@@ -1,0 +1,15 @@
+{
+  "name": "quay-native",
+  "version": "0.0.1",
+  "private": true,
+  "description": "The native Provider for Quay: markdown+frontmatter task store, CLI, and MCP ABI transport (v0 walking skeleton).",
+  "type": "module",
+  "bin": {
+    "quay-native": "./bin/quay-native.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "yaml": "^2.5.1",
+    "zod": "^3.25.0"
+  }
+}

@@ -1,0 +1,10 @@
+# .quay/config.yml — per-workspace config (quay-proposal.md §10). Travels
+# with the user's project; distinct from provider.yml, which travels with
+# the Provider code.
+
+providers:
+  native:
+    enabled: true
+    path: "./packages/quay-native"       # where the Provider's provider.yml + code live
+    tasks_dir: "./tasks"                 # storage path for this workspace
+    mcp_entry: ["node", "./bin/quay-native.js", "mcp"]

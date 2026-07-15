@@ -1,0 +1,323 @@
+// quay-native core: task store logic (raw file ops).
+// One core implementation, consumed identically by the CLI (bin/quay-native.js)
+// and the MCP server (src/mcp-server.js) — design §6 CLI/MCP symmetry.
+//
+// Canonical task view-model (quay-native-design.md §2, quay-proposal.md §7.1):
+//   id, title, status, labels, parent, children  (+ body markdown)
+// status ∈ {todo, ready, done, needs-human}      (design §3)
+
+import fs from "node:fs";
+import path from "node:path";
+import YAML from "yaml";
+
+export const VALID_STATUSES = ["todo", "ready", "done", "needs-human"];
+
+const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
+
+/**
+ * @param {string} tasksDir absolute path to the tasks directory
+ */
+export function createStore(tasksDir) {
+  fs.mkdirSync(tasksDir, { recursive: true });
+
+  function filePathFor(id) {
+    return path.join(tasksDir, `${id}.md`);
+  }
+
+  function lockPathFor(id) {
+    return path.join(tasksDir, `${id}.md.lock`);
+  }
+
+  const STALE_LOCK_MS = 5000;
+  const LOCK_RETRY_MS = 20;
+  const LOCK_TIMEOUT_MS = 3000;
+
+  /**
+   * Acquire an advisory exclusive lock for `id` (design §6: "shared locking
+   * ... symmetry of interface must not become asymmetry of data integrity").
+   * Uses exclusive-create (`wx`) as the atomic primitive; retries with
+   * backoff; reclaims a stale lock (holder crashed) after STALE_LOCK_MS.
+   */
+  function acquireLock(id) {
+    const lockPath = lockPathFor(id);
+    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+    for (;;) {
+      try {
+        const fd = fs.openSync(lockPath, "wx");
+        fs.writeSync(fd, String(process.pid));
+        fs.closeSync(fd);
+        return lockPath;
+      } catch (err) {
+        if (err.code !== "EEXIST") throw err;
+        // Check staleness: if the lock is older than STALE_LOCK_MS, reclaim it.
+        try {
+          const stat = fs.statSync(lockPath);
+          if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
+            fs.rmSync(lockPath, { force: true });
+            continue; // retry acquisition immediately
+          }
+        } catch {
+          // lock disappeared between EEXIST and stat — retry
+          continue;
+        }
+        if (Date.now() > deadline) {
+          throw new Error(`timed out acquiring lock for ${id} (held by another writer)`);
+        }
+        // Busy-wait with backoff (v0: simplest correct mechanism, no external
+        // lock service — see QN-006 proposal).
+        const until = Date.now() + LOCK_RETRY_MS;
+        while (Date.now() < until) {
+          /* spin */
+        }
+      }
+    }
+  }
+
+  function releaseLock(lockPath) {
+    fs.rmSync(lockPath, { force: true });
+  }
+
+  /** Run `fn` (a read-modify-write) holding the lock for `id`. */
+  function withLock(id, fn) {
+    const lockPath = acquireLock(id);
+    try {
+      return fn();
+    } finally {
+      releaseLock(lockPath);
+    }
+  }
+
+  function listIds() {
+    return fs
+      .readdirSync(tasksDir)
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => f.slice(0, -3))
+      .sort();
+  }
+
+  function readRaw(id) {
+    const p = filePathFor(id);
+    if (!fs.existsSync(p)) return null;
+    return fs.readFileSync(p, "utf8");
+  }
+
+  function parse(raw) {
+    const m = FRONTMATTER_RE.exec(raw);
+    if (!m) {
+      throw new Error("malformed task file: missing YAML frontmatter block");
+    }
+    const frontmatter = YAML.parse(m[1]) ?? {};
+    const body = m[2] ?? "";
+    return { frontmatter, body };
+  }
+
+  function serialize(frontmatter, body) {
+    const fm = YAML.stringify(frontmatter).trimEnd();
+    return `---\n${fm}\n---\n${body}`;
+  }
+
+  /** @returns {object|null} the task view-model, or null if not found */
+  function get(id) {
+    const raw = readRaw(id);
+    if (raw === null) return null;
+    const { frontmatter, body } = parse(raw);
+    return toViewModel(frontmatter, body);
+  }
+
+  function toViewModel(frontmatter, body) {
+    const children = frontmatter.children ?? [];
+    return {
+      id: frontmatter.id,
+      title: frontmatter.title,
+      status: frontmatter.status,
+      labels: frontmatter.labels ?? [],
+      parent: frontmatter.parent ?? null,
+      children,
+      // role is derived, never stored (design §2): children non-empty => compound
+      role: children.length > 0 ? "compound" : "primitive",
+      extra: frontmatter.extra ?? {},
+      body,
+    };
+  }
+
+  function list(filter = {}) {
+    return listIds()
+      .map((id) => get(id))
+      .filter((t) => t !== null)
+      .filter((t) => (filter.status ? t.status === filter.status : true))
+      .filter((t) =>
+        filter.label ? (t.labels || []).includes(filter.label) : true
+      );
+  }
+
+  /**
+   * Raw file write — used by both `task create` (internal convenience,
+   * not part of the ABI surface table but needed to seed tasks) and `edit`.
+   */
+  function write(id, { title, status, labels, parent, children, extra, body }) {
+    if (status && !VALID_STATUSES.includes(status)) {
+      throw new Error(
+        `invalid status "${status}" — must be one of ${VALID_STATUSES.join(", ")}`
+      );
+    }
+    // QN-006: read-modify-write is lock-protected so CLI and MCP writers
+    // (the same store.js core, design §6) never interleave on the same file.
+    return withLock(id, () => {
+      const existingRaw = readRaw(id);
+      let frontmatter = { id, title, status, labels: labels ?? [], parent: parent ?? null, children: children ?? [] };
+      let existingBody = "";
+      if (existingRaw !== null) {
+        const parsed = parse(existingRaw);
+        frontmatter = { ...parsed.frontmatter };
+        existingBody = parsed.body;
+        if (title !== undefined) frontmatter.title = title;
+        if (status !== undefined) frontmatter.status = status;
+        if (labels !== undefined) frontmatter.labels = labels;
+        if (parent !== undefined) frontmatter.parent = parent;
+        if (children !== undefined) frontmatter.children = children;
+        if (extra !== undefined) frontmatter.extra = extra;
+      } else {
+        frontmatter.extra = extra ?? {};
+      }
+      const finalBody = body !== undefined ? body : existingBody;
+      const raw = serialize(frontmatter, finalBody);
+      fs.writeFileSync(filePathFor(id), raw, "utf8");
+      return get(id);
+    });
+  }
+
+  function appendNote(id, note) {
+    // appendNote's own read-modify-write goes through write()'s lock too,
+    // but the read of current body must ALSO be inside the lock to avoid a
+    // lost-update race between the read here and write()'s internal read.
+    return withLock(id, () => {
+      const raw = readRaw(id);
+      if (raw === null) throw new Error(`no such task: ${id}`);
+      const { frontmatter, body } = parse(raw);
+      const stamp = new Date().toISOString();
+      const newBody = `${body.trimEnd()}\n\n---\n_${stamp}_: ${note}\n`;
+      const updated = { ...frontmatter };
+      const finalRaw = serialize(updated, newBody);
+      fs.writeFileSync(filePathFor(id), finalRaw, "utf8");
+      return get(id);
+    });
+  }
+
+  /**
+   * The four mandatory artifacts (design §2, §3): Proposal, Plan, AC, DoD.
+   * QN-005 (iteration 2): presence-based-only was too thin (a heading
+   * followed by one word passed). Now requires each section's heading to
+   * exist AND its content (up to the next `##` heading) to exceed
+   * MIN_SECTION_CHARS non-whitespace characters — catches the
+   * heading-with-no-real-content failure mode without attempting semantic
+   * quality scoring (out of scope for a mechanical gate; that is what
+   * independent review/audit is for, per design §3/G3).
+   */
+  const MIN_SECTION_CHARS = 40;
+
+  function artifactSections(body) {
+    const has = (heading) => {
+      if (!new RegExp(`^##\\s+${heading}\\b`, "im").test(body)) return false;
+      const content = extractSection(body, [heading]);
+      const nonWhitespaceLen = content.replace(/\s/g, "").length;
+      return nonWhitespaceLen >= MIN_SECTION_CHARS;
+    };
+    return {
+      proposal: has("Proposal"),
+      plan: has("Plan"),
+      ac: has("AC") || has("Acceptance Criteria"),
+      dod: has("DoD") || has("Definition of Done"),
+    };
+  }
+
+  /**
+   * `task check <id>` — asserts the author->ready and execute->done gates
+   * (design §3). Returns a structured result; does not mutate status itself
+   * (mutation is a separate `edit --status` call by the Skill/human).
+   */
+  function check(id) {
+    const t = get(id);
+    if (!t) return { id, ok: false, reason: "not found" };
+    const artifacts = artifactSections(t.body);
+    const allArtifactsPresent = Object.values(artifacts).every(Boolean);
+
+    if (t.status === "todo") {
+      const gate = "author->ready";
+      // QN-005 phase 2: AC must be machine-checkable — require at least one
+      // checkbox line in the AC section, even if all four headings +
+      // minimum content are present. Distinct, specific failure reason so
+      // the gate stays actionable (matches the existing missing-artifact
+      // pattern).
+      const acSection = extractSection(t.body, ["AC", "Acceptance Criteria"]);
+      const acHasCheckbox = /- \[[ xX]\]/.test(acSection);
+      if (allArtifactsPresent && !acHasCheckbox) {
+        return {
+          id,
+          gate,
+          ok: false,
+          artifacts,
+          reason: "AC section has no checkboxes",
+        };
+      }
+      const ok = allArtifactsPresent && acHasCheckbox;
+      return {
+        id,
+        gate,
+        ok,
+        artifacts,
+        reason: ok
+          ? "all four artifacts present; eligible to move to ready"
+          : "missing artifacts: " +
+            Object.entries(artifacts)
+              .filter(([, v]) => !v)
+              .map(([k]) => k)
+              .join(", "),
+      };
+    }
+    if (t.status === "ready") {
+      // execute->done gate: v0 checks AC checkboxes are all ticked, as a thin
+      // machine-checkable proxy for "AC satisfied" (design §3). This is a
+      // deliberately thin v0 gate — see iteration-0 gap analysis.
+      const acSection = extractSection(t.body, ["AC", "Acceptance Criteria"]);
+      const checkboxes = acSection.match(/- \[[ xX]\]/g) || [];
+      const checked = acSection.match(/- \[[xX]\]/g) || [];
+      const acOk = checkboxes.length > 0 && checked.length === checkboxes.length;
+      return {
+        id,
+        gate: "execute->done",
+        ok: acOk,
+        acTotal: checkboxes.length,
+        acChecked: checked.length,
+        reason: acOk
+          ? "all AC checkboxes checked; eligible to move to done"
+          : `${checked.length}/${checkboxes.length} AC checkboxes checked`,
+      };
+    }
+    if (t.status === "done") {
+      return { id, gate: "none", ok: true, reason: "terminal" };
+    }
+    if (t.status === "needs-human") {
+      return { id, gate: "none", ok: false, reason: "soft stop; human action required" };
+    }
+    return { id, gate: "unknown", ok: false, reason: `unrecognized status ${t.status}` };
+  }
+
+  function extractSection(body, headings) {
+    for (const h of headings) {
+      // QN-005 fix (iteration 2): `\Z` is NOT a valid JavaScript regex
+      // end-of-string anchor (JS has no \Z metacharacter) — the engine took
+      // it as a literal capital "Z", and with the `i` (case-insensitive)
+      // flag this also matched a bare lowercase "z" anywhere in the
+      // section's prose, truncating capture early (found and root-caused
+      // by the iteration-1 G3 audit against QN-005's own AC text, which
+      // contains the word "zero"). Correct JS end-of-string lookahead is
+      // `(?![\s\S])` (no characters remain).
+      const re = new RegExp(`^##\\s+${h}\\b([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im");
+      const m = re.exec(body);
+      if (m) return m[1];
+    }
+    return "";
+  }
+
+  return { list, get, write, appendNote, check, artifactSections };
+}

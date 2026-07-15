@@ -1,1 +1,5 @@
 docs/proposal/quay-bootstrap-experiment.md
+node_modules/
+dist/
+*.log
+.DS_Store

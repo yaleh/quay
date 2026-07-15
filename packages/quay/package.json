@@ -1,0 +1,14 @@
+{
+  "name": "quay",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Quay Core: provider-agnostic web + CLI + MCP client over the Provider ABI (v0 walking skeleton).",
+  "type": "module",
+  "bin": {
+    "quay": "./bin/quay.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "yaml": "^2.5.1"
+  }
+}
