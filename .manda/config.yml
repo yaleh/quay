@@ -1,0 +1,49 @@
+{
+  "profiles": {
+    "dispatch": {
+      "channels": ["inbox-*"],
+      "template": "DISPATCH from {{ .payload.reply_to }}: {{ .payload.task }}\nSpec: {{ .payload.spec }}\nWhen done, run exactly: manda send {{ shq .payload.reply_to }} {{ shq (jsonobj `status` `done` `task` .payload.task) }}"
+    },
+    "parent-proxy": {
+      "channels": ["cap-requests-{name}"],
+      "template": "CAP-REQUEST id={{ .payload.id }} cap={{ .payload.cap }} from={{ .payload.from }} to={{ .payload.to }} args={{ json .payload.args }} — execute this capability with your NATIVE tools (todo.write -> TodoWrite(args.todos); todo.read -> TodoRead(); agent.spawn -> Agent(run_in_background=true, prompt=args.prompt, subagent_type=args.subagent_type)); honor the allowlist and the agent.spawn depth guard; then reply on channel cap-results with a JSON object having id={{ json .payload.id }} and your output under key \"result\" (use \"error\" instead on refusal), building the manda send command yourself with correct shell quoting"
+    }
+  },
+  "adapters": [
+    {
+      "name": "cross-session",
+      "channels": ["pending-{name}"],
+      "command": ["manda-dispatch", "cross-session"]
+    }
+  ],
+  "mcp_adapters": [
+    {
+      "name": "dispatch",
+      "command": ["manda-dispatch", "mcp"],
+      "allow": ["agent.spawn"]
+    },
+    {
+      "name": "claude-tools",
+      "command": ["manda-tools", "mcp", "--self", "{name}"],
+      "allow": ["todo.write", "todo.read", "agent.spawn"]
+    }
+  ],
+  "audit": {
+    "enabled": false,
+    "path": ".manda/audit.jsonl",
+    "channels": ["*"],
+    "payload": "true"
+  },
+  "monitor": {
+    "bindings": [
+      {
+        "channels": ["pending-{name}"],
+        "adapter": "cross-session"
+      },
+      {
+        "channels": ["cap-requests-{name}"],
+        "profile": "parent-proxy"
+      }
+    ]
+  }
+}
