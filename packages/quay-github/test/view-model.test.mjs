@@ -124,5 +124,30 @@ function mkIssue(overrides) {
   assert(JSON.stringify(vm.extra.multipleParents) === JSON.stringify(["gh-20", "gh-30"]), "ambiguity surfaced via extra.multipleParents rather than silently dropped");
 }
 
+// --- Iteration 59 (QN-063): null/undefined body -- a genuinely distinct,
+// previously-uncovered shape from the "" (empty-string) body every fixture
+// above uses. GitHub's real `gh api` response sets `body: null` (not "") for
+// an issue created with no description at all -- this is the actual,
+// realistic malformed-input shape, not merely a stand-in for "empty".
+// issueToViewModel() defends against this via `issue.body ?? ""` (line 140);
+// this was previously completely unexercised (confirmed this iteration via
+// `grep -n "body: null\|body: undefined" packages/quay-github/test/*.mjs`
+// returning zero hits before this block was added).
+
+{
+  const noBody = mkIssue({ number: 40, body: null });
+  const vm = issueToViewModel(noBody);
+  assert(vm.body === "", "null issue.body normalizes to empty string, not null/crash");
+  assert(JSON.stringify(vm.children) === "[]", "null issue.body yields empty children (no crash in extractChildRefs)");
+  assert(vm.role === "primitive", "null-body issue derives role: primitive (no children)");
+}
+
+{
+  const noBody = mkIssue({ number: 41, body: undefined });
+  const vm = issueToViewModel(noBody);
+  assert(vm.body === "", "undefined issue.body normalizes to empty string, not undefined/crash");
+  assert(JSON.stringify(vm.children) === "[]", "undefined issue.body yields empty children (no crash in extractChildRefs)");
+}
+
 console.log(failures === 0 ? "All quay-github view-model tests passed" : `${failures} test(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -136,6 +136,38 @@ function main() {
     assert(true, "not-found handling lives in client.check(), not checkGate() -- documented boundary, no live-API test here");
   }
 
+  // Iteration 59 (QN-063): null-body issue -- a genuinely distinct,
+  // previously-uncovered shape from case (c)'s heading-only-but-present
+  // body above. GitHub's real `gh api` response sets `body: null` (not a
+  // string at all) for an issue created with no description whatsoever.
+  // checkGate()'s own gateArtifactSections()/extractGateSection() both
+  // default via `body || ""` before regex-matching -- this defends against
+  // a crash, but was completely unexercised by any test before this block
+  // (confirmed this iteration: `grep -n "body: null\|body: undefined"
+  // packages/quay-github/test/*.mjs` returned zero hits beforehand).
+  {
+    const r = checkGate({ id: "gh-8", status: "todo", body: null });
+    assert(r.gate === "author->ready", "case h: null-body todo task still resolves gate to author->ready (no crash)");
+    assert(r.ok === false, "case h: null-body task fails the todo gate");
+    assert(
+      /missing artifacts/.test(r.reason),
+      `case h: null-body reason names missing artifacts (got: ${r.reason})`
+    );
+  }
+
+  {
+    const r = checkGate({ id: "gh-9", status: "ready", body: null });
+    assert(r.gate === "execute->done", "case i: null-body ready task still resolves gate to execute->done (no crash)");
+    assert(r.ok === false, "case i: null-body task fails the ready gate");
+    assert(r.acTotal === 0 && r.acChecked === 0, "case i: null-body task reports acTotal:0/acChecked:0, not a crash or NaN");
+  }
+
+  {
+    const r = checkGate({ id: "gh-10", status: "todo", body: undefined });
+    assert(r.gate === "author->ready", "case j: undefined-body todo task still resolves gate to author->ready (no crash)");
+    assert(r.ok === false, "case j: undefined-body task fails the todo gate");
+  }
+
   if (failures > 0) {
     console.error(`\n${failures} QN-028 gate test failure(s).`);
     process.exitCode = 1;
