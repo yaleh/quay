@@ -87,4 +87,64 @@ live-verified capability, not merely a design-doc claim:
    choice — not defer implementation entirely on that basis alone.
 
 ## Resolution
-<!-- filled in by whichever iteration applies, defers, or rejects this directive -->
+
+- **resolved_by:** iteration 26
+- **outcome:** applied in full
+- **task:** `tasks/QN-036.md` (native lifecycle: `todo → ready → done`,
+  provenance `{author_by: native, execute_by: native, gate_by: native}`)
+
+All 5 requested actions completed and live-verified:
+
+1. **`mcp` subcommand added to `packages/quay/bin/quay.js`**, backed by a
+   new `packages/quay/src/mcp-server.js`, starting a genuine MCP server
+   (`McpServer` + `StdioServerTransport`, matching the SDK usage already
+   established in `quay-native`/`quay-github`'s own server files).
+2. **Genuine proxy/aggregation implemented**: for each Provider currently
+   `enabled: true` in `.quay/config.yml`, Core connects to that Provider's
+   own MCP server as a client, reusing `provider-client.js#connectProvider()`
+   **unmodified**, and exposes the aggregated `task_list`/`task_get`/
+   `task_write`/`task_check`/`provider://manifest` surface back out over
+   its own MCP server. Multi-Provider disambiguation resolved via an
+   explicit, documented decision: every proxied tool takes an **optional
+   `provider` argument** (default: first `enabled: true` Provider) rather
+   than per-Provider tool-name namespacing — see `packages/quay/DESIGN.md`
+   §2.3 for the rejected-alternative rationale.
+3. **Live-verified end-to-end against both real Providers in this repo**:
+   `quay mcp` spawned as a real subprocess, a real MCP client connected to
+   it, confirming `task_list`/`task_get`/`task_check` (and
+   `provider://manifest`) proxy correctly through to both native and github
+   (the latter against the real, live `yaleh/quay` repository, including
+   the real compound/epic fixture `gh-7` from iteration 25's QN-035), with
+   results byte-identical (`JSON.stringify(...) === JSON.stringify(...)` on
+   `structuredContent`) to calling each Provider's own `mcp` subcommand
+   directly. `.quay/config.yml`'s `github.enabled` was temporarily flipped
+   to `true` only for the duration of this live check, then restored (`git
+   diff .quay/config.yml` confirmed empty before commit). A committed,
+   network-independent regression test (`packages/quay/test/
+   mcp-server.test.mjs`, 13 assertions) reproduces the same proof using two
+   isolated local native task stores as a permanent, CI-safe equivalent.
+4. **`docs/proposal/quay-proposal.md` §5 updated** (implementation-status
+   note appended after the architecture diagram) and **`packages/quay/
+   DESIGN.md` created** (did not exist before this task) documenting the
+   full design and live-verification transcript. `experiment/provenance.md`
+   updated with QN-036's provenance record and σ recomputation — this now
+   counts toward `abi_symmetry`/`skeleton` (V_instance) and toward
+   genuinely testing the "adding a Provider needs zero consumer-layer
+   changes" architectural claim (V_meta `reusability`'s own underlying
+   premise, since Core's MCP server itself required zero
+   Provider-specific branching to support a second, heterogeneous
+   Provider).
+5. **No sub-part proved infeasible or under-specified enough to defer.**
+   The one genuine design sub-question DIR-007 itself flagged as possibly
+   needing a decision (multi-Provider tool/resource naming or routing) was
+   resolved explicitly (argument-based tool routing; alias +
+   per-id-namespaced resource URIs) and recorded, per point 5's own
+   instruction, rather than left to block implementation.
+
+See `experiment/iterations/iteration-26.md` for the full execution
+transcript, V_instance/V_meta scoring, and honest gap analysis (including
+what this task does **not** yet cover, e.g. exercising `quay mcp` from
+inside a real live Claude Code session's own MCP client registration,
+which remains untested — a standalone Node MCP client stands in for that
+this iteration, the same standing limitation already named for
+`quay-native`/`quay-github`'s own MCP transports).
