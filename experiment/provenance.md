@@ -5109,3 +5109,223 @@ V_instance = 0.70 × 0.96 × 0.76 × 0.96 = **0.4903** (up from 0.4833;
 
 V_meta = 0.74 × 0.26 × 0.79 × 0.64 = **0.0973** (unchanged; ΔV_meta =
 0.0000).
+
+## Records (as of end of iteration 38)
+
+`experiment/directives/pending/` was checked first, per mandatory
+instruction, and confirmed **empty** (verified via `ls`). Self-selected
+work was scoped per iteration 37's own problem-list suggestion: a fresh,
+exhaustive read of `packages/quay-github/DESIGN.md` (486 lines, read in
+full this iteration) for any not-yet-closed gap. (`packages/
+quay-native/DESIGN.md` does not exist — re-confirmed via `ls`, consistent
+with iteration 36's own finding; `packages/quay/DESIGN.md` was not the
+target this iteration per the explicit instruction to focus on the other
+two files.)
+
+This read surfaced a genuine, concrete, previously-undocumented
+internal-consistency defect: `packages/quay-github/provider.yml`'s own
+inline comments (header block, and the `gate:`/`skill:` capability-boolean
+comments) described both capabilities as scoped to **"primitive tasks
+only,"** with the `gate:` comment explicitly stating *"no compound/epic
+children-recursion — this experiment has never had a real compound GitHub
+task."* This claim has been **false since iteration 25 (QN-035,
+DIR-006)**, 12 iterations ago: that iteration implemented
+`childrenStatus()`-based compound/epic gate recursion in
+`github-client.js`, created a real compound issue structure in the live
+`yaleh/quay` repo (issues #5/#6/#7, still present), and live-verified the
+full compound gate path end-to-end — documented accurately in `DESIGN.md`
+§3.5/§3.6, but never back-ported to `provider.yml`'s own comments (`git
+log --oneline -- packages/quay-github/provider.yml` confirmed the file
+untouched since iteration 18/QN-029) nor to `DESIGN.md` §5's own capability
+summary block, which carried the identical stale "primitive tasks only"
+language despite the header line above it already correctly saying "v1.4
+implemented."
+
+**What closes the gap this iteration (QN-049):** live re-verification first
+(`quay-github task check gh-7 --json` and Core's `quay task check gh-7
+--provider github --json` passthrough), both re-run this iteration and
+confirmed byte-identical, both showing the real compound-aware result:
+
+```json
+{
+  "id": "gh-7",
+  "gate": "none",
+  "ok": true,
+  "reason": "terminal",
+  "childrenStatus": [
+    { "id": "gh-5", "status": "done" },
+    { "id": "gh-6", "status": "done" }
+  ]
+}
+```
+
+`provider.yml`'s header comment and `gate:`/`skill:` capability comments
+were then corrected in place. The corrected text, quoted verbatim:
+
+```yaml
+# provider.yml — the GitHub Provider's static self-declaration
+# (quay-proposal.md §10, QN-002's Plan/AC). Travels with the Provider.
+#
+# v1.4 walking skeleton (G5): read + minimal status-only write (QN-024,
+# iteration 10) + gate (QN-028, iteration 17, primitive tasks; extended to
+# compound/epic tasks QN-035, iteration 25, DIR-006) + skill (QN-029,
+# iteration 18: status_skill_map/action_buttons, backed by the
+# now-provider-parameterized quay:author/quay:execute Skills — see
+# packages/quay-native/skills/{author,execute}/SKILL.md's iteration-18
+# honesty notes; this was NOT free — it required fixing a real hardcoded-
+# to-quay-native limitation in those Skills first, not just this file).
+
+...
+
+  gate: true          # QN-028 (iteration 17): task_check, primitive tasks;
+                     # extended to compound/epic (children non-empty) tasks
+                     # by QN-035 (iteration 25, DIR-006) via a ported,
+                     # recursive childrenStatus() — live-verified against a
+                     # real compound issue structure (gh-5/gh-6/gh-7) still
+                     # present in this repo; see DESIGN.md §3.5/
+                     # github-client.js#checkGate.
+  skill: true         # QN-029 (iteration 18): status_skill_map/action_buttons
+                     # declared below, backed by the provider-parameterized
+                     # quay:author/quay:execute Skills (`quay task <cmd>
+                     # --provider github`, Core's existing generic
+                     # passthrough — zero Core-side code change).
+                     # executeEpic's compound recursion against this
+                     # Provider was itself live-verified by QN-035's own
+                     # gh-7 lifecycle drive (iteration 25); no longer scoped
+                     # to primitive tasks only, matching `gate` above.
+```
+
+`packages/quay-github/DESIGN.md` §5 was also corrected: header bumped
+v1.3→v1.4 (matching the file's own top-of-document status line, which
+already said v1.4), the `gate:`/`skill:` comment block corrected to match
+`provider.yml`'s corrected text, and a new sentence added confirming the
+capability-boolean-verbatim-match claim remains true (only the comments
+were stale, never the booleans themselves — `quay-github manifest --json`
+re-run this iteration confirms `capabilities: {"data.read":true,
+"manifest":true,"data.write":true,"gate":true,"skill":true}`, unchanged).
+
+**Zero source-code change**: `git diff --stat` after this task shows only
+`packages/quay-github/DESIGN.md` (19 lines changed) and `packages/
+quay-github/provider.yml` (25 lines changed) — confirmed via `git diff
+--stat -- '*.js'` returning empty. The full regression suite (24
+`*.test.mjs` files across all three packages, plus `abi-symmetry.mjs`) was
+re-run after the change: zero regressions, "ALL FOUR SURFACES SYMMETRIC."
+YAML validity of the edited `provider.yml` was independently confirmed by
+parsing it directly and by re-running `quay-github manifest --json`
+successfully.
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-049 | Fix stale `provider.yml`/`DESIGN.md` §5 comments describing compound/epic gate scope as "primitive tasks only" 12 iterations after QN-035 added it | **native** | **native** | **native** | **done** |
+
+**Honesty note on QN-049's lifecycle execution.** As with every task since
+the seed's author/execute retirement, "native" here means the
+`quay-native` CLI's mechanical `task check` gate was genuinely invoked at
+both the author→ready and execute→done transitions (both returned
+`ok:true`, confirmed via direct command output — 4/4 AC items checked, not
+estimated), and the task file itself was authored and driven through its
+lifecycle using `quay-native task create`/`task edit`/`task check` rather
+than hand-edited frontmatter status. It does NOT mean an independent,
+fresh-context subagent performed the authoring or execution work in
+isolation from this top-level session — this environment still has no
+verified subagent-dispatch primitive (confirmed via `ToolSearch` this
+iteration, per G6), so "native" continues to describe the degraded-
+fallback mode already documented for every prior "native" entry since
+iteration ~15: the same top-level session performs the work directly, then
+invokes the real `quay-native` gate mechanically and honestly reports its
+actual JSON output.
+
+## σ computation — iteration 38
+
+Total allocated task IDs verified via actual command:
+
+```
+ls tasks/QN-*.md | wc -l   -> 48
+```
+
+(QN-001 through QN-049, minus QN-018, never allocated.)
+
+- σ (strict reading: author_by = execute_by = gate_by = native AND status
+  = done) = 41 / 48 = **0.8542** (up from 40/47 = 0.8511 at the end of
+  iteration 37; Δσ = +0.0031).
+- σ (inclusive reading: strict set plus QN-003/QN-004's gate-check-only
+  re-verification cases) = 43 / 48 = **0.8958**.
+- σ_author_only (diagnostic: author_by = native regardless of
+  execute_by/gate_by) = 47 / 48 = **0.9792**.
+
+Δσ (strict) = +0.0031 is consistent with the recent per-iteration norm of
+small, monotonic σ growth from a single new native-triple `done` task
+against a growing denominator; it is not, on its own, evidence bearing on
+any convergence criterion beyond what iteration-38.md §10 evaluates
+directly.
+
+## V-factor attribution — iteration 38 (precedent-derived, held flat)
+
+Per the standing discipline (quote the exact defining language, search all
+of `provenance.md` for the closest precedent, read that precedent's full
+reasoning in full this session, and check whether a closer precedent maps
+to a different factor before crediting), two precedents were located and
+read in full this iteration, and both counsel the same conclusion for
+different reasons:
+
+1. **Iteration 25's post-hoc `gate_correctness` correction** (`## Post-hoc
+   correction (iteration 25's gate_correctness score)`, read in full this
+   iteration): iteration 25's own *new gate-logic-building* work (a real,
+   substantial `childrenStatus()` port into the GitHub Provider) was
+   corrected to hold `gate_correctness` flat and credit `reusability`
+   alone, "per iteration 17's own directly-on-point precedent... work of
+   this kind — a second Provider's own gate conformance fix, with zero
+   change to native's own `store.js` gate logic — holds `gate_correctness`
+   flat." `gate_correctness` per protocol §5.1 is precisely "does
+   `quay-native task check` correctly assert the gate" — native's own
+   gate. This iteration's QN-049 touches neither native's gate logic nor
+   even the GitHub Provider's gate *logic* (zero `.js` diff, confirmed) —
+   only prose comments describing already-existing, unmodified gate
+   behavior. A fortiori not `gate_correctness`.
+2. **Iteration 29's post-hoc `completeness` correction** (`## Post-hoc
+   correction (iteration 29's completeness score)`, read in full this
+   iteration): iteration 29's original `completeness` credit for revising
+   `experiment/ITERATION-PROMPTS.md` (a real, substantive addition of a new
+   section) was corrected to flat, because "`completeness` is
+   protocol-scoped (§5.2) to `quay:author`/`quay:execute`'s own documented
+   methodology, not this experiment's own iteration-guidance document,"
+   with iteration 10's own identical `ITERATION-PROMPTS.md`-revision
+   precedent cited as directly on point. `completeness` per protocol §5.2
+   is "Methodology (Skills + gates + decomposition rule) fully documented
+   and self-contained" — meaning `quay:author`/`quay:execute`'s own
+   SKILL.md Method-step content specifically, per this established
+   precedent chain (iterations 10, 20-28, 29). This iteration's fix
+   touches `provider.yml`/`DESIGN.md` — neither is a SKILL.md file, and
+   neither documents new Skill-orchestration Method-step content. Per
+   iteration 29's own precedent, `completeness` is not the right factor
+   either, even though this task is unambiguously a documentation-accuracy
+   fix in spirit.
+
+`abi_symmetry` was also explicitly considered and ruled out (not merely
+skipped): protocol §5.1 defines it as "`quay-native task … --json` emits
+the same schema as the corresponding MCP tool result... CLI is the golden
+test harness" — a cross-surface schema/content-equivalence proof. This
+iteration produced no new such proof; the live re-verification performed
+(`quay-github` CLI vs. Core's passthrough, both showing byte-identical,
+unchanged compound-gate output) re-confirms an *already-existing*
+equivalence (established at iteration 25 itself), it does not newly prove
+one. `reusability` was also explicitly considered: protocol §5.2 scopes it
+to "the methodology transfers to a second Provider (GitHub) unmodified" —
+i.e., quay-native's methodology *driving new GitHub-Provider construction*.
+This iteration builds no new capability (zero `.js` diff); it corrects
+stale prose describing an already-built, already-transferred capability
+from 12 iterations ago. Per iteration 24/37's own established precedent for
+"test-coverage-only, no new capability" work, this does not count toward
+`reusability` either. `skeleton` and `skill_convergence` are not
+implicated for the same "zero new capability/behavior" reason.
+
+Applying both precedents' reasoning directly: **all eight V-factors held
+flat.** V_instance = 0.4903 (unchanged), V_meta = 0.0973 (unchanged).
+ΔV_instance = ΔV_meta = 0.0000.
+
+This iteration's genuine contribution is a real internal-consistency
+defect closed — a Provider's own static self-declaration file no longer
+contradicts its own `DESIGN.md`'s accurate account of its own capabilities
+— but, per the same discipline applied at iterations 25, 28, 29, and 37,
+a real and valuable fix is not automatically forced into one of the eight
+precisely-scoped V-factor axes when the evidence does not support it.

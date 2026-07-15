@@ -1,9 +1,10 @@
 # provider.yml — the GitHub Provider's static self-declaration
 # (quay-proposal.md §10, QN-002's Plan/AC). Travels with the Provider.
 #
-# v1 walking skeleton (G5): read + minimal status-only write (QN-024,
-# iteration 10) + gate (QN-028, iteration 17, primitive tasks only) + skill
-# (QN-029, iteration 18: status_skill_map/action_buttons, backed by the
+# v1.4 walking skeleton (G5): read + minimal status-only write (QN-024,
+# iteration 10) + gate (QN-028, iteration 17, primitive tasks; extended to
+# compound/epic tasks QN-035, iteration 25, DIR-006) + skill (QN-029,
+# iteration 18: status_skill_map/action_buttons, backed by the
 # now-provider-parameterized quay:author/quay:execute Skills — see
 # packages/quay-native/skills/{author,execute}/SKILL.md's iteration-18
 # honesty notes; this was NOT free — it required fixing a real hardcoded-
@@ -24,16 +25,22 @@ capabilities:
   data.write: true   # QN-024 (iteration 10): status-only write. title/body/
                      # labels/parent/children remain unimplemented — see
                      # DESIGN.md §5/QN-024's own AC for the exact scope line.
-  gate: true          # QN-028 (iteration 17): task_check, primitive tasks
-                     # only (no compound/epic children-recursion — this
-                     # experiment has never had a real compound GitHub
-                     # task; see DESIGN.md §3.5/github-client.js#checkGate).
+  gate: true          # QN-028 (iteration 17): task_check, primitive tasks;
+                     # extended to compound/epic (children non-empty) tasks
+                     # by QN-035 (iteration 25, DIR-006) via a ported,
+                     # recursive childrenStatus() — live-verified against a
+                     # real compound issue structure (gh-5/gh-6/gh-7) still
+                     # present in this repo; see DESIGN.md §3.5/
+                     # github-client.js#checkGate.
   skill: true         # QN-029 (iteration 18): status_skill_map/action_buttons
                      # declared below, backed by the provider-parameterized
                      # quay:author/quay:execute Skills (`quay task <cmd>
                      # --provider github`, Core's existing generic
-                     # passthrough — zero Core-side code change). Primitive
-                     # tasks only, same scope boundary as `gate` above.
+                     # passthrough — zero Core-side code change).
+                     # executeEpic's compound recursion against this
+                     # Provider was itself live-verified by QN-035's own
+                     # gh-7 lifecycle drive (iteration 25); no longer scoped
+                     # to primitive tasks only, matching `gate` above.
 
 # status model (design §3) — same 4-state vocabulary as native; GitHub has
 # no native status field, so this Provider derives status from issue.state

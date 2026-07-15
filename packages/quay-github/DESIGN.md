@@ -458,21 +458,28 @@ budgeted, proposal §16):**
   *naive* approach (a config-only `provider.yml` declaration) would have
   been backend-specific-*looking* but actually silently wrong — see §3.6.
 
-## 5. Capabilities (v1.3)
+## 5. Capabilities (v1.4)
 
 ```
 data.read: true    # task_list, task_get
 manifest:  true    # provider://manifest
 data.write: true   # QN-024 (iteration 10): status-only patch — see §3.4.
                    # title/body/labels/parent/children remain unimplemented.
-gate:       true    # QN-028 (iteration 17): task_check, primitive tasks
-                   # only — see §3.5.
+gate:       true    # QN-028 (iteration 17): task_check, primitive tasks;
+                   # extended to compound/epic tasks by QN-035 (iteration
+                   # 25, DIR-006) — see §3.5.
 skill:      true    # QN-029 (iteration 18): status_skill_map/action_buttons
-                   # — see §3.6. Primitive tasks only, same boundary as gate.
+                   # — see §3.6. Compound/epic scope matches gate above,
+                   # since QN-035 (iteration 25).
 ```
 
-Matches `provider.yml`'s own capability booleans verbatim (verified this
-iteration — see QN-029's AC/DoD).
+Matches `provider.yml`'s own capability booleans verbatim (re-verified
+iteration 38, QN-049: the booleans themselves were never wrong, but both
+this section's own comments and `provider.yml`'s own inline comments had
+drifted stale since iteration 25/QN-035 — both described "primitive tasks
+only" for `gate`/`skill` 12 iterations after compound/epic support was
+implemented and live-verified. Corrected here and in `provider.yml`
+directly; see §3.5/§3.6 above, which had already been kept accurate).
 
 ## 6. Iteration 27 — first live `quay:execute` Skill-level `executeEpic` drive
 
