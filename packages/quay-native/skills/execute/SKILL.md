@@ -282,6 +282,41 @@ executeEpic(task, provider) = {
   recursive orchestration itself* (not just leaf-level gate mechanics) was
   what was actually exercised and recorded. See
   `experiment/iterations/iteration-27.md` §5 for the full transcript.
+- **Iteration 28 finding (partial closure, real gap remains): `quay mcp`'s
+  own stdio transport IS now registered as a real, mechanically-verified
+  project-scoped MCP server** (`.mcp.json`, added via `claude mcp add
+  --scope project quay -- node packages/quay/bin/quay.js mcp` — the actual
+  Claude Code CLI mechanism, not a bespoke script). `claude mcp get quay`/
+  `claude mcp list` both confirm the server is correctly configured and
+  spawns (health-checked), but report its approval status as **"⏸ Pending
+  approval (run `claude` to approve)"** — MCP servers named in a project's
+  `.mcp.json` require per-project approval that is only prompted/resolved
+  at a **fresh session's own startup**, not mid-session. This iteration
+  additionally hand-drove the real MCP JSON-RPC protocol directly over the
+  server's stdio (bypassing the Claude-session-registration boundary,
+  as a diagnostic, not a substitute): a genuine `initialize` handshake,
+  `notifications/initialized`, and `tools/list` all succeeded, returning
+  the actual `task_list`/`task_get`/`task_write`/`task_check` tool schemas
+  from the real running server process; a genuine `tools/call` for
+  `task_list` with `{"status":"done"}` also succeeded, returning real task
+  data matching this repo's own tasks (cross-checked in kind against `quay
+  task list --status done --json`'s own output). This is materially
+  stronger evidence than any prior iteration's manual-command-sequence
+  proxy (it is the actual wire protocol, not a CLI stand-in) — but it is
+  **still not** what remains the genuine residual gap: a real Claude Code
+  session's own tool-use (its own `ToolSearch`/tool-call mechanism, inside
+  its own already-initialized MCP client) discovering and invoking `quay`'s
+  tools has never happened, and cannot be self-verified from within an
+  already-running session (confirmed directly again this iteration:
+  `ToolSearch` still surfaces zero `quay`-related deferred tools in this
+  session, since `.mcp.json` was added after this session's own MCP client
+  initialized). `.mcp.json` is now committed to the repository specifically
+  so that the **next fresh session** started against this repo can check
+  its own `ToolSearch` output as one of its first actions (after approving
+  the pending server) and genuinely close this gap — see
+  `experiment/iterations/iteration-28.md` §5 for the full transcript and
+  `experiment/iterations/iteration-27.md`'s own problem #1 for the prior
+  iteration's identical framing of what would constitute real closure.
 - Not yet dispatched via manda in a background worker by this Skill itself
   (see quay:author's same gap note — dispatch binding is currently the
   host's job).
