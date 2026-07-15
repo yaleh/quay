@@ -6485,3 +6485,314 @@ one of the eight precisely-scoped V-factor axes when the evidence does
 not support it, per the standing discipline (iterations 11, 25, 28, 29,
 37, 38, 39, 40, 41, 42, 43) and, specifically, per QN-025's own directly
 on-point precedent for this exact fix shape.
+
+## Iteration 45 — QN-056 (Status lines re-staled since iteration 42, 4 files), plus a mandatory structural reflection on the V_meta plateau
+
+**Context:** iteration 44 ended with σ (strict) = 47/54 = 0.8704,
+V_instance = 0.4903, V_meta = 0.0973, both audits (iteration 43 and 44)
+already returning clean **PASS** verdicts, extending the clean-PASS
+streak to eight consecutive iterations (37-44). This iteration was asked,
+in addition to its normal work, to give substantive, honest analytical
+effort to a structural question: is there a fundamentally different KIND
+of work — not another isolated flat-hold fix — that could plausibly move
+`effectiveness` or `reusability` in a non-trivial way, given `effectiveness`
+has been stuck at 0.26 for 23 consecutive iterations (21-44) and V_meta
+has been essentially flat for ~20 iterations.
+
+### Structural reflection: is there a genuine, executable opportunity to move `effectiveness` or `reusability` this iteration?
+
+**On `effectiveness`.** Protocol §5.2's exact defining language:
+"Speedup building feature N+1 *via quay-native* vs. ad-hoc/seed... Measured
+on the **marginal increment** only." This session performed a full,
+honest re-derivation of every timing data point ever recorded in this
+file and in `experiment/timing/*.log` (23 log files, `iteration-0.log`
+through `iteration-39.log`), not merely trusting the "0.26, N consecutive
+iterations" refrain:
+
+- Stage-0 comparator (protocol's own fixed baseline, decision §10.5):
+  QN-006, seed-driven, **~179s** (04:24:18Z→04:27:17Z,
+  `experiment/timing/iteration-0.log`).
+- Iteration 21 (QN-031): **~291s** (4m51s) — explicitly *not* scope-matched
+  (broader scope: new test file + source extension + adversarial
+  break/restore + full-suite re-verification vs. QN-006's single-file
+  change) — iteration 21 itself declined to call this a clean comparison.
+- Iteration 22 (QN-032): **~187s** — the first genuinely scope-matched
+  comparison (single test file, one already-existing unchanged unit,
+  no source change, mirroring QN-006's own shape) — ~4.5% slower than
+  stage-0, "near parity."
+- Iteration 23 (QN-033): **deliberately did not repeat** the timing
+  comparison a third time — its own report reasoned a third same-shape
+  sample would not be new evidence (re-read in full this iteration:
+  `experiment/provenance.md` §"Iteration 23", "did not attempt a further
+  timing comparison at all").
+- Iteration 37 (QN-048): **~187s** — coincidentally identical to
+  iteration 22's number, but iteration 24 (re-read in full this iteration)
+  had already identified and named the specific confound this sample
+  carries: a live `gh api` network-I/O dependency, which conflates
+  methodology speedup with network latency variance — orthogonal to what
+  `effectiveness` measures. Correctly not used as a clean comparator.
+- Iteration 39 (QN-050): **~172s**, explicitly recorded as
+  "not used as an effectiveness comparator" (documentation-only task, no
+  code change, no scope-matched precedent).
+
+**Honest aggregate finding:** across 45 prior iterations, there exists
+exactly **one** genuinely scope-matched, non-network-confounded
+comparison pair (stage-0 QN-006 @ 179s vs. iteration-22 QN-032 @ 187s).
+Computing a second such data point was explicitly attempted at iteration
+21 (rejected as too broad) and explicitly declined at iteration 23 (as
+not being new evidence at the same scope). This is not "the aggregation
+was never attempted" — it has, in effect, already been attempted and
+exhausted: the single genuine scope-matched pair that exists says
+"native, in degraded single-session fallback mode, runs at ~parity with
+the seed on a narrowly-matched task shape" — informative, but a sample
+size of one cannot statistically support moving `effectiveness` beyond
+its current level, and manufacturing a second same-shape sample purely to
+report "n=2" would itself be the anticipatory-metric-manufacturing
+anti-pattern G5 warns against (a task authored *to produce a number*,
+not because the backlog needs it). **Conclusion: no new, valid,
+executable effectiveness-timing opportunity exists this iteration** —
+this reflects the ceiling identified at iteration 23 being real and
+still-unbroken, not a case of this session failing to look hard enough.
+
+The one *structurally new* avenue considered and rejected: using the
+`meta-cc` MCP tools (newly available this iteration; not present in
+iterations 21-44's own toolset) to query *this session's own* tool-call
+transcript for Skill-orchestration timing. This was investigated and
+found **not applicable to the historical dataset**: `meta-cc`'s tools
+operate only on the *current* Claude Code session's own transcript file;
+each of the 44 prior iterations was a separate session with its own,
+separate transcript this session has no read access to. It could time
+*this* iteration's own tool-call sequence, but that would be n=1 for a
+metric already shown to need more than n=2 to move honestly, and would
+not be comparable to the stage-0 baseline's own timing methodology
+(`date -u` wall-clock checkpoints, not tool-call-level granularity) without
+introducing a new, undocumented unit-of-measurement change to the
+`effectiveness` comparator mid-experiment — rejected as a confound
+of the same shape iteration 24 already named for network I/O.
+
+**On `reusability`.** Protocol §5.2's exact defining language: "The
+methodology transfers to a **second Provider (GitHub)** unmodified...
+Measured on the **transfer target**, never the accumulated artifact."
+The last genuine movement (0.68→0.79, iteration 25/QN-035) required
+**new, previously-absent behavior** built for the GitHub Provider,
+live-verified against a real compound-issue structure — not test
+coverage of existing behavior, not metadata. This session re-examined,
+fresh, whether such a genuine transfer opportunity exists right now:
+
+- `gh issue list --repo yaleh/quay --json number,title,labels,state`
+  (re-run live): issues #3 (`status:ready`) and #4 (`status:todo`)
+  unchanged from iterations 41-44. Issue #4 — the one live, organic
+  candidate for a `quay:author`-driven cross-Provider transfer proof —
+  remains blocked by the same **structural**, already-analyzed reason:
+  `data.write` for the GitHub Provider is a resolved, deliberate v1.1
+  scope decision (`packages/quay-github/DESIGN.md` §5, QN-024):
+  status-only; issue bodies (where AC checkboxes live) are read-only.
+  Directly re-confirmed this iteration via `grep -n "data.write"
+  packages/quay-github/src/github-client.js`: the status-only
+  restriction is still exactly as implemented at QN-024, unchanged.
+  Extending `data.write` to a body-patch capability now, with the sole
+  demonstrated motivation being "produce a reusability data point," is
+  precisely the anticipatory-design pattern G5 and the standing evolution
+  guidance (`ITERATION-PROMPTS.md` §8) prohibit — evolution requires a
+  demonstrated *task* necessity, not a metric-shaped one.
+- `packages/quay-github/src/{github-client.js,manifest.js,mcp-server.js}`
+  re-cross-referenced against all 7 `quay-github` test files (the same
+  check iteration 41 performed, re-verified fresh): all exported
+  functions remain covered; no genuine, non-manufactured capability gap
+  exists in the GitHub Provider's own surface.
+
+**Conclusion: no genuine, executable reusability-transfer opportunity
+exists this iteration either** — this is not a failure to search; it is
+the same structural blocker (issue #4's `data.write` scope decision)
+independently re-confirmed for the fourth consecutive iteration (41, 42,
+43, 44, and now 45), with the honest analytical addition (new to this
+iteration) that *manufacturing* a fix to unblock it would itself
+disqualify the resulting `reusability` credit under G5/G2's own logic —
+a forced unblock is not the same evidence class as QN-035's genuine,
+independently-arising capability build.
+
+**Overall honest verdict on the structural question:** No fundamentally
+different kind of `effectiveness`- or `reusability`-moving work is
+executable this iteration. Both factors' plateaus are not an artifact of
+insufficiently creative searching — they are the honest, evidenced
+consequence of (a) `effectiveness` requiring a genuinely new marginal
+increment of comparable scope, which arises organically from backlog
+need and cannot be manufactured without corrupting the very metric it
+would produce, and (b) `reusability` requiring a genuine GitHub-Provider
+capability build, which is currently blocked by a real, deliberate,
+previously-justified scope decision (QN-024/DESIGN.md §5) that this
+session correctly declines to unilaterally reopen on metric-motivated
+grounds alone. This conclusion should not be read as "give up looking" —
+future iterations should keep re-checking GitHub issues #3/#4 and the
+native backlog for genuinely new organic work, exactly as iterations
+41-44 already do — but it should stop future iterations from treating
+"we haven't tried hard enough" as the explanation for the plateau. The
+honest explanation is structural, not effort-based.
+
+### Execution: QN-056 (the fallback fix, chosen after the structural search above found no viable alternative)
+
+With no viable effectiveness/reusability-shaped work, this iteration
+re-checked the documentation-staleness vein iteration 44's own problem
+list (item 7) explicitly flagged as worth re-checking. A fresh,
+independent read of `docs/proposal/quay-bootstrap-experiment.md` (this
+iteration's own mandatory first-read of the protocol, per the standing
+instruction to always read it fresh from disk) found its Status line
+still read "41 iterations completed as of 2026-07-15... see
+`experiment/iterations/iteration-41.md`" — **despite iteration 42's own
+QN-053 having already fixed this exact line to say "41" (correctly, at
+that time)**. The three-iteration gap since (43, 44, and now 45) had
+re-staled it. Cross-checked the other three Status lines QN-053/QN-054
+touched:
+
+```
+$ grep -n "^\- \*\*Status" experiment/README.md docs/proposal/quay-proposal.md \
+    docs/proposal/quay-native-design.md docs/proposal/quay-bootstrap-experiment.md
+experiment/README.md:3: ... 42 BAIME iterations ... iteration-42.md ...
+docs/proposal/quay-proposal.md:3: ... 41 BAIME iterations ...
+docs/proposal/quay-native-design.md:3: ... 51 allocated task IDs ... 41 BAIME iterations ...
+docs/proposal/quay-bootstrap-experiment.md:3: ... 41 iterations ... iteration-41.md ...
+```
+
+All four confirmed stale by 2-3 iterations. This is a genuinely new
+instance of the QN-049/050/051/053/054 staleness class — not a
+re-discovery of an unfixed defect, but a **recurrence** of a
+previously-fixed one, since none of iterations 43 or 44 touched these
+four lines again.
+
+**Execution:** `tasks/QN-056.md` created via `quay-native task create`,
+body written via `task edit --body`. All four Status lines updated to
+cite 44 completed iterations, `iteration-44.md` as the most recent
+report, and 54 allocated task IDs (updating `quay-native-design.md`'s
+stale "51" count too). Verified:
+
+```
+$ grep -n "^\- \*\*Status" experiment/README.md docs/proposal/quay-proposal.md \
+    docs/proposal/quay-native-design.md docs/proposal/quay-bootstrap-experiment.md
+experiment/README.md:3: ... 44 BAIME iterations ... iteration-44.md ... (54 allocated native task IDs ...)
+docs/proposal/quay-proposal.md:3: ... 44 BAIME iterations ...
+docs/proposal/quay-native-design.md:3: ... 54 allocated task IDs ... 44 BAIME iterations ...
+docs/proposal/quay-bootstrap-experiment.md:3: ... 44 iterations ... iteration-44.md ...
+
+$ git diff --stat -- '*.js'
+(empty)
+
+$ git diff --stat -- 'docs/proposal/*.md' 'experiment/README.md'
+ docs/proposal/quay-native-design.md | 2 +-
+ docs/proposal/quay-proposal.md      | 2 +-
+ experiment/README.md                | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+```
+
+Exactly three git-tracked files changed (one line each); the fourth
+(`quay-bootstrap-experiment.md`) confirmed changed via direct file read
+only, consistent with its known-gitignored status (iteration 42's own
+discovery, re-confirmed unchanged this iteration — no `.gitignore` edit
+made).
+
+**Full regression suite**, re-run after the edit: all 25 `*.test.mjs`
+files exit 0 (verified per-file via direct `node --test <file>` exit-code
+check); `node packages/quay-native/test/abi-symmetry.mjs` reports "ALL
+FOUR SURFACES SYMMETRIC." Zero regressions, as expected for a pure
+metadata-line change.
+
+`tasks/QN-056.md` was gated `todo → ready` via `task check`: initial call
+(before any AC box checked) correctly returned `ok:false`,
+`"0/4 AC checkboxes checked"` — confirming a real mechanical check, not a
+rubber stamp. All 4 AC items independently re-verified against the live
+command output above before being checked; `task check` re-run:
+`ok:true` ("all four artifacts present; eligible to move to ready").
+Transitioned `todo → ready` via `task edit QN-056 --status ready`. DoD
+items (this provenance.md section and `experiment/iterations/
+iteration-45.md`) are completed as part of this same iteration's work,
+then checked; task gated `ready → done` via `task check` and transitioned
+via `task edit QN-056 --status done`.
+
+## σ computation — iteration 45
+
+Total allocated task IDs verified via actual command:
+
+```
+ls tasks/QN-*.md | wc -l   -> 55
+```
+
+(QN-001 through QN-056, minus QN-018, never allocated.)
+
+QN-056 completed its full lifecycle within this iteration: authored
+(`todo → ready`, gated `ok:true`), then executed (`ready → done`, gated
+`ok:true`, 4/4 AC checked), then formally transitioned via `task edit
+QN-056 --status done`. Final provenance triple: `{author_by: native,
+execute_by: native, gate_by: native, status: done}` — same
+single-iteration author+execute convention used for every prior task
+since iteration ~15.
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-056 | Fix stale iteration-count Status lines re-staled since iteration 42 (4 files: `experiment/README.md`, `quay-proposal.md`, `quay-native-design.md`, `quay-bootstrap-experiment.md`) | **native** | **native** | **native** | **done** |
+
+- σ (strict reading: author_by = execute_by = gate_by = native AND status
+  = done) = 48 / 55 = **0.8727** (47/54 = 0.8704 at the start of this
+  iteration, +1 task in both numerator and denominator).
+- σ_author_only (diagnostic: author_by = native regardless of
+  execute_by/gate_by) = 54 / 55 = **0.9818** (QN-056 added to both
+  numerator and denominator).
+
+## V-factor attribution — iteration 45 (precedent-derived, held flat)
+
+Per the standing discipline (quote the exact defining language, search
+all of `provenance.md` for the closest precedent, read that precedent's
+full reasoning in full this session, and check whether a closer precedent
+maps to a different factor before crediting), the closest, most directly
+on-point precedent is **iteration 42's** (QN-053, the original three-file
+Status-line fix this task's own regression re-fixes), read in full this
+iteration, plus iteration 43's (QN-054, `experiment/README.md`'s own
+Status line) for the fourth file.
+
+Per protocol §5.2's exact defining language, `completeness` is
+"Methodology (Skills + gates + decomposition rule) fully documented and
+self-contained." Iterations 39/42/43's own precedent (re-quoted and
+re-confirmed here): this class of fix documents already-made,
+already-exercised state (iteration count, task-ID count) and adds no new
+Skill-orchestration Method-step content. `completeness` is not
+implicated. Held flat at **0.74**.
+
+- **skeleton, abi_symmetry, gate_correctness, skill_convergence**: each
+  explicitly considered and ruled out — `git diff --stat -- '*.js'`
+  confirmed empty; no new CLI/MCP schema-equivalence proof; no gate-logic
+  change; no `quay:author`/`quay:execute` SKILL.md content changed. All
+  four held flat: skeleton 0.70, abi_symmetry 0.96, gate_correctness 0.76,
+  skill_convergence 0.96.
+- **effectiveness: 0.26 (unchanged).** Documentation-only task, no code
+  change. See the structural reflection above for the full honest
+  analysis of why no new effectiveness-moving evidence exists this
+  iteration (not merely "none found for this specific task," but a
+  substantive, dedicated search across the entire history). Now **25
+  consecutive iterations (21-44, and now 45)**.
+- **reusability: 0.79 (unchanged).** See the structural reflection above.
+  This task touches neither Provider's capability set — only four
+  top-level documents' own metadata lines. Held flat for the **twentieth
+  consecutive iteration (26-45)**.
+- **validation: 0.64 (unchanged).** Credited only after the out-of-band
+  audit for this iteration's own work occurs (next iteration, via the
+  top-level orchestrator's separate `Agent` dispatch, G3). Correctly held
+  flat pending that audit. The clean-audit streak stands at eight
+  consecutive iterations (37-44) as of the start of this iteration —
+  noted as evidence of consistent process quality, not unilaterally used
+  to move this factor (the top-level orchestrator's call, per standing
+  convention).
+
+```
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = 0.4903  (unchanged)
+V_meta      = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+ΔV_instance = ΔV_meta = **0.0000**. This iteration's genuine
+contribution — a substantive, evidence-based structural analysis
+concluding, honestly, that no executable `effectiveness`- or
+`reusability`-moving opportunity currently exists (backed by a full
+re-derivation of every historical timing sample and a fresh
+re-confirmation of the GitHub `data.write` scope blocker), plus a real
+recurrence of the Status-line staleness defect closed across all four
+top-level documents — is not automatically forced into one of the eight
+precisely-scoped V-factor axes when the evidence does not support it, per
+the standing discipline (iterations 25, 28, 29, 37, 38, 39, 40, 41, 42,
+43, 44).

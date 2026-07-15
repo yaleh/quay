@@ -1,6 +1,6 @@
 # Quay-Native Bootstrap — BAIME Experiment
 
-- **Status:** In progress; 42 BAIME iterations completed as of 2026-07-15, NOT CONVERGED — see `experiment/iterations/iteration-42.md` for the most recent full state (52 allocated native task IDs, native + GitHub Providers both built and running)
+- **Status:** In progress; 44 BAIME iterations completed as of 2026-07-15, NOT CONVERGED — see `experiment/iterations/iteration-44.md` for the most recent full state (54 allocated native task IDs, native + GitHub Providers both built and running)
 - **Date:** 2026-07-15
 - **Owner:** Yale Huang
 - **Protocol:** [`../docs/proposal/quay-bootstrap-experiment.md`](../docs/proposal/quay-bootstrap-experiment.md) (authoritative — this file operationalizes it, it does not redefine it)
