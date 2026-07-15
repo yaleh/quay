@@ -2249,3 +2249,75 @@ QN-027, added to both numerator and denominator).
 
 See `experiment/timing/iteration-13.log` for this iteration's raw `date`
 checkpoints (if produced).
+
+## Records (as of end of iteration 14)
+
+**Pre-execution context:** the backlog is now fully exhausted of ordinary
+work — every task except the three permanently-stuck-by-design adversarial
+fixtures (QN-017, QN-020, QN-022, all `needs-human`) and QN-021 (`todo`,
+QN-020's structurally-unsatisfiable child) is `done`. No new task was
+authored or executed this iteration. This iteration's genuine, evidence-
+producing action was instead a direct, honest re-test of the specific
+precondition QN-017/QN-020/QN-021 depend on: does a real, synchronous,
+fresh-context subagent spawn (`mcp__plugin_manda_manda__Agent`) actually
+complete in this environment, now that DIR-004/iteration-13 confirmed an
+async `Dispatch` task-queue primitive is live? This is a narrower, more
+precise question than DIR-004's own — DIR-004 and iteration 13 tested the
+async task-queue (`Dispatch`/`DispatchStatus`/`DispatchSettle`), not a
+genuine synchronous fresh-context spawn.
+
+**Test performed (verbatim):**
+
+```
+Agent(prompt="<fresh-context review-proposal task against tasks/QN-021.md>",
+      subagent_type="general-purpose")
+  → MCP error -32603: timeout waiting for cap "agent.spawn" result after 30s
+
+Agent(prompt="Reply with only the single word: PONG",
+      subagent_type="general-purpose")
+  → MCP error -32603: timeout waiting for cap "agent.spawn" result after 30s
+```
+
+Both calls timed out identically (2/2), at 2026-07-15T09:41:55Z (UTC,
+`date -u` at time of test). `.manda/config.yml` was then read to
+understand why: the `agent.spawn` capability is designed as a *relay*,
+not a locally-completing call — the `parent-proxy` profile forwards a
+`cap-requests-{name}` message to a live parent-broker session, which is
+expected to itself invoke its own native `Agent(...)` tool and reply on
+`cap-results`. `ps aux | grep -i monitor` at the time showed several
+`manda monitor` processes alive (`worker`, `cord`, `terminal`) but none
+of them answered the relay within the 30s window this session's `Agent`
+call waited.
+
+**Provenance-relevant conclusion:** this does **not** reopen QN-017/
+QN-020/QN-021 (their own AC/DoD already scoped the claim narrowly and
+correctly — "no subagent-dispatch primitive... found," re-verified via
+`ToolSearch`, which is a real, still-accurate statement about **tool
+schema visibility**, not about whether an actual spawn completes) and
+does not flip any provenance field to `native` for any task (no task was
+authored or executed this iteration). It does sharpen the experiment's
+running understanding, recorded in `experiment/directives/README.md`'s
+iteration-14 update and `packages/quay-native/skills/author/SKILL.md`'s
+Gaps section: the confirmed-live primitive (async `Dispatch` queue) and
+the still-unconfirmed capability (synchronous fresh-context `Agent`
+spawn, the actual mechanism design §5's review-independence contract
+needs) are two structurally distinct things, and conflating "a dispatch
+primitive is live" with "true fresh-context review independence is now
+achievable" would have been a genuine, evidence-contradicted overclaim.
+
+No task's provenance triple changed this iteration. σ is unchanged.
+
+## σ computation — iteration 14
+
+No task reached a new `{native, native, native, done}` state this
+iteration (no task was authored or executed). σ is recomputed from the
+same 26-task table as iteration 13, unchanged:
+
+```
+σ (strict reading)   = 19 / 26 = 0.7308     (unchanged, Δσ = 0)
+σ (inclusive reading) = 21 / 26 = 0.8077    (unchanged)
+σ_author_only         = 25 / 26 = 0.9615    (unchanged)
+```
+
+Total task count remains **26** (QN-001..QN-027, minus the
+never-allocated QN-018) — no new task was created this iteration.

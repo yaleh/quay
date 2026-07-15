@@ -183,6 +183,50 @@ per-session, mechanically-checked fact going forward, not something to
 assume permanently true without re-checking, since a future gateway
 restart could reintroduce the same startup race DIR-004 diagnosed.
 
+**Update (iteration 14): the confirmed-live primitive is the async
+`Dispatch` task-queue, NOT a genuine synchronous `Agent` fresh-context
+spawn — these are two structurally distinct capabilities, and this
+iteration found the second one does not currently complete.** Motivated
+by QN-017/QN-020/QN-021's own standing claim ("no subagent-dispatch
+primitive exists" — the precondition those three tasks were built to be
+honestly unsatisfiable against), this iteration re-tested the specific,
+narrower claim those tasks actually depend on: can
+`mcp__plugin_manda_manda__Agent` (a real fresh-context subagent spawn,
+the mechanism design §5's review-independence contract actually needs)
+be invoked and complete, not merely be schema-loadable? Two independent
+calls were made — one a realistic `review-proposal`-style task against
+`tasks/QN-021.md`, one a minimal "reply PONG" sanity check — and **both
+timed out identically after 30s**: `MCP error -32603: timeout waiting
+for cap "agent.spawn" result after 30s`. Reading `.manda/config.yml`
+explains why: the `agent.spawn` capability is designed to be relayed
+over a `cap-requests-{name}` channel to a **live parent-broker session**
+that is actively watching that channel and itself calls its own native
+`Agent(...)` tool in response (see the `parent-proxy` profile's
+template) — it is not a locally-completing call. `ps aux | grep -i
+monitor` at the time of the test showed several `manda monitor`
+processes alive (`worker`, `cord`, `terminal`) but none of them visibly
+picked up and answered the `cap-requests-*` relay within the 30s window
+this session's `Agent` call waited.
+
+**What this does and does not change:** it does NOT reopen QN-017/
+QN-020/QN-021 — their own AC/DoD already framed the claim narrowly and
+honestly ("no subagent-dispatch primitive... found," re-verified via
+`ToolSearch`, which is a real, still-true statement about the async
+`Dispatch` queue's tool-schema visibility) and remain correctly
+`needs-human`/`todo` by design; this finding, if anything, reinforces
+why those tasks' underlying precondition was genuine rather than
+transient — the queue-based `Dispatch` primitive iteration 13
+confirmed works is a different mechanism from the synchronous,
+fresh-context `Agent` spawn design §5 actually calls for, and the
+latter still does not complete in practice as tested from this session.
+It also does not change `quay-github`'s `gate`/`skill` verdict (same
+reasoning iteration 13 already applied to the `Dispatch` finding: a
+session-dispatch infrastructure fact is orthogonal to GitHub-specific
+gate semantics). Recorded here as a precise, reproducible (2/2),
+timestamped (2026-07-15T09:41Z) data point for future iterations and
+the independent auditor to build on, rather than left as an assumption
+either way.
+
 ## Relationship to the experiment's guardrails (G1-G6, protocol §6)
 
 Directives introduce a new risk class the existing guardrails don't cover:

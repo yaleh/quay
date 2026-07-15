@@ -137,3 +137,15 @@ authorTask(id) = {
   (an author could check a box without independent verification the
   underlying claim is true) remains open; the gate is still both contestant
   and judge for this class of claim (G3).
+- **Update (iteration 14) — sharpened, not reversed: an async task-queue
+  dispatch primitive (`manda` `Dispatch`/`DispatchStatus`/`DispatchSettle`)
+  was confirmed live starting iteration 13 (DIR-004), but the genuine
+  synchronous fresh-context `Agent` spawn this Skill's `review-proposal`/
+  `review-plan` steps actually need for true independence was tested
+  directly in iteration 14 and did **not** complete (two independent
+  calls, both timed out after 30s waiting on the `agent.spawn`
+  capability — see `experiment/directives/README.md`'s iteration-14
+  update for the full account). The degraded, same-session fallback
+  documented above therefore remains this Skill's actual operating mode
+  as of iteration 14, not merely a historical iteration-1 finding that
+  might now be stale.
