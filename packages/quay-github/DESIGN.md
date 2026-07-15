@@ -1,10 +1,11 @@
-# quay-github — Design (v1.1: read + minimal status-write)
+# quay-github — Design (v1.3: read + status-write + gate + skill)
 
-- **Status:** v1.1 implemented — `data.read` + `manifest` (v1, QN-002) plus
-  a minimal, status-only `data.write` (QN-024, iteration 10). `gate` and
-  `skill` remain deferred (no natural reason found through iteration 12 —
-  see this file's §5 and `provider.yml`'s own inline comments for the
-  current, honest justification).
+- **Status:** v1.3 implemented — `data.read` + `manifest` (v1, QN-002),
+  minimal status-only `data.write` (QN-024, iteration 10), `gate` (QN-028,
+  iteration 17), and `skill` (QN-029, iteration 18) — see §5/§3.5/§3.6 and
+  `provider.yml`'s own inline comments for the current, honest scope of
+  each. `skill` required a real fix one layer below `provider.yml` itself
+  — see §3.6 for why a config-only declaration would have been dishonest.
 - **Scope:** the GitHub Provider — second real backend, proves the ABI
   transfers to a heterogeneous store (proposal §14, protocol §10.1). See
   `tasks/QN-002.md` for the original read-only Proposal/Plan/AC/DoD, and
@@ -25,11 +26,10 @@ v1 was deliberately **read-only** (`data.read` + `manifest` only) — mirrors
 how `quay-native` itself staged `data.read` before `data.write`/`gate`
 (iteration 0's v0 loop). Iteration 10 (QN-024) added a real, minimal,
 status-only `data.write` on top of that read-only base — see §3.4. `gate`
-and `skill` capabilities remain explicitly deferred; no natural reason to
-implement either has arisen through iteration 12 (each iteration since
-QN-024 has re-checked and found none — see `provider.yml`'s own inline
-comments, which are the single source of truth for the current capability
-booleans).
+was added in iteration 17 (QN-028, see §3.5) after 13 consecutive
+iterations of honestly finding no natural reason to implement it. `skill`
+was added in iteration 18 (QN-029, see §3.6), the last capability named in
+`provider.yml`'s original v1 comment set.
 
 ## 2. Backing store
 
@@ -227,6 +227,49 @@ iteration-17 section and `tasks/QN-028.md` for the full transcript.
 
 Covered by `test/gate.test.mjs`.
 
+### 3.6 Skill path (iteration 18, QN-029)
+
+**What "skill" means operationally, and why it was not a config-only
+change.** `provider.yml`'s `status_skill_map`/`action_buttons` fields are
+read generically by Core's `composePayload` (`packages/quay/src/action.js`)
+— zero Provider-specific branching exists there, confirmed by reading that
+file in full. Declaring the two fields in this Provider's `provider.yml`
+alone would therefore have technically "worked" at the config-reading
+layer. But reading `packages/quay-native/skills/{author,execute}/SKILL.md`
+in full (not assumed from this document alone) found both Skills'
+documented Method steps hardcoded every invocation to `quay-native task
+<cmd>` — `quay-native`'s own local CLI, not Core's provider-agnostic `quay
+task <cmd> --provider <id>` passthrough. Declaring `skill: true` here
+without fixing that would have been a real bug disguised as a capability:
+an action button on a GitHub-backed task would compose a payload naming
+`quay:author`/`quay:execute`, and invoking either Skill would silently
+operate on `quay-native`'s own task store — the wrong data entirely.
+
+**The actual fix, made once, generically (QN-029), not duplicated per
+Provider.** Both Skill `.md` files were parameterized to accept an
+optional `provider` argument (default `native`) and now invoke `quay task
+<cmd> --provider <provider>` throughout — this required zero new code in
+Core (the `--provider` flag and `withProvider` passthrough already existed
+since QN-024/QN-027) and zero duplication of the Skills' own Method logic
+per backend. `quay task view/check <id> --provider native --json` was
+confirmed byte-identical to the pre-existing direct `quay-native task
+get/check <id> --json` invocation — the regression proof that every prior
+iteration's native-mode evidence remains valid unchanged.
+
+**Scope, deliberately narrow (G5): primitive tasks only**, same boundary
+as `gate` (§3.5) — `executeEpic`'s compound path was left unparameterized
+per-argument-plumbing (it recurses into the same `provider`-aware calls,
+but has never been exercised against a real compound GitHub task, same
+reasoning as §3.5).
+
+**Live-verified, not merely declared:** the parameterized `quay:author`
+Method's `write-proposal` step (`quay task view <id> --provider github
+--json`) and `gate-check` step (`quay task check <id> --provider github
+--json`) were run for real against a live `yaleh/quay` GitHub issue,
+confirming the Skill's own documented steps — not a hand-simulated
+substitute — correctly reach quay-github when told `provider: github`.
+See `experiment/iterations/iteration-18.md` for the full transcript.
+
 ## 4. What transferred cleanly vs. what required backend-specific work
 
 **Transferred unmodified (zero Core changes, zero ABI changes):**
@@ -281,8 +324,15 @@ budgeted, proposal §16):**
   shapes against a different body-text source; low marginal cost because
   the read-side §3 heading/label conventions already existed, but real,
   independently-authored code nonetheless.
+- Skill-invocation provider-parameterization (added iteration 18, §3.6) —
+  NOT backend-specific work at all, in the end: the fix lived one layer up
+  (in the shared `quay:author`/`quay:execute` Skill `.md` files, made
+  provider-aware once), not duplicated per Provider. Worth naming
+  explicitly here because it is the one capability in this list where the
+  *naive* approach (a config-only `provider.yml` declaration) would have
+  been backend-specific-*looking* but actually silently wrong — see §3.6.
 
-## 5. Capabilities (v1.1)
+## 5. Capabilities (v1.3)
 
 ```
 data.read: true    # task_list, task_get
@@ -291,10 +341,9 @@ data.write: true   # QN-024 (iteration 10): status-only patch — see §3.4.
                    # title/body/labels/parent/children remain unimplemented.
 gate:       true    # QN-028 (iteration 17): task_check, primitive tasks
                    # only — see §3.5.
-skill:      false  # deferred — gate and skill are separate capabilities;
-                   # no natural reason found through iteration 17 to add
-                   # skill (status→Skill map / action buttons) yet.
+skill:      true    # QN-029 (iteration 18): status_skill_map/action_buttons
+                   # — see §3.6. Primitive tasks only, same boundary as gate.
 ```
 
 Matches `provider.yml`'s own capability booleans verbatim (verified this
-iteration — see QN-028's AC/DoD).
+iteration — see QN-029's AC/DoD).

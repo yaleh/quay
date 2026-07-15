@@ -2,16 +2,21 @@
 # (quay-proposal.md §10, QN-002's Plan/AC). Travels with the Provider.
 #
 # v1 walking skeleton (G5): read + minimal status-only write (QN-024,
-# iteration 10) + gate (QN-028, iteration 17, primitive tasks only). skill
-# remains explicitly deferred, not merely omitted by oversight — see
-# DESIGN.md §5.
+# iteration 10) + gate (QN-028, iteration 17, primitive tasks only) + skill
+# (QN-029, iteration 18: status_skill_map/action_buttons, backed by the
+# now-provider-parameterized quay:author/quay:execute Skills — see
+# packages/quay-native/skills/{author,execute}/SKILL.md's iteration-18
+# honesty notes; this was NOT free — it required fixing a real hardcoded-
+# to-quay-native limitation in those Skills first, not just this file).
 
 id: github
 name: "quay-github"
 description: >
-  GitHub Provider (v1, read + status-write + gate): maps this repository's
-  Issues onto the canonical task view-model (DESIGN.md). Second real
-  backend, proves the ABI transfers to a heterogeneous store (proposal §14).
+  GitHub Provider (v1, read + status-write + gate + skill): maps this
+  repository's Issues onto the canonical task view-model (DESIGN.md).
+  Second real backend, proves the ABI transfers to a heterogeneous store
+  (proposal §14), and that the Skill layer itself transfers, not just the
+  ABI surfaces.
 
 capabilities:
   data.read: true    # task_list, task_get — required
@@ -23,9 +28,12 @@ capabilities:
                      # only (no compound/epic children-recursion — this
                      # experiment has never had a real compound GitHub
                      # task; see DESIGN.md §3.5/github-client.js#checkGate).
-  skill: false        # deferred — gate and skill are separate capabilities;
-                     # skill (status→Skill map / action buttons) remains a
-                     # distinct follow-up if later needed, not folded in here.
+  skill: true         # QN-029 (iteration 18): status_skill_map/action_buttons
+                     # declared below, backed by the provider-parameterized
+                     # quay:author/quay:execute Skills (`quay task <cmd>
+                     # --provider github`, Core's existing generic
+                     # passthrough — zero Core-side code change). Primitive
+                     # tasks only, same scope boundary as `gate` above.
 
 # status model (design §3) — same 4-state vocabulary as native; GitHub has
 # no native status field, so this Provider derives status from issue.state
@@ -46,11 +54,23 @@ lanes:
   - authoring
   - execution
 
-# No status_skill_map / action_buttons declared for v1 — this Provider is
-# read-only (no write/gate capability), so there is nothing for an action
-# button to trigger yet (design §7's action edge assumes at least a
-# data.write-capable target to be meaningful). A future task that adds
-# data.write/gate to this Provider should also add this table.
+# status -> Skill logical map (design §3), identical mapping to native's own
+# (packages/quay-native/provider.yml) — same two Skills, now provider-
+# parameterized (QN-029) so they genuinely operate against this Provider's
+# own GitHub-backed data when invoked with provider: github.
+status_skill_map:
+  todo: "quay:author"
+  ready: "quay:execute"
+
+# action_buttons (proposal §6.4, §10; design §7) — identical shape to
+# native's own. Core's composePayload (packages/quay/src/action.js) reads
+# these fields generically per-Provider with zero Provider-specific
+# branching — confirmed by reading that file in full (QN-029).
+action_buttons:
+  - id: advance
+    label: "Advance"
+    payload: "Drive task {{id}} forward one status transition using its current status's Skill (see status_skill_map)."
+    whenStatus: ["todo", "ready"]
 
 repo:
   owner: "yaleh"

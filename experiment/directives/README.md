@@ -252,6 +252,49 @@ that future iterations should treat as a live, re-testable condition,
 not a permanent one — but also not something to paper over if it
 recurs across several more iterations.
 
+## Update (iteration 18, resolving DIR-005): the correct target was found and correctly addressed — the mechanism that was missing turns out to be one level deeper than "wrong target"
+
+`DIR-005` (`experiment/directives/archive/DIR-005-dispatch-to-own-monitor-channel.md`)
+hypothesized that iterations 13-16's "submitted successfully, never
+claimed" pattern was caused by dispatching to a guessed/hardcoded name
+(`to="worker"`) instead of the session's own actual bound monitor.
+Iteration 18 tested this directly: it turned out to **be** the same
+pts/6 session DIR-005's own evidence trail was built from, and walking
+its own process ancestry (`ppid`-chain, not `tty`-filtered, per DIR-005's
+documented pitfall) mechanically confirmed its own bound monitor is
+`cord` — exactly the monitor DIR-005 had flagged as "alive, never yet
+addressed." Iteration 18 then dispatched, async, explicitly `to="cord"`,
+confirmed via `manda events pending-cord` that the event genuinely
+landed on the right channel, and polled for ~110s.
+
+**The task was still never claimed** — but for a more precise reason
+than "wrong target." Direct inspection of `manda-dispatch cross-session
+--help` (the adapter `.manda/config.yml` binds to every `pending-{name}`
+channel) shows it is explicitly documented as **stateless, with "no side
+effects"** — it renders one event to a line of text for whatever is
+watching a monitor's terminal; it does not itself call
+`manda-dispatch claim` or execute anything. Process inspection confirmed
+`cord` runs fully detached (`tty_nr=0`, stdout/stderr are anonymous
+sockets, no `manda watch` process anywhere on the host reads them) — so
+even a perfectly-discovered, perfectly-targeted dispatch to a session's
+own real monitor produces no execution unless a separate live
+human/process is actually watching that monitor's rendered output and
+manually or programmatically issuing the follow-up `claim`.
+
+**Revised G6 framing, going forward:** "is manda armed" is no longer the
+open question (the daemon, the `Dispatch`/`DispatchStatus` MCP tools, and
+`pending-{name}` channel routing all work exactly as documented, and
+target-discovery is now a solved, mechanical, ~5-command procedure — see
+DIR-005's own "Discovery method" section, ppid-walk not tty-filter). The
+open question is narrower and one level deeper: **whether any live
+process is watching a given monitor's output and will act on it** — a
+fact that is per-monitor, per-moment, and directly checkable (does the
+monitor have a live controlling terminal / an attached `manda watch`
+process?), not something to assume true just because the monitor process
+itself is alive. This is a genuine, useful narrowing (DIR-005's own
+stated goal), not a reopening of DIR-001-004/13's positive findings about
+the dispatch plumbing itself, which remain correct and unchanged.
+
 ## Relationship to the experiment's guardrails (G1-G6, protocol §6)
 
 Directives introduce a new risk class the existing guardrails don't cover:

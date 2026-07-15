@@ -1,11 +1,11 @@
 ---
 name: quay:author
-description: Use when driving a quay-native task at status `todo` toward `ready` — writes/reviews the four mandatory artifacts (Proposal, Plan, AC, DoD) and asserts the `todo -> ready` gate via `quay-native task check`. Does not execute the task (see quay:execute for `ready -> done`). Invoke with a task id.
+description: Use when driving a task at status `todo` toward `ready` — writes/reviews the four mandatory artifacts (Proposal, Plan, AC, DoD) and asserts the `todo -> ready` gate via `quay task check`. Does not execute the task (see quay:execute for `ready -> done`). Invoke with a task id and, optionally, a provider id (default `native`).
 ---
 
 # quay:author
 
-λ(taskId: TaskId) → AuthoringOutcome
+λ(taskId: TaskId, provider: ProviderId = "native") → AuthoringOutcome
 
 Layer-2 orchestration Skill (quay-native-design.md §5) for the `todo` status.
 Corresponds to the `author` operation in the status model (design §3):
@@ -16,24 +16,44 @@ iteration 0 as a v0 port of the seed's `authoring-convergence` (epicd) and
 was, at that point, entirely unexercised. **Iteration 1 actually dispatched
 this Skill's method against real tasks** (QN-001, QN-003, QN-005 — see
 `experiment/provenance.md`), authoring real Proposal/Plan/AC/DoD content and
-passing each through `quay-native task check`. A concrete environment finding
-came out of that exercise: **this environment (the tool-calling harness
-driving this session) has no subagent-dispatch primitive** — an explicit
-`ToolSearch` check for a `Task`/`Agent`-equivalent tool during iteration 1
-found none. This means the fresh-context isolation design §5 calls for
-("Layer-1 operation Skills... each in its own subagent") could not be
-achieved for real in iteration 1; the four steps below ran sequentially in
-one session, with a same-session review checklist substituting for genuine
-reviewer independence. This is recorded here, not hidden — see "Gaps".
+passing each through the gate. A concrete environment finding came out of
+that exercise: **this environment (the tool-calling harness driving this
+session) has no subagent-dispatch primitive** — an explicit `ToolSearch`
+check for a `Task`/`Agent`-equivalent tool during iteration 1 found none.
+This means the fresh-context isolation design §5 calls for ("Layer-1
+operation Skills... each in its own subagent") could not be achieved for
+real in iteration 1; the four steps below ran sequentially in one session,
+with a same-session review checklist substituting for genuine reviewer
+independence. This is recorded here, not hidden — see "Gaps".
+
+**Honesty note (iteration 18, QN-029) — provider-parameterized.** Every
+Method step below previously hardcoded `quay-native task <cmd>`, invoking
+`quay-native`'s own CLI directly. This was a real, undeclared limitation:
+declaring quay-github's `skill` capability without fixing it would have
+been a config-only, semantically-empty change (the composed action-button
+payload would name this Skill, but invoking it against a GitHub-backed
+task id would silently target the wrong Provider's data). QN-029 replaced
+every such invocation with Core's own already-existing, provider-agnostic
+CLI passthrough — `quay task <cmd> --provider <provider>` (`packages/quay/
+bin/quay.js`'s `withProvider` helper, live since QN-024/QN-027) — so this
+Skill now genuinely operates against whichever Provider it is told to
+target. Default is `native` (unchanged from every prior iteration's
+invocation); `quay task <cmd> --provider native --json` is confirmed
+byte-identical to the pre-existing direct `quay-native task <cmd> --json`
+invocation (see `experiment/iterations/iteration-18.md` §Phase 3 for the
+verbatim regression proof) — no prior provenance record or prior
+iteration's evidence is invalidated by this change. This is the actual
+mechanism that makes `quay-github`'s own `status_skill_map` declaration
+(this same task, Phase 4) honest rather than aspirational.
 
 ## Spec
 
 ```
 AuthoringOutcome = ReachedReady | NeedsHuman(reason: String)
 
-authorTask :: TaskId → AuthoringOutcome
-authorTask(id) = {
-  task:     quay-native task get <id> --json,
+authorTask :: (TaskId, ProviderId) → AuthoringOutcome
+authorTask(id, provider) = {
+  task:     quay task view <id> --provider <provider> --json,
   assert:   task.status == "todo",
   -- Layer-1 operation Skills (design §5): each in its OWN subagent, fresh
   -- context, for review independence, WHEN the environment offers a
@@ -47,18 +67,19 @@ authorTask(id) = {
                                         --   this is also where the decompose test lives,
                                         --   design §4 — "declare an epic only if >=2
                                         --   independently mergeable deliverables")
-  gate:     quay-native task check <id>,
+  gate:     quay task check <id> --provider <provider>,
   return:   case gate.ok of
-    True  → { quay-native task edit <id> --status ready ; ReachedReady }
+    True  → { quay task edit <id> --status ready --provider <provider> ; ReachedReady }
     False → NeedsHuman(gate.reason)
 }
 ```
 
 ## Method — four named Layer-1 steps, each with a stated environment-capability requirement and a degraded fallback (design §5: "A Skill declares the environment capability it needs and defines a degraded fallback for environments without it")
 
-1. **`write-proposal`** — `quay-native task get <id> --json`; if `## Proposal`
-   is missing, write one: what/why, the approach, grounded in a real,
-   specific gap (read the actual code/design, not a generic filler).
+1. **`write-proposal`** — `quay task view <id> --provider <provider> --json`;
+   if `## Proposal` is missing, write one: what/why, the approach, grounded
+   in a real, specific gap (read the actual code/design, not a generic
+   filler).
    - *Dispatch-capable target:* run in its own fresh-context subagent.
    - *Degraded fallback (currently active — no dispatch primitive found in
      this environment):* write it directly in the current session.
@@ -86,10 +107,10 @@ authorTask(id) = {
    - *Degraded fallback (currently active):* same-session checklist: (a)
      Plan phases map onto AC items, (b) AC section contains ≥1 real
      checkbox line, (c) DoD is a real checklist, not restated AC.
-5. `quay-native task check <id> --json` — if `ok: true`, run
-   `quay-native task edit <id> --status ready`. If `ok: false`, do not force
-   it; leave at `todo` (or move to `needs-human` if a human blocker exists)
-   and report the gate's `reason`.
+5. `quay task check <id> --provider <provider> --json` — if `ok: true`, run
+   `quay task edit <id> --status ready --provider <provider>`. If `ok:
+   false`, do not force it; leave at `todo` (or move to `needs-human` if a
+   human blocker exists) and report the gate's `reason`.
 
 ## Gaps (honestly declared, not hidden — feeds iteration 2's OBSERVE step)
 

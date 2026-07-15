@@ -1,6 +1,6 @@
 # DIR-005
 
-- status: pending
+- status: applied
 - created_by: human (Yale), asserted directly in this live conversation
 - created_at: 2026-07-15
 - title: Dispatch to the iteration-executor session's own manda monitor channel by name, not a hardcoded/guessed target
@@ -164,4 +164,109 @@ the limitation explicitly) applies.
    unattended.
 
 ## Resolution
-<!-- filled in by whichever iteration applies this -->
+
+- resolved_by: iteration-18
+- outcome: **applied** — discovery method executed exactly as specified;
+  the dispatch attempt itself surfaced a new, more precise negative
+  finding than "never claimed" (see below). Not a clean positive
+  (task was never claimed), but not a repeat of the prior "guessed
+  target" failure mode either — this is the honest, more informative
+  outcome DIR-005 explicitly anticipated as legitimate ("if no monitor
+  is discoverable... record that plainly" / item 5's "this does not
+  presuppose success").
+- evidence: `experiment/iterations/iteration-18.md` §3 (DIR-005 section)
+  for the full verbatim command sequence. Summary:
+
+  1. **Discovery (item 1) — succeeded, exactly per the documented
+     method.** This iteration-executor session's own claude pid is
+     `3176586` (confirmed via `ps -o pid,ppid,tty,lstart,cmd -p $$`
+     walking up from this session's own bash child). Walking its
+     direct children (`ps --ppid 3176586`, NOT filtered by `tty`, per
+     the documented pitfall) found a detached (`tty=?`) bash child
+     `3178032` running `manda monitor cord --root .` (pid `3178052`).
+     Three-way parentage confirmed via
+     `ps -o pid,ppid,cmd -p 3176586,3178032,3178052`; `/proc/3178052/cwd`
+     independently confirmed `/home/yale/work/quay`; the process has
+     been running continuously since `03:33:16` (~7h at test time).
+     **This session's own bound monitor is `cord`** — the exact same
+     monitor DIR-005 itself named as "confirmed alive, confirmed never
+     yet addressed." This is a new fact DIR-005 did not know when
+     written: the session that ended up running iteration 18 turned out
+     to be the very pts/6 session DIR-005's evidence trail was built
+     from.
+  2. **Dispatch (item 2) — executed exactly as specified.**
+     `ToolSearch` found live, schema-loadable `Dispatch`/`DispatchStatus`/
+     `DispatchCancel` tools this session (unlike some prior iterations'
+     negative `ToolSearch` results). Submitted
+     `Dispatch(id="iter18-dir005-probe", to="cord", mode="async", ...)`
+     — returned `{"task_id":"iter18-dir005-probe"}` immediately, per the
+     async-submit-then-poll pattern item 2 requires (not the 30s
+     synchronous path). `manda events pending-cord` independently
+     confirmed the event actually landed on channel `pending-cord`
+     (`cursor:36`, real payload) — the target was correctly and
+     verifiably addressed, not merely accepted by the API.
+  3. **Polling (item 2) — task never left `queued` after ~110s** across
+     6+ `DispatchStatus` polls spanning roughly two minutes (`10:41:23Z`
+     submit to `10:43:11Z` last poll). Cleanly cancelled via
+     `DispatchCancel` (`path:"queued"`, `status:"cancelled"`) rather than
+     left open to be retroactively misrepresented as claimed by a future
+     session (matching iteration 15's established hygiene precedent).
+  4. **The new, more precise negative finding (item 3/5):** this is
+     *not* simply "no one happened to be listening" (the old, vaguer
+     framing DIR-005 set out to sharpen). Direct inspection of the
+     `manda-dispatch cross-session --help` output (the adapter bound
+     to `pending-{name}` channels per `.manda/config.yml`'s
+     `monitor.bindings`) shows it is explicitly documented:
+     **"Inbound adapter (stateless, TASK-16.2; invoked per-event by
+     `manda watch --adapter cross-session`)... reads one
+     `adapterabi.Envelope` event from stdin, prints an
+     `adapterabi.Result {forward,line}` to stdout. No side effects."**
+     A live empty-stdin invocation confirmed this: it returns
+     `{"forward":false,"line":""}` and performs no action. This means
+     `manda monitor cord`'s role for a `pending-cord` dispatch is
+     **rendering the event as a line of text for a human or another
+     process to read** — it does not itself call `manda-dispatch claim`
+     or execute anything. Whether the dispatch is ever claimed therefore
+     depends entirely on *something else* watching `cord`'s rendered
+     output and manually/programmatically issuing a `claim`. Direct
+     process inspection confirmed no such watcher exists: `cord`'s
+     controlling terminal is `tty_nr=0` (none — it runs fully detached,
+     exactly the `tty=?` state DIR-005's own "Discovery method" section
+     already documented for monitors started via a session's own
+     `Monitor` tool call), its stdout/stderr are anonymous sockets, and
+     no `manda watch` process was found anywhere on the host attached to
+     read them.
+  5. **Conclusion, stated at the correct precision level:** the
+     dispatch mechanism itself worked exactly as designed — correct
+     target discovered, correct channel addressed, event verifiably
+     delivered. The reason it was never claimed is not "wrong target"
+     (DIR-005's hypothesis, now ruled out for this specific case) but a
+     **structural one level down**: `manda monitor <name>` is a
+     stateless *rendering* adapter, not an autonomous claim loop: even
+     a perfectly-targeted dispatch to a monitor that is unambiguously
+     "this session's own" produces no execution unless a live
+     human/process is actually watching that monitor's terminal and
+     manually (or via its own script) issuing `manda-dispatch claim`.
+     This is a legitimate, honest, more precise negative finding, per
+     DIR-005's own item 3's explicit allowance ("If no monitor is
+     discoverable as bound to the session... record that plainly") —
+     generalized here to the closely analogous outcome DIR-005 did not
+     quite anticipate in those words: the monitor *was* discoverable
+     and correctly targeted, and it *still* does not constitute an
+     unattended executor.
+  6. **What this changes vs. does not change**, precisely: it does
+     **not** show DIR-001/002/004/13's positive dispatch-infrastructure
+     findings were wrong — the `Dispatch`/`DispatchStatus` MCP tools,
+     the `pending-{name}` channel routing, and the daemon itself all
+     worked exactly as documented. It **narrows** the open question
+     from "is the target guessed or discovered" (DIR-005's original
+     hypothesis, now closed — discovery works, targeting was never the
+     defect in this instance) to "is any process autonomously watching
+     a monitor's rendered output and claiming on its behalf" (still
+     open, and this iteration's direct evidence is NO for `cord`
+     specifically, at this specific point in time — a per-instance,
+     re-checkable fact, not a permanent architectural claim, consistent
+     with how DIR-004's and iteration 13's findings were scoped).
+
+See `experiment/iterations/iteration-18.md` §3 for the complete verbatim
+command transcript this summary is drawn from.

@@ -1,11 +1,11 @@
 ---
 name: quay:execute
-description: Use when driving a quay-native task at status `ready` toward `done` — implements the plan, self-audits against AC/DoD, and asserts the `ready -> done` gate via `quay-native task check`. Takes the epic branch (drive children to done, then integration-accept) when the task's derived role is `compound`. Invoke with a task id.
+description: Use when driving a task at status `ready` toward `done` — implements the plan, self-audits against AC/DoD, and asserts the `ready -> done` gate via `quay task check`. Takes the epic branch (drive children to done, then integration-accept) when the task's derived role is `compound`. Invoke with a task id and, optionally, a provider id (default `native`).
 ---
 
 # quay:execute
 
-λ(taskId: TaskId) → ExecutionOutcome
+λ(taskId: TaskId, provider: ProviderId = "native") → ExecutionOutcome
 
 Layer-2 orchestration Skill (quay-native-design.md §5) for the `ready` status.
 Corresponds to the `execute` operation in the status model (design §3):
@@ -24,52 +24,62 @@ records `execute_by: native`. Iteration 1 also confirmed (via `quay:author`'s
 own exercise) that **this environment has no subagent-dispatch primitive**
 — the same finding applies here, and is reflected in the Method/Gaps below.
 
+**Honesty note (iteration 18, QN-029) — provider-parameterized.** Same
+change, same rationale, as `quay:author`'s iteration-18 honesty note: every
+Method step below previously hardcoded `quay-native task <cmd>`; all such
+invocations are replaced with Core's generic `quay task <cmd> --provider
+<provider>` passthrough (default `native`, unchanged behavior — see
+`experiment/iterations/iteration-18.md` §Phase 3 for the byte-identical
+regression proof). This is what makes `quay-github`'s `skill` capability
+declaration (same task) actually correct rather than aspirational — see
+`quay:author`'s own honesty note for the full reasoning, not repeated here.
+
 ## Spec
 
 ```
 ExecutionOutcome = Done | NeedsHuman(reason: String)
 
-executeTask :: TaskId → ExecutionOutcome
-executeTask(id) = {
-  task:    quay-native task get <id> --json,
+executeTask :: (TaskId, ProviderId) → ExecutionOutcome
+executeTask(id, provider) = {
+  task:    quay task view <id> --provider <provider> --json,
   assert:  task.status == "ready",
   role:    task.role,   -- DERIVED (design §2): children non-empty => compound
   return:  case role of
-    "primitive" → executeLeaf(task)
-    "compound"  → executeEpic(task)
+    "primitive" → executeLeaf(task, provider)
+    "compound"  → executeEpic(task, provider)
 }
 
 -- Leaf path: implement the plan's Phases, TDD-style (borrowed discipline
 -- from the seed's primitive-executor, scoped to quay-native's own tooling —
 -- no epicd CLI calls).
-executeLeaf :: Task → ExecutionOutcome
-executeLeaf(task) = {
+executeLeaf :: (Task, ProviderId) → ExecutionOutcome
+executeLeaf(task, provider) = {
   forEachPhase: implementPhaseRedGreen(task),   -- write/adjust tests, make them pass
   selfAudit:    reRunAC(task),                  -- check AC boxes only when actually verified true
-  gate:         quay-native task check <id>,
+  gate:         quay task check <id> --provider <provider>,
   return: case gate.ok of
-    True  → { quay-native task edit <id> --status done ; Done }
+    True  → { quay task edit <id> --status done --provider <provider> ; Done }
     False → NeedsHuman(gate.reason)
 }
 
 -- Compound (epic) path: design §4's execution process.
-executeEpic :: Task → ExecutionOutcome
-executeEpic(task) = {
+executeEpic :: (Task, ProviderId) → ExecutionOutcome
+executeEpic(task, provider) = {
   ensureChildrenExist: task.children,           -- created at authoring or now, on a late split
-  driveEach:  [ driveChildToDone(c) | c <- task.children ],  -- recursive: todo->author->ready->execute->done
+  driveEach:  [ driveChildToDone(c, provider) | c <- task.children ],  -- recursive: todo->author->ready->execute->done
   integrationAccept: runEpicLevelACAndDoD(task),
   return: case integrationAccept of
-    Pass → { quay-native task edit <id> --status done ; Done }
+    Pass → { quay task edit <id> --status done --provider <provider> ; Done }
     Fail → NeedsHuman("integration acceptance failed")
 }
 ```
 
 ## Method — named steps, each with a stated environment-capability requirement and a degraded fallback (mirrors quay:author's QN-003 structure; leaf path only — epic path untested at v0)
 
-1. **`implement-phase`** — `quay-native task get <id> --json`; for each Plan
-   phase, write/adjust tests first, confirm they fail for the expected
-   reason, then implement the minimum change to pass (Red/Green, borrowed
-   from the seed's `primitive-executor` discipline).
+1. **`implement-phase`** — `quay task view <id> --provider <provider>
+   --json`; for each Plan phase, write/adjust tests first, confirm they
+   fail for the expected reason, then implement the minimum change to pass
+   (Red/Green, borrowed from the seed's `primitive-executor` discipline).
    - *Dispatch-capable target:* own fresh-context subagent per phase.
    - *Degraded fallback:* same-session sequential implementation (this
      environment's current mode — no subagent-dispatch primitive found, per
@@ -91,12 +101,12 @@ executeEpic(task) = {
      experiment currently uses to satisfy that requirement. Do not treat a
      green `self-audit-ac` + green `gate-check` as sufficient proof of
      correctness on its own (G3/G4).
-3. **`gate-check`** — run `quay-native task check <id> --json`. If `ok:
-   true`, run `quay-native task edit <id> --status done`. If `ok: false`, do
-   not force it — report the gate's `reason` (e.g. "N/M AC checkboxes
-   checked") and leave the task at `ready` for another pass, or route to
-   `needs-human` if a genuine blocker (not an implementation-layer gap) is
-   found.
+3. **`gate-check`** — run `quay task check <id> --provider <provider>
+   --json`. If `ok: true`, run `quay task edit <id> --status done
+   --provider <provider>`. If `ok: false`, do not force it — report the
+   gate's `reason` (e.g. "N/M AC checkboxes checked") and leave the task at
+   `ready` for another pass, or route to `needs-human` if a genuine blocker
+   (not an implementation-layer gap) is found.
 
 ## Gaps (honestly declared)
 

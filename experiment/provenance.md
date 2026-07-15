@@ -2600,3 +2600,124 @@ including V_instance/V_meta recalculation and convergence-criteria
 re-evaluation (criterion 5 re-examined given genuinely new work this
 iteration, per this iteration's explicit dispatch instruction not to
 mechanically carry forward iteration 16's YES verdict).
+
+## Iteration 18 — DIR-005 resolution + QN-029 (Skill-layer provider parameterization)
+
+**DIR-005 (dispatch-to-own-monitor-channel) resolved this iteration, not
+a QN-numbered task.** Mechanical process introspection (ppid-walk from
+this session's own pid, not tty-filtering, exactly per the directive's
+requested method) found this session's own bound monitor process
+(`cord`). An async dispatch (submit-then-poll) was sent to `cord`; the
+event was verifiably confirmed to land on the `pending-cord` channel
+(cursor advanced), but the dispatched task never left `queued` after
+~110s of polling. Direct inspection of the `manda-dispatch cross-session`
+adapter's own documentation confirmed it is a **stateless renderer with
+no side effects** — it prints one event to stdout and does not execute
+or act on the claim. No live `manda watch`-equivalent process was found
+attached to `cord`'s output (tty_nr=0, no listening socket found bound
+to a watcher, confirmed by direct `/proc` inspection). This is a more
+precise negative finding than iterations 13-16's: the *target-discovery*
+step (this directive's actual subject) now works correctly and
+mechanically; the remaining gap is one level deeper — no process
+currently watches a monitor's rendered output. `experiment/directives/
+README.md` was updated to reflect this narrowed framing. DIR-005 is
+archived with a `## Resolution` section per the standard lifecycle. No
+new task/provenance record was created for this — it is an environment-
+capability finding, not a Q-native deliverable, consistent with how
+DIR-001..004 were each handled.
+
+**QN-029 — the second capability increment to complete quay-github's
+`skill` declaration, this time at the Skill-invocation layer rather than
+the ABI/provider.yml layer.** Iteration 17 (QN-028) deliberately deferred
+`skill` because the two orchestration Skills (`quay:author`,
+`quay:execute`) were found, on inspection, to be hardcoded to
+`quay-native task <cmd>` CLI invocations rather than Core's own generic
+`quay task <cmd> --provider <id>` passthrough — meaning a config-only
+`skill: true` flip in `quay-github/provider.yml` would have been
+semantically empty (dishonest inflation of `reusability`), since invoking
+either Skill against a GitHub-backed task id would silently operate on
+`quay-native`'s own local store instead. QN-029 fixed this at the root:
+both Skills now take an optional `provider` argument (default `native`,
+preserving every prior iteration's own invocation and provenance record
+unchanged) and invoke `quay task <cmd> --provider <provider>` at every
+Method step.
+
+**Regression proof (Skill-invocation layer, not ABI layer — a new proof
+this iteration, since QN-024/QN-027/QN-028 only proved the ABI layer):**
+`quay task view/check <id> --provider native --json` was diffed against
+direct `quay-native task get/check <id> --json` output for a real task
+id — both files were 15 lines, `diff` reported **zero differences**
+(byte-identical), confirming no prior behavior regressed.
+
+**Live GitHub verification (the actual new transfer proof this task
+exists to produce):** `quay task view gh-3 --provider github --json` and
+`quay task check gh-3 --provider github --json` were run against real,
+live GitHub issue #3 in `yaleh/quay`, both succeeding with real data —
+confirming the parameterized `quay:author` Method's own steps correctly
+reach `quay-github` when told `provider: github`, not merely that Core's
+CLI supports the flag in isolation.
+
+`packages/quay-github/provider.yml`'s `skill: false` → `true`, with a
+`status_skill_map` (`todo: "quay:author"`, `ready: "quay:execute"`) and
+`action_buttons` entry identical in shape to native's own (`composePayload`
+in `packages/quay/src/action.js` reads these fields generically per
+Provider — confirmed by reading that file in full, zero Provider-specific
+branching exists there).
+
+**Full author→execute→done cycle driven this iteration, using native's
+own now-parameterized Skills (`provider: native` default), exactly as
+QN-028 was:** `quay-native task check QN-029 --json` confirmed
+`author->ready` gate `ok:true` (all four artifacts present); `task edit
+--status ready` drove `todo -> ready`; all 5 AC checkboxes were
+independently re-verified against real command output and checked;
+`quay-native task check QN-029 --json` confirmed `execute->done` gate
+`ok:true` (`5/5 AC checkboxes checked`); `task edit --status done` drove
+`ready -> done`. QN-029 is now `{author_by: native, execute_by: native,
+gate_by: native, status: done}` — a genuine, complete, non-adversarial
+provenance triple, the second consecutive one (after QN-028).
+
+**Full regression suite, run fresh this iteration:** all 12 pre-existing
+test files across `quay-native` (7), `quay-github` (4), and `quay` (1)
+passed, plus `quay-native/test/abi-symmetry.mjs` reporting "ALL FOUR
+SURFACES SYMMETRIC" — all green, zero regressions, before and after this
+iteration's changes.
+
+## σ computation — iteration 18
+
+QN-029 reaches `{native, native, native, done}` this iteration — the
+second consecutive new qualifying task (after QN-028, iteration 17):
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 21 / 28
+  = 0.75
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 23 / 28
+  = 0.8214
+```
+
+Total task count is now **28** (QN-001..QN-029, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration (QN-029, done).
+
+**σ (strict) = 0.75, up from 0.7407 at the end of iteration 17 (Δσ =
++0.0093).** QN-029 was a genuine, deliberately-scoped, non-adversarial
+capability increment — the second in as many iterations — driven to
+`done` within this iteration using native's own (now-parameterized)
+Skills.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 27 / 28
+              = 0.9643
+```
+
+Up from 0.9630 at the end of iteration 17 (one new natively-authored
+task, QN-029, added to both numerator and denominator).
+
+See `experiment/iterations/iteration-18.md` for the full evaluation,
+including V_instance/V_meta recalculation and convergence-criteria
+re-evaluation.
