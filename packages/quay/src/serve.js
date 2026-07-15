@@ -8,6 +8,7 @@ import http from "node:http";
 import path from "node:path";
 import { loadConfig, activeProvider } from "./config.js";
 import { connectProvider } from "./provider-client.js";
+import { resolveProviderEnv } from "./provider-env.js";
 
 function html(strings, ...values) {
   return strings.reduce((acc, s, i) => acc + s + (values[i] ?? ""), "");
@@ -29,7 +30,14 @@ export async function startServer({ port = 4173 } = {}) {
     command,
     args,
     cwd: providerDir,
-    env: { QUAY_NATIVE_TASKS_DIR: path.resolve(cfg.workspaceRoot, provider.tasks_dir ?? "tasks") },
+    // QN-045 (closes DESIGN.md §4.4's asymmetry): previously this built a
+    // single-key env object from `provider.tasks_dir` directly, ignoring
+    // `provider.env` entirely — the CLI/MCP legs resolved env the other way
+    // (via resolveProviderEnv(cfg, provider), reading only `provider.env`).
+    // A workspace config setting `tasks_dir` and `env` to different values
+    // would silently serve a different task store to the Web UI than to the
+    // CLI/MCP legs. Now all three bindings share the one resolution path.
+    env: resolveProviderEnv(cfg, provider),
   });
 
   const manifest = await client.manifest();

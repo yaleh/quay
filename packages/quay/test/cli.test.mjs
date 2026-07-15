@@ -340,17 +340,19 @@ async function main() {
   //    token by the normal parseFlags(rest) call, which would otherwise see
   //    "--port" as `sub` since `serve` has no subcommand token).
   //
-  //    Note: serve.js's startServer() builds the spawned quay-native mcp
-  //    child's QUAY_NATIVE_TASKS_DIR from the provider's `tasks_dir` field
-  //    directly (NOT from `env`/resolveProviderEnv() — see serve.js's own
-  //    startServer(), a distinct code path from withProvider()'s). So this
-  //    block uses its own dedicated workspace + config with `tasks_dir`
-  //    pointed straight at `envTasksDir` (the directory CLI-1 was actually
-  //    seeded into, above — NOT the top-level `tasksDir` mkdtemp, which
-  //    (per the comment on that variable further up) is never itself
-  //    seeded with tasks), matching serve.test.mjs's own (already-passing)
-  //    fixture convention, rather than reusing the env-relative fixture
-  //    used by tests 1-8 above.
+  //    Note (updated, QN-045): serve.js's startServer() now builds the
+  //    spawned quay-native mcp child's env via the SAME shared
+  //    resolveProviderEnv() (reading `provider.env`) that withProvider()
+  //    already used — previously it read `provider.tasks_dir` directly as a
+  //    distinct, narrower code path (DESIGN.md §4.4's asymmetry, closed this
+  //    iteration). So this block's config now sets BOTH `tasks_dir` (kept,
+  //    harmless, no longer load-bearing for this test) AND `env.
+  //    QUAY_NATIVE_TASKS_DIR` pointed straight at `envTasksDir` (the
+  //    directory CLI-1 was actually seeded into, above — NOT the top-level
+  //    `tasksDir` mkdtemp, which (per the comment on that variable further
+  //    up) is never itself seeded with tasks), matching serve.test.mjs's own
+  //    (already-passing, similarly updated) fixture convention, rather than
+  //    reusing the env-relative fixture used by tests 1-8 above.
   {
     const http = await import("node:http");
     const serveWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-serve-workspace-"));
@@ -364,6 +366,8 @@ async function main() {
         `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
         `    tasks_dir: "${envTasksDir.replaceAll("\\", "\\\\")}"`,
         `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${envTasksDir.replaceAll("\\", "\\\\")}"`,
         "",
       ].join("\n")
     );

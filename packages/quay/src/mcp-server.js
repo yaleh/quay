@@ -46,23 +46,13 @@ import path from "node:path";
 import { loadConfig, activeProvider } from "./config.js";
 import { connectProvider } from "./provider-client.js";
 import { composePayload, deliverTrigger } from "./action.js";
+import { resolveProviderEnv } from "./provider-env.js";
 
-// Resolve a provider's declared `env` map against the workspace root
-// (identical logic to bin/quay.js's own resolveProviderEnv() — duplicated
-// here rather than imported, since bin/quay.js has no exported functions
-// today; kept intentionally tiny and byte-identical so a future refactor
-// extracting it into a shared module is a pure move, not a behavior change).
-function resolveProviderEnv(cfg, provider) {
-  const env = {};
-  for (const [key, value] of Object.entries(provider.env ?? {})) {
-    if (typeof value === "string" && (value.startsWith("./") || value.startsWith("../"))) {
-      env[key] = path.resolve(cfg.workspaceRoot, value);
-    } else {
-      env[key] = value;
-    }
-  }
-  return env;
-}
+// resolveProviderEnv is now imported from ./provider-env.js (QN-045): this
+// file, bin/quay.js, and serve.js all share the single implementation there
+// — the "duplicated here rather than imported" note this comment previously
+// carried is resolved; see provider-env.js's own header for why (DESIGN.md
+// §4.4's asymmetry).
 
 async function connectToProvider(cfg, providerId) {
   const provider = activeProvider(cfg, providerId);

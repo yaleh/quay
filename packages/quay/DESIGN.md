@@ -318,18 +318,32 @@ this test fail rather than pass silently, as long as that capability falls
 within §9's own listed set -- the same enforcement guarantee `abi-symmetry.mjs`
 already provides one layer down, at the Provider level.
 
-### 4.4 A discovered, pre-existing asymmetry (named, not fixed here)
+### 4.4 A discovered, pre-existing asymmetry (named at iteration 33, fixed at iteration 34)
 
 While building the test above, an honest discrepancy surfaced in how the
 three bindings' own launcher code resolves a Provider's task-store
-location: `serve.js`'s `startServer()` reads `provider.tasks_dir` (a
+location: `serve.js`'s `startServer()` read `provider.tasks_dir` (a
 top-level `.quay/config.yml` field) directly, while `bin/quay.js`'s CLI
-dispatch and `mcp-server.js` both resolve it via
+dispatch and `mcp-server.js` both resolved it via
 `resolveProviderEnv(cfg, provider)`, which reads only `provider.env`'s map
--- **not** the top-level `tasks_dir` field. A workspace config that sets
-only one of the two conventions will silently serve a *different* task
-store to the Web UI than to the CLI/MCP legs. This is a real,
+-- **not** the top-level `tasks_dir` field. A workspace config that set
+only one of the two conventions would silently serve a *different* task
+store to the Web UI than to the CLI/MCP legs. This was a real,
 pre-existing config-resolution asymmetry, distinct from the
 capability-set symmetry this section documents and DIR-010 asked to be
-verified -- it is not something DIR-010 asked to be fixed, so it was not
-silently patched here; it is named as a gap for a future directive.
+verified -- it was not something DIR-010 asked to be fixed, so it was not
+silently patched at iteration 33; it was named there as a gap for a
+future directive/task.
+
+**Update (iteration 34, QN-045):** this gap has since been closed. The
+duplicated `resolveProviderEnv(cfg, provider)` logic (previously
+byte-identical in `bin/quay.js` and `mcp-server.js`) was extracted into a
+single shared module, `packages/quay/src/provider-env.js`, and
+`serve.js`'s `startServer()` was updated to call the same shared function
+instead of reading `provider.tasks_dir` directly. All three Core bindings
+now resolve a Provider's task-store location the same way. A dedicated
+adversarial regression test,
+`packages/quay/test/provider-env-symmetry.test.mjs`, proves this: it sets
+`tasks_dir` to an empty decoy directory and `env.QUAY_NATIVE_TASKS_DIR` to
+the real, seeded directory, and confirms the Web UI serves from the
+`env`-named directory, matching the CLI leg, not the decoy.

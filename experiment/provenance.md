@@ -4452,3 +4452,108 @@ literal-numeric pass), which the audit independently judged to remain
 the correct call on its own merits (a genuine double-factor movement of
 this evidentiary weight should not be waved through as plateau noise,
 regardless of its exact historical rank).
+
+## Records (as of end of iteration 34)
+
+Iteration 34's mandatory first step (`ls experiment/directives/pending/`)
+found exactly one pending directive, DIR-011. Unlike DIR-007/008/009/010,
+DIR-011's findings and requested action (updating
+`parent-injection-preamble.md`) are almost entirely about the `manda`
+Claude Code plugin's own `Agent`/cap-request subagent-dispatch primitive,
+targeting a file that lives in a completely separate repository
+(`/home/yale/work/manda`), outside this experiment's own git tree and
+outside the protocol's deliverable scope (quay-native/quay Core/
+quay-github). That portion is NOT applied from this session — see
+`experiment/directives/archive/DIR-011-*.md`'s own `## Resolution`
+section for the full scope-triage reasoning. No file outside
+`/home/yale/work/quay` was touched, and no V-factor is credited for that
+portion.
+
+DIR-011's action 1 asked this iteration to check whether the bare
+`mcp__manda__Agent` tool name (the stale name DIR-011 found) appears
+anywhere in an in-repo file. A direct grep
+(`grep -rn "mcp__manda__Agent" experiment/ packages/ docs/`) found this
+string appears only inside DIR-011's own directive file (describing/
+quoting it) — no in-repo Skill, iteration-prompt, or source file uses
+this bare tool name. So point 1's in-repo scope check found nothing to
+correct.
+
+Per this iteration's instructions, the primary objective became this
+scope-triage itself plus self-selected additional value-producing work:
+QN-045, closing the config-resolution asymmetry that iteration 33/
+QN-044 (DIR-010) explicitly named in `packages/quay/DESIGN.md` §4.4 but,
+correctly per that task's own scope, did not fix. `src/serve.js`'s
+`startServer()` previously built its spawned `quay-native mcp` child's
+environment from `provider.tasks_dir` directly, while `bin/quay.js`'s
+`withProvider()` and `src/mcp-server.js`'s `connectToProvider()` both
+built theirs via a shared `resolveProviderEnv(cfg, provider)` reading
+only `provider.env`. QN-045 extracted the shared logic into a new
+module, `packages/quay/src/provider-env.js`, and updated all three Core
+bindings to call it, closing the asymmetry. A new adversarial regression
+test (`packages/quay/test/provider-env-symmetry.test.mjs`) proves the
+Web UI and CLI legs now resolve to the same task-store directory even
+when `tasks_dir` and `env.QUAY_NATIVE_TASKS_DIR` point at different
+directories in the config. Two pre-existing fixtures
+(`serve.test.mjs`, `cli.test.mjs` test 9) that had relied on `tasks_dir`
+alone (with no `env` block — the same latent gap this task closes) were
+updated to also set `env.QUAY_NATIVE_TASKS_DIR`, matching the real
+repo's own `.quay/config.yml` convention; both re-confirmed passing
+after the fix.
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-045 | Fix Core config-resolution asymmetry (tasks_dir vs provider.env) | **native** | **native** | **native** | **done** |
+
+**Honesty note on QN-045's lifecycle execution.** As with every task
+since the seed's author/execute retirement, "native" here means the
+`quay-native` CLI's mechanical `task check` gate was genuinely invoked
+at both the author→ready and execute→done transitions (both returned
+`ok:true`, confirmed via direct command output, not estimated), and the
+task file itself was authored and driven through its lifecycle using
+`quay-native task edit`/`task check` rather than hand-edited frontmatter
+status. It does NOT mean an independent, fresh-context subagent
+performed the authoring or execution work in isolation from this
+top-level session — this environment still has no verified
+subagent-dispatch primitive (confirmed via ToolSearch each iteration, per
+G6), so "native" continues to describe the degraded-fallback mode
+already documented for every prior "native" entry since iteration ~15:
+the same top-level session performs the work directly, then invokes the
+real `quay-native` gate mechanically and honestly reports its actual
+JSON output.
+
+**Honesty note on this task's origin.** QN-045 is genuinely
+self-selected work, not directive-driven and not a task explicitly
+named as "next iteration's work" in iteration 33's own report (which
+listed DESIGN.md §4.4's asymmetry as one of several candidate sources,
+not a commitment). It was chosen because DIR-011's own in-repo scope
+check (point 1) came back empty, per this iteration's explicit
+conditional instruction to self-select additional value-producing work
+in that case. This determination — that DIR-011 is out of scope and
+that QN-045 is the resulting self-selected substitute — is this
+iteration's own judgment, not an assertion about what any human
+operator intended.
+
+## σ computation — iteration 34
+
+Total allocated task IDs: QN-001 through QN-045, minus QN-018 (never
+allocated — confirmed via `ls tasks/QN-*.md | wc -l` = 44 files).
+
+- σ (strict reading: all of author_by/execute_by/gate_by = native AND
+  status = done) = 37 / 44 = **0.8409** (up from 36/43 = 0.8372 at the
+  end of iteration 33; Δσ = +0.0037 — QN-045 is a new native-triple,
+  done task, and the denominator also grew by one).
+- σ (inclusive reading: strict set plus QN-003/QN-004's
+  gate-check-only re-verification cases) = 39 / 44 = **0.8864**.
+- σ_author_only (diagnostic: author_by = native regardless of
+  execute_by/gate_by) = 43 / 44 = **0.9773** (unchanged in numerator
+  composition from iteration 33's 42/43 — QN-045 adds one more
+  native-authored task to both numerator and denominator).
+
+Δσ (strict) = +0.0037 is consistent with the recent per-iteration norm
+of small, monotonic σ growth driven by an increasingly seed-free task
+population and a slowly growing denominator; it is not a step change and
+does not, on its own, bear on any convergence criterion beyond what §10
+below evaluates directly.
+
+DIR-011 has been archived to `experiment/directives/archive/` with a
+full `## Resolution` section per this iteration's instructions.

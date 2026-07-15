@@ -6,6 +6,7 @@ import path from "node:path";
 import { loadConfig, activeProvider } from "../src/config.js";
 import { connectProvider } from "../src/provider-client.js";
 import { composePayload, deliverTrigger } from "../src/action.js";
+import { resolveProviderEnv } from "../src/provider-env.js";
 
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
@@ -32,23 +33,9 @@ function parseFlags(argv) {
   return { flags, positional };
 }
 
-// Resolve a provider's declared `env` map (proposal §10's `.quay/config.yml`
-// shape) against the workspace root. Values that look like a relative path
-// (start with "./" or "../") are resolved to absolute paths; anything else
-// (e.g. "owner/repo") is passed through verbatim. This is what makes adding
-// a second, heterogeneous Provider (github) require zero changes to this
-// file beyond config — the env-building logic is provider-agnostic.
-function resolveProviderEnv(cfg, provider) {
-  const env = {};
-  for (const [key, value] of Object.entries(provider.env ?? {})) {
-    if (typeof value === "string" && (value.startsWith("./") || value.startsWith("../"))) {
-      env[key] = path.resolve(cfg.workspaceRoot, value);
-    } else {
-      env[key] = value;
-    }
-  }
-  return env;
-}
+// resolveProviderEnv is now imported from ../src/provider-env.js (QN-045):
+// this file, src/mcp-server.js, and src/serve.js all share the single
+// implementation there, closing the DESIGN.md §4.4 asymmetry.
 
 async function withProvider(fn, { providerId } = {}) {
   const cfg = loadConfig();

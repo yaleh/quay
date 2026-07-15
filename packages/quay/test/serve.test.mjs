@@ -92,11 +92,16 @@ async function main() {
 
   // Write a throwaway .quay/config.yml pointing at the isolated tasks dir,
   // since serve.js's startServer() reads config via loadConfig()/
-  // activeProvider() (config.js), not an env var directly.
+  // activeProvider() (config.js), not an env var directly. QN-045: startServer()
+  // now resolves the spawned quay-native mcp child's env via the SAME shared
+  // resolveProviderEnv() (provider.env) that the CLI/MCP legs already used —
+  // `tasks_dir` alone is no longer sufficient (closing DESIGN.md §4.4's
+  // asymmetry), so this fixture sets both, matching the real repo's own
+  // .quay/config.yml convention.
   fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
   fs.writeFileSync(
     path.join(workspaceRoot, ".quay", "config.yml"),
-    `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n`
+    `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"\n`
   );
 
   const port = 41730 + (process.pid % 1000);
