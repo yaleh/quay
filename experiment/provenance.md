@@ -7349,3 +7349,152 @@ exhaustive precedent search establishing that the eleven-consecutive-
 clean-PASS milestone does not license a unilateral `validation` bump —
 is not forced into a V-factor axis the evidence does not support, per the
 standing discipline (iterations 25, 28, 29, 37-47).
+
+## Iteration 49 — concrete re-attempt on GitHub issues #3/#4 through the ABI; real dispatch probe of manda `agent.spawn`
+
+### Preconditions checked
+
+`experiment/directives/pending/` confirmed **empty** via `ls` (mandatory
+first step). `git status --short` confirmed clean modulo the one
+pre-existing, deliberately-untouched `docs/proposal/baime-lite-driving-
+external-projects.md`. `ls tasks/QN-*.md | wc -l` confirmed **56**
+(unchanged from iteration 48's final tally). Full 25-file regression suite
+and `abi-symmetry.mjs` both confirmed passing. `docs/proposal/quay-
+bootstrap-experiment.md` (233 lines, gitignored, read directly from disk),
+`experiment/ITERATION-PROMPTS.md` (489 lines), and the tail of this file
+all read fresh this session.
+
+`experiment/audits/iteration-48-independent-adjudicate.md` (already
+present on disk, produced by the top-level orchestrator's own separate
+process) was read in full. Verdict: clean **PASS**, extending the streak
+(37-47) to **twelve** consecutive iterations (37-48). This audit's own
+text is the direct source of this iteration's explicit two-part mandate:
+(a) concretely re-attempt driving GitHub issues #3/#4 through the ABI, not
+merely re-cite the QN-024 scope blocker; (b) properly re-probe the manda
+dispatch primitive via ToolSearch, not a bare curl to `/`.
+
+### Observe
+
+**Mandate (a).** Read both issues fresh (`gh issue view {3,4}`, full body
+text). Localized issue #3's blocker to a specific line:
+`packages/quay-github/src/mcp-server.js:95`'s `task_write` `inputSchema`
+is deliberately `{id, status}` only (QN-024's scope decision) — issue #3
+asks to add `extra` to that schema, which is precisely the scope QN-024
+declined, not a bug within it. For issue #4, live-verified all 3 AC items
+directly: `quay-native task check QN-001` with no env var (resolves to
+repo-root `tasks/`, `ok:true`) and with a bogus env var (`ok:false,
+"not found"`, proving the var wins) both pass live today; full regression
+suite passes (25/25). The underlying fix is genuinely implemented and
+working. Then tested whether the GitHub Provider's own status-only
+`data.write` could close the drift: `quay-github task check gh-4 --json`
+returns `gate: "author->ready", ok: false, acChecked: 0, acTotal: 3,
+reason: "0/3 AC checkboxes checked"` — the gate reads AC state from
+`issue.body`, which is read-only under QN-024's scope. The identical
+pattern holds for issue #3 (`gh-3`): `gate: "execute->done", ok: false,
+acChecked: 0, acTotal: 4`. **Conclusion, now gate-call-verified rather
+than scope-inferred**: no part of either issue is satisfiable under the
+current status-only restriction — the blocker is the gate's exclusive
+reliance on body-text AC checkboxes, and body writes remain out of scope.
+
+**Mandate (b).** `ps aux`/`ss -tlnp` confirmed `manda serve` genuinely
+live on port 28912 (the standing `curl` 404 is a normal "no route at `/`"
+response, not evidence of an inactive daemon — a distinction the bare
+curl check never established). `ToolSearch("dispatch subagent spawn task
+manda")` surfaced fully loadable schemas for `mcp__plugin_manda_manda__
+Agent`, `Dispatch`, `DispatchStatus/Settle/Progress/Cancel`,
+`TaskCreate/Get/Update`. Actually invoked `Agent` with a real probe
+prompt: result was `MCP error -32603: timeout waiting for cap
+"agent.spawn" result after 30s` — a genuine MCP round-trip and clean
+protocol-level timeout, not a tool-unavailable error. Read `.manda/
+config.yml`: `agent.spawn` requests route to `cap-requests-{name}`,
+serviced by a parent monitor session that must be bound to that specific
+channel name. `ps aux | grep manda-tools` showed all three running
+`manda-tools mcp --self` processes have an **empty** `--self` value — the
+`{name}` template substitution never happened for this session, so the
+channel never resolves to a listener. **New, concrete finding**: the
+dispatch primitive exists, its schema loads, and a real MCP call executes
+— it is a wiring/naming gap (unsubstituted `--self`), not an absence of
+the mechanism, upgrading the standing "no verified dispatch primitive"
+claim (since iteration ~15) to a precise mechanistic diagnosis. This does
+not change the G3 division of labor: audit dispatch remains exclusively
+the top-level orchestrator's own separate process.
+
+**Conclusion:** both mandate items were pursued concretely this iteration
+and both correctly conclude "no new execution opportunity here" — but on
+substantially stronger, more specific evidence (live gate-call failure
+reasons; an actual dispatch round-trip and its precise failure mode) than
+the abstract scope-citation and bare-curl checks of iterations 41-48.
+
+### Strategy
+
+No new tractable V_instance or V_meta opportunity found. Consistent with
+the standing discipline (iterations 19, 28, 29, 37-48), this iteration
+does not force a new task into existence. No `tasks/QN-0NN.md` was
+created.
+
+### Execution
+
+No code, Skill, or gate change was made. Live diagnostic commands only:
+`gh issue view` (×2), `quay-native task check` (×2, env-var on/off),
+`quay-github task get gh-4`, `quay-github task check` (×2, gh-3/gh-4),
+`mcp__plugin_manda_manda__Agent` (×1 probe call), `ps aux`/`ss -tlnp`
+process inspection, `.manda/config.yml` read. None of these are writes;
+no task's status or provenance triple changed; no GitHub issue label or
+state changed (re-confirmed via a second `gh issue view` read after the
+probes, unchanged). Full regression suite (25/25) and `abi-symmetry.mjs`
+("ALL FOUR SURFACES SYMMETRIC") re-confirmed at the end of the iteration.
+`git diff --stat` against the working tree (before this report/provenance
+commit): empty for all source files.
+
+### σ computation — iteration 49
+
+No task's provenance triple changed; no task was created or completed.
+σ is unchanged:
+
+```
+σ (strict reading) = 49 / 56 = 0.8750   (unchanged, Δσ = 0)
+```
+
+`ls tasks/QN-*.md | wc -l` independently re-confirmed = **56**.
+
+### V-factor attribution — iteration 49 (both mandates concretely pursued; held flat)
+
+- **skeleton, abi_symmetry, gate_correctness, skill_convergence**: no
+  source file touched this iteration (`git status --short` confirms). The
+  live `task check` gate calls against gh-3/gh-4 are additional
+  *confirmation* evidence the existing gate logic reports accurate
+  reasons, not new gate content. All four held flat: skeleton 0.70,
+  abi_symmetry 0.96, gate_correctness 0.76, skill_convergence 0.96.
+- **completeness: 0.74 (unchanged).** No Skill/gate/decomposition-rule
+  content changed. Not implicated.
+- **effectiveness: 0.26 (unchanged).** No code executed via `quay:
+  author`/`quay:execute` to build a new feature this iteration (diagnostic
+  gate/dispatch probes only, not a marginal increment). Now **29
+  consecutive iterations (21-48, and now 49)**.
+- **reusability: 0.79 (unchanged).** This iteration's gate-call-level
+  evidence strengthens, but does not change, iteration 45's conclusion
+  that the transfer target cannot absorb new capability without a scope
+  change QN-024 deliberately declined. Held flat for the **twenty-fourth
+  consecutive iteration (26-49)**.
+- **validation: 0.64 (unchanged).** The dispatch-primitive finding
+  (mandate b) is new evidence about *how* the top-level orchestrator's own
+  audits are produced, not a substitute for one; no audit exists yet for
+  this iteration's own work. The twelve-consecutive-PASS streak does not
+  change the precedent established at iterations 41-48 (validation moves
+  only after a specific iteration's own out-of-band audit, never on streak
+  length alone). Held flat at **0.64**.
+
+```
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = 0.4903  (unchanged)
+V_meta      = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+ΔV_instance = ΔV_meta = **0.0000**. This iteration's genuine
+contribution — a gate-call-level localization of exactly why GitHub
+issues #3 and #4 are both blocked (not abstract scope-citation), and a
+real, executed probe of the manda `agent.spawn` dispatch primitive
+upgrading the standing "no verified dispatch primitive" finding to a
+precise mechanistic diagnosis (reachable, schema loads, real MCP
+round-trip, unserviced due to an unsubstituted `--self` label) — is not
+forced into a V-factor axis the evidence does not support, per the
+standing discipline (iterations 25, 28, 29, 37-48).
