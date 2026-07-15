@@ -3161,3 +3161,139 @@ Diagnostic sub-metric:
 
 Up from 0.9667 at the end of iteration 21 (one new natively-authored task,
 QN-032, added to both numerator and denominator).
+
+## Iteration 23 — QN-033 (bin/quay.js CLI dispatch layer gap closure)
+
+**Fresh search performed at the start of iteration 23**, per iteration 22's
+own named next-step: "check whether any residual skeleton-chain
+sub-component remains unsearched (e.g., `bin/quay-native.js`'s own CLI
+argv-parsing entrypoint as distinct from the functions it calls, or
+`bin/quay.js`'s own top-level dispatch/error-handling `main().catch(...)`
+block)." Both named candidates were checked directly (grepping every
+`*.test.mjs` file across all three packages for any reference to either
+`bin/quay-native.js` or `bin/quay.js`):
+
+- `bin/quay-native.js` (the Provider CLI) was found to already have
+  extensive, repeated subprocess-spawn coverage via `execFileSync`/
+  `execFileAsync` across `abi-symmetry.mjs`, `create-validation.test.mjs`,
+  `serve.test.mjs`, and `task-check.test.mjs` — no gap here.
+- `bin/quay.js` (the Core CLI) was confirmed to have **zero** test coverage
+  anywhere in the repo — no test file spawns it as a subprocess. Every test
+  that touches Core's own logic (`serve.test.mjs`, `task-check.test.mjs`)
+  imports Core's `src/*.js` modules directly, never the binary itself. This
+  is a genuine, non-manufactured gap: the CLI dispatch layer (`parseFlags()`,
+  the `cmd`/`sub` branch table, `resolveProviderEnv()`, `withProvider()`, and
+  the top-level `main().catch(...)` handler) was entirely unverified by any
+  automated, re-runnable test.
+
+QN-033 was authored and driven to `done` this iteration: a new test file
+(`packages/quay/test/cli.test.mjs`) spawns the real `bin/quay.js` binary
+(not its `src/*.js` internals) against a fully isolated temporary workspace
+with its own real `.quay/config.yml` (using a `./`-relative
+`QUAY_NATIVE_TASKS_DIR` env value, mirroring the real repo's own config
+shape — a successful `task list` against the seeded tasks is itself live
+proof `resolveProviderEnv()`'s relative-path resolution branch works
+correctly, not merely assumed). Covers: `task list` (JSON array + non-JSON
+tab-separated fallback), `task view` (happy path + "no such task" error),
+`task edit --status` (happy path + missing-required-flag error), `task
+check` (both ok:true/ok:false, confirming the CLI's own
+`process.exitCode = result.ok ? 0 : 1` line — distinct from
+`task-check.test.mjs`, which calls `provider-client.js` directly and never
+exercises this CLI-level branch), `action list` (positive + negative
+whenStatus-filter control), `action run` (composePayload/deliverTrigger
+reached, JSON output fields confirmed), and an unknown top-level command
+(usage fallback + exit 1) — 8 distinct CLI invocations, ~20 assertions
+total, all against the real, unmodified `bin/quay.js`. The break/restore
+cycle inverted the `task check` gate's own exit-code ternary
+(`result.ok ? 0 : 1` -> `result.ok ? 1 : 0`) and confirmed exactly 2 live
+FAILs (the two exit-code assertions on the passing/failing task check
+cases); restoring from a backup and diffing confirmed byte-identical
+restoration (`git status --short`/`git diff --stat` on `bin/quay.js` showed
+zero diff throughout), then re-running produced a full green run again. No
+source-code change to `bin/quay.js` was needed — this task, like QN-032, is
+a pure test-addition. Full regression suite (17 files: 16 pre-existing +
+the new `cli.test.mjs`) re-run fresh: all exit 0, zero regressions.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 23) |
+|---|---|---|---|---|---|
+| QN-033 | Regression test for bin/quay.js's own CLI dispatch layer | **native** | **native** | **native** | **done** |
+
+Driven through the full `todo -> ready -> done` lifecycle this iteration,
+natively, in the same same-session degraded-fallback mode established since
+iteration 1. `quay-native task check QN-033 --json` confirmed `author->ready`
+gate `ok:true` before `task edit --status ready`; all 4 AC checkboxes were
+independently re-verified against real command output (test exit code, live
+break/restore cycle output, full regression-suite re-run, `diff` restoration
+check) before being checked; `quay-native task check QN-033 --json` then
+confirmed `execute->done` gate `ok:true` (4/4 AC checkboxes checked, plus 4
+DoD checkboxes) before `task edit --status done`.
+
+**Full regression suite, run fresh this iteration:** 17 test files total (9
+pre-existing quay-native + 4 quay-github + 3 pre-existing quay +
+`cli.test.mjs`, new this iteration), all exit 0. Zero regressions.
+
+**Reusability re-check (5th consecutive iteration, 19-23):** `gh issue list
+--repo yaleh/quay --json number,title,body,labels --limit 20` re-run live —
+still exactly 2 primitive issues (#3, #4), byte-identical to iterations
+19-22's own findings. No organic compound/epic GitHub backlog growth has
+occurred across 5 consecutive iterations now.
+
+**`effectiveness` — deliberately HELD FLAT this iteration, per iteration
+22's own standing watch-item and this iteration's explicit instructions.**
+No new timing comparison was attempted. The prior two increments
+(iteration 21: +0.04; iteration 22: +0.02) were both awarded for
+progressively fairer *measurement methodology* (narrower scope-matching
+against the stage-0 comparator), not for an actual demonstrated speedup —
+both iterations' own raw numbers showed native as slightly slower than the
+stage-0 seed comparator. Continuing to award credit for "yet another fair
+comparison" without the substantive result ever crossing into a real
+speedup would let small honest increments compound into an unwarranted
+V_meta trajectory disconnected from what the evidence actually shows. This
+iteration did not attempt a further timing comparison at all (QN-033's own
+task, while comparably scoped to QN-006/QN-032, was not separately timed
+for this purpose — deliberately, to avoid manufacturing a comparison whose
+only purpose would be to decide whether to award or withhold another small
+increment). `effectiveness` therefore holds at **0.26**, unchanged from
+iteration 22, pending either (a) a genuinely different kind of evidence —
+e.g., a marginal increment where native session context/tooling measurably
+speeds up a MORE COMPLEX task, not another comparably-scoped simple one — or
+(b) an explicit acknowledgment that this factor has reached its own honest
+ceiling under the current comparison methodology and stage-0 baseline.
+
+## σ computation — iteration 23
+
+QN-033 reaches `{native, native, native, done}` this iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 25 / 32
+  = 0.7813
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 27 / 32
+  = 0.8438
+```
+
+Total task count is now **32** (QN-001..QN-033, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration (QN-033, done).
+
+**σ (strict) = 0.7813, up from 0.7742 at the end of iteration 22 (Δσ =
++0.0071).** QN-033 is a genuine, deliberately-scoped, non-adversarial
+V_instance-side capability increment — the fourth consecutive iteration
+with a nonzero σ movement (20: gate_correctness; 21: skeleton/serve+action;
+22: skeleton/config; 23: skeleton/CLI dispatch layer), and the third
+consecutive iteration specifically on the `skeleton` sub-axis (21, 22, 23),
+now covering CLI dispatch on both sides (Provider CLI already covered;
+Core CLI now covered too).
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 31 / 32
+              = 0.9688
+```
+
+Up from 0.9677 at the end of iteration 22 (one new natively-authored task,
+QN-033, added to both numerator and denominator).
