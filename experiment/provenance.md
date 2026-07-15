@@ -7203,3 +7203,149 @@ precedent search establishing that the ten-consecutive-clean-PASS
 milestone does not license a unilateral `validation` bump at this layer
 — is not forced into a V-factor axis the evidence does not support, per
 the standing discipline (iterations 25, 28, 29, 37-46).
+
+## Iteration 48 — eleven-consecutive-PASS audit read; fresh-angle sweep (no new tractable increment)
+
+### Preconditions checked
+
+`experiment/directives/pending/` confirmed **empty** via `ls` (mandatory
+first step). `git status --short` confirmed clean modulo the one
+pre-existing, deliberately-untouched `docs/proposal/baime-lite-driving-
+external-projects.md`. `ls tasks/QN-*.md | wc -l` confirmed **56**
+(unchanged from iteration 47's final tally). Full 25-file regression
+suite (run twice to probe flakiness — see below) and `abi-symmetry.mjs`
+both confirmed passing at the start of this iteration. `gh auth status`
+confirmed authenticated as `yaleh`, scopes `repo`+`workflow`.
+`docs/proposal/quay-bootstrap-experiment.md` (233 lines, gitignored,
+read directly from disk regardless), `experiment/ITERATION-PROMPTS.md`
+(489 lines, read fresh in full this session), and the tail of this file
+all read fresh this session.
+
+`experiment/audits/iteration-47-independent-adjudicate.md` (227 lines)
+was found already present on disk (produced by the top-level
+orchestrator's own separate process) and read in full. Verdict: clean
+**PASS**, extending the clean-PASS streak (37-46) to **eleven**
+consecutive iterations (37-47). This session did not dispatch or attempt
+to obtain this audit itself.
+
+`curl -s http://localhost:28912` returned `404 page not found` at the
+start of this session — noted honestly; this iteration's own work did
+not require dispatch.
+
+### Observe
+
+**Three genuinely new angles pursued this iteration** (per the standing
+instruction not to assume iteration 47's search is exhaustive forever):
+
+1. **Test timing/flakiness.** Timed all 25 `*.test.mjs` files
+   individually; slowest is `packages/quay/test/cli.test.mjs` at ~11.5s,
+   explained by legitimate real-subprocess-spawn integration-test
+   overhead (`spawn()` used to invoke the actual CLI binary per test
+   case — the file's designed role as the ABI-symmetry golden harness).
+   Ran the full suite twice back-to-back: both runs report identical
+   `tests 25, pass 25, fail 0` with durations within ~100ms of each
+   other — no flaky or order-dependent test found.
+2. **`experiment/ITERATION-PROMPTS.md` staleness.** Full fresh read of
+   all 489 lines: no reference to a long-superseded project state found;
+   every section either explicitly staged or still literally applicable.
+   No `experiment/results.md`-equivalent file exists in this repo to
+   check separately (`ls experiment/*.md` = `ITERATION-PROMPTS.md`,
+   `README.md`, `provenance.md` only).
+3. **Recent-commit review.** `git log --oneline -30` and `git log
+   --oneline --all -- packages/` show the expected alternating
+   report/audit commit pattern with no out-of-sequence, reverted, or
+   unexplained source-touching commit since iteration 44's QN-055 fix.
+
+**Routine re-check (not re-derived from scratch):** `gh issue list
+--repo yaleh/quay --json number,title,labels,state,updatedAt` shows
+issues #3/#4 unchanged from iterations 41-47 (neither `updatedAt` fresher
+than iteration 47's read); `gh pr list --state all` returns empty.
+`quay-native task list --json` (non-`done` filter) shows the same 4
+deliberately-unsatisfiable tasks. `grep -rn "TODO|FIXME|XXX"` across
+`packages/*/src/*.js`, `packages/*/bin/*.js`, `packages/*/test/*.mjs`:
+only literal test-fixture variable names, no genuine debt markers.
+QN-057 durable fix independently re-confirmed holding (all four Status
+lines still read the relative phrasing, two iterations after
+introduction). Eleven-consecutive-PASS streak independently re-verified
+via `grep -o "Verdict: [A-Z]*"` on all eleven audit files.
+
+**Conclusion:** consistent with iterations 19, 41-47, no genuine,
+executable `effectiveness`- or `reusability`-moving opportunity exists
+this iteration; all three genuinely new angles pursued this iteration
+also came back clean.
+
+### Strategy
+
+No new tractable V_instance or V_meta opportunity found, across both
+routine re-checks and three genuinely new angles. Consistent with the
+standing discipline (iterations 19, 28, 29, 37-47), this iteration does
+not force a new task into existence. No `tasks/QN-0NN.md` was created.
+
+### Execution
+
+No code, Skill, or gate change was made. Full regression suite run twice
+(no flakiness); `abi-symmetry.mjs` re-run: "ALL FOUR SURFACES
+SYMMETRIC." `git diff --stat` against the working tree (before this
+report/provenance commit): empty for all source files.
+
+### σ computation — iteration 48
+
+No task's provenance triple changed; no task was created or completed.
+σ is unchanged:
+
+```
+σ (strict reading) = 49 / 56 = 0.8750   (unchanged, Δσ = 0)
+```
+
+`ls tasks/QN-*.md | wc -l` independently re-confirmed = **56**.
+
+### V-factor attribution — iteration 48 (precedent search on the eleven-streak milestone; held flat)
+
+Per the standing discipline, this iteration's central open question —
+does the milestone crossing from ten to **eleven** consecutive
+clean-PASS audits change anything — was investigated by an exhaustive
+search: every one of the 8 occurrences of `"validation: 0.64"` in this
+file (iterations 41-47, each read in context this session) uses
+identical reasoning, credited only after the out-of-band audit for that
+iteration's own work occurs, via the top-level orchestrator's separate
+`Agent` dispatch (G3), and the reasoning does not depend on the specific
+streak length — so crossing the ten-to-eleven milestone does not itself
+change the applicable precedent. A structurally different candidate
+factor was reconsidered and ruled out again: `completeness`'s §5.2
+definition ("Methodology... fully documented and self-contained") does
+not reference audits at all, so it cannot absorb this evidence either.
+
+- **skeleton, abi_symmetry, gate_correctness, skill_convergence**: no
+  source file touched this iteration (`git status --short` confirms).
+  All four held flat: skeleton 0.70, abi_symmetry 0.96, gate_correctness
+  0.76, skill_convergence 0.96.
+- **completeness: 0.74 (unchanged).** No Skill/gate/decomposition-rule
+  content changed. Not implicated.
+- **effectiveness: 0.26 (unchanged).** No code executed via `quay:
+  author`/`quay:execute` this iteration; no new marginal-increment timing
+  evidence. Now **28 consecutive iterations (21-47, and now 48)**.
+- **reusability: 0.79 (unchanged).** Routine re-check and the
+  recent-commit-review angle both found no issue state change and no new
+  organic task. Held flat for the **twenty-third consecutive iteration
+  (26-48)**.
+- **validation: 0.64 (unchanged).** Per the precedent search above,
+  correctly held flat — the milestone jump to eleven consecutive
+  clean-PASS audits is noted, not unilaterally acted upon by this
+  session. That determination remains reserved for the top-level
+  orchestrator.
+
+```
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = 0.4903  (unchanged)
+V_meta      = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+ΔV_instance = ΔV_meta = **0.0000**. This iteration's genuine
+contribution — three genuinely new-angle investigations (test
+timing/flakiness across all 25 test files, a full fresh read of
+`ITERATION-PROMPTS.md` for structural staleness, and a recent-commit
+history review for introduced inconsistency), each independently
+confirming no new work exists, alongside the routine re-checks and an
+exhaustive precedent search establishing that the eleven-consecutive-
+clean-PASS milestone does not license a unilateral `validation` bump —
+is not forced into a V-factor axis the evidence does not support, per the
+standing discipline (iterations 25, 28, 29, 37-47).
