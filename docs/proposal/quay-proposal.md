@@ -73,7 +73,7 @@ The graveyard of universal issue-tracker abstractions is large; they die on the 
 | **capability** | A discrete face a Provider may implement (e.g. `task.write`, `action.run`). The Core negotiates capabilities and degrades gracefully. |
 | **task** | The canonical work-item (a markdown doc + frontmatter in the view-model). The domain object. |
 | **run** | An execution instance — a dispatched agentic run over a task (e.g. via manda). **Never** call a dispatch a "task"; reserve "task" for the work-item. |
-| **action button** | A provider-declared, UI-anchored trigger. Declared in the manifest (with `whenStatus`); executed via the `action_run` MCP tool. |
+| **action button** | A preset trigger message the host sends into a Claude Code session (`{label, payload, whenStatus?}`). A host-owned edge, not a Provider ABI capability (§6.4). |
 | **Skill** | A Claude Code Skill (`SKILL.md`). *Not renamed* — it literally is a Claude Code Skill. Shipped by a Provider under the `quay:*` namespace. |
 | **lane** | A coarse label for "which Skill set applies" (authoring / execution / exploration). The lightweight replacement for `pipeline_id`. |
 | **status** | The coarse, persisted checkpoint of a task (the lightweight replacement for `phase`). |
@@ -102,9 +102,11 @@ Consumer layer  (Core = quay ; all are MCP clients over the Provider ABI)
    provider: native                  provider: github
    (quay-native mcp)                 (github MCP server)
    task_list / task_get / task_write   task_list / task_get / …
-   action_run                          action_run
+   task_check                          task_check
    provider://manifest                 provider://manifest
 ```
+
+Note: **triggering is not on this diagram.** Delivering a trigger into a Claude Code session (an *action*) is a **host-owned edge**, not a Provider ABI capability — see §6.4 and §12.
 
 Two layers, never conflated:
 
@@ -115,7 +117,7 @@ Two layers, never conflated:
 
 Three transports were considered for how the Core reaches a Provider:
 
-- **A. MCP as the uniform transport** — chosen. One definition, shared by humans (Web/CLI) and agents. Ties directly to "MCP is the projection of the data + action faces onto the agent channel," keeping things DRY.
+- **A. MCP as the uniform transport** — chosen. One definition, shared by humans (Web/CLI) and agents. Ties directly to "MCP is the projection of the Provider's **data** face onto the agent channel," keeping things DRY. (Triggering is a separate host edge, §6.4.)
 - B. Subprocess CLI + JSON protocol — awkward for pure-API backends (GitHub) that have no natural executable.
 - C. In-process adapter — fastest, but forces same-language/same-process and loses isolation.
 
@@ -131,10 +133,9 @@ A Provider is a **single directory** that registers into several places:
 
 - **Provider registry** (the Core) — via `provider.yml` + an MCP entry command.
 - **Claude Code skills** — via `SKILL.md` files on disk (namespace `quay:*`).
-- **Action buttons** — declared in the manifest; surfaced in Web/CLI; executed via MCP.
-- **MCP** — the runtime data/action transport.
+- **MCP** — the runtime **data** transport (`task_list / task_get / task_write / task_check`).
 
-This keeps the two plugin systems (Claude Code's skill/plugin system vs. Quay's Provider system) from being conflated: one bundle, several registration targets.
+This keeps the two plugin systems (Claude Code's skill/plugin system vs. Quay's Provider system) from being conflated: one bundle, several registration targets. (Triggering — *actions* — is a separate host-owned edge, §6.4, not part of the Provider's registration.)
 
 ### 6.2 Capability model (required core + optional faces)
 
@@ -143,14 +144,24 @@ This keeps the two plugin systems (Claude Code's skill/plugin system vs. Quay's 
 | **data.read** | `task_list`, `task_get` | **Required** (the UI must show *something*) |
 | **manifest** | `provider://manifest` resource (or static `provider.yml`) | **Required** |
 | **data.write** | `task_write` | Optional (a read-only Provider is valid) |
-| **action** | `action_run(taskId, actionId)` + declared `action_buttons` | Optional |
+| **gate** | `task_check` (assert the `ready`/`done` gates) | Optional (native provides it) |
 | **skill** | shipped `quay:*` Skills | Optional (falls back to generic Skills) |
 
-The Core **negotiates** capabilities and **degrades gracefully**: no write → grey out edit; no action face → hide buttons; no Skills → fall back to generic ones.
+The Core **negotiates** capabilities and **degrades gracefully**: no write → grey out edit; no Skills → fall back to generic ones. Note that **action is not a Provider capability** — see §6.4.
 
-### 6.3 How "dumb" is the UI
+### 6.3 How "dumb" is the UI — the Provider declares semantics, the Core owns presentation
 
-The Core renders: task list, task detail, markdown body editing, and provider-declared action buttons. It contains no `if backend === 'github'`. To still allow a decent board, the Provider may supply a **minimal declarative view hint** (which field is status, optional grouping key, badge fields). The Core stays dumb; it just honors hints. It does **not** accept arbitrary custom components. The invariant: *no backend branch in the Core*.
+The Core renders: task list, task detail, markdown body editing, and (host-bound) action buttons. It contains no `if backend === 'github'`. To still allow a decent board, the Provider declares **semantics** — which field is `status`, its allowed values, which are terminal, and the `lane` — but **never presentation** (no columns, colors, badges, custom components). The Core maps those semantics to presentation itself. This is how "the Provider carries no Web concern" and "the Core can still render a good board" both hold. The invariant: *no backend branch in the Core; no styling in the Provider*.
+
+### 6.4 Action is a host-owned trigger edge, not a Provider capability
+
+An **action** is a lightweight **message sent from outside a Claude Code session into one**, causing a Claude Code action (typically invoking a Skill) — a **dumb pipe**, decoupled from `status` and Skill. It is the interface between quay (host) and a Claude Code session; it is **peripheral, not a Provider ABI capability**.
+
+- The Provider declares only the **logical** `status → Skill` mapping (a convenience for *composing* a trigger payload). It does **not** implement action execution and **does not know about manda**.
+- The **host** owns **environment binding**: manda present → dispatch the payload into a background worker session (async); a Claude Code session without manda → run inline / spawn one subagent (sync); plain CLI without an agent → print the command or disable.
+- **Action buttons** are preset messages the host sends: `{ label, payload, whenStatus? }`. The Provider may ship defaults, but they are peripheral config, not core semantics. Clicking fires **intent**; task state is never optimistically mutated.
+
+See [`quay-native-design.md`](./quay-native-design.md) §7 for the full treatment.
 
 ---
 
@@ -163,13 +174,14 @@ Every Provider exposes an MCP server. Tools/resources, capability-gated:
 | Static declaration | resource `provider://manifest` (or Core reads `provider.yml`) | Required |
 | Data · read | tool `task_list`, `task_get` | Required |
 | Data · write | tool `task_write` | Optional (`data.write`) |
-| Action | tool `action_run(taskId, actionId)` | Optional (`action`) |
+| Gate check | tool `task_check` (assert the `ready`/`done` gates) | Optional (`gate`) |
+
+The ABI is **data-only**. **Triggering (actions) is not part of it** — it is a host-owned edge (§6.4). This keeps every Provider a plain data surface and pushes the manda-present-vs-absent variability entirely into the host.
 
 **Static vs runtime split:**
 
-- `provider.yml` (on disk, ships with the Provider) — the Core reads it to render UI chrome, know how to launch the Provider's MCP, and register Skills.
-- **MCP tools** — runtime data read/write and action execution.
-- An action's **declaration** lives in the manifest (with `whenStatus`); its **execution** goes through `action_run` — the Provider decides whether that means a shell command or a manda dispatch, keeping the Core generic.
+- `provider.yml` (on disk, ships with the Provider) — the Core reads it to render UI chrome, know how to launch the Provider's MCP, register Skills, and read the logical `status → Skill` mapping used to compose triggers.
+- **MCP tools** — runtime data read / write / gate-check only.
 
 ### 7.1 Canonical task view-model
 
@@ -212,9 +224,11 @@ Recommended default: **track the backlog.md frontmatter convention** as the star
 quay serve                          # start Web + provider host
 quay task list                      # via ABI, across the active provider(s)
 quay task view <id>
-quay action list <id>               # action buttons available for a task
-quay action run <id> <actionId>     # trigger via action_run MCP tool
+quay action list <id>               # triggers available for a task (from status→Skill + presets)
+quay action run <id> <actionId>     # deliver the trigger via the host's environment binding
 ```
+
+`quay action run` is the CLI face of the host-owned trigger edge (§6.4): it composes a payload and delivers it into a Claude Code session using whatever binding the environment offers (manda / inline / print). It is **not** a call to a Provider MCP tool.
 
 The Web UI is the same capability set with a web binding, optimized separately for desktop and mobile.
 
@@ -248,11 +262,12 @@ Example workspace layout:
 
 ## 12. Relationship to manda
 
-manda provides the **messaging + trigger** substrate. In Quay:
+manda provides the **messaging + trigger** substrate that the **host** binds an action to (§6.4). In Quay:
 
 - An action button (Web or `quay action run`) fires **intent** — it never optimistically mutates task state.
-- Execution is a **run**: a manda dispatch of a `quay:*` Skill over a task, typically in a background worker session.
+- When manda is present, the host delivers the trigger as a manda dispatch of a `quay:*` Skill over a task — a **run**, typically in a background worker session. When manda is absent, the host degrades (inline / print).
 - Progress is reflected by the backend + a board refresh, not by the trigger.
+- **The Provider never touches manda.** manda-awareness lives only in the host's binding layer, so the Provider ABI stays data-only and portable.
 
 manda's own `TaskCreate/Dispatch` vocabulary maps to Quay's **run** side; do not conflate manda's "task" with Quay's work-item **task**.
 
@@ -266,9 +281,10 @@ manda's own `TaskCreate/Dispatch` vocabulary maps to Quay's **run** side; do not
 | Core CLI | **`quay`** | `serve` / `task` / `action`; MCP client; provider-agnostic |
 | Built-in provider | **native** | reference schema implementation |
 | Provider CLI | **`quay-native`** | `task` (raw) · `mcp` (ABI transport) |
-| ABI transport contract | **provider ABI over MCP** | `task_list/get/write` · `action_run` · `provider://manifest` |
+| ABI transport contract | **provider ABI over MCP** | data-only: `task_list/get/write/check` · `provider://manifest` |
 | Skills namespace | **`quay:*`** | registers into Claude Code |
-| Action config key | **`action_buttons:`** | declared in manifest; executed via `action_run` |
+| Trigger edge | **action** (host-owned) | message into a CC session; bound to manda/inline by the host, not the Provider |
+| Action config key | **`action_buttons:`** | preset trigger messages `{label, payload, whenStatus?}`; peripheral config |
 | Provider manifest | **`provider.yml`** | static declaration + entry points |
 | Workspace config | **`.quay/config.yml`** | enablement + bindings |
 | (Future) public relay | **Harbor / Port** | deferred; see §14 |
@@ -281,7 +297,7 @@ Greenfield tempts gold-plating; enforce a walking skeleton, then add faces.
 
 **v0 — end-to-end minimal loop**
 
-> `.quay/config.yml` enables native → `quay-native mcp` starts the transport → `quay serve` starts Web + list/detail → click an action button → `action_run` triggers a `quay:*` Skill (e.g. a ported single-task convergence) → the task reaches done.
+> `.quay/config.yml` enables native → `quay-native mcp` starts the data transport → `quay serve` starts Web + list/detail → click an action button → the host delivers the trigger into a Claude Code session, which runs a `quay:*` Skill (e.g. a ported single-task convergence) → the task reaches done.
 
 **v1 — write + prove the contract**
 
@@ -304,7 +320,7 @@ Dogfood from day one: use the ported epicd Skills to drive Quay's own backlog.
 ## 15. Open decisions
 
 1. **native storage format** — track backlog.md frontmatter (ecosystem-compatible, recommended) vs. a fresh minimal schema.
-2. **UI dumbness** — pure LCD vs. accept a minimal declarative view hint (recommended: minimal hint).
+2. **UI dumbness** — resolved (§6.3): the Provider declares **semantics** (status enum, terminal flags, lane), the Core owns presentation. Remaining sub-question: exactly which semantic fields the Core needs to render a good board.
 3. **manifest source of truth** — static `provider.yml` read by the Core vs. a live `provider://manifest` MCP resource vs. both (yml on disk, resource derived).
 4. **exploration lane** — keep as a distinct lane, or collapse to a plain label.
 5. **status set** — how close to backlog.md's classic To Do / In Progress / Done (+ a couple of gates like `backlog`/`needs-human`).

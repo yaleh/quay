@@ -13,7 +13,7 @@ Use these terms **verbatim** in all tasks, Skills, code, and docs. This exists t
 | **task** | The canonical work-item (markdown + frontmatter view-model). | — (never use "task" for a dispatch) |
 | **run** | An execution instance — a dispatched agentic run over a task (via manda). | ~~task~~ (for the execution side) |
 | **Skill** | A Claude Code Skill (`SKILL.md`), shipped by a Provider under `quay:*`. **It literally is a Claude Code Skill.** | — (do not rename) |
-| **action button** | A provider-declared, UI-anchored trigger. Declared in manifest (`whenStatus`), executed via `action_run`. | bare "action" (esp. near GitHub) |
+| **action button** | A preset trigger message (`{label, payload, whenStatus?}`) the host sends into a Claude Code session. Host-owned edge, decoupled from status/skill; **not** a Provider ABI capability. | bare "action" (esp. near GitHub) |
 | **lane** | Coarse label for "which Skill set applies" (authoring / execution / exploration). Replaces `pipeline_id`. | ~~pipeline~~ |
 | **status** | Coarse persisted checkpoint of a task. Replaces `phase`. | ~~phase~~ |
 | **manifest** | A Provider's static self-declaration file: `provider.yml`. | ~~descriptor~~, ~~profile~~ (in prose) |
@@ -35,7 +35,9 @@ Use these terms **verbatim** in all tasks, Skills, code, and docs. This exists t
 | `provider://manifest` | Static declaration resource (or Core reads `provider.yml`). | required |
 | `task_list`, `task_get` | Data read. | `data.read` (required) |
 | `task_write` | Data write. | `data.write` (optional) |
-| `action_run(taskId, actionId)` | Execute a declared action button. | `action` (optional) |
+| `task_check` | Assert the `ready`/`done` gates. | `gate` (optional) |
+
+The ABI is **data-only**. Triggering (actions) is a host-owned edge, not part of the ABI.
 
 ## Deliberate collision resolutions
 
