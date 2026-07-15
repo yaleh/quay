@@ -1,6 +1,6 @@
 # DIR-011
 
-- status: pending
+- status: archived (resolved iteration 34 — see Resolution below)
 - created_by: human (Yale), asserted directly in this live conversation
 - created_at: 2026-07-15
 - title: Live-verified manda `Agent` cap-request primitive works end-to-end; tool-name mismatch was the dominant latency/timeout driver, not a broken primitive
@@ -80,4 +80,84 @@ conditions, not a settled capability gap.
    needs to scale with expected chain depth.
 
 ## Resolution
-<!-- filled in by whichever iteration applies this directive -->
+
+Resolved at iteration 34. This directive's scope is genuinely different
+from DIR-007/008/009/010: its findings and requested actions are almost
+entirely about the `manda` Claude Code plugin's own `Agent`/cap-request
+subagent-dispatch primitive, and its primary requested action (action 1)
+targets `parent-injection-preamble.md`, a file that does **not** exist
+anywhere in `/home/yale/work/quay`. It lives at
+`/home/yale/work/manda/plugin/skills/manda-monitor/reference/parent-injection-preamble.md`,
+in a completely separate repository/plugin, outside this experiment's
+own git tree and outside the protocol's deliverable scope (quay-native/
+quay Core/quay-github, per `docs/proposal/quay-bootstrap-experiment.md`).
+
+**(a) Findings read and understood.** DIR-011's live-verified findings —
+that the real, currently-callable tool name is
+`mcp__plugin_manda_manda__Agent` (not the bare `mcp__manda__Agent` alias),
+that tool-discovery overhead (not push-delivery or broker responsiveness)
+dominates cold-path latency (64.4s of a 103.2s round trip), and that
+hinting the correct tool name directly cuts round-trip time by 79% (to
+21.6s) — were read in full and are taken at face value as this
+iteration's understanding of a prior session's live experiment. This
+iteration did not re-run or independently re-verify that timing
+experiment (it is about a mechanism, `manda`'s `Agent` primitive, that
+this experiment's own G3 audit dispatch does not use — see next
+paragraph — so re-verifying it would be work outside this session's
+scope, not a precondition for resolving the directive).
+
+**(b) Primary requested action is out of scope.** Action 1 (update
+`parent-injection-preamble.md`) and action 2 (a discipline for future
+"Agent primitive timeout" claims) both concern manda's own
+`Agent`/cap-request subagent-dispatch primitive specifically. This
+experiment's own G3 independent-audit dispatch mechanism does **not**
+use that primitive — it uses the top-level orchestrator's own native
+`Agent` tool calls (a distinct, platform-level tool, unrelated to
+manda's MCP-exposed `mcp__plugin_manda_manda__Agent`). So even the
+"future discipline" portion of action 2 does not bear on any mechanism
+this repository's own experiment protocol depends on for its own gate
+or audit steps.
+
+**(c) Cannot be applied from this session.** `parent-injection-preamble.md`
+is not present anywhere under `/home/yale/work/quay` (confirmed: it was
+searched for and not found in this repo; it is known, from the
+directive's own text, to live in `/home/yale/work/manda`). Per this
+iteration's explicit instructions, no file outside `/home/yale/work/quay`
+is edited from this session. Actions 1 and 2 are therefore **deferred**,
+not applied and not rejected — they remain valid, correctly-scoped work
+items for whoever next works in the `/home/yale/work/manda` repository
+directly; nothing about their content is disputed here.
+
+**(d) Narrower in-repo action taken.** Action 1 also implicitly asked
+this iteration to check whether the same stale bare tool name
+(`mcp__manda__Agent`) appears in any file genuinely inside this repo
+(specifically `experiment/ITERATION-PROMPTS.md` or any file that
+constructs a capability-borrowing subagent's preamble). A direct search
+(`grep -rn "mcp__manda__Agent" experiment/ packages/ docs/`) found this
+string appears only inside this directive's own text (quoting/
+describing it) — no in-repo Skill, iteration-prompt, or source file
+names this bare tool string, so there was nothing to correct on this
+narrower, genuinely in-scope point. This iteration's primary objective
+therefore became this scope-triage itself, plus self-selected additional
+value-producing work: QN-045 (`tasks/QN-045.md`), closing a
+config-resolution asymmetry named but not fixed in `packages/quay/
+DESIGN.md` §4.4 at iteration 33. See `experiment/iterations/
+iteration-34.md` and `experiment/provenance.md`'s "Records (as of end of
+iteration 34)" section for the full account.
+
+**(e) No V-factor credited for the out-of-scope portion.** No
+V_instance or V_meta factor movement is claimed for actions 1-3 above
+(the manda-repo-targeted portion). All V-factor movement claimed at
+iteration 34 is attributed solely to QN-045's own in-repo work, argued
+independently on its own merits in `experiment/iterations/
+iteration-34.md` §7.
+
+**(f) This is this iteration's own determination, not an assertion about
+human intent.** The scope judgment above (that DIR-011's primary
+requested action is out of scope for this repository's experiment) was
+made by this iteration's own reasoning, applying the same in-repo/
+out-of-repo boundary this experiment has consistently used elsewhere
+(e.g. `docs/proposal/`'s explicit scope statements). It is not asserted
+as a fact about what the human author of DIR-011 intended or expected;
+it is this session's honest, explicit application of the scope-triage
+instructions it was given.
