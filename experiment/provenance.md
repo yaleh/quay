@@ -4345,3 +4345,75 @@ ordinary task against a growing denominator (iteration 31 moved σ by
 +0.0043 for one task against a 41-task denominator; this iteration's
 slightly smaller Δσ is the honest consequence of the denominator growing
 to 42, not a change in method or pace).
+
+## Records (as of end of iteration 33)
+
+`experiment/directives/pending/DIR-010-*.md` (found mid-session in
+iteration 32, left pending and flagged as iteration 33's first priority —
+see iteration-32.md "Problems identified" #5) was picked up this
+iteration: `action_list`/`action_run` MCP tools were added to
+`packages/quay/src/mcp-server.js`, and a new Core-level three-way
+(CLI/MCP/Web-UI) symmetry test (`packages/quay/test/
+core-three-way-symmetry.test.mjs`) was added, per DIR-010's own 5
+requested-action points. `packages/quay/DESIGN.md` §4 documents the
+contract.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 33) |
+|---|---|---|---|---|---|
+| QN-044 | Establish Core-level CLI/MCP/Web-UI three-way symmetry -- add action_list/action_run MCP tools and a Core-level symmetry test (DIR-010) | **native** | **native** | **native** | **done** |
+
+`author_by`/`execute_by`/`gate_by` = `native` for QN-044, in the same
+same-session **degraded-fallback** mode established since iteration 1 (no
+subagent-dispatch primitive exists in this environment — reconfirmed via
+`ToolSearch` at the start of this iteration): `quay:author`'s documented
+method (write Proposal citing DIR-010 directly, its own precedent
+reasoning re: QN-036/QN-042, Plan, AC, DoD; `task check` → `ok:true`;
+`task edit --status ready`) was followed, then `quay:execute`'s
+documented method (`implement-phase`: `action_list`/`action_run` added to
+`mcp-server.js`, 11 new live assertions added to the existing
+`mcp-server.test.mjs` harness, plus a new 26-assertion
+`core-three-way-symmetry.test.mjs` file exercising all three Core
+surfaces against one shared fixture task; `self-audit-ac`: each AC/DoD box
+independently re-verified against live command output — the new symmetry
+test run 3 consecutive standalone times (all exit 0, 26/26 assertions
+passing each time, confirmed via direct `grep`/`PASS`-line-count
+comparison, not estimated); the full regression suite (21 `*.test.mjs`
+files, up from 20, plus `abi-symmetry.mjs`) run and passing; `git diff
+--stat -- packages/quay-native packages/quay-github` confirmed empty
+(Provider layer untouched, per DIR-010 point 4); `gate-check`: `task check
+QN-044 --json` → `{"ok":true}` → `task edit --status done`).
+
+## σ computation — iteration 33
+
+QN-044 reaches `{native, native, native, done}` this iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 36 / 43
+  = 0.8372
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 38 / 43
+  = 0.8837
+
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+  = 42 / 43
+  = 0.9767
+```
+
+Total task count is now **43** (QN-001..QN-044, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration (QN-044, done).
+
+**σ (strict) = 0.8372, up from 0.8333 at the end of iteration 32 (Δσ =
++0.0039).** Consistent with the recent per-iteration norm for a single
+ordinary task against a growing denominator — in the same range as
+iteration 32's own +0.0040 move for one task against a 42-task
+denominator; this iteration's marginally smaller Δσ is the honest
+consequence of the denominator growing to 43, not a change in method or
+pace.
+
+`experiment/directives/pending/DIR-010-*.md` was archived to
+`experiment/directives/archive/DIR-010-*.md` with a full `## Resolution`
+section addressing all 5 of its requested-action points, following the
+same archival convention DIR-007/DIR-008/DIR-009 established.

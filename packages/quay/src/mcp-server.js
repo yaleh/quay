@@ -45,6 +45,7 @@ import { z } from "zod";
 import path from "node:path";
 import { loadConfig, activeProvider } from "./config.js";
 import { connectProvider } from "./provider-client.js";
+import { composePayload, deliverTrigger } from "./action.js";
 
 // Resolve a provider's declared `env` map against the workspace root
 // (identical logic to bin/quay.js's own resolveProviderEnv() — duplicated
@@ -267,6 +268,105 @@ export async function startMcpServer() {
           content: [{ type: "text", text: err?.message ?? String(err) }],
         };
       }
+    }
+  );
+
+  // action_list / action_run (DIR-010): mirror bin/quay.js's own `action
+  // list`/`action run` subcommands (proposal §9's own "one capability set,
+  // three bindings" list), so an Agent connected only via `quay mcp` can
+  // enumerate and trigger action buttons, not merely list/get/write/check
+  // tasks. Same generic, provider-agnostic passthrough shape as the four
+  // existing tools above (optional `provider` argument, same
+  // getClient()/error-handling convention) -- zero Provider-specific
+  // branching, matching the standing "Core never special-cases a Provider
+  // id" discipline (design §6.3, this file's own header comment).
+
+  // action_list — same filtering logic as bin/quay.js's `action list`:
+  // manifest.action_buttons filtered by whenStatus against the task's
+  // current status.
+  server.registerTool(
+    "action_list",
+    {
+      description:
+        "List the action buttons applicable to one task's current status, on an enabled Provider (defaults to the default-enabled Provider). Proxies the Provider's own manifest/task_get and applies the same whenStatus filter as `quay action list`.",
+      inputSchema: {
+        provider: z.string().optional(),
+        id: z.string(),
+      },
+    },
+    async ({ provider, id }) => {
+      const { client } = await getClient(provider);
+      const manifest = await client.manifest();
+      const task = await client.taskGet(id);
+      if (!task) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `no such task: ${id} (provider: ${provider || defaultId})` }],
+        };
+      }
+      const buttons = (manifest.action_buttons ?? []).filter(
+        (b) => !b.whenStatus || b.whenStatus.includes(task.status)
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(buttons, null, 2) }],
+        structuredContent: { buttons },
+      };
+    }
+  );
+
+  // action_run — same compose+deliver logic as bin/quay.js's `action run`.
+  // Supports the DIR-009 mock/file-log delivery mode via an explicit
+  // `mockLogPath` argument (rather than only the QUAY_ACTION_MOCK_LOG env
+  // var bin/quay.js/serve.js read), so this tool's own regression test can
+  // select deterministic delivery per-call without relying on process-wide
+  // env state -- the same underlying deliverTrigger() contract, just wired
+  // through an explicit MCP tool argument instead of an env var, since MCP
+  // tool calls are the natural place for a caller-supplied argument rather
+  // than ambient environment state.
+  server.registerTool(
+    "action_run",
+    {
+      description:
+        "Compose and deliver one action-button trigger for a task, on an enabled Provider (defaults to the default-enabled Provider). Mirrors `quay action run`. Pass `mockLogPath` to select the deterministic mock/file-log delivery mode (DIR-009) instead of live manda/print delivery -- the same contract QUAY_ACTION_MOCK_LOG selects for the CLI and Web UI.",
+      inputSchema: {
+        provider: z.string().optional(),
+        id: z.string(),
+        actionId: z.string(),
+        mockLogPath: z.string().optional(),
+      },
+    },
+    async ({ provider, id, actionId, mockLogPath }) => {
+      const { client } = await getClient(provider);
+      const manifest = await client.manifest();
+      const task = await client.taskGet(id);
+      if (!task) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `no such task: ${id} (provider: ${provider || defaultId})` }],
+        };
+      }
+      let payloadObj;
+      try {
+        payloadObj = composePayload({ providerManifest: manifest, task, actionId });
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: err?.message ?? String(err) }],
+        };
+      }
+      const channel = `task-${id}`;
+      const envMockLogPath = mockLogPath || process.env.QUAY_ACTION_MOCK_LOG || undefined;
+      const result = await deliverTrigger({
+        root: cfg.workspaceRoot,
+        channel,
+        payloadObj,
+        mockLogPath: envMockLogPath,
+      });
+      const combined = { ...payloadObj, channel, ...result };
+      return {
+        content: [{ type: "text", text: JSON.stringify(combined, null, 2) }],
+        structuredContent: combined,
+      };
     }
   );
 

@@ -38,6 +38,13 @@
 //      mismatched one returns isError:true (not a crash) naming both the
 //      expected and actual status; and a follow-up task_get confirms
 //      nothing was written to disk on the conflict path.
+//   6. (QN-044/DIR-010 item 1) action_list/action_run -- the two new tools
+//      that close the CLI-vs-MCP capability gap DIR-010 identified: an
+//      Agent connected only via `quay mcp` can now enumerate and trigger
+//      action buttons, the same way bin/quay.js's own `action list`/`action
+//      run` subcommands already could. action_run supports the DIR-009
+//      mock/file-log delivery mode via an explicit `mockLogPath` tool
+//      argument, so this test never depends on live manda delivery.
 //
 // Run: node test/mcp-server.test.mjs
 
@@ -275,6 +282,59 @@ async function main() {
 
     const rUnknownId = await core.callTool({ name: "task_get", arguments: { id: "NOPE-999" } });
     assert(rUnknownId.isError === true, "task_get with an unknown task id returns isError:true, not a crash");
+  }
+
+  // ---- 9. action_list / action_run (QN-044/DIR-010 item 1) ----
+  {
+    // MCP-B1 is still "todo" on Provider native-2 (untouched by steps 6-7,
+    // which only ever wrote to Provider "native"'s MCP-A1).
+    const listResult = await core.callTool({ name: "action_list", arguments: { id: "MCP-B1", provider: "native-2" } });
+    assert(
+      Array.isArray(listResult.structuredContent?.buttons) && listResult.structuredContent.buttons.length === 1 &&
+        listResult.structuredContent.buttons[0].id === "advance",
+      `action_list via quay mcp returns the one "advance" button applicable to MCP-B1's "todo" status (got: ${JSON.stringify(listResult.structuredContent)})`
+    );
+
+    // action_list on an unknown task id -> isError, not a crash.
+    const listUnknown = await core.callTool({ name: "action_list", arguments: { id: "NOPE-999", provider: "native-2" } });
+    assert(listUnknown.isError === true, "action_list with an unknown task id returns isError:true, not a crash");
+
+    // action_run, mock delivery mode selected via the explicit mockLogPath
+    // tool argument (not the QUAY_ACTION_MOCK_LOG env var) -- deterministic,
+    // no live manda dependency.
+    const mockLogPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-action-run-")), "log.jsonl");
+    const runResult = await core.callTool({
+      name: "action_run",
+      arguments: { id: "MCP-B1", actionId: "advance", provider: "native-2", mockLogPath },
+    });
+    assert(runResult.structuredContent?.delivered === "mock", `action_run via quay mcp with mockLogPath returns delivered:"mock" (got ${JSON.stringify(runResult.structuredContent?.delivered)})`);
+    assert(runResult.structuredContent?.taskId === "MCP-B1", "action_run's returned payload carries the correct taskId (MCP-B1)");
+    assert(runResult.structuredContent?.skill === "quay:author", "action_run's returned payload resolves skill from status_skill_map for MCP-B1's current status (todo)");
+    assert(fs.existsSync(mockLogPath), "action_run's mock delivery actually wrote the log file");
+    const logLines = fs.readFileSync(mockLogPath, "utf8").trim().split("\n").filter(Boolean);
+    assert(logLines.length === 1, `action_run's mock log has exactly 1 record after 1 call (got ${logLines.length})`);
+    const logRecord = JSON.parse(logLines[0]);
+    assert(logRecord.taskId === "MCP-B1" && logRecord.channel === "task-MCP-B1", "the mock log record's own content matches the composed payload (taskId, channel)");
+
+    // action_run on an unknown task id -> isError, not a crash.
+    const runUnknownTask = await core.callTool({
+      name: "action_run",
+      arguments: { id: "NOPE-999", actionId: "advance", provider: "native-2", mockLogPath },
+    });
+    assert(runUnknownTask.isError === true, "action_run with an unknown task id returns isError:true, not a crash");
+
+    // action_run on an unknown actionId -> isError, not a crash (composePayload() throws).
+    const runUnknownAction = await core.callTool({
+      name: "action_run",
+      arguments: { id: "MCP-B1", actionId: "does-not-exist", provider: "native-2", mockLogPath },
+    });
+    assert(runUnknownAction.isError === true, "action_run with an unknown actionId returns isError:true, not a crash");
+    assert(
+      /no such action button/.test(runUnknownAction.content?.[0]?.text ?? ""),
+      "the unknown-actionId error message names the problem (composePayload()'s own error text surfaces through)"
+    );
+
+    fs.rmSync(path.dirname(mockLogPath), { recursive: true, force: true });
   }
 
   await core.close();

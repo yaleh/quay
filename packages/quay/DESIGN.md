@@ -2,7 +2,9 @@
 
 - **Status:** v1 — walking skeleton (Web UI + CLI) plus, as of iteration 26
   (`DIR-007`), a genuine Core-level MCP server, plus, as of iteration 31
-  (`QN-042`/`DIR-009`), a deterministic mock/file-log action-delivery mode.
+  (`QN-042`/`DIR-009`), a deterministic mock/file-log action-delivery mode,
+  plus, as of iteration 33 (`QN-044`/`DIR-010`), Core-level CLI/MCP/Web-UI
+  three-way symmetry over that same shared capability set.
 - **Relates:** `docs/proposal/quay-proposal.md` (esp. §5 architecture), `docs/
   proposal/quay-native-design.md` (Provider-level reference), `docs/proposal/
   glossary.md`.
@@ -235,3 +237,99 @@ separately a transient `spawn manda ENOENT`) — live manda reachability
 remains a per-session, per-moment fact, exactly as already documented, and
 this mode's whole purpose is to sidestep that for automated verification,
 not re-litigate or depend on it.
+
+## 4. Core-level three-way symmetry (`QN-044`/`DIR-010`)
+
+### 4.1 The contract
+
+Proposal §5 (line 54) states the requirement this section documents: "Three
+sibling front-ends over the same Provider ABI: **Web UI**, **Core CLI**
+(`quay`), and an **MCP projection** for agents — **one capability set, three
+bindings**." §9 (line 235) restates it directly: "The Web UI is **the same
+capability set** with a web binding." §9 itself lists the literal scope of
+that shared capability set (lines 226-230): `serve` (Web UI), `task list`,
+`task view`, `action list`, `action run` — in this document's own terms:
+
+1. **task-list rendering** — enumerate tasks and their id/title/status.
+2. **task-detail rendering** — show one task's id/title/status/body.
+3. **action-button triggering** — list the action buttons applicable to a
+   task's current status, and trigger one.
+
+This is a **different symmetry claim** from design §6's principle P3
+(`packages/quay-native/DESIGN.md`, enforced by
+`packages/quay-native/test/abi-symmetry.mjs`): P3 is explicitly
+**Provider-scoped** (`quay-native`'s own CLI vs. its own MCP tools) and
+explicitly excludes the Web UI (`quay-native-design.md` P2: "Web is a *Core*
+concern"). §5/§9's three-way claim is a **Core-level** claim across all
+three of Core's own bindings, including the Web UI -- a claim P3 never made
+and `abi-symmetry.mjs` never tested.
+
+**Explicitly out of scope for this contract:** `task edit` and `task check`.
+Both were added to the Core CLI later (`QN-024`, `QN-027`), after §9's own
+example block was written, and neither was ever proposed for the Web UI.
+Their absence from the Web UI is correctly **not** a symmetry gap against
+this contract -- asserting it as one would be testing a requirement that was
+never written.
+
+### 4.2 What closed the gap (DIR-010 item 1)
+
+Before iteration 33, Core MCP (`src/mcp-server.js`, DIR-007) registered only
+`task_list`/`task_get`/`task_write`/`task_check` -- no `action_list` or
+`action_run` tool existed, even though both are part of §9's own listed
+capability set. An Agent connected only via `quay mcp` could not list or
+trigger action buttons; the CLI and Web UI could. This was the one concrete,
+checkable gap against the actual written requirement (as opposed to
+`task edit`/`task check`, which were never claimed).
+
+`action_list` and `action_run` were added to `src/mcp-server.js`, mirroring
+the existing four tools' shape exactly (optional `provider` argument, same
+`isError: true`-on-failure convention, no crash on an unknown task or action
+id). `action_run` accepts an optional `mockLogPath` argument selecting the
+deterministic mock/file-log delivery mode (§3 above, `QN-042`/`DIR-009`)
+instead of live manda -- the same contract `QUAY_ACTION_MOCK_LOG` already
+selects for the CLI and Web UI, reused rather than reintroducing a
+live-manda dependency into this new surface's own regression test.
+
+### 4.3 Enforcement mechanism
+
+`packages/quay/test/core-three-way-symmetry.test.mjs` is the checkable test
+for this contract (analogous in spirit to `abi-symmetry.mjs`, but scoped to
+Core's three bindings rather than one Provider's two). For each of the three
+capabilities above, it asserts:
+
+- the capability exists in the Core CLI (`bin/quay.js`, spawned as a real
+  subprocess);
+- the capability exists as a Core MCP tool (`quay mcp`, spawned as a real
+  subprocess, driven by a real MCP client);
+- the Web UI's own rendering/handling of that capability (`src/serve.js`'s
+  `startServer()`, driven by real HTTP requests -- no browser automation; see
+  the test file's own header comment for why that is out of scope here)
+  produces content consistent with what the CLI/MCP legs return, for the
+  same fixture task.
+
+All three legs are checked against **the same isolated, temporary native
+Provider task store** for one fixture task, so the comparison is genuine
+(same underlying data) rather than incidental. The test does not assert
+anything about `task edit`/`task check`'s absence from the Web UI, per §4.1.
+
+A future capability added to only one of the three surfaces (e.g., a new
+Core MCP tool with no CLI or Web UI equivalent, or vice versa) will make
+this test fail rather than pass silently, as long as that capability falls
+within §9's own listed set -- the same enforcement guarantee `abi-symmetry.mjs`
+already provides one layer down, at the Provider level.
+
+### 4.4 A discovered, pre-existing asymmetry (named, not fixed here)
+
+While building the test above, an honest discrepancy surfaced in how the
+three bindings' own launcher code resolves a Provider's task-store
+location: `serve.js`'s `startServer()` reads `provider.tasks_dir` (a
+top-level `.quay/config.yml` field) directly, while `bin/quay.js`'s CLI
+dispatch and `mcp-server.js` both resolve it via
+`resolveProviderEnv(cfg, provider)`, which reads only `provider.env`'s map
+-- **not** the top-level `tasks_dir` field. A workspace config that sets
+only one of the two conventions will silently serve a *different* task
+store to the Web UI than to the CLI/MCP legs. This is a real,
+pre-existing config-resolution asymmetry, distinct from the
+capability-set symmetry this section documents and DIR-010 asked to be
+verified -- it is not something DIR-010 asked to be fixed, so it was not
+silently patched here; it is named as a gap for a future directive.
