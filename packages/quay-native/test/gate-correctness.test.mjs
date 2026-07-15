@@ -77,14 +77,22 @@ function main() {
   }
 
   // (c) meets both new bars: substantive content in all four sections AND
-  // at least one AC checkbox line.
+  // all AC checkboxes checked.
+  //
+  // QN-019 (iteration 8): this fixture originally had unchecked AC boxes
+  // and still expected ok:true, which was exactly QN-017's discovered gap
+  // (author->ready was presence-only, not checked-state). Updated to all-
+  // checked boxes now that the gate correctly requires checked-state — see
+  // test/gate-checked-state.test.mjs for the dedicated coverage of the
+  // presence-vs-checked distinction itself (including the exact previously-
+  // passing, now-correctly-failing case).
   store.write("GC-C", {
     title: "meets-both-bars",
     status: "todo",
     body:
       `## Proposal\n${substantive("Proposal")}\n` +
       `## Plan\n${substantive("Plan")}\n` +
-      `## AC\n- [ ] a real, checkable acceptance criterion\n- [ ] another one\n` +
+      `## AC\n- [x] a real, checkable acceptance criterion\n- [x] another one\n` +
       `## DoD\n${substantive("DoD")}\n`,
   });
   {

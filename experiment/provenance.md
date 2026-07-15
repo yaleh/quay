@@ -1211,3 +1211,258 @@ iteration's honest judgment, not decided here by fiat.
 
 See `experiment/timing/iteration-7.log` for this iteration's raw `date -u`
 checkpoints.
+
+## V_meta formula correction (iteration 8 — mandatory, top-priority resolution)
+
+**Finding (from iteration 7's independent audit,
+`experiment/audits/iteration-7-independent-adjudicate.md`, "Material systemic
+concern"):** every iteration from 1 through 7 computed `V_meta` as the
+**arithmetic mean** of its four components (completeness, effectiveness,
+reusability, validation). The governing protocol document
+(`docs/proposal/quay-bootstrap-experiment.md` §5.2, line 129) explicitly
+defines:
+
+```
+V_meta = completeness × effectiveness × reusability × validation
+```
+
+— a **product**, mirroring `V_instance`'s own (correctly-computed, every
+iteration) product formula. This experiment's own `experiment/README.md`
+restates the same product formula. The mean was never a documented
+substitution, never flagged as a deviation, and never formally proposed as
+an amendment in any prior iteration report — it was silently used,
+iteration after iteration, without being reconciled against the ratified
+protocol text.
+
+**Decision (made explicitly this iteration, not deferred further): option
+(a) — correct the formula to the protocol's product, going forward, and
+publish the full historical recomputation for transparency.** This is the
+more defensible option: the protocol document is the ratified source of
+truth for this experiment and was never formally amended (per protocol
+§10's own resolved-decisions log, which records deliberate amendments
+explicitly — no such entry exists for V_meta). Silently continuing the mean
+would compound an already undocumented deviation; formally amending the
+protocol to adopt the mean (option b) was considered and rejected, because
+no principled rationale for preferring a mean over the product (which
+deliberately mirrors V_instance's own multiplicative "all components must
+be strong, a single weak link sinks the whole score" semantics) was ever
+articulated in the historical record — the mean appears to have been an
+unexamined implementation shortcut, not a reasoned methodological choice.
+
+**Full historical V_meta series, recomputed under the protocol's product
+formula, iterations 0-7** (component values themselves are unchanged —
+only the aggregation operator changes; see each iteration's own report for
+the underlying component evidence):
+
+| iter | completeness | effectiveness | reusability | validation | V_meta (mean, as reported) | V_meta (product, corrected) |
+|---|---|---|---|---|---|---|
+| 0 | 0.20 | 0.0 | 0.0 | 0.20 | 0.10 | 0.0000 |
+| 1 | 0.35 | 0.0 | 0.0 | 0.30 | 0.1625 | 0.0000 |
+| 2 | 0.50 | 0.0 | 0.0 | 0.35 | 0.2125 | 0.0000 |
+| 3 | 0.55 | 0.0 | 0.0 | 0.40 | 0.2375 | 0.0000 |
+| 4 | 0.60 | 0.20 | 0.55 | 0.45 | 0.45 | 0.0297 |
+| 5 | 0.65 | 0.20 | 0.55 | 0.50 | 0.475 | 0.0358 |
+| 6 | 0.70 | 0.20 | 0.55 | 0.55 | 0.50 | 0.0424 |
+| 7 | 0.72 | 0.20 | 0.55 | 0.60 | 0.5175 | 0.0475 |
+
+(Note: this table's component values for iterations 0-6 are read directly
+from each iteration's own historical report; iteration 7's are read from
+`experiment/iterations/iteration-7.md`. The "product" column is the same
+four numbers multiplied instead of averaged — no component value itself is
+changed, so this recomputation does not require re-litigating any prior
+iteration's evidence, only its aggregation arithmetic.)
+
+**Consequence for convergence assessment:** under the mean, iteration 7's
+reported `V_meta = 0.5175` might appear to be approaching the §7 dual
+threshold (`≥ 0.80`). Under the protocol's actual product formula,
+`V_meta = 0.0475` — roughly an order of magnitude lower, and nowhere near
+the threshold. This materially changes the honest read of how far this
+experiment actually is from meta-layer convergence: the product formula
+correctly punishes the persistently-low `effectiveness` component (held at
+an honest ceiling of 0.20 since iteration 4, per iteration 6/7's own
+analysis) far more severely than the mean did, which is the intended
+multiplicative semantics — a single persistently-weak component should
+suppress the whole score, exactly as it does for `V_instance`. This is a
+more honest signal of the actual state of meta-layer maturity than the mean
+ever was.
+
+**Going forward (iteration 8 onward): `V_meta` is computed as the product of
+its four components, matching the protocol document exactly, with no
+further silent deviation.** See §8 of `experiment/iterations/iteration-8.md`
+for this iteration's own component values and resulting product.
+
+## Records (as of end of iteration 8)
+
+**Pre-execution context:** this iteration's mandate, in priority order: (1)
+MANDATORY — resolve the V_meta mean-vs-product discrepancy found by
+iteration 7's independent audit (resolved above); (2) decide whether
+`executeEpic`'s own distinct `needs-human` branch needs a dedicated
+adversarial task; (3) consider tightening the `author→ready` gate's
+presence-only AC check to require checked-state; (4) do not re-attempt
+`effectiveness`'s matched-scope comparator without a genuinely new idea;
+(5) do not force `reusability`; (6) act on `quay-github`'s deferred
+`data.write`/`gate`/`skill` capabilities only if a natural reason arises.
+
+Three new tasks were authored this iteration: QN-019 (the `author→ready`
+gate checked-state fix, addressing priority 3, which — genuinely
+unplanned at authoring time — turned out to be a *precondition* for
+priority 2's own honest execution, since it changed QN-021's actual
+trigger point), QN-020 (epic, addressing priority 2), and QN-021 (QN-020's
+sole child). **Note on numbering:** QN-018 was never allocated — this
+session's internal task-numbering decision started this iteration's new
+tasks at QN-019, leaving a permanent, honestly-acknowledged gap at QN-018
+in the sequence. This is recorded plainly rather than silently
+renumbering or backfilling a placeholder task to close the gap
+retroactively (G1-style honesty — the provenance record reflects what
+actually happened, including a numbering artifact, not a cosmetically
+tidy sequence). `quay-github`'s `data.write`/`gate`/`skill` capabilities
+(priority 6) were re-checked (`packages/quay-github/provider.yml`, all
+three still `false`) — this iteration's work is entirely gate-internal to
+`quay-native` and touches no Provider surface, so there is no natural
+reason to act this iteration; left unchanged, honestly, matching iteration
+7's identical reasoning for `reusability`.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 8) |
+|---|---|---|---|---|---|
+| QN-001 .. QN-017 | (unchanged from iteration 7) | — | — | — | done / needs-human (QN-017) |
+| QN-019 | Tighten author->ready gate to require checked-state | **native§§§** | **native§§§** | **native§§§** | **done** |
+| QN-020 | Exercise executeEpic's own needs-human branch (epic) | **native¶¶¶** | **native¶¶¶ (did not reach done)** | **native¶¶¶** | **needs-human** |
+| QN-021 | Achieve fresh-context reviewer independence (QN-020's child) | **native¶¶¶** | **native¶¶¶ (did not reach ready)** | **native¶¶¶** | **todo** |
+
+Rows QN-001 through QN-017 are unchanged from the end of iteration 7;
+reproduced in full in that section above (not restated here to avoid
+duplication drift).
+
+`§§§` — QN-019: same-session, no subagent-dispatch primitive found
+(re-confirmed via `ToolSearch` at the start of this iteration — the 8th
+consecutive confirmation, iterations 1-8). `author_by = native`:
+`quay:author`'s Method was followed, citing iteration 7's QN-017 finding as
+the motivating evidence, gated by the real `author→ready` gate. `execute_by
+= native`: genuine TDD discipline via `git stash`/`git stash pop` —
+pre-fix `store.js` genuinely failed 4 assertions in the new
+`gate-checked-state.test.mjs` (CS-B: present-but-unchecked → expected
+`ok:false` but pre-fix code returned `ok:true`; CS-C similarly); post-fix
+genuinely passed 13/13. Full existing regression suite (`compound-
+gate.test.mjs`, `compound-gate-recursive.test.mjs`, `abi-symmetry.mjs`,
+`gate-correctness.test.mjs`, `lock.test.mjs`, `cas-write.test.mjs`) re-run
+green after one expected, transparently-fixed regression: `gate-
+correctness.test.mjs`'s GC-C fixture had always had unchecked AC boxes and
+had always (incorrectly, in hindsight) expected `ok:true` — exactly the
+QN-017 gap, now caught by its own regression suite. Fixed by updating
+GC-C's fixture to checked boxes, with an explanatory comment, since the
+gate's new behavior is the intended fix, not a bug to route around. Live
+re-check of all 17 pre-existing real task files in this repo's own `tasks/`
+directory confirms zero regression: all are already past `todo`
+(`ready`/`done`/`needs-human`), so the tightened `todo` gate does not
+retroactively touch their live status. `gate_by = native`: the real
+`quay-native task check QN-019 --json` gate reported `ok: true` before
+each status flip.
+
+`¶¶¶` — QN-020/QN-021's honesty note (read before treating these
+statuses as routine): these two tasks together exercise `executeEpic`'s
+own distinct `needs-human` branch — the question iteration 7 left open
+("is `executeEpic`'s branch adequately covered by the general leaf-level
+proof, or does it need its own dedicated task?"). This iteration answers:
+it needed a dedicated task, and this is it. QN-021 (the child) was
+authored with the same structurally-unsatisfiable AC item QN-017 used
+(genuinely re-confirmed absent, not assumed: two `ToolSearch` queries this
+iteration, 8th consecutive confirmation across iterations 1-8). **Honest,
+genuinely new finding, not anticipated by this task's own Plan:** because
+QN-019 landed in the same iteration, QN-021 fails one gate earlier than
+QN-017 did — at `author→ready` itself, not `execute→done`. Live gate
+output (captured verbatim, twice, since checking QN-021's own AC item 2
+changed the live count from 0/2 to 1/2 — a genuine self-referential
+quirk, recorded rather than hidden):
+
+```json
+{"id":"QN-021","gate":"author->ready","ok":false,"artifacts":
+ {"proposal":true,"plan":true,"ac":true,"dod":true},"acTotal":2,
+ "acChecked":0,"reason":"0/2 AC checkboxes checked"}
+```
+
+then, after AC item 2 (verbatim-capture requirement) was itself checked:
+
+```json
+{"id":"QN-021","gate":"author->ready","ok":false,"artifacts":
+ {"proposal":true,"plan":true,"ac":true,"dod":true},"acTotal":2,
+ "acChecked":1,"reason":"1/2 AC checkboxes checked"}
+```
+
+QN-021 therefore never reaches `ready`, let alone `done`. Since QN-021
+cannot reach `done`, `executeEpic`'s `driveEach` step cannot complete for
+that child — a genuine, mechanically-produced (not narrated) trigger of
+`executeEpic`'s "child cannot be driven to done" `needs-human` sub-case.
+QN-020 was then actually flipped: `task edit QN-020 --status needs-human`,
+and `task check QN-020 --json` genuinely returns `{"gate":"none","ok":
+false,"reason":"soft stop; human action required"}`. `author_by = native`
+for both (real `quay:author` Method followed, gated by the real gate).
+`execute_by`: recorded as `native (did not reach done / did not reach
+ready)` for QN-020/QN-021 respectively — `quay:execute`'s Method was
+genuinely followed (`ensureChildrenExist` succeeded; `driveEach` genuinely
+could not complete; routing to `needs-human` matches the Skill's own
+documented Method) but neither task reached `done`, so **neither qualifies
+for σ's numerator under any reading** — matching the protocol's definition
+precisely, same reasoning as QN-017 in iteration 7. `gate_by = native`:
+the real mechanical gate produced every outcome above; no
+self-certification at any step. The narrower "all children done, but
+integration acceptance itself fails" sub-case of `executeEpic`'s
+`needs-human` branch remains open, unresolved by this task — see
+`packages/quay-native/skills/execute/SKILL.md`'s Gaps section for the
+explicit statement of what remains open.
+
+## σ computation — iteration 8
+
+Applying protocol §10.1's strict definition (all three of `author_by`,
+`execute_by`, `gate_by` must be `native`, AND the task must be `done`):
+
+- QN-001, QN-002, QN-005, QN-007, QN-008, QN-009, QN-010, QN-011, QN-012,
+  QN-013, QN-014, QN-015, QN-016: unchanged from iteration 7, still
+  qualify (13 tasks).
+- QN-019: native/native/native, `done` → **qualifies (new this
+  iteration)**.
+- QN-017, QN-020, QN-021: native/native/native, but none are `done`
+  (`needs-human`, `needs-human`, `todo` respectively) → **none qualify**.
+- QN-003, QN-004: qualify under the inclusive reading only (unchanged).
+- QN-006: seed/seed/seed → does not qualify (unchanged, permanent).
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 14 / 20
+  = 0.700
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 16 / 20
+  = 0.800
+```
+
+Total task count is now **20** (QN-001..QN-021, minus the never-allocated
+QN-018) — 3 new tasks created this iteration (QN-019 done; QN-020,
+QN-021 both non-`done`).
+
+**σ (strict) = 0.700, down from 0.765 at the end of iteration 7 (Δσ =
+-0.065).** This is, again, an honest and expected decrease, for the same
+reason iteration 7's decrease was: QN-020 and QN-021 were deliberately
+constructed to not reach `done` — that is the entire point of exercising
+`executeEpic`'s `needs-human` branch. Diluting the denominator by 2 while
+the numerator grows by only 1 (QN-019) is the correct, honest arithmetic,
+not a regression to explain away.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 19 / 20
+              = 0.950
+```
+
+Up from 0.941 at the end of iteration 7 (QN-019, QN-020, QN-021 were all
+authored natively; QN-006 remains the sole permanently-seed gap). This
+sub-metric correctly credits that authoring worked as designed for all
+three new tasks, including QN-021's correct refusal to fabricate its own
+impossible checkbox, while strict σ correctly penalizes that none of the
+three deliberately-adversarial/gate-fix tasks besides QN-019 reached
+`done`.
+
+See `experiment/timing/iteration-8.log` for this iteration's raw `date -u`
+checkpoints.

@@ -119,3 +119,21 @@ authorTask(id) = {
 - Not yet dispatched via manda in a background worker session by this Skill
   itself — dispatch is currently the host's job (`quay action run`), and this
   Skill is invoked directly inside whatever session receives that trigger.
+- **Fixed in iteration 8 (QN-019):** the `author->ready` gate (`store.js`'s
+  `check()` "todo" branch) previously tested the AC section only for
+  checkbox **presence**, not checked-**state** — a task could reach `ready`
+  with zero AC boxes actually checked, so long as at least one checkbox
+  line existed. This asymmetry with the `execute->done` gate (which already
+  required full-checked state) was found live by iteration 7's QN-017 (the
+  first genuine `needs-human` exercise): its author-gate unexpectedly passed
+  with 0/2 AC boxes checked, because the gate at that time only checked
+  presence. The gate now requires **all** AC checkboxes checked before
+  `author->ready` passes, with a distinct `"N/M AC checkboxes checked"`
+  reason string, matching `execute->done`'s existing reason format. See
+  `packages/quay-native/test/gate-checked-state.test.mjs` for dedicated
+  coverage, including the exact previously-passing/now-correctly-failing
+  case. **Note:** this closes the narrow "checked vs. merely present"
+  mechanical asymmetry only — the deeper "checkbox-count gameability" gap
+  (an author could check a box without independent verification the
+  underlying claim is true) remains open; the gate is still both contestant
+  and judge for this class of claim (G3).

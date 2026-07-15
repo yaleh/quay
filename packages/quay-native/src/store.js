@@ -343,8 +343,18 @@ export function createStore(tasksDir) {
       // minimum content are present. Distinct, specific failure reason so
       // the gate stays actionable (matches the existing missing-artifact
       // pattern).
+      //
+      // QN-019 (iteration 8): tightened from presence-only to checked-state,
+      // matching the execute->done gate's own semantics below. Iteration
+      // 7's QN-017 found live that a task could reach `ready` with AC
+      // checkboxes present but zero of them checked — an asymmetry with
+      // execute->done, which already required full-checked state. This
+      // reuses the same checkboxes/checked regex-count logic, applied one
+      // gate earlier.
       const acSection = extractSection(t.body, ["AC", "Acceptance Criteria"]);
-      const acHasCheckbox = /- \[[ xX]\]/.test(acSection);
+      const acCheckboxes = acSection.match(/- \[[ xX]\]/g) || [];
+      const acChecked = acSection.match(/- \[[xX]\]/g) || [];
+      const acHasCheckbox = acCheckboxes.length > 0;
       if (allArtifactsPresent && !acHasCheckbox) {
         return {
           id,
@@ -354,7 +364,20 @@ export function createStore(tasksDir) {
           reason: "AC section has no checkboxes",
         };
       }
-      const ok = allArtifactsPresent && acHasCheckbox;
+      const acAllChecked =
+        acHasCheckbox && acChecked.length === acCheckboxes.length;
+      if (allArtifactsPresent && acHasCheckbox && !acAllChecked) {
+        return {
+          id,
+          gate,
+          ok: false,
+          artifacts,
+          acTotal: acCheckboxes.length,
+          acChecked: acChecked.length,
+          reason: `${acChecked.length}/${acCheckboxes.length} AC checkboxes checked`,
+        };
+      }
+      const ok = allArtifactsPresent && acAllChecked;
       return {
         id,
         gate,

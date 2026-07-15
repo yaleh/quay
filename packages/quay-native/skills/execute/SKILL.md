@@ -177,6 +177,32 @@ executeEpic(task) = {
   Cycle-safe (a cyclic children graph resolves to `"missing"`/`ok:false`
   rather than crashing or hanging). See
   `packages/quay-native/test/compound-gate-recursive.test.mjs`.
+- **Resolved in iteration 8 (QN-020/QN-021):** the question left open above
+  ("was `executeEpic`'s own branch adequately covered by the general
+  leaf-level proof, or does it need a dedicated task?") is now answered:
+  yes, it needed a dedicated task, and QN-020 (epic, one child QN-021) is
+  it. `executeEpic`'s `needs-human` outcome has two structurally distinct
+  triggers in the pseudocode (`executeEpic`'s Spec above): (1) a child
+  cannot be driven to `done`, so `driveEach` cannot complete (`ok` never
+  reached for that child) — the case this task exercises; and (2) all
+  children reach `done`, but `integrationAccept` (`runEpicLevelACAndDoD`)
+  itself fails — a narrower, still-**unexercised** sub-case this task does
+  **not** resolve. QN-020's child QN-021 was authored with the same
+  structurally-unsatisfiable AC item QN-017 used (no subagent-dispatch
+  primitive found, 8th consecutive `ToolSearch` confirmation across
+  iterations 1-8); QN-021 was actually driven — not narrated — and, because
+  of QN-019's same-iteration `author->ready` gate tightening, failed one
+  gate earlier than QN-017 did (`author->ready` itself, `1/2 AC checkboxes
+  checked`, rather than `execute->done`). Either way QN-021 cannot reach
+  `done`, so `driveEach` cannot complete; QN-020 was then actually flipped
+  (`task edit QN-020 --status needs-human`), and `task check QN-020 --json`
+  now genuinely returns `{"gate":"none","ok":false,"reason":"soft stop;
+  human action required"}` — the first real, mechanically-produced exercise
+  of `executeEpic`'s own distinct `needs-human` branch (not `executeLeaf`'s,
+  which QN-017 already proved) in this experiment's 8-iteration history.
+  See `experiment/iterations/iteration-8.md` §5 for the full account. The
+  "integration acceptance itself fails after all children complete"
+  sub-case remains open for a future iteration.
 - Not yet dispatched via manda in a background worker by this Skill itself
   (see quay:author's same gap note — dispatch binding is currently the
   host's job).
