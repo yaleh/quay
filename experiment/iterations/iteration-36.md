@@ -323,13 +323,19 @@ closest — and directly on-point — precedent is **iteration 28
 reasoning explicitly that "a new registration/discoverability proof for
 an already-existing capability is a different kind of evidence than a
 new capability, a new gate-logic change, a new schema-symmetry proof,
-or a new Skill-orchestration branch/scenario." Iterations 29 and 30
+or a new Skill-orchestration branch/scenario." ~~Iterations 29 and 30
 (read in full) independently reached and applied the identical
 conclusion for their own analogous registration/discoverability-proof
-work on the same residual gap. This iteration's QN-047 is squarely the
-same *kind* of event — evidence about an already-existing capability,
-not a new one — so this precedent, not a more loosely-analogous one,
-governs.
+work on the same residual gap.~~ **Corrected post-hoc:** this iteration's
+independent audit found the claim about iterations 29/30 is false —
+iteration 29's task was unrelated CLI-dispatch test coverage (only
+re-confirming, not attempting to close, the MCP-registration gap), and
+iteration 30 closed a different, narrower MCP resource-enumeration gap.
+Iteration 28 alone is the directly on-point precedent; it is sufficient
+on its own and does not need corroboration from 29/30 to govern here.
+This iteration's QN-047 is squarely the same *kind* of event as
+iteration 28's — evidence about an already-existing capability, not a
+new one — so iteration 28's precedent governs.
 
 - **skeleton: 0.69 (unchanged).** `git diff --stat` confirms zero
   change to `packages/quay/src/mcp-server.js` — the capability itself

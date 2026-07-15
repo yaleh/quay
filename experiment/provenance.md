@@ -4878,10 +4878,15 @@ capability is a different kind of evidence than a new capability, a new
 gate-logic change, a new schema-symmetry proof, or a new Skill-
 orchestration branch/scenario. Forcing this into one of the four factors
 to 'reward' real work would repeat exactly the kind of overclaim the
-iteration-25 correction... were built to prevent." Iterations 29 and 30
+iteration-25 correction... were built to prevent." ~~Iterations 29 and 30
 (read in full) independently reached and applied the identical
 conclusion for their own analogous registration/discoverability-proof
-work.
+work.~~ **Corrected post-hoc (per this iteration's own independent
+audit):** this claim about iterations 29/30 is false — iteration 29's
+task was unrelated CLI-dispatch test coverage (only re-confirming, not
+attempting to close, the MCP-registration gap), and iteration 30 closed a
+different, narrower MCP resource-enumeration gap. Iteration 28 alone is
+the directly on-point precedent and is sufficient on its own.
 
 This iteration's QN-047 is squarely the same *kind* of event: `git diff
 --stat` confirms zero change to `packages/quay/src/mcp-server.js` (the
@@ -4891,10 +4896,10 @@ any CLI/MCP schema (`abi-symmetry.mjs` re-run fresh, unchanged, still
 `github-client.js`'s gate logic, and zero Provider-side diff (`git diff
 --stat -- packages/quay-native packages/quay-github` empty, confirmed
 directly) — so `reusability` is not implicated either, for the same
-reason iteration 28 gave. Applying iteration 28/29/30's own precedent
-directly rather than searching for a plausible-sounding but less exact
-match: **all eight V-factors held flat.** V_instance = 0.4833
-(unchanged), V_meta = 0.0973 (unchanged). ΔV_instance = ΔV_meta = 0.0000.
+reason iteration 28 gave. Applying iteration 28's own precedent directly
+rather than searching for a plausible-sounding but less exact match:
+**all eight V-factors held flat.** V_instance = 0.4833 (unchanged),
+V_meta = 0.0973 (unchanged). ΔV_instance = ΔV_meta = 0.0000.
 
 This iteration's genuine contribution — unlike iterations 28-30's own
 partial-closure work — is that it **fully closes** convergence
