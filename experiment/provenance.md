@@ -5723,3 +5723,199 @@ completeness-scope ambiguity iteration 39's audit raised, for this
 particular file (though not for `quay-native-design.md` itself, which
 remains iteration 39's own open question for a future iteration/audit to
 weigh, not re-litigated here).
+
+## Iteration 41 — QN-052 (`quay-github/provider.yml`'s missing `skills_path` field, after an explicit search for effectiveness/reusability-shaped work)
+
+**Mandate this iteration:** look harder than iterations 36-40 for work
+genuinely `effectiveness`- or `reusability`-shaped (e.g. Provider-side
+`quay-github` code changes, or real Skill-orchestration timing data)
+before defaulting to another documentation fix. A substantial investigation
+was performed and is recorded in full in `experiment/iterations/
+iteration-41.md` §3 (Observe); summarized here:
+
+1. **`quay-github` code/test coverage** — cross-referenced every exported
+   function in `packages/quay-github/src/github-client.js`,
+   `manifest.js`, `mcp-server.js` against the 7 `quay-github` test files:
+   all 6 `github-client.js` exports are referenced by 1-3 test files each;
+   `manifest.js`/`mcp-server.js` are exercised via subprocess/MCP-client
+   tests. No genuine, non-manufactured coverage gap was found (unlike
+   iterations 21-23's `serve.js`/`config.js`/`bin/quay.js` findings on the
+   Core side, or QN-036/QN-045's own gaps) — `quay-github`'s code surface
+   is already saturated.
+2. **Live organic GitHub issues (#3, #4)** — re-checked via `gh issue
+   list`/`gh issue view 4`: issue #4 remains at `status:todo`, all four
+   authoring artifacts present in its body, 0/3 AC boxes checked
+   (`quay task check gh-4 --provider github --json` confirmed `ok:false`,
+   `"0/3 AC checkboxes checked"`, live this iteration). This looked like a
+   genuine, natural `quay:author` target — but `data.write` is a
+   **resolved, deliberate v1.1 scope decision** (DESIGN.md §5, QN-024):
+   status-only; `body` (where AC checkboxes live) is read-only. This is a
+   real, structural blocker, not neglect — checking issue #4's AC boxes
+   through the ABI is not currently possible, and extending `data.write`
+   to a body-patch capability now, with no demonstrated need beyond
+   "forcing a reusability data point," would be exactly the anticipatory-
+   design anti-pattern the evolution guidance (ITERATION-PROMPTS.md §8)
+   and G5 warn against. Not attempted.
+3. **`effectiveness`'s own ceiling** — iteration 23's reasoning (quoted
+   and re-read in full this iteration) was reconfirmed: another
+   comparably-scoped timing comparison would not be legitimate further
+   evidence, since two such comparisons (iterations 21, 22) already
+   showed native at or slightly below stage-0 seed pace, and iteration 23
+   explicitly named the only legitimate path forward as "a marginal
+   increment where native session context/tooling measurably speeds up a
+   MORE COMPLEX task" — no such task arose naturally this iteration, and
+   none was fabricated.
+4. **The one genuine finding**: `packages/quay-native/provider.yml`
+   declares both `capabilities.skill: true` AND `skills_path: "./skills"`
+   (pointing at its own real Skill files); `packages/quay-github/
+   provider.yml` declares `capabilities.skill: true` with **no
+   `skills_path` field at all** — confirmed via `grep -n "skills_path"`
+   against both files (zero hits vs. one). Also confirmed via `grep -rn
+   "skills_path" packages/*/src/*.js` (zero hits, repo-wide) that the
+   field is **never read by any code path** — purely declarative
+   metadata, the same class as QN-049/QN-050/QN-051's stale-comment
+   fixes, not a behavior change.
+
+QN-052 fixes this: adds `skills_path: "../quay-native/skills"` to
+`packages/quay-github/provider.yml`, with an explicit comment naming the
+actual Skill files meant (native's own `author/`/`execute/` SKILL.md
+files, invoked via Core's already-working, already-credited
+provider-parameterized `quay task <cmd> --provider github` passthrough,
+QN-029/QN-035) and explicitly disclaiming that any physically-duplicated
+`packages/quay-github/skills/` directory was created (none was — creating
+one would be an unjustified, undemonstrated duplication of Skill content
+across Providers, G5).
+
+**Diff-scope verification:**
+
+```
+$ git diff --stat
+ packages/quay-github/provider.yml | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+$ git diff --stat -- '*.js'
+(empty)
+```
+
+Purely additive (19 new lines appended before `bin_entry`/`mcp_entry`;
+every pre-existing line confirmed byte-identical via direct diff — the
+`bin_entry`/`mcp_entry` lines simply moved down, unchanged in content).
+Zero JavaScript change.
+
+**Full regression suite**, run after the edit: all 24 `*.test.mjs` files
+across all three packages exit 0; `node packages/quay-native/test/
+abi-symmetry.mjs` reports "ALL FOUR SURFACES SYMMETRIC." A live
+`quay-github task check gh-7 --json` re-run confirms the compound-gate
+capability (QN-035) still works unchanged. Zero regressions.
+
+`tasks/QN-052.md` was gated `todo → ready` via `task check`: `ok:true`
+(all four artifacts present). All 4 AC checkboxes were independently
+re-verified (each against live command output: `grep -n "^skills_path:"`,
+the comment content, `git diff --stat -- '*.js'`, the regression-suite
+run) before being checked. One AC item's own wording was corrected before
+checking it (the bare-word `grep -n "skills_path"` count includes comment
+mentions, 6 total, not "exactly one" as originally drafted; corrected to
+`grep -n "^skills_path:"`, the actual field-assignment line, which
+genuinely is exactly one) — an honest self-correction during authoring,
+not a silently-smoothed-over claim.
+
+## σ computation — iteration 41
+
+Total allocated task IDs verified via actual command:
+
+```
+ls tasks/QN-*.md | wc -l   -> 51
+```
+
+(QN-001 through QN-052, minus QN-018, never allocated.)
+
+QN-052 completed its full lifecycle within this iteration: authored
+(`todo → ready`, gated `ok:true`), then executed (`ready → done`, gated
+`ok:true`, 4/4 AC checked), then formally transitioned via `task edit
+QN-052 --status done`. Final provenance triple: `{author_by: native,
+execute_by: native, gate_by: native, status: done}` — same
+single-iteration author+execute convention used for every prior task
+since iteration ~15.
+
+- σ (strict reading: author_by = execute_by = gate_by = native AND status
+  = done) = 44 / 51 = **0.8627** (43/50 = 0.8600 at the start of this
+  iteration, +1 task in both numerator and denominator).
+- σ_author_only (diagnostic: author_by = native regardless of
+  execute_by/gate_by) = 50 / 51 = **0.9804** (QN-052 added to both
+  numerator and denominator).
+
+See `experiment/iterations/iteration-41.md` §6 for the full derivation.
+
+## V-factor attribution — iteration 41 (precedent-derived, held flat)
+
+Per the standing discipline (quote the exact defining language, search all
+of `provenance.md` for the closest precedent, read that precedent's full
+reasoning in full this session, and check whether a closer precedent maps
+to a different factor before crediting), the closest, most directly
+on-point precedents are **iterations 38, 39, and 40's** V-factor
+attributions (all three read in full this iteration), plus, uniquely for
+this iteration, iteration 25's `reusability`-crediting precedent (QN-035,
+also read in full this iteration) as the counter-example that must be
+distinguished, not merely cited.
+
+**`reusability` — the factor requiring the most careful scrutiny this
+iteration, given the mandate to look for reusability-shaped work.**
+Protocol §5.2's exact defining language: "The methodology transfers to a
+**second Provider (GitHub)** unmodified... Measured on the **transfer
+target**, never the accumulated artifact." Iteration 25's QN-035 (the
+last iteration to genuinely move `reusability`, 0.68→0.79) is
+distinguished directly: QN-035 implemented new, previously-absent
+**behavior** (`childrenStatus()` recursion in `github-client.js`) and
+live-verified it against a real, freshly-created compound issue structure
+in `yaleh/quay` — a demonstrated, executable capability transfer. QN-052,
+by contrast, adds a field to `quay-github/provider.yml` that is **never
+read by any code path** (confirmed via `grep -rn "skills_path"
+packages/*/src/*.js`, zero hits) — it documents, but does not itself
+constitute or newly demonstrate, the transfer mechanism (which was
+already live-verified and already credited at iterations 18 and 25). Per
+G2's "never the accumulated artifact" discipline and the precedent chain
+established at QN-049/QN-050/QN-051 for identical-class (declarative-
+metadata-only) fixes, `reusability` is **not** moved by this task. Held
+flat at **0.79**.
+- **completeness**: re-considered per protocol §5.2 ("Methodology
+  (Skills + gates + decomposition rule) fully documented and
+  self-contained"), scoped by the iteration 10/20-29/38/39/40 precedent
+  chain to `quay:author`/`quay:execute`'s own SKILL.md Method-step
+  content. `git diff --stat` confirms no `skills/*/SKILL.md` path
+  touched this iteration. Not implicated. Held flat at **0.74**.
+- **effectiveness: 0.26 (unchanged).** No timing-comparable, scope-matched
+  code-changing task arose this iteration (QN-052 is a manifest-metadata
+  addition, not a candidate for the established comparator methodology);
+  per iteration 23's own standing reasoning (re-read in full this
+  iteration, see this iteration's report §3), no further same-shape
+  comparison was attempted, and no more-complex marginal increment
+  requiring genuinely different evidence arose or was fabricated. Now
+  **21 consecutive iterations (21-40, and now 41)**.
+- **validation: 0.64 (unchanged).** Credited only after the out-of-band
+  audit for this iteration's own work occurs (next iteration, via the
+  top-level orchestrator's separate `Agent` dispatch, G3). Correctly held
+  flat pending that audit.
+
+`skeleton`, `abi_symmetry`, `gate_correctness`, `skill_convergence` were
+each explicitly considered and ruled out: zero JavaScript diff (confirmed
+via `git diff --stat -- '*.js'`); no new CLI/MCP schema-equivalence proof;
+no gate-logic change (a live `quay-github task check gh-7 --json` re-run
+confirms `checkGate()`'s compound-recursion behavior is unchanged); no
+`quay:author`/`quay:execute` SKILL.md Method-step content changed. All
+four held flat: skeleton 0.70, abi_symmetry 0.96, gate_correctness 0.76,
+skill_convergence 0.96.
+
+```
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = 0.4903  (unchanged)
+V_meta      = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+ΔV_instance = ΔV_meta = **0.0000**. This iteration's genuine contribution
+— an explicit, substantial search for effectiveness/reusability-shaped
+work (documented in full, including two concrete near-misses: `quay-
+github`'s already-saturated test coverage, and issue #4's structurally-
+blocked AC-checkbox path) that honestly found no such work available this
+iteration, plus a real, previously-undiscovered manifest asymmetry closed
+— is not automatically forced into one of the eight precisely-scoped
+V-factor axes when the evidence does not support it, per the standing
+discipline (iterations 25, 28, 29, 37, 38, 39, 40).

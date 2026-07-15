@@ -84,5 +84,24 @@ repo:
   name: "quay"
   # QUAY_GITHUB_REPO env var overrides this at runtime (see bin/quay-github.js).
 
+# skills_path (QN-052, iteration 41): fixes a real, previously-undiscovered
+# manifest asymmetry with native's own provider.yml, which declares
+# skills_path: "./skills" alongside its own capabilities.skill: true. This
+# Provider declared capabilities.skill: true (above) with no corresponding
+# skills_path field at all. IMPORTANT — this field is documentary/
+# declarative only (confirmed via `grep -rn skills_path packages/*/src/*.js`:
+# zero consumers repo-wide, in either Provider or Core); it does NOT mean a
+# duplicate packages/quay-github/skills/ directory exists, and none was
+# created by this fix (that would be an unjustified, undemonstrated
+# duplication of Skill content across Providers, not a real transfer proof —
+# G5). The path below names the SAME two Skill files native's own
+# skills_path already names (packages/quay-native/skills/author/SKILL.md,
+# .../execute/SKILL.md) — this Provider's actual, already-working,
+# already-credited (QN-029, iteration 18; QN-035, iteration 25) transfer
+# mechanism is Core's provider-parameterized `quay task <cmd> --provider
+# github` passthrough invoking those same physical files, not a
+# per-Provider physical copy.
+skills_path: "../quay-native/skills"
+
 bin_entry: ["node", "./bin/quay-github.js"]
 mcp_entry: ["node", "./bin/quay-github.js", "mcp"]
