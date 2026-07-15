@@ -8940,3 +8940,116 @@ Future iterations authoring a task directly at a terminal status (rather
 than running the full create→gate→transition→gate sequence) should
 disclose this plainly as a narrower/weaker gate exercise, not describe
 it as matching a precedent that in fact ran the full sequence.
+
+## Iteration 58: QN-062 — Provider-subprocess startup-failure propagation (Core CLI + Core MCP)
+
+Iteration 57's own reflection explicitly named the next genuinely new
+angle after the cross-Provider read-path sweep (iterations 54-57, CLI/
+MCP/Web-UI) was fully exhausted: "negative/error-path coverage
+specifically for the GitHub Provider (e.g. malformed issue bodies, a
+repo/token misconfiguration, rate-limit or network-failure handling)."
+This iteration's standing dispatch reiterated the same exhaustion
+finding explicitly and forbade repeating or lightly varying the
+read-path sweep.
+
+Grepped provenance.md for prior tests of the GitHub Provider's
+misconfiguration path: the only hit was QN-034 (iteration 24), which
+tests `resolveRepo()`'s synchronous throw (on a malformed
+`QUAY_GITHUB_REPO`) directly against `quay-github.js`'s own CLI — never
+through any Core-level binding, where the failure must additionally
+survive an MCP stdio-transport connect attempt
+(`provider-client.js`'s `connectProvider()`) before reaching the caller.
+
+Read `provider-client.js`, `bin/quay.js`, `serve.js`, and `mcp-server.js`
+in full/relevant-sections this session. Manually verified (via a
+throwaway workspace and script, both deleted immediately after use,
+confirmed absent via `git status --short`) a genuine, previously
+undocumented asymmetry: Core CLI and Web UI connect to every enabled
+Provider **eagerly** (a crashing Provider fails fast, verbose
+name-bearing stderr diagnostic, exit code 1); Core's own MCP server
+connects **lazily** (only on first tool call naming the Provider —
+`quay mcp` itself starts fine even with a broken Provider config; the
+first tool call against it returns a gracefully-caught `isError:true`
+MCP result whose error text is opaque, `MCP error -32000: Connection
+closed`, never surfacing `resolveRepo()`'s own diagnostic text).
+
+Added test 12 to `packages/quay/test/cli.test.mjs` (a Provider whose
+`mcp_entry` crashes on launch via malformed `QUAY_GITHUB_REPO`; asserts
+exit code 1, empty stdout, stderr names the failure) and block 11 to
+`packages/quay/test/mcp-server.test.mjs` (same broken-Provider fixture
+via a real `quay mcp` subprocess; asserts `task_list` returns
+`isError:true` with non-empty error text, and that a second, independent
+call also returns `isError:true`, proving the aggregator process
+survives the first failure). 156 lines added across the two existing
+files; `git diff --stat -- packages/*/src/*.js` empty (test-file-only
+change). No live GitHub network access required for either test (the
+failure is local/synchronous, before any `gh api` call). Full
+regression suite: 26/26 (unchanged top-level count — both new blocks
+landed inside already-counted files). `abi-symmetry.mjs`: ALL FOUR
+SURFACES SYMMETRIC. Issue #3's labels/state unchanged before/after.
+
+QN-062 was created and driven through the **full gated lifecycle**
+(`task create` → `todo`, gated `author->ready` check, `task edit
+--status ready`, gated `execute->done` check, `task edit --status
+done`, terminal `task check` confirming `"gate":"none"`) — explicitly
+NOT authored directly at terminal `status: done`, in direct response to
+iteration 57's own post-hoc correction (its eleventh confirmed
+correction), which found iteration 57 falsely claimed a direct-to-done
+authoring shortcut "matched" a stronger, full-lifecycle precedent.
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-062 | Add cross-Provider (GitHub) subprocess-startup-failure test coverage for Core CLI and Core MCP | native | native | native | done |
+
+σ (strict) = 54/61 = **0.8852** (up from 53/60 = 0.8833).
+
+**V_instance factor reasoning:** `skeleton` credited **+0.01 (0.74 →
+0.75)**, following the identical reasoning pattern iterations 54-57 used
+for their own new-angle-but-same-factor-shape closures (test-coverage-
+only regression addition, zero source diff, for an already-existing,
+unmodified capability) — applied here to a genuinely different content
+(Provider startup-failure propagation, not read-path success rendering).
+`gate_correctness` explicitly considered and rejected (Provider
+subprocess-connection failure is a materially different code path from
+the task-lifecycle gate mechanism `checkGate()`/`store.js`; no
+task-lifecycle gate logic was touched). `abi_symmetry` explicitly
+considered and rejected (this iteration's tests make no cross-binding
+content-equivalence claim; if anything they document a deliberate
+*asymmetry* in error-message shape between CLI and MCP, the opposite of
+what `abi_symmetry` measures). `skill_convergence` unchanged (no
+SKILL.md content touched).
+
+```
+V_instance = 0.75 × 0.96 × 0.76 × 0.96 = 0.5253  (up from 0.5183)
+```
+
+**V_meta factor reasoning:** all four factors held flat. `effectiveness`
+was explicitly investigated (per this iteration's standing instruction,
+given this task's genuine lack of live-network dependency) but declined
+per iteration 23's own precedent (QN-033, read in full this session),
+which requires an actual timed comparison against the stage-0 baseline
+— merely lacking a network dependency does not by itself constitute
+evidence, and manufacturing a timing comparison purely to decide credit
+was explicitly rejected as bad practice by that precedent. `reusability`
+held flat (this iteration's tests prove an existing transfer property of
+`provider-client.js`'s Provider-agnostic connection code, not new
+transfer evidence). `completeness` and `validation` held flat (no
+methodology documentation change; no audit yet exists for this
+iteration's own work, reserved for the top-level orchestrator).
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+No system evolution (no new agent, no new capability, no Skill change)
+is warranted — the standing system (M_57 = M_58, A_57 = A_58) remains
+stable. This iteration closes one concrete instance of the
+negative/error-path angle iteration 57 named; future iterations should
+look for other negative/error-path instances (malformed issue bodies,
+rate-limit/network-transient-failure handling, misconfiguration surfaced
+at other lifecycle points) rather than treating this broader angle as
+exhausted after a single instance, and should not assume the
+CLI-vs-MCP error-shape asymmetry documented here needs fixing absent a
+demonstrated genuine need (G5 discipline — noted, not actioned).
+
+Full detail: `experiment/iterations/iteration-58.md`.

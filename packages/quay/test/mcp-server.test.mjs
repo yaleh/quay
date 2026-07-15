@@ -65,6 +65,21 @@
 //      safely target with destructive live writes in an automated,
 //      repeatable test file) and iteration 55's identical CLI-layer
 //      exclusion of `task edit --provider github` for the same reason.
+//   8. (QN-062, iteration 58) Provider-subprocess STARTUP-FAILURE
+//      propagation through `quay mcp`'s tool-call surface -- a genuinely
+//      new angle from the read-path cross-Provider sweeps above: what
+//      happens when an enabled Provider's own mcp_entry crashes on launch
+//      (malformed QUAY_GITHUB_REPO), not what happens when a live,
+//      correctly-configured Provider returns ordinary data. Requires no
+//      live GitHub network access (the failure is local/synchronous).
+//      Block 11 below documents, honestly, a real asymmetry: mcp-server.js
+//      connects LAZILY (so `quay mcp` itself starts up fine even with a
+//      broken Provider, only failing -- gracefully, isError:true -- on the
+//      first tool call that targets it), unlike serve.js/bin/quay.js which
+//      connect eagerly and fail fast; and the resulting MCP-level error
+//      text is opaque ("Connection closed"), NOT the same name-bearing
+//      diagnostic cli.test.mjs's sibling test (test 12 there) observes on
+//      the CLI/Web-UI layer's stderr.
 //
 // Run: node test/mcp-server.test.mjs
 
@@ -442,6 +457,67 @@ async function main() {
 
     await coreGh.close();
     fs.rmSync(ghWorkspaceRoot, { recursive: true, force: true });
+  }
+
+  // ---- 11. (QN-062, iteration 58) Provider-subprocess STARTUP-FAILURE
+  //      propagation through `quay mcp`'s tool-call surface, local-only (no
+  //      live network) — the MCP-layer sibling of cli.test.mjs's new test
+  //      12. Unlike serve.js/bin/quay.js (which connect to every Provider
+  //      eagerly, so a crashing Provider fails fast at startup, before
+  //      anything is served), mcp-server.js's own getClient() connects
+  //      LAZILY, on first tool call that names the Provider (see this
+  //      file's header / mcp-server.js's own doc comment) -- so `quay mcp`
+  //      itself starts up successfully even with a Provider whose mcp_entry
+  //      will crash, and the failure only surfaces on the first tool call
+  //      that actually targets it. This test proves that first call returns
+  //      isError:true (a graceful MCP-protocol-level failure), not a
+  //      hang or an uncaught-exception crash of the `quay mcp` process
+  //      itself -- but ALSO documents, honestly, that the resulting error
+  //      text is opaque ("MCP error -32000: Connection closed") and does
+  //      NOT surface bin/quay-github.js's own actual diagnostic
+  //      ("QUAY_GITHUB_REPO must be \"owner/repo\""), which is only ever
+  //      visible on the crashed child's own stderr (verified by hand this
+  //      iteration, not asserted here since a torn-down child process's
+  //      stderr is not retained by the MCP SDK's client transport). This is
+  //      a real, previously-undocumented asymmetry between the CLI/Web-UI
+  //      layer (verbose but name-bearing stderr diagnostic) and the MCP
+  //      layer (a protocol-level error code only) for the identical root
+  //      cause -- named honestly here rather than glossed over.
+  {
+    const brokenWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-workspace-broken-"));
+    fs.mkdirSync(path.join(brokenWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(brokenWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  broken-github:",
+        "    enabled: true",
+        `    path: "${githubProviderDir}"`,
+        `    mcp_entry: ["node", "${githubBin}", "mcp"]`,
+        "    env:",
+        "      QUAY_GITHUB_REPO: \"this-is-not-owner-slash-repo\"",
+        "",
+      ].join("\n")
+    );
+
+    const { client: coreBroken, transport: coreBrokenTransport } = await connectStdio("node", [coreBin, "mcp"], brokenWorkspaceRoot);
+
+    const tl = await coreBroken.callTool({ name: "task_list", arguments: {} });
+    assert(tl.isError === true, "task_list against a Provider whose mcp_entry crashes on launch returns isError:true (a graceful MCP-level failure, not a hang or an uncaught crash of quay mcp itself)");
+    assert(
+      typeof tl.content?.[0]?.text === "string" && tl.content[0].text.length > 0,
+      `task_list against a crashing Provider still returns a non-empty error text field (got: ${JSON.stringify(tl.content)})`
+    );
+
+    // A second, independent call proves `quay mcp` itself is still alive
+    // and responsive after the first call's underlying connection attempt
+    // failed -- the crash is scoped to that one Provider's connection, not
+    // fatal to the aggregator process as a whole.
+    const tl2 = await coreBroken.callTool({ name: "task_list", arguments: {} });
+    assert(tl2.isError === true, "a second task_list call against the same broken Provider also returns isError:true (quay mcp itself did not crash or hang after the first failure)");
+
+    await coreBroken.close();
+    fs.rmSync(brokenWorkspaceRoot, { recursive: true, force: true });
   }
 
   // ---- Cleanup ----

@@ -62,6 +62,26 @@
 // applies identically here, so the exclusion is a correctly-precedented
 // boundary, not an oversight.
 //
+// Iteration 58 added test 12: a genuinely new angle from the three
+// consecutive read-path cross-Provider sweeps (54/55 at the CLI layer, 56
+// at the Core MCP layer, 57 at the Web-UI layer) — Provider-subprocess
+// STARTUP-FAILURE propagation through Core's CLI, i.e. what happens when an
+// enabled Provider's own mcp_entry process crashes immediately on launch
+// (e.g. a malformed QUAY_GITHUB_REPO env value causing
+// bin/quay-github.js's own resolveRepo() to throw before the MCP transport
+// is ever established), NOT what happens when a live, correctly-configured
+// Provider returns ordinary application-level data (the shape every prior
+// cross-Provider test closed). Grepping every *.test.mjs file in the repo
+// for "QUAY_GITHUB_REPO must be" confirmed this exact failure mode was
+// previously tested only once, directly against packages/quay-github/
+// bin/quay-github.js's own CLI (packages/quay-github/test/cli.test.mjs) —
+// never through any Core-level binding (CLI, MCP, or Web UI), where the
+// error must additionally survive an MCP stdio-transport connection
+// attempt before reaching the caller. This test requires no live GitHub
+// network access at all (the failure is local/synchronous, before any `gh
+// api` call would even be attempted), so it needs no `gh auth status`
+// precondition, unlike tests 8/10/11.
+//
 // Run: node test/cli.test.mjs
 // Precondition for tests 8, 10, and 11 only: `gh auth status` must show an
 // authenticated session with read access to yaleh/quay (a standing stage-2+
@@ -659,6 +679,66 @@ async function main() {
     }
 
     // Restore the native-only config for cleanliness (matches tests 8/10's own convention).
+    fs.writeFileSync(
+      path.join(workspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        "      QUAY_NATIVE_TASKS_DIR: \"./tasks-env-relative\"",
+        "",
+      ].join("\n")
+    );
+  }
+
+  // 12. QN-062 (iteration 58): Provider-subprocess STARTUP-FAILURE
+  //     propagation through Core's CLI, local-only (no live network) — a
+  //     malformed QUAY_GITHUB_REPO env value causes bin/quay-github.js's
+  //     own resolveRepo() to throw synchronously, before the MCP stdio
+  //     transport handshake ever completes, so `withProvider()`'s
+  //     `connectProvider()` call rejects. This test proves Core's own
+  //     `main().catch(...)` handler (bin/quay.js) still correctly reports
+  //     failure (a real, if verbose, diagnostic on stderr, and exit code 1)
+  //     rather than hanging, silently swallowing the error, or exiting 0.
+  {
+    fs.writeFileSync(
+      path.join(workspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        "      QUAY_NATIVE_TASKS_DIR: \"./tasks-env-relative\"",
+        "  broken-github:",
+        "    enabled: false",
+        `    path: "${githubProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${githubBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        "      QUAY_GITHUB_REPO: \"this-is-not-owner-slash-repo\"",
+        "",
+      ].join("\n")
+    );
+
+    const r = run(["task", "list", "--provider", "broken-github", "--json"], spawnOpts);
+    assert(r.status === 1, `quay task list --provider <a Provider whose mcp_entry crashes on launch> exits 1 (got ${r.status})`);
+    assert(
+      r.stdout.trim() === "",
+      "quay task list against a crashing Provider subprocess writes nothing to stdout (the diagnostic goes to stderr only, not mixed into what a --json caller would try to parse)"
+    );
+    assert(
+      r.stderr.includes("QUAY_GITHUB_REPO must be") || r.stderr.includes("Connection closed"),
+      `quay task list against a crashing Provider subprocess reports a diagnostic on stderr naming the failure (got: ${r.stderr.slice(0, 300)})`
+    );
+
+    // Restore the native-only config for the next block (matches tests
+    // 8/10/11's own convention).
     fs.writeFileSync(
       path.join(workspaceRoot, ".quay", "config.yml"),
       [
