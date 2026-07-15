@@ -471,8 +471,13 @@ points**, named explicitly for the next audit to check independently:
       < 0.02 on its own, but this breaks the "2+ consecutive iterations"
       requirement in spirit: iteration 32 was flat (ΔV_instance = 0.0000),
       and this iteration moved +0.0119, a materially larger, genuinely
-      evidence-grounded jump (the largest V_instance movement since
-      iteration 25) reflecting real new capability plus a real new
+      evidence-grounded jump (~~the largest V_instance movement since
+      iteration 25~~ — corrected post-hoc: this was independently checked
+      by the iteration-33 audit and found false; iteration 26's own
+      ΔV_instance was +0.0134, larger than this iteration's +0.0119; the
+      correct framing is "the second-largest V_instance movement since
+      iteration 25, and the largest since iteration 26" — see
+      `provenance.md`) reflecting real new capability plus a real new
       symmetry-proof surface — not plateau noise. Recorded honestly: this
       is the second consecutive iteration (31, and now 33, with 32's own
       QN-043 flat in between) with a non-trivial, non-repeating V_instance
@@ -481,7 +486,9 @@ points**, named explicitly for the next audit to check independently:
       (< 0.02) is still satisfied this iteration in isolation, but the
       *substance* of criterion 5 — diminishing returns, i.e. movements
       trending toward zero — is not what this iteration's own result shows
-      (it is the largest movement in 8 iterations). Scored **NO** on
+      (it is ~~the largest movement in 8 iterations~~ the second-largest
+      movement since iteration 25, corrected post-hoc — see
+      `provenance.md`). Scored **NO** on
       substance, over-riding a bare literal-numeric pass, consistent with
       this experiment's standing practice (iterations 29, 31) of treating
       criterion 5's literal wording as necessary but not sufficient

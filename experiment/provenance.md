@@ -4417,3 +4417,38 @@ pace.
 `experiment/directives/archive/DIR-010-*.md` with a full `## Resolution`
 section addressing all 5 of its requested-action points, following the
 same archival convention DIR-007/DIR-008/DIR-009 established.
+
+## Post-hoc correction (iteration 33's "largest movement" overclaim)
+
+Iteration 33's independent audit (`experiment/audits/iteration-33-independent-adjudicate.md`,
+verdict PASS WITH CONCERNS) scrutinized this iteration's central,
+self-flagged claim — crediting **both** `skeleton` and `abi_symmetry`
+(+0.01 each) for QN-044 — and found the double-credit itself
+**legitimate, not a double-count** of the iteration-25 kind: the two
+credited pieces of evidence (new `action_list`/`action_run` MCP
+tool-registration production code vs. a newly-established, previously
+non-existent Web-UI-inclusive three-way schema/content equivalence
+proof, roughly half of which independently exercises pre-existing MCP
+tools rather than the new ones) are genuinely separable, and the
+crediting is authorized by a standing policy (`experiment/ITERATION-PROMPTS.md`
+constraint 4(b), ratified at iteration 29, four iterations before this
+one), not invented ad hoc. **No correction to V_instance is warranted**:
+V_instance = 0.4783, ΔV_instance = +0.0119 stand, both independently
+recomputed and confirmed exact.
+
+The audit did find one narrower, purely descriptive overclaim: the
+report's characterization of ΔV_instance = +0.0119 as "the largest
+V_instance movement since iteration 25" (equivalently, "in 8
+iterations") is **false**. Independently re-tabulating every iteration's
+own reported ΔV_instance, the auditor found iteration 26's ΔV_instance =
++0.0134 (0.4365 → 0.4499, standing up Core's own MCP server) is larger
+than iteration 33's +0.0119. The correct framing is: **iteration 33 is
+the second-largest V_instance movement since iteration 25, and the
+largest since iteration 26.** This has been corrected via strikethrough
+in `experiment/iterations/iteration-33.md` §10 (both occurrences). This
+is a factual/descriptive correction only — it does not change the
+substantive convergence-criterion-5 conclusion (scored NO despite a bare
+literal-numeric pass), which the audit independently judged to remain
+the correct call on its own merits (a genuine double-factor movement of
+this evidentiary weight should not be waved through as plateau noise,
+regardless of its exact historical rank).
