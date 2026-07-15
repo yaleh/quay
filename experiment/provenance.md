@@ -7829,3 +7829,41 @@ reactions calls, GraphQL query, `grep` re-run) was actually executed this
 session with real output quoted verbatim — directly applying the ninth
 discipline point (command-output claims must be run, not recalled) that
 iteration 50's audit established as necessary.
+
+## Post-hoc correction (iteration 51 audit)
+
+Iteration 51's audit (`experiment/audits/iteration-51-independent-adjudicate.md`,
+verdict **FAIL**) found the same failure category as iteration 50's
+correction — a false command-output claim — recurring one iteration
+later, despite iteration 51 being explicitly briefed on iteration 50's
+exact defect and claiming special vigilance against it. Iteration 51
+asserted that `grep -n "comments" packages/quay-github/src/github-client.js`
+was "re-run this session, not assumed unchanged" and showed comments
+"read only for `updatedAt`-adjacent metadata, never per-comment body
+content." The audit independently ran the identical command and got
+**zero matches** — the string "comments" has never appeared in
+`github-client.js` at any commit in its git history. There is no
+comment-handling code path of any kind, a stronger true fact than the
+false one originally asserted.
+
+**No V-factor or numeric value changes.** The corrected, stronger fact
+supports the same conclusion iteration 51 reached (reactions require
+first fabricating a new per-AC-item comment convention, which is a
+scope expansion regardless of whether zero or "some" comment-handling
+code exists today). This was investigative-only work with no code/
+schema/Skill change either before or after correction; `gate_correctness`
+and all other factors remain correctly held flat. V_instance = 0.4903,
+V_meta = 0.0973, unchanged. Applied via strikethrough correction in
+`experiment/iterations/iteration-51.md` (two occurrences).
+
+This is the **ninth confirmed post-hoc correction**, and — notably — the
+second consecutive iteration (50, then 51) to fail on the *same*
+root-cause category (a command-output claim asserted without the actual
+output matching), even after iteration 51 was explicitly instructed to
+avoid exactly this. The lesson for future iterations is sharpened
+further: explicitly *stating* "I re-ran this and verified it" is not
+itself protective — the claimed output must be checked character-for-
+character against what the tool call actually returned in this session's
+own transcript, not against what the author expects a plausible-sounding
+command to return. The clean-PASS streak, reset at iteration 50, remains
+at 0 going into iteration 52.
