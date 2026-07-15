@@ -2483,3 +2483,120 @@ criterion 5 firing does **not** by itself constitute overall protocol
 §7 convergence (criteria 1-3 remain clearly unmet), and the explicit,
 unresolved practical-convergence question surfaced for the
 human/top-level orchestrator.
+
+## Records (as of end of iteration 17)
+
+**Pre-execution context:** iteration 16 explicitly surfaced a
+top-level-orchestrator judgment call — declare practical convergence, or
+deliberately author the next real increment now that organic discovery
+had genuinely plateaued (three consecutive flat iterations). The
+orchestrator made that call for this iteration: deliberately scope and
+implement quay-github's `gate` capability (QN-028), the next planned
+increment per protocol §10 resolved decision 4 (quay-github as the
+V_meta transfer target).
+
+**QN-028 authored and driven to `done` this iteration, natively, in
+degraded-fallback (same-session) mode — consistent with every prior
+iteration's provenance category, not a distinct/stricter one.**
+`store.js#check()`/`artifactSections()`/`extractSection()` were read in
+full before any design work, to establish the exact operational gate
+semantics being ported (not assumed from DESIGN.md alone). Implementation:
+`github-client.js` gained `checkGate()` (pure function) + `check(id)`
+(client method); `mcp-server.js` registered `task_check` (same `{id}`
+input / `structuredContent` output shape as native's own tool); `provider.yml`
+flipped `gate: false` → `gate: true`; `bin/quay-github.js` gained a `task
+check <id>` CLI subcommand. Scope deliberately excluded compound/epic
+children-recursion (no real compound GitHub task has ever existed in this
+experiment) and the `skill` capability (a structurally separate increment,
+left `false`, confirmed unchanged by grep) — per G5 walking-skeleton
+discipline and the dispatch's explicit scope-narrowing instruction.
+
+**Test coverage:** new `packages/quay-github/test/gate.test.mjs` (7 cases
++ 1 documentation-only assertion, mirroring `gate-correctness.test.mjs`'s
+structure). One genuine fixture-length bug was found and fixed during
+authoring (an AC-checkbox fixture too short to clear `MIN_SECTION_CHARS`,
+causing a "missing artifacts" false-negative instead of the intended
+checkbox-count branch) — fixed by lengthening the fixture text, matching
+a discipline already established elsewhere in this codebase's own test
+fixtures. Final run: 19/19 assertions passed, exit 0. Full regression
+suite (13 test files: 12 pre-existing + the new file) re-run fresh
+end-to-end: 13/13 green, zero regressions.
+
+**Live verification, not merely unit-tested:** `quay-github task check
+gh-3 --json` and `gh-4 --json` were run against this repository's two
+real, live GitHub issues (read-only; no state mutated), each correctly
+reporting `ok:false` (their real AC checkboxes are genuinely unchecked).
+Core's existing, unmodified `taskCheck()` passthrough (`provider-client.js`,
+added QN-027/iteration 13, zero backend-specific branching) was then run
+against the same two issues via `quay task check gh-3/gh-4 --provider
+github --json` and produced **byte-identical JSON** to the direct
+`quay-github` CLI's own output for both issues — the concrete
+reusability/transfer-proof evidence protocol §5.2's `reusability`
+component and this task's AC item 5 require. `DESIGN.md` gained a new
+§3.5 documenting this path (and §4/§5 were updated to match), resolving
+a forward-reference gap noted mid-iteration.
+
+**Full author→execute→done cycle driven this iteration, using native
+Skills:** `quay-native task check QN-028 --json` confirmed the
+`author->ready` gate `ok:true` once all four artifact sections were
+authored; `quay:author`'s method (same-session degraded-fallback mode,
+consistent with all 16 prior iterations — no subagent-dispatch primitive
+found in this environment) drove `todo -> ready` via `task edit --status
+ready`. All 5 AC checkboxes were then independently re-verified against
+real command output (not "should work" reasoning) and checked; `quay-native
+task check QN-028 --json` confirmed the `execute->done` gate `ok:true`
+(`5/5 AC checkboxes checked`); `quay:execute`'s method drove `ready ->
+done` via `task edit --status done`. QN-028 is now `{author_by: native,
+execute_by: native, gate_by: native, status: done}` — a genuine, complete,
+non-adversarial provenance triple, the first new one since QN-027
+(iteration 13).
+
+**One genuinely unrelated finding, not produced by this iteration's own
+work:** a pre-existing, uncommitted working-tree edit to
+`experiment/directives/pending/DIR-005-dispatch-to-own-monitor-channel.md`
+(documenting a live subagent monitor-discovery experiment) was found
+sitting in the working tree from earlier in this same session, before
+QN-028's work began. It is unrelated to QN-028's file scope and is
+committed separately, not folded into QN-028's commit or credited toward
+this iteration's V-component evidence.
+
+## σ computation — iteration 17
+
+QN-028 reaches `{native, native, native, done}` this iteration — the
+first new qualifying task since QN-027 (iteration 13):
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 20 / 27
+  = 0.7407
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 22 / 27
+  = 0.8148
+```
+
+Total task count is now **27** (QN-001..QN-028, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration (QN-028, done).
+
+**σ (strict) = 0.7407, up from 0.7308 at the end of iteration 16 (Δσ =
++0.0099).** QN-028 was a genuine, deliberately-scoped, non-adversarial
+capability increment, designed and driven to `done` within this
+iteration, using native's own Skills.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 26 / 27
+              = 0.9630
+```
+
+Up from 0.9615 at the end of iteration 16 (one new natively-authored
+task, QN-028, added to both numerator and denominator).
+
+See `experiment/iterations/iteration-17.md` for the full evaluation,
+including V_instance/V_meta recalculation and convergence-criteria
+re-evaluation (criterion 5 re-examined given genuinely new work this
+iteration, per this iteration's explicit dispatch instruction not to
+mechanically carry forward iteration 16's YES verdict).

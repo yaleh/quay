@@ -105,7 +105,19 @@ async function main() {
       return;
     }
 
-    console.error(`unknown task subcommand: ${sub} (v1 supports list/get/edit --status only)`);
+    if (sub === "check") {
+      // QN-028 (iteration 17): gate capability CLI surface, mirroring
+      // quay-native's own `task check` convention (JSON if --json, else a
+      // human-readable PASS/FAIL summary line; process.exitCode from ok).
+      const id = positional[0];
+      const result = client.check(id);
+      if (flags.json) printJson(result);
+      else console.log(`${id}: ${result.ok ? "PASS" : "FAIL"} — ${result.reason}`);
+      process.exitCode = result.ok ? 0 : 1;
+      return;
+    }
+
+    console.error(`unknown task subcommand: ${sub} (v1 supports list/get/edit --status/check only)`);
     process.exitCode = 1;
     return;
   }

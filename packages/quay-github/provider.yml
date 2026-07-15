@@ -2,15 +2,16 @@
 # (quay-proposal.md §10, QN-002's Plan/AC). Travels with the Provider.
 #
 # v1 walking skeleton (G5): read + minimal status-only write (QN-024,
-# iteration 10). gate/skill remain explicitly deferred, not merely omitted
-# by oversight — see DESIGN.md §5.
+# iteration 10) + gate (QN-028, iteration 17, primitive tasks only). skill
+# remains explicitly deferred, not merely omitted by oversight — see
+# DESIGN.md §5.
 
 id: github
 name: "quay-github"
 description: >
-  GitHub Provider (v1, read + status-write): maps this repository's Issues
-  onto the canonical task view-model (DESIGN.md). Second real backend,
-  proves the ABI transfers to a heterogeneous store (proposal §14).
+  GitHub Provider (v1, read + status-write + gate): maps this repository's
+  Issues onto the canonical task view-model (DESIGN.md). Second real
+  backend, proves the ABI transfers to a heterogeneous store (proposal §14).
 
 capabilities:
   data.read: true    # task_list, task_get — required
@@ -18,9 +19,13 @@ capabilities:
   data.write: true   # QN-024 (iteration 10): status-only write. title/body/
                      # labels/parent/children remain unimplemented — see
                      # DESIGN.md §5/QN-024's own AC for the exact scope line.
-  gate: false        # deferred — no natural reason to implement this
-                     # iteration either; QN-024's scope is data.write only.
-  skill: false        # deferred, same reason
+  gate: true          # QN-028 (iteration 17): task_check, primitive tasks
+                     # only (no compound/epic children-recursion — this
+                     # experiment has never had a real compound GitHub
+                     # task; see DESIGN.md §3.5/github-client.js#checkGate).
+  skill: false        # deferred — gate and skill are separate capabilities;
+                     # skill (status→Skill map / action buttons) remains a
+                     # distinct follow-up if later needed, not folded in here.
 
 # status model (design §3) — same 4-state vocabulary as native; GitHub has
 # no native status field, so this Provider derives status from issue.state

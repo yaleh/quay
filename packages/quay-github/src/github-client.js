@@ -235,6 +235,131 @@ export function computeStatusWrite({ currentLabelNames, status }) {
   };
 }
 
+// QN-028: gate capability (task_check equivalent for GitHub-backed tasks).
+// Direct port of quay-native's store.js#check()/artifactSections()/
+// extractSection() semantics, adapted to operate on an issue's raw body
+// text instead of a native task file's body -- same regex shapes, same
+// content-length floor, so the two implementations stay structurally
+// comparable side by side (design's Provider-independence principle: no
+// cross-package import, each Provider ports the semantic itself).
+//
+// Scope discipline (G5): primitive (non-compound) tasks only -- this
+// experiment has never had a real compound GitHub-backed task (children
+// has always been empty for every real issue used so far), so no
+// children-recursion (native's QN-012/QN-016 childrenStatus) is ported
+// here. `done` status is an unconditional terminal pass for a primitive,
+// matching native's own check()'s done-branch degrade-to-leaf behavior.
+const MIN_SECTION_CHARS = 40;
+
+/** Same end-of-string-safe heading-section extractor as store.js's
+ * extractSection -- JS has no \Z anchor; `(?![\s\S])` is the correct
+ * end-of-string lookahead (native's own QN-005 fix, ported verbatim to
+ * avoid reintroducing the same bug in a second implementation). */
+function extractGateSection(body, headings) {
+  for (const h of headings) {
+    const re = new RegExp(`^##\\s+${h}\\b([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im");
+    const m = re.exec(body || "");
+    if (m) return m[1];
+  }
+  return "";
+}
+
+function gateArtifactSections(body) {
+  const has = (heading) => {
+    if (!new RegExp(`^##\\s+${heading}\\b`, "im").test(body || "")) return false;
+    const content = extractGateSection(body, [heading]);
+    const nonWhitespaceLen = content.replace(/\s/g, "").length;
+    return nonWhitespaceLen >= MIN_SECTION_CHARS;
+  };
+  return {
+    proposal: has("Proposal"),
+    plan: has("Plan"),
+    ac: has("AC") || has("Acceptance Criteria"),
+    dod: has("DoD") || has("Definition of Done"),
+  };
+}
+
+/**
+ * QN-028: the gate-check equivalent of native's store.js#check(), for a
+ * GitHub-backed task. Given the task's already-derived view-model `status`
+ * and its raw issue `body`, returns the same `{gate, ok, reason, acTotal,
+ * acChecked}` shape native's check() returns for todo/ready/done, primitive
+ * tasks only (no children-recursion -- see file header note above).
+ *
+ * @param {{id: string, status: string, body: string}} task
+ */
+export function checkGate(task) {
+  const { id, status, body } = task;
+  const artifacts = gateArtifactSections(body);
+  const allArtifactsPresent = Object.values(artifacts).every(Boolean);
+
+  if (status === "todo") {
+    const gate = "author->ready";
+    const acSection = extractGateSection(body, ["AC", "Acceptance Criteria"]);
+    const acCheckboxes = acSection.match(/- \[[ xX]\]/g) || [];
+    const acChecked = acSection.match(/- \[[xX]\]/g) || [];
+    const acHasCheckbox = acCheckboxes.length > 0;
+    if (allArtifactsPresent && !acHasCheckbox) {
+      return { id, gate, ok: false, artifacts, reason: "AC section has no checkboxes" };
+    }
+    const acAllChecked = acHasCheckbox && acChecked.length === acCheckboxes.length;
+    if (allArtifactsPresent && acHasCheckbox && !acAllChecked) {
+      return {
+        id,
+        gate,
+        ok: false,
+        artifacts,
+        acTotal: acCheckboxes.length,
+        acChecked: acChecked.length,
+        reason: `${acChecked.length}/${acCheckboxes.length} AC checkboxes checked`,
+      };
+    }
+    const ok = allArtifactsPresent && acAllChecked;
+    return {
+      id,
+      gate,
+      ok,
+      artifacts,
+      reason: ok
+        ? "all four artifacts present; eligible to move to ready"
+        : "missing artifacts: " +
+          Object.entries(artifacts)
+            .filter(([, v]) => !v)
+            .map(([k]) => k)
+            .join(", "),
+    };
+  }
+
+  if (status === "ready") {
+    const acSection = extractGateSection(body, ["AC", "Acceptance Criteria"]);
+    const checkboxes = acSection.match(/- \[[ xX]\]/g) || [];
+    const checked = acSection.match(/- \[[xX]\]/g) || [];
+    const acOk = checkboxes.length > 0 && checked.length === checkboxes.length;
+    return {
+      id,
+      gate: "execute->done",
+      ok: acOk,
+      acTotal: checkboxes.length,
+      acChecked: checked.length,
+      reason: acOk
+        ? "all AC checkboxes checked; eligible to move to done"
+        : `${checked.length}/${checkboxes.length} AC checkboxes checked`,
+    };
+  }
+
+  if (status === "done") {
+    // Primitive-only scope (G5, see file header note): no children
+    // re-verification (unlike native's compound-aware done branch).
+    return { id, gate: "none", ok: true, reason: "terminal" };
+  }
+
+  if (status === "needs-human") {
+    return { id, gate: "none", ok: false, reason: "soft stop; human action required" };
+  }
+
+  return { id, gate: "unknown", ok: false, reason: `unrecognized status ${status}` };
+}
+
 /**
  * @param {{owner: string, repo: string}} opts
  */
@@ -358,5 +483,17 @@ export function createGithubClient({ owner, repo }) {
     return get(id);
   }
 
-  return { list, get, setStatus };
+  // QN-028: gate capability -- `check(id)` fetches the task (a single-issue
+  // get(), so `parent` is left null per the existing get() limitation --
+  // irrelevant to gate-checking, which only reads `status`/`body`) and
+  // applies the pure checkGate() function above. Returns the same shape
+  // native's own `check()` returns; `{id, ok:false, reason:"not found"}`
+  // if the task does not exist, matching store.js's own not-found shape.
+  function check(id) {
+    const task = get(id);
+    if (!task) return { id, ok: false, reason: "not found" };
+    return checkGate(task);
+  }
+
+  return { list, get, setStatus, check };
 }

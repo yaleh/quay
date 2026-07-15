@@ -172,6 +172,61 @@ afterward. See `experiment/provenance.md`'s iteration-10 section and
 
 Covered by `test/write.test.mjs`.
 
+### 3.5 Gate path (iteration 17, QN-028)
+
+**Resolved, minimal `gate` scope: primitive tasks only, direct port of
+`quay-native`'s `store.js#check()`/`artifactSections()`/`extractSection()`
+semantics onto an issue's raw body text.** `quay-github task check <id>`
+(and Core's generic, provider-agnostic `quay task check --provider
+github`) asserts the same two gates native does:
+
+- `todo` status → `author->ready` gate: all four sections (`## Proposal`,
+  `## Plan`, `## AC`/`## Acceptance Criteria`, `## DoD`/`## Definition of
+  Done`) must be present with ≥40 non-whitespace characters each, the AC
+  section must contain at least one Markdown checkbox (`- [ ]`/`- [x]`),
+  and all AC checkboxes must be checked.
+- `ready` status → `execute->done` gate: all AC checkboxes in the issue
+  body's AC section must be checked (count-only; no artifact-presence
+  re-check, matching native's own `ready`-branch behavior).
+- `done` status: unconditional terminal pass, `{gate:"none", ok:true,
+  reason:"terminal"}` — matches native's own done-branch degrade-to-leaf
+  behavior for a task with no children.
+- `needs-human` status: soft-stop, `{gate:"none", ok:false, reason:"soft
+  stop; human action required"}`.
+
+**Scope, deliberately narrow (G5): primitive tasks only.** This
+experiment has never had a real compound/epic GitHub-backed task
+(`children` has always been empty for both real issues used so far), so
+native's `childrenStatus()` compound-recursion is *not* ported here. A
+future task should add it only once a real compound GitHub task exists to
+motivate the work, not preemptively.
+
+**No cross-package import.** Per the design's Provider-independence
+principle, `checkGate()`/`gateArtifactSections()`/`extractGateSection()`
+in `github-client.js` are an independent re-implementation of the same
+regex shapes and content-length floor as native's `store.js`, not a
+shared import — each Provider ports the semantic itself, so the two
+implementations can diverge safely if one backend's constraints ever
+require it, at the cost of needing to keep the `\Z`-is-not-a-JS-anchor
+class of bug (native's own QN-005 fix; the correct end-of-section anchor
+is `(?![\s\S])`, not `\Z`) independently un-reintroduced in both places.
+`test/gate.test.mjs`'s case (g) is a direct regression test for exactly
+this bug class in the ported implementation.
+
+**Live-verified, not merely unit-tested:** `quay-github task check gh-3
+--json` and `gh-4 --json` were run against this repository's two real
+issues (read-only; no state was mutated), each correctly reporting
+`ok:false` (their real AC checkboxes are genuinely unchecked). Core's
+existing, unmodified `taskCheck()` passthrough (`provider-client.js`,
+added QN-027/iteration 13, zero backend-specific branching) was then run
+against the same two issues via `quay task check gh-3/gh-4 --provider
+github --json` and produced byte-identical JSON to the direct
+`quay-github` CLI's own output — the concrete reusability/transfer proof
+this task exists to produce. See `experiment/provenance.md`'s
+iteration-17 section and `tasks/QN-028.md` for the full transcript.
+
+Covered by `test/gate.test.mjs`.
+
 ## 4. What transferred cleanly vs. what required backend-specific work
 
 **Transferred unmodified (zero Core changes, zero ABI changes):**
@@ -189,6 +244,10 @@ Covered by `test/write.test.mjs`.
 - Quay Core's `quay task list` / `quay task view` CLI — **zero lines
   changed**; same code path as native, only the active provider config
   differs.
+- Quay Core's `quay task check` CLI / `taskCheck()` passthrough (QN-027,
+  iteration 13) — **zero lines changed** to talk to this Provider's new
+  `task_check` tool (QN-028, iteration 17); confirmed by byte-identical
+  JSON output against the direct `quay-github` CLI (§3.5).
 
 **Required backend-specific normalization work (the real cost, honestly
 budgeted, proposal §16):**
@@ -217,6 +276,11 @@ budgeted, proposal §16):**
 - Auth/access: `gh` CLI subprocess auth, vs. native's plain filesystem
   access — a qualitatively different failure mode (network/auth errors
   possible; native only has filesystem errors).
+- Gate section extraction (added iteration 17, §3.5) — a genuine
+  re-implementation (not a shared import) of native's `store.js` regex
+  shapes against a different body-text source; low marginal cost because
+  the read-side §3 heading/label conventions already existed, but real,
+  independently-authored code nonetheless.
 
 ## 5. Capabilities (v1.1)
 
@@ -225,9 +289,12 @@ data.read: true    # task_list, task_get
 manifest:  true    # provider://manifest
 data.write: true   # QN-024 (iteration 10): status-only patch — see §3.4.
                    # title/body/labels/parent/children remain unimplemented.
-gate:       false  # deferred — no natural reason found through iteration 12
-skill:      false  # deferred — same reason
+gate:       true    # QN-028 (iteration 17): task_check, primitive tasks
+                   # only — see §3.5.
+skill:      false  # deferred — gate and skill are separate capabilities;
+                   # no natural reason found through iteration 17 to add
+                   # skill (status→Skill map / action buttons) yet.
 ```
 
 Matches `provider.yml`'s own capability booleans verbatim (verified this
-iteration — see QN-026's AC/DoD).
+iteration — see QN-028's AC/DoD).
