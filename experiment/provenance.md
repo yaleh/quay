@@ -8692,3 +8692,213 @@ read-path gaps, future iterations should look for a still-different angle
 (negative/error-path coverage, a new tool/subcommand, or documentation
 drift) rather than assuming further gaps of either now-exhausted shape
 remain.
+
+---
+
+## Iteration 57: QN-061 — Web-UI-layer cross-Provider (GitHub) test coverage
+
+The standing instructions explicitly named a concrete, specific angle:
+whether the Web UI (`quay serve`, `packages/quay/src/serve.js`), the third
+of the proposal's three sibling ABI bindings (`quay-proposal.md` §9: CLI,
+Core MCP, Web UI), had ever been tested end-to-end against a live GitHub
+Provider, or only against native fixtures.
+
+Read `serve.test.mjs` (QN-031) and `core-three-way-symmetry.test.mjs`
+(QN-044/DIR-010) in full this session: both exclusively spin up
+`startServer()` against isolated, local native task stores; grep confirmed
+zero occurrences of "github" in either file's test code. `serve.js`
+itself has never branched on provider id (confirmed by reading its own
+150-line source in full), so this is the identical
+shape of gap iterations 54/55/56 each closed at their own layer (CLI, then
+MCP), now found at the Web-UI layer.
+
+**Safety verification (performed before writing any test code, per
+standing instruction):** read `serve.js` and `provider-client.js` in full.
+`startServer()`'s GET routes (`/` list, `/task/:id` detail) call only
+`client.taskList({})`, `client.taskGet(id)`, `client.manifest()` — all
+three are read-only passthroughs in `provider-client.js` (confirmed:
+`taskList`/`taskGet`/`manifest` each only issue a `callTool`/
+`readResource` read; only `taskWrite` in that file touches a write path,
+and `serve.js` never calls it from a GET route). The POST
+`/task/:id/action/:actionId` route calls `composePayload()` +
+`deliverTrigger()` — a real, non-idempotent trigger-delivery side effect,
+not itself a Provider write, but excluded from live-issue testing anyway,
+matching `write.test.mjs`'s and iterations 55/56's identical
+`task edit --provider github` / `action_run` exclusion precedent.
+
+Manually verified via a throwaway script
+(`packages/quay/manual-serve-github-check.mjs`, deleted immediately after
+use, confirmed absent from the committed diff via `git status --short`)
+before writing any test code:
+
+```
+$ node manual-serve-github-check.mjs
+quay-github mcp: serving tasks from github.com/yaleh/quay (read-only v1)
+quay serve: listening on http://localhost:45999
+GET / status: 200
+contains gh-3: true
+GET /task/gh-3 status: 200
+contains title: true
+contains status:ready-derived status label 'ready': true
+contains Advance button: true
+```
+
+Added `packages/quay/test/serve-github.test.mjs` (new file), covering
+`GET /` and `GET /task/gh-3` live against the real `yaleh/quay` issue #3,
+through a real `quay serve` HTTP server connected to the real GitHub
+Provider (not native). `POST /task/gh-3/action/advance` explicitly
+excluded, with rationale documented in the test file itself.
+
+```
+$ node packages/quay/test/serve-github.test.mjs
+quay-github mcp: serving tasks from github.com/yaleh/quay (read-only v1)
+quay serve: listening on http://localhost:43283
+PASS: GET / returns 200 (got 200)
+PASS: GET / body contains the real GitHub-backed task id gh-3
+PASS: GET / body contains gh-3's real live title
+PASS: GET /task/gh-3 returns 200 (got 200)
+PASS: GET /task/gh-3 body contains gh-3's real live title
+PASS: GET /task/gh-3 body reflects gh-3's real live derived status (ready, from its status:ready label)
+PASS: GET /task/gh-3 renders the Advance action button (gh-3's live status 'ready' matches provider.yml's whenStatus)
+
+All QN-061 live cross-Provider (GitHub) Web UI regression tests passed.
+```
+
+```
+$ node --test packages/*/test/*.test.mjs
+...
+ℹ tests 26
+ℹ pass 26
+ℹ fail 0
+```
+(up from 25 in iteration 56 — the one new test file added 7 new
+assertions, reported by `node --test` as 1 additional top-level test file
+entry.)
+
+```
+$ node packages/quay-native/test/abi-symmetry.mjs
+...
+ALL FOUR SURFACES SYMMETRIC
+```
+
+```
+$ git diff --stat -- packages/*/src/*.js
+(empty)
+```
+Test-file-only change (new file, zero source-code lines touched).
+Confirmed no accidental live write occurred: `gh issue view 3 --repo
+yaleh/quay --json number,state,labels` returned identical output
+(`status:ready`, `lane:execution`, OPEN) both before writing the manual
+exploration script and after the automated test run.
+
+### σ computation — iteration 57: QN-061
+
+Created `tasks/QN-061.md`, gated `author->ready` (`ok:true`, all four
+artifacts present — Proposal/Plan/AC/DoD sections all populated), task
+authored directly at `status: done` reflecting the already-completed,
+already-verified work (matching QN-060's own recording convention —
+`task check` on a `done`-status task returns `gate: none, ok: true,
+reason: terminal`, confirmed this session), gated `execute->done`
+(4/4 AC boxes checked, all DoD boxes checked).
+
+```
+$ ls tasks/QN-*.md | wc -l
+60
+```
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-061 | Add live cross-Provider (GitHub) test coverage for the Web UI (quay serve list/detail against a real GitHub-backed task) | **native** | **native** | **native** | **done** |
+
+σ (strict) = 53 / 60 = **0.8833** (up from 52/59 = 0.8814; Δσ = +0.0019).
+σ_author_only (diagnostic) = 60 / 60 = **1.0000** (unchanged shape).
+
+### V-factor attribution — iteration 57 (precedent-derived: QN-034/048/058/059/060)
+
+Closest, directly on-point precedent: **iteration 56 (QN-060)**, itself
+following **iterations 24/37/54/55 (QN-034/048/058/059)** — all read in
+full this session. All five closed a test-coverage-only regression-test
+gap for an already-existing, unmodified capability, live against real
+`yaleh/quay` issues, zero source-code change, and all five scored
+`skeleton +0.01`. QN-061 is structurally identical in kind, at the third
+and final architectural layer named in the protocol's own three-way
+symmetry framing (Web UI, after CLI in 54/55 and Core MCP in 56).
+
+- **skeleton**: credited **+0.01 (0.73 → 0.74)** — a genuinely new
+  regression-test addition closing a previously-real, self-documented (by
+  omission — grep-confirmed zero "github" references in either existing
+  Web-UI test file) zero-coverage gap in the v0 loop's `serve` stage, its
+  cross-Provider (GitHub) instantiation specifically. `abi_symmetry` was
+  explicitly considered and rejected as the alternative factor: per
+  `core-three-way-symmetry.test.mjs`'s own definition, `abi_symmetry`-
+  shaped claims compare CLI/MCP/Web-UI *content* against each other for
+  identical underlying data on ONE Provider (a symmetry claim); this
+  iteration's test proves the Web UI *itself* functions end-to-end against
+  a *second, live* Provider (a connectivity/routing claim, matching the
+  identical reasoning iteration 56 applied when it rejected `abi_symmetry`
+  for the analogous MCP-aggregation case) — that is `skeleton`-shaped, not
+  `abi_symmetry`-shaped. `gate_correctness` does not apply (no `task_check`
+  path exercised by this test). `skill_convergence` does not apply (no
+  SKILL.md content touched).
+- **abi_symmetry**: held flat at **0.96** (no ABI schema/shape change; no
+  new content-equivalence claim between bindings was made or broken;
+  `abi-symmetry.mjs` re-confirmed symmetric).
+- **gate_correctness**: held flat at **0.76** (no gate-logic change; this
+  test does not exercise `task_check`/`checkGate()` at all).
+- **skill_convergence**: held flat at **0.96** (no SKILL.md content
+  changed).
+
+```
+V_instance = 0.74 × 0.96 × 0.76 × 0.96 = 0.5183  (up from 0.5113)
+```
+ΔV_instance = **+0.0070**.
+
+- **completeness**: held flat at **0.74** (test-coverage gap closure for
+  existing behavior, not new orchestration-Skill methodology content).
+- **effectiveness**: held flat at **0.26** (live external-network
+  dependency confound, unchanged reasoning). Now 37 consecutive
+  iterations (21-57).
+- **reusability**: held flat at **0.79** (test-coverage-only addition
+  proving an already-existing GitHub-Provider Web-UI capability works, not
+  new methodology-transfer evidence — the Web UI's provider-agnosticism
+  was a pre-existing design property, not something this iteration's test
+  caused to newly exist). Now the **thirty-second consecutive iteration
+  (26-57)**.
+- **validation**: held flat at **0.64** (no audit yet exists for this
+  iteration's own work; reserved for the top-level orchestrator, per
+  standing instruction not to self-audit, G3).
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+ΔV_meta = **0.0000**.
+
+### Discipline note
+
+This iteration followed the standing instruction's explicit, concrete
+suggestion — check whether the Web UI (the third ABI surface named in
+`core-three-way-symmetry.test.mjs`/constraint 4(b)) has an analogous
+cross-Provider test-coverage gap to the CLI (54/55) and MCP (56) layers
+already closed. Confirmed by reading both existing Web-UI test files in
+full and grepping for "github" (zero hits in test code) that the gap was
+real, not assumed. Traced the exact read/write classification of every
+route `serve.js` exposes before writing any test code (matching the exact
+discipline iterations 54/55/56 each applied at their own layer), and
+manually verified live behavior via a throwaway script (deleted after use)
+before committing to test assertions. This closes the third and final
+layer of the three-way-symmetry cross-Provider read-path sweep; per the
+protocol's own framing (quay-proposal.md §9, `core-three-way-symmetry.test.mjs`'s
+own header), CLI, Core MCP, and Web UI are now ALL proven live against the
+GitHub Provider for their respective read paths. No system evolution (no
+new agent, no new capability, no Skill change) is warranted — the
+standing system (M_56 = M_57, A_56 = A_57) remains stable.
+
+Future iterations should not assume a fourth architectural layer of this
+identical gap-shape remains — the three sibling ABI bindings named by the
+protocol are now all covered for their read paths. The next genuinely new
+angle is more likely negative/error-path coverage for the GitHub Provider
+specifically (e.g. malformed issue bodies, a repo/token misconfiguration,
+rate-limit or network-failure handling), a new MCP tool or CLI/Web-UI
+surface being added in a future iteration, or a documentation-drift check
+— not a fourth re-run of the now three-times-exhausted "does layer X work
+live against GitHub" sweep.
