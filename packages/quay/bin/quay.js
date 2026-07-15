@@ -122,6 +122,26 @@ async function main() {
     return;
   }
 
+  if (cmd === "task" && sub === "check") {
+    // QN-027 (iteration 13): generic task_check passthrough — same
+    // withProvider() path as list/view/edit, zero backend branch. Whether
+    // the active Provider actually implements task_check (gate capability)
+    // is a Provider-manifest question, not something this command
+    // special-cases (mirrors task edit's own comment, QN-024).
+    const id = positional[0];
+    let result;
+    await withProvider(async (client) => {
+      result = await client.taskCheck(id);
+    }, { providerId: flags.provider });
+    if (flags.json) {
+      printJson(result);
+    } else {
+      console.log(`${result.id}: ${result.ok ? "PASS" : "FAIL"} — ${result.reason}`);
+    }
+    process.exitCode = result.ok ? 0 : 1;
+    return;
+  }
+
   if (cmd === "action" && sub === "list") {
     const id = positional[0];
     await withProvider(async (client) => {
@@ -170,7 +190,7 @@ async function main() {
     return;
   }
 
-  console.error("usage: quay <task list|view|action list|run|serve> ...");
+  console.error("usage: quay <task list|view|edit|check|action list|run|serve> ...");
   process.exitCode = 1;
 }
 

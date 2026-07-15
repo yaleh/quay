@@ -2039,3 +2039,213 @@ task, QN-026, added to both numerator and denominator).
 
 See `experiment/timing/iteration-12.log` for this iteration's raw `date`
 checkpoints.
+
+## Records (as of end of iteration 13)
+
+**Prior-attempt continuity note:** this iteration continues work from a
+prior execution attempt that crashed mid-task due to an infrastructure
+socket error (not a task failure) — `packages/quay/bin/quay.js`,
+`packages/quay/src/provider-client.js`, and `tasks/QN-027.md` were
+already substantially drafted before this session picked the work back
+up. This session independently re-read all three files' actual diffs/
+content before treating any of it as done (per this iteration's own
+mandate), rather than trusting the crash-recovery framing at face value.
+
+**QN-027, found and completed this iteration:** while investigating
+(per this iteration's mandate) whether DIR-004's now-confirmed manda
+dispatch primitive changes the "no natural reason" verdict on
+`quay-github`'s `gate`/`skill`, reading `quay-native`'s own
+`mcp-server.js` alongside Core's `provider-client.js`/`quay.js` surfaced
+a genuine, previously-unflagged ABI-symmetry gap: Core's `provider-
+client.js` had `taskList`/`taskGet`/`taskWrite`/`manifest` passthroughs
+but no `taskCheck`, and `quay.js` never called it, even though
+`quay-native`'s own CLI/`provider.yml`/`mcp-server.js` all support/
+declare `task_check` (`gate: true`). This meant `task_check` had never
+actually been exercised through Core's provider-agnostic client, across
+12+ iterations of scoring `abi_symmetry` at 0.90-0.92 — a real gap in
+the CLI-JSON-equals-MCP-tool-output symmetry claim, confirmed by live
+command output (`quay task check` failed with a usage error) before any
+fix, not by code-reading alone.
+
+Fixed with a narrow, mirrored passthrough addition (`taskCheck(id)` in
+`provider-client.js`, a `task check` branch in `quay.js`'s CLI, both
+following the existing `taskWrite`/`task edit` pattern exactly — no
+change to `store.js`, `mcp-server.js`, or gate semantics in either
+Provider). A new regression test
+(`packages/quay/test/task-check.test.mjs`) was added, exercising the
+passthrough end-to-end against a real `quay-native` MCP server over
+stdio (both the `ok:true` and `ok:false` gate outcomes), following the
+existing test conventions in `quay-native/test/` and `quay-github/
+test/` (plain assert/PASS-FAIL scripts, `process.exitCode` on failure).
+
+Live verification (not code-inspection-only, per AC/DoD):
+
+```
+$ node packages/quay-native/bin/quay-native.js task check QN-001 --json
+{"id":"QN-001","gate":"none","ok":true,"reason":"terminal"}
+
+$ node packages/quay/bin/quay.js task check QN-001 --json
+{"id":"QN-001","gate":"none","ok":true,"reason":"terminal"}
+
+$ diff <(...native...) <(...quay...)   → no output (byte-identical stdout)
+
+$ node packages/quay/bin/quay.js task check QN-001            (no --json)
+QN-001: PASS — terminal                                        (exit 0)
+
+$ node packages/quay/bin/quay.js task check QN-017             (no --json)
+QN-017: FAIL — soft stop; human action required                (exit 1)
+```
+
+Full regression suite (10 prior suites + this new one, 11 total)
+re-run fresh, 11/11 green. `git diff --stat` confirmed only the intended
+files changed: `packages/quay/bin/quay.js`, `packages/quay/src/
+provider-client.js`, the new test file, and `tasks/QN-027.md` — no
+change to `store.js`, `mcp-server.js` (either Provider), or any gate
+logic.
+
+Honest note on task-lifecycle provenance: unlike QN-026 (driven through
+the full native `quay-native task edit --status` round-trip), QN-027's
+own `status`/AC/DoD-checkbox fields were set directly via file edit in
+this same session, not by round-tripping through `quay-native`'s CLI —
+consistent with this and prior iterations' same-session degraded-
+fallback mode for the *task's own* lifecycle management (distinct from
+the dispatch-primitive question below, which concerns spawning a
+separate executor, not driving one task file's own status transitions).
+`task check QN-027 --json` independently confirms `{"ok":true,
+"reason":"terminal"}` against the final file content, so the gate itself
+was not bypassed even though the CLI round-trip was.
+
+**DIR-004 open question resolved (positively) for a dispatched
+iteration-executor session:** DIR-004 (resolved by the top-level
+orchestrator session) left one explicit open question: whether a
+freshly `Agent`-dispatched `baime:iteration-executor` subagent (as
+distinct from the long-running top-level orchestrator session) inherits
+the reconnected `manda mcp` gateway. This iteration's own session *is*
+such a dispatched subagent, and independently re-ran `ToolSearch` for
+"agent"/"dispatch"/"spawn" (bare-word queries, per mandate) before
+assuming either way: all of `Agent`, `Dispatch`, `DispatchStatus`,
+`DispatchSettle`, `DispatchCancel`, `DispatchProgress` (plus `TaskCreate`/
+`TaskGet`/`TaskUpdate`/`request`/`respond`) came back as real,
+schema-loadable tools — confirmed by loading and calling several, not
+merely seeing their names. Live `ps aux` cross-check confirmed multiple
+correctly-parented `manda mcp` → `manda-dispatch mcp` + `manda-tools mcp`
+process trees currently running.
+
+One more real, minimal async-dispatch-and-settle cycle was then run, per
+DIR-004's own suggested next step, verbatim:
+
+```
+Dispatch(id="iter13-executor-probe", to="worker", mode="async",
+         args={task, reply_to})
+  → {"task_id":"iter13-executor-probe"}
+DispatchStatus(id="iter13-executor-probe")
+  → {"id":"iter13-executor-probe","status":"queued"}
+(waited ~15s, real sleep)
+DispatchStatus(id="iter13-executor-probe")
+  → {"id":"iter13-executor-probe","status":"queued"}   (unchanged — no
+     live session auto-claimed it in this window)
+$ manda-dispatch claim --id=iter13-executor-probe \
+    --session=quay-iter13-executor-probe --root /home/yale/work/quay
+  → claimed iter13-executor-probe
+DispatchStatus(id="iter13-executor-probe")
+  → {"id":"iter13-executor-probe","status":"claimed"}
+DispatchSettle(id="iter13-executor-probe", status="done",
+               result={finding: "..."})
+  → {"id":"iter13-executor-probe","relayed":true,"status":"done"}
+DispatchStatus(id="iter13-executor-probe")
+  → {"id":"iter13-executor-probe","kind":"done",
+     "payload":{"kind":"done","result":{...}},"status":"done"}
+$ manda-dispatch release --id=iter13-executor-probe \
+    --session=quay-iter13-executor-probe
+  → released iter13-executor-probe
+```
+
+**Verdict: found-and-works, for a dispatched iteration-executor session,
+not just the top-level orchestrator.** Same caveat as DIR-004's own
+probe: no live session auto-claimed the task within the ~15s test
+window; the executor role was played manually via the `manda-dispatch`
+CLI, exactly mirroring DIR-004's own methodology. This closes DIR-004's
+remaining open question with a positive result — `experiment/
+directives/README.md` updated with this finding. It does **not** change
+the `quay-github` `gate`/`skill` verdict below: a working dispatch
+primitive answers "can a subagent be spawned," not "does GitHub-specific
+gate logic now have a natural trigger to be written" — those remain
+separate questions, and no new angle on the latter was found this
+iteration (see below).
+
+**`quay-github` `gate`/`skill` re-evaluation (10th consecutive
+iteration):** re-read `provider.yml`'s inline comments and `DESIGN.md`
+§5 (unchanged: `data.write: true`, `gate: false`, `skill: false`).
+QN-027 is explicitly Core-side (fixes Core's passthrough symmetry, not
+GitHub-specific gate logic) and was scoped that way deliberately in its
+own Proposal — it is a *prerequisite* for `gate` ever mattering through
+Core, not itself an implementation of `quay-github`'s `gate`. No new
+angle beyond DIR-004's now-confirmed dispatch primitive was found or
+tested this iteration for actually implementing GitHub-specific
+Proposal/Plan/AC/DoD-artifact gate logic against issue bodies — the
+dispatch primitive answers a different question (spawning executors),
+not "what would GitHub's own gate rule even check." `gate`/`skill`
+remain `false`/`false`, honestly re-confirmed with no natural trigger —
+the 10th consecutive substantive iteration (4 through 13, minus
+iteration 11) reaching this conclusion.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 13) |
+|---|---|---|---|---|---|
+| QN-027 | Wire task_check into Core (quay) CLI and provider-client.js for ABI symmetry with quay-native's own task check | native (same-session, direct file edit, not CLI round-trip) | native (same-session) | native (`task check` gate independently confirmed ok:true against final file) | done |
+
+All other 25 tasks (QN-001–QN-026, minus QN-018, never allocated)
+unchanged from iteration 12's table.
+
+## σ computation — iteration 13
+
+Applying protocol §10.1's strict definition (all three of `author_by`,
+`execute_by`, `gate_by` must be `native`, AND the task must be `done`):
+
+- All 18 tasks that qualified at the end of iteration 12 (QN-001,
+  QN-002, QN-005, QN-007, QN-008, QN-009, QN-010, QN-011, QN-012,
+  QN-013, QN-014, QN-015, QN-016, QN-019, QN-023, QN-024, QN-025,
+  QN-026) remain unchanged, still qualify (18 tasks).
+- QN-027: native/native/native (by the strict reading — the gate was
+  independently, mechanically confirmed against the final file content,
+  even though the status/checkbox edits themselves were made directly
+  rather than via CLI round-trip; this is consistent with how QN-001..
+  QN-026's own "native" attributions have been read throughout this
+  provenance ledger — same-session degraded-fallback mode, not a
+  distinct/stricter category), `done` → **qualifies (new this
+  iteration)**.
+- QN-017, QN-020, QN-021, QN-022: unchanged, none `done` → none qualify
+  (permanently-stuck adversarial fixtures, by design).
+- QN-003, QN-004: qualify under the inclusive reading only (unchanged).
+- QN-006: seed/seed/seed → does not qualify (unchanged, permanent).
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 19 / 26
+  = 0.7308
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 21 / 26
+  = 0.8077
+```
+
+Total task count is now **26** (QN-001..QN-027, minus the never-allocated
+QN-018) — 1 new task created this iteration (QN-027, done).
+
+**σ (strict) = 0.7308, up from 0.72 at the end of iteration 12 (Δσ =
++0.0108).** QN-027 was a genuine, non-adversarial ABI-symmetry fix,
+expected and designed to reach `done`, and did.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 25 / 26
+              = 0.9615
+```
+
+Up from 0.96 at the end of iteration 12 (one new natively-authored task,
+QN-027, added to both numerator and denominator).
+
+See `experiment/timing/iteration-13.log` for this iteration's raw `date`
+checkpoints (if produced).

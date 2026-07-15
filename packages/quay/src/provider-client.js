@@ -37,6 +37,18 @@ export async function connectProvider({ command, args, env, cwd }) {
     return r.structuredContent?.task ?? null;
   }
 
+  // QN-027 (iteration 13): generic task_check passthrough, mirroring
+  // taskWrite's pattern exactly — provider-agnostic, no backend branch.
+  // Whether the active Provider actually implements task_check (gate
+  // capability) is between the caller and the Provider's own manifest;
+  // Core just forwards the id and returns whatever the Provider's gate
+  // reports, same as taskList/taskGet/taskWrite already do.
+  async function taskCheck(id) {
+    const r = await client.callTool({ name: "task_check", arguments: { id } });
+    if (r.isError) throw new Error(r.content?.[0]?.text ?? "task_check failed");
+    return r.structuredContent ?? null;
+  }
+
   async function manifest() {
     const r = await client.readResource({ uri: "provider://manifest" });
     return JSON.parse(r.contents[0].text);
@@ -46,5 +58,5 @@ export async function connectProvider({ command, args, env, cwd }) {
     await client.close();
   }
 
-  return { taskList, taskGet, taskWrite, manifest, close };
+  return { taskList, taskGet, taskWrite, taskCheck, manifest, close };
 }

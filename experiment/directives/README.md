@@ -163,6 +163,26 @@ instance has it connected remains a per-session, mechanically-checked
 fact (`ToolSearch`), not something to assume either way from this
 finding.
 
+**Update (iteration 13): confirmed YES for a dispatched iteration-executor
+session too.** Iteration 13's own session (a genuine `Agent`-dispatched
+`baime:iteration-executor` subagent, not the top-level orchestrator) ran
+`ToolSearch` for "agent"/"dispatch"/"spawn" independently and found the
+same real, schema-loadable `Agent`/`Dispatch`/`DispatchStatus`/
+`DispatchSettle`/`DispatchCancel`/`DispatchProgress` tools, then performed
+one more real, minimal end-to-end cycle (`Dispatch(mode="async",
+to="worker")` → `queued` → `manda-dispatch claim` → `claimed` →
+`DispatchSettle(status="done")` → `DispatchStatus` shows the terminal
+payload folded in → `manda-dispatch release`) — see
+`experiment/iterations/iteration-13.md` §6 for the verbatim sequence.
+Same caveat as DIR-004's own probe: no live session auto-claimed the
+task within the test window (~15s); the executor role was played
+manually. This closes the specific open question left above: the
+reconnected gateway state **is** inherited by a freshly-dispatched
+iteration-executor subagent, at least in this instance — still a
+per-session, mechanically-checked fact going forward, not something to
+assume permanently true without re-checking, since a future gateway
+restart could reintroduce the same startup race DIR-004 diagnosed.
+
 ## Relationship to the experiment's guardrails (G1-G6, protocol §6)
 
 Directives introduce a new risk class the existing guardrails don't cover:
