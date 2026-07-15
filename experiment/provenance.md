@@ -3412,3 +3412,151 @@ Diagnostic sub-metric:
 
 Up from 0.9688 at the end of iteration 23 (one new natively-authored task,
 QN-034, added to both numerator and denominator).
+
+## Iteration 25 — QN-035 (quay-github compound/epic gate support, DIR-006 applied)
+
+**Mandatory first-priority target this iteration, per iteration 24's own
+deferral:** `DIR-006-implement-quay-github-compound-epic-support.md`
+(discovered mid-iteration-24, deferred with a full progress note, correctly
+named as iteration 25's first-priority OBSERVE-step target). This
+directive explicitly rejected the "no organic compound GitHub issue has
+appeared" reasoning iterations 19-24 used to leave GitHub-side compound/
+epic support unimplemented, and required: (1) a REAL (not synthetic)
+compound issue structure created in `yaleh/quay`; (2) implementing the
+missing children-recursion in `github-client.js`'s `checkGate()`; (3)
+live-verifying end-to-end at the QN-028/QN-029 evidentiary standard; (4)
+updating `DESIGN.md`; (5) honestly documenting any genuine infeasibility.
+
+**All five points were completed in full this iteration — no deferral, no
+partial completion:**
+
+1. **Real compound structure created in `yaleh/quay`** (not deleted
+   afterward, retained as durable evidence): issue **#5** ("[QN-035-fixture]
+   Child A", created then closed → status:done), issue **#6**
+   ("[QN-035-fixture] Child B", created open at status:todo, later closed),
+   issue **#7** ("[QN-035-fixture] Parent epic"), body referencing both via
+   `- [ ] #5` / `- [ ] #6` checkbox syntax — the exact convention
+   `extractChildRefs()` already parses. `quay-github task get gh-7 --json`
+   confirmed `role:"compound"`, `children:["gh-5","gh-6"]` derived
+   correctly from the live issue body.
+2. **`childrenStatus()` implemented in `packages/quay-github/src/
+   github-client.js`** — a direct, structurally-comparable port of native's
+   `store.js#childrenStatus()` (QN-012/QN-016 semantics: recursive,
+   cycle-safe — a child id reappearing in its own ancestry reports
+   `"missing"`, not infinite recursion — and a compound child whose own
+   label says `done` but whose subtree isn't fully done rolls up as
+   `"stale-done"`). Adapted for live per-child fetching via an injected
+   `getChildTask(id)` function (mirrors the existing `pageIssues`/
+   `fetchPage` injection convention already in this file), which
+   `createGithubClient()`'s own `check(id)` wires to its own live `get`.
+   `checkGate()`'s `ready` and `done` branches now call this whenever
+   `task.role === "compound"`; primitive tasks (children empty) are
+   completely unaffected — the fetcher is never invoked, `.every()` over
+   `[]` is vacuously true. **Zero regressions**: `test/gate.test.mjs`'s
+   pre-existing 19 primitive-only assertions all still pass unchanged.
+3. **New test file `packages/quay-github/test/compound-gate.test.mjs`**:
+   24 assertions, injected-fixture unit tests (no live `gh api` call in
+   this file, matching this package's established convention), mirroring
+   native's own `compound-gate.test.mjs`/`compound-gate-recursive.test.mjs`
+   case structure — all-children-done, one-child-todo, dangling-child
+   reference, nested/stale-done rollup, cyclic-reference safety, ready-gate
+   AC-vs-children interaction, and primitive-task non-regression. All 24
+   pass.
+4. **Live-verified end-to-end, the full lifecycle, against the real repo:**
+   - `quay-github task check gh-7 --json` while #6 was still open:
+     `ok:false`, `acChecked` count accurate, `childrenStatus` showing
+     `gh-5:done`, `gh-6:todo`.
+   - Core's generic passthrough (`quay task check gh-7 --provider github
+     --json`) confirmed **byte-identical stdout** to `quay-github`'s own
+     direct CLI output at this "before" state — the reusability/transfer
+     proof, extended from QN-028's primitive-only precedent.
+   - All 4 AC checkboxes on issue #7 checked (each independently verified
+     true against the live command output above before being checked), and
+     child #6 closed: re-running `task check gh-7 --json` produced
+     `ok:true`, `childrenStatus` showing both children `done`. Re-confirmed
+     byte-identical against Core's passthrough at this "after" state too.
+   - Issue #7 itself closed (status → done): `task check gh-7 --json`
+     confirmed the compound-aware `done` branch: `ok:true, "terminal"`,
+     `childrenStatus` present.
+   - **Adversarial regression test**: #6 reopened while #7 remained
+     closed/done — `task check gh-7 --json` correctly flipped to
+     `ok:false`, `"compound task marked done, but not all children are
+     done: gh-6 (todo)"`, **exit code 1** — proving the gate has real
+     teeth, mirroring native's own QN-012 adversarial-test intent. #6 was
+     then re-closed, restoring the final, honest all-done end state
+     (`ok:true`, confirmed again).
+5. **No sub-part proved infeasible.** The checkbox-based convention this
+   repo already documented as its chosen mechanism was implemented and
+   verified directly, per DIR-006's own point-5 preference ordering — no
+   need to fall back to GitHub's structured sub-issues preview API.
+6. **`packages/quay-github/DESIGN.md` updated**: header status line
+   (v1.3 → v1.4), §3.5 (gate path) rewritten to describe compound/epic
+   support as implemented + the full live-verification transcript, §3.6
+   (skill path) updated to note `executeEpic`'s compound recursion is now
+   genuinely exercised (it required zero code change itself — it is
+   Skill-level orchestration already calling the generic, provider-
+   parameterized gate this task fixed).
+7. **DIR-006 moved to `experiment/directives/archive/`** with a
+   `## Resolution` section (outcome: applied), per the directives
+   lifecycle protocol.
+
+**Full regression suite, run fresh this iteration:** 18 `*.test.mjs` files
+total (8 quay-native + 6 quay-github, including the new
+`compound-gate.test.mjs` + 4 quay — one more than iteration 24's own tally
+of 18, since `compound-gate.test.mjs` is new this iteration), all exit 0,
+plus `abi-symmetry.mjs` (a standalone script, not a `*.test.mjs` file, run
+separately per this package's existing convention) still reporting "ALL
+FOUR SURFACES SYMMETRIC." Zero regressions anywhere.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 25) |
+|---|---|---|---|---|---|
+| QN-035 | Implement and live-verify quay-github compound/epic (children non-empty) task support (DIR-006) | **native** | **native** | **native** | **done** |
+
+Driven through the full `todo -> ready -> done` lifecycle this iteration,
+natively, in the same degraded-fallback (same-session) mode established
+since iteration 1. `quay-native task check QN-035 --json` confirmed
+`author->ready` gate `ok:true` (all four artifacts present) before `task
+edit --status ready`; all 4 AC checkboxes were independently re-verified
+against real command output (the live gate-check transcript above, the
+regression-suite re-run, the DESIGN.md diff) before being checked; `quay-
+native task check QN-035 --json` then confirmed `execute->done` gate
+`ok:true` (4/4 AC checkboxes checked, plus 4 DoD checkboxes independently
+verified and checked) before `task edit --status done`.
+
+## σ computation — iteration 25
+
+QN-035 reaches `{native, native, native, done}` this iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 27 / 34
+  = 0.7941
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 29 / 34
+  = 0.8529
+```
+
+Total task count is now **34** (QN-001..QN-035, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration (QN-035, done).
+
+**σ (strict) = 0.7941, up from 0.7879 at the end of iteration 24 (Δσ =
++0.0062).** QN-035 is a genuine, substantial V_instance-side capability
+increment (unlike iterations 20-24's smaller, narrower CLI/test-coverage
+closures) — it closes a real, structural capability gap (compound/epic
+gate support) that convergence criterion 3 has depended on since iteration
+17's `gate` capability was first added, and does so under real, live-repo
+verification with a deliberately-created (not organic) fixture, per a
+direct human steering directive.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 33 / 34
+              = 0.9706
+```
+
+Up from 0.9697 at the end of iteration 24 (one new natively-authored task,
+QN-035, added to both numerator and denominator).

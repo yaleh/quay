@@ -1,7 +1,10 @@
 # DIR-006
 
-- status: pending
+- status: applied
 - created_by: human (Yale), asserted directly in this live conversation
+  (hedged per standing rule — this session cannot itself verify the exact
+  provenance of that assertion beyond the artifact's own claim; acted on
+  regardless, per iteration 24's own correct precedent)
 - created_at: 2026-07-15
 - title: Implement and verify quay-github compound/epic (children non-empty) task support — reject the "deliberately out of scope" deferral
 
@@ -129,3 +132,66 @@ iteration** — not even a partial start — specifically to avoid a rushed,
 partial implementation being mistaken for genuine progress. This is a
 deliberate, complete-honesty deferral, stated plainly rather than
 disguised as partial completion.
+
+## Resolution
+
+- **resolved_by:** iteration 25
+- **outcome:** applied
+- **evidence:** `experiment/iterations/iteration-25.md` (full transcript);
+  `tasks/QN-035.md` (Proposal/Plan/AC/DoD, driven `todo → ready → done`
+  natively); `experiment/provenance.md`'s iteration-25 section;
+  `packages/quay-github/src/github-client.js` (`childrenStatus()` added,
+  `checkGate()`'s `ready`/`done` branches extended);
+  `packages/quay-github/test/compound-gate.test.mjs` (24 new passing
+  assertions); `packages/quay-github/DESIGN.md` §3.5/§3.6 (compound/epic
+  framing updated from "deliberately out of scope" to "implemented,
+  live-verified"); real GitHub issues #5, #6, #7 in `yaleh/quay` (retained,
+  not deleted, as durable evidence).
+
+**All five requested actions were completed, in full, this iteration —
+not deferred a second time:**
+
+1. **A real compound/epic structure was created in `yaleh/quay`** — issue
+   #7 (parent epic), body referencing child issues #5 and #6 via the
+   `- [ ] #N` checkbox convention `extractChildRefs()` already parses.
+   Not a synthetic/mocked fixture — real, durable GitHub issues, clearly
+   labeled `[QN-035-fixture]` and left in the repo afterward.
+2. **`childrenStatus()` was implemented in `github-client.js`**, a direct,
+   structurally-comparable port of native's `store.js#childrenStatus()`
+   (QN-012/QN-016 semantics: recursion, cycle-safety, stale-done rollup),
+   adapted for live per-child fetching via an injected `getChildTask`
+   function. `checkGate()`'s `ready` and `done` branches now require all
+   children `done` for a compound task; primitive tasks are provably
+   unaffected (existing `gate.test.mjs`'s 19 assertions pass unchanged).
+   `bin/quay-github.js` itself required zero changes — `executeEpic`'s own
+   compound recursion is Skill-level orchestration (`skills/execute/
+   SKILL.md`) that already called the generic, provider-parameterized
+   `quay task check <id> --provider <provider>` path (QN-029); it is this
+   gate the recursion depends on, and that gate is what this task fixed.
+3. **Live-verified end-to-end against the real structure**, the same
+   evidentiary standard as QN-028/QN-029: `quay-github task check gh-7
+   --json` correctly reported `ok:false` (naming the blocking child)
+   while #6 was open, `ok:true` once both children were closed, correctly
+   re-verified children on the compound `done` branch, and correctly
+   flipped back to `ok:false` under an adversarial reopen-while-done
+   regression test (exit code 1) — proving real teeth, not a static pass.
+   Core's generic `quay task check --provider github --json` passthrough
+   was confirmed byte-identical to `quay-github`'s own direct CLI output
+   at both the "before" and "after" states.
+4. **`packages/quay-github/DESIGN.md` updated** — header status line
+   (v1.3 → v1.4), §3.5 (gate path) and §3.6 (skill path) both rewritten to
+   describe compound/epic support as implemented and live-verified, with
+   the full transcript summarized inline; the separate (and still
+   correctly out-of-scope) GitHub structured sub-issues preview API
+   distinction was left untouched, since DIR-006 targeted the checkbox
+   convention specifically, not that separate API.
+5. **No sub-part proved infeasible.** The checkbox-based convention this
+   repo already documented as its chosen mechanism (rather than GitHub's
+   preview sub-issues API) was the one actually implemented and verified,
+   per DIR-006's own point 5 preference-ordering.
+
+This directly moves convergence criterion 3 ("contract proven: native +
+GitHub Provider both run") meaningfully forward — see
+`experiment/iterations/iteration-25.md` §10 for the full, honest
+re-assessment (it is not yet unconditionally YES; the remaining precise
+gap, if any, is stated there rather than glossed over).

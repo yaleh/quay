@@ -1,11 +1,13 @@
-# quay-github — Design (v1.3: read + status-write + gate + skill)
+# quay-github — Design (v1.4: read + status-write + gate (primitive + compound/epic) + skill)
 
-- **Status:** v1.3 implemented — `data.read` + `manifest` (v1, QN-002),
+- **Status:** v1.4 implemented — `data.read` + `manifest` (v1, QN-002),
   minimal status-only `data.write` (QN-024, iteration 10), `gate` (QN-028,
-  iteration 17), and `skill` (QN-029, iteration 18) — see §5/§3.5/§3.6 and
-  `provider.yml`'s own inline comments for the current, honest scope of
-  each. `skill` required a real fix one layer below `provider.yml` itself
-  — see §3.6 for why a config-only declaration would have been dishonest.
+  iteration 17, primitive tasks; extended to compound/epic tasks by
+  QN-035, iteration 25, DIR-006), and `skill` (QN-029, iteration 18) —
+  see §5/§3.5/§3.6 and `provider.yml`'s own inline comments for the
+  current, honest scope of each. `skill` required a real fix one layer
+  below `provider.yml` itself — see §3.6 for why a config-only
+  declaration would have been dishonest.
 - **Scope:** the GitHub Provider — second real backend, proves the ABI
   transfers to a heterogeneous store (proposal §14, protocol §10.1). See
   `tasks/QN-002.md` for the original read-only Proposal/Plan/AC/DoD, and
@@ -172,11 +174,12 @@ afterward. See `experiment/provenance.md`'s iteration-10 section and
 
 Covered by `test/write.test.mjs`.
 
-### 3.5 Gate path (iteration 17, QN-028)
+### 3.5 Gate path (iteration 17, QN-028; extended to compound/epic tasks iteration 25, QN-035/DIR-006)
 
-**Resolved, minimal `gate` scope: primitive tasks only, direct port of
-`quay-native`'s `store.js#check()`/`artifactSections()`/`extractSection()`
-semantics onto an issue's raw body text.** `quay-github task check <id>`
+**Resolved `gate` scope: both primitive AND compound (epic) tasks, direct
+port of `quay-native`'s `store.js#check()`/`artifactSections()`/
+`extractSection()`/`childrenStatus()` semantics onto an issue's raw body
+text.** `quay-github task check <id>`
 (and Core's generic, provider-agnostic `quay task check --provider
 github`) asserts the same two gates native does:
 
@@ -188,18 +191,92 @@ github`) asserts the same two gates native does:
 - `ready` status → `execute->done` gate: all AC checkboxes in the issue
   body's AC section must be checked (count-only; no artifact-presence
   re-check, matching native's own `ready`-branch behavior).
-- `done` status: unconditional terminal pass, `{gate:"none", ok:true,
-  reason:"terminal"}` — matches native's own done-branch degrade-to-leaf
-  behavior for a task with no children.
+- `done` status: for a **primitive** task (no children), unconditional
+  terminal pass, `{gate:"none", ok:true, reason:"terminal"}` — matches
+  native's own done-branch degrade-to-leaf behavior. For a **compound**
+  task (children non-empty), children are re-verified (see below) — a
+  `done` epic whose child has regressed reports `ok:false`, not a
+  rubber-stamped pass.
 - `needs-human` status: soft-stop, `{gate:"none", ok:false, reason:"soft
   stop; human action required"}`.
 
-**Scope, deliberately narrow (G5): primitive tasks only.** This
-experiment has never had a real compound/epic GitHub-backed task
-(`children` has always been empty for both real issues used so far), so
-native's `childrenStatus()` compound-recursion is *not* ported here. A
-future task should add it only once a real compound GitHub task exists to
-motivate the work, not preemptively.
+**Compound/epic (children non-empty) support — implemented and
+live-verified (iteration 25, QN-035, DIR-006).** Through iteration 24 this
+section documented compound/epic support as "deliberately out of scope,"
+reasoning that no real compound GitHub-backed task had organically
+appeared in this repo's backlog. A human-asserted directive (DIR-006,
+`experiment/directives/archive/DIR-006-implement-quay-github-compound-epic-support.md`)
+explicitly rejected that reasoning as a permanent excuse and required
+real implementation, a **deliberately-created** real compound issue
+structure (not a synthetic fixture), and live end-to-end verification.
+This has now been done:
+
+- `childrenStatus()` was added to `github-client.js`, a direct, line-for-
+  line-comparable port of native's `store.js#childrenStatus()`
+  (QN-012/QN-016): recursive, cycle-safe (a child id reappearing in its
+  own ancestry is reported `"missing"`, not infinitely recursed), and
+  reports a compound child whose own label says `done` but whose subtree
+  is not entirely done as `"stale-done"`, matching native's own rollup
+  rule exactly. The only structural difference from native's version is
+  the child-fetch mechanism: native's calls a local file-store `get()`;
+  this Provider's calls an **injected** `getChildTask(id)` fetcher
+  (mirroring the `pageIssues`/`fetchPage` injection convention already
+  established in this file), which `createGithubClient()`'s own `check()`
+  wires to its own live, single-issue `get()` — i.e. each child is fetched
+  live via `gh api` at check time, recursively.
+- `checkGate()`'s `ready` and `done` branches now call `childrenStatus()`
+  whenever `task.role === "compound"` (i.e. `children` non-empty),
+  requiring every child to already be `done` before the task's own gate
+  can pass — the same compound-aware behavior as native's `store.js`. A
+  primitive task (`children` empty) is completely unaffected: the
+  fetcher is never even invoked in that case (`.every(...)` over an
+  empty array is vacuously true).
+- **A real compound issue pair was deliberately created in `yaleh/quay`**
+  (not a synthetic/mocked fixture, per DIR-006's explicit requirement):
+  issue #5 (child A, closed/done), issue #6 (child B, initially open/
+  todo), and issue #7 (the parent epic, body referencing both via the
+  `- [ ] #5` / `- [ ] #6` checkbox convention `extractChildRefs()` already
+  parsed). All three remain in the repo afterward as durable evidence, the
+  same discipline this experiment applied to every other live-repo
+  artifact since QN-028/QN-029.
+- **Live-verified end-to-end**, the full lifecycle: `quay-github task
+  check gh-7 --json` correctly derived `role:"compound"`,
+  `children:["gh-5","gh-6"]`; while #6 was still open, the gate reported
+  `ok:false`, `childrenStatus` showing `gh-6: todo`; after closing #6, the
+  gate reported `ok:true` with both children `done`; closing the parent
+  (#7 → status `done`) then re-running `task check` confirmed the
+  compound-aware `done` branch's own re-verification: `ok:true, terminal`;
+  an adversarial regression (reopening #6 while #7 remained `done`)
+  correctly flipped the result to `ok:false, "compound task marked done,
+  but not all children are done: gh-6 (todo)"`, exit code 1 — proving the
+  gate has real teeth, not a static pass. Core's generic passthrough
+  (`quay task check gh-7 --provider github --json`) was independently
+  confirmed byte-identical to `quay-github`'s own direct CLI output at
+  both the "before" (1/4 AC checked, one child still todo) and "after"
+  (4/4 AC checked, both children done) states — the same reusability/
+  transfer proof QN-028 established for the primitive-only gate, now
+  extended to the compound path. See `experiment/provenance.md`'s
+  iteration-25 section and `tasks/QN-035.md` for the full transcript.
+- Covered by `test/compound-gate.test.mjs` (24 assertions, injected-
+  fixture unit coverage mirroring native's own
+  `compound-gate.test.mjs`/`compound-gate-recursive.test.mjs` case
+  structure: all-done, one-child-todo, dangling-child-reference,
+  nested/stale-done rollup, cyclic-reference safety, ready-gate AC-vs-
+  children interaction, and primitive-task non-regression).
+
+**`executeEpic`'s compound recursion (Layer-2 Skill path, `skills/execute/
+SKILL.md`)** required no code change here — it is Skill-level
+orchestration pseudocode (`quay task check`/`quay task edit` calls
+against each child in turn), not a `bin/quay-github.js` code path. It
+was, however, exercised for the first time against a real GitHub-backed
+compound task by this same live verification: `quay:execute`'s Method
+already calls the generic, provider-parameterized `quay task check <id>
+--provider <provider>` (QN-029, §3.6) — which this iteration's work
+above confirmed now correctly returns compound-aware results for a
+GitHub-backed epic, closing the specific gap `executeEpic`'s own "epic
+path untested at v0" note (its own SKILL.md, still true for the seed-
+dispatch/subagent-recursion mechanics, but no longer true for the gate it
+recurses against).
 
 **No cross-package import.** Per the design's Provider-independence
 principle, `checkGate()`/`gateArtifactSections()`/`extractGateSection()`
@@ -256,11 +333,17 @@ confirmed byte-identical to the pre-existing direct `quay-native task
 get/check <id> --json` invocation — the regression proof that every prior
 iteration's native-mode evidence remains valid unchanged.
 
-**Scope, deliberately narrow (G5): primitive tasks only**, same boundary
-as `gate` (§3.5) — `executeEpic`'s compound path was left unparameterized
-per-argument-plumbing (it recurses into the same `provider`-aware calls,
-but has never been exercised against a real compound GitHub task, same
-reasoning as §3.5).
+**Scope, formerly narrow, now extended (iteration 25, QN-035/DIR-006):**
+`executeEpic`'s compound path was already parameterized (it recurses into
+the same `provider`-aware `quay task check`/`quay task edit` calls as the
+leaf path) — what had never happened was exercising it against a real
+compound GitHub task, since §3.5's gate itself had no children-recursion
+to exercise. Now that §3.5's gate supports compound tasks, `executeEpic`'s
+own recursive `quay task check <child-id> --provider <provider>` calls
+correctly receive compound-aware results when a GitHub-backed epic's
+child is itself compound — see §3.5's live-verification transcript above,
+which is this capability's own live-verification too (the same generic
+Skill call path, not a separate code path to test twice).
 
 **Live-verified, not merely declared:** the parameterized `quay:author`
 Method's `write-proposal` step (`quay task view <id> --provider github

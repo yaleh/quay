@@ -243,12 +243,14 @@ export function computeStatusWrite({ currentLabelNames, status }) {
 // comparable side by side (design's Provider-independence principle: no
 // cross-package import, each Provider ports the semantic itself).
 //
-// Scope discipline (G5): primitive (non-compound) tasks only -- this
-// experiment has never had a real compound GitHub-backed task (children
-// has always been empty for every real issue used so far), so no
-// children-recursion (native's QN-012/QN-016 childrenStatus) is ported
-// here. `done` status is an unconditional terminal pass for a primitive,
-// matching native's own check()'s done-branch degrade-to-leaf behavior.
+// QN-035 (iteration 25, DIR-006): compound/epic (children non-empty) support
+// added below (childrenStatus()), porting store.js's own QN-012/QN-016
+// childrenStatus() recursion. Ported per DIR-006's explicit rejection of the
+// prior "no organic compound issue has appeared" deferral reasoning -- a
+// real compound issue pair (gh-<parent>/gh-<child>) was deliberately created
+// in yaleh/quay to motivate and live-verify this work (see DESIGN.md §3.5
+// and provenance.md's iteration-25 section for the concrete issue numbers
+// and live-verification transcript).
 const MIN_SECTION_CHARS = 40;
 
 /** Same end-of-string-safe heading-section extractor as store.js's
@@ -280,16 +282,79 @@ function gateArtifactSections(body) {
 }
 
 /**
+ * QN-035 (iteration 25, DIR-006): recursive children-status rollup for a
+ * compound (epic) GitHub-backed task -- direct port of store.js's own
+ * `childrenStatus()` (QN-012/QN-016), adapted to fetch each child live via
+ * an injected `getTask(childId)` function instead of a local file-store
+ * `get()` (mirrors the `pageIssues`/`fetchPage` injection pattern already
+ * established in this file -- pure recursion logic, callers supply the
+ * actual I/O).
+ *
+ * Same semantics as native's version:
+ * - each child is reported `{id, status}` (or, if itself compound,
+ *   `{id, status, childrenStatus: [...grandchildren]}`);
+ * - a child that no longer exists (deleted issue, bad reference) is
+ *   reported `{id, status: "missing"}`;
+ * - a child that reappears within its own ancestry (a cyclic parent/child
+ *   graph) is reported `{id, status: "missing"}` too -- a data-integrity
+ *   bug this gate must not crash or hang on;
+ * - a compound child whose own status is "done" but whose subtree is NOT
+ *   entirely "done" is reported as "stale-done", not "done" -- the same
+ *   rollup native's own fix (iteration 6/7) established, so a `done` label
+ *   later contradicted by a reverted grandchild is surfaced, not
+ *   silently trusted.
+ *
+ * @param {{id: string, role: string, children: string[]}} task
+ * @param {(childId: string) => ({id:string, status:string, role:string, children:string[]}|null)} getTask
+ * @param {Set<string>} visited ids seen earlier in the current walk (cycle guard)
+ */
+export function childrenStatus(task, getTask, visited = new Set()) {
+  if (visited.has(task.id)) {
+    // Should not normally be reached (callers guard before recursing), kept
+    // as a defensive no-op-safe fallback, matching store.js's own comment.
+    return [];
+  }
+  const nextVisited = new Set(visited);
+  nextVisited.add(task.id);
+  return (task.children || []).map((childId) => {
+    if (nextVisited.has(childId)) {
+      return { id: childId, status: "missing" };
+    }
+    const child = getTask(childId);
+    if (!child) return { id: childId, status: "missing" };
+    if (child.role === "compound") {
+      const grandkids = childrenStatus(child, getTask, nextVisited);
+      const subtreeOk = grandkids.every((g) => g.status === "done");
+      const status = child.status === "done" && !subtreeOk ? "stale-done" : child.status;
+      return { id: childId, status, childrenStatus: grandkids };
+    }
+    return { id: childId, status: child.status };
+  });
+}
+
+/**
  * QN-028: the gate-check equivalent of native's store.js#check(), for a
  * GitHub-backed task. Given the task's already-derived view-model `status`
  * and its raw issue `body`, returns the same `{gate, ok, reason, acTotal,
- * acChecked}` shape native's check() returns for todo/ready/done, primitive
- * tasks only (no children-recursion -- see file header note above).
+ * acChecked}` shape native's check() returns for todo/ready/done.
  *
- * @param {{id: string, status: string, body: string}} task
+ * QN-035 (iteration 25, DIR-006): compound (epic) tasks are now supported --
+ * `ready`/`done` branches call the injected `getChildTask` fetcher (via
+ * `childrenStatus()` above) to require every child already `done`, mirroring
+ * store.js's own QN-012 compound-aware gate exactly. Primitive tasks
+ * (`role !== "compound"`, i.e. `children` empty) are entirely unaffected --
+ * `childrenStatus` degrades to `[]` and `.every(...)` over an empty array is
+ * vacuously true, the same degrade-to-leaf guarantee native's own gate uses.
+ *
+ * @param {{id: string, status: string, body: string, role?: string, children?: string[]}} task
+ * @param {(childId: string) => object|null} [getChildTask] required only
+ *   when `task.role === "compound"` (children non-empty); a primitive task's
+ *   gate check never calls it, so callers of the primitive-only path (every
+ *   existing call site before this iteration) are unaffected and require no
+ *   change.
  */
-export function checkGate(task) {
-  const { id, status, body } = task;
+export function checkGate(task, getChildTask) {
+  const { id, status, body, role, children } = task;
   const artifacts = gateArtifactSections(body);
   const allArtifactsPresent = Object.values(artifacts).every(Boolean);
 
@@ -335,22 +400,64 @@ export function checkGate(task) {
     const checkboxes = acSection.match(/- \[[ xX]\]/g) || [];
     const checked = acSection.match(/- \[[xX]\]/g) || [];
     const acOk = checkboxes.length > 0 && checked.length === checkboxes.length;
-    return {
+
+    // QN-035 (DIR-006): for a compound (epic) task, the execute->done gate
+    // must ALSO require every child to already be `done` -- direct port of
+    // store.js's own QN-012 fix (see file header note). Primitive tasks
+    // (children.length === 0 / role !== "compound") are unaffected:
+    // childrenStatus is `[]` and `.every(...)` over an empty array is
+    // vacuously true.
+    const isCompound = role === "compound" && (children || []).length > 0;
+    const kids = isCompound ? childrenStatus({ id, role, children }, getChildTask) : [];
+    const childrenOk = kids.every((c) => c.status === "done");
+    const ok = acOk && childrenOk;
+    const badChildren = kids.filter((c) => c.status !== "done");
+    let reason;
+    if (!acOk) {
+      reason = `${checked.length}/${checkboxes.length} AC checkboxes checked`;
+    } else if (!childrenOk) {
+      reason =
+        "AC checkboxes complete, but not all children are done: " +
+        badChildren.map((c) => `${c.id} (${c.status})`).join(", ");
+    } else {
+      reason = "all AC checkboxes checked; eligible to move to done";
+    }
+    const result = {
       id,
       gate: "execute->done",
-      ok: acOk,
+      ok,
       acTotal: checkboxes.length,
       acChecked: checked.length,
-      reason: acOk
-        ? "all AC checkboxes checked; eligible to move to done"
-        : `${checked.length}/${checkboxes.length} AC checkboxes checked`,
+      reason,
     };
+    if (isCompound) result.childrenStatus = kids;
+    return result;
   }
 
   if (status === "done") {
-    // Primitive-only scope (G5, see file header note): no children
-    // re-verification (unlike native's compound-aware done branch).
-    return { id, gate: "none", ok: true, reason: "terminal" };
+    // QN-035 (DIR-006): a `done` compound (epic) task's gate check must
+    // actually re-verify that its children are still `done`, rather than
+    // unconditionally rubber-stamping `ok: true` -- direct port of
+    // store.js's own QN-012 fix (see file header note). Primitive tasks
+    // are unaffected -- degrades to the original unconditional behavior.
+    const isCompound = role === "compound" && (children || []).length > 0;
+    const kids = isCompound ? childrenStatus({ id, role, children }, getChildTask) : [];
+    const childrenOk = kids.every((c) => c.status === "done");
+    if (isCompound && !childrenOk) {
+      const badChildren = kids.filter((c) => c.status !== "done");
+      return {
+        id,
+        gate: "none",
+        ok: false,
+        reason:
+          "compound task marked done, but not all children are done: " +
+          badChildren.map((c) => `${c.id} (${c.status})`).join(", "),
+        childrenStatus: kids,
+      };
+    }
+    const result = { id, gate: "none", ok: true, reason: "terminal" };
+    if (isCompound) result.childrenStatus = kids;
+    return result;
   }
 
   if (status === "needs-human") {
@@ -492,7 +599,12 @@ export function createGithubClient({ owner, repo }) {
   function check(id) {
     const task = get(id);
     if (!task) return { id, ok: false, reason: "not found" };
-    return checkGate(task);
+    // QN-035 (DIR-006): supply `get` itself as the child-fetcher -- a
+    // compound task's gate check recursively live-fetches each child issue
+    // via the same single-issue `get()` this client already exposes. Cheap
+    // for primitive tasks (role !== "compound"): checkGate() never calls
+    // this fetcher unless task.children is non-empty.
+    return checkGate(task, get);
   }
 
   return { list, get, setStatus, check };
