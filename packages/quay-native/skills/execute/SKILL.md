@@ -112,9 +112,35 @@ executeEpic(task) = {
   `experiment/audits/iteration-0-adjudicate.md` and iteration 1's
   `experiment/audits/iteration-1-adjudicate.md` do), not on anything this
   Skill enforces mechanically.
-- The epic/compound branch (`executeEpic`) is unexercised — no compound task
-  has been driven through this Skill yet (or through the seed either). This
-  is untested code-as-documentation, not a validated path.
+- The epic/compound branch (`executeEpic`) was exercised for the first time
+  in iteration 5 (QN-008/009/010/011) — one favorable-case data point (all
+  children's underlying implementation work already correct before their own
+  AC/DoD were written). Iteration 6 (QN-013, children QN-014/QN-015)
+  deliberately designed one child (QN-015, a compare-and-swap concurrency
+  primitive) to be genuinely hard and NOT pre-verified before authoring, so
+  that its own gate outcome would be honest rather than manufactured. The
+  **actual, unplanned result**: QN-015 genuinely passed its own gate on the
+  first implementation attempt (6/6 AC, confirmed red-before-fix via `git
+  stash`) — it did **not** land on `needs-human`. `executeEpic`'s
+  `needs-human` fallback branch therefore **remains unexercised in practice**
+  as of iteration 6, despite a deliberately-adversarial attempt — see
+  `experiment/iterations/iteration-6.md` §5/§9 for the honest account of why
+  the attempt still counts as a genuine (not rigged) test, and what would be
+  needed to actually exercise the fallback branch.
+- **Fixed in iteration 6 (QN-012):** `quay-native task check`'s mechanical
+  gate is now compound-aware — a `done` compound task's gate check
+  re-verifies that every child is itself `status: done` (returning `ok:
+  false` and naming the offending/missing child otherwise), and a `ready`
+  compound task's execute->done gate requires both AC-checkbox completion
+  AND all-children-done. Previously the gate unconditionally rubber-stamped
+  `ok: true, reason: "terminal"` for any `done` task regardless of role —
+  this meant `executeEpic`'s "integrationAccept -> done" guarantee was
+  enforced only by Skill-level process discipline, not by the gate itself.
+  It is now enforced at the gate level too (see `store.js`'s `check()` and
+  `childrenStatus()`), closing the gap iteration 5's independent audit
+  named (`experiment/audits/iteration-5-independent-adjudicate.md`, Claim 5).
+  Primitive (leaf) task gate behavior is unchanged (verified by dedicated
+  regression tests, `packages/quay-native/test/compound-gate.test.mjs`).
 - Not yet dispatched via manda in a background worker by this Skill itself
   (see quay:author's same gap note — dispatch binding is currently the
   host's job).

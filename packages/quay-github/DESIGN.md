@@ -115,6 +115,20 @@ streaming API) — a real fix for a large repo would need a genuinely paged
 a full caching/streaming layer against zero evidence of need would be
 gold-plating).
 
+**Overflow path genuinely exercised (iteration 6, QN-014):** the paging/
+overflow loop was extracted from `createGithubClient`'s `fetchAllIssues`
+into a standalone, exported, injectable `pageIssues({ maxIssues, perPage,
+fetchPage })` function — `createGithubClient`'s real `fetchAllIssues` is now
+a thin wrapper supplying the real `gh api`-calling `fetchPage`, provably
+identical live behavior to before the refactor (regression-checked against
+the real `yaleh/quay` repo). `packages/quay-github/test/pagination.test.mjs`
+exercises `pageIssues` directly with a synthetic `fetchPage`, genuinely
+throwing the overflow error (a real caught exception, not code inspection)
+and covering the natural-end and raised-cap cases too — closing the gap
+iteration 5 deferred (this experiment's real repo has only 4 issues, so a
+real 500+-issue overflow could never be exercised against live GitHub state
+without creating one, which would be disproportionate for a test fixture).
+
 ## 4. What transferred cleanly vs. what required backend-specific work
 
 **Transferred unmodified (zero Core changes, zero ABI changes):**

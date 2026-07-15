@@ -12,6 +12,28 @@ import YAML from "yaml";
 
 export const VALID_STATUSES = ["todo", "ready", "done", "needs-human"];
 
+/**
+ * QN-015: thrown by `write()` when a caller supplies `expectedStatus` and the
+ * task's actual current status (read inside the same lock acquisition used
+ * for the read-modify-write) does not match — a distinguishable class (not a
+ * generic `Error`) so callers can `catch (err) { if (err instanceof
+ * ConflictError) ... }` to detect a lost-update race specifically, rather
+ * than parsing an error message string.
+ */
+export class ConflictError extends Error {
+  constructor(id, expectedStatus, actualStatus) {
+    super(
+      `CAS conflict on ${id}: expected status "${expectedStatus}" but ` +
+        `actual current status is "${actualStatus}" — another writer changed ` +
+        `it first; refusing to overwrite (write() aborted, nothing written to disk)`
+    );
+    this.name = "ConflictError";
+    this.id = id;
+    this.expectedStatus = expectedStatus;
+    this.actualStatus = actualStatus;
+  }
+}
+
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 
 /**
@@ -140,6 +162,19 @@ export function createStore(tasksDir) {
     };
   }
 
+  /**
+   * QN-012: given a task view-model, resolve the live status of each of its
+   * declared `children` ids. A child id that does not resolve to an existing
+   * task file reports status `"missing"` — a distinct, real failure mode,
+   * never silently treated as `"done"`.
+   */
+  function childrenStatus(t) {
+    return (t.children || []).map((childId) => {
+      const child = get(childId);
+      return { id: childId, status: child ? child.status : "missing" };
+    });
+  }
+
   function list(filter = {}) {
     return listIds()
       .map((id) => get(id))
@@ -154,7 +189,7 @@ export function createStore(tasksDir) {
    * Raw file write — used by both `task create` (internal convenience,
    * not part of the ABI surface table but needed to seed tasks) and `edit`.
    */
-  function write(id, { title, status, labels, parent, children, extra, body }) {
+  function write(id, { title, status, labels, parent, children, extra, body, expectedStatus }) {
     if (status && !VALID_STATUSES.includes(status)) {
       throw new Error(
         `invalid status "${status}" — must be one of ${VALID_STATUSES.join(", ")}`
@@ -170,6 +205,13 @@ export function createStore(tasksDir) {
         const parsed = parse(existingRaw);
         frontmatter = { ...parsed.frontmatter };
         existingBody = parsed.body;
+        // QN-015: the CAS check MUST happen here, inside the same lock
+        // acquisition already used for the read-modify-write below — checking
+        // status before acquiring the lock (or in a separate call) would
+        // reopen exactly the TOCTOU race this option exists to close.
+        if (expectedStatus !== undefined && frontmatter.status !== expectedStatus) {
+          throw new ConflictError(id, expectedStatus, frontmatter.status);
+        }
         if (title !== undefined) frontmatter.title = title;
         if (status !== undefined) frontmatter.status = status;
         if (labels !== undefined) frontmatter.labels = labels;
@@ -177,6 +219,12 @@ export function createStore(tasksDir) {
         if (children !== undefined) frontmatter.children = children;
         if (extra !== undefined) frontmatter.extra = extra;
       } else {
+        // No existing file: there is no "current status" to compare against,
+        // so any expectedStatus is by definition a mismatch (there is
+        // nothing to CAS against) — fail closed, not open.
+        if (expectedStatus !== undefined) {
+          throw new ConflictError(id, expectedStatus, null);
+        }
         frontmatter.extra = extra ?? {};
       }
       const finalBody = body !== undefined ? body : existingBody;
@@ -190,6 +238,16 @@ export function createStore(tasksDir) {
     // appendNote's own read-modify-write goes through write()'s lock too,
     // but the read of current body must ALSO be inside the lock to avoid a
     // lost-update race between the read here and write()'s internal read.
+    //
+    // QN-015 scope note (deliberate, stated, not silently dropped): unlike
+    // write(), appendNote() does NOT support expectedStatus / CAS. Its own
+    // use case (appending a timestamped note to the body) does not naturally
+    // have an "expected prior status" precondition the way a status-changing
+    // write() does — a note is usually appendable regardless of the task's
+    // current lifecycle stage. Extending the CAS guarantee here was evaluated
+    // and explicitly deferred (G5): the TOCTOU race this task closes is
+    // specifically the read-decide-write status-transition race (design §3
+    // gate-check pattern), which appendNote() does not participate in.
     return withLock(id, () => {
       const raw = readRaw(id);
       if (raw === null) throw new Error(`no such task: ${id}`);
@@ -282,19 +340,66 @@ export function createStore(tasksDir) {
       const checkboxes = acSection.match(/- \[[ xX]\]/g) || [];
       const checked = acSection.match(/- \[[xX]\]/g) || [];
       const acOk = checkboxes.length > 0 && checked.length === checkboxes.length;
-      return {
+
+      // QN-012: for a compound (epic) task, the execute->done gate must ALSO
+      // require every child to already be `done` — a compound task's own
+      // AC/DoD checkboxes do not mechanically encode "and all children
+      // finished," so without this, a checkbox-complete epic could flip to
+      // `done` while a child was still `todo`/`ready`. Primitive tasks
+      // (children.length === 0) are unaffected: childrenStatus is `[]` and
+      // `.every(...)` over an empty array is vacuously true.
+      const kids = childrenStatus(t);
+      const childrenOk = kids.every((c) => c.status === "done");
+      const ok = acOk && childrenOk;
+      const badChildren = kids.filter((c) => c.status !== "done");
+      let reason;
+      if (!acOk) {
+        reason = `${checked.length}/${checkboxes.length} AC checkboxes checked`;
+      } else if (!childrenOk) {
+        reason =
+          "AC checkboxes complete, but not all children are done: " +
+          badChildren.map((c) => `${c.id} (${c.status})`).join(", ");
+      } else {
+        reason = "all AC checkboxes checked; eligible to move to done";
+      }
+      const result = {
         id,
         gate: "execute->done",
-        ok: acOk,
+        ok,
         acTotal: checkboxes.length,
         acChecked: checked.length,
-        reason: acOk
-          ? "all AC checkboxes checked; eligible to move to done"
-          : `${checked.length}/${checkboxes.length} AC checkboxes checked`,
+        reason,
       };
+      if (t.role === "compound") result.childrenStatus = kids;
+      return result;
     }
     if (t.status === "done") {
-      return { id, gate: "none", ok: true, reason: "terminal" };
+      // QN-012: a `done` compound (epic) task's gate check must actually
+      // re-verify that its children are still `done`, rather than
+      // unconditionally rubber-stamping `ok: true` — closing the gap named
+      // in iteration 5's independent audit (Claim 5): a `done` epic whose
+      // child was later reverted would previously still report
+      // `ok: true, reason: "terminal"` with zero cross-check. Primitive
+      // tasks (children.length === 0) are unaffected: childrenStatus is `[]`
+      // and `.every(...)` over an empty array is vacuously true, so this
+      // branch degrades to the original unconditional behavior for leaves.
+      const kids = childrenStatus(t);
+      const childrenOk = kids.every((c) => c.status === "done");
+      if (t.role === "compound" && !childrenOk) {
+        const badChildren = kids.filter((c) => c.status !== "done");
+        return {
+          id,
+          gate: "none",
+          ok: false,
+          reason:
+            "compound task marked done, but not all children are done: " +
+            badChildren.map((c) => `${c.id} (${c.status})`).join(", "),
+          childrenStatus: kids,
+        };
+      }
+      const result = { id, gate: "none", ok: true, reason: "terminal" };
+      if (t.role === "compound") result.childrenStatus = kids;
+      return result;
     }
     if (t.status === "needs-human") {
       return { id, gate: "none", ok: false, reason: "soft stop; human action required" };
@@ -319,5 +424,5 @@ export function createStore(tasksDir) {
     return "";
   }
 
-  return { list, get, write, appendNote, check, artifactSections };
+  return { list, get, write, appendNote, check, artifactSections, childrenStatus };
 }

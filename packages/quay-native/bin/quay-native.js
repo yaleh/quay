@@ -122,15 +122,30 @@ async function main() {
       if (flags.body !== undefined) patch.body = flags.body;
       if (flags.children !== undefined) patch.children = String(flags.children).split(",").filter(Boolean);
       if (flags.extra !== undefined) patch.extra = JSON.parse(flags.extra);
+      // QN-015: --expect-status wires the CAS option through the CLI path
+      // (design §6 symmetry — must match the MCP task_write inputSchema
+      // identically). Omitted entirely => patch.expectedStatus stays
+      // undefined => store.write()'s existing, unaffected behavior.
+      if (flags["expect-status"] !== undefined) patch.expectedStatus = flags["expect-status"];
       if (flags["append-notes"] !== undefined) {
         const t = store.appendNote(id, flags["append-notes"]);
         if (flags.json) printJson(t);
         else console.log(`appended note to ${id}`);
         return;
       }
-      const t = store.write(id, patch);
-      if (flags.json) printJson(t);
-      else console.log(`updated ${id}`);
+      try {
+        const t = store.write(id, patch);
+        if (flags.json) printJson(t);
+        else console.log(`updated ${id}`);
+      } catch (err) {
+        if (err && err.name === "ConflictError") {
+          if (flags.json) printJson({ error: "ConflictError", message: err.message, id: err.id, expectedStatus: err.expectedStatus, actualStatus: err.actualStatus });
+          else console.error(`CAS conflict: ${err.message}`);
+          process.exitCode = 1;
+          return;
+        }
+        throw err;
+      }
       return;
     }
 

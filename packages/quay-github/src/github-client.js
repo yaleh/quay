@@ -158,6 +158,40 @@ function buildParentIndex(issues) {
 const DEFAULT_MAX_ISSUES = 500;
 
 /**
+ * QN-014: the paging/overflow loop, extracted from `createGithubClient` into
+ * a standalone, independently-testable, injectable function. `fetchPage(page,
+ * perPage)` is the thing that actually talks to `gh api` in production
+ * (`createGithubClient`'s real `fetchAllIssues` below), but tests supply a
+ * synthetic stand-in so the overflow throw path can be genuinely exercised
+ * without needing a real 500+-issue GitHub repository (impractical — this
+ * experiment's real repo has 4 issues). Pure paging/cap logic; does not read
+ * `process.env` itself (that stays `createGithubClient`'s job).
+ *
+ * @param {{maxIssues: number, perPage: number, fetchPage: (page:number, perPage:number) => any[]}} opts
+ * @returns {any[]} the concatenated issues across all fetched pages
+ * @throws if the cap is reached without a natural (short) final page
+ */
+export function pageIssues({ maxIssues, perPage, fetchPage }) {
+  const maxPages = Math.ceil(maxIssues / perPage);
+  const issues = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const batch = fetchPage(page, perPage);
+    issues.push(...batch);
+    if (batch.length < perPage) break; // last page reached
+  }
+  if (issues.length >= maxIssues) {
+    throw new Error(
+      `quay-github: repo has >= ${maxIssues} issues ` +
+        `(QUAY_GITHUB_MAX_ISSUES cap reached); v1 has no pagination/` +
+        `caching strategy beyond this hard limit (DESIGN.md §3). Raise ` +
+        `QUAY_GITHUB_MAX_ISSUES if you know what you are doing, or file ` +
+        `a follow-up task for a real paged/streaming task_list API.`
+    );
+  }
+  return issues;
+}
+
+/**
  * @param {{owner: string, repo: string}} opts
  */
 export function createGithubClient({ owner, repo }) {
@@ -167,34 +201,27 @@ export function createGithubClient({ owner, repo }) {
     // Request the max per-page size (100) to minimize round-trips, and cap
     // total pages fetched so a single `task list` call cannot silently
     // balloon into an unbounded crawl of a very large repo's full history.
+    // QN-014: the actual paging/overflow logic now lives in the standalone,
+    // independently-tested `pageIssues` above — this is a thin wrapper
+    // supplying the real `gh api`-calling fetchPage, provably unchanged live
+    // behavior from before the refactor.
     const perPage = 100;
-    const maxPages = Math.ceil(maxIssues / perPage);
-    const issues = [];
-    for (let page = 1; page <= maxPages; page++) {
-      const batch = ghApiJson([
-        `repos/${owner}/${repo}/issues`,
-        "-X",
-        "GET",
-        "-f",
-        "state=all",
-        "-f",
-        `per_page=${perPage}`,
-        "-f",
-        `page=${page}`,
-      ]);
-      issues.push(...batch);
-      if (batch.length < perPage) break; // last page reached
-    }
-    if (issues.length >= maxIssues) {
-      throw new Error(
-        `quay-github: repo ${owner}/${repo} has >= ${maxIssues} issues ` +
-          `(QUAY_GITHUB_MAX_ISSUES cap reached); v1 has no pagination/` +
-          `caching strategy beyond this hard limit (DESIGN.md §3). Raise ` +
-          `QUAY_GITHUB_MAX_ISSUES if you know what you are doing, or file ` +
-          `a follow-up task for a real paged/streaming task_list API.`
-      );
-    }
-    return issues;
+    return pageIssues({
+      maxIssues,
+      perPage,
+      fetchPage: (page, pp) =>
+        ghApiJson([
+          `repos/${owner}/${repo}/issues`,
+          "-X",
+          "GET",
+          "-f",
+          "state=all",
+          "-f",
+          `per_page=${pp}`,
+          "-f",
+          `page=${page}`,
+        ]),
+    });
   }
 
   function list({ status, label } = {}) {

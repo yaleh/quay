@@ -97,14 +97,35 @@ export async function startMcpServer({ tasksDir }) {
         // the CLI's own `JSON.parse(flags.extra)` looseness (no schema
         // validation beyond "is it an object" — G5, do not gold-plate).
         extra: z.record(z.any()).optional(),
+        // QN-015: CAS option, symmetric with the CLI's --expect-status flag
+        // (design §6). Omitted entirely => store.write()'s existing,
+        // unaffected behavior (no CAS check performed).
+        expectedStatus: z.string().optional(),
       },
     },
     async ({ id, ...patch }) => {
-      const task = store.write(id, patch);
-      return {
-        content: [{ type: "text", text: JSON.stringify(task, null, 2) }],
-        structuredContent: { task },
-      };
+      try {
+        const task = store.write(id, patch);
+        return {
+          content: [{ type: "text", text: JSON.stringify(task, null, 2) }],
+          structuredContent: { task },
+        };
+      } catch (err) {
+        if (err && err.name === "ConflictError") {
+          return {
+            content: [{ type: "text", text: `CAS conflict: ${err.message}` }],
+            structuredContent: {
+              error: "ConflictError",
+              message: err.message,
+              id: err.id,
+              expectedStatus: err.expectedStatus,
+              actualStatus: err.actualStatus,
+            },
+            isError: true,
+          };
+        }
+        throw err;
+      }
     }
   );
 

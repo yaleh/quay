@@ -829,3 +829,182 @@ authoring, so they add to both numerator and denominator symmetrically).
 
 See `experiment/timing/iteration-5.log` for this iteration's raw `date -u`
 checkpoints.
+
+## Records (as of end of iteration 6)
+
+**Pre-execution context:** this iteration's mandate (per iteration-5's
+"Problems identified for next iteration") was, in priority order: (1) test
+the adversarial epic case (a child genuinely failing its own gate mid-epic,
+to prove `executeEpic`'s `needs-human` fallback actually works); (2) fix
+`store.js`'s `check()` — no compound-aware re-verification existed for a
+`done` epic; (3)/(4) attempt to move the stalled `effectiveness`/
+`reusability` V_meta components off their multi-iteration plateaus; (5)
+optionally exercise `quay-github`'s untested `DEFAULT_MAX_ISSUES` overflow
+throw path. Four new tasks were authored and driven through the full native
+lifecycle: QN-012 (the compound-aware gate fix, a standalone leaf task,
+authored/executed first since it is a precondition for the epic's own
+integration-level gate check to be trustworthy), then QN-013 (an epic) with
+children QN-014 (pagination-overflow fixture, priority 5) and QN-015 (a
+deliberately hard compare-and-swap concurrency primitive, priority 1).
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 6) |
+|---|---|---|---|---|---|
+| QN-001 | Wire task_write into quay-native CLI/MCP with full frontmatter patch semantics | native* | native† | native* | done |
+| QN-002 | Build the GitHub Provider (second real backend, proves ABI) | native§ | native# | native# | done |
+| QN-003 | Port quay:author orchestration Skill (retire authoring seed dependency) | native* | native‡ | native* | done |
+| QN-004 | Port quay:execute orchestration Skill (retire execution seed dependency) | native* | native‡ | native* | done |
+| QN-005 | Deepen task_check gate correctness beyond presence/checkbox heuristics | native* | native† | native* | done |
+| QN-006 | Add file locking shared by CLI and MCP writers (design §6) | seed | seed | seed | done |
+| QN-007 | Fix MCP task_write silently dropping the extra field; strengthen ABI symmetry test | native¶ | native¶ | native¶ | done |
+| QN-008 | Harden quay-github's view-model mapping — epic (integration level) | native** | native** | native** | done |
+| QN-009 | Map GitHub parent/children via task-list checkbox convention | native** | native** | native** | done |
+| QN-010 | Add pagination/scale safety net to quay-github's list() | native** | native** | native** | done |
+| QN-011 | Define and test status-label tie-breaking rule | native** | native** | native** | done |
+| QN-012 | Make store.js's check() compound-aware (re-verify children for epics) | **native††** | **native††** | **native††** | **done** |
+| QN-013 | Harden pagination + close the appendNote TOCTOU gap — epic, adversarial child | **native‡‡** | **native‡‡** | **native‡‡** | **done** |
+| QN-014 | Construct a synthetic large-issue-count fixture (pagination overflow) | **native††** | **native††** | **native††** | **done** |
+| QN-015 | Add a compare-and-swap task_write primitive (CAS) | **native††§§** | **native††§§** | **native††§§** | **done** |
+
+Rows QN-001 through QN-011 are unchanged from the end of iteration 5;
+reproduced here for a single up-to-date table. QN-012/013/014/015 are new
+this iteration. Footnotes *, †, ‡, §, ¶, #, ** carry the same meaning as in
+prior iterations' tables (see the corresponding "Records" sections above for
+their original definitions); new footnotes below.
+
+`††` — QN-012/QN-014: same-session, no subagent-dispatch primitive found
+(re-confirmed via `ToolSearch` at the start of this iteration — same finding
+as every prior iteration). `author_by = native`: `quay:author`'s documented
+Method (write-proposal → review-proposal → write-plan → review-plan) was
+followed, same-session, to produce each task's Proposal/Plan/AC/DoD, gated
+by the real `quay-native task check` author→ready gate before proceeding.
+`execute_by = native`: `quay:execute`'s documented Method
+(implement-phase → self-audit-ac → gate-check) was followed — for QN-012,
+real TDD discipline was verified via `git stash` (pre-fix state genuinely
+fails `compound-gate.test.mjs` with 9 failures; post-fix state genuinely
+passes all 18 assertions); for QN-014, the paging/overflow extraction was
+regression-checked against both the new synthetic test and a live
+`gh`-backed call against the real `yaleh/quay` repo. `gate_by = native`: the
+real `quay-native task check <id> --json` mechanical gate reported `ok:
+true` before each status flip to `done` — no self-certification, no
+skipped step.
+
+`‡‡` — QN-013 (the epic): `author_by = native` — `quay:author`'s
+decomposition test (design §4) was applied live, during authoring, before
+either child existed (recorded in QN-013's own Proposal, not backfilled):
+QN-014 and QN-015 touch entirely disjoint packages (`quay-github` vs.
+`quay-native`) with no shared code path, independently
+testable/mergeable/revertible. `execute_by = native`: `quay:execute`'s
+`executeEpic` method (`ensureChildrenExist` → `driveEach` (recursive,
+todo→ready→done for each child) → `integrationAccept`) was followed
+literally — see the honesty note below on what `driveEach`'s outcome
+actually was. `gate_by = native`: **this is the first iteration where the
+epic-level `done` gate check was itself compound-aware** (QN-012's fix,
+landed earlier the same iteration) — `quay-native task check QN-013 --json`
+genuinely re-verified both children's live status (`childrenStatus: [{id:
+"QN-014", status:"done"}, {id:"QN-015", status:"done"}]`) before reporting
+`ok:true`, rather than rubber-stamping a `done` epic unconditionally (the
+exact gap QN-012 exists to close). This is a materially different, stronger
+gate-level guarantee than QN-008's own epic gate check in iteration 5, which
+predates QN-012 and could not have caught a reverted child.
+
+`§§` — QN-015's honesty note (read this before treating QN-015's `done` as
+routine): this task was deliberately authored to be genuinely hard — a
+compare-and-swap concurrency primitive plus a real, process-level
+concurrent-race regression test — specifically so that, unlike every prior
+epic child (QN-009/010/011 in iteration 5, all of which had their
+underlying implementation work already correct before their own AC/DoD were
+written), its outcome would be a genuine, not-manufactured test of
+`quay:execute`'s `needs-human` fallback path. **The honest, unplanned
+result: QN-015's own gate check passed on the first implementation attempt
+(`ok: true, acChecked: 6/6`)** — it did not land on `needs-human`. This is
+recorded as a genuine PASS (per G1, forcing a false failure to manufacture a
+more interesting narrative would be dishonest), but it also means
+`executeEpic`'s `needs-human` fallback branch **remains empirically
+unexercised** after this iteration's deliberate, good-faith attempt to
+trigger it — a real, standing gap for a future iteration to address (see
+"Problems identified for next iteration" in `experiment/iterations/
+iteration-6.md`). This is a different, and arguably more informative, kind
+of honest finding than a manufactured failure would have been: it shows
+that a good-faith attempt to construct a hard case, scoped by an author
+without foreknowledge of whether the first pass would succeed, still
+succeeded — which says something real (if modest) about the quality of
+this iteration's own authoring judgment on QN-015's Plan, not about whether
+the adversarial-case methodology itself is sound.
+
+## σ computation — iteration 6
+
+Applying protocol §10.1's strict definition (all three of `author_by`,
+`execute_by`, `gate_by` must be `native`) to the updated table above:
+
+- QN-001, QN-002, QN-005, QN-007, QN-008, QN-009, QN-010, QN-011: unchanged
+  from iteration 5, still qualify.
+- QN-012: native/native/native → **qualifies (new this iteration)**.
+- QN-013: native/native/native → **qualifies (new this iteration)**.
+- QN-014: native/native/native → **qualifies (new this iteration)**.
+- QN-015: native/native/native → **qualifies (new this iteration)**.
+- QN-003, QN-004: qualify under the inclusive reading only (unchanged).
+- QN-006: seed/seed/seed → does not qualify (unchanged, permanent).
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native) / (total tasks)
+  = 12 / 15
+  = 0.800
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 14 / 15
+  = 0.933
+```
+
+Total task count is now **15** (QN-001..QN-015) — 4 new tasks created and
+completed this iteration (QN-012, QN-013 epic, QN-014, QN-015).
+
+**σ = 0.800 (strict), up from 0.727 at the end of iteration 5 (Δσ =
++0.073).** Same honesty caveat as iteration 5's own σ rise applies with
+undiminished force: this increase is driven entirely by 4 new tasks created
+AND completed within this same iteration, not by retiring seed dependency on
+pre-existing backlog (there is no such backlog left — QN-006 is the only
+permanently-seed task, and it is not itself being re-attempted, since a
+seed task's provenance is a historical fact, not a moving target). This
+pattern (σ rising via same-iteration task creation) has now repeated across
+2 consecutive iterations (5 and 6) — worth flagging for a future iteration's
+honest assessment of what σ growth actually signals once the backlog is
+this thin: continued σ growth of this kind demonstrates the native Skills
+remain *usable* for new work, but does not by itself demonstrate anything
+new about self-hosting *maturity* beyond what was already shown in
+iteration 5.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 14 / 15
+              = 0.933
+```
+
+Unchanged in kind from iteration 5 (all 4 new tasks are native end-to-end
+from authoring, so they add to both numerator and denominator
+symmetrically; QN-006 remains the sole gap).
+
+## QN-015 / adversarial-epic honest reflection (read alongside §§ above)
+
+This iteration's central methodological question was whether
+`executeEpic`'s `needs-human` fallback path (design §4, `quay:execute`'s
+SKILL.md pseudocode) is real machinery or untested pseudocode. The honest
+answer after this iteration: **still untested in practice**, but for a
+reason that itself has evidentiary value, not merely "we didn't try hard
+enough" — QN-015's Proposal was written, before implementation began,
+naming specific concrete reasons the CAS primitive might not land cleanly in
+one pass (threading a new option through both CLI and MCP without breaking
+backward compatibility; deciding `appendNote()`'s scope; constructing a
+process-level, not simulated, concurrent-race proof). All three of those
+named risks were real engineering work, not straw obstacles, and all three
+were resolved within the same implementation pass. This is recorded as a
+genuine, non-adversarial-in-hindsight PASS — but the gap it leaves (the
+`needs-human` fallback path remains empirically unexercised after 6
+iterations and 2 deliberate attempts across iterations 5-6 to exercise the
+epic branch generally) is named explicitly as unresolved, carried forward to
+iteration 7's priority list.
+
+See `experiment/timing/iteration-6.log` for this iteration's raw `date -u`
+checkpoints.
