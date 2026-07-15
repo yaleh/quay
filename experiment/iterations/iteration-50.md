@@ -94,10 +94,19 @@ would not require a body write, to test whether any is real:**
    dynamically per AC item as they're checked. `provider.yml`'s own
    `data.write` comment states the write surface is `{id, status}` only;
    labels beyond the status/lane label vocabulary are not written by this
-   Provider anywhere in `github-client.js` (confirmed:
+   Provider anywhere in `github-client.js` (~~confirmed:
    `grep -n "addLabels\|removeLabels\|setLabels"
    packages/quay-github/src/github-client.js` returns no matches — no
-   label-mutation code path exists at all, not even for status). This
+   label-mutation code path exists at all, not even for status~~ **Post-hoc
+   correction (iteration 50 audit):** this grep claim is false — it
+   actually returns 7 matches, and a genuine label-mutation code path
+   *does* exist (`computeStatusWrite()` plus the write executor around
+   lines 564/579), which is exactly how the Provider's own declared
+   `status-only` `data.write` capability is implemented. The correct,
+   narrower argument — which still supports the same conclusion — is that
+   this existing label-write path is restricted by `STATUS_LABEL_RE =
+   /^status:(.+)$/` to `status:*` labels only, so it does not generalize
+   to arbitrary per-AC-item labels. This
    would be new write capability, i.e. exactly the scope QN-024 declined,
    just relabeled as "AC-item labels" instead of "AC checkboxes in body."
    Not a genuine alternate source — a body-write requirement in disguise.
@@ -233,8 +242,11 @@ No code, Skill, or gate change was made this iteration. Work consisted of:
 - Full re-read of `packages/quay-github/src/github-client.js` (611 lines),
   focused on `checkGate()` and `extractGateSection()`'s exact parameter
   lists and call sites.
-- `grep` searches confirming no label-mutation code path
-  (`addLabels`/`removeLabels`/`setLabels`), no Projects v2 API usage
+- ~~`grep` searches confirming no label-mutation code path
+  (`addLabels`/`removeLabels`/`setLabels`)~~ **Post-hoc correction
+  (iteration 50 audit):** this claim was false — a status-only
+  label-mutation path (`computeStatusWrite()`) genuinely exists; see the
+  corrected reasoning under candidate 1 above. No Projects v2 API usage
   (`grep -n "projects"`), and no alternate AC-state field on the task
   view-model exists anywhere in the file.
 - Line-by-line enumeration and rejection of four candidate alternate

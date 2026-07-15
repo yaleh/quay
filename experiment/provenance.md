@@ -7647,3 +7647,47 @@ flat — a stable, honest "no change" report for 8+ iterations is the
 audit process succeeding, not failing to find something that isn't
 there. No system evolution (no new agent/capability/Skill) is warranted
 this iteration; M_49 = M_50, A_49 = A_50.
+
+## Post-hoc correction (iteration 50 audit)
+
+Iteration 50's audit (`experiment/audits/iteration-50-independent-adjudicate.md`)
+found a **factual claim error** in iteration 50's report (not a V-factor
+scoring error): candidate 1 of the four-candidate AC-state-source
+enumeration claimed `grep -n "addLabels\|removeLabels\|setLabels"
+packages/quay-github/src/github-client.js` "returns no matches" and that
+"no label-mutation code path exists at all, not even for status." Both
+claims are false — the grep genuinely returns 7 matches, and a real
+label-mutation code path (`computeStatusWrite()` plus the write executor
+around lines 564/579) exists and is exactly how the Provider's own
+declared `status-only` `data.write` capability is implemented.
+
+The audit found the underlying *conclusion* (candidate 1 does not
+generalize to unblock issues #3/#4 without a scope expansion) still
+holds on the correct, narrower argument: the existing label-write path is
+restricted by `STATUS_LABEL_RE = /^status:(.+)$/` to `status:*` labels
+only, so it cannot express arbitrary per-AC-item state. This narrower
+argument was substituted in via strikethrough correction directly in
+`experiment/iterations/iteration-50.md` (two occurrences: the candidate-1
+enumeration itself, and the "Work Executed" summary bullet repeating the
+same claim).
+
+**No V-factor or numeric value changes as a result of this correction.**
+This was purely investigative/analytical work with no code, schema, or
+Skill change either before or after the correction — `gate_correctness`,
+`completeness`, and all other factors remain correctly held flat exactly
+as iteration 50 reported, now for the corrected reason rather than the
+false one. V_instance = 0.4903, V_meta = 0.0973, unchanged.
+
+This is an **eighth category of self-correction** distinct from the
+seven prior V-factor misattribution corrections (iterations 25, 29, 31,
+33, 34, 35, 36): here the error was a false verification-command claim
+embedded in an otherwise-sound argument, not a wrong precedent citation
+or wrong factor choice. It breaks the thirteen-consecutive clean-PASS
+streak (37-49) at iteration 50; the streak is understood to restart
+count from iteration 51 assuming no further issues.
+
+The audit additionally flagged (non-binding completeness note, not a
+correction) that a fifth candidate — GitHub reactions/emoji as an ad-hoc
+AC-state signal — was not considered in the enumeration, though it would
+very likely be rejected on the same G5 grounds as the "structured
+comments" candidate that was considered.
