@@ -3297,3 +3297,118 @@ Diagnostic sub-metric:
 
 Up from 0.9677 at the end of iteration 22 (one new natively-authored task,
 QN-033, added to both numerator and denominator).
+
+## Iteration 24 — QN-034 (bin/quay-github.js CLI dispatch layer gap closure, live-repo-backed)
+
+**Fresh search performed at the start of iteration 24**, per iteration 23's
+own named next-step: check `packages/quay-github/bin/quay-github.js`'s CLI
+dispatch layer and `packages/quay-github/src/mcp-server.js`'s error-handling
+branches, both confirmed genuinely unreferenced by any test file at the
+time. Grepping every `*.test.mjs` file across all three packages for any
+reference to `quay-github.js` confirmed zero hits — a real, unclosed gap,
+the sibling of QN-033's `bin/quay.js` closure one iteration prior.
+
+**This task is deliberately scoped differently from QN-030..033**: those
+four each spun up a fully isolated, disposable local fixture with zero
+external dependency. `quay-github.js`'s CLI has no local-fixture
+equivalent — every operation shells out to the real `gh api` (no
+dependency-injection seam in the CLI binary itself). Closing this gap
+therefore required live calls against the real `yaleh/quay` repo, under an
+explicit constraint already established by this package's own
+`write.test.mjs` header comment: the real issue backlog is too small/
+precious to target with destructive live writes in an automated test. The
+new test file (`packages/quay-github/test/cli.test.mjs`) therefore
+exercises only read-only or fail-before-any-write CLI surfaces: `manifest`,
+`task list` (json + non-json), `task get` (happy + not-found, live against
+real issues #3/#4), `task check` (both ok:true/ok:false, live), `task edit`
+missing-`--status` error path (returns before `client.setStatus` is ever
+reached — verified by reading the source before writing the test, and by a
+self-check assertion inside the test file itself that its own source
+contains no `edit ... --status <value>` invocation), unknown `task`
+subcommand, unknown top-level command, and a malformed `QUAY_GITHUB_REPO`
+env value (resolveRepo()'s own throw path via `main().catch(...)`). 25
+`assert()` call sites, all passing on a clean run, all against the real,
+unmodified `bin/quay-github.js` binary spawned via `execFileSync`.
+
+The real `task edit --status <value>` write path (`client.setStatus`'s
+label add/remove/close-vs-reopen branches) and the `mcp` subcommand
+(starting the stdio MCP transport) remain explicitly out of scope, named
+honestly in the task body — the former for destructive-write risk to the
+real repo, the latter for its different (long-running, stdio-server)
+process-lifecycle shape.
+
+An adversarial break/restore cycle was performed: `bin/quay-github.js`'s own
+`task check` exit-code line (`process.exitCode = result.ok ? 0 : 1`) was
+inverted, re-running the test produced exactly **2** live FAILs (the two
+`task check` exit-code assertions, no other assertion affected), then the
+file was restored from a backup, confirmed byte-identical via `diff` and
+zero-diff via `git diff --stat`, and re-running produced a full green run
+again. `gh issue list --repo yaleh/quay` was captured before and after this
+task's entire execution and diffed byte-identical, confirming no live write
+ever occurred to the real repo.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 24) |
+|---|---|---|---|---|---|
+| QN-034 | Regression test for bin/quay-github.js's own CLI dispatch layer (read-only surfaces, no live writes) | **native** | **native** | **native** | **done** |
+
+Driven through the full `todo -> ready -> done` lifecycle this iteration,
+natively, in the same degraded-fallback (same-session) mode established
+since iteration 1. `quay-native task check QN-034 --json` confirmed
+`author->ready` gate `ok:true` (all four artifacts present) before `task
+edit --status ready`; all 4 AC checkboxes were independently re-verified
+against real command output (test run output, live break/restore cycle
+output, full 18-file regression-suite re-run, `diff`/`git diff --stat`
+restoration checks, before/after `gh issue list` diff) before being
+checked; `quay-native task check QN-034 --json` then confirmed
+`execute->done` gate `ok:true` (4/4 AC checkboxes checked, plus 4 DoD
+checkboxes independently verified and checked) before `task edit --status
+done`.
+
+**Full regression suite, run fresh this iteration:** 18 test files total (9
+quay-native + 5 quay-github, including the new `cli.test.mjs` + 4
+pre-existing + 4 quay), all exit 0. Zero regressions.
+
+**Reusability re-check (6th consecutive iteration, 19-24):** `gh issue list
+--repo yaleh/quay --json number,title,body,labels --limit 20` re-run live —
+still exactly 2 primitive issues (#3, #4), byte-identical to iterations
+19-23's own findings.
+
+## σ computation — iteration 24
+
+QN-034 reaches `{native, native, native, done}` this iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 26 / 33
+  = 0.7879
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 28 / 33
+  = 0.8485
+```
+
+Total task count is now **33** (QN-001..QN-034, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration (QN-034, done).
+
+**σ (strict) = 0.7879, up from 0.7813 at the end of iteration 23 (Δσ =
++0.0066).** QN-034 is a genuine, deliberately-scoped, non-adversarial
+V_instance-side capability increment — the fifth consecutive iteration with
+a nonzero σ movement (20: gate_correctness; 21: skeleton/serve+action; 22:
+skeleton/config; 23: skeleton/quay.js CLI dispatch; 24: skeleton/
+quay-github.js CLI dispatch), and the fourth consecutive iteration
+specifically on the `skeleton` sub-axis (21, 22, 23, 24) — now closing the
+CLI-dispatch gap on the third and final CLI binary in the repo (Core CLI:
+QN-033; Provider CLI (native): already covered; Provider CLI (github): now
+QN-034).
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 32 / 33
+              = 0.9697
+```
+
+Up from 0.9688 at the end of iteration 23 (one new natively-authored task,
+QN-034, added to both numerator and denominator).
