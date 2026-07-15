@@ -7867,3 +7867,140 @@ character against what the tool call actually returned in this session's
 own transcript, not against what the author expects a plausible-sounding
 command to return. The clean-PASS streak, reset at iteration 50, remains
 at 0 going into iteration 52.
+
+## Iteration 52 — post-correction stability re-confirmation; live re-probe of manda dispatch primitive and GitHub issue-state check
+
+### Preconditions checked
+
+`experiment/directives/pending/` confirmed **empty** via `ls`. `git status
+--short` confirmed clean modulo the one pre-existing, deliberately-
+untouched `docs/proposal/baime-lite-driving-external-projects.md`.
+`ls tasks/QN-*.md | wc -l` confirmed **56** (unchanged). Full 25-file
+regression suite and `abi-symmetry.mjs` both confirmed passing this
+session. `docs/proposal/quay-bootstrap-experiment.md` (233 lines,
+gitignored, read directly from disk), `experiment/ITERATION-PROMPTS.md`
+(489 lines), and the tail of this file — including both the "Post-hoc
+correction (iteration 50 audit)" and "Post-hoc correction (iteration 51
+audit)" sections — all read fresh this session.
+
+`experiment/audits/iteration-51-independent-adjudicate.md` (already
+present on disk, produced by the top-level orchestrator's own separate
+process) was read in full. Verdict: **FAIL** — the second consecutive
+non-clean verdict (50: PASS WITH CONCERNS; 51: FAIL), both for the
+identical command-output-fabrication root cause. The correction commit
+(`29ac1ad`) for iteration 51's false claim was already present in `git
+log` before this iteration began.
+
+### Observe
+
+Rather than reopening the exhaustively-closed five-candidate AC-state-
+source question, this iteration searched for other genuinely new angles
+and re-verified three standing findings with fresh, verbatim command
+output:
+
+1. **Documentation Status-line sweep**: `grep -rn "Status:" docs/
+   proposal/*.md experiment/README.md | grep -i status` — all six
+   Status lines still point at their own live source of truth (no
+   hardcoded counts), confirming the QN-056 durable fix (iteration 46)
+   continues to hold. No staleness found.
+2. **GitHub issue #3/#4 external-state check**: `gh issue list --repo
+   yaleh/quay --state all --json number,title,updatedAt` — issue #3's
+   `updatedAt` is `2026-07-15T05:40:27Z` and issue #4's is
+   `2026-07-15T08:18:05Z`, both unchanged from what iteration 49's live
+   reads already established. No external state change has occurred;
+   there is no new evidence to justify reopening the AC-state-source
+   question.
+3. **Live re-probe of the manda dispatch primitive**: `ps aux | grep
+   manda-tools` shows all three live processes still carry an empty
+   `--self` value (`--self  --allow ...`); `.manda/config.yml`'s
+   `claude-tools` adapter and `parent-proxy` profile are unchanged from
+   iteration 49's read. An actual, fresh invocation of
+   `mcp__plugin_manda_manda__Agent(prompt="Reply with only the single
+   word: PONG", timeout=20)` this session returned `MCP error -32603:
+   timeout waiting for cap "agent.spawn" result after 20s: context
+   deadline exceeded` — the identical failure mode iteration 49
+   documented, confirmed via a real tool call this session rather than
+   carried forward from memory.
+
+None of these three lines of inquiry produced a new tractable V_instance/
+V_meta opportunity.
+
+### Strategy
+
+Consistent with the standing discipline (iterations 19, 28, 29, 37-51),
+this iteration does not force a new task into existence. No
+`tasks/QN-0NN.md` was created. Given the two-consecutive-iteration
+command-output-fabrication failure immediately preceding this one, this
+iteration deliberately favored narrower, more mechanically-checkable
+claims and quoted every cited command's real output verbatim in
+`experiment/iterations/iteration-52.md`.
+
+### Execution
+
+No code, Skill, or gate change was made. Read-only work only: `ls`,
+`git status`/`git log`, the regression suite, `abi-symmetry.mjs`, `gh auth
+status`, the Status-line `grep`, `gh issue list`, `ps aux`, a
+`.manda/config.yml` read, and one live `mcp__plugin_manda_manda__Agent`
+probe call. `git status --short` confirmed clean modulo the known
+untracked file, both before and after this session's diagnostic work.
+
+### σ computation — iteration 52
+
+No task's provenance triple changed; no task was created or completed.
+σ is unchanged:
+
+```
+σ (strict reading) = 49 / 56 = 0.8750   (unchanged, Δσ = 0)
+```
+
+`ls tasks/QN-*.md | wc -l` independently re-confirmed = **56**.
+
+### V-factor attribution — iteration 52 (stability re-confirmed; held flat)
+
+- **skeleton, abi_symmetry, skill_convergence**: no source file touched
+  this iteration. Held flat: skeleton 0.70, abi_symmetry 0.96,
+  skill_convergence 0.96.
+- **gate_correctness: 0.76 (unchanged).** No code change; no new evidence
+  bearing on gate correctness. Held flat.
+- **completeness: 0.74 (unchanged).** No Skill/gate/decomposition-rule
+  content changed.
+- **effectiveness: 0.26 (unchanged).** No code executed via `quay:
+  author`/`quay:execute` to build a new feature this iteration (a
+  documentation sweep, an issue-state check, and a dispatch-primitive
+  re-probe, not a marginal increment). Now **32 consecutive iterations
+  (21-51, and now 52)**.
+- **reusability: 0.79 (unchanged).** Re-confirmed via live `gh issue
+  list` that GitHub issues #3/#4 have not changed externally since
+  iteration 49 — no new evidence to justify reopening the AC-state-source
+  question, and no new Provider *behavior* on the transfer target was
+  produced. Held flat for the **twenty-seventh consecutive iteration
+  (26-52)**.
+- **validation: 0.64 (unchanged).** No audit exists yet for this
+  iteration's own work. Iteration 51's FAIL verdict (the second
+  consecutive non-clean verdict) does not itself move this factor,
+  consistent with the precedent at iterations 41-51 (validation moves
+  only after a specific iteration's own audited work).
+
+```
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = 0.4903  (unchanged)
+V_meta      = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+ΔV_instance = ΔV_meta = **0.0000**. This iteration's genuine
+contribution — re-verifying, with fresh verbatim command output rather
+than carried-forward assumption, that documentation staleness has not
+recurred, that GitHub issues #3/#4 remain externally unchanged since
+iteration 49, and that the manda dispatch-primitive wiring gap persists
+unchanged (confirmed via an actual fresh tool invocation this session) —
+is not forced into a V-factor axis the evidence does not support, per the
+standing discipline (iterations 25, 28, 29, 37-51).
+
+### Discipline note
+
+Every command-output claim in this iteration's report (`ls`, `git
+status`/`git log`, the regression suite, `abi-symmetry.mjs`, `gh auth
+status`, the Status-line `grep`, `gh issue list`, `ps aux`, the
+`mcp__plugin_manda_manda__Agent` probe) was actually executed this
+session, with real output quoted verbatim in `experiment/iterations/
+iteration-52.md` — directly applying the discipline established after
+two consecutive command-output-fabrication failures (iterations 50, 51).
