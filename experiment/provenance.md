@@ -2907,3 +2907,133 @@ Diagnostic sub-metric:
 
 Up from 0.9643 at the end of iteration 19 (one new natively-authored task,
 QN-030, added to both numerator and denominator).
+
+## Iteration 21
+
+**Priorities carried forward from iteration 20's own "Problems identified
+for next iteration" list:** (1) attempt a genuine `effectiveness`
+marginal-increment-vs-specific-stage-0-checkpoint timing comparison,
+never actually done in 8 consecutive flat iterations; (2) a fresh,
+non-repeated search of whether `skeleton`/`abi_symmetry`/
+`skill_convergence` have "prose claim never demonstrated live" gaps of
+their own kind, analogous to what QN-030 found for `gate_correctness`.
+
+**σ-ledger axis (QN-006) — re-confirmed, not re-argued.** Iteration 20's
+own reasoning (a provenance record documents a historical fact; "redoing"
+it natively would require either fabricating a fictional native
+re-authoring event — the G1 "backfilling the bootstrap narrative"
+anti-pattern iteration 10's audited FAIL caught — or creating an
+indistinguishable new task, which is not "QN-006 becoming native" in any
+honest sense) was re-read in full and found to still hold. Unchanged.
+
+**Reusability/data.write/compound-epic axis — re-confirmed exhausted, 3rd
+consecutive iteration.** `gh issue list --repo yaleh/quay` re-run fresh:
+still exactly 2 issues (#3, #4), both primitive, byte-for-byte identical
+to iterations 19 and 20's own findings. No organic backlog activity
+occurred between iterations 20 and 21.
+
+**`Agent`/`Dispatch` tool schema — re-observed, not invoked.** Left open
+for the G3 audit dispatch, which is the top-level orchestrator's job, not
+this session's, consistent with the iteration-15 self-dispatch-attempt
+precedent.
+
+**V_instance-side search: found ONE genuine, tractable, non-gold-plating
+increment — `skeleton`'s long-standing "zero automated regression test
+for `serve.js`/`action.js`" gap.** `skeleton` has been scored 0.60 and
+held flat for 16 consecutive iterations (since iteration 4); the only
+prior verification of the HTTP list/detail/action-button loop was a
+single manual curl/browser walkthrough in iteration 0
+(`experiment/timing/iteration-0.log`). `abi_symmetry` and
+`skill_convergence` were checked first and ruled out (both already have
+live, repeated, executable proof backing their scores — `abi-symmetry.mjs`
+for the former, every `done` task's own dispatch history for the latter).
+QN-031 was authored and driven to `done` this iteration: a new test file
+(`packages/quay/test/serve.test.mjs`) exercises `GET /` (list), `GET
+/task/<id>` (detail, action button present), `GET /task/<id>` for a
+non-matching status (button correctly absent — a negative control,
+mirroring QN-030's own GAME-C discipline), `GET /task/<nonexistent>`
+(404), and `POST /task/<id>/action/<actionId>` (302 redirect + correct
+`composePayload()` output), all against a real running `startServer()`
+instance and a real `quay-native mcp` child process (not mocked). The
+negative control's teeth were confirmed by a live break/restore cycle
+(removing the `whenStatus` filter produced a live FAIL, exit 1; restoring
+it produced exit 0 again, byte-identical via `diff`). A minimal, additive
+extension was needed in `packages/quay/src/serve.js` (`server.client =
+client`) so the test could cleanly close the underlying MCP child process
+— confirmed via grep that no existing caller reads this new property, so
+no existing behavior changes. Full regression suite (15 files: 14
+pre-existing + the new `serve.test.mjs`) re-run fresh: all exit 0, zero
+regressions; `abi-symmetry.mjs` still reports "ALL FOUR SURFACES
+SYMMETRIC."
+
+**`effectiveness` marginal-timing comparison — attempted for the first
+time, honestly reported as NOT a clean speedup result.** QN-031's own
+live-timed span (task authored to task gated `done`, per
+`experiment/timing/iteration-21.log`) was approximately 4m51s (11:31:22 to
+11:36:13). The cited stage-0 comparator is QN-006's own execution
+(~2m59s, per the stage-0 timing log), the earliest comparably-scoped
+single-task native execution on record. QN-031's span is *longer*, not
+shorter, than the stage-0 comparator — the two tasks differ in scope
+(QN-031 involved authoring a new test file plus a source extension plus
+an adversarial break/restore cycle plus full-suite re-verification; QN-006
+was a narrower single-file change), so this is explicitly **not** claimed
+as a demonstrated speedup or slowdown of the methodology itself — only
+that the comparison was, for the first time, actually performed against a
+specific cited number rather than deferred again. See iteration-21.md §8
+for the full discussion and the conservative +0.04 scoring rationale.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 21) |
+|---|---|---|---|---|---|
+| QN-031 | Add an automated regression test for quay serve's HTTP list/detail/action-button loop (skeleton evidence gap) | **native** | **native** | **native** | **done** |
+
+Driven through the full `todo -> ready -> done` lifecycle this iteration,
+natively, in the same same-session degraded-fallback mode established
+since iteration 1. `quay-native task check QN-031 --json` confirmed
+`author->ready` gate `ok:true` before `task edit --status ready`; all 5 AC
+checkboxes were independently re-verified against real command output
+(test exit code, live break/restore cycle, full regression suite re-run)
+before being checked; `quay-native task check QN-031 --json` confirmed
+`execute->done` gate `ok:true` (5/5 AC checkboxes checked) before `task
+edit --status done`.
+
+**Full regression suite, run fresh this iteration:** 15 test files total
+(8 pre-existing quay-native + `gate-gameability.test.mjs` + 4 quay-github
++ 1 pre-existing quay + the new `serve.test.mjs`), all exit 0;
+`abi-symmetry.mjs` re-confirms "ALL FOUR SURFACES SYMMETRIC." Zero
+regressions.
+
+## σ computation — iteration 21
+
+QN-031 reaches `{native, native, native, done}` this iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 23 / 30
+  = 0.7667
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 25 / 30
+  = 0.8333
+```
+
+Total task count is now **30** (QN-001..QN-031, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration (QN-031, done).
+
+**σ (strict) = 0.7667, up from 0.7586 at the end of iteration 20 (Δσ =
++0.0080).** QN-031 is a genuine, deliberately-scoped, non-adversarial
+V_instance-side capability increment — the first movement on the
+`skeleton` axis since iteration 4, and the second consecutive iteration
+with a nonzero σ movement (following QN-030's own movement last
+iteration, after iteration 19 was fully flat).
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 29 / 30
+              = 0.9667
+```
+
+Up from 0.9655 at the end of iteration 20 (one new natively-authored task,
+QN-031, added to both numerator and denominator).

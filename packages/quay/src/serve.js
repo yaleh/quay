@@ -117,5 +117,11 @@ export async function startServer({ port = 4173 } = {}) {
     console.log(`quay serve: listening on http://localhost:${port}`);
   });
 
+  // QN-031 (iteration 21): expose the underlying provider client so a caller
+  // (notably an automated test) can shut down the MCP child process cleanly
+  // instead of leaving it running after http.Server.close(). This is a pure
+  // addition (a new property on the returned object) — no existing caller's
+  // behavior changes, since nothing previously read `server.client`.
+  server.client = client;
   return server;
 }
