@@ -4557,3 +4557,45 @@ below evaluates directly.
 
 DIR-011 has been archived to `experiment/directives/archive/` with a
 full `## Resolution` section per this iteration's instructions.
+
+## Post-hoc correction (iteration 34's `abi_symmetry` overclaim)
+
+Iteration 34's independent audit (`experiment/audits/iteration-34-independent-adjudicate.md`,
+verdict PASS WITH CONCERNS) found that this iteration's `abi_symmetry`
+credit (0.95 → 0.96, +0.01, justified by citing QN-007/iteration 3 as
+precedent) is an **overclaim, now corrected**. Per protocol §5.1,
+`abi_symmetry` measures CLI-JSON-vs-MCP-tool-result (and, since
+iteration 33, Web-UI) *output schema/content* equivalence. QN-045 is a
+config-resolution-plumbing fix: it makes `serve.js`, `bin/quay.js`, and
+`mcp-server.js` all resolve the task-store directory the same way via a
+new shared `resolveProviderEnv()` module, closing a real 3-way
+divergence in *input*/environment-construction logic. It does not
+change any output schema or content — iteration 33's own
+`core-three-way-symmetry.test.mjs` already proved, and continues to
+prove unchanged, that all three surfaces' outputs are equivalent.
+Critically, a directly on-point precedent was available but never
+consulted: **QN-039 (iteration 29)** fixed and added test coverage for
+this exact same `resolveProviderEnv()` function and explicitly held
+`abi_symmetry` flat, reasoning that a config/plumbing fix feeding an
+already-proven output surface does not itself constitute a new
+schema-equivalence proof. QN-007 (iteration 3, cited by iteration 34)
+is a much looser match — an early-iteration precedent from before the
+factor's current scope had matured — and should not have been preferred
+over QN-039's directly-matching fact pattern.
+
+**Corrected values**: `abi_symmetry` remains **0.95** (flat, not 0.96).
+V_instance = 0.69 × 0.95 × 0.76 × 0.96 = **0.4783** (flat, unchanged
+from iteration 33 — not 0.4830). ΔV_instance = **0.0000** (not +0.0047).
+This has been corrected via strikethrough in
+`experiment/iterations/iteration-34.md` §7 and §10 (all affected
+bullets, the V_instance formula line, the ΔV_instance line, convergence
+criterion 1, criterion 5's reasoning, and the final Status line).
+V_meta (0.0973), σ_strict (37/44 = 0.8409), and the overall NOT
+CONVERGED verdict (all 5 convergence criteria still evaluate NO on
+substance) are unaffected by this correction. This is the fifth
+post-hoc V-factor correction this session (after iterations 25, 29, 31,
+and 33), continuing to confirm the standing discipline that no V-factor
+credit may be assigned without first locating and reading the single
+closest matching precedent in `provenance.md`, not merely a
+plausible-sounding one.
+full `## Resolution` section per this iteration's instructions.

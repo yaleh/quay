@@ -326,31 +326,25 @@ own precedent, this moves `abi_symmetry`, not `skeleton`.
   behavior *within* the already-existing `config -> mcp`/`config ->
   serve` links, following QN-007's own stated reasoning verbatim ("no
   new link/binding is added"). Held flat.
-- **abi_symmetry: 0.96 (up from 0.95, Δ +0.01).** Evidence: a genuine,
-  previously-undetected symmetry gap — `serve.js` resolved a Provider's
-  task-store env differently than `bin/quay.js`/`mcp-server.js` did —
-  is now closed by a single shared implementation
-  (`src/provider-env.js`), proven by a new adversarial test
-  (`provider-env-symmetry.test.mjs`) that specifically constructs the
-  case the old code got wrong (`tasks_dir` != `env.QUAY_NATIVE_TASKS_DIR`)
-  and confirms all three Core bindings now agree. This is a new
-  symmetry surface closed for the first time (the prior state was a
-  documented, known-broken asymmetry, not merely an unverified one),
-  matching QN-007's own precedent size (+0.05 was scored when this
-  factor was far from its ceiling, at 0.85; this factor is now much
-  closer to ceiling, at 0.95, after 33 iterations of accretion — so a
-  smaller absolute increment for a comparably-scoped fix is consistent
-  with the same near-ceiling-diminishing-increment pattern iteration 33
-  itself used to justify abi_symmetry's own +0.01, and with iteration
-  30's own historical rule that increases must be new surfaces, not
-  re-verifications of existing ones). Scored at the same recent, small
-  increment size (+0.01) rather than QN-007's own +0.05, because:
-  (a) the scope here is a single, narrow config-plumbing path (one
-  env-building function, three call sites), materially smaller than
-  QN-007's cross-cutting `extra`-field CLI/MCP value-level proof across
-  multiple MCP tools; (b) `abi_symmetry` is already at 0.95 (near
-  ceiling) versus QN-007's 0.85 starting point, so the same-sized
-  absolute jump is not warranted by the smaller remaining headroom.
+- ~~**abi_symmetry: 0.96 (up from 0.95, Δ +0.01).**~~ **abi_symmetry: 0.95
+  (unchanged) — corrected post-hoc, see `provenance.md`.** The
+  iteration-34 independent audit found this credit mis-located: §5.1
+  defines `abi_symmetry` as CLI-JSON-vs-MCP-tool-result output
+  schema/content equivalence, and QN-045 changes no output schema or
+  content any binding returns (iteration 33's own
+  `core-three-way-symmetry.test.mjs` already proved, and continues to
+  prove, all three legs return identical schema/content for the same
+  store). QN-045 fixes which internal config key a binding's
+  launcher/spawn code reads to *find* the store — a deployment/config-
+  correctness fix, not an ABI-schema-equivalence one. The audit found a
+  directly on-point precedent this report failed to consult: QN-039
+  (iteration 29), which fixed/tested this exact same `resolveProviderEnv()`
+  function and explicitly held `abi_symmetry` flat ("not an ABI schema
+  change — CLI/MCP schemas are unchanged"). QN-007 (this report's cited
+  precedent) is a poor fit by comparison: QN-007 fixed an MCP tool
+  silently *dropping a caller-supplied field value*, a genuine
+  schema/value-equivalence gap; QN-045 fixes no such thing. Held flat at
+  0.95, per QN-039's directly-matching precedent.
 - **gate_correctness: 0.76 (unchanged).** Zero diff to `store.js`'s or
   `github-client.js`'s own gate logic this iteration — `task_check`/CAS
   logic is completely untouched; QN-045's fix is entirely within the
@@ -366,15 +360,16 @@ own precedent, this moves `abi_symmetry`, not `skeleton`.
   bug. Held flat.
 
 ```
-V_instance = 0.69 × 0.96 × 0.76 × 0.96 = 0.4830
+~~V_instance = 0.69 × 0.96 × 0.76 × 0.96 = 0.4830~~
+V_instance = 0.69 × 0.95 × 0.76 × 0.96 = 0.4783 (corrected post-hoc)
 ```
 
-ΔV_instance = **+0.0047** (0.4783 → 0.4830). A single-factor move,
-smaller than iteration 33's double-factor +0.0119, consistent with this
-iteration's narrower scope (one shared config-plumbing function, three
-call sites) relative to iteration 33's two separable, larger-scope
-events (new MCP tool surface plus a new Core-level three-way symmetry
-proof).
+~~ΔV_instance = **+0.0047** (0.4783 → 0.4830).~~ **ΔV_instance = 0.0000**
+(unchanged from iteration 33) — corrected post-hoc per the `abi_symmetry`
+correction above. QN-045 is genuine, valuable engineering work (a real
+bug fix with a real, adversarially-verified regression test) but does
+not itself move any of the four defined V_instance factors, the same way
+QN-039 (fixing/testing this same function) did not.
 
 ## 8. V_meta
 
@@ -472,8 +467,9 @@ points**, named explicitly for the next audit to check independently:
 ## 10. Convergence Check
 
 - [ ] **1. Dual threshold (V_instance ≥ 0.80 AND V_meta ≥ 0.80)** —
-      **NO.** V_instance = 0.4830 (up from 0.4783), V_meta = 0.0973
-      (unchanged). Both remain far below 0.80.
+      **NO.** V_instance = ~~0.4830 (up from 0.4783)~~ 0.4783 (unchanged
+      from iteration 33 — corrected post-hoc, see `provenance.md`),
+      V_meta = 0.0973 (unchanged). Both remain far below 0.80.
 - [ ] **2. Self-hosting fixpoint (σ→1, zero-seed build, stable Skill set
       + gate)** — **NO.** σ (strict) = 0.8409, up from 0.8372, still far
       from 1. No `quay:author`/`quay:execute` Method-step content
@@ -492,33 +488,26 @@ points**, named explicitly for the next audit to check independently:
       iteration's own work (correctly — it happens after this report is
       committed).
 - [ ] **5. Diminishing returns (ΔV < 0.02 for 2+ iterations)** —
-      **Literal test: YES this iteration (ΔV_instance = +0.0047 < 0.02).
-      Substance: still NO overall**, because criterion 5 requires "2+
-      iterations" of diminishing returns, and iteration 33's own
-      ΔV_instance was +0.0119 — itself scored NO on substance because it
-      was a genuine, evidence-grounded double-factor movement, not
-      plateau noise. Two consecutive non-trivial movements (33's +0.0119,
-      now 34's +0.0047) do not yet establish a *trend toward zero*
-      sustained across 2+ iterations in the sense criterion 5 intends;
-      they establish continued incremental, evidence-grounded
-      abi_symmetry growth at a decreasing but still non-negligible rate.
-      This iteration's own movement is real (a genuinely fixed,
-      previously-broken symmetry gap), not manufactured to pad a
-      convergence signal, but a single iteration's smaller Δ following a
-      larger one is not itself proof of a stable diminishing-returns
-      regime — it could equally be one narrower-scope task following one
-      broader-scope task, which is exactly what happened here. Scored
-      **NO** on substance, consistent with this experiment's standing
-      practice (iterations 29, 31, 33) of treating criterion 5's literal
-      numeric wording as necessary but not sufficient evidence of
-      genuine convergence-approach, and to avoid the exact overclaim
-      pattern iteration 33's own post-hoc correction warned against
-      (declaring a trend from a single data point).
+      ~~Literal test: YES this iteration (ΔV_instance = +0.0047 < 0.02).
+      Substance: still NO overall~~ **Corrected post-hoc: ΔV_instance =
+      0.0000 this iteration (the claimed `abi_symmetry` movement did not
+      hold up to audit), following iteration 33's +0.0119. This is now
+      literally two consecutive iterations with ΔV_instance < 0.02
+      (0.0119 then 0.0000) and ΔV_meta = 0.0000 for both — criterion 5 is
+      literally satisfied. Scored NO on substance regardless**, since
+      this reflects the value function sitting near a local plateau after
+      one genuine capability-plus-symmetry-proof iteration (33) rather
+      than a demonstrated trend, and criteria 1-4 remain clearly unmet
+      (V_instance≈0.48, V_meta≈0.10, both far below 0.80) — consistent
+      with this experiment's standing practice (iterations 28-33) of
+      treating criterion 5's literal wording as necessary but not
+      sufficient evidence of genuine convergence-approach.
 
 **Status**: **NOT CONVERGED**. All 5 criteria are NO this iteration
 (criterion 5 scored NO on substance despite passing the bare literal
-numeric test, per the reasoning above). V_instance (0.4830) and V_meta
-(0.0973) remain far below the 0.80 dual threshold on both axes.
+numeric test, per the reasoning above). V_instance (~~0.4830~~ 0.4783,
+corrected post-hoc) and V_meta (0.0973) remain far below the 0.80 dual
+threshold on both axes.
 
 ## Problems identified for next iteration
 
