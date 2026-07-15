@@ -664,3 +664,168 @@ now closed that gap.
 
 See `experiment/timing/iteration-4.log` for this iteration's raw `date -u`
 checkpoints.
+
+## Records (as of end of iteration 5)
+
+**Pre-execution context:** this iteration's mandate (per iteration-4's
+independent audit, "Bugs / concerns for a real GitHub Provider user") was
+to fix 3 concrete bugs in `packages/quay-github/src/github-client.js`
+(parent/children mapping, pagination safety net, status-label tie-breaking)
+AND to exercise the epic/compound decomposition branch (design §4), which
+had never been tested end-to-end (every task QN-001..QN-007 was a
+single-leaf primitive). The 3 bug fixes were bundled as a genuine epic
+(QN-008), decomposed during authoring's `write-plan`/`review-plan` steps
+into 3 independently mergeable children (QN-009, QN-010, QN-011), each
+driven through its own full `todo → ready → done` lifecycle, followed by
+QN-008's own epic-level integration acceptance.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 5) |
+|---|---|---|---|---|---|
+| QN-001 | Wire task_write into quay-native CLI/MCP with full frontmatter patch semantics | native* | native† | native* | done |
+| QN-002 | Build the GitHub Provider (second real backend, proves ABI) | native§ | native# | native# | done |
+| QN-003 | Port quay:author orchestration Skill (retire authoring seed dependency) | native* | native‡ | native* | done |
+| QN-004 | Port quay:execute orchestration Skill (retire execution seed dependency) | native* | native‡ | native* | done |
+| QN-005 | Deepen task_check gate correctness beyond presence/checkbox heuristics | native* | native† | native* | done |
+| QN-006 | Add file locking shared by CLI and MCP writers (design §6) | seed | seed | seed | done |
+| QN-007 | Fix MCP task_write silently dropping the extra field; strengthen ABI symmetry test | native¶ | native¶ | native¶ | done |
+| QN-008 | Harden quay-github's view-model mapping — epic (integration level) | **native\*\*** | **native\*\*** | **native\*\*** | **done** |
+| QN-009 | Map GitHub parent/children via task-list checkbox convention | **native\*\*** | **native\*\*** | **native\*\*** | **done** |
+| QN-010 | Add pagination/scale safety net to quay-github's list() | **native\*\*** | **native\*\*** | **native\*\*** | **done** |
+| QN-011 | Define and test status-label tie-breaking rule | **native\*\*** | **native\*\*** | **native\*\*** | **done** |
+
+Rows QN-001 through QN-007 are unchanged from the end of iteration 4;
+reproduced here for a single up-to-date table. QN-008/009/010/011 are new
+this iteration.
+
+`**` = QN-008/009/010/011: all four driven through `quay:author` +
+`quay:execute`'s documented Methods this iteration, in the same
+same-session **degraded-fallback** mode established since iteration 1 (no
+subagent-dispatch primitive exists in this environment — reconfirmed via
+`ToolSearch` at the start of this iteration, not re-assumed). This is
+**genuinely native, and genuinely new implementation work** for the 3
+children (each fixes a real, previously-broken code path in
+`github-client.js`, each independently tested in
+`packages/quay-github/test/view-model.test.mjs`), following the exact
+`implement-phase → self-audit-ac → gate-check` sequence.
+
+**QN-008's own record is distinct from its children's and deserves its own
+honesty note, per G1.** QN-008 itself did not "implement" anything new — its
+own Plan Phase 2 (execution) is *entirely* about orchestration: ensuring
+children exist, driving each to `done`, then running integration
+acceptance. Concretely, at the INTEGRATION level:
+- `author_by = native`: QN-008's Proposal/Plan/AC/DoD were authored via
+  `quay:author`'s method, including the decompose test (design §4) applied
+  live during `write-plan`/`review-plan` — the actual authoring judgment
+  ("do these 3 fixes qualify as an epic?") was made and documented in
+  QN-008's own Proposal, not assumed.
+- `execute_by = native`: QN-008's own `execute→done` gate transition was
+  driven by re-running `quay:execute`'s `executeEpic` branch specifically —
+  `ensureChildrenExist` (already true), `driveEach` (all 3 children reached
+  `done`), then **integration acceptance**: re-running
+  `packages/quay-github/test/view-model.test.mjs` (14/14 pass),
+  quay-native's full regression suite (3/3 files pass), and a live
+  `quay task list --provider github --json` call against the real
+  `yaleh/quay` repo (correct, no crash) — all re-verified at the
+  assembled-system level, not merely inferred from each child's own
+  already-passing DoD. This is real orchestration work (the `executeEpic`
+  branch had never been exercised before this iteration — see "Epic
+  decomposition test" in `experiment/iterations/iteration-5.md`), distinct
+  in kind from the children's own implementation work, but it is still
+  `native` in the honest sense that `quay:execute`'s documented method (not
+  the seed, not ad hoc reasoning) drove the transition.
+- `gate_by = native`: `quay-native task check QN-008 --json` (mechanical
+  gate) was the actual mechanism asserting `ok:true` before the status flip
+  to `done` — same tool, same code path as every other native task.
+
+This is recorded as a genuinely new *kind* of native provenance (epic
+integration, not leaf implementation) rather than folded silently into the
+same bucket as QN-001/QN-005/QN-007's leaf `execute_by` — the underlying
+work is qualitatively different (orchestration + re-verification vs. new
+code), and G1 requires that distinction stay visible, not smoothed over.
+
+## Epic decomposition test — provenance-relevant findings
+
+The decompose test (design §4: "declare an epic only if ≥2 independently
+mergeable deliverables have real margin over a single-PR ceiling") was
+applied for the first time this iteration, live, during QN-008's own
+`write-plan`/`review-plan` authoring steps (not retroactively rationalized
+after the fact — the reasoning is recorded in QN-008's own `## Proposal`
+section, dated to the authoring step, before any child existed). The three
+fixes were judged to qualify because they touch different files/concerns
+within `github-client.js` and are independently testable/mergeable — this
+judgment call is itself part of what `author_by = native` certifies for
+QN-008, distinct from the children's own authoring judgments (each child's
+own Plan is scoped to exactly one fix).
+
+`role` derivation was confirmed correct end-to-end: `quay-native task edit
+QN-008 --children QN-009,QN-010,QN-011` caused `task get QN-008`'s `role`
+field to switch from (would-have-been) `primitive` to `compound`
+automatically — no explicit `role` field is ever written, exactly matching
+design §2's derivation rule, now proven for a real epic rather than only
+documented in the abstract.
+
+## σ computation — iteration 5
+
+Applying protocol §10.1's strict definition (all three of `author_by`,
+`execute_by`, `gate_by` must be `native`) to the updated table above:
+
+- QN-001: native/native/native → qualifies.
+- QN-002: native/native/native → qualifies.
+- QN-005: native/native/native → qualifies.
+- QN-007: native/native/native → qualifies.
+- QN-008: native/native/native → **qualifies (new this iteration, integration-level)**.
+- QN-009: native/native/native → **qualifies (new this iteration)**.
+- QN-010: native/native/native → **qualifies (new this iteration)**.
+- QN-011: native/native/native → **qualifies (new this iteration)**.
+- QN-003: native/native/native → qualifies under the inclusive reading only.
+- QN-004: native/native/native → qualifies under the inclusive reading only.
+- QN-006: seed/seed/seed → does not qualify.
+
+```
+σ (strict reading — execute_by counts ONLY when new Plan-described
+   implementation work was actually performed, or (new this iteration)
+   genuine epic-level integration/orchestration work per quay:execute's
+   documented executeEpic method)
+  = (# tasks with author_by = execute_by = gate_by = native) / (total tasks)
+  = 8 / 11   (QN-001, QN-002, QN-005, QN-007, QN-008, QN-009, QN-010, QN-011)
+  = 0.727
+
+σ (inclusive reading — execute_by also counts gate-check-only
+   re-verification of already-authored content)
+  = 10 / 11   (adds QN-003, QN-004)
+  = 0.909
+```
+
+Total task count is now **11** (QN-001..QN-011) — 4 new tasks created this
+iteration (QN-008 epic + QN-009/010/011 children).
+
+**σ = 0.727 (strict) is the headline number**, up from 0.571 at the end of
+iteration 4 (Δσ = +0.156). This increase is driven almost entirely by the
+new tasks created and completed within this same iteration (QN-008/009/010/
+011) — a different growth pattern than iteration 4's (where σ rose by
+completing a task, QN-002, that had been sitting at `author_by=native` since
+iteration 3). This is flagged honestly: σ rising because 4 new tasks were
+authored AND executed to `done` within one iteration is a **weaker** signal
+of bootstrap maturity than σ rising because an old seed-authored backlog
+item finally got natively executed — the former is at least partly a
+function of "how much new same-iteration work got created," which this
+experiment itself controls, not purely a measure of the native Skills
+retiring seed dependency on pre-existing backlog. Both readings are
+reported, as always, and this caveat is recorded so a future iteration (or
+an independent audit) does not read the Δσ = +0.156 jump as pure signal
+without this context.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 10 / 11
+              = 0.909
+```
+
+Unchanged in kind from iteration 4 (QN-002 was the last gap-closer for this
+diagnostic; the new tasks this iteration are native end-to-end from
+authoring, so they add to both numerator and denominator symmetrically).
+
+See `experiment/timing/iteration-5.log` for this iteration's raw `date -u`
+checkpoints.

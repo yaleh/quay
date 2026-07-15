@@ -1,0 +1,128 @@
+// Unit tests for issueToViewModel's normalization rules (DESIGN.md §3), added
+// in iteration 5 to close 3 bugs found by iteration-4's independent audit:
+//   1. parent/children were unconditionally null/empty (no mapping at all).
+//   2. list() had no pagination/scale safety net.
+//   3. multiple status:* labels on one issue silently used last-write-wins.
+// This file exercises (1) and (3) directly against issueToViewModel /
+// buildParentIndex-driven behavior via the exported functions. (2) is a
+// structural change to createGithubClient's fetch loop and is exercised via
+// direct code inspection + the DEFAULT_MAX_ISSUES/QUAY_GITHUB_MAX_ISSUES
+// override documented in github-client.js (no live large-repo fixture is
+// available to test the throw path without network access; see
+// iteration-5.md for the honest scope note on this).
+//
+// Run: node test/view-model.test.mjs
+import { issueToViewModel } from "../src/github-client.js";
+
+let failures = 0;
+function assert(cond, msg) {
+  if (!cond) {
+    failures++;
+    console.error(`FAIL: ${msg}`);
+  } else {
+    console.log(`PASS: ${msg}`);
+  }
+}
+
+function mkIssue(overrides) {
+  return {
+    number: 1,
+    title: "test issue",
+    body: "",
+    state: "open",
+    labels: [],
+    html_url: "https://github.com/x/y/issues/1",
+    user: { login: "someone" },
+    ...overrides,
+  };
+}
+
+// --- Bug #3: multiple status:* labels -- defined precedence, not last-write-wins ---
+
+{
+  // todo + ready (declared in "wrong" order to prove it's not last-write-wins)
+  const vm = issueToViewModel(
+    mkIssue({ labels: [{ name: "status:ready" }, { name: "status:todo" }] })
+  );
+  assert(vm.status === "ready", "precedence: ready beats todo regardless of label order (ready, todo)");
+}
+
+{
+  const vm = issueToViewModel(
+    mkIssue({ labels: [{ name: "status:todo" }, { name: "status:ready" }] })
+  );
+  assert(vm.status === "ready", "precedence: ready beats todo regardless of label order (todo, ready)");
+}
+
+{
+  const vm = issueToViewModel(
+    mkIssue({ labels: [{ name: "status:ready" }, { name: "status:needs-human" }] })
+  );
+  assert(vm.status === "needs-human", "precedence: needs-human beats ready");
+}
+
+{
+  // closed still wins over everything, even with multiple conflicting labels
+  const vm = issueToViewModel(
+    mkIssue({ state: "closed", labels: [{ name: "status:ready" }, { name: "status:todo" }] })
+  );
+  assert(vm.status === "done", "closed-wins rule still holds with multiple status labels present");
+}
+
+{
+  // single label, unaffected by the new precedence logic
+  const vm = issueToViewModel(mkIssue({ labels: [{ name: "status:ready" }] }));
+  assert(vm.status === "ready", "single status label still maps directly (no regression)");
+}
+
+{
+  // no status label at all -> default todo (no regression)
+  const vm = issueToViewModel(mkIssue({ labels: [{ name: "lane:execution" }] }));
+  assert(vm.status === "todo", "no status label defaults to todo (no regression)");
+}
+
+// --- Bug #1: parent/children via task-list checkbox convention ---
+
+{
+  const epic = mkIssue({
+    number: 20,
+    body: "Epic body\n- [ ] #21\n- [x] #22\n- [ ] #21\nmore text",
+  });
+  const vm = issueToViewModel(epic);
+  assert(JSON.stringify(vm.children) === JSON.stringify(["gh-21", "gh-22"]), "children parsed from checkbox refs, de-duplicated, order preserved");
+  assert(vm.role === "compound", "role derives to compound when children present (design §2 convention, extended to github Provider)");
+}
+
+{
+  const leaf = mkIssue({ number: 21, body: "no checkboxes here" });
+  const vm = issueToViewModel(leaf);
+  assert(JSON.stringify(vm.children) === "[]", "no checkbox refs -> empty children");
+  assert(vm.role === "primitive", "role derives to primitive when no children (no regression)");
+}
+
+{
+  // parent resolution via a precomputed parentIndex (as list() builds it)
+  const parentIndex = new Map([["gh-21", ["gh-20"]]]);
+  const child = mkIssue({ number: 21, body: "" });
+  const vm = issueToViewModel(child, parentIndex);
+  assert(vm.parent === "gh-20", "parent populated from caller-supplied parentIndex (built by list() via buildParentIndex)");
+}
+
+{
+  // single-issue get() path: no parentIndex available -> parent stays null (documented limitation)
+  const child = mkIssue({ number: 21, body: "" });
+  const vm = issueToViewModel(child, null);
+  assert(vm.parent === null, "parent is null when no parentIndex supplied (documented single-issue get() limitation)");
+}
+
+{
+  // ambiguous case: two "parents" reference the same child -> first wins, surfaced in extra
+  const parentIndex = new Map([["gh-21", ["gh-20", "gh-30"]]]);
+  const child = mkIssue({ number: 21, body: "" });
+  const vm = issueToViewModel(child, parentIndex);
+  assert(vm.parent === "gh-20", "ambiguous multi-parent: first-found wins (documented rule)");
+  assert(JSON.stringify(vm.extra.multipleParents) === JSON.stringify(["gh-20", "gh-30"]), "ambiguity surfaced via extra.multipleParents rather than silently dropped");
+}
+
+console.log(failures === 0 ? "All quay-github view-model tests passed" : `${failures} test(s) FAILED`);
+process.exit(failures === 0 ? 0 : 1);
