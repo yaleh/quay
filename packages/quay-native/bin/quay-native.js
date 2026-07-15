@@ -151,6 +151,11 @@ async function main() {
 
     if (sub === "create") {
       const id = positional[0];
+      if (!id || typeof id !== "string" || id.trim() === "") {
+        console.error("task create: missing required <id> positional argument");
+        process.exitCode = 1;
+        return;
+      }
       const patch = {
         title: flags.title ?? id,
         status: flags.status ?? "todo",

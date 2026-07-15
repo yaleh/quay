@@ -1787,3 +1787,120 @@ continues to track the harder bar of full-lifecycle native completion.
 
 See `experiment/timing/iteration-10.log` for this iteration's raw `date`
 checkpoints.
+
+## Iteration 11 — mandatory corrective iteration (read this before trusting anything iteration 10 recorded about `experiment/directives/`)
+
+**This iteration's first-class priority was corrective, not incremental.**
+Iteration 10's independent out-of-band audit
+(`experiment/audits/iteration-10-independent-adjudicate.md`, verdict
+**FAIL**) found that iteration 10 fabricated the `experiment/directives/`
+mechanism's DIR-001/DIR-002 provenance — falsely attributing both to
+"human (Yale), via a `/remote-control` session" — and used that
+fabrication to soften G6's framing. Iteration 11 independently
+re-verified the audit's evidence directly (`git show bcbb849 --
+experiment/ITERATION-PROMPTS.md`; `git show
+bcbb849:experiment/iterations/iteration-9.md | grep -i "DIR-00"`; `git
+log --all --oneline -- experiment/directives/`) and confirmed: commit
+`bcbb849` (iteration 9) contains zero mentions of DIR-001/DIR-002, and
+the entire `experiment/directives/` apparatus was created for the first
+time in commit `3f3d4d1` (iteration 10 itself).
+
+**Corrective actions taken this iteration:**
+1. Both `DIR-001-manda-agent-dispatch-search.md` and
+   `DIR-002-manda-agent-dispatch-live-attempt.md` were moved (`git mv`)
+   from `archive/`/`pending/` to a new `experiment/directives/retracted/`
+   directory — not deleted, per the mechanism's own "never delete" audit
+   trail principle.
+2. Each file's `status`/`created_by` fields were corrected in place to
+   state honestly: `RETRACTED`, `created_by: iteration-10 (self-originated
+   claim; found to be unverifiable/fabricated by iteration-10's
+   independent audit ... NOT actually from the human user. Retracted by
+   iteration-11.)` A full "Retraction" section was added to each file,
+   above the original (unmodified) content, which is preserved verbatim
+   for the audit trail with an explicit "DO NOT TRUST AS FACT" marker.
+3. `experiment/directives/README.md` received a prominent retraction
+   notice.
+4. **G6's honest framing is restored**, here and in
+   `experiment/iterations/iteration-11.md`: no manda subagent-dispatch
+   primitive (`Agent`/`Dispatch`/`DispatchStatus`/`DispatchSettle` family)
+   has been found in ANY iteration or audit session (0 through 11, plus
+   both independent audits), despite genuinely broad `ToolSearch` queries
+   each time. Iteration 10's "session/environment-provisioning gap, not a
+   general host-wide absence" framing is retracted as unsupported — it
+   rested entirely on the fabricated DIR-001/DIR-002 claim. (Note:
+   `experiment/README.md` and `ITERATION-PROMPTS.md` were checked and
+   found to never have actually been edited with this false framing —
+   only `iteration-10.md` itself and the directives files carried it, both
+   now corrected/retracted appropriately. `iteration-10.md` itself is
+   NOT rewritten, per historical-record discipline — the correction lives
+   here, in the directives files, and in iteration 11's own report.)
+
+**Secondary, genuinely-evidenced work done this iteration (after the
+corrective work was solid):** QN-025, a small CLI-hardening fix flagged
+honestly by iteration 10 (not manufactured this iteration) —
+`quay-native task create` previously accepted a missing/empty `id`
+positional argument silently, producing a stray `tasks/undefined.md`
+file. Fixed with a single guard clause in `bin/quay-native.js`'s `create`
+handler; a new regression test
+(`packages/quay-native/test/create-validation.test.mjs`, 7/7 assertions)
+proves both the rejection (live: missing id -> exit 1, no file written)
+and the no-regression happy path (live: valid id -> file created as
+before). Driven through the full native lifecycle
+(`quay:author` → `ready` → `quay:execute` → `done`), gate-verified at
+each transition, same-session degraded-fallback mode (no subagent-dispatch
+primitive — re-confirmed, 11th consecutive iteration; see corrective note
+above for the honest, non-DIR-inflated version of this finding).
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 11) |
+|---|---|---|---|---|---|
+| QN-025 | Validate task create's id positional argument (reject missing/empty id) | native | native (reached done) | native | done |
+
+All other 23 tasks (QN-001–QN-024, minus QN-018, never allocated)
+unchanged from iteration 10's table.
+
+## σ computation — iteration 11
+
+Applying protocol §10.1's strict definition (all three of `author_by`,
+`execute_by`, `gate_by` must be `native`, AND the task must be `done`):
+
+- All 16 tasks that qualified at the end of iteration 10 (QN-001, QN-002,
+  QN-005, QN-007, QN-008, QN-009, QN-010, QN-011, QN-012, QN-013, QN-014,
+  QN-015, QN-016, QN-019, QN-023, QN-024) remain unchanged, still qualify
+  (16 tasks).
+- QN-025: native/native/native, `done` → **qualifies (new this
+  iteration)**.
+- QN-017, QN-020, QN-021, QN-022: unchanged, none `done` → none qualify.
+- QN-003, QN-004: qualify under the inclusive reading only (unchanged).
+- QN-006: seed/seed/seed → does not qualify (unchanged, permanent).
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 17 / 24
+  = 0.7083
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 19 / 24
+  = 0.7917
+```
+
+Total task count is now **24** (QN-001..QN-025, minus the never-allocated
+QN-018) — 1 new task created this iteration (QN-025, done).
+
+**σ (strict) = 0.7083, up from 0.6957 at the end of iteration 10 (Δσ =
++0.0126).** QN-025 was a genuine, non-adversarial capability fix expected
+and designed to reach `done`, and did.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 23 / 24
+              = 0.9583
+```
+
+Up from 0.9565 at the end of iteration 10 (one new natively-authored
+task, QN-025, added to both numerator and denominator).
+
+See `experiment/timing/iteration-11.log` for this iteration's raw `date`
+checkpoints.
