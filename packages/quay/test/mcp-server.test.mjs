@@ -31,6 +31,13 @@
 //      rather than silently succeeding -- closing the gap DESIGN.md §2.5
 //      named ("not been checked against any MCP client that enumerates
 //      resources by name rather than uri").
+//   5. (QN-043) task_write's expectedStatus (CAS) option, live, through
+//      this Core MCP path specifically -- the second DESIGN.md §2.5-named
+//      gap ("forwarded but not specifically exercised through the Core MCP
+//      path"): a matching expectedStatus succeeds and persists; a
+//      mismatched one returns isError:true (not a crash) naming both the
+//      expected and actual status; and a follow-up task_get confirms
+//      nothing was written to disk on the conflict path.
 //
 // Run: node test/mcp-server.test.mjs
 
@@ -218,7 +225,46 @@ async function main() {
     );
   }
 
-  // ---- 7. Error paths ----
+  // ---- 7. task_write expectedStatus (CAS) passthrough, live (QN-043) ----
+  {
+    // MCP-A1's status is currently "ready" (set by step 6 above).
+    const okResult = await core.callTool({
+      name: "task_write",
+      arguments: { id: "MCP-A1", status: "done", expectedStatus: "ready", provider: "native" },
+    });
+    assert(
+      okResult.structuredContent?.task?.status === "done",
+      "task_write via `quay mcp` with a matching expectedStatus (ready) succeeds and persists the new status (done)"
+    );
+
+    // Now MCP-A1 is "done". Attempt a CAS write premised on a stale
+    // expectedStatus ("ready") -- must be refused, not silently applied.
+    const conflictResult = await core.callTool({
+      name: "task_write",
+      arguments: { id: "MCP-A1", status: "needs-human", expectedStatus: "ready", provider: "native" },
+    });
+    assert(
+      conflictResult.isError === true,
+      "task_write via `quay mcp` with a mismatched expectedStatus returns isError:true, not a crash or a silent write"
+    );
+    const conflictText = conflictResult.content?.[0]?.text ?? "";
+    assert(
+      /expected status "ready"/.test(conflictText),
+      `the CAS conflict error message names the expected status (got: ${conflictText})`
+    );
+    assert(
+      /actual current status is "done"/.test(conflictText),
+      `the CAS conflict error message names the actual current status (got: ${conflictText})`
+    );
+
+    const afterConflict = await core.callTool({ name: "task_get", arguments: { id: "MCP-A1", provider: "native" } });
+    assert(
+      afterConflict.structuredContent.task.status === "done",
+      "after the refused CAS write, MCP-A1's status is still 'done' (the earlier successful write) -- the conflicting write did NOT get silently applied"
+    );
+  }
+
+  // ---- 8. Error paths ----
   {
     const rUnknownProvider = await core.callTool({ name: "task_list", arguments: { provider: "does-not-exist" } });
     assert(rUnknownProvider.isError === true, "task_list with an unknown/non-enabled provider id returns isError:true, not a crash");

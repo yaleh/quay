@@ -4273,3 +4273,75 @@ overclaim pattern and made no correction to the `skeleton` score; this
 is noted here as a fresh, named precedent for future iterations to cite
 precisely (a "new mode in an existing binding" case), rather than loosely
 analogized to either prior case.
+
+## Records (as of end of iteration 32)
+
+**Pre-execution context:** `experiment/directives/pending/` was checked
+first, per mandatory instruction, and confirmed **empty** (re-verified
+mechanically via `ls`, not assumed). With no pending directive, this
+iteration selected its own next-highest-value work by reading
+`packages/quay/DESIGN.md` §2.5's own "Known gaps" list directly: the
+first named gap (`provider://manifest/<id>` name-vs-uri) was already
+closed in iteration 30 (QN-041); the second, remaining gap — `task_write`'s
+CAS (`expectedStatus`) option forwarded by Core's MCP server but never
+specifically exercised through the Core MCP path — was still open. This
+iteration closes it (QN-043), following QN-041's own precedent exactly
+(a live-verified test extension to `mcp-server.test.mjs`, no new
+capability construction).
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 32) |
+|---|---|---|---|---|---|
+| QN-043 | Live-verify task_write's expectedStatus (CAS) passthrough through Core's own MCP server (closes the second DESIGN.md §2.5-named gap) | **native** | **native** | **native** | **done** |
+
+`author_by`/`execute_by`/`gate_by` = `native` for QN-043, in the same
+same-session **degraded-fallback** mode established since iteration 1 (no
+subagent-dispatch primitive exists in this environment — reconfirmed via
+`ToolSearch` at the start of this iteration, not re-assumed): `quay:author`'s
+documented method (write Proposal citing DESIGN.md §2.5 and QN-041's own
+precedent, Plan, AC, DoD; `task check` → `ok:true`; `task edit --status
+ready`) was followed, then `quay:execute`'s documented method
+(`implement-phase`: 5 new live assertions added to
+`packages/quay/test/mcp-server.test.mjs`'s existing real-subprocess
+harness — positive CAS match, negative CAS mismatch (`isError:true`,
+both statuses named in the message), and a follow-up `task_get`
+confirming the conflicting write was never applied; `self-audit-ac`: each
+AC/DoD box independently re-verified against live command output — the
+extended test file run 3 consecutive standalone times (all exit 0,
+21/21 assertions passing each time, confirmed via `grep -n "assert("`
+minus the function-definition line, matching the live `PASS:` line
+count exactly, not estimated), the full regression suite run twice
+(20/20 pre-existing `*.test.mjs` files plus `abi-symmetry.mjs`, all
+passing both times), `git diff --stat -- packages/quay/src
+packages/quay-native/src packages/quay-github` confirmed empty (zero
+runtime-source diff, no defect found requiring a code fix);
+`gate-check`: `task check QN-043 --json` → `{"ok":true}` → `task edit
+--status done`).
+
+## σ computation — iteration 32
+
+QN-043 reaches `{native, native, native, done}` this iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 35 / 42
+  = 0.8333
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 37 / 42
+  = 0.8810
+
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+  = 41 / 42
+  = 0.9762
+```
+
+Total task count is now **42** (QN-001..QN-043, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration (QN-043, done).
+
+**σ (strict) = 0.8333, up from 0.8293 at the end of iteration 31 (Δσ =
++0.0040).** Consistent with the recent per-iteration norm for a single
+ordinary task against a growing denominator (iteration 31 moved σ by
++0.0043 for one task against a 41-task denominator; this iteration's
+slightly smaller Δσ is the honest consequence of the denominator growing
+to 42, not a change in method or pace).

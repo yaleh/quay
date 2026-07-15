@@ -150,12 +150,21 @@ before any live call):
   **not** been exercised this iteration — only a standalone Node MCP client,
   same limitation already named for `quay-native`'s/`quay-github`'s own MCP
   transports in iterations 24-25's problems lists.
-- `task_write`'s CAS (`expectedStatus`) option is forwarded but was not
+- ~~`task_write`'s CAS (`expectedStatus`) option is forwarded but was not
   specifically exercised through the Core MCP path this iteration (it was
   already covered end-to-end at the native-Provider level by QN-015); this
   is a thin, generic passthrough with no Core-specific CAS logic, so the
   risk surface is low, but it is named here rather than silently assumed
-  covered by transitivity.
+  covered by transitivity.~~ **Closed (QN-043, iteration 32.)**
+  `mcp-server.test.mjs` now live-verifies, against the real `quay mcp`
+  subprocess: (a) `task_write` with a matching `expectedStatus` succeeds
+  and persists; (b) a mismatched `expectedStatus` returns `isError:true`
+  (not a crash) with the error text naming both the expected and actual
+  status; (c) a follow-up `task_get` confirms the conflicting write was
+  never applied to disk. Zero change was needed to `mcp-server.js`'s own
+  runtime code — this was pure passthrough, already correct, now proven
+  live rather than assumed correct by transitivity from QN-015's
+  native-level coverage.
 - ~~The `provider://manifest/<id>` per-Provider resource naming
   (`manifest-${id}` as the MCP resource *name*, distinct from its *uri*) has
   not been checked against any MCP client that enumerates resources by name
