@@ -6796,3 +6796,261 @@ top-level documents — is not automatically forced into one of the eight
 precisely-scoped V-factor axes when the evidence does not support it, per
 the standing discipline (iterations 25, 28, 29, 37, 38, 39, 40, 41, 42,
 43, 44).
+
+## Iteration 46 — QN-057 (durable fix for the recurring Status-line staleness class, 4 files)
+
+**Context:** iteration 45 ended with σ (strict) = 48/55 = 0.8727,
+V_instance = 0.4903, V_meta = 0.0973, both unchanged since iteration 42/
+43-ish. Iteration 45's own audit (`experiment/audits/iteration-45-
+independent-adjudicate.md`, read in full this iteration) returned a clean
+**PASS**, extending the clean-audit streak to **nine** consecutive
+iterations (37-45). Iteration 45's own §3 structural reflection (a
+substantial, dedicated re-derivation of every historical `effectiveness`
+timing sample and a fresh re-check of the `reusability`/GitHub `data.write`
+scope blocker) was re-read in full this iteration rather than re-executed
+from scratch, per iteration 45's own problem-list item 2 ("should not be
+re-litigated from scratch every iteration ... unless new information
+arises").
+
+### Preconditions checked
+
+- `experiment/directives/pending/` confirmed **empty** via `ls` (mandatory
+  first step).
+- `ls tasks/QN-*.md | wc -l` confirmed **55** tasks at the start of this
+  iteration (matching iteration 45's own tally).
+- Full regression suite (25 `*.test.mjs` files across all three packages,
+  plus `abi-symmetry.mjs`) confirmed passing at the start of this
+  iteration.
+- `gh auth status` confirmed `yaleh`, scopes `repo`+`workflow`.
+- `docs/proposal/quay-bootstrap-experiment.md`, `experiment/
+  ITERATION-PROMPTS.md`, and `experiment/provenance.md` (tail) all read
+  fresh from disk at the start of this session.
+- `experiment/audits/iteration-45-independent-adjudicate.md` read in full:
+  clean **PASS**, extending the clean-PASS streak to nine consecutive
+  iterations (37-45) as of this iteration's start.
+- `git status --short` confirmed clean at the start of this iteration
+  (modulo the pre-existing, deliberately-untouched
+  `docs/proposal/baime-lite-driving-external-projects.md`, left
+  completely untouched this iteration as instructed).
+
+### Observe
+
+**Re-check of the effectiveness/reusability structural blockers (routine,
+not re-derived from scratch, per iteration 45's own instruction):**
+
+- `gh issue list --repo yaleh/quay --json number,title,labels,state`:
+  issues #3 (`status:ready`, "Fix MCP task_write silently dropping the
+  extra field") and #4 (`status:todo`, "Fix default tasksDir resolution")
+  unchanged from iterations 41-45. Issue #3 was examined fresh this
+  iteration (not merely re-cited): its body describes exactly the
+  `extra`-field gap QN-007 already fixed on quay-native's own side; on
+  the GitHub Provider side, `grep -n "data.write\|status-only"
+  packages/quay-github/src/mcp-server.js` confirms `task_write`'s
+  `inputSchema` is still deliberately `{ id, status }` only (QN-024's
+  same status-only v1.1 scope decision that already blocks issue #4) —
+  `extra`/title/body/labels/parent/children are all still out of scope by
+  the same design decision, not a distinct, newly-discovered gap. This is
+  the same structural blocker already independently re-confirmed for
+  issue #4 across iterations 41-45, now additionally confirmed to cover
+  issue #3 as well (same root cause, same resolved scope decision,
+  `tasks/QN-024.md`). No genuine new reusability-transfer opportunity
+  found.
+- `ToolSearch("subagent dispatch independent agent invocation")` surfaced
+  the same `mcp__plugin_manda_manda__Agent` tool iterations 14-45 have
+  already found and rejected (per `.manda/config.yml`'s own relay
+  architecture — `agent.spawn` forwards to a live parent-broker session
+  and reliably times out at 30s in this environment, confirmed 4/4 times
+  across iterations 14-15 and re-confirmed by name in iterations 41-45's
+  own provenance entries, read in full this iteration rather than
+  re-tested a fifth+ time). Consistent with the standing instruction not
+  to re-litigate this without new information — no new information arose,
+  so this iteration does not re-invoke `Agent` again.
+- `quay-native task list --json` (via `node packages/quay-native/bin/
+  quay-native.js`, filtered to non-`done`): the same 4 deliberately-
+  unsatisfiable tasks (`QN-017`/`QN-020`/`QN-022` `needs-human`, `QN-021`
+  `todo`) iterations 41-45 have already found. No new organic task.
+
+**Conclusion:** consistent with iteration 45's own explicit finding, no
+genuine, executable `effectiveness`- or `reusability`-moving opportunity
+exists this iteration either. This iteration does not re-derive the full
+historical analysis a second time (per iteration 45's own problem-list
+item 2) but did perform a fresh, non-mechanical check of issue #3
+specifically (not previously examined in this level of detail in the
+provenance record), confirming it collapses into the same QN-024 scope
+decision as issue #4 rather than being a distinct, second blocker.
+
+**A genuinely new observation this iteration:** this session's own
+mandatory first read of `docs/proposal/quay-bootstrap-experiment.md`
+found its Status line still cited "44 iterations completed... see
+iteration-44.md" — the exact QN-049/050/051/053/054/056 staleness class,
+now recurring for a **third** time on the same four files, purely because
+iteration 45's own QN-056 fix (which correctly cited "44... iteration-44")
+was immediately rendered stale the moment iteration 45 itself completed.
+This recurrence pattern (fix → stale again next iteration → fix again →
+stale again) is now empirically well-established across three separate
+fix cycles (QN-053/QN-054 at iterations 42-43; QN-056 at iteration 45;
+now QN-057 at iteration 46) with no sign of self-resolving.
+
+### Strategy
+
+Rather than repeat the same hardcoded-count fix a fourth time (which
+iteration 45's own problem list item 6 explicitly anticipated and flagged
+as a candidate for a more durable alternative), this iteration implements
+the durable fix iteration 45 named but did not itself adopt: replace each
+of the four files' Status-line hardcoded iteration/task-ID counts with
+relative phrasing that points at its own source of truth (`experiment/
+iterations/` for the current iteration count and most recent report;
+`ls tasks/QN-*.md | wc -l` for the current task-ID count) instead of a
+number that goes stale on the very next iteration. This is a genuine
+engineering decision (fix the recurrence's root cause) rather than a
+metric-motivated one — it directly addresses a defect class this
+experiment's own provenance record shows recurring on a fixed schedule.
+
+### Execution
+
+`tasks/QN-057.md` created via `quay-native task create`, body written via
+`task edit --body`. All four Status lines rewritten to relative,
+self-updating phrasing:
+
+```
+$ grep -n "^\- \*\*Status" experiment/README.md docs/proposal/quay-proposal.md \
+    docs/proposal/quay-native-design.md docs/proposal/quay-bootstrap-experiment.md
+experiment/README.md:3: ...In progress; NOT CONVERGED — see the highest-numbered
+  report in `experiment/iterations/` for the most recent full state and
+  iteration count, and `ls tasks/QN-*.md | wc -l` for the current
+  allocated native task ID count...
+docs/proposal/quay-proposal.md:3: ...implementation well underway — see
+  the highest-numbered report in `experiment/iterations/` for the current
+  iteration count and full state...
+docs/proposal/quay-native-design.md:3: ...the native Provider it
+  describes is implemented and running (`quay-native task`/`mcp` both
+  live; run `ls tasks/QN-*.md | wc -l` for the current allocated task ID
+  count and see the highest-numbered report in `experiment/iterations/`
+  for the current iteration count and full state)...
+docs/proposal/quay-bootstrap-experiment.md:3: ...experiment in progress,
+  NOT CONVERGED — see the highest-numbered report in
+  `experiment/iterations/` for the most recent full state and current
+  iteration count
+```
+
+**Diff-scope verification:**
+
+```
+$ git diff --stat -- '*.js'
+(empty)
+
+$ git diff --stat -- 'docs/proposal/*.md' 'experiment/README.md'
+ docs/proposal/quay-native-design.md | 2 +-
+ docs/proposal/quay-proposal.md      | 2 +-
+ experiment/README.md                | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+```
+
+Exactly three git-tracked files changed (one line each); the fourth
+(`docs/proposal/quay-bootstrap-experiment.md`) confirmed edited via
+direct file read only, consistent with its known-gitignored status
+(iteration 42's own discovery, unchanged — no `.gitignore` edit made).
+
+**Full regression suite**, re-run after the edit: all 25 `*.test.mjs`
+files exit 0 (`node --test packages/*/test/*.test.mjs`, real process exit
+codes, not string-matching); `node packages/quay-native/test/
+abi-symmetry.mjs` reports "ALL FOUR SURFACES SYMMETRIC." Zero
+regressions, as expected for a pure metadata-line change touching zero
+`.js` files.
+
+`tasks/QN-057.md` gated `todo → ready` via `task check` (`ok:true`, "all
+four artifacts present; eligible to move to ready" — note: this gate
+checks artifact *presence*, not AC-box state, consistent with `store.js`'s
+own `author->ready` gate logic, re-confirmed this iteration by reading
+`packages/quay-native/src/store.js`'s `check()` function). All 4 AC items
+independently re-verified against the live command output above before
+being written as checked. Transitioned `todo → ready` via `task edit
+QN-057 --status ready`. `task check` re-run for `execute->done`:
+`ok:true`, `acChecked: 4/4`. Transitioned `ready → done` via `task edit
+QN-057 --status done`.
+
+### σ computation — iteration 46
+
+Total allocated task IDs verified via actual command:
+
+```
+ls tasks/QN-*.md | wc -l   -> 56
+```
+
+(QN-001 through QN-057, minus QN-018, never allocated.)
+
+QN-057 completed its full lifecycle within this iteration: authored
+(`todo → ready`, gated `ok:true`), then executed (`ready → done`, gated
+`ok:true`, 4/4 AC checked). Final provenance triple: `{author_by: native,
+execute_by: native, gate_by: native, status: done}`.
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-057 | Durable fix for the recurring Status-line staleness class (4 files): replace hardcoded iteration/task counts with relative, self-updating phrasing | **native** | **native** | **native** | **done** |
+
+- σ (strict reading) = 49 / 56 = **0.8750** (48/55 = 0.8727 at the start
+  of this iteration, +1 task in both numerator and denominator).
+- σ_author_only (diagnostic) = 56 / 56 = **1.0000** (unchanged shape —
+  every allocated task has always been natively authored; this diagnostic
+  reading is not the strict σ used for convergence criterion 2).
+
+### V-factor attribution — iteration 46 (precedent-derived, held flat)
+
+Per the standing discipline (quote the exact defining language, search
+all of `provenance.md` for the closest precedent, read that precedent's
+full reasoning in full this session, and check whether a closer precedent
+maps to a different factor before crediting), the closest, most directly
+on-point precedent is **iteration 45's own** (QN-056, the immediately
+prior instance of this exact staleness-fix class on the same four files),
+read in full this iteration, alongside iterations 42/43 (QN-053/QN-054,
+the original instance).
+
+Per protocol §5.2's exact defining language, `completeness` is
+"Methodology (Skills + gates + decomposition rule) fully documented and
+self-contained." Iterations 39/42/43/45's own precedent (re-quoted and
+re-confirmed here): this class of fix documents already-made,
+already-exercised state (iteration count, task-ID count, and now the
+*mechanism* by which that state is reported) and adds no new
+Skill-orchestration Method-step content — no `skills/*/SKILL.md` path was
+touched (confirmed via `git diff --stat`). `completeness` is not
+implicated. Held flat at **0.74**.
+
+- **skeleton, abi_symmetry, gate_correctness, skill_convergence**: each
+  explicitly considered and ruled out — `git diff --stat -- '*.js'`
+  confirmed empty; no new CLI/MCP schema-equivalence proof; no gate-logic
+  change; no `quay:author`/`quay:execute` SKILL.md content changed. All
+  four held flat: skeleton 0.70, abi_symmetry 0.96, gate_correctness 0.76,
+  skill_convergence 0.96.
+- **effectiveness: 0.26 (unchanged).** Documentation-only task, no code
+  change. Per iteration 45's own exhaustive structural re-derivation
+  (re-read in full this iteration, not re-executed), no new
+  effectiveness-moving evidence exists. Now **26 consecutive iterations
+  (21-45, and now 46)**.
+- **reusability: 0.79 (unchanged).** This iteration's fresh, specific
+  re-check of GitHub issue #3 (see Observe above) confirmed it collapses
+  into the same QN-024 status-only scope decision already blocking issue
+  #4 — not a distinct, second transfer opportunity. Held flat for the
+  **twenty-first consecutive iteration (26-46)**.
+- **validation: 0.64 (unchanged).** Credited only after the out-of-band
+  audit for this iteration's own work occurs (next iteration, via the
+  top-level orchestrator's separate `Agent` dispatch, G3). Correctly held
+  flat pending that audit — this remains the top-level orchestrator's own
+  call, not this session's, per the standing convention re-confirmed by
+  searching all prior occurrences of "validation: 0.64" in this file (all
+  identically worded, none crediting a streak-length-based increase
+  unilaterally). The clean-audit streak stands at nine consecutive
+  iterations (37-45) as of the start of this iteration.
+
+```
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = 0.4903  (unchanged)
+V_meta      = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+ΔV_instance = ΔV_meta = **0.0000**. This iteration's genuine
+contribution — a durable, root-cause fix for a defect class that had
+recurred three times on a fixed schedule, plus a fresh (non-recycled)
+confirmation that GitHub issue #3 shares issue #4's structural blocker
+rather than being a distinct opportunity — is not automatically forced
+into one of the eight precisely-scoped V-factor axes when the evidence
+does not support it, per the standing discipline (iterations 25, 28, 29,
+37, 38, 39, 40, 41, 42, 43, 44, 45).

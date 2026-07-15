@@ -1,6 +1,6 @@
 # quay-native — Design
 
-- **Status:** Authoritative design record; the native Provider it describes is implemented and running (54 allocated task IDs, `quay-native task`/`mcp` both live, 44 BAIME iterations completed as of 2026-07-15 — see `experiment/iterations/`)
+- **Status:** Authoritative design record; the native Provider it describes is implemented and running (`quay-native task`/`mcp` both live; run `ls tasks/QN-*.md | wc -l` for the current allocated task ID count and see the highest-numbered report in `experiment/iterations/` for the current iteration count and full state)
 - **Date:** 2026-07-15
 - **Scope:** The built-in **native** Provider only. See [`quay-proposal.md`](./quay-proposal.md) for the whole system and [`glossary.md`](./glossary.md) for frozen terms.
 

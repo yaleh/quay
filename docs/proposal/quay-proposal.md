@@ -1,6 +1,6 @@
 # Quay — Proposal
 
-- **Status:** Authoritative design record; implementation well underway (44 BAIME iterations completed as of 2026-07-15 — see `experiment/iterations/`; native + GitHub Providers both built and running per `quay-native-design.md` and `packages/quay-github/DESIGN.md`)
+- **Status:** Authoritative design record; implementation well underway — see the highest-numbered report in `experiment/iterations/` for the current iteration count and full state; native + GitHub Providers both built and running per `quay-native-design.md` and `packages/quay-github/DESIGN.md`
 - **Date:** 2026-07-15
 - **Owner:** Yale Huang
 - **Supersedes/relates:** epicd (see §11 "Relationship to epicd")
