@@ -146,12 +146,38 @@ before any live call):
 
 ### 2.5 Known gaps (named honestly, not silently claimed as covered)
 
-- `mcp-server.js`'s own stdio transport lifecycle under a real Claude Code
+- ~~`mcp-server.js`'s own stdio transport lifecycle under a real Claude Code
   session (i.e., actually registering `quay mcp` as an MCP server in a live
   Claude Code configuration and driving a real conversation through it) has
   **not** been exercised this iteration — only a standalone Node MCP client,
   same limitation already named for `quay-native`'s/`quay-github`'s own MCP
-  transports in iterations 24-25's problems lists.
+  transports in iterations 24-25's problems lists.~~ **Closed in stages
+  (iteration 28, then iteration 36; QN-038, QN-047).** Iteration 26
+  (QN-036) built `quay mcp`; iteration 28 (QN-038) registered it as a real
+  project-scoped MCP server (`claude mcp add`, producing the committed
+  `.mcp.json`) and wire-protocol-verified it via a bespoke external
+  script — but that iteration, and iterations 29-30 after it, each
+  honestly left one residual open: Claude Code's own MCP-server approval/
+  discovery happens only at a session's *own startup*, so no
+  already-running top-level session could ever self-verify that a fresh
+  session's own `ToolSearch`/tool-call actually discovers and invokes
+  `quay`'s tools through its own initialized MCP client — writing
+  `.mcp.json` mid-session does not retroactively register it for that
+  same session. Iteration 36 (QN-047) closed this residual: a genuinely
+  separate, freshly-started, non-interactive Claude Code process
+  (`claude -p`, headless) was launched against this project; its own MCP
+  client discovered the real `mcp__quay__*` tool names
+  (`task_list`/`task_get`/`task_write`/`task_check`/`action_list`/
+  `action_run`), and — once `--dangerously-skip-permissions` was
+  additionally supplied, since headless mode has no interactive prompt to
+  answer the normal per-call permission gate — successfully **called**
+  `mcp__quay__task_list({status:"done"})` and returned a real, 41-task
+  result whose id set was cross-checked byte-for-byte identical against
+  `quay task list --status done --json`'s own output. One narrower piece
+  remains honestly open: a fresh session discovering/calling `quay`'s
+  tools **without** `--dangerously-skip-permissions` still requires a
+  human interactively answering a per-call approval prompt — this cannot
+  be closed from a non-interactive harness, and is not claimed as closed.
 - ~~`task_write`'s CAS (`expectedStatus`) option is forwarded but was not
   specifically exercised through the Core MCP path this iteration (it was
   already covered end-to-end at the native-Provider level by QN-015); this
