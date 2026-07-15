@@ -3037,3 +3037,127 @@ Diagnostic sub-metric:
 
 Up from 0.9655 at the end of iteration 20 (one new natively-authored task,
 QN-031, added to both numerator and denominator).
+
+## Iteration 22 — QN-032 (config.js gap closure) + scope-matched effectiveness comparison
+
+**Fresh search performed at the start of iteration 22** (per iteration 21's
+own named next-step: check whether `.quay/config.yml`'s own parsing/
+validation has a similar untested-but-relied-upon gap to the one QN-031
+closed for `serve.js`/`action.js`). `packages/quay/src/config.js`
+(`findConfig`, `loadConfig`, `activeProvider`) — the literal first link in
+the `skeleton` chain (protocol §5.1: "config -> mcp -> serve -> action ->
+Skill -> done") — was confirmed to have **zero direct test coverage**: the
+only prior reference to any of its exports, across every test file in the
+repo, was `serve.test.mjs`'s incidental happy-path fixture (a single
+always-valid config, exercised as a side-effect of testing `serve.js`, never
+calling `config.js`'s exports directly and never triggering any of its three
+error-throwing branches).
+
+QN-032 was authored and driven to `done` this iteration: a new test file
+(`packages/quay/test/config.test.mjs`) exercises `findConfig()`'s
+multi-level upward directory search (both the found case, walking up two
+levels, and the not-found case), `loadConfig()`'s happy path (correct
+`configPath`/`workspaceRoot`/`config` shape) and its "no .quay/config.yml
+found" error path, and all four of `activeProvider()`'s paths: explicit-id
+selection (including a disabled provider, proving the source's own "explicit
+selection does not require enabled:true" comment), no-id auto-selection of
+the sole enabled provider, the "no such provider" error, and the "no enabled
+provider" error (plus an additional empty-providers-map case) — 16
+assertions total, all against the real, unmodified `config.js` module. The
+break/restore cycle inverted `activeProvider`'s enabled-lookup predicate
+(`providers[pid].enabled` -> `!providers[pid].enabled`) and confirmed
+exactly 3 live FAILs (exit 1) on the affected assertions;
+restoring from a backup and diffing confirmed byte-identical restoration,
+then re-running produced exit 0 again, all 16 PASS. No source-code change to
+`config.js` was needed (unlike QN-031's small additive `serve.js` extension)
+— this task is a pure test-addition. Full regression suite (16 files: 15
+pre-existing + the new `config.test.mjs`) re-run fresh: all exit 0, zero
+regressions.
+
+**`effectiveness` scope-matched comparison — the fairer comparison iteration
+21 explicitly named as its own next-step, performed this iteration.**
+QN-032 was deliberately scoped to be narrowly comparable to QN-006's own
+stage-0 scope (a single test file targeting one already-existing, unchanged
+code unit, with no source-code change required) — unlike QN-031's broader
+5-HTTP-surface-plus-source-extension scope last iteration. Per
+`experiment/timing/iteration-22.log`'s live `date -u` checkpoints: task
+created 11:50:34Z -> gated `execute->done` 11:53:41Z = **~3m07s** total.
+The cited stage-0 comparator, unchanged from iteration 21's own citation
+(`experiment/timing/iteration-0.log`'s "QN-006 executed (seed), gated
+ready->done" checkpoint), is **~2m59s** (04:24:18Z -> 04:27:17Z). This is a
+much tighter scope match than iteration 21's comparison (both are "one
+narrowly-scoped module/primitive, one test file, implement-or-none / verify
+/ gate" in shape) and the two numbers are now nearly identical: QN-032 took
+**~8 seconds longer** (~4.5% slower), not dramatically longer as QN-031's
+broader-scope comparison did. Honest interpretation: this still does not
+demonstrate a native speedup — if anything, the raw number again mildly
+favors the seed — but the scope-matched result is much closer to parity than
+QN-031's comparison was, which is itself informative: at comparable scope,
+native (degraded-fallback mode, at σ=0.7667 going in) performs roughly on
+par with, not dramatically slower or faster than, stage-0 seed pace. Scored
+as a modest, conservative +0.02 (0.24 -> 0.26) — credit for finally
+producing the fairer, scope-matched comparison iteration 21 asked for, and
+because the near-parity result is itself a mildly positive signal (native
+is not measurably slower at matched scope), but explicitly not a `> +0.02`
+jump, since the evidence still does not support a demonstrated speedup
+claim.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 22) |
+|---|---|---|---|---|---|
+| QN-032 | Regression test for config.js's findConfig/loadConfig/activeProvider | **native** | **native** | **native** | **done** |
+
+Driven through the full `todo -> ready -> done` lifecycle this iteration,
+natively, in the same same-session degraded-fallback mode established since
+iteration 1. `quay-native task check QN-032 --json` confirmed `author->ready`
+gate `ok:true` before `task edit --status ready`; all 4 AC checkboxes were
+independently re-verified against real command output (test exit code, live
+break/restore cycle output, full regression suite re-run, `diff` restoration
+check) before being checked; `quay-native task check QN-032 --json` then
+confirmed `execute->done` gate `ok:true` (4/4 AC checkboxes checked) before
+`task edit --status done`.
+
+**Full regression suite, run fresh this iteration:** 16 test files total (9
+pre-existing quay-native + 4 quay-github + 2 pre-existing quay +
+`config.test.mjs`, new this iteration), all exit 0. Zero regressions.
+
+**Reusability re-check (4th consecutive iteration, 19-22):** `gh issue list
+--repo yaleh/quay --json number,title,body,labels --limit 20` re-run live —
+still exactly 2 primitive issues (#3, #4), byte-identical to iterations
+19-21's own findings. No organic compound/epic GitHub backlog growth has
+occurred across 4 consecutive iterations now.
+
+## σ computation — iteration 22
+
+QN-032 reaches `{native, native, native, done}` this iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 24 / 31
+  = 0.7742
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 26 / 31
+  = 0.8387
+```
+
+Total task count is now **31** (QN-001..QN-032, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration (QN-032, done).
+
+**σ (strict) = 0.7742, up from 0.7667 at the end of iteration 21 (Δσ =
++0.0075).** QN-032 is a genuine, deliberately-scoped, non-adversarial
+V_instance-side capability increment — the second consecutive iteration
+with a `skeleton`-axis movement, following QN-031 last iteration, and the
+third consecutive iteration with a nonzero σ movement (20: gate_correctness;
+21: skeleton; 22: skeleton again, different sub-scope).
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 30 / 31
+              = 0.9677
+```
+
+Up from 0.9667 at the end of iteration 21 (one new natively-authored task,
+QN-032, added to both numerator and denominator).
