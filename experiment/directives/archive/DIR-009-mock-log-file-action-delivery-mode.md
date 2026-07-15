@@ -134,8 +134,9 @@ own.
     calls `deliverTrigger()` with the mock mode selected, and asserts on
     the resulting file's structured JSON-lines content (including that a
     second delivery appends rather than overwrites). Confirmed via 5
-    consecutive standalone runs (all exit 0, 19/19 assertions passing
-    each time) and 3 consecutive full-suite runs (21/21 test-bearing
+    consecutive standalone runs (all exit 0, ~~19/19~~ 17/17 assertions
+    passing each time — count corrected post-hoc, see `provenance.md`)
+    and 3 consecutive full-suite runs (21/21 test-bearing
     files passing each time). Per item 5, this test does not gate its own
     pass/fail on live manda delivery succeeding or failing either way —
     a `try`/`catch` tolerates either pre-existing outcome for the one

@@ -184,8 +184,10 @@ validation surface to get wrong.
    `packages/quay/test/action-mock-delivery.test.mjs`: composes a real
    trigger payload via the existing `composePayload()` code path (not a
    hand-built fixture object, per the directive's own instruction), calls
-   `deliverTrigger()` with `mockLogPath` set, and asserts (19
-   assertions): the return value is `{ delivered: "mock", ... }`; the
+   `deliverTrigger()` with `mockLogPath` set, and asserts (~~19~~ 17
+   assertions — corrected post-hoc, see `provenance.md`; the "19" figure
+   was an uncorroborated miscount, caught by the iteration-31 independent
+   audit): the return value is `{ delivered: "mock", ... }`; the
    file (and its non-existent parent directory) is created; each record
    has the required structured fields including a parseable ISO
    timestamp; a second delivery **appends** (does not overwrite) with
@@ -221,8 +223,9 @@ validation surface to get wrong.
    `packages/quay/DESIGN.md` §3, so a future reader is not misled into
    assuming `mandaAvailable()` is reliable here.
 6. Re-ran the new test file 5 consecutive standalone times: all exit 0,
-   19/19 assertions passing every time (deterministic, unlike the
-   removed assertion).
+   ~~19/19~~ 17/17 assertions passing every time (deterministic, unlike
+   the removed assertion) — count corrected post-hoc, see
+   `provenance.md`.
 7. Updated `packages/quay/DESIGN.md`: added a new "§3. Action-trigger
    delivery: the mock/file-log mode (`QN-042`/`DIR-009`)" section
    documenting all three delivery modes in precedence order, the
@@ -403,7 +406,8 @@ points**, named explicitly for the next audit to check independently:
    `mandaAvailable()`'s own function body (the central "additive, not a
    replacement" claim) — independently reproducible via `git show
    <this-iteration's-commit> -- packages/quay/src/action.js`.
-2. Whether the new `action-mock-delivery.test.mjs` file's 19 assertions
+2. Whether the new `action-mock-delivery.test.mjs` file's ~~19~~ 17
+   assertions (count corrected post-hoc — see `provenance.md`)
    genuinely reproduce deterministically on an independent re-run (5
    consecutive runs in this session all passed; an auditor should
    re-confirm on their own run, ideally more than once, precisely

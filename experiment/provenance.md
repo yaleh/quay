@@ -4236,3 +4236,40 @@ See `experiment/timing/iteration-31.log` (if captured) for this
 iteration's raw checkpoints; this iteration did not maintain a separate
 `date -u`-stamped timing log file (a process gap, honestly noted — see
 iteration-31.md §5 for the sequence of work performed instead).
+
+## Post-hoc correction (iteration 31's assertion-count miscount)
+
+Iteration 31's independent audit (`experiment/audits/iteration-31-independent-adjudicate.md`,
+verdict PASS WITH CONCERNS) found that `experiment/iterations/iteration-31.md`
+(§3 steps 4 and 6, §9 point 2) and the archived
+`experiment/directives/archive/DIR-009-mock-log-file-action-delivery-mode.md`
+Resolution section all claimed "19/19 assertions" for the new
+`packages/quay/test/action-mock-delivery.test.mjs` regression test. The
+auditor counted actual `assert(...)` call sites three independent ways
+(`grep -c "^  assert("`, manual enumeration, and the live test run's own
+`PASS:` line count) and got **17** in all three, not 19. This has been
+corrected via strikethrough in both files (`~~19~~ 17`).
+
+This is a factual/descriptive miscount, not a scoring error: the test
+itself is real, deterministic, and was independently adversarially
+verified by the auditor (a targeted break of the `timestamp` field
+correctly produced a `FAIL`, restore correctly returned to all-pass with
+zero residual diff). No V_instance or V_meta factor credit depended on
+the assertion count, so **no V-factor correction applies** — V_instance
+remains 0.4664, V_meta remains 0.0973, unchanged from iteration 31's
+original report. This mirrors iteration 28's earlier cosmetic
+test-file-count miscount (20 vs. 19), which was similarly immaterial to
+scoring, except this one is corrected in-place per the now-established
+convention since it appeared in three artifacts rather than one.
+
+The audit separately scrutinized the `skeleton` +0.01 credit (QN-042's
+claimed precedent from iteration 26's QN-036) and judged it defensible
+but based on a looser precedent-fit than the report's own framing
+suggested — a genuinely novel scoring situation (a new *mode* within an
+already-existing *binding*, not squarely matching either the QN-036
+new-binding precedent or the iterations-21-24 new-proof-of-existing-thing
+precedent). The audit did not find this to rise to the iteration-25/29
+overclaim pattern and made no correction to the `skeleton` score; this
+is noted here as a fresh, named precedent for future iterations to cite
+precisely (a "new mode in an existing binding" case), rather than loosely
+analogized to either prior case.
