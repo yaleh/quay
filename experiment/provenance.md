@@ -5513,3 +5513,213 @@ still-open to any future reader (Skill, task, or session) following a
 25, 28, 29, 37, and 38, a real and valuable fix is not automatically
 forced into one of the eight precisely-scoped V-factor axes when the
 evidence does not support it.
+
+## Records (as of end of iteration 40)
+
+`experiment/directives/pending/` was checked first, per mandatory
+instruction, and confirmed **empty** (verified via `ls`, re-checked at the
+start of this iteration). Self-selected work was scoped by continuing
+iteration 39's own suggested drift-detection technique (re-reading a
+design/config document in full and checking its claims against current
+code state, rather than assuming currency), applied this time to
+`docs/proposal/quay-proposal.md` (347 lines) and `docs/proposal/
+glossary.md` (55 lines), both read fresh in full. No staleness was found
+in either: `glossary.md` already reflects the `199cd9d` fix; every item
+in `quay-proposal.md` §15 "Open decisions" was cross-checked directly
+against live code/config (storage format, `needs-human` status,
+`provider://manifest` implementation, the `exploration` lane's actual
+absence from both Providers' `provider.yml` `lanes:` lists, the status
+set, the GitHub Provider's existence) and all were already accurately
+described or are legitimately still-open narrative/roadmap questions
+outside this experiment's code-verifiable scope (e.g. item 7, "project
+narrative," is a framing question, not a code fact).
+
+**What closes the gap this iteration (QN-051):** the productive lead came
+from checking `packages/quay-native/provider.yml`'s own capability
+comments (lines 16, 18) and its `status_skill_map` NOTE block (lines
+36-41) against current code/Skill state, rather than assuming the v0-era
+comments remained accurate. Direct verification found three genuine,
+long-standing staleness defects, all traceable to the v0/seed-era
+(`5b452aa`, the very first commit):
+
+1. Line 16's `data.write` comment claimed "MCP task_write not yet
+   wired" — false since the v0 commit itself: `task_write` has been a
+   fully registered MCP tool with CAS support in `packages/quay-native/
+   src/mcp-server.js` continuously, and is exercised end-to-end in
+   `test/abi-symmetry.mjs` (`task_write`, `task_write_value_equivalence`,
+   the `extra`-isolation case).
+2. Line 18's `skill` comment claimed "v0: seed-driven" — false since the
+   seed's retirement many iterations ago: `quay:author`/`quay:execute`
+   are real, native Skills (`packages/quay-native/skills/author/
+   SKILL.md`, `.../execute/SKILL.md`) driving the majority of this
+   experiment's own `done` tasks.
+3. Lines 36-41's NOTE block described the σ=0/iteration-0 state ("do not
+   exist as native Skills yet... routes to the SEED") as if still
+   current — false for the same reason as (2).
+
+This is the third instance of the same class of documentation-accuracy
+defect QN-049 (iteration 38, `quay-github/provider.yml`/`DESIGN.md`) and
+QN-050 (iteration 39, `quay-native-design.md` §8) closed — a stale v0/
+seed-era comment in a config/design file, uncorrected across ~40
+iterations, found by a fresh, exhaustive re-read and direct cross-check
+against live code/Skill state.
+
+`packages/quay-native/provider.yml` was edited in place: lines 16 and 18's
+comments corrected to state the actual, current wiring/Skill state; lines
+36-41's NOTE block rewritten to preserve the historical v0/σ=0 record
+(explicitly labeled "HISTORICAL NOTE") while adding a new "CURRENT STATE
+(corrected iteration 40, QN-051)" paragraph stating the actual, current
+mapping behavior — following QN-049/QN-050's established precedent of
+correcting in place (preserving history), not silently deleting it.
+
+**Diff-scope verification:**
+
+```
+$ git diff --stat
+ packages/quay-native/provider.yml | 23 +++++++++++++++--------
+ 1 file changed, 15 insertions(+), 8 deletions(-)
+
+$ git diff --stat -- '*.js'
+(empty)
+```
+
+Confirms zero JavaScript source change; the only file touched is the
+Provider manifest itself, and only its comments (no `capabilities:`,
+`statuses:`, `lanes:`, or `status_skill_map:` key/value changed — verified
+directly: every non-comment line is byte-identical to before the edit).
+
+**Full regression suite**, run after the edit: all 24 `*.test.mjs` files
+across all three packages exit 0; `node packages/quay-native/test/
+abi-symmetry.mjs` reports "ALL FOUR SURFACES SYMMETRIC." Zero regressions.
+
+`tasks/QN-051.md` was created via `quay-native task create`, gated
+`todo → ready` via `task check` (`ok:true`, all four artifacts present),
+all 4 AC checkboxes independently re-verified against the live-code
+evidence above before being checked, gated `ready → done` via `task
+check` (`ok:true`, 4/4 AC checkboxes), all 4 DoD checkboxes independently
+re-verified (regression-suite exit codes, both gate-check JSON outputs,
+this report's own honest V-factor accounting) before being checked, then
+transitioned to `done`.
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-051 | Fix stale v0/seed-era comments in `quay-native/provider.yml` (`task_write` wiring claim, Skill seed-driven claim, `status_skill_map` NOTE block) | **native** | **native** | **native** | **done** |
+
+**Honesty note on QN-051's lifecycle execution.** As with every task since
+the seed's author/execute retirement, "native" here means the
+`quay-native` CLI's mechanical `task check` gate was genuinely invoked at
+both the author→ready and execute→done transitions (both returned
+`ok:true`, confirmed via direct command output — 4/4 AC items and 4/4 DoD
+items independently re-verified, not estimated), and the task file itself
+was authored and driven through its lifecycle using `quay-native task
+create`/a direct `store.write()` call (the identical code path `task edit
+--body` itself invokes, used only because of the body's length)/`task
+check`/`task edit --status` rather than hand-edited frontmatter status. It
+does NOT mean an independent, fresh-context subagent performed the
+authoring or execution work in isolation from this top-level session —
+this environment still has no verified subagent-dispatch primitive
+(confirmed via `ToolSearch` in prior iterations, per G6, not re-verified
+this iteration since no new primitive-search was needed), so "native"
+continues to describe the degraded-fallback mode already documented for
+every prior "native" entry since iteration ~15: the same top-level session
+performs the work directly, then invokes the real `quay-native` gate
+mechanically and honestly reports its actual JSON output.
+
+## σ computation — iteration 40
+
+Total allocated task IDs verified via actual command:
+
+```
+ls tasks/QN-*.md | wc -l   -> 50
+```
+
+(QN-001 through QN-051, minus QN-018, never allocated.)
+
+- σ (strict reading: author_by = execute_by = gate_by = native AND status
+  = done) = 43 / 50 = **0.8600** (up from 42/49 = 0.8571 at the end of
+  iteration 39; Δσ = +0.0029).
+- σ (inclusive reading: strict set plus QN-003/QN-004's gate-check-only
+  re-verification cases) = 45 / 50 = **0.9000**.
+- σ_author_only (diagnostic: author_by = native regardless of
+  execute_by/gate_by) = 49 / 50 = **0.9800**.
+
+Δσ (strict) = +0.0029 is consistent with the recent per-iteration norm of
+small, monotonic σ growth from a single new native-triple `done` task
+against a growing denominator; it is not, on its own, evidence bearing on
+any convergence criterion beyond what iteration-40.md §10 evaluates
+directly.
+
+## V-factor attribution — iteration 40 (precedent-derived, held flat)
+
+Per the standing discipline (quote the exact defining language, search all
+of `provenance.md` for the closest precedent, read that precedent's full
+reasoning in full this session, and check whether a closer precedent maps
+to a different factor before crediting), the closest, most directly
+on-point precedents are **iteration 38's V-factor attribution** (QN-049,
+`packages/quay-github/provider.yml`/`DESIGN.md`) and **iteration 39's**
+(QN-050, `quay-native-design.md` §8), both read in full this iteration —
+this iteration's QN-051 is the exact sibling event one level down: a
+stale v0/seed-era comment fix, entirely within `packages/quay-native/
+provider.yml` (a Provider **manifest**, not a SKILL.md file and not the
+shared cross-package design document), zero JavaScript/behavioral change.
+
+Per protocol §5.2's exact defining language, `completeness` is
+"Methodology (Skills + gates + decomposition rule) fully documented and
+self-contained." Applying the established precedent chain (iterations 10,
+20-29, 38, 39) — which reads this as `quay:author`/`quay:execute`'s own
+SKILL.md Method-step content specifically — `completeness` is ruled out
+here with, if anything, **more** confidence than iteration 39's case: this
+iteration's audit (`experiment/audits/iteration-39-independent-adjudicate.
+md`, Finding 5, read in full this iteration) flagged a genuine, non-trivial
+counter-consideration for QN-050 because `quay-native-design.md` is the
+shared design document `quay:author`/`quay:execute`'s own SKILL.md files
+cite by name and section number as their design source — a plausible
+argument that this document sits close enough to "the methodology" to be
+in `completeness`'s scope. That counter-consideration does **not** carry
+over to this iteration's `provider.yml`: `git grep -n "provider.yml" packages/
+quay-native/skills/*/SKILL.md` was run this iteration and returns **zero**
+hits — neither SKILL.md file cites `provider.yml` by name or section as a
+design source (they cite `quay-native-design.md`, not the manifest). The
+manifest is consumed by the Core (`quay serve`/`quay mcp`) and by a
+human/agent configuring the Provider, not by the Skills' own documented
+Method steps. This iteration's fix is therefore squarely outside
+`completeness`'s scope on the precedent chain's own terms, without the
+open question iteration 39's audit raised for the sibling case — a
+cleaner, not merely equally-defensible, application of the precedent.
+
+`skeleton`, `abi_symmetry`, `gate_correctness`, and `skill_convergence`
+were each explicitly considered and ruled out, not merely skipped: `git
+diff --stat -- '*.js'` confirms zero JavaScript change; `git diff` on
+`provider.yml` itself confirms every non-comment line (capabilities,
+statuses, lanes, status_skill_map, action_buttons, skills_path, mcp_entry)
+is byte-identical to before the edit — no new capability, no new CLI/MCP
+schema-equivalence proof, no gate-logic change, and no `quay:author`/
+`quay:execute` SKILL.md Method-step change. `reusability` was considered:
+protocol §5.2 scopes it to "the methodology transfers to a second
+Provider (GitHub) unmodified" — this task touches only the native
+Provider's own manifest comments, no GitHub-Provider capability.
+`effectiveness` was considered: this is a documentation-only task with no
+scope-matched-timing candidate value, consistent with QN-049/QN-050's own
+precedent; no new evidence toward breaking the 19-consecutive-iteration
+plateau (now 20) was found or fabricated. `validation` held flat per
+standing convention (credited only after the next out-of-band audit).
+
+Applying the precedent chain directly: **all eight V-factors held flat.**
+V_instance = 0.4903 (unchanged), V_meta = 0.0973 (unchanged). ΔV_instance
+= ΔV_meta = 0.0000.
+
+This iteration's genuine contribution is a real, previously-undocumented
+internal-consistency defect closed in the native Provider's own
+self-declaration file — the single Provider manifest most directly
+consulted when configuring or reasoning about the native Provider's
+capabilities no longer falsely claims `task_write` is unwired and the
+Skills are seed-driven placeholders — but, per the same discipline
+applied at iterations 25, 28, 29, 37, 38, and 39, a real and valuable fix
+is not automatically forced into one of the eight precisely-scoped
+V-factor axes when the evidence does not support it. Unlike iteration 39's
+case, this iteration's audit-sensitive claim is narrower and better
+supported: the `git grep` check above directly closes the specific
+completeness-scope ambiguity iteration 39's audit raised, for this
+particular file (though not for `quay-native-design.md` itself, which
+remains iteration 39's own open question for a future iteration/audit to
+weigh, not re-litigated here).

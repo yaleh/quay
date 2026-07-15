@@ -13,9 +13,12 @@ description: >
 capabilities:
   data.read: true    # task_list, task_get — required
   manifest: true     # this file / provider://manifest — required
-  data.write: true   # task_write via `quay-native task edit` (v0: raw CLI op; MCP task_write not yet wired)
+  data.write: true   # task_write is fully wired over MCP (packages/quay-native/src/mcp-server.js,
+                     # since the v0 commit) and byte-compared against `quay-native task edit`
+                     # in test/abi-symmetry.mjs (task_write, task_write_value_equivalence, extra-isolation)
   gate: true         # task_check via `quay-native task check`
-  skill: true        # quay:* Skills declared below (v0: seed-driven, see note)
+  skill: true        # quay:* Skills declared below — real, native Skills (author/, execute/),
+                     # driving the majority of this experiment's own tasks since the seed's retirement
 
 # status model (design §3) — 4 states, no more.
 statuses:
@@ -33,12 +36,16 @@ lanes:
   - authoring
   - execution
 
-# status -> Skill logical map (design §3). NOTE (v0/iteration 0, honest):
-# quay:author / quay:execute do not exist as native Skills yet (σ=0). This
-# table is the target mapping; at v0 the action button's payload is composed
-# from this table but routes to the SEED (epicd authoring-convergence /
-# fixpoint-convergence), not to quay:author/quay:execute. See
-# experiment/provenance.md and iteration-0.md for the honest accounting.
+# status -> Skill logical map (design §3). HISTORICAL NOTE (v0/iteration 0):
+# at v0 (σ=0), quay:author / quay:execute did not yet exist as native
+# Skills, and the action button's payload routed to the SEED (epicd
+# authoring-convergence / fixpoint-convergence) instead of this table's own
+# targets — see iteration-0.md for that honest, original accounting.
+# CURRENT STATE (corrected iteration 40, QN-051): quay:author and
+# quay:execute are real, native Skills (packages/quay-native/skills/author/,
+# .../execute/) that this table's mapping actively and currently drives; the
+# seed was retired iterations ago. See experiment/provenance.md for the full
+# per-task {author_by, execute_by, gate_by} record and current σ.
 status_skill_map:
   todo: "quay:author"
   ready: "quay:execute"
