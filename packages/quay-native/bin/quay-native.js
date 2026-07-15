@@ -114,6 +114,11 @@ async function main() {
 
     if (sub === "edit") {
       const id = positional[0];
+      if (!id || typeof id !== "string" || id.trim() === "") {
+        console.error("task edit: missing required <id> positional argument");
+        process.exitCode = 1;
+        return;
+      }
       const patch = {};
       if (flags.title !== undefined) patch.title = flags.title;
       if (flags.status !== undefined) patch.status = flags.status;

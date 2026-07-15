@@ -6266,3 +6266,222 @@ QN-050, QN-051, QN-053) never touched — is not automatically forced into
 one of the eight precisely-scoped V-factor axes when the evidence does
 not support it, per the standing discipline (iterations 25, 28, 29, 37,
 38, 39, 40, 41, 42).
+
+## Iteration 44 — QN-055 (`task edit` missing/empty `<id>` guard clause — the QN-025-class fix flagged by iteration 43)
+
+**Context:** iteration 43's own problem list (item 7) disclosed, honestly
+and without hiding it, an incidental discovery made during that
+iteration's own tool exploration: `quay-native task edit` invoked with no
+positional `<id>` argument does not error the way `task create` does
+(hardened at QN-025, iteration 11) — it silently proceeds and writes a
+stray `tasks/undefined.md` file. This iteration investigated that finding
+fresh (not trusted on iteration 43's assertion alone) and judged it a
+genuine, valuable, in-scope fix.
+
+A search for effectiveness/reusability-shaped work was performed first,
+per the standing mandate (iterations 41-43's own explicit search
+discipline): `gh issue list --repo yaleh/quay --json number,title,labels,
+state` re-run live — issues #3/#4 unchanged from iterations 41-43 (#3
+`status:ready`, #4 `status:todo`, same structural `data.write`
+status-only blocker); `quay-native task list --json` (filtered to
+non-`done`) re-checked — the same 4 deliberately-unsatisfiable tasks
+(QN-017/QN-020/QN-021/QN-022) remain, no new organic task; `ToolSearch`
+was not re-run this iteration for the subagent-dispatch primitive, since
+iterations 41-43 already re-ran the identical query three consecutive
+times with the identical result (`mcp__plugin_manda_manda__Agent`,
+already known and already found unreliable per DIR-004/DIR-005) —
+re-running a fourth time with no new input would itself be the
+"repeat the same searches without new input" anti-pattern the prior
+iterations' own problem lists warned against. No new effectiveness/
+reusability-shaped work was found or fabricated.
+
+With no such work available, iteration 43's disclosed `task edit` finding
+was investigated as this iteration's task. **Reproduced live, fresh, at
+the start of this iteration** (not merely trusted on iteration 43's
+account):
+
+```
+$ rm -f tasks/undefined.md
+$ node packages/quay-native/bin/quay-native.js task edit --title "oops" --json
+{ "title": "oops", "labels": [], "parent": null, "children": [], ... }
+exit=0
+$ ls tasks/undefined.md
+tasks/undefined.md
+```
+
+Confirmed: `task edit` with no `<id>` positional argument writes
+`tasks/undefined.md`, exit 0 — the same bug shape QN-025 (iteration 11)
+fixed for `task create`, never applied to `edit`. `bin/quay-native.js`
+was read directly: the `create` handler (line ~152) has the QN-025 guard
+clause (`if (!id || typeof id !== "string" || id.trim() === "") { ...
+exit 1 }`); the `edit` handler (line ~115) has no such guard — confirmed
+by direct code read, not assumption.
+
+## σ computation — iteration 44
+
+Total allocated task IDs verified via actual command:
+
+```
+ls tasks/QN-*.md | wc -l   -> 54
+```
+
+(QN-001 through QN-055, minus QN-018, never allocated.)
+
+**Execution.** `tasks/QN-055.md` was created via `quay-native task create
+QN-055 --title "..."`, body written via `task edit QN-055 --body "..."`.
+The fix — a single guard clause in `bin/quay-native.js`'s `edit` handler,
+identical in shape to QN-025's `create` guard — was applied, then
+verified live (missing-id case: exit 1, stderr names the missing `<id>`
+argument, no file written, specifically no `tasks/undefined.md`;
+empty-string-id case: same). A new regression test,
+`packages/quay-native/test/edit-validation.test.mjs` (7 assertions,
+mirroring `create-validation.test.mjs`'s structure), was added: 7/7 PASS.
+Full regression suite re-run: all 25 `*.test.mjs` files (24 pre-existing
++ the new one) exit 0 (verified per-file via direct `node --test <file>`
+exit-code check, not string-matching); `abi-symmetry.mjs` reports "ALL
+FOUR SURFACES SYMMETRIC." Zero regressions.
+
+`tasks/QN-055.md` was gated `todo → ready` via `task check`: the initial
+call (before any AC box checked) correctly returned `ok:false`, `reason:
+"0/4 AC checkboxes checked"` — confirming a real mechanical check, not a
+rubber stamp. All 4 AC items were independently re-verified against live
+command output (the exact commands and outputs above) before being
+checked; `task check` re-run: `ok:true` ("all four artifacts present;
+eligible to move to ready"). Transitioned `todo → ready` via `task edit
+QN-055 --status ready`. DoD1-3 were then independently re-verified and
+checked (already true, verified above); DoD4 depends on this
+`provenance.md` update and `experiment/iterations/iteration-44.md`
+existing — completed as part of this same iteration's work, then
+checked. Task gated `ready → done` via `task check` (`ok:true`, 4/4 AC
+checked) and transitioned via `task edit QN-055 --status done`.
+
+QN-055 completed its full lifecycle within this iteration: authored
+(`todo → ready`, gated `ok:true`), then executed (`ready → done`, gated
+`ok:true`, 4/4 AC checked), then formally transitioned via `task edit
+QN-055 --status done`. Final provenance triple: `{author_by: native,
+execute_by: native, gate_by: native, status: done}` — same
+single-iteration author+execute convention used for every prior task
+since iteration ~15.
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-055 | Guard `task edit` against missing/empty `<id>` positional argument (the QN-025-class fix, applied to `edit`) | **native** | **native** | **native** | **done** |
+
+- σ (strict reading: author_by = execute_by = gate_by = native AND status
+  = done) = 47 / 54 = **0.8704** (46/53 = 0.8679 at the start of this
+  iteration, +1 task in both numerator and denominator).
+- σ_author_only (diagnostic: author_by = native regardless of
+  execute_by/gate_by) = 53 / 54 = **0.9815** (QN-055 added to both
+  numerator and denominator).
+
+## V-factor attribution — iteration 44
+
+**This task is a genuine code change (not documentation-only), unlike
+iterations 38-43's QN-049/050/051/053/054.** Per the standing discipline
+(quote the exact defining language, search all of `provenance.md` for the
+closest precedent, read that precedent's full reasoning in full this
+session, and check whether a closer precedent maps to a different
+factor before crediting), the search above (`grep -n "guard clause|
+hardening|validation.test.mjs|CLI-hardening" experiment/provenance.md`)
+found **exactly one** precedent for this precise class of fix:
+**QN-025 itself (iteration 11)** — the original `task create` `<id>`
+guard-clause hardening. No closer or more specific precedent exists; no
+alternative candidate needed to be ruled out.
+
+Iteration 11's own report (`experiment/iterations/iteration-11.md` §8,
+read in full this iteration) reasoned, for the identical diff shape (a
+single guard clause added to a `bin/quay-native.js` subcommand handler,
+plus a new regression test):
+
+> "**skeleton: 0.60 (unchanged).** No new skeleton-level capability was
+> added this iteration... QN-025 is a CLI-hardening fix, [and does not]
+> add[] a new kind of running system." "**abi_symmetry: ... (unchanged).**
+> QN-025 touches only `task create`'s input validation, not the ABI's
+> read/write shape symmetry across CLI/MCP/Core. No evidence of movement
+> in either direction." "**gate_correctness: ... (unchanged).** No change
+> to `store.js`'s gate logic this iteration." "**skill_convergence: ...
+> (unchanged).** QN-025 used the existing, already-converged `implement`/
+> `execute` Skill path; no new `executeEpic` trigger was exercised or
+> discovered."
+
+QN-055 is the same shape, one command further along (`edit` instead of
+`create`), with the identical fix pattern (a single guard clause,
+verified via `git diff --stat -- '*.js'` = `1 file changed, 5
+insertions(+)`, zero other file touched except the new test file) and the
+identical scope of non-implication:
+
+- **skeleton**: `bin/quay-native.js`'s `edit` handler already existed and
+  already worked for valid ids; this task only rejects an invalid input
+  it previously silently accepted. No new kind of running system, no new
+  capability. Not implicated — held flat at **0.70** (iteration 43's
+  value; QN-025's own iteration used a since-superseded lower skeleton
+  baseline of 0.60, but the *reasoning* — "CLI input-validation fix adds
+  no new skeleton capability" — is what transfers, not the absolute
+  number).
+- **abi_symmetry**: `abi-symmetry.mjs` re-run this iteration confirms all
+  four surfaces remain symmetric, unchanged output shape from iteration
+  43's own run (`task_write`, `task_get`, `task_list`, `task_check` all
+  `match: true`). The fix touches CLI-only argument parsing before any
+  `store.write()` call — it does not change the MCP `task_write` tool's
+  own input schema or any JSON output shape. Not implicated. Held flat at
+  **0.96**.
+- **gate_correctness**: `store.js`'s `check()` function (the `task check`
+  gate logic, design §3) was not touched — confirmed via `git diff
+  --stat`, which shows only `bin/quay-native.js` (CLI argument dispatch)
+  changed. The gate itself (author→ready / execute→done assertions) is
+  unchanged. Not implicated. Held flat at **0.76**.
+- **skill_convergence**: no `quay:author`/`quay:execute` SKILL.md
+  Method-step content changed (`git diff --stat` confirms no `skills/`
+  path in the diff); QN-055 was driven through the same
+  already-converged lifecycle path every task since iteration ~15 uses.
+  Not implicated. Held flat at **0.96**.
+
+```
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = 0.4903  (unchanged)
+```
+
+ΔV_instance = **0.0000**, for the same reason QN-025 itself scored
+ΔV_instance = 0.0000 at iteration 11: a small, genuine CLI-hardening fix
+that closes a real defect does not, by itself, move any of the four
+precisely-scoped V_instance factors when the fix adds no new capability,
+no schema-shape change, and no gate-logic change. This is not "the fix
+doesn't matter" — it is a real defect closed, a real regression test
+added, with zero regressions — it simply does not map onto any of the
+four narrowly-defined V_instance axes, exactly as QN-025 itself did not.
+
+- **completeness**: protocol §5.2 scopes this to "Methodology (Skills +
+  gates + decomposition rule) fully documented and self-contained." No
+  `skills/*/SKILL.md` path touched (confirmed via `git diff --stat`).
+  Not implicated. Held flat at **0.74**.
+- **effectiveness: 0.26 (unchanged).** No new seed-vs-native, timing-
+  comparable comparator arose (QN-055 is a small CLI-validation fix, not
+  a scope-matched marginal feature increment against the stage-0
+  baseline). Consistent with QN-025's own iteration-11 precedent
+  ("effectiveness: 0.20 (unchanged, 8th consecutive iteration)... No new
+  seed-vs-native comparator arose"). Now **24 consecutive iterations
+  (21-43, and now 44)**.
+- **reusability: 0.79 (unchanged).** Protocol §5.2 scopes this to "the
+  methodology transfers to a second Provider (GitHub) unmodified." This
+  fix touches only `quay-native`'s own CLI, not the GitHub Provider or
+  the cross-Provider transfer mechanism. Held flat for the **nineteenth
+  consecutive iteration (26-44)**.
+- **validation: 0.64 (unchanged).** Credited only after the out-of-band
+  audit for this iteration's own work occurs (next iteration, via the
+  top-level orchestrator's separate `Agent` dispatch, G3). Correctly held
+  flat pending that audit. Note: iteration 43's own audit result was not
+  yet available at the start of this iteration (it is dispatched by the
+  top-level orchestrator after each iteration's report is committed);
+  this iteration does not assume or pre-credit its outcome.
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+ΔV_meta = **0.0000**. This iteration's genuine contribution — a real,
+disclosed-not-hidden CLI defect closed (`task edit`'s missing `<id>`
+guard, the same class QN-025 fixed for `task create`), with a new
+regression test and zero regressions — is not automatically forced into
+one of the eight precisely-scoped V-factor axes when the evidence does
+not support it, per the standing discipline (iterations 11, 25, 28, 29,
+37, 38, 39, 40, 41, 42, 43) and, specifically, per QN-025's own directly
+on-point precedent for this exact fix shape.
