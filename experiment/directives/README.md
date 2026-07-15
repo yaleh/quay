@@ -127,6 +127,42 @@ correction; if anything, this sequence (fabrication caught by audit →
 retracted → human directly corrected the record via a verifiable git
 commit) is the safeguard actually working end-to-end.
 
+## Follow-up (added by DIR-004, applied by the top-level orchestrator session directly, 2026-07-15): the "no manda dispatch primitive found" result for iterations 0-12 was a fixable process defect, not a permanent capability gap
+
+`DIR-004` (`experiment/directives/archive/DIR-004-manda-mcp-gateway-restarted-agent-visible.md`)
+identified the root cause: the `manda mcp` gateway process serving the
+iteration sessions started 42 seconds before `.manda/config.yml` existed,
+read `mcp_adapters` at startup, found no config, and came up with zero
+adapters — permanently, for that process's lifetime, since the gateway
+does not hot-reload. Every negative `ToolSearch` result from iterations
+0-12 (and this experiment's own top-level session, before reconnection)
+was truthful, not a search-technique failure — but the cause was a
+one-time startup race, not a structural session-type limitation as
+DIR-001/DIR-002's framing had implied.
+
+After the human manually reconnected the gateway (confirmed via `ps`:
+old gateway process gone, new one now correctly parenting live
+`manda-dispatch mcp`/`manda-tools mcp` children), the top-level
+orchestrator session's own `ToolSearch` found real, callable
+`Agent`/`Dispatch`/`DispatchStatus`/`DispatchSettle`/... tools for the
+first time, and performed a real end-to-end lifecycle test (submit →
+queue → claim → settle → status → release) — see DIR-004's Resolution
+section for the verbatim sequence. This is the first genuinely positive
+result across the entire experiment on the "does a manda dispatch
+primitive exist and work" question.
+
+**Caveat, stated plainly:** this was verified for the long-running
+top-level orchestrator session, not for a freshly `Agent`-dispatched
+`baime:iteration-executor` subagent — those remain a distinct session
+type, and no iteration (0-12, nor any run after DIR-004) has yet
+independently confirmed whether such a subagent session inherits the
+reconnected gateway. G6's honest framing going forward: the dispatch
+primitive is confirmed to exist and function in this project's manda
+setup in general — but whether any *given* iteration-executor session
+instance has it connected remains a per-session, mechanically-checked
+fact (`ToolSearch`), not something to assume either way from this
+finding.
+
 ## Relationship to the experiment's guardrails (G1-G6, protocol §6)
 
 Directives introduce a new risk class the existing guardrails don't cover:

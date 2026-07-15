@@ -69,4 +69,23 @@ existed by the time this new gateway started). The human confirms
    availability.
 
 ## Resolution
-(to be filled in by whichever iteration applies this)
+
+- status: applied
+- resolved_by: top-level orchestrator session (this conversation, not a dispatched iteration-executor — the reconnected `manda mcp` gateway is scoped to this session, and no evidence exists that a freshly-`Agent`-dispatched iteration-executor subagent inherits it)
+- resolved_at: 2026-07-15
+
+**Found: YES, positively, for the first time across 13+ iterations.** `ToolSearch` in this session returned real, schema-loadable
+`mcp__plugin_manda_manda__{Agent,Dispatch,DispatchStatus,DispatchSettle,DispatchCancel,DispatchProgress,TaskCreate,TaskGet,TaskUpdate,request,respond}`
+tools — confirmed by successfully loading and calling several of them, not just seeing their names.
+
+**Real end-to-end test performed (item 2), verbatim sequence:**
+1. `Dispatch(id="dir004-probe-iter13", to="worker", mode="async", args={task, reply_to})` → `{"task_id":"dir004-probe-iter13"}`
+2. `DispatchStatus(id="dir004-probe-iter13")` → `{"status":"queued"}`, both immediately and again after a real 20s sleep — no live session auto-claimed `pending-worker` in that window (several `manda monitor worker`/`cord`/`terminal` processes were running per `ps aux`, but none appears to have been actively watched/attended by an interactive Claude session at that moment; this is a "no reader currently attending" finding, not a tool/wiring failure).
+3. `manda-dispatch claim --id=dir004-probe-iter13 --session=quay-orchestrator-probe --root .` → `claimed dir004-probe-iter13`; `DispatchStatus` → `{"status":"claimed"}`.
+4. `DispatchSettle(id="dir004-probe-iter13", status="done", result={...})` → `{"relayed":true,"status":"done"}`.
+5. `DispatchStatus(id="dir004-probe-iter13")` → `{"status":"done","kind":"done","payload":{"result":{...}}}` — terminal payload correctly folded in.
+6. `manda-dispatch release --id=dir004-probe-iter13 --session=quay-orchestrator-probe` → `released dir004-probe-iter13` (note: this subcommand rejects `--root`, unlike `claim`/`status`/`submit` — a minor CLI-surface inconsistency, not a defect worth filing here).
+
+**Verdict: found-and-works.** The submit → queue → claim → settle → status → release lifecycle is fully functional end-to-end via both the MCP tool surface and the `manda-dispatch` CLI, in this session, right now. The one caveat: automatic claiming by a live remote monitor session did not happen within the test window — full functionality was demonstrated by manually playing the executor role, not by a genuine second independent live session picking the task up unprompted. This is a materially real, positive result, but not the strongest possible form (a truly unattended cross-session pickup) — recorded honestly rather than overclaimed.
+
+**Item 4 (README/G6 framing):** to be applied directly in `experiment/directives/README.md` and iteration 13's report, per this finding — the "no dispatch primitive found in iterations 0-12" result stands as accurate for those specific sessions, but should now be framed as a fixed, session-scoped startup race (gateway started 42s before `.manda/config.yml` existed), not a structural or permanent capability gap. It remains an open question (not yet tested) whether a *newly dispatched* `baime:iteration-executor` subagent (via the native `Agent` tool) would itself inherit this reconnected gateway — the evidence here only establishes it for the top-level orchestrator's own long-running session.
