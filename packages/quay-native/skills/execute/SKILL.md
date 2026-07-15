@@ -122,11 +122,35 @@ executeEpic(task) = {
   **actual, unplanned result**: QN-015 genuinely passed its own gate on the
   first implementation attempt (6/6 AC, confirmed red-before-fix via `git
   stash`) — it did **not** land on `needs-human`. `executeEpic`'s
-  `needs-human` fallback branch therefore **remains unexercised in practice**
-  as of iteration 6, despite a deliberately-adversarial attempt — see
-  `experiment/iterations/iteration-6.md` §5/§9 for the honest account of why
-  the attempt still counts as a genuine (not rigged) test, and what would be
-  needed to actually exercise the fallback branch.
+  `needs-human` fallback branch therefore **remained unexercised in
+  practice** as of iteration 6, despite a deliberately-adversarial attempt —
+  see `experiment/iterations/iteration-6.md` §5/§9 for the honest account of
+  why the attempt still counted as a genuine (not rigged) test.
+- **Resolved in iteration 7 (QN-017):** the `needs-human` fallback branch has
+  now been genuinely exercised, via `executeLeaf`'s path (not `executeEpic`
+  — the leaf path shares the same `gate.ok === false -> NeedsHuman` outcome).
+  QN-017 was authored *deliberately unsatisfiable by construction*, not
+  merely "hard": its AC required this environment's `review-proposal` step
+  to have run in a genuinely separate, freshly-dispatched subagent — a real,
+  re-confirmed-absent environmental precondition (no subagent-dispatch
+  primitive has been found in 7 consecutive `ToolSearch` checks, iterations
+  1-7), not a subjective difficulty estimate. `quay-native task check
+  QN-017 --json` genuinely returned `{"ok": false, "acTotal": 2,
+  "acChecked": 0, "reason": "0/2 AC checkboxes checked"}` at the
+  `execute->done` gate, because AC item 1 could not honestly be checked
+  true. Per this Skill's own Method step 3 ("route to `needs-human` if a
+  genuine blocker... is found"), the task was flipped to status
+  `needs-human` — a real, valid status (`store.js`'s `VALID_STATUSES`),
+  producing `{"gate": "none", "ok": false, "reason": "soft stop; human
+  action required"}` on subsequent checks. This is the first genuine,
+  mechanically-produced (not narrated) exercise of this fallback path in
+  the experiment's 7-iteration history. See
+  `experiment/iterations/iteration-7.md` §5 for the full account, including
+  the honest correction that the initial attempt to trigger this via the
+  *authoring* gate did not work (the `author->ready` gate only requires
+  checkbox *presence*, not checked-state — a real, useful finding about
+  gate design surfaced by this attempt) and the actual trigger point was
+  the `execute->done` gate, as this Skill's own Method already documents.
 - **Fixed in iteration 6 (QN-012):** `quay-native task check`'s mechanical
   gate is now compound-aware — a `done` compound task's gate check
   re-verifies that every child is itself `status: done` (returning `ok:
@@ -141,6 +165,18 @@ executeEpic(task) = {
   named (`experiment/audits/iteration-5-independent-adjudicate.md`, Claim 5).
   Primitive (leaf) task gate behavior is unchanged (verified by dedicated
   regression tests, `packages/quay-native/test/compound-gate.test.mjs`).
+- **Fixed in iteration 7 (QN-016):** the QN-012 fix above only checked one
+  level deep (`childrenStatus()` read `child.status` directly) — a `done`
+  child whose own grandchild had reverted would still be reported `"done"`,
+  so a 3-level epic could stay falsely `ok: true`. Found by iteration 6's
+  independent, out-of-band audit (`experiment/audits/
+  iteration-6-independent-adjudicate.md`, Finding 1). `childrenStatus()` is
+  now recursive: a compound child is only reported `"done"` if its own
+  subtree is also fully done; otherwise it is reported as the distinct
+  status `"stale-done"` (nameable, not silently collapsed into `"done"`).
+  Cycle-safe (a cyclic children graph resolves to `"missing"`/`ok:false`
+  rather than crashing or hanging). See
+  `packages/quay-native/test/compound-gate-recursive.test.mjs`.
 - Not yet dispatched via manda in a background worker by this Skill itself
   (see quay:author's same gap note — dispatch binding is currently the
   host's job).

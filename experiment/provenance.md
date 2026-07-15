@@ -1008,3 +1008,206 @@ iteration 7's priority list.
 
 See `experiment/timing/iteration-6.log` for this iteration's raw `date -u`
 checkpoints.
+
+## Records (as of end of iteration 7)
+
+**Pre-execution context:** this iteration's mandate (per iteration 6's
+"Problems identified for next iteration"), in priority order: (1) TOP
+PRIORITY — construct a task deliberately unsatisfiable by construction (a
+real, confirmed-absent environmental precondition, not a subjective "hard"
+estimate) to finally exercise the `needs-human` fallback path, unexercised
+after two good-faith attempts across iterations 5-6; (2) reconsider the
+`effectiveness` V_meta measurement approach or declare 0.20 an honest
+ceiling; (3) look for a *natural* reusability opportunity (do not build a
+third provider just to move the number); (4) continue driving σ up through
+genuine native work; (5) watch for a diminishing-returns signal on
+`gate_correctness`. Also carried forward from iteration 6's independent
+audit: fix `childrenStatus()`'s one-level-deep limitation if natural (not
+gold-plated), and note (but do not chase) a trivial assertion-count
+discrepancy in `cas-write.test.mjs`.
+
+Two new tasks were authored this iteration: QN-016 (the recursive
+`childrenStatus()` fix, addressing the carried-forward audit finding) and
+QN-017 (the deliberately-unsatisfiable adversarial case, addressing
+priority 1).
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 7) |
+|---|---|---|---|---|---|
+| QN-001 .. QN-015 | (unchanged from iteration 6) | — | — | — | done |
+| QN-016 | Make childrenStatus() recursive (catch reverted grandchildren) | **native†††** | **native†††** | **native†††** | **done** |
+| QN-017 | Achieve true fresh-context reviewer independence for review-proposal (deliberately-adversarial) | **native‡‡‡** | **native‡‡‡ (did not reach done)** | **native‡‡‡** | **needs-human** |
+
+Rows QN-001 through QN-015 are unchanged from the end of iteration 6;
+reproduced in full in that section above (not restated here to avoid
+duplication drift — see "Records (as of end of iteration 6)"). QN-016 and
+QN-017 are new this iteration.
+
+`†††` — QN-016: same-session, no subagent-dispatch primitive found
+(re-confirmed via `ToolSearch` at the start of this iteration — the 7th
+consecutive confirmation, iterations 1-7). `author_by = native`:
+`quay:author`'s documented Method was followed to produce the Proposal/Plan/
+AC/DoD, citing the exact independent-audit finding
+(`experiment/audits/iteration-6-independent-adjudicate.md`, Finding 1) that
+motivated it, gated by the real author→ready gate before proceeding.
+`execute_by = native`: `quay:execute`'s `implement-phase` → `self-audit-ac`
+→ `gate-check` Method was followed with genuine TDD discipline, verified via
+`git stash`/`git stash pop`: pre-fix `store.js` genuinely fails 5/13
+assertions in the new `compound-gate-recursive.test.mjs` (top-level
+recursion, cycle safety, `stale-done` labeling all fail as expected);
+post-fix genuinely passes 13/13. Full existing regression suite
+(`compound-gate.test.mjs`, `abi-symmetry.mjs`, `gate-correctness.test.mjs`,
+`lock.test.mjs`, `cas-write.test.mjs`) re-run green both before and after.
+Live re-check of QN-008 and QN-013 (the two real compound tasks in this
+repo) both still return `ok: true` after the fix — zero regression on real
+data. `gate_by = native`: the real `quay-native task check QN-016 --json`
+gate reported `ok: true, reason: "terminal"` before the status flip to
+`done` — re-verified again fresh during this iteration's own same-session
+audit (`experiment/audits/iteration-7-adjudicate.md`).
+
+`‡‡‡` — QN-017's honesty note (read this before treating its `needs-human`
+status as routine): this task was authored *deliberately unsatisfiable by
+construction*, per iteration 6's top-priority recommendation, to finally
+exercise the `needs-human` fallback path that survived two good-faith "hard
+task" attempts unexercised (QN-008 in iteration 5, QN-015 in iteration 6 —
+both happened to pass on the first attempt). QN-017's AC item 1 required
+this task's own `review-proposal` authoring step to have been performed by
+a genuinely separate, freshly-dispatched subagent — a real, independently
+re-confirmed-absent environmental precondition (no subagent-dispatch
+primitive found in 7 consecutive `ToolSearch` checks spanning iterations
+1-7), not a subjective difficulty estimate.
+
+**Honest correction recorded, not retconned:** the original Plan expected
+the failure to surface at the `author→ready` gate (AC checkbox left
+unchecked → gate `ok:false` → task stays at `todo`). What actually happened
+on first live gate-check: `quay-native task check QN-017 --json` returned
+`ok: true` — because `store.js`'s `check()` "todo" branch tests only for
+checkbox **presence** in the AC section (`acHasCheckbox =
+/- \[[ xX]\]/.test(acSection)`), not checked-state. This is itself a real,
+useful finding about gate design, not a bug this task tried to hide or
+route around. QN-017 was therefore flipped honestly to `ready` (the gate
+genuinely passed), and the actual failure point shifted one gate later, to
+`execute→done` (the `ready` branch, which does require all AC checkboxes
+checked). There, `quay-native task check QN-017 --json` genuinely returned:
+
+```json
+{"id":"QN-017","gate":"execute->done","ok":false,"acTotal":2,"acChecked":0,
+ "reason":"0/2 AC checkboxes checked"}
+```
+
+Per `quay:execute`'s own Method step 3 ("route to `needs-human` if a
+genuine blocker... is found"), the task was flipped to `needs-human` — a
+real, valid status in `store.js`'s `VALID_STATUSES` array, not an invented
+label. Re-checking afterward reproduces `{"gate":"none","ok":false,
+"reason":"soft stop; human action required"}`. This is the first genuine,
+mechanically-produced (not narrated) exercise of the `needs-human` fallback
+path in this experiment's 7-iteration history.
+
+`author_by = native`: `quay:author`'s Method was followed in full (the
+gate-passes-unexpectedly finding above is itself evidence the real gate ran,
+not a self-certified claim). `execute_by`: recorded as `native (did not
+reach done)` — `quay:execute`'s Method was genuinely followed
+(`implement-phase` was vacuous by design — there is nothing to implement
+for a structurally-impossible AC item; `self-audit-ac` correctly refused to
+check AC item 1; `gate-check` genuinely ran and genuinely returned
+`ok:false`, correctly routing to `needs-human` per the Skill's own
+documented Method) — but the task **did not reach `done`**, so it does
+**not** qualify for σ's numerator under any reading (strict, inclusive, or
+author-only), matching the protocol's definition precisely: σ counts tasks
+actually driven to `done` by native tooling, not tasks where native tooling
+was merely, correctly, invoked. `gate_by = native`: the real mechanical gate
+(`author→ready`, then `execute→done`) produced both outcomes above — no
+self-certification at any step.
+
+**On the manda MCP tool surfacing this iteration:** a `mcp__plugin_manda_
+manda__Send` tool appeared in this session's deferred-tool list. Checked
+honestly before finalizing this section: its schema is "post one message to
+a channel" (mirrors `manda send` — writes an event to a channel) — it has
+no mechanism to launch a separate, fresh-context session or receive a reply
+from one. It is not a subagent-dispatch primitive under design §5's
+definition (a fresh-context, independently-reviewing subagent). This does
+not change QN-017's honest precondition or the standing G6 finding; noted
+here for precision rather than silently ignored.
+
+## σ computation — iteration 7
+
+Applying protocol §10.1's strict definition (all three of `author_by`,
+`execute_by`, `gate_by` must be `native`, AND the task must be `done`) to
+the updated table above:
+
+- QN-001, QN-002, QN-005, QN-007, QN-008, QN-009, QN-010, QN-011, QN-012,
+  QN-013, QN-014, QN-015: unchanged from iteration 6, still qualify (12
+  tasks).
+- QN-016: native/native/native, `done` → **qualifies (new this iteration)**.
+- QN-017: native/native/native, but status is `needs-human`, not `done` →
+  **does not qualify** — genuinely and correctly invoked native tooling at
+  every step, but never reached `done`, which is what σ measures.
+- QN-003, QN-004: qualify under the inclusive reading only (unchanged).
+- QN-006: seed/seed/seed → does not qualify (unchanged, permanent).
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 13 / 17
+  = 0.765
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 15 / 17
+  = 0.882
+```
+
+Total task count is now **17** (QN-001..QN-017) — 2 new tasks created this
+iteration (QN-016 done, QN-017 needs-human).
+
+**σ (strict) = 0.765, down from 0.800 at the end of iteration 6 (Δσ =
+-0.035).** This is an honest, expected, and methodologically correct
+decrease, not a regression to explain away: QN-017 was deliberately
+constructed to NOT reach `done` — that is the entire point of the task, and
+the top priority carried into this iteration. A σ formula that could not
+register this as a (small) decrease would be measuring something other than
+what it claims to measure. Diluting the denominator with a genuinely
+unsatisfiable task while adding only one qualifying task to the numerator
+is the expected, honest arithmetic — not a sign of regressed capability.
+This is the first iteration in the experiment's history where σ has
+decreased; recorded plainly, not minimized or reframed.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 16 / 17
+              = 0.941
+```
+
+Up from 0.933 at the end of iteration 6 (both QN-016 and QN-017 were
+authored natively; QN-006 remains the sole permanently-seed gap). This
+sub-metric is not diluted by QN-017's non-`done` outcome, since it only
+measures the authoring step, which QN-017 genuinely completed natively —
+illustrating why both readings are reported: strict σ correctly penalizes
+"did not reach done," while `σ_author_only` correctly credits "authoring
+Skill worked as designed, including correctly refusing to fabricate a
+checked box."
+
+## QN-017 / needs-human honest reflection (read alongside §§ above)
+
+This iteration's central methodological question, carried forward from
+iterations 5 and 6, was whether the `needs-human` fallback path is real,
+exercised machinery or untested pseudocode. The honest answer after this
+iteration: **it is now real, exercised machinery** — but the path that
+exercised it was `execute→done`'s `ready` branch (`quay:execute`'s
+`executeLeaf`), not `executeEpic`'s epic-level integration-accept branch
+specifically. `executeEpic`'s own `needs-human` outcome (a child or the
+epic's own integration acceptance failing) remains, honestly, still
+unexercised in practice as of this iteration — QN-017 was authored as a
+plain (non-compound) task, deliberately, to keep the adversarial case
+narrowly scoped to one clear structural impossibility rather than
+compounding it with epic-level mechanics. This distinction is named
+explicitly rather than glossed over: "the `needs-human` fallback path in
+general" and "`executeEpic`'s specific epic-integration `needs-human`
+branch" are not the same claim, and only the former is resolved by QN-017.
+Whether the latter is worth a dedicated future task (a compound task with a
+child deliberately unsatisfiable) or is adequately covered by the general
+mechanism now being proven real is left as an open question for a future
+iteration's honest judgment, not decided here by fiat.
+
+See `experiment/timing/iteration-7.log` for this iteration's raw `date -u`
+checkpoints.

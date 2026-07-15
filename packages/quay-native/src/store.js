@@ -167,11 +167,48 @@ export function createStore(tasksDir) {
    * declared `children` ids. A child id that does not resolve to an existing
    * task file reports status `"missing"` — a distinct, real failure mode,
    * never silently treated as `"done"`.
+   *
+   * QN-016 (iteration 7): made recursive. Iteration 6's independent audit
+   * found the original version only read `child.status` directly — one
+   * level deep — so a `done` child whose own grandchild had reverted would
+   * still be reported `"done"`. Now: a child that is itself compound (has
+   * its own children) is only reported `"done"` if its stored status is
+   * `"done"` AND its own (recursively derived) children are all `"done"`.
+   * If the child's stored status says `"done"` but its subtree is not
+   * actually fully done, it is reported as the distinct status
+   * `"stale-done"` — nameable and distinguishable from an honestly
+   * incomplete child (`"todo"`/`"ready"`) or a dangling reference
+   * (`"missing"`), matching this file's existing convention of naming
+   * failure modes explicitly rather than collapsing them.
+   *
+   * Cycle-safety: `visited` tracks ids seen earlier in the *current* walk
+   * (this call plus its own ancestors' calls, threaded through the
+   * recursion). A child id that reappears within its own ancestry is
+   * reported `"missing"` for the purposes of this check — a cyclic
+   * parent/children graph is a data-integrity bug this gate must not crash
+   * or hang on, not a case worth full cycle-detection tooling for (G5).
    */
-  function childrenStatus(t) {
+  function childrenStatus(t, visited = new Set()) {
+    if (visited.has(t.id)) {
+      // Should not normally be reached (callers guard before recursing),
+      // but kept as a defensive no-op-safe fallback.
+      return [];
+    }
+    const nextVisited = new Set(visited);
+    nextVisited.add(t.id);
     return (t.children || []).map((childId) => {
+      if (nextVisited.has(childId)) {
+        return { id: childId, status: "missing" };
+      }
       const child = get(childId);
-      return { id: childId, status: child ? child.status : "missing" };
+      if (!child) return { id: childId, status: "missing" };
+      if (child.role === "compound") {
+        const grandkids = childrenStatus(child, nextVisited);
+        const subtreeOk = grandkids.every((g) => g.status === "done");
+        const status = child.status === "done" && !subtreeOk ? "stale-done" : child.status;
+        return { id: childId, status, childrenStatus: grandkids };
+      }
+      return { id: childId, status: child.status };
     });
   }
 
