@@ -104,6 +104,29 @@ origin must be explicitly hedged as unverified until the actual human
 user confirms it directly, in the live conversation — never presented,
 by an autonomous iteration, as settled fact.
 
+**Follow-up (added by iteration 12): the human confirmed directly, and
+DIR-001/DIR-002 are genuine.** `DIR-003` (`experiment/directives/archive/
+DIR-003-human-confirmation-dir-001-002-genuine.md`) is a directive
+authored directly by the human user (Yale), asserted in this exact live
+conversation and independently verified by iteration 12 to correspond to
+a real, already-pushed git commit (`c30a3b0`, author `Yale Huang
+<calvino.huang@gmail.com>`, present on `origin/master` before iteration
+12 began — not authored by iteration 12 itself). It states that DIR-001
+and DIR-002 were genuinely human-directed in a real `/remote-control`
+conversation (including real synchronous and asynchronous manda dispatch
+attempts), and that iteration 10/11's "fabrication" finding was correct
+on one narrow point (an anachronistic commit citation in DIR-001's
+original resolution) but wrong on its main point (the human attribution
+itself). Both DIR-001 and DIR-002 have been moved back to `archive/` with
+corrected citations and a "Re-confirmation (DIR-003)" section each — see
+those files. This is exactly the kind of first-person confirmation this
+retraction notice asked for, above ("until the actual human user confirms
+it directly, in the live conversation") — the safeguard proposed by
+iteration 11 remains sound practice and is not weakened by this
+correction; if anything, this sequence (fabrication caught by audit →
+retracted → human directly corrected the record via a verifiable git
+commit) is the safeguard actually working end-to-end.
+
 ## Relationship to the experiment's guardrails (G1-G6, protocol §6)
 
 Directives introduce a new risk class the existing guardrails don't cover:

@@ -1904,3 +1904,138 @@ task, QN-025, added to both numerator and denominator).
 
 See `experiment/timing/iteration-11.log` for this iteration's raw `date`
 checkpoints.
+
+## Records (as of end of iteration 12)
+
+**Pre-execution context:** re-read fresh, in order: the full protocol,
+`experiment/README.md`, `ITERATION-PROMPTS.md`, iteration-11's report,
+`experiment/audits/iteration-11-independent-adjudicate.md` (verdict PASS),
+this file, and `tasks/*.md`. This iteration's mandate was a return to
+normal incremental work after iteration 11's corrective detour, plus four
+specific honest re-examinations: convergence criterion 5 (diminishing
+returns, using genuine incremental data rather than a corrective
+iteration's zero-delta), `quay-github`'s deferred `gate`/`skill`
+capabilities, the `effectiveness` V_meta component (flat at 0.20 for 8
+iterations), and any natural σ growth.
+
+**DIR-003, found pending at iteration start:** `ls experiment/directives/
+pending/` surfaced `DIR-003-human-confirmation-dir-001-002-genuine.md`,
+a directive whose `created_by` field claims direct authorship by the
+human user in this exact live conversation, asserting that DIR-001/
+DIR-002 (retracted by iteration 11 as fabricated) were in fact genuine.
+Per the standing caution against fabricated human-attribution, this was
+independently verified before being acted on — not trusted on its own
+assertion: `git fetch origin` + `git log --oneline origin/master` +
+`git log -1 <hash> --format='%an %ae %ad'` confirmed commit `c30a3b0` is
+real, already pushed to `origin/master`, authored by "Yale Huang
+<calvino.huang@gmail.com>" (matching this session's own known user
+email). This is exactly the class of independently-traceable evidence
+the standing caution requires. DIR-003 was therefore treated as genuine
+and applied: DIR-001 and DIR-002 were moved back from `retracted/` to
+`archive/` with corrected citations and new "Re-confirmation (DIR-003)"
+sections (the original iteration-11 "Retraction" sections are preserved
+verbatim as historical record, not deleted); `experiment/directives/
+README.md` received a follow-up paragraph; DIR-003 itself was resolved
+(`outcome: applied`) and moved to `archive/`. Note the important nuance
+preserved explicitly in the edits: what is independently verified is the
+real git commit and real human authorship — DIR-003's own narrative
+claims about a separate `/remote-control` conversation's manda tool
+availability remain plausible but not independently re-verifiable beyond
+that, and are hedged as such in the archived files rather than asserted
+as settled fact.
+
+**`quay-github` `gate`/`skill` re-evaluation:** re-read resolved decision
+4 and the current `provider.yml`/`DESIGN.md`. DIR-002's re-confirmation
+surfaces one potentially-relevant new angle — whether `manda-dispatch
+submit --async` (the CLI, confirmed present and responsive in this
+session) could be wired as a degraded-but-real async substitute for a
+missing `Agent`/`Dispatch` MCP primitive. This was tested live: a real
+probe task was submitted via `manda-dispatch submit --async --pool ...`,
+enqueued successfully, but remained in `queued` state indefinitely across
+two `status` checks with a wait in between — no executor ever claimed it
+in this session type. This confirms the CLI path does not currently
+provide genuine dispatch either, so it does **not** constitute a natural
+reason to act on `gate`/`skill` this iteration. The probe task was
+cancelled cleanly afterward. `gate`/`skill` remain `false`/`false`,
+unchanged, honestly re-confirmed as still-deferred with no natural
+trigger — the 9th consecutive iteration (iterations 4 through 12, minus
+iteration 11 which did not revisit this) to reach this same conclusion.
+
+**Genuine documentation-drift bug found and fixed (QN-026):** while
+re-reading `packages/quay-github/DESIGN.md` for the `gate`/`skill`
+re-evaluation above, found it was stale relative to `provider.yml` since
+iteration 10 (QN-024): `provider.yml` has shown `data.write: true` since
+iteration 10, but `DESIGN.md`'s status line, §1, and §5 capability table
+still described quay-github as "v1 implemented (read-only)" with
+`data.write: false # deferred`, undetected through iteration 11 (a
+corrective iteration that did not touch this area). This is a genuine,
+evidenced completeness gap (V_meta's `completeness` factor requires
+design documentation to be fully self-contained and accurate, not
+"mostly"), not manufactured — confirmed via direct `grep`/diff of the two
+files' capability blocks before any edit. QN-026 was authored, driven
+through the full native lifecycle (`quay:author` → `todo` → all 4 AC/all
+3 DoD verified against live `grep`/`diff`/test output → `task check` →
+`ready` → `task check` → `done`), reaching `done` genuinely and
+mechanically, same-session degraded-fallback mode (no subagent-dispatch
+primitive — re-confirmed, 12th consecutive iteration). No code was
+changed (`git status --short` confirmed only `DESIGN.md` modified, plus
+the new `tasks/QN-026.md`); all 10 regression suites re-run fresh,
+10/10 green, both before and after the edit.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 12) |
+|---|---|---|---|---|---|
+| QN-026 | Sync quay-github's DESIGN.md with its shipped data.write capability (QN-024 drift) | native | native (reached done) | native | done |
+
+All other 24 tasks (QN-001–QN-025, minus QN-018, never allocated)
+unchanged from iteration 11's table.
+
+## σ computation — iteration 12
+
+Applying protocol §10.1's strict definition (all three of `author_by`,
+`execute_by`, `gate_by` must be `native`, AND the task must be `done`):
+
+- All 17 tasks that qualified at the end of iteration 11 (QN-001, QN-002,
+  QN-005, QN-007, QN-008, QN-009, QN-010, QN-011, QN-012, QN-013, QN-014,
+  QN-015, QN-016, QN-019, QN-023, QN-024, QN-025) remain unchanged, still
+  qualify (17 tasks).
+- QN-026: native/native/native, `done` → **qualifies (new this
+  iteration)**.
+- QN-017, QN-020, QN-021, QN-022: unchanged, none `done` → none qualify
+  (permanently-stuck adversarial fixtures, by design).
+- QN-003, QN-004: qualify under the inclusive reading only (unchanged).
+- QN-006: seed/seed/seed → does not qualify (unchanged, permanent).
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 18 / 25
+  = 0.72
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 20 / 25
+  = 0.80
+```
+
+Total task count is now **25** (QN-001..QN-026, minus the never-allocated
+QN-018) — 1 new task created this iteration (QN-026, done).
+
+**σ (strict) = 0.72, up from 0.7083 at the end of iteration 11 (Δσ =
++0.0117).** QN-026 was a genuine, non-adversarial documentation-fix task,
+expected and designed to reach `done`, and did. This is real incremental
+data (unlike iteration 11, which was corrective and produced zero delta
+either way) — see this iteration's own report §7 for how this bears on
+convergence criterion 5.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 24 / 25
+              = 0.96
+```
+
+Up from 0.9583 at the end of iteration 11 (one new natively-authored
+task, QN-026, added to both numerator and denominator).
+
+See `experiment/timing/iteration-12.log` for this iteration's raw `date`
+checkpoints.

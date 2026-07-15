@@ -1,10 +1,15 @@
-# quay-github — Design (v1, read-only minimal)
+# quay-github — Design (v1.1: read + minimal status-write)
 
-- **Status:** v1 implemented (read-only: `data.read` + `manifest` only)
+- **Status:** v1.1 implemented — `data.read` + `manifest` (v1, QN-002) plus
+  a minimal, status-only `data.write` (QN-024, iteration 10). `gate` and
+  `skill` remain deferred (no natural reason found through iteration 12 —
+  see this file's §5 and `provider.yml`'s own inline comments for the
+  current, honest justification).
 - **Scope:** the GitHub Provider — second real backend, proves the ABI
   transfers to a heterogeneous store (proposal §14, protocol §10.1). See
-  `tasks/QN-002.md` for the authored Proposal/Plan/AC/DoD this package
-  executes.
+  `tasks/QN-002.md` for the original read-only Proposal/Plan/AC/DoD, and
+  `tasks/QN-024.md` for the status-write increment this document was
+  updated (QN-026) to reflect.
 
 ## 1. Purpose
 
@@ -16,10 +21,15 @@ concept). Building this Provider is the concrete test of proposal §16's
 that normalization work, made explicit and reviewable rather than buried in
 code.
 
-v1 is deliberately **read-only** (`data.read` + `manifest` only) — mirrors
+v1 was deliberately **read-only** (`data.read` + `manifest` only) — mirrors
 how `quay-native` itself staged `data.read` before `data.write`/`gate`
-(iteration 0's v0 loop). `data.write`, `gate`, and `skill` capabilities are
-explicitly deferred to a future task.
+(iteration 0's v0 loop). Iteration 10 (QN-024) added a real, minimal,
+status-only `data.write` on top of that read-only base — see §3.4. `gate`
+and `skill` capabilities remain explicitly deferred; no natural reason to
+implement either has arisen through iteration 12 (each iteration since
+QN-024 has re-checked and found none — see `provider.yml`'s own inline
+comments, which are the single source of truth for the current capability
+booleans).
 
 ## 2. Backing store
 
@@ -129,6 +139,39 @@ iteration 5 deferred (this experiment's real repo has only 4 issues, so a
 real 500+-issue overflow could never be exercised against live GitHub state
 without creating one, which would be disproportionate for a test fixture).
 
+### 3.4 Status-write path (iteration 10, QN-024)
+
+**Resolved, minimal `data.write` scope: status-only.** `quay-github task
+edit <id> --status <new-status>` (and Core's generic, provider-agnostic
+`quay task edit --provider github`) patches an issue's `status:*` label
+set to reflect the requested status, reusing exactly the same label
+convention §3 already established for *reading* status — no new
+normalization work was required for the write direction, because the
+read-side convention (one `status:*` label per issue, `done` also derived
+from `issue.state == "closed"`) already fully specifies what a write must
+produce. Concretely: writing `status: "ready"` removes any existing
+`status:*` label and applies `status:ready`; writing `status: "done"`
+closes the issue (`issue.state = "closed"`) rather than relying on a
+label, matching §3's own read-side rule that `state == "closed"` takes
+precedence over any label.
+
+**Scope, deliberately narrow (G5):** only `status` is writable. `title`,
+`body`, `labels` (non-status), `parent`, `children` remain read-only in
+v1.1 — there is no AC/DoD requirement or observed drift motivating a
+broader write surface yet, and adding one now would be anticipatory
+gold-plating.
+
+**Live-verified, not merely unit-tested:** two real writes were performed
+against this repository's actual issue #4 during QN-024 (one via
+`quay-github`'s own CLI, one via Core's generic `quay task edit
+--provider github` passthrough), each independently re-verified by a
+fresh `gh issue view --json` read (not by trusting the write call's own
+return value), and the issue was restored to its original label
+afterward. See `experiment/provenance.md`'s iteration-10 section and
+`tasks/QN-024.md` for the full transcript.
+
+Covered by `test/write.test.mjs`.
+
 ## 4. What transferred cleanly vs. what required backend-specific work
 
 **Transferred unmodified (zero Core changes, zero ABI changes):**
@@ -175,12 +218,16 @@ budgeted, proposal §16):**
   access — a qualitatively different failure mode (network/auth errors
   possible; native only has filesystem errors).
 
-## 5. Capabilities (v1)
+## 5. Capabilities (v1.1)
 
 ```
 data.read: true    # task_list, task_get
 manifest:  true    # provider://manifest
-data.write: false  # deferred
-gate:       false  # deferred
-skill:      false  # deferred
+data.write: true   # QN-024 (iteration 10): status-only patch — see §3.4.
+                   # title/body/labels/parent/children remain unimplemented.
+gate:       false  # deferred — no natural reason found through iteration 12
+skill:      false  # deferred — same reason
 ```
+
+Matches `provider.yml`'s own capability booleans verbatim (verified this
+iteration — see QN-026's AC/DoD).

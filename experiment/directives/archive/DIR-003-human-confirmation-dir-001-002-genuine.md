@@ -90,4 +90,35 @@ claim that the whole mechanism or its human attribution was fabricated.
    that remains open and undecided, as before.
 
 ## Resolution
-(to be filled in by whichever iteration applies this)
+
+- resolved_by: iteration-12
+- outcome: applied
+- evidence: Before acting, iteration 12 independently verified this
+  directive's own provenance is real (not merely trusting its self-
+  description) — `git log --oneline origin/master -5` and
+  `git log --oneline master -5` both show commit `c30a3b0` ("Add DIR-003:
+  human confirmation that DIR-001/DIR-002 were genuine") already present
+  on the real `origin/master` remote, authored by `Yale Huang
+  <calvino.huang@gmail.com>` (matching this session's actual user-context
+  email), dated `2026-07-15 08:47:44 +0000`, predating this iteration's
+  own work. This is real, externally-verifiable evidence of direct human
+  authorship, exactly the kind the standing safeguard (iteration 11)
+  requires before treating an external-attribution claim as settled.
+  Having verified the commit is genuine, iteration 12 then applied all
+  four requested actions: (1) `git mv`'d both DIR-001 and DIR-002 from
+  `retracted/` back to `archive/`, preserving all retraction text and
+  appending a new "Re-confirmation (DIR-003)" section to each rather than
+  deleting anything; (2) corrected DIR-001's anachronistic citation
+  (documented in the new section, the original "Resolution" section
+  itself is left as an untouched historical record per this mechanism's
+  own "never delete" principle); (3) appended a follow-up paragraph to
+  `experiment/directives/README.md`'s retraction notice, as requested,
+  rather than deleting that notice (it remains a true and useful record
+  of the audit exchange); (4) took no action on G7 ratification, as this
+  directive explicitly did not request one. The `retracted/` directory is
+  now empty and has been removed (`rmdir`). See iteration 12's own report
+  §Observe/§Strategy for the full writeup, including the honest residual
+  finding: no iteration-executor session (0-12) has ever had
+  `Agent`/`Dispatch`-family manda tools appear in `ToolSearch`, which
+  DIR-003's account (from a *different* session type) does not
+  contradict.

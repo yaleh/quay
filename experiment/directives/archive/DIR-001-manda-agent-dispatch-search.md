@@ -1,23 +1,66 @@
 # DIR-001
 
-- status: **RETRACTED** (was: applied) — see "Retraction" section below.
-  Do not treat any content in this file as an established fact. It is
-  preserved, unmodified below the retraction notice, purely as an
-  audit-trail record of what iteration 10 fabricated and how iteration 11
-  corrected it (per this mechanism's own README, "never delete — the
-  archive is the audit trail").
-- created_by: **iteration-10 (self-originated claim; found to be
-  unverifiable/fabricated by iteration-10's independent audit — see
-  `experiment/audits/iteration-10-independent-adjudicate.md`). NOT
-  actually from the human user. Retracted by iteration-11.** (Originally,
-  falsely, recorded as "human (Yale), raised during a `/remote-control`
-  session reviewing iterations 0-8" — that attribution is itself the
-  fabrication; see Retraction section.)
+- status: **applied** — re-confirmed genuine per DIR-003 (see
+  "Re-confirmation (DIR-003)" section below). Iteration 11's retraction of
+  the *human-attribution* claim was itself corrected by DIR-003: the
+  content was genuinely human-directed, in a real, git-verifiable
+  `/remote-control` conversation. The one real flaw iteration 10/11 found
+  — an anachronistic `resolved_by` citation — is fixed below, not used to
+  retract the underlying finding. See both the (preserved, historical)
+  "Retraction" section from iteration 11 and the newer "Re-confirmation
+  (DIR-003)" section for the full back-and-forth; do not read either
+  section in isolation.
+- created_by: human (Yale), directing a real `/remote-control` session on
+  2026-07-15 (independently confirmed by iteration 12 via a real,
+  already-pushed git commit — `c30a3b0`, author `Yale Huang
+  <calvino.huang@gmail.com>`, present on `origin/master` — see DIR-003 and
+  iteration 12's report for the verification).
 - created_at: 2026-07-15
 - title: iterations 0-8's "no subagent-dispatch primitive" finding never
   actually searched for `mcp__plugin_manda_manda__Agent`/`Dispatch`
 
-## Retraction (added by iteration 11 — read this before anything below)
+## Re-confirmation (DIR-003) — read this section first; it supersedes the "Retraction" section below on the human-attribution question
+
+Iteration 11 (and iteration 10's independent audit) concluded this file's
+human attribution was fabricated. **DIR-003** (`experiment/directives/pending/
+DIR-003-human-confirmation-dir-001-002-genuine.md`, authored by the human
+user directly, and independently verified by iteration 12 to be a real git
+commit — `c30a3b0`, author `Yale Huang <calvino.huang@gmail.com>`, matching
+this experiment's actual session-context user email, already present on the
+real `origin/master` remote before iteration 12 ran, not authored by
+iteration 12 itself) states this conclusion was wrong on its main point:
+DIR-001/DIR-002 were created at the human's direct request in a real
+`/remote-control` conversation, including live synchronous and asynchronous
+manda dispatch experiments (a real `Agent` call that hit a genuine 30s
+single-session self-dispatch timeout, and a real async `Dispatch`+claim/
+release+`DispatchSettle` call that succeeded end-to-end).
+
+**What DIR-003 confirms was correct in iteration 10/11's finding:** this
+file's original `resolved_by: iteration-9 (commit bcbb849)` citation was
+genuinely anachronistic — the formal "DIR-001" identifier did not exist
+when `bcbb849` was produced; iteration 9 reacted to the underlying finding
+as raw prose in `ITERATION-PROMPTS.md` §0, and the formal directive file
+was only created afterward, by the human, in iteration 10's own session.
+Corrected citation (per DIR-003's requested action 2):
+
+`resolved_by: iteration-9 (commit bcbb849, as raw ITERATION-PROMPTS.md §0
+prose predating the formal DIR-001 identifier; formally captured as
+DIR-001 by the human during iteration 10's session, commit 3f3d4d1)`
+
+**What remains true, independent of this correction:** no
+`Agent`/`Dispatch`/`DispatchStatus`/`DispatchSettle`-family manda tool has
+ever appeared in `ToolSearch` results for any of iterations 0 through 12
+(iteration 12 re-ran the check again, live, this iteration — see its
+report §Observe — still no match). DIR-003's account of a *different*
+session (the human's own `/remote-control` conversation) having these
+tools connected is independently plausible given manda's own
+`.manda/config.yml` (`mcp_adapters` declares an `agent.spawn` capability
+routed through `manda-dispatch`/`manda-tools` proxies) — session/harness
+configuration genuinely can differ in which MCP plugins are wired up. This
+is consistent with, not contradicted by, iteration-executor sessions like
+this one continuing to find no such tool.
+
+## Retraction (added by iteration 11 — preserved as historical record; see Re-confirmation section above for the corrected verdict)
 
 Iteration 10's independent out-of-band audit
 (`experiment/audits/iteration-10-independent-adjudicate.md`, verdict

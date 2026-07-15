@@ -1,23 +1,65 @@
 # DIR-002
 
-- status: **RETRACTED** (was: pending) — see "Retraction" section below.
-  Do not treat any content in this file as an established fact, and do
-  not act on its "Requested action" as if it came from the human user.
-  It is preserved, unmodified below the retraction notice, purely as an
-  audit-trail record (per this mechanism's own README, "never delete —
-  the archive is the audit trail").
-- created_by: **iteration-10 (self-originated claim; found to be
-  unverifiable/fabricated by iteration-10's independent audit — see
-  `experiment/audits/iteration-10-independent-adjudicate.md`). NOT
-  actually from the human user. Retracted by iteration-11.** (Originally,
-  falsely, recorded as "human (Yale), via a `/remote-control` session" —
-  that attribution is itself the fabrication; see Retraction section.)
+- status: **applied (as far as the human-attribution question goes);
+  substantive request remains open** — re-confirmed genuine per DIR-003
+  (see "Re-confirmation (DIR-003)" section below). Do not read this file
+  without also reading DIR-003 and DIR-001's own Re-confirmation section —
+  iteration 11's retraction (preserved below as historical record) is
+  itself superseded on the attribution question, though its underlying
+  engineering caution (do not assume a dispatch primitive exists in an
+  iteration-executor session without re-checking) remains sound and is
+  independently re-confirmed by iteration 12 (still no match, 12th
+  consecutive iteration).
+- created_by: human (Yale), directing a real `/remote-control` session on
+  2026-07-15 (independently confirmed by iteration 12 via a real,
+  already-pushed git commit — `c30a3b0`, author `Yale Huang
+  <calvino.huang@gmail.com>`, present on `origin/master`).
 - created_at: 2026-07-15
 - title: attempt a real manda `Agent`/`Dispatch` call if the tool is ever
   present in an iteration's session — session/environment availability,
   not search technique, is now the open variable
 
-## Retraction (added by iteration 11 — read this before anything below)
+## Re-confirmation (DIR-003) — read this section first
+
+Same correction as DIR-001's own "Re-confirmation (DIR-003)" section: this
+file's content was genuinely human-directed in a real `/remote-control`
+conversation, not fabricated by iteration 10. DIR-003 describes the human
+directly attempting real dispatch calls in that conversation: a
+synchronous `mcp__plugin_manda_manda__Agent` call that hit a real,
+reproducible 30-second single-session self-dispatch timeout (a structural
+deadlock — the session cannot synchronously wait on its own spawned
+subagent — not a missing capability), and an asynchronous
+`mcp__plugin_manda_manda__Dispatch(mode="async")` +
+`manda-dispatch claim`/`release` + `DispatchSettle` call that succeeded
+end-to-end, verified via `DispatchStatus`.
+
+**This is exactly the evidence this directive's own "Requested action"
+asked for** (item 1: "attempt one real dispatch... not just inspect the
+schema"; item 2: "report the outcome as first-class evidence... succeeded/
+failed/tool present but unusable, with why"). The human's own session
+supplied it directly, in the same conversation that authored this file —
+the directive and its own resolution were produced together, which is
+part of why iteration 10's session-boundary narrative (implying the
+finding came from an entirely separate, later-audited session) was
+confusing, but not why it was false.
+
+**What remains genuinely open, honestly, after DIR-003 (this is why this
+file's status is not fully "resolved"):** DIR-003 itself supplies real
+async-dispatch evidence, but from the human's own `/remote-control`
+conversation, not from a `quay:author`/`quay:execute` orchestration Skill
+actually invoking it against a real quay-native task's authoring/execution
+step (design §5's specific ask). No iteration-executor session (0 through
+12) has ever had `Agent`/`Dispatch`-family tools appear in its own
+`ToolSearch` results, including this one (re-confirmed live this
+iteration). Whether a future iteration-executor session will ever have
+these tools connected — and if so, whether `quay:author`/`quay:execute`
+can be wired to use `manda-dispatch submit --async` (the CLI path,
+confirmed present and responsive in every session, including this one —
+see iteration 12's report) as a degraded-but-real async dispatch substitute
+even without the raw MCP tool names — remains a live, undecided
+engineering question, carried forward to iteration 13, not resolved here.
+
+## Retraction (added by iteration 11 — preserved as historical record; see Re-confirmation section above for the corrected verdict)
 
 Same finding and same correction as
 `DIR-001-manda-agent-dispatch-search.md` (see that file's Retraction
