@@ -158,11 +158,48 @@ Skills obviously must know the Provider's status set and the four mandatory arti
 
 ## 8. Open decisions
 
+**Status update (QN-050, iteration 39):** all five items below were, at
+the time this document was first drafted, genuinely open questions. Over
+the course of this experiment's subsequent iterations, each was resolved —
+by its own recommended option, in every case — and has been shipped and
+exercised in the actual codebase for many iterations. This section
+originally never recorded that; QN-050 closes that documentation gap. The
+original question framing is kept below (so the resolved answer can be
+read against what was actually being asked), with each item's resolution
+and concrete evidence added inline.
+
 1. **native storage format** — track backlog.md frontmatter (recommended, ecosystem-compatible) vs. a fresh minimal schema.
+   **RESOLVED: markdown+frontmatter** (the recommended option). See §2's
+   own description; every task under `tasks/` is a `.md` file with YAML
+   frontmatter (e.g. `tasks/QN-049.md`), implemented in
+   `packages/quay-native/src/store.js`.
 2. **`needs-human`** — keep as a status (recommended: it suppresses auto-operations) vs. demote to a label.
+   **RESOLVED: kept as a first-class status** (the recommended option).
+   `packages/quay-native/src/store.js`'s `VALID_STATUSES` includes
+   `"needs-human"` as a real status value, exercised repeatedly as a
+   genuine terminal soft-stop (see `packages/quay-native/skills/execute/
+   SKILL.md`'s own Gaps section for the QN-017, QN-020/021, and
+   QN-022/023 exercises).
 3. **manda-absent fallback for a trigger** — default to **sync inline run** vs. **print command for manual run**.
+   **RESOLVED: both, layered.** `packages/quay/src/action.js`'s own
+   header comment documents and implements the full fallback chain (manda
+   present → dispatch; Claude Code session, no manda → inline/subagent;
+   plain CLI, no agent → print-degrade), exercised across iterations
+   13-18 (DIR-004/DIR-005) and extended with the QN-042/DIR-009 mock-log
+   mode.
 4. **`quay:execute` epic branch** — actively dispatch children (nested manda) and await, vs. only wait for independently-triggered children, vs. support both (recommended: both; the epic's `done` gate is "all children done + integration passes" regardless of who drove them).
+   **RESOLVED: both** (the recommended option). `packages/quay-native/
+   skills/execute/SKILL.md`'s `executeEpic` pseudocode actively drives
+   each child (`driveEach: [driveChildToDone(c, provider) |
+   c <- task.children]`); its own Gaps section documents this branch
+   genuinely exercised at iterations 5, 8, 9, and 27 (the last closing
+   the "epic-level recursive orchestration itself" residual gap).
 5. **operation-Skill roster** — exact Layer-1 set (is `decompose` its own Skill or folded into `review-plan`? recommended: folded).
+   **RESOLVED: folded** (the recommended option). `packages/quay-native/
+   skills/author/SKILL.md` step 4 (`review-plan`) explicitly states "this
+   is also where the decompose test lives" and implements it inline; no
+   standalone `decompose` Skill file exists anywhere in `packages/
+   quay-native/skills/`.
 
 ---
 
