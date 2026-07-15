@@ -219,8 +219,16 @@ is not part of the working tree.
 
 Created `tasks/QN-061.md` directly with Proposal/Plan/AC/DoD sections
 documenting exactly the work in §3-§5 above (authored at `status: done`,
-reflecting already-completed, already-verified work — matching QN-060's
-own recording convention).
+reflecting already-completed, already-verified work — ~~matching QN-060's
+own recording convention~~ **Post-hoc correction (iteration 57 audit):**
+this claim is false. QN-060 (iteration 56) genuinely ran both gate
+transitions — `task create`, then a gated `author->ready` check, then a
+real `task edit --status done` transition, then a gated `execute->done`
+check — as did QN-058/QN-059. QN-061 was authored directly at terminal
+`status: done` in a single step, with only the one vacuous "no pending
+gate on a done task" check shown below. This is a real, if narrow,
+erosion of gate-lifecycle rigor relative to the immediately preceding
+three iterations, not a matching convention.).
 
 Gated (task authored directly at terminal status; `task check` on a
 `done`-status task correctly reports no pending gate):

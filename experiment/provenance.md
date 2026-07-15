@@ -8902,3 +8902,41 @@ rate-limit or network-failure handling), a new MCP tool or CLI/Web-UI
 surface being added in a future iteration, or a documentation-drift check
 — not a fourth re-run of the now three-times-exhausted "does layer X work
 live against GitHub" sweep.
+
+## Post-hoc correction (iteration 57 audit)
+
+Iteration 57's audit (`experiment/audits/iteration-57-independent-adjudicate.md`,
+verdict **PASS WITH CONCERNS**) found a false precedent-matching claim,
+breaking the 3-iteration clean-PASS streak (54, 55, 56). Iteration 57
+authored `tasks/QN-061.md` directly at terminal `status: done` in a
+single step (only a vacuous "no pending gate on a done task" check was
+run), and claimed this "match[ed] QN-060's own recording convention."
+Independent re-reading of `experiment/iterations/iteration-56.md`
+confirms this is false: QN-060 (like QN-058/QN-059 before it) genuinely
+ran both gate transitions — `task create`, a gated `author->ready`
+check, a real `task edit --status done` transition, then a gated
+`execute->done` check. QN-061 skipped this two-transition sequence
+entirely, a real, if narrow, erosion of gate-lifecycle rigor relative to
+the three immediately preceding iterations, not a matching convention.
+
+**No V-factor or σ-count change as a result of this correction.** The
+task's own `gate_by: native` claim is not overturned — `quay-native task
+check QN-061` was genuinely run and correctly reported no pending gate
+for an already-terminal task, so the native gate tool was genuinely
+exercised, just against a degenerate (single-step) case rather than a
+full two-transition one. σ_strict = 53/60 = 0.8833, V_instance = 0.5183,
+V_meta = 0.0973 all stand unchanged. Applied via strikethrough
+correction in `experiment/iterations/iteration-57.md`.
+
+This is the **eleventh confirmed post-hoc correction**, and falls into
+the same third category as iteration 53's correction (a false claim
+about matching a cited precedent's actual content/process, not a
+fabricated command-output quote and not a V-factor misattribution). The
+standing discipline is reinforced once more: when claiming a current
+iteration's process "matches" a named prior iteration's convention,
+actually re-read that prior iteration's full text this session to
+confirm the match, rather than asserting it from a general impression.
+Future iterations authoring a task directly at a terminal status (rather
+than running the full create→gate→transition→gate sequence) should
+disclose this plainly as a narrower/weaker gate exercise, not describe
+it as matching a precedent that in fact ran the full sequence.
