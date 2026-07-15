@@ -5919,3 +5919,179 @@ iteration, plus a real, previously-undiscovered manifest asymmetry closed
 — is not automatically forced into one of the eight precisely-scoped
 V-factor axes when the evidence does not support it, per the standing
 discipline (iterations 25, 28, 29, 37, 38, 39, 40).
+
+## Iteration 42 — QN-053 (stale `**Status:** Draft (pre-implementation)` header in three top-level proposal docs, plus a genuine `.gitignore` discovery)
+
+**Context:** iteration 41's own problem list (item 5) named this as a
+candidate: `docs/proposal/quay-proposal.md`, `docs/proposal/
+quay-native-design.md`, and `docs/proposal/quay-bootstrap-experiment.md`
+all still carried `**Status:** Draft (pre-implementation)`, unchanged
+since original authoring, despite 99 commits, 41 completed iterations, 51
+allocated task IDs, and both Providers built and running. Re-confirmed via
+`grep -n "Status:\*\*" docs/proposal/*.md` at the start of this iteration
+(iteration 41's own grep pattern `^\*\*Status` was checked and found to
+under-match, since the actual lines are list items `- **Status:**...`, not
+line-initial `**Status`; the corrected pattern was used and confirmed all
+three files still carried the stale text).
+
+A genuine, substantial search for effectiveness/reusability-shaped work
+was performed first, per the standing mandate established at iteration
+41: re-checked GitHub issues #3/#4 (unchanged, same structural
+`data.write` status-only blocker previously documented), re-checked the
+native backlog for undone tasks (only the known, deliberately-
+unsatisfiable `needs-human`/adversarial-epic tasks QN-017/QN-020/QN-021/
+QN-022 remain, no new organic task), and re-ran `ToolSearch` for a
+subagent-dispatch primitive (found the same `mcp__plugin_manda_manda__
+Agent` tool documented and already investigated in DIR-004/DIR-005 —
+not re-litigated, consistent with standing practice). No new
+effectiveness/reusability-shaped work was found; none was fabricated.
+
+**Genuine, unplanned discovery made during QN-053's own execution:**
+`docs/proposal/quay-bootstrap-experiment.md` — the experiment's own
+authoritative protocol document — is listed in `.gitignore` (line 1,
+present since the very first `.gitignore` commit, `af577cd`, before this
+experiment's own first BAIME iteration) and is therefore **not tracked by
+git at all**, unlike its two sibling documents (`quay-proposal.md`,
+`quay-native-design.md`). `git status --short docs/proposal/` confirms it
+does not even appear as untracked (`??`); `git check-ignore -v` confirms
+the exclusion is deliberate and explicit (not an accident of a broader
+glob — it is the literal, first, standalone line of `.gitignore`). This
+means QN-053's edit to that file's Status line is a real, on-disk content
+fix, but is **structurally invisible to `git diff`/`git commit`** without
+first changing `.gitignore` — which this task does not do, since a
+`.gitignore` change was not requested or authorized and would be an
+unrequested scope expansion beyond a Status-line fix (this is flagged
+plainly in this iteration's report for human attention, not silently
+decided unilaterally).
+
+**Execution:** `tasks/QN-053.md` was created via `quay-native task
+create`, with the body written via a direct `store.write()` call (used
+only for the body's length, the same code path `task edit --body`
+itself invokes). The Status lines of all three files were edited in
+place; only the metadata line changed in each, all other content
+byte-identical (confirmed by `git diff` review). `git diff --stat --
+'*.js'` confirmed empty (zero JavaScript change). `git diff --stat --
+'docs/proposal/*.md'` confirmed exactly two git-tracked files changed
+(`quay-proposal.md`, `quay-native-design.md`) — not three, per the
+gitignore discovery above; the third file's on-disk edit was verified
+directly by file read, not `git diff`.
+
+**Full regression suite**, re-run after the edit: all 24 `*.test.mjs`
+files across all three packages exit 0 (verified via exit-code check per
+file, not string-matching test output, after an initial grep-based check
+was found to under-match); `node packages/quay-native/test/
+abi-symmetry.mjs` reports "ALL FOUR SURFACES SYMMETRIC." Zero
+regressions, as expected for a pure prose/metadata-only change.
+
+`tasks/QN-053.md` was gated `todo → ready` via `task check`: `ok:true`
+(all four artifacts present, 4/4 AC checkboxes independently re-verified
+against live command output before being checked). AC3/AC4 were revised
+mid-authoring to honestly describe the gitignore discovery rather than
+the originally-planned three-tracked-files outcome — an honest
+self-correction made during authoring, not a silently-smoothed-over
+discrepancy (matching the discipline iteration 41 itself demonstrated for
+its own AC-wording correction). The task was then gated `ready → done`:
+`ok:true` (4/4 AC checkboxes checked). DoD1-3 were independently
+re-verified against live command output; DoD4 depends on this
+provenance.md section and the iteration-42 report both existing, which is
+satisfied by this very edit.
+
+## σ computation — iteration 42
+
+Total allocated task IDs verified via actual command:
+
+```
+ls tasks/QN-*.md | wc -l   -> 52
+```
+
+(QN-001 through QN-053, minus QN-018, never allocated.)
+
+QN-053 completed its full lifecycle within this iteration: authored
+(`todo → ready`, gated `ok:true`), then executed (`ready → done`, gated
+`ok:true`, 4/4 AC checked), then formally transitioned via `task edit
+QN-053 --status done`. Final provenance triple: `{author_by: native,
+execute_by: native, gate_by: native, status: done}` — same
+single-iteration author+execute convention used for every prior task
+since iteration ~15.
+
+- σ (strict reading: author_by = execute_by = gate_by = native AND status
+  = done) = 45 / 52 = **0.8654** (44/51 = 0.8627 at the start of this
+  iteration, +1 task in both numerator and denominator).
+- σ_author_only (diagnostic: author_by = native regardless of
+  execute_by/gate_by) = 51 / 52 = **0.9808** (QN-053 added to both
+  numerator and denominator).
+
+## V-factor attribution — iteration 42 (precedent-derived, held flat)
+
+Per the standing discipline (quote the exact defining language, search
+all of `provenance.md` for the closest precedent, read that precedent's
+full reasoning in full this session, and check whether a closer precedent
+maps to a different factor before crediting), the closest, most directly
+on-point precedent is **iteration 39's** (QN-050, `quay-native-design.md`
+§8), read in full this iteration, plus iterations 38, 40, and 41's own
+flat-V-factor reasoning for the same class of fix.
+
+Per protocol §5.2's exact defining language, `completeness` is
+"Methodology (Skills + gates + decomposition rule) fully documented and
+self-contained." Iteration 39's own precedent (quoted directly): "
+`completeness` is protocol-scoped (§5.2) to `quay:author`/`quay:execute`'s
+own documented methodology, not this experiment's own iteration-guidance
+document... `quay-native-design.md` is the shared design document those
+Skills implement against — not a SKILL.md file itself — and this task
+documents already-made, already-exercised decisions; it adds no new
+Skill-orchestration Method-step content." QN-053 is the same class of fix
+one level further out: it touches a document-level `**Status:**`
+metadata line across three top-level design/protocol documents (including
+two, `quay-proposal.md` and `quay-bootstrap-experiment.md`, that no prior
+`completeness`-adjacent fix — QN-049, QN-050, QN-051 — ever touched), with
+zero new Skill-orchestration Method-step content in any of the three.
+`git diff --stat` (for the two tracked files) and a direct read (for the
+third, gitignored file) both confirm no `skills/*/SKILL.md` path was
+touched. `completeness` is not implicated. Held flat at **0.74**.
+
+- **skeleton, abi_symmetry, gate_correctness, skill_convergence**: each
+  explicitly considered and ruled out — `git diff --stat -- '*.js'`
+  confirmed empty; no new CLI/MCP schema-equivalence proof; no gate-logic
+  change (this task never touches `store.js`/`github-client.js`/
+  `mcp-server.js`); no `quay:author`/`quay:execute` SKILL.md content
+  changed. All four held flat: skeleton 0.70, abi_symmetry 0.96,
+  gate_correctness 0.76, skill_convergence 0.96.
+- **effectiveness: 0.26 (unchanged).** This is a documentation-only task
+  with no code change and no scope-matched-timing candidate value,
+  consistent with QN-049/QN-050/QN-051's own precedent. No new evidence
+  toward breaking the plateau was found or fabricated. Now **22
+  consecutive iterations (21-41, and now 42)**.
+- **reusability: 0.79 (unchanged).** Protocol §5.2 scopes this to "the
+  methodology transfers to a second Provider (GitHub) unmodified." This
+  task touches neither Provider's capability set — only three top-level
+  design/protocol documents' own metadata lines. Held flat for the
+  **seventeenth consecutive iteration (26-42)**.
+- **validation: 0.64 (unchanged).** Credited only after the out-of-band
+  audit for this iteration's own work occurs (next iteration, via the
+  top-level orchestrator's separate `Agent` dispatch, G3). Correctly held
+  flat pending that audit. Note: iteration 41's own audit
+  (`experiment/audits/iteration-41-independent-adjudicate.md`) returned a
+  clean PASS, extending the clean-audit streak to five consecutive
+  iterations (37-41) — this is evidence of consistent process quality,
+  but per the standing convention this factor has held at 0.64 since
+  approximately iteration 10 regardless of how many consecutive clean
+  audits accumulate (a structural plateau noted explicitly by iteration
+  30's own audit as "a long-standing structural plateau since iteration
+  10, not a defect introduced by iteration 30" and reaffirmed by this
+  iteration, not re-litigated unilaterally — moving this factor is
+  characterized across the precedent chain as the top-level orchestrator's
+  call, not this session's).
+
+```
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = 0.4903  (unchanged)
+V_meta      = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+ΔV_instance = ΔV_meta = **0.0000**. This iteration's genuine contribution
+— a real, previously-undocumented staleness defect closed across three
+top-level protocol/design documents, plus a genuine, previously-unnoticed
+discovery that one of the experiment's own core documents has been
+gitignored (and therefore untracked by git) since before iteration 0 —
+is not automatically forced into one of the eight precisely-scoped
+V-factor axes when the evidence does not support it, per the standing
+discipline (iterations 25, 28, 29, 37, 38, 39, 40, 41).
