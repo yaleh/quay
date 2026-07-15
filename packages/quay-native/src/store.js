@@ -307,6 +307,14 @@ export function createStore(tasksDir) {
    * heading-with-no-real-content failure mode without attempting semantic
    * quality scoring (out of scope for a mechanical gate; that is what
    * independent review/audit is for, per design §3/G3).
+   *
+   * QN-030 (iteration 20): the same boundary applies to `check()`'s AC
+   * checkbox counting below — presence/checked-state is verified, never
+   * claim truth. This was asserted in prose for 9+ iterations before being
+   * demonstrated live in test/gate-gameability.test.mjs (a checked-but-
+   * false AC claim passes both the author->ready and execute->done gates).
+   * This is expected, structural, and permanent — see that test file's own
+   * header before treating a future change here as a "fix" for it.
    */
   const MIN_SECTION_CHARS = 40;
 

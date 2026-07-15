@@ -2789,3 +2789,121 @@ including the honest engagement with future work / resource-ceiling
 questions and the re-evaluated convergence criteria (criterion 5 is now
 a live candidate for YES if iteration 20's own fresh search finds the
 same result).
+
+## Iteration 20 — fresh V_instance-side search finds one tractable increment (QN-030); reusability/σ-ledger axes re-confirmed exhausted
+
+**Mandate:** iteration 20 was asked to do its own genuinely fresh search
+(not merely repeat iteration 19's reusability-focused search), explicitly
+including the V_instance side (flat since iteration 13 for two of its four
+factors) and the σ-ledger "could a seed task be redone natively" axis
+iteration 19 did not explore.
+
+**σ-ledger axis (redoing QN-006 natively) — investigated and confirmed a
+dead end, for a reason grounded in the protocol's own text, not
+convenience.** Protocol §10 decision 1 states σ is counted "per native
+task... one task = one provenance record." QN-006's provenance record is a
+historical fact: it was built in iteration 0, before `quay:author`/
+`quay:execute` existed. There is no honest way to "redo" it natively —
+either (a) fabricate a fictional re-authoring event narrating history that
+did not happen (exactly the "backfilling the bootstrap narrative"
+anti-pattern G1 names, and exactly what iteration 10's own audit FAILED
+iteration 10 for), or (b) delete and recreate it as a literally new task,
+which does not change QN-006's own historical record — it just creates
+another new task, indistinguishable in kind from QN-030 below, and would
+not be "QN-006 becoming native" in any honest sense. Correctly declined,
+confirming (via a different, sharper argument) the same conclusion prior
+iterations reached implicitly.
+
+**Reusability/data.write/compound-epic axes — re-confirmed exhausted, by
+live re-check, not by trusting iteration 19's own claim.** `gh issue list
+--repo yaleh/quay` re-run fresh: still exactly 2 issues (#3, #4), both
+primitive — byte-for-byte the same as iteration 19's finding. Both
+Providers' `provider.yml` re-read in full: identical capability
+declarations (`data.read/manifest/data.write/gate/skill` all `true`,
+scoped identically to primitive tasks). No new organic backlog activity
+occurred between iterations 19 and 20.
+
+**`Agent` tool schema re-observed (read-only; not invoked)** — its
+description text now reads differently ("mirrors Claude Code's native
+Agent tool... forwarded to the parent broker via the agent.spawn
+capability") from how it was quoted in iterations 13-16. Per standing
+rules (do not self-obtain an audit/subagent-dispatch via this session's
+own manda tooling — the iteration-15 self-dispatch-attempt precedent),
+this was **not live-tested this iteration** — testing it would require
+actually calling `Agent`/`Dispatch`, which is exactly the disallowed
+self-dispatch pattern. This remains an open question for the *G3 audit
+dispatch*, which is the top-level orchestrator's job, not this session's.
+
+**V_instance-side search: found ONE genuine, tractable, non-gold-plating
+increment — `gate_correctness`'s long-standing "checkbox-count-gameability"
+gap, named in prose across 9+ iterations (9, 11, 12, 13, 16, 17, 18, 19)
+but never demonstrated by a live, executable test.** QN-030 was authored
+and driven to `done` this iteration: a new adversarial regression test
+(`packages/quay-native/test/gate-gameability.test.mjs`) proves live that
+`store.check()` accepts a checked-but-semantically-false AC claim on both
+the `author->ready` and `execute->done` gates (with a negative control,
+GAME-C, proving the gate still correctly rejects a genuinely unchecked
+box — this is not a broken always-passing gate). This does **not** close
+the gap (a generic mechanical parser cannot verify claim truth in
+general — see the test file's own header and `store.js`'s new
+cross-reference comment) — it converts a prose assertion into a concrete,
+reproducible artifact, and states explicitly (in both the test and a new
+`## Gaps` section on QN-030 itself) that this is expected, permanent,
+structural behavior a future maintainer must not mistake for a bug.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 20) |
+|---|---|---|---|---|---|
+| QN-030 | Prove gate_correctness's checkbox-count-gameability boundary with a live adversarial test | **native** | **native** | **native** | **done** |
+
+Driven through the full `todo -> ready -> done` lifecycle this iteration,
+natively, in the same same-session degraded-fallback mode established
+since iteration 1 (no subagent-dispatch primitive was invoked or assumed
+live — see the `Agent`-schema note above for why it was not tested this
+iteration). `quay-native task check QN-030 --json` confirmed
+`author->ready` gate `ok:true` (all four artifacts present) before `task
+edit --status ready`; all 5 AC checkboxes were independently re-verified
+against real command output (test exit code, grep for the cross-reference
+comment, full regression suite re-run) before being checked; `quay-native
+task check QN-030 --json` confirmed `execute->done` gate `ok:true` (5/5 AC
+checkboxes checked) before `task edit --status done`.
+
+**Full regression suite, run fresh this iteration:** 13 test files total
+(8 pre-existing quay-native + the new `gate-gameability.test.mjs` + 4
+quay-github + 1 quay), all exit 0; `abi-symmetry.mjs` re-confirms "ALL
+FOUR SURFACES SYMMETRIC." Zero regressions.
+
+## σ computation — iteration 20
+
+QN-030 reaches `{native, native, native, done}` this iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 22 / 29
+  = 0.7586
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 24 / 29
+  = 0.8276
+```
+
+Total task count is now **29** (QN-001..QN-030, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration (QN-030, done).
+
+**σ (strict) = 0.7586, up from 0.75 at the end of iteration 19 (Δσ =
++0.0086).** QN-030 is a genuine, deliberately-scoped, non-adversarial
+V_instance-side capability increment — the first movement on the
+`gate_correctness`/V_instance axis since QN-005 (iteration 2)/QN-019
+(iteration 8), and the first σ movement of any kind since iteration 18
+(iteration 19 was fully flat).
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 28 / 29
+              = 0.9655
+```
+
+Up from 0.9643 at the end of iteration 19 (one new natively-authored task,
+QN-030, added to both numerator and denominator).
