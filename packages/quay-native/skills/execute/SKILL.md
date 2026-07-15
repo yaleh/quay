@@ -203,6 +203,41 @@ executeEpic(task) = {
   See `experiment/iterations/iteration-8.md` §5 for the full account. The
   "integration acceptance itself fails after all children complete"
   sub-case remains open for a future iteration.
+- **Resolved in iteration 9 (QN-022/QN-023):** the narrower sub-case left
+  open above is now exercised for real. Unlike QN-020/QN-021 (child cannot
+  reach `done`), QN-023 (the child) genuinely reached `done` — confirmed
+  via live `quay-native task check QN-023 --json` returning `{"gate":
+  "none", "ok": true, "reason": "terminal"}`. QN-022's own AC was authored
+  with 4 genuinely-satisfiable items at authoring time (so `author->ready`
+  passed for real, `ok: true`), and only after QN-022 genuinely reached
+  `ready` (and QN-023 was already `done`) was a 5th, honestly-unsatisfiable
+  AC item added — the same structural precondition as QN-017/QN-020/
+  QN-021 (no subagent-dispatch primitive found; 9th consecutive `ToolSearch`
+  confirmation across iterations 1-9), but applied at the epic-integration
+  sign-off level rather than a per-Skill-step level. `quay-native task check
+  QN-022 --json` at that point genuinely returned `{"gate": "execute->done",
+  "ok": false, "acTotal": 5, "acChecked": 4, "reason": "4/5 AC checkboxes
+  checked", "childrenStatus": [{"id": "QN-023", "status": "done"}]}` —
+  i.e. `acOk: false` while `childrenOk: true`, the one previously-untested
+  boolean combination in `store.js`'s `ok = acOk && childrenOk` compound
+  gate. QN-022 was then flipped to `needs-human`, producing the same
+  soft-stop shape as the other two triggers. A genuine sequencing pitfall
+  was caught and corrected mid-construction: an initial single-pass attempt
+  to write all 5 AC items at once (while QN-022 was still `status: todo`)
+  would have tripped the *wrong* gate (`author->ready`, not `execute->done`)
+  for the wrong reason, since QN-019's checked-state fix made both gates
+  inspect the same AC section — this was caught via a live `task check`
+  call showing the mistaken `author->ready` failure, and the construction
+  was redone in genuine temporal order before QN-022's status was ever
+  advanced. See `experiment/iterations/iteration-9.md` §5 for the full
+  account. All three structurally distinct `needs-human` triggers named in
+  `executeEpic`'s Spec/Gaps history are now genuinely, mechanically
+  exercised: (1) `executeLeaf`'s own gate failure (QN-017), (2) a child
+  that cannot reach `done` (QN-020/QN-021), (3) all children done but the
+  epic's own integration acceptance fails (QN-022/QN-023). No further
+  distinct branch in `executeEpic`'s own pseudocode is currently known to
+  remain unexercised; if one is identified later it should be named here
+  explicitly rather than assumed covered.
 - Not yet dispatched via manda in a background worker by this Skill itself
   (see quay:author's same gap note — dispatch binding is currently the
   host's job).

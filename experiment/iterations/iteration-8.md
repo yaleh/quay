@@ -22,7 +22,7 @@ under the protocol's actual product formula, the honest number is
 `V_meta = 0.0475` — an order of magnitude lower, and materially relevant
 to the §7 dual-threshold convergence criterion (`≥ 0.80` for both
 `V_instance` and `V_meta`). **This iteration's own `V_meta`, computed
-under the corrected product formula: 0.72 × 0.20 × 0.55 × 0.62 = 0.0491**
+under the corrected product formula: 0.73 × 0.20 × 0.55 × 0.62 = 0.0498**
 (component values below, §8).
 
 Secondary work this iteration: (1) constructed QN-020 (epic) / QN-021
@@ -160,7 +160,7 @@ New test file `packages/quay-native/test/gate-checked-state.test.mjs`, 5
 cases (CS-A zero checkboxes, CS-B present-but-unchecked, CS-C partially
 checked, CS-D fully checked, CS-E execute→done regression). Genuine TDD
 via `git stash`/`git stash pop`: pre-fix, 4 assertions genuinely failed
-(exactly CS-B and CS-C, the intended new-behavior cases); post-fix, 13/13
+(exactly CS-B and CS-C, the intended new-behavior cases); post-fix, 14/14
 passed.
 
 **One expected, transparently-fixed regression, not hidden:**
@@ -411,8 +411,8 @@ V_meta = completeness × effectiveness × reusability × validation
 - **validation: 0.62 (up from 0.60, ΔV +0.02).** Evidence: this
   iteration's same-session audit (`experiment/audits/
   iteration-8-adjudicate.md`) genuinely re-derived QN-019's TDD proof
-  (fresh `git stash`/`git stash pop`, confirming 4/13 genuine pre-fix
-  failures and 13/13 genuine post-fix passes, not merely citing the
+  (fresh `git stash`/`git stash pop`, confirming 4/14 genuine pre-fix
+  failures and 14/14 genuine post-fix passes, not merely citing the
   earlier run), independently re-ran `quay-native task check` against
   QN-020 and QN-021 fresh (reproducing the exact JSON outputs reported in
   §5, not trusting the reported claim), and independently re-verified the
@@ -444,7 +444,7 @@ separate `ToolSearch` queries at the start of this iteration: no
 dispatch-capable tool exists). Its contents:
 
 - Re-ran `gate-checked-state.test.mjs`'s full `git stash`/`git stash pop`
-  TDD proof fresh: genuine 4/13 red pre-fix, genuine 13/13 green post-fix.
+  TDD proof fresh: genuine 4/14 red pre-fix, genuine 14/14 green post-fix.
 - Re-ran the full existing regression suite fresh (`compound-
   gate.test.mjs`, `compound-gate-recursive.test.mjs`, `abi-symmetry.mjs`,
   `gate-correctness.test.mjs`, `lock.test.mjs`, `cas-write.test.mjs`) — all
@@ -632,7 +632,7 @@ of it, not new capability.
 
 - `packages/quay-native/src/store.js` — `check()`'s `"todo"` branch now
   requires checked-state, not mere presence (QN-019).
-- `packages/quay-native/test/gate-checked-state.test.mjs` — new, 13
+- `packages/quay-native/test/gate-checked-state.test.mjs` — new, 14
   assertions.
 - `packages/quay-native/test/gate-correctness.test.mjs` — GC-C fixture
   updated (checked boxes), with explanatory comment.

@@ -1466,3 +1466,177 @@ three deliberately-adversarial/gate-fix tasks besides QN-019 reached
 
 See `experiment/timing/iteration-8.log` for this iteration's raw `date -u`
 checkpoints.
+
+## Records (as of end of iteration 9)
+
+**Pre-execution context:** this iteration's mandate, in priority order:
+(1) consider constructing an adversarial epic task to exercise
+`executeEpic`'s narrower "all children done, integration acceptance
+itself fails" sub-case, if a natural next step exists; (2) watch the
+V_meta product-to-product delta (iter7→iter8 was +0.0023, below the 0.02
+threshold) — evaluate honestly if this iteration's delta is also small;
+(3) `gate_correctness`'s checkbox-count-gameability gap (G3) remains open
+— consider a natural next step or say honestly none exists; (4) continue
+holding effectiveness (0.20) and reusability (0.55) absent a natural
+opportunity; (5) act on `quay-github`'s deferred `data.write`/`gate`/
+`skill` capabilities only if a natural, protocol-compliant reason arises.
+
+Two new tasks were authored this iteration: QN-022 (epic, addressing
+priority 1) and QN-023 (QN-022's sole, genuinely-completable child).
+Unlike QN-020/QN-021 (iteration 8), QN-023 genuinely, mechanically
+reached `done` — the key structural difference needed to isolate the
+epic's own `acOk=false` as the sole cause of its gate failure, distinct
+from a children-blocked cause. `quay-github`'s deferred capabilities
+(priority 5) were re-checked (`packages/quay-github/provider.yml`, all
+three still `false`) — this iteration's work is entirely gate-internal to
+`quay-native` and touches no Provider surface, so there is no natural
+reason to act this iteration; left unchanged, honestly, matching
+iterations 7-8's identical reasoning. G3 (priority 3) was re-evaluated: no
+natural, non-gold-plated next step exists absent a subagent-dispatch
+primitive (G6, still absent 9th consecutive iteration) — left open,
+honestly, not forced.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 9) |
+|---|---|---|---|---|---|
+| QN-001 .. QN-021 | (unchanged from iteration 8) | — | — | — | done / needs-human (QN-017, QN-020) / todo (QN-021) |
+| QN-022 | Exercise executeEpic's narrower "integration acceptance itself fails" sub-case (epic) | **native†††** | **native††† (did not reach done)** | **native†††** | **needs-human** |
+| QN-023 | Re-verify store.js's compound execute->done gate ANDs acOk/childrenOk independently (QN-022's child) | **native†††** | **native††† (reached done)** | **native†††** | **done** |
+
+Rows QN-001 through QN-021 are unchanged from the end of iteration 8;
+reproduced in full in that section above (not restated here to avoid
+duplication drift).
+
+`†††` — QN-022/QN-023's honesty note (read before treating these statuses
+as routine): together these two tasks exercise the third and, as far as
+can currently be determined, final structurally distinct trigger in
+`executeEpic`'s `needs-human` branch space — "all children reach `done`,
+but the epic's own integration acceptance itself fails" — explicitly left
+open by iteration 8's provenance record and `quay:execute`'s own
+SKILL.md. QN-023 (the child) was authored to be genuinely, honestly
+completable (unlike QN-021), and was driven through the full native
+lifecycle for real:
+
+```json
+{"id":"QN-023","gate":"none","ok":true,"reason":"terminal"}
+```
+
+QN-022's own AC construction required genuine temporal sequencing, and a
+real mid-construction pitfall was caught and corrected rather than
+hidden: an initial single-pass write of all 5 AC items (4
+genuinely-satisfiable + 1 deliberately-unsatisfiable) while QN-022 was
+still `status: todo` would have tripped the wrong gate
+(`author->ready`, not `execute->done`) for the wrong reason, since
+iteration 8's QN-019 fix made both gates inspect the identical AC section.
+This was directly observed via a live gate check against the actual file
+state:
+
+```json
+{"id":"QN-022","gate":"author->ready","ok":false,
+ "artifacts":{"proposal":true,"plan":true,"ac":true,"dod":true},
+ "acTotal":5,"acChecked":4,"reason":"4/5 AC checkboxes checked"}
+```
+
+The construction was then corrected to genuine temporal order: (1) AC
+reverted to 4 genuinely-satisfiable items only; `author->ready` re-checked
+and genuinely passed (`ok:true`); (2) `task edit QN-022 --status ready`
+genuinely advanced the task; (3) `execute->done` re-checked at `ready`
+status, **before** the 5th item was added, confirming
+`acOk:true, childrenOk:true`:
+
+```json
+{"id":"QN-022","gate":"execute->done","ok":true,
+ "acTotal":4,"acChecked":4,
+ "reason":"all AC checkboxes checked; eligible to move to done",
+ "childrenStatus":[{"id":"QN-023","status":"done"}]}
+```
+
+(4) `ToolSearch` re-confirmed no subagent-dispatch primitive exists (9th
+consecutive confirmation, iterations 1-9); (5) the 5th, deliberately-
+unsatisfiable AC item was then genuinely added (epic-level integration
+sign-off by a genuinely separate, freshly-dispatched subagent — same real
+precondition as QN-017/QN-020/QN-021, applied at the epic-integration
+level); (6) `execute->done` re-checked again, capturing the target
+combination live:
+
+```json
+{"id":"QN-022","gate":"execute->done","ok":false,
+ "acTotal":5,"acChecked":4,"reason":"4/5 AC checkboxes checked",
+ "childrenStatus":[{"id":"QN-023","status":"done"}]}
+```
+
+`acOk:false` (4/5 checked) while `childrenOk:true` (QN-023 done) — the one
+previously-untested boolean combination in `store.js`'s compound
+`execute->done` gate (`ok = acOk && childrenOk`), exercised for real, at
+the correct gate transition. QN-022 was then flipped:
+`task edit QN-022 --status needs-human`, producing
+`{"gate":"none","ok":false,"reason":"soft stop; human action required"}` —
+the same soft-stop shape as QN-017/QN-020. `author_by = native` for both
+(real `quay:author` Method followed, gated by the real gate, including
+correctly recovering from the self-caught sequencing pitfall).
+`execute_by`: recorded as `native (reached done)` for QN-023 and `native
+(did not reach done)` for QN-022 — `quay:execute`'s Method was genuinely
+followed for both (`ensureChildrenExist` succeeded, `driveEach` genuinely
+completed QN-023, `integrationAccept` genuinely failed on QN-022's own AC)
+but only QN-023 qualifies for σ's numerator; QN-022 does not, matching
+the protocol's definition precisely, same reasoning as QN-020/QN-021 in
+iteration 8. `gate_by = native`: the real mechanical gate produced every
+outcome above, including the initial wrong-gate failure that surfaced the
+sequencing pitfall — no self-certification, no fabricated primitive, no
+forced checkbox anywhere in either task.
+
+## σ computation — iteration 9
+
+Applying protocol §10.1's strict definition (all three of `author_by`,
+`execute_by`, `gate_by` must be `native`, AND the task must be `done`):
+
+- QN-001, QN-002, QN-005, QN-007, QN-008, QN-009, QN-010, QN-011, QN-012,
+  QN-013, QN-014, QN-015, QN-016, QN-019: unchanged from iteration 8,
+  still qualify (14 tasks).
+- QN-023: native/native/native, `done` → **qualifies (new this
+  iteration)**.
+- QN-017, QN-020, QN-021, QN-022: native/native/native, but none are
+  `done` (`needs-human`, `needs-human`, `todo`, `needs-human`
+  respectively) → **none qualify**.
+- QN-003, QN-004: qualify under the inclusive reading only (unchanged).
+- QN-006: seed/seed/seed → does not qualify (unchanged, permanent).
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 15 / 22
+  = 0.6818
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 17 / 22
+  = 0.7727
+```
+
+Total task count is now **22** (QN-001..QN-023, minus the never-allocated
+QN-018) — 2 new tasks created this iteration (QN-023 done; QN-022
+non-`done`).
+
+**σ (strict) = 0.6818, down from 0.700 at the end of iteration 8 (Δσ =
+-0.0182).** This is the third such decrease, for the same honest reason as
+iterations 7 and 8: QN-022 was deliberately constructed to not reach
+`done` — that is the entire point of exercising `executeEpic`'s
+`needs-human` branch's final sub-case. Diluting the denominator by 2 while
+the numerator grows by only 1 (QN-023) is the correct, honest arithmetic,
+not a regression to explain away.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 21 / 22
+              = 0.9545
+```
+
+Up from 0.950 at the end of iteration 8 (QN-022, QN-023 were both
+authored natively). This sub-metric correctly credits that authoring
+worked as designed for both new tasks, including QN-022's own correctly-
+caught-and-corrected sequencing pitfall and its correct refusal to
+fabricate its own impossible checkbox, while strict σ correctly penalizes
+that only QN-023 (of the two new tasks) reached `done`.
+
+See `experiment/timing/iteration-9.log` for this iteration's raw `date`
+checkpoints.
