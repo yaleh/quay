@@ -4599,3 +4599,95 @@ credit may be assigned without first locating and reading the single
 closest matching precedent in `provenance.md`, not merely a
 plausible-sounding one.
 full `## Resolution` section per this iteration's instructions.
+
+## Records (as of end of iteration 35)
+
+`experiment/directives/pending/` was checked first, per mandatory
+instruction, and confirmed **empty** (re-verified via `ls`, matching what
+was reported immediately before this iteration was dispatched). With no
+pending directive, this iteration self-selected the one remaining un-issued
+proposal from `docs/proposal/quay-core-scope-expansion-discussion.md` §2.1
+("Use browser-automation MCP tooling to test/verify the Web UI") — named
+explicitly, across iterations 21/29/31/33/34's own problem lists, as the
+last of the discussion doc's three proposals not yet closed (§2.2 closed at
+iteration 33/QN-044/DIR-010; §2.3 closed at iteration 31/QN-042/DIR-009).
+
+`quay serve`'s list page, task-detail page, and action-button POST were
+driven through a REAL rendered browser this iteration, via playwright MCP
+tooling (a session-level capability, kept unambiguous from the Provider-ABI
+`mcp` transport per `ITERATION-PROMPTS.md`'s Core-scope constraint 1) —
+closing both the discussion doc's §2.1 proposal and QN-031's (iteration 21)
+own explicitly-named `## Gaps` item, "browser-level rendering," which
+`serve.test.mjs`'s raw-HTTP-only assertions never covered.
+
+**A genuine, previously-undetected production bug was found live, not
+manufactured:** `serve.js`'s two HTML-emitting routes sent
+`Content-Type: text/html` with no charset parameter. The wire bytes are
+correct UTF-8 (`xxd` confirmed the list page's em-dash as `e2 80 94`), but a
+real browser with no charset hint falls back to a legacy encoding and
+mis-decodes non-ASCII glyphs — observed live as "Quay â€” task list"
+(should be "Quay — task list") and "role: primitive Â· labels:" (should be
+"role: primitive · labels:"). Root-caused, fixed (both routes now declare
+`charset=utf-8` in the header plus a belt-and-braces `<meta charset="utf-8">`
+tag), and re-verified live via playwright MCP tooling that the fix resolves
+the mojibake.
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-046 | Browser-driven Web UI verification (playwright MCP): close discussion-doc §2.1's gap and QN-031's own named "browser-level rendering" gap; fix genuine charset mojibake bug found live | **native** | **native** | **native** | **done** |
+
+**Honesty note on QN-046's lifecycle execution.** As with every task since
+the seed's author/execute retirement, "native" here means the
+`quay-native` CLI's mechanical `task check` gate was genuinely invoked at
+both the author→ready and execute→done transitions (both returned
+`ok:true`, confirmed via direct command output, not estimated), and the
+task file itself was authored and driven through its lifecycle using
+`quay-native task create`/`task edit`/`task check` rather than hand-edited
+frontmatter status. It does NOT mean an independent, fresh-context subagent
+performed the authoring or execution work in isolation from this top-level
+session — this environment still has no verified subagent-dispatch
+primitive (confirmed via ToolSearch this iteration, per G6), so "native"
+continues to describe the degraded-fallback mode already documented for
+every prior "native" entry since iteration ~15: the same top-level session
+performs the work directly, then invokes the real `quay-native` gate
+mechanically and honestly reports its actual JSON output.
+
+**Honesty note on the browser-automation verification's own scope.** The
+live browser-driven verification (navigate/snapshot/click via playwright MCP
+tooling) was performed once, live, by this top-level session — it is real,
+not simulated (the server process was genuinely started, genuinely listened
+on a real port, and genuinely served the rendered pages a real headless
+Chrome instance navigated to; the resulting mojibake and its fix were
+observed in actual tool output, not asserted). It is NOT re-runnable by an
+automated CI process without a live browser-automation MCP session
+attached — this is why the new regression test
+(`serve-browser-render.test.mjs`) asserts the mechanically-checkable root
+cause (Content-Type charset declaration, raw UTF-8 byte sequences, the
+`<meta charset>` tag) rather than fabricating an in-process "browser" the
+test file cannot actually run (confirmed: `npm ls playwright` in the
+workspace root returns empty; no headless-browser package is a dependency
+of `packages/quay`).
+
+## σ computation — iteration 35
+
+Total allocated task IDs verified via actual command:
+
+```
+ls tasks/QN-*.md | wc -l   -> 45
+```
+
+(QN-001 through QN-046, minus QN-018, never allocated.)
+
+- σ (strict reading: author_by = execute_by = gate_by = native AND status =
+  done) = 38 / 45 = **0.8444** (up from 37/44 = 0.8409 at the end of
+  iteration 34; Δσ = +0.0035).
+- σ (inclusive reading: strict set plus QN-003/QN-004's gate-check-only
+  re-verification cases) = 40 / 45 = **0.8889**.
+- σ_author_only (diagnostic: author_by = native regardless of
+  execute_by/gate_by) = 44 / 45 = **0.9778**.
+
+Δσ (strict) = +0.0035 is consistent with the recent per-iteration norm of
+small, monotonic σ growth from a single new native-triple `done` task
+against a growing denominator; it is not a step change and does not, on its
+own, bear on any convergence criterion beyond what iteration-35.md §10
+evaluates directly.

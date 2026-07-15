@@ -57,9 +57,17 @@ export async function startServer({ port = 4173 } = {}) {
           </tr>`
         )
         .join("\n");
-      res.writeHead(200, { "Content-Type": "text/html" });
+      // QN-046 (closes discussion-doc §2.1's browser-rendering gap): a real
+      // browser (driven via playwright MCP tooling) decodes this body as
+      // mojibake (e.g. "Quay â€” task list") without an explicit charset —
+      // the bytes on the wire are correct UTF-8, but a browser with no
+      // charset hint falls back to a legacy encoding. Raw-HTTP-body string
+      // assertions (serve.test.mjs) never caught this because they check
+      // substring presence in the raw byte buffer, not decoded/rendered
+      // text. Fixed by declaring charset=utf-8 explicitly.
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html`<!doctype html>
-        <html><head><title>Quay — ${escapeHtml(manifest.name)}</title></head>
+        <html><head><meta charset="utf-8"><title>Quay — ${escapeHtml(manifest.name)}</title></head>
         <body>
           <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
           <table border="1" cellpadding="4">
@@ -87,9 +95,11 @@ export async function startServer({ port = 4173 } = {}) {
           </form>`
         )
         .join("\n");
-      res.writeHead(200, { "Content-Type": "text/html" });
+      // QN-046: same charset fix as the list route above (the "·" separator
+      // on this page is likewise mis-decoded by a real browser without it).
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html`<!doctype html>
-        <html><head><title>${escapeHtml(t.id)}</title></head>
+        <html><head><meta charset="utf-8"><title>${escapeHtml(t.id)}</title></head>
         <body>
           <p><a href="/">&larr; back to list</a></p>
           <h1>${escapeHtml(t.id)}: ${escapeHtml(t.title)} [${escapeHtml(t.status)}]</h1>
