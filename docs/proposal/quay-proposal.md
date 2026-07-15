@@ -49,7 +49,7 @@ The graveyard of universal issue-tracker abstractions is large; they die on the 
 ### Goals
 
 - A **Core** that renders task list / detail / markdown editing and executes provider-declared action buttons, with **zero backend-specific logic**.
-- A **Provider** plugin model with a **multi-faceted ABI** (data, action, skill, manifest), consumed by the Core uniformly over **MCP**.
+- A **Provider** plugin model that is a multi-faceted bundle — a **data-only ABI** (data + manifest) consumed by the Core uniformly over **MCP**, plus the **Skills** it ships; triggering is a separate host-owned edge (§6.4).
 - A built-in **native** Provider (file/markdown convention + Skill set) for instant deployment; it doubles as the reference implementation and canonical schema.
 - **Three sibling front-ends** over the same Provider ABI: **Web UI**, **Core CLI (`quay`)**, and an **MCP projection** for agents — one capability set, three bindings.
 - Reuse of epicd's convergence **Skills** and the **manda** dispatch/action integration.
@@ -69,8 +69,8 @@ The graveyard of universal issue-tracker abstractions is large; they die on the 
 | Term | Meaning |
 |---|---|
 | **Core** | The thin host: web service + `quay` CLI + MCP projection. Provider-agnostic. Also the project name: **Quay**. |
-| **Provider** | A bundle adapting **one** task backend. Multi-faceted ABI (data / action / skill / manifest). *Renamed from "plugin"* to avoid collision with Claude Code plugins — a Provider **contains** Claude Code Skills. |
-| **capability** | A discrete face a Provider may implement (e.g. `task.write`, `action.run`). The Core negotiates capabilities and degrades gracefully. |
+| **Provider** | A bundle adapting **one** task backend: a data-only ABI (data + manifest, over MCP) plus shipped Skills. *Renamed from "plugin"* to avoid collision with Claude Code plugins — a Provider **contains** Claude Code Skills. |
+| **capability** | A discrete face a Provider may implement (e.g. `data.write`, `gate`). The Core negotiates capabilities and degrades gracefully. |
 | **task** | The canonical work-item (a markdown doc + frontmatter in the view-model). The domain object. |
 | **run** | An execution instance — a dispatched agentic run over a task (e.g. via manda). **Never** call a dispatch a "task"; reserve "task" for the work-item. |
 | **action button** | A preset trigger message the host sends into a Claude Code session (`{label, payload, whenStatus?}`). A host-owned edge, not a Provider ABI capability (§6.4). |

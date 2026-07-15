@@ -8,7 +8,7 @@ Use these terms **verbatim** in all tasks, Skills, code, and docs. This exists t
 |---|---|---|
 | **Quay** | The project, and the **Core** (host: web + CLI + MCP projection). | — |
 | **Core** | The thin, provider-agnostic host. Contains no backend-specific logic. | "the engine" |
-| **Provider** | A bundle adapting **one** task backend; multi-faceted ABI (data / action / skill / manifest). | ~~plugin~~, ~~connector~~ |
+| **Provider** | A bundle adapting **one** task backend: a data-only ABI (data + manifest, over MCP) plus shipped Skills. Triggering is a host-owned edge, not a Provider ABI capability. | ~~plugin~~, ~~connector~~ |
 | **capability** | A discrete face a Provider may implement; negotiated by the Core with graceful degradation. | ~~face~~, ~~facet~~ |
 | **task** | The canonical work-item (markdown + frontmatter view-model). | — (never use "task" for a dispatch) |
 | **run** | An execution instance — a dispatched agentic run over a task (via manda). | ~~task~~ (for the execution side) |
