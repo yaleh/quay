@@ -8004,3 +8004,149 @@ status`, the Status-line `grep`, `gh issue list`, `ps aux`, the
 session, with real output quoted verbatim in `experiment/iterations/
 iteration-52.md` — directly applying the discipline established after
 two consecutive command-output-fabrication failures (iterations 50, 51).
+
+## Iteration 53 — provider.yml/DESIGN.md drift review and action/write test-coverage audit (fresh angle); clean-audit streak now 1
+
+### Preconditions checked
+
+`experiment/directives/pending/` confirmed **empty** via `ls`. `git status
+--short` confirmed clean modulo the one pre-existing, deliberately-
+untouched `docs/proposal/baime-lite-driving-external-projects.md`. `ls
+tasks/QN-*.md | wc -l` confirmed **56** (unchanged). Full 25-file
+regression suite and `abi-symmetry.mjs` both confirmed passing this
+session. `docs/proposal/quay-bootstrap-experiment.md` (233 lines,
+gitignored, read directly from disk), `experiment/ITERATION-PROMPTS.md`
+(489 lines), and the tail of this file were all read fresh this session.
+
+`experiment/audits/iteration-52-independent-adjudicate.md` (already
+present on disk, produced by the top-level orchestrator's own separate
+process) was read in full. Verdict: **PASS** — the clean-audit streak
+restarts at 1, following two consecutive non-clean verdicts (50: PASS
+WITH CONCERNS; 51: FAIL). The audit specifically praised the
+"literal copy-paste" discipline and found one minor citation imprecision
+(not a fabrication), requiring no correction.
+
+### Observe
+
+Per the standing instruction to try something structurally different
+from recent iterations' routine re-checks (Status-lines, manda dispatch,
+GitHub issue-state, TODO sweeps), this iteration reviewed both
+Providers' `provider.yml` files and both packages' `DESIGN.md` body
+content for drift, and searched concretely for a test-coverage gap in
+the action/write code paths:
+
+1. **provider.yml comparison**: full reads of `packages/quay-native/
+   provider.yml` and `packages/quay-github/provider.yml` confirmed their
+   `status_skill_map`/`action_buttons` fields are byte-identical in
+   shape; `skills_path`'s declarative-only nature (QN-052) was
+   re-confirmed by `ls packages/quay-github/skills` returning "No such
+   file or directory" — consistent with the comment's claim of no
+   duplicate Skill directory. No drift found.
+2. **DESIGN.md body-content review**: both files' cited QN-numbers/
+   iteration numbers are historical citations of closed work (up to
+   iteration 36/38), not live "current iteration" claims — a
+   structurally different staleness risk than the already-fixed
+   Status-line pattern (QN-056). No drift found.
+3. **Test-coverage gap search**: an initial `grep -c "test("` pass
+   showed 0 for several files already known to pass in the regression
+   suite; investigated directly and confirmed these files use a
+   deliberate custom `assert()`/PASS/FAIL pattern (documented in-file)
+   for subprocess/live-repo tests, not missing coverage. Read
+   `packages/quay/src/action.js` in full and cross-checked
+   `composePayload`/`deliverTrigger` coverage against four separate test
+   files, confirming end-to-end coverage against both a native fixture
+   manifest and the real GitHub Provider (`--provider github` in
+   `cli.test.mjs`). Checked whether `computeStatusWrite` (GitHub's
+   status-write logic) needed compound/epic-role-awareness parallel to
+   `childrenStatus()`'s QN-035 gate extension — confirmed the
+   write/gate separation of concerns is intentional (write mutates a
+   status label uniformly regardless of role; only the gate path is
+   role-aware), not a gap.
+4. Re-confirmed live: `gh issue list` shows issues #3/#4's `updatedAt`
+   unchanged from iteration 52; `ps aux | grep manda-tools` shows the
+   `--self` wiring gap still present.
+
+None of these lines of inquiry produced a new tractable V_instance/
+V_meta opportunity.
+
+### Strategy
+
+Consistent with the standing discipline (iterations 19, 28, 29, 37-52),
+this iteration does not force a new task into existence. No
+`tasks/QN-0NN.md` was created.
+
+### Execution
+
+No code, Skill, or gate change was made. Read-only work only: `ls`,
+`git status`/`git log`, the regression suite, `abi-symmetry.mjs`, full
+reads of both `provider.yml` files and both `DESIGN.md` files' body
+content, `grep`/`wc -l` sweeps, a full read of `action.js` cross-checked
+against four test files, a `grep` on `computeStatusWrite`, `gh issue
+list`, and `ps aux`. `git status --short` confirmed clean modulo the
+known untracked file, both before and after this session's diagnostic
+work.
+
+### σ computation — iteration 53
+
+No task's provenance triple changed; no task was created or completed.
+σ is unchanged:
+
+```
+σ (strict reading) = 49 / 56 = 0.8750   (unchanged, Δσ = 0)
+```
+
+`ls tasks/QN-*.md | wc -l` independently re-confirmed = **56**.
+
+### V-factor attribution — iteration 53 (stability re-confirmed via a new angle; held flat)
+
+- **skeleton, abi_symmetry, skill_convergence**: no source file touched
+  this iteration. Held flat: skeleton 0.70, abi_symmetry 0.96,
+  skill_convergence 0.96.
+- **gate_correctness: 0.76 (unchanged).** This iteration's review of
+  `computeStatusWrite` vs. `childrenStatus()` confirmed the existing
+  write/gate separation of concerns is correct, not a code change. Held
+  flat.
+- **completeness: 0.74 (unchanged).** Confirmed `provider.yml`/
+  `DESIGN.md` content is consistent (no drift) — necessary but not
+  sufficient for a completeness improvement; no new documentation was
+  written.
+- **effectiveness: 0.26 (unchanged).** No code executed via `quay:
+  author`/`quay:execute` to build a new feature this iteration
+  (documentation/config-drift review and test-coverage-gap search, not
+  a marginal increment). Now **33 consecutive iterations (21-52, and now
+  53)**.
+- **reusability: 0.79 (unchanged).** The `provider.yml` comparison
+  directly examined cross-Provider transfer fidelity and confirmed
+  `composePayload` genuinely executes against the real GitHub Provider's
+  own manifest end-to-end — but this is confirmatory re-verification of
+  already-established transfer fidelity, not new transfer *behavior* on
+  the target this iteration. Held flat for the **twenty-eighth
+  consecutive iteration (26-53)**.
+- **validation: 0.64 (unchanged).** No audit exists yet for this
+  iteration's own work. Iteration 52's PASS verdict (restarting the
+  clean-audit streak at 1) does not itself move this factor, consistent
+  with the precedent at iterations 41-52 (validation moves only after a
+  specific iteration's own audited work).
+
+```
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = 0.4903  (unchanged)
+V_meta      = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+ΔV_instance = ΔV_meta = **0.0000**. This iteration's genuine
+contribution — a structurally different review angle (provider.yml/
+DESIGN.md drift, action/write test-coverage gap search) than the last
+several iterations' routine re-checks, concluding with specific evidence
+that the system remains internally consistent and adequately covered —
+is not forced into a V-factor axis the evidence does not support, per the
+standing discipline (iterations 25, 28, 29, 37-52).
+
+### Discipline note
+
+Every command-output claim in this iteration's report (`ls`, `git
+status`/`git log`, the regression suite, `abi-symmetry.mjs`, the
+`provider.yml`/`DESIGN.md` file reads, the `ls packages/quay-github/skills`
+not-found error, `gh issue list`, `ps aux`) was actually executed this
+session, with real output quoted verbatim in `experiment/iterations/
+iteration-53.md` — continuing the literal copy-paste discipline that
+iteration 52's audit confirmed held cleanly.
