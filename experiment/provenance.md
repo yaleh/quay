@@ -8536,3 +8536,159 @@ Having now closed the two most obvious cross-Provider gaps across two
 consecutive iterations, this exact sweep is unlikely to surface further
 gaps of the same shape — future iterations should look for a genuinely
 new angle.
+
+## Iteration 56
+
+### Observe — MCP-layer analogue of the CLI cross-Provider gap
+
+Following the standing instruction's suggestion to check whether MCP-level
+(not just CLI-level) commands have an analogous cross-Provider gap, read
+`packages/quay/test/mcp-server.test.mjs`'s own file-header comment (point
+2), which explicitly states live GitHub aggregation through `quay mcp` was
+"separately live-verified by hand" at iteration 26 and never captured as an
+automated regression test — confirmed via
+`grep -n "github" packages/quay/test/mcp-server.test.mjs` returning only
+that one comment, zero test code.
+
+Read `experiment/iterations/iteration-26.md` §5c-5g in full: confirmed the
+one-time manual verification (`.quay/config.yml`'s `github.enabled`
+temporarily flipped for a `node -e` script, then restored) was genuine but
+never turned into a repeatable test.
+
+Read `packages/quay/src/mcp-server.js` in full (383 lines): confirmed
+`task_list`/`task_get`/`task_check`/`action_list` are read-only (proxy only
+`taskList()`/`taskGet()`/`taskCheck()`/`manifest()`); `task_write`/
+`action_run` are write-capable and correctly excluded, matching
+`write.test.mjs`'s precedent and iteration 55's `task edit --provider
+github` exclusion.
+
+Manually exercised all four read-only tools live against real issue `gh-3`
+through a real `quay mcp` subprocess (temporary script, deleted after
+confirmation) before writing any test code — confirmed genuine live
+aggregation through the Core MCP fan-out path.
+
+### Strategy / Execution
+
+Added block 10 (105 lines) to `packages/quay/test/mcp-server.test.mjs`: a
+dedicated GitHub-enabled `.quay/config.yml` fixture, a real `quay mcp`
+subprocess connection, 9 new assertions across `task_list`/`task_get`/
+`task_check`/`action_list`, all `provider: "github"`, against real issue
+`gh-3`.
+
+```
+$ node packages/quay/test/mcp-server.test.mjs
+...
+PASS: task_list via quay mcp (provider=github) returns real, non-empty task data aggregated live from the yaleh/quay repo
+PASS: task_list via quay mcp (provider=github) includes the real, live gh-3 task
+PASS: task_get via quay mcp (provider=github) returns gh-3's real id
+PASS: task_get via quay mcp (provider=github) returns a non-empty title read live from the real issue
+PASS: task_get via quay mcp (provider=github) reflects gh-3's real live status (got ready)
+PASS: task_check via quay mcp (provider=github) does not error for gh-3 (the gate itself may still report ok:false)
+PASS: task_check via quay mcp (provider=github) reports ok:false for gh-3's real, currently-unchecked AC state (got {"id":"gh-3","gate":"execute->done","ok":false,"acTotal":4,"acChecked":0,"reason":"0/4 AC checkboxes checked"})
+PASS: task_check via quay mcp (provider=github) reports real numeric acTotal/acChecked counts read live from the issue body
+PASS: action_list via quay mcp (provider=github) includes the "advance" button for gh-3 (its real live status is in the button's whenStatus); got {"buttons":[{"id":"advance","label":"Advance", ...}]}
+
+All QN-036 Core MCP server (DIR-007) tests passed.
+```
+
+```
+$ node --test packages/*/test/*.test.mjs
+...
+ℹ tests 25
+ℹ pass 25
+ℹ fail 0
+```
+```
+$ node packages/quay-native/test/abi-symmetry.mjs
+...
+ALL FOUR SURFACES SYMMETRIC
+```
+```
+$ git diff --stat
+ packages/quay/test/mcp-server.test.mjs | 105 +++++++++++++++++++++++++++++++
+ 1 file changed, 105 insertions(+)
+```
+Test-file-only change. Confirmed no accidental live write occurred: `gh
+issue view 3 --repo yaleh/quay --json number,state,labels` unchanged
+(`status:ready`, `lane:execution`, OPEN) before and after.
+
+### σ computation — iteration 56: QN-060
+
+Created `tasks/QN-060.md`, gated `author->ready` (`ok:true`, all four
+artifacts present), transitioned `todo -> ready`, gated `execute->done`
+(`ok:true`, 4/4 AC checked), transitioned `ready -> done`.
+
+```
+$ ls tasks/QN-*.md | wc -l
+59
+```
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-060 | Add live cross-Provider (GitHub) test coverage for quay mcp aggregation (task_list/task_get/task_check/action_list) | **native** | **native** | **native** | **done** |
+
+σ (strict) = 52 / 59 = **0.8814** (up from 51/58 = 0.8793; Δσ = +0.0021).
+σ_author_only (diagnostic) = 59 / 59 = **1.0000** (unchanged shape).
+
+### V-factor attribution — iteration 56 (precedent-derived: QN-034/048/058/059)
+
+Closest, directly on-point precedent: **iteration 55 (QN-059)**, itself
+following **iterations 24/37/54 (QN-034/048/058)** — all read in full this
+session. All four closed a test-coverage-only regression-test gap for an
+already-existing, unmodified capability, live against real `yaleh/quay`
+issues, zero source-code change, and all four scored `skeleton +0.01`.
+QN-060 is structurally identical in kind, at a different architectural
+layer (Core MCP aggregation, not CLI dispatch).
+
+- **skeleton**: credited **+0.01 (0.72 → 0.73)** — a genuinely new
+  regression-test addition closing a previously-real, self-documented,
+  zero-coverage gap in the v0 loop's `mcp` stage, its cross-Provider
+  (GitHub) instantiation specifically. `abi_symmetry` was explicitly
+  considered and rejected as the alternative factor (the work touches the
+  MCP surface) — `abi-symmetry.mjs`'s own definition is CLI-output-vs-
+  MCP-output schema comparability for a single Provider connection, not
+  cross-Provider aggregation-routing correctness, which is what this
+  iteration's test actually proves (a `skeleton`-shaped claim).
+  `gate_correctness` was also considered (the `task_check` sub-assertion
+  touches the gate stage) but, per precedent, held flat — no
+  `checkGate()`/`store.js`/`github-client.js` code was touched.
+- **abi_symmetry**: held flat at **0.96** (no ABI schema/shape change;
+  `abi-symmetry.mjs` re-confirmed symmetric).
+- **gate_correctness**: held flat at **0.76** (no gate-logic change).
+- **skill_convergence**: held flat at **0.96** (no SKILL.md content
+  changed).
+
+```
+V_instance = 0.73 × 0.96 × 0.76 × 0.96 = 0.5113  (up from 0.5043)
+```
+ΔV_instance = **+0.0070**.
+
+- **completeness**: held flat at **0.74** (test-coverage gap closure for
+  existing behavior, not new orchestration-Skill methodology content).
+- **effectiveness**: held flat at **0.26** (live external-network
+  dependency confound). Now 36 consecutive iterations (21-56).
+- **reusability**: held flat at **0.79** (test-coverage-only addition to
+  an already-existing GitHub-Provider-aggregation capability, not new
+  methodology-transfer evidence). Now the **thirty-first consecutive
+  iteration (26-56)**.
+- **validation**: held flat at **0.64** (no audit yet exists for this
+  iteration's own work).
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+ΔV_meta = **0.0000**.
+
+### Discipline note
+
+This iteration explicitly followed the standing instruction's suggestion
+to check for an MCP-level analogue of the CLI-level cross-Provider sweep
+iterations 54/55 exhausted. The gap found (Core's `quay mcp` GitHub
+aggregation path, self-documented in `mcp-server.test.mjs`'s own header as
+proven only once, by hand, at iteration 26) is a genuinely new angle — a
+different architectural layer, not a re-run of the exhausted CLI sweep.
+Having now closed both the CLI-layer and MCP-layer cross-Provider
+read-path gaps, future iterations should look for a still-different angle
+(negative/error-path coverage, a new tool/subcommand, or documentation
+drift) rather than assuming further gaps of either now-exhausted shape
+remain.

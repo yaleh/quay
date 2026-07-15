@@ -45,6 +45,26 @@
 //      run` subcommands already could. action_run supports the DIR-009
 //      mock/file-log delivery mode via an explicit `mockLogPath` tool
 //      argument, so this test never depends on live manda delivery.
+//   7. (QN-060) live cross-Provider (GitHub) aggregation through the ONE
+//      `quay mcp` endpoint -- point 2 above deliberately used a second
+//      local/isolated native Provider instead of live GitHub "so the test
+//      suite has zero external-network dependency," and explicitly deferred
+//      the real github+live-repo aggregation proof to a one-time, by-hand
+//      check (iteration 26, never captured as an automated regression
+//      test). This mirrors, at the MCP layer, the exact CLI-layer gap
+//      iterations 54/55 closed for bin/quay.js's own `--provider github`
+//      subcommands (action run; task view/action list/task check) -- this
+//      is the analogous MCP-level gap the same systematic-sweep discipline
+//      surfaces. Block 10 below adds `task_list`/`task_get`/`task_check`/
+//      `action_list`, all `provider: "github"`, against the real, live
+//      `yaleh/quay` issue gh-3, through the real `quay mcp` subprocess (not
+//      a direct `quay-github mcp` spawn -- the aggregation/fan-out path
+//      itself is what's under test). `task_write`/`action_run` remain
+//      excluded for GitHub in this block, matching `write.test.mjs`'s own
+//      precedent (this repo's real issue count is too small/precious to
+//      safely target with destructive live writes in an automated,
+//      repeatable test file) and iteration 55's identical CLI-layer
+//      exclusion of `task edit --provider github` for the same reason.
 //
 // Run: node test/mcp-server.test.mjs
 
@@ -60,6 +80,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const coreBin = path.join(__dirname, "..", "bin", "quay.js");
 const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
 const nativeProviderDir = path.dirname(nativeBin);
+const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.js");
+const githubProviderDir = path.dirname(githubBin);
 
 let failures = 0;
 function assert(cond, msg) {
@@ -338,6 +360,89 @@ async function main() {
   }
 
   await core.close();
+
+  // ---- 10. (QN-060) live cross-Provider (GitHub) aggregation through
+  //      `quay mcp`, against the real, live yaleh/quay issue gh-3 ----
+  // A separate workspace/config fixture (native + github both enabled) is
+  // used here rather than reusing the native/native-2 fixture above, so this
+  // block's real-network dependency is isolated to its own connection and
+  // cleanup, matching cli.test.mjs's own per-block github fixture convention
+  // (tests 8/10/11 there each stand up their own config.yml).
+  {
+    const ghWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-workspace-gh-"));
+    fs.mkdirSync(path.join(ghWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(ghWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir}"`,
+        `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${tasksDirA}"`,
+        "  github:",
+        "    enabled: true",
+        `    path: "${githubProviderDir}"`,
+        `    mcp_entry: ["node", "${githubBin}", "mcp"]`,
+        "    env:",
+        "      QUAY_GITHUB_REPO: \"yaleh/quay\"",
+        "",
+      ].join("\n")
+    );
+
+    const { client: coreGh, transport: coreGhTransport } = await connectStdio("node", [coreBin, "mcp"], ghWorkspaceRoot);
+
+    const tl = await coreGh.callTool({ name: "task_list", arguments: { provider: "github" } });
+    assert(
+      Array.isArray(tl.structuredContent?.tasks) && tl.structuredContent.tasks.length > 0,
+      "task_list via quay mcp (provider=github) returns real, non-empty task data aggregated live from the yaleh/quay repo"
+    );
+    assert(
+      tl.structuredContent.tasks.some((t) => t.id === "gh-3"),
+      "task_list via quay mcp (provider=github) includes the real, live gh-3 task"
+    );
+
+    const tg = await coreGh.callTool({ name: "task_get", arguments: { id: "gh-3", provider: "github" } });
+    assert(tg.structuredContent?.task?.id === "gh-3", "task_get via quay mcp (provider=github) returns gh-3's real id");
+    assert(
+      typeof tg.structuredContent?.task?.title === "string" && tg.structuredContent.task.title.length > 0,
+      "task_get via quay mcp (provider=github) returns a non-empty title read live from the real issue"
+    );
+    assert(
+      tg.structuredContent?.task?.status === "ready",
+      `task_get via quay mcp (provider=github) reflects gh-3's real live status (got ${tg.structuredContent?.task?.status})`
+    );
+
+    const tc = await coreGh.callTool({ name: "task_check", arguments: { id: "gh-3", provider: "github" } });
+    assert(tc.isError !== true, "task_check via quay mcp (provider=github) does not error for gh-3 (the gate itself may still report ok:false)");
+    assert(
+      tc.structuredContent?.ok === false,
+      `task_check via quay mcp (provider=github) reports ok:false for gh-3's real, currently-unchecked AC state (got ${JSON.stringify(tc.structuredContent)})`
+    );
+    assert(
+      typeof tc.structuredContent?.acTotal === "number" && typeof tc.structuredContent?.acChecked === "number",
+      "task_check via quay mcp (provider=github) reports real numeric acTotal/acChecked counts read live from the issue body"
+    );
+
+    const al = await coreGh.callTool({ name: "action_list", arguments: { id: "gh-3", provider: "github" } });
+    assert(
+      Array.isArray(al.structuredContent?.buttons) &&
+        al.structuredContent.buttons.some((b) => b.id === "advance"),
+      `action_list via quay mcp (provider=github) includes the "advance" button for gh-3 (its real live status is in the button's whenStatus); got ${JSON.stringify(al.structuredContent)}`
+    );
+
+    // task_write / action_run are deliberately NOT exercised against GitHub
+    // here -- both have a real `gh api` write path (github-client.js's
+    // setStatus()), and per write.test.mjs's own precedent (this repo's real
+    // issue count is too small/precious to safely target with destructive
+    // live writes in an automated, repeatable test file) and iteration 55's
+    // identical `task edit --provider github` CLI-layer exclusion, this
+    // exclusion is intentional, not an oversight.
+
+    await coreGh.close();
+    fs.rmSync(ghWorkspaceRoot, { recursive: true, force: true });
+  }
 
   // ---- Cleanup ----
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
