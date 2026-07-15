@@ -4024,3 +4024,28 @@ Diagnostic sub-metric:
 
 Up from 0.9730 at the end of iteration 28 (QN-039 and QN-040 both added
 to numerator and denominator).
+
+## Post-hoc correction (iteration 29's `completeness` score)
+
+The iteration-29 independent out-of-band audit
+(`experiment/audits/iteration-29-independent-adjudicate.md`) found that
+iteration 29's original `completeness` score (0.75, up +0.01 from 0.74,
+credited for QN-040's new "Core-scope work" section in
+`experiment/ITERATION-PROMPTS.md`) was an overclaim: `completeness` is
+protocol-scoped (§5.2) to `quay:author`/`quay:execute`'s own documented
+methodology, not this experiment's own iteration-guidance document.
+Iterations 20-28 consistently held `completeness` flat for anything
+outside SKILL.md Method-step content, and iteration 10 set a directly
+on-point precedent — revising this very file (`ITERATION-PROMPTS.md`)
+and explicitly holding `completeness` flat for the same reason. Corrected:
+`completeness` remains **0.74** (unchanged) at the end of iteration 29;
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = **0.0973**, unchanged from iteration
+28 (ΔV_meta = 0.0000, not the originally-claimed +0.0013). This also means
+convergence criterion 5's "2 consecutive iterations with ΔV < 0.02"
+finding is unaffected (ΔV_meta = 0.0000 either way, still < 0.02) — only
+the "first nonzero V_meta movement since iteration 25" framing is
+retracted. `experiment/iterations/iteration-29.md` has been corrected in
+place (§8, §10) to reflect this. QN-040's own work (processing DIR-008,
+adding the new constraints section) stands as genuine, valuable
+experiment-process work — it simply does not move any V_meta factor, per
+the protocol's scoping and this project's established precedent.

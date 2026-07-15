@@ -354,21 +354,24 @@ iteration-25 correction was built to prevent.
 V_meta = completeness × effectiveness × reusability × validation
 ```
 
-- **completeness: 0.75 (up from 0.74, +0.01).** QN-040 is the first
-  iteration since the standing-guardrail set (G1-G6) itself was ratified
-  to add a **new, durable, standing-methodology-content section** to
-  `experiment/ITERATION-PROMPTS.md` — not a Gaps-history narrative entry
-  (which iterations 26-28 correctly held flat for `quay:execute`'s
-  SKILL.md), but a genuinely new piece of the orchestration methodology's
-  own documented procedure: a standing constraint set that will bind
-  every future Core-scope task, the same way §0's preconditions checklist
-  and §Stage 2+'s scoping rules already bind their respective triggers.
-  This is squarely what `completeness` measures (protocol §5.2: the
-  orchestration Skills' and gate's own documented methodology
-  completeness) — a small, genuine, evidence-based increment, not a
-  narrative/history addition. Scored conservatively (+0.01, not larger):
-  the addition is one bounded section addressing one specific scope
-  (Core-touching tasks), not a broad methodology gap closure.
+- **completeness: 0.74 (unchanged) — CORRECTED post-audit, see note
+  below.** ~~Original text scored this +0.01 (0.74→0.75), reasoning that
+  the new "Core-scope work" section in `ITERATION-PROMPTS.md` was a
+  genuinely new piece of standing methodology content.~~ The iteration-29
+  independent audit (`experiment/audits/iteration-29-independent-
+  adjudicate.md`) found this conflicts with a consistently-applied,
+  9+-iteration precedent (iterations 20-28) holding `completeness` flat
+  for anything outside `quay:author`/`quay:execute`'s own SKILL.md
+  Method-step content — and, specifically, with iteration 10's own
+  directly-on-point precedent, which revised this exact file
+  (`ITERATION-PROMPTS.md`) and explicitly held `completeness` flat with
+  the reasoning "No new Skill or gate-mechanism gap was closed this
+  iteration." Protocol §5.2 scopes `completeness` to the orchestration
+  Skills'/gate's own documented methodology, not the experiment-process
+  guidance document that drives *this* BAIME experiment's own iteration
+  loop (a different artifact, per §8/§10). Corrected to remain flat at
+  0.74, consistent with iteration 10's precedent and the unbroken
+  iterations-20-28 convention.
 - **effectiveness: 0.26 (unchanged).** Neither QN-039 nor QN-040 is
   Skill-orchestration-timing-shaped work comparable to the stage-0 QN-006
   baseline — QN-039 is test-authoring/debugging work, QN-040 is
@@ -388,16 +391,18 @@ V_meta = completeness × effectiveness × reusability × validation
   flat pending that audit, not self-simulated.
 
 ```
-V_meta = 0.75 × 0.26 × 0.79 × 0.64 = 0.0986
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973
 ```
 
-ΔV_meta = **+0.0013** (up from 0.0973). The first nonzero V_meta movement
-since iteration 25 (protocol-methodology-content growth via
-`completeness`, not a Skill-orchestration-timing or Provider-transfer
-event) — small, and honestly bounded to reflect the narrow, single-
-section scope of QN-040's own contribution, not the broader Core-scope
-verification work the underlying discussion document raised (which
-remains future, separately-directived work per DIR-008's own explicit
+ΔV_meta = **0.0000** (unchanged from iteration 28), corrected post-audit.
+~~The original report claimed +0.0013, the first nonzero V_meta movement
+since iteration 25.~~ That claim does not survive the `completeness`
+correction above: V_meta remains exactly what it was at the end of
+iteration 28. QN-040's genuine contribution (a real, DIR-008-driven
+addition to `ITERATION-PROMPTS.md`) stands on its own merits as
+experiment-process work, but per protocol §5.2's own scoping and this
+project's established precedent, it does not move any V_meta factor
+(which remains future, separately-directived work per DIR-008's own explicit
 item 5).
 
 ## 9. Out-of-band audit
@@ -451,8 +456,9 @@ points**, named explicitly for the next audit to check independently:
 ## 10. Convergence Check
 
 - [ ] **1. Dual threshold (V_instance ≥ 0.80 AND V_meta ≥ 0.80)** — **NO.**
-      V_instance = 0.4595 (unchanged), V_meta = 0.0986 (up slightly).
-      Both remain far below 0.80.
+      V_instance = 0.4595 (unchanged), V_meta = 0.0973 (unchanged,
+      corrected post-audit — see `completeness` note in §8). Both remain
+      far below 0.80.
 - [ ] **2. Self-hosting fixpoint (σ→1, zero-seed build, stable Skill set +
       gate)** — **NO.** σ (strict) = 0.8205, up from 0.8108, still far
       from 1. The Skill set's own documented procedure gained one new
@@ -478,8 +484,9 @@ points**, named explicitly for the next audit to check independently:
 - [ ] **5. Diminishing returns (ΔV < 0.02 for 2+ iterations)** — **YES
       for a 2-iteration run, the first time this has been literally
       satisfied.** ΔV_instance = 0.0000 this iteration (< 0.02) and
-      ΔV_meta = +0.0013 this iteration (< 0.02); iteration 28's own
-      ΔV_instance = 0.0000 and ΔV_meta = 0.0000 (both also < 0.02). This
+      ΔV_meta = 0.0000 this iteration (< 0.02, corrected post-audit —
+      see `completeness` note in §8); iteration 28's own ΔV_instance =
+      0.0000 and ΔV_meta = 0.0000 (both also < 0.02). This
       is now **2 consecutive iterations (28, 29)** with both ΔV values
       under the 0.02 threshold — the literal "2+ iterations" wording of
       criterion 5 is satisfied for the first time in this ledger.
@@ -488,7 +495,7 @@ points**, named explicitly for the next audit to check independently:
       criteria that must **all** hold simultaneously for convergence
       (protocol §7's "all must hold" framing) — diminishing returns on
       an absolute-value scale this far below the 0.80 threshold (V_meta
-      = 0.0986) reflects a value function that has been essentially flat
+      = 0.0973) reflects a value function that has been essentially flat
       near its own floor for several iterations, not a system approaching
       its target and leveling off there. Recorded honestly as
       criterion-5-as-literally-stated being met, while flagging this
