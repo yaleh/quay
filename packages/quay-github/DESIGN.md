@@ -7,7 +7,9 @@
   see §5/§3.5/§3.6 and `provider.yml`'s own inline comments for the
   current, honest scope of each. `skill` required a real fix one layer
   below `provider.yml` itself — see §3.6 for why a config-only
-  declaration would have been dishonest.
+  declaration would have been dishonest. This Provider's own MCP stdio
+  transport (`src/mcp-server.js`) gained its first dedicated regression
+  test at iteration 37 (QN-048) — see §3.7.
 - **Scope:** the GitHub Provider — second real backend, proves the ABI
   transfers to a heterogeneous store (proposal §14, protocol §10.1). See
   `tasks/QN-002.md` for the original read-only Proposal/Plan/AC/DoD, and
@@ -352,6 +354,47 @@ Method's `write-proposal` step (`quay task view <id> --provider github
 confirming the Skill's own documented steps — not a hand-simulated
 substitute — correctly reach quay-github when told `provider: github`.
 See `experiment/iterations/iteration-18.md` for the full transcript.
+
+### 3.7 MCP stdio transport regression coverage (iteration 37, QN-048)
+
+**Gap closed, named honestly since iteration 24's own problem list:**
+`src/mcp-server.js` (this Provider's own MCP stdio transport —
+`provider://manifest`, `task_list`, `task_get`, `task_write`, `task_check`)
+had **zero automated test coverage** through iteration 36 — the sibling gap
+to QN-034 (iteration 24), which closed the identical class of gap for this
+package's CLI dispatch layer (`bin/quay-github.js`) but explicitly named
+"the `mcp` subcommand (starting the stdio MCP transport)" as out of scope,
+"for its different (long-running, stdio-server) process-lifecycle shape."
+Iteration 24's own problem list predicted this exact task would require
+"managing a long-running stdio server process's lifecycle, not just
+spawning a CLI command and reading its exit code/stdout."
+
+**Closed via `packages/quay-github/test/mcp-server.test.mjs`** (iteration
+37, QN-048): spawns the real `bin/quay-github.js mcp` subprocess via a real
+MCP client (`StdioClientTransport`, same SDK pattern as
+`packages/quay/test/mcp-server.test.mjs`), live against the real
+`yaleh/quay` repo, asserting: resource enumeration (`provider://manifest`,
+correct `name` field), `task_list` (includes the real open issues gh-3/
+gh-4), `task_get` for `gh-3` (cross-checked byte-identical against the
+direct CLI's own `task get gh-3 --json` output), `task_get`/`task_write`
+for an unknown id (both `isError:true`, not a crash), and `task_check` for
+both `gh-3` and `gh-4` (cross-checked byte-identical against the direct
+CLI's own `task check <id> --json` output for each). Same live-repo
+discipline already established by this package's `write.test.mjs`/
+`cli.test.mjs`: the one write-capable tool (`task_write`) is exercised
+**only** via its unknown-id error path, which returns before
+`client.setStatus` is ever reached — no live write to any real GitHub
+issue ever occurs (`gh issue list --repo yaleh/quay` re-run after this
+task's completion confirmed byte-identical state to before it started).
+
+**Zero source-code change** — this is a pure test-addition, mirroring
+QN-030 through QN-034's own precedent shape: `mcp-server.js` itself is
+unmodified (confirmed via `git diff --stat`). An adversarial break/restore
+cycle (inverting `task_check`'s `structuredContent: result` line to negate
+`ok`) produced exactly 2 live FAILs, confirming the new test has real
+teeth; restoring produced a byte-identical diff and a full green re-run.
+
+Covered by `test/mcp-server.test.mjs`.
 
 ## 4. What transferred cleanly vs. what required backend-specific work
 

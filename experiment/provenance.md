@@ -4911,3 +4911,201 @@ is real and is reflected in the convergence-criterion-3 narrative, but —
 per the same discipline iteration 28 itself applied — a criterion-3
 narrative movement is not, by itself, one of the eight precisely-defined
 V-factor axes, and is not forced into one here.
+
+## Records (as of end of iteration 37)
+
+`experiment/directives/pending/` was checked first, per mandatory
+instruction, and confirmed **empty** (verified via `ls`). Self-selected
+work was scoped by a systematic search for a genuine, un-manufactured
+gap: grepping every `*.test.mjs` file across all three packages for any
+reference to `quay-github`'s own `src/mcp-server.js` or a subprocess
+spawn of `bin/quay-github.js mcp` returned **zero hits** —
+`packages/quay/test/mcp-server.test.mjs` exists for Core's own MCP
+transport, and `packages/quay-native/src/mcp-server.js` is exercised by
+`abi-symmetry.mjs`, but `quay-github`'s own MCP stdio transport (the
+GitHub Provider's `provider://manifest`, `task_list`, `task_get`,
+`task_write`, `task_check` tools) had never been spawned as a real
+subprocess with a real MCP client in any test file. This is the exact
+gap **QN-034/iteration 24** explicitly named as out of scope for its own
+CLI-dispatch-layer closure ("the `mcp` subcommand (starting the stdio
+MCP transport)"), and which iteration 24's own "Problems identified for
+next iteration" section explicitly predicted as the next, harder
+candidate for this package.
+
+**What closes the gap this iteration (QN-048):** a new file,
+`packages/quay-github/test/mcp-server.test.mjs`, was written mirroring
+`packages/quay/test/mcp-server.test.mjs`'s established pattern
+(`StdioClientTransport` spawning the real `bin/quay-github.js mcp`
+subprocess, `QUAY_GITHUB_REPO=yaleh/quay`). It asserts: resource
+enumeration (`provider://manifest`, non-empty `name` field, resolves to
+`id === "github"`); `task_list` includes the real, currently-open issues
+`gh-3`/`gh-4`; `task_get('gh-3')` is byte-identical to the direct CLI's
+own `task get gh-3 --json` output; `task_get` for an unknown id returns
+`isError:true`; `task_check` for both `gh-3` and `gh-4` is byte-identical
+to the direct CLI's own `task check <id> --json` output; and
+`task_write` for an unknown id returns `isError:true` — the **only**
+`task_write` call the file ever makes, so `client.setStatus` is never
+reached with a real, existing task id and no live write to any real
+GitHub issue occurs, following the same live-repo write-avoidance
+discipline already established by this package's own
+`write.test.mjs`/`cli.test.mjs`.
+
+The adversarial break/restore cycle was performed live: `structuredContent:
+result` on `task_check`'s handler (source line, `src/mcp-server.js`) was
+changed to `structuredContent: { ...result, ok: !result.ok }`, producing
+two live FAILs (`task_check('gh-3')`/`task_check('gh-4')` byte-identity
+assertions), then the file was restored via `cp` from a backup and
+confirmed byte-identical to the pre-edit original via `diff` (empty
+output) and `git diff --stat -- packages/quay-github/src/mcp-server.js`
+(empty). The full regression suite (24 `*.test.mjs` files across all
+three packages, plus `abi-symmetry.mjs`) was re-run after the new file
+was added and passed with zero regressions. `gh issue list --repo
+yaleh/quay --state all --json ...` re-run after this task completes shows
+the same 2 open issues (`#3`, `#4`), same labels, same body content as
+before this task started — confirming no accidental live write occurred.
+
+`packages/quay-github/DESIGN.md` updated in place: new §3.7 "MCP stdio
+transport regression coverage (iteration 37, QN-048)" inserted between
+the existing §3.6 and §4, documenting the gap closed, what was built, the
+live-repo write-avoidance discipline followed, the zero-source-change
+confirmation, and the adversarial break/restore result.
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-048 | Regression test for quay-github's own MCP stdio transport (`src/mcp-server.js`), live against real `yaleh/quay` issues #3/#4 | **native** | **native** | **native** | **done** |
+
+**Honesty note on QN-048's lifecycle execution.** As with every task
+since the seed's author/execute retirement, "native" here means the
+`quay-native` CLI's mechanical `task check` gate was genuinely invoked at
+both the author→ready and execute→done transitions (both returned
+`ok:true`, confirmed via direct command output — 4/4 AC items checked —
+not estimated), and the task file itself was authored and driven through
+its lifecycle using `quay-native task create`/`task edit`/`task check`
+rather than hand-edited frontmatter status. It does NOT mean an
+independent, fresh-context subagent performed the authoring or execution
+work in isolation from this top-level session — this environment still
+has no verified subagent-dispatch primitive (confirmed via `ToolSearch`
+this iteration, per G6), so "native" continues to describe the
+degraded-fallback mode already documented for every prior "native" entry
+since iteration ~15: the same top-level session performs the work
+directly, then invokes the real `quay-native` gate mechanically and
+honestly reports its actual JSON output.
+
+## σ computation — iteration 37
+
+Total allocated task IDs verified via actual command:
+
+```
+ls tasks/QN-*.md | wc -l   -> 47
+```
+
+(QN-001 through QN-048, minus QN-018, never allocated.)
+
+- σ (strict reading: author_by = execute_by = gate_by = native AND status
+  = done) = 40 / 47 = **0.8511** (up from 39/46 = 0.8478 at the end of
+  iteration 36; Δσ = +0.0033).
+- σ (inclusive reading: strict set plus QN-003/QN-004's gate-check-only
+  re-verification cases) = 42 / 47 = **0.8936**.
+- σ_author_only (diagnostic: author_by = native regardless of
+  execute_by/gate_by) = 46 / 47 = **0.9787**.
+
+Δσ (strict) = +0.0033 is consistent with the recent per-iteration norm of
+small, monotonic σ growth from a single new native-triple `done` task
+against a growing denominator; it is not, on its own, evidence bearing on
+any convergence criterion beyond what iteration-37.md §10 evaluates
+directly.
+
+## V-factor attribution — iteration 37 (precedent-derived)
+
+Per the standing discipline (quote the exact defining language, search
+all of `provenance.md` for the closest precedent, read that precedent's
+full reasoning in full THIS session, and check whether a closer precedent
+maps to a different factor before crediting), the closest — and
+directly on-point — precedent for this iteration's work is **iteration
+24 (QN-034)**, read in full this iteration
+(`experiment/iterations/iteration-24.md`, offsets 445-600 and 751-800).
+QN-034 closed the identical class of gap (a test-coverage-only
+regression-test addition for `bin/quay-github.js`'s CLI dispatch layer,
+live against the same real `yaleh/quay` issues #3/#4, zero source-code
+change) and its own reasoning, read verbatim this iteration, scored:
+`skeleton` +0.01 (0.64→0.65, "a genuinely new regression-test file
+closing a previously-real, zero-coverage gap in an existing dispatch
+loop — the same magnitude and shape as QN-030/032/033's own test-only
+additions"); `reusability` held **flat** (0.68, unchanged), with explicit
+reasoning that a test-coverage-only addition to an *already-existing*
+GitHub-Provider capability is not "methodology transfer" evidence (no new
+capability was built via quay-native *driving* GitHub-Provider
+construction — the actual scope `reusability` measures per protocol
+§5.2); and `effectiveness` explicitly **not measured** from this task's
+own timing data, reasoning that a task with a live external-network
+dependency (`gh api` calls) timed against the stage-0 seed comparator
+conflates methodology speedup with network-I/O latency variance, which is
+orthogonal to what `effectiveness` measures (the confound iteration 24
+itself first identified and named).
+
+This iteration's QN-048 is the exact sibling event QN-034 explicitly
+predicted and scoped around, one layer harder (MCP stdio transport
+process-lifecycle shape, rather than direct CLI dispatch) but otherwise
+identical in kind: a test-coverage-only regression-test addition,
+live-repo-constrained, for an *already-existing*, unmodified capability
+(`git diff --stat -- packages/quay-github/src/mcp-server.js` confirmed
+empty after the adversarial break/restore cycle — the capability itself
+is byte-identical to before this task started). Applying iteration 24's
+own precedent directly:
+
+- **`skeleton`**: credited **+0.01 (0.69 → 0.70)**, matching QN-034's own
+  magnitude and reasoning exactly — a genuinely new regression-test file
+  closing a previously-real, zero-coverage gap in an existing
+  process-lifecycle loop (the MCP stdio server's tool/resource dispatch),
+  the same shape as QN-030/032/033/034's own test-only additions.
+- **`reusability`**: held **flat (0.79)**. QN-048 adds test coverage to
+  an already-existing GitHub-Provider capability (`src/mcp-server.js`,
+  built at an earlier iteration); it does not build a *new* capability via
+  quay-native *driving* GitHub-Provider construction, which is the
+  precise "methodology transfer" scope `reusability` measures (protocol
+  §5.2, reinforced by iteration 24's own reasoning for the analogous
+  QN-034). Crediting this would repeat exactly the kind of
+  precedent-blind overclaim the session's prior six post-hoc corrections
+  (iterations 25, 29, 31, 33, 34, 35) were about.
+- **`effectiveness`**: held **flat (0.26)**. Timing data was recorded
+  (`experiment/timing/iteration-37.log`: author-create→execute-done span
+  3m07s/187s) for completeness, but per iteration 24's own explicit,
+  directly-applicable reasoning, a task with a live external-network
+  dependency (`gh api` calls against real issues `gh-3`/`gh-4`) is not a
+  valid comparator against the stage-0 seed baseline — the confound is
+  network-I/O latency variance, not methodology signal. Repeating
+  iteration 24's own conclusion for the same fact pattern, not a fresh
+  judgment call.
+- **`abi_symmetry`**: held **flat (0.96)**. No new Core-level CLI/MCP/
+  Web-UI schema-or-content-equivalence proof was produced this iteration
+  (constraint 4(b)); `abi-symmetry.mjs` was re-run unchanged and still
+  reports "ALL FOUR SURFACES SYMMETRIC". Not implicated.
+- **`gate_correctness`**: held **flat (0.76)**. No gate-logic change to
+  `store.js`/`github-client.js`'s `checkGate()`; QN-048's own `task_check`
+  assertions cross-check existing, unmodified gate output, they do not
+  change it.
+
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = **0.4903** (up from 0.4833;
+ΔV_instance = **+0.0070**).
+
+- **`completeness`**: held **flat (0.74)**. Matching iteration 24's own
+  reasoning for QN-034 verbatim ("documents a test-coverage gap closure
+  for existing CLI dispatch behavior, not new orchestration-Skill
+  methodology content... conservatively not counted toward
+  completeness"): QN-048 documents a test-coverage gap closure for
+  existing MCP-transport behavior, not new orchestration-Skill
+  methodology content. `packages/quay-github/DESIGN.md` §3.7 records the
+  closure but does not introduce new reusable Skill/methodology guidance.
+- **`effectiveness`** (meta layer): held **flat (0.26)**, same reasoning
+  as the instance-layer factor above — the 16-consecutive-iteration
+  plateau is not broken this iteration; this iteration's self-selected
+  work, while real, is not Skill-orchestration-timing-shaped work free of
+  the network-I/O confound, and no such work was found or fabricated.
+- **`reusability`** (meta layer): held **flat (0.79)**, same reasoning as
+  the instance-layer factor above.
+- **`validation`**: held **flat (0.64)**, per standing convention —
+  credited only after the out-of-band audit for this iteration's own work
+  occurs (next iteration), not self-assessed.
+
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = **0.0973** (unchanged; ΔV_meta =
+0.0000).

@@ -1,0 +1,134 @@
+// QN-048 (iteration 37): regression test for quay-github's own MCP stdio
+// transport (packages/quay-github/src/mcp-server.js, wired into
+// bin/quay-github.js's `mcp` subcommand). Sibling gap to QN-034 (iteration
+// 24), which closed the identical class of gap for quay-github.js's CLI
+// dispatch layer but explicitly named "the `mcp` subcommand (starting the
+// stdio MCP transport)" as out of scope for that task -- this file closes
+// exactly that named residual. Also the GitHub-Provider-side sibling of
+// packages/quay/test/mcp-server.test.mjs (Core's own MCP transport test).
+//
+// Same live-repo constraint already established by this package's own
+// write.test.mjs/cli.test.mjs header comments: the real yaleh/quay issue
+// backlog is too small/precious to target with destructive live writes in
+// an automated, repeatable test file. This file spawns the real
+// `bin/quay-github.js mcp` subprocess via a real MCP client
+// (StdioClientTransport) and exercises only:
+//   1. provider://manifest resource enumeration (correct `name` field).
+//   2. task_list (json array, includes real issues #3/#4).
+//   3. task_get for gh-3, cross-checked byte-identical against the direct
+//      CLI's own `task get gh-3 --json` output.
+//   4. task_get for an unknown id (isError:true, not a crash).
+//   5. task_check for gh-3 and gh-4, cross-checked byte-identical against
+//      the direct CLI's own `task check <id> --json` output for both.
+//   6. task_write for an unknown id (isError:true) -- the only task_write
+//      call this file ever makes; client.setStatus is never reached with a
+//      real, existing task id, so no live write to any real GitHub issue
+//      ever occurs.
+//
+// Run: node test/mcp-server.test.mjs
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const bin = path.join(__dirname, "..", "bin", "quay-github.js");
+const repoEnv = { ...process.env, QUAY_GITHUB_REPO: "yaleh/quay" };
+
+let failures = 0;
+function assert(cond, msg) {
+  if (!cond) {
+    failures++;
+    console.error(`FAIL: ${msg}`);
+  } else {
+    console.log(`PASS: ${msg}`);
+  }
+}
+
+function cliJson(args) {
+  const out = execFileSync("node", [bin, ...args], { env: repoEnv, encoding: "utf8" });
+  return JSON.parse(out);
+}
+
+async function main() {
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [bin, "mcp"],
+    cwd: __dirname,
+    env: repoEnv,
+  });
+  const client = new Client({ name: "test-agent", version: "0.0.1" });
+  await client.connect(transport);
+
+  // ---- 1. Resource enumeration ----
+  const resources = await client.listResources();
+  const uris = resources.resources.map((r) => r.uri).sort();
+  assert(uris.includes("provider://manifest"), "quay-github mcp lists provider://manifest");
+  const entry = resources.resources.find((r) => r.uri === "provider://manifest");
+  assert(
+    typeof entry?.name === "string" && entry.name.length > 0,
+    `provider://manifest's listed entry carries a non-empty name field (got: ${JSON.stringify(entry)})`
+  );
+  const manifestRead = await client.readResource({ uri: "provider://manifest" });
+  const manifestJson = JSON.parse(manifestRead.contents[0].text);
+  assert(manifestJson.id === "github", `provider://manifest resolves to this Provider's own declared id (got: ${manifestJson.id})`);
+
+  // ---- 2. task_list ----
+  const listResult = await client.callTool({ name: "task_list", arguments: {} });
+  const ids = listResult.structuredContent.tasks.map((t) => t.id).sort();
+  assert(ids.includes("gh-3") && ids.includes("gh-4"), `task_list includes the real, currently-open issues gh-3 and gh-4 (got: ${JSON.stringify(ids)})`);
+
+  // ---- 3. task_get for gh-3, cross-checked against the direct CLI ----
+  {
+    const viaMcp = await client.callTool({ name: "task_get", arguments: { id: "gh-3" } });
+    const viaCli = cliJson(["task", "get", "gh-3", "--json"]);
+    assert(
+      JSON.stringify(viaMcp.structuredContent.task) === JSON.stringify(viaCli),
+      "task_get('gh-3') via quay-github mcp is byte-identical to the direct CLI's own `task get gh-3 --json` output"
+    );
+  }
+
+  // ---- 4. task_get for an unknown id ----
+  {
+    const r = await client.callTool({ name: "task_get", arguments: { id: "gh-999999" } });
+    assert(r.isError === true, "task_get with an unknown id returns isError:true, not a crash");
+  }
+
+  // ---- 5. task_check for gh-3 and gh-4, cross-checked against the direct CLI ----
+  for (const id of ["gh-3", "gh-4"]) {
+    const viaMcp = await client.callTool({ name: "task_check", arguments: { id } });
+    let viaCli;
+    try {
+      viaCli = cliJson(["task", "check", id, "--json"]);
+    } catch (err) {
+      // the direct CLI sets process.exitCode = 1 on ok:false, which makes
+      // execFileSync throw; stdout is still captured on err.stdout.
+      viaCli = JSON.parse(err.stdout.toString());
+    }
+    assert(
+      JSON.stringify(viaMcp.structuredContent) === JSON.stringify(viaCli),
+      `task_check('${id}') via quay-github mcp is byte-identical to the direct CLI's own \`task check ${id} --json\` output (mcp: ${JSON.stringify(viaMcp.structuredContent)}, cli: ${JSON.stringify(viaCli)})`
+    );
+  }
+
+  // ---- 6. task_write for an unknown id only -- no real write ever attempted ----
+  {
+    const r = await client.callTool({ name: "task_write", arguments: { id: "gh-999999", status: "ready" } });
+    assert(r.isError === true, "task_write with an unknown id returns isError:true, not a crash (this is the ONLY task_write call this file makes -- no live status write to a real issue ever occurs)");
+  }
+
+  await client.close();
+
+  if (failures > 0) {
+    console.error(`\n${failures} FAILURE(S)`);
+    process.exitCode = 1;
+  } else {
+    console.log("\nAll QN-048 quay-github MCP server tests passed.");
+  }
+}
+
+main().catch((err) => {
+  console.error(err.stack || String(err));
+  process.exitCode = 1;
+});
