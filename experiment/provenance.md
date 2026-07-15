@@ -8210,3 +8210,166 @@ with real new test code — this would be a legitimate, non-manufactured
 deliberately (not merely to manufacture a data point, consistent with
 G5), since it is a real, previously-uncredited gap this correction
 discovered rather than one invented to produce work.
+
+## Iteration 54 — close the audit-discovered `action run --provider github` test-coverage gap (QN-058); skeleton +0.01
+
+### Preconditions checked
+
+`experiment/directives/pending/` confirmed **empty** via `ls`. `git status
+--short` confirmed clean modulo the one pre-existing, deliberately-
+untouched `docs/proposal/baime-lite-driving-external-projects.md`. `ls
+tasks/QN-*.md | wc -l` confirmed **56** before this iteration's work.
+`docs/proposal/quay-bootstrap-experiment.md` (233 lines, gitignored),
+`experiment/ITERATION-PROMPTS.md`, `experiment/iterations/iteration-53.md`
+(including its post-hoc correction strikethroughs), and the tail of this
+file (including the full "Post-hoc correction (iteration 53 audit)"
+section) were all read fresh this session.
+
+### Observe
+
+Independently re-confirmed the gap iteration 53's correction surfaced:
+`grep -n "provider github\|--provider github" packages/quay/test/cli.test.mjs`
+confirmed test 8 (line ~307) exercises only `task list --provider
+github`; no `action run` invocation with `--provider github` exists
+anywhere in the suite. Manually exercised the real end-to-end target
+before writing test code:
+
+```
+$ gh issue list --repo yaleh/quay --state all --json number,title,state,labels
+```
+confirmed issue #3 (task id `gh-3`) carries `status:ready`, OPEN.
+
+```
+$ node packages/quay/bin/quay.js action run gh-3 advance --json --provider github
+```
+(ad-hoc manual run) confirmed the full real chain works: `taskId:
+"gh-3"`, `status: "ready"`, `skill: "quay:execute"`, `channel:
+"task-gh-3"`. Then re-ran with `QUAY_ACTION_MOCK_LOG` set, confirming
+deterministic, side-effect-free delivery works for this cross-Provider
+path too (previously only proven for native in
+`action-mock-delivery.test.mjs`).
+
+### Strategy
+
+Added a new test block (test 10) to `packages/quay/test/cli.test.mjs`
+(the natural, minimal-footprint location — it already houses the sibling
+`--provider github` test 8 and the native `action run` test 6), against
+real issue `gh-3` (genuine, non-fixture, currently-OPEN) rather than a
+fresh disposable issue, since `gh-3` already has the exact state needed.
+
+### Execution
+
+Test 10 spawns `bin/quay.js action run gh-3 advance --json --provider
+github` for real, with `QUAY_ACTION_MOCK_LOG` set to a fresh temp path,
+asserting: exit 0; parseable JSON; `taskId === "gh-3"`; `status ===
+"ready" && skill === "quay:execute"`; `channel === "task-gh-3"`;
+`delivered === "mock"`; and independently re-reading the on-disk mock
+delivery log record to confirm its fields, not just trusting the CLI's
+own `--json` echo.
+
+```
+$ node --test packages/*/test/*.test.mjs
+...
+ℹ tests 25
+ℹ pass 25
+ℹ fail 0
+```
+
+```
+$ node packages/quay-native/test/abi-symmetry.mjs
+...
+ALL FOUR SURFACES SYMMETRIC
+```
+
+```
+$ git diff --stat -- packages/
+ packages/quay/test/cli.test.mjs | 108 ++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 107 insertions(+), 1 deletion(-)
+```
+Test-file-only change; no `src/*.js` touched.
+
+### σ computation — iteration 54: QN-058
+
+Created `tasks/QN-058.md`, gated `author->ready` (`ok:true`, all four
+artifacts present), transitioned `todo -> ready`, gated `execute->done`
+(`ok:true`, 4/4 AC checked), transitioned `ready -> done`.
+
+```
+$ ls tasks/QN-*.md | wc -l
+57
+```
+(QN-001 through QN-058, minus QN-018, never allocated.)
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-058 | Add end-to-end action-run test for --provider github (real GitHub-backed task) | **native** | **native** | **native** | **done** |
+
+σ (strict) = 50 / 57 = **0.8772** (up from 49/56 = 0.8750; Δσ = +0.0022).
+σ_author_only (diagnostic) = 57 / 57 = **1.0000** (unchanged shape).
+
+### V-factor attribution — iteration 54 (precedent-derived: QN-034/QN-048)
+
+Closest, directly on-point precedent: **iteration 37 (QN-048)**, itself
+following **iteration 24 (QN-034)** — both read in full this session.
+Both closed a test-coverage-only regression-test gap for an already-
+existing, unmodified capability, live against real `yaleh/quay` issues,
+zero source-code change, and both scored `skeleton +0.01` while holding
+`gate_correctness`/`reusability`/`effectiveness`/`completeness` flat
+(with explicit reasoning for each). QN-058 is structurally identical in
+kind. Applying the precedent directly:
+
+- **skeleton**: credited **+0.01 (0.70 → 0.71)** — a genuinely new
+  regression-test file closing a previously-real, zero-coverage gap in
+  the `action` stage of the v0 loop's own end-to-end chain (§5.1), its
+  cross-Provider (GitHub) instantiation specifically. `gate_correctness`/
+  `reusability` were explicitly considered (the iteration-53 correction's
+  own text flagged them as "likely") but the QN-034/QN-048 precedent is
+  more directly on-point and argues for `skeleton`, not those two.
+- **abi_symmetry**: held flat at **0.96** (no ABI schema/shape change;
+  `abi-symmetry.mjs` re-confirmed symmetric).
+- **gate_correctness**: held flat at **0.76** (no `checkGate()`/`store.js`/
+  `github-client.js` gate-logic change; QN-034/QN-048's own precedent:
+  test assertions cross-check existing gate output, do not change it).
+- **skill_convergence**: held flat at **0.96** (no SKILL.md content
+  changed).
+
+```
+V_instance = 0.71 × 0.96 × 0.76 × 0.96 = 0.4973  (up from 0.4903)
+```
+ΔV_instance = **+0.0070**.
+
+- **completeness**: held flat at **0.74** (QN-034/QN-048 precedent:
+  documents a test-coverage gap closure for existing behavior, not new
+  orchestration-Skill methodology content).
+- **effectiveness**: held flat at **0.26**. QN-058 *was* built via
+  `quay:author`/`quay:execute` driving a real task to `done` this
+  iteration — but per QN-034/QN-048's own explicit reasoning, this task
+  has a live external-network dependency (`gh api` calls against real
+  issue `gh-3`), so timing it against the stage-0 seed comparator would
+  conflate methodology speedup with network-I/O latency variance. Now
+  34 consecutive iterations (21-53, and now 54) the *value* is held flat,
+  though this iteration did build/gate a real task (a nuance from the
+  pure "no task built" framing of the prior streak).
+- **reusability**: held flat at **0.79** (QN-034/QN-048 precedent: a
+  test-coverage-only addition to an already-existing cross-Provider
+  capability is not "methodology transfer" evidence — no new capability
+  was built via quay-native *driving* GitHub-Provider construction). Now
+  the **twenty-ninth consecutive iteration (26-54)**.
+- **validation**: held flat at **0.64** (no audit yet exists for this
+  iteration's own work).
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+ΔV_meta = **0.0000**.
+
+### Discipline note
+
+Every command-output claim in this iteration's report was actually
+executed this session, with real output quoted verbatim in
+`experiment/iterations/iteration-54.md`. The new test's specific
+citations (exact PASS lines, `gh-3`'s live `status:ready` label, the
+mock delivery log content) were independently re-verified via fresh
+command output, not carried forward from the iteration-53 correction's
+text alone — directly applying that correction's own added discipline
+(read the full test body / actual live state before asserting coverage).

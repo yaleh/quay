@@ -37,12 +37,23 @@
 // (test 9 below, spawning `bin/quay.js serve --port <n>` for real). Neither
 // is silently claimed as covered elsewhere any more — see tests 8 and 9.
 //
+// Iteration 54 (post-hoc correction from iteration 53's audit) added test
+// 10: iteration 53 had falsely claimed test 8 already end-to-end tested
+// `action run --provider github` against a real GitHub-backed task — it
+// does not; test 8 only exercises `task list`. A repo-wide search at that
+// time confirmed no test anywhere combined `action run`/`composePayload`
+// with `--provider github`. Test 10 closes that real, audit-discovered gap
+// for real, spawning `action run gh-3 advance --json --provider github`
+// against `yaleh/quay` issue #3 (a real, non-fixture, currently-OPEN issue),
+// using QUAY_ACTION_MOCK_LOG (QN-042/DIR-009) for deterministic,
+// side-effect-free delivery verification.
+//
 // Run: node test/cli.test.mjs
-// Precondition for test 8 only: `gh auth status` must show an authenticated
-// session with read access to yaleh/quay (a standing stage-2+ precondition
-// of this experiment, re-confirmed at the start of every iteration) — test
-// 8 spawns a real (read-only) `quay-github mcp` child process via `--provider
-// github`.
+// Precondition for tests 8 and 10 only: `gh auth status` must show an
+// authenticated session with read access to yaleh/quay (a standing stage-2+
+// precondition of this experiment, re-confirmed at the start of every
+// iteration) — both spawn a real (read-only) `quay-github mcp` child
+// process via `--provider github`.
 
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -407,6 +418,112 @@ async function main() {
       child.kill();
       fs.rmSync(serveWorkspaceRoot, { recursive: true, force: true });
     }
+  }
+
+  // 10. Iteration 54 (post-hoc correction from iteration 53's audit):
+  //     end-to-end `quay action run --json --provider github` against a
+  //     REAL GitHub-backed task. Iteration 53 falsely claimed test 8 above
+  //     already covered this (it does not — test 8 only exercises `task
+  //     list --provider github`, never `action run`). A repo-wide grep at
+  //     that time confirmed no test anywhere combined `action run`/
+  //     `composePayload` with `--provider github`. This block closes that
+  //     gap for real: it spawns the actual `bin/quay.js` binary with
+  //     `--provider github` against `gh-3` (`yaleh/quay` issue #3, a real,
+  //     currently-OPEN, non-fixture issue carrying the `status:ready`
+  //     label), exercising the FULL real chain — `resolveProviderEnv()` ->
+  //     spawned `quay-github mcp` child -> a real (read-only) `gh api` call
+  //     -> `task_get` -> `composePayload()` reading quay-github's own
+  //     `provider.yml` action_buttons/status_skill_map -> `deliverTrigger()`.
+  //     `QUAY_ACTION_MOCK_LOG` (QN-042/DIR-009) is used to select the
+  //     deterministic, network-independent-for-delivery mock mode, so the
+  //     assertions below do not depend on a live manda daemon and make zero
+  //     writes back to the real repo (setStatus()/gh api PATCH is never
+  //     called by `action run` -- only `action.js`'s own composePayload +
+  //     deliverTrigger, confirmed by reading action.js in full, iteration 53).
+  //     `gh-3`'s live status was independently confirmed via
+  //     `quay-github task get gh-3 --json` this same iteration session to
+  //     carry `"status": "ready"` before this test was added, so the
+  //     `skill === "quay:execute"` assertion below is a genuine, currently-
+  //     true fact about live external state, not a guess -- if issue #3's
+  //     status label ever changes, this assertion (not the harness) would
+  //     need to be revisited, exactly as test 8's own live-repo dependency
+  //     already requires.
+  {
+    fs.writeFileSync(
+      path.join(workspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        "      QUAY_NATIVE_TASKS_DIR: \"./tasks-env-relative\"",
+        "  github:",
+        "    enabled: false",
+        `    path: "${githubProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${githubBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        "      QUAY_GITHUB_REPO: \"yaleh/quay\"",
+        "",
+      ].join("\n")
+    );
+    const mockLogPath = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-action-github-log-")),
+      "delivery-log.jsonl"
+    );
+    const r = run(
+      ["action", "run", "gh-3", "advance", "--json", "--provider", "github"],
+      { ...spawnOpts, env: { ...process.env, QUAY_ACTION_MOCK_LOG: mockLogPath } }
+    );
+    assert(r.status === 0, "quay action run gh-3 advance --json --provider github exits 0 (real GitHub-backed task, end-to-end)");
+    const jsonStart = r.stdout.lastIndexOf("\n{\n");
+    let result;
+    try {
+      result = JSON.parse(r.stdout.slice(jsonStart + 1));
+    } catch {
+      result = null;
+    }
+    assert(!!result, "quay action run --json --provider github emits parseable JSON output");
+    if (result) {
+      assert(result.taskId === "gh-3", "quay action run --json --provider github output includes the real GitHub taskId (gh-3)");
+      assert(
+        result.status === "ready" && result.skill === "quay:execute",
+        `quay action run --json --provider github resolves the correct status_skill_map skill for gh-3's real live status (got status=${result.status}, skill=${result.skill})`
+      );
+      assert(result.channel === "task-gh-3", "quay action run --json --provider github output includes the composed channel name for the real GitHub task id");
+      assert(result.delivered === "mock", "quay action run --json --provider github used the deterministic QUAY_ACTION_MOCK_LOG delivery mode, not a live manda/print path");
+    }
+    // Independently confirm the delivery record itself was actually
+    // written to disk with the expected fields -- not just trusting the
+    // CLI's own --json echo of the result.
+    assert(fs.existsSync(mockLogPath), "the mock delivery log file was actually created on disk for the real GitHub-backed action run");
+    if (fs.existsSync(mockLogPath)) {
+      const lines = fs.readFileSync(mockLogPath, "utf8").trim().split("\n").filter(Boolean);
+      assert(lines.length === 1, `mock delivery log contains exactly one record (got ${lines.length})`);
+      if (lines.length === 1) {
+        const record = JSON.parse(lines[0]);
+        assert(record.taskId === "gh-3" && record.skill === "quay:execute" && record.channel === "task-gh-3",
+          "the on-disk mock delivery record for the real GitHub task carries the correct taskId/skill/channel");
+      }
+    }
+    // Restore the native-only config for cleanliness (matches test 8's own convention).
+    fs.writeFileSync(
+      path.join(workspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        "      QUAY_NATIVE_TASKS_DIR: \"./tasks-env-relative\"",
+        "",
+      ].join("\n")
+    );
+    fs.rmSync(path.dirname(mockLogPath), { recursive: true, force: true });
   }
 
   fs.rmSync(tasksDir, { recursive: true, force: true });
