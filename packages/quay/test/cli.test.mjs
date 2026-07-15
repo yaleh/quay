@@ -48,8 +48,22 @@
 // using QUAY_ACTION_MOCK_LOG (QN-042/DIR-009) for deterministic,
 // side-effect-free delivery verification.
 //
+// Iteration 55 added test 11: a systematic sweep of bin/quay.js's own
+// branch table (task list/view/edit/check, action list/run) found that
+// ONLY `task list` (test 8) and `action run` (test 10) had ever been
+// exercised end-to-end with `--provider github`. Test 11 closes the
+// read-only remainder — `task view`, `action list`, and `task check` — all
+// against real GitHub-backed task gh-3. `task edit --provider github` is
+// deliberately excluded: it is the one Provider-parameterized command with
+// a real `gh api` write path, and packages/quay-github/test/write.test.mjs's
+// own header comment already documents the standing project convention
+// that this repo's real issue count is too small/precious to safely target
+// with destructive live writes in an automated test — that reasoning
+// applies identically here, so the exclusion is a correctly-precedented
+// boundary, not an oversight.
+//
 // Run: node test/cli.test.mjs
-// Precondition for tests 8 and 10 only: `gh auth status` must show an
+// Precondition for tests 8, 10, and 11 only: `gh auth status` must show an
 // authenticated session with read access to yaleh/quay (a standing stage-2+
 // precondition of this experiment, re-confirmed at the start of every
 // iteration) — both spawn a real (read-only) `quay-github mcp` child
@@ -524,6 +538,141 @@ async function main() {
       ].join("\n")
     );
     fs.rmSync(path.dirname(mockLogPath), { recursive: true, force: true });
+  }
+
+  // 11. Iteration 55: a systematic sweep of every Provider-parameterized
+  //     `quay` subcommand (per bin/quay.js's own branch table: task
+  //     list/view/edit/check, action list/run) found that ONLY `task list`
+  //     (test 8) and `action run` (test 10) had ever been exercised with
+  //     `--provider github` end-to-end. `task view` and `action list` are
+  //     pure data.read paths (no gh api write call anywhere in their
+  //     control flow -- confirmed by reading bin/quay.js's `task view` and
+  //     `action list` branches in full: both call only client.taskGet() /
+  //     client.manifest(), never client.taskWrite()) and `task check` is a
+  //     pure gate/read path (calls only client.taskCheck(), which reads the
+  //     issue body via github-client.js's checkGate(); confirmed by reading
+  //     that file in full -- no gh api PATCH/POST call exists in checkGate's
+  //     call graph). All three were manually exercised live against real
+  //     `yaleh/quay` issue gh-3 this session, before writing this test, to
+  //     confirm exact expected behavior:
+  //       $ QUAY_GITHUB_REPO=yaleh/quay node packages/quay/bin/quay.js \
+  //           task view gh-3 --json --provider github
+  //         -> {"id":"gh-3", ..., "status":"ready", ...}
+  //       $ QUAY_GITHUB_REPO=yaleh/quay node packages/quay/bin/quay.js \
+  //           action list gh-3 --json --provider github
+  //         -> [{"id":"advance","label":"Advance",...,"whenStatus":["todo","ready"]}]
+  //       $ QUAY_GITHUB_REPO=yaleh/quay node packages/quay/bin/quay.js \
+  //           task check gh-3 --json --provider github
+  //         -> exit 1, {"gate":"execute->done","ok":false,"acTotal":4,"acChecked":0,...}
+  //     (gh-3 has zero AC checkboxes checked in its live body, so the gate
+  //     correctly fails -- this is itself useful, different-shaped coverage
+  //     from test 10's action-run path, which only ever exercises the
+  //     ready-status/advance-button branch.) `task edit --provider github`
+  //     is deliberately NOT added here: it is the one Provider-parameterized
+  //     command that performs a real `gh api` write (label add/remove or
+  //     issue close, per github-client.js's computeStatusWrite()), and
+  //     packages/quay-github/test/write.test.mjs's own header comment
+  //     already documents the standing project convention that this repo's
+  //     real issue count is "too small/precious to safely target with
+  //     destructive live writes in an automated, repeatable test file" --
+  //     that reasoning applies identically at the Core CLI dispatch layer,
+  //     so `task edit --provider github` remains a correctly-excluded,
+  //     already-precedented gap, not an oversight.
+  {
+    fs.writeFileSync(
+      path.join(workspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        "      QUAY_NATIVE_TASKS_DIR: \"./tasks-env-relative\"",
+        "  github:",
+        "    enabled: false",
+        `    path: "${githubProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${githubBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        "      QUAY_GITHUB_REPO: \"yaleh/quay\"",
+        "",
+      ].join("\n")
+    );
+
+    // 11a. `quay task view <id> --json --provider github`.
+    {
+      const r = run(["task", "view", "gh-3", "--json", "--provider", "github"], spawnOpts);
+      assert(r.status === 0, "quay task view gh-3 --json --provider github exits 0 (real GitHub-backed task, end-to-end)");
+      let t;
+      try {
+        t = JSON.parse(r.stdout);
+      } catch {
+        t = null;
+      }
+      assert(!!t, "quay task view --json --provider github emits parseable JSON output");
+      if (t) {
+        assert(t.id === "gh-3", "quay task view --json --provider github output includes the real GitHub taskId (gh-3)");
+        assert(typeof t.title === "string" && t.title.length > 0, "quay task view --json --provider github output includes a non-empty title read live from the real issue");
+        assert(t.status === "ready", `quay task view --json --provider github reflects gh-3's real live status (got ${t.status})`);
+      }
+    }
+
+    // 11b. `quay action list <id> --json --provider github`.
+    {
+      const r = run(["action", "list", "gh-3", "--json", "--provider", "github"], spawnOpts);
+      assert(r.status === 0, "quay action list gh-3 --json --provider github exits 0 (real GitHub-backed task, end-to-end)");
+      let buttons;
+      try {
+        buttons = JSON.parse(r.stdout);
+      } catch {
+        buttons = null;
+      }
+      assert(Array.isArray(buttons), "quay action list --json --provider github emits a JSON array");
+      assert(
+        Array.isArray(buttons) && buttons.some((b) => b.id === "advance"),
+        "quay action list --json --provider github includes the 'advance' button for gh-3 (whenStatus includes its real live status 'ready')"
+      );
+    }
+
+    // 11c. `quay task check <id> --json --provider github` — exit code
+    //      mirrors result.ok, exactly like the native task-check test
+    //      (test 4) above, but against a real GitHub-backed gate read.
+    //      gh-3's live body currently has zero AC checkboxes checked, so
+    //      this exercises the FAIL branch (a different, previously-
+    //      untested shape from test 10's action-run path).
+    {
+      const r = run(["task", "check", "gh-3", "--json", "--provider", "github"], spawnOpts);
+      assert(r.status === 1, "quay task check gh-3 --json --provider github exits 1 (mirrors result.ok for gh-3's real, currently-unchecked AC state)");
+      let result;
+      try {
+        result = JSON.parse(r.stdout);
+      } catch {
+        result = null;
+      }
+      assert(!!result, "quay task check --json --provider github emits parseable JSON output");
+      if (result) {
+        assert(result.id === "gh-3", "quay task check --json --provider github output includes the real GitHub taskId (gh-3)");
+        assert(result.ok === false, "quay task check --json --provider github reports ok:false for gh-3's real, currently-unchecked AC state");
+        assert(typeof result.acTotal === "number" && typeof result.acChecked === "number", "quay task check --json --provider github reports real acTotal/acChecked counts read live from the issue body");
+      }
+    }
+
+    // Restore the native-only config for cleanliness (matches tests 8/10's own convention).
+    fs.writeFileSync(
+      path.join(workspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        "      QUAY_NATIVE_TASKS_DIR: \"./tasks-env-relative\"",
+        "",
+      ].join("\n")
+    );
   }
 
   fs.rmSync(tasksDir, { recursive: true, force: true });

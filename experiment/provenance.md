@@ -8373,3 +8373,166 @@ mock delivery log content) were independently re-verified via fresh
 command output, not carried forward from the iteration-53 correction's
 text alone — directly applying that correction's own added discipline
 (read the full test body / actual live state before asserting coverage).
+
+## Iteration 55 — systematic sweep for cross-Provider test-coverage gaps (QN-059); closes task view/action list/task check `--provider github`; skeleton +0.01
+
+### Preconditions checked
+
+`experiment/directives/pending/` confirmed **empty** via `ls`. `ls
+tasks/QN-*.md | wc -l` confirmed **57** before this iteration's work (58
+after). `docs/proposal/quay-bootstrap-experiment.md` (233 lines,
+gitignored), `experiment/ITERATION-PROMPTS.md`,
+`experiment/iterations/iteration-54.md`, and the tail of this file were
+all read fresh this session. Iteration 54's own out-of-band audit
+(`06efe94 Add iteration-54 independent audit (PASS)`) was read in full:
+a clean **PASS**, the first since iteration 52.
+
+### Observe — systematic sweep
+
+Read `packages/quay/bin/quay.js` in full (203 lines) to enumerate its
+complete Provider-parameterized branch table: `task list/view/edit/check`,
+`action list/run` (6 subcommands). Grepped every test file for
+`--provider github` combinations: only `task list` (test 8, iteration 29)
+and `action run` (test 10, iteration 54) had ever been tested
+cross-Provider. `task view`, `task edit`, `task check`, `action list` had
+zero cross-Provider coverage.
+
+Read `bin/quay.js`'s `task view`/`action list`/`task check` branches and
+`packages/quay-github/src/github-client.js` in full: confirmed all three
+are read-only (call only `taskGet()`/`manifest()`/`taskCheck()`, never
+`taskWrite()`); `task edit`'s `computeStatusWrite()` is the only real `gh
+api` write path. Read `packages/quay-github/test/write.test.mjs`'s own
+header comment: it already documents the standing convention that this
+repo's real issue count is "too small/precious to safely target with
+destructive live writes in an automated, repeatable test file" — this
+precedent directly justifies excluding `task edit --provider github` from
+live end-to-end testing, at the Core CLI layer too, not just leaving it
+as an oversight.
+
+Manually exercised all three live against real issue `gh-3` before
+writing test code:
+```
+$ QUAY_GITHUB_REPO=yaleh/quay node packages/quay/bin/quay.js task view gh-3 --json --provider github
+{"id":"gh-3","title":"Fix MCP task_write silently dropping the extra field","status":"ready", ...}
+
+$ QUAY_GITHUB_REPO=yaleh/quay node packages/quay/bin/quay.js action list gh-3 --json --provider github
+[{"id":"advance","label":"Advance", ..., "whenStatus":["todo","ready"]}]
+
+$ QUAY_GITHUB_REPO=yaleh/quay node packages/quay/bin/quay.js task check gh-3 --json --provider github
+```
+(exit 1) `{"id":"gh-3","gate":"execute->done","ok":false,"acTotal":4,"acChecked":0,...}`
+— confirms `task check` exercises the FAIL branch, a different shape
+from test 10's `action run` path.
+
+### Strategy
+
+Added test 11 (three sub-blocks 11a/11b/11c) to
+`packages/quay/test/cli.test.mjs`, matching test 8/10's style and fixture
+conventions, all against real issue `gh-3`. Documented in the test file
+itself why `task edit --provider github` remains excluded, citing
+`write.test.mjs`'s own precedent directly.
+
+### Execution
+
+```
+$ node --test packages/*/test/*.test.mjs
+...
+ℹ tests 25
+ℹ pass 25
+ℹ fail 0
+```
+```
+$ node packages/quay-native/test/abi-symmetry.mjs
+...
+ALL FOUR SURFACES SYMMETRIC
+```
+```
+$ git diff --stat -- packages/
+ packages/quay/test/cli.test.mjs | 151 +++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 150 insertions(+), 1 deletion(-)
+```
+Test-file-only change; no `src/*.js` touched. Confirmed no accidental
+live write occurred: `gh issue view 3 --repo yaleh/quay --json
+number,state,labels` returned `status:ready`, `lane:execution`, OPEN —
+unchanged.
+
+### σ computation — iteration 55: QN-059
+
+Created `tasks/QN-059.md`, gated `author->ready` (`ok:true`, all four
+artifacts present), transitioned `todo -> ready`, gated `execute->done`
+(`ok:true`, 4/4 AC checked), transitioned `ready -> done`.
+
+```
+$ ls tasks/QN-*.md | wc -l
+58
+```
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-059 | Add cross-Provider test coverage for task view/action list/task check (--provider github) | **native** | **native** | **native** | **done** |
+
+σ (strict) = 51 / 58 = **0.8793** (up from 50/57 = 0.8772; Δσ = +0.0021).
+σ_author_only (diagnostic) = 58 / 58 = **1.0000** (unchanged shape).
+
+### V-factor attribution — iteration 55 (precedent-derived: QN-034/QN-048/QN-058)
+
+Closest, directly on-point precedent: **iteration 54 (QN-058)**, itself
+following **iterations 24/37 (QN-034/QN-048)** — all read in full this
+session. All three closed a test-coverage-only regression-test gap for
+an already-existing, unmodified capability, live against real
+`yaleh/quay` issues, zero source-code change, and all three scored
+`skeleton +0.01`. QN-059 is structurally identical in kind.
+
+- **skeleton**: credited **+0.01 (0.71 → 0.72)** — a genuinely new
+  regression-test addition (three sub-blocks) closing a previously-real,
+  zero-coverage gap in the `task view`/`action`(list)/`task check` stages
+  of the v0 loop's own end-to-end chain, their cross-Provider (GitHub)
+  instantiation specifically. `gate_correctness` was considered (the
+  `task check` sub-block specifically targets the gate stage) but per
+  precedent, test assertions cross-checking existing, unmodified gate
+  *output* do not change gate *logic* — no `checkGate()`/`store.js`/
+  `github-client.js` code was touched, so `skeleton` is the correct
+  factor.
+- **abi_symmetry**: held flat at **0.96** (no ABI schema/shape change;
+  `abi-symmetry.mjs` re-confirmed symmetric).
+- **gate_correctness**: held flat at **0.76** (no gate-logic change;
+  precedent: test assertions cross-check existing gate output, do not
+  change it).
+- **skill_convergence**: held flat at **0.96** (no SKILL.md content
+  changed).
+
+```
+V_instance = 0.72 × 0.96 × 0.76 × 0.96 = 0.5043  (up from 0.4973)
+```
+ΔV_instance = **+0.0070**.
+
+- **completeness**: held flat at **0.74** (precedent: documents a
+  test-coverage gap closure for existing behavior, not new
+  orchestration-Skill methodology content).
+- **effectiveness**: held flat at **0.26** (live external-network
+  dependency confound, per QN-034/QN-048/QN-058's own precedent). Now 35
+  consecutive iterations (21-54, and now 55) the *value* is held flat.
+- **reusability**: held flat at **0.79** (precedent: a test-coverage-only
+  addition to already-existing cross-Provider capabilities is not
+  "methodology transfer" evidence). Now the **thirtieth consecutive
+  iteration (26-55)**.
+- **validation**: held flat at **0.64** (no audit yet exists for this
+  iteration's own work).
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+ΔV_meta = **0.0000**.
+
+### Discipline note
+
+The systematic sweep in this iteration directly followed the standing
+scoring discipline's item 7: rather than inferring coverage from grep hit
+locations alone, `bin/quay.js`'s full branch table and the relevant
+source/test files were read in full to confirm which uncovered
+subcommands were genuinely safe/closeable (read-only) versus correctly
+excluded (real write path, matching `write.test.mjs`'s own precedent).
+Having now closed the two most obvious cross-Provider gaps across two
+consecutive iterations, this exact sweep is unlikely to surface further
+gaps of the same shape — future iterations should look for a genuinely
+new angle.
