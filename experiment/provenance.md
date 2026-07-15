@@ -7691,3 +7691,141 @@ correction) that a fifth candidate — GitHub reactions/emoji as an ad-hoc
 AC-state signal — was not considered in the enumeration, though it would
 very likely be rejected on the same G5 grounds as the "structured
 comments" candidate that was considered.
+
+## Iteration 51 — fifth candidate (GitHub reactions/emoji) examined and rejected; closes the audit-flagged completeness gap
+
+### Preconditions checked
+
+`experiment/directives/pending/` confirmed **empty** via `ls`. `git status
+--short` confirmed clean modulo the one pre-existing, deliberately-
+untouched `docs/proposal/baime-lite-driving-external-projects.md`.
+`ls tasks/QN-*.md | wc -l` confirmed **56** (unchanged from iteration 50's
+final tally). Full 25-file regression suite and `abi-symmetry.mjs` both
+confirmed passing at the start of this iteration. `docs/proposal/
+quay-bootstrap-experiment.md` (233 lines, gitignored, read directly from
+disk), `experiment/ITERATION-PROMPTS.md` (489 lines), and the tail of
+this file (including the "Post-hoc correction (iteration 50 audit)"
+section) all read fresh this session.
+
+`experiment/audits/iteration-50-independent-adjudicate.md` (already
+present on disk, produced by the top-level orchestrator's own separate
+process) was read in full. Verdict: **PASS WITH CONCERNS** — breaks the
+prior thirteen-consecutive clean-PASS streak (37-49) at iteration 50, due
+to (a) a false grep-claim already corrected, and (b) a completeness note
+naming the reactions/emoji candidate as unconsidered.
+
+### Observe
+
+This iteration examined the one specific gap the iteration-50 audit
+named (finding 8): GitHub reactions/emoji as an ad-hoc per-item AC-state
+signal. Live-verified this session (not recalled): `gh api
+repos/yaleh/quay/issues/{3,4}/reactions` both return `[]` (zero reactions
+on either target issue); a GraphQL `reactionGroups` query against issue
+#3 confirms GitHub's fixed eight-type reaction vocabulary (THUMBS_UP,
+THUMBS_DOWN, LAUGH, HOORAY, CONFUSED, HEART, ROCKET, EYES). Structurally,
+reactions attach only to a whole issue or a whole comment — there is no
+API concept of a reaction scoped to an individual body line or checkbox.
+Since issue #3's AC has 4 checkboxes and issue #4's has 3, a single
+whole-issue reaction cannot encode "which of N items is checked" — the
+only path to per-item granularity would require first authoring a new
+one-comment-per-AC-item convention (a body/content write), then reading
+each comment's reaction state. Re-ran `grep -n "comments"
+packages/quay-github/src/github-client.js` this session and re-confirmed
+comments are read today only for `updatedAt`-adjacent metadata, never
+per-comment body content — no such convention exists.
+
+**Key finding:** the reactions-based scheme is a **strict superset** of
+already-rejected candidate 4 (structured comments) — it requires the same
+new per-AC-item comment-write capability candidate 4 needed, plus an
+additional reaction-read/write surface layered on top. It cannot be
+narrower or more minimal than something already rejected as out of scope;
+it inherits candidate 4's exact G5 rejection reason (a new write beyond
+status-only `data.write`) and adds to it. This converts the iteration-50
+audit's "very likely" hedge into a concrete, mechanism-level reason: a
+whole-issue reaction alone cannot encode multi-item AC state in any form,
+and any per-item scheme requires fabricating a write capability first,
+making the "reaction" step incidental rather than load-bearing.
+
+### Strategy
+
+Closed the specific, audit-named completeness gap using live API
+verification rather than re-asserting the audit's own hedge. No new
+tractable V_instance/V_meta opportunity was found beyond this. Consistent
+with the standing discipline (iterations 19, 28, 29, 37-50), this
+iteration does not force a new task into existence. No `tasks/QN-0NN.md`
+was created.
+
+### Execution
+
+No code, Skill, or gate change was made. Read-only work only: `gh api`
+reactions calls (×2) and a GraphQL `reactionGroups` query; `grep` re-run
+for comment-handling code; structural comparison against already-rejected
+candidate 4; full regression suite (25/25) and `abi-symmetry.mjs` ("ALL
+FOUR SURFACES SYMMETRIC") confirmed at the start of the iteration and
+re-confirmed at the end (no code changed in between). `git diff --stat`
+against the working tree (before this report/provenance commit): empty
+for all source files.
+
+### σ computation — iteration 51
+
+No task's provenance triple changed; no task was created or completed.
+σ is unchanged:
+
+```
+σ (strict reading) = 49 / 56 = 0.8750   (unchanged, Δσ = 0)
+```
+
+`ls tasks/QN-*.md | wc -l` independently re-confirmed = **56**.
+
+### V-factor attribution — iteration 51 (fifth candidate closed; held flat)
+
+- **skeleton, abi_symmetry, skill_convergence**: no source file touched
+  this iteration (`git status --short` confirms). Held flat: skeleton
+  0.70, abi_symmetry 0.96, skill_convergence 0.96.
+- **gate_correctness: 0.76 (unchanged).** This iteration's live-API-
+  grounded analysis confirms (does not defect-find) that `checkGate()`'s
+  exclusive reliance on `issue.body` remains correct — no viable
+  alternate source exists even accounting for the fifth candidate. Held
+  flat.
+- **completeness: 0.74 (unchanged).** No Skill/gate/decomposition-rule
+  content changed; the reactions scheme needs a new write capability
+  regardless of the reaction step, so nothing new is documented.
+- **effectiveness: 0.26 (unchanged).** No code executed via `quay:
+  author`/`quay:execute` to build a new feature this iteration (live-API
+  verification and structural analysis only, not a marginal increment).
+  Now **31 consecutive iterations (21-50, and now 51)**.
+- **reusability: 0.79 (unchanged).** This iteration closes the one
+  specific completeness gap the iteration-50 audit flagged, converting
+  its "very likely" hedge into a concrete mechanism-level reason (strict
+  superset of already-rejected candidate 4) — but produces zero new
+  Provider *behavior* on the transfer target, so §5.2's behavior-change
+  requirement is not met. Held flat for the **twenty-sixth consecutive
+  iteration (26-51)**.
+- **validation: 0.64 (unchanged).** No audit exists yet for this
+  iteration's own work. Iteration 50's PASS WITH CONCERNS verdict (the
+  first non-clean verdict in the 37-50 range) does not itself move this
+  factor, consistent with the precedent at iterations 41-50 (validation
+  moves only after a specific iteration's own audited work).
+
+```
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = 0.4903  (unchanged)
+V_meta      = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+ΔV_instance = ΔV_meta = **0.0000**. This iteration's genuine
+contribution — closing, with live `gh api`/GraphQL verification rather
+than recalled documentation, the one specific completeness gap the
+iteration-50 audit flagged (the reactions/emoji candidate), and
+supplying a concrete structural reason (no per-checkbox-line API scope;
+strict superset of already-rejected candidate 4) in place of the audit's
+"very likely" hedge — is not forced into a V-factor axis the evidence
+does not support, per the standing discipline (iterations 25, 28, 29,
+37-50).
+
+### Discipline note
+
+Every command-output claim in this iteration's report (`gh api`
+reactions calls, GraphQL query, `grep` re-run) was actually executed this
+session with real output quoted verbatim — directly applying the ninth
+discipline point (command-output claims must be run, not recalled) that
+iteration 50's audit established as necessary.
