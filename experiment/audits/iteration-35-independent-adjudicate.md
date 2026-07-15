@@ -1,0 +1,51 @@
+# Iteration 35 — Independent Out-of-Band Audit (G3)
+
+**Auditor:** fresh, zero-prior-context out-of-band review. Ran all tests/diffs/adversarial checks directly against the working tree. Main focus, per standing discipline (five prior post-hoc corrections in `provenance.md`): (1) adversarially verify the star bug-fix/regression-test claim; (2) re-derive the `skeleton` V-factor credit against the *single closest* precedent in `provenance.md`, not merely a plausible one.
+
+**Verdict: PASS WITH CONCERNS** — the engineering (bug found, root-caused, fixed, regression-tested) is genuine and adversarially confirmed exactly as reported. The `skeleton` V-factor credit is a **likely misattribution**: a more directly on-point precedent (QN-044/iteration 33, and `ITERATION-PROMPTS.md` constraint 4(b)'s own `abi_symmetry` half, which iteration 35 quotes only half of) argues this event is `abi_symmetry`-shaped, not (or not only) `skeleton`-shaped. Recommend correction; see §7 below for the corrected value.
+
+## Findings
+
+1. **Task QN-046 genuineness — VERIFIED.** `tasks/QN-046.md` exists, drives through `author→ready→execute→done` via the real `quay-native` gate (confirmed pattern matches report). `ls tasks/QN-*.md | wc -l` = **45**, exactly as claimed (QN-001..QN-046 minus never-allocated QN-018).
+
+2. **The discussion-doc §2.1 gap and QN-031's named gap — VERIFIED as a real, pre-existing, named item.** Read `packages/quay/test/serve.test.mjs`'s scope and iteration-21.md directly: iteration 21 (QN-031) explicitly names, as out of scope, "browser-level rendering" — not fabricated retroactively. `docs/proposal/quay-core-scope-expansion-discussion.md` §2.1 is confirmed to have remained the one still-open item after §2.2 (iteration 33) and §2.3 (iteration 31) closed.
+
+3. **The bug-fix claim — ADVERSARIALLY VERIFIED, genuine.** Confirmed `packages/quay/src/serve.js` currently declares `Content-Type: text/html; charset=utf-8` on both HTML-emitting routes plus `<meta charset="utf-8">` in each `<head>`. Ran the new test as-is: **10/10 assertions PASS, exit 0.** Then reverted the fix (`sed -i 's/text\/html; charset=utf-8/text\/html/g' packages/quay/src/serve.js`) and re-ran: **exactly 2 FAILED** (the two Content-Type/charset assertions; all byte-level and meta-tag assertions still passed, matching the report's own prediction precisely). Restored the file, `diff` confirmed byte-identical to the pre-revert version, and re-ran the test **3 consecutive times**: all exit 0, 10/10 PASS each time. This is the single most load-bearing claim in the report and it holds up exactly as described, including the specific "2 FAILED" detail.
+
+4. **Full regression suite — VERIFIED.** `find packages -name "*.test.mjs" | wc -l` = 23 (22 pre-existing + the new file). Ran all 23 directly: **23/23 pass, zero failures.** `node packages/quay-native/test/abi-symmetry.mjs` → "ALL FOUR SURFACES SYMMETRIC," confirmed.
+
+5. **σ/V arithmetic — recomputed independently, exact.** σ_strict = 38/45 = 0.84444... ≈ 0.8444 (Δσ = +0.0035 from 37/44 = 0.8409, confirmed). V_instance = 0.70 × 0.95 × 0.76 × 0.96 = 0.48518... ≈ 0.4852 (ΔV_instance = +0.0069, confirmed exact against 0.4783). V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.09728 ≈ 0.0973 (unchanged, confirmed).
+
+6. **`git status --short` — VERIFIED clean**, modulo the one pre-existing, deliberately-untouched `docs/proposal/baime-lite-driving-external-projects.md`. `git diff --stat -- packages/quay-native packages/quay-github` is empty, confirming the Core-only scope claim.
+
+7. **The `skeleton` V-factor credit — LIKELY MISATTRIBUTION, precedent re-derived.**
+
+   Protocol §5.1 (`docs/proposal/quay-bootstrap-experiment.md`) defines the two factors precisely:
+   > **skeleton** — "The v0 loop runs end-to-end (`config → mcp → serve → action → Skill → done`)."
+   > **abi_symmetry** — "`quay-native task … --json` emits the same schema as the corresponding MCP tool result (design §6); CLI is the golden test harness."
+
+   `ITERATION-PROMPTS.md` constraint 4(b) (ratified iteration 29, applied at iteration 33/QN-044) extends `abi_symmetry` explicitly to the Core-level, three-way (CLI/MCP/**Web-UI**) surface: "new Core CLI/MCP schema-symmetry proof (extending `abi-symmetry.mjs`'s discipline one layer up, **or a genuinely new Core-level equivalent script**) → `abi_symmetry`." Iteration 35's own §7 quotes only the *other* half of the same sentence ("new Core capability code → `skeleton`") and never mentions the `abi_symmetry` half, nor QN-044/iteration-33 at all — despite QN-044 being the single closest precedent for "a genuinely new Core-level test script that proves Web-UI output correctness," which is exactly what `serve-browser-render.test.mjs` is.
+
+   QN-046's core finding is not new *capability* code (no new route, no new action, no new gate transition — `git diff --stat` on `serve.js` is 14 insertions / 4 deletions, entirely inside two pre-existing routes' response-header/HTML-head lines). It is a **cross-surface content-fidelity defect**: the Web UI was rendering content that did not match what CLI/MCP already correctly expose (`quay-native task get --json` returns correctly-encoded UTF-8 strings; the Web UI, due to the missing charset declaration, displayed mojibake for the identical underlying content). That is squarely a **content-equivalence** defect between the Web-UI surface and the other two surfaces — the exact "schema/content equivalence" scope this project's own audits (iterations 33, 34) have used to define `abi_symmetry`'s Web-UI-inclusive reach. The new regression test (`serve-browser-render.test.mjs`) is, in form, "a genuinely new Core-level equivalent script" proving that content-equivalence at the byte/rendering layer — i.e., precisely the pattern constraint 4(b) maps to `abi_symmetry`, not `skeleton`.
+
+   Iteration 35's chosen precedent, QN-031 (iteration 21), predates constraint 4(b) (ratified iteration 29) by eight iterations and predates the Web-UI surface itself (added at iteration 33) entirely — QN-031's own `abi_symmetry` scope at the time was CLI↔MCP only, with no Web UI to speak of, so it could not have contemplated a Web-UI content-fidelity proof. Iteration 0's `--port`-bug precedent is also weaker: that bug was in argument parsing that broke the loop's basic operation (the server literally didn't bind to the requested port — a `skeleton` defect in the "loop runs end-to-end" sense), not a cross-surface content-equivalence defect. Neither cited precedent is the closest match; QN-044/iteration 33 is.
+
+   This is the same root-cause pattern named explicitly in all five prior post-hoc corrections: citing a plausible-sounding precedent (QN-031, iteration 0) while a more directly on-point one (QN-044/iteration 33, and half of the very constraint 4(b) being partially quoted) sits unexamined in `provenance.md`.
+
+   **Recommended correction:** At minimum, `abi_symmetry` should move (0.95 → 0.96) alongside or instead of `skeleton`, following iteration 33's own establishment that a genuinely new Core-level content/schema-equivalence proof is separable, creditable evidence. Two plausible corrected outcomes, in order of how closely they track iteration 33's own reasoning:
+   - **(a) Re-attribute solely to `abi_symmetry`** (treat this as a content-equivalence fix, not new capability): `abi_symmetry` 0.95 → 0.96, `skeleton` held flat at 0.69. V_instance = 0.69 × 0.96 × 0.76 × 0.96 = **0.4833** (ΔV_instance = +0.0050, not +0.0069).
+   - **(b) Credit both factors** (iteration-33-style, if the auditor/orchestrator judges the bug-fix-plus-new-capability-test genuinely separable from the content-equivalence proof): `skeleton` 0.69 → 0.70 **and** `abi_symmetry` 0.95 → 0.96. V_instance = 0.70 × 0.96 × 0.76 × 0.96 = **0.4903** (ΔV_instance = +0.0150).
+
+   This audit does not have the authority to pick between (a) and (b) or apply either — that is the top-level orchestrator's job, per instructions. Both are flagged as more defensible than the as-reported `skeleton`-only, `abi_symmetry`-flat outcome (V_instance = 0.4852), given the unexamined precedent above.
+
+8. **`gate_correctness` held flat — VERIFIED correct.** `git diff` shows zero changes to `store.js`/gate-check logic; this factor's flat-hold is not in question.
+
+9. **`skill_convergence` and all four `V_meta` factors held flat — VERIFIED reasoning is consistent** with established precedent (ordinary task through the converged author/execute procedure; no SKILL.md content changed; no Provider-layer diff).
+
+10. **Convergence verdict — VERIFIED correct regardless of the §7 correction.** Even under the most generous corrected V_instance (0.4903), it remains far below the 0.80 dual threshold, V_meta (0.0973) is unaffected, and criteria 2–4 are unaffected by this correction. **NOT CONVERGED** stands under either corrected value.
+
+## Net assessment
+
+The iteration's headline engineering claim — a real charset/mojibake bug found live via playwright MCP browser automation, root-caused, fixed, and covered by a genuine regression test — is **fully genuine**, confirmed by an independent adversarial revert-and-restore that reproduced the exact "2 FAILED" detail reported. The full regression suite (23 files) and ABI-symmetry script both pass independently. Task-count, σ, and V arithmetic are all exactly reproducible.
+
+The one real issue is the same pattern this experiment's provenance log has now caught five times before: iteration 35 credits `skeleton` alone by citing QN-031 (iteration 21, pre-dates the Web-UI surface and constraint 4(b) entirely) and iteration 0, while never examining — or even mentioning — QN-044/iteration 33, the standing, ratified (`ITERATION-PROMPTS.md` constraint 4(b)) precedent for exactly this shape of event: a new Core-level test script proving Web-UI content/output equivalence. Iteration 35 quotes constraint 4(b) itself but stops mid-sentence before its `abi_symmetry` clause. The corrected value is likely V_instance = 0.4833 (abi_symmetry-only re-attribution) or 0.4903 (both factors, iteration-33-style dual credit) rather than the reported 0.4852 — a modest but real overclaim/misattribution, not a fabrication. This does not change the overall NOT CONVERGED verdict, which stands correctly under any of the three candidate values.
