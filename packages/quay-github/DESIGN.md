@@ -430,3 +430,14 @@ skill:      true    # QN-029 (iteration 18): status_skill_map/action_buttons
 
 Matches `provider.yml`'s own capability booleans verbatim (verified this
 iteration — see QN-029's AC/DoD).
+
+## 6. Iteration 27 — first live `quay:execute` Skill-level `executeEpic` drive
+
+Fixture A (issue #8, child of epic issue #10): this sentence is fixture A's
+own real, independently-verifiable Plan-step-1 deliverable, added as part
+of driving issue #8 through `quay:execute`'s `executeLeaf` path for real.
+
+Fixture B (issue #9, sibling child of epic issue #10): this sentence is
+fixture B's own real, independently-verifiable Plan-step-1 deliverable,
+added as part of driving issue #9 through `quay:execute`'s `executeLeaf`
+path for real, immediately after fixture A completed.

@@ -148,3 +148,18 @@ inside a real live Claude Code session's own MCP client registration,
 which remains untested — a standalone Node MCP client stands in for that
 this iteration, the same standing limitation already named for
 `quay-native`/`quay-github`'s own MCP transports).
+
+**Clarifying note (added iteration 27, per the iteration-26 independent
+audit's cosmetic-nit finding):** point 4 above loosely echoes this
+directive's own original wording (from the numbered request list further
+above) suggesting `reusability` might move as a result of this work. That
+original wording predates iteration 26's actual diff-grounded scoring
+decision and should not be read as a competing claim: iteration 26 (and
+the corrected provenance/iteration report record) explicitly and
+correctly held `reusability` flat for this task, since the MCP server
+work touched only Core-side infrastructure with zero diff to either
+Provider package. `experiment/iterations/iteration-26.md` §8 and
+`experiment/provenance.md` remain the sole authoritative, internally
+consistent scoring record; this note exists only to prevent future
+readers of this archived directive from misreading the point-4 echo above
+as contradicting that record.

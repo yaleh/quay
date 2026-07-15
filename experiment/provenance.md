@@ -3655,3 +3655,119 @@ Diagnostic sub-metric:
 
 Up from 0.9706 at the end of iteration 25 (QN-036 added to both numerator
 and denominator).
+
+## Iteration 27 — QN-037 (executeEpic's own Skill-level compound-recursion drive)
+
+**Pre-execution context:** `experiment/directives/pending/` was checked
+first, per mandatory instruction, and found empty (confirmed via `ls`, not
+assumed from iteration 26's own note). With no new directive, this
+iteration prioritized among iteration 26's own "Problems identified for
+next iteration" list: convergence criterion 3's residual gap —
+`executeEpic`'s own compound-recursion path (`quay:execute`'s SKILL.md
+`Spec`: `driveEach` + `integrationAccept`) had never been run end-to-end as
+a live `quay:execute` **Skill invocation** driving a real multi-child epic
+from `todo` to `done`. Every prior compound/epic live-verification
+(native's QN-012/QN-016, GitHub's QN-035/DIR-006) exercised only the
+**gate's own** compound-recursion logic (`checkGate()`/`childrenStatus()`)
+via direct, manual `task check`/`task edit` commands standing in for the
+Skill, never `executeEpic`'s own recursive orchestration as an actual
+Skill-level drive. Iterations 25 and 26 both independently named this same
+gap, and it was judged (using this iteration's own judgment, per
+instruction) "likely the single highest-value remaining gap."
+
+A fresh, real, two-child GitHub epic (issue #10, referencing children
+#8/#9, all created live this iteration in the real `yaleh/quay`
+repository) was authored via `quay:author`'s own documented Method
+(Proposal/Plan/AC/DoD written directly in the issue body; a genuine
+decompose-test confirmation — two independently mergeable
+`packages/quay-github/DESIGN.md` doc-comment deliverables), then driven
+via `quay:execute`'s own `executeEpic` pseudocode: `driveEach` over each
+child in genuine temporal order (child A/gh-8 fully `done` before child
+B/gh-9 was even authored), each child's own `executeLeaf` path exercised
+for real (`implement-phase`, `self-audit-ac`, `gate-check`), followed by
+`integrationAccept` (epic-level re-check, DoD sign-off, `execute→done`
+gate flip). The epic's own compound gate was live-captured in both
+states: `ok:false` (after child A alone reached `done`, naming gh-9 as the
+blocking child) and `ok:true` (after both children reached `done`,
+`childrenStatus` confirming both). Core's passthrough
+(`quay task check gh-10 --provider github --json`) was cross-checked
+byte-identical against `quay-github`'s own direct CLI output, and
+`.quay/config.yml`'s temporary `github.enabled: true` flip (needed for
+this live GitHub-backed work) was restored to its original state before
+commit (`git diff .quay/config.yml` confirmed empty).
+
+One authoring-time correction is worth recording explicitly (the most
+judgment-laden design decision this iteration): the epic's (gh-10) AC was
+initially drafted with execution-outcome-dependent items ("both children
+are independently, genuinely driven to done...", "`quay task check`
+reports `ok:false` while at least one child is not yet done...") that
+cannot be truthfully checked at authoring time, before any execution has
+occurred. Running `task check gh-10` at that point genuinely failed
+(`{"ok":false,"acTotal":4,"acChecked":0,...}`) since the author→ready gate
+(tightened in iteration 8's QN-019) requires all AC checkboxes checked.
+The AC was rewritten to be genuinely author-time-verifiable (decompose-test
+satisfaction, plan concreteness, children's own AC quality), following the
+QN-020 precedent that an epic's AC should be authored to be truthfully
+checkable at authoring time, with execution-outcome verification living in
+DoD/the iteration report instead.
+
+`quay:execute`'s SKILL.md (`packages/quay-native/skills/execute/SKILL.md`)
+Gaps section was updated to record this as the first genuine live
+Skill-level `executeEpic` drive-to-`done`, and
+`packages/quay-github/DESIGN.md` received a new "Iteration 27" section
+documenting the two fixture doc-comment deliverables added live during
+child A's and child B's own `executeLeaf` implement-phases (in that
+temporal order, not both at once). The archived `DIR-007` directive
+received a short clarifying note (per the iteration-26 independent audit's
+cosmetic-nit finding) explicitly cross-referencing `iteration-26.md` §8 and
+this file as the authoritative, internally consistent scoring record for
+`reusability`.
+
+| task_id | title | author_by | execute_by | gate_by | status |
+|---|---|---|---|---|---|
+| QN-037 | Live-verify executeEpic's own Skill-level compound-recursion drive (native tracker for GitHub-backed gh-10/gh-8/gh-9) | native | native | native | done |
+
+`author_by`/`execute_by`/`gate_by` = `native` for QN-037, in the same
+same-session **degraded-fallback** mode established since iteration 1 (no
+subagent-dispatch primitive exists in this environment — reconfirmed via
+`ToolSearch` at the start of this iteration, not re-assumed). The
+GitHub-side fixture tasks (gh-8, gh-9, gh-10) are themselves real, live
+GitHub Provider tasks but are **not** counted in this native σ ledger —
+consistent with protocol §10.1 ("σ is counted per native task, aligned
+with the native task model") and this project's own established
+precedent (the pre-existing gh-7/gh-5/gh-6 fixture from iteration 25 was
+never counted either).
+
+## σ computation — iteration 27
+
+QN-037 reaches `{native, native, native, done}` this iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 29 / 36
+  = 0.8056
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 31 / 36
+  = 0.8611
+```
+
+Total task count is now **36** (QN-001..QN-037, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration (QN-037, done).
+
+**σ (strict) = 0.8056, up from 0.8000 at the end of iteration 26 (Δσ =
++0.0056).** Consistent with the established pattern of one substantial
+capability-closure task per iteration moving σ by a small, honest
+increment against a now-larger (36-task) denominator.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 35 / 36
+              = 0.9722
+```
+
+Up from 0.9714 at the end of iteration 26 (QN-037 added to both numerator
+and denominator).

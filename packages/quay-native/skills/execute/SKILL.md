@@ -248,6 +248,40 @@ executeEpic(task, provider) = {
   distinct branch in `executeEpic`'s own pseudocode is currently known to
   remain unexercised; if one is identified later it should be named here
   explicitly rather than assumed covered.
+- **Resolved in iteration 27 (QN-037, gh-10/gh-8/gh-9):** iterations 25 and
+  26 both named the same residual gap — every prior compound/epic live
+  verification (native's QN-012/QN-016, GitHub's QN-035/DIR-006) exercised
+  only the **gate's own** compound-recursion logic (`checkGate()`/
+  `childrenStatus()`) via direct, manual `task check`/`task edit` commands
+  standing in for this Skill, never `executeEpic`'s own **recursive
+  orchestration** (`driveEach` over real children, followed by
+  `integrationAccept`) as an actual Skill-level drive. Iteration 27 closes
+  this: a fresh, real, two-child GitHub epic (issue #10, children #8/#9)
+  was authored via `quay:author`'s own Method against the epic itself
+  (decompose test genuinely satisfied — two independently mergeable
+  DESIGN.md doc-comment deliverables), then driven via this Skill's own
+  `executeEpic` pseudocode: `driveEach` recursively invoked `quay:author`
+  then this Skill's own `executeLeaf` path (`implement-phase` — a real
+  `packages/quay-github/DESIGN.md` diff per child; `self-audit-ac` — the
+  full regression suite re-run after each child; `gate-check`) against
+  each child in turn, in genuine temporal order (child A fully to `done`
+  before child B was even authored), followed by `integrationAccept` — a
+  live `quay task check gh-10 --provider github --json` re-run at the
+  epic level. The intermediate proof was captured live, not narrated:
+  with only child A done, the epic's own `execute->done` gate genuinely
+  returned `{"ok":false,"reason":"AC checkboxes complete, but not all
+  children are done: gh-9 (todo)","childrenStatus":[{"id":"gh-8",
+  "status":"done"},{"id":"gh-9","status":"todo"}]}`; once both children
+  reached `done`, the same gate call returned `{"ok":true,"reason":"all AC
+  checkboxes checked; eligible to move to done","childrenStatus":
+  [{"id":"gh-8","status":"done"},{"id":"gh-9","status":"done"}]}` — the
+  epic was then flipped to `done` for real. This is still the same
+  same-session degraded-fallback mode this experiment has used since
+  iteration 1 (no subagent-dispatch primitive found, reconfirmed via
+  `ToolSearch` this iteration) — what changed is that the *epic-level
+  recursive orchestration itself* (not just leaf-level gate mechanics) was
+  what was actually exercised and recorded. See
+  `experiment/iterations/iteration-27.md` §5 for the full transcript.
 - Not yet dispatched via manda in a background worker by this Skill itself
   (see quay:author's same gap note — dispatch binding is currently the
   host's job).
