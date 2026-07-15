@@ -178,7 +178,7 @@ fixture manifest), `packages/quay/test/serve.test.mjs` (line 161-180:
 `composePayload()` unit-level check, including the unknown-actionId
 throw case), `packages/quay/test/core-three-way-symmetry.test.mjs`
 (CLI/MCP/Web-UI three-way symmetry check on `action_run`/`action list`),
-and `packages/quay/test/cli.test.mjs` (line 261: `quay action run --json`
+and ~~`packages/quay/test/cli.test.mjs` (line 261: `quay action run --json`
 against `--provider github`, asserting the correct `status_skill_map`
 skill resolves for a real GitHub-backed task). Confirmed via:
 
@@ -188,7 +188,26 @@ $ grep -n "composePayload\|action_buttons\|status_skill_map" packages/quay/test/
 that `composePayload` is exercised against both a synthetic native-shaped
 manifest (three separate test files) and the real GitHub Provider's own
 manifest via `--provider github` end-to-end CLI invocation — no gap
-found in cross-Provider action-composition coverage.
+found in cross-Provider action-composition coverage.~~ **Post-hoc
+correction (iteration 53 audit):** this citation is false. Line 261's
+test invokes `action run` with no `--provider` flag (defaults to
+native) against `CLI-1`, a native-Provider fixture task — it is not a
+GitHub-backed test. `cli.test.mjs`'s actual `--provider github` test
+(test 8, line 307) only exercises `task list`; it never calls `action
+run`. A repo-wide search confirms **no test anywhere combines `action
+run`/`composePayload` with `--provider github`** — there is no
+dedicated end-to-end GitHub-backed `action run` CLI/MCP integration
+test. The grep command itself was genuinely run and its hits accurately
+reproduced; the error was drawing an incorrect inference about what
+line 261 specifically tests. The underlying "no code-level gap" judgment
+remains defensible on structural grounds only — `composePayload` is a
+small, Provider-agnostic pure function (confirmed by direct reading of
+`action.js`), and quay-github's `provider.yml` manifest shape is
+verified byte-identical to quay-native's (Finding 7) — but this is a
+weaker claim than "end-to-end tested," and a genuine, real test-coverage
+gap (no `action run --provider github` integration test exists) is
+correctly identified by the audit as a legitimate open item for a future
+iteration to close with a new test, not dismissed as covered.
 
 Checked whether `computeStatusWrite` (GitHub's status-write logic,
 `packages/quay-github/src/github-client.js:220`) needed
@@ -359,9 +378,12 @@ precedent argues for a different factor):
   directly examined cross-Provider transfer fidelity (native's and
   GitHub's `status_skill_map`/`action_buttons` fields are byte-identical
   in shape; `skills_path` correctly documents a shared-file mechanism,
-  not a duplicated one) and confirmed `composePayload` genuinely executes
+  not a duplicated one) — ~~and confirmed `composePayload` genuinely executes
   against the real GitHub Provider's own manifest via `--provider github`
-  end-to-end (not merely a native-shaped fixture) — but this is
+  end-to-end (not merely a native-shaped fixture)~~ **Post-hoc correction
+  (iteration 53 audit): false — no `action run --provider github`
+  end-to-end test exists anywhere in the suite; see the correction under
+  §3 above.** — but this is
   confirmatory re-verification of already-established transfer fidelity,
   not new transfer *behavior* on the target this iteration. §5.2's
   behavior-change requirement is not met. Held flat at **0.79**. Now the

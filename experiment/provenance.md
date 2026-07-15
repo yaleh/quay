@@ -8054,9 +8054,12 @@ the action/write code paths:
    for subprocess/live-repo tests, not missing coverage. Read
    `packages/quay/src/action.js` in full and cross-checked
    `composePayload`/`deliverTrigger` coverage against four separate test
-   files, confirming end-to-end coverage against both a native fixture
+   files, ~~confirming end-to-end coverage against both a native fixture
    manifest and the real GitHub Provider (`--provider github` in
-   `cli.test.mjs`). Checked whether `computeStatusWrite` (GitHub's
+   `cli.test.mjs`)~~ **Post-hoc correction (iteration 53 audit): false —
+   no test anywhere combines `action run`/`composePayload` with
+   `--provider github`; this is a real, open test-coverage gap, not
+   confirmed coverage.** Checked whether `computeStatusWrite` (GitHub's
    status-write logic) needed compound/epic-role-awareness parallel to
    `childrenStatus()`'s QN-035 gate extension — confirmed the
    write/gate separation of concerns is intentional (write mutates a
@@ -8150,3 +8153,60 @@ not-found error, `gh issue list`, `ps aux`) was actually executed this
 session, with real output quoted verbatim in `experiment/iterations/
 iteration-53.md` — continuing the literal copy-paste discipline that
 iteration 52's audit confirmed held cleanly.
+
+## Post-hoc correction (iteration 53 audit)
+
+Iteration 53's audit (`experiment/audits/iteration-53-independent-adjudicate.md`,
+verdict **PASS WITH CONCERNS**) found that the verbatim command-output
+discipline (mandated after iterations 50/51's fabrication failures, first
+successfully upheld at iteration 52) held cleanly this iteration — every
+quoted terminal output was independently re-run and matched exactly. This
+is a **different failure category** from iterations 50/51: not a
+fabricated tool-call transcript, but a **false characterization of an
+existing, correctly-quoted test file's actual content**.
+
+Iteration 53 claimed `packages/quay/test/cli.test.mjs` line 261 tests
+`quay action run --json` "against `--provider github`... for a real
+GitHub-backed task," and used this to conclude cross-Provider
+`action run`/`composePayload` coverage has no gap. The audit found line
+261's test actually invokes `action run` with no `--provider` flag
+(defaults to native) against `CLI-1`, a native-Provider fixture task.
+`cli.test.mjs`'s actual `--provider github` test (test 8, line 307) only
+exercises `task list`, never `action run`. A repo-wide search confirmed
+**no test anywhere combines `action run`/`composePayload` with
+`--provider github`** — this is a genuine, currently-open test-coverage
+gap, not confirmed coverage as originally claimed.
+
+**No V-factor or numeric value changes.** This remains investigative/
+analytical work with no code/schema/Skill change either before or after
+correction (the underlying `composePayload` Provider-agnostic-pure-
+function structural argument still supports holding `gate_correctness`
+and `reusability` flat, on weaker but still-defensible structural
+grounds rather than "end-to-end tested" grounds). V_instance = 0.4903,
+V_meta = 0.0973, unchanged. Applied via strikethrough correction in
+`experiment/iterations/iteration-53.md` (two occurrences) and
+`experiment/provenance.md` (one occurrence, in this same tail section
+above).
+
+This is the **tenth confirmed post-hoc correction**, and a **new,
+third failure category** distinct from both the seven V-factor-
+misattribution corrections (iterations 25, 29, 31, 33, 34, 35, 36) and
+the two command-output-fabrication corrections (iterations 50, 51): a
+correctly-quoted, correctly-run command (the `grep` hit list) was
+followed by an incorrect inference about what a specific cited test
+line actually demonstrates, without reading the surrounding test body
+carefully enough to notice the fixture task (`CLI-1`) was native, not
+GitHub-backed. The added discipline this establishes: when citing a
+specific test file/line as proof a scenario is covered, read the full
+test body (not just grep hit locations) and confirm the actual
+fixture/flags used match the claimed scenario, before asserting
+coverage exists.
+
+A genuine, currently-open opportunity is surfaced by this correction:
+there is no dedicated `action run --provider github` end-to-end
+integration test in the suite. A future iteration could close this gap
+with real new test code — this would be a legitimate, non-manufactured
+`gate_correctness`/`reusability`-moving increment if picked up
+deliberately (not merely to manufacture a data point, consistent with
+G5), since it is a real, previously-uncredited gap this correction
+discovered rather than one invented to produce work.
