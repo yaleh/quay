@@ -32,16 +32,34 @@ function parseFlags(argv) {
   return { flags, positional };
 }
 
-async function withProvider(fn) {
+// Resolve a provider's declared `env` map (proposal §10's `.quay/config.yml`
+// shape) against the workspace root. Values that look like a relative path
+// (start with "./" or "../") are resolved to absolute paths; anything else
+// (e.g. "owner/repo") is passed through verbatim. This is what makes adding
+// a second, heterogeneous Provider (github) require zero changes to this
+// file beyond config — the env-building logic is provider-agnostic.
+function resolveProviderEnv(cfg, provider) {
+  const env = {};
+  for (const [key, value] of Object.entries(provider.env ?? {})) {
+    if (typeof value === "string" && (value.startsWith("./") || value.startsWith("../"))) {
+      env[key] = path.resolve(cfg.workspaceRoot, value);
+    } else {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
+async function withProvider(fn, { providerId } = {}) {
   const cfg = loadConfig();
-  const provider = activeProvider(cfg);
+  const provider = activeProvider(cfg, providerId);
   const providerDir = path.resolve(cfg.workspaceRoot, provider.path ?? ".");
   const [command, ...args] = provider.mcp_entry;
   const client = await connectProvider({
     command,
     args,
     cwd: providerDir,
-    env: { QUAY_NATIVE_TASKS_DIR: path.resolve(cfg.workspaceRoot, provider.tasks_dir ?? "tasks") },
+    env: resolveProviderEnv(cfg, provider),
   });
   try {
     return await fn(client, cfg, provider);
@@ -62,7 +80,7 @@ async function main() {
       } else {
         for (const t of tasks) console.log(`${t.id}\t${t.status}\t${t.role}\t${t.title}`);
       }
-    });
+    }, { providerId: flags.provider });
     return;
   }
 
@@ -80,7 +98,7 @@ async function main() {
         console.log(`${t.id}: ${t.title} [${t.status}]`);
         console.log(t.body);
       }
-    });
+    }, { providerId: flags.provider });
     return;
   }
 
@@ -99,7 +117,7 @@ async function main() {
       );
       if (flags.json) printJson(buttons);
       else for (const b of buttons) console.log(`${b.id}\t${b.label}`);
-    });
+    }, { providerId: flags.provider });
     return;
   }
 
@@ -119,7 +137,7 @@ async function main() {
       const channel = `task-${id}`;
       const result = await deliverTrigger({ root: cfg.workspaceRoot, channel, payloadObj });
       printJson({ ...payloadObj, channel, ...result });
-    });
+    }, { providerId: flags.provider });
     return;
   }
 

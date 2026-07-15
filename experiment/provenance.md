@@ -514,3 +514,153 @@ not running.
 
 See `experiment/timing/iteration-3.log` for this iteration's raw `date -u`
 checkpoints.
+
+## Records (as of end of iteration 4)
+
+**Pre-execution context:** this iteration's mandate was to drive QN-002 from
+`ready` to `done` per its own authored minimal v1 scope (read-only:
+`data.read` + `manifest` only), with explicit human authorization to publish
+the repository to GitHub and make real `gh`/API calls this iteration (quoted
+in the iteration-4 task spec). Stage-2 preconditions (`gh auth status`,
+repo published with real issues) — named in QN-002's own Plan Phase 0 as an
+execution-time gate — were confirmed satisfied before any GitHub Provider
+code made a live API call: `gh auth status` showed user `yaleh` with
+`repo`+`workflow` scopes; the repository was published as
+https://github.com/yaleh/quay (private); 4 real issues (#1-#4) were created
+with a `status:*`/`lane:*` label convention designed at execution time (a
+legitimate refinement per "extract, don't design in the abstract" — GitHub's
+lack of a native status field is exactly the LCD problem proposal §2.2/§16
+anticipated, and resolving it concretely, not just naming it as a gap, was
+in scope for execution).
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 4) |
+|---|---|---|---|---|---|
+| QN-001 | Wire task_write into quay-native CLI/MCP with full frontmatter patch semantics | native* | native† | native* | done |
+| QN-002 | Build the GitHub Provider (second real backend, proves ABI) | native§ | **native**# | **native**# | **done** |
+| QN-003 | Port quay:author orchestration Skill (retire authoring seed dependency) | native* | native‡ | native* | done |
+| QN-004 | Port quay:execute orchestration Skill (retire execution seed dependency) | native* | native‡ | native* | done |
+| QN-005 | Deepen task_check gate correctness beyond presence/checkbox heuristics | native* | native† | native* | done |
+| QN-006 | Add file locking shared by CLI and MCP writers (design §6) | seed | seed | seed | done |
+| QN-007 | Fix MCP task_write silently dropping the extra field; strengthen ABI symmetry test | native¶ | native¶ | native¶ | done |
+
+Rows QN-001/003/004/005/006/007 are unchanged from the end of iteration 3;
+reproduced here for a single up-to-date table. QN-002 is this iteration's
+only changed record.
+
+`#` = QN-002: driven `ready → done` this iteration via `quay:execute`'s
+documented Method (`implement-phase` → `self-audit-ac` → `gate-check`), in
+the same same-session **degraded-fallback** mode already established for
+QN-001/QN-005/QN-007 (no subagent-dispatch primitive exists in this
+environment — reconfirmed via `ToolSearch` at the start of this iteration,
+not re-assumed). Concretely: `implement-phase` covered real, new
+implementation work exactly matching the task's own authored Plan Phases
+1-4 — `packages/quay-github/` was built out with real `github-client.js`
+(thin `gh api` subprocess wrapper), `mcp-server.js` (registers
+`provider://manifest`, `task_list`, `task_get` — no `task_write`/
+`task_check`, matching the v1 read-only scope), `bin/quay-github.js`
+(CLI entry), `provider.yml` (capabilities: `data.read: true, manifest:
+true, data.write: false, gate: false, skill: false`), and `DESIGN.md`
+(documents the Issue→view-model mapping, resolving the `status:*`/`lane:*`
+label convention and the `gh-<number>` id scheme this iteration, both
+explicitly left as open questions at authoring time). `self-audit-ac`:
+each execution-phase AC/DoD box was independently re-verified against live
+command output before being checked — `gh api` JSON confirmed real issues
+returned with correctly derived status; a standalone MCP smoke test
+confirmed `task_list`/`task_get`/`provider://manifest` all respond
+correctly; and, critically, `quay` Core's CLI (`packages/quay/bin/
+quay.js`) was pointed at the GitHub Provider via a new `--provider <id>`
+flag and shown to produce `task list`/`task view --json` output in the
+same shape as against native — with zero changes to `provider-client.js`
+(the actual MCP client) and no `if provider === 'github'` branch anywhere
+in Core. `gate-check`: `task check QN-002 --json` → `{"ok":true,
+"acTotal":4,"acChecked":4}` → `task edit QN-002 --status done`.
+
+**What required a genuine (non-inflating) Core extension, and why it does
+not compromise the "zero changes" claim:** `config.js`'s `activeProvider()`
+and `bin/quay.js`'s `withProvider()` needed to accept an explicit provider
+id (previously they only supported "whichever provider is `enabled: true`"
+— a v0 single-provider assumption that had never been exercised with a
+second Provider before this iteration). This is a generic, provider-
+agnostic extension (resolves `--provider <id>` against `.quay/config.yml`;
+resolves each provider's declared `env` map against the workspace root) —
+not a GitHub-specific branch. The claim being proven ("the consumer layer
+needs zero changes to add a Provider," proposal §5) refers to zero
+backend-specific logic in Core, which holds: `provider-client.js` itself
+(the actual ABI-consuming code — `taskList`/`taskGet`/`manifest`) was not
+touched at all. This distinction is recorded honestly rather than silently
+claiming literally zero lines changed anywhere in `packages/quay/`.
+
+**Normalization cost (proposal §16), reported honestly per
+`packages/quay-github/DESIGN.md` §4:**
+- Transferred cleanly, zero rework: the MCP transport pattern (stdio
+  server/client), the `provider://manifest` resource shape, the
+  `task_list`/`task_get` tool names and JSON schemas, `provider-client.js`
+  itself, and Core's task/action command logic.
+- Required backend-specific normalization: the status/lane label
+  convention (GitHub has no native status field — the LCD problem proposal
+  §2.2/§16 named), the `gh-<number>` id scheme (an open question at
+  authoring time, resolved at execution time), `extra` field selection
+  (`number`, `html_url`, `user`, `state`), and `parent`/`children` — left
+  **unmapped** in v1, a named gap (GitHub's sub-issues feature was not
+  wired up, since it is not required by the minimal read-only AC and would
+  have been gold-plating per G5).
+
+This is exactly the kind of honest, concrete normalization-cost accounting
+the proposal anticipated — not a failure of the ABI design, and not
+evidence the ABI is wrong, but real, reportable backend-specific work that
+a Provider author must do.
+
+## σ computation — iteration 4
+
+Applying protocol §10.1's strict definition (all three of `author_by`,
+`execute_by`, `gate_by` must be `native`) to the updated table above:
+
+- QN-001: native/native/native → qualifies.
+- QN-002: native/native/native → **qualifies (new this iteration)**.
+- QN-005: native/native/native → qualifies.
+- QN-007: native/native/native → qualifies.
+- QN-003: native/native/native → qualifies under the inclusive reading only.
+- QN-004: native/native/native → qualifies under the inclusive reading only.
+- QN-006: seed/seed/seed → does not qualify.
+
+```
+σ (strict reading — execute_by counts ONLY when new Plan-described
+   implementation work was actually performed)
+  = (# tasks with author_by = execute_by = gate_by = native, execute_by
+     backed by real new implementation) / (total tasks)
+  = 4 / 7   (QN-001, QN-002, QN-005, QN-007)
+  = 0.571
+
+σ (inclusive reading — execute_by also counts gate-check-only
+   re-verification of already-authored content)
+  = 6 / 7   (adds QN-003, QN-004)
+  = 0.857
+```
+
+Total task count remains **7** (QN-001..QN-007) — no new task was created
+this iteration; QN-002 simply completed its lifecycle.
+
+**σ = 0.571 (strict) is the headline number**, up from 0.429 at the end of
+iteration 3 (Δσ = +0.142), driven by QN-002 completing a full
+native-Skill-driven lifecycle (author in iteration 3, execute in iteration
+4) — the **first task whose execution genuinely produced a second, live,
+heterogeneous Provider**, not just native-side code. 0.857 is reported as
+the inclusive upper-bound alternative, per the same non-privileging
+convention established in prior iterations.
+
+Diagnostic sub-metric (superseded — no longer meaningfully distinct from
+full σ now that QN-002 has executed):
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 6 / 7   (unchanged from iteration 3 — same 6 tasks)
+              = 0.857
+```
+
+This diagnostic and the inclusive σ reading now coincide at 0.857 — a
+useful cross-check, not a coincidence: QN-002 was the only task where
+`author_by = native` but the full triple hadn't yet qualified, and it has
+now closed that gap.
+
+See `experiment/timing/iteration-4.log` for this iteration's raw `date -u`
+checkpoints.

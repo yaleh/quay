@@ -32,10 +32,24 @@ export function loadConfig(startDir = process.cwd()) {
   return { config, configPath, workspaceRoot };
 }
 
-/** Returns the first enabled provider's launch info (v0: single-provider). */
-export function activeProvider(cfg) {
+/**
+ * Returns a provider's launch info.
+ *
+ * v0 default (single-provider) behavior is preserved: with no `id` argument,
+ * returns the first *enabled* provider. Iteration 4 (QN-002 execution) adds
+ * explicit selection by id — `quay --provider <id> ...` — so the Core CLI
+ * can be pointed at either `native` or `github` without any code change
+ * (proposal §5: "the consumer layer needs zero changes" to add a Provider).
+ * Explicit-id selection does not require the provider to be `enabled: true`
+ * in config — enabled/disabled only affects the *default* pick.
+ */
+export function activeProvider(cfg, id) {
   const providers = cfg.config.providers ?? {};
-  const enabledId = Object.keys(providers).find((id) => providers[id].enabled);
+  if (id) {
+    if (!providers[id]) throw new Error(`no such provider "${id}" in .quay/config.yml`);
+    return { id, ...providers[id] };
+  }
+  const enabledId = Object.keys(providers).find((pid) => providers[pid].enabled);
   if (!enabledId) throw new Error("no enabled provider in .quay/config.yml");
   return { id: enabledId, ...providers[enabledId] };
 }

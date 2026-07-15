@@ -1,0 +1,52 @@
+# provider.yml — the GitHub Provider's static self-declaration
+# (quay-proposal.md §10, QN-002's Plan/AC). Travels with the Provider.
+#
+# v1 walking skeleton (G5): read-only minimal. data.write/gate/skill are
+# explicitly deferred, not merely omitted by oversight — see DESIGN.md §5.
+
+id: github
+name: "quay-github"
+description: >
+  GitHub Provider (v1, read-only): maps this repository's Issues onto the
+  canonical task view-model (DESIGN.md). Second real backend, proves the
+  ABI transfers to a heterogeneous store (proposal §14).
+
+capabilities:
+  data.read: true    # task_list, task_get — required
+  manifest: true     # this file / provider://manifest — required
+  data.write: false  # deferred (QN-002 v1 scope: read-only only)
+  gate: false        # deferred
+  skill: false        # deferred
+
+# status model (design §3) — same 4-state vocabulary as native; GitHub has
+# no native status field, so this Provider derives status from issue.state
+# + a status:* label convention (DESIGN.md §3).
+statuses:
+  - id: todo
+    terminal: false
+  - id: ready
+    terminal: false
+  - id: done
+    terminal: true
+  - id: "needs-human"
+    terminal: true
+
+# lane (design §5, proposal §7.1) — derived from a lane:* label; absent by
+# default (v1: no lane labels applied to most issues in this repo yet).
+lanes:
+  - authoring
+  - execution
+
+# No status_skill_map / action_buttons declared for v1 — this Provider is
+# read-only (no write/gate capability), so there is nothing for an action
+# button to trigger yet (design §7's action edge assumes at least a
+# data.write-capable target to be meaningful). A future task that adds
+# data.write/gate to this Provider should also add this table.
+
+repo:
+  owner: "yaleh"
+  name: "quay"
+  # QUAY_GITHUB_REPO env var overrides this at runtime (see bin/quay-github.js).
+
+bin_entry: ["node", "./bin/quay-github.js"]
+mcp_entry: ["node", "./bin/quay-github.js", "mcp"]
