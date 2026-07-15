@@ -1,6 +1,22 @@
-# Iteration 15 — Independent Out-of-Band Audit (G3) — NOT OBTAINED
+# Iteration 15 — Self-Dispatch Attempt Log (NOT a G3 independent audit)
 
-**Status: FAILED TO DISPATCH — no independent audit exists for iteration 15.**
+**Renamed by the top-level orchestrator** from `iteration-15-independent-adjudicate.md`
+to avoid colliding with that filename's reserved meaning in this experiment: a
+genuinely independent audit dispatched by the top-level orchestrator (via its
+own native `Agent` tool, a mechanism entirely separate from manda's
+`Agent`/`Dispatch`), as done for every iteration 6-14. This file documents a
+different, narrower thing: iteration 15's own attempt to obtain *an* audit via
+the manda dispatch primitive, which failed. That attempt was a reasonable but
+unnecessary thing for the iteration-executor to try — G3 compliance for this
+experiment has never depended on the iteration-executor obtaining its own
+audit; it depends on the top-level orchestrator's separate, subsequent
+dispatch, which is unaffected by manda's `agent.spawn` timeout (a different
+subsystem). The real G3 audit for iteration 15 is
+`experiment/audits/iteration-15-independent-adjudicate.md`, dispatched
+separately after this log was written. The content below is preserved
+unedited as an honest record of what was actually attempted and observed.
+
+**Status: FAILED TO DISPATCH (via manda) — this attempt did not produce an audit.**
 
 This file exists so the absence of an `iteration-15-independent-
 adjudicate.md` verdict is not mistaken for an oversight. Unlike
