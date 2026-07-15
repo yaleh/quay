@@ -227,6 +227,31 @@ timestamped (2026-07-15T09:41Z) data point for future iterations and
 the independent auditor to build on, rather than left as an assumption
 either way.
 
+**Update (iteration 15): the `Agent` timeout now reproduces 5/5, and —
+critically — this iteration's own attempt to obtain the mandatory G3
+independent audit FAILED for the same reason.** Iteration 15 re-ran the
+minimal "PONG" sanity check itself (identical timeout, a 4th data
+point alongside iteration 14's 2 calls + its auditor's 1 call), then
+separately attempted to `Agent`-dispatch a genuine independent auditor
+session for iteration 15's own work (the same mechanism iterations
+13/14 used successfully) — **that call also timed out identically**
+(5th data point). A fallback via the async `Dispatch` queue (`pool:
+true`) succeeded at submission but found no live worker to claim the
+task, so it was explicitly cancelled rather than left to an
+unbounded-future claim being retroactively misrepresented as this
+iteration's audit. **Net effect: iteration 15 has no independent,
+externally-dispatched mechanical `adjudicate` co-sign** — see
+`experiment/audits/iteration-15-independent-adjudicate.md` (a
+"FAILED TO DISPATCH" record, not a verdict) and `experiment/
+iterations/iteration-15.md` §9. This is a new, slightly worse data
+point than iteration 14's own (which DID obtain its audit): the
+degraded state is not just "fresh-context spawn for task work is
+unavailable" but "on-demand independent audit dispatch is itself not
+reliably available," a standing risk to G3 compliance (protocol §6)
+that future iterations should treat as a live, re-testable condition,
+not a permanent one — but also not something to paper over if it
+recurs across several more iterations.
+
 ## Relationship to the experiment's guardrails (G1-G6, protocol §6)
 
 Directives introduce a new risk class the existing guardrails don't cover:

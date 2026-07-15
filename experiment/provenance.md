@@ -2321,3 +2321,80 @@ same 26-task table as iteration 13, unchanged:
 
 Total task count remains **26** (QN-001..QN-027, minus the
 never-allocated QN-018) — no new task was created this iteration.
+
+## Records (as of end of iteration 15)
+
+**Pre-execution context:** the backlog remains exactly as iteration 14
+left it — 22 `done`, 3 permanently `needs-human` by design (QN-017,
+QN-020, QN-022), 1 structurally-unsatisfiable `todo` (QN-021),
+re-verified by direct per-file `status:` grep, not assumed. No task was
+authored or executed this iteration.
+
+**Test performed (verbatim), a fourth independent data point on the
+`Agent` fresh-context-spawn precondition:**
+
+```
+$ date -u
+Wed Jul 15 09:51:43 UTC 2026
+
+mcp__plugin_manda_manda__Agent(prompt="Reply with only the single word:
+      PONG", subagent_type="general-purpose")
+  → MCP error -32603: timeout waiting for cap "agent.spawn" result
+    after 30s
+```
+
+Identical error signature to iteration 14's own two calls and iteration
+14's independent auditor's own separate call — 4/4 across two sessions
+(this iteration's and iteration 14's/its auditor's). This further
+strengthens (does not newly reverse) iteration 14's finding: the
+`agent.spawn` capability is architected as a relay to a live parent-
+broker session (`.manda/config.yml`'s `parent-proxy` profile), and no
+live session has answered the relay within the 30s window across any
+of the 4 attempts made so far across both iterations.
+
+**`quay-github` `gate`/`skill` re-evaluation (12th consecutive
+substantive iteration):** `store.js#check()` (quay-native's own gate,
+~150 lines, artifact-presence + AC-checkbox + recursive-children logic)
+was re-read fresh and compared side-by-side against `quay-github`'s
+`DESIGN.md` §5 / `provider.yml` (`gate: false`, `skill: false`,
+unchanged since QN-024/iteration 10). Conclusion, stated more precisely
+than in prior iterations: implementing a GitHub-side gate would be
+mechanically straightforward (the same section/checkbox regex logic
+already exists and issue bodies are markdown too) — the missing
+ingredient is not a design gap but a **usage event**: no task has ever
+been authored/executed with GitHub Issues as its *primary* backend
+(every GitHub-touching task so far — QN-002, QN-009/010/011, QN-024 —
+built or extended the Provider itself, none drove a task's own
+todo→ready→done lifecycle natively through it). `gate`/`skill` remain
+`false`/`false`, honestly re-confirmed — the 12th consecutive
+substantive iteration (4 through 15, minus iteration 11).
+
+**GitHub issue-mirror staleness (issues #3/#4) checked and found NOT to
+be new evidence:** `gh issue list`/`gh issue view` showed issues #3/#4
+still `OPEN` with stale-looking labels (#3 mirrors QN-007, `done`
+natively; #4 is a GitHub-only fixture task, not a mirror of any native
+QN task). Traced to iteration 10's own deliberate scoping of QN-024
+(status-write-only, explicitly not an ongoing auto-sync mechanism) —
+not a new finding, and orthogonal to the `gate`/`skill` question
+(sync-cadence vs. gate-logic).
+
+No task's provenance triple changed this iteration. σ is unchanged.
+
+## σ computation — iteration 15
+
+No task reached a new `{native, native, native, done}` state this
+iteration (no task was authored or executed). σ is recomputed from the
+same 26-task table as iterations 13/14, unchanged:
+
+```
+σ (strict reading)    = 19 / 26 = 0.7308     (unchanged, Δσ = 0)
+σ (inclusive reading) = 21 / 26 = 0.8077     (unchanged)
+σ_author_only         = 25 / 26 = 0.9615     (unchanged)
+```
+
+Total task count remains **26** (QN-001..QN-027, minus the
+never-allocated QN-018) — no new task was created this iteration. This
+is now the **second consecutive iteration with zero task/code
+movement** (iteration 14, then iteration 15) — see
+`experiment/iterations/iteration-15.md` §10 for the resulting rigorous
+(and explicitly time-bounded) treatment of convergence criterion 5.
