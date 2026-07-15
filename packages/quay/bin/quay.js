@@ -102,6 +102,26 @@ async function main() {
     return;
   }
 
+  if (cmd === "task" && sub === "edit") {
+    // QN-024 (iteration 10): generic task_write passthrough, provider-
+    // agnostic — same withProvider() path as list/view, zero backend
+    // branch. Whether the active Provider actually implements task_write
+    // is a Provider-manifest question (data.write capability), not
+    // something this command special-cases.
+    const id = positional[0];
+    if (!flags.status) {
+      console.error("quay task edit: --status <s> is required (v1 supports status-only writes)");
+      process.exitCode = 1;
+      return;
+    }
+    await withProvider(async (client) => {
+      const t = await client.taskWrite({ id, status: flags.status });
+      if (flags.json) printJson(t);
+      else console.log(`${t.id}: ${t.title} [${t.status}]`);
+    }, { providerId: flags.provider });
+    return;
+  }
+
   if (cmd === "action" && sub === "list") {
     const id = positional[0];
     await withProvider(async (client) => {

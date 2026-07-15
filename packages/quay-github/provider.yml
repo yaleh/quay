@@ -1,22 +1,26 @@
 # provider.yml — the GitHub Provider's static self-declaration
 # (quay-proposal.md §10, QN-002's Plan/AC). Travels with the Provider.
 #
-# v1 walking skeleton (G5): read-only minimal. data.write/gate/skill are
-# explicitly deferred, not merely omitted by oversight — see DESIGN.md §5.
+# v1 walking skeleton (G5): read + minimal status-only write (QN-024,
+# iteration 10). gate/skill remain explicitly deferred, not merely omitted
+# by oversight — see DESIGN.md §5.
 
 id: github
 name: "quay-github"
 description: >
-  GitHub Provider (v1, read-only): maps this repository's Issues onto the
-  canonical task view-model (DESIGN.md). Second real backend, proves the
-  ABI transfers to a heterogeneous store (proposal §14).
+  GitHub Provider (v1, read + status-write): maps this repository's Issues
+  onto the canonical task view-model (DESIGN.md). Second real backend,
+  proves the ABI transfers to a heterogeneous store (proposal §14).
 
 capabilities:
   data.read: true    # task_list, task_get — required
   manifest: true     # this file / provider://manifest — required
-  data.write: false  # deferred (QN-002 v1 scope: read-only only)
-  gate: false        # deferred
-  skill: false        # deferred
+  data.write: true   # QN-024 (iteration 10): status-only write. title/body/
+                     # labels/parent/children remain unimplemented — see
+                     # DESIGN.md §5/QN-024's own AC for the exact scope line.
+  gate: false        # deferred — no natural reason to implement this
+                     # iteration either; QN-024's scope is data.write only.
+  skill: false        # deferred, same reason
 
 # status model (design §3) — same 4-state vocabulary as native; GitHub has
 # no native status field, so this Provider derives status from issue.state

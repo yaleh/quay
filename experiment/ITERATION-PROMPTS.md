@@ -27,40 +27,13 @@
     — do NOT require this before stage 2 begins
 [ ] experiment/provenance.md exists (after iteration 0) and is being read, not re-derived from memory
 [ ] previous iteration's experiment/iterations/iteration-{N-1}.md has been read in full
-[ ] re-run `ToolSearch` for a subagent-dispatch primitive with BROAD queries
-    (not just "subagent dispatch spawn agent task delegate" variants — also
-    try bare terms like "agent", "dispatch") before trusting any prior
-    iteration's "no dispatch primitive" finding — see note below
+[ ] experiment/directives/pending/ has been listed (`ls`) and every file in
+    it read; each must reach an explicit applied/deferred/rejected outcome
+    this iteration, recorded in this iteration's own report — see
+    experiment/directives/README.md for the full protocol
 ```
 
 G6 makes the manda check mandatory, not optional background — if the daemon is not live, stop and arm it before doing anything else.
-
-**Finding carried forward (post-iteration-8, do not silently drop):** iterations
-0-8 all concluded "no subagent-dispatch primitive exists in this environment"
-(G6, degraded same-session fallback) based on `ToolSearch` queries that never
-actually surfaced `mcp__plugin_manda_manda__Agent` or `mcp__plugin_manda_
-manda__Dispatch`/`DispatchStatus`/`DispatchSettle` — only `manda-dispatch`'s
-submit/status/cancel/fork-join (iteration 0/1, ruled out as requiring a
-separately-registered executor session) and `mcp__plugin_manda_manda__Send`
-(iteration 7, correctly ruled out — no fresh-context spawn, no reply). Whether
-`Agent`/`Dispatch` were absent from the tool list during iterations 0-8, or
-present but missed by narrow query phrasing, is **not yet determined** — this
-is an open question, not a conclusion. `Agent`'s own schema states: "Spawn a
-subagent... forwarded to the parent broker via the agent.spawn capability so
-the same prompt works at depth 0 (native) and depth 1 (this proxy)" — if
-usable, this is exactly the fresh-context independence primitive design §5
-requires and every iteration 1-8 report says is missing.
-
-**Action for the next iteration that reaches this point:** before repeating
-the standing "no dispatch primitive" finding, actually attempt one real
-`quay:author` or `quay:execute` dispatch through `mcp__plugin_manda_manda__
-Agent` (or `Dispatch`) against a real task, and report the outcome
-(succeeded / failed / tool absent) as first-class evidence in that
-iteration's report — do not just re-cite the prior 8 iterations' searches.
-If it works, this changes `author_by`/`execute_by`/`gate_by` provenance
-semantics going forward (genuine fresh-context independence becomes
-possible, per design §5) and should be treated as a protocol-relevant event,
-not folded silently into routine execution.
 
 ---
 

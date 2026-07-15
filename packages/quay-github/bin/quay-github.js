@@ -6,7 +6,10 @@
 // only the MCP surface is"). A thin `task list`/`task get` convenience is
 // still provided for manual smoke-testing/debugging, reusing the same
 // github-client.js core the MCP server uses (symmetry, design §6, applied
-// to whatever subset of the ABI this Provider implements).
+// to whatever subset of the ABI this Provider implements). `task edit
+// --status <s>` (QN-024, iteration 10) is the new minimal write-path
+// convenience — same CLI-as-golden-harness principle applied to whatever
+// subset of the write ABI this Provider implements (status-only, v1).
 
 import { createGithubClient } from "../src/github-client.js";
 
@@ -89,7 +92,20 @@ async function main() {
       return;
     }
 
-    console.error(`unknown task subcommand: ${sub} (v1 supports list/get only — read-only Provider)`);
+    if (sub === "edit") {
+      const id = positional[0];
+      if (!flags.status) {
+        console.error("quay-github task edit: --status <s> is required (v1 write capability is status-only, QN-024)");
+        process.exitCode = 1;
+        return;
+      }
+      const t = client.setStatus(id, flags.status);
+      if (flags.json) printJson(t);
+      else console.log(`${t.id}: ${t.title} [${t.status}]`);
+      return;
+    }
+
+    console.error(`unknown task subcommand: ${sub} (v1 supports list/get/edit --status only)`);
     process.exitCode = 1;
     return;
   }

@@ -80,10 +80,31 @@ export async function startMcpServer({ owner, repo }) {
     }
   );
 
-  // NOTE: task_write / task_check are intentionally NOT registered — v1
-  // capabilities are data.read + manifest only (provider.yml declares this
-  // explicitly; QN-002 AC #3). The Core degrades gracefully (design §6.2):
-  // no write -> grey out edit.
+  // task_write — data.write (QN-024, iteration 10: minimal status-only
+  // write). Mirrors quay-native's own task_write tool name (design §6
+  // symmetry), but with a deliberately narrower input schema — only `id`
+  // and `status` are accepted, per this task's explicit scope discipline
+  // (G5: do not gold-plate; title/body/labels/parent/children writes
+  // remain out of scope for v1).
+  server.registerTool(
+    "task_write",
+    {
+      description:
+        "Patch one task's status in the GitHub Provider's backing repository (status-only v1 write capability).",
+      inputSchema: { id: z.string(), status: z.string() },
+    },
+    async ({ id, status }) => {
+      const task = client.setStatus(id, status);
+      return {
+        content: [{ type: "text", text: JSON.stringify(task, null, 2) }],
+        structuredContent: { task },
+      };
+    }
+  );
+
+  // NOTE: task_check is still NOT registered — `gate` capability remains
+  // deferred (provider.yml), unchanged, no natural reason to implement it
+  // this task (QN-024's scope is data.write only).
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

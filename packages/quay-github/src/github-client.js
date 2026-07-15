@@ -32,6 +32,15 @@ function ghApiJson(args) {
   return JSON.parse(out);
 }
 
+function ghApiRun(args) {
+  // Same subprocess convention as ghApiJson, but for calls whose return
+  // value we don't need to parse (e.g. PATCH with no interesting body use,
+  // or calls made purely for a side effect). Still returns parsed JSON when
+  // the API gives one, for callers that want to inspect it.
+  const out = execFileSync("gh", ["api", ...args], { encoding: "utf8" });
+  return out ? JSON.parse(out) : null;
+}
+
 /** Extract child issue numbers referenced via task-list checkboxes in an
  * issue body (e.g. "- [ ] #12"). Returns an array of "gh-<n>" ids, in the
  * order they appear, de-duplicated. */
@@ -191,6 +200,41 @@ export function pageIssues({ maxIssues, perPage, fetchPage }) {
   return issues;
 }
 
+// QN-024: minimal data.write (status-only). Given an issue's CURRENT raw
+// label name list and the desired canonical `status`, compute the write
+// plan: which labels to keep, which `status:*` labels to remove, which new
+// `status:*` label (if any) to add, and whether the issue should end up
+// open or closed. Pure function, injectable/unit-testable without a live
+// `gh api` call (mirrors QN-014's `pageIssues` extraction pattern).
+//
+// Rules (mirror DESIGN.md §3's read-side mapping, applied in reverse):
+// - status === "done": close the issue. Per DESIGN.md §3, `state=="closed"`
+//   unconditionally forces status="done" on read regardless of any
+//   status:* label -- so no label change is required for this transition;
+//   existing status:* labels are left as-is (harmless, since read ignores
+//   them once closed).
+// - any other status: issue must end up OPEN, and must carry exactly one
+//   status:* label, `status:<status>` -- all other existing status:*
+//   labels are removed first, to avoid reintroducing the multi-label
+//   precedence ambiguity DESIGN.md §3.1 already had to solve for read.
+export function computeStatusWrite({ currentLabelNames, status }) {
+  if (status === "done") {
+    return { close: true, addLabels: [], removeLabels: [] };
+  }
+  const removeLabels = currentLabelNames.filter((n) => STATUS_LABEL_RE.test(n));
+  const desired = `status:${status}`;
+  const addLabels = removeLabels.includes(desired) && removeLabels.length === 1
+    ? [] // already exactly the desired single label -- nothing to change
+    : [desired];
+  return {
+    close: false,
+    addLabels,
+    // Only remove labels that are NOT the one we're about to (re-)add, to
+    // avoid a pointless remove-then-immediately-re-add round trip.
+    removeLabels: removeLabels.filter((n) => n !== desired),
+  };
+}
+
 /**
  * @param {{owner: string, repo: string}} opts
  */
@@ -252,5 +296,67 @@ export function createGithubClient({ owner, repo }) {
     return issueToViewModel(issue, null);
   }
 
-  return { list, get };
+  // QN-024: data.write (status-only, minimal v1 write surface — G5, no
+  // title/body/labels/parent/children writes). Reopens/closes the issue
+  // and replaces status:* label(s) per computeStatusWrite's pure decision
+  // logic above, then returns the fresh view-model (single-issue lookup,
+  // so `parent` is left null per the existing get() limitation).
+  function setStatus(id, status) {
+    const m = /^gh-(\d+)$/.exec(id);
+    if (!m) throw new Error(`quay-github: invalid task id for setStatus: ${id}`);
+    const number = m[1];
+    const issue = ghApiJson([`repos/${owner}/${repo}/issues/${number}`]);
+    const currentLabelNames = (issue.labels ?? []).map((l) =>
+      typeof l === "string" ? l : l.name
+    );
+    const plan = computeStatusWrite({ currentLabelNames, status });
+
+    if (plan.close) {
+      ghApiRun([
+        `repos/${owner}/${repo}/issues/${number}`,
+        "-X",
+        "PATCH",
+        "-f",
+        "state=closed",
+      ]);
+    } else {
+      // Ensure open (idempotent -- reopening an already-open issue is a
+      // harmless no-op per the GitHub API).
+      ghApiRun([
+        `repos/${owner}/${repo}/issues/${number}`,
+        "-X",
+        "PATCH",
+        "-f",
+        "state=open",
+      ]);
+      for (const label of plan.removeLabels) {
+        // Deleting a label that isn't present 404s -- swallow, since our
+        // plan was computed from a live read moments ago but another
+        // writer could have raced us; a missing label to remove is not
+        // itself an error worth failing the whole write for.
+        try {
+          ghApiRun([
+            `repos/${owner}/${repo}/issues/${number}/labels/${encodeURIComponent(label)}`,
+            "-X",
+            "DELETE",
+          ]);
+        } catch {
+          /* already absent -- fine */
+        }
+      }
+      for (const label of plan.addLabels) {
+        ghApiRun([
+          `repos/${owner}/${repo}/issues/${number}/labels`,
+          "-X",
+          "POST",
+          "-f",
+          `labels[]=${label}`,
+        ]);
+      }
+    }
+
+    return get(id);
+  }
+
+  return { list, get, setStatus };
 }

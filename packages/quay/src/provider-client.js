@@ -26,6 +26,17 @@ export async function connectProvider({ command, args, env, cwd }) {
     return r.structuredContent?.task ?? null;
   }
 
+  // QN-024 (iteration 10): generic task_write passthrough — no
+  // provider-specific branch. Whether a given Provider actually implements
+  // task_write (data.write capability) is between the caller and the
+  // Provider's own manifest; Core just forwards whatever patch fields are
+  // given, same as taskList/taskGet forward whatever filter/id is given.
+  async function taskWrite(patch) {
+    const r = await client.callTool({ name: "task_write", arguments: patch });
+    if (r.isError) throw new Error(r.content?.[0]?.text ?? "task_write failed");
+    return r.structuredContent?.task ?? null;
+  }
+
   async function manifest() {
     const r = await client.readResource({ uri: "provider://manifest" });
     return JSON.parse(r.contents[0].text);
@@ -35,5 +46,5 @@ export async function connectProvider({ command, args, env, cwd }) {
     await client.close();
   }
 
-  return { taskList, taskGet, manifest, close };
+  return { taskList, taskGet, taskWrite, manifest, close };
 }
