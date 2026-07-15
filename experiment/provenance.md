@@ -7498,3 +7498,152 @@ precise mechanistic diagnosis (reachable, schema loads, real MCP
 round-trip, unserviced due to an unsubstituted `--self` label) — is not
 forced into a V-factor axis the evidence does not support, per the
 standing discipline (iterations 25, 28, 29, 37-48).
+
+## Iteration 50 — milestone (50th); exhaustive closure of the alternate-AC-state-source fresh angle; Status-line and dispatch-wiring durability re-checks
+
+### Preconditions checked
+
+`experiment/directives/pending/` confirmed **empty** via `ls`. `git status
+--short` confirmed clean modulo the one pre-existing, deliberately-
+untouched `docs/proposal/baime-lite-driving-external-projects.md`.
+`ls tasks/QN-*.md | wc -l` confirmed **56** (unchanged from iteration 49's
+final tally). Full 25-file regression suite and `abi-symmetry.mjs` both
+confirmed passing at start and end. `docs/proposal/quay-bootstrap-
+experiment.md` (233 lines, gitignored, read directly from disk),
+`experiment/ITERATION-PROMPTS.md` (489 lines), and the tail of this file
+all read fresh this session.
+
+`experiment/audits/iteration-49-independent-adjudicate.md` (already
+present on disk, produced by the top-level orchestrator's own separate
+process) was read in full. Verdict: clean **PASS**, extending the streak
+(37-48) to **thirteen** consecutive iterations (37-49) — independently
+re-verified this session via grep across all 13 audit files.
+
+### Observe
+
+This iteration's brief named a specific fresh angle: whether
+`checkGate()` (`packages/quay-github/src/github-client.js`) could accept
+an alternate AC-state source (not `issue.body`) that would let issues
+#3/#4 progress without violating QN-024's status-only `data.write` scope.
+Read the full 611-line file, confirmed `checkGate(task, getChildTask)`'s
+signature has no injected AC-state function and `body` is the sole
+source consulted by both gate branches. Enumerated four candidate
+alternate sources and rejected each on distinct, code-verified grounds:
+(1) per-AC-item labels — no label-mutation code path exists at all
+(`grep` for `addLabels|removeLabels|setLabels` returns zero matches); a
+new write capability, i.e. the same declined scope in disguise. (2)
+GitHub's sub-issues/tasklist-progress API — already independently scoped
+out (`DESIGN.md` lines 97-100) for orthogonal reasons (disproportionate
+effort for read-only v1), and structurally a different concept (child
+issues, not one issue's checkbox lines). (3) GitHub Projects v2 custom
+fields — no `projects` capability declared, no `projects/v2` API call
+anywhere in the file (`grep` confirms); would be a new capability
+category, not a parameter extension. (4) structured comments — the one
+candidate technically distinct from a body edit, but still a new write
+path beyond the declared status-only `data.write` scope; adding it solely
+to unblock two issues for a metric is exactly the anticipatory-scope-
+expansion G5 prohibits. **Conclusion: no alternate AC-state source exists
+that both avoids a new `data.write` scope expansion and is populated by
+anything other than a body edit** — the fresh angle is closed with a
+firm, exhaustively-derived negative, not left open.
+
+Also re-checked two previously-fixed/-diagnosed items for continued
+durability: the Status-line staleness class (QN-049/050/051/053/054/
+056/057) — all four files QN-057 fixed at iteration 46 still show
+relative, non-stale phrasing four iterations later (`grep -n "^\- \*\*
+Status"` against all four, none re-staled); and the manda `--self`
+dispatch wiring — all three running `manda-tools mcp --self` processes
+still show an empty `--self` value, unchanged from iteration 49, still
+correctly out of scope for this experiment to unilaterally fix. A full
+TODO/FIXME sweep across all package source returned zero matches.
+
+### Strategy
+
+The named fresh angle was pursued to a concrete, exhaustive conclusion
+rather than left open or answered by analogy. No new tractable
+V_instance/V_meta opportunity was found. Consistent with the standing
+discipline (iterations 19, 28, 29, 37-49), this iteration does not force
+a new task into existence. No `tasks/QN-0NN.md` was created.
+
+### Execution
+
+No code, Skill, or gate change was made. Read-only work only: full read
+of `github-client.js`; `grep` searches for label-mutation and Projects v2
+code paths; `gh issue view` re-reads (both issues' `updatedAt` unchanged
+since iteration 49); Status-line file re-checks; manda process re-checks;
+TODO/FIXME sweep; full regression suite (25/25) and `abi-symmetry.mjs`
+("ALL FOUR SURFACES SYMMETRIC") re-confirmed at start and end.
+`git diff --stat` against the working tree (before this report/provenance
+commit): empty for all source files.
+
+### σ computation — iteration 50
+
+No task's provenance triple changed; no task was created or completed.
+σ is unchanged:
+
+```
+σ (strict reading) = 49 / 56 = 0.8750   (unchanged, Δσ = 0)
+```
+
+`ls tasks/QN-*.md | wc -l` independently re-confirmed = **56**.
+
+### V-factor attribution — iteration 50 (fresh angle exhaustively closed; two durability re-checks; held flat)
+
+- **skeleton, abi_symmetry, skill_convergence**: no source file touched
+  this iteration (`git status --short` confirms). Held flat: skeleton
+  0.70, abi_symmetry 0.96, skill_convergence 0.96.
+- **gate_correctness: 0.76 (unchanged).** This iteration's close read of
+  `checkGate()`'s parameter surface and call sites is confirmatory — the
+  gate correctly and exclusively consults the one AC-state source this
+  Provider's scope permits; no defect found, no code changed. Held flat.
+- **completeness: 0.74 (unchanged).** No Skill/gate/decomposition-rule
+  content changed; the hypothetical injection-point refactor was
+  correctly identified as unmotivated (no real alternate source would use
+  it) and correctly not performed.
+- **effectiveness: 0.26 (unchanged).** No code executed via `quay:
+  author`/`quay:execute` to build a new feature this iteration
+  (enumeration/source-reading only, not a marginal increment). Now **30
+  consecutive iterations (21-49, and now 50)**.
+- **reusability: 0.79 (unchanged).** This iteration's exhaustive
+  four-candidate enumeration is a stronger, more complete negative result
+  than any prior iteration's (iteration 45's grep-based scope citation;
+  iteration 49's live-gate-call confirmation) but produces zero new
+  Provider *behavior* on the transfer target — §5.2 requires behavior
+  change, not a more complete proof that none is currently available.
+  Held flat for the **twenty-fifth consecutive iteration (26-50)**.
+- **validation: 0.64 (unchanged).** No audit exists yet for this
+  iteration's own work. The thirteen-consecutive-PASS streak does not
+  move this factor alone, consistent with the precedent at iterations
+  41-49 (validation moves only after a specific iteration's own audited
+  work, never on streak length).
+
+```
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = 0.4903  (unchanged)
+V_meta      = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+ΔV_instance = ΔV_meta = **0.0000**. This iteration's genuine
+contribution — an exhaustive, code-verified enumeration and rejection of
+every candidate alternate AC-state source `checkGate()` could plausibly
+consult, closing the specific fresh angle this iteration's brief named
+with a firm negative rather than leaving it open, plus two clean
+durability re-checks (Status-line class holding four iterations after its
+fix; dispatch wiring unchanged) — is not forced into a V-factor axis the
+evidence does not support, per the standing discipline (iterations 25,
+28, 29, 37-49).
+
+### Milestone note (50th iteration)
+
+A brief retrospective (full text in `experiment/iterations/iteration-
+50.md`'s Reflections section) observes the 50-iteration arc splits into
+two phases: iterations ~0-36 built real capability (σ climbed 0 → 0.875,
+V_instance rose from an honest low baseline to 0.4903); iterations ~37-50
+are a genuine floor (not a plateau-toward-convergence) with both V's flat
+since ~iteration 42, `effectiveness` flat 30 iterations, `reusability`
+flat 25 iterations. The thirteen-consecutive clean-PASS audit streak
+(37-49) is read as evidence the methodology's self-checking discipline
+(G3) works correctly even while the underlying V-factors it checks sit
+flat — a stable, honest "no change" report for 8+ iterations is the
+audit process succeeding, not failing to find something that isn't
+there. No system evolution (no new agent/capability/Skill) is warranted
+this iteration; M_49 = M_50, A_49 = A_50.
