@@ -4691,3 +4691,50 @@ small, monotonic σ growth from a single new native-triple `done` task
 against a growing denominator; it is not a step change and does not, on its
 own, bear on any convergence criterion beyond what iteration-35.md §10
 evaluates directly.
+
+## Post-hoc correction (iteration 35's `skeleton`/`abi_symmetry` misattribution)
+
+Iteration 35's independent audit
+(`experiment/audits/iteration-35-independent-adjudicate.md`, verdict PASS
+WITH CONCERNS) fully confirmed the iteration's headline engineering claim
+(a genuine charset/mojibake bug in `serve.js`, found live via playwright
+MCP browser automation, root-caused, fixed, and covered by a new
+regression test `serve-browser-render.test.mjs`) via an independent
+adversarial revert-and-restore, reproducing the exact "2 FAILED"
+assertion detail reported. It found one V-factor misattribution: the
+iteration credited `skeleton` alone (+0.01) and held `abi_symmetry` flat,
+citing QN-031 (iteration 21) and iteration 0 as precedent — but never
+examined the closest on-point precedent, **QN-044/iteration 33**, which
+(via `ITERATION-PROMPTS.md` constraint 4(b), ratified iteration 29) maps
+"a genuinely new Core-level test script proving Web-UI content/output
+equivalence" to `abi_symmetry`, not `skeleton`. Iteration 35's own §7 even
+quotes constraint 4(b) but stops mid-sentence before its `abi_symmetry`
+clause.
+
+On review, `git diff --stat` on `serve.js` for this task is 14
+insertions/4 deletions entirely inside two pre-existing routes'
+response-header/HTML-head lines — no new route, action, or gate
+transition (the "loop runs end-to-end" scope §5.1 defines for
+`skeleton`). The charset bug is instead a genuine cross-surface
+**content-fidelity** defect: the Web UI rendered different content
+(mojibake) than what CLI/MCP already correctly exposed for identical
+underlying data — squarely the Web-UI-inclusive content-equivalence scope
+this project's own iteration-33/34 precedent uses to define
+`abi_symmetry`'s reach. The new regression test is the correct shape of
+event for that factor, not `skeleton`.
+
+**Corrected**: `skeleton` remains **0.69** (flat, not 0.70); `abi_symmetry`
+moves **0.95 → 0.96** (+0.01, not held flat). V_instance = 0.69 × 0.96 ×
+0.76 × 0.96 = **0.4833** (not 0.4852). ΔV_instance = **+0.0050** (not
++0.0069). This has been corrected via strikethrough in
+`experiment/iterations/iteration-35.md` §7 and §10 (all affected bullets,
+the V_instance formula/ΔV_instance lines, convergence criteria 1 and 5,
+and the final Status line). V_meta (0.0973), σ_strict (38/45 = 0.8444),
+and the overall NOT CONVERGED verdict (all 5 convergence criteria still
+evaluate NO on substance, confirmed by the audit under either candidate
+correction) are unaffected. This is the sixth post-hoc V-factor correction
+this session (after iterations 25, 29, 31, 33, and 34), continuing to
+confirm the standing discipline that no V-factor credit may be assigned
+without first locating and reading the single closest matching precedent
+in `provenance.md`, not merely a plausible-sounding one — in this case,
+QN-044/iteration 33 was the precedent sitting unexamined.

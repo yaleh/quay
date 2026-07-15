@@ -299,7 +299,7 @@ smaller end of this same "evidentiary-basis-only" pattern, used here for
 calibration of magnitude, not gap-closure completeness (this iteration's gap
 IS fully closed, unlike iteration 20's).
 
-- **skeleton: 0.70 (up from 0.69, Δ +0.01).** QN-046 does two things,
+- ~~**skeleton: 0.70 (up from 0.69, Δ +0.01).** QN-046 does two things,
   both `skeleton`-shaped per constraint 4(b)'s own mapping ("new Core
   capability code -> `skeleton`") and QN-031's directly-on-point precedent:
   (a) converts QN-031's own explicitly-named, 14-iteration-old open gap
@@ -318,8 +318,19 @@ IS fully closed, unlike iteration 20's).
   work, only newly proven to render correctly through an actual browser.
   This magnitude judgment follows iteration 20's own explicit calibration
   reasoning (smaller increment on an already-partially-covered surface →
-  +0.01, not +0.02).
-- **abi_symmetry: 0.95 (unchanged).** `abi-symmetry.mjs` re-run fresh this
+  +0.01, not +0.02).~~ **Corrected post-hoc: `skeleton` held flat at 0.69.**
+  Iteration 35's independent audit found this event contains no new
+  *capability* code separable from the bug fix — `git diff --stat` on
+  `serve.js` is 14 insertions/4 deletions entirely inside two pre-existing
+  routes' response-header/HTML-head lines, not a new route/action/gate
+  transition (the "loop runs end-to-end" scope §5.1 defines for
+  `skeleton`). QN-031 (iteration 21) and iteration 0 are not the closest
+  precedent: QN-044/iteration 33 (via `ITERATION-PROMPTS.md` constraint
+  4(b)'s `abi_symmetry` clause, which this section originally quoted only
+  half of) is the directly on-point precedent for "a genuinely new
+  Core-level test script proving Web-UI content/output equivalence" —
+  which is exactly what `serve-browser-render.test.mjs` is. Held flat.
+- ~~**abi_symmetry: 0.95 (unchanged).** `abi-symmetry.mjs` re-run fresh this
   iteration, still "ALL FOUR SURFACES SYMMETRIC" — reconfirmed, not newly
   established. No CLI/MCP JSON schema or content changed this iteration;
   the fix is entirely in `serve.js`'s HTTP response headers/HTML markup, a
@@ -328,7 +339,19 @@ IS fully closed, unlike iteration 20's).
   correction's own reasoning (QN-039/QN-045's precedent: config/rendering
   plumbing that does not change any CLI/MCP output schema does not move
   this factor), correctly held flat rather than credited here too. Held
-  flat.
+  flat.~~ **Corrected post-hoc: `abi_symmetry: 0.96 (up from 0.95, Δ
+  +0.01).** The charset bug was a genuine cross-surface **content-fidelity**
+  defect: the Web UI rendered different content (mojibake) than what
+  CLI/MCP already correctly exposed for the identical underlying data —
+  squarely the Web-UI-inclusive content-equivalence scope this project's
+  own iteration-33/34 precedent uses to define `abi_symmetry`'s reach. The
+  new regression test is a genuinely new Core-level equivalence proof at
+  the rendering/byte layer, the same shape constraint 4(b) maps to
+  `abi_symmetry`, not `skeleton`. The QN-039/QN-045 flat-hold precedent
+  (cited above, pre-correction) does not apply here — that precedent
+  covers config/plumbing fixes that touch no output surface at all; this
+  fix, by contrast, directly changes what the Web UI surface outputs,
+  making it and its regression test the correct kind of event to credit.
 - **gate_correctness: 0.76 (unchanged).** Zero diff to `store.js`'s or
   `github-client.js`'s own gate logic this iteration — `task_check`/CAS
   logic is completely untouched; QN-046's fix and new test are entirely
@@ -341,15 +364,20 @@ IS fully closed, unlike iteration 20's).
   gate via the already-converged `quay:author`/`quay:execute` procedure is
   not new evidence about Skill convergence itself. Held flat.
 
-```
+~~```
 V_instance = 0.70 × 0.95 × 0.76 × 0.96 = 0.4852
 ```
 
-ΔV_instance = **+0.0069** (0.4783 → 0.4852). This is a genuine, modest
+ΔV_instance = **+0.0069** (0.4783 → 0.4852).~~ **Corrected post-hoc:**
+```
+V_instance = 0.69 × 0.96 × 0.76 × 0.96 = 0.4833
+```
+ΔV_instance = **+0.0050** (0.4783 → 0.4833). This is a genuine, modest
 V_instance movement — the third such movement in the last three iterations
 (iteration 33: +0.0119, iteration 34: 0.0000 post-hoc-corrected, this
-iteration: +0.0069), all landing well within diminishing-returns territory
-(< 0.02) but none yet approaching the 0.80 dual threshold.
+iteration: +0.0050 post-hoc-corrected), all landing well within
+diminishing-returns territory (< 0.02) but none yet approaching the 0.80
+dual threshold.
 
 ## 8. V_meta
 
@@ -444,7 +472,8 @@ points**, named explicitly for the next audit to check independently:
 ## 10. Convergence Check
 
 - [ ] **1. Dual threshold (V_instance ≥ 0.80 AND V_meta ≥ 0.80)** — **NO.**
-      V_instance = 0.4852 (up from 0.4783), V_meta = 0.0973 (unchanged).
+      ~~V_instance = 0.4852 (up from 0.4783)~~ V_instance = 0.4833
+      (corrected post-hoc, up from 0.4783), V_meta = 0.0973 (unchanged).
       Both remain far below 0.80.
 - [ ] **2. Self-hosting fixpoint (σ→1, zero-seed build, stable Skill set +
       gate)** — **NO.** σ (strict) = 0.8444, up from 0.8409, still far from
@@ -458,7 +487,8 @@ points**, named explicitly for the next audit to check independently:
       sign-off)** — **NO.** No audit yet exists for this iteration's own
       work (correctly — it happens after this report is committed).
 - [ ] **5. Diminishing returns (ΔV < 0.02 for 2+ iterations)** — **Literal
-      test: YES** this iteration (ΔV_instance = +0.0069 < 0.02, ΔV_meta =
+      test: YES** this iteration (ΔV_instance = ~~+0.0069~~ +0.0050
+      (corrected post-hoc) < 0.02, ΔV_meta =
       0.0000 < 0.02; iteration 34's own corrected ΔV_instance was 0.0000,
       also < 0.02 — two consecutive iterations satisfying the literal
       numeric test). **Scored NO on substance**, consistent with this
@@ -471,8 +501,9 @@ points**, named explicitly for the next audit to check independently:
 
 **Status**: **NOT CONVERGED**. All 5 criteria are NO this iteration
 (criterion 5 scored NO on substance despite passing the bare literal numeric
-test, per the reasoning above). V_instance (0.4852) and V_meta (0.0973)
-remain far below the 0.80 dual threshold on both axes.
+test, per the reasoning above). V_instance (~~0.4852~~ 0.4833, corrected
+post-hoc) and V_meta (0.0973) remain far below the 0.80 dual threshold on
+both axes.
 
 ## Problems identified for next iteration
 
