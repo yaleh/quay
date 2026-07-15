@@ -40,6 +40,19 @@
 //   promptly; killing/timing that out would test process-management noise
 //   more than the dispatch logic itself.
 //
+// QN-064 (iteration 60) added test 9: a genuinely new negative-path angle
+// from test 8's own malformed-QUAY_GITHUB_REPO test. Test 8 exercises
+// resolveRepo()'s own synchronous throw, reached BEFORE any `gh api` call
+// is ever attempted. Test 9 instead uses a well-FORMED but unreachable
+// owner/repo (passes resolveRepo()'s own parse, so a real `gh api` network
+// round-trip is attempted and genuinely fails with a live 404) — exercising
+// list()'s completely unhandled `fetchAllIssues()` failure path (no
+// try/catch, unlike get()'s already-caught not-found path). Distinct from
+// QN-062 (iteration 58, Core's own Provider subprocess-startup-crash
+// angle) and QN-063 (iteration 59, malformed input VALUE inside an
+// existing, reachable issue's body) — this is a live `gh api` call FAILING
+// mid-session, from a Provider process that started successfully.
+//
 // Run: node test/cli.test.mjs
 // Precondition: `gh auth status` must show an authenticated session with
 // read access to yaleh/quay (already a standing stage-2+ precondition of
@@ -190,6 +203,24 @@ function main() {
     assert(
       r.stderr.includes("QUAY_GITHUB_REPO must be"),
       "quay-github <malformed QUAY_GITHUB_REPO> prints resolveRepo()'s own diagnostic via main().catch(...)"
+    );
+  }
+
+  // 9. Live `gh api` failure DURING `task list` (QN-064, iteration 60) —
+  //    a well-formed but unreachable owner/repo passes resolveRepo()'s own
+  //    parse (unlike test 8's malformed-format value), so a real `gh api`
+  //    network round-trip is attempted and genuinely 404s. Exercises
+  //    list()'s completely unhandled fetchAllIssues() failure path,
+  //    distinct from test 8's pre-network resolveRepo() throw.
+  {
+    const r = run(["task", "list", "--json"], {
+      QUAY_GITHUB_REPO: "nonexistent-owner-xyz-123/nonexistent-repo-abc",
+    });
+    assert(r.status === 1, "quay-github <task list, unreachable owner/repo> exits 1");
+    assert(r.stdout === "", "quay-github <task list, unreachable owner/repo> writes nothing to stdout");
+    assert(
+      /gh api|Not Found|HTTP/.test(r.stderr),
+      `quay-github <task list, unreachable owner/repo> stderr carries gh's own diagnostic (got: ${JSON.stringify(r.stderr.slice(0, 200))})`
     );
   }
 

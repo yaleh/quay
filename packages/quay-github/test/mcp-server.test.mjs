@@ -24,6 +24,20 @@
 //      call this file ever makes; client.setStatus is never reached with a
 //      real, existing task id, so no live write to any real GitHub issue
 //      ever occurs.
+//   7. (QN-064, iteration 60) task_list against a SEPARATE subprocess
+//      started with a well-formed but unreachable owner/repo -- a live
+//      `gh api` network round-trip is attempted and genuinely 404s,
+//      exercising list()'s completely unhandled fetchAllIssues() failure
+//      path (github-client.js has no try/catch around it, unlike get()'s
+//      already-caught not-found path). Distinct from QN-062 (iteration 58,
+//      Core's own Provider subprocess-STARTUP-crash angle via a malformed
+//      QUAY_GITHUB_REPO value, caught before any gh api call) and QN-063
+//      (iteration 59, malformed input VALUE inside an existing issue's
+//      body) -- this is a live gh api call FAILING mid-session, against
+//      quay-github's own MCP server (not Core's), from a Provider process
+//      that started and connected successfully. Asserts isError:true and
+//      that a second, independent call also returns isError:true (the
+//      quay-github mcp process itself survives the failure).
 //
 // Run: node test/mcp-server.test.mjs
 import { execFileSync } from "node:child_process";
@@ -119,6 +133,42 @@ async function main() {
   }
 
   await client.close();
+
+  // ---- 7. task_list against an unreachable owner/repo (QN-064) ----
+  // Separate subprocess/transport (a distinct env from the main `repoEnv`
+  // client above), started with a well-formed but unreachable owner/repo
+  // so the process itself starts and connects fine (unlike QN-062's
+  // startup-crash angle) and the failure occurs live, inside list()'s own
+  // unhandled fetchAllIssues() call.
+  {
+    const brokenEnv = {
+      ...process.env,
+      QUAY_GITHUB_REPO: "nonexistent-owner-xyz-123/nonexistent-repo-abc",
+    };
+    const brokenTransport = new StdioClientTransport({
+      command: "node",
+      args: [bin, "mcp"],
+      cwd: __dirname,
+      env: brokenEnv,
+    });
+    const brokenClient = new Client({ name: "test-agent-broken", version: "0.0.1" });
+    await brokenClient.connect(brokenTransport);
+
+    const r1 = await brokenClient.callTool({ name: "task_list", arguments: {} });
+    assert(r1.isError === true, "task_list against an unreachable owner/repo returns isError:true, not a crash");
+    assert(
+      typeof r1.content?.[0]?.text === "string" && r1.content[0].text.length > 0,
+      "task_list's isError:true result carries non-empty error text"
+    );
+
+    const r2 = await brokenClient.callTool({ name: "task_list", arguments: {} });
+    assert(
+      r2.isError === true,
+      "a second, independent task_list call against the same broken Provider ALSO returns isError:true (the quay-github mcp process survives the first failure)"
+    );
+
+    await brokenClient.close();
+  }
 
   if (failures > 0) {
     console.error(`\n${failures} FAILURE(S)`);

@@ -9252,3 +9252,161 @@ chain and overlook the most recent, most directly on-point iteration.
 
 **Current corrected state**: σ_strict = 55/62 = 0.8871, V_instance =
 0.5323, V_meta = 0.0973.
+
+## Iteration 60: QN-064 — live `gh api` failure during `task_list` mid-session (third distinct negative/error-path instance)
+
+Iterations 58 and 59 named "malformed issue bodies" and "rate-limit/
+network-transient-failure handling, misconfiguration surfaced at other
+lifecycle points" as distinct, not-yet-closed instances of the broader
+negative/error-path category. Iteration 58 closed the Provider
+**subprocess startup** failure angle (a malformed `QUAY_GITHUB_REPO`
+causing `resolveRepo()` to throw synchronously, before any `gh api`
+call). Iteration 59 closed the **null/undefined issue-body** input-shape
+angle. This iteration closes a third, previously untested angle: what
+happens when `gh api` itself fails (a live, well-formed-but-unreachable
+owner/repo — a real network 404, not a malformed-format value) **after**
+a successful Provider startup, **during** a live `task_list` call
+(inside `fetchAllIssues()`)?
+
+Read `packages/quay-github/src/github-client.js` in full this session.
+Confirmed `list()` (line 504) has **no try/catch** around
+`fetchAllIssues()` — unlike `get(id)` (line 512-521), which already wraps
+its own `ghApiJson` call in `try { ... } catch { return null; }`. A raw
+`execFileSync` failure (the real `Error` Node throws when `gh api` exits
+non-zero, carrying `gh`'s own stderr text, e.g. `gh: Not Found (HTTP
+404)`) propagates unhandled out of `list()`. Confirmed genuinely untested
+via `grep -n "fetchAllIssues\|\.list(" packages/quay-github/test/*.mjs`:
+`list()`/`fetchAllIssues` was previously only exercised against the real,
+reachable `yaleh/quay` repo, or via the fully-synthetic, injectable
+`pageIssues` (`pagination.test.mjs`, which tests only the max-issues
+overflow-cap throw — a *successful* `gh api` call whose result set is too
+large, a different failure mode entirely, not a *failing* `gh api` call).
+Also confirmed via `grep -n "malformed issue\|rate-limit"
+experiment/provenance.md` that this exact angle (a live `gh api` failure
+during `task_list`, as opposed to at Provider startup or a malformed
+input value) had never been closed before this iteration.
+
+Added test 9 to `packages/quay-github/test/cli.test.mjs` (`task list
+--json` against a well-formed but unreachable `owner/repo`; asserts exit
+1, empty stdout, stderr carries `gh`'s own diagnostic) and block 7 to
+`packages/quay-github/test/mcp-server.test.mjs` (a separate subprocess
+started with the same unreachable owner/repo; asserts `task_list` returns
+`isError:true` with non-empty error text, and that a second, independent
+call also returns `isError:true`, proving the quay-github MCP process
+itself survives the failure). 81 lines added across the two existing
+files; `git diff --stat -- packages/*/src/*.js` confirmed empty
+(test-file-only change). Full regression suite:
+
+```
+$ node --test packages/*/test/*.test.mjs
+...
+ℹ tests 26
+ℹ pass 26
+ℹ fail 0
+```
+(unchanged top-level file count — both new blocks landed inside
+already-counted files). `abi-symmetry.mjs`: ALL FOUR SURFACES SYMMETRIC.
+`gh issue view 3 --repo yaleh/quay --json number,state,labels` unchanged
+before/after this iteration's work — no live write occurred.
+
+QN-064 was created and driven through the **full gated lifecycle**
+(`task create` → `todo`, gated `author->ready` check, `task edit
+--status ready`, gated `execute->done` check, `task edit --status done`,
+terminal `task check` confirming `"gate":"none"`) — matching the full
+lifecycle discipline reinforced by iteration 57's post-hoc correction and
+iteration 59's own audit. `experiment/timing/iteration-60.log` records
+the real `date -u` checkpoints: task created 23:41:02Z → transitioned to
+`ready` 23:41:46Z → transitioned to `done` 23:43:38Z (total 2m36s).
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-064 | Add live gh-api-failure regression coverage for quay-github's task_list (mid-session, post-startup) | native | native | native | done |
+
+σ (strict) = 56/63 = **0.8889** (up from 55/62 = 0.8871).
+
+**V_instance factor reasoning:** `skeleton` credited **+0.01 (0.76 →
+0.77)**, following the identical reasoning pattern iterations 54-59 used
+for their own new-angle-but-same-factor-shape closures (test-coverage-
+only regression addition, zero source diff, for an already-existing,
+unmodified capability) — applied here to a genuinely different content
+(a live `gh api` failure occurring mid-session, after a successful
+Provider connect, inside `list()`'s unhandled `fetchAllIssues()` call —
+distinct from iteration 58's pre-connect subprocess-startup crash and
+iteration 59's malformed-input-*value* angle). `abi_symmetry` explicitly
+considered and rejected: this iteration's new tests make no cross-binding
+content-equivalence claim about a successful result; if anything, like
+iteration 58's tests, they exercise the CLI's/MCP's respective own
+error-surfacing shape for the *same underlying* Provider-level failure,
+not a schema-equivalence claim `abi-symmetry.mjs` itself measures.
+`gate_correctness` explicitly considered and rejected (this task
+concerns `list()`'s live-data-fetch failure path, a materially different
+code path from the task-lifecycle gate mechanism `checkGate()`/
+`store.js`; no gate logic was touched). `skill_convergence` unchanged (no
+SKILL.md content touched).
+
+```
+V_instance = 0.77 × 0.96 × 0.76 × 0.96 = 0.5393  (up from 0.5323)
+```
+
+**V_meta factor reasoning:** all four factors held flat.
+
+`effectiveness` was explicitly re-examined this iteration, given the
+timing log shows QN-064 completed in **2m36s** — faster than every prior
+scope-matched comparator (stage-0 QN-006 ~2m59s; iteration 22's QN-032
+~3m07s; iteration 59's QN-063 ~3m10s), the first time native has ever
+measured *faster* than the seed at this task shape. This was weighed
+carefully against iteration 23's own exact, verbatim bar (re-quoted
+directly from that iteration's own text, not a later gloss): reopening
+`effectiveness` requires "a marginal increment where native session
+context/tooling measurably speeds up a MORE COMPLEX task, not another
+comparably-scoped simple one." QN-064 is, by its own shape, the *same*
+comparably-scoped-simple-task pattern as QN-006/QN-032/QN-063 (one
+already-existing, unmodified code unit; two new test blocks; no
+source-code change; gate check; done) — it is not a "MORE COMPLEX task"
+in iteration 23's sense, regardless of which direction the raw timing
+number points. Iteration 59's own post-hoc correction (immediately
+preceding this iteration) established, in detail, that "zero network
+dependency" and "a positive/interesting timing result" are not the
+criterion iteration 23 set, and that substituting either property for
+"more complex task" is the exact scoring overreach that correction
+reversed. Crediting `effectiveness` here — merely because the number
+happens to be faster this time, on the identical simple-task shape
+already run three times — would repeat precisely the error the
+immediately preceding correction fixed, one iteration later, under a
+superficially different justification (favorable direction instead of
+absent network dependency). This task also does not itself constitute
+"a genuinely different kind of evidence": it is a fourth repetition of
+the same measurement methodology on a fourth same-shaped task. Held flat
+at **0.26**. The timing log itself (`experiment/timing/iteration-60.log`)
+is retained as genuine data (a real, honest data point showing more
+variance in either direction than previously observed, consistent with
+small-sample noise at this task scale), but no score credit is drawn from
+it, per the discipline above. `completeness` held flat (no methodology
+documentation change — `skills/author/SKILL.md` and
+`skills/execute/SKILL.md` untouched). `reusability` held flat (35th
+consecutive flat iteration — this iteration's tests prove an existing
+transfer property of `provider-client.js`'s/`github-client.js`'s own
+error-propagation code, not new transfer evidence for a different
+project). `validation` held flat (no audit yet exists for this
+iteration's own work, reserved for the top-level orchestrator).
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+No system evolution (no new agent, no new capability, no Skill change)
+is warranted — the standing system (M_59 = M_60, A_59 = A_60) remains
+stable. This iteration closes a third concrete instance of the
+negative/error-path angle (live `gh api` failure mid-session, alongside
+iteration 58's subprocess-startup-failure and iteration 59's
+malformed/null-body input) without exhausting the broader category.
+Future iterations should continue to look for further distinct instances
+(e.g. GitHub API rate-limit-specific handling if distinguishable from a
+generic `gh api` failure, malformed label/milestone data, or a
+misconfiguration surfaced at yet another lifecycle point) rather than
+treating the category as exhausted after three instances. `reusability`
+and `validation` remain the most stalled V_meta factors (35 and ~50
+consecutive flat iterations respectively) and are named as priority
+targets for a genuinely new angle in the next iteration.
+
+Full detail: `experiment/iterations/iteration-60.md`.
