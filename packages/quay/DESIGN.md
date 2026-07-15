@@ -155,8 +155,18 @@ before any live call):
   is a thin, generic passthrough with no Core-specific CAS logic, so the
   risk surface is low, but it is named here rather than silently assumed
   covered by transitivity.
-- The `provider://manifest/<id>` per-Provider resource naming
+- ~~The `provider://manifest/<id>` per-Provider resource naming
   (`manifest-${id}` as the MCP resource *name*, distinct from its *uri*) has
   not been checked against any MCP client that enumerates resources by name
   rather than uri; every check performed this iteration used uri-based
-  `readResource()` calls.
+  `readResource()` calls.~~ **Closed (QN-041, iteration 30).**
+  `mcp-server.test.mjs` now asserts, against a live `quay mcp` subprocess,
+  that (a) `listResources()` returns a distinct `name` field
+  (`"manifest"` / `"manifest-native"`) alongside each resource's `uri`,
+  and (b) `readResource({ name: ... })` (uri omitted) genuinely rejects
+  with an MCP protocol-level error rather than silently succeeding — the
+  SDK's `resources/read` request is uri-keyed by protocol design; `name`
+  is listing/display-only, never a lookup key, confirmed live rather than
+  assumed. An adversarial break (making the per-Provider resource's `name`
+  collide with its `uri`) reproduced 2 live FAILs; restoring produced a
+  byte-identical diff and all PASS again.

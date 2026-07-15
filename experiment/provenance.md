@@ -4025,6 +4025,106 @@ Diagnostic sub-metric:
 Up from 0.9730 at the end of iteration 28 (QN-039 and QN-040 both added
 to numerator and denominator).
 
+## Records (as of end of iteration 30)
+
+**Pre-execution context:** `experiment/directives/pending/` confirmed
+empty at session start (matching iteration 29's own end-state). With no
+new directive, this iteration's OBSERVE phase searched fresh for the
+highest-value remaining gap rather than re-treading iteration 29's own
+priority list mechanically. `packages/quay/DESIGN.md` §2.5's third named
+"Known gap" — the `provider://manifest/<id>` resource's `name` field
+(`manifest-${id}`, distinct from its `uri`) had never been checked
+against any MCP client enumerating resources by `name` rather than
+`uri` — was confirmed live, via a standalone probe script against the
+real `quay mcp` subprocess, to be both real (the `name` field is
+genuinely present and distinct) and previously untested (the SDK's
+`readResource({ name })` call, uri omitted, throws a protocol-level
+zod-validation error: `params.uri` expected string, got undefined).
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 30) |
+|---|---|---|---|---|---|
+| QN-041 | Close the "manifest resource enumerated by name vs. read by uri" test-coverage gap named in packages/quay/DESIGN.md §2.5 | **native** | **native** | **native** | **done** |
+
+`author_by`/`execute_by`/`gate_by` = `native` for QN-041, in the same
+same-session **degraded-fallback** mode established since iteration 1 (no
+subagent-dispatch primitive exists in this environment — reconfirmed via
+`ToolSearch` at the start of this iteration, not re-assumed): `quay:
+author`'s documented method (write Proposal — including a fresh,
+pre-authoring live probe establishing the gap is real, not assumed —
+Plan, AC, DoD; `task check` → `author->ready` gate `ok:true`; `task edit
+--status ready`) was followed, then `quay:execute`'s documented method
+(`implement-phase`: extended `packages/quay/test/mcp-server.test.mjs`'s
+existing "Resource enumeration" block with 5 new assertions confirming
+distinct `name`/`uri` fields and the `name`-omitted-uri lookup failure;
+updated `packages/quay/DESIGN.md` §2.5 to mark the gap closed;
+`self-audit-ac`: each AC/DoD box independently re-verified against live
+command output — an adversarial break (making the per-Provider
+resource's `name` collide with its `uri`) reproduced exactly 2 live
+FAILs, and restoring from backup produced a byte-identical `diff` before
+re-confirming all PASS — before checking any box; `gate-check`: `task
+check QN-041 --json` → `execute->done` gate `ok:true, acChecked:4/4` →
+`task edit --status done`). `git diff --stat` confirms only
+`packages/quay/test/mcp-server.test.mjs` (41 lines) and
+`packages/quay/DESIGN.md` (14 lines) changed among tracked production/doc
+files — zero diff to `mcp-server.js` itself.
+
+**Scope check (per this iteration's explicit precedent-search
+discipline):** this is a test-coverage-closure task, of the same shape as
+QN-039 (iteration 29) — a live probe demonstrating existing, unchanged,
+already-correct behavior, captured as a committed regression assertion.
+It is not a new ABI surface (the `name` field already existed in
+`mcp-server.js`'s source since QN-036/iteration 26; this task did not add
+or change it), not a new schema, and not a new gate-logic change. Applying
+QN-039's own on-point precedent (which held all four V_instance factors
+flat for an analogous test-only closure, reasoning "tested existing
+schema-conformant branches, it did not add or change any schema"), this
+task's V_instance scoring below holds all four factors flat too — decided
+by checking the precedent first, not by pattern-matching to "this touches
+MCP resources, so it must be abi_symmetry."
+
+**Full regression suite (final re-run, after QN-041's work):** all 19
+`*.test.mjs` files (across `packages/quay-native/test/`, `packages/
+quay/test/`, `packages/quay-github/test/`) plus `packages/quay-native/
+test/abi-symmetry.mjs` — **20 total test-bearing files, all PASS, zero
+regressions.** `ps aux | grep -i quay` confirmed no orphaned
+test-spawned subprocesses; the one live `node packages/quay/bin/quay.js
+mcp` process found is the genuinely-registered `.mcp.json` project-scoped
+MCP server from iteration 28 (a legitimate child of this Claude Code
+session, not a leftover from test debugging).
+
+## σ computation — iteration 30
+
+QN-041 reaches `{native, native, native, done}` this iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 33 / 40
+  = 0.8250
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 35 / 40
+  = 0.8750
+
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+  = 39 / 40
+  = 0.9750
+```
+
+Total task count is now **40** (QN-001..QN-041, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration.
+
+**σ (strict) = 0.8250, up from 0.8205 at the end of iteration 29 (Δσ =
++0.0045).** Comparable to the recent per-iteration norm for a single
+ordinary test-coverage-closure task (iterations 26/28 moved σ by roughly
++0.005-0.006 for one task each); smaller than iteration 29's own
++0.0097 because iteration 29 completed two tasks (QN-039 + QN-040)
+against a smaller (39-task) denominator, while this iteration completed
+one task against a now-larger (40-task) denominator.
+
+See `experiment/timing/iteration-30.log` for this iteration's raw
+`date -u` checkpoints.
+
 ## Post-hoc correction (iteration 29's `completeness` score)
 
 The iteration-29 independent out-of-band audit

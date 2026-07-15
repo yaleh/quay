@@ -24,7 +24,13 @@
 //      conventions, e.g. cli.test.mjs/serve.test.mjs);
 //   3. error paths: unknown provider id, unknown task id;
 //   4. resource enumeration: provider://manifest (default alias) and
-//      provider://manifest/<id> per enabled Provider.
+//      provider://manifest/<id> per enabled Provider -- including (QN-041)
+//      that each listed resource carries a distinct `name` field (display/
+//      enumeration-only) separate from its `uri` (the actual lookup key),
+//      and that `readResource({ name })` (uri omitted) genuinely fails
+//      rather than silently succeeding -- closing the gap DESIGN.md §2.5
+//      named ("not been checked against any MCP client that enumerates
+//      resources by name rather than uri").
 //
 // Run: node test/mcp-server.test.mjs
 
@@ -120,6 +126,39 @@ async function main() {
       uris.includes("provider://manifest/native") &&
       uris.includes("provider://manifest/native-2"),
     "quay mcp lists provider://manifest (default alias) plus one provider://manifest/<id> resource per enabled Provider"
+  );
+
+  // QN-041: close the DESIGN.md §2.5 "name vs. uri" gap -- confirm each
+  // listed resource carries both a distinct `name` and a `uri` field, and
+  // that `name` cannot be used as an alternate lookup key (MCP's
+  // resources/read request is uri-keyed by protocol; `name` is
+  // listing/display-only). This was previously asserted only via
+  // uri-based readResource() calls -- never checked against `name`.
+  const defaultEntry = resources.resources.find((r) => r.uri === "provider://manifest");
+  const nativeEntry = resources.resources.find((r) => r.uri === "provider://manifest/native");
+  assert(
+    typeof defaultEntry?.name === "string" && defaultEntry.name === "manifest",
+    `provider://manifest's listed entry carries a distinct name field ("manifest"), got: ${JSON.stringify(defaultEntry)}`
+  );
+  assert(
+    typeof nativeEntry?.name === "string" && nativeEntry.name === "manifest-native",
+    `provider://manifest/native's listed entry carries a distinct name field ("manifest-native"), got: ${JSON.stringify(nativeEntry)}`
+  );
+  assert(
+    nativeEntry.name !== nativeEntry.uri,
+    "the per-Provider resource's name and uri are genuinely distinct strings, not the same value under two keys"
+  );
+  let nameLookupThrew = false;
+  let nameLookupErrorText = "";
+  try {
+    await core.readResource({ name: "manifest" });
+  } catch (err) {
+    nameLookupThrew = true;
+    nameLookupErrorText = err.message || String(err);
+  }
+  assert(
+    nameLookupThrew,
+    `readResource({ name: "manifest" }) (uri omitted) rejects rather than silently succeeding or resolving the wrong resource -- confirms an Agent cannot use the listing-only "name" field as an alternate lookup key (got error: ${nameLookupErrorText})`
   );
 
   const defaultManifest = await core.readResource({ uri: "provider://manifest" });
