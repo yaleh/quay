@@ -98,10 +98,15 @@ export async function startServer({ port = 4173 } = {}) {
       const { composePayload, deliverTrigger } = await import("./action.js");
       const t = await client.taskGet(decodeURIComponent(id));
       const payloadObj = composePayload({ providerManifest: manifest, task: t, actionId: decodeURIComponent(actionId) });
+      // QN-042 (DIR-009): QUAY_ACTION_MOCK_LOG opts into the deterministic
+      // mock/file-log delivery mode instead of manda/print — see
+      // src/action.js#deliverTrigger's own doc comment.
+      const mockLogPath = process.env.QUAY_ACTION_MOCK_LOG || undefined;
       const result = await deliverTrigger({
         root: cfg.workspaceRoot,
         channel: `task-${t.id}`,
         payloadObj,
+        mockLogPath,
       });
       res.writeHead(302, { Location: `/task/${t.id}` });
       res.end();

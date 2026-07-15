@@ -1,7 +1,8 @@
 # `packages/quay` (Core) — DESIGN
 
 - **Status:** v1 — walking skeleton (Web UI + CLI) plus, as of iteration 26
-  (`DIR-007`), a genuine Core-level MCP server.
+  (`DIR-007`), a genuine Core-level MCP server, plus, as of iteration 31
+  (`QN-042`/`DIR-009`), a deterministic mock/file-log action-delivery mode.
 - **Relates:** `docs/proposal/quay-proposal.md` (esp. §5 architecture), `docs/
   proposal/quay-native-design.md` (Provider-level reference), `docs/proposal/
   glossary.md`.
@@ -170,3 +171,58 @@ before any live call):
   assumed. An adversarial break (making the per-Provider resource's `name`
   collide with its `uri`) reproduced 2 live FAILs; restoring produced a
   byte-identical diff and all PASS again.
+
+## 3. Action-trigger delivery: the mock/file-log mode (`QN-042`/`DIR-009`)
+
+`src/action.js#deliverTrigger()` (proposal §6.4, design §7 — the host-owned
+trigger edge, NOT part of the Provider ABI) has three delivery modes, tried
+in this order:
+
+1. **`mock`** (new, iteration 31) — selected when the caller supplies an
+   explicit `mockLogPath` (threaded from the `QUAY_ACTION_MOCK_LOG`
+   environment variable by both `bin/quay.js`'s `action run` subcommand and
+   `serve.js`'s POST action-button handler). Appends one structured
+   JSON-lines record (`{channel, payload, taskId, status, skill, timestamp}`)
+   to that file, creating its parent directory if needed, and returns
+   `{ delivered: "mock", channel, mockLogPath, record }` — distinguishable
+   from both other modes' return shapes.
+2. **`manda`** — unchanged from prior iterations: if `mandaAvailable(root)`
+   and no `mockLogPath` was supplied, sends the composed payload via `manda
+   send <channel> <json>`, returns `{ delivered: "manda", channel }`.
+3. **print (degrade)** — unchanged: logs the composed command to stdout for
+   manual/agent execution, returns `{ delivered: "print" }`.
+
+**Why this exists:** prior to iteration 31, the only non-`manda` path was
+the stdout-print degrade — there was no deterministic, file-based record an
+automated test could assert against, so any test of action-composition/
+delivery logic either had to scrape freeform stdout text or skip verifying
+delivery entirely. The mock mode is intended as the **default harness for
+automated verification** of action-composition logic; live `manda`
+delivery remains a separate, additional, non-gating check (see
+`docs/proposal/quay-core-scope-expansion-discussion.md` §2.3 for the
+original reasoning, and `experiment/directives/archive/DIR-009-*.md` for
+the directive that requested it).
+
+**Explicitly additive, not a replacement:** `mandaAvailable()`'s own
+detection logic was not touched at all (`git diff --stat` for this task
+shows zero lines changed in that function); the existing `manda` and
+print-degrade paths' behavior is unchanged — `mockLogPath` is opt-in only,
+selected exclusively when the caller explicitly supplies it.
+
+**Regression-test discipline (network-independent, not manda-gated):**
+`packages/quay/test/action-mock-delivery.test.mjs` exercises the mock mode
+end-to-end (composes a real payload via `composePayload()`, calls
+`deliverTrigger()` with `mockLogPath` set, asserts on the resulting file's
+structured JSON-lines content — including that a second delivery appends
+rather than overwrites). Per `DIR-008`'s standing constraint (itself citing
+`experiment/directives/archive/DIR-004-*.md`/`DIR-005-*.md`'s iterations
+13-18 findings), this test does **not** gate its own pass/fail on live
+manda-send reachability succeeding or failing either way — a run of this
+very test during iteration 31's own execution independently reconfirmed
+that finding: `mandaAvailable()`'s health check and the subsequent `manda
+send` call were each observed, across repeated runs in the same sandbox, to
+sometimes succeed and sometimes fail (a live connection-refused error, and
+separately a transient `spawn manda ENOENT`) — live manda reachability
+remains a per-session, per-moment fact, exactly as already documented, and
+this mode's whole purpose is to sidestep that for automated verification,
+not re-litigate or depend on it.

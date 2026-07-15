@@ -4149,3 +4149,90 @@ place (§8, §10) to reflect this. QN-040's own work (processing DIR-008,
 adding the new constraints section) stands as genuine, valuable
 experiment-process work — it simply does not move any V_meta factor, per
 the protocol's scoping and this project's established precedent.
+
+## Records (as of end of iteration 31)
+
+**Pre-execution context:** `experiment/directives/pending/` was checked
+first, per mandatory instruction, and found to contain
+`DIR-009-mock-log-file-action-delivery-mode.md` — a human-asserted
+directive requesting a deterministic mock/file-log action-delivery mode in
+`packages/quay/src/action.js#deliverTrigger()`, distinct from the existing
+`manda` path and stdout-print degrade path, per
+`docs/proposal/quay-core-scope-expansion-discussion.md` §2.3.
+
+| task_id | title | author_by | execute_by | gate_by | status (end of iter 31) |
+|---|---|---|---|---|---|
+| QN-042 | Add a deterministic mock/log-file action-delivery mode to action.js's deliverTrigger() (DIR-009) | **native** | **native** | **native** | **done** |
+
+`author_by`/`execute_by`/`gate_by` = `native` for QN-042, in the same
+same-session **degraded-fallback** mode established since iteration 1 (no
+subagent-dispatch primitive exists in this environment — reconfirmed via
+`ToolSearch` at the start of this iteration, not re-assumed): `quay:author`'s
+documented method (write Proposal citing the directive and the discussion
+doc, Plan, AC, DoD; `task check` → `ok:true`; `task edit --status ready`)
+was followed, then `quay:execute`'s documented method (`implement-phase`:
+real new code — the `mockLogPath` branch and `appendMockDeliveryRecord()`
+helper added to `action.js`, wiring added to both `bin/quay.js` and
+`serve.js`, a new committed regression test written; `self-audit-ac`: each
+AC/DoD box independently re-verified against live command output — the new
+test run 5 consecutive standalone times (all exit 0) and the full
+regression suite run 3 consecutive times (21/21 test-bearing files passing
+each time), `git diff --stat` confirmed the exact expected file set with
+zero diff to `mandaAvailable()`; `gate-check`: `task check QN-042 --json`
+→ `{"ok":true}` → `task edit --status done`).
+
+**Honesty note on a genuine, unplanned finding surfaced while writing this
+task's own regression test:** an early draft of the test asserted that
+`mandaAvailable()` deterministically returns `false` against a synthetic
+"bogus" root, to force the pre-existing print-degrade path reproducibly.
+Repeated runs in this same sandbox showed `mandaAvailable()` itself is
+**not** deterministic here — it returned `true` (a successful `manda
+events health` call) in some runs and threw `spawn manda ENOENT` in
+others, and even when it returned `true`, the subsequent `manda send` call
+in one run failed with a live connection-refused error. This is a second,
+independent reproduction (this time at the *detection* step, not just the
+*send* step already known from iterations 13-18) of the exact live-manda
+per-session/per-moment unreliability DIR-004/DIR-005/§2.3 already
+document. The offending assertion was removed rather than left as a flaky
+test — asserting on `mandaAvailable()`'s live return value would repeat
+exactly the mistake DIR-008/§2.3 flags as already paid for. The committed
+test instead only asserts the one fact DIR-009 requires (omitting
+`mockLogPath` never selects the `mock` mode), tolerating either pre-existing
+outcome via a `try`/`catch`, and documents this finding in
+`packages/quay/DESIGN.md` §3 and in the test file's own comments so a
+future reader is not misled into thinking `mandaAvailable()` is reliable
+in this environment.
+
+## σ computation — iteration 31
+
+QN-042 reaches `{native, native, native, done}` this iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 34 / 41
+  = 0.8293
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 36 / 41
+  = 0.8780
+
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+  = 40 / 41
+  = 0.9756
+```
+
+Total task count is now **41** (QN-001..QN-042, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration.
+
+**σ (strict) = 0.8293, up from 0.8250 at the end of iteration 30 (Δσ =
++0.0043).** Consistent with the recent per-iteration norm for a single
+ordinary task against a growing denominator (iteration 30 moved σ by
++0.0045 for one task against a 40-task denominator; this iteration's
+slightly smaller Δσ is the honest consequence of the denominator growing
+to 41, not a change in method or pace).
+
+See `experiment/timing/iteration-31.log` (if captured) for this
+iteration's raw checkpoints; this iteration did not maintain a separate
+`date -u`-stamped timing log file (a process gap, honestly noted — see
+iteration-31.md §5 for the sequence of work performed instead).

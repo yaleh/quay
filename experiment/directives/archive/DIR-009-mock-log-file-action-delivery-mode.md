@@ -1,6 +1,6 @@
 # DIR-009
 
-- status: pending
+- status: applied
 - created_by: human (Yale), asserted directly in this live conversation
 - created_at: 2026-07-15
 - title: Add a deterministic mock/log-file action-delivery mode to `packages/quay/src/action.js`, distinct from today's print-only degrade path
@@ -104,3 +104,82 @@ the three (no new external tool dependency, no naming-collision risk) and
 is intended to land first, providing a deterministic delivery-verification
 foundation the other two can build on rather than needing to invent their
 own.
+
+## Resolution
+
+- resolved_by: iteration 31 (QN-042)
+- outcome: applied
+- evidence:
+  - `packages/quay/src/action.js#deliverTrigger()` gained a new,
+    additive `mockLogPath` parameter (requested action item 1): when
+    supplied, it selects a `mock` delivery mode that appends one
+    structured JSON-lines record (`channel`, `payload`, `taskId`,
+    `status`, `skill`, `timestamp`) per delivery attempt to the given
+    file, creating its parent directory if needed. Returns
+    `{ delivered: "mock", channel, mockLogPath, record }` (item 2),
+    distinguishable from both `{ delivered: "manda", ... }` and
+    `{ delivered: "print" }`.
+  - Activation mechanism (this task's own design decision, item 1):
+    a new `QUAY_ACTION_MOCK_LOG` environment variable, read by both
+    existing callers (`packages/quay/bin/quay.js`'s `action run`
+    subcommand and `packages/quay/src/serve.js`'s POST action-button
+    handler) and threaded into `deliverTrigger()`'s new parameter.
+    Chosen over a config-schema field or new CLI flag because it
+    requires zero config-schema changes and mirrors this repo's
+    existing convention (`QUAY_NATIVE_TASKS_DIR`) for
+    test/verification-mode activation.
+  - A new, committed, network-independent regression test,
+    `packages/quay/test/action-mock-delivery.test.mjs` (item 3): composes
+    a real trigger payload via the existing `composePayload()` code path,
+    calls `deliverTrigger()` with the mock mode selected, and asserts on
+    the resulting file's structured JSON-lines content (including that a
+    second delivery appends rather than overwrites). Confirmed via 5
+    consecutive standalone runs (all exit 0, 19/19 assertions passing
+    each time) and 3 consecutive full-suite runs (21/21 test-bearing
+    files passing each time). Per item 5, this test does not gate its own
+    pass/fail on live manda delivery succeeding or failing either way —
+    a `try`/`catch` tolerates either pre-existing outcome for the one
+    negative-control assertion that touches the manda/print fallback
+    path at all. A genuine, unplanned finding surfaced while writing this
+    test: `mandaAvailable()`'s own live return value was observed to be
+    non-deterministic in this sandbox across repeated runs (sometimes
+    `true` via a successful health check, sometimes a thrown
+    `spawn manda ENOENT`; and even when `true`, a subsequent `manda send`
+    call was separately observed to fail with connection-refused) — a
+    second, independent reproduction of the exact per-session/per-moment
+    manda unreliability DIR-004/DIR-005/§2.3 already document, this time
+    at the detection step rather than the send step. An earlier draft
+    assertion that depended on `mandaAvailable()`'s determinism was
+    removed rather than shipped as a flaky test, and the finding is
+    recorded here and in `packages/quay/DESIGN.md` §3 and the test
+    file's own comments, per item 5's instruction not to repeat that
+    mistake.
+  - Item 4 (additive-only): `git diff --stat` for this task shows zero
+    diff to `mandaAvailable()`'s own body, and zero behavior change to
+    the existing `manda`-present or stdout-degrade paths — confirmed by
+    the same regression test's own negative-control assertions and by
+    direct inspection of the diff.
+  - Item 6 (V-factor attribution): credited to **`skeleton`** (+0.01,
+    0.67→0.68), not `abi_symmetry` (no CLI/MCP schema surface — the
+    trigger edge is explicitly outside the Provider ABI per its own
+    header comment) and not `gate_correctness` (no `task check`/gate
+    logic touched), and explicitly not `effectiveness` and not a new
+    fifth factor. Reasoning: this is genuinely new Core-level capability
+    code (a new branch, a new helper function, new wiring in two
+    callers) at the `action` link of `skeleton`'s own protocol-defined
+    v0-loop chain (`config → mcp → serve → action → Skill → done`) — the
+    same "genuinely new capability, not merely new proof about existing
+    behavior" pattern iteration 26 (QN-036, Core's own MCP server)
+    credited to `skeleton` at +0.02. Scored at the smaller end of that
+    precedent range (+0.01, matching iteration 22's smaller-scoped
+    capability-adjacent case) because this is a new *mode* within an
+    already-existing link (`action`), not an entirely new link/binding
+    the way `quay mcp` was. See `experiment/iterations/iteration-31.md`
+    §7 for the full reasoning and precedent citations.
+  - Item 7: `packages/quay/DESIGN.md` gained a new "§3. Action-trigger
+    delivery: the mock/file-log mode" section documenting all three
+    modes, the activation mechanism, the additive-only guarantee, and
+    the regression-test discipline.
+  - Provenance: `experiment/provenance.md`'s new "Records (as of end of
+    iteration 31)" section logs QN-042 as `{native, native, native,
+    done}`; σ (strict) recomputed to 34/41 = 0.8293 (up from 0.8250).

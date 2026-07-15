@@ -175,7 +175,11 @@ async function main() {
       console.log(`[quay action run] composed trigger for ${id} (status=${t.status}, skill=${payloadObj.skill}):`);
       console.log(`  ${payloadObj.payload}`);
       const channel = `task-${id}`;
-      const result = await deliverTrigger({ root: cfg.workspaceRoot, channel, payloadObj });
+      // QN-042 (DIR-009): QUAY_ACTION_MOCK_LOG opts into the deterministic
+      // mock/file-log delivery mode instead of manda/print — see
+      // src/action.js#deliverTrigger's own doc comment.
+      const mockLogPath = process.env.QUAY_ACTION_MOCK_LOG || undefined;
+      const result = await deliverTrigger({ root: cfg.workspaceRoot, channel, payloadObj, mockLogPath });
       printJson({ ...payloadObj, channel, ...result });
     }, { providerId: flags.provider });
     return;
