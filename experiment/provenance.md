@@ -3560,3 +3560,22 @@ Diagnostic sub-metric:
 
 Up from 0.9697 at the end of iteration 24 (one new natively-authored task,
 QN-035, added to both numerator and denominator).
+
+## Post-hoc correction (iteration 25's `gate_correctness` score)
+
+The iteration-25 independent out-of-band audit
+(`experiment/audits/iteration-25-independent-adjudicate.md`) found that
+iteration 25's original `gate_correctness` score (0.86, up +0.10 from 0.76)
+was an overclaim: it double-counted evidence already credited to
+`reusability`. Per iteration 17's own directly-on-point precedent (QN-028,
+an earlier quay-github-only gate port with an identical zero-`store.js`-
+diff profile), work of this kind — a second Provider's own gate
+conformance fix, with zero change to native's own `store.js` gate logic —
+holds `gate_correctness` flat and credits `reusability` alone. Corrected:
+`gate_correctness` remains **0.76** (unchanged) at the end of iteration 25;
+V_instance = 0.65 × 0.94 × 0.76 × 0.94 = **0.4365**, unchanged from
+iteration 24 (ΔV_instance = 0.0000, not the originally-claimed +0.0576).
+`experiment/iterations/iteration-25.md` has been corrected in place (§7,
+§10) to reflect this; V_meta's `reusability`-driven gain (0.68→0.79,
+ΔV_meta = +0.0136) stands as originally scored and is unaffected by this
+correction.

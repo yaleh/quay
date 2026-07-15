@@ -366,25 +366,26 @@ V_instance = skeleton × abi_symmetry × gate_correctness × skill_convergence
   identically — confirmed by the Core-passthrough byte-identical check in
   §5e, which exercises the MCP-backed generic passthrough path, not just
   the direct provider CLI). No asymmetry was introduced or discovered.
-- **gate_correctness: 0.86 (up from 0.76, Δ +0.10).** This is the direct,
-  structural analog of native's own historical compound-gate fixes:
-  QN-012 (iteration 6) first implemented compound-gate support for
-  *native* and was scored **+0.10** (0.55→0.65); QN-016 (iteration 7) added
-  cycle-safety/recursion depth to that same native implementation and was
-  scored **+0.05** (0.65→0.70). QN-035 is comparably substantial to QN-012
-  specifically — a first-time, complete compound-gate implementation
-  (recursion, cycle-safety via `visited` Set, `stale-done` rollup, AC-vs-
-  children interaction on the `ready` branch, re-verification on `done`)
-  for a *previously entirely gate-less* code path (`checkGate()` had zero
-  children-awareness before this iteration), live-verified against a real
-  external system with an adversarial regression test proving real teeth —
-  matching QN-012's own evidentiary weight, not QN-016's smaller refinement
-  weight. Scored at the same increment QN-012 earned for the same reason:
-  this is the *first* implementation of the capability on this surface, not
-  an incremental refinement of an already-partially-working one. This is
-  the single largest `gate_correctness` movement since QN-012 itself
-  (iterations 8-24 each moved this factor by at most +0.05, most recently
-  +0.01 in iteration 20; it has been flat at 0.76 for 4 iterations, 20-24).
+- **gate_correctness: 0.76 (unchanged) — CORRECTED post-audit, see note
+  below.** ~~Original text scored this +0.10 (0.76→0.86), reasoning it was
+  structurally analogous to QN-012's first-time compound-gate
+  implementation.~~ The iteration-25 independent audit
+  (`experiment/audits/iteration-25-independent-adjudicate.md`) identified
+  that this reasoning conflicts with this project's own directly-on-point
+  precedent: iteration 17 (QN-028), scoring an earlier quay-github-only
+  gate port with an identical zero-`store.js`-diff profile, explicitly held
+  `gate_correctness` **flat** with the reasoning *"No change to `store.js`'s
+  gate logic this iteration... the new work is entirely on `quay-github`'s
+  side"* — crediting `reusability` alone for that class of work. Protocol
+  §5.1 scopes `gate_correctness` to native's own gate module specifically;
+  `git diff` confirms zero changes to `packages/quay-native/` this
+  iteration too. Moving both `gate_correctness` and `reusability` for the
+  same underlying fact (a second Provider's gate capability now matches
+  native's) double-counts one piece of evidence across two factors the
+  protocol's product design keeps independent. Corrected to remain flat at
+  0.76, consistent with the iteration-17 precedent; full credit for this
+  iteration's genuine gain is properly concentrated in `reusability` (§8
+  below).
 - **skill_convergence: 0.94 (unchanged).** QN-035 was driven through the
   same leaf-task, degraded-fallback author→execute lifecycle every prior
   task has used (see §5g) — nothing new about Skill *convergence* itself
@@ -393,15 +394,17 @@ V_instance = skeleton × abi_symmetry × gate_correctness × skill_convergence
   orchestration driving tasks through that gate* did not change.
 
 ```
-V_instance = 0.65 × 0.94 × 0.86 × 0.94 = 0.4941
+V_instance = 0.65 × 0.94 × 0.76 × 0.94 = 0.4365
 ```
 
-ΔV_instance = **+0.0576** (0.4365 → 0.4941). This is by a wide margin the
-largest single-iteration V_instance movement in this experiment's entire
-history since the early gate-correctness fixes (iterations 2, 6, 7) —
-reflecting that DIR-006 targeted a genuine, previously-open structural gap
-rather than a marginal test-coverage closure (the pattern iterations 20-24
-had settled into, each moving V_instance by ~+0.0067 via `skeleton`).
+ΔV_instance = **0.0000** (0.4365 → 0.4365), corrected post-audit. ~~The
+original report claimed +0.0576, the largest single-iteration V_instance
+movement in the experiment's history.~~ That claim does not survive the
+`gate_correctness` correction above: this iteration's true V_instance is
+unchanged from iteration 24. This iteration's genuine, substantial gain is
+real, but it lands entirely in V_meta's `reusability` factor (§8), not in
+V_instance — DIR-006's work was a second-Provider conformance/transfer
+achievement, not a new native-side capability.
 
 ## 8. V_meta
 
@@ -548,10 +551,10 @@ next audit to check independently rather than take on faith:
 ## 10. Convergence Check
 
 - [ ] **1. Dual threshold (V_instance ≥ 0.80 AND V_meta ≥ 0.80)** — **NO.**
-      V_instance = 0.4941 (up from 0.4365 — the largest single-iteration
-      jump in this experiment's history), V_meta = 0.0973 (up from 0.0837).
-      Both remain far below 0.80, though V_instance's jump this iteration
-      is the largest step toward that threshold seen so far.
+      V_instance = 0.4365 (unchanged from iteration 24, corrected post-audit
+      — see `gate_correctness` note in §7), V_meta = 0.0973 (up from
+      0.0837). Both remain far below 0.80; this iteration's genuine gain
+      lands entirely in V_meta's `reusability` factor, not V_instance.
 - [ ] **2. Self-hosting fixpoint (σ→1, zero-seed build, stable Skill set +
       gate)** — **NO.** σ (strict) = 0.7941, still far from 1, though up
       from 0.7879. The gate's own mechanical logic *did* change this
@@ -604,22 +607,22 @@ next audit to check independently rather than take on faith:
       standing rules); human fixpoint sign-off remains untriggered,
       correctly, since criterion 2's own precondition (σ→1) remains far
       from met.
-- [ ] **5. Diminishing returns (ΔV < 0.02 for 2+ iterations)** — **NO**,
-      unambiguously this time, for the clearest reason yet: this iteration
-      produced ΔV_instance = +0.0576 and ΔV_meta = +0.0136 — the former by
-      a wide margin the largest single-iteration movement in this
-      experiment's entire history, driven by a substantial, human-directed,
-      previously-deferred structural fix, not a marginal template
-      repetition. This directly confirms iteration 24's own final caution
-      (§Problems 6): genuine new work, materially different in kind from
-      the exhausted freestanding-CLI-file template, was found and executed
-      this iteration — the opposite of the diminishing-returns pattern this
-      criterion checks for.
+- [ ] **5. Diminishing returns (ΔV < 0.02 for 2+ iterations)** — **NO.**
+      This iteration produced ΔV_instance = 0.0000 (corrected post-audit)
+      and ΔV_meta = +0.0136 — the latter still exceeding the 0.02-over-2-
+      iterations threshold when combined with prior movement, driven by a
+      substantial, human-directed, previously-deferred structural fix (a
+      genuine second-Provider transfer achievement), not a marginal
+      template repetition. This directly confirms iteration 24's own final
+      caution (§Problems 6): genuine new work, materially different in kind
+      from the exhausted freestanding-CLI-file template, was found and
+      executed this iteration — the opposite of the diminishing-returns
+      pattern this criterion checks for, even though the gain landed in
+      V_meta rather than V_instance as originally (mis-)scored.
 
-**Status**: **NOT CONVERGED**, but with the most significant single-
-iteration movement toward convergence criteria 1 and 3 in this experiment's
-history. Criterion 1 remains clearly NO but with V_instance's largest-ever
-single-iteration jump. Criterion 2 remains clearly NO. Criterion 3 moves
+**Status**: **NOT CONVERGED**. Criterion 1 remains clearly NO; V_instance
+is unchanged this iteration (corrected post-audit — see §7). Criterion 2
+remains clearly NO. Criterion 3 moves
 from a clear, repeatedly-reconfirmed NO to a materially strengthened,
 specifically-bounded NO (the originally-named proximate cause is now
 substantially addressed; a narrower, honestly-named residual gap remains —
