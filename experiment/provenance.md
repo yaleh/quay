@@ -2721,3 +2721,71 @@ task, QN-029, added to both numerator and denominator).
 See `experiment/iterations/iteration-18.md` for the full evaluation,
 including V_instance/V_meta recalculation and convergence-criteria
 re-evaluation.
+
+## Iteration 19 — fresh reusability/validation gap search, honest zero-movement result
+
+**No new task was authored or executed this iteration.** Per the
+iteration's own explicit mandate — take a genuinely fresh look at
+whether a further well-scoped `reusability`/`validation` gap exists now
+that quay-github has gate+skill parity — three candidate gaps were
+investigated concretely, with live evidence, not merely asserted absent:
+
+1. **Compound/epic GitHub-task support.** Live-checked via `gh issue
+   list --repo yaleh/quay`: exactly 2 issues exist (#3, #4), both
+   primitive (no checkbox-list `children` pattern in either body).
+   There has never been a real compound GitHub-backed task in this
+   experiment's history. Building compound-gate/skill recursion for
+   quay-github today would require manufacturing a synthetic epic with
+   no organic backlog need — declined per G5, the same scope-discipline
+   QN-028's and QN-029's own Plans each already applied.
+2. **`data.write`'s remaining scope** (title/body/labels/parent/children,
+   still status-only in v1). Investigated by re-reading `quay:author`'s
+   and `quay:execute`'s actual Method pseudocode: the only ABI-mediated
+   write either Skill ever performs, at any step, is `quay task edit <id>
+   --status <s> --provider <provider>`. Proposal/Plan/AC/DoD content is
+   written directly into the task body (outside `task_write` entirely),
+   on both Providers. Live-confirmed symmetric: `quay task edit <id>
+   --provider native --body test` and the `--provider github` equivalent
+   **both** fail identically with `"quay task edit: --status <s> is
+   required (v1 supports status-only writes)"` — a Core-level,
+   provider-agnostic v1 scope line (`packages/quay/bin/quay.js` line
+   113), not a GitHub-specific asymmetry. Not a live blocker to
+   methodology transfer; orthogonal to what `reusability` measures.
+3. **A third Provider** — explicitly out of scope per protocol §10
+   resolved decision 4; not investigated further.
+
+**`validation`'s protocol definition was re-read carefully** (per the
+iteration's explicit instruction, not guessed): protocol §5.2 defines it
+as "Self-host proof: σ and the provenance log... Corroborated by
+out-of-band audit (G3)" — i.e. σ rising toward 1 plus each lift being
+audited, not additional transfer targets (that's `reusability`'s own
+row) or open-ended "usage evidence." Since σ did not move this
+iteration (nothing was authored/executed), there is no new lift for an
+audit to co-sign, and `validation` correctly stays flat at 0.64.
+
+No task's provenance triple changed. σ is unchanged.
+
+## σ computation — iteration 19
+
+No task reached a new `{native, native, native, done}` state this
+iteration (no task was authored or executed; the investigation above
+found no genuinely tractable new increment, not a failure to look). σ is
+recomputed from the same 28-task table as iteration 18, unchanged:
+
+```
+σ (strict reading)    = 21 / 28 = 0.75      (unchanged, Δσ = 0)
+σ (inclusive reading) = 23 / 28 = 0.8214    (unchanged)
+σ_author_only         = 27 / 28 = 0.9643    (unchanged)
+```
+
+Total task count remains **28** (QN-001..QN-029, minus the never-
+allocated QN-018) — no new task was created this iteration. This is the
+first fully flat iteration since the iteration-14/15/16 streak, but with
+a materially different, stronger evidentiary basis: a fresh,
+evidence-based investigation that concluded no further genuine increment
+is currently available (not "no candidate task exists to try"). See
+`experiment/iterations/iteration-19.md` for the full evaluation,
+including the honest engagement with future work / resource-ceiling
+questions and the re-evaluated convergence criteria (criterion 5 is now
+a live candidate for YES if iteration 20's own fresh search finds the
+same result).
