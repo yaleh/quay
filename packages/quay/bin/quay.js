@@ -190,7 +190,19 @@ async function main() {
     return;
   }
 
-  console.error("usage: quay <task list|view|edit|check|action list|run|serve> ...");
+  if (cmd === "mcp") {
+    // DIR-007: Core's own MCP server — the "MCP projection -> Agent" binding
+    // (quay-proposal.md §5). Aggregates every Provider currently
+    // `enabled: true` in .quay/config.yml behind a single MCP endpoint, so
+    // an Agent (Claude Code) registers `quay mcp` once instead of each
+    // Provider's own `<provider> mcp` separately. No subcommand token or
+    // flags — mirrors quay-native/quay-github's own `mcp` subcommand shape.
+    const { startMcpServer } = await import("../src/mcp-server.js");
+    await startMcpServer();
+    return;
+  }
+
+  console.error("usage: quay <task list|view|edit|check|action list|run|serve|mcp> ...");
   process.exitCode = 1;
 }
 

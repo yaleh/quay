@@ -3579,3 +3579,79 @@ iteration 24 (ΔV_instance = 0.0000, not the originally-claimed +0.0576).
 §10) to reflect this; V_meta's `reusability`-driven gain (0.68→0.79,
 ΔV_meta = +0.0136) stands as originally scored and is unaffected by this
 correction.
+
+## Iteration 26 — QN-036 (Core's own MCP server, DIR-007 applied)
+
+**Pre-execution context:** `experiment/directives/pending/` was checked
+first, per mandatory instruction, and found to contain
+`DIR-007-implement-core-mcp-server.md` — a human-asserted directive finding
+that `docs/proposal/quay-proposal.md` §5's "MCP projection → Agent"
+architecture claim (Core acting as the single MCP endpoint an Agent
+connects to, fanning out internally to each enabled Provider's own MCP
+server) had never actually been implemented: `packages/quay/bin/quay.js`
+had no `mcp` subcommand, and `packages/quay/src/provider-client.js` was
+confirmed to be Core's MCP **client** side only.
+
+This iteration also carried forward the iteration-25 independent audit's
+correction (`gate_correctness` flat at 0.76, V_instance = 0.4365 unchanged
+— see the post-hoc correction section immediately above) as its scoring
+baseline, and applied the same discipline going forward: DIR-007's work
+is genuinely new **skeleton/abi_symmetry**-relevant Core capability (a new
+v0-loop-adjacent transport binding, not a second-Provider conformance
+port), so it is scored honestly against that distinction rather than
+mechanically re-applying iteration 25's own correction pattern without
+re-checking which factor the evidence actually belongs to (see
+`experiment/iterations/iteration-26.md` §7 for the explicit reasoning on
+each factor).
+
+| task_id | title | author_by | execute_by | gate_by | status |
+|---|---|---|---|---|---|
+| QN-036 | Implement and live-verify Core's own MCP server (quay mcp, DIR-007) | native | native | native | done |
+
+`author_by`/`execute_by`/`gate_by` = `native` for QN-036, in the same
+same-session **degraded-fallback** mode established since iteration 1 (no
+subagent-dispatch primitive exists in this environment — reconfirmed via
+`ToolSearch` at the start of this iteration, not re-assumed): `quay:author`'s
+documented method (write Proposal/Plan/AC/DoD, `task check` → `ok:true`,
+`task edit --status ready`) was followed, then `quay:execute`'s documented
+method (`implement-phase`: real new code — `packages/quay/src/mcp-server.js`
+created, `bin/quay.js`'s `mcp` subcommand wired in; `self-audit-ac`: each
+AC/DoD box independently re-verified against live command output —
+byte-identical JSON comparisons, a live github-repo check, a 13-assertion
+committed test run — before being checked; `gate-check`: `task check` →
+`ok:true, acChecked: 4/4` → `task edit --status done`).
+
+## σ computation — iteration 26
+
+QN-036 reaches `{native, native, native, done}` this iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 28 / 35
+  = 0.8000
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 30 / 35
+  = 0.8571
+```
+
+Total task count is now **35** (QN-001..QN-036, minus the never-allocated
+QN-018) — 1 new task created and completed this iteration (QN-036, done).
+
+**σ (strict) = 0.8000, up from 0.7941 at the end of iteration 25 (Δσ =
++0.0059).** Comparable in size to iteration 25's own Δσ; consistent with
+the pattern of one substantial, human-directed capability closure per
+iteration continuing to move σ by a small, honest increment against a
+now-large (35-task) denominator.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 34 / 35
+              = 0.9714
+```
+
+Up from 0.9706 at the end of iteration 25 (QN-036 added to both numerator
+and denominator).
