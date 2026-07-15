@@ -52,16 +52,57 @@ section, read earlier in this conversation) — they are not necessarily
 verified which (if any) monitor process is a child of its own session
 before picking a `to=` value.
 
+**Discovery method, tested live in this same conversation, including a
+pitfall worth flagging explicitly.** The top-level orchestrator session
+(this conversation, pts/9, pid `3526382`) was checked for its own bound
+monitor. A first attempt — `ps --ppid <own pid>` plus filtering `ps aux`
+by the session's own `tty` (`pts/9`) — found no `manda monitor` process,
+and concluded (wrongly) that this session had no monitor bound. The
+human then reported a live `Monitor details` panel showing `Script:
+manda monitor terminal --root ., Runtime: 1h50m33s` for this very
+session, contradicting that conclusion. Re-investigating found the exact
+cause of the false negative: the `manda monitor terminal` process was
+started via this session's own `Monitor` tool (a detached background
+task), so its `tty` shows as `?`, not `pts/9` — a plain `tty`-filtered
+`ps aux` scan silently excludes it. The correct check walks the `ppid`
+chain instead of filtering by `tty`:
+
+```
+ps -o pid,ppid,tty,lstart,cmd -p <own claude pid>       # confirm own pid
+ps --ppid <own claude pid>                               # direct children (may show only an intermediate bash)
+# then, for any bash child whose cmd contains "manda monitor <name>",
+# confirm via a full three-way parentage check:
+ps -o pid,ppid,cmd -p <own pid>,<bash child pid>,<manda monitor pid>
+```
+
+Confirmed this way: `3526382` (this session) → `3965631` (a detached
+`bash -c '... manda monitor terminal --root .'`, started by this
+session's own `Monitor` tool call, `tty=?`) → `3965654` (`manda monitor
+terminal --root .`). `/proc/3965654/cwd` independently confirmed
+`/home/yale/work/quay`. **This session's own monitor name is `terminal`,
+not absent as first (incorrectly) concluded.**
+
+This means the naive discovery method proposed further down (`ps --ppid
+<own pid>` "or equivalent") is insufficient on its own and must not
+filter by `tty` — a session's own monitor, if started via that session's
+`Monitor` tool (as the `manda-monitor` skill does), will always appear
+`tty=?` and will be invisible to any check that assumes it shares the
+session's terminal.
+
 ## Requested action
 
 1. Before attempting any `Dispatch`/`Agent` call, the iteration-executor
    session should first **discover its own monitor's name**, mechanically
-   (not guessed) — e.g. by reading `.manda/config.yml`'s
-   `monitor.bindings` section together with host process introspection
-   (`ps --ppid <own pid>` or equivalent, if available from within the
-   session; otherwise via whatever manda-provided mechanism exposes
-   "which monitor, if any, is bound to this session") — rather than
-   defaulting to `to="worker"` or any other hardcoded/example name.
+   (not guessed) — by reading `.manda/config.yml`'s `monitor.bindings`
+   section together with host process introspection, walking the `ppid`
+   chain from the session's own pid rather than filtering by `tty` (see
+   the "Discovery method" subsection above — a `tty`-based filter
+   silently misses monitors started via the session's own `Monitor` tool,
+   since those run detached with `tty=?`) — rather than defaulting to
+   `to="worker"` or any other hardcoded/example name. If no host-level
+   process introspection is available from within a given session type,
+   record that limitation explicitly rather than silently falling back to
+   a guessed name.
 2. If the session's own bound monitor name is discoverable, dispatch
    (or instruct any subagent it spawns to dispatch) explicitly to that
    name, and use an async-submit-then-poll pattern (per this
