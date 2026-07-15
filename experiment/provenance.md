@@ -2398,3 +2398,88 @@ is now the **second consecutive iteration with zero task/code
 movement** (iteration 14, then iteration 15) — see
 `experiment/iterations/iteration-15.md` §10 for the resulting rigorous
 (and explicitly time-bounded) treatment of convergence criterion 5.
+
+## Records (as of end of iteration 16)
+
+**Pre-execution context:** iteration 15's own report stated an explicit,
+falsifiable threshold — a third consecutive fully-flat iteration with no
+new angle on `gate`/`skill` (or any other genuine gap) should tip
+convergence criterion 5 to fire. Iteration 16's mandate was to perform a
+genuinely fresh (not habitual) search across several specific angles
+before evaluating that threshold.
+
+**Backlog re-check (fresh, this iteration):** 22 `done`, 3
+`needs-human` (QN-017, QN-020, QN-022), 1 `todo` (QN-021) — byte-for-byte
+unchanged from iterations 14/15. No task authored or executed. Full
+12-file regression suite re-run fresh: 12/12 green.
+
+**`Dispatch`/`Agent` schema-contract check (genuinely new angle, not a
+runtime re-test):** the actual tool schemas for
+`mcp__plugin_manda_manda__Dispatch`/`DispatchStatus`/`DispatchSettle`/
+`DispatchCancel` were fetched and read verbatim this iteration (not
+inferred from past runtime behavior). Confirmed at the contract level:
+`Dispatch` is a message-passing/queue mechanism requiring an
+already-live claimer session (its own description warns "under default
+config, monitors do NOT subscribe to the shared pending pool") — it does
+not itself spawn a fresh-context subagent, and cannot substitute for
+`Agent`'s synchronous spawn for design §5's review-independence
+requirement. This sharpens, at a stronger evidentiary level than before,
+the same conclusion iterations 13-15 reached empirically. No live
+`Agent`/`Dispatch` call was made this iteration (deliberately — a bare
+re-test with no new purpose would not add information, and the dispatch
+instructions explicitly forbid repeating iteration 15's self-obtained-
+audit attempt).
+
+**QN-021 reconsidered, explicitly, per this iteration's mandate:**
+re-read in full. Its AC item 1 requires a genuinely separate,
+freshly-dispatched subagent for its own `review-proposal` step — its own
+Plan explicitly invites reversal if such a primitive is ever found. The
+schema-contract check above is exactly the kind of check its Plan calls
+for, applied fresh. Result: still unsatisfiable, now confirmed at a
+stronger (contract, not just empirical) evidentiary level. QN-021's
+designed purpose (a permanent, honest artifact recording an
+environmental limitation) remains intact, correctly un-reversed.
+
+**Discovered this iteration, not produced by it:** `git log` showed that
+after iteration 15's own report was committed, the top-level
+orchestrator (a separate session — not this iteration-executor,
+consistent with the dispatch's explicit instruction not to repeat
+iteration 15's self-audit-dispatch attempt) ran and committed a genuine
+independent out-of-band audit of iteration 15's work
+(`experiment/audits/iteration-15-independent-adjudicate.md`, commit
+`d28eb83`) — **verdict PASS**, including the auditor's own 6th
+independent reproduction of the `Agent`-spawn timeout (across at least 3
+distinct sessions total now). This resolves the *mechanical* half of
+convergence criterion 4 for iteration 15's work. It does **not** move
+this iteration's own `validation` V_meta component — applying the same
+consistent standard iterations 12-14 established (credit an audit toward
+the iteration whose work it audited, obtained during that iteration; do
+not retroactively credit the iteration that merely discovers the
+resulting file afterward), `validation` remains 0.64. See
+`experiment/iterations/iteration-16.md` §8 for the full reasoning.
+
+No task's provenance triple changed this iteration. σ is unchanged.
+
+## σ computation — iteration 16
+
+No task reached a new `{native, native, native, done}` state this
+iteration (no task was authored or executed; none exists to author or
+execute). σ is recomputed from the same 26-task table as iterations
+13-15, unchanged:
+
+```
+σ (strict reading)    = 19 / 26 = 0.7308     (unchanged, Δσ = 0)
+σ (inclusive reading) = 21 / 26 = 0.8077     (unchanged)
+σ_author_only         = 25 / 26 = 0.9615     (unchanged)
+```
+
+Total task count remains **26** — no new task was created this
+iteration. This is now the **third consecutive iteration with zero
+task/code movement** (iterations 14, 15, 16) — meeting, on its own
+explicit terms, the threshold iteration 15's report stated for firing
+convergence criterion 5. See `experiment/iterations/iteration-16.md`
+§10 for the full convergence-criteria evaluation, including why
+criterion 5 firing does **not** by itself constitute overall protocol
+§7 convergence (criteria 1-3 remain clearly unmet), and the explicit,
+unresolved practical-convergence question surfaced for the
+human/top-level orchestrator.
