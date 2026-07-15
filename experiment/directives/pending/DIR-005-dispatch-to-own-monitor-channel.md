@@ -89,6 +89,43 @@ filter by `tty` — a session's own monitor, if started via that session's
 `tty=?` and will be invisible to any check that assumes it shares the
 session's terminal.
 
+**Follow-up experiment: can a subagent discover this on its own, with no
+name handed to it?** Tested live via a fresh, cold `Agent`-spawned
+`general-purpose` subagent, deliberately given no monitor name, no
+session identifiers, and explicit instructions not to search conversation
+history or `experiment/` markdown for hints — only OS process/file
+introspection was allowed. Result: **yes, it succeeded, using the exact
+ancestor-rooted method above.** It derived its own ancestry via `$$` and
+`ppid` walking up to the `claude` process (pid `3526382`), then scanned
+that process's descendants (`pstree -ap`/`ps --ppid` iteratively) and
+found `bash(3965631) → manda monitor terminal --root .(3965654)` as a
+grandchild of that same `claude` instance — correctly identifying
+`terminal` as its own lineage's monitor. It independently rediscovered
+the `tty` pitfall (its own lineage is `tty=pts/9`; the monitor process is
+`tty=?`) and confirmed a naive host-wide `grep "manda monitor"` alone is
+ambiguous — it found 7 total monitor processes on the host across 3
+distinct names (`cord`×3, `worker`×3, `terminal`×1) and only the
+ancestor-rooted scan (not name-matching) disambiguated which one was
+actually its own. It also independently re-confirmed `.manda/config.yml`
+contains no static session-id-to-monitor-name mapping — the name only
+exists as a runtime CLI argument, discoverable solely via process
+introspection.
+
+**Important caveat on this positive result, stated plainly and not to be
+overclaimed:** this succeeded specifically because the subagent's `Bash`
+tool executes in the *same host process namespace* as the spawning
+session — it could directly `ps`/`pstree` the parent `claude` process and
+all its siblings/descendants. This is a property of `Agent`-spawned
+subagents *in this environment as currently configured*, not a guarantee
+that holds for every session/dispatch type. It remains untested whether
+an `Agent`-dispatched `baime:iteration-executor` subagent (the actual
+iteration-executor session type used throughout iterations 0-16) shares
+this same-host, same-process-namespace property with its own spawning
+session, or whether some future/different dispatch path (a genuinely
+isolated worktree, container, or remote host) would break this method
+entirely — in which case the fallback in Requested action item 3 (record
+the limitation explicitly) applies.
+
 ## Requested action
 
 1. Before attempting any `Dispatch`/`Agent` call, the iteration-executor
