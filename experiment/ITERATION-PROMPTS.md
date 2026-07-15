@@ -298,6 +298,82 @@ Do not build a third backend. GitHub is the sole v1 transfer target
 
 ---
 
+## §Core-scope work: standing constraints for any task touching `packages/quay`
+
+Added by iteration 29 (DIR-008), sourced from `docs/proposal/
+quay-core-scope-expansion-discussion.md` (a discussion document, not a
+directive itself — read in full there for the underlying reasoning; do
+not re-derive these from scratch). These four constraints bind **every**
+future iteration whose task touches `packages/quay` (the Core: CLI + Web
+server + action-trigger edge), the same way G1-G6 bind every iteration
+regardless of task. They do not authorize or request any new
+implementation work by themselves (the three original proposals in the
+discussion doc — browser-automation Web UI verification, Core CLI/MCP/
+Web-UI three-way symmetry, mock/log-file action-delivery mode — remain
+separate, not-yet-issued, future directives).
+
+1. **Terminology discipline.** This project's glossary
+   (`docs/proposal/glossary.md`) freezes "MCP" to mean specifically the
+   Provider ABI transport (`quay-native mcp`, `quay-github mcp`, `quay
+   mcp`). Browser-automation tooling available to a Claude Code session
+   (chrome-devtools / playwright MCP servers) is an unrelated mechanism
+   that happens to share the protocol name. Any iteration prompt or task
+   body touching both must keep them unambiguous — write "browser-
+   automation tooling (chrome-devtools / playwright MCP)," never bare
+   "MCP testing" — especially now that a real Core-level `quay mcp`
+   exists (QN-036) alongside it.
+2. **G5 discipline for Web UI verification.** `packages/quay/src/
+   serve.js`'s own header states the Web UI is deliberately "crude but
+   real... no framework, no styling beyond what's needed to prove the
+   loop." Any browser-driven or other Web UI verification work must stay
+   scoped to confirming *existing* behavior (list renders, detail
+   renders, action-button POST fires) and must not become a pretext for
+   improving the UI's appearance or interactivity before the skeleton's
+   functional loop is otherwise complete — per G5's own warning that "the
+   bootstrap ambition amplifies" the gold-plating temptation.
+3. **manda-investigation reuse discipline.** Iterations 13-18 already
+   spent substantial effort establishing that: the async `Dispatch` queue
+   primitive works but nothing reliably claims tasks submitted to it; a
+   genuine synchronous `Agent` fresh-context spawn times out (reproduced
+   5/5 as of iteration 15); and even a correctly-targeted dispatch to a
+   session's own monitor channel produces no execution unless a live
+   process is actually watching that monitor's output (DIR-005's
+   finding, iteration 18). Any future prompt involving action-delivery
+   verification must explicitly instruct: do not re-discover these
+   findings from scratch — cite and build on
+   `experiment/directives/archive/DIR-004-*.md` and
+   `experiment/directives/archive/DIR-005-*.md` directly — and must not
+   make an automated test's pass/fail hinge on live manda delivery
+   succeeding, since that has been repeatedly shown to be a per-session,
+   per-moment fact, not a reliably available one.
+4. **Resolution of the two open scope/attribution questions (discussion
+   doc §4), decided by iteration 29:**
+   - **(a) Scope:** Core is **already in scope**, no protocol §10
+     resolution needed. `experiment/README.md` §1's instance objective
+     already depends on the v0 walking skeleton, which already includes
+     `packages/quay` (the Core) — it is not a new backend being added,
+     it is the pre-existing Core layer several already-completed tasks
+     (QN-027, QN-031, QN-033, QN-036, QN-038, QN-039) have exercised
+     without any prior objection or §10 amendment. No change to
+     `experiment/README.md` §1 is made by this decision — the existing
+     text already covers it.
+   - **(b) V-factor attribution:** Core-level three-way symmetry work
+     (CLI ⟷ Core MCP ⟷ Web UI) and action-delivery mock-verification
+     work should be credited to the **same factors that already credit
+     the analogous Provider-level work**, not a new fifth factor: new
+     Core capability code → `skeleton`; new Core CLI/MCP schema-symmetry
+     proof (extending `abi-symmetry.mjs`'s discipline one layer up, or a
+     genuinely new Core-level equivalent script) → `abi_symmetry`; new
+     Core gate-logic change → `gate_correctness`. This is a direct
+     extension of precedent already applied at the Provider level, not a
+     new invention, and it explicitly avoids re-opening the extended
+     `effectiveness`-attribution debate seen in iterations 21-24 —
+     `effectiveness` is not the right factor for structural
+     capability/symmetry work regardless of which layer (Provider or
+     Core) it targets.
+
+---
+
 ## §Fixpoint iteration: σ→1, human sign-off (not just adjudicate)
 
 Trigger this section only when: σ has reached (or is about to reach) 1, AND the Skill set + gate have been stable (unchanged) across the previous iteration's build. Both conditions, not just σ.

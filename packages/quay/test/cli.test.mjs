@@ -29,17 +29,20 @@
 // `task list` result is itself live proof this function works, not an
 // assumption.
 //
-// Out of scope, named honestly (not silently claimed as covered):
-// - resolveProviderEnv()'s absolute-path passthrough branch (values that do
-//   NOT start with "./" or "../") — the native Provider fixture used here
-//   has no such env value.
-// - `quay serve`'s own CLI branch (the `cmd === "serve"` branch and its
-//   `process.argv.slice(3)` re-parse quirk) — serve.js's own HTTP behavior
-//   is already covered by QN-031's serve.test.mjs, but that test imports
-//   startServer directly and never spawns bin/quay.js serve itself. This
-//   remains a small, separately-named residual gap.
+// QN-039 (iteration 29) closed the two residual gaps this file used to name
+// here as "out of scope": resolveProviderEnv()'s absolute-path passthrough
+// branch (test 8 below, via a real --provider github spawn using the
+// exact QUAY_GITHUB_REPO: "yaleh/quay" shape this repo's own
+// .quay/config.yml uses) and `quay serve`'s own CLI dispatch branch
+// (test 9 below, spawning `bin/quay.js serve --port <n>` for real). Neither
+// is silently claimed as covered elsewhere any more — see tests 8 and 9.
 //
 // Run: node test/cli.test.mjs
+// Precondition for test 8 only: `gh auth status` must show an authenticated
+// session with read access to yaleh/quay (a standing stage-2+ precondition
+// of this experiment, re-confirmed at the start of every iteration) — test
+// 8 spawns a real (read-only) `quay-github mcp` child process via `--provider
+// github`.
 
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -51,6 +54,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const coreBin = path.join(__dirname, "..", "bin", "quay.js");
 const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
 const nativeProviderDir = path.dirname(nativeBin);
+const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.js");
+const githubProviderDir = path.dirname(githubBin);
 
 let failures = 0;
 function assert(cond, msg) {
@@ -263,6 +268,141 @@ async function main() {
     const r = run(["bogus"], spawnOpts);
     assert(r.status === 1, "quay <unknown command> exits 1");
     assert(r.stderr.includes("usage:"), "quay <unknown command> prints the usage fallback to stderr");
+  }
+
+  // 8. QN-039 (iteration 29): resolveProviderEnv()'s absolute-path
+  //    passthrough branch (the `else` of the `./`/`../`-prefix check) —
+  //    exercised via a second provider entry, `github`, whose `env` uses
+  //    QUAY_GITHUB_REPO: "yaleh/quay" verbatim, the EXACT shape the real
+  //    repo's own .quay/config.yml uses (not a synthetic value). If
+  //    resolveProviderEnv() ever mis-resolved this (e.g. tried to
+  //    path.resolve() it, corrupting "yaleh/quay" into an absolute
+  //    filesystem path), the spawned `quay-github mcp` child process would
+  //    receive a broken QUAY_GITHUB_REPO and bin/quay-github.js's own
+  //    resolveRepo() would throw ("QUAY_GITHUB_REPO must be owner/repo") —
+  //    so a genuinely successful, non-empty `task list` result is itself
+  //    live proof the passthrough branch works, not an assumption. This
+  //    makes a real (read-only) `gh api` call against yaleh/quay.
+  {
+    fs.writeFileSync(
+      path.join(workspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        "      QUAY_NATIVE_TASKS_DIR: \"./tasks-env-relative\"",
+        "  github:",
+        "    enabled: false",
+        `    path: "${githubProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${githubBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        "      QUAY_GITHUB_REPO: \"yaleh/quay\"",
+        "",
+      ].join("\n")
+    );
+    const r = run(["task", "list", "--provider", "github", "--json"], spawnOpts);
+    assert(r.status === 0, "quay --provider github task list --json exits 0 (proves resolveProviderEnv()'s absolute-path passthrough reached the spawned quay-github mcp child intact)");
+    let tasks;
+    try {
+      tasks = JSON.parse(r.stdout);
+    } catch {
+      tasks = null;
+    }
+    assert(Array.isArray(tasks) && tasks.length > 0, "quay --provider github task list --json returns real, non-empty task data from the live yaleh/quay repo");
+    // Restore the native-only config for any subsequent step in this file.
+    fs.writeFileSync(
+      path.join(workspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        "      QUAY_NATIVE_TASKS_DIR: \"./tasks-env-relative\"",
+        "",
+      ].join("\n")
+    );
+  }
+
+  // 9. QN-039 (iteration 29): `quay serve`'s own CLI dispatch branch
+  //    (`cmd === "serve"` and its `process.argv.slice(3)` re-parse quirk),
+  //    exercised by spawning bin/quay.js itself as a real child process
+  //    (not importing startServer() directly, which is what serve.test.mjs
+  //    already covers). Confirms both that the dispatch branch's dynamic
+  //    import + startServer() call actually runs, AND that --port is read
+  //    correctly by the argv.slice(3) re-parse (not swallowed as a `sub`
+  //    token by the normal parseFlags(rest) call, which would otherwise see
+  //    "--port" as `sub` since `serve` has no subcommand token).
+  //
+  //    Note: serve.js's startServer() builds the spawned quay-native mcp
+  //    child's QUAY_NATIVE_TASKS_DIR from the provider's `tasks_dir` field
+  //    directly (NOT from `env`/resolveProviderEnv() — see serve.js's own
+  //    startServer(), a distinct code path from withProvider()'s). So this
+  //    block uses its own dedicated workspace + config with `tasks_dir`
+  //    pointed straight at `envTasksDir` (the directory CLI-1 was actually
+  //    seeded into, above — NOT the top-level `tasksDir` mkdtemp, which
+  //    (per the comment on that variable further up) is never itself
+  //    seeded with tasks), matching serve.test.mjs's own (already-passing)
+  //    fixture convention, rather than reusing the env-relative fixture
+  //    used by tests 1-8 above.
+  {
+    const http = await import("node:http");
+    const serveWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-serve-workspace-"));
+    fs.mkdirSync(path.join(serveWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(serveWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    tasks_dir: "${envTasksDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "",
+      ].join("\n")
+    );
+    const port = 41800 + (process.pid % 500);
+    const child = (await import("node:child_process")).spawn(
+      "node", [coreBin, "serve", "--port", String(port)],
+      { cwd: serveWorkspaceRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+    );
+    let stdout = "";
+    child.stdout.on("data", (c) => (stdout += c));
+    try {
+      // Poll for the server to come up (real subprocess start-up latency).
+      let up = false;
+      for (let i = 0; i < 50 && !up; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        try {
+          const res = await new Promise((resolve, reject) => {
+            http.get({ host: "127.0.0.1", port, path: "/" }, resolve).on("error", reject);
+          });
+          if (res.statusCode === 200) up = true;
+        } catch {
+          // not up yet
+        }
+      }
+      assert(up, "quay serve --port <n>, spawned as a real subprocess, becomes reachable on the exact port passed on the command line (proves the argv.slice(3) re-parse works, not the 4173 default)");
+      if (up) {
+        const body = await new Promise((resolve, reject) => {
+          http.get({ host: "127.0.0.1", port, path: "/" }, (res) => {
+            let b = "";
+            res.on("data", (c) => (b += c));
+            res.on("end", () => resolve(b));
+          }).on("error", reject);
+        });
+        assert(body.includes("CLI-1"), "quay serve (spawned as a subprocess) renders the seeded task in its GET / body, proving the cmd === 'serve' dispatch branch genuinely ran startServer()");
+      }
+    } finally {
+      child.kill();
+      fs.rmSync(serveWorkspaceRoot, { recursive: true, force: true });
+    }
   }
 
   fs.rmSync(tasksDir, { recursive: true, force: true });

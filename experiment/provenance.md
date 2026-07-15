@@ -3874,3 +3874,153 @@ Diagnostic sub-metric:
 
 Up from 0.9722 at the end of iteration 27 (QN-038 added to both
 numerator and denominator).
+
+## Records (as of end of iteration 29)
+
+**Pre-execution context:** `experiment/directives/pending/` was confirmed
+empty at the start of this iteration; no new directive existed. Per
+standing convention, this iteration's priority list came from iteration
+28's own carried-forward "Problems identified for next iteration": item 1
+(the real-Claude-Code-session MCP tool-use gap) was re-confirmed still
+genuinely unclosable from within this already-running session
+(`ToolSearch` for "quay task mcp" surfaced zero `quay`-related tools,
+exactly as expected, since this session started before `.mcp.json`
+existed / no approval occurred) — per the task's own explicit instruction,
+this was not pursued further (it is not this session's to close; a fresh
+session must do so). This iteration instead pursued item 2 from iteration
+28's list: `resolveProviderEnv()`'s absolute-path passthrough branch and
+`quay serve`'s own CLI-dispatch branch, both named explicitly (since
+iteration 23, QN-033) as honestly-scoped-out gaps in
+`packages/quay/test/cli.test.mjs`'s own header comment, and both still
+open as of iteration 28.
+
+QN-039 closed both: (1) a new test spawns `bin/quay.js task list
+--provider github --json` against a fixture `.quay/config.yml` whose
+`github` provider entry uses `QUAY_GITHUB_REPO: "yaleh/quay"` — the exact
+absolute (non-`./`-prefixed) passthrough value the real repo's own
+config already uses in production — and asserts a genuine, non-empty
+result from the live `yaleh/quay` GitHub repo, proving
+`resolveProviderEnv()`'s passthrough branch correctly forwards such
+values unresolved to the spawned `quay-github mcp` child process; (2) a
+new test spawns `bin/quay.js serve --port <ephemeral>` as a real
+subprocess (not `startServer()` imported directly) and confirms via a
+live HTTP GET both that the server started (rendering a seeded task) and
+that it is listening on the exact `--port` value passed on the command
+line, not the 4173 default — proving the `cmd === "serve"` dispatch
+branch and its `process.argv.slice(3)` re-parse quirk both work as
+intended. `cli.test.mjs`'s header comment was updated to remove the
+"Out of scope, named honestly" framing for both closed gaps. This is new
+test coverage of pre-existing, already-shipped code paths only — `git
+diff --stat` for this iteration's tracked-file changes shows only
+`packages/quay/test/cli.test.mjs` (149 insertions, 9 deletions) — zero
+changes to `bin/quay.js`, `src/mcp-server.js`, or `src/serve.js`
+themselves.
+
+One genuine implementation bug was found and fixed **in the test itself**
+while authoring this task (not in production code): the first attempt at
+the `--provider github` test placed `--provider github` before `task
+list` on the command line, which silently failed because `bin/quay.js`'s
+own `cmd`/`sub` dispatch reads `process.argv[2]`/`[3]` positionally (not
+post-flag-parsed) — `--provider` must follow `task list`, matching every
+other existing test in the file. This was caught by actually running the
+test and observing the `usage:` fallback output, not assumed to work.
+Similarly, the first attempt at the `serve` test pointed its fixture's
+`tasks_dir` at an empty directory, because `serve.js`'s own
+`startServer()` builds its spawned child's `QUAY_NATIVE_TASKS_DIR` from
+the provider's `tasks_dir` field directly (a distinct code path from
+`withProvider()`'s `resolveProviderEnv()`-based one used by every other
+CLI command) — this was also caught by live observation (an empty
+task table in the rendered HTML) and fixed by pointing `tasks_dir` at the
+directory the fixture tasks were actually seeded into.
+
+**Mid-iteration discovery:** while assembling this iteration's own report
+(after QN-039 was already complete), a re-check of `experiment/
+directives/pending/` and `git log` showed that a genuine new human
+directive, DIR-008 (`experiment/directives/pending/DIR-008-codify-core-
+scope-constraints-in-iteration-prompts.md` at the time), had been
+committed (`c0829d5`, 2026-07-15T14:39:48Z) — mid-session, after this
+iteration's own mandatory first-step check (which correctly found
+`pending/` empty at that earlier moment) but before this iteration's work
+concluded. DIR-008 requested that `experiment/ITERATION-PROMPTS.md` be
+revised to encode four standing Core-scope verification constraints
+(terminology discipline, G5 Web-UI scope, manda-reuse discipline, and an
+explicit resolution of two open scope/attribution questions), sourced
+from `docs/proposal/quay-core-scope-expansion-discussion.md` (a
+discussion document a human/Claude Code conversation produced, not itself
+a directive). Rather than deferring this to iteration 30 (the directive
+was fully specified, tractable, and self-contained — a single
+documentation-file revision with no ambiguity about scope), this
+iteration processed it as a second unit of work (QN-040), honestly
+attributed to iteration 29 alongside QN-039. See
+`experiment/directives/archive/DIR-008-*.md`'s `## Resolution` section
+and `experiment/iterations/iteration-29.md` §4-§5 for the full account.
+
+| task_id | title | author_by | execute_by | gate_by | status |
+|---|---|---|---|---|---|
+| QN-039 | Close resolveProviderEnv()'s absolute-path passthrough gap and quay serve's own CLI-dispatch gap in bin/quay.js's test coverage | native | native | native | done |
+| QN-040 | Process DIR-008 -- codify Core-scope verification constraints into experiment/ITERATION-PROMPTS.md | native | native | native | done |
+
+`author_by`/`execute_by`/`gate_by` = `native` for QN-039, in the same
+same-session **degraded-fallback** mode established since iteration 1
+(no subagent-dispatch primitive exists in this environment — reconfirmed
+via `ToolSearch` at the start of this iteration, not re-assumed).
+`quay:author`'s method (Proposal/Plan/AC/DoD authored, `author->ready`
+gate passed) and `quay:execute`'s method (`implement-phase`: the two new
+test blocks written and debugged against live command output;
+`self-audit-ac`: each AC/DoD box checked only after the corresponding
+live evidence existed and was independently re-verified — actual test
+run output, actual `git diff --stat`, actual full-suite re-run;
+`gate-check`: `task check` → `task edit --status done`) were both
+genuinely followed this iteration.
+
+| QN-040 | Process DIR-008 -- codify Core-scope verification constraints into experiment/ITERATION-PROMPTS.md | native | native | native | done |
+
+`author_by`/`execute_by`/`gate_by` = `native` for QN-040 also, same
+degraded-fallback mode. DIR-008 (a genuine human directive, committed
+`c0829d5` at 2026-07-15T14:39:48Z, mid-iteration) was discovered when
+re-checking `experiment/directives/pending/` while assembling this
+iteration's own report (after the iteration's mandatory first-step check,
+which correctly found it empty at that earlier moment). It was processed
+as a second unit of work in the same iteration rather than deferred,
+since it was fully specified, tractable, and self-contained (a single
+documentation-file revision). See `experiment/directives/archive/
+DIR-008-*.md`'s own `## Resolution` section for the full evidence
+pointer.
+
+## σ computation — iteration 29
+
+QN-039 and QN-040 both reach `{native, native, native, done}` this
+iteration:
+
+```
+σ (strict reading)
+  = (# tasks with author_by = execute_by = gate_by = native AND status = done) / (total tasks)
+  = 32 / 39
+  = 0.8205
+
+σ (inclusive reading — adds QN-003, QN-004)
+  = 34 / 39
+  = 0.8718
+```
+
+Total task count is now **39** (QN-001..QN-040, minus the never-allocated
+QN-018) — 2 new tasks created and completed this iteration (QN-039,
+QN-040, both done).
+
+**σ (strict) = 0.8205, up from 0.8108 at the end of iteration 28 (Δσ =
++0.0097).** A larger single-iteration increment than the recent norm
+(iterations 26-28 each moved σ by roughly +0.005 to +0.013), because this
+iteration completed two tasks rather than the usual one — an honest
+consequence of DIR-008 arriving mid-iteration and being tractable enough
+to process within the same session, not a change in method.
+
+Diagnostic sub-metric:
+
+```
+σ_author_only = (# tasks with author_by = native) / (total tasks)
+              = 38 / 39
+              = 0.9744
+```
+
+Up from 0.9730 at the end of iteration 28 (QN-039 and QN-040 both added
+to numerator and denominator).

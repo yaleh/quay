@@ -1,6 +1,6 @@
 # DIR-008
 
-- status: pending
+- status: applied
 - created_by: human (Yale), asserted directly in this live conversation
 - created_at: 2026-07-15
 - title: Codify Core-scope verification constraints into `experiment/ITERATION-PROMPTS.md`
@@ -135,4 +135,31 @@ Concretely, the iteration that processes this directive should:
 
 ## Resolution
 
-<!-- filled in by the iteration that applies this directive -->
+- resolved_by: iteration 29 (QN-040)
+- outcome: applied
+- evidence: `experiment/ITERATION-PROMPTS.md`'s new "§Core-scope work:
+  standing constraints for any task touching `packages/quay`" section
+  (inserted after "§Stage 2+: When GitHub-Provider-building iterations
+  begin") states all four constraints verbatim from the source discussion
+  document, none dropped or narrowed. Constraint 4's two open
+  sub-questions are both given explicit, reasoned decisions inline:
+  (a) Core is already in scope, no protocol §10 resolution needed --
+  `experiment/README.md` §1 is left unchanged, with reasoning recorded
+  that its existing text already covers `packages/quay` via the v0
+  walking skeleton dependency; (b) Core-level three-way symmetry work and
+  action-delivery mock-verification work are credited to the same
+  existing factors that already credit analogous Provider-level work
+  (`skeleton`/`abi_symmetry`/`gate_correctness` as applicable), explicitly
+  not `effectiveness` and explicitly not a new fifth factor. See
+  `experiment/iterations/iteration-29.md` §5/§7/§8 for the full reasoning
+  and this task's own V-factor scoring (this directive-processing work
+  itself is process/methodology-maintenance, analyzed on its own merits,
+  not forced into a feature-shaped factor).
+
+  DIR-008 appeared in `pending/` mid-iteration-29 (committed
+  `c0829d5`, 2026-07-15T14:39:48Z), after iteration 29's own mandatory
+  first-step `ls experiment/directives/pending/` check (which correctly
+  found it empty at that moment) but before the iteration's work
+  concluded -- processed as a second unit of work within the same
+  iteration rather than deferred to iteration 30, since it was fully
+  specified, tractable, and self-contained.
