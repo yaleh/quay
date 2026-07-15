@@ -7054,3 +7054,152 @@ rather than being a distinct opportunity — is not automatically forced
 into one of the eight precisely-scoped V-factor axes when the evidence
 does not support it, per the standing discipline (iterations 25, 28, 29,
 37, 38, 39, 40, 41, 42, 43, 44, 45).
+
+## Iteration 47 — durable-fix confirmation, ten-consecutive-PASS audit read, routine re-checks (no new tractable increment)
+
+### Preconditions checked
+
+`experiment/directives/pending/` confirmed **empty** via `ls` (mandatory
+first step). `git status --short` confirmed clean at the start of this
+iteration modulo the one pre-existing, deliberately-untouched
+`docs/proposal/baime-lite-driving-external-projects.md`. `ls tasks/
+QN-*.md | wc -l` confirmed **56** (unchanged from iteration 46's final
+tally). Full 25-file regression suite and `abi-symmetry.mjs` both
+confirmed passing at the start of this iteration. `gh auth status`
+confirmed authenticated as `yaleh`, scopes `repo`+`workflow`.
+`docs/proposal/quay-bootstrap-experiment.md` (233 lines, gitignored, read
+directly from disk regardless), `experiment/ITERATION-PROMPTS.md` (489
+lines), and the tail of this file all read fresh this session.
+
+**New this iteration:** `experiment/audits/iteration-46-independent-
+adjudicate.md` (206 lines) was found already present on disk (produced
+by the top-level orchestrator's own separate process between iteration
+46's completion and this session's start) and read in full. Verdict:
+clean **PASS**, extending the clean-PASS streak (37-45) to **ten**
+consecutive iterations (37-46). This session did not dispatch or attempt
+to obtain this audit itself.
+
+`curl -s http://localhost:28912` returned `404 page not found` at the
+start of this session — noted honestly (not asserted as "armed" or "not
+armed" beyond what was directly observed); this iteration's own work did
+not require dispatch, consistent with the standing finding (since
+iteration ~15) that this session's environment has no verified,
+locally-completing subagent-dispatch primitive regardless of manda's
+daemon state.
+
+### Observe
+
+**QN-057 durable-fix confirmation (iteration 46's own explicit ask —
+verify, don't assume):** `grep -n "^\- \*\*Status"` on all four files
+(`experiment/README.md`, `docs/proposal/quay-proposal.md`, `docs/
+proposal/quay-native-design.md`, `docs/proposal/quay-bootstrap-
+experiment.md`) confirms all four still read the relative, self-updating
+phrasing iteration 46 introduced, with zero re-staling one full iteration
+later. `ls experiment/iterations/ | sort -V | tail -3` confirms
+`iteration-46.md` sorts as the highest-numbered file, so the phrasing
+still resolves correctly. **The fix is holding**, a genuine fresh
+confirmation (not assumed).
+
+**Routine re-check (not re-derived from scratch):** `gh issue list
+--repo yaleh/quay --json number,title,labels,state` shows issues #3/#4
+unchanged from iterations 41-46 (no state or label change). `quay-native
+task list --json` (non-`done` filter) shows the same 4 deliberately-
+unsatisfiable tasks (`QN-017`/`QN-020`/`QN-022` `needs-human`, `QN-021`
+`todo`) iterations 41-46 already found — no new organic task. Fresh read
+of `packages/quay/DESIGN.md` §2.5 ("Known gaps") and `packages/
+quay-github/DESIGN.md`'s full section list: every previously-named gap
+is marked closed with an iteration citation; no open, un-struck item
+remains in either file. `grep -rn "TODO\|FIXME\|XXX" packages/*/src/*.js
+packages/*/bin/*.js`: zero matches.
+
+**Ten-consecutive-clean-PASS streak independently re-verified**: `for i
+in 37..46; do grep -o "Verdict: [A-Z]*" experiment/audits/
+iteration-$i-independent-adjudicate.md; done` — all ten return `Verdict:
+PASS`.
+
+**Conclusion:** consistent with iterations 19, 41-46, no genuine,
+executable `effectiveness`- or `reusability`-moving opportunity exists
+this iteration; no new V_instance-side gap exists in either package's
+"known gaps" ledger (freshly re-confirmed, not carried from memory).
+
+### Strategy
+
+No new tractable V_instance or V_meta opportunity found; the QN-057
+durable fix is independently confirmed holding (a confirmation of prior
+work, not a new increment). Consistent with the standing discipline
+(iterations 19, 28, 29, 37-46), this iteration does not force a new task
+into existence to manufacture the appearance of progress — an honest
+flat iteration, grounded in fresh, specific verification, is the correct
+outcome here. No `tasks/QN-0NN.md` was created.
+
+### Execution
+
+No code, Skill, or gate change was made. Full regression suite re-run:
+25/25 `*.test.mjs` files pass; `abi-symmetry.mjs` re-run: "ALL FOUR
+SURFACES SYMMETRIC." `git diff --stat` against the working tree (before
+this report/provenance commit): empty for all source files.
+
+### σ computation — iteration 47
+
+No task's provenance triple changed; no task was created or completed.
+σ is unchanged:
+
+```
+σ (strict reading) = 49 / 56 = 0.8750   (unchanged, Δσ = 0)
+```
+
+`ls tasks/QN-*.md | wc -l` independently re-confirmed = **56**.
+
+### V-factor attribution — iteration 47 (precedent search on the ten-PASS-streak question; held flat)
+
+Per the standing discipline, this iteration's central open question —
+does the newly-reached ten-consecutive-clean-PASS audit milestone move
+`validation`? — was investigated by an exhaustive search: every one of
+the 7 prior occurrences of `"validation: 0.64 (unchanged)"` in this file
+(iterations 41-46, each read in context this session) uses identical
+reasoning — credited only after the out-of-band audit for *that*
+iteration's own work occurs, via the top-level orchestrator's separate
+`Agent` dispatch (G3), and each explicitly frames a sustained clean-audit
+streak as evidence *noted*, never as grounds for the iteration-executor
+session to unilaterally increment the factor (iteration 46's own text:
+"that remains characterized, across the precedent chain, as the
+top-level orchestrator's own call, not this session's"). No precedent
+anywhere in this file shows an iteration-executor session unilaterally
+moving `validation` on streak length. A structurally different candidate
+factor was also considered and ruled out: `completeness`'s §5.2
+definition ("Methodology... fully documented and self-contained") does
+not reference audits at all, so it cannot absorb this evidence either —
+confirming `validation` is the only candidate axis, and confirming
+(rather than assuming) that no factor should move this iteration on this
+basis.
+
+- **skeleton, abi_symmetry, gate_correctness, skill_convergence**: no
+  source file touched this iteration (`git status --short` confirms).
+  All four held flat: skeleton 0.70, abi_symmetry 0.96, gate_correctness
+  0.76, skill_convergence 0.96.
+- **completeness: 0.74 (unchanged).** No Skill/gate/decomposition-rule
+  content changed. Not implicated.
+- **effectiveness: 0.26 (unchanged).** No code executed via `quay:
+  author`/`quay:execute` this iteration; no new marginal-increment timing
+  evidence. Now **27 consecutive iterations (21-46, and now 47)**.
+- **reusability: 0.79 (unchanged).** Routine re-check found no issue
+  state change and no new organic task. Held flat for the **twenty-second
+  consecutive iteration (26-47)**.
+- **validation: 0.64 (unchanged).** Per the precedent search above,
+  correctly held flat — the ten-consecutive-PASS milestone is noted, not
+  unilaterally acted upon by this session. That determination remains
+  reserved for the top-level orchestrator.
+
+```
+V_instance = 0.70 × 0.96 × 0.76 × 0.96 = 0.4903  (unchanged)
+V_meta      = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+ΔV_instance = ΔV_meta = **0.0000**. This iteration's genuine
+contribution — an independent, fresh confirmation that the QN-057
+durable fix is holding, a fresh re-confirmation that both packages' own
+"known gaps" ledgers have zero remaining open items, and an exhaustive
+precedent search establishing that the ten-consecutive-clean-PASS
+milestone does not license a unilateral `validation` bump at this layer
+— is not forced into a V-factor axis the evidence does not support, per
+the standing discipline (iterations 25, 28, 29, 37-46).
