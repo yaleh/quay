@@ -106,3 +106,100 @@ verification, not assertion. Still `status: pending`. Whoever picks this
 up next should read it in full and likely split it across more than one
 iteration rather than force it into a single pass. No V-factor movement is
 implied by this deferral.
+
+## Progress note (added 2026-07-16, iteration 74)
+
+**Actions 1 and 2 applied this iteration; actions 3 and 4 explicitly
+deferred to a future, separate iteration.** Still `status: pending` —
+this directive is only partially applied, not fully resolved, so it is
+deliberately **not** moved to `archive/` yet.
+
+**Action 1 (root README.md) — done.** A root-level `/README.md` was
+created for an external reader: what `quay` is, the three-package
+structure (`quay` Core / `quay-native` Provider / `quay-github`
+Provider), install instructions (`npm install` at the workspace root;
+each package's binary invoked directly via `node packages/*/bin/*.js`),
+and a `.quay/config.yml` example copied verbatim from this repo's own
+live config. Every CLI usage example was derived from an actual, live
+command run this iteration against this repository's real, current
+state — not recalled or invented — including:
+
+```
+$ node packages/quay/bin/quay.js task list --json
+quay-native mcp: serving tasks from /home/yale/work/quay/tasks
+[ { "id": "QN-001", "title": "Wire task_write into quay-native CLI/MCP
+with full frontmatter patch semantics", "status": "done", ... } ]
+
+$ node packages/quay/bin/quay.js task check QN-001
+quay-native mcp: serving tasks from /home/yale/work/quay/tasks
+QN-001: PASS — terminal
+
+$ node packages/quay-native/bin/quay-native.js task list
+QN-001	done	primitive	Wire task_write into quay-native CLI/MCP with full
+frontmatter patch semantics
+...
+
+$ node packages/quay-native/bin/quay-native.js manifest
+{ "id": "native", "name": "quay-native", "capabilities": {"data.read":
+true, "manifest": true, "data.write": true, "gate": true, "skill": true},
+... }
+
+$ node packages/quay-github/bin/quay-github.js task list
+gh-10	done	compound	[QN-037] Epic: live quay:execute Skill-driven
+compound-recursion end-to-end proof
+...
+```
+
+(Note, discovered live and reflected accurately in the README rather than
+assumed: `quay` Core's own subcommand is `task view`, but `quay-native`'s
+own raw CLI subcommand for the same operation is `task get` —
+`quay-native task view` does not exist and was confirmed, live, to error
+with `unknown task subcommand: view`. The README documents each binary's
+actual subcommand name correctly, not a guessed unified name.) The README
+also points readers at `docs/proposal/` for the deeper design/methodology
+material, explicitly labeling that directory as internal experiment
+documentation, not primary user docs, and states plainly that reading it
+is not required to install or use `quay`.
+
+**Action 2 (LICENSE) — done.** A root-level `/LICENSE` was added, using
+the standard, unmodified MIT License text, with copyright holder "Yale
+Huang" and year 2026. Source for the copyright holder name: `git log -1
+--format='%an <%ae>'` against this repository's own history returned
+`Yale Huang <calvino.huang@gmail.com>` consistently across all recent
+commits; year 2026 taken from the current date (context supplied to this
+iteration; also consistent with every commit's own date in `git log`).
+The license choice itself (MIT) was supplied directly by the human in the
+top-level orchestrating conversation, per this iteration's own task
+framing — not re-asked here.
+
+**Actions 3 and 4 (CI workflow + real GitHub release) — explicitly NOT
+attempted this iteration**, per this iteration's own assigned scope.
+These remain for a separate, later iteration: a `.github/workflows/` CI
+job running `node --test packages/*/test/*.test.mjs` on push/PR,
+live-verified green on GitHub Actions; a semver bump off `0.0.0`/`0.0.1`
+with recorded rationale; and an actual `git tag` + `gh release create`
+against the live `https://github.com/yaleh/quay` remote (human-approved
+in the top-level orchestrating conversation, per this iteration's own
+task framing — the approval is recorded here for the next iteration's
+benefit, but the live tag/release act itself is deliberately left to that
+later iteration, once CI is genuinely green first).
+
+**Action 5 (V-factor check) — performed, no credit claimed.** See the
+owning iteration report (`experiment/iterations/iteration-74.md` §8) for
+the full reasoning against the exact §5.1/§5.2 defining language. In
+summary: no V_instance factor applies (README/LICENSE are neither
+skeleton runtime behavior, ABI schema, gate logic, nor Skill content).
+`completeness` (the closest V_meta candidate) was seriously
+investigated and declined — §5.2 defines `completeness` as "Methodology
+(Skills + gates + decomposition rule) fully documented and
+self-contained," i.e. quay-native's own Skills/gate/decomposition rule,
+not the repository's external user-facing presentability; a README aimed
+at an external installer is one level removed from that object, the same
+distinction iterations 70-73 drew for their own edits to
+`ITERATION-PROMPTS.md`/`provenance.md`. No V-factor movement is claimed
+or recorded as a result of this iteration's work.
+
+Still `status: pending` — whoever picks this up next should read this
+note in full and proceed directly to actions 3-4 (CI first, then the
+real release), without needing to re-litigate actions 1-2 or the license
+choice.
