@@ -77,10 +77,12 @@ precondition — compact if over limit (see DIR-002 for procedure).
 |------|-----------|-----------|------------|---------|----------------|-----------------|
 | QC-001 | 1 (2026-07-16) | seed | seed | seed | 0/1 | web_ui_verification 0.0 → 0.5 |
 | QC-002 | 2 (2026-07-16) | seed | seed | seed | 0/2 | web_ui_verification 0.5 → 1.0; action_delivery_mode 0.5 → 1.0 |
+| QC-003 | 3 (2026-07-16) | seed | seed | seed | 0/3 | core_abi_symmetry 0.8 → 1.0 |
 
-**σ_QC**: 0/2. Both tasks are seed provenance — excluded from σ_QC numerator.
+**σ_QC**: 0/3. All tasks are seed provenance — excluded from σ_QC numerator.
 **Inherited floor**: σ_strict = 0.8493 (experiment 1's final value — context only).
 
 See each iteration's report for full per-factor evidence:
 - QC-001: `experiments/quay-core-bootstrap/iterations/iteration-1.md` §5/§7
 - QC-002: `experiments/quay-core-bootstrap/iterations/iteration-2.md` §5/§7
+- QC-003: `experiments/quay-core-bootstrap/iterations/iteration-3.md` §5/§7
