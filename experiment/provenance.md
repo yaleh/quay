@@ -10738,3 +10738,79 @@ flat since iteration 25 (net).
 Full detail: `experiment/iterations/iteration-78.md`. Independent
 out-of-band audit: to be dispatched separately by the top-level
 orchestrator (not performed by this session, per standing G3 discipline).
+
+## Iteration 79
+
+This iteration's work was applying DIR-021
+(`experiment/directives/pending/DIR-021-*.md`, present at this
+iteration's mandatory first-step `ls experiment/directives/pending/`
+check) — running a genuinely fresh, live, end-to-end manda
+nested-subagent trial, not authoring, executing, or gating a native task.
+No `tasks/QN-*.md` file was created or modified; the task count remains
+**70**, and no provenance triple changed. σ_strict is therefore
+**unchanged**: 62/70 = **0.8857**.
+
+**DIR-021 action 1**: satisfied for this occurrence. A fresh trial was
+constructed and run from this iteration's own execution context,
+targeting `terminal` (a channel bound to a monitor process under a
+genuinely distinct session, PID 3526382 — confirmed distinct from this
+iteration's own orchestrator session 3176586 via `ps`/`lsof`
+cross-checks, including disambiguating two differently-rooted
+"cord"-named monitors on two different daemons). Verbatim outcome:
+`mcp__plugin_manda_manda__Agent(to="terminal", timeout=90)` returned
+`{"value":"iteration-79-pong"}` — an exact echo of the requested ping
+text — over a ~30-37s round trip, well inside the 90s deadline.
+
+**DIR-021 action 2**: honored — the fresh trial was run and reported
+before any re-analysis of existing evidence was touched; the resulting
+updated tally (3 clean successes + 3 explained failures) is recorded
+explicitly as supplementary, not a substitute.
+
+**DIR-021 action 3**: honored — DIR-019/DIR-020's already-audited
+conclusion (2 successes + 3 explained failures, broker-availability-
+artifact-only) was not reopened or overturned.
+
+**DIR-021 action 4**: honored — this iteration's own report states
+plainly that a fresh trial was run and succeeded, and names the one real
+limitation encountered (no native `Agent`/Task subagent-dispatch tool
+available in this execution context to wrap the depth-1 call in a
+background dispatch, per §0b's own recommended, non-hard-rule practice —
+not load-bearing here since the chosen target was not self-deadlocking).
+
+**Status decision**: DIR-021 left `pending` (standing SOP directive), not
+archived — its own action 1 text is a standing, by-name-re-applicable
+requirement, not a one-time task; see
+`experiment/iterations/iteration-79.md` §11 for full reasoning, mirrored
+in a `## Progress note` appended to the directive file itself.
+
+**V-factor check, against exact §5.1/§5.2 defining language**:
+- `V_instance = skeleton × abi_symmetry × gate_correctness ×
+  skill_convergence`: `skill_convergence` is defined narrowly as
+  "`quay:author`/`quay:execute` drive real tasks to a green gate within
+  bounded rounds" — this iteration touched neither Skill nor any task's
+  gate; no support for movement.
+- `V_meta = completeness × effectiveness × reusability × validation`:
+  `effectiveness` is "speedup building feature N+1 via quay-native" — no
+  marginal feature was built. `validation` is "σ and the provenance log,
+  corroborated by out-of-band audit" — σ is unchanged (no new task closed
+  this iteration); a successful manda capability trial is evidence about
+  the experiment's own tooling reliability, not about quay-native's own
+  self-hosting proof — analytically distinct, no credit claimed.
+  `completeness` and `reusability` are untouched.
+
+```
+V_instance = 0.83 × 0.96 × 0.76 × 0.96 = 0.5813  (unchanged)
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, honest **zero-V-movement**
+increment (M_78 = M_79, A_78 = A_79) — DIR-021's own content is entirely
+process/protocol-layer (a fresh capability-verification trial and a
+directive-disposition judgment call), not instance-layer feature work.
+`completeness`, `effectiveness`, and `reusability` remain the most
+stalled V_meta factors; `effectiveness` flat since iteration 23 (net),
+`reusability` flat since iteration 25 (net).
+
+Full detail: `experiment/iterations/iteration-79.md`. Independent
+out-of-band audit: to be dispatched separately by the top-level
+orchestrator (not performed by this session, per standing G3 discipline).
