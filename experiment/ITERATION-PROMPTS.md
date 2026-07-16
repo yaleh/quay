@@ -22,7 +22,11 @@
 
 ```
 [ ] manda daemon is live for this workspace (http://localhost:28912)
-[ ] the workspace monitor is attached (manda:manda-monitor)
+[ ] a live `manda monitor <name> --root .` process is confirmed a DIRECT
+    CHILD of the current session's own process tree (see "G6 operational
+    check" immediately below for the exact mechanized procedure) — a bare
+    daemon `/healthz`/root-URL reachability probe is NOT sufficient by
+    itself and must not be treated as satisfying this precondition
 [ ] (stage 2+ only) `gh auth status` shows user yaleh, scopes repo + workflow
     — do NOT require this before stage 2 begins
 [ ] experiment/provenance.md exists (after iteration 0) and is being read, not re-derived from memory
@@ -34,6 +38,53 @@
 ```
 
 G6 makes the manda check mandatory, not optional background — if the daemon is not live, stop and arm it before doing anything else.
+
+### G6 operational check (amended by DIR-014, iteration 67)
+
+Prior iterations' G6 check was satisfied loosely — e.g. confirming the
+manda daemon process is up, or that its HTTP root/`/healthz` endpoint
+responds — without ever confirming a live `manda monitor` is actually
+bound to the *specific session* about to run the iteration. DIR-014
+(`experiment/directives/archive/DIR-014-*.md`) found this gap directly:
+the session that had driven the large majority of this experiment's
+iterations (pts/6, the "driving session") had manda's MCP tool adapters
+loaded but **no `manda monitor` process anywhere in its own process
+tree** — a standing gap, not a one-off. The daemon being reachable and a
+monitor being bound to *this* session are two different facts; only the
+second is what G6's own text ("the monitor for this workspace attached")
+actually requires.
+
+The mechanized check, going forward, every iteration:
+
+```
+1. Identify the current session's own top-level process id (walk up
+   from the running shell via $$/ppid to the `claude` process — see
+   DIR-005's "Discovery method" section for the tty=? pitfall: a monitor
+   started via this session's own `Monitor` tool call runs detached and
+   will NOT show the session's own tty, so do not filter by tty).
+
+2. Recursively list that pid's descendants and grep for "manda monitor":
+     ps -o pid,ppid,tty,etime,cmd --ppid <own top-level pid> | grep -i monitor
+   (if the monitor is not a direct child but nested one level deeper —
+   e.g. under an intermediate detached bash — re-run recursively against
+   that intermediate pid too, per DIR-005's three-way parentage check.)
+
+3. If a `manda monitor <name> --root .` process is found in that
+   descendant tree: G6 is satisfied. Record the verbatim `ps` output
+   (pid, name) as evidence in the iteration's own report.
+
+4. If NOT found: G6 is NOT satisfied by a bare daemon-liveness check
+   alone. Arm one via the `manda:manda-monitor` skill (sweep by
+   sentinel, then one persistent `Monitor` call, per that skill's own
+   spec) before proceeding with any other iteration work, then re-run
+   step 2 to confirm the arm succeeded and is a child of this session's
+   own tree.
+```
+
+This does not weaken or replace the daemon-liveness check (step 1 of the
+old §0 checklist) — it adds a second, session-scoped check on top of it,
+since the two facts (daemon up vs. monitor bound to *this* session) were
+being conflated.
 
 ---
 
