@@ -123,4 +123,52 @@ its own turn.
    concurrent task execution, mirroring DIR-021's own standing-SOP
    precedent.
 
-<!-- ## Resolution: to be filled in by the iteration/session that applies this directive -->
+## Progress note (orchestrator, same live session, 2026-07-16): actions 3a-3b executed
+
+**3a (DIR-024 fix)**: confirmed applied and resolved — see DIR-024's own
+Resolution section. Three consecutive `cord` cap-requests were each
+serviced with `Agent(..., run_in_background=true)`, cited explicitly.
+
+**3b (concurrency trial)**, run against the corrected mechanism
+(multiple `Agent()` calls in one turn, not the nonexistent "async
+Dispatch"): a separate caller subagent issued three `mcp__plugin_manda_manda__Agent(to="cord", timeout=100, ...)`
+calls as three tool-use blocks within its own single assistant turn,
+requesting distinct pong strings (`concurrent-trial-pong-A/B/C`). Caller
+bracket: `2026-07-16T13:13:48.417Z` → `2026-07-16T13:14:46.880Z` (~58.5s
+total for the batch). All three returned their exact expected value, zero
+timeouts, zero retries.
+
+**Broker-side observation (this session, servicing `cord`)**: the three
+CAP-REQUEST notifications (ids `18c2c7636ffff3b3`, `18c2c7672815ec9f`,
+`18c2c76b5d72897b`) arrived **spaced apart in this session's own turns,
+not simultaneously** — each was fully serviced (leaf spawned in the
+background, awaited, `respond` called) before the next one's
+notification appeared. Each individual leaf agent completed quickly
+(1.8s, 5.4s, 4.2s respectively).
+
+**Honest interpretation — do not overclaim**: this trial demonstrates
+(a) the broker can correctly service a rapid sequence of `cord`
+cap-requests without deadlock or timeout once background spawning
+(DIR-024) is applied, and (b) the caller-side batching of three `Agent()`
+calls in one turn completed successfully end-to-end. It does **not**
+demonstrate genuine wall-clock-overlapping concurrent servicing at the
+broker (no two leaf agents were ever simultaneously in flight from this
+broker's own perspective) — the requests, as delivered to this session,
+were sequential-but-non-blocking, not concurrent-and-overlapping. Whether
+this reflects the caller's three tool-use blocks not actually firing
+simultaneously at the transport layer, the manda relay/monitor rendering
+events one at a time, or some other serialization point, is not yet
+determined. A follow-up trial designed to force genuine temporal overlap
+(e.g., one leaf agent instructed to run measurably longer than the
+others, confirming a second cap-request is serviced *while* the first
+leaf is still running) is needed before claiming true concurrent-broker
+capability. Depth/quota guard was not stressed (3 spawns, well under
+MAX_SPAWN=10).
+
+**Disposition**: action 3a/3b evidence recorded; 3c (intra-iteration
+concurrent quay-task fan-out) and 3d (concurrent-full-iteration design
+input) remain for a future iteration, now unblocked by a confirmed
+background-spawning broker but still pending the stronger overlap-proof
+trial above before being treated as fully validated.
+
+<!-- ## Resolution: to be filled in by the iteration/session that applies this directive once 3c/3d are attempted -->

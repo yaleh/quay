@@ -1,5 +1,5 @@
 ---
-status: pending
+status: resolved
 created_by: human (calvino.huang@gmail.com), asserted directly in this live conversation
 created_at: 2026-07-16
 title: Broker-side agent.spawn servicing must actually use run_in_background=true (per caps-broker.md's own written spec) — foreground spawns block the broker from servicing concurrent cap-requests, and must be fixed before any multi-concurrent-nested-subagent capability can be validated
@@ -82,4 +82,43 @@ diagnostic signal beyond a generic cap-request timeout.
    credit for applying it, consistent with this experiment's treatment of
    similar meta/process fixes.
 
-<!-- ## Resolution: to be filled in by the iteration/session that applies this directive -->
+## Resolution (orchestrator, same live session, 2026-07-16)
+
+Action 1 applied and confirmed directly, three times, in this same
+conversation (the DIR-025 concurrency trial, see DIR-025's own progress
+note for full detail): servicing `cord` cap-requests
+`18c2c7636ffff3b3` (call A), `18c2c7672815ec9f` (call B), and
+`18c2c76b5d72897b` (call C), the orchestrator issued each leaf spawn as
+`Agent(description=..., prompt=..., run_in_background=true)` — cited
+explicitly, per action 1's own confirmability requirement — waited for
+each task-notification, then called `respond` with the matching result.
+No foreground spawn was used this time; the fix from action 1 is applied
+and repeatable across at least three consecutive cap-requests in one
+session's lifetime without deadlock or timeout.
+
+Action 2's precondition (do not attempt a concurrency trial against a
+foreground-spawning broker) is satisfied by the above — the DIR-025
+concurrency trial run immediately after this fix is genuinely informative
+about the mechanism, not confounded by the previously-known bug.
+
+Action 3's trial was run in this same session — see DIR-025's own
+progress note for the full record and its one honest caveat: the three
+cap-requests arrived at this broker's monitor **spaced apart, not
+simultaneously** (each was fully serviced and responded to before the
+next one's CAP-REQUEST notification appeared in this session's turn),
+so while the fix in action 1 was confirmed safe across a rapid sequence
+of three requests with no deadlock, this trial did not demonstrate two
+leaf agents whose lifetimes genuinely *overlapped* in wall-clock time —
+that stronger claim ("broker services truly simultaneous cap-requests
+concurrently, not just sequentially-without-blocking") remains open for
+a future trial designed to force genuine overlap (e.g. artificially
+delaying one leaf agent's completion while another is issued).
+
+Action 4 honored: no V_instance/V_meta credit claimed for this fix or
+trial.
+
+Archiving deferred to whichever iteration next processes
+`experiment/directives/pending/` — this file's `status` is updated to
+`resolved` so that iteration can move it to `archive/` per the
+established convention, without needing to re-derive this resolution
+itself.
