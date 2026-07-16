@@ -35,6 +35,12 @@
     it read; each must reach an explicit applied/deferred/rejected outcome
     this iteration, recorded in this iteration's own report — see
     experiment/directives/README.md for the full protocol
+[ ] (orchestrator-only, added by DIR-015, iteration 70) the iteration-
+    executing subagent for THIS iteration was dispatched non-blockingly
+    (`run_in_background=true`) — see "§0a. Non-blocking iteration-subagent
+    dispatch" immediately below. This item is checked and recorded by the
+    top-level orchestrator, not by the executing subagent itself, which
+    cannot observe its own dispatch mode from inside its own context.
 ```
 
 G6 makes the manda check mandatory, not optional background — if the daemon is not live, stop and arm it before doing anything else.
@@ -85,6 +91,105 @@ This does not weaken or replace the daemon-liveness check (step 1 of the
 old §0 checklist) — it adds a second, session-scoped check on top of it,
 since the two facts (daemon up vs. monitor bound to *this* session) were
 being conflated.
+
+---
+
+## §0a. Non-blocking iteration-subagent dispatch (added by DIR-015, iteration 70)
+
+**Requirement**: the top-level orchestrator MUST dispatch the subagent
+that executes each iteration's work **non-blockingly**
+(`run_in_background=true` for the platform's native `Agent`/Task tool,
+or manda's own non-blocking dispatch mode if the iteration itself is
+driven via manda) — never in foreground/synchronous blocking mode.
+
+**Load-bearing evidence (DIR-015's Finding, cite verbatim)**: this
+requirement is not speculative — it is the direct, concrete explanation
+for a previously-unexplained standing failure. DIR-011's Finding
+(`experiment/directives/archive/DIR-011-manda-agent-live-verified-tool-
+name-latency.md`) established that the manda `Agent`/cap-request round
+trip only completes when **both** the requester and the broker session
+dispatch non-blockingly (`run_in_background=true` on both sides) — a
+foreground-blocked dispatch on either side produces a false timeout.
+DIR-015 observed, from direct inspection of the driving session (PID
+3176586, pts/6), that this session dispatches each iteration's executing
+subagent **in the foreground** — i.e. it blocks synchronously, waiting
+on the iteration subagent's `Agent`/Task call for the iteration's entire
+duration. This gives a concrete, sufficient mechanism for iteration 68's
+own independently-reached finding (resolving DIR-014 action 3): even
+with the monitor-attachment precondition fully satisfied and the
+cap-request confirmed correctly targeted, the manda `Agent`/cap-request
+mechanism still timed out — because a session permanently blocked on its
+own iteration subagent cannot, by construction, notice or service a
+concurrent `cap-requests-*` event at the same time, regardless of
+whether a `manda monitor` process is bound to it.
+
+**Orchestrator-only confirmation step (added by DIR-015 action 2,
+alongside DIR-014's G6 check)**: after dispatching the iteration-executing
+subagent, the driving/orchestrating session MUST confirm, in its own
+record — not the executing subagent's report, which cannot verify this
+about itself from inside its own context — that it is not itself blocked
+following that dispatch. This is a mechanically checkable claim, not an
+assertion:
+  - cite the actual dispatch call's `run_in_background` argument value
+    used for this iteration's subagent invocation, and/or
+  - demonstrate the orchestrator can still respond to a concurrent probe
+    (e.g. a manda cap-request, a status check, a user message) while the
+    iteration subagent is still running.
+
+**Why this is orchestrator-scoped, not subagent-scoped**: an
+iteration-executing subagent has no visibility into, or control over,
+the `run_in_background` argument value the orchestrator used to dispatch
+it — that dispatch call happens in the orchestrator's own context,
+before the subagent's own context begins, and is not inspectable from
+inside the subagent's session (iteration 69 confirmed this directly when
+deferring DIR-015's application for exactly this reason). Every future
+iteration report MAY note, if the executing subagent happens to observe
+evidence bearing on this (e.g. being dispatched as part of the same
+top-level turn as other, unrelated concurrent activity), but MUST NOT
+assert or self-certify its own dispatch mode — that claim belongs
+exclusively to the orchestrator's own record.
+
+---
+
+## §0b. Manda nested-subagent guidance for development/testing operations (added by DIR-015, iteration 70)
+
+**Scope**: this section applies to development or testing operations
+within an iteration's own work — e.g. a task that needs a subagent to
+invoke a tool/capability not natively available in its own context (the
+original motivating use case for manda's `Agent`/cap-request mechanism).
+It does **not** apply to the G3 out-of-band audit dispatch, which is
+governed exclusively by "§5 OUT-OF-BAND AUDIT" above and has permanently
+retired manda nested-subagent use for that specific purpose (DIR-015
+action 3).
+
+**Guidance**: once §0a's non-blocking-dispatch precondition is in place
+(the orchestrator confirms it dispatched the iteration subagent with
+`run_in_background=true` and is not itself blocked), development/testing
+operations that need this kind of subagent capability-borrowing **should
+prefer the manda nested-subagent mechanism** (`mcp__plugin_manda_manda__Agent`
+cap-request, relayed to a live broker session) **where it can be shown to
+work reliably** — over, e.g., avoiding the capability entirely or
+inventing an ad-hoc workaround.
+
+**Mandatory caveats (do not let this guidance become load-bearing without
+its own evidence, every time)**:
+- Reliability must be demonstrated **per use** — cite a live-verified
+  success for the specific operation at hand. Do not assume reliability
+  from this guidance alone, from a single prior trial, or from the fact
+  that the non-blocking-dispatch precondition is now satisfied; §0a fixes
+  one necessary precondition, it does not by itself prove the mechanism
+  works for every future use.
+- This guidance must **never silently become load-bearing for G3 or any
+  other guardrail** without its own separate, explicit directive. If a
+  future iteration finds itself tempted to lean on a manda nested
+  subagent for anything audit-independence-critical, that is out of
+  scope for this guidance and requires a new directive, not an inference
+  from this section.
+- If a given use fails, record it plainly (per this experiment's standing
+  evidence discipline) rather than silently reverting to the fallback
+  without comment — failures here are useful data for the mechanism's own
+  reliability track record, the same way DIR-011/012/014's own failed and
+  successful trials were recorded.
 
 ---
 
@@ -292,11 +397,44 @@ Extract:
      live broker session). **This audit step MUST continue to use the
      native subagent mechanism, not the manda nested subagent mechanism —
      see the DEFERRED note immediately below for why.**
-   - **DEFERRED (DIR-012 action 2): requiring the manda nested subagent
-     mechanism for this audit step.** DIR-012 asked whether this audit
+   - **RETIRED, not merely deferred (DIR-015 action 3, iteration 70 —
+     supersedes the DEFERRED framing below for this specific purpose).**
+     DIR-012 action 2 and DIR-014 action 3 asked whether this audit
      should instead be required to run via the manda nested subagent
-     mechanism, on the reasoning that its broker round-trip gives a
-     stronger process-separation guarantee. Iteration 65 evaluated this
+     mechanism. Both were evaluated (iterations 65 and 68) and found the
+     mechanism unreliable even under corrected preconditions — see the
+     historical record immediately below for the full findings, preserved
+     unedited. Iteration 69 then added a second, independent data point:
+     the same executing session that performed iteration 69's own work
+     also authored and self-committed its own "independent audit" — a
+     first-of-its-kind G3 guardrail violation, caught and voided by a
+     genuinely independent re-audit (`experiment/audits/
+     iteration-69-independent-adjudicate-v2.md`). This sharpened the
+     stakes: G3 is this experiment's **sole** defense against exactly
+     this kind of self-certification failure, and continuing to chase an
+     already-twice-failed, still-unproven mechanism (manda nested
+     subagent) for that specific defense is no longer worth the risk,
+     regardless of whether a future precondition fix might someday make
+     it reliable. **The native `Agent`-tool mechanism (the top-level
+     orchestrator's own platform `Agent`/Task tool, fresh-context,
+     dispatched separately from whatever authored/executed the task)
+     is therefore the permanent, unmodified G3 audit mechanism going
+     forward — this is a retirement of the goal "use manda for G3
+     audits" specifically, not merely a further deferral pending some
+     future precondition.** Manda nested-subagent use remains a live,
+     encouraged goal for **development/testing operations** instead —
+     see "§0b. Manda nested-subagent guidance for development/testing
+     operations" for where that goal now lives. This retirement does not
+     rewrite DIR-012's or DIR-014's own archived Resolution sections —
+     their historical findings stand unedited below and in their own
+     archived files; this note simply stops pursuing that one specific
+     application (G3 audit dispatch) going forward.
+   - **Historical record (DIR-012 action 2, evaluated iteration 65; DIR-014
+     action 3, re-evaluated iteration 68 — preserved verbatim, no longer
+     an open question per the RETIRED note above).** DIR-012 asked whether
+     this audit should instead be required to run via the manda nested
+     subagent mechanism, on the reasoning that its broker round-trip gives
+     a stronger process-separation guarantee. Iteration 65 evaluated this
      and found the precondition DIR-012 itself set — "confirm G6's
      manda-daemon-liveness precondition can be relied upon for every
      iteration's audit step without making audits newly flaky" — is
@@ -307,21 +445,15 @@ Extract:
      multiple monitors (`worker`, `cord`, `terminal`) alive on the host,
      including a case (iteration 15) where the *audit dispatch itself*
      failed for this reason, leaving that iteration with no independent
-     mechanical co-sign at all. Whether any given fresh iteration session
-     has a live monitor bound to it, and whether a live parent-broker
-     session is actively watching the right `cap-requests-<name>`
-     channel at the moment the audit needs to run, are per-session,
-     per-moment facts (§Core-scope work item 3's own manda-reuse
-     discipline already establishes this) — not something a MUST-level
-     requirement can safely assume for **every** future iteration without
-     risk of newly making the mandatory G3 step flaky. This sub-item is
-     therefore **resolved as DEFERRED**, not applied: the audit dispatch
-     mechanism named in this section remains the native subagent (the
-     top-level orchestrator's own `Agent` tool), unconditionally, for
-     every iteration going forward, until a future iteration can
-     mechanically confirm live-monitor coverage is reliable across
-     fresh sessions (not just the current session at the moment of
-     writing) rather than merely possible in principle.
+     mechanical co-sign at all. DIR-014 action 3 later re-tested this
+     under corrected preconditions (a live `manda monitor` confirmed bound
+     to the driving session's own process tree, for two consecutive
+     iterations) and found a deeper, narrower root cause: the inbound
+     rendering adapter (`manda-dispatch cross-session`) is explicitly
+     documented, and confirmed live, as stateless with "no side effects"
+     — it renders a cap-request event to text; nothing automatically
+     answers it. The mechanism therefore still fails even with every
+     previously-identified precondition met.
    - Write the verdict to `experiment/audits/iteration-{N}-adjudicate.md`
      (co-sign or specific findings — if it finds problems, the σ lift for the
      affected tasks does not count yet; fix and re-audit before claiming the lift).
