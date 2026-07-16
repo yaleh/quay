@@ -5,8 +5,8 @@
   (`QN-042`/`DIR-009`), a deterministic mock/file-log action-delivery mode,
   plus, as of iteration 33 (`QN-044`/`DIR-010`), Core-level CLI/MCP/Web-UI
   three-way symmetry over that same shared capability set.
-- **Relates:** `docs/proposal/quay-proposal.md` (esp. §5 architecture), `docs/
-  proposal/quay-native-design.md` (Provider-level reference), `docs/proposal/
+- **Relates:** `docs/proposals/quay-proposal.md` (esp. §5 architecture), `docs/
+  proposals/quay-native-design.md` (Provider-level reference), `docs/proposals/
   glossary.md`.
 
 This file documents the Core (`quay` — the provider-agnostic host: Web UI +
@@ -236,7 +236,7 @@ delivery logic either had to scrape freeform stdout text or skip verifying
 delivery entirely. The mock mode is intended as the **default harness for
 automated verification** of action-composition logic; live `manda`
 delivery remains a separate, additional, non-gating check (see
-`docs/proposal/quay-core-scope-expansion-discussion.md` §2.3 for the
+`docs/proposals/quay-core-scope-expansion-discussion.md` §2.3 for the
 original reasoning, and `experiment/directives/archive/DIR-009-*.md` for
 the directive that requested it).
 

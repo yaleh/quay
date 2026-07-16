@@ -9,7 +9,7 @@ ABI — `quay` Core doesn't know or care which.
 This repository is also the live workspace for a BAIME (Bootstrapped AI
 Methodology Engineering) research experiment in which `quay-native`'s own
 development backlog is driven, progressively, by `quay-native` itself. See
-[**docs/proposal/**](docs/proposal/) below if you want that deeper story —
+[**docs/proposals/**](docs/proposals/) below if you want that deeper story —
 it is not required reading to install or use `quay`.
 
 ## The three packages
@@ -210,30 +210,30 @@ node --test packages/*/test/*.test.mjs
 ```
 
 This is the same command every iteration of this repository's own
-development process uses to self-verify (see `docs/proposal/` for why).
+development process uses to self-verify (see `docs/proposals/` for why).
 
 ## Deeper design and methodology material
 
-The [`docs/proposal/`](docs/proposal/) directory is **internal experiment
+The [`docs/proposals/`](docs/proposals/) directory is **internal experiment
 documentation**, not primary user documentation — it captures the design
 of the Provider ABI, the native Provider, and (distinctly) the BAIME
 bootstrap-experiment protocol under which this repository's own backlog
 has been developed. Start with:
 
-- [`docs/proposal/glossary.md`](docs/proposal/glossary.md) — frozen
+- [`docs/proposals/glossary.md`](docs/proposals/glossary.md) — frozen
   vocabulary (Provider, Skill, status, lane, task, run, action button,
   capability) used consistently across the rest of `docs/`.
-- [`docs/proposal/quay-proposal.md`](docs/proposal/quay-proposal.md) — the
+- [`docs/proposals/quay-proposal.md`](docs/proposals/quay-proposal.md) — the
   original Core/Provider-ABI design proposal.
-- [`docs/proposal/quay-native-design.md`](docs/proposal/quay-native-design.md)
+- [`docs/proposals/quay-native-design.md`](docs/proposals/quay-native-design.md)
   — the native Provider's design (task store, ABI, gate, Skills).
-- [`docs/proposal/quay-bootstrap-experiment.md`](docs/proposal/quay-bootstrap-experiment.md)
+- [`docs/proposals/quay-bootstrap-experiment.md`](docs/proposals/quay-bootstrap-experiment.md)
   — the BAIME self-hosting bootstrap experiment protocol that has driven
   this repository's own iterative development (`experiment/` holds its
   running log, provenance ledger, and per-iteration reports).
 
 If you only want to install and use `quay`, you can stop here — none of
-`docs/proposal/` is required reading for that.
+`docs/proposals/` is required reading for that.
 
 ## License
 

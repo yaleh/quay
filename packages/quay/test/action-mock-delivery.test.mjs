@@ -2,7 +2,7 @@
 // mock/file-log delivery mode in deliverTrigger() — a THIRD mode, additive
 // to (and independent of) the existing `manda` path and the stdout-print
 // degrade path (see src/action.js's own doc comment, and
-// docs/proposal/quay-core-scope-expansion-discussion.md §2.3 for the
+// docs/proposals/quay-core-scope-expansion-discussion.md §2.3 for the
 // original reasoning this directive implements).
 //
 // This test is deliberately network-independent and does NOT exercise or
