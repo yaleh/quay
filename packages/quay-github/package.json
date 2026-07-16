@@ -1,6 +1,6 @@
 {
   "name": "quay-github",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "description": "The GitHub Provider for Quay: read-only v1 minimal capability (data.read + manifest) mapping GitHub Issues onto the canonical task view-model (QN-002). Second real backend, proves the ABI transfers (proposal §14, protocol §10.1).",
   "type": "module",
