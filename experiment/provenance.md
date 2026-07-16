@@ -9410,3 +9410,110 @@ consecutive flat iterations respectively) and are named as priority
 targets for a genuinely new angle in the next iteration.
 
 Full detail: `experiment/iterations/iteration-60.md`.
+
+## Iteration 61: QN-065 — feed the negative/error-path test-coverage discipline (iterations 58-60) back into `quay:execute`'s own Method; first genuine `completeness` movement in 52 iterations
+
+This iteration's dispatch explicitly asked whether a genuine (not
+manufactured) `completeness` or `reusability` opportunity existed before
+defaulting to an eighth consecutive skeleton-only test-coverage closure.
+Grepped both orchestration Skills' SKILL.md files for any mention of the
+negative/error-path discipline iterations 58-60 established (three
+distinct, real instances: Provider-subprocess-startup failure,
+malformed/null-body input, live mid-session `gh api` failure) —
+confirmed **zero** hits: the Method itself was genuinely silent on this
+real, repeated practice, which existed only as `provenance.md`'s own
+per-iteration narration.
+
+Read iteration 18's own full V_meta reasoning (the closest on-point
+precedent, since QN-029 that iteration genuinely edited both SKILL.md
+files yet declined `completeness` credit) and iteration 29's post-hoc
+correction (revising `ITERATION-PROMPTS.md`, an out-of-scope document).
+The exact line both draw: "documenting newly-written capability" and
+"revising an out-of-scope document" do not count; "closing a previously-
+identified, named gap in the methodology's own self-containedness" does.
+Confirmed via grep that no prior iteration (58/59/60) had already named
+"the SKILL.md files are silent on this discipline" as an open gap — this
+is a genuinely new observation this iteration, not a stale item
+opportunistically closed now.
+
+Added a new "Negative/error-path sub-check" to `quay:execute`'s Method
+step 1 (`implement-phase`) in
+`packages/quay-native/skills/execute/SKILL.md`, naming all three
+concrete failure-mode categories (connection/startup, malformed/absent
+input, live mid-session failure), each cited to its originating task
+(QN-062/063/064), explicitly framed as a standing question for future
+boundary-touching Plan phases — not a mandate to manufacture tests where
+none is genuinely open (G5). Added a corresponding "Gaps" entry
+documenting this as feeding real, established practice back into the
+Method, explicitly distinguishing it from the iteration-18/29
+non-precedents. 64 lines added; `git diff --stat -- packages/*/src/*.js`
+confirmed empty (documentation-only change, no source or test file
+touched). Full regression suite: 26/26 (unchanged — no test file
+touched). `abi-symmetry.mjs`: ALL FOUR SURFACES SYMMETRIC. No live `gh
+api` write occurred.
+
+QN-065 was created and driven through the **full gated lifecycle**
+(`task create` → `todo`, gated `author->ready` check, `task edit
+--status ready`, gated `execute->done` check, `task edit --status done`,
+terminal `task check` confirming `"gate":"none"`).
+`experiment/timing/iteration-61.log` records the real `date -u`
+checkpoints: task created 23:59:37Z → transitioned to `ready` 00:00:44Z
+→ transitioned to `done` 00:00:48Z (total ~1m11s) — a documentation-only
+task, not scope-matched to the QN-006/QN-032/QN-063/QN-064 comparator
+series and not used for an `effectiveness` claim.
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-065 | Feed the negative/error-path test-coverage discipline (iterations 58-60) back into quay:execute's Method | native | native | native | done |
+
+σ (strict) = 57/64 = **0.8906** (up from 56/63 = 0.8889).
+
+**V_instance factor reasoning:** all four factors held flat. `skeleton`
+explicitly considered and rejected: this is a pure documentation edit to
+`quay:execute`'s Method content, making no claim about the v0 loop's own
+runtime behavior (unlike iterations 54-60's test-coverage-closure work,
+which did make such claims) — every prior `skeleton` movement cites real
+code/test evidence, none a documentation-only change. `skill_convergence`
+explicitly considered and rejected: QN-065 is an ordinary leaf task using
+the standard gated lifecycle, exercising no genuinely new Skill branch
+(the bar iteration 27's own precedent set for this factor's last
+movement). `abi_symmetry`/`gate_correctness` do not apply (no ABI/gate
+code touched).
+
+```
+V_instance = 0.77 × 0.96 × 0.76 × 0.96 = 0.5393  (unchanged)
+```
+
+**V_meta factor reasoning:** `completeness` credited **+0.01 (0.74 →
+0.75)** — the first genuine movement on this factor since iteration 9 (52
+consecutive flat iterations, 10-60). Full reasoning above and in
+`experiment/iterations/iteration-61.md` §3/§8: this closes a real,
+previously-unnamed gap in `quay:execute`'s own Method self-containedness,
+distinct in kind from both rejected precedents (iterations 18 and 29).
+`effectiveness` explicitly considered and declined (no scope-matched
+comparator exists for a documentation-only task; manufacturing one
+against a mismatched comparator would repeat the twelfth-correction's
+exact overreach). `reusability` explicitly considered and declined (the
+edit restates an already-existing Provider-agnostic property of the
+Method, not new transfer evidence; no third transfer target exists per
+decision §10 item 4). `validation` held flat (no audit yet exists for
+this iteration's own work, reserved for the top-level orchestrator).
+
+```
+V_meta = 0.75 × 0.26 × 0.79 × 0.64 = 0.0986  (up from 0.0973)
+```
+
+This iteration constitutes a real, narrow **system evolution** (M_60 ≠
+M_61): `quay:execute`'s own documented Method changed substantively (a
+new standing sub-check + Gaps entry), evidence-driven by three
+consecutive iterations' real, repeated practice — not a new Skill or
+capability, an extension of the existing one. No `quay:author` change
+was made this iteration (deliberately scoped, per G5 — see
+`experiment/iterations/iteration-61.md` §4/§8 problem 8). Future
+iterations should apply the new sub-check as a matter of course for any
+boundary-touching Plan phase, and continue watching for further,
+still-open negative/error-path instances beyond the three already
+closed. `reusability` and `validation` remain the most stalled V_meta
+factors (36 and ~51 consecutive flat iterations respectively).
+
+Full detail: `experiment/iterations/iteration-61.md`.

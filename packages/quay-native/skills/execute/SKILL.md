@@ -84,6 +84,45 @@ executeEpic(task, provider) = {
    - *Degraded fallback:* same-session sequential implementation (this
      environment's current mode — no subagent-dispatch primitive found, per
      `quay:author`'s QN-003 finding, which applies equally here).
+   - **Negative/error-path sub-check (added iteration 61, generalizing a
+     pattern discovered across iterations 58-60 — QN-062/063/064):** before
+     treating a Plan phase's happy-path test as sufficient, explicitly ask
+     whether the phase's target code has an **untested failure mode** at
+     any of these three, now-repeatedly-demonstrated distinct points, and
+     close it if genuinely open (do not manufacture one if the phase has
+     none):
+     1. **connection/startup failure** — does the call path correctly
+        propagate a failure to *start* or *connect* to the thing being
+        driven (a crashing subprocess, an unreachable Provider), rather
+        than hanging or crashing the host process? (QN-062: a malformed
+        `QUAY_GITHUB_REPO` causing `resolveRepo()` to throw, verified
+        through both Core CLI's eager-connect and Core MCP's lazy-connect
+        paths.)
+     2. **malformed/absent input shape** — does the call path handle a
+        real-but-degenerate data shape from an external source (`null`/
+        `undefined` where a string is expected, an empty collection),
+        distinct from every existing fixture, without crashing? (QN-063:
+        `null`/`undefined` GitHub issue `body`, previously only exercised
+        via an empty-string stand-in.)
+     3. **live mid-session failure** — does the call path correctly
+        surface a failure that occurs *after* a successful connection, in
+        the middle of an otherwise-successful session (a live upstream
+        call failing partway through), without crashing the host process
+        or silently swallowing the failure? (QN-064: a live `gh api` 404
+        from inside `fetchAllIssues()`, occurring after a successful
+        Provider connect.)
+     This sub-check is a **documented consequence of real, independently-
+     justified work already performed** (iterations 58-60 each found and
+     closed a genuinely distinct instance of this category by first
+     grepping `experiment/provenance.md`/the target source for prior
+     coverage) — it is written here so a future `implement-phase` pass
+     treats this as a standing consideration for *any* Plan phase touching
+     an external boundary (a Provider subprocess, a network call, a
+     parsed external data shape), not as three now-closed, one-off tasks.
+     It does **not** mandate manufacturing a negative-path test where none
+     is genuinely open (G5) — only that the question be asked and the
+     answer (open/already-covered/not-applicable) be recorded, the same
+     discipline `self-audit-ac` already requires for AC checkboxes.
 2. **`self-audit-ac`** — check off `## AC` checkboxes **only when
    independently re-verified true** against the actual code/tests — never
    because "it should work."
@@ -324,3 +363,28 @@ executeEpic(task, provider) = {
   own authoring task (QN-004) was driven to `ready`, but that is a plan for
   retiring its seed dependency, not the retirement itself. `execute_by` is
   `seed` for every task in `experiment/provenance.md` as of iteration 1.
+- **Fed back into the Method in iteration 61: the negative/error-path
+  test-coverage discipline.** Iterations 58, 59, and 60 each independently
+  found and closed a genuinely distinct instance of an untested failure
+  mode at an external boundary (Provider-subprocess-connection failure;
+  malformed/absent input shape; live mid-session upstream failure) — in
+  each case, by first grepping this repo's own test files and
+  `experiment/provenance.md` to confirm the specific instance was
+  genuinely open, not merely re-running or lightly varying prior coverage.
+  This was real, repeated, independently-justified practice across three
+  consecutive iterations, but until this iteration it existed only in
+  `experiment/provenance.md`'s own per-iteration narration — the Method
+  above (step 1) was silent on it, so a future `implement-phase` pass had
+  no standing instruction to consider this class of gap for a *new*
+  feature's own boundary-touching code, only a historical record that
+  three past *test-coverage-closure* tasks happened to find such gaps.
+  This is now written into step 1 above as a standing sub-check (ask the
+  question for any boundary-touching Plan phase; do not manufacture a
+  test where no genuine gap exists, per G5). This closes a real,
+  previously-unaddressed gap in this Skill's own self-containedness (the
+  Method not reflecting real, established practice), not a cosmetic
+  rewording — see `experiment/iterations/iteration-61.md` for the full
+  reasoning distinguishing this from iteration 18's "documenting
+  newly-written capability" (which does not count) and iteration 29's
+  reverted `completeness` credit (revising `ITERATION-PROMPTS.md`, an
+  out-of-scope document, which also does not count).
