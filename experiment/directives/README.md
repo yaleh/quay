@@ -295,6 +295,60 @@ itself is alive. This is a genuine, useful narrowing (DIR-005's own
 stated goal), not a reopening of DIR-001-004/13's positive findings about
 the dispatch plumbing itself, which remain correct and unchanged.
 
+## Update (iteration 68, resolving DIR-014 action 3/4): the manda nested-subagent mechanism was re-tested with the driving session's monitor gap fixed, and still failed — for DIR-005's already-known deeper reason, not DIR-014's own narrower one
+
+DIR-014 (iteration 67) found and fixed a real, standing gap: the driving
+session (PID 3176586, pts/6) had never had a `manda monitor` process
+armed in its own process tree at all. Once fixed and independently
+re-confirmed live for two consecutive iterations (67, then 68 —
+`experiment/iterations/iteration-68.md` §2), iteration 68 performed the
+re-test DIR-014's own action 3 called for: two bounded attempts (150s and
+60s timeouts) to invoke `mcp__plugin_manda_manda__Agent` targeting
+`to: "quay-bootstrap"` (the now-confirmed, correctly-bound monitor).
+
+**Both attempts timed out**, with the identical `MCP error -32603:
+timeout waiting for cap "agent.spawn" result after <N>s: context deadline
+exceeded` signature documented in every prior failure (iteration 14's 2,
+iteration 15's 5, iteration 18's 1) — now a 6th and 7th data point.
+Critically, `manda events cap-requests-quay-bootstrap` confirmed **both
+requests actually landed on the correct, correctly-targeted channel**,
+and the monitor process was confirmed alive throughout — ruling out
+"wrong target" and "no monitor bound to this session" simultaneously as
+the cause, for the first time in one clean test.
+
+**Conclusion, at the correct precision level:** DIR-014's own narrower
+hypothesis — that the entire 5/5 historical failure rate was explained
+by "the driving session's own session never had a monitor armed," and
+that arming one would restore reliability — is **not confirmed**. The
+deeper cause remains exactly what DIR-005 (iteration 18) already
+diagnosed: `manda-dispatch cross-session --help` documents the inbound
+adapter `manda monitor <name>` uses as **"stateless... No side
+effects"** — it renders a dispatched `cap-requests-*` event to text but
+never itself calls back into a live broker session's own native `Agent`
+tool to answer it. No live process (human or automated) in this
+experiment's environment watches `quay-bootstrap`'s rendered output and
+completes the `agent.spawn` cap-request's other half. DIR-014's fix was
+real and necessary (a monitor now exists, bound, and correctly targeted)
+but not sufficient — DIR-005's rendering-adapter gap is the binding
+constraint, now confirmed to persist even with DIR-014's own gap closed.
+
+**No change to G3 audit dispatch was made as a result of this finding.**
+Per DIR-014's own action 3 text ("this is a re-test, not an assumption")
+and this iteration's own scoping, the native subagent mechanism (the
+top-level orchestrator's own `Agent` tool) remains the unconditional G3
+audit-dispatch mechanism, exactly as DIR-012's action 2 resolution
+already established. This is a data point for a possible **future**
+directive or human decision (e.g., whether pairing the monitor with a
+live `manda watch`-driven answering loop would close the gap), not an
+automatic protocol change triggered by a single (now seven-data-point)
+test. No V-factor movement was claimed for this diagnostic work — see
+`experiment/iterations/iteration-68.md` §7-8 for the full reasoning.
+
+Full detail: `experiment/iterations/iteration-68.md` §3, §5, §9;
+`experiment/directives/archive/DIR-014-arm-manda-monitor-in-driving-
+session-and-continue-nested-subagent-audit-exploration.md`'s Resolution
+(c)-(d), updated by iteration 68.
+
 ## Relationship to the experiment's guardrails (G1-G6, protocol §6)
 
 Directives introduce a new risk class the existing guardrails don't cover:

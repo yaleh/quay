@@ -91,11 +91,13 @@ the iteration.
 
 ## Resolution
 
-- resolved_by: iteration 67
-- outcome: applied (actions 1 and 2 applied in full; action 3 explicitly
-  deferred, not attempted, pending the second of the "at least two
-  consecutive iterations" this directive's own text requires; action 4
-  not yet applicable, since it depends on action 3 having been attempted)
+- resolved_by: iteration 67 (actions 1-2); iteration 68 (actions 3-4)
+- outcome: applied in full — actions 1 and 2 applied at iteration 67;
+  action 3 (the re-test) attempted at iteration 68, the second of the
+  "at least two consecutive iterations" this directive's own text
+  requires, with RESULT: FAILED (mechanism still times out, for a
+  deeper reason than "no monitor armed" — see DIR-005); action 4
+  (record the new, narrower finding) applied at iteration 68
 
 **(a) Action 1 — amend G6's operational check — applied.**
 `experiment/ITERATION-PROMPTS.md` §0's precondition checklist was amended:
@@ -137,31 +139,99 @@ re-test becomes appropriate — see `experiment/iterations/iteration-67.md`
 §Problems identified for next iteration for the explicit hand-off.
 
 **(c) Action 3 — re-attempt the manda nested-subagent mechanism for G3
-audits — explicitly DEFERRED, not attempted.** This directive's own text
-conditions action 3 on the monitor being "confirmed bound to the driving
-session for at least two consecutive iterations." Only one consecutive
-iteration (this one) has confirmed it so far. Per this iteration's own
-dispatch scoping, action 3 was deliberately not attempted this iteration
-— attempting it now, with only one confirmation in hand, would not
-satisfy the directive's own stated precondition and would risk exactly
-the kind of premature-declaration pattern this experiment's guardrails
-(G1, G4) warn against elsewhere. Deferred to a future iteration (expected
-iteration 68), not rejected.
+audits — ATTEMPTED at iteration 68 (the second consecutive confirmation);
+RESULT: FAILED, reproducing the prior timeout under the corrected
+precondition.** This directive's own text conditioned action 3 on the
+monitor being "confirmed bound to the driving session for at least two
+consecutive iterations." Iteration 67 (this iteration) provided the
+first; iteration 68 independently, freshly re-verified the same live
+process-tree fact a second time (`ps -o pid,ppid,tty,etime,cmd --ppid
+3176586 | grep -i monitor` -> PID 2621758 wrapper / PID 2621778 `manda
+monitor quay-bootstrap --root .`, confirmed still alive, both before and
+after the test attempts) -- meeting this directive's own stated
+precondition in full.
 
-**(d) Action 4 — record a new, narrower finding if the mechanism still
-fails after re-test — not yet applicable.** Depends on action 3 having
-been attempted; it has not been. No finding to record yet.
+With the precondition met, iteration 68 made two bounded attempts to
+invoke `mcp__plugin_manda_manda__Agent` (targeting `to: "quay-bootstrap"`,
+the driving session's own confirmed monitor name): a realistic task
+(150s timeout) and a minimal PING sanity check (60s timeout, the one
+permitted retry). **Both timed out** with the identical error signature
+documented across all 5 prior failures: `MCP error -32603: timeout
+waiting for cap "agent.spawn" result after <N>s: context deadline
+exceeded`. Critically, iteration 68 gathered evidence beyond what any
+prior attempt had: `manda events cap-requests-quay-bootstrap` confirmed
+**both dispatched requests actually landed on the correct, correctly-
+targeted channel** (matching prompt text, cap `agent.spawn`, `to:
+"quay-bootstrap"`) -- ruling out a wrong/guessed target as the cause for
+this case, and confirming the monitor process itself did not crash
+during either call. Full detail: `experiment/iterations/iteration-68.md`
+section 5, section 9.
 
-**(e) V-factor movement: none claimed.** This is process/precondition-
-tooling work (a `ITERATION-PROMPTS.md` §0 amendment, a directive
-resolution, and an independently-reproduced process-tree confirmation),
-not a feature increment to quay-native, quay-github, or Core. See
-`experiment/iterations/iteration-67.md` §7-8 for the full factor-by-
-factor reasoning on why this genuinely does not fit any of the eight
-§5.1/§5.2 factors — applying the same standard iteration 65's DIR-012/
-DIR-013 application, and iterations 8, 18, 29 before it, used for prior
-process/prompt-maintenance-only work. Both V_instance (0.5673) and V_meta
-(0.0973) are unchanged from iteration 66.
+**(d) Action 4 -- record a new, narrower finding, since the mechanism
+still failed after re-test -- applied.** The finding, stated at the
+correct precision level (per this directive's own action 4 instruction to
+distinguish it from "no monitor was ever armed"):
+
+- **What is now resolved (was DIR-014's own finding, now confirmed
+  fixed):** the driving session (PID 3176586) not having any monitor
+  bound to it at all is no longer the cause of anything -- a monitor
+  (`quay-bootstrap`) is confirmed live and correctly bound, for two
+  consecutive iterations running, and the dispatched requests are
+  confirmed to have reached it correctly.
+- **What is NOT resolved, and is the deeper, still-standing cause:**
+  `manda-dispatch cross-session --help` (the inbound adapter `manda
+  monitor <name>` uses to render `cap-requests-*` events) is explicitly
+  documented, and was directly re-confirmed live this iteration, as
+  **"stateless... No side effects"** (`echo '' | manda-dispatch
+  cross-session` -> `{"forward":false,"line":""}`). It renders a
+  dispatched cap-request event to text for something else to read; it
+  never itself calls back into a live broker session's own native
+  `Agent` tool to answer the request. This experiment's environment has
+  no live process (human or automated) watching `quay-bootstrap`'s
+  rendered terminal output and completing the `agent.spawn` cap-request's
+  other half. This is **exactly** the root cause `experiment/directives/
+  archive/DIR-005-dispatch-to-own-monitor-channel.md` (iteration 18)
+  already diagnosed for the `cord` monitor case -- now independently
+  reproduced (a 6th and 7th data point, on top of iteration 14's 2,
+  iteration 15's 2, and iteration 18's 1) under conditions that
+  additionally rule out every other previously-open alternative
+  explanation (wrong target, no monitor bound to this specific session,
+  daemon unreachable) simultaneously in one test.
+- **Net conclusion:** DIR-014's own narrower hypothesis -- that the 5/5
+  historical failure rate was fully explained by "the driving session
+  simply never had a monitor armed," and that arming one would make the
+  mechanism reliable -- is **not confirmed**. The mechanism still fails,
+  for the deeper, structural reason DIR-005 already found. Both findings
+  are true and non-contradictory: DIR-014 correctly identified and fixed
+  a real, standing gap (no monitor bound to the driving session), and
+  that fix was necessary but not sufficient -- DIR-005's own
+  rendering-adapter gap remains the binding constraint.
+- **Explicit non-consequence, per this iteration's own scoping and
+  DIR-014's own action 3 text ("this is a re-test, not an assumption"):**
+  no change is made to how this experiment's G3 audits are dispatched.
+  The native subagent mechanism (the top-level orchestrator's own `Agent`
+  tool) remains the G3 audit-dispatch mechanism, unconditionally, exactly
+  as DIR-012's action 2 resolution already established -- this one
+  (now seven-data-point) test is a data point for a **future** directive
+  or human decision (e.g., whether pairing the monitor with a live
+  `manda watch`-driven answering loop is worth building), not an
+  immediate protocol change made unilaterally by this iteration.
+  Full detail: `experiment/iterations/iteration-68.md` section 9, section
+  Problems identified for next iteration.
+
+**(e) V-factor movement: none claimed (both for iteration 67's actions
+1-2 and iteration 68's action 3 re-test).** This is process/precondition-
+tooling and dispatch-mechanism diagnostic work (a `ITERATION-PROMPTS.md`
+§0 amendment, a directive resolution, an independently-reproduced
+process-tree confirmation, and a bounded manda-nested-subagent test), not
+a feature increment to quay-native, quay-github, or Core. See
+`experiment/iterations/iteration-67.md` §7-8 and `experiment/iterations/
+iteration-68.md` §7-8 for the full factor-by-factor reasoning on why this
+genuinely does not fit any of the eight §5.1/§5.2 factors — applying the
+same standard iteration 65's DIR-012/DIR-013 application, and iterations
+8, 18, 29 before it, used for prior process/prompt-maintenance-only work.
+V_instance (0.5673) and V_meta (0.0973) are unchanged from iteration 66
+through iteration 68.
 
 **(f) Cross-links.** This directive's own Finding section already cites
 `experiment/directives/archive/DIR-012-nested-subagent-terminology-and-
