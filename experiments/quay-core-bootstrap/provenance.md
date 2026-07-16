@@ -32,8 +32,63 @@ averaged or concatenated with experiment 1's final value.
   `experiments/quay-native-bootstrap/directives/pending/DIR-025-*.md`'s
   2026-07-16 progress note).
 
+## Iteration 0 context note (2026-07-16)
+
+Iteration 0 was run on 2026-07-16 as a purely observational pass. No
+QC-* tasks were created or driven. The inheritance record above was
+confirmed by reading all required artifacts (provenance.md, EXTRACTION-
+SUMMARY.md, SKILL.md, patterns.md, v-meta-stall-analysis.md, gate-
+mechanics.md, g3-audit-discipline.md, quay-core-bootstrap-experiment-v2.md,
+CLOSING-REPORT.md, iteration-88.md) and surveying the actual code in
+packages/quay/ and packages/quay-native/.
+
+Initial V scores for this experiment, measured at iteration 0:
+
+```
+V_instance = core_abi_symmetry × web_ui_verification × action_delivery_mode × native_backlog_health
+           = 0.8 × 0.0 × 0.5 × 1.0 = 0.0
+             (web_ui_verification = 0.0 collapses the product)
+
+V_meta     = completeness × effectiveness × reusability × validation
+           = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973
+             (inherited unchanged from experiment 1's final values;
+              not re-derived from zero — a scoring error per protocol §5)
+
+σ_QC       = 0/0 (no QC-* tasks exist yet)
+σ_strict   = 0.8493 (experiment 1's final inherited floor — noted separately,
+             not substituted for σ_QC)
+```
+
+See `experiments/quay-core-bootstrap/iterations/iteration-0.md` for the
+full per-factor evidence, re-trigger checks, and convergence assessment.
+
 ## Task entries
 
-(none yet — this experiment has not started; entries begin once
-`docs/proposals/quay-core-bootstrap-experiment-v2.md` §7's remaining
-preconditions are satisfied and iteration 0 is run)
+| Task | Title | author_by | execute_by | gate_by | σ contribution |
+|------|-------|-----------|------------|---------|----------------|
+| QC-001 | Write browser-automation tests for Web UI pages | seed | seed | seed | 0/1 (seed, excluded from σ_QC numerator) |
+
+**σ_QC after iteration 1**: 0/1 (QC-001 has seed provenance throughout —
+authored, executed, and gated by the iteration-1 seed session, not through
+`quay:author` / `quay:execute` native Skills). Per protocol §6: seed-provenance
+tasks increment the denominator but not the numerator. The task's real value is
+the V_instance lift (web_ui_verification 0.0 → 0.5), not σ credit.
+
+**Inherited floor**: σ_strict = 0.8493 (experiment 1's final value — noted
+separately, not substituted for σ_QC).
+
+### QC-001 detail
+
+- **Iteration**: 1 (2026-07-16)
+- **Work**: Created `packages/quay/test/web-ui-browser.test.mjs` — 26
+  structural assertions covering GET / (task list), GET /task/:id (detail,
+  todo + done negative control), GET /task/:nonexistent (404). Live
+  browser-automation verification via playwright MCP tools confirmed rendering
+  of all three page types; observations recorded verbatim in the test file's
+  own header.
+- **Test count**: 29 pass, 0 fail after commit (was 28).
+- **V_instance lift**: web_ui_verification 0.0 → 0.5 (GET / and GET /task/:id
+  both covered, per the 0.5 rubric in ITERATION-PROMPTS.md). POST action
+  trigger not covered by browser-automation yet → not at 1.0.
+- **G3 audit**: dispatched as out-of-band adjudicate pass; verdict in
+  `experiments/quay-core-bootstrap/audits/iteration-1-adjudicate.md`.
