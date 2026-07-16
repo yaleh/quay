@@ -10814,3 +10814,74 @@ stalled V_meta factors; `effectiveness` flat since iteration 23 (net),
 Full detail: `experiment/iterations/iteration-79.md`. Independent
 out-of-band audit: to be dispatched separately by the top-level
 orchestrator (not performed by this session, per standing G3 discipline).
+
+## Iteration 80
+
+This iteration's work was applying DIR-022
+(`experiment/directives/pending/DIR-022-*.md`, brand-new, filed directly
+by the human in the live conversation, present at this iteration's
+mandatory first-step `ls experiment/directives/pending/` check alongside
+the still-pending DIR-021) — attempting the actual hard/ambiguous manda
+nested-subagent trial case (`to="cord"`, a channel bound to a monitor
+under the orchestrator's own process tree, PPID 3176586, which this
+iteration's own execution context shares) that iteration 79 had identified
+but sidestepped in favor of an easier, unambiguous target (`terminal`).
+No `tasks/QN-*.md` file was created or modified; the task count remains
+**70**, and no provenance triple changed. σ_strict is therefore
+**unchanged**: 62/70 = **0.8857**.
+
+**The trial itself**: this iteration confirmed, via a fresh `ps -ef | grep
+"manda monitor"`, that `cord` (PID 214935/214955) remains a direct child
+of PPID 3176586 — the identical PPID as this iteration's own dispatched-
+subagent execution context. Rather than avoid this configuration (as
+iteration 79 explicitly chose to, reasoning about the ambiguity at length
+but never testing it), this iteration issued the call directly:
+`mcp__plugin_manda_manda__Agent(to="cord", timeout=90)` from its own turn.
+Verbatim outcome: `{"value":"iteration-80-cord-pong"}` — an exact echo of
+the requested text — over a ~50.7s round trip (`date -u` bracket
+2026-07-16T12:11:42.454Z → 2026-07-16T12:12:33.123Z), comfortably inside
+the 90s deadline. **No timeout, no self-deadlock.**
+
+This is a genuine, load-bearing empirical result: OS process-tree
+ancestry between caller and broker (same PPID) did NOT by itself cause a
+self-deadlock, refuting the narrower "process-tree ancestry alone is
+sufficient" hypothesis and supporting the orchestrator's own alternative
+reading (DIR-022's Finding) that the actual self-deadlock mechanism is
+same-live-conversational-turn identity between caller and broker — the
+one confirmed genuine self-deadlock on record (DIR-020, iteration 78) had
+the orchestrator's own top-level turn as BOTH caller and broker, with no
+subagent dispatch in between, which is a materially different
+configuration than this iteration's (a dispatched depth-1 subagent
+sharing process ancestry, but not a live turn, with the broker).
+
+**Status decisions**: DIR-022 resolved and moved to `archive/` (a
+concrete, one-time empirical ask, now discharged with genuine evidence —
+see its own Resolution section). DIR-021 remains `pending` (unchanged
+disposition from iteration 79 — a standing, by-name-re-applicable SOP,
+not a one-time task), with a Progress note appended recording this
+iteration's second successful application of its action 1, this time
+against the harder case.
+
+**V-factor check, against exact §5.1/§5.2 defining language**: identical
+reasoning to iteration 79 — this iteration touched neither a `quay:*`
+Skill nor any task's gate; no marginal quay-native feature was built; the
+manda trial is evidence about the experiment's own tooling-reliability
+mechanism, analytically distinct from quay-native's own self-hosting
+proof. No factor movement claimed.
+
+```
+V_instance = 0.83 × 0.96 × 0.76 × 0.96 = 0.5813  (unchanged)
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, honest **zero-V-movement**
+increment (M_79 = M_80, A_79 = A_80) — DIR-022's own content is entirely
+process/protocol-layer (a directed, hard-case capability trial and a
+directive-disposition decision), not instance-layer feature work.
+`completeness`, `effectiveness`, and `reusability` remain the most
+stalled V_meta factors; `effectiveness` flat since iteration 23 (net),
+`reusability` flat since iteration 25 (net) — unchanged this iteration.
+
+Full detail: `experiment/iterations/iteration-80.md`. Independent
+out-of-band audit: to be dispatched separately by the top-level
+orchestrator (not performed by this session, per standing G3 discipline).

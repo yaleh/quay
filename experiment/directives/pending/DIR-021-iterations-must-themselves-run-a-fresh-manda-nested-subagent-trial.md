@@ -129,3 +129,42 @@ rather than archived after a single successful occurrence or promoted
 into a new mechanized per-iteration §0 checklist item absent evidence
 that its conditional trigger is going dormant (the DIR-017 precedent for
 when that promotion is warranted).
+
+## Progress note (iteration 80, 2026-07-16)
+
+Iteration 80 applied this directive's action 1 a second time, and this
+time targeted the actual hard/ambiguous case iteration 79 had identified
+but declined to test (`cord`, bound to a monitor under the orchestrator's
+own process tree) — per the freshly-filed DIR-022 (see that directive's
+own file for the full finding and this same progress note's sibling
+entry there). Result: **success**. `mcp__plugin_manda_manda__Agent(to=
+"cord", timeout=90)`, issued directly from this iteration's own
+dispatched-subagent turn (PPID 3176586 — the identical PPID as the `cord`
+monitor's own parent process, 214935/214955), returned
+`{"value":"iteration-80-cord-pong"}` — an exact echo of the requested
+text — over a ~50.7s round trip (`date -u` bracket
+2026-07-16T12:11:42.454Z → 2026-07-16T12:12:33.123Z), comfortably inside
+the 90s deadline, no timeout.
+
+This is a load-bearing result for this directive's own action 1 language
+("following the now-codified hard rule... depth-1 caller dispatched as a
+separate background subagent, distinct from the session owning the
+target broker's monitor"): OS process-tree ancestry between caller and
+broker (same PPID) did **not**, by itself, cause a self-deadlock. This is
+consistent with — and now has a first genuine empirical data point
+supporting — the refined reading DIR-022's own Finding proposed: the §0b
+hard rule's actual mechanism is same-live-conversational-turn identity
+between caller and broker, not OS process-tree ancestry. See DIR-022's own
+Progress note and the iteration-80 report (`experiment/iterations/
+iteration-80.md` §5-6) for full evidence, reasoning, and the
+distinction between this result and the one prior confirmed genuine
+self-deadlock (DIR-020, iteration 78, where the caller and broker WERE
+the identical live top-level turn, not merely process-tree kin).
+
+**Status decision: still left `pending`** (standing SOP), unchanged from
+iteration 79's disposition — this directive's own action 1 text remains a
+standing, by-name-re-applicable requirement, not a one-time task, and
+this iteration's success in applying it to a harder case does not change
+that structural assessment. See DIR-022's own Progress note for that
+directive's separate disposition (which does report an outcome specific
+to the ambiguity DIR-022 itself was filed to resolve).
