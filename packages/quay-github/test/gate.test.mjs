@@ -106,6 +106,37 @@ function main() {
     assert(r.reason === "terminal", "case f: done task reason is 'terminal'");
   }
 
+  // QN-068 (iteration 64): the needs-human soft-stop branch and the final
+  // "unrecognized status" fallthrough have never been directly unit-tested
+  // on either Provider. Confirmed beforehand: `grep -rn "soft stop"
+  // packages/*/test/*.mjs` and `grep -rn "gate.*unknown\|gate: \"unknown\""
+  // packages/*/test/*.mjs` both returned zero hits. checkGate() applies no
+  // upstream validation to `status` itself, so both branches are genuine
+  // defensive/terminal-state logic, not dead code -- and both are asserted
+  // here with the identical shape native's own gate-correctness.test.mjs
+  // (GC-F/GC-G) now asserts, proving cross-Provider ABI parity for these
+  // two terminal branches, not just each Provider's own internal
+  // correctness.
+  {
+    const r = checkGate({ id: "gh-11", status: "needs-human", body: "anything, irrelevant" });
+    assert(r.gate === "none", "case k: needs-human task reports gate 'none'");
+    assert(r.ok === false, "case k: needs-human task gates ok:false (soft stop, not terminal-pass)");
+    assert(
+      r.reason === "soft stop; human action required",
+      `case k: reason is the exact soft-stop text (got: ${r.reason})`
+    );
+  }
+
+  {
+    const r = checkGate({ id: "gh-12", status: "bogus-status-value", body: "anything, irrelevant" });
+    assert(r.gate === "unknown", "case l: unrecognized-status task reports gate 'unknown'");
+    assert(r.ok === false, "case l: unrecognized-status task gates ok:false");
+    assert(
+      r.reason === "unrecognized status bogus-status-value",
+      `case l: reason names the exact unrecognized status value (got: ${r.reason})`
+    );
+  }
+
   // Bonus regression: the \Z-is-not-a-JS-anchor class of bug (native's own
   // QN-005 fix) must not be reintroduced in this second implementation --
   // AC prose containing a bare "z"/"Z" must not truncate the section early.

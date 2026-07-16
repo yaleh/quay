@@ -9800,3 +9800,106 @@ consecutive flat iterations (23-63, net, counting iteration 59's
 reverted attempt as non-movement).
 
 Full detail: `experiment/iterations/iteration-63.md`.
+
+## Iteration 64: QN-068 — close the gate's untested `needs-human` soft-stop and `unrecognized status` fallthrough branches, cross-Provider
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-068 | Add unit test coverage for the gate's needs-human soft-stop and unrecognized-status fallback shapes, on both Providers | native | native | native | done |
+
+σ (strict) = 60/67 = **0.8955** (up from 59/66 = 0.8939).
+
+**V_instance factor reasoning:** `skeleton` credited **+0.01 (0.79 →
+0.80)**, following the identical reasoning pattern iterations 54-63 used
+for their own new-angle-but-same-factor-shape closures (test-coverage-
+only regression addition, zero source diff, for an already-existing,
+unmodified capability). Applied here to genuinely different content: the
+`needs-human` soft-stop branch and the final "unrecognized status"
+fallthrough inside `check()` (native, `packages/quay-native/src/
+store.js`) and `checkGate()` (GitHub, `packages/quay-github/src/
+github-client.js`) had never been directly unit-tested on either
+Provider — confirmed beforehand via `grep -rn "soft stop"
+packages/*/test/*.mjs` and `grep -rn "gate.*unknown\|gate: \"unknown\""
+packages/*/test/*.mjs`, both returning zero hits, despite provenance.md's
+own iterations 7-9 narrating real, live `needs-human` transitions in
+practice. Four new cases were added (two per Provider: GC-F/GC-G in
+native's `gate-correctness.test.mjs`, cases k/l in quay-github's
+`gate.test.mjs`), all adversarially verified: temporarily removing the
+`needs-human` branch entirely from each Provider's source in turn caused
+the corresponding new test to fail with the expected two-assertion
+failure pattern (gate and reason fields differ from the branch's actual
+values), then each source file was restored byte-identical (confirmed
+via `git diff --stat` empty for both `store.js` and `github-client.js`)
+and the full regression suite (26/26) passed again. The unrecognized-
+status case required bypassing `store.write()`'s own `VALID_STATUSES`
+guard by patching a written task's on-disk frontmatter directly via
+`fs.readFileSync`/`fs.writeFileSync` (native) and passing a bogus status
+literal directly to the pure `checkGate()` function (GitHub, which
+applies no upstream validation) — both are disclosed, deliberate
+techniques documented in the task file and iteration report, not hidden
+workarounds, and both exercise a genuine defensive branch (not dead
+code), since `check()`/`checkGate()` themselves apply no status
+validation independent of `store.write()`'s separate write-time guard.
+This satisfies `skeleton`'s bar the same way iterations 62-63's
+`skeleton +0.01` did (executed, adversarially-verified tests, not
+unexercised prose). `abi_symmetry` explicitly considered and rejected:
+while this change is intentionally symmetric across both Providers (the
+identical two response shapes are now asserted on both), no new cross-
+binding content-equivalence claim beyond what iteration 25's precedent
+already governs is being made here — see `gate_correctness` below.
+`gate_correctness` explicitly considered and rejected, applying the
+iteration 25 post-hoc correction precedent (QN-028) *a fortiori*: that
+correction held `gate_correctness` flat for a second Provider's own gate
+conformance fix with zero change to native's own gate logic; this
+iteration is a strictly weaker case for credit, since *zero* production
+gate-logic source changed on *either* Provider (pure test-only addition,
+confirmed via `git diff --stat` showing only the two `test/*.mjs` files
+touched). `skill_convergence` unchanged: no SKILL.md content touched, no
+new Skill branch exercised (QN-068 is an ordinary leaf task using the
+standard gated lifecycle).
+
+```
+V_instance = 0.80 × 0.96 × 0.76 × 0.96 = 0.5603  (up from 0.5533)
+```
+
+**V_meta factor reasoning:** all four factors explicitly considered and
+held flat, consistent with iterations 62-63's own clean, audited
+decisions to decline all four factors for structurally identical (test-
+coverage-only, zero-source-diff) closures. `completeness`: no Method/
+Skill content was edited this iteration (the shipped change is two test
+files only) — the pre-existing gate-dispatch logic already implemented
+both branches correctly; this iteration proves both branches true at
+runtime on both Providers, it does not close a gap in the Method's own
+self-containedness (§5.2's literal scope, per the iteration-9/18/29/61/63
+precedent chain, re-confirmed this session). `effectiveness`: no scope-
+matched timing comparator exists for this task's specific shape (a pure-
+function unit test with an adversarial break/restore cycle on two
+Providers, no live `gh api` call at all); manufacturing one against a
+mismatched comparator would repeat the twelfth/thirteenth correction's
+exact category of error. `reusability`: per the direct, on-point, and
+repeatedly-applied precedent (QN-034, QN-048, QN-067, and every negative/
+error-path/test-coverage closure since iteration 26 — 39 consecutive
+flat iterations before this one) — a test-coverage-only addition that
+proves already-existing, unmodified behavior true on both Providers is
+not new transfer-target evidence; noted explicitly as a *weaker* case for
+credit than iteration 63's own closer call, since a symmetric both-
+Providers change here demonstrates existing parity between the two
+Providers' independently-implemented logic rather than new one-
+directional (native → GitHub) transfer evidence. Held flat. `validation`:
+held flat, reserved for the top-level orchestrator's independent out-of-
+band audit of this iteration, per standing practice.
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, narrow **skeleton-only** system
+increment (M_63 = M_64, A_63 = A_64 — no Skill or capability created or
+modified; only new regression tests added to existing, unmodified gate-
+dispatch logic on both Providers). `completeness`, `reusability`, and
+`validation` remain the most stalled V_meta factors (55, 39, and ~54
+consecutive flat iterations respectively); `effectiveness` at 43
+consecutive flat iterations (23-64, net, counting iteration 59's
+reverted attempt as non-movement).
+
+Full detail: `experiment/iterations/iteration-64.md`.

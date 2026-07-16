@@ -120,6 +120,58 @@ function main() {
     assert(r.reason === "terminal", "GC-D: done task reason is 'terminal'");
   }
 
+  // QN-068 (iteration 64): the needs-human soft-stop branch has never been
+  // directly unit-tested — provenance.md's iterations 7-9 narrate real,
+  // live `needs-human` transitions, but nothing regression-tests the exact
+  // response shape going forward. Confirmed beforehand: `grep -rn "soft
+  // stop" packages/*/test/*.mjs` returned zero hits.
+  store.write("GC-F", {
+    title: "needs-human-soft-stop",
+    status: "needs-human",
+    body: "anything, irrelevant — this branch does not inspect body content",
+  });
+  {
+    const r = store.check("GC-F");
+    assert(r.gate === "none", "GC-F: needs-human task reports gate 'none'");
+    assert(r.ok === false, "GC-F: needs-human task gates ok:false (soft stop, not terminal-pass)");
+    assert(
+      r.reason === "soft stop; human action required",
+      `GC-F: reason is the exact soft-stop text (got: ${r.reason})`
+    );
+  }
+
+  // QN-068 (iteration 64): the final "unrecognized status" fallthrough has
+  // never been directly unit-tested either. Confirmed beforehand: `grep -rn
+  // "gate.*unknown\|gate: \"unknown\"" packages/*/test/*.mjs` returned zero
+  // hits. This is a genuine defensive branch (check()/checkGate() accept
+  // any string in `status` with no upstream validation inside these
+  // specific functions), not dead code.
+  // store.write() rejects any status outside VALID_STATUSES (a real,
+  // separate write-time validation layer) -- so this genuinely-defensive
+  // check()/checkGate() fallthrough (no upstream validation inside check()
+  // itself) is exercised the same way a hand-edited/corrupted task file on
+  // disk would trigger it: write a valid task, then patch the on-disk
+  // frontmatter's status field directly, bypassing store.write()'s guard.
+  store.write("GC-G", {
+    title: "unrecognized-status-value",
+    status: "todo",
+    body: "anything, irrelevant — this branch does not inspect body content",
+  });
+  {
+    const p = path.join(tasksDir, "GC-G.md");
+    const raw = fs.readFileSync(p, "utf8");
+    fs.writeFileSync(p, raw.replace("status: todo", "status: bogus-status-value"));
+  }
+  {
+    const r = store.check("GC-G");
+    assert(r.gate === "unknown", "GC-G: unrecognized-status task reports gate 'unknown'");
+    assert(r.ok === false, "GC-G: unrecognized-status task gates ok:false");
+    assert(
+      r.reason === "unrecognized status bogus-status-value",
+      `GC-G: reason names the exact unrecognized status value (got: ${r.reason})`
+    );
+  }
+
   // Bonus regression check (not a Plan Phase 3 item, but directly relevant
   // to this task's own scope): the \Z-is-not-a-JS-anchor bug fix — a
   // ready task whose AC prose contains a bare "z"/"Z" must no longer have
