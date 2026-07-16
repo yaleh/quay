@@ -2731,3 +2731,76 @@ stalled V_meta factors; `effectiveness` flat since iteration 23 (net),
 Full detail: `experiment/iterations/iteration-82.md`. Independent
 out-of-band audit: to be dispatched separately by the top-level
 orchestrator (not performed by this session, per standing G3 discipline).
+
+## Iteration 83
+
+This iteration directly engaged iteration 82's own independent audit
+recommendation (`experiment/audits/iteration-82-independent-adjudicate.md`,
+§e) to run "a fresh, dedicated gap search against the current artifact"
+for V_meta's three stalled factors — `completeness`, `effectiveness`, and
+`reusability` — rather than continuing to lean on an increasingly dated
+"exhausted" finding. No `tasks/QN-*.md` file was created or modified; the
+task count remains **70**, and no provenance triple changed. σ_strict is
+therefore **unchanged**: 62/70 = **0.8857**.
+
+**The fresh search, against primary sources (not prior iterations'
+summaries)**:
+
+- **effectiveness**: `ls experiment/timing/*.log | sort -V` confirms the
+  most recent timing log is still `iteration-64.log` — 19 iterations
+  (65-83) have produced no new comparable-scope timing data. Scanned
+  `git log --stat` across all task-closing commits from iterations 66-82
+  looking for a candidate scope-matched to the one genuine historical
+  comparison pair (stage-0 QN-006 @179s vs iteration-22 QN-032 @187s,
+  established in iteration 45's exhaustive re-derivation); none of the
+  intervening commits share that single-file/no-network-I/O shape.
+- **reusability**: live-verified via `gh issue list --repo yaleh/quay`
+  and `node packages/quay/bin/quay.js task check gh-3/gh-4 --provider
+  github --json` that GitHub issues #3/#4 remain gate-blocked exactly as
+  in 38+ prior iterations. Went one level deeper than any prior
+  iteration's search by directly reading
+  `packages/quay-github/src/github-client.js`'s `setStatus()`
+  implementation (not just `DESIGN.md`'s prose) and running
+  `grep -n "\-f body=\|\-f title=" packages/quay-github/src/*.js`
+  repo-wide (zero hits) — confirming at the code level, not merely the
+  documentation level, that no `data.write` body/title path exists.
+  Explicitly considered extending `data.write` to add that path, and
+  explicitly declined: gh-3/gh-4 predate the QN-024 scope decision and
+  are legacy fixtures, not organic demand for wider write capability;
+  building it now to manufacture a reusability data point would be
+  exactly the kind of metric-manufacturing G5 forbids.
+- **completeness**: full fresh re-read of both `author/SKILL.md` and
+  `execute/SKILL.md` Gaps sections, checking each "Resolved in iteration
+  N" annotation against its cited evidence rather than trusting the label
+  alone. No new gap found; the sole standing gap (no subagent-dispatch
+  primitive) was re-confirmed live via a fresh `ToolSearch` call this
+  iteration, not inherited from a prior transcript.
+
+**Conclusion**: all three factors remain honestly exhausted under the
+protocol's strict definitions (§5.2's held-out discipline: effectiveness
+on the marginal increment only, reusability on the transfer target only,
+never the accumulated artifact) — but this iteration reaches that
+conclusion via fresh, dated, primary-source evidence gathered this
+session, not by re-asserting precedent. No task was authored or code
+changed; manufacturing one solely for V-movement was explicitly
+considered and rejected as the exact anti-pattern the iteration-25
+correction and G5 already guard against.
+
+```
+V_instance = 0.83 × 0.96 × 0.76 × 0.96 = 0.5813  (unchanged)
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, honest **zero-V-movement**
+increment (M_82 = M_83, A_82 = A_83). DIR-021 not triggered — no manda
+dispatch was organically needed. DIR-024 and the broker-side portions of
+DIR-025 re-confirmed orchestrator/broker-scoped and not actionable from
+this dispatched subagent's own context; briefly re-confirmed, not
+re-litigated. `completeness`, `effectiveness`, and `reusability` remain
+the most stalled V_meta factors; `effectiveness` flat since iteration 23
+(net), `reusability` flat since iteration 25 (net) — unchanged this
+iteration, now re-verified fresh rather than inherited.
+
+Full detail: `experiment/iterations/iteration-83.md`. Independent
+out-of-band audit: to be dispatched separately by the top-level
+orchestrator (not performed by this session, per standing G3 discipline).
