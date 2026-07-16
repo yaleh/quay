@@ -9903,3 +9903,90 @@ consecutive flat iterations (23-64, net, counting iteration 59's
 reverted attempt as non-movement).
 
 Full detail: `experiment/iterations/iteration-64.md`.
+
+## Iteration 65: apply DIR-012 (subagent-dispatch terminology + manda-audit-requirement, DEFERRED) and DIR-013 (codify G3-extends-to-Core) — process/protocol work, no V-factor movement, no new task
+
+This iteration's work was applying two pending directives
+(`experiment/directives/pending/DIR-012-*.md` and `DIR-013-*.md`, both
+authored by the human in a separate concurrent conversation, both
+present at this iteration's mandatory first-step `ls
+experiment/directives/pending/` check) — not authoring, executing, or
+gating a native task. No `tasks/QN-*.md` file was created; the task
+count remains **67**, and no provenance triple changed. σ is therefore
+**unchanged**: 60/67 = **0.8955**.
+
+**DIR-012 resolution summary** (full resolution text in
+`experiment/directives/archive/DIR-012-nested-subagent-terminology-and-audit-requirement.md`):
+action 1 (terminology — "native subagent" vs. "manda nested subagent")
+applied in `docs/proposal/glossary.md` and `experiment/ITERATION-PROMPTS.md`
+§5; action 3 (cross-link from DIR-011) applied; action 2 (require the
+manda nested subagent mechanism for G3 audits) resolved as **DEFERRED**,
+with the blocking reason recorded in full in both the directive's own
+Resolution section and inline in `ITERATION-PROMPTS.md` §5 — the
+experiment's own recorded history (iteration-14/15 findings in
+`experiment/directives/README.md`, including iteration 15's own audit
+dispatch failing 1-for-1 under live-daemon conditions) shows the
+manda-daemon-liveness precondition DIR-012 itself made action 2
+conditional on cannot currently be relied upon for every iteration
+without risking a newly-flaky mandatory G3 gate. The G3 audit-dispatch
+mechanism this experiment actually depends on (the top-level
+orchestrator's own native `Agent` tool calling a fresh `general-purpose`
+subagent) is explicitly reaffirmed, unweakened, for every iteration going
+forward.
+
+**DIR-013 resolution summary** (full resolution text in
+`experiment/directives/archive/DIR-013-codify-g3-audit-extends-to-core.md`):
+action 1 (a fifth Core-scope standing-constraint item, citing
+`docs/proposal/quay-core-scope-expansion-discussion.md` §3 item 3
+verbatim) added to `experiment/ITERATION-PROMPTS.md`'s "§Core-scope
+work" section; action 3's one-time retrospective check found a
+**positive** result, not a gap: every Core-touching iteration since
+DIR-007 (iterations 13, 21, 22, 23, 26, 29-36, 54-58, 62) has its own
+independent, fresh-context `experiment/audits/iteration-{N}-independent-adjudicate.md`
+file, none missing, none self-certified — spot-checked in depth for
+iterations 26 and 36. This directive codifies existing good practice
+explicitly; it does not correct a past lapse.
+
+**V-factor reasoning — explicitly no movement claimed, either
+direction.** This iteration's work is protocol/prompt-maintenance and
+directive resolution, not a feature increment authored/executed/gated by
+quay-native. Applying the same reasoning DIR-008's own iteration (29)
+used for its own analogous ITERATION-PROMPTS.md-authoring work: `skeleton`
+is unchanged (no runtime capability of the v0 loop changed — no code in
+`packages/quay*` was touched); `abi_symmetry` is unchanged (no ABI
+surface touched); `gate_correctness` is unchanged (no gate logic
+touched); `skill_convergence` is unchanged (no `SKILL.md` touched, no
+Skill branch exercised). On the V_meta side: `completeness` is
+explicitly considered and rejected — the changes are to
+`experiment/ITERATION-PROMPTS.md` (the *experiment's own* iteration-prompt
+document) and `docs/proposal/glossary.md` (frozen vocabulary), neither of
+which is quay-native's own methodology artifact (`packages/quay-native/
+skills/*/SKILL.md`); §5.2's `completeness` factor is precisely scoped to
+"methodology (Skills + gates + decomposition rule) fully documented and
+self-contained" — this iteration touched none of those three things.
+`effectiveness`: no marginal feature increment exists this iteration to
+compare against a stage-0 timing baseline; not applicable, not merely
+undermeasured. `reusability`: no GitHub-Provider-specific content
+changed. `validation`: held flat, reserved for the top-level
+orchestrator's independent audit of this iteration, per standing
+practice.
+
+```
+V_instance = 0.80 × 0.96 × 0.76 × 0.96 = 0.5603  (unchanged)
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, honest **zero-V-movement**
+increment (M_64 = M_65 in the narrow sense that no Skill/gate/ABI content
+changed; A_64 = A_65, no agent capability changed) — the two directives'
+own content is entirely process/protocol-layer (terminology, an explicit
+deferred decision with recorded reasoning, and a standing-constraint
+codification plus a clean retrospective finding), not instance-layer
+feature work. `completeness`, `reusability`, and `validation` remain the
+most stalled V_meta factors (56, 40, and ~55 consecutive flat iterations
+respectively, unaffected by this iteration since none of the three factors
+are claimed to move here either); `effectiveness` at 44 consecutive flat
+iterations (23-65, net, counting iteration 59's reverted attempt as
+non-movement).
+
+Full detail: `experiment/iterations/iteration-65.md`.

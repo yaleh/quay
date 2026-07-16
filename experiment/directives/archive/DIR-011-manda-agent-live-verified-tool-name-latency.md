@@ -152,6 +152,19 @@ iteration 34 is attributed solely to QN-045's own in-repo work, argued
 independently on its own merits in `experiment/iterations/
 iteration-34.md` §7.
 
+**(g) Cross-link (added by DIR-012, iteration 65):** a later live
+conversation surfaced that this Resolution's "out of scope" determination
+in (b) was, at least once, read as implying the manda mechanism itself is
+irrelevant to this experiment going forward. That is not what (b) says —
+(b) is narrowly about this experiment's G3 audit dispatch *not currently
+using* manda's `Agent` cap-request mechanism, not a claim that the
+mechanism should never be used here. See `experiment/directives/archive/
+DIR-012-nested-subagent-terminology-and-audit-requirement.md` for the
+terminology this experiment now uses to keep the two subagent-dispatch
+mechanisms (native vs. manda nested) unambiguous, and for the explicit,
+reasoned DEFERRED decision on whether G3 audits should be *required* to
+use the manda mechanism instead.
+
 **(f) This is this iteration's own determination, not an assertion about
 human intent.** The scope judgment above (that DIR-011's primary
 requested action is out of scope for this repository's experiment) was

@@ -230,6 +230,47 @@ Extract:
    - Run an independent epicd `adjudicate` pass against this iteration's lifted
      task(s) and the gate that certified them. `adjudicate` must be independent of
      whatever authored/executed the task — it reads the artifact + diff only.
+   - **Terminology (added by DIR-012, iteration 65 — see `docs/proposal/
+     glossary.md`'s "Subagent dispatch mechanisms" section for full
+     definitions):** this audit is dispatched via a **native subagent** —
+     the top-level orchestrator's own platform `Agent`/Task tool, a
+     fresh-context spawn within the same session/orchestrator invocation,
+     entirely separate from whatever authored/executed the task. This is
+     distinct from a **manda nested subagent** (manda's own
+     `mcp__plugin_manda_manda__Agent` cap-request mechanism, relayed to a
+     live broker session). **This audit step MUST continue to use the
+     native subagent mechanism, not the manda nested subagent mechanism —
+     see the DEFERRED note immediately below for why.**
+   - **DEFERRED (DIR-012 action 2): requiring the manda nested subagent
+     mechanism for this audit step.** DIR-012 asked whether this audit
+     should instead be required to run via the manda nested subagent
+     mechanism, on the reasoning that its broker round-trip gives a
+     stronger process-separation guarantee. Iteration 65 evaluated this
+     and found the precondition DIR-012 itself set — "confirm G6's
+     manda-daemon-liveness precondition can be relied upon for every
+     iteration's audit step without making audits newly flaky" — is
+     **not** satisfiable given the experiment's own recorded history:
+     `experiment/directives/README.md`'s own iteration-14/15 updates
+     record the synchronous `Agent` cap-request spawn timing out 5/5
+     reproductions even with the manda daemon process confirmed live and
+     multiple monitors (`worker`, `cord`, `terminal`) alive on the host,
+     including a case (iteration 15) where the *audit dispatch itself*
+     failed for this reason, leaving that iteration with no independent
+     mechanical co-sign at all. Whether any given fresh iteration session
+     has a live monitor bound to it, and whether a live parent-broker
+     session is actively watching the right `cap-requests-<name>`
+     channel at the moment the audit needs to run, are per-session,
+     per-moment facts (§Core-scope work item 3's own manda-reuse
+     discipline already establishes this) — not something a MUST-level
+     requirement can safely assume for **every** future iteration without
+     risk of newly making the mandatory G3 step flaky. This sub-item is
+     therefore **resolved as DEFERRED**, not applied: the audit dispatch
+     mechanism named in this section remains the native subagent (the
+     top-level orchestrator's own `Agent` tool), unconditionally, for
+     every iteration going forward, until a future iteration can
+     mechanically confirm live-monitor coverage is reliable across
+     fresh sessions (not just the current session at the moment of
+     writing) rather than merely possible in principle.
    - Write the verdict to `experiment/audits/iteration-{N}-adjudicate.md`
      (co-sign or specific findings — if it finds problems, the σ lift for the
      affected tasks does not count yet; fix and re-audit before claiming the lift).
@@ -371,6 +412,31 @@ separate, not-yet-issued, future directives).
      `effectiveness` is not the right factor for structural
      capability/symmetry work regardless of which layer (Provider or
      Core) it targets.
+5. **G3 (out-of-band audit) applies to Core on exactly the same terms as
+   Provider (added by DIR-013, iteration 65).** Per `docs/proposal/
+   quay-core-scope-expansion-discussion.md` §3 item 3 (quoted verbatim):
+   > **G3 (out-of-band audit) must extend to Core.** If a future Core MCP
+   > server (DIR-007) is used as evidence toward quay-native's own
+   > self-certification claims, the independent audit mechanism (G3) must
+   > explicitly cover Core-level code too — quay-native's own gate must
+   > not be the sole judge of Core's correctness, the same
+   > "no self-certification" principle the protocol already applies at
+   > the Provider level.
+   Concretely: any iteration whose task touches `packages/quay` (Core —
+   `mcp-server.js`, `serve.js`, `bin/quay.js`, `provider-env.js`,
+   `action.js`, `config.js`, `provider-client.js`, or any other Core
+   source file) must receive the same mandatory §5 OUT-OF-BAND AUDIT
+   dispatch (independent `adjudicate`, native-subagent-dispatched per the
+   terminology/mechanism note in §5 above) as a Provider-layer change —
+   no self-certification by whichever Skill/session authored or executed
+   the Core change, and no exemption for Core code on the theory that it
+   is "infrastructure" rather than "the thing being verified." This is a
+   codification of what this experiment's own audit-dispatch practice
+   has already done uniformly since iteration 13 (verified retrospectively
+   at iteration 65 — see `experiment/directives/archive/
+   DIR-013-codify-g3-audit-extends-to-core.md`'s Resolution for the full
+   retrospective check), not a new obligation being introduced for the
+   first time.
 
 ---
 
