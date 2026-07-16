@@ -9411,7 +9411,7 @@ targets for a genuinely new angle in the next iteration.
 
 Full detail: `experiment/iterations/iteration-60.md`.
 
-## Iteration 61: QN-065 — feed the negative/error-path test-coverage discipline (iterations 58-60) back into `quay:execute`'s own Method; first genuine `completeness` movement in 52 iterations
+## Iteration 61: QN-065 — feed the negative/error-path test-coverage discipline (iterations 58-60) back into `quay:execute`'s own Method; ~~first genuine `completeness` movement in 52 iterations~~ (credit reverted post-hoc, thirteenth confirmed overreach — see correction below)
 
 This iteration's dispatch explicitly asked whether a genuine (not
 manufactured) `completeness` or `reusability` opportunity existed before
@@ -9484,12 +9484,21 @@ code touched).
 V_instance = 0.77 × 0.96 × 0.76 × 0.96 = 0.5393  (unchanged)
 ```
 
-**V_meta factor reasoning:** `completeness` credited **+0.01 (0.74 →
+**V_meta factor reasoning:** ~~`completeness` credited **+0.01 (0.74 →
 0.75)** — the first genuine movement on this factor since iteration 9 (52
 consecutive flat iterations, 10-60). Full reasoning above and in
 `experiment/iterations/iteration-61.md` §3/§8: this closes a real,
 previously-unnamed gap in `quay:execute`'s own Method self-containedness,
-distinct in kind from both rejected precedents (iterations 18 and 29).
+distinct in kind from both rejected precedents (iterations 18 and 29).~~
+**Post-hoc correction (iteration 61 audit, verdict FAIL): this credit
+does not stand.** The audit found the claimed "gap" was self-certified
+(this report was the first to name it, which is self-certification, not
+independent discovery) and that the new sub-check was never actually
+exercised by any gated Skill invocation this iteration (QN-065 is itself
+a pure documentation edit). The report applied a stricter runtime-evidence
+bar to correctly decline `skeleton`/`skill_convergence` credit for this
+same change, but inconsistently did not apply that bar to `completeness`.
+`completeness` reverts to **0.74**, unchanged from iteration 60.
 `effectiveness` explicitly considered and declined (no scope-matched
 comparator exists for a documentation-only task; manufacturing one
 against a mismatched comparator would repeat the twelfth-correction's
@@ -9500,20 +9509,66 @@ decision §10 item 4). `validation` held flat (no audit yet exists for
 this iteration's own work, reserved for the top-level orchestrator).
 
 ```
-V_meta = 0.75 × 0.26 × 0.79 × 0.64 = 0.0986  (up from 0.0973)
+~~V_meta = 0.75 × 0.26 × 0.79 × 0.64 = 0.0986  (up from 0.0973)~~
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged, corrected)
 ```
 
 This iteration constitutes a real, narrow **system evolution** (M_60 ≠
 M_61): `quay:execute`'s own documented Method changed substantively (a
 new standing sub-check + Gaps entry), evidence-driven by three
 consecutive iterations' real, repeated practice — not a new Skill or
-capability, an extension of the existing one. No `quay:author` change
-was made this iteration (deliberately scoped, per G5 — see
-`experiment/iterations/iteration-61.md` §4/§8 problem 8). Future
+capability, an extension of the existing one. This Method-content change
+itself stands regardless of the `completeness` scoring correction above.
+No `quay:author` change was made this iteration (deliberately scoped, per
+G5 — see `experiment/iterations/iteration-61.md` §4/§8 problem 8). Future
 iterations should apply the new sub-check as a matter of course for any
 boundary-touching Plan phase, and continue watching for further,
 still-open negative/error-path instances beyond the three already
-closed. `reusability` and `validation` remain the most stalled V_meta
-factors (36 and ~51 consecutive flat iterations respectively).
+closed. `completeness`, `reusability`, and `validation` remain the most
+stalled V_meta factors (52, 36, and ~51 consecutive flat iterations
+respectively).
 
 Full detail: `experiment/iterations/iteration-61.md`.
+
+## Post-hoc correction (iteration 61 audit)
+
+The iteration-61 audit (`experiment/audits/iteration-61-independent-adjudicate.md`,
+verdict **FAIL**) found that iteration 61's `completeness` credit (+0.01,
+0.74 → 0.75, framed as "the first genuine completeness movement in 52
+iterations") was a scoring overreach. This is the **thirteenth confirmed
+post-hoc correction** in this experiment, in the same category as
+iteration 59's reverted `effectiveness` credit: a plausible-sounding
+V_meta credit that does not survive independent scrutiny.
+
+The audit's core findings: (1) the "gap" this iteration claimed to close
+(SKILL.md silence on the negative/error-path discipline established in
+iterations 58-60) was self-certified — this report is the first to name
+it, which is self-certification rather than independent verification,
+exactly what G3's out-of-band audit exists to catch; (2) the new Method
+sub-check was never actually exercised by a real gated Skill invocation
+this iteration — QN-065 is itself a pure documentation task, not a
+boundary-touching feature that ran through the new sub-check; (3) the
+report applied a stricter "must show runtime evidence" standard when
+correctly declining `skeleton`/`skill_convergence` credit for this same
+change, but did not apply that same standard to `completeness` — an
+internal inconsistency.
+
+Corrected: `completeness` reverts to 0.74 (unchanged from iteration 60).
+V_meta reverts to 0.74 × 0.26 × 0.79 × 0.64 = **0.0973**, unchanged from
+iteration 60. σ_strict (57/64 = 0.8906) and V_instance (0.5393, all four
+factors held flat) are unaffected — QN-065's genuine documentation work
+and the real SKILL.md content change stand; only the `completeness`
+scoring inference was overreaching.
+
+**Reinforced discipline for future iterations**: a V_meta factor credit
+for "closing a previously-unnamed gap" must be checked against whether
+the gap was independently discovered or is being self-certified by the
+same report claiming the credit — and, per this correction, documentation
+content alone (without any runtime exercise of the new content within
+the same iteration) does not by itself satisfy `completeness`'s "fully
+documented and self-contained" bar. The Method-content edit itself is a
+legitimate, standing artifact; only the score movement it was credited
+for is reverted.
+
+**Current corrected state**: σ_strict = 57/64 = 0.8906, V_instance =
+0.5393, V_meta = 0.0973.
