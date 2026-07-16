@@ -1,6 +1,8 @@
 // QC-001 (experiment 2, iteration 1): browser-automation verification of
-// packages/quay's Web UI pages — the committed test that moves
-// `web_ui_verification` from 0.0.
+// packages/quay's Web UI pages — GET / and GET /task/:id flows.
+// QC-002 (experiment 2, iteration 2): extends browser-automation verification
+// to the POST action trigger flow — the third reachable Web UI flow, completing
+// web_ui_verification (0.5 → 1.0).
 //
 // BROWSER-AUTOMATION VERIFICATION (playwright MCP, iteration 1, 2026-07-16):
 // A live browser session was driven via playwright MCP tooling (the session-
@@ -36,6 +38,37 @@
 //   - NO button element (done status has no matching whenStatus entry)
 //
 // GET /task/NONEXISTENT-999: HTTP status 404 (confirmed in browser navigation)
+//
+// BROWSER-AUTOMATION VERIFICATION (playwright MCP, iteration 2, 2026-07-16):
+// QC-002 — POST action trigger flow (the third reachable flow). A live browser
+// session was driven against a startServer() instance seeded with one task
+// (ACT-1 status=todo) and with QUAY_ACTION_MOCK_LOG set to a temp file path.
+//
+// GET /task/ACT-1 (todo — before POST):
+//   - Page URL: http://127.0.0.1:47210/task/ACT-1
+//   - Page title: "ACT-1"
+//   - Heading: "ACT-1: Action trigger test task [todo]" [level=1]
+//   - Button "Advance" present [ref=f4e9]
+//
+// POST /task/ACT-1/action/advance (via clicking "Advance" button):
+//   - Button clicked via playwright MCP `browser_click` on ref f4e9
+//   - Browser followed 302 redirect → GET /task/ACT-1
+//   - Final page URL: http://127.0.0.1:47210/task/ACT-1 (same as before)
+//   - Final page title: "ACT-1" (unchanged)
+//   - Accessibility snapshot after redirect: same detail page structure,
+//     "Advance" button still present (task status not changed by action trigger)
+//
+// Mock log record written to /tmp/quay-act-mock.jsonl (verbatim):
+//   {"channel":"task-ACT-1","payload":"Drive task ACT-1 forward one status
+//    transition using its current status's Skill (see status_skill_map).",
+//    "taskId":"ACT-1","status":"todo","skill":"quay:author",
+//    "timestamp":"2026-07-16T16:41:00.405Z"}
+//
+// This confirms the POST action trigger:
+//   1. Fires deliverTrigger() in mock mode when QUAY_ACTION_MOCK_LOG is set
+//   2. Composes the correct channel ("task-<id>"), payload, taskId, status, skill
+//   3. Responds with 302 redirect to /task/<id>
+//   4. The browser follows the redirect and lands back on the detail page
 //
 // This committed test file, like QN-046's serve-browser-render.test.mjs,
 // cannot itself invoke a real browser from within a plain `node test.mjs`
@@ -92,6 +125,21 @@ function get(port, urlPath) {
   });
 }
 
+function post(port, urlPath) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: "127.0.0.1", port, path: urlPath, method: "POST" },
+      (res) => {
+        let body = "";
+        res.on("data", (c) => (body += c));
+        res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body }));
+      }
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 const VALID_SECTIONS =
   "## Proposal\nThis is a sufficiently long proposal section so the gate's minimum-content check passes cleanly.\n" +
   "## Plan\nThis is a sufficiently long plan section so the gate's minimum-content check passes cleanly.\n" +
@@ -101,17 +149,28 @@ const VALID_SECTIONS =
 async function main() {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-web-ui-browser-test-"));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-web-ui-browser-workspace-"));
+  // QC-002 (iteration 2): mock log path for POST action trigger verification.
+  // QUAY_ACTION_MOCK_LOG is set in process.env before startServer() so
+  // serve.js's action route picks it up and routes deliverTrigger() through
+  // the deterministic file-log mode instead of manda/print — the same env
+  // var the real CLI uses (src/serve.js line "QUAY_ACTION_MOCK_LOG || undefined").
+  const mockLogPath = path.join(tasksDir, "action-mock.jsonl");
 
-  // Two tasks seeded identically to the playwright MCP browser verification
-  // run recorded in this file's header: one at todo (action button PRESENT
-  // per provider.yml's whenStatus: [todo, ready]), one at done (button
-  // ABSENT — negative control, same discipline as serve.test.mjs QN-031).
+  // Three tasks seeded:
+  // - WUI-1 (todo): action button PRESENT (per provider.yml whenStatus: [todo, ready])
+  // - WUI-2 (done): action button ABSENT — negative control (no matching whenStatus)
+  // - WUI-ACT (todo): used exclusively for the POST action trigger test (QC-002)
+  //   so the GET/detail assertions on WUI-1 remain isolated from the POST test.
   execFileSync("node", [nativeBin, "task", "create", "WUI-1", "--title", "Web UI browser test task one",
     "--status", "todo", "--body", VALID_SECTIONS], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
   execFileSync("node", [nativeBin, "task", "create", "WUI-2", "--title", "Web UI browser test task two (done)",
     "--status", "done", "--body", VALID_SECTIONS], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+  });
+  execFileSync("node", [nativeBin, "task", "create", "WUI-ACT", "--title", "Web UI action trigger test task",
+    "--status", "todo", "--body", VALID_SECTIONS], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
 
@@ -127,6 +186,13 @@ async function main() {
 
   const port = 47180 + (process.pid % 1000);
   const originalCwd = process.cwd();
+  // QC-002 (iteration 2): set QUAY_ACTION_MOCK_LOG before startServer() so
+  // serve.js's action route routes deliverTrigger() through the mock/file-log
+  // mode — the three-way symmetry that QUAY_ACTION_MOCK_LOG was designed for
+  // (QN-042/DIR-009). The env var is restored in the finally block so we do
+  // not pollute process.env for later tests.
+  const prevMockLog = process.env.QUAY_ACTION_MOCK_LOG;
+  process.env.QUAY_ACTION_MOCK_LOG = mockLogPath;
   let server;
   try {
     process.chdir(workspaceRoot);
@@ -239,18 +305,68 @@ async function main() {
     assert(/charset=utf-8/i.test(detail1.headers["content-type"] || ""),
       `GET /task/WUI-1 Content-Type declares charset=utf-8 (got "${detail1.headers["content-type"]}")`);
 
+    // ── POST /task/:id/action/:actionId → 302 redirect (QC-002) ─────────────
+    // Browser-automation verification (playwright MCP, iteration 2, 2026-07-16):
+    //   Navigated to GET /task/ACT-1 (todo); clicked "Advance" button.
+    //   Browser followed 302 → GET /task/ACT-1; final URL and title unchanged.
+    //   Mock log record written with channel="task-ACT-1", payload/taskId/status/skill.
+    //
+    // This committed test mechanically guards:
+    //   1. The 302 status and Location header (redirect to /task/<id>)
+    //   2. The mock log file is created and contains a valid JSON record
+    //   3. The record has the correct channel, taskId, and status fields
+    //
+    // QUAY_ACTION_MOCK_LOG is set in process.env before startServer() (above),
+    // so serve.js reads it from process.env on each POST and routes through
+    // the deterministic file-log mode. No live manda daemon required.
+    const actionPost = await post(port, "/task/WUI-ACT/action/advance");
+    assert(actionPost.status === 302,
+      `POST /task/WUI-ACT/action/advance returns 302 (got ${actionPost.status})`);
+    assert(actionPost.headers.location === "/task/WUI-ACT",
+      `POST redirect Location: /task/WUI-ACT (got "${actionPost.headers.location}")`);
+
+    // Mock log verification: the record must exist and be valid JSON with the
+    // expected fields (same structure confirmed in the playwright MCP live run).
+    const mockLogExists = fs.existsSync(mockLogPath);
+    assert(mockLogExists, `mock log file created at ${mockLogPath}`);
+    if (mockLogExists) {
+      const lines = fs.readFileSync(mockLogPath, "utf8").trim().split("\n").filter(Boolean);
+      assert(lines.length >= 1, "mock log contains at least one delivery record");
+      if (lines.length >= 1) {
+        let record;
+        let parseOk = false;
+        try { record = JSON.parse(lines[lines.length - 1]); parseOk = true; } catch {}
+        assert(parseOk, "mock log last line is valid JSON");
+        if (parseOk) {
+          assert(record.channel === "task-WUI-ACT",
+            `mock log record channel is "task-WUI-ACT" (got "${record.channel}")`);
+          assert(record.taskId === "WUI-ACT",
+            `mock log record taskId is "WUI-ACT" (got "${record.taskId}")`);
+          assert(record.status === "todo",
+            `mock log record status is "todo" (got "${record.status}")`);
+          assert(typeof record.payload === "string" && record.payload.length > 0,
+            "mock log record payload is a non-empty string");
+          assert(typeof record.timestamp === "string" && record.timestamp.length > 0,
+            "mock log record has a non-empty ISO-8601 timestamp");
+        }
+      }
+    }
+
   } finally {
     if (server) {
       server.close();
       if (server.client) await server.client.close();
     }
     process.chdir(originalCwd);
+    // Restore QUAY_ACTION_MOCK_LOG env var (QC-002: set before startServer).
+    if (prevMockLog === undefined) delete process.env.QUAY_ACTION_MOCK_LOG;
+    else process.env.QUAY_ACTION_MOCK_LOG = prevMockLog;
     fs.rmSync(tasksDir, { recursive: true, force: true });
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 
   console.log(failures === 0
-    ? "\nAll QC-001 web-ui-browser regression tests passed."
+    ? "\nAll QC-001/QC-002 web-ui-browser regression tests passed."
     : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
