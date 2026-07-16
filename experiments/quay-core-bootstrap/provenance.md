@@ -62,33 +62,25 @@ V_meta     = completeness × effectiveness × reusability × validation
 See `experiments/quay-core-bootstrap/iterations/iteration-0.md` for the
 full per-factor evidence, re-trigger checks, and convergence assessment.
 
+## Entry format norm (DIR-002, iteration 2)
+
+Per DIR-002 (2026-07-16): entries must be terse. Each task entry contains:
+task id, provenance triple, σ_QC delta, and a one-line pointer to the
+relevant `iterations/iteration-N.md` or `audits/iteration-N-adjudicate.md`.
+Full derivation stays in the iteration report. Size limit: 1,500 lines; run
+`wc -l experiments/quay-core-bootstrap/provenance.md` each iteration as §0
+precondition — compact if over limit (see DIR-002 for procedure).
+
 ## Task entries
 
-| Task | Title | author_by | execute_by | gate_by | σ contribution |
-|------|-------|-----------|------------|---------|----------------|
-| QC-001 | Write browser-automation tests for Web UI pages | seed | seed | seed | 0/1 (seed, excluded from σ_QC numerator) |
+| Task | Iteration | author_by | execute_by | gate_by | σ contribution | V_instance lift |
+|------|-----------|-----------|------------|---------|----------------|-----------------|
+| QC-001 | 1 (2026-07-16) | seed | seed | seed | 0/1 | web_ui_verification 0.0 → 0.5 |
+| QC-002 | 2 (2026-07-16) | seed | seed | seed | 0/2 | web_ui_verification 0.5 → 1.0; action_delivery_mode 0.5 → 1.0 |
 
-**σ_QC after iteration 1**: 0/1 (QC-001 has seed provenance throughout —
-authored, executed, and gated by the iteration-1 seed session, not through
-`quay:author` / `quay:execute` native Skills). Per protocol §6: seed-provenance
-tasks increment the denominator but not the numerator. The task's real value is
-the V_instance lift (web_ui_verification 0.0 → 0.5), not σ credit.
+**σ_QC**: 0/2. Both tasks are seed provenance — excluded from σ_QC numerator.
+**Inherited floor**: σ_strict = 0.8493 (experiment 1's final value — context only).
 
-**Inherited floor**: σ_strict = 0.8493 (experiment 1's final value — noted
-separately, not substituted for σ_QC).
-
-### QC-001 detail
-
-- **Iteration**: 1 (2026-07-16)
-- **Work**: Created `packages/quay/test/web-ui-browser.test.mjs` — 26
-  structural assertions covering GET / (task list), GET /task/:id (detail,
-  todo + done negative control), GET /task/:nonexistent (404). Live
-  browser-automation verification via playwright MCP tools confirmed rendering
-  of all three page types; observations recorded verbatim in the test file's
-  own header.
-- **Test count**: 29 pass, 0 fail after commit (was 28).
-- **V_instance lift**: web_ui_verification 0.0 → 0.5 (GET / and GET /task/:id
-  both covered, per the 0.5 rubric in ITERATION-PROMPTS.md). POST action
-  trigger not covered by browser-automation yet → not at 1.0.
-- **G3 audit**: dispatched as out-of-band adjudicate pass; verdict in
-  `experiments/quay-core-bootstrap/audits/iteration-1-adjudicate.md`.
+See each iteration's report for full per-factor evidence:
+- QC-001: `experiments/quay-core-bootstrap/iterations/iteration-1.md` §5/§7
+- QC-002: `experiments/quay-core-bootstrap/iterations/iteration-2.md` §5/§7
