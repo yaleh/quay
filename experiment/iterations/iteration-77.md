@@ -488,3 +488,66 @@ an iteration-executor session, only a same-shape-but-ambiguous result.
   this execution context).
 - No production or test source files touched (`git status --short` clean
   throughout).
+
+## Addendum (2026-07-16, added by iteration 78, per DIR-020 action 1) — attribution now resolved externally; the "inconclusive" verdict above was the correct call given this iteration's own visibility
+
+**Who is asserting what, kept distinct, per DIR-020's own explicit
+instruction not to blur this**:
+
+- **This iteration (77) itself** verified, from inside its own
+  execution context, only what §5/§5.1 above state: a real
+  `agent.spawn` cap-request (id `18c2c14da8cd87e3`) was posted to
+  channel `cord` at T=1784200941.309 UTC and a matching, correct result
+  (`{"value":"leaf alive"}`) arrived at T=1784200967.593 UTC (26.28s),
+  with **no independently attributable responder** — this iteration had
+  no visibility into the top-level orchestrator session's own
+  transcript/notification queue from its own subagent execution context,
+  and said so explicitly rather than rounding the result up to "success."
+  This remains true and unretracted; nothing below overturns iteration
+  77's own honest scope limitation.
+- **The human**, via DIR-020
+  (`experiment/directives/archive/DIR-020-self-deadlock-in-manda-agent-
+  synchronous-same-session-caller-broker.md`), reconstructed the
+  orchestrator session's (PID 3176586, session id
+  `f0c763bc-9823-49e5-a3d4-7c818af450c5`) own cross-session activity via
+  meta-cc transcript analysis, independent of anything iteration 77 could
+  see from inside its own context. That reconstruction places, at
+  11:22:29 UTC, the orchestrator's own top-level turn (free at that
+  moment, since iteration 77 was running elsewhere as a background
+  subagent per DIR-015) receiving the live `cord`-monitor notification for
+  this exact request, spawning a background leaf ("Iteration-77 manda
+  trial leaf"), and calling `mcp__plugin_manda_manda__respond(id=
+  "18c2c14da8cd87e3", ...)` successfully at 11:22:42 UTC — a clean,
+  well-within-timeout round trip, **not** a self-deadlock (the
+  orchestrator's own top-level turn was not blocked at that moment; only
+  its *later*, separate 11:27-11:29 attempt, discussed in DIR-020 action
+  2 below, exhibits the self-deadlock pattern).
+- **This iteration (78)** independently corroborates DIR-020's timeline
+  is internally consistent with iteration 77's own already-recorded
+  facts (same request id, same timestamps within rounding, same
+  "no timeout, real result" outcome) — but this iteration did **not**
+  itself re-derive the orchestrator's transcript from scratch (no fresh
+  meta-cc query was re-run for this addendum); it is relying on DIR-020's
+  own cited reconstruction plus the exact match against iteration 77's
+  own already-independently-recorded id/timestamp evidence, which is a
+  legitimate, checkable form of corroboration but not a wholly separate
+  re-derivation.
+
+**Conclusion**: iteration 77's manda trial is now understood, per
+DIR-020's cross-session evidence, to have been a genuine, clean,
+timeout-free success serviced by the orchestrator's own session acting as
+`cord`'s broker — but this attribution comes from the human's
+cross-session reconstruction (DIR-020), corroborated by matching the
+orchestrator's own transcript against iteration 77's independently-logged
+request id/timestamps, not from anything iteration 77 itself could see or
+verify. Iteration 77's own "inconclusive" framing (§5.1) was, and remains,
+the correct, honest verdict **given its own vantage point** — a
+background subagent execution context genuinely has no visibility into
+its dispatching top-level session's own transcript, and iteration 77 was
+right not to claim a success it could not itself attribute. This is not a
+correction of an error; it is an external, later-arriving piece of
+evidence that resolves an attribution gap iteration 77 correctly flagged
+as unresolved rather than papered over. No V_instance/V_meta factor moves
+as a result of this addendum (see iteration 78's own report, §8, for the
+factor-by-factor check) — this is a provenance/attribution correction to
+a diagnostic finding, not new production or methodology work.

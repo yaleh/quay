@@ -10656,3 +10656,85 @@ coverage additions require no manda dispatch).
 Full detail: `experiment/iterations/iteration-76.md`. Independent
 out-of-band audit: to be dispatched separately by the top-level
 orchestrator (not performed by this session, per standing G3 discipline).
+
+## Iteration 78: apply DIR-020 (self-deadlock finding + iteration-77 attribution correction) and re-resolve DIR-019 — process/protocol work, no V-factor movement, no new task
+
+This iteration's work was applying two pending directives
+(`experiment/directives/pending/DIR-019-*.md` and `DIR-020-*.md`, both
+present at this iteration's mandatory first-step `ls
+experiment/directives/pending/` check) — not authoring, executing, or
+gating a native task. No `tasks/QN-*.md` file was created or modified;
+the task count remains **70**, and no provenance triple changed. σ_strict
+is therefore **unchanged**: 62/70 = **0.8857**.
+
+**DIR-020 action 1**: added a dated addendum to
+`experiment/iterations/iteration-77.md` (append-only, original body
+untouched) recording that iteration 77's own manda trial is now
+understood, per DIR-020's cross-session meta-cc reconstruction of the
+orchestrator session's own transcript, to have been a genuine, clean,
+timeout-free success serviced by the orchestrator's own session acting as
+`cord`'s broker — while being explicit that this attribution comes from
+the human's external reconstruction (corroborated by matching against
+iteration 77's own independently-logged request id/timestamps), not from
+anything iteration 77 itself could verify from its own execution context.
+Iteration 77's own "inconclusive" verdict is confirmed correct **given
+its own vantage point** — not overturned as an error.
+
+**DIR-020 action 2**: codified a hard, mechanically-checkable rule in
+`experiment/ITERATION-PROMPTS.md` §0b — a manda depth-1 caller must never
+be issued synchronously from the same session that owns the target
+channel's bound broker; if caller and broker are the same session, the
+caller half must be dispatched as a background subagent
+(`run_in_background=true`). Explicitly cites and generalizes the
+DIR-002/DIR-003 precedent (iterations 8-12) rather than treating this as
+a new finding.
+
+**DIR-020 action 3 / DIR-019's own open question**: re-examined, not
+rubber-stamped. DIR-020 itself asserted "three independent clean
+successes... two in the human's session." Direct re-reading of DIR-019's
+own Finding text shows it documents exactly **one** successful round trip
+in the human's session (PID 3526382), preceded by two *failures* (both
+explained by broker-unavailability, not daemon defect) — DIR-020
+overcounts by one. Corrected tally: two independent clean successes (one
+human-session per DIR-019, one now-attributed iteration-77 per DIR-020)
+plus three explained non-daemon-defect failures (two broker-unavailability,
+one self-deadlock). This corrected count still supports resolving in
+favor of hypothesis (a) (broker-availability artifact only, no genuine
+daemon-side SSE defect) over (b) — every failure on record now has a
+specific non-daemon explanation, and every live-broker trial has
+succeeded without the `MCP error -32603` SSE-timeout signature. DIR-019
+archived on this corrected basis; DIR-020 archived with a Resolution
+noting the correction made to its own action-3 reasoning.
+
+**V-factor check, against exact §5.1/§5.2 defining language**:
+- `V_instance = skeleton × abi_symmetry × gate_correctness ×
+  skill_convergence`: `skill_convergence` is defined narrowly as
+  "`quay:author`/`quay:execute` drive real tasks to a green gate within
+  bounded rounds" — this iteration touched neither Skill nor any task's
+  gate; no support for movement.
+- `V_meta = completeness × effectiveness × reusability × validation`:
+  `effectiveness` is "speedup building feature N+1 via quay-native" — no
+  marginal feature was built. `validation` is "σ and the provenance log,
+  corroborated by out-of-band audit" — σ is unchanged (no new task
+  closed this iteration); no support for movement. `completeness` and
+  `reusability` are untouched by process/precondition codification per
+  established precedent (iteration 65).
+
+```
+V_instance = 0.83 × 0.96 × 0.76 × 0.96 = 0.5813  (unchanged)
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, honest **zero-V-movement**
+increment (M_77 = M_78 in the narrow sense that no Skill/gate/ABI content
+changed; A_77 = A_78, no agent capability changed) — the two directives'
+own content is entirely process/protocol-layer (a hard precondition rule,
+a provenance-attribution correction, and a directive-resolution
+re-examination), not instance-layer feature work. `completeness`,
+`effectiveness`, and `reusability` remain the most stalled V_meta
+factors; `effectiveness` flat since iteration 23 (net), `reusability`
+flat since iteration 25 (net).
+
+Full detail: `experiment/iterations/iteration-78.md`. Independent
+out-of-band audit: to be dispatched separately by the top-level
+orchestrator (not performed by this session, per standing G3 discipline).

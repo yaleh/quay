@@ -168,4 +168,68 @@ Left `pending`, not moved to `archive/`, since neither the SOP-adoption
 action item nor the live-broker-trial action item is fully and cleanly
 discharged by this iteration.
 
-<!-- ## Resolution: to be filled in by the iteration that fully resolves this directive -->
+## Resolution
+
+- **resolved_by:** iteration 78 (applying DIR-020's actions 1-3, which
+  concern this same underlying finding)
+- **outcome:** applied — archived with the open question resolved in
+  favor of hypothesis (a) (broker-availability artifact only, no evidence
+  of a genuine daemon-side defect), on a **corrected** evidence count,
+  not the exact count DIR-020 itself proposed
+- **evidence:** `experiment/iterations/iteration-78.md` §5/§8;
+  `experiment/iterations/iteration-77.md`'s Addendum (added by iteration
+  78); `experiment/directives/archive/DIR-020-self-deadlock-in-manda-
+  agent-synchronous-same-session-caller-broker.md`'s own Resolution
+
+**Action 2 (re-run/distinguish the two hypotheses) — resolved, with an
+honest correction to DIR-020's own count**: DIR-020 proposed resolving
+this in favor of (a) on the claim of "three independent clean
+successes... two in the human's session, one newly attributed to the
+orchestrator's own iteration-77 trial." Iteration 78 re-examined this
+claim directly against this file's own Finding text (the sole source for
+the "human's session" evidence) and found DIR-020 **overcounts by one**:
+this file's Finding describes exactly **one** successful round trip in
+the human's driving session (PID 3526382; T1=1784200148.979,
+T2=1784200170.579, ~21.6s, `leaf alive` exact match), preceded by **two
+failures** in that same session (both explained by the broker not
+actively watching in real time, not by daemon misbehavior) — not two
+successes. No other repo artifact (`experiment/iterations/`,
+`experiment/directives/`) records a second success from PID 3526382.
+
+The corrected count is: **two** independent clean successes exist (one in
+the human's session, per this file's own Finding; one now attributed to
+the orchestrator's own iteration-77 trial, per DIR-020's cross-session
+reconstruction — see `experiment/iterations/iteration-77.md`'s Addendum),
+plus **three** explained failures with non-daemon-defect root causes (two
+broker-unavailability failures in the human's own session, documented in
+this file's own Finding; one self-deadlock failure in the orchestrator's
+11:27-11:29 UTC attempt, per DIR-020). This corrected count still
+supports resolving in favor of hypothesis (a) over (b): every genuine
+failure on record now has a specific, non-daemon explanation (broker not
+watching, or a structural same-session deadlock), and every trial run
+under a verified-live, actually-watching broker has succeeded without
+reproducing the `MCP error -32603` SSE-timeout signature. This is a
+narrower, more defensible basis for closing (b) than DIR-020's own
+overcounted framing, but it reaches the same directional conclusion —
+iteration 78 is making this call on its own re-examination of the
+evidence chain, not by deference to DIR-020's exact count.
+
+**Action 1 (adopt the two preconditions as SOP)**: already adopted, with
+the honest scope caveat iteration 77 itself recorded (a background-
+subagent execution context cannot enforce daemon-before-session ordering,
+only verify it after the fact) — unchanged by this resolution.
+
+**Action 3 (use the confirmed method for real workflow needs)**: remains
+conditional guidance under `experiment/ITERATION-PROMPTS.md` §0b, per its
+own standing caveats (reliability must be demonstrated per use, never
+silently load-bearing for G3). No real production/workflow need for
+nested-subagent capability-borrowing has arisen in this experiment since
+iteration 77; this action item is not force-exercised here.
+
+**Hard rule now codified going forward (via DIR-020, applied
+simultaneously)**: `experiment/ITERATION-PROMPTS.md` §0b now contains a
+mechanically-checkable rule — a manda depth-1 caller must never be issued
+synchronously from the same session that owns the target channel's bound
+broker — closing the specific mechanism that produced the one
+self-deadlock failure in this evidence chain. See DIR-020's own
+Resolution for the full text and precedent citation.

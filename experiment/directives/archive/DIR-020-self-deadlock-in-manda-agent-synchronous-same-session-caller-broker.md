@@ -91,4 +91,73 @@ timeout window.
    deadlock). DIR-019 may be archived once this directive's action 2 is
    applied.
 
-<!-- ## Resolution: to be filled in by the iteration that applies this directive -->
+## Resolution
+
+- **resolved_by:** iteration 78
+- **outcome:** applied, all 3 requested actions — with one honest
+  correction to this directive's own action-3 reasoning (see below)
+- **evidence:** `experiment/iterations/iteration-77.md`'s Addendum;
+  `experiment/ITERATION-PROMPTS.md` §0b's new "Hard rule" subsection;
+  `experiment/iterations/iteration-78.md` §5-§8
+
+**Action 1 (correct iteration-77.md's record via a dated addendum)** —
+done. `experiment/iterations/iteration-77.md` now has an "Addendum
+(2026-07-16, added by iteration 78, per DIR-020 action 1)" section
+appended after its original body (not rewritten in place), recording:
+who asserts what (iteration 77 itself verified only the request-id/
+timestamp/result triple with no responder attribution; the human, via
+this directive's own cross-session meta-cc reconstruction, supplies the
+attribution to the orchestrator session's own top-level turn acting as
+`cord`'s broker), and stating plainly that iteration 77's own
+"inconclusive" verdict was the correct, honest call **given iteration
+77's own vantage point** — a background-subagent execution context
+genuinely cannot see its dispatching top-level session's own transcript.
+This is not framed as "iteration 77 was wrong" — it is framed as "an
+external, later-arriving piece of evidence resolves an attribution gap
+iteration 77 correctly flagged as unresolved."
+
+**Action 2 (codify the hard rule)** — done.
+`experiment/ITERATION-PROMPTS.md` §0b now has a "Hard rule: depth-1
+caller must never be synchronous same-session-as-broker (added by
+DIR-020, iteration 78)" subsection: a mechanical check (identify the
+target channel's bound broker session; if the about-to-dispatch session
+is the same session, the depth-1 call MUST be wrapped in
+`run_in_background=true`), plus the "why this is structural, not
+probabilistic" reasoning, plus an explicit citation of the DIR-002/
+DIR-003 precedent (iterations 8-12) this generalizes, quoted verbatim
+from DIR-002's own Re-confirmation section. Placed in §0b (the existing
+manda nested-subagent guidance section) rather than a new section, per
+the task's own instruction to extend existing G6/manda-precondition
+material rather than duplicate it.
+
+**Action 3 (resolve DIR-019's open hypothesis question)** — applied, with
+an honest correction to this directive's own count, not a rubber-stamp of
+it as originally worded. This directive's own text asserted "three
+independent clean successes... two in the human's session, one newly
+attributed to the orchestrator's own iteration-77 trial." Iteration 78
+re-examined DIR-019's own Finding directly (the sole source for the
+"human's session" claim) and found it documents exactly **one**
+successful round trip in the human's session (PID 3526382, ~21.6s,
+T1/T2 timestamps given), preceded by **two failures** in that same
+session — not two successes. This directive's "two in the human's
+session" claim over-counts by one. The corrected tally — two independent
+clean successes (one human-session, one now-attributed iteration-77) plus
+three explained non-daemon-defect failures (two broker-unavailability in
+the human's session, one self-deadlock in the orchestrator's own
+11:27-11:29 attempt) — still supports this directive's own directional
+conclusion (resolve in favor of hypothesis (a), no evidence of a genuine
+daemon-side SSE defect), and DIR-019 has been archived on that corrected
+basis. See `experiment/directives/archive/DIR-019-use-confirmed-method-
+to-verify-and-use-manda-nested-subagent.md`'s own Resolution section for
+the full corrected reasoning. This correction does not change this
+directive's own bottom-line request (archive DIR-019 once action 2 is
+applied) — it changes the precision of the count relied upon to grant
+it, which iteration 78 judged necessary to state honestly rather than
+silently accept.
+
+No V_instance or V_meta factor movement is claimed for this directive's
+resolution — this is process/methodology codification (a hard
+precondition rule + a provenance-attribution correction), not new
+production or task-closing work. See iteration 78's own report §7-§8 for
+the full factor-by-factor check against the exact §5.1/§5.2 defining
+language.

@@ -314,6 +314,71 @@ read as touching, DIR-015 action 3's permanent retirement of manda
 nested-subagent use for G3 audit dispatch specifically — that boundary
 remains exactly as stated in "§5 OUT-OF-BAND AUDIT" above, unmodified.
 
+### Hard rule: depth-1 caller must never be synchronous same-session-as-broker (added by DIR-020, iteration 78)
+
+**Rule (mechanically checkable, mandatory for every manda nested-subagent
+use in this project — iteration subagents, the out-of-band audit
+dispatch's own precondition checks, and the orchestrator's own top-level
+turn alike)**: a manda depth-1 caller
+(`mcp__plugin_manda_manda__Agent`/`Dispatch`/`request`) must **never** be
+issued synchronously from the same session that owns the bound
+broker/monitor for the target channel. If the caller and the broker are
+the same session, the caller half **must** itself be dispatched as a
+separate background subagent (`run_in_background=true`) so the session's
+own top-level turn stays free to service the resulting cap-request.
+
+**Mechanical check, before any depth-1 call**:
+```
+1. Identify the target channel's bound broker session — the process
+   whose descendant tree contains the live `manda monitor <name> --root .`
+   for that channel (same ps-based procedure as the G6 operational check
+   above).
+2. Identify the session about to issue the depth-1 call.
+3. If (1) and (2) are the SAME session: the depth-1 call MUST be wrapped
+   in a background dispatch (`run_in_background=true`) — never issued
+   directly/synchronously in that session's own top-level turn. If (1)
+   and (2) differ, a synchronous call is not structurally deadlocked by
+   this specific mechanism (though other timeout risks — an inactive
+   broker, an unfavorable daemon state — still apply per §0b's own
+   caveats above).
+```
+
+**Why this is a hard rule, not situational guidance**: a synchronous
+depth-1 call blocks the issuing session's own turn-processing for the
+call's entire duration. If that same session is also the live monitor
+process's parent — the one thing that has to remain free to observe and
+answer the very cap-request the call itself generates — the call is
+guaranteed to time out at its own deadline regardless of daemon
+correctness, precondition state, or broker liveness otherwise. This is
+not a probabilistic risk to be mitigated with a longer timeout; it is a
+structural impossibility, the same shape as a single thread trying to
+`join()` on itself.
+
+**Precedent this generalizes (read before treating this as a new
+finding)**: this is the same failure class DIR-002/DIR-003
+(`experiment/directives/archive/DIR-002-manda-agent-dispatch-live-
+attempt.md`, `experiment/directives/archive/DIR-003-human-confirmation-
+dir-001-002-genuine.md`), iterations 8-12, already diagnosed once, in the
+human's own words (DIR-002's Re-confirmation section, quoted verbatim):
+"a synchronous `mcp__plugin_manda_manda__Agent` call... hit a real,
+reproducible 30-second single-session self-dispatch timeout (a
+**structural deadlock** — the session cannot synchronously wait on its
+own spawned subagent — not a missing capability)." DIR-020
+(`experiment/directives/archive/DIR-020-self-deadlock-in-manda-agent-
+synchronous-same-session-caller-broker.md`, iteration 78) found this same
+failure class had recurred, live, in this experiment's own orchestrator
+session on 2026-07-16 (11:27:05-11:29:03 UTC: a synchronous
+`Agent(to="cord", timeout=90)` call, issued directly from the
+orchestrator's own top-level turn while that same session also owned the
+`cord` broker/monitor, timed out at exactly the 90s deadline it set for
+itself) — codifying it here as a standing, mechanically-checked
+precondition is meant to prevent a third recurrence, not to introduce a
+new hypothesis. This rule does not reopen or contradict §0a's own
+non-blocking-dispatch requirement for the iteration-executing and G3
+audit subagents — it is a narrower, additional check specific to the
+*manda depth-1 call itself*, applicable any time such a call is about to
+be issued, by whichever session is about to issue it.
+
 ---
 
 ## Iteration 0: Baseline — the v0 walking skeleton (seed-driven, σ=0)
