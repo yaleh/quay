@@ -89,3 +89,18 @@ feature/credit work, and both recorded plainly regardless of outcome.
 ## Resolution
 
 <!-- Filled in by whichever iteration applies this directive. -->
+
+## Progress note (added 2026-07-16, iteration 72)
+
+Read in full this iteration. **Deferred, not applied** — iteration 72's
+assigned scope was narrowly "apply DIR-016" (extend DIR-015's
+non-blocking-dispatch requirement to the G3 audit subagent); applying
+DIR-017 in the same iteration (a separate §0b amendment plus, per its own
+N=3 window, an eventual bounded manda nested-subagent trial) would violate
+this experiment's standing one-action-one-proof discipline and risks
+leaving DIR-016 itself only partially applied. This is iteration 72; DIR-017's own
+suggested deadline is "by iteration 73 at the latest" — this deferral does
+not yet exceed that window, but the very next iteration (73) is the
+deadline itself and must explicitly apply DIR-017 or explicitly extend/
+reject its window with reasoning, not silently let it lapse. Still
+`status: pending`. No V-factor movement is implied by this deferral.

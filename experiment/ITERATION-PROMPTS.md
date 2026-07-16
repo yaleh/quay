@@ -35,12 +35,15 @@
     it read; each must reach an explicit applied/deferred/rejected outcome
     this iteration, recorded in this iteration's own report — see
     experiment/directives/README.md for the full protocol
-[ ] (orchestrator-only, added by DIR-015, iteration 70) the iteration-
-    executing subagent for THIS iteration was dispatched non-blockingly
-    (`run_in_background=true`) — see "§0a. Non-blocking iteration-subagent
-    dispatch" immediately below. This item is checked and recorded by the
-    top-level orchestrator, not by the executing subagent itself, which
-    cannot observe its own dispatch mode from inside its own context.
+[ ] (orchestrator-only, added by DIR-015, iteration 70; extended by
+    DIR-016, iteration 72) BOTH the iteration-executing subagent AND the
+    §9/out-of-band G3 audit subagent for THIS cycle were each dispatched
+    non-blockingly (`run_in_background=true`) — see "§0a. Non-blocking
+    dispatch — iteration-executing subagent AND the G3 audit subagent"
+    immediately below. This item is checked and recorded TWICE by the
+    top-level orchestrator (once per dispatch), not by either subagent
+    itself — neither can observe the orchestrator's own dispatch-mode
+    choice from inside its own context.
 ```
 
 G6 makes the manda check mandatory, not optional background — if the daemon is not live, stop and arm it before doing anything else.
@@ -94,60 +97,130 @@ being conflated.
 
 ---
 
-## §0a. Non-blocking iteration-subagent dispatch (added by DIR-015, iteration 70)
+## §0a. Non-blocking dispatch — iteration-executing subagent AND the G3 audit subagent (added by DIR-015, iteration 70; extended by DIR-016, iteration 72)
 
-**Requirement**: the top-level orchestrator MUST dispatch the subagent
-that executes each iteration's work **non-blockingly**
-(`run_in_background=true` for the platform's native `Agent`/Task tool,
-or manda's own non-blocking dispatch mode if the iteration itself is
-driven via manda) — never in foreground/synchronous blocking mode.
+**Requirement**: the top-level orchestrator MUST dispatch **every**
+subagent it invokes as part of running an iteration cycle
+**non-blockingly** (`run_in_background=true` for the platform's native
+`Agent`/Task tool, or manda's own non-blocking dispatch mode if the
+iteration itself is driven via manda) — never in foreground/synchronous
+blocking mode. This covers, explicitly and separately, **both**:
+  1. the **iteration-executing subagent** (the original DIR-015 scope,
+     applied iteration 70), and
+  2. the **§9/out-of-band G3 audit subagent** (extended by DIR-016,
+     applied iteration 72) — the independent `adjudicate` pass dispatched
+     after the iteration subagent completes.
 
-**Load-bearing evidence (DIR-015's Finding, cite verbatim)**: this
-requirement is not speculative — it is the direct, concrete explanation
-for a previously-unexplained standing failure. DIR-011's Finding
-(`experiment/directives/archive/DIR-011-manda-agent-live-verified-tool-
-name-latency.md`) established that the manda `Agent`/cap-request round
-trip only completes when **both** the requester and the broker session
-dispatch non-blockingly (`run_in_background=true` on both sides) — a
-foreground-blocked dispatch on either side produces a false timeout.
-DIR-015 observed, from direct inspection of the driving session (PID
-3176586, pts/6), that this session dispatches each iteration's executing
-subagent **in the foreground** — i.e. it blocks synchronously, waiting
-on the iteration subagent's `Agent`/Task call for the iteration's entire
-duration. This gives a concrete, sufficient mechanism for iteration 68's
-own independently-reached finding (resolving DIR-014 action 3): even
-with the monitor-attachment precondition fully satisfied and the
-cap-request confirmed correctly targeted, the manda `Agent`/cap-request
-mechanism still timed out — because a session permanently blocked on its
-own iteration subagent cannot, by construction, notice or service a
-concurrent `cap-requests-*` event at the same time, regardless of
-whether a `manda monitor` process is bound to it.
+Neither dispatch may be left in the platform's default synchronous mode;
+both are equally in scope of this requirement.
+
+**Load-bearing evidence for the original (iteration-subagent) scope
+(DIR-015's Finding)**: this requirement is not speculative — it is the
+direct, concrete explanation for a previously-unexplained standing
+failure. DIR-011's Finding (`experiment/directives/archive/DIR-011-manda-
+agent-live-verified-tool-name-latency.md`) established that the manda
+`Agent`/cap-request round trip only completes when **both** the
+requester and the broker session dispatch non-blockingly
+(`run_in_background=true` on both sides) — a foreground-blocked dispatch
+on either side produces a false timeout. DIR-015 observed, from direct
+inspection of the driving session (PID 3176586, pts/6), that this session
+dispatches each iteration's executing subagent **in the foreground** —
+i.e. it blocks synchronously, waiting on the iteration subagent's
+`Agent`/Task call for the iteration's entire duration. This gives a
+concrete, sufficient mechanism for iteration 68's own independently-
+reached finding (resolving DIR-014 action 3): even with the
+monitor-attachment precondition fully satisfied and the cap-request
+confirmed correctly targeted, the manda `Agent`/cap-request mechanism
+still timed out — because a session permanently blocked on its own
+iteration subagent cannot, by construction, notice or service a
+concurrent `cap-requests-*` event at the same time, regardless of whether
+a `manda monitor` process is bound to it.
+
+**Load-bearing evidence for the extension to the G3 audit subagent
+(DIR-016's Finding, quoted verbatim)**: DIR-016
+(`experiment/directives/archive/DIR-016-extend-non-blocking-dispatch-to-
+g3-audit-subagent.md`) found that iteration 70's own execution, while
+correctly applying the iteration-subagent half of DIR-015, left the very
+next dispatch in the same turn foreground-blocked:
+
+> "This conversation's human directly observed the driving session (PID
+> 3176586, pts/6) execute iteration 70 end-to-end: the iteration-executing
+> subagent was dispatched via `Agent(..., run_in_background=true)`
+> ("Backgrounded agent... Waiting for 1 background agent to finish"),
+> exactly as DIR-015 action 1 requires, and completed cleanly with no
+> self-audit violation (contrast iteration 69)... **But the very next
+> dispatch in the same turn — the mandatory G3 out-of-band audit of
+> iteration 70's own work — was made in the foreground.** The human's
+> transcript shows `Agent(Iteration 70 independent G3 audit)` with inline
+> tool-use output streaming synchronously in the same message block, not
+> the `Backgrounded agent (↓ to manage · ctrl+o to expand)` /
+> `✻ Waiting for 1 background agent to finish` pattern iteration 70's own
+> dispatch used one step earlier. This audit did complete (commit
+> `b799002`... so nothing failed this time — but the driving session was,
+> for the audit's full duration, back in exactly the blocked state
+> DIR-015 was written to eliminate."
+
+DIR-016's Finding continues: "This is the same class of gap DIR-015
+itself closed for the iteration dispatch, left open one call later...
+That reasoning is not specific to *which* subagent is being dispatched —
+it applies identically to the audit-dispatch call. Leaving the audit
+dispatch foreground-blocked means the driving session still cannot
+service a concurrent `cap-requests-*` event (or do anything else useful)
+for the audit's entire duration, undermining DIR-015 action 1's stated
+purpose for roughly half of every iteration's total dispatch time (one
+iteration dispatch + one audit dispatch per cycle)." This is the same
+DIR-011-derived reasoning DIR-015 itself relied on, applied one dispatch
+call later in the same cycle — mirroring exactly how DIR-015 itself cited
+DIR-011 as its own load-bearing evidence.
 
 **Orchestrator-only confirmation step (added by DIR-015 action 2,
-alongside DIR-014's G6 check)**: after dispatching the iteration-executing
-subagent, the driving/orchestrating session MUST confirm, in its own
-record — not the executing subagent's report, which cannot verify this
-about itself from inside its own context — that it is not itself blocked
-following that dispatch. This is a mechanically checkable claim, not an
-assertion:
+alongside DIR-014's G6 check; extended by DIR-016 action 2, iteration 72,
+to apply separately to the audit dispatch)**: after dispatching the
+iteration-executing subagent, **and again after dispatching the G3 audit
+subagent**, the driving/orchestrating session MUST confirm, in its own
+record — not either dispatched subagent's report, neither of which can
+verify this about itself from inside its own context — that it is not
+itself blocked following that dispatch. This is a mechanically checkable
+claim, not an assertion, checked **twice per cycle, once per dispatch**:
   - cite the actual dispatch call's `run_in_background` argument value
-    used for this iteration's subagent invocation, and/or
+    used for this iteration's subagent invocation, and separately for the
+    audit subagent's invocation, and/or
   - demonstrate the orchestrator can still respond to a concurrent probe
     (e.g. a manda cap-request, a status check, a user message) while the
-    iteration subagent is still running.
+    iteration subagent is still running, and separately while the audit
+    subagent is still running.
 
-**Why this is orchestrator-scoped, not subagent-scoped**: an
-iteration-executing subagent has no visibility into, or control over,
-the `run_in_background` argument value the orchestrator used to dispatch
-it — that dispatch call happens in the orchestrator's own context,
-before the subagent's own context begins, and is not inspectable from
-inside the subagent's session (iteration 69 confirmed this directly when
-deferring DIR-015's application for exactly this reason). Every future
-iteration report MAY note, if the executing subagent happens to observe
-evidence bearing on this (e.g. being dispatched as part of the same
-top-level turn as other, unrelated concurrent activity), but MUST NOT
-assert or self-certify its own dispatch mode — that claim belongs
-exclusively to the orchestrator's own record.
+**Why this is orchestrator-scoped, not subagent-scoped — for both
+dispatches**: neither the iteration-executing subagent nor the G3 audit
+subagent has any visibility into, or control over, the
+`run_in_background` argument value the orchestrator used to dispatch it
+— each dispatch call happens in the orchestrator's own context, before
+the respective subagent's own context begins, and is not inspectable from
+inside either subagent's session (iteration 69 confirmed this directly
+for the iteration-subagent case when deferring DIR-015's application for
+exactly this reason; DIR-016 action 2 extends the identical logic to the
+audit subagent — an audit subagent is, in this one specific respect, no
+different from an iteration subagent: it cannot observe the orchestrator's
+own dispatch-mode choice for itself either). Every future iteration report
+MAY note, if the executing subagent happens to observe evidence bearing on
+this (e.g. being dispatched as part of the same top-level turn as other,
+unrelated concurrent activity), but MUST NOT assert or self-certify its
+own dispatch mode — that claim belongs exclusively to the orchestrator's
+own record. The same applies to whatever record accompanies the audit
+subagent's dispatch: the audit subagent's own report (e.g.
+`experiment/audits/iteration-N-adjudicate.md`) MUST NOT assert or
+self-certify its own dispatch mode either — that, too, is exclusively the
+orchestrator's own record to confirm.
+
+**Explicitly NOT reopened by this extension (DIR-016 action 3)**: this
+section governs dispatch *mode* only (`run_in_background=true` vs. the
+default synchronous mode) for the audit dispatch. It does **not** reopen,
+and must not be read as reopening, the separate, already-settled question
+of *which mechanism* performs the G3 audit dispatch — the native
+`Agent`/Task tool, unconditionally, per DIR-012/DIR-015 action 3's
+retirement of the "use manda for G3 audits" goal (see "§5. OUT-OF-BAND
+AUDIT" below). Manda nested-subagent dispatch remains permanently out of
+bounds for the audit path regardless of dispatch mode.
 
 ---
 

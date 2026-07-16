@@ -90,3 +90,19 @@ scope for any iteration so far, and the live repo state reflects that.
 ## Resolution
 
 <!-- Filled in by whichever iteration applies this directive. -->
+
+## Progress note (added 2026-07-16, iteration 72)
+
+Read in full this iteration. **Deferred, not applied** — iteration 72's
+assigned scope was narrowly "apply DIR-016"; DIR-018 is a substantially
+larger, multi-part undertaking (root README, a LICENSE choice that
+explicitly requires asking the human directly per its own action 2, a live
+CI workflow verified green on GitHub Actions, a semver bump with recorded
+rationale, and an actual `gh release create` against the live
+`yaleh/quay` remote) that should not be rushed into the same iteration as
+DIR-016 without risking an incomplete or non-live-verified partial
+CI/release state — action 3/4 of this directive explicitly require live
+verification, not assertion. Still `status: pending`. Whoever picks this
+up next should read it in full and likely split it across more than one
+iteration rather than force it into a single pass. No V-factor movement is
+implied by this deferral.
