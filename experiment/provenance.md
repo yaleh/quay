@@ -8,6 +8,38 @@ At iteration 0, **every** task is `{seed, seed, seed}` by definition (protocol
 §9): no `quay:*` Skill exists yet, so nothing can be `native`. This is the
 σ = 0 floor.
 
+## Permanent strict-exclusion set (σ_strict)
+
+Added iteration 71, as a bookkeeping fix flagged independently by iteration
+70's own report and its out-of-band audit (`experiment/audits/
+iteration-70-independent-adjudicate.md` Task 7): every honest σ_strict
+recount since iteration 69's post-hoc correction (the correction itself,
+its v2 audit, iteration 70, and iteration 70's audit) has had to re-derive
+this exact set by grepping scattered prose across the file. This section is
+the single canonical, greppable statement of it — the underlying reasoning
+below (dates to iteration 12 for QN-003/QN-004, iteration 1/0 for QN-006)
+is **not changed or reinterpreted** by adding this section; it is a
+pointer, not a new decision.
+
+**σ_strict permanently excludes the following 3 tasks, regardless of their
+`status` field:**
+
+| Task | Reason (one line) | Full reasoning |
+|---|---|---|
+| QN-003 | `status: done`, but `execute_by`'s "new implementation work" never occurred as a genuinely separate execute-side step — the described Plan work was already completed during iteration 1's authoring pass, so under the strict (non-inclusive) reading it does not qualify as a real `execute_by = native` transition. | "QN-003/QN-004 execute_by nuance" section below |
+| QN-004 | Same nuance as QN-003 (task **about** `quay:execute` itself; its Plan content was written during the authoring pass, not executed separately). | "QN-003/QN-004 execute_by nuance" section below |
+| QN-006 | `{seed, seed, seed}` — the one task driven through the full v0 loop entirely by the seed (no `quay:author`/`quay:execute` Skill existed yet); this is the permanent σ=0 floor task per protocol §9. | "Iteration 1 author_by honesty note" section below, and the iteration-0 baseline itself |
+
+This set has been stable and unrevisited since iteration 12 (QN-003/QN-004)
+and iteration 0/1 (QN-006). Every σ_strict computation in this file is
+`(# tasks done AND {author_by,execute_by,gate_by} = {native,native,native})`,
+computed as `(total done) − 3` whenever all three excluded tasks are
+themselves `status: done` (true as of iteration 69 onward — all three
+reached `done` well before iteration 69). If a future task is ever proposed
+for addition to or removal from this set, that change must be justified
+here, in this section, with its own dated rationale — not silently folded
+into a routine σ recount.
+
 ## Records (as of end of iteration 2)
 
 | task_id | title | author_by | execute_by | gate_by | status (end of iter 2) |
