@@ -3,7 +3,7 @@
 - **status:** pending
 - **created_by:** human (Yale), asserted directly in this live conversation
 - **created_at:** 2026-07-16
-- **title:** Require the experiment session to dispatch iteration-executing subagents in the background, not foreground
+- **title:** Require non-blocking iteration-subagent dispatch; broaden manda nested-subagent use to development/testing, not G3 audits
 
 ## Finding
 
@@ -16,28 +16,40 @@ iteration in the foreground** (i.e. the top-level orchestrator blocks,
 synchronously waiting on the iteration-executing subagent's `Agent`/Task
 call, rather than dispatching it with `run_in_background=true`).
 
-This is a standing blocker for DIR-012's action 3 / DIR-014's action 3
-(re-testing the manda nested-subagent mechanism for G3 audits), for the
-same reason this session's own earlier, already-completed live
-experiment established: `experiment/directives/archive/
-DIR-011-manda-agent-live-verified-tool-name-latency.md`'s Finding
-explicitly recorded, as a precondition for the manda `Agent`/cap-request
-round trip to succeed at all, that **both the requester (the subagent
-issuing the cap-request) and the broker (the session servicing it) must
-dispatch non-blockingly** — the original test scenario that motivated
-DIR-011 failed the first time specifically because a foreground-blocked
-dispatch on one side produced a false timeout, and only succeeded once
-both sides used `run_in_background=true`. A driving session that
-dispatches its own iteration-executing subagent in the foreground cannot,
-by construction, *also* be a live, responsive broker for a nested
-manda cap-request originating from inside that same subagent — the
-top-level session is synchronously blocked waiting on the subagent for
-the iteration's entire duration, so it cannot service `cap-requests-*`
-concurrently, regardless of whether a `manda monitor` process is bound
-to it (DIR-014's fix) or not. DIR-014's action 1-2 fixed the *monitor
-attachment* precondition; this directive addresses a **separate,
-independently necessary** precondition — non-blocking dispatch — that
-was not part of DIR-014's scope and has not yet been checked or fixed.
+This is consistent with, and gives a concrete mechanism for, iteration
+68's own independently-reached finding (`experiment/iterations/
+iteration-68.md`, resolving DIR-014 action 3): with the monitor-attachment
+precondition fully satisfied for two consecutive iterations and the
+cap-request confirmed correctly targeted, the manda `Agent`/cap-request
+mechanism still timed out, 6th/7th reproduction of the same failure
+signature. Iteration 68 attributed this to `manda monitor` being a
+passive rendering adapter with "no side effects" — nothing automatically
+answers a rendered cap-request. A session permanently foreground-blocked
+on its own iteration subagent is one concrete, sufficient reason nothing
+answers it: the top-level session cannot notice or service a concurrent
+`cap-requests-*` event while synchronously waiting on that subagent for
+the iteration's entire duration, regardless of whether a monitor process
+is bound to it (DIR-014's fix) or not.
+
+**A second, independent data point has since reinforced treating the
+manda nested-subagent *audit* path as out of bounds for now, not just
+unproven**: this conversation was also told that iteration 69 committed
+a self-authored "audit" — a direct G3 violation (every audit must come
+from a fresh, independently-dispatched subagent, never the iteration's
+own authoring context) — alongside an unexplained σ numerator jump
+(+4 for what was described as a single task). The experiment session
+itself is treating that self-authored audit as void and re-dispatching a
+genuine one. This is unrelated to manda specifically, but it raises the
+cost of using an already-unreliable, still-unproven mechanism (manda
+nested subagent) for G3 specifically: G3 is this experiment's sole
+defense against exactly this kind of self-certification failure, and
+DIR-012/DIR-014 already established the manda path is not yet reliable
+enough to bet that defense on. **Continuing to chase a manda-based G3
+audit mechanism is therefore de-prioritized** in favor of a narrower,
+lower-stakes goal: use the manda nested-subagent mechanism, where it
+already works reliably, for **development and testing operations** (not
+the audit-independence-critical path), so its actual reliability
+characteristics can keep being learned without risking G3's integrity.
 
 ## Requested action
 
@@ -57,21 +69,29 @@ was not part of DIR-014's scope and has not yet been checked or fixed.
    the actual dispatch call's `run_in_background` argument value in the
    iteration report) — a verifiable claim, not an assertion, per this
    experiment's standing evidence discipline (G1, G3).
-3. Once actions 1-2 are in place and DIR-014's own action 3 precondition
-   (manda monitor bound for 2+ consecutive iterations) is also
-   independently satisfied, re-attempt the manda nested-subagent audit
-   test with **both** preconditions now met simultaneously — a session
-   with a bound monitor that is *also* foreground-blocked on its own
-   iteration subagent would still fail the test for the reason explained
-   in the Finding above, so both fixes are necessary together, and
-   neither alone is sufficient. Record explicitly, in whichever
-   iteration attempts this, which of DIR-012/DIR-014's and this
-   directive's preconditions were checked and how.
-4. If, after both preconditions are genuinely met, the manda
-   nested-subagent mechanism still fails for audit dispatch, record that
-   as a new, narrower finding — per DIR-014's own action 4 reasoning,
-   this would indicate a deeper problem, not a missing precondition, and
-   should not be silently re-deferred with recycled reasoning.
+3. **Retire DIR-012/DIR-014's framing of "re-test manda nested subagent
+   for G3 audits."** Do not require, or further pursue as a goal, using
+   the manda nested-subagent mechanism for the G3 out-of-band audit
+   dispatch specifically — G3's independence guarantee should keep using
+   the native `Agent` tool mechanism it already relies on, unmodified.
+   This narrows DIR-012's original action 2 and DIR-014's action 3 from
+   "required" to "not pursued for audits"; both remain correctly recorded
+   as deferred/failed findings in their own archived resolutions and are
+   not being retroactively rewritten — this directive simply stops
+   chasing that specific application going forward.
+4. Instead, add explicit guidance (in `ITERATION-PROMPTS.md` or a
+   dedicated section) that whichever iteration work involves
+   **development or testing operations** that could plausibly use a
+   subagent invoking tools/capabilities not natively available in that
+   subagent's own context (the original motivating use case for manda's
+   `Agent`/cap-request mechanism) **should prefer the manda nested-
+   subagent mechanism where it can be shown to work reliably**, once
+   actions 1-2's non-blocking-dispatch precondition is in place — subject
+   to the same evidence discipline as everywhere else in this experiment
+   (cite a live-verified success, do not assume reliability from a single
+   trial, and do not let a development/testing use of this mechanism
+   silently expand into a load-bearing dependency for G3 or any other
+   guardrail without a separate, explicit directive).
 
 ## Resolution
 
