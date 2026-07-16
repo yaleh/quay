@@ -20,6 +20,13 @@
 // shapes end-to-end over a real stdio MCP connection specifically to a real
 // `quay-github mcp` server (not quay-native's)?
 //
+// QN-072 (iteration 86): added Case 3 — the compound (epic) task
+// childrenStatus rollup (QN-035/DIR-006), the one remaining check()/
+// checkGate() branch shape never exercised through either Provider's
+// taskCheck() MCP passthrough, on either package, until now. See Case 3's
+// own comment below and packages/quay/test/task-check.test.mjs's own
+// QN-072 addition (the native-Provider sibling of this case).
+//
 // Constraint (this project's own standing discipline, repeated in
 // write.test.mjs/cli.test.mjs/mcp-server.test.mjs's header comments): the
 // real yaleh/quay issue backlog (issues #3/#4) is a strictly READ-ONLY test
@@ -112,6 +119,27 @@ function mkIssueJson({ number, labels, state = "open" }) {
   });
 }
 
+// QN-072 (iteration 86): plain (non-JSON-stringified) issue object builder,
+// for use with FAKE_GH_ISSUES_JSON's map (each value must be a real object,
+// not a JSON string, since the whole map itself gets JSON.stringify'd once).
+// `childRefs` (issue numbers) are rendered as body checkbox lines
+// (`- [ ] #<n>`), the GitHub-Provider's own lightweight parent/child
+// convention (github-client.js's CHILD_CHECKBOX_RE) — this is what makes
+// an issue "compound" (role derivation is children.length > 0).
+function mkIssueObj({ number, labels, state = "open", childRefs = [] }) {
+  const childLines = childRefs.map((n) => `- [ ] #${n}`).join("\n");
+  return {
+    number,
+    title: `fixture issue ${number}`,
+    body: ISSUE_BODY + (childLines ? `\n## Children\n${childLines}\n` : ""),
+    labels: labels.map((name) => ({ name })),
+    state,
+    pull_request: undefined,
+    html_url: `https://github.com/yaleh/quay-fixture/issues/${number}`,
+    user: { login: "fixture-user" },
+  };
+}
+
 async function withGithubMcpFor(fakeIssueJson, run) {
   const fakeGhDir = makeFakeGhPathDir();
   const env = {
@@ -119,6 +147,28 @@ async function withGithubMcpFor(fakeIssueJson, run) {
     PATH: `${fakeGhDir}${path.delimiter}${process.env.PATH}`,
     QUAY_GITHUB_REPO: "yaleh/quay-fixture", // never actually reached over the network — fake gh ignores it
     FAKE_GH_ISSUE_JSON: fakeIssueJson,
+  };
+  const { client, transport } = await connectStdio("node", [githubBin, "mcp"], githubProviderDir, env);
+  try {
+    await run(client);
+  } finally {
+    await client.close();
+    fs.rmSync(fakeGhDir, { recursive: true, force: true });
+  }
+}
+
+// QN-072 (iteration 86): multi-issue variant of withGithubMcpFor, using
+// FAKE_GH_ISSUES_JSON (fake-gh.mjs's own new map-keyed-by-issue-number
+// mode) instead of the single-issue FAKE_GH_ISSUE_JSON — needed for a
+// compound (epic) task, whose check() recursively fetches each child issue
+// by its own number via the identical single-issue GET endpoint.
+async function withGithubMcpForMulti(issuesByNumber, run) {
+  const fakeGhDir = makeFakeGhPathDir();
+  const env = {
+    ...process.env,
+    PATH: `${fakeGhDir}${path.delimiter}${process.env.PATH}`,
+    QUAY_GITHUB_REPO: "yaleh/quay-fixture",
+    FAKE_GH_ISSUES_JSON: JSON.stringify(issuesByNumber),
   };
   const { client, transport } = await connectStdio("node", [githubBin, "mcp"], githubProviderDir, env);
   try {
@@ -264,6 +314,127 @@ async function main() {
     }
   }
 
+  // --- Case 3 (QN-072, iteration 86): compound (epic) task childrenStatus
+  //     rollup — genuinely distinct from Cases 1/2 above (different check()
+  //     branch entirely: status==="done" with role==="compound", not the
+  //     needs-human/unrecognized-status shortcuts). Confirmed by grep before
+  //     writing this: no existing test anywhere calls Core's taskCheck()
+  //     passthrough (either `quay-github mcp`'s own tool or `quay mcp`'s
+  //     aggregation) for a compound GitHub-backed task — QN-035's own
+  //     childrenStatus()/checkGate() compound support has only ever been
+  //     exercised directly against github-client.js (compound-gate.test.mjs,
+  //     gate-gameability.test.mjs, view-model.test.mjs), never through the
+  //     MCP passthrough layer this file exists to cover. ---
+  await withGithubMcpForMulti(
+    {
+      601: mkIssueObj({ number: 601, labels: ["status:todo"], state: "open" }), // child still todo
+      600: mkIssueObj({ number: 600, labels: [], state: "closed", childRefs: [601] }), // epic marked done (closed), one child not done
+    },
+    async (client) => {
+      const r = await client.callTool({ name: "task_check", arguments: { id: "gh-600" } });
+      assert(r.isError !== true, "task_check via quay-github mcp for a compound (epic) issue does not error");
+      assert(
+        r.structuredContent?.gate === "none" &&
+          r.structuredContent?.ok === false &&
+          typeof r.structuredContent?.reason === "string" &&
+          r.structuredContent.reason.includes("gh-601") &&
+          Array.isArray(r.structuredContent?.childrenStatus) &&
+          r.structuredContent.childrenStatus.length === 1,
+        `quay-github's own task_check tool surfaces the compound "done but a child not done" shape unchanged, including childrenStatus (got: ${JSON.stringify(r.structuredContent)})`
+      );
+    }
+  );
+
+  {
+    const fakeGhDir = makeFakeGhPathDir();
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-qn072-workspace-"));
+    fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  github:",
+        "    enabled: true",
+        `    path: "${githubProviderDir}"`,
+        `    mcp_entry: ["node", "${githubBin}", "mcp"]`,
+        "    env:",
+        '      QUAY_GITHUB_REPO: "yaleh/quay-fixture"',
+        "",
+      ].join("\n")
+    );
+    const coreEnv = {
+      ...process.env,
+      PATH: `${fakeGhDir}${path.delimiter}${process.env.PATH}`,
+      FAKE_GH_ISSUES_JSON: JSON.stringify({
+        603: mkIssueObj({ number: 603, labels: [], state: "closed" }), // child genuinely done
+        602: mkIssueObj({ number: 602, labels: [], state: "closed", childRefs: [603] }), // epic done, child genuinely done -> ok:true
+      }),
+    };
+    const { client: core } = await connectStdio("node", [coreBin, "mcp"], workspaceRoot, coreEnv);
+    try {
+      const r = await core.callTool({ name: "task_check", arguments: { id: "gh-602", provider: "github" } });
+      assert(r.isError !== true, "task_check via quay mcp (provider=github) does not error for a compound epic with a genuinely-done child");
+      assert(
+        r.structuredContent?.gate === "none" &&
+          r.structuredContent?.ok === true &&
+          Array.isArray(r.structuredContent?.childrenStatus) &&
+          r.structuredContent.childrenStatus.length === 1 &&
+          r.structuredContent.childrenStatus[0].id === "gh-603" &&
+          r.structuredContent.childrenStatus[0].status === "done",
+        `Core's taskCheck() passthrough surfaces the compound "all children done" positive shape unchanged through the GitHub Provider, including per-child ids/statuses (got: ${JSON.stringify(r.structuredContent)})`
+      );
+    } finally {
+      await core.close();
+      fs.rmSync(fakeGhDir, { recursive: true, force: true });
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  // --- Adversarial break/restore (QN-072): confirm the compound-rollup
+  //     coverage above has real teeth too, not just Cases 1/2's shapes —
+  //     temporarily force `isCompound` false in the `done` branch (the same
+  //     unconditional-rubber-stamp regression iteration-5's original audit
+  //     caught for store.js, QN-012's own motivating bug, applied here to
+  //     confirm github-client.js's port would also be caught by this new
+  //     passthrough coverage were it ever reintroduced). ---
+  {
+    const srcPath = path.join(__dirname, "..", "src", "github-client.js");
+    const original = fs.readFileSync(srcPath, "utf8");
+    const needle =
+      '  if (status === "done") {\n' +
+      '    // QN-035 (DIR-006): a `done` compound (epic) task\'s gate check must\n' +
+      '    // actually re-verify that its children are still `done`, rather than\n' +
+      '    // unconditionally rubber-stamping `ok: true` -- direct port of\n' +
+      '    // store.js\'s own QN-012 fix (see file header note). Primitive tasks\n' +
+      '    // are unaffected -- degrades to the original unconditional behavior.\n' +
+      '    const isCompound = role === "compound" && (children || []).length > 0;';
+    if (!original.includes(needle)) {
+      assert(false, "adversarial break/restore (QN-072): expected done-branch isCompound text not found verbatim in github-client.js — source may have changed shape; aborting this check honestly rather than silently skipping it");
+    } else {
+      const broken = original.replace(needle, needle.replace('role === "compound" && (children || []).length > 0', "false"));
+      fs.writeFileSync(srcPath, broken);
+      try {
+        await withGithubMcpForMulti(
+          {
+            701: mkIssueObj({ number: 701, labels: ["status:todo"], state: "open" }),
+            700: mkIssueObj({ number: 700, labels: [], state: "closed", childRefs: [701] }),
+          },
+          async (client) => {
+            const r = await client.callTool({ name: "task_check", arguments: { id: "gh-700" } });
+            assert(
+              r.structuredContent?.ok === true && r.structuredContent?.childrenStatus === undefined,
+              `adversarial check (QN-072): with isCompound forced false, the same "epic done but child todo" fixture now WRONGLY reports ok:true with no childrenStatus (got: ${JSON.stringify(r.structuredContent)}) — confirms Case 3's ok:false/childrenStatus assertions above have real teeth, not merely checking passthrough plumbing`
+            );
+          }
+        );
+      } finally {
+        fs.writeFileSync(srcPath, original);
+      }
+      const restored = fs.readFileSync(srcPath, "utf8");
+      assert(restored === original, "adversarial check (QN-072): github-client.js is byte-identical to its original content after the isCompound break/restore cycle");
+    }
+  }
+
   // --- Adversarial break/restore: temporarily comment out
   //     github-client.js's needs-human branch, confirm the new test above
   //     actually has teeth (fails with the shape falling through to
@@ -296,7 +467,7 @@ async function main() {
     }
   }
 
-  console.log(failures === 0 ? "\nAll QN-071 GitHub-Provider taskCheck passthrough tests passed." : `\n${failures} test(s) FAILED`);
+  console.log(failures === 0 ? "\nAll QN-071/QN-072 GitHub-Provider taskCheck passthrough tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
 

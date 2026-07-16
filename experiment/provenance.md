@@ -3018,3 +3018,136 @@ re-read, neither triggered nor modified; left `pending`.
 Full detail: `experiment/iterations/iteration-85.md`. Independent
 out-of-band audit: to be dispatched separately by the top-level
 orchestrator (not performed by this session, per standing G3 discipline).
+
+## Iteration 86 — testing the G3 iteration-85 audit's specific objection: is `skeleton` really not yet ceiling-bound? (QN-072, `skeleton` +0.01, breaks the 8-flat-iteration streak)
+
+The independent G3 out-of-band audit of iteration 85
+(`experiment/audits/iteration-85-independent-adjudicate.md`) returned
+**PASS-WITH-CONCERNS**: every fact checked out, but it found iteration
+85's "whole-experiment Practical Convergence" recommendation premature on
+one specific, checkable ground — `skeleton` (unlike `gate_correctness`,
+which has an argued, 65-iteration-old structural ceiling) moved as
+recently as iteration 76 (9-10 iterations before 85) via a repeatable,
+non-ceilinged discovery pattern, and the audit's own recommendation was
+to "direct one more, narrowly-scoped iteration specifically to attempt a
+fresh `skeleton`-focused... search" before treating V_instance as a whole
+as equally ceilinged to V_meta.
+
+This iteration did exactly that. Re-read iterations 66, 69, and 76's full
+work (not summaries): all three closed a genuinely new, previously-
+uncovered instance of the same shape — a Core-`taskCheck()`-passthrough-
+fidelity gap for a gate shape that already existed correctly on a
+Provider's own `check()`/`checkGate()` function, closed via a runtime-
+exercised, adversarially-verified (break/restore) regression test, zero
+source-code change. Applying that exact understanding, this iteration
+grepped every `*.test.mjs` in the repo for the one remaining branch shape
+in `store.js#check()` (QN-012, iteration 6) and
+`github-client.js#checkGate()` (QN-035, iteration 25, DIR-006) never
+covered this way: the **compound (epic) `childrenStatus` rollup**. Both
+`checkGate` functions have been thoroughly exercised directly against
+each Provider (`compound-gate.test.mjs`,
+`compound-gate-recursive.test.mjs`, `gate-gameability.test.mjs`,
+`view-model.test.mjs`), but **no test anywhere called Core's own generic
+`taskCheck()` passthrough for a compound task, on either Provider** —
+confirmed genuinely new, not a manufactured re-labeling of existing
+coverage.
+
+**QN-072** closed this: extended
+`packages/quay/test/task-check.test.mjs` (native) with a compound
+"done but a child regressed" case and a positive "all children genuinely
+done" case, both through a real `connectProvider()`/stdio MCP connection;
+extended `packages/quay-github/test/task-check-passthrough.test.mjs`
+(GitHub) with the same two cases through both `quay-github mcp`'s own
+tool and Core's `quay mcp` aggregation, adding a backward-compatible
+multi-issue mode to the `fake-gh.mjs` fixture (`FAKE_GH_ISSUES_JSON`,
+needed because a compound task's gate check fetches each child via a
+separate single-issue GET). Adversarially verified both: (a) native —
+severing the parent/child link makes the passthrough correctly fall back
+to the plain-leaf `terminal` shape; (b) GitHub — temporarily forcing
+`isCompound` false in the `done` branch (the exact class of bug QN-012's
+own motivating audit finding was, on the native side) makes the same
+fixture WRONGLY report `ok:true` with no `childrenStatus`, confirming the
+new assertions have real teeth. Full regression suite: 28/28 clean (new
+assertions added inside existing files, so the `node --test`-discovered
+file/test count is unchanged; assertion count increased). ABI symmetry:
+unchanged (`ALL FOUR SURFACES SYMMETRIC`). `git diff --stat -- 'packages/
+*/src/*.js'` empty — test/fixture-only, matching QN-069/QN-071's own DoD
+bar exactly.
+
+```
+$ ls tasks/QN-*.md | wc -l                          -> 71 (was 70)
+$ grep -h "^status:" tasks/QN-*.md | sort | uniq -c  -> 67 done, 3 needs-human, 1 todo
+σ_strict = 62/71 = 0.8732  (down from 62/70 = 0.8857)
+```
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-072 | Close the last untested `check()`/`checkGate()` branch shape through Core's `taskCheck()` passthrough — the compound (epic) `childrenStatus` rollup, on both Providers | seed | seed | seed | done |
+
+QN-072 is `{author_by: seed, execute_by: seed, gate_by: seed}` (performed
+directly by the iteration-executor session, same as QN-071 — no `quay:*`
+Skill exists for this ad hoc test-infrastructure shape). This mechanically
+lowers σ_strict (denominator +1, native-qualifying numerator unchanged at
+62) — an honest, expected decrease, not an error, identical in kind to
+iteration 76's own σ movement. The permanent-exclusion set (QN-003,
+QN-004, QN-006) is unaffected.
+
+**V_instance factor reasoning:** `skeleton` credited **+0.01 (0.83 →
+0.84)**, applying the identical reasoning pattern iterations 55-76 used:
+a runtime-exercised, adversarially-verified regression test closing a
+genuinely previously-uncovered branch, zero source diff. `abi_symmetry`
+explicitly considered and rejected: this is not a new CLI-vs-MCP schema-
+equivalence claim (what `abi-symmetry.mjs` checks), it is a passthrough-
+fidelity claim for an existing gate shape against a second, already-
+tested transport hop — the same boundary QN-069/QN-071 themselves drew.
+`gate_correctness` explicitly considered and rejected: zero gate-logic
+source changed (`git diff --stat -- 'packages/*/src/*.js'` empty) —
+`store.js#check()`/`github-client.js#checkGate()` were exercised by new
+tests, neither was modified, and this iteration made no new claim about
+gate *logic* correctness beyond what QN-012/QN-035 already established.
+`skill_convergence` unchanged: no SKILL.md content touched, no new Skill
+branch exercised.
+
+```
+V_instance = 0.84 × 0.96 × 0.76 × 0.96 = 0.5883  (up from 0.5813)
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+**This breaks the 8-consecutive-flat-iteration streak (78-85)** — the
+first genuine σ/V movement since iteration 76 (10 iterations prior). This
+is a direct, first-party test of the G3 audit's specific objection, and
+the objection is **confirmed correct**: `skeleton`'s discovery pattern was
+not yet exhausted, only not recently re-attempted, exactly as the audit
+argued. This does not, by itself, mean the broader Practical Convergence
+question is now resolved the other way — one more `+0.01` factor
+movement is a modest, narrow result, not a reopening of the whole
+backlog (still genuinely exhausted: same 4 adversarial fixtures,
+re-confirmed unchanged this iteration) — but it directly falsifies
+iteration 85's specific claim that `skeleton` was "not obviously more
+open" than `gate_correctness`, and it means the honest count of "distinct
+V_instance factors with a demonstrated non-ceilinged discovery pattern"
+is not zero. Per this task's own framing (mirroring iteration 85's own
+practice), the convergence decision itself remains surfaced for
+orchestrator/human sign-off, not self-executed here: this iteration's own
+honest view is that the case for declaring Practical Convergence now
+rests on a strictly narrower, more defensible footing than iteration 85's
+original framing — the `gate_correctness`/V_meta ceilings stand, the
+backlog-exhaustion finding stands, but "V_instance as a whole is
+ceilinged" no longer holds even provisionally, since `skeleton` has now
+been shown live, on the same footing gate_correctness was tested against
+(a direct, current-iteration search), to still have headroom. Whether
+that residual headroom is large enough to justify continued iterating,
+versus accepting a narrower "V_meta-side Practical Convergence, V_instance
+partially open" framing, is exactly the kind of judgment call this
+experiment's own iteration-16/17 precedent reserves for explicit
+orchestrator/human sign-off, not unilateral resolution by the iteration
+that ran the test.
+
+DIR-021/DIR-025 both re-read per standing §0 SOP; no manda nested-subagent
+work was undertaken this iteration (this was a narrowly-scoped test-
+coverage search, not a capability-borrowing or concurrent-dispatch
+trial), so neither directive was triggered; both left `pending`.
+
+Full detail: `experiment/iterations/iteration-86.md`. Independent
+out-of-band audit: to be dispatched separately by the top-level
+orchestrator (not performed by this session, per standing G3 discipline).

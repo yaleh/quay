@@ -8,6 +8,13 @@
 // the ok:true and ok:false cases, and confirms `connectProvider()`'s
 // returned object actually exposes `taskCheck`.
 //
+// QN-072 (iteration 86): added compound (epic) `childrenStatus`-rollup
+// coverage — see that block's own comment below for the specific,
+// previously-uncovered gap it closes (Core's taskCheck() passthrough had
+// never been exercised for a compound task, on either Provider, despite
+// store.js#check()/github-client.js#checkGate() both having compound-aware
+// branches since QN-012/QN-035).
+//
 // Run: node test/task-check.test.mjs
 
 import { execFileSync } from "node:child_process";
@@ -127,12 +134,88 @@ async function main() {
       `Core's taskCheck() passthrough surfaces the unrecognized-status shape unchanged ` +
         `(got: ${JSON.stringify(unrecognized)})`
     );
+
+    // QN-072 (iteration 86): a genuinely distinct, previously-uncovered
+    // passthrough shape — the COMPOUND (epic) `childrenStatus` rollup.
+    // QN-012 (iteration 6) made store.js#check() compound-aware
+    // (childrenStatus/stale-done/missing-child branches), and
+    // compound-gate.test.mjs/compound-gate-recursive.test.mjs both
+    // thoroughly exercise that logic directly against store.js — but
+    // neither those files nor this one (QN-027/QN-069, until now) nor
+    // mcp-server.test.mjs ever call Core's own generic taskCheck()
+    // passthrough (provider-client.js) for a compound task. Confirmed by
+    // grep across every *.test.mjs in the repo before writing this: no
+    // existing test connects `childrenStatus`/`stale-done` fixture data to
+    // a `connectProvider()`/`quay mcp` call. This is the same class of gap
+    // QN-069/QN-071 closed (Core-passthrough fidelity for a Provider gate
+    // shape, not yet proven to survive the extra MCP hop) applied to the
+    // one remaining untested `check()` branch shape: the epic rollup.
+    execFileSync("node", [nativeBin, "task", "create", "CHILD-DONE", "--title", "Compound-fixture child (done)",
+      "--status", "done", "--body", validSections + acDodChecked], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "create", "CHILD-TODO", "--title", "Compound-fixture child (still todo)",
+      "--body", validSections + acDodUnchecked], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "create", "EPIC-STALE-DONE", "--title", "Epic marked done but a child regressed",
+      "--status", "done", "--body", validSections + acDodChecked], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "edit", "EPIC-STALE-DONE", "--children", "CHILD-DONE,CHILD-TODO"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+
+    const staleDone = await client.taskCheck("EPIC-STALE-DONE");
+    assert(
+      staleDone.gate === "none" && staleDone.ok === false &&
+        typeof staleDone.reason === "string" &&
+        staleDone.reason.includes("CHILD-TODO") &&
+        Array.isArray(staleDone.childrenStatus) &&
+        staleDone.childrenStatus.length === 2,
+      `Core's taskCheck() passthrough surfaces the compound "done but a child regressed" ` +
+        `shape unchanged, including the childrenStatus array (got: ${JSON.stringify(staleDone)})`
+    );
+
+    execFileSync("node", [nativeBin, "task", "create", "EPIC-ALL-DONE", "--title", "Epic with all children genuinely done",
+      "--status", "done", "--body", validSections + acDodChecked], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "edit", "EPIC-ALL-DONE", "--children", "CHILD-DONE"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    const allDone = await client.taskCheck("EPIC-ALL-DONE");
+    assert(
+      allDone.gate === "none" && allDone.ok === true &&
+        Array.isArray(allDone.childrenStatus) && allDone.childrenStatus.length === 1 &&
+        allDone.childrenStatus[0].id === "CHILD-DONE" && allDone.childrenStatus[0].status === "done",
+      `Core's taskCheck() passthrough surfaces the compound "all children done" positive ` +
+        `shape unchanged, including per-child ids/statuses (got: ${JSON.stringify(allDone)})`
+    );
+
+    // Adversarial: confirm this new coverage has real teeth, not merely
+    // exercising already-tested machinery under a new name — sever the
+    // parent/child link (edit EPIC-STALE-DONE to zero children) and confirm
+    // Core's passthrough now reports the unconditional-done shape instead
+    // (no childrenStatus field, ok:true, reason:"terminal"), proving the
+    // childrenStatus assertion above was actually load-bearing.
+    execFileSync("node", [nativeBin, "task", "edit", "EPIC-STALE-DONE", "--children", ""], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    const severed = await client.taskCheck("EPIC-STALE-DONE");
+    assert(
+      severed.ok === true && severed.reason === "terminal" && severed.childrenStatus === undefined,
+      `adversarial check: severing EPIC-STALE-DONE's children makes Core's passthrough report ` +
+        `the plain-leaf terminal shape (got: ${JSON.stringify(severed)}), confirming the prior ` +
+        `compound-shape assertions were genuinely exercising the childrenStatus rollup, not a ` +
+        `coincidental pass`
+    );
   } finally {
     await client.close();
     fs.rmSync(tasksDir, { recursive: true, force: true });
   }
 
-  console.log(failures === 0 ? "\nAll QN-027/QN-069 taskCheck passthrough tests passed." : `\n${failures} test(s) FAILED`);
+  console.log(failures === 0 ? "\nAll QN-027/QN-069/QN-072 taskCheck passthrough tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
 

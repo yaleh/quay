@@ -21,12 +21,35 @@
 // process boundary instead of a task file's frontmatter (github-client.js
 // has no on-disk file to hand-edit — issues live on GitHub's own servers).
 //
+// QN-072 (iteration 86): optionally supports a MULTI-issue fixture via
+// FAKE_GH_ISSUES_JSON — a JSON object mapping issue number (string) ->
+// issue JSON — needed to test a compound (epic) task's childrenStatus
+// rollup, which calls get() once per child issue number, each expecting
+// its own distinct labels/body. When FAKE_GH_ISSUES_JSON is set, it takes
+// precedence and the requested issue number is looked up in that map (a
+// missing key is a genuine test-authoring bug, not a "missing child" case
+// — that case is exercised at the github-client.js level, not this
+// fixture's, so it fails loudly rather than silently). When unset, falls
+// back to the original single-issue FAKE_GH_ISSUE_JSON behavior unchanged
+// (existing QN-071 callers are unaffected).
+//
 // Any other invocation (paging list calls, writes, etc.) is deliberately
 // unsupported and exits non-zero with a clear message, so a test that
 // accidentally exercises an unexpected code path fails loudly rather than
 // silently returning nonsense data.
 const args = process.argv.slice(2);
 if (args[0] === "api" && args.length === 2 && /^repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(args[1])) {
+  if (process.env.FAKE_GH_ISSUES_JSON) {
+    const m = /\/issues\/(\d+)$/.exec(args[1]);
+    const issues = JSON.parse(process.env.FAKE_GH_ISSUES_JSON);
+    const issue = issues[m[1]];
+    if (issue === undefined) {
+      process.stderr.write(`fake-gh: FAKE_GH_ISSUES_JSON has no entry for issue number ${m[1]} (requested: ${args[1]})\n`);
+      process.exit(1);
+    }
+    process.stdout.write(JSON.stringify(issue));
+    process.exit(0);
+  }
   process.stdout.write(process.env.FAKE_GH_ISSUE_JSON || "{}");
   process.exit(0);
 }
