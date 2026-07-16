@@ -1,0 +1,59 @@
+{
+  "note": "No config.json existed in experiments/quay-native-bootstrap/ (the source experiment predates that convention). This file is synthesized from experiments/quay-native-bootstrap/provenance.md, experiments/quay-native-bootstrap/README.md, and docs/proposals/quay-bootstrap-experiment.md's section 5, as the closest equivalent to a machine-readable meta-objective breakdown, for downstream tooling that expects this shape.",
+  "experiment": {
+    "name": "quay-native-bootstrap",
+    "domain": "self-hosting BAIME experiment (M(Q) = Q): quay-native builds quay-native",
+    "status": "halted_not_converged",
+    "halted_at_iteration": 88,
+    "halted_by": "human owner (explicit decision, not inferred)",
+    "v_instance": 0.6016,
+    "v_meta": 0.0973,
+    "sigma_strict": 0.8493
+  },
+  "meta_objective": {
+    "formula": "completeness * effectiveness * reusability * validation",
+    "components": [
+      {
+        "name": "completeness",
+        "weight": 0.25,
+        "score": 0.74,
+        "priority": "high",
+        "target": {"type": "qualitative", "description": "Methodology (Skills + gates + decomposition rule) fully documented and self-contained"},
+        "held_flat_since_iteration": 22,
+        "stall_reason": "one standing environmental gap: no native subagent-dispatch primitive existed for most of the experiment's life"
+      },
+      {
+        "name": "effectiveness",
+        "weight": 0.25,
+        "score": 0.26,
+        "priority": "high",
+        "target": {"type": "qualitative", "description": "Speedup building feature N+1 via quay-native vs ad-hoc/seed, measured on the marginal increment only"},
+        "held_flat_since_iteration": 23,
+        "stall_reason": "no organically-arising, scope-matched marginal-increment timing comparison has appeared in the backlog since iteration 22"
+      },
+      {
+        "name": "reusability",
+        "weight": 0.25,
+        "score": 0.79,
+        "priority": "high",
+        "target": {"type": "qualitative", "description": "Methodology transfers to a second Provider (GitHub) unmodified, measured on the transfer target only"},
+        "held_flat_since_iteration": 25,
+        "stall_reason": "genuine new GitHub-Provider data.write capability blocked by a deliberate v1 scope decision (status-only writes)"
+      },
+      {
+        "name": "validation",
+        "weight": 0.25,
+        "score": 0.64,
+        "priority": "high",
+        "target": {"type": "qualitative", "description": "Self-host proof: sigma and the provenance log, corroborated by out-of-band audit"},
+        "tracks": "sigma_strict directly",
+        "stall_reason": "sigma_strict plateaued and mechanically decreased late in the experiment as seed-provenance test-coverage tasks were added without matching native-provenance growth"
+      }
+    ]
+  },
+  "extraction_rules": {
+    "examples_strategy": "compact_only",
+    "case_studies": true,
+    "automation_priority": "medium"
+  }
+}

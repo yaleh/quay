@@ -237,7 +237,7 @@ delivery entirely. The mock mode is intended as the **default harness for
 automated verification** of action-composition logic; live `manda`
 delivery remains a separate, additional, non-gating check (see
 `docs/proposals/quay-core-scope-expansion-discussion.md` §2.3 for the
-original reasoning, and `experiment/directives/archive/DIR-009-*.md` for
+original reasoning, and `experiments/quay-native-bootstrap/directives/archive/DIR-009-*.md` for
 the directive that requested it).
 
 **Explicitly additive, not a replacement:** `mandaAvailable()`'s own
@@ -252,7 +252,7 @@ end-to-end (composes a real payload via `composePayload()`, calls
 `deliverTrigger()` with `mockLogPath` set, asserts on the resulting file's
 structured JSON-lines content — including that a second delivery appends
 rather than overwrites). Per `DIR-008`'s standing constraint (itself citing
-`experiment/directives/archive/DIR-004-*.md`/`DIR-005-*.md`'s iterations
+`experiments/quay-native-bootstrap/directives/archive/DIR-004-*.md`/`DIR-005-*.md`'s iterations
 13-18 findings), this test does **not** gate its own pass/fail on live
 manda-send reachability succeeding or failing either way — a run of this
 very test during iteration 31's own execution independently reconfirmed

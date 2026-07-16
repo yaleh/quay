@@ -1,0 +1,41 @@
+{
+  "skill_name": "quay-native-methodology",
+  "timestamp": "2026-07-16",
+  "experiment_dir": "experiments/quay-native-bootstrap/",
+  "V_instance": 0.90,
+  "V_instance_rationale": "Structure complete: SKILL.md, 5 reference files (patterns/v-meta-stall-analysis/gate-mechanics/directive-lifecycle/g3-audit-discipline), 1 case study, 2 verbatim example Skills, 1 template, 4 working automation scripts (all executed successfully and cross-checked against experiments/quay-native-bootstrap/provenance.md's actual final numbers: V_instance=0.6016, V_meta=0.0973, sigma_strict=0.8493 all confirmed by extract-patterns.py's independent parse). Deduction from 1.0 for: no config.json existed in the source experiment (inferred meta objective from results/provenance prose per protocol, not a config file), and Layer-1 operation Skills were never materialized as standalone files in the source (documented as inline Method steps instead, per reference/patterns.md) so there are no separate Layer-1 example files to extract beyond what's already inline in the two Layer-2 examples.",
+  "V_meta_compliance": {
+    "components": {
+      "compactness": {
+        "compliant": true,
+        "target": 400,
+        "actual": {
+          "SKILL.md": 113,
+          "reference/patterns.md": 143,
+          "reference/v-meta-stall-analysis.md": 82,
+          "reference/gate-mechanics.md": 76,
+          "reference/directive-lifecycle.md": 75,
+          "reference/g3-audit-discipline.md": 82
+        },
+        "violations": [],
+        "notes": "reference/patterns.md (143 lines) well within the 400-line ceiling; all reference files individually compact."
+      },
+      "maintainability": {
+        "compliant": true,
+        "target": "Clear structure with cross-references",
+        "actual": {
+          "structure_score": 1.0,
+          "cross_ref_score": 1.0,
+          "overall_score": 1.0
+        },
+        "notes": "templates/, reference/, examples/, scripts/, inventory/ all present; extensive cross-references between SKILL.md and reference/*.md files, and between reference files themselves (patterns.md points to the other 4 reference files and the case study)."
+      },
+      "honesty_of_non_convergence": {
+        "compliant": true,
+        "notes": "SKILL.md's Status section, every reference file, and this validation report all state the halted-not-converged status and final metrics without qualification or softening. No file in this skill claims or implies convergence was achieved."
+      }
+    },
+    "overall_compliant": true,
+    "summary": "This extraction inherits from a NOT-CONVERGED experiment by deliberate, documented design (per docs/proposals/quay-core-bootstrap-experiment-v2.md section 2.1). Compliance here means honestly representing that non-convergent state and packaging the actually-inheritable mechanics (Layer-2 Skills, gate, directives, G3 audit discipline, V_meta stall analysis) rather than presenting a false convergence narrative. All checks pass under that framing."
+  }
+}

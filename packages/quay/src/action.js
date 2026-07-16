@@ -15,7 +15,7 @@
 // logic have a deterministic, structured, network-independent record to
 // assert against, instead of either scraping stdout or gating pass/fail on a
 // live manda session (per DIR-008/§2.3's standing constraint — see
-// `experiment/directives/archive/DIR-004-*.md` and `DIR-005-*.md`: live manda
+// `experiments/quay-native-bootstrap/directives/archive/DIR-004-*.md` and `DIR-005-*.md`: live manda
 // delivery has repeatedly been shown to be a per-session, per-moment fact,
 // not a reliably available one, and this mode's whole purpose is to
 // sidestep that, not re-verify it). It does NOT change `mandaAvailable()`
@@ -77,7 +77,7 @@ function appendMockDeliveryRecord({ mockLogPath, channel, payloadObj }) {
  * Deliver a trigger. v0 (walking skeleton, G5): the manda-present path
  * sends a manda message on the task's own channel; a real background worker
  * session subscribed to that channel is the seed-driven consumer for
- * iteration 0 (see experiment/iterations/iteration-0.md — the seed stands in
+ * iteration 0 (see experiments/quay-native-bootstrap/iterations/iteration-0.md — the seed stands in
  * for quay:author/quay:execute at σ=0). The plain-CLI degrade path prints
  * the composed command, which is exactly what iteration 0 exercises when run
  * non-interactively.

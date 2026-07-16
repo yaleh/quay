@@ -6,10 +6,10 @@
 - **Date:** 2026-07-15
 - **Context:** captured from a live conversation between the human (Yale) and a
   Claude Code session, after 24 iterations of the `quay-bootstrap` BAIME
-  experiment (`experiment/`). The human observed that the BAIME method has
+  experiment (`experiments/quay-native-bootstrap/`). The human observed that the BAIME method has
   driven the development of quay-native — a small project — nearly
   autonomously, long-running and continuously, with a working asynchronous
-  steering (adjustment) mechanism (the `experiment/directives/` apparatus),
+  steering (adjustment) mechanism (the `experiments/quay-native-bootstrap/directives/` apparatus),
   and proposed a natural generalization: pairing quay-native (+ the Core,
   `quay`) with a BAIME-*derived* iteration mechanism (with the meta-goal and
   V_meta removed) to drive continuous, automated development of **other**
@@ -17,8 +17,8 @@
 - **Related:** [`quay-bootstrap-experiment.md`](./quay-bootstrap-experiment.md)
   (the protocol this generalizes from) · [`quay-proposal.md`](./quay-proposal.md) ·
   [`quay-core-scope-expansion-discussion.md`](./quay-core-scope-expansion-discussion.md) ·
-  `experiment/directives/README.md` (the steering mechanism) ·
-  `experiment/iterations/iteration-{22,23,24}.md` (the diminishing-returns
+  `experiments/quay-native-bootstrap/directives/README.md` (the steering mechanism) ·
+  `experiments/quay-native-bootstrap/iterations/iteration-{22,23,24}.md` (the diminishing-returns
   signal referenced below).
 
 ## 1. The observation being generalized

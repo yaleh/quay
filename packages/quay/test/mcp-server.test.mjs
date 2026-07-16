@@ -17,7 +17,7 @@
 //      enabled: true"), without depending on live `gh`/GitHub network
 //      access inside this automated test file (github+live-repo
 //      aggregation was separately live-verified by hand this iteration,
-//      see experiment/iterations/iteration-26.md — this file exercises the
+//      see experiments/quay-native-bootstrap/iterations/iteration-26.md — this file exercises the
 //      same code path against a second, fully local/isolated Provider
 //      instance instead, so the test suite has zero external-network
 //      dependency, consistent with this package's existing test-isolation

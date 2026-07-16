@@ -1,9 +1,13 @@
 # Quay Core — Second-Generation Bootstrap Experiment (proposal)
 
-- **Status:** Proposal — **not adopted**. Requires an explicit human decision to
-  start (see §7 "Preconditions to start"). This is a design document, not a
-  protocol amendment to `quay-bootstrap-experiment.md` and not a directive —
-  it defines a **new, separate experiment** to run after the first one stops.
+- **Status:** All five §7 preconditions now satisfied (2026-07-16) —
+  experiment 1 stopped, extraction run, instance objective made concrete
+  (§4), directory migration executed, DIR-021/DIR-025 resolved deferred.
+  **Still requires an explicit, separate human decision to actually begin
+  iteration 0** — satisfying the preconditions authorizes the start, it
+  is not itself the start. This is a design document, not a protocol
+  amendment to `quay-bootstrap-experiment.md` and not a directive — it
+  defines a **new, separate experiment**.
 - **Date:** 2026-07-16 (updated 2026-07-16, after re-checking experiment 1's
   state as of iteration 88 and resolving the layout/instance-objective
   open questions below)
@@ -79,7 +83,7 @@ This is deliberately **not** a `docs/proposal/quay-bootstrap-experiment.md`
 running experiment's protocol; this proposal describes a **distinct
 experiment** with its own instance objective, meant to start only once
 experiment 1 has ended. It is also deliberately **not** a directive —
-`experiment/directives/README.md`'s own format requires a concrete,
+`experiments/quay-native-bootstrap/directives/README.md`'s own format requires a concrete,
 checkable Finding and Requested action, and "develop quay Core more
 completely" fails that bar for exactly the reason G5 (walking-skeleton
 discipline) warns about: no checkable acceptance criterion, an
@@ -124,7 +128,7 @@ use, justified because:
 |---|---|
 | Layer-1 operation Skills (`write-proposal`, `review-proposal`, `write-plan`, `review-plan`, `implement`, `adjudicate`) and Layer-2 orchestration Skills (`quay:author`, `quay:execute`), as extracted | Explicit Core-development task backlog, scoped per §4 |
 | The `task check` gate mechanics (design §3, §5) | Whatever gate/methodology changes are motivated by fixing the stalled factors (§5) |
-| The directive mechanism (`experiment/directives/`) and its lifecycle | A fresh `provenance.md` (σ resets — see §6) |
+| The directive mechanism (`experiments/quay-native-bootstrap/directives/`) and its lifecycle | A fresh `provenance.md` (σ resets — see §6) |
 | The out-of-band audit discipline (G3) and the "Resolved decisions" §10 mechanism | The manda-nested-subagent-for-concurrent-work question raised by DIR-021/DIR-025 (still `pending` as of iteration 88), evaluated as a live methodology change rather than assumed |
 | `quay-github` as the transfer target (§10.1 of experiment 1) | Core-level ABI symmetry evidence (three-way CLI ⟷ Core MCP ⟷ Web UI, per the unresolved discussion-doc §2.2 proposal) |
 
@@ -147,7 +151,7 @@ experiment 2 starts. "Stop" means: run the extraction (§2.1), write a
 closing iteration report stating the final V_instance/V_meta/σ snapshot
 and explicitly marking the experiment as **halted, not converged**
 (distinct from experiment 1's own in-progress status line, which must be
-updated to reflect this), and leave `experiment/directives/pending/`
+updated to reflect this), and leave `experiments/quay-native-bootstrap/directives/pending/`
 either empty or explicitly triaged (each pending directive marked
 carried-forward-to-experiment-2, deferred indefinitely, or resolved) —
 not silently abandoned.
@@ -286,54 +290,78 @@ experiments' task populations stay physically distinguishable in
 
 ---
 
-## 7. Preconditions to start (partially satisfied)
+## 7. Preconditions to start (all five now satisfied)
 
-This document does not authorize starting experiment 2. Before it starts:
+This section originally gated experiment 2 behind five preconditions.
+All five are now satisfied, as of 2026-07-16:
 
 1. **Experiment 1 stop decision**, made explicitly by the human owner —
-   not inferred from this document's existence. **Not yet satisfied.**
+   not inferred from this document's existence. **Satisfied.** The human
+   owner halted experiment 1 at iteration 88 on 2026-07-16. See
+   `experiments/quay-native-bootstrap/CLOSING-REPORT.md` (final snapshot,
+   directive triage) and the updated status line in
+   `quay-bootstrap-experiment.md`.
 2. **Extraction run** (§2.1) against experiment 1's current state,
-   producing the inheritance artifact §2.2/§6 reference. **Not yet
-   satisfied** — must be run at stop time, against whatever iteration
-   experiment 1 is at when the stop decision (item 1) is made, not
-   against the iteration-88 snapshot cited in this document's Origin
-   note (which is a discussion-time reference point, not the extraction
-   input).
+   producing the inheritance artifact §2.2/§6 reference. **Satisfied.**
+   `baime:knowledge-extractor` was run against iteration 88's state
+   (before the directory migration in item 4, per §2.1's intent) —
+   explicitly as a non-converged extraction, not implying convergence.
+   Artifacts: `experiments/quay-native-bootstrap/EXTRACTION-SUMMARY.md`
+   and `/home/yale/work/quay/.claude/skills/quay-native-methodology/`
+   (extracted Layer-1/Layer-2 Skills, gate mechanics, directive
+   lifecycle, G3 audit discipline, and the four-stalled-V_meta-factor
+   analysis).
 3. **Instance objective converted from a starting-scope list into a
    concrete, checkable statement** — mirroring how
    `quay-bootstrap-experiment.md` §1 states quay-native's instance goal
-   as a specific, bounded bullet list, not an open-ended ambition. **Now
-   satisfied — see §4**, which carries an explicit "Done when" clause
+   as a specific, bounded bullet list, not an open-ended ambition.
+   **Satisfied — see §4**, which carries an explicit "Done when" clause
    per item.
-4. **Experiment layout decided**: whether experiment 2 reuses
-   `experiment/` or gets its own top-level directory. **Now resolved:**
-   a new top-level `experiments/` directory is created; the existing
-   `experiment/` directory is renamed and moved to
-   `experiments/quay-native-bootstrap/` (no content change beyond the
-   move itself — the name mirrors this experiment's own protocol
-   document, `quay-bootstrap-experiment.md`); experiment 2 gets its own
+4. **Experiment layout decided**: whether experiment 2 reuses experiment
+   1's directory or gets its own top-level directory. **Satisfied and
+   physically executed.** A new top-level `experiments/` directory was
+   created; the former `experiment/` directory was renamed and moved
+   (`git mv`) to `experiments/quay-native-bootstrap/` (no content change
+   beyond the move — the name mirrors experiment 1's own protocol
+   document, `quay-bootstrap-experiment.md`); experiment 2 got its own
    fresh directory, `experiments/quay-core-bootstrap/` (mirroring this
-   document's own name), with its own `provenance.md`, `directives/`,
-   `audits/`, and `iterations/` subdirectories mirroring experiment 1's
-   internal layout. This keeps the two experiments'
-   provenance, directives, and audit trails physically separate (not
-   just separated by prose convention), consistent with §6's per-task-ID
-   separation. **The physical `git mv` and the resulting path-reference
-   updates across `quay-bootstrap-experiment.md`, `ITERATION-PROMPTS.md`,
-   and the `directives/` archive are deferred to the execution of items
-   1-2 above** (i.e. done once, at the same time experiment 1 is
-   actually stopped) — not performed by this document itself, to avoid
-   rewriting path references inside a still-running experiment 1's own
-   in-flight documents.
+   document's own name), with its own `provenance.md`, `directives/`
+   (`pending/`, `archive/`), `audits/`, and `iterations/` subdirectories
+   mirroring experiment 1's internal layout. All path references across
+   `quay-bootstrap-experiment.md`, `ITERATION-PROMPTS.md`, the
+   `directives/` archive, other `docs/proposals/*.md` files, task files
+   under `tasks/`, and source-code comments under `packages/*` were
+   rewritten from `experiment/` to `experiments/quay-native-bootstrap/`
+   in the same pass. Automated test suites for `packages/quay`,
+   `packages/quay-native`, and `packages/quay-github` were re-run after
+   the migration and show no regressions attributable to the path
+   change (two unrelated pre-existing standalone-helper-script failures,
+   present before this migration, are untouched by it).
 5. **DIR-021/DIR-025's manda-nested-subagent-for-concurrent-work question
    resolved one way or another** (applied, deferred, or rejected) before
    being assumed as a standing practice for experiment 2's own workflow.
-   **Not yet satisfied** — both remain `pending` as of iteration 88.
-   (DIR-012's narrower, original question — which mechanism G3 audit
-   dispatch means — is already resolved; see the note in §2.2. DIR-021/
-   DIR-025 are the still-open, newer directives and are what this
-   precondition now tracks.)
+   **Satisfied — resolved deferred.** By explicit human decision
+   (2026-07-16), active adoption of manda nested-subagent for concurrent
+   work (DIR-025) is deferred for quay-core-bootstrap — not retracted as
+   history, simply not pursued for now; can be revisited via a new
+   directive if a concrete need arises. DIR-021's own standing discipline
+   (fresh-trial-over-reconstruction, when the capability is actively
+   invoked) is unaffected and remains historically accurate for
+   experiment 1; its trigger condition is not expected to arise in
+   quay-core-bootstrap while DIR-025 stays deferred there. Both
+   directives remain in `experiments/quay-native-bootstrap/directives/
+   pending/` (not `archive/`), per the directive lifecycle's own rule
+   that deferred directives stay in `pending/`, each with a dated
+   progress note recording this resolution. (DIR-012's narrower, original
+   question — which mechanism G3 audit dispatch means — was already
+   resolved, deferred, before this document was first drafted; see the
+   note in §2.2.)
 
-Two of five preconditions (3 and 4) are now satisfied by this revision.
-Until all five are satisfied, this document remains a proposal, not a
-protocol.
+**With all five preconditions satisfied, this document's own
+authorization gate (§7's opening sentence) is cleared — quay-core-bootstrap
+may now start**, using §4 as its instance objective and §5 as its meta
+objective. Iteration 0 should begin by reading `experiments/
+quay-core-bootstrap/provenance.md` (the inheritance record already
+written there) and the extraction artifacts cited in item 2 above, per
+the same context-extraction discipline `quay-bootstrap-experiment.md`
+itself establishes for its own iterations.

@@ -4,7 +4,7 @@
 - **Date:** 2026-07-15
 - **Context:** captured from a live conversation between the human (Yale) and a
   Claude Code session reviewing the `quay-bootstrap` BAIME experiment
-  (`experiment/`), after DIR-006 (quay-github compound/epic support) and
+  (`experiments/quay-native-bootstrap/`), after DIR-006 (quay-github compound/epic support) and
   DIR-007 (Core MCP server) were drafted and committed. This document records
   that discussion so it can inform a future protocol decision or an
   `ITERATION-PROMPTS.md` revision — it is **not itself** a directive, a
@@ -12,7 +12,7 @@
 
 ## 1. Motivation
 
-`experiment/README.md` §1 currently scopes the experiment's instance
+`experiments/quay-native-bootstrap/README.md` §1 currently scopes the experiment's instance
 objective narrowly: "Implement **quay-native**." In practice, `packages/quay`
 (the Core — CLI + web server + action-trigger edge) already exists as part of
 the v0 walking skeleton and is exercised by several completed tasks (QN-027,
@@ -108,7 +108,7 @@ depending on live manda message delivery for verification.
   **default harness for automated verification** of action-composition logic
   — with live-manda delivery treated as a separate, additional check.
 - **This directly avoids re-litigating a large, already-paid-for
-  investigation.** Iterations 13-18 (see `experiment/directives/README.md`'s
+  investigation.** Iterations 13-18 (see `experiments/quay-native-bootstrap/directives/README.md`'s
   own running log, and DIR-004/DIR-005) spent substantial effort discovering
   that: the async `Dispatch` queue primitive works but nothing reliably
   claims tasks submitted to it; a genuine synchronous `Agent` fresh-context
@@ -124,7 +124,7 @@ depending on live manda message delivery for verification.
 
 ## 3. Additional constraints identified during discussion (not raised by the original three proposals)
 
-1. **Scope-declaration mechanism.** `experiment/README.md` §1 currently
+1. **Scope-declaration mechanism.** `experiments/quay-native-bootstrap/README.md` §1 currently
    scopes the instance objective to "quay-native" only. Whether validating
    Core (Web UI / Core CLI / Core MCP / action delivery) requires an explicit
    update to that scope statement, or is already implicitly covered (since
@@ -135,7 +135,7 @@ depending on live manda message delivery for verification.
    Core-level three-way symmetry work and action-delivery mock verification
    needs to be settled in advance, to avoid a repeat of the extended
    `effectiveness`-attribution debate seen in iterations 21-24
-   (`experiment/iterations/iteration-{21,22,23,24}.md`).
+   (`experiments/quay-native-bootstrap/iterations/iteration-{21,22,23,24}.md`).
 3. **G3 (out-of-band audit) must extend to Core.** If a future Core MCP
    server (DIR-007) is used as evidence toward quay-native's own
    self-certification claims, the independent audit mechanism (G3) must
@@ -147,7 +147,7 @@ depending on live manda message delivery for verification.
    discrete implementation requests. The broader question this document
    records ("what general prompts/constraints should govern all future
    Core-scope work") is a different kind of change: it likely belongs in
-   `experiment/ITERATION-PROMPTS.md` (the artifact the `baime:
+   `experiments/quay-native-bootstrap/ITERATION-PROMPTS.md` (the artifact the `baime:
    iteration-prompt-designer` agent maintains) rather than in another
    single-purpose directive file.
 
@@ -158,7 +158,7 @@ depending on live manda message delivery for verification.
   process), or is it already within the existing instance objective's scope
   since `packages/quay` is already part of the v0 skeleton?
 - Which V_instance/V_meta factor(s) should credit this work?
-- Should `experiment/ITERATION-PROMPTS.md` be revised to encode the
+- Should `experiments/quay-native-bootstrap/ITERATION-PROMPTS.md` be revised to encode the
   constraints in §2-§3 above, and if so, in what form?
 
 This document intentionally stops at recording the discussion and the

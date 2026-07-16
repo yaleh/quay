@@ -1,0 +1,4 @@
+{
+  "name": "quay-native-methodology",
+  "description": "Use when inheriting or extending quay's task-authoring/execution methodology (Layer-2 quay:author/quay:execute Skills, task check gate, directive lifecycle, G3 out-of-band audit discipline) into a new scope \u2014 e.g. quay Core development, a follow-on BAIME experiment, or a new Provider. Extracted HALTED-NOT-CONVERGED from experiments/quay-native-bootstrap/ (quay-native bootstrap) at iteration 88: V_instance=0.6016, V_meta=0.0973, sigma_strict=0.8493. Do not present this as a converged methodology; it is an inheritance snapshot."
+}

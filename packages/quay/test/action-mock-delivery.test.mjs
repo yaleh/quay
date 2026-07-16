@@ -7,7 +7,7 @@
 //
 // This test is deliberately network-independent and does NOT exercise or
 // gate on live manda delivery at all — per DIR-008/§2.3's standing
-// constraint (see experiment/directives/archive/DIR-004-*.md and
+// constraint (see experiments/quay-native-bootstrap/directives/archive/DIR-004-*.md and
 // DIR-005-*.md: live manda delivery has repeatedly been shown to be a
 // per-session, per-moment fact, not a reliably available one). The whole
 // point of this mode is to give action-composition logic a delivery path

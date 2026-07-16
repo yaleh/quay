@@ -4,7 +4,7 @@
 // runs end-to-end (config -> mcp -> serve -> action -> Skill -> done)").
 // Prior to this task, this chain had only ever been exercised by a manual
 // curl/browser walkthrough once, in iteration 0
-// (experiment/timing/iteration-0.log) — never by an automated, re-runnable
+// (experiments/quay-native-bootstrap/timing/iteration-0.log) — never by an automated, re-runnable
 // test. This closes that gap, following the same isolation pattern
 // task-check.test.mjs (QN-027) already established: a real quay-native MCP
 // child process over stdio, spun up against a temporary tasks dir, with a

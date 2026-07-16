@@ -229,7 +229,7 @@ has been developed. Start with:
   — the native Provider's design (task store, ABI, gate, Skills).
 - [`docs/proposals/quay-bootstrap-experiment.md`](docs/proposals/quay-bootstrap-experiment.md)
   — the BAIME self-hosting bootstrap experiment protocol that has driven
-  this repository's own iterative development (`experiment/` holds its
+  this repository's own iterative development (`experiments/quay-native-bootstrap/` holds its
   running log, provenance ledger, and per-iteration reports).
 
 If you only want to install and use `quay`, you can stop here — none of

@@ -171,7 +171,7 @@ against this repository's actual issue #4 during QN-024 (one via
 --provider github` passthrough), each independently re-verified by a
 fresh `gh issue view --json` read (not by trusting the write call's own
 return value), and the issue was restored to its original label
-afterward. See `experiment/provenance.md`'s iteration-10 section and
+afterward. See `experiments/quay-native-bootstrap/provenance.md`'s iteration-10 section and
 `tasks/QN-024.md` for the full transcript.
 
 Covered by `test/write.test.mjs`.
@@ -207,7 +207,7 @@ live-verified (iteration 25, QN-035, DIR-006).** Through iteration 24 this
 section documented compound/epic support as "deliberately out of scope,"
 reasoning that no real compound GitHub-backed task had organically
 appeared in this repo's backlog. A human-asserted directive (DIR-006,
-`experiment/directives/archive/DIR-006-implement-quay-github-compound-epic-support.md`)
+`experiments/quay-native-bootstrap/directives/archive/DIR-006-implement-quay-github-compound-epic-support.md`)
 explicitly rejected that reasoning as a permanent excuse and required
 real implementation, a **deliberately-created** real compound issue
 structure (not a synthetic fixture), and live end-to-end verification.
@@ -257,7 +257,7 @@ This has now been done:
   both the "before" (1/4 AC checked, one child still todo) and "after"
   (4/4 AC checked, both children done) states — the same reusability/
   transfer proof QN-028 established for the primitive-only gate, now
-  extended to the compound path. See `experiment/provenance.md`'s
+  extended to the compound path. See `experiments/quay-native-bootstrap/provenance.md`'s
   iteration-25 section and `tasks/QN-035.md` for the full transcript.
 - Covered by `test/compound-gate.test.mjs` (24 assertions, injected-
   fixture unit coverage mirroring native's own
@@ -301,7 +301,7 @@ added QN-027/iteration 13, zero backend-specific branching) was then run
 against the same two issues via `quay task check gh-3/gh-4 --provider
 github --json` and produced byte-identical JSON to the direct
 `quay-github` CLI's own output — the concrete reusability/transfer proof
-this task exists to produce. See `experiment/provenance.md`'s
+this task exists to produce. See `experiments/quay-native-bootstrap/provenance.md`'s
 iteration-17 section and `tasks/QN-028.md` for the full transcript.
 
 Covered by `test/gate.test.mjs`.
@@ -353,7 +353,7 @@ Method's `write-proposal` step (`quay task view <id> --provider github
 --json`) were run for real against a live `yaleh/quay` GitHub issue,
 confirming the Skill's own documented steps — not a hand-simulated
 substitute — correctly reach quay-github when told `provider: github`.
-See `experiment/iterations/iteration-18.md` for the full transcript.
+See `experiments/quay-native-bootstrap/iterations/iteration-18.md` for the full transcript.
 
 ### 3.7 MCP stdio transport regression coverage (iteration 37, QN-048)
 

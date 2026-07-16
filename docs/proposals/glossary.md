@@ -51,22 +51,22 @@ The ABI is **data-only**. Triggering (actions) is a host-owned edge, not part of
 ## Subagent dispatch mechanisms (added by DIR-012, iteration 65)
 
 Two distinct mechanisms exist for spawning a fresh-context subagent inside
-this experiment's own sessions. Prior text in `experiment/` used the bare
+this experiment's own sessions. Prior text in `experiments/quay-native-bootstrap/` used the bare
 word "subagent" for both, which produced a real terminology gap (a human
 expectation about one mechanism was initially read as applying to the
-other — see `experiment/directives/archive/
+other — see `experiments/quay-native-bootstrap/directives/archive/
 DIR-012-nested-subagent-terminology-and-audit-requirement.md`). Use these
 two explicit terms, never bare "subagent," wherever the distinction
 matters:
 
 | Term | Mechanism | Used by |
 |---|---|---|
-| **native subagent** | The platform's own `Agent`/Task tool: a fresh-context spawn within the same top-level session/orchestrator invocation, no manda involved. | This experiment's G3 out-of-band audit dispatch, today (`experiment/ITERATION-PROMPTS.md` §5 OUT-OF-BAND AUDIT). |
-| **manda nested subagent** | A subagent that reaches back out to a live broker session via manda's own cap-request mechanism (`mcp__plugin_manda_manda__Agent`), relayed over a `cap-requests-<name>` channel to a parent-broker session that is actively watching it. See `experiment/directives/archive/DIR-011-manda-agent-live-verified-tool-name-latency.md` for the live-verified tool name and latency profile. | Not currently used by any mechanism this repository's protocol depends on for its own gate or audit steps (per DIR-011's own Resolution, part b). |
+| **native subagent** | The platform's own `Agent`/Task tool: a fresh-context spawn within the same top-level session/orchestrator invocation, no manda involved. | This experiment's G3 out-of-band audit dispatch, today (`experiments/quay-native-bootstrap/ITERATION-PROMPTS.md` §5 OUT-OF-BAND AUDIT). |
+| **manda nested subagent** | A subagent that reaches back out to a live broker session via manda's own cap-request mechanism (`mcp__plugin_manda_manda__Agent`), relayed over a `cap-requests-<name>` channel to a parent-broker session that is actively watching it. See `experiments/quay-native-bootstrap/directives/archive/DIR-011-manda-agent-live-verified-tool-name-latency.md` for the live-verified tool name and latency profile. | Not currently used by any mechanism this repository's protocol depends on for its own gate or audit steps (per DIR-011's own Resolution, part b). |
 
 Do not call the manda mechanism a "nested subagent" without the "manda"
 qualifier, and do not call the platform's own `Agent`/Task tool a
-"subagent" without the "native" qualifier, in any `experiment/` document
+"subagent" without the "native" qualifier, in any `experiments/quay-native-bootstrap/` document
 where the two could be confused.
 
 ## Reserved for the future

@@ -44,7 +44,7 @@ lanes:
 # CURRENT STATE (corrected iteration 40, QN-051): quay:author and
 # quay:execute are real, native Skills (packages/quay-native/skills/author/,
 # .../execute/) that this table's mapping actively and currently drives; the
-# seed was retired iterations ago. See experiment/provenance.md for the full
+# seed was retired iterations ago. See experiments/quay-native-bootstrap/provenance.md for the full
 # per-task {author_by, execute_by, gate_by} record and current σ.
 status_skill_map:
   todo: "quay:author"

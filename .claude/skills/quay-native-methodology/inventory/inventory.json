@@ -1,0 +1,38 @@
+{
+  "skill_name": "quay-native-methodology",
+  "extracted_from": "experiments/quay-native-bootstrap/ (quay-native bootstrap experiment)",
+  "extracted_at": "2026-07-16",
+  "source_status": "HALTED, NOT CONVERGED (human owner decision, iteration 88)",
+  "protocol_doc": "docs/proposals/quay-bootstrap-experiment.md",
+  "extraction_rationale_doc": "docs/proposals/quay-core-bootstrap-experiment-v2.md (section 2.1)",
+  "structure": {
+    "templates": ["directive-template.md"],
+    "reference": [
+      "patterns.md",
+      "v-meta-stall-analysis.md",
+      "gate-mechanics.md",
+      "directive-lifecycle.md",
+      "g3-audit-discipline.md",
+      "case-studies/iteration-88-abi-symmetry-walkthrough.md"
+    ],
+    "examples": [
+      "quay-author-SKILL.md (copied verbatim from packages/quay-native/skills/author/SKILL.md)",
+      "quay-execute-SKILL.md (copied verbatim from packages/quay-native/skills/execute/SKILL.md)"
+    ],
+    "scripts": [
+      "count-artifacts.sh",
+      "extract-patterns.py",
+      "generate-frontmatter.py",
+      "validate-skill.sh"
+    ]
+  },
+  "final_metrics": {
+    "V_instance": 0.6016,
+    "V_meta": 0.0973,
+    "sigma_strict": 0.8493,
+    "V_meta_flat_since_iteration": 66,
+    "V_meta_flat_iteration_count": "22+ consecutive as of iteration 88"
+  },
+  "convergence_criteria_met": "0 of 5 (protocol section 7)",
+  "note": "This inventory describes a deliberate pre-stop extraction (protocol deviation), not a post-convergence extraction. See EXTRACTION-SUMMARY.md at experiments/quay-native-bootstrap/EXTRACTION-SUMMARY.md."
+}

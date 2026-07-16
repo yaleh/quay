@@ -1,7 +1,7 @@
 // QN-016 (iteration 7): recursive childrenStatus() re-verification.
 //
 // Iteration 6's independent, out-of-band audit
-// (experiment/audits/iteration-6-independent-adjudicate.md, Finding 1) found
+// (experiments/quay-native-bootstrap/audits/iteration-6-independent-adjudicate.md, Finding 1) found
 // that childrenStatus() only checks one level deep (child.status), not
 // recursively into a child's own children/grandchildren. A `done` epic whose
 // grandchild reverted would not be caught by the compound gate check. This

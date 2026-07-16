@@ -1,0 +1,28 @@
+{
+  "source": "/home/yale/work/quay/experiments/quay-native-bootstrap/provenance.md",
+  "v_instance_values_found": [
+    "0.5813",
+    "0.5813",
+    "0.5883",
+    "0.5954",
+    "0.6016"
+  ],
+  "v_meta_values_found": [
+    "0.0973",
+    "0.0973",
+    "0.0973",
+    "0.0973",
+    "0.0973"
+  ],
+  "sigma_strict_values_found": [
+    "0.8986",
+    "0.8857",
+    "0.8732",
+    "0.8611",
+    "0.8493"
+  ],
+  "last_v_instance": "0.6016",
+  "last_v_meta": "0.0973",
+  "last_sigma_strict": "0.8493",
+  "note": "HALTED NOT CONVERGED per iteration 88 \u2014 do not treat as final/converged values without checking the actual final iteration report."
+}

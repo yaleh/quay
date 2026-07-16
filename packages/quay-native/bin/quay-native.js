@@ -15,7 +15,7 @@ function findRepoRoot(startDir) {
   // default tasks dir resolves to the repo root's `tasks/`, not to whatever
   // directory `quay-native` happened to be invoked from. This fixes the
   // CWD-resolution footgun flagged by the independent audit in iteration 2
-  // and reconfirmed in iteration 3 (experiment/audits/iteration-3-independent-
+  // and reconfirmed in iteration 3 (experiments/quay-native-bootstrap/audits/iteration-3-independent-
   // adjudicate.md "New bugs found" #1): omitting QUAY_NATIVE_TASKS_DIR while
   // running from packages/quay-native/ silently resolved tasks from
   // packages/quay-native/tasks/ (a near-empty stray directory) instead of the

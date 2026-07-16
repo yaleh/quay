@@ -32,7 +32,7 @@
 // precondition (checked live each iteration, not embedded as an automated
 // test's pass/fail condition), the LIVE browser verification is this
 // iteration's own real, run-once evidence (recorded in
-// experiment/iterations/iteration-35.md), not fabricated into this file.
+// experiments/quay-native-bootstrap/iterations/iteration-35.md), not fabricated into this file.
 // What THIS file can and does assert mechanically, forever, without a
 // browser: the root-caused, mechanically-checkable condition that was
 // causing the mojibake — the exact `Content-Type` header value and byte
