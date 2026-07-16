@@ -1,6 +1,6 @@
 # DIR-017
 
-- **status:** pending
+- **status:** archived (resolved iteration 73 — see Resolution below)
 - **created_by:** human (Yale), asserted directly in this live conversation
 - **created_at:** 2026-07-16
 - **title:** Require a deliberate, scoped manda nested-subagent verification trial during an iteration — not passive "prefer it if an organic occasion arises"
@@ -88,7 +88,81 @@ feature/credit work, and both recorded plainly regardless of outcome.
 
 ## Resolution
 
-<!-- Filled in by whichever iteration applies this directive. -->
+**resolved_by:** iteration 73
+**outcome:** applied (both requested actions)
+
+**Action 1 — §0b amendment, applied.** `experiment/ITERATION-PROMPTS.md`
+§0b's heading was updated to note "time-bounded trial obligation added by
+DIR-017, iteration 73." A new subsection, "### Time-bounded affirmative
+obligation (added by DIR-017, iteration 73)," was added after the
+pre-existing "Mandatory caveats" list, stating: the N=3-consecutive-
+iteration rule (iterations 70-72 elapsed since DIR-015 with zero recorded
+trial, so the obligation was triggered at exactly this iteration, matching
+DIR-017's own suggested "by iteration 73 at the latest" window); the
+minimum content every future trial run under this obligation must include
+(§0a check to the extent inspectable, G6 check via `ps`, an explicit
+responder-loop-existence check, one attempt + at most one bounded retry,
+no V-factor claim, plain recording of the result either way); and an
+explicit "Explicitly NOT reopened by this addition" closing paragraph
+mirroring DIR-016 action 3's own non-reopening precedent, reaffirming
+DIR-015 action 3's permanent retirement of manda-for-G3-audit-dispatch is
+untouched. See `experiment/iterations/iteration-73.md` §5 ("Action 1")
+for the full diff description.
+
+**Action 2 — the bounded trial itself, applied and run live.** Dispatched
+via `mcp__plugin_manda_manda__Agent`, a minimal PING/PONG-style prompt
+("reply PONG"), modeled directly on iteration 14's own PONG check and
+DIR-014 action 3's bounded re-tests, not invented ad hoc:
+  - **Attempt 1** (90s timeout, 2026-07-16T02:41:25Z start): FAILED —
+    `MCP error -32603: timeout waiting for cap "agent.spawn" result after
+    1m30s: context deadline exceeded`.
+  - **Attempt 2 / the one permitted bounded retry** (60s timeout,
+    2026-07-16T02:43:02Z start): FAILED — identical error signature,
+    `timeout waiting for cap "agent.spawn" result after 1m0s: context
+    deadline exceeded`.
+  - Total elapsed: ~2m42s, well within "bounded, not indefinite."
+  - **Preconditions confirmed before the trial**: G6 — `manda monitor
+    quay-bootstrap --root .` (PID 2621778) confirmed live and a
+    descendant of the driving session's own process tree (PID 3176586),
+    via direct `ps` re-verification (see `iteration-73.md` §2). §0a — not
+    self-verifiable from inside the executing subagent's own context, per
+    the same structural limitation iterations 69-72 already identified;
+    recorded as such, not guessed.
+  - **Responder-loop-existence check, performed and recorded as
+    requested**: a full `ps -ef | grep -E "manda (monitor|serve)"` scan
+    found only `manda monitor <name> --root .` processes (three: `cord`,
+    `terminal`, `quay-bootstrap`) and `manda serve start` daemon
+    processes — **no separate, actively-watching responder-loop process**
+    (something that claims/answers `cap-requests-*` events, as opposed to
+    a monitor that merely renders them to its own output) was found
+    anywhere in the live process tree. This is consistent with, not a
+    reversal of, DIR-014's own already-established finding that the
+    inbound rendering adapter is stateless with "no side effects." Its
+    absence alone is sufficient to fully explain both timeouts without
+    reopening any settled question.
+  - **Outcome recorded plainly: FAILURE, both attempts, identical error
+    signature to DIR-011/012/014's own prior findings.** This is the
+    third independent, live-reproduced confirmation of the same root
+    cause under G6+§0a-corrected preconditions (after iteration 65's and
+    iteration 68's own trials) — the mechanism's dev/test unreliability is
+    now well-established, not suppressed or softened. See
+    `experiment/iterations/iteration-73.md` §5 ("Action 2") for the full
+    transcript.
+
+**No V_instance or V_meta factor movement is claimed for either action**,
+exactly as this directive's own action 2 required — the trial's failure
+is data about the mechanism's reliability, not a scoring event.
+
+**DIR-015 action 3's settled scope is explicitly NOT reopened**: manda
+nested-subagent dispatch remains permanently out of bounds for G3 audit
+dispatch specifically. This directive and its trial concern the separate
+dev/test capability-borrowing application (§0b) only.
+
+**No self-audit artifact was created by this iteration** — no file with
+"audit"/"adjudicate" in its name was authored or committed by the
+executing session; the independent out-of-band G3 audit of this
+iteration's own work is, per standing discipline, exclusively the
+top-level orchestrator's separate, later, freshly-dispatched job.
 
 ## Progress note (added 2026-07-16, iteration 72)
 

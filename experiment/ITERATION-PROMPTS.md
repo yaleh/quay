@@ -224,7 +224,7 @@ bounds for the audit path regardless of dispatch mode.
 
 ---
 
-## §0b. Manda nested-subagent guidance for development/testing operations (added by DIR-015, iteration 70)
+## §0b. Manda nested-subagent guidance for development/testing operations (added by DIR-015, iteration 70; time-bounded trial obligation added by DIR-017, iteration 73)
 
 **Scope**: this section applies to development or testing operations
 within an iteration's own work — e.g. a task that needs a subagent to
@@ -233,7 +233,8 @@ original motivating use case for manda's `Agent`/cap-request mechanism).
 It does **not** apply to the G3 out-of-band audit dispatch, which is
 governed exclusively by "§5 OUT-OF-BAND AUDIT" above and has permanently
 retired manda nested-subagent use for that specific purpose (DIR-015
-action 3).
+action 3). **This boundary is not reopened by DIR-017 either — see the
+explicit non-reopening note at the end of this section.**
 
 **Guidance**: once §0a's non-blocking-dispatch precondition is in place
 (the orchestrator confirms it dispatched the iteration subagent with
@@ -263,6 +264,55 @@ its own evidence, every time)**:
   without comment — failures here are useful data for the mechanism's own
   reliability track record, the same way DIR-011/012/014's own failed and
   successful trials were recorded.
+
+### Time-bounded affirmative obligation (added by DIR-017, iteration 73)
+
+The guidance above, as originally written, activates only if some
+iteration's own task *organically* needs capability-borrowing — a purely
+passive/conditional trigger. DIR-017's Finding (`experiment/directives/
+archive/DIR-017-*.md`) observed this class of trigger has a demonstrated
+tendency to produce zero action indefinitely (the same shape as
+`reusability`/`completeness`/`validation` sitting flat for dozens of
+consecutive iterations), and that leaving §0b conditional-only risked the
+manda nested-subagent mechanism's dev/test reliability question never
+actually being tested again after DIR-015 (iteration 70).
+
+**Obligation**: if no iteration has recorded a live-verified manda
+nested-subagent trial (success OR failure — either counts as "recorded")
+for **N=3 consecutive iterations** since DIR-015 was applied, the next
+iteration **must** construct and run a minimal, low-stakes dev/test
+operation for the sole purpose of exercising the manda nested-subagent
+mechanism end-to-end — modeled directly on iteration 14's PONG check /
+DIR-014 action 3's bounded (150s/60s) re-tests, not invented ad hoc —
+rather than merely noting the guidance "could" apply. This obligation was
+triggered and discharged at iteration 73 itself (iterations 70-72 elapsed
+with no recorded trial; see iteration-73.md for the trial's own record —
+one 90s attempt, one 60s retry, both failed with the identical
+`agent.spawn` timeout signature already on record from DIR-011/012/014).
+
+**Every future trial run under this obligation must, at minimum**:
+- Confirm §0a's non-blocking-dispatch precondition for the trial's own
+  dispatch context, to whatever extent it is inspectable from inside that
+  context (per §0a's own structural limitation).
+- Confirm G6 (a live `manda monitor` bound to the driving session's own
+  process tree) via `ps`, per the mechanized procedure above.
+- Explicitly check and record whether an **actively-watching responder
+  loop** exists on the broker side (not merely a bound, stateless monitor
+  process) — DIR-014's own finding (the "no side effects" rendering
+  adapter) means the absence of such a loop alone can fully explain a
+  further timeout, without reopening any settled question about the
+  mechanism's fundamental viability.
+- Use one realistic attempt with a reasonable timeout (60-150s) and, if it
+  fails, at most one further bounded retry — never an open-ended loop.
+- Claim **no V_instance or V_meta factor movement** regardless of outcome,
+  and record the result plainly whether success or failure.
+
+**Explicitly NOT reopened by this addition (mirrors DIR-016 action 3's own
+non-reopening precedent)**: this addition governs the dev/test
+capability-borrowing use case only. It does not touch, and must not be
+read as touching, DIR-015 action 3's permanent retirement of manda
+nested-subagent use for G3 audit dispatch specifically — that boundary
+remains exactly as stated in "§5 OUT-OF-BAND AUDIT" above, unmodified.
 
 ---
 
