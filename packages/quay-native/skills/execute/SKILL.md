@@ -359,6 +359,18 @@ executeEpic(task, provider) = {
 - Not yet dispatched via manda in a background worker by this Skill itself
   (see quay:author's same gap note — dispatch binding is currently the
   host's job).
+- **Update (experiment 2, iteration 4) — conditional manda-proxied Agent
+  now demonstrated live:** same finding as `quay:author`'s iteration-4
+  update above; applies equally to this Skill. `mcp__plugin_manda_manda__Agent`
+  was successfully called with `to="cord"`, `timeout=90`, returning
+  `{"output":"PONG"}` on first attempt (daemon live at `.manda/hub.addr`
+  port 46215; live broker confirmed). DIR-020 hard rule applies: caller
+  session must differ from broker session. The primitive is conditional
+  (daemon live + non-self broker required), not unconditional — the
+  completeness gap's specific wording ("reliable, unconditional native
+  fresh-context spawn") is not yet closed. Reliability track record: 1
+  successful call. See `quay:author`'s iteration-4 update for full
+  constraints and evidence.
 - **This Skill itself remains entirely unexercised as of iteration 1** — its
   own authoring task (QN-004) was driven to `ready`, but that is a plan for
   retiring its seed dependency, not the retirement itself. `execute_by` is

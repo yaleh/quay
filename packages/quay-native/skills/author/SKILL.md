@@ -170,3 +170,30 @@ authorTask(id, provider) = {
   documented above therefore remains this Skill's actual operating mode
   as of iteration 14, not merely a historical iteration-1 finding that
   might now be stale.
+- **Update (experiment 2, iteration 4) — conditional manda-proxied Agent
+  now demonstrated live, replacing the imprecise "no primitive" standing
+  note:** `mcp__plugin_manda_manda__Agent` was confirmed available as a
+  deferred tool in experiment 2's iteration 3 (ToolSearch). In iteration 4,
+  the manda daemon was confirmed reachable at the address in
+  `.manda/hub.addr` (port 46215 — not port 28912 as previously assumed; the
+  `/healthz` probe must target `.manda/hub.addr`'s actual address). A live
+  `manda monitor cord` broker was running (orchestrator session, PID-confirmed
+  via `ps aux`). A bounded trial call was issued:
+  `mcp__plugin_manda_manda__Agent(prompt="respond with the word PONG and
+  nothing else", to="cord", timeout=90)` — returned `{"output":"PONG"}` on
+  the first attempt, no timeout, no error. This is the first confirmed
+  successful synchronous Agent dispatch in the experiment's history.
+  **Constraints that remain:** (a) requires live daemon (`.manda/hub.addr`
+  reachable) AND a named broker/monitor armed on the target channel;
+  (b) DIR-020 hard rule — the calling session must differ from the session
+  that owns the broker; a self-deadlock results if the caller IS the broker.
+  **This is a conditional, not unconditional, primitive.** It does not close
+  the completeness gap (which requires a *reliable, unconditional* native
+  fresh-context spawn — the environmental gap's specific wording from
+  `v-meta-stall-analysis.md`). But it narrows the characterization from "no
+  primitive available" to "conditional manda-proxied Agent available when
+  daemon is live and a non-self broker is armed." Reliability track record as
+  of iteration 4: 1 successful call (PONG trial). A multi-call track record
+  is needed before claiming reliable availability — see
+  `experiments/quay-core-bootstrap/iterations/iteration-4.md` §3 for the
+  full primary-source trial record.
