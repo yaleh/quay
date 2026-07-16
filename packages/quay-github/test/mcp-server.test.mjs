@@ -75,64 +75,80 @@ async function main() {
   const client = new Client({ name: "test-agent", version: "0.0.1" });
   await client.connect(transport);
 
-  // ---- 1. Resource enumeration ----
-  const resources = await client.listResources();
-  const uris = resources.resources.map((r) => r.uri).sort();
-  assert(uris.includes("provider://manifest"), "quay-github mcp lists provider://manifest");
-  const entry = resources.resources.find((r) => r.uri === "provider://manifest");
-  assert(
-    typeof entry?.name === "string" && entry.name.length > 0,
-    `provider://manifest's listed entry carries a non-empty name field (got: ${JSON.stringify(entry)})`
-  );
-  const manifestRead = await client.readResource({ uri: "provider://manifest" });
-  const manifestJson = JSON.parse(manifestRead.contents[0].text);
-  assert(manifestJson.id === "github", `provider://manifest resolves to this Provider's own declared id (got: ${manifestJson.id})`);
-
-  // ---- 2. task_list ----
-  const listResult = await client.callTool({ name: "task_list", arguments: {} });
-  const ids = listResult.structuredContent.tasks.map((t) => t.id).sort();
-  assert(ids.includes("gh-3") && ids.includes("gh-4"), `task_list includes the real, currently-open issues gh-3 and gh-4 (got: ${JSON.stringify(ids)})`);
-
-  // ---- 3. task_get for gh-3, cross-checked against the direct CLI ----
-  {
-    const viaMcp = await client.callTool({ name: "task_get", arguments: { id: "gh-3" } });
-    const viaCli = cliJson(["task", "get", "gh-3", "--json"]);
+  // NOTE (added iteration 75, CI-hang fix): everything from here to the
+  // matching `finally` below MUST stay inside this try/finally. Without
+  // it, any live `gh api` failure this file did not anticipate (e.g. a
+  // permissions/rate-limit error different from the "unknown id"/
+  // "unreachable repo" cases explicitly tested below) throws mid-`main()`
+  // and skips `client.close()` entirely, leaving the child `quay-github
+  // mcp` subprocess (and its stdio pipes) alive -- which hangs `node
+  // --test` indefinitely (observed live in GitHub Actions run 29468690142,
+  // an HTTP 403 on task_list from an under-scoped CI token left an orphan
+  // process and the job only ended via its 10-minute timeout-minutes cap).
+  try {
+    // ---- 1. Resource enumeration ----
+    const resources = await client.listResources();
+    const uris = resources.resources.map((r) => r.uri).sort();
+    assert(uris.includes("provider://manifest"), "quay-github mcp lists provider://manifest");
+    const entry = resources.resources.find((r) => r.uri === "provider://manifest");
     assert(
-      JSON.stringify(viaMcp.structuredContent.task) === JSON.stringify(viaCli),
-      "task_get('gh-3') via quay-github mcp is byte-identical to the direct CLI's own `task get gh-3 --json` output"
+      typeof entry?.name === "string" && entry.name.length > 0,
+      `provider://manifest's listed entry carries a non-empty name field (got: ${JSON.stringify(entry)})`
     );
-  }
+    const manifestRead = await client.readResource({ uri: "provider://manifest" });
+    const manifestJson = JSON.parse(manifestRead.contents[0].text);
+    assert(manifestJson.id === "github", `provider://manifest resolves to this Provider's own declared id (got: ${manifestJson.id})`);
 
-  // ---- 4. task_get for an unknown id ----
-  {
-    const r = await client.callTool({ name: "task_get", arguments: { id: "gh-999999" } });
-    assert(r.isError === true, "task_get with an unknown id returns isError:true, not a crash");
-  }
+    // ---- 2. task_list ----
+    const listResult = await client.callTool({ name: "task_list", arguments: {} });
+    assert(
+      listResult.isError !== true && listResult.structuredContent?.tasks,
+      `task_list succeeds against the live yaleh/quay repo, not isError (got: ${JSON.stringify(listResult).slice(0, 300)})`
+    );
+    const ids = (listResult.structuredContent?.tasks ?? []).map((t) => t.id).sort();
+    assert(ids.includes("gh-3") && ids.includes("gh-4"), `task_list includes the real, currently-open issues gh-3 and gh-4 (got: ${JSON.stringify(ids)})`);
 
-  // ---- 5. task_check for gh-3 and gh-4, cross-checked against the direct CLI ----
-  for (const id of ["gh-3", "gh-4"]) {
-    const viaMcp = await client.callTool({ name: "task_check", arguments: { id } });
-    let viaCli;
-    try {
-      viaCli = cliJson(["task", "check", id, "--json"]);
-    } catch (err) {
-      // the direct CLI sets process.exitCode = 1 on ok:false, which makes
-      // execFileSync throw; stdout is still captured on err.stdout.
-      viaCli = JSON.parse(err.stdout.toString());
+    // ---- 3. task_get for gh-3, cross-checked against the direct CLI ----
+    {
+      const viaMcp = await client.callTool({ name: "task_get", arguments: { id: "gh-3" } });
+      const viaCli = cliJson(["task", "get", "gh-3", "--json"]);
+      assert(
+        JSON.stringify(viaMcp.structuredContent?.task) === JSON.stringify(viaCli),
+        "task_get('gh-3') via quay-github mcp is byte-identical to the direct CLI's own `task get gh-3 --json` output"
+      );
     }
-    assert(
-      JSON.stringify(viaMcp.structuredContent) === JSON.stringify(viaCli),
-      `task_check('${id}') via quay-github mcp is byte-identical to the direct CLI's own \`task check ${id} --json\` output (mcp: ${JSON.stringify(viaMcp.structuredContent)}, cli: ${JSON.stringify(viaCli)})`
-    );
-  }
 
-  // ---- 6. task_write for an unknown id only -- no real write ever attempted ----
-  {
-    const r = await client.callTool({ name: "task_write", arguments: { id: "gh-999999", status: "ready" } });
-    assert(r.isError === true, "task_write with an unknown id returns isError:true, not a crash (this is the ONLY task_write call this file makes -- no live status write to a real issue ever occurs)");
-  }
+    // ---- 4. task_get for an unknown id ----
+    {
+      const r = await client.callTool({ name: "task_get", arguments: { id: "gh-999999" } });
+      assert(r.isError === true, "task_get with an unknown id returns isError:true, not a crash");
+    }
 
-  await client.close();
+    // ---- 5. task_check for gh-3 and gh-4, cross-checked against the direct CLI ----
+    for (const id of ["gh-3", "gh-4"]) {
+      const viaMcp = await client.callTool({ name: "task_check", arguments: { id } });
+      let viaCli;
+      try {
+        viaCli = cliJson(["task", "check", id, "--json"]);
+      } catch (err) {
+        // the direct CLI sets process.exitCode = 1 on ok:false, which makes
+        // execFileSync throw; stdout is still captured on err.stdout.
+        viaCli = JSON.parse(err.stdout.toString());
+      }
+      assert(
+        JSON.stringify(viaMcp.structuredContent) === JSON.stringify(viaCli),
+        `task_check('${id}') via quay-github mcp is byte-identical to the direct CLI's own \`task check ${id} --json\` output (mcp: ${JSON.stringify(viaMcp.structuredContent)}, cli: ${JSON.stringify(viaCli)})`
+      );
+    }
+
+    // ---- 6. task_write for an unknown id only -- no real write ever attempted ----
+    {
+      const r = await client.callTool({ name: "task_write", arguments: { id: "gh-999999", status: "ready" } });
+      assert(r.isError === true, "task_write with an unknown id returns isError:true, not a crash (this is the ONLY task_write call this file makes -- no live status write to a real issue ever occurs)");
+    }
+  } finally {
+    await client.close();
+  }
 
   // ---- 7. task_list against an unreachable owner/repo (QN-064) ----
   // Separate subprocess/transport (a distinct env from the main `repoEnv`
@@ -153,21 +169,22 @@ async function main() {
     });
     const brokenClient = new Client({ name: "test-agent-broken", version: "0.0.1" });
     await brokenClient.connect(brokenTransport);
+    try {
+      const r1 = await brokenClient.callTool({ name: "task_list", arguments: {} });
+      assert(r1.isError === true, "task_list against an unreachable owner/repo returns isError:true, not a crash");
+      assert(
+        typeof r1.content?.[0]?.text === "string" && r1.content[0].text.length > 0,
+        "task_list's isError:true result carries non-empty error text"
+      );
 
-    const r1 = await brokenClient.callTool({ name: "task_list", arguments: {} });
-    assert(r1.isError === true, "task_list against an unreachable owner/repo returns isError:true, not a crash");
-    assert(
-      typeof r1.content?.[0]?.text === "string" && r1.content[0].text.length > 0,
-      "task_list's isError:true result carries non-empty error text"
-    );
-
-    const r2 = await brokenClient.callTool({ name: "task_list", arguments: {} });
-    assert(
-      r2.isError === true,
-      "a second, independent task_list call against the same broken Provider ALSO returns isError:true (the quay-github mcp process survives the first failure)"
-    );
-
-    await brokenClient.close();
+      const r2 = await brokenClient.callTool({ name: "task_list", arguments: {} });
+      assert(
+        r2.isError === true,
+        "a second, independent task_list call against the same broken Provider ALSO returns isError:true (the quay-github mcp process survives the first failure)"
+      );
+    } finally {
+      await brokenClient.close();
+    }
   }
 
   if (failures > 0) {
