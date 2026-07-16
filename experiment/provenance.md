@@ -10461,3 +10461,198 @@ or copy-pasted result. Future iterations (and their independent audits)
 should treat "the pending directory is empty" claims with the same
 skepticism as a σ figure: verify by re-running `ls` directly, not by
 trusting the quoted transcript.
+
+## Iteration 76: QN-071 — close the GitHub-Provider-side sibling of QN-069: Core's `taskCheck()` passthrough, needs-human/unrecognized-status shapes, over the GitHub Provider
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-071 | Add test coverage for Core's `task_check` passthrough surfacing the gate's needs-human soft-stop and unrecognized-status shapes end-to-end against the **GitHub** Provider specifically (QN-069 covered only the native Provider) | seed | seed | seed | done |
+
+σ (strict) = 62/70 = **0.8857** (down from 62/69 = 0.8986) — the
+denominator grew by the one new task (`tasks/QN-071.md`), but the
+numerator does not, since this task's `{author_by, execute_by, gate_by}`
+are all `seed` (this work was performed directly by the iteration-executor
+session, not dispatched through any `quay:*` Skill — no such Skill exists
+in this environment for this class of ad hoc test-infrastructure work).
+This is an honest, expected decrease, not an error: adding any
+seed-provenance task to the denominator without a matching native-
+provenance numerator increment mechanically lowers σ_strict, and the
+canonical exclusion set (QN-003, QN-004, QN-006) is unaffected by this
+addition (none of the three is QN-071).
+
+**Genuinely new angle, not a repeat of QN-069/QN-068/QN-070.** QN-069
+(iteration 66) closed Core's `taskCheck()` passthrough gap for the
+needs-human/unrecognized-status shapes, but only against the **native**
+Provider (`packages/quay/test/task-check.test.mjs`, hand-edited on-disk
+task files). QN-068 (iteration 64) and QN-070 (iteration 69) each tested
+`checkGate()` directly against both Providers, including GitHub's
+`github-client.js#checkGate()` — but as a **direct unit test of the pure
+gate function**, never through Core's own MCP-mediated passthrough. No
+test anywhere in the suite (confirmed by direct grep against
+`packages/quay/test/mcp-server.test.mjs`'s GitHub-provider block, which
+only exercises `task_check` against the real, live, read-only-fixture
+issue gh-3's actual `ready`-status shape) exercised Core's `taskCheck()`
+passthrough against the **GitHub** Provider for the needs-human/
+unrecognized-status shapes specifically — the direct GitHub-side sibling
+of the exact gap QN-069 closed on the native side.
+
+**Constraint navigated**: issues #3/#4 on `yaleh/quay` are a strictly
+READ-ONLY test fixture and neither currently carries a needs-human/
+unrecognized-status label, so this could not be tested against the live
+fixture without either writing to it (forbidden) or depending on an
+unrelated, unstable fact about its current label state. No function-
+argument injection point exists in `github-client.js`'s own `check()`/
+`get()` path (confirmed by reading the source), and
+`mcp-server.js#startMcpServer()` hardcodes `createGithubClient({owner,
+repo})` directly — so no existing test mechanism reaches this path
+without a live `gh api` call.
+
+**New test-infrastructure mechanism**: a new fake-`gh` CLI fixture,
+`packages/quay-github/test/fixtures/fake-gh.mjs`, understanding exactly
+one invocation shape (`gh api repos/<owner>/<repo>/issues/<n>`, the only
+call `github-client.js`'s own `get()`/`check()` path makes), returning a
+test-supplied canned issue JSON via the `FAKE_GH_ISSUE_JSON` env var and
+exiting non-zero loudly for anything else. `packages/quay-github/test/
+task-check-passthrough.test.mjs` PATH-shadows a fresh temp dir containing
+a `gh` shim delegating to this fixture, spawns a REAL `quay-github mcp`
+subprocess and, separately, a real `quay mcp` Core-aggregation subprocess
+against it, asserting both layers surface the needs-human and
+unrecognized-status shapes unchanged for a synthetic fixture issue — zero
+live network calls, zero reads/writes against the real `yaleh/quay`
+repository. Verbatim, from this iteration's own run:
+
+```
+PASS: Core's taskCheck() passthrough surfaces the needs-human soft-stop shape unchanged (got: {"id":"NH-1","gate":"none","ok":false,"reason":"soft stop; human action required"})
+PASS: Core's taskCheck() passthrough surfaces the unrecognized-status shape unchanged (got: {"id":"BAD-1","gate":"unknown","ok":false,"reason":"unrecognized status bogus-status-value"})
+```
+
+Adversarially verified: temporarily removing `github-client.js`'s
+`needs-human` branch caused the new needs-human case to fail with the
+expected shape mismatch (falling through to "unrecognized status
+needs-human"); the source was then restored byte-identical (`git diff
+--stat -- packages/quay-github/src/github-client.js` empty) and the full
+suite re-run clean — the same disclosed technique QN-069's own Plan step 2
+used against `store.js`.
+
+Full regression suite and ABI symmetry re-confirmed:
+
+```
+$ node --test packages/*/test/*.test.mjs 2>&1 | tail -8
+ℹ tests 28
+ℹ pass 28
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 24423.227563
+
+$ node packages/quay-native/test/abi-symmetry.mjs 2>&1 | tail -1
+ALL FOUR SURFACES SYMMETRIC
+```
+
+```
+$ git diff --stat -- 'packages/*/src/*.js'
+(no output — confirmed zero source changes, test/fixture-only)
+```
+
+**V_instance factor reasoning:** `skeleton` credited **+0.01 (0.82 →
+0.83)**, applying the identical reasoning pattern iterations 55-70 used
+for their own new-angle-but-same-factor-shape closures (a runtime-
+exercised, adversarially-verified regression test closing a genuinely
+previously-uncovered branch, zero source diff). Applied here to content
+genuinely new relative to both QN-069's own closure (native Provider only)
+and QN-068/QN-070's closures (direct gate-function unit tests, no Core
+MCP passthrough): this iteration exercises Core's `taskCheck()` passthrough
+one layer above quay-github's own MCP tool, over a real stdio MCP
+connection, against the GitHub Provider specifically — a code path (Core's
+structuredContent-forwarding logic composed with quay-github's MCP server
+and `github-client.js#checkGate()`) that no prior test touches or
+regress-protects. `abi_symmetry` explicitly considered and rejected: this
+is not a new CLI-vs-MCP schema-equivalence claim — it is a passthrough-
+fidelity claim for a single client function against a second Provider,
+already the established boundary for `gate_correctness` reasoning below,
+not `abi_symmetry`. `gate_correctness` explicitly considered and rejected,
+applying the iteration-25/62-70 precedent: zero gate-logic source changed
+(`git diff --stat -- 'packages/*/src/*.js'` empty) —
+`github-client.js#checkGate()` and `provider-client.js#taskCheck()` were
+exercised by new tests, neither was modified. `skill_convergence`
+unchanged: no SKILL.md content touched, no new Skill branch exercised
+(QN-071 is an ordinary leaf task using the standard gated lifecycle,
+authored directly by the iteration-executor session rather than through a
+`quay:*` Skill, since none exists for this ad hoc test-infrastructure
+shape).
+
+```
+V_instance = 0.83 × 0.96 × 0.76 × 0.96 = 0.5813  (up from 0.5743)
+```
+
+**V_meta factor reasoning:** all four factors explicitly considered and
+held flat, consistent with iterations 62-70's own clean decisions to
+decline all four factors for structurally identical (test-coverage-only,
+zero-source-diff) closures. `completeness`: no Method/Skill content was
+edited this iteration (the shipped change is two new test-side files, a
+fixture and a test) — Core's passthrough logic and quay-github's gate
+logic already behaved correctly; this iteration proves it true at runtime
+for the GitHub Provider specifically, it does not close a gap in the
+Method's own self-containedness (§5.2's literal scope, per the
+iteration-9/18/29/61/63/64/69/70 precedent chain, re-confirmed this
+iteration). `effectiveness`: no scope-matched timing comparator exists for
+this task's specific shape (a passthrough-fidelity unit test with an
+adversarial break/restore cycle and a novel PATH-shadowing fixture, no
+live `gh api` call); manufacturing one would repeat the twelfth/thirteenth
+correction's exact category of error. `reusability`: seriously
+reconsidered given this task's explicit GitHub-Provider focus, but
+declined applying the direct, on-point, and repeatedly-applied precedent
+(QN-070's own iteration-69 investigation, the closest and most recent
+analogous case — itself explicitly investigated and declined on
+structurally identical grounds): §5.2's exact defining language requires
+"new, previously-absent production behavior... live-verified against a
+real compound-issue structure" (iteration-25/QN-035's own bar, reaffirmed
+at iteration 45 and again at iteration 69) — QN-071's actual shipped diff
+has `git diff --stat -- 'packages/*/src/*.js'` empty, `checkGate()`'s and
+`taskCheck()`'s production logic are completely unchanged, and the
+passthrough behavior QN-071's new test proves already existed, identically,
+before this task. This is structurally indistinguishable from QN-034/048/
+063/067/068/069/070, all correctly held flat — even less favorable than
+QN-070's own close call, since QN-071 tests an existing passthrough
+mechanism rather than porting a structural-boundary proof to a
+previously-untested Provider capability. `validation`: held flat — σ moved
+(down, mechanically, from the denominator effect described above) and a
+new independently-auditable artifact was added, but the `validation`
+factor as defined tracks the self-host proof mechanism itself, not each
+individual σ movement, consistent with iterations 62-70's treatment of
+their own σ-affecting, test-only closures.
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, narrow **skeleton-only** system
+increment (no Skill or capability created or modified in production
+source; a new, previously-absent regression-test artifact and a new
+process-boundary test-fixture mechanism, both scoped to test/fixture code
+only, closing a genuinely previously-uncovered Core-passthrough-over-
+GitHub-Provider gap). `completeness`, `reusability`, `effectiveness`, and
+`validation` remain the most stalled V_meta factors; `effectiveness`
+remains flat since iteration 23 (net); `reusability` remains flat since
+iteration 25 (net), with QN-070 (iteration 69) as the closest call and
+QN-071 (this iteration) seriously reconsidered and again honestly
+declined.
+
+**G6 finding**: mechanized check performed — a `manda monitor cord --root
+.` process exists as a live process on this host (PID 1044566), but is
+watching the wrong workspace (`/home/yale/work/manda`, confirmed via
+`curl http://localhost:21471/healthz` returning
+`{"root":"/home/yale/work/manda"}`), and in any case is not a descendant
+of this session's own process tree (session root PID 3176586; the monitor
+process's own lineage traces to a separate tmux session, PID 599935).
+**G6 is NOT satisfied** for this session, consistent with iterations
+74-75's own findings. This did not block this iteration's work (test-
+coverage additions require no manda dispatch).
+
+**Current state**: σ_strict = 62/70 = 0.8857, V_instance = 0.5813, V_meta
+= 0.0973.
+
+Full detail: `experiment/iterations/iteration-76.md`. Independent
+out-of-band audit: to be dispatched separately by the top-level
+orchestrator (not performed by this session, per standing G3 discipline).
