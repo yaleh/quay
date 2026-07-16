@@ -210,6 +210,76 @@ async function main() {
         `compound-shape assertions were genuinely exercising the childrenStatus rollup, not a ` +
         `coincidental pass`
     );
+
+    // QN-073 (iteration 87): a distinct, previously-uncovered passthrough
+    // shape one branch over from QN-072's — the `status: ready` compound
+    // (epic) rollup, i.e. the execute->done gate (store.js#check()'s
+    // `t.status === "ready"` branch), NOT the done-terminal branch QN-072
+    // covered. This is genuinely different code (a separate `if` block in
+    // store.js, guarded by its own `childrenOk` computation) and, unlike
+    // QN-072's `done`-branch rollup (which is purely informational/
+    // corrective metadata on an already-`ok`-computed result), here
+    // `childrenOk` is directly ANDed into the gate's own `ok` value
+    // (`const ok = acOk && childrenOk`) — i.e. a false-negative or
+    // false-positive bug in this branch would silently let (or block) a
+    // real ready->done transition, not just omit informational metadata.
+    // Confirmed via grep before writing this: no existing test (this file,
+    // compound-gate.test.mjs, compound-gate-recursive.test.mjs, or
+    // mcp-server.test.mjs) connects a `status: ready` compound fixture to
+    // Core's taskCheck() passthrough over a real MCP connection —
+    // compound-gate.test.mjs's own Cases 4/5 (ready-compound) call
+    // store.check() directly, never through provider-client.js.
+    execFileSync("node", [nativeBin, "task", "create", "EPIC-READY-CHILD-TODO", "--title", "Ready epic blocked on a child",
+      "--status", "ready", "--body", validSections + acDodChecked], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "edit", "EPIC-READY-CHILD-TODO", "--children", "CHILD-DONE,CHILD-TODO"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    const readyBlocked = await client.taskCheck("EPIC-READY-CHILD-TODO");
+    assert(
+      readyBlocked.gate === "execute->done" && readyBlocked.ok === false &&
+        typeof readyBlocked.reason === "string" &&
+        readyBlocked.reason.includes("CHILD-TODO") &&
+        Array.isArray(readyBlocked.childrenStatus) && readyBlocked.childrenStatus.length === 2,
+      `Core's taskCheck() passthrough surfaces the ready-compound "AC complete but a child ` +
+        `still todo" shape unchanged, including the childrenStatus array (got: ${JSON.stringify(readyBlocked)})`
+    );
+
+    execFileSync("node", [nativeBin, "task", "create", "EPIC-READY-ALL-DONE", "--title", "Ready epic with all children done",
+      "--status", "ready", "--body", validSections + acDodChecked], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "edit", "EPIC-READY-ALL-DONE", "--children", "CHILD-DONE"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    const readyAllDone = await client.taskCheck("EPIC-READY-ALL-DONE");
+    assert(
+      readyAllDone.gate === "execute->done" && readyAllDone.ok === true &&
+        Array.isArray(readyAllDone.childrenStatus) && readyAllDone.childrenStatus.length === 1 &&
+        readyAllDone.childrenStatus[0].id === "CHILD-DONE" && readyAllDone.childrenStatus[0].status === "done",
+      `Core's taskCheck() passthrough surfaces the ready-compound "AC complete and all ` +
+        `children done" positive shape unchanged, including per-child ids/statuses (got: ${JSON.stringify(readyAllDone)})`
+    );
+
+    // Adversarial: confirm this new coverage has real teeth. Sever
+    // EPIC-READY-CHILD-TODO's children and confirm Core's passthrough now
+    // reports ok:true (pure-AC gate, no compound rollup applied), proving
+    // the prior ok:false/childrenStatus assertion was genuinely exercising
+    // the ready-compound rollup, not a coincidental pass from AC state alone
+    // (EPIC-READY-CHILD-TODO's own AC is fully checked, so ok:false could
+    // only have come from the children check).
+    execFileSync("node", [nativeBin, "task", "edit", "EPIC-READY-CHILD-TODO", "--children", ""], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    const readySevered = await client.taskCheck("EPIC-READY-CHILD-TODO");
+    assert(
+      readySevered.gate === "execute->done" && readySevered.ok === true &&
+        readySevered.childrenStatus === undefined,
+      `adversarial check (QN-073): severing EPIC-READY-CHILD-TODO's children makes Core's ` +
+        `passthrough report ok:true with no childrenStatus (got: ${JSON.stringify(readySevered)}), ` +
+        `confirming the prior ok:false assertion was genuinely gated on the children check, not AC state`
+    );
   } finally {
     await client.close();
     fs.rmSync(tasksDir, { recursive: true, force: true });

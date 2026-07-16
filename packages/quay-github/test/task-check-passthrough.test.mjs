@@ -435,6 +435,130 @@ async function main() {
     }
   }
 
+  // --- Case 4 (QN-073, iteration 87): a distinct, previously-uncovered
+  //     passthrough shape one branch over from Case 3's — the
+  //     `status:ready` compound (epic) rollup, i.e. the execute->done gate
+  //     (github-client.js#checkGate()'s own `status === "ready"` branch),
+  //     NOT the done-terminal branch Case 3 covered. This is genuinely
+  //     different code (a separate `if` block, its own `isCompound`/
+  //     `childrenOk` computation at line ~410) and, unlike Case 3's
+  //     `done`-branch rollup (informational/corrective metadata only),
+  //     here `childrenOk` is directly ANDed into the gate's own `ok` value
+  //     (`const ok = acOk && childrenOk`) — a false positive/negative here
+  //     would silently let (or block) a real ready->done transition, not
+  //     merely omit metadata. Confirmed by grep before writing this: no
+  //     existing test (this file, compound-gate.test.mjs,
+  //     gate-gameability.test.mjs, view-model.test.mjs, or
+  //     packages/quay/test/mcp-server.test.mjs) connects a
+  //     `status:ready`-labeled compound fixture to either quay-github mcp's
+  //     own task_check tool or Core's quay mcp aggregation. ---
+  await withGithubMcpForMulti(
+    {
+      611: mkIssueObj({ number: 611, labels: ["status:todo"], state: "open" }), // child still todo
+      610: mkIssueObj({ number: 610, labels: ["status:ready"], state: "open", childRefs: [611] }), // epic ready, AC complete, one child not done
+    },
+    async (client) => {
+      const r = await client.callTool({ name: "task_check", arguments: { id: "gh-610" } });
+      assert(r.isError !== true, "task_check via quay-github mcp for a ready-status compound (epic) issue does not error");
+      assert(
+        r.structuredContent?.gate === "execute->done" &&
+          r.structuredContent?.ok === false &&
+          typeof r.structuredContent?.reason === "string" &&
+          r.structuredContent.reason.includes("gh-611") &&
+          Array.isArray(r.structuredContent?.childrenStatus) &&
+          r.structuredContent.childrenStatus.length === 1,
+        `quay-github's own task_check tool surfaces the ready-compound "AC complete but a child still todo" shape unchanged, including childrenStatus (got: ${JSON.stringify(r.structuredContent)})`
+      );
+    }
+  );
+
+  {
+    const fakeGhDir = makeFakeGhPathDir();
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-qn073-workspace-"));
+    fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  github:",
+        "    enabled: true",
+        `    path: "${githubProviderDir}"`,
+        `    mcp_entry: ["node", "${githubBin}", "mcp"]`,
+        "    env:",
+        '      QUAY_GITHUB_REPO: "yaleh/quay-fixture"',
+        "",
+      ].join("\n")
+    );
+    const coreEnv = {
+      ...process.env,
+      PATH: `${fakeGhDir}${path.delimiter}${process.env.PATH}`,
+      FAKE_GH_ISSUES_JSON: JSON.stringify({
+        613: mkIssueObj({ number: 613, labels: [], state: "closed" }), // child genuinely done
+        612: mkIssueObj({ number: 612, labels: ["status:ready"], state: "open", childRefs: [613] }), // epic ready, AC complete, child genuinely done -> ok:true
+      }),
+    };
+    const { client: core } = await connectStdio("node", [coreBin, "mcp"], workspaceRoot, coreEnv);
+    try {
+      const r = await core.callTool({ name: "task_check", arguments: { id: "gh-612", provider: "github" } });
+      assert(r.isError !== true, "task_check via quay mcp (provider=github) does not error for a ready-status compound epic with a genuinely-done child");
+      assert(
+        r.structuredContent?.gate === "execute->done" &&
+          r.structuredContent?.ok === true &&
+          Array.isArray(r.structuredContent?.childrenStatus) &&
+          r.structuredContent.childrenStatus.length === 1 &&
+          r.structuredContent.childrenStatus[0].id === "gh-613" &&
+          r.structuredContent.childrenStatus[0].status === "done",
+        `Core's taskCheck() passthrough surfaces the ready-compound "AC complete and all children done" positive shape unchanged through the GitHub Provider, including per-child ids/statuses (got: ${JSON.stringify(r.structuredContent)})`
+      );
+    } finally {
+      await core.close();
+      fs.rmSync(fakeGhDir, { recursive: true, force: true });
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  // --- Adversarial break/restore (QN-073): confirm the ready-compound
+  //     rollup coverage above has real teeth — force isCompound false in
+  //     the READY branch specifically (distinct code from Case 3's DONE
+  //     branch fix). ---
+  {
+    const srcPath = path.join(__dirname, "..", "src", "github-client.js");
+    const original = fs.readFileSync(srcPath, "utf8");
+    const needle =
+      '    // QN-035 (DIR-006): for a compound (epic) task, the execute->done gate\n' +
+      '    // must ALSO require every child to already be `done` -- direct port of\n' +
+      "    // store.js's own QN-012 fix (see file header note). Primitive tasks\n" +
+      "    // (children.length === 0 / role !== \"compound\") are unaffected:\n" +
+      '    // childrenStatus is `[]` and `.every(...)` over an empty array is\n' +
+      "    // vacuously true.\n" +
+      '    const isCompound = role === "compound" && (children || []).length > 0;';
+    if (!original.includes(needle)) {
+      assert(false, "adversarial break/restore (QN-073): expected ready-branch isCompound text not found verbatim in github-client.js — source may have changed shape; aborting this check honestly rather than silently skipping it");
+    } else {
+      const broken = original.replace(needle, needle.replace('role === "compound" && (children || []).length > 0', "false"));
+      fs.writeFileSync(srcPath, broken);
+      try {
+        await withGithubMcpForMulti(
+          {
+            621: mkIssueObj({ number: 621, labels: ["status:todo"], state: "open" }),
+            620: mkIssueObj({ number: 620, labels: ["status:ready"], state: "open", childRefs: [621] }),
+          },
+          async (client) => {
+            const r = await client.callTool({ name: "task_check", arguments: { id: "gh-620" } });
+            assert(
+              r.structuredContent?.ok === true && r.structuredContent?.childrenStatus === undefined,
+              `adversarial check (QN-073): with the ready-branch isCompound forced false, the same "ready epic, child todo" fixture now WRONGLY reports ok:true with no childrenStatus (got: ${JSON.stringify(r.structuredContent)}) — confirms Case 4's ok:false/childrenStatus assertions above have real teeth, and are testing a genuinely distinct code path from Case 3's done-branch fix`
+            );
+          }
+        );
+      } finally {
+        fs.writeFileSync(srcPath, original);
+      }
+      const restored = fs.readFileSync(srcPath, "utf8");
+      assert(restored === original, "adversarial check (QN-073): github-client.js is byte-identical to its original content after the ready-branch isCompound break/restore cycle");
+    }
+  }
+
   // --- Adversarial break/restore: temporarily comment out
   //     github-client.js's needs-human branch, confirm the new test above
   //     actually has teeth (fails with the shape falling through to
@@ -467,7 +591,7 @@ async function main() {
     }
   }
 
-  console.log(failures === 0 ? "\nAll QN-071/QN-072 GitHub-Provider taskCheck passthrough tests passed." : `\n${failures} test(s) FAILED`);
+  console.log(failures === 0 ? "\nAll QN-071/QN-072/QN-073 GitHub-Provider taskCheck passthrough tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
 
