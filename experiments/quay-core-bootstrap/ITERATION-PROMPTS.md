@@ -253,10 +253,44 @@ V_meta = completeness × effectiveness × reusability × validation
 ### V_meta re-trigger watchlist (check all four, every iteration)
 
 1. **effectiveness re-trigger**: did any QC-* task arise that is organically scope-matched to stage-0 QN-006's shape (single-file, no/minimal source change, no network I/O)? If yes: measure the timing comparison and update.
+   - **Timing baseline confirmed** (iteration 6, primary source):
+     `experiments/quay-native-bootstrap/timing/iteration-0.log` — QN-006
+     author ~51s (04:23:03→04:23:54), execute ~2m59s (04:24:18→04:27:17).
+     Do not re-derive; cite this file directly.
+   - **Standing timing-recording instruction** (added iteration 7, carried
+     to Skill files): when a scope-matched task arises organically, record
+     wall-clock start/end times for each Method phase (write-proposal,
+     review-proposal, write-plan, review-plan, implement, gate) in the
+     iteration report. This is the precondition for firing this re-trigger.
 2. **reusability re-trigger**: did organic external demand appear for wider GitHub Provider `data.write` capability (AC/DoD-checkbox or body/title writes against a real issue, not a legacy fixture)? If yes: re-open.
 3. **completeness re-trigger (gap discovery)**: was a new, previously-undocumented Skill Method-step gap found during *unrelated* work on the Skill files? If yes: re-open.
 4. **completeness + reusability/effectiveness joint re-trigger**: did a reliable, unconditional native fresh-context subagent-dispatch primitive become available (not the conditional async/background workaround from iterations 78-87)? If yes: re-open completeness, and reusability/effectiveness jointly against full design-§5 fidelity.
+   - **Manda conditional primitive reliability track record** (as of
+     iteration 8): 6/6 calls SUCCESS across six distinct task types:
+     - Trivial (PONG echo): 1/1, 90s timeout, iteration 4
+     - Medium (file read + structured JSON verdict): 1/1, 150s, iteration 5
+     - Complex (multi-file + adversarial + verdict): 1/1, 150s, iteration 6
+     - Documentation-reading (read provenance.md, return structured JSON):
+       1/1, 150s, iteration 8 (~107s wall-clock)
+     - Computation (arithmetic, return JSON): 1/1, 150s, iteration 8 (~20s)
+     - Code-reading (read store.js, line count + first function): 1/1,
+       150s, iteration 8 (~28s)
+     The primitive remains **conditional** (daemon live + non-self broker
+     required per DIR-020). Conditionality is unchanged; reliability is now
+     empirically confirmed across six calls with no failures. This does NOT
+     close the completeness gap (requires unconditional), but narrows the
+     characterization from "unknown reliability" to "confirmed reliable
+     conditional primitive." See §Completeness ceiling assessment below.
 5. **Fallback rule**: if none of 1-4 fire within roughly 12 iterations of experiment 2, run one more dedicated full search rather than letting the standing-fact note calcify.
+
+**Completeness ceiling assessment** (established iteration 8): The manda
+conditional primitive has accumulated 6/6 successful calls across diverse
+task types. The remaining completeness gap is **conditionality only** —
+daemon + non-self broker are required preconditions. The gap is not
+reliability (6/6 across 6 tiers confirms reliable operation). This
+distinction matters for honest scoring: additional reliability trials beyond
+6/6 do not move completeness, because the blocker is the unconditional/
+conditional distinction, not the reliability track record.
 
 **Validation mechanics**: report two numbers separately every iteration —
 - *Inherited floor*: σ_strict = 0.8493 (experiment 1's final value; this is the baseline the inheritance gives)

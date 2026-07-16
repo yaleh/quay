@@ -79,9 +79,32 @@ precondition — compact if over limit (see DIR-002 for procedure).
 | QC-002 | 2 (2026-07-16) | seed | seed | seed | 0/2 | web_ui_verification 0.5 → 1.0; action_delivery_mode 0.5 → 1.0 |
 | QC-003 | 3 (2026-07-16) | seed | seed | seed | 0/3 | core_abi_symmetry 0.8 → 1.0 |
 | QC-004 | 4 (2026-07-16) | seed | seed | seed | 0/4 | completeness annotation — no V_instance lift |
-| QC-005 | 5 (2026-07-16) | seed | seed | seed | 0/5 | no V_instance lift; completeness 0.74→0.75 from manda trial (not QC-005) |
+| QC-005 | 5 (2026-07-16) | native¹ | native¹ | seed | 0/5 | no V_instance lift; completeness 0.74→0.75 from manda trial (not QC-005). Reclassified iteration 6: Method-step-driven under QN-070 precedent; gate_by=seed (same session). |
+| QC-006 | 6 (2026-07-16) | native¹ | native¹ | seed | 0/6 | no V_instance lift; completeness 0.75→0.77 from complex manda G3 trial. CHANGELOG.md created. gate_by=seed (same session). |
+| QC-007 | 7 (2026-07-16) | native¹ | native¹ | native² | 1/7 | no V_instance lift; no V_meta score move (validation floor still dominates; completeness update = evidence consolidation only). Skill files updated: three-tier manda envelope + timing-recording note. DIR-003 applied and archived. |
+| QC-008 | 8 (2026-07-16) | native¹ | native¹ | native² | 2/8 | no V_instance lift; no V_meta score move. ITERATION-PROMPTS.md updated: timing baseline citation, standing timing-recording instruction, manda reliability 6/6. Timing recorded: author 39s, execute 128s — not scope-matched (documentation, not source logic). Three new manda trials all SUCCESS. |
 
-**σ_QC**: 0/5. All tasks are seed provenance — excluded from σ_QC numerator.
+¹ native (degraded fallback): quay:author/quay:execute SKILL.md Method steps were the
+operative driver (write-proposal → review-proposal → write-plan → review-plan → gate →
+implement → self-audit-ac → gate-check), followed explicitly in sequence with the Skill
+file as the guide. Consistent with QN-070 precedent from experiment 1 (iteration 69).
+The review steps are same-session (not fresh-context independent), per the Skill's own
+degraded-fallback definition.
+
+² native (gate): the gate-check (`mcp__quay__task_check`) was run as the FINAL step of
+the quay:execute Method (Method step 3 — gate-check), not ad-hoc outside the Skill's
+own sequence. The Skill's Method structure was the operative driver of the gate assertion.
+For QC-007: all three fields native → σ_QC numerator credit.
+
+gate_by=seed (QC-001 through QC-006): the gate check was mechanically run by the same
+session that executed — not driven by the Skill's gate-check Method step as the final
+operative step of the Method sequence.
+
+For σ_QC numerator credit, ALL THREE fields must be native.
+
+**σ_QC**: 2/8 (after iteration 8). QC-007 and QC-008 are both all-three-fields native. Validation
+score remains at inherited floor (0.64) because σ_QC = 2/8 = 0.25 is below the inherited floor
+σ_strict = 0.8493 level.
 **Inherited floor**: σ_strict = 0.8493 (experiment 1's final value — context only).
 
 See each iteration's report for full per-factor evidence:
@@ -89,4 +112,7 @@ See each iteration's report for full per-factor evidence:
 - QC-002: `experiments/quay-core-bootstrap/iterations/iteration-2.md` §5/§7
 - QC-003: `experiments/quay-core-bootstrap/iterations/iteration-3.md` §5/§7
 - QC-004: `experiments/quay-core-bootstrap/iterations/iteration-4.md` §5/§7
-- QC-005: `experiments/quay-core-bootstrap/iterations/iteration-5.md` §5/§7
+- QC-005: `experiments/quay-core-bootstrap/iterations/iteration-5.md` §5/§7 (reclassified iteration 6)
+- QC-006: `experiments/quay-core-bootstrap/iterations/iteration-6.md` §5/§7
+- QC-007: `experiments/quay-core-bootstrap/iterations/iteration-7.md` §5/§6
+- QC-008: `experiments/quay-core-bootstrap/iterations/iteration-8.md` §5/§6

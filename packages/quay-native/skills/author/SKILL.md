@@ -192,8 +192,26 @@ authorTask(id, provider) = {
   fresh-context spawn — the environmental gap's specific wording from
   `v-meta-stall-analysis.md`). But it narrows the characterization from "no
   primitive available" to "conditional manda-proxied Agent available when
-  daemon is live and a non-self broker is armed." Reliability track record as
-  of iteration 4: 1 successful call (PONG trial). A multi-call track record
-  is needed before claiming reliable availability — see
-  `experiments/quay-core-bootstrap/iterations/iteration-4.md` §3 for the
-  full primary-source trial record.
+  daemon is live and a non-self broker is armed." **Three-tier reliability
+  envelope now confirmed (experiment 2, iterations 4-6):**
+  - Trivial (PONG — single-word echo): SUCCESS 1/1, timeout=90s (iteration 4)
+  - Medium (single file read + structured JSON verdict): SUCCESS 1/1,
+    timeout=150s (iteration 5)
+  - Complex (multi-file read + adversarial analysis + structured verdict):
+    SUCCESS 1/1, timeout=150s (iteration 6)
+  All three tiers confirmed at their respective timeout windows. The
+  unconditional gap remains (daemon + non-self broker required). See
+  `experiments/quay-core-bootstrap/iterations/iteration-4.md` §3,
+  `iteration-5.md` §3a, `iteration-6.md` §3a for full primary-source trial
+  records.
+  **Timing-recording note (experiment 2, iteration 7 — effectiveness gap):**
+  The V_meta effectiveness factor requires a scope-matched native-execution
+  timing comparison against stage-0 QN-006's baseline (author ~51s, execute
+  ~2m59s — confirmed in `experiments/quay-native-bootstrap/timing/
+  iteration-0.log`). Future Skill-driven executions of a scope-matched task
+  (single source file, logic change, no network I/O) should record wall-clock
+  timing in the iteration report to enable this comparison. No QC-* task has
+  yet matched this shape (iterations 1-6 produced only documentation and
+  browser-test tasks). When one arises organically, timing should be recorded
+  explicitly — see `experiments/quay-core-bootstrap/iterations/iteration-7.md`
+  §3 for the full stall analysis.

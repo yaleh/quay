@@ -368,9 +368,27 @@ executeEpic(task, provider) = {
   session must differ from broker session. The primitive is conditional
   (daemon live + non-self broker required), not unconditional — the
   completeness gap's specific wording ("reliable, unconditional native
-  fresh-context spawn") is not yet closed. Reliability track record: 1
-  successful call. See `quay:author`'s iteration-4 update for full
-  constraints and evidence.
+  fresh-context spawn") is not yet closed. **Three-tier reliability envelope
+  now confirmed (experiment 2, iterations 4-6):**
+  - Trivial (PONG — single-word echo): SUCCESS 1/1, timeout=90s (iteration 4)
+  - Medium (single file read + structured JSON verdict): SUCCESS 1/1,
+    timeout=150s (iteration 5)
+  - Complex (multi-file read + adversarial analysis + structured verdict):
+    SUCCESS 1/1, timeout=150s (iteration 6)
+  All three tiers confirmed at their respective timeout windows. The
+  unconditional gap remains. See `quay:author`'s iteration-4/5/6 updates for
+  full primary-source trial records.
+  **Timing-recording note (experiment 2, iteration 7 — effectiveness gap):**
+  The V_meta effectiveness factor requires a scope-matched native-execution
+  timing comparison against stage-0 QN-006's baseline (author ~51s, execute
+  ~2m59s — confirmed in `experiments/quay-native-bootstrap/timing/
+  iteration-0.log`). Future Skill-driven executions of a scope-matched task
+  (single source file, logic change, no network I/O) should record wall-clock
+  timing in the iteration report to enable this comparison. No QC-* task has
+  yet matched this shape (iterations 1-6 produced only documentation and
+  browser-test tasks). When one arises organically, timing should be recorded
+  explicitly — see `experiments/quay-core-bootstrap/iterations/iteration-7.md`
+  §3 for the full stall analysis.
 - **This Skill itself remains entirely unexercised as of iteration 1** — its
   own authoring task (QN-004) was driven to `ready`, but that is a plan for
   retiring its seed dependency, not the retirement itself. `execute_by` is
