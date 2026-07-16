@@ -9715,3 +9715,88 @@ respectively); `effectiveness` at 41 consecutive flat iterations (23-62,
 net, counting iteration 59's reverted attempt as non-movement).
 
 Full detail: `experiment/iterations/iteration-62.md`.
+
+## Records (as of end of iteration 63)
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-067 | Add test coverage for issueToViewModel's unrecognized-status-label-value precedence fallback | native | native | native | done |
+
+σ (strict) = 59/66 = **0.8939** (up from 58/65 = 0.8923).
+
+**V_instance factor reasoning:** `skeleton` credited **+0.01 (0.78 →
+0.79)**, following the identical reasoning pattern iterations 54-62 used
+for their own new-angle-but-same-factor-shape closures (test-coverage-
+only regression addition, zero source diff, for an already-existing,
+unmodified capability). Applied here to genuinely different content: the
+`STATUS_PRECEDENCE` sort comparator's "unrecognized label value" fallback
+branch inside `issueToViewModel` — documented in a comment since
+iteration 5 but never previously exercised by any test (confirmed via
+grep of `test/view-model.test.mjs`'s six existing precedence cases, all
+of which combine only mutually-recognized label values). Three new cases
+were added (recognized+unrecognized in both orders; two unrecognized
+values testing the encounter-order tie-break), all adversarially
+verified: temporarily changing the comparator's `-1 → STATUS_PRECEDENCE
+.length` fallback to `-1` (making unrecognized values rank *above*
+recognized ones) caused the two ranking-dependent new tests to fail
+(the third, tie-break-only test was correctly unaffected by this
+specific mutation), then the source was restored byte-identical
+(confirmed via `git diff --stat` empty) and all tests passed again. This
+is a runtime-behavior claim about the v0 loop's GitHub Provider correctly
+surfacing the documented precedence rule, satisfying `skeleton`'s bar the
+same way iteration 62's `skeleton +0.01` did (an executed, adversarially-
+verified test, not unexercised prose) — categorically distinguishable
+from iteration 61's reverted `completeness` claim. `abi_symmetry`
+explicitly considered and rejected: no cross-binding content-equivalence
+claim is made; this is a single-function (`issueToViewModel`) unit test,
+not a CLI-vs-MCP schema-equivalence claim. `gate_correctness` explicitly
+considered and rejected: no `checkGate()`/`store.js` gate logic touched.
+`skill_convergence` unchanged: no SKILL.md content touched, no new Skill
+branch exercised (QN-067 is an ordinary leaf task using the standard
+gated lifecycle).
+
+```
+V_instance = 0.79 × 0.96 × 0.76 × 0.96 = 0.5533  (up from 0.5463)
+```
+
+**V_meta factor reasoning:** all four factors explicitly considered and
+held flat, declining a fourth consecutive V_meta reach after two
+corrected overreaches (iterations 59, 61) and consistent with iteration
+62's own clean, audited decision to decline all four factors for a
+structurally identical (test-coverage-only, zero-source-diff) closure.
+`completeness`: no Method/Skill content was edited this iteration (the
+shipped change is a test file only, `packages/quay-github/test/
+view-model.test.mjs`) — the pre-existing code comment already documented
+the fallback rule; this iteration proves the rule true at runtime, it
+does not close a gap in the Method's own self-containedness (§5.2's
+literal scope, per the iteration-9/18/29/61 precedent chain, all
+re-confirmed this session). `effectiveness`: no scope-matched timing
+comparator exists for this task's specific shape (a single-function unit
+test with an adversarial break/restore cycle, no live `gh api` call at
+all); manufacturing one against a mismatched comparator would repeat the
+twelfth/thirteenth correction's exact category of error. `reusability`:
+per the direct, on-point, and repeatedly-applied precedent (QN-034,
+QN-048, and every negative/error-path/test-coverage closure since
+iteration 26 — 38 consecutive flat iterations before this one, all
+citing the same rule) — a test-coverage-only addition to the GitHub
+Provider that proves an *already-existing*, unmodified behavior true is
+not new transfer-target evidence; it documents that the methodology's
+prior transfer (the behavior already worked, uncredited, before this
+iteration) was sound, but creates no new transfer proof itself. Held
+flat. `validation`: held flat, reserved for the top-level orchestrator's
+independent out-of-band audit of this iteration, per standing practice.
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, narrow **skeleton-only** system
+increment (M_62 = M_63, A_62 = A_63 — no Skill or capability created or
+modified; only a new regression test added to an existing, unmodified
+GitHub-Provider capability). `completeness`, `reusability`, and
+`validation` remain the most stalled V_meta factors (54, 38, and ~53
+consecutive flat iterations respectively); `effectiveness` at 42
+consecutive flat iterations (23-63, net, counting iteration 59's
+reverted attempt as non-movement).
+
+Full detail: `experiment/iterations/iteration-63.md`.

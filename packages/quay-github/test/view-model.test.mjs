@@ -81,6 +81,39 @@ function mkIssue(overrides) {
   assert(vm.status === "todo", "no status label defaults to todo (no regression)");
 }
 
+// --- iteration 63 (QN-067): unrecognized status:* label value fallback ---
+// The precedence comment above STATUS_PRECEDENCE documents that an
+// unrecognized label value (not present in STATUS_PRECEDENCE at all) is
+// "treated as lowest precedence, in the order encountered, below all
+// recognized ones" -- but until this test, no case ever combined a
+// recognized label with an unrecognized one, so this fallback branch of the
+// sort comparator was never actually exercised.
+
+{
+  const vm = issueToViewModel(
+    mkIssue({ labels: [{ name: "status:ready" }, { name: "status:some-typo-value" }] })
+  );
+  assert(vm.status === "ready", "unrecognized status label ranks below a recognized one (recognized first, unrecognized second)");
+}
+
+{
+  const vm = issueToViewModel(
+    mkIssue({ labels: [{ name: "status:some-typo-value" }, { name: "status:ready" }] })
+  );
+  assert(vm.status === "ready", "unrecognized status label ranks below a recognized one (unrecognized first, recognized second -- not last-write-wins)");
+}
+
+{
+  // two unrecognized values, neither in STATUS_PRECEDENCE at all -- the
+  // documented "in the order encountered" tie-break for the fully-unranked
+  // case: first one wins (stable sort, both rank equally at
+  // STATUS_PRECEDENCE.length).
+  const vm = issueToViewModel(
+    mkIssue({ labels: [{ name: "status:alpha-unrecognized" }, { name: "status:beta-unrecognized" }] })
+  );
+  assert(vm.status === "alpha-unrecognized", "two unrecognized status labels: first one encountered wins (stable-sort tie-break)");
+}
+
 // --- Bug #1: parent/children via task-list checkbox convention ---
 
 {
