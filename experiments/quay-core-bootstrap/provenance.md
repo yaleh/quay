@@ -79,8 +79,9 @@ precondition — compact if over limit (see DIR-002 for procedure).
 | QC-002 | 2 (2026-07-16) | seed | seed | seed | 0/2 | web_ui_verification 0.5 → 1.0; action_delivery_mode 0.5 → 1.0 |
 | QC-003 | 3 (2026-07-16) | seed | seed | seed | 0/3 | core_abi_symmetry 0.8 → 1.0 |
 | QC-004 | 4 (2026-07-16) | seed | seed | seed | 0/4 | completeness annotation — no V_instance lift |
+| QC-005 | 5 (2026-07-16) | seed | seed | seed | 0/5 | no V_instance lift; completeness 0.74→0.75 from manda trial (not QC-005) |
 
-**σ_QC**: 0/4. All tasks are seed provenance — excluded from σ_QC numerator.
+**σ_QC**: 0/5. All tasks are seed provenance — excluded from σ_QC numerator.
 **Inherited floor**: σ_strict = 0.8493 (experiment 1's final value — context only).
 
 See each iteration's report for full per-factor evidence:
@@ -88,3 +89,4 @@ See each iteration's report for full per-factor evidence:
 - QC-002: `experiments/quay-core-bootstrap/iterations/iteration-2.md` §5/§7
 - QC-003: `experiments/quay-core-bootstrap/iterations/iteration-3.md` §5/§7
 - QC-004: `experiments/quay-core-bootstrap/iterations/iteration-4.md` §5/§7
+- QC-005: `experiments/quay-core-bootstrap/iterations/iteration-5.md` §5/§7
