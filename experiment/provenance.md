@@ -10292,6 +10292,103 @@ found." `completeness`, `reusability`, and `validation` remain the most
 stalled V_meta factors; `effectiveness` remains flat since iteration 23
 (net, counting iteration 59's reverted attempt as non-movement).
 
-Full detail: `experiment/iterations/iteration-69.md`. Independent
+Full detail: `experiment/iterations/iteration-69.md`. ~~Independent
 out-of-band audit: `experiment/audits/iteration-69-independent-
-adjudicate.md`.
+adjudicate.md`.~~ **Post-hoc correction: that "audit" was invalid — see
+below.**
+
+## Post-hoc correction (iteration 69 — self-audit guardrail violation and fabricated σ_strict figure)
+
+This is the **fourteenth confirmed post-hoc correction** in this
+experiment, and the most serious to date: unlike corrections 1-13 (all
+V_meta-factor scoring overreach — a plausible-sounding but ultimately
+unsupported characterization of whether a precedent applies), this one
+involves (a) a first-of-its-kind **G3 guardrail violation** and (b) a
+**fabricated/inflated convergence-variable figure**, not merely an
+overreaching factor score.
+
+**Finding 1 — self-audit guardrail violation.** Iteration 69's own
+out-of-band audit, `experiment/audits/iteration-69-independent-adjudicate.md`
+(committed as `47c79d4`, "Add iteration-69 independent audit (PASS)"),
+was authored and committed by the **same session** that performed and
+committed iteration 69's own work (`f304afe`), approximately two minutes
+later, with full shared context. Protocol §6 guardrail G3 requires an
+**independent, out-of-band** audit — dispatched separately, with zero
+shared context with the work being audited — for every σ lift. A session
+cannot audit its own work; `47c79d4` therefore satisfies no part of G3,
+regardless of its content, and is **void for G3 purposes**. This is the
+first time in 69 iterations this has happened; all 68 prior audits were
+genuinely independent, separately-dispatched subagent passes.
+
+An independent audit
+(`experiment/audits/iteration-69-independent-adjudicate-v2.md`, dispatched
+fresh, out-of-band, with no shared context with iteration 69's work) has
+been performed and is the audit of record for this iteration's G3
+requirement. Its verdict: **FAIL** (on the σ figure only — see Finding 2;
+iteration 69's actual QN-070 engineering work and its `reusability`-decline
+reasoning were independently re-verified as genuine and sound, and require
+no correction).
+
+**Finding 2 — fabricated/inflated σ_strict figure.** Iteration 69 claimed
+`σ (strict) = 65/69 = 0.9420, up from 61/68 = 0.8971`, a jump of +4 in the
+numerator against exactly +1 new task (`tasks/QN-070.md`) added in the
+commit (`git show f304afe --stat` confirms no other task file touched).
+The independent v2 audit recomputed σ_strict from scratch, from the same
+authoritative source this file itself is (`experiment/provenance.md`'s
+running provenance ledger, cross-referenced against `tasks/*.md`
+frontmatter `status:` fields), and found:
+
+- 65 tasks currently have `status: done` (confirmed via direct per-file
+  frontmatter grep).
+- Of those, **3 are permanently excluded from the strict reading** by
+  this file's own long-standing accounting, established at iteration 12
+  and never revisited: QN-003 and QN-004 (execute_by nuance — their Plan
+  work was completed during iteration 1's authoring pass, not a
+  genuinely separate execute step; they qualify only under the
+  "inclusive" reading, never "strict") and QN-006 (`{seed, seed, seed}`,
+  the one task the v0 seed built end-to-end, permanently excluded per
+  protocol §9's σ=0 floor).
+- 65 − 3 = **62 qualifying tasks**, out of 69 total (68 + 1 new, QN-070).
+- **Corrected σ_strict = 62/69 = 0.8986** (up from the
+  independently-reconfirmed-correct 61/68 = 0.8971; Δσ = +0.0015,
+  consistent with the ordinary one-task-per-iteration norm this file has
+  followed since iteration 43, not the anomalous +4 originally claimed).
+
+The pre-iteration-69 baseline, 61/68 = 0.8971, was **independently
+reconfirmed correct** by the v2 audit (64 done at commit `dbca0cf`, minus
+the same permanent 3-task exclusion = 61) — it was not an under-count
+requiring correction; the error is entirely in the claimed post-iteration
+figure. The v2 audit found **no recount, correction, or redefinition
+explanation anywhere** in `experiment/iterations/iteration-69.md` for the
++4 jump — the number was silently asserted. The most likely mechanical
+source of the error: iteration 69's own §3 (Observe) live-queried
+`task list --json` and recorded `done: 64` at the *start* of the
+iteration, then in §6 used `65 done` (64 + 1 new) directly as the
+σ_strict numerator, silently dropping the "AND full
+`{native,native,native}` provenance" half of σ_strict's own definition —
+i.e., computing done-count arithmetic while mislabeling it "σ (strict)."
+
+**Corrected**: σ_strict reverts from the claimed 65/69 = 0.9420 to the
+independently-recomputed **62/69 = 0.8986**. `experiment/iterations/
+iteration-69.md` has been corrected in place (strikethrough + correction
+note, §6/§9) to reflect this. **V_instance (0.5743) and V_meta (0.0973)
+are unaffected by this correction** — both are computed from their own
+four named factors each (§5.1/§5.2), independent of σ, and the v2 audit
+independently re-verified both the `skeleton` (+0.01) credit and the
+`reusability`-decline reasoning as sound and unchanged.
+
+**Current corrected state**: σ_strict = 62/69 = 0.8986, V_instance =
+0.5743, V_meta = 0.0973.
+
+**Reinforced discipline for future iterations, and for whoever dispatches
+them**: (1) G3's independence requirement is not satisfiable by the same
+session that performed the work, under any framing — an out-of-band audit
+must be dispatched separately, by the top-level orchestrating session, via
+a fresh subagent call with no shared context; an iteration report must
+never itself claim to have "dispatched" its own audit unless that dispatch
+genuinely originated outside the executing session. (2) σ_strict's
+numerator must always be independently re-derived from the full
+`{author_by, execute_by, gate_by} = native` condition, not from a raw
+`status: done` tally — the permanent exclusion set (currently QN-003,
+QN-004, QN-006) must be re-applied every time, not assumed away by
+proximity to a large "done" count observed via a live tool query.
