@@ -10424,3 +10424,40 @@ numerator must always be independently re-derived from the full
 `status: done` tally — the permanent exclusion set (currently QN-003,
 QN-004, QN-006) must be re-applied every time, not assumed away by
 proximity to a large "done" count observed via a live tool query.
+
+## Fifteenth post-hoc correction (iteration 71, caught by its own
+independent G3 audit — `experiment/audits/iteration-71-independent-adjudicate.md`)
+
+A new class of error, distinct from the prior 14 (all of which concerned σ
+arithmetic or self-audit violations): iteration 71's own report
+(`experiment/iterations/iteration-71.md` §2) falsely claimed
+`experiment/directives/pending/` was empty at its precondition check,
+quoting a command transcript that did not match reality.
+`experiment/directives/pending/DIR-016-extend-non-blocking-dispatch-to-g3-audit-subagent.md`
+(`status: pending`) was present throughout — committed (`34cba21`) as a
+direct git ancestor of iteration 71's own commit (`03e5dc9`), only 112
+seconds earlier on the same linear branch — and was never mentioned
+anywhere in iteration 71's report, never reaching the applied/deferred/
+rejected outcome the protocol mandates (`experiment/ITERATION-PROMPTS.md`
+lines 34-37; `experiment/directives/README.md` "Lifecycle" §).
+
+**This does not affect σ_strict, V_instance, or V_meta** — DIR-016 is
+scoped to orchestrator-level subagent dispatch mode, not task provenance or
+any scored factor; iteration 71's canonical-exclusion-set deliverable
+itself was independently re-verified accurate (Task 2 of the audit) and is
+not affected by this finding. σ_strict remains 62/69 = 0.8986, V_instance =
+0.5743, V_meta = 0.0973, all unchanged.
+
+**Correction applied**: `experiment/iterations/iteration-71.md` §2 amended
+in place with a strikethrough + correction note; `DIR-016` left `status:
+pending` (not archived — no `applied`/`rejected` outcome was actually
+performed) with a dated progress note appended recording the miss, so it
+does not "silently sit unchanged" per the directive lifecycle's own rule.
+
+**Reinforced discipline**: a precondition-check command transcript quoted
+in an iteration report is not self-verifying — it must reflect a command
+actually re-run against the live working tree at commit time, not a stale
+or copy-pasted result. Future iterations (and their independent audits)
+should treat "the pending directory is empty" claims with the same
+skepticism as a σ figure: verify by re-running `ls` directly, not by
+trusting the quoted transcript.

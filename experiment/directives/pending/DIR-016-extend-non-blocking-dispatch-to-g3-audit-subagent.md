@@ -75,3 +75,20 @@ dispatch + one audit dispatch per cycle).
 ## Resolution
 
 <!-- Filled in by whichever iteration applies this directive. -->
+
+## Progress note (added 2026-07-16, by the independent G3 audit of
+iteration 71 — `experiment/audits/iteration-71-independent-adjudicate.md`)
+
+This directive was committed (`34cba21`) as a direct git ancestor of
+iteration 71's own commit (`03e5dc9`), only 112 seconds earlier on the same
+linear branch — meaning it was present in `experiment/directives/pending/`
+throughout iteration 71's run. Iteration 71's own precondition check
+(`experiment/iterations/iteration-71.md` §2) nonetheless claimed this
+directory was empty, and never mentioned this directive anywhere in its
+report. Per `experiment/directives/README.md`'s "Lifecycle" §, a directive
+must not "silently sit unchanged run after run" — this note records that
+it did, for one full iteration cycle, and flags it explicitly so the next
+iteration cannot repeat the same miss. **Still `status: pending` — the
+next iteration must read this file in full and reach an explicit
+applied/deferred/rejected outcome, recorded in its own report, per the
+standard lifecycle.**
