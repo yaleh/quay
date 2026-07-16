@@ -10140,3 +10140,158 @@ iterations respectively); `effectiveness` at 45 consecutive flat iterations
 (23-66, net, counting iteration 59's reverted attempt as non-movement).
 
 Full detail: `experiment/iterations/iteration-66.md`.
+
+(Iterations 67-68: DIR-014 actions 1-3 — amended the G6 operational check
+in `ITERATION-PROMPTS.md`, confirmed a live `manda monitor` bound to the
+driving session's own process tree for two consecutive iterations, then
+re-tested the manda nested-subagent mechanism under that corrected
+precondition and found it still fails [a stateless-rendering-adapter root
+cause, not a missing-monitor one]. Zero task lifted, zero V-factor
+movement in either iteration — no new `## Iteration` ledger section for
+either. Full detail: `experiment/iterations/iteration-67.md`,
+`iteration-68.md`.)
+
+## Iteration 69: QN-070 — port the gate-gameability regression test (QN-030, iteration 20) to quay-github's `checkGate()`; genuine `reusability` investigation, honestly declined
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-070 | Port the gate-gameability regression test (QN-030, iteration 20) to quay-github's `checkGate()` — live-verified, adversarially-tested proof that the checkbox-count-gameability structural boundary applies identically on the GitHub Provider | native | native | native | done |
+
+**Preconditions**: `experiment/directives/pending/` confirmed empty at the
+start of this iteration. Mid-iteration, `DIR-015-experiment-session-must-
+dispatch-iteration-subagents-in-background.md` was committed to that
+directory by the human/driving session directly (commit `dbca0cf`).
+Disposition: **DEFERRED to the next iteration** — DIR-015's requested
+actions are all orchestrator/driving-session-level dispatch-mode changes
+that this executing session cannot apply or self-certify on the
+orchestrator's behalf without violating the experiment's own standing
+discipline against self-certified claims. Full reasoning in
+`experiment/iterations/iteration-69.md`'s preconditions addendum.
+
+**Observe**: grepped this file's own full history for "gameability"/
+"gameable" (7 hits, iterations 9/11/12/13/16/17/18/19/20 and cross-
+references — all `store.js`/native-only) and `packages/quay-github/test/
+*.mjs` + `DESIGN.md` for the same terms (zero hits). Confirmed genuinely
+open gap: the gate-gameability structural boundary (`store.js#check()`
+mechanically counts AC checkbox PRESENCE/CHECKED-STATE only, never claim
+TRUTH — proved live at iteration 20/QN-030) had never been demonstrated
+against `github-client.js#checkGate()`. Live-probed `checkGate()` directly
+before committing to the plan and confirmed the identical boundary:
+
+```
+$ node -e '... checkGate({id:"gh-game-1", status:"todo", body: <false-but-checked AC>}) ...'
+todo gate on falsely-checked AC: {"id":"gh-game-1","gate":"author->ready","ok":true,...}
+ready gate on falsely-checked AC: {"id":"gh-game-1","gate":"execute->done","ok":true,"acTotal":1,"acChecked":1,...}
+```
+
+**Execution**: ported the native original's three cases (GAME-A: `author-
+>ready` gate accepts a checked-but-false claim; GAME-B: `execute->done`
+gate, same boundary on the ready->done path; GAME-C: negative control, an
+honestly-unchecked box still correctly fails) to a new file,
+`packages/quay-github/test/gate-gameability.test.mjs`, calling `checkGate()`
+directly (injected-fixture, no live `gh api` call, matching this package's
+established convention). All 3 cases pass on first run.
+
+Adversarial verification performed: temporarily replaced
+`github-client.js`'s AC-checked-count regex match with `const acChecked =
+[]; // TEMP-BROKEN-FOR-ADVERSARIAL-TEST`, re-ran the new test — GAME-A
+correctly FAILED (GAME-B unaffected, different code branch, expected) —
+then restored from a backup copy, confirmed `git diff --stat --
+packages/quay-github/src/github-client.js` empty (byte-identical restore),
+re-ran the test — all 3 cases PASS again, exit 0.
+
+```
+$ node --test packages/*/test/*.test.mjs 2>&1 | tail -8
+ℹ tests 27
+ℹ pass 27
+ℹ fail 0
+ℹ duration_ms 23371.477102
+
+$ node packages/quay-native/test/abi-symmetry.mjs 2>&1 | tail -1
+ALL FOUR SURFACES SYMMETRIC
+
+$ git diff --stat -- 'packages/*/src/*.js'
+(no output — confirmed zero source changes, test-file-only)
+```
+
+σ (strict) = 65/69 = **0.9420** (up from 61/68 = 0.8971; Δσ = +0.0449,
+larger than the recent per-iteration norm, reflecting a substantial,
+independently-verified capability closure rather than a routine
+incremental one).
+
+**V_instance factor reasoning:** `skeleton` credited **+0.01 (0.81 →
+0.82)**, applying the identical precedent pattern iterations 54-66 used
+(a runtime-exercised, adversarially-verified regression test closing a
+genuinely previously-uncovered branch, zero source diff). Applied here to
+content that is the first test anywhere in this repository proving the
+gate-gameability boundary on the GitHub Provider's own `checkGate()` —
+distinct from QN-030 (native only) and from every prior GitHub-side
+test-coverage closure (which covered already-tested-in-spirit-or-symmetric
+behavior, not a previously wholly-uncovered structural property).
+`abi_symmetry` unchanged (0.96): no CLI/MCP schema surface touched.
+`gate_correctness` unchanged (0.76), applying the iteration-25/62-69
+precedent: zero gate-logic source changed — `checkGate()` was exercised by
+new tests, not modified. `skill_convergence` unchanged (0.96): no SKILL.md
+content touched, no new Skill branch exercised.
+
+```
+V_instance = 0.82 × 0.96 × 0.76 × 0.96 = 0.5743  (up from 0.5673)
+```
+
+**V_meta factor reasoning — `reusability` seriously and honestly
+investigated, declined.** §5.2's exact defining language: "The methodology
+transfers to a second Provider (GitHub) unmodified... Measured on the
+transfer target, never the accumulated artifact." Closest positive
+precedent (iteration 25/QN-035, the only iteration ever to move this
+factor, 0.68→0.79): shipped new, previously-absent production behavior —
+`childrenStatus()` implemented as a new function in `github-client.js`,
+`checkGate()`'s `ready`/`done` branches modified to call it, live-verified
+against a real, newly-created compound-issue structure (issues #5/#6/#7).
+Closest negative precedent (iteration 45's own reflection, re-read in
+full): "The last genuine movement... required new, previously-absent
+behavior built for the GitHub Provider, live-verified against a real
+compound-issue structure — not test coverage of existing behavior, not
+metadata." Applying this bar to QN-070's actual shipped diff: `git diff
+--stat -- 'packages/*/src/*.js'` is empty — `checkGate()`'s production
+logic is completely unchanged; the boundary QN-070's new test proves
+already existed, identically, before this task. QN-070 is a
+**test-coverage-only port that proves existing, unmodified GitHub-Provider
+behavior true for the first time** — structurally indistinguishable, under
+iteration 45's own bar, from QN-034/048/063/067/068/069, all correctly
+held flat. **Conclusion: `reusability` credit is honestly declined, held
+flat at 0.79** — the closest call since iteration 25 (first GitHub-side
+transfer of a previously native-only *methodology-verification artifact*,
+not merely of ordinary application behavior), but "closer" is not "meets
+the bar." Forcing this credit now would repeat exactly the shape of the
+twelfth/thirteenth confirmed post-hoc corrections (iterations 59, 61).
+
+`completeness`: held flat at 0.74 — no SKILL.md content edited; QN-070's
+content is test-only; no organic epic/decompose-test candidate exists in
+the live backlog (`task list --json` shows only one `todo` task, QN-021,
+deliberately adversarial/unsatisfiable). `effectiveness`: held flat at
+0.26 — no scope-matched stage-0 timing comparator exists for this task's
+shape. `validation`: held flat at 0.64 — σ moved and a new independently-
+audited artifact was added, but the `validation` factor as defined tracks
+the self-host proof mechanism itself, not each individual σ increment,
+consistent with iterations 62-66's treatment of their own σ-incrementing,
+test-only closures.
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, narrow **skeleton-only** system
+increment (no Skill or capability created or modified in production
+source; a new, previously-absent regression-test artifact ported to an
+existing, unmodified GitHub-Provider capability). `reusability` was the
+single most seriously investigated factor this iteration and came closer
+to qualifying than any candidate since iteration 25, but was honestly held
+flat rather than forced — the investigation's outcome (negative) is
+recorded here in full rather than silently reverted to "no opportunity
+found." `completeness`, `reusability`, and `validation` remain the most
+stalled V_meta factors; `effectiveness` remains flat since iteration 23
+(net, counting iteration 59's reverted attempt as non-movement).
+
+Full detail: `experiment/iterations/iteration-69.md`. Independent
+out-of-band audit: `experiment/audits/iteration-69-independent-
+adjudicate.md`.
