@@ -86,12 +86,53 @@ async function main() {
     const keys = Object.keys(pass).sort();
     assert(keys.includes("id") && keys.includes("ok") && keys.includes("reason"),
       `result carries at least id/ok/reason (got keys: ${JSON.stringify(keys)})`);
+
+    // QN-069 (iteration 66): QN-068 (iteration 64) added direct-Provider unit
+    // test coverage for the gate's `needs-human` soft-stop and unrecognized-
+    // status fallthrough shapes on both store.js#check() and
+    // github-client.js#checkGate() directly, but never touched Core's own
+    // generic taskCheck() passthrough (provider-client.js) at all. This is a
+    // distinct, previously-uncovered path: does Core's passthrough forward
+    // these two shapes unchanged, end-to-end over a real MCP connection?
+    // Both new task files are hand-edited on disk (bypassing store.write()'s
+    // own VALID_STATUSES write-time guard), the same disclosed technique
+    // QN-068 used directly against store.js, applied here one layer up
+    // through Core's client instead.
+    execFileSync("node", [nativeBin, "task", "create", "NH-1", "--title", "Needs-human task",
+      "--body", validSections + acDodUnchecked], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    const nhFile = path.join(tasksDir, "NH-1.md");
+    fs.writeFileSync(nhFile, fs.readFileSync(nhFile, "utf8").replace("status: todo", "status: needs-human"));
+
+    const needsHuman = await client.taskCheck("NH-1");
+    assert(
+      needsHuman.gate === "none" && needsHuman.ok === false &&
+        needsHuman.reason === "soft stop; human action required",
+      `Core's taskCheck() passthrough surfaces the needs-human soft-stop shape unchanged ` +
+        `(got: ${JSON.stringify(needsHuman)})`
+    );
+
+    execFileSync("node", [nativeBin, "task", "create", "BAD-1", "--title", "Bogus-status task",
+      "--body", validSections + acDodUnchecked], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    const badFile = path.join(tasksDir, "BAD-1.md");
+    fs.writeFileSync(badFile, fs.readFileSync(badFile, "utf8").replace("status: todo", "status: bogus-status-value"));
+
+    const unrecognized = await client.taskCheck("BAD-1");
+    assert(
+      unrecognized.gate === "unknown" && unrecognized.ok === false &&
+        unrecognized.reason === "unrecognized status bogus-status-value",
+      `Core's taskCheck() passthrough surfaces the unrecognized-status shape unchanged ` +
+        `(got: ${JSON.stringify(unrecognized)})`
+    );
   } finally {
     await client.close();
     fs.rmSync(tasksDir, { recursive: true, force: true });
   }
 
-  console.log(failures === 0 ? "\nAll QN-027 taskCheck passthrough tests passed." : `\n${failures} test(s) FAILED`);
+  console.log(failures === 0 ? "\nAll QN-027/QN-069 taskCheck passthrough tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
 

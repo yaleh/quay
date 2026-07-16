@@ -9990,3 +9990,153 @@ iterations (23-65, net, counting iteration 59's reverted attempt as
 non-movement).
 
 Full detail: `experiment/iterations/iteration-65.md`.
+
+## Iteration 66: QN-069 — close a Core-layer test-coverage gap in `taskCheck()`'s passthrough of the gate's needs-human/unrecognized-status shapes
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-069 | Add test coverage for Core's `task_check` passthrough surfacing the gate's needs-human soft-stop and unrecognized-status shapes end-to-end, not just the AC/DoD ok:true/ok:false cases | native | native | native | done |
+
+σ (strict) = 61/68 = **0.8971** (up from 60/67 = 0.8955).
+
+**Genuinely new angle, not a repeat of QN-068.** QN-068 (iteration 64)
+closed the needs-human/unrecognized-status test-coverage gap directly
+against both Providers' own gate functions in isolation
+(`packages/quay-native/src/store.js#check()` and `packages/quay-github/src/
+github-client.js#checkGate()`), confirmed via `git show --stat bd7f047 --
+packages/` showing only `packages/quay-native/test/gate-correctness.test.mjs`
+and `packages/quay-github/test/gate.test.mjs` touched — zero files under
+`packages/quay/` (Core). This iteration targets a different layer entirely:
+Core's own generic `taskCheck()` passthrough
+(`packages/quay/src/provider-client.js`, added QN-027/iteration 13), which
+until now had exactly one direct regression test
+(`packages/quay/test/task-check.test.mjs`) covering only the AC/DoD
+`ok:true`/`ok:false` shapes — never the `needs-human` soft-stop or
+unrecognized-status shapes flowing through Core's passthrough end-to-end
+over a real MCP connection. `mcp-server.test.mjs`'s one incidental use of
+the literal string `"needs-human"` (line 288) was read in full and
+confirmed to be an arbitrary status value used only to trigger a CAS
+`expectedStatus` mismatch in a `task_write` test — it never calls
+`task_check`/`taskCheck()` on a `needs-human` task at all. This closes a
+genuine, previously-undiscovered gap at the Core layer, directly responsive
+to `experiment/ITERATION-PROMPTS.md`'s §Core-scope work item 5 (DIR-013,
+iteration 65's codification of "G3 extends to Core on exactly the same
+terms as Provider").
+
+Two new cases added to `packages/quay/test/task-check.test.mjs`: a task
+hand-edited on disk to `status: needs-human` (bypassing `store.write()`'s
+own `VALID_STATUSES` write-time guard, the same disclosed technique QN-068
+used directly against `store.js`, applied here one layer up through Core's
+client instead), asserting `client.taskCheck(id)` returns exactly
+`{gate:"none", ok:false, reason:"soft stop; human action required"}`; and a
+second task hand-edited to an unrecognized status string, asserting
+`client.taskCheck(id)` returns exactly `{gate:"unknown", ok:false,
+reason:"unrecognized status <value>"}`. Both verified live before writing
+any test (see `tasks/QN-069.md`'s Proposal section for the verbatim
+pre-task invocation and output). Adversarially verified: temporarily
+removing `store.js`'s `needs-human` branch caused the new Core-level test to
+fail with the expected shape (`{"gate":"unknown", ... "reason":
+"unrecognized status needs-human"}` instead of the `gate:"none"` soft-stop
+shape) — confirmed verbatim:
+
+```
+$ node packages/quay/test/task-check.test.mjs
+...
+FAIL: Core's taskCheck() passthrough surfaces the needs-human soft-stop shape unchanged (got: {"id":"NH-1","gate":"unknown","ok":false,"reason":"unrecognized status needs-human"})
+PASS: Core's taskCheck() passthrough surfaces the unrecognized-status shape unchanged (got: {"id":"BAD-1","gate":"unknown","ok":false,"reason":"unrecognized status bogus-status-value"})
+
+1 test(s) FAILED
+```
+
+— then the source was restored byte-identical (`git diff --stat --
+packages/quay-native/src/store.js` empty) and the full test re-run clean:
+
+```
+$ node packages/quay/test/task-check.test.mjs
+...
+All QN-027/QN-069 taskCheck passthrough tests passed.
+```
+
+Full regression suite and ABI symmetry re-confirmed:
+
+```
+$ node --test packages/*/test/*.test.mjs 2>&1 | tail -8
+ℹ tests 26
+ℹ pass 26
+ℹ fail 0
+ℹ duration_ms 22272.979019
+
+$ node packages/quay-native/test/abi-symmetry.mjs 2>&1 | tail -1
+ALL FOUR SURFACES SYMMETRIC
+```
+
+```
+$ git diff --stat -- 'packages/*/src/*.js'
+(no output — confirmed zero source changes, test-file-only)
+```
+
+**V_instance factor reasoning:** `skeleton` credited **+0.01 (0.80 →
+0.81)**, applying the identical reasoning pattern iterations 55-64 used for
+their own new-angle-but-same-factor-shape closures (a runtime-exercised,
+adversarially-verified regression test closing a genuinely previously-
+uncovered branch, zero source diff). Applied here to content that is
+genuinely new relative to QN-068's own closure: QN-068 exercised the two
+Providers' gate functions directly; this iteration exercises the same two
+response shapes one layer up, through Core's own `taskCheck()` passthrough
+(`provider-client.js`) — a different code path (the MCP round-trip plus
+Core's structuredContent-forwarding logic) that QN-068's tests do not
+touch and cannot regress-protect. `abi_symmetry` explicitly considered and
+rejected: this is not a new CLI-vs-MCP schema-equivalence claim (the kind
+`abi-symmetry.mjs` checks) — it is a passthrough-fidelity claim for a
+single client function, already the established boundary for
+`gate_correctness` reasoning below, not `abi_symmetry`. `gate_correctness`
+explicitly considered and rejected, applying the same iteration-25/62-65
+precedent: zero gate-logic source changed (`git diff --stat -- 'packages/
+*/src/*.js'` empty) — `provider-client.js#taskCheck()` was not modified,
+only exercised by new tests. `skill_convergence` unchanged: no SKILL.md
+content touched, no new Skill branch exercised (QN-069 is an ordinary leaf
+task using the standard gated lifecycle).
+
+```
+V_instance = 0.81 × 0.96 × 0.76 × 0.96 = 0.5673  (up from 0.5603)
+```
+
+**V_meta factor reasoning:** all four factors explicitly considered and
+held flat, consistent with iterations 62-65's own clean, audited decisions
+to decline all four factors for structurally identical (test-coverage-
+only, zero-source-diff) closures. `completeness`: no Method/Skill content
+was edited this iteration (the shipped change is one test file,
+`packages/quay/test/task-check.test.mjs`) — Core's passthrough logic
+already behaved correctly; this iteration proves it true at runtime, it
+does not close a gap in the Method's own self-containedness (§5.2's literal
+scope, per the iteration-9/18/29/61/63/64 precedent chain, re-confirmed
+this session). Explicitly note: `experiment/ITERATION-PROMPTS.md`'s
+§Core-scope work item 4(b) (DIR-008) maps Core-level *gate-logic changes*
+to `gate_correctness`, not a new factor — this iteration has zero gate-
+logic change, so even that precedent, read most favorably, does not open a
+`completeness` avenue here. `effectiveness`: no scope-matched timing
+comparator exists for this task's specific shape (a passthrough-fidelity
+unit test with an adversarial break/restore cycle, no live `gh api` call);
+manufacturing one would repeat the twelfth/thirteenth correction's exact
+category of error. `reusability`: per the direct, on-point, and repeatedly-
+applied precedent (QN-034, QN-048, QN-067, QN-068, and every negative/
+error-path/test-coverage closure since iteration 26 — 40 consecutive flat
+iterations before this one) — this iteration touches zero GitHub-Provider
+content at all (its scope is Core + native only), an even more clear-cut
+case for flat than QN-068's own cross-Provider-symmetric change. `validation`:
+held flat, reserved for the top-level orchestrator's independent out-of-
+band audit of this iteration, per standing practice.
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, narrow **skeleton-only** system
+increment (M_65 = M_66, A_65 = A_66 — no Skill or capability created or
+modified; only a new regression test added to an existing, unmodified
+Core capability). `completeness`, `reusability`, and `validation` remain
+the most stalled V_meta factors (57, 41, and ~56 consecutive flat
+iterations respectively); `effectiveness` at 45 consecutive flat iterations
+(23-66, net, counting iteration 59's reverted attempt as non-movement).
+
+Full detail: `experiment/iterations/iteration-66.md`.
