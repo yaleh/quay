@@ -2942,3 +2942,79 @@ process/discoverability work as production movement.
 Full detail: `experiment/iterations/iteration-84.md`. Independent
 out-of-band audit: to be dispatched separately by the top-level
 orchestrator (not performed by this session, per standing G3 discipline).
+
+## Iteration 85
+
+This iteration was explicitly tasked with a genuine, rigorous
+**whole-experiment convergence reassessment** (not another routine gap
+search): re-engage protocol §7 in full — the strict dual threshold, the
+"Meta-Focused Convergence" alternative, and the "Practical Convergence"
+pattern established by this experiment's own history (iterations
+16-17, 83's audit, 84) — and form an independent judgment. No
+`tasks/QN-*.md` file was created or modified; task count remains 70.
+σ_strict is unchanged.
+
+**Conclusion, reached independently (not by deference to iteration 84's
+or its audit's framing)**: the strict dual threshold and the
+Meta-Focused alternative are both clearly, unambiguously not met
+(V_meta=0.0973 is an order of magnitude below 0.80 under either
+reading). The Practical Convergence question, engaged rigorously, is
+judged **now genuinely satisfied** — stronger than at any prior
+iteration this pattern was raised — for a reason not previously
+assembled in one place: this iteration found that `gate_correctness`
+(V_instance's own lowest, longest-flat factor, unchanged at 0.76 since
+iteration 20 — 65 iterations) has been explicitly considered and
+explicitly rejected in 11 separate recent iterations (60, 61, 62, 63,
+64, 66, 76, 80, 82, 83, 84) for a documented **structural** reason
+(iteration 20's own language: "a generic mechanical gate can never fully
+close the checkbox-count-gameability gap, by design — that is G3's
+whole point") — the same class of architectural, not merely
+under-searched, ceiling that provenance.md's iteration-84 standing-fact
+note already formalized for V_meta's three factors. Combined with 8
+consecutive independently-reverified flat iterations (78-85) across all
+eight V-factors and a structurally (not merely low) exhausted 70-task
+backlog (66 done, 4 mutually-non-independent deliberately-adversarial
+fixtures), this iteration's own judgment is that the plateau now spans
+both layers' dominant remaining gaps, each with a concretely-nameable
+unlock condition this experiment's own structure cannot produce without
+external change (a native subagent-dispatch primitive, or a
+deliberately-manufactured — and G5-prohibited — new scope item).
+
+**This iteration's recommendation — surfaced, not unilaterally
+executed**, mirroring this experiment's own iteration-16/17 precedent
+for handling exactly this class of decision: the orchestrator/human
+should explicitly choose between (A) formally declaring Practical
+Convergence and beginning a results-analysis/wind-down phase (while
+leaving `ITERATION-PROMPTS.md`, the standing SOPs, and the loop
+machinery intact, in case a re-trigger condition fires later), (B)
+continuing to iterate on the grounds that a genuine, non-manufactured
+path still exists (this iteration did not find one), or (C) some other
+honest partial characterization. This iteration explicitly does not
+choose among these itself. Full reasoning: `experiment/iterations/
+iteration-85.md` §5.
+
+This iteration also performed DIR-025 action 3d as **design-only**
+work (identifying, without executing, what would need to change in the
+provenance/state model to support concurrent full iterations — five
+concrete changes identified: provenance-write serialization, a frozen
+batch-baseline convention for σ/V computation, an iteration-level
+touch-set conflict domain, a batch/reconciliation numbering convention,
+and G3 audit fan-out), judged ripe as a genuinely new angle not
+requiring 3c's blocked backlog precondition. 3c itself remains not
+actionable (re-confirmed: still only the same four adversarial
+fixtures in the backlog).
+
+```
+V_instance = 0.83 × 0.96 × 0.76 × 0.96 = 0.5813  (unchanged)
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, honest **zero-V-movement**
+increment (M_84 = M_85, A_84 = A_85) — no V-factor credit is claimed for
+the convergence synthesis or the DIR-025 3d design note (neither is a
+production, gate, ABI, or Skill-content change). DIR-021/DIR-025 both
+re-read, neither triggered nor modified; left `pending`.
+
+Full detail: `experiment/iterations/iteration-85.md`. Independent
+out-of-band audit: to be dispatched separately by the top-level
+orchestrator (not performed by this session, per standing G3 discipline).
