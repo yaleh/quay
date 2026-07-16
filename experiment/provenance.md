@@ -2622,3 +2622,112 @@ stalled V_meta factors; `effectiveness` flat since iteration 23 (net),
 Full detail: `experiment/iterations/iteration-80.md`. Independent
 out-of-band audit: to be dispatched separately by the top-level
 orchestrator (not performed by this session, per standing G3 discipline).
+
+## Iteration 81
+
+This iteration applied DIR-023 (a brand-new housekeeping directive filed
+directly in the live conversation) to compact this file, `provenance.md`,
+which had grown to 10,887 lines across 81 iterations of detailed
+narrative — well past the point of being efficiently readable by future
+iterations' mandatory first-step review. No `tasks/QN-*.md` file was
+created or modified; the task count remains **70**, and no provenance
+triple changed. σ_strict is therefore **unchanged**: 62/70 = **0.8857**.
+
+**The work itself**: extracted the full narrative detail for iterations
+8-66 (13 contiguous blocks, 8,385 lines) into a new companion file,
+`experiment/provenance-archive.md`, leaving a compact trajectory-summary
+table in this file in their place. The canonical permanent
+strict-exclusion set (QN-003/QN-004/QN-006) and all 15 post-hoc
+corrections were preserved verbatim, unmodified, in this file (not moved
+to the archive) since they are load-bearing for every future iteration's
+σ_strict recomputation. Recent iterations (69-81) were left in full detail
+in this file. Net result: this file shrank from 10,887 to 2,624 lines;
+the new archive file holds 8,417 lines. Every deleted block was verified
+byte-for-byte present in the archive before deletion (diff against a
+pre-edit backup), and this was independently re-verified by iteration 81's
+own out-of-band audit (`experiment/audits/iteration-81-independent-adjudicate.md`,
+verdict: PASS, no concerns — all 13 blocks, all 15 corrections, and the
+exclusion-set section confirmed byte-identical pre/post-compaction).
+
+**V-factor check**: this is a pure documentation/housekeeping
+reorganization — no `quay:*` Skill, no task, no gate, no ABI surface, and
+no Skill-orchestration branch was touched. No factor movement claimed.
+
+```
+V_instance = 0.83 × 0.96 × 0.76 × 0.96 = 0.5813  (unchanged)
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, honest **zero-V-movement**
+increment (M_80 = M_81, A_80 = A_81) — DIR-023's own content is entirely
+process/protocol-layer (ledger-file maintenance), not instance-layer
+feature work. DIR-024 (broker-side `agent.spawn` background-spawn fix)
+arrived new at this iteration's precondition check; confirmed
+orchestrator/broker-scoped, not actionable from a dispatched iteration
+subagent's own context, and left untouched, pending, for the orchestrator.
+
+Full detail: `experiment/iterations/iteration-81.md`. Independent
+out-of-band audit: `experiment/audits/iteration-81-independent-adjudicate.md`
+(PASS, no concerns).
+
+## Iteration 82
+
+This iteration searched for genuine, organic task/test work to close
+σ_strict/V_instance/V_meta gaps, per explicit instruction to prioritize
+real backlog work over further manda-related process busywork (four
+consecutive iterations, 78-81, had produced zero V movement). No
+`tasks/QN-*.md` file was created or modified; the task count remains
+**70**, and no provenance triple changed. σ_strict is therefore
+**unchanged**: 62/70 = **0.8857**.
+
+**Backlog/test sweep**: re-confirmed all 70 tasks are either `done` (66)
+or one of the four permanently-adversarial `needs-human`/`todo` fixtures
+(QN-017, QN-020, QN-021, QN-022 — each deliberately unsatisfiable by
+design, requiring a non-existent subagent-dispatch primitive). Ran the
+full regression suite directly (`node <file>` across all 29 real test
+files in `packages/quay-native/test`, `packages/quay/test`,
+`packages/quay-github/test`): all exit 0. Re-checked both `author` and
+`execute` Skills' Gaps sections: every previously-named gap carries an
+explicit "Resolved in iteration N" annotation except the standing
+environmental "no subagent-dispatch primitive exists" limitation, which
+remains genuinely absent (re-confirmed, not newly discovered).
+
+**The one new, genuine finding**: this iteration's own dispatched-subagent
+session had live, working `mcp__quay__*` tool access (`task_get`,
+`task_check`, `task_list`, `action_list`, all invoked directly and
+returning results byte/schema-identical to the equivalent `quay --json`
+CLI output) despite `claude mcp list`/`~/.claude.json` showing no explicit
+per-project MCP-approval record for `quay`, and despite no
+`--dangerously-skip-permissions` flag being in play. This closes the one
+narrow sentence iteration 36 explicitly left open (a fresh session
+discovering/calling quay's tools **without**
+`--dangerously-skip-permissions`, previously assumed to require an
+unavailable interactive human approval prompt).
+
+**V-factor check, against exact §5.1/§5.2 defining language, precedent-
+governed**: per iteration 28's reasoning (re-applied verbatim by iteration
+36 and now again here) — a new consuming-channel/discoverability proof of
+an already-existing, already-scored capability is not new production
+behavior, new gate logic, new ABI schema surface, or a new
+Skill-orchestration branch, and crediting it would repeat exactly the
+kind of overclaim the iteration-25 correction was built to prevent. This
+decision was pre-committed before running the investigation, to guard
+against post-hoc rationalization. No factor movement claimed.
+
+```
+V_instance = 0.83 × 0.96 × 0.76 × 0.96 = 0.5813  (unchanged)
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, honest **zero-V-movement**
+increment (M_81 = M_82, A_81 = A_82). DIR-024 re-confirmed
+orchestrator/broker-scoped and not actionable from this dispatched
+subagent's own context; left untouched, pending. DIR-021 not triggered —
+no manda dispatch was organically needed for this iteration's actual
+work. `completeness`, `effectiveness`, and `reusability` remain the most
+stalled V_meta factors; `effectiveness` flat since iteration 23 (net),
+`reusability` flat since iteration 25 (net) — unchanged this iteration.
+
+Full detail: `experiment/iterations/iteration-82.md`. Independent
+out-of-band audit: to be dispatched separately by the top-level
+orchestrator (not performed by this session, per standing G3 discipline).
