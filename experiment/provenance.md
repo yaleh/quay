@@ -3321,3 +3321,106 @@ so neither directive was triggered; both left `pending`.
 Full detail: `experiment/iterations/iteration-87.md`. Independent
 out-of-band audit: to be dispatched separately by the top-level
 orchestrator (not performed by this session, per standing G3 discipline).
+
+## Iteration 88 — applying iteration 87's exhaustive-enumeration rigor to `abi_symmetry` and `skill_convergence` (QN-074, `abi_symmetry` +0.01)
+
+Per iteration 87's own independent G3 audit's explicit recommendation:
+`abi_symmetry` and `skill_convergence` are the two V_instance factors
+that had not had a comparably rigorous, dedicated fresh search applied
+(`abi_symmetry` last genuinely moved at iteration 35, 0.95→0.96;
+`skill_convergence` set at iterations 0-7, never moved once in 87
+iterations).
+
+**`abi_symmetry` search**: re-derived "the four surfaces" from design
+§6 (list/get/write/check, CLI vs MCP), then read `abi-symmetry.mjs`'s
+existing 4 checks side by side with `quay-native.js`/`mcp-server.js`
+looking for an untested CLI flag or MCP param. Found: `task_write`'s CAS
+option (QN-015, iteration 6 — CLI `--expect-status` / MCP
+`expectedStatus`) has **zero** test coverage anywhere for its CLI-vs-MCP
+error-shape (`ConflictError`) symmetry — confirmed by exhaustive grep
+across every `*.test.mjs` file; `cas-write.test.mjs` only exercises
+`store.write()` in-process, never through either ABI surface. Genuine,
+real, 82-iteration-old gap. Closed via QN-074: a new 5th check in
+`abi-symmetry.mjs` forces an identical CAS conflict on both surfaces and
+asserts schema + value equivalence of the resulting error shape.
+Adversarially verified: disabled the CLI's `--expect-status` wiring,
+confirmed the new check fails loudly (script's own guard threw as
+designed), restored byte-identical (`diff` confirmed IDENTICAL). Zero
+production-source diff (`git diff --stat -- 'packages/*/src/*.js'`
+empty). Full regression suite 28/28 (unchanged — `abi-symmetry.mjs` is a
+standalone script, not `node --test`-discovered).
+
+**`skill_convergence` search**: read both `packages/quay-native/skills/
+{author,execute}/SKILL.md` in full (172 + 390 lines), then checked the
+live backlog directly rather than trusting prior summaries: `ls tasks/
+QN-*.md | wc -l` = 72 (pre-QN-074), 68 done / 3 needs-human / 1 todo —
+all 4 non-done tasks are the same permanent adversarial fixtures
+(QN-017/020/021/022) iteration 87 already named, confirmed by reading
+QN-021 in full: already fully driven at iteration 8, its own AC item 1
+deliberately, permanently left unchecked by design. No fresh,
+non-adversarial `todo` task exists in the backlog to drive through
+`quay:author` this iteration. Cross-checked provenance: the last
+`{native,native,native}` task was QN-070 (iteration 69) — every genuine
+`skeleton` movement since (76, 86, 87) has been `{seed,seed,seed}`
+test-coverage work, not Skill-driven. A real secondary finding (both
+Skill files' "Gaps" sections still narrate "no subagent-dispatch
+primitive exists," last updated iteration 14, now stale relative to
+iterations 78-87's demonstrated live manda `Agent` dispatch under the
+§0b hard rule) was explicitly checked against this experiment's own
+precedent (iteration 61's reverted `completeness` credit; iterations
+79/80's own "analytically distinct, no credit" reasoning for manda-trial
+work) and correctly scoped **out** of `skill_convergence` — it is a
+`completeness`-adjacent observation, not an operational
+Skill-drives-a-task-to-green-gate fact, and no SKILL.md edit was made or
+credited this iteration.
+
+**Net finding**: mixed, not uniformly negative. `abi_symmetry` was NOT at
+a ceiling — a single rigorous fresh pass (the first since iteration 35)
+immediately found a genuine, real gap. `skill_convergence` produced a
+negative result, but for a specific, articulable structural reason (no
+fresh task-level material in the backlog), not a demonstrated
+architectural ceiling. This weakens, not strengthens, the case that
+V_instance overall is near a ceiling across all four factors — contrary
+to what a uniform double-negative result would have supported.
+
+QN-074 recorded `{author_by: seed, execute_by: seed, gate_by: seed}` —
+same as QN-069/071/072/073, ad hoc test-infrastructure work, no `quay:*`
+Skill invoked.
+
+```
+$ ls tasks/QN-*.md | wc -l                          -> 73 (was 72)
+$ grep -h "^status:" tasks/QN-*.md | sort | uniq -c  -> 69 done, 3 needs-human, 1 todo
+σ_strict = 62/73 = 0.8493  (down from 62/72 = 0.8611)
+```
+
+| task_id | title | author_by | execute_by | gate_by | status |
+|---|---|---|---|---|---|
+| QN-074 | Close a genuine, previously-zero-coverage `abi_symmetry` gap — `task_write`'s CAS-conflict error-shape symmetry (`--expect-status`/`expectedStatus`), untested since QN-015 (iteration 6) | seed | seed | seed | done |
+
+`skeleton` (0.85), `gate_correctness` (0.76), `skill_convergence` (0.96)
+all held flat — no v0-loop/gate-transition/Skill-content change this
+iteration. `abi_symmetry` credited **+0.01 (0.96 → 0.97)**: genuine,
+previously-zero-coverage cross-surface error-shape symmetry check closed,
+adversarially verified, zero production-source diff.
+
+```
+V_instance = 0.85 × 0.97 × 0.76 × 0.96 = 0.6016  (up from 0.5954)
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged, six consecutive
+  iterations flat: 83-88)
+```
+
+Not converged under any protocol §7 reading — V_meta remains an order of
+magnitude below 0.80; σ_strict decreased (honest, mechanical); V_instance
+moved for the third consecutive iteration (86, 87, 88), so the
+diminishing-returns criterion is not satisfied on a strict reading.
+Convergence decision left for orchestrator/human sign-off, per iterations
+85-87's own precedent — no unilateral wind-down taken.
+
+DIR-021/DIR-025 both re-read per standing §0 SOP; no manda nested-subagent
+work was undertaken this iteration (no capability-borrowing need arose;
+no concurrent task execution attempted), so neither directive was
+triggered; both left `pending`.
+
+Full detail: `experiment/iterations/iteration-88.md`. Independent
+out-of-band audit: to be dispatched separately by the top-level
+orchestrator (not performed by this session, per standing G3 discipline).

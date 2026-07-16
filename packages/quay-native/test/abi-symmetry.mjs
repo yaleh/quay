@@ -4,6 +4,10 @@
 // Iteration 1: iteration 0 only checked task_get key-by-key. This script
 // checks all four for real, side-by-side, via an actual MCP client
 // connection (not asserted).
+// Iteration 88: added a 5th check — task_write's CAS-conflict (error) shape
+// symmetry (QN-015's `--expect-status`/`expectedStatus`), previously
+// completely untested on either ABI surface's error path (only store.js's
+// own in-process behavior had coverage, via cas-write.test.mjs).
 
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -185,6 +189,56 @@ async function main() {
       cliKeys: keysOf(cli),
       mcpKeys: keysOf(mcpResult),
       match: JSON.stringify(keysOf(cli)) === JSON.stringify(keysOf(mcpResult)),
+    };
+  }
+
+  // 5. task_write CAS conflict shape (QN-015's `--expect-status` /
+  // `expectedStatus`) — iteration 88: this option existed since QN-015 but
+  // had ZERO test coverage anywhere in the repo (confirmed by grep across
+  // every *.test.mjs file before writing this block) for its CLI-vs-MCP
+  // error-shape symmetry specifically — cas-write.test.mjs only exercises
+  // store.write() directly, in-process, never through either ABI surface.
+  // Design §6: "quay-native task … --json emits the same schema as the
+  // corresponding MCP tool's structured result" — this must hold for the
+  // CAS-conflict (error) shape, not just the happy path.
+  {
+    execFileSync("node", [binPath, "task", "create", "T-5", "--title", "CAS conflict CLI", "--status", "ready"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    execFileSync("node", [binPath, "task", "create", "T-6", "--title", "CAS conflict MCP", "--status", "ready"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+    // Both T-5/T-6 are actually "ready"; supply a deliberately mismatched
+    // expectedStatus ("todo") on each surface to force a ConflictError.
+    let cli;
+    try {
+      cli = cliJson(tasksDir, ["task", "edit", "T-5", "--status", "done", "--expect-status", "todo"]);
+      throw new Error("expected CLI CAS conflict to exit non-zero, but it succeeded");
+    } catch (e) {
+      if (!e.stdout) throw e; // a real script bug, not the expected CAS failure
+      cli = JSON.parse(e.stdout.toString());
+    }
+    const mcp = await client.callTool({
+      name: "task_write",
+      arguments: { id: "T-6", status: "done", expectedStatus: "todo" },
+    });
+    const mcpResult = mcp.structuredContent;
+    results.task_write_cas_conflict_shape = {
+      cliKeys: keysOf(cli),
+      mcpKeys: keysOf(mcpResult),
+      cliIsError: cli.error === "ConflictError",
+      mcpIsError: mcp.isError === true && mcpResult.error === "ConflictError",
+      cliExpectedStatus: cli.expectedStatus,
+      mcpExpectedStatus: mcpResult.expectedStatus,
+      cliActualStatus: cli.actualStatus,
+      mcpActualStatus: mcpResult.actualStatus,
+      match:
+        JSON.stringify(keysOf(cli)) === JSON.stringify(keysOf(mcpResult)) &&
+        cli.error === "ConflictError" &&
+        mcp.isError === true &&
+        mcpResult.error === "ConflictError" &&
+        cli.expectedStatus === mcpResult.expectedStatus &&
+        cli.actualStatus === mcpResult.actualStatus,
     };
   }
 
