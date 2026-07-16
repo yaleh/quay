@@ -308,6 +308,32 @@ async function main() {
     assert(result.delivered === "manda" || result.delivered === "print", "quay action run --json output reports a delivered mode (manda or degraded print)");
   }
 
+  // 6b. QN-066 (iteration 62): unknown actionId — composePayload() throws
+  //     ("no such action button: ...") BEFORE deliverTrigger() is ever
+  //     reached, inside withProvider()'s async callback, uncaught all the
+  //     way out to main().catch(...) at the bottom of this file. This exact
+  //     failure shape is already tested at the MCP layer
+  //     (mcp-server.test.mjs's action_run-with-unknown-actionId case) and at
+  //     the direct src/action.js unit level (serve.test.mjs), but a
+  //     repo-wide grep for "no such action button" confirmed this direct
+  //     CLI-subprocess path (bin/quay.js's own dispatch + top-level
+  //     main().catch handler) had never itself been spawned with a bogus
+  //     actionId — a genuinely distinct, previously-untested failure point
+  //     from either of those two (a real child-process exit-code/stderr
+  //     shape, not a caught-and-returned MCP tool result or a direct
+  //     in-process function-throw assertion). No live GitHub/network access
+  //     is required (the throw happens before deliverTrigger(), entirely
+  //     local, against the same fixture used throughout this file).
+  {
+    const r = run(["action", "run", "CLI-1", "bogus-action-id", "--json"], spawnOpts);
+    assert(r.status === 1, "quay action run <id> <unknown actionId> exits 1 (not a hang, not a silent success)");
+    assert(
+      r.stderr.includes("no such action button"),
+      `quay action run <id> <unknown actionId> propagates composePayload()'s own error text via main().catch (stderr: ${JSON.stringify(r.stderr)})`
+    );
+    assert(!r.stdout.includes('"delivered"'), "quay action run <id> <unknown actionId> never reaches deliverTrigger() (no 'delivered' field ever printed)");
+  }
+
   // 7. Unknown top-level command — usage fallback + exit 1.
   {
     const r = run(["bogus"], spawnOpts);

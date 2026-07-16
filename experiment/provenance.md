@@ -9572,3 +9572,146 @@ for is reverted.
 
 **Current corrected state**: σ_strict = 57/64 = 0.8906, V_instance =
 0.5393, V_meta = 0.0973.
+
+## Iteration 62: QN-066 — direct-CLI-subprocess unknown-actionId negative-path test coverage for `bin/quay.js`'s own `action run` dispatch
+
+Following the reinforced discipline from iteration 61's post-hoc
+correction (a V_meta credit for "closing a previously-unnamed gap" must
+be independently, not self-, certified, and documentation content alone
+without same-iteration runtime exercise does not satisfy `completeness`),
+this iteration explicitly searched for, but did not default to
+manufacturing, V_meta movement — and evaluated two candidate
+negative-path angles before settling on a genuine, safely closeable one.
+
+**Angle 1 (investigated, correctly declined): `quay-github`'s `setStatus`
+(the actual `gh api` PATCH/label-write path) failing mid-write**, distinct
+from the already-tested GET-404 failure (`mcp-server.test.mjs` test 6
+only exercises the initial GET call inside `setStatus`, never the
+PATCH/label-add/label-remove calls that follow it — confirmed by reading
+`github-client.js` lines 536-591 in full this session). Investigated live
+against the real `yaleh/quay` repo. A probe (`gh api
+repos/yaleh/quay/issues/3/labels -X POST -f
+"labels[]=status:nonexistent-value-xyz"`) **accidentally created a real
+label on issue #3** — immediately reverted via a matching `DELETE gh api`
+call, confirmed via a follow-up live `GET` that issue #3's labels are
+back to exactly `status:ready`/`lane:execution` (its original state) and
+`state` remains `open`. A second, non-mutating probe (`PATCH
+.../issues/3 -f "state=bogus-invalid-state-value"`) showed GitHub's REST
+API silently ignores an invalid `state` value rather than erroring — so
+no clean, safe, non-mutating way exists to trigger a PATCH-specific
+failure against a real, existing issue in this small (10-issue), precious
+repo. This angle is correctly left closed: this iteration's own live
+probe reconfirms (does not merely re-assert) the standing scope
+constraint already documented in `write.test.mjs`/`cli.test.mjs`/
+`mcp-server.test.mjs`'s header comments.
+
+**Angle 2 (selected): `bin/quay.js`'s own direct-CLI-subprocess dispatch
+for `action run` with an unknown `actionId`.** `composePayload()`'s `no
+such action button: <id>` throw was already tested at the MCP layer
+(`mcp-server.test.mjs`) and at the direct `src/action.js` unit level
+(`serve.test.mjs`), but a repo-wide grep for `"no such action button"`
+confirmed `bin/quay.js` itself — spawned as a real child process, so the
+failure must propagate through `withProvider()`'s async callback all the
+way to the top-level `main().catch(...)` handler and produce a real
+process-level exit-code/stderr shape — had never been exercised this way.
+Genuinely distinct from both existing tests (MCP: SDK-caught structured
+tool result; `serve.test.mjs`: in-process function-throw assertion;
+neither exercises the real CLI-subprocess exit-code/stderr contract). No
+live GitHub/network access required (the throw happens before
+`deliverTrigger()`, entirely local, against the existing
+`packages/quay/test/cli.test.mjs` fixture).
+
+Added test 6b to `packages/quay/test/cli.test.mjs`: spawns `quay action
+run CLI-1 bogus-action-id --json`; asserts exit code 1, stderr contains
+`no such action button`, and stdout never contains `"delivered"` (proving
+`deliverTrigger()` is never reached). Adversarially verified: temporarily
+replaced `composePayload`'s throw with a stub success return — all three
+new assertions failed as expected — then restored the original file;
+`git diff --stat -- packages/quay/src/action.js` confirmed zero net
+change after restore. 26 lines added to `cli.test.mjs`; `git diff --stat
+-- packages/*/src/*.js` confirmed empty (test-file-only change). Full
+regression suite:
+
+```
+$ node --test packages/*/test/*.test.mjs
+...
+ℹ tests 26
+ℹ pass 26
+ℹ fail 0
+```
+`abi-symmetry.mjs`: ALL FOUR SURFACES SYMMETRIC. Real `yaleh/quay` issue
+#3 reconfirmed unchanged (`state: open`, labels
+`["status:ready","lane:execution"]`) after the angle-1 accidental
+mutation was reverted.
+
+QN-066 was created and driven through the **full gated lifecycle**
+(`task create` → `todo`, gated `author->ready` check, `task edit
+--status ready`, gated `execute->done` check, `task edit --status done`,
+terminal `task check` confirming `"gate":"none"`).
+`experiment/timing/iteration-62.log` records the real `date -u`
+checkpoints: task created 00:19:21Z → author gate checked 00:19:32Z →
+transitioned to `ready` 00:19:32Z → execute gate checked 00:19:32Z →
+transitioned to `done` 00:19:32Z (sub-second internal transitions once
+the real test-writing/adversarial-verification work — which preceded
+task creation — was already complete; matching QN-065's own pattern of a
+short terminal gate-walk following substantial prior investigation work).
+
+| Task | Description | author_by | execute_by | gate_by | Status |
+|---|---|---|---|---|---|
+| QN-066 | Add direct-CLI-subprocess unknown-actionId negative-path test coverage for bin/quay.js's own action run dispatch | native | native | native | done |
+
+σ (strict) = 58/65 = **0.8923** (up from 57/64 = 0.8906).
+
+**V_instance factor reasoning:** `skeleton` credited **+0.01 (0.77 →
+0.78)**, following the identical reasoning pattern iterations 54-60 used
+for their own new-angle-but-same-factor-shape closures (test-coverage-
+only regression addition, zero source diff, for an already-existing,
+unmodified capability) — applied here to genuinely different content (the
+direct-CLI-subprocess exit-code/stderr contract for an unknown actionId,
+distinct in kind from the MCP-layer and unit-level tests of the same
+underlying throw). This is categorically different from iteration 61's
+reverted `completeness` claim: the new content here is a test that was
+itself actually run this iteration and produced real, adversarially-
+verified pass/fail evidence about actual subprocess runtime behavior, not
+prose describing a future practice. `abi_symmetry` explicitly considered
+and rejected: no cross-binding content-equivalence claim is made (this is
+an error-surfacing-shape test, not a schema-equivalence one).
+`gate_correctness` explicitly considered and rejected: no gate/checkGate
+logic touched. `skill_convergence` unchanged: no SKILL.md content
+touched, no new Skill branch exercised.
+
+```
+V_instance = 0.78 × 0.96 × 0.76 × 0.96 = 0.5463  (up from 0.5393)
+```
+
+**V_meta factor reasoning:** all four factors explicitly considered and
+held flat, deliberately not defaulting to another V_meta reach after two
+consecutive corrected overreaches (iterations 59, 61). `completeness`:
+no Method/Skill content was edited this iteration (the change is a test
+file only); the angle-1 investigation reconfirms an existing scope
+constraint rather than closing a new methodology gap. `effectiveness`:
+no scope-matched timing comparator exists for this task shape (a
+CLI-subprocess test-coverage addition combined with a live negative-probe
+investigation); manufacturing one would repeat the exact shape of the
+twelfth correction. `reusability`: no new transfer-target evidence was
+created (no GitHub-Provider-specific content changed — Angle 1 concerned
+`quay-github` but was investigated and declined, producing no shipped
+change there). `validation`: held flat, reserved for the top-level
+orchestrator's independent audit of this iteration.
+
+```
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, narrow **skeleton-only** system
+increment (M_61 = M_62, A_61 = A_62 — no Skill or capability created or
+modified; only a new regression test added to an existing, unmodified
+capability). Per the dispatch's own explicit guidance, this is the
+honest, lowest-risk outcome after two consecutive V_meta correction
+events: real, evidence-backed instance-layer progress, no V_meta reach.
+`completeness`, `reusability`, and `validation` remain the most stalled
+V_meta factors (53, 37, and ~52 consecutive flat iterations
+respectively); `effectiveness` at 41 consecutive flat iterations (23-62,
+net, counting iteration 59's reverted attempt as non-movement).
+
+Full detail: `experiment/iterations/iteration-62.md`.
