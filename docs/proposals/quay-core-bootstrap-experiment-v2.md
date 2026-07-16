@@ -268,11 +268,12 @@ tasks are a different population — σ **resets to a fresh count** scoped
 to experiment 2's own task set, not averaged or concatenated with
 experiment 1's final value (0.8493 as of iteration 88; see the Origin
 note above on why it is now lower than the 0.8939 cited when this
-document was first drafted). `experiments/experiment-2/provenance.md`
-(a fresh ledger — see §7 precondition 4 for the layout this now lives
-under) must carry an explicit **inheritance record**: a pointer to
-experiment 1's final provenance state (`experiments/experiment-1/
-provenance.md`, at its stop-time last entry) and the
+document was first drafted). `experiments/quay-core-bootstrap/
+provenance.md` (a fresh ledger — see §7 precondition 4 for the layout
+this now lives under) must carry an explicit **inheritance record**: a
+pointer to experiment 1's final provenance state
+(`experiments/quay-native-bootstrap/provenance.md`, at its stop-time
+last entry) and the
 extracted-methodology artifact from §2.1, so a reader can distinguish
 "this task was driven by inherited, already-proven Skills" from "this
 task exercised newly modified Skills as part of experiment 2's own
@@ -308,11 +309,13 @@ This document does not authorize starting experiment 2. Before it starts:
    `experiment/` or gets its own top-level directory. **Now resolved:**
    a new top-level `experiments/` directory is created; the existing
    `experiment/` directory is renamed and moved to
-   `experiments/experiment-1/` (no content change beyond the move
-   itself); experiment 2 gets its own fresh directory,
-   `experiments/experiment-2/`, with its own `provenance.md`,
-   `directives/`, `audits/`, and `iterations/` subdirectories mirroring
-   experiment 1's internal layout. This keeps the two experiments'
+   `experiments/quay-native-bootstrap/` (no content change beyond the
+   move itself — the name mirrors this experiment's own protocol
+   document, `quay-bootstrap-experiment.md`); experiment 2 gets its own
+   fresh directory, `experiments/quay-core-bootstrap/` (mirroring this
+   document's own name), with its own `provenance.md`, `directives/`,
+   `audits/`, and `iterations/` subdirectories mirroring experiment 1's
+   internal layout. This keeps the two experiments'
    provenance, directives, and audit trails physically separate (not
    just separated by prose convention), consistent with §6's per-task-ID
    separation. **The physical `git mv` and the resulting path-reference
