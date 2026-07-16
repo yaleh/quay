@@ -72,12 +72,26 @@ its own turn.
       a foreground-spawning broker would silently serialize concurrent
       requests and produce a false negative about the mechanism's real
       capability (already flagged by DIR-024 action 2).
-   b. Run a minimal, bounded trial of 2-3 concurrent async `Dispatch`
-      calls against a single confirmed-background-spawning broker,
-      recording whether they are serviced genuinely concurrently
-      (overlapping leaf-agent lifetimes) or merely queued-and-serial, and
-      recording behavior at the `agent.spawn` depth/quota guard
-      (MAX_DEPTH=3, MAX_SPAWN=10) under this load.
+   b. ~~Run a minimal, bounded trial of 2-3 concurrent async `Dispatch`
+      calls against a single confirmed-background-spawning broker,~~
+      **Post-hoc correction (orchestrator, same-session, 2026-07-16):** this
+      action's original text incorrectly assumed `mcp__plugin_manda_manda__Dispatch`
+      is an async variant of the `Agent`/cap-request nested-subagent
+      mechanism. It is not — `Dispatch`/`DispatchStatus`/`DispatchProgress`/
+      `DispatchSettle` are a separate pending-task-queue protocol
+      (`pending-<to>` channel, claim/settle semantics), unrelated to
+      `agent.spawn`/`caps-broker.md`. The `Agent` tool itself (the actual
+      nested-subagent mechanism this whole DIR chain concerns) has **no
+      async mode** — it is always a blocking MCP call; `timeout<=0` means
+      "wait indefinitely," not "return immediately." Corrected action: run
+      a minimal, bounded trial of 2-3 `Agent()` calls issued as separate
+      tool-use blocks **within a single conversational turn** (which
+      Claude Code executes concurrently) — or from 2-3 distinct sessions
+      each issuing one call — against a single confirmed-background-
+      spawning broker, recording whether they are serviced genuinely
+      concurrently (overlapping leaf-agent lifetimes) or merely
+      queued-and-serial, and recording behavior at the `agent.spawn`
+      depth/quota guard (MAX_DEPTH=3, MAX_SPAWN=10) under this load.
    c. Only after (a) and (b) produce genuine, recorded evidence, attempt
       an actual application: a single iteration fanning out, via manda
       nested subagent, concurrent work on 2-3 independent, non-conflicting
