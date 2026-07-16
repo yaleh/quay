@@ -40,6 +40,88 @@ for addition to or removal from this set, that change must be justified
 here, in this section, with its own dated rationale — not silently folded
 into a routine σ recount.
 
+## Standing fact: V_meta practical-convergence ceiling on `effectiveness`, `reusability`, `completeness` (added iteration 84)
+
+Added iteration 84, applying iteration 83's own independent G3 audit's
+explicit recommendation (`experiment/audits/iteration-83-independent-
+adjudicate.md`, judgment (c)) — mirroring this file's own
+"Permanent strict-exclusion set" section above: a single canonical,
+greppable statement of a settled fact, so future iterations stop
+re-deriving it from scratch every single time. **This is not a change to
+any V_meta score, and not a claim that the experiment or any single
+factor is "converged" under protocol §7** (V_meta = 0.0973 remains far
+below the 0.80 dual threshold, and full §7 convergence requires all five
+listed criteria including that threshold). It is narrower: a documented
+statement that the search process itself, for these three specific
+factors, has reached a practical evidentiary ceiling under the current
+architecture and backlog.
+
+**The three factors and their ceiling:**
+
+| Factor | Held flat since | Structural blocker |
+|---|---|---|
+| `effectiveness` | iteration 23 (61 iterations) | Requires an organically-arising, scope-matched marginal-increment timing comparison (protocol §5.2: "measured on the marginal increment only"). No comparably-scoped task (single-file, no-network-I/O, matching stage-0 QN-006's shape) has arisen in the backlog since iteration 22; manufacturing one solely to produce a timing data point would corrupt the metric it produces (G5). |
+| `reusability` | iteration 25 (59 iterations) | Requires genuine new GitHub-Provider write capability exercised against a real compound-issue structure (protocol §5.2: "measured on the transfer target, never the accumulated artifact"). The one remaining candidate (gh-3/gh-4's blocked AC checkboxes) is blocked by a deliberate, already-justified v1 scope decision (`data.write` status-only, `packages/quay-github/DESIGN.md` QN-024) — independently confirmed at the code level (not just doc level) in iteration 83 that no `body`/`title` write path exists anywhere in `github-client.js`. Widening it now, with no organic demand, would be pure metric-manufacturing. |
+| `completeness` | ~iteration 22 (62 iterations) | Every documented Method-step gap in both `skills/author/SKILL.md` and `skills/execute/SKILL.md` carries an explicit "Resolved"/"Fixed in iteration N" annotation, re-verified against its own cited evidence as recently as iteration 83, except the single standing environmental gap: no native subagent-dispatch (fresh-context spawn) primitive exists in this harness — re-confirmed absent via `ToolSearch` in essentially every iteration since it was first identified, including iteration 84 (this iteration; see below). This is an out-of-quay-native's-control environmental limitation, not a Skill-content gap. |
+
+**Evidentiary basis (6+ independently-motivated search passes, all
+converging on the same negative result):** iterations 19-24 (original
+exhaustive search), 41 and 45 (later independent re-derivations), 82 (a
+differently-motivated organic backlog/test sweep — "is there unclaimed
+work sitting in the task list," not a rubric re-derivation), and 83 (a
+rubric-driven, primary-source-level re-verification, going one level
+deeper than any prior pass by directly reading `github-client.js`'s
+actual code rather than `DESIGN.md`'s prose alone). Three separate
+overclaim attempts on these factors (iterations 29, 59, 61) were each
+independently caught and correctly reverted — evidence the anti-inflation
+guardrails (G1/G2/G3/G5) are functioning, not that the factors are
+under-searched.
+
+**Disposition change, effective iteration 84 onward**: future iterations
+should **not**, by default, re-run the full three-factor passive search
+described above every single iteration. Instead, check only for a
+concrete **re-trigger condition** (any one of the following, checked
+directly against current repository/backlog state, not assumed):
+
+1. A new task appears in the backlog that is organically scope-matched to
+   stage-0 QN-006's shape (single-file, no source change or one small
+   source change, no network I/O) — re-open `effectiveness` and attempt a
+   fresh timing comparison.
+2. Genuine external/organic demand appears for wider GitHub Provider
+   `data.write` capability (e.g., a new task requiring AC/DoD-checkbox or
+   body/title writes against a real GitHub issue, not a legacy
+   pre-QN-024-scope-decision fixture like gh-3/gh-4) — re-open
+   `reusability`.
+3. A new, previously-undocumented Skill Method-step gap is found during
+   *unrelated* work on `author/SKILL.md` or `execute/SKILL.md` (i.e.,
+   discovered organically, not from a dedicated re-search) — re-open
+   `completeness`.
+4. A native fresh-context subagent-dispatch primitive becomes available in
+   this harness (a genuine capability change, not a re-check of the same
+   absence) — re-open both `completeness` and `reusability`/`effectiveness`
+   evaluation against design §5's full fidelity.
+5. Twelve (12) further iterations pass with none of 1-4 triggering
+   organically — at that point, run one more dedicated full search (not
+   sooner), to guard against this note itself becoming stale dogma rather
+   than a living, periodically-revisited fact. (12 chosen to mirror
+   roughly double the gap between iteration 82's and 83's own back-to-back
+   dedicated searches, while being long enough that a below-12-iteration
+   re-check would just be repeating this iteration's own conclusion
+   without new information.)
+
+If none of 1-5 apply in a given iteration, that iteration should state
+plainly "checked: no re-trigger condition met" (one line, not a full
+re-derivation) and move on to other work — this is the same
+lightweight-standing-check discipline `DIR-017`/`DIR-021` already
+establish for the manda-nested-subagent-trial obligation, applied here to
+V_meta's search cadence.
+
+This note does **not** foreclose a deliberately-authored, organically-
+motivated new increment (option (ii) in iteration 83's audit) if a future
+iteration judges that is the right call — it only retires the
+default-every-iteration passive re-search behavior for these three
+specific factors.
+
 ## Records (as of end of iteration 2)
 
 | task_id | title | author_by | execute_by | gate_by | status (end of iter 2) |
@@ -2802,5 +2884,61 @@ the most stalled V_meta factors; `effectiveness` flat since iteration 23
 iteration, now re-verified fresh rather than inherited.
 
 Full detail: `experiment/iterations/iteration-83.md`. Independent
+out-of-band audit: to be dispatched separately by the top-level
+orchestrator (not performed by this session, per standing G3 discipline).
+
+## Iteration 84
+
+This iteration applied iteration 83's own independent G3 audit's
+recommendation (`experiment/audits/iteration-83-independent-adjudicate.md`,
+judgment (c)) after independently re-verifying that audit's reasoning
+against its full text (not taken on summary alone): given 6
+differently-motivated search passes (iterations 19-24, 41, 45, 82, 83)
+have all independently converged on the same negative result for
+V_meta's three stalled factors, this iteration chose the audit's option
+(i) — **formally documenting a practical-convergence standing fact**,
+added as a new section in this file ("Standing fact: V_meta practical-
+convergence ceiling on `effectiveness`, `reusability`, `completeness`"),
+mirroring this file's own "Permanent strict-exclusion set" pattern: a
+canonical, dated, greppable statement of the settled evidentiary state,
+explicitly **not** a claim of protocol §7 convergence, with five concrete,
+checkable re-trigger conditions (a new scope-matched task; genuine new
+GitHub `data.write` demand; a newly-discovered Skill-content gap found
+organically; a native subagent-dispatch primitive becoming available; or
+12 iterations passing with none of the above) that would justify
+resuming the full three-factor search.
+
+This iteration also directly verified DIR-025's action 3c (intra-
+iteration concurrent fan-out across 2-3 independent quay tasks) is
+**not yet actionable**: the only non-`done` tasks in the 70-task backlog
+are four deliberately-adversarial fixtures (QN-017/020/021/022,
+structurally unsatisfiable by design, one a child of another), not
+genuine independent development work — attempting 3c now would require
+manufacturing artificial "independent tasks" solely to exercise the
+directive, the same anti-pattern G5 prohibits for V_meta searches. Left
+DIR-025 `pending`, unmodified, with this finding recorded.
+
+DIR-024 (`status: resolved` since the orchestrator's own prior live
+session, commit `6710d22`) was archived this iteration per this repo's
+convention (`mv experiment/directives/pending/DIR-024-*.md
+experiment/directives/archive/`) — pure bookkeeping, no score effect.
+
+No `tasks/QN-*.md` file was created or modified; task count remains 70.
+σ_strict is unchanged.
+
+```
+V_instance = 0.83 × 0.96 × 0.76 × 0.96 = 0.5813  (unchanged)
+V_meta = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (unchanged)
+```
+
+This iteration constitutes a genuine, honest **zero-V-movement**
+increment (M_83 = M_84, A_83 = A_84) — no V-factor credit is claimed for
+writing the standing-fact note itself (it documents an existing
+evidentiary state, it does not create new Method content, gate logic, ABI
+surface, or a newly-exercised Skill-orchestration branch), consistent
+with the iteration-25 correction's precedent against crediting
+process/discoverability work as production movement.
+
+Full detail: `experiment/iterations/iteration-84.md`. Independent
 out-of-band audit: to be dispatched separately by the top-level
 orchestrator (not performed by this session, per standing G3 discipline).
