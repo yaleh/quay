@@ -463,6 +463,100 @@ Gap-list delta (final): 5 new gaps found (CB-013 blocking, UQ-011 re-opened, UQ-
 
 ---
 
+## Iteration 4 record (2026-07-17, FINAL)
+
+### QX-* tasks created and completed this iteration
+
+| Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
+|------|-----------|------------|---------|----------------|--------|-------|
+| QX-016 | native | native | G3 PASS WITH NOTES | 15/19 | done | Multi-label AND-filter: parseFlags array collection; CLI .every() filter; Web UI getAll + buildHref array; test 18 cli.test.mjs + serve QX-016..019 block |
+| QX-017 | native | native | G3 PASS WITH NOTES | 16/19 | done | Sticky actions column: .col-actions position:sticky;right:0; .col-updated hidden at mobile; fully closes UQ-011 |
+| QX-018 | native | native | G3 PASS WITH NOTES | 17/19 | done | relativeTime() helper; "updated" column on list; "last updated" on detail; store.js get() adds updatedAt; closes UQ-017 + UQ-015 |
+| QX-019 | native | native | G3 PASS WITH NOTES | 18/19 | done | List-page target-status tooltip backport (listNextStatusMap per task); closes UQ-018 |
+
+σ_QX before iteration 4: 14/15 = 0.933
+σ_QX after iteration 4 (FINAL): 18/19 = 0.947
+(QX-001 remains seed provenance. QX-016..019 all native authoring + execution. gate_by = "G3 PASS WITH NOTES" — co-signed; see audits/iteration-4-adjudicate.md.)
+
+### Gate check results (iteration 4, FINAL)
+- QX-016: all ACs checked; status advanced to done; G3 PASS WITH NOTES
+- QX-017: all ACs checked; status advanced to done; G3 PASS WITH NOTES
+- QX-018: all ACs checked; status advanced to done; G3 PASS WITH NOTES
+- QX-019: all ACs checked; status advanced to done; G3 PASS WITH NOTES
+
+### Gaps closed this iteration (FINAL — 6 total)
+Development phase:
+- CB-013 (multi-label filter broken) → QX-016; commit 446d95a
+- UQ-011 (Advance off-screen mobile, fully) → QX-017; commit 446d95a
+- UQ-015 (task_get missing updatedAt) → QX-018 (side effect); commit 446d95a
+- UQ-017 (updatedAt never displayed) → QX-018; commit 446d95a
+- UQ-018 (list tooltip generic) → QX-019; commit 446d95a
+
+Synthesis step (closed as duplicate):
+- UQ-005 (no visual age indicator) → closed as duplicate of UQ-017; confirmed by comparison reviewer, iteration 4
+
+### New gaps found this iteration (FINAL)
+From simulated-user pass:
+- CB-014 (significant): MCP task_list schema stale in-session — CB-011 structural recurrence; requires session-independent fix
+- CB-015 (minor): MCP task_list single-label only — no multi-label AND-filter parity with CLI/Web UI
+- UQ-019 (significant): Label nav replaces entire filter instead of toggling individual labels when 2+ labels active
+- UQ-020 (minor): CLI silent exit (0 tasks, no message) on empty filter result
+- UQ-021 (minor): --label with no value silently ignored vs --prefix exits 1
+- UQ-022 (minor): needs-human detail page shows no call-to-action or guidance
+
+From G3 audit notes:
+- UQ-023 (minor): Redundant statSync in list() after QX-018 made get() unconditionally fetch mtime
+
+### G3 status (iteration 4, FINAL)
+G3 COMPLETE — PASS WITH NOTES. 12/12 test files pass. QX-016..019 co-signed.
+Two non-blocking notes: (1) redundant statSync in list() — filed as UQ-023 minor gap; (2) serve.test.mjs negative control assertion weaker form — logically correct, no functional issue.
+See experiments/quay-continuous-bootstrap/audits/iteration-4-adjudicate.md.
+
+### System health (iteration 4, FINAL)
+Full test suite: 12/12 files pass (30 top-level suites). No regressions. All three inherited snapshots confirmed intact.
+
+### V_instance (iteration 4, FINAL)
+```
+V_instance = capability_breadth × usability_quality × verification_coverage × system_health
+           = 0.72 × 0.82 × 0.97 × 0.98
+           ≈ 0.561
+
+ΔV_instance = 0.561 - 0.491 = +0.070 (over iteration 3 final)
+```
+Component rationale:
+- capability_breadth: 0.72 (CB-013 blocking closed; 2 new gaps CB-014/015 found; net: 0 blocking + 4 significant + 2 minor open vs prior 1 blocking + 3 significant + 1 minor)
+- usability_quality: 0.82 (UQ-011/017/018 significant closed; UQ-005/015 minor closed; UQ-019 significant added; 4 minor added; net: 2 significant open vs prior 3)
+- verification_coverage: 0.97 (12/12 test files pass; new test blocks added; no Playwright mobile)
+- system_health: 0.98 (G3 PASS WITH NOTES; both notes non-blocking; no regressions)
+
+### V_meta (iteration 4, FINAL)
+```
+V_meta = completeness × effectiveness × reusability × validation
+       = 0.77 × 0.26 × 0.79 × 0.947
+       ≈ 0.150
+
+ΔV_meta = 0.150 - 0.148 = +0.002 (over iteration 3 final)
+```
+σ_QX = 18/19 = 0.947 (confirmed final; G3 co-sign complete).
+Ceiling: 0.26 (effectiveness frozen; unchanged).
+
+### Simulated-user pass (iteration 4, FINAL)
+3 personas dispatched by orchestrator; all complete.
+- Mobile single-task (375px): ALL PASS — UQ-011/017/018 all verified closed; no new findings
+- Comparison reviewer (vs GitHub Issues + Linear): PASS on iteration-4 fixes; UQ-004 re-confirmed open; UQ-022 (minor) new; UQ-005 confirmed duplicate of UQ-017 (close bookkeeping)
+- Cross-experiment maintainer: CB-013/UQ-017 PASS; MCP schema CONCERNS (CB-014 new); label-nav CONCERNS (UQ-019 new significant); UQ-020/021 minor new
+
+Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 significant, UQ-020/021/022/023 minor); 6 gaps closed (CB-013, UQ-005 as duplicate, UQ-011 full, UQ-015, UQ-017, UQ-018); total cumulative gaps closed: 28 (all-time); net open: 15 (6 CB, 9 UQ) + 1 process (PR-001).
+
+### Convergence check (iteration 4)
+- V_meta ≥ 0.80: NO (ceiling 0.26)
+- PAUSE (ΔV < 0.02 for 2+ consecutive iterations AND no new significant gap): NOT MET — ΔV = +0.070 (not flat; acceleration); new significant gaps found (UQ-019, CB-014)
+- G3: PASS WITH NOTES (both notes non-blocking)
+- system_health: no regression
+**Status: CONTINUING**
+
+---
+
 ## Steering note: directive-tracking precondition not being genuinely re-executed (2026-07-17, post-iteration-3, out of band)
 
 Recorded directly here (per explicit human instruction) rather than as a new directive,
