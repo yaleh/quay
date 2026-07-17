@@ -1,9 +1,41 @@
 # DIR-005
 
 - status: pending
+- priority: **URGENT — dedicated iteration requested** (added 2026-07-17, see "Priority amendment" below)
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-17
 - title: Land action buttons end-to-end (epicd-referenced), show Web UI screenshots in README, and fix the connected serve host-binding / G7 log — for experiment 4
+
+## Priority amendment (2026-07-17)
+
+- amended_by: human (Yale Huang), asserted directly in this live conversation
+- Iterations 4 through 8 have each acknowledged this directive and deferred
+  it every time, most recently iteration 8: "action buttons landed (QX-009,
+  iteration 2). G7 confirmed 200. README screenshots outstanding but not
+  blocking. DEFERRED — low priority relative to open capability gaps." Item
+  1 (end-to-end manda dispatch to an actual consumer) and item 2 (in-UI
+  receipt) remain unimplemented; item 4 (README screenshots) remains
+  unimplemented despite six untracked screenshot PNGs accumulating at the
+  repo root as of iteration 7 with no organization into `docs/screenshots/`;
+  item 5 (the specific misleading `localhost` log line at `serve.js`) was
+  independently verified (external investigation, not this directive's own
+  iterations) to still be present and unfixed as of iteration 6, despite
+  iteration 5 and iteration 6's own reports both asserting it was "confirmed
+  satisfied" — a factual inaccuracy in those reports' dispositions, not a
+  disposition problem with this directive itself, but relevant context for
+  why this item needs a dedicated, careful pass rather than another
+  deferral-by-assertion.
+- **The human is now explicitly requesting this be prioritized and executed
+  in its own dedicated iteration as soon as possible**, rather than
+  continuing to be deferred in favor of other gap-list work. This does not
+  override the applying iteration's own judgment on implementation details
+  (which manda dispatch shape, which receipt UI form, etc. — see "Requested
+  action" below, unchanged) — it overrides only the *scheduling* deferral.
+  The applying iteration must verify item 5's log-line fix with direct
+  evidence (the actual line in `serve.js`, not a restated prior claim),
+  given the above-noted prior inaccuracy.
+- This amendment does not change the directive's Finding or Requested action
+  sections below, which remain as originally filed.
 
 ## Finding
 

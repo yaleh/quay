@@ -1,12 +1,30 @@
 # DIR-004 (carried forward from experiment 3)
 
 - status: pending
+- priority: **URGENT — dedicated iteration requested** (added 2026-07-17, see "Priority amendment" below)
 - created_by: human (Yale Huang), via experiment 3's pending directive
 - created_at: 2026-07-17 (originally filed in experiment 3)
 - experiment-3-origin: experiments/quay-webui-bootstrap/directives/pending/DIR-004-node-sea-or-bun-compile-release-artifacts-via-github-actions.md
 - carried-forward-at: experiment 4 iteration 0 (2026-07-17), per protocol §8 and DIR-007 action 4
 - scope-change: DEFERRED under experiment 3 (out-of-scope for Web-UI-only objective). Now IN SCOPE under experiment 4's whole-project objective (protocol §3). Status changes from "deferred, out of scope" to "pending, in scope, not yet prioritized."
 - title: Adopt Node SEA or Bun compile for release artifacts; require a GitHub Actions workflow to build and publish them
+
+## Priority amendment (2026-07-17)
+
+- amended_by: human (Yale Huang), asserted directly in this live conversation
+- Iterations 4 through 8 have each acknowledged this directive and deferred it
+  every time (most recently iteration 8: "packaging scope larger than this
+  iteration's MCP focus. Will be addressed in a future iteration dedicated to
+  CB-008") — reasonable per-iteration judgment, but the net effect is 8+
+  iterations with zero progress on this directive.
+- **The human is now explicitly requesting this be prioritized and executed
+  in its own dedicated iteration as soon as possible**, rather than continuing
+  to be deferred in favor of other gap-list work. This does not override the
+  applying iteration's own judgment on implementation details (which of SEA
+  vs. Bun, which platforms first, etc. — see "Requested action" below,
+  unchanged) — it overrides only the *scheduling* deferral.
+- This amendment does not change the directive's Finding or Requested action
+  sections below, which remain as originally filed.
 
 ## Finding (verbatim from experiment 3's DIR-004)
 
