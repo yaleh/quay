@@ -644,6 +644,30 @@ async function main() {
     assert(list.body.includes("overflow-x: auto") || list.body.includes("overflow-x:auto"),
       'GET / pageStyles() includes overflow-x:auto in @media block for mobile table scrolling (QW-006: DIR-003)');
 
+    // ── QW-009: labels column in list table assertions ───────────────────────
+    // QW-009 (experiment 3, iteration 4): verify labels column in task list table.
+    // LBL-1 has label 'alpha', LBL-2 has label 'beta', WUI-1 has no labels.
+
+    // Table header includes 'labels' column
+    assert(list.body.includes("<th>labels</th>"),
+      "GET / table header includes <th>labels</th> column (QW-009: labels column header)");
+
+    // LBL-1 (label 'alpha') appears on page 1 of default GET /.
+    // Verify it appears in the table body (within td element) with its label value.
+    const listAlphaPage = await get(port, "/?label=alpha");
+    assert(listAlphaPage.body.includes("<td>alpha</td>"),
+      "GET /?label=alpha task rows show 'alpha' label in labels td column (QW-009: labels column content)");
+
+    // WUI-1 has no labels — its row should have an empty labels td (column present)
+    // GET /?status=todo&sort=id shows WUI-1 on page 1 (before ZPG-* tasks)
+    const listTodoForLabels = await get(port, "/?status=todo&sort=id");
+    // WUI-1 appears with empty labels td (between title and </tr>)
+    assert(listTodoForLabels.body.includes("WUI-1"),
+      "GET /?status=todo&sort=id includes WUI-1 (QW-009: labelscolumn fixture sanity)");
+    // The labels column header is present in this filtered view too
+    assert(listTodoForLabels.body.includes("<th>labels</th>"),
+      "GET /?status=todo table header still includes <th>labels</th> column (QW-009: labels column persists across filters)");
+
     // ── QW-008: parent/children frontmatter rendering assertions ────────────
     // QW-008 (experiment 3, iteration 4): verify parent and children links in detail page.
     // PC-PARENT has children=[PC-CHILD]; PC-CHILD has parent=PC-PARENT.
@@ -742,7 +766,7 @@ async function main() {
   }
 
   console.log(failures === 0
-    ? "\nAll QC-001/QC-002/QW-001/QW-002/QW-003/QW-004/QW-005/QW-006/QW-007/QW-008 web-ui-browser regression tests passed."
+    ? "\nAll QC-001/QC-002/QW-001/QW-002/QW-003/QW-004/QW-005/QW-006/QW-007/QW-008/QW-009 web-ui-browser regression tests passed."
     : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }

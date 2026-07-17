@@ -328,6 +328,7 @@ export async function startServer({ port = 4173 } = {}) {
       const safePage = Math.min(page, totalPages);
       const offset = (safePage - 1) * PAGE_SIZE;
       const pageTasks = tasks.slice(offset, offset + PAGE_SIZE);
+      // QW-009 (experiment 3, iteration 4): add labels column to list table.
       const rows = pageTasks
         .map(
           (t) => html`<tr>
@@ -335,6 +336,7 @@ export async function startServer({ port = 4173 } = {}) {
             <td>${escapeHtml(t.status)}</td>
             <td>${escapeHtml(t.role)}</td>
             <td>${escapeHtml(t.title)}</td>
+            <td>${escapeHtml((Array.isArray(t.labels) ? t.labels : []).join(", "))}</td>
           </tr>`
         )
         .join("\n");
@@ -418,7 +420,7 @@ export async function startServer({ port = 4173 } = {}) {
           ${labelNav ? html`<p class="meta">Label: ${labelNav}</p>` : ""}
           ${pageNav}
           <table>
-            <tr><th>id</th><th>status</th><th>role</th><th>title</th></tr>
+            <tr><th>id</th><th>status</th><th>role</th><th>title</th><th>labels</th></tr>
             ${rows}
           </table>
           ${totalPages > 1 ? pageNav : ""}
