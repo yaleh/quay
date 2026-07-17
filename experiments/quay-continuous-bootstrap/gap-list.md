@@ -28,6 +28,7 @@
 
 | ID | Description | Severity | Source | Date added | Last confirmed open |
 |----|-------------|----------|--------|------------|---------------------|
+| UQ-047 | No `--version` flag — `quay --version` fails with usage error. Minor capability gap; no `--version` or `-V` flag implemented anywhere in `bin/quay.js`. | minor | simulated-user (Persona A, CLI returning user, iteration 15 synthesis) | 2026-07-17 | 2026-07-17 |
 | ~~UQ-042~~ | ~~CLI search header shows "1 matches" (grammatically incorrect) — should be "1 match" when `sorted.length === 1`.~~ | ~~minor~~ | Closed iteration 15 — QX-058; `bin/quay.js` search header ternary `sorted.length === 1 ? "match" : "matches"`; cli.test.mjs section 25 |
 | ~~UQ-043~~ | ~~CLI usage synopsis line shows `[--json]` only, not `[--json \| --format json]`.~~ | ~~minor~~ | Closed iteration 15 — QX-058; synopsis updated to `[--json \| --format json]`; cli.test.mjs section 25 |
 | ~~UQ-044~~ | ~~`--format JSON` (uppercase) triggers the unknown-format warning instead of being normalized.~~ | ~~minor~~ | Closed iteration 15 — QX-058; `flags.format.toLowerCase()` normalization added; cli.test.mjs section 25 |
@@ -74,6 +75,14 @@
 | SH-006 | `quay-native mcp: serving tasks from <path>` startup message leaks to stderr. Scripts that redirect stderr to stdout (`2>&1`) get this line mixed into JSON output, breaking automated pipelines. Pre-existing; first formally documented by CLI scripting user in iteration 12 synthesis. | minor | simulated-user (CLI scripting user, iteration 12 synthesis) | 2026-07-17 | 2026-07-17 |
 | ~~SH-004~~ | ~~Pagination contract edge cases: (1) `totalPages=0` when `total=0` — some consumers expect `totalPages=1` for empty sets; behavior is deterministic but potentially surprising. (2) `pageSize=0` and `pageSize>200` clamping behavior is correct but not regression-protected by tests.~~ | ~~minor~~ | Closed iteration 11 — QX-042; mcp-server.test.mjs Block 18 locks: `total=0→totalPages=0` (API contract documented); `pageSize=0→50` (parseInt(0)\|\|50=50 fallback documented); `pageSize=201→200` (min clamp). No behavior changes — tests document and regression-protect existing behavior |
 | ~~SH-005~~ | ~~`mcp-server.js` contains an independent inline copy of `stripHeadings()` that was not updated by QX-041. MCP `task_list` search (via the `search` parameter) still strips `#`-prefixed lines inside fenced code blocks — the fix applied to `serve.js` did not propagate. The two entry points share no import of the function.~~ | ~~minor~~ | Closed iteration 12 — QX-044; `mcp-server.js` `stripHeadings()` updated with `inFence` state tracking (matching `serve.js` post-QX-041); mcp-server.test.mjs Block 19 (FENCE-1/FENCE-2: 2 assertions). |
+
+### packaging_quality (sub-dimension of system_health; tracked separately for clarity)
+
+| ID | Description | Severity | Source | Date added | Last confirmed open |
+|----|-------------|----------|--------|------------|---------------------|
+| PKG-001 | README line 41 hardcodes `quay-0.1.0.tgz` install command — stale after v0.2.0 release. Users following the README install the wrong version. | minor | simulated-user (Persona B, npm installer, iteration 15 synthesis) | 2026-07-17 | 2026-07-17 |
+| PKG-002 | CHANGELOG missing v0.2.0 entry — no record of what changed between 0.1.0 and 0.2.0. Users and downstream consumers cannot see release notes. | minor | simulated-user (Persona B, npm installer, iteration 15 synthesis) | 2026-07-17 | 2026-07-17 |
+| PKG-003 | No `files` field in `packages/quay/package.json` — test files (`packages/quay/test/*.mjs`) are bundled in the npm artifact, unnecessarily increasing artifact size and exposing test infrastructure to consumers. | minor | simulated-user (Persona B, npm installer, iteration 15 synthesis) | 2026-07-17 | 2026-07-17 |
 
 ### process (experiment self-execution — outside the four V_instance dimensions; tracked here because it affects whether steering directives actually take effect)
 
@@ -243,3 +252,6 @@
 - Iteration 15 (development phase): closed DIR-004 genuine verification (QX-056: GitHub Actions run 29582230120 SUCCEEDED, quay-0.2.0.tgz published and verified), DIR-006 formal disposition QX-057 (Option B: files canonical; dual-representation state resolved), UQ-042 (QX-058: grammar fix), UQ-043 (QX-058: synopsis update), UQ-044 (QX-058: lowercase normalization), UQ-045 (QX-058: scripting example), UQ-046 (QX-059: test OR condition tightened); 7 closures (5 UQ + 2 directive/process); G3 + simulated-user PENDING (orchestrator dispatch)
 - **Cumulative gaps closed (all-time, iteration 15 development phase): 80** (adds UQ-042/043/044/045/046 + DIR-004-final + DIR-006)
 - **Net open gaps after iteration 15 development phase**: 3 minor — CB-006 (configurable page size); ENV-001 (MCP stale process, known env characteristic); SH-006 (quay-native startup message leaks to stderr)
+- Iteration 15 (G3 + simulated-user, FINAL): G3 PASS (σ_QX=55/57=0.965; QX-056/058/059 all co-signed); Persona A (CLI returning user) PASS — 1 new gap UQ-047 (no --version flag, minor); Persona B (npm installer) PARTIAL — 3 new packaging gaps PKG-001/002/003 (all minor; release pipeline itself verified working); Persona C (methodology reviewer) PASS — transfer_breadth revised upward to 0.80 (packaging surface solidly covered by QX-056); no new closures in synthesis.
+- **Cumulative gaps closed (all-time, iteration 15 FINAL): 80** (unchanged from dev phase — no new closures in synthesis)
+- **Net open gaps after iteration 15 FINAL**: 7 minor — CB-006; ENV-001; SH-006; UQ-047; PKG-001; PKG-002; PKG-003. **ACTIVE — continuing to iteration 16** (ΔV=+0.021 > 0.02; PAUSE counter = 0; directives/pending/ EMPTY).
