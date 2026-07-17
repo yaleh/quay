@@ -646,7 +646,10 @@ closed/newly-found entries every iteration.
 ```
 Read, in full, before doing anything else:
   experiments/quay-continuous-bootstrap/iterations/iteration-{N-1}.md  — prior state, V scores, problems
-  experiments/quay-continuous-bootstrap/provenance.md                   — current QX-* task provenance
+  experiments/quay-continuous-bootstrap/provenance.md (CURRENT STATE header + iteration-{N-1}'s
+                                                          own record block only — not the full
+                                                          per-iteration history; older iterations'
+                                                          detail is archival, grep on demand)
   experiments/quay-continuous-bootstrap/gap-list.md (or QX-*-gap-labeled tasks, per iteration-0 decision)
   experiments/quay-continuous-bootstrap/audits/iteration-{N-1}-*        — ONLY the most recent G3
                                                                             co-sign and the most recent
@@ -660,7 +663,9 @@ Read, in full, before doing anything else:
   packages/quay-native/skills/execute/SKILL.md
 
 Extract:
-  - current σ_QX (recompute from provenance.md QX-* entries only)
+  - current σ_QX (read directly from provenance.md's CURRENT STATE header / V-score
+    history table's latest row — do not recompute by scanning every historical QX-*
+    block; the header exists precisely to remove that scan)
   - the CURRENT gap list, by dimension and severity — this iteration's actual work menu
   - the specific problems iteration {N-1} identified as blocking progress
   - ΔV_instance and ΔV_meta from the last 1-2 iterations — is a PAUSE recommendation close?
@@ -911,7 +916,11 @@ its test in this same iteration. Confirm self-hosted task-tracking mechanism use
 provenance, not a file-only shortcut.]
 
 ## 6. Provenance update
-[Per-QX-* task {author_by, execute_by, gate_by} diffs this iteration; σ_QX before → after]
+[Per-QX-* task {author_by, execute_by, gate_by} diffs this iteration; σ_QX before → after.
+Confirm BOTH the CURRENT STATE header AND the V-score history table row for this iteration
+were updated together in provenance.md — updating one without the other is a drift risk
+the header was specifically designed to avoid (see provenance.md's CURRENT STATE block
+comment).]
 
 ## 7. Simulated-user pass (§0c — every iteration)
 [Personas dispatched this iteration (2-3, deliberately different angles) and why those were

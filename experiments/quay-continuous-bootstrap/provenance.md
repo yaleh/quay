@@ -5,6 +5,31 @@ per-iteration V_instance/V_meta history, per the mechanics inherited unchanged f
 `experiments/quay-native-bootstrap/directives/README.md` and continued through
 experiments 2 and 3.
 
+## CURRENT STATE (overwrite each iteration — see V-score history table below for the
+source-of-truth per-iteration numbers; do not restate numbers here independently)
+
+_Last updated: iteration 7 (HALT)_
+
+- **Latest scores:** see "V-score history (all iterations)" table, iteration 7 row, for
+  V_instance / ΔV_instance / V_meta / σ_QX. Do not duplicate those figures here — update
+  the table, not this line, when a new iteration completes.
+- **Live V_meta re-triggers:** none fired as of iteration 7 — all 5 re-trigger conditions
+  (effectiveness, reusability, completeness/gap-discovery, completeness+reusability/
+  effectiveness joint, open-ended-domain-specific) remain NOT TRIGGERED at every iteration
+  checked (0, 1, 2; status unchanged through iteration 7, "effectiveness frozen; unchanged"
+  per the iteration 7 V_meta note). This field does NOT exist in the V-score history table,
+  so it lives here.
+- **Standing decisions (do not re-litigate without new evidence):**
+  - Gap-list storage: plain markdown file at `experiments/quay-continuous-bootstrap/gap-list.md`
+    (decided iteration 0 — see "Gap-list storage decision" in the Iteration 0 record).
+  - σ-reset rule: floor RESET to 0 for experiment 4's own validation scoring, not carried
+    forward from experiment 3's σ_QW=0.778 (decided iteration 0 — see
+    "σ_QX-vs-inherited-floor decision" in the Iteration 0 record).
+  - V_meta ceiling: 0.26 (1.0 × 0.26 × 1.0 × 1.0, effectiveness-bound; inherited from
+    experiment 1, confirmed positively across experiments 2/3 — see Inheritance record below).
+- **Status:** HALT (human-imposed, after iteration 7 — "将对实验设置进行调整"; see HALT
+  note at bottom of file for full detail).
+
 ---
 
 ## Inheritance record (2026-07-17, written at scaffold time, before iteration 0)
