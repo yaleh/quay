@@ -1,8 +1,9 @@
 # DIR-007
 
-- status: pending
+- status: **APPLIED** (iteration 10, 2026-07-17)
 - created_by: human (Yale), asserted directly in this live conversation
 - created_at: 2026-07-17
+- applied_at: iteration 10, 2026-07-17
 - title: Remove the task-list page's orientation banner
 
 ## Finding
@@ -58,5 +59,24 @@ branch/blocked state, not a sequential step in a `→` chain. Update
 presence/text accordingly.
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred -->
+
+**APPLIED in iteration 10 (2026-07-17).** Source: `iterations/iteration-10.md` §3
+("DIR-007 — Orientation banner removal") and §4 (dev-phase gap/directive log).
+
+- Removed `<div class="orientation-banner">...</div>` from the list-page
+  template in `packages/quay/src/serve.js`.
+- The `.orientation-banner {}` CSS rule was retained as an empty block with an
+  explanatory comment (not deleted outright) — see `serve.js:717` region,
+  which now carries a comment referencing this directive and the two findings
+  above (misleading `needs-human` sequencing; disproportionate mobile layout
+  cost).
+- No replacement banner-shaped element was added, per the requested action's
+  "no added dedicated vertical space" constraint. The existing status filter
+  navigation (`serve.js:518-520`) was left as the sole status-vocabulary
+  affordance.
+- `serve.test.mjs` updated: two assertion blocks now check the banner text is
+  ABSENT (iteration 10, port+11 test block region).
+- Full test suite: 30/30 pass, no regressions (iteration 10 dev-phase run).
+- Directive counted in iteration 10's V_instance provisional scoring as a
+  `usability_quality` cosmetic improvement (0.875).
 </content>
