@@ -223,7 +223,12 @@ inside the fenced block (current line 623-624).
   separate "read reference/ fresh each iteration" line. No edit to
   Context-extraction is needed for Lever 4 since its two named standing
   files are already itemized there individually, not folded into a
-  wholesale `reference/` read.
+  wholesale `reference/` read. (Per the proposal's §2 corrected baseline
+  table, these two native `SKILL.md` files —
+  `packages/quay-native/skills/author/SKILL.md` and
+  `packages/quay-native/skills/execute/SKILL.md` — total ~42.7KB and are
+  distinct from the unrelated ~31KB set of 4 `.claude/skills/*/SKILL.md`
+  methodology-skill definitions; the two figures are not interchangeable.)
 
 **Acceptance criteria:**
 - (a) `git diff` shows only the third bullet of the Lifecycle
@@ -258,6 +263,12 @@ touching `provenance.md`'s structure/section-ordering/iteration-record
 format. If neither is confirmed, do not proceed with this phase — land it
 only once, or as part of, the settings-adjustment, per proposal §9 finding
 #2. This is a timing gate, not a technical dependency on Phase 1.
+Per proposal §6, this check must be **performed fresh, at Phase 2
+implementation time** — re-read `provenance.md`'s current HALT note and
+re-confirm (a) or (b) then. It is not satisfied by citing this plan
+document's or the proposal's original review-time confirmation that the
+experiment was HALTed at a clean boundary; that confirmation is now stale
+by construction and must not be treated as still-current evidence.
 
 ### Stage 2.0 — Design step: fold into, don't duplicate, the V-score history table
 
@@ -279,15 +290,17 @@ options to leave open:
   table does not carry* — namely the standing decisions (gap-list storage
   format, σ-reset rule, V_meta ceiling = 0.26) and which V_meta re-triggers
   are currently live — and (2) for the fields the table *does* carry
-  (latest σ_QX, latest V_instance/V_meta, last-2 deltas), **references the
-  table's own last row(s) by iteration number instead of restating the
-  numbers** (e.g. "see V-score history row for iteration 7, below"), OR, if
-  restating for at-a-glance convenience is preferred over a table lookup,
-  the restated numbers must be sourced by an explicit "must match V-score
-  history table, iteration N row" note co-located with them so a future
-  editor updating one is visually prompted to update the other. Prefer the
-  reference-not-restate form — it structurally cannot drift because there
-  is only one number, not two.
+  (latest σ_QX, latest V_instance/V_meta, last-2 deltas), **must reference
+  the table's own last row(s) by iteration number instead of restating the
+  numbers** (e.g. "see V-score history row for iteration 7, below"). This
+  is the required resolution, not one of two options: per the proposal's
+  Lever 2 "Change:" text (§3), the block "must NOT independently restate"
+  the table's numbers. A "restate-with-a-co-located-cross-reference-note"
+  alternative (sourcing restated numbers via an explicit "must match
+  V-score history table, iteration N row" note) was considered and
+  rejected in favor of the strictly reference-only form — a co-located
+  note still leaves two numbers that can drift, whereas a reference
+  structurally cannot drift because there is only one number, not two.
 
 **Acceptance criteria for this stage:**
 - (a) A concrete before/after text for the `CURRENT STATE` block is drafted

@@ -54,7 +54,7 @@ Corrected sizes:
 | `audits/` (full directory) | 168KB, 16 files | **288KB, 31 files** | +4 files/iteration (not +2 — one adjudicate + up to three simulated-user reports per iteration), unbounded |
 | `gap-list.md` | "~modest" | **27KB** (not modest — already the third-largest source) | linear |
 | 3× methodology `reference/` trees | 88KB | ~102KB (confirmed same order of magnitude) | static |
-| 2× native `SKILL.md` | 43KB | 2 files total 31KB across all 4 skill SKILL.md (native+core+webui+directive); the two actually read per Lever 4 (`quay-native-methodology` + one other) are smaller — figure was approximate but roughly consistent | static |
+| 2× native `SKILL.md` | 43KB | ~42.7KB confirmed (`packages/quay-native/skills/author/SKILL.md` 14,252B + `packages/quay-native/skills/execute/SKILL.md` 28,474B) — these are the two files actually read per the standing Context-extraction list (ITERATION-PROMPTS.md lines 627-628); the ~31KB figure for the 4 `.claude/skills/*/SKILL.md` methodology-skill definitions is a separate, unrelated set of files and does not apply here | static |
 | **Total (re-measured)** | ~505KB / ~126K tokens | **~570KB+ / ~140K+ tokens**, and still growing | dominated by `audits/`, `gap-list.md`, and `provenance.md` |
 
 The original "+2 files/iteration" growth rate for `audits/` undercounts:
@@ -98,12 +98,18 @@ is instructed to "recompute σ_QX from `provenance.md` QX-* entries only,"
 which forces scanning every historical block. Grows linearly forever.
 
 **Change:** add a `## CURRENT STATE (overwrite each iteration)` block at the
-top, holding only what the next iteration needs at start: latest σ_QX,
-latest V_instance/V_meta plus the last 2 deltas, which V_meta re-triggers are
-live, and the standing decisions (gap-list storage format, σ-reset rule,
-V_meta ceiling = 0.26). Per-iteration detail blocks stay below, unchanged, as
-the full audit trail — read on demand, not at every start. Context-extraction
-reads the header plus only `iteration-{N-1}`'s own block.
+top, holding only the fields the existing "V-score history (all iterations)"
+table does *not* already carry: which V_meta re-triggers are live, and the
+standing decisions (gap-list storage format, σ-reset rule, V_meta ceiling =
+0.26). For the fields the V-score history table *does* already carry
+(latest σ_QX, latest V_instance/V_meta, last-2 deltas), this block must NOT
+independently restate those numbers — it must reference the table's latest
+row instead (e.g. "see V-score history row for iteration N, below"), so the
+table remains the single source of truth for per-iteration V-scores and the
+header is derived/pointer, not a second, separately-maintained copy of the
+same numbers. Per-iteration detail blocks stay below, unchanged, as the full
+audit trail — read on demand, not at every start. Context-extraction reads
+the header plus only `iteration-{N-1}`'s own block.
 
 **Saves:** ~26KB now, unbounded going forward. Also removes the
 "recompute σ by scanning every block" friction that itself invites
@@ -186,9 +192,18 @@ of that material.
 V_meta re-trigger check actually uses (`v-meta-stall-analysis.md`,
 `v-meta-ceiling-diagnostic.md`, ~11KB combined). The rest is "read once, and
 re-read the specific skill only when that skill is being modified this
-iteration" — which is already the stated capability-reading protocol rule
-("re-read immediately before using it"), just not reflected in the
-every-iteration mandatory read list.
+iteration." The wholesale-every-iteration instruction this narrows is the
+third bullet of `ITERATION-PROMPTS.md`'s "Lifecycle capability-reading
+protocol" section (lines 639-645) — "Read
+`.claude/skills/quay-native-methodology/reference/`, ... files fresh each
+iteration." That bullet is not separate, already-existing discipline the
+read-list merely failed to mirror; it is itself the mandate being edited.
+The first two bullets of that same section ("read all relevant Skill
+definitions before the iteration starts" / "re-read the specific
+Skill/capability being modified immediately before using it") already state
+the narrower rule this lever wants to apply — the third bullet currently
+overrides that narrower rule with a wholesale reread, and this lever removes
+that override.
 
 **Saves:** ~80KB/iteration.
 **Risk:** low — this aligns the read list with an already-documented
@@ -281,7 +296,16 @@ section placement or duplicate the existing "V-score history" table.
 Landing order should be: hard-gate fix and Levers 1/4 first (they touch
 `ITERATION-PROMPTS.md` only and do not interact with each other's edit
 regions), then Lever 2 last and only once `provenance.md`'s post-HALT
-shape is settled. If Lever 3 is later picked up out of sequence with
+shape is settled. **Gate owner/trigger:** whoever lands Phase 2 (Lever 2)
+must, at implementation time (not from this proposal's original review
+date), first re-read `experiments/quay-continuous-bootstrap/provenance.md`'s
+current HALT note and confirm either (a) the settings-adjustment has landed
+and its diff to `provenance.md` is known, so Lever 2 can be reconciled
+against it, or (b) the human operator has explicitly confirmed the
+settings-adjustment does not touch `provenance.md`'s structure. This check
+must be performed fresh immediately before landing Lever 2, not assumed
+satisfied because this proposal or its architect review once found the
+experiment HALTed at a clean boundary. If Lever 3 is later picked up out of sequence with
 Levers 1/4 already applied, its "runbook" extraction must carry forward
 whatever read-list narrowing Levers 1/4 already introduced rather than
 reverting to the original wholesale-read instructions when the file is
