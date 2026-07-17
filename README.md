@@ -38,7 +38,7 @@ Download the latest `quay-*.tgz` from the [GitHub Releases page](https://github.
 then install it globally with npm:
 
 ```sh
-npm install -g quay-0.1.0.tgz   # replace with the actual filename from the release
+npm install -g quay-0.2.0.tgz   # replace with the actual filename from the release
 quay --help
 ```
 

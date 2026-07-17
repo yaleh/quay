@@ -8,16 +8,16 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 15 FINAL_
+_Last updated: iteration 16 dev phase (G3 + simulated-user PENDING)_
 
-- **Latest scores (FINAL):** V_instance = 0.771 (ΔV = +0.021). V_meta = 0.288 (ΔV = +0.048). σ_QX = 55/57 = 0.965. G3 co-signed PASS.
+- **Latest scores (dev-phase PROVISIONAL):** V_instance ≈ 0.800 (ΔV ≈ +0.029). V_meta ≈ 0.293 (ΔV ≈ +0.005). σ_QX = 57/59 = 0.966. G3 PENDING.
 - **DIR-004: APPLIED AND ARCHIVED** (QX-056 done; GitHub Actions run 29582230120 SUCCEEDED; quay-0.2.0.tgz verified; directive file archived). Full closure — all four reopen criteria satisfied.
 - **DIR-006: RESOLVED AND ARCHIVED** (QX-057 done; Option B chosen: files canonical; DIR-004 quay task marked done/superseded; invariant enforced).
 - **DIR-008: APPLIED AND ARCHIVED** (QX-050 done, archived in synthesis, iteration 14). V_meta redesigned: new formula (`methodology_leverage × strategy_completeness × transfer_breadth × validation`) active from iteration 14. G3 co-sign received (PASS-WITH-NOTES). See `VMETAFORMULA.md`.
 - **DIR-009 STATUS: APPLIED AND ARCHIVED** — applied in iteration 13 (genuine worktree isolation, HARD GATE ls proof, no ENV-excuse boilerplate); moved to `directives/archive/DIR-009-orchestrator-must-honor-hardened-gates.md`.
-- **directives/pending/ EMPTY** — All active directives applied and archived. No pending directives entering iteration 16.
-- **PAUSE NOT TRIGGERED** — ΔV = +0.021 > 0.02; PAUSE counter = 0.
-- **V_instance ≥ 0.80: NOT YET MET** — V_instance = 0.771 (approaching threshold; new minor gaps PKG-001/002/003/UQ-047 provide clear targets for iteration 16).
+- **directives/pending/ EMPTY** — All active directives applied and archived. No pending directives entering iteration 17.
+- **PAUSE NOT TRIGGERED** — ΔV ≈ +0.029 > 0.02; PAUSE counter = 0.
+- **V_instance ≥ 0.80: PROVISIONAL MET** — dev-phase score ≈ 0.800. Confirm at FINAL after G3 + simulated-user.
 - **Standing decisions (do not re-litigate without new evidence):**
   - Gap-list storage: plain markdown file at `experiments/quay-continuous-bootstrap/gap-list.md`
     (decided iteration 0 — see "Gap-list storage decision" in the Iteration 0 record).
@@ -28,7 +28,7 @@ _Last updated: iteration 15 FINAL_
   - V_meta formula: `methodology_leverage × strategy_completeness × transfer_breadth × validation` (from iteration 14 onward). See `VMETAFORMULA.md`.
   - V_meta re-baseline FINAL: 0.240 (transfer_breadth revised 0.80 → 0.75 in synthesis per Persona C; VMETAFORMULA.md history table updated). Non-comparable to old formula value 0.154. Transfer_breadth bumped back to 0.80 at iteration 15 FINAL per honest upward revision (packaging solidly covered by QX-056).
   - **Directive mechanism (iteration 15):** Files are canonical. Directive files in `directives/pending/` and `directives/archive/` are the one authoritative record. No directive quay tasks. (DIR-006 resolution, QX-057.)
-- **Status:** **ACTIVE — iteration 15 FINAL, continue to iteration 16. directives/pending/ EMPTY. V_instance ≥ 0.80 NOT YET achieved (0.771).** Cumulative gaps closed: 80. Net open: 7 minor (CB-006, ENV-001, SH-006, UQ-047, PKG-001, PKG-002, PKG-003).
+- **Status:** **ACTIVE — iteration 16 dev complete, G3 + simulated-user PENDING. directives/pending/ EMPTY. V_instance ≈ 0.800 PROVISIONAL.** Cumulative gaps closed: 85 (dev phase). Net open: 2 minor (ENV-001, SH-006).
 
 ---
 
@@ -602,10 +602,11 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | 13 | **0.721** | **+0.004** | 0.154 (old formula) | 45/46 = 0.978 | 5 gaps closed (PR-001/002/003 process, CB-021, UQ-036); DIR-009 applied+archived; genuine worktree isolation (first time); G3 PASS; Persona A/B/C all PASS; 5 new minor gaps (UQ-037/038/039/040/041); cumulative closed=67; **PAUSE TRIGGERED** (2nd consecutive ΔV < 0.02) |
 | **14 FINAL** | **0.750** | **+0.029** | **0.240** (new formula, FINAL; transfer_breadth revised 0.80→0.75 in synthesis per Persona C) | 51/53 = 0.962 | DIR-008 APPLIED+ARCHIVED; 5 UQ gaps closed (UQ-037/038/039/040/041 via QX-051..055); 6 new gaps (UQ-042..046 open, META-001 found+closed); G3 PASS-WITH-NOTES; 3 personas complete; PAUSE not triggered (ΔV=+0.029 > 0.02); cumulative closed=73; **FORMULA SWITCH POINT — ΔV_meta non-comparable across iter 13/14** |
 | **15 FINAL** | **0.771** | **+0.021** | **0.288** (methodology_leverage=0.45, strategy_completeness=0.83, transfer_breadth=0.80↑, validation=0.965) | 55/57 = 0.965 | DIR-004 final (release verified, run 29582230120, quay-0.2.0.tgz), DIR-006 resolved (Option B: files canonical); UQ-042..046 closed (QX-058/059 CLI polish); 4 new minor gaps (UQ-047, PKG-001/002/003) from synthesis; G3 PASS; directives/pending/ EMPTY; cumulative closed=80; PAUSE not triggered (ΔV=+0.021 > 0.02); V_meta: transfer_breadth revised 0.75→0.80 (packaging solidly covered by QX-056) |
+| **16 dev (provisional)** | **≈0.800** | **≈+0.029** | **≈0.293** | 57/59 = 0.966 | CB-006 (page-size), UQ-047 (--version flag), PKG-001/002/003 closed (QX-060/061); ENV-001+SH-006 deferred (out-of-scope/cross-package); G3+SU PENDING; cumulative closed=85; PAUSE counter=0 |
 
-ΔV trend (V_instance): +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, +0.004, +0.029, **+0.021**. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13: 2nd consecutive < 0.02 (ΔV=+0.004) → **PAUSE TRIGGERED**; iter-14: PAUSE counter RESET (human resumption mandate) + ΔV=+0.029 > 0.02 → PAUSE counter at 0; iter-15: ΔV=+0.021 > 0.02 → PAUSE counter remains 0. Cumulative gaps closed: 80 (iter-15 FINAL).
+ΔV trend (V_instance): +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, +0.004, +0.029, +0.021, **≈+0.029 (16 provisional)**. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13: 2nd consecutive < 0.02 (ΔV=+0.004) → **PAUSE TRIGGERED**; iter-14: PAUSE counter RESET (human resumption mandate) + ΔV=+0.029 > 0.02 → PAUSE counter at 0; iter-15: ΔV=+0.021 > 0.02 → PAUSE counter remains 0; iter-16: ΔV≈+0.029 (provisional, G3+SU PENDING). Cumulative gaps closed: 85 (iter-16 provisional).
 
-V_meta formula switch: old formula last value = 0.154 (iter 13); new formula re-baseline = 0.240 (iter 14 FINAL; revised from provisional 0.255 after synthesis transfer_breadth correction). Non-comparable across switch point. Iter-15 FINAL: V_meta = 0.288 (transfer_breadth bumped 0.75→0.80 per Persona C honest upward revision for packaging surface).
+V_meta formula switch: old formula last value = 0.154 (iter 13); new formula re-baseline = 0.240 (iter 14 FINAL; revised from provisional 0.255 after synthesis transfer_breadth correction). Non-comparable across switch point. Iter-15 FINAL: V_meta = 0.288 (transfer_breadth bumped 0.75→0.80 per Persona C honest upward revision for packaging surface). Iter-16 provisional: V_meta ≈ 0.293 (methodology_leverage nudge 0.45→0.47 for CB-006 multi-surface delivery; G3+SU PENDING).
 
 ---
 
