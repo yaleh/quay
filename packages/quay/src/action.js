@@ -74,13 +74,15 @@ function appendMockDeliveryRecord({ mockLogPath, channel, payloadObj }) {
 }
 
 /**
- * Deliver a trigger. v0 (walking skeleton, G5): the manda-present path
- * sends a manda message on the task's own channel; a real background worker
- * session subscribed to that channel is the seed-driven consumer for
- * iteration 0 (see experiments/quay-native-bootstrap/iterations/iteration-0.md — the seed stands in
- * for quay:author/quay:execute at σ=0). The plain-CLI degrade path prints
- * the composed command, which is exactly what iteration 0 exercises when run
- * non-interactively.
+ * Deliver a trigger. The manda-present path dispatches via
+ * `manda-dispatch submit --to=worker` (DIR-005 item 1 — experiment 4,
+ * 2026-07-17), routing to the `pending-worker` channel; a real
+ * `manda monitor worker --root .` session subscribed via
+ * `.manda/config.yml`'s `cross-session` adapter binding is the confirmed
+ * consumer. (Superseded the earlier v0 walking-skeleton behavior of a raw
+ * `manda send` on the task's own per-task channel, which had no confirmed
+ * subscriber.) The plain-CLI degrade path prints the composed command for a
+ * human/agent to run manually.
  *
  * QN-042 (DIR-009): if `mockLogPath` is supplied (explicitly, by the
  * caller — e.g. via the `QUAY_ACTION_MOCK_LOG` environment variable read by
@@ -98,9 +100,22 @@ export async function deliverTrigger({ root, channel, payloadObj, mockLogPath })
   }
   const haveManda = await mandaAvailable(root);
   if (haveManda) {
-    const json = JSON.stringify(payloadObj);
-    await execFileAsync("manda", ["send", channel, json], { cwd: root });
-    return { delivered: "manda", channel };
+    // DIR-005 item 1: a raw `manda send <channel> <json>` has no confirmed
+    // subscriber — the message fires into the void unless something happens
+    // to be watching that exact per-task channel at that exact moment.
+    // Dispatch to an actual consumer instead, modeled on epicd's
+    // `manda-dispatch submit -id=$TASK_ID -to=worker -async -args='{task:...}'`:
+    // `--to=worker` routes to the `pending-worker` channel (manda-dispatch's
+    // own routing, confirmed via `manda-dispatch submit --help`), which
+    // `.manda/config.yml`'s `monitor.bindings` maps to the `cross-session`
+    // adapter — consumed by a `manda monitor worker --root .` session.
+    const dispatchArgs = JSON.stringify({ task: payloadObj.payload });
+    await execFileAsync(
+      "manda-dispatch",
+      ["submit", `--id=${payloadObj.taskId}`, `--args=${dispatchArgs}`, "--async", "--to=worker"],
+      { cwd: root },
+    );
+    return { delivered: "manda", channel, to: "worker" };
   }
   // Degrade: print the command for the user/agent to run manually.
   console.log(`[quay action run] manda not available — degraded delivery.`);

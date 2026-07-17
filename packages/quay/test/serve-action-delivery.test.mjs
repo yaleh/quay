@@ -213,8 +213,12 @@ async function main() {
     // non-blocking separate check" (ITERATION-PROMPTS.md §action_delivery_mode).
     //
     // When manda IS available: deliverTrigger() without mockLogPath takes the
-    // manda path and returns { delivered: "manda", channel }. A real manda
-    // daemon running `manda monitor <name> --root .` is the consumer.
+    // manda path and returns { delivered: "manda", channel, to: "worker" }.
+    // DIR-005 item 1 (experiment 4, 2026-07-17) closed the "fires into the
+    // void" gap: delivery now dispatches via `manda-dispatch submit --to=worker`
+    // rather than a raw `manda send` on an unwatched per-task channel. A real
+    // `manda monitor worker --root .` session is the confirmed consumer
+    // (`.manda/config.yml`'s `pending-{name}` -> `cross-session` binding).
     //
     // Historical context: iterations 13-18 of experiment 1 established that
     // live manda delivery is a per-session, per-moment fact — not a reliably
@@ -225,15 +229,22 @@ async function main() {
     //
     // LIVE-MANDA: attempt live delivery (non-blocking, skipped if not available)
     console.log("\n[LIVE-MANDA] Checking manda daemon availability for workspace root...");
-    const liveMandaAvailable = await mandaAvailable(__dirname);
+    const liveMandaAvailable = await mandaAvailable(path.dirname(path.dirname(path.dirname(__dirname))));
     if (!liveMandaAvailable) {
       skip("[LIVE-MANDA] manda daemon not available — live delivery check skipped (non-blocking, expected in CI)");
-      console.log("[LIVE-MANDA] Note: live manda delivery requires `manda monitor <name> --root .` running as a direct child of the session process tree (G6 precondition from ITERATION-PROMPTS.md §0).");
+      console.log("[LIVE-MANDA] Note: live manda delivery requires `manda monitor worker --root .` running as a direct child of the session process tree (G6 precondition from ITERATION-PROMPTS.md §0, DIR-005 item 1).");
     } else {
-      console.log("[LIVE-MANDA] manda daemon available — attempting live delivery...");
+      console.log("[LIVE-MANDA] manda daemon available — attempting live dispatch to worker...");
       try {
+        // deliverTrigger()'s manda path relies on `root` as the child
+        // process's cwd (no --root flag is passed explicitly — same
+        // convention as the pre-existing `manda send` call it replaced), so
+        // this MUST be the actual repo root containing `.manda/hub.addr`,
+        // not packages/quay — using the wrong root silently falls back to
+        // manda's default :7474, which nothing is listening on.
+        const repoRoot = path.dirname(path.dirname(path.dirname(__dirname)));
         const liveResult = await deliverTrigger({
-          root: path.dirname(__dirname),  // packages/quay root
+          root: repoRoot,
           channel: "task-QC-LIVE-TEST",
           payloadObj,
           // No mockLogPath: takes the live manda path
@@ -241,8 +252,29 @@ async function main() {
         assert(liveResult.delivered === "manda",
           '[LIVE-MANDA] deliverTrigger() live mode returns { delivered: "manda" }');
         assert(liveResult.channel === "task-QC-LIVE-TEST",
-          '[LIVE-MANDA] deliverTrigger() live result carries channel');
-        console.log("[LIVE-MANDA] Live manda delivery succeeded:", liveResult);
+          '[LIVE-MANDA] deliverTrigger() live result echoes the passed-in channel label');
+        assert(liveResult.to === "worker",
+          '[LIVE-MANDA] deliverTrigger() live mode dispatches to the "worker" executor (DIR-005 item 1)');
+        console.log("[LIVE-MANDA] Live manda dispatch succeeded:", liveResult);
+
+        // Confirm the dispatch actually reached the daemon as a real task
+        // (not just that the CLI exited 0) — query its status via
+        // manda-dispatch, matching the taskId composePayload assigned above.
+        const { execFile } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        const execFileAsync = promisify(execFile);
+        try {
+          const { stdout } = await execFileAsync(
+            "manda-dispatch",
+            ["status", `--id=${payloadObj.taskId}`],
+            { cwd: repoRoot },
+          );
+          console.log(`[LIVE-MANDA] manda-dispatch status --id=${payloadObj.taskId}:`, stdout.trim());
+          assert(stdout.trim().length > 0,
+            "[LIVE-MANDA] manda-dispatch status returns a non-empty record for the dispatched task id");
+        } catch (statusErr) {
+          skip(`[LIVE-MANDA] manda-dispatch status check threw (non-blocking): ${statusErr.message || String(statusErr)}`);
+        }
       } catch (err) {
         // Live manda failures are non-blocking — record but do not increment failures.
         skip(`[LIVE-MANDA] live delivery threw (non-blocking): ${err.message || String(err)}`);
