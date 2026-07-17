@@ -230,84 +230,122 @@ DIR-004 moved from `directives/pending/` to `directives/archive/DIR-004-node-sea
 |------|-----------|-----------|------------|---------|----------------|-------|
 | QX-001 | 0 | seed | N/A | N/A | 0/34 | Unchanged |
 | QX-002..QX-031 | 1–8 | native | native | G3 PASS / tests pass | 1–30/34 | Unchanged |
-| QX-032 | 9 | native | native | G3 co-sign PENDING | 31/34 | MCP multi-label AND-join (CB-015) |
-| QX-033 | 9 | native | native | G3 co-sign PENDING | 32/34 | Packaging/release artifacts (CB-008, DIR-004) |
-| QX-034 | 9 | native | native | G3 co-sign PENDING | 33/34 | Usability polish (UQ-031/032/033) |
+| QX-032 | 9 | native | native | G3 PASS-WITH-NOTES | 31/34 | MCP multi-label AND-join (CB-015) |
+| QX-033 | 9 | native | native | G3 PASS-WITH-NOTES | 32/34 | Packaging/release artifacts (CB-008, DIR-004); v-prefix bug fixed in synthesis |
+| QX-034 | 9 | native | native | G3 PASS-WITH-NOTES | 33/34 | Usability polish (UQ-031/032/033) |
 
 σ_QX before iteration 9: 30/31 = 0.968
-σ_QX after iteration 9 (development phase, G3 pending): 30/31 = 0.968 (QX-032/033/034 not yet co-signed)
-
-When G3 co-signs: σ_QX will be 33/34 = 0.971.
-
-BOTH CURRENT STATE header AND V-score history table in provenance.md must be updated together after G3 co-sign — development phase provenance recorded here; full update pending orchestrator synthesis step.
+σ_QX after iteration 9 (FINAL, G3 PASS-WITH-NOTES co-signed): 33/34 = 0.971
 
 ---
 
 ## 7. Simulated-user pass (§0c — every iteration)
 
-**PENDING — dispatched by orchestrator. This section will be completed in synthesis.**
+Three persona-diverse simulated-user agents dispatched by orchestrator. All complete.
 
-Suggested personas for iteration 9 (per §0c persona-diversity requirement — 2-3, deliberately different angles):
+Files:
+- `experiments/quay-continuous-bootstrap/audits/iteration-9-simulated-user-web-ui-user.md`
+- `experiments/quay-continuous-bootstrap/audits/iteration-9-simulated-user-project-maintainer-packaging.md`
+- `experiments/quay-continuous-bootstrap/audits/iteration-9-simulated-user-mcp-power-user.md`
 
-1. **MCP power user**: focuses specifically on the new multi-label filter (QX-032). Task: "I want to find all tasks tagged both 'experiment-4' AND 'iteration-9' using the MCP tools." Tests the array label parameter, verifies backward compat with single-string label, verifies empty array behavior.
+### Persona 1: Web UI user (UQ-031/032/033 focus) — PASS
 
-2. **Project maintainer wanting to publish**: follows the packaging/release flow (QX-033). Task: "I want to create a release of quay and make it available for users without requiring them to clone the repo." Reviews the package.sh script, the release.yml workflow, and README/documentation for install instructions.
+Label badges accurate. Details/summary expand works — `<details>/<summary>` element present and functional for overflow labels. Search result count banner (`Showing N results for 'query'`) renders correctly with XSS escaping confirmed.
 
-3. **Web UI user**: exercises label counts, details/summary expand, and search result count (QX-034). Task: "I want to understand how many tasks each label contains, and I need to see labels that are truncated in the nav." Verifies UQ-031/032/033 improvements, checks if the affordances are intuitive.
+**Minor gaps noted (not filed — cosmetic):**
+- Safari ≤14 `details` element `display:inline` may cause line breaks between summary and content. Low practical impact; modern Safari (≥15) and all other browsers unaffected.
+- Inline `color` styles on label badge elements resist dark mode — no `prefers-color-scheme` override. Cosmetic only.
 
-Files: `experiments/quay-continuous-bootstrap/audits/iteration-9-simulated-user-{persona}.md`
+**New gap filed**: UQ-034 — label counts in nav are global totals, not filter-scoped. When filtering to `status=todo`, a label showing `(17)` actually has 17 total tasks but may have only 3 matching the current filter. Potentially misleading. Filed as minor.
 
-New gap-list entries from simulated-user pass: PENDING (recorded in §8 after synthesis).
+### Persona 2: Project maintainer — CONCERNS (blocking bug found)
+
+**BLOCKING BUG (synthesis-phase fix)**: Release body install command reads:
+```sh
+npm install -g quay-${{ github.ref_name }}.tgz
+```
+For tag `v0.1.0`, `github.ref_name` = `v0.1.0`, so the command becomes `npm install -g quay-v0.1.0.tgz`. But `npm pack` produces `quay-0.1.0.tgz` (version from `package.json`, which has no `v` prefix). Users copy-pasting this command would get a file-not-found error. **This bug was missed by G3** (artifact path check focused on the upload path expression `${{ steps.pack.outputs.artifact }}`, which is correct; G3 did not check that the release body text would produce a valid filename).
+
+**Fix applied in synthesis phase**: install command changed to `npm install -g quay-*.tgz` (glob, works regardless of version string), with clarifying note added explaining the v-prefix discrepancy. Filed as CB-018 (minor, FIXED).
+
+**Additional findings (minor):**
+- No test step before publish (also noted by G3). Filed as CB-018 (same entry). **FIXED in synthesis**: `node --test` step added to `release.yml` before `npm pack`.
+- Test artifacts (~370 kB) included in npm pack artifact — 22 files, includes `test/` directory. Bloat but not blocking.
+- README missing install documentation for global npm install path. Filed as CB-019 (minor, open).
+- No `engines` field in `packages/quay/package.json`. Users on Node.js <20 will get runtime errors rather than a clear install-time message. Filed as CB-019 (same entry, minor, open).
+
+### Persona 3: MCP power user — CONCERNS (ENV-001 re-rated)
+
+Code and unit tests are correct: all 30/30 test assertions pass, including the new 9-assertion Block 16 for multi-label AND-join. String-form backward compatibility confirmed working via test execution.
+
+**ENV-001 re-rated significant**: Live MCP process is still stale (process started before QX-032 was implemented). The new array-form `label` parameter is not discoverable via live `tools/list` because the running process has the old schema. For MCP-consuming AI agents, this means new capabilities are effectively invisible until a session restart — the tool appears to only accept a single string label. This is a meaningful discoverability barrier for AI agent consumers (not merely an inconvenience), justifying re-rating from minor to **significant**.
+
+String-form backward compat confirmed working live (pre-QX-032 behavior unchanged, so the stale process still handles `label: "experiment-4"` correctly — only the new array form is invisible).
+
+### Synthesis-phase fixes applied
+
+1. **v-prefix bug fixed** (blocking): `.github/workflows/release.yml` release body install command changed from `npm install -g quay-${{ github.ref_name }}.tgz` to `npm install -g quay-*.tgz`. Clarifying note added. This was a synthesis-phase fix of a bug caught by simulated-user and missed by G3.
+2. **Test step added**: `node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs packages/quay-github/test/*.test.mjs` added to `release.yml` before the pack step.
+3. **ENV-001 re-rated**: significant (was minor). Gap-list entry updated.
+
+**New gaps filed from simulated-user pass:**
+- CB-018 (minor, FIXED in synthesis): no test step before publish
+- CB-019 (minor, open): README missing install docs; no `engines` field in package.json
+- UQ-034 (minor, open): label counts are global not filter-scoped
+- ENV-001 re-rated: minor → significant
 
 ---
 
-## 8. V_instance (PROVISIONAL — §7 and §10 PENDING)
+## 8. V_instance (FINAL)
 
-**capability_breadth**: 0.93 (ΔV: +0.125 from 0.805)
+**capability_breadth**: 0.845 (revised from provisional 0.93)
 - Prior: 0.805 (CB-006/008/015 open — 1 significant + 2 minor)
-- CB-008 CLOSED (significant, QX-033): packaging artifact produced; GitHub Actions workflow for release. +0.065
-- CB-015 CLOSED (minor, QX-032): MCP multi-label AND-join parity achieved. +0.04
-- CB-006 still open (minor: configurable page size). −0.01
-- Net: 0.805 + 0.125 → 0.93
-- Open: CB-006 only (1 minor)
+- CB-008 CLOSED (significant, QX-033): packaging artifact produced; GitHub Actions workflow for release; v-prefix bug fixed in synthesis. +0.020 (reduced from provisional +0.065 — packaging exists and works but had a blocking user-facing defect at dev-phase ship time that required synthesis fix)
+- CB-015 CLOSED (minor, QX-032): MCP multi-label AND-join parity achieved. +0.025
+- New CB gaps: CB-018 minor FIXED-in-synthesis, CB-019 minor open. −0.005 net
+- Net: 0.805 + 0.040 → 0.845
+- Open: CB-006 (minor), CB-019 (minor), CB-018 (minor, fixed in synthesis — recorded open for tracking completeness)
 
-Note: CB-008 closure is partial — npm pack requires Node.js to be installed by the user; DIR-004 item 2 requested standalone executables. However, it removes the "must clone the repo" barrier and adds CI automation, which is meaningful capability progress. The remaining Node.js requirement is acknowledged as a residual gap but not filed as a new gap (DIR-004 specifically said "or npm pack" was acceptable as an alternative to SEA/Bun).
+Note: CB-008 closure reflects partial credit. npm pack removes the "must clone the repo" barrier and adds CI automation; the release body v-prefix defect was caught by simulated-user and fixed in synthesis. DIR-004 specifically said "or npm pack" was acceptable as an alternative to SEA/Bun — this closure stands.
 
-**usability_quality**: 0.87 (ΔV: +0.030 from 0.84)
+**usability_quality**: 0.85 (revised from provisional 0.87)
 - Prior: 0.84 (9 minor UQ gaps: UQ-006/007/020/021/022/030/031/032/033)
-- UQ-031 CLOSED (minor, QX-034): search result count banner. +0.01
-- UQ-032 CLOSED (minor, QX-034): label count display. +0.01
-- UQ-033 CLOSED (minor, QX-034): details/summary expand. +0.01
-- 6 minor UQ gaps remain (UQ-006/007/020/021/022/030)
-- Net: 0.84 + 0.03 → 0.87
+- UQ-031 CLOSED (minor, QX-034): search result count banner. +0.005
+- UQ-032 CLOSED (minor, QX-034): label count display. +0.005
+- UQ-033 CLOSED (minor, QX-034): details/summary expand. +0.005
+- New UQ-034 (minor): filter-scoped label counts. −0.005
+- Net: 0.84 + 0.010 → 0.85
+- Open: UQ-006/007/020/021/022/030 (prior) + UQ-034 (new) = 7 minor
 
 **verification_coverage**: 0.97 (ΔV: 0.00)
 - 30/30 pass. New test blocks: mcp-server.test.mjs Block 16 (9 assertions, QX-032 multi-label) + serve.test.mjs port+10 block (9 assertions, QX-034). No uncovered capability introduced.
 - Score unchanged from iteration 8.
 
-**system_health**: 0.97 (ΔV: 0.00)
+**system_health**: 0.96 (revised from provisional 0.97)
 - 30/30 pass confirmed before and after all changes. All three inherited snapshots confirmed intact.
-- SH-003/ENV-001/SH-004 remain minor open. No new system_health gaps introduced.
+- ENV-001 re-rated significant (was minor): MCP stale process blocks new array-form label param discoverability for AI agent consumers. −0.01 applied.
+- SH-003/SH-004 remain minor. Net: 0.97 − 0.01 → 0.96
 
-### Provisional V_instance:
+### Final V_instance:
 ```
-V_instance (PROVISIONAL) = 0.93 × 0.87 × 0.97 × 0.97
-                         = 0.93 × 0.87 = 0.8091
-                         × 0.97 = 0.7848
-                         × 0.97 = 0.7613
+V_instance (FINAL) = capability_breadth × usability_quality × verification_coverage × system_health
+                   = 0.845 × 0.85 × 0.97 × 0.96
+                   = 0.845 × 0.85 = 0.71825
+                   × 0.97 = 0.69671
+                   × 0.96 = 0.66884
 
-V_instance (PROVISIONAL) ≈ 0.761
+V_instance (FINAL) ≈ 0.669
 
-ΔV_instance (PROVISIONAL) = 0.761 − 0.636 = +0.125
+ΔV_instance (FINAL) = 0.669 − 0.636 = +0.033
 ```
 
-**Cumulative gaps closed (development phase): 48** (prior 43 + CB-008, CB-015, UQ-031, UQ-032, UQ-033 = 5 new closures)
+Note: Provisional was +0.125 (before simulated-user pass). Revised significantly downward after project-maintainer found blocking v-prefix bug (reduces CB-008 credit) and MCP power-user re-rated ENV-001 to significant (reduces system_health). The simulated-user mechanism correctly detected a user-facing defect that G3 missed — the audit pair worked as designed.
 
-Sections 7 and 10 are PENDING — final V_instance will be computed after G3 audit and simulated-user synthesis.
+**Cumulative gaps closed (FINAL): 48** (unchanged from development phase — CB-018 filed as new-then-fixed-in-synthesis, not a pre-existing closure)
 
 ---
 
-## 9. V_meta (PROVISIONAL)
+## 9. V_meta (FINAL)
 
 **completeness**: 0.77
 Re-trigger check: NOT TRIGGERED — no new Skill Method-step gap found.
@@ -318,20 +356,20 @@ Re-trigger check: NOT TRIGGERED — QX-032/033/034 each touched multiple source 
 **reusability**: 0.79
 Re-trigger check: NOT TRIGGERED — no organic demand for GitHub Provider data.write or new ABI extension. QX-032's label AND-join is client-side Core layer — no Provider ABI change.
 
-**validation (PROVISIONAL)**: 0.971 (σ_QX = 33/34 — when G3 co-signs QX-032/033/034)
+**validation (FINAL)**: 0.971 (σ_QX = 33/34 — G3 PASS-WITH-NOTES co-signs QX-032/033/034)
 - QX-001: seed (0/34 numerator contribution)
 - QX-002..QX-031: native (30/34)
-- QX-032/033/034: native, gate_by = G3 co-sign PENDING (33/34 when co-signed)
-- σ_QX PROVISIONAL = 33/34 ≈ 0.971
+- QX-032/033/034: native, gate_by = G3 PASS-WITH-NOTES (33/34)
+- σ_QX = 33/34 ≈ 0.971
 
-**V_meta total (PROVISIONAL)**:
+**V_meta total (FINAL)**:
 ```
-V_meta (PROVISIONAL) = completeness × effectiveness × reusability × validation
-                     = 0.77 × 0.26 × 0.79 × 0.971
-                     = 0.158 × 0.971
-                     ≈ 0.154
+V_meta (FINAL) = completeness × effectiveness × reusability × validation
+               = 0.77 × 0.26 × 0.79 × 0.971
+               = 0.158 × 0.971
+               ≈ 0.154
 
-V_meta (PROVISIONAL) ≈ 0.154 (marginal uptick from σ_QX improvement: 30/31=0.968 → 33/34=0.971)
+V_meta (FINAL) ≈ 0.154 (marginal uptick from σ_QX improvement: 30/31=0.968 → 33/34=0.971)
 ```
 
 **V_meta ceiling**: 0.26 (effectiveness frozen; V_meta ≥ 0.80 arithmetically unreachable — standing fact restated)
@@ -342,94 +380,108 @@ V_meta (PROVISIONAL) ≈ 0.154 (marginal uptick from σ_QX improvement: 30/31=0.
 
 ## 10. Out-of-band audit (G3)
 
-**PENDING — dispatched by orchestrator. This section will be completed in synthesis.**
-
 G3 was triggered this iteration — Core source files changed:
 - `packages/quay/src/mcp-server.js` (QX-032: label parameter schema + handler)
 - `packages/quay/src/serve.js` (QX-034: label counts, details/summary, search result banner)
 - `packages/quay/scripts/package.sh` (QX-033: new build script)
 - `.github/workflows/release.yml` (QX-033: new CI workflow)
 
-G3 focus areas to verify:
-1. **QX-032**: label AND-join filter correctness — ensure `labelFilters.every(...)` correctly handles empty arrays, single strings, multi-element arrays; no regression in prefix/search/pagination filter ordering.
-2. **QX-033**: package.sh correctness — `set -euo pipefail`, artifact path detection, exit code. release.yml YAML validity — trigger syntax, `softprops/action-gh-release@v2` usage, artifact path expression.
-3. **QX-034**: escaping in label count badge — `${escapeHtml(l)} (${labelCounts.get(l) || 0})` — count is a number, not user-supplied string; escapeHtml(l) already applied to label name. Details/summary inner links use escapeHtml on label names. No XSS vector introduced.
+**Result: PASS-WITH-NOTES**
 
 File: `experiments/quay-continuous-bootstrap/audits/iteration-9-adjudicate.md`
 
+G3 confirmed:
+- QX-032: label AND-join filter correctness verified — `labelFilters.every(...)` handles empty arrays, single strings, multi-element arrays correctly; no regression in filter ordering.
+- QX-034: escaping in label count badge correct — count is a number (not user-supplied string); `escapeHtml(l)` applied to label name; details/summary inner links use `escapeHtml` on label names; no XSS vector.
+- QX-033: `package.sh` correctness confirmed (`set -euo pipefail`, artifact detection, exit code). `release.yml` YAML validity confirmed; trigger syntax correct; `softprops/action-gh-release@v2` usage correct; artifact upload path expression `${{ steps.pack.outputs.artifact }}` correct.
+
+**G3 notes** (non-blocking):
+1. No test step before release publish — if broken code is tagged, it will be published without automated validation.
+2. Third-party actions (`actions/checkout@v4`, `actions/setup-node@v4`, `softprops/action-gh-release@v2`) are not SHA-pinned — version tags can be mutated; SHA-pinning is best practice for supply-chain security.
+
+**G3 MISSED**: the v-prefix bug in the release body install command (`quay-${{ github.ref_name }}.tgz` vs actual npm pack output `quay-0.1.0.tgz`). G3's artifact path check focused on the upload path expression `${{ steps.pack.outputs.artifact }}` (which is correct); G3 did not verify that the install command in the release body text would produce a valid filename. This bug was caught by the project-maintainer simulated-user persona and fixed in synthesis phase. This is a noteworthy instance of the simulated-user mechanism catching a bug that G3's code-review focus missed.
+
 ---
 
-## 11. Pause / Convergence Check (PROVISIONAL — §7 and §10 pending)
+## 11. Pause / Convergence Check (FINAL)
 
-- [ ] **Meta-layer V_meta ≥ 0.80**: NO — V_meta ≈ 0.154 (PROVISIONAL), ceiling = 0.26. Arithmetically unreachable. NOT CONVERGED on meta-layer.
-- [ ] **Instance-layer PAUSE criteria** (ΔV flat < 0.02 for 2+ consecutive iterations AND no new significant gap):
+- [ ] **Meta-layer V_meta ≥ 0.80**: NO — V_meta ≈ 0.154 (FINAL), ceiling = 0.26. Arithmetically unreachable. NOT CONVERGED on meta-layer.
+- [x] **Instance-layer PAUSE criteria** (ΔV flat < 0.02 for 2+ consecutive iterations AND no new significant gap):
+  - ΔV_instance iteration 7 (FINAL): +0.037 (above 0.02)
   - ΔV_instance iteration 8 (FINAL): +0.035 (above 0.02)
-  - ΔV_instance iteration 9 (PROVISIONAL): +0.125 (above 0.02)
-  - Two consecutive iterations below threshold: NO — both above 0.02
-  - **PAUSE: NOT triggered** — ΔV trend is strongly positive this iteration
-- [ ] **G3 green for all Core/lift tasks**: PENDING (G3 not yet dispatched)
-- [ ] **Simulated-user pass run, findings recorded**: PENDING
-- [ ] **system_health: no regression against any of the three inherited snapshots**: YES (30/30 pass confirmed; all inherited snapshots intact) — provisionally green pending G3
+  - ΔV_instance iteration 9 (FINAL): +0.033 (above 0.02)
+  - Three consecutive iterations above threshold — PAUSE NOT triggered
+- [x] **G3 green for all Core/lift tasks**: YES — G3 PASS-WITH-NOTES; both notes non-blocking
+- [x] **Simulated-user pass run, findings recorded**: YES — 3 personas complete; synthesis fixes applied
+- [x] **system_health: no regression against any of the three inherited snapshots**: YES (30/30 pass confirmed)
 
-ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.125(prov). Iteration 9 provisional ΔV is largest since iteration 0 — driven by closing CB-008 (1 significant) + CB-015 (1 minor) + 3 UQ minor.
+ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033. Iteration 9 FINAL ΔV is +0.033 — significantly lower than provisional (+0.125) due to simulated-user findings (v-prefix bug reduced CB-008 credit; ENV-001 re-rated reduced system_health). The ΔV trend for iterations 7/8/9 is +0.037/+0.035/+0.033 — all above 0.02, three consecutive, declining slightly but not flat.
 
-**Status: CONTINUING (PROVISIONAL)** — PAUSE not triggered; sections 7 and 10 pending synthesis by orchestrator.
+**Status: CONTINUING (FINAL)** — PAUSE not triggered (ΔV > 0.02 for all three recent iterations); new significant gap ENV-001 re-rating; open gaps remain.
 
 ---
 
-## Problems identified for next iteration
+## Problems identified for next iteration (FINAL — refined after simulated-user synthesis)
 
-(Development-phase only — will be refined after simulated-user synthesis)
+Priority order from updated open gap list (final, post-synthesis):
 
-Priority order from updated open gap list (10 open gaps, development phase):
+**Significant (1)**:
+- ENV-001 (significant, re-rated): MCP server restart required for new features to be discoverable. Significant for AI agent consumers. Address by: documenting restart requirement in MCP usage docs, OR adding a file-watcher that auto-restarts the MCP process on code changes, OR adding a `server-version` field to `tools/list` response so agents can detect staleness.
 
-1. **CB-006** (minor): Configurable page size on Web UI — now the sole remaining open CB gap. Low urgency but cleanup value.
-
+**Minor (11 open)**:
+1. **CB-019** (minor): README missing install docs; no `engines` field. Low effort, high value for new users.
 2. **UQ-020** (minor): CLI silent exit on empty filter result — "0 tasks found" message missing.
-
 3. **UQ-021** (minor): --label with no value silently ignored vs --prefix consistent error behavior.
-
 4. **UQ-022** (minor): needs-human detail page empty space — no call-to-action.
-
-5. **UQ-030** (minor): Search form buried below label wall on mobile (375px viewport).
-
-6. **SH-003/ENV-001/SH-004** (minor): stripHeadings code-block false-negative; MCP restart requirement; pagination edge cases.
-
-Simulated-user pass may add new gaps — iteration 10 priority order will be refined accordingly.
+5. **UQ-034** (minor): Label counts are global not filter-scoped in nav.
+6. **UQ-030** (minor): Search form buried below label wall on mobile (375px viewport).
+7. **CB-006** (minor): Configurable page size on Web UI.
+8. **SH-003** (minor): stripHeadings code-block false-negative.
+9. **SH-004** (minor): Pagination contract edge cases.
+10. **UQ-006/007** (minor): Mobile label nav / table overflow.
+11. **CB-018** (minor, FIXED): test step added in synthesis — tracked for completeness.
 
 ---
 
-## ORCHESTRATOR HANDOFF — Iteration 9 Development Phase Complete
+## ORCHESTRATOR HANDOFF — Iteration 9 FINAL
 
-**Commit hash**: `<hash>` (to be filled after commit)
+**Commit hash**: (to be filled after commit)
 **Branch**: master
 **Test results**: 30/30 pass
-**Tasks created**: QX-032 (done), QX-033 (done), QX-034 (done)
-**Gaps closed (dev phase)**: CB-015, CB-008, UQ-031, UQ-032, UQ-033 — cumulative: 48
-**Files changed**:
-- `packages/quay/src/mcp-server.js` — QX-032 (multi-label label parameter + AND-join filter)
-- `packages/quay/src/serve.js` — QX-034 (label counts, details/summary, search result banner)
-- `packages/quay/scripts/package.sh` — QX-033 (new: npm pack build script)
-- `.github/workflows/release.yml` — QX-033 (new: release workflow)
-- `packages/quay/test/mcp-server.test.mjs` — Block 16 (QX-032 multi-label tests)
-- `packages/quay/test/serve.test.mjs` — QX-034 block (port+10), updated QX-020 bold assertions
-- `experiments/quay-continuous-bootstrap/gap-list.md` — CB-015/CB-008/UQ-031/032/033 closed; iteration 9 dev phase counter added
-- `experiments/quay-continuous-bootstrap/iterations/iteration-9.md` — this report (draft)
-- `experiments/quay-continuous-bootstrap/directives/pending/DIR-004-...md` → moved to `directives/archive/`
-- `packages/quay/quay-0.1.0.tgz` — produced artifact (should NOT be committed — add to .gitignore if not already)
+**Tasks created and closed**: QX-032 (done), QX-033 (done), QX-034 (done)
+**G3**: PASS-WITH-NOTES; QX-032/033/034 co-signed; σ_QX = 33/34 = 0.971
+**Simulated-user**: 3 personas complete (PASS + CONCERNS + CONCERNS)
 
-**Packaging approach chosen**: Option B (npm pack) — esbuild unavailable; SEA requires bundler for non-trivial dependency tree; npm pack simpler and sufficient to close "must clone the repo" barrier. Node.js ≥20 still required by users.
+**Gaps closed (cumulative): 48** (CB-008, CB-015, UQ-031, UQ-032, UQ-033 in dev phase; CB-018 filed+fixed in synthesis; cumulative count holds at 48)
 
-**Draft report**: `experiments/quay-continuous-bootstrap/iterations/iteration-9.md`
+**Synthesis-phase fix**: `.github/workflows/release.yml` v-prefix bug (blocking, missed by G3) + test step. Found by project-maintainer simulated-user.
 
-**Provisional V_instance**: 0.761 (ΔV = +0.125)
+**V_instance (FINAL)**: 0.669 (ΔV = +0.033)
+- capability_breadth = 0.845
+- usability_quality = 0.85
+- verification_coverage = 0.97
+- system_health = 0.96
 
-**Required orchestrator actions**:
-1. G3 audit: `packages/quay/src/mcp-server.js` (multi-label), `packages/quay/src/serve.js` (polish), `packages/quay/scripts/package.sh` + `.github/workflows/release.yml` (packaging). Write to `experiments/quay-continuous-bootstrap/audits/iteration-9-adjudicate.md`
-2. Simulated-user: 3 persona-diverse agents:
-   (i) MCP power user — multi-label filter (array label param, backward compat, AND-join)
-   (ii) Project maintainer — packaging/release flow (package.sh, release.yml, install instructions)
-   (iii) Web UI user — label counts (N badge), details/summary expand, search result count banner
-   Write to `experiments/quay-continuous-bootstrap/audits/iteration-9-simulated-user-{persona}.md`
-3. After both: synthesize final `iteration-9.md` (fill in §7 and §10, finalize V_instance and V_meta)
-4. Check if `packages/quay/quay-0.1.0.tgz` is tracked by git and add to `.gitignore` if so (build artifacts should not be committed)
+**V_meta (FINAL)**: 0.154 (σ_QX = 33/34 = 0.971; ceiling = 0.26)
+
+**PAUSE status**: NOT triggered (ΔV_7=+0.037, ΔV_8=+0.035, ΔV_9=+0.033 — all above 0.02)
+
+**New gaps logged**:
+- ENV-001 re-rated: minor → significant (MCP stale process blocks new feature discoverability for AI agents)
+- CB-018 (minor, FIXED in synthesis): no test step before publish
+- CB-019 (minor, open): README missing install docs; no `engines` field
+- UQ-034 (minor, open): label counts global not filter-scoped
+
+**Open significant gaps remaining**: ENV-001 (significant, re-rated)
+
+**Recommended iteration 10 targets** (from final gap list):
+- ENV-001 (significant): MCP process restart discoverability — add restart docs or auto-restart watcher
+- CB-019 (minor, high-value): README install docs + `engines` field (low effort)
+- UQ-020 + UQ-021 (minor, CLI polish bundle): empty-result message + --label validation
+- UQ-034 (minor): filter-scoped label counts
+
+**Files changed (synthesis phase additions)**:
+- `.github/workflows/release.yml` — v-prefix bug fix + test step (synthesis-phase fix)
+- `experiments/quay-continuous-bootstrap/gap-list.md` — ENV-001 re-rated, CB-018/019/UQ-034 added, iteration 9 FINAL counter added
+- `experiments/quay-continuous-bootstrap/iterations/iteration-9.md` — §7 and §10 filled in, §8/§9/§11 finalized
+- `experiments/quay-continuous-bootstrap/provenance.md` — iteration 9 row added, QX-032/033/034 gate_by updated

@@ -8,7 +8,7 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 8 (FINAL)_
+_Last updated: iteration 9 (FINAL)_
 
 - **Latest scores:** see "V-score history (all iterations)" table, iteration 8 row, for
   V_instance / ΔV_instance / V_meta / σ_QX. Do not duplicate those figures here — update
@@ -27,7 +27,7 @@ _Last updated: iteration 8 (FINAL)_
     "σ_QX-vs-inherited-floor decision" in the Iteration 0 record).
   - V_meta ceiling: 0.26 (1.0 × 0.26 × 1.0 × 1.0, effectiveness-bound; inherited from
     experiment 1, confirmed positively across experiments 2/3 — see Inheritance record below).
-- **Status:** CONTINUING — iteration 8 complete; PAUSE NOT triggered (ΔV_7=+0.037, ΔV_8=+0.035); no new significant gaps; significant open gaps remain (CB-008, CB-015).
+- **Status:** CONTINUING — iteration 9 complete; PAUSE NOT triggered (ΔV_7=+0.037, ΔV_8=+0.035, ΔV_9=+0.033 — all above 0.02); ENV-001 re-rated significant; cumulative gaps closed: 48; synthesis-phase fix: v-prefix bug in release.yml (blocking, G3-missed, caught by simulated-user).
 
 ---
 
@@ -594,8 +594,9 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | 6 | 0.564 | −0.012 | 0.152 | 24/25 = 0.960 | 5 gaps closed; 5 new gaps (4 significant); first negative ΔV; PAUSE not triggered (significant gaps found) |
 | 7 | 0.601 | +0.037 | 0.152 | 27/28 = 0.964 | 4 gaps closed (CB-017/UQ-027/028/029); 4 new minor gaps; G3 PASS-WITH-NOTES; 2× PASS + 1× CONCERNS simulated-user; HALT (human-imposed) |
 | 8 | 0.636 | +0.035 | 0.153 | 30/31 = 0.968 | 3 gaps closed (CB-010/CB-014/UQ-008); 2 new minor gaps (ENV-001/SH-004); G3 PASS-WITH-NOTES; 2× PASS + 1× FAIL (ENV, not code defect) simulated-user; cumulative closed=43 |
+| 9 | 0.669 | +0.033 | 0.154 | 33/34 = 0.971 | 5 gaps closed (CB-008/CB-015/UQ-031/032/033); ENV-001 re-rated significant; synthesis-phase fix: v-prefix bug in release.yml (G3-missed, caught by project-maintainer); G3 PASS-WITH-NOTES; PASS + CONCERNS + CONCERNS simulated-user; cumulative closed=48 |
 
-ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035. Iterations 7 and 8 both above 0.02 threshold — PAUSE NOT triggered. Cumulative gaps closed: 43.
+ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033. Iterations 7, 8, and 9 all above 0.02 threshold — PAUSE NOT triggered. Cumulative gaps closed: 48.
 
 ---
 
@@ -1025,5 +1026,102 @@ Per protocol §4.5, this is an externally-imposed HALT — distinct from self-as
 - V_meta = 0.152 (completeness=0.77, effectiveness=0.26, reusability=0.79, validation=0.964)
 - Cumulative gaps closed: 40
 - Open significant gaps: CB-008, CB-010, CB-014, UQ-008
+
+---
+
+## Iteration 9 record (2026-07-17, FINAL)
+
+### QX-* tasks created and completed this iteration
+
+| Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
+|------|-----------|------------|---------|----------------|--------|-------|
+| QX-032 | native | native | G3 PASS-WITH-NOTES | 31/34 | done | MCP multi-label AND-join (CB-015): `label` param changed from `z.string()` to `z.union([z.array(z.string()), z.string()])`. AND-join filter in handler. Backward-compatible. mcp-server.test.mjs Block 16 (9 assertions) |
+| QX-033 | native | native | G3 PASS-WITH-NOTES | 32/34 | done | Packaging/release artifacts (CB-008, DIR-004 APPLIED): `packages/quay/scripts/package.sh` (npm pack, exits 0, produces quay-0.1.0.tgz); `.github/workflows/release.yml` (trigger on v* tags, upload to GitHub Release). Synthesis-phase fix: v-prefix bug in release body (install command used `quay-v0.1.0.tgz`; fixed to `quay-*.tgz` glob; G3 missed this bug; caught by project-maintainer simulated-user). |
+| QX-034 | native | native | G3 PASS-WITH-NOTES | 33/34 | done | Usability polish (UQ-031/032/033): search result count banner; label count badges `(N)` in nav; hidden labels wrapped in `<details><summary>` expand. serve.test.mjs port+10 block (9 assertions) |
+
+σ_QX before iteration 9: 30/31 = 0.968
+σ_QX after iteration 9 (FINAL): 33/34 = 0.971
+(QX-001 remains seed provenance. QX-032..034 all native authoring + execution. gate_by = "G3 PASS-WITH-NOTES" — co-signed; see audits/iteration-9-adjudicate.md.)
+
+### Gate check results (iteration 9, FINAL)
+- QX-032: all 5 ACs checked; status advanced to done; G3 PASS-WITH-NOTES
+- QX-033: all 5 ACs checked; status advanced to done; G3 PASS-WITH-NOTES (v-prefix bug fixed in synthesis)
+- QX-034: all 5 ACs checked; status advanced to done; G3 PASS-WITH-NOTES
+
+### Gaps closed this iteration (FINAL — 5 dev phase + 1 synthesis-fixed)
+Development phase:
+- CB-015 (MCP multi-label parity) → QX-032
+- CB-008 (packaging/distribution) → QX-033; v-prefix defect fixed in synthesis
+- UQ-031 (no search result acknowledgment) → QX-034
+- UQ-032 (no label counts in nav) → QX-034
+- UQ-033 ("N more labels" non-interactive) → QX-034
+
+Synthesis phase (new-then-fixed, not counted as additional closure):
+- CB-018 (no test step before publish): filed and fixed in same synthesis pass; node --test step added to release.yml
+
+### New gaps found this iteration (FINAL)
+From project-maintainer simulated-user (CONCERNS):
+- **CB-018 (minor, FIXED in synthesis)**: no test step before publish; node --test step added
+- **CB-019 (minor, open)**: README missing install docs; no `engines` field in package.json
+
+From web-ui-user simulated-user (PASS):
+- **UQ-034 (minor, open)**: label counts in nav are global totals not filter-scoped
+
+From MCP power-user simulated-user (CONCERNS):
+- **ENV-001 re-rated**: minor → significant; stale MCP process blocks new array-form label param discoverability for AI agent consumers
+
+From G3 audit (PASS-WITH-NOTES, 2 notes):
+- No new gap IDs filed (notes are: no test step — covered by CB-018; SHA-pinning — cosmetic process concern not filed as gap)
+
+### G3 status (iteration 9, FINAL)
+G3 TRIGGERED — Core source files changed: `packages/quay/src/mcp-server.js`, `packages/quay/src/serve.js`, `packages/quay/scripts/package.sh`, `.github/workflows/release.yml`.
+G3 COMPLETE — PASS-WITH-NOTES. 30/30 tests pass. No correctness or security bugs. Two notes: no test step (CB-018, fixed in synthesis); third-party actions not SHA-pinned. QX-032/033/034 co-signed.
+**G3 MISSED**: v-prefix bug in release.yml release body install command. See §10 in iteration-9.md.
+See `experiments/quay-continuous-bootstrap/audits/iteration-9-adjudicate.md`.
+
+### Simulated-user pass (iteration 9, FINAL)
+3 personas dispatched by orchestrator; all complete.
+- Web UI user: PASS — label badges accurate; details/summary expand works; XSS escaping correct; 3 minor cosmetic notes (Safari ≤14 display quirk, dark mode inline color, filter-scoped counts); UQ-034 filed
+- Project maintainer: CONCERNS — BLOCKING v-prefix bug found in release body (quay-v0.1.0.tgz vs quay-0.1.0.tgz); fixed in synthesis. Also: no test step (CB-018), README install docs (CB-019), engines field (CB-019)
+- MCP power user: CONCERNS — ENV-001 re-rated significant (live MCP process stale; array-form label not discoverable); unit tests 30/30 pass; string-form backward compat confirmed live
+
+Gap-list delta (final): 4 new gaps/re-ratings (CB-018 minor FIXED, CB-019 minor open, UQ-034 minor open, ENV-001 re-rated significant); synthesis-phase fix applied (release.yml v-prefix + test step); cumulative gaps closed: 48.
+
+### System health (iteration 9, FINAL)
+Full test suite: 30/30 pass. No regressions against any of the three inherited snapshots. All inherited capabilities retain tests. G3 PASS-WITH-NOTES; both notes addressed (CB-018 fixed, SHA-pinning noted as process concern).
+
+### V_instance (iteration 9, FINAL)
+```
+V_instance = capability_breadth × usability_quality × verification_coverage × system_health
+           = 0.845 × 0.85 × 0.97 × 0.96
+           ≈ 0.669
+
+ΔV_instance = 0.669 − 0.636 = +0.033 (over iteration 8 final)
+```
+Component rationale:
+- capability_breadth: 0.845 (CB-008 sig closed +0.020 partial credit — v-prefix bug found in synthesis; CB-015 minor closed +0.025; new CB-018/019 minor −0.005; net +0.040)
+- usability_quality: 0.85 (UQ-031/032/033 minor closed +0.015; UQ-034 minor new −0.005; net +0.010)
+- verification_coverage: 0.97 (30/30 pass; 18 new assertions total; no uncovered capability)
+- system_health: 0.96 (ENV-001 re-rated significant −0.01; SH-003/SH-004 remain minor; no regressions)
+
+### V_meta (iteration 9, FINAL)
+```
+V_meta = completeness × effectiveness × reusability × validation
+       = 0.77 × 0.26 × 0.79 × 0.971
+       = 0.158 × 0.971
+       ≈ 0.154
+
+ΔV_meta = 0.154 − 0.153 = +0.001 (over iteration 8 final)
+```
+σ_QX = 33/34 = 0.971 (FINAL; G3 PASS-WITH-NOTES co-signed).
+Ceiling: 0.26 (effectiveness frozen; unchanged).
+
+### Convergence check (iteration 9, FINAL)
+- V_meta ≥ 0.80: NO (ceiling 0.26)
+- PAUSE (ΔV < 0.02 for 2+ consecutive iterations AND no new significant gap): NOT MET — ΔV_7=+0.037, ΔV_8=+0.035, ΔV_9=+0.033 (all above 0.02); ENV-001 re-rated significant
+- G3: PASS-WITH-NOTES (two minor notes; non-blocking)
+- Simulated-user: 3 personas complete; 1× PASS, 2× CONCERNS; synthesis-phase fix applied
+- system_health: no regression
+**Status: CONTINUING** — PAUSE not triggered; ENV-001 now significant; cumulative gaps closed: 48
 
 Artifacts at `experiments/quay-continuous-bootstrap/`. Experiment 4 closed.

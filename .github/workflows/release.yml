@@ -28,10 +28,15 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Run tests
+        run: node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs packages/quay-github/test/*.test.mjs
+
       - name: Build release artifact (npm pack)
         id: pack
         run: |
           bash packages/quay/scripts/package.sh
+          # npm pack produces quay-<version>.tgz where version has no 'v' prefix
+          # (git tags use v0.1.0 but package.json version is 0.1.0 — the 'v' must be stripped)
           ARTIFACT=$(ls -1t packages/quay/quay-*.tgz 2>/dev/null | head -1)
           echo "artifact=${ARTIFACT}" >> "$GITHUB_OUTPUT"
           echo "Built: ${ARTIFACT}"
@@ -46,10 +51,12 @@ jobs:
             Install globally with Node.js >= 20:
 
             ```sh
-            npm install -g quay-${{ github.ref_name }}.tgz
+            # Download the .tgz from this release page, then:
+            npm install -g quay-*.tgz
             quay --help
             quay serve
             ```
 
             The `.tgz` artifact attached to this release is produced by `npm pack` from `packages/quay/`.
             It includes all runtime dependencies (`@modelcontextprotocol/sdk`, `yaml`) and the CLI entrypoint (`bin/quay.js`).
+            Note: the artifact filename uses the package version (e.g. `quay-0.1.0.tgz`), not the git tag (e.g. `v0.1.0`).
