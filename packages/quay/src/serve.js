@@ -110,6 +110,8 @@ button:hover { background: #0052a3; }
 }
 .body pre code { background: none; padding: 0; font-size: inherit; }
 hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
+/* QW-007: disabled page-nav items — non-clickable, muted color */
+.page-nav-disabled { color: #adb5bd; }
 /* QW-006: visually-hidden class for semantic headings that should not disrupt layout */
 .sr-only {
   position: absolute;
@@ -316,7 +318,17 @@ export async function startServer({ port = 4173 } = {}) {
       } else {
         tasks = filtered;
       }
-      const rows = tasks
+      // QW-007 (experiment 3, iteration 4): pagination — 20 tasks per page.
+      // ?page=N selects the page (1-based, default 1). Applied after filter+sort.
+      const PAGE_SIZE = 20;
+      const pageParam = parseInt(url.searchParams.get("page") || "1", 10);
+      const page = Number.isFinite(pageParam) && pageParam >= 1 ? pageParam : 1;
+      const totalTasks = tasks.length;
+      const totalPages = Math.max(1, Math.ceil(totalTasks / PAGE_SIZE));
+      const safePage = Math.min(page, totalPages);
+      const offset = (safePage - 1) * PAGE_SIZE;
+      const pageTasks = tasks.slice(offset, offset + PAGE_SIZE);
+      const rows = pageTasks
         .map(
           (t) => html`<tr>
             <td><a href="/task/${t.id}">${escapeHtml(t.id)}</a></td>
@@ -331,12 +343,14 @@ export async function startServer({ port = 4173 } = {}) {
       const statuses = ["todo", "ready", "done", "needs-human"];
       // QW-005: collect distinct labels across ALL tasks (before any filter) for label nav.
       const allLabels = [...new Set(allTasks.flatMap((t) => Array.isArray(t.labels) ? t.labels : []))].sort();
-      // Build query param helper: merges status, sort, and label params.
-      function buildHref(status, sort, label) {
+      // Build query param helper: merges status, sort, label, and page params.
+      // QW-007: page param added; when page=1 it is omitted from the href (clean URL).
+      function buildHref(status, sort, label, pg) {
         const params = new URLSearchParams();
         if (status) params.set("status", status);
         if (label) params.set("label", label);
         if (sort) params.set("sort", sort);
+        if (pg && pg > 1) params.set("page", String(pg));
         const qs = params.toString();
         return qs ? `/?${qs}` : "/";
       }
@@ -373,6 +387,19 @@ export async function startServer({ port = 4173 } = {}) {
             : html`<a href="${buildHref(statusFilter, sortKey, l)}">${escapeHtml(l)}</a>`
         ),
       ].join(" · ") : null;
+      // QW-007: page navigation — Previous / Next links with page info.
+      // Filter/sort nav links reset to page 1 (no pg param) when clicked, which is correct:
+      // changing a filter changes which tasks are in view.
+      const pageNav = totalPages > 1 ? html`
+        <p class="meta">
+          ${safePage > 1
+            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilter, safePage - 1)}">&laquo; Previous</a>`
+            : html`<span class="page-nav-disabled">&laquo; Previous</span>`}
+          &nbsp; Page ${safePage} of ${totalPages} (${totalTasks} tasks) &nbsp;
+          ${safePage < totalPages
+            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilter, safePage + 1)}">Next &raquo;</a>`
+            : html`<span class="page-nav-disabled">Next &raquo;</span>`}
+        </p>` : html`<p class="meta">Page 1 of ${totalPages} (${totalTasks} tasks)</p>`;
       // QN-046 (closes discussion-doc §2.1's browser-rendering gap): a real
       // browser (driven via playwright MCP tooling) decodes this body as
       // mojibake (e.g. "Quay â€" task list") without an explicit charset —
@@ -389,10 +416,12 @@ export async function startServer({ port = 4173 } = {}) {
           <p class="meta">Filter: ${filterNav}</p>
           <p class="meta">Sort: ${sortNav}</p>
           ${labelNav ? html`<p class="meta">Label: ${labelNav}</p>` : ""}
+          ${pageNav}
           <table>
             <tr><th>id</th><th>status</th><th>role</th><th>title</th></tr>
             ${rows}
           </table>
+          ${totalPages > 1 ? pageNav : ""}
         </main></body></html>`);
       return;
     }

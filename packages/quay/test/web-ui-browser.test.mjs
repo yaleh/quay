@@ -157,7 +157,7 @@ async function main() {
   const mockLogPath = path.join(tasksDir, "action-mock.jsonl");
 
   // Three tasks seeded for core UI tests, plus three for QW-004 sort tests,
-  // plus three for QW-005 label filter tests:
+  // plus three for QW-005 label filter tests, plus 25 for QW-007 pagination tests:
   // - WUI-1 (todo): action button PRESENT (per provider.yml whenStatus: [todo, ready])
   // - WUI-2 (done): action button ABSENT — negative control (no matching whenStatus)
   // - WUI-ACT (todo): used exclusively for the POST action trigger test (QC-002)
@@ -166,6 +166,10 @@ async function main() {
   //   Inserted in C, A, B order to test that sort overrides insertion order.
   // - LBL-1 (todo, labels:[alpha]), LBL-2 (done, labels:[beta]), LBL-3 (todo, labels:[alpha,beta]):
   //   QW-005 label filter verification tasks.
+  // - ZPG-01..ZPG-25 (todo): QW-007 pagination verification tasks. Seeded LAST (after all
+  //   other tasks) so WUI-*/SORT-*/LBL-* appear on page 1 in insertion-order mode. ZPG-
+  //   prefix (Z > W alphabetically) ensures these sort to the end with ?sort=id. With 34
+  //   total tasks and PAGE_SIZE=20, page 1 = first 20; page 2 = remaining 14 (ZPG-12..25).
   execFileSync("node", [nativeBin, "task", "create", "LBL-1", "--title", "Label test task 1 (alpha)",
     "--status", "todo", "--labels", "alpha", "--body", VALID_SECTIONS], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
@@ -202,6 +206,18 @@ async function main() {
     "--status", "todo", "--body", VALID_SECTIONS], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
   });
+  // QW-007: seed 25 pagination test tasks (ZPG-01..ZPG-25).
+  // Seeded LAST so that in insertion-order (default, no sort), WUI-*/SORT-*/LBL-* tasks
+  // appear on page 1. ZPG- prefix sorts after W alphabetically — with ?sort=id and 34
+  // total tasks: page 1 (20 tasks) = LBL-1..LBL-3 + SORT-A/B/C + WUI-1/2/ACT + ZPG-01..ZPG-11;
+  // page 2 (14 tasks) = ZPG-12..ZPG-25.
+  for (let i = 1; i <= 25; i++) {
+    const padded = String(i).padStart(2, "0");
+    execFileSync("node", [nativeBin, "task", "create", `ZPG-${padded}`, "--title", `Pagination test task ${padded}`,
+      "--status", "todo", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+    });
+  }
 
   // Workspace config wiring — same pattern as serve.test.mjs (QN-031) and
   // serve-browser-render.test.mjs (QN-046): serve.js's loadConfig() does a
@@ -613,6 +629,64 @@ async function main() {
     assert(list.body.includes("overflow-x: auto") || list.body.includes("overflow-x:auto"),
       'GET / pageStyles() includes overflow-x:auto in @media block for mobile table scrolling (QW-006: DIR-003)');
 
+    // ── QW-007: pagination assertions ───────────────────────────────────────
+    // QW-007 (experiment 3, iteration 4): verify ?page=N pagination with PAGE_SIZE=20.
+    // 25 ZPG-* tasks are seeded last. Total fixture: 34 tasks.
+    // With ?sort=id (alphabetical): LBL-1..3, SORT-A/B/C, WUI-1/2/ACT, ZPG-01..ZPG-11 = page 1 (20).
+    // Page 2 = ZPG-12..ZPG-25 (14 tasks).
+    // ZPG-11 is the last ZPG-* task on page 1; ZPG-12 is the first task on page 2.
+
+    // GET /?sort=id — page 1 (default): includes ZPG-01 (first ZPG), excludes ZPG-12 (page 2 start)
+    const listPage1SortId = await get(port, "/?sort=id");
+    assert(listPage1SortId.status === 200, `GET /?sort=id returns 200 for pagination test (got ${listPage1SortId.status})`);
+    assert(listPage1SortId.body.includes("ZPG-01"),
+      "GET /?sort=id page 1 includes ZPG-01 (first ZPG task on page 1) (QW-007: pagination first page)");
+    assert(listPage1SortId.body.includes("ZPG-11"),
+      "GET /?sort=id page 1 includes ZPG-11 (last ZPG task on page 1) (QW-007: pagination first page boundary)");
+    assert(!listPage1SortId.body.includes("ZPG-12"),
+      "GET /?sort=id page 1 excludes ZPG-12 (first task on page 2) (QW-007: pagination excludes page 2 tasks)");
+    assert(!listPage1SortId.body.includes("ZPG-25"),
+      "GET /?sort=id page 1 excludes ZPG-25 (last task on page 2) (QW-007: pagination excludes page 2 tasks)");
+
+    // GET /?sort=id&page=2 — page 2: shows ZPG-12..ZPG-25, NOT ZPG-01..ZPG-11
+    const listPage2SortId = await get(port, "/?sort=id&page=2");
+    assert(listPage2SortId.status === 200, `GET /?sort=id&page=2 returns 200 (got ${listPage2SortId.status})`);
+    assert(listPage2SortId.body.includes("ZPG-12"),
+      "GET /?sort=id&page=2 includes ZPG-12 (first task on page 2) (QW-007: pagination second page)");
+    assert(listPage2SortId.body.includes("ZPG-25"),
+      "GET /?sort=id&page=2 includes ZPG-25 (last task on page 2) (QW-007: pagination second page boundary)");
+    assert(!listPage2SortId.body.includes("ZPG-01"),
+      "GET /?sort=id&page=2 excludes ZPG-01 (first ZPG task on page 1) (QW-007: pagination excludes page 1 tasks)");
+    assert(!listPage2SortId.body.includes("ZPG-11"),
+      "GET /?sort=id&page=2 excludes ZPG-11 (last ZPG task on page 1) (QW-007: pagination excludes page 1 tasks)");
+
+    // Page navigation links present when multiple pages exist
+    assert(listPage1SortId.body.includes("page=2") || listPage1SortId.body.includes("Next"),
+      "GET /?sort=id page 1 contains page navigation to page 2 (QW-007: page nav present)");
+    assert(listPage2SortId.body.includes("page=1") || listPage2SortId.body.includes("Previous") || listPage2SortId.body.includes("laquo"),
+      "GET /?sort=id&page=2 contains page navigation back (QW-007: page nav present)");
+
+    // Page info present in response
+    assert(listPage1SortId.body.includes("Page 1") || listPage1SortId.body.includes("page 1"),
+      "GET /?sort=id page 1 contains 'Page 1' info text (QW-007: page info rendered)");
+
+    // GET /?sort=id&page=1 and GET /?sort=id are equivalent (page=1 is the default)
+    const listPage1Explicit = await get(port, "/?sort=id&page=1");
+    assert(listPage1Explicit.body.includes("ZPG-01") && !listPage1Explicit.body.includes("ZPG-12"),
+      "GET /?sort=id&page=1 is equivalent to page 1 default (ZPG-01 in, ZPG-12 out) (QW-007: explicit page=1 matches default)");
+
+    // Pagination interacts with filters: GET /?sort=id&status=todo&page=2 paginates filtered tasks
+    // All ZPG-* tasks are todo. With ?status=todo&sort=id: todo tasks = LBL-1,LBL-3,SORT-A,
+    // WUI-1,WUI-ACT,ZPG-01..ZPG-25 (total 30). Page 2 (tasks 21-30) = ZPG-16..ZPG-25.
+    const listFilteredPage2 = await get(port, "/?sort=id&status=todo&page=2");
+    assert(listFilteredPage2.status === 200, `GET /?sort=id&status=todo&page=2 returns 200 (got ${listFilteredPage2.status})`);
+    // ZPG-16 is the 21st todo task (alphabetically: LBL-1, LBL-3, SORT-A, WUI-1, WUI-ACT, ZPG-01..ZPG-25
+    // = 5 non-ZPG + 25 ZPG = 30 todo tasks; page 2 starts at task 21 = ZPG-16)
+    assert(listFilteredPage2.body.includes("ZPG-"),
+      "GET /?sort=id&status=todo&page=2 shows ZPG-* tasks on page 2 of filtered results (QW-007: filter+pagination)");
+    assert(!listFilteredPage2.body.includes("LBL-1"),
+      "GET /?sort=id&status=todo&page=2 excludes LBL-1 (page 1 task, not on page 2) (QW-007: filter+pagination)");
+
   } finally {
     if (server) {
       server.close();
@@ -627,7 +701,7 @@ async function main() {
   }
 
   console.log(failures === 0
-    ? "\nAll QC-001/QC-002/QW-001/QW-002/QW-003/QW-004/QW-005/QW-006 web-ui-browser regression tests passed."
+    ? "\nAll QC-001/QC-002/QW-001/QW-002/QW-003/QW-004/QW-005/QW-006/QW-007 web-ui-browser regression tests passed."
     : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
