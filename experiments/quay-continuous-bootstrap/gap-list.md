@@ -20,17 +20,11 @@
 
 | ID | Description | Severity | Source | Date added | Last confirmed open |
 |----|-------------|----------|--------|------------|---------------------|
-| UQ-003 | No onboarding/orientation content in Web UI (no "what is this" header, no status lifecycle explanation) — with 103 tasks visible and no context, confirmed significant barrier for new contributors | significant | simulated-user (new contributor, iteration 0); severity escalated iteration 2 by new-contributor persona | 2026-07-17 | 2026-07-17 |
 | UQ-004 | No timestamp column in CLI list output — cannot identify most-recently-updated task from CLI | minor | simulated-user (cross-experiment maintainer + comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-005 | No visual age indicator on Web UI list rows ("updated X ago") | minor | simulated-user (comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-006 | Label filter on Web UI is a flat 40+ item inline list — likely unwieldy on mobile viewport | minor | simulated-user (comparison reviewer + cross-experiment maintainer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-007 | Web UI task list table (5 columns) may overflow on narrow mobile viewports — not live-verified | minor | simulated-user (comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-008 | MCP task_list response too large for inline context — no streaming or pagination at MCP layer (full unfiltered response remains large) | significant | simulated-user (cross-experiment maintainer, iteration 0) + direct-observation | 2026-07-17 | 2026-07-17 |
-| UQ-009 | Back link from task detail page drops filter/prefix context (returns to unfiltered `/`) — after drilling into a task the maintainer lands on page 1 of all tasks with no filter | minor | simulated-user (cross-experiment maintainer, iteration 1) | 2026-07-17 | 2026-07-17 |
-| UQ-011 | Advance button (actions column) hidden off-screen at 375px viewport — table requires horizontal scroll to reveal rightmost column with no scroll affordance hint | significant | simulated-user (mobile-single-task, iteration 2) | 2026-07-17 | 2026-07-17 |
-| UQ-012 | Table `role` and `labels` columns not hidden at mobile viewport (≤600px) — their width crowds `title` and `actions` columns out of the visible area | significant | simulated-user (mobile-single-task, iteration 2) | 2026-07-17 | 2026-07-17 |
-| UQ-013 | Gate-fail feedback is silent — when Advance is blocked by unmet gate conditions, the page silently refreshes with no error message or explanation to the user | significant | simulated-user (mobile-single-task + new-contributor, iteration 2) | 2026-07-17 | 2026-07-17 |
-| UQ-014 | Advance button has no tooltip, no hover text, no post-action confirmation — a new contributor may click it on the wrong task with no indication of what was triggered and no undo path | significant | simulated-user (new-contributor, iteration 2) | 2026-07-17 | 2026-07-17 |
 | UQ-015 | `updatedAt` field absent from `task_get` MCP tool response — asymmetry between `task_list` (includes `updatedAt`) and `task_get` (omits it); detail-page "last updated" display not possible via MCP | minor | G3 audit notes (iteration 2) | 2026-07-17 | 2026-07-17 |
 
 ### verification_coverage
@@ -64,7 +58,13 @@
 |----|-------------|-----------|---------|
 | UQ-001 | CLI `--help` returns one line — no project description, no subcommand docs, no examples | iteration 1 | QX-005 (done); `quay --help` now prints structured usage guide with all subcommands and examples |
 | UQ-002 | CLI subcommand help is missing or shows error messages instead of usage | iteration 1 | QX-005 (done); `quay task --help` and `quay task list --help` now print usage documentation |
+| UQ-003 | No onboarding/orientation content in Web UI — significant barrier for new contributors | iteration 3 | QX-015 (done); orientation banner added to list page with project description and status lifecycle; serve.test.mjs assertion; commit f4b3b8d |
+| UQ-009 | Back link from task detail page drops filter/prefix context | iteration 3 | QX-011 (done); task title links on list page include ?from= param; detail page back link uses from= value with open-redirect guard; serve.test.mjs block; commit f4b3b8d |
 | UQ-010 | `quay serve --help` and `quay action --help` silently exit with no output | iteration 1 | QX-007 (done); `printHelp()` now emits a stub usage line for unrecognised subcommands; test 16 in cli.test.mjs asserts non-empty output |
+| UQ-011 | Advance button (actions column) hidden off-screen at 375px viewport | iteration 3 | QX-012 (done); role/labels columns hidden at ≤600px via .col-role/.col-labels CSS classes; actions column now visible at 375px; serve.test.mjs assertion; commit f4b3b8d |
+| UQ-012 | Table role and labels columns not hidden at mobile viewport (≤600px) | iteration 3 | QX-012 (done); .col-role and .col-labels hidden in @media (max-width: 600px) block; serve.test.mjs assertion; commit f4b3b8d |
+| UQ-013 | Gate-fail feedback is silent — page silently refreshes when Advance is blocked | iteration 3 | QX-013 (done); gate check added to action POST handler; ?error= redirect on gate-fail; error/success banners on list and detail pages; serve.test.mjs block; commit f4b3b8d |
+| UQ-014 | Advance button has no tooltip, no hover text, no post-action confirmation | iteration 3 | QX-014 (done); title="Advance task to next status" on list page buttons; title="Advance to [next]" on detail page buttons; serve.test.mjs assertion; commit f4b3b8d |
 
 ### verification_coverage
 
@@ -85,5 +85,6 @@
 - Iteration 0: 19 gaps added (CB-001..CB-010, UQ-001..UQ-008, VC-001); 0 closed
 - Iteration 1: 5 new gaps found (CB-011, CB-012, UQ-009, UQ-010, SH-001); 9 gaps closed (CB-001, CB-002, CB-009, UQ-001, UQ-002, UQ-010, VC-001, SH-001) — note SH-001 was found and closed in the same iteration
 - Iteration 2: 6 new gaps found (UQ-011, UQ-012, UQ-013, UQ-014, UQ-015 added; UQ-003 severity escalated from minor to significant); 5 gaps closed (CB-003, CB-004, CB-005, CB-011, CB-012)
-- **Cumulative gaps closed (all-time): 14** (CB-001, CB-002, CB-003, CB-004, CB-005, CB-009, CB-011, CB-012, UQ-001, UQ-002, UQ-010, VC-001, SH-001; CB-010 partially addressed)
-- **Net open gaps after iteration 2 (final)**: 16 (4 CB, 12 UQ, 0 VC, 0 SH) — UQ-003 escalated to significant; UQ-011..015 added from simulated-user and G3
+- Iteration 3 (development phase): 0 new gaps found during development; 6 gaps closed (UQ-003, UQ-009, UQ-011, UQ-012, UQ-013, UQ-014); simulated-user pass pending (orchestrator dispatch)
+- **Cumulative gaps closed (all-time, development phase): 20** (CB-001..005, CB-009, CB-011, CB-012, UQ-001..003, UQ-009..014, VC-001, SH-001; CB-010 partially addressed)
+- **Net open gaps after iteration 3 development phase**: 10 (4 CB, 6 UQ, 0 VC, 0 SH) — UQ-004/005/006/007/008/015 remain open; simulated-user may add new gaps

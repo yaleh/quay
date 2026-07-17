@@ -366,6 +366,49 @@ Gap-list delta (final): 5 new gaps added (UQ-011..015); UQ-003 escalated; 5 gaps
 
 ---
 
+## Iteration 3 record (2026-07-17, development phase — G3 + simulated-user pending)
+
+### QX-* tasks created and completed this iteration
+
+| Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
+|------|-----------|------------|---------|----------------|--------|-------|
+| QX-011 | native | native | G3 pending | 10/15 | done | Back link preserves filter context (UQ-009): ?from= in task title links; detail page back link uses from= param; open-redirect guard; 6 assertions in serve.test.mjs |
+| QX-012 | native | native | G3 pending | 11/15 | done | Mobile table adaptation (UQ-011/012): col-role/col-labels CSS classes; @media (max-width:600px) rule; 3 assertions in serve.test.mjs |
+| QX-013 | native | native | G3 pending | 12/15 | done | Gate-fail feedback (UQ-013): gate check before deliverTrigger; ?error= redirect; error/success banners; addParam() helper; 7 assertions in serve.test.mjs |
+| QX-014 | native | native | G3 pending | 13/15 | done | Advance button tooltip (UQ-014): title= on list-page buttons; target-status title= on detail-page buttons; 2 assertions in serve.test.mjs |
+| QX-015 | native | native | G3 pending | 14/15 | done | Orientation banner (UQ-003): .orientation-banner div + CSS; 3 assertions in serve.test.mjs |
+
+σ_QX before iteration 3: 9/10 = 0.900 (QX-001 seed, QX-002..010 native; QX-008/009 gate_by G3 PASS WITH NOTES; QX-010 tests pass)
+σ_QX after iteration 3 (development phase, G3 pending): 14/15 = 0.933
+(QX-001 remains seed provenance. QX-011..015 all native authoring + execution. gate_by = "G3 pending" — awaiting orchestrator dispatch.)
+
+### Gate check results (iteration 3, development phase)
+- QX-011: all 6 ACs checked; status advanced to done; G3 pending
+- QX-012: all 7 ACs checked; status advanced to done; G3 pending
+- QX-013: all 9 ACs checked; status advanced to done; G3 pending
+- QX-014: all 5 ACs checked; status advanced to done; G3 pending
+- QX-015: all 6 ACs checked; status advanced to done; G3 pending
+
+### Gaps closed this iteration (development phase)
+- UQ-003 (orientation banner) → QX-015; commit f4b3b8d
+- UQ-009 (back link context) → QX-011; commit f4b3b8d
+- UQ-011 (Advance off-screen mobile) → QX-012; commit f4b3b8d
+- UQ-012 (role/labels columns at mobile) → QX-012; commit f4b3b8d
+- UQ-013 (gate-fail silent) → QX-013; commit f4b3b8d
+- UQ-014 (no button tooltip) → QX-014; commit f4b3b8d
+
+### New gaps found this iteration (development phase)
+None during development phase. Simulated-user pass pending (dispatched separately by orchestrator).
+
+### G3 status (iteration 3)
+G3 TRIGGERED — Core source file changed: `packages/quay/src/serve.js`. Also test files changed: `packages/quay/test/serve.test.mjs`, `packages/quay/test/web-ui-browser.test.mjs`, `packages/quay/test/core-three-way-symmetry.test.mjs`.
+G3 PENDING — awaiting orchestrator dispatch.
+
+### System health (iteration 3, development phase)
+Full test suite (final): 30/30 pass. No regressions. QX-011..015 serve.test.mjs block (25 new assertions), plus updated existing assertions in web-ui-browser.test.mjs and core-three-way-symmetry.test.mjs.
+
+---
+
 ## Human-observed gap-list seed candidates (2026-07-17, pre-iteration-0)
 
 The human, using experiment 3's shipped Web UI directly as a real user (not via the
