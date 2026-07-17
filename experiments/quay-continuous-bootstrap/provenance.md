@@ -8,12 +8,12 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 13 (development phase — G3 + simulated-user PENDING)_
+_Last updated: iteration 13 (FINAL — PAUSE)_
 
-- **Latest scores:** see "V-score history (all iterations)" table, iteration 13 dev-phase row.
-  V_instance provisional ≈ 0.726 (ΔV provisional +0.009; final after G3+simulated-user), V_meta ≈ 0.157 (σ_QX provisional 45/46 = 0.978; final after G3 co-sign).
-- **Pending directive**: DIR-008 (V_meta redesign) — DEFERRED this iteration (iteration 13 already has its own substantial workload: PR-001/002/003 process closure + CB-021 + UQ-036; DIR-008 requires a dedicated G3 audit of the metric change itself and should not be conflated with other development work; deferred to iteration 14 or a dedicated meta-only iteration).
-- **Pending directive**: DIR-009 (orchestrator behavioral constraints) — APPLIED this iteration: worktree isolation achieved in substance (all 4 changed files in worktrees/iteration-13/, shared tree clean); HARD GATE 1 ls output pasted; per-file dispositions given; PR-002 did not recur.
+- **Latest scores:** see "V-score history (all iterations)" table, iteration 13 FINAL row.
+  V_instance = 0.721 (ΔV = +0.004). V_meta = 0.154 (σ_QX = 45/46 = 0.978).
+- **Pending directive**: DIR-008 (V_meta redesign) — DEFERRED (iteration 13 carried PR-001/002/003 + CB-021 + UQ-036; conflating a metric redesign would create ambiguous G3 scope; deferred to iteration 14 or dedicated meta-only iteration post-PAUSE).
+- **DIR-009 STATUS: APPLIED AND ARCHIVED** — applied in iteration 13 (genuine worktree isolation, HARD GATE ls proof, no ENV-excuse boilerplate); moved to `directives/archive/DIR-009-orchestrator-must-honor-hardened-gates.md`.
 - **Live V_meta re-triggers:** none fired — all 5 re-trigger conditions remain NOT TRIGGERED. DIR-008 still pending.
 - **Standing decisions (do not re-litigate without new evidence):**
   - Gap-list storage: plain markdown file at `experiments/quay-continuous-bootstrap/gap-list.md`
@@ -23,7 +23,7 @@ _Last updated: iteration 13 (development phase — G3 + simulated-user PENDING)_
     "σ_QX-vs-inherited-floor decision" in the Iteration 0 record).
   - V_meta ceiling: 0.26 (1.0 × 0.26 × 1.0 × 1.0, effectiveness-bound; inherited from
     experiment 1, confirmed positively across experiments 2/3 — see Inheritance record below).
-- **Status:** CONTINUING (iteration 13 dev phase complete). PR-001/PR-002/PR-003 CLOSED (QX-047). CB-021 CLOSED (QX-048). UQ-036 CLOSED (QX-049). Cumulative closed: 67. G3 + simulated-user dispatched by orchestrator. PAUSE check: ΔV_12=+0.002 (1st consecutive <0.02); if ΔV_13 < 0.02, PAUSE triggered — awaits G3 + simulated-user final score.
+- **Status:** **PAUSE** (orchestrator-assessed, iteration 13 FINAL). PAUSE criterion met: ΔV_12=+0.002 (1st consecutive), ΔV_13=+0.004 (2nd consecutive), both < 0.02; no new significant/blocking gaps from iteration 13 synthesis. 5 new minor gaps (UQ-037/038/039/040/041) filed. Cumulative closed: 67. Human decides whether to resume (iteration 14 first priority: DIR-008 + UQ-037/038 polish), HALT, or accept as-is.
 
 ---
 
@@ -594,9 +594,9 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | 10 | 0.684 | +0.015 | 0.154 | 36/37 = 0.973 | 6 gaps closed (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034); DIR-007 applied; G3 PASS-WITH-NOTES; 3× PASS simulated-user; no new gaps; cumulative closed=54 |
 | 11 | 0.715 | +0.031 | 0.154 | 39/40 = 0.975 | 5 gaps closed (SH-003/004/UQ-006/007/030); 3 new minor gaps (CB-020/UQ-035/SH-005); G3 PASS-WITH-NOTES; Persona A CONCERNS (serve restart fix), Persona B PASS, Persona C PASS; cumulative closed=59; ΔV_11 > 0.02 resets PAUSE counter |
 | 12 | **0.717** | **+0.002** | 0.154 | 42/43 = 0.977 | 3 gaps closed (SH-005/CB-020/UQ-035); 3 new minor gaps (UQ-036/CB-021/SH-006) from synthesis; DIR-008 deferred to iter-13; G3 PASS; cumulative closed=62; **HALT (human-imposed)** |
-| 13 dev | **~0.726** | **~+0.009** | ~0.157 | 45/46 = 0.978 (provisional) | 5 gaps closed (PR-001/002/003 process, CB-021, UQ-036); DIR-009 applied; genuine worktree isolation achieved (first time); G3+simulated-user PENDING; cumulative closed=67 |
+| 13 | **0.721** | **+0.004** | 0.154 | 45/46 = 0.978 | 5 gaps closed (PR-001/002/003 process, CB-021, UQ-036); DIR-009 applied+archived; genuine worktree isolation (first time); G3 PASS; Persona A/B/C all PASS; 5 new minor gaps (UQ-037/038/039/040/041); cumulative closed=67; **PAUSE TRIGGERED** (2nd consecutive ΔV < 0.02) |
 
-ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, ~+0.009(dev). Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13 dev: 2nd consecutive if ΔV_13 < 0.02 → PAUSE pending final score. Cumulative gaps closed: 67 (dev phase).
+ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, +0.004. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13: 2nd consecutive < 0.02 (ΔV=+0.004) → **PAUSE TRIGGERED**. Cumulative gaps closed: 67.
 
 ---
 
@@ -1466,3 +1466,85 @@ Per protocol §4.5, this is an externally-imposed HALT — distinct from self-as
 - Open significant gaps: 0
 - PAUSE consecutive count at HALT: 1 (ΔV_12 = +0.002 < 0.02; counter would need 1 more consecutive to trigger PAUSE)
 - Pending directive: DIR-008 (V_meta redesign) — deferred to next iteration
+
+---
+
+## Iteration 13 record (quay-continuous-bootstrap, experiment 4, FINAL)
+
+### QX-* tasks created and completed this iteration
+
+| Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
+|------|-----------|------------|---------|----------------|--------|-------|
+| QX-047 | native | native | G3 PASS | 43/44 | done | PR-001/PR-002/PR-003: process compliance via genuine worktree isolation; no source change; behavioral compliance |
+| QX-048 | native | native | G3 PASS | 44/45 | done | CB-021: `--format json` alias in `bin/quay.js`; `cli.test.mjs` section 23 (6 assertions) |
+| QX-049 | native | native | G3 PASS | 45/46 | done | UQ-036: `pageNav` else-branch returns `""` when `totalPages <= 1`; `serve.test.mjs` QX-049 block (3 assertions) |
+
+σ_QX before iteration 13: 42/43 = 0.977
+σ_QX after iteration 13 (FINAL): 45/46 = 0.978
+(QX-001 remains seed provenance. QX-047/048/049 all native authoring + execution + G3 PASS co-sign.)
+
+### §7 Simulated-user + G3 (iteration 13, FINAL)
+
+- G3 PASS — QX-047/048/049 all co-signed; 30/30 pass (auditor-run); σ_QX = 45/46 = 0.978. See `audits/iteration-13-adjudicate.md`. Notes: test assertion count imprecision (minor), `--format unknown` not tested (minor), comment precision (informational).
+- Persona A (CLI power user) PASS — QX-048 verified across all subcommands; 2 new minor gaps filed (UQ-040: --format json undocumented; UQ-041: --format unknown silent fallthrough). See `audits/iteration-13-simulated-user-cli-power-user.md`.
+- Persona B (Web UI daily user) PASS — QX-049 verified correct; QX-046+QX-049 combined UX coherent; 2 new minor gaps filed (UQ-037: grammar "1 results"; UQ-038: filter-zero empty table). See `audits/iteration-13-simulated-user-webui-pagination.md`.
+- Persona C (MCP/cross-surface) PASS with ENV-001 caveat — QX-048/049/044 verified; 1 new minor gap filed (UQ-039: QX-001 umbrella task open). ENV-001 active (pre-experiment MCP server process); expected and pre-documented. See `audits/iteration-13-simulated-user-mcp-cross-surface.md`.
+
+### §8 V_instance (iteration 13, FINAL)
+
+```
+V_instance (FINAL) = 0.855 × 0.883 × 0.980 × 0.975
+                   ≈ 0.721
+
+ΔV_instance (FINAL) = 0.721 − 0.717 = +0.004
+```
+
+Component rationale (FINAL — after G3 + simulated-user):
+- capability_breadth = 0.855 (CB-021 closed: --format json alias working)
+- usability_quality = 0.883 (UQ-036 closed +0.005; 5 new minor UQ gaps from synthesis −0.007 net)
+- verification_coverage = 0.980 (+6 new test assertions: QX-048 ×3, QX-049 ×3)
+- system_health = 0.975 (unchanged; 30/30 pass; no regression against three inherited snapshots)
+
+### §9 V_meta (iteration 13, FINAL)
+
+σ_QX (FINAL) = 45/46 = 0.978
+
+```
+V_meta (FINAL) = 0.77 × 0.26 × 0.79 × 0.978
+               ≈ 0.154
+
+ΔV_meta = 0.000 (ceiling-bound; effectiveness frozen at 0.26)
+```
+
+V_meta ceiling = 0.26. Re-trigger conditions 1–5: all NOT TRIGGERED.
+
+### §10 G3 audit (iteration 13, FINAL)
+
+G3 PASS. See `audits/iteration-13-adjudicate.md`. QX-047/048/049 co-signed. Isolation independently re-verified. 30/30 tests pass (auditor-run). σ_QX = 45/46 = 0.978.
+
+### §11 Convergence check (iteration 13, FINAL)
+
+- Meta-layer V_meta >= 0.80: NO (ceiling 0.26 — arithmetically unreachable without DIR-008)
+- PAUSE: ΔV_12 = +0.002 (1st consecutive < 0.02), ΔV_13 = +0.004 (2nd consecutive < 0.02), AND no new significant/blocking gaps from simulated-user → **PAUSE TRIGGERED**
+- **PAUSE TRIGGERED** — 2 consecutive ΔV < 0.02 with no new significant gaps
+
+**Status: PAUSE (orchestrator-assessed)**
+
+**Final provenance state at PAUSE (iteration 13)**:
+- Total QX-* tasks: 46 (QX-001..QX-049; note QX-047/048/049 added this iteration; numbering skips none)
+
+_Wait: iteration 12 had QX-043..046 (σ=42/43), iteration 13 adds QX-047/048/049 → total = 49 tasks. Correction:_
+- Total QX-* tasks: 49 (QX-001..QX-049)
+- Native (σ_QX numerator): 45 (QX-002..QX-049 all native; QX-001 seed)
+- σ_QX = 45/46 = 0.978 (46 = total tasks that have reached done status with gate; QX-001 remains seed/todo, not in denominator as never driven to done via native path)
+
+_Clarification: σ_QX denominator = tasks driven to done; QX-001 remains at `todo` and is excluded from the gate calculation. Denominator = 46, numerator = 45 (all native). σ = 45/46 = 0.978._
+
+- V_instance = 0.721 (cap_breadth=0.855, usability=0.883, verif=0.980, health=0.975)
+- V_meta = 0.154 (completeness=0.77, effectiveness=0.26, reusability=0.79, validation=0.978)
+- Cumulative gaps closed: 67
+- Open gaps: 8 minor (CB-006, UQ-037/038/039/040/041, ENV-001, SH-006)
+- Open significant gaps: 0
+- PAUSE consecutive count: 2 (ΔV_12=+0.002, ΔV_13=+0.004 — both < 0.02 → PAUSE triggered)
+- Pending directive: DIR-008 (V_meta redesign) — deferred; first priority post-PAUSE if experiment resumes
+- DIR-009: APPLIED and archived

@@ -254,96 +254,125 @@ provenance.md: CURRENT STATE header and iteration-13 dev-phase row updated toget
 
 ---
 
-## §7 Simulated-user pass (PENDING — dispatched by orchestrator)
+## §7 Simulated-user pass (FINAL)
 
-Dispatched by orchestrator (native Agent/Task tool, run_in_background=true, fresh contexts — never via manda, never from this session). Personas and verdicts to be recorded in:
-- `experiments/quay-continuous-bootstrap/audits/iteration-13-simulated-user-{persona}-{surface}.md`
+Three independent fresh-context personas dispatched by orchestrator (native Agent tool, run_in_background=true). All three returned PASS.
 
-Results incorporated into §8 (FINAL) when available.
+**Persona A — CLI power user (scripting/automation)**
+Report: `experiments/quay-continuous-bootstrap/audits/iteration-13-simulated-user-cli-power-user.md`
+Verdict: **PASS**
+- QX-048 (`--format json` alias) verified across all subcommands (`task list`, `task view`, `task edit`, `task check`, `action list`). Byte-for-byte identical output to `--json`. Empty result set returns `[]` cleanly. Stdout uncontaminated.
+- New minor gaps found:
+  - **UQ-040**: `--format json` is a valid alias but not documented in `--help` output; power user cannot discover it from the usage string alone.
+  - **UQ-041**: `--format <unknown>` silently falls through to human-readable output with exit code 0 — a footgun for scripts that misspell `json` or use an unsupported value.
+
+**Persona B — Web UI daily user (pagination/search)**
+Report: `experiments/quay-continuous-bootstrap/audits/iteration-13-simulated-user-webui-pagination.md`
+Verdict: **PASS**
+- QX-049 (pageNav single-page suppression) verified correct in worktree source: `totalPages > 1` ternary returns `""` for single-page; multi-page nav preserved. Live (pre-fix) server confirmed the "Page 1 of 1 (0 tasks)" and "Page 1 of 1 (1 tasks)" bugs that QX-049 fixes.
+- QX-046 + QX-049 combined UX confirmed coherent (no redundant page indicator on single-page search).
+- New minor gaps found:
+  - **UQ-037**: `searchResultBanner` uses fixed plural "results" — "Showing 1 results for X" is grammatically incorrect. Should be "1 result" (singular).
+  - **UQ-038**: Web UI table shows no in-table "no tasks found" message when filter (not just search) yields zero results. `searchResultBanner` covers the search case; filtered views with 0 results show an empty table body with no explanation.
+
+**Persona C — MCP AI consumer + cross-surface maintainer**
+Report: `experiments/quay-continuous-bootstrap/audits/iteration-13-simulated-user-mcp-cross-surface.md`
+Verdict: **PASS** (with standing ENV-001 caveat)
+- ENV-001 active: MCP server this session connected to predates all experiment-4 improvements (pre-commit 36c0a58). Prefix/search/pagination parameters silently ignored; 147-task unfiltered response (~638k chars) overflowed context window. Expected and pre-documented.
+- QX-048, QX-049, QX-044 (inFence) all verified correct via worktree source and CLI.
+- Multi-label AND semantics consistent across CLI (worktree) and MCP (single-string form).
+- New minor gap found:
+  - **UQ-039**: `QX-001` umbrella task remains `todo` despite all stated ACs being met by child tasks. Misleading for a maintainer scanning open work; pre-existing since iteration 1.
+
+**Simulated-user synthesis summary**: 5 new minor gaps across 3 personas (UQ-037, UQ-038, UQ-039, UQ-040, UQ-041). No new blocking or significant gaps. All personas PASS. PAUSE criterion conditions met.
 
 ---
 
-## §8 V_instance (dev-phase provisional)
+## §8 V_instance (FINAL)
 
 Changes this iteration:
 - CB-021 CLOSED: `--format json` now works → `capability_breadth` +credit
 - UQ-036 CLOSED: pageNav no longer clutters single-page results → `usability_quality` +credit
-- PR-001/PR-002/PR-003 CLOSED: process-dimension blocking gaps removed — these are not V_instance dimensions but their closure removes overhead that was masking effective work
-- New assertions added (QX-048 section 23: 3; QX-049 block: 3 assertions) → `verification_coverage` +credit
+- PR-001/PR-002/PR-003 CLOSED: process-dimension blocking gaps removed (not V_instance dimensions, but their closure removes masking overhead)
+- New assertions added: +6 (QX-048 section 23 × 3; QX-049 block × 3) → `verification_coverage` +credit
+- Synthesis found 5 new minor UQ gaps (UQ-037/038/039/040/041): revises `usability_quality` down from dev-provisional 0.890
 
-**Provisional dimension estimates (dev phase — before G3 + simulated-user):**
-
-| Dimension | Entering iter-13 | Delta (dev) | Provisional |
-|-----------|-----------------|-------------|-------------|
-| capability_breadth | 0.850 | CB-021 closed +0.005 | **0.855** |
-| usability_quality | 0.885 | UQ-036 closed +0.005 | **0.890** |
-| verification_coverage | 0.977 | +6 new assertions → +0.003 | **0.980** |
-| system_health | 0.975 | No change | **0.975** |
+| Dimension | Entering iter-13 | Dev change | Synthesis change | FINAL |
+|-----------|-----------------|-----------|-----------------|-------|
+| capability_breadth | 0.850 | +0.005 (CB-021 closed) | 0 | **0.855** |
+| usability_quality | 0.885 | +0.005 (UQ-036 closed) | −0.007 (5 new minor UQ gaps) | **0.883** |
+| verification_coverage | 0.977 | +0.003 (+6 assertions) | 0 | **0.980** |
+| system_health | 0.975 | 0 | 0 | **0.975** |
 
 ```
-V_instance (provisional) = 0.855 × 0.890 × 0.980 × 0.975
-                         ≈ 0.726
+V_instance (FINAL) = 0.855 × 0.883 × 0.980 × 0.975
+                   = 0.7550 × 0.980 × 0.975
+                   = 0.7399 × 0.975
+                   ≈ 0.721
 
-ΔV_instance (provisional) = 0.726 − 0.717 = +0.009
+ΔV_instance (FINAL) = 0.721 − 0.717 = +0.004
 ```
 
-Note: ΔV_13 ~+0.009 < 0.02 → this would be the 2nd consecutive below-threshold iteration (ΔV_12 = +0.002). If the simulated-user pass finds no new significant gaps, **PAUSE would be triggered** after G3 + simulated-user final scoring.
+**FINAL scores after G3 + simulated-user synthesis:** ΔV_13 = +0.004 < 0.02 (2nd consecutive below threshold).
 
 ---
 
-## §9 V_meta (dev-phase provisional)
+## §9 V_meta (FINAL)
 
 DIR-008 deferred. V_meta formula unchanged.
 
-σ_QX provisional = 45/46 = 0.978 (gate_by fields pending G3 co-sign).
+σ_QX FINAL = 45/46 = 0.978 (G3 co-signed QX-047/048/049; see `audits/iteration-13-adjudicate.md`).
 
 ```
-V_meta (provisional) = 0.77 × 0.26 × 0.79 × 0.978
-                     ≈ 0.154
+V_meta (FINAL) = 0.77 × 0.26 × 0.79 × 0.978
+               ≈ 0.154
 
 ΔV_meta = 0.000 (ceiling-bound; effectiveness frozen at 0.26)
 ```
 
 V_meta ceiling = 0.26 (standing fact; arithmetically unreachable without DIR-008 adoption).
 
-Re-trigger conditions 1–5: all NOT TRIGGERED (checked in §3).
+Re-trigger conditions 1–5: all NOT TRIGGERED (checked in §3 dev phase; no new trigger surfaced in synthesis).
 
 ---
 
-## §10 Out-of-band audit (G3) — PENDING
+## §10 Out-of-band audit (G3) — FINAL: PASS
 
-G3 dispatched by orchestrator (native Agent/Task tool, run_in_background=true). Will cover:
-- QX-048: bin/quay.js `flags.format === "json"` alias correctness
-- QX-049: serve.js pageNav else-branch suppression correctness + regression coverage
-- QX-047: process compliance (behavioral, no source change — G3 checks that the isolation proofs are genuine)
+Report: `experiments/quay-continuous-bootstrap/audits/iteration-13-adjudicate.md`
+Verdict: **PASS**
 
-Verdict to be recorded in `experiments/quay-continuous-bootstrap/audits/iteration-13-adjudicate.md`.
+- **QX-047 (process compliance)**: co-signed. PR-001/002/003 all independently verified closed. Worktree isolation re-verified by auditor: `git -C /home/yale/work/quay status --short -- packages/` = empty. DIR-008 deferral substantive and appropriate. DIR-009 applied.
+- **QX-048 (--format json alias)**: co-signed. Alias logic mechanically correct at post-`parseFlags()` insertion point. All subcommands use `flags.json`; fix is unconditional. 6 assertions across 3 sub-tests.
+- **QX-049 (pageNav conditional)**: co-signed. Fix correct for all reachable `totalPages` values (`Math.max(1,…)` ensures floor=1; single-page → `""`, multi-page → nav HTML). Both template use-sites now consistent. 3 assertions.
+- **30/30 tests pass** (auditor-run independently).
+- Notes (non-blocking): test assertion count imprecision in report (QX-048 undercounts by 3); `--format unknown` not tested (code correct per reading); comment precision in QX-049 (≡ correct in practice).
+
+σ_QX FINAL = 45/46 = 0.978. Gate OPEN.
 
 ---
 
-## §11 Convergence check — PENDING FINAL
+## §11 Convergence check — FINAL
 
-_Dev-phase interim state:_
-
-- [ ] Meta-layer V_meta >= 0.80: NO (ceiling 0.26 — arithmetically unreachable without DIR-008)
-- [ ] Instance-layer PAUSE criteria:
+- [ ] Meta-layer V_meta >= 0.80: **NO** (ceiling 0.26 — arithmetically unreachable without DIR-008)
+- [x] Instance-layer PAUSE criteria — **TRIGGERED**:
   - ΔV_12 = +0.002 (< 0.02 — 1st consecutive)
-  - ΔV_13 provisional = ~+0.009 (< 0.02 — would be 2nd consecutive)
-  - Simulated-user findings: PENDING — if no new blocking/significant gap found, PAUSE triggers
-  - **Provisional: PAUSE LIKELY after G3 + simulated-user final**
-  - Note: if PAUSE triggers, this is a pause the human can resume, not a terminal halt.
-- [ ] G3 green for all tasks: PENDING
-- [ ] Simulated-user pass run: PENDING (dispatched by orchestrator)
-- [ ] system_health: no regression against three inherited snapshots — 30/30 tests pass from worktree; provisional PASS
+  - ΔV_13 = +0.004 (< 0.02 — **2nd consecutive**)
+  - Simulated-user findings: 5 new minor gaps (UQ-037/038/039/040/041) — **none significant or blocking**
+  - **PAUSE CRITERION MET: 2 consecutive ΔV < 0.02 AND no new significant gaps**
+- [x] G3 green for all tasks: PASS (QX-047/048/049 co-signed; 30/30 verified)
+- [x] Simulated-user pass run: 3 personas × PASS; 5 new minor gaps found; no blocking/significant
+- [x] system_health: 30/30 pass (auditor-run from worktree); no regression against three inherited snapshots
 
-**Dev-phase status: DEVELOPMENT COMPLETE — AWAITING G3 + SIMULATED-USER SYNTHESIS**
+**PAUSE RECOMMENDED.**
 
----
+This is an orchestrator-assessed PAUSE (§4.5 of protocol) — a recommended stopping point, not a terminal halt. The human decides whether to:
+1. Accept PAUSE and archive iteration 13 as the current stable state
+2. Resume with iteration 14 (likely first task: DIR-008 V_meta redesign + CB-006 + UQ-037/038 polish)
+3. Convert to HALT
 
-## Problems identified for next iteration
+The 5 minor open gaps (UQ-037 grammar, UQ-038 filter-zero table, UQ-039 QX-001 umbrella task, UQ-040 --format help, UQ-041 --format unknown) and standing open items (CB-006 configurable page size, ENV-001 MCP stale process, SH-006 stderr leak) do not constitute blocking deficits. The tool is functionally correct and well-tested. PAUSE is appropriate.
 
-1. **DIR-008 (V_meta redesign)**: first-priority for iteration 14 (or a dedicated meta-only iteration). Requires its own G3 audit of the metric change itself.
-2. **PAUSE evaluation**: if ΔV_13 (final) < 0.02 and simulated-user finds no new significant gaps, PAUSE is recommended. Human decides whether to resume, which direction to go, or whether to convert to HALT.
-3. **CB-006** (configurable page size): deferred multiple times — revisit post-PAUSE if experiment resumes.
-4. **SH-006** (stderr leak from quay-native mcp startup): minor, pre-existing — low priority.
-5. **ENV-001** (MCP stale process): minor, mitigated — standing characteristic.
+**FINAL STATUS: PAUSE (orchestrator-assessed, iteration 13)**
+V_instance = 0.721, ΔV = +0.004
+V_meta = 0.154, σ_QX = 45/46 = 0.978
+Cumulative gaps closed: 67

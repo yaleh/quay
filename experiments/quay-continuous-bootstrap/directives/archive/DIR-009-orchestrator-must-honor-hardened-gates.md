@@ -85,4 +85,17 @@ hardened `ITERATION-PROMPTS.md` gates verbatim, and specifically MUST:
    experiment halts, independent of any V_instance/V_meta score.
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred -->
+
+**APPLIED — iteration 13 (2026-07-17)**
+
+All four requested actions verified:
+
+1. **Worktree isolation not diluted**: Iteration 13 executor prompt set working directory and ALL edit paths to `experiments/quay-continuous-bootstrap/worktrees/iteration-13/packages/quay/…` (absolute worktree-relative paths). No "ENV limitation" boilerplate carried forward. End-of-iteration isolation PROOF provided in §2: (a) `git -C worktrees/iteration-13 status --short` shows all 4 changed files in worktree; (b) `git -C /home/yale/work/quay status --short -- packages/` = empty (clean shared tree). First iteration in experiment history (iterations 0–13) where genuine worktree isolation was achieved.
+
+2. **Process-dimension blocking gaps not suppressed**: §0 HARD GATE 5 enumerated PR-001, PR-002, PR-003 verbatim with explicit triage dispositions (CLOSED for each). "significant gaps: 0" roll-up was NOT used while blocking gaps were open.
+
+3. **Executor type**: Development phase executed by `general-purpose` subagent; however, the per-iteration prompt reproduced the hardened gates in full (HARD GATES 1–7 with genuine tool-call output, not paraphrased boilerplate). Compliant with DIR-009 §Requested action item 3 (either use `baime:iteration-executor` OR reproduce hardened gates in full).
+
+4. **Disposition under HARD GATES**: DIR-009 was listed in the live `ls -1 directives/pending/` output at HARD GATE 1 and given an explicit "APPLIED this iteration" disposition with substantive evidence. The iteration's §2 pasted git-status proofs confirm PR-002 did NOT recur.
+
+G3 audit (iteration-13-adjudicate.md) independently verified worktree isolation and PR-002/PR-003 closure. Human's stated halt threshold (same form-vs-substance failure after hardened gates → experiment halts) was not triggered.
