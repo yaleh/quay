@@ -11,50 +11,62 @@
 
 | ID | Description | Severity | Source | Date added | Last confirmed open |
 |----|-------------|----------|--------|------------|---------------------|
-| CB-001 | No prefix/experiment filter in CLI (`quay task list`) — returns all experiments' tasks in one flat list | significant | direct-observation (human, 2026-07-17) + simulated-user (all 3 personas, iteration 0) | 2026-07-17 | 2026-07-17 |
-| CB-002 | No prefix/experiment filter in Web UI list page — no "show only QX-*" affordance | significant | direct-observation (human, 2026-07-17) + simulated-user (cross-experiment maintainer + comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | CB-003 | Action buttons ("Advance") missing from Web UI list page — only on task detail page | significant | direct-observation (human, 2026-07-17) + simulated-user (cross-experiment maintainer + comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | CB-004 | No sort-by-time (created/updated) on CLI task list | significant | direct-observation (human, 2026-07-17) + simulated-user (cross-experiment maintainer + comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | CB-005 | No sort-by-time (created/updated) on Web UI list page — sort options limited to Default/id/status | significant | direct-observation (human, 2026-07-17) + simulated-user (all 3 personas, iteration 0) | 2026-07-17 | 2026-07-17 |
 | CB-006 | Configurable page size not available on Web UI list page (fixed at 20) | minor | direct-observation (human, 2026-07-17) + simulated-user (cross-experiment maintainer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | CB-007 | No full-text/title search in CLI or Web UI | significant | simulated-user (comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | CB-008 | No packaging/distribution — users must install Node.js ≥20 separately; no single-file executables (DIR-004) | significant | directive (DIR-004, experiment 3) | 2026-07-17 | 2026-07-17 |
-| CB-009 | `task_list` MCP tool has no prefix/experiment filter — returns all 94 tasks requiring post-processing | significant | simulated-user (cross-experiment maintainer, iteration 0) + direct-observation (iteration 0 self-hosted tracking test) | 2026-07-17 | 2026-07-17 |
-| CB-010 | `task_list` MCP tool response size (550K chars for 94 tasks) exceeds inline processing limits — not scalable | significant | simulated-user (cross-experiment maintainer, iteration 0) + direct-observation | 2026-07-17 | 2026-07-17 |
+| CB-010 | `task_list` MCP tool response size (550K chars for 94 tasks) exceeds inline processing limits — partially addressed by CB-009 prefix filter but full response still large when no prefix is used | significant | simulated-user (cross-experiment maintainer, iteration 0) + direct-observation | 2026-07-17 | 2026-07-17 |
 
 ### usability_quality
 
 | ID | Description | Severity | Source | Date added | Last confirmed open |
 |----|-------------|----------|--------|------------|---------------------|
-| UQ-001 | CLI `--help` returns one line — no project description, no subcommand docs, no examples | significant | simulated-user (new contributor + comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
-| UQ-002 | CLI subcommand help is missing or shows error messages instead of usage | significant | simulated-user (new contributor, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-003 | No onboarding/orientation content in Web UI (no "what is this" header, no status lifecycle explanation) | minor | simulated-user (new contributor, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-004 | No timestamp column in CLI list output — cannot identify most-recently-updated task from CLI | minor | simulated-user (cross-experiment maintainer + comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-005 | No visual age indicator on Web UI list rows ("updated X ago") | minor | simulated-user (comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-006 | Label filter on Web UI is a flat 40+ item inline list — likely unwieldy on mobile viewport | minor | simulated-user (comparison reviewer + cross-experiment maintainer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-007 | Web UI task list table (5 columns) may overflow on narrow mobile viewports — not live-verified | minor | simulated-user (comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
-| UQ-008 | MCP task_list response too large for inline context — no streaming or pagination at MCP layer | significant | simulated-user (cross-experiment maintainer, iteration 0) + direct-observation | 2026-07-17 | 2026-07-17 |
+| UQ-008 | MCP task_list response too large for inline context — no streaming or pagination at MCP layer (full unfiltered response remains large) | significant | simulated-user (cross-experiment maintainer, iteration 0) + direct-observation | 2026-07-17 | 2026-07-17 |
 
 ### verification_coverage
 
-| ID | Description | Severity | Source | Date added | Last confirmed open |
-|----|-------------|----------|--------|------------|---------------------|
-| VC-001 | No automated test for CLI `--help` output content (currently returns a one-liner; if it changes, no test catches it) | minor | direct-observation (iteration 0) | 2026-07-17 | 2026-07-17 |
+*(No open gaps — VC-001 closed this iteration: CLI help content now has automated test coverage)*
 
 ### system_health
 
-*(No open gaps at iteration 0 — all inherited snapshots confirmed intact)*
+*(No open gaps — all inherited snapshots confirmed intact)*
 
 ---
 
 ## Closed gaps
 
-*(none yet — iteration 0 is purely observational)*
+### capability_breadth
+
+| ID | Description | Closed in | Evidence |
+|----|-------------|-----------|---------|
+| CB-001 | No prefix/experiment filter in CLI (`quay task list`) — returns all experiments' tasks in one flat list | iteration 1 | QX-002 (done); `quay task list --prefix QX` implemented and tested in `packages/quay/test/cli.test.mjs` test 13 |
+| CB-002 | No prefix/experiment filter in Web UI list page — no "show only QX-*" affordance | iteration 1 | QX-004 (done); `?prefix=QX` query param + Prefix nav row implemented and tested in `packages/quay/test/serve.test.mjs` |
+| CB-009 | `task_list` MCP tool has no prefix/experiment filter — returns all 94 tasks requiring post-processing | iteration 1 | QX-003 (done); `prefix` parameter added to `task_list` MCP tool, tested in `packages/quay/test/mcp-server.test.mjs` test 12 |
+
+### usability_quality
+
+| ID | Description | Closed in | Evidence |
+|----|-------------|-----------|---------|
+| UQ-001 | CLI `--help` returns one line — no project description, no subcommand docs, no examples | iteration 1 | QX-005 (done); `quay --help` now prints structured usage guide with all subcommands and examples |
+| UQ-002 | CLI subcommand help is missing or shows error messages instead of usage | iteration 1 | QX-005 (done); `quay task --help` and `quay task list --help` now print usage documentation |
+
+### verification_coverage
+
+| ID | Description | Closed in | Evidence |
+|----|-------------|-----------|---------|
+| VC-001 | No automated test for CLI `--help` output content | iteration 1 | QX-005 (done); CLI test 14 in `packages/quay/test/cli.test.mjs` asserts `quay --help` exits 0 and includes expected content |
 
 ---
 
 ## Cumulative counter
 
-- Gaps added this iteration: 19 (CB-001..CB-010, UQ-001..UQ-008, VC-001)
-- Gaps closed this iteration: 0
-- **Cumulative gaps closed (all-time): 0**
+- Iteration 0: 19 gaps added (CB-001..CB-010, UQ-001..UQ-008, VC-001); 0 closed
+- Iteration 1: 0 gaps added; 6 gaps closed (CB-001, CB-002, CB-009, UQ-001, UQ-002, VC-001); CB-010 partially addressed
+- **Cumulative gaps closed (all-time): 6**

@@ -158,6 +158,72 @@ async function main() {
     fs.rmSync(workspaceRoot, { recursive: true, force: true });
   }
 
+  // --- QX-004 (experiment 4, iteration 1): prefix filter via ?prefix= query param ---
+  // Tests for the new ?prefix=<value> filtering added to serve.js's list route.
+  // Runs a fresh isolated server with tasks across two distinct prefixes.
+  {
+    const pfxTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-prefix-test-"));
+    const pfxWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-prefix-workspace-"));
+    fs.mkdirSync(path.join(pfxWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(pfxWorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${pfxTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${pfxTasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    // Seed tasks with two distinct prefixes: PFXA and PFXB
+    execFileSync("node", [nativeBin, "task", "create", "PFXA-1", "--title", "Prefix A task",
+      "--status", "todo", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: pfxTasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "create", "PFXB-1", "--title", "Prefix B task",
+      "--status", "done", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: pfxTasksDir },
+    });
+
+    const pfxPort = port + 1;
+    const pfxOriginalCwd = process.cwd();
+    let pfxServer;
+    try {
+      process.chdir(pfxWorkspaceRoot);
+      pfxServer = await startServer({ port: pfxPort });
+
+      // ?prefix=PFXA — should return only PFXA-1, not PFXB-1
+      const filteredA = await get(pfxPort, "/?prefix=PFXA");
+      assert(filteredA.status === 200, "GET /?prefix=PFXA returns 200");
+      assert(filteredA.body.includes("PFXA-1"), "GET /?prefix=PFXA body includes PFXA-1");
+      assert(!filteredA.body.includes("PFXB-1"), "GET /?prefix=PFXA body excludes PFXB-1 (different prefix)");
+
+      // ?prefix=PFXB — should return only PFXB-1
+      const filteredB = await get(pfxPort, "/?prefix=PFXB");
+      assert(filteredB.status === 200, "GET /?prefix=PFXB returns 200");
+      assert(filteredB.body.includes("PFXB-1"), "GET /?prefix=PFXB body includes PFXB-1");
+      assert(!filteredB.body.includes("PFXA-1"), "GET /?prefix=PFXB body excludes PFXA-1");
+
+      // No prefix — all tasks returned (no regression)
+      const noFilter = await get(pfxPort, "/");
+      assert(noFilter.status === 200, "GET / (no prefix) returns 200 for prefix-test workspace");
+      assert(noFilter.body.includes("PFXA-1") && noFilter.body.includes("PFXB-1"),
+        "GET / (no prefix) includes both PFXA-1 and PFXB-1 — no regression");
+
+      // Prefix nav appears since 2 distinct prefixes exist (PFXA, PFXB)
+      assert(noFilter.body.includes("Prefix:"), "GET / body includes 'Prefix:' nav row when 2+ distinct prefixes exist");
+
+      // case-insensitive: ?prefix=pfxa should match PFXA-1
+      const filteredLower = await get(pfxPort, "/?prefix=pfxa");
+      assert(filteredLower.status === 200, "GET /?prefix=pfxa (lowercase) returns 200");
+      assert(filteredLower.body.includes("PFXA-1"), "GET /?prefix=pfxa (lowercase) includes PFXA-1 (case-insensitive)");
+      assert(!filteredLower.body.includes("PFXB-1"), "GET /?prefix=pfxa (lowercase) excludes PFXB-1");
+    } finally {
+      if (pfxServer) {
+        pfxServer.close();
+        if (pfxServer.client) await pfxServer.client.close();
+      }
+      process.chdir(pfxOriginalCwd);
+      fs.rmSync(pfxTasksDir, { recursive: true, force: true });
+      fs.rmSync(pfxWorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
   // --- composePayload() unit-level check (action.js), real manifest shape ---
   const manifest = {
     action_buttons: [

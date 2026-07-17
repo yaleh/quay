@@ -205,6 +205,54 @@ This is the correct and expected outcome for an observational/baseline iteration
 
 ---
 
+## Iteration 1 record (2026-07-17)
+
+### QX-* tasks created and completed this iteration
+
+| Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
+|------|-----------|------------|---------|----------------|--------|-------|
+| QX-002 | native | native | N/A (G3 pending) | 1/5 | done | CLI `--prefix` filter; tested in cli.test.mjs test 13 |
+| QX-003 | native | native | N/A (G3 pending) | 2/5 | done | MCP `task_list` prefix parameter; tested in mcp-server.test.mjs test 12 |
+| QX-004 | native | native | N/A (G3 pending) | 3/5 | done | Web UI `?prefix=` query param + Prefix nav; tested in serve.test.mjs |
+| QX-005 | native | native | N/A (G3 pending) | 4/5 | done | CLI `--help` / `-h` / subcommand help; tested in cli.test.mjs test 14 |
+
+σ_QX before iteration 1: 0/1 = 0.000 (only QX-001 at seed provenance)
+σ_QX after iteration 1: 4/5 = 0.800
+(QX-001 remains seed provenance, 0 native. QX-002..QX-005 all native authoring + execution.)
+
+### Gate check results (iteration 1)
+- QX-002: gate `execute->done` ok:true (4/4 AC checked)
+- QX-003: gate `execute->done` ok:true (4/4 AC checked)
+- QX-004: gate `execute->done` ok:true (5/5 AC checked)
+- QX-005: gate `execute->done` ok:true (5/5 AC checked)
+
+### G3 status (iteration 1)
+G3 IS TRIGGERED — Core source files changed: `packages/quay/bin/quay.js`, `packages/quay/src/mcp-server.js`, `packages/quay/src/serve.js`.
+Orchestrator dispatches G3 out-of-band audit. gate_by for QX-002..QX-005 = "N/A — G3 pending orchestrator dispatch".
+Verdict will be recorded in `experiments/quay-continuous-bootstrap/audits/iteration-1-adjudicate.md`.
+
+### Gaps closed this iteration
+- CB-001 (CLI prefix filter) → QX-002
+- CB-002 (Web UI prefix filter) → QX-004
+- CB-009 (MCP prefix filter) → QX-003
+- CB-010 (MCP response size) → PARTIALLY ADDRESSED (filter reduces size when used; full unfiltered response still large)
+- UQ-001 (CLI --help one-liner) → QX-005
+- UQ-002 (CLI subcommand help broken) → QX-005
+- VC-001 (no CLI help test) → QX-005 (cli.test.mjs test 14)
+
+### System health (iteration 1)
+Full test suite: 30/30 pass (node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs packages/quay-github/test/*.test.mjs). No regressions against any inherited snapshot.
+
+### V_meta re-trigger checks (iteration 1)
+All 5 conditions checked:
+1. effectiveness re-trigger: NOT TRIGGERED — no scope-matched single-file timing comparison yet (QX-002..QX-005 each touched one Core file but none qualify as purely single-file, no-network tasks in the QN-006 sense; they are multi-file implementations with test additions)
+2. reusability re-trigger: NOT TRIGGERED — no organic GitHub Provider write demand
+3. completeness re-trigger (gap discovery): NOT TRIGGERED — no new Skill Method-step gap found; ENV gap continues
+4. completeness + reusability/effectiveness joint: NOT TRIGGERED — no unconditional native dispatch primitive
+5. open-ended-domain-specific: OBSERVATIONAL — prefix filter makes self-hosted tracking (task_list with prefix="QX") practical; qualitative improvement in dogfooding experience noted but not yet decidable as effectiveness re-trigger without timing evidence
+
+---
+
 ## Human-observed gap-list seed candidates (2026-07-17, pre-iteration-0)
 
 The human, using experiment 3's shipped Web UI directly as a real user (not via the

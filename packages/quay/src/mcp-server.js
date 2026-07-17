@@ -146,23 +146,33 @@ export async function startMcpServer() {
   // via the optional `provider` argument (defaults to the default-enabled
   // Provider). Same shape as each Provider's own task_list tool, plus the
   // one added `provider` field.
+  //
+  // QX-003 (experiment 4, iteration 1): added optional `prefix` parameter —
+  // closes CB-009 (no prefix filter on MCP task_list) and partially
+  // addresses CB-010 (response size reduced when prefix is used). Same
+  // client-side filter logic as bin/quay.js's QX-002 implementation.
   server.registerTool(
     "task_list",
     {
       description:
-        "List tasks from an enabled Provider (defaults to the default-enabled Provider if `provider` is omitted), optionally filtered by status/label. Proxies the Provider's own task_list tool via Core's MCP client fan-out.",
+        "List tasks from an enabled Provider (defaults to the default-enabled Provider if `provider` is omitted), optionally filtered by status/label/prefix. The `prefix` parameter filters by task id prefix (e.g. prefix='QX' returns only QX-* tasks), reducing response size for large workspaces. Proxies the Provider's own task_list tool via Core's MCP client fan-out.",
       inputSchema: {
         provider: z.string().optional(),
         status: z.string().optional(),
         label: z.string().optional(),
+        prefix: z.string().optional(),
       },
     },
-    async ({ provider, status, label }) => {
+    async ({ provider, status, label, prefix }) => {
       const { client } = await getClient(provider);
       const tasks = await client.taskList({ status, label });
+      // QX-003: client-side prefix filter (no provider-side changes needed).
+      const filtered = prefix
+        ? tasks.filter((t) => t.id.toUpperCase().startsWith(prefix.toUpperCase()))
+        : tasks;
       return {
-        content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }],
-        structuredContent: { tasks },
+        content: [{ type: "text", text: JSON.stringify(filtered, null, 2) }],
+        structuredContent: { tasks: filtered },
       };
     }
   );

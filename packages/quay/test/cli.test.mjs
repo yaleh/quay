@@ -781,6 +781,158 @@ async function main() {
     );
   }
 
+  // 13. QX-002 (experiment 4, iteration 1): --prefix filter for task list.
+  //     Closes CB-001: `quay task list --prefix <P>` returns only tasks whose
+  //     id starts with P. Uses a fresh isolated workspace with two distinct
+  //     task-id prefixes to confirm filtering and no-regression.
+  {
+    const prefixTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-prefix-tasks-"));
+    const prefixWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-prefix-workspace-"));
+
+    fs.mkdirSync(path.join(prefixWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(prefixWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${prefixTasksDir.replaceAll("\\", "\\\\")}"`,
+        "",
+      ].join("\n")
+    );
+
+    // Seed tasks with two distinct prefixes
+    execFileSync("node", [nativeBin, "task", "create", "PRFA-001", "--title", "Prefix A task one",
+      "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "create", "PRFA-002", "--title", "Prefix A task two",
+      "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "create", "PRFB-001", "--title", "Prefix B task one",
+      "--status", "done", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
+    });
+
+    const prefixOpts = { cwd: prefixWorkspaceRoot, encoding: "utf8" };
+
+    // --prefix PRFA (non-JSON): should include PRFA tasks, exclude PRFB
+    {
+      const r = run(["task", "list", "--prefix", "PRFA"], prefixOpts);
+      assert(r.status === 0, "quay task list --prefix PRFA exits 0");
+      assert(r.stdout.includes("PRFA-001") && r.stdout.includes("PRFA-002"),
+        "quay task list --prefix PRFA includes both PRFA-* tasks");
+      assert(!r.stdout.includes("PRFB-001"),
+        "quay task list --prefix PRFA excludes PRFB-001");
+      assert(r.stdout.includes("filtered"),
+        "quay task list --prefix PRFA shows a filter indicator in non-JSON output");
+    }
+
+    // --prefix PRFA --json: should return a filtered JSON array
+    {
+      const r = run(["task", "list", "--prefix", "PRFA", "--json"], prefixOpts);
+      assert(r.status === 0, "quay task list --prefix PRFA --json exits 0");
+      let tasks;
+      try {
+        tasks = JSON.parse(r.stdout);
+      } catch {
+        tasks = null;
+      }
+      assert(Array.isArray(tasks), "quay task list --prefix PRFA --json emits a JSON array");
+      assert(
+        Array.isArray(tasks) && tasks.every((t) => t.id.toUpperCase().startsWith("PRFA")),
+        "quay task list --prefix PRFA --json returns only PRFA-* tasks"
+      );
+      assert(
+        Array.isArray(tasks) && !tasks.some((t) => t.id === "PRFB-001"),
+        "quay task list --prefix PRFA --json excludes PRFB-001"
+      );
+      assert(
+        Array.isArray(tasks) && tasks.length === 2,
+        `quay task list --prefix PRFA --json returns exactly 2 tasks (got ${Array.isArray(tasks) ? tasks.length : "null"})`
+      );
+    }
+
+    // --prefix prfa (lowercase): case-insensitive match
+    {
+      const r = run(["task", "list", "--prefix", "prfa", "--json"], prefixOpts);
+      assert(r.status === 0, "quay task list --prefix prfa (lowercase) exits 0");
+      let tasks;
+      try {
+        tasks = JSON.parse(r.stdout);
+      } catch {
+        tasks = null;
+      }
+      assert(
+        Array.isArray(tasks) && tasks.some((t) => t.id === "PRFA-001"),
+        "quay task list --prefix prfa (lowercase) matches PRFA-001 (case-insensitive)"
+      );
+    }
+
+    // No --prefix: all 3 tasks returned (no regression)
+    {
+      const r = run(["task", "list", "--json"], prefixOpts);
+      assert(r.status === 0, "quay task list --json (no prefix) exits 0 after adding prefix-test tasks");
+      let tasks;
+      try {
+        tasks = JSON.parse(r.stdout);
+      } catch {
+        tasks = null;
+      }
+      assert(
+        Array.isArray(tasks) && tasks.length === 3,
+        `quay task list --json (no prefix) returns all 3 seeded tasks (got ${Array.isArray(tasks) ? tasks.length : "null"}) — no regression`
+      );
+    }
+
+    fs.rmSync(prefixTasksDir, { recursive: true, force: true });
+    fs.rmSync(prefixWorkspaceRoot, { recursive: true, force: true });
+  }
+
+  // 14. QX-005 (experiment 4, iteration 1): --help and -h output.
+  //     Closes UQ-001 (was one-line fallback) and UQ-002 (subcommand help was missing).
+  //     Tests that --help / -h exit 0 and include expected content.
+  {
+    const helpOpts = { cwd: workspaceRoot, encoding: "utf8" };
+
+    // quay --help: exits 0, includes "Usage:" and key subcommands
+    {
+      const r = run(["--help"], helpOpts);
+      assert(r.status === 0, "quay --help exits 0 (not an error)");
+      assert(r.stdout.includes("Usage:"), "quay --help output includes 'Usage:'");
+      assert(r.stdout.includes("task list"), "quay --help output includes 'task list'");
+      assert(r.stdout.includes("task view"), "quay --help output includes 'task view'");
+      assert(r.stdout.includes("--prefix"), "quay --help output mentions --prefix flag (QX-002 cross-link)");
+      assert(r.stdout.includes("quay"), "quay --help output includes the tool name");
+    }
+
+    // quay -h: alias, also exits 0
+    {
+      const r = run(["-h"], helpOpts);
+      assert(r.status === 0, "quay -h exits 0 (alias for --help)");
+      assert(r.stdout.includes("Usage:"), "quay -h output includes 'Usage:'");
+    }
+
+    // quay task list --help: exits 0, includes task-list-specific flag docs
+    {
+      const r = run(["task", "list", "--help"], helpOpts);
+      assert(r.status === 0, "quay task list --help exits 0");
+      assert(r.stdout.includes("--prefix"), "quay task list --help output mentions --prefix");
+      assert(r.stdout.includes("--status"), "quay task list --help output mentions --status");
+    }
+
+    // The existing "unknown command" test must still work (--help is not passed).
+    {
+      const r = run(["bogus-command-that-is-not-help"], helpOpts);
+      assert(r.status === 1, "quay <unknown-non-help command> still exits 1 (--help does not break fallback)");
+      assert(r.stderr.includes("usage:"), "quay <unknown-non-help command> still prints usage to stderr");
+    }
+  }
+
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 

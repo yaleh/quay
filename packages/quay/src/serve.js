@@ -290,15 +290,23 @@ export async function startServer({ port = 4173 } = {}) {
 
     if (url.pathname === "/") {
       const allTasks = await client.taskList({});
+      // QX-004 (experiment 4, iteration 1): filter by ?prefix=<value> query param.
+      // Closes CB-002: "show only QX-* tasks" affordance in Web UI.
+      // Applied FIRST, before status/label filters — prefix scopes the whole view.
+      // No param → all tasks; unknown prefix → empty list (not an error).
+      const prefixFilter = url.searchParams.get("prefix");
+      const filteredByPrefix = prefixFilter
+        ? allTasks.filter((t) => t.id.toUpperCase().startsWith(prefixFilter.toUpperCase()))
+        : allTasks;
       // QW-003 (experiment 3, iteration 2): filter by ?status=<value> query param.
       // No param → all tasks; unknown value → empty list (not an error).
       const statusFilter = url.searchParams.get("status");
       const filteredByStatus = statusFilter
-        ? allTasks.filter((t) => t.status === statusFilter)
-        : allTasks;
+        ? filteredByPrefix.filter((t) => t.status === statusFilter)
+        : filteredByPrefix;
       // QW-005 (experiment 3, iteration 3): filter by ?label=<value> query param.
       // No param → all tasks; unknown value → empty list (not an error).
-      // Applied after status filter.
+      // Applied after prefix and status filters.
       const labelFilter = url.searchParams.get("label");
       const filtered = labelFilter
         ? filteredByStatus.filter((t) => Array.isArray(t.labels) && t.labels.includes(labelFilter))
@@ -343,12 +351,12 @@ export async function startServer({ port = 4173 } = {}) {
       // QW-003: filter navigation links — All, todo, ready, done, needs-human.
       // Active filter is shown as plain text; others as links.
       const statuses = ["todo", "ready", "done", "needs-human"];
-      // QW-005: collect distinct labels across ALL tasks (before any filter) for label nav.
-      const allLabels = [...new Set(allTasks.flatMap((t) => Array.isArray(t.labels) ? t.labels : []))].sort();
-      // Build query param helper: merges status, sort, label, and page params.
+      // Build query param helper: merges prefix, status, sort, label, and page params.
       // QW-007: page param added; when page=1 it is omitted from the href (clean URL).
-      function buildHref(status, sort, label, pg) {
+      // QX-004: prefix param added; omitted when null/falsy (clears the prefix filter).
+      function buildHref(status, sort, label, pg, prefix) {
         const params = new URLSearchParams();
+        if (prefix) params.set("prefix", prefix);
         if (status) params.set("status", status);
         if (label) params.set("label", label);
         if (sort) params.set("sort", sort);
@@ -356,50 +364,71 @@ export async function startServer({ port = 4173 } = {}) {
         const qs = params.toString();
         return qs ? `/?${qs}` : "/";
       }
+      // QX-004: prefix navigation links — All + each distinct task-id prefix.
+      // A "prefix" is the part of a task id before the first `-` (e.g. "QX" from "QX-001").
+      // Only rendered when 2+ distinct prefixes exist across ALL tasks (single-experiment
+      // workspaces need no clutter). Placed FIRST in the nav, before status/sort/label.
+      const allPrefixes = [...new Set(allTasks.map((t) => {
+        const dash = t.id.indexOf("-");
+        return dash > 0 ? t.id.slice(0, dash) : t.id;
+      }))].sort();
+      const prefixNav = allPrefixes.length >= 2 ? [
+        prefixFilter
+          ? html`<a href="${buildHref(statusFilter, sortKey, labelFilter, null, null)}">All</a>`
+          : html`<strong>All</strong>`,
+        ...allPrefixes.map((p) =>
+          p === prefixFilter
+            ? html`<strong>${escapeHtml(p)}</strong>`
+            : html`<a href="${buildHref(statusFilter, sortKey, labelFilter, null, p)}">${escapeHtml(p)}</a>`
+        ),
+      ].join(" · ") : null;
       const filterNav = [
         statusFilter
-          ? html`<a href="${buildHref(null, sortKey, labelFilter)}">All</a>`
+          ? html`<a href="${buildHref(null, sortKey, labelFilter, null, prefixFilter)}">All</a>`
           : html`<strong>All</strong>`,
         ...statuses.map((s) =>
           s === statusFilter
             ? html`<strong>${escapeHtml(s)}</strong>`
-            : html`<a href="${buildHref(s, sortKey, labelFilter)}">${escapeHtml(s)}</a>`
+            : html`<a href="${buildHref(s, sortKey, labelFilter, null, prefixFilter)}">${escapeHtml(s)}</a>`
         ),
       ].join(" · ");
       // QW-004: sort navigation links — Default, id, status.
-      // Active sort shown as plain text; others as links (preserving active status and label filters).
+      // Active sort shown as plain text; others as links (preserving active status, label, and prefix filters).
       const sortNav = [
-        !sortKey ? html`<strong>Default</strong>` : html`<a href="${buildHref(statusFilter, null, labelFilter)}">Default</a>`,
+        !sortKey ? html`<strong>Default</strong>` : html`<a href="${buildHref(statusFilter, null, labelFilter, null, prefixFilter)}">Default</a>`,
         sortKey === "id"
           ? html`<strong>id</strong>`
-          : html`<a href="${buildHref(statusFilter, "id", labelFilter)}">id</a>`,
+          : html`<a href="${buildHref(statusFilter, "id", labelFilter, null, prefixFilter)}">id</a>`,
         sortKey === "status"
           ? html`<strong>status</strong>`
-          : html`<a href="${buildHref(statusFilter, "status", labelFilter)}">status</a>`,
+          : html`<a href="${buildHref(statusFilter, "status", labelFilter, null, prefixFilter)}">status</a>`,
       ].join(" · ");
       // QW-005: label navigation links — All + each distinct label.
       // Only rendered when at least one task has labels.
+      const allLabels = [...new Set(allTasks.flatMap((t) => Array.isArray(t.labels) ? t.labels : []))].sort();
       const labelNav = allLabels.length > 0 ? [
         labelFilter
-          ? html`<a href="${buildHref(statusFilter, sortKey, null)}">All</a>`
+          ? html`<a href="${buildHref(statusFilter, sortKey, null, null, prefixFilter)}">All</a>`
           : html`<strong>All</strong>`,
         ...allLabels.map((l) =>
           l === labelFilter
             ? html`<strong>${escapeHtml(l)}</strong>`
-            : html`<a href="${buildHref(statusFilter, sortKey, l)}">${escapeHtml(l)}</a>`
+            : html`<a href="${buildHref(statusFilter, sortKey, l, null, prefixFilter)}">${escapeHtml(l)}</a>`
         ),
       ].join(" · ") : null;
       // QW-007: page navigation — Previous / Next links with page info.
+      // QW-007: page navigation — Previous / Next links with page info.
       // Filter/sort nav links reset to page 1 (no pg param) when clicked, which is correct:
       // changing a filter changes which tasks are in view.
+      // QX-004: prefix param carried through page nav links.
       const pageNav = totalPages > 1 ? html`
         <p class="meta">
           ${safePage > 1
-            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilter, safePage - 1)}">&laquo; Previous</a>`
+            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilter, safePage - 1, prefixFilter)}">&laquo; Previous</a>`
             : html`<span class="page-nav-disabled">&laquo; Previous</span>`}
           &nbsp; Page ${safePage} of ${totalPages} (${totalTasks} tasks) &nbsp;
           ${safePage < totalPages
-            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilter, safePage + 1)}">Next &raquo;</a>`
+            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilter, safePage + 1, prefixFilter)}">Next &raquo;</a>`
             : html`<span class="page-nav-disabled">Next &raquo;</span>`}
         </p>` : html`<p class="meta">Page 1 of ${totalPages} (${totalTasks} tasks)</p>`;
       // QN-046 (closes discussion-doc §2.1's browser-rendering gap): a real
@@ -415,6 +444,7 @@ export async function startServer({ port = 4173 } = {}) {
         <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
         <body><main>
           <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
+          ${prefixNav ? html`<p class="meta">Prefix: ${prefixNav}</p>` : ""}
           <p class="meta">Filter: ${filterNav}</p>
           <p class="meta">Sort: ${sortNav}</p>
           ${labelNav ? html`<p class="meta">Label: ${labelNav}</p>` : ""}

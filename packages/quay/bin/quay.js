@@ -55,17 +55,77 @@ async function withProvider(fn, { providerId } = {}) {
   }
 }
 
+// QX-005 (experiment 4, iteration 1): structured help text for --help / -h.
+// Previously `quay --help` fell through to the generic usage error on stderr
+// (UQ-001) and `quay task --help` / `quay task list --help` likewise showed
+// nothing useful (UQ-002). This closes both gaps.
+function printHelp(sub) {
+  if (!sub || sub === "task") {
+    process.stdout.write(`quay — task management for AI-assisted development
+
+Usage:
+  quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status] [--json]
+  quay task view <task-id> [--json]
+  quay task edit <task-id> --status <status> [--json]
+  quay task check <task-id> [--json]
+  quay action list <task-id> [--json]
+  quay action run <task-id> <action-id> [--json]
+  quay serve [--port <port>]
+  quay mcp
+
+Options for task list:
+  --status <status>   Filter by status (todo, ready, done, needs-human)
+  --label <label>     Filter by label
+  --prefix <prefix>   Filter by task id prefix (e.g. QX for QX-* tasks)
+  --sort id|status    Sort by id or status (default: insertion order)
+  --json              Output as JSON
+
+Examples:
+  quay task list --prefix QX          List only QX-* tasks
+  quay task list --status todo        List todo tasks
+  quay task view QX-001               View task details
+  quay task edit QX-001 --status done Mark task done
+`);
+  }
+}
+
 async function main() {
   const [, , cmd, sub, ...rest] = process.argv;
   const { flags, positional } = parseFlags(rest);
 
+  // QX-005: top-level --help / -h detection (UQ-001: was a one-line fallback).
+  // Matches: `quay --help`, `quay -h`, `quay` with no command.
+  if (cmd === "--help" || cmd === "-h" || (cmd === undefined && flags.help)) {
+    printHelp();
+    return;
+  }
+
+  // QX-005: subcommand-level --help (UQ-002: was missing/broken).
+  // Matches: `quay task --help`, `quay task list --help`, `quay task -h`,
+  //   `quay task list -h`, `quay task list --help --json`, etc.
+  // When `quay task list --help` is parsed: cmd="task", sub="list", flags.help=true.
+  // When `quay task --help` is parsed: cmd="task", sub="--help".
+  if (sub === "--help" || sub === "-h" || flags.help) {
+    printHelp(cmd);
+    return;
+  }
+
   if (cmd === "task" && sub === "list") {
+    // QX-005: task list --help is caught above by the sub === "--help" branch.
     await withProvider(async (client) => {
       const tasks = await client.taskList({ status: flags.status, label: flags.label });
+      // QX-002 (experiment 4, iteration 1): --prefix filter for experiment scoping.
+      // Closes CB-001: `quay task list --prefix QX` returns only QX-* tasks.
+      // Client-side filter after provider fetch — no provider-side changes needed.
+      const prefix = flags.prefix;
+      const filtered = prefix
+        ? tasks.filter((t) => t.id.toUpperCase().startsWith(prefix.toUpperCase()))
+        : tasks;
       if (flags.json) {
-        printJson(tasks);
+        printJson(filtered);
       } else {
-        for (const t of tasks) console.log(`${t.id}\t${t.status}\t${t.role}\t${t.title}`);
+        if (prefix) console.log(`# filtered: ${prefix.toUpperCase()}-* (${filtered.length} tasks)`);
+        for (const t of filtered) console.log(`${t.id}\t${t.status}\t${t.role}\t${t.title}`);
       }
     }, { providerId: flags.provider });
     return;
@@ -193,7 +253,8 @@ async function main() {
     return;
   }
 
-  console.error("usage: quay <task list|view|edit|check|action list|run|serve|mcp> ...");
+  // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
+  console.error("usage: quay <task list|view|edit|check|action list|run|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
 }
 

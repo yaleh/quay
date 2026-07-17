@@ -520,6 +520,105 @@ async function main() {
     fs.rmSync(brokenWorkspaceRoot, { recursive: true, force: true });
   }
 
+  // ---- 12. (QX-003, experiment 4 iteration 1): task_list prefix filter ----
+  // Tests the new optional `prefix` parameter on the task_list MCP tool, which
+  // closes CB-009 (no prefix filter on MCP task_list) and partially addresses
+  // CB-010 (response size reduced when prefix is used). Uses a fresh isolated
+  // workspace with tasks across two distinct prefixes.
+  {
+    const prefixTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-prefix-tasks-"));
+    const prefixWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-prefix-workspace-"));
+    fs.mkdirSync(path.join(prefixWorkspaceRoot, ".quay"), { recursive: true });
+
+    // Seed tasks with two distinct prefixes: PFXA and PFXB
+    const MINIMAL_BODY =
+      "## Proposal\nA sufficiently long proposal section.\n" +
+      "## Plan\nA sufficiently long plan section.\n" +
+      "## AC\n- [x] a sufficiently long acceptance criterion line\n" +
+      "## DoD\n- [x] a sufficiently long definition-of-done line\n";
+
+    execFileSync("node", [nativeBin, "task", "create", "PFXA-001", "--title", "Prefix A task 1",
+      "--status", "todo", "--body", MINIMAL_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "create", "PFXA-002", "--title", "Prefix A task 2",
+      "--status", "todo", "--body", MINIMAL_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "create", "PFXB-001", "--title", "Prefix B task 1",
+      "--status", "done", "--body", MINIMAL_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
+    });
+
+    fs.writeFileSync(
+      path.join(prefixWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir}"`,
+        `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${prefixTasksDir}"`,
+        "",
+      ].join("\n")
+    );
+
+    const { client: corePrefix } = await connectStdio("node", [coreBin, "mcp"], prefixWorkspaceRoot);
+
+    // task_list with prefix: returns only matching tasks
+    const filtered = await corePrefix.callTool({ name: "task_list", arguments: { prefix: "PFXA" } });
+    assert(filtered.isError !== true, "task_list with prefix='PFXA' does not return isError:true");
+    assert(
+      Array.isArray(filtered.structuredContent?.tasks),
+      "task_list with prefix='PFXA' returns structuredContent.tasks array"
+    );
+    const filteredTasks = filtered.structuredContent?.tasks ?? [];
+    assert(
+      filteredTasks.every((t) => t.id.toUpperCase().startsWith("PFXA")),
+      `task_list with prefix='PFXA' returns only tasks whose id starts with PFXA (got: ${filteredTasks.map(t => t.id).join(", ")})`
+    );
+    assert(
+      filteredTasks.some((t) => t.id === "PFXA-001") && filteredTasks.some((t) => t.id === "PFXA-002"),
+      "task_list with prefix='PFXA' includes both PFXA-001 and PFXA-002"
+    );
+    assert(
+      !filteredTasks.some((t) => t.id === "PFXB-001"),
+      "task_list with prefix='PFXA' excludes PFXB-001 (different prefix)"
+    );
+
+    // task_list with prefix: case-insensitive
+    const filteredLower = await corePrefix.callTool({ name: "task_list", arguments: { prefix: "pfxa" } });
+    const filteredLowerTasks = filteredLower.structuredContent?.tasks ?? [];
+    assert(
+      filteredLowerTasks.some((t) => t.id === "PFXA-001"),
+      "task_list with prefix='pfxa' (lowercase) includes PFXA-001 (case-insensitive match)"
+    );
+
+    // task_list without prefix: returns all tasks (no regression)
+    const all = await corePrefix.callTool({ name: "task_list", arguments: {} });
+    assert(all.isError !== true, "task_list without prefix does not return isError:true (no regression)");
+    const allTasks = all.structuredContent?.tasks ?? [];
+    assert(
+      allTasks.length === 3,
+      `task_list without prefix returns all 3 seeded tasks (got ${allTasks.length})`
+    );
+    assert(
+      allTasks.some((t) => t.id === "PFXA-001") && allTasks.some((t) => t.id === "PFXB-001"),
+      "task_list without prefix includes tasks from both prefixes"
+    );
+
+    // task_list with prefix that matches nothing: returns empty array (not an error)
+    const empty = await corePrefix.callTool({ name: "task_list", arguments: { prefix: "ZZZZ" } });
+    assert(empty.isError !== true, "task_list with non-matching prefix does not return isError:true");
+    const emptyTasks = empty.structuredContent?.tasks ?? [];
+    assert(emptyTasks.length === 0, "task_list with non-matching prefix returns empty array");
+
+    await corePrefix.close();
+    fs.rmSync(prefixWorkspaceRoot, { recursive: true, force: true });
+    fs.rmSync(prefixTasksDir, { recursive: true, force: true });
+  }
+
   // ---- Cleanup ----
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
   fs.rmSync(tasksDirA, { recursive: true, force: true });
