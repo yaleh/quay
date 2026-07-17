@@ -202,7 +202,20 @@ async function main() {
     assert(detailPage.status === 200, `Web UI leg: GET /task/SYM-1 returns 200 (got ${detailPage.status})`);
     assert(detailPage.body.includes(cliDetail.title), "Web UI leg: task-detail page renders the same title the CLI/MCP legs return");
     assert(detailPage.body.includes(cliDetail.status), "Web UI leg: task-detail page renders the same status the CLI/MCP legs return");
-    assert(detailPage.body.includes(cliDetail.body.trim().split("\n")[0]), "Web UI leg: task-detail page renders (a line of) the same body content the CLI/MCP legs return");
+    // QW-002 (experiment 3, iteration 1): the Web UI now renders the task body
+    // via renderMarkdown() instead of a bare <pre> block. The raw markdown
+    // text ("## Proposal") no longer appears literally in the HTML — it is
+    // rendered as <h3>Proposal</h3>. The assertion is updated to check for the
+    // rendered heading text (stripping the markdown prefix), which confirms the
+    // body content IS present and rendered, just not as raw syntax.
+    // The first line of VALID_SECTIONS is "## Proposal"; rendered: "Proposal"
+    // appears in an <h3> tag. Extract the text content of the first heading.
+    const firstBodyLine = cliDetail.body.trim().split("\n")[0];
+    const firstBodyText = firstBodyLine.replace(/^#+\s*/, "").replace(/^[-*+]\s*/, "");
+    assert(
+      detailPage.body.includes(firstBodyText),
+      `Web UI leg: task-detail page renders (a line of) the same body content the CLI/MCP legs return (rendered: "${firstBodyText}")`
+    );
 
     // Explicitly out of scope, per DIR-010's own Finding (quay-proposal.md
     // §9 never listed `task edit`/`task check` as part of the shared

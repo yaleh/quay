@@ -352,6 +352,75 @@ async function main() {
       }
     }
 
+    // ── QW-001: CSS styling system assertions ────────────────────────────
+    // QW-001 (experiment 3, iteration 1): verify the pageStyles() CSS system
+    // is applied to both list and detail pages, and that the table no longer
+    // uses the raw border="1" attribute.
+
+    // <style> tag present in list page (CSS system applied)
+    assert(list.body.includes("<style>"),
+      "GET / <head> includes <style> tag (QW-001: CSS styling system)");
+
+    // <style> tag present in detail page
+    assert(detail1.body.includes("<style>"),
+      "GET /task/WUI-1 <head> includes <style> tag (QW-001: CSS styling system)");
+
+    // Table no longer uses HTML border attribute (replaced by CSS)
+    assert(!list.body.includes('border="1"'),
+      "GET / table does not use border=\"1\" attribute (QW-001: CSS replaces inline styling)");
+
+    // <main> wrapper present in list page (semantic structure)
+    assert(list.body.includes("<main>"),
+      "GET / body includes <main> wrapper element (QW-001: semantic structure)");
+
+    // <main> wrapper present in detail page
+    assert(detail1.body.includes("<main>"),
+      "GET /task/WUI-1 body includes <main> wrapper element (QW-001: semantic structure)");
+
+    // <nav> element wraps back link in detail page (semantic structure)
+    assert(detail1.body.includes("<nav>"),
+      "GET /task/WUI-1 body includes <nav> element wrapping back link (QW-001: semantic structure)");
+
+    // viewport meta tag present (required for Lighthouse best-practices ≥ 90)
+    assert(list.body.includes('name="viewport"'),
+      'GET / <head> includes viewport meta tag (QW-001: Lighthouse best-practices prerequisite)');
+    assert(detail1.body.includes('name="viewport"'),
+      'GET /task/WUI-1 <head> includes viewport meta tag (QW-001: Lighthouse best-practices prerequisite)');
+
+    // lang attribute on <html> (accessibility)
+    assert(list.body.includes('<html lang="en">'),
+      'GET / <html> has lang="en" attribute (QW-001: accessibility)');
+    assert(detail1.body.includes('<html lang="en">'),
+      'GET /task/WUI-1 <html> has lang="en" attribute (QW-001: accessibility)');
+
+    // ── QW-002: rendered markdown body assertions ─────────────────────────
+    // QW-002 (experiment 3, iteration 1): verify the task detail page renders
+    // the body using renderMarkdown() instead of a bare <pre> block. The
+    // VALID_SECTIONS fixture body contains "## Proposal" etc. — these should
+    // appear as <h3> elements in the output (## = 2 hashes → h3, since h1
+    // is reserved for the page title).
+
+    // Body is inside a .body div (not bare <pre> at top level)
+    assert(detail1.body.includes('<div class="body">'),
+      'GET /task/WUI-1 body contains <div class="body"> wrapper (QW-002: renderMarkdown() used)');
+
+    // "## Proposal" heading rendered as <h3>Proposal</h3>
+    assert(detail1.body.includes("<h3>Proposal</h3>"),
+      "GET /task/WUI-1 body: ## Proposal rendered as <h3>Proposal</h3> (QW-002: rendered markdown)");
+
+    // "## Plan" heading rendered as <h3>Plan</h3>
+    assert(detail1.body.includes("<h3>Plan</h3>"),
+      "GET /task/WUI-1 body: ## Plan rendered as <h3>Plan</h3> (QW-002: rendered markdown)");
+
+    // List items from "- [x] ..." appear as <li> elements
+    assert(detail1.body.includes("<li>"),
+      "GET /task/WUI-1 body: list items rendered as <li> elements (QW-002: rendered markdown)");
+
+    // No bare top-level <pre> wrapping the entire body text
+    // (the body text should NOT start with "<pre>" as it did before QW-002)
+    assert(!detail1.body.match(/<div class="body"><pre>/),
+      "GET /task/WUI-1 body: no bare <pre> wrapping the entire body (QW-002: markdown rendered)");
+
   } finally {
     if (server) {
       server.close();
@@ -366,7 +435,7 @@ async function main() {
   }
 
   console.log(failures === 0
-    ? "\nAll QC-001/QC-002 web-ui-browser regression tests passed."
+    ? "\nAll QC-001/QC-002/QW-001/QW-002 web-ui-browser regression tests passed."
     : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
