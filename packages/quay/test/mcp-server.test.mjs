@@ -718,6 +718,279 @@ async function main() {
     fs.rmSync(schemaWorkspaceRoot, { recursive: true, force: true });
   }
 
+  // ---- Block 14: QX-029 (experiment 4, iteration 8) — task_list search
+  //      parameter (CB-014 partial). ----
+  //
+  // task_list now supports an optional `search` parameter: case-insensitive
+  // substring match on task title + body, with heading lines excluded from
+  // the body match (same stripHeadings() logic as bin/quay.js + serve.js's
+  // QX-028 heading-exclusion implementation).
+  //
+  // Fixture: a dedicated workspace with 3 tasks —
+  //   SRCH-1: title "toggle feature", body prose only (no headings)
+  //   SRCH-2: title "regular task", body = heading-only ("## Proposal\n## Plan")
+  //   SRCH-3: title "another task", body prose containing "unique-xyzzy-prose"
+  //
+  // Assertions:
+  //   a. search="toggle" returns SRCH-1, not SRCH-2 or SRCH-3 (title match)
+  //   b. search="Proposal" returns NOTHING (heading excluded from match)
+  //   c. search="unique-xyzzy-prose" returns SRCH-3 (prose body match)
+  //   d. no search: returns all 3 tasks (no regression)
+  //   e. listTools() schema includes 'search' in task_list.inputSchema.properties
+  {
+    const srchTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-srch-tasks-"));
+    const srchWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-srch-workspace-"));
+    fs.mkdirSync(path.join(srchWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(srchWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir}"`,
+        `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${srchTasksDir}"`,
+        "",
+      ].join("\n")
+    );
+
+    // SRCH-1: title match for "toggle"
+    execFileSync("node", [nativeBin, "task", "create", "SRCH-1",
+      "--title", "toggle feature task",
+      "--status", "todo",
+      "--body", "## Proposal\nThis task is about toggling something.\n## Plan\nImplement the toggle.\n## AC\n- [x] toggle works\n## DoD\n- [x] toggle is tested\n"],
+      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir } });
+
+    // SRCH-2: heading-only body — "Proposal" only appears in ## Proposal heading
+    execFileSync("node", [nativeBin, "task", "create", "SRCH-2",
+      "--title", "regular task",
+      "--status", "todo",
+      "--body", "## Proposal\n## Plan\n## AC\n- [x] criterion\n## DoD\n- [x] done criterion\n"],
+      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir } });
+
+    // SRCH-3: prose body containing unique token
+    execFileSync("node", [nativeBin, "task", "create", "SRCH-3",
+      "--title", "another task",
+      "--status", "todo",
+      "--body", "## Proposal\nContains unique-xyzzy-prose token in a prose line.\n## Plan\nN/A\n## AC\n- [x] criterion\n## DoD\n- [x] done criterion\n"],
+      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir } });
+
+    const { client: coreSrch } = await connectStdio("node", [coreBin, "mcp"], srchWorkspaceRoot);
+
+    // (a) search="toggle" — title match on SRCH-1 only
+    {
+      const r = await coreSrch.callTool({ name: "task_list", arguments: { search: "toggle" } });
+      assert(r.isError !== true, "task_list with search='toggle' does not return isError:true");
+      const ids = (r.structuredContent?.tasks ?? []).map((t) => t.id);
+      assert(ids.includes("SRCH-1"), "task_list search='toggle' includes SRCH-1 (title contains 'toggle feature task')");
+      assert(!ids.includes("SRCH-2"), "task_list search='toggle' excludes SRCH-2 (no 'toggle' in title or prose body)");
+      assert(!ids.includes("SRCH-3"), "task_list search='toggle' excludes SRCH-3 (no 'toggle' in title or prose body)");
+    }
+
+    // (b) search="Proposal" — heading excluded from match; all tasks use ## Proposal heading
+    //     but NONE have "Proposal" as prose content → returns nothing
+    {
+      const r = await coreSrch.callTool({ name: "task_list", arguments: { search: "Proposal" } });
+      assert(r.isError !== true, "task_list with search='Proposal' does not return isError:true");
+      const tasks = r.structuredContent?.tasks ?? [];
+      assert(
+        tasks.length === 0,
+        `task_list search='Proposal' returns 0 tasks (heading exclusion prevents ## Proposal from matching); got ${tasks.length} task(s): ${tasks.map(t => t.id).join(", ")}`
+      );
+    }
+
+    // (c) search="unique-xyzzy-prose" — prose body match on SRCH-3 only
+    {
+      const r = await coreSrch.callTool({ name: "task_list", arguments: { search: "unique-xyzzy-prose" } });
+      assert(r.isError !== true, "task_list with search='unique-xyzzy-prose' does not return isError:true");
+      const ids = (r.structuredContent?.tasks ?? []).map((t) => t.id);
+      assert(ids.includes("SRCH-3"), "task_list search='unique-xyzzy-prose' includes SRCH-3 (prose body match)");
+      assert(!ids.includes("SRCH-1"), "task_list search='unique-xyzzy-prose' excludes SRCH-1 (no match in title or prose body)");
+      assert(!ids.includes("SRCH-2"), "task_list search='unique-xyzzy-prose' excludes SRCH-2 (no match in title or prose body)");
+    }
+
+    // (d) no search: returns all 3 tasks (no regression from search addition)
+    {
+      const r = await coreSrch.callTool({ name: "task_list", arguments: {} });
+      assert(r.isError !== true, "task_list with no search returns no error (no regression)");
+      const tasks = r.structuredContent?.tasks ?? [];
+      assert(
+        tasks.length === 3,
+        `task_list with no search returns all 3 seeded tasks (no regression); got ${tasks.length}`
+      );
+    }
+
+    // (e) listTools() schema includes 'search' in task_list.inputSchema.properties
+    {
+      const toolsResult = await coreSrch.listTools();
+      const taskListTool = (toolsResult.tools ?? []).find((t) => t.name === "task_list");
+      assert(!!taskListTool, "listTools() includes task_list tool definition (QX-029 schema check)");
+      if (taskListTool) {
+        const props = taskListTool.inputSchema?.properties ?? {};
+        assert(
+          "search" in props,
+          "task_list inputSchema.properties includes 'search' (QX-029: search parameter registered)"
+        );
+        assert(
+          props.search?.type === "string" || props.search?.anyOf?.some?.((x) => x.type === "string"),
+          "task_list inputSchema.properties.search is declared as a string type"
+        );
+      }
+    }
+
+    await coreSrch.close();
+    fs.rmSync(srchTasksDir, { recursive: true, force: true });
+    fs.rmSync(srchWorkspaceRoot, { recursive: true, force: true });
+  }
+
+  // ---- Block 15: QX-030 (experiment 4, iteration 8) — task_list
+  //      page/pageSize pagination (CB-010, UQ-008). ----
+  //
+  // task_list now supports optional `page` (1-based, default 1) and
+  // `pageSize` (default 50, max 200) parameters. Applied after all other
+  // filters. Response structuredContent includes `total`, `page`,
+  // `pageSize`, and `totalPages` alongside the `tasks` array.
+  //
+  // Fixture: a dedicated workspace with 4 tasks (PAG-1..PAG-4), all todo,
+  // with unique title tokens for combined search+pagination test.
+  //
+  // Assertions:
+  //   a. Default (no page/pageSize): structuredContent has total=4 metadata
+  //   b. page=1, pageSize=2: returns PAG-1 and PAG-2 (first 2)
+  //   c. page=2, pageSize=2: returns PAG-3 and PAG-4 (second 2)
+  //   d. totalPages = ceil(total/pageSize) = ceil(4/2) = 2
+  //   e. page beyond last page: returns empty tasks array, total still accurate
+  //   f. pagination applies AFTER filters: search for "pag-special" (only PAG-4
+  //      has this in title), page=1, pageSize=2 → total=1, tasks=[PAG-4]
+  //   g. listTools() schema includes 'page' and 'pageSize' in task_list
+  {
+    const pagTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-pag-tasks-"));
+    const pagWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-pag-workspace-"));
+    fs.mkdirSync(path.join(pagWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(pagWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir}"`,
+        `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${pagTasksDir}"`,
+        "",
+      ].join("\n")
+    );
+
+    const PAG_BODY =
+      "## Proposal\nPagination fixture task.\n## Plan\nN/A\n## AC\n- [x] criterion\n## DoD\n- [x] done criterion\n";
+
+    for (const id of ["PAG-1", "PAG-2", "PAG-3"]) {
+      execFileSync("node", [nativeBin, "task", "create", id,
+        "--title", `Pagination task ${id}`,
+        "--status", "todo", "--body", PAG_BODY],
+        { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: pagTasksDir } });
+    }
+    // PAG-4 has a unique title token for combined search+pagination test
+    execFileSync("node", [nativeBin, "task", "create", "PAG-4",
+      "--title", "pag-special token task",
+      "--status", "todo", "--body", PAG_BODY],
+      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: pagTasksDir } });
+
+    const { client: corePag } = await connectStdio("node", [coreBin, "mcp"], pagWorkspaceRoot);
+
+    // (a) default: structuredContent has total=4, page=1, pageSize=50 metadata
+    {
+      const r = await corePag.callTool({ name: "task_list", arguments: {} });
+      assert(r.isError !== true, "task_list with no pagination params returns no error");
+      const sc = r.structuredContent ?? {};
+      assert(sc.total === 4, `default task_list total=4 (got ${sc.total})`);
+      assert(sc.page === 1, `default task_list page=1 (got ${sc.page})`);
+      assert(sc.pageSize === 50, `default task_list pageSize=50 (got ${sc.pageSize})`);
+      assert(Array.isArray(sc.tasks), "default task_list returns tasks array in structuredContent");
+      assert(
+        sc.tasks.length === 4,
+        `default task_list returns all 4 tasks (pageSize=50 > 4 total) (got ${sc.tasks.length})`
+      );
+      assert(
+        typeof sc.totalPages === "number",
+        `default task_list includes totalPages field (got ${JSON.stringify(sc.totalPages)})`
+      );
+    }
+
+    // (b) page=1, pageSize=2: returns first 2 tasks
+    {
+      const r = await corePag.callTool({ name: "task_list", arguments: { page: 1, pageSize: 2 } });
+      assert(r.isError !== true, "task_list page=1 pageSize=2 returns no error");
+      const sc = r.structuredContent ?? {};
+      assert(sc.total === 4, `page=1,pageSize=2: total=4 (got ${sc.total})`);
+      assert(sc.page === 1, `page=1,pageSize=2: page=1 (got ${sc.page})`);
+      assert(sc.pageSize === 2, `page=1,pageSize=2: pageSize=2 (got ${sc.pageSize})`);
+      assert(sc.totalPages === 2, `page=1,pageSize=2: totalPages=2 (ceil(4/2)) (got ${sc.totalPages})`);
+      assert((sc.tasks ?? []).length === 2, `page=1,pageSize=2: returns 2 tasks (got ${(sc.tasks ?? []).length})`);
+    }
+
+    // (c) page=2, pageSize=2: returns next 2 tasks (disjoint from page 1)
+    {
+      const r1 = await corePag.callTool({ name: "task_list", arguments: { page: 1, pageSize: 2 } });
+      const r2 = await corePag.callTool({ name: "task_list", arguments: { page: 2, pageSize: 2 } });
+      const ids1 = (r1.structuredContent?.tasks ?? []).map((t) => t.id);
+      const ids2 = (r2.structuredContent?.tasks ?? []).map((t) => t.id);
+      assert(
+        ids2.length === 2,
+        `page=2,pageSize=2: returns 2 tasks (got ${ids2.length})`
+      );
+      const overlap = ids1.filter((id) => ids2.includes(id));
+      assert(
+        overlap.length === 0,
+        `page=1 and page=2 (pageSize=2) return disjoint task sets (overlap: ${overlap.join(", ")})`
+      );
+      assert(
+        r2.structuredContent?.totalPages === 2,
+        `page=2,pageSize=2: totalPages=2 (got ${r2.structuredContent?.totalPages})`
+      );
+    }
+
+    // (d) page beyond last: empty tasks array, total still reflects filtered count
+    {
+      const r = await corePag.callTool({ name: "task_list", arguments: { page: 99, pageSize: 2 } });
+      assert(r.isError !== true, "task_list page=99 (beyond last) returns no error");
+      const sc = r.structuredContent ?? {};
+      assert(sc.total === 4, `page=99,pageSize=2: total still 4 (got ${sc.total})`);
+      assert((sc.tasks ?? []).length === 0, `page=99,pageSize=2: tasks array is empty (beyond last page) (got ${(sc.tasks ?? []).length})`);
+    }
+
+    // (e) search + pagination: filter first, then page
+    {
+      const r = await corePag.callTool({
+        name: "task_list",
+        arguments: { search: "pag-special", page: 1, pageSize: 2 },
+      });
+      assert(r.isError !== true, "task_list search+pagination returns no error");
+      const sc = r.structuredContent ?? {};
+      assert(sc.total === 1, `search='pag-special' + pagination: total=1 (only PAG-4 matches) (got ${sc.total})`);
+      assert((sc.tasks ?? []).length === 1, `search='pag-special' + pagination: 1 task returned (got ${(sc.tasks ?? []).length})`);
+      const returnedId = (sc.tasks ?? [])[0]?.id;
+      assert(returnedId === "PAG-4", `search='pag-special' returns PAG-4 (got ${returnedId})`);
+    }
+
+    // (f) listTools() schema includes 'page' and 'pageSize'
+    {
+      const toolsResult = await corePag.listTools();
+      const taskListTool = (toolsResult.tools ?? []).find((t) => t.name === "task_list");
+      assert(!!taskListTool, "listTools() includes task_list (QX-030 schema check)");
+      if (taskListTool) {
+        const props = taskListTool.inputSchema?.properties ?? {};
+        assert("page" in props, "task_list inputSchema.properties includes 'page' (QX-030)");
+        assert("pageSize" in props, "task_list inputSchema.properties includes 'pageSize' (QX-030)");
+      }
+    }
+
+    await corePag.close();
+    fs.rmSync(pagTasksDir, { recursive: true, force: true });
+    fs.rmSync(pagWorkspaceRoot, { recursive: true, force: true });
+  }
+
   // ---- Cleanup ----
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
   fs.rmSync(tasksDirA, { recursive: true, force: true });

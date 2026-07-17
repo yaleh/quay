@@ -142,6 +142,21 @@ export async function startMcpServer() {
     );
   }
 
+  // stripHeadings: remove lines matching /^#+\s/ from body text before
+  // search indexing, so that structural markdown headings (## Proposal,
+  // ## Plan, ## AC, ## DoD) do not produce false positives when a search
+  // term matches a standard section name (e.g. "Proposal" matching every
+  // task that uses the Proposal/Plan/AC/DoD template).
+  //
+  // QX-028 added this helper to bin/quay.js and serve.js. Inlined here
+  // rather than imported because mcp-server.js is a separate entry point —
+  // importing from serve.js or bin/quay.js would create cross-entry-point
+  // dependencies that don't exist anywhere else in this package. The
+  // implementation is identical in all three locations by design.
+  function stripHeadings(text) {
+    return (text || "").split("\n").filter((line) => !/^#+\s/.test(line)).join(" ");
+  }
+
   // task_list — aggregates/proxies task_list against one Provider, selected
   // via the optional `provider` argument (defaults to the default-enabled
   // Provider). Same shape as each Provider's own task_list tool, plus the
@@ -151,41 +166,84 @@ export async function startMcpServer() {
   // closes CB-009 (no prefix filter on MCP task_list) and partially
   // addresses CB-010 (response size reduced when prefix is used). Same
   // client-side filter logic as bin/quay.js's QX-002 implementation.
+  //
+  // QX-029 (experiment 4, iteration 8): added optional `search` parameter —
+  // closes CB-014 (partial: search parity). Title+body search with heading
+  // exclusion via stripHeadings(). Same logic as bin/quay.js + serve.js.
+  //
+  // QX-030 (experiment 4, iteration 8): added optional `page` / `pageSize`
+  // pagination parameters — closes CB-010 and UQ-008 (MCP response size).
+  // Default pageSize=50, max pageSize=200. Applied after all other filters.
+  // Response structuredContent includes total/page/pageSize/totalPages
+  // metadata alongside the tasks array.
   server.registerTool(
     "task_list",
     {
       description:
-        "List tasks from an enabled Provider (defaults to the default-enabled Provider if `provider` is omitted), optionally filtered by status/label/prefix. The `prefix` parameter filters by task id prefix (e.g. prefix='QX' returns only QX-* tasks), reducing response size for large workspaces. Proxies the Provider's own task_list tool via Core's MCP client fan-out.",
+        "List tasks from an enabled Provider (defaults to the default-enabled Provider if `provider` is omitted), " +
+        "optionally filtered by status, label, prefix (task-id prefix), and/or full-text search. " +
+        "Supports pagination via `page` (1-based, default 1) and `pageSize` (default 50, max 200). " +
+        "Response includes `tasks` array plus pagination metadata: `total` (filtered count before paging), " +
+        "`page`, `pageSize`, `totalPages`. " +
+        "Filter order: status → label → prefix → search → pagination. " +
+        "The `prefix` parameter filters by task-id prefix (e.g. prefix='QX' returns only QX-* tasks, case-insensitive). " +
+        "The `search` parameter does case-insensitive substring match on task title + body text; " +
+        "markdown heading lines (## Proposal, ## Plan, ## AC, ## DoD, etc.) are excluded from the body match " +
+        "to avoid false positives on template boilerplate. " +
+        "Proxies the Provider's own task_list tool via Core's MCP client fan-out.",
       inputSchema: {
-        provider: z.string().optional(),
-        status: z.string().optional(),
-        label: z.string().optional(),
-        prefix: z.string().optional(),
+        provider: z.string().optional().describe("Provider id to query (defaults to the first-enabled Provider in .quay/config.yml)."),
+        status: z.string().optional().describe("Filter by task status (e.g. 'todo', 'ready', 'done', 'needs-human'). Omit to include all statuses."),
+        label: z.string().optional().describe("Filter by a single label string. Tasks must have this label to be included. For multi-label AND-filter use CLI or Web UI."),
+        prefix: z.string().optional().describe("Filter by task-id prefix, case-insensitive (e.g. 'QX' returns QX-001, QX-002, ...). Reduces response size for large multi-experiment workspaces."),
+        search: z.string().optional().describe("Full-text search: case-insensitive substring match on task title + body content. Markdown heading lines (e.g. ## Proposal, ## Plan) are excluded from the body match to avoid template boilerplate false positives."),
+        page: z.number().int().optional().describe("1-based page number (default 1). Applied after all filters."),
+        pageSize: z.number().int().optional().describe("Number of tasks per page (default 50, max 200). Applied after all filters."),
       },
     },
-    async ({ provider, status, label, prefix }) => {
+    async ({ provider, status, label, prefix, search, page, pageSize }) => {
       const { client } = await getClient(provider);
-      const tasks = await client.taskList({ status, label });
-      // QX-003: client-side prefix filter (no provider-side changes needed).
-      const filtered = prefix
-        ? tasks.filter((t) => t.id.toUpperCase().startsWith(prefix.toUpperCase()))
-        : tasks;
+      let tasks = await client.taskList({ status, label });
+      // QX-003: client-side prefix filter.
+      if (prefix) {
+        tasks = tasks.filter((t) => t.id.toUpperCase().startsWith(prefix.toUpperCase()));
+      }
+      // QX-029: client-side search filter (title + stripped body, case-insensitive).
+      if (search) {
+        const sq = search.toLowerCase();
+        tasks = tasks.filter((t) =>
+          (t.title + " " + stripHeadings(t.body || "")).toLowerCase().includes(sq)
+        );
+      }
+      // QX-030: pagination — applied after all filters so page/total reflect filtered set.
+      const total = tasks.length;
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const size = Math.min(200, Math.max(1, parseInt(pageSize) || 50));
+      const start = (pageNum - 1) * size;
+      const paged = tasks.slice(start, start + size);
+      const totalPages = Math.ceil(total / size);
+      const result = { tasks: paged, total, page: pageNum, pageSize: size, totalPages };
       return {
-        content: [{ type: "text", text: JSON.stringify(filtered, null, 2) }],
-        structuredContent: { tasks: filtered },
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
       };
     }
   );
 
   // task_get
+  // QX-031: description updated to reflect current field set (updatedAt added
+  // by QX-018/store.js). No logic changes.
   server.registerTool(
     "task_get",
     {
       description:
-        "Get one task by id from an enabled Provider (defaults to the default-enabled Provider if `provider` is omitted). Proxies the Provider's own task_get tool.",
+        "Get one task by id from an enabled Provider (defaults to the default-enabled Provider if `provider` is omitted). " +
+        "Returns full task details including id, title, status, labels, parent, children, role, body, updatedAt (ms since epoch), and extra fields. " +
+        "Returns isError:true if the task id does not exist. " +
+        "Proxies the Provider's own task_get tool.",
       inputSchema: {
-        provider: z.string().optional(),
-        id: z.string(),
+        provider: z.string().optional().describe("Provider id to query (defaults to the first-enabled Provider in .quay/config.yml)."),
+        id: z.string().describe("Task id to retrieve (e.g. 'QX-029')."),
       },
     },
     async ({ provider, id }) => {
@@ -208,22 +266,29 @@ export async function startMcpServer() {
   // already provider-agnostic per QN-024's comment; whether the selected
   // Provider actually implements data.write is between the caller and that
   // Provider's own manifest, same discipline as bin/quay.js's `task edit`).
+  // QX-031: description updated to document expectedStatus CAS semantics and
+  // label array type. No logic changes.
   server.registerTool(
     "task_write",
     {
       description:
-        "Write/patch one task's frontmatter and/or body on an enabled Provider (defaults to the default-enabled Provider). Proxies the Provider's own task_write tool.",
+        "Write/patch one task's frontmatter and/or body on an enabled Provider (defaults to the default-enabled Provider). " +
+        "Only provided fields are updated; omitted fields are left unchanged. " +
+        "Supply `expectedStatus` for optimistic-locking (CAS): if the task's current status does not match, returns isError:true without writing. " +
+        "`labels` is an array of strings (replaces the full label set). " +
+        "Returns the updated task object on success, or isError:true on CAS conflict or other failure. " +
+        "Proxies the Provider's own task_write tool.",
       inputSchema: {
-        provider: z.string().optional(),
-        id: z.string(),
-        title: z.string().optional(),
-        status: z.string().optional(),
-        labels: z.array(z.string()).optional(),
-        parent: z.string().nullable().optional(),
-        children: z.array(z.string()).optional(),
-        body: z.string().optional(),
-        extra: z.record(z.any()).optional(),
-        expectedStatus: z.string().optional(),
+        provider: z.string().optional().describe("Provider id to write to (defaults to the first-enabled Provider in .quay/config.yml)."),
+        id: z.string().describe("Task id to write/patch (e.g. 'QX-029')."),
+        title: z.string().optional().describe("New title. Omit to leave unchanged."),
+        status: z.string().optional().describe("New status ('todo', 'ready', 'needs-human', 'done'). Omit to leave unchanged."),
+        labels: z.array(z.string()).optional().describe("Replacement label array (replaces all existing labels). Omit to leave unchanged."),
+        parent: z.string().nullable().optional().describe("Parent task id, or null to clear. Omit to leave unchanged."),
+        children: z.array(z.string()).optional().describe("Replacement children array. Omit to leave unchanged."),
+        body: z.string().optional().describe("Full replacement body (markdown). Omit to leave unchanged."),
+        extra: z.record(z.any()).optional().describe("Extra frontmatter fields as a key/value map."),
+        expectedStatus: z.string().optional().describe("Optimistic-locking guard: if task's current status differs from this value, the write is refused with isError:true (no mutation). Omit to skip the check."),
       },
     },
     async ({ provider, id, ...patch }) => {
@@ -244,14 +309,19 @@ export async function startMcpServer() {
   );
 
   // task_check — generic passthrough, same pattern as task_write.
+  // QX-031: description updated to document ok/acTotal/acChecked response
+  // fields. No logic changes.
   server.registerTool(
     "task_check",
     {
       description:
-        "Assert the ready/done gate for one task on an enabled Provider (defaults to the default-enabled Provider). Proxies the Provider's own task_check tool.",
+        "Assert the ready/done gate for one task on an enabled Provider (defaults to the default-enabled Provider). " +
+        "Returns { ok, acTotal, acChecked, ... } where ok:true means all AC checkboxes are checked and the task is in a gate-passing status. " +
+        "ok:false means the gate is not yet satisfied (some ACs unchecked, or status not ready/done). " +
+        "Proxies the Provider's own task_check tool.",
       inputSchema: {
-        provider: z.string().optional(),
-        id: z.string(),
+        provider: z.string().optional().describe("Provider id to query (defaults to the first-enabled Provider in .quay/config.yml)."),
+        id: z.string().describe("Task id to check the gate for (e.g. 'QX-029')."),
       },
     },
     async ({ provider, id }) => {
