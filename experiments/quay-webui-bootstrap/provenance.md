@@ -205,6 +205,38 @@ full per-factor evidence, re-trigger checks, and convergence assessment.
 See `experiments/quay-webui-bootstrap/audits/iteration-1-adjudicate.md`
 for the G3 adjudicate verdict (PASS).
 
+## Iteration 2 — context note (2026-07-17)
+
+One QW-* task driven to done in iteration 2. Single-file change to
+packages/quay/src/serve.js (GET / route filter logic) — single source file,
+logic change, no network I/O. First all-native triple in experiment 3.
+
+**V_instance lift**: ui_read_capability 0.35 → 0.50 (filter-by-status added);
+visual_design_quality 0.30 → 0.65 (Lighthouse audit now complete: list page
+accessibility=100/best-practices=100, detail page accessibility=96/best-practices=100;
+both mandatory thresholds met on both pages; holistic PASS confirmed from iteration 1
+and re-confirmed this iteration). V_instance product: 0.50 × 0.65 × 1.0 × 1.0 = 0.325.
+
+**Effectiveness re-trigger**: QW-003 is the first CLEAN per-task timing comparison
+against QN-006's baseline. Author: 32s (QN-006 ~51s). Execute: 170s (QN-006 ~179s).
+Total: 202s (QN-006 ~230s). Comparable to baseline — first organic scope-matched
+data point with clean isolation. Re-trigger 1 fired. Score held at 0.26 conservatively
+(no rubric change pending — comparable timing confirms the baseline holds rather than
+demonstrating a meaningful new measurement).
+
+**σ_QW update**: QW-003 driven all-native: author_by=native, execute_by=native,
+gate_by=native. σ_QW = 1/3 = 0.333. Validation factor: 0.333.
+
+**DIR-001**: Resolved. Node.js `server.listen(port)` defaults to `::` (all interfaces).
+Standing quay serve instance started at port 4176, bound `*:4176`. Directive archived.
+
+See `experiments/quay-webui-bootstrap/iterations/iteration-2.md` for the full
+per-factor evidence, re-trigger checks, and convergence assessment.
+See `experiments/quay-webui-bootstrap/audits/iteration-2-adjudicate.md` for the
+G3 adjudicate verdict (PASS).
+See `experiments/quay-webui-bootstrap/audits/iteration-2-visual-review-list.md`
+and `iteration-2-visual-review-detail.md` for the Lighthouse-confirmed visual reviews.
+
 ## Task entries
 
 | Task | Iteration | author_by | execute_by | gate_by | σ contribution | V_instance lift |
@@ -212,9 +244,9 @@ for the G3 adjudicate verdict (PASS).
 | *(none — iteration 0 was observational; no QW-* tasks created)* | 0 | — | — | — | 0/0 | none |
 | QW-001 | 1 | seed | seed | native | 0/1 (not all-native) | visual_design_quality: 0.0 → 0.30 |
 | QW-002 | 1 | seed | seed | native | 0/1 (not all-native) | ui_read_capability: 0.20 → 0.35 |
+| QW-003 | 2 | native | native | native | 1/1 (all-native) | ui_read_capability: 0.35 → 0.50; visual_design_quality: 0.30 → 0.65 (Lighthouse complete) |
 
-**σ_QW**: 0/2 (2 tasks total; 0 with all-native {author, execute, gate} triples).
+**σ_QW**: 1/3 (3 tasks total; 1 with all-native {author, execute, gate} triple — QW-003).
 **Floor decision**: RESET to 0 (see iteration 0 context note above).
 Validation tracks σ_QW alone; no cross-experiment inherited floor applies.
-With σ_QW = 0/2, validation = 0.0 (floor). V_meta will be assessed
-against this new floor starting from iteration 2.
+With σ_QW = 1/3 = 0.333, validation = 0.333. V_meta = 0.77 × 0.26 × 0.79 × 0.333 = 0.0527.

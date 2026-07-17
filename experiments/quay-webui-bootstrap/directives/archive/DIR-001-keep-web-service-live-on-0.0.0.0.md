@@ -64,4 +64,25 @@ of the requested action below, not assumed here.
    archived.
 
 ## Resolution
-<!-- to be filled in by whichever iteration applies this -->
+
+Resolved in iteration 2 (2026-07-17).
+
+1. **Binding verification**: Node.js `server.listen(port, callback)` with no
+   explicit host defaults to `::` (IPv6 dual-stack, all-interfaces). Confirmed
+   by `node -e "...s.listen(0,...console.log(s.address())..."` → `{"address":"::","family":"IPv6"}`.
+   No source change to serve.js is required for 0.0.0.0 binding — the default
+   ALREADY satisfies "reachable from outside localhost."
+
+2. **Standing instance started**: `node packages/quay/bin/quay.js serve --port 4176`
+   started as a background process (PID 2483817) in the iteration-2 session,
+   serving `/home/yale/work/quay` (the actual current main working directory).
+   `ss -tlnp | grep 4176` confirms `*:4176` (all interfaces).
+
+3. **Reachable on all interfaces**: confirmed `curl http://localhost:4176/` returns
+   the task list HTML. The `*:4176` bind covers both localhost and external access.
+
+4. **Standing instruction**: Each subsequent iteration should restart this instance
+   after any serve.js change (or confirm it is serving current code). Current
+   running state at iteration-2 close: PID 2483817, port 4176, all interfaces.
+
+Status: RESOLVED — archived.
