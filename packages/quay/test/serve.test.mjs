@@ -144,9 +144,11 @@ async function main() {
     assert(notFound.status === 404, `GET /task/NOPE-999 returns 404 (got ${notFound.status})`);
 
     // --- POST /task/<id>/action/<actionId> -> 302 redirect ---
+    // QX-013 (iteration 3): gate passes (VALID_SECTIONS has all ACs checked) so
+    // redirect now includes ?success= param. Check the redirect starts with /task/SRV-1.
     const action = await post(port, "/task/SRV-1/action/advance");
     assert(action.status === 302, `POST /task/SRV-1/action/advance returns 302 (got ${action.status})`);
-    assert(action.headers.location === "/task/SRV-1",
+    assert(action.headers.location && action.headers.location.startsWith("/task/SRV-1"),
       `POST redirect Location header points back to /task/SRV-1 (got ${action.headers.location})`);
   } finally {
     if (server) {
@@ -352,20 +354,27 @@ async function main() {
 
       // POST action from list page: should redirect back to the list (not /task/<id>).
       // The from= param is URL-encoded "/" (the list root).
+      // QX-013 (iteration 3): gate passes (VALID_SECTIONS all ACs checked) so redirect
+      // now includes ?success= appended to the from= target. Check starts-with "/" (list root).
       const fromEncoded = encodeURIComponent("/");
       const actionPost = await post(actPort, `/task/SRV2-1/action/advance?from=${fromEncoded}`);
       assert(actionPost.status === 302, `POST /task/SRV2-1/action/advance?from=/ returns 302 (got ${actionPost.status})`);
       assert(
-        actionPost.headers.location === "/",
-        `POST action from list page redirects back to the list (Location: ${actionPost.headers.location})`
+        actionPost.headers.location && actionPost.headers.location.startsWith("/"),
+        `POST action from list page redirects back to list (starts with /) (Location: ${actionPost.headers.location})`
+      );
+      assert(
+        actionPost.headers.location && actionPost.headers.location.includes("success="),
+        `POST action from list page redirect includes ?success= param (QX-013) (Location: ${actionPost.headers.location})`
       );
 
       // POST action without from= param: should still redirect to task detail (existing behavior).
+      // QX-013: now also appends ?success= to the task detail redirect.
       const actionPostNoFrom = await post(actPort, `/task/SRV2-1/action/advance`);
       assert(actionPostNoFrom.status === 302, `POST /task/SRV2-1/action/advance (no from=) returns 302 (got ${actionPostNoFrom.status})`);
       assert(
-        actionPostNoFrom.headers.location === "/task/SRV2-1",
-        `POST action without from= still redirects to task detail (Location: ${actionPostNoFrom.headers.location})`
+        actionPostNoFrom.headers.location && actionPostNoFrom.headers.location.startsWith("/task/SRV2-1"),
+        `POST action without from= redirects to task detail (starts with /task/SRV2-1) (Location: ${actionPostNoFrom.headers.location})`
       );
     } finally {
       if (actServer) {
@@ -398,6 +407,182 @@ async function main() {
     threw = true;
   }
   assert(threw, "composePayload() throws for an unknown actionId (no such action button)");
+
+  // --- QX-011..QX-015 (experiment 4, iteration 3): back-link context, mobile columns,
+  //     gate-fail feedback, button tooltips, orientation banner ---
+  // Uses a fresh isolated server with one todo task (unchecked ACs for gate-fail testing)
+  // and one todo task with all ACs checked (for gate-pass testing and back-link testing).
+  {
+    const ux3TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-ux3-test-"));
+    const ux3WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-ux3-workspace-"));
+    fs.mkdirSync(path.join(ux3WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(ux3WorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${ux3TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${ux3TasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    // UX3-1: todo with all ACs checked (gate passes) — tests back-link, tooltip, success redirect
+    execFileSync("node", [nativeBin, "task", "create", "UX3-1", "--title", "Gate-pass task (todo, all ACs checked)",
+      "--status", "todo", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: ux3TasksDir },
+    });
+    // UX3-2: todo with unchecked ACs — tests gate-fail redirect and error banner
+    const UNCHECKED_SECTIONS =
+      "## Proposal\nThis is a sufficiently long proposal section so the gate's minimum-content check passes cleanly.\n" +
+      "## Plan\nThis is a sufficiently long plan section so the gate's minimum-content check passes cleanly.\n" +
+      "## AC\n- [ ] a sufficiently long acceptance criterion line — NOT YET CHECKED\n" +
+      "## DoD\n- [ ] a sufficiently long definition-of-done line — NOT YET CHECKED\n";
+    execFileSync("node", [nativeBin, "task", "create", "UX3-2", "--title", "Gate-blocked task (todo, ACs unchecked)",
+      "--status", "todo", "--body", UNCHECKED_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: ux3TasksDir },
+    });
+
+    const ux3Port = port + 4;
+    const ux3OrigCwd = process.cwd();
+    let ux3Server;
+    try {
+      process.chdir(ux3WorkspaceRoot);
+      ux3Server = await startServer({ port: ux3Port });
+
+      // --- QX-015 (UQ-003): orientation banner on list page ---
+      const listForBanner = await get(ux3Port, "/");
+      assert(listForBanner.status === 200, "GET / (UX3 server) returns 200");
+      assert(
+        listForBanner.body.includes("orientation-banner"),
+        "GET / list page includes orientation-banner class (QX-015, UQ-003)"
+      );
+      assert(
+        listForBanner.body.includes("AI-assisted task management"),
+        "GET / list page orientation banner includes project description text (QX-015)"
+      );
+      assert(
+        listForBanner.body.includes("todo"),
+        "GET / list page orientation banner mentions status lifecycle (QX-015)"
+      );
+
+      // --- QX-012 (UQ-011, UQ-012): col-role, col-labels classes in list HTML + CSS rule ---
+      assert(
+        listForBanner.body.includes('class="col-role"'),
+        'GET / list page table header includes class="col-role" (QX-012, UQ-012)'
+      );
+      assert(
+        listForBanner.body.includes('class="col-labels"'),
+        'GET / list page table header includes class="col-labels" (QX-012, UQ-011/012)'
+      );
+      assert(
+        listForBanner.body.includes(".col-role, .col-labels { display: none; }") ||
+        listForBanner.body.includes(".col-role,.col-labels{display:none}") ||
+        (listForBanner.body.includes(".col-role") && listForBanner.body.includes("display: none")),
+        "GET / page styles include media-query rule hiding .col-role and .col-labels (QX-012)"
+      );
+
+      // --- QX-014 (UQ-014): Advance button has title= attribute on list page ---
+      assert(
+        listForBanner.body.includes('title="Advance task to next status"'),
+        'GET / list page Advance button has title="Advance task to next status" tooltip (QX-014, UQ-014)'
+      );
+
+      // --- QX-011 (UQ-009): task title links include ?from= on list page ---
+      assert(
+        listForBanner.body.includes("?from="),
+        "GET / list page task title links include ?from= query param (QX-011, UQ-009)"
+      );
+
+      // --- QX-011 (UQ-009): detail page back link uses ?from= param ---
+      // Access detail page with ?from=%2F%3Fprefix%3DQX (encodes /?prefix=QX)
+      const fromValue = encodeURIComponent("/?prefix=QX");
+      const detailWithFrom = await get(ux3Port, `/task/UX3-1?from=${fromValue}`);
+      assert(detailWithFrom.status === 200, `GET /task/UX3-1?from=/?prefix=QX returns 200`);
+      assert(
+        detailWithFrom.body.includes('href="/?prefix=QX"'),
+        `GET /task/UX3-1?from=/?prefix=QX: back link href is "/?prefix=QX" (QX-011, UQ-009)`
+      );
+
+      // --- QX-011 (UQ-009): detail page back link defaults to "/" when no from= ---
+      const detailNoFrom = await get(ux3Port, `/task/UX3-1`);
+      assert(detailNoFrom.status === 200, "GET /task/UX3-1 (no from=) returns 200");
+      assert(
+        detailNoFrom.body.includes('href="/"') && detailNoFrom.body.includes("back to list"),
+        'GET /task/UX3-1 (no from=): back link defaults to href="/" (QX-011)'
+      );
+
+      // --- QX-011 (UQ-009): open-redirect guard — from= with external URL rejected ---
+      const externalFrom = encodeURIComponent("https://evil.com");
+      const detailExternal = await get(ux3Port, `/task/UX3-1?from=${externalFrom}`);
+      assert(
+        detailExternal.body.includes('href="/"') && !detailExternal.body.includes("evil.com"),
+        "GET /task/UX3-1?from=https://evil.com: open-redirect guard rejects external URL, defaults to / (QX-011)"
+      );
+
+      // --- QX-014 (UQ-014): detail page Advance button has target-status tooltip ---
+      // UX3-1 is at status=todo, so next status is "ready"
+      assert(
+        detailNoFrom.body.includes('title="Advance to ready"'),
+        'GET /task/UX3-1 (todo status) detail page Advance button has title="Advance to ready" (QX-014)'
+      );
+
+      // --- QX-013 (UQ-013): gate-fail feedback — POST on UX3-2 (unchecked ACs) ---
+      // Gate should block and redirect with ?error= instead of silently delivering
+      const gateFailPost = await post(ux3Port, `/task/UX3-2/action/advance`);
+      assert(gateFailPost.status === 302, `POST /task/UX3-2/action/advance (blocked gate) returns 302 (got ${gateFailPost.status})`);
+      assert(
+        gateFailPost.headers.location && gateFailPost.headers.location.includes("error="),
+        `POST /task/UX3-2/action/advance: gate-blocked redirect includes ?error= param (QX-013, UQ-013) (Location: ${gateFailPost.headers.location})`
+      );
+      assert(
+        !(gateFailPost.headers.location && gateFailPost.headers.location.includes("success=")),
+        `POST /task/UX3-2/action/advance: gate-blocked redirect does NOT include ?success= (QX-013)`
+      );
+
+      // --- QX-013 (UQ-013): error banner rendered on list page when ?error= is in URL ---
+      const errorInURL = await get(ux3Port, "/?error=Gate+check+failed");
+      assert(errorInURL.status === 200, "GET /?error=Gate+check+failed returns 200");
+      assert(
+        errorInURL.body.includes("error-banner"),
+        'GET /?error=...: list page renders .error-banner element (QX-013, UQ-013)'
+      );
+      assert(
+        errorInURL.body.includes("Gate check failed"),
+        'GET /?error=Gate+check+failed: list page error banner shows the error message (QX-013)'
+      );
+
+      // --- QX-013 (UQ-013): error banner on detail page ---
+      const detailWithError = await get(ux3Port, `/task/UX3-1?error=Gate+blocked`);
+      assert(
+        detailWithError.body.includes("error-banner"),
+        'GET /task/UX3-1?error=...: detail page renders .error-banner element (QX-013)'
+      );
+
+      // --- QX-013 (UQ-013): gate-pass → redirect includes ?success= ---
+      // UX3-1 has all ACs checked, so gate passes
+      const gatePassPost = await post(ux3Port, `/task/UX3-1/action/advance`);
+      assert(gatePassPost.status === 302, `POST /task/UX3-1/action/advance (gate passes) returns 302 (got ${gatePassPost.status})`);
+      assert(
+        gatePassPost.headers.location && gatePassPost.headers.location.includes("success="),
+        `POST /task/UX3-1/action/advance: gate-pass redirect includes ?success= param (QX-013) (Location: ${gatePassPost.headers.location})`
+      );
+      assert(
+        !(gatePassPost.headers.location && gatePassPost.headers.location.includes("error=")),
+        `POST /task/UX3-1/action/advance: gate-pass redirect does NOT include ?error= (QX-013)`
+      );
+
+      // --- QX-013 (UQ-013): success banner rendered on list page when ?success= is in URL ---
+      const successInURL = await get(ux3Port, "/?success=Task+advanced");
+      assert(
+        successInURL.body.includes("success-banner"),
+        'GET /?success=...: list page renders .success-banner element (QX-013)'
+      );
+
+    } finally {
+      if (ux3Server) {
+        ux3Server.close();
+        if (ux3Server.client) await ux3Server.client.close();
+      }
+      process.chdir(ux3OrigCwd);
+      fs.rmSync(ux3TasksDir, { recursive: true, force: true });
+      fs.rmSync(ux3WorkspaceRoot, { recursive: true, force: true });
+    }
+  }
 
   console.log(failures === 0 ? "\nAll QN-031 serve/action regression tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;

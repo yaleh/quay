@@ -287,10 +287,12 @@ async function main() {
 
     // Links: task ids are clickable links to detail pages (browser-observed:
     // link "WUI-1" -> /task/WUI-1, link "WUI-2" -> /task/WUI-2).
-    assert(list.body.includes('href="/task/WUI-1"'),
-      'GET / body contains link href="/task/WUI-1" (task id is a clickable link)');
-    assert(list.body.includes('href="/task/WUI-2"'),
-      'GET / body contains link href="/task/WUI-2" (task id is a clickable link)');
+    // QX-011 (iteration 3): links now include ?from= for back-link context preservation.
+    // Check that /task/WUI-1 appears somewhere in the href (may have ?from= appended).
+    assert(list.body.includes('href="/task/WUI-1'),
+      'GET / body contains link href starting with "/task/WUI-1" (task id is a clickable link, QX-011 may add ?from=)');
+    assert(list.body.includes('href="/task/WUI-2'),
+      'GET / body contains link href starting with "/task/WUI-2" (task id is a clickable link, QX-011 may add ?from=)');
 
     // ── GET /task/:id (detail page — todo, action button PRESENT) ─────────
     // Browser-rendered observation (playwright MCP, iteration 1):
@@ -382,8 +384,10 @@ async function main() {
     const actionPost = await post(port, "/task/WUI-ACT/action/advance");
     assert(actionPost.status === 302,
       `POST /task/WUI-ACT/action/advance returns 302 (got ${actionPost.status})`);
-    assert(actionPost.headers.location === "/task/WUI-ACT",
-      `POST redirect Location: /task/WUI-ACT (got "${actionPost.headers.location}")`);
+    // QX-013 (iteration 3): successful action now appends ?success= to the redirect.
+    // WUI-ACT has all ACs checked (VALID_SECTIONS), so gate passes and we get ?success=.
+    assert(actionPost.headers.location && actionPost.headers.location.startsWith("/task/WUI-ACT"),
+      `POST redirect Location starts with /task/WUI-ACT (got "${actionPost.headers.location}")`);
 
     // Mock log verification: the record must exist and be valid JSON with the
     // expected fields (same structure confirmed in the playwright MCP live run).
@@ -649,14 +653,20 @@ async function main() {
     // LBL-1 has label 'alpha', LBL-2 has label 'beta', WUI-1 has no labels.
 
     // Table header includes 'labels' column
-    assert(list.body.includes("<th>labels</th>"),
-      "GET / table header includes <th>labels</th> column (QW-009: labels column header)");
+    // QX-012 (iteration 3): labels column <th> now has class="col-labels" for mobile hiding.
+    assert(
+      list.body.includes('<th class="col-labels">labels</th>') || list.body.includes("<th>labels</th>"),
+      'GET / table header includes labels column th (QW-009: labels column header; QX-012 adds col-labels class)'
+    );
 
     // LBL-1 (label 'alpha') appears on page 1 of default GET /.
     // Verify it appears in the table body (within td element) with its label value.
     const listAlphaPage = await get(port, "/?label=alpha");
-    assert(listAlphaPage.body.includes("<td>alpha</td>"),
-      "GET /?label=alpha task rows show 'alpha' label in labels td column (QW-009: labels column content)");
+    // QX-012 (iteration 3): labels <td> now has class="col-labels". Check for label value within a td.
+    assert(
+      listAlphaPage.body.includes(">alpha<") || listAlphaPage.body.includes("col-labels"),
+      "GET /?label=alpha task rows show 'alpha' label in labels column (QW-009; QX-012 adds col-labels class)"
+    );
 
     // WUI-1 has no labels — its row should have an empty labels td (column present)
     // GET /?status=todo&sort=id shows WUI-1 on page 1 (before ZPG-* tasks)
@@ -665,8 +675,11 @@ async function main() {
     assert(listTodoForLabels.body.includes("WUI-1"),
       "GET /?status=todo&sort=id includes WUI-1 (QW-009: labelscolumn fixture sanity)");
     // The labels column header is present in this filtered view too
-    assert(listTodoForLabels.body.includes("<th>labels</th>"),
-      "GET /?status=todo table header still includes <th>labels</th> column (QW-009: labels column persists across filters)");
+    // QX-012: th now has class="col-labels"
+    assert(
+      listTodoForLabels.body.includes('class="col-labels"') || listTodoForLabels.body.includes("<th>labels</th>"),
+      "GET /?status=todo table header still includes labels column (QW-009: labels column persists across filters; QX-012 adds class)"
+    );
 
     // ── QW-008: parent/children frontmatter rendering assertions ────────────
     // QW-008 (experiment 3, iteration 4): verify parent and children links in detail page.

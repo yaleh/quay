@@ -276,7 +276,9 @@ async function main() {
     const linesBefore = fs.readFileSync(mockLogPath, "utf8").trim().split("\n").filter(Boolean).length;
     const postResult = await post(port, "/task/SYM-1/action/advance");
     assert(postResult.status === 302, `Web UI leg: POST /task/SYM-1/action/advance returns 302 (got ${postResult.status})`);
-    assert(postResult.headers.location === "/task/SYM-1", "Web UI leg: POST redirect Location header points back to the task-detail page");
+    // QX-013 (iteration 3): gate passes (VALID_SECTIONS all ACs checked) so redirect
+    // now includes ?success= appended. Check it starts with /task/SYM-1.
+    assert(postResult.headers.location && postResult.headers.location.startsWith("/task/SYM-1"), "Web UI leg: POST redirect Location header points back to the task-detail page (QX-013 may append ?success=)");
     const linesAfter = fs.readFileSync(mockLogPath, "utf8").trim().split("\n").filter(Boolean).length;
     assert(linesAfter === linesBefore + 1, `Web UI leg: POSTing the action button appended exactly one new mock-delivery record (before=${linesBefore}, after=${linesAfter})`);
     delete process.env.QUAY_ACTION_MOCK_LOG;

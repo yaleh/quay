@@ -129,6 +129,42 @@ hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
   main { padding: 1rem 0.75rem; }
   table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   th, td { padding: 0.45rem 0.6rem; font-size: 0.85rem; }
+  /* QX-012 (experiment 4, iteration 3): hide role/labels columns on mobile so
+     id, status, title, and actions all fit in the visible viewport at 375px.
+     Closes UQ-011 (action button hidden off-screen) and UQ-012 (role/labels
+     columns crowd out title and actions). */
+  .col-role, .col-labels { display: none; }
+}
+/* QX-015 (experiment 4, iteration 3): project orientation banner — visible at
+   all viewports, subtle enough not to dominate. Closes UQ-003. */
+.orientation-banner {
+  background: #f0f4ff;
+  border-left: 3px solid #0066cc;
+  padding: 0.6rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: #333;
+  border-radius: 0 4px 4px 0;
+}
+/* QX-013 (experiment 4, iteration 3): error and success banners for
+   gate-fail and post-action feedback. Closes UQ-013. */
+.error-banner {
+  background: #fff0f0;
+  border-left: 3px solid #cc0000;
+  padding: 0.6rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: #8b0000;
+  border-radius: 0 4px 4px 0;
+}
+.success-banner {
+  background: #f0fff0;
+  border-left: 3px solid #007700;
+  padding: 0.6rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: #004400;
+  border-radius: 0 4px 4px 0;
 }
 </style>`;
 }
@@ -285,6 +321,15 @@ export async function startServer({ port = 4173 } = {}) {
 
   const manifest = await client.manifest();
 
+  // QX-013 (iteration 3): helper to append a query param to an existing URL path
+  // (which may already have params). Used to add ?error= and ?success= to redirect
+  // targets without clobbering existing filter params already in the target URL.
+  function addParam(urlPath, key, value) {
+    const u = new URL(urlPath, "http://x");
+    u.searchParams.set(key, value);
+    return u.pathname + "?" + u.searchParams.toString();
+  }
+
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -361,19 +406,22 @@ export async function startServer({ port = 4173 } = {}) {
             const applicableButtons = (manifest.action_buttons ?? []).filter(
               (b) => !b.whenStatus || b.whenStatus.includes(t.status)
             );
+            // QX-014 (iteration 3): action buttons include title= tooltip.
             const actionCell = applicableButtons.length > 0
               ? applicableButtons.map((b) =>
                   html`<form method="post" action="/task/${encodeURIComponent(t.id)}/action/${encodeURIComponent(b.id)}?from=${encodeURIComponent(currentListHref)}" style="display:inline">
-                    <button type="submit">${escapeHtml(b.label)}</button>
+                    <button type="submit" title="Advance task to next status">${escapeHtml(b.label)}</button>
                   </form>`
                 ).join("")
               : "";
+            // QX-011 (iteration 3): task title link includes ?from= so the detail page
+            // back link can return to the current filtered list view (UQ-009).
             return html`<tr>
-            <td><a href="/task/${t.id}">${escapeHtml(t.id)}</a></td>
+            <td><a href="/task/${encodeURIComponent(t.id)}?from=${encodeURIComponent(currentListHref)}">${escapeHtml(t.id)}</a></td>
             <td>${escapeHtml(t.status)}</td>
-            <td>${escapeHtml(t.role)}</td>
+            <td class="col-role">${escapeHtml(t.role)}</td>
             <td>${escapeHtml(t.title)}</td>
-            <td>${escapeHtml((Array.isArray(t.labels) ? t.labels : []).join(", "))}</td>
+            <td class="col-labels">${escapeHtml((Array.isArray(t.labels) ? t.labels : []).join(", "))}</td>
             <td>${actionCell}</td>
           </tr>`;
           }
@@ -474,18 +522,25 @@ export async function startServer({ port = 4173 } = {}) {
       // assertions (serve.test.mjs) never caught this because they check
       // substring presence in the raw byte buffer, not decoded/rendered
       // text. Fixed by declaring charset=utf-8 explicitly.
+      // QX-013: read ?error= and ?success= params for post-action feedback banners.
+      const errorParam = url.searchParams.get("error");
+      const successParam = url.searchParams.get("success");
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html`<!doctype html>
         <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
         <body><main>
+          <!-- QX-015: project orientation banner (UQ-003) — brief preamble for new users -->
+          <div class="orientation-banner"><strong>Quay</strong> — AI-assisted task management. Task statuses: <code>todo</code> → <code>in_progress</code> → <code>needs-human</code> → <code>done</code>. Use the Prefix filter to focus on one experiment&apos;s tasks.</div>
           <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
+          ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
+          ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
           ${prefixNav ? html`<p class="meta">Prefix: ${prefixNav}</p>` : ""}
           <p class="meta">Filter: ${filterNav}</p>
           <p class="meta">Sort: ${sortNav}</p>
           ${labelNav ? html`<p class="meta">Label: ${labelNav}</p>` : ""}
           ${pageNav}
           <table>
-            <tr><th>id</th><th>status</th><th>role</th><th>title</th><th>labels</th><th>actions</th></tr>
+            <tr><th>id</th><th>status</th><th class="col-role">role</th><th>title</th><th class="col-labels">labels</th><th>actions</th></tr>
             ${rows}
           </table>
           ${totalPages > 1 ? pageNav : ""}
@@ -502,13 +557,26 @@ export async function startServer({ port = 4173 } = {}) {
         res.end("not found");
         return;
       }
+      // QX-011 (iteration 3): read ?from= param to restore the back link's
+      // filter context (UQ-009). Guard against open redirect (must start with /).
+      const fromParam = url.searchParams.get("from");
+      const backHref = fromParam && fromParam.startsWith("/") ? fromParam : "/";
+      // QX-013 (iteration 3): read ?error= and ?success= for post-action feedback.
+      const detailErrorParam = url.searchParams.get("error");
+      const detailSuccessParam = url.searchParams.get("success");
+      // QX-014 (iteration 3): compute target status for tooltip on detail page.
+      const nextStatusMap = { todo: "ready", ready: "done" };
       const buttons = (manifest.action_buttons ?? [])
         .filter((b) => !b.whenStatus || b.whenStatus.includes(t.status))
-        .map(
-          (b) => html`<form method="post" action="/task/${t.id}/action/${b.id}" style="display:inline">
-            <button type="submit">${escapeHtml(b.label)}</button>
-          </form>`
-        )
+        .map((b) => {
+          const nextStatus = nextStatusMap[t.status];
+          const titleAttr = nextStatus
+            ? `title="Advance to ${escapeHtml(nextStatus)}"`
+            : `title="Advance task to next status"`;
+          return html`<form method="post" action="/task/${encodeURIComponent(t.id)}/action/${encodeURIComponent(b.id)}" style="display:inline">
+            <button type="submit" ${titleAttr}>${escapeHtml(b.label)}</button>
+          </form>`;
+        })
         .join("\n");
       // QN-046: same charset fix as the list route above (the "·" separator
       // on this page is likewise mis-decoded by a real browser without it).
@@ -526,8 +594,11 @@ export async function startServer({ port = 4173 } = {}) {
       res.end(html`<!doctype html>
         <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(t.id)}: ${escapeHtml(t.title)}">${pageStyles()}<title>${escapeHtml(t.id)}</title></head>
         <body><main>
-          <nav><a href="/">&larr; back to list</a></nav>
+          <!-- QX-011: back link uses ?from= param to restore filter context (UQ-009) -->
+          <nav><a href="${escapeHtml(backHref)}">&larr; back to list</a></nav>
           <h1>${escapeHtml(t.id)}: ${escapeHtml(t.title)} [${escapeHtml(t.status)}]</h1>
+          ${detailErrorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(detailErrorParam)}</div>` : ""}
+          ${detailSuccessParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(detailSuccessParam)}</div>` : ""}
           <p class="meta">role: ${escapeHtml(t.role)} · labels: ${escapeHtml((t.labels || []).join(", "))}${parentMeta}</p>
           ${childrenMeta}
           <div>${buttons}</div>
@@ -541,7 +612,26 @@ export async function startServer({ port = 4173 } = {}) {
     if (am && req.method === "POST") {
       const [, id, actionId] = am;
       const { composePayload, deliverTrigger } = await import("./action.js");
-      const t = await client.taskGet(decodeURIComponent(id));
+      const decodedId = decodeURIComponent(id);
+      const t = await client.taskGet(decodedId);
+      // QX-009 (experiment 4, iteration 2): read ?from= param for list-context redirect.
+      const fromParam = url.searchParams.get("from");
+      const baseRedirect = fromParam && fromParam.startsWith("/") ? fromParam : `/task/${t.id}`;
+      // QX-013 (experiment 4, iteration 3): gate-check BEFORE delivering the trigger.
+      // If gate is blocked (ok: false), redirect back with ?error= instead of silently
+      // delivering. Closes UQ-013 (silent gate-fail feedback). The gate check uses the
+      // same client.taskCheck() the CLI/MCP 'quay task check' uses — no new API surface.
+      const gateResult = await client.taskCheck(decodedId);
+      if (!gateResult.ok) {
+        const errorMsg = gateResult.reason
+          ? `Gate check failed: ${gateResult.reason}`
+          : "Gate check failed: task not ready to advance";
+        const errorRedirect = addParam(baseRedirect, "error", errorMsg);
+        res.writeHead(302, { Location: errorRedirect });
+        res.end();
+        console.log(`[quay serve] action ${actionId} on ${decodedId}: gate blocked — ${errorMsg}`);
+        return;
+      }
       const payloadObj = composePayload({ providerManifest: manifest, task: t, actionId: decodeURIComponent(actionId) });
       // QN-042 (DIR-009): QUAY_ACTION_MOCK_LOG opts into the deterministic
       // mock/file-log delivery mode instead of manda/print — see
@@ -553,16 +643,12 @@ export async function startServer({ port = 4173 } = {}) {
         payloadObj,
         mockLogPath,
       });
-      // QX-009 (experiment 4, iteration 2): if the POST URL carries a `from`
-      // query param (set by the list-page inline action forms), redirect there
-      // to return the user to the list with filter context preserved. Without
-      // `from`, fall back to the task detail page (existing behavior for the
-      // detail-page action buttons).
-      const fromParam = url.searchParams.get("from");
-      const redirectTo = fromParam && fromParam.startsWith("/") ? fromParam : `/task/${t.id}`;
-      res.writeHead(302, { Location: redirectTo });
+      // QX-013 (iteration 3): on success, redirect with ?success= for feedback.
+      const successMsg = `Task ${t.id} advanced`;
+      const successRedirect = addParam(baseRedirect, "success", successMsg);
+      res.writeHead(302, { Location: successRedirect });
       res.end();
-      console.log(`[quay serve] action ${actionId} on ${id}:`, result);
+      console.log(`[quay serve] action ${actionId} on ${decodedId}:`, result);
       return;
     }
 
