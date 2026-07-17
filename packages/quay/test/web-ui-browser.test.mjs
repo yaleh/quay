@@ -156,11 +156,25 @@ async function main() {
   // var the real CLI uses (src/serve.js line "QUAY_ACTION_MOCK_LOG || undefined").
   const mockLogPath = path.join(tasksDir, "action-mock.jsonl");
 
-  // Three tasks seeded:
+  // Three tasks seeded for core UI tests, plus three for QW-004 sort tests:
   // - WUI-1 (todo): action button PRESENT (per provider.yml whenStatus: [todo, ready])
   // - WUI-2 (done): action button ABSENT — negative control (no matching whenStatus)
   // - WUI-ACT (todo): used exclusively for the POST action trigger test (QC-002)
   //   so the GET/detail assertions on WUI-1 remain isolated from the POST test.
+  // - SORT-A (todo), SORT-B (done), SORT-C (ready): QW-004 sort verification tasks.
+  //   Inserted in C, A, B order to test that sort overrides insertion order.
+  execFileSync("node", [nativeBin, "task", "create", "SORT-C", "--title", "Sort test task C (ready)",
+    "--status", "ready", "--body", VALID_SECTIONS], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+  });
+  execFileSync("node", [nativeBin, "task", "create", "SORT-A", "--title", "Sort test task A (todo)",
+    "--status", "todo", "--body", VALID_SECTIONS], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+  });
+  execFileSync("node", [nativeBin, "task", "create", "SORT-B", "--title", "Sort test task B (done)",
+    "--status", "done", "--body", VALID_SECTIONS], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+  });
   execFileSync("node", [nativeBin, "task", "create", "WUI-1", "--title", "Web UI browser test task one",
     "--status", "todo", "--body", VALID_SECTIONS], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
@@ -454,11 +468,66 @@ async function main() {
     assert(!listDone.body.includes("WUI-ACT"),
       "GET /?status=done excludes WUI-ACT (todo task) (QW-003: filter excludes non-matching)");
 
-    // GET /?status=ready — no tasks in fixture; returns empty list (not an error)
+    // GET /?status=ready — returns only SORT-C (the one ready task in fixture)
     const listReady = await get(port, "/?status=ready");
     assert(listReady.status === 200, `GET /?status=ready returns 200 (got ${listReady.status})`);
     assert(!listReady.body.includes("WUI-1") && !listReady.body.includes("WUI-2"),
-      "GET /?status=ready returns empty list (no fixture tasks have status=ready) (QW-003: empty-filter not an error)");
+      "GET /?status=ready excludes WUI-1/WUI-2 (todo/done) (QW-003: filter excludes non-matching)");
+    assert(listReady.body.includes("SORT-C"),
+      "GET /?status=ready includes SORT-C (ready task) (QW-003: filter includes matching)");
+
+    // ── QW-004: sort-by-id and sort-by-status assertions ────────────────────
+    // QW-004 (experiment 3, iteration 3): verify ?sort=id and ?sort=status query
+    // params in GET /. Three tasks seeded in C, A, B order (non-alphabetical
+    // insertion) to prove sort overrides insertion order:
+    //   SORT-A (todo), SORT-B (done), SORT-C (ready) — inserted as C, A, B.
+
+    // Sort nav is present in the list page (check for sort links)
+    assert(list.body.includes("/?sort=id") || list.body.includes("sort=id"),
+      "GET / body includes sort navigation link for sort=id (QW-004: sort nav)");
+    assert(list.body.includes("/?sort=status") || list.body.includes("sort=status"),
+      "GET / body includes sort navigation link for sort=status (QW-004: sort nav)");
+
+    // GET /?sort=id — tasks sorted alphabetically by id (SORT-A before SORT-B before SORT-C)
+    const listSortId = await get(port, "/?sort=id");
+    assert(listSortId.status === 200, `GET /?sort=id returns 200 (got ${listSortId.status})`);
+    assert(listSortId.body.includes("SORT-A") && listSortId.body.includes("SORT-B") && listSortId.body.includes("SORT-C"),
+      "GET /?sort=id includes all three SORT-* tasks (QW-004: sort=id returns all tasks)");
+    // Verify SORT-A appears before SORT-B in HTML output (index comparison)
+    assert(listSortId.body.indexOf("SORT-A") < listSortId.body.indexOf("SORT-B"),
+      "GET /?sort=id: SORT-A appears before SORT-B (alphabetical by id) (QW-004: sort=id order)");
+    assert(listSortId.body.indexOf("SORT-B") < listSortId.body.indexOf("SORT-C"),
+      "GET /?sort=id: SORT-B appears before SORT-C (alphabetical by id) (QW-004: sort=id order)");
+
+    // GET /?sort=status — tasks sorted alphabetically by status (done, ready, todo)
+    // then by id as tiebreaker. Expected order: SORT-B(done), SORT-C(ready), SORT-A(todo).
+    const listSortStatus = await get(port, "/?sort=status");
+    assert(listSortStatus.status === 200, `GET /?sort=status returns 200 (got ${listSortStatus.status})`);
+    assert(listSortStatus.body.includes("SORT-A") && listSortStatus.body.includes("SORT-B") && listSortStatus.body.includes("SORT-C"),
+      "GET /?sort=status includes all three SORT-* tasks (QW-004: sort=status returns all tasks)");
+    // done < ready < todo alphabetically, so SORT-B(done) first, SORT-C(ready) second, SORT-A(todo) third
+    assert(listSortStatus.body.indexOf("SORT-B") < listSortStatus.body.indexOf("SORT-C"),
+      "GET /?sort=status: SORT-B(done) appears before SORT-C(ready) (QW-004: sort=status order)");
+    assert(listSortStatus.body.indexOf("SORT-C") < listSortStatus.body.indexOf("SORT-A"),
+      "GET /?sort=status: SORT-C(ready) appears before SORT-A(todo) (QW-004: sort=status order)");
+
+    // GET /?status=todo&sort=id — filter first (only todo tasks), then sort by id.
+    // Fixture todo tasks: WUI-1, WUI-ACT, SORT-A. Sorted: SORT-A, WUI-1, WUI-ACT.
+    const listStatusTodoSortId = await get(port, "/?status=todo&sort=id");
+    assert(listStatusTodoSortId.status === 200, `GET /?status=todo&sort=id returns 200 (got ${listStatusTodoSortId.status})`);
+    assert(!listStatusTodoSortId.body.includes("SORT-B") && !listStatusTodoSortId.body.includes("SORT-C"),
+      "GET /?status=todo&sort=id excludes done/ready tasks (QW-004: combined filter+sort)");
+    assert(listStatusTodoSortId.body.includes("SORT-A") && listStatusTodoSortId.body.includes("WUI-1"),
+      "GET /?status=todo&sort=id includes todo tasks SORT-A and WUI-1 (QW-004: combined filter+sort)");
+    // SORT-A < WUI-1 alphabetically (S < W)
+    assert(listStatusTodoSortId.body.indexOf("SORT-A") < listStatusTodoSortId.body.indexOf("WUI-1"),
+      "GET /?status=todo&sort=id: SORT-A appears before WUI-1 (alphabetical, S<W) (QW-004: combined sort)");
+
+    // Sort nav links preserve the active status filter in their href
+    // When ?status=todo is active, sort links should include status=todo in href
+    const listTodoForSortNav = await get(port, "/?status=todo");
+    assert(listTodoForSortNav.body.includes("status=todo") && listTodoForSortNav.body.includes("sort=id"),
+      "GET /?status=todo sort nav links preserve status=todo filter in sort hrefs (QW-004: sortNav href)");
 
   } finally {
     if (server) {
@@ -474,7 +543,7 @@ async function main() {
   }
 
   console.log(failures === 0
-    ? "\nAll QC-001/QC-002/QW-001/QW-002 web-ui-browser regression tests passed."
+    ? "\nAll QC-001/QC-002/QW-001/QW-002/QW-003/QW-004 web-ui-browser regression tests passed."
     : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }

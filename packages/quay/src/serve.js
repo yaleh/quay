@@ -272,9 +272,24 @@ export async function startServer({ port = 4173 } = {}) {
       // QW-003 (experiment 3, iteration 2): filter by ?status=<value> query param.
       // No param → all tasks; unknown value → empty list (not an error).
       const statusFilter = url.searchParams.get("status");
-      const tasks = statusFilter
+      const filtered = statusFilter
         ? allTasks.filter((t) => t.status === statusFilter)
         : allTasks;
+      // QW-004 (experiment 3, iteration 3): sort by ?sort=<value> query param.
+      // Supported values: 'id' (lexicographic) and 'status' (then id tiebreaker).
+      // No param or unknown value → insertion order preserved.
+      const sortKey = url.searchParams.get("sort");
+      let tasks;
+      if (sortKey === "id") {
+        tasks = filtered.slice().sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+      } else if (sortKey === "status") {
+        tasks = filtered.slice().sort((a, b) =>
+          a.status < b.status ? -1 : a.status > b.status ? 1 :
+          a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+        );
+      } else {
+        tasks = filtered;
+      }
       const rows = tasks
         .map(
           (t) => html`<tr>
@@ -288,13 +303,34 @@ export async function startServer({ port = 4173 } = {}) {
       // QW-003: filter navigation links — All, todo, ready, done, needs-human.
       // Active filter is shown as plain text; others as links.
       const statuses = ["todo", "ready", "done", "needs-human"];
+      // Build query param helper: merges status and sort params.
+      function buildHref(status, sort) {
+        const params = new URLSearchParams();
+        if (status) params.set("status", status);
+        if (sort) params.set("sort", sort);
+        const qs = params.toString();
+        return qs ? `/?${qs}` : "/";
+      }
       const filterNav = [
-        statusFilter ? html`<a href="/">All</a>` : html`<strong>All</strong>`,
+        statusFilter
+          ? html`<a href="${buildHref(null, sortKey)}">All</a>`
+          : html`<strong>All</strong>`,
         ...statuses.map((s) =>
           s === statusFilter
             ? html`<strong>${escapeHtml(s)}</strong>`
-            : html`<a href="/?status=${encodeURIComponent(s)}">${escapeHtml(s)}</a>`
+            : html`<a href="${buildHref(s, sortKey)}">${escapeHtml(s)}</a>`
         ),
+      ].join(" · ");
+      // QW-004: sort navigation links — Default, id, status.
+      // Active sort shown as plain text; others as links (preserving active status filter).
+      const sortNav = [
+        !sortKey ? html`<strong>Default</strong>` : html`<a href="${buildHref(statusFilter, null)}">Default</a>`,
+        sortKey === "id"
+          ? html`<strong>id</strong>`
+          : html`<a href="${buildHref(statusFilter, "id")}">id</a>`,
+        sortKey === "status"
+          ? html`<strong>status</strong>`
+          : html`<a href="${buildHref(statusFilter, "status")}">status</a>`,
       ].join(" · ");
       // QN-046 (closes discussion-doc §2.1's browser-rendering gap): a real
       // browser (driven via playwright MCP tooling) decodes this body as
@@ -310,6 +346,7 @@ export async function startServer({ port = 4173 } = {}) {
         <body><main>
           <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
           <p class="meta">Filter: ${filterNav}</p>
+          <p class="meta">Sort: ${sortNav}</p>
           <table>
             <tr><th>id</th><th>status</th><th>role</th><th>title</th></tr>
             ${rows}
