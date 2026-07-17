@@ -445,13 +445,24 @@ export async function startServer({ port = 4173 } = {}) {
         .join("\n");
       // QN-046: same charset fix as the list route above (the "·" separator
       // on this page is likewise mis-decoded by a real browser without it).
+      // QW-008 (experiment 3, iteration 4): render parent and children links in detail page meta.
+      // t.parent: string id or null. t.children: array of child ids (may be empty).
+      const parentMeta = t.parent
+        ? html` · parent: <a href="/task/${escapeHtml(t.parent)}">${escapeHtml(t.parent)}</a>`
+        : "";
+      const childrenMeta = Array.isArray(t.children) && t.children.length > 0
+        ? html`<p class="meta">children: ${t.children.map((c) =>
+            html`<a href="/task/${escapeHtml(c)}">${escapeHtml(c)}</a>`
+          ).join(" · ")}</p>`
+        : "";
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html`<!doctype html>
         <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${pageStyles()}<title>${escapeHtml(t.id)}</title></head>
         <body><main>
           <nav><a href="/">&larr; back to list</a></nav>
           <h1>${escapeHtml(t.id)}: ${escapeHtml(t.title)} [${escapeHtml(t.status)}]</h1>
-          <p class="meta">role: ${escapeHtml(t.role)} · labels: ${escapeHtml((t.labels || []).join(", "))}</p>
+          <p class="meta">role: ${escapeHtml(t.role)} · labels: ${escapeHtml((t.labels || []).join(", "))}${parentMeta}</p>
+          ${childrenMeta}
           <div>${buttons}</div>
           <h2 class="sr-only">Details</h2>
           <div class="body">${renderMarkdown(t.body)}</div>
