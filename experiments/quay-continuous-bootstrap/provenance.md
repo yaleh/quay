@@ -286,6 +286,78 @@ All 5 conditions checked:
 
 ---
 
+## Iteration 2 record (2026-07-17)
+
+### QX-* tasks created and completed this iteration
+
+| Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
+|------|-----------|------------|---------|----------------|--------|-------|
+| QX-008 | native | native | G3 pending (Core source touched) | 7/10 | done | Sort by updated (CB-004/CB-005/CB-012): store.js updatedAt, CLI --sort updated, Web UI ?sort=updated + "Updated ↓" nav |
+| QX-009 | native | native | G3 pending (Core source touched) | 8/10 | done | List-page action buttons (CB-003): inline forms with ?from= redirect, "actions" column header |
+| QX-010 | native | native | tests pass (30/30) | 9/10 | done | MCP schema test (CB-011): Block 13 in mcp-server.test.mjs verifies prefix in inputSchema + updatedAt in task_list response; no Core source change |
+
+σ_QX before iteration 2: 6/7 = 0.857 (QX-001 seed, QX-002..QX-007 native)
+σ_QX after iteration 2 (development phase, G3 pending): 9/10 = 0.900
+(QX-001 remains seed provenance. QX-008, QX-009, QX-010 all native authoring + execution.
+ QX-008 and QX-009 gate_by = "G3 pending" — G3 must co-sign before final confirmation.
+ QX-010 gate_by = "tests pass (30/30)" — no Core source change, no G3 required per DoD.)
+
+### Gate check results (iteration 2)
+- QX-008: gate `execute->done` ok:true (7/7 AC checked); G3 co-sign pending (orchestrator dispatch)
+- QX-009: gate `execute->done` ok:true (6/6 AC checked); G3 co-sign pending (orchestrator dispatch)
+- QX-010: gate `execute->done` ok:true (4/4 AC checked); tests pass (30/30); no G3 required
+
+### Gaps closed this iteration (development phase)
+- CB-003 (action buttons on list page) → QX-009; commit 44fa2a7
+- CB-004 (CLI sort by time) → QX-008; commit 44fa2a7
+- CB-005 (Web UI sort by time) → QX-008; commit 44fa2a7
+- CB-011 (MCP schema stale — task_list missing prefix in session) → QX-010; commit 44fa2a7 (test-only; source already correct since QX-003)
+- CB-012 (--sort updated silently ignored regression) → QX-008; commit 44fa2a7
+
+### New gaps found this iteration (development phase)
+None during development phase. Simulated-user pass pending (dispatched separately by orchestrator).
+
+### G3 status (iteration 2)
+G3 TRIGGERED — Core source files changed: `packages/quay-native/src/store.js`, `packages/quay/bin/quay.js`, `packages/quay/src/serve.js`.
+G3 PENDING — orchestrator dispatches G3 audit agent after development phase completes.
+
+### System health (iteration 2, development phase)
+Full test suite (final): 30/30 pass (node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs packages/quay-github/test/*.test.mjs). No regressions. QX-008 (test 17), QX-009 (serve port+3 block), QX-010 (Block 13) all added.
+
+### V_instance (iteration 2, DRAFT — development phase only, simulated-user pending)
+```
+V_instance = capability_breadth × usability_quality × verification_coverage × system_health
+           ≈ 0.74 × 0.69 × 0.97 × 0.99
+           ≈ 0.490   (DRAFT — subject to simulated-user and G3 revision)
+
+ΔV_instance ≈ +0.102 over iteration 1 final (0.388)
+```
+Development-phase rationale:
+- capability_breadth: CB-003, CB-004, CB-005, CB-011, CB-012 closed; remaining open: CB-006 (minor), CB-007 (significant), CB-008 (significant), CB-010 (significant, partial). 5 closed / (5 closed + 4 remaining significant/minor weighted) ≈ 0.74
+- usability_quality: UQ-003/004/005/006/007/008/009 remain open (all minor-to-significant); no usability gaps closed this iteration; score held at ~0.69 (marginal improvement over 0.68 from CB-003 action buttons reducing friction)
+- verification_coverage: all 3 task groups tested; 30/30 pass; ≈ 0.97
+- system_health: no regressions; new tests added; ≈ 0.99
+
+### V_meta (iteration 2, DRAFT)
+```
+V_meta = completeness × effectiveness × reusability × validation
+       = 0.77 × 0.26 × 0.79 × 0.900
+       = 0.143   (DRAFT)
+
+ΔV_meta = 0.143 - 0.136 = +0.007
+```
+Ceiling: 0.26 (effectiveness frozen; unchanged).
+
+### V_meta re-trigger checks (iteration 2)
+All 5 conditions checked:
+1. effectiveness re-trigger: NOT TRIGGERED — QX-008/009/010 each touched multiple files (store.js + quay.js + serve.js + 3 test files). No single-file no-network scope-matched task completed.
+2. reusability re-trigger: NOT TRIGGERED — no organic GitHub Provider write demand.
+3. completeness re-trigger (gap discovery): NOT TRIGGERED — no new Skill Method-step gap found; ENV gap continues.
+4. completeness + reusability/effectiveness joint: NOT TRIGGERED — no unconditional native dispatch primitive.
+5. open-ended-domain-specific: NOT TRIGGERED (development phase only; simulated-user pass pending — may update).
+
+---
+
 ## Human-observed gap-list seed candidates (2026-07-17, pre-iteration-0)
 
 The human, using experiment 3's shipped Web UI directly as a real user (not via the

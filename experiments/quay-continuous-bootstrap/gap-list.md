@@ -11,15 +11,10 @@
 
 | ID | Description | Severity | Source | Date added | Last confirmed open |
 |----|-------------|----------|--------|------------|---------------------|
-| CB-003 | Action buttons ("Advance") missing from Web UI list page — only on task detail page | significant | direct-observation (human, 2026-07-17) + simulated-user (cross-experiment maintainer + comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
-| CB-004 | No sort-by-time (created/updated) on CLI task list | significant | direct-observation (human, 2026-07-17) + simulated-user (cross-experiment maintainer + comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
-| CB-005 | No sort-by-time (created/updated) on Web UI list page — sort options limited to Default/id/status | significant | direct-observation (human, 2026-07-17) + simulated-user (all 3 personas, iteration 0) | 2026-07-17 | 2026-07-17 |
 | CB-006 | Configurable page size not available on Web UI list page (fixed at 20) | minor | direct-observation (human, 2026-07-17) + simulated-user (cross-experiment maintainer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | CB-007 | No full-text/title search in CLI or Web UI | significant | simulated-user (comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | CB-008 | No packaging/distribution — users must install Node.js ≥20 separately; no single-file executables (DIR-004) | significant | directive (DIR-004, experiment 3) | 2026-07-17 | 2026-07-17 |
 | CB-010 | `task_list` MCP tool response size (550K chars for 94 tasks) exceeds inline processing limits — partially addressed by CB-009 prefix filter but full response still large when no prefix is used | significant | simulated-user (cross-experiment maintainer, iteration 0) + direct-observation | 2026-07-17 | 2026-07-17 |
-| CB-011 | MCP `task_list` registered schema in Claude Code does not include `prefix` parameter (stale snapshot) — agents cannot discover or use the implemented filter via the declared interface | significant | simulated-user (cross-experiment maintainer, iteration 1) | 2026-07-17 | 2026-07-17 |
-| CB-012 | `--sort updated` silently ignored in CLI `task list` (no error, no sort by time) — a user who guesses this flag gets no feedback that it is unsupported | significant | simulated-user (cross-experiment maintainer, iteration 1) | 2026-07-17 | 2026-07-17 |
 
 ### usability_quality
 
@@ -51,7 +46,12 @@
 |----|-------------|-----------|---------|
 | CB-001 | No prefix/experiment filter in CLI (`quay task list`) — returns all experiments' tasks in one flat list | iteration 1 | QX-002 (done); `quay task list --prefix QX` implemented and tested in `packages/quay/test/cli.test.mjs` test 13 |
 | CB-002 | No prefix/experiment filter in Web UI list page — no "show only QX-*" affordance | iteration 1 | QX-004 (done); `?prefix=QX` query param + Prefix nav row implemented and tested in `packages/quay/test/serve.test.mjs` |
+| CB-003 | Action buttons ("Advance") missing from Web UI list page — only on task detail page | iteration 2 | QX-009 (done); inline action buttons added to each list row; POST with ?from= redirects back to list; tested in `packages/quay/test/serve.test.mjs` QX-009 block |
+| CB-004 | No sort-by-time (created/updated) on CLI task list | iteration 2 | QX-008 (done); `--sort updated` now sorts by file mtime descending; tested in `packages/quay/test/cli.test.mjs` test 17 |
+| CB-005 | No sort-by-time (created/updated) on Web UI list page | iteration 2 | QX-008 (done); `?sort=updated` + "Updated ↓" nav link; tested in `packages/quay/test/serve.test.mjs` QX-008 block |
 | CB-009 | `task_list` MCP tool has no prefix/experiment filter — returns all 94 tasks requiring post-processing | iteration 1 | QX-003 (done); `prefix` parameter added to `task_list` MCP tool, tested in `packages/quay/test/mcp-server.test.mjs` test 12 |
+| CB-011 | MCP `task_list` registered schema in Claude Code does not include `prefix` parameter (stale snapshot) | iteration 2 | QX-010 (done); server code already correct since QX-003; automated `tools/list` schema test added in `packages/quay/test/mcp-server.test.mjs` Block 13 confirming `prefix` in inputSchema; stale session cache resolved by new session |
+| CB-012 | `--sort updated` silently ignored in CLI `task list` | iteration 2 | QX-008 (done); `--sort updated` now correctly sorts by file mtime (not silently falls through to default order); CLI test 17 proves non-default ordering |
 
 ### usability_quality
 
@@ -79,5 +79,6 @@
 
 - Iteration 0: 19 gaps added (CB-001..CB-010, UQ-001..UQ-008, VC-001); 0 closed
 - Iteration 1: 5 new gaps found (CB-011, CB-012, UQ-009, UQ-010, SH-001); 9 gaps closed (CB-001, CB-002, CB-009, UQ-001, UQ-002, UQ-010, VC-001, SH-001) — note SH-001 was found and closed in the same iteration
-- **Cumulative gaps closed (all-time): 9** (CB-001, CB-002, CB-009, UQ-001, UQ-002, UQ-010, VC-001, SH-001; CB-010 partially addressed)
-- **Net open gaps after iteration 1**: 16 (9 CB, 7 UQ, 0 VC, 0 SH)
+- Iteration 2: 0 new gaps found (development phase only; simulated-user pending); 5 gaps closed (CB-003, CB-004, CB-005, CB-011, CB-012)
+- **Cumulative gaps closed (all-time): 14** (CB-001, CB-002, CB-003, CB-004, CB-005, CB-009, CB-011, CB-012, UQ-001, UQ-002, UQ-010, VC-001, SH-001; CB-010 partially addressed)
+- **Net open gaps after iteration 2 development phase**: 11 (4 CB, 7 UQ, 0 VC, 0 SH) [simulated-user may add more]
