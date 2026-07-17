@@ -384,9 +384,13 @@ export async function startServer({ port = 4173 } = {}) {
       // QX-021 (experiment 4, iteration 5): full-text title search via ?q=<query>.
       // Case-insensitive substring match on task title. Empty or absent ?q means no filter.
       // Closes CB-007 (significant: no search affordance in CLI or Web UI).
+      // QX-023 (experiment 4, iteration 6): extend to body content too.
+      // Closes CB-016 (significant: title-only search misses body content).
       const qFilter = url.searchParams.get("q") || null;
       const filtered = qFilter
-        ? filteredByLabel.filter((t) => t.title.toLowerCase().includes(qFilter.toLowerCase()))
+        ? filteredByLabel.filter((t) =>
+            (t.title + " " + (t.body || "")).toLowerCase().includes(qFilter.toLowerCase())
+          )
         : filteredByLabel;
       // QW-004 (experiment 3, iteration 3): sort by ?sort=<value> query param.
       // QX-008 (experiment 4, iteration 2): added 'updated' sort value —
@@ -542,12 +546,19 @@ export async function startServer({ port = 4173 } = {}) {
       // Active labels are shown bold (works for multi-label state too).
       // When 2+ labels are active, an "All" / clear-all link is shown first.
       // Closes UQ-019 (significant: multi-label label-nav replaced entire filter).
+      // QX-024 (experiment 4, iteration 6): truncate label nav at 25 labels.
+      // When more than 25 distinct labels exist, show only the first 25 and append
+      // a non-link "… N more labels" note. Closes UQ-025 (significant: flat wall
+      // of 40+ labels becomes unusable at scale).
+      const LABEL_NAV_MAX = 25;
       const allLabels = [...new Set(allTasks.flatMap((t) => Array.isArray(t.labels) ? t.labels : []))].sort();
+      const visibleLabels = allLabels.slice(0, LABEL_NAV_MAX);
+      const hiddenLabelCount = allLabels.length - visibleLabels.length;
       const labelNav = allLabels.length > 0 ? [
         labelFilters.length > 0
           ? html`<a href="${buildHref(statusFilter, sortKey, null, null, prefixFilter, qFilter)}">All</a>`
           : html`<strong>All</strong>`,
-        ...allLabels.map((l) => {
+        ...visibleLabels.map((l) => {
           const isActive = labelFilters.includes(l);
           // Toggle: if active, remove l from filters; if inactive, add l to filters.
           const toggledLabels = isActive
@@ -557,6 +568,7 @@ export async function startServer({ port = 4173 } = {}) {
             ? html`<strong>${escapeHtml(l)}</strong> (<a href="${buildHref(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">remove</a>)`
             : html`<a href="${buildHref(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">${escapeHtml(l)}</a>`;
         }),
+        ...(hiddenLabelCount > 0 ? [`… ${hiddenLabelCount} more labels`] : []),
       ].join(" · ") : null;
       // QW-007: page navigation — Previous / Next links with page info.
       // QW-007: page navigation — Previous / Next links with page info.

@@ -828,6 +828,110 @@ async function main() {
     }
   }
 
+  // --- QX-023 (experiment 4, iteration 6): body search (CB-016) ---
+  // --- QX-024 (experiment 4, iteration 6): label nav truncation (UQ-025) ---
+  // --- QX-025 (experiment 4, iteration 6): clear link filter preservation (UQ-026) ---
+  {
+    const qx23TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-qx23-test-"));
+    const qx23WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-qx23-workspace-"));
+    fs.mkdirSync(path.join(qx23WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx23WorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx23TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx23TasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    // BSRCH-1: unique term ONLY in body, not in title
+    const bodyOnlyBody = VALID_SECTIONS + "\nThis body contains xyzzy-unique-body-term here.\n";
+    execFileSync("node", [nativeBin, "task", "create", "BSRCH-1", "--title", "Unrelated title only",
+      "--status", "todo", "--body", bodyOnlyBody], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx23TasksDir },
+    });
+    // BSRCH-2: term NOT in title or body (control — must be excluded)
+    execFileSync("node", [nativeBin, "task", "create", "BSRCH-2", "--title", "Other task no match",
+      "--status", "todo", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx23TasksDir },
+    });
+    // QX-024 setup: 30 tasks with distinct labels (label-01 through label-30)
+    // to trigger the "more labels" truncation threshold (25).
+    for (let i = 1; i <= 30; i++) {
+      const labelId = `LBL${String(i).padStart(2, "0")}`;
+      const labelName = `label-${String(i).padStart(2, "0")}`;
+      execFileSync("node", [nativeBin, "task", "create", labelId, "--title", `Label task ${i}`,
+        "--status", "todo", "--body", VALID_SECTIONS, "--labels", labelName], {
+        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx23TasksDir },
+      });
+    }
+
+    const qx23Port = port + 7;
+    const qx23OrigCwd = process.cwd();
+    let qx23Server;
+    try {
+      process.chdir(qx23WorkspaceRoot);
+      qx23Server = await startServer({ port: qx23Port });
+
+      // --- QX-023 (CB-016): body search ---
+      // ?q=xyzzy-unique-body-term must return BSRCH-1 (body match) but not BSRCH-2 (no match)
+      const bodySearch = await get(qx23Port, "/?q=xyzzy-unique-body-term");
+      assert(bodySearch.status === 200, "GET /?q=body-term returns 200 (QX-023, CB-016)");
+      assert(bodySearch.body.includes("BSRCH-1"),
+        "GET /?q=body-term includes BSRCH-1 (body match, not title) (QX-023, CB-016)");
+      assert(!bodySearch.body.includes("BSRCH-2"),
+        "GET /?q=body-term excludes BSRCH-2 (no match) (QX-023, CB-016)");
+
+      // Case-insensitive body search
+      const bodySearchUpper = await get(qx23Port, "/?q=XYZZY-UNIQUE-BODY-TERM");
+      assert(bodySearchUpper.status === 200, "GET /?q=BODY-TERM (uppercase) returns 200 (QX-023, CB-016)");
+      assert(bodySearchUpper.body.includes("BSRCH-1"),
+        "GET /?q=BODY-TERM (uppercase) finds body match case-insensitively (QX-023, CB-016)");
+
+      // --- QX-024 (UQ-025): label nav truncation ---
+      // With 30 labels in the workspace, the label nav should be truncated at 25
+      // and show a "more labels" indicator.
+      const manyLabels = await get(qx23Port, "/");
+      assert(manyLabels.status === 200, "GET / with 30 labels returns 200 (QX-024, UQ-025)");
+      assert(manyLabels.body.includes("more labels"),
+        "GET / with 30 labels: label nav shows 'more labels' truncation indicator (QX-024, UQ-025)");
+      // Confirm the truncation count is correct: 30 - 25 = 5 more labels
+      assert(manyLabels.body.includes("5 more labels"),
+        "GET / with 30 labels: label nav shows '5 more labels' (QX-024, UQ-025)");
+
+      // --- QX-025 (UQ-026): clear link preserves other filters ---
+      // When status and label are active, the search clear link must preserve them
+      // and only clear ?q=. The clear link href should include status= and label= but NOT q=.
+      const filteredSearch = await get(qx23Port, "/?status=todo&label=label-01&q=something");
+      assert(filteredSearch.status === 200,
+        "GET /?status=todo&label=label-01&q=something returns 200 (QX-025, UQ-026)");
+      // The clear link for search should include status and label, but not q
+      // buildHref(statusFilter, sortKey, labelFilters, null, prefixFilter, null) produces
+      // /?status=todo&label=label-01 (no q param).
+      assert(
+        filteredSearch.body.includes("status=todo") && filteredSearch.body.includes("label=label-01"),
+        "GET /?status=todo&label=label-01&q=something page contains filter params in nav (QX-025, UQ-026)"
+      );
+      // The clear link href must contain status=todo&label=label-01 and must NOT be bare "/"
+      // (which would reset all filters). Verify the clear link includes the preserved params.
+      assert(
+        filteredSearch.body.includes(">clear</a>"),
+        "GET /?status=todo&label=label-01&q=something page contains a clear link for search (QX-025, UQ-026)"
+      );
+      // Verify clear link preserves status filter (href includes status=todo)
+      const clearWithStatus = filteredSearch.body.match(/href="([^"]*)"[^>]*>clear<\/a>/);
+      assert(
+        clearWithStatus && clearWithStatus[1].includes("status=todo"),
+        `GET clear link preserves ?status=todo filter (QX-025, UQ-026): href="${clearWithStatus ? clearWithStatus[1] : "not found"}"`
+      );
+
+    } finally {
+      if (qx23Server) {
+        qx23Server.close();
+        if (qx23Server.client) await qx23Server.client.close();
+      }
+      process.chdir(qx23OrigCwd);
+      fs.rmSync(qx23TasksDir, { recursive: true, force: true });
+      fs.rmSync(qx23WorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
   console.log(failures === 0 ? "\nAll QN-031 serve/action regression tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }

@@ -1236,6 +1236,62 @@ async function main() {
       assert(r.stdout.includes("--search"), "quay --help output mentions --search flag (QX-021, CB-007)");
     }
 
+    // QX-023 (experiment 4, iteration 6): body search — term in body but NOT in title.
+    // SRCH-4: title is "Unrelated title" but body contains "xyzzy-unique-term".
+    // --search xyzzy-unique-term must match SRCH-4 (body match) and exclude SRCH-1/2/3.
+    {
+      const srch4TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-bodysearch-tasks-"));
+      const srch4WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-bodysearch-workspace-"));
+      fs.mkdirSync(path.join(srch4WorkspaceRoot, ".quay"), { recursive: true });
+      fs.writeFileSync(
+        path.join(srch4WorkspaceRoot, ".quay", "config.yml"),
+        [
+          "providers:",
+          "  native:",
+          "    enabled: true",
+          `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+          `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+          "    env:",
+          `      QUAY_NATIVE_TASKS_DIR: "${srch4TasksDir.replaceAll("\\", "\\\\")}"`,
+          "",
+        ].join("\n")
+      );
+      const srch4Opts = { cwd: srch4WorkspaceRoot, encoding: "utf8" };
+      // BSRCH-1: unique term ONLY in body, not in title
+      const bodyWithUniqueToken = VALID_SECTIONS + "\nxyzzy-unique-term appears here in the body\n" + AC_DOD_CHECKED;
+      execFileSync("node", [nativeBin, "task", "create", "BSRCH-1", "--title", "Unrelated title",
+        "--status", "todo", "--body", bodyWithUniqueToken], {
+        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srch4TasksDir },
+      });
+      // BSRCH-2: control — term NOT in title or body; must be excluded
+      execFileSync("node", [nativeBin, "task", "create", "BSRCH-2", "--title", "Other task",
+        "--status", "todo", "--body", ML_BODY], {
+        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srch4TasksDir },
+      });
+      {
+        const r = run(["task", "list", "--search", "xyzzy-unique-term", "--json"], srch4Opts);
+        assert(r.status === 0, "quay task list --search body-term exits 0 (QX-023, CB-016)");
+        let tasks;
+        try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+        assert(Array.isArray(tasks) && tasks.some((t) => t.id === "BSRCH-1"),
+          "quay task list --search body-term includes BSRCH-1 (body match, not title) (QX-023, CB-016)");
+        assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "BSRCH-2"),
+          "quay task list --search body-term excludes BSRCH-2 (no match) (QX-023, CB-016)");
+      }
+      // QX-025: zero-result hint (UQ-024) — --search for a term that matches nothing
+      // should print a Hint line in non-JSON output.
+      {
+        const r = run(["task", "list", "--search", "no-such-term-ever-42z"], srch4Opts);
+        assert(r.status === 0, "quay task list --search no-match exits 0 (QX-025, UQ-024)");
+        assert(r.stdout.includes("Hint:"),
+          "quay task list --search no-match outputs Hint line (QX-025, UQ-024)");
+        assert(r.stdout.includes("--label"),
+          "quay task list --search no-match Hint mentions --label (QX-025, UQ-024)");
+      }
+      fs.rmSync(srch4TasksDir, { recursive: true, force: true });
+      fs.rmSync(srch4WorkspaceRoot, { recursive: true, force: true });
+    }
+
     fs.rmSync(srchTasksDir, { recursive: true, force: true });
     fs.rmSync(srchWorkspaceRoot, { recursive: true, force: true });
   }

@@ -239,18 +239,15 @@ export function createStore(tasksDir) {
     // (?sort=updated) sort by recency without needing a separate fs.stat call
     // at the Core layer. The mtime is read here, once per task, as part of the
     // existing listIds() → get() walk.
+    // QX-025 (experiment 4, iteration 6): remove redundant statSync. get() already
+    // calls statSync internally (QX-018) and sets updatedAt on the returned
+    // view-model. The prior additional statSync block here was a redundant second
+    // stat on the same file — removed. Closes UQ-023 (minor: redundant statSync
+    // in list() noted by G3 audit, iteration 4).
     return listIds()
       .map((id) => {
         const t = get(id);
         if (t === null) return null;
-        try {
-          const mtime = fs.statSync(filePathFor(id)).mtimeMs;
-          t.updatedAt = mtime;
-        } catch {
-          // If stat fails (race: file deleted after listIds), omit updatedAt
-          // rather than crashing — the task will be filtered out as null above
-          // in practice, but handle gracefully just in case.
-        }
         return t;
       })
       .filter((t) => t !== null)

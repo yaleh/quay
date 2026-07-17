@@ -180,9 +180,13 @@ async function main() {
         : filteredByPrefix;
       // QX-021 (experiment 4, iteration 5): --search <query> title filter.
       // Case-insensitive substring match on task title. Closes CB-007.
+      // QX-023 (experiment 4, iteration 6): extend to body content too.
+      // Closes CB-016 (significant: title-only search misses body content).
       const searchQuery = typeof flags.search === "string" ? flags.search : null;
       const filtered = searchQuery
-        ? filteredByLabel.filter((t) => t.title.toLowerCase().includes(searchQuery.toLowerCase()))
+        ? filteredByLabel.filter((t) =>
+            (t.title + " " + (t.body || "")).toLowerCase().includes(searchQuery.toLowerCase())
+          )
         : filteredByLabel;
       // QX-008 (experiment 4, iteration 2): sort-by-updated support.
       // Closes CB-004 (no sort-by-time on CLI) and CB-012 (--sort updated
@@ -218,6 +222,12 @@ async function main() {
         for (const t of sorted) {
           const updatedStr = typeof t.updatedAt === "number" ? relativeTimeCli(t.updatedAt) : "—";
           console.log(`${t.id}\t${t.status}\t${t.role}\t${t.title}\t${updatedStr}`);
+        }
+        // QX-025 (experiment 4, iteration 6): zero-result hint when --search
+        // returns nothing — users often search for a label name and are confused
+        // by an empty result with no guidance. Closes UQ-024 (minor).
+        if (sorted.length === 0 && searchQuery !== null) {
+          console.log(`Hint: use --label to filter by label, or --search to match title/body content.`);
         }
       }
     }, { providerId: flags.provider });

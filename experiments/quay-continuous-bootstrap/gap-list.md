@@ -17,7 +17,7 @@
 | CB-010 | `task_list` MCP tool response size (550K chars for 94 tasks) exceeds inline processing limits — partially addressed by CB-009 prefix filter but full response still large when no prefix is used | significant | simulated-user (cross-experiment maintainer, iteration 0) + direct-observation | 2026-07-17 | 2026-07-17 |
 | CB-014 | MCP `task_list` schema still shows stale version in live Claude Code session (`prefix` absent in ToolSearch cache) — structural: CB-011's "fix" (new session) did not permanently resolve the underlying session-cache lifecycle; requires a session-independent fix (version header, or MCP reconnect signal) | significant | simulated-user (cross-experiment maintainer, iteration 4) | 2026-07-17 | 2026-07-17 |
 | CB-015 | MCP `task_list` has no multi-label filter parity — CLI and Web UI both support multi-label AND-join (`--label A --label B` / `?label=A&label=B`); MCP `task_list` only accepts a single `label` string parameter | minor | simulated-user (cross-experiment, iteration 4) | 2026-07-17 | 2026-07-17 |
-| CB-016 | Search is title-only; body/description content is not searchable. Significant gap vs. GitHub Issues / Linear where full-text body search is standard | significant | simulated-user (comparison-reviewer, iteration 5) | 2026-07-17 | 2026-07-17 |
+| ~~CB-016~~ | ~~Search is title-only; body/description content is not searchable. Significant gap vs. GitHub Issues / Linear where full-text body search is standard~~ | ~~significant~~ | Closed iteration 6 — QX-023; search now matches title + body content; cli.test.mjs + serve.test.mjs body-search tests added |
 
 ### usability_quality
 
@@ -31,10 +31,10 @@
 | UQ-020 | CLI `task list` returns empty output (no rows, no message) with no "0 tasks found" line when filter matches nothing — user cannot distinguish "no matches" from "command failed silently" | minor | simulated-user (cross-experiment maintainer, iteration 4) | 2026-07-17 | 2026-07-17 |
 | UQ-021 | `--label` with no value is silently ignored (returns all tasks), while `--prefix` with no value exits with error (QX-006) — inconsistency in flag validation | minor | simulated-user (cross-experiment maintainer, iteration 4) | 2026-07-17 | 2026-07-17 |
 | UQ-022 | `needs-human` task detail page shows empty space where Advance button would be — no call-to-action, no explanatory text, no guidance on what action the human should take | minor | simulated-user (comparison-reviewer, iteration 4) | 2026-07-17 | 2026-07-17 |
-| UQ-023 | Redundant `statSync` in `store.js list()` after QX-018 changes — `get()` already fetches mtime and sets `updatedAt`; `list()`'s subsequent post-`get()` stat call is redundant (same value, stale comment) | minor | G3 audit notes (iteration 4) | 2026-07-17 | 2026-07-17 |
-| UQ-024 | `--search <query>` returns 0 results when a user searches for a label name with no hint to use `--label` instead — new-contributor persona found this disorienting | minor | simulated-user (new-contributor, iteration 5) | 2026-07-17 | 2026-07-17 |
-| UQ-025 | Label navigation degrades at 40+ distinct labels — becomes a flat wall with no grouping, truncation, or search; significant at scale | significant | simulated-user (comparison-reviewer, iteration 5) | 2026-07-17 | 2026-07-17 |
-| UQ-026 | The "clear" search link in the Web UI resets all active filters (status, labels, sort) rather than just clearing the `?q=` query | minor | simulated-user (comparison-reviewer, iteration 5) | 2026-07-17 | 2026-07-17 |
+| ~~UQ-023~~ | ~~Redundant `statSync` in `store.js list()` after QX-018 changes — `get()` already fetches mtime and sets `updatedAt`; `list()`'s subsequent post-`get()` stat call is redundant (same value, stale comment)~~ | ~~minor~~ | Closed iteration 6 — QX-025; redundant statSync block removed from list() in store.js; existing tests confirm no regression |
+| ~~UQ-024~~ | ~~`--search <query>` returns 0 results when a user searches for a label name with no hint to use `--label` instead — new-contributor persona found this disorienting~~ | ~~minor~~ | Closed iteration 6 — QX-025; zero-result hint added to CLI non-JSON output; cli.test.mjs test added |
+| ~~UQ-025~~ | ~~Label navigation degrades at 40+ distinct labels — becomes a flat wall with no grouping, truncation, or search; significant at scale~~ | ~~significant~~ | Closed iteration 6 — QX-024; label nav truncated at 25 with "… N more labels" note; serve.test.mjs test added |
+| ~~UQ-026~~ | ~~The "clear" search link in the Web UI resets all active filters (status, labels, sort) rather than just clearing the `?q=` query~~ | ~~minor~~ | Closed iteration 6 — QX-025; confirmed clear link uses buildHref(statusFilter, sortKey, labelFilters, null, prefixFilter, null) — preserves all filters except q; serve.test.mjs test confirms href includes status=todo when other filters active |
 
 ### verification_coverage
 
@@ -89,6 +89,11 @@
 | UQ-004 | No timestamp column in CLI list output | iteration 5 | QX-022 (done); relativeTimeCli() helper added to bin/quay.js; 5th tab-separated column added to non-JSON output; cli.test.mjs test 19 |
 | UQ-018 | List-page Advance button tooltip generic vs detail-page target-status | iteration 4 | QX-019 (done); listNextStatusMap lookup per task in row renderer; list now shows "Advance to ready" for todo, "Advance to done" for ready; serve.test.mjs assertion; commit 446d95a |
 | UQ-019 | Multi-label filter label-nav replaces entire filter instead of toggling | iteration 5 | QX-020 (done); label nav uses toggle semantics (add if inactive, remove if active); active labels shown bold in multi-label state; "All" clear link shown when 2+ labels active; serve.test.mjs QX-020/021 block |
+| CB-016 | Search is title-only; body/description content is not searchable | iteration 6 | QX-023 (done); search now matches `(t.title + ' ' + (t.body || '')).toLowerCase()` in CLI + Web UI; serve.test.mjs QX-023 body-search block; cli.test.mjs BSRCH-1/BSRCH-2 body-search tests |
+| UQ-025 | Label navigation degrades at 40+ distinct labels — flat wall with no truncation | iteration 6 | QX-024 (done); LABEL_NAV_MAX=25; visibleLabels = allLabels.slice(0,25); hiddenLabelCount>0 appends "… N more labels" note; serve.test.mjs "5 more labels" test with 30 labels |
+| UQ-023 | Redundant statSync in store.js list() after QX-018 | iteration 6 | QX-025 (done); redundant statSync block removed from list(); get() already sets updatedAt; existing tests confirm no regression |
+| UQ-024 | --search returns 0 results with no hint to use --label | iteration 6 | QX-025 (done); zero-result hint added to CLI output when sorted.length===0 && searchQuery!==null; cli.test.mjs BSRCH-2/no-match test |
+| UQ-026 | Web UI clear search link resets all filters not just ?q= | iteration 6 | QX-025 (done); confirmed clear link uses buildHref(statusFilter, sortKey, labelFilters, null, prefixFilter, null) — null q omits q param but preserves all other filters; serve.test.mjs clear-link-href test confirms status=todo preserved |
 
 ### verification_coverage
 
@@ -123,3 +128,6 @@
 - Iteration 5 (G3 + simulated-user, FINAL): G3 PASS; 3 persona simulated-user pass (new-contributor PASS, comparison-reviewer CONCERNS, cross-experiment-maintainer PASS); 4 new gaps logged (CB-016 significant, UQ-024 minor, UQ-025 significant, UQ-026 minor); 0 additional gaps closed in synthesis; cumulative gaps closed unchanged at 31
 - **Cumulative gaps closed (all-time, iteration 5 FINAL): 31**
 - **Net open gaps after iteration 5 FINAL**: 16 (6 CB, 10 UQ, 0 VC, 0 SH) + 1 process — CB-006/008/010/014/015/016 open; UQ-006/007/008/020/021/022/023/024/025/026 open
+- Iteration 6 (development phase): closed CB-016 (QX-023), UQ-025 (QX-024), UQ-023 (QX-025), UQ-024 (QX-025), UQ-026 (QX-025); 5 gaps closed in development phase; G3 + simulated-user pending (dispatched by orchestrator)
+- **Cumulative gaps closed (all-time, iteration 6 development phase): 36** (adds CB-016, UQ-023, UQ-024, UQ-025, UQ-026)
+- **Net open gaps after iteration 6 development phase**: 11 (5 CB, 6 UQ, 0 VC, 0 SH) + 1 process — CB-006/008/010/014/015 open; UQ-006/007/008/020/021/022 open
