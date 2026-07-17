@@ -110,7 +110,11 @@ forward, and DIR-005/DIR-006 went unseen for three iterations — see gap-list P
     → paste the status code (G7 reachability).
 [ ] git worktree add experiments/quay-continuous-bootstrap/worktrees/iteration-N
     -b experiment-4-iteration-N
-    → paste the "HEAD is now at <hash>" line.
+    → paste the "HEAD is now at <hash>" line. Creating the worktree is NOT the
+      gate — WRITING THIS ITERATION'S CHANGES INTO IT is. All development/test
+      edits this iteration must target paths UNDER worktrees/iteration-N/, not
+      the shared tree at repo root. See the end-of-iteration isolation proof
+      gate below; the two are one requirement checked at both ends.
 ```
 
 ```
@@ -128,20 +132,45 @@ forward, and DIR-005/DIR-006 went unseen for three iterations — see gap-list P
     storage-location decision, protocol §9 item 1) has been read in full; every open gap
     entry's "date last re-confirmed still open" is checked against this iteration's planned
     work
+[ ] PROCESS-DIMENSION BLOCKING GAPS surfaced explicitly (hardened per gap-list PR-003 after
+    iteration 12's entering-state summarized them away as "significant gaps: 0"). Grep the
+    gap-list for every OPEN entry whose severity is `blocking` — INCLUDING the process
+    dimension (PR-00N entries), which is NOT one of the four V_instance dimensions and is
+    routinely dropped from V_instance-only roll-ups. Paste each such entry's id + one-line
+    description verbatim into §2. The entering-state summary MAY NOT report "significant
+    gaps: 0" (or any V_instance-dimension-only count) while a process-dimension blocking gap
+    is open. If any process-dimension blocking gap is open, TRIAGING IT is this iteration's
+    first-priority work item — an iteration that instead proceeds to a curated cluster of
+    minor V_instance gaps while a blocking process gap stands open has skipped its own
+    highest-priority obligation and the gate FAILS.
 [ ] directives/pending/ dispositioned — satisfied via the HARD GATES block above (raw
     `ls` pasted, every listed file given an outcome). This INCLUDES the two directives
     carried forward from experiment 3 (DIR-004 packaging/distribution, now re-filed here
-    per protocol §8; DIR-006 worktree isolation, adopted directly as a standing guardrail
-    rather than re-filed as still-open — confirm both are represented correctly in this
-    experiment's own directives/ tree at iteration 0)
+    per protocol §8; DIR-006 worktree isolation). DIR-006 is NOT satisfied by being
+    "adopted as a standing guardrail" — that acknowledgment-in-place framing is the exact
+    loophole that let iterations 0–12 skip real isolation (gap-list PR-002). It is satisfied
+    ONLY by the end-of-iteration isolation PROOF gate below (pasted `git -C worktree status`
+    showing this iteration's writes landed there, plus a clean shared tree). Confirm both
+    directives are represented correctly in this experiment's own directives/ tree.
 [ ] G7 standing web-service reachability (protocol §8, new guardrail): is `quay serve`
     currently running and reachable on 0.0.0.0 (not localhost-only)? If not, start it before
     proceeding — the simulated-user mechanism needs a live target every iteration, not a
     service started ad hoc mid-iteration.
-[ ] Git worktree isolation (protocol §8, generalized from DIR-006): has a dedicated worktree
-    been created for this iteration's development/testing work? If a structural blocker
-    prevents it, concrete evidence of the blocker must be shown (not asserted) before falling
-    back to direct execution in the shared tree, flagged explicitly as a deviation.
+[ ] Git worktree isolation END-OF-ITERATION PROOF (protocol §8, generalized from DIR-006;
+    hardened per gap-list PR-002 after iterations 0–12 satisfied "worktree created" while
+    every real file write still landed in the shared tree). Creation is not the gate; writes
+    landing in the worktree is. Paste BOTH of these raw outputs into §2 of the report:
+      (a) git -C experiments/quay-continuous-bootstrap/worktrees/iteration-N status --short
+          → MUST list this iteration's changed source/test files (they landed in the worktree).
+      (b) git -C <repo root> status --short -- packages/
+          → MUST be clean for the files this iteration changed (they did NOT land in the
+            shared tree).
+    If (a) is empty or (b) shows this iteration's edits, the gate FAILS — this is the exact
+    form-vs-substance failure PR-002 flagged, and a prose claim of "isolated" does not
+    override the git output. If a genuine structural blocker forces shared-tree execution,
+    the blocker must be REPRODUCED as pasted command output (the error itself, not an
+    assertion that ENV limits exist), and the deviation flagged explicitly; the standing
+    "ENV limitation" boilerplate carried forward since iteration 0 is NOT acceptable evidence.
 [ ] The V_meta re-trigger conditions (from .claude/skills/quay-native-methodology/
     reference/v-meta-stall-analysis.md, as refined by quay-core-bootstrap-methodology's
     ceiling/floor findings AND by this experiment's own self-hosted-task-tracking-as-
