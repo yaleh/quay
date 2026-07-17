@@ -514,6 +514,24 @@ async function main() {
         "GET /task/UX3-1?from=https://evil.com: open-redirect guard rejects external URL, defaults to / (QX-011)"
       );
 
+      // --- SH-002: open-redirect guard — protocol-relative URL //evil.com rejected ---
+      const protoRelFrom = encodeURIComponent("//evil.com");
+      const detailProtoRel = await get(ux3Port, `/task/UX3-1?from=${protoRelFrom}`);
+      assert(
+        detailProtoRel.body.includes('href="/"') && !detailProtoRel.body.includes("evil.com"),
+        "GET /task/UX3-1?from=//evil.com: open-redirect guard rejects protocol-relative URL, defaults to / (SH-002)"
+      );
+
+      // --- CR-010 / UQ-016: orientation banner must say 'ready', not 'in_progress' ---
+      assert(
+        !listForBanner.body.includes("in_progress"),
+        "GET / orientation banner does NOT contain 'in_progress' (non-existent status) (CR-010, UQ-016)"
+      );
+      assert(
+        listForBanner.body.includes("ready"),
+        "GET / orientation banner contains 'ready' (actual status in model) (CR-010, UQ-016)"
+      );
+
       // --- QX-014 (UQ-014): detail page Advance button has target-status tooltip ---
       // UX3-1 is at status=todo, so next status is "ready"
       assert(

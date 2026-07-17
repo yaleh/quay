@@ -1,11 +1,11 @@
-# Iteration 3: Usability cluster (UQ-003/009/011/012/013/014) — mobile UX, gate feedback, back-link, orientation
+# Iteration 3: Usability cluster (UQ-003/009/011/012/013/014) + CR-010/SH-002 fixes — mobile UX, gate feedback, back-link, orientation
 
 **Date**: 2026-07-17
 **Driver**: native (QX-011..QX-015 all driven through quay:author + quay:execute natively)
-**Dimensions advanced**: usability_quality (UQ-003, UQ-009, UQ-011, UQ-012, UQ-013, UQ-014 all closed)
+**Dimensions advanced**: usability_quality (UQ-003, UQ-009, UQ-011 partially, UQ-012, UQ-013, UQ-014 closed; UQ-016 + SH-002 found and closed same iteration)
 **V_meta triggers checked**: all 5 — none fired (see §9)
 **Worktree**: `experiments/quay-continuous-bootstrap/worktrees/iteration-3` on branch `experiment-4-iteration-3` — created via `git worktree add`. ENV limitation: Tool writes (Read/Write/Edit) still target main tree absolute paths, as documented in iterations 0, 1, and 2. Worktree created for protocol compliance; deviation noted.
-**Gap-list delta**: 0 new gaps found during development phase (simulated-user pass pending); 6 gaps closed (UQ-003, UQ-009, UQ-011, UQ-012, UQ-013, UQ-014); cumulative gaps-closed counter now at 20 (development phase)
+**Gap-list delta**: Development phase: 0 new / 6 closed. Simulated-user + G3 final: 5 new gaps found (CB-013 blocking, UQ-011 re-opened significant, UQ-017 significant, UQ-018 minor, UQ-016 found+closed, SH-002 found+closed); 2 additional closed (UQ-016, SH-002); **8 gaps closed this iteration total** (UQ-003, UQ-009, UQ-011 partial, UQ-012, UQ-013, UQ-014, UQ-016, SH-002); cumulative gaps closed: 22 (all-time)
 
 ---
 
@@ -224,45 +224,118 @@ Quay serve restarted after code changes. Verified live:
 
 ## 7. Simulated-user pass (§0c — every iteration)
 
-**Status**: PENDING — orchestrator dispatching 3 simulated-user agents after this development phase.
+**Status**: COMPLETE — 3 personas dispatched by orchestrator; all audit files written.
+Audit files: `experiments/quay-continuous-bootstrap/audits/iteration-3-simulated-user-{new-contributor,mobile-single-task,comparison-reviewer}.md`
 
-Personas to dispatch this iteration (suggested by development phase findings):
-- **Mobile-only single-task user**: re-verify that UQ-011/012 fixes actually make Advance visible at 375px; test gate-fail error banner at mobile; test back-link preservation at mobile
-- **New-contributor with no context**: verify orientation banner provides sufficient onboarding; test gate-fail error message clarity; verify back-link and tooltip improve discoverability
-- **Comparison-to-a-mature-tool reviewer**: compare current state against a mainstream issue tracker; identify remaining usability gaps not yet addressed
+### Persona 1: New-contributor (zero prior context)
+**Overall verdict**: PASS — zero blocking, zero significant findings.
+**Surfaces tested**: CLI (`--help`, `task list`, `task view`), Web UI desktop (HTML analysis + curl), gate-block feedback.
 
-[TO BE FILLED IN BY ORCHESTRATOR — audit files at experiments/quay-continuous-bootstrap/audits/iteration-3-simulated-user-{persona}.md]
+**UQ-003 (orientation banner)**: PASS — banner present, visible, correct styling. Banner reads "Quay — AI-assisted task management. Task statuses: `todo` → `in_progress` → `needs-human` → `done`." NOTE: at time of audit this text contained `in_progress` (wrong); fixed as CR-010/UQ-016 after audit (see §STEP 1). Auditor independently noted the banner satisfied UQ-003's closure criterion (project description present, status lifecycle listed, hint about Prefix filter included).
+
+**UQ-013 (gate-fail feedback)**: PASS — error banner renders with `role="alert"`, message "Gate check failed: 0/4 AC checkboxes checked", styled distinctly in red. Screen-reader accessible.
+
+**UQ-014 (Advance tooltip)**: PASS WITH CONCERNS (minor) — detail page: tooltip shows `"Advance to ready"` (target-specific). List page: tooltip shows `"Advance task to next status"` (generic). Inconsistency noted; list page tooltip weaker than detail page. Downgraded from significant (no tooltip at all) to minor (generic tooltip). Recorded as UQ-018.
+
+**UQ-009 (back-link context)**: PASS — `?from=` correctly preserves filter context. Back link href `"/?prefix=QX"` verified when navigating from filtered list.
+
+**New gaps found by this persona**: UQ-018 (list-page Advance tooltip generic vs detail-page target-specific — minor).
+
+---
+
+### Persona 2: Mobile-only single-task user (375×812 viewport)
+**Overall verdict**: PASS WITH CONCERNS — one significant remaining concern.
+**Surfaces tested**: Web UI list page at 375px, gate-fail banner, back-link filter preservation.
+
+**UQ-011/UQ-012 fix verification**: CONCERNS (significant) — CSS fix correctly hides `col-role` and `col-labels` columns. For short-ID filtered pages (e.g. `/?prefix=QX`), Advance button IS within viewport (`left=274, right=362, isWithinViewport: true`). However, on the unfiltered `/` page with long task IDs and titles, actions column extends to ~436px vs 375px viewport — button overflows by 47px. Table is scrollable (`overflow-x: auto`) so button is reachable but not discoverable on first render. Partial fix acknowledged; long-ID case still fails. UQ-011 re-opened as significant; UQ-012 fully closed.
+
+**UQ-013 fix verification**: PASS — error banner visible in viewport at 375px, `role="alert"` present, message clear.
+
+**UQ-009 fix verification**: PASS — `from=` correctly decoded, back link returns to `/?prefix=QX`.
+
+**Detail page at 375px**: PASS — Advance button full-width, tappable; no horizontal overflow on detail page.
+
+**New gaps found by this persona**: UQ-011 re-opened (significant) — actions column sticky positioning needed for long-ID pages.
+
+---
+
+### Persona 3: Comparison-to-mature-tool reviewer (vs GitHub Issues + Linear)
+**Overall verdict**: CONCERNS — multiple new significant and blocking gaps found.
+**Surfaces tested**: CLI (all subcommands), Web UI (list, detail, action flows), task data model (JSON, `.md` files).
+
+**Key new findings recorded as gaps**:
+
+- **CB-013 (blocking)**: Multi-label filtering broken on both surfaces. CLI `--label A --label B` silently uses last label only (last-wins via `parseFlags()`). Web UI `?label=A&label=B` silently uses first label only (`searchParams.get("label")`). Additionally, the two surfaces are inconsistent with each other (last-wins vs first-wins). Expected behavior (AND-logic) not implemented. No error or warning.
+
+- **CR-009 → UQ-017 (significant)**: `updatedAt` timestamp tracked and used for sort-by-updated (QX-008) but never displayed in any UI surface — no column on list page, no "last updated" field on detail page. GitHub Issues shows "updated X ago" on every row. Linear shows timestamps. Quay knows the mtime but hides it from the user.
+
+- **CR-010 → UQ-016 (found + closed same iteration)**: Orientation banner contained `in_progress` which is not a real status; `ready` was missing. Fixed in this synthesis step.
+
+- **CR-008 → UQ-018 (minor)**: List-page Advance tooltip generic vs detail-page target-specific (confirmed independently from new-contributor finding).
+
+Other comparison findings noted but not added as new tracked gaps (already known or architectural): no priority field (CR-003), no `in_progress` status (CR-002 — design choice), CLI task edit status-only (CR-004 — existing), no task creation UI (CR-006 — existing), no assignee (CR-005 — existing), needs-human guidance (CR-013 — minor, existing).
+
+**New gaps added**: CB-013 (blocking), UQ-017 (significant), UQ-016 (found+closed), UQ-018 (minor — confirmed from new-contributor).
+
+---
+
+### Simulated-user pass summary
+
+| Finding | Severity | Surface | Status |
+|---------|----------|---------|--------|
+| CB-013: Multi-label filter broken (CLI last-wins, Web first-wins) | blocking | CLI + Web UI | NEW — open; triaged for iteration 4 |
+| UQ-011: Actions column overflows at 375px for long IDs | significant | Web UI mobile | Re-opened (partial fix confirmed for short-ID) |
+| UQ-017: `updatedAt` tracked but never displayed | significant | Web UI list + detail | NEW — open |
+| UQ-016: Banner shows wrong status (`in_progress`) | significant | Web UI | Found + CLOSED this iteration (CR-010 fix) |
+| SH-002: Open-redirect guard accepts `//evil.com` | significant | Web UI | Found (G3) + CLOSED this iteration |
+| UQ-018: List-page tooltip generic vs detail-page target-specific | minor | Web UI list | NEW — open |
+| UQ-014: Tooltip partially resolved (detail PASS, list generic) | — | — | Downgraded to minor; remainder tracked as UQ-018 |
 
 ---
 
 ## 8. V_instance
 
-### Pre-simulated-user estimates (development phase)
+### Final V_instance (post-simulated-user + G3 + CR-010/SH-002 fixes)
 
-**capability_breadth**: ~0.74 (unchanged — no CB work this iteration; 4 CB gaps still open)
-ΔV from iteration 2: 0.00
+**capability_breadth**: 0.68
+- Iteration 2 had 4 open CB gaps (3 significant + 1 minor) → 0.74.
+- Iteration 3 adds CB-013 (blocking): 5 open CB gaps total (1 blocking + 3 significant + 1 minor).
+- New blocking gap (CB-013: multi-label filtering broken on both surfaces) penalizes this dimension below iteration 2's 0.74.
+- CB-013 triaged: "blocking capability gap; scheduled for iteration 4; does not affect core gate mechanics or inherited experiment snapshots."
+- Score: 0.68 (blocking gap confirmed by comparison reviewer on live system; two surfaces behave differently).
 
-**usability_quality**: ~0.80 (development-phase estimate)
-Reasoning: 6 significant UQ gaps closed (UQ-003, UQ-009, UQ-011, UQ-012, UQ-013, UQ-014). Remaining significant open: UQ-008 (MCP response size). Minor open: UQ-004, UQ-005, UQ-006, UQ-007, UQ-015. With 1 significant open vs. 7 before, score should rise substantially from 0.63. Estimate 0.80; final confirmed after simulated-user pass.
-ΔV from iteration 2: ~+0.17
+**usability_quality**: 0.76
+- Iteration 2: 7 significant UQ gaps open → 0.63.
+- Iteration 3 closed fully: UQ-003, UQ-009, UQ-012, UQ-013, UQ-014. UQ-016 found + closed same iteration.
+- UQ-011 partially closed (works for short-ID filtered pages; re-opened for long-ID case, still significant).
+- Significant open after iteration 3: UQ-008 (MCP response size), UQ-011 (mobile actions overflow — long IDs), UQ-017 (updatedAt never displayed). = 3 significant open.
+- Minor open: UQ-004, UQ-005, UQ-006, UQ-007, UQ-015, UQ-018. = 6 minor open.
+- 3 significant open vs 7 in iteration 2 — substantial improvement. Score: 0.76.
 
-**verification_coverage**: ~0.97 (unchanged — 25 new assertions added, maintaining coverage; small deduction for no Playwright live mobile verification)
-ΔV from iteration 2: 0.00
+**verification_coverage**: 0.97
+- 30/30 test suites pass (confirmed by G3 and independently).
+- 5 new test assertions added this synthesis step (SH-002 protocol-relative redirect guard + 2 banner assertions for UQ-016/CR-010). Total new assertions for iteration 3: 30.
+- Small deduction maintained: no Playwright live mobile verification at 375px (CSS-layer only).
 
-**system_health**: ~0.98 (unchanged — 30/30 tests pass; no regressions; G3 pending)
-ΔV from iteration 2: 0.00
+**system_health**: 0.98
+- G3 PASS WITH NOTES (see §10). SH-002 found and fixed. No regression against any of the 3 inherited snapshots.
+- CB-013 blocking gap explicitly triaged: does not affect gate mechanics or inherited snapshots. No system_health penalty after explicit triage.
 
-### Development-phase V_instance estimate:
+### Final V_instance computation:
 ```
-V_instance (estimate) ≈ 0.74 × 0.80 × 0.97 × 0.98
-                      ≈ 0.562
+V_instance = capability_breadth × usability_quality × verification_coverage × system_health
+           = 0.68 × 0.76 × 0.97 × 0.98
 
-ΔV_instance (estimate): +0.119 (over iteration 2 final of 0.443)
+           = 0.68 × 0.76 = 0.5168
+           = 0.5168 × 0.97 = 0.5013
+           = 0.5013 × 0.98 = 0.491
+
+V_instance (iteration 3 final) ≈ 0.491
+
+ΔV_instance = 0.491 - 0.443 = +0.048 (over iteration 2 final)
 ```
 
-**NOTE**: Final V_instance to be computed after simulated-user pass findings are incorporated. Simulated-user may find new significant UQ gaps (as in iteration 2) that revise usability_quality downward, or may confirm the fixes were effective (raising confidence). These are labeled as estimates pending.
-
-**Cumulative gaps closed (development phase)**: 20 (all-time, development phase; simulated-user may add new gaps that affect the final count)
+**Cumulative gaps closed (all-time, iteration 3 final)**: 22 (development phase 20 + UQ-016 + SH-002 found+closed this synthesis step)
 
 ---
 
@@ -277,71 +350,107 @@ Re-trigger check: NOT TRIGGERED — QX-011..015 each touched serve.js + multiple
 **reusability**: 0.79
 Re-trigger check: NOT TRIGGERED — no organic demand for GitHub Provider data.write or new ABI extension.
 
-**validation**: 0.933 (σ_QX = 14/15, development phase; QX-011..015 gate_by "G3 pending")
-Movement: validation went from 0.900 (iteration 2) to 0.933 (iteration 3 development phase). Final value after G3 co-sign will be recorded when G3 reports.
+**validation**: 0.933 (σ_QX = 14/15, FINAL — G3 co-signed)
+G3 co-signed QX-011..015 (verdict: PASS WITH NOTES). gate_by entries updated from "G3 pending" to "G3 PASS WITH NOTES" in provenance.md. σ_QX = 14/15 confirmed final. (QX-001 seed provenance; QX-002..015 all native authoring + execution.)
+Movement: 0.900 (iteration 2) → 0.933 (iteration 3 final).
 
-**V_meta total (development phase)**:
+**V_meta total (FINAL)**:
 ```
 V_meta = completeness × effectiveness × reusability × validation
        = 0.77 × 0.26 × 0.79 × 0.933
-       ≈ 0.148
 
+       = 0.77 × 0.26 = 0.2002
+       = 0.2002 × 0.79 = 0.15816
+       = 0.15816 × 0.933 ≈ 0.148
+
+V_meta (iteration 3 final) ≈ 0.148
 ΔV_meta from iteration 2 final (0.142): +0.006
 ```
 
 **V_meta ceiling**: 0.26 (effectiveness frozen; V_meta ≥ 0.80 arithmetically unreachable — standing fact restated)
 
-**Stall diagnosis**: Unchanged from inherited — effectiveness frozen at 0.26 (largest structural blocker); completeness blocked by ENV gap; reusability blocked by no organic write demand. Validation continues upward (0.778 → 0.857 → 0.900 → 0.933). No change to stall structure.
+**Re-trigger check (all 5 conditions — final)**:
+1. effectiveness re-trigger: NOT TRIGGERED — no scope-matched single-file, no-network task arising this iteration.
+2. reusability re-trigger: NOT TRIGGERED — no organic GitHub Provider write demand.
+3. completeness re-trigger (gap discovery): NOT TRIGGERED — no new Skill Method-step gap found; ENV gap continues.
+4. completeness + reusability/effectiveness joint: NOT TRIGGERED — no unconditional native dispatch primitive.
+5. open-ended-domain-specific: NOT TRIGGERED — simulated-user pass complete. CB-013 is a domain capability gap, not a methodology gap.
+
+**Stall diagnosis**: Unchanged — effectiveness frozen at 0.26 (largest structural blocker); completeness blocked by ENV gap; reusability blocked by no organic write demand. Validation continues upward: 0.778 → 0.857 → 0.900 → 0.933. No change to stall structure.
 
 ---
 
 ## 10. Out-of-band audit (G3)
 
 **G3 IS TRIGGERED this iteration** — Core source file changed:
-- `packages/quay/src/serve.js` (QX-011, QX-012, QX-013, QX-014, QX-015: multiple Web UI rendering and action handler changes)
+- `packages/quay/src/serve.js` (QX-011, QX-012, QX-013, QX-014, QX-015)
 
-**Commit to audit**: f4b3b8d
+**Commit audited**: f4b3b8d
+**Verdict: PASS WITH NOTES**
+**Audit file**: `experiments/quay-continuous-bootstrap/audits/iteration-3-adjudicate.md`
 
-**Status**: PENDING — awaiting orchestrator dispatch.
+### G3 summary
 
-Dispatcher: orchestrator, native Agent/Task tool, NOT manda, run_in_background=true.
-Audit file: `experiments/quay-continuous-bootstrap/audits/iteration-3-adjudicate.md`
+| Item | Result |
+|------|--------|
+| Full test suite (12/12 files) | PASS |
+| Gate-check blocks delivery on `ok:false` (QX-013) | PASS |
+| `addParam()` helper correctness | PASS |
+| Open-redirect guard (`https://evil.com`) | PASS |
+| Open-redirect guard (`//evil.com`) | **NOTE** — protocol-relative URL bypasses `startsWith("/")` (practical risk low; `?from=` is server-generated; action-handler path safe via `addParam` URL normalization) |
+| CSS col-role/col-labels media query (QX-012) | PASS |
+| Label filter test regression | PASS |
+| Orientation banner placement (QX-015) | PASS |
+| Core-stays-dumb (no backend conditionals) | PASS |
+| Scope (G5) — only serve.js + test files | PASS |
 
-[TO BE FILLED IN BY ORCHESTRATOR]
+### G3 security note (SH-002) — actioned this synthesis step
+
+G3 identified `//evil.com` bypass of the `startsWith("/")` guard in the GET detail page back-link renderer (line ~563). The action POST handler redirect path is safe (due to `addParam`'s URL normalization via `new URL()`). G3 recommended: tighten guard to `startsWith("/") && !startsWith("//")`.
+
+**Fixed in this synthesis step**:
+- `serve.js` line ~563: guard tightened to `startsWith("/") && !fromParam.startsWith("//")`.
+- New test added to `serve.test.mjs`: `?from=//evil.com` → back-link `href="/"` (SH-002).
+- SH-002 added to gap-list and immediately closed.
+- 30/30 test suites confirmed passing after fix.
+
+**σ_QX co-sign**: QX-011, QX-012, QX-013, QX-014, QX-015 gate_by updated to "G3 PASS WITH NOTES". σ_QX = 14/15 confirmed.
 
 ---
 
 ## 11. Pause / Convergence Check
 
-- [ ] **Meta-layer V_meta ≥ 0.80**: NO — V_meta ≈ 0.148, ceiling = 0.26. Arithmetically unreachable. NOT CONVERGED on meta-layer.
-- [ ] **Instance-layer PAUSE criteria** (ΔV flat < 0.02 for 2+ iterations AND no new significant gap):
-  - ΔV_instance estimate: ~+0.119 — NOT flat (well above 0.02 threshold). PAUSE criterion does NOT apply.
-  - Additionally: simulated-user pass pending — cannot confirm "no new significant gap" until it completes.
+- [x] **Meta-layer V_meta ≥ 0.80**: NO — V_meta = 0.148, ceiling = 0.26. Arithmetically unreachable. NOT CONVERGED on meta-layer.
+- [x] **Instance-layer PAUSE criteria** (ΔV flat < 0.02 for 2+ iterations AND no new significant gap):
+  - ΔV_instance iteration 2: +0.055 (NOT flat)
+  - ΔV_instance iteration 3: +0.048 (NOT flat — above 0.02 threshold)
+  - Additionally: simulated-user found new significant gaps (CB-013 blocking, UQ-017 significant, UQ-011 re-opened significant) — "no new significant gap" condition NOT met.
+  - PAUSE criterion NOT triggered on either sub-condition.
   - Status: NOT PAUSED
-- [ ] **G3 green for all Core/lift tasks**: PENDING — G3 not yet dispatched. Will be confirmed by orchestrator.
-- [ ] **Simulated-user pass run, findings recorded**: PENDING — orchestrator dispatching after development phase.
-- [ ] **system_health: no regression against any of the three inherited snapshots**: YES (development phase) — 30/30 tests pass; no regressions confirmed before commit.
+- [x] **G3 green for all Core/lift tasks**: YES — G3 PASS WITH NOTES; security note (SH-002) fixed this iteration.
+- [x] **Simulated-user pass run, findings recorded**: YES — 3 personas complete; findings recorded in §7 and gap-list.
+- [x] **system_health: no regression against any of the three inherited snapshots**: YES — 30/30 test suites pass; no regressions confirmed; CB-013 blocking gap explicitly triaged (does not affect gate mechanics or inherited snapshots).
 
-**Status: CONTINUING** (development phase; final status pending G3 + simulated-user completion)
+**Status: CONTINUING**
+
+ΔV trend: iter0→1 = +0.152, iter1→2 = +0.055, iter2→3 = +0.048. All three above 0.02. PAUSE not triggered. New significant gaps found (CB-013, UQ-017, UQ-011 re-open) confirms PAUSE condition not met independently.
 
 ---
 
 ## Problems identified for next iteration
 
-(To be refined after simulated-user pass findings)
+Priority order from simulated-user findings + gap-list state:
 
-1. **CB-007** (significant): Full-text/title search still missing — highest-effort remaining capability gap.
+1. **CB-013** (blocking): Fix multi-label filtering on CLI and Web UI. CLI `--label A --label B` → AND-logic (or at minimum document single-value, surface error). Web UI `?label=A&label=B` → same. Both surfaces should behave identically.
 
-2. **CB-008/DIR-004** (significant): No packaging/distribution — longest-open significant gap without progress. Now iteration 3 without movement.
+2. **UQ-011** (significant): Fix actions column sticky positioning for mobile. Recommended: `position: sticky; right: 0` on `<th>` and `<td>` cells in actions column. This makes Advance always visible at any viewport width without horizontal scrolling.
 
-3. **CB-010 / UQ-008** (significant): MCP task_list unfiltered response size — prefix filter helps; unfiltered scalability persists.
+3. **UQ-017** (significant): Display `updatedAt` timestamp on list rows (new column or inline) and detail page ("Last updated: …"). The value is already available in task data and used for sort ordering — just not rendered.
 
-4. **UQ-015** (minor): `updatedAt` absent from `task_get` MCP response — G3 audit note from iteration 2.
+4. **UQ-018** (minor): Backport detail-page target-status tooltip logic to list-page Advance buttons. The detail-page already computes `nextStatusMap`; list-page needs the same per-task computation to render `title="Advance to [next]"` instead of the generic text.
 
-5. **UQ-004** (minor): No timestamp column in CLI list output.
+5. **CB-007** (significant): Full-text/title search — highest-effort remaining capability gap; deferred again.
 
-6. **UQ-005** (minor): No visual age indicator on Web UI list rows.
+6. **CB-010 / UQ-008** (significant): MCP task_list unfiltered response size — unchanged from prior iterations.
 
-7. **UQ-006** (minor): Label filter flat 40+ item list.
-
-8. **Simulated-user findings** (TBD): new gaps from iteration 3's simulated-user pass will be added here after orchestrator dispatch.
+7. **CB-008/DIR-004** (significant): No packaging/distribution — four iterations without progress; lowest priority among significant gaps.

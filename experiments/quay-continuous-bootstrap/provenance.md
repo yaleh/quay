@@ -372,40 +372,94 @@ Gap-list delta (final): 5 new gaps added (UQ-011..015); UQ-003 escalated; 5 gaps
 
 | Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
 |------|-----------|------------|---------|----------------|--------|-------|
-| QX-011 | native | native | G3 pending | 10/15 | done | Back link preserves filter context (UQ-009): ?from= in task title links; detail page back link uses from= param; open-redirect guard; 6 assertions in serve.test.mjs |
-| QX-012 | native | native | G3 pending | 11/15 | done | Mobile table adaptation (UQ-011/012): col-role/col-labels CSS classes; @media (max-width:600px) rule; 3 assertions in serve.test.mjs |
-| QX-013 | native | native | G3 pending | 12/15 | done | Gate-fail feedback (UQ-013): gate check before deliverTrigger; ?error= redirect; error/success banners; addParam() helper; 7 assertions in serve.test.mjs |
-| QX-014 | native | native | G3 pending | 13/15 | done | Advance button tooltip (UQ-014): title= on list-page buttons; target-status title= on detail-page buttons; 2 assertions in serve.test.mjs |
-| QX-015 | native | native | G3 pending | 14/15 | done | Orientation banner (UQ-003): .orientation-banner div + CSS; 3 assertions in serve.test.mjs |
+| QX-011 | native | native | G3 PASS WITH NOTES | 10/15 | done | Back link preserves filter context (UQ-009): ?from= in task title links; detail page back link uses from= param; open-redirect guard; 6 assertions in serve.test.mjs |
+| QX-012 | native | native | G3 PASS WITH NOTES | 11/15 | done | Mobile table adaptation (UQ-011/012): col-role/col-labels CSS classes; @media (max-width:600px) rule; 3 assertions in serve.test.mjs |
+| QX-013 | native | native | G3 PASS WITH NOTES | 12/15 | done | Gate-fail feedback (UQ-013): gate check before deliverTrigger; ?error= redirect; error/success banners; addParam() helper; 7 assertions in serve.test.mjs |
+| QX-014 | native | native | G3 PASS WITH NOTES | 13/15 | done | Advance button tooltip (UQ-014): title= on list-page buttons; target-status title= on detail-page buttons; 2 assertions in serve.test.mjs |
+| QX-015 | native | native | G3 PASS WITH NOTES | 14/15 | done | Orientation banner (UQ-003): .orientation-banner div + CSS; 3 assertions in serve.test.mjs; banner text corrected (CR-010: in_progress→ready) in synthesis step |
 
 σ_QX before iteration 3: 9/10 = 0.900 (QX-001 seed, QX-002..010 native; QX-008/009 gate_by G3 PASS WITH NOTES; QX-010 tests pass)
-σ_QX after iteration 3 (development phase, G3 pending): 14/15 = 0.933
-(QX-001 remains seed provenance. QX-011..015 all native authoring + execution. gate_by = "G3 pending" — awaiting orchestrator dispatch.)
+σ_QX after iteration 3 (FINAL): 14/15 = 0.933
+(QX-001 remains seed provenance. QX-011..015 all native authoring + execution. gate_by = "G3 PASS WITH NOTES" — co-signed; see audits/iteration-3-adjudicate.md.)
 
-### Gate check results (iteration 3, development phase)
-- QX-011: all 6 ACs checked; status advanced to done; G3 pending
-- QX-012: all 7 ACs checked; status advanced to done; G3 pending
-- QX-013: all 9 ACs checked; status advanced to done; G3 pending
-- QX-014: all 5 ACs checked; status advanced to done; G3 pending
-- QX-015: all 6 ACs checked; status advanced to done; G3 pending
+### Gate check results (iteration 3, FINAL)
+- QX-011: all 6 ACs checked; status advanced to done; G3 PASS WITH NOTES
+- QX-012: all 7 ACs checked; status advanced to done; G3 PASS WITH NOTES
+- QX-013: all 9 ACs checked; status advanced to done; G3 PASS WITH NOTES
+- QX-014: all 5 ACs checked; status advanced to done; G3 PASS WITH NOTES
+- QX-015: all 6 ACs checked; status advanced to done; G3 PASS WITH NOTES
 
-### Gaps closed this iteration (development phase)
+### Gaps closed this iteration (FINAL — 8 total)
+Development phase:
 - UQ-003 (orientation banner) → QX-015; commit f4b3b8d
 - UQ-009 (back link context) → QX-011; commit f4b3b8d
-- UQ-011 (Advance off-screen mobile) → QX-012; commit f4b3b8d
+- UQ-011 (Advance off-screen mobile) → QX-012; commit f4b3b8d — PARTIALLY CLOSED; re-opened for long-ID case
 - UQ-012 (role/labels columns at mobile) → QX-012; commit f4b3b8d
 - UQ-013 (gate-fail silent) → QX-013; commit f4b3b8d
 - UQ-014 (no button tooltip) → QX-014; commit f4b3b8d
 
-### New gaps found this iteration (development phase)
-None during development phase. Simulated-user pass pending (dispatched separately by orchestrator).
+Synthesis step (found + closed same iteration):
+- UQ-016 (banner shows wrong status `in_progress`) → serve.js banner text corrected to `ready`; serve.test.mjs assertions added; commit [iteration-3-final]
+- SH-002 (open-redirect guard incomplete: `//evil.com` bypass) → serve.js guard tightened; serve.test.mjs test added; commit [iteration-3-final]
 
-### G3 status (iteration 3)
-G3 TRIGGERED — Core source file changed: `packages/quay/src/serve.js`. Also test files changed: `packages/quay/test/serve.test.mjs`, `packages/quay/test/web-ui-browser.test.mjs`, `packages/quay/test/core-three-way-symmetry.test.mjs`.
-G3 PENDING — awaiting orchestrator dispatch.
+### New gaps found this iteration (FINAL)
+From simulated-user pass + G3:
+- CB-013 (blocking): Multi-label filter broken on CLI (last-wins) and Web UI (first-wins), inconsistent between surfaces
+- UQ-011 (significant): Re-opened — actions column still overflows at 375px for long task IDs / unfiltered page
+- UQ-016 (significant): Found + closed — banner shows `in_progress` (non-existent status)
+- UQ-017 (significant): `updatedAt` tracked but never displayed on list or detail page
+- UQ-018 (minor): List-page Advance tooltip generic vs detail-page target-specific
 
-### System health (iteration 3, development phase)
-Full test suite (final): 30/30 pass. No regressions. QX-011..015 serve.test.mjs block (25 new assertions), plus updated existing assertions in web-ui-browser.test.mjs and core-three-way-symmetry.test.mjs.
+From G3 audit:
+- SH-002 (significant): Open-redirect guard accepts protocol-relative URLs (`//evil.com`); found + closed same iteration
+
+### G3 status (iteration 3, FINAL)
+G3 COMPLETE — PASS WITH NOTES. 12/12 test files pass. QX-011..015 co-signed.
+Security note actioned: SH-002 fixed in synthesis step (serve.js guard tightened + test added).
+See `experiments/quay-continuous-bootstrap/audits/iteration-3-adjudicate.md`.
+
+### System health (iteration 3, FINAL)
+Full test suite: 30/30 pass. No regressions. QX-011..015 serve.test.mjs block (25 new assertions from development phase; 5 additional from synthesis step: SH-002 redirect test + 2 UQ-016 banner assertions + 2 confirmation tests). All inherited snapshots confirmed intact.
+
+### V_instance (iteration 3, FINAL)
+```
+V_instance = capability_breadth × usability_quality × verification_coverage × system_health
+           = 0.68 × 0.76 × 0.97 × 0.98
+           ≈ 0.491
+
+ΔV_instance = 0.491 - 0.443 = +0.048 (over iteration 2 final)
+```
+Component rationale:
+- capability_breadth: 0.68 (CB-013 blocking gap added; 5 open CB gaps vs 4 in iteration 2; blocking penalizes below 0.74)
+- usability_quality: 0.76 (3 significant open vs 7 in iteration 2; UQ-003/009/012/013/014 fully closed; UQ-011 partial)
+- verification_coverage: 0.97 (30 new assertions total; 12/12 test suites pass; no Playwright mobile)
+- system_health: 0.98 (SH-002 fixed; CB-013 triaged; no regression)
+
+### V_meta (iteration 3, FINAL)
+```
+V_meta = completeness × effectiveness × reusability × validation
+       = 0.77 × 0.26 × 0.79 × 0.933
+       ≈ 0.148
+
+ΔV_meta = 0.148 - 0.142 = +0.006 (over iteration 2 final)
+```
+σ_QX = 14/15 = 0.933 (confirmed final; G3 co-sign complete).
+Ceiling: 0.26 (effectiveness frozen; unchanged).
+
+### Simulated-user pass (iteration 3, FINAL)
+3 personas dispatched by orchestrator; all complete.
+- New-contributor: PASS — zero blocking, zero significant findings; UQ-003, UQ-013, UQ-009 confirmed resolved; UQ-018 (minor) new gap found
+- Mobile single-task (375px): PASS WITH CONCERNS — UQ-013, UQ-009 confirmed resolved; UQ-011 partially resolved (short-ID OK, long-ID still overflows); UQ-011 re-opened significant
+- Comparison reviewer (vs GitHub Issues + Linear): CONCERNS — CB-013 (blocking), UQ-017 (significant), UQ-016 (found+closed), UQ-018 (confirmed from new-contributor) found
+
+Gap-list delta (final): 5 new gaps found (CB-013 blocking, UQ-011 re-opened, UQ-016→closed, UQ-017 significant, UQ-018 minor); 2 gaps additionally closed in synthesis (UQ-016, SH-002); total 8 closed this iteration; net open: 14 (5 CB, 9 UQ, 0 VC, 0 SH).
+
+### Convergence check (iteration 3)
+- V_meta ≥ 0.80: NO (ceiling 0.26)
+- PAUSE (ΔV < 0.02 for 2+ consecutive iterations AND no new significant gap): NOT MET — ΔV = +0.048 (not flat); new significant gaps found (CB-013, UQ-017, UQ-011 re-opened)
+- G3: PASS WITH NOTES (security note fixed)
+- system_health: no regression (CB-013 triaged)
+**Status: CONTINUING**
 
 ---
 

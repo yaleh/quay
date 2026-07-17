@@ -530,7 +530,7 @@ export async function startServer({ port = 4173 } = {}) {
         <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
         <body><main>
           <!-- QX-015: project orientation banner (UQ-003) — brief preamble for new users -->
-          <div class="orientation-banner"><strong>Quay</strong> — AI-assisted task management. Task statuses: <code>todo</code> → <code>in_progress</code> → <code>needs-human</code> → <code>done</code>. Use the Prefix filter to focus on one experiment&apos;s tasks.</div>
+          <div class="orientation-banner"><strong>Quay</strong> — AI-assisted task management. Task statuses: <code>todo</code> → <code>ready</code> → <code>needs-human</code> → <code>done</code>. Use the Prefix filter to focus on one experiment&apos;s tasks.</div>
           <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
           ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
           ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
@@ -560,7 +560,7 @@ export async function startServer({ port = 4173 } = {}) {
       // QX-011 (iteration 3): read ?from= param to restore the back link's
       // filter context (UQ-009). Guard against open redirect (must start with /).
       const fromParam = url.searchParams.get("from");
-      const backHref = fromParam && fromParam.startsWith("/") ? fromParam : "/";
+      const backHref = fromParam && fromParam.startsWith("/") && !fromParam.startsWith("//") ? fromParam : "/";
       // QX-013 (iteration 3): read ?error= and ?success= for post-action feedback.
       const detailErrorParam = url.searchParams.get("error");
       const detailSuccessParam = url.searchParams.get("success");
