@@ -4,24 +4,36 @@
 **Protocol**: [`docs/proposals/quay-continuous-bootstrap-experiment-v4.md`](../../docs/proposals/quay-continuous-bootstrap-experiment-v4.md) (authoritative — read it before running any iteration)
 **Objectives**:
 - *Instance* (§4 of protocol): Open-ended continuous improvement of the whole `quay` project — CLI, Core/MCP client, Web UI, packaging/distribution, documentation — measured via four durable quality dimensions (`capability_breadth × usability_quality × verification_coverage × system_health`), each rescored every iteration against the CURRENT best-known gap list, not a fixed checklist frozen at design time. No fixed "Done when" ceiling. `ΔV` (trend), not raw level, is the primary comparative signal; a monotonically-growing cumulative gaps-closed counter is tracked alongside it.
-- *Meta* (§6 of protocol): Test whether the inherited methodology (Skill files, directive lifecycle, provenance/gate mechanics, G3 audit discipline) transfers to open-ended, self-directed, continuously-rescoped work — where the methodology must also decide what to work on next, not just execute a known objective. `V_meta`'s formula (`completeness × effectiveness × reusability × validation`) is unchanged in FORM; it continues from experiment 3's stopping value, not reset to zero.
+- *Meta* (§6 of protocol): Test whether the inherited methodology (Skill files, directive lifecycle, provenance/gate mechanics, G3 audit discipline) transfers to open-ended, self-directed, continuously-rescoped work — where the methodology must also decide what to work on next, not just execute a known objective. **V_meta formula redesigned at iteration 14 (DIR-008)** — see `VMETAFORMULA.md` for the full redesign record, non-comparability statement, and G3 audit requirement. New formula: `methodology_leverage × strategy_completeness × transfer_breadth × validation`. Old formula (`completeness × effectiveness × reusability × validation`) is RETIRED; do not use it for iterations 14+.
 
 > **STATUS AT TIME OF WRITING THIS FILE**: this document and its companion protocol document are being authored as the operational scaffold for experiment 4, per `DIR-007` (filed in experiment 3, requesting closure of experiment 3 and hand-off to a new, distinctly-scoped experiment 4). `experiments/quay-continuous-bootstrap/README.md` and `provenance.md` have NOT yet been written — they are the orchestrating session's own job, built on top of this document and the protocol. **Iteration 0 has NOT run.** A human must explicitly authorize starting iteration 0 (mirroring the precondition-5 discipline of every prior experiment) once experiment 3's actual closing report exists and the provisional V_meta inheritance value (§2 below) is reconciled against it.
 
 **Inheritance baseline** (per protocol §2 — not to be re-derived as if starting from zero):
 - **V_instance** starts fresh on experiment 4's own four dimensions — but "fresh" means "freshly measured," not "assumed near-zero." Experiment 3's iteration-4 report records its own four bounded factors all at 1.0 (`ui_read_capability`, `visual_design_quality`, `verified_by_construction`, `backlog_health`) — a reasonably healthy starting system, not a from-scratch rebuild. Iteration 0's job is to survey the actual current state of `capability_breadth`, `usability_quality`, `verification_coverage`, and `system_health` against a freshly-assembled gap list (protocol §4.4), not to inherit a number.
-- **V_meta does NOT reset to zero.** It continues from wherever `quay-webui-bootstrap` (experiment 3) holds it at its own stopping point. **This is a PROVISIONAL number, not yet reconciled against experiment 3's actual closing report** (which did not exist at the time this document was authored — see protocol §2):
+- **V_meta does NOT reset to zero.** It continues from wherever `quay-webui-bootstrap` (experiment 3) holds it at its own stopping point. The inheritance value is 0.123 (CONFIRMED against experiment 3's HALT-RECOMMENDATION.md at iteration 0).
+
+  **FORMULA REDESIGNED AT ITERATION 14 (DIR-008).** The old formula is retired:
   ```
-  V_meta (provisional, from experiment 3's iteration-4.md / provenance.md — RE-CONFIRM against
-          CLOSING-REPORT.md before trusting this at iteration 0)
-        = completeness × effectiveness × reusability × validation
-        = 0.77 × 0.26 × 0.79 × 0.778 = 0.123
+  V_meta_old = completeness × effectiveness × reusability × validation
+             = 0.77 × 0.26 × 0.79 × 0.978 = 0.154   ← last value under old formula (iter 13)
   ```
-  Iteration 0 MUST read `experiments/quay-webui-bootstrap/CLOSING-REPORT.md` if it exists by
-  that point, and use ITS values instead of this provisional number if they differ. If the
-  closing report does not yet exist, iteration 0 must state that explicitly and flag the
-  0.123 figure as provisional pending that reconciliation — do not treat this document's
-  number as silently authoritative.
+  New formula (from iteration 14 onward):
+  ```
+  V_meta_new = methodology_leverage × strategy_completeness × transfer_breadth × validation
+  ```
+  **Factor definitions (new — renewable, iteration-specific):**
+  - `methodology_leverage`: fraction of this iteration's delivered improvements driven by the methodology loop (simulated-user surfacing, directive lifecycle, quay:author/execute) vs. ad-hoc engineering. Attribution per closed gap, per G3 audit. NOT "invoked the Skill as ceremony."
+  - `strategy_completeness`: whether the Skill set covers open-ended strategy formation (what to work on next, iteration-feedback-to-priority loop, PAUSE decisions) — not just execution of known objectives. Scored against a 6-item capability checklist (see VMETAFORMULA.md).
+  - `transfer_breadth`: whether the methodology has transferred to each of quay's 5 current surface types (CLI, MCP, Web UI, packaging/distribution, docs). Score = covered surfaces / 5. Live, non-frozen — neglecting a surface degrades this.
+  - `validation`: σ_QX = (# native QX tasks done) / (# total QX tasks done). Unchanged.
+  
+  **Re-baseline (iteration 14):** V_meta_new = 0.40 × 0.83 × 0.80 × 0.962 = 0.255 (PROVISIONAL — pending G3 co-sign of the metric change itself per DIR-008).
+  
+  **ΔV_meta across the switch point is non-comparable.** The starting value for future ΔV calculations is V_meta_14 = 0.255.
+  
+  **New ceiling:** V_meta_ceiling_new = 1.0. V_meta ≥ 0.80 is now achievable in principle.
+  
+  See `VMETAFORMULA.md` for full scoring rubrics, non-comparability statement, G3 audit requirement, and history table.
 - **σ resets to a fresh count** scoped to experiment 4's own task population, using the
   **`QX-*`** prefix — distinct from `QN-*` (experiment 1), `QC-*` (experiment 2), `QW-*`
   (experiment 3). σ_QX starts at 0/0.
@@ -30,8 +42,9 @@
 the whole point of the redirection). The operative "target," every iteration, is: (a) genuine,
 evidenced `ΔV_instance` movement or an honest diminishing-returns finding: (b) the standing
 PAUSE criteria (protocol §4.5) checked explicitly; (c) `V_meta`'s own bounded threshold
-(≥ 0.80) still tracked, unchanged in form, as the meta-layer's own (separately bounded)
-convergence question.
+(≥ 0.80) now tracked under the **redesigned formula** (DIR-008, iteration 14) — the old
+ceiling of 0.26 was arithmetically unreachable; the new ceiling is 1.0 and V_meta ≥ 0.80
+is achievable in principle. See `VMETAFORMULA.md` for current factor definitions and scoring.
 
 > Frozen vocabulary applies (`glossary.md`). BAIME terms (`V_instance`, `V_meta`, OCA, `A_n`,
 > `M_n`, `O`) are used verbatim per the `methodology-bootstrapping` skill. The inherited

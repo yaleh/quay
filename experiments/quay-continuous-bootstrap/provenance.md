@@ -8,22 +8,22 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 13 (FINAL — PAUSE)_
+_Last updated: iteration 14 (dev phase — G3 + SU PENDING)_
 
-- **Latest scores:** see "V-score history (all iterations)" table, iteration 13 FINAL row.
-  V_instance = 0.721 (ΔV = +0.004). V_meta = 0.154 (σ_QX = 45/46 = 0.978).
-- **Pending directive**: DIR-008 (V_meta redesign) — DEFERRED (iteration 13 carried PR-001/002/003 + CB-021 + UQ-036; conflating a metric redesign would create ambiguous G3 scope; deferred to iteration 14 or dedicated meta-only iteration post-PAUSE).
+- **Latest scores (provisional):** see "V-score history (all iterations)" table, iteration 14 provisional row.
+  V_instance provisional = TBD (G3+SU pending). V_meta_new (re-baseline, new formula) = 0.255 (PROVISIONAL — metric-G3 pending). σ_QX = 51/53 = 0.962.
+- **DIR-008: APPLIED this iteration** (QX-050 done). V_meta redesigned: old formula (`completeness × effectiveness × reusability × validation`) retired; new formula (`methodology_leverage × strategy_completeness × transfer_breadth × validation`) active from iteration 14. See `VMETAFORMULA.md`. Metric-G3 co-sign required before V_meta_new is trusted.
 - **DIR-009 STATUS: APPLIED AND ARCHIVED** — applied in iteration 13 (genuine worktree isolation, HARD GATE ls proof, no ENV-excuse boilerplate); moved to `directives/archive/DIR-009-orchestrator-must-honor-hardened-gates.md`.
-- **Live V_meta re-triggers:** none fired — all 5 re-trigger conditions remain NOT TRIGGERED. DIR-008 still pending.
+- **PAUSE COUNTER RESET** — human explicitly resumed experiment with mandate to apply DIR-008 + UQ polish. PAUSE counter resets on human-authorized resumption.
 - **Standing decisions (do not re-litigate without new evidence):**
   - Gap-list storage: plain markdown file at `experiments/quay-continuous-bootstrap/gap-list.md`
     (decided iteration 0 — see "Gap-list storage decision" in the Iteration 0 record).
   - σ-reset rule: floor RESET to 0 for experiment 4's own validation scoring, not carried
     forward from experiment 3's σ_QW=0.778 (decided iteration 0 — see
     "σ_QX-vs-inherited-floor decision" in the Iteration 0 record).
-  - V_meta ceiling: 0.26 (1.0 × 0.26 × 1.0 × 1.0, effectiveness-bound; inherited from
-    experiment 1, confirmed positively across experiments 2/3 — see Inheritance record below).
-- **Status:** **PAUSE** (orchestrator-assessed, iteration 13 FINAL). PAUSE criterion met: ΔV_12=+0.002 (1st consecutive), ΔV_13=+0.004 (2nd consecutive), both < 0.02; no new significant/blocking gaps from iteration 13 synthesis. 5 new minor gaps (UQ-037/038/039/040/041) filed. Cumulative closed: 67. Human decides whether to resume (iteration 14 first priority: DIR-008 + UQ-037/038 polish), HALT, or accept as-is.
+  - V_meta ceiling (NEW): 1.0 (redesigned formula, DIR-008, iteration 14). Old ceiling 0.26 is retired. V_meta ≥ 0.80 is now achievable in principle.
+  - V_meta formula: `methodology_leverage × strategy_completeness × transfer_breadth × validation` (from iteration 14 onward). See `VMETAFORMULA.md`.
+- **Status:** **ACTIVE** (PAUSE reset per human resumption with mandate). Cumulative gaps closed: 72. Net open: 3 minor (CB-006, ENV-001, SH-006). 5 UQ gaps closed this iteration.
 
 ---
 
@@ -594,9 +594,12 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | 10 | 0.684 | +0.015 | 0.154 | 36/37 = 0.973 | 6 gaps closed (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034); DIR-007 applied; G3 PASS-WITH-NOTES; 3× PASS simulated-user; no new gaps; cumulative closed=54 |
 | 11 | 0.715 | +0.031 | 0.154 | 39/40 = 0.975 | 5 gaps closed (SH-003/004/UQ-006/007/030); 3 new minor gaps (CB-020/UQ-035/SH-005); G3 PASS-WITH-NOTES; Persona A CONCERNS (serve restart fix), Persona B PASS, Persona C PASS; cumulative closed=59; ΔV_11 > 0.02 resets PAUSE counter |
 | 12 | **0.717** | **+0.002** | 0.154 | 42/43 = 0.977 | 3 gaps closed (SH-005/CB-020/UQ-035); 3 new minor gaps (UQ-036/CB-021/SH-006) from synthesis; DIR-008 deferred to iter-13; G3 PASS; cumulative closed=62; **HALT (human-imposed)** |
-| 13 | **0.721** | **+0.004** | 0.154 | 45/46 = 0.978 | 5 gaps closed (PR-001/002/003 process, CB-021, UQ-036); DIR-009 applied+archived; genuine worktree isolation (first time); G3 PASS; Persona A/B/C all PASS; 5 new minor gaps (UQ-037/038/039/040/041); cumulative closed=67; **PAUSE TRIGGERED** (2nd consecutive ΔV < 0.02) |
+| 13 | **0.721** | **+0.004** | 0.154 (old formula) | 45/46 = 0.978 | 5 gaps closed (PR-001/002/003 process, CB-021, UQ-036); DIR-009 applied+archived; genuine worktree isolation (first time); G3 PASS; Persona A/B/C all PASS; 5 new minor gaps (UQ-037/038/039/040/041); cumulative closed=67; **PAUSE TRIGGERED** (2nd consecutive ΔV < 0.02) |
+| 14 | TBD (G3+SU pending) | TBD | **0.255** (new formula, PROVISIONAL — metric-G3 pending) | 51/53 = 0.962 | DIR-008 APPLIED: V_meta redesigned (VMETAFORMULA.md); 5 UQ gaps closed (UQ-037/038/039/040/041 via QX-051..055); QX-050 (DIR-008 doc), QX-001 closed; PAUSE counter RESET per human resumption; cumulative closed=72; **FORMULA SWITCH POINT — ΔV_meta non-comparable across iter 13/14** |
 
-ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, +0.004. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13: 2nd consecutive < 0.02 (ΔV=+0.004) → **PAUSE TRIGGERED**. Cumulative gaps closed: 67.
+ΔV trend (V_instance): +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, +0.004. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13: 2nd consecutive < 0.02 (ΔV=+0.004) → **PAUSE TRIGGERED**. Cumulative gaps closed: 72 (iter-14 dev phase).
+
+V_meta formula switch: old formula last value = 0.154 (iter 13); new formula re-baseline = 0.255 (iter 14 PROVISIONAL). Non-comparable across switch point.
 
 ---
 
@@ -1548,3 +1551,98 @@ _Clarification: σ_QX denominator = tasks driven to done; QX-001 remains at `tod
 - PAUSE consecutive count: 2 (ΔV_12=+0.002, ΔV_13=+0.004 — both < 0.02 → PAUSE triggered)
 - Pending directive: DIR-008 (V_meta redesign) — deferred; first priority post-PAUSE if experiment resumes
 - DIR-009: APPLIED and archived
+
+---
+
+## Iteration 14 record (2026-07-17 — dev phase, G3+SU PENDING)
+
+### QX-* tasks created and completed this iteration
+
+| Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
+|------|-----------|------------|---------|----------------|--------|-------|
+| QX-050 | native | native | metric-G3 PENDING | 46/49 | done | DIR-008: V_meta redesign documentation (VMETAFORMULA.md + ITERATION-PROMPTS.md update) |
+| QX-051 | native | native | G3 PENDING | 47/49 | done | UQ-037: singular "result" grammar fix in searchResultBanner (serve.js); serve.test.mjs QX-051 block |
+| QX-052 | native | native | G3 PENDING | 48/49 | done | UQ-038: "No tasks found." in Web UI table when filter yields zero results (no ?q=); serve.test.mjs QX-052 block |
+| QX-053 | native | native | G3 PENDING | 49/49 | done | UQ-040: `--format json` documented in printHelp(); cli.test.mjs section 23 |
+| QX-054 | native | native | G3 PENDING | 50/51 | done | UQ-041: warn on unknown --format values; cli.test.mjs section 24 |
+| QX-055 | native | native | none | 51/51 | done | UQ-039: close QX-001 umbrella task (task status update only, no source change) |
+
+Also: QX-001 status updated to `done` (was at `todo` — seed provenance, adds to denominator but not numerator).
+
+σ_QX entering iteration 14: 45/46 = 0.978 (note: QX-001 was at todo, NOT in denominator yet)
+σ_QX after iteration 14 (provisional): 51/53 = 0.962
+- Denominator: 46 (prior) + 7 new done tasks (QX-050..055 + QX-001 closure) = 53
+- Numerator: 45 (prior native) + 6 new native (QX-050..055) = 51 (QX-001 is seed, 0 contribution)
+
+### Gaps closed this iteration
+- UQ-037 → QX-051 (grammar: "Showing 1 result" singular)
+- UQ-038 → QX-052 (empty table message for filter zero results)
+- UQ-039 → QX-055 (close QX-001 umbrella task)
+- UQ-040 → QX-053 (document --format json in --help)
+- UQ-041 → QX-054 (warn on unknown --format values)
+- (Also: QX-048 and QX-049 from iteration 13 carried forward into iteration-14 worktree base)
+
+### DIR dispositions (iteration 14)
+- DIR-004: **DEFERRED** to iteration 15 (complex Node SEA/packaging; iteration 14 scope already sufficient)
+- DIR-006: **DISPOSITION** — see §DIR-006 below
+- DIR-008: **APPLIED** (QX-050; VMETAFORMULA.md created; ITERATION-PROMPTS.md updated; metric-G3 PENDING)
+
+### §DIR-006 formal disposition (iteration 14)
+
+DIR-006 (directives as quay tasks, single source of truth) is formally **DEFERRED to iteration 15 or later with conditions.** Reasoning:
+
+The directive's core problem — dual representation, two mechanisms half-live — is real and well-documented in its "Reopen" section. The `quay-directive` skill still creates files; directive-tasks and directive-files coexist in the experiment with drift.
+
+However, applying DIR-006 now would require: (1) updating the `quay-directive` skill to create tasks instead of files; (2) migrating DIR-004, DIR-006, DIR-008 from files to tasks; (3) reconciling the existing `DIR-004` quay task (created in iteration 11) against the file. This is non-trivial work that competes with DIR-008 (first priority) and the UQ polish tasks.
+
+More importantly: DIR-006 must be applied with mechanical enforcement, not prose commitment — the iteration 11 failure mode was exactly prose commitment without tooling update. Applying it correctly requires updating the `quay-directive` skill, which touches skill files outside the per-iteration worktree scope. This makes it a natural fit for a dedicated directive-lifecycle iteration.
+
+**Decision**: Defer DIR-006 to iteration 15. If iteration 15 does not apply it, escalate to human for explicit REJECT vs APPLY decision. The dual-representation state is an acknowledged technical debt, not an ignored problem.
+
+### §7 Simulated-user (iteration 14)
+
+PENDING — dispatched by orchestrator separately.
+
+### §8 V_instance provisional (iteration 14)
+
+The 5 UQ gaps closed this iteration are all minor usability_quality gaps. Provisional V_instance estimate:
+
+Closing 5 minor UQ gaps should improve the `usability_quality` sub-dimension modestly. Prior V_instance = 0.721 with:
+- capability_breadth ≈ 0.855 (CB-006 still open; no change this iteration)
+- usability_quality ≈ 0.883 (5 UQ minor gaps closed: UQ-037/038/039/040/041)
+- verification_coverage ≈ 0.980 (new tests added; no regression)
+- system_health ≈ 0.975 (no system_health changes)
+
+UQ dimension: was 0.883 (denominator ~8 open UQ gaps out of ~9 identified). Closing 5 of 8 open UQ minor gaps improves coverage. New UQ open = 0 (all UQ gaps from iter 13 closed); remaining open gaps are CB-006, ENV-001, SH-006 (non-UQ). usability_quality estimate ≈ 0.93–0.95.
+
+V_instance provisional ≈ 0.855 × 0.94 × 0.980 × 0.975 ≈ 0.768
+
+ΔV_instance provisional ≈ 0.768 − 0.721 = **+0.047**
+
+(Final scoring pending G3 + simulated-user pass.)
+
+### §9 V_meta provisional (iteration 14)
+
+**Formula switch — NEW formula active (DIR-008):**
+
+```
+V_meta_new = methodology_leverage × strategy_completeness × transfer_breadth × validation
+           = 0.40 × 0.83 × 0.80 × 0.962
+           = 0.255  (PROVISIONAL — metric-G3 pending)
+```
+
+ΔV_meta across switch point is NON-COMPARABLE. V_meta_old (iter 13) = 0.154; V_meta_new (iter 14 re-baseline) = 0.255 — these do not represent an improvement of 0.101. They measure different things.
+
+### §10 G3 audit (iteration 14)
+
+PENDING — dispatched by orchestrator separately.
+
+G3 MUST assess the metric change itself (per DIR-008): is methodology_leverage more honest than effectiveness? Can the new factors move over time? Is the re-baseline non-retroactive? Is transfer_breadth resistant to inflation? See VMETAFORMULA.md §G3 audit requirement for the full checklist.
+
+### §11 Convergence check (iteration 14)
+
+PENDING FINAL — awaiting G3 + simulated-user.
+
+Provisional: ΔV_instance ≈ +0.047 (well above 0.02 threshold). PAUSE counter RESET per human resumption mandate. PAUSE would not be triggered provisionally even without the reset.
+
+**Status: ACTIVE (dev phase — G3+SU PENDING)**
