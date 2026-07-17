@@ -11,6 +11,7 @@
 
 | ID | Description | Severity | Source | Date added | Last confirmed open |
 |----|-------------|----------|--------|------------|---------------------|
+| CB-022 | `--page-size N` is silently ignored in JSON output mode. `printJson(sorted)` at ~line 268 in `bin/quay.js` should be `printJson(displayTasks)`. Scripts combining `--page-size` with `--json` receive all tasks regardless of the page-size flag, making the CLI scripting use case broken for large result sets. | **significant** | Persona A (CLI power user), iteration 16 synthesis | 2026-07-17 | 2026-07-17 |
 | ~~CB-006~~ | ~~Configurable page size not available on Web UI list page (fixed at 20)~~ | ~~minor~~ | Closed iteration 16 — QX-061; CLI `--page-size <N>` limits non-JSON output with truncation hint; Web UI `?pageSize=N` (default 20, min 1, max 200) with "Per page: 10 · 20 · 50 · 100" nav; cli.test.mjs section 24 (7 assertions) + serve.test.mjs QX-061 block (3 assertions). |
 | ~~CB-021~~ | ~~`--format json` flag is silently ignored — output falls through to human-readable format with no error message. Scripts expecting JSON receive corrupt pipeline data with no error signal. `--json` flag works correctly; only the `--format json` alias is broken.~~ | ~~minor~~ | Closed iteration 13 — QX-048; `main()` in `bin/quay.js` now aliases `flags.format === "json"` → `flags.json = true` immediately after `parseFlags()`, so both `--json` and `--format json` activate the same JSON output path. `cli.test.mjs` section 23 adds 3 assertions: `--format json` alone produces valid JSON, `--prefix X --format json` produces filtered JSON, `--prefix X` (no flag) still shows human-readable `# filtered:` comment. |
 | ~~CB-020~~ | ~~`--format json` emits a `# filtered: …` comment line before the JSON array, breaking automated JSON parsing (e.g. `jq`, `JSON.parse`). Pre-existing defect; newly discovered.~~ | ~~minor~~ | Closed iteration 12 — QX-045; investigation confirmed the `--json` path already routes through `printJson()` (no comment emitted); `# filtered:` exists only in the non-JSON branch. Test added in `cli.test.mjs` section 22 to regression-lock the invariant: `--prefix X --json` stdout is valid JSON, `--prefix X` (non-JSON) still shows the comment for human use. |
@@ -28,6 +29,7 @@
 
 | ID | Description | Severity | Source | Date added | Last confirmed open |
 |----|-------------|----------|--------|------------|---------------------|
+| UQ-048 | Invalid `--page-size` values (0, -1, `abc`) silently fall back to showing all results — no warning or error message is emitted. Users who mistype or pass a bad value receive unexpected full output with no signal that the flag was ignored. | minor | Persona A (CLI power user), iteration 16 synthesis | 2026-07-17 | 2026-07-17 |
 | ~~UQ-047~~ | ~~No `--version` flag — `quay --version` fails with usage error.~~ | ~~minor~~ | Closed iteration 16 — QX-060; `printVersion()` reads package.json via `createRequire`; `--version` and `-V` both work; documented in `printHelp()` Global options; cli.test.mjs section 23 (6 assertions). |
 | ~~UQ-042~~ | ~~CLI search header shows "1 matches" (grammatically incorrect) — should be "1 match" when `sorted.length === 1`.~~ | ~~minor~~ | Closed iteration 15 — QX-058; `bin/quay.js` search header ternary `sorted.length === 1 ? "match" : "matches"`; cli.test.mjs section 25 |
 | ~~UQ-043~~ | ~~CLI usage synopsis line shows `[--json]` only, not `[--json \| --format json]`.~~ | ~~minor~~ | Closed iteration 15 — QX-058; synopsis updated to `[--json \| --format json]`; cli.test.mjs section 25 |
@@ -64,7 +66,12 @@
 
 ### verification_coverage
 
-*(No open gaps — VC-001 closed iteration 1: CLI help content now has automated test coverage)*
+| ID | Description | Severity | Source | Date added | Last confirmed open |
+|----|-------------|----------|--------|------------|---------------------|
+| TST-001 | `serve.test.mjs` QX-061 block does not verify that `?pageSize=N` is carried in prev/next pagination nav links. The pageSizeNav itself is tested, but link href propagation through navigation is not asserted. | low | Persona B (Web UI pagination), iteration 16 synthesis | 2026-07-17 | 2026-07-17 |
+| TST-002 | `serve.test.mjs` QX-061 block does not verify that the active page size is rendered in bold in the pageSizeNav (only the presence of the nav is tested). | low | Persona B (Web UI pagination), iteration 16 synthesis | 2026-07-17 | 2026-07-17 |
+
+*(VC-001 closed iteration 1: CLI help content now has automated test coverage)*
 
 ### system_health
 
@@ -80,6 +87,8 @@
 
 | ID | Description | Severity | Source | Date added | Last confirmed open |
 |----|-------------|----------|--------|------------|---------------------|
+| PKG-004 | `CHANGELOG.md` is listed in the `files` field of `packages/quay/package.json` but the file does not exist under `packages/quay/`. The CHANGELOG lives at the project root. As a result, `npm pack` will silently omit the CHANGELOG from the published artifact — consumers installing from the tgz will not receive it. | minor | Persona C (package quality), iteration 16 synthesis | 2026-07-17 | 2026-07-17 |
+| PKG-005 | `templates/` is listed in the `files` field of `packages/quay/package.json` but the `templates/` directory does not exist under `packages/quay/`. This is a ghost entry that references a non-existent path. | minor | Persona C (package quality), iteration 16 synthesis | 2026-07-17 | 2026-07-17 |
 | ~~PKG-001~~ | ~~README line 41 hardcodes `quay-0.1.0.tgz` install command.~~ | ~~minor~~ | Closed iteration 16 — shared tree `README.md` line updated to `quay-0.2.0.tgz`. |
 | ~~PKG-002~~ | ~~CHANGELOG missing v0.2.0 entry.~~ | ~~minor~~ | Closed iteration 16 — `CHANGELOG.md` v0.2.0 section added with complete feature/improvement/bugfix listing. |
 | ~~PKG-003~~ | ~~No `files` field in `packages/quay/package.json`.~~ | ~~minor~~ | Closed iteration 16 — `"files": ["bin/", "src/", "templates/", "README.md", "CHANGELOG.md", "LICENSE"]` added to package.json in worktree; QX-061. |
@@ -258,3 +267,6 @@
 - Iteration 16 (development phase): closed CB-006 (QX-061: CLI --page-size + Web UI ?pageSize=N), UQ-047 (QX-060: --version/-V flag), PKG-001 (README version), PKG-002 (CHANGELOG v0.2.0), PKG-003 (package.json files field); 5 gaps closed; ENV-001 and SH-006 deferred (see §4 rationale); G3 + simulated-user PENDING (orchestrator dispatch)
 - **Cumulative gaps closed (all-time, iteration 16 development phase): 85** (adds CB-006, UQ-047, PKG-001, PKG-002, PKG-003)
 - **Net open gaps after iteration 16 development phase**: 2 minor — ENV-001 (MCP stale process, known env characteristic); SH-006 (quay-native startup stderr leak, in quay-native package)
+- Iteration 16 (G3 + simulated-user, FINAL): G3 PASS (12/12, 0 failures, σ_QX=57/59=0.966); Persona A PARTIAL — CB-022 significant (--page-size ignored in JSON mode), UQ-048 minor (invalid values silent fallback); Persona B PASS — TST-001/002 low test-gap findings; Persona C PARTIAL — PKG-001 concern DISMISSED, PKG-004/005 minor new; 6 new gaps logged (CB-022 significant, UQ-048/PKG-004/PKG-005 minor, TST-001/002 low); 0 additional closures in synthesis; cumulative closed unchanged at 85
+- **Cumulative gaps closed (all-time, iteration 16 FINAL): 85** (unchanged from dev phase — no new closures in synthesis)
+- **Net open gaps after iteration 16 FINAL**: 8 — CB-022 (significant, new); UQ-048 (minor, new); TST-001/TST-002 (low, new); PKG-004/PKG-005 (minor, new); ENV-001 (minor, deferred); SH-006 (minor, deferred). **ACTIVE — continuing to iteration 17** (ΔV=+0.010 < 0.02, PAUSE counter=1; CB-022 significant gap found → PAUSE not triggered; directives/pending/ EMPTY).
