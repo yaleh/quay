@@ -557,6 +557,76 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 
 ---
 
+## Iteration 5 record (2026-07-17, DEVELOPMENT PHASE — G3 + simulated-user pending)
+
+### QX-* tasks created and completed this iteration
+
+| Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
+|------|-----------|------------|---------|----------------|--------|-------|
+| QX-020 | native | native | G3 pending | 19/22 | done | Label nav toggle semantics (UQ-019): toggle-on/off; bold active; "remove" links; closes UQ-019 |
+| QX-021 | native | native | G3 pending | 20/22 | done | Full-text title search: `--search` on CLI + `?q=` on Web UI with GET form; `buildHref` carries q; closes CB-007 |
+| QX-022 | native | native | G3 pending | 21/22 | done | CLI timestamp column: relativeTimeCli() in bin/quay.js; 5th tab-separated field in non-JSON output; closes UQ-004 |
+
+σ_QX before iteration 5: 18/19 = 0.947
+σ_QX after iteration 5 (PROVISIONAL — G3 co-sign pending): 21/22 = 0.955
+(QX-001 remains seed provenance. QX-020..022 all native authoring + execution. gate_by = "G3 pending" — will be updated to "G3 PASS WITH NOTES" or equivalent after orchestrator dispatches G3 audit of commit 69a102a.)
+
+### Gate check results (iteration 5, development phase)
+- QX-020: all 5 ACs checked; status advanced to done; G3 co-sign pending
+- QX-021: all 6 ACs checked; status advanced to done; G3 co-sign pending
+- QX-022: all 4 ACs checked; status advanced to done; G3 co-sign pending
+
+### Gaps closed this iteration (development phase — 3 total)
+- UQ-019 (label-nav replace bug) → QX-020; commit 69a102a
+- CB-007 (no full-text search) → QX-021; commit 69a102a
+- UQ-004 (no CLI timestamp) → QX-022; commit 69a102a
+
+### New gaps found this iteration (development phase)
+None — 0 new gaps in development phase. Simulated-user pass pending.
+
+### G3 status (iteration 5)
+G3 TRIGGERED — Core source files changed: `packages/quay/bin/quay.js`, `packages/quay/src/serve.js`.
+G3 PENDING — awaiting orchestrator dispatch. Commit: 69a102a.
+See `experiments/quay-continuous-bootstrap/audits/iteration-5-adjudicate.md` (to be written by G3 auditor).
+
+### System health (iteration 5, development phase)
+Full test suite: 30/30 pass (node --test). No regressions against any of the three inherited snapshots.
+Baseline 30/30 confirmed before implementation; 30/30 confirmed after all changes in commit 69a102a.
+
+### V_instance (iteration 5, PROVISIONAL development phase)
+```
+V_instance = capability_breadth × usability_quality × verification_coverage × system_health
+           = 0.78 × 0.86 × 0.97 × 0.98
+           ≈ 0.637
+
+ΔV_instance (provisional) = 0.637 - 0.561 = +0.076 (over iteration 4 final)
+```
+Component rationale:
+- capability_breadth: 0.78 (CB-007 significant closed; 5 open CB gaps vs 6 prior; 0 blocking, 3 significant, 2 minor)
+- usability_quality: 0.86 (UQ-019 significant + UQ-004 minor closed; 1 significant open vs 2 prior; 6 minor open vs 7 prior)
+- verification_coverage: 0.97 (30/30 pass; new test blocks added; no Playwright mobile)
+- system_health: 0.98 (provisional; no blocking issues in self-audit; G3 pending)
+
+### V_meta (iteration 5, PROVISIONAL)
+```
+V_meta = completeness × effectiveness × reusability × validation
+       = 0.77 × 0.26 × 0.79 × 0.955
+       ≈ 0.151
+
+ΔV_meta (provisional) = 0.151 - 0.150 = +0.001 (over iteration 4 final)
+```
+σ_QX = 21/22 = 0.955 (provisional; G3 co-sign pending).
+Ceiling: 0.26 (effectiveness frozen; unchanged).
+
+### Convergence check (iteration 5, PROVISIONAL)
+- V_meta ≥ 0.80: NO (ceiling 0.26)
+- PAUSE (ΔV < 0.02 for 2+ consecutive iterations AND no new significant gap): NOT MET (provisional) — ΔV = +0.076 (not flat); simulated-user findings pending
+- G3: PENDING
+- system_health: no regression (30/30 pass)
+**Status: CONTINUING (provisional — pending G3 + simulated-user)**
+
+---
+
 ## Steering note: directive-tracking precondition not being genuinely re-executed (2026-07-17, post-iteration-3, out of band)
 
 Recorded directly here (per explicit human instruction) rather than as a new directive,
