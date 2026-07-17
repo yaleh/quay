@@ -110,8 +110,8 @@ button:hover { background: #0052a3; }
 }
 .body pre code { background: none; padding: 0; font-size: inherit; }
 hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
-/* QW-007: disabled page-nav items — non-clickable, muted color */
-.page-nav-disabled { color: #adb5bd; }
+/* QW-007: disabled page-nav items — non-clickable; use #666 (5.74:1 on white, AA pass) */
+.page-nav-disabled { color: #666; cursor: default; }
 /* QW-006: visually-hidden class for semantic headings that should not disrupt layout */
 .sr-only {
   position: absolute;
@@ -412,7 +412,7 @@ export async function startServer({ port = 4173 } = {}) {
       // text. Fixed by declaring charset=utf-8 explicitly.
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html`<!doctype html>
-        <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
+        <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
         <body><main>
           <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
           <p class="meta">Filter: ${filterNav}</p>
@@ -459,7 +459,7 @@ export async function startServer({ port = 4173 } = {}) {
         : "";
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html`<!doctype html>
-        <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${pageStyles()}<title>${escapeHtml(t.id)}</title></head>
+        <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(t.id)}: ${escapeHtml(t.title)}">${pageStyles()}<title>${escapeHtml(t.id)}</title></head>
         <body><main>
           <nav><a href="/">&larr; back to list</a></nav>
           <h1>${escapeHtml(t.id)}: ${escapeHtml(t.title)} [${escapeHtml(t.status)}]</h1>
