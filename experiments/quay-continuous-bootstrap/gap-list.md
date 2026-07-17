@@ -39,6 +39,12 @@
 
 *(No open gaps — SH-001 triaged and closed iteration 1 with QX-006 fix)*
 
+### process (experiment self-execution — outside the four V_instance dimensions; tracked here because it affects whether steering directives actually take effect)
+
+| ID | Description | Severity | Source | Date added | Last confirmed open |
+|----|-------------|----------|--------|------------|---------------------|
+| PR-001 | §0 precondition step "list `directives/pending/` and give every file an explicit applied/deferred/rejected outcome" is not being genuinely re-executed each iteration. Iterations 1, 2, and 3 each contain the exact same verbatim boilerplate line — "directives/pending/ listed: DIR-004 remains pending (in scope, not yet prioritized)" — with no `ls` output shown and no mention of DIR-005 (committed 2026-07-17 04:05:28, before iteration 1 started 04:15:13) or DIR-006 (committed 2026-07-17 05:09:30, before iteration 3 started 05:26:24), even though both were present in `directives/pending/` well before the relevant iteration began. A worktree branch-point-staleness hypothesis was tested directly (`git worktree list`, `ls` inside each iteration's own worktree checkout, `git merge-base --is-ancestor`) and disproven for iterations 2 and 3 — both the worktree checkout and the main tree had the files present at iteration start. Net effect: DIR-005 and DIR-006 have gone unacknowledged by three consecutive iterations despite satisfying every documented precondition for being picked up — the directive mechanism itself is not currently reliable, independent of any individual directive's content. | blocking | direct-observation (human-directed investigation, this steering conversation) + commit-timestamp cross-reference against `iterations/iteration-{1,2,3}.md` | 2026-07-17 | 2026-07-17 |
+
 ---
 
 ## Closed gaps
@@ -94,3 +100,4 @@
 - Iteration 3 (FINAL): development phase closed 6 gaps (UQ-003, UQ-009, UQ-011 partially, UQ-012, UQ-013, UQ-014); simulated-user + G3 found and closed 2 additional gaps (UQ-016, SH-002); simulated-user found 5 new gaps (CB-013, UQ-011 re-opened as still-significant, UQ-017, UQ-018, UQ-016→closed, SH-002→closed); net gaps closed this iteration: 8 (UQ-003, UQ-009, UQ-011 partial, UQ-012, UQ-013, UQ-014, UQ-016, SH-002)
 - **Cumulative gaps closed (all-time, iteration 3 final): 22** (CB-001..005, CB-009, CB-011, CB-012, UQ-001..003, UQ-009..014, UQ-016, VC-001, SH-001, SH-002; UQ-011 partially closed/re-opened; CB-010 partially addressed)
 - **Net open gaps after iteration 3 final**: 14 (5 CB, 9 UQ, 0 VC, 0 SH) — CB-006/007/008/010/013 open; UQ-004/005/006/007/008/011/015/017/018 open
+- Post-iteration-3 steering (out of band, this conversation): 1 new gap found, PR-001 (process dimension — the `directives/pending/` precondition check has not been genuinely re-executed for 3 consecutive iterations, so DIR-005 and DIR-006 went unacknowledged despite being available before their respective iterations started). No DIR filed for this finding — filing another directive into a mechanism already shown not to be reliably read would not fix it; recorded directly here and in `provenance.md` instead, per explicit human instruction.

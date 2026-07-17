@@ -463,6 +463,51 @@ Gap-list delta (final): 5 new gaps found (CB-013 blocking, UQ-011 re-opened, UQ-
 
 ---
 
+## Steering note: directive-tracking precondition not being genuinely re-executed (2026-07-17, post-iteration-3, out of band)
+
+Recorded directly here (per explicit human instruction) rather than as a new directive,
+because the finding is that the directive mechanism's own uptake precondition is the thing
+that is broken — filing another directive into it would not test anything new.
+
+**Finding.** ITERATION-PROMPTS.md §0 requires each iteration to list
+`experiments/quay-continuous-bootstrap/directives/pending/` and give every file an explicit
+applied/deferred/rejected outcome before proceeding. `iterations/iteration-1.md`,
+`iteration-2.md`, and `iteration-3.md` each contain the *exact same verbatim* line:
+"directives/pending/ listed: DIR-004 remains pending (in scope, not yet prioritized)" — with
+no `ls` output shown and no mention of DIR-005 or DIR-006.
+
+Commit-timestamp cross-reference against each iteration's own start timestamp:
+- `DIR-005-land-action-buttons-end-to-end-readme-screenshots-serve-g7.md` committed
+  2026-07-17 04:05:28 — **before** iteration 1 started (04:15:13). Not mentioned in
+  iteration 1, 2, or 3.
+- `DIR-006-directives-as-quay-tasks-single-source-of-truth-cutover.md` committed
+  2026-07-17 05:09:30 — **before** iteration 3 started (05:26:24). Not mentioned in
+  iteration 3.
+
+A worktree branch-point-staleness explanation was tested directly, not assumed: `git worktree
+list`, `ls` inside each iteration's own worktree checkout, and `git merge-base
+--is-ancestor` all checked. Result: **disproven** for iterations 2 and 3 — both their own
+worktree checkout and the shared main tree had the relevant DIR files present at the time
+each iteration started. It only theoretically could explain iteration 1's miss of DIR-005
+(commit landed ~10 minutes before iteration 1 started; timing is tight but not provably a
+staleness issue either). The dominant, better-supported explanation is that the §0 precondition
+line is being satisfied by copying the prior iteration's report text forward rather than by
+genuinely re-running the listing each time.
+
+**Effect.** DIR-005 (land action buttons end-to-end, README screenshots, serve/G7 host-binding
+fix) and DIR-006 (directive = quay task single-source-of-truth cutover, migrate DIR-004/005
+into tasks and delete the files) remain unapplied and unacknowledged after 3 iterations, despite
+satisfying every documented precondition for being picked up before the iteration that should
+have processed them began.
+
+**No new directive filed for this finding** — see gap-list.md `PR-001` (new `process`
+dimension, orthogonal to the four V_instance dimensions) for the tracked entry. Whichever
+iteration next executes should, as part of its own §0 precondition step, actually run
+`ls experiments/quay-continuous-bootstrap/directives/pending/` (not recall it from memory or a
+prior report) and give DIR-004, DIR-005, and DIR-006 each a real, current-iteration disposition.
+
+---
+
 ## Human-observed gap-list seed candidates (2026-07-17, pre-iteration-0)
 
 The human, using experiment 3's shipped Web UI directly as a real user (not via the
