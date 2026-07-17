@@ -63,6 +63,23 @@ async function withProvider(fn, { providerId } = {}) {
   }
 }
 
+// QX-022 (experiment 4, iteration 5): relative-time helper for CLI timestamp column.
+// Mirror of serve.js's relativeTime() — kept self-contained here to avoid importing
+// serve.js (which starts an HTTP server as a side effect of startServer() being called
+// on import in some scenarios, and imports http/config/connectProvider at module load).
+function relativeTimeCli(ts) {
+  const elapsed = Date.now() - ts;
+  if (elapsed < 0) return "just now";
+  const seconds = Math.floor(elapsed / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 // QX-005 (experiment 4, iteration 1): structured help text for --help / -h.
 // Previously `quay --help` fell through to the generic usage error on stderr
 // (UQ-001) and `quay task --help` / `quay task list --help` likewise showed
@@ -77,7 +94,7 @@ function printHelp(sub) {
     process.stdout.write(`quay — task management for AI-assisted development
 
 Usage:
-  quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--json]
+  quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--json]
   quay task view <task-id> [--json]
   quay task edit <task-id> --status <status> [--json]
   quay task check <task-id> [--json]
@@ -88,14 +105,16 @@ Usage:
 
 Options for task list:
   --status <status>   Filter by status (todo, ready, done, needs-human)
-  --label <label>     Filter by label
+  --label <label>     Filter by label (repeatable: --label A --label B for AND-filter)
   --prefix <prefix>   Filter by task id prefix (e.g. QX for QX-* tasks)
   --sort id|status|updated  Sort by id, status, or last-updated time (default: insertion order)
+  --search <query>    Filter by title substring (case-insensitive full-text search)
   --json              Output as JSON
 
 Examples:
   quay task list --prefix QX          List only QX-* tasks
   quay task list --status todo        List todo tasks
+  quay task list --search "bootstrap" List tasks with "bootstrap" in title
   quay task view QX-001               View task details
   quay task edit QX-001 --status done Mark task done
 `);
@@ -154,11 +173,17 @@ async function main() {
       // or an array of strings (repeated --label, collected by parseFlags).
       // [].concat(flags.label).filter(Boolean) normalises all three cases to an array.
       const labelFilters = [].concat(flags.label).filter(Boolean);
-      const filtered = labelFilters.length > 0
+      const filteredByLabel = labelFilters.length > 0
         ? filteredByPrefix.filter((t) =>
             Array.isArray(t.labels) && labelFilters.every((l) => t.labels.includes(l))
           )
         : filteredByPrefix;
+      // QX-021 (experiment 4, iteration 5): --search <query> title filter.
+      // Case-insensitive substring match on task title. Closes CB-007.
+      const searchQuery = typeof flags.search === "string" ? flags.search : null;
+      const filtered = searchQuery
+        ? filteredByLabel.filter((t) => t.title.toLowerCase().includes(searchQuery.toLowerCase()))
+        : filteredByLabel;
       // QX-008 (experiment 4, iteration 2): sort-by-updated support.
       // Closes CB-004 (no sort-by-time on CLI) and CB-012 (--sort updated
       // silently ignored). Tasks include `updatedAt` (file mtime in ms) from
@@ -186,8 +211,14 @@ async function main() {
       if (flags.json) {
         printJson(sorted);
       } else {
-        if (prefix) console.log(`# filtered: ${prefix.toUpperCase()}-* (${sorted.length} tasks)`);
-        for (const t of sorted) console.log(`${t.id}\t${t.status}\t${t.role}\t${t.title}`);
+        // QX-021 (iteration 5): show active search query in header line.
+        // QX-022 (iteration 5): include "updated" timestamp as rightmost column.
+        if (prefix) console.log(`# filtered: ${prefix.toUpperCase()}-* (${sorted.length} tasks)${searchQuery ? ` --search "${searchQuery}"` : ""}`);
+        else if (searchQuery) console.log(`# search: "${searchQuery}" (${sorted.length} matches)`);
+        for (const t of sorted) {
+          const updatedStr = typeof t.updatedAt === "number" ? relativeTimeCli(t.updatedAt) : "—";
+          console.log(`${t.id}\t${t.status}\t${t.role}\t${t.title}\t${updatedStr}`);
+        }
       }
     }, { providerId: flags.provider });
     return;

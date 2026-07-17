@@ -710,6 +710,124 @@ async function main() {
     }
   }
 
+  // --- QX-020 (experiment 4, iteration 5): label-nav toggling (UQ-019) ---
+  // --- QX-021 (experiment 4, iteration 5): full-text search (CB-007) ---
+  {
+    const qx20TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-qx20-test-"));
+    const qx20WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-qx20-workspace-"));
+    fs.mkdirSync(path.join(qx20WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx20WorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx20TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx20TasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    // TOGGLE-1: has labels "alpha" and "beta"
+    execFileSync("node", [nativeBin, "task", "create", "TOGGLE-1", "--title", "Alpha beta task",
+      "--status", "todo", "--body", VALID_SECTIONS, "--labels", "alpha,beta"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx20TasksDir },
+    });
+    // TOGGLE-2: has label "alpha" only
+    execFileSync("node", [nativeBin, "task", "create", "TOGGLE-2", "--title", "Alpha only task",
+      "--status", "todo", "--body", VALID_SECTIONS, "--labels", "alpha"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx20TasksDir },
+    });
+    // TOGGLE-3: has label "gamma" only (not alpha or beta)
+    execFileSync("node", [nativeBin, "task", "create", "TOGGLE-3", "--title", "Gamma search task",
+      "--status", "done", "--body", VALID_SECTIONS, "--labels", "gamma"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx20TasksDir },
+    });
+
+    const qx20Port = port + 6;
+    const qx20OrigCwd = process.cwd();
+    let qx20Server;
+    try {
+      process.chdir(qx20WorkspaceRoot);
+      qx20Server = await startServer({ port: qx20Port });
+
+      // --- QX-020 (UQ-019): label-nav toggle semantics ---
+      // With ?label=alpha&label=beta active, the label nav should offer toggle links.
+      const twolabel = await get(qx20Port, "/?label=alpha&label=beta");
+      assert(twolabel.status === 200, "GET /?label=alpha&label=beta returns 200 (QX-020, UQ-019)");
+      // The page should include TOGGLE-1 (has both) but not TOGGLE-2 (only alpha)
+      assert(twolabel.body.includes("TOGGLE-1"), "GET /?label=alpha&label=beta includes TOGGLE-1 (has both) (QX-020)");
+      assert(!twolabel.body.includes("TOGGLE-2"), "GET /?label=alpha&label=beta excludes TOGGLE-2 (only alpha) (QX-020)");
+
+      // Toggle-off: the link for "alpha" (already active) should produce a URL to remove alpha.
+      // With alpha and beta both active, clicking "alpha remove" should leave only ?label=beta.
+      // The "(remove)" link pattern is: <a href="/?label=beta">remove</a> somewhere on page.
+      // We check the page includes the pattern href="/?label=beta" (or with other params) as a remove link.
+      assert(
+        twolabel.body.includes(">remove<") || twolabel.body.includes("remove</a>"),
+        "GET /?label=alpha&label=beta label nav contains (remove) link for active labels (QX-020, UQ-019)"
+      );
+
+      // Active label "alpha" should be shown as bold (strong tag).
+      assert(
+        twolabel.body.includes("<strong>alpha</strong>") || twolabel.body.includes("<strong>alpha<"),
+        "GET /?label=alpha&label=beta shows active label 'alpha' in bold (QX-020, UQ-019)"
+      );
+
+      // Active label "beta" should also be shown as bold.
+      assert(
+        twolabel.body.includes("<strong>beta</strong>") || twolabel.body.includes("<strong>beta<"),
+        "GET /?label=alpha&label=beta shows active label 'beta' in bold (QX-020, UQ-019)"
+      );
+
+      // A clear-all link ("All") should be present when 2+ labels are active.
+      assert(
+        twolabel.body.includes(">All<") || twolabel.body.includes("Label: <a"),
+        "GET /?label=alpha&label=beta label nav includes an All/clear link (QX-020, UQ-019)"
+      );
+
+      // Toggle-on: with no labels active, clicking "alpha" should produce ?label=alpha.
+      const noLabelPage = await get(qx20Port, "/");
+      assert(noLabelPage.status === 200, "GET / (no label filter) returns 200 for toggle-on test (QX-020)");
+      // The unfiltered page's label nav should link to ?label=alpha for the alpha label.
+      assert(
+        noLabelPage.body.includes("label=alpha"),
+        "GET / (no labels) label nav includes link with label=alpha (toggle-on semantics) (QX-020, UQ-019)"
+      );
+
+      // --- QX-021 (CB-007): Web UI title search via ?q= ---
+      // ?q=gamma should return only TOGGLE-3 (title: "Gamma search task")
+      const searchGamma = await get(qx20Port, "/?q=gamma");
+      assert(searchGamma.status === 200, "GET /?q=gamma returns 200 (QX-021, CB-007)");
+      assert(searchGamma.body.includes("TOGGLE-3"), "GET /?q=gamma includes TOGGLE-3 (title contains Gamma) (QX-021)");
+      assert(!searchGamma.body.includes("TOGGLE-1"), "GET /?q=gamma excludes TOGGLE-1 (title: Alpha beta task) (QX-021, CB-007)");
+      assert(!searchGamma.body.includes("TOGGLE-2"), "GET /?q=gamma excludes TOGGLE-2 (title: Alpha only task) (QX-021)");
+
+      // ?q= (empty) should return all tasks (no filter applied)
+      const searchEmpty = await get(qx20Port, "/?q=");
+      assert(searchEmpty.status === 200, "GET /?q= (empty) returns 200 — no filter applied (QX-021)");
+      assert(
+        searchEmpty.body.includes("TOGGLE-1") && searchEmpty.body.includes("TOGGLE-2") && searchEmpty.body.includes("TOGGLE-3"),
+        "GET /?q= (empty) returns all tasks — no regression (QX-021)"
+      );
+
+      // The search form must be present: <input name="q"
+      assert(
+        noLabelPage.body.includes('name="q"') || noLabelPage.body.includes("name='q'"),
+        'GET / page includes search form with input name="q" (QX-021, CB-007)'
+      );
+
+      // Case-insensitive search: ?q=ALPHA should match "Alpha beta task" and "Alpha only task"
+      const searchUpper = await get(qx20Port, "/?q=ALPHA");
+      assert(searchUpper.status === 200, "GET /?q=ALPHA returns 200 (case-insensitive search, QX-021)");
+      assert(searchUpper.body.includes("TOGGLE-1"), "GET /?q=ALPHA includes TOGGLE-1 (case-insensitive) (QX-021)");
+      assert(searchUpper.body.includes("TOGGLE-2"), "GET /?q=ALPHA includes TOGGLE-2 (case-insensitive) (QX-021)");
+      assert(!searchUpper.body.includes("TOGGLE-3"), "GET /?q=ALPHA excludes TOGGLE-3 (Gamma title) (QX-021)");
+
+    } finally {
+      if (qx20Server) {
+        qx20Server.close();
+        if (qx20Server.client) await qx20Server.client.close();
+      }
+      process.chdir(qx20OrigCwd);
+      fs.rmSync(qx20TasksDir, { recursive: true, force: true });
+      fs.rmSync(qx20WorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
   console.log(failures === 0 ? "\nAll QN-031 serve/action regression tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }

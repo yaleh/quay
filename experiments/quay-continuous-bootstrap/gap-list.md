@@ -12,7 +12,7 @@
 | ID | Description | Severity | Source | Date added | Last confirmed open |
 |----|-------------|----------|--------|------------|---------------------|
 | CB-006 | Configurable page size not available on Web UI list page (fixed at 20) | minor | direct-observation (human, 2026-07-17) + simulated-user (cross-experiment maintainer, iteration 0) | 2026-07-17 | 2026-07-17 |
-| CB-007 | No full-text/title search in CLI or Web UI | significant | simulated-user (comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
+| ~~CB-007~~ | ~~No full-text/title search in CLI or Web UI~~ | ~~significant~~ | Closed iteration 5 — QX-021; `--search` on CLI + `?q=` on Web UI |
 | CB-008 | No packaging/distribution — users must install Node.js ≥20 separately; no single-file executables (DIR-004) | significant | directive (DIR-004, experiment 3) | 2026-07-17 | 2026-07-17 |
 | CB-010 | `task_list` MCP tool response size (550K chars for 94 tasks) exceeds inline processing limits — partially addressed by CB-009 prefix filter but full response still large when no prefix is used | significant | simulated-user (cross-experiment maintainer, iteration 0) + direct-observation | 2026-07-17 | 2026-07-17 |
 | CB-014 | MCP `task_list` schema still shows stale version in live Claude Code session (`prefix` absent in ToolSearch cache) — structural: CB-011's "fix" (new session) did not permanently resolve the underlying session-cache lifecycle; requires a session-independent fix (version header, or MCP reconnect signal) | significant | simulated-user (cross-experiment maintainer, iteration 4) | 2026-07-17 | 2026-07-17 |
@@ -22,11 +22,11 @@
 
 | ID | Description | Severity | Source | Date added | Last confirmed open |
 |----|-------------|----------|--------|------------|---------------------|
-| UQ-004 | No timestamp column in CLI list output — cannot identify most-recently-updated task from CLI | minor | simulated-user (cross-experiment maintainer + comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
+| ~~UQ-004~~ | ~~No timestamp column in CLI list output~~ | ~~minor~~ | Closed iteration 5 — QX-022; "updated" column added to non-JSON CLI output |
 | UQ-006 | Label filter on Web UI is a flat 40+ item inline list — likely unwieldy on mobile viewport | minor | simulated-user (comparison reviewer + cross-experiment maintainer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-007 | Web UI task list table (5 columns) may overflow on narrow mobile viewports — not live-verified | minor | simulated-user (comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-008 | MCP task_list response too large for inline context — no streaming or pagination at MCP layer (full unfiltered response remains large) | significant | simulated-user (cross-experiment maintainer, iteration 0) + direct-observation | 2026-07-17 | 2026-07-17 |
-| UQ-019 | Multi-label filter label-nav replaces entire filter instead of toggling individual labels — when 2+ labels active, clicking a label nav link replaces `?label=A&label=B` with `?label=X` (single-label replace) instead of adding/removing one label; active labels also not highlighted (bold) in multi-label state | significant | simulated-user (cross-experiment maintainer, iteration 4) | 2026-07-17 | 2026-07-17 |
+| ~~UQ-019~~ | ~~Multi-label filter label-nav replaces entire filter instead of toggling individual labels~~ | ~~significant~~ | Closed iteration 5 — QX-020; label nav now uses toggle semantics; active labels shown bold |
 | UQ-020 | CLI `task list` returns empty output (no rows, no message) with no "0 tasks found" line when filter matches nothing — user cannot distinguish "no matches" from "command failed silently" | minor | simulated-user (cross-experiment maintainer, iteration 4) | 2026-07-17 | 2026-07-17 |
 | UQ-021 | `--label` with no value is silently ignored (returns all tasks), while `--prefix` with no value exits with error (QX-006) — inconsistency in flag validation | minor | simulated-user (cross-experiment maintainer, iteration 4) | 2026-07-17 | 2026-07-17 |
 | UQ-022 | `needs-human` task detail page shows empty space where Advance button would be — no call-to-action, no explanatory text, no guidance on what action the human should take | minor | simulated-user (comparison-reviewer, iteration 4) | 2026-07-17 | 2026-07-17 |
@@ -62,6 +62,7 @@
 | CB-009 | `task_list` MCP tool has no prefix/experiment filter — returns all 94 tasks requiring post-processing | iteration 1 | QX-003 (done); `prefix` parameter added to `task_list` MCP tool, tested in `packages/quay/test/mcp-server.test.mjs` test 12 |
 | CB-011 | MCP `task_list` registered schema in Claude Code does not include `prefix` parameter (stale snapshot) | iteration 2 | QX-010 (done); server code already correct since QX-003; automated `tools/list` schema test added in `packages/quay/test/mcp-server.test.mjs` Block 13 confirming `prefix` in inputSchema; stale session cache resolved by new session |
 | CB-012 | `--sort updated` silently ignored in CLI `task list` | iteration 2 | QX-008 (done); `--sort updated` now correctly sorts by file mtime (not silently falls through to default order); CLI test 17 proves non-default ordering |
+| CB-007 | No full-text/title search in CLI or Web UI | iteration 5 | QX-021 (done); `--search <query>` on CLI (case-insensitive substring, test 19 cli.test.mjs); `?q=<query>` on Web UI with GET form (QX-020/021 block serve.test.mjs) |
 | CB-013 | Multi-label filtering broken: CLI last-wins; Web UI first-wins; surfaces inconsistent | iteration 4 | QX-016 (done); parseFlags() collects repeated --label flags as array; CLI AND-logic filter; Web UI uses searchParams.getAll('label') + AND-filter; buildHref() supports array label; cli.test.mjs test 18 + serve.test.mjs QX-016..019 block; commit 446d95a |
 
 ### usability_quality
@@ -81,7 +82,9 @@
 | UQ-015 | `updatedAt` field absent from `task_get` MCP tool response — asymmetry between task_list and task_get | iteration 4 | QX-018 (done); store.js get() now includes updatedAt (file mtime via statSync); closes asymmetry with list() path; commit 446d95a |
 | UQ-016 | Orientation banner shows wrong status model (`in_progress` listed, does not exist; `ready` missing) | iteration 3 (found + closed same iteration) | Banner text corrected to `todo → ready → needs-human → done`; test added to serve.test.mjs asserting banner does NOT contain `in_progress` and DOES contain `ready`; source: simulated-user (comparison-reviewer, iteration 3); commit 05a8ec9 |
 | UQ-017 | `updatedAt` timestamp tracked but never displayed on list or detail page | iteration 4 | QX-018 (done); relativeTime() helper added to serve.js; "updated" column on list page + "last updated" meta on detail page; serve.test.mjs QX-016..019 block; commit 446d95a |
+| UQ-004 | No timestamp column in CLI list output | iteration 5 | QX-022 (done); relativeTimeCli() helper added to bin/quay.js; 5th tab-separated column added to non-JSON output; cli.test.mjs test 19 |
 | UQ-018 | List-page Advance button tooltip generic vs detail-page target-status | iteration 4 | QX-019 (done); listNextStatusMap lookup per task in row renderer; list now shows "Advance to ready" for todo, "Advance to done" for ready; serve.test.mjs assertion; commit 446d95a |
+| UQ-019 | Multi-label filter label-nav replaces entire filter instead of toggling | iteration 5 | QX-020 (done); label nav uses toggle semantics (add if inactive, remove if active); active labels shown bold in multi-label state; "All" clear link shown when 2+ labels active; serve.test.mjs QX-020/021 block |
 
 ### verification_coverage
 
@@ -110,3 +113,6 @@
 - Iteration 4 (FINAL): development phase closed 5 gaps (CB-013, UQ-011 fully, UQ-015, UQ-017, UQ-018); simulated-user + G3 found 7 new gaps (CB-014 significant, CB-015 minor, UQ-019 significant, UQ-020 minor, UQ-021 minor, UQ-022 minor, UQ-023 minor); UQ-005 closed as duplicate of UQ-017 (comparison reviewer, iteration 4); total gaps closed this iteration: 6 (CB-013, UQ-005 as duplicate, UQ-011, UQ-015, UQ-017, UQ-018)
 - **Cumulative gaps closed (all-time, iteration 4 final): 28** (adds CB-013, UQ-005 as duplicate closure, UQ-011 full, UQ-015, UQ-017, UQ-018)
 - **Net open gaps after iteration 4 final**: 15 (6 CB, 9 UQ, 0 VC, 0 SH) + 1 process (PR-001) — CB-006/007/008/010/014/015 open; UQ-004/006/007/008/019/020/021/022/023 open
+- Iteration 5 (development phase): closed CB-007 (QX-021), UQ-004 (QX-022), UQ-019 (QX-020); 3 gaps closed in development phase; G3 + simulated-user pending (dispatched by orchestrator)
+- **Cumulative gaps closed (all-time, iteration 5 development phase): 31** (adds CB-007, UQ-004, UQ-019)
+- **Net open gaps after iteration 5 development phase**: 12 (5 CB, 7 UQ, 0 VC, 0 SH) + 1 process — CB-006/008/010/014/015 open; UQ-006/007/008/020/021/022/023 open

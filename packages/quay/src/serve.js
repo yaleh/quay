@@ -376,11 +376,18 @@ export async function startServer({ port = 4173 } = {}) {
       // repeated ?label=A&label=B params. Applies AND-logic: task must have ALL labels.
       // Closes CB-013 (Web UI first-wins bug). Single ?label=A still works as before.
       const labelFilters = url.searchParams.getAll("label").filter(Boolean);
-      const filtered = labelFilters.length > 0
+      const filteredByLabel = labelFilters.length > 0
         ? filteredByStatus.filter((t) =>
             Array.isArray(t.labels) && labelFilters.every((l) => t.labels.includes(l))
           )
         : filteredByStatus;
+      // QX-021 (experiment 4, iteration 5): full-text title search via ?q=<query>.
+      // Case-insensitive substring match on task title. Empty or absent ?q means no filter.
+      // Closes CB-007 (significant: no search affordance in CLI or Web UI).
+      const qFilter = url.searchParams.get("q") || null;
+      const filtered = qFilter
+        ? filteredByLabel.filter((t) => t.title.toLowerCase().includes(qFilter.toLowerCase()))
+        : filteredByLabel;
       // QW-004 (experiment 3, iteration 3): sort by ?sort=<value> query param.
       // QX-008 (experiment 4, iteration 2): added 'updated' sort value —
       // sorts by task file mtime (updatedAt field in ms from quay-native's
@@ -424,7 +431,7 @@ export async function startServer({ port = 4173 } = {}) {
       // the detail page). The action POST URL includes ?from= carrying the
       // current list URL so the redirect returns to the list with filter context
       // preserved, rather than to the task detail page.
-      const currentListHref = buildHref(statusFilter, sortKey, labelFilters, safePage > 1 ? safePage : null, prefixFilter);
+      const currentListHref = buildHref(statusFilter, sortKey, labelFilters, safePage > 1 ? safePage : null, prefixFilter, qFilter);
       const rows = pageTasks
         .map(
           (t) => {
@@ -472,13 +479,15 @@ export async function startServer({ port = 4173 } = {}) {
       // QX-004: prefix param added; omitted when null/falsy (clears the prefix filter).
       // QX-016 (iteration 4): label param now supports an array (for multi-label AND-filter)
       // or a string (for single-label nav links). Array generates repeated ?label=X&label=Y.
-      function buildHref(status, sort, label, pg, prefix) {
+      // QX-021 (iteration 5): q param carries the active title-search query.
+      function buildHref(status, sort, label, pg, prefix, q) {
         const params = new URLSearchParams();
         if (prefix) params.set("prefix", prefix);
         if (status) params.set("status", status);
         const labels = [].concat(label).filter(Boolean);
         for (const l of labels) params.append("label", l);
         if (sort) params.set("sort", sort);
+        if (q) params.set("q", q);
         if (pg && pg > 1) params.set("page", String(pg));
         const qs = params.toString();
         return qs ? `/?${qs}` : "/";
@@ -493,52 +502,61 @@ export async function startServer({ port = 4173 } = {}) {
       }))].sort();
       const prefixNav = allPrefixes.length >= 2 ? [
         prefixFilter
-          ? html`<a href="${buildHref(statusFilter, sortKey, labelFilters, null, null)}">All</a>`
+          ? html`<a href="${buildHref(statusFilter, sortKey, labelFilters, null, null, qFilter)}">All</a>`
           : html`<strong>All</strong>`,
         ...allPrefixes.map((p) =>
           p === prefixFilter
             ? html`<strong>${escapeHtml(p)}</strong>`
-            : html`<a href="${buildHref(statusFilter, sortKey, labelFilters, null, p)}">${escapeHtml(p)}</a>`
+            : html`<a href="${buildHref(statusFilter, sortKey, labelFilters, null, p, qFilter)}">${escapeHtml(p)}</a>`
         ),
       ].join(" · ") : null;
       const filterNav = [
         statusFilter
-          ? html`<a href="${buildHref(null, sortKey, labelFilters, null, prefixFilter)}">All</a>`
+          ? html`<a href="${buildHref(null, sortKey, labelFilters, null, prefixFilter, qFilter)}">All</a>`
           : html`<strong>All</strong>`,
         ...statuses.map((s) =>
           s === statusFilter
             ? html`<strong>${escapeHtml(s)}</strong>`
-            : html`<a href="${buildHref(s, sortKey, labelFilters, null, prefixFilter)}">${escapeHtml(s)}</a>`
+            : html`<a href="${buildHref(s, sortKey, labelFilters, null, prefixFilter, qFilter)}">${escapeHtml(s)}</a>`
         ),
       ].join(" · ");
       // QW-004: sort navigation links — Default, id, status.
       // QX-008: added "Updated ↓" sort link (sort by mtime descending).
       // Active sort shown as plain text; others as links (preserving active status, label, and prefix filters).
       const sortNav = [
-        !sortKey ? html`<strong>Default</strong>` : html`<a href="${buildHref(statusFilter, null, labelFilters, null, prefixFilter)}">Default</a>`,
+        !sortKey ? html`<strong>Default</strong>` : html`<a href="${buildHref(statusFilter, null, labelFilters, null, prefixFilter, qFilter)}">Default</a>`,
         sortKey === "id"
           ? html`<strong>id</strong>`
-          : html`<a href="${buildHref(statusFilter, "id", labelFilters, null, prefixFilter)}">id</a>`,
+          : html`<a href="${buildHref(statusFilter, "id", labelFilters, null, prefixFilter, qFilter)}">id</a>`,
         sortKey === "status"
           ? html`<strong>status</strong>`
-          : html`<a href="${buildHref(statusFilter, "status", labelFilters, null, prefixFilter)}">status</a>`,
+          : html`<a href="${buildHref(statusFilter, "status", labelFilters, null, prefixFilter, qFilter)}">status</a>`,
         sortKey === "updated"
           ? html`<strong>Updated ↓</strong>`
-          : html`<a href="${buildHref(statusFilter, "updated", labelFilters, null, prefixFilter)}">Updated ↓</a>`,
+          : html`<a href="${buildHref(statusFilter, "updated", labelFilters, null, prefixFilter, qFilter)}">Updated ↓</a>`,
       ].join(" · ");
       // QW-005: label navigation links — All + each distinct label.
-      // Only rendered when at least one task has labels. Each link sets a single label filter
-      // (clicking a label link replaces the current multi-label filter with just that one label).
+      // Only rendered when at least one task has labels.
+      // QX-020 (experiment 4, iteration 5): toggle semantics — clicking a label link
+      // adds the label to the current filter if not active, removes it if active.
+      // Active labels are shown bold (works for multi-label state too).
+      // When 2+ labels are active, an "All" / clear-all link is shown first.
+      // Closes UQ-019 (significant: multi-label label-nav replaced entire filter).
       const allLabels = [...new Set(allTasks.flatMap((t) => Array.isArray(t.labels) ? t.labels : []))].sort();
       const labelNav = allLabels.length > 0 ? [
         labelFilters.length > 0
-          ? html`<a href="${buildHref(statusFilter, sortKey, null, null, prefixFilter)}">All</a>`
+          ? html`<a href="${buildHref(statusFilter, sortKey, null, null, prefixFilter, qFilter)}">All</a>`
           : html`<strong>All</strong>`,
-        ...allLabels.map((l) =>
-          labelFilters.length === 1 && labelFilters[0] === l
-            ? html`<strong>${escapeHtml(l)}</strong>`
-            : html`<a href="${buildHref(statusFilter, sortKey, l, null, prefixFilter)}">${escapeHtml(l)}</a>`
-        ),
+        ...allLabels.map((l) => {
+          const isActive = labelFilters.includes(l);
+          // Toggle: if active, remove l from filters; if inactive, add l to filters.
+          const toggledLabels = isActive
+            ? labelFilters.filter((x) => x !== l)
+            : [...labelFilters, l];
+          return isActive
+            ? html`<strong>${escapeHtml(l)}</strong> (<a href="${buildHref(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">remove</a>)`
+            : html`<a href="${buildHref(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">${escapeHtml(l)}</a>`;
+        }),
       ].join(" · ") : null;
       // QW-007: page navigation — Previous / Next links with page info.
       // QW-007: page navigation — Previous / Next links with page info.
@@ -548,11 +566,11 @@ export async function startServer({ port = 4173 } = {}) {
       const pageNav = totalPages > 1 ? html`
         <p class="meta">
           ${safePage > 1
-            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilters, safePage - 1, prefixFilter)}">&laquo; Previous</a>`
+            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilters, safePage - 1, prefixFilter, qFilter)}">&laquo; Previous</a>`
             : html`<span class="page-nav-disabled">&laquo; Previous</span>`}
           &nbsp; Page ${safePage} of ${totalPages} (${totalTasks} tasks) &nbsp;
           ${safePage < totalPages
-            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilters, safePage + 1, prefixFilter)}">Next &raquo;</a>`
+            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilters, safePage + 1, prefixFilter, qFilter)}">Next &raquo;</a>`
             : html`<span class="page-nav-disabled">Next &raquo;</span>`}
         </p>` : html`<p class="meta">Page 1 of ${totalPages} (${totalTasks} tasks)</p>`;
       // QN-046 (closes discussion-doc §2.1's browser-rendering gap): a real
@@ -566,6 +584,21 @@ export async function startServer({ port = 4173 } = {}) {
       // QX-013: read ?error= and ?success= params for post-action feedback banners.
       const errorParam = url.searchParams.get("error");
       const successParam = url.searchParams.get("success");
+      // QX-021 (iteration 5): search form — GET form so URL is bookmarkable.
+      // Carries all other active filters as hidden fields so they are preserved on submit.
+      // A visible "active search" badge is rendered when qFilter is set.
+      const searchBadge = qFilter
+        ? html` <strong style="color:#0066cc">"${escapeHtml(qFilter)}"</strong> (<a href="${buildHref(statusFilter, sortKey, labelFilters, null, prefixFilter, null)}">clear</a>)`
+        : "";
+      const searchForm = html`<form method="GET" style="margin:0.5rem 0 0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+        ${prefixFilter ? html`<input type="hidden" name="prefix" value="${escapeHtml(prefixFilter)}">` : ""}
+        ${statusFilter ? html`<input type="hidden" name="status" value="${escapeHtml(statusFilter)}">` : ""}
+        ${labelFilters.map((l) => html`<input type="hidden" name="label" value="${escapeHtml(l)}">`).join("")}
+        ${sortKey ? html`<input type="hidden" name="sort" value="${escapeHtml(sortKey)}">` : ""}
+        <input name="q" type="search" value="${escapeHtml(qFilter || "")}" placeholder="Search titles…" style="padding:0.4rem 0.6rem;border:1px solid #ced4da;border-radius:4px;font-size:0.9rem;min-width:180px">
+        <button type="submit" style="padding:0.4rem 0.8rem">Search</button>
+        ${searchBadge}
+      </form>`;
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html`<!doctype html>
         <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
@@ -579,6 +612,7 @@ export async function startServer({ port = 4173 } = {}) {
           <p class="meta">Filter: ${filterNav}</p>
           <p class="meta">Sort: ${sortNav}</p>
           ${labelNav ? html`<p class="meta">Label: ${labelNav}</p>` : ""}
+          ${searchForm}
           ${pageNav}
           <table>
             <tr><th>id</th><th>status</th><th class="col-role">role</th><th>title</th><th class="col-labels">labels</th><th class="col-updated">updated</th><th class="col-actions">actions</th></tr>

@@ -1134,6 +1134,112 @@ async function main() {
     fs.rmSync(mlWorkspaceRoot, { recursive: true, force: true });
   }
 
+  // 19. QX-021 (experiment 4, iteration 5): --search title filter on CLI.
+  //     --search "foo" returns only tasks with "foo" in title (case-insensitive).
+  //     --search "" (empty string) or no flag returns all tasks (no filter).
+  //     Also covers QX-022: non-JSON output includes a timestamp ("ago") column.
+  //     Closes CB-007 (CLI full-text search) and UQ-004 (CLI timestamp).
+  {
+    const srchTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-search-tasks-"));
+    const srchWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-search-workspace-"));
+    fs.mkdirSync(path.join(srchWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(srchWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${srchTasksDir.replaceAll("\\", "\\\\")}"`,
+        "",
+      ].join("\n")
+    );
+
+    const ML_BODY = VALID_SECTIONS + AC_DOD_CHECKED;
+    // SRCH-1: title contains "bootstrap" (should match --search bootstrap)
+    execFileSync("node", [nativeBin, "task", "create", "SRCH-1", "--title", "Quay bootstrap task",
+      "--status", "todo", "--body", ML_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir },
+    });
+    // SRCH-2: title contains "dashboard" (should NOT match --search bootstrap)
+    execFileSync("node", [nativeBin, "task", "create", "SRCH-2", "--title", "Dashboard setup",
+      "--status", "todo", "--body", ML_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir },
+    });
+    // SRCH-3: title contains "Bootstrap" (case-insensitive should also match --search bootstrap)
+    execFileSync("node", [nativeBin, "task", "create", "SRCH-3", "--title", "Bootstrap configuration",
+      "--status", "done", "--body", ML_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir },
+    });
+
+    const srchOpts = { cwd: srchWorkspaceRoot, encoding: "utf8" };
+
+    // --search bootstrap: should match SRCH-1 and SRCH-3, not SRCH-2
+    {
+      const r = run(["task", "list", "--search", "bootstrap", "--json"], srchOpts);
+      assert(r.status === 0, "quay task list --search bootstrap exits 0 (QX-021, CB-007)");
+      let tasks;
+      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "SRCH-1"),
+        "quay task list --search bootstrap includes SRCH-1 (title: Quay bootstrap task) (QX-021)");
+      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "SRCH-3"),
+        "quay task list --search bootstrap includes SRCH-3 (title: Bootstrap configuration, case-insensitive) (QX-021)");
+      assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "SRCH-2"),
+        "quay task list --search bootstrap excludes SRCH-2 (title: Dashboard setup) (QX-021, CB-007)");
+    }
+
+    // --search dashboard: should match only SRCH-2
+    {
+      const r = run(["task", "list", "--search", "dashboard", "--json"], srchOpts);
+      assert(r.status === 0, "quay task list --search dashboard exits 0 (QX-021)");
+      let tasks;
+      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "SRCH-2"),
+        "quay task list --search dashboard includes SRCH-2 (QX-021)");
+      assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "SRCH-1"),
+        "quay task list --search dashboard excludes SRCH-1 (QX-021)");
+    }
+
+    // No --search flag: should return all 3 tasks (no filter applied)
+    {
+      const r = run(["task", "list", "--json"], srchOpts);
+      assert(r.status === 0, "quay task list (no --search) exits 0 (QX-021 no-filter baseline)");
+      let tasks;
+      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+      assert(Array.isArray(tasks) && tasks.length === 3,
+        "quay task list (no --search) returns all 3 tasks (QX-021 no-filter baseline)");
+    }
+
+    // QX-022: non-JSON output includes timestamp ("ago") column for tasks with updatedAt.
+    // quay-native's store.js sets updatedAt = file mtime, so any created task has it.
+    {
+      const r = run(["task", "list"], srchOpts);
+      assert(r.status === 0, "quay task list (non-JSON) exits 0 (QX-022, UQ-004)");
+      const lines = r.stdout.trim().split("\n").filter((l) => !l.startsWith("#") && l.trim());
+      assert(lines.length === 3, `quay task list (non-JSON) returns 3 lines (got ${lines.length}) (QX-022)`);
+      // Each task row should have 5 tab-separated fields: id, status, role, title, updated
+      const firstLine = lines[0];
+      const fields = firstLine.split("\t");
+      assert(fields.length === 5, `quay task list (non-JSON) row has 5 tab-separated fields (got ${fields.length}): "${firstLine}" (QX-022, UQ-004)`);
+      // The 5th field (timestamp) should contain "ago" or be "—" (null-safe)
+      const tsField = fields[4];
+      assert(tsField.includes("ago") || tsField === "—",
+        `quay task list (non-JSON) 5th field is a relative timestamp or "—" (got: "${tsField}") (QX-022, UQ-004)`);
+    }
+
+    // QX-021: --help now documents --search flag
+    {
+      const r = run(["--help"], srchOpts);
+      assert(r.status === 0, "quay --help exits 0 (QX-021 --help check)");
+      assert(r.stdout.includes("--search"), "quay --help output mentions --search flag (QX-021, CB-007)");
+    }
+
+    fs.rmSync(srchTasksDir, { recursive: true, force: true });
+    fs.rmSync(srchWorkspaceRoot, { recursive: true, force: true });
+  }
+
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 
