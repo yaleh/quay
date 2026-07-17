@@ -8,16 +8,17 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 17 dev phase (2026-07-17)_
+_Last updated: iteration 17 FINAL (2026-07-17)_
 
-- **Latest scores (PROVISIONAL dev phase):** V_instance ≈ 0.836 (ΔV ≈ +0.055). V_meta ≈ 0.321 (ΔV ≈ +0.020). σ_QX = 59/61 = 0.967. G3 PENDING. Simulated-user PENDING.
+- **Latest scores (FINAL):** V_instance = 0.832 (ΔV = +0.051). V_meta = 0.321 (ΔV = +0.020). σ_QX = 59/61 = 0.967. G3 PASS. Simulated-user COMPLETE.
 - **DIR-004: APPLIED AND ARCHIVED** (QX-056 done; GitHub Actions run 29582230120 SUCCEEDED; quay-0.2.0.tgz verified; directive file archived). Full closure — all four reopen criteria satisfied.
 - **DIR-006: RESOLVED AND ARCHIVED** (QX-057 done; Option B chosen: files canonical; DIR-004 quay task marked done/superseded; invariant enforced).
 - **DIR-008: APPLIED AND ARCHIVED** (QX-050 done, archived in synthesis, iteration 14). V_meta redesigned: new formula (`methodology_leverage × strategy_completeness × transfer_breadth × validation`) active from iteration 14. G3 co-sign received (PASS-WITH-NOTES). See `VMETAFORMULA.md`.
 - **DIR-009 STATUS: APPLIED AND ARCHIVED** — applied in iteration 13 (genuine worktree isolation, HARD GATE ls proof, no ENV-excuse boilerplate); moved to `directives/archive/DIR-009-orchestrator-must-honor-hardened-gates.md`.
-- **directives/pending/ EMPTY** — All active directives applied and archived. No pending directives entering iteration 17.
-- **CB-022 FIXED** — `printJson(sorted)` → `printJson(displayTasks)`; --format json alias carry-forward; PAUSE blocker cleared.
-- **PAUSE counter RESET** (provisional) — ΔV_17 ≈ +0.055 > 0.02, counter resets to 0.
+- **directives/pending/ EMPTY** — All active directives applied and archived. No pending directives entering iteration 18.
+- **CB-022 FIXED** — `printJson(sorted)` → `printJson(displayTasks)`; --format json alias carry-forward; PAUSE blocker cleared. Confirmed by G3 and Persona A.
+- **PAUSE counter RESET** — ΔV_17 = +0.051 > 0.02, counter resets to 0.
+- **V_instance ≥ 0.80 threshold CROSSED** — V_instance_17 = 0.832. First time in experiment history. V_meta (0.321) remains far below 0.80.
 - **Standing decisions (do not re-litigate without new evidence):**
   - Gap-list storage: plain markdown file at `experiments/quay-continuous-bootstrap/gap-list.md`
     (decided iteration 0 — see "Gap-list storage decision" in the Iteration 0 record).
@@ -28,7 +29,7 @@ _Last updated: iteration 17 dev phase (2026-07-17)_
   - V_meta formula: `methodology_leverage × strategy_completeness × transfer_breadth × validation` (from iteration 14 onward). See `VMETAFORMULA.md`.
   - V_meta re-baseline FINAL: 0.240 (transfer_breadth revised 0.80 → 0.75 in synthesis per Persona C; VMETAFORMULA.md history table updated). Non-comparable to old formula value 0.154. Transfer_breadth bumped back to 0.80 at iteration 15 FINAL per honest upward revision (packaging solidly covered by QX-056).
   - **Directive mechanism (iteration 15):** Files are canonical. Directive files in `directives/pending/` and `directives/archive/` are the one authoritative record. No directive quay tasks. (DIR-006 resolution, QX-057.)
-- **Status:** **ACTIVE — iteration 17 dev phase. directives/pending/ EMPTY. V_instance ≈ 0.836 (provisional). PAUSE counter = 0 (RESET; ΔV ≈ +0.055 > 0.02; CB-022 fixed — significant-gap blocker cleared).** Cumulative gaps closed: 91 (dev phase). Net open: 2 minor (ENV-001, SH-006).
+- **Status:** **ACTIVE — iteration 17 FINAL. directives/pending/ EMPTY. V_instance = 0.832 (FINAL, ≥ 0.80 threshold crossed). PAUSE counter = 0 (RESET; ΔV = +0.051 > 0.02).** Cumulative gaps closed: 91. Net open: 5 (ENV-001, SH-006, TST-003, TST-004, PKG-006).
 
 ---
 
@@ -603,11 +604,11 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | **14 FINAL** | **0.750** | **+0.029** | **0.240** (new formula, FINAL; transfer_breadth revised 0.80→0.75 in synthesis per Persona C) | 51/53 = 0.962 | DIR-008 APPLIED+ARCHIVED; 5 UQ gaps closed (UQ-037/038/039/040/041 via QX-051..055); 6 new gaps (UQ-042..046 open, META-001 found+closed); G3 PASS-WITH-NOTES; 3 personas complete; PAUSE not triggered (ΔV=+0.029 > 0.02); cumulative closed=73; **FORMULA SWITCH POINT — ΔV_meta non-comparable across iter 13/14** |
 | **15 FINAL** | **0.771** | **+0.021** | **0.288** (methodology_leverage=0.45, strategy_completeness=0.83, transfer_breadth=0.80↑, validation=0.965) | 55/57 = 0.965 | DIR-004 final (release verified, run 29582230120, quay-0.2.0.tgz), DIR-006 resolved (Option B: files canonical); UQ-042..046 closed (QX-058/059 CLI polish); 4 new minor gaps (UQ-047, PKG-001/002/003) from synthesis; G3 PASS; directives/pending/ EMPTY; cumulative closed=80; PAUSE not triggered (ΔV=+0.021 > 0.02); V_meta: transfer_breadth revised 0.75→0.80 (packaging solidly covered by QX-056) |
 | **16 FINAL** | **0.781** | **+0.010** | **0.301** (methodology_leverage=0.47, strategy_completeness=0.83, transfer_breadth=0.80, validation=0.966) | 57/59 = 0.966 | CB-006 (page-size), UQ-047 (--version flag), PKG-001/002/003 closed (QX-060/061); CB-007 significant new (--page-size ignored in JSON mode); PKG-004/005 minor new; ENV-001+SH-006 still deferred; G3 PASS (12/12); 3 personas complete (G3 PASS, Persona A PARTIAL, Persona B PASS, Persona C PARTIAL); cumulative closed=85; PAUSE counter=1 (1st consecutive ΔV < 0.02; but CB-007 significant found → PAUSE not triggered) |
-| **17 dev** | **~0.836** | **~+0.055** | **~0.321** (methodology_leverage=0.50↑, strategy_completeness=0.83, transfer_breadth=0.80, validation=0.967) | 59/61 = 0.967 | CB-022 FIXED (printJson(displayTasks) + --format json alias), UQ-048 (invalid --page-size warning), PKG-004/005 (CHANGELOG.md created; templates/ removed), TST-001/002 (pageSize nav link + bold assertions); 6 gaps closed; 12/12 tests pass; G3+simulated-user PENDING; PAUSE counter = 0 (RESET; ΔV ≈ +0.055 > 0.02); cumulative closed=91 |
+| **17 FINAL** | **0.832** | **+0.051** | **0.321** (methodology_leverage=0.50↑, strategy_completeness=0.83, transfer_breadth=0.80, validation=0.967) | 59/61 = 0.967 | CB-022 FIXED (printJson(displayTasks) + --format json alias), UQ-048 (invalid --page-size warning), PKG-004/005 (CHANGELOG.md created; templates/ removed), TST-001/002 (pageSize nav link + bold assertions); 6 gaps closed; G3 PASS (12/12); 3 personas complete (Persona A PASS, Persona B PASS minor notes, Persona C PARTIAL); 3 new gaps (TST-003/004 low, PKG-006 minor); synthesis minor corrections reduce provisional 0.836→0.832; **V_instance ≥ 0.80 threshold CROSSED for first time**; PAUSE counter = 0 (RESET; ΔV = +0.051 > 0.02); cumulative closed=91 |
 
-ΔV trend (V_instance): +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, +0.004, +0.029, +0.021, +0.010, **~+0.055 (17 dev)**. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13: 2nd consecutive < 0.02 (ΔV=+0.004) → **PAUSE TRIGGERED**; iter-14: PAUSE counter RESET (human resumption mandate) + ΔV=+0.029 > 0.02 → PAUSE counter at 0; iter-15: ΔV=+0.021 > 0.02 → PAUSE counter remains 0; iter-16 FINAL: ΔV=+0.010 < 0.02 → **PAUSE counter = 1** (1st consecutive; CB-022 significant gap found → PAUSE not triggered per "no new significant gap" condition); iter-17 dev: ΔV ≈ +0.055 > 0.02 → **PAUSE counter RESET to 0** (CB-022 significant gap fixed, blocker cleared). Cumulative gaps closed: 91 (dev phase).
+ΔV trend (V_instance): +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, +0.004, +0.029, +0.021, +0.010, **+0.051 (17 FINAL)**. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13: 2nd consecutive < 0.02 (ΔV=+0.004) → **PAUSE TRIGGERED**; iter-14: PAUSE counter RESET (human resumption mandate) + ΔV=+0.029 > 0.02 → PAUSE counter at 0; iter-15: ΔV=+0.021 > 0.02 → PAUSE counter remains 0; iter-16 FINAL: ΔV=+0.010 < 0.02 → **PAUSE counter = 1** (1st consecutive; CB-022 significant gap found → PAUSE not triggered per "no new significant gap" condition); iter-17 FINAL: ΔV = +0.051 > 0.02 → **PAUSE counter RESET to 0** (CB-022 significant gap fixed, blocker cleared). Cumulative gaps closed: 91 (FINAL).
 
-V_meta formula switch: old formula last value = 0.154 (iter 13); new formula re-baseline = 0.240 (iter 14 FINAL; revised from provisional 0.255 after synthesis transfer_breadth correction). Non-comparable across switch point. Iter-15 FINAL: V_meta = 0.288 (transfer_breadth bumped 0.75→0.80 per Persona C honest upward revision for packaging surface). Iter-16 FINAL: V_meta = 0.301 (methodology_leverage=0.47, strategy_completeness=0.83, transfer_breadth=0.80, validation=0.966; Persona C confirmed 0.47 as honest). Iter-17 dev: V_meta ≈ 0.321 (methodology_leverage bumped 0.47→0.50: all 6 closures 100% simulated-user-sourced; strategy_completeness=0.83 unchanged; transfer_breadth=0.80 unchanged; validation=59/61=0.967).
+V_meta formula switch: old formula last value = 0.154 (iter 13); new formula re-baseline = 0.240 (iter 14 FINAL; revised from provisional 0.255 after synthesis transfer_breadth correction). Non-comparable across switch point. Iter-15 FINAL: V_meta = 0.288 (transfer_breadth bumped 0.75→0.80 per Persona C honest upward revision for packaging surface). Iter-16 FINAL: V_meta = 0.301 (methodology_leverage=0.47, strategy_completeness=0.83, transfer_breadth=0.80, validation=0.966; Persona C confirmed 0.47 as honest). Iter-17 FINAL: V_meta = 0.321 (methodology_leverage bumped 0.47→0.50: all 6 closures 100% simulated-user-sourced; strategy_completeness=0.83 unchanged; transfer_breadth=0.80 unchanged; validation=59/61=0.967; Persona C confirmed 0.50 "honest, if anything conservative").
 
 ---
 
@@ -1828,15 +1829,15 @@ V_meta = methodology_leverage × strategy_completeness × transfer_breadth × va
 
 | Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
 |------|-----------|------------|---------|----------------|--------|-------|
-| QX-062 | native | native | tests pass (12/12); G3 PENDING | 58/61 | done | CB-022: `printJson(sorted)` → `printJson(displayTasks)`; `--format json` alias carry-forward (QX-048/QX-058 from prior iterations); cli.test.mjs section 24 sub-(c)/(d) updated (CB-022 fix assertions) |
-| QX-063 | native | native | tests pass (12/12); G3 PENDING | 59/61 | done | UQ-048 (invalid --page-size warning), PKG-004 (CHANGELOG.md created), PKG-005 (templates/ removed), TST-001/002 (pageSize nav link + bold assertions in serve.test.mjs); cli.test.mjs section 25 (new, 7 assertions) |
+| QX-062 | native | native | tests pass (12/12); G3 PASS | 58/61 | done | CB-022: `printJson(sorted)` → `printJson(displayTasks)`; `--format json` alias carry-forward (QX-048/QX-058 from prior iterations); cli.test.mjs section 24 sub-(c)/(d) updated (CB-022 fix assertions) |
+| QX-063 | native | native | tests pass (12/12); G3 PASS | 59/61 | done | UQ-048 (invalid --page-size warning), PKG-004 (CHANGELOG.md created), PKG-005 (templates/ removed), TST-001/002 (pageSize nav link + bold assertions in serve.test.mjs); cli.test.mjs section 25 (new, 7 assertions) |
 
 σ_QX entering iteration 17: 57/59 = 0.966
-σ_QX after iteration 17 dev phase: 59/61 = 0.967
+σ_QX after iteration 17 FINAL: 59/61 = 0.967
 - Denominator: 59 (prior) + 2 new done tasks = 61
 - Numerator: 57 (prior native) + 2 new native = 59
 
-### Gaps closed this iteration (development phase — 6 total)
+### Gaps closed this iteration (FINAL — 6 total, all in dev phase)
 - CB-022 (significant): `printJson(sorted)` → `printJson(displayTasks)` + `--format json` alias → QX-062
 - UQ-048 (minor): invalid --page-size warning to stderr → QX-063
 - PKG-004 (minor): CHANGELOG.md created at packages/quay/ → QX-063
@@ -1844,51 +1845,54 @@ V_meta = methodology_leverage × strategy_completeness × transfer_breadth × va
 - TST-001 (low): serve.test.mjs pageSize in nav link assertion → QX-063
 - TST-002 (low): serve.test.mjs active size bold assertion → QX-063
 
-**Cumulative gaps closed: 91 (development phase)**
+**Cumulative gaps closed: 91 (FINAL)**
 
-### New gaps found this iteration (development phase)
-None found in dev phase. Simulated-user dispatch PENDING.
+### New gaps found this iteration (synthesis — 3 new)
+- TST-003 (low): TST-001 assertion weakly anchored (full-body substring, not href-specific) — Persona B
+- TST-004 (low): No test for Previous link carrying pageSize — Persona B
+- PKG-006 (minor): README.md ghost entry in package.json files — Persona C
 
-### G3 status (iteration 17, development phase)
-G3 PENDING — Core source file changed: `packages/quay/bin/quay.js`. Must be dispatched by orchestrator (native Agent/Task tool, not manda). Verdict to go to `experiments/quay-continuous-bootstrap/audits/iteration-17-adjudicate.md`.
+### G3 status (iteration 17, FINAL)
+G3 PASS — Core source file `packages/quay/bin/quay.js` changed. All verifications passed: 12/12 tests, CB-022 fix confirmed at line 296 (`printJson(displayTasks)`), UQ-048 validation confirmed (warn+fallback), PKG-004/005/TST-001/002 all co-signed. σ_QX = 59/61 = 0.967. Gate OPEN.
 
-### System health (iteration 17, development phase)
-Full test suite: 12/12 files pass. No regressions against any of the three inherited snapshots. CB-022 fix verified manually: `--json --page-size 3` returns 3 tasks (not all 5). `--format json --page-size 2` returns 2 tasks. UQ-048 warnings appear on stderr for invalid values.
+### System health (iteration 17, FINAL)
+Full test suite: 12/12 files pass. No regressions against any of the three inherited snapshots.
 
-### §8 V_instance (iteration 17, development phase — PROVISIONAL)
+### §8 V_instance (iteration 17, FINAL)
 ```
 V_instance = capability_breadth × usability_quality × verification_coverage × system_health
-           ≈ 0.920 × 0.940 × 0.992 × 0.975
+           = 0.920 × 0.940 × 0.990 × 0.972
 
-  0.920 × 0.940  = 0.8648
-  0.8648 × 0.992 = 0.8579
-  0.8579 × 0.975 = 0.8365
+  0.920 × 0.940   = 0.8648
+  0.8648 × 0.990  = 0.856152
+  0.856152 × 0.972 = 0.831780
 
-  ≈ 0.836 (PROVISIONAL)
+  = 0.832 (FINAL)
 
-ΔV_instance (provisional) = 0.836 − 0.781 = +0.055
+ΔV_instance (FINAL) = 0.832 − 0.781 = +0.051
 ```
+Synthesis corrections from provisional (0.836): verif 0.992→0.990 (TST-003/004 assertion weakness noted); health 0.975→0.972 (PKG-006 ghost entry new).
 
-### §9 V_meta (iteration 17, development phase — PROVISIONAL)
+### §9 V_meta (iteration 17, FINAL)
 ```
 V_meta = methodology_leverage × strategy_completeness × transfer_breadth × validation
        = 0.50 × 0.83 × 0.80 × 0.967
 
   0.50 × 0.83  = 0.415
   0.415 × 0.80 = 0.332
-  0.332 × 0.967 = 0.321
+  0.332 × 0.967 = 0.321044
 
-  ≈ 0.321 (PROVISIONAL)
+  = 0.321 (FINAL)
 
-ΔV_meta (provisional) = 0.321 − 0.301 = +0.020
+ΔV_meta (FINAL) = 0.321 − 0.301 = +0.020
 ```
-σ_QX = 59/61 = 0.967 (dev phase).
-methodology_leverage bumped 0.47 → 0.50: all 6 closures 100% simulated-user-sourced (Persona A/B/C iteration 16 synthesis); implementation via worktree. Anti-inflation: Skill shaped framing, not code architecture → partial credit. Marginal honest bump.
+σ_QX = 59/61 = 0.967. methodology_leverage=0.50 confirmed by Persona C as "honest, if anything conservative." All four factors confirmed unchanged from provisional.
 
-### §11 Convergence check (iteration 17, development phase — PROVISIONAL)
-- V_meta ≥ 0.80: NO (≈0.321; far below threshold)
-- PAUSE criteria: ΔV_17 ≈ +0.055 > 0.02 → **PAUSE counter RESET to 0**; CB-022 significant gap has been FIXED → significant-gap blocker CLEARED. PAUSE not triggered.
-- G3: PENDING
-- Simulated-user: PENDING
+### §11 Convergence check (iteration 17, FINAL)
+- V_meta ≥ 0.80: NO (0.321; far below threshold)
+- V_instance ≥ 0.80: **YES** (0.832; threshold CROSSED for first time)
+- PAUSE criteria: ΔV_17 = +0.051 > 0.02 → **PAUSE counter RESET to 0**; CB-022 significant gap FIXED → blocker CLEARED.
+- G3: PASS (12/12)
+- Simulated-user: COMPLETE (Persona A PASS, Persona B PASS, Persona C PARTIAL — PKG-006 new)
 - system_health: No regression against any inherited snapshot (12/12 tests pass)
-- **Provisional status: CONTINUING** — §10/11 PENDING for synthesis
+- **Status: CONTINUING to iteration 18** — V_meta = 0.321 << 0.80; structural challenge: methodology_leverage must grow from 0.50 toward 0.80.

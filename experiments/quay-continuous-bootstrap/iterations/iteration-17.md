@@ -239,11 +239,33 @@ Both provenance.md CURRENT STATE header and V-score history table to be updated 
 
 ## 7. Simulated-user pass (§0c — every iteration)
 
-**Status: PENDING** — dispatched by orchestrator (not this session); this is the development-phase report.
+**Status: COMPLETE** — 3 personas dispatched and returned; synthesis complete.
 
-Simulated-user is a standing, every-iteration dispatch by the orchestrator using the native Agent/Task tool (not manda, not inline). This report is §0-§8 only; §7 and §10-§11 will be completed in synthesis.
+### Persona A — JSON scripting user (iteration-17-simulated-user-json-scripting.md): PASS
 
-§7 mark: **PENDING**
+CB-022 fix fully confirmed live. `--page-size 5 --json` returns exactly 5 tasks. Invalid values (`abc`, `0`, `-1`) all produce clean stderr warnings, exit code 0, and full result set in stdout. No new gaps identified from this persona.
+
+### Persona B — Web UI test coverage reviewer (iteration-17-simulated-user-webui-test-coverage.md): PASS (with minor notes)
+
+TST-001 and TST-002 assertions confirmed present and passing. Notes:
+- TST-001 assertion uses full-body substring match — passes but is weakly anchored (could be anchored to Next link href specifically). Filed as TST-003 (low).
+- No test for Previous link carrying pageSize across pages. Filed as TST-004 (low).
+
+### Persona C — Package artifact reviewer (iteration-17-simulated-user-package-artifact.md): PARTIAL
+
+- PKG-004 (templates/): FIXED — confirmed ghost entry removed.
+- PKG-005 (CHANGELOG.md): FIXED — file now exists at packages/quay/CHANGELOG.md.
+- **PKG-006 (new, minor):** `README.md` is listed in `package.json files` field but `packages/quay/README.md` does not exist. Same ghost-entry class as the just-fixed PKG-005. Filed as PKG-006 (minor).
+- V_meta methodology_leverage 0.50 assessment: judged "honest, if anything conservative" — all 6 closures are simulated-user-sourced.
+
+### Synthesis summary
+
+All 3 personas confirm CB-022 is fully fixed. No new significant or blocking gaps found. Three new minor/low gaps:
+- TST-003 (low): TST-001 assertion uses full-body substring — could be anchored to Next link href
+- TST-004 (low): No test for Previous link carrying pageSize
+- PKG-006 (minor): `README.md` ghost entry in `package.json files` — file doesn't exist under `packages/quay/`
+
+§7 mark: **COMPLETE**
 
 ## 8. V_instance
 
@@ -269,32 +291,32 @@ Simulated-user is a standing, every-iteration dispatch by the orchestrator using
 - Before: 0.915 (CB-022 significant + UQ-048 minor open)
 - After: ~0.940 (+0.025 significant CB-022, +0.005 minor UQ-048)
 
-**verification_coverage**: TST-001 + TST-002 closed. 12/12 tests pass. No uncovered capability introduced.
+**verification_coverage**: TST-001 + TST-002 closed. 12/12 tests pass. No uncovered capability introduced. Synthesis found TST-003/004 (assertion weakness noted by Persona B) — minor deduction from provisional.
 - Before: 0.985 (TST-001/002 open = 2 low gaps)
-- After: ~0.992 (+0.007 for 2 low gaps closed)
+- After: ~0.990 (minor down from provisional 0.992: TST-003/004 assertion weakness noted; actual test paths pass but anchoring is weak)
 
-**system_health**: PKG-004/PKG-005 closed. ENV-001 and SH-006 still open at minor severity (known, deferred). No regressions: 12/12 tests pass, all three inherited snapshots intact.
+**system_health**: PKG-004/PKG-005 closed. ENV-001 and SH-006 still open at minor severity (known, deferred). PKG-006 new ghost entry found by Persona C (minor). No regressions: 12/12 tests pass, all three inherited snapshots intact.
 - Before: 0.968 (PKG-004/005 open)
-- After: ~0.975 (+0.007 for 2 minor packaging gaps closed; ENV-001/SH-006 still open at minor)
+- After: ~0.972 (minor down from provisional 0.975: PKG-006 ghost entry adds back a minor packaging gap; ENV-001/SH-006 still open at minor)
 
-### Provisional V_instance (development phase)
+### V_instance FINAL
 
 ```
-V_instance_17_dev = cap_breadth × usability × verif × health
-                  = 0.920 × 0.940 × 0.992 × 0.975
+V_instance_17_FINAL = cap_breadth × usability × verif × health
+                    = 0.920 × 0.940 × 0.990 × 0.972
 
-0.920 × 0.940 = 0.8648
-0.8648 × 0.992 = 0.8579
-0.8579 × 0.975 = 0.8365
+0.920 × 0.940  = 0.8648
+0.8648 × 0.990 = 0.856152
+0.856152 × 0.972 = 0.831780
 
-≈ 0.836 (provisional)
+≈ 0.832 (FINAL)
 ```
 
-**ΔV_instance (provisional)**: 0.836 − 0.781 = **+0.055**
+**ΔV_instance (FINAL)**: 0.832 − 0.781 = **+0.051**
 
-This improvement is driven primarily by closing CB-022 (significant) which had been weighing down both capability_breadth and usability_quality.
+This improvement is driven primarily by closing CB-022 (significant) which had been weighing down both capability_breadth and usability_quality. Minor synthesis corrections (TST-003/004, PKG-006) reduce the provisional 0.836 to 0.832.
 
-**Cumulative gaps closed (monotonic counter)**: 91 (all-time, development phase)
+**Cumulative gaps closed (monotonic counter)**: 91 (all-time, development phase); no new closures in synthesis
 
 Previous: 85 (iteration 16 FINAL). +6 this iteration (CB-022, UQ-048, PKG-004, PKG-005, TST-001, TST-002).
 
@@ -342,47 +364,83 @@ Score: 4/5 = **0.80** (unchanged from iteration 16)
 
 (57 native done + 2 new native = 59 native; 59 total + 2 = 61 total. QX-001 seed still 0 contribution.)
 
-### Provisional V_meta (development phase)
+### V_meta FINAL
+
+All four factors confirmed by synthesis:
+- **methodology_leverage = 0.50**: Persona C confirmed "honest, if anything conservative" — all 6 closures sourced via simulated-user (100% vs ~80% in iteration 16). No change from provisional.
+- **strategy_completeness = 0.83**: Unchanged — MCP not touched this iteration; item 6 (cross-surface same iteration) not exercised.
+- **transfer_breadth = 0.80**: Unchanged — same 4 surfaces covered (CLI, Web UI, packaging, MCP historically). No new surface coverage.
+- **validation = 0.967**: G3 co-signed σ_QX = 59/61 = 0.967.
 
 ```
-V_meta_17 = methodology_leverage × strategy_completeness × transfer_breadth × validation
-           = 0.50 × 0.83 × 0.80 × 0.967
+V_meta_17_FINAL = methodology_leverage × strategy_completeness × transfer_breadth × validation
+                = 0.50 × 0.83 × 0.80 × 0.967
 
 0.50 × 0.83 = 0.415
 0.415 × 0.80 = 0.332
-0.332 × 0.967 = 0.321
+0.332 × 0.967 = 0.321044
 
-≈ 0.321 (provisional)
+≈ 0.321 (FINAL)
 ```
 
-**ΔV_meta (provisional)**: 0.321 − 0.301 = **+0.020**
+**ΔV_meta (FINAL)**: 0.321 − 0.301 = **+0.020**
 
-Primary driver: methodology_leverage bump 0.47 → 0.50 (all 6 closures 100% simulated-user-sourced). strategy_completeness and transfer_breadth unchanged.
+Primary driver: methodology_leverage bump 0.47 → 0.50 (all 6 closures 100% simulated-user-sourced). strategy_completeness and transfer_breadth unchanged. Provisional and FINAL values are identical — synthesis confirmed all factors.
 
 ## 10. Out-of-band audit (G3)
 
-**Status: PENDING** — G3 is mandatory for this iteration (Core file `packages/quay/bin/quay.js` changed). Must be dispatched by orchestrator (native Agent/Task tool, not manda, not inline). Verdict to be written to `experiments/quay-continuous-bootstrap/audits/iteration-17-adjudicate.md`.
+**Status: PASS** — G3 co-sign received (iteration-17-adjudicate.md).
 
-§10 mark: **PENDING**
+- Tests: 12/12, 0 failures.
+- CB-022 fix confirmed: `printJson(displayTasks)` at line 296; both `--json` and `--format json` use paginated slice.
+- UQ-048 validation: PASS — invalid page-size warns to stderr and falls back gracefully.
+- PKG-004/005: PASS — CHANGELOG.md created, templates/ removed.
+- TST-001/002: PASS — included in 12/12 run.
+- σ_QX = 59/61 = 0.967. Gate OPEN.
+
+§10 mark: **PASS**
 
 ## 11. Pause / Convergence Check
 
-**Status: PENDING** — awaiting simulated-user pass (§7) and G3 (§10).
+**Status: COMPLETE — CONTINUING to iteration 18.**
 
-Provisional inputs:
-- **Meta-layer V_meta ≥ 0.80**: NO — V_meta_17 ≈ 0.321 (provisional). Well below 0.80 threshold.
-- **Instance-layer PAUSE criteria**: ΔV_17 ≈ +0.055 (provisional). If confirmed > 0.02, PAUSE counter RESETS to 0. CB-022 significant gap has been FIXED this iteration, clearing the prior blocker. PAUSE would only trigger if ΔV < 0.02 AND no new significant gaps from simulated-user.
-- **G3 green**: PENDING.
-- **Simulated-user pass**: PENDING.
-- **system_health**: No regression against any of the three inherited snapshots (12/12 tests pass). PASS.
+### PAUSE counter analysis
 
-§11 mark: **PENDING**
+- ΔV_14 = +0.029 → counter = 0
+- ΔV_15 = +0.021 → counter = 0
+- ΔV_16 = +0.010 → counter = 1 (first consecutive < 0.02; CB-022 found → PAUSE blocked)
+- **ΔV_17 = +0.051 > 0.02 → PAUSE counter RESETS to 0**
 
-**Provisional status**: CONTINUING (ΔV ≈ +0.055 > 0.02; PAUSE counter RESET if confirmed)
+No new significant or blocking gaps from synthesis — only minor/low (TST-003, TST-004, PKG-006).
+
+### V_instance check
+
+V_instance_17 = **0.832** ≥ 0.80. Instance-layer threshold CROSSED for the first time.
+
+### V_meta check
+
+V_meta_17 = **0.321** < 0.80. Meta-layer threshold NOT met. Primary constraint: methodology_leverage (0.50) and strategy_completeness (0.83) both well below 1.0. V_meta needs to roughly double to reach 0.80 — the structural challenge is that methodology_leverage would need to reach ~0.80 for V_meta to approach 0.80 at current other factors.
+
+### G3 gate
+
+PASS. 12/12 tests. σ_QX = 59/61 = 0.967. Gate OPEN.
+
+### Convergence verdict
+
+**NOT CONVERGED** — V_meta = 0.321 << 0.80 threshold. Both V_instance and V_meta must reach ≥ 0.80 for convergence. V_instance has now crossed 0.80 but V_meta remains far below.
+
+### Next iteration
+
+PAUSE counter = 0 (RESET). Continue to iteration 18. Remaining open gaps are all minor/low (ENV-001, SH-006, TST-003, TST-004, PKG-006). The structural challenge for future iterations: methodology_leverage must grow from 0.50 toward ~0.80 to bring V_meta above 0.80.
+
+§11 mark: **COMPLETE — CONTINUING**
 
 ## Problems identified for next iteration
 
 1. ENV-001 (minor): MCP stale process — known environmental characteristic. Cannot fix at code level. Continue deferring unless a code-level mitigation presents itself.
 2. SH-006 (minor): quay-native startup message leaks to stderr. Lives in `packages/quay-native`, not `packages/quay`. Low priority; addressable if quay-native has a silent-startup flag.
-3. Post-simulated-user: any new blocking/significant gaps from this iteration's simulated-user pass become the next iteration's priority cluster.
-4. PAUSE monitoring: if ΔV_17 FINAL confirms > 0.02, PAUSE counter resets; no PAUSE pressure for iteration 18.
+3. TST-003 (low): TST-001 assertion is a full-body substring match — could be anchored to Next link href specifically. Weak but functional. Low priority.
+4. TST-004 (low): No test for Previous link carrying pageSize across pages. Low priority.
+5. PKG-006 (minor): `README.md` ghost entry in `package.json files` field — `packages/quay/README.md` does not exist. Same ghost-entry class as just-fixed PKG-005. Easy one-file fix.
+6. V_meta structural challenge: methodology_leverage (0.50) is the primary constraint on V_meta. To reach V_meta ≥ 0.80, methodology_leverage needs to approach ~0.80. The gap between current (0.50) and target (~0.80) represents the core open-ended challenge for future iterations.
+7. PAUSE counter = 0 (RESET; ΔV_17 = +0.051 > 0.02). No PAUSE pressure for iteration 18.
