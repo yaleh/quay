@@ -378,3 +378,33 @@ forward-looking items for any experiment 4 design.
 
 See `experiments/quay-webui-bootstrap/iterations/iteration-5.md` for full HALT assessment.
 See `experiments/quay-webui-bootstrap/HALT-RECOMMENDATION.md` for the formal recommendation.
+
+## Extraction complete (2026-07-17)
+
+HALT accepted. Skill extraction from experiment 3 complete.
+
+Skill directory created: `.claude/skills/quay-webui-bootstrap-methodology/`
+
+Files created:
+- `SKILL.md` — status, inheritance chain (exp1→exp2→exp3), net-new findings
+  summary, constraints, implementation guidance
+- `reference/visual-review-mechanism.md` — full §0c operational spec:
+  dispatcher pattern, four-mode grid (list/detail × desktop/mobile),
+  holistic-first verdict, Lighthouse sequencing, browser conflict rule,
+  blocking semantics, audit file location
+- `reference/g3-visual-review-env-gap.md` — shared root cause of inline
+  self-audit fallback for both G3 and visual review; correct orchestration
+  pattern; degraded-fallback record for experiment 3
+- `reference/v-meta-ceiling-two-experiment.md` — two-experiment confirmation
+  of 0.26 ceiling; experiment 2 (absence-of-data) vs. experiment 3 (positive
+  measurement) evidence types; implications for experiment 4 design
+- `reference/effectiveness-timing-corpus.md` — all clean timing data across
+  experiments 1-3; QN-006 baseline; four clean QW-* data points; excluded
+  tasks with rationale; re-trigger-domain-specificity finding
+
+Final scores at extraction:
+- V_instance = 1.0 (all 4 Done-when clauses met)
+- V_meta = 0.123 (completeness=0.77, effectiveness=0.26, reusability=0.79,
+  validation=0.778); ceiling = 0.26
+- σ_QW = 7/9 = 0.778 (floor reset to 0 at iteration 0)
+- HALT status: HALT with practical convergence accepted (NOT CONVERGED)
