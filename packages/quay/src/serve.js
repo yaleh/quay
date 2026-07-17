@@ -90,6 +90,7 @@ button {
 }
 button:hover { background: #0052a3; }
 .meta { color: #555; font-size: 0.9rem; margin: 0.5rem 0 1rem; }
+.meta a { text-decoration: underline; }
 .body { margin-top: 1rem; }
 .body h2, .body h3 { margin-top: 1rem; }
 .body ul, .body ol { margin: 0.4rem 0 0.4rem 1.5rem; }
