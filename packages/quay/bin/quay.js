@@ -59,6 +59,11 @@ async function withProvider(fn, { providerId } = {}) {
 // Previously `quay --help` fell through to the generic usage error on stderr
 // (UQ-001) and `quay task --help` / `quay task list --help` likewise showed
 // nothing useful (UQ-002). This closes both gaps.
+//
+// QX-007 (experiment 4, iteration 1): `quay serve --help` and
+// `quay action --help` previously exited 0 with no output (UQ-010). Fixed by
+// adding a fallback stub for unrecognised subcommand names so callers always
+// get at least minimal guidance.
 function printHelp(sub) {
   if (!sub || sub === "task") {
     process.stdout.write(`quay — task management for AI-assisted development
@@ -86,6 +91,9 @@ Examples:
   quay task view QX-001               View task details
   quay task edit QX-001 --status done Mark task done
 `);
+  } else {
+    // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
+    process.stdout.write(`Usage: quay ${sub} [...]\nRun \`quay --help\` for full usage documentation.\n`);
   }
 }
 
@@ -117,7 +125,17 @@ async function main() {
       // QX-002 (experiment 4, iteration 1): --prefix filter for experiment scoping.
       // Closes CB-001: `quay task list --prefix QX` returns only QX-* tasks.
       // Client-side filter after provider fetch — no provider-side changes needed.
+      //
+      // QX-006 (experiment 4, iteration 1): guard against `--prefix` passed with
+      // no value. parseFlags() sets flags.prefix = true (boolean) in that case,
+      // which causes prefix.toUpperCase() to throw a TypeError (SH-001 regression
+      // from QX-002). Detect early and exit with a clear usage error.
       const prefix = flags.prefix;
+      if (prefix !== undefined && typeof prefix !== "string") {
+        console.error("Error: --prefix requires a value (e.g., --prefix QX)");
+        process.exitCode = 1;
+        return;
+      }
       const filtered = prefix
         ? tasks.filter((t) => t.id.toUpperCase().startsWith(prefix.toUpperCase()))
         : tasks;

@@ -933,6 +933,47 @@ async function main() {
     }
   }
 
+  // 15. QX-006 (experiment 4, iteration 1): `--prefix` with no value must
+  //     exit 1 with a clear usage error, not crash with a TypeError.
+  //     Regression from QX-002 (SH-001). Uses the same fixture workspace as
+  //     tests 1-12 (envTasksDir has CLI-1 seeded, which is enough to reach
+  //     the prefix-guard code path).
+  {
+    const r = run(["task", "list", "--prefix"], spawnOpts);
+    assert(r.status === 1, "quay task list --prefix (no value) exits 1 (not a TypeError crash)");
+    assert(
+      r.stderr.includes("--prefix requires a value"),
+      `quay task list --prefix (no value) prints a clear usage error to stderr (got: ${JSON.stringify(r.stderr.slice(0, 200))})`
+    );
+    assert(
+      !r.stderr.includes("TypeError"),
+      "quay task list --prefix (no value) does NOT produce a TypeError stack trace"
+    );
+  }
+
+  // 16. QX-007 (experiment 4, iteration 1): `quay serve --help` and
+  //     `quay action --help` must exit 0 and produce at least a stub line
+  //     of output. Previously they exited 0 with no output (UQ-010).
+  {
+    const r1 = run(["serve", "--help"], spawnOpts);
+    assert(r1.status === 0, "quay serve --help exits 0");
+    assert(
+      r1.stdout.trim().length > 0,
+      "quay serve --help prints at least some output (not silent)"
+    );
+    assert(
+      r1.stdout.includes("quay --help") || r1.stdout.includes("serve"),
+      "quay serve --help output references serve or points to --help"
+    );
+
+    const r2 = run(["action", "--help"], spawnOpts);
+    assert(r2.status === 0, "quay action --help exits 0");
+    assert(
+      r2.stdout.trim().length > 0,
+      "quay action --help prints at least some output (not silent)"
+    );
+  }
+
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 

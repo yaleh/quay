@@ -211,41 +211,74 @@ This is the correct and expected outcome for an observational/baseline iteration
 
 | Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
 |------|-----------|------------|---------|----------------|--------|-------|
-| QX-002 | native | native | N/A (G3 pending) | 1/5 | done | CLI `--prefix` filter; tested in cli.test.mjs test 13 |
-| QX-003 | native | native | N/A (G3 pending) | 2/5 | done | MCP `task_list` prefix parameter; tested in mcp-server.test.mjs test 12 |
-| QX-004 | native | native | N/A (G3 pending) | 3/5 | done | Web UI `?prefix=` query param + Prefix nav; tested in serve.test.mjs |
-| QX-005 | native | native | N/A (G3 pending) | 4/5 | done | CLI `--help` / `-h` / subcommand help; tested in cli.test.mjs test 14 |
+| QX-002 | native | native | G3 PASS WITH NOTES | 1/7 | done | CLI `--prefix` filter; tested in cli.test.mjs test 13 |
+| QX-003 | native | native | G3 PASS WITH NOTES | 2/7 | done | MCP `task_list` prefix parameter; tested in mcp-server.test.mjs test 12 |
+| QX-004 | native | native | G3 PASS WITH NOTES | 3/7 | done | Web UI `?prefix=` query param + Prefix nav; tested in serve.test.mjs |
+| QX-005 | native | native | G3 PASS WITH NOTES | 4/7 | done | CLI `--help` / `-h` / subcommand help; tested in cli.test.mjs test 14 |
+| QX-006 | native | native | tests pass (30/30) | 5/7 | done | Fix --prefix crash (SH-001 regression from QX-002); test 15 in cli.test.mjs |
+| QX-007 | native | native | tests pass (30/30) | 6/7 | done | Fix quay serve/action --help silent exit (UQ-010); test 16 in cli.test.mjs |
 
 σ_QX before iteration 1: 0/1 = 0.000 (only QX-001 at seed provenance)
-σ_QX after iteration 1: 4/5 = 0.800
-(QX-001 remains seed provenance, 0 native. QX-002..QX-005 all native authoring + execution.)
+σ_QX after iteration 1 (final): 6/7 = 0.857
+(QX-001 remains seed provenance, 0 native. QX-002..QX-007 all native authoring + execution.)
 
 ### Gate check results (iteration 1)
-- QX-002: gate `execute->done` ok:true (4/4 AC checked)
-- QX-003: gate `execute->done` ok:true (4/4 AC checked)
-- QX-004: gate `execute->done` ok:true (5/5 AC checked)
-- QX-005: gate `execute->done` ok:true (5/5 AC checked)
+- QX-002: gate `execute->done` ok:true (4/4 AC checked); G3 co-signed
+- QX-003: gate `execute->done` ok:true (4/4 AC checked); G3 co-signed
+- QX-004: gate `execute->done` ok:true (5/5 AC checked); G3 co-signed
+- QX-005: gate `execute->done` ok:true (5/5 AC checked); G3 co-signed
+- QX-006: fix implemented and tested; 30/30 test suites pass; test 15 confirms no TypeError crash
+- QX-007: fix implemented and tested; 30/30 test suites pass; test 16 confirms non-empty output
 
 ### G3 status (iteration 1)
-G3 IS TRIGGERED — Core source files changed: `packages/quay/bin/quay.js`, `packages/quay/src/mcp-server.js`, `packages/quay/src/serve.js`.
-Orchestrator dispatches G3 out-of-band audit. gate_by for QX-002..QX-005 = "N/A — G3 pending orchestrator dispatch".
-Verdict will be recorded in `experiments/quay-continuous-bootstrap/audits/iteration-1-adjudicate.md`.
+G3 TRIGGERED and COMPLETE — Core source files changed: `packages/quay/bin/quay.js`, `packages/quay/src/mcp-server.js`, `packages/quay/src/serve.js`.
+Verdict: PASS WITH NOTES — 413 assertions, 0 failures across 12 test suites. Commit 36c0a58.
+See `experiments/quay-continuous-bootstrap/audits/iteration-1-adjudicate.md`.
+Notes: (1) silent serve/action --help → UQ-010 filed and closed this iteration (QX-007); (2) cosmetic duplicate comment in serve.js line 419-420.
 
-### Gaps closed this iteration
+### Gaps closed this iteration (final)
 - CB-001 (CLI prefix filter) → QX-002
 - CB-002 (Web UI prefix filter) → QX-004
 - CB-009 (MCP prefix filter) → QX-003
 - CB-010 (MCP response size) → PARTIALLY ADDRESSED (filter reduces size when used; full unfiltered response still large)
 - UQ-001 (CLI --help one-liner) → QX-005
 - UQ-002 (CLI subcommand help broken) → QX-005
+- UQ-010 (serve/action --help silent exit) → QX-007 [FILED AND CLOSED SAME ITERATION]
 - VC-001 (no CLI help test) → QX-005 (cli.test.mjs test 14)
+- SH-001 (--prefix crash, regression from QX-002) → QX-006 [FILED AND CLOSED SAME ITERATION]
+
+### New gaps found this iteration
+- CB-011 (significant): MCP task_list registered schema missing prefix parameter — simulated-user cross-experiment maintainer
+- CB-012 (significant): --sort updated silently ignored — simulated-user cross-experiment maintainer
+- UQ-009 (minor): back link from task detail loses filter context — simulated-user cross-experiment maintainer
+- UQ-010 (minor): serve/action --help silent exit — G3 audit note [FILED AND CLOSED SAME ITERATION]
+- SH-001 (significant bug): --prefix crash with no value — simulated-user comparison reviewer [FILED AND CLOSED SAME ITERATION]
 
 ### System health (iteration 1)
-Full test suite: 30/30 pass (node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs packages/quay-github/test/*.test.mjs). No regressions against any inherited snapshot.
+Full test suite (final): 30/30 pass (node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs packages/quay-github/test/*.test.mjs). No regressions against any inherited snapshot. SH-001 crash bug triaged and closed with QX-006.
+
+### V_instance (iteration 1 final)
+```
+V_instance = capability_breadth × usability_quality × verification_coverage × system_health
+           = 0.62 × 0.68 × 0.95 × 0.97
+           = 0.388
+
+ΔV_instance = 0.388 - 0.236 = +0.152
+```
+
+### V_meta (iteration 1 final)
+```
+V_meta = completeness × effectiveness × reusability × validation
+       = 0.77 × 0.26 × 0.79 × 0.857
+       = 0.136
+
+ΔV_meta = 0.136 - 0.123 = +0.013
+```
+Ceiling: 0.26 (effectiveness frozen; unchanged).
 
 ### V_meta re-trigger checks (iteration 1)
 All 5 conditions checked:
-1. effectiveness re-trigger: NOT TRIGGERED — no scope-matched single-file timing comparison yet (QX-002..QX-005 each touched one Core file but none qualify as purely single-file, no-network tasks in the QN-006 sense; they are multi-file implementations with test additions)
+1. effectiveness re-trigger: NOT TRIGGERED — no scope-matched single-file timing comparison yet (QX-002..QX-007 each touched one Core file but none qualify as purely single-file, no-network tasks; they are multi-file implementations with test additions)
 2. reusability re-trigger: NOT TRIGGERED — no organic GitHub Provider write demand
 3. completeness re-trigger (gap discovery): NOT TRIGGERED — no new Skill Method-step gap found; ENV gap continues
 4. completeness + reusability/effectiveness joint: NOT TRIGGERED — no unconditional native dispatch primitive
