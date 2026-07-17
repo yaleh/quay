@@ -568,8 +568,9 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | 4 | 0.561 | +0.070 | 0.150 | 18/19 = 0.947 | 6 gaps closed; acceleration; UQ-019 significant new |
 | 5 | 0.576 | +0.015 | 0.151 | 21/22 = 0.955 | 3 gaps closed; 4 new gaps (2 significant); first iteration below 0.02 threshold |
 | 6 | 0.564 | −0.012 | 0.152 | 24/25 = 0.960 | 5 gaps closed; 5 new gaps (4 significant); first negative ΔV; PAUSE not triggered (significant gaps found) |
+| 7 | 0.601 | +0.037 | 0.152 | 27/28 = 0.964 | 4 gaps closed (CB-017/UQ-027/028/029); 4 new minor gaps; G3 PASS-WITH-NOTES; 2× PASS + 1× CONCERNS simulated-user; HALT (human-imposed) |
 
-ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012. Iteration 6 first negative ΔV. PAUSE criteria: two consecutive iterations below 0.02 threshold (iterations 5+6) BUT significant gaps condition violated (4 new significant gaps). PAUSE NOT triggered. Status: CONTINUING.
+ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037. Iteration 7 reverses the negative ΔV from iteration 6. HALT issued by human operator after iteration 7 — "将对实验设置进行调整". Cumulative gaps closed: 40.
 
 ---
 
@@ -677,6 +678,92 @@ Gap-list delta (final): 5 new gaps found (CB-017 significant, UQ-027 significant
 - Simulated-user: 3 personas complete; 1× FAIL, 2× CONCERNS; 5 new gaps logged
 - system_health: no regression
 **Status: CONTINUING** — significant gaps require iteration 7
+
+---
+
+## Iteration 7 record (2026-07-17, FINAL — HALT)
+
+### QX-* tasks created and completed this iteration
+
+| Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
+|------|-----------|------------|---------|----------------|--------|-------|
+| QX-026 | native | native | G3 PASS-WITH-NOTES | 25/28 | done | Freq-sort labels + pin active (UQ-028+027): labelCounts Map, sort by count desc then alpha, activeHidden pinning, pinnedFirst dedup |
+| QX-027 | native | native | G3 PASS-WITH-NOTES | 26/28 | done | Doc staleness (UQ-029): --help updated to "title/body content (case-insensitive)"; placeholder updated to "Search titles and descriptions…" |
+| QX-028 | native | native | G3 PASS-WITH-NOTES | 27/28 | done | Body search heading exclusion (CB-017): stripHeadings() function added to serve.js + bin/quay.js; heading lines excluded from body search index |
+
+σ_QX before iteration 7: 24/25 = 0.960
+σ_QX after iteration 7 (FINAL): 27/28 = 0.964
+(QX-001 remains seed provenance. QX-026..028 all native authoring + execution. gate_by = "G3 PASS-WITH-NOTES" — co-signed; see audits/iteration-7-adjudicate.md.)
+
+### Gate check results (iteration 7, FINAL)
+- QX-026: all 5 ACs checked; status advanced to done; G3 PASS-WITH-NOTES
+- QX-027: all 5 ACs checked; status advanced to done; G3 PASS-WITH-NOTES
+- QX-028: all 5 ACs checked; status advanced to done; G3 PASS-WITH-NOTES
+
+### Gaps closed this iteration (FINAL — 4 total)
+Development phase:
+- CB-017 (body search false positives) → QX-028
+- UQ-027 (active label hidden by truncation) → QX-026
+- UQ-028 (alphabetic label ordering) → QX-026
+- UQ-029 (doc staleness) → QX-027
+
+### New gaps found this iteration (FINAL — 4 total)
+From G3 audit (PASS-WITH-NOTES):
+- SH-003 (minor): stripHeadings() strips #-prefixed lines inside fenced code blocks (false negative)
+
+From simulated-user pass (1× CONCERNS):
+- UQ-031 (minor): No search result highlighting — matching terms not highlighted in task list results
+- UQ-032 (minor): No label count display in nav — label names shown without task counts
+- UQ-033 (minor): "N more labels" is non-interactive — no expand path
+
+### G3 status (iteration 7, FINAL)
+G3 TRIGGERED — Core source files changed: `packages/quay/bin/quay.js`, `packages/quay/src/serve.js`.
+G3 COMPLETE — PASS-WITH-NOTES. 30/30 tests verified. No security issues. Two low-severity notes: (1) stripHeadings code-block false-negative (filed as SH-003 minor); (2) phantom URL label edge case. QX-026/027/028 co-signed.
+See `experiments/quay-continuous-bootstrap/audits/iteration-7-adjudicate.md`.
+
+### Simulated-user pass (iteration 7, FINAL)
+3 personas dispatched by orchestrator; all complete.
+- New-contributor (CLI + Web UI): PASS — "Proposal" flood 117→37 confirmed; freq sort working; help/placeholder accurate; no blocking gaps
+- Comparison-reviewer (Web UI): CONCERNS — iteration-7 fixes all passed; 3 new minor UQ gaps (UQ-031/032/033); CB-014 noted as pre-existing
+- Cross-experiment-maintainer (all surfaces): PASS — all 3 iteration-7 fixes verified (CB-017/UQ-027/028/029 closed); no regressions
+
+Gap-list delta (final): 4 new gaps found (SH-003 minor, UQ-031/032/033 minor); 0 additional gaps closed in synthesis; cumulative gaps closed: 40.
+
+### System health (iteration 7, FINAL)
+Full test suite: 30/30 pass. No regressions against any of the three inherited snapshots. All inherited capabilities retain tests.
+
+### V_instance (iteration 7, FINAL)
+```
+V_instance = capability_breadth × usability_quality × verification_coverage × system_health
+           = 0.76 × 0.84 × 0.97 × 0.97
+           ≈ 0.601
+
+ΔV_instance = 0.601 − 0.564 = +0.037 (over iteration 6 final)
+```
+Component rationale:
+- capability_breadth: 0.76 (CB-017 significant closed +0.02; no new CB gaps; 5 open: CB-006/015 minor, CB-008/010/014 significant)
+- usability_quality: 0.84 (UQ-028 sig +0.02, UQ-027 sig +0.015, UQ-029 sig +0.01 closed; 3 new minor −0.015; net +0.03; 1 significant + 9 minor open)
+- verification_coverage: 0.97 (30/30 pass; new test blocks: serve.test.mjs port+8/port+9, cli.test.mjs test 20; no Playwright mobile)
+- system_health: 0.97 (G3 PASS-WITH-NOTES; 2 low-severity notes; all tests pass; no regressions)
+
+### V_meta (iteration 7, FINAL)
+```
+V_meta = completeness × effectiveness × reusability × validation
+       = 0.77 × 0.26 × 0.79 × 0.964
+       ≈ 0.152
+
+ΔV_meta = 0.152 − 0.152 = 0.000 (unchanged in rounded value from iteration 6)
+```
+σ_QX = 27/28 = 0.964 (FINAL; G3 PASS-WITH-NOTES co-signed).
+Ceiling: 0.26 (effectiveness frozen; unchanged).
+
+### Convergence check (iteration 7, FINAL)
+- V_meta ≥ 0.80: NO (ceiling 0.26)
+- PAUSE (ΔV < 0.02 for 2+ consecutive iterations AND no new significant gap): NOT MET — ΔV_7 = +0.037 (above threshold); no new significant gaps (only minor); but the ΔV itself breaks the 2-consecutive-below condition
+- G3: PASS-WITH-NOTES (two low-severity notes; non-blocking)
+- Simulated-user: 3 personas complete; 2× PASS, 1× CONCERNS; 4 new minor gaps logged
+- system_health: no regression
+**Status: HALT** — Human operator issued explicit HALT directive after iteration 7. "将对实验设置进行调整" (experiment settings will be adjusted). Per protocol §4.5, this is an externally-imposed HALT distinct from self-assessed PAUSE or CONVERGED.
 
 ### Gate check results (iteration 5, development phase)
 - QX-020: all 5 ACs checked; status advanced to done; G3 co-sign pending
@@ -809,3 +896,25 @@ question this experiment's whole redirection answers: how to structurally streng
 iteration's ability to *proactively* discover this class of gap, rather than rely on the
 human noticing them ad hoc. See protocol §5.2 (continuous simulated-user usage) and
 `ITERATION-PROMPTS.md` §0c for the mechanism designed in direct response to this question.
+
+---
+
+## HALT note (2026-07-17, after iteration 7)
+
+Human operator issued explicit HALT directive after iteration 7 synthesis.
+Reason: "将对实验设置进行调整" (experiment settings will be adjusted).
+
+Per protocol §4.5, this is an externally-imposed HALT — distinct from self-assessed PAUSE
+(ΔV < 0.02 for 2+ consecutive iterations AND no new significant gap) or CONVERGED
+(V_meta ≥ 0.80, arithmetically unreachable given ceiling = 0.26).
+
+**Final provenance state at HALT**:
+- Total QX-* tasks: 28 (QX-001..QX-028)
+- Native (σ_QX numerator): 27 (QX-002..QX-028 all native; QX-001 seed)
+- σ_QX = 27/28 = 0.964
+- V_instance = 0.601 (cap_breadth=0.76, usability=0.84, verif=0.97, health=0.97)
+- V_meta = 0.152 (completeness=0.77, effectiveness=0.26, reusability=0.79, validation=0.964)
+- Cumulative gaps closed: 40
+- Open significant gaps: CB-008, CB-010, CB-014, UQ-008
+
+Artifacts at `experiments/quay-continuous-bootstrap/`. Experiment 4 closed.

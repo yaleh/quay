@@ -40,6 +40,9 @@
 | ~~UQ-028~~ | ~~Label nav uses alphabetic ordering rather than frequency-based ordering~~ | ~~significant~~ | Closed iteration 7 — QX-026; frequency-based sort implemented (most-used labels first, then alphabetically within equal counts); tests added |
 | ~~UQ-029~~ | ~~Documentation staleness — --help says "title substring", placeholder says "Search titles…"~~ | ~~significant~~ | Closed iteration 7 — QX-027; help text updated to "title/body content (case-insensitive)"; example updated; placeholder updated to "Search titles and descriptions…" |
 | UQ-030 | Search form is positioned below the label navigation wall on mobile (375px). At 46 labels, the above-the-fold area is consumed by label nav before the search form appears. Fix: move search form above label nav, or add CSS `order` to prioritize it on narrow screens. | minor | simulated-user (mobile-only, iteration 6) | 2026-07-17 | 2026-07-17 |
+| UQ-031 | No search result highlighting — matching query terms are not highlighted in task list results; users must visually scan to find why a result matched. | minor | simulated-user (comparison-reviewer, iteration 7) | 2026-07-17 | 2026-07-17 |
+| UQ-032 | No label count display in nav — label nav shows label names only without task counts; users cannot see which labels are most-used directly from the nav. | minor | simulated-user (comparison-reviewer, iteration 7) | 2026-07-17 | 2026-07-17 |
+| UQ-033 | "N more labels" is non-interactive — no way to expand or see all hidden labels without editing the URL; non-interactive text with no expand path. | minor | simulated-user (comparison-reviewer, iteration 7) | 2026-07-17 | 2026-07-17 |
 
 ### verification_coverage
 
@@ -47,7 +50,9 @@
 
 ### system_health
 
-*(No open gaps — SH-001 triaged and closed iteration 1 with QX-006 fix)*
+| ID | Description | Severity | Source | Date added | Last confirmed open |
+|----|-------------|----------|--------|------------|---------------------|
+| SH-003 | `stripHeadings()` strips `#`-prefixed lines inside fenced code blocks (false negative — e.g., `# comment` inside a code block would be excluded from body search). Low practical impact; worth fixing if code-heavy task bodies become common. | minor | G3 audit (PASS-WITH-NOTES, iteration 7) | 2026-07-17 | 2026-07-17 |
 
 ### process (experiment self-execution — outside the four V_instance dimensions; tracked here because it affects whether steering directives actually take effect)
 
@@ -146,3 +151,6 @@
 - Iteration 7 (development phase): closed CB-017 (QX-028), UQ-027 (QX-026), UQ-028 (QX-026), UQ-029 (QX-027); 4 gaps closed in development phase; G3 + simulated-user pending (dispatched by orchestrator)
 - **Cumulative gaps closed (all-time, iteration 7 development phase): 40** (adds CB-017, UQ-027, UQ-028, UQ-029)
 - **Net open gaps after iteration 7 development phase**: 12 (5 CB, 7 UQ, 0 VC, 0 SH) + 1 process — CB-006/008/010/014/015 open; UQ-006/007/008/020/021/022/030 open
+- Iteration 7 (G3 + simulated-user, FINAL): G3 PASS-WITH-NOTES (2 low-severity notes: stripHeadings code-block false-negative, phantom URL label edge case); 2× PASS (new-contributor, cross-experiment-maintainer), 1× CONCERNS (comparison-reviewer); 4 new gaps logged (SH-003 minor, UQ-031 minor, UQ-032 minor, UQ-033 minor); 0 additional gaps closed in synthesis; cumulative gaps closed unchanged at 40. Human operator issued HALT after iteration 7.
+- **Cumulative gaps closed (all-time, iteration 7 FINAL): 40**
+- **Net open gaps after iteration 7 FINAL (HALT state)**: 16 (5 CB, 10 UQ, 0 VC, 1 SH) + 1 process — CB-006/008/010/014/015 open; UQ-006/007/008/020/021/022/030/031/032/033 open; SH-003 open

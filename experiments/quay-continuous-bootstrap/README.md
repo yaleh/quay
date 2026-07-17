@@ -1,6 +1,6 @@
 # Quay Continuous Bootstrap — BAIME Experiment (Experiment 4)
 
-- **Status**: Not started — iteration 0 is the next action. Explicit human authorization to begin iteration 0 has NOT yet been given.
+- **Status**: HALT (human-imposed, after iteration 7) — "将对实验设置进行调整"
 - **Date**: 2026-07-17
 - **Owner**: Yale Huang
 - **Protocol**: [`docs/proposals/quay-continuous-bootstrap-experiment-v4.md`](../../docs/proposals/quay-continuous-bootstrap-experiment-v4.md) (authoritative — this file operationalizes it, does not redefine it)
@@ -134,6 +134,15 @@ See protocol document §8 for full text and rationale of each.
 
 | Iteration | Date | Primary work | V_instance | V_meta | σ_QX | Status |
 |-----------|------|-------------|------------|--------|------|--------|
-| — | — | Not yet started | — | — | — | — |
+| 0 | 2026-07-17 | Baseline measurement, gap seeding (19 gaps), self-hosted task tracking test | 0.236 | 0.123 (inherited) | 0/1 (floor: 0.778 inherited) | Complete |
+| 1 | 2026-07-17 | CLI/Web UI/MCP prefix filter, --help, --prefix crash fix (9 gaps closed) | 0.388 | 0.136 | 6/7 = 0.857 | Complete |
+| 2 | 2026-07-17 | Sort by updated (CLI+Web UI), list-page action buttons, MCP schema test (5 gaps closed) | 0.443 | 0.142 | 9/10 = 0.900 | Complete |
+| 3 | 2026-07-17 | Back link context, mobile table, gate-fail feedback, orientation banner, open-redirect fix (8 gaps closed) | 0.491 | 0.148 | 14/15 = 0.933 | Complete |
+| 4 | 2026-07-17 | Multi-label AND-filter, sticky actions column, updatedAt display, list-page target tooltip (6 gaps closed) | 0.561 | 0.150 | 18/19 = 0.947 | Complete |
+| 5 | 2026-07-17 | Label nav toggle semantics, full-text title search, CLI timestamp column (3 gaps closed) | 0.576 | 0.151 | 21/22 = 0.955 | Complete |
+| 6 | 2026-07-17 | Body search, label nav truncation, minor polish bundle (5 gaps closed; 4 new significant from audit) | 0.564 | 0.152 | 24/25 = 0.960 | Complete |
+| 7 | 2026-07-17 | Freq label sort + active pinning, doc staleness fix, body search heading exclusion (4 gaps closed) | 0.601 | 0.152 | 27/28 = 0.964 | HALT |
 
-*Iteration 0 has not run. Explicit human authorization is still outstanding.*
+**ΔV trajectory**: +0.152 → +0.055 → +0.048 → +0.070 → +0.015 → −0.012 → +0.037
+
+**Final state at HALT**: V_instance=0.601, V_meta=0.152, σ_QX=27/28=0.964, cumulative gaps closed=40, open significant gaps: CB-008/CB-010/CB-014/UQ-008.

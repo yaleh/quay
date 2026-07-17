@@ -239,67 +239,76 @@ When G3 co-signs: σ_QX will be 27/28 = 0.964.
 
 ## 7. Simulated-user pass (§0c — every iteration)
 
-**PENDING — orchestrator will dispatch**
+Three persona-diverse agents dispatched by the orchestrator (run_in_background=true, NOT manda, fresh contexts per §0c). All three complete.
 
-Three persona-diverse agents to be dispatched by the orchestrator (run_in_background=true, NOT manda, fresh contexts per §0c). Suggested personas for iteration 7:
+**Persona 1 — New-contributor (CLI + Web UI)**
+**Verdict: PASS**
+"Proposal" flood reduced from 117 to 37 tasks (83 boilerplate tasks correctly excluded by stripHeadings). Label nav now sorts by frequency (v1, usability_quality, experiment-4 in expected order). Help text and placeholder accurately reflect body search. No blocking gaps found.
+File: `experiments/quay-continuous-bootstrap/audits/iteration-7-simulated-user-new-contributor-cli-webui.md`
 
-1. **New-contributor-with-no-context** — arrives fresh, uses Web UI search and label nav to find tasks; surfaces whether the frequency sort and doc-accurate placeholder improve first-use discoverability.
-2. **Comparison-to-mature-tool reviewer (vs GitHub Issues)** — compares quay's search quality (post-CB-017 fix) against GitHub Issues' search; surfaces whether body search is now genuinely useful for structured task bodies.
-3. **Cross-experiment maintainer (CLI + Web UI)** — runs `--search` from CLI and checks that "Proposal" no longer floods results; also verifies label nav with active filter now shows the expected bold/remove affordance.
+**Persona 2 — Comparison-reviewer (vs mature tools, Web UI focus)**
+**Verdict: CONCERNS**
+Iteration 7 fixes all passed (body search false-positive fix, freq sort, active-label pinning, doc staleness). Remaining significant gaps flagged (not blocking):
+- No search result highlighting — matching terms not highlighted in task list results
+- No label count display in nav — label names shown without task counts
+- "N more labels" is non-interactive — no expand path
+- CB-014 (MCP task_list stale schema) noted as pre-existing
+New gaps logged as UQ-031, UQ-032, UQ-033 (all minor).
+File: `experiments/quay-continuous-bootstrap/audits/iteration-7-simulated-user-comparison-reviewer-webui.md`
 
-Each persona writes to:
-`experiments/quay-continuous-bootstrap/audits/iteration-7-simulated-user-{persona}.md`
-
-New significant findings become gap-list entries dated this iteration.
+**Persona 3 — Cross-experiment maintainer (CLI + Web UI + MCP, all surfaces)**
+**Verdict: PASS**
+All 3 iteration-7 fixes verified: Proposal 117→37 (CB-017 closed), freq sort v1→usability_quality→experiment-4 (UQ-028 closed), active labels pinned+bold (UQ-027 closed), --help and placeholder updated (UQ-029 closed). No regressions found.
+File: `experiments/quay-continuous-bootstrap/audits/iteration-7-simulated-user-cross-experiment-maintainer-all-surfaces.md`
 
 ---
 
-## 8. V_instance (provisional — development phase only; G3 + simulated-user pending)
+## 8. V_instance (FINAL — G3 PASS-WITH-NOTES + simulated-user complete)
 
-**capability_breadth (provisional)**: 0.76
+**capability_breadth**: 0.76
 - Prior: 0.74.
 - CB-017 CLOSED (significant, QX-028): body search heading exclusion implemented — false positives for template terms eliminated. +0.02.
+- No new CB gaps this iteration.
 - Net: +0.02 → 0.76.
-- Open: CB-006/008/010/014/015 (5 open, as before) = 5 open (4 significant + 1 minor).
+- Open: CB-006/008/010/014/015 (5 open: 3 significant + 2 minor).
 
-**usability_quality (provisional)**: 0.85
+**usability_quality**: 0.84
 - Prior: 0.81.
-- UQ-027 CLOSED (significant, QX-026): active label pinning — active filters now always visible in nav. +0.02.
-- UQ-028 CLOSED (significant, QX-026): frequency sort — most-used labels (v1, usability_quality) now appear first. +0.015.
+- UQ-028 CLOSED (significant, QX-026): frequency sort — most-used labels (v1, usability_quality) now appear first. +0.02.
+- UQ-027 CLOSED (significant, QX-026): active label pinning — active filters now always visible in nav. +0.015.
 - UQ-029 CLOSED (significant, QX-027): doc staleness corrected — help and placeholder now accurately reflect body search. +0.01.
-- Net: +0.045 → 0.855 ≈ 0.85.
-- Open: UQ-008 (significant) + UQ-006/007/020/021/022/030 (6 minor) = 7 open.
+- 3 new UQ minor gaps from comparison-reviewer (UQ-031/032/033): −0.015 (−0.005 each).
+- Net: +0.03 → 0.84.
+- Open: UQ-008 (significant) + UQ-006/007/020/021/022/030/031/032/033 (9 minor) = 10 open.
 
-**verification_coverage (provisional)**: 0.97
+**verification_coverage**: 0.97
 - 30/30 pass. New test blocks added: serve.test.mjs (port+8 QX-026/027 block + port+9 QX-028 block), cli.test.mjs (test 20 QX-027/028 block).
 - No Playwright live mobile verification. Score unchanged from iteration 6.
 
-**system_health (provisional)**: 0.97
-- 30/30 pass confirmed before and after all changes. G3 PENDING.
-- All three inherited snapshots confirmed intact.
-- No regressions. Score unchanged from iteration 6.
+**system_health**: 0.97
+- 30/30 pass confirmed before and after all changes. G3 PASS-WITH-NOTES.
+- Both notes are low-severity, non-blocking edge cases (SH-003 filed for code-block false-negative).
+- All three inherited snapshots confirmed intact. Score unchanged from iteration 6.
 
-### Provisional V_instance:
+### Final V_instance:
 ```
-V_instance (provisional) = capability_breadth × usability_quality × verification_coverage × system_health
-                         = 0.76 × 0.85 × 0.97 × 0.97
+V_instance (FINAL) = capability_breadth × usability_quality × verification_coverage × system_health
+                   = 0.76 × 0.84 × 0.97 × 0.97
 
-                         = 0.76 × 0.85 = 0.646
-                         × 0.97 = 0.627
-                         × 0.97 = 0.608
+                   = 0.76 × 0.84 = 0.6384
+                   × 0.97 = 0.6192
+                   × 0.97 = 0.6006
 
-V_instance (provisional) ≈ 0.608
+V_instance (FINAL) ≈ 0.601
 
-ΔV_instance (provisional) = 0.608 − 0.564 = +0.044
+ΔV_instance (FINAL) = 0.601 − 0.564 = +0.037
 ```
 
-**This is a provisional development-phase estimate.** G3 and simulated-user may revise these scores, as occurred in iterations 5 and 6 where provisional and final differed by 0.061 and 0.079 respectively.
-
-**Cumulative gaps closed (development phase): 40** (prior 36 + CB-017, UQ-027, UQ-028, UQ-029)
+**Cumulative gaps closed (FINAL): 40** (prior 36 + CB-017, UQ-027, UQ-028, UQ-029)
 
 ---
 
-## 9. V_meta (provisional)
+## 9. V_meta (FINAL)
 
 **completeness**: 0.77
 Re-trigger check: NOT TRIGGERED — no new Skill Method-step gap found. ENV gap continues unchanged.
@@ -310,16 +319,20 @@ Re-trigger check: NOT TRIGGERED — QX-026/027/028 each touched multiple source 
 **reusability**: 0.79
 Re-trigger check: NOT TRIGGERED — no organic demand for GitHub Provider data.write or new ABI extension.
 
-**validation**: 0.960 (σ_QX = 24/25, development phase — G3 co-sign pending)
-When G3 co-signs QX-026/027/028: σ_QX = 27/28 = 0.964 → V_meta moves slightly.
+**validation**: 0.964 (σ_QX = 27/28 — QX-026/027/028 gate_by = G3 PASS-WITH-NOTES, co-signed)
+- QX-001: seed (0 σ contribution)
+- QX-002..QX-025: 24 native tasks
+- QX-026, QX-027, QX-028: native, gate_by = G3 PASS-WITH-NOTES (FINAL)
+- σ_QX = 27/28 = 0.964
 
-**V_meta total (provisional)**:
+**V_meta total (FINAL)**:
 ```
 V_meta = completeness × effectiveness × reusability × validation
-       = 0.77 × 0.26 × 0.79 × 0.960
+       = 0.77 × 0.26 × 0.79 × 0.964
+       = 0.158158 × 0.964
        ≈ 0.152
 
-V_meta (provisional, unchanged from iteration 6)
+V_meta (FINAL) ≈ 0.152 (unchanged in rounded value from iteration 6)
 ```
 
 **V_meta ceiling**: 0.26 (effectiveness frozen; V_meta ≥ 0.80 arithmetically unreachable — standing fact restated)
@@ -331,56 +344,50 @@ V_meta (provisional, unchanged from iteration 6)
 4. completeness + reusability/effectiveness joint: NOT TRIGGERED
 5. open-ended-domain-specific: NOT TRIGGERED — domain capability gaps being closed; self-hosted tracking functioning; no new methodology finding.
 
-**Stall diagnosis**: Unchanged — effectiveness frozen at 0.26; completeness blocked by ENV gap; reusability blocked by no organic write demand. Validation moving slowly upward.
+**Stall diagnosis**: Unchanged — effectiveness frozen at 0.26; completeness blocked by ENV gap; reusability blocked by no organic write demand. Validation at 0.964 (27/28).
 
 ---
 
 ## 10. Out-of-band audit (G3)
 
-**PENDING — orchestrator will dispatch**
+**G3 PASS-WITH-NOTES**
 
-G3 WAS TRIGGERED this iteration — Core source files changed:
+G3 was triggered this iteration — Core source files changed:
 - `packages/quay/bin/quay.js` (QX-027 help text + QX-028 stripHeadings)
 - `packages/quay/src/serve.js` (QX-026 freq-sort + pin, QX-027 placeholder, QX-028 stripHeadings)
 
-G3 auditor should write to:
-`experiments/quay-continuous-bootstrap/audits/iteration-7-adjudicate.md`
+**Verdict: PASS-WITH-NOTES** — 30/30 tests verified. No security issues. Two low-severity notes:
+1. `stripHeadings()` does not handle content inside fenced code blocks — a `# comment` line inside a triple-backtick block would be stripped (false negative). Negligible in practice since task bodies rarely embed code; logged as SH-003 (minor).
+2. Phantom URL label could displace nav slots in an edge case. Non-blocking.
 
-Key focus areas for G3:
-1. `stripHeadings()` correctness: does `/^#+\s/.test(line)` correctly exclude `## Proposal`, `### Phase 1 —`, `# Title` but NOT `#tag` (no space after hash)?
-2. Frequency sort edge case: what happens when `labelCounts` has 0 tasks for a label (shouldn't happen, but confirm Set iteration is consistent)?
-3. Active-label pinning: does `[...new Set([...activeHidden, ...allLabels])]` correctly dedup and preserve order?
-4. `hiddenLabelCount` calculation: `allLabels.filter(l => !visibleLabels.includes(l)).length` — is this O(n²) for large label sets? Non-blocking note if so.
-5. Placeholder update doesn't break any test that asserted the old string.
-
-Confirm dispatcher: orchestrator, native Agent/Task tool, NOT manda.
+Both notes are pre-existing edge cases, non-blocking. QX-026, QX-027, QX-028 co-signed (gate_by = G3 PASS-WITH-NOTES).
+File: `experiments/quay-continuous-bootstrap/audits/iteration-7-adjudicate.md`
 
 ---
 
-## 11. Pause / Convergence Check (provisional — pending G3 + simulated-user)
+## 11. Pause / Convergence Check (FINAL)
 
-- [ ] **Meta-layer V_meta ≥ 0.80**: NO — V_meta ≈ 0.152 (provisional), ceiling = 0.26. Arithmetically unreachable. NOT CONVERGED on meta-layer.
-- [ ] **Instance-layer PAUSE criteria** (ΔV flat < 0.02 for 2+ consecutive iterations AND no new significant gap):
+- [x] **Meta-layer V_meta ≥ 0.80**: NO — V_meta ≈ 0.152 (FINAL), ceiling = 0.26. Arithmetically unreachable. NOT CONVERGED on meta-layer.
+- [x] **Instance-layer PAUSE criteria** (ΔV flat < 0.02 for 2+ consecutive iterations AND no new significant gap):
   - ΔV_instance iteration 6 (FINAL): −0.012 (below 0.02)
-  - ΔV_instance iteration 7 (PROVISIONAL): +0.044 (above 0.02 threshold)
-  - Two consecutive iterations below threshold: NO (iteration 7 provisional breaks the streak)
-  - **PAUSE: NOT triggered** — ΔV_7 provisional is +0.044 (above threshold)
-  - Note: PAUSE check is provisional; final ΔV depends on G3 + simulated-user findings
-- [ ] **G3 green for all Core/lift tasks**: PENDING — Core source files changed; awaiting orchestrator dispatch
-- [ ] **Simulated-user pass run, findings recorded**: PENDING — orchestrator dispatch required
-- [ ] **system_health: no regression against any of the three inherited snapshots**: YES (30/30 pass confirmed; all inherited snapshots intact)
+  - ΔV_instance iteration 7 (FINAL): +0.037 (above 0.02 threshold)
+  - Two consecutive iterations below threshold: NO (iteration 7 breaks the streak)
+  - **PAUSE: NOT triggered** — ΔV_7 = +0.037 (above threshold)
+- [x] **G3 green for all Core/lift tasks**: YES — G3 PASS-WITH-NOTES; QX-026/027/028 co-signed
+- [x] **Simulated-user pass run, findings recorded**: YES — 3 personas complete; 2× PASS, 1× CONCERNS
+- [x] **system_health: no regression against any of the three inherited snapshots**: YES (30/30 pass confirmed; all inherited snapshots intact)
 
-**Status: CONTINUING (provisional)** — G3 and simulated-user pending; no evidence of convergence criteria being met.
+**Status: HALT (human-imposed)** — PAUSE criteria not triggered. Human operator issued explicit HALT directive after iteration 7.
 
-ΔV trend (provisional): iter0→1=+0.152, iter1→2=+0.055, iter2→3=+0.048, iter3→4=+0.070, iter4→5=+0.015, iter5→6=−0.012, iter6→7=+0.044 (provisional). Iteration 7 provisionally reverses the negative ΔV from iteration 6.
+ΔV trend (FINAL): iter0→1=+0.152, iter1→2=+0.055, iter2→3=+0.048, iter3→4=+0.070, iter4→5=+0.015, iter5→6=−0.012, iter6→7=+0.037. Iteration 7 reverses the negative ΔV from iteration 6.
 
 ---
 
 ## Problems identified for next iteration
 
-(To be updated after G3 + simulated-user findings. Pre-emptive list from current open gap state.)
+(N/A — HALT issued by human operator after this iteration. Open gaps are inherited for the adjusted experiment.)
 
-Priority order from updated open gap list after development phase:
+Priority order from updated open gap list at HALT:
 
 1. **CB-014** (significant): MCP task_list schema stale in-session — structural gap. Requires session-independent fix.
 
@@ -388,12 +395,27 @@ Priority order from updated open gap list after development phase:
 
 3. **CB-008/DIR-004** (significant): Packaging/distribution — 7 iterations without progress; growing technical debt.
 
-4. **UQ-030** (minor): Move search form above label nav on mobile (or use CSS `order`).
+4. **UQ-030/031/032/033** (minor): Mobile search form position; search result highlighting; label count display; "N more labels" expand path.
 
-5. **UQ-020/021/022** (minor): CLI edge cases and needs-human guidance.
+5. **SH-003** (minor): stripHeadings code-block false-negative.
 
-6. **CB-006** (minor): Configurable page size on Web UI list page.
+6. **UQ-020/021/022** (minor): CLI edge cases and needs-human guidance.
 
-Any new significant gaps from G3 or simulated-user will be inserted at the top of this list.
+7. **CB-006** (minor): Configurable page size on Web UI list page.
 
-Note: If ΔV_7_final ≥ 0.02 AND simulated-user finds no new significant gaps, iteration 8 would be the first iteration where PAUSE criteria could potentially be met. Watch ΔV trend.
+---
+
+## HALT — Human-imposed stop after iteration 7
+
+The human operator issued an explicit HALT directive after iteration 7 with the note:
+"将对实验设置进行调整" (experiment settings will be adjusted).
+
+This is an externally-imposed HALT per protocol §4.5 — distinct from self-assessed PAUSE
+(ΔV < 0.02 for 2+ consecutive) or CONVERGED (V_meta ≥ 0.80, not reachable given ceiling).
+
+**Final state at HALT**:
+- V_instance = 0.601 (cap_breadth=0.76, usability=0.84, verif=0.97, health=0.97)
+- V_meta = 0.152 (completeness=0.77, effectiveness=0.26, reusability=0.79, validation=0.964)
+- σ_QX = 27/28 = 0.964
+- Cumulative gaps closed: 40 / 56 total gap entries (including process dimension)
+- Open significant gaps: CB-008, CB-010, CB-014, UQ-008
