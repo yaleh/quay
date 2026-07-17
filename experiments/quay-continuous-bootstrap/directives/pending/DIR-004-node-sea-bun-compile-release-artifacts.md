@@ -1,6 +1,6 @@
 # DIR-004 (carried forward from experiment 3)
 
-- status: pending
+- status: **REOPENED — pending** (was marked APPLIED iteration 9; reopened 2026-07-17 — see "Reopen (2026-07-17)" section below)
 - priority: **URGENT — dedicated iteration requested** (added 2026-07-17, see "Priority amendment" below)
 - created_by: human (Yale Huang), via experiment 3's pending directive
 - created_at: 2026-07-17 (originally filed in experiment 3)
@@ -95,15 +95,50 @@ The human's conclusion, reached in this conversation, was:
 6. Record the resolution of this directive (applied/deferred/rejected,
    with evidence) in whichever iteration first acts on it.
 
-## Resolution
+## Reopen (2026-07-17)
 
-- **Status**: APPLIED — iteration 9 (2026-07-17)
-- **Applied by**: QX-033 (experiment 4, iteration 9 development phase)
-- **Approach chosen**: Option B (npm pack) — NOT Node SEA or Bun compile
+- **Reopened by**: human (Yale Huang), asserted directly in this live conversation, after a
+  cross-check of the iteration-9 "APPLIED" claim against actual repository + GitHub state.
+- **Why reopened — the "APPLIED" claim was only half true.** DIR-004 requires TWO things:
+  (a) produce a release artifact, and (b) a **GitHub Actions workflow that builds and
+  publishes** it (requested action items 3 and 4). Item (a) was genuinely done and verified
+  locally. Item (b) was verified only at the "file exists + local YAML/structure looks
+  correct" level — **the workflow has never actually run on GitHub, and cannot have**:
+  - All experiment-4 commits — including `9c8e571`/`1f3c833`, which contain
+    `.github/workflows/release.yml` — have **never been pushed to `origin`**. As of the
+    reopen, local `master` is 88 commits ahead of `origin/master` (`origin/master` is still
+    at experiment-1 "Iteration 88 independent G3 audit — PASS").
+  - `gh run list --workflow=release.yml` → `HTTP 404: workflow release.yml not found on the
+    default branch`. GitHub has no knowledge of this workflow.
+  - The `v0.1.0` tag that exists on `origin` points at commit `10c847b`, which **predates**
+    `release.yml`'s creation (`9c8e571`) — so even the one tag on the remote could not have
+    triggered this workflow; at that commit the workflow file did not exist.
+  - Requested-action item 4 ("verify the produced executable actually runs ... with evidence
+    recorded") was never satisfied for a real published artifact — only the local `.tgz` was
+    exercised, and only as `npm pack` output, not as a standalone executable.
+- **Net current state**: local packaging (`package.sh` → `.tgz`, 30/30 tests) is real and
+  stands. The GitHub-Actions **build-and-publish** half — the core of what this directive
+  asked for — is unexecuted and unverified in reality. That half is why this directive is
+  back in `pending/`.
+
+## Requested action on reopen
+
+The applying iteration must actually CLOSE the publish half, not re-assert file existence:
+1. Get the commits carrying `release.yml` onto a branch GitHub can see (push to `origin`, or
+   an explicit decision + evidence about which remote/branch is the real publish target).
+2. Trigger the workflow for real (push a `v*` tag whose commit actually contains the
+   workflow) and **record the actual GitHub Actions run URL + result** — not a local dry run.
+3. Download the published artifact from the resulting GitHub Release and verify the CLI +
+   `serve` subcommands run from it (item 4), with pasted evidence.
+4. Only then re-close, with the run URL as the evidence the original "APPLIED" lacked.
+
+## Prior partial resolution (iteration 9 — retained for history, no longer the closing record)
+
+- **Status at the time**: marked APPLIED — iteration 9 (2026-07-17), by QX-033.
+- **Approach chosen**: Option B (npm pack) — NOT Node SEA or Bun compile.
 - **Reason for approach**: `esbuild` is not available in this environment (`which esbuild` returns nothing). Node SEA requires bundling all runtime dependencies (`yaml`, `@modelcontextprotocol/sdk`) into a single bundle file before injecting into a node copy. Without a bundler, this would require installing `esbuild` or equivalent as an additional toolchain dependency. `npm pack` requires no additional toolchain, produces a `.tgz` installable via `npm install -g quay-0.1.0.tgz`, and honors the existing `bin` field in `package.json`.
-- **Evidence**:
+- **Evidence (local only — see Reopen above for what this did NOT cover)**:
   - `packages/quay/scripts/package.sh` — created, executable (`chmod +x`), runs `npm pack`, exits 0, produces `quay-0.1.0.tgz` (107.8 kB packed, 432.8 kB unpacked, 22 files).
-  - `.github/workflows/release.yml` — created; triggers on `push: tags: ['v*']`; installs deps, runs `bash packages/quay/scripts/package.sh`, uploads artifact to GitHub Release via `softprops/action-gh-release@v2`.
+  - `.github/workflows/release.yml` — created; triggers on `push: tags: ['v*']`; installs deps, runs `bash packages/quay/scripts/package.sh`, uploads artifact to GitHub Release via `softprops/action-gh-release@v2`. **NOTE: never actually executed on GitHub — see Reopen.**
   - Full test suite: 30/30 pass (no regression).
-- **Gaps closed**: CB-008 (capability_breadth, significant).
-- **DIR lifecycle**: This file will be moved to `directives/archive/` in the iteration 9 commit.
+- **Gaps that were marked closed**: CB-008 (capability_breadth, significant) — this closure is now only partial; the publish path remains open.
