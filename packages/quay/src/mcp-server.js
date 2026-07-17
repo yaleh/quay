@@ -176,6 +176,12 @@ export async function startMcpServer() {
   // Default pageSize=50, max pageSize=200. Applied after all other filters.
   // Response structuredContent includes total/page/pageSize/totalPages
   // metadata alongside the tasks array.
+  //
+  // QX-032 (experiment 4, iteration 9): changed `label` parameter from
+  // z.string().optional() to z.array(z.string()).optional() — closes CB-015
+  // (MCP multi-label filter parity). Backward-compatible: a single string
+  // passed as label is coerced to a one-element array. AND-join semantics
+  // match CLI (`--label A --label B`) and Web UI (`?label=A&label=B`).
   server.registerTool(
     "task_list",
     {
@@ -186,6 +192,8 @@ export async function startMcpServer() {
         "Response includes `tasks` array plus pagination metadata: `total` (filtered count before paging), " +
         "`page`, `pageSize`, `totalPages`. " +
         "Filter order: status → label → prefix → search → pagination. " +
+        "The `label` parameter accepts an array of label strings for AND-join filtering (all specified labels must be present on the task). " +
+        "A single string is also accepted for backward compatibility (treated as a one-element array). " +
         "The `prefix` parameter filters by task-id prefix (e.g. prefix='QX' returns only QX-* tasks, case-insensitive). " +
         "The `search` parameter does case-insensitive substring match on task title + body text; " +
         "markdown heading lines (## Proposal, ## Plan, ## AC, ## DoD, etc.) are excluded from the body match " +
@@ -194,7 +202,7 @@ export async function startMcpServer() {
       inputSchema: {
         provider: z.string().optional().describe("Provider id to query (defaults to the first-enabled Provider in .quay/config.yml)."),
         status: z.string().optional().describe("Filter by task status (e.g. 'todo', 'ready', 'done', 'needs-human'). Omit to include all statuses."),
-        label: z.string().optional().describe("Filter by a single label string. Tasks must have this label to be included. For multi-label AND-filter use CLI or Web UI."),
+        label: z.union([z.array(z.string()), z.string()]).optional().describe("Array of label strings for AND-join filtering (all specified labels must be present). A single string is accepted for backward compatibility. Omit to include all tasks regardless of labels."),
         prefix: z.string().optional().describe("Filter by task-id prefix, case-insensitive (e.g. 'QX' returns QX-001, QX-002, ...). Reduces response size for large multi-experiment workspaces."),
         search: z.string().optional().describe("Full-text search: case-insensitive substring match on task title + body content. Markdown heading lines (e.g. ## Proposal, ## Plan) are excluded from the body match to avoid template boilerplate false positives."),
         page: z.number().int().optional().describe("1-based page number (default 1). Applied after all filters."),
@@ -203,7 +211,16 @@ export async function startMcpServer() {
     },
     async ({ provider, status, label, prefix, search, page, pageSize }) => {
       const { client } = await getClient(provider);
-      let tasks = await client.taskList({ status, label });
+      // QX-032: normalize label to an array (backward-compatible — single string still works).
+      const labelFilters = Array.isArray(label) ? label : (label ? [label] : []);
+      let tasks = await client.taskList({ status });
+      // QX-032: client-side AND-join label filter — matches CLI (--label A --label B) and
+      // Web UI (?label=A&label=B) semantics. Empty labelFilters = no filter applied.
+      if (labelFilters.length > 0) {
+        tasks = tasks.filter((t) =>
+          labelFilters.every((l) => Array.isArray(t.labels) && t.labels.includes(l))
+        );
+      }
       // QX-003: client-side prefix filter.
       if (prefix) {
         tasks = tasks.filter((t) => t.id.toUpperCase().startsWith(prefix.toUpperCase()));

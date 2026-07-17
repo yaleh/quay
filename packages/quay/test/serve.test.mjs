@@ -762,14 +762,15 @@ async function main() {
       );
 
       // Active label "alpha" should be shown as bold (strong tag).
+      // QX-034 (UQ-032): label now renders with count badge: <strong>alpha (N)</strong>
       assert(
-        twolabel.body.includes("<strong>alpha</strong>") || twolabel.body.includes("<strong>alpha<"),
+        twolabel.body.includes("<strong>alpha") && twolabel.body.includes("</strong>"),
         "GET /?label=alpha&label=beta shows active label 'alpha' in bold (QX-020, UQ-019)"
       );
 
       // Active label "beta" should also be shown as bold.
       assert(
-        twolabel.body.includes("<strong>beta</strong>") || twolabel.body.includes("<strong>beta<"),
+        twolabel.body.includes("<strong>beta") && twolabel.body.includes("</strong>"),
         "GET /?label=alpha&label=beta shows active label 'beta' in bold (QX-020, UQ-019)"
       );
 
@@ -1085,6 +1086,95 @@ async function main() {
       process.chdir(qx28OrigCwd);
       fs.rmSync(qx28TasksDir, { recursive: true, force: true });
       fs.rmSync(qx28WorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  // ---- QX-034 (experiment 4, iteration 9) block — usability polish:
+  //      label counts (UQ-032), details/summary expand (UQ-033), search
+  //      result count banner (UQ-031). ----
+  //
+  // Fixture: a workspace with tasks carrying multiple labels, so the label
+  // nav renders with counts and the "N more labels" overflow.
+  {
+    const nativeBin = path.resolve(__dirname, "../../quay-native/bin/quay-native.js");
+    const nativeProviderDir = path.resolve(__dirname, "../../quay-native");
+
+    const qx34TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-qx34-tasks-"));
+    const qx34WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-qx34-workspace-"));
+    fs.mkdirSync(path.join(qx34WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx34WorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx34TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}","mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx34TasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    // Create tasks with various labels. We need enough labels to trigger the
+    // LABEL_NAV_MAX=25 truncation so the details/summary expand appears.
+    // We'll create 30 distinct labels (A-label-01..A-label-20 + B-label-01..B-label-10),
+    // plus a known "common-label" that appears on 3 tasks to verify the count display.
+    const envOverride = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx34TasksDir };
+    const COMMON_LABEL = "common-label";
+    const SEARCH_TERM = "searchable-unique-qx34";
+
+    // Create 3 tasks with common-label (count should be 3 in nav)
+    for (let i = 1; i <= 3; i++) {
+      const id = `QX34-${String(i).padStart(2, "0")}`;
+      const title = i === 1 ? `Task with ${SEARCH_TERM} in title` : `Task ${id}`;
+      execFileSync("node", [nativeBin, "task", "create", id,
+        "--title", title,
+        "--status", "todo",
+        "--labels", `${COMMON_LABEL},A-label-${String(i).padStart(2, "0")}`],
+        { env: envOverride });
+    }
+    // Create 22 more tasks each with a unique rare label to push total distinct labels > 25
+    for (let i = 4; i <= 25; i++) {
+      const id = `QX34-${String(i).padStart(2, "0")}`;
+      execFileSync("node", [nativeBin, "task", "create", id,
+        "--title", `Task ${id}`,
+        "--status", "todo",
+        "--labels", `rare-label-${String(i).padStart(2, "0")}`],
+        { env: envOverride });
+    }
+
+    const qx34Port = port + 10;
+    const qx34OrigCwd = process.cwd();
+    let qx34Server;
+    try {
+      process.chdir(qx34WorkspaceRoot);
+      qx34Server = await startServer({ port: qx34Port });
+
+      // Test 1 (UQ-032): label count display — nav should show "common-label (3)"
+      const homeResp = await get(qx34Port, "/");
+      assert(homeResp.status === 200, "GET / returns 200 (QX-034 setup)");
+      assert(homeResp.body.includes(`common-label (3)`),
+        `Label nav shows count: "common-label (3)" should appear in HTML (UQ-032, QX-034)`);
+      assert(homeResp.body.match(/A-label-0[123] \(\d+\)/),
+        "Label nav shows per-label counts for A-label-* entries (UQ-032, QX-034)");
+
+      // Test 2 (UQ-033): details/summary expand — with 25+ distinct labels, the
+      // "N more labels" overflow should be rendered as a <details> element.
+      assert(homeResp.body.includes("<details"),
+        "Label nav overflow rendered as <details> element (UQ-033, QX-034)");
+      assert(homeResp.body.includes("<summary>"),
+        "Label nav overflow <details> has <summary> child (UQ-033, QX-034)");
+      assert(homeResp.body.includes("more labels"),
+        "Label nav overflow summary contains 'more labels' text (UQ-033, QX-034)");
+
+      // Test 3 (UQ-031): search result count banner — GET /?q=<term> shows count line
+      const searchResp = await get(qx34Port, `/?q=${encodeURIComponent(SEARCH_TERM)}`);
+      assert(searchResp.status === 200, "GET /?q=<term> returns 200 (QX-034 search banner)");
+      assert(searchResp.body.includes("results for"),
+        `Search result banner contains "results for" when ?q= is active (UQ-031, QX-034)`);
+      assert(searchResp.body.includes(SEARCH_TERM),
+        `Search result banner includes the search query term (UQ-031, QX-034)`);
+
+    } finally {
+      if (qx34Server) {
+        qx34Server.close();
+        if (qx34Server.client) await qx34Server.client.close();
+      }
+      process.chdir(qx34OrigCwd);
+      fs.rmSync(qx34TasksDir, { recursive: true, force: true });
+      fs.rmSync(qx34WorkspaceRoot, { recursive: true, force: true });
     }
   }
 

@@ -1,0 +1,55 @@
+name: Release
+
+# QX-033 (experiment 4, iteration 9): closes CB-008 (no packaging/distribution).
+# Triggers on version tags (v*). Builds a distributable npm pack artifact and
+# publishes it to the GitHub Release created by the tag push.
+#
+# Approach: npm pack (Option B) — produces quay-<version>.tgz installable via
+# `npm install -g quay-<version>.tgz`. No build toolchain required beyond Node.js.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build release artifact (npm pack)
+        id: pack
+        run: |
+          bash packages/quay/scripts/package.sh
+          ARTIFACT=$(ls -1t packages/quay/quay-*.tgz 2>/dev/null | head -1)
+          echo "artifact=${ARTIFACT}" >> "$GITHUB_OUTPUT"
+          echo "Built: ${ARTIFACT}"
+
+      - name: Upload artifact to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.pack.outputs.artifact }}
+          body: |
+            ## quay ${{ github.ref_name }}
+
+            Install globally with Node.js >= 20:
+
+            ```sh
+            npm install -g quay-${{ github.ref_name }}.tgz
+            quay --help
+            quay serve
+            ```
+
+            The `.tgz` artifact attached to this release is produced by `npm pack` from `packages/quay/`.
+            It includes all runtime dependencies (`@modelcontextprotocol/sdk`, `yaml`) and the CLI entrypoint (`bin/quay.js`).

@@ -96,4 +96,14 @@ The human's conclusion, reached in this conversation, was:
    with evidence) in whichever iteration first acts on it.
 
 ## Resolution
-<!-- to be filled in by whichever iteration applies it -->
+
+- **Status**: APPLIED — iteration 9 (2026-07-17)
+- **Applied by**: QX-033 (experiment 4, iteration 9 development phase)
+- **Approach chosen**: Option B (npm pack) — NOT Node SEA or Bun compile
+- **Reason for approach**: `esbuild` is not available in this environment (`which esbuild` returns nothing). Node SEA requires bundling all runtime dependencies (`yaml`, `@modelcontextprotocol/sdk`) into a single bundle file before injecting into a node copy. Without a bundler, this would require installing `esbuild` or equivalent as an additional toolchain dependency. `npm pack` requires no additional toolchain, produces a `.tgz` installable via `npm install -g quay-0.1.0.tgz`, and honors the existing `bin` field in `package.json`.
+- **Evidence**:
+  - `packages/quay/scripts/package.sh` — created, executable (`chmod +x`), runs `npm pack`, exits 0, produces `quay-0.1.0.tgz` (107.8 kB packed, 432.8 kB unpacked, 22 files).
+  - `.github/workflows/release.yml` — created; triggers on `push: tags: ['v*']`; installs deps, runs `bash packages/quay/scripts/package.sh`, uploads artifact to GitHub Release via `softprops/action-gh-release@v2`.
+  - Full test suite: 30/30 pass (no regression).
+- **Gaps closed**: CB-008 (capability_breadth, significant).
+- **DIR lifecycle**: This file will be moved to `directives/archive/` in the iteration 9 commit.

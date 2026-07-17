@@ -589,6 +589,8 @@ export async function startServer({ port = 4173 } = {}) {
       const visibleLabels = pinnedFirst.slice(0, LABEL_NAV_MAX);
       // Hidden count = labels in allLabels that are NOT in visibleLabels.
       const hiddenLabelCount = allLabels.filter((l) => !visibleLabels.includes(l)).length;
+      // QX-034 (experiment 4, iteration 9): UQ-032 — show task count per label;
+      // UQ-033 — convert "N more labels" plain text to a details/summary expandable.
       const labelNav = allLabels.length > 0 ? [
         labelFilters.length > 0
           ? html`<a href="${buildHref(statusFilter, sortKey, null, null, prefixFilter, qFilter)}">All</a>`
@@ -599,11 +601,25 @@ export async function startServer({ port = 4173 } = {}) {
           const toggledLabels = isActive
             ? labelFilters.filter((x) => x !== l)
             : [...labelFilters, l];
+          // UQ-032: append (N) count after label name so users can see relative label usage.
+          const countBadge = ` (${labelCounts.get(l) || 0})`;
           return isActive
-            ? html`<strong>${escapeHtml(l)}</strong> (<a href="${buildHref(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">remove</a>)`
-            : html`<a href="${buildHref(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">${escapeHtml(l)}</a>`;
+            ? html`<strong>${escapeHtml(l)}${countBadge}</strong> (<a href="${buildHref(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">remove</a>)`
+            : html`<a href="${buildHref(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">${escapeHtml(l)}${countBadge}</a>`;
         }),
-        ...(hiddenLabelCount > 0 ? [`… ${hiddenLabelCount} more labels`] : []),
+        // UQ-033: hidden labels rendered inside a <details> expand element so users can
+        // see all labels without editing the URL. Previously was non-interactive plain text.
+        ...(hiddenLabelCount > 0 ? [
+          html`<details style="display:inline"><summary>… ${hiddenLabelCount} more labels</summary><div style="margin:0.25rem 0">${
+            allLabels.filter((l) => !visibleLabels.includes(l)).map((l) => {
+              const toggledLabels = labelFilters.includes(l)
+                ? labelFilters.filter((x) => x !== l)
+                : [...labelFilters, l];
+              const countBadge = ` (${labelCounts.get(l) || 0})`;
+              return html`<a href="${buildHref(statusFilter, sortKey, toggledLabels, null, prefixFilter, qFilter)}">${escapeHtml(l)}${countBadge}</a>`;
+            }).join(" · ")
+          }</div></details>`,
+        ] : []),
       ].join(" · ") : null;
       // QW-007: page navigation — Previous / Next links with page info.
       // QW-007: page navigation — Previous / Next links with page info.
@@ -646,6 +662,12 @@ export async function startServer({ port = 4173 } = {}) {
         <button type="submit" style="padding:0.4rem 0.8rem">Search</button>
         ${searchBadge}
       </form>`;
+      // QX-034 (experiment 4, iteration 9): UQ-031 — when ?q= is active, show
+      // "Showing N results for 'query'" to acknowledge the search is active and
+      // how many results matched, without needing to count rows manually.
+      const searchResultBanner = qFilter
+        ? html`<p class="meta" style="color:#0066cc">Showing ${totalTasks} results for &ldquo;${escapeHtml(qFilter)}&rdquo;</p>`
+        : "";
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html`<!doctype html>
         <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
@@ -660,6 +682,7 @@ export async function startServer({ port = 4173 } = {}) {
           <p class="meta">Sort: ${sortNav}</p>
           ${labelNav ? html`<p class="meta">Label: ${labelNav}</p>` : ""}
           ${searchForm}
+          ${searchResultBanner}
           ${pageNav}
           <table>
             <tr><th>id</th><th>status</th><th class="col-role">role</th><th>title</th><th class="col-labels">labels</th><th class="col-updated">updated</th><th class="col-actions">actions</th></tr>

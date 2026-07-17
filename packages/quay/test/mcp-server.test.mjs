@@ -991,6 +991,130 @@ async function main() {
     fs.rmSync(pagWorkspaceRoot, { recursive: true, force: true });
   }
 
+  // ---- Block 16: QX-032 (experiment 4, iteration 9) — task_list multi-label
+  //      AND-join filter parity (CB-015). ----
+  //
+  // task_list now accepts `label` as either an array of strings (AND-join) or
+  // a single string (backward-compat). This closes CB-015: CLI and Web UI both
+  // support multi-label AND-filtering; MCP previously only accepted a single string.
+  //
+  // Fixture: a workspace with 4 tasks carrying various label combinations:
+  //   MLT-1: labels ["experiment-4", "iteration-5"]
+  //   MLT-2: labels ["experiment-4", "iteration-9"]
+  //   MLT-3: labels ["experiment-4"]
+  //   MLT-4: labels ["iteration-9"]
+  //
+  // Assertions:
+  //   a. label: ["experiment-4", "iteration-9"] → returns only MLT-2 (BOTH labels)
+  //   b. label: ["experiment-4"] (single-element array) → MLT-1, MLT-2, MLT-3 (3 tasks)
+  //   c. label: "experiment-4" (string, backward-compat) → same as (b)
+  //   d. label: [] (empty array) → no filter applied; all 4 tasks returned
+  //   e. listTools() schema shows label as accepting array type
+  {
+    const mltTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-mlt-tasks-"));
+    const mltWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-mlt-workspace-"));
+    fs.mkdirSync(path.join(mltWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(mltWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir}"`,
+        `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${mltTasksDir}"`,
+        "",
+      ].join("\n")
+    );
+
+    const MLT_BODY = "## Proposal\nMulti-label fixture.\n## AC\n- [x] ok\n## DoD\n- [x] done\n";
+
+    execFileSync("node", [nativeBin, "task", "create", "MLT-1",
+      "--title", "Multi-label task 1",
+      "--status", "todo", "--body", MLT_BODY, "--labels", "experiment-4,iteration-5"],
+      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mltTasksDir } });
+    execFileSync("node", [nativeBin, "task", "create", "MLT-2",
+      "--title", "Multi-label task 2",
+      "--status", "todo", "--body", MLT_BODY, "--labels", "experiment-4,iteration-9"],
+      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mltTasksDir } });
+    execFileSync("node", [nativeBin, "task", "create", "MLT-3",
+      "--title", "Multi-label task 3",
+      "--status", "todo", "--body", MLT_BODY, "--labels", "experiment-4"],
+      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mltTasksDir } });
+    execFileSync("node", [nativeBin, "task", "create", "MLT-4",
+      "--title", "Multi-label task 4",
+      "--status", "todo", "--body", MLT_BODY, "--labels", "iteration-9"],
+      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mltTasksDir } });
+
+    const { client: coreMlt } = await connectStdio("node", [coreBin, "mcp"], mltWorkspaceRoot);
+
+    // (a) AND-join: label array with 2 elements — only MLT-2 has both
+    {
+      const r = await coreMlt.callTool({
+        name: "task_list",
+        arguments: { label: ["experiment-4", "iteration-9"] },
+      });
+      assert(r.isError !== true, "task_list label=['experiment-4','iteration-9'] returns no error (QX-032)");
+      const sc = r.structuredContent ?? {};
+      const ids = (sc.tasks ?? []).map((t) => t.id).sort();
+      assert(ids.length === 1, `AND-join filter: exactly 1 task has both labels (got ${JSON.stringify(ids)})`);
+      assert(ids[0] === "MLT-2", `AND-join filter: that task is MLT-2 (got ${ids[0]})`);
+    }
+
+    // (b) single-element array: label: ["experiment-4"] → MLT-1, MLT-2, MLT-3
+    {
+      const r = await coreMlt.callTool({
+        name: "task_list",
+        arguments: { label: ["experiment-4"] },
+      });
+      assert(r.isError !== true, "task_list label=['experiment-4'] (single-element array) returns no error (QX-032)");
+      const sc = r.structuredContent ?? {};
+      const ids = (sc.tasks ?? []).map((t) => t.id).sort();
+      assert(ids.length === 3, `single-element array label filter: 3 tasks have experiment-4 (got ${JSON.stringify(ids)})`);
+      assert(ids.includes("MLT-1") && ids.includes("MLT-2") && ids.includes("MLT-3"),
+        `single-element array: MLT-1/MLT-2/MLT-3 all returned (got ${JSON.stringify(ids)})`);
+    }
+
+    // (c) backward compat: label as string → same as (b)
+    {
+      const r = await coreMlt.callTool({
+        name: "task_list",
+        arguments: { label: "experiment-4" },
+      });
+      assert(r.isError !== true, "task_list label='experiment-4' (string, backward-compat) returns no error (QX-032)");
+      const sc = r.structuredContent ?? {};
+      const ids = (sc.tasks ?? []).map((t) => t.id).sort();
+      assert(ids.length === 3, `string label (backward-compat): 3 tasks have experiment-4 (got ${JSON.stringify(ids)})`);
+    }
+
+    // (d) empty array: label: [] → no filter, all 4 tasks
+    {
+      const r = await coreMlt.callTool({
+        name: "task_list",
+        arguments: { label: [] },
+      });
+      assert(r.isError !== true, "task_list label=[] (empty array) returns no error (QX-032)");
+      const sc = r.structuredContent ?? {};
+      assert((sc.tasks ?? []).length === 4, `label=[] returns all 4 tasks (no filter) (got ${(sc.tasks ?? []).length})`);
+    }
+
+    // (e) schema check: listTools() shows label parameter
+    {
+      const toolsResult = await coreMlt.listTools();
+      const taskListTool = (toolsResult.tools ?? []).find((t) => t.name === "task_list");
+      assert(!!taskListTool, "listTools() includes task_list (QX-032 schema check)");
+      if (taskListTool) {
+        const props = taskListTool.inputSchema?.properties ?? {};
+        assert("label" in props, "task_list inputSchema.properties includes 'label' (QX-032)");
+      }
+    }
+
+    await coreMlt.close();
+    fs.rmSync(mltTasksDir, { recursive: true, force: true });
+    fs.rmSync(mltWorkspaceRoot, { recursive: true, force: true });
+  }
+
   // ---- Cleanup ----
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
   fs.rmSync(tasksDirA, { recursive: true, force: true });

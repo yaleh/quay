@@ -7,3 +7,5 @@ dist/
 experiment/timing/*.log
 .manda/hub.addr
 .playwright-mcp/
+# QX-033: npm pack build artifacts — do not commit .tgz release files
+*.tgz
