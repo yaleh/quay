@@ -85,6 +85,35 @@ convergence question.
 ## §0. Preconditions (check before every iteration, from iteration 0 onward)
 
 ```
+HARD GATES — paste the literal command output into §2 of this iteration's report,
+not a prose summary. A summary is not acceptable evidence for these four; the raw
+output is the artifact. (This block exists because through iteration 3 the
+"directives listed" check was satisfied by copying the prior report's sentence
+forward, and DIR-005/DIR-006 went unseen for three iterations — see gap-list PR-001.)
+
+[ ] ls -1 experiments/quay-continuous-bootstrap/directives/pending/
+    → paste the raw file listing. Then give EACH file listed an explicit
+      applied/deferred-with-reason/rejected DISPOSITION this iteration — not
+      an acknowledgment. Naming the gap (e.g. "still open per PR-001") or
+      restating that the mechanism is unreliable is NOT a disposition and
+      does not satisfy this gate — each filename needs its own outcome
+      stated in this iteration's own words, even if the outcome is
+      "deferred, reason: X." If the listing shows more files than you have
+      given a real disposition to, you have not completed this gate.
+      (This sub-clause exists because iteration 4 satisfied the letter of
+      the original gate by citing PR-001 itself as the reason DIR-005/
+      DIR-006 remained unaddressed — technically an acknowledgment, but not
+      a disposition, and the loophole this gate is meant to close.)
+[ ] cat .manda/hub.addr && curl -s "$(cat .manda/hub.addr)/healthz"
+    → paste both outputs.
+[ ] curl -s http://localhost:4173/ -o /dev/null -w "%{http_code}\n"
+    → paste the status code (G7 reachability).
+[ ] git worktree add experiments/quay-continuous-bootstrap/worktrees/iteration-N
+    -b experiment-4-iteration-N
+    → paste the "HEAD is now at <hash>" line.
+```
+
+```
 [ ] manda daemon address read LIVE from .manda/hub.addr — NEVER hardcode a port.
     (`cat .manda/hub.addr` then `curl -s <that address>/healthz`.)
 [ ] a live `manda monitor <name> --root .` process is confirmed a DIRECT CHILD of
@@ -99,13 +128,12 @@ convergence question.
     storage-location decision, protocol §9 item 1) has been read in full; every open gap
     entry's "date last re-confirmed still open" is checked against this iteration's planned
     work
-[ ] experiments/quay-continuous-bootstrap/directives/pending/ has been listed (`ls`) and
-    every file in it read; each must reach an explicit applied/deferred/rejected outcome
-    this iteration, recorded in this iteration's own report — this INCLUDES the two
-    directives carried forward from experiment 3 (DIR-004 packaging/distribution, now
-    re-filed here per protocol §8; DIR-006 worktree isolation, adopted directly as a
-    standing guardrail rather than re-filed as still-open — confirm both are represented
-    correctly in this experiment's own directives/ tree at iteration 0)
+[ ] directives/pending/ dispositioned — satisfied via the HARD GATES block above (raw
+    `ls` pasted, every listed file given an outcome). This INCLUDES the two directives
+    carried forward from experiment 3 (DIR-004 packaging/distribution, now re-filed here
+    per protocol §8; DIR-006 worktree isolation, adopted directly as a standing guardrail
+    rather than re-filed as still-open — confirm both are represented correctly in this
+    experiment's own directives/ tree at iteration 0)
 [ ] G7 standing web-service reachability (protocol §8, new guardrail): is `quay serve`
     currently running and reachable on 0.0.0.0 (not localhost-only)? If not, start it before
     proceeding — the simulated-user mechanism needs a live target every iteration, not a
@@ -620,8 +648,12 @@ Read, in full, before doing anything else:
   experiments/quay-continuous-bootstrap/iterations/iteration-{N-1}.md  — prior state, V scores, problems
   experiments/quay-continuous-bootstrap/provenance.md                   — current QX-* task provenance
   experiments/quay-continuous-bootstrap/gap-list.md (or QX-*-gap-labeled tasks, per iteration-0 decision)
-  experiments/quay-continuous-bootstrap/audits/                         — prior G3 co-signs AND
-                                                                            prior simulated-user verdicts
+  experiments/quay-continuous-bootstrap/audits/iteration-{N-1}-*        — ONLY the most recent G3
+                                                                            co-sign and the most recent
+                                                                            simulated-user verdict(s);
+                                                                            older audits are archival —
+                                                                            grep on demand for a specific
+                                                                            past finding, do not read in full
   .claude/skills/quay-native-methodology/reference/v-meta-stall-analysis.md
   .claude/skills/quay-core-bootstrap-methodology/reference/v-meta-ceiling-diagnostic.md
   packages/quay-native/skills/author/SKILL.md
@@ -640,9 +672,17 @@ Extract:
 
 - Read all relevant Skill definitions before the iteration starts.
 - Re-read the specific Skill/capability being modified immediately before using it.
-- Read `.claude/skills/quay-native-methodology/reference/`,
-  `.claude/skills/quay-core-bootstrap-methodology/reference/`, and (once produced)
-  `.claude/skills/quay-webui-bootstrap-methodology/reference/` files fresh each iteration.
+- `.claude/skills/quay-native-methodology/reference/`,
+  `.claude/skills/quay-core-bootstrap-methodology/reference/`, and
+  `.claude/skills/quay-webui-bootstrap-methodology/reference/`: read once (iteration 0),
+  then re-read only the specific skill's reference material in an iteration that is
+  actually modifying that skill — per the "re-read immediately before using it" rule
+  above, this is not a new discipline, just the existing rule stated as the standing
+  read-list default instead of a wholesale-every-iteration reread. The two files the
+  V_meta re-trigger check actually uses every iteration
+  (`v-meta-stall-analysis.md`, `v-meta-ceiling-diagnostic.md`) remain in the standing
+  Context-extraction read list above (unchanged from Lever 4 scope — see Context
+  extraction).
 
 ### Iteration cycle (Observe → Codify → Automate → Evaluate → Convergence/Pause Check)
 
