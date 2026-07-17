@@ -421,6 +421,45 @@ async function main() {
     assert(!detail1.body.match(/<div class="body"><pre>/),
       "GET /task/WUI-1 body: no bare <pre> wrapping the entire body (QW-002: markdown rendered)");
 
+    // ── QW-003: filter-by-status assertions ─────────────────────────────
+    // QW-003 (experiment 3, iteration 2): verify the ?status=<value> filter
+    // query param in GET /. Three tasks are seeded: WUI-1 (todo), WUI-2 (done),
+    // WUI-ACT (todo). Filter navigation links must be present in GET /.
+
+    // GET / (no param) — all tasks visible (baseline, re-verified)
+    assert(list.body.includes("WUI-1") && list.body.includes("WUI-2") && list.body.includes("WUI-ACT"),
+      "GET / (no param) shows all three seeded tasks (QW-003: unfiltered baseline)");
+
+    // Filter nav is present in the list page
+    assert(list.body.includes("/?status=todo") || list.body.includes("/?status=done"),
+      "GET / body includes filter navigation links for status values (QW-003: filter nav)");
+
+    // GET /?status=todo — only todo tasks (WUI-1, WUI-ACT); done task (WUI-2) excluded
+    const listTodo = await get(port, "/?status=todo");
+    assert(listTodo.status === 200, `GET /?status=todo returns 200 (got ${listTodo.status})`);
+    assert(listTodo.body.includes("WUI-1"),
+      "GET /?status=todo includes WUI-1 (todo task) (QW-003: filter includes matching)");
+    assert(listTodo.body.includes("WUI-ACT"),
+      "GET /?status=todo includes WUI-ACT (todo task) (QW-003: filter includes matching)");
+    assert(!listTodo.body.includes("WUI-2"),
+      "GET /?status=todo excludes WUI-2 (done task) (QW-003: filter excludes non-matching)");
+
+    // GET /?status=done — only done tasks (WUI-2); todo tasks (WUI-1, WUI-ACT) excluded
+    const listDone = await get(port, "/?status=done");
+    assert(listDone.status === 200, `GET /?status=done returns 200 (got ${listDone.status})`);
+    assert(listDone.body.includes("WUI-2"),
+      "GET /?status=done includes WUI-2 (done task) (QW-003: filter includes matching)");
+    assert(!listDone.body.includes("WUI-1"),
+      "GET /?status=done excludes WUI-1 (todo task) (QW-003: filter excludes non-matching)");
+    assert(!listDone.body.includes("WUI-ACT"),
+      "GET /?status=done excludes WUI-ACT (todo task) (QW-003: filter excludes non-matching)");
+
+    // GET /?status=ready — no tasks in fixture; returns empty list (not an error)
+    const listReady = await get(port, "/?status=ready");
+    assert(listReady.status === 200, `GET /?status=ready returns 200 (got ${listReady.status})`);
+    assert(!listReady.body.includes("WUI-1") && !listReady.body.includes("WUI-2"),
+      "GET /?status=ready returns empty list (no fixture tasks have status=ready) (QW-003: empty-filter not an error)");
+
   } finally {
     if (server) {
       server.close();

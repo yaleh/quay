@@ -268,7 +268,13 @@ export async function startServer({ port = 4173 } = {}) {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (url.pathname === "/") {
-      const tasks = await client.taskList({});
+      const allTasks = await client.taskList({});
+      // QW-003 (experiment 3, iteration 2): filter by ?status=<value> query param.
+      // No param → all tasks; unknown value → empty list (not an error).
+      const statusFilter = url.searchParams.get("status");
+      const tasks = statusFilter
+        ? allTasks.filter((t) => t.status === statusFilter)
+        : allTasks;
       const rows = tasks
         .map(
           (t) => html`<tr>
@@ -279,9 +285,20 @@ export async function startServer({ port = 4173 } = {}) {
           </tr>`
         )
         .join("\n");
+      // QW-003: filter navigation links — All, todo, ready, done, needs-human.
+      // Active filter is shown as plain text; others as links.
+      const statuses = ["todo", "ready", "done", "needs-human"];
+      const filterNav = [
+        statusFilter ? html`<a href="/">All</a>` : html`<strong>All</strong>`,
+        ...statuses.map((s) =>
+          s === statusFilter
+            ? html`<strong>${escapeHtml(s)}</strong>`
+            : html`<a href="/?status=${encodeURIComponent(s)}">${escapeHtml(s)}</a>`
+        ),
+      ].join(" · ");
       // QN-046 (closes discussion-doc §2.1's browser-rendering gap): a real
       // browser (driven via playwright MCP tooling) decodes this body as
-      // mojibake (e.g. "Quay â€” task list") without an explicit charset —
+      // mojibake (e.g. "Quay â€" task list") without an explicit charset —
       // the bytes on the wire are correct UTF-8, but a browser with no
       // charset hint falls back to a legacy encoding. Raw-HTTP-body string
       // assertions (serve.test.mjs) never caught this because they check
@@ -292,6 +309,7 @@ export async function startServer({ port = 4173 } = {}) {
         <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
         <body><main>
           <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
+          <p class="meta">Filter: ${filterNav}</p>
           <table>
             <tr><th>id</th><th>status</th><th>role</th><th>title</th></tr>
             ${rows}
