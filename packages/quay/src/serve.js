@@ -134,6 +134,12 @@ hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
      Closes UQ-011 (action button hidden off-screen) and UQ-012 (role/labels
      columns crowd out title and actions). */
   .col-role, .col-labels { display: none; }
+  /* QX-017 (experiment 4, iteration 4): sticky actions column at mobile — the
+     actions column (th/td) sticks to the right edge so Advance button is always
+     visible even when the table scrolls horizontally for long task IDs. Also hide
+     the updated column at mobile to reduce clutter. Closes UQ-011 (remainder). */
+  .col-actions { position: sticky; right: 0; background: #fff; z-index: 2; }
+  .col-updated { display: none; }
 }
 /* QX-015 (experiment 4, iteration 3): project orientation banner — visible at
    all viewports, subtle enough not to dominate. Closes UQ-003. */
@@ -299,6 +305,22 @@ function inlineMarkdown(text) {
   }).join("");
 }
 
+// QX-018 (experiment 4, iteration 4): relative-time helper for updatedAt display.
+// Given a millisecond timestamp, returns a human-readable "X ago" string.
+// Used on both the list page (updated column) and detail page (last updated meta).
+function relativeTime(ts) {
+  const elapsed = Date.now() - ts;
+  if (elapsed < 0) return "just now";
+  const seconds = Math.floor(elapsed / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 export async function startServer({ port = 4173 } = {}) {
   const cfg = loadConfig();
   const provider = activeProvider(cfg);
@@ -350,11 +372,14 @@ export async function startServer({ port = 4173 } = {}) {
         ? filteredByPrefix.filter((t) => t.status === statusFilter)
         : filteredByPrefix;
       // QW-005 (experiment 3, iteration 3): filter by ?label=<value> query param.
-      // No param → all tasks; unknown value → empty list (not an error).
-      // Applied after prefix and status filters.
-      const labelFilter = url.searchParams.get("label");
-      const filtered = labelFilter
-        ? filteredByStatus.filter((t) => Array.isArray(t.labels) && t.labels.includes(labelFilter))
+      // QX-016 (experiment 4, iteration 4): use getAll() instead of get() to support
+      // repeated ?label=A&label=B params. Applies AND-logic: task must have ALL labels.
+      // Closes CB-013 (Web UI first-wins bug). Single ?label=A still works as before.
+      const labelFilters = url.searchParams.getAll("label").filter(Boolean);
+      const filtered = labelFilters.length > 0
+        ? filteredByStatus.filter((t) =>
+            Array.isArray(t.labels) && labelFilters.every((l) => t.labels.includes(l))
+          )
         : filteredByStatus;
       // QW-004 (experiment 3, iteration 3): sort by ?sort=<value> query param.
       // QX-008 (experiment 4, iteration 2): added 'updated' sort value —
@@ -399,7 +424,7 @@ export async function startServer({ port = 4173 } = {}) {
       // the detail page). The action POST URL includes ?from= carrying the
       // current list URL so the redirect returns to the list with filter context
       // preserved, rather than to the task detail page.
-      const currentListHref = buildHref(statusFilter, sortKey, labelFilter, safePage > 1 ? safePage : null, prefixFilter);
+      const currentListHref = buildHref(statusFilter, sortKey, labelFilters, safePage > 1 ? safePage : null, prefixFilter);
       const rows = pageTasks
         .map(
           (t) => {
@@ -407,13 +432,24 @@ export async function startServer({ port = 4173 } = {}) {
               (b) => !b.whenStatus || b.whenStatus.includes(t.status)
             );
             // QX-014 (iteration 3): action buttons include title= tooltip.
+            // QX-019 (iteration 4): backport target-status tooltip to list page (UQ-018).
+            // Compute next status per-task using the same map as the detail page.
+            const listNextStatusMap = { todo: "ready", ready: "done" };
+            const listNextStatus = listNextStatusMap[t.status];
             const actionCell = applicableButtons.length > 0
-              ? applicableButtons.map((b) =>
-                  html`<form method="post" action="/task/${encodeURIComponent(t.id)}/action/${encodeURIComponent(b.id)}?from=${encodeURIComponent(currentListHref)}" style="display:inline">
-                    <button type="submit" title="Advance task to next status">${escapeHtml(b.label)}</button>
-                  </form>`
-                ).join("")
+              ? applicableButtons.map((b) => {
+                  const titleAttr = listNextStatus
+                    ? `title="Advance to ${escapeHtml(listNextStatus)}"`
+                    : `title="Advance task to next status"`;
+                  return html`<form method="post" action="/task/${encodeURIComponent(t.id)}/action/${encodeURIComponent(b.id)}?from=${encodeURIComponent(currentListHref)}" style="display:inline">
+                    <button type="submit" ${titleAttr}>${escapeHtml(b.label)}</button>
+                  </form>`;
+                }).join("")
               : "";
+            // QX-018 (iteration 4): show updatedAt as relative time in list row.
+            const updatedCell = typeof t.updatedAt === "number"
+              ? escapeHtml(relativeTime(t.updatedAt))
+              : "—";
             // QX-011 (iteration 3): task title link includes ?from= so the detail page
             // back link can return to the current filtered list view (UQ-009).
             return html`<tr>
@@ -422,7 +458,8 @@ export async function startServer({ port = 4173 } = {}) {
             <td class="col-role">${escapeHtml(t.role)}</td>
             <td>${escapeHtml(t.title)}</td>
             <td class="col-labels">${escapeHtml((Array.isArray(t.labels) ? t.labels : []).join(", "))}</td>
-            <td>${actionCell}</td>
+            <td class="col-updated">${updatedCell}</td>
+            <td class="col-actions">${actionCell}</td>
           </tr>`;
           }
         )
@@ -433,11 +470,14 @@ export async function startServer({ port = 4173 } = {}) {
       // Build query param helper: merges prefix, status, sort, label, and page params.
       // QW-007: page param added; when page=1 it is omitted from the href (clean URL).
       // QX-004: prefix param added; omitted when null/falsy (clears the prefix filter).
+      // QX-016 (iteration 4): label param now supports an array (for multi-label AND-filter)
+      // or a string (for single-label nav links). Array generates repeated ?label=X&label=Y.
       function buildHref(status, sort, label, pg, prefix) {
         const params = new URLSearchParams();
         if (prefix) params.set("prefix", prefix);
         if (status) params.set("status", status);
-        if (label) params.set("label", label);
+        const labels = [].concat(label).filter(Boolean);
+        for (const l of labels) params.append("label", l);
         if (sort) params.set("sort", sort);
         if (pg && pg > 1) params.set("page", String(pg));
         const qs = params.toString();
@@ -453,48 +493,49 @@ export async function startServer({ port = 4173 } = {}) {
       }))].sort();
       const prefixNav = allPrefixes.length >= 2 ? [
         prefixFilter
-          ? html`<a href="${buildHref(statusFilter, sortKey, labelFilter, null, null)}">All</a>`
+          ? html`<a href="${buildHref(statusFilter, sortKey, labelFilters, null, null)}">All</a>`
           : html`<strong>All</strong>`,
         ...allPrefixes.map((p) =>
           p === prefixFilter
             ? html`<strong>${escapeHtml(p)}</strong>`
-            : html`<a href="${buildHref(statusFilter, sortKey, labelFilter, null, p)}">${escapeHtml(p)}</a>`
+            : html`<a href="${buildHref(statusFilter, sortKey, labelFilters, null, p)}">${escapeHtml(p)}</a>`
         ),
       ].join(" · ") : null;
       const filterNav = [
         statusFilter
-          ? html`<a href="${buildHref(null, sortKey, labelFilter, null, prefixFilter)}">All</a>`
+          ? html`<a href="${buildHref(null, sortKey, labelFilters, null, prefixFilter)}">All</a>`
           : html`<strong>All</strong>`,
         ...statuses.map((s) =>
           s === statusFilter
             ? html`<strong>${escapeHtml(s)}</strong>`
-            : html`<a href="${buildHref(s, sortKey, labelFilter, null, prefixFilter)}">${escapeHtml(s)}</a>`
+            : html`<a href="${buildHref(s, sortKey, labelFilters, null, prefixFilter)}">${escapeHtml(s)}</a>`
         ),
       ].join(" · ");
       // QW-004: sort navigation links — Default, id, status.
       // QX-008: added "Updated ↓" sort link (sort by mtime descending).
       // Active sort shown as plain text; others as links (preserving active status, label, and prefix filters).
       const sortNav = [
-        !sortKey ? html`<strong>Default</strong>` : html`<a href="${buildHref(statusFilter, null, labelFilter, null, prefixFilter)}">Default</a>`,
+        !sortKey ? html`<strong>Default</strong>` : html`<a href="${buildHref(statusFilter, null, labelFilters, null, prefixFilter)}">Default</a>`,
         sortKey === "id"
           ? html`<strong>id</strong>`
-          : html`<a href="${buildHref(statusFilter, "id", labelFilter, null, prefixFilter)}">id</a>`,
+          : html`<a href="${buildHref(statusFilter, "id", labelFilters, null, prefixFilter)}">id</a>`,
         sortKey === "status"
           ? html`<strong>status</strong>`
-          : html`<a href="${buildHref(statusFilter, "status", labelFilter, null, prefixFilter)}">status</a>`,
+          : html`<a href="${buildHref(statusFilter, "status", labelFilters, null, prefixFilter)}">status</a>`,
         sortKey === "updated"
           ? html`<strong>Updated ↓</strong>`
-          : html`<a href="${buildHref(statusFilter, "updated", labelFilter, null, prefixFilter)}">Updated ↓</a>`,
+          : html`<a href="${buildHref(statusFilter, "updated", labelFilters, null, prefixFilter)}">Updated ↓</a>`,
       ].join(" · ");
       // QW-005: label navigation links — All + each distinct label.
-      // Only rendered when at least one task has labels.
+      // Only rendered when at least one task has labels. Each link sets a single label filter
+      // (clicking a label link replaces the current multi-label filter with just that one label).
       const allLabels = [...new Set(allTasks.flatMap((t) => Array.isArray(t.labels) ? t.labels : []))].sort();
       const labelNav = allLabels.length > 0 ? [
-        labelFilter
+        labelFilters.length > 0
           ? html`<a href="${buildHref(statusFilter, sortKey, null, null, prefixFilter)}">All</a>`
           : html`<strong>All</strong>`,
         ...allLabels.map((l) =>
-          l === labelFilter
+          labelFilters.length === 1 && labelFilters[0] === l
             ? html`<strong>${escapeHtml(l)}</strong>`
             : html`<a href="${buildHref(statusFilter, sortKey, l, null, prefixFilter)}">${escapeHtml(l)}</a>`
         ),
@@ -507,11 +548,11 @@ export async function startServer({ port = 4173 } = {}) {
       const pageNav = totalPages > 1 ? html`
         <p class="meta">
           ${safePage > 1
-            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilter, safePage - 1, prefixFilter)}">&laquo; Previous</a>`
+            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilters, safePage - 1, prefixFilter)}">&laquo; Previous</a>`
             : html`<span class="page-nav-disabled">&laquo; Previous</span>`}
           &nbsp; Page ${safePage} of ${totalPages} (${totalTasks} tasks) &nbsp;
           ${safePage < totalPages
-            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilter, safePage + 1, prefixFilter)}">Next &raquo;</a>`
+            ? html`<a href="${buildHref(statusFilter, sortKey, labelFilters, safePage + 1, prefixFilter)}">Next &raquo;</a>`
             : html`<span class="page-nav-disabled">Next &raquo;</span>`}
         </p>` : html`<p class="meta">Page 1 of ${totalPages} (${totalTasks} tasks)</p>`;
       // QN-046 (closes discussion-doc §2.1's browser-rendering gap): a real
@@ -540,7 +581,7 @@ export async function startServer({ port = 4173 } = {}) {
           ${labelNav ? html`<p class="meta">Label: ${labelNav}</p>` : ""}
           ${pageNav}
           <table>
-            <tr><th>id</th><th>status</th><th class="col-role">role</th><th>title</th><th class="col-labels">labels</th><th>actions</th></tr>
+            <tr><th>id</th><th>status</th><th class="col-role">role</th><th>title</th><th class="col-labels">labels</th><th class="col-updated">updated</th><th class="col-actions">actions</th></tr>
             ${rows}
           </table>
           ${totalPages > 1 ? pageNav : ""}
@@ -600,6 +641,7 @@ export async function startServer({ port = 4173 } = {}) {
           ${detailErrorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(detailErrorParam)}</div>` : ""}
           ${detailSuccessParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(detailSuccessParam)}</div>` : ""}
           <p class="meta">role: ${escapeHtml(t.role)} · labels: ${escapeHtml((t.labels || []).join(", "))}${parentMeta}</p>
+          ${typeof t.updatedAt === "number" ? html`<p class="meta">last updated: ${escapeHtml(relativeTime(t.updatedAt))}</p>` : ""}
           ${childrenMeta}
           <div>${buttons}</div>
           <h2 class="sr-only">Details</h2>

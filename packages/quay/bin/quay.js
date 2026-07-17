@@ -21,7 +21,15 @@ function parseFlags(argv) {
       const key = a.slice(2);
       const next = argv[i + 1];
       if (next !== undefined && !next.startsWith("--")) {
-        flags[key] = next;
+        // QX-016 (experiment 4, iteration 4): support repeated flags (e.g. --label A --label B).
+        // If the key already has a value, convert to array or push to existing array.
+        // This fixes CB-013 (CLI last-wins bug): previously `flags[key] = next` silently
+        // overwrote any prior value, so --label A --label B silently used only B.
+        if (flags[key] !== undefined && flags[key] !== true) {
+          flags[key] = Array.isArray(flags[key]) ? [...flags[key], next] : [flags[key], next];
+        } else {
+          flags[key] = next;
+        }
         i++;
       } else {
         flags[key] = true;
@@ -121,7 +129,9 @@ async function main() {
   if (cmd === "task" && sub === "list") {
     // QX-005: task list --help is caught above by the sub === "--help" branch.
     await withProvider(async (client) => {
-      const tasks = await client.taskList({ status: flags.status, label: flags.label });
+      // QX-016 (iteration 4): pass only status to taskList; label filtering handled
+      // client-side below so we can apply AND-logic for multiple --label values.
+      const tasks = await client.taskList({ status: flags.status });
       // QX-002 (experiment 4, iteration 1): --prefix filter for experiment scoping.
       // Closes CB-001: `quay task list --prefix QX` returns only QX-* tasks.
       // Client-side filter after provider fetch — no provider-side changes needed.
@@ -136,9 +146,19 @@ async function main() {
         process.exitCode = 1;
         return;
       }
-      const filtered = prefix
+      const filteredByPrefix = prefix
         ? tasks.filter((t) => t.id.toUpperCase().startsWith(prefix.toUpperCase()))
         : tasks;
+      // QX-016 (experiment 4, iteration 4): AND-logic multi-label filter.
+      // flags.label may be: undefined (no filter), a string (single --label),
+      // or an array of strings (repeated --label, collected by parseFlags).
+      // [].concat(flags.label).filter(Boolean) normalises all three cases to an array.
+      const labelFilters = [].concat(flags.label).filter(Boolean);
+      const filtered = labelFilters.length > 0
+        ? filteredByPrefix.filter((t) =>
+            Array.isArray(t.labels) && labelFilters.every((l) => t.labels.includes(l))
+          )
+        : filteredByPrefix;
       // QX-008 (experiment 4, iteration 2): sort-by-updated support.
       // Closes CB-004 (no sort-by-time on CLI) and CB-012 (--sort updated
       // silently ignored). Tasks include `updatedAt` (file mtime in ms) from

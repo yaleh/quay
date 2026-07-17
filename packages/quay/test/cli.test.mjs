@@ -1063,6 +1063,77 @@ async function main() {
     fs.rmSync(sortWorkspaceRoot, { recursive: true, force: true });
   }
 
+  // 18. QX-016 (experiment 4, iteration 4): multi-label AND-filter on CLI.
+  //     --label A --label B should return only tasks that have BOTH labels.
+  //     Closes CB-013 (CLI last-wins bug: parseFlags() now collects repeated
+  //     --label flags as an array; filter applies AND-logic).
+  {
+    const mlTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-multilabel-tasks-"));
+    const mlWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-multilabel-workspace-"));
+    fs.mkdirSync(path.join(mlWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(mlWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${mlTasksDir.replaceAll("\\", "\\\\")}"`,
+        "",
+      ].join("\n")
+    );
+
+    const ML_BODY = VALID_SECTIONS + AC_DOD_CHECKED;
+    // MBOTH-1: has both labels "bug" and "cli"
+    execFileSync("node", [nativeBin, "task", "create", "MBOTH-1", "--title", "Has both labels",
+      "--status", "todo", "--body", ML_BODY, "--labels", "bug,cli"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mlTasksDir },
+    });
+    // MBUG-1: has only "bug"
+    execFileSync("node", [nativeBin, "task", "create", "MBUG-1", "--title", "Has only bug",
+      "--status", "todo", "--body", ML_BODY, "--labels", "bug"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mlTasksDir },
+    });
+    // MNONE-1: no labels
+    execFileSync("node", [nativeBin, "task", "create", "MNONE-1", "--title", "Has no labels",
+      "--status", "todo", "--body", ML_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mlTasksDir },
+    });
+
+    const mlOpts = { cwd: mlWorkspaceRoot, encoding: "utf8" };
+
+    // --label bug --label cli (AND-logic): should return only MBOTH-1
+    {
+      const r = run(["task", "list", "--label", "bug", "--label", "cli", "--json"], mlOpts);
+      assert(r.status === 0, "quay task list --label bug --label cli exits 0 (multi-label AND-filter, QX-016, CB-013)");
+      let tasks;
+      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "MBOTH-1"),
+        "quay task list --label bug --label cli includes MBOTH-1 (has both labels) (QX-016)");
+      assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "MBUG-1"),
+        "quay task list --label bug --label cli excludes MBUG-1 (has only bug, not cli) (QX-016, CB-013)");
+      assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "MNONE-1"),
+        "quay task list --label bug --label cli excludes MNONE-1 (no labels) (QX-016)");
+    }
+
+    // --label bug (single): should return MBOTH-1 and MBUG-1 (no regression)
+    {
+      const r = run(["task", "list", "--label", "bug", "--json"], mlOpts);
+      assert(r.status === 0, "quay task list --label bug exits 0 (single-label, no regression, QX-016)");
+      let tasks;
+      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "MBOTH-1"),
+        "quay task list --label bug includes MBOTH-1 (QX-016 single-label no regression)");
+      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "MBUG-1"),
+        "quay task list --label bug includes MBUG-1 (QX-016 single-label no regression)");
+    }
+
+    fs.rmSync(mlTasksDir, { recursive: true, force: true });
+    fs.rmSync(mlWorkspaceRoot, { recursive: true, force: true });
+  }
+
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 

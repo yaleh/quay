@@ -138,16 +138,26 @@ export function createStore(tasksDir) {
     return `---\n${fm}\n---\n${body}`;
   }
 
-  // get() does not include updatedAt — it is used for point lookups (task
-  // view, gate checks, action triggers, childrenStatus) where mtime is
-  // irrelevant. The list() path below supplies updatedAt for each task so
-  // sort-by-updated works without a separate stat call at the Core layer.
+  // QX-018 (experiment 4, iteration 4): get() now includes updatedAt (file mtime
+  // in ms) to close UQ-015 (task_get MCP response missing updatedAt field) and
+  // enable the detail-page "last updated" display. The stat() call is cheap
+  // (one fs.statSync on the already-located file) and consistent with list()'s
+  // own mtime inclusion. Gate checks, childrenStatus, and other internal callers
+  // already ignore unknown fields so no behavioral regression results.
   /** @returns {object|null} the task view-model, or null if not found */
   function get(id) {
     const raw = readRaw(id);
     if (raw === null) return null;
     const { frontmatter, body } = parse(raw);
-    return toViewModel(frontmatter, body);
+    let updatedAt;
+    try {
+      const taskFile = path.join(tasksDir, `${id}.md`);
+      const stat = fs.statSync(taskFile);
+      updatedAt = stat.mtimeMs;
+    } catch {
+      // stat failed (race or missing file) — omit updatedAt
+    }
+    return toViewModel(frontmatter, body, updatedAt);
   }
 
   function toViewModel(frontmatter, body, updatedAt) {

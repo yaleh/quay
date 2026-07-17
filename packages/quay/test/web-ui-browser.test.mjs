@@ -349,8 +349,10 @@ async function main() {
     // Negative control: no action button for done status (browser-observed:
     // no <button> element — the same discipline QN-031/serve.test.mjs used
     // for its own "Advance" button negative control).
-    assert(!detail2.body.includes("Advance"),
-      "GET /task/WUI-2 (status=done) does NOT render the 'Advance' button (negative control)");
+    // QX-017 (iteration 4): CSS comment in pageStyles() now mentions "Advance button",
+    // so checking for the button element instead of the bare string.
+    assert(!detail2.body.includes(">Advance<"),
+      "GET /task/WUI-2 (status=done) does NOT render the 'Advance' button element (negative control)");
     assert(!detail2.body.includes("<button"),
       "GET /task/WUI-2 (status=done) has no <button> element at all (full negative control)");
 

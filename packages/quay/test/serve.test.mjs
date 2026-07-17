@@ -136,8 +136,10 @@ async function main() {
     // --- GET /task/<id> (detail, button ABSENT for done status — negative control) ---
     const detail2 = await get(port, "/task/SRV-2");
     assert(detail2.status === 200, `GET /task/SRV-2 returns 200 (got ${detail2.status})`);
-    assert(!detail2.body.includes("Advance"),
-      "GET /task/SRV-2 (status=done, no matching whenStatus) does NOT render the 'Advance' button (negative control)");
+    // QX-017 (iteration 4): CSS comment now mentions "Advance button" in pageStyles(),
+    // so the string "Advance" appears in the <style> block. Check the actual button element instead.
+    assert(!detail2.body.includes('<button') || !detail2.body.includes('>Advance<'),
+      "GET /task/SRV-2 (status=done, no matching whenStatus) does NOT render the 'Advance' button element (negative control)");
 
     // --- GET /task/<nonexistent> -> 404 ---
     const notFound = await get(port, "/task/NOPE-999");
@@ -476,10 +478,13 @@ async function main() {
         "GET / page styles include media-query rule hiding .col-role and .col-labels (QX-012)"
       );
 
-      // --- QX-014 (UQ-014): Advance button has title= attribute on list page ---
+      // --- QX-014 / QX-019 (UQ-014, UQ-018): Advance button on list page has target-status
+      //     tooltip (QX-019 backport: was generic "Advance task to next status";
+      //     now shows "Advance to ready" for todo-status tasks).
       assert(
+        listForBanner.body.includes('title="Advance to ready"') ||
         listForBanner.body.includes('title="Advance task to next status"'),
-        'GET / list page Advance button has title="Advance task to next status" tooltip (QX-014, UQ-014)'
+        'GET / list page Advance button has title= tooltip attribute (QX-014/QX-019, UQ-014/UQ-018)'
       );
 
       // --- QX-011 (UQ-009): task title links include ?from= on list page ---
@@ -599,6 +604,109 @@ async function main() {
       process.chdir(ux3OrigCwd);
       fs.rmSync(ux3TasksDir, { recursive: true, force: true });
       fs.rmSync(ux3WorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  // --- QX-016..QX-019 (experiment 4, iteration 4): multi-label filter, sticky actions,
+  //     updatedAt display, and target-status tooltip backport ---
+  {
+    const qx16TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-qx16-test-"));
+    const qx16WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-qx16-workspace-"));
+    fs.mkdirSync(path.join(qx16WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx16WorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx16TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx16TasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    // BOTH-1: has both labels "bug" and "cli"
+    execFileSync("node", [nativeBin, "task", "create", "BOTH-1", "--title", "Has both labels",
+      "--status", "todo", "--body", VALID_SECTIONS, "--labels", "bug,cli"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx16TasksDir },
+    });
+    // BUGONLY-1: has only label "bug"
+    execFileSync("node", [nativeBin, "task", "create", "BUGONLY-1", "--title", "Has only bug label",
+      "--status", "todo", "--body", VALID_SECTIONS, "--labels", "bug"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx16TasksDir },
+    });
+    // NOLAB-1: no labels
+    execFileSync("node", [nativeBin, "task", "create", "NOLAB-1", "--title", "Has no labels",
+      "--status", "done", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx16TasksDir },
+    });
+
+    const qx16Port = port + 5;
+    const qx16OrigCwd = process.cwd();
+    let qx16Server;
+    try {
+      process.chdir(qx16WorkspaceRoot);
+      qx16Server = await startServer({ port: qx16Port });
+
+      // --- QX-016 (CB-013): Web UI multi-label AND-filter ---
+      // ?label=bug&label=cli should return only BOTH-1 (has both), not BUGONLY-1 (only bug)
+      const multiLabel = await get(qx16Port, "/?label=bug&label=cli");
+      assert(multiLabel.status === 200, "GET /?label=bug&label=cli returns 200 (multi-label AND-filter)");
+      assert(multiLabel.body.includes("BOTH-1"), "GET /?label=bug&label=cli includes BOTH-1 (has both labels) (QX-016, CB-013)");
+      assert(!multiLabel.body.includes("BUGONLY-1"), "GET /?label=bug&label=cli excludes BUGONLY-1 (has only bug, not cli) (QX-016, CB-013)");
+      assert(!multiLabel.body.includes("NOLAB-1"), "GET /?label=bug&label=cli excludes NOLAB-1 (has no labels) (QX-016, CB-013)");
+
+      // Single-label still works (no regression from QW-005).
+      const singleLabel = await get(qx16Port, "/?label=bug");
+      assert(singleLabel.status === 200, "GET /?label=bug returns 200 (single-label, no regression) (QX-016)");
+      assert(singleLabel.body.includes("BOTH-1"), "GET /?label=bug includes BOTH-1 (has bug label) (QX-016)");
+      assert(singleLabel.body.includes("BUGONLY-1"), "GET /?label=bug includes BUGONLY-1 (has bug label) (QX-016)");
+      assert(!singleLabel.body.includes("NOLAB-1"), "GET /?label=bug excludes NOLAB-1 (no labels) (QX-016)");
+
+      // No label filter — all tasks returned.
+      const noLabel = await get(qx16Port, "/");
+      assert(noLabel.status === 200, "GET / (no label filter) returns 200 — no regression (QX-016)");
+      assert(noLabel.body.includes("BOTH-1") && noLabel.body.includes("BUGONLY-1") && noLabel.body.includes("NOLAB-1"),
+        "GET / (no label filter) returns all tasks — no regression (QX-016)");
+
+      // --- QX-017 (UQ-011): sticky actions column in CSS ---
+      assert(
+        noLabel.body.includes(".col-actions") && noLabel.body.includes("position: sticky") && noLabel.body.includes("right: 0"),
+        "GET / page styles include .col-actions with position:sticky and right:0 (QX-017, UQ-011)"
+      );
+      // The actions column header has class="col-actions".
+      assert(
+        noLabel.body.includes('class="col-actions"'),
+        'GET / list page actions column header has class="col-actions" (QX-017, UQ-011)'
+      );
+
+      // --- QX-018 (UQ-017): updatedAt displayed on list page as "updated" column ---
+      assert(
+        noLabel.body.includes(">updated<") || noLabel.body.includes(">updated</th>"),
+        'GET / list page table includes "updated" column header (QX-018, UQ-017)'
+      );
+      // Tasks with updatedAt (from quay-native store.js) render a relative time.
+      assert(
+        noLabel.body.includes(" ago") || noLabel.body.includes("col-updated"),
+        "GET / list page rows include relative-time ago display or col-updated class (QX-018, UQ-017)"
+      );
+
+      // --- QX-018 (UQ-017): "last updated" on detail page ---
+      const detailQX18 = await get(qx16Port, "/task/BOTH-1");
+      assert(detailQX18.status === 200, "GET /task/BOTH-1 returns 200 (QX-018 detail page check)");
+      assert(
+        detailQX18.body.includes("last updated"),
+        'GET /task/BOTH-1 detail page includes "last updated" meta (QX-018, UQ-017)'
+      );
+
+      // --- QX-019 (UQ-018): list-page Advance button has target-status tooltip ---
+      // BOTH-1 is at todo status, so next status should be "ready"
+      assert(
+        noLabel.body.includes('title="Advance to ready"'),
+        'GET / list page Advance button for todo-status task has title="Advance to ready" (QX-019, UQ-018)'
+      );
+
+    } finally {
+      if (qx16Server) {
+        qx16Server.close();
+        if (qx16Server.client) await qx16Server.client.close();
+      }
+      process.chdir(qx16OrigCwd);
+      fs.rmSync(qx16TasksDir, { recursive: true, force: true });
+      fs.rmSync(qx16WorkspaceRoot, { recursive: true, force: true });
     }
   }
 
