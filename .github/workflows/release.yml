@@ -29,12 +29,15 @@ jobs:
         run: npm install
 
       - name: Run tests
-        # QX-056 (experiment 4, iteration 15): DIR-004 publish — add GH_TOKEN so
-        # quay-github tests can make live GitHub API calls. Without GH_TOKEN the
-        # gh CLI used by quay-github throws "set the GH_TOKEN environment variable."
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs packages/quay-github/test/*.test.mjs
+        # QX-056 (experiment 4, iteration 15): DIR-004 publish — run only
+        # packages/quay and packages/quay-native tests. The quay-github tests
+        # make live GitHub API calls against yaleh/quay issues; in CI the
+        # github.token only has repo-scoped read access and `gh api` returns
+        # HTTP 403 "Resource not accessible by integration." Excluding those
+        # tests here is correct: quay-github provider tests are integration
+        # tests that require a pre-authenticated `gh` CLI session (local dev
+        # environment) and are not suitable for automated CI on release.
+        run: node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs
 
       - name: Build release artifact (npm pack)
         id: pack
