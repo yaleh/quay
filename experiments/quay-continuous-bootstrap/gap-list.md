@@ -53,6 +53,8 @@
 | ID | Description | Severity | Source | Date added | Last confirmed open |
 |----|-------------|----------|--------|------------|---------------------|
 | SH-003 | `stripHeadings()` strips `#`-prefixed lines inside fenced code blocks (false negative — e.g., `# comment` inside a code block would be excluded from body search). Low practical impact; worth fixing if code-heavy task bodies become common. | minor | G3 audit (PASS-WITH-NOTES, iteration 7) | 2026-07-17 | 2026-07-17 |
+| ENV-001 | MCP server process (`mcp-server.js`) is not automatically restarted when source code changes. Live MCP tool consumers (e.g., Claude Code sessions using quay MCP tools) continue using the stale process and silently drop new parameters until a new session is started. Makes iterative MCP development impossible to verify via live tool calls without a session restart. Note: this is an ENV/infrastructure gap, not a code defect — all MCP code is verified correct by unit tests and G3 audit. | minor | simulated-user (AI-agent MCP-focused, iteration 8) | 2026-07-17 | 2026-07-17 |
+| SH-004 | Pagination contract edge cases: (1) `totalPages=0` when `total=0` — some consumers expect `totalPages=1` for empty sets; behavior is deterministic but potentially surprising. (2) `pageSize=0` and `pageSize>200` clamping behavior is correct (`Math.max(1,…)` / `Math.min(200,…)`) but not regression-protected by tests. Neither is a production defect; both are test-coverage and API-contract documentation gaps noted by G3 PASS-WITH-NOTES. | minor | G3 audit (PASS-WITH-NOTES, iteration 8) | 2026-07-17 | 2026-07-17 |
 
 ### process (experiment self-execution — outside the four V_instance dimensions; tracked here because it affects whether steering directives actually take effect)
 
@@ -160,3 +162,6 @@
 - Iteration 8 (development phase): closed CB-010 (QX-030: MCP pagination), CB-014 (QX-029: MCP search + QX-031: schema refresh), UQ-008 (QX-030: same fix as CB-010); 3 gap IDs closed (CB-010, CB-014, UQ-008 counted separately); G3 + simulated-user pending (dispatched by orchestrator)
 - **Cumulative gaps closed (all-time, iteration 8 development phase): 43** (adds CB-010, CB-014, UQ-008)
 - **Net open gaps after iteration 8 development phase**: 13 (3 CB, 9 UQ, 0 VC, 1 SH) + 1 process — CB-006/008/015 open; UQ-006/007/020/021/022/030/031/032/033 open; SH-003 open
+- Iteration 8 (G3 + simulated-user, FINAL): G3 PASS-WITH-NOTES (2 minor notes: totalPages=0 edge case, pageSize clamping not regression-protected); simulated-user: 2× PASS (new-contributor, cross-experiment-maintainer), 1× FAIL (AI-agent MCP-focused — stale MCP server process, operational/ENV gap, NOT code defect; code verified correct by G3 + direct test execution: 23/23 MCP assertions pass); 2 new gaps logged (ENV-001 minor, SH-004 minor); 0 additional gaps closed in synthesis; cumulative gaps closed unchanged at 43
+- **Cumulative gaps closed (all-time, iteration 8 FINAL): 43**
+- **Net open gaps after iteration 8 FINAL**: 15 (3 CB, 9 UQ, 0 VC, 3 SH) + 1 process — CB-006/008/015 open; UQ-006/007/020/021/022/030/031/032/033 open; SH-003/ENV-001/SH-004 open
