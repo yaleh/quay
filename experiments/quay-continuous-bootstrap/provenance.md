@@ -557,19 +557,34 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 
 ---
 
-## Iteration 5 record (2026-07-17, DEVELOPMENT PHASE — G3 + simulated-user pending)
+## V-score history (all iterations)
+
+| Iteration | V_instance | ΔV_instance | V_meta | σ_QX | Notes |
+|-----------|-----------|-------------|--------|------|-------|
+| 0 | 0.236 | baseline | 0.123 (inherited) | 0/1 (floor: 0.778 inherited) | Observational; σ_QX uses inherited floor convention |
+| 1 | 0.388 | +0.152 | 0.136 | 6/7 = 0.857 | 6 gaps closed; simulated-user 3 personas |
+| 2 | 0.443 | +0.055 | 0.142 | 9/10 = 0.900 | 5 gaps closed; 5 new gaps from simulated-user |
+| 3 | 0.491 | +0.048 | 0.148 | 14/15 = 0.933 | 8 gaps closed; CB-013 blocking found |
+| 4 | 0.561 | +0.070 | 0.150 | 18/19 = 0.947 | 6 gaps closed; acceleration; UQ-019 significant new |
+| 5 | 0.576 | +0.015 | 0.151 | 21/22 = 0.955 | 3 gaps closed; 4 new gaps (2 significant); first iteration below 0.02 threshold |
+
+ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015. PAUSE threshold (0.02) first crossed in iteration 5. PAUSE requires 2+ consecutive — watch iteration 6.
+
+---
+
+## Iteration 5 record (2026-07-17, FINAL)
 
 ### QX-* tasks created and completed this iteration
 
 | Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
 |------|-----------|------------|---------|----------------|--------|-------|
-| QX-020 | native | native | G3 pending | 19/22 | done | Label nav toggle semantics (UQ-019): toggle-on/off; bold active; "remove" links; closes UQ-019 |
-| QX-021 | native | native | G3 pending | 20/22 | done | Full-text title search: `--search` on CLI + `?q=` on Web UI with GET form; `buildHref` carries q; closes CB-007 |
-| QX-022 | native | native | G3 pending | 21/22 | done | CLI timestamp column: relativeTimeCli() in bin/quay.js; 5th tab-separated field in non-JSON output; closes UQ-004 |
+| QX-020 | native | native | G3 PASS | 19/22 | done | Label nav toggle semantics (UQ-019): toggle-on/off; bold active; "remove" links; closes UQ-019 |
+| QX-021 | native | native | G3 PASS | 20/22 | done | Full-text title search: `--search` on CLI + `?q=` on Web UI with GET form; `buildHref` carries q; closes CB-007 |
+| QX-022 | native | native | G3 PASS | 21/22 | done | CLI timestamp column: relativeTimeCli() in bin/quay.js; 5th tab-separated field in non-JSON output; closes UQ-004 |
 
 σ_QX before iteration 5: 18/19 = 0.947
-σ_QX after iteration 5 (PROVISIONAL — G3 co-sign pending): 21/22 = 0.955
-(QX-001 remains seed provenance. QX-020..022 all native authoring + execution. gate_by = "G3 pending" — will be updated to "G3 PASS WITH NOTES" or equivalent after orchestrator dispatches G3 audit of commit 69a102a.)
+σ_QX after iteration 5 (FINAL): 21/22 = 0.955
+(QX-001 remains seed provenance. QX-020..022 all native authoring + execution. gate_by = "G3 PASS" — co-signed; see audits/iteration-5-adjudicate.md. Commit 69a102a.)
 
 ### Gate check results (iteration 5, development phase)
 - QX-020: all 5 ACs checked; status advanced to done; G3 co-sign pending
@@ -593,37 +608,41 @@ See `experiments/quay-continuous-bootstrap/audits/iteration-5-adjudicate.md` (to
 Full test suite: 30/30 pass (node --test). No regressions against any of the three inherited snapshots.
 Baseline 30/30 confirmed before implementation; 30/30 confirmed after all changes in commit 69a102a.
 
-### V_instance (iteration 5, PROVISIONAL development phase)
+### V_instance (iteration 5, FINAL)
 ```
 V_instance = capability_breadth × usability_quality × verification_coverage × system_health
-           = 0.78 × 0.86 × 0.97 × 0.98
-           ≈ 0.637
+           = 0.73 × 0.83 × 0.97 × 0.98
+           ≈ 0.576
 
-ΔV_instance (provisional) = 0.637 - 0.561 = +0.076 (over iteration 4 final)
+ΔV_instance (FINAL) = 0.576 - 0.561 = +0.015 (over iteration 4 final)
 ```
 Component rationale:
-- capability_breadth: 0.78 (CB-007 significant closed; 5 open CB gaps vs 6 prior; 0 blocking, 3 significant, 2 minor)
-- usability_quality: 0.86 (UQ-019 significant + UQ-004 minor closed; 1 significant open vs 2 prior; 6 minor open vs 7 prior)
-- verification_coverage: 0.97 (30/30 pass; new test blocks added; no Playwright mobile)
-- system_health: 0.98 (provisional; no blocking issues in self-audit; G3 pending)
+- capability_breadth: 0.73 (CB-007 significant closed +0.03; CB-016 significant new −0.02; net +0.01; 6 open CB gaps: 4 significant, 2 minor)
+- usability_quality: 0.83 (UQ-019 significant closed +0.03; UQ-004 minor closed +0.01; UQ-024/026 minor new −0.01; UQ-025 significant new −0.02; net +0.01; 2 significant open, 8 minor open)
+- verification_coverage: 0.97 (G3 PASS; 30/30 pass; new test blocks added; no Playwright mobile)
+- system_health: 0.98 (G3 PASS; no regressions confirmed by all simulated-user personas)
 
-### V_meta (iteration 5, PROVISIONAL)
+Development-phase provisional was 0.637 (before simulated-user found 2 new significant gaps). Final revised down to 0.576.
+
+### V_meta (iteration 5, FINAL)
 ```
 V_meta = completeness × effectiveness × reusability × validation
        = 0.77 × 0.26 × 0.79 × 0.955
        ≈ 0.151
 
-ΔV_meta (provisional) = 0.151 - 0.150 = +0.001 (over iteration 4 final)
+ΔV_meta (FINAL) = 0.151 - 0.150 = +0.001 (over iteration 4 final)
+ΔV_meta from experiment-3 inherited base (0.123): +0.028
 ```
-σ_QX = 21/22 = 0.955 (provisional; G3 co-sign pending).
+σ_QX = 21/22 = 0.955 (FINAL; G3 PASS co-signed).
 Ceiling: 0.26 (effectiveness frozen; unchanged).
 
-### Convergence check (iteration 5, PROVISIONAL)
+### Convergence check (iteration 5, FINAL)
 - V_meta ≥ 0.80: NO (ceiling 0.26)
-- PAUSE (ΔV < 0.02 for 2+ consecutive iterations AND no new significant gap): NOT MET (provisional) — ΔV = +0.076 (not flat); simulated-user findings pending
-- G3: PENDING
-- system_health: no regression (30/30 pass)
-**Status: CONTINUING (provisional — pending G3 + simulated-user)**
+- PAUSE (ΔV < 0.02 for 2+ consecutive iterations AND no new significant gap): NOT MET — ΔV_5 = +0.015 (below 0.02 threshold, first time); requires 2+ consecutive iterations below threshold; this is only ONE. Additionally, 2 new significant gaps found (CB-016, UQ-025) — "no new significant gap" condition NOT met.
+- G3: PASS
+- Simulated-user: 3 personas complete; 2× PASS, 1× CONCERNS; 4 new gaps logged
+- system_health: no regression (30/30 pass; all personas confirmed)
+**Status: CONTINUING** — watch ΔV_6; if also below 0.02 AND no new significant gap, PAUSE triggered
 
 ---
 
