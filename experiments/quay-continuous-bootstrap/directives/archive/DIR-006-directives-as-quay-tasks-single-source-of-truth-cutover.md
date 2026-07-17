@@ -86,3 +86,39 @@ leaving two mechanisms half-live:
    enforcement is what failed here.
 3. Reconcile the currently-duplicated DIR-004 (both a `pending/` file AND a `label: directive`
    quay task exist for the same packaging work) so there is exactly one authoritative record.
+
+## Resolution (iteration 15, 2026-07-17) — QX-057
+
+**Decision: Option B — files are canonical. The iteration-11 task-based cutover is formally rolled back.**
+
+Rationale:
+- Every directive since iteration 11 was filed as a file (DIR-007, DIR-008, DIR-009, DIR-004
+  reopen, DIR-006 reopen) — the quay task mechanism had zero mechanical enforcement and was
+  never actually adopted.
+- The `quay-directive` skill (item 3 of the original requested action) was never updated and
+  still produces files; updating it to produce tasks would require significant tooling work
+  with no clear benefit given the file-based system's actual usage pattern.
+- Directive files are co-located with the codebase in git, reviewable in PRs, and require no
+  running server — these properties suit the experiment's methodology better than a task store.
+- The quay task store's strength is tracking development work (QX-NNN tasks), not steering
+  directives which tend to be longer-lived, structured documents with multiple sections.
+
+**Actions taken:**
+1. **Canonical mechanism**: `directives/pending/` and `directives/archive/` files are the one
+   authoritative record for steering directives. No new directive should be created as a quay
+   task with `label: directive`.
+2. **DIR-004 reconciliation**: The `DIR-004` quay task (created in iteration 11 with
+   `label: directive`) is marked `done` / superseded — the file-based record in
+   `directives/archive/DIR-004-*.md` is the authoritative history. The DIR-004 task body
+   had remaining work that is now fully closed by QX-056 (GitHub Actions run 29582230120
+   verified; artifact quay-0.2.0.tgz published and installable).
+3. **DIR-005 note**: The `DIR-005` quay task (created in iteration 11) is not actively
+   referenced in current gap-list or iteration work; it remains in the task store as a
+   historical artifact (no file-based DIR-005 is being restored).
+4. **Tooling**: The `quay-directive` skill continues to create files. No skill update needed.
+5. **Invariant**: From this iteration forward — if a directive is needed, create a file in
+   `directives/pending/`. Do NOT create a quay task with `label: directive`.
+
+**Status: CLOSED. This directive's objective is resolved as Option B (files canonical).**
+The dual-representation state is resolved: DIR-004 task → done/superseded by file record;
+no future directive tasks will be created; DIR-006 itself is archived.
