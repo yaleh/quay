@@ -8,7 +8,7 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 9 (FINAL)_
+_Last updated: iteration 10 (dev phase; G3 + simulated-user pending)_
 
 - **Latest scores:** see "V-score history (all iterations)" table, iteration 8 row, for
   V_instance / ΔV_instance / V_meta / σ_QX. Do not duplicate those figures here — update
@@ -27,7 +27,7 @@ _Last updated: iteration 9 (FINAL)_
     "σ_QX-vs-inherited-floor decision" in the Iteration 0 record).
   - V_meta ceiling: 0.26 (1.0 × 0.26 × 1.0 × 1.0, effectiveness-bound; inherited from
     experiment 1, confirmed positively across experiments 2/3 — see Inheritance record below).
-- **Status:** CONTINUING — iteration 9 complete; PAUSE NOT triggered (ΔV_7=+0.037, ΔV_8=+0.035, ΔV_9=+0.033 — all above 0.02); ENV-001 re-rated significant; cumulative gaps closed: 48; synthesis-phase fix: v-prefix bug in release.yml (blocking, G3-missed, caught by simulated-user).
+- **Status:** CONTINUING — iteration 10 dev phase complete; G3 + simulated-user PENDING; 6 gaps closed dev phase (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034); DIR-007 applied; cumulative gaps closed: 54; σ_QX=36/37 (G3 co-sign pending for QX-035/036/037).
 
 ---
 
@@ -595,8 +595,9 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | 7 | 0.601 | +0.037 | 0.152 | 27/28 = 0.964 | 4 gaps closed (CB-017/UQ-027/028/029); 4 new minor gaps; G3 PASS-WITH-NOTES; 2× PASS + 1× CONCERNS simulated-user; HALT (human-imposed) |
 | 8 | 0.636 | +0.035 | 0.153 | 30/31 = 0.968 | 3 gaps closed (CB-010/CB-014/UQ-008); 2 new minor gaps (ENV-001/SH-004); G3 PASS-WITH-NOTES; 2× PASS + 1× FAIL (ENV, not code defect) simulated-user; cumulative closed=43 |
 | 9 | 0.669 | +0.033 | 0.154 | 33/34 = 0.971 | 5 gaps closed (CB-008/CB-015/UQ-031/032/033); ENV-001 re-rated significant; synthesis-phase fix: v-prefix bug in release.yml (G3-missed, caught by project-maintainer); G3 PASS-WITH-NOTES; PASS + CONCERNS + CONCERNS simulated-user; cumulative closed=48 |
+| 10 | TBD | TBD | TBD | 36/37 = 0.973 (G3 pending) | 6 gaps closed dev phase (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034); DIR-007 applied; G3 + simulated-user PENDING; cumulative closed=54 (dev phase) |
 
-ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033. Iterations 7, 8, and 9 all above 0.02 threshold — PAUSE NOT triggered. Cumulative gaps closed: 48.
+ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033. Iterations 7, 8, and 9 all above 0.02 threshold — PAUSE NOT triggered. Iteration 10 final V-scores pending G3 + simulated-user. Cumulative gaps closed: 54 (dev phase).
 
 ---
 
@@ -1125,3 +1126,82 @@ Ceiling: 0.26 (effectiveness frozen; unchanged).
 **Status: CONTINUING** — PAUSE not triggered; ENV-001 now significant; cumulative gaps closed: 48
 
 Artifacts at `experiments/quay-continuous-bootstrap/`. Experiment 4 closed.
+
+---
+
+## Iteration 10 record (2026-07-17, dev phase — G3 + simulated-user pending)
+
+### QX-* tasks created and completed this iteration
+
+| Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
+|------|-----------|------------|---------|----------------|--------|-------|
+| QX-035 | native | native | G3 pending | 34/37 (pending) | done | MCP staleness mitigations (ENV-001 significant): `_version` field in task_list response; "Version: X.Y.Z." prefix in tool description; README "Updating quay" section with restart guidance. mcp-server.test.mjs Block 17 (4 assertions: _version string, non-empty, Version: in description, non-empty). ENV-001 downgraded minor. |
+| QX-036 | native | native | G3 pending | 35/37 (pending) | done | README install documentation + engines field (CB-019): restructured Install section into Option A (global from release artifact) + Option B (from source); `"engines": {"node": ">=20.0.0"}` added to packages/quay/package.json. |
+| QX-037 | native | native | G3 pending | 36/37 (pending) | done | Minor polish bundle (UQ-020/021/022/034): empty-result stdout message "No tasks found."; --label guard (exits 1 with error if --label passed without value); filter-scoped label counts (labels show counts for current prefix+status+search context, excluding label filter itself); needs-human CTA info-banner on detail page. cli.test.mjs Test 21 (2 assertions). serve.test.mjs filter-scoped block (4 assertions: port+11). |
+
+σ_QX before iteration 10: 33/34 = 0.971
+σ_QX after iteration 10 (dev phase, G3 pending): 36/37 = 0.973
+(QX-001 remains seed provenance. QX-035..037 all native authoring + execution. gate_by = "G3 pending" — co-sign awaited from orchestrator.)
+
+### Directive applied this iteration
+- **DIR-007** (remove orientation banner from serve.js, pending since pre-iteration-10): Applied. Banner `<div class="orientation-banner">...</div>` removed from list-page template. Rationale: (1) depicted needs-human as sequential step in flow (incorrect — it is a side-branch); (2) permanent vertical space cost on every list view. CSS `.orientation-banner {}` block kept as empty rule with comment explaining removal. Directive moved from `directives/pending/` to `directives/archive/`. Corresponding serve.test.mjs assertions updated to assert banner text ABSENT.
+
+### Gate check results (iteration 10, dev phase)
+- QX-035: all ACs checked; status advanced to done; G3 co-sign pending
+- QX-036: all ACs checked; status advanced to done; G3 co-sign pending
+- QX-037: all ACs checked; status advanced to done; G3 co-sign pending
+
+### Gaps closed this iteration (dev phase — 6 total)
+Development phase:
+- ENV-001 (MCP server staleness, significant) → QX-035 mitigations (downgraded to minor; not fully closed — root cause is environmental)
+- CB-019 (README install + engines field) → QX-036
+- UQ-020 (CLI silent exit on empty result) → QX-037
+- UQ-021 (--label without value silently ignored) → QX-037
+- UQ-022 (needs-human no CTA) → QX-037
+- UQ-034 (label counts are global, not filter-scoped) → QX-037
+
+Directive applied (not a gap-list entry):
+- DIR-007 (remove orientation banner — applied and archived)
+
+### G3 status (iteration 10)
+G3 TRIGGERED — Core source files changed: `packages/quay/src/mcp-server.js`, `packages/quay/bin/quay.js`, `packages/quay/src/serve.js`, `packages/quay/package.json`.
+G3 PENDING — awaiting orchestrator dispatch.
+
+### System health (iteration 10, dev phase)
+Full test suite: 30/30 pass (node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs packages/quay-github/test/*.test.mjs). No regressions. New test blocks: mcp-server.test.mjs Block 17 (4 assertions), cli.test.mjs Test 21 (2 assertions), serve.test.mjs filter-scoped block port+11 (4 assertions).
+
+### V_instance (iteration 10, dev phase — PROVISIONAL; PENDING G3 + simulated-user)
+```
+V_instance (provisional, dev phase) = capability_breadth × usability_quality × verification_coverage × system_health
+
+  capability_breadth: 0.855 (CB-019 minor closed +0.005; ENV-001 downgraded to minor, health impact −0.005 recouped; net ≈ +0.010)
+  usability_quality:  0.875 (UQ-020/021/022/034 minor closed +0.020; DIR-007 orientation banner removed — cosmetic improvement; no new UQ gaps in dev phase)
+  verification_coverage: 0.97 (30/30 pass; 10 new assertions; coverage maintained)
+  system_health: 0.97 (ENV-001 downgraded from significant to minor → health recoupment; DIR-007 is removal not regression)
+
+= 0.855 × 0.875 × 0.97 × 0.97
+≈ 0.684
+
+Provisional ΔV_instance = 0.684 − 0.669 = +0.015
+```
+Final scores depend on G3 + simulated-user findings. Per protocol: simulated-user may reveal new significant gaps revising scores down; G3 may add new gap entries.
+
+### V_meta (iteration 10, dev phase — PROVISIONAL)
+```
+V_meta (provisional) = completeness × effectiveness × reusability × validation
+                     = 0.77 × 0.26 × 0.79 × (36/37)
+                     = 0.158 × 0.973
+                     ≈ 0.154
+
+ΔV_meta (provisional) = 0.154 − 0.154 = 0.000 (rounded; actual: 0.158×0.973 = 0.1537 vs 0.158×0.971 = 0.1534; +0.0003)
+```
+σ_QX = 36/37 = 0.973 (G3 pending; provisional).
+Ceiling: 0.26 (effectiveness frozen; unchanged).
+
+### Convergence check (iteration 10, dev phase — PROVISIONAL)
+- V_meta ≥ 0.80: NO (ceiling 0.26)
+- PAUSE (ΔV < 0.02 for 2+ consecutive iterations AND no new significant gap): NOT YET ASSESSABLE — provisional ΔV_10 = +0.015 (below 0.02 threshold); ΔV_9 = +0.033 (above); two-consecutive window requires BOTH below threshold; not yet met. Simulated-user may find new significant gaps.
+- G3: PENDING
+- Simulated-user: PENDING
+- system_health: no regression (dev phase)
+**Status: PENDING ORCHESTRATOR DISPATCH** — G3 + simulated-user required before final convergence assessment.

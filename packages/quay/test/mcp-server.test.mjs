@@ -1115,6 +1115,69 @@ async function main() {
     fs.rmSync(mltWorkspaceRoot, { recursive: true, force: true });
   }
 
+  // ---- Block 17: QX-035 (experiment 4, iteration 10) — task_list _version field
+  //   and tool description Version: mitigation for ENV-001. ----
+  {
+    // Set up a minimal workspace to call task_list.
+    const vsnTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-vsn-tasks-"));
+    const vsnWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-vsn-workspace-"));
+    // Create one task to ensure task_list returns something.
+    fs.writeFileSync(path.join(vsnTasksDir, "VSN-1.md"), [
+      "---",
+      "id: VSN-1",
+      "title: Version test task",
+      "status: todo",
+      "role: primitive",
+      "labels: []",
+      "---",
+      "# VSN-1 body",
+    ].join("\n") + "\n");
+    fs.mkdirSync(path.join(vsnWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(path.join(vsnWorkspaceRoot, ".quay", "config.yml"), [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir}"`,
+      `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${vsnTasksDir}"`,
+      "",
+    ].join("\n"));
+
+    const { client: coreVsn, transport: coreVsnTransport } = await connectStdio(
+      "node", [coreBin, "mcp"], vsnWorkspaceRoot
+    );
+
+    // (a) task_list response includes _version field (string, non-empty) — Mitigation A
+    {
+      const r = await coreVsn.callTool({
+        name: "task_list",
+        arguments: {},
+      });
+      assert(r.isError !== true, "task_list returns no error (QX-035 _version check)");
+      const sc = r.structuredContent ?? {};
+      assert(typeof sc._version === "string", `task_list structuredContent._version is a string (got ${typeof sc._version}) (QX-035)`);
+      assert(sc._version.length > 0, `task_list structuredContent._version is non-empty (got '${sc._version}') (QX-035)`);
+    }
+
+    // (b) task_list tool description includes "Version:" — Mitigation B
+    {
+      const toolsResult = await coreVsn.listTools();
+      const taskListTool = (toolsResult.tools ?? []).find((t) => t.name === "task_list");
+      assert(!!taskListTool, "listTools() includes task_list (QX-035 description check)");
+      if (taskListTool) {
+        assert(
+          (taskListTool.description ?? "").includes("Version:"),
+          `task_list tool description includes "Version:" (QX-035) (got: "${(taskListTool.description ?? "").slice(0, 80)}")`
+        );
+      }
+    }
+
+    await coreVsnTransport.close();
+    fs.rmSync(vsnTasksDir, { recursive: true, force: true });
+    fs.rmSync(vsnWorkspaceRoot, { recursive: true, force: true });
+  }
+
   // ---- Cleanup ----
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
   fs.rmSync(tasksDirA, { recursive: true, force: true });

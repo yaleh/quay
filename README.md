@@ -32,6 +32,20 @@ a specific backend.
 Requires Node.js >= 20 (this repo is developed against Node v25; see each
 package's `package.json` `engines` field for the exact floor).
 
+### Option A — global install from a release artifact (recommended for most users)
+
+Download the latest `quay-*.tgz` from the [GitHub Releases page](https://github.com/yaleh/quay/releases),
+then install it globally with npm:
+
+```sh
+npm install -g quay-0.1.0.tgz   # replace with the actual filename from the release
+quay --help
+```
+
+This installs the `quay` binary on your PATH. Node.js >= 20 must already be installed.
+
+### Option B — from source (for development or the latest unreleased changes)
+
 ```sh
 git clone https://github.com/yaleh/quay.git
 cd quay
@@ -51,6 +65,15 @@ node packages/quay/bin/quay.js <command>
 node packages/quay-native/bin/quay-native.js <command>
 node packages/quay-github/bin/quay-github.js <command>
 ```
+
+## Updating quay
+
+If you update quay (by installing a new release artifact or pulling from source)
+while a Claude Code session that registered the `quay` MCP server is already open,
+**restart the Claude Code session** for the MCP server to pick up the changes.
+The MCP server process is started once when Claude Code launches and does not
+auto-restart when the underlying files change. After a restart, the updated tool
+schemas and any new parameters will be available to the AI agent.
 
 ## Configuration
 

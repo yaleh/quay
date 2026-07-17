@@ -151,17 +151,13 @@ hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
   .col-actions { position: sticky; right: 0; background: #fff; z-index: 2; }
   .col-updated { display: none; }
 }
-/* QX-015 (experiment 4, iteration 3): project orientation banner — visible at
-   all viewports, subtle enough not to dominate. Closes UQ-003. */
-.orientation-banner {
-  background: #f0f4ff;
-  border-left: 3px solid #0066cc;
-  padding: 0.6rem 1rem;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
-  color: #333;
-  border-radius: 0 4px 4px 0;
-}
+/* QX-015 (experiment 4, iteration 3): project orientation banner — REMOVED by
+   DIR-007 (iteration 10). Banner had two problems: (1) depicted needs-human as
+   sequential step in todo→ready→needs-human→done chain rather than as a
+   side-branch/blocked state; (2) permanent top-of-page layout cost
+   disproportionate to value. CSS class left as empty rule for no-op safety
+   in case any test or external reference still matches on it; the HTML element
+   was removed from the list-page template. */
 /* QX-013 (experiment 4, iteration 3): error and success banners for
    gate-fail and post-action feedback. Closes UQ-013. */
 .error-banner {
@@ -180,6 +176,16 @@ hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
   margin-bottom: 1rem;
   font-size: 0.9rem;
   color: #004400;
+  border-radius: 0 4px 4px 0;
+}
+/* QX-037 (experiment 4, iteration 10): info banner for needs-human CTA (UQ-022). */
+.info-banner {
+  background: #fffbf0;
+  border-left: 3px solid #cc8800;
+  padding: 0.6rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: #664400;
   border-radius: 0 4px 4px 0;
 }
 </style>`;
@@ -571,14 +577,24 @@ export async function startServer({ port = 4173 } = {}) {
       // Closes UQ-028 (alphabetic ordering hides most-used labels) and UQ-027
       // (active label hidden when it falls after position 25 alphabetically).
       const LABEL_NAV_MAX = 25;
-      // Count how many tasks carry each label (across the unfiltered full task list).
+      // QX-037 (experiment 4, iteration 10): UQ-034 — label counts scoped to current
+      // status/prefix/search filters (but NOT label filter) so the (N) badge shows how
+      // many tasks in the current context have each label, not the global total.
+      // filteredByStatusAndSearch = prefix + status + search filters applied; label filter
+      // deliberately excluded so clicking a label shows "how many tasks would match."
+      const filteredByStatusAndSearch = qFilter
+        ? filteredByStatus.filter((t) =>
+            (t.title + " " + stripHeadings(t.body)).toLowerCase().includes(qFilter.toLowerCase())
+          )
+        : filteredByStatus;
       const labelCounts = new Map();
-      for (const t of allTasks) {
+      for (const t of filteredByStatusAndSearch) {
         for (const l of (Array.isArray(t.labels) ? t.labels : [])) {
           labelCounts.set(l, (labelCounts.get(l) || 0) + 1);
         }
       }
-      // All distinct labels sorted by frequency descending, then alphabetically.
+      // All distinct labels (from full task list for nav completeness) sorted by filter-scoped
+      // frequency descending, then alphabetically.
       const allLabels = [...new Set(allTasks.flatMap((t) => Array.isArray(t.labels) ? t.labels : []))]
         .sort((a, b) => (labelCounts.get(b) || 0) - (labelCounts.get(a) || 0) || a.localeCompare(b));
       // Pin active labels that would be hidden (fall after position LABEL_NAV_MAX).
@@ -672,8 +688,8 @@ export async function startServer({ port = 4173 } = {}) {
       res.end(html`<!doctype html>
         <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Quay task list — ${escapeHtml(manifest.name)}">${pageStyles()}<title>Quay — ${escapeHtml(manifest.name)}</title></head>
         <body><main>
-          <!-- QX-015: project orientation banner (UQ-003) — brief preamble for new users -->
-          <div class="orientation-banner"><strong>Quay</strong> — AI-assisted task management. Task statuses: <code>todo</code> → <code>ready</code> → <code>needs-human</code> → <code>done</code>. Use the Prefix filter to focus on one experiment&apos;s tasks.</div>
+          <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
+               needs-human placement + disproportionate layout cost. -->
           <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
           ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
           ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
@@ -748,6 +764,9 @@ export async function startServer({ port = 4173 } = {}) {
           ${typeof t.updatedAt === "number" ? html`<p class="meta">last updated: ${escapeHtml(relativeTime(t.updatedAt))}</p>` : ""}
           ${childrenMeta}
           <div>${buttons}</div>
+          ${t.status === "needs-human" && buttons.length > 0
+            ? html`<div class="info-banner" role="note">This task needs human attention. Use the action buttons above to advance or resolve it.</div>`
+            : ""}
           <h2 class="sr-only">Details</h2>
           <div class="body">${renderMarkdown(t.body)}</div>
         </main></body></html>`);

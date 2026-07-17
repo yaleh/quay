@@ -446,20 +446,18 @@ async function main() {
       process.chdir(ux3WorkspaceRoot);
       ux3Server = await startServer({ port: ux3Port });
 
-      // --- QX-015 (UQ-003): orientation banner on list page ---
+      // --- QX-015 (UQ-003): orientation banner removed by DIR-007 (iteration 10) ---
+      // Banner was misleading (depicted needs-human as sequential step, not side-branch)
+      // and had disproportionate layout cost. Assertions updated to reflect removal.
       const listForBanner = await get(ux3Port, "/");
       assert(listForBanner.status === 200, "GET / (UX3 server) returns 200");
       assert(
-        listForBanner.body.includes("orientation-banner"),
-        "GET / list page includes orientation-banner class (QX-015, UQ-003)"
-      );
-      assert(
-        listForBanner.body.includes("AI-assisted task management"),
-        "GET / list page orientation banner includes project description text (QX-015)"
+        !listForBanner.body.includes("AI-assisted task management"),
+        "GET / list page no longer contains orientation banner text (DIR-007, QX-015 removed)"
       );
       assert(
         listForBanner.body.includes("todo"),
-        "GET / list page orientation banner mentions status lifecycle (QX-015)"
+        "GET / list page HTML still contains 'todo' status (filter nav present) (DIR-007)"
       );
 
       // --- QX-012 (UQ-011, UQ-012): col-role, col-labels classes in list HTML + CSS rule ---
@@ -527,14 +525,15 @@ async function main() {
         "GET /task/UX3-1?from=//evil.com: open-redirect guard rejects protocol-relative URL, defaults to / (SH-002)"
       );
 
-      // --- CR-010 / UQ-016: orientation banner must say 'ready', not 'in_progress' ---
+      // --- CR-010 / UQ-016: orientation banner removed (DIR-007); verify no 'in_progress' status leaks ---
+      // The banner text was the only known location using 'in_progress'; verify it's gone.
       assert(
         !listForBanner.body.includes("in_progress"),
-        "GET / orientation banner does NOT contain 'in_progress' (non-existent status) (CR-010, UQ-016)"
+        "GET / page does NOT contain 'in_progress' (non-existent status) anywhere (CR-010, UQ-016, DIR-007)"
       );
       assert(
         listForBanner.body.includes("ready"),
-        "GET / orientation banner contains 'ready' (actual status in model) (CR-010, UQ-016)"
+        "GET / page still contains 'ready' status (filter nav) (CR-010, UQ-016)"
       );
 
       // --- QX-014 (UQ-014): detail page Advance button has target-status tooltip ---
@@ -1175,6 +1174,80 @@ async function main() {
       process.chdir(qx34OrigCwd);
       fs.rmSync(qx34TasksDir, { recursive: true, force: true });
       fs.rmSync(qx34WorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  // ---- QX-037 (experiment 4, iteration 10) block — filter-scoped label counts (UQ-034) ----
+  //
+  // Fixture: tasks where a "mixed-label" appears on both todo and done tasks.
+  // When filtered to ?status=todo, the label count badge should show only the
+  // count of todo tasks with that label (2), NOT the global total (5).
+  {
+    const qx37TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-qx37-tasks-"));
+    const qx37WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-qx37-workspace-"));
+    fs.mkdirSync(path.join(qx37WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx37WorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx37TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}","mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx37TasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    const envOverride37 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx37TasksDir };
+    const MIXED_LABEL = "mixed-status-label";
+
+    // Create 2 todo tasks with MIXED_LABEL
+    for (let i = 1; i <= 2; i++) {
+      const id = `SC37-TODO-${i}`;
+      execFileSync("node", [nativeBin, "task", "create", id,
+        "--title", `Todo task ${i}`,
+        "--status", "todo",
+        "--labels", MIXED_LABEL],
+        { env: envOverride37 });
+    }
+    // Create 3 done tasks with MIXED_LABEL (global total = 5, todo-scoped = 2)
+    for (let i = 1; i <= 3; i++) {
+      const id = `SC37-DONE-${i}`;
+      execFileSync("node", [nativeBin, "task", "create", id,
+        "--title", `Done task ${i}`,
+        "--status", "done",
+        "--labels", MIXED_LABEL],
+        { env: envOverride37 });
+    }
+
+    let qx37Server = null;
+    const qx37OrigCwd = process.cwd();
+    try {
+      process.chdir(qx37WorkspaceRoot);
+      const qx37Port = port + 11;
+      qx37Server = await startServer({ port: qx37Port });
+
+      // Unfiltered page: mixed-status-label should show count 5 (global total)
+      const unfilteredResp = await get(qx37Port, "/");
+      assert(unfilteredResp.status === 200, "GET / returns 200 (QX-037 setup)");
+      assert(
+        unfilteredResp.body.includes(`${MIXED_LABEL} (5)`),
+        `Unfiltered page shows global count 5 for ${MIXED_LABEL} (UQ-034, QX-037)`
+      );
+
+      // Status=todo filter: mixed-status-label should show filter-scoped count 2
+      const todoResp = await get(qx37Port, "/?status=todo");
+      assert(todoResp.status === 200, "GET /?status=todo returns 200 (QX-037)");
+      assert(
+        todoResp.body.includes(`${MIXED_LABEL} (2)`),
+        `?status=todo page shows filter-scoped count 2 for ${MIXED_LABEL} (UQ-034, QX-037)`
+      );
+      assert(
+        !todoResp.body.includes(`${MIXED_LABEL} (5)`),
+        `?status=todo page does NOT show global count 5 for ${MIXED_LABEL} (UQ-034, QX-037)`
+      );
+
+    } finally {
+      if (qx37Server) {
+        qx37Server.close();
+        if (qx37Server.client) await qx37Server.client.close();
+      }
+      process.chdir(qx37OrigCwd);
+      fs.rmSync(qx37TasksDir, { recursive: true, force: true });
+      fs.rmSync(qx37WorkspaceRoot, { recursive: true, force: true });
     }
   }
 

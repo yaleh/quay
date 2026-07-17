@@ -174,6 +174,17 @@ async function main() {
         process.exitCode = 1;
         return;
       }
+      // QX-037 (experiment 4, iteration 10): UQ-021 — guard --label with no value.
+      // parseFlags() sets flags.label = true (boolean) when --label is passed with no value.
+      // Inconsistency with --prefix (which exits 1) filed as UQ-021; fix mirrors QX-006.
+      // [].concat(flags.label).filter(Boolean) below would silently drop a boolean true,
+      // producing no label filter — even more confusing than a crash.
+      const rawLabel = flags.label;
+      if (rawLabel !== undefined && typeof rawLabel !== "string" && !Array.isArray(rawLabel)) {
+        console.error("Error: --label requires a value (e.g., --label experiment-4)");
+        process.exitCode = 1;
+        return;
+      }
       const filteredByPrefix = prefix
         ? tasks.filter((t) => t.id.toUpperCase().startsWith(prefix.toUpperCase()))
         : tasks;
@@ -240,6 +251,16 @@ async function main() {
         // by an empty result with no guidance. Closes UQ-024 (minor).
         if (sorted.length === 0 && searchQuery !== null) {
           console.log(`Hint: use --label to filter by label, or --search to match title/body content.`);
+        }
+        // QX-037 (experiment 4, iteration 10): UQ-020 — "No tasks found." message
+        // when any filter combination returns zero results. Without this, the CLI
+        // exits silently with no output and no message, which users cannot distinguish
+        // from a command that failed silently or a tool that is malfunctioning.
+        // The --search hint above fires for the specific search-with-no-results case;
+        // this is a broader catch-all for status/label/prefix filter combinations.
+        // Written to stdout (consistent with other informational output in this branch).
+        if (sorted.length === 0 && searchQuery === null) {
+          console.log("No tasks found.");
         }
       }
     }, { providerId: flags.provider });

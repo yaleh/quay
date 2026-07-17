@@ -1353,6 +1353,54 @@ async function main() {
     fs.rmSync(hdngWorkspaceRoot, { recursive: true, force: true });
   }
 
+  // 21. QX-037 (experiment 4, iteration 10): UQ-020 (empty filter result message)
+  //     and UQ-021 (--label with no value guard).
+  {
+    const qx37TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-qx37-tasks-"));
+    const qx37WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-qx37-workspace-"));
+    fs.mkdirSync(path.join(qx37WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx37WorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    tasks_dir: "${qx37TasksDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${qx37TasksDir.replaceAll("\\", "\\\\")}"`,
+        "",
+      ].join("\n")
+    );
+    const spawnOpts37 = { cwd: qx37WorkspaceRoot, encoding: "utf8" };
+    const env37 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx37TasksDir };
+
+    // Create one ready task (status != done, so filtering by done returns empty)
+    execFileSync("node", [nativeBin, "task", "create", "QRDY-1",
+      "--title", "A ready task",
+      "--status", "ready",
+      "--labels", "some-label"],
+      { env: env37, cwd: qx37WorkspaceRoot });
+
+    // UQ-020: filter by --status done on a workspace with no done tasks → "No tasks found." to stdout
+    {
+      const r = run(["task", "list", "--status", "done"], spawnOpts37);
+      assert(r.status === 0, "quay task list --status done (no matches) exits 0 (QX-037, UQ-020)");
+      assert(r.stdout.includes("No tasks found"), "quay task list --status done prints 'No tasks found' to stdout (QX-037, UQ-020)");
+    }
+
+    // UQ-021: --label with no value should exit 1 with usage error
+    {
+      const r = run(["task", "list", "--label"], spawnOpts37);
+      assert(r.status !== 0, "quay task list --label (no value) exits non-zero (QX-037, UQ-021)");
+      assert(r.stderr.includes("--label requires a value"), "quay task list --label (no value) prints usage error to stderr (QX-037, UQ-021)");
+    }
+
+    fs.rmSync(qx37TasksDir, { recursive: true, force: true });
+    fs.rmSync(qx37WorkspaceRoot, { recursive: true, force: true });
+  }
+
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 

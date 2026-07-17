@@ -7,6 +7,9 @@
   "bin": {
     "quay": "./bin/quay.js"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
     "yaml": "^2.5.1"

@@ -43,10 +43,21 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import path from "node:path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { loadConfig, activeProvider } from "./config.js";
 import { connectProvider } from "./provider-client.js";
 import { composePayload, deliverTrigger } from "./action.js";
 import { resolveProviderEnv } from "./provider-env.js";
+
+// QX-035 (experiment 4, iteration 10): read package version at startup for
+// Mitigation A (_version field in task_list response) and Mitigation B
+// (Version: in tool description). ENV-001 mitigation — lets AI agent consumers
+// detect MCP server staleness by comparing _version against their expected version.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const { version: QUAY_VERSION } = JSON.parse(
+  readFileSync(path.resolve(__dirname, "../package.json"), "utf8")
+);
 
 // resolveProviderEnv is now imported from ./provider-env.js (QN-045): this
 // file, bin/quay.js, and serve.js all share the single implementation there
@@ -186,6 +197,7 @@ export async function startMcpServer() {
     "task_list",
     {
       description:
+        `Version: ${QUAY_VERSION}. ` +
         "List tasks from an enabled Provider (defaults to the default-enabled Provider if `provider` is omitted), " +
         "optionally filtered by status, label, prefix (task-id prefix), and/or full-text search. " +
         "Supports pagination via `page` (1-based, default 1) and `pageSize` (default 50, max 200). " +
@@ -239,7 +251,9 @@ export async function startMcpServer() {
       const start = (pageNum - 1) * size;
       const paged = tasks.slice(start, start + size);
       const totalPages = Math.ceil(total / size);
-      const result = { tasks: paged, total, page: pageNum, pageSize: size, totalPages };
+      // QX-035 (experiment 4, iteration 10): Mitigation A — _version field lets
+      // AI agents detect MCP server staleness by comparing against expected version.
+      const result = { tasks: paged, total, page: pageNum, pageSize: size, totalPages, _version: QUAY_VERSION };
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         structuredContent: result,
