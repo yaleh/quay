@@ -567,8 +567,9 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | 3 | 0.491 | +0.048 | 0.148 | 14/15 = 0.933 | 8 gaps closed; CB-013 blocking found |
 | 4 | 0.561 | +0.070 | 0.150 | 18/19 = 0.947 | 6 gaps closed; acceleration; UQ-019 significant new |
 | 5 | 0.576 | +0.015 | 0.151 | 21/22 = 0.955 | 3 gaps closed; 4 new gaps (2 significant); first iteration below 0.02 threshold |
+| 6 | 0.564 | −0.012 | 0.152 | 24/25 = 0.960 | 5 gaps closed; 5 new gaps (4 significant); first negative ΔV; PAUSE not triggered (significant gaps found) |
 
-ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015. PAUSE threshold (0.02) first crossed in iteration 5. PAUSE requires 2+ consecutive — watch iteration 6.
+ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012. Iteration 6 first negative ΔV. PAUSE criteria: two consecutive iterations below 0.02 threshold (iterations 5+6) BUT significant gaps condition violated (4 new significant gaps). PAUSE NOT triggered. Status: CONTINUING.
 
 ---
 
@@ -585,6 +586,97 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 σ_QX before iteration 5: 18/19 = 0.947
 σ_QX after iteration 5 (FINAL): 21/22 = 0.955
 (QX-001 remains seed provenance. QX-020..022 all native authoring + execution. gate_by = "G3 PASS" — co-signed; see audits/iteration-5-adjudicate.md. Commit 69a102a.)
+
+---
+
+## Iteration 6 record (2026-07-17, FINAL)
+
+### QX-* tasks created and completed this iteration
+
+| Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
+|------|-----------|------------|---------|----------------|--------|-------|
+| QX-023 | native | native | G3 PASS-WITH-NOTES | 22/25 | done | Body search (CB-016): extend CLI + Web UI search filter to match title + body content; cli.test.mjs BSRCH-1/BSRCH-2; serve.test.mjs QX-023 block |
+| QX-024 | native | native | G3 PASS-WITH-NOTES | 23/25 | done | Label nav truncation (UQ-025): LABEL_NAV_MAX=25; visibleLabels=allLabels.slice(0,25); "… N more labels" note; serve.test.mjs "5 more labels" test |
+| QX-025 | native | native | G3 PASS-WITH-NOTES | 24/25 | done | Minor polish bundle (UQ-023/024/026): remove redundant statSync from store.js list(); zero-result hint in CLI; clear-link filter preservation confirmed + tested |
+
+σ_QX before iteration 6: 21/22 = 0.955
+σ_QX after iteration 6 (FINAL): 24/25 = 0.960
+(QX-001 remains seed provenance. QX-023..025 all native authoring + execution. gate_by = "G3 PASS-WITH-NOTES" — co-signed; see audits/iteration-6-adjudicate.md. C-5 correctness gap noted by G3: active label hidden by alphabetic truncation → filed as UQ-027.)
+
+### Gate check results (iteration 6, FINAL)
+- QX-023: all 5 ACs checked; status advanced to done; G3 PASS-WITH-NOTES
+- QX-024: all 5 ACs checked; status advanced to done; G3 PASS-WITH-NOTES (C-5 note: active-label hidden when alphabetically > position 25)
+- QX-025: all 5 ACs checked; status advanced to done; G3 PASS-WITH-NOTES
+
+### Gaps closed this iteration (FINAL — 5 total)
+Development phase:
+- CB-016 (body search title-only) → QX-023
+- UQ-025 (label nav flat wall at 40+ labels) → QX-024
+- UQ-023 (redundant statSync in list()) → QX-025
+- UQ-024 (--search 0 results no hint) → QX-025
+- UQ-026 (clear link resets all filters) → QX-025
+
+### New gaps found this iteration (FINAL — 5 total)
+From G3 audit (PASS-WITH-NOTES):
+- UQ-027 (significant): Active label hidden by alphabetic label nav truncation (C-5)
+
+From simulated-user pass (1× FAIL, 2× CONCERNS):
+- CB-017 (significant): Body search template boilerplate false positives — "Proposal"/"Plan" etc. match 117/118 tasks
+- UQ-027 (significant): Active label hidden (confirmed by cross-experiment-maintainer and mobile-only personas; same finding as G3 C-5)
+- UQ-028 (significant): Alphabetic label ordering hides most-used labels — frequency sort needed
+- UQ-029 (significant): Doc staleness — --help and placeholder say "title", body search is live
+- UQ-030 (minor): Search form buried below label wall on mobile
+
+### G3 status (iteration 6, FINAL)
+G3 TRIGGERED — Core source files changed: `packages/quay/bin/quay.js`, `packages/quay/src/serve.js`, `packages/quay-native/src/store.js`.
+G3 COMPLETE — PASS-WITH-NOTES. All 30 tests pass. No security issues. One correctness gap (C-5): active label hidden by alphabetic truncation when label falls after position 25. QX-023/024/025 co-signed.
+See `experiments/quay-continuous-bootstrap/audits/iteration-6-adjudicate.md`.
+
+### System health (iteration 6, FINAL)
+Full test suite: 30/30 pass. No regressions against any of the three inherited snapshots. All inherited capabilities retain tests.
+
+### V_instance (iteration 6, FINAL)
+```
+V_instance = capability_breadth × usability_quality × verification_coverage × system_health
+           = 0.74 × 0.81 × 0.97 × 0.97
+           ≈ 0.564
+
+ΔV_instance = 0.564 − 0.576 = −0.012 (over iteration 5 final)
+```
+First negative ΔV. Provisional from development phase was 0.643 (+0.067); revised to 0.564 (−0.012) after audit pass found 4 new significant gaps. The audit mechanism detected product-quality issues that automated tests could not.
+
+Component rationale:
+- capability_breadth: 0.74 (CB-016 closed +0.03; CB-017 new −0.02; net +0.01; 6 open CB gaps)
+- usability_quality: 0.81 (4 closed: UQ-025 sig +0.02, UQ-024 min +0.005, UQ-026 min +0.005, UQ-023 min +0.003; 4 new: UQ-027 sig −0.02, UQ-028 sig −0.015, UQ-029 sig −0.01, UQ-030 min −0.005; net ≈ −0.017)
+- verification_coverage: 0.97 (30/30 pass; new test blocks added; no Playwright mobile)
+- system_health: 0.97 (G3 PASS-WITH-NOTES; C-5 correctness gap; all tests pass; no regressions)
+
+### V_meta (iteration 6, FINAL)
+```
+V_meta = completeness × effectiveness × reusability × validation
+       = 0.77 × 0.26 × 0.79 × 0.960
+       ≈ 0.152
+
+ΔV_meta = 0.152 − 0.151 = +0.001 (over iteration 5 final)
+```
+σ_QX = 24/25 = 0.960 (FINAL; G3 PASS-WITH-NOTES co-signed).
+Ceiling: 0.26 (effectiveness frozen; unchanged).
+
+### Simulated-user pass (iteration 6, FINAL)
+3 personas dispatched by orchestrator; all complete.
+- mobile-only (375px): CONCERNS — label truncation at 21/46 labels with no expand path; search placeholder mismatch; search form buried below label wall; body search for unique terms: PASS
+- new-power-user (CLI + Web UI): FAIL — CB-017 template boilerplate false positives; UQ-028 alphabetic ordering; UQ-029 doc staleness
+- cross-experiment-maintainer (all surfaces): CONCERNS — UQ-027 active-label hidden (confirms G3 C-5); UQ-029 doc staleness; body search unique terms: PASS; clear link: PASS; zero-result hint: PASS
+
+Gap-list delta (final): 5 new gaps found (CB-017 significant, UQ-027 significant, UQ-028 significant, UQ-029 significant, UQ-030 minor); 0 additional gaps closed in synthesis; cumulative gaps closed: 36.
+
+### Convergence check (iteration 6, FINAL)
+- V_meta ≥ 0.80: NO (ceiling 0.26)
+- PAUSE (ΔV < 0.02 for 2+ consecutive iterations AND no new significant gap): NOT MET — two consecutive iterations below 0.02 threshold (✓) BUT 4 new significant gaps found in iterations 5+6 (✗ — significant-gap condition violated)
+- G3: PASS-WITH-NOTES (one correctness gap, C-5, filed as UQ-027; not blocking)
+- Simulated-user: 3 personas complete; 1× FAIL, 2× CONCERNS; 5 new gaps logged
+- system_health: no regression
+**Status: CONTINUING** — significant gaps require iteration 7
 
 ### Gate check results (iteration 5, development phase)
 - QX-020: all 5 ACs checked; status advanced to done; G3 co-sign pending

@@ -207,76 +207,116 @@ Quay serve restarted after code changes. Live on `http://localhost:4173/`.
 |------|-----------|-----------|------------|---------|----------------|-------|
 | QX-001 | 0 | seed | N/A | N/A | 0/25 | Unchanged |
 | QX-002..QX-022 | 1–5 | native | native | G3 PASS / tests pass | 1–21/25 | Unchanged |
-| QX-023 | 6 | native | native | G3 pending | 22/25 | Body search (CB-016) |
-| QX-024 | 6 | native | native | G3 pending | 23/25 | Label nav truncation (UQ-025) |
-| QX-025 | 6 | native | native | G3 pending | 24/25 | Minor polish bundle (UQ-023/024/026) |
+| QX-023 | 6 | native | native | G3 PASS-WITH-NOTES | 22/25 | Body search (CB-016) |
+| QX-024 | 6 | native | native | G3 PASS-WITH-NOTES | 23/25 | Label nav truncation (UQ-025) |
+| QX-025 | 6 | native | native | G3 PASS-WITH-NOTES | 24/25 | Minor polish bundle (UQ-023/024/026) |
 
 σ_QX before iteration 6: 21/22 = 0.955
-σ_QX after iteration 6 (DRAFT — G3 co-sign pending): 24/25 = 0.960
-(QX-001 seed provenance; QX-002..025 all native authoring + execution. gate_by for QX-023..025 will be updated from "G3 pending" to "G3 PASS" or equivalent after G3 co-sign.)
+σ_QX after iteration 6 (FINAL): 24/25 = 0.960
+(QX-001 seed provenance; QX-002..025 all native authoring + execution. gate_by for QX-023..025 = G3 PASS-WITH-NOTES — co-signed; see audits/iteration-6-adjudicate.md.)
 
 ---
 
 ## 7. Simulated-user pass (§0c — every iteration)
 
-**PENDING — orchestrator will dispatch**
+Three persona-diverse agents were dispatched by the orchestrator (run_in_background=true, NOT manda, fresh contexts per §0c).
 
-Three persona-diverse agents to be dispatched by the orchestrator (run_in_background=true, NOT manda, fresh contexts per §0c).
+### 7a. mobile-only (375px viewport)
 
-Recommended personas for iteration 6:
-- **mobile-only-user**: tests body search and label truncation on a 375px mobile viewport — both changes have mobile-specific implications (label truncation especially).
-- **cross-experiment-maintainer**: verifies that search now finds content in task bodies (e.g. searching for text from a task's Plan section); tests label nav at realistic scale; verifies filter preservation on clear link.
-- **new-power-user**: comes with familiarity with mature trackers; evaluates body search quality, hint discoverability, and label truncation UX.
+**Verdict: CONCERNS**
 
-Expected output: `experiments/quay-continuous-bootstrap/audits/iteration-6-simulated-user-{persona}.md`
+Audit file: `experiments/quay-continuous-bootstrap/audits/iteration-6-simulated-user-mobile-only-webui.md`
 
-New gap-list entries (if any blocking/significant findings): to be added by orchestrator after synthesis.
+Key findings:
+- **Label nav truncation (new gap UQ-027/UQ-028)**: 21/46 labels truncated with no expand path. No frequency-based ordering — most-used labels hidden.
+- **Body search placeholder mismatch (new gap UQ-029)**: Placeholder says "Search titles…" but body search is active, flooding results for structural terms.
+- **Search form buried (new gap UQ-030)**: At 46 labels, search form is below the label wall on mobile — not visible above the fold.
+- Body search for unique body terms: PASS. Clear link filter preservation: PASS.
+
+### 7b. new-power-user (CLI + Web UI)
+
+**Verdict: FAIL**
+
+Audit file: `experiments/quay-continuous-bootstrap/audits/iteration-6-simulated-user-new-power-user-cli-webui.md`
+
+Key findings:
+- **Template boilerplate false positives (new gap CB-017)**: Body search returns 117/118 tasks for "Proposal" — every task body uses `## Proposal` as a template section header. Near-total recall defeats search signal for any structural template term.
+- **Alphabetic ordering hides most-used labels (new gap UQ-028)**: `v1` (33 tasks) and `usability_quality` (19 tasks) both hidden by alphabetic truncation. Alphabetic order is the wrong heuristic for a nav with 46+ labels.
+- **Doc staleness (new gap UQ-029)**: `--search --help` says "title substring", Web UI placeholder says "Search titles…" — documentation contradicts actual body-search behavior after QX-023.
+
+### 7c. cross-experiment-maintainer (all surfaces)
+
+**Verdict: CONCERNS**
+
+Audit file: `experiments/quay-continuous-bootstrap/audits/iteration-6-simulated-user-cross-experiment-maintainer-all-surfaces.md`
+
+Key findings:
+- **Active label hidden by truncation (new gap UQ-027)**: Confirmed G3 C-5 finding. When an active label filter falls alphabetically after position 25, the label nav shows no bold indicator and no remove link — user cannot see or clear the filter without URL editing.
+- **Doc staleness (confirmed UQ-029)**: `--search` help text and placeholder both still say "title" — contradicts body-search behavior.
+- Body search for unique body terms: PASS. Clear-link filter preservation: PASS. Zero-result hint: PASS.
+
+### 7. Summary
+
+| Persona | Verdict | New gaps found |
+|---------|---------|----------------|
+| mobile-only (375px) | CONCERNS | UQ-028, UQ-029, UQ-030 |
+| new-power-user (CLI + Web UI) | FAIL | CB-017, UQ-028, UQ-029 |
+| cross-experiment-maintainer (all surfaces) | CONCERNS | UQ-027, UQ-029 |
+
+**New gaps logged**: CB-017 (significant), UQ-027 (significant), UQ-028 (significant), UQ-029 (significant), UQ-030 (minor). Total: 5 new gaps.
 
 ---
 
-## 8. V_instance (provisional — before simulated-user/G3)
+## 8. V_instance (FINAL — post simulated-user and G3)
 
-**Note**: These are provisional scores for the development phase. Final values will be set after G3 audit and simulated-user pass, following the pattern established in prior iterations (where simulated-user findings revised provisional scores).
+**Note**: The provisional score from the development phase was 0.643. The audit pass (G3 + 3 simulated-user personas) revealed systematic issues in two of the three major features implemented this iteration, revising the score downward. This is a healthy signal: the standing simulated-user mechanism is working as intended, detecting product-quality problems that automated tests could not.
 
-**capability_breadth (provisional)**: 0.76
-- Prior: 6 open CB gaps (4 significant + 2 minor) → 0.73.
-- CB-016 CLOSED (significant, QX-023): body search now covers both title and body content. +0.03.
-- Net: 0 blocking + 3 significant (CB-008, CB-010, CB-014) + 2 minor (CB-006, CB-015) = 5 open.
-- Net change: +0.03 → provisional 0.76.
+**capability_breadth (FINAL)**: 0.74
+- Prior: 0.73.
+- CB-016 CLOSED (significant, QX-023): body search implemented — works correctly for non-template terms. +0.03.
+- CB-017 NEW (significant): body search produces false positives for structural template terms (e.g., "Proposal", "Plan") — near-total recall defeats search signal. −0.02.
+- Net: +0.01 → 0.74.
+- Open: CB-006/008/010/014/015 (5 open, as before) + CB-017 (new) = 6 open total (4 significant + 2 minor).
 
-**usability_quality (provisional)**: 0.89
-- Prior: 2 significant open (UQ-008, UQ-025) + 8 minor (UQ-006/007/020/021/022/023/024/026) → 0.83.
-- UQ-025 CLOSED (significant, QX-024): label nav truncation. +0.02.
-- UQ-023 CLOSED (minor, QX-025): redundant statSync removed. +0.01.
-- UQ-024 CLOSED (minor, QX-025): zero-result hint. +0.01.
-- UQ-026 CLOSED (minor, QX-025): clear link filter preservation confirmed + tested. +0.01.
-- Net: 1 significant open (UQ-008) + 6 minor (UQ-006/007/020/021/022) = 7 open.
-- Net change: +0.06 → provisional 0.89.
+**usability_quality (FINAL)**: 0.81
+- Prior: 0.83.
+- UQ-025 CLOSED (significant, QX-024): label nav truncation added — exists but has residual correctness gap. +0.02.
+- UQ-024 CLOSED (minor, QX-025): zero-result hint in CLI. +0.005.
+- UQ-026 CLOSED (minor, QX-025): clear-link filter preservation confirmed + tested. +0.005.
+- UQ-023 CLOSED (minor, QX-025): redundant statSync removed. +0.003.
+- UQ-027 NEW (significant): active label hidden by alphabetic truncation — user cannot see or clear active filter. −0.02.
+- UQ-028 NEW (significant): alphabetic label ordering hides most-used labels (`v1`, `usability_quality`). −0.015.
+- UQ-029 NEW (significant): doc staleness — help text and placeholder say "title" but body search is live. −0.01.
+- UQ-030 NEW (minor): search form buried below label wall on mobile (375px). −0.005.
+- Net: ≈ −0.017 → 0.813 ≈ 0.81.
 
-**verification_coverage (provisional)**: 0.97
+**verification_coverage (FINAL)**: 0.97
 - 30/30 pass. New test blocks added: cli.test.mjs (body-search + zero-result-hint), serve.test.mjs (QX-023/024/025 block).
 - No Playwright live mobile verification. Score unchanged from iteration 5.
 
-**system_health (provisional)**: 0.98
-- 30/30 pass. No regressions. store.js statSync removal confirmed non-regressing (all existing store tests pass). No write-surface violations.
+**system_health (FINAL)**: 0.97
+- 30/30 pass confirmed. G3 PASS-WITH-NOTES (C-5 correctness gap — not a regression of prior tests; a new feature gap in QX-024). Down from 0.98 by one step to reflect the G3 PASS-WITH-NOTES verdict on a functional correctness issue.
 
-### Provisional V_instance:
+### Final V_instance:
 ```
 V_instance = capability_breadth × usability_quality × verification_coverage × system_health
-           = 0.76 × 0.89 × 0.97 × 0.98
+           = 0.74 × 0.81 × 0.97 × 0.97
 
-           = 0.76 × 0.89 = 0.6764
-           = 0.6764 × 0.97 = 0.6561
-           = 0.6561 × 0.98 ≈ 0.643
+           = 0.74 × 0.81 = 0.5994
+           × 0.97 = 0.5814
+           × 0.97 = 0.5640
+           ≈ 0.564
 
-V_instance (iteration 6, PROVISIONAL) ≈ 0.643
+V_instance (iteration 6, FINAL) ≈ 0.564
 
-ΔV_instance (PROVISIONAL) = 0.643 - 0.576 = +0.067
+ΔV_instance (FINAL) = 0.564 − 0.576 = −0.012
 ```
 
-This is a significant jump driven by closing 1 significant CB gap and 1 significant UQ gap plus 3 minor UQ gaps. The simulated-user pass may find new significant gaps that revise this downward (as happened in iteration 5 where provisional 0.637 was revised to 0.576).
+**Iteration 6 shows the first negative ΔV.** The audit pass revealed systematic issues in two of the three major features (body search quality and label ordering), which the automated test suite could not detect — the tests were correct but the product behavior was unsatisfactory for real-world use. This is a healthy signal: the standing simulated-user mechanism is working as intended.
 
-**Cumulative gaps closed (development phase): 36** (prior 31 + CB-016, UQ-023, UQ-024, UQ-025, UQ-026)
+Provisional was 0.643 (+0.067). Final is 0.564 (−0.012). Simulated-user and G3 together reduced the score by 0.079 from the provisional.
+
+**Cumulative gaps closed (FINAL): 36** (prior 31 + CB-016, UQ-023, UQ-024, UQ-025, UQ-026)
 
 ---
 
@@ -291,10 +331,10 @@ Re-trigger check: NOT TRIGGERED — QX-023/024/025 each touched multiple source 
 **reusability**: 0.79
 Re-trigger check: NOT TRIGGERED — no organic demand for GitHub Provider data.write or new ABI extension.
 
-**validation**: 0.960 (σ_QX = 24/25, PROVISIONAL — G3 co-sign pending)
-Provisional movement: 0.955 (iteration 5) → 0.960 (iteration 6 provisional, pending G3 co-sign).
+**validation**: 0.960 (σ_QX = 24/25, FINAL — G3 PASS-WITH-NOTES co-sign complete)
+Movement: 0.955 (iteration 5) → 0.960 (iteration 6 final). QX-001 remains seed provenance (0 native); QX-002..025 all native authoring + execution. σ_QX = 24/25 = 0.960.
 
-**V_meta total (PROVISIONAL)**:
+**V_meta total (FINAL)**:
 ```
 V_meta = completeness × effectiveness × reusability × validation
        = 0.77 × 0.26 × 0.79 × 0.960
@@ -303,8 +343,8 @@ V_meta = completeness × effectiveness × reusability × validation
        = 0.2002 × 0.79 = 0.15816
        = 0.15816 × 0.960 ≈ 0.152
 
-V_meta (iteration 6 PROVISIONAL) ≈ 0.152
-ΔV_meta from iteration 5 final (0.151): +0.001 (provisional)
+V_meta (iteration 6 FINAL) ≈ 0.152
+ΔV_meta from iteration 5 final (0.151): +0.001
 ```
 
 **V_meta ceiling**: 0.26 (effectiveness frozen; V_meta ≥ 0.80 arithmetically unreachable — standing fact restated)
@@ -322,60 +362,62 @@ V_meta (iteration 6 PROVISIONAL) ≈ 0.152
 
 ## 10. Out-of-band audit (G3)
 
-**PENDING — orchestrator will dispatch**
+**Verdict: PASS-WITH-NOTES**
 
-**G3 IS TRIGGERED this iteration** — Core source files changed:
+Audit file: `experiments/quay-continuous-bootstrap/audits/iteration-6-adjudicate.md`
+
+**G3 WAS TRIGGERED this iteration** — Core source files changed:
 - `packages/quay/bin/quay.js` (QX-023, QX-025)
 - `packages/quay/src/serve.js` (QX-023, QX-024, QX-025)
 - `packages/quay-native/src/store.js` (QX-025 — statSync removal)
 
-Expected output: `experiments/quay-continuous-bootstrap/audits/iteration-6-adjudicate.md`
+All 30 tests pass. No security issues found (body content is filtered/compared, not rendered in the filter step; no XSS vector). No off-by-one in 25-label threshold.
 
-Dispatcher confirmation: orchestrator, native Agent/Task tool, NOT manda. This is the absolute requirement per §0b and experiments 2/3's G3-dispatch-drift case study.
+**Correctness gap noted — C-5**: Active label hidden by alphabetic truncation. When an active label filter falls alphabetically after position 25, the label nav shows no bold indicator and no remove link. User cannot see or clear the active filter without URL-editing. This is not a security issue but is a functional correctness gap in the label truncation feature (UQ-025). Filed as **UQ-027** in gap-list.
 
-Key areas for G3 to review:
-1. Body search: confirm no XSS risk from body content in the filter path (body is compared, not rendered in filter step); confirm case-insensitive logic correct for all body encodings.
-2. Label nav truncation: confirm the "… N more labels" text is HTML-escaped correctly; confirm no off-by-one in the 25-label threshold.
-3. store.js statSync removal: confirm that `get()` always sets `updatedAt` (including the race/catch path) and that `list()`'s removal of the second stat cannot cause `updatedAt` to be undefined when it was previously defined.
-4. Zero-result hint: confirm it only fires for explicit `--search` (not other empty-result cases like `--prefix NONEXISTENT`).
+QX-023, QX-024, and QX-025 co-signed: gate_by = **G3 PASS-WITH-NOTES**.
 
 ---
 
-## 11. Pause / Convergence Check (provisional)
+## 11. Pause / Convergence Check (FINAL)
 
-- [ ] **Meta-layer V_meta ≥ 0.80**: NO — V_meta ≈ 0.152 (PROVISIONAL), ceiling = 0.26. Arithmetically unreachable. NOT CONVERGED on meta-layer.
-- [ ] **Instance-layer PAUSE criteria** (ΔV flat < 0.02 for 2+ iterations AND no new significant gap):
+- [ ] **Meta-layer V_meta ≥ 0.80**: NO — V_meta ≈ 0.152 (FINAL), ceiling = 0.26. Arithmetically unreachable. NOT CONVERGED on meta-layer.
+- [ ] **Instance-layer PAUSE criteria** (ΔV flat < 0.02 for 2+ consecutive iterations AND no new significant gap):
   - ΔV_instance iteration 5: +0.015 (below 0.02 threshold — first time)
-  - ΔV_instance iteration 6 (PROVISIONAL): +0.067 (NOT flat — significant acceleration from closing 2 significant gaps)
-  - PAUSE criterion NOT MET: iteration 6 is not below 0.02 threshold (provisional). The two-consecutive requirement is reset.
-  - Additionally: simulated-user pass pending — may find new significant gaps (as happened in iterations 3, 4, 5). PAUSE doubly not triggered at development-phase stage.
-  - Status: CONTINUING (provisional)
-- [ ] **G3 green for all Core/lift tasks**: PENDING
-- [ ] **Simulated-user pass run, findings recorded**: PENDING
-- [ ] **system_health: no regression against any of the three inherited snapshots**: YES (30/30 pass confirmed; store.js statSync removal non-regressing)
+  - ΔV_instance iteration 6 (FINAL): −0.012 (below 0.02 threshold — second consecutive)
+  - Two consecutive iterations below threshold: YES (iterations 5 and 6 both < 0.02)
+  - "No new significant gap" condition: VIOLATED — 4 new significant gaps found (CB-017, UQ-027, UQ-028, UQ-029) in iterations 5+6
+  - **PAUSE: NOT triggered** — two-consecutive ΔV condition met, but significant-gap condition fails
+- [x] **G3 green for all Core/lift tasks**: PASS-WITH-NOTES (C-5 correctness gap filed as UQ-027; no blocking issues)
+- [x] **Simulated-user pass run, findings recorded**: YES — 3 personas complete (1× FAIL, 2× CONCERNS); 5 new gaps logged
+- [x] **system_health: no regression against any of the three inherited snapshots**: YES (30/30 pass confirmed; G3 PASS-WITH-NOTES; all inherited snapshots intact)
 
-**Status: CONTINUING (provisional — pending G3 + simulated-user)**
+**Status: CONTINUING** — PAUSE condition not triggered (significant gaps found). Iteration 7 should prioritize the 4 new significant gaps discovered this iteration.
 
-ΔV trend (provisional): iter0→1=+0.152, iter1→2=+0.055, iter2→3=+0.048, iter3→4=+0.070, iter4→5=+0.015, iter5→6=+0.067 (provisional). If provisional holds after simulated-user, this reverses the iteration-5 deceleration and shows the gap-list has remaining high-value work.
+ΔV trend (FINAL): iter0→1=+0.152, iter1→2=+0.055, iter2→3=+0.048, iter3→4=+0.070, iter4→5=+0.015, iter5→6=−0.012. Iteration 6 is the first negative ΔV. The score dip reflects the audit pass finding more significant problems than the development phase resolved. PAUSE is not triggered because the gap list has significant actionable work remaining.
 
 ---
 
 ## Problems identified for next iteration
 
-Priority order from updated open gap list:
+Priority order from updated open gap list (incorporating iteration 6 audit findings):
 
-1. **CB-014** (significant): MCP task_list schema stale in-session — structural gap. Requires session-independent fix.
+1. **UQ-028** (significant): Change label nav sort to frequency-descending — highest-impact single change; also resolves UQ-027 for most-used labels (they won't be truncated if they appear first).
 
-2. **CB-010/UQ-008** (significant): MCP pagination — no streaming or pagination at MCP layer.
+2. **UQ-027** (significant): Ensure active labels always appear in nav regardless of truncation position — may follow naturally from frequency sort above; if not, add an active-label pin.
 
-3. **CB-008/DIR-004** (significant): Packaging/distribution — 6 iterations without progress; may warrant a dedicated iteration.
+3. **UQ-029** (significant): Update `--help` text, CLI example, and Web UI placeholder from "title" to "title/body" or "content" — trivial fix, high credibility value.
 
-4. **UQ-020** (minor): CLI task list exits 0 with no message on empty filter result.
+4. **CB-017** (significant): Exclude structural headings (`## ...` lines) from search index, or add a stop-phrase list for template section names — moderate complexity but important for body search quality.
 
-5. **UQ-021** (minor): --label with no value silently ignored vs --prefix exits 1.
+5. **CB-014** (significant): MCP task_list schema stale in-session — structural gap. Requires session-independent fix.
 
-6. **UQ-022** (minor): needs-human detail page shows no guidance.
+6. **CB-010/UQ-008** (significant): MCP pagination — no streaming or pagination at MCP layer.
 
-7. Any new significant gaps found by iteration 6's simulated-user pass.
+7. **CB-008/DIR-004** (significant): Packaging/distribution — 6 iterations without progress; may warrant a dedicated iteration.
 
-Note: provisional ΔV_6 = +0.067 (significant bounce back from iteration 5's +0.015). PAUSE monitoring continues but not currently close to triggering.
+8. **UQ-030** (minor): Move search form above label nav on mobile, or use CSS `order` on narrow screens.
+
+9. **UQ-020/021/022** (minor): CLI edge cases and needs-human guidance.
+
+Note: ΔV_6 = −0.012 (first negative ΔV — audit found 4 new significant gaps). PAUSE not triggered (significant gaps condition fails). Iteration 7 focus: fix the 4 new significant gaps from this iteration before pursuing further feature work.
