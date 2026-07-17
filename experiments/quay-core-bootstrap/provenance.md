@@ -83,6 +83,8 @@ precondition — compact if over limit (see DIR-002 for procedure).
 | QC-006 | 6 (2026-07-16) | native¹ | native¹ | seed | 0/6 | no V_instance lift; completeness 0.75→0.77 from complex manda G3 trial. CHANGELOG.md created. gate_by=seed (same session). |
 | QC-007 | 7 (2026-07-16) | native¹ | native¹ | native² | 1/7 | no V_instance lift; no V_meta score move (validation floor still dominates; completeness update = evidence consolidation only). Skill files updated: three-tier manda envelope + timing-recording note. DIR-003 applied and archived. |
 | QC-008 | 8 (2026-07-16) | native¹ | native¹ | native² | 2/8 | no V_instance lift; no V_meta score move. ITERATION-PROMPTS.md updated: timing baseline citation, standing timing-recording instruction, manda reliability 6/6. Timing recorded: author 39s, execute 128s — not scope-matched (documentation, not source logic). Three new manda trials all SUCCESS. |
+| QC-009 | 9 (2026-07-16) | native¹ | native¹ | native² | 3/9 | no V_instance lift; no V_meta score move. README.md §2 updated (current V scores, σ_QC=2/8), §9 Practical Convergence Assessment added. Timing: author ~225s, execute ~465s — not scope-matched (documentation). |
+| QC-010 | 10 (2026-07-16) | native¹ | native¹ | native² | 4/10 | no V_instance lift; no V_meta score move. README.md §10 Iteration history table added (10 rows, iterations 0–9). Timing: author ~210s, execute ~360s — not scope-matched (documentation). Final iteration; practical convergence accepted. |
 
 ¹ native (degraded fallback): quay:author/quay:execute SKILL.md Method steps were the
 operative driver (write-proposal → review-proposal → write-plan → review-plan → gate →
@@ -102,8 +104,8 @@ operative step of the Method sequence.
 
 For σ_QC numerator credit, ALL THREE fields must be native.
 
-**σ_QC**: 2/8 (after iteration 8). QC-007 and QC-008 are both all-three-fields native. Validation
-score remains at inherited floor (0.64) because σ_QC = 2/8 = 0.25 is below the inherited floor
+**σ_QC**: 4/10 (after iteration 10). QC-007, QC-008, QC-009, and QC-010 are all all-three-fields native. Validation
+score remains at inherited floor (0.64) because σ_QC = 4/10 = 0.40 is below the inherited floor
 σ_strict = 0.8493 level.
 **Inherited floor**: σ_strict = 0.8493 (experiment 1's final value — context only).
 
@@ -116,3 +118,5 @@ See each iteration's report for full per-factor evidence:
 - QC-006: `experiments/quay-core-bootstrap/iterations/iteration-6.md` §5/§7
 - QC-007: `experiments/quay-core-bootstrap/iterations/iteration-7.md` §5/§6
 - QC-008: `experiments/quay-core-bootstrap/iterations/iteration-8.md` §5/§6
+- QC-009: `experiments/quay-core-bootstrap/iterations/iteration-9.md` §5/§6
+- QC-010: `experiments/quay-core-bootstrap/iterations/iteration-10.md` §5/§6
