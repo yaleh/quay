@@ -165,75 +165,115 @@ PASS — 30/30. No regressions.
 
 ---
 
-## §7 G3 audit (PENDING)
+## §7 Simulated-user pass + G3 (FINAL)
 
-G3 TRIGGERED — core source files changed: `packages/quay/src/mcp-server.js` (SH-005 fix) and `packages/quay/src/serve.js` (UQ-035 fix). Orchestrator to dispatch independent G3 audit subagent.
+Four independent subagents dispatched in parallel by orchestrator.
+
+Files:
+- `experiments/quay-continuous-bootstrap/audits/iteration-12-adjudicate.md`
+- `experiments/quay-continuous-bootstrap/audits/iteration-12-simulated-user-mcp-consumer.md`
+- `experiments/quay-continuous-bootstrap/audits/iteration-12-simulated-user-webui-search.md`
+- `experiments/quay-continuous-bootstrap/audits/iteration-12-simulated-user-cli-scripting.md`
+
+### G3 — PASS
+
+All three QX units co-signed. QX-044 (`mcp-server.js` stripHeadings) confirmed byte-identical to `serve.js` canonical implementation. QX-045 (JSON path regression test) correctly locks the invariant via structural code analysis. QX-046 (page indicator) confirmed conditional on `totalPages > 1`; single-page negative assertion correctly isolates banner element. 30/30 pass. σ_QX = 42/43 = 0.977.
+
+### Persona A: MCP AI consumer — PASS
+
+QX-044 SH-005 fix verified: `inFence` logic at lines 172–179 correct. Block 19 FENCE-1/FENCE-2 both pass. `_version` field and `Version:` prefix (iter-10 QX-035) intact — no regression. Operational significance noted: code-comment tokens in fenced blocks now correctly searchable.
+
+### Persona B: Web UI search user — CONCERNS
+
+**Finding**: serve process stale (started before iter-12 changes). QX-046 banner change not visible in live environment.
+
+**Synthesis-phase fix**: serve restarted (PID 4115913, 200 OK).
+
+**New gap filed**: **UQ-036** (minor) — `pageNav` paragraph renders "Page 1 of 1 (N tasks)" on single-page results. This is a pre-existing element from iter-8 pagination UI, not introduced by QX-046 (G3 confirms QX-046's `searchResultBanner` is correctly conditional). However, it produces redundant text on single-page views. Separate from QX-046's change.
+
+### Persona C: CLI scripting user — PASS
+
+QX-045 verified: `--json` and `--format json` both emit valid JSON; `# filtered:` comment only in non-JSON branch; section 22 tests all pass.
+
+**New gaps filed**:
+- **CB-021** (minor): `--format json` is silently ignored — no error message, output falls through to human-readable format. Scripts expecting JSON get corrupt pipeline data without an error signal.
+- **SH-006** (minor): `quay-native mcp: serving tasks from <path>` leaks to stderr — pre-existing; scripts using `2>&1` get this line mixed into JSON output.
+
+### Synthesis-phase fixes applied
+
+1. **serve process restarted** — QX-046 changes now live. Persona B CONCERNS (stale serve) resolved.
+
+### New gaps filed from synthesis
+
+- UQ-036 (minor): pageNav shows "Page 1 of 1" on single-page results
+- CB-021 (minor): `--format json` silently ignored
+- SH-006 (minor): stderr leak from quay-native mcp startup
 
 ---
 
-## §8 Temporary V_instance estimate
+## §8 V_instance (FINAL)
 
-V_instance components entering iteration 12:
-- capability_breadth = 0.850 (CB-006 still open; CB-020 now closed — confirmed correct behavior)
-- usability_quality = 0.885 (UQ-035 now closed)
-- verification_coverage = 0.975 (σ_QX = 39/40)
-- system_health = 0.975 (SH-005 now closed)
+Component accounting — synthesis pass (G3 + simulated-user) revised all four dimensions:
 
-**Closed this iteration**: SH-005 (+system_health), CB-020 (confirmed correct, no score change to capability_breadth), UQ-035 (+usability_quality)
+| Dimension | Entering iter-12 | Closed (+) | Found in synthesis (−) | FINAL |
+|-----------|-----------------|------------|------------------------|-------|
+| capability_breadth | 0.850 | CB-020 confirmed correct +0.005; regression test added | CB-021 (--format json silently ignored) −0.005 | **0.850** |
+| usability_quality | 0.885 | UQ-035 closed +0.005 | UQ-036 (pageNav "Page 1 of 1" redundant) −0.005 | **0.885** |
+| verification_coverage | 0.975 | +10 assertions (Block 19: 2, cli section 22: 3, serve QX-046: 5) | — | **0.977** |
+| system_health | 0.975 | SH-005 closed +0.005 | SH-006 (stderr leak from quay-native) −0.005 | **0.975** |
 
-Provisional post-iteration estimates:
-- capability_breadth: 0.850 → **0.860** (CB-020 confirmed correct + regression test; 1 open minor CB gap remains: CB-006)
-- usability_quality: 0.885 → **0.900** (UQ-035 closed; no significant UQ gaps remain open)
-- verification_coverage: 0.975 → **0.975** (σ_QX = 42/43 ≈ 0.977; effectively unchanged at this ceiling)
-- system_health: 0.975 → **0.985** (SH-005 closed; only ENV-001 minor remains)
+Note: closed-gap credits and synthesis-found-gap debits wash in capability_breadth, usability_quality, and system_health; only verification_coverage moved (more test assertions).
 
-V_instance (provisional) = (0.860 + 0.900 + 0.977 + 0.985) / 4
-                         = 3.722 / 4
-                         ≈ **0.731**
+```
+V_instance (FINAL) = capability_breadth × usability_quality × verification_coverage × system_health
+                   = 0.850 × 0.885 × 0.977 × 0.975
+                   ≈ 0.717
 
-ΔV_instance (provisional) = 0.731 − 0.715 = **+0.016**
+ΔV_instance (FINAL) = 0.717 − 0.715 = +0.002
+```
 
-Note: ΔV is positive but small (< 0.02). This would be the 1st consecutive iteration below 0.02 (since iter-11 ΔV reset the counter). PAUSE would not trigger until 2 consecutive < 0.02.
+Note: the executor's §8 draft used an arithmetic mean `(a+b+c+d)/4` (incorrect formula). The above uses the correct product formula consistent with all prior iterations.
 
 ---
 
-## §9 V_meta temporary estimate
+## §9 V_meta (FINAL)
 
-DIR-008 acknowledged this iteration (deferred to iter-13 for dedicated adoption with G3 audit). V_meta formula unchanged (DIR-008 not yet adopted):
+DIR-008 acknowledged this iteration (deferred to iter-13 for dedicated adoption with G3 audit). V_meta formula unchanged (DIR-008 not yet adopted).
 
-V_meta (provisional) = 0.77 × 0.26 × 0.79 × 0.977
-                     ≈ **0.154**
+G3 PASS co-signs QX-044, QX-045, QX-046 → σ_QX = 42/43 = 0.977 (FINAL).
 
-σ_QX = 42/43 ≈ 0.977 (QX-044/045/046 created and closed this iteration, all correct by test).
+```
+V_meta (FINAL) = 0.77 × 0.26 × 0.79 × 0.977
+               ≈ 0.154
 
-ΔV_meta (provisional) ≈ 0.000 (ceiling-bound; arithmetic ceiling = 0.26 remains).
+ΔV_meta (FINAL) = 0.000 (ceiling-bound; 0.26 arithmetic ceiling unchanged)
+```
 
 DIR-008 deferred note: once adopted in iter-13, V_meta will be **re-baselined** non-retroactively; the old and new formulas will both be recorded at the switch point per the directive's explicit requirement.
 
 ---
 
-## §10 G3 audit (PENDING)
+## §10 G3 audit (FINAL)
 
-Awaiting independent G3 audit subagent dispatch from orchestrator.
+**G3 PASS** — see `audits/iteration-12-adjudicate.md`.
 
-Changed source files for G3 scope:
-- `packages/quay/src/mcp-server.js` (QX-044: stripHeadings inFence fix)
-- `packages/quay/src/serve.js` (QX-046: searchResultBanner page indicator)
+All three QX units co-signed:
+- QX-044: `mcp-server.js` `stripHeadings()` byte-identical to `serve.js` canonical (QX-041). Block 19 FENCE-1/FENCE-2 assertions correct.
+- QX-045: JSON path regression test correctly locks invariant via structural code analysis. `--json` routes through `printJson()` only; `# filtered:` comment in non-JSON branch only.
+- QX-046: `searchResultBanner` page indicator conditional on `totalPages > 1`; single-page negative assertion correctly isolates the `color:#0066cc` paragraph.
 
-Test files changed:
-- `packages/quay/test/mcp-server.test.mjs` (Block 19: QX-044 assertions)
-- `packages/quay/test/serve.test.mjs` (QX-046 block)
-- `packages/quay/test/cli.test.mjs` (section 22: QX-045 regression test)
+30/30 pass. σ_QX = 42/43 = 0.977 (FINAL).
 
 ---
 
-## §11 Convergence check (iteration 12, PROVISIONAL)
+## §11 Convergence check (iteration 12, FINAL)
 
 - V_meta ≥ 0.80: NO (ceiling 0.26 — arithmetically unreachable without DIR-008 adoption)
 - PAUSE check:
-  - ΔV_11 = +0.031 (reset counter)
-  - ΔV_12 (provisional) ≈ +0.016 (< 0.02 — 1st consecutive)
+  - ΔV_11 = +0.031 (reset counter to 0)
+  - ΔV_12 (FINAL) = +0.002 (< 0.02 — **1st consecutive below threshold**)
   - Consecutive < 0.02 count: **1** (need 2 consecutive to trigger PAUSE)
   - **PAUSE NOT TRIGGERED**
 - Open significant gaps: 0
-- **Status: IN PROGRESS** — awaiting G3 audit + simulated-user pass
+- New minor gaps filed this iteration: UQ-036, CB-021, SH-006 (all minor; no significant gaps among them)
+- **Status: HALT** — Human operator issued explicit stop directive after iteration 12 synthesis. "将对实验设置进行调整" (experiment settings will be adjusted). Per protocol §4.5, this is an externally-imposed HALT distinct from self-assessed PAUSE or CONVERGED.

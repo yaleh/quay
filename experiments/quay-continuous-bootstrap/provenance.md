@@ -8,15 +8,12 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 12 (dev phase — G3 PENDING)_
+_Last updated: iteration 12 (FINAL — HALT)_
 
-- **Latest scores:** see "V-score history (all iterations)" table, iteration 11 row (FINAL from synthesis), for
-  V_instance / ΔV_instance / V_meta / σ_QX. Iteration 12 provisional: V_instance=0.731 (ΔV=+0.016),
-  V_meta=0.154 (ceiling-bound; σ_QX=42/43=0.977 provisional). Update table once G3 co-signs.
+- **Latest scores:** see "V-score history (all iterations)" table, iteration 12 row (FINAL).
+  V_instance=0.717 (ΔV=+0.002), V_meta=0.154 (ceiling-bound; σ_QX=42/43=0.977 FINAL).
 - **Pending directive**: DIR-008 (V_meta redesign) — acknowledged in iteration 12 §0.1, deferred to iteration 13 for dedicated adoption with independent G3 audit of the metric change itself.
-- **Live V_meta re-triggers:** none fired as of iteration 12 dev phase — all 5 re-trigger conditions
-  remain NOT TRIGGERED. DIR-008 deferred; re-triggers will be re-evaluated once DIR-008 is adopted.
-  This field does NOT exist in the V-score history table, so it lives here.
+- **Live V_meta re-triggers:** none fired — all 5 re-trigger conditions remain NOT TRIGGERED. DIR-008 deferred; re-triggers will be re-evaluated once DIR-008 is adopted. This field does NOT exist in the V-score history table, so it lives here.
 - **Standing decisions (do not re-litigate without new evidence):**
   - Gap-list storage: plain markdown file at `experiments/quay-continuous-bootstrap/gap-list.md`
     (decided iteration 0 — see "Gap-list storage decision" in the Iteration 0 record).
@@ -25,7 +22,7 @@ _Last updated: iteration 12 (dev phase — G3 PENDING)_
     "σ_QX-vs-inherited-floor decision" in the Iteration 0 record).
   - V_meta ceiling: 0.26 (1.0 × 0.26 × 1.0 × 1.0, effectiveness-bound; inherited from
     experiment 1, confirmed positively across experiments 2/3 — see Inheritance record below).
-- **Status:** IN PROGRESS (iteration 12, dev phase) — 3 gaps closed (SH-005/CB-020/UQ-035); cumulative: 62; σ_QX=42/43 provisional; V_instance=0.731 provisional (ΔV_12=+0.016, 1st consecutive < 0.02 — PAUSE NOT yet triggered); DIR-008 acknowledged+deferred. G3 + simulated-user PENDING (orchestrator dispatch).
+- **Status:** HALT (iteration 12 FINAL) — human operator issued stop directive after iteration 12 synthesis for experiment setting adjustments. 3 gaps closed (SH-005/CB-020/UQ-035); 3 new minor gaps found in synthesis (UQ-036/CB-021/SH-006); cumulative closed: 62; σ_QX=42/43=0.977; V_instance=0.717 (ΔV=+0.002, 1st consecutive < 0.02 — PAUSE NOT triggered at halt); DIR-008 deferred to next iteration.
 
 ---
 
@@ -595,9 +592,9 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | 9 | 0.669 | +0.033 | 0.154 | 33/34 = 0.971 | 5 gaps closed (CB-008/CB-015/UQ-031/032/033); ENV-001 re-rated significant; synthesis-phase fix: v-prefix bug in release.yml (G3-missed, caught by project-maintainer); G3 PASS-WITH-NOTES; PASS + CONCERNS + CONCERNS simulated-user; cumulative closed=48 |
 | 10 | 0.684 | +0.015 | 0.154 | 36/37 = 0.973 | 6 gaps closed (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034); DIR-007 applied; G3 PASS-WITH-NOTES; 3× PASS simulated-user; no new gaps; cumulative closed=54 |
 | 11 | 0.715 | +0.031 | 0.154 | 39/40 = 0.975 | 5 gaps closed (SH-003/004/UQ-006/007/030); 3 new minor gaps (CB-020/UQ-035/SH-005); G3 PASS-WITH-NOTES; Persona A CONCERNS (serve restart fix), Persona B PASS, Persona C PASS; cumulative closed=59; ΔV_11 > 0.02 resets PAUSE counter |
-| 12 | **0.731** (provisional) | **+0.016** (provisional) | 0.154 | 42/43 = 0.977 (provisional) | 3 gaps closed (SH-005/CB-020/UQ-035); DIR-008 acknowledged+deferred to iter-13; G3 PENDING; cumulative closed=62 (provisional) |
+| 12 | **0.717** | **+0.002** | 0.154 | 42/43 = 0.977 | 3 gaps closed (SH-005/CB-020/UQ-035); 3 new minor gaps (UQ-036/CB-021/SH-006) from synthesis; DIR-008 deferred to iter-13; G3 PASS; cumulative closed=62; **HALT (human-imposed)** |
 
-ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.016(prov). Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12 provisional: 1st consecutive < 0.02 (PAUSE not yet triggered; need 2). Cumulative gaps closed: 62. Iteration 12 G3 + simulated-user PENDING.
+ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002; PAUSE not triggered at HALT — need 2 consecutive). Cumulative gaps closed: 62. HALT after iteration 12.
 
 ---
 
@@ -1336,11 +1333,11 @@ _Date: 2026-07-17_
 
 | Task | author_by | execute_by | gate_by | σ_pending | status | Summary |
 |------|-----------|------------|---------|-----------|--------|---------|
-| QX-041 | native | native | G3 PENDING | 37/40 (pending) | done | stripHeadings() code-block fence tracking; serve.test.mjs QX-041 (3 assertions) |
-| QX-042 | native | native | G3 PENDING | 38/40 (pending) | done | MCP pagination edge cases regression tests; mcp-server.test.mjs Block 18 (9 assertions) |
-| QX-043 | native | native | G3 PENDING | 39/40 (pending) | done | Mobile layout: search before labels; .label-nav-wrap; UQ-007 closed as already-resolved |
+| QX-041 | native | native | G3 PASS-WITH-NOTES | 37/40 | done | stripHeadings() code-block fence tracking; serve.test.mjs QX-041 (3 assertions) |
+| QX-042 | native | native | G3 PASS-WITH-NOTES | 38/40 | done | MCP pagination edge cases regression tests; mcp-server.test.mjs Block 18 (9 assertions) |
+| QX-043 | native | native | G3 PASS-WITH-NOTES | 39/40 | done | Mobile layout: search before labels; .label-nav-wrap; UQ-007 closed as already-resolved |
 
-σ_QX pending = 39/40 = 0.975 (provisional; G3 co-sign awaited).
+σ_QX (FINAL) = 39/40 = 0.975 (G3 PASS-WITH-NOTES co-signed; note: mcp-server.js stale stripHeadings copy filed as SH-005 — not a QX-04x regression, pre-existing miss from QX-041).
 
 ### Files changed (iteration 11, dev phase)
 
@@ -1357,48 +1354,113 @@ Orchestrator to dispatch independent simulated-user agents for iteration 11. Cha
 - `packages/quay/src/serve.js` (Core source change → G3 TRIGGERED)
 - `packages/quay/test/mcp-server.test.mjs` + `serve.test.mjs` (test coverage)
 
-### §8 V_instance (iteration 11, PROVISIONAL — dev phase only)
-
-Provisional estimate before G3/simulated-user pass:
+### §8 V_instance (iteration 11, FINAL)
 
 ```
-V_instance (provisional) = capability_breadth × usability_quality × verification_coverage × system_health
-                         = 0.855 × 0.905 × 0.98 × 0.985
-                         ≈ 0.726
+V_instance (FINAL) = 0.855 × 0.885 × 0.975 × 0.975
+                   ≈ 0.715
 
-ΔV_instance (provisional) = 0.726 − 0.684 = +0.042
+ΔV_instance (FINAL) = 0.715 − 0.684 = +0.031
 ```
 
-Component rationale (provisional):
-- capability_breadth: 0.855 (CB-006 still open; no new CB gaps added)
-- usability_quality: 0.905 (UQ-006/007/030 closed; 3 mobile UX gaps resolved; only ENV-001 minor remaining in UQ-adjacent)
-- verification_coverage: 0.98 (30/30 pass + 14 new test assertions covering SH-003/004 and mobile layout)
-- system_health: 0.985 (SH-003/004 both closed; only ENV-001 minor and CB-006 minor remaining)
+Component rationale (FINAL — after G3 + simulated-user):
+- capability_breadth: 0.855 (CB-006 still open; CB-020 new minor −0.005 from synthesis; no net change from dev-phase estimate)
+- usability_quality: 0.885 (UQ-035 new minor −0.005 from synthesis; UQ-006/007/030 closed as planned)
+- verification_coverage: 0.975 (30/30 pass; 14 dev-phase assertions + synthesis adjustments; G3 PASS-WITH-NOTES)
+- system_health: 0.975 (SH-005 new minor from G3 note −0.005; SH-003/004 closed; ENV-001 minor)
 
-Note: These are preliminary estimates. G3 + simulated-user may revise up/down.
+Note: dev-phase provisional was 0.726/+0.042. Synthesis-found gaps (CB-020, UQ-035, SH-005 — all minor) revised components down. FINAL = 0.715 (+0.031 > 0.02, resets PAUSE counter from 1 to 0).
 
-### §9 V_meta (iteration 11, PROVISIONAL)
+### §9 V_meta (iteration 11, FINAL)
 
-σ_QX provisional = 39/40 = 0.975 (3 new tasks co-signed pending G3).
+σ_QX (FINAL) = 39/40 = 0.975 (G3 PASS-WITH-NOTES co-signed).
 
 ```
-V_meta (provisional) = 0.77 × 0.26 × 0.79 × 0.975
-                     = 0.158 × 0.975
-                     ≈ 0.154
+V_meta (FINAL) = 0.77 × 0.26 × 0.79 × 0.975 ≈ 0.154
+ΔV_meta = 0.000 (ceiling-bound)
 ```
-ΔV_meta (provisional) = 0.154 − 0.154 = 0.000 (ceiling-bound; σ_QX change from 0.973 to 0.975 is arithmetically negligible at the ceiling).
 
-### §10 PENDING: G3 audit
+### §10 G3 audit (iteration 11, FINAL)
 
-G3 TRIGGERED — Core source file `packages/quay/src/serve.js` changed. Orchestrator to dispatch independent G3 audit subagent.
+G3 PASS-WITH-NOTES. QX-041/042/043 co-signed. Note: mcp-server.js has independent inline stripHeadings() copy not updated by QX-041 → filed as SH-005 minor gap.
+See `audits/iteration-11-adjudicate.md`.
 
-### §11 Convergence check (iteration 11, PROVISIONAL)
+### §11 Convergence check (iteration 11, FINAL)
+
+- V_meta ≥ 0.80: NO (ceiling 0.26)
+- PAUSE: ΔV_10 = +0.015 (below; 1st), ΔV_11 = +0.031 (above → **resets consecutive counter to 0**)
+- **PAUSE NOT TRIGGERED** — ΔV_11 > 0.02
+- **Status: CONTINUING** → iteration 12
+
+---
+
+## Iteration 12 record (quay-continuous-bootstrap, experiment 4, FINAL)
+
+_Date: 2026-07-17_
+
+### §3–§5 Summary
+
+Selected gaps: SH-005 + CB-020 + UQ-035 (all minor, well-scoped).
+
+| Task | author_by | execute_by | gate_by | σ contribution | status | Summary |
+|------|-----------|------------|---------|----------------|--------|---------|
+| QX-044 | native | native | G3 PASS | 40/43 | done | mcp-server.js stripHeadings() updated with inFence state tracking; mcp-server.test.mjs Block 19 (2 assertions: FENCE-1 positive, FENCE-2 negative). Closes SH-005. |
+| QX-045 | native | native | G3 PASS | 41/43 | done | CB-020 investigated: --json path already routes through printJson() only; `# filtered:` comment in non-JSON branch only. No source change. Regression test added: cli.test.mjs section 22 (3 assertions). Closes CB-020 as confirmed-correct. |
+| QX-046 | native | native | G3 PASS | 42/43 | done | searchResultBanner in serve.js: `· Page X of Y` suffix appended when totalPages > 1. serve.test.mjs QX-046 block (5 assertions: page 1 of 2, page 2 of 2, single-page no suffix). Closes UQ-035. |
+
+σ_QX (FINAL) = 42/43 = 0.977 (G3 PASS co-signed all 3 tasks; QX-001 remains seed).
+
+### §7 Simulated-user + G3 (iteration 12, FINAL)
+
+- G3 PASS — QX-044/045/046 all co-signed; 30/30 pass; σ_QX = 42/43 = 0.977. See `audits/iteration-12-adjudicate.md`.
+- Persona A (MCP AI consumer): PASS — inFence fix byte-identical to serve.js canonical; Block 19 assertions correct; _version field + Version: prefix intact.
+- Persona B (Web UI search): CONCERNS (serve stale) → serve restarted in synthesis (synthesis-phase fix); QX-046 changes now live. New gap: UQ-036 (pageNav "Page 1 of 1" redundant on single-page — pre-existing iter-8 element, not QX-046 regression).
+- Persona C (CLI scripting): PASS — --json and --format json both verified; section 22 tests pass. New gaps: CB-021 (--format json silently ignored), SH-006 (stderr leak from quay-native startup).
+
+New gaps from synthesis: UQ-036 (minor), CB-021 (minor), SH-006 (minor). Synthesis-phase fix: serve restarted.
+
+### §8 V_instance (iteration 12, FINAL)
+
+```
+V_instance (FINAL) = 0.850 × 0.885 × 0.977 × 0.975
+                   ≈ 0.717
+
+ΔV_instance (FINAL) = 0.717 − 0.715 = +0.002
+```
+
+Component rationale: closed-gap credits and synthesis-found-gap debits wash in capability_breadth (CB-020 +0.005, CB-021 −0.005), usability_quality (UQ-035 +0.005, UQ-036 −0.005), and system_health (SH-005 +0.005, SH-006 −0.005); verification_coverage rose from 0.975 to 0.977 (+10 new assertions).
+
+### §9 V_meta (iteration 12, FINAL)
+
+```
+V_meta (FINAL) = 0.77 × 0.26 × 0.79 × 0.977 ≈ 0.154
+ΔV_meta = 0.000 (ceiling-bound)
+```
+σ_QX = 42/43 = 0.977 (FINAL).
+
+### §11 Convergence check (iteration 12, FINAL)
 
 - V_meta ≥ 0.80: NO (ceiling 0.26 — arithmetically unreachable)
-- PAUSE check:
-  - ΔV_10 = +0.015 (below 0.02, 1st consecutive)
-  - ΔV_11 (provisional) = +0.042 (above 0.02 — if confirmed, RESETS the consecutive counter)
-  - If G3/simulated-user confirm ΔV_11 ≥ 0.02: PAUSE NOT TRIGGERED (counter reset to 0)
-  - If G3/simulated-user revise down to < 0.02: PAUSE threshold consecutive count = 2 → TRIGGERED
+- PAUSE: ΔV_11 = +0.031 (reset counter), ΔV_12 = +0.002 → **1st consecutive < 0.02**; consecutive count = 1 (need 2)
+- **PAUSE NOT TRIGGERED**
+- **Status: HALT** — Human operator issued stop directive after iteration 12 synthesis. "将对实验设置进行调整" (experiment settings will be adjusted). Per protocol §4.5, externally-imposed HALT.
+
+---
+
+## HALT note (2026-07-17, after iteration 12)
+
+Human operator issued explicit HALT directive after iteration 12 synthesis.
+Reason: "在当前迭代结束后中止迭代。我们将对实验设置进行调整。" (stop after this iteration; experiment settings will be adjusted).
+
+Per protocol §4.5, this is an externally-imposed HALT — distinct from self-assessed PAUSE (2+ consecutive ΔV < 0.02 AND no new significant gap, not yet triggered) or CONVERGED (V_meta ≥ 0.80, arithmetically unreachable).
+
+**Final provenance state at HALT (iteration 12)**:
+- Total QX-* tasks: 43 (QX-001..QX-046)
+- Native (σ_QX numerator): 42 (QX-002..QX-046 all native; QX-001 seed)
+- σ_QX = 42/43 = 0.977
+- V_instance = 0.717 (cap_breadth=0.850, usability=0.885, verif=0.977, health=0.975)
+- V_meta = 0.154 (completeness=0.77, effectiveness=0.26, reusability=0.79, validation=0.977)
+- Cumulative gaps closed: 62
 - Open significant gaps: 0
-- **Status: IN PROGRESS** — awaiting G3 audit + simulated-user pass
+- PAUSE consecutive count at HALT: 1 (ΔV_12 = +0.002 < 0.02; counter would need 1 more consecutive to trigger PAUSE)
+- Pending directive: DIR-008 (V_meta redesign) — deferred to next iteration
