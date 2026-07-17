@@ -8,13 +8,14 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 11 (dev phase — G3 PENDING)_
+_Last updated: iteration 12 (dev phase — G3 PENDING)_
 
-- **Latest scores:** see "V-score history (all iterations)" table, iteration 10 row (FINAL), for
-  V_instance / ΔV_instance / V_meta / σ_QX. Iteration 11 provisional: V_instance=0.726 (ΔV=+0.042),
-  V_meta=0.154 (ceiling-bound; σ_QX=39/40 provisional). Update table once G3 co-signs.
-- **Live V_meta re-triggers:** none fired as of iteration 11 dev phase — all 5 re-trigger conditions
-  remain NOT TRIGGERED (status unchanged through iteration 11, "effectiveness frozen; unchanged").
+- **Latest scores:** see "V-score history (all iterations)" table, iteration 11 row (FINAL from synthesis), for
+  V_instance / ΔV_instance / V_meta / σ_QX. Iteration 12 provisional: V_instance=0.731 (ΔV=+0.016),
+  V_meta=0.154 (ceiling-bound; σ_QX=42/43=0.977 provisional). Update table once G3 co-signs.
+- **Pending directive**: DIR-008 (V_meta redesign) — acknowledged in iteration 12 §0.1, deferred to iteration 13 for dedicated adoption with independent G3 audit of the metric change itself.
+- **Live V_meta re-triggers:** none fired as of iteration 12 dev phase — all 5 re-trigger conditions
+  remain NOT TRIGGERED. DIR-008 deferred; re-triggers will be re-evaluated once DIR-008 is adopted.
   This field does NOT exist in the V-score history table, so it lives here.
 - **Standing decisions (do not re-litigate without new evidence):**
   - Gap-list storage: plain markdown file at `experiments/quay-continuous-bootstrap/gap-list.md`
@@ -24,7 +25,7 @@ _Last updated: iteration 11 (dev phase — G3 PENDING)_
     "σ_QX-vs-inherited-floor decision" in the Iteration 0 record).
   - V_meta ceiling: 0.26 (1.0 × 0.26 × 1.0 × 1.0, effectiveness-bound; inherited from
     experiment 1, confirmed positively across experiments 2/3 — see Inheritance record below).
-- **Status:** IN PROGRESS (iteration 11, dev phase) — 5 gaps closed (SH-003/004, UQ-006/007/030); cumulative: 59; σ_QX=39/40 provisional; V_instance=0.726 provisional (ΔV_11=+0.042); PAUSE check: ΔV_11 provisional > 0.02 — counter reset to 0 if confirmed. G3 + simulated-user PENDING (orchestrator dispatch).
+- **Status:** IN PROGRESS (iteration 12, dev phase) — 3 gaps closed (SH-005/CB-020/UQ-035); cumulative: 62; σ_QX=42/43 provisional; V_instance=0.731 provisional (ΔV_12=+0.016, 1st consecutive < 0.02 — PAUSE NOT yet triggered); DIR-008 acknowledged+deferred. G3 + simulated-user PENDING (orchestrator dispatch).
 
 ---
 
@@ -593,8 +594,10 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | 8 | 0.636 | +0.035 | 0.153 | 30/31 = 0.968 | 3 gaps closed (CB-010/CB-014/UQ-008); 2 new minor gaps (ENV-001/SH-004); G3 PASS-WITH-NOTES; 2× PASS + 1× FAIL (ENV, not code defect) simulated-user; cumulative closed=43 |
 | 9 | 0.669 | +0.033 | 0.154 | 33/34 = 0.971 | 5 gaps closed (CB-008/CB-015/UQ-031/032/033); ENV-001 re-rated significant; synthesis-phase fix: v-prefix bug in release.yml (G3-missed, caught by project-maintainer); G3 PASS-WITH-NOTES; PASS + CONCERNS + CONCERNS simulated-user; cumulative closed=48 |
 | 10 | 0.684 | +0.015 | 0.154 | 36/37 = 0.973 | 6 gaps closed (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034); DIR-007 applied; G3 PASS-WITH-NOTES; 3× PASS simulated-user; no new gaps; cumulative closed=54 |
+| 11 | 0.715 | +0.031 | 0.154 | 39/40 = 0.975 | 5 gaps closed (SH-003/004/UQ-006/007/030); 3 new minor gaps (CB-020/UQ-035/SH-005); G3 PASS-WITH-NOTES; Persona A CONCERNS (serve restart fix), Persona B PASS, Persona C PASS; cumulative closed=59; ΔV_11 > 0.02 resets PAUSE counter |
+| 12 | **0.731** (provisional) | **+0.016** (provisional) | 0.154 | 42/43 = 0.977 (provisional) | 3 gaps closed (SH-005/CB-020/UQ-035); DIR-008 acknowledged+deferred to iter-13; G3 PENDING; cumulative closed=62 (provisional) |
 
-ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015. Iteration 10: first iteration below 0.02 threshold (ΔV=+0.015); ΔV_9 was +0.033 (above); PAUSE NOT triggered (need 2 consecutive below threshold). Cumulative gaps closed: 54. Iteration 11 recommended.
+ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.016(prov). Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12 provisional: 1st consecutive < 0.02 (PAUSE not yet triggered; need 2). Cumulative gaps closed: 62. Iteration 12 G3 + simulated-user PENDING.
 
 ---
 

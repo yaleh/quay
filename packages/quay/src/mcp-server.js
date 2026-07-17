@@ -164,8 +164,18 @@ export async function startMcpServer() {
   // importing from serve.js or bin/quay.js would create cross-entry-point
   // dependencies that don't exist anywhere else in this package. The
   // implementation is identical in all three locations by design.
+  //
+  // QX-041 (experiment 4, iteration 11) added inFence tracking to serve.js
+  // to preserve `# comment` lines inside fenced code blocks from being
+  // stripped. QX-044 (experiment 4, iteration 12) syncs that fix here
+  // (SH-005: the mcp-server.js inline copy was not updated by QX-041).
   function stripHeadings(text) {
-    return (text || "").split("\n").filter((line) => !/^#+\s/.test(line)).join(" ");
+    let inFence = false;
+    return (text || "").split("\n").filter((line) => {
+      if (/^```/.test(line)) { inFence = !inFence; return true; }
+      if (inFence) return true; // preserve code content (including # comment lines)
+      return !/^#+\s/.test(line); // strip structural headings outside fences
+    }).join(" ");
   }
 
   // task_list — aggregates/proxies task_list against one Provider, selected

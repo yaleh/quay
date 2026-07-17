@@ -700,8 +700,14 @@ export async function startServer({ port = 4173 } = {}) {
       // QX-034 (experiment 4, iteration 9): UQ-031 — when ?q= is active, show
       // "Showing N results for 'query'" to acknowledge the search is active and
       // how many results matched, without needing to count rows manually.
+      //
+      // QX-046 (experiment 4, iteration 12): UQ-035 — when search results span
+      // multiple pages, users could not tell which page they were on or that a
+      // page 2 existed from the banner alone. Add "· Page X of Y" suffix when
+      // totalPages > 1 so the pagination context is visible in the banner itself,
+      // not only in the page navigation links below the table.
       const searchResultBanner = qFilter
-        ? html`<p class="meta" style="color:#0066cc">Showing ${totalTasks} results for &ldquo;${escapeHtml(qFilter)}&rdquo;</p>`
+        ? html`<p class="meta" style="color:#0066cc">Showing ${totalTasks} results for &ldquo;${escapeHtml(qFilter)}&rdquo;${totalPages > 1 ? ` · Page ${safePage} of ${totalPages}` : ""}</p>`
         : "";
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html`<!doctype html>

@@ -1260,6 +1260,82 @@ async function main() {
     fs.rmSync(qx42WorkspaceRoot, { recursive: true, force: true });
   }
 
+  // ---- Block 19: QX-044 (experiment 4, iteration 12) — mcp-server.js inFence fix (SH-005) ----
+  //
+  // QX-041 (iteration 11) fixed serve.js's stripHeadings() to track inFence state so that
+  // `# comment` lines inside fenced code blocks are NOT stripped from the search index.
+  // SH-005 (G3 audit, iteration 11) found that mcp-server.js's INLINE copy of stripHeadings()
+  // was not updated by QX-041 — the MCP task_list search still stripped # lines inside fences.
+  // QX-044 syncs the fix to mcp-server.js.
+  //
+  // Fixture: a workspace with 2 tasks —
+  //   FENCE-1: body contains `# bash-comment-token` INSIDE a fenced code block
+  //            → search for "bash-comment-token" must MATCH (not stripped in fence)
+  //   FENCE-2: body has `## Proposal-outside-fence` heading OUTSIDE any fence
+  //            → search for "Proposal-outside-fence" must NOT MATCH (heading stripped)
+  {
+    const qx44TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-qx44-tasks-"));
+    const qx44WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-qx44-workspace-"));
+    fs.mkdirSync(path.join(qx44WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx44WorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir}"`,
+        `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${qx44TasksDir}"`,
+        "",
+      ].join("\n")
+    );
+
+    // FENCE-1: body has a fenced code block containing "# bash-comment-token"
+    execFileSync("node", [nativeBin, "task", "create", "FENCE-1",
+      "--title", "Task with fenced code block",
+      "--status", "todo",
+      "--body", "## Proposal\nSome prose.\n```bash\n# bash-comment-token\necho hello\n```\n## AC\n- [x] done\n## DoD\n- [x] done\n"],
+      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx44TasksDir } });
+
+    // FENCE-2: body has a heading outside any fence — "## Proposal-outside-fence"
+    execFileSync("node", [nativeBin, "task", "create", "FENCE-2",
+      "--title", "Task with heading outside fence",
+      "--status", "todo",
+      "--body", "## Proposal-outside-fence\nSome prose.\n## AC\n- [x] done\n## DoD\n- [x] done\n"],
+      { env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx44TasksDir } });
+
+    const { client: coreQx44, transport: coreQx44Transport } = await connectStdio(
+      "node", [coreBin, "mcp"], qx44WorkspaceRoot
+    );
+
+    // Positive: "bash-comment-token" is inside a fenced code block — must be findable
+    {
+      const r = await coreQx44.callTool({ name: "task_list", arguments: { search: "bash-comment-token" } });
+      assert(r.isError !== true, "task_list search='bash-comment-token' returns no error (QX-044, SH-005)");
+      const ids = (r.structuredContent?.tasks ?? []).map((t) => t.id);
+      assert(
+        ids.includes("FENCE-1"),
+        `task_list search='bash-comment-token': FENCE-1 IS found (# inside fence not stripped) (SH-005, QX-044). Got: [${ids.join(", ")}]`
+      );
+    }
+
+    // Negative: "Proposal-outside-fence" is a ## heading outside any fence — must NOT be findable
+    {
+      const r = await coreQx44.callTool({ name: "task_list", arguments: { search: "Proposal-outside-fence" } });
+      assert(r.isError !== true, "task_list search='Proposal-outside-fence' returns no error (QX-044, SH-005)");
+      const ids = (r.structuredContent?.tasks ?? []).map((t) => t.id);
+      assert(
+        !ids.includes("FENCE-2"),
+        `task_list search='Proposal-outside-fence': FENCE-2 is NOT found (heading outside fence IS stripped) (SH-005, QX-044). Got: [${ids.join(", ")}]`
+      );
+    }
+
+    await coreQx44Transport.close();
+    fs.rmSync(qx44TasksDir, { recursive: true, force: true });
+    fs.rmSync(qx44WorkspaceRoot, { recursive: true, force: true });
+  }
+
   // ---- Cleanup ----
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
   fs.rmSync(tasksDirA, { recursive: true, force: true });

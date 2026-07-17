@@ -1390,6 +1390,98 @@ async function main() {
     }
   }
 
+  // ---- QX-046 (experiment 4, iteration 12) block — search banner page indicator (UQ-035) ----
+  //
+  // When ?q= is active and results span multiple pages, the search result banner should show
+  // "Showing N results for 'query' · Page X of Y" (page indicator suffix).
+  // When results fit on one page, the banner should show "Showing N results for 'query'" (no suffix).
+  //
+  // Fixture: a workspace with 25 tasks all having "xyzzy-qx46" in title (to ensure all match
+  // the search query). PAGE_SIZE=20, so 25 tasks → 2 pages. Page 1 should show "Page 1 of 2",
+  // page 2 should show "Page 2 of 2". A search returning ≤20 results should NOT show page indicator.
+  {
+    const qx46TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-qx46-tasks-"));
+    const qx46WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-qx46-workspace-"));
+    fs.mkdirSync(path.join(qx46WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx46WorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx46TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}","mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx46TasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    const envOverride46 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx46TasksDir };
+
+    // Create 25 tasks matching "xyzzy-qx46" in title
+    for (let i = 1; i <= 25; i++) {
+      const id = `PGSRCH-${String(i).padStart(2, "0")}`;
+      execFileSync("node", [nativeBin, "task", "create", id,
+        "--title", `xyzzy-qx46 task ${i}`,
+        "--status", "todo"],
+        { env: envOverride46 });
+    }
+
+    let qx46Server = null;
+    const qx46OrigCwd = process.cwd();
+    try {
+      process.chdir(qx46WorkspaceRoot);
+      const qx46Port = port + 14;
+      qx46Server = await startServer({ port: qx46Port });
+
+      // Page 1: search returns 25 results across 2 pages → banner shows "Page 1 of 2"
+      const page1Resp = await get(qx46Port, "/?q=xyzzy-qx46&page=1");
+      assert(page1Resp.status === 200, "GET /?q=xyzzy-qx46&page=1 returns 200 (QX-046 setup)");
+      assert(
+        page1Resp.body.includes("Showing 25 results"),
+        `Page 1 search banner shows total count (QX-046, UQ-035). body snippet: ${page1Resp.body.slice(0, 500)}`
+      );
+      assert(
+        page1Resp.body.includes("Page 1 of 2"),
+        `Page 1 search banner shows '· Page 1 of 2' indicator when results span 2 pages (QX-046, UQ-035). body snippet: ${page1Resp.body.slice(0, 500)}`
+      );
+
+      // Page 2: banner shows "Page 2 of 2"
+      const page2Resp = await get(qx46Port, "/?q=xyzzy-qx46&page=2");
+      assert(page2Resp.status === 200, "GET /?q=xyzzy-qx46&page=2 returns 200 (QX-046)");
+      assert(
+        page2Resp.body.includes("Page 2 of 2"),
+        `Page 2 search banner shows '· Page 2 of 2' indicator (QX-046, UQ-035). body snippet: ${page2Resp.body.slice(0, 500)}`
+      );
+
+      // Single-page search (only 1 task matches unique term) → banner has NO page indicator
+      // "xyzzy-qx46-unique-singleton" only appears in PGSRCH-01's title (add it now)
+      execFileSync("node", [nativeBin, "task", "create", "PGSRCH-SINGLE",
+        "--title", "xyzzy-qx46-unique-singleton task",
+        "--status", "todo"],
+        { env: envOverride46 });
+
+      const singleResp = await get(qx46Port, "/?q=xyzzy-qx46-unique-singleton");
+      assert(singleResp.status === 200, "GET /?q=xyzzy-qx46-unique-singleton returns 200 (QX-046 single-page)");
+      // Extract the search result banner (the blue p.meta element with color:#0066cc)
+      // to verify it does NOT contain the "· Page X of Y" suffix when totalPages=1.
+      // NOTE: pageNav separately renders "Page 1 of 1 (N tasks)" on the page — that is
+      // expected and is not the element being tested here. We test that the BANNER itself
+      // (the "Showing N results for…" paragraph) has no page indicator when 1 page.
+      const singleBannerMatch = singleResp.body.match(/<p[^>]*color:#0066cc[^>]*>([^<]*)<\/p>/);
+      const singleBannerText = singleBannerMatch ? singleBannerMatch[0] : "";
+      assert(
+        singleBannerText.includes("Showing 1 results") || singleBannerText.includes("Showing 1 result"),
+        `Single-page search banner shows 1 result (QX-046, UQ-035). banner: ${singleBannerText}`
+      );
+      assert(
+        !singleBannerText.includes("Page") && !singleBannerText.includes("·"),
+        `Single-page search banner does NOT contain page indicator when totalPages=1 (QX-046, UQ-035). banner: ${singleBannerText}`
+      );
+
+    } finally {
+      if (qx46Server) {
+        qx46Server.close();
+        if (qx46Server.client) await qx46Server.client.close();
+      }
+      process.chdir(qx46OrigCwd);
+      fs.rmSync(qx46TasksDir, { recursive: true, force: true });
+      fs.rmSync(qx46WorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
   console.log(failures === 0 ? "\nAll QN-031 serve/action regression tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }

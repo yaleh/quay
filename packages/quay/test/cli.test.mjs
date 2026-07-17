@@ -1401,6 +1401,86 @@ async function main() {
     fs.rmSync(qx37WorkspaceRoot, { recursive: true, force: true });
   }
 
+  // 22. QX-045 (experiment 4, iteration 12): CB-020 — `--prefix X --json` must emit
+  //     valid JSON (no `# filtered:` comment before the array).
+  //
+  //     CB-020 was filed (simulated-user, iteration 11) because the `# filtered: QX-* (N tasks)`
+  //     comment in non-JSON mode confused automated consumers who may have expected JSON.
+  //     The `--json` path already routes through printJson() (no comment emitted), but this
+  //     test regression-locks that invariant so it cannot regress if the branching logic changes.
+  //
+  //     Assertions:
+  //       (a) `--prefix X --json`: stdout is valid JSON with JSON.parse() (no comment line)
+  //       (b) `--json` without prefix: stdout is valid JSON (baseline)
+  //       (c) `--prefix X` WITHOUT --json: stdout contains `# filtered:` (human-readable comment preserved)
+  {
+    const qx45TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-qx45-tasks-"));
+    const qx45WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-qx45-workspace-"));
+    fs.mkdirSync(path.join(qx45WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx45WorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${qx45TasksDir.replaceAll("\\", "\\\\")}"`,
+        "",
+      ].join("\n")
+    );
+    const spawnOpts45 = { cwd: qx45WorkspaceRoot, encoding: "utf8" };
+    const env45 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx45TasksDir };
+
+    // Seed two tasks: one with prefix QX, one without
+    execFileSync("node", [nativeBin, "task", "create", "QX-T1", "--title", "QX prefix task", "--status", "todo"],
+      { env: env45 });
+    execFileSync("node", [nativeBin, "task", "create", "OTHER-1", "--title", "Other prefix task", "--status", "todo"],
+      { env: env45 });
+
+    // (a) --prefix QX --json must produce valid JSON (no # filtered: comment)
+    {
+      const r = run(["task", "list", "--prefix", "QX", "--json"], spawnOpts45);
+      assert(r.status === 0, "quay task list --prefix QX --json exits 0 (QX-045, CB-020)");
+      let tasks = null;
+      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+      assert(
+        Array.isArray(tasks),
+        `quay task list --prefix QX --json stdout is valid JSON array (no # comment prefix) (QX-045, CB-020). stdout: ${r.stdout.slice(0, 200)}`
+      );
+      assert(
+        tasks !== null && tasks.some((t) => t.id === "QX-T1"),
+        "quay task list --prefix QX --json includes QX-T1 (QX-045, CB-020)"
+      );
+    }
+
+    // (b) --json without prefix: stdout is valid JSON
+    {
+      const r = run(["task", "list", "--json"], spawnOpts45);
+      assert(r.status === 0, "quay task list --json exits 0 (QX-045 baseline)");
+      let tasks = null;
+      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+      assert(
+        Array.isArray(tasks) && tasks.length === 2,
+        `quay task list --json (no prefix) is valid JSON with 2 tasks (QX-045, CB-020). got: ${r.stdout.slice(0, 200)}`
+      );
+    }
+
+    // (c) --prefix QX WITHOUT --json: stdout includes # filtered: comment for human use
+    {
+      const r = run(["task", "list", "--prefix", "QX"], spawnOpts45);
+      assert(r.status === 0, "quay task list --prefix QX (non-JSON) exits 0 (QX-045 non-json path)");
+      assert(
+        r.stdout.includes("# filtered:"),
+        `quay task list --prefix QX (non-JSON) includes '# filtered:' header for human use (QX-045, CB-020). stdout: ${r.stdout.slice(0, 200)}`
+      );
+    }
+
+    fs.rmSync(qx45TasksDir, { recursive: true, force: true });
+    fs.rmSync(qx45WorkspaceRoot, { recursive: true, force: true });
+  }
+
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 
