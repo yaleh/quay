@@ -240,16 +240,39 @@ node --test experiments/quay-continuous-bootstrap/worktrees/iteration-18/package
 
 ## 7. Simulated-user pass (§0c — every iteration)
 
-**PENDING — dispatched by orchestrator (not this executor's session).**
+**COMPLETE — 4 audits: G3 (adjudicate), Persona A (new-user-readme), Persona B (methodology-surface), Persona C (package-final).**
 
-Per §0c discipline: the simulated-user pass is dispatched by the orchestrator using the native Agent/Task tool (run_in_background=true, fresh context). It must NOT be dispatched via manda and must NOT be the same session that did the development work.
+### G3 (adjudicate): PASS-WITH-NOTES
+- 12/12 tests, 0 failures.
+- QX-064 (README.md): PASS — substantive 163 lines, ghost entry resolved.
+- QX-065 (TST-003/004): PASS — assertions correctly anchored (href-based extraction).
+- PKG-007 (LICENSE ghost): noted as pre-existing carry-forward gap, remains open.
+- σ_QX = 61/63 = 0.968. Gate OPEN.
+- transfer_breadth = 1.0: DEFENSIBLE (both rubric criteria met; packaging-fix framing is a nuance, not a disqualifier).
 
-This section will be completed by the orchestrator's simulated-user report. Planned personas (diversity per §0c guidance, varied from iteration 17):
-- **Comparison-to-mature-tool reviewer**: holds quay up against a comparable tool (e.g. Linear, Jira Lite) and asks what affordances are missing that users would expect.
-- **First-time-installer persona**: uses the new `packages/quay/README.md` as their primary onboarding document and attempts installation and first-use.
-- **MCP power-user**: exercises `task_list` pagination, search, and multi-label filter through the MCP interface.
+### Persona A (new-user-readme): PARTIAL
+README is accurate but incomplete. Gaps found (all minor/low):
+- **DOC-001** (minor): README missing `--provider <id>` flag — undocumented for multi-provider workspaces.
+- **DOC-002** (minor): README missing `action list` / `action run` commands (present in root README).
+- **DOC-003** (minor): README missing `task view` / `task edit` commands.
+- **DOC-004** (low): Config section appears after usage examples — new users will attempt `quay task list` before creating a config and get an error.
+- **DOC-005** (low): No GitHub releases URL in Option A install instructions (just says "the GitHub releases page").
 
-Findings from this pass will seed gap-list entries for iteration 19 if blocking/significant gaps are found.
+### Persona B (methodology-surface): PASS
+- transfer_breadth = 1.0: DEFENSIBLE confirmed.
+- strategy_completeness item 6: NOT EXERCISED — 0.83 confirmed.
+- Gap-list accuracy: PASS (TST-003/004/PKG-006 closed; PKG-007 open).
+
+### Persona C (package-final): PARTIAL
+- PKG-007 (LICENSE ghost): MINOR — confirmed. File missing from disk; npm artifact will omit LICENSE.
+- **PKG-008** (minor): No `"license"` field in `package.json` — npm will warn on publish.
+- **PKG-009** (minor): `"private": true` blocks npm registry publish. Note: CB-008 used GitHub release artifact, not npm registry. Classified as **minor** — intentional for current delivery model, but a blocker if npm registry publishing is ever pursued.
+
+### Synthesis summary
+- New gaps: DOC-001..005 (5, all minor/low), PKG-008 (minor), PKG-009 (minor) — 7 new.
+- No new significant/blocking gaps found.
+- All simulated-user verdicts: PASS-WITH-NOTES (G3), PARTIAL (A), PASS (B), PARTIAL (C).
+- Open gap count: 3 (ENV-001, SH-006, PKG-007) + 7 new = 10 total open.
 
 ---
 
@@ -263,14 +286,14 @@ Evidence: PKG-006 closed (README.md now exists in artifact; ghost entry resolved
 Score rationale: 0.925 is a modest improvement from 0.920. PKG-007 (found same iteration) offsets the PKG-006 closure partially.
 
 ### usability_quality
-Score: **0.942** (ΔV: +0.002 from 0.940)
+Score: **0.940** (ΔV: +0.000 — flat vs. 0.940; minor deduction from provisional 0.942 for DOC-004 ordering issue and DOC-001..003 missing commands)
 
 Evidence:
 - TST-003/004 fix (QX-065): improved test precision means the test suite now better guards the pageSize feature. This is a verification improvement that supports usability_quality confidence.
 - QX-064 README: users can now discover the tool's full feature set (CLI flags, Web UI, MCP setup) from the package artifact itself. This is a genuine usability improvement for the first-time-install experience.
-- No simulated-user verdicts yet (pending orchestrator dispatch).
+- Simulated-user (Persona A PARTIAL): DOC-001..005 gaps found. Config ordering (DOC-004) creates a new-user friction path; missing commands (DOC-002/003) leave the CLI surface incomplete in the package README.
 
-Score rationale: 0.942 — small increment from better test coverage and the README improving discoverability.
+Score rationale: 0.940 — minor deduction from 0.942 provisional for DOC gaps; the README improvement is real but not complete enough to hold the provisional increment.
 
 ### verification_coverage
 Score: **0.993** (ΔV: +0.003 from 0.990)
@@ -285,39 +308,41 @@ Evidence:
 Score rationale: 0.993 — marginal improvement from 2 new/improved assertions covering the pageSize navigation contract more precisely.
 
 ### system_health
-Score: **0.978** (ΔV: +0.006 from 0.972)
+Score: **0.972** (ΔV: +0.000 — flat vs. 0.972; slight deduction from provisional 0.978 for PKG-007/008 packaging gaps)
 
 Evidence:
 - 12/12 test suites pass, 0 failures.
 - PKG-006 resolved — npm artifact now ships README.md; one fewer packaging inconsistency.
-- PKG-007 found (minor): LICENSE ghost entry — same class as PKG-006, not blocking.
+- PKG-007 confirmed open (minor): LICENSE ghost entry — same class as PKG-006, not blocking.
+- PKG-008 found (minor, synthesis): no `"license"` field in `package.json` — npm publish warning.
 - No regression against experiment 1/2/3 inherited snapshots confirmed.
 - ENV-001 and SH-006 remain open (deferred, known characteristics).
 
-Score rationale: 0.978 — modest improvement from PKG-006 resolution; PKG-007 discovery (minor) does not materially degrade health.
+Score rationale: 0.972 — hold vs. prior iteration. PKG-006 resolution offsets PKG-007/008 new packaging gaps; net health improvement is neutral.
 
-### Total V_instance (provisional, §7 PENDING G3/simulated-user)
+### Total V_instance (FINAL)
 
 ```
 V_instance = capability_breadth × usability_quality × verification_coverage × system_health
-           = 0.925 × 0.942 × 0.993 × 0.978
+           = 0.925 × 0.940 × 0.993 × 0.972
 
-0.925 × 0.942  = 0.87135
-0.87135 × 0.993 = 0.86545
-0.86545 × 0.978 = 0.84641
+0.925 × 0.940  = 0.86950
+0.86950 × 0.993 = 0.86361
+0.86361 × 0.972 = 0.83943
 
-V_instance ≈ 0.846
+V_instance ≈ 0.839
 
-ΔV_instance = 0.846 − 0.832 = +0.014 (provisional)
+ΔV_instance = 0.839 − 0.832 = +0.007 (FINAL)
 ```
 
-**Cumulative gaps closed (monotonic counter): 94** (adds PKG-006, TST-003, TST-004; PKG-007 newly found offsets one)
+Note: revised down from provisional 0.846 (usability_quality 0.942→0.940 for DOC gaps; system_health 0.978→0.972 for PKG-007/008).
+
+**Cumulative gaps closed (monotonic counter): 94** (adds PKG-006, TST-003, TST-004; PKG-007/008/009 and DOC-001..005 are new synthesis findings)
 
 Gap-list composition before vs. after:
-- Before: 5 open (ENV-001, SH-006, TST-003, TST-004, PKG-006)
-- Closed this iteration: TST-003, TST-004, PKG-006
-- New this iteration: PKG-007
-- After: 3 open (ENV-001, SH-006, PKG-007)
+- Before (development phase): 3 open (ENV-001, SH-006, PKG-007)
+- New from synthesis: DOC-001, DOC-002, DOC-003, DOC-004, DOC-005, PKG-008, PKG-009
+- After (FINAL): 10 open (ENV-001, SH-006, PKG-007, PKG-008, PKG-009, DOC-001, DOC-002, DOC-003, DOC-004, DOC-005)
 
 ---
 
@@ -346,7 +371,7 @@ Score: **0.83** (5/6, unchanged)
 Score: 5/6 = **0.83** (unchanged).
 
 ### `transfer_breadth`
-Score: **1.0** (PROVISIONAL — up from 0.80)
+Score: **1.0** (FINAL — confirmed by G3 and Persona B)
 
 Surface audit:
 1. **CLI** — methodology-driven changes: **YES** (QX-002/QX-005/QX-006/QX-022/QX-058/QX-060 across iterations; CLI is well-covered)
@@ -356,22 +381,20 @@ Surface audit:
 5. **Docs** — methodology-driven changes: **YES** (QX-064, this iteration). QX-064 is:
    - Gap-sourced: simulated-user (Persona C, PKG-006, iteration 17 synthesis)
    - Executed: native QX-064 task, authored and completed via native methodology path
-   - Content: comprehensive README.md covering CLI/Web UI/MCP/installation (not a stub)
-   - Per rubric: "at least one methodology-driven change (gap sourced from simulated-user or directive lifecycle, QX task authored and executed via native methodology path) been made?" — **YES**.
+   - Content: comprehensive README.md covering CLI/Web UI/MCP/installation (163 lines, not a stub)
+   - Per rubric: "at least one methodology-driven change ... been made?" — **YES**.
 
-Score: 5/5 = **1.0** (provisional; subject to synthesis-phase review for honest inflation check, same discipline iteration 14 applied when Persona C downgraded docs from 0.80 to 0.75).
+Score: 5/5 = **1.0** (FINAL — G3 verdict: "DEFENSIBLE. Not overstated." Persona B verdict: "1.0 DEFENSIBLE — all five rubric criteria structurally satisfied." The provisional 1.0 withstood synthesis review. The packaging-fix framing of PKG-006 origin is acknowledged as a nuance but does not disqualify the docs surface claim — the artifact is comprehensive and the methodology chain (simulated-user → gap → QX task → execution) was genuinely traversed.)
 
-**Honest assessment:** Prior docs changes (QX-027 doc staleness, QX-036 README restructure) were scored as "thin and irregular" and caused a downward revision from 0.80 to 0.75. QX-064 is more substantive: a complete package-level README.md created specifically to fix a packaging gap (PKG-006) and covering all three major user surfaces in depth. The key distinction: QX-027/036 were incremental patches to existing docs; QX-064 is a comprehensive new artifact that didn't exist before. The rubric's "at least one" criterion is met.
-
-**Risk:** Synthesis review may apply the same downward correction as iteration 14 if the README is judged insufficient for full 1.0 credit. If downgraded to 0.75 credit (same as iteration 14's correction): transfer_breadth = (4 + 0.75)/5 = 0.95, not 1.0. This would change V_meta to 0.50 × 0.83 × 0.95 × 0.968 = 0.380 vs. the 0.402 provisional.
+**Post-synthesis honesty check:** Persona B explicitly noted that docs surface coverage is "exactly one change deep" and "the thinnest of the five surfaces," but confirmed this does not violate the rubric's "at least one" threshold. The iteration-14 downgrade condition ("thin and irregular coverage while claiming covered") does not apply here: QX-064 is the first comprehensive artifact for its surface, not a thin patch. 1.0 confirmed.
 
 ### `validation`
-Score: **σ_QX = 61/63 = 0.968** (provisional, pending G3)
+Score: **σ_QX = 61/63 = 0.968** (FINAL — G3 confirmed)
 
 Before: 59/61 = 0.967. This iteration: QX-064 (native) + QX-065 (native) = 2 new native tasks.
-After: 61/63 = 0.968.
+After: 61/63 = 0.968. G3 confirmed in adjudication: QX-064 and QX-065 both authored and executed → 2 new numerator and denominator entries. PKG-007 noted but no QX task authored this iteration for it (no denominator change).
 
-### Total V_meta (provisional)
+### Total V_meta (FINAL)
 
 ```
 V_meta = methodology_leverage × strategy_completeness × transfer_breadth × validation
@@ -381,55 +404,75 @@ V_meta = methodology_leverage × strategy_completeness × transfer_breadth × va
 0.415 × 1.0  = 0.415
 0.415 × 0.968 = 0.40172
 
-V_meta ≈ 0.402 (provisional)
+V_meta ≈ 0.402 (FINAL)
 
-ΔV_meta = 0.402 − 0.321 = +0.081 (provisional, driven by transfer_breadth 0.80 → 1.0)
+ΔV_meta = 0.402 − 0.321 = +0.081 (FINAL, driven by transfer_breadth 0.80 → 1.0)
 ```
 
 **V_meta ceiling:** 1.0 (new formula, DIR-008, iteration 14). V_meta ≥ 0.80 is achievable in principle. With ML=0.50, SC=0.83, the maximum possible V_meta (if TB=1.0 and VAL=1.0) = 0.50 × 0.83 × 1.0 × 1.0 = 0.415. To reach 0.80, ML or SC must improve:
-- ML would need to reach ≥ 0.80/( 0.83 × 1.0 × 1.0) ≈ 0.96 (very high; requires methodology-driven execution, not just sourcing)
+- ML would need to reach ≥ 0.80/(0.83 × 1.0 × 1.0) ≈ 0.96 (very high; requires methodology-driven execution, not just sourcing)
 - SC would need to reach 6/6 = 1.0 (requires item 6: all surfaces in same iteration)
 
-**Stall diagnosis:** V_meta stall at ~0.30–0.40 driven by two factors: (1) execution remains ad-hoc/inline (ML capped ~0.50), (2) item 6 (cross-surface) not exercised (SC = 5/6 = 0.83). The TB lift this iteration provides a step-change but ceiling is now ~0.415 without ML or SC improvement.
+**Stall diagnosis:** V_meta stall at ~0.30–0.40 driven by two factors: (1) execution remains ad-hoc/inline (ML capped ~0.50), (2) item 6 (cross-surface) not exercised (SC = 5/6 = 0.83). The TB lift this iteration provides a step-change (+0.081) but ceiling is now ~0.415 without ML or SC improvement.
 
 ---
 
 ## 10. Out-of-band audit (G3)
 
-**PENDING** — dispatched by orchestrator (not this executor's session), using native Agent/Task tool (run_in_background=true). G3 is required because `packages/quay/test/serve.test.mjs` is a Core source file change.
+**COMPLETE — PASS-WITH-NOTES.**
 
-G3 must co-sign:
-- QX-064 (README.md): docs-only change, no executable logic
-- QX-065 (serve.test.mjs): TST-001 assertion tightened (regex-based href extraction); TST-004 new assertion; both logically correct per serve.js buildHref behavior; no false positives/negatives expected
+See `experiments/quay-continuous-bootstrap/audits/iteration-18-adjudicate.md`.
 
-Verdict will be written to: `experiments/quay-continuous-bootstrap/audits/iteration-18-adjudicate.md`
+σ_QX = 61/63 = 0.968. Gate **OPEN**.
+
+G3 co-signed:
+- QX-064 (README.md): PASS — docs-only change, no executable logic. Ghost entry resolved. 163-line comprehensive README confirmed.
+- QX-065 (serve.test.mjs): PASS — TST-003 href-anchored assertion correctly extracts Next link href. TST-004 Previous-link assertion logically sound (buildHref omits page=1 per pg>1 guard; prevHref = `/?pageSize=3`). Both assertions would catch genuine regressions.
+- Worktree isolation: PASS — shared tree clean for Core source files; changes confined to worktree.
+- transfer_breadth = 1.0: DEFENSIBLE. PKG-006 was simulated-user-sourced (Persona C, iter-17); QX-064 is native-authored and executed; artifact is substantive (163 lines, all 4 surfaces covered). Not overstated.
+
+G3 notes:
+- PKG-007 (LICENSE ghost in `files`): pre-existing carry-forward gap, not blocking.
+- No security or correctness issues found.
 
 ---
 
-## 11. Pause / Convergence Check
+## 11. Pause / Convergence Check (FINAL)
 
-- [ ] **Meta-layer V_meta >= 0.80**: **NO** — V_meta (provisional) = 0.402. Maximum achievable with current ML=0.50 and SC=0.83 is 0.415. V_meta ≥ 0.80 would require ML ≥ 0.96 or SC = 1.0 plus ML ≥ 0.80, both structurally unachieved.
-- [ ] **Instance-layer PAUSE criteria** (ΔV < 0.02 for 2+ consecutive AND no new significant gap): **PARTIALLY MET** — ΔV_17 = +0.051 (RESET counter); ΔV_18 (provisional) = +0.014 (< 0.02) → if confirmed, counter becomes 1 (first of two needed). **NO new significant gap found this iteration** (PKG-007 is minor; no simulated-user pass yet). PAUSE not triggered at end of development phase; synthesis simulated-user findings may change this.
-- [ ] **G3 green for all Core/lift tasks**: **PENDING** (orchestrator dispatch).
-- [ ] **Simulated-user pass run, findings recorded**: **PENDING** (orchestrator dispatch; §7 PENDING).
-- [ ] **system_health: no regression against any of the three inherited snapshots**: 12/12 tests pass; no regressions. Experiments 1/2/3 inherited snapshots unaffected.
+- [ ] **Meta-layer V_meta >= 0.80**: **NO** — V_meta FINAL = 0.402. Maximum achievable with current ML=0.50 and SC=0.83 is 0.415 (TB=1.0 and VAL=1.0). V_meta ≥ 0.80 would require ML ≥ 0.96 or SC = 1.0 plus ML ≥ 0.80, both structurally unachieved.
+- [ ] **Instance-layer PAUSE criteria** (ΔV < 0.02 for 2+ consecutive AND no new significant gap): **PARTIALLY MET — PAUSE counter = 1** — ΔV_17 = +0.051 (RESET counter); ΔV_18 FINAL = +0.007 (< 0.02) → counter becomes 1 (first of two consecutive needed). **NO new significant gap found** — DOC-001..005, PKG-007/008/009 are all minor/low. PAUSE not triggered (requires 2 consecutive, currently at 1).
+- [x] **G3 green for all Core/lift tasks**: **PASS-WITH-NOTES** — QX-064/065 co-signed. Gate OPEN. σ_QX = 61/63 = 0.968.
+- [x] **Simulated-user pass run, findings recorded**: **COMPLETE** — 4 audits (G3, Persona A/B/C); 7 new minor/low gaps found; §7 complete.
+- [x] **system_health: no regression against any of the three inherited snapshots**: 12/12 tests pass; no regressions. Experiments 1/2/3 inherited snapshots unaffected.
 
-**Status: CONTINUING** (development phase complete; G3 and simulated-user pass pending orchestrator dispatch; PAUSE not yet triggerable without synthesis-phase findings).
+**Status: CONTINUING to iteration 19.**
 
-**PAUSE assessment (provisional):** If synthesis finds no new significant gap: counter becomes 1 (first consecutive ΔV < 0.02). Iteration 19 would need ΔV < 0.02 AND no new significant gap from that iteration's simulated-user pass to trigger PAUSE. The gap list is now very thin (3 open: ENV-001, SH-006, PKG-007 — all minor/deferred/new-minor). A PAUSE recommendation is structurally plausible at iteration 19 or 20 if no new significant gaps emerge.
+**PAUSE assessment (FINAL):**
+- ΔV_18 FINAL = +0.007 < 0.02 → PAUSE counter = 1 (first consecutive).
+- No new significant gap from synthesis (DOC-001..005 all minor/low; PKG-008/009 minor).
+- PAUSE trigger requires: 2 consecutive ΔV < 0.02 AND no new significant gap. Counter = 1 means iteration 19 is the potential second.
+- If iteration 19 yields ΔV < 0.02 AND no new significant gap from simulated-user → PAUSE recommended.
+- Gap list is now 10 open (all minor/low) — the DOC-001..005 surface provides material for iteration 19.
+- V_instance = 0.839 (≥ 0.80 threshold maintained; not near 1.0 ceiling).
+- V_meta = 0.402 (structurally capped at ~0.415 without ML or SC improvement).
 
 ---
 
 ## Problems identified for next iteration
 
-1. **PKG-007** (minor, direct-observation): `LICENSE` is listed in `packages/quay/package.json files` field but `packages/quay/LICENSE` does not exist. Same ghost-entry class as PKG-006/PKG-005. Fix: create `packages/quay/LICENSE` (copy or symlink from project root) OR remove `LICENSE` from files field. Low priority.
+From synthesis (all minor/low):
 
-2. **ENV-001** (minor, deferred): MCP stale process remains a known environmental characteristic. Continue deferring unless simulated-user finds a new code-level mitigation angle.
+1. **DOC-001** (minor): README missing `--provider <id>` flag. Advanced users with multi-provider configs will not find it.
+2. **DOC-002** (minor): README missing `action list` / `action run` commands. Users who want workflow actions won't know these exist.
+3. **DOC-003** (minor): README missing `task view` / `task edit` commands.
+4. **DOC-004** (low): Config section appears after usage examples — new users will attempt `quay task list` before creating a config and get an error. A prerequisites callout before usage examples would prevent this.
+5. **DOC-005** (low): No GitHub releases URL in Option A install instructions ("the GitHub releases page" with no link).
+6. **PKG-007** (minor): `LICENSE` ghost entry in `package.json files` field; `packages/quay/LICENSE` does not exist. npm artifact will be published without a LICENSE file.
+7. **PKG-008** (minor): No `"license"` field in `package.json` — npm publish will warn.
+8. **PKG-009** (minor): `"private": true` blocks npm registry publish. Intentional for current GitHub release delivery model; reassess if npm registry publish is ever pursued.
+9. **ENV-001** (minor, deferred): MCP stale process remains a known environmental characteristic. Continue deferring unless simulated-user finds a new code-level mitigation angle.
+10. **SH-006** (minor, deferred): quay-native startup stderr leak. Fix would be in `packages/quay-native/`, a different package scope. Continue deferring unless in-scope.
 
-3. **SH-006** (minor, deferred): quay-native startup stderr leak. Fix would be in `packages/quay-native/`, a different package scope. Continue deferring unless in-scope.
-
-4. **V_meta structural bottleneck**: To reach V_meta ≥ 0.50 requires ML ≥ 0.50 (current) × SC=0.83 × TB=1.0 × VAL≈0.97 ≈ 0.40; we're at 0.40. To meaningfully approach 0.80, either ML must improve (quay:author/execute Skill must actually shape design decisions, not just gap sourcing) or SC item 6 must be exercised (all five surfaces in same iteration). Both require structural methodology engagement, not just more gap closures.
-
-5. **PAUSE counter monitoring**: Counter = 1 after this iteration (provisional). One more < 0.02 iteration with no new significant gap triggers PAUSE. Next iteration should be fully productive to avoid premature PAUSE, OR actively accept PAUSE if the gap list is genuinely exhausted.
-
-6. **Simulated-user findings for gap-list seeding**: Iteration 18's simulated-user pass (pending orchestrator dispatch) will be the primary source of new gaps for iteration 19. The new README.md (QX-064) is an obvious target for a first-time-installer persona.
+Strategic notes:
+- **PAUSE counter = 1**: One more ΔV < 0.02 with no new significant gap → PAUSE recommended. Iteration 19 should close the DOC-001..005 and PKG-007/008 gaps productively. Gaps are addressable and provide meaningful work.
+- **V_meta structural ceiling**: ML=0.50, SC=0.83, TB=1.0 → max V_meta ≈ 0.415. Reaching 0.80 requires either ML ≥ 0.96 (methodology-driven execution) or SC = 1.0 (item 6: all surfaces in one iteration). Neither is near-term achievable without structural methodology changes.

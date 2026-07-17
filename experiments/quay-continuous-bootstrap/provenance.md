@@ -8,17 +8,18 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 18 dev phase (2026-07-17) — G3 + simulated-user PENDING_
+_Last updated: iteration 18 FINAL (2026-07-17) — G3 + simulated-user COMPLETE_
 
-- **Latest scores (PROVISIONAL — development phase):** V_instance ≈ 0.846 (ΔV ≈ +0.014 from 0.832). V_meta ≈ 0.402 (ΔV ≈ +0.081; transfer_breadth 0.80 → 1.0 via QX-064 docs surface). σ_QX = 61/63 = 0.968 (provisional). G3 PENDING. Simulated-user PENDING.
+- **Latest scores (FINAL):** V_instance = 0.839 (ΔV = +0.007 from 0.832). V_meta = 0.402 (ΔV = +0.081; transfer_breadth 0.80 → 1.0 CONFIRMED via QX-064 docs surface; G3 + Persona B both DEFENSIBLE). σ_QX = 61/63 = 0.968 (FINAL, G3 confirmed).
 - **DIR-004: APPLIED AND ARCHIVED** (QX-056 done; GitHub Actions run 29582230120 SUCCEEDED; quay-0.2.0.tgz verified; directive file archived). Full closure — all four reopen criteria satisfied.
 - **DIR-006: RESOLVED AND ARCHIVED** (QX-057 done; Option B chosen: files canonical; DIR-004 quay task marked done/superseded; invariant enforced).
 - **DIR-008: APPLIED AND ARCHIVED** (QX-050 done, archived in synthesis, iteration 14). V_meta redesigned: new formula (`methodology_leverage × strategy_completeness × transfer_breadth × validation`) active from iteration 14. G3 co-sign received (PASS-WITH-NOTES). See `VMETAFORMULA.md`.
 - **DIR-009 STATUS: APPLIED AND ARCHIVED** — applied in iteration 13 (genuine worktree isolation, HARD GATE ls proof, no ENV-excuse boilerplate); moved to `directives/archive/DIR-009-orchestrator-must-honor-hardened-gates.md`.
 - **directives/pending/ EMPTY** — All active directives applied and archived. No pending directives.
-- **PKG-006 FIXED** — `packages/quay/README.md` created (QX-064); ghost files entry resolved; docs surface now "covered" for transfer_breadth.
+- **PKG-006 FIXED** — `packages/quay/README.md` created (QX-064); ghost files entry resolved; docs surface now "covered" for transfer_breadth (confirmed FINAL by G3 + Persona B).
 - **TST-003/004 CLOSED** — TST-001 assertion tightened (href-anchored via page=2 regex); TST-004 Previous-link pageSize test added (QX-065).
-- **PAUSE counter: 1 (provisional)** — ΔV_18 ≈ +0.014 < 0.02 (first consecutive below threshold). No new significant gap found in dev phase. One more iteration < 0.02 with no new significant gap → PAUSE recommendation. PAUSE would be resumable, not a terminal halt.
+- **PAUSE counter: 1 (FINAL)** — ΔV_18 FINAL = +0.007 < 0.02 (first consecutive below threshold). No new significant gap from synthesis (DOC-001..005, PKG-007/008/009 all minor/low). One more iteration < 0.02 with no new significant gap → PAUSE recommendation.
+- **7 new gaps from synthesis:** DOC-001..005 (minor/low, README completeness), PKG-008 (minor, no license field), PKG-009 (minor, private:true blocks npm publish).
 - **Standing decisions (do not re-litigate without new evidence):**
   - Gap-list storage: plain markdown file at `experiments/quay-continuous-bootstrap/gap-list.md`
     (decided iteration 0 — see "Gap-list storage decision" in the Iteration 0 record).
@@ -29,7 +30,7 @@ _Last updated: iteration 18 dev phase (2026-07-17) — G3 + simulated-user PENDI
   - V_meta formula: `methodology_leverage × strategy_completeness × transfer_breadth × validation` (from iteration 14 onward). See `VMETAFORMULA.md`.
   - V_meta re-baseline FINAL: 0.240 (transfer_breadth revised 0.80 → 0.75 in synthesis per Persona C; VMETAFORMULA.md history table updated). Non-comparable to old formula value 0.154. Transfer_breadth bumped back to 0.80 at iteration 15 FINAL per honest upward revision (packaging solidly covered by QX-056).
   - **Directive mechanism (iteration 15):** Files are canonical. Directive files in `directives/pending/` and `directives/archive/` are the one authoritative record. No directive quay tasks. (DIR-006 resolution, QX-057.)
-- **Status:** **ACTIVE — iteration 18 dev phase COMPLETE. G3 + simulated-user PENDING. directives/pending/ EMPTY. V_instance ≈ 0.846 (PROVISIONAL). PAUSE counter = 1 (provisional, 1st consecutive ΔV < 0.02).** Cumulative gaps closed: 94. Net open: 3 (ENV-001, SH-006, PKG-007).
+- **Status:** **ACTIVE — iteration 18 FINAL COMPLETE. directives/pending/ EMPTY. V_instance = 0.839 (FINAL). PAUSE counter = 1 (FINAL, 1st consecutive ΔV < 0.02). Continuing to iteration 19.** Cumulative gaps closed: 94. Net open: 10 (ENV-001, SH-006, PKG-007, PKG-008, PKG-009, DOC-001..005).
 
 ---
 
@@ -605,11 +606,11 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | **15 FINAL** | **0.771** | **+0.021** | **0.288** (methodology_leverage=0.45, strategy_completeness=0.83, transfer_breadth=0.80↑, validation=0.965) | 55/57 = 0.965 | DIR-004 final (release verified, run 29582230120, quay-0.2.0.tgz), DIR-006 resolved (Option B: files canonical); UQ-042..046 closed (QX-058/059 CLI polish); 4 new minor gaps (UQ-047, PKG-001/002/003) from synthesis; G3 PASS; directives/pending/ EMPTY; cumulative closed=80; PAUSE not triggered (ΔV=+0.021 > 0.02); V_meta: transfer_breadth revised 0.75→0.80 (packaging solidly covered by QX-056) |
 | **16 FINAL** | **0.781** | **+0.010** | **0.301** (methodology_leverage=0.47, strategy_completeness=0.83, transfer_breadth=0.80, validation=0.966) | 57/59 = 0.966 | CB-006 (page-size), UQ-047 (--version flag), PKG-001/002/003 closed (QX-060/061); CB-007 significant new (--page-size ignored in JSON mode); PKG-004/005 minor new; ENV-001+SH-006 still deferred; G3 PASS (12/12); 3 personas complete (G3 PASS, Persona A PARTIAL, Persona B PASS, Persona C PARTIAL); cumulative closed=85; PAUSE counter=1 (1st consecutive ΔV < 0.02; but CB-007 significant found → PAUSE not triggered) |
 | **17 FINAL** | **0.832** | **+0.051** | **0.321** (methodology_leverage=0.50↑, strategy_completeness=0.83, transfer_breadth=0.80, validation=0.967) | 59/61 = 0.967 | CB-022 FIXED (printJson(displayTasks) + --format json alias), UQ-048 (invalid --page-size warning), PKG-004/005 (CHANGELOG.md created; templates/ removed), TST-001/002 (pageSize nav link + bold assertions); 6 gaps closed; G3 PASS (12/12); 3 personas complete (Persona A PASS, Persona B PASS minor notes, Persona C PARTIAL); 3 new gaps (TST-003/004 low, PKG-006 minor); synthesis minor corrections reduce provisional 0.836→0.832; **V_instance ≥ 0.80 threshold CROSSED for first time**; PAUSE counter = 0 (RESET; ΔV = +0.051 > 0.02); cumulative closed=91 |
-| **18 PROVISIONAL** | **≈0.846** | **≈+0.014** | **≈0.402 PROVISIONAL** (methodology_leverage=0.50 carry, strategy_completeness=0.83 unchanged, transfer_breadth=1.0↑ docs surface covered by QX-064, validation=61/63=0.968) | 61/63 = 0.968 | PKG-006 (QX-064: packages/quay/README.md created — docs surface now covered), TST-003/004 (QX-065: TST-001 href-anchored assertion + TST-004 Previous-link test); 3 gaps closed; 1 new gap (PKG-007 LICENSE ghost entry, minor, direct-observation); G3 PENDING; simulated-user PENDING; **PAUSE counter = 1 (provisional, 1st consecutive ΔV < 0.02 — no new significant gap in dev phase)**; cumulative closed=94. transfer_breadth 0.80→1.0 subject to synthesis review (risk: downward correction if README deemed insufficient for full 1.0 credit). |
+| **18 FINAL** | **0.839** | **+0.007** | **0.402** (methodology_leverage=0.50 carry, strategy_completeness=0.83 unchanged, transfer_breadth=1.0↑ FINAL — docs surface confirmed by G3 PASS-WITH-NOTES + Persona B PASS; validation=61/63=0.968 FINAL) | 61/63 = 0.968 | PKG-006 (QX-064: packages/quay/README.md created — docs surface now covered), TST-003/004 (QX-065: TST-001 href-anchored assertion + TST-004 Previous-link test); 3 gaps closed; 8 new gaps from dev+synthesis: PKG-007 (LICENSE ghost, dev), DOC-001..005 (README completeness, minor/low, Persona A), PKG-008 (no license field, minor, Persona C), PKG-009 (private:true blocks npm, minor, Persona C); G3 PASS-WITH-NOTES (12/12, σ=61/63); Persona A PARTIAL, Persona B PASS, Persona C PARTIAL; **PAUSE counter = 1 (FINAL, 1st consecutive ΔV < 0.02 — no new significant gap)**; cumulative closed=94; V_instance revised down from provisional 0.846 (usability 0.942→0.940, health 0.978→0.972 for DOC+PKG synthesis findings). |
 
-ΔV trend (V_instance): +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, +0.004, +0.029, +0.021, +0.010, +0.051, **≈+0.014 (18 PROVISIONAL)**. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13: 2nd consecutive < 0.02 (ΔV=+0.004) → **PAUSE TRIGGERED**; iter-14: PAUSE counter RESET (human resumption mandate) + ΔV=+0.029 > 0.02 → PAUSE counter at 0; iter-15: ΔV=+0.021 > 0.02 → PAUSE counter remains 0; iter-16 FINAL: ΔV=+0.010 < 0.02 → **PAUSE counter = 1** (1st consecutive; CB-022 significant gap found → PAUSE not triggered per "no new significant gap" condition); iter-17 FINAL: ΔV = +0.051 > 0.02 → **PAUSE counter RESET to 0** (CB-022 significant gap fixed, blocker cleared); iter-18 PROVISIONAL: ΔV ≈ +0.014 < 0.02 → **PAUSE counter = 1** (1st consecutive; no new significant gap in dev phase). Cumulative gaps closed: 94 (PROVISIONAL dev phase).
+ΔV trend (V_instance): +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, +0.004, +0.029, +0.021, +0.010, +0.051, **+0.007 (18 FINAL)**. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13: 2nd consecutive < 0.02 (ΔV=+0.004) → **PAUSE TRIGGERED**; iter-14: PAUSE counter RESET (human resumption mandate) + ΔV=+0.029 > 0.02 → PAUSE counter at 0; iter-15: ΔV=+0.021 > 0.02 → PAUSE counter remains 0; iter-16 FINAL: ΔV=+0.010 < 0.02 → **PAUSE counter = 1** (1st consecutive; CB-022 significant gap found → PAUSE not triggered per "no new significant gap" condition); iter-17 FINAL: ΔV = +0.051 > 0.02 → **PAUSE counter RESET to 0** (CB-022 significant gap fixed, blocker cleared); iter-18 FINAL: ΔV = +0.007 < 0.02 → **PAUSE counter = 1** (1st consecutive; no new significant gap — DOC-001..005, PKG-007/008/009 all minor/low). Cumulative gaps closed: 94 (FINAL).
 
-V_meta formula switch: old formula last value = 0.154 (iter 13); new formula re-baseline = 0.240 (iter 14 FINAL; revised from provisional 0.255 after synthesis transfer_breadth correction). Non-comparable across switch point. Iter-15 FINAL: V_meta = 0.288 (transfer_breadth bumped 0.75→0.80 per Persona C honest upward revision for packaging surface). Iter-16 FINAL: V_meta = 0.301 (methodology_leverage=0.47, strategy_completeness=0.83, transfer_breadth=0.80, validation=0.966; Persona C confirmed 0.47 as honest). Iter-17 FINAL: V_meta = 0.321 (methodology_leverage bumped 0.47→0.50: all 6 closures 100% simulated-user-sourced; strategy_completeness=0.83 unchanged; transfer_breadth=0.80 unchanged; validation=59/61=0.967; Persona C confirmed 0.50 "honest, if anything conservative"). Iter-18 PROVISIONAL: V_meta ≈ 0.402 (methodology_leverage=0.50 carry; strategy_completeness=0.83 unchanged — item 6 not exercised; transfer_breadth=1.0 PROVISIONAL — QX-064 docs surface change; validation=61/63=0.968). transfer_breadth 1.0 claim subject to synthesis-phase honest inflation check.
+V_meta formula switch: old formula last value = 0.154 (iter 13); new formula re-baseline = 0.240 (iter 14 FINAL; revised from provisional 0.255 after synthesis transfer_breadth correction). Non-comparable across switch point. Iter-15 FINAL: V_meta = 0.288 (transfer_breadth bumped 0.75→0.80 per Persona C honest upward revision for packaging surface). Iter-16 FINAL: V_meta = 0.301 (methodology_leverage=0.47, strategy_completeness=0.83, transfer_breadth=0.80, validation=0.966; Persona C confirmed 0.47 as honest). Iter-17 FINAL: V_meta = 0.321 (methodology_leverage bumped 0.47→0.50: all 6 closures 100% simulated-user-sourced; strategy_completeness=0.83 unchanged; transfer_breadth=0.80 unchanged; validation=59/61=0.967; Persona C confirmed 0.50 "honest, if anything conservative"). Iter-18 FINAL: V_meta = 0.402 (methodology_leverage=0.50 carry; strategy_completeness=0.83 unchanged — item 6 not exercised; transfer_breadth=1.0 FINAL — QX-064 docs surface confirmed by G3 DEFENSIBLE + Persona B 1.0 DEFENSIBLE; validation=61/63=0.968 FINAL; ΔV_meta=+0.081 driven by transfer_breadth 0.80→1.0).
 
 ---
 
@@ -1900,56 +1901,68 @@ V_meta = methodology_leverage × strategy_completeness × transfer_breadth × va
 
 ---
 
-## Iteration 18 record (2026-07-17, development phase — G3 + simulated-user PENDING)
+## Iteration 18 record (2026-07-17, FINAL)
 
 ### QX-* tasks created and completed this iteration
 
 | Task | author_by | execute_by | gate_by | σ contribution | Status | Notes |
 |------|-----------|------------|---------|----------------|--------|-------|
-| QX-064 | native | native | G3-pending | 61/63 | done | PKG-006: `packages/quay/README.md` created; docs surface covered for transfer_breadth; comprehensive CLI/Web UI/MCP/install docs |
-| QX-065 | native | native | G3-pending | 62/63 | done | TST-003: TST-001 assertion tightened (href-anchored via page=2 regex); TST-004: new Previous-link pageSize test; 12/12 tests pass |
+| QX-064 | native | native | G3 PASS-WITH-NOTES | 61/63 | done | PKG-006: `packages/quay/README.md` created; docs surface covered for transfer_breadth (FINAL); comprehensive 163-line CLI/Web UI/MCP/install docs |
+| QX-065 | native | native | G3 PASS-WITH-NOTES | 62/63 | done | TST-003: TST-001 assertion tightened (href-anchored via page=2 regex); TST-004: new Previous-link pageSize test; 12/12 tests pass |
 
 σ_QX entering iteration 18: 59/61 = 0.967
-σ_QX after iteration 18 (provisional): 61/63 = 0.968
+σ_QX after iteration 18 FINAL: 61/63 = 0.968
 - Denominator: 61 (prior) + 2 new done tasks = 63
 - Numerator: 59 (prior native) + 2 new native = 61
+- PKG-007 noted (no QX task authored for it this iteration — no denominator change)
 
-### Gaps closed this iteration (dev phase — 3 total)
+### Gaps closed this iteration (FINAL — 3 total, all in dev phase)
 - PKG-006 (minor): `packages/quay/README.md` created → QX-064
 - TST-003 (low): TST-001 assertion tightened (href-anchored) → QX-065
 - TST-004 (low): New Previous-link pageSize test added → QX-065
 
-**Cumulative gaps closed: 94 (PROVISIONAL dev phase)**
+**Cumulative gaps closed: 94 (FINAL)**
 
-### New gaps found this iteration (dev phase — 1 new)
+### New gaps found this iteration (FINAL — 8 new)
+Dev phase:
 - PKG-007 (minor, direct-observation): `LICENSE` ghost entry in `packages/quay/package.json files` field; `packages/quay/LICENSE` does not exist.
+
+Synthesis:
+- DOC-001 (minor): README missing `--provider <id>` flag — Persona A
+- DOC-002 (minor): README missing `action list` / `action run` commands — Persona A
+- DOC-003 (minor): README missing `task view` / `task edit` commands — Persona A
+- DOC-004 (low): Config section after usage examples; new users hit errors first — Persona A
+- DOC-005 (low): No GitHub releases URL in Option A install instructions — Persona A
+- PKG-008 (minor): No `"license"` field in `package.json` — Persona C
+- PKG-009 (minor): `"private": true` blocks npm registry publish (intentional for GitHub release model) — Persona C
 
 ### Worktree
 Branch: `experiment-4-iteration-18`, based on `experiment-4-iteration-17` tip (39038c8). Commit: `f9e1b37`.
 Isolation proof: worktree shows `M packages/quay/test/serve.test.mjs` and `?? packages/quay/README.md`; shared tree `git status -- packages/` is clean.
 
-### G3 status (iteration 18, PENDING)
-G3 TRIGGERED — Core source file `packages/quay/test/serve.test.mjs` changed. Orchestrator dispatch pending. Expected: PASS (changes are test-only tightening with correct logic; README.md is documentation only).
+### G3 status (iteration 18, FINAL)
+G3 PASS-WITH-NOTES — Core source file `packages/quay/test/serve.test.mjs` changed. 12/12 tests pass. QX-064 (README.md): PASS — substantive 163 lines, ghost entry resolved. QX-065 (TST-003/004): PASS — assertions correctly anchored. transfer_breadth = 1.0: DEFENSIBLE. σ_QX = 61/63 = 0.968. Gate OPEN. PKG-007 confirmed pre-existing (not introduced this iteration).
 
-### System health (iteration 18, dev phase)
+### System health (iteration 18, FINAL)
 Full test suite: 12/12 files pass. No regressions against any of the three inherited snapshots.
 
-### §8 V_instance (iteration 18, PROVISIONAL)
+### §8 V_instance (iteration 18, FINAL)
 ```
 V_instance = capability_breadth × usability_quality × verification_coverage × system_health
-           = 0.925 × 0.942 × 0.993 × 0.978
+           = 0.925 × 0.940 × 0.993 × 0.972
 
-  0.925 × 0.942   = 0.87135
-  0.87135 × 0.993 = 0.86545
-  0.86545 × 0.978 = 0.84641
+  0.925 × 0.940   = 0.86950
+  0.86950 × 0.993 = 0.86361
+  0.86361 × 0.972 = 0.83943
 
-  ≈ 0.846 (PROVISIONAL)
+  = 0.839 (FINAL)
 
-ΔV_instance (PROVISIONAL) = 0.846 − 0.832 = +0.014
+ΔV_instance (FINAL) = 0.839 − 0.832 = +0.007
 ```
-PAUSE counter: 1 (provisional, first consecutive ΔV < 0.02). No new significant gap in dev phase.
+Synthesis corrections from provisional 0.846: usability_quality 0.942→0.940 (DOC-001..005 gaps from Persona A); system_health 0.978→0.972 (PKG-007 confirmed + PKG-008 new from Persona C).
+PAUSE counter: 1 (FINAL, first consecutive ΔV < 0.02). No new significant gap from synthesis.
 
-### §9 V_meta (iteration 18, PROVISIONAL)
+### §9 V_meta (iteration 18, FINAL)
 ```
 V_meta = methodology_leverage × strategy_completeness × transfer_breadth × validation
        = 0.50 × 0.83 × 1.0 × 0.968
@@ -1958,16 +1971,22 @@ V_meta = methodology_leverage × strategy_completeness × transfer_breadth × va
   0.415 × 1.0  = 0.415
   0.415 × 0.968 = 0.40172
 
-  ≈ 0.402 (PROVISIONAL)
+  = 0.402 (FINAL)
 
-ΔV_meta (PROVISIONAL) = 0.402 − 0.321 = +0.081
+ΔV_meta (FINAL) = 0.402 − 0.321 = +0.081
 ```
-transfer_breadth 1.0 is provisional — subject to synthesis honest-inflation check. Risk: if docs scored at 0.75 credit (same downward correction as iteration 14), transfer_breadth = (4+0.75)/5 = 0.95, V_meta ≈ 0.380.
+transfer_breadth 1.0 CONFIRMED by synthesis: G3 "DEFENSIBLE. Not overstated." + Persona B "1.0 DEFENSIBLE — all five rubric criteria structurally satisfied." Provisional 1.0 survived honest-inflation check. No downward correction applied.
 
-### §11 Convergence check (iteration 18, PROVISIONAL)
-- V_meta ≥ 0.80: NO (≈0.402; max achievable with current ML=0.50, SC=0.83 is 0.415)
-- PAUSE criteria: ΔV_18 ≈ +0.014 < 0.02 → **counter = 1** (provisional; no new significant gap in dev phase; synthesis may change if simulated-user finds significant gap)
-- G3: PENDING
-- Simulated-user: PENDING
+### Simulated-user summary (iteration 18, FINAL)
+- G3 (adjudicate): PASS-WITH-NOTES — 12/12, σ=61/63=0.968, transfer_breadth=1.0 DEFENSIBLE, PKG-007 pre-existing noted.
+- Persona A (new-user-readme): PARTIAL — 5 new minor/low gaps (DOC-001..005).
+- Persona B (methodology-surface): PASS — transfer_breadth=1.0 confirmed, SC=0.83 confirmed, gap-list PASS.
+- Persona C (package-final): PARTIAL — PKG-007 MINOR confirmed; PKG-008 (no license field) new minor; PKG-009 (private:true) new minor.
+
+### §11 Convergence check (iteration 18, FINAL)
+- V_meta ≥ 0.80: NO (0.402; max achievable with current ML=0.50, SC=0.83 is 0.415)
+- PAUSE criteria: ΔV_18 = +0.007 < 0.02 → **counter = 1** (FINAL; no new significant gap from synthesis — DOC-001..005, PKG-007/008/009 all minor/low)
+- G3: PASS-WITH-NOTES (12/12)
+- Simulated-user: COMPLETE (Persona A PARTIAL, Persona B PASS, Persona C PARTIAL)
 - system_health: 12/12 tests pass; no regression
-- **Status: CONTINUING (dev phase complete; synthesis pending)**
+- **Status: CONTINUING to iteration 19** — PAUSE counter = 1. One more ΔV < 0.02 with no significant gap triggers PAUSE. Gap list has 10 open (all minor/low): DOC-001..005 are addressable material for iteration 19.
