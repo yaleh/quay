@@ -156,13 +156,28 @@ async function main() {
   // var the real CLI uses (src/serve.js line "QUAY_ACTION_MOCK_LOG || undefined").
   const mockLogPath = path.join(tasksDir, "action-mock.jsonl");
 
-  // Three tasks seeded for core UI tests, plus three for QW-004 sort tests:
+  // Three tasks seeded for core UI tests, plus three for QW-004 sort tests,
+  // plus three for QW-005 label filter tests:
   // - WUI-1 (todo): action button PRESENT (per provider.yml whenStatus: [todo, ready])
   // - WUI-2 (done): action button ABSENT — negative control (no matching whenStatus)
   // - WUI-ACT (todo): used exclusively for the POST action trigger test (QC-002)
   //   so the GET/detail assertions on WUI-1 remain isolated from the POST test.
   // - SORT-A (todo), SORT-B (done), SORT-C (ready): QW-004 sort verification tasks.
   //   Inserted in C, A, B order to test that sort overrides insertion order.
+  // - LBL-1 (todo, labels:[alpha]), LBL-2 (done, labels:[beta]), LBL-3 (todo, labels:[alpha,beta]):
+  //   QW-005 label filter verification tasks.
+  execFileSync("node", [nativeBin, "task", "create", "LBL-1", "--title", "Label test task 1 (alpha)",
+    "--status", "todo", "--labels", "alpha", "--body", VALID_SECTIONS], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+  });
+  execFileSync("node", [nativeBin, "task", "create", "LBL-2", "--title", "Label test task 2 (beta)",
+    "--status", "done", "--labels", "beta", "--body", VALID_SECTIONS], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+  });
+  execFileSync("node", [nativeBin, "task", "create", "LBL-3", "--title", "Label test task 3 (alpha+beta)",
+    "--status", "todo", "--labels", "alpha,beta", "--body", VALID_SECTIONS], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
+  });
   execFileSync("node", [nativeBin, "task", "create", "SORT-C", "--title", "Sort test task C (ready)",
     "--status", "ready", "--body", VALID_SECTIONS], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: tasksDir },
@@ -529,6 +544,55 @@ async function main() {
     assert(listTodoForSortNav.body.includes("status=todo") && listTodoForSortNav.body.includes("sort=id"),
       "GET /?status=todo sort nav links preserve status=todo filter in sort hrefs (QW-004: sortNav href)");
 
+    // ── QW-005: filter-by-label assertions ──────────────────────────────────
+    // QW-005 (experiment 3, iteration 3): verify ?label=<value> filter in GET /.
+    // Three label tasks seeded: LBL-1 (labels:[alpha]), LBL-2 (labels:[beta]),
+    // LBL-3 (labels:[alpha, beta]).
+
+    // Label nav is present in the list page (check for label links, since some tasks have labels)
+    assert(list.body.includes("label=alpha") || list.body.includes("Label:"),
+      "GET / body includes label navigation (QW-005: label nav present when tasks have labels)");
+
+    // GET /?label=alpha — includes LBL-1 (alpha) and LBL-3 (alpha+beta); excludes LBL-2 (beta only)
+    const listLabelAlpha = await get(port, "/?label=alpha");
+    assert(listLabelAlpha.status === 200, `GET /?label=alpha returns 200 (got ${listLabelAlpha.status})`);
+    assert(listLabelAlpha.body.includes("LBL-1"),
+      "GET /?label=alpha includes LBL-1 (has label alpha) (QW-005: label filter includes matching)");
+    assert(listLabelAlpha.body.includes("LBL-3"),
+      "GET /?label=alpha includes LBL-3 (has labels alpha+beta) (QW-005: label filter includes matching)");
+    assert(!listLabelAlpha.body.includes("LBL-2"),
+      "GET /?label=alpha excludes LBL-2 (has label beta only) (QW-005: label filter excludes non-matching)");
+
+    // GET /?label=beta — includes LBL-2 (beta) and LBL-3 (alpha+beta); excludes LBL-1 (alpha only)
+    const listLabelBeta = await get(port, "/?label=beta");
+    assert(listLabelBeta.status === 200, `GET /?label=beta returns 200 (got ${listLabelBeta.status})`);
+    assert(listLabelBeta.body.includes("LBL-2"),
+      "GET /?label=beta includes LBL-2 (has label beta) (QW-005: label filter includes matching)");
+    assert(listLabelBeta.body.includes("LBL-3"),
+      "GET /?label=beta includes LBL-3 (has labels alpha+beta) (QW-005: label filter includes matching)");
+    assert(!listLabelBeta.body.includes("LBL-1"),
+      "GET /?label=beta excludes LBL-1 (has label alpha only) (QW-005: label filter excludes non-matching)");
+
+    // GET /?label=gamma — no task has label 'gamma': returns empty for label tasks
+    const listLabelGamma = await get(port, "/?label=gamma");
+    assert(listLabelGamma.status === 200, `GET /?label=gamma returns 200 (got ${listLabelGamma.status})`);
+    assert(!listLabelGamma.body.includes("LBL-1") && !listLabelGamma.body.includes("LBL-2") && !listLabelGamma.body.includes("LBL-3"),
+      "GET /?label=gamma returns no LBL-* tasks (unknown label → empty result) (QW-005: unknown label not an error)");
+
+    // GET /?status=todo&label=alpha — filter by both status and label.
+    // LBL-1 (todo, alpha) → included; LBL-3 (todo, alpha+beta) → included;
+    // LBL-2 (done, beta) → excluded by status filter; WUI-1/WUI-ACT (todo, no labels) → excluded by label filter.
+    const listStatusTodoLabelAlpha = await get(port, "/?status=todo&label=alpha");
+    assert(listStatusTodoLabelAlpha.status === 200, `GET /?status=todo&label=alpha returns 200 (got ${listStatusTodoLabelAlpha.status})`);
+    assert(listStatusTodoLabelAlpha.body.includes("LBL-1"),
+      "GET /?status=todo&label=alpha includes LBL-1 (todo, alpha) (QW-005: combined status+label filter)");
+    assert(listStatusTodoLabelAlpha.body.includes("LBL-3"),
+      "GET /?status=todo&label=alpha includes LBL-3 (todo, alpha+beta) (QW-005: combined status+label filter)");
+    assert(!listStatusTodoLabelAlpha.body.includes("LBL-2"),
+      "GET /?status=todo&label=alpha excludes LBL-2 (done, beta) (QW-005: combined status+label filter)");
+    assert(!listStatusTodoLabelAlpha.body.includes("WUI-1"),
+      "GET /?status=todo&label=alpha excludes WUI-1 (todo, no labels) (QW-005: label filter excludes no-label tasks)");
+
   } finally {
     if (server) {
       server.close();
@@ -543,7 +607,7 @@ async function main() {
   }
 
   console.log(failures === 0
-    ? "\nAll QC-001/QC-002/QW-001/QW-002/QW-003/QW-004 web-ui-browser regression tests passed."
+    ? "\nAll QC-001/QC-002/QW-001/QW-002/QW-003/QW-004/QW-005 web-ui-browser regression tests passed."
     : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
