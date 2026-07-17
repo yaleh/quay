@@ -29,14 +29,14 @@ jobs:
         run: npm install
 
       - name: Run tests
-        # QX-056 (experiment 4, iteration 15): DIR-004 publish — run only
-        # packages/quay and packages/quay-native tests. The quay-github tests
-        # make live GitHub API calls against yaleh/quay issues; in CI the
-        # github.token only has repo-scoped read access and `gh api` returns
-        # HTTP 403 "Resource not accessible by integration." Excluding those
-        # tests here is correct: quay-github provider tests are integration
-        # tests that require a pre-authenticated `gh` CLI session (local dev
-        # environment) and are not suitable for automated CI on release.
+        # QX-056 (experiment 4, iteration 15): DIR-004 publish.
+        # GH_TOKEN required: packages/quay/test/cli.test.mjs includes integration
+        # tests that spawn `quay --provider github` making live GitHub API calls
+        # against yaleh/quay. Without GH_TOKEN the gh CLI subprocess returns 403.
+        # github.token has read access to this repo's issues by default.
+        # quay-github package tests are excluded (they require broader org perms).
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs
 
       - name: Build release artifact (npm pack)
