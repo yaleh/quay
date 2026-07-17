@@ -5,7 +5,7 @@
 **Dimensions advanced**: capability_breadth (CB-003, CB-004, CB-005, CB-011, CB-012 closed), verification_coverage (3 new test blocks added)
 **V_meta triggers checked**: all 5 — none fired (see §9)
 **Worktree**: `experiments/quay-continuous-bootstrap/worktrees/iteration-2` on branch `experiment-4-iteration-2` — created via `git worktree add`. ENV limitation: Tool writes (Read/Write/Edit) still target main tree absolute paths, as documented in iterations 0 and 1. Worktree created for protocol compliance; deviation noted.
-**Gap-list delta**: 0 new gaps found (development phase only; simulated-user pending); 5 gaps closed (CB-003, CB-004, CB-005, CB-011, CB-012); cumulative gaps-closed counter now at 14
+**Gap-list delta**: 6 new gaps found (UQ-011, UQ-012, UQ-013, UQ-014, UQ-015 added; UQ-003 severity escalated from minor to significant); 5 gaps closed (CB-003, CB-004, CB-005, CB-011, CB-012); cumulative gaps-closed counter now at 14
 
 ---
 
@@ -220,56 +220,88 @@ Quay serve restarted after code changes. Verified live:
 
 ## 7. Simulated-user pass (§0c — every iteration)
 
-**Status**: PENDING — dispatched by orchestrator after development phase completes (commit 44fa2a7). This section will be updated with findings from the 3 simulated-user agents once their reports are available.
+**Status**: COMPLETE — all 3 personas dispatched and completed by orchestrator. Reports in `audits/iteration-2-simulated-user-{cross-experiment-maintainer,mobile-single-task,new-contributor}.md`.
 
-**Personas to dispatch** (chosen for deliberate angle diversity, different from iteration 1's set):
-- **Mobile-only single-task user**: Does one concrete task start-to-finish on a mobile viewport only — tests the new list-page action buttons and sort at 375px width, a surface not thoroughly verified in iteration 1
-- **Cross-experiment maintainer** (continued from iteration 1): Re-tests CLI and MCP after sort-by-updated implementation; verifies `?sort=updated` flow; re-checks `task_list` schema in a fresh session (CB-011 resolution verification)
-- **New-contributor-with-no-context reviewer**: Re-tests onboarding after list-page action buttons are visible; UQ-003 (no orientation content) and UQ-005 (no visual age indicator) are good new-contributor friction points
+**Personas dispatched** (chosen for deliberate angle diversity, different from iteration 1's set):
 
-**Expected findings**: UQ-003 (no onboarding header), UQ-004 (no timestamp column in CLI list), UQ-005 (no visual age "updated X ago"), UQ-006 (40+ label filter items), UQ-007 (table overflow on mobile), UQ-009 (back link loses filter context) all remain open and are likely to be re-confirmed. New findings possible from mobile-only persona on action buttons at 375px.
+### Persona 1: Cross-experiment maintainer
+**Verdict: PASS** (all 4 surfaces)
+**Audit file**: `audits/iteration-2-simulated-user-cross-experiment-maintainer.md`
+
+Key findings:
+- `--sort updated` now works correctly (CB-004/012 confirmed resolved) ✓
+- `?prefix=QX&sort=updated` composes correctly; all filter dimensions preserve each other ✓
+- Advance button on list page works; `from=` encodes full filter state; redirect returns to correct filtered URL ✓
+- MCP `prefix` parameter present in `task_list` inputSchema (CB-011 confirmed resolved); note: live session may reflect stale schema until MCP server restart ✓
+- **Remaining significant**: UQ-009 (back link from task detail still drops filter context — `from=` mechanism exists for POST but not for GET navigation to task detail)
+- **Minor**: No cross-prefix "one-recent-per-workstream" summary view; label bar shows global label universe (not scoped to current prefix); no `sort` parameter in MCP `task_list`
+
+### Persona 2: Mobile single-task user (375×812 viewport)
+**Verdict: CONCERNS** (3 significant findings)
+**Audit file**: `audits/iteration-2-simulated-user-mobile-single-task.md`
+
+Key findings:
+- Prefix filter nav, sort-by-updated, and sort+prefix composition all work correctly at 375px ✓
+- Task detail page at 375px renders well; Advance button above the fold on detail page ✓
+- **UQ-011 (significant NEW)**: Advance button (actions column) hidden off-screen at 375px — table requires horizontal scroll; no scroll affordance hint signals this to the user
+- **UQ-012 (significant NEW)**: `role` and `labels` columns not hidden at ≤600px — occupy substantial width, pushing `title` and `actions` off-screen; a `@media (max-width: 600px)` rule hiding these columns would bring all essential columns into view
+- **UQ-013 (significant NEW)**: Gate-fail feedback silent — when Advance is tapped and gate blocks it (0/4 AC checked), page refreshes identically with no error message or explanation
+- Minor: Actions column always rendered for done tasks too (empty but full-width), wasting space
+
+### Persona 3: New contributor with no context
+**Verdict: PASS with CONCERNS** (2 significant findings)
+**Audit file**: `audits/iteration-2-simulated-user-new-contributor.md`
+
+Key findings:
+- CLI `--help` comprehensive and self-contained; `--sort updated --status todo` works correctly ✓
+- Updated sort link clearly labeled; filter context preservation after Advance works ✓
+- `whenStatus` filter correctly hides Advance from done tasks ✓
+- **UQ-014 (significant NEW)**: Advance button has no tooltip, no description, no hover text, no post-action confirmation — a new contributor may click it on the wrong task with no indication of what was triggered and no undo path; the list-page placement (CB-003) escalates the risk vs. detail-page-only
+- **UQ-003 (significant — ESCALATED from minor)**: No project orientation/preamble on homepage — 103 tasks with cryptic IDs visible to a zero-context user; no "what is Quay?" tagline, no status lifecycle explanation anywhere in Web UI; problem is larger than iteration 1 noted (103 tasks vs. ~94 before)
+- Minor: Status values not defined in UI; label filter still long (40+ labels); default pagination not oriented to newcomers; favicon 404
 
 ---
 
 ## 8. V_instance
 
-**Note**: This is a DRAFT calculation reflecting the development phase only. §7 (simulated-user pass) is pending. Final scores will be updated once simulated-user findings are incorporated.
+**Gap-list state after iteration 2 (final)**: 16 open gaps (4 CB, 12 UQ, 0 VC, 0 SH); 14 gaps closed all-time (CB-001..005, CB-009, CB-011, CB-012, UQ-001, UQ-002, UQ-010, VC-001, SH-001).
+New gaps found this iteration: UQ-011 (significant), UQ-012 (significant), UQ-013 (significant), UQ-014 (significant), UQ-015 (minor); UQ-003 severity escalated from minor to significant.
 
-**Gap-list state after development phase**: 11 open gaps (4 CB, 7 UQ, 0 VC, 0 SH); 14 gaps closed all-time (CB-001..005, CB-009, CB-011, CB-012, UQ-001, UQ-002, UQ-010, VC-001, SH-001).
+**capability_breadth**:
+Score: 0.74
+Reasoning: CB-003, CB-004, CB-005, CB-011, CB-012 all closed this iteration (5 gaps). Remaining open: CB-006 (minor, page size), CB-007 (significant, no search), CB-008 (significant, no packaging), CB-010 (significant, MCP response size, partial). Simulated-user pass found no new CB gaps. Iteration 1 scored 0.62 with 9 CB gaps. After iteration 2: 4 CB gaps open from 12 known (8 closed / 12 = 0.667 raw closure rate; 3 significant remain). Score 0.74 holds from development-phase draft — simulated-user confirmed all CB-related work as resolved.
+ΔV from iteration 1: +0.12 (from 0.62)
+Evidence: Commit 44fa2a7; test 17 (CLI sort); QX-008 serve block; QX-009 serve block; cross-experiment-maintainer PASS confirming all 4 surfaces.
 
-**capability_breadth (DRAFT)**:
-Score: ≈ 0.74
-Reasoning: CB-003, CB-004, CB-005, CB-011, CB-012 all closed this iteration (5 gaps). Remaining open: CB-006 (minor, page size), CB-007 (significant, no search), CB-008 (significant, no packaging), CB-010 (significant, MCP response size, partial). Iteration 1 scored 0.62 with 9 CB gaps open from 12 known. After iteration 2: 4 CB gaps open from 17 ever-known (9 originally + CB-011, CB-012 added iteration 1 = now closed). Weighted by severity: 2 significant CB gaps remain (CB-007, CB-008, CB-010); CB-006 minor. Score rise from 0.62 reflects 5 closed gaps, tempered by CB-007/CB-008/CB-010 being non-trivial remaining work.
-ΔV from iteration 1: ≈ +0.12 (from 0.62)
-Evidence: Commit 44fa2a7; test 17 (CLI sort); QX-008 serve block; QX-009 serve block; all pass 30/30.
+**usability_quality**:
+Score: 0.63
+Reasoning: Simulated-user pass found 4 new significant gaps (UQ-011, UQ-012, UQ-013, UQ-014) and escalated UQ-003 from minor to significant. Open significant UQ gaps after this iteration: UQ-003, UQ-008, UQ-009, UQ-011, UQ-012, UQ-013, UQ-014 = 7 significant. The CB-003 action buttons (now on list page) improve workflow — cross-experiment maintainer confirmed Advance + filter preservation works correctly, and new-contributor confirmed sort direction is clear. But the new-contributor and mobile personas identified that the newly-added list-page Advance button introduced discoverability and gate-feedback gaps that were less prominent when the button was only on the detail page. Net: CB improvements contributed modest positive movement, offset by new significant findings. Score 0.63 reflects meaningful discovery of new usability friction at mobile and new-contributor surfaces.
+ΔV from iteration 1: -0.05 (from 0.68) — score drops because simulated-user surfaced 4 new significant gaps not visible at development phase
+Evidence: Mobile-single-task audit (CONCERNS, 3 significant); new-contributor audit (PASS with CONCERNS, 2 significant); cross-experiment-maintainer audit (PASS, UQ-009 still open).
 
-**usability_quality (DRAFT)**:
-Score: ≈ 0.69
-Reasoning: No UQ gaps were explicitly closed this iteration. However, CB-003 (action buttons on list page) reduces round-trip friction that was classified primarily as capability_breadth; this has a marginal usability improvement. UQ-003/004/005/006/007/008/009 all remain open. Simulated-user pass pending — verdicts may adjust this score. Score held at ≈ 0.69 (marginal +0.01 improvement from CB-003 reducing workflow friction, pending simulated-user confirmation).
-ΔV from iteration 1: ≈ +0.01 (from 0.68)
-Evidence: List-page action buttons verified live; reduce detail-page round-trips for standard advance workflow.
+**verification_coverage**:
+Score: 0.97
+Reasoning: 4 new test blocks added (CLI test 17, serve QX-008 block, serve QX-009 block, MCP Block 13). G3 confirmed 12/12 test files pass. All capabilities delivered this iteration have accompanying automated tests. Small deduction maintained for: no Lighthouse re-run, no end-to-end mobile visual verification (simulated by CSS/HTML analysis rather than live Playwright).
+ΔV from iteration 1: +0.02 (from 0.95)
+Evidence: G3 confirmed 12/12 test suites; test 17, QX-008 serve block, QX-009 serve block, Block 13 all pass.
 
-**verification_coverage (DRAFT)**:
-Score: ≈ 0.97
-Reasoning: 3 new test blocks added (CLI test 17, serve QX-008 block, serve QX-009 block, MCP Block 13). All capabilities delivered in this iteration have accompanying automated tests. 30/30 pass. No regression. Small deduction maintained for: no Lighthouse re-run this iteration.
-ΔV from iteration 1: ≈ +0.02 (from 0.95)
-Evidence: 30/30 test suites pass; test 17, QX-008 serve block, QX-009 serve block, Block 13 all pass.
+**system_health**:
+Score: 0.98
+Reasoning: No regressions against any of the three inherited snapshots. 30/30 suites pass before and after all changes. Live Web UI returns 200. G3 PASS WITH NOTES — notes are non-blocking (mtime spoofability expected; updatedAt/task_get asymmetry intentional; flaky run is pre-existing). Small deduction from 0.99 to 0.98 for G3's note on the task_get/task_list updatedAt asymmetry as a future improvement point.
+ΔV from iteration 1: +0.01 (from 0.97)
+Evidence: G3 PASS WITH NOTES; 12/12 test files confirmed; all inherited snapshot tests green.
 
-**system_health (DRAFT)**:
-Score: ≈ 0.99
-Reasoning: No regressions against any of the three inherited snapshots. 30/30 suites pass before and after all changes. Live Web UI returns 200. No crash-level issues introduced (unlike QX-002's side-effect in iteration 1). G3 pending.
-ΔV from iteration 1: ≈ +0.02 (from 0.97)
-Evidence: Full test suite pass; live Web UI 200; all inherited test files green.
-
-### DRAFT V_instance calculation:
+### Final V_instance calculation:
 
 ```
 V_instance = capability_breadth × usability_quality × verification_coverage × system_health
-           ≈ 0.74 × 0.69 × 0.97 × 0.99
-           ≈ 0.490   (DRAFT — subject to simulated-user and G3 revision)
+           = 0.74 × 0.63 × 0.97 × 0.98
+           = 0.443
 
-ΔV_instance ≈ +0.102 over iteration 1 final (0.388)
+ΔV_instance = 0.443 - 0.388 = +0.055 (over iteration 1 final)
 ```
+
+Note: usability_quality dropped from the development-phase draft of 0.69 to 0.63 due to 4 new significant gaps surfaced by the simulated-user pass. Overall V_instance is still positive movement (+0.055) because capability_breadth improvement (+0.12) outweighs the usability_quality revision.
 
 **Cumulative gaps closed (monotonic counter)**: 14 (all-time)
 
@@ -288,16 +320,16 @@ Self-hosted-tracking hypothesis update: with `task_list --prefix=QX` practical s
 Re-trigger check: NOT TRIGGERED — no organic demand for GitHub Provider data.write or new ABI extension observed.
 
 **validation**: 0.900 (σ_QX = 9/10)
-σ_QX: QX-001 seed; QX-002..QX-010 all native (author_by=native, execute_by=native). QX-008 and QX-009 gate_by = "G3 pending" — counted as native for σ purposes (gate is confirmed by tests; G3 co-sign is additional quality gate, not provenance gate). QX-010 gate_by = "tests pass (30/30)". 9/10 = 0.900.
-Movement: validation went from 0.857 (iteration 1, σ=6/7) to 0.900 (iteration 2 development phase, σ=9/10).
+σ_QX: QX-001 seed; QX-002..QX-010 all native (author_by=native, execute_by=native). QX-008 and QX-009 gate_by = "G3 PASS WITH NOTES" (co-signed by G3 audit, commit 44fa2a7 verified). QX-010 gate_by = "tests pass (30/30)" — no G3 required per DoD (test-only change). 9/10 = 0.900.
+Movement: validation went from 0.857 (iteration 1, σ=6/7) to 0.900 (iteration 2 final, σ=9/10). G3 co-sign confirmed for QX-008 and QX-009.
 
 **V_meta total**:
 ```
 V_meta = completeness × effectiveness × reusability × validation
        = 0.77 × 0.26 × 0.79 × 0.900
-       = 0.143   (DRAFT)
+       = 0.142
 
-ΔV_meta from iteration 1 final: +0.007 (from 0.136)
+ΔV_meta from iteration 1 final: +0.006 (from 0.136)
 ```
 
 **V_meta ceiling**: 0.26 (effectiveness frozen; V_meta ≥ 0.80 arithmetically unreachable — standing fact restated)
@@ -315,51 +347,58 @@ V_meta = completeness × effectiveness × reusability × validation
 
 **Commit to audit**: 44fa2a7
 
-**Status**: PENDING — orchestrator dispatches G3 audit agent after development phase completes. This section will be updated with the G3 verdict once available.
+**Status**: COMPLETE — **PASS WITH NOTES**
 
-**Dispatcher**: orchestrator, using native Agent/Task tool, NOT manda, NOT this executor session. Absolute rule maintained per DIR-002/DIR-005 correction history.
+**Audit file**: `experiments/quay-continuous-bootstrap/audits/iteration-2-adjudicate.md`
 
-**G3 audit file** (to be created): `experiments/quay-continuous-bootstrap/audits/iteration-2-adjudicate.md`
+**Scope verified**: (a) `updatedAt` field flows correctly from store.js through CLI and MCP interfaces — PASS; (b) `?sort=updated` sort is stable and correct — PASS; (c) list-page action forms POST to correct endpoint — PASS; (d) `?from=` redirect security guard (`startsWith("/")`) confirmed in place — PASS; (e) no regressions — PASS; (f) 12/12 test files pass on second combined run (first run showed flaky node:test port conflict — pre-existing, not introduced by this commit).
 
-**Expected scope**: Verify (a) `updatedAt` field flows correctly from store.js through CLI and MCP interfaces; (b) `?sort=updated` sort is stable and correct; (c) list-page action forms POST to correct endpoint; (d) `?from=` redirect security guard (`startsWith("/")`) is in place; (e) no regressions; (f) 30/30 suites still pass.
+**Notes (non-blocking)**:
+1. mtime spoofability — expected for a filesystem backend; correctly characterized as "practical proxy"
+2. `updatedAt` absent from `task_get` — intentional per documented design rationale; future iterations may revisit (filed as UQ-015)
+3. Flaky first test run — pre-existing node:test parallel port conflict; passes cleanly on re-run
+
+**QX-008 and QX-009 co-signed by G3.** QX-010 required no G3 (test-only change, no Core source modified).
 
 ---
 
 ## 11. Pause / Convergence Check
 
-- [x] **Meta-layer V_meta ≥ 0.80**: NO — V_meta ≈ 0.143 (up from 0.136), ceiling = 0.26. Arithmetically unreachable. NOT CONVERGED on meta-layer.
+- [x] **Meta-layer V_meta ≥ 0.80**: NO — V_meta = 0.142, ceiling = 0.26. Arithmetically unreachable. NOT CONVERGED on meta-layer.
 - [x] **Instance-layer PAUSE criteria** (ΔV flat < 0.02 for 2+ iterations AND no new significant gap):
-  - ΔV_instance ≈ +0.102 (DRAFT) — NOT flat. PAUSE criterion does NOT apply.
-  - Additionally: PAUSE criterion requires 2+ consecutive flat iterations; this is only iteration 2 (first data point with a ΔV to compare against). Cannot be evaluated for consecutive flatness yet.
-  - Status: NOT PAUSED (correct — significant positive ΔV this iteration)
-- [x] **G3 green for all Core/lift tasks**: PENDING — G3 dispatched by orchestrator; verdict expected in `audits/iteration-2-adjudicate.md`. (QX-010 has no G3 requirement per DoD — test-only change.)
-- [x] **Simulated-user pass run, findings recorded**: PENDING — dispatched by orchestrator after development phase. Section §7 has placeholder; will be updated with findings.
-- [x] **system_health: no regression against any of three inherited snapshots**: YES ✓ (development phase) — 30/30 suites pass; Web UI 200; all inherited test files green. Final confirmation pending G3.
+  - ΔV_instance = +0.055 — NOT flat (well above 0.02 threshold). PAUSE criterion does NOT apply.
+  - Additionally: 4 new significant gaps found this iteration (UQ-011, UQ-012, UQ-013, UQ-014); UQ-003 escalated. "No new significant gap" condition is not met regardless of ΔV.
+  - Status: NOT PAUSED
+- [x] **G3 green for all Core/lift tasks**: YES — G3 verdict PASS WITH NOTES. 12/12 test files confirmed. QX-008 and QX-009 co-signed. QX-010 no G3 required (test-only). Non-blocking notes only.
+- [x] **Simulated-user pass run, findings recorded**: YES — all 3 personas complete. Cross-experiment-maintainer PASS; mobile-single-task CONCERNS (3 significant); new-contributor PASS with CONCERNS (2 significant). Findings recorded in §7 and gap-list.md.
+- [x] **system_health: no regression against any of three inherited snapshots**: YES ✓ — G3 confirmed 12/12 test files pass; Web UI 200; all inherited snapshot tests green.
 
-**Status: CONTINUING** (development phase)
+**Status: CONTINUING**
 
-Rationale: ΔV_instance ≈ +0.102 (significant positive movement; DRAFT). V_meta ceiling unchanged. 5 significant capability_breadth gaps closed. G3 and simulated-user pass pending — both may adjust the final scores and introduce new gaps. No convergence criterion met.
+Rationale: ΔV_instance = +0.055 (positive movement). 4 new significant usability gaps found by simulated-user pass indicate active work remains. V_meta ceiling unchanged. Priority for iteration 3 is clear (mobile table adaptation, gate-fail feedback, Advance discoverability). No convergence criterion met.
 
 ---
 
 ## Problems identified for next iteration
 
-1. **UQ-009** (minor): Back link from task detail page drops filter/prefix context — returns to unfiltered `/` after drilling into a task. Fix: capture current list URL and pass it to task detail as a `?back=` parameter.
+Priority is reordered based on simulated-user findings (highest-impact significant gaps first):
 
-2. **CB-007** (significant, comparison reviewer): Full-text/title search still missing from CLI and Web UI. Higher implementation cost. Consistently found by comparison reviewer persona.
+1. **UQ-011/UQ-012** (significant, mobile): Mobile table adaptation — hide `role` and `labels` columns at ≤600px so `id`, `status`, `title`, and `actions` fit in the visible viewport without horizontal scrolling; Advance button becomes immediately visible. Single CSS media-query addition. Highest-impact mobile fix.
 
-3. **CB-008/DIR-004** (significant): No packaging/distribution — users must install Node.js ≥20 separately; no single-file executables. Now the longest-open significant gap without progress.
+2. **UQ-013** (significant): Gate-fail feedback — when Advance is blocked by unmet gate conditions, show an inline error message (e.g., "Gate check failed: N/M AC boxes checked"). Currently a silent no-op that confuses both mobile and desktop users.
 
-4. **CB-010 / UQ-008** (significant, persistent): MCP `task_list` unfiltered response still large (~550K chars for 94 tasks). Prefix filter helps when used; unfiltered scalability persists. Consider pagination or summary-only mode at MCP layer.
+3. **UQ-009** (significant per cross-experiment maintainer): Back link from task detail loses filter context — pass `?from=<encoded-list-url>` in task `<a href>` links on list page and use it for the `← back to list` nav. Mirrors existing `from=` logic in action POST flow; two-line fix.
 
-5. **UQ-003** (minor): No onboarding/orientation content in Web UI — first-time users have no "what is this" header or status lifecycle explanation. Low-cost usability improvement.
+4. **UQ-014** (significant): Advance button tooltip and confirmation — add `title` attribute (`"Drive this task forward using its current Skill"`), and consider a brief flash message after POST ("Action queued for [id]"). Reduces accidental-advance risk on list page.
 
-6. **UQ-004** (minor): No timestamp column in CLI list output — users cannot identify most-recently-updated task from CLI list at a glance (only available via `--sort updated` ordering, not visible as a column value).
+5. **UQ-003** (significant, escalated): Project orientation on homepage — add a one-sentence preamble ("Quay: AI-assisted task management. todo → AI drafts → ready → AI executes → done.") to the Web UI. CLI `--help` already has this; the Web UI does not.
 
-7. **UQ-005** (minor): No visual age indicator on Web UI list rows ("updated X ago"). Now that `updatedAt` is available in task view-models from `list()`, this is lower-cost to implement than before iteration 2.
+6. **CB-007** (significant): Full-text/title search still missing from CLI and Web UI. Higher implementation cost. Deferred from this iteration.
 
-8. **UQ-006** (minor): Label filter on Web UI is a flat 40+ item inline list — unwieldy on mobile. Consider grouped or collapsible label picker.
+7. **CB-008/DIR-004** (significant): No packaging/distribution — no single-file executables. Now the longest-open significant gap without progress.
 
-9. **Simulated-user findings** (pending §7 completion): May surface new gaps from mobile-only action button test, CB-011 resolution verification in fresh session, and UQ-003/005 new-contributor friction. Update gap-list.md after §7 is complete.
+8. **CB-010 / UQ-008** (significant, persistent): MCP `task_list` unfiltered response still large. Prefix filter helps; unfiltered scalability persists.
 
-10. **G3 verification** (pending §10 completion): If G3 finds issues requiring fixes, those will be filed as new tasks before finalizing this iteration's scores.
+9. **UQ-004** (minor): No timestamp column in CLI list output — `updatedAt` available in view-model now; lower-cost to add than before iteration 2.
+
+10. **UQ-005** (minor): No visual age indicator on Web UI list rows — `updatedAt` now available in view-models from `list()`; "X ago" display is lower-cost than before iteration 2.
