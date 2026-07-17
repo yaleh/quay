@@ -5,7 +5,7 @@
 **Dimensions advanced**: usability_quality (DOC-001..005 README completeness, config-first ordering), system_health/packaging (PKG-007/008 license, PKG-009 assessed)
 **V_meta triggers checked**: All 5 re-trigger conditions checked. methodology_leverage: NOT triggered (inline docs/metadata edits). strategy_completeness item 6: NOT exercised (CLI+MCP not touched). transfer_breadth: unchanged at 1.0 (no surface additions or regressions). PAUSE/resume: triggered — PAUSE counter = 2 provisional.
 **Worktree**: `experiments/quay-continuous-bootstrap/worktrees/iteration-19` (branch `experiment-4-iteration-19`, reset to `experiment-4-iteration-18` tip at f9e1b37). All development edits target worktree paths exclusively.
-**Gap-list delta**: 8 gaps closed (DOC-001/002/003/004/005, PKG-007, PKG-008, PKG-009/won't-fix); 0 new gaps found in dev phase; cumulative gaps-closed counter: **102** (provisional)
+**Gap-list delta**: 8 gaps closed (DOC-001/002/003/004/005, PKG-007, PKG-008, PKG-009/won't-fix); 2 new gaps from synthesis (NEW-001 LOW, PKG-010 MINOR); cumulative gaps-closed counter: **102** (FINAL)
 
 ---
 
@@ -254,15 +254,47 @@ node --test experiments/quay-continuous-bootstrap/worktrees/iteration-19/package
 
 ## 7. Simulated-user pass (§0c — every iteration)
 
-**STATUS: PENDING** — Simulated-user dispatch is the orchestrator's responsibility (native Agent/Task tool, run_in_background=true, fresh context). This iteration-executor does not dispatch or observe its own dispatch mode.
+**STATUS: COMPLETE — 3 personas dispatched by orchestrator (2026-07-17). All PASS.**
 
-§11 (Pause/Convergence Check) and §10 (Out-of-band audit) are marked PENDING pending synthesis.
+### Persona A — New CLI contributor
+**Verdict: PASS**
 
-**Planned persona selection for orchestrator's reference:**
-- This iteration's changes are docs/packaging — README polish and license. Appropriate reviewer angles:
-  - **New-contributor-no-context** (re-run): verify the config-first ordering resolves DOC-004 friction; confirm action and task view/edit commands are discoverable; check install instructions for clarity with the GitHub releases URL.
-  - **Package-artifact reviewer**: verify the LICENSE file ships correctly in a dry-run `npm pack`; confirm `"license"` field visible in `npm pack` output; PKG-009 intentionality documented.
-  - **Cross-surface consistency check**: verify README accurately reflects actual CLI behavior (flags documented match what `--help` shows); no documentation drift.
+All five DOC gaps verified fixed:
+- DOC-001 (`--provider <id>`): FIXED — documented in both Global options and Configuration sections with example
+- DOC-002 (action list/run): FIXED — "Action commands" subsection added with both commands
+- DOC-003 (task view/edit): FIXED — shown with usage examples in Task commands section
+- DOC-004 (config-first ordering): FIXED — Configuration at line 30, CLI usage at line 51; "Create this file before running any commands" present verbatim
+- DOC-005 (GitHub releases URL): FIXED — `https://github.com/yaleh/quay/releases` inline in Option A install instructions
+
+**New gap found:**
+- NEW-001 (LOW/cosmetic): `quay action run QX-001 <action-id>` uses literal placeholder without noting "run `action list` first to see IDs." Cosmetic; action list is documented immediately above.
+
+Persona A recommendation: **PAUSE** — no blocking issue requires another iteration.
+
+### Persona B — Methodology reviewer
+**Verdict: PASS**
+
+- Gap-list accuracy: ACCURATE — all 8 closures correctly recorded, sourced to QX-066/QX-067, no ghost closures
+- strategy_completeness = 0.83: DEFENSIBLE — item 6 not exercised (docs/metadata only, no CLI/MCP/Web UI source touched)
+- methodology_leverage = 0.50 carry: DEFENSIBLE — gaps are simulated-user-sourced but implementations bypass the Skill design loop; carry convention is correct; note: carry at 0.50 is generous relative to a strict cumulative running average where denominator grew by 8 with 0 new native executions
+- V_instance components: all DEFENSIBLE; mild scrutiny noted: system_health 0.978 carries `repository` field gap (see Persona C)
+- V_meta = 0.402: DEFENSIBLE — ML and SC structural constraints correctly diagnosed
+- iteration-19.md §1–§6: COMPLETE and HONEST; one precision note: QX-066 gate description "tests pass (12/12); docs-only" understates that README correctness was assessed by direct inspection, not automated test; non-fraudulent, but a provenance-hygiene note
+
+Persona B recommendation: **PAUSE** — methodology reason to continue would require new significant gap from synthesis. None found.
+
+### Persona C — Package artifact checker
+**Verdict: PASS**
+
+- PKG-007 (LICENSE file): FIXED — MIT text matching root LICENSE (Yale Huang 2026)
+- PKG-008 ("license":"MIT"): FIXED — field present in package.json
+- PKG-009 ("private":true): WON'T-FIX DEFENSIBLE — root workspace package.json also carries "private":true; GitHub release delivery model confirmed
+- Files array: CLEAN — all 5 entries (bin/, src/, README.md, CHANGELOG.md, LICENSE) resolve to real paths; zero ghost entries
+
+**New gap found:**
+- PKG-010 (MINOR): No `repository` field in `packages/quay/package.json` — package consumers cannot trace provenance to GitHub repo without it
+
+Persona C recommendation: **PAUSE** — no blocking PKG issue prevents PAUSE.
 
 ---
 
@@ -400,32 +432,83 @@ V_meta ≈ 0.402 (PROVISIONAL)
 
 ## 10. Out-of-band audit (G3)
 
-**G3 NOT TRIGGERED this iteration.**
+**G3 dispatched by orchestrator. Verdict: PASS.**
 
-Reason: No Core source files were changed. `packages/quay/README.md` is documentation (non-executable). `packages/quay/LICENSE` is a text file. `packages/quay/package.json` `"license"` field is metadata (does not affect Node.js execution or the MCP/CLI/Web UI behavior). Per §Core-scope-constraints item 5: "G3 extends to Core: any task touching `packages/quay` source files." Source files = `bin/` and `src/` directories. Metadata and documentation changes do not meet this criterion.
+Note: The executor correctly noted that no Core source files changed, so no source-code G3 gate was required. The orchestrator dispatched G3 independently per experiment discipline to verify isolation, artifact completeness, and σ_QX. G3 confirmed:
 
-This is the correct and expected outcome for a documentation/metadata-only iteration. Not a loophole or an attempt to avoid G3 — the same logic that exempted QX-010 (test-only, no Core source change) in iteration 2.
+- **Isolation**: `git status --short -- packages/quay/` returned empty — shared tree clean
+- **DOC-001..005**: all present in README (--provider, action list/run, task view/edit, config-first, GitHub releases URL)
+- **PKG-007**: LICENSE file exists with full MIT text (Yale Huang 2026)
+- **PKG-008**: `"license": "MIT"` present in package.json line 5
+- **PKG-009**: WON'T-FIX rationale defensible
+- **files array**: LICENSE now resolves — no longer a ghost entry
+- **σ_QX**: 63/65 = 0.969 confirmed
+- **Tests**: 12/12 pass (live run)
+- **iteration-19.md §1–§6**: complete; §7 PENDING marker correct at time of executor submission
+
+Audit file: `experiments/quay-continuous-bootstrap/audits/iteration-19-adjudicate.md`
 
 ---
 
-## 11. Pause / Convergence Check (PROVISIONAL — simulated-user pending)
+## 11. Pause / Convergence Check (FINAL)
 
-- [ ] **Meta-layer V_meta >= 0.80**: **NO** — V_meta PROVISIONAL ≈ 0.402. Maximum achievable at current factor values (ML=0.50, SC=0.83, TB=1.0, VAL~1.0) = 0.415. V_meta ≥ 0.80 requires structural methodology change (ML or SC improvement). Neither is achievable without genuine methodology-driven execution or cross-surface iteration.
-- [ ] **Instance-layer PAUSE criteria** (ΔV < 0.02 for 2+ consecutive AND no new significant gap): **PROVISIONALLY MET (pending synthesis)**
-  - ΔV_18 = +0.007 < 0.02 (1st consecutive — PAUSE counter = 1)
-  - ΔV_19 provisional ≈ +0.013 < 0.02 (2nd consecutive — PAUSE counter = 2)
-  - New significant gaps from synthesis: **UNKNOWN (pending simulated-user pass)**
-  - If synthesis finds no new blocking/significant gap → **PAUSE RECOMMENDED**
-  - **This is a PAUSE the human can resume, not a terminal halt.**
-- [ ] **G3 green for all Core/lift tasks**: **NOT TRIGGERED** — no Core source files changed; no V-factor-lift tasks require G3 this iteration. Correct and expected.
-- [ ] **Simulated-user pass run, findings recorded**: **PENDING** — orchestrator dispatch required (native Agent/Task tool, run_in_background=true, fresh context). §7 marked PENDING.
-- [ ] **system_health: no regression against any of the three inherited snapshots**: **PASS (provisional)** — 12/12 test suites pass; no source logic changed; no regressions possible from docs/metadata-only changes.
+- [x] **Meta-layer V_meta >= 0.80**: **NO** — V_meta FINAL = 0.402. Maximum achievable at current factor values (ML=0.50, SC=0.83, TB=1.0, VAL~1.0) = 0.415. V_meta ≥ 0.80 requires structural methodology change. Not achievable without genuine Skill-loop-executed changes or cross-surface iteration.
+- [x] **Instance-layer PAUSE criteria** (ΔV < 0.02 for 2+ consecutive AND no new significant gap): **MET**
+  - ΔV_18 FINAL = +0.007 < 0.02 (PAUSE counter = 1)
+  - ΔV_19 FINAL = +0.011 < 0.02 (system_health revised 0.978→0.976 for PKG-010 repository field MINOR; PAUSE counter = 2)
+  - New gaps from synthesis: NEW-001 (LOW/cosmetic), PKG-010 (MINOR) — neither SIGNIFICANT nor BLOCKING
+  - **PAUSE CONDITION CONFIRMED**
+- [x] **G3 dispatched and returned PASS**: PASS — isolation confirmed, all artifacts verified, σ_QX = 63/65 = 0.969 confirmed
+- [x] **Simulated-user pass run, findings recorded**: COMPLETE — Persona A PASS, Persona B PASS, Persona C PASS (see §7)
+- [x] **system_health: no regression against any of the three inherited snapshots**: PASS — 12/12 test suites pass; no source logic changed
 
-**Status: PENDING (synthesis required) — provisional PAUSE RECOMMENDED**
+### FINAL V_instance = 0.850
 
-If simulated-user synthesis finds:
-- **No new blocking/significant gap** → **PAUSE RECOMMENDED** (2nd consecutive ΔV < 0.02 confirmed; PAUSE condition satisfied). State explicitly: **this is a PAUSE the human can resume, not a terminal halt.**
-- **New significant/blocking gap** → PAUSE counter resets; continue to iteration 20 to address.
+Synthesis revision: system_health adjusted 0.978 → 0.976 for PKG-010 (missing `repository` field, MINOR).
+
+```
+cap_breadth     = 0.928
+usability       = 0.945
+verification    = 0.993
+system_health   = 0.976   (revised from 0.978 for PKG-010)
+V_instance      = 0.928 × 0.945 × 0.993 × 0.976 = 0.850
+ΔV_19 FINAL     = 0.850 - 0.839 = +0.011
+```
+
+### FINAL V_meta = 0.402
+
+No factor movement. All factors carry from iteration 18 FINAL:
+```
+methodology_leverage    = 0.50   (carry — gaps sourced but not Skill-executed)
+strategy_completeness   = 0.83   (5/6 — item 6 not exercised)
+transfer_breadth        = 1.0    (carry — confirmed)
+validation (σ_QX)       = 63/65  = 0.969   (G3 confirmed)
+V_meta = 0.50 × 0.83 × 1.0 × 0.969 = 0.402
+ΔV_meta = 0.000
+```
+
+### **⏸ PAUSE TRIGGERED — ITERATION 19 FINAL**
+
+**PAUSE counter = 2 (FINAL):**
+- ΔV_18 FINAL = +0.007 < 0.02 (counter = 1)
+- ΔV_19 FINAL = +0.011 < 0.02 (counter = 2)
+- No new SIGNIFICANT or BLOCKING gap from synthesis
+
+**This is a PAUSE the human can resume, not a terminal halt.**
+
+Remaining open gaps (2 total):
+- ENV-001 (minor, deferred): MCP stale process — environmental characteristic, no code fix at package level
+- SH-006 (minor, deferred): quay-native startup stderr leak — fix requires changes in `packages/quay-native/`
+
+New MINOR gaps found by synthesis (backlog for future iteration if resumed):
+- NEW-001 (LOW): action-id discovery hint missing in action run example
+- PKG-010 (MINOR): No `repository` field in `packages/quay/package.json`
+
+Resumption options (human decision):
+1. Address ENV-001 with more aggressive client-side mitigation
+2. Address SH-006 if quay-native is brought into scope
+3. Exercise item 6 (cross-surface changes) to improve V_meta strategy_completeness → 1.0
+4. Accept current state: V_instance = 0.850 (above 0.80 threshold), V_meta = 0.402 (structural ceiling 0.415)
 
 ---
 
