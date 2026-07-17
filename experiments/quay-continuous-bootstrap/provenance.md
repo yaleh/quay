@@ -84,6 +84,127 @@ instead of experiment 3's, is a scoring error — see protocol §6.
 
 ---
 
+## Iteration 0 record (2026-07-17)
+
+### V_meta inheritance reconciliation
+**RECONCILED AGAINST AUTHORITATIVE SOURCE**: `experiments/quay-webui-bootstrap/HALT-RECOMMENDATION.md`
+exists and was read in full. Its final recorded values are:
+```
+V_meta = completeness × effectiveness × reusability × validation
+       = 0.77 × 0.26 × 0.79 × 0.778 = 0.123
+```
+These match the provisional 0.123 in ITERATION-PROMPTS.md. No discrepancy found.
+**The 0.123 figure is CONFIRMED, not provisional.** The HALT-RECOMMENDATION.md records this
+as the final experiment-3 value (not merely a mid-experiment reading).
+
+V_meta ceiling = 1.0 × 0.26 × 1.0 × 1.0 = **0.26**
+V_meta ≥ 0.80 is arithmetically unreachable at this ceiling (0.26 < 0.80).
+This is a standing fact restated every iteration until/unless a genuine re-trigger fires.
+
+### Gap-list storage decision
+**Decision: plain markdown file** at `experiments/quay-continuous-bootstrap/gap-list.md`.
+
+**Reasoning**: Iteration 0 is primarily observational and the MCP tools themselves are being
+tested for friction. Using `QX-* tasks with gap label` would conflate "a known gap not yet
+turned into actionable work" with "a task actively being executed." The plain file is simpler
+to stand up immediately, immediately available, and the distinction between gap entries and
+active tasks is cleaner to maintain. This decision may be revisited in a later iteration if
+the gap list grows unwieldy as a flat file and `task_list --label gap` proves a cleaner query.
+
+### DIR-006 standing guardrail confirmation
+DIR-006 (git worktree isolation) is adopted as a standing guardrail from iteration 0 onward
+per protocol §8. It is NOT re-filed as a pending directive (the protocol itself resolves the
+"should we do this" question). This iteration created worktree at:
+`experiments/quay-continuous-bootstrap/worktrees/iteration-0` on branch `experiment-4-iteration-0`.
+Created via: `git worktree add experiments/quay-continuous-bootstrap/worktrees/iteration-0 -b experiment-4-iteration-0`
+Result: SUCCESS (Preparing worktree, HEAD at 6742218).
+
+### DIR-004 re-filing
+DIR-004 re-filed as `experiments/quay-continuous-bootstrap/directives/pending/DIR-004-node-sea-bun-compile-release-artifacts.md`.
+Scope status changed from "deferred, out of scope" (experiment 3) to "pending, IN SCOPE, not yet prioritized" (experiment 4).
+This is a `capability_breadth` gap (CB-008 in gap-list).
+
+### σ_QX-vs-inherited-floor decision (EXPLICIT, iteration 0)
+**Decision: RESET the floor to 0 for experiment 4's own validation scoring.**
+
+Same reasoning as experiment 3's iteration 0: experiment 4's task population (QX-*) is
+genuinely different from experiment 3's (QW-*). Cross-experiment carry-forward of σ_QW=0.778
+as a floor would conflate two different provenance populations and would likely cause the same
+inherited-floor trap that burned experiment 2 (σ_QC unable to exceed σ_strict floor within
+experiment scope). The reset is the validated design choice per quay-webui-bootstrap-methodology
+SKILL.md finding #5.
+
+validation = σ_QX alone: (# QX-* tasks with all three fields = native) / (total QX-* tasks)
+σ_QX starts at 0/0. No cross-experiment floor applies.
+
+Consequence: with σ_QX = 0/0 at iteration 0, validation = 0/0 = undefined. Convention
+(consistent with experiment 3's iteration 0): use the inherited validation value (0.778) for
+iteration 0 before any QX-* task has been driven to done, marking it as inherited-not-yet-own.
+Starting from iteration 1, validation = σ_QX exclusively.
+
+### Provenance note: open design question #5 resolution
+Protocol §9 item 5: "Does a `task_write` call made through the MCP tool change how provenance
+is recorded?" Answer confirmed at iteration 0: NO — provenance mechanics ({author_by, execute_by,
+gate_by}) are unchanged. QX-001 was created via `mcp__quay__task_write`, but the provenance
+triple records WHO did the authoring (seed = this iteration's setup, not a native Skill-driven
+pass). The MCP tool interface used does not change the provenance attribution.
+
+### QX-* tasks created this iteration
+| Task | author_by | execute_by | gate_by | σ contribution | Notes |
+|------|-----------|------------|---------|----------------|-------|
+| QX-001 | seed | N/A | N/A | 0/1 | Created via task_write MCP tool; todo status; not yet driven through quay:author/execute |
+
+σ_QX after iteration 0: 0/1 = 0.000
+validation (iteration 0, using inherited floor convention): 0.778 (inherited, not yet own)
+
+### Self-hosted task tracking test result (friction found)
+End-to-end MCP cycle completed:
+- task_write: SUCCESS (QX-001 created)
+- task_list: SUCCESS but returns ALL 94 tasks (no prefix filter) — response was 550,343 chars,
+  exceeded context limits, required file + jq post-processing. This confirms CB-009 and CB-010.
+- task_get: SUCCESS (QX-001 retrieved cleanly)
+- task_check: SUCCESS (gate correctly reports ok:false, 0/4 AC checkboxes checked)
+
+Friction recorded as gap-list entries CB-009 and CB-010 (usability_quality dimension).
+
+### Simulated-user pass: ENV gap record
+Native Agent/Task tool search result: ToolSearch query "Agent task spawn subagent" returned
+only `mcp__plugin_manda_manda__Agent`, `TaskStop`, and `mcp__quay__task_check`.
+No unconditional native Agent/Task tool found in this session's deferred-tool list.
+This is the same ENV gap documented in experiments 2 and 3.
+Per DIR-002/DIR-005 evidentiary bar: actual ToolSearch result shown (not merely asserted).
+Fallback: inline degraded-fallback — all 3 personas simulated in this session sequentially.
+Deviation explicitly flagged: this does not satisfy §0c's fresh-context independence requirement.
+
+### V_meta re-trigger checks (iteration 0)
+All 5 re-trigger conditions checked:
+1. effectiveness re-trigger: NOT TRIGGERED — no QX-* task arising with scope-matched shape
+   (single-file, no network I/O) has been COMPLETED this iteration (QX-001 is at todo status).
+2. reusability re-trigger: NOT TRIGGERED — no organic demand for GitHub Provider body/title
+   writes observed.
+3. completeness re-trigger (gap discovery): NOT TRIGGERED — no new, previously-undocumented
+   Skill Method-step gap found. The ENV gap continues unchanged.
+4. completeness + reusability/effectiveness joint: NOT TRIGGERED — no unconditional
+   fresh-context spawn primitive appeared.
+5. open-ended-domain-specific: OBSERVATIONAL DATA COLLECTED — self-hosted task tracking
+   confirmed friction (CB-009, CB-010, MCP response size). This is the first iteration of
+   data; not sufficient to claim re-trigger without timing evidence.
+
+### System health regression check
+- Experiment 1 snapshot (V_instance = 0.6016): No regression detected. All inherited code
+  paths confirmed by running full test suite: 30/30 proper tests pass.
+- Experiment 2 snapshot (all 4 factors = 1.0): No regression. core-three-way-symmetry.test.mjs
+  and web-ui-browser.test.mjs both pass.
+- Experiment 3 snapshot (V_instance = 1.0): No regression. web-ui-browser.test.mjs:
+  30/30 tests pass. http://localhost:4173/ returns 200. Lighthouse not re-run this iteration
+  (no visual changes made).
+
+### G3 audit status
+G3 NOT TRIGGERED this iteration — no Core source files (`packages/quay`) were changed.
+This is the correct and expected outcome for an observational/baseline iteration.
+
+---
+
 ## Human-observed gap-list seed candidates (2026-07-17, pre-iteration-0)
 
 The human, using experiment 3's shipped Web UI directly as a real user (not via the
