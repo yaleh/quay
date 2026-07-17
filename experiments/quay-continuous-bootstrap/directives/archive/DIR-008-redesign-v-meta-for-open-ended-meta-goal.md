@@ -117,4 +117,13 @@ separately and may become its own directive; this DIR-008 is scoped to
 the concrete V_meta redesign + re-baseline only.
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred -->
+
+**Status:** APPLIED — Iteration 14 (2026-07-17)
+**Applied in:** QX-050
+**G3 co-sign:** PASS-WITH-NOTES (iteration-14-adjudicate.md)
+
+New formula: methodology_leverage × strategy_completeness × transfer_breadth × validation
+Re-baseline: 0.40 × 0.83 × 0.75 × 0.962 = 0.240 (FINAL, post-Persona-C correction; transfer_breadth revised 0.80 → 0.75 after synthesis review found docs coverage "thin and irregular" inconsistent with "covered" scoring)
+VMETAFORMULA.md created with full rubric and history.
+ITERATION-PROMPTS.md updated (header + operational body; META-001 body inconsistency fixed in synthesis).
+Non-comparability statement recorded.

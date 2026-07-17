@@ -1,7 +1,7 @@
 # Iteration 14 — quay-continuous-bootstrap (Experiment 4)
 
 **Date:** 2026-07-17  
-**Status:** Dev phase COMPLETE — G3 + Simulated-user PENDING (orchestrator dispatch)  
+**Status:** FINAL — G3 PASS-WITH-NOTES; all 3 simulated-user personas complete  
 **Worktree:** `experiments/quay-continuous-bootstrap/worktrees/iteration-14` (branch: `experiment-4-iteration-14`)
 
 ---
@@ -295,69 +295,165 @@ Also: QX-001 closed (seed provenance; adds to denominator, not numerator).
 
 ---
 
-## §7 Simulated-user pass
+## §7 Simulated-user synthesis (FINAL)
 
-PENDING — dispatched by orchestrator separately. Not run in this session.
+Three personas dispatched by orchestrator; all complete.
+
+### Persona A — First-time CLI contributor
+
+**QX-054 (unknown --format warning): PASS** — Warning correctly emitted to stderr, exit 0, table output on stdout unaffected. Additional edge case: `--format JSON` (uppercase) triggers warning instead of being normalized to lowercase (new gap UQ-044).
+
+**QX-051 (grammar fix): PASS** — Web UI search banner correctly shows "1 result" / "2 results" (confirmed via `quay serve`).
+
+**QX-052 (filter-zero state): PASS** — Both CLI and Web UI show appropriate zero-state messaging; no double-message conflict.
+
+**QX-053 (--format in --help): PARTIAL** — `--format json` appears in the Options section (`--json  Output as JSON (also: --format json)`), which is a meaningful improvement. However, the usage synopsis line still reads `[--json]`, not `[--json | --format json]` or `[--format <fmt>]`. A first-timer scanning only the synopsis will not see `--format` at all. New gaps found by Persona A:
+- UQ-042: CLI "1 matches" grammar error in search header (`# search: "q" (1 matches)` should be `(1 match)`)
+- UQ-043: `--format` absent from CLI usage synopsis line (QX-053 partial — synopsis not updated)
+- UQ-044: `--format` case-sensitive — `--format JSON` triggers warning instead of normalizing
+- UQ-045: No `--format json` scripting example in --help Examples section
+
+### Persona B — Web UI filter user
+
+**QX-051: PASS** — Ternary `totalTasks === 1 ? "result" : "results"` confirmed correct at line 717 of `serve.js`. Comment block references QX-051 explicitly.
+
+**QX-052: PASS** — `pageTasks.length === 0 && !qFilter` condition correct; anti-double-message invariant confirmed.
+
+New gap found by Persona B:
+- UQ-046: QX-046 test block OR condition at line 1466 still accepts the pre-fix `"Showing 1 results"` form (`singleBannerText.includes("Showing 1 results") || singleBannerText.includes("Showing 1 result")`). The dedicated QX-051 block correctly covers the singular-only assertion; this is a latent regression in the older block's negative check. Low severity.
+
+### Persona C — Cross-experiment maintainer
+
+**QX-050 (V_meta redesign): PARTIAL** — Formula redesign is conceptually sound and problem diagnosis is honest. Two implementation gaps found:
+
+1. **DIR-008 not archived** — directive still in `directives/pending/`, not moved to `directives/archive/` after being applied. A future iteration executor reading the pending list will not know whether to re-apply it.
+
+2. **ITERATION-PROMPTS.md body not fully updated** — The header/inheritance sections correctly reference the new formula and retirement notice. However, two operational template sections still compute the old formula:
+   - Line 618 (§V_meta for this experiment): still shows `V_meta = completeness × effectiveness × reusability × validation`
+   - Line 785 (EVALUATE step): still instructs executor to compute with old formula and old re-trigger watchlist
+
+   These are the sections an executor will follow step-by-step in iteration 15. The top-level notice says old formula is RETIRED, but the template contradicts it. **Real executor-confusion risk.** Assigned META-001 (process gap, immediately closed in synthesis).
+
+3. **transfer_breadth = 0.80 mildly inflated** — Docs surface scored as "covered" while the rationale simultaneously describes coverage as "thin and irregular across iterations." Persona C flags 0.75 as more honest (3.75/5 rounded down). A strict re-baseline would use 0.70, giving V_meta = 0.223; synthesis agent adopts 0.75 as the revised correction.
+
+### Synthesis verdict per QX task
+
+| QX | Final verdict |
+|----|--------------|
+| QX-050 | PASS-WITH-NOTES (metric-G3 co-sign; DIR-008 archival gap + ITERATION-PROMPTS body gap → both fixed in synthesis) |
+| QX-051 | PASS (grammar fix confirmed; 3 assertions correct) |
+| QX-052 | PASS (empty-state message confirmed; no double-message; 3 assertions correct) |
+| QX-053 | PARTIAL (--format in Options ✓; synopsis line not updated; no scripting example) |
+| QX-054 | PASS (warning on unknown format; exit 0; spawnSync captures stderr correctly) |
+| QX-055 | PASS (QX-001 closed in canonical task store) |
+
+### New gaps from synthesis
+
+| ID | Description | Found by |
+|----|-------------|----------|
+| UQ-042 | CLI "1 matches" grammar error in search header | Persona A |
+| UQ-043 | --format absent from CLI usage synopsis line | Persona A |
+| UQ-044 | --format case-sensitive (JSON not normalized to json) | Persona A |
+| UQ-045 | No --format json scripting example in --help | Persona A |
+| UQ-046 | QX-046 test OR condition accepts pre-fix "Showing 1 results" (latent regression) | Persona B |
+| META-001 | ITERATION-PROMPTS.md body still used old V_meta formula (fixed in synthesis — CLOSED) | Persona C |
 
 ---
 
-## §8 V_instance provisional
+## §8 V_instance FINAL
 
-The 5 UQ gaps closed (UQ-037/038/039/040/041) are all minor `usability_quality` improvements. No capability_breadth, verification_coverage, or system_health changes.
+Scoring against iteration-13 FINAL baselines (cap_breadth=0.855, usability_quality=0.883, verification_coverage=0.970, system_health=0.975):
 
-Provisional estimate:
-- `capability_breadth` ≈ 0.855 (unchanged — CB-006 still open)
-- `usability_quality` ≈ 0.93–0.95 (was 0.883; closing 5 of 8 open UQ gaps, leaving 0 UQ gaps open)
-- `verification_coverage` ≈ 0.980 (new tests added; no regression)
-- `system_health` ≈ 0.975 (no system_health changes)
+**`capability_breadth` = 0.860**
+QX-053 is PARTIAL (synopsis not updated). New gaps UQ-042..045 are open. Minor upward movement from QX-050 (metric) and the general polish arc, partially offset by new gaps. Carry-forward 0.855 + minor credit for closing 5 UQ gaps without new CB gaps → 0.860.
 
-**V_instance provisional ≈ 0.855 × 0.94 × 0.980 × 0.975 ≈ 0.768**
-**ΔV_instance provisional ≈ +0.047**
+**`usability_quality` = 0.908**
+Was 0.883. QX-051 (grammar fix) PASS, QX-052 (empty state) PASS, QX-054 (format warning) PASS — substantive improvements. New UQ-042 (grammar, minor) holds score below provisional peak. Net: significant improvement from 5 closed UQ gaps, slightly offset by 5 new minor UQ gaps.
 
-(Final scoring pending G3 + simulated-user.)
+**`verification_coverage` = 0.985**
+30/30 tests pass. New test assertions for QX-051 (3), QX-052 (3), QX-053 (1), QX-054 (2) added this iteration. Coverage improved, no gaps in covered capabilities.
+
+**`system_health` = 0.975**
+Clean worktree isolation. No regressions against inherited snapshots. Unchanged from iteration 13.
+
+**V_instance FINAL:**
+```
+V_instance = 0.860 × 0.908 × 0.985 × 0.975
+
+  0.860 × 0.908  = 0.78088
+  0.78088 × 0.985 = 0.76917
+  0.76917 × 0.975 = 0.74994
+
+V_instance FINAL = 0.750
+
+ΔV_instance = 0.750 − 0.721 = +0.029
+```
+
+ΔV = +0.029 (above 0.02 threshold). PAUSE counter does not increment.
 
 ---
 
-## §9 V_meta provisional
+## §9 V_meta FINAL (revised — new formula, transfer_breadth corrected)
 
 **Formula: NEW (DIR-008, adopted this iteration)**
 
+G3 audit co-sign received (PASS-WITH-NOTES). Persona C critique prompted a downward revision of `transfer_breadth` from 0.80 → 0.75: docs surface was scored as "covered" while the rationale simultaneously described coverage as "thin and irregular across iterations." This is an honest downward correction, not a retroactive rescoring — the re-baseline itself is being finalized at synthesis, and Persona C's finding is the correct basis for the final value.
+
 ```
 V_meta_new = methodology_leverage × strategy_completeness × transfer_breadth × validation
-           = 0.40              ×  0.83                ×  0.80           × 0.962
-           = 0.255  (PROVISIONAL — metric-G3 PENDING)
+           = 0.40              ×  0.83                ×  0.75           × 0.962
+
+  0.40 × 0.83  = 0.332
+  0.332 × 0.75 = 0.249
+  0.249 × 0.962 = 0.23954
+
+V_meta FINAL = 0.240 (revised from provisional 0.255)
 ```
 
-**Non-comparability statement:** ΔV_meta across the formula switch point is non-comparable. V_meta_old (iter 13) = 0.154; V_meta_new (iter 14) = 0.255. The 0.101 difference reflects the formula change, not a real improvement.
+**Revision note:** Provisional re-baseline was 0.40 × 0.83 × 0.80 × 0.962 = 0.255. Persona C's synthesis-phase audit found transfer_breadth inflated (docs scored as "covered" despite "thin and irregular" evidence). Correcting docs from 1.0 to 0.75 credit within the 5-surface denominator changes transfer_breadth from 4/5=0.80 to 3.75/5=0.75. The VMETAFORMULA.md history table is updated accordingly.
+
+**Non-comparability statement:** ΔV_meta across the formula switch point is non-comparable. V_meta_old (iter 13) = 0.154; V_meta_new (iter 14 FINAL) = 0.240. The difference reflects the formula change, not a real improvement.
 
 **New ceiling:** V_meta_ceiling_new = 1.0. V_meta ≥ 0.80 is achievable in principle.
 
 ---
 
-## §10 G3 audit
+## §10 G3 co-sign
 
-PENDING — dispatched by orchestrator separately.
+**Verdict: PASS-WITH-NOTES**
+**σ_QX = 51/53 = 0.962**
+**Gate: OPEN**
 
-**Critical G3 scope this iteration:** G3 must audit the metric change itself (per DIR-008 item 5), not just the code changes. Specifically:
-
-1. Is `methodology_leverage` more honest than the old `effectiveness`? Does the 0.40 re-baseline score reflect genuine attribution, or is it gaming?
-2. Can the new factors actually move over time? Are they renewable in practice?
-3. Is the re-baseline genuinely non-retroactive and properly recorded?
-4. Is `transfer_breadth` resistant to score inflation? Can "mentioned docs" trivially claim 5/5?
-5. Standard code review: QX-051/052/053/054 source changes correct? Tests adequate?
-
-The G3 co-sign on the metric change is required before V_meta_new = 0.255 is treated as trusted.
+Key findings from G3 (audits/iteration-14-adjudicate.md):
+- `methodology_leverage` measures something substantially more real than old `effectiveness`. The old 0.26 was a scoring artifact from one-time bootstrap events; the new factor is a live, per-iteration attribution question. Anti-inflation rule (Skill must shape design decisions, not merely be called as ceremony) is appropriately stated. Residual concern: attribution requires executor honesty and is hard to audit independently — design-level limitation acknowledged, not blocking.
+- All four factors are renewable; none measures a frozen one-time past event.
+- Re-baseline is non-retroactive and properly documented. Non-comparability statement recorded. No perverse incentive to game the switch point introduced.
+- `transfer_breadth = 0.80` noted as "mostly yes, with a noted weakness" — docs surface is "thin and irregular" but scored as covered. G3 accepts this as "honest for the reasons above" (single genuine methodology-driven change counts per rubric); Persona C later prompted a downward correction to 0.75 in synthesis.
+- `methodology_leverage = 0.40` rated honest. Scoring at top of the execution range (30–40%) is marginally generous but within the documented range. Document frames this as "a genuine finding, not a failure mode to paper over."
+- **QX-051 PASS**, **QX-052 PASS**, **QX-053 PASS**, **QX-054 PASS**, **QX-055 PASS**.
+- 30/30 tests pass. Worktree isolation confirmed clean.
+- Intermediate miscalculation in VMETAFORMULA.md (briefly claiming 54/55 = 0.982 before self-correcting to 51/53 = 0.962) noted as "visible and transparent — not a problem, but noted."
 
 ---
 
-## §11 Convergence check
+## §11 Convergence check (FINAL)
 
-PENDING FINAL — awaiting G3 + simulated-user.
+```
+[ ] V_meta >= 0.80:         NO — V_meta FINAL = 0.240 (new formula; ceiling = 1.0; achievable in principle)
+[ ] Instance PAUSE criteria: NOT TRIGGERED
+    ΔV_14 = +0.029 (above 0.02 threshold)
+    PAUSE counter was RESET per human resumption mandate (iteration 14 §0 HARD GATE 6)
+    Consecutive-below-0.02 count: 0 (reset)
+[ ] G3:                     PASS-WITH-NOTES — QX-050..055 all co-signed; σ_QX = 51/53 = 0.962
+[ ] Simulated-user:         3 personas complete; QX-051/052/054 PASS; QX-053 PARTIAL; 6 new gaps (UQ-042..046 + META-001 closed)
+[ ] system_health:          No regressions; 30/30 tests pass; worktree isolation clean
 
-**Provisional inputs:**
-- ΔV_instance provisional ≈ +0.047 (above 0.02 threshold)
-- PAUSE counter RESET per human resumption mandate
-- No new significant/blocking gaps opened this iteration
-- Provisional: PAUSE would NOT be triggered (ΔV > 0.02 and counter reset)
+Pending directives:
+  DIR-004: DEFERRED to iteration 15 (first priority — complex packaging work)
+  DIR-006: DEFERRED to iteration 15 (first priority non-DIR-004 — directive lifecycle cutover)
+  DIR-008: APPLIED this iteration (QX-050) + ARCHIVED in synthesis phase
 
-**Status: ACTIVE — dev phase complete, G3+SU pending**
+Status: CONTINUE to iteration 15
+```
+
+**Rationale:** ΔV = +0.029 > 0.02 and PAUSE counter was reset at iteration start — PAUSE not triggered. Active pending directives (DIR-004, DIR-006) provide clear work mandate for iteration 15. V_instance = 0.750 (above iteration-13 = 0.721; meaningful progress). V_meta = 0.240 (below 0.80 threshold; continued work needed). Open gaps: CB-006, ENV-001, SH-006, UQ-042, UQ-043, UQ-044, UQ-045, UQ-046 (8 open, all minor).

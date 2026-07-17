@@ -8,13 +8,12 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 14 (dev phase — G3 + SU PENDING)_
+_Last updated: iteration 14 FINAL — continuing to iteration 15_
 
-- **Latest scores (provisional):** see "V-score history (all iterations)" table, iteration 14 provisional row.
-  V_instance provisional = TBD (G3+SU pending). V_meta_new (re-baseline, new formula) = 0.255 (PROVISIONAL — metric-G3 pending). σ_QX = 51/53 = 0.962.
-- **DIR-008: APPLIED this iteration** (QX-050 done). V_meta redesigned: old formula (`completeness × effectiveness × reusability × validation`) retired; new formula (`methodology_leverage × strategy_completeness × transfer_breadth × validation`) active from iteration 14. See `VMETAFORMULA.md`. Metric-G3 co-sign required before V_meta_new is trusted.
+- **Latest scores (FINAL):** V_instance = 0.750 (ΔV = +0.029). V_meta_new = 0.240 (FINAL, post-Persona-C correction; revised from provisional 0.255 — transfer_breadth 0.80 → 0.75). σ_QX = 51/53 = 0.962. See V-score history table, iteration 14 FINAL row.
+- **DIR-008: APPLIED AND ARCHIVED** (QX-050 done, archived in synthesis). V_meta redesigned: old formula (`completeness × effectiveness × reusability × validation`) retired; new formula (`methodology_leverage × strategy_completeness × transfer_breadth × validation`) active from iteration 14. G3 co-sign received (PASS-WITH-NOTES). See `VMETAFORMULA.md`.
 - **DIR-009 STATUS: APPLIED AND ARCHIVED** — applied in iteration 13 (genuine worktree isolation, HARD GATE ls proof, no ENV-excuse boilerplate); moved to `directives/archive/DIR-009-orchestrator-must-honor-hardened-gates.md`.
-- **PAUSE COUNTER RESET** — human explicitly resumed experiment with mandate to apply DIR-008 + UQ polish. PAUSE counter resets on human-authorized resumption.
+- **PAUSE NOT TRIGGERED** — ΔV = +0.029 > 0.02; PAUSE counter was reset at iteration start per human resumption mandate. Counter remains at 0.
 - **Standing decisions (do not re-litigate without new evidence):**
   - Gap-list storage: plain markdown file at `experiments/quay-continuous-bootstrap/gap-list.md`
     (decided iteration 0 — see "Gap-list storage decision" in the Iteration 0 record).
@@ -23,7 +22,8 @@ _Last updated: iteration 14 (dev phase — G3 + SU PENDING)_
     "σ_QX-vs-inherited-floor decision" in the Iteration 0 record).
   - V_meta ceiling (NEW): 1.0 (redesigned formula, DIR-008, iteration 14). Old ceiling 0.26 is retired. V_meta ≥ 0.80 is now achievable in principle.
   - V_meta formula: `methodology_leverage × strategy_completeness × transfer_breadth × validation` (from iteration 14 onward). See `VMETAFORMULA.md`.
-- **Status:** **ACTIVE** (PAUSE reset per human resumption with mandate). Cumulative gaps closed: 72. Net open: 3 minor (CB-006, ENV-001, SH-006). 5 UQ gaps closed this iteration.
+  - V_meta re-baseline FINAL: 0.240 (transfer_breadth revised 0.80 → 0.75 in synthesis per Persona C; VMETAFORMULA.md history table updated). Non-comparable to old formula value 0.154.
+- **Status:** **ACTIVE — CONTINUE TO ITERATION 15**. Cumulative gaps closed: 73 (72 dev + META-001 closed in synthesis). Net open: 8 minor (CB-006, ENV-001, SH-006, UQ-042, UQ-043, UQ-044, UQ-045, UQ-046). Pending directives: DIR-004 (first priority), DIR-006 (first priority non-DIR-004).
 
 ---
 
@@ -595,11 +595,11 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | 11 | 0.715 | +0.031 | 0.154 | 39/40 = 0.975 | 5 gaps closed (SH-003/004/UQ-006/007/030); 3 new minor gaps (CB-020/UQ-035/SH-005); G3 PASS-WITH-NOTES; Persona A CONCERNS (serve restart fix), Persona B PASS, Persona C PASS; cumulative closed=59; ΔV_11 > 0.02 resets PAUSE counter |
 | 12 | **0.717** | **+0.002** | 0.154 | 42/43 = 0.977 | 3 gaps closed (SH-005/CB-020/UQ-035); 3 new minor gaps (UQ-036/CB-021/SH-006) from synthesis; DIR-008 deferred to iter-13; G3 PASS; cumulative closed=62; **HALT (human-imposed)** |
 | 13 | **0.721** | **+0.004** | 0.154 (old formula) | 45/46 = 0.978 | 5 gaps closed (PR-001/002/003 process, CB-021, UQ-036); DIR-009 applied+archived; genuine worktree isolation (first time); G3 PASS; Persona A/B/C all PASS; 5 new minor gaps (UQ-037/038/039/040/041); cumulative closed=67; **PAUSE TRIGGERED** (2nd consecutive ΔV < 0.02) |
-| 14 | TBD (G3+SU pending) | TBD | **0.255** (new formula, PROVISIONAL — metric-G3 pending) | 51/53 = 0.962 | DIR-008 APPLIED: V_meta redesigned (VMETAFORMULA.md); 5 UQ gaps closed (UQ-037/038/039/040/041 via QX-051..055); QX-050 (DIR-008 doc), QX-001 closed; PAUSE counter RESET per human resumption; cumulative closed=72; **FORMULA SWITCH POINT — ΔV_meta non-comparable across iter 13/14** |
+| **14 FINAL** | **0.750** | **+0.029** | **0.240** (new formula, FINAL; transfer_breadth revised 0.80→0.75 in synthesis per Persona C) | 51/53 = 0.962 | DIR-008 APPLIED+ARCHIVED; 5 UQ gaps closed (UQ-037/038/039/040/041 via QX-051..055); 6 new gaps (UQ-042..046 open, META-001 found+closed); G3 PASS-WITH-NOTES; 3 personas complete; PAUSE not triggered (ΔV=+0.029 > 0.02); cumulative closed=73; **FORMULA SWITCH POINT — ΔV_meta non-comparable across iter 13/14** |
 
-ΔV trend (V_instance): +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, +0.004. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13: 2nd consecutive < 0.02 (ΔV=+0.004) → **PAUSE TRIGGERED**. Cumulative gaps closed: 72 (iter-14 dev phase).
+ΔV trend (V_instance): +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, +0.004, **+0.029**. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13: 2nd consecutive < 0.02 (ΔV=+0.004) → **PAUSE TRIGGERED**; iter-14: PAUSE counter RESET (human resumption mandate) + ΔV=+0.029 > 0.02 → PAUSE counter at 0. Cumulative gaps closed: 73 (iter-14 FINAL).
 
-V_meta formula switch: old formula last value = 0.154 (iter 13); new formula re-baseline = 0.255 (iter 14 PROVISIONAL). Non-comparable across switch point.
+V_meta formula switch: old formula last value = 0.154 (iter 13); new formula re-baseline = 0.240 (iter 14 FINAL; revised from provisional 0.255 after synthesis transfer_breadth correction). Non-comparable across switch point.
 
 ---
 

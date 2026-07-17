@@ -27,7 +27,7 @@
   - `transfer_breadth`: whether the methodology has transferred to each of quay's 5 current surface types (CLI, MCP, Web UI, packaging/distribution, docs). Score = covered surfaces / 5. Live, non-frozen — neglecting a surface degrades this.
   - `validation`: σ_QX = (# native QX tasks done) / (# total QX tasks done). Unchanged.
   
-  **Re-baseline (iteration 14):** V_meta_new = 0.40 × 0.83 × 0.80 × 0.962 = 0.255 (PROVISIONAL — pending G3 co-sign of the metric change itself per DIR-008).
+  **Re-baseline (iteration 14 FINAL):** V_meta_new = 0.40 × 0.83 × 0.75 × 0.962 = 0.240. (Provisional was 0.255 with transfer_breadth=0.80; revised to 0.240 in synthesis after Persona C found docs surface scored "covered" despite "thin and irregular" coverage. G3 co-sign received — PASS-WITH-NOTES.)
   
   **ΔV_meta across the switch point is non-comparable.** The starting value for future ΔV calculations is V_meta_14 = 0.255.
   
@@ -614,63 +614,40 @@ Converge vs. Halt" section below.
 
 ## V_meta for this experiment
 
+> **OLD FORMULA RETIRED AT ITERATION 14 (DIR-008).** Do not use `completeness × effectiveness × reusability × validation` for iterations 14+. The section below has been updated to the new formula. See `VMETAFORMULA.md` for the full redesign record, scoring rubrics, non-comparability statement, and history table.
+
 ```
-V_meta = completeness × effectiveness × reusability × validation
+V_meta = methodology_leverage × strategy_completeness × transfer_breadth × validation
+         (see VMETAFORMULA.md for full rubric — old formula RETIRED at iteration 14)
 ```
 
-**Formula shape**: inherited unchanged from experiments 1, 2, and 3. This is deliberate — the
-human's redirection targets the instance layer's shape, not the meta layer's.
+**Current values (iteration 14 FINAL re-baseline):**
+- `methodology_leverage` = 0.40 (fraction of closures methodology-sourced AND methodology-executed per G3 strict standard)
+- `strategy_completeness` = 0.83 (5/6 capability checklist items documented and exercised; cross-surface consistency deducted)
+- `transfer_breadth` = 0.75 (3.75/5 surfaces; CLI/MCP/Web UI strong; packaging minimal; docs thin — revised down from 0.80 in synthesis per Persona C critique)
+- `validation` = 0.962 (σ_QX = 51/53)
 
-**Starting values**: whatever experiment 3's actual closing report records (reconciled at
-iteration 0), provisionally `completeness=0.77, effectiveness=0.26, reusability=0.79,
-validation=0.778` (product 0.123) per the latest recorded state (iteration-4.md) as of this
-document's authoring — **DO NOT treat this as final without the iteration-0 reconciliation
-step.**
+**V_meta FINAL (iteration 14):** 0.40 × 0.83 × 0.75 × 0.962 = 0.240
 
-**What must change**: each factor must show either (a) genuine movement with evidence, or (b)
-a **different** stalling reason than experiments 1/2/3 recorded. Repeating the same stall
-reason after a supposed refinement is itself a finding requiring escalation. Per protocol §6's
-explicit hypothesis (not guaranteed): the self-hosted task-tracking mechanism (protocol §5.1)
-is a plausible organic re-trigger candidate for `effectiveness` specifically — using quay's own
-MCP tools for real daily task management puts the tooling directly in the loop in a way no
-prior experiment's domain did. This must be OBSERVED with timing evidence, not assumed.
+**ΔV_meta across the switch point is non-comparable.** Old formula last value (iter 13) = 0.154; new formula re-baseline (iter 14 FINAL) = 0.240. The difference reflects the formula change, not a real improvement. Starting point for future ΔV_meta calculations: 0.240.
 
-### V_meta re-trigger watchlist (check all applicable, every iteration)
+**New ceiling:** V_meta_ceiling_new = 1.0. V_meta ≥ 0.80 is achievable in principle.
 
-1. **effectiveness re-trigger**: did any QX-* task arise that is organically scope-matched to
-   stage-0 QN-006's shape (single-file, no/minimal source change, no network I/O)? The
-   self-hosted task-tracking mechanism's own MCP-tool usage is a NEW, experiment-4-specific
-   candidate source for this — record timing whenever a scope-matched task arises, comparing
-   against the QN-006 baseline (author ~51s, execute ~2m59s) and QW-003's own confirmation
-   (author 32s, execute 170s).
-2. **reusability re-trigger**: did organic external demand appear for wider GitHub Provider
-   `data.write` capability, OR (new for this experiment, given the widened scope) any other
-   Provider-ABI extension demand surfaced by capability_breadth work? Check every iteration.
-3. **completeness re-trigger (gap discovery)**: was a new, previously-undocumented Skill
-   Method-step gap found — including, specifically for this experiment, a gap in how the
-   Method handles STRATEGY FORMATION UNDER AN OPEN-ENDED OBJECTIVE (a genuinely new demand
-   this experiment's shape places on the Skill set that no prior experiment tested)?
-4. **completeness + reusability/effectiveness joint re-trigger**: did a reliable, unconditional
-   native fresh-context subagent-dispatch primitive become available? If yes: re-open
-   completeness, and reusability/effectiveness jointly.
-5. **open-ended-domain-specific re-trigger (NEW for this experiment)**: does the introduction
-   of continuous simulated-user usage as a STANDING, every-iteration mechanism (rather than
-   change-triggered, as in experiment 3) itself surface a Skill Method-step gap not previously
-   documented? Does the self-hosted task-tracking mechanism (using quay's own MCP tools for
-   quay's own backlog) surface friction that is itself evidence for or against
-   `effectiveness`/`reusability`? Record findings here explicitly, whichever way they resolve.
-6. **Fallback rule**: if none of 1-5 fire within roughly 12 iterations, run one dedicated
-   comprehensive full search, mirroring experiment 2's iteration-10 precedent. Prefer early
-   discharge (as experiment 2 modeled) over letting the obligation lapse to the deadline.
+### V_meta factor scoring (check all, every iteration — NEW FORMULA)
 
-**Ceiling note**: restate every iteration until/unless a re-trigger fires with evidence.
+See `VMETAFORMULA.md` for full rubric definitions. Summary of what to check each iteration:
+
+1. **`methodology_leverage`**: what fraction of this iteration's closed gaps were (a) surfaced via simulated-user or directive lifecycle, AND (b) implemented via `quay:author`/`quay:execute` Skill design loop, AND (c) subject to G3 audit? Apply anti-inflation rule: Skill invoked as ceremony does not count; it must have shaped the design decision. Score = methodology-driven closures / total closures. If zero gaps closed, carry last iteration's value.
+
+2. **`strategy_completeness`**: evaluate against 6-item checklist (see VMETAFORMULA.md §strategy_completeness). Items: (1) gap-list management, (2) directive lifecycle, (3) simulated-user → priority translation, (4) open-ended tracking, (5) PAUSE/resume, (6) cross-surface strategy. Score = items documented and exercised / 6.
+
+3. **`transfer_breadth`**: evaluate against 5 surfaces (CLI, MCP, Web UI, packaging/distribution, docs). For each: has at least one methodology-driven change (gap sourced from simulated-user or directive lifecycle, QX task authored and executed via native path) been made? Score = covered surfaces / 5. Note: neglecting a surface for multiple iterations degrades the score per the rubric.
+
+4. **`validation`**: σ_QX = (# QX-* tasks with all three provenance fields = native) / (# QX-* tasks done). Report count explicitly. G3 independence required.
 
 **Validation mechanics**: `validation` tracks experiment 4's own σ_QX = (# QX-* tasks with all
 three fields = native) / (total QX-* tasks). No inherited floor from experiment 3 applies
-unless a future decision explicitly re-adopts one — experiment 3 itself reset to a
-floor-of-zero design (see its provenance.md), and absent a reason to diverge, experiment 4
-inherits that same reset-to-zero framing by default; state this explicitly at iteration 0
-rather than silently assuming it.
+unless a future decision explicitly re-adopts one.
 
 ---
 
@@ -782,10 +759,15 @@ Extract:
    - Update the cumulative gaps-closed counter (monotonic, never decreases).
    - Show the before/after gap-list composition explicitly (what closed, what was newly found).
 
-   V_meta = completeness × effectiveness × reusability × validation
-   - For EACH factor: check the re-trigger watchlist item, update with evidence if fired,
-     else state the inherited stall reason explicitly.
-   - Restate the ceiling as a standing fact.
+   V_meta = methodology_leverage × strategy_completeness × transfer_breadth × validation
+            (see VMETAFORMULA.md for full rubric — old formula RETIRED at iteration 14)
+   - For EACH factor: score against the rubric in VMETAFORMULA.md. Record attribution per
+     closed gap (methodology_leverage), evaluate the 6-item checklist (strategy_completeness),
+     check each of 5 surfaces (transfer_breadth), and report σ_QX count (validation).
+   - Apply anti-inflation rule to methodology_leverage: Skill must have shaped the design
+     decision, not merely been invoked as ceremony.
+   - Report V_meta = product of four factors. Compute ΔV_meta vs. last iteration's same-formula value.
+   - New ceiling: 1.0. V_meta ≥ 0.80 is achievable in principle.
    - Report σ_QX and its trend.
 
 6. OUT-OF-BAND AUDIT (G3 — mandatory for any Core change or V-factor lift)

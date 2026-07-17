@@ -182,7 +182,7 @@ Evaluating against the 5 surface types:
 4. **Packaging/distribution** — methodology-driven changes: YES (QX-033 via DIR-004, iteration 9 — but only ONE significant change, and CB-008 was declared "applied" though DIR-004 remains deferred for Node SEA work)
 5. **Docs** — methodology-driven changes: PARTIAL (QX-027 doc staleness fix, QX-036 README restructure — surfaced by simulated-user and executed; but documentation coverage has been thin and irregular across iterations)
 
-**Score: 4/5 = 0.80** — CLI, MCP, and Web UI well-covered; packaging/distribution and docs present but thin. Scoring docs as "covered" given QX-027/QX-036 were genuine methodology-driven doc changes.
+**Score: 3.75/5 = 0.75 (FINAL — revised in synthesis)** — CLI, MCP, and Web UI well-covered; packaging/distribution present but thin (one change, primary Node SEA work deferred); docs thin and irregular (QX-027/QX-036 are genuine methodology-driven changes but coverage has been sparse across 14 iterations). Provisional score was 4/5 = 0.80; downward correction made in iteration-14 synthesis after Persona C (cross-experiment maintainer) flagged the inconsistency between "covered" scoring and "thin and irregular" rationale for the docs surface. Honest revision: docs receive 0.75 credit (3.75/5 total → 0.75), not full credit. See synthesis note below.
 
 #### `validation` at iteration 14 re-baseline
 
@@ -211,12 +211,28 @@ Actually: QX-001 was already counted in the denominator at σ=45/46 only if it w
 
 **σ_QX (iteration 14 provisional) = 51/53 = 0.962**
 
+### Synthesis-phase downward correction (iteration 14 FINAL)
+
+Persona C (cross-experiment maintainer) in the iteration-14 synthesis review identified that `transfer_breadth = 0.80` was scored as "covered" for the docs surface while the rationale simultaneously described docs coverage as "thin and irregular across iterations." This inconsistency was flagged as "borderline honest inflation: honest in that it flags the weakness, but still claims the point."
+
+The synthesis agent adopted a downward correction: docs surface is scored at 0.75 credit (not 1.0) within the 5-surface denominator, giving transfer_breadth = 3.75/5 = 0.75 rather than 4/5 = 0.80. This is the correct basis for the FINAL re-baseline since the re-baseline itself is being finalized at synthesis time, and Persona C's review is the intended mechanism for catching provisional over-scoring before values are trusted.
+
+**transfer_breadth: 0.80 (provisional) → 0.75 (FINAL)**
+
 ### Re-baseline formula value
 
 ```
-V_meta_new (iteration 14 re-baseline) = methodology_leverage × strategy_completeness × transfer_breadth × validation
-                                       = 0.40 × 0.83 × 0.80 × 0.962
-                                       = 0.255
+V_meta_new (iteration 14 re-baseline, PROVISIONAL):
+  = 0.40 × 0.83 × 0.80 × 0.962 = 0.255
+
+V_meta_new (iteration 14 re-baseline, FINAL — post-synthesis correction):
+  = 0.40 × 0.83 × 0.75 × 0.962
+
+  0.40 × 0.83  = 0.332
+  0.332 × 0.75 = 0.249
+  0.249 × 0.962 = 0.23954
+
+  = 0.240
 ```
 
 ---
@@ -226,14 +242,15 @@ V_meta_new (iteration 14 re-baseline) = methodology_leverage × strategy_complet
 **ΔV_meta across the formula switch point is non-comparable.**
 
 - Old formula value at switch point (iteration 13 FINAL): `V_meta_old = 0.154`
-- New formula value at re-baseline (iteration 14): `V_meta_new = 0.255`
+- New formula value at re-baseline (iteration 14 FINAL): `V_meta_new = 0.240`
+  (Provisional was 0.255; revised in synthesis to 0.240 after transfer_breadth correction 0.80→0.75.)
 
-The increase from 0.154 to 0.255 reflects the redesigned formula, not a real improvement.
+The increase from 0.154 to 0.240 reflects the redesigned formula, not a real improvement.
 The two numbers measure different things with different scales. They MUST NOT be compared
-as if V_meta improved by 0.101 between iteration 13 and iteration 14.
+as if V_meta improved by 0.086 between iteration 13 and iteration 14.
 
 From iteration 14 onward, `ΔV_meta` is computed within the new formula only. The
-starting point for future ΔV calculations is `V_meta_14 = 0.255`.
+starting point for future ΔV calculations is `V_meta_14 = 0.240`.
 
 ---
 
@@ -265,4 +282,4 @@ are treated as trusted. Until G3 co-signs, V_meta_new values are marked PROVISIO
 | 1 | old | 0.136 | σ_QX rise |
 | ... | old | ... | (see provenance.md for full history) |
 | 13 (FINAL) | old | 0.154 | Last value under old formula |
-| **14 (re-baseline)** | **new** | **0.255** | **Switch point — non-comparable to prior values** |
+| **14 FINAL (re-baseline)** | **new** | **0.240** | **Switch point — non-comparable to prior values. transfer_breadth revised 0.80→0.75 in synthesis (Persona C critique: docs scored "covered" despite thin, irregular coverage). Provisional was 0.255.** |
