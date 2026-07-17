@@ -237,6 +237,61 @@ G3 adjudicate verdict (PASS).
 See `experiments/quay-webui-bootstrap/audits/iteration-2-visual-review-list.md`
 and `iteration-2-visual-review-detail.md` for the Lighthouse-confirmed visual reviews.
 
+## Iteration 3 — context note (2026-07-17)
+
+Three QW-* tasks driven to done in iteration 3. All three are single-file
+changes to packages/quay/src/serve.js — single source file, logic/CSS change,
+no network I/O. First iteration with three all-native tasks. σ_QW jumps from
+1/3 to 4/6.
+
+**V_instance lift**: ui_read_capability 0.50 → 0.80 (sort-by-id/status QW-004;
+filter-by-label QW-005 — "Done when" clause now nearly fully satisfied for these
+two factors); visual_design_quality 0.65 → 0.85 (heading-order fix h2.sr-only
+on detail page; mobile responsive CSS @media ≤600px; Lighthouse 100/100
+accessibility and best-practices on ALL FOUR combinations: list+detail ×
+desktop+mobile; DIR-003 applied — mobile viewport 390×844 defined and verified).
+V_instance product: 0.80 × 0.85 × 1.0 × 1.0 = 0.680.
+
+Additionally: `.meta a { text-decoration: underline }` CSS fix committed
+(separate commit) to resolve `link-in-text-block` accessibility failure found
+during Lighthouse run. This was discovered organically during the Lighthouse
+audit and fixed in the same iteration. Not a separate QW-* task (same-session
+CSS fix; no new Proposal/Plan artifact warranted for a one-line CSS rule
+addition discovered mid-audit).
+
+**Effectiveness re-trigger**: Three scope-matched tasks (single-file serve.js
+changes):
+- QW-004: author=72s, execute=180s, total=252s
+- QW-005: author=27s, execute=173s, total=200s
+- QW-006: author=27s, execute=75s, total=102s (visual/CSS task; shorter execute)
+QW-004 and QW-005 match QN-006's scope shape (logic change, no network I/O).
+QW-006 is simpler (CSS-only + one HTML line). All within the 202-230s range
+established in iterations 2 and the QN-006 baseline. Effectiveness score
+held at 0.26 (comparable timing, no rubric change).
+
+**σ_QW update**: QW-004, QW-005, QW-006 all driven all-native:
+author_by=native, execute_by=native, gate_by=native.
+σ_QW = 4/6 = 0.667. Validation factor: 0.667.
+
+**DIR-002**: Partially applied. manda Agent routing mechanically denied by
+monitor. No unconditional native Agent/Task tool available (ENV gap). G3 and
+visual reviews conducted inline as degraded-fallback. G3 adjudicate: PASS.
+All four visual reviews: PASS.
+
+**DIR-003**: Applied. Desktop (1280×800) and mobile (390×844x3) viewports
+defined. Lighthouse 100/100 on all four mode combinations. Visual reviews for
+all four combinations written to audits/iteration-3-visual-review-*.md.
+
+**DIR-004**: Deferred. Packaging/distribution scope outside current V_instance
+factors. See directive resolution for rationale.
+
+See `experiments/quay-webui-bootstrap/iterations/iteration-3.md` for the full
+per-factor evidence, re-trigger checks, and convergence assessment.
+See `experiments/quay-webui-bootstrap/audits/iteration-3-adjudicate.md` for the
+G3 adjudicate verdict (PASS, degraded-fallback).
+See `audits/iteration-3-visual-review-{list,detail}-{desktop,mobile}.md` for
+the four viewport/page visual review verdicts (all PASS).
+
 ## Task entries
 
 | Task | Iteration | author_by | execute_by | gate_by | σ contribution | V_instance lift |
@@ -245,8 +300,11 @@ and `iteration-2-visual-review-detail.md` for the Lighthouse-confirmed visual re
 | QW-001 | 1 | seed | seed | native | 0/1 (not all-native) | visual_design_quality: 0.0 → 0.30 |
 | QW-002 | 1 | seed | seed | native | 0/1 (not all-native) | ui_read_capability: 0.20 → 0.35 |
 | QW-003 | 2 | native | native | native | 1/1 (all-native) | ui_read_capability: 0.35 → 0.50; visual_design_quality: 0.30 → 0.65 (Lighthouse complete) |
+| QW-004 | 3 | native | native | native | 1/1 (all-native) | ui_read_capability: 0.50 → 0.65 (sort-by-id/status added) |
+| QW-005 | 3 | native | native | native | 1/1 (all-native) | ui_read_capability: 0.65 → 0.80 (filter-by-label added) |
+| QW-006 | 3 | native | native | native | 1/1 (all-native) | visual_design_quality: 0.65 → 0.85 (heading-order fix; mobile CSS; Lighthouse 100/100 all 4 modes; DIR-003 applied) |
 
-**σ_QW**: 1/3 (3 tasks total; 1 with all-native {author, execute, gate} triple — QW-003).
+**σ_QW**: 4/6 (6 tasks total; 4 with all-native {author, execute, gate} triple — QW-003, QW-004, QW-005, QW-006).
 **Floor decision**: RESET to 0 (see iteration 0 context note above).
 Validation tracks σ_QW alone; no cross-experiment inherited floor applies.
-With σ_QW = 1/3 = 0.333, validation = 0.333. V_meta = 0.77 × 0.26 × 0.79 × 0.333 = 0.0527.
+With σ_QW = 4/6 = 0.667, validation = 0.667. V_meta = 0.77 × 0.26 × 0.79 × 0.667 = 0.105.
