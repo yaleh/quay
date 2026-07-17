@@ -8,12 +8,13 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 12 (FINAL — HALT)_
+_Last updated: iteration 13 (development phase — G3 + simulated-user PENDING)_
 
-- **Latest scores:** see "V-score history (all iterations)" table, iteration 12 row (FINAL).
-  V_instance=0.717 (ΔV=+0.002), V_meta=0.154 (ceiling-bound; σ_QX=42/43=0.977 FINAL).
-- **Pending directive**: DIR-008 (V_meta redesign) — acknowledged in iteration 12 §0.1, deferred to iteration 13 for dedicated adoption with independent G3 audit of the metric change itself.
-- **Live V_meta re-triggers:** none fired — all 5 re-trigger conditions remain NOT TRIGGERED. DIR-008 deferred; re-triggers will be re-evaluated once DIR-008 is adopted. This field does NOT exist in the V-score history table, so it lives here.
+- **Latest scores:** see "V-score history (all iterations)" table, iteration 13 dev-phase row.
+  V_instance provisional ≈ 0.726 (ΔV provisional +0.009; final after G3+simulated-user), V_meta ≈ 0.157 (σ_QX provisional 45/46 = 0.978; final after G3 co-sign).
+- **Pending directive**: DIR-008 (V_meta redesign) — DEFERRED this iteration (iteration 13 already has its own substantial workload: PR-001/002/003 process closure + CB-021 + UQ-036; DIR-008 requires a dedicated G3 audit of the metric change itself and should not be conflated with other development work; deferred to iteration 14 or a dedicated meta-only iteration).
+- **Pending directive**: DIR-009 (orchestrator behavioral constraints) — APPLIED this iteration: worktree isolation achieved in substance (all 4 changed files in worktrees/iteration-13/, shared tree clean); HARD GATE 1 ls output pasted; per-file dispositions given; PR-002 did not recur.
+- **Live V_meta re-triggers:** none fired — all 5 re-trigger conditions remain NOT TRIGGERED. DIR-008 still pending.
 - **Standing decisions (do not re-litigate without new evidence):**
   - Gap-list storage: plain markdown file at `experiments/quay-continuous-bootstrap/gap-list.md`
     (decided iteration 0 — see "Gap-list storage decision" in the Iteration 0 record).
@@ -22,7 +23,7 @@ _Last updated: iteration 12 (FINAL — HALT)_
     "σ_QX-vs-inherited-floor decision" in the Iteration 0 record).
   - V_meta ceiling: 0.26 (1.0 × 0.26 × 1.0 × 1.0, effectiveness-bound; inherited from
     experiment 1, confirmed positively across experiments 2/3 — see Inheritance record below).
-- **Status:** HALT (iteration 12 FINAL) — human operator issued stop directive after iteration 12 synthesis for experiment setting adjustments. 3 gaps closed (SH-005/CB-020/UQ-035); 3 new minor gaps found in synthesis (UQ-036/CB-021/SH-006); cumulative closed: 62; σ_QX=42/43=0.977; V_instance=0.717 (ΔV=+0.002, 1st consecutive < 0.02 — PAUSE NOT triggered at halt); DIR-008 deferred to next iteration.
+- **Status:** CONTINUING (iteration 13 dev phase complete). PR-001/PR-002/PR-003 CLOSED (QX-047). CB-021 CLOSED (QX-048). UQ-036 CLOSED (QX-049). Cumulative closed: 67. G3 + simulated-user dispatched by orchestrator. PAUSE check: ΔV_12=+0.002 (1st consecutive <0.02); if ΔV_13 < 0.02, PAUSE triggered — awaits G3 + simulated-user final score.
 
 ---
 
@@ -593,8 +594,9 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | 10 | 0.684 | +0.015 | 0.154 | 36/37 = 0.973 | 6 gaps closed (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034); DIR-007 applied; G3 PASS-WITH-NOTES; 3× PASS simulated-user; no new gaps; cumulative closed=54 |
 | 11 | 0.715 | +0.031 | 0.154 | 39/40 = 0.975 | 5 gaps closed (SH-003/004/UQ-006/007/030); 3 new minor gaps (CB-020/UQ-035/SH-005); G3 PASS-WITH-NOTES; Persona A CONCERNS (serve restart fix), Persona B PASS, Persona C PASS; cumulative closed=59; ΔV_11 > 0.02 resets PAUSE counter |
 | 12 | **0.717** | **+0.002** | 0.154 | 42/43 = 0.977 | 3 gaps closed (SH-005/CB-020/UQ-035); 3 new minor gaps (UQ-036/CB-021/SH-006) from synthesis; DIR-008 deferred to iter-13; G3 PASS; cumulative closed=62; **HALT (human-imposed)** |
+| 13 dev | **~0.726** | **~+0.009** | ~0.157 | 45/46 = 0.978 (provisional) | 5 gaps closed (PR-001/002/003 process, CB-021, UQ-036); DIR-009 applied; genuine worktree isolation achieved (first time); G3+simulated-user PENDING; cumulative closed=67 |
 
-ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002. Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002; PAUSE not triggered at HALT — need 2 consecutive). Cumulative gaps closed: 62. HALT after iteration 12.
+ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, +0.031, +0.002, ~+0.009(dev). Iteration 10: first below 0.02 (ΔV=+0.015); iter-11 reset (ΔV=+0.031 > 0.02); iter-12: 1st consecutive < 0.02 (ΔV=+0.002); iter-13 dev: 2nd consecutive if ΔV_13 < 0.02 → PAUSE pending final score. Cumulative gaps closed: 67 (dev phase).
 
 ---
 
