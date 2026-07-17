@@ -69,7 +69,7 @@
 | UQ-012 | Table role and labels columns not hidden at mobile viewport (≤600px) | iteration 3 | QX-012 (done); .col-role and .col-labels hidden in @media (max-width: 600px) block; serve.test.mjs assertion; commit f4b3b8d |
 | UQ-013 | Gate-fail feedback is silent — page silently refreshes when Advance is blocked | iteration 3 | QX-013 (done); gate check added to action POST handler; ?error= redirect on gate-fail; error/success banners on list and detail pages; serve.test.mjs block; commit f4b3b8d |
 | UQ-014 | Advance button has no tooltip, no hover text, no post-action confirmation | iteration 3 | QX-014 (done); title="Advance task to next status" on list page buttons; title="Advance to [next]" on detail page buttons; serve.test.mjs assertion; commit f4b3b8d |
-| UQ-016 | Orientation banner shows wrong status model (`in_progress` listed, does not exist; `ready` missing) | iteration 3 (found + closed same iteration) | Banner text corrected to `todo → ready → needs-human → done`; test added to serve.test.mjs asserting banner does NOT contain `in_progress` and DOES contain `ready`; source: simulated-user (comparison-reviewer, iteration 3); commit [iteration-3-final] |
+| UQ-016 | Orientation banner shows wrong status model (`in_progress` listed, does not exist; `ready` missing) | iteration 3 (found + closed same iteration) | Banner text corrected to `todo → ready → needs-human → done`; test added to serve.test.mjs asserting banner does NOT contain `in_progress` and DOES contain `ready`; source: simulated-user (comparison-reviewer, iteration 3); commit 05a8ec9 |
 
 ### verification_coverage
 
@@ -82,7 +82,7 @@
 | ID | Description | Closed in | Evidence |
 |----|-------------|-----------|---------|
 | SH-001 | `quay task list --prefix` (no value) crashes with `TypeError: prefix.toUpperCase is not a function` — regression from QX-002 | iteration 1 | QX-006 (done); guard added in `packages/quay/bin/quay.js`; test 15 in cli.test.mjs asserts exit 1 + usage error, no TypeError; all 30 test suites pass |
-| SH-002 | Open-redirect guard for `?from=` back-link parameter accepts protocol-relative URLs (`//evil.com` passes `startsWith("/")` guard) | iteration 3 (found + closed same iteration) | Guard tightened to `startsWith("/") && !startsWith("//")` in serve.js line ~563; test added to serve.test.mjs asserting `?from=//evil.com` results in back-link `href="/"`; source: G3 audit (iteration 3); commit [iteration-3-final] |
+| SH-002 | Open-redirect guard for `?from=` back-link parameter accepts protocol-relative URLs (`//evil.com` passes `startsWith("/")` guard) | iteration 3 (found + closed same iteration) | Guard tightened to `startsWith("/") && !startsWith("//")` in serve.js line ~563; test added to serve.test.mjs asserting `?from=//evil.com` results in back-link `href="/"`; source: G3 audit (iteration 3); commit 05a8ec9 |
 
 ---
 

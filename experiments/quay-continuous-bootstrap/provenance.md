@@ -399,8 +399,8 @@ Development phase:
 - UQ-014 (no button tooltip) → QX-014; commit f4b3b8d
 
 Synthesis step (found + closed same iteration):
-- UQ-016 (banner shows wrong status `in_progress`) → serve.js banner text corrected to `ready`; serve.test.mjs assertions added; commit [iteration-3-final]
-- SH-002 (open-redirect guard incomplete: `//evil.com` bypass) → serve.js guard tightened; serve.test.mjs test added; commit [iteration-3-final]
+- UQ-016 (banner shows wrong status `in_progress`) → serve.js banner text corrected to `ready`; serve.test.mjs assertions added; commit 05a8ec9
+- SH-002 (open-redirect guard incomplete: `//evil.com` bypass) → serve.js guard tightened; serve.test.mjs test added; commit 05a8ec9
 
 ### New gaps found this iteration (FINAL)
 From simulated-user pass + G3:
