@@ -312,8 +312,11 @@ export async function startServer({ port = 4173 } = {}) {
         ? filteredByStatus.filter((t) => Array.isArray(t.labels) && t.labels.includes(labelFilter))
         : filteredByStatus;
       // QW-004 (experiment 3, iteration 3): sort by ?sort=<value> query param.
-      // Supported values: 'id' (lexicographic) and 'status' (then id tiebreaker).
-      // No param or unknown value → insertion order preserved.
+      // QX-008 (experiment 4, iteration 2): added 'updated' sort value —
+      // sorts by task file mtime (updatedAt field in ms from quay-native's
+      // store.js list()), descending (most-recently-modified first). Closes
+      // CB-005 (no sort-by-time on Web UI). The 'updated' sort option also
+      // resolves the Web UI's analog of CB-012.
       const sortKey = url.searchParams.get("sort");
       let tasks;
       if (sortKey === "id") {
@@ -323,6 +326,12 @@ export async function startServer({ port = 4173 } = {}) {
           a.status < b.status ? -1 : a.status > b.status ? 1 :
           a.id < b.id ? -1 : a.id > b.id ? 1 : 0
         );
+      } else if (sortKey === "updated") {
+        tasks = filtered.slice().sort((a, b) => {
+          const ta = typeof a.updatedAt === "number" ? a.updatedAt : -Infinity;
+          const tb = typeof b.updatedAt === "number" ? b.updatedAt : -Infinity;
+          return tb - ta; // descending: most-recently-modified first
+        });
       } else {
         tasks = filtered;
       }
@@ -337,15 +346,37 @@ export async function startServer({ port = 4173 } = {}) {
       const offset = (safePage - 1) * PAGE_SIZE;
       const pageTasks = tasks.slice(offset, offset + PAGE_SIZE);
       // QW-009 (experiment 3, iteration 4): add labels column to list table.
+      // QX-009 (experiment 4, iteration 2): add inline action buttons to each
+      // list row. Closes CB-003: "Advance" (and any other applicable action
+      // button) is now available without navigating to the task detail page.
+      // Write-surface: the POST goes to the existing /task/<id>/action/<actionId>
+      // endpoint (not a new write surface — same backend-agnostic composition as
+      // the detail page). The action POST URL includes ?from= carrying the
+      // current list URL so the redirect returns to the list with filter context
+      // preserved, rather than to the task detail page.
+      const currentListHref = buildHref(statusFilter, sortKey, labelFilter, safePage > 1 ? safePage : null, prefixFilter);
       const rows = pageTasks
         .map(
-          (t) => html`<tr>
+          (t) => {
+            const applicableButtons = (manifest.action_buttons ?? []).filter(
+              (b) => !b.whenStatus || b.whenStatus.includes(t.status)
+            );
+            const actionCell = applicableButtons.length > 0
+              ? applicableButtons.map((b) =>
+                  html`<form method="post" action="/task/${encodeURIComponent(t.id)}/action/${encodeURIComponent(b.id)}?from=${encodeURIComponent(currentListHref)}" style="display:inline">
+                    <button type="submit">${escapeHtml(b.label)}</button>
+                  </form>`
+                ).join("")
+              : "";
+            return html`<tr>
             <td><a href="/task/${t.id}">${escapeHtml(t.id)}</a></td>
             <td>${escapeHtml(t.status)}</td>
             <td>${escapeHtml(t.role)}</td>
             <td>${escapeHtml(t.title)}</td>
             <td>${escapeHtml((Array.isArray(t.labels) ? t.labels : []).join(", "))}</td>
-          </tr>`
+            <td>${actionCell}</td>
+          </tr>`;
+          }
         )
         .join("\n");
       // QW-003: filter navigation links — All, todo, ready, done, needs-human.
@@ -393,6 +424,7 @@ export async function startServer({ port = 4173 } = {}) {
         ),
       ].join(" · ");
       // QW-004: sort navigation links — Default, id, status.
+      // QX-008: added "Updated ↓" sort link (sort by mtime descending).
       // Active sort shown as plain text; others as links (preserving active status, label, and prefix filters).
       const sortNav = [
         !sortKey ? html`<strong>Default</strong>` : html`<a href="${buildHref(statusFilter, null, labelFilter, null, prefixFilter)}">Default</a>`,
@@ -402,6 +434,9 @@ export async function startServer({ port = 4173 } = {}) {
         sortKey === "status"
           ? html`<strong>status</strong>`
           : html`<a href="${buildHref(statusFilter, "status", labelFilter, null, prefixFilter)}">status</a>`,
+        sortKey === "updated"
+          ? html`<strong>Updated ↓</strong>`
+          : html`<a href="${buildHref(statusFilter, "updated", labelFilter, null, prefixFilter)}">Updated ↓</a>`,
       ].join(" · ");
       // QW-005: label navigation links — All + each distinct label.
       // Only rendered when at least one task has labels.
@@ -450,7 +485,7 @@ export async function startServer({ port = 4173 } = {}) {
           ${labelNav ? html`<p class="meta">Label: ${labelNav}</p>` : ""}
           ${pageNav}
           <table>
-            <tr><th>id</th><th>status</th><th>role</th><th>title</th><th>labels</th></tr>
+            <tr><th>id</th><th>status</th><th>role</th><th>title</th><th>labels</th><th>actions</th></tr>
             ${rows}
           </table>
           ${totalPages > 1 ? pageNav : ""}
@@ -518,7 +553,14 @@ export async function startServer({ port = 4173 } = {}) {
         payloadObj,
         mockLogPath,
       });
-      res.writeHead(302, { Location: `/task/${t.id}` });
+      // QX-009 (experiment 4, iteration 2): if the POST URL carries a `from`
+      // query param (set by the list-page inline action forms), redirect there
+      // to return the user to the list with filter context preserved. Without
+      // `from`, fall back to the task detail page (existing behavior for the
+      // detail-page action buttons).
+      const fromParam = url.searchParams.get("from");
+      const redirectTo = fromParam && fromParam.startsWith("/") ? fromParam : `/task/${t.id}`;
+      res.writeHead(302, { Location: redirectTo });
       res.end();
       console.log(`[quay serve] action ${actionId} on ${id}:`, result);
       return;

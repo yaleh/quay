@@ -69,7 +69,7 @@ function printHelp(sub) {
     process.stdout.write(`quay — task management for AI-assisted development
 
 Usage:
-  quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status] [--json]
+  quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--json]
   quay task view <task-id> [--json]
   quay task edit <task-id> --status <status> [--json]
   quay task check <task-id> [--json]
@@ -82,7 +82,7 @@ Options for task list:
   --status <status>   Filter by status (todo, ready, done, needs-human)
   --label <label>     Filter by label
   --prefix <prefix>   Filter by task id prefix (e.g. QX for QX-* tasks)
-  --sort id|status    Sort by id or status (default: insertion order)
+  --sort id|status|updated  Sort by id, status, or last-updated time (default: insertion order)
   --json              Output as JSON
 
 Examples:
@@ -139,11 +139,35 @@ async function main() {
       const filtered = prefix
         ? tasks.filter((t) => t.id.toUpperCase().startsWith(prefix.toUpperCase()))
         : tasks;
-      if (flags.json) {
-        printJson(filtered);
+      // QX-008 (experiment 4, iteration 2): sort-by-updated support.
+      // Closes CB-004 (no sort-by-time on CLI) and CB-012 (--sort updated
+      // silently ignored). Tasks include `updatedAt` (file mtime in ms) from
+      // the provider (quay-native's store.js list() path). Sort descending
+      // (most-recently-modified first). Tasks without updatedAt (e.g. from a
+      // provider that doesn't expose it) sort after those that have it.
+      const sortKey = flags.sort;
+      let sorted;
+      if (sortKey === "updated") {
+        sorted = filtered.slice().sort((a, b) => {
+          const ta = typeof a.updatedAt === "number" ? a.updatedAt : -Infinity;
+          const tb = typeof b.updatedAt === "number" ? b.updatedAt : -Infinity;
+          return tb - ta; // descending: most-recent first
+        });
+      } else if (sortKey === "id") {
+        sorted = filtered.slice().sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+      } else if (sortKey === "status") {
+        sorted = filtered.slice().sort((a, b) =>
+          a.status < b.status ? -1 : a.status > b.status ? 1 :
+          a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+        );
       } else {
-        if (prefix) console.log(`# filtered: ${prefix.toUpperCase()}-* (${filtered.length} tasks)`);
-        for (const t of filtered) console.log(`${t.id}\t${t.status}\t${t.role}\t${t.title}`);
+        sorted = filtered; // insertion order (default)
+      }
+      if (flags.json) {
+        printJson(sorted);
+      } else {
+        if (prefix) console.log(`# filtered: ${prefix.toUpperCase()}-* (${sorted.length} tasks)`);
+        for (const t of sorted) console.log(`${t.id}\t${t.status}\t${t.role}\t${t.title}`);
       }
     }, { providerId: flags.provider });
     return;

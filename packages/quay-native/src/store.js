@@ -138,6 +138,10 @@ export function createStore(tasksDir) {
     return `---\n${fm}\n---\n${body}`;
   }
 
+  // get() does not include updatedAt — it is used for point lookups (task
+  // view, gate checks, action triggers, childrenStatus) where mtime is
+  // irrelevant. The list() path below supplies updatedAt for each task so
+  // sort-by-updated works without a separate stat call at the Core layer.
   /** @returns {object|null} the task view-model, or null if not found */
   function get(id) {
     const raw = readRaw(id);
@@ -146,9 +150,9 @@ export function createStore(tasksDir) {
     return toViewModel(frontmatter, body);
   }
 
-  function toViewModel(frontmatter, body) {
+  function toViewModel(frontmatter, body, updatedAt) {
     const children = frontmatter.children ?? [];
-    return {
+    const vm = {
       id: frontmatter.id,
       title: frontmatter.title,
       status: frontmatter.status,
@@ -160,6 +164,13 @@ export function createStore(tasksDir) {
       extra: frontmatter.extra ?? {},
       body,
     };
+    // QX-008 (experiment 4, iteration 2): include updatedAt (file mtime as ms
+    // since epoch) when the caller provides it. Callers that don't need mtime
+    // (e.g. childrenStatus's recursive get() calls) omit it; the list() path
+    // always supplies it. Including as ms-since-epoch (number) for easy
+    // numeric comparison in sort paths (CLI and Web UI).
+    if (updatedAt !== undefined) vm.updatedAt = updatedAt;
+    return vm;
   }
 
   /**
@@ -213,8 +224,25 @@ export function createStore(tasksDir) {
   }
 
   function list(filter = {}) {
+    // QX-008 (experiment 4, iteration 2): include updatedAt (file mtime in ms)
+    // on each task in list results. This lets CLI (--sort updated) and Web UI
+    // (?sort=updated) sort by recency without needing a separate fs.stat call
+    // at the Core layer. The mtime is read here, once per task, as part of the
+    // existing listIds() → get() walk.
     return listIds()
-      .map((id) => get(id))
+      .map((id) => {
+        const t = get(id);
+        if (t === null) return null;
+        try {
+          const mtime = fs.statSync(filePathFor(id)).mtimeMs;
+          t.updatedAt = mtime;
+        } catch {
+          // If stat fails (race: file deleted after listIds), omit updatedAt
+          // rather than crashing — the task will be filtered out as null above
+          // in practice, but handle gracefully just in case.
+        }
+        return t;
+      })
       .filter((t) => t !== null)
       .filter((t) => (filter.status ? t.status === filter.status : true))
       .filter((t) =>

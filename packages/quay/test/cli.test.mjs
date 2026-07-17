@@ -974,6 +974,95 @@ async function main() {
     );
   }
 
+  // 17. QX-008 (experiment 4, iteration 2): --sort updated.
+  //     Closes CB-004 (no sort-by-time on CLI) and CB-012 (--sort updated
+  //     silently ignored). Uses a fresh isolated workspace with tasks created
+  //     in a specific time-ordered sequence so sort-by-updated is verifiable.
+  {
+    const sortTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-sort-tasks-"));
+    const sortWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-sort-workspace-"));
+    fs.mkdirSync(path.join(sortWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(sortWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${sortTasksDir.replaceAll("\\", "\\\\")}"`,
+        "",
+      ].join("\n")
+    );
+
+    const sortOpts = { cwd: sortWorkspaceRoot, encoding: "utf8" };
+    const SORT_BODY = VALID_SECTIONS + AC_DOD_CHECKED;
+
+    // Create tasks in order: SORT-A, then SORT-B, then SORT-C.
+    // Touch each file 100ms apart to ensure distinct mtimes.
+    execFileSync("node", [nativeBin, "task", "create", "SORT-A", "--title", "Sort A (oldest)",
+      "--status", "todo", "--body", SORT_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
+    });
+    // Small sleep between creates to ensure distinct mtime.
+    const t0 = Date.now(); while (Date.now() - t0 < 50) { /* spin */ }
+    execFileSync("node", [nativeBin, "task", "create", "SORT-B", "--title", "Sort B (middle)",
+      "--status", "todo", "--body", SORT_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
+    });
+    const t1 = Date.now(); while (Date.now() - t1 < 50) { /* spin */ }
+    execFileSync("node", [nativeBin, "task", "create", "SORT-C", "--title", "Sort C (most recent)",
+      "--status", "todo", "--body", SORT_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
+    });
+
+    // --sort updated --json: tasks should be sorted by mtime descending (SORT-C first, SORT-A last).
+    {
+      const r = run(["task", "list", "--sort", "updated", "--json"], sortOpts);
+      assert(r.status === 0, "quay task list --sort updated --json exits 0");
+      let tasks;
+      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+      assert(Array.isArray(tasks), "quay task list --sort updated --json emits a JSON array");
+      if (Array.isArray(tasks) && tasks.length === 3) {
+        assert(
+          tasks[0].id === "SORT-C",
+          `quay task list --sort updated: first task is most-recently-created SORT-C (got ${tasks[0]?.id})`
+        );
+        assert(
+          tasks[tasks.length - 1].id === "SORT-A",
+          `quay task list --sort updated: last task is oldest SORT-A (got ${tasks[tasks.length - 1]?.id})`
+        );
+        // Confirm updatedAt field is present and numeric.
+        assert(
+          tasks.every((t) => typeof t.updatedAt === "number" && t.updatedAt > 0),
+          "quay task list --sort updated: all tasks include updatedAt as a positive number (ms)"
+        );
+      }
+    }
+
+    // --sort updated (non-JSON): exits 0, produces tabbed output (not default insertion order).
+    {
+      const r = run(["task", "list", "--sort", "updated"], sortOpts);
+      assert(r.status === 0, "quay task list --sort updated (non-JSON) exits 0");
+      // Tasks are listed in default alphabetical (insertion) order without --sort:
+      // SORT-A, SORT-B, SORT-C. With --sort updated, SORT-C should be first.
+      const lines = r.stdout.trim().split("\n").filter((l) => !l.startsWith("#") && l.trim());
+      assert(
+        lines.length === 3 && lines[0].startsWith("SORT-C"),
+        `quay task list --sort updated (non-JSON): first line starts with SORT-C (got: ${lines[0]})`
+      );
+    }
+
+    // CB-012 verification: --sort updated does NOT silently return default
+    // (insertion alphabetical) order. Default order would be SORT-A first.
+    // Sort-by-updated order has SORT-C first. These differ, so the
+    // non-default-equals-updated check above is the live proof.
+
+    fs.rmSync(sortTasksDir, { recursive: true, force: true });
+    fs.rmSync(sortWorkspaceRoot, { recursive: true, force: true });
+  }
+
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 

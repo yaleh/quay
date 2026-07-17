@@ -619,6 +619,105 @@ async function main() {
     fs.rmSync(prefixTasksDir, { recursive: true, force: true });
   }
 
+  // ---- Block 13: QX-010 (experiment 4, iteration 2) — tools/list schema
+  //      correctness for task_list (prefix parameter, CB-011). ----
+  //
+  // CB-011 was filed because Claude Code's cached MCP schema for this session
+  // (opened BEFORE QX-003 was committed) lacked the `prefix` parameter.
+  // The server code has had `prefix` in its inputSchema since QX-003 (iteration
+  // 1). This block verifies that fact via the MCP SDK's own `listTools()` call
+  // (the same wire mechanism Claude Code would use on a fresh session).
+  //
+  // Also verifies that `task_list`'s response objects include `updatedAt`
+  // (QX-008, experiment 4, iteration 2) — the file mtime field added to
+  // quay-native's store.js list() path, closing CB-004/CB-005/CB-012.
+  {
+    const schemaTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-schema-tasks-"));
+    const schemaWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-schema-workspace-"));
+    fs.mkdirSync(path.join(schemaWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(schemaWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir}"`,
+        `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${schemaTasksDir}"`,
+        "",
+      ].join("\n")
+    );
+
+    // Seed one task so task_list returns a real object to inspect for updatedAt.
+    const MINIMAL_BODY =
+      "## Proposal\nA sufficiently long proposal section.\n" +
+      "## Plan\nA sufficiently long plan section.\n" +
+      "## AC\n- [x] a sufficiently long acceptance criterion line\n" +
+      "## DoD\n- [x] a sufficiently long definition-of-done line\n";
+    execFileSync("node", [nativeBin, "task", "create", "SCH-001", "--title", "Schema test task",
+      "--status", "todo", "--body", MINIMAL_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: schemaTasksDir },
+    });
+
+    const { client: coreSchema } = await connectStdio("node", [coreBin, "mcp"], schemaWorkspaceRoot);
+
+    // QX-010: listTools() response includes all 6 expected tools.
+    const toolsResult = await coreSchema.listTools();
+    const tools = toolsResult.tools ?? [];
+    const toolNames = tools.map((t) => t.name);
+    const EXPECTED_TOOLS = ["task_list", "task_get", "task_write", "task_check", "action_list", "action_run"];
+    for (const name of EXPECTED_TOOLS) {
+      assert(
+        toolNames.includes(name),
+        `tools/list includes expected tool: ${name}`
+      );
+    }
+
+    // QX-010: task_list inputSchema includes 'prefix' as a string property.
+    const taskListTool = tools.find((t) => t.name === "task_list");
+    assert(
+      !!taskListTool,
+      "tools/list contains 'task_list' tool definition"
+    );
+    if (taskListTool) {
+      const props = taskListTool.inputSchema?.properties ?? {};
+      assert(
+        "prefix" in props,
+        "task_list inputSchema.properties includes 'prefix' (CB-011: stale session snapshot had this missing)"
+      );
+      assert(
+        props.prefix?.type === "string" || props.prefix?.anyOf?.some?.((x) => x.type === "string"),
+        "task_list inputSchema.properties.prefix is declared as a string type"
+      );
+      // Also confirm the other expected parameters are present.
+      assert("status" in props, "task_list inputSchema.properties includes 'status'");
+      assert("label" in props, "task_list inputSchema.properties includes 'label'");
+      assert("provider" in props, "task_list inputSchema.properties includes 'provider'");
+    }
+
+    // QX-008: task_list response objects include 'updatedAt' (file mtime in ms).
+    const listResult = await coreSchema.callTool({ name: "task_list", arguments: {} });
+    assert(listResult.isError !== true, "task_list for updatedAt test does not return isError:true");
+    const listTasks = listResult.structuredContent?.tasks ?? [];
+    assert(listTasks.length === 1, `task_list for updatedAt test returns exactly 1 seeded task (got ${listTasks.length})`);
+    if (listTasks.length === 1) {
+      const t = listTasks[0];
+      assert(
+        typeof t.updatedAt === "number" && t.updatedAt > 0,
+        `task_list response includes 'updatedAt' as a positive number (ms since epoch) on each task (got: ${JSON.stringify(t.updatedAt)})`
+      );
+      assert(
+        t.id === "SCH-001",
+        "task_list response returns the seeded SCH-001 task"
+      );
+    }
+
+    await coreSchema.close();
+    fs.rmSync(schemaTasksDir, { recursive: true, force: true });
+    fs.rmSync(schemaWorkspaceRoot, { recursive: true, force: true });
+  }
+
   // ---- Cleanup ----
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
   fs.rmSync(tasksDirA, { recursive: true, force: true });

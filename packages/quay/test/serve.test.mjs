@@ -224,6 +224,160 @@ async function main() {
     }
   }
 
+  // --- QX-008 (experiment 4, iteration 2): ?sort=updated on Web UI list page ---
+  // Tests for "Updated ↓" sort support, closing CB-005 and the Web UI analog
+  // of CB-012. Creates tasks in time-ordered sequence in a fresh isolated server.
+  {
+    const sortTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-sort-test-"));
+    const sortWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-sort-workspace-"));
+    fs.mkdirSync(path.join(sortWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(sortWorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${sortTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${sortTasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    // Create tasks in sequence with distinct mtimes.
+    execFileSync("node", [nativeBin, "task", "create", "SRT-A", "--title", "Sort A (oldest)",
+      "--status", "todo", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
+    });
+    const t0 = Date.now(); while (Date.now() - t0 < 50) { /* spin wait for distinct mtime */ }
+    execFileSync("node", [nativeBin, "task", "create", "SRT-B", "--title", "Sort B (middle)",
+      "--status", "todo", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
+    });
+    const t1 = Date.now(); while (Date.now() - t1 < 50) { /* spin */ }
+    execFileSync("node", [nativeBin, "task", "create", "SRT-C", "--title", "Sort C (most recent)",
+      "--status", "todo", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
+    });
+
+    const sortPort = port + 2;
+    const sortOrigCwd = process.cwd();
+    let sortServer;
+    try {
+      process.chdir(sortWorkspaceRoot);
+      sortServer = await startServer({ port: sortPort });
+
+      // ?sort=updated: SRT-C (most recent) should appear before SRT-A (oldest).
+      // Default (?sort=id) alphabetical order would be SRT-A, SRT-B, SRT-C.
+      const sortedByUpdated = await get(sortPort, "/?sort=updated");
+      assert(sortedByUpdated.status === 200, "GET /?sort=updated returns 200");
+      assert(
+        sortedByUpdated.body.includes("SRT-C") && sortedByUpdated.body.includes("SRT-A"),
+        "GET /?sort=updated body includes both SRT-C and SRT-A"
+      );
+      // Verify SRT-C appears before SRT-A in the rendered HTML body.
+      const posC = sortedByUpdated.body.indexOf("SRT-C");
+      const posA = sortedByUpdated.body.indexOf("SRT-A");
+      assert(
+        posC < posA,
+        `GET /?sort=updated: SRT-C (most recent) appears before SRT-A (oldest) in the HTML (posC=${posC}, posA=${posA})`
+      );
+
+      // Sort nav should include "Updated" link.
+      assert(
+        sortedByUpdated.body.includes("Updated"),
+        "GET /?sort=updated body includes 'Updated' in the sort nav"
+      );
+
+      // No regression: default order (no sort param) still returns 200.
+      const noSort = await get(sortPort, "/");
+      assert(noSort.status === 200, "GET / (no sort param) returns 200 after adding sort-by-updated");
+      assert(noSort.body.includes("SRT-A") && noSort.body.includes("SRT-C"),
+        "GET / (no sort param) includes both seeded tasks — no regression");
+    } finally {
+      if (sortServer) {
+        sortServer.close();
+        if (sortServer.client) await sortServer.client.close();
+      }
+      process.chdir(sortOrigCwd);
+      fs.rmSync(sortTasksDir, { recursive: true, force: true });
+      fs.rmSync(sortWorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  // --- QX-009 (experiment 4, iteration 2): inline action buttons on list page ---
+  // Tests for CB-003 (action buttons only on detail page; not on list page).
+  // Uses the existing fixture's tasks (SRV-1 at todo with advance button, SRV-2 at done without).
+  // This reuses the main server (already closed above) so creates a fresh one.
+  {
+    const actTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-listaction-test-"));
+    const actWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-listaction-workspace-"));
+    fs.mkdirSync(path.join(actWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(actWorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${actTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${actTasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    // SRV2-1: todo status → should have Advance button on list page.
+    // SRV2-2: done status → should NOT have Advance button (whenStatus: ["todo","ready"]).
+    execFileSync("node", [nativeBin, "task", "create", "SRV2-1", "--title", "List action task (todo)",
+      "--status", "todo", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: actTasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "create", "SRV2-2", "--title", "List action task (done, no button)",
+      "--status", "done", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: actTasksDir },
+    });
+
+    const actPort = port + 3;
+    const actOrigCwd = process.cwd();
+    let actServer;
+    try {
+      process.chdir(actWorkspaceRoot);
+      actServer = await startServer({ port: actPort });
+
+      // GET / (list): Advance button appears for SRV2-1 (todo), absent for SRV2-2 (done).
+      const listPage = await get(actPort, "/");
+      assert(listPage.status === 200, "GET / (list page with actions) returns 200");
+      assert(listPage.body.includes("SRV2-1") && listPage.body.includes("SRV2-2"),
+        "GET / body includes both seeded tasks");
+      // The list page should include at least one "Advance" button (for SRV2-1).
+      assert(
+        listPage.body.includes("Advance"),
+        "GET / list page body includes 'Advance' action button for todo-status task (QX-009)"
+      );
+      // The table should have an "actions" column header.
+      assert(
+        listPage.body.toLowerCase().includes("actions"),
+        "GET / list page body includes 'actions' column header (QX-009)"
+      );
+      // The action form on the list page posts to the task's action URL.
+      assert(
+        listPage.body.includes(`/task/${encodeURIComponent("SRV2-1")}/action/advance`) ||
+        listPage.body.includes("/task/SRV2-1/action/advance"),
+        "GET / list page body includes action form posting to SRV2-1's advance action endpoint"
+      );
+
+      // POST action from list page: should redirect back to the list (not /task/<id>).
+      // The from= param is URL-encoded "/" (the list root).
+      const fromEncoded = encodeURIComponent("/");
+      const actionPost = await post(actPort, `/task/SRV2-1/action/advance?from=${fromEncoded}`);
+      assert(actionPost.status === 302, `POST /task/SRV2-1/action/advance?from=/ returns 302 (got ${actionPost.status})`);
+      assert(
+        actionPost.headers.location === "/",
+        `POST action from list page redirects back to the list (Location: ${actionPost.headers.location})`
+      );
+
+      // POST action without from= param: should still redirect to task detail (existing behavior).
+      const actionPostNoFrom = await post(actPort, `/task/SRV2-1/action/advance`);
+      assert(actionPostNoFrom.status === 302, `POST /task/SRV2-1/action/advance (no from=) returns 302 (got ${actionPostNoFrom.status})`);
+      assert(
+        actionPostNoFrom.headers.location === "/task/SRV2-1",
+        `POST action without from= still redirects to task detail (Location: ${actionPostNoFrom.headers.location})`
+      );
+    } finally {
+      if (actServer) {
+        actServer.close();
+        if (actServer.client) await actServer.client.close();
+      }
+      process.chdir(actOrigCwd);
+      fs.rmSync(actTasksDir, { recursive: true, force: true });
+      fs.rmSync(actWorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
   // --- composePayload() unit-level check (action.js), real manifest shape ---
   const manifest = {
     action_buttons: [
