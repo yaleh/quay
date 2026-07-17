@@ -593,6 +593,26 @@ async function main() {
     assert(!listStatusTodoLabelAlpha.body.includes("WUI-1"),
       "GET /?status=todo&label=alpha excludes WUI-1 (todo, no labels) (QW-005: label filter excludes no-label tasks)");
 
+    // ── QW-006: heading-order fix and mobile CSS assertions ──────────────────
+    // QW-006 (experiment 3, iteration 3): structural tests for heading-order
+    // fix (.sr-only h2 before .body div on detail page) and mobile @media rule.
+
+    // Detail page: h2.sr-only element present before .body div (heading-order fix)
+    assert(detail1.body.includes('<h2 class="sr-only">Details</h2>'),
+      'GET /task/WUI-1 detail page contains <h2 class="sr-only">Details</h2> before .body div (QW-006: heading-order fix)');
+
+    // .sr-only CSS rule is defined in pageStyles (visually hidden heading)
+    assert(list.body.includes(".sr-only"),
+      'GET / pageStyles() includes .sr-only CSS rule (QW-006: visually hidden semantic heading)');
+
+    // @media (max-width: 600px) responsive block is present in pageStyles
+    assert(list.body.includes("@media") && list.body.includes("max-width"),
+      'GET / pageStyles() includes @media (max-width) responsive CSS block (QW-006: mobile responsive layout / DIR-003)');
+
+    // Mobile media query includes table display:block for horizontal scroll
+    assert(list.body.includes("overflow-x: auto") || list.body.includes("overflow-x:auto"),
+      'GET / pageStyles() includes overflow-x:auto in @media block for mobile table scrolling (QW-006: DIR-003)');
+
   } finally {
     if (server) {
       server.close();
@@ -607,7 +627,7 @@ async function main() {
   }
 
   console.log(failures === 0
-    ? "\nAll QC-001/QC-002/QW-001/QW-002/QW-003/QW-004/QW-005 web-ui-browser regression tests passed."
+    ? "\nAll QC-001/QC-002/QW-001/QW-002/QW-003/QW-004/QW-005/QW-006 web-ui-browser regression tests passed."
     : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }

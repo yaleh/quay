@@ -109,6 +109,24 @@ button:hover { background: #0052a3; }
 }
 .body pre code { background: none; padding: 0; font-size: inherit; }
 hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
+/* QW-006: visually-hidden class for semantic headings that should not disrupt layout */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* QW-006: mobile-responsive layout (DIR-003) — narrow viewport adaptations */
+@media (max-width: 600px) {
+  main { padding: 1rem 0.75rem; }
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  th, td { padding: 0.45rem 0.6rem; font-size: 0.85rem; }
+}
 </style>`;
 }
 
@@ -405,6 +423,7 @@ export async function startServer({ port = 4173 } = {}) {
           <h1>${escapeHtml(t.id)}: ${escapeHtml(t.title)} [${escapeHtml(t.status)}]</h1>
           <p class="meta">role: ${escapeHtml(t.role)} · labels: ${escapeHtml((t.labels || []).join(", "))}</p>
           <div>${buttons}</div>
+          <h2 class="sr-only">Details</h2>
           <div class="body">${renderMarkdown(t.body)}</div>
         </main></body></html>`);
       return;
