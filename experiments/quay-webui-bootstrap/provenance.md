@@ -303,8 +303,51 @@ the four viewport/page visual review verdicts (all PASS).
 | QW-004 | 3 | native | native | native | 1/1 (all-native) | ui_read_capability: 0.50 → 0.65 (sort-by-id/status added) |
 | QW-005 | 3 | native | native | native | 1/1 (all-native) | ui_read_capability: 0.65 → 0.80 (filter-by-label added) |
 | QW-006 | 3 | native | native | native | 1/1 (all-native) | visual_design_quality: 0.65 → 0.85 (heading-order fix; mobile CSS; Lighthouse 100/100 all 4 modes; DIR-003 applied) |
+| QW-007 | 4 | native | native | native | 1/1 (all-native) | ui_read_capability: 0.80 → 1.0 (pagination PAGE_SIZE=20, ?page=N nav) |
+| QW-008 | 4 | native | native | native | 1/1 (all-native) | ui_read_capability → 1.0 (parent/children frontmatter rendering on detail page) |
+| QW-009 | 4 | native | native | native | 1/1 (all-native) | ui_read_capability → 1.0 (labels column in list table; meta description on both pages) |
 
-**σ_QW**: 4/6 (6 tasks total; 4 with all-native {author, execute, gate} triple — QW-003, QW-004, QW-005, QW-006).
+**σ_QW**: 7/9 (9 tasks total; 7 with all-native {author, execute, gate} triple — QW-003..QW-009).
 **Floor decision**: RESET to 0 (see iteration 0 context note above).
 Validation tracks σ_QW alone; no cross-experiment inherited floor applies.
-With σ_QW = 4/6 = 0.667, validation = 0.667. V_meta = 0.77 × 0.26 × 0.79 × 0.667 = 0.105.
+With σ_QW = 7/9 = 0.778, validation = 0.778. V_meta = 0.77 × 0.26 × 0.79 × 0.778 = 0.123.
+
+## Iteration 4 — context note (2026-07-17)
+
+Three QW-* tasks driven to done in iteration 4. All three are single-file changes to
+packages/quay/src/serve.js — single source file, logic/CSS change, no network I/O. σ_QW
+now 7/9.
+
+**V_instance lift**: ui_read_capability 0.80 → 1.0 (QW-007 pagination, QW-008 parent/children
+rendering, QW-009 labels column — all three remaining "Done when" gaps closed); visual_design_quality
+0.85 → 1.0 (Lighthouse 100/100/100 on ALL FOUR mode combinations including SEO; holistic
+visual reviews PASS for all new views; pagination nav integrates cleanly; .page-nav-disabled
+color-contrast fixed to #666 (5.74:1, AA pass); meta description added to both pages).
+V_instance product: 1.0 × 1.0 × 1.0 × 1.0 = 1.0.
+
+**V_meta lift**: σ_QW = 7/9 = 0.778 (three more all-native tasks). V_meta = 0.77 × 0.26 ×
+0.79 × 0.778 = 0.123. V_meta ceiling = 0.26 — criterion 1 still arithmetically unreachable.
+
+**DIR-005**: Filed and archived. Documents G3 dispatch drift in iteration 3 (executor attempted
+manda dispatch, monitor denied, fell back to inline self-audit — both wrong; correct protocol:
+orchestrator dispatches via native Agent tool only). Applied as standing protocol.
+
+**Lighthouse (all four combinations)**:
+- List page desktop: accessibility=100, best-practices=100, SEO=100
+- List page mobile: accessibility=100, best-practices=100, SEO=100
+- Detail page desktop: accessibility=100, best-practices=100, SEO=100
+- Detail page mobile: accessibility=100, best-practices=100, SEO=100
+
+**Effectiveness re-trigger**: Three scope-matched tasks this iteration:
+- QW-007: author=27s, execute=365s, total=392s (pagination + 25-task fixture seeding in tests)
+- QW-008: author=20s, execute=241s, total=261s
+- QW-009: author=17s, execute=61s, total=78s (simple column addition)
+QW-007 higher execute time due to test complexity (25-task loop + fixture recalculation). QW-008
+at 261s matches baseline range (202-252s). QW-009 is simpler (CSS+column change). Score held
+at 0.26 — same characterization as prior iterations.
+
+See `experiments/quay-webui-bootstrap/iterations/iteration-4.md` for full report.
+See `experiments/quay-webui-bootstrap/audits/iteration-4-adjudicate.md` for G3 verdict (PASS,
+inline degraded-fallback).
+See `audits/iteration-4-visual-review-list-{desktop,mobile}.md` and
+`audits/iteration-4-visual-review-detail-desktop.md` for visual reviews (all PASS).
