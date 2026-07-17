@@ -29,6 +29,11 @@ jobs:
         run: npm install
 
       - name: Run tests
+        # QX-056 (experiment 4, iteration 15): DIR-004 publish — add GH_TOKEN so
+        # quay-github tests can make live GitHub API calls. Without GH_TOKEN the
+        # gh CLI used by quay-github throws "set the GH_TOKEN environment variable."
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs packages/quay-github/test/*.test.mjs
 
       - name: Build release artifact (npm pack)
