@@ -932,6 +932,162 @@ async function main() {
     }
   }
 
+  // --- QX-026 (experiment 4, iteration 7): frequency-sort labels + pin active (UQ-028 + UQ-027) ---
+  // --- QX-027 (experiment 4, iteration 7): doc staleness — placeholder updated (UQ-029) ---
+  // --- QX-028 (experiment 4, iteration 7): body search heading exclusion (CB-017) ---
+  {
+    const qx26TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-qx26-test-"));
+    const qx26WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-qx26-workspace-"));
+    fs.mkdirSync(path.join(qx26WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx26WorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx26TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx26TasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    // Create 30 tasks with label "freq-common" (the most-used label).
+    // Then create 5 tasks with each of "zzz-rare-a" through "zzz-rare-y" (25 rare labels).
+    // With frequency sort, "freq-common" should appear first in the nav.
+    // "zzz-rare-*" labels come last alphabetically but may fill top-25 slots if not sorted by freq.
+    for (let i = 1; i <= 30; i++) {
+      execFileSync("node", [nativeBin, "task", "create", `FREQ-${String(i).padStart(2, "0")}`, "--title", `Freq task ${i}`,
+        "--status", "todo", "--body", VALID_SECTIONS, "--labels", "freq-common"], {
+        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx26TasksDir },
+      });
+    }
+    // 26 rare labels (zzz-rare-a through zzz-rare-z) each on 1 task.
+    // With freq sort, "freq-common" (30 tasks) beats all of these.
+    for (let i = 0; i < 26; i++) {
+      const rareLabel = `zzz-rare-${String.fromCharCode(97 + i)}`; // zzz-rare-a .. zzz-rare-z
+      execFileSync("node", [nativeBin, "task", "create", `RARE-${String.fromCharCode(65 + i)}`, "--title", `Rare label task ${i}`,
+        "--status", "todo", "--body", VALID_SECTIONS, "--labels", rareLabel], {
+        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx26TasksDir },
+      });
+    }
+    // Active label that would be position >25 alphabetically but should appear due to pinning.
+    // "zzz-rare-z" is the last alphabetically of the rare labels and won't appear in top-25
+    // by frequency (all have count=1; "freq-common" has count=30 and takes position 1;
+    // the 26 rare labels fill positions 2-27, but only 24 fit within the 25-slot cap after
+    // "freq-common"). The last ones alphabetically ("zzz-rare-x", "zzz-rare-y", "zzz-rare-z")
+    // will be beyond position 25. Filter by "zzz-rare-z" to trigger the pin.
+
+    const qx26Port = port + 8;
+    const qx26OrigCwd = process.cwd();
+    let qx26Server;
+    try {
+      process.chdir(qx26WorkspaceRoot);
+      qx26Server = await startServer({ port: qx26Port });
+
+      // --- QX-026a (UQ-028): frequency sort puts most-used label first ---
+      const freqPage = await get(qx26Port, "/");
+      assert(freqPage.status === 200, "GET / with freq-labeled tasks returns 200 (QX-026, UQ-028)");
+      // The label nav should contain "freq-common" and it should appear before the rare labels.
+      // Check it's in the HTML at all first.
+      assert(freqPage.body.includes("freq-common"),
+        "GET / label nav includes freq-common (most-used label with 30 tasks) (QX-026, UQ-028)");
+      // Frequency sort: freq-common (30 tasks) must appear before any zzz-rare-* (1 task each).
+      const freqPos = freqPage.body.indexOf("freq-common");
+      const rarePos = freqPage.body.indexOf("zzz-rare-");
+      assert(freqPos !== -1 && rarePos !== -1 && freqPos < rarePos,
+        `GET / freq-common appears before zzz-rare-* labels in nav (QX-026, UQ-028): freqPos=${freqPos}, rarePos=${rarePos}`);
+
+      // --- QX-026b (UQ-027): active label pinned to front if it would be hidden ---
+      // Filter by zzz-rare-z — this label is alphabetically last among 27 total labels,
+      // so without pinning it would be hidden (position >25). With pinning it must be visible.
+      const pinnedPage = await get(qx26Port, "/?label=zzz-rare-z");
+      assert(pinnedPage.status === 200, "GET /?label=zzz-rare-z returns 200 (QX-026, UQ-027)");
+      // The active label must appear in the nav with a remove link (bold + "remove").
+      assert(pinnedPage.body.includes("zzz-rare-z"),
+        "GET /?label=zzz-rare-z shows active label zzz-rare-z in nav (QX-026, UQ-027)");
+      assert(pinnedPage.body.includes("remove"),
+        "GET /?label=zzz-rare-z shows remove link for active label (QX-026, UQ-027)");
+
+      // --- QX-026c: hidden count reflects correct number of non-visible labels ---
+      // Total distinct labels: 1 (freq-common) + 26 (zzz-rare-a..z) = 27.
+      // Without active pin: visibleLabels = first 25 (freq-common + zzz-rare-a..zzz-rare-x).
+      // hidden = 27 - 25 = 2 (zzz-rare-y and zzz-rare-z).
+      // Check "more labels" appears (not exact count check since pinning may shift it).
+      assert(freqPage.body.includes("more labels"),
+        "GET / with 27 labels shows 'more labels' truncation note (QX-026)");
+
+      // --- QX-027 (UQ-029): search placeholder updated ---
+      assert(freqPage.body.includes("Search titles and descriptions"),
+        "GET / search input placeholder says 'Search titles and descriptions' not 'Search titles' (QX-027, UQ-029)");
+      assert(!freqPage.body.includes('placeholder="Search titles…"'),
+        "GET / old placeholder 'Search titles…' no longer present (QX-027, UQ-029)");
+
+      // --- QX-028 (CB-017): heading-excluded body search (dedicated minimal workspace) ---
+      // Use a separate server with only 2 tasks to avoid pagination interfering with results.
+    } finally {
+      if (qx26Server) {
+        qx26Server.close();
+        if (qx26Server.client) await qx26Server.client.close();
+      }
+      process.chdir(qx26OrigCwd);
+      fs.rmSync(qx26TasksDir, { recursive: true, force: true });
+      fs.rmSync(qx26WorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  // --- QX-028 (experiment 4, iteration 7): body search heading exclusion (CB-017) ---
+  // Dedicated minimal server with exactly 2 tasks: one heading-only body, one prose body.
+  {
+    const qx28TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-qx28-test-"));
+    const qx28WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-qx28-workspace-"));
+    fs.mkdirSync(path.join(qx28WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx28WorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx28TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx28TasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+    // HDNG-1: body is ONLY heading lines — no prose content at all.
+    // Searching "Proposal" must NOT return this task (headings stripped).
+    execFileSync("node", [nativeBin, "task", "create", "HDNG-1", "--title", "Heading-only body task",
+      "--status", "todo", "--body", "## Proposal\n## Plan\n## AC\n## DoD\n"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx28TasksDir },
+    });
+    // HDNG-2: body has a unique prose token "xyzzy-prose-only-42z" in a non-heading line.
+    // This token must NOT contain "Proposal" or "Plan" (to avoid matching the exclusion test).
+    // The heading line "## Proposal" is present but must be stripped before search indexing.
+    execFileSync("node", [nativeBin, "task", "create", "HDNG-2", "--title", "Prose body task",
+      "--status", "todo", "--body", "## Proposal\n## Plan\nThis line has xyzzy-prose-only-42z token.\n## AC\n## DoD\n"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: qx28TasksDir },
+    });
+
+    const qx28Port = port + 9;
+    const qx28OrigCwd = process.cwd();
+    let qx28Server;
+    try {
+      process.chdir(qx28WorkspaceRoot);
+      qx28Server = await startServer({ port: qx28Port });
+
+      // Search for "Proposal" — HDNG-1 must NOT match (headings stripped, no prose),
+      // HDNG-2 must NOT match either (its prose is "xyzzy-prose-only-42z" — does not contain "Proposal").
+      // Neither task should appear when searching for the heading term "Proposal".
+      const headingSearch = await get(qx28Port, "/?q=Proposal");
+      assert(headingSearch.status === 200, "GET /?q=Proposal returns 200 (QX-028, CB-017)");
+      assert(!headingSearch.body.includes("HDNG-1"),
+        "GET /?q=Proposal excludes HDNG-1 (heading-only body, headings stripped) (QX-028, CB-017)");
+      assert(!headingSearch.body.includes("HDNG-2"),
+        "GET /?q=Proposal excludes HDNG-2 (prose lacks 'Proposal'; heading stripped) (QX-028, CB-017)");
+
+      // Search for the unique prose token — must match HDNG-2, not HDNG-1.
+      const proseSearch = await get(qx28Port, "/?q=xyzzy-prose-only-42z");
+      assert(proseSearch.status === 200, "GET /?q=unique-prose-token returns 200 (QX-028, CB-017)");
+      assert(proseSearch.body.includes("HDNG-2"),
+        "GET /?q=unique-prose-token includes HDNG-2 (prose under heading is searchable) (QX-028, CB-017)");
+      assert(!proseSearch.body.includes("HDNG-1"),
+        "GET /?q=unique-prose-token excludes HDNG-1 (heading-only, no prose match) (QX-028, CB-017)");
+
+    } finally {
+      if (qx28Server) {
+        qx28Server.close();
+        if (qx28Server.client) await qx28Server.client.close();
+      }
+      process.chdir(qx28OrigCwd);
+      fs.rmSync(qx28TasksDir, { recursive: true, force: true });
+      fs.rmSync(qx28WorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
   console.log(failures === 0 ? "\nAll QN-031 serve/action regression tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }

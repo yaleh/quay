@@ -26,6 +26,16 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// QX-028 (experiment 4, iteration 7): strip structural heading lines from
+// body content before using it as a search index. Lines matching /^#+\s/
+// (one or more # followed by a space) are structural headers ("## Proposal",
+// "## Plan", "## AC", "## DoD", etc.) — excluding them prevents template
+// boilerplate section names from causing false positives in body search.
+// Closes CB-017 (significant: searching "Proposal" matched 117/118 tasks).
+function stripHeadings(text) {
+  return (text || "").split("\n").filter((line) => !/^#+\s/.test(line)).join(" ");
+}
+
 // QW-001: minimal, consistent CSS system — applied via <link> in every page's
 // <head>. No external file: inlined as a <style> block so the single-file
 // serve.js remains self-contained (G5: no framework, no build step).
@@ -386,10 +396,15 @@ export async function startServer({ port = 4173 } = {}) {
       // Closes CB-007 (significant: no search affordance in CLI or Web UI).
       // QX-023 (experiment 4, iteration 6): extend to body content too.
       // Closes CB-016 (significant: title-only search misses body content).
+      // QX-028 (experiment 4, iteration 7): strip structural heading lines before
+      // indexing body content — lines starting with "# " (any number of #s followed
+      // by a space) are excluded from the search index. This prevents template section
+      // headers ("## Proposal", "## Plan", "## AC", "## DoD") from causing false
+      // positives when searching for those terms. Closes CB-017 (significant).
       const qFilter = url.searchParams.get("q") || null;
       const filtered = qFilter
         ? filteredByLabel.filter((t) =>
-            (t.title + " " + (t.body || "")).toLowerCase().includes(qFilter.toLowerCase())
+            (t.title + " " + stripHeadings(t.body)).toLowerCase().includes(qFilter.toLowerCase())
           )
         : filteredByLabel;
       // QW-004 (experiment 3, iteration 3): sort by ?sort=<value> query param.
@@ -550,10 +565,30 @@ export async function startServer({ port = 4173 } = {}) {
       // When more than 25 distinct labels exist, show only the first 25 and append
       // a non-link "… N more labels" note. Closes UQ-025 (significant: flat wall
       // of 40+ labels becomes unusable at scale).
+      // QX-026 (experiment 4, iteration 7): sort by frequency (most-used first),
+      // then alphabetically within equal counts. Pin active filter labels to the
+      // front of the visible list so they are never hidden by truncation.
+      // Closes UQ-028 (alphabetic ordering hides most-used labels) and UQ-027
+      // (active label hidden when it falls after position 25 alphabetically).
       const LABEL_NAV_MAX = 25;
-      const allLabels = [...new Set(allTasks.flatMap((t) => Array.isArray(t.labels) ? t.labels : []))].sort();
-      const visibleLabels = allLabels.slice(0, LABEL_NAV_MAX);
-      const hiddenLabelCount = allLabels.length - visibleLabels.length;
+      // Count how many tasks carry each label (across the unfiltered full task list).
+      const labelCounts = new Map();
+      for (const t of allTasks) {
+        for (const l of (Array.isArray(t.labels) ? t.labels : [])) {
+          labelCounts.set(l, (labelCounts.get(l) || 0) + 1);
+        }
+      }
+      // All distinct labels sorted by frequency descending, then alphabetically.
+      const allLabels = [...new Set(allTasks.flatMap((t) => Array.isArray(t.labels) ? t.labels : []))]
+        .sort((a, b) => (labelCounts.get(b) || 0) - (labelCounts.get(a) || 0) || a.localeCompare(b));
+      // Pin active labels that would be hidden (fall after position LABEL_NAV_MAX).
+      const topLabels = allLabels.slice(0, LABEL_NAV_MAX);
+      const activeHidden = labelFilters.filter((l) => !topLabels.includes(l));
+      // Build the visible list: pinned-active first, then frequency-sorted rest, up to LABEL_NAV_MAX.
+      const pinnedFirst = [...new Set([...activeHidden, ...allLabels])];
+      const visibleLabels = pinnedFirst.slice(0, LABEL_NAV_MAX);
+      // Hidden count = labels in allLabels that are NOT in visibleLabels.
+      const hiddenLabelCount = allLabels.filter((l) => !visibleLabels.includes(l)).length;
       const labelNav = allLabels.length > 0 ? [
         labelFilters.length > 0
           ? html`<a href="${buildHref(statusFilter, sortKey, null, null, prefixFilter, qFilter)}">All</a>`
@@ -607,7 +642,7 @@ export async function startServer({ port = 4173 } = {}) {
         ${statusFilter ? html`<input type="hidden" name="status" value="${escapeHtml(statusFilter)}">` : ""}
         ${labelFilters.map((l) => html`<input type="hidden" name="label" value="${escapeHtml(l)}">`).join("")}
         ${sortKey ? html`<input type="hidden" name="sort" value="${escapeHtml(sortKey)}">` : ""}
-        <input name="q" type="search" value="${escapeHtml(qFilter || "")}" placeholder="Search titles…" style="padding:0.4rem 0.6rem;border:1px solid #ced4da;border-radius:4px;font-size:0.9rem;min-width:180px">
+        <input name="q" type="search" value="${escapeHtml(qFilter || "")}" placeholder="Search titles and descriptions…" style="padding:0.4rem 0.6rem;border:1px solid #ced4da;border-radius:4px;font-size:0.9rem;min-width:180px">
         <button type="submit" style="padding:0.4rem 0.8rem">Search</button>
         ${searchBadge}
       </form>`;

@@ -1296,6 +1296,63 @@ async function main() {
     fs.rmSync(srchWorkspaceRoot, { recursive: true, force: true });
   }
 
+  // 20. QX-028 (experiment 4, iteration 7): heading-excluded body search (CB-017).
+  //     --search "Proposal" must NOT match a task whose body is only heading lines.
+  //     --search "Proposal" MUST match a task with "proposal" in prose (non-heading) content.
+  //     --search <help-text-check>: --help now says "title/body content" not "title substring".
+  {
+    const hdngTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-hdng-tasks-"));
+    const hdngWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-hdng-workspace-"));
+    fs.mkdirSync(path.join(hdngWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(hdngWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${hdngTasksDir.replaceAll("\\", "\\\\")}"`,
+        "",
+      ].join("\n")
+    );
+    const hdngOpts = { cwd: hdngWorkspaceRoot, encoding: "utf8" };
+    // HDNG-1: body is ONLY heading lines — searching "Proposal" must NOT return this task
+    execFileSync("node", [nativeBin, "task", "create", "HDNG-1", "--title", "Headings only",
+      "--status", "todo", "--body", "## Proposal\n## Plan\n## AC\n## DoD\n"], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: hdngTasksDir },
+    });
+    // HDNG-2: body has "proposal" in actual prose — must MATCH
+    execFileSync("node", [nativeBin, "task", "create", "HDNG-2", "--title", "Prose body",
+      "--status", "todo", "--body", VALID_SECTIONS + "\nThis task is a proposal for improvement.\n" + AC_DOD_CHECKED], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: hdngTasksDir },
+    });
+    {
+      const r = run(["task", "list", "--search", "Proposal", "--json"], hdngOpts);
+      assert(r.status === 0, "quay task list --search Proposal exits 0 (QX-028, CB-017)");
+      let tasks;
+      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+      assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "HDNG-1"),
+        "quay task list --search Proposal excludes HDNG-1 (heading-only body) (QX-028, CB-017)");
+      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "HDNG-2"),
+        "quay task list --search Proposal includes HDNG-2 (prose contains 'proposal') (QX-028, CB-017)");
+    }
+    {
+      // Verify help text updated (QX-027, UQ-029): "title/body content" not "title substring"
+      const rHelp = run(["--help"], hdngOpts);
+      assert(rHelp.status === 0, "quay --help exits 0 (QX-027 doc-staleness check)");
+      assert(rHelp.stdout.includes("title/body content"),
+        "quay --help mentions 'title/body content' (QX-027, UQ-029)");
+      assert(!rHelp.stdout.includes("title substring"),
+        "quay --help no longer says 'title substring' (QX-027, UQ-029)");
+      assert(rHelp.stdout.includes("in title or body"),
+        "quay --help example says 'in title or body' not 'in title' (QX-027, UQ-029)");
+    }
+    fs.rmSync(hdngTasksDir, { recursive: true, force: true });
+    fs.rmSync(hdngWorkspaceRoot, { recursive: true, force: true });
+  }
+
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 

@@ -80,6 +80,15 @@ function relativeTimeCli(ts) {
   return `${days}d ago`;
 }
 
+// QX-028 (experiment 4, iteration 7): strip structural heading lines from
+// body content before using it as a search index. Heading lines (matching
+// /^#+\s/) are template boilerplate ("## Proposal", "## Plan", "## AC",
+// "## DoD") that appear in every task body and cause false positives when
+// users search for those terms. Closes CB-017 (significant).
+function stripHeadings(text) {
+  return (text || "").split("\n").filter((line) => !/^#+\s/.test(line)).join(" ");
+}
+
 // QX-005 (experiment 4, iteration 1): structured help text for --help / -h.
 // Previously `quay --help` fell through to the generic usage error on stderr
 // (UQ-001) and `quay task --help` / `quay task list --help` likewise showed
@@ -108,13 +117,13 @@ Options for task list:
   --label <label>     Filter by label (repeatable: --label A --label B for AND-filter)
   --prefix <prefix>   Filter by task id prefix (e.g. QX for QX-* tasks)
   --sort id|status|updated  Sort by id, status, or last-updated time (default: insertion order)
-  --search <query>    Filter by title substring (case-insensitive full-text search)
+  --search <query>    Filter by title/body content (case-insensitive)
   --json              Output as JSON
 
 Examples:
   quay task list --prefix QX          List only QX-* tasks
   quay task list --status todo        List todo tasks
-  quay task list --search "bootstrap" List tasks with "bootstrap" in title
+  quay task list --search "bootstrap" List tasks with "bootstrap" in title or body
   quay task view QX-001               View task details
   quay task edit QX-001 --status done Mark task done
 `);
@@ -182,10 +191,13 @@ async function main() {
       // Case-insensitive substring match on task title. Closes CB-007.
       // QX-023 (experiment 4, iteration 6): extend to body content too.
       // Closes CB-016 (significant: title-only search misses body content).
+      // QX-028 (experiment 4, iteration 7): use stripHeadings() to exclude
+      // structural markdown heading lines from the body search index.
+      // Closes CB-017 (significant: template boilerplate false positives).
       const searchQuery = typeof flags.search === "string" ? flags.search : null;
       const filtered = searchQuery
         ? filteredByLabel.filter((t) =>
-            (t.title + " " + (t.body || "")).toLowerCase().includes(searchQuery.toLowerCase())
+            (t.title + " " + stripHeadings(t.body)).toLowerCase().includes(searchQuery.toLowerCase())
           )
         : filteredByLabel;
       // QX-008 (experiment 4, iteration 2): sort-by-updated support.
