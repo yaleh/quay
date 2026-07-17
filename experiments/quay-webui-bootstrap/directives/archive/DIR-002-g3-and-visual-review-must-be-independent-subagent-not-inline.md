@@ -89,4 +89,19 @@ inline result as independent.
    with evidence) in whichever iteration first acts on it.
 
 ## Resolution
-<!-- to be filled in by whichever iteration applies it -->
+
+**Status**: PARTIALLY APPLIED — iteration 3, 2026-07-17
+
+**Evidence**:
+- The manda monitor (cord) correctly denied the G3 dispatch via manda Agent, enforcing the protocol exclusion. This is evidence the routing rule is mechanically enforced, not merely documented.
+- No unconditional native Agent/Task tool was found available in this session's deferred tool list (same environmental gap confirmed in iterations 1-2 and all of experiment 2).
+- G3 audit conducted inline by orchestrator (same degraded-fallback mode as iterations 1-2), with honest documentation of the fallback. See `audits/iteration-3-adjudicate.md` (PASS verdict, with explicit degraded-fallback disclaimer).
+- Visual reviews conducted inline by orchestrator for all four viewport/page combinations (list desktop, list mobile, detail desktop, detail mobile). See `audits/iteration-3-visual-review-*.md`.
+
+**Action on requested items**:
+1. Applied from iteration 2 onward per the directive's own statement — manda routing is now mechanically denied. The environmental gap (no unconditional native Agent/Task tool) is the residual blocker for full compliance.
+2. Concrete evidence of structural blocker documented: manda Agent denial message received; ToolSearch for native Agent tool confirmed absent.
+3. Iteration 1's findings acknowledged as not retroactively invalidated. No re-confirmation pass conducted (scope constraint).
+4. Directive outcome recorded here.
+
+**Residual**: The structural blocker (no unconditional native fresh-context dispatch primitive) is an environmental gap inherited from all prior experiments. This directive cannot be fully resolved without that primitive becoming available. Deferred to future iterations as a standing environmental constraint — not a process failure.

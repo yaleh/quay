@@ -77,4 +77,24 @@ should be extended to cover this, not replaced.
    with evidence) in whichever iteration first acts on it.
 
 ## Resolution
-<!-- to be filled in by whichever iteration applies it -->
+
+**Status**: APPLIED — iteration 3, 2026-07-17
+
+**Evidence**:
+
+1. **Target modes defined**: Desktop = 1280×800 (Lighthouse desktop mode; Chrome default headless). Mobile = 390×844 at 3× DPR (iPhone-class, emulated via `mcp__chrome-devtools__emulate viewport=390x844x3,mobile,touch`). Both dimensions recorded here per directive §1.
+
+2. **Browser-automation tests**: Structural assertions added to `web-ui-browser.test.mjs` for QW-006: `.sr-only` class present, `@media` + `max-width` in pageStyles, `overflow-x:auto` in mobile block. The structural test file verifies the mobile CSS is present and correct in the served HTML. Tests that assert on data/content (filter, sort, label assertions) are viewport-agnostic (HTTP-level assertions). All 30/30 tests pass.
+
+3. **Lighthouse both viewports**: All four Lighthouse runs (list+detail × desktop+mobile) passed 100/100 accessibility and 100/100 best-practices after the `.meta a { text-decoration: underline }` CSS fix.
+
+4. **Independent holistic visual reviews**: Four visual review files written:
+   - `iteration-3-visual-review-list-desktop.md` — PASS
+   - `iteration-3-visual-review-detail-desktop.md` — PASS
+   - `iteration-3-visual-review-list-mobile.md` — PASS
+   - `iteration-3-visual-review-detail-mobile.md` — PASS
+   Screenshots saved: `iteration-3-list-desktop-screenshot.png`, `iteration-3-detail-desktop-screenshot.png`, `iteration-3-list-mobile-screenshot.png`, `iteration-3-detail-mobile-screenshot.png`.
+
+5. **Retroactive scope note**: Iterations 0-2's existing Lighthouse/visual evidence was desktop-only. This is now documented as such; the DIR-003 requirement is satisfied from iteration 3 onward.
+
+**Visual_design_quality impact**: Prior iterations' scores were desktop-only credit. Now both viewports are covered. The visual_design_quality factor assessment is updated in iteration-3.md §7 to reflect this broader coverage.
