@@ -1,0 +1,37 @@
+{
+  "skill_name": "quay-core-bootstrap-methodology",
+  "extracted_from": "experiments/quay-core-bootstrap/ (quay-core bootstrap experiment, experiment 2 — a transfer test of experiment 1's methodology)",
+  "extracted_at": "2026-07-17",
+  "source_status": "HALT with practical convergence accepted (NOT formally CONVERGED), per iterations/iteration-10.md §11",
+  "authoritative_closing_report": "experiments/quay-core-bootstrap/iterations/iteration-10.md",
+  "companion_skill": ".claude/skills/quay-native-methodology/ (read first — this skill is a delta, not a replacement)",
+  "structure": {
+    "reference": [
+      "transfer-test-outcome.md",
+      "manda-daemon-address-bug.md",
+      "manda-reliability-envelope.md",
+      "g3-audit-dispatch-drift-case-study.md",
+      "v-meta-ceiling-diagnostic.md",
+      "sigma-inherited-floor-trap.md"
+    ]
+  },
+  "final_metrics": {
+    "V_instance": 1.0,
+    "V_instance_note": "all 4 Done-when clauses met, stable since iteration 3 (core_abi_symmetry, web_ui_verification, action_delivery_mode, native_backlog_health each = 1.0)",
+    "V_meta": 0.1012,
+    "V_meta_ceiling": 0.26,
+    "V_meta_flat_since_iteration": 6,
+    "sigma_QC": "4/10 = 0.40 (own-experiment ledger)",
+    "inherited_sigma_strict_floor": 0.8493
+  },
+  "convergence_criteria_met": "3 of 5 (criteria 2, 4, 5); criteria 1 and 3 not met and structurally unreachable within this experiment's scope",
+  "net_new_findings_not_in_quay_native_methodology": [
+    "manda daemon hardcoded-port bug (28912) vs runtime .manda/hub.addr read — found and fixed iteration 4",
+    "three-tier manda Agent reliability envelope (trivial/medium/complex x timeout), including the corrected finding that complex/G3-shaped tasks succeed at 150s (not a reliable timeout)",
+    "G3-audit-via-manda anti-pattern (iterations 3-5) and its correction via DIR-003 (orchestrator-dispatched native Agent/Task tool only)",
+    "mathematical-ceiling diagnostic for multiplicative V_meta, applied early (iteration 6) to recognize criterion-1 unreachability",
+    "sigma_QC-vs-inherited-floor structural trap and its arithmetic (~57 more native-gate tasks needed to exceed the 0.8493 floor)",
+    "confirmation the {native,native,native} provenance triple is reproducible on demand (4 consecutive tasks) under the degraded-fallback Method interpretation"
+  ],
+  "note": "This is a delta/companion extraction, not a full re-extraction of the inherited methodology — see SKILL.md 'Relationship to quay-native-methodology'."
+}

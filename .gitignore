@@ -6,3 +6,4 @@ dist/
 .DS_Store
 experiment/timing/*.log
 .manda/hub.addr
+.playwright-mcp/
