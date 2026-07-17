@@ -8,17 +8,16 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 10 (dev phase; G3 + simulated-user pending)_
+_Last updated: iteration 10 (FINAL)_
 
-- **Latest scores:** see "V-score history (all iterations)" table, iteration 8 row, for
+- **Latest scores:** see "V-score history (all iterations)" table, iteration 10 row, for
   V_instance / ΔV_instance / V_meta / σ_QX. Do not duplicate those figures here — update
   the table, not this line, when a new iteration completes.
-- **Live V_meta re-triggers:** none fired as of iteration 8 — all 5 re-trigger conditions
+- **Live V_meta re-triggers:** none fired as of iteration 10 — all 5 re-trigger conditions
   (effectiveness, reusability, completeness/gap-discovery, completeness+reusability/
   effectiveness joint, open-ended-domain-specific) remain NOT TRIGGERED at every iteration
-  checked (0, 1, 2; status unchanged through iteration 8, "effectiveness frozen; unchanged"
-  per the iteration 8 V_meta note). This field does NOT exist in the V-score history table,
-  so it lives here.
+  checked (0, 1, 2; status unchanged through iteration 10, "effectiveness frozen; unchanged").
+  This field does NOT exist in the V-score history table, so it lives here.
 - **Standing decisions (do not re-litigate without new evidence):**
   - Gap-list storage: plain markdown file at `experiments/quay-continuous-bootstrap/gap-list.md`
     (decided iteration 0 — see "Gap-list storage decision" in the Iteration 0 record).
@@ -27,7 +26,7 @@ _Last updated: iteration 10 (dev phase; G3 + simulated-user pending)_
     "σ_QX-vs-inherited-floor decision" in the Iteration 0 record).
   - V_meta ceiling: 0.26 (1.0 × 0.26 × 1.0 × 1.0, effectiveness-bound; inherited from
     experiment 1, confirmed positively across experiments 2/3 — see Inheritance record below).
-- **Status:** CONTINUING — iteration 10 dev phase complete; G3 + simulated-user PENDING; 6 gaps closed dev phase (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034); DIR-007 applied; cumulative gaps closed: 54; σ_QX=36/37 (G3 co-sign pending for QX-035/036/037).
+- **Status:** CONTINUING — iteration 10 FINAL; G3 PASS-WITH-NOTES; 3× PASS simulated-user; 6 gaps closed (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034); DIR-007 applied; cumulative gaps closed: 54; σ_QX=36/37=0.973; V_instance=0.684; ΔV_10=+0.015 (first iteration below 0.02 threshold; ΔV_9=+0.033 above; PAUSE not triggered — need 2 consecutive). Iteration 11 recommended.
 
 ---
 
@@ -595,9 +594,9 @@ Gap-list delta (final): 7 new gaps found (CB-014/015 significant+minor, UQ-019 s
 | 7 | 0.601 | +0.037 | 0.152 | 27/28 = 0.964 | 4 gaps closed (CB-017/UQ-027/028/029); 4 new minor gaps; G3 PASS-WITH-NOTES; 2× PASS + 1× CONCERNS simulated-user; HALT (human-imposed) |
 | 8 | 0.636 | +0.035 | 0.153 | 30/31 = 0.968 | 3 gaps closed (CB-010/CB-014/UQ-008); 2 new minor gaps (ENV-001/SH-004); G3 PASS-WITH-NOTES; 2× PASS + 1× FAIL (ENV, not code defect) simulated-user; cumulative closed=43 |
 | 9 | 0.669 | +0.033 | 0.154 | 33/34 = 0.971 | 5 gaps closed (CB-008/CB-015/UQ-031/032/033); ENV-001 re-rated significant; synthesis-phase fix: v-prefix bug in release.yml (G3-missed, caught by project-maintainer); G3 PASS-WITH-NOTES; PASS + CONCERNS + CONCERNS simulated-user; cumulative closed=48 |
-| 10 | TBD | TBD | TBD | 36/37 = 0.973 (G3 pending) | 6 gaps closed dev phase (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034); DIR-007 applied; G3 + simulated-user PENDING; cumulative closed=54 (dev phase) |
+| 10 | 0.684 | +0.015 | 0.154 | 36/37 = 0.973 | 6 gaps closed (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034); DIR-007 applied; G3 PASS-WITH-NOTES; 3× PASS simulated-user; no new gaps; cumulative closed=54 |
 
-ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033. Iterations 7, 8, and 9 all above 0.02 threshold — PAUSE NOT triggered. Iteration 10 final V-scores pending G3 + simulated-user. Cumulative gaps closed: 54 (dev phase).
+ΔV trend: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015. Iteration 10: first iteration below 0.02 threshold (ΔV=+0.015); ΔV_9 was +0.033 (above); PAUSE NOT triggered (need 2 consecutive below threshold). Cumulative gaps closed: 54. Iteration 11 recommended.
 
 ---
 
@@ -1205,3 +1204,51 @@ Ceiling: 0.26 (effectiveness frozen; unchanged).
 - Simulated-user: PENDING
 - system_health: no regression (dev phase)
 **Status: PENDING ORCHESTRATOR DISPATCH** — G3 + simulated-user required before final convergence assessment.
+
+### G3 status (iteration 10, FINAL)
+G3 TRIGGERED and COMPLETE — Core source files changed: `packages/quay/src/mcp-server.js`, `packages/quay/bin/quay.js`, `packages/quay/src/serve.js`, `packages/quay/package.json`.
+Verdict: **PASS-WITH-NOTES** — no bugs, no security issues, 4 low-severity notes (untested --json edge case; 0-count labels clickable; info-banner not test-asserted; _version in content text not asserted separately). All 3 tasks co-signed.
+See `experiments/quay-continuous-bootstrap/audits/iteration-10-adjudicate.md`.
+
+### Simulated-user pass (iteration 10, FINAL)
+- Persona A (CLI new-contributor): **PASS** — --label guard clear and consistent; empty-result message appropriate; --json mode clean; README install clear.
+- Persona B (Web UI daily user): **PASS** — filter-scoped label counts correct; needs-human CTA well-designed; orientation banner removal clean.
+- Persona C (MCP AI agent consumer): **PASS** — `_version` field useful for staleness detection; "Version:" prefix at position 0; README guidance clear and actionable; ENV-001 mitigations practical at minor severity.
+No new gaps found by any persona.
+See `experiments/quay-continuous-bootstrap/audits/iteration-10-simulated-user-*.md`.
+
+### V_instance (iteration 10, FINAL)
+```
+V_instance = capability_breadth × usability_quality × verification_coverage × system_health
+           = 0.855 × 0.875 × 0.97 × 0.97
+           ≈ 0.684
+
+ΔV_instance = 0.684 − 0.669 = +0.015 (over iteration 9 final)
+```
+Component rationale:
+- capability_breadth: 0.855 (CB-019 minor closed; ENV-001 downgraded to minor; G3+simulated-user: no new CB gaps)
+- usability_quality: 0.875 (UQ-020/021/022/034 minor closed; DIR-007 cosmetic improvement; G3+simulated-user: no new UQ gaps)
+- verification_coverage: 0.97 (30/30 pass; 10 new assertions; G3 PASS-WITH-NOTES: notes are minor coverage gaps not capability gaps)
+- system_health: 0.97 (ENV-001 downgraded to minor; no regressions; G3+simulated-user: no new SH gaps)
+
+### V_meta (iteration 10, FINAL)
+```
+V_meta = completeness × effectiveness × reusability × validation
+       = 0.77 × 0.26 × 0.79 × 0.973
+       = 0.158 × 0.973
+       ≈ 0.154
+
+ΔV_meta = 0.154 − 0.154 = +0.000 (rounded; actual: +0.0003)
+```
+σ_QX = 36/37 = 0.973 (FINAL; G3 PASS-WITH-NOTES co-signed all 3 tasks).
+Ceiling: 0.26 (effectiveness frozen; unchanged).
+
+### Convergence check (iteration 10, FINAL)
+- V_meta ≥ 0.80: NO (ceiling 0.26; arithmetically unreachable)
+- PAUSE (ΔV < 0.02 for 2+ consecutive iterations AND no new significant gap):
+  - ΔV_9 = +0.033 (above threshold); ΔV_10 = +0.015 (below threshold)
+  - Two-consecutive window: ΔV_9 above → only 1 consecutive below-threshold iteration
+  - No new significant gaps (G3 + simulated-user: all PASS/PASS-WITH-NOTES; 0 new gaps filed)
+  - **PAUSE: NOT TRIGGERED** — need 2 consecutive ΔV < 0.02; only 1 this far
+- system_health: no regression
+**Status: CONTINUING** — PAUSE not triggered; 0 significant open gaps; iteration 11 recommended. PAUSE threshold first iteration count: 1 (need 1 more consecutive below-threshold iteration to trigger).

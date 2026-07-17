@@ -1,8 +1,8 @@
 # Iteration 10 — quay-continuous-bootstrap (experiment 4)
 
 **Date:** 2026-07-17
-**Status:** DEV PHASE COMPLETE — G3 audit + simulated-user PENDING (orchestrator dispatch required)
-**Commit:** TBD (after orchestrator completes)
+**Status:** FINAL
+**Commit:** TBD (synthesis commit pending)
 
 ---
 
@@ -206,43 +206,137 @@ No agent or capability evolution this iteration. No insufficiency demonstrated t
 
 ## §7 Simulated-user pass
 
-**[PENDING — orchestrator dispatch required]**
+**3 personas complete. All PASS.**
 
-Orchestrator must dispatch 3 persona-diverse simulated-user agents in fresh contexts before this section can be completed.
+Dispatched by orchestrator. Each persona audited the iteration 10 changes from source code (no commands run).
+
+### Persona A — CLI new-contributor
+
+**Verdict: PASS**
+- `--label` guard: error message is clear and actionable ("Error: --label requires a value (e.g., --label experiment-4)"). Behavior consistent with `--prefix` guard (same pattern, same exit code). No confusion.
+- Empty result message: "No tasks found." fires on empty filter results (non-JSON mode only — confirmed not contaminating `--json` output). Clear and unambiguous.
+- README install section: two-option (Option A/B) layout is clear. `quay-*.tgz` glob avoids the v-prefix issue. Node.js ≥20 requirement stated upfront.
+- No new gaps found.
+
+See `audits/iteration-10-simulated-user-new-contributor-cli.md`.
+
+### Persona B — Web UI daily user
+
+**Verdict: PASS**
+- Filter-scoped label counts: scoping logic correct. `filteredByStatusAndSearch` correctly excludes label filter, includes prefix+status+search. `?status=todo` shows count-2 for a label on 2 todo + 3 done tasks. `allLabels` from `allTasks` for nav completeness (intentional design — labels show `(0)` count for out-of-scope ones).
+- Needs-human CTA: amber `.info-banner` renders only when `t.status === "needs-human" && buttons.length > 0`. Button check uses string length (correct for joined string). Banner text is static (no XSS risk). `role="note"` is correct ARIA.
+- Orientation banner removal: banner element fully gone from HTML. CSS rule retained as no-op empty rule. Comment is informational only. Clean removal.
+- No new gaps found.
+
+See `audits/iteration-10-simulated-user-webui-daily.md`.
+
+### Persona C — MCP AI agent consumer
+
+**Verdict: PASS**
+- `_version` field: present in both `structuredContent` and `content[0].text` (JSON). `QUAY_VERSION` computed at module startup via `readFileSync` — fails fast at startup if `package.json` missing (good). Field name `_version` (underscore prefix) signals metadata.
+- "Version:" prefix: at position 0 of tool description — correct for hosts that truncate descriptions. Format `Version: X.Y.Z.` parseable by `/Version:\s+([\d.]+)/`.
+- README guidance: clearly states restart requirement, root cause, and actionable steps for operators.
+- ENV-001 assessment: 3 mitigations together cover proactive (B: description prefix), reactive (A: `_version` in response), and human-operator (C: README) detection. Gap remains at minor severity — root cause is environmental and unchanged. Mitigations are practical.
+- Test coverage: Block 17 assertions adequate for primary consumer path.
+- No new gaps found.
+
+See `audits/iteration-10-simulated-user-mcp-ai-agent.md`.
 
 ---
 
 ## §8 G3 audit
 
-**[PENDING — orchestrator dispatch required]**
+**Verdict: PASS-WITH-NOTES**
 
-G3 TRIGGERED: Core source files changed this iteration:
-- `packages/quay/src/mcp-server.js` (QUAY_VERSION import, _version field, description prefix)
-- `packages/quay/bin/quay.js` (--label guard, empty-result message)
-- `packages/quay/src/serve.js` (filter-scoped labelCounts, info-banner, DIR-007 banner removal)
-- `packages/quay/package.json` (engines field)
+G3 TRIGGERED: Core source files changed this iteration.
+G3 COMPLETE: See `audits/iteration-10-adjudicate.md`.
+
+### Summary
+
+All 6 changes (QX-035, QX-036, QX-037×4, DIR-007) are logically correct, security-clean, and test-covered for primary paths. No bugs, no security issues, no regressions.
+
+### Findings
+
+**QX-035 (mcp-server.js):** `QUAY_VERSION` computation via `readFileSync` at module startup is correct — path `../package.json` from `src/` resolves correctly to `packages/quay/package.json`. Fail-fast at startup (not call time). `_version` present in both `structuredContent` and `content[0].text`. "Version:" prefix at position 0 of description. All PASS.
+
+**QX-037 `--label` guard (bin/quay.js):** Guard condition `rawLabel !== undefined && typeof rawLabel !== "string" && !Array.isArray(rawLabel)` correctly identifies the boolean-`true` case (flag passed with no value). Placement before `[].concat(flags.label).filter(Boolean)` is correct (without guard, `[].concat(true).filter(Boolean)` would produce `[true]` and filter by label `true` silently). Pattern identical to `--prefix` guard. PASS.
+
+**QX-037 empty result (bin/quay.js):** "No tasks found." inside `else` block — NOT printed in `--json` mode (which calls `printJson(sorted)` in the `if` branch). Mutually exclusive with search hint (search hint fires when `searchQuery !== null`, empty-result message fires when `searchQuery === null`). PASS.
+
+**QX-037 filter-scoped labelCounts (serve.js):** `filteredByStatusAndSearch` correctly chains from `filteredByStatus` (prefix+status) with optional search filter — label filter excluded by design. `allLabels` from `allTasks` for nav completeness is intentional. PASS.
+
+**QX-037 info-banner (serve.js):** `buttons.length > 0` uses string length (buttons is a joined string) — semantically equivalent to checking if any buttons were rendered. Static banner text — no XSS risk. PASS.
+
+**DIR-007, QX-036:** No issues. PASS.
+
+### Notes (4 low-severity, no blocking issues)
+
+- NOTE-1: `--json` mode + empty result — "No tasks found." correctly suppressed, but not tested by assertion.
+- NOTE-2: 0-count labels in nav remain clickable (pre-existing design; labels with 0 count in current scope still appear in nav from `allTasks`).
+- NOTE-3: `.info-banner` rendering has no automated serve.test.mjs test assertion.
+- NOTE-4: `_version` in `content[0].text` (text JSON) not asserted separately from `structuredContent` (low risk — same `result` object).
+
+### σ_QX resolution
+
+G3 PASS-WITH-NOTES co-signs QX-035, QX-036, QX-037. σ_QX FINAL = 36/37 = 0.973.
 
 ---
 
-## §9 Convergence check (dev phase — provisional)
+## §9 Convergence check (FINAL)
 
 - V_meta ≥ 0.80: NO (ceiling 0.26; arithmetically unreachable)
 - PAUSE (ΔV < 0.02 for 2 consecutive AND no new significant gap):
-  - ΔV_9 = +0.033 (above threshold); ΔV_10 (provisional) = +0.015 (below threshold)
-  - Two-consecutive window requires BOTH below: NOT MET (ΔV_9 above)
-  - Simulated-user may add new significant gaps
-  - PAUSE: NOT MET (provisional)
-- G3: PENDING
-- Simulated-user: PENDING
-- system_health: no regression (dev phase)
+  - ΔV_9 = +0.033 (above threshold); ΔV_10 FINAL = +0.015 (below threshold)
+  - Two-consecutive window: ΔV_9 above threshold → first below-threshold iteration only (NOT 2 consecutive)
+  - No new significant gaps found by G3 or simulated-user
+  - **PAUSE: NOT TRIGGERED** — only 1 consecutive ΔV < 0.02 (need 2)
+- G3: PASS-WITH-NOTES (4 low-severity notes; no bugs)
+- Simulated-user: 3× PASS (Persona A CLI, Persona B WebUI, Persona C MCP)
+- system_health: no regression
 
-**Status: PENDING** — awaiting G3 + simulated-user from orchestrator before final assessment.
+**Status: CONTINUING** — PAUSE not triggered (ΔV_10 below threshold but ΔV_9 was above). Iteration 11 recommended.
 
 ---
 
 ## §10 Final convergence assessment
 
-**[PENDING — will be completed after §7 (simulated-user) and §8 (G3) results are available]**
+### V_instance FINAL
+
+```
+capability_breadth:     0.855  (CB-019 closed; ENV-001 downgraded; G3+simulated-user: no new CB gaps)
+usability_quality:      0.875  (UQ-020/021/022/034 closed; DIR-007; G3+simulated-user: no new UQ gaps)
+verification_coverage:  0.97   (30/30 pass; 10 new assertions; G3 PASS-WITH-NOTES: minor test gaps only)
+system_health:          0.97   (ENV-001 downgraded to minor; no regressions; G3+simulated-user: no new SH gaps)
+
+V_instance FINAL = 0.855 × 0.875 × 0.97 × 0.97 ≈ 0.684
+ΔV_instance FINAL = 0.684 − 0.669 = +0.015
+```
+
+### V_meta FINAL
+
+```
+σ_QX FINAL = 36/37 = 0.973 (G3 PASS-WITH-NOTES co-signs QX-035, QX-036, QX-037)
+
+V_meta FINAL = 0.77 × 0.26 × 0.79 × 0.973
+             = 0.158 × 0.973
+             ≈ 0.154
+
+ΔV_meta FINAL = 0.154 − 0.154 = +0.000 (rounded; actual: +0.0003)
+```
+
+Ceiling: 0.26 (effectiveness frozen; unchanged).
+
+### Cumulative gaps closed (FINAL)
+
+- Gaps closed dev phase: 6 (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034)
+- New gaps found by G3/simulated-user: 0 (4 low-severity G3 notes, none filed as gaps)
+- **Cumulative gaps closed all-time: 54**
+- Open significant gaps: 0
+- Open minor gaps: SH-003, SH-004, ENV-001 (downgraded)
+
+### Convergence verdict
+
+**CONTINUING** — PAUSE not triggered. ΔV_10 (+0.015) is below the 0.02 threshold; ΔV_9 (+0.033) was above. Two-consecutive rule requires BOTH below threshold — not yet met. No new significant gaps. Recommend iteration 11.
 
 ---
 
@@ -265,6 +359,8 @@ G3 TRIGGERED: Core source files changed this iteration:
 ### QX task provenance summary (iteration 10)
 | Task | author_by | execute_by | gate_by | σ |
 |------|-----------|------------|---------|---|
-| QX-035 | native | native | G3 pending | 34/37 |
-| QX-036 | native | native | G3 pending | 35/37 |
-| QX-037 | native | native | G3 pending | 36/37 |
+| QX-035 | native | native | G3 PASS-WITH-NOTES | 34/37 |
+| QX-036 | native | native | G3 PASS-WITH-NOTES | 35/37 |
+| QX-037 | native | native | G3 PASS-WITH-NOTES | 36/37 |
+
+σ_QX FINAL = 36/37 = 0.973 (all 3 tasks co-signed by G3)
