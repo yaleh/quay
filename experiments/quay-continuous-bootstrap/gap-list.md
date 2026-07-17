@@ -15,7 +15,6 @@
 | CB-007 | No full-text/title search in CLI or Web UI | significant | simulated-user (comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | CB-008 | No packaging/distribution — users must install Node.js ≥20 separately; no single-file executables (DIR-004) | significant | directive (DIR-004, experiment 3) | 2026-07-17 | 2026-07-17 |
 | CB-010 | `task_list` MCP tool response size (550K chars for 94 tasks) exceeds inline processing limits — partially addressed by CB-009 prefix filter but full response still large when no prefix is used | significant | simulated-user (cross-experiment maintainer, iteration 0) + direct-observation | 2026-07-17 | 2026-07-17 |
-| CB-013 | Multi-label filtering broken: CLI `--label A --label B` silently uses last label only (last-wins); Web UI `?label=A&label=B` silently uses first label only (first-wins); behavior differs between surfaces; no error or warning given — **triage: blocking capability gap; scheduled for iteration 4; does not affect core gate mechanics or inherited experiment snapshots** | blocking | simulated-user (comparison-reviewer, iteration 3) | 2026-07-17 | 2026-07-17 |
 
 ### usability_quality
 
@@ -26,10 +25,6 @@
 | UQ-006 | Label filter on Web UI is a flat 40+ item inline list — likely unwieldy on mobile viewport | minor | simulated-user (comparison reviewer + cross-experiment maintainer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-007 | Web UI task list table (5 columns) may overflow on narrow mobile viewports — not live-verified | minor | simulated-user (comparison reviewer, iteration 0) | 2026-07-17 | 2026-07-17 |
 | UQ-008 | MCP task_list response too large for inline context — no streaming or pagination at MCP layer (full unfiltered response remains large) | significant | simulated-user (cross-experiment maintainer, iteration 0) + direct-observation | 2026-07-17 | 2026-07-17 |
-| UQ-011 | Actions column still overflows at 375px viewport for long task IDs / long titles — QX-012 fix (hiding role/labels) works for short-ID filtered pages (e.g. QX-prefix) but actions column right edge reaches ~436px on unfiltered page; fix: `position: sticky; right: 0` on actions column cells — **PARTIALLY CLOSED in iteration 3** (col-role/col-labels hidden; short-ID case fixed); re-opened for long-ID/unfiltered case | significant | simulated-user (mobile-single-task, iteration 3) | 2026-07-17 | 2026-07-17 |
-| UQ-015 | `updatedAt` field absent from `task_get` MCP tool response — asymmetry between `task_list` (includes `updatedAt`) and `task_get` (omits it); detail-page "last updated" display not possible via MCP | minor | G3 audit notes (iteration 2) | 2026-07-17 | 2026-07-17 |
-| UQ-017 | `updatedAt` timestamp is tracked internally (used for sort-by-updated) and available in task JSON but never displayed on list page (no column) or detail page (no "last updated" field) — user cannot see recency without inferring from sort position | significant | simulated-user (comparison-reviewer, iteration 3) | 2026-07-17 | 2026-07-17 |
-| UQ-018 | List-page Advance button tooltip is generic ("Advance task to next status") while detail-page shows target status ("Advance to ready") — inconsistency between surfaces; list-page should show target status | minor | simulated-user (new-contributor + comparison-reviewer, iteration 3) | 2026-07-17 | 2026-07-17 |
 
 ### verification_coverage
 
@@ -61,6 +56,7 @@
 | CB-009 | `task_list` MCP tool has no prefix/experiment filter — returns all 94 tasks requiring post-processing | iteration 1 | QX-003 (done); `prefix` parameter added to `task_list` MCP tool, tested in `packages/quay/test/mcp-server.test.mjs` test 12 |
 | CB-011 | MCP `task_list` registered schema in Claude Code does not include `prefix` parameter (stale snapshot) | iteration 2 | QX-010 (done); server code already correct since QX-003; automated `tools/list` schema test added in `packages/quay/test/mcp-server.test.mjs` Block 13 confirming `prefix` in inputSchema; stale session cache resolved by new session |
 | CB-012 | `--sort updated` silently ignored in CLI `task list` | iteration 2 | QX-008 (done); `--sort updated` now correctly sorts by file mtime (not silently falls through to default order); CLI test 17 proves non-default ordering |
+| CB-013 | Multi-label filtering broken: CLI last-wins; Web UI first-wins; surfaces inconsistent | iteration 4 | QX-016 (done); parseFlags() collects repeated --label flags as array; CLI AND-logic filter; Web UI uses searchParams.getAll('label') + AND-filter; buildHref() supports array label; cli.test.mjs test 18 + serve.test.mjs QX-016..019 block; commit 446d95a |
 
 ### usability_quality
 
@@ -71,11 +67,14 @@
 | UQ-003 | No onboarding/orientation content in Web UI — significant barrier for new contributors | iteration 3 | QX-015 (done); orientation banner added to list page with project description and status lifecycle; serve.test.mjs assertion; commit f4b3b8d |
 | UQ-009 | Back link from task detail page drops filter/prefix context | iteration 3 | QX-011 (done); task title links on list page include ?from= param; detail page back link uses from= value with open-redirect guard; serve.test.mjs block; commit f4b3b8d |
 | UQ-010 | `quay serve --help` and `quay action --help` silently exit with no output | iteration 1 | QX-007 (done); `printHelp()` now emits a stub usage line for unrecognised subcommands; test 16 in cli.test.mjs asserts non-empty output |
-| UQ-011 | Advance button (actions column) hidden off-screen at 375px viewport | iteration 3 (PARTIALLY CLOSED — re-opened) | QX-012 (done); role/labels columns hidden at ≤600px; works for short-ID contexts (e.g. QX-prefix filtered list); re-opened for long-ID/unfiltered case where actions column right edge exceeds viewport; see open UQ-011 entry above |
+| UQ-011 | Advance button (actions column) hidden off-screen at 375px viewport | iteration 4 (FULLY CLOSED) | QX-017 (done); .col-actions CSS class added to th/td; position:sticky;right:0;z-index:2 in @media (max-width:600px) block; Advance button always visible even when table scrolls horizontally; serve.test.mjs QX-016..019 block; commit 446d95a |
 | UQ-012 | Table role and labels columns not hidden at mobile viewport (≤600px) | iteration 3 | QX-012 (done); .col-role and .col-labels hidden in @media (max-width: 600px) block; serve.test.mjs assertion; commit f4b3b8d |
 | UQ-013 | Gate-fail feedback is silent — page silently refreshes when Advance is blocked | iteration 3 | QX-013 (done); gate check added to action POST handler; ?error= redirect on gate-fail; error/success banners on list and detail pages; serve.test.mjs block; commit f4b3b8d |
 | UQ-014 | Advance button has no tooltip, no hover text, no post-action confirmation | iteration 3 | QX-014 (done); title="Advance task to next status" on list page buttons; title="Advance to [next]" on detail page buttons; serve.test.mjs assertion; commit f4b3b8d |
+| UQ-015 | `updatedAt` field absent from `task_get` MCP tool response — asymmetry between task_list and task_get | iteration 4 | QX-018 (done); store.js get() now includes updatedAt (file mtime via statSync); closes asymmetry with list() path; commit 446d95a |
 | UQ-016 | Orientation banner shows wrong status model (`in_progress` listed, does not exist; `ready` missing) | iteration 3 (found + closed same iteration) | Banner text corrected to `todo → ready → needs-human → done`; test added to serve.test.mjs asserting banner does NOT contain `in_progress` and DOES contain `ready`; source: simulated-user (comparison-reviewer, iteration 3); commit 05a8ec9 |
+| UQ-017 | `updatedAt` timestamp tracked but never displayed on list or detail page | iteration 4 | QX-018 (done); relativeTime() helper added to serve.js; "updated" column on list page + "last updated" meta on detail page; serve.test.mjs QX-016..019 block; commit 446d95a |
+| UQ-018 | List-page Advance button tooltip generic vs detail-page target-status | iteration 4 | QX-019 (done); listNextStatusMap lookup per task in row renderer; list now shows "Advance to ready" for todo, "Advance to done" for ready; serve.test.mjs assertion; commit 446d95a |
 
 ### verification_coverage
 
@@ -101,3 +100,6 @@
 - **Cumulative gaps closed (all-time, iteration 3 final): 22** (CB-001..005, CB-009, CB-011, CB-012, UQ-001..003, UQ-009..014, UQ-016, VC-001, SH-001, SH-002; UQ-011 partially closed/re-opened; CB-010 partially addressed)
 - **Net open gaps after iteration 3 final**: 14 (5 CB, 9 UQ, 0 VC, 0 SH) — CB-006/007/008/010/013 open; UQ-004/005/006/007/008/011/015/017/018 open
 - Post-iteration-3 steering (out of band, this conversation): 1 new gap found, PR-001 (process dimension — the `directives/pending/` precondition check has not been genuinely re-executed for 3 consecutive iterations, so DIR-005 and DIR-006 went unacknowledged despite being available before their respective iterations started). No DIR filed for this finding — filing another directive into a mechanism already shown not to be reliably read would not fix it; recorded directly here and in `provenance.md` instead, per explicit human instruction.
+- Iteration 4 (development phase): 6 gaps closed (CB-013, UQ-011 fully, UQ-015, UQ-017, UQ-018 + UQ-015 as bonus); 0 new gaps found in development phase; simulated-user + G3 results pending (orchestrator dispatch)
+- **Cumulative gaps closed (development phase, iteration 4): 27** (adds CB-013, UQ-011 full closure, UQ-015, UQ-017, UQ-018)
+- **Net open gaps after iteration 4 development phase**: 8 (4 CB, 4 UQ) — CB-006/007/008/010 open; UQ-004/005/006/007/008 open
