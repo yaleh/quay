@@ -210,78 +210,131 @@ Note: The test correctly uses `<div class="label-nav-wrap">` (the HTML body elem
 
 ---
 
-## §7 PENDING: simulated-user pass
+## §7 Simulated-user pass (FINAL)
 
-STATUS: **PENDING** — orchestrator to dispatch independent simulated-user agents for iteration 11.
+Three persona-diverse agents dispatched by orchestrator in parallel with G3. All complete.
 
-Core source file changed: `packages/quay/src/serve.js` → G3 TRIGGERED.
-Test files changed: `serve.test.mjs`, `mcp-server.test.mjs`.
+Files:
+- `experiments/quay-continuous-bootstrap/audits/iteration-11-simulated-user-mobile-webui.md`
+- `experiments/quay-continuous-bootstrap/audits/iteration-11-simulated-user-search-poweruser.md`
+- `experiments/quay-continuous-bootstrap/audits/iteration-11-simulated-user-mcp-consumer.md`
 
----
+### Persona A: Mobile Web UI daily user — CONCERNS (synthesis-phase fix applied)
 
-## §8 V_instance (provisional, dev phase only)
+**Finding**: serve process (PID 3885190, started 2026-07-16) had not been restarted after serve.js was modified. QX-043 changes (search form position, `.label-nav-wrap` CSS) were not visible in the live environment.
 
-```
-V_instance (provisional) = capability_breadth × usability_quality × verification_coverage × system_health
-                         = 0.855 × 0.905 × 0.98 × 0.985
-                         ≈ 0.726
+**Synthesis-phase fix**: serve process killed and restarted (new PID 4041295, port 4173, 200 OK confirmed). Post-restart verification: search form (`<form>`) appears at line 170, `.label-nav-wrap` div at line 180 — correct order (search before label nav) confirmed.
 
-ΔV_instance (provisional) = 0.726 − 0.684 = +0.042
-```
+UQ-030 VERIFIED live after restart. UQ-006 CSS (`.label-nav-wrap { overflow-x: auto }`) confirmed in live HTML. Search result banner ("Showing N results for 'quay'") confirmed — no regression.
 
-Component rationale (provisional):
-- **capability_breadth = 0.855** (unchanged; CB-006 still open; no new CB gaps)
-- **usability_quality = 0.905** (UQ-006/007/030 closed — 3 mobile UX gaps; remaining open: ENV-001 minor only in this dimension)
-- **verification_coverage = 0.98** (30/30 pass; 14 new assertions: 3 from QX-041, 9 from QX-042, 2 from QX-043)
-- **system_health = 0.985** (SH-003 and SH-004 both closed; only ENV-001 minor remaining)
+No new gaps from this persona (the CONCERNS was an ENV restart issue, not a code defect).
 
-These are preliminary. G3 + simulated-user may adjust.
+### Persona B: Search power user (cross-experiment maintainer) — PASS
 
----
+SH-003 fix VERIFIED: `stripHeadings()` fence-tracking confirmed working — `# bash-comment-token` inside fenced code blocks is preserved in search index. Heading strip behavior unchanged (only ~2 tasks with "Proposal" in prose body returned, not the ~41 with `## Proposal` heading — correct behavior). CLI/Web UI consistency confirmed (30 tasks each, Web UI pagination explains apparent count difference).
 
-## §9 V_meta (provisional)
+**New gaps filed:**
+- **UQ-035** (minor): Web UI pagination not visually prominent during search — users may see 20 of 30 results without realizing there is a page 2. Pagination links exist but are not highlighted or annotated with "showing page 1 of 2."
+- **CB-020** (minor): `--format json` emits a `# filtered: …` comment line before the JSON array, breaking automated JSON parsing (e.g. `jq`, `JSON.parse`). Pre-existing; newly discovered.
 
-σ_QX provisional = 39/40 = 0.975
+### Persona C: MCP AI agent consumer — PASS
 
-```
-V_meta (provisional) = 0.77 × 0.26 × 0.79 × 0.975
-                     = 0.158 × 0.975
-                     ≈ 0.154
+SH-004 regression tests VERIFIED: Block 18 (9 assertions) all pass. `pageSize=0→50` and `pageSize=201→200` clamp behavior locked. `totalPages=0` when `total=0` locked as API contract. `_version` field and `Version:` description prefix (iter-10 QX-035) both confirmed present — no regression.
 
-ΔV_meta (provisional) = 0.154 − 0.154 = 0.000 (ceiling-bound)
-```
+One informational note: `pageSize=0→50` behavior (via `parseInt(0)||50`) is non-obvious — a consumer expecting `Math.max(1,0)=1` would be surprised. Not a bug; locked by Block 18. Filed as a description clarification opportunity but not a new gap.
 
-The 40th task (QX-043) adds 1 to denominator and 1 to numerator; σ_QX moves 0.973→0.975, negligible at 4-decimal precision under the ceiling.
+### Synthesis-phase fixes applied
 
----
+1. **serve process restarted** (blocking): QX-043 changes now live. UQ-030/006 verified working.
 
-## §10 PENDING: G3 audit
+### New gaps filed from simulated-user pass
 
-STATUS: **PENDING**
-
-G3 TRIGGERED: `packages/quay/src/serve.js` is a Core source file.
-
-G3 audit to cover:
-- `stripHeadings()` fence-tracking correctness (SH-003 fix)
-- `.label-nav-wrap` CSS correctness (mobile scrollability)
-- HTML template order change (search before label nav)
-- Test coverage for QX-041, QX-042, QX-043
-- Any new correctness or security issues introduced
+- CB-020 (minor, open): `--format json` comment header breaks JSON parsing
+- UQ-035 (minor, open): Web UI pagination not prominent during search
+- SH-005 (minor, open): `mcp-server.js` has stale inline `stripHeadings()` copy — MCP `task_list` search still strips `#` inside fenced code blocks (G3 finding, confirmed by architecture analysis)
 
 ---
 
-## §11 Convergence check (PROVISIONAL — IN PROGRESS)
+## §8 V_instance (FINAL)
 
-- V_meta ≥ 0.80: **NO** (ceiling 0.26; arithmetically unreachable)
-- PAUSE check:
-  - ΔV_10 = +0.015 (below 0.02 — 1st consecutive below-threshold)
-  - ΔV_11 (provisional) = +0.042 (above 0.02)
-  - If ΔV_11 ≥ 0.02 confirmed by G3/simulated-user: PAUSE consecutive counter RESETS to 0
-  - If ΔV_11 revised down to < 0.02: consecutive count = 2 → PAUSE triggered
-- Open significant gaps: 0
-- Open minor gaps (after dev phase): CB-006 (configurable page size), ENV-001 (MCP stale process)
+```
+V_instance (FINAL) = capability_breadth × usability_quality × verification_coverage × system_health
+                   = 0.850 × 0.885 × 0.975 × 0.975
+                   = 0.85 × 0.885 = 0.75225
+                   × 0.975 = 0.73344
+                   × 0.975 = 0.71510
 
-**Status: IN PROGRESS** — awaiting G3 audit + simulated-user pass from orchestrator.
+V_instance (FINAL) ≈ 0.715
+
+ΔV_instance (FINAL) = 0.715 − 0.684 = +0.031
+```
+
+Component rationale (FINAL — revised from provisional after G3 + simulated-user):
+
+- **capability_breadth = 0.850** (CB-020 new minor from Persona B: `--format json` comment header; CB-006 still open; -0.005 from provisional 0.855)
+- **usability_quality = 0.885** (UQ-006/007/030 closed (+0.015 from entering 0.875); UQ-035 new minor (-0.005): search pagination not prominent; net: 0.875 + 0.010 = 0.885)
+- **verification_coverage = 0.975** (14 new assertions, 30/30 pass; modest +0.005 from entering 0.97)
+- **system_health = 0.975** (SH-003 closed (+0.005), SH-004 closed (+0.005) from entering 0.97; SH-005 new minor (-0.005): mcp-server.js stale stripHeadings copy; net: 0.97 + 0.005 = 0.975)
+
+Note: Provisional used inflated components (0.905, 0.985) that overcounted gap-closure credit. FINAL restores conservative calibration consistent with prior iterations' scoring patterns.
+
+---
+
+## §9 V_meta (FINAL)
+
+σ_QX FINAL = 39/40 = 0.975 (G3 PASS-WITH-NOTES co-signs QX-041, QX-042, QX-043)
+
+```
+V_meta (FINAL) = completeness × effectiveness × reusability × validation
+               = 0.77 × 0.26 × 0.79 × 0.975
+               = 0.1582 × 0.975
+               ≈ 0.154
+
+ΔV_meta (FINAL) = 0.154 − 0.154 = 0.000 (ceiling-bound; rounding masks +0.0003)
+```
+
+V_meta ceiling = 0.26 (effectiveness frozen). V_meta ≥ 0.80 arithmetically unreachable.
+
+---
+
+## §10 G3 audit (FINAL)
+
+**Result: PASS-WITH-NOTES**
+
+File: `experiments/quay-continuous-bootstrap/audits/iteration-11-adjudicate.md`
+
+G3 confirmed:
+- **QX-041 (stripHeadings fence tracking)**: PASS. State machine correct; inFence toggling, EOF handling, consecutive fences all acceptable. Tests cover positive (# inside fence IS searchable) and negative (## heading outside fence IS stripped).
+- **QX-042 (pagination edge case tests)**: PASS. All three assertions match actual JS evaluation (`parseInt(0)||50=50`, `Math.min(200,201)=200`, `Math.ceil(0/50)=0`). Behavior correctly locked.
+- **QX-043 (mobile layout)**: PASS. HTML reorder does not affect CSS selectors. No JS structural dependency. `escapeHtml()` applied to all label content — no new XSS vector.
+
+**G3 note (non-blocking)**: `mcp-server.js` contains an independent inline copy of `stripHeadings()` that was NOT updated by QX-041. MCP `task_list` search still strips `#` lines inside fenced code blocks. Filed as **SH-005** (minor).
+
+σ_QX update: QX-041, QX-042, QX-043 all co-signed. σ_QX = 39/40 = 0.975.
+
+---
+
+## §11 Convergence check (FINAL)
+
+- [x] **V_meta ≥ 0.80**: NO — V_meta = 0.154, ceiling = 0.26. Arithmetically unreachable.
+- [x] **PAUSE criteria** (ΔV < 0.02 for 2+ consecutive AND no new significant gap):
+  - ΔV_10 (FINAL) = +0.015 (below 0.02 — 1st consecutive)
+  - ΔV_11 (FINAL) = +0.031 (above 0.02) → **PAUSE consecutive counter RESETS TO 0**
+  - Two-consecutive-below window: NOT met (only 1 then reset)
+- [x] **No new significant gaps**: confirmed — CB-020, UQ-035, SH-005 all filed as minor
+- [x] **G3 green for all Core tasks**: YES — G3 PASS-WITH-NOTES; note is non-blocking
+- [x] **Simulated-user pass run, findings recorded**: YES — 3 personas complete; serve restart synthesis fix applied
+- [x] **system_health: no regression against inherited snapshots**: YES (30/30 pass confirmed)
+
+**ΔV trend**: +0.152, +0.055, +0.048, +0.070, +0.015, −0.012, +0.037, +0.035, +0.033, +0.015, **+0.031**
+
+**Status: CONTINUING (FINAL)** — PAUSE not triggered (ΔV_11 = +0.031, above threshold; counter reset to 0). Open gaps remain (CB-006, CB-020, UQ-035, SH-005, ENV-001 minor).
+
+**Recommended iteration 12 targets** (from updated gap list):
+- SH-005 (minor): sync `stripHeadings()` fix to `mcp-server.js` inline copy
+- CB-020 (minor): fix `--format json` comment header breaking JSON parsing
+- UQ-035 (minor): make Web UI pagination more prominent during search
+- CB-006 (minor): configurable page size (higher complexity, consider bundling)
 
 ---
 
