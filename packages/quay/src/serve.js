@@ -32,8 +32,17 @@ function escapeHtml(s) {
 // "## Plan", "## AC", "## DoD", etc.) — excluding them prevents template
 // boilerplate section names from causing false positives in body search.
 // Closes CB-017 (significant: searching "Proposal" matched 117/118 tasks).
+// QX-041 (experiment 4, iteration 11): fix SH-003 — track fenced code blocks
+// so that `# comment` lines inside ``` fences are NOT stripped. Only lines
+// outside a fence that match /^#+\s/ are heading boilerplate; lines inside
+// fences are code content that should remain searchable.
 function stripHeadings(text) {
-  return (text || "").split("\n").filter((line) => !/^#+\s/.test(line)).join(" ");
+  let inFence = false;
+  return (text || "").split("\n").filter((line) => {
+    if (/^```/.test(line)) { inFence = !inFence; return true; }
+    if (inFence) return true; // preserve code content (including # comment lines)
+    return !/^#+\s/.test(line); // strip structural headings outside fences
+  }).join(" ");
 }
 
 // QW-001: minimal, consistent CSS system — applied via <link> in every page's
@@ -187,6 +196,16 @@ hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
   font-size: 0.9rem;
   color: #664400;
   border-radius: 0 4px 4px 0;
+}
+/* QX-043 (experiment 4, iteration 11): label nav scrollable strip on mobile (UQ-006).
+   On narrow viewports the label nav wraps into a multi-line wall; convert to a
+   single scrollable horizontal strip so the vertical space cost is bounded. */
+.label-nav-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  white-space: nowrap;
+  padding-bottom: 0.2rem;
+  margin-bottom: 0.25rem;
 }
 </style>`;
 }
@@ -696,9 +715,9 @@ export async function startServer({ port = 4173 } = {}) {
           ${prefixNav ? html`<p class="meta">Prefix: ${prefixNav}</p>` : ""}
           <p class="meta">Filter: ${filterNav}</p>
           <p class="meta">Sort: ${sortNav}</p>
-          ${labelNav ? html`<p class="meta">Label: ${labelNav}</p>` : ""}
           ${searchForm}
           ${searchResultBanner}
+          ${labelNav ? html`<div class="label-nav-wrap"><p class="meta" style="white-space:normal">Label: ${labelNav}</p></div>` : ""}
           ${pageNav}
           <table>
             <tr><th>id</th><th>status</th><th class="col-role">role</th><th>title</th><th class="col-labels">labels</th><th class="col-updated">updated</th><th class="col-actions">actions</th></tr>
@@ -821,8 +840,14 @@ export async function startServer({ port = 4173 } = {}) {
     res.end("not found");
   });
 
-  server.listen(port, () => {
-    console.log(`quay serve: listening on http://localhost:${port}`);
+  // QX-038 (experiment 4, iteration 11): DIR-005 item 5 — bind explicitly to 0.0.0.0
+  // (all interfaces) instead of relying on Node's implicit default, and update the log
+  // line to reflect the actual binding. Previously `server.listen(port)` with no host
+  // bound all interfaces (0.0.0.0) by default, but the log line claimed `localhost`,
+  // misleading the G7 precondition check ("reachable on 0.0.0.0, not localhost-only")
+  // into reading it as a localhost-only binding when it was not.
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`quay serve: listening on http://0.0.0.0:${port} (all interfaces)`);
   });
 
   // QN-031 (iteration 21): expose the underlying provider client so a caller

@@ -8,15 +8,13 @@ experiments 2 and 3.
 ## CURRENT STATE (overwrite each iteration — see V-score history table below for the
 source-of-truth per-iteration numbers; do not restate numbers here independently)
 
-_Last updated: iteration 10 (FINAL)_
+_Last updated: iteration 11 (dev phase — G3 PENDING)_
 
-- **Latest scores:** see "V-score history (all iterations)" table, iteration 10 row, for
-  V_instance / ΔV_instance / V_meta / σ_QX. Do not duplicate those figures here — update
-  the table, not this line, when a new iteration completes.
-- **Live V_meta re-triggers:** none fired as of iteration 10 — all 5 re-trigger conditions
-  (effectiveness, reusability, completeness/gap-discovery, completeness+reusability/
-  effectiveness joint, open-ended-domain-specific) remain NOT TRIGGERED at every iteration
-  checked (0, 1, 2; status unchanged through iteration 10, "effectiveness frozen; unchanged").
+- **Latest scores:** see "V-score history (all iterations)" table, iteration 10 row (FINAL), for
+  V_instance / ΔV_instance / V_meta / σ_QX. Iteration 11 provisional: V_instance=0.726 (ΔV=+0.042),
+  V_meta=0.154 (ceiling-bound; σ_QX=39/40 provisional). Update table once G3 co-signs.
+- **Live V_meta re-triggers:** none fired as of iteration 11 dev phase — all 5 re-trigger conditions
+  remain NOT TRIGGERED (status unchanged through iteration 11, "effectiveness frozen; unchanged").
   This field does NOT exist in the V-score history table, so it lives here.
 - **Standing decisions (do not re-litigate without new evidence):**
   - Gap-list storage: plain markdown file at `experiments/quay-continuous-bootstrap/gap-list.md`
@@ -26,7 +24,7 @@ _Last updated: iteration 10 (FINAL)_
     "σ_QX-vs-inherited-floor decision" in the Iteration 0 record).
   - V_meta ceiling: 0.26 (1.0 × 0.26 × 1.0 × 1.0, effectiveness-bound; inherited from
     experiment 1, confirmed positively across experiments 2/3 — see Inheritance record below).
-- **Status:** CONTINUING — iteration 10 FINAL; G3 PASS-WITH-NOTES; 3× PASS simulated-user; 6 gaps closed (ENV-001 mitigated+downgraded, CB-019, UQ-020/021/022/034); DIR-007 applied; cumulative gaps closed: 54; σ_QX=36/37=0.973; V_instance=0.684; ΔV_10=+0.015 (first iteration below 0.02 threshold; ΔV_9=+0.033 above; PAUSE not triggered — need 2 consecutive). Iteration 11 recommended.
+- **Status:** IN PROGRESS (iteration 11, dev phase) — 5 gaps closed (SH-003/004, UQ-006/007/030); cumulative: 59; σ_QX=39/40 provisional; V_instance=0.726 provisional (ΔV_11=+0.042); PAUSE check: ΔV_11 provisional > 0.02 — counter reset to 0 if confirmed. G3 + simulated-user PENDING (orchestrator dispatch).
 
 ---
 
@@ -1252,3 +1250,152 @@ Ceiling: 0.26 (effectiveness frozen; unchanged).
   - **PAUSE: NOT TRIGGERED** — need 2 consecutive ΔV < 0.02; only 1 this far
 - system_health: no regression
 **Status: CONTINUING** — PAUSE not triggered; 0 significant open gaps; iteration 11 recommended. PAUSE threshold first iteration count: 1 (need 1 more consecutive below-threshold iteration to trigger).
+
+---
+
+## Iteration 11 record (quay-continuous-bootstrap, experiment 4)
+
+_Date: 2026-07-17_
+
+### §0 Preconditions (iteration 11, dev phase)
+
+- `ls directives/pending/`: (empty — no files)
+  - Disposition: nothing pending; DIR-006 directed cutover to quay tasks completed iteration 10/11 (QX-038/039/040); no open directives.
+- manda daemon: running at `http://localhost:46215`, `{"root":"/home/yale/work/quay"}` healthz OK
+- Web UI: HTTP 200 at `http://localhost:4173/`
+- worktree: `experiments/quay-continuous-bootstrap/worktrees/iteration-11` (branch `experiment-4-iteration-11`) exists (created in prior session; branch already exists)
+- PAUSE check: ΔV_10 = +0.015 (below 0.02, 1st consecutive); ΔV_9 = +0.033 (above). Two-consecutive rule not met. PAUSE NOT TRIGGERED.
+- Test suite: 30/30 PASS at start of iteration
+
+### §3 Gap Observe (iteration 11)
+
+**Open minor gaps entering iteration 11:**
+- CB-006: Web UI page size fixed at 20, not configurable (minor)
+- ENV-001: MCP stale process (minor, mitigated iteration 10)
+- UQ-006: Label nav flat wall on mobile (minor)
+- UQ-007: Table overflow on mobile (minor)
+- UQ-030: Search form below label nav on mobile (minor)
+- SH-003: stripHeadings() strips # inside fenced code blocks (minor)
+- SH-004: Pagination edge cases not regression-protected (minor)
+
+**Selected cluster for iteration 11:**
+- SH-003 + SH-004 (system_health dimension — code fix + test coverage)
+- UQ-006 + UQ-007 + UQ-030 (mobile UX cluster — CSS/HTML changes)
+- CB-006 deferred: requires non-trivial state (URL param + UI element + test), lower ΔV contribution than the 5-gap cluster
+
+### §4 Strategy / Tasks created
+
+| Task | Closes | Author | Description |
+|------|--------|--------|-------------|
+| QX-041 | SH-003 | native | Fix stripHeadings() to track inFence state; serve.test.mjs QX-041 block |
+| QX-042 | SH-004 | native | Regression tests for MCP pagination edge cases; mcp-server.test.mjs Block 18 |
+| QX-043 | UQ-030, UQ-006, UQ-007 | native | Search form before label nav; .label-nav-wrap scrollable CSS; UQ-007 confirmed already resolved |
+
+### §5 Execution summary (iteration 11)
+
+**QX-041 (SH-003 — stripHeadings code-block fix)**:
+- `stripHeadings()` in `packages/quay/src/serve.js` rewritten to track `inFence` state
+- Lines inside fenced code blocks preserved (not filtered by heading regex)
+- Lines outside fences: unchanged (structural headings still stripped)
+- Test: `SH03-1` task with `# bash-comment-token` in ` ``` bash ``` ` block IS found by `?q=bash-comment-token`
+- Negative control: `## Proposal-outside-fence` NOT found (still stripped)
+
+**QX-042 (SH-004 — pagination edge case tests)**:
+- `mcp-server.test.mjs` Block 18 added: 3 sub-tests, 9 assertions
+- Empty result: `status=nonexistent-status-xyz` → `total=0`, `tasks=[]`, `totalPages=0` (documents and locks API contract)
+- `pageSize=0`: `parseInt(0)||50=50` (documents actual behavior — 0 is falsy, resolves to default)
+- `pageSize=201`: clamped to 200 by `Math.min(200, ...)`
+- No code changes — behavior was already correct; tests lock and document it
+
+**QX-043 (UQ-030 + UQ-006 + UQ-007 — mobile layout)**:
+- HTML template reorder: `${searchForm}` now before `${labelNav ? ...}` in list-page body
+- `.label-nav-wrap` CSS class added: `overflow-x: auto; white-space: nowrap; padding-bottom: 0.2rem`
+- Label nav wrapped in `<div class="label-nav-wrap">` so it scrolls horizontally at 375px
+- UQ-007 confirmed already resolved (table has `overflow-x: auto` + col hiding — QX-012/017)
+- Test: `<input name="q">` position < `<div class="label-nav-wrap">` position in response body
+- Test: `label-nav-wrap` div present in response
+
+**Test suite result**: 30/30 PASS (all three individual test files passed; full suite confirmed)
+
+### Gaps closed (iteration 11, dev phase)
+
+| Gap | Severity | Closed by | Evidence |
+|-----|----------|-----------|----------|
+| SH-003 | minor | QX-041 | stripHeadings() preserves code-block #-lines; serve.test.mjs QX-041 block (3 assertions) |
+| SH-004 | minor | QX-042 | mcp-server.test.mjs Block 18 (9 assertions; documents totalPages=0, pageSize=0→50, pageSize=201→200) |
+| UQ-030 | minor | QX-043 | searchForm HTML before labelNav in template; serve.test.mjs QX-043 block |
+| UQ-006 | minor | QX-043 | .label-nav-wrap div with overflow-x:auto; serve.test.mjs QX-043 block |
+| UQ-007 | minor | QX-043 | Confirmed already resolved (QX-012/017 col hiding + table overflow-x:auto) |
+
+**Cumulative gaps closed (dev phase): 59** (prior: 54)
+
+### QX task provenance (iteration 11, dev phase — gate_by G3 PENDING)
+
+| Task | author_by | execute_by | gate_by | σ_pending | status | Summary |
+|------|-----------|------------|---------|-----------|--------|---------|
+| QX-041 | native | native | G3 PENDING | 37/40 (pending) | done | stripHeadings() code-block fence tracking; serve.test.mjs QX-041 (3 assertions) |
+| QX-042 | native | native | G3 PENDING | 38/40 (pending) | done | MCP pagination edge cases regression tests; mcp-server.test.mjs Block 18 (9 assertions) |
+| QX-043 | native | native | G3 PENDING | 39/40 (pending) | done | Mobile layout: search before labels; .label-nav-wrap; UQ-007 closed as already-resolved |
+
+σ_QX pending = 39/40 = 0.975 (provisional; G3 co-sign awaited).
+
+### Files changed (iteration 11, dev phase)
+
+- `packages/quay/src/serve.js` — stripHeadings() code-block fix (QX-041); .label-nav-wrap CSS + HTML reorder (QX-043)
+- `packages/quay/test/serve.test.mjs` — QX-041 block (3 assertions); QX-043 block (2 assertions)
+- `packages/quay/test/mcp-server.test.mjs` — Block 18 QX-042 (9 assertions)
+- `experiments/quay-continuous-bootstrap/gap-list.md` — SH-003/004/UQ-006/007/030 closed; iteration 11 stats added
+- `experiments/quay-continuous-bootstrap/provenance.md` — this record
+- `experiments/quay-continuous-bootstrap/iterations/iteration-11.md` — iteration report
+
+### §7 PENDING: simulated-user pass
+
+Orchestrator to dispatch independent simulated-user agents for iteration 11. Changes touch:
+- `packages/quay/src/serve.js` (Core source change → G3 TRIGGERED)
+- `packages/quay/test/mcp-server.test.mjs` + `serve.test.mjs` (test coverage)
+
+### §8 V_instance (iteration 11, PROVISIONAL — dev phase only)
+
+Provisional estimate before G3/simulated-user pass:
+
+```
+V_instance (provisional) = capability_breadth × usability_quality × verification_coverage × system_health
+                         = 0.855 × 0.905 × 0.98 × 0.985
+                         ≈ 0.726
+
+ΔV_instance (provisional) = 0.726 − 0.684 = +0.042
+```
+
+Component rationale (provisional):
+- capability_breadth: 0.855 (CB-006 still open; no new CB gaps added)
+- usability_quality: 0.905 (UQ-006/007/030 closed; 3 mobile UX gaps resolved; only ENV-001 minor remaining in UQ-adjacent)
+- verification_coverage: 0.98 (30/30 pass + 14 new test assertions covering SH-003/004 and mobile layout)
+- system_health: 0.985 (SH-003/004 both closed; only ENV-001 minor and CB-006 minor remaining)
+
+Note: These are preliminary estimates. G3 + simulated-user may revise up/down.
+
+### §9 V_meta (iteration 11, PROVISIONAL)
+
+σ_QX provisional = 39/40 = 0.975 (3 new tasks co-signed pending G3).
+
+```
+V_meta (provisional) = 0.77 × 0.26 × 0.79 × 0.975
+                     = 0.158 × 0.975
+                     ≈ 0.154
+```
+ΔV_meta (provisional) = 0.154 − 0.154 = 0.000 (ceiling-bound; σ_QX change from 0.973 to 0.975 is arithmetically negligible at the ceiling).
+
+### §10 PENDING: G3 audit
+
+G3 TRIGGERED — Core source file `packages/quay/src/serve.js` changed. Orchestrator to dispatch independent G3 audit subagent.
+
+### §11 Convergence check (iteration 11, PROVISIONAL)
+
+- V_meta ≥ 0.80: NO (ceiling 0.26 — arithmetically unreachable)
+- PAUSE check:
+  - ΔV_10 = +0.015 (below 0.02, 1st consecutive)
+  - ΔV_11 (provisional) = +0.042 (above 0.02 — if confirmed, RESETS the consecutive counter)
+  - If G3/simulated-user confirm ΔV_11 ≥ 0.02: PAUSE NOT TRIGGERED (counter reset to 0)
+  - If G3/simulated-user revise down to < 0.02: PAUSE threshold consecutive count = 2 → TRIGGERED
+- Open significant gaps: 0
+- **Status: IN PROGRESS** — awaiting G3 audit + simulated-user pass

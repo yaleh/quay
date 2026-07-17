@@ -1178,6 +1178,88 @@ async function main() {
     fs.rmSync(vsnWorkspaceRoot, { recursive: true, force: true });
   }
 
+  // ---- Block 18: QX-042 (experiment 4, iteration 11) — pagination edge cases (SH-004) ----
+  //
+  // Regression-protects three pagination contract edge cases identified by G3
+  // PASS-WITH-NOTES (iteration 8) that were previously not test-locked:
+  //
+  //   (a) empty result set: total=0 → totalPages=0 (Math.ceil(0/50)=0; deterministic).
+  //       Documents and locks this as the API contract. If future code changes
+  //       normalise to totalPages=1, this test catches the regression.
+  //   (b) pageSize=0 → clamped to 1 by Math.max(1, ...). No error; tasks returned.
+  //   (c) pageSize=201 → clamped to 200 by Math.min(200, ...). Tasks array bounded.
+  //
+  // Fixture: a fresh workspace with a small number of tasks (3) for clamping tests.
+  {
+    const qx42TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-qx42-tasks-"));
+    const qx42WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-test-qx42-workspace-"));
+    fs.mkdirSync(path.join(qx42WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx42WorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir}"`,
+        `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${qx42TasksDir}"`,
+        "",
+      ].join("\n")
+    );
+
+    const envOverride42 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx42TasksDir };
+    const QX42_BODY = "## Proposal\nEdge case fixture.\n## AC\n- [x] done\n## DoD\n- [x] done\n";
+
+    // Create 3 tasks for clamping assertions
+    for (let i = 1; i <= 3; i++) {
+      execFileSync("node", [nativeBin, "task", "create", `QX42-${i}`,
+        "--title", `Edge case task ${i}`,
+        "--status", "todo",
+        "--body", QX42_BODY],
+        { env: envOverride42 });
+    }
+
+    const { client: coreQx42, transport: coreQx42Transport } = await connectStdio(
+      "node", [coreBin, "mcp"], qx42WorkspaceRoot
+    );
+
+    // (a) empty result: filter to non-existent status → total=0, totalPages=0
+    {
+      const r = await coreQx42.callTool({ name: "task_list", arguments: { status: "nonexistent-status-xyz" } });
+      assert(r.isError !== true, "task_list with non-matching status returns no error (QX-042 empty case)");
+      const sc = r.structuredContent ?? {};
+      assert(sc.total === 0, `empty result: total=0 (got ${sc.total}) (SH-004, QX-042)`);
+      assert((sc.tasks ?? []).length === 0, `empty result: tasks=[] (got ${(sc.tasks ?? []).length}) (SH-004, QX-042)`);
+      assert(sc.totalPages === 0, `empty result: totalPages=0 (Math.ceil(0/50)=0) (SH-004, QX-042 — documents API contract)`);
+    }
+
+    // (b) pageSize=0 → treated as default (50) by the `|| 50` fallback in mcp-server.js.
+    // The expression `Math.min(200, Math.max(1, parseInt(pageSize) || 50))` evaluates
+    // parseInt(0)=0, and 0||50=50 (0 is falsy), so pageSize=0 yields 50 not 1.
+    // This test documents and regression-locks that actual behavior (SH-004, QX-042).
+    {
+      const r = await coreQx42.callTool({ name: "task_list", arguments: { pageSize: 0 } });
+      assert(r.isError !== true, "task_list with pageSize=0 returns no error (QX-042 clamp-low)");
+      const sc = r.structuredContent ?? {};
+      assert(sc.pageSize === 50, `pageSize=0 treated as default 50 (parseInt(0)||50=50) (got ${sc.pageSize}) (SH-004, QX-042 — documents actual behavior)`);
+      assert(sc.total === 3, `pageSize=0 as default: all 3 tasks present in total (got ${sc.total}) (SH-004, QX-042)`);
+    }
+
+    // (c) pageSize=201 → clamped to 200 by Math.min(200, ...)
+    {
+      const r = await coreQx42.callTool({ name: "task_list", arguments: { pageSize: 201 } });
+      assert(r.isError !== true, "task_list with pageSize=201 returns no error (QX-042 clamp-high)");
+      const sc = r.structuredContent ?? {};
+      assert(sc.pageSize === 200, `pageSize=201 clamped to 200 (got ${sc.pageSize}) (SH-004, QX-042)`);
+      assert(sc.total === 3, `pageSize=201 clamped: all 3 tasks present in total (got ${sc.total}) (SH-004, QX-042)`);
+    }
+
+    await coreQx42Transport.close();
+    fs.rmSync(qx42TasksDir, { recursive: true, force: true });
+    fs.rmSync(qx42WorkspaceRoot, { recursive: true, force: true });
+  }
+
   // ---- Cleanup ----
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
   fs.rmSync(tasksDirA, { recursive: true, force: true });

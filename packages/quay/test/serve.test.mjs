@@ -1251,6 +1251,145 @@ async function main() {
     }
   }
 
+  // ---- QX-041 (experiment 4, iteration 11) block — stripHeadings() code-block fix (SH-003) ----
+  //
+  // Fixture: a task whose body contains a fenced code block with a `# bash comment` line.
+  // Before the fix, stripHeadings() would strip that line from the search index, making
+  // the task invisible when searching for "bash-comment-token". After the fix, lines inside
+  // fences are preserved and the task IS found.
+  // Also verifies that a genuine structural heading (## Proposal) outside a fence IS
+  // still stripped (i.e., the task is NOT found when searching for "Proposal-outside-fence").
+  {
+    const qx41TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-qx41-tasks-"));
+    const qx41WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-qx41-workspace-"));
+    fs.mkdirSync(path.join(qx41WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx41WorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx41TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}","mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx41TasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    const envOverride41 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx41TasksDir };
+
+    // Create a task with a fenced code block containing # bash-comment-token
+    // and a genuine heading outside the fence (## Proposal-outside-fence)
+    const taskBody = [
+      "## Proposal-outside-fence",
+      "",
+      "Some body text with a code sample:",
+      "",
+      "```bash",
+      "# bash-comment-token",
+      "echo hello",
+      "```",
+      "",
+      "End of body.",
+    ].join("\n");
+
+    const taskFile = path.join(qx41TasksDir, "SH03-1.md");
+    fs.writeFileSync(taskFile, [
+      "---",
+      "id: SH03-1",
+      "title: Task with code-block hash comments",
+      "status: todo",
+      "labels: []",
+      "---",
+      taskBody,
+    ].join("\n"));
+
+    let qx41Server = null;
+    const qx41OrigCwd = process.cwd();
+    try {
+      process.chdir(qx41WorkspaceRoot);
+      const qx41Port = port + 12;
+      qx41Server = await startServer({ port: qx41Port });
+
+      // Search for the fenced code block content — should be found (SH-003 fix)
+      const foundResp = await get(qx41Port, "/?q=bash-comment-token");
+      assert(foundResp.status === 200, "GET /?q=bash-comment-token returns 200 (QX-041 setup)");
+      assert(
+        foundResp.body.includes("SH03-1"),
+        "Task with # comment in fenced code block IS found by search (SH-003, QX-041)"
+      );
+
+      // Search for heading text outside fence — should NOT be found (still stripped)
+      const notFoundResp = await get(qx41Port, "/?q=Proposal-outside-fence");
+      assert(notFoundResp.status === 200, "GET /?q=Proposal-outside-fence returns 200 (QX-041 negative)");
+      assert(
+        !notFoundResp.body.includes("SH03-1"),
+        "Task heading outside fence is still stripped from search index (QX-041 negative control)"
+      );
+
+    } finally {
+      if (qx41Server) {
+        qx41Server.close();
+        if (qx41Server.client) await qx41Server.client.close();
+      }
+      process.chdir(qx41OrigCwd);
+      fs.rmSync(qx41TasksDir, { recursive: true, force: true });
+      fs.rmSync(qx41WorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  // ---- QX-043 (experiment 4, iteration 11) block — search form order + label nav (UQ-030, UQ-006) ----
+  //
+  // Verifies that the search form HTML (`<input name="q"`) appears BEFORE the label nav
+  // (`Label:`) in the list-page response (UQ-030 fix). Also verifies label nav is wrapped
+  // in `.label-nav-wrap` div for horizontal scroll on mobile (UQ-006).
+  {
+    const qx43TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-qx43-tasks-"));
+    const qx43WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-qx43-workspace-"));
+    fs.mkdirSync(path.join(qx43WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(qx43WorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${qx43TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}","mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${qx43TasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    const envOverride43 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx43TasksDir };
+
+    // Create a task with a label so label nav renders
+    execFileSync("node", [nativeBin, "task", "create", "UQ30-1",
+      "--title", "Task with label",
+      "--status", "todo",
+      "--labels", "test-label"],
+      { env: envOverride43 });
+
+    let qx43Server = null;
+    const qx43OrigCwd = process.cwd();
+    try {
+      process.chdir(qx43WorkspaceRoot);
+      const qx43Port = port + 13;
+      qx43Server = await startServer({ port: qx43Port });
+
+      const homeResp = await get(qx43Port, "/");
+      assert(homeResp.status === 200, "GET / returns 200 (QX-043 setup)");
+
+      // Search form should appear BEFORE label nav (UQ-030).
+      // Use the <div class="label-nav-wrap"> opening tag in the HTML body (not the CSS class
+      // definition in <style>, which would appear earlier due to pageStyles() position).
+      const searchFormPos = homeResp.body.indexOf('name="q"');
+      const labelNavDivPos = homeResp.body.indexOf('<div class="label-nav-wrap">');
+      assert(
+        searchFormPos !== -1 && labelNavDivPos !== -1 && searchFormPos < labelNavDivPos,
+        `Search form (name="q") appears before label nav div in HTML body (UQ-030, QX-043). searchFormPos=${searchFormPos}, labelNavDivPos=${labelNavDivPos}`
+      );
+
+      // Label nav should be wrapped in .label-nav-wrap div (UQ-006)
+      assert(
+        homeResp.body.includes('<div class="label-nav-wrap">'),
+        "Label nav is wrapped in .label-nav-wrap container for mobile scroll (UQ-006, QX-043)"
+      );
+
+    } finally {
+      if (qx43Server) {
+        qx43Server.close();
+        if (qx43Server.client) await qx43Server.client.close();
+      }
+      process.chdir(qx43OrigCwd);
+      fs.rmSync(qx43TasksDir, { recursive: true, force: true });
+      fs.rmSync(qx43WorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
   console.log(failures === 0 ? "\nAll QN-031 serve/action regression tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
