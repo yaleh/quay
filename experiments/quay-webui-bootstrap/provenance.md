@@ -351,3 +351,30 @@ See `experiments/quay-webui-bootstrap/audits/iteration-4-adjudicate.md` for G3 v
 inline degraded-fallback).
 See `audits/iteration-4-visual-review-list-{desktop,mobile}.md` and
 `audits/iteration-4-visual-review-detail-desktop.md` for visual reviews (all PASS).
+
+## Iteration 5 — context note (2026-07-17, HALT assessment — observation only)
+
+No QW-* tasks driven. σ_QW = 7/9 = 0.778 (unchanged). V_instance = 1.0 (unchanged).
+V_meta = 0.123 (unchanged). This iteration is a formal 7-criterion convergence assessment.
+
+**HALT recommendation issued**: HALT with practical convergence accepted. Criteria MET: 2
+(Done-when clauses), 4 (G3 audit green — substantive in iters 3-4, vacuous here), 5 (visual
+review green), 6 (stall guard throughout). Criteria UNMET (structural): 1 (V_meta ceiling =
+0.26), 3 (only validation moved numerically; ≥2 factors required). Criterion 7 technically
+unmet by strict reading (1 consecutive below-threshold vs. 2 required) but V_instance is at
+its mathematical ceiling (1.0) and V_meta is structurally frozen below 0.26.
+
+**Meta-objective served**: methodology transferred to frontend/visual/UX domain with one new
+mechanism (§0c independent holistic visual review) and documented ENV gap (dispatch pattern
+falls back to inline degraded-fallback for both G3 and visual review). σ_QW floor-reset
+avoided the inherited-floor trap. Effectiveness factor produced positive data (four
+scope-matched timing data points, all confirming 0.26) — different outcome than experiment
+2 (zero scope-matched data). The 0.26 value is now positively measured across two experiments
+and multiple domains. V_meta ceiling confirmed at 0.26 across two consecutive experiments.
+
+**Pending directives at HALT**: DIR-004 (Node SEA/Bun packaging) and DIR-006 (git worktree
+isolation) remain PENDING/DEFERRED — neither was applied this experiment; both noted as
+forward-looking items for any experiment 4 design.
+
+See `experiments/quay-webui-bootstrap/iterations/iteration-5.md` for full HALT assessment.
+See `experiments/quay-webui-bootstrap/HALT-RECOMMENDATION.md` for the formal recommendation.
