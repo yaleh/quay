@@ -42,11 +42,56 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 export function createStore(tasksDir) {
   fs.mkdirSync(tasksDir, { recursive: true });
 
+  // M26-adversarial-eval finding ADV-004 (highest-severity real finding of
+  // this audit): filePathFor()/lockPathFor() previously did `path.join(
+  // tasksDir, id + ".md")` with NO validation of `id` at all. `path.join`
+  // does not sandbox against ".." segments -- an id like
+  // "../../../../tmp/somewhere/pwned" resolves to an absolute path OUTSIDE
+  // tasksDir entirely. Confirmed exploitable end-to-end via BOTH `quay-native
+  // task create <id>` (CLI) and the MCP task_write tool (protocol-level, no
+  // CLI needed) during this audit -- both wrote an arbitrary .md file to a
+  // path chosen entirely by the (possibly untrusted, e.g. a task title/id
+  // proposed by an LLM-driven caller) `id` argument, with no error and no
+  // indication anything unusual happened. This is a real arbitrary-file-write
+  // vulnerability, not a theoretical one. Fixed by validating `id` at this
+  // single chokepoint (every read/write/lock path in this module funnels
+  // through filePathFor/lockPathFor) BEFORE building the path: reject any id
+  // containing a path separator (forward or back slash) or a literal ".."
+  // segment, and confirm (defense in depth) the resolved path's directory is
+  // still exactly tasksDir. A rejected id throws a clear, named error --
+  // callers (CLI/MCP) already have top-level catch-and-report handling (see
+  // bin/quay-native.js's main().catch and mcp-server.js's per-tool
+  // try/catch), so this degrades safely (clear error, no crash, no file
+  // written) rather than needing new plumbing.
+  function assertSafeId(id) {
+    if (typeof id !== "string" || id.length === 0) {
+      throw new Error(`invalid task id: must be a non-empty string (got ${JSON.stringify(id)})`);
+    }
+    if (id.includes("/") || id.includes("\\") || id.includes("\0")) {
+      throw new Error(
+        `invalid task id "${id}": must not contain a path separator or null byte (path-traversal guard, ADV-004)`
+      );
+    }
+    if (id === "." || id === "..") {
+      throw new Error(`invalid task id "${id}": must not be "." or ".." (path-traversal guard, ADV-004)`);
+    }
+    const resolved = path.resolve(tasksDir, `${id}.md`);
+    if (path.dirname(resolved) !== path.resolve(tasksDir)) {
+      // Defense in depth -- should be unreachable given the checks above,
+      // but fail closed rather than silently writing outside tasksDir if
+      // some future id shape this function didn't anticipate slips through.
+      throw new Error(`invalid task id "${id}": resolves outside the task store (path-traversal guard, ADV-004)`);
+    }
+    return id;
+  }
+
   function filePathFor(id) {
+    assertSafeId(id);
     return path.join(tasksDir, `${id}.md`);
   }
 
   function lockPathFor(id) {
+    assertSafeId(id);
     return path.join(tasksDir, `${id}.md.lock`);
   }
 

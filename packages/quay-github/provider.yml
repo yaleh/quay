@@ -22,9 +22,14 @@ description: >
 capabilities:
   data.read: true    # task_list, task_get — required
   manifest: true     # this file / provider://manifest — required
-  data.write: true   # QN-024 (iteration 10): status-only write. title/body/
-                     # labels/parent/children remain unimplemented — see
-                     # DESIGN.md §5/QN-024's own AC for the exact scope line.
+  data.write: true   # QN-024 (iteration 10): status-only write, later
+                     # extended to full write completeness -- title/body/
+                     # labels write closed by M09-gh-write (github-client.js
+                     # writeFields()) and parent/children write closed by
+                     # M12-abi-parent-write (github-client.js
+                     # writeRelations()); Provider-ABI write coverage is
+                     # 13/13 = 1.0000 as of M12 (dashboard.md). See
+                     # DESIGN.md §5 for the full field-by-field scope.
   gate: true          # QN-028 (iteration 17): task_check, primitive tasks;
                      # extended to compound/epic (children non-empty) tasks
                      # by QN-035 (iteration 25, DIR-006) via a ported,
