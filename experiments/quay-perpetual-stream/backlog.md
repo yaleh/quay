@@ -40,6 +40,13 @@ at SELECT time once VT origin is scored.
 | M-GH-WRITE | GitHub Provider write-completeness (title/body/labels/parent-children write; fix PR-ABI-001's silent-drop-no-error failure mode at minimum, real write support as stretch) | Provider-ABI | gap-list PR-ABI-001 (significant) | explore | Provider-ABI cov 0.654→~0.85 (write fraction 1/5→~4/5, weight 20, Δv̂≈+3 to +4) | Real, precisely-sized candidate — M03-abi-eval's matrix bounds the gap exactly (write=0.20, the lone thin cell). Minimum-viable form: make the MCP schema reject/error on unsupported fields instead of silently dropping them (closes the "no error signal" danger even without full write support); stretch form: implement real title/body/labels write against GitHub's API. Not yet charter-authored. |
 | M-GH-PARENT | Fix quay-github's `task_get`/`task_list` parent-resolution asymmetry (PR-ABI-002) | Provider-ABI | gap-list PR-ABI-002 (minor) | exploit | small (~+0.5, cov nudge only) | Small, well-bounded — `github-client.js#get()` needs the same parentIndex lookup `list()` already does. Candidate for bundling into M-GH-WRITE rather than a standalone milestone (too small alone per "raw polish gaps are NOT standalone milestones"). |
 
+## M04-discover-sourced candidates (2026-07-18)
+
+| id | title | surface(s) | source | e/x | rough Δv̂ | notes |
+|---|---|---|---|---|---|---|
+| M-MERGE-RECOVER | Recover ~12 exp4 iterations' worth of `packages/quay` code that gap-list.md/CHANGELOG.md claim shipped but were never actually merged to `master` (MD-001): `--version`/`-V`, `--page-size` (CLI+Web UI+JSON mode), `--format json` alias, `packages/quay/{README,CHANGELOG,LICENSE}.md`, `package.json` `files`/`license` fields — either by re-merging the original `experiment-4-iteration-{13,14,16,17,18,19}` branch tips (conflict risk against intervening M-DIST/M-ABI-EVAL master history, needs real review) or by re-implementing fresh against current master (safer, smaller diff, re-verify each against its original test additions). Also fold in DOC-006 (document the SEA/release artifacts M-DIST already shipped — currently completely undocumented in README.md) and DOC-007 (CHANGELOG v0.3.x entry, correct the v0.2.0 entry's false claims) as part of the same milestone's docs-closeout scope, since both require touching the same files. | CLI, Docs, Packaging | gap-list MD-001 (significant) + DOC-006/DOC-007 (minor) | explore | med-high (CLI cov likely 0.95→lower once merge-drift is priced in, recovers back toward ~0.90+; Docs cov 0.70→higher once SEA is documented and CHANGELOG corrected; Δv̂≈+4 to +6 est., precise number needs re-baseline at SELECT time once this milestone's charter is authored) | Not yet charter-authored. Sizing rationale: 6 iterations' worth of `bin/quay.js`/`serve.js`/test changes is real re-implementation/re-verification effort, not a 1-line fix — explicitly named by the charter's own bundling rule as backlog-candidate-worthy. Smaller sub-candidate `M-DOCS-SEA` (DOC-006/007 alone, docs-only, no code recovery) could be split out if `M-MERGE-RECOVER`'s code-recovery scope is judged too large for one milestone at SELECT time. |
+| UQ-049 | Web UI `?search=` URL param silently no-ops (real param is `q`); mobile-viewport title-text CSS overflow (UQ-050). | Web UI | gap-list UQ-049 (minor) / UQ-050 (low) | exploit | low (~+0.5-1, cov nudge only) | Small, well-bounded — likely bundle into `M-MERGE-RECOVER`'s Web UI touch-surface or a future exploit-channel pass rather than a standalone milestone (too small alone per "raw polish gaps are NOT standalone milestones"). |
+
 ## Backlog exhaustion finding (m3 SELECT, 2026-07-18)
 Every carried-by-reference candidate above except M-DIST/M-GATES (both DONE) is now confirmed STALE
 — the exp4-vintage backlog has no remaining milestone-sized product-value or methodology-infra scope.
@@ -63,3 +70,10 @@ M-DOCS (exploit) → **M-DIRTASK** (explore) → checkpoint 1.
 
 Revised order after m2 SELECT (2026-07-18): **M-DIST(done) → M-GATES → M-DOCS → M-DIRTASK →
 checkpoint 1.**
+
+Revised order after m4/M04-discover iteration-0 (2026-07-18): the exploit-channel discovery pass
+found the backlog's most consequential item yet — **M-MERGE-RECOVER** (significant, MD-001 merge-drift)
+should be the next SELECT ahead of M-GH-WRITE/M-GH-PARENT, since it recovers real, previously-claimed
+CLI/Docs/Packaging capability that is silently absent from `master` today, vs. M-GH-WRITE's smaller,
+already-fully-bounded Provider-ABI write-completeness gap. Suggested: **M-MERGE-RECOVER (explore) →
+M-GH-WRITE (explore) → M-GH-PARENT (exploit, bundle into M-GH-WRITE) → checkpoint 2.**
