@@ -1,6 +1,6 @@
 # DIR-015
 
-- status: pending
+- status: applied
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Materialize the M-TASK-BACKLOG-PROJECTION implementation as a selectable backlog candidate and charter it — the DIR-009/010 "self-host exp5's own work in quay" fix has been design-DONE since m13 but has no implementation candidate row, so SELECT can never reach it (it is stuck in exactly the invisibility trap it was designed to remove)
@@ -107,3 +107,23 @@ dispatch `M-TASK-BACKLOG-PROJECTION-IMPL`, does not touch the task-store/
 of scope for M23 — `M-TASK-BACKLOG-PROJECTION-IMPL`'s `backlog.md` row remains
 `pending`/unselected after this milestone; this DIR remains pending until a future
 SELECT boundary actually charters that row.
+
+- resolved_by: M24-task-backlog-projection-impl (iteration-0 + iteration-1, both
+  fully independent, merged `exp5-outer-driver` commit `086cbc9`, published to
+  `master` this same ABSORB)
+- outcome: applied
+- evidence: `charters/M24-task-backlog-projection-impl.md` (4-phase charter, both
+  gates PASS); `milestones/M24-task-backlog-projection-impl/iterations/iteration-{0,1}.md`
+  (all 13 Done-when clauses met independently in both); `dashboard.md`'s ABSORB m24
+  log entry (full merge-reconciliation rationale, gate re-verification); `backlog.md`'s
+  `exp5-M-TASK-BACKLOG-PROJECTION-IMPL` row now `DONE`.
+
+**Resolution (M24-task-backlog-projection-impl ABSORB, 2026-07-18):** item 1 was
+already satisfied at m21 (row creation). Item 2 (charter and dispatch the actual
+implementation) is now DONE — three consecutive deferrals (M21, M22, M23) ended at
+the m24 SELECT boundary. Both iterations independently built and verified the full
+§15 checklist: experiment-prefixed id-scheme join (fixing the DIR-004/DIR-005
+cross-experiment collision this DIR's own Finding named), M01-M12 backfill,
+forward-looking `milestone-candidate` task creation, `OUTER-LOOP.md` SELECT-read/
+ABSORB-write wiring, `backlog.md`/`dashboard.md` regeneration script, and a
+backlog-projection anti-drift check — all re-verified PASS after merge. Archived.

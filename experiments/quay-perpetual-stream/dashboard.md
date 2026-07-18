@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 23** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 24** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -1891,3 +1891,69 @@ ABSORB satisfies the DIR-016 impl-row gate by being the implementing milestone i
 own backlog row DONE, does not need to spawn a further `-IMPL` row — it IS the `-IMPL` row).
 Dispatching inner iteration-0 and iteration-1 next, both from worktrees off `exp5-outer-driver`
 HEAD (not `master`), per the now-standing M23 driver-isolation discipline.
+
+**ABSORB m24 (2026-07-18).** Both iterations converged independently on the same 4-phase design
+(iteration-0 commit `571957c`+fixup `1884149`, all 13 Done-when clauses met, 32/32 tests; iteration-1
+commit `dac857c`, all 13 Done-when clauses met independently, 391-line report). Realized `Δv = 0`
+exact vs. `Δv̂ = 0` hypothesis — method infra, no VT chart cell, no calibration error to compute.
+
+**Merge into `exp5-outer-driver` — per-file reconciliation** (commit `086cbc9`, full rationale also
+in that commit message): iteration-1 merged first cleanly (no conflicts, `a5597b4`). iteration-0's
+merge hit two distinct problems, both resolved per the standing no-blanket-take/read-both-sides
+discipline:
+1. **Untracked task-store collision (new failure mode).** Both subagents' concurrent
+   `mcp__quay__task_write` MCP calls during their Phase 2/3 demos wrote directly to the SAME shared,
+   non-worktree-isolated `tasks/` directory at the repo root — landing 22 untracked, differently-
+   shaped `exp5-*.md` files (3 with a `-STALE` suffix iteration-0's own commit didn't use, plus an
+   extra `exp5-UQ-049.md` from iteration-1's Phase 3 demo) that blocked the merge outright (git
+   refused to overwrite untracked files). Backed the untracked set up to
+   `/tmp/m24-untracked-tasks-backup/` for provenance, then removed it so iteration-0's git-tracked
+   (canonical) 21-file task set could land via the merge — git-tracked content is the correct
+   canonical form per this milestone's own design goal (task store legible from git history, not
+   live-only MCP state). **This failure mode itself is new evidence for a future milestone**: the
+   MCP task tools do not respect git-worktree isolation the way file-based tools do — worth a
+   backlog row if two agents ever need to demo live task-store writes concurrently again.
+2. **4 real content conflicts** (both iterations independently touched the same files with
+   equivalent-but-differently-worded implementations of the same Stage 1.1-1.3/Stage 4.2 scope —
+   not substantive disagreements): `OUTER-LOOP.md` (SELECT/ABSORB wiring text, 2 hunks) and
+   `scripts/it0-dir-projection-check.{mjs,sh}` (id-scheme/ignore-section/resolved-synonym logic, 5
+   hunks total) resolved to iteration-1's (HEAD's) wording/implementation throughout, for internal
+   consistency. `scripts/it0-backlog-projection-check.mjs` (add/add — two independently-written full
+   scripts with different call signatures) resolved to iteration-0's self-contained
+   `<experiment-dir>` signature (matches the sibling `it0-dir-projection-check.sh` convention;
+   iteration-0's own report pasted PASS evidence for exactly this signature) — its companion `.sh`
+   wrapper (written by iteration-1 against the other signature, not itself conflicted) was rewritten
+   to match. `backlog.md` had no git conflict (both iterations converged on the same generated-view
+   format) but went stale once iteration-0's 21 backfilled/forward-looking task files landed;
+   regenerated via `it0-backlog-regen.mjs --write`. Both anti-drift checks re-verified PASS after
+   resolution: `it0-dir-projection-check.sh` → 18 DIR files vs 16 label:directive tasks, no
+   divergence; `it0-backlog-projection-check.sh` → 19 milestone-candidate tasks vs `backlog.md`, no
+   divergence. Also found and fixed, incidental to the stray-marker grep sweep: a leftover
+   `>>>>>>> exp5-m22-iteration-0` conflict marker at the end of `DIR-014`'s archived directive file
+   (never caught since M22 — same failure class M23 found and fixed in `OUTER-LOOP.md`; single
+   stray trailing line removed, no content otherwise affected). Full test suite re-run after
+   resolution: 32/32 pass, 0 fail, no regressions.
+
+**ABSORB gates:** Adversarial-audit gate — neither condition fires (Δv=0, not VT-scoring;
+iteration-0 did not recommend skipping iteration-1, both ran fully independently) — documented
+no-op per the gate's own non-blanket cadence rule. V_meta consolidation-lag gate — `v-meta-ledger.md`
+has one `consolidated` row (no lag) and one `proposed` row at confirmation-count 1 (not yet past the
+φ=2 threshold, gate does not apply to non-`confirmed` rows) — clear, no action needed.
+Design-only-milestone impl-row gate — N/A, M24 is itself an implementation milestone (DIR-015 item
+2's `-IMPL`), not design-only; its own backlog row is marked DONE by this ABSORB rather than
+spawning a further `-IMPL` row, per the charter's own stated disposition.
+
+**Driver → master publish sub-step** (DIR-018/M23 pattern, second real use): `git checkout master &&
+git merge --no-ff exp5-outer-driver` — clean, no conflicts, 45 files changed (2274 insertions, 165
+deletions), including the 6 DRAIN-time DIR status-mirror fixes (`tasks/DIR-004.md`,
+`DIR-005.md`, `DIR-013.md`, `DIR-014.md`, `DIR-016.md`, `DIR-018.md`) reaching `master` for the
+first time this milestone.
+
+**DIR-015 disposition:** item 1 was satisfied at m21 (row creation, `M-IMPL-ROW-ENFORCEMENT`'s
+retroactive sweep); item 2 (this milestone's entire scope) is now DONE. DIR-015 to be archived with
+a filled `## Resolution` section as part of the next DRAIN pass's directive-file bookkeeping.
+
+Worktrees/branches for both M24 iterations (`milestones/M24-task-backlog-projection-impl/worktrees/
+iteration-{0,1}`, branches `exp5-m24-iteration-{0,1}`) to be removed/deleted next.
+`milestone_counter` → **24**. Checkpoint not due (next due at m25, per every-5 cadence — cp-20 was
+last). Continuing directly to m25 SELECT, no human wait.
