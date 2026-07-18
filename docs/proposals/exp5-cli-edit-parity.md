@@ -1,19 +1,15 @@
 # exp5 CLI edit parity — Core CLI `task edit` full-field-parity design doc
 
-**Status:** design only (no implementation). Produced by M14-cli-edit-parity iteration-1, an
-independent re-derivation per the charter's own note that this milestone's design-doc completeness
-(against DIR-011's 4 numbered items, plus the two concrete decision points — whole-body mode,
-portable-metadata wording) is genuinely independently checkable.
+**Status:** design only (no implementation). Produced by M14-cli-edit-parity iteration-0, per the
+human's own routing decision quoted in DIR-011 ("Design-only at this stage, same routing as
+DIR-009").
 
-**Sources:** DIR-011 (`experiments/quay-perpetual-stream/directives/archive/DIR-011-relax-core-cli-
+**Source:** DIR-011 (`experiments/quay-perpetual-stream/directives/archive/DIR-011-relax-core-cli-
 task-edit-surface-and-formalize-portable-metadata-body-vs-extra.md`), drained at the m12→m13
-boundary into `backlog.md`'s `M-CLI-EDIT-PARITY` row, deferred pending M13-task-backlog-projection's
-body-vs-`extra{}` convention landing first (it has — see cross-reference in §3). Grounded in three
-real, already-implemented precedents this doc cites rather than re-derives: the native provider
-CLI's existing full-field `task edit` (`packages/quay-native/bin/quay-native.js`), the MCP
-`task_write` schema (both `packages/quay-native/src/mcp-server.js` and `packages/quay-github/src/
-mcp-server.js`), and M09-gh-write's PR-ABI-001 hard-error-floor fix (`packages/quay-github/src/
-mcp-server.js`, `packages/quay-github/src/github-client.js`).
+boundary into `backlog.md`'s `M-CLI-EDIT-PARITY` row, selected at the m13→m14 boundary once
+M13-task-backlog-projection's body-vs-`extra{}` convention landed
+(`docs/proposals/exp5-task-backlog-primitive-projection.md`, §11) satisfying M-CLI-EDIT-PARITY's
+stated dependency.
 
 ## Table of contents / DIR-011 item map
 
@@ -21,21 +17,21 @@ mcp-server.js`, `packages/quay-github/src/github-client.js`).
 |---|---|
 | §1 Core CLI `task edit` full-field parity | 1 |
 | §2 Provider-capability handling | 2 |
-| §3 Portable-metadata rule (formalized wording) | 3 |
+| §3 Portable-metadata rule (proposed wording) | 3 |
 | §4 Non-goals | 4 |
-| §5 Verification plan (worked, ≥2 fields, both providers) | (item 2's verify-live-against-both requirement) |
-| §6 Done-when clauses a future implementing milestone would need | (charter Done-when clause 5) |
+| §5 Verification plan (worked, ≥2 fields, both providers) | (item 2's verification requirement) |
+| §6 Done-when clauses for a future implementing milestone | (charter in-scope item 4 / Done-when 5) |
 
-Every DIR-011 numbered item (1-4) has exactly one primary home section below; none are answered
-only implicitly.
+Every DIR-011 numbered item (1-4) has exactly one home section below; none is answered only
+implicitly.
 
 ---
 
 ## §1. Core CLI `task edit` full-field parity (DIR-011 item 1)
 
-### Current state (cited, not re-derived)
+### 1.1 Current state (cite, don't re-derive)
 
-The Core CLI's `task edit` (`packages/quay/bin/quay.js` lines 376-394) is hard-gated to
+The Core CLI (`packages/quay/bin/quay.js`, `task edit` handler, lines 376-394) is gated to
 status-only:
 
 ```js
@@ -49,43 +45,28 @@ if (cmd === "task" && sub === "edit") {
   await withProvider(async (client) => {
     const t = await client.taskWrite({ id, status: flags.status });
     ...
-  }, { providerId: flags.provider });
-  return;
-}
 ```
 
-This is a **passthrough-layer restriction only** — `provider-client.js`'s `taskWrite(patch)`
-(lines 34-38) already forwards an arbitrary patch object to `task_write` with zero backend branch
-("Core just forwards whatever patch fields are given, same as taskList/taskGet forward whatever
-filter/id is given" — its own comment). Both provider MCP servers already accept the fuller patch
-shape: native's `task_write` schema (`packages/quay-native/src/mcp-server.js` lines 83-104) accepts
-`title`/`status`/`labels`/`parent`/`children`/`body`/`extra`/`expectedStatus`; github's `task_write`
-schema (`packages/quay-github/src/mcp-server.js` lines 127-137) accepts `status`/`title`/`body`/
-`labels`/`parent`/`children` (not `extra` — see §2/§3). The native provider's own CLI
-(`packages/quay-native/bin/quay-native.js` lines 115-155) already builds and forwards the full patch:
+`client.taskWrite(patch)` (`packages/quay/src/provider-client.js`, lines 34-38) is already a
+**generic, provider-agnostic passthrough** — it forwards whatever patch object it is given to the
+active Provider's `task_write` MCP tool and throws on `isError:true`. It does not need to change at
+all for this design; the restriction is entirely in the Core CLI's own flag-parsing/validation
+above `taskWrite`, not in the transport.
 
-```js
-const patch = {};
-if (flags.title !== undefined) patch.title = flags.title;
-if (flags.status !== undefined) patch.status = flags.status;
-if (flags.labels !== undefined) patch.labels = String(flags.labels).split(",").filter(Boolean);
-if (flags.parent !== undefined) patch.parent = flags.parent;
-if (flags.body !== undefined) patch.body = flags.body;
-if (flags.children !== undefined) patch.children = String(flags.children).split(",").filter(Boolean);
-if (flags.extra !== undefined) patch.extra = JSON.parse(flags.extra);
-if (flags["expect-status"] !== undefined) patch.expectedStatus = flags["expect-status"];
-if (flags["append-notes"] !== undefined) { /* store.appendNote(...) */ }
-```
+The native provider CLI (`packages/quay-native/bin/quay-native.js`, `task edit` handler, lines
+115-155) already builds a full patch object from `--title`/`--status`/`--labels`/`--parent`/
+`--body`/`--children`/`--extra` (JSON) and a distinct `--append-notes` path (`store.appendNote`,
+not part of `patch`, handled as an early return). The MCP `task_write` tool schema itself
+(`packages/quay-native/src/mcp-server.js`, lines 79-104) accepts
+`{id, title?, status?, labels?, parent?, children?, body?, extra?, expectedStatus?}`.
 
-So closing the gap is **not** a provider-ABI change — it is relaxing the Core CLI's own flag-gate
-and building the same style of optional-field patch object quay-native's CLI already builds,
-forwarded through the exact same `client.taskWrite(patch)` call already used for `--status`.
+### 1.2 Design: relax the Core CLI flag surface
 
-### Recommended design
-
-Replace the `if (!flags.status) { ...error...; return; }` hard gate with an optional-field patch
-builder mirroring quay-native's shape exactly (same flag names, for muscle-memory parity across the
-two CLIs — DIR-011's own framing is "parity with the native provider CLI"):
+Add flag parsing for `--title`, `--body`, `--labels`, `--extra`, `--parent`, `--children`,
+`--append-notes` to the Core CLI's `task edit` handler, mirroring the native CLI's own flag→patch
+construction **exactly** (same flag names, same `--labels`/`--children` comma-split, same
+`JSON.parse` for `--extra`), so a user who has learned the native CLI's flags needs to learn
+nothing new for the Core CLI:
 
 ```js
 if (cmd === "task" && sub === "edit") {
@@ -97,20 +78,19 @@ if (cmd === "task" && sub === "edit") {
   if (flags.parent !== undefined) patch.parent = flags.parent;
   if (flags.children !== undefined) patch.children = String(flags.children).split(",").filter(Boolean);
   if (flags.extra !== undefined) patch.extra = JSON.parse(flags.extra);
-  // body: see whole-body-replacement-mode recommendation below.
-  if (flags.body !== undefined) patch.body = flags.body;
-  else if (flags["body-file"] !== undefined) patch.body = readBodyFile(flags["body-file"]);
-  else if (flags["body-stdin"] === true) patch.body = await readStdin();
-
-  if (Object.keys(patch).length === 0) {
-    console.error(
-      "quay task edit: at least one of --title/--status/--labels/--extra/--parent/--children/" +
-      "--body/--body-file/--body-stdin/--append-notes is required"
-    );
+  if (flags.body !== undefined) patch.body = await resolveBody(flags); // see §1.3
+  if (Object.keys(patch).length === 0 && flags["append-notes"] === undefined) {
+    console.error("quay task edit: at least one of --title/--status/--body/--labels/--extra/" +
+      "--parent/--children/--append-notes is required");
     process.exitCode = 1;
     return;
   }
   await withProvider(async (client) => {
+    if (flags["append-notes"] !== undefined) {
+      // no native appendNote passthrough on the ABI yet (see §4 non-goals) —
+      // out of scope this milestone; ships as a `patch.body`-based append
+      // helper in the Core CLI itself if picked up (§6 Done-when).
+    }
     const t = await client.taskWrite({ id, ...patch });
     if (wantsJson) printJson(t);
     else console.log(`${t.id}: ${t.title} [${t.status}]`);
@@ -119,282 +99,368 @@ if (cmd === "task" && sub === "edit") {
 }
 ```
 
-`--append-notes` is deliberately **not** folded into the same patch object — quay-native's own CLI
-treats it as a separate, mutually-exclusive branch (`store.appendNote(id, ...)`, a different store
-method than `store.write()`), and the Core CLI should mirror that same branch split rather than
-inventing a combined call the provider layer doesn't actually support atomically.
+The `--status <s> is required` guard is REMOVED (replaced by an "at least one field" guard, since
+status is no longer the only writable field). This is the single behavior-visible break from v1 —
+existing `quay task edit <id> --status <s>` invocations continue to work unchanged (status remains
+a valid, still-optional field in the patch), so this is additive, not breaking, for all existing
+callers.
 
-**Error-message change**: the existing `"v1 supports status-only writes"` message is removed;
-replaced by the "at least one field required" usage error above (mirrors `task_write`'s own
-"at least one of status/title/body/labels/parent/children is required" validation message on the
-github side, and its analogous native-side behavior — consistent phrasing across CLI and ABI
-layers).
+**`--expect-status` (CAS)** is already wired symmetrically on the native CLI (QN-015) and already
+passes through generically today via `client.taskWrite`'s passthrough shape — it should be added to
+the Core CLI's flag list at the same time for full symmetry, though it is not itself a DIR-011-named
+field and is called out here only so a future implementer does not have to re-discover it
+separately.
 
-### Whole-body-replacement-mode recommendation (concrete, not a menu)
+### 1.3 Whole-body-replacement mode — concrete recommendation
 
-**Recommendation: add `--body-file <path>` as the primary first-class whole-body-replacement mode;
-do NOT add a separate `--body-stdin` boolean flag as a second mode in the same milestone.**
+DIR-011 item 1 explicitly asks for a decision, not a menu: **recommend `--body-file <path>` as the
+first-class whole-body-replacement mode, with `-` accepted as a `<path>` value meaning "read from
+stdin."** Do **not** add a second, separate `--body-stdin` boolean flag — one flag, one
+convention (`-` for stdin) keeps the flag surface minimal and matches a common Unix CLI convention
+(e.g. `tar -f -`, `git apply -`) rather than inventing a bespoke boolean.
 
-Reasoning:
-- `--body-file <path>` with the conventional `-` sentinel meaning "read stdin instead of a real
-  path" is the single, well-established Unix CLI convention for "replace this field with file or
-  piped content" (mirrors `git commit -F -`, `curl -d @-`, etc.) — one flag, two ways to invoke it,
-  rather than two flags a user has to choose between. `readBodyFile(flags["body-file"])` above
-  should special-case `flags["body-file"] === "-"` to read stdin, eliminating the need for a
-  separate `--body-stdin` flag entirely. (The pseudocode above shows both for illustration of the
-  underlying stdin-reading mechanism; the actual recommended CLI surface is the single `--body-file`
-  flag with `-` meaning stdin, not two independent flags.)
-- `--body <string>` (inline, already the design's baseline per item 1) remains adequate for short
-  bodies and scripting one-liners; it is not being removed, only supplemented.
-- A whole-body edit is exactly the "entire description as a unit" case DIR-011's Requested action
-  names explicitly ("so a task's entire description can be edited as a unit, per the human's ask")
-  — `--body-file`/`-` covers both "edit in `$EDITOR`, save to a temp file, pass the path" and
-  "pipe from another command" workflows with one mechanism, which is why it is recommended as the
-  sole first-class mode rather than an enumerated set of alternatives.
-- This does not require any provider-ABI change: `task_write`'s `body` field is already a plain
-  string; `--body-file`/stdin is pure Core-CLI-side content-sourcing, not a new wire shape.
+Reasoning against the alternatives DIR-011's own item 1 names:
+- **Plain `--body <string>`** (already in the flag list above) remains available for short bodies
+  passed directly as a shell argument — useful for scripting/automation with short strings, but
+  shell-quoting a large multi-paragraph markdown body as a single CLI argument is exactly the
+  friction DIR-011 item 1 is asking to solve ("a task's entire description can be edited as a
+  unit").
+- **`--body-file <path>`** reads the file's full contents as the new body verbatim (whole-body
+  REPLACEMENT semantics — not a merge/patch of sections; a task author who wants to edit one
+  section of an existing body edits it in their own file, still whole-body-replacing on write).
+  This is the natural mode for an agent or a human editing a task body in an actual editor before
+  committing the write, and is the mode DIR-009/M13's own workflow (rich structured body sections,
+  §9-§11 of that design) will actually exercise most: an agent composes a body in memory/a temp
+  file, then applies it in one write.
+- **`--body-file -` (stdin)** covers the pipeline case (`some-generator | quay task edit T1
+  --body-file -`) without inventing a second flag, and is the natural complement once `--body-file`
+  exists — stdin is just "the path is unavailable, use fd 0."
+- **Rejected: a separate `--body-stdin` boolean.** Redundant with `--body-file -`; would require
+  documenting and testing two flags that do the same job through two different spellings, with no
+  offsetting benefit.
+- **Rejected: an interactive `$EDITOR` launch mode** (like `git commit` with no `-m`). Plausible
+  future ergonomic addition, but out of scope for a design doc whose Done-when requires a *concrete*
+  recommendation implementable in one pass — an editor-launch mode adds a process-spawn/tty
+  dependency this CLI does not currently have anywhere, a bigger design surface than DIR-011 item 1
+  asks for.
 
----
+Implementation sketch for `resolveBody(flags)` (referenced in §1.2's patch-construction code):
 
-## §2. Provider-capability handling, not assumption (DIR-011 item 2)
+```js
+async function resolveBody(flags) {
+  if (flags["body-file"] !== undefined) {
+    if (flags["body-file"] === "-") {
+      return await readAll(process.stdin); // whole-body replacement from stdin
+    }
+    return await fs.readFile(flags["body-file"], "utf8"); // whole-body replacement from file
+  }
+  return flags.body; // short-string mode, already validated present by the caller
+}
+```
 
-The Core CLI is provider-agnostic (per `withProvider()`'s `providerId` parameterization and
-`provider-client.js`'s zero-backend-branch design, cited above) and **must not** special-case which
-fields "should" work. §1's design already achieves this structurally: the patch object is built
-from whatever flags were passed and forwarded verbatim to `client.taskWrite(patch)` — the Core CLI
-never inspects or filters the patch by provider type. All capability-mismatch handling happens
-**inside the provider's own `task_write` implementation**, which is exactly where M09-gh-write's
-PR-ABI-001 fix already put it.
-
-### Reusing the existing hard-error floor (not re-litigating it)
-
-Per PR-ABI-001 (`packages/quay-github/src/mcp-server.js` lines 84-165), github's `task_write`:
-1. Uses a raw (non-zod-typed, `.catchall(z.unknown())`) input schema specifically so unrecognized
-   keys survive MCP-SDK input validation instead of being silently stripped (the original
-   `task_write-unsupported-field-probe` bug this fix closed).
-2. Explicitly scans `Object.keys(rawArgs)` against `TASK_WRITE_SUPPORTED_FIELDS` (`id`, `status`,
-   `title`, `body`, `labels`, `parent`, `children` — `extra` is deliberately absent) and returns
-   `isError: true` with an explicit message naming the unsupported field(s) if any are present.
-
-**Design requirement for the Core CLI**: when `client.taskWrite(patch)` (provider-client.js line
-34-38) receives an MCP tool error (`r.isError`), it already `throw new Error(r.content?.[0]?.text
-?? "task_write failed")` — this propagates the provider's own explicit error message (e.g.
-`"task_write: unsupported field(s) [extra] — this Provider does not implement writing extra.
-Supported fields: id, status, title, body, labels, parent, children."`) up to the CLI's existing
-`try`/`catch` in the `task edit` handler (mirroring the existing `ConflictError` catch block already
-present at lines 145-152 for `--status`/CAS). The Core CLI's job is only to **not swallow or
-re-word** that error — print the provider's message as-is to stderr and exit 1, exactly as the
-existing `ConflictError` branch does for its own error class. No new Core-CLI-side capability
-table, no "is this provider native?" branch — the hard-error floor is already correct and already
-lives at the provider layer; the Core CLI's only correctness obligation is to be a transparent
-passthrough for both the success and the error path, symmetric with how it already is for the
-success path today.
-
-### What this means concretely for each newly-relaxed flag
-
-| Flag | native | github | Core CLI's role |
-|---|---|---|---|
-| `--title` | real write | real write (M09) | pure passthrough, both succeed |
-| `--body` / `--body-file` | real write | real write (M09) | pure passthrough, both succeed |
-| `--labels` | real write | real write (M09) | pure passthrough, both succeed |
-| `--parent` / `--children` | real write | real write (M12-abi-parent-write) | pure passthrough, both succeed |
-| `--extra` | real write (native-only field) | **hard error** (PR-ABI-001 floor, `extra` not in `TASK_WRITE_SUPPORTED_FIELDS`) | pure passthrough; github's explicit error propagates unmodified |
-
-Note `--parent`/`--children` are now real writes on **both** providers as of M12-abi-parent-write
-(the design doc must not describe them as github-unsupported — that was true only through M09, and
-DIR-011's own Finding predates M12; this doc corrects for that landed change). The one flag that
-genuinely diverges at the ABI layer today is `--extra`, which is exactly the case §2/§3 are built
-around.
-
-### Differential-conformance verification approach (pointer to §5's worked-through detail)
-
-Per the charter's item 4 / DIR-011 item 2's "verify live against BOTH providers, in the
-M03-abi-eval/M09 differential-conformance style" instruction: the existing
-`packages/quay/test/provider-abi-conformance.test.mjs` file already runs exactly this style of
-paired native/github probe (see its `task_write-unsupported-field-probe` and
-`task_write-hard-error-floor-probe` cases, lines 224-252, cited verbatim in §5). A future
-implementing milestone's verification plan is to **extend this same file** with Core-CLI-level
-probes (spawning `quay task edit` as a child process against both providers, not just calling
-`task_write` directly as the existing file does) — §5 works this through concretely for two fields.
+`--body` and `--body-file` are mutually exclusive; the Core CLI should reject supplying both with a
+clear "quay task edit: --body and --body-file are mutually exclusive" error rather than silently
+preferring one (the same "surface, don't silently pick" discipline §2 applies to provider-capability
+mismatches).
 
 ---
 
-## §3. Formalize the portable-metadata rule (DIR-011 item 3)
+## §2. Provider-capability handling (DIR-011 item 2)
 
-### Constraint this rule resolves (cited, not re-derived)
+### 2.1 The Core CLI must not assume native
 
-Native's `extra{}` (`packages/quay-native/src/mcp-server.js` line 99: `extra: z.record(z.any())
-.optional()`) is an arbitrary JSON k/v map — a native-store-only feature. GitHub's `task_write`
-explicitly excludes `extra` from `TASK_WRITE_SUPPORTED_FIELDS` and hard-errors on it (§2's table).
-Any metadata that must survive a provider switch (or must be writable when GitHub is the active
-provider at all) cannot rely on `extra{}` as its sole representation.
+The Core CLI is provider-agnostic by construction (`withProvider(...)`, `provider-client.js`'s
+generic `taskWrite` passthrough) — §1's design adds no provider-specific branch to the Core CLI
+itself. Whether a given field is writable is entirely a fact about the ACTIVE PROVIDER, discovered
+at write time by the provider's own `task_write` MCP tool, not something the Core CLI pre-filters
+or special-cases per provider.
 
-### Proposed rule text (insertable prose)
+### 2.2 The existing hard-error floor (M09 PR-ABI-001) already does exactly what item 2 asks for
 
-The following is the actual proposed wording, suitable for direct insertion into
-`inherited-core.md` and/or a provider-ABI doc (e.g. as a new subsection titled "Portable metadata:
-body vs. `extra{}`"):
+`client.taskWrite` (`provider-client.js` line 36) already does:
 
-> **Portable metadata convention.** Any task metadata that must be readable or writable
-> regardless of which Provider is active MUST be represented as a **structured markdown section
-> within the task's `body` field** (e.g. a `## <Label>` heading followed by a short value line or
-> block), never as the sole copy in `extra{}`. `extra{}` is a **native-Provider-only convenience
-> mirror**: it MAY additionally hold a machine-readable copy of the same fact for native-only
-> tooling that wants to query it without markdown-parsing the body, but nothing in this
-> experiment's (or a future consumer's) design may depend on `extra{}` being present, because the
-> GitHub Provider cannot write it at all — `task_write` hard-errors (`isError: true`) on any
-> `extra` field per the PR-ABI-001 fix, rather than silently dropping it. When in doubt about
-> where a new field belongs: if the fact must be readable after a provider switch, or written at
-> all while GitHub is active, it goes in the body first; `extra{}` is additive, never load-bearing.
+```js
+async function taskWrite(patch) {
+  const r = await client.callTool({ name: "task_write", arguments: patch });
+  if (r.isError) throw new Error(r.content?.[0]?.text ?? "task_write failed");
+  return r.structuredContent?.task ?? null;
+}
+```
 
-This is a direct formalization of DIR-011's own Finding #2 ("`extra{}` is not provider-portable;
-the task body is") into adoptable convention prose, not a new decision — the wording states the
-constraint DIR-011 already discovered, in a form suitable for a skill or ABI-doc author to paste in
-verbatim.
+— any `isError:true` MCP tool response becomes a thrown `Error` with the Provider's own explicit
+message. The GitHub provider's `task_write` handler (`packages/quay-github/src/mcp-server.js`,
+lines 104-165) implements exactly the hard-error floor DIR-011 item 2 asks to reuse:
 
-### Cross-reference: M13's own reliance on this exact rule
+```js
+const TASK_WRITE_SUPPORTED_FIELDS = new Set(["id", "status", "title", "body", "labels", "parent", "children"]);
+...
+const unsupported = Object.keys(rawArgs).filter((k) => !TASK_WRITE_SUPPORTED_FIELDS.has(k));
+if (unsupported.length > 0) {
+  return {
+    isError: true,
+    content: [{ type: "text", text:
+      `task_write: unsupported field(s) [${unsupported.join(", ")}] — this Provider does not ` +
+      `implement writing ${unsupported.join("/")}. Supported fields: ${[...TASK_WRITE_SUPPORTED_FIELDS].join(", ")}.` }],
+  };
+}
+```
+
+**Design decision: change NOTHING about this mechanism.** §1's Core CLI relaxation needs zero new
+error-handling code beyond what `withProvider`'s existing top-level error reporting already does
+(uncaught errors from the async callback surface as a CLI error message + non-zero exit code — the
+same path `client.taskWrite`'s `throw new Error(...)` already flows through today for the
+status-only case). Concretely: `quay task edit gh-3 --extra '{"foo":"bar"}'` against the GitHub
+provider will throw `Error: task_write: unsupported field(s) [extra] — this Provider does not
+implement writing extra. Supported fields: id, status, title, body, labels, parent, children.`,
+which the Core CLI's existing top-level catch prints to stderr and sets `process.exitCode = 1` —
+this is the SAME "surface the provider's existing hard error, don't silently drop" behavior item 2
+asks for, inherited for free by not special-casing anything.
+
+### 2.3 Post-M12 state: `parent`/`children` are no longer GitHub-unsupported
+
+Important correction to DIR-011's own framing (item 2 names `extra`/`parent`/`children` together
+as the unsupported-on-GitHub set): that was accurate when DIR-011 was filed (m12→m13 boundary), but
+M12-abi-parent-write (m12, already merged) moved `parent`/`children` from the rejected set INTO
+`TASK_WRITE_SUPPORTED_FIELDS` (see the code excerpt above — both are now present in the set,
+implementing real bidirectional reassign-parent semantics via body-checkbox mutation,
+`github-client.js`'s `writeRelations()`/`setChildCheckboxes()`). As of this design doc, **only
+`extra` remains hard-error-rejected on GitHub** among the fields DIR-011 originally listed (plus any
+other field never in the schema, e.g. `assignee`, per the conformance test's own probe). §1's design
+correctly makes no assumption either way — it passes `parent`/`children` through generically and
+lets the active provider's own manifest/hard-error floor be the actual source of truth, so this
+correction does not require any code-shape change to §1, only an accurate expectation in this doc
+and in §5's verification plan below.
+
+---
+
+## §3. Portable-metadata rule — proposed wording (DIR-011 item 3)
+
+### 3.1 Cross-reference to M13's existing reliance on this rule
 
 `docs/proposals/exp5-task-backlog-primitive-projection.md` §11 ("Portable metadata vs native-only
-convenience", answering DIR-009 item 11) already assumes and applies precisely this rule, **before
-it was formalized as citable prose** — this is the gap DIR-011 item 3 exists to close. M13 §11
-states:
+convenience") already assumes and depends on this exact rule for DIR-009 item 11 — it states the
+constraint informally ("Every field this design introduces... is designed **body-first**... `extra{}`
+is used only as an *optional* native-only convenience mirror") and explicitly notes: *"The Core CLI
+edit-surface work actually needed to write these body sections and labels through the CLI (not just
+MCP `task_write`) is correctly split out to DIR-011/`M-CLI-EDIT-PARITY`... this doc does not re-scope
+that work in."* This design doc is that split-out work's design half; §3.2 below is the first place
+the rule is stated as adoptable prose rather than assumed informally.
 
-> "Every field this design introduces... is designed **body-first**: the authoritative, portable
-> copy lives in a structured markdown section of the task body, writable on both providers.
-> `extra{}` is used only as an *optional* native-only convenience mirror for machine-readable
-> queries... never as the sole copy of anything this design needs to survive a provider switch."
+### 3.2 Proposed wording (insertable, verbatim)
 
-M13 §9 (selection provenance) and §10 (execution provenance) both instantiate this pattern
-concretely: `Not selected @M-NN: <reason>` as a body line with an optional `extra.notSelected`
-mirror (§9), and `## Execution record` as a body section (§10) — the same shape M05's own `Status
-mirror:` body line / `extra.dirStatus` pairing established even earlier. **This design doc's
-contribution is not a new pattern** — it is lifting the pattern M05 originated and M13 already
-reused into a single, explicitly labeled, insertable convention-doc paragraph (the blockquote
-above) so that a *third* future consumer does not have to re-derive it by reading M05's and M13's
-prose and inferring the rule themselves, which is exactly the drift-risk DIR-011's own Finding
-flags ("land it where both the `/quay-directive` skill and any future milestone-tracking skill will
-read it").
+The following is proposed for insertion into `inherited-core.md` (as a new named section, e.g.
+"Portable-metadata convention") and/or a provider-ABI doc (e.g. a new section in
+`packages/quay-github/DESIGN.md` / `packages/quay/DESIGN.md`):
 
-**Recommended landing spot**: `inherited-core.md`, as a new short subsection near wherever ABI/
-provider-capability conventions are already documented (this milestone does not edit that file —
-see §4/Done-when clause 6 — a future implementing milestone inserts the blockquote above verbatim
-or near-verbatim).
+> ### Portable-metadata convention (body-first, `extra{}` native-only)
+>
+> A quay task's `body` (markdown) and `labels` are **portable**: every Provider ABI implementation
+> (native, GitHub, and any future Provider) is expected to support reading and writing them, because
+> both are backed by fields every realistic backing store has (a free-text description field, a
+> tag/label mechanism). A task's `extra{}` map is **native-only convenience**: it is an arbitrary
+> key/value store specific to the native Provider's own file-backed task store, and MUST NOT be
+> relied upon as the sole copy of any fact that needs to survive a Provider switch.
+>
+> **Rule for anyone writing metadata onto a task that must be provider-portable:** the authoritative,
+> portable copy of that metadata MUST live in a structured markdown section of the task `body`
+> (e.g. a `## <Section Name>` heading with the fact stated in prose or a `Key: value` line
+> immediately beneath it — the exact same shape M05's `Status mirror:` body line already
+> established). `extra{}` MAY additionally carry the same fact as a machine-readable, native-only
+> mirror (e.g. `extra.someKey`) purely as a query-performance convenience on native — but if a
+> Provider hard-errors on writing `extra` (as GitHub does per PR-ABI-001's floor), the body copy
+> alone must remain sufficient; nothing may be designed to depend on the `extra{}` mirror being
+> present.
+>
+> **Corollary:** any milestone/design that finds itself needing `extra{}` as the ONLY place a fact
+> is recorded has mis-designed a provider-portability requirement — either the fact does not
+> actually need to be portable (state that explicitly and accept native-only status), or it needs a
+> body-section home in addition to (not instead of) the `extra{}` mirror.
+
+### 3.3 Why this wording, not a different formulation
+
+- States the rule as a **MUST/MAY** normative pair (portable body-first is a MUST when portability
+  is required; `extra{}` mirroring is a MAY, never a substitute) rather than descriptive prose, so
+  it is directly citable the way M05's `Status mirror:`/`extra.dirStatus` pairing already is.
+  cited/enforced elsewhere.
+- Names the exact mechanism ("a `## <Section Name>` heading... `Key: value` line") rather than
+  leaving the body's internal shape unspecified, because M13 §9/§10/§6 already use this exact shape
+  (`## Backfill provenance`, `## Execution record`, `## Status mirror`) and a vaguer rule would
+  invite drift across future body-writing designs.
+- Includes the corollary explicitly because it is the actual failure mode DIR-011 item 3 exists to
+  prevent (a design silently depending on `extra{}` as the sole copy, only discovered broken against
+  GitHub later) — stating it as a checkable self-test ("does this design depend on `extra{}` alone?")
+  gives a future author something to run against their own design, not just a rule to remember.
 
 ---
 
 ## §4. Non-goals (DIR-011 item 4)
 
-- **GitHub `extra` storage stays out of scope.** The hard-error floor (§2, §3) is the correct,
-  final behavior for `extra` on GitHub — not a defect this or any future milestone should "fix" by
-  finding some GitHub-side encoding trick (e.g. stuffing JSON into a hidden body section). §3's
-  rule exists precisely so metadata that needs to survive on GitHub is expressed as a portable body
-  section instead; inventing a GitHub-side `extra` emulation would undermine that convention by
-  giving `extra{}` a second, inconsistent portable pathway.
-- **MCP `task_write` and the native provider CLI (`quay-native task edit`) are not touched.** Both
-  already implement the full field set (cited in §1) — this design is a **Core-CLI-passthrough +
-  convention-documentation change only**. No schema change to either MCP server's `task_write`
-  tool, no new provider-side capability.
-- This milestone (M14) itself performs **no implementation** — no `packages/quay/bin/quay.js` edit,
-  no `inherited-core.md` edit, no provider ABI file change (confirmed via `git diff --stat` in the
-  iteration report). This doc specifies; a future SELECT dispatches, per DIR-011's own
-  "design-only at this stage" routing instruction.
+- **GitHub `extra{}` write support is explicitly OUT OF SCOPE, not a defect.** The hard-error floor
+  (§2.2) is the *correct* behavior for a field GitHub's issue model has no slot for — this design
+  does not propose adding an `extra`-to-GitHub-issue mapping (e.g. via a hidden HTML comment or a
+  side-channel gist), which would be a much larger, riskier ABI change than DIR-011 asked to scope,
+  and would violate §3's own "body is the portable channel" rule by creating a second, GitHub-only
+  portability mechanism outside the body.
+- **MCP `task_write` and the native provider CLI are NOT touched.** Both already implement the full
+  field set (§1.1) — this design's only product-code-shaped change is the Core CLI's flag-parsing/
+  validation layer (§1.2/§1.3), a thin passthrough addition, never the transport or either
+  provider's write logic.
+- **No new Provider ABI capability is introduced.** `parent`/`children`/`extra` support is exactly
+  what each Provider's existing manifest already declares (post-M12 for GitHub's `parent`/
+  `children`; native has always supported all fields) — this design surfaces the CLI to that
+  existing capability set, it does not grow the capability set itself.
+- **`--append-notes`'s CLI-level exposure is scoped narrowly.** The native store's `appendNote`
+  mechanism (`store.appendNote`) is a native-provider-internal convenience with no dedicated
+  `task_write`-schema equivalent on the ABI today (native CLI's own `--append-notes` handling is a
+  special early-return outside the generic `patch` object, per §1.1's citation). This design
+  recommends the Core CLI's `--append-notes` be implemented as a `--body-file`-style READ-then-
+  WRITE convenience in the Core CLI itself (read current body via `taskGet`, append the note text,
+  `taskWrite` the whole new body) rather than requiring a new ABI tool — this keeps the ABI surface
+  unchanged (consistent with the "MCP/native CLI not touched" non-goal above) while still giving
+  Core CLI users the same ergonomic shortcut. This is flagged as an explicit open design point for
+  the future implementing milestone (§6), not fully specified here, because it is genuinely
+  secondary to DIR-011's core ask (full-field parity + portable-metadata rule) and small enough that
+  over-specifying it now risks the same "re-derive vs. cite" mismatch this doc's own charter warns
+  against for the other three items.
 
 ---
 
-## §5. Verification plan — worked through for 2 relaxed fields against both providers
+## §5. Verification plan — worked example, ≥2 fields, both providers (DIR-011 item 2's verification
+## requirement, charter in-scope item 4)
 
-Following the `provider-abi-conformance.test.mjs` differential-conformance style already
-established (M03-abi-eval, extended by M09-gh-write/M12-abi-parent-write — cited fully in §2), a
-future implementing milestone adds Core-CLI-level probes to that same file (or a sibling
-`quay-task-edit-cli.test.mjs`, spawning `node packages/quay/bin/quay.js task edit ...` as a child
-process against both a native fixture and the live github fixture, the same dual-fixture setup the
-existing file already uses).
+Modeled directly on `packages/quay/test/provider-abi-conformance.test.mjs`'s existing differential-
+conformance style (per-provider `record(providerName, shape, probeName, ok, message)` calls,
+idempotent probes against real fixtures where possible — `gh-3`/`gh-7` on GitHub, native store
+fixtures on native). A future implementing milestone would ADD new probes to this same file (or a
+new sibling `cli-edit-parity-conformance.test.mjs`, if the CLI-level surface — not just the MCP
+tool — needs its own harness invoking `packages/quay/bin/quay.js` as a subprocess) asserting the
+following, worked through for two representative newly-relaxed fields:
 
-### Worked example 1 — `--title` against both providers (relaxed, real-write field)
+### 5.1 `--title` — supported on both providers (relaxed field #1)
 
-**Assertion shape** (mirrors the existing `task_write-unsupported-field-probe` case at lines
-224-235, lifted one layer up to the CLI):
+**Native:**
+```js
+const before = await nativeClient.callTool({ name: "task_get", arguments: { id: "QX-001" } });
+const t0 = before.structuredContent.task;
+// Core CLI subprocess invocation (or direct client.taskWrite call, same effective assertion):
+const r = await coreCliTaskWrite({ id: "QX-001", title: t0.title }); // idempotent re-assert
+assert(r.exitCode === 0);
+assert(r.stdoutJson.title === t0.title);
+```
+Assertion: `quay task edit QX-001 --title "<same title>"` exits 0 and the returned task's `title`
+field equals the value written — i.e. the Core CLI's new `--title` flag actually reaches the
+native store's `title` field through the full `Core CLI → provider-client.js → MCP task_write →
+store.write()` path, not just that the flag is parsed.
 
-- **Native**: run `quay task edit <native-fixture-id> --title "CLI-parity probe title"`.
-  Assert: (a) process exit code 0; (b) `quay task view <id> --json` afterward shows
-  `title === "CLI-parity probe title"`; (c) immediately follow with a second `task edit --title
-  <original-title>` call to restore state (idempotent-restore discipline, mirroring the existing
-  file's gh-3 title-restore pattern at line 226).
-- **GitHub**: run the identical CLI invocation against the github fixture (`gh-3`, the same fixture
-  `provider-abi-conformance.test.mjs` already uses), asserting the same three things — GitHub's
-  `task_write` already real-writes `title` since M09 (§2's table), so the expected outcome on both
-  providers is **success**, and the test's pass condition is that both behave identically (same
-  "MATCHES native's own explicit-field write support" framing the existing probe already uses).
-- **What this specifically tests that the existing MCP-level probe doesn't**: that the Core CLI's
-  new flag-parsing/patch-building code (§1) correctly threads `--title` through
-  `client.taskWrite()` with no CLI-side field-dropping bug of its own (the CLI layer is new code
-  this milestone's future implementer writes; the ABI layer underneath is already covered by the
-  existing test file).
+**GitHub:**
+```js
+const before = await githubClient.callTool({ name: "task_get", arguments: { id: "gh-3" } });
+const t0 = before.structuredContent.task;
+const r = await coreCliTaskWrite({ id: "gh-3", title: t0.title, provider: "github" }); // idempotent
+assert(r.exitCode === 0);
+assert(r.stdoutJson.title === t0.title);
+```
+Assertion: identical shape to native — `--title` reaches GitHub's real issue title via
+`github-client.js#writeFields`'s already-shipped (M09) title write. Mirrors the existing
+`task_write-unsupported-field-probe` in `provider-abi-conformance.test.mjs` (lines 224-235), which
+already performs exactly this idempotent title-reassert probe at the MCP-tool layer — the new
+probe's only addition is invoking it through the CLI subprocess instead of `callTool` directly, to
+prove the CLI's new flag-parsing layer itself (not just the ABI beneath it) works.
 
-### Worked example 2 — `--extra` against native (success) + GitHub (hard-error path)
+### 5.2 `--extra` — supported on native, hard-error on GitHub (relaxed field #2)
 
-**Assertion shape** (mirrors the existing `task_write-hard-error-floor-probe` case at lines
-237-252):
+**Native (supported):**
+```js
+const r = await coreCliTaskWrite({ id: "QX-001", extra: JSON.stringify({ probeKey: "probeValue" }) });
+assert(r.exitCode === 0);
+const after = await nativeClient.callTool({ name: "task_get", arguments: { id: "QX-001" } });
+assert(after.structuredContent.task.extra.probeKey === "probeValue");
+```
+Assertion: `--extra '{"probeKey":"probeValue"}'` reaches `store.write()`'s `extra` merge and is
+readable back via `task_get` — full round-trip through the Core CLI, not just the native CLI (which
+already covers this — QN-024's own reasoning explicitly leans on this being unchanged).
 
-- **Native**: run `quay task edit <native-fixture-id> --extra '{"probeKey":"probeValue"}'`.
-  Assert: (a) exit code 0; (b) `quay task view <id> --json` shows `extra.probeKey ===
-  "probeValue"`; (c) follow with a restore call resetting `extra` to its pre-probe value (same
-  idempotent-restore discipline).
-- **GitHub**: run `quay task edit gh-3 --extra '{"probeKey":"probeValue"}'`. Assert: (a) **non-zero
-  exit code** (the Core CLI's `try`/`catch` around `client.taskWrite()`, §2, must convert the
-  provider's `isError: true` into a CLI-level failure, not a silent success); (b) stderr contains
-  the provider's own hard-error message text (or a substring — e.g. `"unsupported field(s)
-  [extra]"`) unmodified, per §2's "transparent passthrough for the error path" requirement — the
-  test should assert this exact substring is present, not merely that *some* error occurred, since
-  a generic uncaught-exception failure would also produce a non-zero exit and would incorrectly
-  pass a weaker assertion; (c) `quay task view gh-3 --json` afterward shows the task **unchanged**
-  (no partial write occurred — GitHub's `task_write` handler returns its error before calling
-  `client.writeFields`/`writeRelations`, so this should hold structurally, but the test should
-  verify it empirically rather than assume it).
-- **What this specifically tests**: that the Core CLI does not accidentally swallow, re-word, or
-  (worst case) silently succeed-with-partial-write on a hard-error from the provider — the single
-  highest-risk regression this milestone's future implementation could introduce, since it is new
-  CLI-side error-handling code, not a re-exercise of already-tested ABI-layer behavior.
+**GitHub (hard-error floor, per §2.2/§2.3):**
+```js
+const r = await coreCliTaskWrite({ id: "gh-3", extra: JSON.stringify({ probeKey: "probeValue" }), provider: "github" });
+assert(r.exitCode === 1); // non-zero exit — Core CLI's top-level catch on the thrown Error
+assert(/unsupported field.*extra/.test(r.stderr));
+assert(/Supported fields: id, status, title, body, labels, parent, children/.test(r.stderr));
+```
+Assertion: `quay task edit gh-3 --extra '{"probeKey":"probeValue"}' --provider github` exits
+non-zero, its stderr contains the GitHub provider's own literal hard-error message text
+(`task_write: unsupported field(s) [extra] — this Provider does not implement writing extra.`),
+and — critically — that gh-3's actual title/body/labels are UNCHANGED after the call (read gh-3
+again, assert equality with the pre-call snapshot), proving no partial silent write occurred before
+the hard-error fired. This is the direct CLI-level equivalent of
+`provider-abi-conformance.test.mjs`'s existing `task_write-hard-error-floor-probe` (lines 243-252),
+which already proves the ABI-layer floor with `assignee`; this new probe proves the SAME floor is
+visible through the newly-relaxed Core CLI, using `extra` specifically (the still-current
+GitHub-unsupported field DIR-011 named, per §2.3's correction).
 
-### General pattern for any additional relaxed field a future implementer wants to cover
+### 5.3 Why these two fields
 
-For each of `--labels`, `--parent`, `--children`, `--body`/`--body-file`: the same "native succeeds,
-github succeeds (both real-write since M09/M12), Core CLI is a transparent passthrough" shape as
-worked example 1 applies — no new pattern needed, `--title`'s worked-through case generalizes
-directly. Only `--extra` needs the divergent hard-error-path shape (worked example 2), because it
-is the one field where the two providers' `task_write` behavior genuinely differs (§2's table).
+`--title` (relaxed-but-supported-everywhere) and `--extra` (relaxed-but-hard-errors-on-GitHub) are
+the minimum pair that together exercises BOTH branches DIR-011 item 2 asks to verify: "does a
+newly-relaxed field actually write through on a provider that supports it" and "does a newly-relaxed
+field surface the existing hard-error floor, not silently drop, on a provider that doesn't." A
+future implementing milestone's Done-when (§6) extends the same two-branch pattern to `--body`/
+`--body-file`, `--labels`, and `--parent`/`--children` (all-provider-supported post-M12, per §2.3)
+for full coverage, but `--title`+`--extra` alone already prove the CLI relaxation's core claim on
+both axes.
 
 ---
 
 ## §6. Done-when clauses a future implementing milestone would need
 
-- [ ] `packages/quay/bin/quay.js`'s `task edit` handler relaxed per §1's design (optional-field
-      patch builder, `--append-notes` kept as a separate branch) — no `--status`-required hard
-      gate remains; a `task edit <id>` call with zero recognized flags produces the "at least one
-      field required" usage error, pasted transcript.
-- [ ] `--body-file <path>` implemented with `-` meaning stdin (§1's whole-body-replacement-mode
-      recommendation) — pasted transcript of both a real-file and a piped-stdin invocation
-      succeeding.
-- [ ] `printHelp()`'s `task edit` usage line and Options section updated to list the full relaxed
-      flag set (currently shows only `--status <status>`, `packages/quay/bin/quay.js` line 148) —
-      pasted before/after diff.
-- [ ] Worked examples 1 and 2 (§5) implemented as real automated tests (extending
-      `provider-abi-conformance.test.mjs` or a sibling CLI-level test file) and passing against
-      both a native fixture and the live github fixture — pasted raw test-run output.
-- [ ] At least one additional relaxed field beyond `--title`/`--extra` (e.g. `--labels` or
-      `--parent`/`--children`) covered by an analogous CLI-level differential-conformance test,
-      per §5's "general pattern" — pasted raw test-run output.
-- [ ] `inherited-core.md` (or the chosen provider-ABI doc) updated with §3's proposed portable-
-      metadata-rule blockquote, inserted verbatim or near-verbatim — pasted diff.
-- [ ] Full existing test suite (including the now-extended `provider-abi-conformance.test.mjs`)
-      still passes post-change — pasted raw output, same closing-gate discipline M05's/M13's own
-      Done-when clauses used.
-- [ ] `git diff --stat` against that future milestone's own pre-charter base commit shows only
-      `packages/quay/bin/quay.js`, the test file(s), and `inherited-core.md` touched — no
-      unrelated product code, no provider-ABI (`packages/quay-native`/`packages/quay-github`)
-      change, consistent with §4's non-goals (provider layer is already sufficient, untouched).
-- [ ] `backlog.md`'s `M-CLI-EDIT-PARITY` row (or its successor, once implemented) updated at
-      ABSORB pointing at the shipped change, marked DONE with realized Δv recorded (this design
-      doc's own charter has Δv̂=0 by design; the future implementing milestone is where
-      capability-growth value is actually realized, per this doc's parent charter's Value
-      hypothesis section).
+- [ ] `packages/quay/bin/quay.js`'s `task edit` handler relaxed per §1.2 (accepts `--title`/
+      `--body`/`--body-file`/`--labels`/`--extra`/`--parent`/`--children`/`--expect-status`,
+      `--status` no longer solely required) — pasted diff.
+- [ ] `--body-file <path>` (including `-` for stdin) implemented per §1.3's `resolveBody` sketch,
+      with `--body`+`--body-file` mutual-exclusion validated and erroring clearly — pasted example
+      invocation + output for both the file-path and stdin (`-`) forms.
+- [ ] `--append-notes` implemented as the read-then-write convenience described in §4 (no new ABI
+      tool added) — pasted before/after `task_get` body showing the note appended.
+- [ ] The proposed portable-metadata-rule wording (§3.2) inserted verbatim into `inherited-core.md`
+      (new named section) — pasted diff.
+- [ ] `--title` two-provider conformance probe (§5.1) added to
+      `provider-abi-conformance.test.mjs` (or a new CLI-level sibling harness) and passing on both
+      native and GitHub — pasted PASS output.
+- [ ] `--extra` two-provider conformance probe (§5.2) added and passing: native round-trip succeeds,
+      GitHub hard-errors with the exact PR-ABI-001 floor message AND leaves gh-3 unmodified — pasted
+      PASS output for both branches.
+- [ ] `--labels`/`--parent`/`--children` conformance probes extended per §5.3's "full coverage"
+      note (all three are all-provider-supported post-M12 per §2.3) — pasted PASS output.
+- [ ] `packages/quay/README.md` / `packages/quay/DESIGN.md`'s existing `task edit` usage text
+      (currently documents only `--status`, per the citation in §1.1's grep) updated to the full
+      flag set — pasted diff.
+- [ ] Full existing test suite still passes post-change (pasted raw output) — same closing gate
+      M05/M13's own Done-when clauses used.
+- [ ] `git diff --stat` against this milestone's own pre-charter base commit shows only the expected
+      files touched (`packages/quay/bin/quay.js`, `inherited-core.md`, README/DESIGN docs, new/
+      extended conformance test file — no unrelated product code) — same evidence-gate discipline
+      this doc's own charter Done-when clause 6 demonstrates below in the iteration report.
+
+## Outer-loop reconciliation note (ABSORB, m14, 2026-07-18)
+
+Both iteration-0 (`6ce284e`) and iteration-1 (`9ddc75b`) independently derived this design from the
+charter and the same primary sources (native CLI, MCP schemas, DIR-011, M13's doc), without reading
+each other's work. Unlike m13's merge (a genuine substantive disagreement on the DIR-010 namespace
+decision), this was **not** a real conflict — both iterations converged on the identical concrete
+recommendation for every decision point the charter required: `--body-file <path>` (with `-` for
+stdin) as the whole-body-replacement mode, reuse of the existing PR-ABI-001 hard-error floor
+unchanged (no new provider-branching logic), and the same two fields (`--title`, `--extra`) chosen
+for the worked two-provider verification example. The merge conflict was purely a file-level add/add
+collision (both wrote a full document to the same path), not a decision-level one.
+
+This version (iteration-0's) was kept as canonical because it additionally documents a real,
+citable correction that iteration-1's version does not make explicit: DIR-011's own Finding (filed
+at the m12→m13 boundary) names `extra`/`parent`/`children` together as GitHub-unsupported, but
+M12-abi-parent-write (already merged before this milestone was chartered) moved `parent`/`children`
+into GitHub's `TASK_WRITE_SUPPORTED_FIELDS` — see this doc's §2.3. Iteration-1's doc reaches the same
+underlying facts (its own §1 cites the GitHub `task_write` schema as accepting `parent`/`children`)
+but does not flag the discrepancy against DIR-011's original framing the way §2.3 does, which matters
+for a future implementer reading DIR-011 at face value. iteration-1's full report (including its own
+independently-written doc) is retained at `milestones/M14-cli-edit-parity/iterations/iteration-1.md`
+and the `exp5-m14-iteration-1` branch tip, for provenance — consistent with this stream's standing
+practice of never silently discarding a reconciled-away iteration's work.
