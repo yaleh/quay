@@ -356,6 +356,36 @@ function relativeTime(ts) {
   return `${days}d ago`;
 }
 
+// M26-adversarial-eval finding ADV-003: shared open-redirect guard for
+// ?from= redirect targets, replacing the two previously-DIVERGING inline
+// checks (GET /task/<id>'s backHref had startsWith("/") &&
+// !startsWith("//"); POST .../action/<id>'s baseRedirect had only
+// startsWith("/"), a real bypass closed by ADV-003 above). Also closes two
+// further real bypasses the audit found neither inline check caught: a
+// backslash immediately after the leading slash (e.g. "/\evil.com") and a
+// literal-tab/control-char immediately after the leading slash (e.g.
+// "/\t/evil.com") -- both are accepted by a naive startsWith("/") &&
+// !startsWith("//") check, but the WHATWG URL spec (which real browsers
+// implement) normalizes a leading backslash to a forward slash and treats
+// a leading control character as insignificant whitespace BEFORE resolving
+// the URL, so a browser actually navigates "/\evil.com" or "/\t/evil.com"
+// to the external origin http://evil.com/ despite the string itself
+// starting with a single "/" -- confirmed by direct WHATWG URL resolution
+// (`new URL(v, base).host !== base.host`) during this audit. This helper
+// rejects any candidate whose second character (after the leading "/") is
+// "/", "\", or a C0 control character (which covers both confirmed bypass
+// shapes and the general class they belong to), in addition to the
+// original external-scheme and protocol-relative checks.
+function isSafeRelativeRedirect(v) {
+  if (!v || typeof v !== "string") return false;
+  if (!v.startsWith("/")) return false;
+  const second = v.charCodeAt(1);
+  if (Number.isNaN(second)) return true; // v === "/" exactly
+  if (second === 0x2f /* / */ || second === 0x5c /* \ */) return false;
+  if (second <= 0x1f || second === 0x7f) return false; // C0 control chars incl. \t, \0
+  return true;
+}
+
 export async function startServer({ port = 4173 } = {}) {
   const cfg = loadConfig();
   const provider = activeProvider(cfg);
@@ -387,7 +417,48 @@ export async function startServer({ port = 4173 } = {}) {
     return u.pathname + "?" + u.searchParams.toString();
   }
 
+  // M26-adversarial-eval finding M26-F2 (Phase A audit): this request
+  // handler had no top-level try/catch. Combined with provider-client.js's
+  // taskList() previously swallowing Provider errors into an empty array,
+  // failures were invisible; now that taskList() (and any other client.*
+  // call) can throw on a real Provider failure (malformed task file
+  // crashing the store, or a live rate-limit/network failure), an unhandled
+  // throw inside this async handler would leave the request hanging (no
+  // res.end() ever called) rather than degrading safely. This wrapper
+  // ensures ANY thrown error from the request-handling logic below (not
+  // just the taskList() case) results in a clean 500 response instead of a
+  // hung connection or an uncaught rejection that could take the whole
+  // server down.
   const server = http.createServer(async (req, res) => {
+    // M26-adversarial-eval finding ADV-002/M26-F2 (both iterations
+    // independently found this): this handler previously had no try/catch
+    // anywhere -- a thrown/rejected error from any route (e.g. the Provider
+    // layer throwing on a malformed task file, now correctly surfaced by
+    // ADV-001/M26-F2's provider-client.js fix instead of being silently
+    // masked as an empty list) went fully uncaught, crashing the ENTIRE Node
+    // process (taking down the Web UI for every other task and every other
+    // request, not just the one bad task) -- an unhandled rejection inside
+    // an http.createServer async callback is fatal by default. Wrapping the
+    // whole handler body closes this: any single request's failure now
+    // degrades to a 500 for THAT request only, with the server, other
+    // tasks, and other requests unaffected -- matching DIR-001's "should
+    // degrade safely... not crash" framing. Response body deliberately omits
+    // err.message/stack (logged server-side only via console.error) to
+    // avoid leaking internal error detail to the client.
+    try {
+      await handleRequest(req, res);
+    } catch (err) {
+      console.error(`[quay serve] request handler error (${req.method} ${req.url}):`, err.stack || String(err));
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        res.end("internal server error");
+      } else {
+        res.end();
+      }
+    }
+  });
+
+  async function handleRequest(req, res) {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (url.pathname === "/") {
@@ -781,9 +852,11 @@ export async function startServer({ port = 4173 } = {}) {
         return;
       }
       // QX-011 (iteration 3): read ?from= param to restore the back link's
-      // filter context (UQ-009). Guard against open redirect (must start with /).
+      // filter context (UQ-009). Guard against open redirect (must start with /,
+      // not // or \ or a control-char-prefixed variant -- see
+      // isSafeRelativeRedirect()'s own doc comment, ADV-003).
       const fromParam = url.searchParams.get("from");
-      const backHref = fromParam && fromParam.startsWith("/") && !fromParam.startsWith("//") ? fromParam : "/";
+      const backHref = isSafeRelativeRedirect(fromParam) ? fromParam : "/";
       // QX-013 (iteration 3): read ?error= and ?success= for post-action feedback.
       const detailErrorParam = url.searchParams.get("error");
       const detailSuccessParam = url.searchParams.get("success");
@@ -842,8 +915,26 @@ export async function startServer({ port = 4173 } = {}) {
       const decodedId = decodeURIComponent(id);
       const t = await client.taskGet(decodedId);
       // QX-009 (experiment 4, iteration 2): read ?from= param for list-context redirect.
+      // M26-adversarial-eval finding ADV-003/M26-F3 (both iterations independently found
+      // this): this guard previously checked ONLY fromParam.startsWith("/") -- missing the
+      // !startsWith("//") protocol-relative-URL guard the GET /task/<id> detail route's own
+      // ?from= handling already has (QX-011/SH-002, see backHref above). Now uses the same
+      // shared isSafeRelativeRedirect() helper as backHref above, which also closes the
+      // backslash/control-char bypass variants the plain startsWith("//") check would miss
+      // (see that helper's doc comment).
+      // Live-exploitability note (iteration-1's independent finding, verified correct):
+      // `baseRedirect` here is never used directly as a Location header value -- both call
+      // sites below route it through addParam(), which always builds a `new URL(urlPath,
+      // "http://x")` and returns only `.pathname + "?" + ...`, stripping any scheme/host.
+      // That means a `//evil.com`-style bypass value is already neutralized end-to-end on
+      // THIS route regardless of this guard (verified: `new URL("//evil.com", "http://x")`
+      // resolves to the `evil.com` origin with pathname "/", which addParam then discards,
+      // yielding a same-origin path). So this specific fix is defense-in-depth /
+      // guard-consistency with the GET route (which does use its guarded value more
+      // directly, via backHref, rendered straight into an href attribute) -- not a
+      // confirmed live open-redirect on the POST route itself.
       const fromParam = url.searchParams.get("from");
-      const baseRedirect = fromParam && fromParam.startsWith("/") ? fromParam : `/task/${t.id}`;
+      const baseRedirect = isSafeRelativeRedirect(fromParam) ? fromParam : `/task/${t.id}`;
       // QX-013 (experiment 4, iteration 3): gate-check BEFORE delivering the trigger.
       // If gate is blocked (ok: false), redirect back with ?error= instead of silently
       // delivering. Closes UQ-013 (silent gate-fail feedback). The gate check uses the
@@ -881,7 +972,7 @@ export async function startServer({ port = 4173 } = {}) {
 
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("not found");
-  });
+  }
 
   // QX-038 (experiment 4, iteration 11): DIR-005 item 5 — bind explicitly to 0.0.0.0
   // (all interfaces) instead of relying on Node's implicit default, and update the log

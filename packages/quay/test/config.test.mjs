@@ -144,6 +144,41 @@ function main() {
   }
   assert(emptyMapThrew !== null, "activeProvider(cfg) throws when the config has no providers map at all");
 
+  // --- M26-adversarial-eval (DIR-001 item 4, "bad config" category):
+  // loadConfig() with a SYNTACTICALLY malformed .quay/config.yml (present,
+  // but not valid YAML) -- distinct from the not-found case above (which
+  // config.js already handled with its own clear "no .quay/config.yml
+  // found" message). Confirmed during Phase A audit: YAML.parse() throws a
+  // raw YAMLParseError with no wrapping, and this path had ZERO test
+  // coverage before this milestone. The error DOES propagate cleanly (no
+  // crash, no hang) up to bin/quay.js's top-level main().catch handler,
+  // which already prints err.stack and exits non-zero -- this is asserted
+  // here directly against loadConfig() itself, the actual throw site, per
+  // this milestone's "fault-injection test must assert safe degradation"
+  // requirement (Done-when clause 5).
+  const root3 = fs.mkdtempSync(path.join(os.tmpdir(), "quay-config-malformed-"));
+  const malformedDir = mkTree(root3, "a");
+  fs.mkdirSync(path.join(malformedDir, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(malformedDir, ".quay", "config.yml"),
+    "providers:\n  native:\n  - bad: [unterminated\n"
+  );
+  let malformedThrew = null;
+  try {
+    loadConfig(malformedDir);
+  } catch (err) {
+    malformedThrew = err;
+  }
+  assert(
+    malformedThrew !== null,
+    "loadConfig() with a syntactically malformed (present but invalid) .quay/config.yml throws rather than returning garbage or hanging"
+  );
+  assert(
+    malformedThrew && /YAMLParseError|flow sequence|nested mapping/i.test(malformedThrew.name || malformedThrew.message || String(malformedThrew)),
+    `loadConfig()'s malformed-YAML error is a real, nameable parse error, not a generic/opaque failure (got: ${malformedThrew && (malformedThrew.name + ": " + malformedThrew.message)})`
+  );
+  fs.rmSync(root3, { recursive: true, force: true });
+
   fs.rmSync(root1, { recursive: true, force: true });
   fs.rmSync(root2, { recursive: true, force: true });
 

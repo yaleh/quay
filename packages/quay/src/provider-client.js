@@ -15,8 +15,22 @@ export async function connectProvider({ command, args, env, cwd }) {
   const client = new Client({ name: "quay-core", version: "0.0.1" });
   await client.connect(transport);
 
+  // M26-adversarial-eval finding M26-F2 (Phase A audit): this previously
+  // returned `r.structuredContent?.tasks ?? []` with NO `r.isError` check —
+  // unlike taskGet/taskWrite/taskCheck below, which all check it. When the
+  // underlying Provider's task_list tool throws (e.g. a malformed task file
+  // crashing quay-native's store.list(), or a live gh-api rate-limit/network
+  // failure crashing quay-github's fetchAllIssues()), the MCP SDK converts
+  // that into an isError:true result with NO structuredContent — the old
+  // code silently coerced that into an empty array, so `quay serve`'s list
+  // page (and any other taskList() caller) rendered "0 tasks" with zero
+  // error indication, hiding both the real failure AND every other
+  // legitimate task in the store. Now: an isError result throws, matching
+  // the other three methods' existing behavior, so callers can catch it and
+  // surface a real error instead of a silently-empty list.
   async function taskList(filter = {}) {
     const r = await client.callTool({ name: "task_list", arguments: filter });
+    if (r.isError) throw new Error(r.content?.[0]?.text ?? "task_list failed");
     return r.structuredContent?.tasks ?? [];
   }
 
