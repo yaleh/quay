@@ -27,3 +27,6 @@ todo (open candidate, not yet selected/dispatched)
 
 ---
 _2026-07-18T19:18:52.059Z_: Not selected @M24: DIR-015/DIR-016's standing hard floor already committed this SELECT pass to M-TASK-BACKLOG-PROJECTION-IMPL (self-hosting fix, blocks all future SELECT read-path work) — a governance/infra candidate whose own enabling half was itself unselectable until this milestone lands.
+
+---
+_2026-07-18_: Not selected @M25: DIR-017 Step 1 (M-DOD-META-ENFORCER) outranks — it is the newly-unblocked (by M24) load-bearing prerequisite for DIR-017's remaining steps and closes a standing self-exemption/Goodhart hole in the governance loop itself; higher priority than this cross-cutting eval work this pass.

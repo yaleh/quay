@@ -1957,3 +1957,42 @@ Worktrees/branches for both M24 iterations (`milestones/M24-task-backlog-project
 iteration-{0,1}`, branches `exp5-m24-iteration-{0,1}`) to be removed/deleted next.
 `milestone_counter` → **24**. Checkpoint not due (next due at m25, per every-5 cadence — cp-20 was
 last). Continuing directly to m25 SELECT, no human wait.
+
+## SELECT m25 — 2026-07-18
+
+**Chosen: `exp5-M-DOD-META-ENFORCER`** (DIR-017 Step 1 — the Definition-of-Done meta-enforcer,
+the human-flagged "load-bearing foothold"). Materialized fresh this DRAIN as a forward-looking
+candidate task (design doc §6 scope) since DIR-017 itself has no prior standing row — DIR-017's own
+Step 0 prerequisite ("self-host the record," = DIR-015 item 2) is now satisfied by M24, unblocking
+Step 1 for the first time since DIR-017 went `pending`.
+
+**Rationale:** DIR-017 names an explicit, human-flagged risk — the "designed-not-wired" disease
+(M17/M18) and DIR-015's own multi-milestone re-deferral pattern — and gates its own Steps 2-3
+(escrow-Δv clause, product-work test-floor, leakage metrics) behind Step 1 landing as *operative,
+not merely designed*, confirmed by a human. This is a standing governance-integrity gap (the 4
+existing gates — adversarial-audit/DIR-007, V_meta-lag/DIR-005, line-budget/M18, impl-row/DIR-016 —
+are each independently wired but nothing enforces that ALL FOUR fire and block, nor that a milestone
+can't self-exempt from one). Outranks the three other open cross-cutting eval candidates considered
+this pass (`M-ADVERSARIAL-EVAL`, `M-COMPETITIVE-BENCH`, `M-OUTCOME-EVAL` — all VT-eval-surface work,
+no governance-loop risk); not-selected notes appended to each with this rationale. `M-CLI-UX`,
+`M-DIRTASK`, `M-DOCS` remain STALE, not reconsidered.
+
+**Scope (per DIR-017's own text, Step 1 only):** (1) collect the 4 existing gates as named clauses
+in one `inherited-core.md` "Definition of Done" section; (2) no-self-exemption meta-clause; (3) a
+standing `scripts/it0-dod-*.{sh,mjs}` mechanical check (exit 0/1/2), fixture-tested against both a
+synthetic violating stub and a compliant stub; (4) wire it into `OUTER-LOOP.md`'s ABSORB as a HARD
+BLOCK on `milestone_counter++`, same shape as the existing gates. Steps 2-3 explicitly OUT of scope
+— DIR-017 gates them behind human confirmation Step 1 is actually operative.
+
+**Task-store write-back:** `exp5-M-DOD-META-ENFORCER` labeled `milestone:M25-dod-meta-enforcer`,
+`status: todo → ready`. Backlog regenerated (`it0-backlog-regen.mjs --write`) and both anti-drift
+checks re-verified PASS (18 DIR files vs 16 label:directive tasks; 20 milestone-candidate tasks vs
+`backlog.md`, row now `SELECTED`).
+
+**Note for ABSORB m25:** per DIR-017's own "Human verification gate (irreducible, not delegable)"
+clause, Step 1's enforcer must be confirmed by a human to be *operative*, not merely designed,
+before DIR-017 Steps 2-3 may be selected in any future SELECT pass. This does not block
+`milestone_counter++` itself (only Steps 2-3 are gated) but must be flagged explicitly, not
+silently passed over, in the m25 ABSORB entry.
+
+Proceeding to charter authoring for M25.
