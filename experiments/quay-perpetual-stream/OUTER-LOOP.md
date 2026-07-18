@@ -52,6 +52,18 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    verification, not forced into new build work, no mid-milestone re-scope)? If not, split along a
    different seam or explicitly budget a multi-build milestone before authoring the charter — never
    carry an implicitly half-shipped value step forward.
+   **Plan-time line-budget gate (M18-milestone-model-ceiling-and-diversity-policy, DIR-012 item 2 —
+   mechanically-checkable, not narrative):** run
+   `scripts/it0-ceiling-line-budget-check.sh <charter-file>` against the drafted charter BEFORE
+   dispatch. This flags any charter whose scope plausibly exceeds the ~2000-line milestone ceiling
+   (`inherited-core.md`'s "Milestone ceiling expansion" subsection) without a nested phase/stage plan
+   — either an explicit `Line budget:`/`Phase`/`Stage` structure present in the charter text, or a
+   `Plan:` line pointing at an external phase/stage plan document. A charter under the small-
+   milestone norm (no declared line budget, or a declared budget ≤2000 WITH a phase/stage plan
+   present) PASSES. A charter that declares (or whose in-scope-item count/shape plausibly implies)
+   a budget above ~2000 lines with NO phase/stage plan reference FAILS/flags — fix by adding the
+   phase/stage plan reference, or resize/split the candidate, before dispatch; same "fix the
+   charter, not the script" discipline as the existing gate-hash check (Check 2 below).
    **Record each candidate's value type(s)** (mandatory, applies forward from m7) from
    `inherited-core.md`'s "Value-typed SELECT ledger" section — capability-growth / discovery /
    instrument-correction / risk-option / governance-integrity — alongside its VT Δv̂. VT Δv̂ is one
