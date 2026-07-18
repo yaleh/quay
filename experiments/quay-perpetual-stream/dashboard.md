@@ -1336,4 +1336,24 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   `status: applied` update, `tasks/DIR-012.md`'s `status: done` update) were left staged and completely
   untouched throughout — not committed, not unstaged, not read into any of this milestone's decisions
   beyond confirming they were the human's own concurrent work and excluding them from this milestone's
-  `git diff --stat` scope check above.
+  `git diff --stat` scope check above. (Those two files were subsequently committed by the human
+  directly, independent of this outer loop — `eaa5e50` — confirming the above read was correct.)
+- **SELECT m18 = M-MILESTONE-CEILING-DIVERSITY-POLICY** 2026-07-18. `directives/pending/` drained:
+  empty. `.halt` absent. Picked DIR-012 item 2 (deferred at M17's own charter boundary): land the
+  design doc's §4 milestone ceiling (≤2000/≤500/≤200-line budgets), §5 two-class diversity policy, and
+  §6 "clamp at both ends" pipeline citation into `inherited-core.md`/`OUTER-LOOP.md` as reusable
+  substrate, plus a real mechanically-checkable plan-time line-budget gate — closing the exact
+  DIR-002-class "enforcement half never built" pattern DIR-012 itself names, following the
+  M-GATES/M-SIZING/M-VMETA-GATE method-infra precedent. Other backlogged candidates
+  (M-OUTCOME-EVAL/M-ADVERSARIAL-EVAL/M-COMPETITIVE-BENCH) remain not charter-ready (still need a
+  concrete scenario list authored first); M-TASK-BACKLOG-PROJECTION's implementation follow-up
+  remains a live future candidate but DIR-012 item 2 is more immediately actionable — freshly matured
+  at m17, directly referenced by M17's own §19 status note as "a future milestone lands DIR-012 item
+  2's changes." Authored charter `charters/M18-milestone-model-ceiling-and-diversity-policy.md`: type
+  explore, value type governance-integrity (primary) + risk/option (secondary), Δv̂=0 by design (method
+  infra, mirrors M-SIZING/M-VMETA-GATE/M-GATES's zero-VT precedent). Explicitly excludes DIR-012 item 3
+  (skill implementation/dogfooding) and any change to M18's own dispatch pattern. Gate-hash check:
+  `it0-gate-hash-check.sh --by-reference charters/M18-milestone-model-ceiling-and-diversity-policy.md`
+  → **PASS** (same pinned hash reused unchanged, M12–M18). Adversarial-audit gate NOT expected to
+  trigger (Δv̂=0, no iteration-0 self-exemption authorized). Dispatching inner iteration-0 and
+  iteration-1 next, both from worktrees off the current master HEAD (`d96d40b`).
