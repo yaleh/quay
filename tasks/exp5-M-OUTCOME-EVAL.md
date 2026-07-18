@@ -2,10 +2,11 @@
 id: exp5-M-OUTCOME-EVAL
 title: "Outcome-based (job-to-be-done) evaluation: fixed real end-to-end
   task-board scenarios, binary pass/fail, dogfooding-gated"
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - surface:cross-cutting
+  - milestone:M28-outcome-eval
 parent: null
 children: []
 extra: {}
@@ -54,7 +55,9 @@ dogfooding discipline. A future charter selecting this candidate should treat th
 starting Done-when set, adding/pruning only with a stated reason.
 
 ## Status mirror
-todo (open candidate, not yet selected/dispatched)
+ready (SELECTed @M28, 2026-07-18 — DIR-001 item 3, the only remaining open candidate in
+backlog.md; DIR-017 Steps 2-3 remain blocked pending human confirmation, all other
+milestone-candidate rows are DONE or STALE)
 
 ---
 _2026-07-18T19:18:52.080Z_: Not selected @M24: DIR-015/DIR-016's standing hard floor already committed this SELECT pass to M-TASK-BACKLOG-PROJECTION-IMPL (self-hosting fix, blocks all future SELECT read-path work) — a governance/infra candidate whose own enabling half was itself unselectable until this milestone lands.
@@ -75,3 +78,11 @@ recognized as a stagnation pattern, not a legitimate re-deferral each time). M-C
 since item 4 closed @M26 and item 3 — this candidate — still carries no forcing signal beyond the
 ordering itself). This candidate is now charter-ready for a future SELECT with the 5-scenario draft
 above as its starting Done-when set.
+
+---
+_2026-07-18_: SELECTED @M28. The only remaining open candidate — all other rows in
+backlog.md are DONE (12 backfilled + M24/M25/M26/M27) or STALE (M-CLI-UX, M-DIRTASK,
+M-DOCS, repeatedly not selected). DIR-017 Steps 2-3 remain blocked (pending human
+confirmation that Step 1's meta-enforcer is operative), so not a candidate. The
+5-scenario draft authored @M27 SELECT is used as the starting Done-when set per its
+own stated instruction.

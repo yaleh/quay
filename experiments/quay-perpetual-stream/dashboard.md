@@ -2305,3 +2305,33 @@ these form a coherent future capability-growth-typed candidate, tentatively
 "Explicitly OUT of scope").
 
 Continuing directly to m28 DRAIN/SELECT, no human wait.
+
+## SELECT m28 — 2026-07-18
+
+DRAIN: `.halt` absent. `directives/pending/` has only DIR-017 (Steps 2-3), which
+remains explicitly blocked by its own "Human verification gate (irreducible, not
+delegable)" clause — Step 1's meta-enforcer must be human-confirmed operative
+before Steps 2-3 may be SELECTed; still not confirmed, so DIR-017 stays pending,
+not a candidate this pass. `exp5-outer-driver` synced to `master` HEAD (`2d66bde`,
+fast-forward, no new commits to merge — driver and master converged at m27's
+publish).
+
+Candidates considered: `backlog.md` now shows **only one open row**,
+`M-OUTCOME-EVAL` (DIR-001 item 3) — every other milestone-candidate row is either
+DONE (12 backfilled historical milestones + M24/M25/M26/M27) or STALE
+(M-CLI-UX/M-DIRTASK/M-DOCS, each repeatedly not selected across many passes).
+`M-OUTCOME-EVAL` is now charter-ready per the 5-scenario draft authored into
+`tasks/exp5-M-OUTCOME-EVAL.md` at m27's own SELECT step.
+
+**m28 = `M-OUTCOME-EVAL`** (DIR-001 item 3) — the only remaining open candidate, no
+other forcing signal needed; DIR-001's items 3/4/5 are now all either selected or
+in-flight (3 = this milestone, 4 = M26, 5 = M27).
+
+Task store write-back: `tasks/exp5-M-OUTCOME-EVAL.md` → `status: ready`, label
+`milestone:M28-outcome-eval` added, `## Status mirror` updated, SELECTED history
+note appended. `it0-backlog-regen.mjs --write` re-run; anti-drift checks re-run
+clean (20 milestone-candidate tasks, 18 DIR files, no divergence).
+
+Gate-hash-by-reference: unchanged since M06, reused unchanged through M28.
+
+Continuing directly to charter authoring for m28.
