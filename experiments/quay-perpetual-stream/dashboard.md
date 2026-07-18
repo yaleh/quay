@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 10** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 11** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -870,3 +870,45 @@ independently re-derived and confirmed by iteration-1, fresh worktree/fresh comm
   the exact mechanism DIR-006 found missing). Server reachability: M04-discover's own iteration-0
   started `quay serve` on `localhost:4173` for its browser session — same startable local target,
   not currently running, iteration-0 must start it fresh. Dispatching inner iteration-0 next.
+- **ABSORB m11 = M-WEBUI-REVERIFY → DONE** 2026-07-18. Iteration-0: real
+  `mcp__playwright__*` navigate+snapshot/screenshot traces at desktop (1280×900) and mobile
+  (390×844) across list/detail/filter/search/action-flow pages; Web UI cov **CONFIRMED at 0.92**
+  (⚠️ PROVISIONALLY UNCERTAIN annotation removed, no Δv); UQ-049 (`?search=` no-op) and UQ-050
+  (mobile overflow) both reproduced live, UQ-050's root cause refined to an unbroken long URL in
+  task-body markdown (not the `<h1>` title as originally narrated); no new product issue found; no
+  product code touched; `backlog.md`'s `M-WEBUI-REVERIFY` row marked DONE. Iteration-1: independent
+  re-verification from a FRESH worktree/branch off the same pre-iteration-0 base commit (`f2fa5b6`,
+  own dev-server instance, own playwright session) — full agreement, zero discrepancies, broader DOM
+  sweep (8 selectors vs. 3) confirmed the same offending element; only correction was adding
+  cross-references to both iteration reports in `dashboard.md`/`backlog.md`. **Realized Δv = 0**
+  (confirmed-unchanged outcome, value type discovery+risk/option — never capability-growth, in
+  either possible outcome branch).
+  Both `exp5-m11-iteration-0` and `exp5-m11-iteration-1` merged to `master` (`--no-ff` each,
+  `9046c91`/`0a0d815` respectively, one small conflict in `dashboard.md`/`backlog.md`'s Web UI
+  row/backlog row where both branches independently made the same semantic edit off the same base —
+  resolved by keeping iteration-1's version, which cites both reports). Confirmed post-merge (`git
+  diff f2fa5b6 HEAD`): 23 files changed, zero non-`.md`/non-evidence-`.png` files — no product code
+  touched, no test run required.
+  **Adversarial-audit gate adjudication (OUTER-LOOP.md step 6 / `inherited-core.md`'s cadence
+  rule):** this milestone's own charter (Done-when 6) asserted condition (a) "applies" because it is
+  "VT-scoring" — on review, this charter text conflated "touches the VT chart" with the gate's own,
+  narrower, precisely-worded test: condition (a) requires BOTH the SELECT-time value-typed ledger
+  entry to include `capability-growth` AND ABSORB to append a nonzero VT Δv. This charter's value
+  hypothesis explicitly typed the milestone as discovery+risk/option (or instrument-correction if a
+  correction had been needed) — never capability-growth, in either outcome branch — and realized
+  Δv=0 confirms no capability was in fact inflated. Condition (b) (iteration-0 self-exempting from
+  iteration-1) also did not fire — iteration-1 ran normally. Iteration-1 independently reached this
+  same reading before I (the outer loop) reviewed it, which itself is some evidence the reading is
+  the plain-text one, not a self-serving reinterpretation. **Neither gate condition fires — the
+  out-of-band adversarial-audit dispatch is NOT required for m11**, per `OUTER-LOOP.md` step 6's own
+  instruction to record a documented no-op rather than silently omit the check. **Charter-authoring
+  imprecision noted for future correction:** m11's own charter conflated "VT-scoring" with
+  "capability-growth-typed" in its Done-when 6 text — future charters should use the gate's exact
+  conjunctive test, not the looser paraphrase, to avoid ambiguity at ABSORB. This gate's real
+  first-proof test therefore remains open for the next milestone whose value-typed ledger entry
+  genuinely includes `capability-growth` with a nonzero realized Δv.
+  V_meta consolidation lag: unchanged, 0 rows past-threshold-and-unresolved. No new φ fold-back this
+  milestone (playwright/chrome-devtools-as-audit-channel is a new mechanism for this domain, not a
+  reuse of a prior different-domain adaptation). `milestone_counter` → **11**. `directives/pending/`
+  re-drained at this boundary: empty. Continuing to SELECT m12 next (checkpoint cp-03 due at
+  milestone_counter=15).
