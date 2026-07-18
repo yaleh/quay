@@ -43,6 +43,24 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    mechanically rather than eyeballing the two lists — a non-zero exit means drift and must be
    resolved (regenerate the stale projection via `/quay-directive`'s projection step, or fix the
    underlying data) before the drain step is considered complete, not silently carried forward.
+   **Driver-isolation merge sub-step (M23-outer-driver-isolation, DIR-018) — run BEFORE SELECT:**
+   the OUTER loop's own commit stream lives on the dedicated branch `exp5-outer-driver`, never
+   directly on human-shared `master` (charter authoring, per-iteration worktree base points, and
+   inner-merge conflict resolution all happen there). As part of THIS drain step, deliberately
+   merge `master` → `exp5-outer-driver`: `git checkout exp5-outer-driver && git merge master`. This
+   is the ONE place human commits made directly to `master` (via `/quay-directive` or manual edits)
+   enter the driver's own history. **No-silent-drop discipline applies to this merge, mandatorily:**
+   any conflict must be resolved **per-file**, reading BOTH sides' actual content before choosing —
+   never a blanket `git checkout --ours` or `--theirs` across the whole conflict set (the DIR-013
+   failure this rule exists to prevent). For each conflicted file, record a one- or two-line
+   **reconciliation note in the DRAIN log** stating which side's content was kept/merged and why
+   (e.g. "kept human's `backlog.md` edit, loop's version had no conflicting hunk in that range" or
+   "merged both: human added row X, loop added row Y, no overlap"). A merge with zero textual
+   conflicts is NOT automatically exempt from this note — if the auto-merge combined content from
+   both sides in a file either party was actively editing, state that plainly too, so a
+   conflict-free-but-semantically-inconsistent merge (the M18 `OUTER-LOOP.md` case) has a paper
+   trail to audit against. Only after this merge (and its reconciliation notes, if any) is recorded
+   does the cycle proceed to SELECT.
 1. **SELECT** the next milestone from `backlog.md` per the explore/exploit policy (§4.5): **≥1 explore
    milestone per 5**. Exploit = high-value, high-ρ, method handles it; explore = new surface/domain
    that grows the reusable core. Prefer aged high-value items (DIR-004 Distribution is URGENT).
@@ -187,6 +205,21 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      because SELECT (step 1) only considers non-DONE rows and a deferral with no row is a deferral
      to never (DIR-016's finding). Record the check's PASS/FAIL output directly in this ABSORB's log
      entry, mirroring the V_meta gate's row-update discipline.
+   - **Driver→master publish sub-step (M23-outer-driver-isolation, DIR-018) — the ONLY point the
+     loop's own work lands on `master`:** once ALL the gates above (adversarial-audit,
+     V_meta consolidation-lag, design-only impl-row) have cleared for this milestone, publish the
+     milestone's result from the driver branch to `master` as **exactly one**
+     `git checkout master && git merge --no-ff exp5-outer-driver` commit — one atomic, deliberate
+     publish per milestone boundary. Everything upstream of this point (charter authoring, inner
+     iteration-0/iteration-1 worktrees and branches, and any inner-merge conflict resolution between
+     them) happens ON the driver branch, never on `master` directly, so a human commit landing on
+     `master` mid-milestone cannot race an in-progress loop merge index (the concrete M18 damage
+     DIR-018 cites — a conflicted merge sitting in the shared index blocking a human commit). The
+     **same no-silent-drop discipline from step 0's DRAIN merge applies here too**: if this publish
+     merge produces any conflict against `master` (e.g. a human commit landed on `master` since the
+     last DRAIN), resolve it per-file — never a blanket `--ours`/`--theirs` — and record a
+     reconciliation note in this ABSORB's log entry before completing the publish. Step 7's
+     `milestone_counter++` and dashboard update follow this publish commit, not precede it.
 7. **UPDATE DASHBOARD** — VT, slope (marginal Δv), ρ, charter-thickness, discovery-latency,
    calibration-error, `V_meta consolidation lag` (re-derive milestones-since-confirmed for every
    ledger row per `v-meta-ledger.md`), milestone_counter++ (only after BOTH the V_meta gate AND the

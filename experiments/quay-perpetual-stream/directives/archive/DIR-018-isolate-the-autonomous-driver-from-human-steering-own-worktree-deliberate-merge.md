@@ -1,6 +1,6 @@
 # DIR-018
 
-- status: pending
+- status: applied
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Isolate the autonomous driver from human steering — run the loop on its own branch/worktree and merge human-directed changes deliberately, so the two writers stop sharing `master` and racing (this session produced silent auto-merge content loss and a boundary projection-drift from exactly that collision)
@@ -71,7 +71,55 @@ session races the loop until this lands.
    "clean windows" to commit, it is not done regardless of the mark.
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred:
-- resolved_by: iteration-N / milestone M-NN
-- outcome: applied | deferred | rejected
-- evidence: pointer to the design doc / iteration report section / commit -->
+
+- resolved_by: M23-outer-driver-isolation, iteration-0 + iteration-1 (independent
+  re-derivation), 2026-07-18
+- outcome: **applied**
+- evidence:
+  1. **Item 1 (run the loop in its own isolation):** dedicated branch
+     `exp5-outer-driver` created from `master` HEAD (`e3602c6`, the m22→m23 charter-
+     authoring SELECT commit). This milestone's own two iteration worktrees/branches
+     (`exp5-m23-iteration-0`, `exp5-m23-iteration-1`) were created off
+     `exp5-outer-driver` HEAD, not `master` directly — `git worktree list` /
+     `git log --oneline` evidence in `milestones/M23-outer-driver-isolation/
+     iterations/iteration-1.md`. `OUTER-LOOP.md`'s DISPATCH step (5) is unchanged
+     (per-iteration worktree pattern retained, only its base point moves), so the
+     inner build/merge/ABSORB machinery now composes on top of the driver branch,
+     never `master`, until the single publish merge below.
+  2. **Item 2 (human steering merges in deliberately):** `OUTER-LOOP.md` step 0
+     (DRAIN) now contains an explicit "Driver-isolation merge sub-step" run BEFORE
+     SELECT: `master` → `exp5-outer-driver`, via `git checkout exp5-outer-driver &&
+     git merge master`. This is the one deliberate, reviewed point at which human
+     commits made directly to `master` (via `/quay-directive` or manual edits) enter
+     the driver's own history — never mid-milestone, matching the cadence DIR-018
+     item 2 requested. `OUTER-LOOP.md` step 6/ABSORB gained the mirror-image publish
+     sub-step: `exp5-outer-driver` → `master` via exactly one
+     `git merge --no-ff exp5-outer-driver`, sequenced after all three existing
+     ABSORB gates (adversarial-audit, V_meta consolidation-lag, design-only impl-
+     row) and before step 7's `milestone_counter++` — the ONLY point the loop's own
+     work lands on `master`.
+  3. **Item 3 (no silent content-dropping merges):** both merge sub-steps' text
+     explicitly forbids a blanket `checkout --ours`/`--theirs` resolution (the
+     DIR-013 failure named in the Finding), mandates per-file conflict resolution
+     reading both sides' actual content, and requires a reconciliation note (DRAIN
+     log for the master→driver direction, ABSORB log for the driver→master
+     direction) — including for a textually-conflict-free merge that nonetheless
+     combines content from both sides in an actively-edited file, closing the
+     specific M18 "conflict-free-but-semantically-inconsistent" gap the Finding
+     names. DIR-017 (the standing mechanized-check meta-enforcer) remains a
+     separate, larger, still-pending program per this milestone's own explicit
+     non-goals — item 3's second sentence ("the standing checks (DIR-017) should
+     catch it") is therefore NOT closed by this milestone; it stays DIR-017's own
+     future scope, unchanged.
+  4. **Item 4 (minimal, mechanically checkable, no heavy process):** honored by
+     construction — no new script, hook, or CI gate was added; the entire change is
+     documented convention in `OUTER-LOOP.md` prose plus one new git branch. No
+     automated enforcement of the branch discipline was built, per this milestone's
+     explicit non-goal (a future milestone may add mechanical enforcement if drift
+     is observed).
+  - `inherited-core.md` was NOT touched (confirmed by `git diff --stat` against the
+    pre-charter base) — this is purely an `OUTER-LOOP.md` process/topology change,
+    per the charter's explicit non-goal.
+  - Full detail, pasted command output for every Done-when clause, and the
+    dogfooded worktree/branch-ancestry proof:
+    `milestones/M23-outer-driver-isolation/iterations/iteration-1.md`.
