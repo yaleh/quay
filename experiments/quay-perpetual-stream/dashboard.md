@@ -840,3 +840,16 @@ independently re-derived and confirmed by iteration-1, fresh worktree/fresh comm
   milestone. `directives/pending/` re-drained at this boundary: **empty** — no further directive
   disposition needed before SELECT m11. **Checkpoint cp-02 is due now** (milestone_counter=10,
   divisible by 5) — writing it next, non-blocking, then continuing to SELECT m11.
+- **Merge-integrity correction note** (2026-07-18, post-ABSORB-m10): the `--no-ff` merge described
+  above initially landed on the wrong git context (Bash cwd had silently drifted into the M10
+  iteration-0 linked worktree, so the merge commit was created on that worktree's own branch line,
+  not on `master`) — caught via `git diff d233f20 <merge-commit> --stat` showing only 2 files
+  changed instead of the expected 9. Root-caused, then re-run from a freshly `pwd`-confirmed
+  `/home/yale/work/quay`: `git merge --no-ff exp5-m10-iteration-1` now genuinely on `master`
+  (commit `62ff03e`), full 9-file/1569-insertion diff confirmed present
+  (`inherited-core.md`/`OUTER-LOOP.md`/`backlog.md` all changed, `directives/pending/` empty,
+  DIR-006/007/008 under `archive/`, zero non-`.md` files). This ABSORB entry's factual claims were
+  written assuming success and are now retroactively accurate — no other correction needed. Lesson:
+  always `pwd`-confirm cwd immediately before any `git merge`/`git commit` when a linked worktree
+  exists under the same milestone tree; recorded as a live instance of the σ-inherited-floor trap's
+  sibling failure mode (silently-inherited *context*, not just silently-inherited baseline values).
