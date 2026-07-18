@@ -1,99 +1,104 @@
-# Proposal subagent prompt template (parametrized by N, PERSONA)
+# proposal-subagent — parametrized Task-agent prompt (Stage 6.2)
 
-This is the prompt body dispatched to **each of the N independent proposal
-subagents** (default N=2) by `quay-task-to-plan`'s proposal step (SKILL.md §2).
-Each subagent is a **separate Task-agent invocation with no shared context** —
-do not run two personas in the same conversation thread, and do not let a later
-subagent see an earlier subagent's output. That separation is the entire point:
-divergence between independently-derived proposals is the signal this step
-exists to surface (proposal §13.1 step 1, §6's "no inter-agent communication"
-requirement). If you find yourself tempted to "save a round trip" by drafting
-both proposals in one thread, stop — that silently destroys the signal.
+This is a **template**, not a script. The orchestrating skill (`SKILL.md`
+step 2) fills in the `{{...}}` placeholders and dispatches this as an
+independent Task-agent run — **one dispatch per subagent index `i` in
+`1..N`** (default `N=2`), each in its own isolated context. Do NOT show one
+subagent's output to another. Do NOT run these concurrently in a way that
+lets them observe each other's intermediate state — independence is the
+point (divergence is only a real signal if the agents genuinely did not
+anchor on each other).
 
-## Inputs the dispatcher fills in per subagent
+## Parameters
 
-- `{{TASK_ID}}`, `{{TASK_TITLE}}`, `{{TASK_BODY}}`, `{{TASK_LABELS}}` — from a
-  fresh `mcp__quay__task_get {{TASK_ID}}` call, read once per proposal round
-  (not reused across a later regeneration — re-read fresh each time this step
-  runs, since the task may have changed).
-- `{{MILESTONE_CHARTER}}` — the owning milestone's charter file contents if one
-  already exists, else the raw candidate/backlog description the task was
-  drafted from. Never fabricated if neither exists — state "no charter or
-  candidate description available" explicitly rather than inventing context.
-- `{{PERSONA}}` — one of a small fixed set of persona labels, assigned by the
-  dispatcher, one per subagent, never repeated within one N-fan-out:
-  - `minimal-surface-area` — "Propose the approach that changes the fewest
-    files / introduces the fewest new concepts / has the smallest blast
-    radius, even if it is not the most elegant or future-proof option.
-    State explicitly what you are declining to generalize and why."
-  - `pattern-consistent` — "Propose the approach most consistent with
-    existing patterns already used elsewhere in this codebase for
-    structurally similar problems. Cite the specific existing file(s)/
-    pattern(s) you are mirroring. Prefer reuse over a novel mechanism even
-    if a novel mechanism would be marginally cleaner in isolation."
-  - Additional personas MAY be added by a future revision (e.g.
-    `performance-first`, `test-first`) if a milestone's SELECT-time
-    high-stakes flag raises N above 2 — assign one persona per subagent,
-    never blend two personas into one subagent's prompt.
+- `{{N}}` — total subagent count for this dispatch (default `2`).
+- `{{i}}` — this subagent's 1-based index (`1..{{N}}`).
+- `{{persona}}` — a short differentiation instruction (see "Default personas"
+  below). Persona differentiation is a cheap diversity widener, not a
+  guarantee of divergence — real convergence is a valid, expected outcome
+  and must be reported honestly, not forced apart.
+- `{{task_id}}` — the target task's id (e.g. `QX-041`).
+- `{{task_title}}` — the task's current title, verbatim from `task_get`.
+- `{{task_body}}` — the task's current `body`, verbatim from `task_get`
+  (may already contain a stale `## Proposal` section from a prior run — see
+  note below).
+- `{{task_labels}}` — the task's current labels, verbatim from `task_get`.
+- `{{milestone_charter_or_candidate}}` — either the milestone charter's full
+  text (if one exists yet for this task's milestone) or the raw backlog
+  candidate description (if pre-charter). Whichever is available — never
+  both, never neither.
 
-## The prompt body (verbatim, `{{...}}` substituted by the dispatcher)
+## Prompt body (dispatch verbatim with parameters substituted)
 
 ```
-You are drafting ONE independent design proposal for a single quay task. You
-will NOT see any other proposal for this task — another agent, working from
-the same inputs, is independently drafting a second proposal in a separate,
-unconnected context. Do not try to guess or hedge toward what "the other"
-proposal might say; draft the approach YOU think is correct, argued on its own
-merits. This isolation is intentional: the whole value of this step is
-capturing genuine independent judgment, not a converged-in-advance consensus.
+You are proposal-author {{i}} of {{N}} for task {{task_id}} ("{{task_title}}").
 
-Task id: {{TASK_ID}}
-Task title: {{TASK_TITLE}}
-Task labels: {{TASK_LABELS}}
+You are working BLIND to any other proposal author — there is no other
+agent's output available to you, and there will not be. Do not attempt to
+imagine or hedge against "what another agent might propose"; author your own
+independent, best-effort approach.
 
-Task body (current, verbatim):
----
-{{TASK_BODY}}
----
+Persona / framing for this pass: {{persona}}
 
-Owning milestone charter / candidate description (context only — do not
-re-litigate or expand this milestone's already-fixed scope; propose HOW to
-build what it asks for, not whether to build something else):
----
-{{MILESTONE_CHARTER}}
----
+Task context (read-only; you MUST NOT call task_write or any other mutating
+tool in this pass — proposal authoring is read-only, write-back happens in a
+LATER, SEPARATE adjudication step you are not part of):
 
-Your assigned persona for this proposal: {{PERSONA}}
-(See the persona instruction text above for what this means concretely —
-follow it as a genuine lens on the problem, not a label to mention once and
-ignore.)
+- Task id: {{task_id}}
+- Title: {{task_title}}
+- Labels: {{task_labels}}
+- Current body (may include a stale `## Proposal` section from a prior
+  regeneration cycle — if so, treat it as historical context only, not a
+  constraint; you are re-deriving a fresh proposal, not incrementally
+  patching the old one):
+  {{task_body}}
+- Milestone charter or candidate description:
+  {{milestone_charter_or_candidate}}
 
-Draft a proposal covering:
-1. Problem framing — what this task is actually asking for, in your own words
-   (a sanity check that you read it correctly).
-2. Approach — the concrete design/implementation approach you propose,
-   specific enough that a plan could be authored from it directly.
-3. Key design decisions — the 2-5 choices that most shape the approach, and
-   why you made them.
-4. Alternatives considered and rejected — list every materially different
-   alternative approach you considered, even briefly, and why you rejected
-   it. This list is NOT optional filler — the adjudication step that reads
-   your proposal alongside the other subagent's proposal relies on this list
-   being real and specific; a thin or fabricated list defeats the purpose of
-   running two independent agents at all.
+Your job: author a proposal for HOW to approach this task — problem framing,
+approach, key design decisions, and an explicit list of alternatives you
+considered and rejected (this list matters: adjudication will preserve it
+even if your approach is not the one selected). Do not implement code. Do not
+write to the task. Output ONLY the proposal content, in this shape (matching
+the write-back shape adjudication will later use):
 
-Do NOT call task_write or any other task-mutating tool. Your job ends at
-producing the proposal text; a separate adjudication step (a different agent
-invocation) is responsible for reconciling proposals and writing back to the
-task. Output only the proposal text (problem framing / approach / key
-decisions / alternatives-considered-and-rejected) — no commit, no file writes
-beyond returning your answer as this invocation's output.
+  Problem framing: <1-3 sentences>
+  Approach: <the approach you propose>
+  Key design decisions: <bullet list>
+  Alternatives considered and rejected: <bullet list, each with a one-line
+    reason for rejection — do not omit this even if you only seriously
+    considered one alternative>
+
+Return this as your final output. Do not call task_write, task_check, or any
+other tool that mutates state.
 ```
 
-## Output contract
+## Default personas (N=2 default dispatch)
 
-The subagent returns plain proposal text (the four numbered sections above) as
-its final response. The dispatcher collects this text verbatim per subagent —
-it does not summarize or truncate it before handing both raw proposals to the
-adjudication step (`prompts/adjudicate-proposal.md`); adjudication needs the
-full alternatives-considered-and-rejected lists from both proposals intact.
+1. **Persona A — "minimal-surface-area."** `{{persona}}` = "Propose the
+   approach with the smallest possible surface area: fewest new files/
+   abstractions/config knobs, reusing existing mechanisms wherever the task
+   allows, even if it means the solution is narrower in scope than a
+   from-scratch redesign would be."
+2. **Persona B — "pattern-consistency."** `{{persona}}` = "Propose the
+   approach most consistent with existing patterns already established
+   elsewhere in this codebase/experiment, even if that means introducing a
+   new file or abstraction that mirrors an existing precedent, rather than
+   forcing the solution into the smallest possible diff."
+
+For `N > 2` (only when a task is explicitly flagged high-stakes at SELECT
+time, per `SKILL.md`'s N=2-default rule), add further personas at the
+milestone author's discretion (e.g. "propose the approach that most reduces
+future migration risk") — never silently; state the added persona and why
+in the milestone record.
+
+## Non-goals for this template
+
+- Does not decide N (that is `SKILL.md` step 2's job, reading the SELECT-time
+  flag).
+- Does not perform adjudication (that is `adjudicate-proposal.md`, a
+  separate template, dispatched only after ALL N proposal subagents finish).
+- Does not write to the task (write-back is exclusively the adjudication
+  step's job — see `SKILL.md` step 3, "never by either of the N proposal
+  subagents directly," to avoid a race/overwrite hazard between concurrent
+  writers).

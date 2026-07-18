@@ -1,142 +1,131 @@
-# Adjudication + write-back subagent prompt template
+# adjudicate-proposal — parametrized Task-agent prompt (Stage 6.3)
 
-This is the prompt body dispatched to the **single adjudication subagent**
-(SKILL.md §3) after both (or all N) proposal subagents
-(`prompts/proposal-subagent.md`) have returned. Unlike the proposal subagents,
-this ONE agent DOES see all N raw proposals — its entire job is to reconcile
-them. This is also the ONLY step in the pipeline authorized to call
-`mcp__quay__task_write` for this task's proposal — neither proposal subagent
-writes anything (SKILL.md §2, "writes nothing" / proposal §13.1 step 3's
-race-avoidance rationale). Do not split write-back into a separate fourth
-invocation; the agent that adjudicates is the same agent that writes back and
-reads back, so there is no gap in which a stale decision could be written.
+This is a **template**, not a script. The orchestrating skill (`SKILL.md`
+step 3) fills in the `{{...}}` placeholders and dispatches this as ONE
+independent Task-agent run, **after all N proposal-subagent runs
+(`proposal-subagent.md`) for the target task have completed**. This is the
+ONLY step in the pipeline authorized to call `task_write` for the `##
+Proposal` section — never the proposal subagents themselves (avoids a
+race/overwrite hazard between N≥2 concurrent writers, per `SKILL.md` step 3).
 
-## Inputs the dispatcher fills in
+## Parameters
 
-- `{{TASK_ID}}` — same task id the proposal subagents drafted for.
-- `{{PROPOSAL_1}}`, `{{PROPOSAL_2}}`, ... `{{PROPOSAL_N}}` — the raw,
-  unmodified text each proposal subagent returned, each tagged with its
-  `{{PERSONA_i}}` label so the adjudicator can cite "the minimal-surface-area
-  proposal" etc. in its adjudication note.
-- `{{CURRENT_TASK_BODY}}` — a **fresh** `mcp__quay__task_get {{TASK_ID}}` read,
-  taken at write-back time (not reused from the proposal-step read, which may
-  now be stale) — the full current body, so the idempotent section-replace
-  below operates on up-to-date content.
+- `{{task_id}}` — the target task's id (e.g. `QX-041`).
+- `{{proposals}}` — the full raw output of all N proposal-subagent runs,
+  concatenated and labeled by persona/index (e.g. "Proposal 1
+  (minimal-surface-area): ...", "Proposal 2 (pattern-consistency): ..."),
+  never summarized or pre-filtered by the orchestrator before this step sees
+  them — adjudication must see the actual raw divergence, not a paraphrase.
+- `{{current_task_body}}` — the task's CURRENT `body`, read fresh via
+  `task_get` immediately before this dispatch (not the stale copy the
+  proposal subagents saw — the task may have changed since step 2 ran).
+- `{{provider_capability}}` — whether the active provider supports `extra{}`
+  writes (`native` = yes; `github` = no, PR-ABI-001 hard-error floor) — the
+  orchestrator determines this from `.quay/config.yml` before dispatch, the
+  adjudication agent does not probe for it itself.
 
-## The prompt body (verbatim, `{{...}}` substituted by the dispatcher)
+## Prompt body (dispatch verbatim with parameters substituted)
 
 ```
-You are adjudicating between {{N}} independently-drafted proposals for a
-single quay task, and then writing the reconciled result back to that task's
-body. You are the ONLY agent in this pipeline authorized to call
-mcp__quay__task_write for this task's proposal — do not skip the write-back,
-and do not ask a different agent to do it.
+You are the adjudicator for task {{task_id}}. You have been given {{N}}
+independent proposals, authored blind to each other. Your job has four
+parts, in order:
 
-Task id: {{TASK_ID}}
+1. CLASSIFY: did the proposals CONVERGE (same approach, differing only in
+   low-stakes framing/wording) or DIVERGE (a real approach-level
+   disagreement — e.g. different data model, different module boundary,
+   different sequencing)? State this explicitly and justify it in one or two
+   sentences citing the specific point of agreement or disagreement. Do not
+   default to either answer without justification — real convergence is a
+   valid, common, and desirable outcome; do not manufacture a divergence
+   narrative to make this step look more consequential than it was.
 
-Proposal 1 (persona: {{PERSONA_1}}):
----
-{{PROPOSAL_1}}
----
+2. RECONCILE:
+   - If CONVERGED: write back the (near-)identical approach. Do not include
+     an "### Adjudication note" subsection — omit it entirely, not as a
+     placeholder.
+   - If DIVERGED: either (a) select a winning proposal and state why, or
+     (b) explicitly synthesize a merged approach if neither proposal alone
+     is best. Either way, write an "### Adjudication note" recording which
+     proposal(s) diverged, on what specific axis, and which resolution was
+     chosen and why. This must be precise enough that a skeptical re-reader
+     could check your reasoning against the two raw proposals, not a vague
+     "proposal 1 was better" statement.
+   - In BOTH cases: preserve the full "Alternatives considered and rejected"
+     list from every proposal, merged (deduplicated by content, not by
+     wording) into the final write-back — never silently drop an
+     alternative just because its proposal was not selected.
 
-Proposal 2 (persona: {{PERSONA_2}}):
----
-{{PROPOSAL_2}}
----
+3. WRITE BACK (the only step in this whole pipeline authorized to mutate the
+   task). Call `mcp__quay__task_write` (MCP tool; do not use `packages/quay/
+   bin/quay.js task edit` — it is status-only in v1 and will silently fail
+   or reject the body/extra fields) with:
+   - `id`: {{task_id}}
+   - `body`: the task's CURRENT body ({{current_task_body}}) with the
+     `## Proposal` section REPLACED using a full-section replace — locate
+     the existing `## Proposal` heading (if any) and everything through
+     (but not past) the next `##` heading, and substitute exactly this
+     block in its place (append at the end of the body if no `## Proposal`
+     heading currently exists):
 
-[... additional proposals if N > 2 ...]
+     ## Proposal
 
-Perform these steps in order:
+     Source: <adjudicated | single-author>, <today's ISO date>, <author
+     identity: the persona label(s) that fed into the final content, or
+     "single-pass" for an N=1 fallback>
 
-1. CONVERGENCE CHECK. Read all N proposals. Determine: did they converge (same
-   underlying approach, differing only in low-stakes wording/framing) or
-   diverge (a real approach-level disagreement — e.g. different data
-   structures, different module boundaries, different sequencing, a
-   genuinely different answer to "how should this be built")? A difference in
-   emphasis or prose style is NOT divergence; a difference in what gets built
-   or how is.
+     <the adjudicated/converged proposal: problem framing, approach, key
+     design decisions, and the merged alternatives-considered-and-rejected
+     list>
 
-2. IF DIVERGED: adjudicate. Either pick a winner (state which, and why, citing
-   the SPECIFIC axis of disagreement) or explicitly synthesize a merged
-   approach that takes the strongest elements of each (state which elements
-   came from which proposal). Do not silently average or blend without saying
-   so. Preserve BOTH proposals' "alternatives considered and rejected" lists
-   in your reconciled write-up — do not discard the losing proposal's
-   reasoning; a future reader needs to see what was considered and why it
-   lost, not just what won.
+     ### Adjudication note
+     <ONLY present when the classification in step 1 was DIVERGED — omit
+     this whole subsection entirely for CONVERGED or N=1 fallback>
 
-   IF CONVERGED: write back the (near-)identical content. Do not manufacture
-   an adjudication note for a non-disagreement — an invented "adjudication"
-   over a wording difference is worse than admitting there was nothing to
-   adjudicate.
+   - `extra`: ONLY if {{provider_capability}} indicates the active provider
+     supports it (native = yes) — `{"proposalStatus": "adjudicated"}` (or
+     `"pending"` if for some reason you cannot complete reconciliation, which
+     should not normally happen in this step). If {{provider_capability}}
+     indicates GitHub, DO NOT attempt this field at all — do not attempt-
+     then-catch a hard error, simply omit the parameter from the
+     `task_write` call.
+   - Do NOT touch `title`, `labels`, `status`, `parent`, or `children` in
+     this call unless the adjudicated proposal explicitly concludes the task
+     should be epic-split (a different, rarer outcome) — in that case, and
+     ONLY in that case, may `parent`/`children` also be set, using the real
+     M12 WRITE surface exactly as any other quay client would.
 
-   IF ONLY ONE PROPOSAL WAS PROVIDED (N=1 fallback): pass it through as-is,
-   source = "single-pass", no adjudication note. Do not fabricate a second
-   opinion or claim adjudication occurred.
+4. READ BACK. Immediately after the write, call `mcp__quay__task_get` for
+   {{task_id}} and report its raw output verbatim as evidence the write
+   landed with the expected `## Proposal` content. If the readback does not
+   show the expected content, report this as a FAILURE — do not silently
+   retry more than once, and do not paraphrase a failure as a success.
 
-3. EPIC-SPLIT CHECK (rare). If, having read both proposals, you conclude the
-   task itself is over-scoped and should be decomposed into multiple sub-tasks
-   BEFORE any of these proposals can be meaningfully planned, say so explicitly
-   and describe the proposed split — this is the one case where a
-   parent/children write may be appropriate as part of this step (a
-   DIFFERENT relationship than milestone-membership grouping, which uses the
-   milestone:<id> label, not parent/children). Do not default to this path;
-   most tasks will not need it.
-
-4. COMPOSE THE WRITE-BACK BODY. Read the task's CURRENT full body (a fresh
-   mcp__quay__task_get call — do not reuse a body snapshot from earlier in
-   this pipeline, it may be stale):
-   {{CURRENT_TASK_BODY}}
-
-   Idempotently replace the existing "## Proposal" section if one is already
-   present (replace from the "## Proposal" heading through, but not past, the
-   next "##" heading — do not touch any other section of the body; if no
-   "## Proposal" section exists yet, append one). Construct the new section
-   in exactly this shape:
-
-   ## Proposal
-
-   Source: <adjudicated | single-author>, <today's ISO date>, <author
-   identity: e.g. "minimal-surface-area + pattern-consistent" if adjudicated
-   from named personas, or "single-pass" for N=1>
-
-   <the reconciled approach: problem framing, approach, key design decisions,
-   alternatives considered and rejected from BOTH/ALL proposals>
-
-   ### Adjudication note
-   <ONLY if step 2 found real divergence: which proposal(s) diverged, on what
-   axis, which resolution was chosen and why. Omit this whole sub-heading
-   entirely — not even an empty stub — if proposals converged or N=1.>
-
-   Then reassemble the FULL body (every other existing section unchanged,
-   plus this new/replaced "## Proposal" section in its correct position) —
-   mcp__quay__task_write's body parameter is a full replacement, not a patch,
-   so you must pass the complete reconstructed body, never just the new
-   section in isolation.
-
-5. WRITE BACK. Call mcp__quay__task_write with id={{TASK_ID}} and the full
-   reconstructed body from step 4. If the native provider is active, you MAY
-   also pass extra={"proposalStatus": "adjudicated"} (or "pending" only if,
-   unusually, you are stopping before finishing adjudication — normally you
-   will only ever write "adjudicated" or omit extra entirely) as a native-only
-   convenience mirror; never treat this as a substitute for the body write.
-
-6. READ BACK (mandatory evidence, do not skip). Immediately call
-   mcp__quay__task_get on {{TASK_ID}} again and confirm the returned body
-   contains your just-written "## Proposal" section verbatim. Report the full
-   raw tool output of this readback call as part of your final response —
-   this is the evidence that the write actually landed, not just that the
-   write call returned success.
-
-Output: a short summary of your convergence/divergence finding, the reconciled
-proposal text you wrote, and the verbatim readback tool output from step 6.
+Report your classification (step 1), the final written content (step 2/3),
+and the raw task_write + task_get tool outputs (step 3/4) as your final
+output.
 ```
 
-## Output contract
+## Regeneration discipline (not write-once)
 
-The dispatcher (or the human running this skill manually) records this
-subagent's full final response — convergence finding, reconciled text, and
-raw readback — as the Stage 6.3 evidence for the Done-when clause requiring a
-demonstrated dry-run. This is the only step in the pipeline that produces
-provider-write evidence; the proposal subagents (§ proposal-subagent.md)
-produce no tool-call evidence because they perform no writes.
+Per DIR-009 (task granularity is variable) and the M05 projection design's
+own `## Status mirror` precedent: a task's `## Proposal` section is **never
+write-once**. Any later re-invocation of this pipeline for the same task
+(because the task was re-grouped into a different milestone, split, or the
+proposal was simply re-requested) MUST perform the SAME full-section-replace
+write described in step 3 above — never append a second `## Proposal`
+heading, never leave the old one orphaned alongside a new one. The
+adjudication agent's step 3 instructions above already encode this
+(“REPLACED using a full-section replace”); this is restated here as the
+template's own standing discipline so a future caller does not need to
+re-derive it from `SKILL.md` alone.
+
+## Non-goals for this template
+
+- Does not author new proposals (that is `proposal-subagent.md`'s job,
+  already completed before this template is dispatched).
+- Does not run architect-review (that is `proposal-to-plan`'s existing,
+  unchanged step, which runs AFTER this adjudication step completes — see
+  `SKILL.md` step 4).
+- Does not author a plan document or run a TDD gate (Phase 7, not built by
+  this skill).

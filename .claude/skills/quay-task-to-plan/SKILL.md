@@ -1,255 +1,208 @@
 ---
 name: quay-task-to-plan
-description: For a development-class quay task (or a milestone's grouped task set), run N independent blank-slate proposal subagents, adjudicate their divergence, and write the reconciled proposal back to the task's body via the Provider ABI's task_write tool (never a status-only patch). This is the PROPOSAL STEP ONLY (Phase 6 of docs/plans/3-7-quay-task-to-plan-skill.md) — it stops after write-back; the plan-authoring step, TDD gate, and DISPATCH wiring are a separate future phase and are explicitly not invoked by this skill yet. Invoke on a development/capability-growth-typed task that needs a proposal before it can be planned.
-allowed-tools: Bash, Read, Write, Task
+description: Proposal step (Phase 6) of the quay-task-to-plan pipeline — for a development-class milestone's grouped task(s), run N independent blank-slate subagents to draft proposals, adjudicate divergence M13-style, and write the reconciled proposal back to the task's body via the Provider ABI (task_write/task_get), portable per DIR-011. Invoke after a development-class milestone's tasks are grouped (milestone:<id> label / M12 parent-children) and before proposal-to-plan's own architect-review + plan step (Phase 7, not yet built) runs.
+allowed-tools: Bash, Read, Write
 ---
 
-# quay-task-to-plan (proposal step)
+# quay-task-to-plan
 
-    read    :: TaskId → TaskDetail                          -- mcp__quay__task_get / task_list
-    propose :: TaskDetail → [Proposal; N=2]                  -- N independent, blank-slate, no inter-agent comms
-    adjudicate :: [Proposal; N] → ReconciledProposal          -- M13-style: converge silently, diverge explicitly
-    write_back :: (TaskId, ReconciledProposal) → TaskDetail  -- mcp__quay__task_write, full-field, body-portable
-    readback :: TaskId → TaskDetail                          -- mcp__quay__task_get, confirms the write landed
+    read     :: TaskId → task_get/task_list → TaskRecord            -- Provider ABI, never backlog.md
+    propose  :: TaskRecord × N → [Proposal]                          -- N independent, blank-slate, no inter-agent comms
+    adjudicate :: [Proposal] → ReconciledProposal                    -- M13-style; explicit on convergence vs divergence
+    write_back :: ReconciledProposal → task_write → task_get(readback) -- body-portable, regeneratable, not write-once
 
 This skill implements **Phase 6 only** of `docs/plans/3-7-quay-task-to-plan-skill.md`
-(the `quay-task-to-plan` skill's **proposal step**): read a task, run N independent
-proposal subagents, adjudicate them, and write the reconciled proposal back to the
-task's `body`. It stops there. **Phase 7** (the plan-authoring step, the grounded
-convergent check, the TDD ≥80% hard gate, and wiring `OUTER-LOOP.md` DISPATCH to
-invoke this skill automatically for development-class milestones) is explicitly
-**out of scope** for this skill as currently built — do not treat this skill's
-existence as making the two-class diversity policy non-discretionary; that
-de-optionalization is a separate future milestone's job (DIR-014 items 2-3).
+(the **proposal step**: N-independent-subagent authoring + adjudication +
+write-back to the task's `body`). It is modeled structurally on
+`.claude/skills/quay-directive/SKILL.md`'s shape (YAML frontmatter, numbered
+`## Steps`, explicit provider-tool citations, evidence-by-readback discipline)
+and on `~/.claude/skills/proposal-to-plan/SKILL.md`'s isolated-Task-agent
+step structure (each step = one independent agent invocation, sequential, not
+parallel-and-merged).
 
-Authoritative build spec: `docs/plans/3-7-quay-task-to-plan-skill.md` Phase 6
-(Stages 6.1-6.3). Full design detail: `docs/proposals/exp5-quay-task-proposal-plan-skill.md`
-§§12-13. Structural precedent for this file's shape: `.claude/skills/quay-directive/SKILL.md`.
+**Phase 7 (plan step + grounded convergent check + TDD ≥80% hard gate +
+`OUTER-LOOP.md` DISPATCH wiring + de-optionalizing the two-class diversity
+policy) is explicitly OUT OF SCOPE for this skill as currently built** — see
+`docs/plans/3-7-quay-task-to-plan-skill.md` Phase 7. This skill's proposal
+step is a standing artifact that a future Phase-7 milestone will chain a plan
+step onto; it does not yet self-invoke, and nothing in `OUTER-LOOP.md`
+dispatches it automatically. Until Phase 7 lands, invoke this skill manually
+(`/quay-task-to-plan <task-id-or-ids>`) for a development-class milestone's
+grouped tasks.
 
 ## 0. Provider read/write contract (Stage 6.1)
 
-Per DIR-009 item 8's provider-tool convention: this skill uses the **Provider ABI
-tool surface exclusively** — it never reads or writes `backlog.md` or any other
-generated markdown view as a data source or sink, and it never edits a native
-store's frontmatter file directly even though it may be running inside the same
-repo that hosts the native store (that would silently break the provider-agnostic
-contract this section exists to preserve).
+Per DIR-009 item 8's provider-tool convention (`exp5-task-backlog-primitive-
+projection.md` §8, "SELECT reads quay via the provider tool — read path"):
+this skill uses the **Provider ABI tool surface exclusively** — it never
+reads or writes `backlog.md` or any other generated markdown view as a data
+source or sink.
 
-- **Read.** `mcp__quay__task_get` (single task, full detail: `body`, `labels`,
-  `parent`/`children`, `status`) and `mcp__quay__task_list` (candidate/milestone-
-  membership queries, e.g. `label: ["milestone:<id>"]`) — MCP tools preferred
-  in-session. CLI fallback when no MCP session is available: `node
-  packages/quay/bin/quay.js task list --label milestone:<id> --json` / `task get
-  <id> --json`.
-- **Write.** `mcp__quay__task_write` — **the full-field write path**
-  (`body`/`extra`/`labels`/`parent`/`children`/`status`/`title`, per M16-cli-
-  edit-parity-impl's landed full-field flag surface), **never a status-only
-  patch**. CLI fallback for the native provider specifically:
-  `packages/quay-native/bin/quay-native.js task edit <id> --body '...' --extra
-  '{"proposalStatus":"..."}' --json` (mirrors the quay-directive skill's own
-  documented fallback — the Core CLI's `packages/quay/bin/quay.js task edit` is
-  deliberately status-only in v1 per QN-024 and **cannot** perform this write;
-  do not use it for this purpose). MCP `task_write` is preferred whenever this
-  skill runs in an MCP-tool-equipped session.
-- **Check (not used by the proposal step, cited for completeness).**
-  `mcp__quay__task_check` / CLI `task check` is reserved for the Phase 7
-  plan/TDD-gate steps this skill does not yet implement.
+- **Read.** MCP `mcp__quay__task_get` (single task, including current `body`,
+  `labels`, `parent`/`children`) and `mcp__quay__task_list` (candidate /
+  milestone-membership queries, e.g. `label: milestone:<id>`) — preferred
+  in-session. CLI fallback when MCP tools are unavailable in the running
+  context: `node packages/quay/bin/quay.js task list --label milestone:<id>
+  --json` / `task get <id> --json`.
+- **Write.** MCP `mcp__quay__task_write` — **the full-field write path**,
+  never a status-only patch. CLI fallback: **`packages/quay/bin/quay.js task
+  edit` is deliberately status-only in v1** (per QN-024's comment in
+  `packages/quay/bin/quay.js` — it errors/no-ops on `--labels`/`--extra`/
+  `--body`), so it **cannot** perform this skill's write-back. For the native
+  provider (this repo's default, `.quay/config.yml`), the CLI fallback is the
+  provider's own richer CLI: `QUAY_NATIVE_TASKS_DIR=./tasks node
+  packages/quay-native/bin/quay-native.js task edit <id> --body "..." --extra
+  '{"proposalStatus":"..."}' --json` — same "never the Core CLI's `task edit`
+  for a body/extra write" discipline `quay-directive`'s own SKILL.md states.
+  If a future provider is active, check that provider's own CLI for the
+  equivalent richer write path rather than assuming this one.
+- **Check.** MCP `mcp__quay__task_check` (or CLI `task check`) for any
+  gate-mechanics read a later Phase-7 plan-check/TDD-gate step will need —
+  this skill's own proposal step does not call it, but the contract is
+  documented here so Phase 7 does not have to re-derive it.
 
-**Portability rule (DIR-011, body-first / extra-native-only-mirror):** a task's
-proposal is *portable metadata* and MUST live in the task's `body`, not solely in
-`extra{}`. The write-back step (§3 below) writes the adjudicated proposal into a
-`## Proposal` body section; `extra.proposalStatus` (`adjudicated` / `pending`) MAY
-additionally be written as a native-only, query-performance convenience, but is
-**never the sole record of the fact** — the body section alone must be sufficient
-to reconstruct the proposal's content and provenance on any provider, including
-one with no `extra{}` field at all.
+### DIR-011 portability rule (body-portable, extra-native-only, GitHub degradation)
 
-**GitHub degradation.** On the GitHub provider, `extra{}` does not exist and there
-is no native `parent`/`children` field — the `## Proposal` body section is written
-exactly the same way (body is provider-portable by construction), but the
-`extra.proposalStatus` mirror is simply omitted (native-only convenience, not
-required), and any parent/children grouping this skill would otherwise perform
-degrades to the checkbox-in-body convention per M12 (`extractChildRefs`/
-`CHILD_CHECKBOX_RE` in `packages/quay-github/src/github-client.js`). This skill
-does not live-test the GitHub path this phase (per the charter's explicit scope
-note); it documents the degradation so a future GitHub-path probe has a contract
-to test against.
+Per the portable-metadata convention (`inherited-core.md`, inserted verbatim
+by M16-cli-edit-parity-impl): a task's proposal is **portable metadata** — it
+MUST live in the task's `body`, never solely in `extra{}`.
 
-**Milestone → task grouping** is NOT invented by this skill — it reuses M12's
-real parent/children WRITE (`packages/quay-native/src/store.js` parent/children
-fields; GitHub checkbox-in-body write side landed by M12-abi-parent-write). The
-*primary* portable grouping key for milestone membership is the `milestone:<id>`
-label (label writes are supported unconditionally on both providers); `parent`/
-`children` is reserved for a DIFFERENT relationship — epic-decomposition of a
-single over-scoped task into sub-tasks — and this skill only writes `parent`/
-`children` when the adjudication step itself concludes a task should be split
-into sub-tasks before planning (rare; see §3 step 3c), never as the milestone-
-grouping mechanism.
+- **`body`** carries the authoritative `## Proposal` section (§2 below) — this
+  is what makes the proposal visible and portable across both the native
+  provider and GitHub.
+- **`extra.proposalStatus`** (e.g. `"adjudicated"` / `"pending"`) is an
+  **optional, native-only convenience mirror** for query performance — it is
+  NEVER the sole record of the fact; the `## Proposal` body section is
+  authoritative and sufficient on its own.
+- **GitHub degradation.** `body` and `labels` writes are fully portable
+  (no degradation needed); `parent`/`children` epic-decomposition writes are
+  fully supported on GitHub post-M12 (checkbox-in-body convention,
+  `extractChildRefs`/`CHILD_CHECKBOX_RE` in `packages/quay-github/src/
+  github-client.js`). The **one** path that still hard-errors on GitHub is
+  `extra{}` (PR-ABI-001's existing hard-error floor, unchanged, not reopened
+  by this skill) — since `extra.proposalStatus` is explicitly optional and
+  non-load-bearing, the skill's write-back step MUST check provider
+  capability before attempting the `extra` write (never attempt-then-catch a
+  hard error as normal control flow) and simply omit it on GitHub. This
+  skill introduces no new `extra{}` dependency beyond that existing floor.
 
-## 1. Input
+### M12 milestone→task grouping (reused unchanged)
 
-A task id (or a milestone's `label:"milestone:<id>"` task set, read via
-`task_list`). For a milestone-grouped set, steps 2-4 below run once per task in
-the set, independently — this skill does not batch multiple tasks' proposals
-into a single subagent run (each task gets its own N-subagent fan-out; different
-tasks' proposal drafting never shares an agent context, for the same
-blank-slate reason within-task subagents don't share context).
+This skill does not invent a new grouping mechanism. A development-class
+milestone's tasks are already grouped via the `milestone:<id>` label (the
+provider-portable grouping key, since GitHub issues have no native
+parent-link field) before this skill runs — the skill's read step (`task_list
+--label milestone:<id>`) simply consumes that existing grouping. `parent`/
+`children` (the real, bidirectionally-writable M12 WRITE surface,
+`packages/quay-native/src/store.js:264-307` native / `github-client.js`
+GitHub) is reserved for epic-decomposition (a proposal concluding a task
+should be split into sub-tasks before planning) — a different relationship
+than milestone membership — and this skill calls `task_write` with
+`parent`/`children` exactly as any other quay client would if an
+adjudicated proposal recommends a split; it never uses `parent`/`children`
+as the milestone-grouping key itself.
 
-## 2. Proposal step — N independent subagents (Stage 6.2)
+## Steps
 
-For the target task, dispatch **N=2 independent Task-agent subagents** (default;
-raise N only when the *task itself* is flagged high-stakes at SELECT time by a
-human/charter decision — never as a silent per-task judgment call made inside
-this skill).
+1. **Resolve target task(s).** Given a task id or a `milestone:<id>` label
+   (the invocation argument), call `mcp__quay__task_list` (filtered by
+   `label: milestone:<id>`) or `mcp__quay__task_get` (single id) to read the
+   current `body`/`title`/`labels`/`parent`/`children` for every task this
+   invocation covers. This is read-only — nothing is written in this step.
 
-- **Blank-slate-leaning dispatch.** Each subagent receives *only*: the task's
-  current `title`/`body`/`labels` (read via `task_get`), the owning milestone's
-  charter if one exists yet (else the raw candidate description), and this
-  skill's §0 write-back shape instruction (so each proposal is drafted in the
-  shape adjudication expects, without seeing the *other* subagent's draft).
-  Subagents are **not** shown each other's output and are **not** run in the
-  same context/thread — this is what makes divergence a real signal rather than
-  an artifact of shared anchoring (proposal §13.1 step 1, §6's "no
-  inter-agent-communication" requirement).
-- **Persona differentiation** (permitted, encouraged, cheap divergence widener):
-  e.g. subagent A is instructed to "propose the minimal-surface-area approach";
-  subagent B is instructed to "propose the approach most consistent with
-  existing patterns already in this codebase." See
-  `.claude/skills/quay-task-to-plan/prompts/proposal-subagent.md` for the full
-  parametrized template (parametrized by `N` and `PERSONA`).
-- **Architect-review is retained, unchanged, as an ADDITIONAL pass** — this step
-  does not replace `proposal-to-plan`'s existing single sequential
-  architect-review; it inserts parallel re-derivation *upstream* of where that
-  review sits. The full chain for a `quay-task-to-plan`-driven task is:
+2. **Proposal step (Stage 6.2) — N independent subagents.** For each target
+   task, dispatch **N=2 independent Task-agent runs** (default; raise N only
+   for a task explicitly flagged high-stakes at SELECT time, never as a
+   silent per-task judgment call inside this skill) using the parametrized
+   template at `.claude/skills/quay-task-to-plan/prompts/proposal-subagent.md`.
+   - **Blank-slate-leaning, no inter-agent communication.** Each subagent
+     receives only: the task's current `body`/title/labels, the milestone
+     charter (if one exists yet) or the raw candidate description
+     (pre-charter), and the write-back shape instruction (§2 below). Agents
+     are NOT shown each other's output and do NOT run in the same context —
+     this is what makes divergence a real signal rather than an artifact of
+     shared anchoring.
+   - **Persona differentiation** (cheap diversity widener, e.g. "propose the
+     minimal-surface-area approach" vs. "propose the approach most
+     consistent with existing patterns in this codebase") is applied via the
+     template's `{{persona}}` parameter — see the prompt file for the two
+     default personas.
+   - **Writes nothing to the task.** Each proposal subagent's output is
+     returned to the orchestrating context (this skill), never written to
+     the task directly — this avoids a race/overwrite hazard between N≥2
+     concurrent writers and defers all writing to step 3.
 
-  ```
-  N independent proposal authors → adjudication (this skill, §3)
-    → [existing, unchanged] architect-review → plan → [existing] architect-review → commit
-  ```
+3. **Adjudication + write-back (Stage 6.3).** Dispatch ONE further Task-agent
+   run using `.claude/skills/quay-task-to-plan/prompts/adjudicate-proposal.md`,
+   giving it BOTH (all N) raw proposals from step 2. It must:
+   a. Determine **convergence** (same approach, differing only in low-stakes
+      framing) vs **divergence** (a real approach-level disagreement, the
+      M13 DIR-010-namespace precedent) — explicitly, not silently.
+   b. For divergence: adjudicate a winner, or explicitly synthesize a merged
+      approach, and record the adjudication note (§2's `### Adjudication
+      note`). For convergence: write back the (near-)identical content with
+      no adjudication note required — do not fabricate a divergence to fill
+      the section.
+   c. Preserve the alternatives-considered-and-rejected list from whichever
+      proposal(s) are not selected — never silently discard it.
+   d. **Write back via `mcp__quay__task_write`** (never any other channel —
+      no direct file edits to the native store, even though this skill runs
+      inside the same repo that hosts it) to the task's `body`, using the
+      **idempotent full-section replace** discipline: replace the existing
+      `## Proposal` heading through (but not past) the next `##` heading if
+      present, otherwise append the section. This is the SAME regeneration
+      discipline the M05 projection design already uses for `## Status
+      mirror` — a task's `## Proposal` is **not write-once**: because task
+      granularity is variable (DIR-009), the section MUST be regenerable
+      (fully replaced, never appended-and-orphaned) whenever the task is
+      re-grouped into a different milestone or its proposal is
+      re-requested. Optionally also write `extra.proposalStatus` (native
+      only, capability-checked first per the GitHub-degradation rule above).
+   e. **Read back with `mcp__quay__task_get`** immediately after the write,
+      and show the raw tool output as evidence the write landed with the
+      expected `## Proposal` content — same evidence discipline as
+      `quay-directive`'s own step 5d.
 
-  Architect-review's existing job (catching mechanical/verifiable errors in the
-  SINGLE adjudicated proposal) is unchanged; it is never skipped and never asked
-  to arbitrate between the raw N candidates itself — that is adjudication's job.
-- **Writes nothing.** Neither proposal subagent calls `task_write`. This avoids
-  a race/overwrite hazard between N≥2 concurrent writers (proposal §13.1 step 3)
-  — the task is written to exactly once, by the adjudication step (§3), never by
-  either proposal author directly.
+4. **Relationship to `proposal-to-plan`'s architect-review — STRENGTHENS, does
+   not replace.** This skill's N-independent-proposal + adjudication step is
+   an ADDED adversarial pass inserted UPSTREAM of `proposal-to-plan`'s
+   existing sequential architect-review (`~/.claude/skills/proposal-to-plan/
+   SKILL.md` Step 2/4), not a substitute for it. The chain for a
+   `quay-task-to-plan`-driven task is:
 
-## 3. Adjudication + write-back step (Stage 6.3)
+   ```
+   N independent proposal authors → adjudication → [existing] architect-review → plan (Phase 7, not built) → [existing] architect-review → commit
+                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^ unchanged, reused as-is, still runs every time
+   ```
 
-A **third** subagent (or, at the milestone author's discretion for small/low-
-stakes tasks, a synchronous review by whoever is running this skill) receives
-**both** N proposals in full and performs, in order:
+   If the N proposals converge, architect-review proceeds exactly as it
+   would with a single author (negligible added cost). If they diverge,
+   architect-review still runs afterward on whichever approach adjudication
+   selected — it is never skipped, and never asked to arbitrate between the
+   raw candidate proposals itself (that is adjudication's job).
 
-1. **Convergence check.** Determine whether the N proposals converged (same
-   approach, differing only in low-stakes framing/wording) or diverged (a real
-   approach-level disagreement — the M13 DIR-010-namespace-decision precedent:
-   two independently-derived designs disagreeing on a genuine design axis, not
-   a wording nit).
-2. **Divergence handling (when diverged).** Adjudicate a winner OR explicitly
-   synthesize a merged approach, and record *why* in an `### Adjudication note`
-   sub-section — which proposal(s) diverged, on what axis, and which resolution
-   was chosen and why. Per proposal §13.2, the alternatives-considered-and-
-   rejected list from each losing proposal is **preserved in the write-back**,
-   not silently discarded — adjudication summarizes, it does not erase, the
-   rejected reasoning.
-3. **Convergence handling (when converged).** Write back the (near-)identical
-   content with **no** `### Adjudication note` required (the note is present
-   only when N≥2 diverged; absent for N=1 fallback or clean convergence).
-   3a. **N=1 fallback.** If only one proposal subagent was run (e.g. a
-       resource-constrained dispatch), the adjudication step still runs, but
-       degrades to "pass the single proposal through, source = single-pass,
-       no adjudication note" — it does not fabricate a second opinion.
-   3b. **Epic-split exception.** If adjudication concludes the task itself
-       should be decomposed into multiple sub-tasks before planning (rather
-       than proposing one design for it as-is), this is the ONE case where
-       this skill writes `parent`/`children` (§0's grouping section) as part
-       of the write-back — a different relationship than milestone membership,
-       used only here.
-4. **Write-back (exactly once, by this step, via `mcp__quay__task_write`).**
-   The reconciled proposal is written into the task's `body` in the shape
-   below. This is the **full-field write path** — `task_write`'s `body`
-   parameter is a *full replacement body*, so the adjudication step reads the
-   task's *current* full body first (`task_get`), does an **idempotent
-   section-replace** of the existing `## Proposal` section (through, but not
-   past, the next `##` heading) if one is already present, and passes the
-   *entire* reconstructed body back — never a bare partial fragment, and never
-   the status-only patch path.
+## Constraints
 
-### Write-back shape (DIR-011 body-first, mirrors M05's `## Status mirror` / M13's `Status mirror:` convention)
-
-```markdown
-## Proposal
-
-Source: <adjudicated | single-author>, <ISO date>, <author identity: subagent
-persona label(s), e.g. "minimal-surface-area + pattern-consistent", or
-"single-pass">
-
-<the adjudicated (or, for N=1 fallback, single-author) approach: problem
-framing, approach, key design decisions, explicitly-listed alternatives
-considered and rejected (from BOTH proposals when N≥2, not just the winner)>
-
-### Adjudication note
-<present only when N≥2 AND the proposals diverged — which proposal(s)
-diverged, on what axis, and which resolution was chosen and why. Absent
-entirely for N=1 fallback or clean convergence.>
+```
+require(target task(s) resolved via task_get/task_list, never backlog.md) ∧
+propose: N=2 default, independent, blank-slate, no inter-agent communication ∧
+propose: writes nothing to the task (defers to adjudication) ∧
+adjudicate: exactly one write-back step, explicit convergence-vs-divergence call ∧
+write_back: task_write on body (full-section replace of `## Proposal`, not write-once) ∧
+write_back: extra{} only as optional native-only mirror, capability-checked before GitHub attempt ∧
+write_back: task_get readback pasted as evidence ∧
+forbid(status-only `task edit` as the write path) ∧
+forbid(architect-review skip or replacement) ∧
+forbid(Phase 7: plan step, TDD gate, DISPATCH wiring, non-discretionary policy)
 ```
 
-- **`extra` mirror (optional, native-only).** The skill MAY additionally write
-  `extra.proposalStatus: "adjudicated"` (or `"pending"` before this step runs)
-  on the native provider as a query-performance convenience. This mirror is
-  never authoritative on its own — the `## Proposal` body section is sufficient
-  by itself, per §0's portability rule.
-- **Regeneration, not write-once (proposal §3 / §12.2).** A task's `## Proposal`
-  section is **not** a one-time artifact. Task granularity is variable (DIR-009)
-  — a task may be re-grouped into a different milestone, or its proposal
-  re-derived after new information — so this write-back step is always safe to
-  re-run: it REPLACES the existing `## Proposal` section wholesale (never
-  appends a second, orphaned copy alongside the old one), the same idempotent-
-  section-replace discipline the M05 projection design already uses for its own
-  `## Status mirror` section. Whatever later action triggers a re-proposal
-  (re-grouping, explicit "regenerate the proposal" request) re-invokes steps
-  2-3 of this skill and re-runs this write-back step exactly the same way —
-  there is no separate "first write" vs. "update" code path.
-- **Readback (mandatory evidence step).** Immediately after `task_write`, call
-  `mcp__quay__task_get` on the same task id and confirm the returned `body`
-  contains the just-written `## Proposal` section verbatim — same evidence
-  discipline as the quay-directive skill's own step 5d. Do not report the
-  write-back as complete without pasting this readback.
+## Output
 
-See `.claude/skills/quay-task-to-plan/prompts/adjudicate-proposal.md` for the
-full adjudication subagent prompt template.
-
-## 4. Steps (operational summary)
-
-0. Resolve the target: a single task id, or a milestone's `label:
-   ["milestone:<id>"]` task set via `task_list`. For a set, repeat steps 1-4
-   independently per task.
-1. `task_get <id>` — read current `title`/`body`/`labels`/`status`. This is
-   the blank-slate input every proposal subagent receives (§2).
-2. Dispatch N=2 (default) independent proposal subagents per
-   `prompts/proposal-subagent.md`, persona-differentiated, no shared context,
-   no inter-agent communication. Collect both raw proposal texts. **No writes
-   yet.**
-3. Dispatch one adjudication subagent per `prompts/adjudicate-proposal.md`
-   with both raw proposals. Collect the reconciled proposal (+ adjudication
-   note if divergent).
-4. Read the task's current full `body` again (`task_get`, freshest state —
-   avoid a stale-read race if time has passed since step 1), idempotently
-   section-replace `## Proposal` (append if absent), and call
-   `mcp__quay__task_write` with the **full reconstructed body** (never a
-   partial fragment) — plus `extra.proposalStatus` mirror if using the native
-   provider.
-5. `task_get <id>` again — readback evidence, paste verbatim.
-6. Stop. Do **not** proceed to plan-authoring, TDD-gate checks, or any
-   DISPATCH-level wiring — those are Phase 7, out of scope for this skill.
-
-## Non-goals (this skill, as built)
-
-- Does not author a plan document (Phase 7's plan step).
-- Does not run a grounded convergent check or a TDD ≥80% hard gate (Phase 7).
-- Does not wire itself into `OUTER-LOOP.md` DISPATCH, and does not make the
-  two-class diversity policy non-discretionary (Phase 7 / DIR-014 items 2-3).
-- Does not touch `inherited-core.md` or `OUTER-LOOP.md`.
-- Does not run against a live GitHub repo this phase (documented degradation
-  only, not live-tested — see §0).
+```
+outputs = {
+  proposals:     [Proposal] (N raw, ephemeral — not persisted to the task),
+  reconciled:    ReconciledProposal (adjudicated or converged),
+  task_write:    raw tool-call result,
+  task_get:      raw readback tool-call result (evidence the write landed)
+}
+```
