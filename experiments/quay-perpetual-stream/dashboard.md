@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 9** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 10** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -788,3 +788,55 @@ independently re-derived and confirmed by iteration-1, fresh worktree/fresh comm
   newly-invented scope. Gate-hash check:
   `it0-gate-hash-check.sh --by-reference charters/M10-audit-consolidation.md` → **PASS**.
   Dispatching inner iteration-0 next.
+- **ABSORB m10 = M-AUDIT-CONSOLIDATION → DONE** 2026-07-18. Iteration-0: added an operational Web UI
+  verification-requirement section to `inherited-core.md` (mechanized playwright/chrome-devtools
+  evidence rule, not a citation); flagged M04-discover's Web UI cov numbers "provisionally
+  uncertain" in this file and added a new `M-WEBUI-REVERIFY` candidate to `backlog.md`; performed
+  the exp1-4 systematic audit DIR-006 requested (grepped/read exp1-4's charters/DIRs against
+  `inherited-core.md`'s delta chain, found nothing further beyond the three already-known items);
+  added a concretely-named adversarial-audit-role step to `inherited-core.md`/`OUTER-LOOP.md` (a
+  NEW out-of-band dispatch, distinct from iteration-1's build-reverify template, charged to REFUTE
+  claims) plus a mechanized `OUTER-LOOP.md` gate requiring it on VT-scoring/self-exemption-attempt
+  milestones only (explicit non-blanket cadence, mirroring the V_meta consolidation-lag gate's own
+  HARD-BLOCK style); recorded the `VT₀` reset-vs-carry-forward decision and consolidated the
+  σ-inherited-floor trap as operational content (concept + decision procedure + the m4 −6.60 case
+  study), completing the kickoff commit's three-item "First consolidation target"; consolidated the
+  manda-dispatch discipline at its correct narrow scope (DIR-020 self-deadlock + DIR-015/016/024
+  background-dispatch, fire-and-forget explicitly unaffected); filled in `## Resolution` sections
+  for DIR-006/007/008 and `git mv`'d all three from `directives/pending/` to `directives/archive/`,
+  following the DIR-001..005 precedent. No product code touched (confirmed:
+  `git diff --name-status` against the pre-charter commit shows only `.md` files) — no test run
+  required. Iteration-1: independently re-verified all 8 Done-when clauses from a fresh
+  worktree/branch (based on the SAME pre-charter commit, not iteration-0's branch) — grepped every
+  exp5 milestone's own iteration reports itself for `mcp__playwright__`/`mcp__chrome-devtools__`
+  strings (zero hits, reproducing DIR-006's core finding from scratch, not trusting iteration-0's
+  claim); independently recomputed the m4 VT arithmetic from raw per-surface numbers; independently
+  read 9 of the 35 exp1-4 archived directives itself (targeting the highest-risk categories) and
+  verified iteration-0's per-experiment file counts; grepped `packages/quay/src/action.js` directly
+  to verify the fire-and-forget manda-dispatch claim against live code, not directive text; and —
+  the most judgment-dependent check — critically stress-tested whether the new adversarial-audit
+  role is genuinely distinct from iteration-1's OWN function (DIR-007's exact concern): found it
+  distinct BY DESIGN (different dispatcher — outer loop vs. inner milestone; different inputs —
+  prior reports as claims-to-refute vs. a fresh independent rebuild; different question — "is this
+  claim true" vs. "is this reproducible") but honestly flagged it remains UNEXERCISED in practice
+  (no milestone has actually had it dispatched yet) rather than overclaiming the gap fully closed.
+  **All 8 Done-when clauses independently CONFIRMED — no defects found requiring correction**, one
+  of the minority-case milestones (alongside m8) where iteration-1's re-verification pass found
+  iteration-0's work already sound. Merged `exp5-m10-iteration-1` → `master` (`--no-ff` — brings in
+  both iteration-0's `dda4d81` build commit and iteration-1's own report/verification commit).
+  Confirmed post-merge: `directives/pending/` empty, all three directives present under
+  `directives/archive/` with real per-clause Resolution sections; no non-`.md` files in the merge
+  diff vs pre-charter master. **No VT Δv** (methodology-infra, by design — like m2/m5/m6/m7).
+  `milestone_counter` → **10**. `backlog.md`'s `M-AUDIT-CONSOLIDATION` scope has no separate backlog
+  row (it was directive-sourced, not backlog-sourced) — nothing to mark DONE there beyond the new
+  `M-WEBUI-REVERIFY` row iteration-0 already added as a NEW candidate for a future milestone.
+  Inner-convergence success track: 10/10 (m10 also 2 iterations, Done-when-complete, no
+  mid-milestone re-scope). Discovery latency: 0. V_meta consolidation lag: unchanged, 0 rows
+  past-threshold-and-unresolved (the one `proposed` row, repo-root isolation-leak lesson, still has
+  only 1 confirmation — not yet past the φ threshold, no new ledger rows proposed this milestone).
+  **Per M10's own new gate**: this milestone was methodology-infra (no VT scoring) and its own
+  iteration-0 did NOT attempt to self-exempt from iteration-1 — so the new adversarial-audit-role
+  requirement does not apply to m10 itself; first real applicability is the next VT-scoring
+  milestone. `directives/pending/` re-drained at this boundary: **empty** — no further directive
+  disposition needed before SELECT m11. **Checkpoint cp-02 is due now** (milestone_counter=10,
+  divisible by 5) — writing it next, non-blocking, then continuing to SELECT m11.
