@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 17** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 18** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -1357,3 +1357,56 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   → **PASS** (same pinned hash reused unchanged, M12–M18). Adversarial-audit gate NOT expected to
   trigger (Δv̂=0, no iteration-0 self-exemption authorized). Dispatching inner iteration-0 and
   iteration-1 next, both from worktrees off the current master HEAD (`d96d40b`).
+- **ABSORB m18 = M-MILESTONE-CEILING-DIVERSITY-POLICY** 2026-07-18. Both iterations converged
+  independently off base `9350ab0`: iteration-1 (`ddc0a6d`, branch `exp5-m18-iteration-1`, worktree
+  `.../M18.../worktrees/iteration-1`) landed all 4 in-scope items; iteration-0 (`ad1a9a6`, branch
+  `exp5-m18-iteration-0`, worktree `.../M18.../worktrees/iteration-0`) independently re-derived the
+  same 4 items with no prior read of iteration-1's materials. `git merge --no-ff exp5-m18-iteration-1`
+  → clean (3 files: `OUTER-LOOP.md`, `inherited-core.md`, new script
+  `scripts/it0-line-budget-check.sh`). `git merge --no-ff exp5-m18-iteration-0` →
+  **conflict in `inherited-core.md`, two hunks** (both iterations independently wrote a "Milestone
+  ceiling" subsection covering the same ≤2000/≤500/≤200-line budgets, citing design doc §4, with
+  overlapping but differently-worded prose) **plus one auto-added file with no conflict**
+  (`scripts/it0-ceiling-line-budget-check.sh`, iteration-0's own gate script, different filename from
+  iteration-1's). Resolved via wholesale-selection (clause-by-clause reconciliation judged
+  higher-risk for near-duplicate prose, same precedent as M16/M17): kept **iteration-0's** text for
+  both `inherited-core.md` hunks and iteration-0's script as canonical, per the same
+  "caught-a-real-bug-during-self-testing" quality heuristic used at M16/M17 — iteration-0's iteration
+  report documents catching and fixing a real false-PASS bug (a loose substring match) in its gate
+  script during self-testing, replacing it with a strict heading/label regex; iteration-1's report
+  shows no comparable defect-caught signal. Deleted the non-canonical duplicate script
+  (`scripts/it0-line-budget-check.sh`) to leave a single canonical mechanism, mirroring the
+  "singular canonical spec" reasoning used for M17's design-doc duplication.
+  **New failure mode discovered and documented, distinct from an actual git conflict:** the earlier
+  `git merge --no-ff exp5-m18-iteration-1` step (reported "clean," no conflict markers) had in fact
+  combined two independent additions to *different, non-overlapping* locations of the same file
+  (`OUTER-LOOP.md`) without flagging anything, yet the combined result was internally
+  **inconsistent** — three separate mentions of the new plan-time line-budget gate across the file,
+  two naming iteration-1's script (`it0-line-budget-check.sh`) and one (added later, by the
+  iteration-0 merge) naming iteration-0's script (`it0-ceiling-line-budget-check.sh`). This was
+  invisible to `git status`/conflict markers and was only caught by a manual post-merge
+  `grep -n` sweep for all script-name mentions. Fixed by removing the duplicate AUTHOR CHARTER step
+  bullet entirely and repointing the remaining it0-checks 4(e) reference to the canonical script
+  name, so `OUTER-LOOP.md` now cites `it0-ceiling-line-budget-check.sh` consistently in both of its
+  surviving mentions (SELECT step + it0-checks step 4(e)). **Lesson for future merges:** a
+  conflict-free git auto-merge is necessary but not sufficient evidence of a consistent result when
+  two branches touch the same file in different locations — a post-merge grep/read sweep for
+  cross-referenced identifiers (script names, section numbers, etc.) is required whenever both
+  iterations touched the same file, even absent conflict markers. Merge committed as `6a24768`.
+  `git diff --stat 9350ab0..HEAD` (excluding milestone worktree/report dirs) confirms only the
+  3 expected substrate files changed (`OUTER-LOOP.md`, `inherited-core.md`, the canonical script) —
+  no `.claude/skills/` files touched, DIR-012 item 3 (skill implementation) correctly stayed out of
+  scope (Done-when clause 6). Ran the canonical gate script against M18's own charter as a sanity
+  check: `bash -n` syntax OK, `it0-ceiling-line-budget-check.sh charters/M18-....md` →
+  **PASS** (charter within small-milestone norm, no phase/stage plan required) — demonstrates the
+  gate script actually runs and produces the expected verdict on a real charter (Done-when clause 7).
+  Adversarial-audit gate correctly did NOT fire (Δv̂=0 method-infra milestone, no iteration-0
+  self-exemption attempted), exactly as the charter's own pre-analysis predicted.
+  `milestone_counter` → **18**. `backlog.md`'s `M-MILESTONE-CEILING-DIVERSITY-POLICY` row to be
+  marked DONE next. Worktrees/branches for both M18 iterations to be removed next.
+  **New pending directive discovered this milestone's boundary**: `directives/pending/DIR-013-...md`
+  — a human-authored finding (asserted directly in this live conversation via `/quay-directive`)
+  about dangling cross-references and a stale companion plan in the M17-produced design doc, arising
+  from a concurrent human-directed `proposal-to-plan` run writing the same file exp5 was merging
+  into. Documentation-only, governance-integrity typed, Δv̂≈0. To be drained at the next SELECT
+  boundary (m18→m19), per the standing "drain `directives/pending/`" step.
