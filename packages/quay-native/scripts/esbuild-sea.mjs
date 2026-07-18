@@ -25,14 +25,35 @@ const redirectManifestPlugin = {
   },
 };
 
-await esbuild.build({
-  entryPoints: [path.resolve(pkgDir, "bin/quay-native.js")],
-  bundle: true,
-  platform: "node",
-  format: "cjs",
-  outfile: path.resolve(pkgDir, "dist-sea/quay-native-bundle.cjs"),
-  plugins: [redirectManifestPlugin],
-  loader: { ".yml": "text" },
-});
+const outfile = path.resolve(pkgDir, "dist-sea/quay-native-bundle.cjs");
 
-console.log("esbuild: quay-native bundle written (manifest.js -> sea-shim redirected).");
+try {
+  const result = await esbuild.build({
+    entryPoints: [path.resolve(pkgDir, "bin/quay-native.js")],
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    outfile,
+    plugins: [redirectManifestPlugin],
+    loader: { ".yml": "text" },
+    logLevel: "info",
+  });
+  if (result.errors && result.errors.length > 0) {
+    console.error("esbuild reported errors but did not throw:", result.errors);
+    process.exit(1);
+  }
+} catch (err) {
+  // M01-dist iteration-1: mirrors the same hardening added to
+  // packages/quay/scripts/esbuild-sea.mjs after a Windows CI failure where
+  // the SEA config step reported a missing outfile with no visible esbuild
+  // error in the log. See that file's comment for the full rationale.
+  console.error("esbuild.build() threw:", err);
+  process.exit(1);
+}
+
+const fs = await import("node:fs");
+if (!fs.existsSync(outfile)) {
+  console.error(`esbuild reported success but outfile is missing: ${outfile}`);
+  process.exit(1);
+}
+console.log(`esbuild: quay-native bundle written to ${outfile} (manifest.js -> sea-shim redirected).`);

@@ -25,14 +25,41 @@ const redirectVersionPlugin = {
   },
 };
 
-await esbuild.build({
-  entryPoints: [path.resolve(pkgDir, "bin/quay.js")],
-  bundle: true,
-  platform: "node",
-  format: "cjs",
-  outfile: path.resolve(pkgDir, "dist-sea/quay-bundle.cjs"),
-  plugins: [redirectVersionPlugin],
-  loader: { ".json": "json" },
-});
+const outfile = path.resolve(pkgDir, "dist-sea/quay-bundle.cjs");
 
-console.log("esbuild: quay bundle written (version.js -> sea-shim redirected).");
+try {
+  const result = await esbuild.build({
+    entryPoints: [path.resolve(pkgDir, "bin/quay.js")],
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    outfile,
+    plugins: [redirectVersionPlugin],
+    loader: { ".json": "json" },
+    logLevel: "info",
+  });
+  if (result.errors && result.errors.length > 0) {
+    console.error("esbuild reported errors but did not throw:", result.errors);
+    process.exit(1);
+  }
+} catch (err) {
+  // M01-dist iteration-1: Windows CI hit a silent esbuild.build() failure
+  // (SEA config later reported the outfile missing, with no visible esbuild
+  // error in the log — the ordering artifact suggested an unhandled/async
+  // failure). Make any build failure loud and non-zero-exit explicitly,
+  // rather than relying on an unhandled promise rejection's implicit exit
+  // code, which can interleave unpredictably with prior stdout under
+  // Windows' pipe buffering.
+  console.error("esbuild.build() threw:", err);
+  process.exit(1);
+}
+
+// Fail loudly (not just via SEA's later, less specific error) if esbuild
+// reported success but the file genuinely isn't there — narrows the
+// diagnosis if this recurs on a platform we can't repro locally.
+const fs = await import("node:fs");
+if (!fs.existsSync(outfile)) {
+  console.error(`esbuild reported success but outfile is missing: ${outfile}`);
+  process.exit(1);
+}
+console.log(`esbuild: quay bundle written to ${outfile} (version.js -> sea-shim redirected).`);
