@@ -1143,3 +1143,29 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   `M-CLI-EDIT-PARITY` row marked DONE (design delivered; still not yet charter-ready for
   implementation — a future SELECT must pick it up). `milestone_counter` → **14**. Deliverable:
   `docs/proposals/exp5-cli-edit-parity.md`.
+- **SELECT m15 = M-HUMAN-REVIEW-CADENCE** 2026-07-18. `directives/pending/` re-drained: empty. `.halt`
+  absent. Picked over the three remaining DIR-001-sourced candidates (M-OUTCOME-EVAL/
+  M-ADVERSARIAL-EVAL/M-COMPETITIVE-BENCH — still need a concrete scenario list authored, not yet
+  charter-ready) because M-HUMAN-REVIEW-CADENCE's own stated blocking condition ("once ≥2 more DIR-*
+  instances exist to generalize from") is now clearly satisfied — 10 further directives (DIR-002
+  through DIR-011) have landed since DIR-001 was filed, giving a real 11-directive sample to
+  generalize a cadence design from instead of a speculative one. Also: `milestone_counter=15` is a
+  checkpoint boundary, and this milestone's own deliverable (a health track visible in checkpoint
+  snapshots) is designed to prove itself live at this exact ABSORB. Authored charter
+  `charters/M15-human-review-cadence.md`: type explore, value type discovery (primary, formalizing
+  the channel DIR-001 identified as the sole source of structural discoveries) + governance-integrity
+  (secondary, DIR-002/005/007-class "untracked invariant" pattern recurring for the human-review
+  channel itself), Δv̂=0 by design (method infra, no VT chart move — matches M-GATES/M-DIR-PROJECTION/
+  M-SIZING/M-VMETA-GATE's own zero-VT precedent). 7 Done-when clauses: a real tally of all 11 archived
+  directives, a computed `milestones-since-last-human-directive` health track added to `dashboard.md`
+  (K=5 soft-alarm, explicitly non-blocking — contrast with the V_meta consolidation-lag gate, which
+  IS blocking), a citable rule section added to `inherited-core.md`, a precise `OUTER-LOOP.md` step 8
+  edit, live proof via this milestone's own `checkpoints/cp-15.md` write, confirmation no blocking
+  mechanism was introduced, and a `backlog.md` row update at ABSORB. Gate-hash check:
+  `it0-gate-hash-check.sh --by-reference charters/M15-human-review-cadence.md` → **PASS**. it0 checks
+  recorded in-charter: ceiling arithmetic N/A (Δv̂=0), domain-misfit audit-channel explicitly N/A
+  (method-infra doc editing, no live external system, no product code — consistent with
+  M-SIZING/M-VMETA-GATE/M13/M14 precedent). Charter explicitly states the adversarial-audit gate is
+  NOT expected to fire and pre-commits the m6/M13/M14 override precedent if iteration-0 recommends
+  skipping iteration-1. Dispatching inner iteration-0 and iteration-1 next, both from worktrees off
+  the current master HEAD.
