@@ -245,9 +245,25 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      because SELECT (step 1) only considers non-DONE rows and a deferral with no row is a deferral
      to never (DIR-016's finding). Record the check's PASS/FAIL output directly in this ABSORB's log
      entry, mirroring the V_meta gate's row-update discipline.
+   - **DoD meta-enforcer gate (DIR-017 / M25-dod-meta-enforcer, HARD BLOCK on step 7's
+     `milestone_counter++` — positioned immediately AFTER the adversarial-audit gate, V_meta
+     consolidation-lag gate, and design-only-milestone impl-row gate above all individually clear,
+     and BEFORE the driver→master publish sub-step below):** this is a SEPARATE, additional check
+     from the three individual gates above — it does not replace any of their own HARD BLOCKs
+     (each stays exactly as specified above), it verifies that the RECORD of all four DoD clauses
+     (`inherited-core.md`'s "Definition of Done" section: adversarial-audit, V_meta-lag,
+     line-budget, impl-row) plus the no-self-exemption meta-clause is actually complete and
+     undrifted for this milestone. Run:
+     `scripts/it0-dod-check.sh <milestone-id> <charter-file> <dashboard-ABSORB-entry-text-or-file>`
+     — a non-zero exit is the SAME HARD BLOCK shape/placement as the three gates it wraps; step 7's
+     `milestone_counter++` **MUST NOT** run until it PASSes (exit 0). Record the check's raw
+     PASS/FAIL output directly in this ABSORB's log entry, mirroring the V_meta gate's and impl-row
+     gate's own row-update discipline. See `inherited-core.md`'s "Definition of Done" section for
+     the full clause definitions and the no-self-exemption waiver-line shape this gate enforces.
    - **Driver → master publish sub-step (DIR-018 / M23-outer-driver-isolation, HARD sequencing —
-     runs AFTER the adversarial-audit gate, V_meta consolidation-lag gate, and design-only-
-     milestone impl-row gate above all clear, and BEFORE step 7's `milestone_counter++`):** this is
+     runs AFTER the adversarial-audit gate, V_meta consolidation-lag gate, design-only-milestone
+     impl-row gate, AND the DoD meta-enforcer gate above all clear, and BEFORE step 7's
+     `milestone_counter++`):** this is
      the ONLY point at which the loop's own work (charter drafts, iteration worktrees/branches,
      inner-merge conflict resolution — all of which happened upstream on `exp5-outer-driver`) lands
      on `master`. Publish via a single, atomic, deliberate merge:
@@ -257,15 +273,15 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      landing on `master` mid-milestone racing an in-progress loop merge index): because the loop
      never writes to `master` directly between boundaries, there is nothing for a human commit to
      race until this single publish point, and that point is itself gated behind the audit/consolidation-
-     lag/impl-row HARD BLOCKs above. Any conflict at THIS merge is subject to the same no-silent-drop
+     lag/impl-row/DoD-meta-enforcer HARD BLOCKs above. Any conflict at THIS merge is subject to the same no-silent-drop
      reconciliation-note requirement as the master→driver merge at step 0 (DIR-018 item 3, see
      above) — per-file resolution, both sides read, a reconciliation note recorded in this ABSORB's
      log entry, never a blanket `--ours`/`--theirs`.
 7. **UPDATE DASHBOARD** — VT, slope (marginal Δv), ρ, charter-thickness, discovery-latency,
    calibration-error, `V_meta consolidation lag` (re-derive milestones-since-confirmed for every
-   ledger row per `v-meta-ledger.md`), milestone_counter++ (only after BOTH the V_meta gate AND the
-   design-only-milestone impl-row gate above clear, AND the driver→master publish sub-step above has
-   landed the milestone's work on `master`).
+   ledger row per `v-meta-ledger.md`), milestone_counter++ (only after the V_meta gate, the
+   design-only-milestone impl-row gate, AND the DoD meta-enforcer gate above all clear, AND the
+   driver→master publish sub-step above has landed the milestone's work on `master`).
    **`backlog.md`/`dashboard.md` regeneration (M24-task-backlog-projection-impl, design doc §13,
    applies forward from m24):** re-run `scripts/it0-backlog-regen.mjs` (generates the
    `backlog.md`/backlog-section-of-`dashboard.md` view from the live `milestone-candidate`-labeled
