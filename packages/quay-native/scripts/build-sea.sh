@@ -52,10 +52,22 @@ echo "[1/5] Bundling quay-native with esbuild (ESM -> CJS, manifest.js aliased t
 node scripts/esbuild-sea.mjs
 
 echo "[2/5] Writing SEA config..."
+# M01-dist iteration-1 (Windows CI fix): mirrors the same fix in
+# packages/quay/scripts/build-sea.sh — see that file's comment for the full
+# root-cause explanation (Node's --experimental-sea-config parses "main"/
+# "output" with native Windows path handling, which does not understand Git
+# Bash's POSIX-style /d/... paths).
+if command -v cygpath >/dev/null 2>&1; then
+  BUNDLE_JSON="$(cygpath -w "${BUNDLE}")"
+  BLOB_JSON="$(cygpath -w "${BLOB}")"
+else
+  BUNDLE_JSON="${BUNDLE}"
+  BLOB_JSON="${BLOB}"
+fi
 cat > "${OUT_DIR}/sea-config.json" <<EOF
 {
-  "main": "${BUNDLE}",
-  "output": "${BLOB}",
+  "main": "${BUNDLE_JSON//\\/\\\\}",
+  "output": "${BLOB_JSON//\\/\\\\}",
   "disableExperimentalSEAWarning": true
 }
 EOF

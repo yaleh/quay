@@ -37,10 +37,27 @@ echo "[1/5] Bundling quay (Core) with esbuild (ESM -> CJS, version.js aliased to
 node scripts/esbuild-sea.mjs
 
 echo "[2/5] Writing SEA config..."
+# M01-dist iteration-1 (Windows CI fix): `node --experimental-sea-config`
+# parses the "main"/"output" JSON values with the *native* Node.js fs path
+# resolver, not through the shell. On Windows under Git Bash, ${BUNDLE}/
+# ${BLOB} are POSIX-style MSYS paths (e.g. /d/a/quay/quay/packages/quay/
+# dist-sea/quay-bundle.cjs), which bash/cp/npx all handle transparently but
+# which Node's native Windows path handling does NOT understand — it looked
+# for a literal, nonexistent path and failed with "Cannot read main script
+# ...: no such file or directory" even though esbuild had genuinely written
+# the file. Convert to Windows-native (D:\...) paths for the JSON only, via
+# `cygpath -w` when available (Git Bash/MSYS provides it; no-op elsewhere).
+if command -v cygpath >/dev/null 2>&1; then
+  BUNDLE_JSON="$(cygpath -w "${BUNDLE}")"
+  BLOB_JSON="$(cygpath -w "${BLOB}")"
+else
+  BUNDLE_JSON="${BUNDLE}"
+  BLOB_JSON="${BLOB}"
+fi
 cat > "${OUT_DIR}/sea-config.json" <<EOF
 {
-  "main": "${BUNDLE}",
-  "output": "${BLOB}",
+  "main": "${BUNDLE_JSON//\\/\\\\}",
+  "output": "${BLOB_JSON//\\/\\\\}",
   "disableExperimentalSEAWarning": true
 }
 EOF
