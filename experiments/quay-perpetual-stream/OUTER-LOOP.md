@@ -46,10 +46,25 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    - the **inner termination five conditions** (§3.2);
    - the **it0 systematic-explore checks** (next step);
    - a pinned pointer (path + git SHA) to `inherited-core.md` (Tier-B, not inlined).
-4. **it0 SYSTEMATIC-EXPLORE CHECKS** (§4.4, 4/5 offline-validated): (a) ceiling/floor arithmetic —
-   is any target arithmetically unreachable? (b) gate-hash/transclusion — charter gates verbatim?
-   (c) dogfooding evidence-gate — does "done" require a real run, not prose? (d) domain-misfit — does
-   this milestone's new domain have an independent audit channel? Any fire → fix before dispatch.
+4. **it0 SYSTEMATIC-EXPLORE CHECKS** (§4.4) — run the mechanized checks below, not just read about
+   them (M02-gates milestone, `charters/M02-gates.md`):
+   (a) **ceiling/floor arithmetic** — `scripts/it0-ceiling-check.sh <gap-id>...` against every
+       gap/directive ID this milestone's charter cites as in-scope; non-zero exit or a CLOSED/
+       NOT-FOUND result means the charter's scope is stale — re-derive before dispatch.
+   (b) **gate-hash/transclusion** — `scripts/it0-gate-hash-check.sh <charter-file>` against the
+       drafted charter; non-zero exit means an undeclared paraphrase of the pinned HARD GATES
+       block — fix the charter text (not the script) before dispatch.
+   (c) **dogfooding evidence-gate** — `scripts/it0-dogfood-evidence-gate.sh <iteration-report.md>
+       [window]` against each inner iteration's report as it's produced; a FAIL means a claimed-met
+       Done-when clause has no nearby pasted-output evidence — send back to the inner iteration
+       before ABSORB, not silently accepted.
+   (d) **domain-misfit audit-channel** — apply the decision procedure in `inherited-core.md`
+       ("Domain-misfit audit-channel — concrete decision procedure") to this milestone's Done-when
+       list; if Step 3 concludes no independent mechanism is reachable, that IS a §3.2 condition-3
+       ceiling trigger — redesign the milestone's scope before dispatch, don't dispatch without an
+       audit channel.
+   Any check firing → fix before dispatch, per the procedures/scripts above (all under
+   `experiments/quay-perpetual-stream/scripts/`).
 5. **DISPATCH INNER** — run the milestone as a bounded BAIME experiment to convergence. Per iteration
    use `baime:iteration-executor` fed the charter (Tier-A) only. Terminate on the first of (§3.2):
    Done-when complete | ΔV<0.02 both-layers K=2 consecutive | ceiling→redesign-OR-stop | past
