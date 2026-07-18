@@ -8,7 +8,11 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
 - **Protocol (architecture, all §§):** `docs/proposals/quay-perpetual-stream-experiment-v5.md`
 - **Offline calibration/evidence:** `experiments/offline-replay/RESULTS.md`
 - **Dashboard (mutable outer state):** `experiments/quay-perpetual-stream/dashboard.md`
-- **Backlog (milestone candidates):** `experiments/quay-perpetual-stream/backlog.md`
+- **Backlog (milestone candidates):** `experiments/quay-perpetual-stream/backlog.md` — **generated
+  view** as of M24-task-backlog-projection-impl (DIR-015 item 2 / m13 design doc §1/§13): the task
+  store (`label: milestone-candidate` tasks) is canonical; `backlog.md`/`dashboard.md` are regenerated
+  from it via `scripts/regenerate-backlog-views.mjs`, not hand-edited as the source of truth going
+  forward. SELECT (step 1 below) reads the task store directly.
 - **Inherited core (Tier-B methodology):** `experiments/quay-perpetual-stream/inherited-core.md`
 
 ## Invariants — never violate
@@ -68,9 +72,23 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    pre-commit hook (per DIR-018's own "keep it minimal, not a heavy process" request) — the loop
    applies it by reading this text, the same way it already applies the gate-hash and line-budget
    checks' fix-the-charter (not the mechanism) discipline.
-1. **SELECT** the next milestone from `backlog.md` per the explore/exploit policy (§4.5): **≥1 explore
-   milestone per 5**. Exploit = high-value, high-ρ, method handles it; explore = new surface/domain
-   that grows the reusable core. Prefer aged high-value items (DIR-004 Distribution is URGENT).
+1. **SELECT** the next milestone candidate. **Candidates are read via `task_list`, not `backlog.md`
+   prose** (M24-task-backlog-projection-impl, DIR-015 item 2 / m13 design doc §1/§13 — the task store
+   is canonical for backlog/milestone/selection tracking going forward; `backlog.md` is a generated
+   view, see step 0's note below and the regeneration script under `scripts/`). Run
+   `task_list --label milestone-candidate --status todo` (native provider MCP tool, or
+   `node packages/quay/bin/quay.js task list --label milestone-candidate --status todo --json`
+   equivalently) to get the live open-candidate set; apply the explore/exploit policy (§4.5): **≥1
+   explore milestone per 5**. Exploit = high-value, high-ρ, method handles it; explore = new
+   surface/domain that grows the reusable core. Prefer aged high-value items (DIR-004 Distribution is
+   URGENT).
+   **Write the selection back onto the task store as part of this step:** the chosen candidate task
+   gets `milestone:M-NN` appended to its `labels` (via `task_write`) at dispatch time, and every OTHER
+   candidate task actually considered this pass (i.e. compared against the winner, not the full
+   unconsidered backlog) gets a short **not-selected note** appended to its body — e.g. a `## Not
+   selected (M-NN)` section stating the pass number and one-line reason (aged-out, smaller Δv̂, wrong
+   value type for this pass's explore/exploit slot, etc.). This makes the SELECT reasoning
+   inspectable per-task instead of only living in a dashboard/checkpoint narrative.
    **Size the candidate BEFORE dispatch** using `inherited-core.md`'s "Milestone size definition +
    verify-iteration size gauge" section: does the proposed scope let iteration-0 land ALL Done-when
    in one pass, with iteration-1 having real material to independently re-derive (not empty
@@ -170,6 +188,16 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    adaptations to the log; check φ — if a prior adaptation was just reused unchanged by THIS
    (different-domain) milestone, **CONSOLIDATE**: merge it into `inherited-core.md` and retire the
    citation (§4.2).
+   - **Execution-provenance task write-back (M24-task-backlog-projection-impl, DIR-015 item 2 / m13
+     design doc §10):** for the milestone-candidate task(s) just executed this pass — including any
+     in-scope DIR-labeled task whose underlying directive this milestone resolved — `task_write` an
+     appended `## Execution record` body section (milestone id, iteration(s), realized `Δv`, merge
+     commit SHA(s), one-line outcome summary — the same shape as the backfilled tasks' `## Outcome`
+     section) and set `status: done`. This is a DIFFERENT actor/time than the `milestone:M-NN`
+     selection-label write in step 1 (SELECT) and than the anti-drift checks' narrow status-mirror
+     contract (`it0-dir-projection-check.mjs`/a future backlog-projection check both explicitly
+     ignore `## Execution record` sections and `milestone:M-NN` labels when computing divergence, per
+     M24 Stage 1.2 — this write-back is expected content, not drift).
    - **Adversarial-audit gate (DIR-007 / M10-audit-consolidation, HARD BLOCK on this milestone's VT-
      curve append / Done-when-complete claim — distinct from, and in addition to, the inner
      milestone's own iteration-1):** BEFORE this milestone's realized `Δv` is appended to the VT
@@ -238,6 +266,13 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    ledger row per `v-meta-ledger.md`), milestone_counter++ (only after BOTH the V_meta gate AND the
    design-only-milestone impl-row gate above clear, AND the driver→master publish sub-step above has
    landed the milestone's work on `master`).
+   **`backlog.md`/`dashboard.md` regeneration (M24-task-backlog-projection-impl, design doc §13,
+   applies forward from m24):** re-run `scripts/it0-backlog-regen.mjs` (generates the
+   `backlog.md`/backlog-section-of-`dashboard.md` view from the live `milestone-candidate`-labeled
+   task set, value-ordered by default with a `--sort=updated` recency alternate) as part of this
+   step, paired with the status-change writes above — the same "glue regeneration to the exact
+   action that changes the canonical source" discipline the M05 DIR-projection mechanism already
+   uses (design doc §14 item 2), not a separate standing/CI-only check.
 8. **CHECKPOINT (non-blocking)** if `milestone_counter % 5 == 0`: write `checkpoints/cp-<NN>.md` — a
    health snapshot across all tracks (including `dashboard.md`'s "Human-review cadence" track's
    current `milestones-since-last-human-directive` value, per `inherited-core.md`'s Human-review

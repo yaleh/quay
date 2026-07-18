@@ -1846,3 +1846,48 @@ Checkpoint not due (next due at m25, per every-5 cadence — cp-20 was last). `m
 22 → 23. Continuing directly to m24 DRAIN/SELECT, no human wait — this time exercising the new
 master↔driver merge discipline the loop just built on itself: DRAIN step 0 will now include the
 explicit master→driver merge sub-step before SELECT.
+
+**DRAIN m24 (2026-07-18).** First real exercise of M23's new master→driver merge sub-step:
+`git checkout exp5-outer-driver && git merge master` — fast-forward, no conflict (`22806f1` →
+`2899a38`). `directives/pending/` unchanged: DIR-015 (still pending — `M-TASK-BACKLOG-PROJECTION-
+IMPL`'s own SELECT is exactly this milestone's work, see below), DIR-017 (still pending — step 1's
+meta-enforcer is a large, human-verification-gated program, not yet chartered).
+`it0-dir-projection-check.sh experiments/quay-perpetual-stream` initially **FAILed with 6
+divergences**: DIR-004/DIR-005 tasks had no status-mirror field at all; DIR-013/DIR-014/DIR-016/
+DIR-018 task mirrors were stuck `pending` despite their files being archived (`applied`) by M19/
+M20/M21/M23 — stale projections accumulating exactly the kind of drift DIR-015/DIR-017 are about.
+Per `OUTER-LOOP.md` step 0's "must be resolved... before the drain step is considered complete"
+requirement, reconciled all 6 via `task_write` (updated `extra.dirStatus` + the `Status mirror:`
+body line + DIR-013/014/016/018's stale `extra.dirFile` path to `applied`/`archive/...`; DIR-004/
+005 given the mirror field for the first time) — no directive-file content changed, no new
+directive decisions made, pure projection reconciliation (commit `ac03a71` on `exp5-outer-driver`).
+Re-run: `PASS: 16 label:directive task(s) checked against 18 DIR file(s) — no divergence.`
+
+**SELECT m24 (2026-07-18).** Chose `M-TASK-BACKLOG-PROJECTION-IMPL` (`backlog.md`, created m21 by
+`M-IMPL-ROW-ENFORCEMENT`'s retroactive sweep) — the highest-value aged pending candidate: DIR-015
+item 2's own implementation, explicitly deferred at M21 ("that new row's own future SELECT"), M22
+("explicit OUT of scope", named only as `quay-task-to-plan`'s future dogfood customer), and M23
+("deferred, out of scope for M23") — three consecutive deferrals of the exact "deferred to never"
+pattern DIR-015 was filed to cure. capability-growth (primary) + governance-integrity (secondary,
+closes the "quay only shows DIRs" distortion this session's DIR-projection drift just demonstrated
+concretely). Full spec: `docs/proposals/exp5-task-backlog-primitive-projection.md` §15's 13-item
+dispatch-ready checklist. **Charter:** `charters/M24-task-backlog-projection-impl.md` — chartered
+the FULL §15 scope as a single milestone under the ceiling-expansion regime (not split into a
+follow-on row), reasoning: the governance/infra hard floor forbids dispatching this class of row
+partial (enabling half + enforcement half must ship together), and §15 is DIR-015 item 2's one
+coherent deliverable. Explicit 4-phase plan (Phase 1: `it0-dir-projection-check.mjs` id-scheme +
+ignore-sections + `resolved`-synonym updates; Phase 2: M01-M12 backfill + forward-looking
+`milestone-candidate` task creation; Phase 3: `OUTER-LOOP.md` SELECT/ABSORB wiring to read/write
+via `task_list`/`task_write`; Phase 4: `backlog.md`/`dashboard.md` regeneration script, anti-drift
+check, Web UI `?label=` verification, full test suite, scoped `git diff --stat`), 8 top-level
+in-scope items (2 per phase), each phase an independently coherent ≤500-line build+verify unit.
+Non-goals: VT/history re-scoring beyond backfill provenance, no `serve.js`/new Web UI code (design
+requires zero UI code changes), no renaming exp4's existing bare DIR ids, DIR-014 items 2-3 (a
+separate row), no further branch-isolation enforcement beyond M23, no `inherited-core.md`
+methodology-substrate rewrite. Both gates verified PASS before dispatch:
+`it0-ceiling-line-budget-check.sh` (phase/stage plan present, ceiling-expansion regime satisfied)
+and `it0-gate-hash-check.sh --by-reference` (pinned hash unchanged since M06). This milestone's own
+ABSORB satisfies the DIR-016 impl-row gate by being the implementing milestone itself (marks its
+own backlog row DONE, does not need to spawn a further `-IMPL` row — it IS the `-IMPL` row).
+Dispatching inner iteration-0 and iteration-1 next, both from worktrees off `exp5-outer-driver`
+HEAD (not `master`), per the now-standing M23 driver-isolation discipline.
