@@ -170,9 +170,27 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      carry-forward reason directly in the ledger row (no silent deferral — a missing/blank
      disposition is not a valid resolution). Update the row's status/notes in `v-meta-ledger.md`
      accordingly as part of this ABSORB step, before proceeding to step 7.
+   - **Design-only-milestone impl-row gate (DIR-016 / M21-impl-row-enforcement, HARD BLOCK on step
+     7's `milestone_counter++`):** a milestone is **design-only** for this gate's purposes if EITHER
+     its own `backlog.md` row text states "design delivered"/"design-doc only" (or equivalent), OR
+     its deliverable includes a "Done-when clauses a future implementing milestone would need"
+     section (or equivalently-named dispatch-ready follow-up checklist). If THIS milestone is
+     design-only, its ABSORB **MUST** create a selectable, non-DONE `<M-NAME>-IMPL` candidate row in
+     `backlog.md` — sourced to the design doc's own "Done-when clauses a future implementing
+     milestone would need" checklist — **before** step 7's `milestone_counter++` may execute. Run
+     `scripts/it0-impl-row-check.sh <milestone-id> backlog.md` as the mechanical check; a non-zero
+     exit means the row is missing (or the milestone is design-only with no row yet) and
+     `milestone_counter++` **MUST NOT** run until the row exists and the script re-run PASSes. This
+     is the SAME HARD BLOCK shape and placement as the V_meta consolidation-lag gate immediately
+     above and the adversarial-audit gate above that — deferring a design-only milestone's
+     implementation as prose only, with no selectable row, is NOT a valid resolution of this gate,
+     because SELECT (step 1) only considers non-DONE rows and a deferral with no row is a deferral
+     to never (DIR-016's finding). Record the check's PASS/FAIL output directly in this ABSORB's log
+     entry, mirroring the V_meta gate's row-update discipline.
 7. **UPDATE DASHBOARD** — VT, slope (marginal Δv), ρ, charter-thickness, discovery-latency,
    calibration-error, `V_meta consolidation lag` (re-derive milestones-since-confirmed for every
-   ledger row per `v-meta-ledger.md`), milestone_counter++ (only after the gate above clears).
+   ledger row per `v-meta-ledger.md`), milestone_counter++ (only after BOTH the V_meta gate AND the
+   design-only-milestone impl-row gate above clear).
 8. **CHECKPOINT (non-blocking)** if `milestone_counter % 5 == 0`: write `checkpoints/cp-<NN>.md` — a
    health snapshot across all tracks (including `dashboard.md`'s "Human-review cadence" track's
    current `milestones-since-last-human-directive` value, per `inherited-core.md`'s Human-review

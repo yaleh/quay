@@ -801,3 +801,35 @@ prior dependency. Note (worktree-local edit): this file is Tier-B shared context
 made to the copy of `inherited-core.md` inside this iteration's own worktree and will be reconciled
 against the real shared file by the outer loop at ABSORB, per this milestone's charter (Done-when 4
 note) — expected, not a conflict to avoid.
+
+## Design-only-milestone impl-row rule (M21-impl-row-enforcement, DIR-016)
+
+**Statement (reusable rule, mechanized gate lives in `OUTER-LOOP.md` step 6/ABSORB, HARD BLOCK on
+step 7's `milestone_counter++`):** a milestone is **design-only** when EITHER its own `backlog.md`
+row text states "design delivered"/"design-doc only" (or an equivalent explicit design-only marker),
+OR its deliverable includes a "Done-when clauses a future implementing milestone would need" section
+(or an equivalently-named dispatch-ready follow-up checklist). Every design-only milestone's ABSORB
+**MUST** create a selectable, non-DONE `<M-NAME>-IMPL` candidate row in `backlog.md` — sourced to
+the design doc's own follow-up checklist — **before** `milestone_counter++` may execute in step 7.
+Leaving the implementation follow-up as prose only (no row) is **NOT** a valid resolution: SELECT
+(`OUTER-LOOP.md` step 1) only ever considers non-DONE `backlog.md` rows, so a design-only milestone
+that completes without materializing its own `-IMPL` row has deferred its implementation to a
+candidate list SELECT structurally cannot reach — a deferral to never, not a deferral to later.
+
+**Why a HARD BLOCK, same shape as the V_meta consolidation-lag gate and the adversarial-audit gate:**
+un-enforced convention already failed twice out of three recent design milestones before this rule
+existed (DIR-016's finding): `M-CLI-EDIT-PARITY` (m14) correctly produced `M-CLI-EDIT-PARITY-IMPL`
+(SELECTed and closed at m16), but `M-TASK-BACKLOG-PROJECTION` (m13) and `M-TASK-TO-PLAN-SKILL-DESIGN`
+(m17) did not — the mechanism only works when it cannot be silently skipped. This mirrors DIR-002's
+general finding ("enforcement half never built") applied one level up, to the loop's own
+design→implementation hand-off.
+
+**Mechanical check:** `scripts/it0-impl-row-check.sh <milestone-id> [backlog-file]` — exit 0 = PASS
+(milestone is not design-only, OR is design-only and its `-IMPL` row already exists and is
+non-DONE); exit 1 = FAIL/FLAG (milestone is design-only and no corresponding `-IMPL` row is found in
+the backlog file); exit 2 = usage/file-not-found error. Same 0/1/2 convention as
+`it0-gate-hash-check.sh` and `it0-ceiling-line-budget-check.sh`.
+
+**Scope note:** this rule requires only that the row EXISTS and is selectable — it does not require
+the implementation itself to be built at the same ABSORB (that remains a future SELECT's own
+milestone, per the existing design→implementation two-step this rule is defending, not collapsing).

@@ -1,6 +1,6 @@
 # DIR-016
 
-- status: pending
+- status: applied
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Make design→implementation drop-through impossible — require every design-only milestone's ABSORB to materialize a selectable `-IMPL` candidate row (never leave it as prose only), and retroactively sweep past design-only milestones that lack one
@@ -70,7 +70,38 @@ DIR-009/010 self-hosting fix — all three are instances of "designed but never
 materialized as selectable/executable work."
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred:
-- resolved_by: iteration-N / milestone M-NN
-- outcome: applied | deferred | rejected
-- evidence: pointer to the design doc / iteration report section / commit -->
+- resolved_by: M21-impl-row-enforcement, iteration-1, 2026-07-18
+- outcome: applied — all four Requested-action items done
+- evidence:
+  - Item 1 (HARD BLOCK rule): `OUTER-LOOP.md` step 6 (ABSORB) amended with a new
+    "Design-only-milestone impl-row gate" clause, placed and worded in the same
+    HARD-BLOCK register as the existing V_meta consolidation-lag gate immediately
+    above it and the adversarial-audit gate above that — blocks step 7's
+    `milestone_counter++` until a design-only milestone's `-IMPL` row exists.
+    `inherited-core.md` gained the equivalent reusable "Design-only-milestone
+    impl-row rule" section (mirrors the gate's statement, scope note, and
+    rationale independent of the `OUTER-LOOP.md` mechanized placement).
+  - Item 2 (mechanical check): `scripts/it0-impl-row-check.sh` created, following
+    the existing `it0-*.sh` 0/1/2 exit-code convention (0=PASS, 1=FAIL/FLAG,
+    2=usage/file-not-found error). Fixture-tested against real backlog rows: PASS
+    on `M-CLI-EDIT-PARITY` (has `-IMPL` row), FAIL on `M-TASK-BACKLOG-PROJECTION`
+    (had none, before this same milestone's sweep created one), usage-error (exit
+    2) on an unknown milestone id — see this milestone's
+    `milestones/M21-impl-row-enforcement/iterations/iteration-1.md` for full
+    pasted output.
+  - Item 3 (retroactive sweep): `backlog.md` gained two new non-DONE rows —
+    `M-TASK-BACKLOG-PROJECTION-IMPL` (satisfies DIR-015 item 1) and
+    `M-TASK-TO-PLAN-SKILL-IMPL-PHASE7` (the script's own naming-convention
+    verdict against `M-TASK-TO-PLAN-SKILL-DESIGN` was FAIL/absent; substantive
+    review confirmed `M-TASK-TO-PLAN-SKILL-PROPOSAL-STEP` (m20) covers Phase 6
+    only and Phase 7 was tracked solely as prose + a still-pending DIR-014 with
+    no row of its own, so a new row was created rather than judged
+    not-applicable). Full disposition reasoning + script transcripts in this
+    milestone's iteration-1 report.
+  - Item 4 (visibility note): recorded, not built — `M-TASK-BACKLOG-PROJECTION-
+    IMPL`'s own backlog row text states explicitly that DIR-016 item 4
+    (projecting `-IMPL` rows into quay) depends on that row's own future
+    implementation; no task-projection work was attempted by this milestone
+    (out of scope per the charter's explicit non-goals, same DIR-009/010
+    self-hosting-mechanism fence DIR-015 already draws).
+  - Full detail: `experiments/quay-perpetual-stream/milestones/M21-impl-row-enforcement/iterations/iteration-1.md`.
