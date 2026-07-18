@@ -1,0 +1,278 @@
+### NOTE: issue numbers jumped 17->21/22 because concurrent iteration-1 run created/closed its own scratch issues #16,18,19,20 (all -it1 tagged) in parallel -- expected per charter dispatcher notes, confirmed via gh issue list, not a bug ###
+
+### gh issue view 21/22 BEFORE ###
+{"body":"## Proposal\nStandalone isEven(n) helper for scenario3-work-gh/, TDD.\n\n## Plan\nPhase 1: red test. Phase 2: green impl.\n\n## AC\n- [ ] iseven.test.mjs covers zero, positive even, positive odd, negative even, negative odd\n- [ ] iseven.mjs implements isEven(n)\n- [ ] node --test scenario3-work-gh/iseven.test.mjs exits 0\n\n## DoD\n- [ ] AC re-verified live\n- [ ] no product code touched","labels":[],"number":21,"state":"OPEN","title":"[M28-outcome-eval-scratch] Scenario 3 child A: implement isEven helper"}
+{"body":"## Proposal\nStandalone titleCase(str) helper for scenario3-work-gh/, TDD.\n\n## Plan\nPhase 1: red test. Phase 2: green impl.\n\n## AC\n- [ ] titlecase.test.mjs covers empty string, single word, multiple words, already-capitalized input\n- [ ] titlecase.mjs implements titleCase(str)\n- [ ] node --test scenario3-work-gh/titlecase.test.mjs exits 0\n\n## DoD\n- [ ] AC re-verified live\n- [ ] no product code touched","labels":[],"number":22,"state":"OPEN","title":"[M28-outcome-eval-scratch] Scenario 3 child B: implement titleCase helper"}
+
+### quay task view gh-21/gh-22 --provider github ###
+{
+  "id": "gh-21",
+  "title": "[M28-outcome-eval-scratch] Scenario 3 child A: implement isEven helper",
+  "status": "todo",
+  "lane": null,
+  "labels": [],
+  "parent": null,
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 21,
+    "html_url": "https://github.com/yaleh/quay/issues/21",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "## Proposal\nStandalone isEven(n) helper for scenario3-work-gh/, TDD.\n\n## Plan\nPhase 1: red test. Phase 2: green impl.\n\n## AC\n- [ ] iseven.test.mjs covers zero, positive even, positive odd, negative even, negative odd\n- [ ] iseven.mjs implements isEven(n)\n- [ ] node --test scenario3-work-gh/iseven.test.mjs exits 0\n\n## DoD\n- [ ] AC re-verified live\n- [ ] no product code touched"
+}
+{
+  "id": "gh-22",
+  "title": "[M28-outcome-eval-scratch] Scenario 3 child B: implement titleCase helper",
+  "status": "todo",
+  "lane": null,
+  "labels": [],
+  "parent": null,
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 22,
+    "html_url": "https://github.com/yaleh/quay/issues/22",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "## Proposal\nStandalone titleCase(str) helper for scenario3-work-gh/, TDD.\n\n## Plan\nPhase 1: red test. Phase 2: green impl.\n\n## AC\n- [ ] titlecase.test.mjs covers empty string, single word, multiple words, already-capitalized input\n- [ ] titlecase.mjs implements titleCase(str)\n- [ ] node --test scenario3-work-gh/titlecase.test.mjs exits 0\n\n## DoD\n- [ ] AC re-verified live\n- [ ] no product code touched"
+}
+### quay task view gh-26 --provider github (parent, confirm role derived as compound from checkbox refs) ###
+{
+  "id": "gh-26",
+  "title": "[M28-outcome-eval-scratch] Scenario 3 parent: scenario3-work-gh utility bundle epic",
+  "status": "todo",
+  "lane": null,
+  "labels": [],
+  "parent": null,
+  "children": [
+    "gh-21",
+    "gh-22"
+  ],
+  "role": "compound",
+  "extra": {
+    "number": 26,
+    "html_url": "https://github.com/yaleh/quay/issues/26",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "## Proposal\nCompound/epic task bundling two independently mergeable deliverables (isEven, titleCase) under scenario3-work-gh/. Decompose test satisfied.\n\n## Plan\nDrive each child todo->ready->done, then integration-accept once childrenStatus() confirms both done.\n\n## AC\n- [ ] both children reach done\n- [ ] childrenStatus() gate confirms parent completable\n\n## DoD\n- [ ] AC re-verified live via quay task check\n\n- [ ] #21\n- [ ] #22"
+}
+### RED: both fail before implementations exist ###
+    at ModuleJob.link (node:internal/modules/esm/module_job:245:17) {
+  code: 'ERR_MODULE_NOT_FOUND',
+  url: 'file:///home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M28-outcome-eval/scenario3-work-gh/titlecase.mjs'
+}
+
+Node.js v25.8.0
+✖ titlecase.test.mjs (73.343933ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 97.424039
+
+✖ failing tests:
+
+test at iseven.test.mjs:1:1
+✖ iseven.test.mjs (74.824882ms)
+  'test failed'
+
+test at titlecase.test.mjs:1:1
+✖ titlecase.test.mjs (73.343933ms)
+  'test failed'
+### GREEN: both pass after implementation ###
+✔ zero is even (1.720417ms)
+✔ positive even (0.217102ms)
+✔ positive odd (0.241813ms)
+✔ negative even (0.232255ms)
+✔ negative odd (0.236681ms)
+✔ empty string (2.099544ms)
+✔ single word (0.392273ms)
+✔ multiple words (0.318921ms)
+✔ already-capitalized input (0.32823ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 156.64927
+### flip both todo -> ready ###
+{
+  "id": "gh-21",
+  "title": "[M28-outcome-eval-scratch] Scenario 3 child A: implement isEven helper",
+  "status": "ready",
+  "lane": null,
+  "labels": [],
+  "parent": "gh-26",
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 21,
+    "html_url": "https://github.com/yaleh/quay/issues/21",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "## Proposal\nStandalone isEven(n) helper for scenario3-work-gh/, TDD.\n\n## Plan\nPhase 1: write iseven.test.mjs (red). Phase 2: implement iseven.mjs (green). Phase 3: self-audit AC only after real test-pass observed.\n\n## AC\n- [x] iseven.test.mjs covers zero, positive even, positive odd, negative even, negative odd -- verified live, 5/5 pass\n- [x] iseven.mjs implements isEven(n)\n- [x] node --test scenario3-work-gh/iseven.test.mjs exits 0\n\n## DoD\n- [x] AC re-verified live\n- [x] no product code touched"
+}
+{
+  "id": "gh-22",
+  "title": "[M28-outcome-eval-scratch] Scenario 3 child B: implement titleCase helper",
+  "status": "ready",
+  "lane": null,
+  "labels": [],
+  "parent": "gh-26",
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 22,
+    "html_url": "https://github.com/yaleh/quay/issues/22",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "## Proposal\nStandalone titleCase(str) helper for scenario3-work-gh/, TDD.\n\n## Plan\nPhase 1: write titlecase.test.mjs (red). Phase 2: implement titlecase.mjs (green). Phase 3: self-audit AC only after real test-pass observed.\n\n## AC\n- [x] titlecase.test.mjs covers empty string, single word, multiple words, already-capitalized input -- verified live, 4/4 pass\n- [x] titlecase.mjs implements titleCase(str)\n- [x] node --test scenario3-work-gh/titlecase.test.mjs exits 0\n\n## DoD\n- [x] AC re-verified live\n- [x] no product code touched"
+}
+### execute self-audit: re-run tests ###
+✔ zero is even (2.137732ms)
+✔ positive even (0.312853ms)
+✔ positive odd (0.473687ms)
+✔ negative even (0.226728ms)
+✔ negative odd (0.327319ms)
+✔ empty string (2.437628ms)
+✔ single word (0.483186ms)
+✔ multiple words (0.371536ms)
+✔ already-capitalized input (0.378332ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 169.391578
+### task check both (execute->done gate) ###
+{
+  "id": "gh-21",
+  "gate": "execute->done",
+  "ok": true,
+  "acTotal": 3,
+  "acChecked": 3,
+  "reason": "all AC checkboxes checked; eligible to move to done"
+}
+{
+  "id": "gh-22",
+  "gate": "execute->done",
+  "ok": true,
+  "acTotal": 3,
+  "acChecked": 3,
+  "reason": "all AC checkboxes checked; eligible to move to done"
+}
+
+### flip both ready -> done ###
+{
+  "id": "gh-21",
+  "title": "[M28-outcome-eval-scratch] Scenario 3 child A: implement isEven helper",
+  "status": "done",
+  "lane": null,
+  "labels": [],
+  "parent": "gh-26",
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 21,
+    "html_url": "https://github.com/yaleh/quay/issues/21",
+    "user": "yaleh",
+    "state": "closed"
+  },
+  "body": "## Proposal\nStandalone isEven(n) helper for scenario3-work-gh/, TDD.\n\n## Plan\nPhase 1: write iseven.test.mjs (red). Phase 2: implement iseven.mjs (green). Phase 3: self-audit AC only after real test-pass observed.\n\n## AC\n- [x] iseven.test.mjs covers zero, positive even, positive odd, negative even, negative odd -- verified live, 5/5 pass\n- [x] iseven.mjs implements isEven(n)\n- [x] node --test scenario3-work-gh/iseven.test.mjs exits 0\n\n## DoD\n- [x] AC re-verified live\n- [x] no product code touched"
+}
+{
+  "id": "gh-22",
+  "title": "[M28-outcome-eval-scratch] Scenario 3 child B: implement titleCase helper",
+  "status": "done",
+  "lane": null,
+  "labels": [],
+  "parent": "gh-26",
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 22,
+    "html_url": "https://github.com/yaleh/quay/issues/22",
+    "user": "yaleh",
+    "state": "closed"
+  },
+  "body": "## Proposal\nStandalone titleCase(str) helper for scenario3-work-gh/, TDD.\n\n## Plan\nPhase 1: write titlecase.test.mjs (red). Phase 2: implement titlecase.mjs (green). Phase 3: self-audit AC only after real test-pass observed.\n\n## AC\n- [x] titlecase.test.mjs covers empty string, single word, multiple words, already-capitalized input -- verified live, 4/4 pass\n- [x] titlecase.mjs implements titleCase(str)\n- [x] node --test scenario3-work-gh/titlecase.test.mjs exits 0\n\n## DoD\n- [x] AC re-verified live\n- [x] no product code touched"
+}
+### flip parent todo -> ready ###
+{
+  "id": "gh-26",
+  "title": "[M28-outcome-eval-scratch] Scenario 3 parent: scenario3-work-gh utility bundle epic",
+  "status": "ready",
+  "lane": null,
+  "labels": [],
+  "parent": null,
+  "children": [
+    "gh-21",
+    "gh-22"
+  ],
+  "role": "compound",
+  "extra": {
+    "number": 26,
+    "html_url": "https://github.com/yaleh/quay/issues/26",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "## Proposal\nCompound/epic task bundling two independently mergeable deliverables (isEven, titleCase) under scenario3-work-gh/. Decompose test satisfied.\n\n## Plan\nDrive each child todo->ready->done, then integration-accept once childrenStatus() confirms both done.\n\n## AC\n- [x] both children reach done -- confirmed via quay task view, both status:done\n- [x] childrenStatus() gate confirms parent completable -- to be verified below\n\n## DoD\n- [x] AC re-verified live via quay task check\n\n- [ ] #21\n- [ ] #22"
+}
+
+### task check gh-26 (execute->done gate, should roll up childrenStatus()) ###
+{
+  "id": "gh-26",
+  "gate": "execute->done",
+  "ok": true,
+  "acTotal": 2,
+  "acChecked": 2,
+  "reason": "all AC checkboxes checked; eligible to move to done",
+  "childrenStatus": [
+    {
+      "id": "gh-21",
+      "status": "done"
+    },
+    {
+      "id": "gh-22",
+      "status": "done"
+    }
+  ]
+}
+### flip parent ready -> done ###
+{
+  "id": "gh-26",
+  "title": "[M28-outcome-eval-scratch] Scenario 3 parent: scenario3-work-gh utility bundle epic",
+  "status": "done",
+  "lane": null,
+  "labels": [],
+  "parent": null,
+  "children": [
+    "gh-21",
+    "gh-22"
+  ],
+  "role": "compound",
+  "extra": {
+    "number": 26,
+    "html_url": "https://github.com/yaleh/quay/issues/26",
+    "user": "yaleh",
+    "state": "closed"
+  },
+  "body": "## Proposal\nCompound/epic task bundling two independently mergeable deliverables (isEven, titleCase) under scenario3-work-gh/. Decompose test satisfied.\n\n## Plan\nDrive each child todo->ready->done, then integration-accept once childrenStatus() confirms both done.\n\n## AC\n- [x] both children reach done -- confirmed via quay task view, both status:done\n- [x] childrenStatus() gate confirms parent completable -- to be verified below\n\n## DoD\n- [x] AC re-verified live via quay task check\n\n- [ ] #21\n- [ ] #22"
+}
+### gh issue view 21/22/26 AFTER (raw gh CLI, ground truth) ###
+{"number":21,"state":"CLOSED"}
+{"number":22,"state":"CLOSED"}
+{"number":26,"state":"CLOSED"}

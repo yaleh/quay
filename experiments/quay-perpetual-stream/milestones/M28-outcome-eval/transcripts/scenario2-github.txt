@@ -1,0 +1,106 @@
+### gh issue view 17 BEFORE (raw gh CLI, ground truth) ###
+{"body":"Scratch issue for quay experiment M28-outcome-eval, scenario 2 (dogfooding quay:author/quay:execute against a real GitHub-backed task via the github provider). Will be closed at end of milestone run per no-litter discipline.\n\n## Proposal\nplaceholder","labels":[{"id":"LA_kwDOTY9jJM8AAAACrxoKrA","name":"status:todo","description":"quay-native status: todo","color":"ededed"}],"number":17,"state":"OPEN","title":"[M28-outcome-eval-scratch] Scenario 2: author->execute round-trip, github provider"}
+
+### quay task view gh-17 --provider github (confirms Core CLI sees the real issue) ###
+{
+  "id": "gh-17",
+  "title": "[M28-outcome-eval-scratch] Scenario 2: author->execute round-trip, github provider",
+  "status": "todo",
+  "lane": null,
+  "labels": [],
+  "parent": null,
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 17,
+    "html_url": "https://github.com/yaleh/quay/issues/17",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "Scratch issue for quay experiment M28-outcome-eval, scenario 2 (dogfooding quay:author/quay:execute against a real GitHub-backed task via the github provider). Will be closed at end of milestone run per no-litter discipline.\n\n## Proposal\nplaceholder"
+}
+### RED: run tests before implementation exists ###
+  code: 'ERR_MODULE_NOT_FOUND',
+  url: 'file:///home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M28-outcome-eval/scenario2-work/wordcount.mjs'
+}
+
+Node.js v25.8.0
+✖ wordcount.test.mjs (57.01927ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 68.755379
+
+✖ failing tests:
+
+test at wordcount.test.mjs:1:1
+✖ wordcount.test.mjs (57.01927ms)
+  'test failed'
+### GREEN: run tests after implementation ###
+✔ empty string has 0 words (1.425872ms)
+✔ single word has 1 word (0.266154ms)
+✔ multiple words with extra whitespace (0.270715ms)
+✔ newlines act as separators (0.214174ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 94.782745
+### flip todo -> ready ###
+{
+  "id": "gh-17",
+  "title": "[M28-outcome-eval-scratch] Scenario 2: author->execute round-trip, github provider",
+  "status": "ready",
+  "lane": null,
+  "labels": [],
+  "parent": null,
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 17,
+    "html_url": "https://github.com/yaleh/quay/issues/17",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "Scratch issue for quay experiment M28-outcome-eval, scenario 2 (dogfooding quay:author/quay:execute against a real GitHub-backed task via the github provider). Will be closed at end of milestone run per no-litter discipline.\n\n## Proposal\nWhat/why: identical job to scenario 1 but against the github provider, real freshly-created yaleh/quay issue #17. Deliverable: a tiny standalone script scenario2-work/wordcount.mjs (countWords(text) helper) + Node --test suite, motivated by the real lack of a body-word-count utility anywhere in the quay CLI output (task view prints raw body with no length/word-count summary) -- this scratch deliverable does NOT modify any product code under packages/.\nApproach: TDD, same discipline as scenario 1.\n\n## Plan\nPhase 1: write scenario2-work/wordcount.test.mjs (red).\nPhase 2: implement scenario2-work/wordcount.mjs (green).\nPhase 3: self-audit AC only after real test-pass observed.\n\n## AC\n- [x] wordcount.test.mjs covers: empty string, single word, multiple words with extra whitespace, newlines-as-separators -- verified live, 4/4 pass\n- [x] wordcount.mjs implements countWords(text) satisfying all tests\n- [x] `node --test scenario2-work/wordcount.test.mjs` exits 0\n\n## DoD\n- [ ] AC fully satisfied and independently re-verified\n- [ ] No product code under packages/ touched\n- [ ] Task driven todo->ready->done using ONLY quay:author/quay:execute Skills + quay task edit --provider github, zero manual gh api calls to mutate state (gh used read-only for before/after verification only)"
+}
+### quay:execute self-audit: re-run tests independently ###
+✔ empty string has 0 words (1.505735ms)
+✔ single word has 1 word (0.280175ms)
+✔ multiple words with extra whitespace (0.271991ms)
+✔ newlines act as separators (0.218504ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 120.391075
+### gh issue view 17 AFTER (raw gh CLI, ground truth) ###
+{"labels":[{"id":"LA_kwDOTY9jJM8AAAACrxoLEw","name":"status:ready","description":"quay-native status: ready","color":"0e8a16"}],"number":17,"state":"CLOSED","title":"[M28-outcome-eval-scratch] Scenario 2: author->execute round-trip, github provider"}
+### independent re-read via quay task view gh-17 --provider github (confirms status=done despite stale label) ###
+{
+  "id": "gh-17",
+  "title": "[M28-outcome-eval-scratch] Scenario 2: author->execute round-trip, github provider",
+  "status": "done",
+  "lane": null,
+  "labels": [],
+  "parent": null,
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 17,
+    "html_url": "https://github.com/yaleh/quay/issues/17",
+    "user": "yaleh",
+    "state": "closed"
+  },
+  "body": "Scratch issue for quay experiment M28-outcome-eval, scenario 2 (dogfooding quay:author/quay:execute against a real GitHub-backed task via the github provider). Will be closed at end of milestone run per no-litter discipline.\n\n## Proposal\nWhat/why: identical job to scenario 1 but against the github provider, real freshly-created yaleh/quay issue #17. Deliverable: a tiny standalone script scenario2-work/wordcount.mjs (countWords(text) helper) + Node --test suite, motivated by the real lack of a body-word-count utility anywhere in the quay CLI output (task view prints raw body with no length/word-count summary) -- this scratch deliverable does NOT modify any product code under packages/.\nApproach: TDD, same discipline as scenario 1.\n\n## Plan\nPhase 1: write scenario2-work/wordcount.test.mjs (red).\nPhase 2: implement scenario2-work/wordcount.mjs (green).\nPhase 3: self-audit AC only after real test-pass observed.\n\n## AC\n- [x] wordcount.test.mjs covers: empty string, single word, multiple words with extra whitespace, newlines-as-separators -- verified live, 4/4 pass\n- [x] wordcount.mjs implements countWords(text) satisfying all tests\n- [x] `node --test scenario2-work/wordcount.test.mjs` exits 0\n\n## DoD\n- [x] AC fully satisfied and independently re-verified -- re-run at execute time, 4/4 pass again\n- [x] No product code under packages/ touched -- confirmed, scratch dir only\n- [x] Task driven todo->ready->done using ONLY quay:author/quay:execute Skills + quay task edit --provider github, zero manual gh api calls to mutate state (gh used read-only for before/after verification only)"
+}

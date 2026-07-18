@@ -1,0 +1,78 @@
+### Scenario 5 native: create 2 fresh parents + 1 fresh child, reparent child from parent A to parent B ###
+{
+  "id": "M28S5-PARENT-A",
+  "title": "M28S5 parent A (reassign-from)",
+  "status": "todo",
+  "labels": [],
+  "parent": null,
+  "children": [],
+  "role": "primitive",
+  "extra": {},
+  "body": "## Proposal\nScratch parent for scenario 5 reparenting demo (native).",
+  "updatedAt": 1784416809007.0864
+}
+{
+  "id": "M28S5-PARENT-B",
+  "title": "M28S5 parent B (reassign-to)",
+  "status": "todo",
+  "labels": [],
+  "parent": null,
+  "children": [],
+  "role": "primitive",
+  "extra": {},
+  "body": "## Proposal\nScratch parent for scenario 5 reparenting demo (native).",
+  "updatedAt": 1784416809767.0896
+}
+{
+  "id": "M28S5-CHILD-C",
+  "title": "M28S5 child C (write-verify target)",
+  "status": "todo",
+  "labels": [],
+  "parent": "M28S5-PARENT-A",
+  "children": [],
+  "role": "primitive",
+  "extra": {},
+  "body": "## Proposal\nScratch child for scenario 5 reparenting demo (native).",
+  "updatedAt": 1784416810511.0925
+}
+### BEFORE: quay task view M28S5-CHILD-C (parent=M28S5-PARENT-A) ###
+{
+  "id": "M28S5-CHILD-C",
+  "title": "M28S5 child C (write-verify target)",
+  "status": "todo",
+  "labels": [],
+  "parent": "M28S5-PARENT-A",
+  "children": [],
+  "role": "primitive",
+  "extra": {},
+  "body": "## Proposal\nScratch child for scenario 5 reparenting demo (native).",
+  "updatedAt": 1784416810511.0925
+}
+
+### reparent: quay task edit M28S5-CHILD-C --parent M28S5-PARENT-B ###
+{
+  "id": "M28S5-CHILD-C",
+  "title": "M28S5 child C (write-verify target)",
+  "status": "todo",
+  "labels": [],
+  "parent": "M28S5-PARENT-B",
+  "children": [],
+  "role": "primitive",
+  "extra": {},
+  "body": "## Proposal\nScratch child for scenario 5 reparenting demo (native).",
+  "updatedAt": 1784416817135.12
+}
+
+### AFTER: independent re-read via quay task view (not the write call's own return value) ###
+{
+  "id": "M28S5-CHILD-C",
+  "title": "M28S5 child C (write-verify target)",
+  "status": "todo",
+  "labels": [],
+  "parent": "M28S5-PARENT-B",
+  "children": [],
+  "role": "primitive",
+  "extra": {},
+  "body": "## Proposal\nScratch child for scenario 5 reparenting demo (native).",
+  "updatedAt": 1784416817135.12
+}
