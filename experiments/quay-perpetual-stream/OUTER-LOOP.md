@@ -197,6 +197,31 @@ only two — stop signals:
 - **Stop:** `touch experiments/quay-perpetual-stream/.halt` → clean exit at next boundary.
 - **Review:** read `checkpoints/` and `dashboard.md` any time — no interaction required.
 
+- **Lesson recorded (DIR-013 item 4, M19-task-to-plan-docs-reconcile, 2026-07-18)
+  — concurrent human/loop edits to the same live-steering file:** a human-directed
+  `proposal-to-plan` run and the autonomous M17 milestone independently designed
+  the same skill by writing to the same file (`docs/proposals/exp5-quay-task-
+  proposal-plan-skill.md`) concurrently on `master`; their commits interleaved
+  and the merge, though clean at the git level, left dangling internal
+  cross-references and a self-contradictory section count (fixed at
+  M19-task-to-plan-docs-reconcile). Recorded, not enforced (mechanical
+  enforcement is explicitly deferred to a future milestone's scoping — not built
+  here):
+  - When a human is live-editing (or about to live-edit) a file the loop will
+    also touch this session, **prefer pausing the loop** (touch `.halt`, per the
+    Stop control above) **or working on a branch**, rather than letting both
+    write the same file on `master` concurrently.
+  - The loop's merge/ABSORB step must **not** claim a design doc is
+    "dispatch-ready" / "singular and unambiguous" when its own newly-appended
+    section still contains unresolved internal cross-references (a `§N` citation
+    that does not resolve to an existing section) — a **post-merge
+    cross-reference sweep is required** before such a claim is made, not assumed
+    from a clean git merge alone (a clean auto-merge says nothing about
+    cross-document consistency).
+  - Whether to build a mechanical enforcement check for this (e.g. a
+    proposal-internal `§N`-reference-resolves script) is left to a future
+    milestone's scoping — this note only records the lesson.
+
 ## Chart transitions (§6.2)
 When a chart saturates (all surfaces cov→1, VT→chart max) and value still exists, open a NEW chart:
 add a surface or deepen a capability ceiling, record a numeric conversion factor old→new points.

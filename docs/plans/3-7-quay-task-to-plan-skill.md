@@ -1,14 +1,33 @@
 # Plan: A quay-task-native `quay-task-to-plan` skill + the exp5 milestone-model changes it requires
 
 - **Source proposal:** `docs/proposals/exp5-quay-task-proposal-plan-skill.md`
-  (reviewed, DRAFT status, authored 2026-07-18). This plan decomposes the two
-  deliverable strands the proposal describes (§8 the skill; §4/§5/§6/§7 the
-  milestone-model changes) into dependency-ordered phases/stages. Scope is drawn
-  **strictly** from the proposal — nothing here extends it.
+  (MATURED, dispatch-ready skill design, post-M17-merge status — see
+  **Authoritative-artifact note** below). This plan decomposes the two
+  deliverable strands the proposal describes (§8's flat list + Part II §§12-19
+  the skill; §4/§5/§6/§7 the milestone-model changes) into dependency-ordered
+  phases/stages. Scope is drawn **strictly** from the proposal — nothing here
+  extends it.
+  - **Authoritative-artifact note (added at M19-task-to-plan-docs-reconcile,
+    per DIR-013 item 3):** the proposal's Part II (§§12-19) is the
+    dispatch-ready OPERATIONAL SPEC an implementer needs (exact tool names, the
+    `## Proposal` body shape, N-independent-proposal adjudication mechanics, the
+    plan-check stop condition, and — above all — **§17's Done-when checklist**).
+    This plan (`docs/plans/3-7-…`) is the BUILD-ROUTE ELABORATION: it decomposes
+    §§12-19's spec into dependency-ordered phases/stages with line budgets. If
+    this plan's phase/stage decomposition and the proposal's §17 checklist ever
+    drift (e.g. after further edits to either document), **the proposal's §17
+    checklist is the acceptance authority; this plan's phase/stage breakdown is
+    advisory build-route elaboration and must be reconciled to match §17, not
+    the other way around.** (DIR-013's own recommendation, adopted here — no
+    concrete reason found during this reconciliation pass to prefer the
+    opposite.) Every phase below MUST be read alongside proposal §§12-19, not
+    only the pre-merge §8 flat list this plan was originally drafted against.
 
 - **⚠ THIS IS A PLAN, NOT AN AUTHORIZATION TO EXECUTE.** Consistent with the sibling
   plan `docs/plans/2-exp5-driver-deliverability-packaging.md` and the proposal's
-  §11: exp5 (`experiments/quay-perpetual-stream/`) is a RUNNING perpetual loop.
+  §19 (bootstrap resolution, preserved from the original draft's §11 — see the
+  Authoritative-artifact note above): exp5 (`experiments/quay-perpetual-stream/`)
+  is a RUNNING perpetual loop.
   Strand 2's edits touch that live harness (`OUTER-LOOP.md`, `inherited-core.md`,
   `scripts/`) and MUST enter through `/quay-directive` at a milestone boundary
   (OUTER-LOOP §4.7, consumed at the next boundary, never mid-milestone), one phase
@@ -37,9 +56,9 @@
   prose/skill/template/methodology assets, verification is defined as **mechanical
   checkable artifacts** (the gate script runs and FAILS on an over-budget fixture,
   PASSES on an under-budget one; existing `it0-*.sh` still pass; `grep`-checkable
-  structural assertions). This is the proposal's own §8.4 code-vs-prose classifier,
-  applied to the plan's own stages. Pretending 80% coverage applies to prose is the
-  failure both plan 2 and proposal §8.4 explicitly warn against.
+  structural assertions). This is the proposal's own §15.2 code-vs-prose
+  classifier, applied to the plan's own stages. Pretending 80% coverage applies to
+  prose is the failure both plan 2 and proposal §15.2 explicitly warn against.
 
 - **Grounded state (verified against the codebase 2026-07-18):**
   - `~/.claude/skills/proposal-to-plan/SKILL.md` exists — the 5-step
@@ -380,7 +399,8 @@ clamp's plan-check stage cites the budget gate). Stages sequential.
 
 ## Phase 6 — `quay-task-to-plan` skill: proposal step (N-subagents + adjudication)
 
-**Goal (proposal §8.1, §8.2, §8.5, §8.6):** create the new skill's scaffold and its
+**Goal (proposal §12 read/write behavior, §13 N-independent-proposal step, §16
+GitHub degradation, §8's point 6 feature-developer reuse):** create the new skill's scaffold and its
 **proposal step** — the half that reads a milestone's grouped tasks from the
 provider, runs N independent subagents to author proposals + adjudicates, and writes
 each reconciled proposal back to its task `body` (portable, DIR-011). This phase is
@@ -424,7 +444,7 @@ frontmatter+I/O contract of 6.1; 6.3 needs the proposal subagents of 6.2 to adju
   parametrized prompt template, default `N=2`, with persona differentiation notes).
   (~170 lines total.)
 - **Work:** encode the proposal step as **N independent Task-agent runs**
-  (proposal §8.2, §6): blank-slate-leaning (minimize shared context; no
+  (proposal §13, §6): blank-slate-leaning (minimize shared context; no
   inter-agent communication so divergence is a real signal; persona differentiation
   as a cheap diversity widener), each authoring a proposal for the task(s).
   Default `N=2` (proposal §10). Keep `proposal-to-plan`'s architect-review as an
@@ -470,10 +490,12 @@ frontmatter+I/O contract of 6.1; 6.3 needs the proposal subagents of 6.2 to adju
 
 ## Phase 7 — `quay-task-to-plan` skill: plan step (grounded check) + TDD ≥80% hard gate + dogfood wiring
 
-**Goal (proposal §8.3, §8.4, §8.6, §11):** complete the skill with the **plan step**
+**Goal (proposal §14 plan step, §15 TDD ≥80% hard gate, §8's point 6
+feature-developer reuse, §19 bootstrap resolution):** complete the skill with the **plan step**
 (author + grounded convergent check producing a milestone-level plan record kept
 **out of the task tree**), the **TDD ≥80% hard gate** with the code-vs-prose
-classifier, and the dogfooding wiring per §11.
+classifier, and the dogfooding wiring per §19 (the bootstrap-resolution paragraph
+preserved from the original draft's §11).
 
 **Dependencies:** requires Phase 6 (the plan step consumes the reconciled proposals
 the proposal step produces). References the Phase 3/4/5 conventions (budget, clamp,
@@ -482,7 +504,7 @@ stopping rule) but does not require their live-loop adoption first. Stages seque
 ### Stage 7.1 — Plan step: author + grounded convergent check (milestone-level, out of task tree)
 - **Files:** edit `.claude/skills/quay-task-to-plan/SKILL.md` (plan step) and add
   `.claude/skills/quay-task-to-plan/prompts/plan-check-subagent.md`. (~170 lines.)
-- **Work:** encode the plan step (proposal §8.3, §7): one subagent authors a
+- **Work:** encode the plan step (proposal §14, §7): one subagent authors a
   milestone-level plan record (phases/stages, dependency order, per-stage line
   budgets, per-stage TDD ≥80% acceptance — the exact shape of *this* document); then
   one **maximally codebase-grounded** check subagent iterates to convergence
@@ -502,7 +524,7 @@ stopping rule) but does not require their live-loop adoption first. Stages seque
 ### Stage 7.2 — TDD ≥80% hard gate with the code-vs-prose classifier
 - **Files:** edit `.claude/skills/quay-task-to-plan/SKILL.md` (hard-gate section)
   and its `Constraints` block. (~140 lines.)
-- **Work:** encode proposal §8.4: **TDD ≥80% per stage is a HARD GATE**, stricter
+- **Work:** encode proposal §15.1/§15.2: **TDD ≥80% per stage is a HARD GATE**, stricter
   than exp5's current "paste test output" evidence gate — because single-
   implementation makes it the primary correctness net (§6). Add the per-stage
   **classifier**: "is this stage code or prose?" — literal ≥80% line coverage applies
@@ -521,9 +543,10 @@ stopping rule) but does not require their live-loop adoption first. Stages seque
 ### Stage 7.3 — Dogfooding wiring, bootstrap resolution, and `feature-developer` reuse note
 - **Files:** edit `.claude/skills/quay-task-to-plan/SKILL.md` (a "Relationship /
   bootstrap" section) and its `Output` block. (~110 lines.)
-- **Work:** encode proposal §8.6 (reuse/wrap `feature-developer`'s orchestration
-  where it fits rather than reinventing the review loop) and §11's **bootstrap
-  resolution**: the skill-implementation milestone itself **cannot** run through
+- **Work:** encode proposal §8's point 6 (reuse/wrap `feature-developer`'s orchestration
+  where it fits rather than reinventing the review loop) and §19's **preserved
+  bootstrap resolution** (carried forward, unchanged, from the original draft's
+  §11): the skill-implementation milestone itself **cannot** run through
   `quay-task-to-plan` (it is its own deliverable), so that first milestone runs
   through the existing `proposal-to-plan`, and `quay-task-to-plan`'s design is
   cross-checked against `proposal-to-plan` step-by-step; only the **second** dev-
@@ -545,7 +568,7 @@ stopping rule) but does not require their live-loop adoption first. Stages seque
    Phase-5 stopping rule, consuming the Phase-4 budget gate.
 2. The TDD ≥80% hard gate is encoded with the code-vs-prose classifier (coverage %
    for code; mechanical checks for prose per plan 2).
-3. Bootstrap resolution (proposal §11), `feature-developer` reuse, `Output`, and
+3. Bootstrap resolution (proposal §19, preserved from original §11), `feature-developer` reuse, `Output`, and
    non-goals are all present.
 4. Prose-asset mechanical checks pass (frontmatter valid, all referenced tools/
    commands/skills resolve, `grep`-checkable presence of the load-bearing rules).
@@ -556,7 +579,7 @@ stopping rule) but does not require their live-loop adoption first. Stages seque
 ## Test / verification strategy (scope stated honestly)
 
 Split by asset type, exactly as `docs/plans/2-exp5-driver-deliverability-packaging.md`
-and proposal §8.4 require — **not** a single blanket coverage number.
+and proposal §15.2 require — **not** a single blanket coverage number.
 
 - **Executable code — TDD, ≥80% line coverage applies.** This is the Phase-4
   `it0-plan-budget-check.{sh,mjs}` (and any small helper the skill needs to invoke
@@ -589,10 +612,11 @@ and proposal §8.4 require — **not** a single blanket coverage number.
 
 ---
 
-## Dogfooding note (proposal §11)
+## Dogfooding note (proposal §19, preserving the original draft's §11 bootstrap resolution)
 
-**This plan is itself intended to be the dogfooding subject.** Per proposal §11,
-the first *development-class* milestone that builds this skill runs through the
+**This plan is itself intended to be the dogfooding subject.** Per proposal §19
+(which preserves, unchanged, the original draft's §11 bootstrap-resolution
+paragraph), the first *development-class* milestone that builds this skill runs through the
 **existing `proposal-to-plan`** skill (the bootstrap substrate — the new skill
 cannot run through itself before it exists), and `quay-task-to-plan`'s design is
 cross-checked against `proposal-to-plan` step-by-step. From the **second** dev-class

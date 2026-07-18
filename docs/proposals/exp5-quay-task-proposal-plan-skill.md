@@ -4,16 +4,17 @@
 m16→m17). Sections 1-11 are the original DRAFT (authored 2026-07-18 from a live
 human-steering conversation, git revision `05a8066`, the conversational draft
 DIR-012 references and cites verbatim as its precursor artifact) — kept
-unmodified as the rationale/evidence base. Sections 12-18 are NEW, added by this
+unmodified as the rationale/evidence base. Sections 12-19 are NEW, added by this
 milestone per its charter's in-scope items 1-8: they fully specify the skill's
 quay task read/write behavior, the N-independent-proposal + adjudication step,
 the plan author + grounded-convergent-check step (with a precise stop
 condition), the TDD ≥80%-per-stage hard gate, provider-agnostic GitHub
 degradation, a dispatch-ready Done-when checklist for a future implementing
-milestone, and explicit non-goals — at the same fidelity M13
+milestone, explicit non-goals, and a closing status/next-step section — at the
+same fidelity M13
 (`docs/proposals/exp5-task-backlog-primitive-projection.md` §15) and M14
 (`docs/proposals/exp5-cli-edit-parity.md` §6) achieved for their own skill/design
-docs. Per this milestone's charter, sections 12-18 are **design-doc-only**: no
+docs. Per this milestone's charter, sections 12-19 are **design-doc-only**: no
 skill implementation, no code under `.claude/skills/`, no edits to
 `inherited-core.md`/`OUTER-LOOP.md` (DIR-012 items 2/3 stay explicitly out of
 scope here — see §18).
@@ -24,7 +25,7 @@ it usable inside the exp5 perpetual OUTER loop for typical *development* work
 (up to ~2000 lines of change), not just the small methodology milestones exp5
 has run so far.
 
-## Table of contents — M17 addition map (§12-18)
+## Table of contents — M17 addition map (§12-19)
 
 | Doc section | DIR-012/charter in-scope item | Charter Done-when clause |
 |---|---|---|
@@ -36,6 +37,7 @@ has run so far.
 | §16 Provider-agnostic GitHub degradation | 6 | 6 |
 | §17 Done-when clauses for a future implementing milestone | 7 | 7 |
 | §18 Non-goals (M17-level restatement) | 8 | 8 |
+| §19 Status / next step (closing summary, supersedes original §11's DRAFT-era framing) | (closing section, not a separate charter item) | — |
 
 ---
 
@@ -575,7 +577,7 @@ task board — §12.3):
   record, full stop — stricter than exp5's current default "paste test output"
   evidence convention, which does not enforce a numeric threshold.
 
-### 15.2 Code-vs-prose per-stage classifier (scope caveat, carried from §8.4)
+### 15.2 Code-vs-prose per-stage classifier (scope caveat, carried from §8's point 4, "TDD ≥80% per stage is a hard gate")
 
 The ≥80% LINE-coverage number applies **only to executable code** stages (JS,
 shell, etc.). For prose/skill/template/manifest stages (a `SKILL.md`, subagent
@@ -624,8 +626,9 @@ precise reason the TDD gate must be a HARD gate here, stricter than the
 
 ## 16. Provider-agnostic GitHub degradation (charter item 6)
 
-Stated explicitly, extending §8.5's one-line summary into a precise behavior
-specification:
+Stated explicitly, extending §8's point 5 ("Provider-agnostic: everything the
+skill writes to tasks respects the body-portable / extra-native-only rule...")
+one-line summary into a precise behavior specification:
 
 - **`## Proposal` body write-back (§12.2):** fully supported on GitHub — `body`
   is a portable field per the portable-metadata convention; no degradation
@@ -711,8 +714,9 @@ literal evidence named.
       only the positive "gate passed" case).
 - [ ] `[prose]`-tagged stages are gated by the mechanical-check discipline (§15.2)
       instead of a coverage percentage, demonstrated on at least one real prose
-      stage (e.g. the skill's own `SKILL.md` authoring, if self-hosted per §11's
-      bootstrap resolution) — pasted gate-hash/projection-check script output.
+      stage (e.g. the skill's own `SKILL.md` authoring, if self-hosted per §19's
+      preserved bootstrap-resolution paragraph, "bootstrapped on the existing
+      `proposal-to-plan`") — pasted gate-hash/projection-check script output.
 - [ ] Milestone→task grouping writes exclusively through `task_write`'s
       `labels`/`parent`/`children` fields (§12.3), verified on BOTH providers —
       pasted two-provider conformance probe output (native + GitHub), following
@@ -779,7 +783,8 @@ cadence) are the natural first customers."
 **Current status (M17-task-to-plan-skill-design, this milestone):** the DIR was
 filed (`DIR-012`) and drained exactly per that routing — this milestone
 (charter item 1) has now produced the "fully specify the new skill" deliverable
-the DIR's Requested-action item 1 asked for (§§12-18 above). Still Design-only:
+the DIR's Requested-action item 1 asked for (§§12-19 above, this closing status
+section included). Still Design-only:
 per this milestone's charter, DIR-012 items 2 (`inherited-core.md`/
 `OUTER-LOOP.md` milestone-model changes — the ≤2000-line ceiling, nested ≤500/
 ≤200 budgets, two-class diversity policy, two-ends-clamp pipeline as reusable
