@@ -74,3 +74,13 @@ into the task-to-plan work (DIR-014) — that is a separate deferred implementat
 - resolved_by: iteration-N / milestone M-NN
 - outcome: applied | deferred | rejected
 - evidence: pointer to the design doc / iteration report section / commit -->
+
+**Status note (M21-impl-row-enforcement, 2026-07-18, this DIR stays `pending` — NOT resolved,
+only partially addressed):** item 1 ("Create the selectable candidate row
+`M-TASK-BACKLOG-PROJECTION-IMPL`") is now satisfied as a byproduct of M21's retroactive sweep
+(DIR-016 item 3) — the row exists in `backlog.md`, non-DONE, sourced to this DIR + the m13 design
+doc's §15 checklist, mirroring the `M-CLI-EDIT-PARITY-IMPL` precedent's row shape, per this item's
+own instruction. Item 2 (charter and dispatch the actual implementation) remains fully open — this
+is intentionally that row's own future SELECT work, not attempted by M21. This DIR is NOT archived;
+it stays `pending` until item 2 also lands, per M21's charter instruction not to close it out for
+row-creation alone.

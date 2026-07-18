@@ -801,3 +801,51 @@ prior dependency. Note (worktree-local edit): this file is Tier-B shared context
 made to the copy of `inherited-core.md` inside this iteration's own worktree and will be reconciled
 against the real shared file by the outer loop at ABSORB, per this milestone's charter (Done-when 4
 note) — expected, not a conflict to avoid.
+
+## Design-only milestone → mandatory `-IMPL` row rule (M21-impl-row-enforcement, DIR-016)
+
+**The problem this rule closes (DIR-016's finding, condensed):** a design-only milestone completes,
+marks itself DONE, and defers its implementation to "a future SELECT" in prose — but SELECT
+(`OUTER-LOOP.md` step 1) only considers non-DONE `backlog.md` candidate rows, so a deferral with no
+row is a deferral to never. Evidence: `M-CLI-EDIT-PARITY` (design, DONE m14) correctly got an
+`-IMPL` row (SELECTed and completed at m16); `M-TASK-BACKLOG-PROJECTION` (design, DONE m13) did
+NOT (DIR-015); `M-TASK-TO-PLAN-SKILL-DESIGN` (design, DONE m17) did NOT (its follow-up sat unqueued
+until DIR-014 was hand-filed). Whether a design milestone's implementation ever becomes reachable
+depended entirely on the ABSORB agent *remembering* to hand-author an `-IMPL` row — an unenforced
+convention that silently failed 2 of 3 times.
+
+**The rule, stated operationally (reusable across milestones, mirrored in `OUTER-LOOP.md` step 6's
+Impl-row gate):**
+
+1. **Definition — "design-only milestone."** A milestone is design-only if EITHER: (a) its own
+   `backlog.md` row states "design delivered" / "design-doc only" (or equivalent wording), OR (b)
+   its deliverable includes a "Done-when clauses a future implementing milestone would need"
+   section (or equivalent — a dispatch-ready checklist explicitly written for a *later*
+   implementing milestone to consume). A milestone that ships product/method-infra code, or is
+   itself the `-IMPL` implementation of a prior design, is NOT design-only.
+2. **The mandatory action.** At ABSORB (`OUTER-LOOP.md` step 6), before that milestone's Done-when
+   clauses may be recorded as complete or `milestone_counter++` (step 7) may execute, a design-only
+   milestone's ABSORB **MUST** create a corresponding **selectable, non-DONE `<M-NAME>-IMPL`**
+   candidate row in `backlog.md`, sourced to the design doc's own "Done-when clauses a future
+   implementing milestone would need" checklist (or nearest equivalent). Leaving the follow-up as
+   prose only is not a valid disposition of this rule.
+3. **HARD BLOCK, not advisory.** This is stated as unambiguously blocking — same shape/placement as
+   the existing V_meta consolidation-lag gate (`OUTER-LOOP.md` step 6, blocks step 7's
+   `milestone_counter++`) and the adversarial-audit gate (`OUTER-LOOP.md` step 6, blocks the
+   VT-append/Done-when-complete claim). A design-only milestone's ABSORB that skips this step has
+   not validly completed ABSORB.
+4. **Mechanical check, not eyeballing.** `scripts/it0-impl-row-check.sh <milestone-id>
+   [backlog-file]` flags (non-zero exit) a design-only milestone whose `-IMPL` row is absent from
+   `backlog.md`, mirroring the existing `it0-*.sh` 0/1/2 exit-code convention (0=pass, 1=flag/fail,
+   2=usage error). Without this mechanized half, this rule would itself recreate the very
+   enforcement-half-never-built pattern it exists to close (the DIR-002 lesson, applied one level
+   up to the loop's own design→implementation hand-off).
+5. **Retroactive scope.** The rule applies going forward from M21; the retroactive sweep of past
+   design-only milestones lacking their `-IMPL` row was performed once, at M21's own ABSORB (see
+   `backlog.md`'s `M-TASK-BACKLOG-PROJECTION-IMPL` row and the M21 iteration report's sweep
+   disposition table) — it is not re-run automatically on every future ABSORB, only the
+   going-forward per-milestone check is.
+
+Source: DIR-016 (filed together with DIR-015, its first concrete instance), resolved by
+M21-impl-row-enforcement. See `directives/archive/DIR-016-*.md`'s `## Resolution` section for the
+full evidence trail.

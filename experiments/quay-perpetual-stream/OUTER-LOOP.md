@@ -140,6 +140,25 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    adaptations to the log; check φ — if a prior adaptation was just reused unchanged by THIS
    (different-domain) milestone, **CONSOLIDATE**: merge it into `inherited-core.md` and retire the
    citation (§4.2).
+   - **Impl-row gate (DIR-016 / M21-impl-row-enforcement, HARD BLOCK on step 7's
+     `milestone_counter++`):** before this milestone may be marked DONE / `milestone_counter`
+     incremented in step 7 below, determine whether this milestone is **design-only** — its own
+     `backlog.md` row states "design delivered" / "design-doc only", OR its deliverable includes a
+     "Done-when clauses a future implementing milestone would need" section (or equivalent). If it
+     IS design-only, this ABSORB **MUST** create a corresponding **selectable, non-DONE
+     `<M-NAME>-IMPL` candidate row** in `backlog.md`, sourced to the design doc's own "Done-when
+     clauses a future implementing milestone would need" checklist (or the nearest equivalent
+     section), before `milestone_counter++` in step 7 may execute. Leaving the implementation
+     follow-up as prose only (a "still requires a future SELECT" sentence with no row) does **NOT**
+     satisfy this gate — it is the exact drop-through DIR-016 was filed to close. Run
+     `scripts/it0-impl-row-check.sh <milestone-id> backlog.md` to verify mechanically rather than
+     eyeballing the row; a non-zero exit means the row is missing or malformed and step 7 MUST NOT
+     proceed until it is created and the check re-run clean. This is the same HARD BLOCK
+     shape/placement as the V_meta consolidation-lag gate and the adversarial-audit gate below —
+     unambiguously blocking, not advisory. If this milestone is NOT design-only (it shipped
+     product/method-infra code, or is itself an `-IMPL` implementation of a prior design), this gate
+     is a documented no-op: state plainly in the ABSORB log entry that the milestone is not
+     design-only and why, rather than silently omitting the check.
    - **Adversarial-audit gate (DIR-007 / M10-audit-consolidation, HARD BLOCK on this milestone's VT-
      curve append / Done-when-complete claim — distinct from, and in addition to, the inner
      milestone's own iteration-1):** BEFORE this milestone's realized `Δv` is appended to the VT
