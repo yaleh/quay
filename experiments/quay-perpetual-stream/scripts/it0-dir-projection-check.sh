@@ -11,14 +11,31 @@
 #   (b) STATUS-DISAGREEMENT — a DIR-NNN.md file's own `status:` frontmatter line disagrees with
 #       its projected task's status-mirror field (checked in `extra.dirStatus` first, falling
 #       back to parsing the body's `Status mirror: <value>` line if `extra.dirStatus` is absent).
+#       `resolved` is accepted as a synonym of `applied` on EITHER side of the comparison (M24 /
+#       design doc §14 item 3 — the two words are used interchangeably in practice).
 #
 # A task with a real, matching file and an agreeing status mirror is not an error — that is the
 # expected, healthy projection state (files canonical, task is a generated projection of it).
 #
+# Id scheme (M24-task-backlog-projection-impl, design doc §14 item 1): each DIR-NNN.md file's join
+# key is tried in TWO forms — the experiment-prefixed form (e.g. `exp5-DIR-004`, derived from the
+# <experiment-dir> basename) first, falling back to the legacy bare `DIR-NNN` form if no prefixed
+# task exists. This lets newly-created/regenerated exp5 projections use the collision-proof
+# prefixed id (unblocking exp5's own DIR-004/DIR-005, whose bare ids are permanently occupied by
+# exp4's pre-existing same-numbered tasks) while leaving already-working bare-id projections
+# (DIR-003, DIR-006..018) passing unchanged — no retroactive rename performed.
+#
+# `## Execution record` body sections and `milestone:M-NN` labels (M24 / design doc §10's DIR
+# sub-tension resolution) are explicitly ignored by the comparison below — the check continues to
+# look ONLY at the status-mirror field, so a DIR task additionally carrying milestone-execution
+# provenance (applied by an executing milestone's ABSORB step) still PASSes.
+#
 # Usage:
 #   it0-dir-projection-check.sh <experiment-dir> [tasks-json-file]
 #
-#   <experiment-dir>    e.g. experiments/quay-perpetual-stream (the dir containing directives/)
+#   <experiment-dir>    e.g. experiments/quay-perpetual-stream (the dir containing directives/;
+#                        its basename's `quay-<slug>` -> `exp<N>` mapping is used to derive the
+#                        experiment id prefix — see EXP_PREFIX below)
 #   [tasks-json-file]   optional: a pre-fetched `task list --label directive --json` file to
 #                        check against (lets this run be tested/demonstrated deterministically
 #                        without a live MCP/CLI round-trip each time). If omitted, this script
@@ -38,6 +55,18 @@ fi
 EXP_DIR="$1"
 TASKS_JSON_FILE="${2:-}"
 DIRECTIVES_DIR="${EXP_DIR}/directives"
+
+# Derive the experiment-prefixed id namespace (design doc §14 item 1) from <experiment-dir>'s own
+# basename, e.g. quay-perpetual-stream (this is exp5) -> "exp5". Hand-maintained small map, since
+# there is no machine-readable experiment-number source file to read from; extend this map when a
+# new experiment directory adopts this script.
+EXP_BASENAME=$(basename "$EXP_DIR")
+case "$EXP_BASENAME" in
+  quay-webui-bootstrap) EXP_PREFIX="exp3" ;;
+  quay-continuous-bootstrap) EXP_PREFIX="exp4" ;;
+  quay-perpetual-stream) EXP_PREFIX="exp5" ;;
+  *) EXP_PREFIX="" ;;
+esac
 
 if [ ! -d "$DIRECTIVES_DIR" ]; then
   echo "ERROR: directives dir not found: $DIRECTIVES_DIR" >&2
@@ -94,7 +123,7 @@ printf '%s' "$TASKS_JSON" > "$TASKS_JSON_TMP"
 
 # Use node to do the JSON parsing + comparison (avoids a jq dependency, consistent with this
 # repo's existing scripts preferring node/awk over requiring extra tooling).
-export FILE_STATUS_TMP TASKS_JSON_TMP
+export FILE_STATUS_TMP TASKS_JSON_TMP EXP_PREFIX
 node "$(dirname "$0")/it0-dir-projection-check.mjs"
 STATUS=$?
 exit $STATUS

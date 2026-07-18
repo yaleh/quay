@@ -68,9 +68,27 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    pre-commit hook (per DIR-018's own "keep it minimal, not a heavy process" request) — the loop
    applies it by reading this text, the same way it already applies the gate-hash and line-budget
    checks' fix-the-charter (not the mechanism) discipline.
-1. **SELECT** the next milestone from `backlog.md` per the explore/exploit policy (§4.5): **≥1 explore
-   milestone per 5**. Exploit = high-value, high-ρ, method handles it; explore = new surface/domain
-   that grows the reusable core. Prefer aged high-value items (DIR-004 Distribution is URGENT).
+1. **SELECT** the next milestone from the task store's `milestone-candidate`-labeled tasks per the
+   explore/exploit policy (§4.5): **≥1 explore milestone per 5**. Exploit = high-value, high-ρ,
+   method handles it; explore = new surface/domain that grows the reusable core. Prefer aged
+   high-value items (DIR-004 Distribution is URGENT).
+   **Read path (M24-task-backlog-projection-impl, design doc §8 — dogfooding requirement, applies
+   forward from m24):** obtain the candidate set by calling `task_list` (MCP tool
+   `mcp__quay__task_list`, `label: milestone-candidate`, `status: todo`) or the CLI/native-provider
+   equivalent (`node packages/quay-native/bin/quay-native.js task list --label milestone-candidate
+   --json`, filtered to non-`done` status) — **never** by reading `backlog.md` prose directly as
+   the source of candidates. `backlog.md` remains useful as the generated human-readable *view*
+   (step 7's regeneration script) SELECT may consult for a quick overview, but the authoritative
+   query for "what are the candidates" is this task-store read path.
+   **Selection-provenance write-back (design doc §9, applies forward from m24):** on the SAME
+   SELECT pass, (a) apply `milestone:M-NN` label + transition `status: todo → ready` to the chosen
+   candidate task(s) (native provider status enum has no separate `in-progress` value; `ready`
+   is the "selected, about to dispatch" state); (b) for **every other** candidate task considered
+   in that pass but not chosen, `task_write` an appended not-selected note — a body line
+   `Not selected @M-NN: <reason>` per the body-first-portability convention (`extra.notSelected` MAY
+   additionally mirror it on native-only, same dual-representation pattern as the DIR
+   `Status mirror:`/`extra.dirStatus` fields) — so today's `backlog.md`-only "STALE at mN SELECT"
+   prose becomes a filterable, board-visible, per-candidate fact instead.
    **Size the candidate BEFORE dispatch** using `inherited-core.md`'s "Milestone size definition +
    verify-iteration size gauge" section: does the proposed scope let iteration-0 land ALL Done-when
    in one pass, with iteration-1 having real material to independently re-derive (not empty
@@ -170,6 +188,18 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    adaptations to the log; check φ — if a prior adaptation was just reused unchanged by THIS
    (different-domain) milestone, **CONSOLIDATE**: merge it into `inherited-core.md` and retire the
    citation (§4.2).
+   - **Execution-provenance write-back (M24-task-backlog-projection-impl, design doc §10, applies
+     forward from m24):** every task that was actually executed as part of this milestone
+     (including any in-scope DIR tasks that passed through this milestone's own scope) gets, via
+     `task_write`/`appendNote`: `milestone:M-NN` label confirmed/kept (already applied at SELECT,
+     step 1 above — ABSORB does not re-decide membership, only records completion); an appended
+     `## Execution record` body section (`Executed by M-NN, iterations 0-1. See
+     milestones/M-NN/iterations/. Outcome: <one-line summary>.`); and `status: ready → done` (or
+     `todo → done` for a DIR task the projection mechanism itself created without going through the
+     SELECT `ready` transition). The `it0-dir-projection-check.mjs` anti-drift check (step 0 above)
+     is explicitly updated to ignore this `milestone:M-NN` label and `## Execution record` section
+     when computing DIR file/task divergence (design doc §10's DIR sub-tension resolution) — it
+     continues to check only the `Status mirror:`/`extra.dirStatus` field.
    - **Adversarial-audit gate (DIR-007 / M10-audit-consolidation, HARD BLOCK on this milestone's VT-
      curve append / Done-when-complete claim — distinct from, and in addition to, the inner
      milestone's own iteration-1):** BEFORE this milestone's realized `Δv` is appended to the VT
@@ -238,6 +268,13 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    ledger row per `v-meta-ledger.md`), milestone_counter++ (only after BOTH the V_meta gate AND the
    design-only-milestone impl-row gate above clear, AND the driver→master publish sub-step above has
    landed the milestone's work on `master`).
+   **`backlog.md`/`dashboard.md` regeneration (M24-task-backlog-projection-impl, design doc §13,
+   applies forward from m24):** re-run `scripts/it0-backlog-regen.mjs` (generates the
+   `backlog.md`/backlog-section-of-`dashboard.md` view from the live `milestone-candidate`-labeled
+   task set, value-ordered by default with a `--sort=updated` recency alternate) as part of this
+   step, paired with the status-change writes above — the same "glue regeneration to the exact
+   action that changes the canonical source" discipline the M05 DIR-projection mechanism already
+   uses (design doc §14 item 2), not a separate standing/CI-only check.
 8. **CHECKPOINT (non-blocking)** if `milestone_counter % 5 == 0`: write `checkpoints/cp-<NN>.md` — a
    health snapshot across all tracks (including `dashboard.md`'s "Human-review cadence" track's
    current `milestones-since-last-human-directive` value, per `inherited-core.md`'s Human-review
