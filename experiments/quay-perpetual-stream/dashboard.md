@@ -1271,3 +1271,21 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   still running in their worktrees) — per the standing invariant, the loop did not pause or interrupt
   the in-flight dispatch for it; it will be drained and dispositioned at the m16→m17 SELECT boundary,
   immediately following this ABSORB, per normal DRAIN-then-continue protocol.
+- **SELECT m17 = M-TASK-TO-PLAN-SKILL-DESIGN** 2026-07-18. `directives/pending/` drained: DIR-012
+  found (landed mid-M16-dispatch, see the ABSORB m16 note above). Read DIR-012 in full — proposes a
+  quay-task-native `quay-task-to-plan` skill plus milestone-model changes (≤2000-line milestones with
+  Phase/Stage plans, N-independent-proposal upstream + adjudication, plan author + grounded convergent
+  check, TDD ≥80% hard gate), grounded in a live-conversation precursor design doc
+  (`docs/proposals/exp5-quay-task-proposal-plan-skill.md`). DIR-012's own Requested-action routes
+  design-first, same pattern as DIR-009/010/011: item 1 charter a design-doc milestone, item 2
+  (inherited-core.md/OUTER-LOOP.md milestone-model changes) and item 3 (dogfooding/implementation)
+  explicitly deferred. Archived DIR-012 to `directives/archive/` with a filled Resolution section
+  (commit `a179d5b`). Authored charter `charters/M17-task-to-plan-skill-design.md`: type explore,
+  value type discovery (primary) + governance-integrity (secondary), Δv̂=0 by design (method infra,
+  mirrors M13/M14's zero-VT design-doc precedent) — scopes IN DIR-012 item 1 only (full skill spec +
+  dispatch-ready Done-when checklist matching the M13/M14 pattern), scopes OUT items 2 and 3
+  explicitly. Gate-hash check: `it0-gate-hash-check.sh --by-reference
+  charters/M17-task-to-plan-skill-design.md` → **PASS** (same pinned hash reused unchanged, M12–M17).
+  Adversarial-audit gate NOT expected to trigger (Δv̂=0, no iteration-0 self-exemption authorized).
+  Dispatching inner iteration-0 and iteration-1 next, both from worktrees off the current master HEAD
+  (`a179d5b`).
