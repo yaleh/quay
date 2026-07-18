@@ -117,8 +117,21 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    adaptations to the log; check φ — if a prior adaptation was just reused unchanged by THIS
    (different-domain) milestone, **CONSOLIDATE**: merge it into `inherited-core.md` and retire the
    citation (§4.2).
+   - **V_meta consolidation-lag gate (DIR-005 / M07-vmeta-gate, HARD BLOCK on step 7's
+     `milestone_counter++`):** before this milestone may be marked DONE / `milestone_counter`
+     incremented in step 7 below, check every row in `v-meta-ledger.md`. For each row whose status is
+     `confirmed` (past the φ 2-cross-domain-confirmation threshold) but not yet `consolidated`,
+     compute `milestones-since-confirmed = milestone_counter (current, pre-increment) − confirming
+     milestone number (recorded in the row)`. If this exceeds the `dashboard.md` `V_meta
+     consolidation lag` health track's alarm (**K=2**), step 7's `milestone_counter++` MUST NOT
+     execute until the row is resolved by EITHER (a) consolidating the row's pattern into
+     `inherited-core.md` at this ABSORB (pasted diff) OR (b) recording an explicit DATED
+     carry-forward reason directly in the ledger row (no silent deferral — a missing/blank
+     disposition is not a valid resolution). Update the row's status/notes in `v-meta-ledger.md`
+     accordingly as part of this ABSORB step, before proceeding to step 7.
 7. **UPDATE DASHBOARD** — VT, slope (marginal Δv), ρ, charter-thickness, discovery-latency,
-   calibration-error, milestone_counter++.
+   calibration-error, `V_meta consolidation lag` (re-derive milestones-since-confirmed for every
+   ledger row per `v-meta-ledger.md`), milestone_counter++ (only after the gate above clears).
 8. **CHECKPOINT (non-blocking)** if `milestone_counter % 5 == 0`: write `checkpoints/cp-<NN>.md` — a
    health snapshot across all tracks + a re-test of the standing hypothesis (§1). **Do NOT wait for a
    human.** After writing it, CONTINUE to the next milestone. The human reviews snapshots
