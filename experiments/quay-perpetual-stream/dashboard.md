@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 15** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 16** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -1219,3 +1219,55 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   flags the adversarial-audit gate as EXPECTED to trigger this time (capability-growth-typed with a
   plausible nonzero Δv̂), contrast with M13/M14/M15's zero-VT precedent. Dispatching inner iteration-0
   and iteration-1 next, both from worktrees off the current master HEAD (`17b48dc`).
+- **ABSORB m16 = M-CLI-EDIT-PARITY-IMPL** 2026-07-18. Both iterations ran genuinely in parallel from
+  base `c668ff0`: iteration-0 (commit `5f1f1be`) and iteration-1 (commit `cb59284`), independently
+  implementing the same 10-item Done-when checklist from `docs/proposals/exp5-cli-edit-parity.md` §6
+  — relaxed `task edit` flag surface, `--body-file`/stdin whole-body replacement, `--append-notes`,
+  the portable-metadata rule inserted into `inherited-core.md`, extended two-provider conformance
+  probes (incl. a live `--extra` GitHub hard-error-floor probe against real scratch issues gh-12/13/14),
+  README/DESIGN updates, full test-suite pass, `git diff --stat` scope confirmation. **It0 ceiling
+  arithmetic: both iterations independently computed Δv̂ = 0** — the existing CLI-surface VT-chart cov
+  formula (weight=25, cov=0.94 since m8) is a narrative-calibrated number for regression/restoration
+  deltas against an unenumerated flag surface, not a per-sub-flag counter; neither iteration found a
+  chart cell this closure could map to without fabricating an extrapolation, so both recorded Δv̂=0
+  explicitly rather than invent a number. **This is agreement, not a reconciliation** — unlike M15's
+  3-vs-2 split, both derivations landed on the identical figure independently. Merged to master:
+  `f9d0606` (iteration-1, clean) then `4f6b03b` (iteration-0, CONFLICT across 4 files —
+  `inherited-core.md`, `packages/quay/README.md`, `packages/quay/bin/quay.js`,
+  `packages/quay/test/cli-edit-parity-conformance.test.mjs` — since both iterations independently wrote
+  real, materially different implementations of the same feature, not just prose/table divergence like
+  M13/M14/M15). Unlike those markdown-only conflicts, this one could not be reconciled clause-by-clause
+  — resolved by keeping **iteration-0's implementation as canonical** for all 4 code files (it actively
+  found and fixed a real test-fixture bug during its own conformance run — a `[github/parent-extended]`
+  probe that blindly re-asserted a stale `null` parent — and passed 32/32 test files, vs iteration-1's
+  30/1053-tests with 2 pre-existing bugs found-but-left-unfixed as confirmed-out-of-scope via `git
+  stash`). iteration-1's 2 findings (invalid-JSON `--extra` throws an unhandled raw `SyntaxError`
+  instead of a clean CLI error; `task edit` on a nonexistent task id silently auto-creates rather than
+  erroring) are retained as documented follow-up candidates, not silently dropped — both confirmed
+  pre-existing (not regressions from this milestone) by iteration-1's own `git stash` check against
+  master. Kept iteration-0's `inherited-core.md` portable-metadata section (identical rule body text to
+  iteration-1's, richer provenance footer citing this milestone + the design doc + M13's prior informal
+  cross-reference). Both iteration reports retained for provenance (commit `4e56233`). No cwd-drift
+  stray file this time (clean `git status` before each merge). **Full test suite re-run on merged
+  master**: one transient failure in `provider-abi-conformance.test.mjs`
+  (`[github/primitive/task_write-children-idempotent-preserves-body]`) — confirmed non-regression via
+  isolated re-run (clean PASS alone; root cause was live-GitHub-state contention from both iterations'
+  concurrent conformance runs against the same shared scratch issues during dispatch, not a merge
+  defect). New `cli-edit-parity-conformance.test.mjs` also re-run standalone — clean PASS. **Realized
+  Δv = 0** (agreed by both iterations, see above) — `git diff --stat c668ff0 HEAD` (excluding the
+  concurrently-landed DIR-012 doc/task files, which are unrelated async human-directive content, not
+  part of this milestone's diff) confirmed exactly the 8 expected files changed
+  (`inherited-core.md`, `packages/quay/README.md`, `packages/quay/bin/quay.js`,
+  `packages/quay/test/cli-edit-parity-conformance.test.mjs`, `packages/quay/test/cli.test.mjs`,
+  `charters/M16-cli-edit-parity-impl.md`, `backlog.md`, the two iteration reports), satisfying
+  Done-when clause 10. **Adversarial-audit gate correctly did NOT fire** — condition (a) requires a
+  nonzero realized Δv, which did not materialize (Δv=0 per the it0 arithmetic both iterations
+  independently confirmed); this is the charter's own explicit fallback case (charter flagged the gate
+  as "expected to trigger... if it0's ceiling arithmetic finds a real nonzero Δv̂" — it did not, so the
+  gate correctly stayed dark). `backlog.md`'s `M-CLI-EDIT-PARITY-IMPL` row added (DONE) and the m14
+  `M-CLI-EDIT-PARITY` row cross-referenced with its implementation closure. `milestone_counter` → **16**.
+  **Note: DIR-012 arrived asynchronously in `directives/pending/` during this milestone's dispatch**
+  (commit `887a880`, landed mid-M16-dispatch at 2026-07-18 16:52 UTC, while both inner iterations were
+  still running in their worktrees) — per the standing invariant, the loop did not pause or interrupt
+  the in-flight dispatch for it; it will be drained and dispositioned at the m16→m17 SELECT boundary,
+  immediately following this ABSORB, per normal DRAIN-then-continue protocol.
