@@ -387,7 +387,31 @@ export async function startServer({ port = 4173 } = {}) {
     return u.pathname + "?" + u.searchParams.toString();
   }
 
+  // M26-adversarial-eval finding M26-F2 (Phase A audit): this request
+  // handler had no top-level try/catch. Combined with provider-client.js's
+  // taskList() previously swallowing Provider errors into an empty array,
+  // failures were invisible; now that taskList() (and any other client.*
+  // call) can throw on a real Provider failure (malformed task file
+  // crashing the store, or a live rate-limit/network failure), an unhandled
+  // throw inside this async handler would leave the request hanging (no
+  // res.end() ever called) rather than degrading safely. This wrapper
+  // ensures ANY thrown error from the request-handling logic below (not
+  // just the taskList() case) results in a clean 500 response instead of a
+  // hung connection or an uncaught rejection that could take the whole
+  // server down.
   const server = http.createServer(async (req, res) => {
+    try {
+      await handleRequest(req, res);
+    } catch (err) {
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+      }
+      res.end(`quay serve: internal error — ${err.message || String(err)}\n`);
+      console.error(`[quay serve] request handler error (${req.method} ${req.url}):`, err);
+    }
+  });
+
+  async function handleRequest(req, res) {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (url.pathname === "/") {
@@ -842,8 +866,19 @@ export async function startServer({ port = 4173 } = {}) {
       const decodedId = decodeURIComponent(id);
       const t = await client.taskGet(decodedId);
       // QX-009 (experiment 4, iteration 2): read ?from= param for list-context redirect.
+      // M26-adversarial-eval finding M26-F3 (Phase A audit): this guard was missing the
+      // `!startsWith("//")` check that the sibling GET /task/:id `backHref` guard (above,
+      // ~line 810) already has. Investigated whether this is a live open-redirect: it is
+      // NOT — `addParam()` (below, used to build both errorRedirect and successRedirect)
+      // always routes the value through `new URL(urlPath, "http://x").pathname`, which
+      // strips any scheme/host, so a `//evil.com`-style protocol-relative bypass value
+      // collapses to a same-origin path before it ever reaches the Location header
+      // (verified empirically with `//evil.com`, backslash variants, and a `https:`
+      // scheme value — all neutralized). This is a latent inconsistency, not an
+      // exploitable vulnerability; hardened here for defense-in-depth / guard-consistency
+      // with the GET route's guard, not because it was demonstrated exploitable.
       const fromParam = url.searchParams.get("from");
-      const baseRedirect = fromParam && fromParam.startsWith("/") ? fromParam : `/task/${t.id}`;
+      const baseRedirect = fromParam && fromParam.startsWith("/") && !fromParam.startsWith("//") ? fromParam : `/task/${t.id}`;
       // QX-013 (experiment 4, iteration 3): gate-check BEFORE delivering the trigger.
       // If gate is blocked (ok: false), redirect back with ?error= instead of silently
       // delivering. Closes UQ-013 (silent gate-fail feedback). The gate check uses the
@@ -881,7 +916,7 @@ export async function startServer({ port = 4173 } = {}) {
 
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("not found");
-  });
+  }
 
   // QX-038 (experiment 4, iteration 11): DIR-005 item 5 — bind explicitly to 0.0.0.0
   // (all interfaces) instead of relying on Node's implicit default, and update the log

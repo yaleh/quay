@@ -525,6 +525,23 @@ async function main() {
         "GET /task/UX3-1?from=//evil.com: open-redirect guard rejects protocol-relative URL, defaults to / (SH-002)"
       );
 
+      // --- M26-F3 (M26-adversarial-eval, Phase B hardening): open-redirect guard on the
+      // POST .../action/:actionId route's ?from= param — mirrors the GET /task/:id guard's
+      // existing //evil.com coverage above (SH-002), which this route lacked until this
+      // milestone. The audit found the underlying value was already neutralized end-to-end
+      // by addParam()'s pathname-only URL parsing (not independently exploitable), but the
+      // guard itself was inconsistent with its GET sibling; this test locks in both the
+      // guard-level rejection and the redirect-target safety net.
+      const protoRelFromPost = encodeURIComponent("//evil.com");
+      const actionProtoRel = await post(ux3Port, `/task/UX3-1/action/advance?from=${protoRelFromPost}`);
+      assert(actionProtoRel.status === 302, `POST /task/UX3-1/action/advance?from=//evil.com returns 302 (got ${actionProtoRel.status})`);
+      assert(
+        actionProtoRel.headers.location &&
+          actionProtoRel.headers.location.startsWith("/task/UX3-1") &&
+          !actionProtoRel.headers.location.includes("evil.com"),
+        `POST .../action/advance?from=//evil.com: open-redirect guard rejects protocol-relative URL, falls back to /task/UX3-1 (M26-F3) (Location: ${actionProtoRel.headers.location})`
+      );
+
       // --- CR-010 / UQ-016: orientation banner removed (DIR-007); verify no 'in_progress' status leaks ---
       // The banner text was the only known location using 'in_progress'; verify it's gone.
       assert(

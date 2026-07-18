@@ -22,9 +22,17 @@ description: >
 capabilities:
   data.read: true    # task_list, task_get — required
   manifest: true     # this file / provider://manifest — required
-  data.write: true   # QN-024 (iteration 10): status-only write. title/body/
-                     # labels/parent/children remain unimplemented — see
-                     # DESIGN.md §5/QN-024's own AC for the exact scope line.
+  data.write: true   # QN-024 (iteration 10) added status-only write; M09-gh-write
+                     # (title/body/labels) and M12-abi-parent-write (parent/
+                     # children, via cross-issue body-checkbox mutation) closed
+                     # the remaining write surface — Provider-ABI write coverage
+                     # is 13/13 = 1.0000 as of M12's ABSORB (dashboard.md line
+                     # 189). This comment previously (through M25) still read
+                     # "title/body/labels/parent/children remain unimplemented",
+                     # which M26-adversarial-eval's audit found stale and
+                     # corrected here — see M26's audit-report.md finding
+                     # M26-F1. See github-client.js#writeFields/#writeRelations
+                     # for the actual implementations.
   gate: true          # QN-028 (iteration 17): task_check, primitive tasks;
                      # extended to compound/epic (children non-empty) tasks
                      # by QN-035 (iteration 25, DIR-006) via a ported,
