@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 12** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 13** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -1076,3 +1076,28 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   pre-commits that if iteration-0 recommends skipping iteration-1, the outer loop must override that
   per M-SIZING's own m6 precedent. Dispatching inner iteration-0 and iteration-1 next, both from
   worktrees off base commit `c2217c99`.
+- **ABSORB m13 = M-TASK-BACKLOG-PROJECTION** 2026-07-18. Both iterations ran genuinely in parallel
+  (unlike m12), independently authoring the full design doc from base commit `c2217c99`: iteration-0
+  (`df009e7`/`1e545a8`, 772-line doc) and iteration-1 (`18af59f`/`9a7f04f`, 607-line doc), both
+  independently covering all 13 DIR-009 items + all 4 DIR-010 items. Merged to master: `a377449`
+  (iteration-1, clean) then `2dcb89e` (iteration-0, add/add CONFLICT on the design doc only — a
+  genuine substantive disagreement, not a mechanical duplicate like m12's conflict). Both iterations
+  independently confirmed DIR-009 item 1's canonical-direction option (b); diverged on DIR-010's
+  namespace decision (iteration-0: `extra.experiment` join field; iteration-1: experiment-prefixed
+  task ids). Resolved in favor of iteration-1: it directly fixes the write-time id collision
+  iteration-0's own proposal self-admittedly left unresolved, and is consistent with DIR-011's
+  already-established extra{}-non-portability precedent (iteration-0's proposal doesn't address
+  cross-provider portability). Full reasoning and both iterations' original arguments recorded
+  verbatim in the merged doc's own "Outer-loop reconciliation note" section — not silently picked.
+  A cwd-drift stray duplicate `iterations/iteration-0.md` (byte-identical to the worktree's committed
+  copy) leaked into the main checkout during merge; verified via `diff` and removed before completing
+  the merge. **Realized Δv = 0** (design-doc-only, exactly as charter specified) — `git diff --stat
+  c2217c99 HEAD` confirms exactly 5 files changed (charter, this dashboard, both iteration reports,
+  the design doc), zero product/method-infra code touched, satisfying Done-when clause 6. Full test
+  suite re-run on merged master as a sanity check (not gating, since zero product code touched):
+  31/31 files pass, 0 failures. **Adversarial-audit gate correctly did NOT fire** — Δv=0 (no
+  capability-growth typing, condition (a) inapplicable) and both iterations ran normally with no
+  iteration-0 self-exemption attempt (condition (b) inapplicable), exactly as the charter's own
+  pre-analysis predicted. `backlog.md`'s `M-TASK-BACKLOG-PROJECTION` row marked DONE (design
+  delivered; still not yet charter-ready for implementation — a future SELECT must pick it up).
+  `milestone_counter` → **13**. Deliverable: `docs/proposals/exp5-task-backlog-primitive-projection.md`.
