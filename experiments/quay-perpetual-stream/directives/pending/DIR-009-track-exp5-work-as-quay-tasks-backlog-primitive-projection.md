@@ -61,13 +61,26 @@ governance and would itself be an un-dogfooded "dogfooding" change).
 
 The design must cover, at minimum:
 
-1. **Task as the backlog primitive.** exp5 backlog candidates become
-   `label: milestone-candidate` (or similar) quay tasks *when created*,
-   ahead of selection — not derived from milestones after the fact. Reconcile
-   this with `backlog.md`: decide whether `backlog.md` stays canonical with
-   tasks as its projection (M05 pattern), or whether tasks become canonical
-   and `backlog.md` becomes a generated view. State the single source of
-   truth explicitly — the M05 lesson is that ambiguity here is the whole bug.
+1. **Task as the backlog primitive — and the canonical-direction decision
+   (the crux).** exp5 backlog candidates become `label: milestone-candidate`
+   (or similar) quay tasks *when created*, ahead of selection — not derived
+   from milestones after the fact. The single-source-of-truth question must be
+   answered explicitly (the M05 lesson: ambiguity here is the whole bug). Two
+   options: (a) `backlog.md` stays canonical, tasks are a read-only projection
+   (pure M05 pattern), or (b) the quay task becomes canonical and `backlog.md`
+   becomes a generated view (or is retired).
+   **Recommended resolution (this conversation): option (b) for OUTER-loop
+   backlog/milestone/selection tracking.** The requirements added below —
+   SELECT *reads* the task list via CLI/MCP (item 8), SELECT *writes back*
+   selection decisions incl. not-selected reasons (item 9), ABSORB *writes*
+   execution provenance (item 10) — all require the task to be a written,
+   first-class working surface, which is incompatible with "never-hand-edited
+   projection." So for exp5's own OUTER-loop tracking the task is canonical.
+   **This is a deliberate, scoped reversal of M05's directives-only restraint**
+   — and it does NOT extend to DIRs: directive files stay canonical per M05
+   (see item 10's DIR sub-tension). Confirm this direction before a milestone
+   implements it; DIR-009 records it as the recommended design, not a
+   fait accompli.
 
 2. **Variable granularity + regrouping.** Model epics (a big task split into
    subtasks via `parent/children`) and small-task→milestone merging (several
@@ -100,10 +113,67 @@ The design must cover, at minimum:
    DIR-001/DIR-002 historical hole — specify how, without rewriting history
    the OUTER loop will re-derive.
 
-7. **Non-goals / guardrails.** Keep files canonical unless (1) explicitly
-   decides otherwise; do not build task-projection for anything beyond exp5's
-   own backlog/milestone work in this pass; do not perturb an in-flight
-   milestone's frozen charter.
+7. **Non-goals / guardrails.** Do not build task-projection for anything
+   beyond exp5's own backlog/milestone work in this pass; do not perturb an
+   in-flight milestone's frozen charter; directive files stay canonical (M05).
+
+8. **SELECT reads quay via the provider tool (read path).** The OUTER loop's
+   SELECT step (cycle step 1) must access the candidate set by calling the
+   quay task list through the provider's own tool — `task_list` (MCP) or
+   `node packages/quay/bin/quay.js task list --json` (CLI) — not by eyeballing
+   `backlog.md`. This is what makes quay the actual working substrate, and it
+   dogfoods the read surface each pass. (Requirement: human, this conversation.)
+
+9. **Selection provenance (write-back on SELECT).** Each SELECT records its
+   decision onto the tasks themselves: the chosen task(s) get the milestone
+   tag (item 10); **every candidate that was considered-but-not-selected this
+   pass gets a brief reason recorded** (e.g. an `extra.notSelected` note or a
+   body line: "not selected @M-NN: <reason>") so the task board shows why the
+   loop passed on it, not just what it picked. This turns the currently-only-
+   in-`backlog.md`-prose "STALE at mN SELECT" annotations into first-class,
+   filterable task state. (Requirement: human, this conversation.)
+
+10. **Execution provenance (write-back on ABSORB) — incl. DIRs.** Every
+    executed task, **including DIR tasks**, is tagged with the milestone that
+    actually executed it (e.g. `milestone:M-NN` label or `extra.executedBy`),
+    and carries a record of the execution process (a pointer to, or summary
+    of, the iteration work — `appendNote`/body section is the natural
+    mechanism; the native store already has `appendNote`). Given the
+    granularity mismatch (item 2), it is fine for the milestone to ALSO keep
+    its own fuller record under `milestones/M-NN/` — the task record is the
+    board-visible summary, not the sole copy.
+    **DIR sub-tension (must be resolved, interacts with DIR-010):** a DIR task
+    is a regenerated, never-hand-edited M05 projection. Its milestone tag and
+    execution record therefore cannot be hand-written onto the task — they
+    must either (i) be added to the canonical DIR *file* (e.g. an
+    `executed_by:`/Resolution field) and flow into the task on regeneration,
+    or (ii) live in a separate annotation namespace the anti-drift check
+    explicitly ignores. Pick one; do not let it reintroduce the DIR-010
+    "change the file, forget to regenerate" drift.
+
+11. **Portable metadata vs native-only convenience (verified this
+    conversation).** The rich attributes items 2/3/9/10 add have a hard
+    provider-portability constraint: the native store's `extra{}` is an
+    arbitrary k/v map, but the GitHub provider CANNOT write `extra` (GitHub
+    issues have no arbitrary-metadata slot; M09's PR-ABI-001 fix makes an
+    `extra` write an explicit hard error, not a silent drop). GitHub CAN write
+    `title/body/labels` (M09). **Therefore portable structured metadata must
+    live in a structured markdown section of the task BODY (writable on both
+    providers), with `extra{}` used only as an optional native-only machine-
+    readable mirror** — exactly the pattern M05's anti-drift check already
+    uses (`extra.dirStatus` OR the `Status mirror:` body line). Design the
+    milestone/selection/execution fields body-first for portability. The Core
+    CLI edit-surface work needed to write these is split out to DIR-011.
+
+12. **Milestone-as-grouping representation, portably.** For item 2's grouping,
+    prefer a scheme that works on both providers: a parent "milestone" task
+    with member tasks as `children` is natively supported (native derives
+    `role: compound` from non-empty children; GitHub represents children via
+    body task-list checkboxes, `extractChildRefs`) — but note GitHub cannot
+    currently *write* `parent/children` (M09 hard-errors on them), so a
+    `milestone:M-NN` label (writable on both) may be the more portable primary
+    grouping key, with parent/children as a native-only enrichment. Decide
+    with the DIR-011 portability findings in hand.
 
 Deliverable: a design doc (e.g. under `docs/proposals/` or
 `experiments/quay-perpetual-stream/`) capturing the above, cross-referencing
