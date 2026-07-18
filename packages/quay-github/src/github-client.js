@@ -520,12 +520,15 @@ export function createGithubClient({ owner, repo }) {
       return null;
     }
     if (issue.pull_request) return null; // PRs are not tasks
-    // Single-issue lookup cannot cheaply compute `parent` (would require
-    // scanning every other issue's body) -- documented limitation, `parent`
-    // is left null in this path. `children` is still populated (it only
-    // needs this issue's own body). Callers that need `parent` reliably
-    // populated should use `list()` (DESIGN.md §3).
-    return issueToViewModel(issue, null);
+    // PR-ABI-002 fix (M09-gh-write): single-issue lookup now also resolves
+    // `parent`, by reusing the SAME fetchAllIssues()+buildParentIndex() pair
+    // list() already uses -- accepting the extra API-call cost (a full repo
+    // issue fetch) for read-side correctness/symmetry with list(), per the
+    // gap-list entry's own suggested fix. Previously this path unconditionally
+    // left `parent` null (see git history / capability-matrix.md's prior
+    // write-up) -- that asymmetry is what this fix closes.
+    const parentIndex = buildParentIndex(fetchAllIssues());
+    return issueToViewModel(issue, parentIndex);
   }
 
   // QN-024: data.write (status-only, minimal v1 write surface — G5, no
@@ -590,6 +593,79 @@ export function createGithubClient({ owner, repo }) {
     return get(id);
   }
 
+  // M09-gh-write (PR-ABI-001, real write): title/body/labels write. Applies
+  // whichever of `title`/`body`/`labels` are present in `fields` via `gh api
+  // ... -X PATCH` (title/body, same PATCH-on-self endpoint setStatus already
+  // uses for state) and the existing add/remove-label endpoints (generalized
+  // beyond just status:*/lane:* labels -- `labels` here means the full
+  // desired list of NON-status/lane "other" labels, i.e. the same field
+  // issueToViewModel calls `labels` in the view-model; status:*/lane:*
+  // labels already carrying separate semantics are left untouched by this
+  // path, mirroring computeStatusWrite's own label-surgery discipline of
+  // touching only the labels relevant to the field being written).
+  // `status` is intentionally NOT accepted here -- callers wanting a status
+  // change use setStatus/computeStatusWrite's own open/close+status:*-label
+  // semantics; mixing the two write paths in one function would reintroduce
+  // exactly the kind of implicit precedence ambiguity DESIGN.md §3.1 already
+  // had to solve once for read.
+  function writeFields(id, fields) {
+    const m = /^gh-(\d+)$/.exec(id);
+    if (!m) throw new Error(`quay-github: invalid task id for writeFields: ${id}`);
+    const number = m[1];
+
+    const patchFields = {};
+    if (Object.prototype.hasOwnProperty.call(fields, "title")) {
+      patchFields.title = fields.title;
+    }
+    if (Object.prototype.hasOwnProperty.call(fields, "body")) {
+      patchFields.body = fields.body;
+    }
+    if (Object.keys(patchFields).length > 0) {
+      ghApiRun([
+        `repos/${owner}/${repo}/issues/${number}`,
+        "-X",
+        "PATCH",
+        ...Object.entries(patchFields).flatMap(([k, v]) => ["-f", `${k}=${v}`]),
+      ]);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(fields, "labels")) {
+      const issue = ghApiJson([`repos/${owner}/${repo}/issues/${number}`]);
+      const currentLabelNames = (issue.labels ?? []).map((l) =>
+        typeof l === "string" ? l : l.name
+      );
+      // Only touch "other" (non-status:*/non-lane:*) labels -- status/lane
+      // labels carry separate semantics owned by setStatus, not this path.
+      const currentOther = currentLabelNames.filter(
+        (n) => !STATUS_LABEL_RE.test(n) && !LANE_LABEL_RE.test(n)
+      );
+      const desiredOther = fields.labels ?? [];
+      const toRemove = currentOther.filter((n) => !desiredOther.includes(n));
+      const toAdd = desiredOther.filter((n) => !currentOther.includes(n));
+      for (const label of toRemove) {
+        try {
+          ghApiRun([
+            `repos/${owner}/${repo}/issues/${number}/labels/${encodeURIComponent(label)}`,
+            "-X",
+            "DELETE",
+          ]);
+        } catch {
+          /* already absent -- fine, same race-tolerance as setStatus */
+        }
+      }
+      if (toAdd.length > 0) {
+        ghApiRun([
+          `repos/${owner}/${repo}/issues/${number}/labels`,
+          "-X",
+          "POST",
+          ...toAdd.map((label) => ["-f", `labels[]=${label}`]).flat(),
+        ]);
+      }
+    }
+
+    return get(id);
+  }
+
   // QN-028: gate capability -- `check(id)` fetches the task (a single-issue
   // get(), so `parent` is left null per the existing get() limitation --
   // irrelevant to gate-checking, which only reads `status`/`body`) and
@@ -607,5 +683,5 @@ export function createGithubClient({ owner, repo }) {
     return checkGate(task, get);
   }
 
-  return { list, get, setStatus, check };
+  return { list, get, setStatus, writeFields, check };
 }

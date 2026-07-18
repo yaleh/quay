@@ -33,10 +33,17 @@
 // back to the original single-issue FAKE_GH_ISSUE_JSON behavior unchanged
 // (existing QN-071 callers are unaffected).
 //
-// Any other invocation (paging list calls, writes, etc.) is deliberately
-// unsupported and exits non-zero with a clear message, so a test that
-// accidentally exercises an unexpected code path fails loudly rather than
-// silently returning nonsense data.
+// M09-gh-write (PR-ABI-002 fix, github-client.js#get()): get() now ALSO
+// issues a paged list call (`gh api repos/<owner>/<repo>/issues -X GET -f
+// state=all -f per_page=<n> -f page=<n>`, the same call list() already
+// made) to build a parentIndex, since get() no longer leaves `parent`
+// unconditionally null. This fixture's task_check-only scope never exercises
+// `parent` (checkGate() only reads status/body), so the list call is
+// answered with an EMPTY page (a well-formed, immediately-terminating single
+// page) rather than real fixture data -- get()'s returned view-model's
+// `parent` will be null (no other issue's body references it), which is
+// irrelevant to every assertion this file makes (all of which check
+// status/gate/childrenStatus, never `parent`).
 const args = process.argv.slice(2);
 if (args[0] === "api" && args.length === 2 && /^repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(args[1])) {
   if (process.env.FAKE_GH_ISSUES_JSON) {
@@ -53,5 +60,13 @@ if (args[0] === "api" && args.length === 2 && /^repos\/[^/]+\/[^/]+\/issues\/\d+
   process.stdout.write(process.env.FAKE_GH_ISSUE_JSON || "{}");
   process.exit(0);
 }
-process.stderr.write(`fake-gh: unsupported invocation (this fixture only supports a single-issue GET): ${JSON.stringify(args)}\n`);
+if (args[0] === "api" && args[1] === "repos/yaleh/quay-fixture/issues") {
+  // Paged list call (PR-ABI-002's get()-side parentIndex build). Always
+  // answer with an empty page -- terminates pagination immediately
+  // (pageIssues' own "batch.length < perPage" break condition) and this
+  // fixture's assertions never depend on `parent`.
+  process.stdout.write("[]");
+  process.exit(0);
+}
+process.stderr.write(`fake-gh: unsupported invocation (this fixture only supports a single-issue GET, or an empty paged list): ${JSON.stringify(args)}\n`);
 process.exit(1);

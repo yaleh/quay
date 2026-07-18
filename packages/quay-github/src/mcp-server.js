@@ -81,25 +81,102 @@ export async function startMcpServer({ owner, repo }) {
     }
   );
 
-  // task_write — data.write (QN-024, iteration 10: minimal status-only
-  // write). Mirrors quay-native's own task_write tool name (design §6
-  // symmetry), but with a deliberately narrower input schema — only `id`
-  // and `status` are accepted, per this task's explicit scope discipline
-  // (G5: do not gold-plate; title/body/labels/parent/children writes
-  // remain out of scope for v1).
+  // task_write — data.write. QN-024 (iteration 10) shipped status-only
+  // write; M09-gh-write (PR-ABI-001) extends this to real title/body/labels
+  // write, while `parent`/`children` write remains explicitly out of scope
+  // (charter M09-gh-write's exclusion — cross-issue body-text mutation is a
+  // materially different/riskier write path, deferred to a future
+  // milestone). Per PR-ABI-001's hard-error floor: any field NOT in this
+  // schema's accepted set (id/status/title/body/labels) is now rejected
+  // with an explicit isError:true tool error rather than the prior silent
+  // drop-via-zod-input-stripping behavior — the MCP SDK's own zod input
+  // validation strips unrecognized keys before the handler ever sees them,
+  // so the handler cannot itself detect "an extra field was silently
+  // dropped" after the fact; the fix is a raw (non-zod-typed) passthrough
+  // shape plus an explicit unsupported-key scan INSIDE the handler, so
+  // unrecognized keys are visible and can be rejected instead of stripped.
+  const TASK_WRITE_SUPPORTED_FIELDS = new Set(["id", "status", "title", "body", "labels"]);
+  // PR-ABI-001 hard-error floor: the MCP SDK builds a zod `z.object(shape)`
+  // from a plain inputSchema shape and, by default, SILENTLY STRIPS
+  // unrecognized keys before the handler ever sees them (confirmed by
+  // reading node_modules/@modelcontextprotocol/sdk's own
+  // server/mcp.js#validateToolInput -> zod-compat.js#normalizeObjectSchema
+  // -> objectFromShape -- a plain `{k: zodType}` shape object is detected as
+  // a "raw shape" and rebuilt into a default z.object(), which strips extra
+  // keys). Passing an ACTUAL zod object schema (this has `_def`, so
+  // normalizeObjectSchema's raw-shape heuristic does not fire and the
+  // schema is used AS GIVEN) with `.catchall(z.unknown())` disables that
+  // stripping -- unrecognized keys survive into the parsed args object, so
+  // the handler below can see and explicitly reject them instead of the SDK
+  // silently dropping them first. This is the actual fix for the
+  // `title` field being silently dropped (task_write-unsupported-field-probe).
+  const taskWriteInputSchema = z
+    .object({
+      id: z.string(),
+      status: z.string().optional(),
+      title: z.string().optional(),
+      body: z.string().optional(),
+      labels: z.array(z.string()).optional(),
+    })
+    .catchall(z.unknown());
   server.registerTool(
     "task_write",
     {
       description:
-        "Patch one task's status in the GitHub Provider's backing repository (status-only v1 write capability).",
-      inputSchema: { id: z.string(), status: z.string() },
+        "Patch one task's status/title/body/labels in the GitHub Provider's backing repository. " +
+        "`parent`/`children` write is not supported (returns an explicit error); any other " +
+        "unrecognized field also returns an explicit error rather than silently no-op'ing.",
+      inputSchema: taskWriteInputSchema,
     },
-    async ({ id, status }) => {
-      const task = client.setStatus(id, status);
-      return {
-        content: [{ type: "text", text: JSON.stringify(task, null, 2) }],
-        structuredContent: { task },
-      };
+    async (rawArgs) => {
+      const unsupported = Object.keys(rawArgs).filter((k) => !TASK_WRITE_SUPPORTED_FIELDS.has(k));
+      if (unsupported.length > 0) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text:
+                `task_write: unsupported field(s) [${unsupported.join(", ")}] — this Provider ` +
+                `does not implement writing ${unsupported.join("/")} (e.g. parent/children write ` +
+                `is explicitly out of scope, see M09-gh-write charter). Supported fields: ` +
+                `${[...TASK_WRITE_SUPPORTED_FIELDS].join(", ")}.`,
+            },
+          ],
+        };
+      }
+      const { id, status, title, body, labels } = rawArgs;
+      if (status === undefined && title === undefined && body === undefined && labels === undefined) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "task_write: at least one of status/title/body/labels is required" }],
+        };
+      }
+      try {
+        let task;
+        if (status !== undefined) {
+          task = client.setStatus(id, status);
+        }
+        const otherFields = {};
+        if (title !== undefined) otherFields.title = title;
+        if (body !== undefined) otherFields.body = body;
+        if (labels !== undefined) otherFields.labels = labels;
+        if (Object.keys(otherFields).length > 0) {
+          task = client.writeFields(id, otherFields);
+        }
+        if (!task) {
+          return { isError: true, content: [{ type: "text", text: `no such task: ${id}` }] };
+        }
+        return {
+          content: [{ type: "text", text: JSON.stringify(task, null, 2) }],
+          structuredContent: { task },
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `task_write failed: ${err.message}` }],
+        };
+      }
     }
   );
 
