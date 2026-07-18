@@ -8,10 +8,30 @@
 # OTHER divergence FAILS this check and should block dispatch.
 #
 # Usage:
-#   it0-gate-hash-check.sh <charter-file>
+#   it0-gate-hash-check.sh <charter-file>                    # verbatim-transclusion mode (default)
+#   it0-gate-hash-check.sh --by-reference <charter-file>      # by-reference mode (M06-sizing)
 #
-# Exit codes: 0 = PASS (charter's gate block matches the pinned source modulo declared PARAM
-# lines); 1 = FAIL (undeclared divergence found — printed as a diff); 2 = usage/extraction error.
+# By-reference mode (added M06-sizing, charter item 5): the charter file does NOT need to contain
+# the fenced HARD GATES block at all. Instead it must contain a line of the exact form:
+#   GATE-HASH-REF: <sha256-hex> (experiments/quay-continuous-bootstrap/ITERATION-PROMPTS.md lines 100-131)
+# This script recomputes the sha256 of the CURRENT pinned block and compares it to the declared
+# hash. A match means the charter's reference is verified current (the pinned source has not
+# drifted since the hash was recorded) — PASS. A mismatch means the pinned source has changed
+# since the charter cited it — FAIL, re-derive the charter's reference before dispatch. This mode
+# only ever verifies the CHARTER FILE's reference; it says nothing about what a dispatched
+# iteration-executor agent's actual prompt contains — that must independently be checked to
+# contain the literal gate text (see OUTER-LOOP.md step 3's by-reference note).
+#
+# To (re-)derive a GATE-HASH-REF value by hand, matching exactly what this script computes:
+#   sed -n '100,131p' experiments/quay-continuous-bootstrap/ITERATION-PROMPTS.md \
+#     | sed '1{/^```$/d}; ${/^```$/d}' \
+#     | { block=$(cat); printf '%s' "$block" | sha256sum; }
+# (note: this strips the trailing newline via command substitution, same as the script — a naive
+# `sha256sum` on a file with a trailing newline will NOT match; use the pipeline above, not `cat
+# file | sha256sum`, when deriving a reference to paste into a charter.)
+#
+# Exit codes: 0 = PASS; 1 = FAIL (undeclared divergence, or hash mismatch in --by-reference mode);
+# 2 = usage/extraction error.
 
 set -u
 
@@ -19,8 +39,14 @@ PINNED_SOURCE="experiments/quay-continuous-bootstrap/ITERATION-PROMPTS.md"
 PINNED_START=100
 PINNED_END=131
 
+BY_REFERENCE=0
+if [ "${1:-}" = "--by-reference" ]; then
+  BY_REFERENCE=1
+  shift
+fi
+
 if [ "$#" -ne 1 ]; then
-  echo "Usage: $0 <charter-file>" >&2
+  echo "Usage: $0 [--by-reference] <charter-file>" >&2
   exit 2
 fi
 
@@ -34,6 +60,26 @@ fi
 if [ ! -f "$PINNED_SOURCE" ]; then
   echo "ERROR: pinned source not found: $PINNED_SOURCE" >&2
   exit 2
+fi
+
+if [ "$BY_REFERENCE" -eq 1 ]; then
+  pinned_block_raw=$(sed -n "${PINNED_START},${PINNED_END}p" "$PINNED_SOURCE" | sed '1{/^```$/d}; ${/^```$/d}')
+  pinned_hash=$(printf '%s' "$pinned_block_raw" | sha256sum | cut -d' ' -f1)
+
+  ref_line=$(grep -n "^GATE-HASH-REF:" "$CHARTER" | head -1)
+  if [ -z "$ref_line" ]; then
+    echo "ERROR: no 'GATE-HASH-REF: <sha256>' line found in $CHARTER (required for --by-reference mode)" >&2
+    exit 2
+  fi
+  declared_hash=$(echo "$ref_line" | sed -E 's/^[0-9]+:GATE-HASH-REF:[[:space:]]*([0-9a-f]+).*/\1/')
+
+  if [ "$declared_hash" = "$pinned_hash" ]; then
+    echo "PASS: $CHARTER GATE-HASH-REF ($declared_hash) matches current pinned source ($PINNED_SOURCE lines ${PINNED_START}-${PINNED_END}) sha256."
+    exit 0
+  else
+    echo "FAIL: $CHARTER GATE-HASH-REF ($declared_hash) does NOT match current pinned source sha256 ($pinned_hash) — pinned source has drifted since the charter cited it, or the declared hash is wrong. Re-derive before dispatch."
+    exit 1
+  fi
 fi
 
 # Extract the FIRST fenced code block (```...```) that appears at or after the "## HARD GATES"

@@ -46,10 +46,33 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
 1. **SELECT** the next milestone from `backlog.md` per the explore/exploit policy (§4.5): **≥1 explore
    milestone per 5**. Exploit = high-value, high-ρ, method handles it; explore = new surface/domain
    that grows the reusable core. Prefer aged high-value items (DIR-004 Distribution is URGENT).
+   **Size the candidate BEFORE dispatch** using `inherited-core.md`'s "Milestone size definition +
+   verify-iteration size gauge" section: does the proposed scope let iteration-0 land ALL Done-when
+   in one pass, with iteration-1 having real material to independently re-derive (not empty
+   verification, not forced into new build work, no mid-milestone re-scope)? If not, split along a
+   different seam or explicitly budget a multi-build milestone before authoring the charter — never
+   carry an implicitly half-shipped value step forward.
+   **Record each candidate's value type(s)** (mandatory, applies forward from m7) from
+   `inherited-core.md`'s "Value-typed SELECT ledger" section — capability-growth / discovery /
+   instrument-correction / risk-option / governance-integrity — alongside its VT Δv̂. VT Δv̂ is one
+   input among several, never the sole ranker: a zero/negative-VT candidate carrying a
+   governance-integrity, instrument-correction, or risk/option type can and should outrank a
+   positive-VT capability-growth candidate when the non-VT risk is higher. Apply the ledger's
+   **governance/infra hard floor**: a governance/infra candidate whose scope excludes its own
+   enabling/enforcement half must be rejected or resized here, never dispatched partial.
 2. **VALUE HYPOTHESIS** (§4.1/§6.2): commit a numeric `Δv̂ = Σ weight_s·Δĉov_s` + the metric `Y` that
    will measure realized `Δv`. Record predicted on the dashboard BEFORE dispatch.
 3. **AUTHOR CHARTER** → `charters/M<NN>-<slug>.md`, Tier-A, target ≤ 2 K tokens (§3.1):
-   - HARD GATES block **transcluded byte-for-byte** from the pinned template (hash-checked, invariant 3);
+   - HARD GATES block: **EITHER** transcluded byte-for-byte from the pinned template (hash-checked,
+     invariant 3), **OR** cited **by-reference** — path + verified hash via
+     `scripts/it0-gate-hash-check.sh --by-reference <charter-file>` (added by M06-sizing) — instead
+     of transcribing the full block verbatim, to keep the CHARTER FILE itself thin. **Either form is
+     an acceptable satisfaction of invariant 3**, but the by-reference form does NOT change what a
+     DISPATCHED iteration-executor agent's prompt must contain: that prompt must always include the
+     literal gate text somewhere, in full, regardless of which form the charter file uses — a
+     dispatched agent must never see only a hash reference with no literal text (this would
+     reintroduce the exact gate-dilution risk DIR-009 defends against). The charter may shrink; the
+     agent-facing prompt may not lose the literal text.
    - the **in-scope gap subset only** (+ every OPEN blocking gap verbatim);
    - **binary Done-when clauses** (mandatory — §3.4; without them milestones drag, cf. exp1/exp4);
    - the **inner termination five conditions** (§3.2);
