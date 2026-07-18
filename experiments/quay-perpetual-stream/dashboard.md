@@ -761,3 +761,30 @@ independently re-derived and confirmed by iteration-1, fresh worktree/fresh comm
   dedicated methodology-infra charter (parallel to how DIR-005 alone became M07-vmeta-gate) — exact
   scope/bundling decision deferred to that boundary, not decided now. Checkpoint cp-02 is due at
   milestone_counter=10 (next milestone) — non-blocking, write it and continue, do not stop.
+- **SELECT m10 = M-AUDIT-CONSOLIDATION (bundles DIR-006 + DIR-007 + DIR-008)** 2026-07-18. No
+  `.halt`. `directives/pending/` drain confirms exactly the three items logged at m9's ABSORB, all
+  still `status: pending`. Read DIR-008 in full this step (it was only titled, not read, at m9's
+  ABSORB) — confirms the same hypothesis: `inherited-core.md`'s own kickoff-commit "Known weakness"
+  line pre-named exactly these three φ edges ("§0c visual-review; dispatch/G3 discipline; σ-floor
+  handling") as its "First consolidation target" — DIR-006/007/008 are that trio's three pieces,
+  discovered incrementally by the human's live audit, not three independent findings. Bundling into
+  one charter (governance-integrity + risk/option value type, no VT weight, parallel to
+  M02/M05/M06/M07's methodology-infra precedent) rather than three separate thin milestones, per
+  DIR-004's method-ROI framing and the directives' own explicit request to be read/disposed
+  together. Charter `charters/M10-audit-consolidation.md` scopes 8 Done-when clauses: (1-3) DIR-006
+  — mechanized Web UI verification requirement in `inherited-core.md`, M04-discover's cov numbers
+  flagged provisionally-uncertain + a new `M-WEBUI-REVERIFY` backlog candidate (actual
+  re-verification explicitly deferred, per DIR-006's own item 3 scoping), exp1-4 systematic audit
+  performed and findings recorded; (4-6) DIR-007 — a genuinely distinct, concretely-named
+  adversarial-audit-role step added to `inherited-core.md`/`OUTER-LOOP.md` as its own out-of-band
+  dispatch (not folded into iteration-1), mechanized as a gate on VT-scoring/self-exemption-attempt
+  milestones only (explicit non-blanket cadence rule recorded); (7-8) DIR-008 — VT₀
+  reset-vs-carry-forward decision + σ-inherited-floor trap consolidated as operational content
+  (completing the kickoff commit's trio), manda-dispatch discipline consolidated at its correct
+  narrow scope (DIR-020 self-deadlock + DIR-015/016/024 background-dispatch, fire-and-forget
+  explicitly unaffected). Deliberately larger than the recent 5-7-clause norm (M06-sizing's own
+  gauge) — justified: pure documentation/consolidation (no live external mutation, unlike M09), and
+  every item traces directly to a directive's own already-itemized requested action, not
+  newly-invented scope. Gate-hash check:
+  `it0-gate-hash-check.sh --by-reference charters/M10-audit-consolidation.md` → **PASS**.
+  Dispatching inner iteration-0 next.
