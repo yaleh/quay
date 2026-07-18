@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 21** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 22** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -1686,3 +1686,61 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   (with Resolution) is delegated to the dispatched iterations, mirroring the DIR-013/DIR-016
   precedent; DIR-015 stays pending (unaffected by this milestone). Dispatching inner iteration-0 and
   iteration-1 next, both from worktrees off the current master HEAD (`e908ebe`).
+
+**ABSORB m22 (2026-07-18).** Both iterations converged independently on `.claude/skills/quay-task-to-plan/`
+Phase 7. Merge sequence: `exp5-m22-iteration-1` merged clean (`ort`, no conflict) first
+(commit hash recorded in iteration-1's own report); `exp5-m22-iteration-0` then conflicted
+across 5 files (`SKILL.md`, `plan-check-subagent.md` add/add, `backlog.md`, `DIR-014` archive,
+`DIR-015` pending) — resolved commit `372ef2a`. Per-file resolution, not blanket wholesale:
+- `.claude/skills/quay-task-to-plan/SKILL.md` + new `prompts/plan-check-subagent.md`: kept
+  iteration-0's version wholesale (`git checkout --theirs`). Both iterations independently built
+  the same three Stage 7.1/7.2/7.3 sections with materially equivalent content; iteration-0's was
+  more precisely grounded (explicit `{{budget_gate_result}}` computed by the orchestrator BEFORE
+  dispatch and handed in as ground truth rather than re-run inside the check subagent; explicit
+  round-cap-3 refusal language; `{{task_id_or_milestone_ref}}` naming matching the provider
+  read/write contract in §0 more exactly than iteration-1's `{{milestone_id}}`). Post-merge grep
+  sweep for duplicate section headers (`## `/`### `) in `SKILL.md` found each Stage-7.x section
+  exactly once — no M18/M21-class duplicate-insertion this time.
+- `backlog.md`'s `M-TASK-TO-PLAN-SKILL-IMPL-PHASE7` row: kept iteration-0's DONE entry (attributes
+  `iteration-0`, matches the SKILL.md/plan-check-subagent.md choice above and gives a fuller
+  item-by-item `git diff --stat` accounting against the pre-charter base).
+- `directives/archive/DIR-014-*.md` Resolution: kept iteration-0's version (same reasoning —
+  consistent attribution, more granular per-requested-action breakdown items 1-5).
+- `directives/pending/DIR-015-*.md` disposition note: both iterations' notes were substantively
+  identical (DEFERRED, unchanged pending status, M-TASK-BACKLOG-PROJECTION-IMPL's own
+  implementation explicitly out of scope) — merged into one note attributing both iterations
+  rather than picking one arbitrarily, since there was no real divergence to adjudicate.
+Standing M18/M21-class silent-duplicate-insertion sweep also run on `OUTER-LOOP.md` (not among the
+5 git-reported conflicts, meaning it auto-merged cleanly for M22 too) — `grep -c` for the impl-row
+gate clause returned 1 (not 2); no duplicate found this time. `inherited-core.md` was not touched
+by either M22 iteration.
+
+Gate re-verification post-merge: `it0-gate-hash-check.sh --by-reference` PASS; the plan-time
+line-budget gate PASS (small-milestone norm, ≤8 items); `it0-impl-row-check.sh
+M-TASK-TO-PLAN-SKILL-IMPL-PHASE7 backlog.md` → PASS/not-applicable (row is not design-only, per
+its own backlog text — this milestone shipped code, not a design doc). `git diff --stat 1a217bc
+HEAD` confirms scope: skill-tree files, DIR-014/DIR-015 bookkeeping, both iteration reports, plus
+two new human-authored directive files (DIR-017, DIR-018 — see below) and their `tasks/` mirrors —
+no Core CLI code touched, no `inherited-core.md`/`OUTER-LOOP.md` edits, `M-TASK-BACKLOG-PROJECTION-
+IMPL`'s own implementation not begun, consistent with the charter's non-goals. **Realized Δv = 0**,
+by design (capability-growth-typed, no VT chart cell for a skill artifact's internal stage count,
+mirrors M16/M20's precedent). Adversarial-audit gate correctly did NOT fire (Δv̂=0, no iteration-0
+self-exemption). Worktrees/branches for M22 (`milestones/M22-quay-task-to-plan-skill-phase7/
+worktrees/iteration-{0,1}`, branches `exp5-m22-iteration-{0,1}`) removed/deleted post-merge.
+Checkpoint not due (next due at m25, per every-5 cadence — cp-20 was last). `milestone_counter`
+21 → 22.
+
+**New human directives discovered mid-milestone (commit `cf4cad3`, Yale Huang, 2026-07-18
+18:28:39 UTC, "Add DIR-017 + DIR-018 (exp5): ordered DoD-installation program + driver/human
+isolation"):** DIR-017 (install a single mechanical, non-self-exemptible Definition-of-Done
+meta-enforcer in `inherited-core.md`, folding in the existing scattered gates, as an ORDERED
+program — step 0 self-host-the-record [already satisfied by M21's `M-TASK-BACKLOG-PROJECTION-IMPL`
+row materialization] → step 1 the meta-enforcer itself [load-bearing, requires a human-verification
+gate before steps 2-3 may proceed — irreducible, not delegable] → step 2 escrow-Δv + test-floor
+clauses → step 3 leakage metrics on `dashboard.md`) and DIR-018 (isolate the autonomous outer loop
+onto its own branch/worktree so it stops committing directly to the human-shared `master` and
+racing human edits — diagnosed against concrete damage already observed this session: the M17/
+DIR-013 auto-resolve-wholesale content loss, the M18 shared-index merge blocking a human commit,
+and the DIR-013 projection-drift miss). Both filed to `directives/pending/`, to be drained at the
+m22→m23 SELECT boundary per the standard DRAIN step. Not actioned during this ABSORB (they arrived
+after M22's charter was authorized) — recorded here for continuity into the next SELECT.
