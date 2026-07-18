@@ -1410,3 +1410,23 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   from a concurrent human-directed `proposal-to-plan` run writing the same file exp5 was merging
   into. Documentation-only, governance-integrity typed, Δv̂≈0. To be drained at the next SELECT
   boundary (m18→m19), per the standing "drain `directives/pending/`" step.
+- **SELECT m19 = M-TASK-TO-PLAN-DOCS-RECONCILE** 2026-07-18. `directives/pending/` drained: found
+  `DIR-013` (already independently committed by the human, `4141aca`, while this outer loop was
+  mid-M18-merge — confirms the standing "leave the user's own concurrent commits untouched" posture
+  was correct). `.halt` absent. Picked DIR-013 directly (only pending directive; no other candidate
+  needed comparison): fixes its three MUST-FIX doc defects (dangling `§8.4/§8.5/§8 point 6/§11`
+  cross-references in the M17 design doc's §§12-19, a status-header/TOC undercount omitting §19, and
+  the companion plan `docs/plans/3-7-quay-task-to-plan-skill.md` citing sections that never existed
+  and never referencing the real §12-19 operational spec). Authored charter
+  `charters/M19-task-to-plan-docs-reconcile.md`: type explore, value type governance-integrity only,
+  Δv̂=0 (documentation reconciliation, DIR-013's own framing). Explicitly excludes re-running M17,
+  building the `quay-task-to-plan` skill (DIR-012 item 3, untouched), building a mechanical
+  `§N`-reference-resolves enforcement script (DIR-013 item 4 explicitly defers that decision), and
+  touching M18's `inherited-core.md`/`OUTER-LOOP.md` additions. Gate-hash check:
+  `it0-gate-hash-check.sh --by-reference charters/M19-task-to-plan-docs-reconcile.md` → **PASS**
+  (same pinned hash reused unchanged, M12–M19). Plan-time line-budget gate (M18's own new mechanism,
+  first live use on a real charter post-ABSORB): `it0-ceiling-line-budget-check.sh
+  charters/M19-task-to-plan-docs-reconcile.md` → **PASS** (within small-milestone norm, no
+  phase/stage plan required). Adversarial-audit gate NOT expected to trigger (Δv̂=0, no iteration-0
+  self-exemption authorized). Dispatching inner iteration-0 and iteration-1 next, both from
+  worktrees off the current master HEAD (`1d85eb7`).
