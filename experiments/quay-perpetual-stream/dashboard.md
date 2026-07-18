@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 3** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 4** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -79,6 +79,42 @@ series but backlog flags coverage as "thin/irregular" — M-DOCS still open, Δv
 
 VT curve (append `Δv` per milestone): `[ (m0, 82.25), (m1/M-DIST, 88.25, Δv=+6.0) ]`
 Slope (marginal points / milestone): **+6.0** (1 data point so far — trend, not yet a rate)
+
+### Chart-1 re-score (M04-discover, exploit-channel 4-persona pass) — 2026-07-18
+
+Re-scored the 5 chart-0 surfaces (Provider-ABI is M03-abi-eval's scope, unchanged here) from this
+milestone's own live persona-pass findings, per the charter's Done-when clause 2. Cited findings are
+in `experiments/quay-continuous-bootstrap/gap-list.md` (MD-001, CB-006/021/022, UQ-047/048/049/050,
+PKG-003/004/005/006/007/008, DOC-006/007) and the M04-discover iteration-0 report.
+
+| surface | prior cov | new cov | rationale |
+|---|---|---|---|
+| CLI | 0.95 | **0.80** | MD-001's merge-drift is CLI-surface-heaviest: `--version`/`-V` (UQ-047), `--page-size` in all 3 modes (CB-006/CB-022), and `--format json` alias (CB-021) are ALL live-confirmed absent/broken on master despite gap-list.md having asserted them closed since exp4 iterations 13-17. Core subcommands (`task list/view/edit/check`, `action list/run`, `serve`, `mcp`) all work correctly on both the `.tgz`/node path AND the SEA executable path (byte-identical `--help`, live-verified) — the drop is bounded to the 4 specific reopened capabilities, not a broad regression. 0.95→0.80 reflects 4 real capability losses on a ~20-capability-wide surface, not a catastrophic surface failure. |
+| MCP | 0.90 | **0.90** | Live stdio-client persona pass (real `@modelcontextprotocol/sdk` `Client`+`StdioClientTransport`, not test mocking) exercised `tools/list`, `task_list`, `task_get`, `task_write`, `task_check`, `resources/list` end-to-end — all 6 clean, no new gaps found. MCP surface is unaffected by MD-001 (the drifted commits were CLI/Web UI/docs-only; `mcp-server.js` was not among the files touched by the unmerged commits). Unchanged. |
+| Web UI | 0.95 | **0.92** | list/detail/filter/sort/label-nav/action-gate flows all verified live at desktop (1280x900) and mobile (390x844 emulated touch) viewports — core functionality intact and correctly gated (Advance blocks/errors with no AC checkboxes). Two new minor/low findings: UQ-049 (`?search=` URL param silently no-ops; real param is `q` — a real discoverability trap for anyone constructing URLs by the visible field's `name` attribute) and UQ-050 (mobile title-text CSS overflow, cosmetic, DOM/functionality intact). Small deduction (0.03) for these two, not zero, since UQ-049 is a genuine no-error-signal usability gap. |
+| Packaging / Distribution | 0.85 | **0.85** | SEA executable path (M-DIST's headline deliverable) verified working end-to-end this milestone: `--help`, `task list`, `mcp`, `serve` all function correctly on the SEA binary, byte-identical `--help` output vs the `.tgz`/node path. `package.json` metadata gaps (PKG-003/004/005/006/007/008: missing `files`/`license` fields, missing `packages/quay/{README,CHANGELOG,LICENSE}.md`) are real but were already true before this milestone (MD-001 reveals they were NEVER actually fixed, not that they regressed) — the packaging cov score has always implicitly excluded these (gap-list.md's own "Closed" claims for them were the miscalibration, not a change in the underlying artifact). Held flat rather than dropped, since the SEA-path capability this surface is primarily scored on is confirmed solid; the metadata gaps are better reflected as a Docs-adjacent finding (folded into Docs' drop below) since they're about published-artifact *documentation/metadata completeness*, which is this surface's thinner, historically-never-actually-0.85-justifying edge — flagged for a more rigorous re-derivation at the M-MERGE-RECOVER milestone rather than guessed further here. |
+| Docs | 0.70 | **0.55** | Two real, previously-invisible findings: DOC-006 (root README.md has ZERO mention of the SEA/single-file-executable distribution path — the charter's own explicitly-named candidate gap, and a major shipped capability with no user-facing docs at all) and DOC-007 (CHANGELOG.md is stuck at "v0.2.0", no v0.3.x/SEA entry despite `package.json` reporting 0.3.4, AND the v0.2.0 entry itself makes 3 false shipped-feature claims per MD-001). Combined with the DOC-001..005/PKG-004..008 reopenings (packages/quay/{README,CHANGELOG,LICENSE}.md all confirmed absent, `package.json` missing `files`/`license`), Docs is the surface most concretely damaged by this milestone's findings — a genuine, evidenced drop, not a soft impression. |
+| **VT chart-1 total (after m4)** | **101.33/120** | **94.73/120** | CLI 25×0.80=20.00 (was 23.75, −3.75); MCP 20×0.90=18.00 (unchanged); Web UI 20×0.92=18.40 (was 19.00, −0.60); Packaging 20×0.85=17.00 (unchanged); Docs 15×0.55=8.25 (was 10.50, −2.25); Provider-ABI 20×0.654=13.08 (unchanged, out of scope). Total = 20.00+18.00+18.40+17.00+8.25+13.08 = **94.73/120** (≈0.789 normalized, down from 0.844 at m3). |
+
+**Iteration-1 correction (independent re-verification):** iteration-0's original text stated this
+total as 95.83/120 (Δv=−5.50); re-summing the same five per-surface point values it cites
+(20.00+18.00+18.40+17.00+8.25+13.08) gives **94.73/120**, and the per-surface deltas it lists
+(−3.75, 0, −0.60, 0, −2.25 = −6.60) also sum to 101.33−6.60=94.73, not 95.83. This was a pure
+arithmetic/transcription slip in iteration-0 (the per-surface cov values and rationale were correct
+and are unchanged here) — corrected in this iteration, independently re-verified via
+`python3 -c "print(20.00+18.00+18.40+17.00+8.25+13.08)"` → `94.73`.
+
+This is the first milestone in exp5 where VT genuinely DECREASES (Δv=−6.60 vs m3's 101.33) — not a
+regression in the product, but a correction of a **measurement error carried since m1**: MD-001's
+merge-drift means chart-0's cov numbers have been systematically overstated since before exp5 even
+began (they were inherited from exp4's own, now-shown-to-be-inaccurate, "Closed" ledger). This is
+exactly the kind of finding the exploit-channel persona-review discovery engine exists to surface —
+consistent with DIR-001's broader thesis that un-audited "closed" claims silently distort the value
+function the outer loop steers on.
+
+VT curve (append, chart-1 basis): `[ ..., (m3/M-ABI-EVAL, 101.33/120), (m4/M04-discover, 94.73/120,
+Δv=−6.60, MEASUREMENT CORRECTION not a capability regression — see MD-001; corrected from
+iteration-0's arithmetic slip of 95.83 during iteration-1's independent re-verification) ]`
 
 ## Health tracks (§4.2–4.4, §6.1)
 
@@ -284,3 +320,20 @@ Slope (marginal points / milestone): **+6.0** (1 data point so far — trend, no
   archived, since it's deferred not resolved). Continuing M04-discover: dispatching a lightweight
   iteration-1 stability-confirmation pass next, per iteration-0's own recommendation given MD-001's
   significance.
+- **ABSORB m4 = M04-discover → DONE** 2026-07-18. Merged `exp5-m04-iteration-1` → `master`
+  (`--no-ff`; 1 real content conflict in `backlog.md` — both this iteration's DIR-002-sourced
+  section and iteration-1's own M04-discover-sourced section were appended at the same location;
+  resolved by keeping both sections concatenated, no semantic loss). milestone_counter → 4 (next
+  milestone, m5, hits the 5-milestone checkpoint cadence — write a non-blocking checkpoint after
+  m5's ABSORB). VT chart-1 total is now **94.73/120** (corrected during iteration-1's independent
+  re-verification, see VT table note above) — exp5's first genuine VT decrease, explicitly a
+  measurement correction (MD-001 merge-drift was always-true product state, only now measured) not
+  a capability regression. Two new backlog candidates directly recoverable from this milestone's
+  findings: `M-MERGE-RECOVER` (recover the ~12 iterations of never-merged exp4 code, fold in
+  DOC-006/007) and a small `UQ-049` row (bundle candidate). Selection guidance updated in
+  `backlog.md`. Ranking going into m5 SELECT: `M-DIR-PROJECTION` (DIR-002, top priority per its
+  own deferred-drain note) vs. `M-MERGE-RECOVER` (real product-integrity gap, med-high Δv̂) vs.
+  `M-GH-WRITE`/`M-GH-PARENT` (smaller, precisely-bounded). Next SELECT will weigh governance-drift
+  risk (DIR-002, 2nd dropped instance of the same requirement) against product-integrity risk
+  (M-MERGE-RECOVER, silently-wrong ledger) — both are legitimate top candidates, decided at m5
+  SELECT with full reasoning recorded then, not pre-decided here.
