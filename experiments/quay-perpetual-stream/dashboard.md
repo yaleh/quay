@@ -1025,3 +1025,54 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   domain-audit-channel≡CI-job pattern, following M03/M09). Charter explicitly flags: if realized Δv
   is nonzero at ABSORB, the adversarial-audit gate's condition (a) is expected to fire and must be
   honored, not re-adjudicated away. Dispatching inner iteration-0 next.
+- **ABSORB m12 = M-ABI-PARENT-WRITE** 2026-07-18. Both iteration-0 (`f172b29`) and iteration-1
+  (`6d76cdf`, independent worktree/branch off pre-charter commit `9ae3cd3`, independently derived
+  identical cov/Δv numbers) merged to master (`a1f581a` then `47898fe`, conflict resolved in favor of
+  iteration-1's already-merged implementation, both iteration reports retained for provenance). Full
+  test suite re-run on merged master: 31/31 files pass. Provider-ABI cov 12/13(0.9231)→13/13(1.0000),
+  **realized Δv=+1.54**, exactly matching the charter's pre-dispatch ceiling. **Adversarial-audit gate
+  fired for the first time** (capability-growth-typed, nonzero Δv — condition (a)): dispatched fresh-
+  context refutation-focused audit per `inherited-core.md`'s role definition, verdict **CONCERNS**
+  (non-blocking) — (1) merge left stale DRAFT labels un-finalized, (2) a false PR-ABI-003 citation into
+  `gap-list.md`, (3) iteration-1's "independent" framing overstated (ran after iteration-0, reused
+  shared scratch issues gh-12/gh-13; git ancestry itself was clean, no report/code contamination). All
+  3 findings fixed at this same ABSORB, not deferred, per the gate's own must-not-be-re-argued-away
+  instruction: `gap-list.md` PR-ABI-003 row added, `dashboard.md`/`capability-matrix.md` DRAFT→CONFIRMED,
+  independence caveat recorded honestly. `backlog.md`'s `M-ABI-PARENT-WRITE` row marked DONE.
+  `milestone_counter` → **12**. See `milestones/M12-abi-parent-write/audits/iteration-1-adversarial-
+  audit.md` for the full audit report.
+- **DRAIN (m12→m13 boundary)** 2026-07-18. `directives/pending/` held DIR-009, DIR-010, DIR-011 (all
+  created earlier this same conversation, human-routed as "design doc only — do not implement, do not
+  charter yet"). Ran `it0-dir-projection-check.sh`: **5 divergences** found — Gap B (DIR-006/007/008
+  status-mirrors stale since M10 archived them without regenerating, per DIR-010's own finding) fixed
+  immediately via the existing regeneration mechanism (SKILL.md step 5c), dropping divergences to 2.
+  Gap A (exp5's real DIR-004/DIR-005 files collide on task-ids already occupied by exp4's leftover
+  tasks) intentionally NOT hand-patched, per DIR-010 item 4's own instruction — it needs the namespace
+  decision DIR-010 defers to a future design; the 2 remaining divergences are a known, documented,
+  non-silent residue tracked by the new backlog candidate below. DIR-009+DIR-010 (folded together, per
+  DIR-010's own suggested routing) → `backlog.md`'s new `M-TASK-BACKLOG-PROJECTION` row (design-doc-
+  only, discovery+governance-integrity value, Δv̂=0). DIR-011 → `backlog.md`'s new `M-CLI-EDIT-PARITY`
+  row (design-doc-only, capability-growth+risk/option, small positive Δv̂ possible, sized at a future
+  SELECT). All 3 moved `pending/`→`archive/`, `status: pending`→`deferred`, task projections
+  regenerated to match. Commits `ed5cc41` (m12 ABSORB finalization), `c2217c9` (this drain).
+- **SELECT m13 = M-TASK-BACKLOG-PROJECTION** 2026-07-18. `directives/pending/` re-drained at this
+  boundary: empty (DIR-009/010/011 just dispositioned above). `.halt` absent. Picked over
+  `M-CLI-EDIT-PARITY` (conceptually depends on this milestone's body-vs-extra convention landing
+  first) and the four still-not-charter-ready DIR-001-sourced candidates, and due for an explore pick
+  (m11 exploit, m12 exploit — two exploits in a row). Authored charter
+  `charters/M13-task-backlog-projection.md`: type explore, value type discovery (primary, the design
+  doc is the deliverable) + governance-integrity (secondary, DIR-010's Gap A/B are a DIR-002-class
+  enforcement-gap recurrence), Δv̂=0 by design (no VT chart move — matches M-SIZING/M-VMETA-GATE's own
+  zero-VT governance-integrity precedent). 7 Done-when clauses: design doc covering all 13 of DIR-009's
+  items + 4 of DIR-010's items with a concrete (not enumerated-options) namespace-decision resolution,
+  explicit confirm/revise of DIR-009's own tentative canonical-direction recommendation, a worked
+  2-milestone backfill example, a dispatch-ready Done-when-clauses section for a future implementing
+  milestone, zero product/method-infra files touched (doc-only), and a `backlog.md` row update at
+  ABSORB. Gate-hash check: `it0-gate-hash-check.sh --by-reference charters/M13-task-backlog-
+  projection.md` → **PASS**. it0 checks recorded in-charter: ceiling arithmetic N/A (Δv̂=0 by design),
+  domain-misfit audit-channel explicitly N/A (no live external system, no product code — consistent
+  with M-SIZING/M-VMETA-GATE's own doc-only precedent, not a mismatched citation). Charter explicitly
+  states the adversarial-audit gate is NOT expected to fire (Δv̂=0, no capability-growth typing) and
+  pre-commits that if iteration-0 recommends skipping iteration-1, the outer loop must override that
+  per M-SIZING's own m6 precedent. Dispatching inner iteration-0 and iteration-1 next, both from
+  worktrees off base commit `c2217c99`.
