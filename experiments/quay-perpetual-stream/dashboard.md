@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 4** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 5** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -120,12 +120,12 @@ iteration-0's arithmetic slip of 95.83 during iteration-1's independent re-verif
 
 | track | current | alarm |
 |---|---|---|
-| ρ reuse rate | **~0.85** (m3: HARD GATES/worktree-isolation/report-shape all reused unchanged from m1/m2; new work product is the matrix+suite, by design) | must-not-fall |
-| φ fold-back (confirmed edges) | **3 confirming** (raw-output-bar 3rd-in-a-row + m3 4th; domain-audit-channel≡CI-job pattern now **CONFIRMED** at m3 — 2nd, different-domain [cross-provider vs. cross-platform] instance reusing the M01-dist-derived `inherited-core.md` procedure unchanged, crosses the §4.2 fold-back threshold; consolidation into inherited-core.md's confirmed-pattern section still pending, not yet done) | — |
-| charter thickness (tokens) | **~1.8 K** (M01-dist), **~2.1 K** (M02-gates), **~2.0 K** (M03-abi-eval) — all near/over the 2K alarm; gate-block overhead is now the dominant, structural driver across every charter regardless of scope, not milestone-specific dilution | >2 K = dilution |
-| discovery latency (mechanizable) | **0** (m1, m2, m3 all — m3's gap-list findings PR-ABI-001/002 were logged same-iteration as found, not deferred) | >~8 iters late |
-| calibration error \|Δv−Δv̂\|/Δv̂ | **0%** (m1); m2 no VT Δv̂ (methodology-infra); m3 Δv̂ explicitly "≈0 direct" (re-baseline milestone) — realized cov (0.654) came in materially above the charter's own 0.30 placeholder, a genuine miscalibration on the ESTIMATE though not on a formal Δv̂ (no formal % applicable — flagged so a future numeric placeholder is treated as a real hypothesis to calibrate against, not a throwaway guess) | trend must shrink |
-| inner-convergence success | **3/3** (m1: 2 iterations; m2: 2 iterations; m3: 2 iterations, 2nd a stability re-confirmation with zero corrections needed — all three Done-when-complete, no mid-milestone re-scope) | mid-milestone re-scope = fail |
+| ρ reuse rate | **~0.85** (m5: HARD GATES/worktree-isolation/report-shape/iteration-1-independent-reverify pattern all reused unchanged from m1-m4; new work product is the skill update + anti-drift script + OUTER-LOOP.md wiring, by design) | must-not-fall |
+| φ fold-back (confirmed edges) | **3 confirming** (domain-audit-channel≡CI-job pattern CONFIRMED at m3, 2nd different-domain instance; m5's own anti-drift check IS a 3rd instance of the same pattern by charter design [§ it0 check d], but not yet an independently-dispatched-milestone reuse, so not counted as a 4th confirming edge — tracked for m6+) | — |
+| charter thickness (tokens) | **~1.8 K** (M01-dist), **~2.1 K** (M02-gates), **~2.0 K** (M03-abi-eval), **~2.0 K** (M04-discover), **~1.9 K** (M05-dir-projection) — all near/over the 2K alarm; gate-block overhead is now the dominant, structural driver across every charter regardless of scope, not milestone-specific dilution | >2 K = dilution |
+| discovery latency (mechanizable) | **0** (m1-m5 all — m5's PR-004/PR-005 gap-list findings were logged same-iteration as found, not deferred; PR-005 specifically was iteration-1 catching a bug iteration-0 introduced and shipped in the SAME milestone, zero-latency self-correction) | >~8 iters late |
+| calibration error \|Δv−Δv̂\|/Δv̂ | **0%** (m1); m2/m5 no VT Δv̂ (methodology-infra, by design); m3 Δv̂ "≈0 direct" (re-baseline); m4 re-score, no formal Δv̂ (discovery-value framing) | trend must shrink |
+| inner-convergence success | **5/5** (m1-m5 each: 2 iterations, Done-when-complete, no mid-milestone re-scope — m5's iteration-1 found and fixed a real bug [`--labels`/`--label` CLI typo] but this counts as convergence-with-correction, not re-scope: same charter, same Done-when, no scope change) | mid-milestone re-scope = fail |
 
 ## Control limits (pre-declared; §6/§6.1)
 - inner budget = 10 (past → default HALT, continue needs authorization)
@@ -354,3 +354,28 @@ iteration-0's arithmetic slip of 95.83 during iteration-1's independent re-verif
   declared [PARAM: ...] substitutions"). `backlog.md`'s M-DIR-PROJECTION row updated to SELECTED.
   Dispatching inner iteration-0 next via `baime:iteration-executor`, worktree
   `milestones/M05-dir-projection/worktrees/iteration-0` branch `exp5-m05-iteration-0`.
+- **ABSORB m5 = M-DIR-PROJECTION → DONE** 2026-07-18. Merged `exp5-m05-iteration-1` → `master`
+  (`--no-ff`, clean merge, no conflicts). Realized-value check (per the milestone's own value
+  hypothesis): a real, live `/quay-directive` invocation this milestone produced a real projected
+  task (DIR-003, archived-as-applied, `task_get` evidence pasted) and the anti-drift check genuinely
+  caught a real, previously-unknown bug — not a contrived one. iteration-0 built the anti-drift
+  script and dogfood demo; iteration-1's independent re-verification (checking `git show`/`git diff`
+  against the actual committed content rather than trusting iteration-0's prose, per this
+  experiment's standing discipline) found the script and `OUTER-LOOP.md` both used a non-existent
+  CLI flag `--labels` (plural) instead of the real `--label` (singular) — `packages/quay/bin/quay.js`
+  silently ignores unrecognized flags rather than erroring, so this masked a genuine live-CLI
+  filtering bug that iteration-0's own testing never exercised (it always used a pre-fetched JSON
+  file, never the live-CLI code path) and that was further coincidentally masked from producing a
+  visibly-wrong final answer by the `.mjs` companion script's separate id-shape regex filter. Fixed
+  both occurrences, re-verified output unchanged post-fix, logged the narrower remaining gap as
+  `PR-005` (`.mjs`'s id-shape-based rather than label-based filtering — left as out-of-charter
+  hardening, not blocking). 2 consecutive clean iterations with all 5 Done-when clauses met and
+  stable — DONE per §3.2 condition 1. milestone_counter → **5**, hitting the checkpoint cadence
+  (every 5 milestones, non-blocking) — writing checkpoint-1 now, then continuing directly to m6
+  SELECT without stopping. No VT chart points (method-infra milestone, measured on
+  discovery-latency/dogfooding health tracks instead, per its own charter). `backlog.md`'s
+  M-DIR-PROJECTION row marked DONE. `M-MERGE-RECOVER` (deferred from m5, real product-integrity gap
+  from MD-001) is now the leading candidate for m6 SELECT alongside `M-GH-WRITE`/`M-GH-PARENT`
+  (smaller, precisely-bounded provider-ABI fixes) and the newly-logged `PR-004`/`PR-005` (CLI
+  label-filter gaps, likely foldable into whichever milestone touches the CLI next rather than
+  standalone).
