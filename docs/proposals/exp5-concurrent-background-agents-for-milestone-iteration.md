@@ -6,7 +6,10 @@
   during this discussion, **no directive was created** — the loop is being left
   to run un-injected so the next SELECT can be observed; this document is the
   written record, not an authorization.
-- **Date:** 2026-07-18
+- **Date:** 2026-07-18 (revised same day — §5 reworked after the human supplied
+  the native-subagent no-nesting constraint; original §5.1 "iteration-executor
+  fans out via Workflow" retracted as a nesting violation, replaced by the
+  Level-0-orchestrated Shape A / Shape B analysis)
 - **Context:** captured from a live conversation between the human (Yale) and an
   observer Claude Code session (exp5 = `experiments/quay-perpetual-stream/`,
   state RUNNING at milestone_counter 5, m6 = M-SIZING dispatched). The human
@@ -105,6 +108,11 @@ resume without further steering.
 
 ## 4. Recommendation
 
+> **Read with §5.0/§5.1.** A hard architectural constraint — native subagents do
+> not nest — refines this section: uses 2 and 3 below are only feasible as
+> *Shape A* (split into more iterations, orchestrated by the main loop), not by a
+> single executor fanning out internally. Use 1 (scouting) is unaffected.
+
 Adopt background subagents **only for within-milestone / within-phase fan-out**,
 where they are pure acceleration with no shared-state write and no learning-loop
 disruption. Three concrete, safe uses (the first was demonstrated live this
@@ -137,32 +145,92 @@ discussion: how within-milestone parallelism works concretely, whether
 across-milestone parallelism can be gated by milestone *type*, and whether a
 mechanism can decide the granularity dynamically.
 
-### 5.1 Within-milestone: the map/reduce seam
+### 5.0 Governing constraint: native subagents do NOT nest
 
-Every milestone's iteration-0 build phase is almost always "a set of mutually
-independent probes/builds (**map**) + one assembly step (**reduce**)". The map
-set is what parallelizes:
+The real system has a hard architectural constraint that overrides the naïve
+framing of §4/§5.1-as-originally-drafted:
 
-| milestone type | map set (independent, parallel) | reduce (sequential, needs all results) |
+- **Level 0** = the main Claude Code session (the OUTER-LOOP driver). It **can**
+  spawn subagents.
+- **Level 1** = subagents it spawns (`baime:iteration-executor`, the Explore
+  scouts in this proposal). They are **leaves — they cannot spawn their own
+  subagents.** Nesting is exactly the problem `manda` was meant to solve, and
+  `manda` is not mature enough to rely on.
+- Current dispatch pattern: the main loop spawns **one Level-1
+  `iteration-executor` per iteration, sequentially** — only one Level-1 slot is
+  ever in use.
+
+**Consequence (this retracts the original §5.1):** an `iteration-executor` (a
+Level-1 leaf) **cannot** call `Workflow` or otherwise fan its build phase out
+into Level-2 workers. All parallelism must be **orchestrated at Level 0** — the
+main loop spawns the parallel units itself. And the only unit the main loop
+dispatches is an **iteration**. Therefore:
+
+> **"Within-milestone concurrency" is identical to "split the milestone into more
+> iterations that the main loop dispatches concurrently."** It is not a separate
+> option from the iteration-count question we discussed earlier — the no-nesting
+> constraint fuses them.
+
+### 5.1 The two feasible shapes (both orchestrated at Level 0)
+
+**Shape A — within-milestone, expressed as more iterations.** Restructure a
+milestone so each independent map-chunk is its **own iteration**; the main loop's
+normal "spawn an executor per iteration" loop then runs the N independent
+iterations concurrently, plus a final **reduce iteration** (a barrier).
+
+| milestone type | independent iterations (parallel) | reduce iteration (barrier) |
 |---|---|---|
-| evaluation (M-ABI-EVAL) | 16 capability-matrix cells + 18 conformance scenarios — each an independent probe | assemble matrix, compute cov, write report |
-| discovery (M04-discover) | 4 personas (CLI/MCP/WebUI/Docs) scan independently | merge findings, re-score VT |
-| distribution (M-DIST) | quay + quay-native SEA targets, Docker verification | assemble artifacts, CI wiring |
-| verification (iteration-1) | multiple adversarial skeptics each refute one finding | majority-vote adjudication |
+| evaluation (M-ABI-EVAL) | conformance scenarios / matrix-cell groups as independent iterations | assemble matrix, compute cov, write report |
+| discovery (M04-discover) | 4 personas (CLI/MCP/WebUI/Docs) as independent iterations | merge findings, re-score VT |
+| verification | several adversarial skeptics as independent iterations | majority-vote adjudication |
 
-**The discipline that keeps it safe** (this is the dividing line between safe
-and unsafe parallelism): fan-out subagents **produce isolated results only**
-(return the result as data, or each writes its own file) and **never touch
-shared state**; a **single sequential reduce agent** assembles and is the only
-writer of the one dashboard/report entry. This is exactly the `Workflow` tool's
-`parallel()`/`pipeline()` model — the map-reduce orchestration already exists as
-tooling, and `baime:iteration-executor` can call `Workflow` to fan out its build
-phase.
+Fits **map-heavy** milestones (evaluation, discovery). Does **not** fit the
+build→verify backbone (hard sequential). Cost: N× the per-iteration fixed
+overhead (charter/gate/merge/dashboard) — see the reconciliation in §5.1.1.
+Discipline unchanged: each parallel iteration produces **isolated output only**;
+the single reduce iteration is the **only writer** of the one dashboard/report
+entry.
 
-What still cannot parallelize inside a milestone: the build→verify main chain
-(hard dependency), the reduce/scoring step, and any write to dashboard/backlog.
-Payoff: M-ABI-EVAL's 18 scenarios go from "sum of sequential runs" to "max of
-concurrent runs". Pure acceleration, zero added risk — **do this now**.
+**Shape B — across-milestone, multiple iterations.** The main loop spawns
+`iteration-executor`s for **different milestones** concurrently. Under the
+no-nesting constraint this is **mechanically the cheapest** path: each
+milestone's iteration is already a natural Level-1 leaf unit, so Shape B needs
+**zero milestone restructuring**, whereas Shape A must redesign the milestone
+into N iterations. **This is why cross-milestone parallelism is "more feasible"
+here** — a correct observation. The catch is §5.2: Shape B is only *safe* for the
+orthogonal-execution subclass, and still needs state-sharding.
+
+**The tension the constraint exposes.** The mechanically-cheapest path (B, no
+restructuring) is precisely the methodologically-riskiest one (it breaks the
+SELECT←ABSORB learning loop and collides on the append-all state files, as at
+merge `afcdbff`). The methodologically-clean path (A, single milestone, no
+learning dependency) is the one that costs restructuring + N× overhead. So the
+no-nesting constraint does not "make parallelism easy" — it **biases the path of
+least resistance toward the more dangerous option**, which must be named, not
+glossed.
+
+#### 5.1.1 Reconciliation with the earlier "more iterations" discussion
+
+Earlier this session (turn 2026-07-18T09:36, recovered via meta-cc) the
+conclusion was: *under a serial model, adding inner increments mostly pays fixed
+overhead with no matching learning, so exp5 pushed increments to the milestone
+granularity.* The no-nesting-but-Level-0-parallel model **partially flips that**:
+
+- **Wall-clock** for a map-heavy phase goes from "serial sum" to "concurrent
+  max" — so splitting that phase into more iterations now has a real
+  justification (it is the *only* way to parallelize it), and no longer costs
+  serial time.
+- But the **fixed overhead is still paid N times** (N charters/gates/merges, N
+  shared-state writes at reduce). So Shape A's viability is **gated on lowering
+  per-iteration overhead** — i.e. on **DIR-004 item 5** (cite the HARD-GATES
+  block by verified hash instead of transcribing it, bringing charter thickness
+  under 2K). Without that, splitting into N iterations is N× the ~2K charter and
+  concurrency cannot buy it back.
+
+Net: the earlier "don't add more iterations" conclusion **still holds for the
+build→verify backbone** (sequential, no parallel benefit) but is **reversed for
+map-heavy phases** (parallel benefit real, provided DIR-004 reduces the per-
+iteration tax first).
 
 ### 5.2 Across-milestone: type is a proxy; the real criterion is dependency
 
@@ -214,8 +282,11 @@ A mechanism can decide the granularity, as a **two-level scheduler**:
   orthogonal batch in parallel (worktree + sharded state), then a **single
   sequential fan-in ABSORB** merges their dashboard/backlog entries and VT
   (additive over disjoint surfaces). Learning-type always runs alone, serial.
-- **Inner schedule:** each milestone's build phase auto-decomposes its Done-when
-  into a map set and fans out (§5.1, directly via `Workflow`).
+- **Inner schedule:** for map-heavy milestones, the charter declares the
+  independent map-chunks as separate iterations (Shape A) that the **main loop
+  (Level 0)** dispatches concurrently, followed by a reduce iteration. Note this
+  cannot be delegated into a single `iteration-executor` (no nesting, §5.0) — the
+  main loop must own the fan-out.
 
 **The enabler that makes it honest** (not guesswork): a **machine-checkable
 `touches` declaration** in each charter (surfaces + code paths + value-function
@@ -239,18 +310,30 @@ that usually holds only 1–2 orthogonal candidates ⇒ outer-batch payoff is
 "more machinery than the development it serves" methodology bloat this stream is
 already watching for.
 
-### 5.4 Layered conclusion
+### 5.4 Layered conclusion (revised for the no-nesting constraint)
 
-1. **§5.1 within-milestone map-reduce — do now.** Safe, frequent, tooling
-   (`Workflow`) already exists; `iteration-executor` can call it. Definite net
-   acceleration.
-2. **§5.2 the type/dependency criterion — usable now as a SELECT-time label**
-   even without parallelizing: tag each candidate with its `touches` set and
-   execution/learning type, making "what is theoretically parallel-eligible"
-   visible (and serving DIR-004's value-typed SELECT in passing).
-3. **§5.3 the outer batch scheduler — a valid design, gated behind two
-   preconditions** (≥2 orthogonal execution milestones queued + state-sharding
-   paid for). Do not pre-build.
+1. **Single-iteration internal fan-out — RETRACTED.** The original §5.1 assumed
+   an `iteration-executor` could `Workflow`-fan-out its build phase; that is
+   Level-1→Level-2 nesting and is not supported (§5.0). Removed.
+2. **SELECT-time candidate scouting — survives, do now.** It is the main loop
+   (Level 0) spawning read-only leaf scouts (this proposal's own Scout A/B), no
+   nesting involved. Safe and immediately useful.
+3. **Within-milestone parallelism = Shape A (split into more iterations, main
+   loop dispatches concurrently + a barrier reduce iteration).** Fits map-heavy
+   milestones (evaluation, discovery) only; the persona/verification fan-outs of
+   the original §4 are instances of it. **Gated on DIR-004** lowering the per-
+   iteration overhead first (§5.1.1), else N× the ~2K charter tax negates it.
+4. **Across-milestone parallelism = Shape B (different milestones' iterations
+   concurrently).** Mechanically the cheapest under no-nesting (the "more
+   feasible" observation), but **safe only for orthogonal execution-type
+   milestones** (§5.2) + state-sharding; dangerous otherwise (breaks the learning
+   loop). The constraint biases the easy path toward this risky one — treat with
+   care.
+5. **Level 0 is the sole orchestrator.** The main loop must dispatch parallel
+   units itself; it cannot delegate a whole iteration to one executor and expect
+   internal parallelism. The outer batch scheduler (§5.3) stays gated behind ≥2
+   orthogonal execution milestones queued + state-sharding paid for — do not
+   pre-build.
 
 ## 6. Status / next step
 
