@@ -1,6 +1,6 @@
 # DIR-013
 
-- status: pending
+- status: applied
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Reconcile the auto-merged quay-task-to-plan proposal and its stale companion plan — a concurrent human-directed proposal-to-plan run and the autonomous M17 milestone both designed the same skill and their outputs were merged, leaving dangling internal cross-references, a self-contradictory section count, and a plan that cites proposal subsections that never existed and never references the Part II (§12-19) that is the real implementer-facing spec
@@ -102,7 +102,30 @@ capability-growth. Δv̂ ≈ 0 (documentation reconciliation). Adversarial-audit
 not expected to fire (no capability-growth typing, Δv=0).
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred:
-- resolved_by: iteration-N / milestone M-NN
-- outcome: applied | deferred | rejected
-- evidence: pointer to the design doc / iteration report section / commit -->
+- resolved_by: M19-task-to-plan-docs-reconcile, iteration-1, 2026-07-18
+- outcome: applied
+- evidence: all four Requested-action items fixed in a single milestone, documentation-only, per
+  this DIR's own scope:
+  1. **Fix F2** — `docs/proposals/exp5-quay-task-proposal-plan-skill.md`'s status header, TOC
+     heading, and TOC table now accurately cover §12-19 (§19 row added, not silently renumbered
+     away).
+  2. **Fix F1** — every dangling `§8.4`/`§8.5`/`§11` reference inside the proposal's §§12-19
+     repointed to its real target (§15.2's code-vs-prose classifier; §8's flat-list point 5 for the
+     GitHub-degradation summary; §19's preserved bootstrap-resolution paragraph for the former §11
+     content); `§8 point 6` references were already correctly flat-list-shaped and needed no fix.
+     Full `grep -n '§[0-9]'` sweep of the fixed file confirms every remaining internal `§N`
+     reference resolves to a section that actually exists.
+  3. **Fix F3** — `docs/plans/3-7-quay-task-to-plan-skill.md`'s stale `§8.x`/`§11` citations
+     repointed to `§12`/`§13`/`§14`/`§15`/`§16`/§8's flat list; explicit new references to the
+     proposal's Part II (§12-19) operational spec and §17 Done-when checklist added (an
+     "Authoritative-artifact note"); explicit authority statement adopted verbatim per this DIR's
+     own recommendation — the proposal's §17 checklist is the acceptance authority if it and the
+     plan's phase/stage decomposition ever drift, the plan is the build-route elaboration.
+  4. **Process note** — a short lesson (not an enforcement mechanism) recorded in
+     `experiments/quay-perpetual-stream/OUTER-LOOP.md`'s "Human async control surface" section:
+     prefer pausing the loop (`.halt`) or working on a branch when a human is live-editing a file
+     the loop will also touch; the merge/ABSORB step must not claim "dispatch-ready" when its own
+     appended section has unresolved internal cross-references; a post-merge cross-reference sweep
+     is required. Whether to build mechanical enforcement is explicitly left to a future milestone.
+  - Full evidence (pasted diffs/greps): `experiments/quay-perpetual-stream/milestones/
+    M19-task-to-plan-docs-reconcile/iterations/iteration-1.md`.
