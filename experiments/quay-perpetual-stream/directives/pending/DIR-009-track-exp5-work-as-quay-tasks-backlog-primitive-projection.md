@@ -175,6 +175,41 @@ The design must cover, at minimum:
     grouping key, with parent/children as a native-only enrichment. Decide
     with the DIR-011 portability findings in hand.
 
+13. **`backlog.md` weakens to a generated view — but ordered by VALUE, not
+    recency (decided this conversation).** Once items 1/2/3/9 land, `backlog.md`
+    holds nothing canonical and becomes a pure projection over the
+    `label: milestone-candidate` tasks. Two schema facts shape how:
+    - **Recency already exists for free** (`updatedAt` file-mtime + `--sort
+      updated` CLI + `?sort=updated` Web UI) — a "recency-first index" needs
+      zero new code. But recency is the WRONG primary ordering for SELECT: a
+      just-touched low-value task would float to the top and an aged-but-URGENT
+      one (as DIR-004/Distribution once was) would sink. So recency is at most
+      a secondary/alternate sort, never the SELECT-primary surface.
+    - **Priority does NOT exist as a task field** (sort keys today are only
+      id/status/updated/insertion-order). Do NOT invent a separate `priority`
+      axis: the value-typed ledger fields items 3/9 already move onto the task
+      (`Δv̂`, `value-type`, `e/x`, `urgency`, `source`, `surface`) ARE the
+      priority signal. `backlog.md`'s ordering is a value-view computed from
+      those fields — expressible as a saved query / URL
+      (`?label=milestone-candidate&sort=<value-key>`). The small product piece
+      needed to sort the store by a value field (a new `--sort`/`?sort=` key,
+      or client-side ordering over the JSON) rides with DIR-011's Core-CLI
+      work; it is not a new schema field.
+    - **The irreducible residue is curation, not a sortable number.** SELECT is
+      explicitly not pure-Δv̂ ranking (the value-typed ledger: "Δv̂ is one input
+      among several"; governance/risk types may outrank higher-VT items; ≥1
+      explore per 5). That human-judgment override is exactly item 9's
+      selection provenance (the rationale written back onto tasks, incl.
+      not-selected reasons) — so `backlog.md`'s last genuinely-canonical
+      content already has a home on the tasks, and nothing is lost when it is
+      demoted to a generated, value-ordered index (recency available as an
+      alternate view).
+    Optionally retain a lightweight, portable human-override handle — a
+    `priority:*` label (writable on both providers) — for the explicit
+    "escalate past the value sort" case, distinct from the derived value order;
+    decide whether that is worth the extra axis or whether item 9's provenance
+    note suffices.
+
 Deliverable: a design doc (e.g. under `docs/proposals/` or
 `experiments/quay-perpetual-stream/`) capturing the above, cross-referencing
 DIR-002/M05 as the pattern source and exp4's `QX-*` labeling as the prior
