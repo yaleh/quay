@@ -9,3 +9,7 @@ experiment/timing/*.log
 .playwright-mcp/
 # QX-033: npm pack build artifacts — do not commit .tgz release files
 *.tgz
+
+# BAIME experiment throwaway checkouts / build output — never track
+**/worktrees/
+**/dist-sea/
