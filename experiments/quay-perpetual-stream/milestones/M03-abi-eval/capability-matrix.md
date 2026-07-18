@@ -68,12 +68,26 @@ original finding and this milestone's fix), this section is the rolled-up rescor
   1 is an intentional, correctly-signaled scope exclusion (parent/children write), not a
   silent gap.**
 
-## Findings feeding the VT re-baseline (§ dashboard.md)
+## Findings feeding the VT re-baseline (§ dashboard.md) and gap-list
 
-(Note: this experiment's own convention tracks gap findings directly in this matrix + `dashboard.md`'s
-Log section, not a separate `gap-list.md` file — that file exists in the sibling exp4 experiment
-only; M09-gh-write's charter's "gap-list.md" references should be read as this section, per
-this experiment's actual file layout confirmed at M09-gh-write's it0.)
+**Iteration-1 correction**: iteration-0's note here (below, retained struck-through for the
+record) incorrectly claimed `experiments/quay-continuous-bootstrap/gap-list.md` "does NOT" apply
+to exp5 milestones. That is wrong — `gap-list.md` is a real, shared cross-experiment file that
+exp5 milestones DO write to directly (see M08-merge-recover iteration-1's own CB-021/CB-006/
+DOC-00x/PKG-00x closure-citation entries in that same file, all dated 2026-07-18, all written by
+an exp5 milestone). The charter's own Done-when clause 7 explicitly requires "gap-list.md's
+PR-ABI-001/PR-ABI-002 entries updated to reflect real closure" — iteration-0 did NOT do this (only
+this matrix + `dashboard.md` were updated). Iteration-1 has now updated `gap-list.md`'s
+PR-ABI-001/PR-ABI-002 rows directly (see that file, entries now read "**CLOSED exp5 M09-gh-write
+iteration-1**...", mirroring M08's own RE-CLOSED/CLOSED citation style) — this was a real,
+previously-unclosed Done-when 7 sub-clause, not a rubber-stamp pass.
+
+~~(Note: this experiment's own convention tracks gap findings directly in this matrix +
+`dashboard.md`'s Log section, not a separate `gap-list.md` file — that file exists in the sibling
+exp4 experiment only; M09-gh-write's charter's "gap-list.md" references should be read as this
+section, per this experiment's actual file layout confirmed at M09-gh-write's it0.)~~ (iteration-0's
+note, retracted by iteration-1 above — `gap-list.md` is real, shared, and IS the charter's
+intended target.)
 
 1. **PR-ABI-001 — CLOSED (M09-gh-write, iteration-0).** Originally: title/body/labels write on
    github silently dropped, not rejected. Fix: `github-client.js#writeFields` (real PATCH-based
