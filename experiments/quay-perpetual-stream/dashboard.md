@@ -221,6 +221,70 @@ PR-ABI-001 (real title/body/labels write, hard-error floor for the remaining uni
 parent/children field) and PR-ABI-002 (get() parent-resolution symmetry fix) both closed;
 independently re-derived and confirmed by iteration-1, fresh worktree/fresh command output) ]`
 
+### Chart-1 re-score (M12-abi-parent-write, Provider-ABI write completion) — 2026-07-18 — DRAFT (iteration-1, independent derivation)
+
+**This is iteration-1's own INDEPENDENT re-derivation, from a fresh worktree
+(`exp5-m12-iteration-1`, based on the pre-charter `9ae3cd3` SELECT commit — none of any
+iteration-0 changes present at branch time), not yet cross-checked against a separate iteration-0
+report.** Per this milestone's own dispatch instructions, iteration-1 did NOT read iteration-0's
+report before deriving the numbers below — this section records iteration-1's independent
+cov/Δv claim for the outer loop to compare against iteration-0's own, at ABSORB. Findings cited
+below are this iteration's own live evidence (`gh issue view` transcripts against
+`gh-12`/`gh-13`/`gh-14`, and `packages/quay/test/provider-abi-conformance.test.mjs`'s own
+newly-added parent/children-write scenario cells, all pasted in
+`milestones/M12-abi-parent-write/iterations/iteration-1.md`).
+
+Write-semantics decision (charter Done-when 2, stated explicitly, not left implicit): writing
+`children: [...]` on task X mutates X's OWN body (add/remove `- [ ] #<n>` lines, preserving `[x]`
+state for kept children); writing `parent: <id>` on task X mutates the TARGET parent's body (adds
+a checkbox line referencing X) and REMOVES the checkbox line referencing X from every OTHER issue
+currently listing X as a child (full bidirectional reassignment, not merely an
+add/remove-child-on-one-issue primitive) — see `github-client.js`'s `writeRelations()` header
+comment for the full statement. This iteration realized FULL bidirectional reassign-parent
+semantics (charter §"Explicit exclusions" narrower-primitive fallback was NOT needed — no scope
+had to be narrowed relative to the charter's stated scope item 2).
+
+| capability | fields scored | github realized | fraction |
+|---|---|---|---|
+| read | status, title, body, labels, parent/children | 5/5 (unchanged since M09-gh-write; PR-ABI-002 symmetry) | 1.00 |
+| write | status, title, body, labels, parent/children | **5/5 (M12: parent/children write closed — add/preserve-checked-state/reassign/remove all live-verified against real issues `gh-12`/`gh-13`/`gh-14`)** | **1.00** |
+| gate | primitive, compound | 2/2 (unchanged, untouched this milestone) | 1.00 |
+| skill | status_skill_map/action_buttons | 1/1 (unchanged, untouched this milestone) | 1.00 |
+
+cov = (5 + 5 + 2 + 1) / (5 + 5 + 2 + 1) = **13 / 13 = 1.0000** — full closure of the Provider-ABI
+surface's write dimension, matching the charter's own ceiling arithmetic exactly (§ Value
+hypothesis: "closing to 5/5 moves cov from 12/13=0.9231 to 13/13=1.00 ... +1.54 VT points").
+
+| surface | prior cov (m9, unchanged through m11) | new cov | rationale (this iteration's own live evidence) |
+|---|---|---|---|
+| Provider-ABI | 0.9231 | **1.0000** | write 0.80→**1.00** (parent/children write closed via `github-client.js#writeRelations()`/`setChildCheckboxes()` — cross-issue body-text checkbox mutation, full bidirectional reassignment; live-verified against dedicated scratch issues `gh-12`/`gh-13` (parents) and `gh-14` (child): add (`gh-14`→parent `gh-12`, checkbox appears on `gh-12`'s body), checked-state preservation (re-deriving an unchanged children set on `gh-13` leaves an existing `[x]` line byte-identical), reassignment (`gh-14`→parent `gh-13`, checkbox removed from `gh-12`, added to `gh-13`), and removal (`children: []` on `gh-13` removes the line, role reverts to primitive)); read/gate/skill unchanged (untouched this milestone). cov = (5+5+2+1)/(5+5+2+1) = 13/13 = **1.0000**. |
+| **VT chart-1 total (after m12, iteration-1 draft)** | **109.11/120** | **110.65/120** | CLI 25×0.94=23.50 (unchanged, out of scope); MCP 20×0.90=18.00 (unchanged, out of scope); Web UI 20×0.92=18.40 (unchanged, out of scope); Packaging 20×0.90=18.00 (unchanged, out of scope); Docs 15×0.85=12.75 (unchanged, out of scope); Provider-ABI 20×1.0000=**20.00** (+1.54 vs m9's 18.46). Total = 23.50+18.00+18.40+18.00+12.75+20.00 = **110.65/120** (≈0.922 normalized, up from 0.909 at m9). |
+
+**Arithmetic re-check** (this milestone's own standing convention):
+```
+$ python3 -c "print(23.50+18.00+18.40+18.00+12.75+20*13/13)"
+110.65
+```
+Total confirmed: **≈110.65/120**. Δv = 110.65 − 109.11 = **+1.54** — matches the charter's own
+Δv̂ ceiling estimate EXACTLY (§ Value hypothesis: "+1.54 VT points if fully closed"), because this
+iteration realized full 5/5 write closure (not a narrower add/remove-only primitive) — the
+"actual realized Δv may be smaller ... or larger only up to this ceiling" clause resolved at
+its ceiling, not below it.
+
+VT curve (append, chart-1 basis, DRAFT iteration-1 — pending outer-loop cross-check against a
+separate iteration-0 derivation before this is stated as CONFIRMED): `[ ..., (m9/M09-gh-write,
+109.11/120), (m12/M12-abi-parent-write, 110.65/120, Δv=+1.54, CAPABILITY-GROWTH — Provider-ABI
+write-completeness: parent/children write closed via checkbox-in-body cross-issue mutation, full
+bidirectional reassignment, live-verified against gh-12/gh-13/gh-14; iteration-1's own independent
+first derivation, not yet cross-checked against iteration-0's) ]`
+
+**Per the charter's own Adversarial-audit gate note**: this milestone's value hypothesis types as
+`capability-growth` with a nonzero realized Δv (+1.54, not zero) — per `inherited-core.md`'s
+Adversarial-audit cadence rule condition (a), this fires the out-of-band adversarial-audit role
+requirement, to be dispatched by the OUTER loop itself before this VT-curve entry is finalized as
+CONFIRMED/ABSORB'd (iteration-1 records this trigger condition as met; does not itself perform the
+audit-role dispatch, which is outer-loop bookkeeping outside this worktree's scope).
+
 ## Health tracks (§4.2–4.4, §6.1)
 
 | track | current | alarm |
