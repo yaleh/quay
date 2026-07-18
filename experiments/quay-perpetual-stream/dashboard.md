@@ -1101,3 +1101,23 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   pre-analysis predicted. `backlog.md`'s `M-TASK-BACKLOG-PROJECTION` row marked DONE (design
   delivered; still not yet charter-ready for implementation — a future SELECT must pick it up).
   `milestone_counter` → **13**. Deliverable: `docs/proposals/exp5-task-backlog-primitive-projection.md`.
+- **SELECT m14 = M-CLI-EDIT-PARITY** 2026-07-18. `directives/pending/` re-drained at this boundary:
+  empty. `.halt` absent. Picked over the four still-not-charter-ready DIR-001-sourced candidates
+  (M-OUTCOME-EVAL/M-ADVERSARIAL-EVAL/M-COMPETITIVE-BENCH/M-HUMAN-REVIEW-CADENCE — none has a scenario
+  list authored yet). M-CLI-EDIT-PARITY's stated dependency (M13's body-vs-extra convention) is now
+  satisfied by M13's own ABSORB. Authored charter `charters/M14-cli-edit-parity.md`: type explore,
+  value type capability-growth (primary, DIR-011's own note that this candidate — unlike DIR-009/010 —
+  plausibly carries positive Δv̂ on the CLI surface) + risk/option (secondary), Δv̂=0 THIS milestone by
+  design (design-doc-only per the same human routing decision as M13; the capability-growth value is
+  deferred to a future implementing milestone). 7 Done-when clauses: design doc covering all 4 of
+  DIR-011's items, a concrete (not enumerated-options) whole-body-replacement-mode recommendation, the
+  actual proposed portable-metadata-rule wording plus a cross-reference to M13's doc, a worked
+  verification-plan for ≥2 relaxed fields against both providers, a dispatch-ready Done-when-clauses
+  section, zero product/method-infra files touched, and a `backlog.md` row update at ABSORB. Gate-hash
+  check: `it0-gate-hash-check.sh --by-reference charters/M14-cli-edit-parity.md` → **PASS**. it0 checks
+  recorded in-charter: ceiling arithmetic N/A (Δv̂=0 this round by design), domain-misfit audit-channel
+  explicitly N/A (doc-only, consistent with M13/M-SIZING/M-VMETA-GATE precedent). Charter explicitly
+  states the adversarial-audit gate is NOT expected to fire (verify realized Δv stays 0 at ABSORB
+  before relying on this) and pre-commits the m6/M13 override precedent if iteration-0 recommends
+  skipping iteration-1. Dispatching inner iteration-0 and iteration-1 next, both from worktrees off
+  the current master HEAD.
