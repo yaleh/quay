@@ -1,0 +1,152 @@
+M28-outcome-eval — Scenario 4: Web UI task-board round-trip via action_buttons
+================================================================================
+Interface driven: REAL browser automation (playwright MCP), against a live
+`quay serve` process started from the scratch workspace /tmp/m28-quay-scratch.
+NOT static source inspection — every claim below is either a pasted tool
+transcript excerpt or a pasted CLI/server-log excerpt.
+
+Setup
+-----
+$ cd /tmp/m28-quay-scratch && QCLI=.../packages/quay/bin/quay.js
+$ node "$QCLI" task edit M28S4-WEBUI-001 --status todo \
+    --title "M28S4 Web UI round-trip target task" \
+    --body "## Proposal\nScratch task for scenario 4 Web UI action_buttons round-trip test." --json
+(created; provider = quay-native, scratch tasks dir /tmp/m28-quay-scratch/tasks)
+
+$ node "$QCLI" action list M28S4-WEBUI-001 --json
+{"id":"advance","label":"Advance","payload":"Drive task {{id}} forward one status
+ transition using its current status's Skill (see status_skill_map).",
+ "whenStatus":["todo","ready"]}
+
+Server started:
+$ cd /tmp/m28-quay-scratch && nohup node "$QCLI" serve --port 4128 \
+    > /tmp/m28-serve.log 2>&1 &   (pid 1829143)
+$ curl -s http://localhost:4128/ -o /dev/null -w "%{http_code}\n"
+200
+
+Step 1 — RED: click Advance while gate is not satisfied
+---------------------------------------------------------
+Pre-click gate check (CLI, independent of UI):
+$ node "$QCLI" task check M28S4-WEBUI-001 --json
+{
+  "id": "M28S4-WEBUI-001", "gate": "author->ready", "ok": false,
+  "artifacts": {"proposal": true, "plan": false, "ac": false, "dod": false},
+  "reason": "missing artifacts: plan, ac, dod"
+}
+
+Browser: navigated to http://localhost:4128/task/M28S4-WEBUI-001
+Snapshot showed heading "M28S4-WEBUI-001: ... [todo]" and a real "Advance"
+button (ref f41e10). Playwright flagged "Console: 1 errors" — inspected via
+browser_console_messages(level=error):
+  [ERROR] Failed to load resource: the server responded with a status of 404
+  (Not Found) @ http://localhost:4128/favicon.ico:0
+-> harmless (no favicon route registered), not a functional gap; noted and
+   not counted as a scenario-4 defect.
+
+Clicked "Advance" (browser_click on ref f41e10):
+Resulting URL: http://localhost:4128/task/M28S4-WEBUI-001?error=Gate+check+failed%3A+missing+artifacts%3A+plan%2C+ac%2C+dod
+
+-> PASS (sub-check): gate-blocked path works correctly end-to-end through
+   the real UI control, matching the CLI's own `task check` verdict.
+
+Step 2 — GREEN: complete artifacts, re-check gate
+---------------------------------------------------
+$ node "$QCLI" task edit M28S4-WEBUI-001 --body "<Proposal+Plan+AC+DoD, all
+    >=40 chars, all 3 AC checkboxes checked>" --json
+$ node "$QCLI" task check M28S4-WEBUI-001 --json
+{
+  "id": "M28S4-WEBUI-001", "gate": "author->ready", "ok": true,
+  "artifacts": {"proposal": true, "plan": true, "ac": true, "dod": true},
+  "reason": "all four artifacts present; eligible to move to ready"
+}
+Task view immediately before browser re-click:
+  "status": "todo", "updatedAt": 1784417133676.3875
+
+Step 3 — click Advance with gate satisfied; observe real effect
+-------------------------------------------------------------------
+Browser: navigated (reload) to http://localhost:4128/task/M28S4-WEBUI-001.
+Snapshot confirmed heading still "[todo]" pre-click (content matches the
+just-written Proposal/Plan/AC/DoD).
+
+Clicked "Advance" (browser_click on ref f43e10):
+Resulting URL:
+  http://localhost:4128/task/M28S4-WEBUI-001?success=Task+M28S4-WEBUI-001+advanced
+Resulting page snapshot: banner "Done: Task M28S4-WEBUI-001 advanced", BUT
+the page's own <h1> heading still reads:
+  "M28S4-WEBUI-001: M28S4 Web UI round-trip target task [todo]"
+i.e. the UI's own re-render (server-side, same GET route, same task read)
+shows status is still todo, immediately after the "success" redirect.
+
+Server log (/tmp/m28-serve.log), pasted verbatim:
+  [quay serve] action advance on M28S4-WEBUI-001: gate blocked — Gate check
+    failed: missing artifacts: plan, ac, dod          <- Step 1's request
+  [quay action run] manda not available — degraded delivery.
+  Run this to drive the task:
+    Drive task M28S4-WEBUI-001 forward one status transition using its
+    current status's Skill (see status_skill_map).
+  [quay serve] action advance on M28S4-WEBUI-001: { delivered: 'print' }
+
+-> Confirms mechanism: deliverTrigger() ran in "plain-CLI-print" degraded
+   mode (no manda dispatcher registered in this scratch workspace) — it
+   printed instructions to the SERVER's own stdout for a human/agent to
+   separately run the Skill. It did not call taskWrite() and did not
+   change status.
+
+Step 4 — INDEPENDENT verification (separate CLI process, not the UI's
+own claim)
+-------------------------------------------------------------------------
+$ node "$QCLI" task view M28S4-WEBUI-001 --json
+{
+  "id": "M28S4-WEBUI-001", ..., "status": "todo", ...,
+  "updatedAt": 1784417133676.3875
+}
+updatedAt is BYTE-IDENTICAL to the pre-click value captured in Step 2 —
+proof of zero mutation from the click.
+
+Verdict: FAIL
+--------------
+The Web UI's "Advance" action_button does NOT perform the task's status
+round-trip. It gate-checks correctly (Step 1's RED path is fully correct
+and matches CLI `task check`), but on success it only *delivers a trigger*
+(here: prints instructions to the server process's own stdout, since no
+manda dispatcher is configured) — it does not itself drive the task to its
+next status. The page's own success banner text ("Done: Task ... advanced")
+actively overstates what happened: nothing about the task was "done" or
+"advanced"; only a trigger message was printed server-side. An operator
+watching only the browser UI, with no independent CLI/task_get check, would
+be misled into believing the task transitioned.
+
+This matches the source-level reading of packages/quay/src/serve.js's POST
+/task/<id>/action/<actionId> handler and packages/quay/src/action.js's
+deliverTrigger(): by design, action buttons dispatch async work for
+something else (a human, a manda-managed subagent, or Claude-Code-inline
+sync spawn) to complete; they are not a synchronous status-mutation
+primitive. In THIS scratch environment (no manda, no Claude-Code-inline
+wiring configured), the round trip cannot complete via the UI alone.
+
+Gap logged (per M28 "log, don't fix" discipline):
+G-S4-01 (UX honesty): the POST action route's success banner says
+"Done: Task <id> advanced" even in plain-CLI-print degraded-delivery mode,
+where nothing about the task has changed yet. Recommend the success message
+be conditioned on delivery mode, e.g. "Trigger sent (print mode) — run the
+printed command to complete the transition" vs. an unqualified "advanced".
+Disposition: DEFERRED — future-candidate backlog note (UI copy-only fix,
+no functional gate-logic change implied); not fixed here per charter's
+"log, don't fix" discipline. Filed for the DIR-001 backlog, not blocking
+this milestone.
+
+G-S4-02 (capability gap, not a bug): action_buttons' "advance" semantics
+depend entirely on which deliverTrigger mode is configured/available
+(manda / Claude-Code-inline / print / mock-log). In the print-degraded
+mode used by this scratch harness (representative of a bare `quay serve`
+deployment with no agent dispatcher wired up), the Web UI cannot complete
+an end-to-end round trip unassisted. This is an environment/config
+limitation, not a code defect — but it means Scenario 4 as specified
+("Web UI task-board round-trip", "independent task_get/task view
+confirmation of persisted state") genuinely does not pass out of the box.
+Disposition: DEFERRED — future-candidate backlog note recommending either
+(a) documenting this limitation prominently in the Web UI's own copy, or
+(b) wiring a default in-process delivery mode for `quay serve` so the
+button is functionally complete without external dispatcher setup.
+
+Cleanup: server process (pid 1829143) killed at end of milestone run.
