@@ -1,5 +1,6 @@
 # A quay-task-native proposal→plan skill, and the exp5 milestone-model changes it requires
 
+<<<<<<< HEAD
 **Status:** MATURED / dispatch-ready (design-doc-only). §1-11 are the original
 DRAFT (commit `05a8066`, 2026-07-18, authored live alongside DIR-012) — read in
 full and cited, not re-derived, per this milestone's Done-when clause 1. `git
@@ -12,6 +13,25 @@ to fully specify the skill per DIR-012 Requested-action item 1, and to produce a
 dispatch-ready "Done-when clauses a future implementing milestone would need"
 section, matching the M13 (`exp5-task-backlog-primitive-projection.md` §15) /
 M14 (`exp5-cli-edit-parity.md` §6) precedent.
+=======
+**Status:** MATURED — dispatch-ready skill design (M17-task-to-plan-skill-design,
+m16→m17). Sections 1-11 are the original DRAFT (authored 2026-07-18 from a live
+human-steering conversation, git revision `05a8066`, the conversational draft
+DIR-012 references and cites verbatim as its precursor artifact) — kept
+unmodified as the rationale/evidence base. Sections 12-18 are NEW, added by this
+milestone per its charter's in-scope items 1-8: they fully specify the skill's
+quay task read/write behavior, the N-independent-proposal + adjudication step,
+the plan author + grounded-convergent-check step (with a precise stop
+condition), the TDD ≥80%-per-stage hard gate, provider-agnostic GitHub
+degradation, a dispatch-ready Done-when checklist for a future implementing
+milestone, and explicit non-goals — at the same fidelity M13
+(`docs/proposals/exp5-task-backlog-primitive-projection.md` §15) and M14
+(`docs/proposals/exp5-cli-edit-parity.md` §6) achieved for their own skill/design
+docs. Per this milestone's charter, sections 12-18 are **design-doc-only**: no
+skill implementation, no code under `.claude/skills/`, no edits to
+`inherited-core.md`/`OUTER-LOOP.md` (DIR-012 items 2/3 stay explicitly out of
+scope here — see §18).
+>>>>>>> exp5-m17-iteration-0
 
 **Scope:** introduce a new skill, analogous to the existing `proposal-to-plan`
 but native to quay's task spec, and adopt the milestone-model changes that make
@@ -287,8 +307,9 @@ but quay-native. Differences from the existing skill:
   methodology class should *also* eventually adopt proposal-re-derivation or keep
   whole-milestone re-derivation.
 
-## 11. Status / next step
+---
 
+<<<<<<< HEAD
 Design-only. Natural routing (consistent with DIR-009/010/011): capture the
 human-steering origin as a DIR, which requests a design-doc milestone to fully
 specify the new skill; then a first *implementation* milestone builds the skill
@@ -773,3 +794,506 @@ prose):
   (DIR-012 item 3 — no code, no `.claude/skills/quay-task-to-plan/` file, no
   live dispatch of the pipeline described above; design-doc-only, exactly like
   M13/M14).
+=======
+# Part II — Fully-specified `quay-task-to-plan` skill design (M17-task-to-plan-skill-design)
+
+The sections below mature §§1-10's conversational draft into a dispatch-ready
+skill design, per this milestone's charter in-scope items 1-8. Each section is
+labeled with the charter item it satisfies. Nothing here contradicts §§1-10; it
+makes those decisions concrete and operational.
+
+## 12. Quay task read/write behavior (charter item 2 / DIR-012 item 1's read/write half)
+
+### 12.1 Provider ABI tool(s) used
+
+Per DIR-009 item 8's existing provider-tool convention (§8 of
+`docs/proposals/exp5-task-backlog-primitive-projection.md`, "SELECT reads quay via
+the provider tool — read path"): the skill MUST use the Provider ABI tool surface
+exclusively, never read/write `backlog.md` or any other generated markdown view as
+a data source or sink.
+
+- **Read.** `mcp__quay__task_list` (candidate/milestone-membership queries, e.g.
+  `label: milestone:<id>`) and `mcp__quay__task_get` (single-task detail, including
+  current `body`, `labels`, `parent`/`children`) — or their CLI equivalents
+  (`node packages/quay/bin/quay.js task list --label milestone:<id> --json`,
+  `task get <id> --json`) when the skill runs outside an MCP-tool-equipped context.
+- **Write.** `mcp__quay__task_write` (or CLI `task edit`, per M16-cli-edit-parity-
+  impl's now-landed full-field flag surface) for every proposal write-back (§12.2)
+  and every milestone→task grouping write (§12.3). The skill never writes task
+  data through any channel other than this tool — no direct file edits to the
+  native store's frontmatter, even though the skill runs inside the same repo
+  that hosts the native store, because that would silently break the
+  provider-agnostic contract §12's own point is to preserve.
+- **Check.** `mcp__quay__task_check` (or CLI `task check`) for the gate-mechanics
+  read used at plan-check/TDD-gate time (§14, §15) — the skill's plan-check and
+  TDD-gate steps consult `task_check`'s existing gate semantics rather than
+  inventing a parallel status representation.
+
+### 12.2 Proposal → `body` write-back shape (DIR-011 portable-metadata rule)
+
+Per the portable-metadata convention (`inherited-core.md`, "Portable-metadata
+convention (body-first, `extra{}` native-only)", inserted verbatim by
+M16-cli-edit-parity-impl): a task's proposal is portable metadata — it MUST live
+in the task's `body`, not solely in `extra{}`.
+
+**Concrete write-back shape** (mirrors the existing `## Status mirror` body-section
+convention M05's projection design and M13's `Status mirror:` line already
+established — same shape, new section name):
+
+```markdown
+## Proposal
+
+Source: <adjudicated | single-author>, <ISO date>, <author identity: subagent
+persona label(s) or "single-pass">
+
+<proposal body — the adjudicated (or, for N=1 fallback, single-author) approach
+description: problem framing, approach, key design decisions, explicitly-listed
+alternatives considered and rejected (§13.2 requires this list to be preserved,
+not discarded at adjudication)>
+
+### Adjudication note
+<present only when N≥2 — which proposal(s) diverged, on what axis, and which
+resolution was chosen and why; absent entirely for N=1 fallback or when N≥2
+proposals converged with no material divergence>
+```
+
+- **`extra{}` mirror (optional, native-only convenience):** the skill MAY
+  additionally write `extra.proposalStatus` (e.g. `adjudicated` / `pending`) on
+  native as a query-performance convenience — per the portable-metadata rule's own
+  corollary, this mirror is never the sole record of the fact; the `## Proposal`
+  body section above is authoritative and sufficient on its own.
+- **Regeneration, not write-once.** Per §3's "not write-once" finding (task
+  granularity is variable, DIR-009), a task's `## Proposal` section is
+  REPLACED (not appended-and-orphaned) whenever the task is re-grouped into a
+  different milestone or its proposal is regenerated — the skill's write-back
+  step always does a full-section replace of `## Proposal` through (but not past)
+  the next `##` heading, the same idempotent-section-replace discipline the M05
+  projection design already uses for `## Status mirror`.
+
+### 12.3 Milestone → task grouping (M12 parent/children WRITE, reused unchanged)
+
+Per charter item 2's explicit instruction ("reusing M12's real parent/children
+WRITE capability, not a new mechanism") and §12's grouping precedent already
+established by the task-backlog-projection design (`exp5-task-backlog-primitive-
+projection.md` §2/§12): this skill does **not** invent a new grouping mechanism.
+
+- **Primary portable grouping key: the `milestone:<id>` label** (per
+  `exp5-task-backlog-primitive-projection.md` §2/§12 — label is the
+  provider-portable grouping mechanism, since GitHub issues have no native
+  parent-link field and M09's hard-error floor pre-M12 blocked `parent`/`children`
+  writes; label write is supported on both providers unconditionally).
+- **`parent`/`children` is reserved for epic-decomposition** (a single
+  over-scoped task split into several sub-tasks), a DIFFERENT relationship than
+  milestone membership, per the same §2/§12 distinction — the skill uses
+  `parent`/`children` ONLY when it is itself performing an epic-split (e.g. a
+  proposal-adjudication step concludes the task should be decomposed into
+  multiple sub-tasks before planning), never as the milestone-grouping key.
+  This is real, bidirectionally-writable on both providers as of M12
+  (native: `parent`/`children` frontmatter fields, `packages/quay-native/src/
+  store.js:264-307`; GitHub: checkbox-in-body convention,
+  `packages/quay-github/src/github-client.js`'s `extractChildRefs`/
+  `CHILD_CHECKBOX_RE`, write side landed by M12-abi-parent-write) — the skill
+  calls `task_write` with `parent`/`children` fields exactly as any other quay
+  client would; it does not need provider-specific branching, because M12 already
+  made this portable at the Provider ABI layer.
+- **Milestone-level plan record placement.** Per §3's `plan ↔ milestone` alignment
+  ("phase/stage are NOT written into the task board as a child-task tree"): the
+  plan document itself is NOT a quay task and is NOT represented via
+  `parent`/`children` — it lives at
+  `experiments/quay-perpetual-stream/milestones/M<NN>-<slug>/plan.md` (or the
+  equivalent path inside whatever repo/experiment structure hosts the milestone),
+  a plain file, cross-referenced from the milestone's grouping tasks' `body` via a
+  `Plan: <path>` line (same body-line convention as M05's `Status mirror:` line)
+  but never written INTO the task tree as child tasks per phase/stage.
+
+## 13. N-independent-proposal + adjudication step (charter item 3)
+
+### 13.1 Mechanism
+
+For each task selected into a development-class milestone (per §5's two-class
+split), the skill dispatches **N=2 independent subagents** (§10's "Open"
+decision now resolved — 2 is the default, per the prior-art precedent
+(`proposal-to-plan`) and exp5's own M13 both having used 2 independent passes;
+raise N only for a task explicitly flagged high-stakes at SELECT time, never as a
+silent per-task judgment call inside the skill itself):
+
+1. **Blank-slate-leaning dispatch.** Each of the N subagents receives only: the
+   task's current `body`/title/labels (the value description), the milestone
+   charter (if one exists yet) or the raw candidate description (if pre-charter),
+   and this design doc's §12.2 write-back shape instruction. Subagents are NOT
+   shown each other's output and are NOT run in the same context — per §6's
+   "no inter-agent communication" requirement, this is what makes divergence a
+   real signal rather than an artifact of shared anchoring. Persona/prompt
+   differentiation (e.g. "propose the minimal-surface-area approach" vs. "propose
+   the approach most consistent with existing patterns in this codebase") is
+   permitted and encouraged as a cheap way to widen genuine divergence (§6).
+2. **Adjudication step.** A THIRD subagent (or, at the milestone author's
+   discretion for small tasks, a synchronous review by whoever is running the
+   dispatch) receives BOTH proposals and is charged explicitly to: (a) identify
+   whether they converged (same approach, differing only in low-stakes framing)
+   or diverged (a real approach-level disagreement, the M13 DIR-010-namespace
+   precedent), (b) for divergence, adjudicate a winner or explicitly synthesize a
+   merged approach, recording the adjudication note per §12.2's body shape, (c)
+   for convergence, write back the (near-)identical content with no adjudication
+   note required.
+3. **Write-back.** The adjudicated (or converged) proposal is written to the
+   task's `body` per §12.2's shape — exactly once per task, by the adjudication
+   step, never by either of the N proposal subagents directly (this avoids a
+   race/overwrite hazard between N≥2 concurrent writers).
+
+### 13.2 Relationship to `proposal-to-plan`'s existing architect-review — STRENGTHENS, does not replace
+
+This is the charter's explicit disambiguation requirement (item 3): the
+N-independent-proposal + adjudication step is an ADDED adversarial pass, not a
+substitute for `proposal-to-plan`'s existing single sequential architect-review
+step.
+
+- **`proposal-to-plan`'s existing pipeline** (§2's citation): proposal →
+  architect-review → plan → architect-review → commit — ONE proposal author,
+  reviewed sequentially by a SECOND agent that critiques (not re-derives) it.
+- **What `quay-task-to-plan` adds:** it inserts parallel re-derivation UPSTREAM of
+  where `proposal-to-plan`'s architect-review sits — N independent AUTHORS
+  (not reviewers) produce N candidate proposals before any review happens, then
+  adjudication (§13.1 step 2) resolves them into the single proposal that THEN
+  enters `proposal-to-plan`'s own architect-review step unchanged. So the full
+  chain for a `quay-task-to-plan`-driven task is:
+
+  ```
+  N independent proposal authors → adjudication → [existing] architect-review → plan → [existing] architect-review → commit
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^ unchanged, reused as-is
+  ```
+
+  The architect-review step's existing job (catching mechanical/verifiable errors
+  in the SINGLE adjudicated proposal, per §2's evidence) is unchanged and still
+  runs; `quay-task-to-plan` neither removes it nor duplicates its function. It
+  answers a different question (§5's framing): N-independent-proposal +
+  adjudication catches APPROACH-divergence (a judgment call, e.g. M13's DIR-010
+  namespace decision) that a single-author + reviewer pipeline cannot surface at
+  all, because there is only ever one proposal in that pipeline for the reviewer
+  to critique — nothing to diverge FROM.
+- **Concrete non-overlap check:** if the N proposals converge (§13.1 step 2's
+  convergence case), the adjudication step adds negligible cost (a same-approach
+  confirmation) and architect-review proceeds exactly as it would have with a
+  single author. If they diverge, architect-review still runs afterward on
+  whichever approach adjudication selected — it is never skipped, and never
+  asked to arbitrate between the two raw candidate proposals itself (that is
+  adjudication's job, not architect-review's).
+
+## 14. Plan author + grounded convergent-check step (charter item 4)
+
+### 14.1 Mechanism
+
+Once a milestone's tasks all carry adjudicated proposals (§13), a SINGLE plan
+author subagent produces the milestone-level plan record (§12.3's placement) —
+phases (≤500 lines), stages (≤200 lines), dependency order, per-stage TDD ≥80%
+acceptance criteria (§15) — sequencing the ALREADY-ADJUDICATED task proposals'
+implementation, per §7's "check, not re-derive" grounding (plan-class errors —
+signatures, call-sites, stage ordering, sizing, TDD semantics — are verifiable
+against ground truth, not judgment divergences the way approach is).
+
+The plan author is followed by a **grounded convergent-check subagent**:
+
+1. **Maximally codebase-grounded** (§6's grounding-differs-by-role
+   requirement): the check subagent reads the actual current signatures,
+   call-sites, and dependency graph the plan claims to sequence — it does not
+   re-derive a second independent plan from the proposals; it CHECKS the one plan
+   that exists against ground truth.
+2. **What it checks, concretely** (per §2's evidence of what these checks
+   actually catch): function/type signatures referenced in the plan match the
+   real codebase; call-site line numbers are current (not stale from an earlier
+   plan-author pass); stage ordering respects real dependencies (e.g. update
+   call-sites before deleting the old symbol, not after); TDD semantics per stage
+   are correct for the language/toolchain (e.g. "expect BUILD FAIL" only applies
+   where the toolchain actually fails to build on an undefined reference); line
+   budgets (≤500/phase, ≤200/stage) are arithmetically correct against the plan's
+   own stated file-touch list; the code-vs-prose classifier (§15.2) is applied
+   correctly per stage.
+3. **Revision loop.** If the check finds material issues, the plan author
+   revises (not a fresh independent plan — an edit to the existing one,
+   informed by the check's findings) and the check subagent re-runs against the
+   revised plan.
+
+### 14.2 Convergence / stop condition — precise statement
+
+Reusing BAIME's own ΔV-small-and-stable pattern (§7's citation), stated
+precisely for this context (adapting `inherited-core.md`'s inner-termination
+condition 2, "ΔV<0.02 both layers K=2 consecutive," to the plan-check's
+single-metric setting):
+
+- **Convergence metric.** Each check round produces a count of MATERIAL findings
+  (an issue in the §14.1.2 checklist that would change the plan's content if
+  fixed — NOT cosmetic wording changes). Call this `F_i` for round `i`.
+- **Stop condition (met when EITHER fires):**
+  - **(a) Zero-finding convergence:** `F_i = 0` for one full round — the check
+    subagent reviewed the plan in full against ground truth and found no
+    material issue. This is the expected/common case and requires only one
+    round beyond the round that produced `F_i = 0` to confirm (i.e. the round
+    itself IS the confirmation; no extra confirmatory round is required, since
+    unlike BAIME's dual-layer V this is a single boolean-ish signal per round,
+    not a continuous score needing K=2 stability).
+  - **(b) Diminishing-returns cap:** the round count reaches **3** (the cap
+    stated in §7 and DIR-012's own Finding #5, "iterate to convergence... cap
+    ~2-3 rounds") — if round 3 still finds material issues, the milestone STOPS
+    the automated check loop and escalates to a human/architect-review decision
+    rather than iterating indefinitely (mirrors `inherited-core.md`'s own
+    condition-3 "ceiling → redesign-OR-stop" pattern, applied at the plan-check
+    granularity rather than the whole-milestone granularity).
+- **Why not BAIME's literal K=2-of-ΔV<0.02:** that pattern was designed for a
+  continuous dual-layer VALUE score trending toward a threshold across many
+  iterations; the plan-check loop is a discrete, small-N (≤3), single-metric
+  correction loop, so the adaptation keeps the SHAPE (stop when additional
+  rounds stop finding new problems, cap the total cost) without importing the
+  two-consecutive-reading smoothing BAIME uses for a noisier, continuously-valued
+  metric. This is stated explicitly here so a future implementing milestone does
+  not need to re-derive whether the literal K=2/ε=0.02 numbers apply (they do
+  not — F_i=0-once or round-cap-3 are this context's own precise numbers).
+- **Optional ad hoc re-derivation escape hatch (§7's own carve-out, unchanged):**
+  if round 3 still finds material issues AND the underlying disagreement is a
+  decomposition-shape question (not a ground-truth-checkable fact), the milestone
+  MAY request a second independent plan ad hoc — this remains the exception, not
+  the standing mechanism (§7).
+
+## 15. TDD ≥80%-per-stage hard gate (charter item 5)
+
+### 15.1 What it gates, precisely
+
+Every stage (≤200 lines, per §4's nested budget) in the milestone-level plan
+record MUST carry, before that stage is marked complete in the plan (not the
+task board — §12.3):
+
+- A stated **acceptance test set** for the stage (specific test file(s)/case(s),
+  not "tests pass" as a bare claim).
+- A **coverage figure for the stage's own changed/added lines** (not the whole
+  repo's aggregate coverage, which would let a well-covered stage mask a
+  poorly-tested one) of **≥80%**, computed by whatever coverage tool the
+  target language/toolchain already uses in this repo (e.g. `c8`/`nyc` for the
+  Node.js packages here), with the RAW tool output pasted into the stage's
+  completion evidence — narrative claims of coverage are explicitly insufficient
+  (same evidence-gate discipline `inherited-core.md`'s "dogfooding evidence-gate"
+  it0 check already applies elsewhere in this experiment).
+- This is a **hard gate, not advisory**: a stage without a pasted ≥80% coverage
+  figure (or the §15.2 prose-net substitute) CANNOT be marked DONE in the plan
+  record, full stop — stricter than exp5's current default "paste test output"
+  evidence convention, which does not enforce a numeric threshold.
+
+### 15.2 Code-vs-prose per-stage classifier (scope caveat, carried from §8.4)
+
+The ≥80% LINE-coverage number applies **only to executable code** stages (JS,
+shell, etc.). For prose/skill/template/manifest stages (a `SKILL.md`, subagent
+prompt templates, markdown design docs — which `quay-task-to-plan`'s OWN
+eventual implementation is largely made of), the gate degrades to the
+**mechanical-check discipline** already established by `docs/plans/2-exp5-
+driver-deliverability-packaging.md` (gate-hash / projection-check `it0-*.sh`
+script runs, scaffold-lint, isolation test) — never a coverage percentage,
+since "80% of a markdown file's lines are covered" is not a meaningful claim.
+
+**Per-stage classification is mandatory and explicit**, recorded in the plan
+record itself at plan-author time (not decided ad hoc at stage-completion time):
+each stage in the plan is tagged `[code]` or `[prose]`, and the plan-check
+subagent (§14.1.2) verifies the tag is correct (a stage that touches both gets
+split, or the code portion's ≥80% figure is computed on only the code files
+within that stage, with the prose files in the same stage separately satisfying
+the mechanical-check net).
+
+### 15.3 Why load-bearing specifically here — single-implementation rationale
+
+Per §6's two-ends-clamp design: independence is spent at BOTH ends (upstream
+proposal re-derivation, §13; downstream adversarial-audit, unchanged/reused from
+DIR-007/M10) but the IMPLEMENTATION itself runs **once**, in the middle, with no
+separate independent re-implementation or independent tail-verifier spawned
+(§6's explicit "tail self-check degrades to light" design choice). This is the
+precise reason the TDD gate must be a HARD gate here, stricter than the
+"paste test output" convention this experiment otherwise defaults to:
+
+- In a whole-milestone-independent-re-derivation design (the methodology class,
+  §5), a second independent pass over the SAME deliverable is itself a
+  correctness net — if the two independent derivations agree, that agreement is
+  evidence; if they disagree, the disagreement itself is caught.
+- In the dev class's two-ends-clamp design, there is **no second independent
+  pass over the implementation itself** — proposal-level independence (§13)
+  catches approach errors BEFORE any code is written, and adversarial-audit
+  catches claim-inflation AFTER the milestone claims completion, but NEITHER
+  independently re-derives or re-checks the actual line-by-line correctness of
+  the code the single implementation pass wrote. The TDD ≥80%-per-stage gate is
+  therefore the ONLY mechanism in this pipeline that can catch a
+  correctly-approached, correctly-planned, but incorrectly-CODED stage — remove
+  it (or leave it advisory) and the pipeline has a hole exactly where M09-style
+  milestones currently rely on tail-verification (which THIS design deliberately
+  degrades to a light self-check, per §6, precisely because it is trusting the
+  TDD gate to have already done the load-bearing work per-stage, incrementally,
+  rather than waiting to catch everything at the end).
+
+## 16. Provider-agnostic GitHub degradation (charter item 6)
+
+Stated explicitly, extending §8.5's one-line summary into a precise behavior
+specification:
+
+- **`## Proposal` body write-back (§12.2):** fully supported on GitHub — `body`
+  is a portable field per the portable-metadata convention; no degradation
+  needed. Same for the `extra.proposalStatus` native-only mirror: simply omitted
+  on GitHub (never attempted), per the portable-metadata rule's own corollary —
+  the body copy alone remains sufficient.
+- **`milestone:<id>` label grouping (§12.3):** fully supported on GitHub — label
+  write is unconditionally supported on both providers per
+  `exp5-task-backlog-primitive-projection.md` §2's own citation; no degradation
+  needed.
+- **`parent`/`children` epic-decomposition writes (§12.3):** fully supported on
+  GitHub as of M12-abi-parent-write (checkbox-in-body convention,
+  `extractChildRefs`/`CHILD_CHECKBOX_RE`) — this was the LAST unimplemented
+  Provider-ABI write field pre-M12; post-M12 there is no remaining GitHub
+  hard-error floor on this path. The skill calls `task_write` with
+  `parent`/`children` exactly as it would on native.
+- **`extra{}` on GitHub tasks — the ONE path that still hits the hard-error
+  floor.** Per PR-ABI-001 (M09-gh-write)'s hard-error floor, unchanged and not
+  reopened by this design: any attempt to write `extra{}` fields on a GitHub
+  task MUST hard-error with the existing PR-ABI-001 floor message, leaving the
+  GitHub issue unmodified — exactly the same behavior M14-cli-edit-parity's §5.2
+  worked example already conformance-tests for `--extra`. `quay-task-to-plan`
+  does not introduce any NEW `extra{}` dependency (§12.2 explicitly makes the
+  `extra.proposalStatus` mirror optional/native-only-convenience, never load-
+  bearing) — so this skill hits the SAME, already-established floor, not a new
+  one, and requires no new provider-branching logic of its own. This is also
+  §18's non-goal 3, restated here as the operational behavior.
+- **Net effect:** every write `quay-task-to-plan` performs as part of its
+  standing operation (`body`, `labels`, `parent`/`children`) is fully portable
+  post-M12; only the OPTIONAL, non-load-bearing `extra{}` convenience mirror
+  degrades, and it degrades by simply not being attempted on GitHub (the skill's
+  own write-back logic branches on provider capability the same way M14's
+  `task edit` relaxation already does — check provider capability before
+  attempting the `extra` write, never attempt-then-catch a hard error as normal
+  control flow).
+
+## 17. Dispatch-ready Done-when clauses a future implementing milestone would need (charter item 7)
+
+Matching the concrete, pasted-diff/invocation-style checklist form of
+`exp5-task-backlog-primitive-projection.md` §15 and `exp5-cli-edit-parity.md` §6
+(both M13/M14's own equivalent sections) — narrative descriptions are
+insufficient for each item below; the implementing milestone must paste the
+literal evidence named.
+
+- [ ] A new skill directory `.claude/skills/quay-task-to-plan/` exists with a
+      `SKILL.md` describing the pipeline in §13/§14 (proposal N-independent +
+      adjudication → architect-review [reused from `proposal-to-plan`] → plan
+      author + grounded convergent-check → single implementation with per-stage
+      TDD gate → light tail self-check) — pasted `SKILL.md` content or diff.
+- [ ] The skill's proposal-authoring subagent prompt(s) implement the
+      blank-slate-leaning dispatch of §13.1 step 1 (task body/title/labels +
+      charter/candidate description only, NO cross-subagent context sharing) —
+      pasted subagent prompt text, plus a real dispatch trace (e.g. manda
+      `Dispatch`/`Agent` tool-call log) showing N=2 independent, non-communicating
+      invocations for at least one real task.
+- [ ] The adjudication subagent prompt implements §13.1 step 2's three outcomes
+      (converged / diverged-adjudicated / diverged-synthesized) and writes back
+      per §12.2's exact body shape — pasted before/after `task_get` body output
+      for at least one real task showing the `## Proposal` section landed
+      correctly, including an `### Adjudication note` subsection for at least one
+      genuinely-diverged case (not only convergent cases — a diverged case must
+      be demonstrated, or the adjudication step's actual function is unverified).
+- [ ] The plan-author + grounded-convergent-check loop (§14) is implemented as
+      two distinct subagent roles (author vs. checker, per §14.1) with the
+      checker's grounding requirement (real signature/call-site/dependency-graph
+      reads, not proposal-text-only) demonstrable — pasted checker subagent
+      prompt text plus at least one real round-trip (author output → checker
+      findings → author revision) for a real milestone-shaped plan.
+- [ ] The §14.2 convergence/stop condition (`F_i=0` once, OR round-cap 3) is
+      implemented as an explicit, mechanically-checked loop-exit condition in the
+      skill's orchestration code/prompt (not left to the dispatching agent's
+      informal judgment of "looks converged") — pasted orchestration logic/prompt
+      excerpt showing the exit check.
+- [ ] The plan record includes the §15.2 mandatory per-stage `[code]`/`[prose]`
+      classification tag, and the plan-check subagent verifies tag correctness
+      per §14.1.2 — pasted example plan-record excerpt showing at least one
+      `[code]` and one `[prose]` stage, correctly tagged.
+- [ ] The per-stage TDD ≥80% hard gate (§15.1) is enforced as a mechanical block
+      on marking a `[code]` stage DONE in the plan record — i.e. the skill's own
+      tooling refuses (not merely warns) to advance past a stage lacking a pasted
+      ≥80% coverage figure — pasted evidence of the block actually firing on a
+      deliberately-under-tested stage (a real negative-case demonstration, not
+      only the positive "gate passed" case).
+- [ ] `[prose]`-tagged stages are gated by the mechanical-check discipline (§15.2)
+      instead of a coverage percentage, demonstrated on at least one real prose
+      stage (e.g. the skill's own `SKILL.md` authoring, if self-hosted per §11's
+      bootstrap resolution) — pasted gate-hash/projection-check script output.
+- [ ] Milestone→task grouping writes exclusively through `task_write`'s
+      `labels`/`parent`/`children` fields (§12.3), verified on BOTH providers —
+      pasted two-provider conformance probe output (native + GitHub), following
+      the same conformance-harness pattern M14-cli-edit-parity's §5 established.
+- [ ] The GitHub `extra{}` hard-error floor (§16) is NOT reopened — a
+      conformance probe confirms `quay-task-to-plan`'s own write-back logic never
+      attempts an `extra{}` write on a GitHub task (checks provider capability
+      first, per §16's "check before attempt" requirement) — pasted probe output
+      showing zero `extra` write attempts logged against the GitHub provider
+      across a full skill dry-run.
+- [ ] Reuse (not reimplementation) of `feature-developer`'s orchestration is
+      demonstrated where applicable (DIR-012 item 1's explicit instruction,
+      carried through from this doc's §8 point 6) — pasted citation showing which
+      parts of `feature-developer`'s existing orchestration logic the new skill
+      invokes or wraps, and which parts it necessarily diverges from (with a
+      stated reason for each divergence).
+- [ ] `git diff --stat` against the implementing milestone's own pre-charter base
+      commit shows only the expected files touched (new skill directory under
+      `.claude/skills/quay-task-to-plan/`, any conformance-test additions, no
+      unrelated product code) — same evidence-gate discipline M13/M14's own §15/
+      §6 closing clauses used.
+- [ ] Full existing test suite still passes post-change (pasted raw output) —
+      same closing gate M05/M13/M14's own Done-when clauses used.
+
+## 18. Non-goals (charter item 8, DIR-012's carried-through list — restated precisely for this skill)
+
+1. **No stage-level process rendered in the Web UI.** Per §3's accepted
+   consequence (unchanged, restated for completeness here): the plan record
+   (§12.3's placement, a plain file, not a quay task) is never surfaced through
+   the Web UI's task/milestone views. Only the value structure (task/milestone
+   done-or-not) is self-hosted; the implementation PROCESS (phase/stage progress)
+   stays invisible to the Web UI by design. A future milestone MAY choose to
+   change this, but `quay-task-to-plan`'s own design does not attempt it, and no
+   Done-when clause in §17 above requires or implies Web UI rendering of stages.
+2. **No fork or deletion of `proposal-to-plan` for non-quay use.**
+   `proposal-to-plan` stays exactly as it is today, for free-markdown workflows
+   outside the quay task board (e.g. this very design doc's own precedent docs,
+   `docs/plans/1-…`/`docs/plans/2-…`) — `quay-task-to-plan` is purely additive, a
+   NEW skill directory, never a modification to or replacement of the existing
+   one. §13.2's pipeline diagram shows `quay-task-to-plan` CALLING INTO
+   `proposal-to-plan`'s existing architect-review step, not absorbing or forking
+   its code.
+3. **No `extra{}` storage on GitHub tasks — the PR-ABI-001 hard-error floor is
+   unchanged.** Per §16: `quay-task-to-plan` introduces no new `extra{}`
+   dependency of its own, and any attempt to write `extra{}` on a GitHub task
+   must still hard-error exactly as it does today. This design does not request,
+   and a future implementing milestone must not add, any GitHub-side `extra{}`
+   write path.
+
+---
+
+## 19. Status / next step (supersedes original §11's DRAFT-era framing)
+
+**Original §11 (DRAFT, 05a8066), preserved for provenance:** "Design-only.
+Natural routing (consistent with DIR-009/010/011): capture the human-steering
+origin as a DIR, which requests a design-doc milestone to fully specify the new
+skill; then a first *implementation* milestone builds the skill and is itself
+the first dev-class milestone to run through the very pipeline it defines (a
+clean dogfooding loop — and the new skill can be designed using the existing
+`proposal-to-plan` as a cross-check). The overdue implementation milestones
+already queued (M-TASK-BACKLOG-PROJECTION impl, M-CLI-EDIT-PARITY impl, release
+cadence) are the natural first customers."
+
+**Current status (M17-task-to-plan-skill-design, this milestone):** the DIR was
+filed (`DIR-012`) and drained exactly per that routing — this milestone
+(charter item 1) has now produced the "fully specify the new skill" deliverable
+the DIR's Requested-action item 1 asked for (§§12-18 above). Still Design-only:
+per this milestone's charter, DIR-012 items 2 (`inherited-core.md`/
+`OUTER-LOOP.md` milestone-model changes — the ≤2000-line ceiling, nested ≤500/
+≤200 budgets, two-class diversity policy, two-ends-clamp pipeline as reusable
+substrate) and 3 (dogfooding — the first implementation milestone building and
+running through the skill) are explicitly OUT OF SCOPE here, left for
+following milestones once this design is itself reviewed. The natural next
+steps, unchanged from DIR-012's own routing: (a) a future milestone lands DIR-012
+item 2's `inherited-core.md`/`OUTER-LOOP.md` changes; (b) a following
+implementation milestone builds `.claude/skills/quay-task-to-plan/` per §17's
+checklist, bootstrapped on the existing `proposal-to-plan` per this doc's
+original §11 bootstrap-resolution paragraph (unchanged — still the correct
+answer to the chicken-and-egg problem, since that skill still does not exist
+after this milestone). `M16-cli-edit-parity-impl` (already ABSORBed, m16) and
+the overdue `M-TASK-BACKLOG-PROJECTION` implementation remain the natural first
+true-dogfood customers, as originally stated.
+>>>>>>> exp5-m17-iteration-0
