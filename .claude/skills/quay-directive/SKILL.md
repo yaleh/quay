@@ -1,12 +1,13 @@
 ---
 name: quay-directive
-description: Draft a new experiments/<EXPERIMENT>/directives/pending/DIR-NNN-*.md from the discussion already in this conversation, auto-detecting which BAIME experiment is currently active, with a built-in safety check that its directives/ has no in-flight iteration changes outside pending/. Invoke after discussing the finding/action with the user, e.g. /quay-directive manda dispatch confirmed genuine.
+description: Draft a new experiments/<EXPERIMENT>/directives/pending/DIR-NNN-*.md from the discussion already in this conversation, auto-detecting which BAIME experiment is currently active, with a built-in safety check that its directives/ has no in-flight iteration changes outside pending/, then project it as a generated label:directive task via task_write (file stays canonical; task is a regenerated projection, never hand-edited — DIR-002/M-DIR-PROJECTION). Invoke after discussing the finding/action with the user, e.g. /quay-directive manda dispatch confirmed genuine.
 allowed-tools: Bash, Read, Write
 ---
 
 # quay-directive
 
     draft :: ConversationContext → Brief? → Drafted   -- ends at Drafted, never Committed
+    project :: DraftedFile → task_write → ProjectedTask   -- generated, never hand-edited (DIR-002/M-DIR-PROJECTION)
 
 This skill is for **whichever quay BAIME experiment is currently active**,
 using the `experiments/<EXPERIMENT>/directives/` mechanism each experiment
@@ -97,3 +98,81 @@ discussed yet, stop and say so instead of inventing content.
    plus the `<EXPERIMENT>` you resolved in step 0, and stop — committing
    is an explicit, separate, human-confirmed step, same as every prior
    directive in this mechanism.
+
+5. **Project a `label: directive` task (M-DIR-PROJECTION, DIR-002 — restrained
+   design: file stays canonical, the task is a GENERATED, regenerated-not-hand-
+   edited projection; never a second authoritative copy).** This step runs
+   immediately after step 4, still inside this same invocation — it is not a
+   separate later action.
+
+   a. **Determine the task-store provider — never assume.** Check this
+      workspace's `.quay/config.yml` for which provider has `enabled: true`
+      (as of this revision, the repo default is the `native` provider,
+      `packages/quay-native`, backed by the `./tasks/` directory — but
+      re-check the file live rather than trusting that fact to still hold).
+      Confirm the MCP server providing `task_write` is reachable the same way
+      any other in-session `task_write` call would be (this repo's `.mcp.json`
+      wires the `quay` Core CLI's `mcp` subcommand, which resolves the active
+      provider itself — do not hardcode a different entry point).
+
+   b. **Call `task_write`** (via the MCP tool if available in this session, else
+      the equivalent CLI form). **Important, confirmed live (M05-dir-projection
+      iteration-0):** the `quay` Core CLI's own `task edit` (`packages/quay/bin/
+      quay.js task edit`) is deliberately status-only in v1 (it errors/no-ops on
+      `--labels`/`--extra`/`--body`, per its own `--help` text and QN-024's
+      comment in `packages/quay/bin/quay.js`) — it CANNOT write this projection.
+      For the native provider, call the provider's OWN richer CLI directly
+      instead: `QUAY_NATIVE_TASKS_DIR=./tasks node packages/quay-native/bin/
+      quay-native.js task edit DIR-NNN --labels directive --title "..." --extra
+      '{"dirFile":"...","dirStatus":"..."}' --body "..." --status todo --json`
+      (or the MCP `task_write` tool, which DOES accept the full patch shape —
+      prefer the MCP tool when available in-session; use the provider-native
+      CLI as the documented fallback, never the Core CLI's `task edit` for this
+      purpose). If a future provider is active, check that provider's own CLI
+      for the equivalent richer write path rather than assuming this one.
+      - `id`: the SAME `DIR-NNN` id as the file (e.g. `DIR-014`) — this is the
+        join key the anti-drift check (`scripts/it0-dir-projection-check.sh`)
+        uses to find the file, so the task id and filename NNN must match
+        exactly.
+      - `title`: the DIR file's `title:` line, verbatim.
+      - `labels`: MUST include `"directive"` (this is what makes `task_list
+        --label directive` and the Web UI's `?label=directive` filter surface
+        it — QW-005, already works, zero new code needed there).
+      - `status`: a normal task-store status (`todo` for a fresh `pending`
+        directive is the natural mapping — this is the task's OWN lifecycle
+        status, distinct from the mirror field below; do not conflate them).
+      - `body`: a GENERATED projection, always fully regenerated from the file
+        (never hand-edited, never incrementally patched) — exactly three
+        parts, in this order:
+        1. A link line: `` Source: `experiments/<EXPERIMENT>/directives/pending/DIR-NNN-<slug>.md` ``
+           (or `archive/`/`retracted/` if the file has since moved — re-derive
+           the real current path, do not assume `pending/`).
+        2. The Finding section's first paragraph (summary), copied verbatim —
+           not paraphrased, not the whole Finding section.
+        3. A status-mirror line, exactly: `Status mirror: <value>` where
+           `<value>` is copied byte-for-byte from the DIR file's own
+           `status:` frontmatter line at the moment of projection (one of
+           `pending | applied | deferred | rejected`). This is the field the
+           anti-drift check compares against the file — if the file's status
+           later changes (deferred→applied, etc.) and this task is not
+           refreshed, the check is designed to FAIL, by design (that IS the
+           enforcement DIR-002 asked for; do not treat a stale mirror as
+           harmless).
+      - `extra`: `{"dirFile": "<path-to-the-DIR-NNN.md-file>", "dirStatus":
+        "<same-value-as-the-status-mirror-line>"}` — a machine-readable
+        duplicate of the same two facts already in the body, so the anti-drift
+        script does not need to regex-parse markdown prose to do its job.
+
+   c. **Re-run this same step (regenerate, not edit) any time the DIR file's
+      `status:` changes** — e.g. when a later iteration moves the file from
+      `pending/` to `archive/` and updates its `status:` line. Whatever
+      iteration performs that file-side change is responsible for also
+      re-invoking this projection step (`task_write` with the same `id`,
+      refreshed `body`/`extra`) in the same action, so file and task never
+      observably diverge for more than the instant between the two calls.
+      Never hand-edit the task's body directly to fix a mismatch — regenerate
+      it from the file instead.
+
+   d. Show the user the resulting task (a `task_get <DIR-NNN>` or equivalent
+      readback), same evidence discipline as showing the file contents in
+      step 4.

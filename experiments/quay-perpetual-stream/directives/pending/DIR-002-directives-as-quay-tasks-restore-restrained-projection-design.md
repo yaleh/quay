@@ -92,4 +92,22 @@ quay's own board makes `task_write`/label/Web-UI carry real load, exactly the ha
 paths the eval loop otherwise never exercises.
 
 ## Resolution (added when moved to archive/, or updated in place if deferred)
-<!-- to be filled in by the iteration that applies this directive -->
+
+**Progress note (M05-dir-projection iteration-0, 2026-07-18):** all four requested-action
+Done-when clauses were built and demonstrated live this iteration:
+1. `/quay-directive`'s SKILL.md updated (step 5) to call `task_write` after writing the file —
+   confirmed live via a real DIR-003 invocation, task_get pasted in iteration-0's report.
+2. Web UI `?label=directive` lists DIR-003 alongside dev tasks — real screenshot + curl transcript
+   pasted in iteration-0's report.
+3. Anti-drift check `experiments/quay-perpetual-stream/scripts/it0-dir-projection-check.sh` built
+   and demonstrated catching BOTH failure modes (task-with-no-file, status-disagreement) with real
+   PASS/FAIL output.
+4. `OUTER-LOOP.md` step 0 updated to also run `task_list --label directive`, reconciled via the
+   new script.
+Still **status: pending** (not moved to archive/) at the end of iteration-0: per this milestone's
+own charter (§ "Milestone is DONE when all five are met and stable ≥1 iteration"), the outer-loop
+convention in this experiment is to confirm stability across an iteration boundary before final
+archival — see iteration-0's own recommendation on whether an iteration-1 stability-confirmation
+pass is warranted. If iteration-1 (or the outer-loop ABSORB step) confirms no regression, this
+directive should then be marked `status: applied` and moved to `archive/` at that point, citing
+this progress note plus the iteration-1 confirmation as evidence.
