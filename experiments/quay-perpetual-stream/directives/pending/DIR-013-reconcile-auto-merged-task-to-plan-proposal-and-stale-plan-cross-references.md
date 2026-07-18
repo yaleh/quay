@@ -1,0 +1,108 @@
+# DIR-013
+
+- status: pending
+- created_by: human (Yale Huang), asserted directly in this live conversation
+- created_at: 2026-07-18
+- title: Reconcile the auto-merged quay-task-to-plan proposal and its stale companion plan — a concurrent human-directed proposal-to-plan run and the autonomous M17 milestone both designed the same skill and their outputs were merged, leaving dangling internal cross-references, a self-contradictory section count, and a plan that cites proposal subsections that never existed and never references the Part II (§12-19) that is the real implementer-facing spec
+
+## Finding
+
+A human-directed `proposal-to-plan` run and the autonomous exp5 milestone
+**M17-task-to-plan-skill-design** independently designed the *same* new skill
+(`quay-task-to-plan`) at the same time, both writing
+`docs/proposals/exp5-quay-task-proposal-plan-skill.md`. Their commits interleaved
+on `master` and the proposal-file conflict was auto-resolved at merge `989e0cd`.
+A read-only cross-document audit this conversation (against the merged proposal,
+the companion plan `docs/plans/3-7-quay-task-to-plan-skill.md`, the M17 charter,
+both M17 iteration reports, and the merge itself) found the merge took M17
+iteration-0's body **wholesale** (discarding iteration-1's §12-18 body text, kept
+only in its iteration report) — so there is *no* interleaved contradictory-value
+damage, but three concrete MUST-FIX defects remain, all confined to the two
+design docs. Note the mitigating fact: the currently-executing milestone
+(M18-milestone-model-ceiling-and-diversity-policy) builds only against the
+original, untouched §4/§5/§6 and explicitly does not consume §17, so nothing is
+breaking *now* — but the record is self-contradictory and the plan is stale enough
+to misdirect the *next* consumer, i.e. the actual skill-implementation milestone,
+which is precisely the reader of §12-19 and of `docs/plans/3-7`.
+
+**F1 — dangling internal cross-references inside the proposal's §§12-19.** M17's
+appended Part II repeatedly cites `§8.4`, `§8.5`, `§8 point 6`, and `§11` as the
+homes of load-bearing content (e.g.
+`docs/proposals/exp5-quay-task-proposal-plan-skill.md:578` "code-vs-prose
+classifier, carried from §8.4"; `:627` "extending §8.5's one-line summary"; `:714`
+"self-hosted per §11's bootstrap resolution"; `:728` "carried through from §8
+point 6"). But §8 is a flat 6-point list with **no §8.4/§8.5 subsections** (true in
+every version, including the pre-merge draft), and **§11 was dropped** in the merged
+file (its content survives only as a provenance blockquote under §19). Every one of
+these references resolves to nothing or to the wrong place.
+
+**F2 — status header + table-of-contents undercount the sections that are actually
+present.** The status header (`:7`) and TOC (`:16`, `:27`, and the TOC table
+`:29-38`) all say the M17 additions are "**Sections 12-18**", but the file actually
+carries a `## 19. Status / next step` (`:767`). The merge commit message compounds
+this by claiming both iterations "appended full §12-19", which is false
+(iteration-1 appended §12-18, no §19). A reader auditing "what M17 added" is told
+12-18 while a §19 sits in the file — a self-contradictory record.
+
+**F3 — the companion plan cites proposal subsections that never existed and is blind
+to the real implementer-facing spec.** `docs/plans/3-7-quay-task-to-plan-skill.md`
+sources its skill phases from `proposal §8.1/§8.2/§8.3/§8.4/§8.5/§8.6` and `§11`
+(e.g. `:383`, `:473`, `:40`, `:505`, `:525`, `:592`), none of which exist. Worse,
+the authoritative operational spec an implementer needs — exact tool names, the
+`## Proposal` body shape, the N-independent-proposal adjudication mechanics, the
+plan-check stop condition (`F_i=0` once, else round-cap 3), and the §17 Done-when
+checklist — all landed in the proposal's **§12-19, which the plan never references
+at all** (the plan was written against the pre-merge ~338-line draft). An
+implementer following the plan's citations lands on wrong or missing sections.
+
+Verified clean, needing no action: the earlier review's grounding correction ("the
+Core CLI has **no** `task write` subcommand; `task edit` **is** the full-field write
+path after M16-cli-edit-parity-impl") survived the merge intact in *both* documents
+(proposal §12.1 `:322-329`; plan `:67-70`), re-verified against
+`packages/quay/bin/quay.js`. The §17-checklist-vs-plan-phases relationship is
+complementary, not contradictory (acceptance checklist vs build route) — only the
+authority-if-they-drift is unstated, a clarity gap the F1-F3 fixes largely absorb.
+
+## Requested action
+
+Documentation-only reconciliation (no product/method-infra code; no re-running of
+M17). Do it in a single milestone (or fold into the skill-implementation milestone
+as a prerequisite step), and regenerate, do not hand-patch around, the
+inconsistencies:
+
+1. **Fix F2** — update the proposal's status header, the TOC heading, and the TOC
+   table to cover **§12-19** (add the §19 row). Do not silently renumber §19 away;
+   the section is real content.
+2. **Fix F1** — repoint each dangling `§8.4 / §8.5 / §8 point 6 / §11` reference
+   inside §§12-19 to the section that actually carries that content (the
+   code-vs-prose classifier now in §15.2; the GitHub-degradation / feature-developer
+   reuse points in §8's list; the bootstrap resolution preserved under §19), or
+   restate the referenced content inline. After the fix, every internal `§N`
+   reference in the proposal must resolve to an existing section.
+3. **Fix F3** — reconcile `docs/plans/3-7-quay-task-to-plan-skill.md` with the
+   merged proposal: re-point its `§8.x`/`§11` citations to the sections that now
+   exist, and add explicit references to the Part II (§12-19) operational spec and
+   the §17 Done-when checklist, so the plan and the dispatch-ready spec point at
+   each other. State which artifact is authoritative if the checklist and the
+   plan's phase/stage decomposition ever drift (recommend: the proposal's §17
+   checklist is the acceptance authority; the plan is the build-route elaboration).
+4. **Process note (record, do not necessarily act on here):** this whole class of
+   defect arose because a human-directed design run and the autonomous loop wrote
+   the same file concurrently on `master`. Capture the lesson — e.g. a human
+   steering the stream during a live session should either pause the loop (`.halt`
+   sentinel) or work on a branch, and the loop's merge step should not claim
+   "dispatch-ready / singular and unambiguous" when its own appended section
+   contains unresolved internal cross-references. Whether to build an enforcement
+   for this (a proposal-internal `§N`-reference-resolves check, mirroring the M05
+   anti-drift discipline) is left to that milestone's scoping.
+
+Value type: governance-integrity (the record is self-contradictory and the plan is
+stale — a correctness/consistency defect in the design system of record), not
+capability-growth. Δv̂ ≈ 0 (documentation reconciliation). Adversarial-audit gate
+not expected to fire (no capability-growth typing, Δv=0).
+
+## Resolution
+<!-- added when moved to archive/, or updated in place if deferred:
+- resolved_by: iteration-N / milestone M-NN
+- outcome: applied | deferred | rejected
+- evidence: pointer to the design doc / iteration report section / commit -->
