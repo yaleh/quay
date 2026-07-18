@@ -1,12 +1,19 @@
-# Charter M03-discover — Standing simulated-user discovery pass on the live product (Tier-A)
+# Charter M04-discover — Standing simulated-user discovery pass on the live product (Tier-A)
 
-**Milestone id:** M03-discover · **surface:** cross-cutting (CLI/MCP/Web UI/Docs) · **type:** exploit
+**Milestone id:** M04-discover (authored at m3 as "M03-discover", renumbered to m4 when DIR-001
+superseded it for the m3 slot — see `backlog.md`/`dashboard.md` m3 log; only the id/paths below are
+renumbered, scope and rationale are unchanged from authoring) · **surface:** cross-cutting
+(CLI/MCP/Web UI/Docs) · **type:** exploit
 **Source:** protocol §4.4 discovery-engine portfolio, exploit channel (standing simulated-user /
-persona review) — dispatched because m3's carried-by-reference backlog picks (M-DOCS, M-DIRTASK)
-were BOTH rejected at it0 as stale (see `backlog.md` "Backlog exhaustion finding", `dashboard.md`
-m3 log). This is NOT a product-value milestone in the usual sense — it produces fresh gap-list
-entries and a live re-score of VT surface coverage, which becomes the input to m4's SELECT.
-**Charter authored:** m3 (after M-GATES/m2 DONE and two m3 rejections), 2026-07-18.
+persona review) — originally dispatched because m3's carried-by-reference backlog picks (M-DOCS,
+M-DIRTASK) were BOTH rejected at it0 as stale (see `backlog.md` "Backlog exhaustion finding",
+`dashboard.md` m3 log), then deferred one slot when DIR-001 (Provider-ABI blind spot) took the m3
+slot instead. This is NOT a product-value milestone in the usual sense — it produces fresh gap-list
+entries and a live re-score of VT surface coverage (now including the Provider-ABI surface
+M03-abi-eval/m3 just added), which becomes the input to m5's SELECT.
+**Charter authored:** m3 (after M-GATES/m2 DONE and two m3 rejections), 2026-07-18. **Dispatched:**
+m4 (after M-ABI-EVAL/m3 DONE), 2026-07-18 — renumbered from M03- to M04- prefix for worktree/branch
+paths only, to avoid colliding with M-ABI-EVAL's already-used `exp5-m03-iteration-*` branches.
 **Pinned Tier-B pointer:** `experiments/quay-perpetual-stream/inherited-core.md` @ this repo's
 current HEAD at charter-authoring time (re-read only if that file's SHA changes mid-milestone).
 
@@ -93,8 +100,8 @@ forward, and DIR-005/DIR-006 went unseen for three iterations — see gap-list P
     → paste both outputs.
 [ ] curl -s http://localhost:4173/ -o /dev/null -w "%{http_code}\n"
     → paste the status code (G7 reachability).
-[ ] git worktree add experiments/quay-perpetual-stream/milestones/M03-discover/worktrees/iteration-N
-    -b exp5-m03-iteration-N  [PARAM: exp5 milestone worktree path + branch name]
+[ ] git worktree add experiments/quay-perpetual-stream/milestones/M04-discover/worktrees/iteration-N
+    -b exp5-m04-iteration-N  [PARAM: exp5 milestone worktree path + branch name]
     → paste the "HEAD is now at <hash>" line. Creating the worktree is NOT the
       gate — WRITING THIS ITERATION'S CHANGES INTO IT is. All development/test
       edits this iteration must target paths UNDER worktrees/iteration-N/, not
@@ -115,7 +122,7 @@ Additional gates (unparameterized, copied unchanged from the same §0 block, app
 
 **Gate-hash check (it0 systematic-explore, §4.4b) — MECHANIZED this time via M-GATES' own script:**
 ```
-$ experiments/quay-perpetual-stream/scripts/it0-gate-hash-check.sh experiments/quay-perpetual-stream/charters/M03-discover.md
+$ experiments/quay-perpetual-stream/scripts/it0-gate-hash-check.sh experiments/quay-perpetual-stream/charters/M04-discover.md
 ```
 Run this before dispatch and paste the result in the dashboard log (do not just assert PASS).
 
@@ -145,4 +152,4 @@ d. **Domain-misfit audit-channel** — per `inherited-core.md`'s newly-added dec
 ## Dispatcher
 Run via `baime:iteration-executor`, one inner iteration at a time, non-blocking dispatch
 (`run_in_background=true`), reading only this charter (Tier-A) + the pinned Tier-B pointer above.
-Record each iteration under `experiments/quay-perpetual-stream/milestones/M03-discover/iterations/`.
+Record each iteration under `experiments/quay-perpetual-stream/milestones/M04-discover/iterations/`.

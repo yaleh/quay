@@ -252,3 +252,17 @@ Slope (marginal points / milestone): **+6.0** (1 data point so far — trend, no
   the φ confirmation threshold (§4.2, "a LATER different-domain milestone reuses an adaptation
   unchanged"); worth folding into `inherited-core.md` as a confirmed, not just proposed, pattern at
   the next natural editing pass.
+- SELECT m4 = **M04-discover** (exploit). No `.halt`, `directives/pending/` empty. Candidates
+  considered: `M04-discover` (already authored+gate-hash-verified, deferred from m3, exploit —
+  balances explore cadence after 3 straight explore milestones m1-m3), `M-GH-WRITE`/`M-GH-PARENT`
+  (fresh from m3's own findings, not yet charter-authored). Selected M04-discover: it's fully
+  ready (0 authoring cost), satisfies explore/exploit cadence (§4.5, ≥1 explore per 5 — already
+  met 3/3, an exploit pick is due), and its persona sweep now runs against a chart-1 product
+  (Provider-ABI baseline just established) rather than the stale chart-0-only context it was
+  originally authored against — a strictly better time to run it than when first drafted.
+  Renamed `charters/M03-discover.md` → `charters/M04-discover.md` (worktree/branch paths only —
+  `milestones/M03-discover/*` → `milestones/M04-discover/*`, `exp5-m03-iteration-N` →
+  `exp5-m04-iteration-N` — to avoid colliding with M-ABI-EVAL's already-used m3 branch names;
+  scope/rationale/Done-when unchanged from original authoring). Gate-hash re-verified PASS after
+  rename: `it0-gate-hash-check.sh charters/M04-discover.md` → PASS (exit 0). M-GH-WRITE/
+  M-GH-PARENT remain backlogged, ready for m5+. Dispatching inner iteration-0 next.
