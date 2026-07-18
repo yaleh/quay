@@ -43,6 +43,31 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    mechanically rather than eyeballing the two lists — a non-zero exit means drift and must be
    resolved (regenerate the stale projection via `/quay-directive`'s projection step, or fix the
    underlying data) before the drain step is considered complete, not silently carried forward.
+   **Master → driver merge sub-step (DIR-018 / M23-outer-driver-isolation, isolation discipline —
+   runs BEFORE SELECT, as part of DRAIN):** the OUTER loop's own commit stream (charter authoring,
+   per-iteration worktree base points, inner-merge conflict resolution) lives on the dedicated
+   branch `exp5-outer-driver`, never directly on human-shared `master`. At this DRAIN step, before
+   SELECT, deliberately fast-forward/merge `master` → `exp5-outer-driver`:
+   `git checkout exp5-outer-driver && git merge master` (or fast-forward if `master` is a strict
+   ancestor). This is the ONLY point at which human commits made directly to `master` (via
+   `/quay-directive`, manual edits, or any other human-authored commit) enter the driver's own
+   history — human steering merges in deliberately, at this named boundary, never by racing the
+   loop for the same `master` mid-milestone.
+   **No-silent-drop reconciliation-note requirement (standing instruction, applies to BOTH merge
+   directions below — DIR-018 item 3):** any conflict encountered during this master→driver merge
+   (or the driver→master publish merge at step 6/7 below) MUST be resolved **per-file**, reading
+   both sides' actual content — **never** a blanket `git checkout --ours` / `git checkout --theirs`
+   applied wholesale without reading both sides (this is the exact DIR-013 failure this rule exists
+   to prevent: an auto-resolved merge that silently took one side's body wholesale and discarded the
+   other side's content). For every file with a real conflict, record a short **reconciliation
+   note** in this DRAIN step's log entry (or the ABSORB log entry, for the driver→master direction)
+   stating: which file, what each side contained, which content was kept/merged and why. A missing
+   or blank reconciliation note is not a valid resolution of a conflict — the note is mandatory
+   whenever a real per-file conflict was resolved, mirroring the V_meta-lag/`-IMPL`-row gates'
+   "no silent deferral" discipline. This is a documented convention, not a new script or
+   pre-commit hook (per DIR-018's own "keep it minimal, not a heavy process" request) — the loop
+   applies it by reading this text, the same way it already applies the gate-hash and line-budget
+   checks' fix-the-charter (not the mechanism) discipline.
 1. **SELECT** the next milestone from `backlog.md` per the explore/exploit policy (§4.5): **≥1 explore
    milestone per 5**. Exploit = high-value, high-ρ, method handles it; explore = new surface/domain
    that grows the reusable core. Prefer aged high-value items (DIR-004 Distribution is URGENT).
@@ -120,8 +145,13 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
        an unflagged oversized charter.
    Any check firing → fix before dispatch, per the procedures/scripts above (all under
    `experiments/quay-perpetual-stream/scripts/`).
-5. **DISPATCH INNER** — run the milestone as a bounded BAIME experiment to convergence. Per iteration
-   use `baime:iteration-executor` fed the charter (Tier-A) only. Terminate on the first of (§3.2):
+5. **DISPATCH INNER** — run the milestone as a bounded BAIME experiment to convergence. **Per-
+   iteration worktrees are created off `exp5-outer-driver` HEAD, not `master` HEAD** (DIR-018 /
+   M23-outer-driver-isolation — the driver branch, kept current by step 0's master→driver merge, is
+   the base point for every iteration worktree/branch this milestone dispatches; the per-iteration
+   worktree pattern itself — `milestones/M<NN>/worktrees/iteration-{0,1}` — is unchanged, only its
+   base point moved). Per iteration use `baime:iteration-executor` fed the charter (Tier-A) only.
+   Terminate on the first of (§3.2):
    Done-when complete | ΔV<0.02 both-layers K=2 consecutive | ceiling→redesign-OR-stop | past
    budget≈10 & nothing climbing | external HALT. Record under `milestones/M<NN>/`.
    **Waiting on a long inner iteration (background) — poll, don't conclude:**
@@ -187,10 +217,27 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      because SELECT (step 1) only considers non-DONE rows and a deferral with no row is a deferral
      to never (DIR-016's finding). Record the check's PASS/FAIL output directly in this ABSORB's log
      entry, mirroring the V_meta gate's row-update discipline.
+   - **Driver → master publish sub-step (DIR-018 / M23-outer-driver-isolation, HARD sequencing —
+     runs AFTER the adversarial-audit gate, V_meta consolidation-lag gate, and design-only-
+     milestone impl-row gate above all clear, and BEFORE step 7's `milestone_counter++`):** this is
+     the ONLY point at which the loop's own work (charter drafts, iteration worktrees/branches,
+     inner-merge conflict resolution — all of which happened upstream on `exp5-outer-driver`) lands
+     on `master`. Publish via a single, atomic, deliberate merge:
+     `git checkout master && git merge --no-ff exp5-outer-driver` — exactly one `--no-ff` merge
+     commit per milestone boundary, never a sequence of individual milestone commits interleaved
+     directly onto `master`. This is what closes the M18 damage DIR-018 names (a human commit
+     landing on `master` mid-milestone racing an in-progress loop merge index): because the loop
+     never writes to `master` directly between boundaries, there is nothing for a human commit to
+     race until this single publish point, and that point is itself gated behind the audit/consolidation-
+     lag/impl-row HARD BLOCKs above. Any conflict at THIS merge is subject to the same no-silent-drop
+     reconciliation-note requirement as the master→driver merge at step 0 (DIR-018 item 3, see
+     above) — per-file resolution, both sides read, a reconciliation note recorded in this ABSORB's
+     log entry, never a blanket `--ours`/`--theirs`.
 7. **UPDATE DASHBOARD** — VT, slope (marginal Δv), ρ, charter-thickness, discovery-latency,
    calibration-error, `V_meta consolidation lag` (re-derive milestones-since-confirmed for every
    ledger row per `v-meta-ledger.md`), milestone_counter++ (only after BOTH the V_meta gate AND the
-   design-only-milestone impl-row gate above clear).
+   design-only-milestone impl-row gate above clear, AND the driver→master publish sub-step above has
+   landed the milestone's work on `master`).
 8. **CHECKPOINT (non-blocking)** if `milestone_counter % 5 == 0`: write `checkpoints/cp-<NN>.md` — a
    health snapshot across all tracks (including `dashboard.md`'s "Human-review cadence" track's
    current `milestones-since-last-human-directive` value, per `inherited-core.md`'s Human-review
