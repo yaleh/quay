@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 19** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 20** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -1494,3 +1494,36 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   by design); condition (b) not authorized (real independent-re-derivation material exists).
   Dispatching inner iteration-0 and iteration-1 next, both from worktrees off the current master HEAD
   (`17a55f3`).
+- **ABSORB m20 = M-TASK-TO-PLAN-SKILL-PROPOSAL-STEP** 2026-07-18. Both inner iterations converged
+  independently, each building the full Phase 6 scope (skill scaffold, N=2 blank-slate proposal
+  subagent template, adjudication + portable write-back template) and each running a REAL
+  scratch-scoped native-provider `task_write`/`task_get` dry-run proving the write-back mechanism
+  end-to-end (iteration-0: `M20-SCRATCH-001`; iteration-1: `ZZ-M20-SCRATCH-1`, both cleaned up
+  post-dry-run). Merge: `exp5-m20-iteration-1` merged clean (`0b6582c`); `exp5-m20-iteration-0`
+  then conflicted add/add on all three skill files plus `backlog.md` (both iterations independently
+  created the same file paths — the first development-class milestone to hit this shape of conflict,
+  distinct from the doc-editing pattern of M17-M19). Neither iteration's report documented catching
+  a self-testing defect (the usual wholesale-selection tiebreaker); both independently converged on
+  the identical substantive finding that Core CLI's `task edit` is status-only and unusable for
+  write-back, confirming genuine quality parity. Resolved wholesale in favor of iteration-0's version
+  of all three skill files + the backlog DONE row (`git checkout --theirs`, commit `b3854ef`) for
+  consistency across the file set; both `iteration-0.md` and `iteration-1.md` reports retained for
+  provenance. **New pending directives discovered mid-dispatch** (same "human commits independently,
+  leave untouched" pattern as DIR-013/DIR-014, confirmed correct a fifth time): `DIR-015` (M-TASK-
+  BACKLOG-PROJECTION is design-DONE since m13 but has no selectable `-IMPL` row, so SELECT can never
+  reach it) and `DIR-016` (general rule: every design-only milestone's ABSORB must materialize a
+  selectable `<M-NAME>-IMPL` row, HARD block on `milestone_counter++`, plus a mechanical it0-style
+  check; retroactive sweep needed for M-TASK-BACKLOG-PROJECTION and task-to-plan) — committed by the
+  human as `eb21de9`, auto-merged into master cleanly (no conflict, different files) during the M20
+  iteration-0/iteration-1 dispatch window. To be drained at the next SELECT boundary (m20→m21).
+  `git diff --stat fdb3f39 HEAD` confirmed scope: only `.claude/skills/quay-task-to-plan/` +
+  this milestone's own bookkeeping + the human's independently-committed DIR-015/DIR-016 files
+  (Done-when clause 6, satisfied). No script/tooling changed → test suite N/A (Done-when clause 7,
+  satisfied). **Realized Δv = 0**, by design (capability-growth-typed new skill artifact, no VT chart
+  cell, mirrors M16-CLI-EDIT-PARITY-IMPL's precedent). Adversarial-audit gate condition (a) evaluated:
+  did NOT fire (Δv confirmed 0, no nonzero claim to audit); condition (b) not applicable (this was an
+  ABSORB, not an iteration-0 skip-iteration-1 recommendation). Phase 7 (plan step, TDD ≥80% gate,
+  `OUTER-LOOP.md` DISPATCH wiring, non-discretionary diversity policy) remains explicitly open future
+  work, not started this milestone. `milestone_counter` → **20**. Worktrees/branches for both M20
+  iterations removed. **Checkpoint due now** (cadence: every 5 milestones, last checkpoint at m15) —
+  writing `checkpoints/cp-20.md` next, non-blocking, then continuing the outer loop.
