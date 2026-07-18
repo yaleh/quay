@@ -605,3 +605,38 @@ explicitly).
       (script(s), `OUTER-LOOP.md`, `backlog.md`/`dashboard.md` regeneration, no unrelated product
       code) — same evidence-gate discipline this doc's own §Binary-Done-when-confirmation section
       demonstrates below.
+
+---
+
+## Outer-loop reconciliation note (ABSORB, m13, 2026-07-18)
+
+This doc is iteration-1's independently-derived version, adopted as canonical over iteration-0's
+(otherwise substantively equivalent, 772-line) parallel derivation. Both iterations independently
+confirmed DIR-009 item 1's canonical-direction decision (option (b)) via different arguments, and
+both independently produced a full 13-item DIR-009 + 4-item DIR-010 design. They reached the SAME
+per-item-conclusion on every point **except one**: DIR-010 item 1's experiment-namespace decision.
+
+- **Iteration-0 recommended:** an `extra.experiment` join field, additive to existing bare `DIR-NNN`
+  ids (rationale: no disruptive rename of existing task ids). It explicitly self-flagged an
+  unresolved caveat: if the task store enforces a genuinely flat/global id space (which the live
+  DIR-004/DIR-005 collision this same drain found already demonstrates it does — that collision IS
+  two tasks unable to coexist at the same bare id), an `extra` field alone cannot let a second
+  `DIR-004` task be *written* in the first place; it can only disambiguate reads/joins after the
+  fact, not resolve the underlying write-time collision.
+- **Iteration-1 recommended:** experiment-prefixed task ids (e.g. `exp5-DIR-004`) for new/backfilled
+  projections going forward (no retroactive rename of exp4's existing bare ids). It additionally
+  grounded its rejection of `extra.experiment` in the ALREADY-established DIR-011 finding (this same
+  m12→m13 drain's own sibling directive): `extra{}` is not provider-portable — GitHub hard-errors on
+  writing it (M09 PR-ABI-001) — so a join key that depends on a field one of two providers cannot
+  carry is not a durable disambiguator across the exact portability boundary this whole design is
+  built around.
+
+**Resolution: iteration-1's experiment-prefixed-id recommendation is adopted.** It directly resolves
+the actual write-time collision (not just a read-time join ambiguity — the flaw iteration-0 itself
+identified in its own proposal), and it is consistent with DIR-011's already-established
+extra{}-is-native-only-convenience rule rather than creating a second, narrower exception to it. This
+is exactly the kind of genuine, substantive disagreement this milestone's charter anticipated
+iteration-1 would have real material to independently re-derive against (not empty verification) —
+both iterations' full reasoning is preserved via `iterations/iteration-0.md` and `iteration-1.md` for
+provenance, and iteration-0's self-caught flat-id-space caveat is what makes this resolution
+possible to state with confidence rather than as an arbitrary tie-break.
