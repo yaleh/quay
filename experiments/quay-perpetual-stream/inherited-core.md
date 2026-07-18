@@ -542,3 +542,62 @@ re-deriving the rule live. This is now the correct single place to check — thi
 consolidated answer; no future milestone should need to re-open the archived DIR-0NN files directly
 unless this section itself is found insufficient (in which case, expand THIS section, don't leave
 the gap for the next drafter to re-discover).
+
+## Human-review cadence — standing rule (M15-human-review-cadence, DIR-001 item 6)
+
+DIR-001 item 6 backlogged this as "worth a recurring-cadence design once ≥2 more DIR-* instances
+exist to generalize from." That condition is now met: DIR-002 through DIR-011 (10 further
+instances) have landed since DIR-001 was filed, giving an 11-directive real sample to generalize
+from, not a speculative one.
+
+**The real tally (all 11 `directives/archive/DIR-*.md`, read in full at M15's authoring):**
+
+| DIR | Arrival boundary (milestone-count gap) | Initiation mode | Finding kind |
+|---|---|---|---|
+| DIR-001 | pre-m3 dispatch (m2→m3 boundary) | human, mid-conversation | structural blind-spot (VT surface set blind to Provider-ABI/GitHub) |
+| DIR-002 | mid-m4 (during M04-discover; drained at the m4→m5 boundary) | human, mid-conversation | drift detected (exp4's DIR-006 "files-canonical" resolution was a rationalized transition failure, not a settled decision) |
+| DIR-003 | mid-m5 (during M05-dir-projection's own iteration-0) | **self-raised** (iteration-0, per M05's charter item 5's sanctioned live-dogfood requirement) | routing/dogfood demonstration artifact — not a finding in the same sense as the other 10, a deliberately-produced proof object |
+| DIR-004 | m5→m6 boundary | human, mid-conversation | drift detected (2-iteration sizing is a cost-proxy artifact) + routing decision (value-typed SELECT ledger) |
+| DIR-005 | m6→m7 boundary | human, mid-conversation | structural blind-spot (V_meta consolidation lag invisible to every existing health track) |
+| DIR-006 | mid-m9 (arrived during M09-gh-write; drained in the m9→m10 burst with DIR-007/008) | human, mid-conversation | drift detected (Web UI verification narrated as "real browser" but only `curl` evidence pasted) |
+| DIR-007 | mid-m9 (same burst as DIR-006) | human, mid-conversation | structural blind-spot (G3 adversarial-audit role silently weakened into same-template re-run) |
+| DIR-008 | mid-m9 (same burst as DIR-006/007) | human, mid-conversation | drift detected (σ-inherited-floor trap never consolidated despite being pre-named at kickoff) |
+| DIR-009 | m12→m13 boundary (arrived in a 3-directive burst with DIR-010/011) | human, mid-conversation | scope split / routing decision (exp5's own non-directive work invisible in the task store) |
+| DIR-010 | m12→m13 boundary (same burst) | human, mid-conversation | drift detected (directive-projection cross-experiment task-id collision + boundary-only reconcile gap) |
+| DIR-011 | m12→m13 boundary (same burst) | human, mid-conversation | routing decision / scope split (Core CLI edit-surface relaxation + portable-metadata rule design) |
+
+**Summary statistics from the tally:** 10 of 11 directives are human-initiated mid-conversation
+(the async `/quay-directive` channel, per `OUTER-LOOP.md`'s "Human async control surface"); exactly
+1 (DIR-003) is self-raised by an inner iteration under an explicit charter sanction, not a
+human-review-channel instance in the same sense. Arrivals are NOT a steady per-milestone trickle —
+they cluster in bursts at milestone boundaries: 5 single-directive arrivals (m2→m3, m4→m5, mid-m5
+self-raised, m5→m6, m6→m7) and 2 three-directive bursts (m9→m10, m12→m13). The largest observed
+gap between human-directive bursts in this tally is 3 milestones (m6→m7 to m9→m10); the current
+gap as of m14-complete (going into m15) is 2 milestones (m12→m13's burst to m14).
+
+**The rule, stated operationally:**
+
+1. **Compute `milestones-since-last-human-directive`** at every ABSORB (`dashboard.md`'s "Human-
+   review cadence" health track) as `milestone_counter (current, post-increment) − (the milestone
+   number at which the LAST human-initiated directive burst was drained from `directives/pending/`,
+   pre-dispatch)`. DIR-003 (self-raised) does NOT reset this counter — only directives arriving via
+   the external `/quay-directive` channel count, since the whole point of this track is visibility
+   into the async human-input channel specifically, not all directive-shaped artifacts.
+2. **Soft-alarm threshold: K=5.** Chosen to reuse the existing checkpoint cadence
+   (`milestone_counter % 5 == 0`, `OUTER-LOOP.md` step 8) rather than invent a second, unrelated
+   number — the two tracks now share one mental model ("how long since a human last looked at
+   this," observed at the same natural 5-milestone cadence the checkpoint already uses).
+3. **Explicitly non-blocking.** Unlike the V_meta consolidation-lag gate (`dashboard.md`'s
+   neighboring health-track row, `OUTER-LOOP.md` step 6's HARD BLOCK on `milestone_counter++`),
+   crossing K=5 on this track does **NOT** block ABSORB, does NOT block `milestone_counter++`, and
+   does NOT pause the loop. The reason the two tracks are treated differently even though both are
+   "K=5-vs-K=2 thresholds on a lag count": the V_meta ledger's rows are a mechanically resolvable
+   backlog item (a pattern that needs consolidating, entirely within the loop's own power to fix by
+   doing the consolidation work) — but a human directive is, by definition, asynchronous and
+   human-paced; the loop cannot manufacture one, and must not wait for one (`OUTER-LOOP.md`'s own
+   header invariant, "the loop never blocks waiting for a human"). This track exists purely to make
+   that existing asynchrony **visible**, not to change its blocking semantics.
+4. **The one concrete behavior this induces:** at every checkpoint (`milestone_counter % 5 == 0`,
+   `OUTER-LOOP.md` step 8), the checkpoint snapshot must include this track's current value, so a
+   human skimming `checkpoints/cp-<NN>.md` asynchronously sees "N milestones since last human
+   input" directly, without needing to dig through `directives/archive/` to reconstruct it by hand.
