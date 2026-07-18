@@ -403,9 +403,23 @@ for the outer loop to merge to master.
 
 ```
 $ git -C experiments/quay-perpetual-stream/milestones/M05-dir-projection/worktrees/iteration-1 add -A
-$ git -C experiments/quay-perpetual-stream/milestones/M05-dir-projection/worktrees/iteration-1 commit -m "..."
-$ git -C experiments/quay-perpetual-stream/milestones/M05-dir-projection/worktrees/iteration-1 log --oneline -5
+$ git -C experiments/quay-perpetual-stream/milestones/M05-dir-projection/worktrees/iteration-1 commit -m "exp5 M05-dir-projection iteration-1: independent re-verification, fix --labels/--label CLI typo, archive DIR-002"
+[exp5-m05-iteration-1 e2dd7ec] exp5 M05-dir-projection iteration-1: independent re-verification, fix --labels/--label CLI typo, archive DIR-002
+ 5 files changed, 436 insertions(+), 5 deletions(-)
 ```
 
-(Real hash and full log output pasted below, confirmed via a live `git log` call before finishing
-— not asserted from memory, per the handoff-bug lesson from a prior milestone.)
+Confirmed via a live `git log` call before finishing (not asserted from memory, per the
+handoff-bug lesson from a prior milestone):
+
+```
+$ git -C experiments/quay-perpetual-stream/milestones/M05-dir-projection/worktrees/iteration-1 log --oneline -5
+e2dd7ec exp5 M05-dir-projection iteration-1: independent re-verification, fix --labels/--label CLI typo, archive DIR-002
+f399bb5 exp5 M05-dir-projection iteration-0: report polish (final git log paste)
+9144dc6 exp5 M05-dir-projection iteration-0: fill in real commit hash in report
+0c83ac0 exp5 M05-dir-projection iteration-0: directive-to-task projection + anti-drift check
+1caa33b exp5 outer loop: SELECT m5 = M-DIR-PROJECTION (DIR-002), charter authored, gate-hash PASS
+```
+
+`e2dd7ec` genuinely present on branch `exp5-m05-iteration-1`, stacked on top of iteration-0's three
+real commits (`0c83ac0`/`9144dc6`/`f399bb5`), which are in turn stacked on the same `1caa33b`
+master commit both iterations branched from.
