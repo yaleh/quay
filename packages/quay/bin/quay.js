@@ -3,6 +3,7 @@
 // to the Web UI (proposal §9): `serve` / `task` / `action`.
 
 import path from "node:path";
+import fs from "node:fs/promises";
 import { loadConfig, activeProvider } from "../src/config.js";
 import { connectProvider } from "../src/provider-client.js";
 import { composePayload, deliverTrigger } from "../src/action.js";
@@ -83,6 +84,30 @@ function parseFlags(argv) {
 // resolveProviderEnv is now imported from ../src/provider-env.js (QN-045):
 // this file, src/mcp-server.js, and src/serve.js all share the single
 // implementation there, closing the DESIGN.md §4.4 asymmetry.
+
+// M16-cli-edit-parity-impl (design doc §1.3): read all of a readable stream
+// (used for `--body-file -` / stdin) into a single string.
+async function readAll(stream) {
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks.map((c) => (Buffer.isBuffer(c) ? c : Buffer.from(c)))).toString("utf8");
+}
+
+// M16-cli-edit-parity-impl (design doc §1.3's `resolveBody` sketch):
+// whole-body-replacement mode. `--body-file <path>` reads the file's full
+// contents as the new body verbatim; `--body-file -` reads from stdin.
+// Plain `--body <string>` remains available for short bodies passed
+// directly as a shell argument. Mutual exclusion with `--body` is validated
+// by the caller (task edit handler) before this is invoked.
+async function resolveBody(flags) {
+  if (flags["body-file"] !== undefined) {
+    if (flags["body-file"] === "-") {
+      return await readAll(process.stdin); // whole-body replacement from stdin
+    }
+    return await fs.readFile(flags["body-file"], "utf8"); // whole-body replacement from file
+  }
+  return flags.body; // short-string mode, already validated present by the caller
+}
 
 async function withProvider(fn, { providerId } = {}) {
   const cfg = loadConfig();
@@ -379,14 +404,64 @@ async function main() {
     // branch. Whether the active Provider actually implements task_write
     // is a Provider-manifest question (data.write capability), not
     // something this command special-cases.
+    //
+    // M16-cli-edit-parity-impl (design doc §1.2): relaxed from status-only
+    // to full-field parity with the native provider CLI's own `task edit`
+    // flag surface — --title/--body/--body-file/--labels/--extra/--parent/
+    // --children/--expect-status/--append-notes. `--status` is no longer
+    // solely required; the guard below now requires at least one
+    // patch-producing flag instead.
     const id = positional[0];
-    if (!flags.status) {
-      console.error("quay task edit: --status <s> is required (v1 supports status-only writes)");
+
+    if (flags.body !== undefined && flags["body-file"] !== undefined) {
+      console.error("quay task edit: --body and --body-file are mutually exclusive");
       process.exitCode = 1;
       return;
     }
+
+    const patch = {};
+    if (flags.title !== undefined) patch.title = flags.title;
+    if (flags.status !== undefined) patch.status = flags.status;
+    if (flags.labels !== undefined) patch.labels = String(flags.labels).split(",").filter(Boolean);
+    if (flags.parent !== undefined) patch.parent = flags.parent;
+    if (flags.children !== undefined) patch.children = String(flags.children).split(",").filter(Boolean);
+    if (flags.extra !== undefined) patch.extra = JSON.parse(flags.extra);
+    if (flags.body !== undefined || flags["body-file"] !== undefined) {
+      patch.body = await resolveBody(flags);
+    }
+    if (flags["expect-status"] !== undefined) patch.expectedStatus = flags["expect-status"];
+
+    if (Object.keys(patch).length === 0 && flags["append-notes"] === undefined) {
+      console.error(
+        "quay task edit: at least one of --title/--status/--body/--body-file/--labels/--extra/" +
+        "--parent/--children/--append-notes is required"
+      );
+      process.exitCode = 1;
+      return;
+    }
+
     await withProvider(async (client) => {
-      const t = await client.taskWrite({ id, status: flags.status });
+      // M16-cli-edit-parity-impl (design doc §4 non-goals): --append-notes
+      // is a Core-CLI-side read-then-write convenience, not a new ABI tool
+      // — read the current body via taskGet, append the note text, then
+      // taskWrite the whole new body. No native `appendNote` ABI passthrough
+      // is introduced (mirrors the native CLI's own scope discipline; see
+      // design doc §4's explicit non-goal).
+      if (flags["append-notes"] !== undefined) {
+        const current = await client.taskGet(id);
+        if (!current) {
+          console.error(`no such task: ${id}`);
+          process.exitCode = 1;
+          return;
+        }
+        const noteText = String(flags["append-notes"]);
+        const newBody = `${current.body ?? ""}\n\n${noteText}`;
+        const t = await client.taskWrite({ id, ...patch, body: newBody });
+        if (wantsJson) printJson(t);
+        else console.log(`${t.id}: ${t.title} [${t.status}] (note appended)`);
+        return;
+      }
+      const t = await client.taskWrite({ id, ...patch });
       if (wantsJson) printJson(t);
       else console.log(`${t.id}: ${t.title} [${t.status}]`);
     }, { providerId: flags.provider });

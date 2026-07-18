@@ -604,3 +604,39 @@ see `dashboard.md`'s Human-review cadence row for the full reconciliation reason
    `OUTER-LOOP.md` step 8), the checkpoint snapshot must include this track's current value, so a
    human skimming `checkpoints/cp-<NN>.md` asynchronously sees "N milestones since last human
    input" directly, without needing to dig through `directives/archive/` to reconstruct it by hand.
+
+## Portable-metadata convention (body-first, `extra{}` native-only) (M16-cli-edit-parity-impl, DIR-011 item 3, `docs/proposals/exp5-cli-edit-parity.md` §3.2 — inserted verbatim)
+
+> ### Portable-metadata convention (body-first, `extra{}` native-only)
+>
+> A quay task's `body` (markdown) and `labels` are **portable**: every Provider ABI implementation
+> (native, GitHub, and any future Provider) is expected to support reading and writing them, because
+> both are backed by fields every realistic backing store has (a free-text description field, a
+> tag/label mechanism). A task's `extra{}` map is **native-only convenience**: it is an arbitrary
+> key/value store specific to the native Provider's own file-backed task store, and MUST NOT be
+> relied upon as the sole copy of any fact that needs to survive a Provider switch.
+>
+> **Rule for anyone writing metadata onto a task that must be provider-portable:** the authoritative,
+> portable copy of that metadata MUST live in a structured markdown section of the task `body`
+> (e.g. a `## <Section Name>` heading with the fact stated in prose or a `Key: value` line
+> immediately beneath it — the exact same shape M05's `Status mirror:` body line already
+> established). `extra{}` MAY additionally carry the same fact as a machine-readable, native-only
+> mirror (e.g. `extra.someKey`) purely as a query-performance convenience on native — but if a
+> Provider hard-errors on writing `extra` (as GitHub does per PR-ABI-001's floor), the body copy
+> alone must remain sufficient; nothing may be designed to depend on the `extra{}` mirror being
+> present.
+>
+> **Corollary:** any milestone/design that finds itself needing `extra{}` as the ONLY place a fact
+> is recorded has mis-designed a provider-portability requirement — either the fact does not
+> actually need to be portable (state that explicitly and accept native-only status), or it needs a
+> body-section home in addition to (not instead of) the `extra{}` mirror.
+
+Source: `docs/proposals/exp5-cli-edit-parity.md` §3.2, produced by M14-cli-edit-parity (design-only)
+per DIR-011 item 3; inserted here verbatim by M16-cli-edit-parity-impl (the implementing milestone
+the design doc's own §6 Done-when list required) as this milestone's Done-when clause 4. Already
+cross-referenced informally by M13's task-backlog-projection design (§11) before this section
+existed in named/citable form here — see the design doc's own §3.1 cross-reference note for that
+prior dependency. Note (worktree-local edit): this file is Tier-B shared context; this insertion is
+made to the copy of `inherited-core.md` inside this iteration's own worktree and will be reconciled
+against the real shared file by the outer loop at ABSORB, per this milestone's charter (Done-when 4
+note) — expected, not a conflict to avoid.
