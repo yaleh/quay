@@ -484,7 +484,7 @@ below this line once that commit lands):
 $ git status --short   # worktree, post-report-commit
 (clean)
 $ git log --oneline -2  # worktree
-<report-commit-sha> M08-merge-recover it0: write iteration-0 report (build complete, done-when 1-6 evidenced, 7 deferred)
+1cfdffa M08-merge-recover it0: write iteration-0 report (build complete, done-when 1-6 evidenced, 7 deferred)
 d00ce2e M08-merge-recover it0: recover CLI/Docs/Packaging capabilities lost in exp4 merge drift
 $ git status --short   # shared repo root
 (clean)
