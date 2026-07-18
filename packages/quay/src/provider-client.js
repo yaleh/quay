@@ -17,6 +17,18 @@ export async function connectProvider({ command, args, env, cwd }) {
 
   async function taskList(filter = {}) {
     const r = await client.callTool({ name: "task_list", arguments: filter });
+    // M26-adversarial-eval finding ADV-001: taskList previously did not check
+    // r.isError (unlike taskGet/taskWrite/taskCheck below, which all do) --
+    // when the underlying Provider throws (e.g. one malformed task file
+    // breaking store.list()), the MCP SDK returns isError:true with no
+    // structuredContent, and this silently degraded to an empty array `[]`,
+    // indistinguishable from "workspace legitimately has zero tasks". A
+    // corrupted/malformed single task file could make the Web UI (and any
+    // other taskList caller) silently show zero tasks instead of surfacing
+    // an error -- worse than a crash for a task-management tool, since data
+    // appears lost rather than reporting a diagnosable fault. Now matches
+    // the other three passthroughs' isError handling.
+    if (r.isError) throw new Error(r.content?.[0]?.text ?? "task_list failed");
     return r.structuredContent?.tasks ?? [];
   }
 
