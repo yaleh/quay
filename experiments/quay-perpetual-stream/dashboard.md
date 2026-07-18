@@ -337,3 +337,20 @@ iteration-0's arithmetic slip of 95.83 during iteration-1's independent re-verif
   risk (DIR-002, 2nd dropped instance of the same requirement) against product-integrity risk
   (M-MERGE-RECOVER, silently-wrong ledger) — both are legitimate top candidates, decided at m5
   SELECT with full reasoning recorded then, not pre-decided here.
+- **SELECT m5 = M-DIR-PROJECTION** 2026-07-18. Weighed against `M-MERGE-RECOVER` (real
+  product-integrity gap surfaced by MD-001, med-high Δv̂ but no repeat-governance-drift risk) —
+  chose `M-DIR-PROJECTION` per the standing rule established at m4's drain ("pivot immediately if
+  pre-dispatch, defer to next slot if mid-milestone with real work already done") and DIR-002's own
+  top-priority flag: this is the SECOND time the identical restrained-projection requirement has
+  been agreed then dropped (exp4 DIR-006 it11 destructive cutover + it15 rollback, now exp5 DIR-002
+  re-flagging the same gap) — a repeat-governance-drift risk outranks a one-off product-integrity
+  gap, and `M-MERGE-RECOVER` remains fully real and sized, deferred to m6. Charter authored at
+  `charters/M05-dir-projection.md` (explore, MCP/CLI task-store + method-infra surface, no VT chart
+  weight — measured on discovery-latency/dogfooding health tracks instead, per §4.2/§4.3). it0
+  ceiling check done inline at authoring time (`grep -rn "label.*directive\|directive.*label"
+  packages/*/src .claude/skills/quay-directive/` → no existing projection mechanism found; not
+  already done, not unreachable). Gate-hash check: `it0-gate-hash-check.sh
+  charters/M05-dir-projection.md` → **PASS** ("HARD GATES block matches pinned source ... modulo
+  declared [PARAM: ...] substitutions"). `backlog.md`'s M-DIR-PROJECTION row updated to SELECTED.
+  Dispatching inner iteration-0 next via `baime:iteration-executor`, worktree
+  `milestones/M05-dir-projection/worktrees/iteration-0` branch `exp5-m05-iteration-0`.
