@@ -51,3 +51,9 @@ evidence class that surfaced this gap in the first place.
 
 ## Status mirror
 todo (created @m29 DRAIN/SELECT boundary, 2026-07-18 — not yet SELECTed)
+
+---
+## Not selected (M29)
+2026-07-18: Not selected — M-QUAY-CLI-CREATE-ERGONOMICS chosen instead, anchored on GAP-002
+(explicitly flagged by M27's own report as the single most severe finding across all evaluations
+so far, a real data-integrity bug). This candidate remains charter-ready for a future SELECT.

@@ -53,3 +53,11 @@ Given this is a design decision with real backwards-compatibility implications, 
 
 ## Status mirror
 todo (created @m29 DRAIN/SELECT boundary, 2026-07-18 — not yet SELECTed)
+
+---
+## Not selected (M29)
+2026-07-18: Not selected — M-QUAY-CLI-CREATE-ERGONOMICS chosen instead (GAP-002 severity). This
+candidate also needs more design deliberation before charter-ready (a genuine product-design
+decision with backwards-compatibility implications, not a mechanical fix — see its own Notes
+section options (a)/(b)/(c)); recommend a future SELECT pass settle the design question at
+charter-authoring time rather than rushing a default.

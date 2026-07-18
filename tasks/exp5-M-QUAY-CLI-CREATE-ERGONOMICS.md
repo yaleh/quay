@@ -7,6 +7,7 @@ status: todo
 labels:
   - milestone-candidate
   - surface:cli
+  - milestone:M29-cli-create-ergonomics
 extra: {}
 ---
 ## Forward-looking candidate provenance
@@ -56,4 +57,6 @@ level, rather than patching `task edit`'s upsert path to special-case missing ti
 depending on line-budget at SELECT time.
 
 ## Status mirror
-todo (created @m29 DRAIN/SELECT boundary, 2026-07-18 — not yet SELECTed)
+ready (SELECTed @M29, 2026-07-18 — anchored on GAP-002, explicitly flagged by M27's own report
+as "the single most severe finding of the whole benchmark," a real data-integrity bug; exploit
+pick balancing a recent explore-heavy run of milestones)

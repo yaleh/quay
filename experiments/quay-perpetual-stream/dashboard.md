@@ -2422,3 +2422,51 @@ candidate and this milestone's `G-S3-01`/`G-TEST-01`. Value-hypothesis
 judgment flag: realized Δv confirmed 0, task store's stated value type held up
 as accurate.
 
+
+## SELECT m29 — 2026-07-18
+
+**DRAIN results:** `.halt` absent. `directives/pending/` still contains only `DIR-017`
+(Steps 2-3 blocked pending human verification of Step 1's meta-enforcer operative status — not
+a SELECT candidate). `it0-dir-projection-check.sh` PASS (18 files / 16 label:directive tasks, no
+drift). `master` → `exp5-outer-driver` sync: driver was already at `master`'s HEAD (published
+M28 in the same session, no divergence to merge).
+
+**Backlog state at SELECT time:** all 20 pre-existing milestone-candidate rows are DONE (16) or
+STALE (3, repeatedly not-selected: M-CLI-UX/M-DIRTASK/M-DOCS) or SELECTED-then-DONE
+(M-OUTCOME-EVAL). DIR-001 (the directive that seeded most of the recent SELECT candidates) is
+now fully closed: items 1-2 applied at m3, items 3-5 just closed (M26-adversarial-eval,
+M27-competitive-bench, M28-outcome-eval), item 6 resolved at M15-human-review-cadence as a
+standing non-blocking observational health track (not a repeated dispatch). **No open candidate
+remained** — a first for this stream.
+
+**Candidate-generation action taken (this DRAIN, logged as its own commit
+`8b10e06`):** created 4 new forward-looking milestone-candidate tasks directly from M27's and
+M28's own logged gap findings, mirroring M24-task-backlog-projection-impl's forward-looking-
+creation pattern (the same mechanism that originally seeded M-OUTCOME-EVAL etc. from DIR-001):
+`exp5-M-QUAY-CLI-CREATE-ERGONOMICS` (M27 GAP-001/002/007/G-02), `exp5-M-WEBUI-TRIGGER-HONESTY`
+(M28 G-S4-01/G-S4-02), `exp5-M-NATIVE-RELATION-SYNC` (M28 G-S5-01), `exp5-M-CLI-GATE-ENFORCEMENT`
+(M28 G-S3-01). This keeps the stream perpetual by design: dogfooding work itself generates the
+next round of real, evidence-backed candidates rather than stalling when a directive-seeded
+backlog empties.
+
+**SELECT rationale:** `exp5-M-QUAY-CLI-CREATE-ERGONOMICS`, anchored on GAP-002 — M27's own report
+explicitly names it "the single most severe finding of the whole benchmark... real
+correctness/data-integrity bug" (silent title-less task creation). Exploit-typed, addresses a
+confirmed real defect rather than exploring new surface. Explore/exploit policy check: last 5
+milestones (M24 explore, M25 explore, M26 explore, M27 exploit, M28 explore) already satisfy
+"≥1 explore per 5" comfortably (4 of 5 explore) — an exploit pick this pass is not just allowed
+but balances the recent explore-heavy run. The other 3 new candidates
+(M-WEBUI-TRIGGER-HONESTY, M-NATIVE-RELATION-SYNC, M-CLI-GATE-ENFORCEMENT) remain open for future
+SELECT passes; `M-CLI-GATE-ENFORCEMENT` in particular is flagged as needing a genuine design
+decision (not a mechanical fix) and may benefit from more deliberation time before charter-
+authoring.
+
+Task-store write-back: `exp5-M-QUAY-CLI-CREATE-ERGONOMICS` labeled `milestone:M29-cli-create-
+ergonomics`; the other 3 new candidates each received a `## Not selected (M29)` note (smaller/
+less-severe findings this pass, or — for M-CLI-GATE-ENFORCEMENT — needs more design deliberation
+before charter-ready).
+
+Gate-hash-by-reference: unchanged, same pinned template as M06-M28 (hash
+`5023da8232f12579e9a8db0ce26c5a5d1aadd5a7d095380016636330c63d2c93`).
+
+Continuing directly to charter authoring for m29.
