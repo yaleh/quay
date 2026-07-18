@@ -83,3 +83,15 @@ IMPL` row, sourced to this DIR + the m13 design doc's §15 checklist. Item 2
 (actually charter and dispatch the implementation) remains open, intentionally left
 as that new row's own future SELECT work — not built by M21, per M21's charter
 non-goals. Do not archive this DIR until item 2 also lands.
+
+**Disposition note (M22-quay-task-to-plan-skill-phase7, iteration-0, 2026-07-18) —
+DEFERRED, stays `pending`, unchanged from M21's note:** M22's charter is scoped
+strictly to `docs/plans/3-7-quay-task-to-plan-skill.md` Phase 7 (Stages 7.1-7.3 —
+the `quay-task-to-plan` skill's plan step, TDD gate, and dogfooding-wiring
+statement) and explicitly excludes "begin `M-TASK-BACKLOG-PROJECTION-IMPL`'s own
+implementation" (M22's charter, "Explicitly OUT of scope" section, final bullet).
+This DIR's item 2 (charter+dispatch the implementation) is therefore untouched by
+M22 — M22 only NAMES `M-TASK-BACKLOG-PROJECTION-IMPL` as a first true-dogfood
+candidate for the now-built skill (see `.claude/skills/quay-task-to-plan/SKILL.md`'s
+"Relationship / bootstrap" section), it does not charter or dispatch it. No new
+progress on item 2 this iteration; still open for a future SELECT.
