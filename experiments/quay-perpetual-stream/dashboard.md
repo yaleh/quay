@@ -17,6 +17,59 @@ Chart-0 surface weights (initial, soft — revise at checkpoint 1 from live data
 | Docs | 15 | 0.70 | 10.50 |
 | **VT₁ (after m1)** | **/100** | | **88.25** |
 
+### Chart-1 transition (M03-abi-eval, DIR-001 items 1-2) — Provider-ABI surface added
+
+New surface, weight **20** (comparable to Packaging/MCP — structural product pillar, DIR-001's
+own framing: "quay's own reason to exist [is a] provider-agnostic task board"). chart-0's 5
+surfaces carry over 1:1 (no re-scoring — out of this milestone's scope); chart-1 Σ = 120.
+
+**cov derivation (REALIZED, not the charter's 0.30 pre-dispatch placeholder)** — from
+`milestones/M03-abi-eval/capability-matrix.md`'s own live-verified findings (iteration-0), scored
+as the github Provider's OWN realized fraction of the ABI's per-field capability surface
+(the dimension the placeholder was estimating — how complete is the 2nd, heterogeneous-backend
+Provider relative to the ABI's full field set), weighted by field-count per capability row (the
+comparable, non-N/A cells only — gate's/skill's title/body/labels/N/A rows excluded, matrix's own
+"Summary — cell count" section):
+
+| capability | fields scored | github realized | fraction |
+|---|---|---|---|
+| read | status, title, body, labels, parent/children | 4.5/5 (parent/children: children full, `parent` path-dependent — full via `task_list`, always `null` via `task_get`, PR-ABI-002) | 0.90 |
+| write | status, title, body, labels, parent/children | 1/5 (status only — PR-ABI-001: unsupported fields silently dropped, not merely "unimplemented" in an erroring sense) | 0.20 |
+| gate | primitive, compound | 2/2 (both live-verified against real issues — gh-3 primitive, gh-7 compound — not just injected-fixture unit tests) | 1.00 |
+| skill | status_skill_map/action_buttons | 1/1 (byte-identical shape to native's own, generic Core passthrough, live-confirmed via `manifest`) | 1.00 |
+
+cov = (4.5 + 1 + 2 + 1) / (5 + 5 + 2 + 1) = **8.5 / 13 = 0.654** (rounded to 3dp: 0.6538…)
+
+This is HIGHER than the charter's own 0.30 pre-dispatch placeholder — the placeholder assumed
+gate/skill were "ported-but-thin"/uncertain (DIR-001's own framing); this milestone's live
+differential evidence found gate and skill FULLY symmetric across both providers (the only
+material gap is write-completeness, previously known in general but now precisely bounded: 1/5
+write fields, not 0/5 — status write does work, live-verified idempotently against real issues).
+The narrower-than-feared gap is itself part of this milestone's realized-value signal (charter's
+own "does the resulting cov number survive a second look" question) — not asserted as pre-decided,
+derived from the matrix's own per-cell live evidence, cited above.
+
+| surface | weight | cov | points |
+|---|---|---|---|
+| CLI | 25 | 0.95 | 23.75 |
+| MCP | 20 | 0.90 | 18.00 |
+| Web UI | 20 | 0.95 | 19.00 |
+| Packaging / Distribution | 20 | 0.85 | 17.00 |
+| Docs | 15 | 0.70 | 10.50 |
+| **Provider-ABI (NEW)** | **20** | **0.654** | **13.08** |
+| **VT chart-1 total (after m3)** | **/120** | | **101.33** |
+
+Conversion factor: chart-0's 5 surfaces carry over 1:1 (88.25 unchanged); chart-1 adds the new
+20-weight Provider-ABI term on top (+13.08), for a chart-1 total of **101.33/120** (≈0.844
+normalized, vs chart-0's 88.25/100 = 0.8825 normalized — the two totals are on different scales,
+not directly comparable without normalizing; recorded both raw and normalized to avoid an
+apples-to-oranges Δv claim next milestone).
+
+VT curve (append, chart-1 basis from m3 forward):
+`[ (m0, 82.25/100), (m1/M-DIST, 88.25/100, Δv=+6.0), (m2/M-GATES, 88.25/100, Δv=0, methodology-infra
+no VT points), (m3/M-ABI-EVAL, 101.33/120, chart transition — not a direct Δv vs m2's 88.25/100;
+the +13.08 is the NEW surface's own first-ever score, not incremental growth on an existing one) ]`
+
 Scoring basis (bootstrap, from exp4 `gap-list.md` + `backlog.md` framing): CLI/MCP/Web UI
 near-saturated (exp4 closed 102 cumulative gaps, only 4 open at FINAL: ENV-001, SH-006, NEW-001,
 PKG-010 — all minor/env). Packaging is the clear low point: existing PKG-series closed (tgz
