@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 22** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 23** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -1782,3 +1782,67 @@ ABSORB (Δv̂=0 by design, risk/option+governance-integrity typed); condition (b
 DIR-018 archival (with Resolution) delegated to the dispatched iterations per the DIR-013/DIR-014/
 DIR-016 precedent. Dispatching inner iteration-0 and iteration-1 next, both from worktrees off
 `exp5-outer-driver` HEAD (not `master`) — this milestone's own dogfooded proof point.
+
+**ABSORB m23 (2026-07-18).** Both iterations converged independently on materially equivalent
+solutions (agent IDs `a5081b153d4f5c9d4` iteration-0, `af46311f7292c6931` iteration-1; commits
+`5c2985b` iteration-0, and iteration-1's base merged first as `c931950`). Per the very discipline
+this milestone was building, the `exp5-outer-driver` merge of `exp5-m23-iteration-0` (iteration-1
+already merged cleanly first, no conflict) hit conflicts across 5 files, resolved **per-file**,
+reading both sides, no blanket `--ours`/`--theirs` (merge commit `22806f1` on `exp5-outer-driver`):
+- `OUTER-LOOP.md`, hunk 1 (DRAIN step 0's master→driver merge sub-step text): kept iteration-0's
+  ("theirs") paragraph — it separates the "No-silent-drop reconciliation-note requirement" into its
+  own explicit standing-instruction paragraph covering BOTH merge directions, vs iteration-1's
+  version which folded that requirement inline into a single paragraph. A stray trailing
+  `>>>>>>> exp5-m23-iteration-0` marker left over from this hunk's resolution was found and removed
+  in a follow-up edit before staging.
+- `OUTER-LOOP.md`, hunk 2 (ABSORB step 6/7's driver→master publish sub-step text): same reasoning,
+  kept iteration-0's version for consistency with hunk 1's choice — both versions were near-
+  equivalent in content and coverage.
+- `backlog.md`'s `M-OUTER-DRIVER-ISOLATION` row: kept iteration-1's (HEAD's) single-table-row form
+  — it appends to the existing backlog table like every other row, matching this file's established
+  convention — over iteration-0's version, which introduced a separate "## DIR-018-sourced
+  candidate" mini-table section (a structural fragmentation the file has not used elsewhere).
+  Attribution changed from "iteration-0" to "both iterations independently converged" since both
+  iterations built the substantively same isolation pattern.
+- `directives/pending/DIR-015-*.md` and `directives/pending/DIR-017-*.md` disposition notes: both
+  iterations wrote near-identical "deferred, out of scope for M23" text; kept HEAD's (iteration-1's)
+  wording, attribution changed to "both iterations".
+- `directives/archive/DIR-018-*.md` Resolution section: kept HEAD's (iteration-1's) version, which
+  already correctly attributed `resolved_by: M23-outer-driver-isolation, iteration-0 + iteration-1
+  (independent re-derivation)`; removed iteration-0's redundant duplicate Resolution block.
+Post-merge M18/M21-class duplicate-insertion sweep: `grep -c` for both named sub-step headings in
+`OUTER-LOOP.md` returned exactly 1 each (not 2) — no silent duplicate combination this time.
+
+Gate re-verification post-merge: `it0-gate-hash-check.sh --by-reference` PASS (pinned hash
+unchanged); the plan-time line-budget gate PASS (small-milestone norm). `it0-impl-row-check.sh
+M-OUTER-DRIVER-ISOLATION backlog.md` → PASS/not-applicable (method-infra/process milestone, not
+design-only — no "Done-when clauses a future implementing milestone would need" section, no
+design-doc-only backlog text). `inherited-core.md` confirmed untouched (charter non-goal honored).
+
+**The `exp5-outer-driver` → `master` publish** was then performed exactly as the milestone's own new
+`OUTER-LOOP.md` text prescribes: sequenced after all three ABSORB HARD BLOCKs (adversarial-audit —
+N/A, Δv=0, no nonzero claim; V_meta consolidation-lag — N/A, not a ledger-tracked insight-class
+milestone; design-only impl-row — N/A, not design-only) and before `milestone_counter++`, as
+**exactly one** `git checkout master && git merge --no-ff exp5-outer-driver` commit — the FIRST
+real use of the pattern M23 itself built (Done-when clause 6). This is also the first ABSORB entry
+written under the new discipline: everything from charter authoring through the `exp5-outer-driver`
+merge resolution happened on the driver branch, never touching `master` directly, until this single
+publish point.
+
+Adversarial-audit gate correctly did NOT fire — condition (a) requires a capability-growth-typed
+milestone with nonzero realized VT Δv at ABSORB (this milestone is risk/option+governance-integrity
+typed, Δv=0 by design); condition (b) (iteration-0 recommending skipping iteration-1) was not
+authorized. **Realized Δv = 0**, by design, mirroring M18/M21/M22's zero-VT infra precedent.
+
+DIR-018 is now `archive/` with a filled `## Resolution` section (evidence for all 4 requested-action
+items, item-by-item). DIR-015 and DIR-017 remain `pending`, each carrying an M23 disposition note
+(unchanged status — both explicitly out of scope for this milestone's charter).
+
+Worktrees/branches for M23 (`milestones/M23-outer-driver-isolation/worktrees/iteration-{0,1}`,
+branches `exp5-m23-iteration-{0,1}`) removed/deleted post-merge, once both were confirmed merged
+into `exp5-outer-driver` and `exp5-outer-driver` itself published to `master`.
+
+Checkpoint not due (next due at m25, per every-5 cadence — cp-20 was last). `milestone_counter`
+22 → 23. Continuing directly to m24 DRAIN/SELECT, no human wait — this time exercising the new
+master↔driver merge discipline the loop just built on itself: DRAIN step 0 will now include the
+explicit master→driver merge sub-step before SELECT.
