@@ -83,3 +83,14 @@ should be the next SELECT ahead of M-GH-WRITE/M-GH-PARENT, since it recovers rea
 CLI/Docs/Packaging capability that is silently absent from `master` today, vs. M-GH-WRITE's smaller,
 already-fully-bounded Provider-ABI write-completeness gap. Suggested: **M-MERGE-RECOVER (explore) →
 M-GH-WRITE (explore) → M-GH-PARENT (exploit, bundle into M-GH-WRITE) → checkpoint 2.**
+
+## M-SIZING (DIR-004-sourced, m6)
+
+| id | title | surface(s) | source | e/x | value type(s) | notes |
+|---|---|---|---|---|---|---|
+| M-SIZING | Milestone sizing rubric (cost band via build+verify unit) + value-typed SELECT ledger (capability-growth / discovery / instrument-correction / risk-option / governance-integrity) + gate-hash-by-reference charter template slimming | method infra (`inherited-core.md`, `OUTER-LOOP.md`, charter template) | DIR-004 (applied immediately at m5→m6 boundary, pre-dispatch — see `directives/archive/DIR-004-*.md` Resolution) | explore | governance-integrity + risk/option (fixes SELECT's own blind spot before it causes another DIR-002-class drift) | **DONE** (m6, 2026-07-18). Charter `charters/M06-sizing.md`, gate-hash PASS. First real-world application of the value-typed ledger is THIS row itself (see `dashboard.md`'s m6 SELECT log entry) — one milestone ahead of DIR-004's own Done-when-2 target of "starting m7", since authoring M-SIZING's own charter was a natural point to dogfood it informally. |
+
+Revised order after m5/M-DIR-PROJECTION ABSORB + checkpoint-1 + DIR-004 drain (2026-07-18):
+**M-SIZING (explore, applied immediately, governance-integrity value) → M-MERGE-RECOVER (explore,
+instrument-correction value, deferred from m5/m6) → M-GH-WRITE (explore, capability-growth) →
+M-GH-PARENT (exploit, bundle into M-GH-WRITE) → checkpoint 2 (m10).**

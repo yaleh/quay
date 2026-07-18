@@ -1,6 +1,6 @@
-# DIR-003
+# DIR-004
 
-- status: pending
+- status: applied (m6, 2026-07-18) — see Resolution section below
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Milestone sizing — define the cost band via the build+verify unit, and make SELECT value-typed (VT prices only one of four observed value types; never ship half a value step)
@@ -151,4 +151,22 @@ VT value function cannot make about itself — they must enter through the
 falsifiable substrate changes enumerated above rather than in a sizing manifesto.
 
 ## Resolution (added when moved to archive/, or updated in place if deferred)
-<!-- to be filled in by the iteration that applies this directive -->
+
+Renumbered DIR-003→DIR-004 at drain time (2026-07-18): this file's original id (DIR-003) collided
+with the already-archived `DIR-003-m05-dir-projection-dogfoods-directive-task-projection.md`, a
+different directive created earlier the same day as M05-dir-projection's own live dogfood
+demonstration artifact. Content/scope otherwise unchanged from the original submission.
+
+Applied immediately (not deferred) at the m5→m6 boundary: no inner milestone was in-flight when
+this arrived (m5/M-DIR-PROJECTION had just been absorbed and checkpoint-1 written), so per the
+standing rule ("pivot immediately if pre-dispatch, defer if mid-milestone with real work already
+done", established at m4's drain), this went straight to SELECT rather than sitting in the backlog.
+
+Opened as milestone **M-SIZING** (m6), charter at `charters/M06-sizing.md`, covering all 5 requested
+scope items (size definition + verify-iteration gauge → `inherited-core.md`; value-typed SELECT
+ledger + governance/infra hard floor → `inherited-core.md`/`OUTER-LOOP.md`; gate-hash-by-reference
+charter template change demonstrated on a real charter) and all 5 Done-when clauses verbatim. See
+`dashboard.md`'s m6 SELECT log entry for the value-typed reasoning applied to THIS SELECT itself
+(dogfooding the very mechanism DIR-004 requests, one milestone ahead of the directive's own m7
+target — the boundary where M-SIZING is being authored is itself a natural point to start using the
+ledger informally, even before M-SIZING's own Done-when 2 formally requires it starting m7).

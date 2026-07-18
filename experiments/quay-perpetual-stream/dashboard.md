@@ -379,3 +379,41 @@ iteration-0's arithmetic slip of 95.83 during iteration-1's independent re-verif
   (smaller, precisely-bounded provider-ABI fixes) and the newly-logged `PR-004`/`PR-005` (CLI
   label-filter gaps, likely foldable into whichever milestone touches the CLI next rather than
   standalone).
+- **DRAIN + SELECT m6 = M-SIZING** 2026-07-18, immediately after checkpoint-1. `ls -1
+  directives/pending/` showed `DIR-003-milestone-sizing-cost-band-and-value-typed-selection.md` (1
+  file) — a genuinely new human directive (via `/quay-directive`, arrived asynchronously per the
+  loop's own control surface). **Numbering collision found and fixed before dispatch**: its id
+  (DIR-003) collided with the already-archived `DIR-003-m05-dir-projection-dogfoods-directive-task-
+  projection.md` (M05's own live dogfood artifact, a different directive created the same day).
+  Renamed to DIR-004 (`git mv` + in-file header edit) before any further processing — mirroring the
+  M03-discover→M04-discover renumbering discipline already established at m3→m4.
+  DIR-004's finding: reviewing m1-m5, "2 iterations" is a cost-proxy artifact not a real size
+  signal (true gauge: does iteration-0 land all Done-when, does iteration-1 have real material to
+  independently re-derive — m1 was mildly oversized, m2/m4 correctly sized); and VT prices only
+  capability-growth value, scoring m2/m5 at 0 and m4 at **-6.60** despite m4 being one of the two
+  most valuable milestones so far (it caught MD-001, a real measurement error carried since before
+  m1) — SELECT has been compensating with ad hoc prose instead of a structured, typed ledger.
+  **Applied immediately** (not deferred): no inner milestone was in-flight (m5 had just been
+  absorbed, checkpoint-1 just written) — per the standing rule from m4's drain ("pivot immediately
+  if pre-dispatch, defer if mid-milestone with real work already done"), this is a clean pre-dispatch
+  case, same class as DIR-001's immediate supersession at m3.
+  **First live application of DIR-004's own requested value-typed ledger, to THIS SELECT** (one
+  milestone ahead of its own Done-when-2 target of "starting m7" — dogfooding it informally while
+  authoring M-SIZING's own charter, since M-SIZING obviously has no VT Δv̂ of its own and needed a
+  real ranking argument other than "the directive says so"): candidate value types recorded —
+  M-SIZING = **governance-integrity + risk/option** (fixes SELECT's own blind spot before it causes
+  a 3rd repeat-governance-drift instance, same risk class as DIR-002); M-MERGE-RECOVER (deferred
+  again, still real) = **instrument-correction**; M-GH-WRITE/M-GH-PARENT (deferred again) =
+  **capability-growth**, VT Δv̂≈+3-4, the only one with a positive VT number — and per DIR-004's own
+  point, ranking by VT alone would have picked M-GH-WRITE here and permanently deferred the
+  self-correcting milestone type. Chose M-SIZING BEFORE M-MERGE-RECOVER despite M-MERGE-RECOVER
+  being flagged leading candidate at cp-01 (written minutes earlier) — DIR-004 arrived after cp-01
+  and directly changes the ranking logic itself, so applying the OLD (VT-only-adjacent) ranking to
+  choose between them first would be circular; fixing the ranking mechanism takes precedence over
+  using it once more unfixed.
+  Charter authored: `charters/M06-sizing.md` (explore, method-infra surface, no VT chart weight).
+  it0 ceiling check done inline (`grep -rn "value.typed\|verify-iteration.*gauge\|cost band" ...`
+  → nothing found, not already done). Gate-hash check: `it0-gate-hash-check.sh
+  charters/M06-sizing.md` → **PASS**. `backlog.md` gains an M-SIZING row (DONE-pending) and a
+  revised order note. DIR-004 archived with status `applied (m6)` and a Resolution section
+  recording the renumbering + immediate-apply rationale. Dispatching inner iteration-0 next.
