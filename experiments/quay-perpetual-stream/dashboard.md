@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 27** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 28** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -2305,3 +2305,120 @@ these form a coherent future capability-growth-typed candidate, tentatively
 "Explicitly OUT of scope").
 
 Continuing directly to m28 DRAIN/SELECT, no human wait.
+
+## SELECT m28 — 2026-07-18
+
+DRAIN: `.halt` absent. `directives/pending/` has only DIR-017 (Steps 2-3), which
+remains explicitly blocked by its own "Human verification gate (irreducible, not
+delegable)" clause — Step 1's meta-enforcer must be human-confirmed operative
+before Steps 2-3 may be SELECTed; still not confirmed, so DIR-017 stays pending,
+not a candidate this pass. `exp5-outer-driver` synced to `master` HEAD (`2d66bde`,
+fast-forward, no new commits to merge — driver and master converged at m27's
+publish).
+
+Candidates considered: `backlog.md` now shows **only one open row**,
+`M-OUTCOME-EVAL` (DIR-001 item 3) — every other milestone-candidate row is either
+DONE (12 backfilled historical milestones + M24/M25/M26/M27) or STALE
+(M-CLI-UX/M-DIRTASK/M-DOCS, each repeatedly not selected across many passes).
+`M-OUTCOME-EVAL` is now charter-ready per the 5-scenario draft authored into
+`tasks/exp5-M-OUTCOME-EVAL.md` at m27's own SELECT step.
+
+**m28 = `M-OUTCOME-EVAL`** (DIR-001 item 3) — the only remaining open candidate, no
+other forcing signal needed; DIR-001's items 3/4/5 are now all either selected or
+in-flight (3 = this milestone, 4 = M26, 5 = M27).
+
+Task store write-back: `tasks/exp5-M-OUTCOME-EVAL.md` → `status: ready`, label
+`milestone:M28-outcome-eval` added, `## Status mirror` updated, SELECTED history
+note appended. `it0-backlog-regen.mjs --write` re-run; anti-drift checks re-run
+clean (20 milestone-candidate tasks, 18 DIR files, no divergence).
+
+Gate-hash-by-reference: unchanged since M06, reused unchanged through M28.
+
+Continuing directly to charter authoring for m28.
+## ABSORB m28 — M28-outcome-eval — 2026-07-18
+
+**Merge/publish trail:** `exp5-m28-iteration-0` (commit `1a874ea`) and
+`exp5-m28-iteration-1` (commit `6693324`) both merged into `exp5-outer-driver`
+(merge commits, iteration-0 clean fast-merge, iteration-1 required per-file
+conflict resolution on `outcome-eval-report.md`, commit `86c2375`). Reconciled
+report at
+`experiments/quay-perpetual-stream/milestones/M28-outcome-eval/outcome-eval-report.md`,
+both originals preserved as `outcome-eval-report.iteration-{0,1}.md`, per
+DIR-018 item 3.
+
+**Findings summary:** Scenarios 1-3 converged PASS across both iterations
+(scenario 3 carrying 1 real gap, G-S3-01: `quay task edit --status` bypasses
+`task check` gate enforcement — a raw unguarded CLI setter). Scenarios 4 and 5
+diverged between iterations and required explicit reconciliation (not
+averaging/pick-one):
+- **Scenario 4** (Web UI round-trip): both iterations independently found the
+  identical mechanism — the "Advance" button only dispatches an async trigger
+  (`composePayload`/`deliverTrigger`), degrading to print-only without a live
+  consumer, never synchronously writing task status. iteration-0 scored this a
+  strict FAIL against the charter's literal language; iteration-1 scored PASS
+  after manually completing the transition via CLI. Reconciled to **FAIL**,
+  adopting the charter-literal reading — iteration-1's own manual CLI
+  completion is exactly the kind of external intervention the scenario's
+  zero-manual-intervention bar excludes. 2 gaps logged: G-S4-01 (misleading
+  success banner), G-S4-02 (no end-to-end round trip without an external
+  dispatcher).
+- **Scenario 5** (cross-provider parent/children write): iteration-0's own
+  report self-flagged an unchecked scope limit (only child-side field verified
+  on native). iteration-1 independently checked both parents' `children`
+  arrays and found them genuinely unsynced on native (github fully
+  bidirectional, converged both iterations). Reconciled to **PASS-github /
+  gap-on-native**, adopting iteration-1's more complete check as the record of
+  truth. New gap: G-S5-01 (native provider one-sided parent/children sync, no
+  sync mechanism in `store.js`).
+- G-TEST-01 (pre-existing `serve-github.test.mjs` pagination fragility)
+  reconfirmed independently by both iterations, same root cause
+  (`gh-3` pushed past the default page-20 cutoff by legitimate concurrent
+  scratch-issue volume) — not a regression.
+
+None of the 5 real gaps (G-S3-01, G-S4-01, G-S4-02, G-S5-01, G-TEST-01) were
+fixed inline, per charter's explicit "log, don't fix" instruction; all carry
+explicit dispositions in the reconciled report.
+
+**Gate dispositions:**
+1. **Adversarial-audit**: gate does not apply — N/A / documented no-op, EXEMPT
+   BY DEFAULT per the cadence rule (`inherited-core.md` "Adversarial-audit
+   cadence rule") — M28 is explore/method-infra, no VT points, no
+   capability-growth VT delta appended, and neither iteration self-exempted
+   from running (both iteration-0 and iteration-1 ran the full 2-iteration
+   template) — clause (b)'s override trigger does not fire. No-op, Δv̂=0 by
+   design (task store's stated value type: "explore, method infra, no VT
+   points" — confirmed accurate at ABSORB, no re-classification needed; the
+   charter's own Value-hypothesis judgment flag re-check finds no reason to
+   override).
+2. **V_meta consolidation-lag**: clear. `v-meta-ledger.md` has exactly 1
+   `proposed` row (repo-root isolation-leak lesson, m3, confirmation count 1)
+   and 0 unconsolidated `confirmed`-past-threshold rows — unchanged since
+   M27's check, no lag.
+3. **Design-only-impl-row**: PASS, real script output —
+   ```
+   $ bash experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh exp5-M-OUTCOME-EVAL experiments/quay-perpetual-stream/backlog.md
+   PASS: exp5-M-OUTCOME-EVAL is not design-only per its backlog row text (no 'design delivered' / 'design-doc only' / follow-up-checklist marker found) — impl-row gate does not apply.
+   ```
+4. **DoD meta-enforcer** (M25-dod-meta-enforcer): PASS. This is the gate's
+   **fourth-ever real test** (1st = M25 self-check, 2nd = M26, 3rd = M27,
+   4th = this milestone). Invoked as:
+   `it0-dod-check.sh exp5-M-OUTCOME-EVAL experiments/quay-perpetual-stream/charters/M28-outcome-eval.md <this-file>`
+   — first positional argument is the **task-store id**
+   (`exp5-M-OUTCOME-EVAL`), not the milestone id (`M28-outcome-eval`); this
+   convention (established M26, confirmed again M27) continues to hold and is
+   restated here for the next milestone's benefit.
+
+## Backlog row
+
+| exp5-M-OUTCOME-EVAL | Outcome-based (job-to-be-done) evaluation: fixed real end-to-end task-board scenarios, binary pass/fail, dogfooding-gated | DONE | explore, method infra, no VT points | milestone-candidate, surface:cross-cutting, milestone:M28-outcome-eval |
+
+See task-store file `tasks/exp5-M-OUTCOME-EVAL.md` for full Status-mirror.
+
+**Closing notes:** G-S4-01/G-S4-02 (Web UI misleading advance state) and
+G-S5-01 (native provider relation-sync asymmetry) are credible candidates for
+a future SELECT (tentatively `M-WEBUI-TRIGGER-HONESTY` and/or
+`M-NATIVE-RELATION-SYNC`), alongside M27's own `M-QUAY-CLI-CREATE-ERGONOMICS`
+candidate and this milestone's `G-S3-01`/`G-TEST-01`. Value-hypothesis
+judgment flag: realized Δv confirmed 0, task store's stated value type held up
+as accurate.
+

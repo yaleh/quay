@@ -1,0 +1,117 @@
+### quay task view gh-27/28/29 as created ###
+{
+  "id": "gh-27",
+  "title": "[M28-outcome-eval-scratch] Scenario 5 parent A (reassign-from)",
+  "status": "todo",
+  "lane": null,
+  "labels": [],
+  "parent": null,
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 27,
+    "html_url": "https://github.com/yaleh/quay/issues/27",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "## Proposal\nScratch parent for scenario 5 reparenting demo (github)."
+}
+{
+  "id": "gh-28",
+  "title": "[M28-outcome-eval-scratch] Scenario 5 parent B (reassign-to)",
+  "status": "todo",
+  "lane": null,
+  "labels": [],
+  "parent": null,
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 28,
+    "html_url": "https://github.com/yaleh/quay/issues/28",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "## Proposal\nScratch parent for scenario 5 reparenting demo (github)."
+}
+{
+  "id": "gh-29",
+  "title": "[M28-outcome-eval-scratch] Scenario 5 child C (write-verify target)",
+  "status": "todo",
+  "lane": null,
+  "labels": [],
+  "parent": null,
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 29,
+    "html_url": "https://github.com/yaleh/quay/issues/29",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "## Proposal\nScratch child for scenario 5 reparenting demo (github)."
+}
+### set initial parent: quay task edit gh-29 --parent gh-27 --provider github ###
+{
+  "id": "gh-29",
+  "title": "[M28-outcome-eval-scratch] Scenario 5 child C (write-verify target)",
+  "status": "todo",
+  "lane": null,
+  "labels": [],
+  "parent": "gh-27",
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 29,
+    "html_url": "https://github.com/yaleh/quay/issues/29",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "## Proposal\nScratch child for scenario 5 reparenting demo (github)."
+}
+### BEFORE (raw gh issue view #27 body -- expect checkbox #29 added to parent A's body, since children are represented on the PARENT side per charter) ###
+{"body":"## Proposal\nScratch parent for scenario 5 reparenting demo (github).\n\n- [ ] #29\n"}
+
+### BEFORE (raw gh issue view #28 body -- should have no checkbox yet) ###
+{"body":"## Proposal\nScratch parent for scenario 5 reparenting demo (github)."}
+### REPARENT: quay task edit gh-29 --parent gh-28 --provider github ###
+{
+  "id": "gh-29",
+  "title": "[M28-outcome-eval-scratch] Scenario 5 child C (write-verify target)",
+  "status": "todo",
+  "lane": null,
+  "labels": [],
+  "parent": "gh-28",
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 29,
+    "html_url": "https://github.com/yaleh/quay/issues/29",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "## Proposal\nScratch child for scenario 5 reparenting demo (github)."
+}
+### AFTER (raw gh issue view #27 body -- checkbox #29 should now be REMOVED, live-verified via gh issue view --json body, not just the write call's own return value) ###
+{"body":"## Proposal\nScratch parent for scenario 5 reparenting demo (github).\n\n"}
+
+### AFTER (raw gh issue view #28 body -- checkbox #29 should now be ADDED) ###
+{"body":"## Proposal\nScratch parent for scenario 5 reparenting demo (github).\n\n- [ ] #29\n"}
+
+### independent re-read via quay task view gh-29 --provider github ###
+{
+  "id": "gh-29",
+  "title": "[M28-outcome-eval-scratch] Scenario 5 child C (write-verify target)",
+  "status": "todo",
+  "lane": null,
+  "labels": [],
+  "parent": "gh-28",
+  "children": [],
+  "role": "primitive",
+  "extra": {
+    "number": 29,
+    "html_url": "https://github.com/yaleh/quay/issues/29",
+    "user": "yaleh",
+    "state": "open"
+  },
+  "body": "## Proposal\nScratch child for scenario 5 reparenting demo (github)."
+}
