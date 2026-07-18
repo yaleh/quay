@@ -177,8 +177,9 @@ pattern as the domain-misfit section's own M01-dist validation above).
 
 VT (the chart-0/chart-1 capability-growth score) prices only ONE kind of milestone value. DIR-004's
 finding: this made SELECT compensate with ad hoc prose whenever a milestone's real value was NOT
-capability-growth (m2 and m5 both scored 0 VT despite being real governance/method-infra wins; m4
-scored **-6.60** VT despite being one of the two most valuable milestones so far, because it
+capability-growth (m2 scored 0 VT despite delivering real risk/option value — DIR-004's own table:
+"pre-empted 3 wasted SELECTs" — and m5 likewise scored 0 despite real governance-integrity value;
+m4 scored **-6.60** VT despite being one of the two most valuable milestones so far, because it
 corrected a standing measurement error (MD-001) rather than growing a capability). This section
 gives SELECT a named, structured ledger instead.
 
@@ -223,17 +224,17 @@ Applying the five value types to each of m1-m5's actual, already-settled outcome
 | Milestone | VT Δv (settled) | Value type(s) applied | Matches DIR-004's own characterization? |
 |---|---|---|---|
 | m1/M01-dist | +6.0 | **capability-growth** (closed Packaging/Distribution cov gap 0.55→0.85) | Yes — DIR-004 implicitly treats m1 as the capability-growth baseline case (the one with a real positive VT number), only flagging its SIZING as mildly oversized, not its value type. |
-| m2/M-GATES | 0 | **governance-integrity** (mechanized 3 of 4 it0 checks, gate-hash/ceiling/dogfood scripts + domain-misfit procedure — these are the experiment's own control mechanisms, not product capability) | Yes — DIR-004 explicitly cites "m2 ... scored 0 VT despite being real governance/method-infra wins", i.e. non-capability-growth, matching governance-integrity here. |
+| m2/M-GATES | 0 | **risk/option** (mechanized 3 of 4 it0 checks, gate-hash/ceiling/dogfood scripts + domain-misfit procedure — pre-empted wasted SELECTs on stale/unreachable candidates, e.g. the M-CLI-UX rejection at m2's own attempt-1 and M-DOCS/M-DIRTASK rejections at m3, each with 0 wasted inner iterations) | Yes — DIR-004's own table (archived directive, line 54) reads verbatim: "m2 M-GATES \| 0 \| risk/option value (pre-empted 3 wasted SELECTs) \| no — scored 0", matching risk/option here exactly. (**Correction, iteration-1**: the prior draft of this row labeled m2 governance-integrity and attributed that to a "real governance/method-infra wins" quote — that exact phrase does not appear anywhere in DIR-004's archived text. DIR-004's own table explicitly types m2 as risk/option, not governance-integrity; governance-integrity in DIR-004 is applied to m5/M-DIR-PROJECTION's successor framing, not m2. Fixed to match DIR-004's own table verbatim, since this Done-when clause's entire purpose is to reproduce that table, not a paraphrase of it.) |
 | m3/M-ABI-EVAL | ≈0 direct (chart transition/re-baseline) | **discovery** (Provider-ABI capability matrix + differential conformance suite surfaced 2 previously-unknown gaps, PR-ABI-001/002, via an independent audit channel the method didn't have before) | Consistent — DIR-004's table doesn't name m3 explicitly, but its own description ("VT is blind to discovery value (m3)") directly assigns m3 the discovery type, which this row reproduces. |
 | m4/M04-discover | **-6.60** | **instrument-correction** (found+fixed MD-001, a standing VT measurement error carried since before m1 — corrected an inflated chart-1 number, which mechanically shows as a VT decrease despite being real value delivered) | Yes — DIR-004 explicitly cites m4's -6.60 VT score alongside its "instrument-correction value (m4, ... scored -6.60 despite being one of the two most valuable milestones so far)" language; this row's label matches verbatim. |
 | m5/M-DIR-PROJECTION | 0 (no VT chart weight — method-infra) | **governance-integrity + risk/option** (built the directive-projection anti-drift check, closing a SECOND repeat-instance of the DIR-002/DIR-006 files-canonical-without-enforcement gap — both ensures the control mechanism works (governance-integrity) and forecloses a 3rd recurrence (risk/option)) | Yes — matches this milestone's (M06-sizing's) OWN SELECT-time characterization of m5's successor M06-sizing itself as "governance-integrity + risk/option" (dashboard.md m6 SELECT log entry), and m5's own charter framing ("repeat-governance-drift risk outranks a one-off product-integrity gap"). |
 
 **Result: applying the ledger to m1-m5 reproduces DIR-004's own characterization** — m2 and m4 land
-as non-capability-growth types (governance-integrity and instrument-correction respectively,
-exactly DIR-004's own language), m1 lands as the sole clean capability-growth case with a positive
-VT number, and m3/m5 land as discovery and governance-integrity+risk/option respectively, matching
-DIR-004's own prose description of each. This confirms the ledger's five type definitions are
-usable to reproduce a real, already-independently-reached judgment, not just aspirational
+as non-capability-growth types (risk/option and instrument-correction respectively, exactly
+matching DIR-004's own table verbatim), m1 lands as the sole clean capability-growth case with a
+positive VT number, and m3/m5 land as discovery and governance-integrity+risk/option respectively,
+matching DIR-004's own prose description of each. This confirms the ledger's five type definitions
+are usable to reproduce a real, already-independently-reached judgment, not just aspirational
 categories — the same self-consistency pattern used above for the size gauge (against m1/m2/m4)
 and in the domain-misfit section (against M01-dist). No dashboard.md VT number is altered by this
 table; it only ADDS a value-type label alongside the existing settled numbers.
