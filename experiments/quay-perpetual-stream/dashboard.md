@@ -912,3 +912,26 @@ independently re-derived and confirmed by iteration-1, fresh worktree/fresh comm
   reuse of a prior different-domain adaptation). `milestone_counter` → **11**. `directives/pending/`
   re-drained at this boundary: empty. Continuing to SELECT m12 next (checkpoint cp-03 due at
   milestone_counter=15).
+- **SELECT m12 = M-ABI-PARENT-WRITE** 2026-07-18. `directives/pending/` drained: empty. `.halt`
+  absent. Picked M09-gh-write's own explicitly-excluded parent/children WRITE scope over the four
+  DIR-001-sourced methodology-infra candidates (all still "not yet charter-ready" per `backlog.md`)
+  — well-bounded (M09 already scoped the exclusion), and genuinely `capability-growth`-typed with a
+  nonzero Δv̂ ceiling, giving the adversarial-audit-role gate its real first-proof trigger (m11's own
+  ABSORB determined the gate correctly did NOT fire there — discovery/risk-option-typed, Δv=0 — and
+  flagged that "the next milestone whose value-typed ledger entry genuinely includes
+  capability-growth" would be the real test; m12 is that milestone). Authored charter
+  `charters/M12-abi-parent-write.md`: type exploit, value type capability-growth (primary) +
+  risk/option (secondary), Δv̂ ceiling ≈+1.54 VT (cov 12/13→13/13 at Provider-ABI's 20/120 weight,
+  re-verified against current dashboard.md numbers before authoring). 8 Done-when clauses: github
+  provider parent/children checkbox-body write (add/remove `- [ ] #<n>` lines, preserving `[x]`
+  check-state), explicit write-semantics statement, `mcp-server.js` schema update, live `gh issue
+  view` before/after transcripts, `provider-abi-conformance.test.mjs` update+pass, dashboard.md cov
+  re-derivation, full test suite pass (this milestone DOES touch product code, unlike m10/m11), and
+  an explicit-exclusion/backlog-row fallback if full bidirectional reassign semantics proves too
+  large for one milestone (mirroring M09's own partial-ship precedent). Gate-hash check:
+  `it0-gate-hash-check.sh --by-reference charters/M12-abi-parent-write.md` → **PASS**. it0 checks
+  recorded in-charter: ceiling arithmetic (re-verified against live dashboard.md), domain-misfit
+  audit-channel (provider-abi-conformance.test.mjs, THIRD reuse of the now-φ-consolidated
+  domain-audit-channel≡CI-job pattern, following M03/M09). Charter explicitly flags: if realized Δv
+  is nonzero at ABSORB, the adversarial-audit gate's condition (a) is expected to fire and must be
+  honored, not re-adjudicated away. Dispatching inner iteration-0 next.
