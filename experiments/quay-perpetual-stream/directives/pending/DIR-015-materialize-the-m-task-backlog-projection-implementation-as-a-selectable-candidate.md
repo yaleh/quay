@@ -96,3 +96,11 @@ only *names* the row as a future dogfood candidate, which does not constitute
 charter/dispatch. `backlog.md`'s `M-TASK-BACKLOG-PROJECTION-IMPL` row status is
 still `pending` (unselected) after this milestone. This DIR remains pending until a
 future SELECT boundary actually charters that row.
+
+**Disposition note (M23-outer-driver-isolation, iteration-0, 2026-07-18, DEFERRED — out of scope
+for M23, this DIR stays `pending`, unchanged status):** M23's charter is purely the DIR-018
+git-topology/process fix (driver-branch isolation, master↔driver merge sub-steps in
+`OUTER-LOOP.md`); it performs no work toward DIR-015 item 2 (charter/dispatch
+`M-TASK-BACKLOG-PROJECTION-IMPL`'s own implementation) and does not touch `backlog.md`'s
+`M-TASK-BACKLOG-PROJECTION-IMPL` row status. Deferred, unrelated scope — a future SELECT boundary
+must still charter that row.

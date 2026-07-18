@@ -1,6 +1,6 @@
 # DIR-018
 
-- status: pending
+- status: applied
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Isolate the autonomous driver from human steering — run the loop on its own branch/worktree and merge human-directed changes deliberately, so the two writers stop sharing `master` and racing (this session produced silent auto-merge content loss and a boundary projection-drift from exactly that collision)
@@ -71,7 +71,48 @@ session races the loop until this lands.
    "clean windows" to commit, it is not done regardless of the mark.
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred:
-- resolved_by: iteration-N / milestone M-NN
-- outcome: applied | deferred | rejected
-- evidence: pointer to the design doc / iteration report section / commit -->
+- resolved_by: M23-outer-driver-isolation, iteration-0, 2026-07-18
+- outcome: applied — all 4 Requested-action items done, dogfooded on this milestone itself
+- evidence:
+  - Item 1 (run the loop in its own isolation): dedicated branch `exp5-outer-driver` created
+    from `master` HEAD at the m22→m23 boundary (`e3602c6`, the SELECT commit authoring this
+    milestone's own charter). `OUTER-LOOP.md` step 5 (DISPATCH INNER) amended: per-iteration
+    worktrees are now created off `exp5-outer-driver` HEAD, not `master` HEAD directly — the
+    existing `milestones/M<NN>/worktrees/iteration-{0,1}` pattern is unchanged, only its base
+    point moved, per the charter's explicit non-goal against re-architecting the worktree pattern
+    itself.
+  - Item 2 (human steering merges in deliberately): `OUTER-LOOP.md` step 0 (DRAIN) gained an
+    explicit "Master → driver merge sub-step" — before SELECT, the loop deliberately
+    fast-forwards/merges `master` → `exp5-outer-driver`, the only point human-authored commits
+    (via `/quay-directive`, manual edits, etc.) enter the driver's own history. Step 6/7 (ABSORB)
+    gained the mirror-image "Driver → master publish sub-step" — after the adversarial-audit,
+    V_meta consolidation-lag, and design-only-milestone impl-row HARD BLOCKs all clear, the loop
+    publishes via exactly one `git merge --no-ff exp5-outer-driver` onto `master` — the ONLY point
+    the loop's own work lands on `master`. Merge direction and cadence are now documented
+    verbatim in `OUTER-LOOP.md` text (satisfies the DIR-018 "Human verification" checklist item 3).
+  - Item 3 (no silent content-dropping merges): `OUTER-LOOP.md` step 0 gained an explicit
+    "No-silent-drop reconciliation-note requirement" standing instruction, applying to BOTH merge
+    directions (master→driver at DRAIN, driver→master at ABSORB) — per-file conflict resolution,
+    both sides read, a reconciliation note recorded in the relevant step's log entry; a blanket
+    `checkout --ours`/`--theirs` without reading both sides is explicitly named as the DIR-013
+    failure mode this rule exists to prevent. A missing/blank reconciliation note is stated as not
+    a valid resolution, mirroring the V_meta-lag/`-IMPL`-row gates' existing "no silent deferral"
+    discipline. The M18-class conflict-free-but-inconsistent-merge failure mode (DIR-018 human-
+    verification item 4) remains covered by the existing DIR-017-adjacent standing checks
+    (`OUTER-LOOP.md`'s recorded M18 lesson under "Lesson recorded (DIR-013 ...)"), unchanged by
+    this milestone — DIR-017's own meta-enforcer scope is explicitly out of scope here per the
+    charter's non-goals.
+  - Item 4 (keep it minimal, mechanically checkable, not a heavy process): no new script or
+    pre-commit hook was built — both new sub-steps are documented convention in `OUTER-LOOP.md`
+    prose, applied by the loop reading the text (the charter's explicit non-goal against automated
+    enforcement). A future milestone may add mechanical enforcement if drift is observed
+    (`OUTER-LOOP.md`'s own text says so).
+  - Dogfooded proof (charter in-scope item 5 / Done-when clauses 5-6): this milestone's own two
+    iteration worktrees (`exp5-m23-iteration-0`, `exp5-m23-iteration-1`) were created off
+    `exp5-outer-driver` HEAD (`e3602c6`), not `master` — see `git worktree list` output in
+    `milestones/M23-outer-driver-isolation/iterations/iteration-0.md`. The actual
+    `exp5-outer-driver` → `master` publish merge is performed by the orchestrator after both
+    iterations are merged into the driver branch, per the charter's dispatcher notes — this
+    iteration report documents the merge sequence and demonstrates its pieces without executing
+    the final publish itself.
+  - Full detail: `experiments/quay-perpetual-stream/milestones/M23-outer-driver-isolation/iterations/iteration-0.md`.

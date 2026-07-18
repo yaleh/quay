@@ -101,3 +101,11 @@ Do NOT trust the DONE mark; check that the enforcer is real, not designed:
 - resolved_by: iteration-N / milestone M-NN
 - outcome: applied | deferred | rejected
 - evidence: pointer to the design doc / iteration report section / commit -->
+
+**Disposition note (M23-outer-driver-isolation, iteration-0, 2026-07-18, DEFERRED — out of scope
+for M23, this DIR stays `pending`, unchanged status):** M23's charter explicitly excludes DIR-017's
+scope as a non-goal ("Do not touch DIR-017's scope (the Definition-of-Done meta-enforcer) — that is
+a separate, larger, human-verification-gated program; this milestone is purely the git-topology/
+process fix DIR-018 names, independent of DIR-017's own ordering"). No work toward DIR-017's Step
+0/1/2/3 program was performed by this milestone. DIR-017 remains pending, awaiting a future
+dedicated charter.
