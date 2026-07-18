@@ -2,10 +2,11 @@
 id: exp5-M-COMPETITIVE-BENCH
 title: Comparative capability benchmark vs. a real competitor (formalize
   CB-016's ad hoc GitHub Issues/Linear yardstick)
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - surface:cross-cutting
+  - milestone:M27-competitive-bench
 parent: null
 children: []
 extra: {}
@@ -23,7 +24,9 @@ exploit (cross-exp comparison channel), method infra, no VT points
 Backlogged.
 
 ## Status mirror
-todo (open candidate, not yet selected/dispatched)
+ready (SELECTed @M27, 2026-07-18 — DIR-001 item 5, next in DIR-001's own stated ordering since
+item 4 closed @M26 and item 3/M-OUTCOME-EVAL, while now charter-ready with a drafted scenario
+list, carries no forcing signal beyond the ordering itself this pass)
 
 ---
 _2026-07-18T19:18:52.068Z_: Not selected @M24: DIR-015/DIR-016's standing hard floor already committed this SELECT pass to M-TASK-BACKLOG-PROJECTION-IMPL (self-hosting fix, blocks all future SELECT read-path work) — a governance/infra candidate whose own enabling half was itself unselectable until this milestone lands.

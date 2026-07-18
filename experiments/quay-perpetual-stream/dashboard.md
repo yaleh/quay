@@ -2181,3 +2181,40 @@ per-file, rationale in the merge commit message) → published to `master` as
 landed. `tasks/exp5-M-ADVERSARIAL-EVAL.md` → `status: done`.
 
 Continuing directly to m27 DRAIN/SELECT, no human wait.
+
+## SELECT m27 — 2026-07-18
+
+DRAIN: `.halt` absent. `directives/pending/` has only DIR-017 (Steps 2-3), which
+remains explicitly blocked by its own "Human verification gate (irreducible, not
+delegable)" clause — Step 1's meta-enforcer (M25) must be human-confirmed operative
+before Steps 2-3 may be SELECTed; not yet confirmed, so DIR-017 stays pending, not a
+candidate this pass. `exp5-outer-driver` synced to `master` HEAD (`15c7fb2`,
+fast-forward, no new commits to merge).
+
+Candidates considered: `M-OUTCOME-EVAL` (DIR-001 item 3, still not charter-ready —
+now the 4th consecutive SELECT pass (M24/M25/M26/M27) deferring it for the same
+"needs a scenario list" reason, recognized this pass as a stagnation pattern rather
+than a fresh legitimate re-defer) and `M-COMPETITIVE-BENCH` (DIR-001 item 5,
+charter-ready as backlogged, no blocker).
+
+Action taken to break the stagnation: authored a concrete 5-scenario draft for
+`M-OUTCOME-EVAL` directly into `tasks/exp5-M-OUTCOME-EVAL.md` this SELECT pass (CLI
+primitive-task round-trip both providers, compound/epic drive-to-done, Web UI
+round-trip, cross-provider parent/children write — each dogfooding-gated, binary
+pass/fail) so it is charter-ready for a future SELECT, without forcing it as a rider
+on this pass's own selection.
+
+**m27 = `M-COMPETITIVE-BENCH`** (DIR-001 item 5) — next in DIR-001's own stated
+ordering (3, 4, 5) since item 4 closed @M26 and item 3, while now unblocked, still
+carries no forcing signal beyond the ordering itself.
+
+Task store write-back: `tasks/exp5-M-COMPETITIVE-BENCH.md` → `status: ready`, label
+`milestone:M27-competitive-bench` added, `## Status mirror` updated.
+`tasks/exp5-M-OUTCOME-EVAL.md` got the scenario-list addendum plus a "Not selected
+@M27" note. `it0-backlog-regen.mjs --write` re-run; anti-drift checks re-run clean.
+
+Gate-hash-by-reference: unchanged since M06, reused unchanged through M27
+(`5023da8232f12579e9a8db0ce26c5a5d1aadd5a7d095380016636330c63d2c93`, verified PASS
+against `ITERATION-PROMPTS.md` at M26 charter-authoring time, same pin used here).
+
+Continuing directly to charter authoring for m27.
