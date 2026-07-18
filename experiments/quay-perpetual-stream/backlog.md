@@ -11,8 +11,8 @@ at SELECT time once VT origin is scored.
 
 | id | title | surface(s) | source | e/x | rough Δv̂ | notes |
 |---|---|---|---|---|---|---|
-| M-DIST | Distribution: Node SEA / Bun compile release artifacts via GitHub Actions | Packaging | DIR-004 (REOPENED, **URGENT**) | **explore** | high (Packaging cov ~0.2→~0.8, ~+12) | aged 8+ exp4 iters with no outer owner; the canonical first milestone |
-| M-CLI-UX | CLI usability closeout (UQ-042..046: grammar, --format synopsis/case/examples) | CLI | exp4 gap-list usability_quality | exploit | low (~+2) | bundle of polish gaps; good warm-up/exploit milestone |
+| M-DIST | Distribution: Node SEA / Bun compile release artifacts via GitHub Actions | Packaging | DIR-004 (REOPENED, **URGENT**) | **explore** | high (Packaging cov ~0.2→~0.8, ~+12) | **DONE (m1, 2026-07-18)** — realized Δv=+6.0 exact vs hypothesis; merged to master; CI green run https://github.com/yaleh/quay/actions/runs/29635782886; gap-list CB-023 closed |
+| M-CLI-UX | CLI usability closeout (UQ-042..046: grammar, --format synopsis/case/examples) | CLI | exp4 gap-list usability_quality | exploit | low (~+2) | **STALE at m2 SELECT (2026-07-18, it0 ceiling check)** — UQ-042..046 were already closed in exp4 iteration 15 (`gap-list.md` lines 35-39/185-189, all `~~strikethrough~~`/"(done)"). exp4's true FINAL open-gap set (it19) is only ENV-001/SH-006/NEW-001/PKG-010, all minor/env — there is no real CLI-surface milestone-sized scope left to close. NOT selected; retained here as a documented dead-end so a future SELECT doesn't re-discover this from scratch. |
 | M-DOCS | Docs surface hardening (docs_quality sub-dimension, new it18) | Docs | exp4 gap-list docs_quality | exploit | med (~+4) | thin/irregular coverage per exp4 transfer_breadth |
 
 ## Methodology-infrastructure milestones (strengthen the method's own substrate)
@@ -29,5 +29,8 @@ at SELECT time once VT origin is scored.
 
 ## Selection guidance (§4.5)
 ≥1 explore milestone per 5. Suggested first pass: **M-DIST** (explore, URGENT, opens the Packaging
-chart) → M-CLI-UX (exploit warm-up) → **M-GATES** (explore, highest method-ROI) → M-DOCS (exploit)
-→ **M-DIRTASK** (explore) → checkpoint 1.
+chart) → ~~M-CLI-UX~~ (dead, see STALE note above) → **M-GATES** (explore, highest method-ROI) →
+M-DOCS (exploit) → **M-DIRTASK** (explore) → checkpoint 1.
+
+Revised order after m2 SELECT (2026-07-18): **M-DIST(done) → M-GATES → M-DOCS → M-DIRTASK →
+checkpoint 1.**
