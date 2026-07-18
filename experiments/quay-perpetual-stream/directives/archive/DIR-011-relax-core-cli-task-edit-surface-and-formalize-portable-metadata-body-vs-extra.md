@@ -1,6 +1,6 @@
 # DIR-011
 
-- status: pending
+- status: deferred
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Relax the Core CLI's status-only `task edit` to full-field editing (parity with the native provider CLI + MCP task_write it already sits in front of), and formalize the portable-metadata rule (body structured section = cross-provider, extra{} = native-only) verified against the GitHub provider
@@ -81,7 +81,6 @@ one, unlike DIR-009, plausibly carries a small positive VT Δv̂ on the CLI
 surface — size it at SELECT time.
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred:
-- resolved_by: iteration-N / milestone M-NN
-- outcome: applied | deferred | rejected
-- evidence: pointer to the design doc / iteration report section / commit -->
+- resolved_by: outer-loop drain (m12->m13 boundary), 2026-07-18
+- outcome: deferred
+- evidence: disposed as backlog.md candidate `M-CLI-EDIT-PARITY` (design-doc-only deliverable, per the human's own routing decision quoted in this file's Requested action). Not yet charter-ready; no Core CLI code changed. See `backlog.md`'s "DIR-009/DIR-010/DIR-011-sourced candidates" section for the full disposition record.

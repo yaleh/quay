@@ -1,6 +1,6 @@
 # DIR-009
 
-- status: pending
+- status: deferred
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Track exp5's own non-directive work in quay's task board — as backlog-primitive tasks that predate and regroup into milestones (generalize M05's file-canonical projection beyond directives), so the OUTER stream is self-hosted and visible in the Web UI
@@ -217,7 +217,6 @@ practice. It is then eligible to be drained into `backlog.md` as a real
 milestone candidate at a future OUTER boundary.
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred:
-- resolved_by: iteration-N / milestone M-NN
-- outcome: applied | deferred | rejected
-- evidence: pointer to the design doc / iteration report section / commit -->
+- resolved_by: outer-loop drain (m12->m13 boundary), 2026-07-18
+- outcome: deferred
+- evidence: disposed as backlog.md candidate `M-TASK-BACKLOG-PROJECTION` (design-doc-only deliverable, per the human's own routing decision quoted in this file's Requested action). Not yet charter-ready; no OUTER-LOOP.md or implementation changes made. See `backlog.md`'s "DIR-009/DIR-010/DIR-011-sourced candidates" section for the full disposition record, including the still-open DIR-004/DIR-005 task-id-collision residue this directive's design must resolve before it can be fixed.

@@ -1,6 +1,6 @@
 # DIR-010
 
-- status: pending
+- status: deferred
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: The M05 directive-projection mechanism has two live structural gaps — cross-experiment task-id collisions (global id space vs per-experiment DIR numbering) and reconcile-only-at-milestone-boundary — so 5 of 6 exp5 directive projections are currently drifted/wrong and nothing catches it between boundaries
@@ -83,7 +83,6 @@ Cover at least:
    failing — which is correct (it is doing its job); do not suppress it.
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred:
-- resolved_by: iteration-N / milestone M-NN
-- outcome: applied | deferred | rejected
-- evidence: pointer to the design doc / iteration report section / commit -->
+- resolved_by: outer-loop drain (m12->m13 boundary), 2026-07-18
+- outcome: deferred (partial mechanical fix applied immediately; namespace design deferred)
+- evidence: Gap B (DIR-006/007/008 stale status-mirrors) was fixed immediately at this drain via the existing regeneration mechanism (SKILL.md step 5c) — all 3 now mirror the file's `resolved` status, confirmed by `it0-dir-projection-check.sh` dropping from 5 to 2 divergences. Gap A (the DIR-004/DIR-005 cross-experiment id collision, item 1's namespace decision) was explicitly NOT hand-patched ad hoc, per this file's own item 4 instruction — it is folded into backlog.md's `M-TASK-BACKLOG-PROJECTION` candidate (same source as DIR-009) as a sub-section, to be resolved once that design is adopted. The 2 remaining divergences (`DIR-004`, `DIR-005` with no status-mirror field) are a known, documented, non-silent residue until then.
