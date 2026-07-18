@@ -487,5 +487,9 @@ landed via `git log` before writing "done", not trusting prose alone.)
 
 ```
 $ git -C experiments/quay-perpetual-stream/milestones/M05-dir-projection/worktrees/iteration-0 log --oneline -3
-<filled in below, post-report-commit>
+9144dc6 exp5 M05-dir-projection iteration-0: fill in real commit hash in report
+0c83ac0 exp5 M05-dir-projection iteration-0: directive-to-task projection + anti-drift check
+1caa33b exp5 outer loop: SELECT m5 = M-DIR-PROJECTION (DIR-002), charter authored, gate-hash PASS
 ```
+Both commits genuinely present on branch `exp5-m05-iteration-0` — confirmed via a live `git log`
+call, not asserted from memory (per the handoff-bug lesson from a prior milestone).
