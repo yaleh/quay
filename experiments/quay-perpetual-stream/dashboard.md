@@ -1957,3 +1957,102 @@ Worktrees/branches for both M24 iterations (`milestones/M24-task-backlog-project
 iteration-{0,1}`, branches `exp5-m24-iteration-{0,1}`) to be removed/deleted next.
 `milestone_counter` → **24**. Checkpoint not due (next due at m25, per every-5 cadence — cp-20 was
 last). Continuing directly to m25 SELECT, no human wait.
+
+## SELECT m25 — 2026-07-18
+
+**Chosen: `exp5-M-DOD-META-ENFORCER`** (DIR-017 Step 1 — the Definition-of-Done meta-enforcer,
+the human-flagged "load-bearing foothold"). Materialized fresh this DRAIN as a forward-looking
+candidate task (design doc §6 scope) since DIR-017 itself has no prior standing row — DIR-017's own
+Step 0 prerequisite ("self-host the record," = DIR-015 item 2) is now satisfied by M24, unblocking
+Step 1 for the first time since DIR-017 went `pending`.
+
+**Rationale:** DIR-017 names an explicit, human-flagged risk — the "designed-not-wired" disease
+(M17/M18) and DIR-015's own multi-milestone re-deferral pattern — and gates its own Steps 2-3
+(escrow-Δv clause, product-work test-floor, leakage metrics) behind Step 1 landing as *operative,
+not merely designed*, confirmed by a human. This is a standing governance-integrity gap (the 4
+existing gates — adversarial-audit/DIR-007, V_meta-lag/DIR-005, line-budget/M18, impl-row/DIR-016 —
+are each independently wired but nothing enforces that ALL FOUR fire and block, nor that a milestone
+can't self-exempt from one). Outranks the three other open cross-cutting eval candidates considered
+this pass (`M-ADVERSARIAL-EVAL`, `M-COMPETITIVE-BENCH`, `M-OUTCOME-EVAL` — all VT-eval-surface work,
+no governance-loop risk); not-selected notes appended to each with this rationale. `M-CLI-UX`,
+`M-DIRTASK`, `M-DOCS` remain STALE, not reconsidered.
+
+**Scope (per DIR-017's own text, Step 1 only):** (1) collect the 4 existing gates as named clauses
+in one `inherited-core.md` "Definition of Done" section; (2) no-self-exemption meta-clause; (3) a
+standing `scripts/it0-dod-*.{sh,mjs}` mechanical check (exit 0/1/2), fixture-tested against both a
+synthetic violating stub and a compliant stub; (4) wire it into `OUTER-LOOP.md`'s ABSORB as a HARD
+BLOCK on `milestone_counter++`, same shape as the existing gates. Steps 2-3 explicitly OUT of scope
+— DIR-017 gates them behind human confirmation Step 1 is actually operative.
+
+**Task-store write-back:** `exp5-M-DOD-META-ENFORCER` labeled `milestone:M25-dod-meta-enforcer`,
+`status: todo → ready`. Backlog regenerated (`it0-backlog-regen.mjs --write`) and both anti-drift
+checks re-verified PASS (18 DIR files vs 16 label:directive tasks; 20 milestone-candidate tasks vs
+`backlog.md`, row now `SELECTED`).
+
+**Note for ABSORB m25:** per DIR-017's own "Human verification gate (irreducible, not delegable)"
+clause, Step 1's enforcer must be confirmed by a human to be *operative*, not merely designed,
+before DIR-017 Steps 2-3 may be selected in any future SELECT pass. This does not block
+`milestone_counter++` itself (only Steps 2-3 are gated) but must be flagged explicitly, not
+silently passed over, in the m25 ABSORB entry.
+
+Proceeding to charter authoring for M25.
+
+## ABSORB m25 — 2026-07-18
+
+**Realized Δv: 0 (exact, matches Δv̂=0)** — method infra/governance-integrity milestone, no VT chart
+cell, per its own Value hypothesis section.
+
+**Dispatch/merge:** both iterations built off `exp5-outer-driver` HEAD (`e3d31ec`) in isolated
+worktrees, per the M23-driver-isolation discipline. iteration-1 (`494c17b`) merged first cleanly,
+no conflicts. iteration-0 (`e29142f`)'s merge hit 6 conflicts — resolved per-file, no blanket
+`--ours`/`--theirs` (full rationale in merge commit `a7b29dd`):
+- `inherited-core.md` (DoD section content) and `scripts/it0-dod-check.{mjs,sh}` (add/add) and
+  `fixtures/dod/{violating,compliant}-stub.md` (add/add): kept HEAD (iteration-1) throughout —
+  iteration-1's Clause 5 text names the exact "distinguishing test" (evaluated-and-dispositioned
+  vs. argued-away-in-prose) that its own report says was a real bug it found and fixed via
+  self-check against this milestone's own real charter (a `dispositionedClauses` tracking fix);
+  kept the script/fixtures paired with that doc text for internal consistency.
+- `OUTER-LOOP.md` ABSORB wiring text (2 hunks): kept iteration-0's wording — includes an extra
+  nuance (the line-budget clause's ABSORB-time re-check is a drift-check against the FINAL charter
+  text, distinct from its plan-time firing point) that iteration-1's version omitted.
+
+Re-verified post-resolution: both fixtures produce correct exit codes against the chosen script
+(violating=1, 3 clause violations; compliant=0); full test suite re-run, 32/32 files pass, 0 fail,
+no regressions. Stray-marker grep sweep: clean, none found.
+
+**Adversarial-audit gate**: documented no-op — condition (a) does not fire (Δv=0, not a
+capability-growth/VT-scoring milestone); condition (b) does not fire (neither iteration recommended
+skipping the other; both ran independently to completion).
+
+**V_meta consolidation-lag gate**: clear — `v-meta-ledger.md` has one `consolidated` row (no lag)
+and one `proposed` row at confirmation-count 1 (below the φ=2 threshold, gate N/A) — no row is
+`confirmed`-but-not-`consolidated`, nothing to check against K=2.
+
+**Design-only-milestone impl-row gate**: N/A — this milestone is not design-only, it ships
+operational artifacts. `it0-impl-row-check.sh exp5-M-DOD-META-ENFORCER backlog.md` → PASS (N/A,
+not design-only).
+
+**DoD meta-enforcer gate (NEW, first real use — self-referential)**: `it0-dod-check.sh
+exp5-M-DOD-META-ENFORCER charters/M25-dod-meta-enforcer.md <this-absorb-entry-excerpt>` → **PASS
+(exit 0)** — all 5 clauses satisfied (adversarial-audit and V_meta-lag dispositions present above;
+line-budget PASS per the charter's own ceiling-expansion-regime plan; impl-row N/A; no undeclared
+self-exemption — the charter's "Explicitly OUT of scope" section narrows DIR-017 Steps 2-3, the
+retroactive-sweep exclusion, and the 2 existing scripts' own internal logic, none of which name or
+exempt the 4 DoD clauses themselves, so no WAIVER line was required). This is the very first time
+this gate has run against a real (non-fixture) milestone, and it is checking the milestone that
+built it — confirmed the check genuinely evaluates the real charter/backlog-row content, not merely
+echoing the synthetic fixtures' shape.
+
+**Driver → master publish sub-step**: `git checkout master && git merge --no-ff exp5-outer-driver`
+— to run next, sequenced after all 4 gates above clear (confirmed).
+
+**Note for ABSORB — DIR-017 disposition**: per the charter's own "Note for ABSORB" section and
+DIR-017's irreducible human-verification-gate clause, **DIR-017 remains `pending`, NOT archived**.
+Step 1 artifact delivered (inherited-core.md DoD section, it0-dod-check script pair, 2 fixtures,
+OUTER-LOOP.md wiring) — awaiting human confirmation that Step 1 is operative, not merely designed,
+before Steps 2-3 (escrow-Δv clause, product-work test-floor clause, leakage metrics) may be
+SELECTed in any future SELECT pass.
+
+Worktrees/branches for both M25 iterations to be removed/deleted next. `milestone_counter` → **25**
+(pending driver→master publish landing, next). Checkpoint DUE at m25 (every-5 cadence, cp-20 was
+last) — non-blocking checkpoint to follow this ABSORB entry.
