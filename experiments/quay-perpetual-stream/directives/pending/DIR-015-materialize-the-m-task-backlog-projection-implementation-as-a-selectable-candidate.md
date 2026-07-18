@@ -84,7 +84,7 @@ IMPL` row, sourced to this DIR + the m13 design doc's §15 checklist. Item 2
 as that new row's own future SELECT work — not built by M21, per M21's charter
 non-goals. Do not archive this DIR until item 2 also lands.
 
-**Disposition note (M22-quay-task-to-plan-skill-phase7, iteration-1, 2026-07-18,
+**Disposition note (M22-quay-task-to-plan-skill-phase7, both iterations, 2026-07-18,
 still NOT a resolution — this DIR stays `pending`, unchanged status):** M22's
 charter explicitly names `M-TASK-BACKLOG-PROJECTION-IMPL` as `quay-task-to-plan`'s
 first true-dogfood customer (`SKILL.md`'s new "Relationship / bootstrap" section)
