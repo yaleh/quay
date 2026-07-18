@@ -614,3 +614,24 @@ than an arithmetic error) ]`
   methodology-infra one). No new pending directives at the m8→m9 boundary (drain re-run: `ls -1
   directives/pending/` empty). Continuing per the standing instruction: no further deferral needed,
   SELECT m9 next from whatever's live in `backlog.md`/`directives/pending/` at that time.
+- **SELECT m9 = M-GH-WRITE (bundled with M-GH-PARENT)** 2026-07-18. No `.halt`, `directives/
+  pending/` empty (re-drained). Following the standing selection order recorded at m5/m6's ABSORB
+  (`backlog.md` line 93-96: M-SIZING → M-MERGE-RECOVER → M-GH-WRITE → M-GH-PARENT bundled →
+  checkpoint 2 at m10). Confirmed at charter-authoring time via direct source read
+  (`packages/quay-github/src/mcp-server.js`, `github-client.js`) that PR-ABI-001 (task_write
+  silently drops title/body/labels via zod stripping, status-only schema) and PR-ABI-002 (`get()`
+  never builds `parentIndex`, always returns `parent: null`, asymmetric vs `list()`) are both still
+  live on current master — no drift since m3. Charter `charters/M09-gh-write.md` scopes: (1) real
+  title/body/labels write via the existing `ghApiRun` PATCH pattern `setStatus` already uses, (2) a
+  hard-error floor for any field left unimplemented (replaces the silent-drop danger even if the
+  write stretch is partial), (3) `get()`'s parent fix by reusing `list()`'s own
+  `fetchAllIssues()`+`buildParentIndex()`, (4) explicit exclusion of parent/children WRITE
+  (cross-issue body mutation — a materially riskier path, deferred to a future milestone to keep
+  this one's blast radius contained per the M06-sizing gauge). Value type: capability-growth
+  (primary) + risk/option (secondary — closing the no-error-signal danger). Δv̂≈+2.9 (Provider-ABI
+  cov 0.654→~0.80, write fraction 1/5→~3/5 — deliberately narrower than backlog's own "+3 to +4"
+  pre-charter guess, which assumed full 4/5 field completion; this charter's scope stops short of
+  parent/children write). it0 domain-misfit audit-channel check applies the now-twice-confirmed
+  CI-job≡audit-channel convention. Gate-hash check:
+  `it0-gate-hash-check.sh --by-reference charters/M09-gh-write.md` → **PASS**. Dispatching inner
+  iteration-0 next.
