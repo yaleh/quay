@@ -55,3 +55,8 @@ Slope (marginal points / milestone): _n/a until ≥2 points_
   half — Node SEA/Bun single-file executables, CI build+publish, no-Node verification; the existing
   npm-pack/.tgz path is NOT redone). Gate-hash transclusion + it0 checks recorded in-charter.
   Dispatching inner milestone next.
+- ABORTED (user, pre-inner-convergence) 2026-07-18: M-DIST inner iteration-0 (SEA build) had started
+  when the loop was aborted. Cleaned for fresh restart under the corrected inbox-drain driver: worktree
+  + `charters/M01-dist.md` + `milestones/M01-dist/` removed, 255MB dist-sea discarded; 28KB SEA build
+  scripts salvaged on branch `salvage/exp5-m01-attempt-1`. milestone_counter stays 0 (m1 not
+  completed); VT₀ unchanged. Restart re-selects M-DIST fresh.

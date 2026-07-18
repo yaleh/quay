@@ -1,6 +1,6 @@
 # Quay Continuous Bootstrap — BAIME Experiment (Experiment 4)
 
-- **Status**: HALT (human-imposed, after iteration 7) — "将对实验设置进行调整"
+- **Status**: HALT (stopped; ran to iteration 19). **SUPERSEDED by Experiment 5 `quay-perpetual-stream`** (2026-07-18) — its open DIRs/gaps carried to `../quay-perpetual-stream/backlog.md`, methodology to `../quay-perpetual-stream/inherited-core.md`. See `../quay-perpetual-stream/README.md`.
 - **Date**: 2026-07-17
 - **Owner**: Yale Huang
 - **Protocol**: [`docs/proposals/quay-continuous-bootstrap-experiment-v4.md`](../../docs/proposals/quay-continuous-bootstrap-experiment-v4.md) (authoritative — this file operationalizes it, does not redefine it)
