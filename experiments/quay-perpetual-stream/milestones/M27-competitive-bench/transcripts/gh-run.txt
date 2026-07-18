@@ -1,0 +1,178 @@
+###################################################
+# gh issue benchmark run — 2026-07-18T22:30:41Z
+# repo: yaleh/quay-bench-scratch-m27-it0
+###################################################
+
+=== SCENARIO (a): create an issue with title+body ===
+
+$ gh issue create -R yaleh/quay-bench-scratch-m27-it0 --title Fix login button alignment --body The login button is misaligned on mobile viewports. Repro: open /login at 390px width.
+https://github.com/yaleh/quay-bench-scratch-m27-it0/issues/1
+
+real	0m1.468s
+user	0m0.070s
+sys	0m0.035s
+[exit=0]
+
+=== verify creation ===
+
+$ gh issue view 1 -R yaleh/quay-bench-scratch-m27-it0
+title:	Fix login button alignment
+state:	OPEN
+author:	yaleh
+labels:	
+comments:	0
+assignees:	
+projects:	
+milestone:	
+number:	1
+--
+The login button is misaligned on mobile viewports. Repro: open /login at 390px width.
+
+real	0m1.240s
+user	0m0.082s
+sys	0m0.022s
+[exit=0]
+
+=== SCENARIO (b): transition through 2-3 status states ===
+# GitHub Issues has no native todo/ready/done status machine (only open/closed).
+# The idiomatic gh-native way to represent intermediate states is labels.
+
+$ gh label create status:ready -R yaleh/quay-bench-scratch-m27-it0 --color fbca04 --description ready for work
+
+real	0m0.827s
+user	0m0.090s
+sys	0m0.019s
+[exit=0]
+
+$ gh label create status:todo -R yaleh/quay-bench-scratch-m27-it0 --color d4c5f9 --description not yet started
+
+real	0m0.768s
+user	0m0.086s
+sys	0m0.023s
+[exit=0]
+
+$ gh issue edit 1 -R yaleh/quay-bench-scratch-m27-it0 --add-label status:todo
+https://github.com/yaleh/quay-bench-scratch-m27-it0/issues/1
+
+real	0m1.749s
+user	0m0.075s
+sys	0m0.031s
+[exit=0]
+
+$ gh issue edit 1 -R yaleh/quay-bench-scratch-m27-it0 --remove-label status:todo --add-label status:ready
+https://github.com/yaleh/quay-bench-scratch-m27-it0/issues/1
+
+real	0m1.990s
+user	0m0.094s
+sys	0m0.028s
+[exit=0]
+
+$ gh issue close 1 -R yaleh/quay-bench-scratch-m27-it0 --reason completed
+✓ Closed issue yaleh/quay-bench-scratch-m27-it0#1 (Fix login button alignment)
+
+real	0m1.557s
+user	0m0.090s
+sys	0m0.029s
+[exit=0]
+
+=== SCENARIO (c): add/query a label or categorization ===
+
+$ gh label create bug -R yaleh/quay-bench-scratch-m27-it0 --color d73a4a --description bug --force
+
+real	0m1.183s
+user	0m0.080s
+sys	0m0.019s
+[exit=0]
+
+$ gh label create ui -R yaleh/quay-bench-scratch-m27-it0 --color 0e8a16 --description ui --force
+
+real	0m0.845s
+user	0m0.082s
+sys	0m0.023s
+[exit=0]
+
+$ gh issue edit 1 -R yaleh/quay-bench-scratch-m27-it0 --add-label bug --add-label ui
+https://github.com/yaleh/quay-bench-scratch-m27-it0/issues/1
+
+real	0m1.985s
+user	0m0.066s
+sys	0m0.045s
+[exit=0]
+
+$ gh issue list -R yaleh/quay-bench-scratch-m27-it0 --state all --label bug --json number,title,labels
+[]
+
+real	0m0.923s
+user	0m0.072s
+sys	0m0.038s
+[exit=0]
+
+=== SCENARIO (d): list/filter/search open items ===
+
+$ gh issue create -R yaleh/quay-bench-scratch-m27-it0 --title Add dark mode toggle --body Users have requested a dark mode toggle in settings.
+https://github.com/yaleh/quay-bench-scratch-m27-it0/issues/2
+
+real	0m1.240s
+user	0m0.083s
+sys	0m0.028s
+[exit=0]
+
+$ gh issue create -R yaleh/quay-bench-scratch-m27-it0 --title Search endpoint times out on large repos --body The search endpoint times out when repo has >10k files.
+https://github.com/yaleh/quay-bench-scratch-m27-it0/issues/3
+
+real	0m1.310s
+user	0m0.089s
+sys	0m0.051s
+[exit=0]
+
+$ gh issue list -R yaleh/quay-bench-scratch-m27-it0 --state open
+3	OPEN	Search endpoint times out on large repos		2026-07-18T22:30:58Z
+2	OPEN	Add dark mode toggle		2026-07-18T22:30:56Z
+
+real	0m0.794s
+user	0m0.085s
+sys	0m0.032s
+[exit=0]
+
+$ gh issue list -R yaleh/quay-bench-scratch-m27-it0 --search dark mode --state all
+
+real	0m1.028s
+user	0m0.078s
+sys	0m0.044s
+[exit=0]
+
+=== SCENARIO (e): close/complete an item ===
+
+$ gh issue close 2 -R yaleh/quay-bench-scratch-m27-it0 --reason completed
+✓ Closed issue yaleh/quay-bench-scratch-m27-it0#2 (Add dark mode toggle)
+
+real	0m1.839s
+user	0m0.118s
+sys	0m0.041s
+[exit=0]
+
+$ gh issue view 2 -R yaleh/quay-bench-scratch-m27-it0 --json number,title,state
+{"number":2,"state":"CLOSED","title":"Add dark mode toggle"}
+
+real	0m0.812s
+user	0m0.072s
+sys	0m0.028s
+[exit=0]
+
+=== final state: full issue list ===
+
+$ gh issue list -R yaleh/quay-bench-scratch-m27-it0 --state all --json number,title,state,labels
+[{"labels":[],"number":3,"state":"OPEN","title":"Search endpoint times out on large repos"},{"labels":[],"number":2,"state":"CLOSED","title":"Add dark mode toggle"},{"labels":[{"id":"LA_kwDOTczDA88AAAACsVAOhA","name":"bug","description":"bug","color":"d73a4a"},{"id":"LA_kwDOTczDA88AAAACsVAS1Q","name":"status:ready","description":"ready for work","color":"fbca04"},{"id":"LA_kwDOTczDA88AAAACsVAU5g","name":"ui","description":"ui","color":"0e8a16"}],"number":1,"state":"CLOSED","title":"Fix login button alignment"}]
+
+real	0m0.872s
+user	0m0.097s
+sys	0m0.010s
+[exit=0]
+
+=== RE-CHECK after propagation delay (both label-filter and search returned empty/stale on first try above) ===
+
+$ sleep 3 && gh issue list -R yaleh/quay-bench-scratch-m27-it0 --state all --label bug --json number,title,labels
+[{"labels":[{"id":"LA_kwDOTczDA88AAAACsVAOhA","name":"bug","description":"bug","color":"d73a4a"},{"id":"LA_kwDOTczDA88AAAACsVAS1Q","name":"status:ready","description":"ready for work","color":"fbca04"},{"id":"LA_kwDOTczDA88AAAACsVAU5g","name":"ui","description":"ui","color":"0e8a16"}],"number":1,"title":"Fix login button alignment"}]
+
+$ gh issue list -R yaleh/quay-bench-scratch-m27-it0 --search "dark mode" --state all
+2	CLOSED	Add dark mode toggle		2026-07-18T22:31:01Z

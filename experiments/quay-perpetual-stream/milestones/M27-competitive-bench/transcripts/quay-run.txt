@@ -1,0 +1,206 @@
+###################################################
+# quay benchmark run — 2026-07-18T22:29:51Z
+# cwd: /tmp/m27-quay-scratch
+# QUAY_NATIVE_TASKS_DIR (config): /tmp/m27-quay-scratch/tasks
+###################################################
+
+=== SCENARIO (a): create a task with title+body ===
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task edit BENCH-001 --title Fix login button alignment --status todo --body The login button is misaligned on mobile viewports. Repro: open /login at 390px width.
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+BENCH-001: Fix login button alignment [todo]
+
+real	0m0.721s
+user	0m0.762s
+sys	0m0.135s
+[exit=0]
+
+=== verify creation ===
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task view BENCH-001
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+BENCH-001: Fix login button alignment [todo]
+The login button is misaligned on mobile viewports. Repro: open /login at 390px width.
+
+real	0m0.841s
+user	0m0.914s
+sys	0m0.117s
+[exit=0]
+
+=== SCENARIO (b): transition through 2-3 status states (todo -> ready -> done) ===
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task edit BENCH-001 --status ready
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+BENCH-001: Fix login button alignment [ready]
+
+real	0m1.481s
+user	0m0.954s
+sys	0m0.216s
+[exit=0]
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task edit BENCH-001 --status done
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+BENCH-001: Fix login button alignment [done]
+
+real	0m1.183s
+user	0m1.224s
+sys	0m0.169s
+[exit=0]
+
+=== SCENARIO (c): add/query a label or categorization ===
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task edit BENCH-001 --labels bug,ui
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+BENCH-001: Fix login button alignment [done]
+
+real	0m1.026s
+user	0m1.072s
+sys	0m0.171s
+[exit=0]
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task list --label bug --json
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+[
+  {
+    "id": "BENCH-001",
+    "title": "Fix login button alignment",
+    "status": "done",
+    "labels": [
+      "bug",
+      "ui"
+    ],
+    "parent": null,
+    "children": [],
+    "role": "primitive",
+    "extra": {},
+    "body": "The login button is misaligned on mobile viewports. Repro: open /login at 390px width.",
+    "updatedAt": 1784413796388.413
+  }
+]
+
+real	0m1.048s
+user	0m1.032s
+sys	0m0.204s
+[exit=0]
+
+=== SCENARIO (d): list/filter/search open items ===
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task edit BENCH-002 --title Add dark mode toggle --status todo --body Users have requested a dark mode toggle in settings.
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+BENCH-002: Add dark mode toggle [todo]
+
+real	0m0.993s
+user	0m1.045s
+sys	0m0.131s
+[exit=0]
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task edit BENCH-003 --title Search endpoint times out on large repos --status todo --body The search endpoint times out when repo has >10k files.
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+BENCH-003: Search endpoint times out on large repos [todo]
+
+real	0m1.006s
+user	0m1.021s
+sys	0m0.193s
+[exit=0]
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task list --status todo
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+BENCH-002	todo	primitive	Add dark mode toggle	2s ago
+BENCH-003	todo	primitive	Search endpoint times out on large repos	1s ago
+
+real	0m1.011s
+user	0m1.035s
+sys	0m0.152s
+[exit=0]
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task list --search dark mode
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+# search: "dark mode" (1 matches)
+BENCH-002	todo	primitive	Add dark mode toggle	2s ago
+
+real	0m0.794s
+user	0m0.841s
+sys	0m0.149s
+[exit=0]
+
+=== SCENARIO (e): close/complete an item ===
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task edit BENCH-002 --status done
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+BENCH-002: Add dark mode toggle [done]
+
+real	0m0.736s
+user	0m0.847s
+sys	0m0.094s
+[exit=0]
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task view BENCH-002 --json
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+{
+  "id": "BENCH-002",
+  "title": "Add dark mode toggle",
+  "status": "done",
+  "labels": [],
+  "parent": null,
+  "children": [],
+  "role": "primitive",
+  "extra": {},
+  "body": "Users have requested a dark mode toggle in settings.",
+  "updatedAt": 1784413802000.4531
+}
+
+real	0m0.759s
+user	0m0.832s
+sys	0m0.125s
+[exit=0]
+
+=== final state: full task list ===
+
+$ node /home/yale/work/quay/experiments/quay-perpetual-stream/milestones/M27-competitive-bench/worktrees/iteration-0/packages/quay/bin/quay.js task list --json
+quay-native mcp: serving tasks from /tmp/m27-quay-scratch/tasks
+[
+  {
+    "id": "BENCH-001",
+    "title": "Fix login button alignment",
+    "status": "done",
+    "labels": [
+      "bug",
+      "ui"
+    ],
+    "parent": null,
+    "children": [],
+    "role": "primitive",
+    "extra": {},
+    "body": "The login button is misaligned on mobile viewports. Repro: open /login at 390px width.",
+    "updatedAt": 1784413796388.413
+  },
+  {
+    "id": "BENCH-002",
+    "title": "Add dark mode toggle",
+    "status": "done",
+    "labels": [],
+    "parent": null,
+    "children": [],
+    "role": "primitive",
+    "extra": {},
+    "body": "Users have requested a dark mode toggle in settings.",
+    "updatedAt": 1784413802000.4531
+  },
+  {
+    "id": "BENCH-003",
+    "title": "Search endpoint times out on large repos",
+    "status": "todo",
+    "labels": [],
+    "parent": null,
+    "children": [],
+    "role": "primitive",
+    "extra": {},
+    "body": "The search endpoint times out when repo has >10k files.",
+    "updatedAt": 1784413799432.4348
+  }
+]
+
+real	0m0.710s
+user	0m0.752s
+sys	0m0.150s
+[exit=0]
