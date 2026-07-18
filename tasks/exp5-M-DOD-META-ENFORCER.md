@@ -5,7 +5,7 @@ title: "DIR-017 Step 1: the Definition-of-Done meta-enforcer (load-bearing
   gates into one inherited-core.md DoD section, a no-self-exemption clause,
   and a standing mechanical it0-style check that HARD-BLOCKS
   milestone_counter++"
-status: ready
+status: done
 labels:
   - milestone-candidate
   - surface:method-infra
@@ -44,4 +44,6 @@ of scope for this row — DIR-017 gates them behind human confirmation that step
 actually operative, not merely designed.
 
 ## Status mirror
-ready (SELECTed @M25, DIR-017 Step 1 — the DoD meta-enforcer; charter to follow)
+done (ABSORBed @M25, 2026-07-18 — DIR-017 Step 1 artifact delivered: inherited-core.md DoD
+section, scripts/it0-dod-check.{sh,mjs}, 2 fixtures, OUTER-LOOP.md wiring. DIR-017 itself
+stays `pending` — Steps 2-3 await human confirmation Step 1 is operative.)

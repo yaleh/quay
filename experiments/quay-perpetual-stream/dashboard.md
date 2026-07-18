@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 24** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 25** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -2053,6 +2053,12 @@ OUTER-LOOP.md wiring) — awaiting human confirmation that Step 1 is operative, 
 before Steps 2-3 (escrow-Δv clause, product-work test-floor clause, leakage metrics) may be
 SELECTed in any future SELECT pass.
 
-Worktrees/branches for both M25 iterations to be removed/deleted next. `milestone_counter` → **25**
-(pending driver→master publish landing, next). Checkpoint DUE at m25 (every-5 cadence, cp-20 was
-last) — non-blocking checkpoint to follow this ABSORB entry.
+**Driver → master publish**: landed clean, no conflicts, 16 files changed (1415 insertions, 12
+deletions) — `charters/M25-dod-meta-enforcer.md`, `inherited-core.md`'s DoD section,
+`scripts/it0-dod-check.{mjs,sh}`, 4 fixtures, `OUTER-LOOP.md` wiring, `report-iteration-1.md`,
+and the m25 SELECT write-back files (`tasks/exp5-M-DOD-META-ENFORCER.md` + the 3 not-selected
+task notes) all reached `master` for the first time this milestone.
+
+Worktrees/branches for both M25 iterations removed/deleted. `milestone_counter` → **25**.
+Checkpoint DUE at m25 (every-5 cadence, cp-20 was last) — non-blocking checkpoint to follow this
+ABSORB entry. Continuing directly to m26 SELECT after the checkpoint, no human wait.
