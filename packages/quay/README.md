@@ -128,7 +128,7 @@ $ node packages/quay/bin/quay.js task list --prefix QX --page-size 2 --format js
 ]
 ```
 
-### `quay task view <task-id>` / `quay task edit <task-id> --status <s>`
+### `quay task view <task-id>` / `quay task edit <task-id> [flags]`
 
 ```
 $ node packages/quay/bin/quay.js task view QN-001
@@ -139,7 +139,37 @@ $ node packages/quay/bin/quay.js task edit QN-001 --status done --json
 { "id": "QN-001", "status": "done", ... }
 ```
 
-`task edit` v1 supports status-only writes; `--status <s>` is required.
+`task edit` (M16-cli-edit-parity-impl) has full-field parity with the native
+provider CLI/MCP `task_write`: at least one of `--title` / `--status` /
+`--body` / `--body-file` / `--labels` / `--extra` / `--parent` / `--children`
+/ `--append-notes` is required (status is no longer the only writable
+field — existing `--status <s>`-only invocations continue to work
+unchanged).
+
+| Flag | Meaning |
+| --- | --- |
+| `--title <t>` | Set title (portable — every Provider is expected to support it) |
+| `--status <s>` | Set status |
+| `--body <text>` | Set body verbatim (short-string mode; shell argument) |
+| `--body-file <path>` | Set body verbatim from a file; `-` reads from stdin. Whole-body **replacement** semantics; mutually exclusive with `--body` |
+| `--labels <a,b,c>` | Set labels (comma-separated; portable) |
+| `--extra <json>` | Set the `extra{}` map (JSON object string). **Native-only** — GitHub hard-errors on this field; see `inherited-core.md`'s Portable-metadata convention |
+| `--parent <id>` | Set parent task id |
+| `--children <a,b,c>` | Set children task ids (comma-separated) |
+| `--expect-status <s>` | Compare-and-swap: only write if the task's current status equals `<s>` |
+| `--append-notes <text>` | Read-then-write convenience: append `<text>` as a new line to the existing body and write the whole body back (no new ABI tool) |
+
+```
+$ node packages/quay/bin/quay.js task edit QN-001 --title "New title" --labels bug,p1
+$ node packages/quay/bin/quay.js task edit QN-001 --body-file ./new-body.md
+$ cat notes.md | node packages/quay/bin/quay.js task edit QN-001 --body-file -
+$ node packages/quay/bin/quay.js task edit QN-001 --append-notes "Investigated further, see PR #42"
+```
+
+A Provider that does not implement writing a given field (e.g. GitHub does
+not support `extra`) surfaces its own explicit hard-error message and a
+non-zero exit code — the Core CLI does not silently drop unsupported
+fields (PR-ABI-001's hard-error floor, unchanged by this CLI relaxation).
 
 ### `quay task check <task-id>`
 
