@@ -102,7 +102,7 @@ Do NOT trust the DONE mark; check that the enforcer is real, not designed:
 - outcome: applied | deferred | rejected
 - evidence: pointer to the design doc / iteration report section / commit -->
 
-**Disposition note (M23-outer-driver-isolation, iteration-1, 2026-07-18, NOT a
+**Disposition note (M23-outer-driver-isolation, both iterations, 2026-07-18, NOT a
 resolution — this DIR stays `pending`, status unchanged):** M23's charter
 explicitly names this DIR's scope (the Definition-of-Done meta-enforcer program)
 as OUT of scope, verbatim in its "Explicitly OUT of scope" section: "Do not touch

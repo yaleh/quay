@@ -97,7 +97,7 @@ charter/dispatch. `backlog.md`'s `M-TASK-BACKLOG-PROJECTION-IMPL` row status is
 still `pending` (unselected) after this milestone. This DIR remains pending until a
 future SELECT boundary actually charters that row.
 
-**Disposition note (M23-outer-driver-isolation, iteration-1, 2026-07-18, still NOT
+**Disposition note (M23-outer-driver-isolation, both iterations, 2026-07-18, still NOT
 a resolution — this DIR stays `pending`, unchanged status):** M23's charter is
 purely the git-topology/process fix DIR-018 names (a dedicated `exp5-outer-driver`
 branch + `OUTER-LOOP.md` DRAIN/ABSORB merge sub-steps); it does not charter or
