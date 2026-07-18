@@ -1598,6 +1598,84 @@ async function main() {
     }
   }
 
+  // --- M26-F4 (M26-adversarial-eval, Phase B hardening): a single malformed
+  // task file (missing YAML frontmatter delimiters) among an otherwise-good
+  // task store must not crash `quay serve`'s list route (GET /) — it should
+  // degrade safely (clean 500, error logged, process stays up), not hang or
+  // corrupt the good tasks already on disk. Found during the Phase A audit:
+  // quay-native/src/store.js's parse() throws "malformed task file: missing
+  // YAML frontmatter block" (store.js, parse()) with NO try/catch anywhere
+  // in list()'s per-item get() loop, so ONE bad file poisons the ENTIRE
+  // task_list call — verified directly against store.js (independent of
+  // this HTTP layer) as part of the audit. At the MCP layer the SDK's own
+  // registerTool dispatcher already catches any thrown handler error into
+  // an isError:true CallToolResult (node_modules/@modelcontextprotocol/sdk
+  // dist/.../server/mcp.js's registerTool try/catch, calling
+  // createToolError() — confirmed by reading the SDK source directly), and
+  // M26-F2 already made provider-client.js's taskList() throw on isError
+  // instead of silently returning []), and serve.js's handleRequest() is
+  // now wrapped in a top-level try/catch (also M26-F2) — so the full chain
+  // (store throw -> MCP isError -> client throw -> HTTP 500) is exercised
+  // end-to-end here for the first time.
+  {
+    const badTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-badfm-test-"));
+    const badWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-badfm-workspace-"));
+    fs.mkdirSync(path.join(badWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(badWorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${badTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${badTasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    // One well-formed task, written the normal way...
+    execFileSync("node", [nativeBin, "task", "create", "BADFM-GOOD", "--title", "Good task",
+      "--status", "todo", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: badTasksDir },
+    });
+    // ...and one malformed task file written directly to disk (no CLI path
+    // validates frontmatter shape, so this simulates hand-edited/corrupted
+    // task-store content, the DIR-001 "malformed frontmatter" category).
+    fs.writeFileSync(path.join(badTasksDir, "BADFM-BAD.md"), "this file has no YAML frontmatter delimiters at all\n");
+
+    const badPort = port + 12;
+    const badOrigCwd = process.cwd();
+    let badServer;
+    try {
+      process.chdir(badWorkspaceRoot);
+      badServer = await startServer({ port: badPort });
+
+      const badResp = await get(badPort, "/");
+      assert(
+        badResp.status === 500,
+        `GET / with one malformed task file among the store degrades to a clean 500, not a hang/crash (M26-F4) (got ${badResp.status})`
+      );
+      assert(
+        /internal error/i.test(badResp.body),
+        `GET / 500 response body carries a readable error message, not an empty/crashed response (M26-F4). body: ${badResp.body.slice(0, 200)}`
+      );
+
+      // The server process itself must survive — a second, unrelated request
+      // (list page again, after fixing the bad file) must still succeed
+      // normally. This is the "no crash, no corrupted state" half of
+      // DIR-001's own framing: the good task's file on disk is untouched
+      // and still readable once the bad file is removed (simulating a human
+      // fixing the one bad task) — same server process, same port, no restart.
+      fs.rmSync(path.join(badTasksDir, "BADFM-BAD.md"));
+      const recovered = await get(badPort, "/");
+      assert(
+        recovered.status === 200 && recovered.body.includes("BADFM-GOOD"),
+        `GET / recovers to 200 once the malformed file is removed — good task's on-disk content was never corrupted by the earlier crash, and the server process survived (M26-F4) (got status ${recovered.status})`
+      );
+    } finally {
+      if (badServer) {
+        badServer.close();
+        if (badServer.client) await badServer.client.close();
+      }
+      process.chdir(badOrigCwd);
+      fs.rmSync(badTasksDir, { recursive: true, force: true });
+      fs.rmSync(badWorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
   console.log(failures === 0 ? "\nAll QN-031 serve/action regression tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
