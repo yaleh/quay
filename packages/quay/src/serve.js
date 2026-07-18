@@ -456,9 +456,23 @@ export async function startServer({ port = 4173 } = {}) {
       } else {
         tasks = filtered;
       }
-      // QW-007 (experiment 3, iteration 4): pagination — 20 tasks per page.
-      // ?page=N selects the page (1-based, default 1). Applied after filter+sort.
-      const PAGE_SIZE = 20;
+      // QW-007 (experiment 3, iteration 4): pagination — 20 tasks per page
+      // by default. ?page=N selects the page (1-based, default 1). Applied
+      // after filter+sort.
+      // CB-006/CB-022 (M08-merge-recover): ?pageSize=N overrides the
+      // default page size. Invalid values (0, negative, non-numeric) are
+      // ignored and fall back to the default (UQ-048's CLI-side hard-error
+      // behavior doesn't map cleanly onto a GET-request query param — a
+      // malformed URL param silently reverting to the default, rather than
+      // rendering an error page, matches this Web UI's existing convention
+      // for every other filter param above, e.g. an unknown ?status= value).
+      const DEFAULT_PAGE_SIZE = 20;
+      const pageSizeParam = parseInt(url.searchParams.get("pageSize") || "", 10);
+      const pageSizeInvalid = url.searchParams.has("pageSize") &&
+        (!Number.isFinite(pageSizeParam) || pageSizeParam < 1);
+      const PAGE_SIZE = Number.isFinite(pageSizeParam) && pageSizeParam >= 1
+        ? pageSizeParam
+        : DEFAULT_PAGE_SIZE;
       const pageParam = parseInt(url.searchParams.get("page") || "1", 10);
       const page = Number.isFinite(pageParam) && pageParam >= 1 ? pageParam : 1;
       const totalTasks = tasks.length;
@@ -524,7 +538,14 @@ export async function startServer({ port = 4173 } = {}) {
       // QX-016 (iteration 4): label param now supports an array (for multi-label AND-filter)
       // or a string (for single-label nav links). Array generates repeated ?label=X&label=Y.
       // QX-021 (iteration 5): q param carries the active title-search query.
-      function buildHref(status, sort, label, pg, prefix, q) {
+      // CB-006/CB-022 (M08-merge-recover): pageSize carries the active
+      // ?pageSize= override through every other nav link (filter/sort/label/
+      // page/search) so switching e.g. status filter doesn't silently reset
+      // page size back to the default. Defaults to the enclosing PAGE_SIZE
+      // (already resolved from ?pageSize= or the default above) so every
+      // EXISTING buildHref(...) call site needs no change; the page-size
+      // selector links below pass an explicit override as a 7th argument.
+      function buildHref(status, sort, label, pg, prefix, q, pageSizeOverride = PAGE_SIZE) {
         const params = new URLSearchParams();
         if (prefix) params.set("prefix", prefix);
         if (status) params.set("status", status);
@@ -533,6 +554,7 @@ export async function startServer({ port = 4173 } = {}) {
         if (sort) params.set("sort", sort);
         if (q) params.set("q", q);
         if (pg && pg > 1) params.set("page", String(pg));
+        if (pageSizeOverride !== DEFAULT_PAGE_SIZE) params.set("pageSize", String(pageSizeOverride));
         const qs = params.toString();
         return qs ? `/?${qs}` : "/";
       }
@@ -671,6 +693,20 @@ export async function startServer({ port = 4173 } = {}) {
             ? html`<a href="${buildHref(statusFilter, sortKey, labelFilters, safePage + 1, prefixFilter, qFilter)}">Next &raquo;</a>`
             : html`<span class="page-nav-disabled">Next &raquo;</span>`}
         </p>` : html`<p class="meta">Page 1 of ${totalPages} (${totalTasks} tasks)</p>`;
+      // CB-006/CB-022 (M08-merge-recover): page-size selector — 10/20/50/100,
+      // mirroring the CLI's --page-size flag and the MCP task_list pageSize
+      // param (mcp-server.js). Changing page size always resets to page 1
+      // (pg=null passed to buildHref) since the prior page number may no
+      // longer be meaningful at a different page size.
+      const pageSizeOptions = [10, 20, 50, 100];
+      const pageSizeNav = html`<p class="meta">Page size:
+        ${pageSizeOptions.map((sz) =>
+          sz === PAGE_SIZE
+            ? html`<strong>${sz}</strong>`
+            : html`<a href="${buildHref(statusFilter, sortKey, labelFilters, null, prefixFilter, qFilter, sz)}">${sz}</a>`
+        ).join(" ")}
+        ${pageSizeInvalid ? html`<span class="error-banner" role="alert" style="display:inline;margin-left:0.5rem">Invalid pageSize value ignored; showing default (${DEFAULT_PAGE_SIZE}).</span>` : ""}
+      </p>`;
       // QN-046 (closes discussion-doc §2.1's browser-rendering gap): a real
       // browser (driven via playwright MCP tooling) decodes this body as
       // mojibake (e.g. "Quay â€" task list") without an explicit charset —
@@ -724,6 +760,7 @@ export async function startServer({ port = 4173 } = {}) {
           ${searchForm}
           ${searchResultBanner}
           ${labelNav ? html`<div class="label-nav-wrap"><p class="meta" style="white-space:normal">Label: ${labelNav}</p></div>` : ""}
+          ${pageSizeNav}
           ${pageNav}
           <table>
             <tr><th>id</th><th>status</th><th class="col-role">role</th><th>title</th><th class="col-labels">labels</th><th class="col-updated">updated</th><th class="col-actions">actions</th></tr>

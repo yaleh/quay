@@ -1481,6 +1481,91 @@ async function main() {
     fs.rmSync(qx45WorkspaceRoot, { recursive: true, force: true });
   }
 
+  // 23. M08-merge-recover: --version / -V (UQ-047). Real package.json version,
+  //     exit 0. No provider/workspace needed — this must work from any cwd.
+  {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+    const r1 = run(["--version"]);
+    assert(r1.status === 0, "quay --version exits 0");
+    assert(r1.stdout.trim() === pkg.version, `quay --version prints the real package.json version (got ${JSON.stringify(r1.stdout.trim())}, expected ${JSON.stringify(pkg.version)})`);
+
+    const r2 = run(["-V"]);
+    assert(r2.status === 0, "quay -V exits 0");
+    assert(r2.stdout.trim() === pkg.version, `quay -V prints the real package.json version (got ${JSON.stringify(r2.stdout.trim())}, expected ${JSON.stringify(pkg.version)})`);
+  }
+
+  // 24. M08-merge-recover: --format json (CB-021) behaves identically to --json,
+  //     across content, for both task list (array) and task view (object).
+  {
+    const rJson = run(["task", "list", "--json"], spawnOpts);
+    const rFormat = run(["task", "list", "--format", "json"], spawnOpts);
+    assert(rFormat.status === 0, "quay task list --format json exits 0");
+    assert(rJson.status === 0 && rFormat.status === 0, "both --json and --format json exit 0");
+    let jTasks, fTasks;
+    try { jTasks = JSON.parse(rJson.stdout); } catch { jTasks = null; }
+    try { fTasks = JSON.parse(rFormat.stdout); } catch { fTasks = null; }
+    assert(Array.isArray(fTasks), "quay task list --format json emits a JSON array");
+    assert(
+      JSON.stringify(jTasks) === JSON.stringify(fTasks),
+      "quay task list --format json output is identical in content to --json"
+    );
+
+    const rViewJson = run(["task", "view", "CLI-1", "--json"], spawnOpts);
+    const rViewFormat = run(["task", "view", "CLI-1", "--format", "json"], spawnOpts);
+    assert(rViewFormat.status === 0, "quay task view --format json exits 0");
+    assert(
+      rViewJson.stdout === rViewFormat.stdout,
+      "quay task view --format json output is byte-identical to --json"
+    );
+
+    // Invalid --format value is a hard usage error, not a silent human-readable fallback.
+    const rBadFormat = run(["task", "list", "--format", "yaml"], spawnOpts);
+    assert(rBadFormat.status === 1, "quay task list --format yaml (unsupported value) exits 1");
+    assert(
+      rBadFormat.stderr.includes("--format"),
+      "quay task list --format yaml prints a --format usage error to stderr, not a silent human-readable fallback"
+    );
+  }
+
+  // 25. M08-merge-recover: --page-size N (CB-006/CB-022) in both CLI table
+  //     mode and --json/--format json mode — the printJson(sorted) bug fix.
+  //     Also UQ-048: invalid values (0, -1, abc) are a hard error.
+  {
+    // Baseline: workspace has exactly 2 tasks (CLI-1, CLI-2) at this point.
+    const rAllJson = run(["task", "list", "--json"], spawnOpts);
+    const allTasks = JSON.parse(rAllJson.stdout);
+    assert(allTasks.length === 2, `sanity: workspace has 2 tasks before --page-size test (got ${allTasks.length})`);
+
+    const rPage1 = run(["task", "list", "--json", "--page-size", "1"], spawnOpts);
+    assert(rPage1.status === 0, "quay task list --json --page-size 1 exits 0");
+    const page1 = JSON.parse(rPage1.stdout);
+    assert(
+      Array.isArray(page1) && page1.length === 1,
+      `quay task list --json --page-size 1 returns exactly 1 task, not the full array (CB-022 printJson bug fix) (got ${page1.length})`
+    );
+    assert(page1[0].id === allTasks[0].id, "quay task list --json --page-size 1 returns the first task by current sort order");
+
+    const rTablePage1 = run(["task", "list", "--page-size", "1"], spawnOpts);
+    assert(rTablePage1.status === 0, "quay task list --page-size 1 (table mode) exits 0");
+    const tableLines = rTablePage1.stdout.split("\n").filter((l) => l.includes("\t"));
+    assert(tableLines.length === 1, `quay task list --page-size 1 (table mode) prints exactly 1 task row (got ${tableLines.length})`);
+
+    // --page-size larger than the result set: returns everything, no error.
+    const rPageBig = run(["task", "list", "--json", "--page-size", "1000"], spawnOpts);
+    assert(rPageBig.status === 0, "quay task list --json --page-size 1000 (larger than result set) exits 0");
+    assert(JSON.parse(rPageBig.stdout).length === 2, "quay task list --json --page-size 1000 returns all tasks when page-size exceeds total count");
+
+    // UQ-048: invalid --page-size values are a hard error, not a silent "show everything".
+    for (const bad of ["0", "-1", "abc"]) {
+      const r = run(["task", "list", "--page-size", bad], spawnOpts);
+      assert(r.status === 1, `quay task list --page-size ${bad} exits 1 (UQ-048 hard error, not silent fallback)`);
+      assert(
+        r.stderr.includes("--page-size"),
+        `quay task list --page-size ${bad} prints a --page-size usage error to stderr (got: ${r.stderr.slice(0, 200)})`
+      );
+    }
+  }
+
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 
