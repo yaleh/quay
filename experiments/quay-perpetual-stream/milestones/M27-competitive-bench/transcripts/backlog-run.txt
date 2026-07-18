@@ -1,0 +1,335 @@
+###################################################
+# backlog.md benchmark run — 2026-07-18T22:31:50Z
+# cwd: /tmp/m27-backlog-scratch
+###################################################
+
+=== SCENARIO (a): create a task with title+body ===
+
+$ backlog task create Fix login button alignment --description The login button is misaligned on mobile viewports. Repro: open /login at 390px width. --plain
+File: /tmp/m27-backlog-scratch/backlog/tasks/task-1 - Fix-login-button-alignment.md
+
+Task TASK-1 - Fix login button alignment
+==================================================
+
+Status: ○ To Do
+Ordinal: 1000
+Created: 2026-07-18 22:31
+
+Description:
+--------------------------------------------------
+The login button is misaligned on mobile viewports. Repro: open /login at 390px width.
+
+Acceptance Criteria:
+--------------------------------------------------
+No acceptance criteria defined
+
+Definition of Done:
+--------------------------------------------------
+No Definition of Done items defined
+
+
+real	0m0.488s
+user	0m0.370s
+sys	0m0.072s
+[exit=0]
+
+=== verify creation ===
+
+$ backlog task view task-1 --plain
+File: /tmp/m27-backlog-scratch/backlog/tasks/task-1 - Fix-login-button-alignment.md
+
+Task TASK-1 - Fix login button alignment
+==================================================
+
+Status: ○ To Do
+Ordinal: 1000
+Created: 2026-07-18 22:31
+
+Description:
+--------------------------------------------------
+The login button is misaligned on mobile viewports. Repro: open /login at 390px width.
+
+Acceptance Criteria:
+--------------------------------------------------
+No acceptance criteria defined
+
+Definition of Done:
+--------------------------------------------------
+No Definition of Done items defined
+
+
+real	0m0.324s
+user	0m0.315s
+sys	0m0.087s
+[exit=0]
+
+=== SCENARIO (b): transition through 2-3 status states ===
+
+$ backlog task edit task-1 -s In Progress --plain
+File: /tmp/m27-backlog-scratch/backlog/tasks/task-1 - Fix-login-button-alignment.md
+
+Task TASK-1 - Fix login button alignment
+==================================================
+
+Status: ◒ In Progress
+Ordinal: 1000
+Created: 2026-07-18 22:31
+Updated: 2026-07-18 22:31
+
+Description:
+--------------------------------------------------
+The login button is misaligned on mobile viewports. Repro: open /login at 390px width.
+
+Acceptance Criteria:
+--------------------------------------------------
+No acceptance criteria defined
+
+Definition of Done:
+--------------------------------------------------
+No Definition of Done items defined
+
+
+real	0m0.340s
+user	0m0.347s
+sys	0m0.078s
+[exit=0]
+
+$ backlog task edit task-1 -s Done --plain
+File: /tmp/m27-backlog-scratch/backlog/tasks/task-1 - Fix-login-button-alignment.md
+
+Task TASK-1 - Fix login button alignment
+==================================================
+
+Status: ✔ Done
+Ordinal: 1000
+Created: 2026-07-18 22:31
+Updated: 2026-07-18 22:31
+
+Description:
+--------------------------------------------------
+The login button is misaligned on mobile viewports. Repro: open /login at 390px width.
+
+Acceptance Criteria:
+--------------------------------------------------
+No acceptance criteria defined
+
+Definition of Done:
+--------------------------------------------------
+No Definition of Done items defined
+
+
+real	0m0.365s
+user	0m0.381s
+sys	0m0.070s
+[exit=0]
+
+=== SCENARIO (c): add/query a label or categorization ===
+
+$ backlog task edit task-1 --add-label bug --add-label ui --plain
+File: /tmp/m27-backlog-scratch/backlog/tasks/task-1 - Fix-login-button-alignment.md
+
+Task TASK-1 - Fix login button alignment
+==================================================
+
+Status: ✔ Done
+Ordinal: 1000
+Created: 2026-07-18 22:31
+Updated: 2026-07-18 22:31
+Labels: ui
+
+Description:
+--------------------------------------------------
+The login button is misaligned on mobile viewports. Repro: open /login at 390px width.
+
+Acceptance Criteria:
+--------------------------------------------------
+No acceptance criteria defined
+
+Definition of Done:
+--------------------------------------------------
+No Definition of Done items defined
+
+
+real	0m0.333s
+user	0m0.340s
+sys	0m0.078s
+[exit=0]
+
+$ backlog task list -s Done --plain
+Done:
+  TASK-1 - Fix login button alignment
+
+
+real	0m0.372s
+user	0m0.365s
+sys	0m0.107s
+[exit=0]
+
+=== SCENARIO (d): list/filter/search open items ===
+
+$ backlog task create Add dark mode toggle --description Users have requested a dark mode toggle in settings. --plain
+File: /tmp/m27-backlog-scratch/backlog/tasks/task-2 - Add-dark-mode-toggle.md
+
+Task TASK-2 - Add dark mode toggle
+==================================================
+
+Status: ○ To Do
+Ordinal: 2000
+Created: 2026-07-18 22:31
+
+Description:
+--------------------------------------------------
+Users have requested a dark mode toggle in settings.
+
+Acceptance Criteria:
+--------------------------------------------------
+No acceptance criteria defined
+
+Definition of Done:
+--------------------------------------------------
+No Definition of Done items defined
+
+
+real	0m0.418s
+user	0m0.417s
+sys	0m0.093s
+[exit=0]
+
+$ backlog task create Search endpoint times out on large repos --description The search endpoint times out when repo has >10k files. --plain
+File: /tmp/m27-backlog-scratch/backlog/tasks/task-3 - Search-endpoint-times-out-on-large-repos.md
+
+Task TASK-3 - Search endpoint times out on large repos
+==================================================
+
+Status: ○ To Do
+Ordinal: 3000
+Created: 2026-07-18 22:31
+
+Description:
+--------------------------------------------------
+The search endpoint times out when repo has >10k files.
+
+Acceptance Criteria:
+--------------------------------------------------
+No acceptance criteria defined
+
+Definition of Done:
+--------------------------------------------------
+No Definition of Done items defined
+
+
+real	0m0.381s
+user	0m0.400s
+sys	0m0.078s
+[exit=0]
+
+$ backlog task list -s To Do --plain
+To Do:
+  TASK-2 - Add dark mode toggle
+  TASK-3 - Search endpoint times out on large repos
+
+
+real	0m0.363s
+user	0m0.375s
+sys	0m0.082s
+[exit=0]
+
+$ backlog search dark mode --plain
+Tasks:
+  TASK-2 - Add dark mode toggle (To Do) [score 0.850]
+
+real	0m0.352s
+user	0m0.393s
+sys	0m0.056s
+[exit=0]
+
+=== SCENARIO (e): close/complete an item ===
+
+$ backlog task edit task-2 -s Done --plain
+File: /tmp/m27-backlog-scratch/backlog/tasks/task-2 - Add-dark-mode-toggle.md
+
+Task TASK-2 - Add dark mode toggle
+==================================================
+
+Status: ✔ Done
+Ordinal: 2000
+Created: 2026-07-18 22:31
+Updated: 2026-07-18 22:31
+
+Description:
+--------------------------------------------------
+Users have requested a dark mode toggle in settings.
+
+Acceptance Criteria:
+--------------------------------------------------
+No acceptance criteria defined
+
+Definition of Done:
+--------------------------------------------------
+No Definition of Done items defined
+
+
+real	0m0.326s
+user	0m0.330s
+sys	0m0.077s
+[exit=0]
+
+$ backlog task view task-2 --plain
+File: /tmp/m27-backlog-scratch/backlog/tasks/task-2 - Add-dark-mode-toggle.md
+
+Task TASK-2 - Add dark mode toggle
+==================================================
+
+Status: ✔ Done
+Ordinal: 2000
+Created: 2026-07-18 22:31
+Updated: 2026-07-18 22:31
+
+Description:
+--------------------------------------------------
+Users have requested a dark mode toggle in settings.
+
+Acceptance Criteria:
+--------------------------------------------------
+No acceptance criteria defined
+
+Definition of Done:
+--------------------------------------------------
+No Definition of Done items defined
+
+
+real	0m0.311s
+user	0m0.308s
+sys	0m0.081s
+[exit=0]
+
+=== final state: full task list ===
+
+$ backlog task list --plain
+To Do:
+  TASK-3 - Search endpoint times out on large repos
+
+Done:
+  TASK-1 - Fix login button alignment
+  TASK-2 - Add dark mode toggle
+
+
+real	0m0.337s
+user	0m0.352s
+sys	0m0.082s
+[exit=0]
+
+=== Follow-up investigation: --add-label repeated-flag anomaly (found above in Scenario c) ===
+
+$ backlog task view task-1 --plain   # after `--add-label bug --add-label ui` in one edit call
+Labels: ui              # only the LAST --add-label value was applied, not both
+
+$ backlog task edit task-1 --add-label bug --plain   # second, separate invocation
+Labels: ui, bug          # now both present -- confirms repeated flags DO NOT accumulate
+                          # within a single invocation, but DO accumulate across
+                          # separate invocations
+
+$ backlog task create "Label comma test" -l "bug,ui" --plain
+Labels: bug, ui           # comma-separated -l/--labels on CREATE works fine (both applied)
+                          # -- narrows the finding to --add-label specifically on `edit`
+                          # (repeated-flag parsing), not a general multi-label defect
