@@ -73,6 +73,11 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      dispatched agent must never see only a hash reference with no literal text (this would
      reintroduce the exact gate-dilution risk DIR-009 defends against). The charter may shrink; the
      agent-facing prompt may not lose the literal text.
+   - **Web UI verification requirement (M10-audit-consolidation, DIR-006):** if this milestone's
+     scope includes ANY Done-when clause claiming Web UI rendering/interaction/visual verification,
+     the charter must state `inherited-core.md`'s "Web UI verification requirement" evidence rule
+     explicitly in that clause's own text — a `curl` status check is never sufficient evidence for
+     it (liveness/HARD-GATES only). See that section for the full mechanized rule.
    - the **in-scope gap subset only** (+ every OPEN blocking gap verbatim);
    - **binary Done-when clauses** (mandatory — §3.4; without them milestones drag, cf. exp1/exp4);
    - the **inner termination five conditions** (§3.2);
@@ -117,6 +122,24 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    adaptations to the log; check φ — if a prior adaptation was just reused unchanged by THIS
    (different-domain) milestone, **CONSOLIDATE**: merge it into `inherited-core.md` and retire the
    citation (§4.2).
+   - **Adversarial-audit gate (DIR-007 / M10-audit-consolidation, HARD BLOCK on this milestone's VT-
+     curve append / Done-when-complete claim — distinct from, and in addition to, the inner
+     milestone's own iteration-1):** BEFORE this milestone's realized `Δv` is appended to the VT
+     curve or its Done-when clauses are recorded as complete, check whether this milestone meets
+     EITHER cadence-rule condition in `inherited-core.md`'s "Adversarial-audit cadence rule": (a) it
+     is VT-scoring (its SELECT-time value-typed ledger entry includes `capability-growth` and its
+     ABSORB would append a nonzero VT Δv), OR (b) its own iteration-0 recommended skipping
+     iteration-1 (a self-exemption attempt). **If either fires**, dispatch the adversarial-audit role
+     (`inherited-core.md`'s "Adversarial-audit role" section — a fresh-context `baime:iteration-
+     executor` call, `run_in_background=true`, dispatched by the OUTER loop itself, NEVER folded
+     into the inner milestone's own iteration-1) BEFORE this ABSORB step may complete. Output to
+     `milestones/M<NN>/audits/iteration-N-adversarial-audit.md`. A **REFUTED** verdict blocks the VT
+     append / Done-when-complete claim until the underlying record is corrected (same HARD BLOCK
+     shape as the V_meta consolidation-lag gate below); a **CONCERNS** verdict is recorded but
+     non-blocking; **NO REFUTATION FOUND** clears the gate. **If NEITHER condition fires** (the
+     default case — methodology-infra/governance milestones with no VT weight, per the explicit
+     non-blanket cadence rule), this gate is a documented no-op: state plainly in the ABSORB log
+     entry that neither condition applied and why, rather than silently omitting the check.
    - **V_meta consolidation-lag gate (DIR-005 / M07-vmeta-gate, HARD BLOCK on step 7's
      `milestone_counter++`):** before this milestone may be marked DONE / `milestone_counter`
      incremented in step 7 below, check every row in `v-meta-ledger.md`. For each row whose status is

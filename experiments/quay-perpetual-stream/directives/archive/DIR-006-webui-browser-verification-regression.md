@@ -1,6 +1,6 @@
 # DIR-006
 
-- status: pending
+- status: resolved (M10-audit-consolidation, iteration-0)
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Web UI verification regression — exp5 charters/reports narrate "real browser" sessions but paste only curl evidence; playwright/chrome-devtools tools never actually invoked; plus a systematic carry-forward audit is owed
@@ -98,4 +98,39 @@ iteration reports found:
 
 ## Resolution
 
-<!-- to be filled in by whichever iteration applies this directive -->
+- **status: resolved** at M10-audit-consolidation, iteration-0 (2026-07-18)
+
+1. **Requested action 1** (mechanized Web UI verification requirement) —
+   disposed by `inherited-core.md`'s new section "Web UI verification
+   requirement — mechanized browser-tool evidence rule (M10-audit-
+   consolidation Done-when 1, DIR-006)": states the operational rule (a
+   `mcp__playwright__*`/`mcp__chrome-devtools__*` navigation call plus at
+   least one screenshot/DOM-snapshot artifact, at each configured viewport,
+   is the only valid pasted evidence for a Web UI rendering/interaction
+   Done-when claim), demotes `curl` to liveness/HARD-GATES-only use, and
+   restates the dual-viewport spec (desktop 1280×800/900, mobile 390×844
+   DPR×3 emulated touch). `OUTER-LOOP.md` step 3 (AUTHOR CHARTER) gained a
+   companion bullet instructing future charters with Web UI Done-when
+   clauses to state this evidence rule explicitly, cross-referencing
+   `inherited-core.md`.
+2. **Requested action 2** (flag M04-discover's cov numbers as provisional) —
+   disposed by `dashboard.md`'s Chart-1 re-score table: the Web UI row's
+   `new cov` cell now reads `0.92 ⚠️PROVISIONALLY UNCERTAIN`, with an
+   appended rationale paragraph citing the exact curl-only evidence gap
+   (`M04-discover/iterations/iteration-0.md:254-290/271/274`) and pointing
+   to the new `M-WEBUI-REVERIFY` backlog candidate (`backlog.md`, new
+   section "M10-audit-consolidation-sourced candidate"). The number is
+   flagged, not retracted, since no re-verification has been run yet.
+3. **Requested action 3** (systematic exp1–4 audit for other silently-
+   dropped-enforcement requirements) — performed as part of this milestone's
+   Done-when 3 (see iteration-0.md report §6, Done-when 3 for the full
+   walkthrough). Conclusion: exp1–4's directive archives (exp1: 23 files,
+   exp2: 3, exp3: 4, exp4: 5) were read in full; every enforcement-drift
+   instance found (manda self-deadlock, G3 dispatch-must-be-orchestrator,
+   desktop/mobile viewport requirement, orchestrator-must-not-dilute-gates,
+   directives-canonical-as-files) is already covered by DIR-006/007/008's
+   own three named topics, or is already enforced elsewhere in exp5 (pinned
+   HARD GATES block, governance/infra hard floor, gate-hash mechanism). No
+   fourth silently-dropped-enforcement instance was found; recorded here as
+   the required "nothing further found" statement rather than a new
+   directive.
