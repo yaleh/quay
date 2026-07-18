@@ -116,6 +116,52 @@ VT curve (append, chart-1 basis): `[ ..., (m3/M-ABI-EVAL, 101.33/120), (m4/M04-d
 Δv=−6.60, MEASUREMENT CORRECTION not a capability regression — see MD-001; corrected from
 iteration-0's arithmetic slip of 95.83 during iteration-1's independent re-verification) ]`
 
+### Chart-1 re-score (M08-merge-recover, CLI/Docs/Packaging capability recovery) — 2026-07-18
+
+Re-scored CLI/Docs/Packaging (the 3 surfaces MD-001 flagged) from this milestone's own live
+re-verification evidence, per the charter's Done-when clause 7. This is iteration-1's
+INDEPENDENTLY RE-DERIVED score (iteration-0's own §7 draft flagged its own numbers "provisional,
+explicitly flagged for iteration-1's own independent re-derivation" — this section is that
+re-derivation, not a copy-forward). Cited findings are in
+`experiments/quay-continuous-bootstrap/gap-list.md` (MD-001, CB-006/021/022, UQ-047/048,
+PKG-003..008, DOC-001..007) and this milestone's own iteration-1 report
+(`experiments/quay-perpetual-stream/milestones/M08-merge-recover/iterations/iteration-1.md`), which
+contains fresh, independently-captured command output for every claim below (not iteration-0's
+pasted output re-cited).
+
+| surface | prior cov (m4) | new cov | rationale (iteration-1's own independent live evidence) |
+|---|---|---|---|
+| CLI | 0.80 | **0.94** | All 4 MD-001-flagged CLI losses independently re-verified fixed on a fresh worktree/fresh `npm install`: `--version`/`-V` print the real `0.3.5` package version and exit 0; `--format json` and `--json` produce byte-identical output for `task list` (verified via `diff`) and `--format yaml` is a hard usage error (exit 1); `--page-size` works in CLI table mode (`# showing 1 of 3 tasks`), JSON mode (element count truncated, confirming the `printJson(sorted)` bug fix), AND Web UI (`?pageSize=N`, verified via live `curl` against a `quay serve` instance); invalid `--page-size` values (`0`, `-1`, `abc`) all exit 1 with a descriptive stderr error (UQ-048). ADDITIONALLY (beyond iteration-0's own evidence): the Docker audit-channel caveat iteration-0 explicitly left open (10 `--provider github` subtests failing only because `node:20-slim` lacks the `gh` CLI) is NOW FULLY RESOLVED — re-ran the same audit container with `gh` installed via the official apt repository inside the container, and got a **fully clean, zero-caveat pass**: all 10 previously-`gh`-blocked `--provider github` subtests now pass inside the independently-provisioned container (see iteration-1 report §Part A.5 for full transcript). This closes the one residual confidence discount iteration-0's own 0.93 carried; 0.93→0.94 (small, since the discount closed was a process/environment gap, not a code gap — no new capability was added, so the score does not jump further). Not 1.0: no other CLI surface was touched this milestone (out of scope per charter item 9), same ceiling reasoning iteration-0 gave. |
+| Docs | 0.55 | **0.85** | Independently re-confirmed via fresh `grep`/`ls` on the re-derived worktree: `packages/quay/{README,CHANGELOG,LICENSE}.md` all exist with real content (8812/728/1067 bytes respectively — byte-identical to iteration-0's own figures, confirming no drift since iteration-0's commit); DOC-001..006 coverage independently re-confirmed via direct grep of `packages/quay/README.md` (`--provider <id>`, `action list`/`action run`, `task view`/`task edit --status`, Configuration section ordering matching this repo's own `.quay/config.yml`, releases URL, and the SEA distribution section all present); root README's SEA section independently confirmed at line 236, closing DOC-006. CHANGELOG.md's v0.2.0 false claims correction and new v0.3.x entry (DOC-007) independently re-read and confirmed accurate against the same live evidence used to close CB-006/021/022/UQ-047/048 above. Not 1.0: `packages/quay/CHANGELOG.md` remains a deliberate pointer/stub (documented design choice, not a gap) — kept at the same conservative 0.85 iteration-0 proposed, independently re-derived rather than merely copied forward. |
+| Packaging | 0.85 | **0.90** | Independently re-confirmed: `package.json` `files` (`README.md`, `CHANGELOG.md`, `LICENSE.md`, `bin`, `src`) and `license` (`"MIT"`) fields present with a fresh per-entry existence check (`fs.existsSync` for every `files` entry — all 5 EXISTS, zero ghost entries), closing PKG-003/004/005/006/007/008 for real. SEA path itself unchanged/still solid (out of this milestone's touch scope). Not higher: same charter-scope ceiling reasoning as iteration-0 — packaging metadata is now complete but the surface's ceiling in this milestone's scope was always "package.json + the 3 doc files," not a broader packaging redesign. |
+| **VT chart-1 total (after m8)** | **94.73/120** | **103.73/120** | CLI 25×0.94=23.50 (+3.50 vs m4's 20.00); MCP 20×0.90=18.00 (unchanged, out of scope); Web UI 20×0.92=18.40 (unchanged, out of scope); Packaging 20×0.90=18.00 (+1.00 vs m4's 17.00); Docs 15×0.85=12.75 (+4.50 vs m4's 8.25); Provider-ABI 20×0.654=13.08 (unchanged, out of scope). Total = 23.50+18.00+18.40+18.00+12.75+13.08 = **103.73/120** (≈0.864 normalized, up from 0.789 at m4). |
+
+**Arithmetic re-check** (this milestone's own standing convention, applied independently by
+iteration-1 rather than trusting iteration-0's own §7 draft, which explicitly flagged itself
+provisional):
+```
+$ python3 -c "print(23.50+18.00+18.40+18.00+12.75+13.08)"
+103.73
+```
+Total confirmed: **103.73/120**. Δv = 103.73 − 94.73 = **+9.00** — above the charter's own
+Δv̂≈+7.6 pre-dispatch estimate and also above iteration-0's own draft total of 103.48/120
+(Δv=+8.75); the difference (+0.25) is entirely attributable to iteration-1's own independently
+re-derived CLI cov (0.94 vs iteration-0's draft 0.93), driven by the now-fully-resolved Docker
+`gh`-provisioning caveat — a genuinely NEW piece of evidence iteration-1 gathered (not present in
+iteration-0's own report), not an arithmetic correction of iteration-0's math (iteration-0's own
+23.25+18.00+18.40+18.00+12.75+13.08=103.48 python3 re-check was independently re-verified here and
+found to be internally consistent — no arithmetic slip this time, unlike m4's iteration-0→
+iteration-1 correction precedent). This is itself worth noting for the experiment's own base-rate
+tracking: this is the first M08-class milestone where iteration-1's re-derivation did NOT catch an
+arithmetic error in iteration-0's numbers, only extended them with new evidence (the Docker
+audit-channel closure) iteration-0 had explicitly deferred to iteration-1's own scope.
+
+VT curve (append, chart-1 basis): `[ ..., (m4/M04-discover, 94.73/120), (m8/M08-merge-recover,
+103.73/120, Δv=+9.00, CAPABILITY RECOVERY — CLI/Docs/Packaging surfaces recovered from MD-001's
+merge-drift measurement error; iteration-1 independently re-derived every cov number and the total
+from fresh command output, catching a small evidence gap (Docker audit-channel gh-caveat) rather
+than an arithmetic error) ]`
+
 ## Health tracks (§4.2–4.4, §6.1)
 
 | track | current | alarm |
