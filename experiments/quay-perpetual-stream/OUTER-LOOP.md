@@ -156,9 +156,11 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    calibration-error, `V_meta consolidation lag` (re-derive milestones-since-confirmed for every
    ledger row per `v-meta-ledger.md`), milestone_counter++ (only after the gate above clears).
 8. **CHECKPOINT (non-blocking)** if `milestone_counter % 5 == 0`: write `checkpoints/cp-<NN>.md` — a
-   health snapshot across all tracks + a re-test of the standing hypothesis (§1). **Do NOT wait for a
-   human.** After writing it, CONTINUE to the next milestone. The human reviews snapshots
-   asynchronously.
+   health snapshot across all tracks (including `dashboard.md`'s `Human-review cadence` track's
+   current `milestones-since-last-human-directive` value, per `inherited-core.md`'s "Human-review
+   cadence" section — non-blocking, observational only) + a re-test of the standing hypothesis (§1).
+   **Do NOT wait for a human.** After writing it, CONTINUE to the next milestone. The human reviews
+   snapshots asynchronously.
 
 ## The loop runs autonomously — it NEVER blocks waiting for a human
 Human input is asynchronous (below). At **each milestone boundary** the loop checks the two — and
