@@ -7,8 +7,8 @@ iteration — this is a from-scratch derivation from the same primary sources, n
 **Worktree:** `experiments/quay-perpetual-stream/milestones/M13-task-backlog-projection/worktrees/iteration-1`
 **Branch:** `exp5-m13-iteration-1`
 **Base commit:** `c2217c99`
-**Final commit:** `18af59f` ("M13 iteration-1: independently-derived task-backlog-primitive
-projection design doc")
+**Final commit:** `838970d` ("M13 iteration-1: iteration report with hard-gate evidence and
+Done-when mapping"; design doc itself landed in the preceding commit `18af59f`)
 
 ## HARD GATES (raw output, pasted)
 
@@ -116,13 +116,16 @@ execution, SELECT/ABSORB write-back wiring, regeneration script, Web UI verifica
 touched; `git diff --stat` against pre-charter base pasted.
 Evidence:
 ```
-$ git diff --stat c2217c99 18af59f
+$ git diff --stat c2217c99 838970d
  .../exp5-task-backlog-primitive-projection.md      | 607 +++++++++++++++++++++
- 1 file changed, 607 insertions(+)
+ .../iterations/iteration-1.md                      | 193 +++++++
+ 2 files changed, 800 insertions(+)
 ```
-Only the new doc file changed (this milestone's own `iterations/` bookkeeping file — this report —
-is committed separately in this same worktree's git history, not shown in the diff above since it
-is added after this diff was captured; the design-doc commit itself is a single-file diff). Met.
+Only the new doc file (`docs/proposals/exp5-task-backlog-primitive-projection.md`) plus this
+milestone's own `iterations/iteration-1.md` bookkeeping file changed, exactly the exception the
+charter's clause 6 text itself allows ("plus this milestone's own `iterations/`/`charters/`
+bookkeeping files"). No product code, `OUTER-LOOP.md`, `inherited-core.md`, or
+`it0-dir-projection-check.*` file touched. Met.
 
 **Clause 7** — `backlog.md`'s `M-TASK-BACKLOG-PROJECTION` row updated at ABSORB, pasted diff.
 **Not applicable to this inner iteration** — per the charter's own text, `backlog.md` is updated "at
