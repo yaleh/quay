@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 8** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 9** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -705,3 +705,59 @@ independently re-derived and confirmed by iteration-1, fresh worktree/fresh comm
   iteration-0 is in-flight; per the governing invariant ("never perturb an in-flight inner
   milestone"), disposition is deferred to the m9→m10 boundary drain. Logged here so it is not
   lost in the interim.
+- **ABSORB m9 = M-GH-WRITE (bundled M-GH-PARENT) → DONE** 2026-07-18. Iteration-0: implemented real
+  `title`/`body`/`labels` write (`github-client.js#writeFields`, reusing the `ghApiRun` PATCH
+  pattern `setStatus` already used) live-verified against a dedicated scratch issue `gh-11`; a
+  hard-error floor (`isError:true`) for any unimplemented field (`parent`/`children`), replacing
+  the prior silent-drop-via-zod-stripping danger — required a source-dive into
+  `@modelcontextprotocol/sdk`'s `zod-compat.js` to find the actual stripping mechanism and fix it
+  with an explicit `z.object({...}).catchall(z.unknown())` schema; `github-client.js#get()`'s
+  parent-resolution asymmetry fixed by reusing `list()`'s own `fetchAllIssues()`+
+  `buildParentIndex()`; self-caught and self-fixed a regression this same fix caused in
+  `task-check-passthrough.test.mjs` (extended `fake-gh.mjs`'s fixture for the new paged-list call
+  `get()` now also issues). Iteration-1: independently re-verified all 7 Done-when clauses from a
+  fresh worktree/fresh `npm install` — re-read `gh-11` live, re-derived the `gh-5`/`gh-7` parent
+  symmetry BOTH pre-fix (reproducing the original asymmetry against the base commit, proving the
+  bug was real) AND post-fix, re-ran the hard-error-floor probe via the real MCP stdio protocol,
+  re-ran the full test suite fresh (31/31), independently re-derived the cov/VT arithmetic from
+  scratch via a fresh `python3 -c` run (HELD UP unchanged: cov=12/13=0.9231, VT=109.11/120,
+  Δv=+5.38 — no arithmetic error, unlike some earlier milestones), and re-ran the domain-misfit
+  Docker audit-channel in a SECOND, differently-provisioned container (`node:20-slim` + downloaded
+  `gh` release binary, vs iteration-0's `debian:stable-slim` + apt-get) — 19/19 PASS again,
+  confirming the pattern is robust to provisioning-path variation, not an artifact of one specific
+  container recipe. **Iteration-1 caught two real, non-blocking defects**: (1) a wording bug in
+  this file's own Δv arithmetic-recheck prose ("below" should have read "above," directly
+  contradicting the very next sentence — not an arithmetic error); (2) iteration-0 had NOT actually
+  applied Done-when 7's `gap-list.md` sub-clause despite the charter requiring it, and had left a
+  FALSE justifying note in `capability-matrix.md` claiming that file "does NOT" apply to exp5
+  milestones — contradicted by M08-merge-recover iteration-1's own extensive closure entries
+  already present in that same file. Iteration-1 fixed both: wrote real `gap-list.md` closure rows
+  for PR-ABI-001/PR-ABI-002 citing its own fresh live evidence, and retracted the false note.
+  Merged `exp5-m09-iteration-1` → `master` (`--no-ff` — fast-forward-inclusive of iteration-0's
+  commits). Re-ran the full test suite directly on merged `master` as the closing check: 31/31
+  pass, 0 fail, exit 0. **Realized Δv = +5.38** (103.73→109.11/120), above the charter's own
+  conservative Δv̂≈+2.9 pre-dispatch estimate — the realized write fraction (4/5) exceeded the
+  charter's "~3/5 realistic" placeholder, and the read-side PR-ABI-002 fix contributed an
+  additional, separately-unitemized delta the placeholder arithmetic didn't account for. VT
+  chart-1 curve already appended above (§ "Chart-1 re-score (M09-gh-write...)"):
+  `(m9/M09-gh-write, 109.11/120, Δv=+5.38)`. `milestone_counter` → **9**. `backlog.md`'s
+  `M-GH-WRITE`/`M-GH-PARENT` rows marked DONE next. Inner-convergence success track: 9/9 (m9 also 2
+  iterations, Done-when-complete, no mid-milestone re-scope). Discovery latency: 0 (both of
+  iteration-1's catches — the wording defect and the missing gap-list sub-clause — were fixed
+  same-milestone, not deferred). V_meta consolidation lag: unchanged, 0 rows past-threshold (no new
+  ledger rows proposed this milestone — M09 was a pure capability-recovery/write-completeness
+  milestone, not a methodology-infra one). **m9→m10 boundary drain**: `directives/pending/` now
+  contains THREE items — DIR-006 (logged mid-m9 above, Web UI browser-verification regression +
+  requested exp1-4 methodology-carry-forward audit), DIR-007 (arrived via the same external
+  `/quay-directive` channel shortly after DIR-006, discovered via `git log` after m9 iteration-0
+  completed — G3 out-of-band adversarial-audit role cited in `inherited-core.md` but never
+  operationalized as a mechanized Done-when/HARD GATE anywhere in exp5's 9 milestone charters; what
+  exp5 built instead — the domain-misfit audit-channel and iteration-1's same-template independent
+  re-run — is explicitly NOT a substitute for G3's cross-role, claim-refutation-scoped adversarial
+  audit), and DIR-008 (arrived the same way, not yet read in detail by the outer loop — per
+  `git log`'s commit title: "exp5 σ-inherited-floor trap never consolidated, already cost a silent
+  VT correction"). All three are same-failure-class (citation-without-enforcement, the
+  DIR-002/DIR-005 pattern) and will be read/disposed together at the SELECT m10 step, likely as a
+  dedicated methodology-infra charter (parallel to how DIR-005 alone became M07-vmeta-gate) — exact
+  scope/bundling decision deferred to that boundary, not decided now. Checkpoint cp-02 is due at
+  milestone_counter=10 (next milestone) — non-blocking, write it and continue, do not stop.
