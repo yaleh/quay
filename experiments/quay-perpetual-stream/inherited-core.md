@@ -849,3 +849,141 @@ Impl-row gate):**
 Source: DIR-016 (filed together with DIR-015, its first concrete instance), resolved by
 M21-impl-row-enforcement. See `directives/archive/DIR-016-*.md`'s `## Resolution` section for the
 full evidence trail.
+
+## Definition of Done (M25-dod-meta-enforcer, DIR-017 Step 1)
+
+DIR-017's Finding names a real risk: four ABSORB-time gates (adversarial-audit, V_meta
+consolidation-lag, line-budget, design-only-milestone impl-row) had each been added incrementally,
+by four different prior milestones (M10/DIR-007, M07/DIR-005, M18/DIR-012, M21/DIR-016), as
+separate conditional HARD BLOCKs scattered across `OUTER-LOOP.md` step 6 and this file — with no
+single place naming ALL of them as one collective "Definition of Done" a milestone must clear, and
+no mechanism preventing a future charter from narrating its way around one of them (the
+"designed-not-wired" disease M17/M18 exhibited: a rule stated in prose, never made to actually
+block). This section is that single collecting place. It does not redefine any of the four gates'
+own mechanics (each stays exactly as specified in its own section, cited below, not re-derived) —
+it names them together, states each one's shape in a common four-field template, and adds a fifth,
+new **no-self-exemption meta-clause** that applies across all four.
+
+**Mechanical enforcement of this section:** `scripts/it0-dod-check.{sh,mjs}` (below) is the standing
+check that a given milestone's charter + ABSORB-entry record actually satisfies all five clauses
+below — wired into `OUTER-LOOP.md` step 6 as a HARD BLOCK on step 7's `milestone_counter++`, in the
+same gate sequence/position as the three narrative HARD BLOCKs it wraps (see "DoD meta-enforcer
+gate" in `OUTER-LOOP.md`).
+
+### Clause 1 — Adversarial-audit gate (DIR-007 / M10-audit-consolidation)
+- **Trigger condition:** fires per the "Adversarial-audit cadence rule" section above — condition
+  (a) the milestone is VT-scoring (capability-growth-typed SELECT entry AND a nonzero realized VT
+  Δv at ABSORB), OR condition (b) the milestone's own iteration-0 recommended skipping iteration-1
+  (a self-exemption attempt). Methodology-infra/governance milestones with no VT weight are EXEMPT
+  BY DEFAULT unless (b) fires for them specifically.
+- **What it checks:** cited from "Adversarial-audit role" and "Adversarial-audit cadence rule"
+  above — a fresh-context, out-of-band subagent dispatched by the OUTER loop (never the inner
+  milestone's own iterations), explicitly charged to try to REFUTE the milestone's Done-when claims
+  and VT Δv, not merely re-derive them.
+- **Pass/fail semantics:** verdict is one of **REFUTED** (names a specific claim and why — BLOCKS
+  the VT-curve append / Done-when-complete claim until corrected), **CONCERNS** (weaker findings,
+  non-blocking, recorded), or **NO REFUTATION FOUND** (clears the gate). If neither trigger
+  condition fires, the gate is a **documented no-op** — the ABSORB log entry must still state
+  plainly that neither condition applied and why, rather than silently omitting the check.
+- **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), the "Adversarial-audit gate"
+  sub-step (see `OUTER-LOOP.md` step 6, immediately after the execution-provenance task write-back
+  sub-step and before the V_meta consolidation-lag gate sub-step).
+
+### Clause 2 — V_meta consolidation-lag gate (DIR-005 / M07-vmeta-gate)
+- **Trigger condition:** fires for every row in `v-meta-ledger.md` whose status is `confirmed`
+  (past the φ 2-cross-domain-confirmation threshold, §4.2) but not yet `consolidated`.
+- **What it checks:** cited from `v-meta-ledger.md`'s schema (`insight | origin milestone |
+  confirmation count | status`) and its "Definitions" section — for each qualifying row, compute
+  `milestones-since-confirmed = milestone_counter (current, pre-increment) − confirming milestone
+  number`. This is compared against `dashboard.md`'s `V_meta consolidation lag` health track's
+  alarm threshold, **K=2**.
+- **Pass/fail semantics:** if `milestones-since-confirmed` exceeds K=2 for any qualifying row, step
+  7's `milestone_counter++` MUST NOT execute until the row is resolved by EITHER (a) consolidating
+  the pattern into this file at the current ABSORB (pasted diff), OR (b) recording an explicit
+  DATED carry-forward reason directly in the ledger row — a missing/blank disposition is not a
+  valid resolution. PASS = no qualifying row exceeds K=2, or all that do have been resolved this
+  ABSORB.
+- **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), the "V_meta consolidation-lag
+  gate" sub-step (immediately after the adversarial-audit gate sub-step, before the design-only-
+  milestone impl-row gate sub-step).
+
+### Clause 3 — Line-budget gate (M18-milestone-model-ceiling-and-diversity-policy)
+- **Trigger condition:** fires at **charter-authoring/plan time** (`OUTER-LOOP.md` step 1, SELECT),
+  NOT at ABSORB — this is the one clause in this section that fires BEFORE dispatch, not after
+  the milestone completes. Stated explicitly here because it is the exception to the other three
+  clauses' ABSORB-time invocation pattern.
+- **What it checks:** cited from the "Milestone ceiling expansion" subsection above and
+  `scripts/it0-ceiling-line-budget-check.sh`'s own header comment — whether a drafted charter's
+  scope plausibly exceeds the small-milestone norm (an explicit `Line budget: <N>` declaration with
+  N > 2000, or, absent that, an "In-scope work" section with more than a threshold count of
+  top-level numbered items) WITHOUT an accompanying phase/stage decomposition plan.
+- **Pass/fail semantics:** exit 0 = PASS (within norm, or over norm but with a phase/stage plan
+  present); exit 1 = FAIL/FLAG (over norm, no plan — charter must be resized or given a plan before
+  dispatch); exit 2 = usage/file-not-found error. Per the script's own header comment.
+- **Current invocation point:** `OUTER-LOOP.md` step 1 (SELECT / charter-authoring), the plan-time
+  line-budget gate — run `scripts/it0-ceiling-line-budget-check.sh <charter-file>` before dispatch,
+  per the "it0 systematic-explore checks" §4.4e pattern every charter's own it0 section restates.
+
+### Clause 4 — Design-only-milestone impl-row gate (DIR-016 / M21-impl-row-enforcement)
+- **Trigger condition:** fires when a milestone is **design-only**: EITHER its `backlog.md` row
+  states "design delivered"/"design-doc only" (or equivalent), OR its deliverable includes a
+  "Done-when clauses a future implementing milestone would need" section (or equivalent dispatch-
+  ready follow-up checklist). A milestone shipping product/method-infra code, or itself an `-IMPL`
+  implementation, is NOT design-only and this clause N/A-passes.
+- **What it checks:** cited from "Design-only milestone → mandatory `-IMPL` row rule" above and
+  `scripts/it0-impl-row-check.sh` — whether a corresponding selectable, non-DONE `<M-NAME>-IMPL`
+  candidate row already exists in `backlog.md`.
+- **Pass/fail semantics:** exit 0 = PASS (not design-only, rule N/A; or design-only and the `-IMPL`
+  row exists); exit 1 = FAIL/FLAG (design-only, no `-IMPL` row found — step 7's
+  `milestone_counter++` MUST NOT run until the row exists and the script re-run PASSes); exit 2 =
+  usage/file-not-found error.
+- **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), the "Design-only-milestone
+  impl-row gate" sub-step (immediately after the V_meta consolidation-lag gate sub-step, before the
+  driver→master publish sub-step).
+
+### Clause 5 — No-self-exemption meta-clause (new, this milestone)
+No milestone charter or ABSORB step may declare itself exempt from a DoD clause (1-4 above) without
+an explicit, human-visible **waiver line** logged in `dashboard.md`. Concretely:
+
+- **What counts as a self-exemption attempt:** a charter's "Explicitly OUT of scope" section (or an
+  ABSORB log entry) that narrates away one of the four clauses above — language stating a gate does
+  not apply, is skipped, or is exempted — WITHOUT a corresponding waiver line (defined below) present
+  in `dashboard.md`. A charter's LEGITIMATE statement that a clause's own trigger condition does not
+  fire (e.g. clause 1's documented-no-op case when neither cadence-rule condition applies, or clause
+  4's N/A-pass when a milestone is not design-only) is NOT a self-exemption — the trigger simply
+  didn't fire, and the clause's own disposition was still recorded, not narrated away. The
+  distinguishing test: did the record show the gate was EVALUATED and DISPOSITIONED (even as
+  "N/A, trigger did not fire") — or was the gate's applicability itself argued away in prose with no
+  disposition recorded at all? The former is a legitimate non-firing; the latter is an undeclared
+  self-exemption.
+- **The mandatory waiver-line shape**, when a clause's trigger DOES fire but the milestone author
+  believes an exception is warranted anyway: a single line in `dashboard.md`'s Log section, dated,
+  of the exact shape `WAIVER: <milestone-id> | <clause-name> | <one-line reason> | <date>` — e.g.
+  `WAIVER: M99-example | line-budget gate | pre-existing charter grandfathered before M18 shipped |
+  2026-07-18`. Absence of this line, when scope-exemption language is present for a clause whose
+  trigger fired, is itself a DoD violation.
+- **Why this is mechanically detectable, not just prose:** for clauses 3 (line-budget) and 4
+  (impl-row), the charter/ABSORB text is directly inspectable — `it0-dod-check.mjs` (below) scans
+  for exemption-adjacent language paired with an absent waiver line. For clauses 1 (adversarial-
+  audit) and 2 (V_meta-lag), the existing "documented no-op" / row-update ABSORB-log discipline
+  already required by those clauses' own sections above satisfies the same discipline BY
+  CONSTRUCTION — a missing disposition statement for either gate is treated as a DoD FAIL under
+  clause 5, indistinguishable from an undeclared silent skip (cited, not re-derived, from clauses 1
+  and 2's own "documented no-op"/row-update requirements above).
+
+### `scripts/it0-dod-check.{sh,mjs}` — the standing mechanical check
+Given a milestone id, its charter file path, and its dashboard/ABSORB-entry text (or a fixture file
+standing in for that text), runs all 5 clauses above and exits 0 (all PASS/legitimately N/A, no
+undeclared self-exemption), 1 (at least one clause FAILs, or an undeclared self-exemption is found),
+or 2 (usage/environment error) — mirroring every sibling `it0-*.{sh,mjs}` pair's exit-code
+convention. See the script's own header comment for the exact per-clause implementation (clauses 3/4
+shell out to the existing `it0-ceiling-line-budget-check.sh`/`it0-impl-row-check.sh` directly;
+clauses 1/2 check documentation-discipline, not the underlying judgment call; clause 5 is a
+pattern/waiver-line scan). Wired into `OUTER-LOOP.md` step 6 as a HARD BLOCK on step 7's
+`milestone_counter++`, positioned immediately after the three existing HARD BLOCKs it wraps and
+before the driver→master publish sub-step — see `OUTER-LOOP.md`'s "DoD meta-enforcer gate" sub-step.
+
+Source: DIR-017 (`directives/pending/DIR-017-*.md`), Step 1 only — resolved by
+M25-dod-meta-enforcer. DIR-017 itself stays `pending` until a human confirms this step is operative
+before Steps 2-3 (the escrow-Δv clause, product-work test-floor clause, leakage metrics) may be
+SELECTed. See `directives/pending/DIR-017-*.md`'s "Human-verification gate" section.
