@@ -43,21 +43,18 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import path from "node:path";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { loadConfig, activeProvider } from "./config.js";
 import { connectProvider } from "./provider-client.js";
 import { composePayload, deliverTrigger } from "./action.js";
 import { resolveProviderEnv } from "./provider-env.js";
+import { QUAY_VERSION } from "./version.js";
 
 // QX-035 (experiment 4, iteration 10): read package version at startup for
 // Mitigation A (_version field in task_list response) and Mitigation B
 // (Version: in tool description). ENV-001 mitigation — lets AI agent consumers
 // detect MCP server staleness by comparing _version against their expected version.
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { version: QUAY_VERSION } = JSON.parse(
-  readFileSync(path.resolve(__dirname, "../package.json"), "utf8")
-);
+// (M01-dist, exp5 it0: extracted to ./version.js so the SEA build can alias
+// it to a build-time-embedded shim — see scripts/version-sea-shim.js.)
 
 // resolveProviderEnv is now imported from ./provider-env.js (QN-045): this
 // file, bin/quay.js, and serve.js all share the single implementation there
