@@ -1,6 +1,6 @@
 # DIR-001
 
-- status: pending
+- status: applied (partial — items 1-2 this milestone, items 3-6 backlogged)
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: The evaluation instrument is a polish engine blind to the Provider/ABI surface — add capability-completeness evaluation methods
@@ -84,4 +84,28 @@ simulated-user:
    comparison, never from the simulated-user.
 
 ## Resolution (added when moved to archive/, or updated in place if deferred)
-<!-- to be filled in by the iteration that applies this directive -->
+
+Applied at m3 SELECT (2026-07-18), draining `directives/pending/` per the outer-loop HARD GATES
+directive-disposition requirement. Disposition is split by requested item:
+
+- **Item 1 (add Provider-ABI VT surface, capability matrix)**: **APPLIED THIS MILESTONE.**
+  Supersedes the already-authored-but-not-yet-dispatched `charters/M03-discover.md` (0 inner
+  iterations spent on it — cleanly deferred, not discarded, see below) as m3's actual selection.
+  New charter `charters/M03-abi-eval.md` authored; m3 = **M-ABI-EVAL**. Rationale: DIR-001 explicitly
+  asks this happen "before any further Core-surface polish milestone is selected," and M03-discover's
+  own persona-review method is exactly the polish-engine channel DIR-001's finding #1 indicts as
+  structurally blind to this gap — continuing with it first would reproduce the blind spot this
+  directive exists to fix.
+- **Item 2 (ABI conformance / differential-test suite, native vs github)**: **APPLIED THIS
+  MILESTONE**, folded into the same M03-abi-eval charter as in-scope work (both items share one
+  audit-channel mechanism per `inherited-core.md`'s domain-misfit procedure — a differential suite
+  IS the capability-matrix scorer's evidence source).
+- **Items 3-6 (outcome-based eval, adversarial/security eval, comparative benchmark, standing
+  human-review milestone cadence)**: **BACKLOGGED, not applied this milestone** — genuinely
+  separate-scoped methodology-infra work (would blow M03-abi-eval's charter past single-milestone
+  size / dilute its Done-when shape). Added to `backlog.md` as four new candidate rows for future
+  SELECT passes, cross-referenced back to this directive so provenance isn't lost.
+- **M03-discover.md** (the deferred charter): NOT discarded — still valid standalone scope (live
+  VT re-score of the 5 existing chart-0 surfaces + fresh persona pass over the SEA/CI surface).
+  Marked "ready, deferred" in `backlog.md` for m4+ SELECT once M-ABI-EVAL's capability-matrix
+  re-score gives it a completed Provider-ABI baseline to include in the same persona sweep.

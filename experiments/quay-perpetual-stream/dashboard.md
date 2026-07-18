@@ -140,3 +140,23 @@ Slope (marginal points / milestone): **+6.0** (1 data point so far — trend, no
   it0 gate-hash check run via M-GATES' own script (first real-world use of the mechanized check,
   one milestone after being built): `it0-gate-hash-check.sh charters/M03-discover.md` → **PASS**
   (exit 0). Dispatching inner iteration-0 next.
+- **DIR-001 drain (2026-07-18, before m3 dispatch)**: `ls -1 experiments/quay-perpetual-stream/directives/pending/`
+  showed `DIR-001-evaluation-blind-spot-provider-abi-and-outcome-based-methods.md` (1 file).
+  Disposition: **applied (partial)**. Finding: VT's chart-0 surface set has no Provider-ABI term,
+  so the value function cannot see quay's core ABI-completeness gap; the GitHub Provider has been
+  out of the eval loop since exp2 (status-only write, unimplemented title/body/labels/parent-children).
+  This SUPERSEDES the just-authored m3-attempt-3 selection (M03-discover) — its own persona-review
+  method is exactly the polish-engine channel DIR-001 indicts, so running it first would reproduce
+  the blind spot. M03-discover is DEFERRED (not discarded, 0 inner iterations spent — same clean
+  pattern as the M-CLI-UX/M-DOCS/M-DIRTASK rejections) to m4+, ready to dispatch as-is. **SELECT m3
+  (final) = M-ABI-EVAL** (explore, chart-0→chart-1 transition per §4.1). DIR-001 items 3-6
+  backlogged as 4 new candidate rows (`backlog.md`), not built this milestone (would blow this
+  charter's scope). Full disposition + rationale recorded in
+  `directives/archive/DIR-001-evaluation-blind-spot-provider-abi-and-outcome-based-methods.md`'s
+  Resolution section. Charter authored: `charters/M03-abi-eval.md` (scope: capability matrix +
+  native/github differential conformance suite; explicitly NOT closing the write-completeness gap
+  itself — that's later scope this milestone's output makes selectable). Value hypothesis: chart-1
+  VT₀ = 88.25 + 20·0.30(placeholder) = 94.25 pre-dispatch estimate; REALIZED cov to be derived from
+  this milestone's own matrix+suite evidence, not the placeholder. Gate-hash check:
+  `it0-gate-hash-check.sh charters/M03-abi-eval.md` → **PASS** (exit 0). Dispatching inner
+  iteration-0 next via `baime:iteration-executor`.
