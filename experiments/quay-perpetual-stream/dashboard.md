@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 18** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 19** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -1430,3 +1430,42 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   phase/stage plan required). Adversarial-audit gate NOT expected to trigger (Δv̂=0, no iteration-0
   self-exemption authorized). Dispatching inner iteration-0 and iteration-1 next, both from
   worktrees off the current master HEAD (`1d85eb7`).
+- **ABSORB m19 = M-TASK-TO-PLAN-DOCS-RECONCILE** 2026-07-18. Both iterations converged independently
+  off base `a99af9d`: iteration-1 (`dc4ec5f`, branch `exp5-m19-iteration-1`) and iteration-0
+  (`8e93aef`, branch `exp5-m19-iteration-0`) each independently fixed the same DIR-013 F1/F2/F3
+  defects + process note, iteration-1 with no prior read of iteration-0's materials.
+  `git merge --no-ff exp5-m19-iteration-1` → clean. `git merge --no-ff exp5-m19-iteration-0` →
+  **conflict across all 5 touched files** (both docs, `OUTER-LOOP.md`, `backlog.md`, the archived
+  DIR-013 file) — both iterations applied near-identical fixes as many small overlapping-but-
+  differently-worded hunks. Resolved via wholesale-selection (`git checkout --theirs` per file, same
+  precedent as M16/M17/M18: clause-by-clause reconciliation of near-duplicate prose judged
+  higher-risk than picking one complete, self-consistent version): kept iteration-0's version
+  throughout. Quality signal: iteration-0's report documents catching a **second** instance of the
+  "§§12-18" section-count undercount (inside §19's own status text, not just the header/TOC) —
+  iteration-1's report does not mention finding this second instance. Merge committed as `2501c44`.
+  Post-merge verification: no remaining conflict markers (`grep` swept all 5 files); proposal TOC
+  now correctly lists §12-19; a fresh `grep -n '§8\.4\|§8\.5'` sweep of the merged proposal confirms
+  zero remaining dangling references. `git diff --stat a99af9d..HEAD` (excluding milestone
+  worktree/report dirs) shows the 5 expected substrate files changed, plus two unrelated files from
+  the human's own concurrent commits in this same window (`docs/proposals/exp5-codex-continuous-
+  development-port.md`, `7c7d2f7`'s new **DIR-014** — see below) correctly excluded from this
+  milestone's own scope check. No `.claude/skills/` files touched (Done-when clause 6). `DIR-013`
+  moved to `directives/archive/` with a Resolution section, `backlog.md`'s
+  `M-TASK-TO-PLAN-DOCS-RECONCILE` row marked DONE (Done-when clauses 7-8). Full test suite: N/A,
+  stated explicitly — only markdown changed, no script/tooling touched (Done-when clause 7 covers
+  this case explicitly). Adversarial-audit gate correctly did NOT fire (Δv̂=0 governance-integrity
+  milestone, no iteration-0 self-exemption attempted). `milestone_counter` → **19**. Worktrees/
+  branches for both M19 iterations to be removed next.
+  **New pending directive discovered this milestone's boundary**: the human independently committed
+  `directives/pending/DIR-014-build-and-wire-the-proposal-to-plan-process-not-just-design-and-a-
+  bypassable-gate.md` (`7c7d2f7`) during this milestone's dispatch/merge window. Finding: DIR-012's
+  proposal→plan process has scaffolding (M18's sizing ceiling + line-budget gate + written diversity
+  policy) but no engine — the `quay-task-to-plan` skill doesn't exist, the diversity policy is
+  discretionary and gated on a nonexistent skill, `OUTER-LOOP.md` DISPATCH never actually invokes the
+  pipeline (it lives in `inherited-core.md` as prose only), and the one enforced gate (line-budget)
+  is bypassed by any milestone kept under ~2000 lines — the same DIR-002 "enforcement half never
+  built" pattern recurring one level up. Requests a development-class milestone that builds the
+  skill, wires DISPATCH to invoke it, and makes it the default (not discretionary) for
+  capability-growth milestones. To be drained at the next SELECT boundary (m19→m20), per the
+  standing "drain `directives/pending/`" step. **Checkpoint due at m20** (checkpoint cadence: every
+  5 milestones, last checkpoint at m15) — write it non-blocking at the next ABSORB, then continue.
