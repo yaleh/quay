@@ -511,3 +511,22 @@ iteration-0's arithmetic slip of 95.83 during iteration-1's independent re-verif
   **Standing pre-commitment reaffirmed**: SELECT m8 = M-MERGE-RECOVER, no further deferral — three
   consecutive governance/infra-heavy explore milestones (m5, m6, m7) is enough; m8 must be
   product-value work absent a genuine blocking gap or external HALT.
+- **SELECT m8 = M-MERGE-RECOVER** 2026-07-18. No `.halt`, `directives/pending/` empty (only
+  `.gitkeep`). Honoring the pre-commitment made at m7's ABSORB — first product-value milestone
+  since m4, breaking a 3-milestone governance/infra-explore streak (m5/m6/m7). Confirmed at
+  charter-authoring time via `git diff --stat master experiment-4-iteration-19 -- packages/quay`
+  that a direct branch re-merge of the original exp4 dev-phase commits is unsafe: those branches
+  predate M-DIST and M-ABI-EVAL and would delete files master now has (`scripts/build-sea.sh`,
+  `scripts/esbuild-sea.mjs`, `scripts/version-sea-shim.js`, `test/provider-abi-conformance.
+  test.mjs`) — **chose re-implement-fresh against current master**, per backlog's own
+  safer-path guidance. Charter `charters/M08-merge-recover.md` covers all 9 in-scope items
+  (CB-021/CB-006/CB-022/UQ-047/UQ-048/PKG-003..008/DOC-001..007) as 7 binary Done-when clauses.
+  Value type: capability-growth (primary) + instrument-correction (secondary — CHANGELOG's false
+  v0.2.0 claims). Δv̂ re-derived from m4's live baseline (CLI 0.80, Docs 0.55, Packaging 0.85) at
+  ≈+7.6 (CLI+3.25, Docs+3.75, Packaging+0.60), superseding the backlog row's earlier pre-charter
+  "+4 to +6" guess — realized number at ABSORB is authoritative, not this estimate. it0 domain-
+  misfit audit-channel check explicitly applies the just-consolidated CI-job≡audit-channel
+  convention (`inherited-core.md`, added at m7's own ABSORB) — first real-world reuse of that
+  consolidation, one milestone after landing. Gate-hash check:
+  `it0-gate-hash-check.sh --by-reference charters/M08-merge-recover.md` → **PASS**. Dispatching
+  inner iteration-0 next.
