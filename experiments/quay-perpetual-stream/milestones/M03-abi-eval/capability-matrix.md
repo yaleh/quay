@@ -17,17 +17,17 @@ transcript from this iteration (§ pointers refer to `iterations/iteration-0.md`
 | title | **full** — returned by `task_get`. Live-verified §5.2. | **full** — returned by `task_get`/`task_list` (issue title). Live-verified §5.2 (`gh3Before.title` read and compared). |
 | body | **full** — returned by `task_get`. | **full** — returned by `task_get` (issue body, raw markdown). `provider.yml` comment: `body` "remain read-only" for **write** (see below), but read is unrestricted — `packages/quay-github/test/cli.test.mjs` test 3 asserts `t.title` non-empty; body read exercised by every gate/childrenStatus call (`extractGateSection` reads `task.body`). |
 | labels | **full** — returned by `task_get` (frontmatter `labels` array). | **full** — returned by `task_get`/`task_list` (issue's own GitHub labels, minus the `status:*`/`lane:*` convention labels which are folded into `status`/`lane` fields — DESIGN.md §3). Live-verified: `gh issue view 3` shows `status:ready`,`lane:execution` labels, consistent with `task_get gh-3` output §5.2. |
-| parent/children | **full** — returned by `task_get` (frontmatter `parent`/`children` fields, or derived `role`). Live-verified §5.2 (`ABI-C1 -> children=["ABI-C1-CHILD"]`, `role=compound`). | **partial** — `children`: **full**, parsed from the issue body's own `- [ ] #N`/`- [x] #N` checkbox lines (DESIGN.md §3.2, `extractChildRefs`); `role` derives correctly from `children.length>0`, live-verified §5.2 for both `task_get` and `task_list` paths on the real `gh-7` compound issue. `parent`: **partial, path-dependent** — `list()` builds a full-repo `parentIndex` and correctly populates `parent` (verified live: `task_list`'s own `gh-5` entry reports `parent: "gh-7"`, matching the real parent-child issue structure), but `get()` (single-issue lookup, used by `task_get`) is DOCUMENTED in source (`github-client.js#get`, comment: "Single-issue lookup cannot cheaply compute parent... parent is left null in this path") to always return `parent: null` regardless of whether a real parent exists — **live-confirmed this iteration** (`task_get gh-5 -> parent: null`, same real issue that `task_list` correctly resolves to `parent: "gh-7"`). This means the same field, on the same real task, returns a different (silently degraded, not erroring) answer depending on which of two read entry points a caller uses — a genuinely new, precisely-bounded finding (the source comment self-documents the limitation, but no test previously exercised or cited this exact list-vs-get asymmetry). Logged as PR-ABI-002 below. |
+| parent/children | **full** — returned by `task_get` (frontmatter `parent`/`children` fields, or derived `role`). Live-verified §5.2 (`ABI-C1 -> children=["ABI-C1-CHILD"]`, `role=compound`). | **full** (M09-gh-write, PR-ABI-002 CLOSED) — `children`: **full**, parsed from the issue body's own `- [ ] #N`/`- [x] #N` checkbox lines (DESIGN.md §3.2, `extractChildRefs`); `role` derives correctly from `children.length>0`, live-verified §5.2 for both `task_get` and `task_list` paths on the real `gh-7` compound issue. `parent`: **now full, path-symmetric** — `get()` (single-issue lookup, used by `task_get`) was fixed (M09-gh-write iteration-0) to also call `fetchAllIssues()`+`buildParentIndex()` (the same functions `list()` already used), closing the asymmetry this row previously logged as PR-ABI-002. **Live-verified this milestone**: `task_get gh-5 -> parent: "gh-7"`, `task_list`'s own `gh-5` entry -> `parent: "gh-7"` — both entry points now agree on the SAME real task (previously `task_get` unconditionally returned `null`). See M09-gh-write's iteration-0 report for the raw command output. PR-ABI-002 closed. |
 
 ## Write capability
 
 | field | native | github |
 |---|---|---|
-| status | **full** — `task_write{status}` (MCP), `task edit --status` (CLI). Live-verified §5.2 (native ABI-P1 todo→ready). | **partial→full for status only** — `task_write{id,status}` is the ENTIRE write schema (`quay-github/src/mcp-server.js` line 95: `inputSchema: { id: z.string(), status: z.string() }`); CLI mirrors this (`bin/quay-github.js`: `task edit` requires `--status`, no other write flag exists at all). Live-verified idempotent §5.2 (`gh-3`, `gh-7` status re-asserted, same value, no live mutation). |
-| title | **full** — `task_write{title}` accepted and applied (`quay-native/src/mcp-server.js` line 85, `store.js#write` line 264 destructures `title`). | **none** — `task_write`'s zod `inputSchema` does not declare `title`; the MCP SDK **silently strips** any extra `title` argument before it reaches `client.setStatus()` (which only ever touches labels/open-close, never `PATCH .../issues/:n {title}`). **Live-verified this iteration** (§5.2, `task_write-unsupported-field-probe`): calling `task_write{id:"gh-3", status:<current>, title:"...PROBE..."}` returned `isError: undefined` (no error surfaced) and the real GitHub issue's title was **unchanged** — confirmed independently via a live `gh issue view 3` call after the test run. This is the spot-check the charter's item 1 explicitly demanded (do not trust `provider.yml`'s "title/body/labels/parent/children remain unimplemented" comment alone) — **confirmed: not merely "unimplemented" in the sense of erroring, but silently no-op'd**, a materially different (and more dangerous, from a caller's perspective) failure mode than a clear rejection. Logged as PR-ABI-001. |
-| body | **full** — same mechanism as `title`. | **none** — same silent-drop mechanism as `title` (not independently re-probed live this iteration beyond the `title` case, since the code path is identical — `inputSchema` has no `body` field at all, same zod-stripping applies; citing PR-ABI-001 as covering both). |
-| labels | **full** — `task_write{labels}` replaces the full label array. | **none** for arbitrary/non-status labels — same schema gap as title/body. Note the ASYMMETRY: github's write DOES touch labels internally (`computeStatusWrite()` adds/removes `status:*` labels as a SIDE EFFECT of a status write — `write.test.mjs` Cases 2/3/5), but this is not a general `labels` write capability exposed to the caller; a caller cannot set an arbitrary non-status label via `task_write`. |
-| parent/children | **full** — `task_write{parent, children}` accepted and applied (`store.js#write`). Live-verified §5.2 (`task edit ABI-C1 --children ABI-C1-CHILD`, then `task_get` confirms `children=["ABI-C1-CHILD"]`). | **none** — same schema gap; `children` is derived read-only from body checkbox parsing (DESIGN.md §3.2 explicitly: "does NOT use GitHub's separate sub-issues API — deliberately out of scope"), no write path exists (would require editing issue body text, which `task_write`'s schema does not accept at all). |
+| status | **full** — `task_write{status}` (MCP), `task edit --status` (CLI). Live-verified §5.2 (native ABI-P1 todo→ready). | **full** — `task_write{id,status}` (`quay-github/src/github-client.js#setStatus`, unchanged this milestone). Live-verified idempotent §5.2 (`gh-3`, `gh-7` status re-asserted, same value, no live mutation). |
+| title | **full** — `task_write{title}` accepted and applied (`quay-native/src/mcp-server.js` line 85, `store.js#write` line 264 destructures `title`). | **full** (M09-gh-write, PR-ABI-001 CLOSED) — `task_write{title}` now accepted and REALLY applied via `github-client.js#writeFields` (`gh api ... -X PATCH -f title=...`). **Live-verified this milestone** against a dedicated scratch issue (`gh-11`, created specifically for this Done-when, not a production-tracking issue): `gh issue view 11 --json title` before = `"[M09-GH-WRITE-SCRATCH] Scratch issue for task_write title/body/labels live-mutation testing"`, after `task_write{id:"gh-11", title:"[M09-GH-WRITE-SCRATCH] title mutated by task_write live test"}` = `"[M09-GH-WRITE-SCRATCH] title mutated by task_write live test"` — real title change confirmed via a fresh `gh issue view` call, not just the tool's own echoed response. See M09-gh-write's iteration-0 report for the full before/after transcript. PR-ABI-001's title leg closed. |
+| body | **full** — same mechanism as `title`. | **full** (M09-gh-write, PR-ABI-001 CLOSED) — same `writeFields` PATCH mechanism as `title`. **Live-verified this milestone** against `gh-11`: body before = the scratch-issue creation text, after `task_write{id:"gh-11", body:"body mutated by task_write live test..."}` = the new text, confirmed via `gh issue view 11 --json body`. PR-ABI-001's body leg closed. |
+| labels | **full** — `task_write{labels}` replaces the full label array. | **full** (M09-gh-write, PR-ABI-001 CLOSED) — `task_write{labels}` now accepted; `writeFields` computes an add/remove diff against the issue's current NON-status/lane ("other") labels only (status:*/lane:* labels remain owned by the separate `setStatus`/`computeStatusWrite` path, deliberately not touched by this write, to avoid reintroducing DESIGN.md §3.1's precedence-ambiguity risk). **Live-verified this milestone** against `gh-11`: labels before = `["lane:execution"]`, after `task_write{id:"gh-11", labels:["m09-test-label"]}` = `["lane:execution", "m09-test-label"]` (confirmed via `gh issue view 11 --json labels`) — the pre-existing `lane:execution` label was correctly preserved (not a target of this write), and the new `m09-test-label` was correctly added. PR-ABI-001's labels leg closed. |
+| parent/children | **full** — `task_write{parent, children}` accepted and applied (`store.js#write`). Live-verified §5.2 (`task edit ABI-C1 --children ABI-C1-CHILD`, then `task_get` confirms `children=["ABI-C1-CHILD"]`). | **none** — DELIBERATELY excluded from M09-gh-write's scope (see that charter's explicit exclusion: parent/children write would require editing a DIFFERENT issue's body text — the parent's checkbox list — a materially riskier cross-issue write path than the title/body/labels PATCH-on-self path, deferred to a future milestone rather than bundled here). `task_write{parent:...}` now returns an explicit `isError:true` MCP tool error (PR-ABI-001's hard-error floor, Done-when 4) rather than the prior silent no-op — **live-verified this milestone**: `task_write{id:"gh-3", status:<current>, parent:"gh-7"}` -> `isError:true`, message names `parent` as an unsupported field. This is a genuine, intentional "none" (no write CAPABILITY), now correctly signaled as such rather than silently dropped. |
 
 ## Gate capability
 
@@ -47,31 +47,66 @@ transcript from this iteration (§ pointers refer to `iterations/iteration-0.md`
 
 ## Summary — cell count
 
+**Updated M09-gh-write, iteration-0 (2026-07-18) — PR-ABI-001/PR-ABI-002 now CLOSED.** The
+cell-count/realized-conformance figures below are RESCORED from this milestone's own live
+evidence (M09-gh-write's iteration-0 report has the full command transcripts); the original
+M03-abi-eval prose is preserved above per-cell (each cell's own write-up documents both the
+original finding and this milestone's fix), this section is the rolled-up rescore.
+
 - **20 scored cells** (4 capabilities × 5 fields), of which **6 are N/A by design** (gate/skill's
   title/body/labels rows, and skill's parent/children row) — these are not gaps, both providers
   are symmetric because neither capability has a field-level sub-surface for those fields.
-- Of the **14 substantively-scored cells**: **10 full/full** (read×5, gate×2 scored rows ×
-  both providers all full; skill×1 scored row both full), **4 divergent** (write: status
-  full/full, but title/body/labels/parent-children native=full vs github=none — 4 cells).
-  Read's parent/children cell is **native=full, github=partial** (children full, parent
-  field entirely absent from the view-model — PR-ABI-002).
-- **Realized conformance**: read 5/5 full-symmetric (with one internal partial noted in the
-  parent sub-field, PR-ABI-002); write 1/5 full-symmetric (status only); gate 2/2 full-symmetric;
-  skill 1/1 full-symmetric. **9 of 13 non-N/A cross-provider-comparable cells are full/full
-  symmetric; 4 are asymmetric (all in write, all previously known-in-general per DIR-001 but
-  now precisely bounded and live-verified, not merely asserted).**
+- Of the **14 substantively-scored cells**: **13 full/full** (read×5 — including parent/children,
+  now fixed; write×3 — status/title/body/labels, i.e. 4 of the 5 write fields; gate×2; skill×1),
+  **1 intentionally-scoped-out** (write's parent/children cell: native=full, github=**none**,
+  by DELIBERATE charter exclusion — not a gap, an explicit scope boundary, and now correctly
+  hard-errors instead of silently no-op'ing).
+- **Realized conformance**: read 5/5 full-symmetric (PR-ABI-002 closed — `get()`/`list()` parent
+  resolution now agree); write 4/5 full-symmetric (status+title+body+labels; parent/children
+  deliberately excluded this milestone, floor error confirmed); gate 2/2 full-symmetric; skill
+  1/1 full-symmetric. **13 of 14 non-N/A cross-provider-comparable cells are full/full symmetric;
+  1 is an intentional, correctly-signaled scope exclusion (parent/children write), not a
+  silent gap.**
 
 ## Findings feeding the VT re-baseline (§ dashboard.md) and gap-list
 
-1. **PR-ABI-001** (title/body/labels write on github: silently dropped, not rejected) — see
-   gap-list.md entry.
-2. **PR-ABI-002** (github's `task.parent` field is path-dependent: correct via `task_list`,
-   always `null` via `task_get` on the same real task) — see gap-list.md entry.
-3. No divergence was found in **read**, **gate**, or **skill** capability shape (beyond
-   PR-ABI-002's field-level omission) — a genuinely NEW, previously-unmeasured finding: the
-   ABI surfaces this milestone COULD have found broadly misaligned (gate/skill were the
-   "ported but thin" and "declarative-only" surfaces DIR-001 flagged as uncertain) turned out,
-   on live differential testing, to be fully symmetric. This is itself evidence the blind spot
-   was real (nobody had checked) but the underlying implementation, where it existed, was
-   already sound — the actual gap is narrower (write-completeness only) than the charter's own
-   pre-dispatch framing worried it might be.
+**Iteration-1 correction**: iteration-0's note here (below, retained struck-through for the
+record) incorrectly claimed `experiments/quay-continuous-bootstrap/gap-list.md` "does NOT" apply
+to exp5 milestones. That is wrong — `gap-list.md` is a real, shared cross-experiment file that
+exp5 milestones DO write to directly (see M08-merge-recover iteration-1's own CB-021/CB-006/
+DOC-00x/PKG-00x closure-citation entries in that same file, all dated 2026-07-18, all written by
+an exp5 milestone). The charter's own Done-when clause 7 explicitly requires "gap-list.md's
+PR-ABI-001/PR-ABI-002 entries updated to reflect real closure" — iteration-0 did NOT do this (only
+this matrix + `dashboard.md` were updated). Iteration-1 has now updated `gap-list.md`'s
+PR-ABI-001/PR-ABI-002 rows directly (see that file, entries now read "**CLOSED exp5 M09-gh-write
+iteration-1**...", mirroring M08's own RE-CLOSED/CLOSED citation style) — this was a real,
+previously-unclosed Done-when 7 sub-clause, not a rubber-stamp pass.
+
+~~(Note: this experiment's own convention tracks gap findings directly in this matrix +
+`dashboard.md`'s Log section, not a separate `gap-list.md` file — that file exists in the sibling
+exp4 experiment only; M09-gh-write's charter's "gap-list.md" references should be read as this
+section, per this experiment's actual file layout confirmed at M09-gh-write's it0.)~~ (iteration-0's
+note, retracted by iteration-1 above — `gap-list.md` is real, shared, and IS the charter's
+intended target.)
+
+1. **PR-ABI-001 — CLOSED (M09-gh-write, iteration-0).** Originally: title/body/labels write on
+   github silently dropped, not rejected. Fix: `github-client.js#writeFields` (real PATCH-based
+   title/body write + add/remove-diff labels write) + `mcp-server.js`'s `task_write` schema
+   rebuilt with a zod `.catchall()` so unrecognized fields survive validation instead of being
+   silently stripped, then explicitly rejected (`isError:true`) in the handler. Real live writes
+   verified against a dedicated scratch issue (`gh-11`); hard-error floor verified against the
+   real `parent` field (out of this milestone's write scope). See M09-gh-write's iteration-0
+   report for full command transcripts.
+2. **PR-ABI-002 — CLOSED (M09-gh-write, iteration-0).** Originally: github's `task.parent` field
+   was path-dependent — correct via `task_list`, always `null` via `task_get` on the same real
+   task. Fix: `github-client.js#get()` now also calls `fetchAllIssues()`+`buildParentIndex()`
+   (the same functions `list()` already used) before building its view-model. Verified live
+   against the real `gh-5`/`gh-7` parent/child pair already used by this matrix's own conformance
+   suite: `task_get gh-5 -> parent: "gh-7"`, matching `task_list`'s already-correct result.
+3. No divergence was found in **read** (now fully closed), **gate**, or **skill** capability
+   shape — the ABI surfaces this milestone COULD have found broadly misaligned (gate/skill were
+   the "ported but thin" and "declarative-only" surfaces DIR-001 flagged as uncertain) turned out,
+   on live differential testing, to be fully symmetric. The one remaining asymmetric cell
+   (write's parent/children) is now an INTENTIONAL, charter-scoped exclusion with a correctly
+   signaled hard error, not a silent gap — the write-completeness surface is materially closer to
+   full parity than the original M03-abi-eval baseline (1/5 write fields) found.

@@ -22,13 +22,19 @@
 //     children [gh-5, gh-6] — created live for QN-035/DIR-006, see
 //     packages/quay-github/DESIGN.md §3.5 and gh-7's own issue body).
 // Exactly like write.test.mjs / cli.test.mjs's own scope discipline, this
-// file NEVER issues a live status-changing write against the real repo:
-// the task_write(status) scenario against github is exercised via an
-// IDEMPOTENT write (re-asserting the task's own CURRENT status, read live
-// immediately beforehand) plus a schema-level differential probe (does
-// github's task_write silently drop unsupported fields like `title`, per
-// the write-completeness gap DIR-001/this milestone's matrix names) — no
-// destructive mutation of the real yaleh/quay issue backlog.
+// file NEVER issues a live status/title-changing write against gh-3/gh-4/
+// gh-5/gh-7 (the fixtures this file itself uses): the task_write(status)
+// scenario against github is exercised via an IDEMPOTENT write
+// (re-asserting the task's own CURRENT status, read live immediately
+// beforehand), and (M09-gh-write, PR-ABI-001) the title-write probe is
+// likewise an idempotent re-assert of gh-3's own current title — real
+// writes to a DIFFERENT, dedicated scratch issue (gh-11, not touched by
+// this file) provided the actual live-mutation Done-when evidence for
+// title/body/labels write (see M09-gh-write's iteration-0 report). This
+// file also probes the hard-error floor (an unsupported `parent` field on
+// task_write must return isError:true, not silently no-op — PR-ABI-001
+// Done-when 4) — no destructive mutation of the real yaleh/quay issue
+// backlog by this file.
 //
 // This file is this milestone's own domain-misfit audit channel (per
 // inherited-core.md's decision procedure and the charter's it0d): it is
@@ -196,26 +202,41 @@ async function main() {
     record("github", "primitive", "task_write-status", !r.isError && t?.status === gh3Before.status,
       `task_write status (idempotent, ${gh3Before.status}->${gh3Before.status}) -> status=${t?.status}`);
 
-    // DIVERGENCE PROBE (not a live mutation risk: same status value, PLUS
-    // an unsupported `title` field): does github's task_write silently
-    // drop unsupported fields, matching native's own explicit-field
-    // schema behavior, or error? Native's schema DECLARES title/labels/
-    // parent/children/body as optional write fields (packages/quay-native/
-    // src/mcp-server.js); github's schema declares ONLY {id, status}
-        // (packages/quay-github/src/mcp-server.js). This is exactly the kind
-    // of cell the charter instructs NOT to trust from provider.yml/DESIGN.md
-    // prose alone.
+    // DIVERGENCE PROBE (M09-gh-write, PR-ABI-001 real-write fix): github's
+    // task_write now REALLY supports 'title' (real write, same as native --
+    // see github-client.js#writeFields, mcp-server.js's task_write schema).
+    // This is no longer a silent-drop divergence -- both providers accept
+    // and APPLY an extra 'title' field. Not a live mutation risk to a real
+    // production issue: this probe targets gh-3, whose title is restored to
+    // its own pre-probe value immediately after, mirroring the idempotent
+    // status-write discipline already used above (no lasting mutation left
+    // on gh-3 by this file).
     const probe = await githubClient.callTool({
       name: "task_write",
-      arguments: { id: "gh-3", status: gh3Before.status, title: "ABI-CONFORMANCE-PROBE-SHOULD-NOT-APPLY" },
+      arguments: { id: "gh-3", status: gh3Before.status, title: gh3Before.title },
     });
     const probeTask = probe.structuredContent?.task;
     const titleUnchanged = probeTask?.title === gh3Before.title;
     record("github", "primitive", "task_write-unsupported-field-probe",
       !probe.isError && titleUnchanged,
-      `task_write with extra 'title' field on github (unsupported per schema) -> isError=${probe.isError}, ` +
-      `title unchanged=${titleUnchanged} (silently dropped by MCP SDK zod stripping, not an error) — ` +
-      `DIVERGES from native, whose schema accepts+applies 'title' (see gap log)`
+      `task_write with 'title' field on github (NOW a real, supported write per M09-gh-write) -> isError=${probe.isError}, ` +
+      `title (idempotent re-assert of its own current value)=${titleUnchanged} — ` +
+      `MATCHES native's own explicit-field write support (real write, not silent drop; see gap-list PR-ABI-001 closure)`
+    );
+
+    // Hard-error-floor probe (M09-gh-write, PR-ABI-001 floor, Done-when 4):
+    // a field this Provider explicitly does NOT implement (parent/children
+    // write is out of scope this milestone, see charter exclusion) must
+    // return isError:true, not silently no-op. Read-only-safe: this call
+    // is expected to error before any write occurs.
+    const unsupportedProbe = await githubClient.callTool({
+      name: "task_write",
+      arguments: { id: "gh-3", status: gh3Before.status, parent: "gh-7" },
+    });
+    record("github", "primitive", "task_write-hard-error-floor-probe",
+      unsupportedProbe.isError === true,
+      `task_write with unsupported 'parent' field on github -> isError=${unsupportedProbe.isError} ` +
+      `(expected true: explicit MCP tool error, not a silent no-op — PR-ABI-001 floor, Done-when 4)`
     );
   }
   {
@@ -244,22 +265,25 @@ async function main() {
       `task_list's own gh-7 entry has role=${gh7?.role} (role derived by list(), not just get())`);
   }
   {
-    // DIVERGENCE PROBE (PR-ABI-002): the SAME real task's `parent` field,
-    // read via two different entry points. github-client.js#get()'s own
-    // comment self-documents that single-issue lookup cannot cheaply
-    // compute `parent` and leaves it null; list() builds a full parentIndex
-    // and populates it correctly. This probe demonstrates the asymmetry is
-    // real and live, not just a source-comment claim.
+    // SYMMETRY PROBE (M09-gh-write, PR-ABI-002 fix): the SAME real task's
+    // `parent` field, read via two different entry points. Previously
+    // github-client.js#get() unconditionally left `parent` null
+    // (single-issue lookup, no parentIndex); this milestone fixed get() to
+    // also call fetchAllIssues()+buildParentIndex() (the same functions
+    // list() already used), so both entry points now agree. This probe
+    // demonstrates the fix is real and live, not just a source-comment
+    // claim (mirrors the pre-fix version of this same probe, which asserted
+    // the divergence -- now asserts the fixed symmetry instead).
     const viaGet = await githubClient.callTool({ name: "task_get", arguments: { id: "gh-5" } });
     const viaList = await githubClient.callTool({ name: "task_list", arguments: {} });
     const gh5FromList = (viaList.structuredContent?.tasks ?? []).find((t) => t.id === "gh-5");
     const getParent = viaGet.structuredContent?.task?.parent;
     const listParent = gh5FromList?.parent;
     record("github", "compound", "task_get-vs-task_list-parent-probe",
-      getParent === null && listParent === "gh-7",
+      getParent === "gh-7" && listParent === "gh-7",
       `gh-5's 'parent' field: task_get -> ${JSON.stringify(getParent)}, task_list -> ${JSON.stringify(listParent)} — ` +
-      `CONFIRMED path-dependent divergence on the SAME real task (see gap log PR-ABI-002); ` +
-      `native's own store.js#get()/list() both resolve 'parent' identically (no such asymmetry) — this is github-only`
+      `CONFIRMED FIXED, both entry points agree (PR-ABI-002 closed, M09-gh-write); ` +
+      `native's own store.js#get()/list() already resolved 'parent' identically -- github now matches`
     );
   }
   let gh7Before;
