@@ -37,7 +37,7 @@ has run so far.
 | §16 Provider-agnostic GitHub degradation | 6 | 6 |
 | §17 Done-when clauses for a future implementing milestone | 7 | 7 |
 | §18 Non-goals (M17-level restatement) | 8 | 8 |
-| §19 Status / next step (closing summary, supersedes original §11's DRAFT-era framing) | (closing section, not a separate charter item) | — |
+| §19 Status / next step (supersedes original §11's DRAFT-era framing; preserves §11's provenance) | (n/a — closing status section, not a numbered charter item) | (n/a) |
 
 ---
 
@@ -577,7 +577,11 @@ task board — §12.3):
   record, full stop — stricter than exp5's current default "paste test output"
   evidence convention, which does not enforce a numeric threshold.
 
-### 15.2 Code-vs-prose per-stage classifier (scope caveat, carried from §8's point 4, "TDD ≥80% per stage is a hard gate")
+### 15.2 Code-vs-prose per-stage classifier (scope caveat)
+
+This classifier is new content introduced here in Part II — §8 (the original
+draft's flat 6-point "what the new skill is" list) has no subsection matching
+it; there is no earlier home to carry it from.
 
 The ≥80% LINE-coverage number applies **only to executable code** stages (JS,
 shell, etc.). For prose/skill/template/manifest stages (a `SKILL.md`, subagent
@@ -626,9 +630,8 @@ precise reason the TDD gate must be a HARD gate here, stricter than the
 
 ## 16. Provider-agnostic GitHub degradation (charter item 6)
 
-Stated explicitly, extending §8's point 5 ("Provider-agnostic: everything the
-skill writes to tasks respects the body-portable / extra-native-only rule...")
-one-line summary into a precise behavior specification:
+Stated explicitly, extending §8 point 5's one-line summary ("Provider-agnostic
+... must degrade correctly on GitHub") into a precise behavior specification:
 
 - **`## Proposal` body write-back (§12.2):** fully supported on GitHub — `body`
   is a portable field per the portable-metadata convention; no degradation
@@ -714,9 +717,9 @@ literal evidence named.
       only the positive "gate passed" case).
 - [ ] `[prose]`-tagged stages are gated by the mechanical-check discipline (§15.2)
       instead of a coverage percentage, demonstrated on at least one real prose
-      stage (e.g. the skill's own `SKILL.md` authoring, if self-hosted per §19's
-      preserved bootstrap-resolution paragraph, "bootstrapped on the existing
-      `proposal-to-plan`") — pasted gate-hash/projection-check script output.
+      stage (e.g. the skill's own `SKILL.md` authoring, if self-hosted per the
+      bootstrap resolution preserved under §19's provenance blockquote) —
+      pasted gate-hash/projection-check script output.
 - [ ] Milestone→task grouping writes exclusively through `task_write`'s
       `labels`/`parent`/`children` fields (§12.3), verified on BOTH providers —
       pasted two-provider conformance probe output (native + GitHub), following
@@ -783,8 +786,8 @@ cadence) are the natural first customers."
 **Current status (M17-task-to-plan-skill-design, this milestone):** the DIR was
 filed (`DIR-012`) and drained exactly per that routing — this milestone
 (charter item 1) has now produced the "fully specify the new skill" deliverable
-the DIR's Requested-action item 1 asked for (§§12-19 above, this closing status
-section included). Still Design-only:
+the DIR's Requested-action item 1 asked for (§§12-19 above, this status section
+included). Still Design-only:
 per this milestone's charter, DIR-012 items 2 (`inherited-core.md`/
 `OUTER-LOOP.md` milestone-model changes — the ≤2000-line ceiling, nested ≤500/
 ≤200 budgets, two-class diversity policy, two-ends-clamp pipeline as reusable
