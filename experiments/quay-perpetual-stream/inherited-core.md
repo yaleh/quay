@@ -100,3 +100,141 @@ retroactively:
 M01-dist actually used** (a Node-free container, later mechanized identically in CI) — confirming
 the procedure is a faithful concretization of what M01-dist already did by judgment, not a
 redescription that would have given a different answer.
+
+## Milestone size definition + verify-iteration size gauge (M06-sizing Done-when clauses 1-2)
+
+DIR-004's finding, reviewing m1-m5: "2 inner iterations" is a cost-proxy artifact of the
+build+verify template, not a real size signal. This section replaces that artifact with an
+explicit definition and a concrete gauge a future charter-author (or SELECT) applies directly,
+mirroring how the domain-misfit section above replaced ad hoc judgment with a decision procedure.
+
+**Size definition.** A correctly-sized milestone is: *the smallest scope that carries a coherent
+value step AND fits the build+verify cost band* — i.e. iteration-0 can land ALL of the charter's
+Done-when clauses in one pass, and iteration-1 exists purely to independently re-derive/re-verify
+iteration-0's own claims (fresh worktree, fresh checks, no new Done-when work required). No
+mid-milestone re-scope should be needed. When a coherent value step genuinely does not fit in one
+cost unit, the correct response is to **split along a different seam** (find a smaller coherent
+sub-step that still stands alone) **or explicitly budget a multi-build milestone** at
+charter-authoring time (state up front that iteration-0 AND iteration-1 will both do new build
+work, as a deliberate choice, not a discovered one) — but never ship half a value step split
+arbitrarily by the 2-iteration template.
+
+**Verify-iteration size gauge — the concrete decision procedure.** Apply this AFTER iteration-1 of
+any milestone completes, as a self-check on the charter's own sizing (and, going forward, apply it
+retrospectively during SELECT/charter-authoring as a sanity check on the PROPOSED scope, by asking
+"if this scope were dispatched, would iteration-1 have real material to re-derive, or would it be
+empty verification?"):
+- **"Iteration-1 has nothing real to re-derive"** (it re-runs the same checks iteration-0 already
+  ran, on the same artifacts, and finds nothing new) ⇒ **UNDER-SIZED**. The milestone should have
+  been bundled — either folded into iteration-0's own Done-when (making iteration-1 unnecessary) or
+  merged with a neighboring milestone that shares the same verification surface.
+- **"Iteration-1 is forced into new build work, or a mid-milestone re-scope happens"** (iteration-1
+  has to write new code/config to finish what iteration-0 didn't, or the charter's Done-when list
+  has to be edited mid-flight) ⇒ **OVER-SIZED**. The milestone's scope should have been split at
+  charter-authoring time along a seam that gives iteration-0 a completable, self-contained unit.
+- **Correctly sized** sits between these: iteration-1 does REAL independent work (fresh worktree,
+  fresh `npm install`, re-running checks from scratch rather than trusting iteration-0's prose,
+  hand-recomputing arithmetic, spot-checking citations against source) and that work genuinely
+  CATCHES something (an error, a stale claim, a bug) often enough to be worth the cost, without
+  needing to do new Done-when-scoped build work to get there.
+
+**Worked examples (self-consistency check, mirroring how the domain-misfit section validates
+against M01-dist):**
+- **m1/M01-dist — OVERSIZED.** Iteration-0 delivered the SEA builds. Iteration-1 was NOT pure
+  re-verification: it pushed to a real remote and tag-pushed v0.3.0→v0.3.4, fixing **4 distinct
+  real CI failures** (Windows MSYS path resolution needing `cygpath -w`; `gh` absent in the bare
+  container, switched to REST API; private-repo release assets needing the dedicated
+  `/releases/assets/{id}` endpoint rather than `browser_download_url`) before reaching a green run.
+  That is substantive NEW build work discovered and executed inside "iteration-1", not independent
+  re-derivation of iteration-0's claims — the CI-integration half of the milestone's own Done-when
+  scope (clause 3, "workflow has actually run on GitHub") was still open at the start of
+  iteration-1. Per the gauge: forced into new build work ⇒ oversized; the CI-integration/real-push
+  step should have been its own explicit charter unit or iteration-0 should have budgeted for it
+  up front as a declared multi-build milestone, not discovered as overflow.
+- **m2/M02-gates — correctly sized.** Iteration-0 built and committed all 3 scripts plus the
+  domain-misfit procedure, all 6 Done-when clauses met. Iteration-1 was a genuine independent
+  re-verification pass: fresh re-run of all 3 scripts against fresh fixtures (zero drift found),
+  independent confirmation iteration-0's commit was actually present (not just claimed), and an
+  investigation of a real dogfood-gate FAIL against M01-dist's own report — which iteration-1
+  determined was a CORRECT positive (real evidence existed but past the script's default 40-line
+  window), not a script bug. That is exactly "real material to re-derive": a genuine question
+  (is this FAIL a bug or a correct catch?) that iteration-1 had to independently resolve, with a
+  real answer that could have gone either way.
+- **m4/M04-discover — correctly sized.** Iteration-0's persona sweep found MD-001 (a real
+  merge-drift measurement error). Iteration-1's independent re-verification pass RECOMPUTED the VT
+  arithmetic from scratch and found the correction was real (VT chart-1 94.73/120, a genuine
+  decrease from the pre-correction number) — an independent re-derivation that could have
+  contradicted iteration-0's finding but confirmed it instead. No new Done-when-scoped build work
+  was required in iteration-1; the milestone's own scope (persona sweep + re-score) was fully
+  landed by iteration-0.
+
+**Result: applying this gauge to m1/m2/m4 reproduces the same oversized/correctly-sized verdicts
+DIR-004 already reached by direct review** — confirming the gauge is a faithful concretization of
+that judgment, not a redescription that would give a different answer (same self-consistency
+pattern as the domain-misfit section's own M01-dist validation above).
+
+## Value-typed SELECT ledger + governance/infra hard floor (M06-sizing Done-when clauses 2-3)
+
+VT (the chart-0/chart-1 capability-growth score) prices only ONE kind of milestone value. DIR-004's
+finding: this made SELECT compensate with ad hoc prose whenever a milestone's real value was NOT
+capability-growth (m2 scored 0 VT despite delivering real risk/option value — DIR-004's own table:
+"pre-empted 3 wasted SELECTs" — and m5 likewise scored 0 despite real governance-integrity value;
+m4 scored **-6.60** VT despite being one of the two most valuable milestones so far, because it
+corrected a standing measurement error (MD-001) rather than growing a capability). This section
+gives SELECT a named, structured ledger instead.
+
+**The five value types** (apply at SELECT time — a candidate may carry more than one):
+1. **capability-growth** — closes a real capability gap on an existing VT chart surface; the only
+   type VT Δv̂ prices directly.
+2. **discovery** — finds previously-unknown gaps/errors via an independent audit channel (persona
+   sweep, differential conformance, etc.) that the method could not see before; value is in the
+   NEW information, not a capability delivered.
+3. **instrument-correction** — fixes a standing error in the measurement/method itself (a wrong VT
+   number, a broken check, a stale gap-list entry) rather than the product; often VT-negative on
+   paper (correcting an inflated number looks like a regression) while being high real value.
+4. **risk/option** — reduces a forward-looking risk or preserves future optionality (e.g. closing a
+   repeat-governance-drift pattern before a 3rd instance) rather than delivering present capability
+   or catching a present error.
+5. **governance-integrity** — ensures the experiment's own control/decision mechanisms (SELECT,
+   directive handling, projection/enforcement) actually do what they claim, independent of any
+   single milestone's product content.
+
+**Governance/infra hard floor (SELECT-time check, mandatory):** a governance/infra candidate whose
+proposed scope excludes its own enabling/enforcement half must be **rejected or resized at SELECT
+time — never dispatched partial.** (The DIR-002/DIR-006 lesson, generalized: exp4's DIR-006
+"files-canonical" resolution built the canonical-files half but never the enabling projection
+tooling, was rationalized as a completed decision instead of a partial one, and the identical gap
+resurfaced as exp5's DIR-002 — a second, avoidable instance of the same drift. The fix is to check
+BEFORE dispatch whether a governance/infra candidate's stated scope covers enforcement, not just
+declaration, and block/resize at SELECT if it doesn't.) This check applies forward from m7; it is
+NOT applied retroactively to re-open m1-m5's already-settled scope decisions.
+
+**Ranking discipline:** VT Δv̂ is one input among several at SELECT, never the sole ranker — a
+candidate with zero or negative VT Δv̂ but a governance-integrity or instrument-correction value
+type can and should outrank a positive-VT capability-growth candidate when the non-VT risk is
+higher (see M06-sizing's own SELECT log entry, dashboard.md, for a live worked instance: chosen
+over M-GH-WRITE/M-GH-PARENT which had the only positive VT Δv̂≈+3-4 among the m6 candidates).
+
+### Self-consistency check: retroactively applying the ledger to m1-m5 (read-only, M06-sizing
+### Done-when clause 4 — does NOT rewrite dashboard.md's settled VT numbers)
+
+Applying the five value types to each of m1-m5's actual, already-settled outcome (per
+`dashboard.md`'s Log section, read-only):
+
+| Milestone | VT Δv (settled) | Value type(s) applied | Matches DIR-004's own characterization? |
+|---|---|---|---|
+| m1/M01-dist | +6.0 | **capability-growth** (closed Packaging/Distribution cov gap 0.55→0.85) | Yes — DIR-004 implicitly treats m1 as the capability-growth baseline case (the one with a real positive VT number), only flagging its SIZING as mildly oversized, not its value type. |
+| m2/M-GATES | 0 | **risk/option** (mechanized 3 of 4 it0 checks, gate-hash/ceiling/dogfood scripts + domain-misfit procedure — pre-empted wasted SELECTs on stale/unreachable candidates, e.g. the M-CLI-UX rejection at m2's own attempt-1 and M-DOCS/M-DIRTASK rejections at m3, each with 0 wasted inner iterations) | Yes — DIR-004's own table (archived directive, line 54) reads verbatim: "m2 M-GATES \| 0 \| risk/option value (pre-empted 3 wasted SELECTs) \| no — scored 0", matching risk/option here exactly. (**Correction, iteration-1**: the prior draft of this row labeled m2 governance-integrity and attributed that to a "real governance/method-infra wins" quote — that exact phrase does not appear anywhere in DIR-004's archived text. DIR-004's own table explicitly types m2 as risk/option, not governance-integrity; governance-integrity in DIR-004 is applied to m5/M-DIR-PROJECTION's successor framing, not m2. Fixed to match DIR-004's own table verbatim, since this Done-when clause's entire purpose is to reproduce that table, not a paraphrase of it.) |
+| m3/M-ABI-EVAL | ≈0 direct (chart transition/re-baseline) | **discovery** (Provider-ABI capability matrix + differential conformance suite surfaced 2 previously-unknown gaps, PR-ABI-001/002, via an independent audit channel the method didn't have before) | Consistent — DIR-004's table doesn't name m3 explicitly, but its own description ("VT is blind to discovery value (m3)") directly assigns m3 the discovery type, which this row reproduces. |
+| m4/M04-discover | **-6.60** | **instrument-correction** (found+fixed MD-001, a standing VT measurement error carried since before m1 — corrected an inflated chart-1 number, which mechanically shows as a VT decrease despite being real value delivered) | Yes — DIR-004 explicitly cites m4's -6.60 VT score alongside its "instrument-correction value (m4, ... scored -6.60 despite being one of the two most valuable milestones so far)" language; this row's label matches verbatim. |
+| m5/M-DIR-PROJECTION | 0 (no VT chart weight — method-infra) | **governance-integrity + risk/option** (built the directive-projection anti-drift check, closing a SECOND repeat-instance of the DIR-002/DIR-006 files-canonical-without-enforcement gap — both ensures the control mechanism works (governance-integrity) and forecloses a 3rd recurrence (risk/option)) | Yes — matches this milestone's (M06-sizing's) OWN SELECT-time characterization of m5's successor M06-sizing itself as "governance-integrity + risk/option" (dashboard.md m6 SELECT log entry), and m5's own charter framing ("repeat-governance-drift risk outranks a one-off product-integrity gap"). |
+
+**Result: applying the ledger to m1-m5 reproduces DIR-004's own characterization** — m2 and m4 land
+as non-capability-growth types (risk/option and instrument-correction respectively, exactly
+matching DIR-004's own table verbatim), m1 lands as the sole clean capability-growth case with a
+positive VT number, and m3/m5 land as discovery and governance-integrity+risk/option respectively,
+matching DIR-004's own prose description of each. This confirms the ledger's five type definitions
+are usable to reproduce a real, already-independently-reached judgment, not just aspirational
+categories — the same self-consistency pattern used above for the size gauge (against m1/m2/m4)
+and in the domain-misfit section (against M01-dist). No dashboard.md VT number is altered by this
+table; it only ADDS a value-type label alongside the existing settled numbers.
