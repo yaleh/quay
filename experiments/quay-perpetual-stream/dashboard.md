@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 20** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 21** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -1566,3 +1566,79 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   (with Resolution section) is delegated to the dispatched iteration itself, mirroring the DIR-013
   precedent; DIR-015 stays pending (only its item 1 resolved this milestone). Dispatching inner
   iteration-0 and iteration-1 next, both from worktrees off the current master HEAD (`1ece038`).
+
+- **ABSORB m21 (M-IMPL-ROW-ENFORCEMENT, 2026-07-18).** Both iterations converged (iteration-0
+  `968f918`, iteration-1 `12ae612`) with all 4 charter scope items built independently. Merge:
+  `git merge --no-ff exp5-m21-iteration-1` clean (`d9c03bb`); `git merge --no-ff
+  exp5-m21-iteration-0` conflicted across 5 files (`backlog.md`, `directives/archive/DIR-016-*.md`,
+  `directives/pending/DIR-015-*.md`, `inherited-core.md`, `scripts/it0-impl-row-check.sh` add/add) —
+  resolved **per-file**, not blanket wholesale-selected, since the two iterations' final artifacts
+  genuinely diverged in correctness, not just wording:
+  - `scripts/it0-impl-row-check.sh`, `backlog.md`, DIR-016 archive Resolution, DIR-015 pending note:
+    kept iteration-1. Its script detects design-only status via EITHER a "design delivered"/"design
+    doc only" marker OR a "Done-when clauses a future implementing milestone" marker (the charter's
+    alternate (b) definition) — the second pattern is what `M-TASK-TO-PLAN-SKILL-DESIGN`'s own row
+    text actually carries. Iteration-1's script correctly flags this row as design-only-and-missing-
+    its-row (FAIL), and iteration-1 accordingly created `M-TASK-TO-PLAN-SKILL-IMPL-PHASE7`.
+    Iteration-0's script only checks the first marker, misses this row (returns PASS/no-op — a
+    "recorded limitation" per its own report), and iteration-0's manual NOT-APPLICABLE disposition
+    reasoned that DIR-014 (still pending) already covers the Phase 7 follow-up — but DIR-014 is a
+    *directive file*, not a selectable `backlog.md` row, so citing it as sufficient is exactly the
+    SELECT-can't-reach-it drop-through DIR-016 was filed to close. Verified directly: re-ran both
+    scripts against the real `backlog.md` row — `./scripts/it0-impl-row-check.sh
+    M-TASK-TO-PLAN-SKILL-DESIGN backlog.md` → FAIL (confirms iteration-1's script's verdict is
+    correct and reproducible on current `master`).
+  - `inherited-core.md`: kept iteration-0's rule text instead. Iteration-1's merged version (the
+    post-iteration-1-merge `HEAD` side of this conflict) still described the mechanical check's PASS
+    condition as requiring the `-IMPL` row to be "non-DONE" — the status-based bug iteration-1's own
+    report says it caught and fixed in the *script* (re-scoped to existence-based, regardless of the
+    row's own later DONE/pending lifecycle) but did not carry through to this parallel rule-text
+    description, leaving iteration-1's own `inherited-core.md` internally inconsistent with its own
+    script. Iteration-0's text is existence-based throughout (no "non-DONE" qualifier) and more
+    thorough (5 enumerated operational sub-rules + an explicit "retroactive scope" clause), so it was
+    kept in full.
+  - `OUTER-LOOP.md`: auto-merged with **no git-reported conflict**, but — per the M18-discovered
+    "conflict-free merge can still be internally inconsistent" failure mode recurring a second time
+    — both iterations had independently inserted a HARD BLOCK gate clause at two different,
+    non-overlapping locations in step 6, producing a duplicated gate. Caught by a manual post-merge
+    grep sweep (required precisely because git did not flag this file). Removed the earlier,
+    less-well-placed duplicate; kept the one correctly sequenced immediately after the V_meta
+    consolidation-lag gate (matching both iterations' own "same shape/placement as the V_meta gate"
+    framing) and immediately before step 7's `milestone_counter++`.
+  - Also folded in the M21 iteration-1 agent's own report file, which it wrote directly to the
+    shared repo-root working tree (`milestones/M21-impl-row-enforcement/iterations/iteration-1.md`)
+    instead of committing inside its own branch as instructed — a dispatched-agent execution slip,
+    not human work; retained for provenance per the standing "keep both iteration reports" norm.
+  - Merge committed as `e9dfba9`. `git diff --stat e4626ac HEAD` (excluding
+    `milestones/`/`dashboard.md` bookkeeping): `OUTER-LOOP.md` (+20/-6), `backlog.md` (+2),
+    `directives/archive/DIR-016-*.md` (+41/-...), `directives/pending/DIR-015-*.md` (+9),
+    `inherited-core.md` (+48), `scripts/it0-impl-row-check.sh` (new, 94 lines) — scoped exactly to
+    Done-when clause 6's expected file set. Also present in the diff range:
+    `docs/proposals/exp6-driving-and-self-correcting-a-perpetual-stream.md`, a new file — confirmed
+    via `git log` to be the human's own independent commit (`fb7d22a`, authored 2026-07-18 18:21,
+    landed on top of this merge), not touched or authored by this loop; noted here only as scope
+    provenance, left completely untouched, to be drained at the next SELECT boundary.
+  - Done-when clause 3 (PASS+FAIL fixtures): re-verified live on current `master` (see script-verdict
+    re-run above; also `it0-impl-row-check.sh M-CLI-EDIT-PARITY backlog.md` → PASS,
+    `it0-impl-row-check.sh M-IMPL-ROW-ENFORCEMENT backlog.md` → PASS/no-op, confirming this
+    milestone's own Impl-row gate against itself is a documented no-op — M21 shipped method-infra
+    code, is not itself design-only).
+  - Done-when clause 5 (sweep disposition recorded): `backlog.md`'s `M-IMPL-ROW-ENFORCEMENT` row
+    updated to DONE with full disposition detail (script FAIL verdict on
+    `M-TASK-TO-PLAN-SKILL-DESIGN`, substantive-review reasoning for the `-IMPL-PHASE7` row, per-file
+    conflict-resolution rationale above).
+  - Done-when clause 7 (test suite): N/A, direct fixture runs are the accepted evidence for
+    `scripts/it0-*.sh` (mirrors the M02/M18 precedent) — no package-level test harness covers
+    `experiments/quay-perpetual-stream/scripts/`.
+  - **Realized Δv = 0**, by design (method infra, no VT chart cell, mirrors M13/M14/M16-M20's
+    zero-VT precedent). Adversarial-audit gate: condition (a) correctly did NOT fire (Δv̂=0, no
+    nonzero VT claim); condition (b) not applicable (no iteration-0 self-exemption attempted).
+  - **First self-imposed structural HARD BLOCK landed**: this milestone's own gate (Impl-row gate,
+    `OUTER-LOOP.md` step 6) is now live and will apply to every future design-only milestone's own
+    ABSORB, including this loop's own — a meaningfully different enforcement posture than every
+    prior (soft/advisory) gate in this experiment's history to date.
+  - Worktree/branch cleanup: `git worktree remove --force` both
+    `milestones/M21-impl-row-enforcement/worktrees/iteration-{0,1}`; `git branch -d
+    exp5-m21-iteration-0 exp5-m21-iteration-1`.
+  - No checkpoint due at m21 (cadence every 5, last written at m20; next due at m25).
+  - `milestone_counter` → **21**. Continuing directly to m22 SELECT, no human wait.
