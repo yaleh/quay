@@ -1,6 +1,6 @@
 # DIR-002
 
-- status: pending
+- status: deferred (drained at m4 outer-loop pass, 2026-07-18) — see disposition note below
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Directives-as-quay-tasks — the requirement stands; restore the restrained file-canonical + task-projection design (exp4 DIR-006's Option-B rollback was a transition failure rationalized as a decision)
@@ -42,6 +42,18 @@ rationalized the failure as a decision (evidence in DIR-006's own record,
 Net: the requirement was never met and has not changed. exp5 currently inherits
 the files-only end-state (its `/quay-directive` writes files only; exp5
 `directives/` has no task projection), so the goal is still open here.
+
+## Disposition note (outer-loop drain, m4, 2026-07-18)
+
+DEFERRED, not applied or rejected: drained mid-M04-discover (iteration-0 just landed with a
+significant real finding, MD-001 merge-drift, and iteration-1 stability-confirmation is already
+queued — pulling the milestone to pivot now would waste that in-flight work, unlike DIR-001 which
+arrived before any inner iteration had run). This directive's own requested action is itself a
+full standalone explore/methodology-infra milestone (`M-DIR-PROJECTION`) — sized exactly like
+M-GATES/M-ABI-EVAL, not a quick fold-in. Added to `backlog.md` as a charter-ready candidate,
+top priority for m5 SELECT (ahead of `M-GH-WRITE`/`M-GH-PARENT`, which are real but lower-urgency
+per-provider fixes, not a repeated governance-drift risk). See `backlog.md`'s DIR-002-sourced row
+and `dashboard.md`'s m4 log for the SELECT-time reasoning.
 
 ## Requested action
 

@@ -266,3 +266,21 @@ Slope (marginal points / milestone): **+6.0** (1 data point so far — trend, no
   scope/rationale/Done-when unchanged from original authoring). Gate-hash re-verified PASS after
   rename: `it0-gate-hash-check.sh charters/M04-discover.md` → PASS (exit 0). M-GH-WRITE/
   M-GH-PARENT remain backlogged, ready for m5+. Dispatching inner iteration-0 next.
+- **Mid-milestone directive drain (2026-07-18, during M04-discover)**: `ls -1
+  experiments/quay-perpetual-stream/directives/pending/` showed
+  `DIR-002-directives-as-quay-tasks-restore-restrained-projection-design.md` (1 file). Finding:
+  exp4 DIR-006's "files-canonical, Option B" resolution (cited as settling M-DIRTASK's rejection at
+  m3-attempt-2, `backlog.md`) is re-characterized by the human as a transition failure rationalized
+  as a decision — the original restrained requirement (files canonical + generated task
+  *projection*, not replacement) was never actually built; it11 did a destructive cutover instead
+  of the agreed projection, the enabling tooling step was skipped, and it15's rollback discarded
+  the real goal rather than fixing the missing enforcement. Disposition: **DEFERRED** (not
+  applied/rejected) — M04-discover's iteration-0 just landed with a significant real finding
+  (MD-001 merge-drift) and iteration-1 stability-confirmation is already queued; pivoting now would
+  waste in-flight work, unlike DIR-001 which arrived pre-dispatch. Added as `M-DIR-PROJECTION` to
+  `backlog.md`, flagged **top priority for m5 SELECT** (repeat-governance-drift risk outranks the
+  M-GH-WRITE/M-GH-PARENT provider-capability gaps). Full disposition rationale recorded in-place in
+  `directives/pending/DIR-002-*.md`'s new "Disposition note" section (file stays in pending/, not
+  archived, since it's deferred not resolved). Continuing M04-discover: dispatching a lightweight
+  iteration-1 stability-confirmation pass next, per iteration-0's own recommendation given MD-001's
+  significance.
