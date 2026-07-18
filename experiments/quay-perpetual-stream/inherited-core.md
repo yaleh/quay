@@ -572,8 +572,11 @@ from, not a speculative one.
 human-review-channel instance in the same sense. Arrivals are NOT a steady per-milestone trickle —
 they cluster in bursts at milestone boundaries: 5 single-directive arrivals (m2→m3, m4→m5, mid-m5
 self-raised, m5→m6, m6→m7) and 2 three-directive bursts (m9→m10, m12→m13). The largest observed
-gap between human-directive bursts in this tally is 3 milestones (m6→m7 to m9→m10); the current
-gap as of m14-complete (going into m15) is 2 milestones (m12→m13's burst to m14).
+gap between human-directive bursts in this tally is 3 milestones (m6→m7 to m9→m10). As of this
+milestone's own ABSORB (`milestone_counter=15`), `milestones-since-last-human-directive = 3`
+(milestone_counter(15) − arrival milestone(12), since the last human-directive burst landed at
+the m12→m13 boundary and this count must include the currently-completing milestone itself —
+see `dashboard.md`'s Human-review cadence row for the full reconciliation reasoning).
 
 **The rule, stated operationally:**
 
