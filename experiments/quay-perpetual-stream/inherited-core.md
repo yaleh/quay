@@ -542,3 +542,55 @@ re-deriving the rule live. This is now the correct single place to check — thi
 consolidated answer; no future milestone should need to re-open the archived DIR-0NN files directly
 unless this section itself is found insufficient (in which case, expand THIS section, don't leave
 the gap for the next drafter to re-discover).
+
+## Human-review cadence (M15-human-review-cadence, DIR-001 item 6)
+
+Generalizes DIR-001 item 6's original finding ("periodic human-led capability review as a standing
+explore milestone... since offline data shows every structural discovery came from human insight...
+never from the simulated-user") into a citable standing rule, using the real 11-directive sample
+that now exists (DIR-001 through DIR-011, all archived under `directives/archive/`) instead of the
+speculative "once ≥2 more DIR-* instances exist" placeholder DIR-001 itself shipped with.
+
+**Evidence — real tally of all 11 directives** (arrival boundary / initiation mode / finding kind;
+full per-directive detail in `milestones/M15-human-review-cadence/iterations/iteration-0.md`):
+
+| DIR | arrival boundary | initiation mode | finding kind |
+|---|---|---|---|
+| 001 | pre-m3 SELECT | human, mid-conversation | structural blind-spot (VT value function) |
+| 002 | pre-m5 SELECT | human, mid-conversation | drift/rollback-failure (exp4 carry-forward regression) |
+| 003 | during m5 | self-raised (iteration-0, charter-sanctioned dogfood) | dogfood confirmation finding |
+| 004 | pre-m6 SELECT | human, mid-conversation | scope/process gap (sizing + value-typing) |
+| 005 | m6→m7 boundary | human, mid-conversation | structural blind-spot (V_meta absorption) |
+| 006 | mid-m9 (live arrival) | human, mid-conversation | drift detected (Web UI verification regression) |
+| 007 | mid-m9, same burst as 006 | human, mid-conversation | routing/process gap (adversarial-audit role dropped) |
+| 008 | mid-m9, same burst as 006/007 | human, mid-conversation | drift detected (σ-floor consolidation debt) |
+| 009 | m12→m13 boundary (burst) | human, routed design-doc-only | scope split (task-board self-hosting design) |
+| 010 | m12→m13 boundary, same burst as 009 | human, routed design-doc-only | drift detected (projection mechanism gaps) |
+| 011 | m12→m13 boundary, same burst as 009/010 | human, routed design-doc-only | scope split (CLI edit surface parity) |
+
+**10 of 11 (all but DIR-003) are human-initiated**, confirming DIR-001's original claim held up
+under the larger sample, not just the single founding instance. Arrivals cluster in **bursts at
+milestone boundaries** (DIR-006/007/008 together mid-m9; DIR-009/010/011 together at the m12→m13
+boundary) rather than one-per-milestone steadily — the cadence track below measures elapsed
+milestones since the last arrival, not a per-milestone rate, precisely because of this bursty
+pattern.
+
+**The rule:**
+1. **Track `milestones-since-last-human-directive`** as a `dashboard.md` health track (see
+   "Human-review cadence" row, same table as `V_meta consolidation lag`), recomputed at each ABSORB
+   from the same `directives/pending/`/`directives/archive/` drain evidence step 0 of the outer loop
+   already produces — no separate instrumentation.
+2. **Soft-alarm threshold K=5** — reusing the existing checkpoint cadence (`milestone_counter % 5
+   == 0`) so both tracks share one mental model: if 5 or more milestones have elapsed since the last
+   human-initiated directive, that is worth a human noticing (real capability review may be overdue),
+   surfaced passively rather than demanded.
+3. **Explicitly NON-BLOCKING.** Unlike the V_meta consolidation-lag gate (DIR-005/M07-vmeta-gate),
+   which IS a HARD BLOCK on `milestone_counter++` when its own K=2 threshold is exceeded and
+   unresolved, this track carries no blocking language anywhere and must never gate advancement.
+   Directives are asynchronous and human-paced by nature (`OUTER-LOOP.md`'s own standing invariant:
+   "the loop never blocks waiting for a human," §4.7) — a long gap since the last directive may
+   simply mean nothing needed correcting, not that review is owed. The one concrete behavior this
+   rule induces in the outer loop is visibility, not gating: at each checkpoint
+   (`milestone_counter % 5 == 0`), the `checkpoints/cp-<NN>.md` snapshot must include this track's
+   current value, so a human skimming checkpoints asynchronously sees "N milestones since last human
+   input" without digging through `directives/archive/` by hand.
