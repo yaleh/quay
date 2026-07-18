@@ -60,3 +60,14 @@ Slope (marginal points / milestone): _n/a until ≥2 points_
   + `charters/M01-dist.md` + `milestones/M01-dist/` removed, 255MB dist-sea discarded; 28KB SEA build
   scripts salvaged on branch `salvage/exp5-m01-attempt-1`. milestone_counter stays 0 (m1 not
   completed); VT₀ unchanged. Restart re-selects M-DIST fresh.
+- RESTART 2026-07-18: drained `directives/pending/` (empty, nothing to disposition). Re-SELECT
+  m1 = M-DIST (explore, URGENT). Value hypothesis Δv̂=+6.0 (Packaging cov 0.55→0.85, weight 20)
+  re-recorded BEFORE dispatch — unchanged from the aborted attempt (no scope drift). Charter
+  restored verbatim from pre-abort commit `13f3ac8` to `charters/M01-dist.md` (content was never
+  invalidated — only the in-flight worktree/iteration artifacts were cleaned). it0 gate-hash
+  re-verified: charter's transcluded block still literal-matches
+  `experiments/quay-continuous-bootstrap/ITERATION-PROMPTS.md` lines 100–131 (source file
+  unchanged since authoring). Dispatching inner iteration-0 next via `baime:iteration-executor`,
+  salvaged SEA scripts on `salvage/exp5-m01-attempt-1` available for the worktree to cherry-pick
+  if useful (not required — iteration-0 re-derives from charter + gap-list, not from the salvage
+  branch, to keep provenance clean).
