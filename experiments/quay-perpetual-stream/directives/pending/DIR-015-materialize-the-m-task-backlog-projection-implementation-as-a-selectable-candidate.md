@@ -96,3 +96,14 @@ only *names* the row as a future dogfood candidate, which does not constitute
 charter/dispatch. `backlog.md`'s `M-TASK-BACKLOG-PROJECTION-IMPL` row status is
 still `pending` (unselected) after this milestone. This DIR remains pending until a
 future SELECT boundary actually charters that row.
+
+**Disposition note (M23-outer-driver-isolation, iteration-1, 2026-07-18, still NOT
+a resolution — this DIR stays `pending`, unchanged status):** M23's charter is
+purely the git-topology/process fix DIR-018 names (a dedicated `exp5-outer-driver`
+branch + `OUTER-LOOP.md` DRAIN/ABSORB merge sub-steps); it does not charter or
+dispatch `M-TASK-BACKLOG-PROJECTION-IMPL`, does not touch the task-store/
+`it0-dir-projection-check.mjs` surface DIR-015 item 2 names, and its own
+"Explicitly OUT of scope" section does not authorize any such work. Deferred, out
+of scope for M23 — `M-TASK-BACKLOG-PROJECTION-IMPL`'s `backlog.md` row remains
+`pending`/unselected after this milestone; this DIR remains pending until a future
+SELECT boundary actually charters that row.
