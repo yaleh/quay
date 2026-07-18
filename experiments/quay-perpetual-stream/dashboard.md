@@ -635,3 +635,14 @@ than an arithmetic error) ]`
   CI-job≡audit-channel convention. Gate-hash check:
   `it0-gate-hash-check.sh --by-reference charters/M09-gh-write.md` → **PASS**. Dispatching inner
   iteration-0 next.
+- **DIR-006 arrived mid-m9** 2026-07-18 (`directives/pending/DIR-006-webui-browser-verification-
+  regression.md`, human-asserted directly in conversation). Finding: zero real playwright/chrome-
+  devtools browser-tool usage across all 9 milestones despite M04-discover's charter/report
+  narrating a "real browser session" backed only by `curl` evidence — a claim-vs-pasted-evidence
+  mismatch iteration-1 re-verification should have caught and did not; no mechanized Web UI
+  visual-verification gate exists in `inherited-core.md`/`OUTER-LOOP.md`; also requests a
+  systematic audit of exp1-4 for other silently-dropped-enforcement methodology requirements
+  (3rd instance of this failure class after DIR-002/DIR-005). **NOT actioned now** — m9's inner
+  iteration-0 is in-flight; per the governing invariant ("never perturb an in-flight inner
+  milestone"), disposition is deferred to the m9→m10 boundary drain. Logged here so it is not
+  lost in the interim.
