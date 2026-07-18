@@ -110,7 +110,12 @@ M-VMETA-GATE); the eventual skill-implementation milestone may carry a small
 positive Δv̂ — size at SELECT time.
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred:
-- resolved_by: iteration-N / milestone M-NN
-- outcome: applied | deferred | rejected
-- evidence: pointer to the design doc / iteration report section / commit -->
+- resolved_by: outer-loop DRAIN at the m16→m17 SELECT boundary, 2026-07-18
+- outcome: applied — routed exactly per this DIR's own "Requested action" item 1
+- evidence: chartered `experiments/quay-perpetual-stream/charters/M17-task-to-plan-skill-design.md`
+  as a design-doc-only milestone (same routing class as DIR-009/010/011/DIR-012 item 1's own
+  instruction: design-only, do not implement, do not charter the skill's implementation yet).
+  Requested-action items 2 (milestone-model changes to `inherited-core.md`/`OUTER-LOOP.md`) and 3
+  (dogfooding on the first development-class implementation milestone) are explicitly out of scope
+  for M17 and left for a following milestone once M17's design lands — see M17's own charter for the
+  precise scope boundary.
