@@ -50,17 +50,30 @@ instance of the same drift pattern.
    re-derived instead of cited.** `.claude/skills/quay-core-bootstrap-
    methodology/reference/manda-reliability-envelope.md` already
    characterizes manda's dispatch-timing envelope and underlies exp4/5's
-   hard rule "never use manda for real dispatch" (DIR-020 and others). The
-   just-drafted `docs/proposals/
-   exp5-concurrent-background-agents-for-milestone-iteration.md` reaches
-   the same conclusion ("this is the native Agent/Task mechanism, not
-   manda ... the old mechanical reason to avoid parallel dispatch is
-   therefore gone") but does so via a fresh live re-verification, with zero
-   reference to the existing envelope document. The conclusions happened to
-   agree this time, but the rediscovery was avoidable effort — direct,
-   live evidence that the kickoff commit's own disclosed risk ("citations
-   can drift") is a real, currently-recurring friction, not a hypothetical
-   one.
+   **narrower, structural rule from DIR-020**: a session must never
+   synchronously call manda's `Agent`/`Dispatch`/`request` as the caller
+   side of its OWN bound-broker channel (self-deadlock — the session would
+   block its own turn and be unable to service its own incoming
+   cap-request); DIR-015/016/024 extend this by requiring background
+   dispatch for iteration/audit/broker-spawn paths specifically. **This is
+   not a blanket ban on manda dispatch** — corrected here after the human
+   flagged, live in this conversation, that it applies to nested/
+   result-dependent subagent dispatch, not to fire-and-forget paths.
+   `packages/quay/src/action.js`'s Action Button delivery
+   (`manda-dispatch submit ... --async`, never waits on or checks a
+   result) is structurally outside DIR-020's scope entirely and remains a
+   legitimate, currently-working use of manda. The just-drafted
+   `docs/proposals/exp5-concurrent-background-agents-for-milestone-
+   iteration.md` reaches a compatible conclusion for the nested-dispatch
+   case it examines ("this is the native Agent/Task mechanism, not manda
+   ... the old mechanical reason to avoid parallel dispatch is therefore
+   gone") but does so via a fresh live re-verification, with zero
+   reference to the existing envelope document or DIR-020's precise scope.
+   The conclusions happened to be compatible this time, but the
+   rediscovery — and this directive's own initial overstatement of the
+   rule as a blanket ban, corrected above — is direct, live evidence that
+   the kickoff commit's own disclosed risk ("citations can drift") is a
+   real, currently-recurring friction, not a hypothetical one.
 
 ## Requested action
 
@@ -82,6 +95,15 @@ instance of the same drift pattern.
    avoidable re-derivation like finding 2 above. Scope and cadence left to
    the disposing iteration's judgment; this is a minor finding, not a
    blocking one.
+5. When consolidating the manda-dispatch discipline into `inherited-core.md`
+   (action 4, or as part of action 2's broader consolidation pass), state
+   the rule at its correct, narrow scope — DIR-020's self-deadlock
+   condition plus DIR-015/016/024's background-dispatch requirement for
+   result-dependent/nested paths — not as a blanket "never use manda."
+   Explicitly note that fire-and-forget, non-result-checking dispatch
+   (e.g. Action Button's `manda-dispatch submit --async`) is unaffected and
+   remains a valid use, so future milestones don't have to re-derive this
+   distinction from scratch either.
 
 ## Resolution
 
