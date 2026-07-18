@@ -54,6 +54,17 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    use `baime:iteration-executor` fed the charter (Tier-A) only. Terminate on the first of (§3.2):
    Done-when complete | ΔV<0.02 both-layers K=2 consecutive | ceiling→redesign-OR-stop | past
    budget≈10 & nothing climbing | external HALT. Record under `milestones/M<NN>/`.
+   **Waiting on a long inner iteration (background) — poll, don't conclude:**
+   - The **completion notification is the primary wake** — dispatch as a harness-tracked background
+     task so the loop is auto-re-invoked when the iteration finishes, at ANY duration. The build may
+     run far longer than any timer; that is fine.
+   - Any `ScheduleWakeup` fallback (~1200–1800 s) is a **hang-detection heartbeat, NOT a deadline.**
+   - On a **fallback wake: poll the background task.** Still running → re-arm the fallback and keep
+     waiting; do NOT absorb, do NOT advance to step 6/next milestone. Only proceed when the iteration
+     has **genuinely completed** (Done-when / termination checked against real output).
+   - If the iteration waits on **external state the harness can't track** (e.g. a GitHub Actions run),
+     poll that system's status explicitly and match the fallback to its cadence — never conclude from
+     the timer alone.
 6. **ABSORB** — measure realized `Δv`, append to VT curve; compute calibration error
    `|Δv−Δv̂|/Δv̂`; update ρ (fraction executed with inherited method unchanged); append the milestone's
    adaptations to the log; check φ — if a prior adaptation was just reused unchanged by THIS
