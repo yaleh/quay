@@ -34,6 +34,15 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    limits) / an out-of-cycle action (VT chart transition, HALT); then move it to `directives/archive/`.
    This is where async human steering (§4.7) enters — at the boundary, never mid-milestone. `/quay-directive`
    writes here.
+   **Also run `task_list --label directive`** (native provider MCP tool, or
+   `node packages/quay/bin/quay.js task list --label directive --json` equivalently) and
+   **reconcile it against the files** (M-DIR-PROJECTION, DIR-002): every `label: directive` task
+   found must correspond to a real `DIR-NNN.md` file (`pending/`, `archive/`, or `retracted/`), and
+   each file's own `status:` line must agree with its task's `Status mirror:`/`extra.dirStatus`
+   field. Run `experiments/quay-perpetual-stream/scripts/it0-dir-projection-check.sh` to do this
+   mechanically rather than eyeballing the two lists — a non-zero exit means drift and must be
+   resolved (regenerate the stale projection via `/quay-directive`'s projection step, or fix the
+   underlying data) before the drain step is considered complete, not silently carried forward.
 1. **SELECT** the next milestone from `backlog.md` per the explore/exploit policy (§4.5): **≥1 explore
    milestone per 5**. Exploit = high-value, high-ρ, method handles it; explore = new surface/domain
    that grows the reusable core. Prefer aged high-value items (DIR-004 Distribution is URGENT).
