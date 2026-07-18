@@ -3,6 +3,7 @@
 // to the Web UI (proposal §9): `serve` / `task` / `action`.
 
 import path from "node:path";
+import fs from "node:fs/promises";
 import { loadConfig, activeProvider } from "../src/config.js";
 import { connectProvider } from "../src/provider-client.js";
 import { composePayload, deliverTrigger } from "../src/action.js";
@@ -49,6 +50,33 @@ function resolvePageSize(flags) {
     };
   }
   return { pageSize: n, error: null };
+}
+
+// M16-cli-edit-parity-impl (design doc exp5-cli-edit-parity.md §1.3): reads
+// stdin to completion as a UTF-8 string. Shared by resolveBody's `-` case.
+async function readAllStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks.map((c) => (Buffer.isBuffer(c) ? c : Buffer.from(c)))).toString("utf8");
+}
+
+// M16-cli-edit-parity-impl (design doc §1.3's resolveBody sketch): resolves
+// the new body value for `task edit`, implementing the two whole-body-
+// replacement modes plus the existing short-string mode:
+//   --body <string>       short-string mode (shell argument, unchanged).
+//   --body-file <path>    whole-body replacement, read verbatim from <path>.
+//   --body-file -         whole-body replacement, read verbatim from stdin.
+// --body and --body-file are mutually exclusive (validated by the caller
+// BEFORE this is invoked, per the design doc's "surface, don't silently
+// pick" discipline — this function assumes at most one of the two is set).
+async function resolveBody(flags) {
+  if (flags["body-file"] !== undefined) {
+    if (flags["body-file"] === "-") {
+      return await readAllStdin();
+    }
+    return await fs.readFile(flags["body-file"], "utf8");
+  }
+  return flags.body;
 }
 
 function parseFlags(argv) {
@@ -145,7 +173,9 @@ Usage:
   quay --version | -V
   quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--json|--format json]
   quay task view <task-id> [--json]
-  quay task edit <task-id> --status <status> [--json]
+  quay task edit <task-id> [--title <t>] [--status <s>] [--body <text> | --body-file <path>|-]
+    [--labels <a,b,c>] [--extra <json>] [--parent <id>] [--children <a,b,c>]
+    [--expect-status <s>] [--append-notes <text>] [--json]
   quay task check <task-id> [--json]
   quay action list <task-id> [--json]
   quay action run <task-id> <action-id> [--json]
@@ -162,12 +192,32 @@ Options for task list:
   --json              Output as JSON
   --format json       Alias for --json (any other --format value is a usage error)
 
+Options for task edit (M16-cli-edit-parity-impl — full-field parity with the
+native provider CLI/MCP task_write; at least one write flag is required):
+  --title <t>          Set title (portable — every Provider is expected to support it)
+  --status <s>          Set status
+  --body <text>          Set body verbatim (short-string mode; shell argument)
+  --body-file <path>|-   Set body verbatim from a file, or from stdin if <path> is "-"
+                          (whole-body REPLACEMENT semantics; mutually exclusive with --body)
+  --labels <a,b,c>       Set labels (comma-separated; portable)
+  --extra <json>         Set the extra{} map (JSON object string; NATIVE-ONLY — GitHub
+                          hard-errors, see inherited-core.md's Portable-metadata convention)
+  --parent <id>          Set parent task id
+  --children <a,b,c>     Set children task ids (comma-separated)
+  --expect-status <s>    Compare-and-swap: only write if the task's current status equals <s>
+  --append-notes <text>  Read-then-write convenience: append <text> as a new line to the
+                          existing body and write the whole body back (no new ABI tool)
+
 Examples:
   quay task list --prefix QX          List only QX-* tasks
   quay task list --status todo        List todo tasks
   quay task list --search "bootstrap" List tasks with "bootstrap" in title or body
   quay task view QX-001               View task details
   quay task edit QX-001 --status done Mark task done
+  quay task edit QX-001 --title "New title" --labels bug,p1
+  quay task edit QX-001 --body-file ./new-body.md
+  cat notes.md | quay task edit QX-001 --body-file -
+  quay task edit QX-001 --append-notes "Investigated further, see PR #42"
 `);
   } else {
     // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
@@ -379,14 +429,79 @@ async function main() {
     // branch. Whether the active Provider actually implements task_write
     // is a Provider-manifest question (data.write capability), not
     // something this command special-cases.
+    //
+    // M16-cli-edit-parity-impl (design doc exp5-cli-edit-parity.md §1.2):
+    // relaxed from status-only to the full field set the native CLI/MCP
+    // task_write already accept — --title/--body/--body-file/--labels/
+    // --extra/--parent/--children/--expect-status, mirroring the native
+    // CLI's own flag→patch construction exactly (same flag names, same
+    // --labels/--children comma-split, same JSON.parse for --extra) so a
+    // user who has learned the native CLI's flags needs to learn nothing
+    // new for the Core CLI. `--status <s> is required` is REMOVED (status
+    // remains a valid, still-optional field) — additive, not breaking, for
+    // every existing `quay task edit <id> --status <s>` caller.
     const id = positional[0];
-    if (!flags.status) {
-      console.error("quay task edit: --status <s> is required (v1 supports status-only writes)");
+
+    if (flags.body !== undefined && flags["body-file"] !== undefined) {
+      console.error("quay task edit: --body and --body-file are mutually exclusive");
       process.exitCode = 1;
       return;
     }
+
+    if (flags["append-notes"] !== undefined) {
+      // §4's read-then-write convenience: no new ABI tool. Read the
+      // current body via taskGet, append the note text, taskWrite the
+      // whole new body back. Any other field flags supplied alongside
+      // --append-notes are applied together in the same write (append is
+      // just one more contributor to the same patch object).
+      await withProvider(async (client) => {
+        const before = await client.taskGet(id);
+        if (!before) {
+          console.error(`no such task: ${id}`);
+          process.exitCode = 1;
+          return;
+        }
+        const noteText = flags["append-notes"] === true ? "" : String(flags["append-notes"]);
+        const separator = before.body && before.body.length > 0 && !before.body.endsWith("\n") ? "\n" : "";
+        const newBody = `${before.body ?? ""}${separator}${noteText}\n`;
+        const patch = { id, body: newBody };
+        if (flags.title !== undefined) patch.title = flags.title;
+        if (flags.status !== undefined) patch.status = flags.status;
+        if (flags.labels !== undefined) patch.labels = String(flags.labels).split(",").filter(Boolean);
+        if (flags.parent !== undefined) patch.parent = flags.parent;
+        if (flags.children !== undefined) patch.children = String(flags.children).split(",").filter(Boolean);
+        if (flags.extra !== undefined) patch.extra = JSON.parse(flags.extra);
+        if (flags["expect-status"] !== undefined) patch.expectedStatus = flags["expect-status"];
+        const t = await client.taskWrite(patch);
+        if (wantsJson) printJson(t);
+        else console.log(`${t.id}: ${t.title} [${t.status}]`);
+      }, { providerId: flags.provider });
+      return;
+    }
+
+    const patch = {};
+    if (flags.title !== undefined) patch.title = flags.title;
+    if (flags.status !== undefined) patch.status = flags.status;
+    if (flags.labels !== undefined) patch.labels = String(flags.labels).split(",").filter(Boolean);
+    if (flags.parent !== undefined) patch.parent = flags.parent;
+    if (flags.children !== undefined) patch.children = String(flags.children).split(",").filter(Boolean);
+    if (flags.extra !== undefined) patch.extra = JSON.parse(flags.extra);
+    if (flags.body !== undefined || flags["body-file"] !== undefined) {
+      patch.body = await resolveBody(flags);
+    }
+    if (flags["expect-status"] !== undefined) patch.expectedStatus = flags["expect-status"];
+
+    if (Object.keys(patch).length === 0) {
+      console.error(
+        "quay task edit: at least one of --title/--status/--body/--body-file/--labels/--extra/" +
+        "--parent/--children/--append-notes is required"
+      );
+      process.exitCode = 1;
+      return;
+    }
+
     await withProvider(async (client) => {
-      const t = await client.taskWrite({ id, status: flags.status });
+      const t = await client.taskWrite({ id, ...patch });
       if (wantsJson) printJson(t);
       else console.log(`${t.id}: ${t.title} [${t.status}]`);
     }, { providerId: flags.provider });
