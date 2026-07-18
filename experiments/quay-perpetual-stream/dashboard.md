@@ -452,3 +452,31 @@ iteration-0's arithmetic slip of 95.83 during iteration-1's independent re-verif
   real disposition — not just citing iteration-1's placeholder note), then SELECT m7 using the
   value-typed ledger for real, this being its first FULLY in-force use per DIR-004's own Done-when 2
   target ("the next SELECT after this directive" — that's m7).
+- **DRAIN + SELECT m7 = M-VMETA-GATE** 2026-07-18. m6/M-SIZING fully absorbed, no inner milestone
+  in-flight — this is the m6→m7 boundary. Drained `directives/pending/`: only DIR-005 present
+  (`v-meta consolidation lag`). Pre-dispatch → pivot-immediately standing rule applies. Moved to
+  `directives/archive/`, status `applied (m7)`, Resolution section filled in for real (superseding
+  iteration-1's earlier out-of-scope placeholder note from M06-sizing's own HARD GATES run).
+  **First FULLY in-force use of the value-typed SELECT ledger** (per DIR-004's own Done-when 2
+  target — "the next SELECT after this directive"). Candidates weighed: **M-VMETA-GATE**
+  (DIR-005-sourced, governance-integrity + risk/option — "same class of failure as DIR-002/DIR-006":
+  an invariant with no mechanical enforcement) vs. **M-MERGE-RECOVER** (M04-discover-sourced,
+  instrument-correction, real product-integrity gap MD-001, now deferred twice — from m5 and m6) vs.
+  **M-GH-WRITE/M-GH-PARENT** (capability-growth, Provider-ABI). VT Δv̂ alone would favor
+  M-GH-WRITE (only one with nonzero chart points) or defer both infra candidates indefinitely — the
+  ledger's whole purpose is to prevent exactly that systematic bias. Selected **M-VMETA-GATE**:
+  (a) pre-dispatch pivot-immediately applies to a freshly-arrived directive, same as DIR-001/DIR-004
+  before it; (b) DIR-005's own first-proof requirement (Done-when 4) targets the `CI-job≡audit-
+  channel` pattern, which is ALREADY past its φ confirmation threshold (confirmed m1+m3, m6 now
+  complete) — every milestone this is deferred adds to a lag this very milestone exists to measure
+  and gate, a compounding cost M-MERGE-RECOVER/M-GH-WRITE's static gaps don't share. Authored
+  `charters/M07-vmeta-gate.md` (5 in-scope work items + 5 binary Done-when, verbatim from DIR-005).
+  Gate-hash check: `it0-gate-hash-check.sh --by-reference charters/M07-vmeta-gate.md` → **PASS** —
+  this is the first REAL forward use of the by-reference mechanism M-SIZING built (fulfilling that
+  milestone's own Done-when 3 commitment: "or used live when authoring the next real charter"), not
+  another proof-of-concept. `backlog.md` gains an M-VMETA-GATE row under a new "DIR-005-sourced
+  candidate" section marked SELECTED. **Pre-commitment recorded for m8: M-MERGE-RECOVER, no further
+  deferral** — m5 (M-DIR-PROJECTION), m6 (M-SIZING), and now m7 (M-VMETA-GATE) are three consecutive
+  governance/infra-heavy explore milestones; that pattern must not continue into m8 by default
+  regardless of what else surfaces at the m7→m8 boundary, absent a genuine blocking gap or external
+  HALT. Dispatching inner iteration-0 next.

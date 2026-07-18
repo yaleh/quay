@@ -1,6 +1,6 @@
 # DIR-005
 
-- status: pending
+- status: applied (m7) — see Resolution section below
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: V_meta consolidation lag — the inner loop's build+verify specialization defers V_meta absorption indefinitely; make the inner→outer hand-off tracked, alarmed, and gated at ABSORB (do NOT re-fuse exploration into the inner loop)
@@ -107,4 +107,20 @@ DIR-004 and is only referenced, not duplicated here, to keep both directives'
 Done-when disjoint.
 
 ## Resolution (added when moved to archive/, or updated in place if deferred)
-<!-- to be filled in by the iteration that applies this directive -->
+
+Applied at the m6→m7 boundary (2026-07-18), pre-dispatch (no inner iteration was in-flight — this
+is a fresh, real disposition superseding iteration-1's earlier out-of-scope placeholder note made
+during M06-sizing's own HARD GATES run). Standing rule applied: pivot immediately when pre-dispatch.
+
+Selected for m7 as **M-VMETA-GATE**, charter `charters/M07-vmeta-gate.md`. Value-typed per
+`inherited-core.md`'s ledger: governance-integrity (primary) + risk/option (secondary) — DIR-005's
+own Finding section explicitly frames this as "the same class of failure as DIR-002/DIR-006", both
+of which were typed governance-integrity/risk-option when they were resolved. See `backlog.md`'s
+M-VMETA-GATE row and `dashboard.md`'s SELECT m7 log entry for the full ranking argument against the
+competing candidates (M-MERGE-RECOVER, M-GH-WRITE/M-GH-PARENT).
+
+All 5 requested-action items (tracked ledger, health track+alarm, ABSORB gate, first-proof
+requirement against the already-past-threshold `CI-job≡audit-channel` pattern, explicit non-goal of
+not re-fusing exploration into the inner loop) are carried into the charter's in-scope work items
+1-5 and Done-when clauses 1-5 verbatim/near-verbatim. First-proof requirement (item 4) is a hard
+Done-when-4 gate on M07's own ABSORB, not deferred further.
