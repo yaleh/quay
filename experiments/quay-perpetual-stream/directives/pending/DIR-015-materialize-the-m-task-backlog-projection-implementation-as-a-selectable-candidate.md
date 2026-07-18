@@ -83,3 +83,16 @@ IMPL` row, sourced to this DIR + the m13 design doc's §15 checklist. Item 2
 (actually charter and dispatch the implementation) remains open, intentionally left
 as that new row's own future SELECT work — not built by M21, per M21's charter
 non-goals. Do not archive this DIR until item 2 also lands.
+
+**Disposition note (M22-quay-task-to-plan-skill-phase7, iteration-1, 2026-07-18,
+still NOT a resolution — this DIR stays `pending`, unchanged status):** M22's
+charter explicitly names `M-TASK-BACKLOG-PROJECTION-IMPL` as `quay-task-to-plan`'s
+first true-dogfood customer (`SKILL.md`'s new "Relationship / bootstrap" section)
+but its own "Explicitly OUT of scope" section states verbatim: "Do not begin
+`M-TASK-BACKLOG-PROJECTION-IMPL`'s own implementation — that is a separate,
+already-materialized (m21), not-yet-SELECTed backlog row." M22 therefore performs
+no work toward DIR-015 item 2 (charter/dispatch the implementation itself) — it
+only *names* the row as a future dogfood candidate, which does not constitute
+charter/dispatch. `backlog.md`'s `M-TASK-BACKLOG-PROJECTION-IMPL` row status is
+still `pending` (unselected) after this milestone. This DIR remains pending until a
+future SELECT boundary actually charters that row.

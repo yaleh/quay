@@ -101,7 +101,61 @@ the proposal→plan design operative rather than shelfware; size the plan (it is
 itself ≤2000 lines per `docs/plans/3-7`) at SELECT time.
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred:
-- resolved_by: iteration-N / milestone M-NN
-- outcome: applied | deferred | rejected
-- evidence: pointer to the design doc / iteration report section / commit -->
+- resolved_by: M22-quay-task-to-plan-skill-phase7, iteration-1, 2026-07-18
+- outcome: **partially applied** — item 1 (build the skill) DONE across
+  M20 (Phase 6) + M22 (Phase 7, this milestone); items 2-3 (DISPATCH wiring,
+  de-optionalizing the diversity policy) explicitly deferred, NOT built by
+  this milestone, by charter design (see below) — this DIR is archived
+  because item 1's completion is what DIR-014's own Finding named as the
+  concrete, actionable, currently-unqueued gap ("no backlog row for building
+  the skill"); items 2-3 are recorded here as the still-open remainder for a
+  future DIR/milestone, not silently dropped.
+- evidence:
+  - **Requested-action item 1 (build the skill) — DONE.** M20
+    (`M-TASK-TO-PLAN-SKILL-PROPOSAL-STEP`) built Phase 6 (proposal step:
+    N-independent-subagent authoring + adjudication + provider-tool
+    write-back, portable body per DIR-011). THIS milestone (M22) built
+    Phase 7: the plan step (`SKILL.md` steps 5-6 + new
+    `.claude/skills/quay-task-to-plan/prompts/plan-check-subagent.md`), the
+    TDD ≥80% hard gate with the code-vs-prose classifier (`SKILL.md`'s "TDD
+    ≥80% hard gate" section + `Constraints` block), and the
+    dogfooding/bootstrap-resolution wiring (`SKILL.md`'s "Relationship /
+    bootstrap" section). `.claude/skills/quay-task-to-plan/` now covers all
+    of `docs/plans/3-7-quay-task-to-plan-skill.md`'s Phases 6-7 — the skill
+    referenced in DIR-014's Finding as "does not exist" now exists in full.
+  - **Requested-action item 2 (wire DISPATCH to invoke it) — deferred, NOT
+    built, by explicit charter design.** M22's charter's "Explicitly OUT of
+    scope" section states: "Do not wire `OUTER-LOOP.md` DISPATCH to actually
+    invoke this skill for a real milestone this charter." `SKILL.md`'s own
+    header and `Constraints` block state this explicitly
+    (`forbid(DISPATCH auto-wiring into OUTER-LOOP.md — manual invocation
+    only, this milestone)`) so a future reader does not mistake the skill's
+    existence for the pipeline being live. This item remains genuinely open
+    — a future milestone (targeting `OUTER-LOOP.md` step 5) is still needed
+    to close it. Not re-filing a new DIR for this at archive time per the
+    dispatcher's request; if a future SELECT boundary does not naturally
+    pick this up, a new DIR should be filed then.
+  - **Requested-action item 3 (de-optionalize for the dev class) — deferred,
+    NOT built, out of scope by explicit charter design.** M22's charter
+    states: "Do not make the two-class diversity policy non-discretionary —
+    that is Phase 5 territory, already built at M18." `inherited-core.md`'s
+    "MAY, at a future charter's discretion" language (the exact clause
+    DIR-014's Finding #1 cited) is UNCHANGED by this milestone.
+  - **Requested-action item 4 (dogfood + record) — addressed via explicit
+    bootstrap-resolution statement, not a live dogfood run.**
+    `SKILL.md`'s "Relationship / bootstrap" section records: the
+    skill-implementation milestones themselves (M20, M22) necessarily ran
+    through the pre-existing `proposal-to-plan` (a skill cannot build its
+    own deliverable before it exists) — this IS the dogfooding-intent
+    proposal §11/§19 describes, executed exactly as that section
+    anticipates, not a deviation from it. A live end-to-end dogfood run of
+    `quay-task-to-plan` against a real second-milestone customer is
+    explicitly named as future work (item 5 below), not claimed here.
+  - **Requested-action item 5 (first customers after this lands) —
+    named.** `SKILL.md`'s "Relationship / bootstrap" section names
+    `M-TASK-BACKLOG-PROJECTION-IMPL` (`backlog.md`, DIR-015 item 2 /
+    DIR-016 retroactive-sweep row) and a future release-cadence
+    implementation as the first true-dogfood candidates, explicitly ruling
+    out `M16-cli-edit-parity-impl` (already complete, predates this skill).
+  - Full disposition + pasted evidence:
+    `experiments/quay-perpetual-stream/milestones/M22-quay-task-to-plan-skill-phase7/iterations/iteration-1.md`.

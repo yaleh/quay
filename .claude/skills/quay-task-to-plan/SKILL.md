@@ -1,6 +1,6 @@
 ---
 name: quay-task-to-plan
-description: Proposal step (Phase 6) of the quay-task-to-plan pipeline — for a development-class milestone's grouped task(s), run N independent blank-slate subagents to draft proposals, adjudicate divergence M13-style, and write the reconciled proposal back to the task's body via the Provider ABI (task_write/task_get), portable per DIR-011. Invoke after a development-class milestone's tasks are grouped (milestone:<id> label / M12 parent-children) and before proposal-to-plan's own architect-review + plan step (Phase 7, not yet built) runs.
+description: Proposal step (Phase 6) + plan step (Phase 7) of the quay-task-to-plan pipeline — for a development-class milestone's grouped task(s), run N independent blank-slate subagents to draft proposals, adjudicate divergence M13-style, write the reconciled proposal back to the task's body via the Provider ABI (task_write/task_get, portable per DIR-011), then author a milestone-level plan record and run a maximally codebase-grounded convergent check against it, enforcing the TDD ≥80% hard gate (code-vs-prose classifier) per stage. Invoke after a development-class milestone's tasks are grouped (milestone:<id> label / M12 parent-children) and before proposal-to-plan's own architect-review + implementation runs. NOT yet wired into OUTER-LOOP.md DISPATCH (manual invocation only) — see "Relationship / bootstrap" below for which milestone is the first true-dogfood customer.
 allowed-tools: Bash, Read, Write
 ---
 
@@ -10,23 +10,28 @@ allowed-tools: Bash, Read, Write
     propose  :: TaskRecord × N → [Proposal]                          -- N independent, blank-slate, no inter-agent comms
     adjudicate :: [Proposal] → ReconciledProposal                    -- M13-style; explicit on convergence vs divergence
     write_back :: ReconciledProposal → task_write → task_get(readback) -- body-portable, regeneratable, not write-once
+    plan     :: ReconciledProposal → PlanRecord                      -- milestone-level, phases/stages/budgets/TDD-acceptance, NOT a child-task tree
+    plan_check :: PlanRecord × Round(≤3) → Converged | Findings       -- maximally codebase-grounded CHECK, not re-derivation
+    tdd_gate :: Stage → CodeCoverage(≥80%) | MechanicalCheck           -- code-vs-prose classifier, HARD GATE, not skippable
 
-This skill implements **Phase 6 only** of `docs/plans/3-7-quay-task-to-plan-skill.md`
-(the **proposal step**: N-independent-subagent authoring + adjudication +
-write-back to the task's `body`). It is modeled structurally on
+This skill implements **Phase 6 AND Phase 7** of
+`docs/plans/3-7-quay-task-to-plan-skill.md`: Phase 6 is the **proposal step**
+(N-independent-subagent authoring + adjudication + write-back to the task's
+`body`); Phase 7 (this milestone, M22) is the **plan step** (milestone-level
+plan record + grounded convergent check), the **TDD ≥80% hard gate**, and the
+**dogfooding/bootstrap-resolution wiring**. It is modeled structurally on
 `.claude/skills/quay-directive/SKILL.md`'s shape (YAML frontmatter, numbered
 `## Steps`, explicit provider-tool citations, evidence-by-readback discipline)
 and on `~/.claude/skills/proposal-to-plan/SKILL.md`'s isolated-Task-agent
 step structure (each step = one independent agent invocation, sequential, not
 parallel-and-merged).
 
-**Phase 7 (plan step + grounded convergent check + TDD ≥80% hard gate +
-`OUTER-LOOP.md` DISPATCH wiring + de-optionalizing the two-class diversity
-policy) is explicitly OUT OF SCOPE for this skill as currently built** — see
-`docs/plans/3-7-quay-task-to-plan-skill.md` Phase 7. This skill's proposal
-step is a standing artifact that a future Phase-7 milestone will chain a plan
-step onto; it does not yet self-invoke, and nothing in `OUTER-LOOP.md`
-dispatches it automatically. Until Phase 7 lands, invoke this skill manually
+**Still explicitly OUT OF SCOPE for this skill as currently built:**
+`OUTER-LOOP.md` DISPATCH wiring (this skill is not yet invoked automatically
+for any milestone — see "Relationship / bootstrap" below) and
+de-optionalizing the two-class diversity policy (that remains Phase-5/
+`inherited-core.md` territory, already built at M18, referenced but not
+re-wired here). Until DISPATCH wiring lands, invoke this skill manually
 (`/quay-task-to-plan <task-id-or-ids>`) for a development-class milestone's
 grouped tasks.
 
@@ -171,7 +176,7 @@ as the milestone-grouping key itself.
    `quay-task-to-plan`-driven task is:
 
    ```
-   N independent proposal authors → adjudication → [existing] architect-review → plan (Phase 7, not built) → [existing] architect-review → commit
+   N independent proposal authors → adjudication → [existing] architect-review → plan (Steps 5-6 below) → [existing] architect-review → implementation (Step 7 TDD gate) → commit
                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^ unchanged, reused as-is, still runs every time
    ```
 
@@ -180,6 +185,109 @@ as the milestone-grouping key itself.
    architect-review still runs afterward on whichever approach adjudication
    selected — it is never skipped, and never asked to arbitrate between the
    raw candidate proposals itself (that is adjudication's job).
+
+5. **Plan step: author (Stage 7.1).** Once the reconciled proposal has
+   passed `proposal-to-plan`'s existing architect-review (step 4, unchanged),
+   dispatch ONE Task-agent run whose job is to author a **milestone-level
+   plan record** from the reconciled proposal — the exact shape this
+   repository's own `docs/plans/N-*.md` documents already use: **phases,
+   stages, dependency-order between stages, per-stage line budgets
+   (≤200/stage, ≤500/phase, ≤2000/milestone — the Phase-3 sizing convention,
+   `inherited-core.md`'s "Milestone ceiling expansion" subsection, unchanged
+   and only referenced here), and per-stage TDD ≥80% acceptance** (see §Step
+   7 below for the code-vs-prose classifier each stage's acceptance must
+   commit to up front).
+
+   **The plan record is milestone-level and is explicitly NOT written as a
+   child-task tree.** The quay task board tracks VALUE (what got delivered,
+   at what cost); the plan record tracks PROCESS (how the delivery is
+   sequenced) — these are deliberately different layers. Stage-by-stage plan
+   progress is **NOT rendered in the Web UI or task board** as child tasks,
+   sub-issues, or checklist items; the plan record lives in the plan
+   document / task `body` only. State this explicitly to the plan-author
+   subagent so it does not, e.g., attempt to `task_write` a `children` array
+   of one task per stage — that would silently violate this invariant even
+   though nothing would technically error.
+
+6. **Plan step: grounded convergent check (Stage 7.1).** After the
+   plan-author subagent (step 5) produces a plan record, dispatch ONE
+   **maximally codebase-grounded** Task-agent run using
+   `.claude/skills/quay-task-to-plan/prompts/plan-check-subagent.md` — this
+   is a CHECK, not a second independent plan authored blind (plan
+   re-derivation is **declined by default** for the development class, per
+   `docs/plans/3-7-quay-task-to-plan-skill.md` Phase 5 Stage 5.3; available
+   ad hoc only if a decomposition is genuinely contested). The check
+   subagent reads real signatures/call-sites/existing file layout — not the
+   plan's prose claims about them — and verifies mechanical correctness,
+   stage ordering, budget compliance, and TDD-acceptance concreteness (see
+   the prompt file for the full 5-point checklist). **This check consumes
+   the Phase-4 plan-time budget gate
+   (`experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh`,
+   the canonical script name M18 actually shipped — plan 3-7 Phase 4's text
+   names it `it0-plan-budget-check.sh`, but that filename never landed; cite
+   the real script, not the plan's stale name) as one of its own
+   ground-truth checks**, not a separate step the orchestrating skill must
+   remember to run independently.
+
+   **Stopping rule (reused, not reinvented):** iterate plan-author-revise →
+   grounded-check, capped at **~2-3 rounds**, using the SAME
+   ΔV-small-and-stable convergence discipline exp5's own outer loop already
+   applies (`docs/plans/3-7-quay-task-to-plan-skill.md` Phase 5 Stage 5.3) —
+   the check subagent reports CONVERGED once a round produces zero material
+   findings, or NOT-CONVERGED with bounded, cite-able findings for a
+   targeted (not wholesale) revision. If round 3 is still NOT-CONVERGED,
+   this is reported as stopping-rule exhaustion and escalated to a human
+   decision rather than silently looping a 4th round.
+
+7. **TDD ≥80% hard gate (Stage 7.2).** Once the plan converges (step 6),
+   implementation proceeds stage-by-stage. **Every stage's completion is
+   gated on the TDD ≥80% rule below — this is a HARD GATE, not an
+   evidence-paste courtesy.** See "TDD ≥80% hard gate" section below for the
+   full code-vs-prose classifier and the `Constraints`-block entry that
+   forbids skipping it. This step does not reinvent `feature-developer`'s
+   TDD-implementation loop (RED→GREEN→REFACTOR, worktree-isolated Task
+   agents) — where a stage's shape fits that loop, this skill's
+   implementation step wraps/reuses it rather than re-authoring a competing
+   TDD harness (see "Relationship / bootstrap" below).
+
+## TDD ≥80% hard gate (Stage 7.2)
+
+**This gate is STRICTER than exp5's current general-purpose "paste test
+output as evidence" convention.** Because this skill's pipeline runs a
+**single implementation** in the middle (independence is spent at both ends —
+proposal step upstream, the existing adversarial-audit gate downstream — not
+in the middle, per `docs/plans/3-7-quay-task-to-plan-skill.md` Phase 5 Stage
+5.2's two-ends-clamp), the TDD gate is the **primary correctness net** for
+the implementation itself: there is no second independent implementer to
+catch a defect the single implementer missed, so the gate must be mechanical
+and non-negotiable rather than advisory.
+
+**Code-vs-prose classifier** — applied per stage, not once per milestone:
+
+- **Executable code stages** (JS/shell/`.mjs`/any stage whose `Files:` line
+  lists source files that run) — the gate is **literal ≥80% line coverage**,
+  measured with the project's existing coverage tooling (e.g. `c8`/node
+  `--test` coverage reporting, matching the convention
+  `docs/plans/3-7-quay-task-to-plan-skill.md`'s own Phase 4 Stage 4.2 used
+  for `it0-ceiling-line-budget-check.sh`'s TDD acceptance). A stage's
+  coverage number MUST be pasted as raw tool output, not summarized.
+- **Prose / skill / template / manifest stages** (a `SKILL.md` edit, a
+  prompt template, a doc/plan file, a frontmatter manifest — this skill's
+  OWN Phase 6/7 implementation is itself almost entirely this class) — a
+  coverage percentage is meaningless (there is no executable line to run a
+  coverage tool over), so the gate **degrades to the mechanical-check
+  discipline** `docs/plans/2-exp5-driver-deliverability-packaging.md`
+  established: gate-hash / projection-check `it0-*.sh` runs still PASS
+  unchanged (`it0-gate-hash-check.sh`, `it0-dir-projection-check.sh`,
+  `it0-ceiling-line-budget-check.sh`), a **scaffold-lints-clean** check
+  (no dangling/unresolved references left in the emitted prose asset), and
+  an **isolation test** appropriate to the asset (for a skill file: does it
+  parse as valid frontmatter + resolve every tool/skill/script citation it
+  makes — see "Prose-asset mechanical checks" below). **State explicitly:
+  this classifier applies to this very skill's own implementation** (Phases
+  6 and 7 are themselves prose/skill-asset stages, not executable-code
+  stages — the mechanical-check branch, not the coverage-% branch, is what
+  actually gates M20/M22's own Done-when clause 5).
 
 ## Constraints
 
@@ -193,7 +301,18 @@ write_back: extra{} only as optional native-only mirror, capability-checked befo
 write_back: task_get readback pasted as evidence ∧
 forbid(status-only `task edit` as the write path) ∧
 forbid(architect-review skip or replacement) ∧
-forbid(Phase 7: plan step, TDD gate, DISPATCH wiring, non-discretionary policy)
+plan: milestone-level record (phases/stages/dependency-order/budgets/TDD-acceptance) ∧
+forbid(plan rendered as a child-task tree in the Web UI/task board) ∧
+plan_check: maximally codebase-grounded, CHECK not re-derivation, N=1 (not N-independent) ∧
+plan_check: consumes Phase-4 budget gate (`it0-ceiling-line-budget-check.sh`) as a ground-truth check ∧
+plan_check: stopping rule ~2-3 rounds, ΔV-small-and-stable convergence, reused from exp5's own stop condition ∧
+forbid(plan re-derivation as the default — ad hoc only, genuinely contested decomposition) ∧
+tdd_gate: HARD GATE, per stage, not skippable, not an evidence-paste courtesy ∧
+tdd_gate: code stages → literal ≥80% line coverage (pasted raw tool output) ∧
+tdd_gate: prose/skill/template/manifest stages → mechanical-check discipline (gate-hash/projection-check/scaffold-lint/isolation test), NOT a coverage number ∧
+forbid(skipping the TDD gate for any stage, code or prose) ∧
+forbid(DISPATCH auto-wiring into OUTER-LOOP.md — manual invocation only, this milestone) ∧
+forbid(de-optionalizing the two-class diversity policy — Phase-5/M18 territory, referenced not re-wired)
 ```
 
 ## Output
@@ -203,6 +322,80 @@ outputs = {
   proposals:     [Proposal] (N raw, ephemeral — not persisted to the task),
   reconciled:    ReconciledProposal (adjudicated or converged),
   task_write:    raw tool-call result,
-  task_get:      raw readback tool-call result (evidence the write landed)
+  task_get:      raw readback tool-call result (evidence the write landed),
+  plan_record:   PlanRecord (milestone-level; phases/stages/dependency-order/
+                 per-stage budgets/per-stage TDD acceptance; kept in the plan
+                 document / task body, NEVER materialized as child tasks),
+  plan_check:    CONVERGED | NOT-CONVERGED (per round, ≤3 rounds) + the raw
+                 `it0-ceiling-line-budget-check.sh` tool output consumed as
+                 evidence,
+  tdd_evidence:  per stage — {coverage_pct: N (code stages)} OR
+                 {mechanical_checks: [gate-hash PASS, scaffold-lint PASS,
+                 isolation-test PASS, ...]} (prose stages) — raw, not
+                 summarized
 }
 ```
+
+## Relationship / bootstrap (Stage 7.3)
+
+**Bootstrap chicken-and-egg, resolved explicitly** (`docs/plans/
+3-7-quay-task-to-plan-skill.md`'s "Dogfooding note", preserving the original
+proposal draft's §11): `quay-task-to-plan` **cannot build its own
+deliverable** — a skill cannot run itself before it exists. Concretely:
+
+- **The skill-implementation milestones themselves (Phase 6 = M20, Phase 7 =
+  THIS milestone, M22) ran/run through the existing `proposal-to-plan`
+  skill** (the bootstrap substrate), not through `quay-task-to-plan`. This
+  is not a gap to be closed later — it is the permanent, structurally
+  necessary shape of how this skill came to exist. `quay-task-to-plan`'s own
+  design was (and continues to be, at each phase) cross-checked against
+  `proposal-to-plan` step-by-step (frontmatter shape, numbered `## Steps`,
+  isolated-Task-agent-per-step structure — see the skill header above).
+- **From the SECOND development-class milestone onward, `quay-task-to-plan`
+  is the standing route.** The named first true-dogfood candidates are the
+  still-deferred implementation milestones already materialized on
+  `backlog.md`: `M-TASK-BACKLOG-PROJECTION-IMPL` (DIR-015 item 2, DIR-016
+  retroactive-sweep row) and a future release-cadence implementation.
+  **Explicitly NOT** `M16-cli-edit-parity-impl` — that milestone is already
+  complete (`milestone_counter` passed 16 long before this skill existed),
+  so it cannot retroactively become a dogfood instance; it is cited here
+  only to rule it out, not as a candidate.
+- This charter (M22) does **not** wire a live end-to-end dogfooding run
+  against `M-TASK-BACKLOG-PROJECTION-IMPL` — that is
+  `M-TASK-BACKLOG-PROJECTION-IMPL`'s own future milestone's job, once
+  SELECTed. This section states the bootstrap-resolution + names the
+  customer; it does not execute the dogfood run itself (see charter
+  "Explicitly OUT of scope").
+
+**`feature-developer` reuse note** (proposal §8 point 6 / §17): this skill
+does **not** reinvent `feature-developer`'s TDD-implementation review loop
+(RED→GREEN→REFACTOR, parallel worktree-isolated Task agents, self-analysis
+validation — see `~/.claude/skills/feature-developer/SKILL.md` phases 3-9).
+Where a plan stage's shape fits that loop (an executable-code stage with a
+clear RED/GREEN cycle), Step 7's implementation dispatch should **wrap or
+invoke `feature-developer`'s existing implementation phase** rather than
+re-authoring a competing TDD harness — the reuse principle is "reuse/wrap
+where it fits, don't reinvent the review loop," not "always delegate
+unconditionally": a prose/skill/manifest stage (the mechanical-check branch
+of the TDD classifier above) has no RED/GREEN code cycle to hand off, so for
+those stages this skill's own implementation step runs directly, per the
+mechanical-check discipline, without invoking `feature-developer` at all.
+
+**Output contract** (restated here for the plan+implementation pipeline,
+distinct from the Phase-6-only `Output` block above): tasks carry their
+proposals in `body` (Phase 6, unchanged); a **milestone-level plan record**
+(Phase 7) lives in the plan document (or, for a task-scoped plan, the task's
+`body` under a `## Plan` section using the same full-section-replace,
+not-write-once discipline as `## Proposal`) — never as a set of child tasks.
+
+**Non-goals** (proposal §10, restated for Phase 7): this skill does **not**
+delete or fork `proposal-to-plan` — it is a narrower, task-native front-end
+for the development class, coexisting with `proposal-to-plan` as the
+methodology/design class's continuing route. It does **not** render plan
+stage-progress in the Web UI or task board (see step 5 above — the plan
+record is deliberately process-invisible there). It does **not** wire
+`OUTER-LOOP.md` DISPATCH to invoke this skill automatically for any real
+milestone (explicitly out of scope this charter — manual invocation only,
+see the skill-header note above). It does **not** make the two-class
+diversity policy non-discretionary (Phase-5/M18 territory, referenced, not
+re-wired here).
