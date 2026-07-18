@@ -50,3 +50,8 @@ Slope (marginal points / milestone): _n/a until ≥2 points_
   DIRs + open gaps; inherited-core.md → 3 extracted skills + exp4 methodology). Scored VT₀=82.25
   from exp4 gap-list.md. state → RUNNING. Selecting M-DIST next per backlog guidance (explore,
   URGENT).
+- SELECT m1 = M-DIST (explore). Value hypothesis Δv̂=+6.0 (Packaging cov 0.55→0.85, weight 20)
+  recorded BEFORE dispatch. Charter authored: `charters/M01-dist.md` (scope: DIR-004's undelivered
+  half — Node SEA/Bun single-file executables, CI build+publish, no-Node verification; the existing
+  npm-pack/.tgz path is NOT redone). Gate-hash transclusion + it0 checks recorded in-charter.
+  Dispatching inner milestone next.
