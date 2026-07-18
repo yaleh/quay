@@ -2,7 +2,7 @@
 id: exp5-M-ADVERSARIAL-EVAL
 title: Adversarial/negative-path + security evaluation (fault injection, token
   handling, open-redirect, injection review)
-status: ready
+status: done
 labels:
   - milestone-candidate
   - surface:cross-cutting
@@ -24,8 +24,13 @@ explore, method infra, no VT points
 Backlogged.
 
 ## Status mirror
-ready (SELECTed @M26, 2026-07-18 — highest-DIR-001-priority charter-ready candidate; M-OUTCOME-EVAL
-deferred as not-yet-charter-ready per its own notes)
+done (ABSORBed @M26, 2026-07-18 — two-iteration convergent adversarial/security audit, 9 findings
+across both iterations, 3 independently-convergent duplicates + 2 unique (ADV-004 path-traversal
+arbitrary-file-write, fixed; M26-F4 store.js all-or-nothing list() crash, verified-safe-degrade not
+fixed at store.js level, deliberate scope decision). All 4 ABSORB HARD-BLOCK gates PASS, including
+the DoD meta-enforcer's second-ever real test (generalized cleanly, no script defect). Published to
+master as e2c5de1. See dashboard.md ABSORB m26 entry and
+experiments/quay-perpetual-stream/milestones/M26-adversarial-eval/audit-report.md for full detail.)
 
 ---
 _2026-07-18T19:18:52.059Z_: Not selected @M24: DIR-015/DIR-016's standing hard floor already committed this SELECT pass to M-TASK-BACKLOG-PROJECTION-IMPL (self-hosting fix, blocks all future SELECT read-path work) — a governance/infra candidate whose own enabling half was itself unselectable until this milestone lands.

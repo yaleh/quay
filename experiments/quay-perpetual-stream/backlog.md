@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-ADVERSARIAL-EVAL | Adversarial/negative-path + security evaluation (fault injection, token handling, open-redirect, injection review) | DONE | explore, method infra, no VT points | milestone-candidate, surface:cross-cutting, milestone:M26-adversarial-eval |
 | exp5-M-DOD-META-ENFORCER | DIR-017 Step 1: the Definition-of-Done meta-enforcer (load-bearing foothold) - unify the adversarial-audit/V_meta-lag/line-budget/-IMPL-row gates into one inherited-core.md DoD section, a no-self-exemption clause, and a standing mechanical it0-style check that HARD-BLOCKS milestone_counter++ | DONE | explore, governance-integrity (primary) — directly closes the Goodhart/self-exemption | milestone-candidate, surface:method-infra, milestone:M25-dod-meta-enforcer |
 | exp5-M-TASK-BACKLOG-PROJECTION-IMPL | Implement M-TASK-BACKLOG-PROJECTION's design (this milestone itself, M24) | DONE | explore, capability-growth (primary) + governance-integrity (secondary) | milestone-candidate, milestone:M24-task-backlog-projection-impl, surface:method-infra |
 | exp5-M01 | Distribution: Node SEA / Bun compile release artifacts via GitHub Actions | DONE | explore | milestone-candidate, milestone:M01-dist, backfill, surface:packaging |
@@ -22,9 +23,8 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
 | exp5-M-COMPETITIVE-BENCH | Comparative capability benchmark vs. a real competitor (formalize CB-016's ad hoc GitHub Issues/Linear yardstick) | open | exploit (cross-exp comparison channel), method infra, no VT points | milestone-candidate, surface:cross-cutting |
 | exp5-M-OUTCOME-EVAL | Outcome-based (job-to-be-done) evaluation: fixed real end-to-end task-board scenarios, binary pass/fail, dogfooding-gated | open | explore, method infra, no VT points | milestone-candidate, surface:cross-cutting |
-| exp5-M-ADVERSARIAL-EVAL | Adversarial/negative-path + security evaluation (fault injection, token handling, open-redirect, injection review) | SELECTED | explore, method infra, no VT points | milestone-candidate, surface:cross-cutting, milestone:M26-adversarial-eval |
 | exp5-M-CLI-UX | CLI usability closeout (UQ-042..046) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:cli |
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_20 milestone-candidate task(s) as of 2026-07-18T20:41:48.695Z._
+_20 milestone-candidate task(s) as of 2026-07-18T21:55:29.149Z._

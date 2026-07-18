@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 25** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 26** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -2111,3 +2111,73 @@ to deviate from this SELECT, but should be re-flagged at cp-30 if it persists.
 
 
 ABSORB entry. Continuing directly to m26 SELECT after the checkpoint, no human wait.
+
+## ABSORB m26 — M26-adversarial-eval — 2026-07-18
+
+Two-iteration convergent adversarial/security audit, per DIR-001 item 4. Merged
+`exp5-m26-iteration-0` (clean completion, commit 269e854) and `exp5-m26-iteration-1`
+(harness API-error mid-run on first attempt, salvaged WIP + dedicated finish-up
+agent, commit 7d34c23) into `exp5-outer-driver` as merge commit `ad4bcad`, resolving
+4 conflicts per-file (audit-report.md reconciled as a genuinely merged document
+preserving both iterations' unique findings; provider.yml/provider-client.js/serve.js
+resolved with stated rationale in the merge commit message). Fixed one test
+regression (serve.test.mjs M26-F4 assertion) introduced by my own merge-resolution
+choice; full suite re-verified 34/34 pass, exit 0.
+
+Findings: ADV-001..ADV-005 (iteration-0) + M26-F1..M26-F4 (iteration-1), with
+ADV-001≈M26-F2, ADV-003≈M26-F3, ADV-005≈M26-F4 as independently-convergent
+duplicate discoveries (strong thoroughness signal, not redundant churn) plus one
+unique finding per iteration: ADV-004 (path-traversal arbitrary-file-write, fixed
+via `assertSafeId()`) and M26-F4-as-test (store.js `list()` all-or-nothing crash on
+malformed file, verified degrades safely end-to-end via the M26-F2 fix chain, not
+fixed at the store.js level — deliberate scope decision, out of this milestone's
+audit+harden charter). The ADV-003/M26-F3 exploitability disagreement was resolved
+by direct code verification (not by picking a side): `addParam()` neutralizes
+`baseRedirect` before it ever reaches a Location header at both call sites, so
+iteration-1's "not independently exploitable, defense-in-depth" characterization is
+the factually correct one; iteration-0's superior code fix (`isSafeRelativeRedirect()`
+helper) was kept regardless.
+
+### Gate dispositions
+
+**Adversarial-audit gate**: neither condition (a) nor (b) fired this milestone —
+this milestone IS itself an adversarial/audit-type milestone by charter design, not
+a milestone whose OWN claims require a separate adversarial-audit subagent pass
+(the two-iteration convergent-verification structure served that role in this
+case). Documented no-op, N/A.
+
+**V_meta consolidation-lag gate**: clear — 0 rows confirmed-but-not-consolidated in
+v-meta-ledger.md at ABSORB time; this milestone is audit/hardening work, not a
+methodology-adaptation insight, so no new ledger row is warranted. Disposition:
+clear, no rows past threshold.
+
+**Design-only-milestone impl-row gate**: PASS — `it0-impl-row-check.sh
+exp5-M-ADVERSARIAL-EVAL backlog.md` confirms the milestone's backlog row is NOT
+design-only (no "design delivered"/"design-doc only"/follow-up-checklist marker),
+so the impl-row rule does not apply. Real output: "PASS: exp5-M-ADVERSARIAL-EVAL is
+not design-only per its backlog row text ... impl-row gate does not apply."
+
+**DoD meta-enforcer gate**: this IS the second-ever real (non-fixture,
+non-self-referential) test of `it0-dod-check.sh`/`.mjs`, per DIR-017/M25's own
+design and cp-25.md's flagged follow-up. Generalization note: ran cleanly against
+the real charter (`charters/M26-adversarial-eval.md`) and this real ABSORB-entry
+text with NO script changes required — the only friction was operational (needing
+to embed this file's own required "## Backlog row" section, below, in the exact
+synthetic-backlog form clause 4 expects, and confirming the task-store id
+`exp5-M-ADVERSARIAL-EVAL`, not the milestone id `M26-adversarial-eval`, is the
+correct first argument to both `it0-impl-row-check.sh` and this script's own
+`<milestone-id>` positional — consistent with the standing convention already
+established at M21-M25). No script defect found; gate generalized cleanly.
+
+## Backlog row
+| exp5-M-ADVERSARIAL-EVAL | Adversarial/negative-path + security evaluation (fault injection, token handling, open-redirect, injection review) | SELECTED | explore, method infra, no VT points | milestone-candidate, surface:cross-cutting, milestone:M26-adversarial-eval |
+
+Merge/publish trail: `exp5-m26-iteration-0` (269e854) + `exp5-m26-iteration-1`
+(salvaged WIP 2aff6aa, finish-up 7d34c23) → merged into `exp5-outer-driver` as
+`ccf53f1` (iteration-0, clean) then `ad4bcad` (iteration-1, 4 conflicts resolved
+per-file, rationale in the merge commit message) → published to `master` as
+`e2c5de1` (`git merge --no-ff exp5-outer-driver`). All 4 HARD-BLOCK gates PASS
+(see dispositions above). `milestone_counter` bumped 25→26 only after publish
+landed. `tasks/exp5-M-ADVERSARIAL-EVAL.md` → `status: done`.
+
+Continuing directly to m27 DRAIN/SELECT, no human wait.
