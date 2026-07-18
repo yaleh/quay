@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 14** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 15** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -1170,3 +1170,37 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   NOT expected to fire and pre-commits the m6/M13/M14 override precedent if iteration-0 recommends
   skipping iteration-1. Dispatching inner iteration-0 and iteration-1 next, both from worktrees off
   the current master HEAD.
+- **ABSORB m15 = M-HUMAN-REVIEW-CADENCE** 2026-07-18. Both iterations ran genuinely in parallel from
+  base `ed3d94b`: iteration-0 (commit `cc145ec`) and iteration-1 (commit `ffdee07`), independently
+  producing the same real 11-directive tally (10/11 human-initiated mid-conversation, 1/11 self-raised
+  DIR-003) and the same three-file design shape (`dashboard.md` health track, `inherited-core.md` rule
+  section, `OUTER-LOOP.md` step 8 wire-up) plus each independently writing `checkpoints/cp-15.md` as
+  the charter's live-proof requirement. The two iterations diverged on one number:
+  `milestones-since-last-human-directive` — iteration-0 computed 3, iteration-1 computed 2, per
+  differing as-of points (iteration-0 counted as of this ABSORB itself; iteration-1 counted as of
+  m14-complete/pre-m15-dispatch). Reconciled to **3**: the rule (item 1 of the charter, "recompute at
+  every ABSORB") logically includes the milestone whose ABSORB is currently executing, so m15's own
+  zero-new-directive completion must be folded into the count (milestone_counter(15) −
+  arrival-milestone(12) = 3). Merged to master: `49a18f5` (iteration-1, clean) then `5c3a2f6`
+  (iteration-0, CONFLICT across all 5 touched files — `dashboard.md`, `backlog.md`, `OUTER-LOOP.md`,
+  `inherited-core.md`, `checkpoints/cp-15.md` — since both iterations independently authored full
+  sections/rows/entries for the same new content). Resolved by keeping iteration-0's prose/table
+  wording as base throughout (consistent basis across all 5 files), patching the reconciled value (3,
+  not 2) into every location it appears, including one internally-stale "2 milestones... as of
+  m14-complete" reference inside iteration-0's own `inherited-core.md` draft that needed correcting
+  during resolution rather than copied through verbatim. Reconciliation reasoning recorded in this row
+  (above) and in `backlog.md`'s `M-HUMAN-REVIEW-CADENCE` row; both iteration reports retained for
+  provenance (`milestones/M15-human-review-cadence/iterations/iteration-0.md`, `iteration-1.md`,
+  commit `25e8689`). No cwd-drift stray file this time (clean `git status` before each merge).
+  **Realized Δv = 0** (method infra, exactly as charter specified) — `git diff --stat ed3d94b HEAD`
+  confirmed exactly 7 files changed (`dashboard.md`, `backlog.md`, `OUTER-LOOP.md`, `inherited-core.md`,
+  `checkpoints/cp-15.md`, the two iteration reports), zero product code touched, satisfying Done-when
+  clause 6 (no blocking mechanism introduced — `OUTER-LOOP.md` step 0 DRAIN unchanged, confirmed by
+  diff; the new track carries no HARD BLOCK language anywhere). **Adversarial-audit gate correctly did
+  NOT fire** — Δv=0 (condition (a) inapplicable) and both iterations ran normally with no iteration-0
+  self-exemption attempt (condition (b) inapplicable), exactly as the charter's own pre-analysis
+  predicted. **Checkpoint due at this exact milestone (`milestone_counter=15`) — written and live-proven**:
+  `checkpoints/cp-15.md` now contains a working "Human-review cadence" row showing
+  `milestones-since-last-human-directive = 3`, K=5 soft-alarm not yet crossed, non-blocking — the FIRST
+  live proof-of-mechanism for this milestone's own deliverable, satisfying Done-when clause 5.
+  `backlog.md`'s `M-HUMAN-REVIEW-CADENCE` row marked DONE. `milestone_counter` → **15**.
