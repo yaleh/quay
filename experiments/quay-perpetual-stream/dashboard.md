@@ -162,6 +162,48 @@ merge-drift measurement error; iteration-1 independently re-derived every cov nu
 from fresh command output, catching a small evidence gap (Docker audit-channel gh-caveat) rather
 than an arithmetic error) ]`
 
+### Chart-1 re-score (M09-gh-write, Provider-ABI write-completeness) — 2026-07-18 — ITERATION-0 DRAFT
+
+**Provisional — iteration-1 must independently re-derive this section from scratch (fresh
+worktree, fresh command output) before it is treated as settled, per this experiment's own
+standing convention** (mirrors M08's own iteration-0→iteration-1 discipline above). Re-scored
+Provider-ABI (the only surface this milestone touched) from this milestone's own live
+re-verification evidence, per the charter's Done-when clause 7. Cited findings are in
+`milestones/M03-abi-eval/capability-matrix.md`'s own re-derivation section and this milestone's
+own iteration-0 report (`milestones/M09-gh-write/iterations/iteration-0.md`), which contains the
+full live command transcripts (real `gh issue view` before/after against a dedicated scratch
+issue `gh-11`, and the real `gh-5`/`gh-7` parent-symmetry re-check).
+
+| surface | prior cov (m3, unchanged through m8) | new cov | rationale (this iteration's own live evidence) |
+|---|---|---|---|
+| Provider-ABI | 0.654 | **0.923** | Re-derived per-capability (capability-matrix.md's own re-derivation table): read 0.90→**1.00** (PR-ABI-002 closed — `github-client.js#get()` now calls the same `fetchAllIssues()`+`buildParentIndex()` pair `list()` already used; live-verified `task_get gh-5 -> parent: "gh-7"`, matching `task_list`); write 0.20→**0.80** (PR-ABI-001 closed for 4 of 5 fields — status/title/body/labels all real writes, live-verified against a dedicated scratch issue `gh-11` with real `gh issue view` before/after transcripts for each field; parent/children write remains explicitly out of this milestone's charter-scoped exclusion, now hard-errors `isError:true` rather than silently no-op'ing — live-verified); gate 1.00 and skill 1.00 unchanged (untouched this milestone). cov = (5+4+2+1)/(5+5+2+1) = 12/13 = **0.9231**. |
+| **VT chart-1 total (after m9)** | **103.73/120** | **109.11/120** | CLI 25×0.94=23.50 (unchanged, out of scope); MCP 20×0.90=18.00 (unchanged, out of scope); Web UI 20×0.92=18.40 (unchanged, out of scope); Packaging 20×0.90=18.00 (unchanged, out of scope); Docs 15×0.85=12.75 (unchanged, out of scope); Provider-ABI 20×0.9231=**18.46** (+5.38 vs m8's 13.08). Total = 23.50+18.00+18.40+18.00+12.75+18.46 = **109.11/120** (≈0.909 normalized, up from 0.864 at m8). |
+
+**Arithmetic re-check** (this milestone's own standing convention):
+```
+$ python3 -c "print(23.50+18.00+18.40+18.00+12.75+20*12/13)"
+109.11153846153847
+```
+Total confirmed: **≈109.11/120** (109.1115…, rounds to 109.11). Δv = 109.11 − 103.73 = **+5.38** —
+below the charter's own Δv̂≈+2.9 pre-dispatch estimate scaled to points (charter's own value
+hypothesis text computed Δv̂ from a cov delta of 0.654→~0.80, i.e. ≈+2.92 points at weight 20; this
+milestone's REALIZED cov (0.923) exceeded that placeholder target (0.80) because BOTH the write
+stretch over-performed (4/5 realized vs the charter's conservative "~3/5 realistic" framing) AND
+the read-side PR-ABI-002 fix contributed an additional read 0.90→1.00 delta the charter's own
+placeholder arithmetic did not separately itemize — so the REALIZED point delta (+5.38) is larger,
+not smaller, than the pre-dispatch estimate. This is the opposite direction of a shortfall: the
+charter under-estimated by being conservative on scope, and the actual outcome landed better than
+predicted. iteration-1 must independently re-derive this arithmetic from scratch per this
+experiment's own base-rate discipline (most of the last several milestones' iteration-1 passes
+have caught something real) before this is treated as settled.
+
+VT curve (append, chart-1 basis, iteration-0 DRAFT — pending iteration-1 independent re-derivation):
+`[ ..., (m8/M08-merge-recover, 103.73/120), (m9/M09-gh-write, 109.11/120, Δv=+5.38,
+CAPABILITY-GROWTH — Provider-ABI write-completeness: PR-ABI-001 (real title/body/labels write,
+hard-error floor for the remaining unimplemented parent/children field) and PR-ABI-002 (get()
+parent-resolution symmetry fix) both closed; iteration-0's own draft, pending iteration-1's
+independent re-derivation) ]`
+
 ## Health tracks (§4.2–4.4, §6.1)
 
 | track | current | alarm |
