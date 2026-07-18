@@ -1,6 +1,6 @@
 # DIR-012
 
-- status: pending
+- status: applied
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Adopt a quay-task-native proposal→plan skill and the milestone-model changes it requires, so exp5 can execute typical development work (up to ~2000 lines) with an explicit plan, not just acceptance criteria — diversity clamped at both ends (independent proposal re-derivation upstream, adversarial-audit downstream), the plan checked-not-re-derived in the middle
@@ -31,7 +31,12 @@ proposal and the plan", `feature-developer` orchestration), not one-shot.
 
 The full design is written up in
 `docs/proposals/exp5-quay-task-proposal-plan-skill.md` (committed alongside this
-DIR). Its resolved decisions, from this conversation:
+DIR), and the implementation is decomposed into a phased plan at
+`docs/plans/3-7-quay-task-to-plan-skill.md` (5 phases, ~1,970 lines, self-sized
+under the ≤2000-line milestone ceiling this DIR introduces — produced by running
+the existing `proposal-to-plan` skill over the proposal, i.e. dogfooding the very
+proposal→plan discipline the new skill will formalize). Its resolved decisions,
+from this conversation:
 
 1. **Four-entity model, aligned in pairs.** `task ↔ proposal` (a task is a
    valuable unit described by a proposal, written back to the task's *body* —
@@ -119,3 +124,9 @@ positive Δv̂ — size at SELECT time.
   (dogfooding on the first development-class implementation milestone) are explicitly out of scope
   for M17 and left for a following milestone once M17's design lands — see M17's own charter for the
   precise scope boundary.
+- plan reference: `docs/plans/3-7-quay-task-to-plan-skill.md` — the phased implementation plan
+  (Phases 3–7) M17's design and the eventual skill-implementation milestone build against; produced
+  by running `proposal-to-plan` over this DIR's proposal (human-directed, 2026-07-18).
+- frontmatter status corrected `pending`→`applied` at this update to match the archive/ location and
+  the outcome above (it had been left stale when the DRAIN moved the file — the M05 anti-drift check
+  compares this line against the projection).
