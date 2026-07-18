@@ -1469,3 +1469,28 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   capability-growth milestones. To be drained at the next SELECT boundary (m19→m20), per the
   standing "drain `directives/pending/`" step. **Checkpoint due at m20** (checkpoint cadence: every
   5 milestones, last checkpoint at m15) — write it non-blocking at the next ABSORB, then continue.
+- **SELECT m20 = M-TASK-TO-PLAN-SKILL-PROPOSAL-STEP** 2026-07-18. `directives/pending/` drained:
+  found `DIR-014` (already independently committed by the human, `7c7d2f7`, arriving during M19's
+  own dispatch/merge window — same "leave the user's own concurrent commits untouched" posture
+  confirmed correct again). `.halt` absent. Picked DIR-014 directly (only pending directive):
+  charters the first real *build* toward closing the DIR-012/DIR-014 "enforcement half never built"
+  gap — Phase 6 of `docs/plans/3-7-quay-task-to-plan-skill.md` (skill scaffold + proposal step,
+  ~460 est. lines, Stages 6.1-6.3), citing the plan document as authoritative build spec rather than
+  duplicating it (§3.1 charter-thinness). Deliberately scoped to Phase 6 ONLY, not the full DIR-014
+  ask (Phase 7 — plan step, TDD gate, DISPATCH wiring, non-discretionary policy — deferred to a
+  future milestone), per the plan's own mandatory `6 → 7` ordering and to keep this milestone inside
+  the small-to-medium size band rather than attempting the whole skill in one shot. Authored charter
+  `charters/M20-quay-task-to-plan-skill-proposal-step.md`: type explore, value type capability-growth
+  (primary) + discovery (secondary), Δv̂=0 (no VT chart cell for a new skill artifact, mirrors
+  M16-CLI-EDIT-PARITY-IMPL's own realized-Δv=0 precedent — state explicitly at ABSORB, do not
+  fabricate a VT number). Requires a real (but scratch-scoped) native-provider `task_write`/
+  `task_get` dry-run as evidence for Stage 6.3's write-back claim — no GitHub provider access this
+  phase. Gate-hash check: `it0-gate-hash-check.sh --by-reference
+  charters/M20-quay-task-to-plan-skill-proposal-step.md` → **PASS** (same pinned hash reused
+  unchanged, M12–M20). Plan-time line-budget gate: `it0-ceiling-line-budget-check.sh
+  charters/M20-quay-task-to-plan-skill-proposal-step.md` → **PASS** (charter itself is thin/in-norm;
+  the cited external phase/stage plan is what actually carries the larger build). Adversarial-audit
+  gate: condition (a) evaluated at ABSORB (fires only if a nonzero VT Δv is realized — not expected
+  by design); condition (b) not authorized (real independent-re-derivation material exists).
+  Dispatching inner iteration-0 and iteration-1 next, both from worktrees off the current master HEAD
+  (`17a55f3`).
