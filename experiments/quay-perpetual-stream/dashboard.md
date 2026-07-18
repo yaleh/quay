@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 6** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 7** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -126,7 +126,7 @@ iteration-0's arithmetic slip of 95.83 during iteration-1's independent re-verif
 | discovery latency (mechanizable) | **0** (m1-m5 all — m5's PR-004/PR-005 gap-list findings were logged same-iteration as found, not deferred; PR-005 specifically was iteration-1 catching a bug iteration-0 introduced and shipped in the SAME milestone, zero-latency self-correction) | >~8 iters late |
 | calibration error \|Δv−Δv̂\|/Δv̂ | **0%** (m1); m2/m5 no VT Δv̂ (methodology-infra, by design); m3 Δv̂ "≈0 direct" (re-baseline); m4 re-score, no formal Δv̂ (discovery-value framing) | trend must shrink |
 | inner-convergence success | **5/5** (m1-m5 each: 2 iterations, Done-when-complete, no mid-milestone re-scope — m5's iteration-1 found and fixed a real bug [`--labels`/`--label` CLI typo] but this counts as convergence-with-correction, not re-scope: same charter, same Done-when, no scope change) | mid-milestone re-scope = fail |
-| V_meta consolidation lag | **1 row past threshold, milestones-since-confirmed = current `milestone_counter` (6) − confirming milestone number (3) = 3** — `v-meta-ledger.md`'s single `domain-audit-channel≡CI-job` row is `confirmed` (φ threshold crossed at m3: m1 packaging origin + m3 cross-provider 2nd instance, 2 cross-domain confirmations, one row whose confirmation count evolved 1→2, not two separate rows) but not `consolidated`; mechanically re-derivable each ABSORB as `milestone_counter − confirming_milestone_number`, currently 6−3=3, already **exceeding the alarm** by the time m7's own ABSORB runs. The ledger's other row (m3's isolation-leak lesson) is `proposed`, not yet past threshold, not counted against this track. Symmetric to the discovery-latency track above: measures milestones-since-confirmed for any ledger row past the φ 2-confirmation threshold but not yet `consolidated`. | **>2 milestones (K=2)** since confirmed-but-not-consolidated |
+| V_meta consolidation lag | **0 rows past threshold-and-unresolved as of m7-complete.** The `domain-audit-channel≡CI-job` row (confirmed at m3, 3 milestones-since-confirmed by m6, already past K=2) was **resolved by consolidation at m7's own ABSORB** — folded into `inherited-core.md`'s "Domain-misfit audit-channel" section, ledger row status → `consolidated`. This is the gate's first real bite (DIR-005/M07-vmeta-gate Done-when 4): fired on a genuine pre-existing past-threshold case, resolved same-ABSORB rather than carried forward. The ledger's other row (m3's isolation-leak lesson) remains `proposed`, not yet past threshold. Symmetric to the discovery-latency track above: measures milestones-since-confirmed for any ledger row past the φ 2-confirmation threshold but not yet `consolidated`. | **>2 milestones (K=2)** since confirmed-but-not-consolidated |
 
 ## Control limits (pre-declared; §6/§6.1)
 - inner budget = 10 (past → default HALT, continue needs authorization)
@@ -481,3 +481,33 @@ iteration-0's arithmetic slip of 95.83 during iteration-1's independent re-verif
   governance/infra-heavy explore milestones; that pattern must not continue into m8 by default
   regardless of what else surfaces at the m7→m8 boundary, absent a genuine blocking gap or external
   HALT. Dispatching inner iteration-0 next.
+- **ABSORB m7 = M-VMETA-GATE → DONE** 2026-07-18. Iteration-0 built all 5 charter items: new
+  `v-meta-ledger.md` (initially 3 rows, migrated from DIR-005's Finding), a `V_meta consolidation
+  lag` health track in `dashboard.md` (K=2 alarm), and an ABSORB-step gate in `OUTER-LOOP.md`.
+  Iteration-1 independent re-verification (5th of 7 milestones catching something real) found and
+  fixed: (1) a real structural bug — DIR-005 items (a)/(b) are the SAME insight at two points in
+  its confirmation history (m1 origin, m3 threshold-crossing), not two distinct insights; two rows
+  would have double-counted one debt item against the K=2 alarm. Corrected to one row with an
+  evolving confirmation count (1→2), with the correction's reasoning traced directly to
+  `dashboard.md`'s own m1/m3 log-entry wording ("validated once at M01-dist" / "gets its 2nd
+  confirming instance"). (2) The "milestones-since-confirmed" health-track metric was narrative,
+  not mechanically computable — added the explicit formula
+  `milestone_counter (current) − confirming milestone number` grounded in `dashboard.md`'s own
+  logged `milestone_counter → N` values. (3) The ABSORB gate's wording named no concrete block
+  target — tightened to explicitly gate step 7's `milestone_counter++`. All 5 Done-when clauses
+  met with re-derived (not self-reported) evidence; no code touched, no test run required per
+  charter Done-when 5. Merged `exp5-m07-iteration-1` → `master` (`--no-ff`, clean, no conflicts).
+  **First-proof requirement (DIR-005/charter Done-when 4) resolved AT THIS ABSORB, by
+  consolidation, not carry-forward**: the `domain-audit-channel≡CI-job` ledger row (confirmed at
+  m3, already 3 milestones-since-confirmed and past K=2 by m6-complete — zero slack remaining)
+  was folded into `inherited-core.md`'s "Domain-misfit audit-channel" section under a new
+  "CONSOLIDATED — φ-confirmed pattern" subsection, recording the m3 confirming instance (M03-abi-
+  eval's cross-provider conformance suite reusing the CI-job-as-audit-channel pattern from M01-dist,
+  unchanged, in a genuinely different domain) and retiring the citation as an established,
+  twice-confirmed convention. Ledger row status → `consolidated`. `dashboard.md`'s new health
+  track updated to 0 rows past-threshold-and-unresolved — the gate's first real bite, demonstrated
+  against a genuine pre-existing case as DIR-005 itself required, not a hypothetical future one.
+  milestone_counter → **7**. `backlog.md`'s M-VMETA-GATE row to be marked DONE next.
+  **Standing pre-commitment reaffirmed**: SELECT m8 = M-MERGE-RECOVER, no further deferral — three
+  consecutive governance/infra-heavy explore milestones (m5, m6, m7) is enough; m8 must be
+  product-value work absent a genuine blocking gap or external HALT.

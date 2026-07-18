@@ -101,6 +101,27 @@ M01-dist actually used** (a Node-free container, later mechanized identically in
 the procedure is a faithful concretization of what M01-dist already did by judgment, not a
 redescription that would have given a different answer.
 
+### CONSOLIDATED — φ-confirmed pattern: the audit channel IS a CI job (M07-vmeta-gate ABSORB, m7)
+
+The procedure above (Steps 1-4) is the general decision procedure. The specific PATTERN it produced
+when first applied (M01-dist, chart-0) — **"an independent, differently-provisioned CI job run is
+the audit channel"** — has now been independently reused, unchanged, by a SECOND different-domain
+milestone: M03-abi-eval's cross-provider differential conformance suite (18/18 scenarios, native vs.
+real `yaleh/quay` github provider) served as its own audit channel by the exact same reasoning
+(Step 2: an externally-triggered CI run in a separately-provisioned environment, not a
+same-process/same-assumptions local check) — cross-platform (M01-dist) → cross-provider
+(M03-abi-eval), a genuinely different domain, not a repeat of the same check.
+
+Per §4.2's φ fold-back definition ("a LATER different-domain milestone reuses an adaptation
+unchanged"), this crosses the 2-cross-domain-confirmation threshold as of M03-abi-eval (m3) and is
+now **CONFIRMED**, not merely proposed-and-validated-once. Tracked going forward in
+`v-meta-ledger.md` (added M07-vmeta-gate); this note is that ledger row's `consolidated` disposition
+— the pattern itself was already written up above (Steps 1-4 + M01-dist validation), so
+consolidation here means recording the SECOND confirming instance and retiring the citation as
+`confirmed`+`consolidated` rather than re-deriving the procedure a third time. Any future milestone
+citing "the domain-misfit audit-channel is a CI job" pattern should treat it as an established,
+twice-confirmed convention (cite this subsection), not a fresh proposal needing re-justification.
+
 ## Milestone size definition + verify-iteration size gauge (M06-sizing Done-when clauses 1-2)
 
 DIR-004's finding, reviewing m1-m5: "2 inner iterations" is a cost-proxy artifact of the
