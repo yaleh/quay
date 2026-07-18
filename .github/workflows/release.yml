@@ -184,7 +184,7 @@ jobs:
     container:
       image: debian:stable-slim
     steps:
-      - name: Install runtime deps (libatomic1; explicitly NOT nodejs)
+      - name: Install runtime deps (libatomic1; explicitly NOT nodejs, NOT gh)
         run: |
           apt-get update -qq
           apt-get install -y -qq libatomic1 curl tar
@@ -200,12 +200,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # M01-dist iteration-1: `gh` (the GitHub CLI) is preinstalled on
+          # ubuntu-latest HOST runners but is NOT present in a bare
+          # debian:stable-slim `container:` job — a real "command not found"
+          # (exit 127) was hit here, not assumed. Use the GitHub REST API
+          # directly via curl instead, which only needs curl (already
+          # installed above) and keeps this job's dependency footprint
+          # minimal (no extra apt repo for `gh`, staying close to a genuinely
+          # bare/minimal Node-free verification environment).
           VERSION="$(echo "${{ github.ref_name }}" | sed 's/^v//')"
-          gh release download "${{ github.ref_name }}" \
-            --repo "${{ github.repository }}" \
-            --pattern "quay-sea-${VERSION}-linux-x64.tar.gz"
+          ASSET_NAME="quay-sea-${VERSION}-linux-x64.tar.gz"
+          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}"
+          DOWNLOAD_URL="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${API}" \
+            | grep -o "\"browser_download_url\": *\"[^\"]*${ASSET_NAME}\"" \
+            | sed -E 's/.*"(https:[^"]+)"/\1/')"
+          if [ -z "${DOWNLOAD_URL}" ]; then
+            echo "ERROR: could not find download URL for ${ASSET_NAME} in release ${{ github.ref_name }}" >&2
+            exit 1
+          fi
+          curl -sfL -o "${ASSET_NAME}" "${DOWNLOAD_URL}"
           mkdir -p extracted
-          tar -xzf quay-sea-${VERSION}-linux-x64.tar.gz -C extracted
+          tar -xzf "${ASSET_NAME}" -C extracted
       - name: Run quay --help (no Node on PATH)
         run: |
           cd extracted
