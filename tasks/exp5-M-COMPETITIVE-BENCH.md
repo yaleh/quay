@@ -30,3 +30,8 @@ _2026-07-18T19:18:52.068Z_: Not selected @M24: DIR-015/DIR-016's standing hard f
 
 ---
 _2026-07-18_: Not selected @M25: DIR-017 Step 1 (M-DOD-META-ENFORCER) outranks — newly-unblocked load-bearing governance prerequisite; higher priority than this cross-cutting bench work this pass.
+
+---
+_2026-07-18_: Not selected @M26: M-ADVERSARIAL-EVAL (DIR-001 item 4) selected instead — DIR-001's
+own stated ordering (items 3, 4, 5) used as tie-break in the absence of any other forcing signal;
+this candidate is item 5.

@@ -2061,4 +2061,53 @@ task notes) all reached `master` for the first time this milestone.
 
 Worktrees/branches for both M25 iterations removed/deleted. `milestone_counter` → **25**.
 Checkpoint DUE at m25 (every-5 cadence, cp-20 was last) — non-blocking checkpoint to follow this
+ABSORB entry.
+
+## SELECT m26 — 2026-07-18
+
+Checkpoint `checkpoints/cp-25.md` written and committed (`dc9ad39`), non-blocking, no human wait
+required — continuing directly to m26 SELECT per OUTER-LOOP.md's own cadence text.
+
+**DRAIN**: `directives/pending/` holds only DIR-017 (`.gitkeep` + the one file) — stays `pending`
+by its own irreducible human-verification-gate clause; Steps 2-3 are not SELECTable until a human
+confirms M25's Step 1 delivery is operative. No other pending directive to drain. `.halt` absent.
+Master→driver sync performed (`exp5-outer-driver` fast-forwarded `ff58cae..dc9ad39`, no new commit
+needed — clean fast-forward, no conflict).
+
+**Candidates considered** (per cp-25.md's own "Next" section, all three DIR-001-sourced,
+cross-cutting, no VT chart cell):
+- `M-OUTCOME-EVAL` (DIR-001 item 3) — explicitly NOT charter-ready per its own task notes: "needs a
+  concrete scenario list authored at SELECT time." Passing on it this pass rather than rushing a
+  scenario list under this same SELECT step; scenario authorship deserves its own deliberate pass,
+  not a rider on a different milestone's selection.
+- `M-ADVERSARIAL-EVAL` (DIR-001 item 4) — fault injection, token handling, open-redirect, injection
+  review against the Provider ABI / quay-github write paths. Charter-ready as-is (no unmet
+  prerequisite named in its task file). DIR-001 lists this as item 4, directly after item 3.
+- `M-COMPETITIVE-BENCH` (DIR-001 item 5) — formalize CB-016's ad hoc yardstick. Charter-ready, but
+  DIR-001 ranks it after items 3-4; no forcing reason to jump the stated order.
+
+**Chosen: `M-ADVERSARIAL-EVAL`** (`exp5-M-ADVERSARIAL-EVAL`). Rationale: (1) it is the
+highest-DIR-001-priority candidate that is actually charter-ready this pass (M-OUTCOME-EVAL is not,
+per its own notes); (2) security/fault-injection coverage against the Provider ABI and the
+`quay-github` write paths (title/body/labels/parent/children — currently `unimplemented` per
+DIR-001's own Finding #3) is a genuine, previously-named blind spot, not manufactured scope; (3) no
+standing hard-floor directive forces a different choice this pass — this is the first SELECT
+boundary since m20 with genuine discretion, and DIR-001's own stated ordering (items 3, 4, 5) is
+used as the tie-break in the absence of any other forcing signal. m26 = `M-ADVERSARIAL-EVAL`.
+
+Task store write-back: `tasks/exp5-M-ADVERSARIAL-EVAL.md` → `status: ready`, label
+`milestone:M26-adversarial-eval` added, `## Status mirror` updated. `tasks/exp5-M-OUTCOME-EVAL.md`
+and `tasks/exp5-M-COMPETITIVE-BENCH.md` each got an appended "Not selected @M26" note.
+`it0-backlog-regen.mjs --write` re-run to reflect the SELECTED status; anti-drift checks re-run
+clean.
+
+**Note for ABSORB**: per cp-25.md's own flagged item, m26's ABSORB must explicitly evaluate the
+DoD meta-enforcer gate (DIR-017/M25) against this SECOND real milestone and state in the ABSORB
+entry whether it generalized cleanly or needed adjustment — this is the first non-fixture,
+non-self-referential test of that gate. Also: M-ADVERSARIAL-EVAL is method-infra/eval-surface work
+with no VT chart cell (Δv̂=0 by design), consistent with all of m21-m25 — the qualifying-slope
+staleness cp-25.md flagged (13 milestones since m12) will extend to 14 at m26; not itself a reason
+to deviate from this SELECT, but should be re-flagged at cp-30 if it persists.
+
+
 ABSORB entry. Continuing directly to m26 SELECT after the checkpoint, no human wait.

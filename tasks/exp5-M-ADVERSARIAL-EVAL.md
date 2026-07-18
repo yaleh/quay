@@ -2,10 +2,11 @@
 id: exp5-M-ADVERSARIAL-EVAL
 title: Adversarial/negative-path + security evaluation (fault injection, token
   handling, open-redirect, injection review)
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - surface:cross-cutting
+  - milestone:M26-adversarial-eval
 parent: null
 children: []
 extra: {}
@@ -23,7 +24,8 @@ explore, method infra, no VT points
 Backlogged.
 
 ## Status mirror
-todo (open candidate, not yet selected/dispatched)
+ready (SELECTed @M26, 2026-07-18 — highest-DIR-001-priority charter-ready candidate; M-OUTCOME-EVAL
+deferred as not-yet-charter-ready per its own notes)
 
 ---
 _2026-07-18T19:18:52.059Z_: Not selected @M24: DIR-015/DIR-016's standing hard floor already committed this SELECT pass to M-TASK-BACKLOG-PROJECTION-IMPL (self-hosting fix, blocks all future SELECT read-path work) — a governance/infra candidate whose own enabling half was itself unselectable until this milestone lands.

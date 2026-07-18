@@ -30,3 +30,8 @@ _2026-07-18T19:18:52.080Z_: Not selected @M24: DIR-015/DIR-016's standing hard f
 
 ---
 _2026-07-18_: Not selected @M25: DIR-017 Step 1 (M-DOD-META-ENFORCER) outranks — newly-unblocked load-bearing governance prerequisite; higher priority than this cross-cutting eval work this pass, which also still needs a concrete scenario list authored before charter-ready.
+
+---
+_2026-07-18_: Not selected @M26: still not charter-ready (needs a concrete scenario list authored
+at SELECT time — deliberately not rushed as a rider on this pass). M-ADVERSARIAL-EVAL (DIR-001 item
+4, charter-ready as-is) selected instead; DIR-001's own ordering used as tie-break.
