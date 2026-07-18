@@ -1,6 +1,6 @@
 # DIR-007
 
-- status: pending
+- status: resolved (M10-audit-consolidation, iteration-0)
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: G3 out-of-band adversarial audit role silently weakened into same-template independent re-run — no mechanized Done-when/HARD GATE requires it
@@ -89,4 +89,36 @@ independent-verification discipline.
 
 ## Resolution
 
-<!-- to be filled in by whichever iteration applies this directive -->
+- **status: resolved** at M10-audit-consolidation, iteration-0 (2026-07-18)
+
+1. **Requested action 1** (genuinely distinct, adversarially-scoped audit
+   role) — disposed by `inherited-core.md`'s new section "Adversarial-audit
+   role — a NEW out-of-band step, distinct from iteration-1 (M10-audit-
+   consolidation Done-when 4/5/6, DIR-007)": specifies dispatcher (outer
+   loop only, at ABSORB — never the milestone's own iteration-0/1), mechanism
+   (fresh-context `baime:iteration-executor`, `run_in_background=true`,
+   given the charter + iteration-0/1 reports + `inherited-core.md`, with a
+   distinctly-worded refutation-focused prompt template charged to actively
+   try to find fault, not re-derive), output location
+   (`milestones/M<NN>/audits/iteration-N-adversarial-audit.md`), and
+   REFUTED-blocks-ABSORB behavior. A comparison table makes the iteration-1
+   vs. adversarial-audit distinction explicit (dispatcher/scope/question/
+   inputs/frequency), directly answering finding 5's point that the two are
+   not interchangeable. `OUTER-LOOP.md` step 6 (ABSORB) gained a new HARD
+   BLOCK sub-bullet ("Adversarial-audit gate") implementing this as a
+   mechanized, checkable gate rather than another citation-only line.
+2. **Requested action 2** (mechanized Done-when/HARD GATE on exposed
+   milestones) — disposed by the same `OUTER-LOOP.md` HARD BLOCK: it fires
+   on (a) VT-scoring/capability-growth milestones and (b) self-exemption-
+   attempting milestones (the M06-sizing precedent named in the directive's
+   own finding 5 is cited directly as the trigger case for condition (b)).
+3. **Requested action 3** (non-blanket cadence, explicit and checkable) —
+   disposed by `inherited-core.md`'s companion section "Adversarial-audit
+   cadence rule (M10-audit-consolidation Done-when 6, DIR-007 item 3)":
+   states plainly that methodology-infra/governance milestones (M02/M05/
+   M06/M07/M10-class) do NOT require this by default unless condition (b)
+   independently fires, and the `OUTER-LOOP.md` gate requires an explicit
+   "neither condition applied" statement as a documented no-op when the
+   gate doesn't fire, rather than silent omission — satisfying the
+   directive's requirement for "an explicit, checkable requirement, not
+   another citation-only line."

@@ -18,6 +18,18 @@ order; there is no single consolidated core, and citations can drift. First cons
 to merge the confirmed φ edges (§0c visual-review; dispatch/G3 discipline; σ-floor handling) into a
 single authoritative core section here.
 
+**Status (M10-audit-consolidation, m10):** this "First consolidation target" trio is now DONE —
+all three φ edges have operational sections below, not bare citations: "Web UI verification
+requirement" (§0c visual-review, mechanized as a Done-when evidence rule rather than the
+narrative-language failure DIR-006 found), "Adversarial-audit role" + "manda-dispatch discipline"
+(dispatch/G3 discipline, split into its two distinct halves — G3's cross-role refutation charge,
+which had been silently narrowed to same-template re-verification per DIR-007, and the
+manda-mechanics precondition rules per DIR-008), and "σ-inherited-floor trap" (σ-floor handling,
+including the m4 case study where the un-consolidated version of this trap already cost a real
+−6.60 VT correction). The delta chain above is NOT retired — it remains the fuller historical
+source for anything these consolidated sections don't cover — but citations for these three
+specific topics should point to the sections below, not back up this list.
+
 ## exp4 methodology (NOT yet extracted to a skill — inherited as artifacts)
 - `experiments/quay-continuous-bootstrap/ITERATION-PROMPTS.md` — hardened HARD GATES block (the
   **verbatim source for charter gate transclusion**), §0c continuous simulated-user, non-blocking
@@ -259,3 +271,274 @@ are usable to reproduce a real, already-independently-reached judgment, not just
 categories — the same self-consistency pattern used above for the size gauge (against m1/m2/m4)
 and in the domain-misfit section (against M01-dist). No dashboard.md VT number is altered by this
 table; it only ADDS a value-type label alongside the existing settled numbers.
+
+## Web UI verification requirement — mechanized browser-tool evidence rule (M10-audit-consolidation
+## Done-when 1, DIR-006)
+
+DIR-006 found a live claim-vs-evidence mismatch: `charters/M04-discover.md` required "exercise
+list/detail/filter/search/action flows in a real browser (dual-viewport... holistic visual
+review)," and `milestones/M04-discover/iterations/iteration-0.md` narrated a "Live browser
+session... at both desktop (1280x900) and mobile (390x844, emulated touch) viewports" — but the
+only literal pasted evidence anywhere in that report was two `curl` commands comparing
+`?search=` vs `?q=` query params. Zero `mcp__playwright__*`/`mcp__chrome-devtools__*` tool-call
+strings appear anywhere in exp5's 9 milestones (M01–M09), grepped directly. No mechanized gate
+caught this — exp5's only Web UI HARD GATE (`G7`) is an HTTP-status `curl` check, unrelated to
+rendering/interaction verification, and iteration-1's independent-re-verification discipline (which
+exists precisely to catch claim-vs-evidence mismatches) did not catch this one either, because it
+also only re-read prose rather than re-deriving from a tool-call trace.
+
+**The rule, stated operationally (not a citation):** any milestone Done-when clause that claims
+Web UI rendering/interaction/visual verification (list/detail/filter/search/action-flow exercise,
+visual coherence, responsive/dual-viewport behavior) MUST be backed, in the iteration report, by a
+literal pasted `mcp__playwright__*` or `mcp__chrome-devtools__*` tool-call trace consisting of, at
+minimum:
+1. A **navigation** call (`mcp__playwright__browser_navigate` / `mcp__chrome-devtools__navigate_page`)
+   to the actual page under test.
+2. At least one **screenshot or DOM/accessibility snapshot** artifact per claimed viewport
+   (`mcp__playwright__browser_take_screenshot` / `mcp__chrome-devtools__take_screenshot`, or
+   `browser_snapshot`/`take_snapshot`) — not merely a claim that one was taken.
+3. This trace must be present **at both configured viewports** (desktop + mobile, per the
+   dual-viewport requirement below) when the Done-when clause claims dual-viewport coverage.
+
+**`curl` is explicitly demoted, not banned.** `curl -s <url> -o /dev/null -w "%{http_code}"`
+(G7-style checks) remains valid evidence for **liveness/reachability HARD GATES only** — "is the
+server up." It is never valid evidence for, and must never be substituted for, rendering or
+interaction verification. A charter/report that uses `curl` output as its ONLY evidence for a
+Web-UI-rendering Done-when clause fails this rule, regardless of how the surrounding prose
+narrates the check (DIR-006's exact failure shape).
+
+**Dual-viewport requirement (consolidated from `quay-webui-bootstrap-methodology`'s §0c, reference
+`visual-review-mechanism.md`):** desktop 1280×800/900 and mobile 390×844 (device pixel ratio ×3,
+emulated touch) are the two configured viewports; a page/flow is not credited with Web UI
+verification until both are covered. Where a milestone's own charter scopes a narrower check (e.g.
+a single flow, not a full page), the SAME evidence bar applies to whatever is claimed — a
+navigation + screenshot/snapshot trace, not narrative language.
+
+**Charter-authoring checklist note (OUTER-LOOP.md step 3):** any future charter that scopes Web UI
+work must state this evidence rule explicitly in its own Done-when clause text (not merely rely on
+this inherited-core.md section being read) — see `OUTER-LOOP.md` step 3's charter-authoring bullet
+list, amended by this milestone to cross-reference this section.
+
+**What this does NOT require:** this rule does not require every milestone to touch a browser —
+only milestones whose own Done-when clauses actually claim Web UI rendering/interaction
+verification. A milestone that touches CLI/MCP/Packaging/Docs surfaces is unaffected.
+
+## Adversarial-audit role — a NEW out-of-band step, distinct from iteration-1 (M10-audit-consolidation
+## Done-when 4/5/6, DIR-007)
+
+DIR-007 found that exp1's G3 out-of-band audit discipline (`.claude/skills/quay-native-methodology/
+reference/g3-audit-discipline.md`) — a fresh-context subagent, dispatched by the orchestrator, NEVER
+by the session that did the work, explicitly CHARGED TO REFUTE the iteration's claims (not merely
+redo them) — was carried into exp5 only as a citation ("G3 out-of-band audit discipline",
+`inherited-core.md` §Extracted skills item 1; "domain-misfit audit-channel", `OUTER-LOOP.md`
+§4.4d). What exp5 actually built and mechanized instead — the domain-misfit audit-channel (does
+this DOMAIN have any independent verification mechanism, e.g. a CI job?) and iteration-1's
+same-template independent re-run (dispatched as a fresh `baime:iteration-executor`, instructed to
+independently re-derive claims from a fresh worktree) — is real, effective, and has caught genuine
+bugs in 5 of 9 milestones (M02 gate-hash false-FAIL, M04 VT arithmetic slip, M05 CLI-flag typo, M06
+self-exemption override, M07 ledger double-count). But it answers a different question than G3:
+"is this reproducible/stable," not "is this claim actually true and not inflated." G3's exp1 track
+record (3 separate V_meta overclaim attempts caught and reverted, iterations 29/59/61) was
+specifically about the SECOND question — same-template re-runs check it only incidentally.
+
+**The new role — named concretely: `iteration-N-adversarial-audit.md`.** A distinct out-of-band
+step the OUTER LOOP itself dispatches (not folded into any inner milestone's own iteration-1),
+charged EXPLICITLY to try to REFUTE a milestone's Done-when claims and VT delta, not to
+independently re-derive them from scratch in the same shape:
+
+1. **Who dispatches it.** The outer loop (the session executing `OUTER-LOOP.md`), at ABSORB
+   (step 6), for milestones meeting the cadence rule below — never the inner milestone's own
+   iteration-0 or iteration-1, and never folded into either.
+2. **How it's dispatched.** A fresh-context `baime:iteration-executor` call (or equivalent
+   fresh-context subagent dispatch), `run_in_background=true`, reading ONLY: (a) the milestone's
+   charter (Tier-A), (b) the milestone's own iteration-0/iteration-1 reports (the claims under
+   audit), and (c) `inherited-core.md` (Tier-B) — explicitly NOT given "go re-verify this," but
+   given a distinctly-worded refutation-focused prompt: *"Your job is to find fault with this
+   milestone's Done-when claims and VT Δv. Do not simply re-run the same checks and confirm — look
+   for: (a) claims with no pasted evidence nearby (narrative-only), (b) evidence that doesn't
+   actually support the specific claim made (e.g. a curl check standing in for a browser claim —
+   see the Web UI verification rule above), (c) arithmetic that doesn't recompute cleanly, (d) VT
+   deltas that don't match the charter's own pre-dispatch Δv̂ without a stated reason, (e) scope
+   creep or scope-exemption the milestone granted itself without outer-loop sign-off. Render a
+   verdict: REFUTED (name the specific claim and why), CONCERNS (weaker findings, non-blocking), or
+   NO REFUTATION FOUND (state what was specifically tried, not just 'looks fine')."*
+3. **Output location.** `milestones/M<NN>/audits/iteration-N-adversarial-audit.md` — a new
+   `audits/` subdirectory under each milestone's own tree, parallel to `iterations/`, distinct from
+   both. (`N` = the milestone's own iteration count at ABSORB time, e.g. the audit of a
+   2-iteration milestone is `iteration-1-adversarial-audit.md`.)
+4. **What a REFUTED verdict does.** Same discipline as G3's own historical record: a REFUTED
+   finding is not merely noted — it BLOCKS the ABSORB step's VT-curve append / Done-when
+   completion claim until the underlying milestone record is actually corrected (mirrors the
+   existing `V_meta consolidation-lag gate`'s HARD BLOCK pattern in `OUTER-LOOP.md` step 6,
+   applied here to a different failure class).
+
+**Explicitly distinct from iteration-1 (so it is not redundant with an existing mechanism):**
+
+| | iteration-1 (existing) | adversarial-audit (NEW) |
+|---|---|---|
+| Dispatched by | the inner milestone's own charter/dispatcher | the OUTER loop, at ABSORB |
+| Scope | re-derive/re-run the SAME kind of work fresh | actively try to REFUTE the claims already made |
+| Question asked | "is this reproducible?" | "is this claim actually true and not inflated?" |
+| Given the charter? | yes, full charter + fresh worktree | yes, PLUS the claims under audit — explicitly asked to distrust them |
+| When required | every milestone (2-iteration build+verify template) | only per the cadence rule below (Done-when 5) |
+
+## Adversarial-audit cadence rule (M10-audit-consolidation Done-when 6, DIR-007 item 3)
+
+**Required (mechanized gate, see `OUTER-LOOP.md` step 6):**
+(a) every VT-scoring (capability-growth-typed) milestone — i.e. any milestone whose SELECT-time
+value-typed ledger entry includes `capability-growth` and whose ABSORB appends a nonzero VT Δv to
+the curve;
+(b) any milestone whose own iteration-0 recommends skipping iteration-1 (the M06-sizing
+self-exemption precedent — iteration-0 argued "pure-doc-edit, nothing to re-derive"; the outer loop
+overrode this by base-rate judgment, not a mechanized gate, and iteration-1 then caught a real
+defect anyway, confirming the override was correct).
+
+**Explicitly NOT required (non-blanket, recorded as a checkable rule, not left to per-milestone
+improvisation):** methodology-infra/governance milestones with no VT weight (the M02/M05/M06/M07/
+M10 class) are EXEMPT BY DEFAULT — unless clause (b) above fires for them specifically (a
+methodology-infra milestone that also tries to self-exempt from iteration-1 IS in scope for the
+adversarial audit, by (b), independent of (a)'s VT-typing test). This keeps the rule proportionate
+to DIR-004's method-ROI framing (DIR-007 item 3's own explicit instruction) rather than requiring a
+full adversarial pass on every thin governance milestone — the base rate of claim-inflation risk is
+concentrated in VT-scoring/self-exemption cases, not in every markdown edit.
+
+## σ-inherited-floor trap — consolidated as operational content (M10-audit-consolidation Done-when 6,
+## DIR-008)
+
+Completing the kickoff commit's third named consolidation target ("σ-floor handling," alongside
+§0c visual-review above and dispatch/G3 discipline above).
+
+**The general trap** (source: `.claude/skills/quay-core-bootstrap-methodology/reference/
+sigma-inherited-floor-trap.md`): when a new experiment/chart inherits a scoring floor/baseline from
+a prior experiment/chart WITHOUT an explicit, design-time "reset to 0" vs. "design for enough
+throughput to clear the floor" decision, the inherited baseline silently dominates the score until
+the baseline itself is found to be wrong — usually discovered only after the fact, by accident,
+rather than anticipated. Originally characterized for `σ_QC` vs. an inherited `σ_strict` floor
+(experiment 2 inheriting experiment 1's 0.8493 floor, arithmetic showing ≈57 more native-gate tasks
+needed just to begin exceeding it) — but the SHAPE of the trap (uncritical numeric inheritance,
+undecided at design time) generalizes beyond that one factor.
+
+**The decision procedure (apply at design time — chart origin, or any chart transition):**
+1. **Name the inherited number(s) explicitly** — every baseline/floor a new chart or experiment
+   carries forward from a prior one, not just the ones that look load-bearing.
+2. **For each one, make ONE of two choices, explicitly and in writing** (never let it default
+   silently):
+   - **RESET to 0** — the new scope's own ledger stands alone, measuring only its own
+     going-forward discipline, no cross-chart/cross-experiment carry-forward credit.
+   - **CARRY FORWARD, with a stated confidence basis** — explicitly state WHY the inherited number
+     is trusted (what evidence backs it), and accept that if that evidence is later found wrong,
+     the correction is real value (instrument-correction type, per the value-typed ledger above),
+     not a regression.
+3. **Do the arithmetic before committing** if choosing to design around a floor (e.g., "how many
+   more units of X would be needed to clear this floor within the planned budget" — per
+   `v-meta-ceiling-diagnostic.md`'s method) — do not discover the arithmetic is infeasible only
+   after committing.
+
+**The m4 case study (VT₀'s own instance of this trap, already fired for real):** exp5's `VT₀ =
+82.25` was set at bootstrap directly from exp4's `gap-list.md` "Closed" claims (`OUTER-LOOP.md`
+step 2's origin scoring), with NO explicit reset-vs-carry-forward decision ever recorded at
+design time — the carry-forward choice was made implicitly, by construction, not stated. This is
+structurally the CARRY FORWARD case above, but without step 2's "stated confidence basis." The trap
+fired at m4/M04-discover: the live persona pass found exp4's "Closed" claims were systematically
+overstated (MD-001 merge-drift — 12 gap-list entries reopened, CLI/Web UI/Docs surfaces all
+affected), producing exp5's first genuine VT DECREASE (101.33→94.73/120, **Δv=−6.60**,
+`dashboard.md`'s m4 VT curve log) — discovered only after the fact by the exploit-channel discovery
+engine, not anticipated by a design-time check.
+
+**Retroactive disposition of VT₀ (this section IS that decision, recorded now rather than left
+implicit):** VT₀'s carry-forward is retroactively classified as CARRY FORWARD (not reset — a
+reset was never practical after 9 milestones have already built on the chart-1 numbers), with its
+confidence basis now stated explicitly for the first time: exp4's gap-list "Closed" claims were
+trusted based on exp4's own iteration reports asserting closure, WITHOUT independent re-verification
+against `master` — exactly the gap M04-discover's persona pass then found. Going forward, this
+experiment's own posture is: **any number carried forward from a DIFFERENT experiment or a prior
+chart is presumptively CARRY-FORWARD-WITH-LOW-CONFIDENCE until independently re-verified by this
+experiment's own live evidence** — which is in fact what M04/M08/M09's re-scoring passes have
+already been doing in practice (each VT re-score section in `dashboard.md` cites this experiment's
+own live evidence, not a re-cited exp4 claim). This section makes that practice an explicit,
+named rule rather than an emergent pattern.
+
+**Audit for other uncritically-inherited baselines (DIR-008 item 3, disposition required for each):**
+- **Chart-0→chart-1 transition (m3):** `dashboard.md`'s m3 log carried the 5 original chart-0
+  surfaces (CLI/MCP/Web UI/Packaging/Docs) 1:1 into chart-1 "out of scope" (unchanged weights/cov),
+  adding Provider-ABI as a genuinely new 6th surface scored fresh. **Disposition: CARRY FORWARD,
+  low-risk** — the 5 unchanged surfaces were not re-derived at the chart transition itself, but
+  each has SINCE been independently re-scored with live evidence at least once (Web UI/CLI/Docs at
+  m4, CLI/Docs/Packaging at m8, none skipped) — the transition itself didn't introduce a new
+  unverified number, it just deferred re-verification to the ordinary SELECT/exploit cycle, which
+  has since occurred. No further action needed.
+- **Provider-ABI's chart-1 origin cov (m3, 0.654):** this is NOT an inherited number — M03-abi-eval
+  built the capability matrix and differential conformance suite FROM SCRATCH this experiment, no
+  prior-experiment baseline was carried in. Not in scope for this trap.
+- **`v-meta-ledger.md` / V_meta consolidation-lag health track starting value:** reviewed — this
+  track was CREATED by M07-vmeta-gate (m7) with a genuinely fresh starting state (0 rows
+  past-threshold at creation), not inherited from exp4. Not in scope for this trap.
+- **Milestone-counter / chart-counter origin (`milestone_counter: 0`, `chart: 0` at bootstrap):**
+  these are explicit resets to 0 by `OUTER-LOOP.md`'s own First-run bootstrap step 3 — already the
+  correct choice per this section's own decision procedure (RESET, not carry-forward), predating
+  this milestone. No further action needed.
+- **No other still-live inherited numeric baseline was found** by this audit (grep/read of
+  `dashboard.md`'s Log section + `OUTER-LOOP.md`'s bootstrap steps against exp4's own closing
+  artifacts) beyond VT₀ itself and the chart-0→chart-1 transition, both dispositioned above.
+
+## manda-dispatch discipline — correct narrow scope (M10-audit-consolidation Done-when 7, DIR-008
+## item 5)
+
+DIR-008 found a companion, lower-severity drift: `docs/proposals/exp5-concurrent-background-
+agents-for-milestone-iteration.md` re-derived a manda-dispatch conclusion from scratch, live, with
+zero reference to the existing envelope document (`.claude/skills/quay-core-bootstrap-methodology/
+reference/manda-reliability-envelope.md`) or DIR-020's precise scope — and DIR-008's OWN first
+draft overstated the rule as a blanket ban, corrected only after live human review. This section
+exists so future milestones don't have to re-derive (or over-generalize) the rule a third time.
+
+**The rule, at its correct narrow scope (source: DIR-020, archived
+`experiments/quay-native-bootstrap/directives/archive/DIR-020-*.md`; extended by DIR-015/016/024,
+same archive):**
+
+1. **DIR-020's self-deadlock condition (the core structural rule):** the depth-1
+   `mcp__plugin_manda_manda__Agent`/`Dispatch`/`request` caller must NEVER be issued synchronously
+   from the same session that owns the bound broker monitor for the target channel. If caller and
+   broker are the same session, the caller half must be dispatched as a separate background
+   subagent (`run_in_background=true`) so the session's own top-level turn remains free to service
+   the resulting cap-request. This is structural, not probabilistic — a synchronous call blocks
+   that session's own turn processing, so it cannot receive/act on its own incoming cap-request
+   notification until the blocking call itself gives up at the deadline, by construction, regardless
+   of daemon behavior.
+
+2. **DIR-015/016/024's background-dispatch requirement (extends the same reasoning to every
+   dispatch on the path, not just the depth-1 caller):**
+   - DIR-015: the subagent that executes a given iteration's work must be dispatched
+     non-blockingly (`run_in_background=true`) — a foreground-blocked iteration dispatch prevents
+     the dispatching session from servicing ANY concurrent cap-request for the dispatch's entire
+     duration, an independently sufficient explanation for otherwise-mysterious manda timeouts.
+   - DIR-016: the SAME non-blocking requirement extends to the out-of-band audit-subagent dispatch
+     specifically (not just the iteration dispatch) — a gap DIR-015 left open one call later in the
+     same cycle.
+   - DIR-024: the BROKER side of the exchange (the session servicing an incoming `agent.spawn`
+     cap-request) must also spawn its leaf agent with `run_in_background=true`, per the broker
+     protocol's own already-written spec — a foreground broker-side spawn blocks the broker from
+     noticing/servicing a SECOND concurrent cap-request while the first is still running, silently
+     serializing what should be concurrent.
+   - **Net effect: every point on a manda nested-dispatch path — depth-1 caller, iteration
+     dispatch, audit dispatch, broker-side spawn — must be background, for the same underlying
+     reason** (a synchronously-blocked session cannot service its own concurrent notifications).
+
+3. **This is NOT a blanket ban on manda dispatch, and is scoped to result-dependent/nested paths
+   specifically.** `packages/quay/src/action.js`'s Action Button delivery (`manda-dispatch submit
+   ... --async`, never waits on or checks a result) is structurally OUTSIDE this rule's scope
+   entirely — fire-and-forget dispatch has no synchronous caller-side wait to deadlock, and remains
+   a legitimate, currently-working use of manda, unaffected by DIR-020/015/016/024. The rule applies
+   specifically to: (a) the depth-1 caller when it IS the target channel's own broker, and (b) any
+   dispatch where the dispatching session subsequently needs to remain responsive to a concurrent
+   cap-request (result-dependent/nested paths) — not to dispatch calls that neither wait for nor
+   depend on a returned result.
+
+**Standing practice decision (DIR-008 item 4, minor/non-blocking per DIR-008's own framing):**
+**adopted** — before drafting a new cross-cutting proposal or charter section touching manda/
+G3/dispatch mechanics, do a quick grep of `inherited-core.md`'s own delta chain (this file first)
+plus a targeted grep of `experiments/quay-native-bootstrap/directives/archive/DIR-0{15,16,20,24}*`
+and `.claude/skills/quay-core-bootstrap-methodology/reference/manda-reliability-envelope.md` before
+re-deriving the rule live. This is now the correct single place to check — this section IS the
+consolidated answer; no future milestone should need to re-open the archived DIR-0NN files directly
+unless this section itself is found insufficient (in which case, expand THIS section, don't leave
+the gap for the next drafter to re-discover).
