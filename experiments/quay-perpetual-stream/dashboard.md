@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 7** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 8** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -576,3 +576,41 @@ than an arithmetic error) ]`
   consolidation, one milestone after landing. Gate-hash check:
   `it0-gate-hash-check.sh --by-reference charters/M08-merge-recover.md` → **PASS**. Dispatching
   inner iteration-0 next.
+- **ABSORB m8 = M-MERGE-RECOVER → DONE** 2026-07-18. Iteration-0: re-implemented fresh against
+  current `master` (not a branch re-merge, per the SELECT-time conflict-risk finding) all 9
+  in-scope items — `--version`/`-V`, `--format json` alias, `--page-size` (CLI table/JSON + Web UI
+  + UQ-048 validation), `package.json` `files`/`license` fields, `packages/quay/{README,CHANGELOG,
+  LICENSE}.md`, root README SEA section, corrected+new CHANGELOG entries — with Done-when 1-6
+  evidenced and Done-when 7 (VT re-score + gap-list closure) explicitly left as genuine, honestly-
+  flagged remaining scope. Self-caught and self-fixed a worktree-isolation violation (report
+  initially written to the shared repo root) before finishing. Iteration-1: independently
+  re-verified Done-when 1-6 on a fresh worktree/fresh `npm install`/fresh full test run (31/31,
+  zero discrepancies vs iteration-0's claims) and closed iteration-0's one open caveat (Docker
+  audit-channel `--provider github` subtests, previously blocked only by missing `gh` CLI in the
+  `node:20-slim` image — re-attempted with `gh` provisioned via the official apt repo, fully clean,
+  zero-caveat pass). Independently re-derived the VT arithmetic from scratch (did not trust
+  iteration-0's draft) — found iteration-0's own math internally consistent this time (no
+  arithmetic slip, unlike m4's precedent), with the small delta (103.48→103.73) attributable to the
+  newly-closed Docker caveat, a genuinely new finding not a correction. Actually applied Done-when
+  7's file edits (not just drafted): `dashboard.md`'s chart-1 re-score section and
+  `gap-list.md`'s per-entry closure annotations with live command-output citations, deliberately
+  leaving MD-001's umbrella un-resolved pending confirmed presence on `master`. Merged
+  `exp5-m08-iteration-1` → `master` (`--no-ff`, commit `b168153`, 15 files, 1794 insertions/49
+  deletions — fast-forward-inclusive of iteration-0's commits). Re-ran the full test suite directly
+  on merged `master` as the closing check: 31/31 pass, 0 fail. Marked `gap-list.md`'s MD-001
+  umbrella **RESOLVED** (strikethrough id, resolution note citing merge commit `b168153` and the
+  `git merge-base --is-ancestor` confirmation) — this experiment's ABSORB step, not the iteration-1
+  worktree, per MD-001's own root-cause lesson ("ledger says closed, `master` doesn't have the
+  code" — now both agree, verified on `master` itself). **Realized Δv = +9.00** (94.73→103.73/120),
+  above the charter's own Δv̂≈+7.6 pre-dispatch estimate (calibration: realized exceeded estimate by
+  ~18%, in the direction of under-estimating — the Docker-caveat closure was genuinely unanticipated
+  value, not overreach). VT chart-1 curve append: `(m8/M08-merge-recover, 103.73/120, Δv=+9.00)`.
+  milestone_counter → **8**. `backlog.md`'s `M-MERGE-RECOVER` row marked DONE next. Inner-convergence
+  success track: 8/8 (m8 also 2 iterations, Done-when-complete, no mid-milestone re-scope — the
+  Done-when-7 deferral was pre-declared genuine remaining scope, not an ad hoc re-scope). Discovery
+  latency: 0 (iteration-1's Docker-caveat closure and gap-list edits landed same-milestone, not
+  deferred further). V_meta consolidation lag: unchanged, 0 rows past-threshold-and-unresolved (no
+  new ledger rows proposed this milestone — M08 was a pure capability-recovery milestone, not a
+  methodology-infra one). No new pending directives at the m8→m9 boundary (drain re-run: `ls -1
+  directives/pending/` empty). Continuing per the standing instruction: no further deferral needed,
+  SELECT m9 next from whatever's live in `backlog.md`/`directives/pending/` at that time.
