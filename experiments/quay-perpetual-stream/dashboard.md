@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 16** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 17** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -1289,3 +1289,51 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   Adversarial-audit gate NOT expected to trigger (Δv̂=0, no iteration-0 self-exemption authorized).
   Dispatching inner iteration-0 and iteration-1 next, both from worktrees off the current master HEAD
   (`a179d5b`).
+- **ABSORB m17 = M-TASK-TO-PLAN-SKILL-DESIGN** 2026-07-18. Both iterations ran from base `11fd829`:
+  iteration-0 (commit `bb3fe77`, worktree `exp5-m17-iteration-0`) and iteration-1 (commit `d961c91`,
+  worktree `exp5-m17-iteration-1`), independently maturing `docs/proposals/exp5-quay-task-proposal-plan-skill.md`
+  against the same 8-item charter scope — quay task r/w behavior, N-independent-proposal+adjudication,
+  plan author+grounded convergent check, TDD ≥80% hard gate, provider-agnostic GitHub degradation,
+  dispatch-ready Done-when checklist, non-goals. Both self-assessed 9/10 Done-when clauses met
+  directly, correctly deferring clause 10 (backlog row) to this ABSORB step. **It0: both iterations
+  independently confirmed Δv̂=0** (no VT-chart claim introduced), per the charter's own design.
+  Iteration reports committed for provenance (`835964a`). Merged to master: `exp5-m17-iteration-1`
+  first (clean, iteration-1 had appended §12-18 as new content with no base drift) then
+  `exp5-m17-iteration-0` (CONFLICT — both iterations independently wrote a full, complete §12-18/19
+  section set covering the identical scope, ~500 lines each; unlike M13-M15's markdown-prose
+  conflicts, clause-by-clause reconciliation of two complete parallel derivations was judged higher-risk
+  than a clean wholesale pick, so — following M16's wholesale-selection precedent, now extended to
+  design-doc prose for the first time — iteration-0's version was kept whole for the conflicting
+  closing section: it included an extra §19 "Status / next step" section explicitly superseding the
+  original DRAFT-era §11, and a more precise stage-scoped/[code]/[prose] TDD classifier in §15).
+  iteration-1's full independently-derived text remains available for provenance in its own committed
+  iteration report rather than duplicated into the design doc, to keep the doc's dispatch-ready spec
+  singular for a future implementer. Merge commit `989e0cd`. **Realized Δv = 0** (agreed by both
+  iterations) — `git diff --stat 11fd829 HEAD` (excluding two concurrently-edited files belonging to
+  the human's own parallel session, see below) confirmed exactly the 3 expected paths changed (the
+  design doc + the two iteration reports), satisfying Done-when clause 9 (no `inherited-core.md`/
+  `OUTER-LOOP.md`/skill-implementation files touched — DIR-012 items 2/3 correctly stayed out of
+  scope). No product code changed this milestone (design-doc-only, same class as M13/M14/M15) — full
+  test-suite re-run judged not applicable, per that precedent. `backlog.md`'s
+  `M-TASK-TO-PLAN-SKILL-DESIGN` row added (DONE, commit `59f6cbb`). **Adversarial-audit gate correctly
+  did NOT fire** — condition (a) inapplicable (Δv=0, both iterations agree) and condition (b)
+  inapplicable (no iteration-0 self-exemption attempted), exactly as the charter's own pre-analysis
+  predicted. `milestone_counter` → **17**.
+  **Note: this milestone's own precursor doc (`docs/proposals/exp5-quay-task-proposal-plan-skill.md`)
+  had a live, actively-evolving uncommitted human edit in the shared working tree throughout this
+  milestone's dispatch and merge** — the human continuing to develop DIR-012/M17-adjacent material in
+  parallel in a separate conversation, including running `proposal-to-plan` to produce
+  `docs/plans/3-7-quay-task-to-plan-skill.md` and updating the `tasks/DIR-012.md` task-board mirror to
+  `status: done`. Per the standing instruction to never stage/commit/revert this human-authored content,
+  it was stashed only transiently (`git stash push -- <path>`) solely to unblock the iteration-0 merge
+  (which otherwise fails outright on a dirty working-tree file), then a restore was attempted
+  (`git stash pop`) immediately after — this itself conflicted, because the human's edit targeted the
+  original (pre-M17) §11 location and the merge had already restructured that section into §19. Rather
+  than force a content decision on the human's own editorial intent, the restore was abandoned (working
+  tree reset to the clean merged state) and the edit was left safely in `git stash` (`stash@{0}`,
+  fully recoverable, nothing lost) for the human to reconcile on their own terms. The two other
+  actively-staged files (`experiments/quay-perpetual-stream/directives/archive/DIR-012-*.md`'s
+  `status: applied` update, `tasks/DIR-012.md`'s `status: done` update) were left staged and completely
+  untouched throughout — not committed, not unstaged, not read into any of this milestone's decisions
+  beyond confirming they were the human's own concurrent work and excluding them from this milestone's
+  `git diff --stat` scope check above.
