@@ -1527,3 +1527,42 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   work, not started this milestone. `milestone_counter` → **20**. Worktrees/branches for both M20
   iterations removed. **Checkpoint due now** (cadence: every 5 milestones, last checkpoint at m15) —
   writing `checkpoints/cp-20.md` next, non-blocking, then continuing the outer loop.
+- **CHECKPOINT cp-20 written** 2026-07-18 (`checkpoints/cp-20.md`, non-blocking, m16-m20 window).
+  VT unchanged at 110.65/120 since m12 (8 consecutive zero-VT milestones, m13-m20 — a deliberate,
+  directive-driven allocation toward the DIR-012/013/014 proposal→plan methodology track, flagged
+  explicitly as a sustained not transient pattern worth watching). All health tracks healthy;
+  human-review-cadence counter reset to 0 (busiest 5-milestone directive window to date: DIR-012
+  through DIR-016, 5 directives, all left untouched when independently human-committed and drained
+  cleanly). No internal exit signal. Continuing directly to m21 SELECT.
+- **SELECT m21 = M-IMPL-ROW-ENFORCEMENT** 2026-07-18. `directives/pending/` drained: found `DIR-014`
+  (still open — only its Phase 6 was closed at m20, Phase 7 remains, left pending, not re-selected
+  this boundary), `DIR-015` (materialize `M-TASK-BACKLOG-PROJECTION-IMPL`; specific instance),
+  `DIR-016` (general rule + retroactive sweep; both independently human-committed as `eb21de9` during
+  M20's own dispatch window — same "leave the human's own concurrent commits untouched" posture
+  confirmed correct a sixth time). `.halt` absent. Picked DIR-016 over DIR-015 alone: DIR-016's own
+  item 3 (retroactive sweep) explicitly subsumes DIR-015's item 1 (row creation) as its "worked
+  example," so chartering DIR-016 resolves both directives' row-creation asks in one milestone while
+  leaving DIR-015's item 2 (actually implementing the M-TASK-BACKLOG-PROJECTION design) correctly
+  deferred to its own future SELECT once the row exists — avoids conflating "make it selectable"
+  with "select and build it now," per the same discipline M16 applied to M-CLI-EDIT-PARITY-IMPL.
+  Authored charter `charters/M21-impl-row-enforcement.md`: type explore, value type
+  governance-integrity (primary) + risk/option (secondary), Δv̂=0 (method infra, no VT chart cell,
+  mirrors M13/M14/M17/M18/M19/M20's zero-VT precedent). Scope: (1) HARD BLOCK rule text in
+  `OUTER-LOOP.md` ABSORB step + `inherited-core.md`, requiring a design-only milestone's `-IMPL` row
+  before `milestone_counter++`, same shape as the existing V_meta-lag/adversarial-audit gates; (2) a
+  new mechanical `scripts/it0-impl-row-check.sh` with PASS+FAIL fixtures; (3) retroactive sweep
+  creating `M-TASK-BACKLOG-PROJECTION-IMPL` and reconciling M17's task-to-plan follow-up into the
+  same scheme; (4) a recorded (not built) visibility-dependency note for DIR-016 item 4. Gate-hash
+  check: `it0-gate-hash-check.sh --by-reference charters/M21-impl-row-enforcement.md` → **PASS**
+  (same pinned hash reused unchanged, M12-M21). Plan-time line-budget gate:
+  `it0-ceiling-line-budget-check.sh charters/M21-impl-row-enforcement.md` → **PASS** (small-milestone
+  norm, no phase/stage plan needed). Ceiling/floor check (a): N/A in the `it0-ceiling-check.sh`
+  gap-list sense (DIR-015/016 are exp5 directives, not exp4 gaps) — confirmed OPEN/pending directly
+  via `directives/pending/` listing. Adversarial-audit gate: condition (a) will evaluate to
+  not-fired at ABSORB (Δv̂=0 by design); condition (b) not authorized. This is the first milestone to
+  amend the loop's own governing documents (`OUTER-LOOP.md`, `inherited-core.md`) since M18 — both
+  inner iterations are likely to produce heavily overlapping diffs there; charter instructs applying
+  the established wholesale-selection heuristic if both diverge non-trivially. DIR-016's own archival
+  (with Resolution section) is delegated to the dispatched iteration itself, mirroring the DIR-013
+  precedent; DIR-015 stays pending (only its item 1 resolved this milestone). Dispatching inner
+  iteration-0 and iteration-1 next, both from worktrees off the current master HEAD (`1ece038`).
