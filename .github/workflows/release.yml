@@ -206,19 +206,28 @@ jobs:
           # (exit 127) was hit here, not assumed. Use the GitHub REST API
           # directly via curl instead, which only needs curl (already
           # installed above) and keeps this job's dependency footprint
-          # minimal (no extra apt repo for `gh`, staying close to a genuinely
-          # bare/minimal Node-free verification environment).
+          # minimal (no extra apt repo for `gh`).
+          #
+          # This repo is PRIVATE (confirmed: `gh api repos/.../ --jq .private`
+          # -> true), so a plain GET of the release's `browser_download_url`
+          # returns 404 even with a valid bearer token (verified directly,
+          # exit 22/HTTP 404) — private-repo release assets require the
+          # dedicated assets API endpoint with an octet-stream Accept header,
+          # not the public web download URL. Fetch the asset id from the
+          # release-by-tag API, then GET
+          # /releases/assets/{id} with Accept: application/octet-stream.
           VERSION="$(echo "${{ github.ref_name }}" | sed 's/^v//')"
           ASSET_NAME="quay-sea-${VERSION}-linux-x64.tar.gz"
           API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}"
-          DOWNLOAD_URL="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${API}" \
-            | grep -o "\"browser_download_url\": *\"[^\"]*${ASSET_NAME}\"" \
-            | sed -E 's/.*"(https:[^"]+)"/\1/')"
-          if [ -z "${DOWNLOAD_URL}" ]; then
-            echo "ERROR: could not find download URL for ${ASSET_NAME} in release ${{ github.ref_name }}" >&2
+          ASSET_ID="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${API}" \
+            | grep -B2 "\"name\": *\"${ASSET_NAME}\"" \
+            | grep '"id":' | head -1 | grep -o '[0-9]\+')"
+          if [ -z "${ASSET_ID}" ]; then
+            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ github.ref_name }}" >&2
             exit 1
           fi
-          curl -sfL -o "${ASSET_NAME}" "${DOWNLOAD_URL}"
+          curl -sfL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
+            -o "${ASSET_NAME}" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${ASSET_ID}"
           mkdir -p extracted
           tar -xzf "${ASSET_NAME}" -C extracted
       - name: Run quay --help (no Node on PATH)
