@@ -478,5 +478,14 @@ iteration to confirm stability" case, condition 1's own explicit bar.
 Committed inside the worktree on branch `exp5-m05-iteration-0`:
 ```
 $ git -C experiments/quay-perpetual-stream/milestones/M05-dir-projection/worktrees/iteration-0 log --oneline -1
-<hash to be filled in by the commit step below>
+0c83ac0 exp5 M05-dir-projection iteration-0: directive-to-task projection + anti-drift check
+```
+
+(A follow-up commit amends this file to fill in the real hash above and add the
+final `git log`-based verification below, per the task's explicit instruction to confirm commits
+landed via `git log` before writing "done", not trusting prose alone.)
+
+```
+$ git -C experiments/quay-perpetual-stream/milestones/M05-dir-projection/worktrees/iteration-0 log --oneline -3
+<filled in below, post-report-commit>
 ```
