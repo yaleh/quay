@@ -1642,3 +1642,47 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
     exp5-m21-iteration-0 exp5-m21-iteration-1`.
   - No checkpoint due at m21 (cadence every 5, last written at m20; next due at m25).
   - `milestone_counter` → **21**. Continuing directly to m22 SELECT, no human wait.
+
+- **SELECT m22 (2026-07-18).** Drain: `directives/pending/` = DIR-014 (still pending, items 2-4 =
+  Phase 7), DIR-015 (still pending, item 2 = `M-TASK-BACKLOG-PROJECTION-IMPL`'s own future
+  implementation). `.halt` absent. New file observed in the working tree during this drain,
+  `docs/proposals/exp6-driving-and-self-correcting-a-perpetual-stream.md` — confirmed via `git log`
+  to be the human's own independent commit (`fb7d22a`), not a `/quay-directive`-filed directive; left
+  untouched, no backlog row materialized for it (no directive exists asking for one; noting its
+  existence here only as drain-step provenance, per the standing "leave the human's own concurrent
+  work untouched" posture, confirmed correct a seventh time this experiment). Candidate rows
+  reviewed: `M-TASK-BACKLOG-PROJECTION-IMPL` (exploit-sized, large — 11-item Done-when checklist
+  spanning script rewiring + `OUTER-LOOP.md` SELECT/ABSORB mechanism changes + regeneration/anti-drift
+  scripts + Web UI verification; no existing Phase/Stage-marked plan document cites it, so chartering
+  it directly now would very likely FAIL the M18 line-budget gate without first authoring a phase/
+  stage decomposition plan — deferred, not because it's unimportant, but because attempting it
+  unplanned risks exactly the "oversized unplanned charter" failure mode M18 was built to catch);
+  `M-TASK-TO-PLAN-SKILL-IMPL-PHASE7` (already has a ready-made, Phase/Stage-marked plan —
+  `docs/plans/3-7-quay-task-to-plan-skill.md`'s own Phase 7, authored by the human alongside Phase 6,
+  same document M20 already cited successfully — chartering this directly reuses that plan with zero
+  new planning work, continuing the M17→M19→M20 sequence on the same document). **Picked
+  `M-TASK-TO-PLAN-SKILL-IMPL-PHASE7`** for m22 on that basis — the lower-risk, plan-ready choice;
+  `M-TASK-BACKLOG-PROJECTION-IMPL` remains open for a future milestone, likely preceded by its own
+  planning-only step once SELECTed. Authored charter
+  `charters/M22-quay-task-to-plan-skill-phase7.md`: type explore, value type capability-growth
+  (primary) + governance-integrity (secondary), Δv̂=0 (mirrors M16/M20's zero-VT precedent for
+  skill-artifact capability-growth work with no chart cell). Scope: Stage 7.1 (plan step + grounded
+  convergent check), Stage 7.2 (TDD ≥80% hard gate + code-vs-prose classifier), Stage 7.3
+  (dogfooding wiring + bootstrap resolution naming `M-TASK-BACKLOG-PROJECTION-IMPL` as a first
+  true-dogfood candidate) — cites `docs/plans/3-7-quay-task-to-plan-skill.md` Phase 7 verbatim, does
+  not re-derive. Gate-hash check: `it0-gate-hash-check.sh --by-reference
+  charters/M22-quay-task-to-plan-skill-phase7.md` → **PASS** (same pinned hash reused unchanged,
+  M12-M22). Plan-time line-budget gate: `it0-ceiling-line-budget-check.sh
+  charters/M22-quay-task-to-plan-skill-phase7.md` → **PASS** (small-milestone norm by item-count; the
+  external-plan-with-Phase/Stage-markers route was available but not needed since this charter's own
+  in-scope item count is at/under the 8-item threshold). Ceiling/floor check (a): N/A in the
+  `it0-ceiling-check.sh` gap-list sense — confirmed OPEN/pending directly via `backlog.md`'s
+  `M-TASK-TO-PLAN-SKILL-IMPL-PHASE7` row status. Adversarial-audit gate: condition (a) will evaluate
+  to not-fired at ABSORB (Δv̂=0 by design); condition (b) not authorized. Both iterations edit the
+  same `SKILL.md` file Phase 6 (m20) already populated — dispatcher notes flag the M18/M21-class
+  "conflict-free auto-merge can still be internally inconsistent" risk explicitly, requiring a manual
+  post-merge grep sweep for duplicate/contradictory sections regardless of whether git reports a
+  conflict. This milestone also closes DIR-014 (all items addressed across M20+M22) — its archival
+  (with Resolution) is delegated to the dispatched iterations, mirroring the DIR-013/DIR-016
+  precedent; DIR-015 stays pending (unaffected by this milestone). Dispatching inner iteration-0 and
+  iteration-1 next, both from worktrees off the current master HEAD (`e908ebe`).
