@@ -31,10 +31,12 @@
 // writes to a DIFFERENT, dedicated scratch issue (gh-11, not touched by
 // this file) provided the actual live-mutation Done-when evidence for
 // title/body/labels write (see M09-gh-write's iteration-0 report). This
-// file also probes the hard-error floor (an unsupported `parent` field on
-// task_write must return isError:true, not silently no-op — PR-ABI-001
-// Done-when 4) — no destructive mutation of the real yaleh/quay issue
-// backlog by this file.
+// file also probes the STILL-in-force hard-error floor for a genuinely
+// unsupported field (`assignee` — PR-ABI-001 Done-when 4), and
+// (M12-abi-parent-write) exercises the now-REAL parent/children write
+// against the SAME dedicated M09/M12 scratch issues (gh-11/gh-12/gh-13,
+// none of which is gh-3/gh-4/gh-5/gh-7) — no destructive mutation of the
+// real yaleh/quay issue backlog's durable read-fixtures by this file.
 //
 // This file is this milestone's own domain-misfit audit channel (per
 // inherited-core.md's decision procedure and the charter's it0d): it is
@@ -224,19 +226,119 @@ async function main() {
       `MATCHES native's own explicit-field write support (real write, not silent drop; see gap-list PR-ABI-001 closure)`
     );
 
-    // Hard-error-floor probe (M09-gh-write, PR-ABI-001 floor, Done-when 4):
-    // a field this Provider explicitly does NOT implement (parent/children
-    // write is out of scope this milestone, see charter exclusion) must
-    // return isError:true, not silently no-op. Read-only-safe: this call
-    // is expected to error before any write occurs.
+    // Hard-error-floor probe (M09-gh-write, PR-ABI-001 floor, Done-when 4;
+    // STILL in force per M12-abi-parent-write's charter Done-when 3 — the
+    // floor must be kept for any field genuinely still unsupported, even
+    // though `parent`/`children` themselves graduated OUT of this floor
+    // this milestone). `assignee` remains genuinely unimplemented, so this
+    // is now the probe field. Read-only-safe: this call is expected to
+    // error before any write occurs.
     const unsupportedProbe = await githubClient.callTool({
       name: "task_write",
-      arguments: { id: "gh-3", status: gh3Before.status, parent: "gh-7" },
+      arguments: { id: "gh-3", status: gh3Before.status, assignee: "octocat" },
     });
     record("github", "primitive", "task_write-hard-error-floor-probe",
       unsupportedProbe.isError === true,
-      `task_write with unsupported 'parent' field on github -> isError=${unsupportedProbe.isError} ` +
-      `(expected true: explicit MCP tool error, not a silent no-op — PR-ABI-001 floor, Done-when 4)`
+      `task_write with unsupported 'assignee' field on github -> isError=${unsupportedProbe.isError} ` +
+      `(expected true: explicit MCP tool error, not a silent no-op — PR-ABI-001 floor, Done-when 4; ` +
+      `'parent'/'children' graduated OUT of this floor at M12-abi-parent-write, see the real-write probe below)`
+    );
+
+    // REAL parent/children write probe (M12-abi-parent-write, Done-when 5,
+    // replaces the old parent/children-unsupported assertion above). Uses
+    // the SAME dedicated M09/M12 scratch issues real-write evidence already
+    // used (gh-11, gh-12, gh-13 — never gh-3/gh-4/gh-5/gh-7's durable
+    // read-fixture state) so this file's own no-destructive-mutation
+    // discipline for the READ fixtures is unchanged; gh-11/12/13 ARE
+    // scratch/mutable by design (see M09-gh-write's and this milestone's
+    // own iteration-0 reports).
+    const gh11Before = (
+      await githubClient.callTool({ name: "task_get", arguments: { id: "gh-11" } })
+    ).structuredContent?.task;
+    const addChild = await githubClient.callTool({
+      name: "task_write",
+      arguments: { id: "gh-11", children: ["gh-3"] },
+    });
+    const afterAdd = addChild.structuredContent?.task;
+    record("github", "primitive", "task_write-children-real-add",
+      !addChild.isError && afterAdd?.role === "compound" && (afterAdd?.children || []).includes("gh-3"),
+      `task_write children:['gh-3'] on gh-11 -> role=${afterAdd?.role}, children=${JSON.stringify(afterAdd?.children)} ` +
+      `(REAL write, checkbox line added to gh-11's own body)`
+    );
+    const removeChild = await githubClient.callTool({
+      name: "task_write",
+      arguments: { id: "gh-11", children: [] },
+    });
+    const afterRemove = removeChild.structuredContent?.task;
+    record("github", "primitive", "task_write-children-real-remove",
+      !removeChild.isError && afterRemove?.role === "primitive" && (afterRemove?.children || []).length === 0,
+      `task_write children:[] on gh-11 -> role=${afterRemove?.role}, children=${JSON.stringify(afterRemove?.children)} ` +
+      `(REAL write, checkbox line removed from gh-11's own body — restores gh-11 to its pre-probe childless state)`
+    );
+    record("github", "primitive", "task_write-children-real-restore",
+      (gh11Before?.children || []).length === 0,
+      `gh-11's pre-probe children was ${JSON.stringify(gh11Before?.children)} (empty, as expected) -- ` +
+      `add+remove round trip above leaves gh-11 in the same state it started this test run in`
+    );
+
+    // REAL parent write probe (M12-abi-parent-write, Done-when 4/5): the
+    // `parent` field edits the TARGET parent's body (writeParent), and on
+    // reassignment removes the ref from the PRIOR parent's body. Uses two
+    // DEDICATED scratch parent issues (gh-12 "reassign-from", gh-13
+    // "reassign-to") never touched by any other test in this file, plus
+    // gh-11 as the child being (re)parented. Restored to a clean (no
+    // checkbox lines on gh-12/gh-13) state at the end, mirroring the
+    // children-real-restore discipline above.
+    const gh12BodyBeforeAdd = (
+      await githubClient.callTool({ name: "task_get", arguments: { id: "gh-12" } })
+    ).structuredContent?.task;
+    const addParent = await githubClient.callTool({
+      name: "task_write",
+      arguments: { id: "gh-11", parent: "gh-12" },
+    });
+    const gh12AfterAdd = (
+      await githubClient.callTool({ name: "task_get", arguments: { id: "gh-12" } })
+    ).structuredContent?.task;
+    record("github", "primitive", "task_write-parent-real-add",
+      !addParent.isError && (gh12AfterAdd?.children || []).includes("gh-11"),
+      `task_write parent:'gh-12' on gh-11 -> gh-12.children=${JSON.stringify(gh12AfterAdd?.children)} ` +
+      `(REAL write, checkbox line '- [ ] #11' added to gh-12's own body; gh-12 children before this ` +
+      `probe was ${JSON.stringify(gh12BodyBeforeAdd?.children)})`
+    );
+
+    const reassignParent = await githubClient.callTool({
+      name: "task_write",
+      arguments: { id: "gh-11", parent: "gh-13" },
+    });
+    const gh12AfterReassign = (
+      await githubClient.callTool({ name: "task_get", arguments: { id: "gh-12" } })
+    ).structuredContent?.task;
+    const gh13AfterReassign = (
+      await githubClient.callTool({ name: "task_get", arguments: { id: "gh-13" } })
+    ).structuredContent?.task;
+    record("github", "primitive", "task_write-parent-real-reassign",
+      !reassignParent.isError &&
+        !(gh12AfterReassign?.children || []).includes("gh-11") &&
+        (gh13AfterReassign?.children || []).includes("gh-11"),
+      `task_write parent:'gh-13' on gh-11 (reassignment from gh-12) -> gh-12.children=` +
+      `${JSON.stringify(gh12AfterReassign?.children)} (expected: no longer includes gh-11), ` +
+      `gh-13.children=${JSON.stringify(gh13AfterReassign?.children)} (expected: includes gh-11) ` +
+      `(REAL write, checkbox line removed from gh-12's body AND added to gh-13's body)`
+    );
+
+    // Cleanup: remove gh-11's parent link entirely so gh-12/gh-13 both end
+    // this test run childless (their pre-probe clean state).
+    const clearParent = await githubClient.callTool({
+      name: "task_write",
+      arguments: { id: "gh-11", parent: null },
+    });
+    const gh13AfterClear = (
+      await githubClient.callTool({ name: "task_get", arguments: { id: "gh-13" } })
+    ).structuredContent?.task;
+    record("github", "primitive", "task_write-parent-real-restore",
+      !clearParent.isError && !(gh13AfterClear?.children || []).includes("gh-11"),
+      `task_write parent:null on gh-11 -> gh-13.children=${JSON.stringify(gh13AfterClear?.children)} ` +
+      `(expected: no longer includes gh-11) -- gh-12/gh-13 both restored to their pre-probe childless state`
     );
   }
   {

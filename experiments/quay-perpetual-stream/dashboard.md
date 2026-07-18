@@ -221,6 +221,40 @@ PR-ABI-001 (real title/body/labels write, hard-error floor for the remaining uni
 parent/children field) and PR-ABI-002 (get() parent-resolution symmetry fix) both closed;
 independently re-derived and confirmed by iteration-1, fresh worktree/fresh command output) ]`
 
+### Chart-1 re-score (M12-abi-parent-write, Provider-ABI write cov 12/13→13/13) — 2026-07-18
+
+Re-derived per-capability, same style as M09-gh-write's own ABSORB entry above (`capability-matrix.md`'s
+own re-derivation table is the primary source; this is the rolled-up rescore). Provider-ABI is the
+only surface this milestone touched — the last remaining `write.parent/children` gap (native=full,
+github=none) is now closed to full/full, per `milestones/M12-abi-parent-write/iterations/iteration-0.md`'s
+live evidence (real `gh issue view` before/after transcripts on dedicated scratch issues `gh-11`/
+`gh-12`/`gh-13`, add + checked-state-preservation + removal + reassignment all independently
+confirmed).
+
+| surface | prior cov (m9, unchanged through m11) | new cov | rationale (this milestone's own live evidence) |
+|---|---|---|---|
+| Provider-ABI | 0.9231 (12/13) | **1.00 (13/13)** | write 0.80→**1.00** — parent/children write closed (`github-client.js#reconcileChildCheckboxes`/`writeChildren`/`writeParent`; `mcp-server.js`'s `task_write` now accepts `parent`/`children`, hard-error floor kept for genuinely-unsupported fields like `assignee`). read 1.00, gate 1.00, skill 1.00 unchanged (untouched this milestone). cov = (5+5+2+1)/(5+5+2+1) = 13/13 = **1.00**. |
+| **VT chart-1 total (after m12)** | **109.11/120** | **110.65/120** | CLI 25×0.94=23.50 (unchanged, out of scope); MCP 20×0.90=18.00 (unchanged, out of scope); Web UI 20×0.92=18.40 (unchanged, out of scope); Packaging 20×0.90=18.00 (unchanged, out of scope); Docs 15×0.85=12.75 (unchanged, out of scope); Provider-ABI 20×1.00=**20.00** (+1.54 vs m9's 18.46). Total = 23.50+18.00+18.40+18.00+12.75+20.00 = **110.65/120** (≈0.922 normalized, up from 0.909 at m9). |
+
+**Arithmetic re-check:**
+```
+$ python3 -c "print(23.50+18.00+18.40+18.00+12.75+20*13/13)"
+110.65
+```
+Total confirmed: **110.65/120**. Δv = 110.65 − 109.11 = **+1.54** — matches the charter's own
+Δv̂≈+1.54 ceiling EXACTLY (the charter's value hypothesis stated this as a ceiling, not a promise,
+since full 5/5 closure was not guaranteed at charter-authoring time; the realized outcome hit the
+ceiling because the milestone shipped the FULL parent/children write scope, including bidirectional
+reassignment, not just the narrower add/remove-child-on-one-issue primitive the charter flagged as
+an acceptable fallback — see the charter's own Done-when 8 exclusion-recording instruction, not
+triggered this milestone since no scope was narrowed).
+
+VT curve (append, chart-1 basis): `[ ..., (m9/M09-gh-write, 109.11/120), (m12/M12-abi-parent-write,
+110.65/120, Δv=+1.54, CAPABILITY-GROWTH — Provider-ABI parent/children write closed, cov 12/13→13/13,
+last remaining non-N/A gap in the capability matrix; per-milestone Adversarial-audit gate EXPECTED
+TO FIRE per this charter's own §Adversarial-audit gate section — see OUTER-LOOP ABSORB step for the
+dispatched audit's verdict) ]`
+
 ## Health tracks (§4.2–4.4, §6.1)
 
 | track | current | alarm |

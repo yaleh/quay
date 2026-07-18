@@ -27,7 +27,7 @@ transcript from this iteration (§ pointers refer to `iterations/iteration-0.md`
 | title | **full** — `task_write{title}` accepted and applied (`quay-native/src/mcp-server.js` line 85, `store.js#write` line 264 destructures `title`). | **full** (M09-gh-write, PR-ABI-001 CLOSED) — `task_write{title}` now accepted and REALLY applied via `github-client.js#writeFields` (`gh api ... -X PATCH -f title=...`). **Live-verified this milestone** against a dedicated scratch issue (`gh-11`, created specifically for this Done-when, not a production-tracking issue): `gh issue view 11 --json title` before = `"[M09-GH-WRITE-SCRATCH] Scratch issue for task_write title/body/labels live-mutation testing"`, after `task_write{id:"gh-11", title:"[M09-GH-WRITE-SCRATCH] title mutated by task_write live test"}` = `"[M09-GH-WRITE-SCRATCH] title mutated by task_write live test"` — real title change confirmed via a fresh `gh issue view` call, not just the tool's own echoed response. See M09-gh-write's iteration-0 report for the full before/after transcript. PR-ABI-001's title leg closed. |
 | body | **full** — same mechanism as `title`. | **full** (M09-gh-write, PR-ABI-001 CLOSED) — same `writeFields` PATCH mechanism as `title`. **Live-verified this milestone** against `gh-11`: body before = the scratch-issue creation text, after `task_write{id:"gh-11", body:"body mutated by task_write live test..."}` = the new text, confirmed via `gh issue view 11 --json body`. PR-ABI-001's body leg closed. |
 | labels | **full** — `task_write{labels}` replaces the full label array. | **full** (M09-gh-write, PR-ABI-001 CLOSED) — `task_write{labels}` now accepted; `writeFields` computes an add/remove diff against the issue's current NON-status/lane ("other") labels only (status:*/lane:* labels remain owned by the separate `setStatus`/`computeStatusWrite` path, deliberately not touched by this write, to avoid reintroducing DESIGN.md §3.1's precedence-ambiguity risk). **Live-verified this milestone** against `gh-11`: labels before = `["lane:execution"]`, after `task_write{id:"gh-11", labels:["m09-test-label"]}` = `["lane:execution", "m09-test-label"]` (confirmed via `gh issue view 11 --json labels`) — the pre-existing `lane:execution` label was correctly preserved (not a target of this write), and the new `m09-test-label` was correctly added. PR-ABI-001's labels leg closed. |
-| parent/children | **full** — `task_write{parent, children}` accepted and applied (`store.js#write`). Live-verified §5.2 (`task edit ABI-C1 --children ABI-C1-CHILD`, then `task_get` confirms `children=["ABI-C1-CHILD"]`). | **none** — DELIBERATELY excluded from M09-gh-write's scope (see that charter's explicit exclusion: parent/children write would require editing a DIFFERENT issue's body text — the parent's checkbox list — a materially riskier cross-issue write path than the title/body/labels PATCH-on-self path, deferred to a future milestone rather than bundled here). `task_write{parent:...}` now returns an explicit `isError:true` MCP tool error (PR-ABI-001's hard-error floor, Done-when 4) rather than the prior silent no-op — **live-verified this milestone**: `task_write{id:"gh-3", status:<current>, parent:"gh-7"}` -> `isError:true`, message names `parent` as an unsupported field. This is a genuine, intentional "none" (no write CAPABILITY), now correctly signaled as such rather than silently dropped. |
+| parent/children | **full** — `task_write{parent, children}` accepted and applied (`store.js#write`). Live-verified §5.2 (`task edit ABI-C1 --children ABI-C1-CHILD`, then `task_get` confirms `children=["ABI-C1-CHILD"]`). | **full** (M12-abi-parent-write CLOSED, was `none`/deliberately-excluded through M09-gh-write) — `task_write{children:[...]}` reconciles the target issue's OWN body checkbox lines (`- [ ] #N`/`- [x] #N`) against the desired child id set, preserving existing `[x]` checked state for lines that survive and appending new refs (`github-client.js#reconcileChildCheckboxes`/`writeChildren`); `task_write{parent: id|null}` edits the TARGET parent's body to add a ref to the writing task (preserving checked state), and on reassignment additionally removes the ref from the PRIOR parent's body (a second PATCH, `writeParent`, using the same `buildParentIndex()` the read side already relies on to detect the current parent). **Live-verified this milestone** against three dedicated scratch issues (`gh-11`, and two newly-created scratch parents `gh-12`/`gh-13`, none of which are the durable `gh-3`/`gh-4`/`gh-5`/`gh-7` read-fixtures): (a) add — `task_write{id:"gh-11", children:["gh-3"]}` then `gh issue view 11 --json body` shows `- [ ] #3` appended; (b) checked-state preservation — after manually setting `- [x] #3` on gh-11 and re-writing `children:["gh-3"]`, the line remains `- [x] #3` (not reset to `[ ]`); (c) removal — `task_write{id:"gh-11", children:[]}` removes the line, confirmed via `gh issue view`; (d) parent add — `task_write{id:"gh-11", parent:"gh-12"}` adds `- [ ] #11` to gh-12's body; (e) reassignment — `task_write{id:"gh-11", parent:"gh-13"}` removes the `- [ ] #11` line from gh-12's body AND adds it to gh-13's body, both independently confirmed via `gh issue view`. See M12-abi-parent-write's iteration-0 report for the full raw transcripts. `provider-abi-conformance.test.mjs` now asserts real add/remove behavior (replacing the old hard-error-floor probe for this field pair); the hard-error floor itself is retained for genuinely still-unsupported fields (e.g. `assignee`), probed in the same test file. |
 
 ## Gate capability
 
@@ -47,26 +47,31 @@ transcript from this iteration (§ pointers refer to `iterations/iteration-0.md`
 
 ## Summary — cell count
 
-**Updated M09-gh-write, iteration-0 (2026-07-18) — PR-ABI-001/PR-ABI-002 now CLOSED.** The
-cell-count/realized-conformance figures below are RESCORED from this milestone's own live
-evidence (M09-gh-write's iteration-0 report has the full command transcripts); the original
-M03-abi-eval prose is preserved above per-cell (each cell's own write-up documents both the
-original finding and this milestone's fix), this section is the rolled-up rescore.
+**Updated M12-abi-parent-write, iteration-0 (2026-07-18) — write's parent/children cell now
+CLOSED (full/full), the last remaining non-N/A gap this matrix tracked.** The cell-count/
+realized-conformance figures below are RESCORED again from this milestone's own live evidence
+(this milestone's iteration-0 report has the full command transcripts); the M09-gh-write rescore
+below is preserved (struck through in spirit, not literally, since it is now itself superseded)
+for history.
 
 - **20 scored cells** (4 capabilities × 5 fields), of which **6 are N/A by design** (gate/skill's
   title/body/labels rows, and skill's parent/children row) — these are not gaps, both providers
   are symmetric because neither capability has a field-level sub-surface for those fields.
-- Of the **14 substantively-scored cells**: **13 full/full** (read×5 — including parent/children,
-  now fixed; write×3 — status/title/body/labels, i.e. 4 of the 5 write fields; gate×2; skill×1),
-  **1 intentionally-scoped-out** (write's parent/children cell: native=full, github=**none**,
-  by DELIBERATE charter exclusion — not a gap, an explicit scope boundary, and now correctly
-  hard-errors instead of silently no-op'ing).
-- **Realized conformance**: read 5/5 full-symmetric (PR-ABI-002 closed — `get()`/`list()` parent
-  resolution now agree); write 4/5 full-symmetric (status+title+body+labels; parent/children
-  deliberately excluded this milestone, floor error confirmed); gate 2/2 full-symmetric; skill
-  1/1 full-symmetric. **13 of 14 non-N/A cross-provider-comparable cells are full/full symmetric;
-  1 is an intentional, correctly-signaled scope exclusion (parent/children write), not a
-  silent gap.**
+- Of the **14 substantively-scored cells**: **14 full/full** (read×5; write×5 — status, title,
+  body, labels, AND now parent/children; gate×2; skill×1). **Zero remaining scope exclusions
+  or gaps among the non-N/A cells** — this is the first point since M03-abi-eval's origin scoring
+  that every substantively-scored cell is full/full symmetric between the two Providers.
+- **Realized conformance**: read 5/5 full-symmetric (unchanged since M09-gh-write); write 5/5
+  full-symmetric (status/title/body/labels unchanged since M09-gh-write; parent/children now
+  closed this milestone, live-verified add/checked-state-preservation/removal/reassignment); gate
+  2/2 full-symmetric; skill 1/1 full-symmetric. **14 of 14 non-N/A cross-provider-comparable
+  cells are full/full symmetric.**
+
+**Prior state (M09-gh-write, iteration-0, 2026-07-18 — PR-ABI-001/PR-ABI-002 CLOSED, superseded
+by the above):** 13 of 14 non-N/A cells full/full, 1 intentionally-scoped-out (write's
+parent/children cell: native=full, github=`none`, by deliberate charter exclusion, correctly
+hard-erroring rather than silently no-op'ing). That single remaining gap is what this milestone
+closed.
 
 ## Findings feeding the VT re-baseline (§ dashboard.md) and gap-list
 

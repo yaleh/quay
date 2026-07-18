@@ -82,20 +82,29 @@ export async function startMcpServer({ owner, repo }) {
   );
 
   // task_write — data.write. QN-024 (iteration 10) shipped status-only
-  // write; M09-gh-write (PR-ABI-001) extends this to real title/body/labels
-  // write, while `parent`/`children` write remains explicitly out of scope
-  // (charter M09-gh-write's exclusion — cross-issue body-text mutation is a
-  // materially different/riskier write path, deferred to a future
-  // milestone). Per PR-ABI-001's hard-error floor: any field NOT in this
-  // schema's accepted set (id/status/title/body/labels) is now rejected
-  // with an explicit isError:true tool error rather than the prior silent
-  // drop-via-zod-input-stripping behavior — the MCP SDK's own zod input
-  // validation strips unrecognized keys before the handler ever sees them,
-  // so the handler cannot itself detect "an extra field was silently
-  // dropped" after the fact; the fix is a raw (non-zod-typed) passthrough
-  // shape plus an explicit unsupported-key scan INSIDE the handler, so
-  // unrecognized keys are visible and can be rejected instead of stripped.
-  const TASK_WRITE_SUPPORTED_FIELDS = new Set(["id", "status", "title", "body", "labels"]);
+  // write; M09-gh-write (PR-ABI-001) extended this to real title/body/labels
+  // write; M12-abi-parent-write extends it further to real parent/children
+  // write (checkbox-in-body mutation — see github-client.js's
+  // writeChildren()/writeParent() header notes for the exact write
+  // semantics chosen). Per PR-ABI-001's hard-error floor (still in force
+  // for any field NOT in this schema's accepted set): any unrecognized
+  // field is rejected with an explicit isError:true tool error rather than
+  // the prior silent drop-via-zod-input-stripping behavior — the MCP SDK's
+  // own zod input validation strips unrecognized keys before the handler
+  // ever sees them, so the handler cannot itself detect "an extra field was
+  // silently dropped" after the fact; the fix is a raw (non-zod-typed)
+  // passthrough shape plus an explicit unsupported-key scan INSIDE the
+  // handler, so unrecognized keys are visible and can be rejected instead
+  // of stripped.
+  const TASK_WRITE_SUPPORTED_FIELDS = new Set([
+    "id",
+    "status",
+    "title",
+    "body",
+    "labels",
+    "parent",
+    "children",
+  ]);
   // PR-ABI-001 hard-error floor: the MCP SDK builds a zod `z.object(shape)`
   // from a plain inputSchema shape and, by default, SILENTLY STRIPS
   // unrecognized keys before the handler ever sees them (confirmed by
@@ -117,15 +126,20 @@ export async function startMcpServer({ owner, repo }) {
       title: z.string().optional(),
       body: z.string().optional(),
       labels: z.array(z.string()).optional(),
+      parent: z.string().nullable().optional(),
+      children: z.array(z.string()).optional(),
     })
     .catchall(z.unknown());
   server.registerTool(
     "task_write",
     {
       description:
-        "Patch one task's status/title/body/labels in the GitHub Provider's backing repository. " +
-        "`parent`/`children` write is not supported (returns an explicit error); any other " +
-        "unrecognized field also returns an explicit error rather than silently no-op'ing.",
+        "Patch one task's status/title/body/labels/parent/children in the GitHub Provider's " +
+        "backing repository. `parent`/`children` write mutates checkbox lines ('- [ ] #<n>') in " +
+        "issue body text (the same convention the read side already parses) — `children` edits " +
+        "this task's OWN body, `parent` edits the TARGET parent's body (and the OLD parent's body " +
+        "on reassignment); existing checked ('[x]') state is preserved. Any other unrecognized " +
+        "field returns an explicit error rather than silently no-op'ing.",
       inputSchema: taskWriteInputSchema,
     },
     async (rawArgs) => {
@@ -138,18 +152,27 @@ export async function startMcpServer({ owner, repo }) {
               type: "text",
               text:
                 `task_write: unsupported field(s) [${unsupported.join(", ")}] — this Provider ` +
-                `does not implement writing ${unsupported.join("/")} (e.g. parent/children write ` +
-                `is explicitly out of scope, see M09-gh-write charter). Supported fields: ` +
+                `does not implement writing ${unsupported.join("/")}. Supported fields: ` +
                 `${[...TASK_WRITE_SUPPORTED_FIELDS].join(", ")}.`,
             },
           ],
         };
       }
-      const { id, status, title, body, labels } = rawArgs;
-      if (status === undefined && title === undefined && body === undefined && labels === undefined) {
+      const { id, status, title, body, labels, parent, children } = rawArgs;
+      if (
+        status === undefined &&
+        title === undefined &&
+        body === undefined &&
+        labels === undefined &&
+        parent === undefined &&
+        children === undefined
+      ) {
         return {
           isError: true,
-          content: [{ type: "text", text: "task_write: at least one of status/title/body/labels is required" }],
+          content: [{
+            type: "text",
+            text: "task_write: at least one of status/title/body/labels/parent/children is required",
+          }],
         };
       }
       try {
@@ -163,6 +186,12 @@ export async function startMcpServer({ owner, repo }) {
         if (labels !== undefined) otherFields.labels = labels;
         if (Object.keys(otherFields).length > 0) {
           task = client.writeFields(id, otherFields);
+        }
+        if (children !== undefined) {
+          task = client.writeChildren(id, children);
+        }
+        if (parent !== undefined) {
+          task = client.writeParent(id, parent);
         }
         if (!task) {
           return { isError: true, content: [{ type: "text", text: `no such task: ${id}` }] };
