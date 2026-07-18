@@ -28,6 +28,13 @@ if (!fileStatusPath || !tasksJsonPath) {
   process.exit(2);
 }
 
+// §14 item 3: `resolved` and `applied` are the same terminal state — normalize both sides of the
+// comparison through this function rather than requiring file/task authors to pick one spelling.
+function normalizeStatusSynonym(status) {
+  if (status === "resolved") return "applied";
+  return status;
+}
+
 let tasks;
 try {
   const raw = fs.readFileSync(tasksJsonPath, "utf8");
@@ -53,7 +60,11 @@ function normalizeStatus(s) {
 
 function extractBodyMirror(body) {
   if (!body) return undefined;
-  const m = /Status mirror:\s*(\S+)/.exec(body);
+  // §10 DIR sub-tension: strip any `## Execution record` body section before scanning for the
+  // `Status mirror:` line, so an execution-provenance section appended by an executing
+  // milestone's ABSORB step can never accidentally shadow/confuse the mirror-line match.
+  const stripped = body.replace(/^## Execution record[\s\S]*?(?=^## |\z)/m, "");
+  const m = /Status mirror:\s*(\S+)/.exec(stripped);
   return m ? m[1] : undefined;
 }
 

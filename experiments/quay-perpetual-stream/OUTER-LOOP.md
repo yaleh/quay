@@ -266,6 +266,13 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    ledger row per `v-meta-ledger.md`), milestone_counter++ (only after BOTH the V_meta gate AND the
    design-only-milestone impl-row gate above clear, AND the driver→master publish sub-step above has
    landed the milestone's work on `master`).
+   **`backlog.md`/`dashboard.md` regeneration (M24-task-backlog-projection-impl, design doc §13,
+   applies forward from m24):** re-run `scripts/it0-backlog-regen.mjs` (generates the
+   `backlog.md`/backlog-section-of-`dashboard.md` view from the live `milestone-candidate`-labeled
+   task set, value-ordered by default with a `--sort=updated` recency alternate) as part of this
+   step, paired with the status-change writes above — the same "glue regeneration to the exact
+   action that changes the canonical source" discipline the M05 DIR-projection mechanism already
+   uses (design doc §14 item 2), not a separate standing/CI-only check.
 8. **CHECKPOINT (non-blocking)** if `milestone_counter % 5 == 0`: write `checkpoints/cp-<NN>.md` — a
    health snapshot across all tracks (including `dashboard.md`'s "Human-review cadence" track's
    current `milestones-since-last-human-directive` value, per `inherited-core.md`'s Human-review

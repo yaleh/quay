@@ -1,117 +1,164 @@
 #!/usr/bin/env node
-// it0-backlog-projection-check.mjs — companion module for it0-backlog-projection-check.sh.
-// Backlog-projection anti-drift check, M24-task-backlog-projection-impl Stage 4.2
-// (DIR-015 item 2 / m13 design doc §13), mirroring M05-dir-projection's own
-// it0-dir-projection-check.{sh,mjs} precedent but for `label: milestone-candidate` tasks
-// projected into the GENERATED `backlog.md` view instead of DIR-NNN.md files.
-//
-// Detects two divergence modes:
-//   (a) STALE-VIEW — the regenerated `backlog.md` view's content (task count / a task's rendered
-//       status) does not match the LIVE task store's current state. This is the "you edited the
-//       task store but forgot to re-run the regeneration script" failure — the generated file is
-//       now stale prose again, exactly the failure mode §13 exists to prevent.
-//   (b) GROUPING-DISAGREEMENT — two (or more) tasks that share the same `milestone:M-NN` grouping
-//       label disagree about their own `status` (one `done`, the other still `todo`/`ready`) with
-//       no explicit bundling note explaining the split. A shared milestone label is supposed to
-//       mean "executed/decided together" (§12) — if the store's own tasks disagree about whether
-//       that milestone's work is done, the grouping itself has drifted from reality and a human
-//       needs to resolve which is correct, not have the view silently paper over it.
-//
-// A regenerated view with a task count/status set matching the live store, and no grouping-label
-// status disagreement, is not an error — that is the expected, healthy projection state.
+// it0-backlog-projection-check.mjs — anti-drift check for backlog.md as a generated projection
+// over label:milestone-candidate tasks (design doc §4, mirror image of M05's
+// it0-dir-projection-check: task canonical, backlog.md is the regenerated view).
 //
 // Usage:
-//   node it0-backlog-projection-check.mjs <tasks-json-file> <regenerated-backlog-md-file>
+//   node it0-backlog-projection-check.mjs <experiment-dir>
 //
-// Exit codes: 0 = PASS; 1 = FAIL (divergence found, listed); 2 = usage/data error.
+// Detects two divergence modes:
+//   (a) STALE-VIEW — backlog.md contains an id/row with no corresponding milestone-candidate
+//       task in the store (near-impossible once regeneration itself is correct, but real value
+//       is catching a stale un-regenerated backlog.md after a task-field change).
+//   (b) GROUPING-DISAGREEMENT — backlog.md's row for an id disagrees with that task's own
+//       milestone:M-NN label / status field (regenerated-but-drifted, or hand-edited backlog.md).
+//
+// Since backlog.md is now generated (§13), the primary mechanism is a content-hash comparison:
+// regenerate the view in-memory and diff against the on-disk file. If they differ, the file is
+// stale (either hand-edited, or a task field changed since last regeneration) and needs
+// `it0-backlog-regen.mjs --write` to be re-run. This subsumes both (a) and (b) as special cases
+// of "the on-disk view no longer matches what the task store would generate" — plus we also do a
+// row-level id-set diff so the failure message names the specific divergence mode for a human.
 
 import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { createStore } from "../../../packages/quay-native/src/store.js";
 
-const [, , tasksJsonPath, backlogMdPath] = process.argv;
-
-if (!tasksJsonPath || !backlogMdPath) {
-  console.error("Usage: node it0-backlog-projection-check.mjs <tasks-json-file> <regenerated-backlog-md-file>");
+function usage() {
+  console.error("usage: node it0-backlog-projection-check.mjs <experiment-dir>");
   process.exit(2);
 }
 
-let tasks;
-try {
-  tasks = JSON.parse(fs.readFileSync(tasksJsonPath, "utf8"));
-} catch (e) {
-  console.error("ERROR: could not parse tasks JSON: " + e.message);
-  process.exit(2);
-}
-if (!Array.isArray(tasks)) tasks = [tasks];
+const args = process.argv.slice(2);
+const experimentDirArg = args.find((a) => !a.startsWith("--"));
+if (!experimentDirArg) usage();
+const experimentDir = path.resolve(process.cwd(), experimentDirArg);
 
-let backlogMd;
-try {
-  backlogMd = fs.readFileSync(backlogMdPath, "utf8");
-} catch (e) {
-  console.error("ERROR: could not read backlog markdown file: " + e.message);
+function findRepoRoot(startDir) {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, "tasks")) || fs.existsSync(path.join(dir, ".quay"))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return startDir;
+}
+
+const repoRoot = findRepoRoot(process.cwd());
+const store = createStore(path.join(repoRoot, "tasks"));
+
+const candidates = store.list({ label: "milestone-candidate" });
+
+const backlogPath = path.join(experimentDir, "backlog.md");
+if (!fs.existsSync(backlogPath)) {
+  console.error(`ERROR: ${backlogPath} does not exist`);
   process.exit(2);
 }
+const onDisk = fs.readFileSync(backlogPath, "utf8");
+
+// --- (a) STALE-VIEW: ids present in backlog.md's table FIRST COLUMN (the actual row id, not
+// prose/label text elsewhere in the row) but absent from the current milestone-candidate task
+// set. Only scans lines of the form "| <id> | ..." to avoid false positives from label text like
+// "milestone:M24-..." appearing later in the same row.
+const taskIds = new Set(candidates.map((t) => t.id));
+const idsInDoc = new Set();
+const rowIdPattern = /^\|\s*(exp5-[A-Za-z0-9-]+|M-[A-Za-z0-9-]+|M\d{2}[A-Za-z0-9-]*)\s*\|/;
+for (const rawLine of onDisk.split("\n")) {
+  const m2 = rowIdPattern.exec(rawLine);
+  if (m2) idsInDoc.add(m2[1]);
+}
+
+function idMatchesTask(docId, taskId) {
+  if (docId === taskId) return true;
+  // allow bare-id doc token to match an exp5-prefixed task id
+  if (taskId === `exp5-${docId}`) return true;
+  return false;
+}
+
+const staleViewIds = [];
+for (const docId of idsInDoc) {
+  const hasMatch = [...taskIds].some((tid) => idMatchesTask(docId, tid));
+  if (!hasMatch) staleViewIds.push(docId);
+}
+
+// --- (b) GROUPING-DISAGREEMENT: for ids that DO match a task, check whether the doc's nearby
+// status word (DONE/STALE/open/SELECTED) disagrees with the task's own status/labels.
+function taskStatusLabel(t) {
+  const labels = t.labels || [];
+  if (labels.includes("stale")) return "STALE";
+  if (t.status === "done") return "DONE";
+  if (labels.some((l) => l.startsWith("milestone:"))) return "SELECTED";
+  return "open";
+}
+
+const groupingDisagreements = [];
+const lines = onDisk.split("\n");
+for (const t of candidates) {
+  const rowLine = lines.find(
+    (l) => l.includes(t.id) || l.includes(t.id.replace(/^exp5-/, ""))
+  );
+  if (!rowLine) continue; // no row for this task at all is a regen-needed case, caught below by hash diff
+  const expected = taskStatusLabel(t);
+  if (!rowLine.includes(expected)) {
+    groupingDisagreements.push({ id: t.id, expectedStatus: expected, row: rowLine.trim() });
+  }
+}
+
+// --- content-hash / regeneration-needed check: regenerate in-memory (value-view, default sort)
+// and compare against on-disk. This is the general "stale, un-regenerated backlog.md" catch-all
+// per §4 ("diff the last-regenerated backlog.md's content hash/timestamp against the current
+// task-store state and flag regeneration needed").
+function regenerate(sortMode) {
+  function roughValueScore(t) {
+    if ((t.labels || []).includes("stale")) return -1;
+    if (t.status === "done") return 2;
+    return 1;
+  }
+  const sorted = [...candidates].sort((a, b) => {
+    const sv = roughValueScore(b) - roughValueScore(a);
+    if (sv !== 0) return sv;
+    return b.updatedAt - a.updatedAt;
+  });
+  const rowLines = sorted.map((t) => {
+    const vtMatch = (t.body || "").match(/## Value type \/ cadence\n([^\n]*)/);
+    const vt = vtMatch ? vtMatch[1].trim() : "-";
+    return `| ${t.id} | ${t.title} | ${taskStatusLabel(t)} | ${vt} | ${(t.labels || []).join(", ")} |`;
+  });
+  return rowLines.join("\n");
+}
+
+function bodyHash(s) {
+  return crypto.createHash("sha256").update(s).digest("hex").slice(0, 16);
+}
+
+const regenRows = regenerate();
+const onDiskRowLines = lines.filter((l) => l.startsWith("| exp5-") || l.startsWith("| M-") || /^\| M\d{2}/.test(l));
+const onDiskRows = onDiskRowLines.join("\n");
+const regenerationNeeded = bodyHash(regenRows) !== bodyHash(onDiskRows);
 
 const failures = [];
-
-// --- (a) STALE-VIEW: every live task's id must appear in the regenerated view, and its rendered
-// row must reflect its CURRENT status (not a stale one baked in at an earlier regeneration pass).
-for (const t of tasks) {
-  const idPattern = new RegExp(`\\|\\s*${t.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\|`);
-  const rowMatch = idPattern.exec(backlogMd);
-  if (!rowMatch) {
-    failures.push({
-      mode: "STALE-VIEW",
-      id: t.id,
-      detail: `task '${t.id}' exists live in the task store but has no row in the regenerated backlog view — view is stale, re-run the regeneration script`,
-    });
-    continue;
-  }
-  // Grab the full table row line containing this id to check its rendered status field.
-  const lineStart = backlogMd.lastIndexOf("\n", rowMatch.index) + 1;
-  const lineEnd = backlogMd.indexOf("\n", rowMatch.index);
-  const line = backlogMd.slice(lineStart, lineEnd === -1 ? backlogMd.length : lineEnd);
-  // The status field is rendered as `status (milestone:X)` or bare `status` — check the live
-  // status string appears somewhere in that row (loose but sufficient: catches "done" rendered
-  // where live is now "todo" after a re-open, or vice versa).
-  if (!line.includes(`| ${t.status}`) && !line.includes(`| ${t.status} `)) {
-    failures.push({
-      mode: "STALE-VIEW",
-      id: t.id,
-      detail: `task '${t.id}' live status is '${t.status}' but its row in the regenerated view does not show that status — view was regenerated before this status change, re-run the regeneration script`,
-    });
+if (staleViewIds.length > 0) {
+  failures.push(`STALE-VIEW: ${staleViewIds.length} id(s) in backlog.md have no matching milestone-candidate task: ${staleViewIds.join(", ")}`);
+}
+if (groupingDisagreements.length > 0) {
+  for (const d of groupingDisagreements) {
+    failures.push(`GROUPING-DISAGREEMENT: task ${d.id} expected status "${d.expectedStatus}" not found in its backlog.md row: "${d.row}"`);
   }
 }
-
-// --- (b) GROUPING-DISAGREEMENT: tasks sharing a milestone:M-NN label must agree on status
-// (all done, or all not-done) — a split with no bundling note is a drifted grouping.
-const byMilestoneLabel = new Map();
-for (const t of tasks) {
-  const milestoneLabel = (t.labels || []).find((l) => l.startsWith("milestone:"));
-  if (!milestoneLabel) continue;
-  if (!byMilestoneLabel.has(milestoneLabel)) byMilestoneLabel.set(milestoneLabel, []);
-  byMilestoneLabel.get(milestoneLabel).push(t);
-}
-for (const [label, group] of byMilestoneLabel.entries()) {
-  if (group.length < 2) continue;
-  const statuses = new Set(group.map((t) => t.status));
-  if (statuses.size > 1) {
-    failures.push({
-      mode: "GROUPING-DISAGREEMENT",
-      id: label,
-      detail: `tasks grouped under '${label}' disagree on status: ${group.map((t) => `${t.id}=${t.status}`).join(", ")} — a shared milestone grouping should agree on execution state, or carry an explicit bundling/split note explaining the divergence`,
-    });
-  }
+if (regenerationNeeded && staleViewIds.length === 0 && groupingDisagreements.length === 0) {
+  failures.push(`REGENERATION-NEEDED: backlog.md row content does not match a fresh regeneration from the task store (hash mismatch) — run it0-backlog-regen.mjs --write`);
 }
 
-if (failures.length === 0) {
-  console.log(
-    `PASS: ${tasks.length} milestone-candidate task(s) checked against regenerated view '${backlogMdPath}' — no divergence (no stale rows, no grouping-label status disagreement).`
-  );
-  process.exit(0);
-} else {
-  console.log(`FAIL: ${failures.length} divergence(s) found:`);
-  for (const f of failures) {
-    console.log(`  [${f.mode}] ${f.detail}`);
-  }
+if (failures.length > 0) {
+  console.log(`FAIL: ${failures.length} backlog-projection divergence(s) found:`);
+  for (const f of failures) console.log(`  - ${f}`);
   process.exit(1);
+} else {
+  console.log(`PASS: ${candidates.length} milestone-candidate task(s) checked against backlog.md — no divergence (no stale-view ids, no grouping disagreement, regeneration current).`);
+  process.exit(0);
 }

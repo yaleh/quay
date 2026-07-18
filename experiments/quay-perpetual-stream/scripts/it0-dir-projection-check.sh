@@ -32,7 +32,9 @@
 # Usage:
 #   it0-dir-projection-check.sh <experiment-dir> [tasks-json-file]
 #
-#   <experiment-dir>    e.g. experiments/quay-perpetual-stream (the dir containing directives/)
+#   <experiment-dir>    e.g. experiments/quay-perpetual-stream (the dir containing directives/;
+#                        its basename's `quay-<slug>` -> `exp<N>` mapping is used to derive the
+#                        experiment id prefix — see EXP_PREFIX below)
 #   [tasks-json-file]   optional: a pre-fetched `task list --label directive --json` file to
 #                        check against (lets this run be tested/demonstrated deterministically
 #                        without a live MCP/CLI round-trip each time). If omitted, this script
@@ -52,6 +54,18 @@ fi
 EXP_DIR="$1"
 TASKS_JSON_FILE="${2:-}"
 DIRECTIVES_DIR="${EXP_DIR}/directives"
+
+# Derive the experiment-prefixed id namespace (design doc §14 item 1) from <experiment-dir>'s own
+# basename, e.g. quay-perpetual-stream (this is exp5) -> "exp5". Hand-maintained small map, since
+# there is no machine-readable experiment-number source file to read from; extend this map when a
+# new experiment directory adopts this script.
+EXP_BASENAME=$(basename "$EXP_DIR")
+case "$EXP_BASENAME" in
+  quay-webui-bootstrap) EXP_PREFIX="exp3" ;;
+  quay-continuous-bootstrap) EXP_PREFIX="exp4" ;;
+  quay-perpetual-stream) EXP_PREFIX="exp5" ;;
+  *) EXP_PREFIX="" ;;
+esac
 
 if [ ! -d "$DIRECTIVES_DIR" ]; then
   echo "ERROR: directives dir not found: $DIRECTIVES_DIR" >&2

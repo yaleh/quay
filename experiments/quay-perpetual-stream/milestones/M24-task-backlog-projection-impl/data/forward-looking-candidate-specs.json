@@ -1,0 +1,30 @@
+[
+  {
+    "id": "exp5-M-OUTCOME-EVAL",
+    "title": "Outcome-based (job-to-be-done) evaluation: fixed real end-to-end task-board scenarios, binary pass/fail, dogfooding-gated",
+    "status": "todo",
+    "labels": ["milestone-candidate", "surface:cross-cutting"],
+    "body": "## Forward-looking candidate provenance\nForward-looking milestone-candidate task, created by M24-task-backlog-projection-impl (design doc §6 forward-looking-creation scope, distinct from the historical backfill). Source: backlog.md row \"M-OUTCOME-EVAL\" (open, not yet backed by a task before this write).\n\n## Source\nDIR-001 item 3\n\n## Value type / cadence\nexplore, method infra, no VT points\n\n## Notes (verbatim from backlog.md)\nBacklogged, not yet charter-ready — needs a concrete scenario list authored at SELECT time.\n\n## Status mirror\ntodo (open candidate, not yet selected/dispatched)"
+  },
+  {
+    "id": "exp5-M-ADVERSARIAL-EVAL",
+    "title": "Adversarial/negative-path + security evaluation (fault injection, token handling, open-redirect, injection review)",
+    "status": "todo",
+    "labels": ["milestone-candidate", "surface:cross-cutting"],
+    "body": "## Forward-looking candidate provenance\nForward-looking milestone-candidate task, created by M24-task-backlog-projection-impl (design doc §6 forward-looking-creation scope, distinct from the historical backfill). Source: backlog.md row \"M-ADVERSARIAL-EVAL\" (open, not yet backed by a task before this write).\n\n## Source\nDIR-001 item 4\n\n## Value type / cadence\nexplore, method infra, no VT points\n\n## Notes (verbatim from backlog.md)\nBacklogged.\n\n## Status mirror\ntodo (open candidate, not yet selected/dispatched)"
+  },
+  {
+    "id": "exp5-M-COMPETITIVE-BENCH",
+    "title": "Comparative capability benchmark vs. a real competitor (formalize CB-016's ad hoc GitHub Issues/Linear yardstick)",
+    "status": "todo",
+    "labels": ["milestone-candidate", "surface:cross-cutting"],
+    "body": "## Forward-looking candidate provenance\nForward-looking milestone-candidate task, created by M24-task-backlog-projection-impl (design doc §6 forward-looking-creation scope, distinct from the historical backfill). Source: backlog.md row \"M-COMPETITIVE-BENCH\" (open, not yet backed by a task before this write).\n\n## Source\nDIR-001 item 5\n\n## Value type / cadence\nexploit (cross-exp comparison channel), method infra, no VT points\n\n## Notes (verbatim from backlog.md)\nBacklogged.\n\n## Status mirror\ntodo (open candidate, not yet selected/dispatched)"
+  },
+  {
+    "id": "exp5-M-TASK-BACKLOG-PROJECTION-IMPL",
+    "title": "Implement M-TASK-BACKLOG-PROJECTION's design (this milestone itself, M24)",
+    "status": "todo",
+    "labels": ["milestone-candidate", "milestone:M24-task-backlog-projection-impl", "surface:method-infra"],
+    "body": "## Forward-looking candidate provenance\nForward-looking milestone-candidate task, created by M24-task-backlog-projection-impl (design doc §6 forward-looking-creation scope). Source: backlog.md row \"M-TASK-BACKLOG-PROJECTION-IMPL\" (open/pending before this write; this row IS this milestone's own charter source — self-referential: M24 creates and then, at its own SELECT-equivalent moment, is already the milestone executing this row).\n\n## Source\nDIR-015 item 1 (satisfied by the row's own creation, at m21) + DIR-015 item 2 (this row's own SELECT work, executed here at M24) + the m13 design doc docs/proposals/exp5-task-backlog-primitive-projection.md §15\n\n## Value type / cadence\nexplore, capability-growth (primary) + governance-integrity (secondary)\n\n## Notes\nThis task is written with status noted as in-progress in its body (native provider status enum has no in-progress value pre-M24 wiring — see Phase 3's SELECT status-transition convention; this specific bootstrapping task predates that wiring point in its own execution, so its own status field is left `todo` here and is expected to be moved to `done` at this milestone's own ABSORB per Phase 3 Stage 3.3, once the wiring it itself builds exists).\n\n## Status mirror\ntodo (self-referential open candidate — this milestone is its own SELECT+dispatch; status transitions to done at ABSORB, per Phase 3's own newly-built write-back mechanism)"
+  }
+]

@@ -141,4 +141,3 @@ itself ≤2000 lines per `docs/plans/3-7`) at SELECT time.
     (`M-TASK-BACKLOG-PROJECTION-IMPL`, materialized at m21 per DIR-015/DIR-016, still pending its own
     SELECT+charter+dispatch) — not actioned by this DIR's resolution; that remains DIR-015 item 2's
     own open scope.
->>>>>>> exp5-m22-iteration-0

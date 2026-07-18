@@ -1,0 +1,107 @@
+[
+  {
+    "id": "exp5-M01",
+    "title": "Distribution: Node SEA / Bun compile release artifacts via GitHub Actions",
+    "status": "done",
+    "labels": ["milestone-candidate", "milestone:M01-dist", "backfill", "surface:packaging"],
+    "body": "## Backfill provenance\nBackfilled milestone record — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-DIST\" (backlog.md's own internal id, distinct from this task's exp5-M01 id — no history rewrite performed).\n\n## Source\nDIR-004 (REOPENED, URGENT)\n\n## Value type / cadence\nexplore\n\n## Outcome (verbatim from backlog.md DONE column, m1 2026-07-18)\nrealized Δv=+6.0 exact vs hypothesis; merged to master; CI green run https://github.com/yaleh/quay/actions/runs/29635782886; gap-list CB-023 closed.\n\n## Status mirror\ndone (backfilled from backlog.md DONE row, m1 boundary)"
+  },
+  {
+    "id": "exp5-M02",
+    "title": "Institutionalize the 4 systematic-explore it0 checks as real gates",
+    "status": "done",
+    "labels": ["milestone-candidate", "milestone:M02-gates", "backfill", "surface:method-infra"],
+    "body": "## Backfill provenance\nBackfilled milestone record — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-GATES\".\n\n## Source\noffline-replay §4.4\n\n## Value type / cadence\nexplore\n\n## Outcome (verbatim from backlog.md DONE column, m2 2026-07-18)\n`it0-ceiling-check.sh`, `it0-gate-hash-check.sh`, `it0-dogfood-evidence-gate.sh` under experiments/quay-perpetual-stream/scripts/, inherited-core.md domain-misfit procedure, OUTER-LOOP.md step 4 rewired; these same scripts were then used to audit M-DOCS and M-DIRTASK and caught both stale, 1 milestone after being built.\n\n## Status mirror\ndone (backfilled from backlog.md DONE row, m2 boundary)"
+  },
+  {
+    "id": "exp5-M03",
+    "title": "Provider-ABI VT surface (capability matrix) + native/github differential conformance suite",
+    "status": "done",
+    "labels": ["milestone-candidate", "milestone:M03-abi-eval", "backfill", "surface:provider-abi"],
+    "body": "## Backfill provenance\nBackfilled milestone record — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-ABI-EVAL\".\n\n## Source\nDIR-001 items 1-2\n\n## Value type / cadence\nexplore\n\n## Outcome (verbatim from backlog.md DONE column, m3 2026-07-18)\ncov=0.654 realized (vs 0.30 placeholder), chart-1 VT=101.33/120; found PR-ABI-001 (github task_write silently drops unsupported fields) + PR-ABI-002 (github task.parent null via task_get, non-null via task_list) both logged in gap-list.md; merged to master.\n\n## Status mirror\ndone (backfilled from backlog.md DONE row, m3 boundary)"
+  },
+  {
+    "id": "exp5-M04",
+    "title": "M04-discover — exploit-channel simulated-user/persona discovery pass",
+    "status": "done",
+    "labels": ["milestone-candidate", "milestone:M04-discover", "backfill", "surface:cli-mcp-webui-docs"],
+    "body": "## Backfill provenance\nBackfilled milestone record — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M04-discover\".\n\n## Source\nprotocol §4.4 exploit channel\n\n## Value type / cadence\nexploit\n\n## Outcome (verbatim from backlog.md DONE column, m4 2026-07-18)\n4 persona passes complete; headline finding MD-001 (significant, independently re-confirmed iteration-1): exp4 iterations 13/14/16/17/18/19 never merged their dev-phase commits to master despite gap-list/CHANGELOG claiming otherwise, 12 gap-list entries reopened. 6 new findings (DOC-006/007, UQ-049/050, others). MCP pass found 0 gaps. VT chart-1 corrected to 94.73/120. Merged to master.\n\n## Status mirror\ndone (backfilled from backlog.md DONE row, m4 boundary)"
+  },
+  {
+    "id": "exp5-M05",
+    "title": "Directives-as-quay-tasks restrained projection (files canonical, anti-drift check)",
+    "status": "done",
+    "labels": ["milestone-candidate", "milestone:M05-dir-projection", "backfill", "surface:method-infra"],
+    "body": "## Backfill provenance\nBackfilled milestone record — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-DIR-PROJECTION\".\n\n## Source\nDIR-002 (applied — archived)\n\n## Value type / cadence\nexplore\n\n## Outcome (verbatim from backlog.md DONE column, m5 2026-07-18)\n`/quay-directive` now also task_writes a label:directive projection; anti-drift check at scripts/it0-dir-projection-check.{sh,mjs} demonstrated catching both failure modes; OUTER-LOOP.md inbox-drain now also reads task_list --label directive; live dogfood DIR-003 archived as applied. iteration-1 caught and fixed a real --labels/--label CLI-flag typo. Merged to master.\n\n## Status mirror\ndone (backfilled from backlog.md DONE row, m5 boundary)"
+  },
+  {
+    "id": "exp5-M06",
+    "title": "Milestone sizing rubric + value-typed SELECT ledger + gate-hash-by-reference",
+    "status": "done",
+    "labels": ["milestone-candidate", "milestone:M06-sizing", "backfill", "surface:method-infra"],
+    "body": "## Backfill provenance\nBackfilled milestone record — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-SIZING\".\n\n## Source\nDIR-004 (applied immediately at m5→m6 boundary, pre-dispatch)\n\n## Value type / cadence\nexplore, governance-integrity + risk/option\n\n## Outcome (verbatim from backlog.md DONE column, m6 2026-07-18)\nSize definition + verify-iteration gauge + value-typed ledger + governance/infra hard floor all in inherited-core.md/OUTER-LOOP.md; gate-hash-by-reference mechanism demonstrated on a real M01-dist proof-of-concept. iteration-1 found and fixed a real defect (self-consistency table mislabeled m2's value type, fabricated-adjacent DIR-004 quote) — 4th of 6 milestones where independent re-verification caught something real. Merged to master.\n\n## Status mirror\ndone (backfilled from backlog.md DONE row, m6 boundary)"
+  },
+  {
+    "id": "exp5-M07",
+    "title": "V_meta consolidation hand-off: insight ledger + health track + ABSORB gate",
+    "status": "done",
+    "labels": ["milestone-candidate", "milestone:M07-vmeta-gate", "backfill", "surface:method-infra"],
+    "body": "## Backfill provenance\nBackfilled milestone record — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-VMETA-GATE\".\n\n## Source\nDIR-005 (applied at m6→m7 boundary, pre-dispatch)\n\n## Value type / cadence\nexplore, governance-integrity + risk/option\n\n## Outcome (verbatim from backlog.md DONE column, m7 2026-07-18)\nv-meta-ledger.md + dashboard.md health track + OUTER-LOOP.md ABSORB gate all built (iteration-0); iteration-1 caught and fixed a real ledger double-counting bug plus made the alarm math mechanically computable and the gate wording enforceable — 5th of 7 milestones where independent re-verification caught something real. First-proof requirement resolved by CONSOLIDATION at this same ABSORB. Merged to master.\n\n## Status mirror\ndone (backfilled from backlog.md DONE row, m7 boundary)"
+  },
+  {
+    "id": "exp5-M08",
+    "title": "Recover ~12 exp4 iterations' worth of packages/quay code never actually merged to master (MD-001)",
+    "status": "done",
+    "labels": ["milestone-candidate", "milestone:M08-merge-recover", "backfill", "surface:cli-docs-packaging"],
+    "body": "## Backfill provenance\nBackfilled milestone record — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-MERGE-RECOVER\".\n\n## Source\ngap-list MD-001 (significant) + DOC-006/DOC-007 (minor)\n\n## Value type / cadence\nexplore\n\n## Outcome (verbatim from backlog.md DONE column, m8 2026-07-18)\nMerged to master b168153. Re-implemented fresh against current master. Iteration-0: all 9 in-scope items built, Done-when 1-6 evidenced, Done-when 7 left as genuine remaining scope. Iteration-1: independently re-verified 1-6, closed the Docker-provisioning caveat, independently re-derived VT arithmetic (held up), applied Done-when 7. Realized Δv = +9.00 (94.73→103.73/120). gap-list.md MD-001 umbrella marked RESOLVED at ABSORB.\n\n## Status mirror\ndone (backfilled from backlog.md DONE row, m8 boundary)"
+  },
+  {
+    "id": "exp5-M09",
+    "title": "GitHub Provider write-completeness (title/body/labels/parent-children write)",
+    "status": "done",
+    "labels": ["milestone-candidate", "milestone:M09-gh-write", "backfill", "surface:provider-abi"],
+    "body": "## Backfill provenance\nBackfilled milestone record — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-GH-WRITE\" (backlog.md's own internal id, distinct from this task's exp5-M09 id — no history rewrite performed).\n\n## Source\ngap-list PR-ABI-001 (significant)\n\n## Value type / cadence\nexplore\n\n## Outcome (verbatim from backlog.md DONE column, m9 2026-07-18)\nReal title/body/labels write + hard-error floor for parent/children shipped and merged to master. PR-ABI-001 CLOSED. Provider-ABI coverage 0.654 -> 0.923. Realized Δv = +5.38. Independently re-verified by iteration-1 including a fresh, differently-provisioned Docker audit-channel re-run.\n\n## Status mirror\ndone (backfilled from backlog.md DONE row, m9 boundary)"
+  },
+  {
+    "id": "exp5-M09B",
+    "title": "Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002)",
+    "status": "done",
+    "labels": ["milestone-candidate", "milestone:M09-gh-write", "backfill", "surface:provider-abi"],
+    "body": "## Backfill provenance\nBackfilled milestone record — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-GH-PARENT\" (bundled into M-GH-WRITE / M09-gh-write's own milestone, not a standalone charter — this backfilled task records that bundled sub-scope distinctly, per its own backlog.md row).\n\n## Source\ngap-list PR-ABI-002 (minor)\n\n## Value type / cadence\nexploit\n\n## Outcome (verbatim from backlog.md DONE column, m9 2026-07-18, bundled into M-GH-WRITE)\nget() now reuses list()'s fetchAllIssues()+buildParentIndex(), PR-ABI-002 CLOSED, symmetry re-verified pre-fix and post-fix by iteration-1.\n\n## Status mirror\ndone (backfilled from backlog.md DONE row, m9 boundary, bundled sub-scope)"
+  },
+  {
+    "id": "exp5-M11",
+    "title": "Re-verify M04-discover's Web UI findings with REAL browser tooling",
+    "status": "done",
+    "labels": ["milestone-candidate", "milestone:M11-webui-reverify", "backfill", "surface:web-ui"],
+    "body": "## Backfill provenance\nBackfilled milestone record — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-WEBUI-REVERIFY\".\n\n## Source\nDIR-006 item 2 (M10-audit-consolidation Done-when 2)\n\n## Value type / cadence\nexploit, discovery + risk/option\n\n## Outcome (verbatim from backlog.md DONE column, m11 2026-07-18)\niteration-0, INDEPENDENTLY RE-CONFIRMED at iteration-1 from a fresh worktree/branch — real mcp__playwright__* tool-call traces at both desktop 1280x900 and mobile 390x844 viewports. UQ-049 reproduced live in both iterations; UQ-050 reproduced live in both iterations as genuine mobile horizontal overflow with a refined root-cause pin. CONFIRMED 0.92 unchanged, no Δv.\n\n## Status mirror\ndone (backfilled from backlog.md DONE row, m11 boundary)"
+  },
+  {
+    "id": "exp5-M12",
+    "title": "GitHub Provider parent/children WRITE",
+    "status": "done",
+    "labels": ["milestone-candidate", "milestone:M12-abi-parent-write", "backfill", "surface:provider-abi"],
+    "body": "## Backfill provenance\nBackfilled milestone record — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6). Source: backlog.md row \"M-ABI-PARENT-WRITE\".\n\n## Source\nM09-gh-write's charter Done-when item 4 exclusion note (\"parent/children WRITE ... out of scope this milestone ... worth its own future milestone if selected\")\n\n## Value type / cadence\nexploit\n\n## Outcome (verbatim from backlog.md DONE column, m12 2026-07-18)\niteration-0 (f172b29) and iteration-1 (6d76cdf) both independently implemented and live-verified full bidirectional reassign-parent semantics against real GitHub scratch issues; full scope shipped. Merged to master (a1f581a + 47898fe), iteration-1's implementation kept as canonical on merge conflict. Provider-ABI coverage 12/13 (0.9231) -> 13/13 (1.0000). VT chart-1 109.11 -> 110.65/120. Realized Δv = +1.54. First real trigger of the out-of-band adversarial-audit gate: verdict CONCERNS (non-blocking).\n\n## Status mirror\ndone (backfilled from backlog.md DONE row, m12 boundary)"
+  },
+  {
+    "id": "exp5-M-CLI-UX",
+    "title": "CLI usability closeout (UQ-042..046) — STALE, not selected",
+    "status": "todo",
+    "labels": ["milestone-candidate", "backfill", "stale", "surface:cli"],
+    "body": "## Backfill provenance\nBackfilled milestone-candidate record (STALE, never selected/dispatched) — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-CLI-UX\".\n\n## Source\nexp4 gap-list usability_quality\n\n## Value type / cadence\nexploit\n\n## Outcome (verbatim from backlog.md STALE note, m2 SELECT 2026-07-18, it0 ceiling check)\nUQ-042..046 were already closed in exp4 iteration 15 (gap-list.md lines 35-39/185-189). exp4's true FINAL open-gap set (it19) is only ENV-001/SH-006/NEW-001/PKG-010, all minor/env — no real CLI-surface milestone-sized scope left. NOT selected; retained as a documented dead-end.\n\n## Status mirror\ntodo/stale (backfilled from backlog.md STALE row, m2 SELECT boundary — never dispatched, no milestone directory exists)"
+  },
+  {
+    "id": "exp5-M-DOCS",
+    "title": "Docs surface hardening (docs_quality sub-dimension) — STALE, not selected",
+    "status": "todo",
+    "labels": ["milestone-candidate", "backfill", "stale", "surface:docs"],
+    "body": "## Backfill provenance\nBackfilled milestone-candidate record (STALE, never selected/dispatched) — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-DOCS\".\n\n## Source\nexp4 gap-list docs_quality\n\n## Value type / cadence\nexploit\n\n## Outcome (verbatim from backlog.md STALE note, m3 SELECT 2026-07-18, it0-ceiling-check.sh)\nDOC-001..005 (the it18 docs_quality findings this row cites) were already closed in exp4 iteration 19 (gap-list.md, confirmed via mechanized check: all 5 CLOSED). No real Docs-surface milestone-sized scope left. NOT selected.\n\n## Status mirror\ntodo/stale (backfilled from backlog.md STALE row, m3 SELECT boundary — never dispatched, no milestone directory exists)"
+  },
+  {
+    "id": "exp5-M-DIRTASK",
+    "title": "Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected",
+    "status": "todo",
+    "labels": ["milestone-candidate", "backfill", "stale", "surface:method-infra"],
+    "body": "## Backfill provenance\nBackfilled milestone-candidate record (STALE, never selected/dispatched) — one-time migration pass, M13-task-backlog-projection design (DIR-009 item 6), executed by M24-task-backlog-projection-impl. Source: backlog.md row \"M-DIRTASK\".\n\n## Source\nDIR-006 (REOPENED, per row text — later resolved as file-canonical, see below)\n\n## Value type / cadence\nexplore\n\n## Outcome (verbatim from backlog.md STALE note, m3 SELECT 2026-07-18)\nDIR-006 is CLOSED, not reopened, with a formal considered resolution (\"Option B: files canonical\") that explicitly REJECTS this row's own premise. This backlog row predates that resolution and was never updated. NOT selected — dispatching it would re-litigate a decision already made and documented.\n\n## Status mirror\ntodo/stale (backfilled from backlog.md STALE row, m3 SELECT boundary — never dispatched, no milestone directory exists)"
+  }
+]

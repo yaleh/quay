@@ -6,14 +6,14 @@
 # the full STALE-VIEW / GROUPING-DISAGREEMENT failure-mode descriptions.
 #
 # Usage:
-#   it0-backlog-projection-check.sh <tasks-json-file> <regenerated-backlog-md-file>
+#   it0-backlog-projection-check.sh <experiment-dir>
 #
 # Exit codes: 0 = PASS; 1 = FAIL (divergence found); 2 = usage/data error.
 
 set -u
 
-if [ "$#" -lt 2 ]; then
-  echo "Usage: $0 <tasks-json-file> <regenerated-backlog-md-file>" >&2
+if [ "$#" -lt 1 ]; then
+  echo "Usage: $0 <experiment-dir>" >&2
   exit 2
 fi
 
@@ -22,5 +22,5 @@ if ! command -v node >/dev/null 2>&1; then
   exit 2
 fi
 
-node "$(dirname "$0")/it0-backlog-projection-check.mjs" "$1" "$2"
+node "$(dirname "$0")/it0-backlog-projection-check.mjs" "$1"
 exit $?
