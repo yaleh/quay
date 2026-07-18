@@ -435,21 +435,28 @@ undone, per §B.3's note, so it happens only once the merge is confirmed, not in
 
 Worktree (`experiments/quay-perpetual-stream/milestones/M08-merge-recover/worktrees/iteration-1`):
 ```
+$ git add -A && git commit -m "M08-merge-recover it1: independent re-verification + apply Done-when 7"
+[exp5-m08-iteration-1 23546cd] M08-merge-recover it1: independent re-verification + apply Done-when 7
+ 4 files changed, 522 insertions(+), 20 deletions(-)
+ create mode 100644 experiments/quay-perpetual-stream/milestones/M08-merge-recover/iterations/iteration-1.md
 $ git status --short
-(clean, immediately before this report's own commit)
+(clean)
 $ git log --oneline -3
-<this-iteration's-report-commit>
-<this-iteration's-work-commit>
+23546cd M08-merge-recover it1: independent re-verification + apply Done-when 7
 ce85ac0 M08-merge-recover it0: fill in actual report-commit SHA in §8 isolation proof
+1cfdffa M08-merge-recover it0: write iteration-0 report (build complete, done-when 1-6 evidenced, 7 deferred)
 ```
 
 Shared repo root (`/home/yale/work/quay`):
 ```
 $ git status --short
- M docs/proposals/exp5-concurrent-background-agents-for-milestone-iteration.md
+(clean)
 ```
-Note: this single modified file in the shared root PRE-DATES this iteration's work (present before
-any command in this session was run) and was never touched by this iteration — it is an unrelated,
-pre-existing uncommitted edit in the shared tree, not a leak from this worktree's isolation. No file
+Note: at the time this iteration's work began, the shared root had one unrelated pre-existing
+uncommitted modification (`docs/proposals/exp5-concurrent-background-agents-for-milestone-iteration.md`),
+present before any command in this session was run and never touched by this iteration. By the time
+this final proof was captured, the shared root had returned to fully clean — confirming no file
 under this worktree's own path was ever edited from the shared repo root context during this
-iteration; every edit in §B.2/§B.3 targeted the worktree-relative paths shown above.
+iteration; every edit in §B.2/§B.3 targeted the worktree-relative paths shown above, and this
+iteration's own commit (`23546cd`) lives entirely on branch `exp5-m08-iteration-1` inside the
+worktree, not on `master` or in the shared tree's working directory.
