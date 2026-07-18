@@ -1,6 +1,6 @@
 {
   "name": "quay-native",
-  "version": "0.1.0",
+  "version": "0.3.4",
   "private": true,
   "description": "The native Provider for Quay: markdown+frontmatter task store, CLI, and MCP ABI transport (v0 walking skeleton).",
   "type": "module",
@@ -11,5 +11,8 @@
     "@modelcontextprotocol/sdk": "^1.12.0",
     "yaml": "^2.5.1",
     "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
   }
 }

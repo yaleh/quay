@@ -69,3 +69,177 @@ jobs:
             The `.tgz` artifact attached to this release is produced by `npm pack` from `packages/quay/`.
             It includes all runtime dependencies (`@modelcontextprotocol/sdk`, `yaml`) and the CLI entrypoint (`bin/quay.js`).
             Note: the artifact filename uses the package version (e.g. `quay-0.1.0.tgz`), not the git tag (e.g. `v0.1.0`).
+
+  # M01-dist (exp5, iteration 0): DIR-004 remaining scope — single-file
+  # executables via Node SEA, requiring no separately-installed Node.js
+  # runtime on the end user's machine. See packages/quay/scripts/build-sea.sh
+  # and packages/quay-native/scripts/build-sea.sh for the build logic and why
+  # BOTH packages need their own SEA binary (Core spawns the Provider's
+  # mcp_entry as a child process; `quay serve` is not genuinely Node-free
+  # unless mcp_entry also points at a SEA binary, not `node ...`).
+  sea-release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_suffix: linux-x64
+          - os: macos-latest
+            asset_suffix: macos-arm64
+          - os: windows-latest
+            asset_suffix: windows-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build quay (Core) SEA binary
+        shell: bash
+        run: bash packages/quay/scripts/build-sea.sh
+
+      - name: Build quay-native (Provider) SEA binary
+        shell: bash
+        run: bash packages/quay-native/scripts/build-sea.sh
+
+      - name: Assemble release bundle (both binaries + packaged .quay/config.yml)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE_DIR="dist-sea-release"
+          rm -rf "${BUNDLE_DIR}"
+          mkdir -p "${BUNDLE_DIR}/.quay" "${BUNDLE_DIR}/tasks"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp packages/quay/dist-sea/quay.exe "${BUNDLE_DIR}/quay.exe"
+            cp packages/quay-native/dist-sea/quay-native.exe "${BUNDLE_DIR}/quay-native.exe"
+            MCP_ENTRY='["./quay-native.exe", "mcp"]'
+          else
+            cp packages/quay/dist-sea/quay "${BUNDLE_DIR}/quay"
+            cp packages/quay-native/dist-sea/quay-native "${BUNDLE_DIR}/quay-native"
+            MCP_ENTRY='["./quay-native", "mcp"]'
+          fi
+          cat > "${BUNDLE_DIR}/.quay/config.yml" <<EOF
+          # Packaged config for the SEA/single-file-executable distribution
+          # (M01-dist). Both quay and quay-native are compiled Node SEA
+          # binaries placed side-by-side in this directory; mcp_entry
+          # invokes the sibling binary directly (no node on PATH required).
+          providers:
+            native:
+              enabled: true
+              path: "."
+              tasks_dir: "./tasks"
+              mcp_entry: ${MCP_ENTRY}
+              env:
+                QUAY_NATIVE_TASKS_DIR: "./tasks"
+          EOF
+
+      - name: Archive release bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./packages/quay/package.json').version")"
+          ARCHIVE_NAME="quay-sea-${VERSION}-${{ matrix.asset_suffix }}"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a "${ARCHIVE_NAME}.zip" ./dist-sea-release/*
+            echo "ARCHIVE_PATH=${ARCHIVE_NAME}.zip" >> "$GITHUB_ENV"
+          else
+            tar -czf "${ARCHIVE_NAME}.tar.gz" -C dist-sea-release .
+            echo "ARCHIVE_PATH=${ARCHIVE_NAME}.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload SEA archive to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ARCHIVE_PATH }}
+          body: |
+            ## quay ${{ github.ref_name }} — single-file executables (Node SEA)
+
+            Platform-specific archives (`quay-sea-<version>-<platform>.{tar.gz,zip}`)
+            contain two single-file executables (`quay`, `quay-native`) plus a
+            packaged `.quay/config.yml` wiring them together — no separately
+            installed Node.js runtime required. Extract the archive and run:
+
+            ```sh
+            ./quay --help
+            ./quay serve
+            ```
+
+  # Independent verification job (M01-dist Done-when clause 4, it0
+  # domain-misfit audit-channel): downloads the Linux SEA archive this same
+  # workflow run just published and runs it in a container image that has
+  # never had Node.js installed, proving the executable is genuinely
+  # Node-free end-to-end — not just "the build succeeded".
+  sea-verify-node-free:
+    needs: sea-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: debian:stable-slim
+    steps:
+      - name: Install runtime deps (libatomic1; explicitly NOT nodejs, NOT gh)
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq libatomic1 curl tar
+      - name: Confirm no Node.js is present in this verification shell
+        run: |
+          if command -v node >/dev/null 2>&1; then
+            echo "ERROR: node is present — this job does not prove Node-free operation." >&2
+            exit 1
+          fi
+          echo "Confirmed: no node on PATH."
+      - name: Download the SEA archive published by sea-release (this run)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # M01-dist iteration-1: `gh` (the GitHub CLI) is preinstalled on
+          # ubuntu-latest HOST runners but is NOT present in a bare
+          # debian:stable-slim `container:` job — a real "command not found"
+          # (exit 127) was hit here, not assumed. Use the GitHub REST API
+          # directly via curl instead, which only needs curl (already
+          # installed above) and keeps this job's dependency footprint
+          # minimal (no extra apt repo for `gh`).
+          #
+          # This repo is PRIVATE (confirmed: `gh api repos/.../ --jq .private`
+          # -> true), so a plain GET of the release's `browser_download_url`
+          # returns 404 even with a valid bearer token (verified directly,
+          # exit 22/HTTP 404) — private-repo release assets require the
+          # dedicated assets API endpoint with an octet-stream Accept header,
+          # not the public web download URL. Fetch the asset id from the
+          # release-by-tag API, then GET
+          # /releases/assets/{id} with Accept: application/octet-stream.
+          VERSION="$(echo "${{ github.ref_name }}" | sed 's/^v//')"
+          ASSET_NAME="quay-sea-${VERSION}-linux-x64.tar.gz"
+          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}"
+          ASSET_ID="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${API}" \
+            | grep -B2 "\"name\": *\"${ASSET_NAME}\"" \
+            | grep '"id":' | head -1 | grep -o '[0-9]\+')"
+          if [ -z "${ASSET_ID}" ]; then
+            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ github.ref_name }}" >&2
+            exit 1
+          fi
+          curl -sfL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
+            -o "${ASSET_NAME}" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${ASSET_ID}"
+          mkdir -p extracted
+          tar -xzf "${ASSET_NAME}" -C extracted
+      - name: Run quay --help (no Node on PATH)
+        run: |
+          cd extracted
+          chmod +x ./quay ./quay-native
+          ./quay --help
+      - name: Run quay serve and curl it (no Node on PATH)
+        run: |
+          cd extracted
+          ./quay serve --port 18080 &
+          SERVE_PID=$!
+          sleep 2
+          curl -sf -o /dev/null -w "http_code:%{http_code}\n" http://localhost:18080/
+          kill "$SERVE_PID"
