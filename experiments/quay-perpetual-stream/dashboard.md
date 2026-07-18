@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 13** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 14** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -1121,3 +1121,25 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   before relying on this) and pre-commits the m6/M13 override precedent if iteration-0 recommends
   skipping iteration-1. Dispatching inner iteration-0 and iteration-1 next, both from worktrees off
   the current master HEAD.
+- **ABSORB m14 = M-CLI-EDIT-PARITY** 2026-07-18. Both iterations ran genuinely in parallel from base
+  `f7dfccb`: iteration-0 (`6ce284e`, 442-line doc) and iteration-1 (`9ddc75b`, 400-line doc), both
+  independently covering all 4 DIR-011 items and converging on identical recommendations for every
+  decision point (`--body-file <path>`/`-`-for-stdin whole-body mode, unchanged reuse of the M09
+  PR-ABI-001 hard-error floor, `--title`+`--extra` as the two worked verification fields) — unlike
+  m13's conflict, this was a file-level add/add collision only, not a substantive disagreement.
+  Merged to master: `71c44a4` (iteration-1, clean) then `178f5eb` (iteration-0, add/add CONFLICT on
+  the design doc, resolved in favor of iteration-0's version — it additionally documents a real
+  correction that iteration-1's doc reaches the same facts on but doesn't flag explicitly: post-M12,
+  GitHub's `parent`/`children` are no longer unsupported, only `extra` remains hard-error-rejected).
+  Reconciliation reasoning recorded in the merged doc's own "Outer-loop reconciliation note" section;
+  iteration-1's full doc/report retained for provenance (`4eeb253`). No cwd-drift stray file this
+  time (verified clean `git status` before each merge). **Realized Δv = 0** (design-doc-only, exactly
+  as charter specified) — `git diff --stat f7dfccb HEAD` (pre-report-commit) confirmed exactly 2
+  files changed (the design doc, `backlog.md`), zero product/method-infra code touched, satisfying
+  Done-when clause 6. Full test suite re-run on merged master as a sanity check (not gating):
+  see `/tmp/m14_test_output.log`. **Adversarial-audit gate correctly did NOT fire** — Δv=0 (condition
+  (a) inapplicable) and both iterations ran normally with no iteration-0 self-exemption attempt
+  (condition (b) inapplicable), exactly as the charter's own pre-analysis predicted. `backlog.md`'s
+  `M-CLI-EDIT-PARITY` row marked DONE (design delivered; still not yet charter-ready for
+  implementation — a future SELECT must pick it up). `milestone_counter` → **14**. Deliverable:
+  `docs/proposals/exp5-cli-edit-parity.md`.
