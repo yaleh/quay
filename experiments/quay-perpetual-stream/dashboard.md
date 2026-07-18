@@ -1204,3 +1204,18 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
   `milestones-since-last-human-directive = 3`, K=5 soft-alarm not yet crossed, non-blocking — the FIRST
   live proof-of-mechanism for this milestone's own deliverable, satisfying Done-when clause 5.
   `backlog.md`'s `M-HUMAN-REVIEW-CADENCE` row marked DONE. `milestone_counter` → **15**.
+- **SELECT m16 = M-CLI-EDIT-PARITY-IMPL** 2026-07-18. `directives/pending/` re-drained: empty. `.halt`
+  absent. Picked M14's own design-doc-only deliverable (`docs/proposals/exp5-cli-edit-parity.md`) for
+  real implementation, per that doc's own §6 "Done-when clauses a future implementing milestone would
+  need" — the design is complete and dispatch-ready, unlike the three remaining DIR-001-sourced
+  candidates (M-OUTCOME-EVAL/M-ADVERSARIAL-EVAL/M-COMPETITIVE-BENCH, all still need a concrete
+  scenario list authored before charter-ready) or M-TASK-BACKLOG-PROJECTION's own implementation
+  follow-up (larger, self-hosting-shaped, better sequenced after this simpler CLI-surface closure).
+  Authored charter `charters/M16-cli-edit-parity-impl.md`: type exploit, value type capability-growth
+  (primary) + risk/option (secondary), Δv̂ to be computed at it0 (design doc §6's 10-item checklist is
+  the Done-when set verbatim — real product-code change to `packages/quay/bin/quay.js`, not doc-only,
+  first exploit-typed milestone since m12). Gate-hash check:
+  `it0-gate-hash-check.sh --by-reference charters/M16-cli-edit-parity-impl.md` → **PASS**. Charter
+  flags the adversarial-audit gate as EXPECTED to trigger this time (capability-growth-typed with a
+  plausible nonzero Δv̂), contrast with M13/M14/M15's zero-VT precedent. Dispatching inner iteration-0
+  and iteration-1 next, both from worktrees off the current master HEAD (`17b48dc`).
