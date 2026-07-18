@@ -7,9 +7,48 @@ import { loadConfig, activeProvider } from "../src/config.js";
 import { connectProvider } from "../src/provider-client.js";
 import { composePayload, deliverTrigger } from "../src/action.js";
 import { resolveProviderEnv } from "../src/provider-env.js";
+import { QUAY_VERSION } from "../src/version.js";
 
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
+}
+
+// CB-021 (M08-merge-recover): `--format json` is a documented alias for
+// `--json` (both flags are accepted everywhere `--json` is; see printHelp()).
+// Any other `--format <value>` (e.g. `--format yaml`, `--format` with no
+// value) is a usage error — it must NOT silently fall through to
+// human-readable output, which is exactly the bug this closes.
+// Returns { json: boolean } | null (null = invalid --format value, caller
+// should print an error and exit 1).
+function resolveJsonFlag(flags) {
+  if (flags.format === undefined) {
+    return { json: flags.json === true };
+  }
+  if (typeof flags.format === "string" && flags.format.toLowerCase() === "json") {
+    return { json: true };
+  }
+  return null; // invalid --format value
+}
+
+// UQ-047/UQ-048 (M08-merge-recover): shared --page-size parser used by every
+// `task list` output mode (CLI table, --json/--format json) AND documented
+// for the Web UI's own ?pageSize= param (src/serve.js). A missing --page-size
+// means "no limit" (existing behavior, preserved); an explicitly-invalid
+// value (0, negative, non-numeric) is a hard usage error, not a silent
+// fall-back to "show everything" (UQ-048).
+function resolvePageSize(flags) {
+  if (flags["page-size"] === undefined) {
+    return { pageSize: null, error: null };
+  }
+  const raw = flags["page-size"];
+  const n = typeof raw === "string" ? Number(raw) : NaN;
+  if (typeof raw !== "string" || !Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+    return {
+      pageSize: null,
+      error: `Error: --page-size requires a positive integer (got ${JSON.stringify(raw)})`,
+    };
+  }
+  return { pageSize: n, error: null };
 }
 
 function parseFlags(argv) {
@@ -103,7 +142,8 @@ function printHelp(sub) {
     process.stdout.write(`quay — task management for AI-assisted development
 
 Usage:
-  quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--json]
+  quay --version | -V
+  quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--json|--format json]
   quay task view <task-id> [--json]
   quay task edit <task-id> --status <status> [--json]
   quay task check <task-id> [--json]
@@ -118,7 +158,9 @@ Options for task list:
   --prefix <prefix>   Filter by task id prefix (e.g. QX for QX-* tasks)
   --sort id|status|updated  Sort by id, status, or last-updated time (default: insertion order)
   --search <query>    Filter by title/body content (case-insensitive)
+  --page-size <n>     Limit output to the first <n> tasks (must be a positive integer)
   --json              Output as JSON
+  --format json       Alias for --json (any other --format value is a usage error)
 
 Examples:
   quay task list --prefix QX          List only QX-* tasks
@@ -137,6 +179,16 @@ async function main() {
   const [, , cmd, sub, ...rest] = process.argv;
   const { flags, positional } = parseFlags(rest);
 
+  // UQ-047 (M08-merge-recover): top-level --version / -V. Prints the real
+  // packages/quay/package.json version (via src/version.js, which is also
+  // what the SEA build's build-time-embedded shim replaces — see that
+  // module's header comment) and exits 0. Previously both flags fell
+  // through to the generic usage error (exit 1).
+  if (cmd === "--version" || cmd === "-V") {
+    console.log(QUAY_VERSION);
+    return;
+  }
+
   // QX-005: top-level --help / -h detection (UQ-001: was a one-line fallback).
   // Matches: `quay --help`, `quay -h`, `quay` with no command.
   if (cmd === "--help" || cmd === "-h" || (cmd === undefined && flags.help)) {
@@ -154,8 +206,34 @@ async function main() {
     return;
   }
 
+  // CB-021 (M08-merge-recover): --format json / --json normalization,
+  // shared by every subcommand that supports JSON output (task list/view/
+  // edit/check, action list). Validated up front, before connecting to any
+  // provider, so an invalid --format value (e.g. --format yaml) fails fast
+  // with a usage error instead of silently falling through to human-readable
+  // output (the original bug this closes). Commands that don't accept
+  // --json (serve, mcp) never read wantsJson, so this is a no-op for them.
+  const jsonFlag = resolveJsonFlag(flags);
+  const jsonCommands =
+    (cmd === "task" && ["list", "view", "edit", "check"].includes(sub)) ||
+    (cmd === "action" && ["list", "run"].includes(sub));
+  if (jsonFlag === null && jsonCommands) {
+    console.error(`Error: unsupported --format value ${JSON.stringify(flags.format)} (only "json" is supported; use --json instead of --format for non-JSON output)`);
+    process.exitCode = 1;
+    return;
+  }
+  const wantsJson = jsonFlag !== null && jsonFlag.json;
+
   if (cmd === "task" && sub === "list") {
     // QX-005: task list --help is caught above by the sub === "--help" branch.
+    // UQ-047/UQ-048: --page-size validated up front — invalid values (0, -1,
+    // "abc") are a hard error, not a silent "show everything" fallback.
+    const { pageSize, error: pageSizeError } = resolvePageSize(flags);
+    if (pageSizeError) {
+      console.error(pageSizeError);
+      process.exitCode = 1;
+      return;
+    }
     await withProvider(async (client) => {
       // QX-016 (iteration 4): pass only status to taskList; label filtering handled
       // client-side below so we can apply AND-logic for multiple --label values.
@@ -235,21 +313,31 @@ async function main() {
       } else {
         sorted = filtered; // insertion order (default)
       }
-      if (flags.json) {
-        printJson(sorted);
+      // CB-006/CB-022/UQ-047 (M08-merge-recover): --page-size N truncates to
+      // the first N tasks (post-filter, post-sort), applied identically in
+      // BOTH output modes below — this is the printJson(sorted) bug fix
+      // (previously the full array was always printed in JSON mode
+      // regardless of --page-size).
+      const totalCount = sorted.length;
+      const paged = pageSize != null ? sorted.slice(0, pageSize) : sorted;
+      if (wantsJson) {
+        printJson(paged);
       } else {
         // QX-021 (iteration 5): show active search query in header line.
         // QX-022 (iteration 5): include "updated" timestamp as rightmost column.
-        if (prefix) console.log(`# filtered: ${prefix.toUpperCase()}-* (${sorted.length} tasks)${searchQuery ? ` --search "${searchQuery}"` : ""}`);
-        else if (searchQuery) console.log(`# search: "${searchQuery}" (${sorted.length} matches)`);
-        for (const t of sorted) {
+        if (prefix) console.log(`# filtered: ${prefix.toUpperCase()}-* (${totalCount} tasks)${searchQuery ? ` --search "${searchQuery}"` : ""}`);
+        else if (searchQuery) console.log(`# search: "${searchQuery}" (${totalCount} matches)`);
+        if (pageSize != null && pageSize < totalCount) {
+          console.log(`# showing ${paged.length} of ${totalCount} tasks (--page-size ${pageSize})`);
+        }
+        for (const t of paged) {
           const updatedStr = typeof t.updatedAt === "number" ? relativeTimeCli(t.updatedAt) : "—";
           console.log(`${t.id}\t${t.status}\t${t.role}\t${t.title}\t${updatedStr}`);
         }
         // QX-025 (experiment 4, iteration 6): zero-result hint when --search
         // returns nothing — users often search for a label name and are confused
         // by an empty result with no guidance. Closes UQ-024 (minor).
-        if (sorted.length === 0 && searchQuery !== null) {
+        if (paged.length === 0 && searchQuery !== null) {
           console.log(`Hint: use --label to filter by label, or --search to match title/body content.`);
         }
         // QX-037 (experiment 4, iteration 10): UQ-020 — "No tasks found." message
@@ -259,7 +347,7 @@ async function main() {
         // The --search hint above fires for the specific search-with-no-results case;
         // this is a broader catch-all for status/label/prefix filter combinations.
         // Written to stdout (consistent with other informational output in this branch).
-        if (sorted.length === 0 && searchQuery === null) {
+        if (paged.length === 0 && searchQuery === null) {
           console.log("No tasks found.");
         }
       }
@@ -276,7 +364,7 @@ async function main() {
         process.exitCode = 1;
         return;
       }
-      if (flags.json) printJson(t);
+      if (wantsJson) printJson(t);
       else {
         console.log(`${t.id}: ${t.title} [${t.status}]`);
         console.log(t.body);
@@ -299,7 +387,7 @@ async function main() {
     }
     await withProvider(async (client) => {
       const t = await client.taskWrite({ id, status: flags.status });
-      if (flags.json) printJson(t);
+      if (wantsJson) printJson(t);
       else console.log(`${t.id}: ${t.title} [${t.status}]`);
     }, { providerId: flags.provider });
     return;
@@ -316,7 +404,7 @@ async function main() {
     await withProvider(async (client) => {
       result = await client.taskCheck(id);
     }, { providerId: flags.provider });
-    if (flags.json) {
+    if (wantsJson) {
       printJson(result);
     } else {
       console.log(`${result.id}: ${result.ok ? "PASS" : "FAIL"} — ${result.reason}`);
@@ -338,7 +426,7 @@ async function main() {
       const buttons = (manifest.action_buttons ?? []).filter(
         (b) => !b.whenStatus || b.whenStatus.includes(t.status)
       );
-      if (flags.json) printJson(buttons);
+      if (wantsJson) printJson(buttons);
       else for (const b of buttons) console.log(`${b.id}\t${b.label}`);
     }, { providerId: flags.provider });
     return;

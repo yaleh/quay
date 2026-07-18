@@ -34,15 +34,22 @@ package's `package.json` `engines` field for the exact floor).
 
 ### Option A — global install from a release artifact (recommended for most users)
 
-Download the latest `quay-*.tgz` from the [GitHub Releases page](https://github.com/yaleh/quay/releases),
-then install it globally with npm:
+Every [GitHub Release](https://github.com/yaleh/quay/releases) publishes two
+kinds of artifact:
 
-```sh
-npm install -g quay-0.2.0.tgz   # replace with the actual filename from the release
-quay --help
-```
+- **npm package** (`quay-*.tgz`) — requires Node.js >= 20 already installed:
 
-This installs the `quay` binary on your PATH. Node.js >= 20 must already be installed.
+  ```sh
+  npm install -g quay-0.3.5.tgz   # replace with the actual filename from the release
+  quay --help
+  ```
+
+  This installs the `quay` binary on your PATH.
+
+- **single-file executables** (`quay-sea-<version>-<platform>.{tar.gz,zip}`)
+  — no Node.js install required at all. See
+  [Distribution: single-file executables (SEA)](#distribution-single-file-executables-sea)
+  below.
 
 ### Option B — from source (for development or the latest unreleased changes)
 
@@ -225,6 +232,54 @@ It also exposes `task get <id>`, `task edit <id> --status <s>` (status-only
 write path, v1), `manifest`, and `mcp` (its MCP server), mirroring
 `quay-native`'s shape on whatever subset of the ABI this Provider
 implements (v1 is read-primary; write is status-only).
+
+## Distribution: single-file executables (SEA)
+
+In addition to the npm-installable `quay-*.tgz` package (Option A above),
+every tagged release also publishes **platform-specific single-file
+executables** built with
+[Node.js SEA (Single Executable Application)](https://nodejs.org/api/single-executable-applications.html) —
+these require **no separately-installed Node.js runtime** on the end user's
+machine at all.
+
+Each release's GitHub Release page includes archives named
+`quay-sea-<version>-<platform>.{tar.gz,zip}` for `linux-x64`, `macos-arm64`,
+and `windows-x64`. Each archive bundles:
+
+- `quay` (`quay.exe` on Windows) — the Core CLI/web-UI/MCP binary
+  (`packages/quay/scripts/build-sea.sh`).
+- `quay-native` (`quay-native.exe` on Windows) — the native Provider binary
+  (`packages/quay-native/scripts/build-sea.sh`). Both binaries are needed
+  because Core spawns the active Provider's `mcp_entry` as a child process
+  — `quay serve` is only genuinely Node-free end-to-end if `mcp_entry` also
+  points at a compiled binary, not `node ...`.
+- A packaged `.quay/config.yml` wiring the two binaries together and a
+  `tasks/` directory.
+
+```sh
+tar xzf quay-sea-0.3.5-linux-x64.tar.gz
+cd <extracted-dir>
+./quay --help
+./quay serve
+```
+
+No `npm install`, no Node.js on `PATH`, nothing beyond the extracted
+archive is required. This is verified on every release by a dedicated CI
+job (`sea-verify-node-free` in `.github/workflows/release.yml`) that
+downloads the just-published Linux archive into a `debian:stable-slim`
+container that has never had Node.js installed, and runs the extracted
+binary directly — proving the executable is genuinely self-contained, not
+merely "the build succeeded locally."
+
+Build the SEA binaries yourself from source:
+
+```sh
+bash packages/quay/scripts/build-sea.sh          # -> packages/quay/dist-sea/quay
+bash packages/quay-native/scripts/build-sea.sh   # -> packages/quay-native/dist-sea/quay-native
+```
+
+See [`packages/quay/README.md`](packages/quay/README.md#distribution-single-file-executables-sea)
+for the package-level version of this section.
 
 ## Running the test suite
 

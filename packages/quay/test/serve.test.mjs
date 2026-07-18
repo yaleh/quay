@@ -1482,6 +1482,105 @@ async function main() {
     }
   }
 
+  // M08-merge-recover: ?pageSize=N on the Web UI list page (CB-006/CB-022).
+  // Mirrors the CLI --page-size test in cli.test.mjs. 5 tasks, default
+  // PAGE_SIZE=20 shows all on 1 page; ?pageSize=2 forces 3 pages (2+2+1) and
+  // the page-size selector reflects the active value; an invalid ?pageSize=
+  // value falls back to the default with a visible warning banner.
+  {
+    const pgszTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-pgsz-tasks-"));
+    const pgszWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-pgsz-workspace-"));
+    fs.mkdirSync(path.join(pgszWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(pgszWorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${pgszTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}","mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${pgszTasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+    const pgszEnv = { ...process.env, QUAY_NATIVE_TASKS_DIR: pgszTasksDir };
+    for (let i = 1; i <= 5; i++) {
+      execFileSync("node", [nativeBin, "task", "create", `PGSZ-${i}`,
+        "--title", `pgsz task ${i}`, "--status", "todo"], { env: pgszEnv });
+    }
+
+    let pgszServer = null;
+    const pgszOrigCwd = process.cwd();
+    try {
+      process.chdir(pgszWorkspaceRoot);
+      const pgszPort = port + 15;
+      pgszServer = await startServer({ port: pgszPort });
+
+      // Default page size (20): all 5 tasks on page 1, "Page 1 of 1".
+      const defaultResp = await get(pgszPort, "/");
+      assert(defaultResp.status === 200, "GET / returns 200 (pageSize default)");
+      assert(
+        defaultResp.body.includes("Page 1 of 1 (5 tasks)"),
+        `default page size shows all 5 tasks on 1 page. body snippet: ${defaultResp.body.slice(0, 300)}`
+      );
+
+      // ?pageSize=2: 5 tasks / 2 per page = 3 pages.
+      const pgsz2Resp = await get(pgszPort, "/?pageSize=2");
+      assert(pgsz2Resp.status === 200, "GET /?pageSize=2 returns 200");
+      assert(
+        pgsz2Resp.body.includes("Page 1 of 3"),
+        `?pageSize=2 with 5 tasks shows 3 pages. body snippet: ${pgsz2Resp.body.slice(0, 300)}`
+      );
+      const pgsz2RowCount = (pgsz2Resp.body.match(/>PGSZ-\d</g) || []).length;
+      assert(
+        pgsz2RowCount === 2,
+        `?pageSize=2 renders exactly 2 task rows on page 1 (got ${pgsz2RowCount})`
+      );
+
+      // Page 2 of the pageSize=2 view carries the pageSize param through page nav.
+      const pgsz2Page2Resp = await get(pgszPort, "/?pageSize=2&page=2");
+      assert(pgsz2Page2Resp.status === 200, "GET /?pageSize=2&page=2 returns 200");
+      assert(
+        pgsz2Page2Resp.body.includes("Page 2 of 3"),
+        `?pageSize=2&page=2 shows 'Page 2 of 3'. body snippet: ${pgsz2Page2Resp.body.slice(0, 300)}`
+      );
+
+      // The page-size selector reflects a standard option (10/20/50/100) as active;
+      // ?pageSize=2 is a custom (non-menu) value so none of the menu options are
+      // highlighted for it — verify instead with a standard option, ?pageSize=10.
+      const pgsz10Resp = await get(pgszPort, "/?pageSize=10");
+      assert(pgsz10Resp.status === 200, "GET /?pageSize=10 returns 200");
+      assert(
+        /Page size:[\s\S]*?<strong>10<\/strong>/.test(pgsz10Resp.body),
+        `?pageSize=10 page-size selector highlights 10 as active. body snippet: ${pgsz10Resp.body.slice(0, 500)}`
+      );
+      assert(
+        pgsz10Resp.body.includes("Page 1 of 1 (5 tasks)"),
+        `?pageSize=10 with 5 tasks shows 1 page. body snippet: ${pgsz10Resp.body.slice(0, 300)}`
+      );
+
+      // Invalid ?pageSize= value: falls back to default (20), with a warning banner —
+      // NOT a silent full-list dump with no indication anything was wrong (UQ-048's
+      // Web-UI-side analog).
+      const pgszBadResp = await get(pgszPort, "/?pageSize=abc");
+      assert(pgszBadResp.status === 200, "GET /?pageSize=abc returns 200 (falls back, does not error the page)");
+      assert(
+        pgszBadResp.body.includes("Page 1 of 1 (5 tasks)"),
+        `?pageSize=abc falls back to the default page size (20 > 5 tasks -> 1 page). body snippet: ${pgszBadResp.body.slice(0, 300)}`
+      );
+      assert(
+        pgszBadResp.body.includes("Invalid pageSize value ignored"),
+        `?pageSize=abc renders a visible warning banner rather than silently falling back. body snippet: ${pgszBadResp.body.slice(0, 500)}`
+      );
+
+      const pgszZeroResp = await get(pgszPort, "/?pageSize=0");
+      assert(
+        pgszZeroResp.body.includes("Invalid pageSize value ignored"),
+        "?pageSize=0 is also treated as invalid (warning banner shown)"
+      );
+    } finally {
+      if (pgszServer) {
+        pgszServer.close();
+        if (pgszServer.client) await pgszServer.client.close();
+      }
+      process.chdir(pgszOrigCwd);
+      fs.rmSync(pgszTasksDir, { recursive: true, force: true });
+      fs.rmSync(pgszWorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
   console.log(failures === 0 ? "\nAll QN-031 serve/action regression tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
