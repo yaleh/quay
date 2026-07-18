@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 2** · **chart: 0** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 3** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -84,12 +84,12 @@ Slope (marginal points / milestone): **+6.0** (1 data point so far — trend, no
 
 | track | current | alarm |
 |---|---|---|
-| ρ reuse rate | **~0.85** (m2: HARD GATES/worktree-isolation reused unchanged; the milestone's OWN work product is new tooling by design — a method-infra milestone necessarily has lower ρ than a pure product-value one, expected not alarming) | must-not-fall |
-| φ fold-back (confirmed edges) | **2 confirming** (raw-output-bar: 3rd-in-a-row confirming instance, m1×2 + m2; it0 ceiling/gate-hash/dogfooding checks: the manual-judgment version was used successfully at m2-attempt-1 SELECT, now mechanized at m2 itself — the check's OWN value was confirmed by exercising it once before automating it); domain-audit-channel≡CI-job pattern now codified into `inherited-core.md`'s decision procedure (1 confirming — validated retroactively against M01-dist, awaiting a 2nd forward-looking instance) | — |
-| charter thickness (tokens) | **~1.8 K** (M01-dist), **~2.1 K** (M02-gates, slightly over alarm — method-infra charters carry the same gate-block overhead as product charters despite thinner scope; flag for M-GATES' own future scope: could the gate-hash script also check charter TOTAL thickness, not just the gate-block substring?) | >2 K = dilution |
-| discovery latency (mechanizable) | **0** (m1 and m2 both; m2's own gate-hash-check bug — false FAIL against M01-dist from a tag-stripping bug — was caught same-iteration via dogfooding, not late) | >~8 iters late |
-| calibration error \|Δv−Δv̂\|/Δv̂ | **0%** (m1, only VT-scored milestone so far; m2 has no VT Δv̂ to calibrate against — see methodology-infra note in log) | trend must shrink |
-| inner-convergence success | **2/2** (m1: 2 iterations; m2: 2 iterations, 2nd purely a stability re-confirmation with zero new edits — both Done-when-complete, no mid-milestone re-scope) | mid-milestone re-scope = fail |
+| ρ reuse rate | **~0.85** (m3: HARD GATES/worktree-isolation/report-shape all reused unchanged from m1/m2; new work product is the matrix+suite, by design) | must-not-fall |
+| φ fold-back (confirmed edges) | **3 confirming** (raw-output-bar 3rd-in-a-row + m3 4th; domain-audit-channel≡CI-job pattern now **CONFIRMED** at m3 — 2nd, different-domain [cross-provider vs. cross-platform] instance reusing the M01-dist-derived `inherited-core.md` procedure unchanged, crosses the §4.2 fold-back threshold; consolidation into inherited-core.md's confirmed-pattern section still pending, not yet done) | — |
+| charter thickness (tokens) | **~1.8 K** (M01-dist), **~2.1 K** (M02-gates), **~2.0 K** (M03-abi-eval) — all near/over the 2K alarm; gate-block overhead is now the dominant, structural driver across every charter regardless of scope, not milestone-specific dilution | >2 K = dilution |
+| discovery latency (mechanizable) | **0** (m1, m2, m3 all — m3's gap-list findings PR-ABI-001/002 were logged same-iteration as found, not deferred) | >~8 iters late |
+| calibration error \|Δv−Δv̂\|/Δv̂ | **0%** (m1); m2 no VT Δv̂ (methodology-infra); m3 Δv̂ explicitly "≈0 direct" (re-baseline milestone) — realized cov (0.654) came in materially above the charter's own 0.30 placeholder, a genuine miscalibration on the ESTIMATE though not on a formal Δv̂ (no formal % applicable — flagged so a future numeric placeholder is treated as a real hypothesis to calibrate against, not a throwaway guess) | trend must shrink |
+| inner-convergence success | **3/3** (m1: 2 iterations; m2: 2 iterations; m3: 2 iterations, 2nd a stability re-confirmation with zero corrections needed — all three Done-when-complete, no mid-milestone re-scope) | mid-milestone re-scope = fail |
 
 ## Control limits (pre-declared; §6/§6.1)
 - inner budget = 10 (past → default HALT, continue needs authorization)
@@ -213,3 +213,42 @@ Slope (marginal points / milestone): **+6.0** (1 data point so far — trend, no
   this milestone's own matrix+suite evidence, not the placeholder. Gate-hash check:
   `it0-gate-hash-check.sh charters/M03-abi-eval.md` → **PASS** (exit 0). Dispatching inner
   iteration-0 next via `baime:iteration-executor`.
+- **ABSORB m3 = M-ABI-EVAL → DONE** 2026-07-18. Iteration-0: built the Provider-ABI capability
+  matrix (`milestones/M03-abi-eval/capability-matrix.md`) and an 18-scenario differential
+  conformance suite (`packages/quay/test/provider-abi-conformance.test.mjs`) run live against both
+  native and the real `yaleh/quay` github provider (primitive + compound task shapes), all 18
+  passing; found and logged 2 genuine new gaps (PR-ABI-001: github `task_write` silently drops
+  unsupported fields with no error; PR-ABI-002: github `task.parent` resolves via `task_list` but
+  always returns `null` via `task_get` — a real internal inconsistency, not a documented
+  limitation). Mid-iteration self-caught a repo-root isolation leak (2 files) and recovered inside
+  the worktree before finishing — logged as an adaptation-log finding recommending
+  `inherited-core.md` flag dashboard.md/gap-list.md/backlog.md as standing risk paths for this
+  exact mistake (noted for a future consolidation pass, not applied this milestone — out of scope).
+  Iteration-1: independent stability re-confirmation (M02-gates iteration-1 pattern) — fresh
+  worktree, fresh `npm install`, re-ran the full conformance suite (18/18, byte-identical) and full
+  existing suite (31/31, 0 regressions) from scratch rather than trusting iteration-0's pasted
+  output, hand-recomputed the VT arithmetic (cov=0.6538→0.654, points=13.08, chart-1 total=101.33,
+  matches exactly), spot-checked the 2 most load-bearing matrix citations against source. Zero
+  drift, zero corrections needed. **All 6 Done-when clauses MET and stable across the iteration
+  boundary.** Merged `exp5-m03-iteration-1` → `master` (`--no-ff`, 6 files: capability-matrix.md,
+  conformance suite, 2 iteration reports, dashboard.md's chart-1 VT section, gap-list.md's 2 new
+  entries). **Chart transition executed**: chart-0's 5 surfaces carry over 1:1 (unchanged, out of
+  this milestone's scope), Provider-ABI added at weight 20 with REALIZED cov=0.654 (derived from
+  the matrix's own per-capability-row realized fractions: read 0.90, write 0.20, gate 1.00, skill
+  1.00 — weighted by field count), NOT the charter's 0.30 pre-dispatch placeholder — the realized
+  number came in materially higher than guessed, because gate/skill turned out fully symmetric
+  across providers (the charter's own stated worry) while write is the genuinely thin cell.
+  **Chart-1 VT = 88.25 (carried) + 13.08 (Provider-ABI) = 101.33/120** (≈0.844 normalized,
+  comparable to chart-0's 0.8825 — a real but modest dip, consistent with DIR-001's thesis that the
+  "near-perfect" reading was inflated by the surface set the old chart couldn't see past).
+  Calibration: charter's Δv̂ was explicitly "≈0 direct" (this was a re-baseline milestone, not a
+  capability-close) — the realized value is the re-baseline's honesty, not a VT point delta in the
+  usual sense; DIR-001's finding #3 (GitHub provider under-evaluated) is now falsifiable-and-largely-
+  confirmed with live evidence (write genuinely thin at 0.20) rather than argued from provider.yml
+  labels alone. milestone_counter → 3. chart → 1. Backlog `M-ABI-EVAL` row to be marked DONE next.
+  φ: CI-job≡audit-channel pattern (from `inherited-core.md`, validated once at M01-dist) gets its
+  2nd confirming instance here — the conformance suite explicitly designed as its own standing
+  audit channel, same pattern, different domain (cross-provider vs. cross-platform) — this crosses
+  the φ confirmation threshold (§4.2, "a LATER different-domain milestone reuses an adaptation
+  unchanged"); worth folding into `inherited-core.md` as a confirmed, not just proposed, pattern at
+  the next natural editing pass.
