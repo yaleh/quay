@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 5** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 6** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -417,3 +417,38 @@ iteration-0's arithmetic slip of 95.83 during iteration-1's independent re-verif
   charters/M06-sizing.md` → **PASS**. `backlog.md` gains an M-SIZING row (DONE-pending) and a
   revised order note. DIR-004 archived with status `applied (m6)` and a Resolution section
   recording the renumbering + immediate-apply rationale. Dispatching inner iteration-0 next.
+- **ABSORB m6 = M-SIZING → DONE** 2026-07-18. Merged `exp5-m06-iteration-1` → `master` (`--no-ff`,
+  clean, no conflicts). Realized-value check: `inherited-core.md` now has a size definition +
+  verify-iteration gauge section and a value-typed SELECT ledger (5 named types + governance/infra
+  hard floor), both referenced from `OUTER-LOOP.md`'s SELECT/AUTHOR-CHARTER steps; the
+  gate-hash-by-reference mechanism is real (new `--by-reference` mode on `it0-gate-hash-check.sh`,
+  demonstrated on a genuine M01-dist proof-of-concept at ~1796-1798 real tokens, under the 2K alarm,
+  with the dispatched-agent-still-sees-literal-gate-text safeguard confirmed via a worked example).
+  **iteration-0 recommended DONE without an iteration-1** — an explicit exception to this
+  experiment's established 2-iteration pattern, self-justified via its own newly-authored size gauge
+  ("pure doc/script edits, nothing for a fresh worktree to independently re-derive"). The outer loop
+  REJECTED this self-exemption before dispatching iteration-1: a milestone's own iteration-0 judging
+  its own work exempt from independent verification is exactly the SELF-REFERENTIAL pattern
+  `inherited-core.md`'s domain-misfit procedure (Step 2) already names as invalid ("the same
+  process/actor that produces the work also verifies it"), and the prior base rate favored
+  dispatching anyway (3 of 5 prior milestones had iteration-1 catch something real: M02 gate-hash
+  false-FAIL, M04 VT arithmetic slip, M05 `--labels`/`--label` typo). **iteration-1 vindicated the
+  override**: it found and fixed a real defect — iteration-0's self-consistency table (Done-when 4)
+  mislabeled m2/M-GATES's value type as governance-integrity and attributed a fabricated-adjacent
+  quote to DIR-004, when DIR-004's own archived text explicitly types m2 as risk/option
+  ("pre-empted 3 wasted SELECTs") and governance-integrity belongs to m5, not m2 — now the 4th of 6
+  milestones where independent re-verification caught something real. **Standing lesson recorded**:
+  a milestone must never self-exempt from the iteration-1 stability check on its own judgment, even
+  when the size gauge it just built would seem to license it — the size gauge is a sizing tool, not
+  an escape hatch from §3.2 condition 1's "stable ≥1 iteration" bar, and self-assessed exemption is
+  inherently the self-referential case the audit-channel procedure exists to catch.
+  iteration-1's fresh HARD GATES run also surfaced a NEW pending directive, **DIR-005** ("V_meta
+  consolidation lag — track, alarm, gate the inner→outer hand-off"), committed straight to master
+  (commit `d5ba266`, predates iteration-0's own worktree branch point) — dispositioned by iteration-1
+  as deferred (out of M06-sizing's own Done-when scope; DIR-005's own text proposes a separate
+  milestone). Will be drained properly at the m6→m7 boundary next, per the invariant (never absorb
+  async input mid-milestone — this is the boundary).
+  milestone_counter → **6**. `backlog.md`'s M-SIZING row marked DONE. Next: drain DIR-005 (fresh,
+  real disposition — not just citing iteration-1's placeholder note), then SELECT m7 using the
+  value-typed ledger for real, this being its first FULLY in-force use per DIR-004's own Done-when 2
+  target ("the next SELECT after this directive" — that's m7).
