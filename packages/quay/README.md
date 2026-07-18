@@ -139,37 +139,42 @@ $ node packages/quay/bin/quay.js task edit QN-001 --status done --json
 { "id": "QN-001", "status": "done", ... }
 ```
 
-`task edit` (M16-cli-edit-parity-impl) has full-field parity with the native
-provider CLI/MCP `task_write`: at least one of `--title` / `--status` /
-`--body` / `--body-file` / `--labels` / `--extra` / `--parent` / `--children`
-/ `--append-notes` is required (status is no longer the only writable
-field — existing `--status <s>`-only invocations continue to work
-unchanged).
+`task edit` supports full-field parity with the native provider CLI (M16-cli-edit-parity-impl,
+per `docs/proposals/exp5-cli-edit-parity.md`):
 
-| Flag | Meaning |
-| --- | --- |
-| `--title <t>` | Set title (portable — every Provider is expected to support it) |
-| `--status <s>` | Set status |
-| `--body <text>` | Set body verbatim (short-string mode; shell argument) |
-| `--body-file <path>` | Set body verbatim from a file; `-` reads from stdin. Whole-body **replacement** semantics; mutually exclusive with `--body` |
-| `--labels <a,b,c>` | Set labels (comma-separated; portable) |
-| `--extra <json>` | Set the `extra{}` map (JSON object string). **Native-only** — GitHub hard-errors on this field; see `inherited-core.md`'s Portable-metadata convention |
-| `--parent <id>` | Set parent task id |
-| `--children <a,b,c>` | Set children task ids (comma-separated) |
-| `--expect-status <s>` | Compare-and-swap: only write if the task's current status equals `<s>` |
-| `--append-notes <text>` | Read-then-write convenience: append `<text>` as a new line to the existing body and write the whole body back (no new ABI tool) |
+- `--title <string>` — new title.
+- `--status <status>` — new status.
+- `--body <string>` — new body (whole-body replacement), passed directly as a shell argument.
+  Mutually exclusive with `--body-file`.
+- `--body-file <path>` — new body (whole-body replacement) read from a file; use `--body-file -`
+  to read from stdin. Mutually exclusive with `--body`.
+- `--append-notes <text>` — read-then-write convenience: appends `text` to the task's current
+  body rather than replacing it. No new ABI tool is involved — this is a Core-CLI-side
+  `taskGet` + `taskWrite` composition.
+- `--labels <a,b,c>` — comma-separated label list (whole-list replacement).
+- `--parent <task-id>` — reassign parent.
+- `--children <a,b,c>` — comma-separated children list (whole-list replacement).
+- `--extra <json>` — arbitrary JSON merged into the task's native-only `extra{}` map (see the
+  Portable-metadata convention in `experiments/quay-perpetual-stream/inherited-core.md`: `extra{}`
+  is a native-only convenience, never the sole copy of a portable fact). Providers that don't
+  implement `extra` (e.g. GitHub) hard-error rather than silently drop it (PR-ABI-001 floor).
+- `--expect-status <status>` — optimistic-concurrency guard (CAS): the write fails if the task's
+  current status doesn't match.
+
+At least one of `--title`/`--status`/`--body`/`--body-file`/`--labels`/`--extra`/`--parent`/
+`--children`/`--append-notes` is required; `--status` is no longer solely required (v1's
+status-only restriction is lifted).
 
 ```
-$ node packages/quay/bin/quay.js task edit QN-001 --title "New title" --labels bug,p1
-$ node packages/quay/bin/quay.js task edit QN-001 --body-file ./new-body.md
-$ cat notes.md | node packages/quay/bin/quay.js task edit QN-001 --body-file -
-$ node packages/quay/bin/quay.js task edit QN-001 --append-notes "Investigated further, see PR #42"
-```
+$ node packages/quay/bin/quay.js task edit QN-001 --title "New title" --body-file notes.md --json
+{ "id": "QN-001", "title": "New title", ... }
 
-A Provider that does not implement writing a given field (e.g. GitHub does
-not support `extra`) surfaces its own explicit hard-error message and a
-non-zero exit code — the Core CLI does not silently drop unsupported
-fields (PR-ABI-001's hard-error floor, unchanged by this CLI relaxation).
+$ echo "quick body via stdin" | node packages/quay/bin/quay.js task edit QN-001 --body-file - --json
+{ "id": "QN-001", ... }
+
+$ node packages/quay/bin/quay.js task edit QN-001 --append-notes "Follow-up: checked with team." --json
+{ "id": "QN-001", ... }
+```
 
 ### `quay task check <task-id>`
 

@@ -232,13 +232,16 @@ async function main() {
     assert(t.status === "ready", "quay task edit --status ready actually persists the new status");
   }
 
-  // 3b. Missing required --status error path.
+  // 3b. Missing any patch field error path. M16-cli-edit-parity-impl
+  //     relaxed `task edit` to full-field parity — `--status` is no longer
+  //     solely required; the guard now fires when NO patch-producing flag
+  //     (nor --append-notes) is given at all.
   {
     const r = run(["task", "edit", "CLI-1", "--json"], spawnOpts);
-    assert(r.status === 1, "quay task edit without --status exits 1");
+    assert(r.status === 1, "quay task edit with no patch flags exits 1");
     assert(
-      r.stderr.includes("--status") && r.stderr.includes("required"),
-      "quay task edit without --status prints the required-flag error"
+      r.stderr.includes("at least one of") && r.stderr.includes("--status"),
+      "quay task edit with no patch flags prints the 'at least one field required' error"
     );
   }
 
