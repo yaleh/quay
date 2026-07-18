@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 26** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 27** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -2218,3 +2218,90 @@ Gate-hash-by-reference: unchanged since M06, reused unchanged through M27
 against `ITERATION-PROMPTS.md` at M26 charter-authoring time, same pin used here).
 
 Continuing directly to charter authoring for m27.
+
+
+## ABSORB m27 — M27-competitive-bench — 2026-07-18
+
+Merge/publish trail: `exp5-m27-iteration-0` (b794863) + `exp5-m27-iteration-1`
+(f7448e7) → merged into `exp5-outer-driver` — iteration-0 clean (`e2aec02`, no
+conflicts, 4 files added), iteration-1 exactly one add/add conflict on
+`benchmark-report.md` (both iterations wrote a report at the identical path),
+resolved per DIR-018 item 3's per-file reconciliation discipline: read both
+sides' actual content (not just `git diff`), built a genuinely reconciled
+top-level report preserving every finding from both iterations, with both
+full original reports preserved verbatim alongside
+(`benchmark-report.iteration-0.md`, `benchmark-report.iteration-1.md`) —
+merge commit `5c71894`, rationale recorded in the merge commit message.
+
+Findings summary: both iterations independently confirmed real competitors
+(`gh` CLI v2.78.0 authenticated against real `yaleh/quay`; `backlog.md`
+v1.45.0), independently constructed a 5-scenario methodology, and actually
+ran the benchmark against `quay`, `gh issue`, and `backlog.md` with real
+transcripts and timing. 4 core findings converged independently across both
+iterations (no dedicated `task create` verb; gh's lack of native multi-state
+status; gh's search-index propagation lag; backlog.md's repeated-`--add-
+label`-flag data-loss bug). iteration-0 uniquely found GAP-002, a real
+data-integrity bug (`task edit <new-id>` without `--title` silently creates
+a title-less task) — not independently reproduced by iteration-1 since its
+own scenario always supplied `--title`, a real coverage gap in iteration-1's
+own pass and concrete evidence for running two independent iterations.
+22 total findings logged across both iterations (8 + 14), every one
+explicitly dispositioned in the reconciled report — none silently fixed
+inline (per "Explicitly OUT of scope"), none silently dropped.
+
+### Gate dispositions
+
+**Adversarial-audit gate**: condition (a) does not apply — this milestone is
+typed exploit/method-infra with Δv̂=0 by design (no VT chart cell, no
+capability-growth primary type); re-checked at ABSORB per the charter's own
+instruction and confirmed the realized Δv is indeed 0 (no ABI surface added,
+no fixes implemented for any finding). Condition (b) (iteration-0
+recommending skipping iteration-1) was never authorized — both iterations
+ran regardless. Documented no-op, N/A.
+
+**V_meta consolidation-lag gate**: clear — `v-meta-ledger.md` has exactly one
+row (`repo-root isolation-leak lesson`), status `proposed`, never reached
+`confirmed`; zero rows are `confirmed`-but-not-`consolidated`, so nothing is
+past the K=2 alarm threshold. This milestone is measurement/audit work, not a
+methodology-adaptation insight, so no new ledger row is warranted.
+Disposition: clear.
+
+**Design-only-milestone impl-row gate**: PASS — `it0-impl-row-check.sh
+exp5-M-COMPETITIVE-BENCH experiments/quay-perpetual-stream/backlog.md`
+confirms the milestone's backlog row is NOT design-only. Real output: "PASS:
+exp5-M-COMPETITIVE-BENCH is not design-only per its backlog row text (no
+'design delivered' / 'design-doc only' / follow-up-checklist marker found) —
+impl-row gate does not apply."
+
+**DoD meta-enforcer gate**: this IS the third-ever real (non-fixture,
+non-self-referential) test of `it0-dod-check.sh`/`.mjs`, per DIR-017/M25's own
+design and the charter's own explicit note (first real test: M25 self-check;
+second: M26; third: this milestone). Generalization note: ran cleanly against
+the real charter (`charters/M27-competitive-bench.md`), the real backlog row
+below, and this real ABSORB-entry text with NO script changes required — the
+only friction was operational (confirming the task-store id
+`exp5-M-COMPETITIVE-BENCH`, not the milestone id `M27-competitive-bench`, is
+the correct first argument to both `it0-impl-row-check.sh` and this script's
+own `<milestone-id>` positional — consistent with the standing convention
+already established at M21-M26). No script defect found; gate continues to
+generalize cleanly across a third independent real charter/milestone.
+
+## Backlog row
+| exp5-M-COMPETITIVE-BENCH | Comparative capability benchmark vs. a real competitor (formalize CB-016's ad hoc GitHub Issues/Linear yardstick) | SELECTED | exploit, method infra, no VT points | milestone-candidate, surface:cross-cutting, milestone:M27-competitive-bench |
+
+Merge/publish trail (continued): `exp5-outer-driver` at `5c71894` after the
+merge above → published to `master` via `git checkout master && git merge
+--no-ff exp5-outer-driver`, sequenced after all 4 HARD-BLOCK gates PASS (see
+dispositions above). `milestone_counter` bumped 26→27 only after publish
+landed. `tasks/exp5-M-COMPETITIVE-BENCH.md` → `status: done`.
+
+This milestone's findings DO feed a candidate for a future SELECT: GAP-002
+(silent title-less task creation, iteration-0's unique finding) is the
+single highest-priority actionable finding — a real correctness/data-
+integrity bug, not a style nit. Combined with GAP-001/G-01 (no dedicated
+create verb), GAP-007 (MCP per-call latency), and G-02 (stale help text),
+these form a coherent future capability-growth-typed candidate, tentatively
+`M-QUAY-CLI-CREATE-ERGONOMICS`, not implemented here (measurement only, per
+"Explicitly OUT of scope").
+
+Continuing directly to m28 DRAIN/SELECT, no human wait.
