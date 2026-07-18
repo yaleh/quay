@@ -2,7 +2,7 @@
 id: exp5-M-OUTCOME-EVAL
 title: "Outcome-based (job-to-be-done) evaluation: fixed real end-to-end
   task-board scenarios, binary pass/fail, dogfooding-gated"
-status: ready
+status: done
 labels:
   - milestone-candidate
   - surface:cross-cutting
@@ -55,9 +55,20 @@ dogfooding discipline. A future charter selecting this candidate should treat th
 starting Done-when set, adding/pruning only with a stated reason.
 
 ## Status mirror
-ready (SELECTed @M28, 2026-07-18 — DIR-001 item 3, the only remaining open candidate in
-backlog.md; DIR-017 Steps 2-3 remain blocked pending human confirmation, all other
-milestone-candidate rows are DONE or STALE)
+done (ABSORBed @M28, 2026-07-18 — 5 fixed dogfooding-gated scenarios run by two
+independent iterations. Scenarios 1-3 converged PASS (1 real gap: G-S3-01, CLI gate
+bypass). Scenarios 4 and 5 diverged between iterations and were explicitly
+reconciled, not averaged: Scenario 4 (Web UI round-trip) reconciled to FAIL — both
+iterations found the identical async-trigger mechanism, but iteration-1's PASS
+required a manual CLI completion the charter's zero-manual-intervention bar
+excludes; 2 gaps logged (G-S4-01 misleading banner, G-S4-02 no dispatcher-free
+round-trip). Scenario 5 reconciled to PASS-github/gap-on-native — iteration-1
+caught a real native-provider parent/children one-sided sync gap (G-S5-01) that
+iteration-0 had self-flagged as unchecked. All 4 HARD-BLOCK gates PASS, including
+the DoD meta-enforcer's fourth-ever real test. Published to master via
+exp5-outer-driver merge; reconciled report at
+experiments/quay-perpetual-stream/milestones/M28-outcome-eval/outcome-eval-report.md;
+see dashboard.md's "ABSORB m28" entry for full detail)
 
 ---
 _2026-07-18T19:18:52.080Z_: Not selected @M24: DIR-015/DIR-016's standing hard floor already committed this SELECT pass to M-TASK-BACKLOG-PROJECTION-IMPL (self-hosting fix, blocks all future SELECT read-path work) — a governance/infra candidate whose own enabling half was itself unselectable until this milestone lands.
