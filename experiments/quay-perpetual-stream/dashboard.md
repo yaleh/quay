@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 11** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 12** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -221,18 +221,43 @@ PR-ABI-001 (real title/body/labels write, hard-error floor for the remaining uni
 parent/children field) and PR-ABI-002 (get() parent-resolution symmetry fix) both closed;
 independently re-derived and confirmed by iteration-1, fresh worktree/fresh command output) ]`
 
-### Chart-1 re-score (M12-abi-parent-write, Provider-ABI write completion) — 2026-07-18 — DRAFT (iteration-1, independent derivation)
+### Chart-1 re-score (M12-abi-parent-write, Provider-ABI write completion) — 2026-07-18 — CONFIRMED
 
-**This is iteration-1's own INDEPENDENT re-derivation, from a fresh worktree
-(`exp5-m12-iteration-1`, based on the pre-charter `9ae3cd3` SELECT commit — none of any
-iteration-0 changes present at branch time), not yet cross-checked against a separate iteration-0
-report.** Per this milestone's own dispatch instructions, iteration-1 did NOT read iteration-0's
-report before deriving the numbers below — this section records iteration-1's independent
-cov/Δv claim for the outer loop to compare against iteration-0's own, at ABSORB. Findings cited
-below are this iteration's own live evidence (`gh issue view` transcripts against
-`gh-12`/`gh-13`/`gh-14`, and `packages/quay/test/provider-abi-conformance.test.mjs`'s own
-newly-added parent/children-write scenario cells, all pasted in
-`milestones/M12-abi-parent-write/iterations/iteration-1.md`).
+**ABSORB cross-check (outer loop, 2026-07-18).** Both iteration-0 (branch `exp5-m12-iteration-0`,
+commit `f172b29`) and iteration-1 (branch `exp5-m12-iteration-1`, commit `6d76cdf`, dispatched from
+a fresh worktree based on the pre-charter `9ae3cd3` SELECT commit, instructed NOT to read
+iteration-0's report first) independently arrived at the SAME numbers: cov 12/13→13/13, Δv=+1.54,
+full bidirectional reassignment achieved by both, no scope narrowing by either. Both branches were
+merged into master (`a1f581a` then `47898fe`); the merge conflict across the 5 touched files was
+resolved by keeping iteration-1's implementation as canonical (`setChildCheckboxes`/
+`writeRelations`), since both implementations were functionally equivalent and independently
+live-verified — iteration-0's own report is retained at
+`milestones/M12-abi-parent-write/iterations/iteration-0.md` for provenance. Full test suite
+re-run on the merged master: 31/31 files pass, 0 failures, including
+`provider-abi-conformance.test.mjs` (live GitHub API calls).
+
+**Out-of-band adversarial audit** (per `inherited-core.md`'s Adversarial-audit cadence rule
+condition (a) — this milestone is capability-growth-typed with nonzero realized Δv, so the gate
+fired for real this time, not re-argued away as it correctly was not required to at m11):
+dispatched as a fresh-context `baime:iteration-executor`, explicitly charged to REFUTE rather than
+re-verify. Verdict: **CONCERNS** (non-blocking — see
+`milestones/M12-abi-parent-write/audits/iteration-1-adversarial-audit.md`, commit `349b005`). No
+defect found in the code, the live evidence, or the Δv/cov arithmetic (independently
+re-recomputed to 110.65/120, independently re-ran the conformance suite live, independently
+queried `gh issue view` and confirmed the transcripts in both iteration reports are genuine, not
+fabricated). Three real findings, honestly recorded rather than dismissed: (1) this section and
+`capability-matrix.md` were left in an un-finalized "DRAFT" state by the merge — fixed by this
+ABSORB pass; (2) `gap-list.md` was missing its PR-ABI-003 closure row despite
+`capability-matrix.md`'s text implying it existed — fixed, see `gap-list.md`'s new PR-ABI-003 row;
+(3) iteration-1's "independent derivation" framing overstated its independence — it ran strictly
+after iteration-0 (committed 15:05:28Z vs. iteration-0's 14:36:52Z) and reused real shared
+scratch-issue fixtures (`gh-12`/`gh-13`) iteration-0 had already created and mutated. Git ancestry
+itself is clean (no report/code contamination — iteration-1 did not read iteration-0's files), so
+the underlying implementation-and-verification IS a genuine second, separately-authored pass, but
+the "fresh, isolated" framing should be read as "independently authored" rather than "fully
+isolated from all shared state," since GitHub scratch issues are real mutable external state
+shared across both worktrees. This is a calibration note for how future iteration-1 dispatches
+describe their own independence, not a finding that undermines the shipped result.
 
 Write-semantics decision (charter Done-when 2, stated explicitly, not left implicit): writing
 `children: [...]` on task X mutates X's OWN body (add/remove `- [ ] #<n>` lines, preserving `[x]`
@@ -258,7 +283,7 @@ hypothesis: "closing to 5/5 moves cov from 12/13=0.9231 to 13/13=1.00 ... +1.54 
 | surface | prior cov (m9, unchanged through m11) | new cov | rationale (this iteration's own live evidence) |
 |---|---|---|---|
 | Provider-ABI | 0.9231 | **1.0000** | write 0.80→**1.00** (parent/children write closed via `github-client.js#writeRelations()`/`setChildCheckboxes()` — cross-issue body-text checkbox mutation, full bidirectional reassignment; live-verified against dedicated scratch issues `gh-12`/`gh-13` (parents) and `gh-14` (child): add (`gh-14`→parent `gh-12`, checkbox appears on `gh-12`'s body), checked-state preservation (re-deriving an unchanged children set on `gh-13` leaves an existing `[x]` line byte-identical), reassignment (`gh-14`→parent `gh-13`, checkbox removed from `gh-12`, added to `gh-13`), and removal (`children: []` on `gh-13` removes the line, role reverts to primitive)); read/gate/skill unchanged (untouched this milestone). cov = (5+5+2+1)/(5+5+2+1) = 13/13 = **1.0000**. |
-| **VT chart-1 total (after m12, iteration-1 draft)** | **109.11/120** | **110.65/120** | CLI 25×0.94=23.50 (unchanged, out of scope); MCP 20×0.90=18.00 (unchanged, out of scope); Web UI 20×0.92=18.40 (unchanged, out of scope); Packaging 20×0.90=18.00 (unchanged, out of scope); Docs 15×0.85=12.75 (unchanged, out of scope); Provider-ABI 20×1.0000=**20.00** (+1.54 vs m9's 18.46). Total = 23.50+18.00+18.40+18.00+12.75+20.00 = **110.65/120** (≈0.922 normalized, up from 0.909 at m9). |
+| **VT chart-1 total (after m12, CONFIRMED)** | **109.11/120** | **110.65/120** | CLI 25×0.94=23.50 (unchanged, out of scope); MCP 20×0.90=18.00 (unchanged, out of scope); Web UI 20×0.92=18.40 (unchanged, out of scope); Packaging 20×0.90=18.00 (unchanged, out of scope); Docs 15×0.85=12.75 (unchanged, out of scope); Provider-ABI 20×1.0000=**20.00** (+1.54 vs m9's 18.46). Total = 23.50+18.00+18.40+18.00+12.75+20.00 = **110.65/120** (≈0.922 normalized, up from 0.909 at m9). |
 
 **Arithmetic re-check** (this milestone's own standing convention):
 ```
@@ -271,19 +296,20 @@ iteration realized full 5/5 write closure (not a narrower add/remove-only primit
 "actual realized Δv may be smaller ... or larger only up to this ceiling" clause resolved at
 its ceiling, not below it.
 
-VT curve (append, chart-1 basis, DRAFT iteration-1 — pending outer-loop cross-check against a
-separate iteration-0 derivation before this is stated as CONFIRMED): `[ ..., (m9/M09-gh-write,
-109.11/120), (m12/M12-abi-parent-write, 110.65/120, Δv=+1.54, CAPABILITY-GROWTH — Provider-ABI
-write-completeness: parent/children write closed via checkbox-in-body cross-issue mutation, full
-bidirectional reassignment, live-verified against gh-12/gh-13/gh-14; iteration-1's own independent
-first derivation, not yet cross-checked against iteration-0's) ]`
+VT curve (append, chart-1 basis, CONFIRMED — independently derived by BOTH iteration-0 and
+iteration-1, out-of-band adversarial audit returned CONCERNS/non-blocking, no code or arithmetic
+defect found): `[ ..., (m9/M09-gh-write, 109.11/120), (m12/M12-abi-parent-write, 110.65/120,
+Δv=+1.54, CAPABILITY-GROWTH — Provider-ABI write-completeness: parent/children write closed via
+checkbox-in-body cross-issue mutation, full bidirectional reassignment, live-verified against real
+GitHub scratch issues by both iterations independently; adversarial-audited, CONCERNS verdict
+recorded above, non-blocking) ]`
 
-**Per the charter's own Adversarial-audit gate note**: this milestone's value hypothesis types as
-`capability-growth` with a nonzero realized Δv (+1.54, not zero) — per `inherited-core.md`'s
-Adversarial-audit cadence rule condition (a), this fires the out-of-band adversarial-audit role
-requirement, to be dispatched by the OUTER loop itself before this VT-curve entry is finalized as
-CONFIRMED/ABSORB'd (iteration-1 records this trigger condition as met; does not itself perform the
-audit-role dispatch, which is outer-loop bookkeeping outside this worktree's scope).
+**Adversarial-audit gate — CLOSED (first real trigger since the gate was built at M10).** This
+milestone's value hypothesis typed `capability-growth` with a nonzero realized Δv (+1.54), so
+`inherited-core.md`'s Adversarial-audit cadence rule condition (a) fired for real this pass —
+unlike m11, where the gate was correctly adjudicated as NOT firing (discovery/risk-option-typed,
+Δv=0). The outer loop dispatched the audit (see above), it returned CONCERNS (non-blocking), and
+its three findings were fixed/recorded as part of this same ABSORB pass rather than deferred.
 
 ## Health tracks (§4.2–4.4, §6.1)
 
