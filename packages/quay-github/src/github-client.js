@@ -44,7 +44,7 @@ function ghApiRun(args) {
 /** Extract child issue numbers referenced via task-list checkboxes in an
  * issue body (e.g. "- [ ] #12"). Returns an array of "gh-<n>" ids, in the
  * order they appear, de-duplicated. */
-function extractChildRefs(body) {
+export function extractChildRefs(body) {
   if (!body) return [];
   const seen = new Set();
   const out = [];
@@ -139,6 +139,68 @@ export function issueToViewModel(issue, parentIndex = null) {
     },
     body: issue.body ?? "",
   };
+}
+
+// M12-abi-parent-write: pure body-text mutation for the checkbox-in-body
+// convention (charter Done-when 1). Given a body and a DESIRED set of child
+// ids (gh-<n> strings), returns a new body string with exactly one
+// checkbox line per desired child -- adding lines for newly-added children
+// (as unchecked, "- [ ] #<n>") and removing lines for children no longer
+// desired -- while PRESERVING the existing checked ([x]/[X]) state of any
+// checkbox line that is kept. Lines for ids not in CHILD_CHECKBOX_RE's
+// shape (i.e. everything else in the body) are left untouched, in their
+// original position; new lines are appended after the last existing
+// checkbox line (or at the end of the body, with a blank-line separator,
+// if the body has no checkbox lines yet).
+export function setChildCheckboxes(body, desiredChildIds) {
+  const src = body || "";
+  const desired = new Set(desiredChildIds);
+
+  // Pass 1: scan existing checkbox lines, recording their checked state and
+  // whether each is still desired. De-duplicate on first occurrence, same
+  // as extractChildRefs.
+  const existingState = new Map(); // id -> checked (bool)
+  let lastCheckboxLineEnd = -1;
+  const lineRe = /^([ \t]*-\s*\[([ xX])\]\s*#(\d+)\s*)$/gm;
+  for (const m of src.matchAll(lineRe)) {
+    const id = `gh-${m[3]}`;
+    if (!existingState.has(id)) existingState.set(id, /[xX]/.test(m[2]));
+    lastCheckboxLineEnd = m.index + m[0].length;
+  }
+
+  // Pass 2: rewrite the body, dropping checkbox lines for ids no longer
+  // desired, preserving checked-state for ids that are kept, and preserving
+  // every other line verbatim.
+  const lines = src.split("\n");
+  const outLines = [];
+  for (const line of lines) {
+    const m = /^([ \t]*)-\s*\[([ xX])\]\s*#(\d+)\s*$/.exec(line);
+    if (m) {
+      const id = `gh-${m[3]}`;
+      if (desired.has(id)) {
+        outLines.push(line); // keep verbatim (preserves checked state + indent)
+      }
+      // else: drop this line (child removed)
+      continue;
+    }
+    outLines.push(line);
+  }
+
+  let out = outLines.join("\n");
+
+  // Append lines for newly-desired children not already present.
+  const toAdd = [...desired].filter((id) => !existingState.has(id));
+  if (toAdd.length > 0) {
+    const hadAnyCheckbox = lastCheckboxLineEnd !== -1;
+    const sep = out.length === 0 ? "" : out.endsWith("\n") ? "" : "\n";
+    const prefix = !hadAnyCheckbox && out.trim().length > 0 ? "\n" : "";
+    const newLines = toAdd
+      .map((id) => `- [ ] #${id.replace(/^gh-/, "")}`)
+      .join("\n");
+    out = `${out}${sep}${prefix}${newLines}\n`;
+  }
+
+  return out;
 }
 
 /** Build a childId -> [parentIds] index from a full list of raw issues, by
@@ -666,6 +728,107 @@ export function createGithubClient({ owner, repo }) {
     return get(id);
   }
 
+  // Fetch one issue's raw body by number (helper shared by writeRelations
+  // below -- separate from the view-model-returning get() since this needs
+  // the raw body text to feed setChildCheckboxes, not the derived model).
+  function fetchRawBody(number) {
+    const issue = ghApiJson([`repos/${owner}/${repo}/issues/${number}`]);
+    return issue.body ?? "";
+  }
+
+  function patchBody(number, newBody) {
+    ghApiRun([
+      `repos/${owner}/${repo}/issues/${number}`,
+      "-X",
+      "PATCH",
+      "-f",
+      `body=${newBody}`,
+    ]);
+  }
+
+  // M12-abi-parent-write: parent/children WRITE (charter Done-when 1-2).
+  // GitHub has no native parent-link field -- both fields are implemented
+  // via cross-issue body-text checkbox mutation (setChildCheckboxes above),
+  // per the write-semantics this milestone's iteration report states
+  // explicitly:
+  //
+  //   - Writing `children: [...]` on task X mutates X's OWN body to contain
+  //     exactly those checkbox lines (adds missing, removes extras),
+  //     preserving [x] state for kept children. This is a single-issue
+  //     write (X's body only).
+  //   - Writing `parent: <id>` on task X mutates the TARGET parent's body
+  //     to add a checkbox line referencing X (a cross-issue write), and
+  //     REMOVES the checkbox line referencing X from every OTHER issue
+  //     that currently lists X as a child (reassignment) -- found by
+  //     re-deriving the parent index from a full issue fetch, mirroring
+  //     get()'s own PR-ABI-002 buildParentIndex() reuse. Writing
+  //     `parent: null` removes X from every issue currently referencing it
+  //     as a child, without adding it anywhere.
+  //   - If both `parent` and `children` are supplied in the same call, they
+  //     are applied independently (children first, then parent) -- there is
+  //     no interaction between the two (a task's own children live in its
+  //     own body; its parent link lives in some OTHER issue's body).
+  function writeRelations(id, fields) {
+    const m = /^gh-(\d+)$/.exec(id);
+    if (!m) throw new Error(`quay-github: invalid task id for writeRelations: ${id}`);
+    const number = m[1];
+
+    if (Object.prototype.hasOwnProperty.call(fields, "children")) {
+      const currentBody = fetchRawBody(number);
+      const newBody = setChildCheckboxes(currentBody, fields.children ?? []);
+      if (newBody !== currentBody) {
+        patchBody(number, newBody);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(fields, "parent")) {
+      const newParentId = fields.parent; // string gh-<n>, or null/undefined to unset
+      const allIssues = fetchAllIssues();
+      const parentIndex = buildParentIndex(allIssues);
+      const currentParents = parentIndex.get(id) ?? [];
+
+      // Remove this task's checkbox line from every CURRENT parent that is
+      // not the new target (reassignment / unset case).
+      for (const oldParentId of currentParents) {
+        if (newParentId && oldParentId === newParentId) continue; // already correctly parented there
+        const oldParentMatch = /^gh-(\d+)$/.exec(oldParentId);
+        if (!oldParentMatch) continue;
+        const oldParentIssue = allIssues.find(
+          (i) => String(i.number) === oldParentMatch[1]
+        );
+        const oldParentBody = oldParentIssue?.body ?? "";
+        const oldParentChildren = extractChildRefs(oldParentBody).filter((c) => c !== id);
+        const newOldParentBody = setChildCheckboxes(oldParentBody, oldParentChildren);
+        if (newOldParentBody !== oldParentBody) {
+          patchBody(oldParentMatch[1], newOldParentBody);
+        }
+      }
+
+      // Add this task's checkbox line to the new target parent, if any and
+      // not already present there.
+      if (newParentId) {
+        const newParentMatch = /^gh-(\d+)$/.exec(newParentId);
+        if (!newParentMatch) {
+          throw new Error(`quay-github: invalid parent id: ${newParentId}`);
+        }
+        const newParentIssue = allIssues.find(
+          (i) => String(i.number) === newParentMatch[1]
+        );
+        const newParentBody = newParentIssue?.body ?? "";
+        const newParentChildren = extractChildRefs(newParentBody);
+        if (!newParentChildren.includes(id)) {
+          const updatedNewParentBody = setChildCheckboxes(newParentBody, [
+            ...newParentChildren,
+            id,
+          ]);
+          patchBody(newParentMatch[1], updatedNewParentBody);
+        }
+      }
+    }
+
+    return get(id);
+  }
+
   // QN-028: gate capability -- `check(id)` fetches the task (a single-issue
   // get(), so `parent` is left null per the existing get() limitation --
   // irrelevant to gate-checking, which only reads `status`/`body`) and
@@ -683,5 +846,5 @@ export function createGithubClient({ owner, repo }) {
     return checkGate(task, get);
   }
 
-  return { list, get, setStatus, writeFields, check };
+  return { list, get, setStatus, writeFields, writeRelations, check };
 }

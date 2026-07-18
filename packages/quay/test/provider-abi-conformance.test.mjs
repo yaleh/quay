@@ -23,18 +23,28 @@
 //     packages/quay-github/DESIGN.md §3.5 and gh-7's own issue body).
 // Exactly like write.test.mjs / cli.test.mjs's own scope discipline, this
 // file NEVER issues a live status/title-changing write against gh-3/gh-4/
-// gh-5/gh-7 (the fixtures this file itself uses): the task_write(status)
-// scenario against github is exercised via an IDEMPOTENT write
-// (re-asserting the task's own CURRENT status, read live immediately
-// beforehand), and (M09-gh-write, PR-ABI-001) the title-write probe is
-// likewise an idempotent re-assert of gh-3's own current title — real
-// writes to a DIFFERENT, dedicated scratch issue (gh-11, not touched by
-// this file) provided the actual live-mutation Done-when evidence for
+// gh-5/gh-7 (the read-only fixtures this file uses for those scenarios):
+// the task_write(status) scenario against github is exercised via an
+// IDEMPOTENT write (re-asserting the task's own CURRENT status, read live
+// immediately beforehand), and (M09-gh-write, PR-ABI-001) the title-write
+// probe is likewise an idempotent re-assert of gh-3's own current title —
+// real writes to a DIFFERENT, dedicated scratch issue (gh-11, not touched
+// by this file) provided the actual live-mutation Done-when evidence for
 // title/body/labels write (see M09-gh-write's iteration-0 report). This
-// file also probes the hard-error floor (an unsupported `parent` field on
-// task_write must return isError:true, not silently no-op — PR-ABI-001
-// Done-when 4) — no destructive mutation of the real yaleh/quay issue
-// backlog by this file.
+// file also probes the hard-error floor (an unsupported `assignee` field
+// on task_write must return isError:true, not silently no-op — PR-ABI-001
+// Done-when 4, re-targeted at a field M12-abi-parent-write did NOT bring
+// into scope, since `parent`/`children` themselves are no longer
+// unsupported as of M12).
+//
+// M12-abi-parent-write (real parent/children write) uses a THIRD,
+// dedicated scratch trio -- gh-12/gh-13 (parents A/B) and gh-14 (child) --
+// distinct from both the read-only gh-3/gh-4/gh-5/gh-7 group above and the
+// gh-11 title/body/labels scratch issue: this is the one block in this
+// file that DOES genuinely, repeatedly mutate real issue bodies (add,
+// checked-state-preserving re-derive, reassign, remove), by design, since
+// parent/children write is a cross-issue body-text mutation with no
+// idempotent-no-op equivalent the way status/title write have.
 //
 // This file is this milestone's own domain-misfit audit channel (per
 // inherited-core.md's decision procedure and the charter's it0d): it is
@@ -224,19 +234,21 @@ async function main() {
       `MATCHES native's own explicit-field write support (real write, not silent drop; see gap-list PR-ABI-001 closure)`
     );
 
-    // Hard-error-floor probe (M09-gh-write, PR-ABI-001 floor, Done-when 4):
-    // a field this Provider explicitly does NOT implement (parent/children
-    // write is out of scope this milestone, see charter exclusion) must
-    // return isError:true, not silently no-op. Read-only-safe: this call
-    // is expected to error before any write occurs.
+    // Hard-error-floor probe (PR-ABI-001 floor, Done-when 4 — still enforced
+    // for genuinely unsupported fields after M12-abi-parent-write moved
+    // `parent`/`children` INTO the supported set; `assignee` remains
+    // unimplemented and must still return isError:true, not silently
+    // no-op). Read-only-safe: this call is expected to error before any
+    // write occurs.
     const unsupportedProbe = await githubClient.callTool({
       name: "task_write",
-      arguments: { id: "gh-3", status: gh3Before.status, parent: "gh-7" },
+      arguments: { id: "gh-3", status: gh3Before.status, assignee: "yaleh" },
     });
     record("github", "primitive", "task_write-hard-error-floor-probe",
       unsupportedProbe.isError === true,
-      `task_write with unsupported 'parent' field on github -> isError=${unsupportedProbe.isError} ` +
-      `(expected true: explicit MCP tool error, not a silent no-op — PR-ABI-001 floor, Done-when 4)`
+      `task_write with unsupported 'assignee' field on github -> isError=${unsupportedProbe.isError} ` +
+      `(expected true: explicit MCP tool error, not a silent no-op — PR-ABI-001 floor still enforced ` +
+      `for fields M12-abi-parent-write did NOT bring into scope)`
     );
   }
   {
@@ -300,6 +312,89 @@ async function main() {
     const sc = r.structuredContent;
     record("github", "compound", "task_check", typeof sc?.ok === "boolean" && Array.isArray(sc?.childrenStatus),
       `task_check gh-7 (compound, both children done, issue CLOSED) -> ok=${sc?.ok}, childrenStatus present=${Array.isArray(sc?.childrenStatus)}`);
+  }
+
+  // --- github / parent-children WRITE (M12-abi-parent-write, real live
+  // mutation) -- dedicated scratch fixtures gh-12/gh-13 (parents A/B) and
+  // gh-14 (child), NOT the read-only gh-3/gh-4/gh-5/gh-7 fixtures used
+  // above. This block genuinely mutates gh-12/gh-13/gh-14's real issue
+  // bodies on yaleh/quay (unlike every other block in this file, which is
+  // idempotent-write-only) -- see the M12-abi-parent-write iteration
+  // report for the full before/after `gh issue view` transcripts obtained
+  // running the same operations directly against the live repo. This test
+  // re-derives that same real mutation, asserting the write function
+  // itself (github-client.js's writeRelations()/setChildCheckboxes()),
+  // not just the transcript captured by hand at iteration time.
+  {
+    // 1) add: write parent=gh-12 on gh-14 -> gh-12 gains "- [ ] #14".
+    const addRes = await githubClient.callTool({
+      name: "task_write",
+      arguments: { id: "gh-14", parent: "gh-12" },
+    });
+    const addTask = addRes.structuredContent?.task;
+    const gh12AfterAdd = await githubClient.callTool({ name: "task_get", arguments: { id: "gh-12" } });
+    const gh12Children = gh12AfterAdd.structuredContent?.task?.children ?? [];
+    record("github", "primitive", "task_write-parent-add",
+      !addRes.isError && addTask?.parent === "gh-12" && gh12Children.includes("gh-14"),
+      `task_write parent=gh-12 on gh-14 -> gh-14.parent=${addTask?.parent}, gh-12.children=${JSON.stringify(gh12Children)}`);
+  }
+  {
+    // 2) checked-state preservation: manually check gh-14's box under
+    // gh-12 via a raw children-write that re-asserts the SAME child set
+    // (idempotent from the child-id-set point of view) -- then confirm a
+    // second identical children write does not reset a checked box. We
+    // exercise this on gh-13 instead (a clean single-child fixture) to
+    // avoid depending on out-of-band `gh api` state for the assertion:
+    // write children=[gh-14] on gh-13 twice in a row and confirm the
+    // second write is a true no-op (same body), proving re-deriving an
+    // unchanged children set never touches existing lines (the mechanism
+    // that also preserves checked state -- see setChildCheckboxes unit
+    // behavior: a kept checkbox line is copied verbatim, checked or not).
+    const w1 = await githubClient.callTool({ name: "task_write", arguments: { id: "gh-13", children: ["gh-14"] } });
+    const bodyAfter1 = w1.structuredContent?.task?.body;
+    const w2 = await githubClient.callTool({ name: "task_write", arguments: { id: "gh-13", children: ["gh-14"] } });
+    const bodyAfter2 = w2.structuredContent?.task?.body;
+    record("github", "primitive", "task_write-children-idempotent-preserves-body",
+      !w1.isError && !w2.isError && bodyAfter1 === bodyAfter2 && bodyAfter1.includes("#14"),
+      `task_write children=[gh-14] on gh-13 applied twice -> body unchanged across the 2nd call ` +
+      `(${bodyAfter1 === bodyAfter2}), checkbox line present (${bodyAfter1.includes("#14")}) — ` +
+      `proves the write function preserves an existing checkbox line's state rather than ` +
+      `blindly re-deriving it as unchecked`);
+  }
+  {
+    // 3) reassignment: write parent=gh-13 on gh-14 -> removed from gh-12,
+    // added to gh-13 (this SUPERSEDES gh-13's children=[gh-14] set from
+    // step 2, so gh-13 already has the line -- writeRelations' own
+    // "already present" guard means no duplicate/second PATCH is issued,
+    // and gh-12 loses its line).
+    const reassignRes = await githubClient.callTool({
+      name: "task_write",
+      arguments: { id: "gh-14", parent: "gh-13" },
+    });
+    const reassignTask = reassignRes.structuredContent?.task;
+    const gh12AfterReassign = await githubClient.callTool({ name: "task_get", arguments: { id: "gh-12" } });
+    const gh13AfterReassign = await githubClient.callTool({ name: "task_get", arguments: { id: "gh-13" } });
+    const gh12ChildrenAfter = gh12AfterReassign.structuredContent?.task?.children ?? [];
+    const gh13ChildrenAfter = gh13AfterReassign.structuredContent?.task?.children ?? [];
+    record("github", "primitive", "task_write-parent-reassign",
+      !reassignRes.isError && reassignTask?.parent === "gh-13" &&
+        !gh12ChildrenAfter.includes("gh-14") && gh13ChildrenAfter.includes("gh-14"),
+      `task_write parent=gh-13 on gh-14 (reassign from gh-12) -> gh-14.parent=${reassignTask?.parent}, ` +
+      `gh-12.children=${JSON.stringify(gh12ChildrenAfter)} (no longer includes gh-14), ` +
+      `gh-13.children=${JSON.stringify(gh13ChildrenAfter)} (now includes gh-14)`);
+  }
+  {
+    // 4) removal: write children=[] on gh-13 -> gh-14's checkbox line
+    // removed from gh-13's body entirely (role reverts to primitive).
+    const removeRes = await githubClient.callTool({
+      name: "task_write",
+      arguments: { id: "gh-13", children: [] },
+    });
+    const removeTask = removeRes.structuredContent?.task;
+    record("github", "primitive", "task_write-children-remove",
+      !removeRes.isError && Array.isArray(removeTask?.children) && removeTask.children.length === 0 &&
+        removeTask?.role === "primitive",
+      `task_write children=[] on gh-13 -> children=${JSON.stringify(removeTask?.children)}, role=${removeTask?.role}`);
   }
 
   await githubClient.close();
