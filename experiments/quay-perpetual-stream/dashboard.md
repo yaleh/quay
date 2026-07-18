@@ -1744,3 +1744,41 @@ DIR-013 auto-resolve-wholesale content loss, the M18 shared-index merge blocking
 and the DIR-013 projection-drift miss). Both filed to `directives/pending/`, to be drained at the
 m22→m23 SELECT boundary per the standard DRAIN step. Not actioned during this ABSORB (they arrived
 after M22's charter was authorized) — recorded here for continuity into the next SELECT.
+
+**SELECT m23 (2026-07-18).** DRAIN: `directives/pending/` holds DIR-015 (still pending, unchanged —
+`M-TASK-BACKLOG-PROJECTION-IMPL`'s own SELECT remains future work), DIR-017 (new, ordered
+DoD-installation program — step 1's meta-enforcer carries an explicit, irreducible
+human-verification gate before steps 2-3 may proceed; step 0 references `M-TASK-BACKLOG-PROJECTION-
+IMPL`, already materialized as a row by M21), DIR-018 (new, isolate the outer loop's own commit
+stream from `master`). `it0-ceiling-check.sh` N/A (directive-sourced, not a `gap-list.md` id, same
+confirmed limitation as M21/M22).
+
+**Chose DIR-018 over DIR-017 for m23.** Reasoning: DIR-018 is explicitly flagged high-priority by
+the human ("every future human steering session races the loop until this lands") and diagnoses
+concrete, already-observed damage from THIS session (the M17/DIR-013 wholesale-take content loss,
+the M18 shared-index merge blocking a human commit, and the two non-trivial per-file conflict
+resolutions this loop had to manually perform at M21 and M22 — all stemming from iteration
+worktrees being created off shared `master` HEAD directly). DIR-017's step 1 (the meta-enforcer)
+is larger in scope and carries an explicit "irreducible, not delegable" human-verification gate
+before its own program can proceed past step 1 — better suited to a milestone the human can review
+promptly after landing, not one dispatched into a long autonomous run. Fixing DIR-018 first also
+de-risks DIR-017's own future execution (once the loop stops racing `master`, DIR-017's eventual
+build is cleaner). DIR-015 stays deferred (unchanged reasoning from M21/M22 — no phase/stage plan
+yet for `M-TASK-BACKLOG-PROJECTION-IMPL`'s own implementation).
+
+**Charter:** `charters/M23-outer-driver-isolation.md` — risk/option (primary) + governance-integrity
+(secondary), Δv̂=0 (infra, mirrors M18/M21's zero-VT precedent). In-scope: create `exp5-outer-driver`
+branch off `master` HEAD (`477e7a6`); amend `OUTER-LOOP.md` step 0 (DRAIN) with an explicit
+master→driver merge sub-step (per-file/no-silent-drop reconciliation required); amend step 6/7
+(ABSORB) with an explicit driver→master single-`--no-ff`-merge publish sub-step; write the
+no-silent-drop reconciliation-note discipline into `OUTER-LOOP.md` text; dogfood the new pattern on
+this milestone itself (both M23 iteration worktrees created off `exp5-outer-driver`, not `master`).
+Explicitly out of scope: no new automated enforcement hook, no DIR-017 work, no per-iteration
+worktree pattern redesign, no history rewrite for M01-M22, no `inherited-core.md` edits. Both gates
+verified PASS before dispatch: `it0-gate-hash-check.sh --by-reference` and
+`it0-ceiling-line-budget-check.sh`. `exp5-outer-driver` branch created at `477e7a6` (= current
+`master` HEAD at charter time). Adversarial-audit gate: condition (a) will evaluate to not-fired at
+ABSORB (Δv̂=0 by design, risk/option+governance-integrity typed); condition (b) not authorized.
+DIR-018 archival (with Resolution) delegated to the dispatched iterations per the DIR-013/DIR-014/
+DIR-016 precedent. Dispatching inner iteration-0 and iteration-1 next, both from worktrees off
+`exp5-outer-driver` HEAD (not `master`) — this milestone's own dogfooded proof point.
