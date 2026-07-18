@@ -417,19 +417,34 @@ export async function startServer({ port = 4173 } = {}) {
     return u.pathname + "?" + u.searchParams.toString();
   }
 
+  // M26-adversarial-eval finding M26-F2 (Phase A audit): this request
+  // handler had no top-level try/catch. Combined with provider-client.js's
+  // taskList() previously swallowing Provider errors into an empty array,
+  // failures were invisible; now that taskList() (and any other client.*
+  // call) can throw on a real Provider failure (malformed task file
+  // crashing the store, or a live rate-limit/network failure), an unhandled
+  // throw inside this async handler would leave the request hanging (no
+  // res.end() ever called) rather than degrading safely. This wrapper
+  // ensures ANY thrown error from the request-handling logic below (not
+  // just the taskList() case) results in a clean 500 response instead of a
+  // hung connection or an uncaught rejection that could take the whole
+  // server down.
   const server = http.createServer(async (req, res) => {
-    // M26-adversarial-eval finding ADV-002: this handler previously had no
-    // try/catch anywhere -- a thrown/rejected error from any route (e.g. the
-    // Provider layer throwing on a malformed task file, now correctly
-    // surfaced by ADV-001's provider-client.js fix instead of being
-    // silently masked as an empty list) went fully uncaught, crashing the
-    // ENTIRE Node process (taking down the Web UI for every other task and
-    // every other request, not just the one bad task) -- an unhandled
-    // rejection inside an http.createServer async callback is fatal by
-    // default. Wrapping the whole handler body closes this: any single
-    // request's failure now degrades to a 500 for THAT request only, with
-    // the server, other tasks, and other requests unaffected -- matching
-    // DIR-001's "should degrade safely... not crash" framing.
+    // M26-adversarial-eval finding ADV-002/M26-F2 (both iterations
+    // independently found this): this handler previously had no try/catch
+    // anywhere -- a thrown/rejected error from any route (e.g. the Provider
+    // layer throwing on a malformed task file, now correctly surfaced by
+    // ADV-001/M26-F2's provider-client.js fix instead of being silently
+    // masked as an empty list) went fully uncaught, crashing the ENTIRE Node
+    // process (taking down the Web UI for every other task and every other
+    // request, not just the one bad task) -- an unhandled rejection inside
+    // an http.createServer async callback is fatal by default. Wrapping the
+    // whole handler body closes this: any single request's failure now
+    // degrades to a 500 for THAT request only, with the server, other
+    // tasks, and other requests unaffected -- matching DIR-001's "should
+    // degrade safely... not crash" framing. Response body deliberately omits
+    // err.message/stack (logged server-side only via console.error) to
+    // avoid leaking internal error detail to the client.
     try {
       await handleRequest(req, res);
     } catch (err) {
@@ -900,18 +915,24 @@ export async function startServer({ port = 4173 } = {}) {
       const decodedId = decodeURIComponent(id);
       const t = await client.taskGet(decodedId);
       // QX-009 (experiment 4, iteration 2): read ?from= param for list-context redirect.
-      // M26-adversarial-eval finding ADV-003: this guard previously checked
-      // ONLY fromParam.startsWith("/") -- missing the !startsWith("//")
-      // protocol-relative-URL guard the GET /task/<id> detail route's own
-      // ?from= handling already has (QX-011/SH-002, see backHref above).
-      // A request like `POST /task/<id>/action/<id>?from=//evil.com` passed
-      // this route's weaker check and would have set the 302 Location header
-      // to an attacker-controlled external origin -- a real open-redirect
-      // bypass via the action-button POST flow specifically (the GET detail
-      // route was already guarded; this route was not). Now uses the same
-      // shared isSafeRelativeRedirect() helper as backHref above (also
-      // closes the backslash/control-char bypass variants, see that
-      // helper's doc comment).
+      // M26-adversarial-eval finding ADV-003/M26-F3 (both iterations independently found
+      // this): this guard previously checked ONLY fromParam.startsWith("/") -- missing the
+      // !startsWith("//") protocol-relative-URL guard the GET /task/<id> detail route's own
+      // ?from= handling already has (QX-011/SH-002, see backHref above). Now uses the same
+      // shared isSafeRelativeRedirect() helper as backHref above, which also closes the
+      // backslash/control-char bypass variants the plain startsWith("//") check would miss
+      // (see that helper's doc comment).
+      // Live-exploitability note (iteration-1's independent finding, verified correct):
+      // `baseRedirect` here is never used directly as a Location header value -- both call
+      // sites below route it through addParam(), which always builds a `new URL(urlPath,
+      // "http://x")` and returns only `.pathname + "?" + ...`, stripping any scheme/host.
+      // That means a `//evil.com`-style bypass value is already neutralized end-to-end on
+      // THIS route regardless of this guard (verified: `new URL("//evil.com", "http://x")`
+      // resolves to the `evil.com` origin with pathname "/", which addParam then discards,
+      // yielding a same-origin path). So this specific fix is defense-in-depth /
+      // guard-consistency with the GET route (which does use its guarded value more
+      // directly, via backHref, rendered straight into an href attribute) -- not a
+      // confirmed live open-redirect on the POST route itself.
       const fromParam = url.searchParams.get("from");
       const baseRedirect = isSafeRelativeRedirect(fromParam) ? fromParam : `/task/${t.id}`;
       // QX-013 (experiment 4, iteration 3): gate-check BEFORE delivering the trigger.

@@ -287,3 +287,63 @@ via `path.resolve` differently on other platforms), (c) ADV-003's `isSafeRelativ
 ALL practically-reachable bypass shapes, not just the ones this iteration happened to test, and (d)
 whether ADV-005's "not fixed, logged as disposition" call is the right one or whether `list()`'s
 per-file isolation should in fact have been in scope.
+
+---
+
+## Iteration-1 independent re-derivation — reconciliation supplement
+
+Per DIR-018's per-file, no-silent-drop merge-reconciliation discipline: iteration-1 ran
+independently (fresh worktree, no access to this report), re-derived its own audit inventory, and
+found a genuinely NEW real bug this iteration-0 pass had not covered. Rather than picking one
+report over the other, this supplement folds iteration-1's distinct contribution in below; nothing
+from either iteration's real findings is silently dropped.
+
+### M26-F4 — a single malformed task file crashes `list()` for the ENTIRE task store (new finding, iteration-1)
+
+This is the SAME underlying `store.js#list()` all-or-nothing-throw behavior this report's own
+ADV-005 already identified and logged as "real, not fixed this milestone, assessed as acceptable
+degradation" — both iterations independently found and reasoned about it, converging on the same
+disposition (do not change `list()`'s partial-failure semantics this milestone; verify the
+downstream chain degrades safely instead). iteration-1's distinct contribution is a dedicated,
+committed regression test at the `serve.js` HTTP layer (this report's own ADV-004/ADV-001/ADV-002
+tests exercise the `store.js` and `provider-client.js` layers directly, but neither iteration-0's
+`adversarial-eval.test.mjs` nor `serve-adversarial-eval.test.mjs` had an end-to-end `GET /`-level
+test for this exact scenario before iteration-1 added one):
+
+- **Test added:** `packages/quay/test/serve.test.mjs` (M26-F4 block, iteration-1's own commit) —
+  asserts (1) `GET /` with one malformed file among the store returns a clean 500 with a readable
+  error body, not a hang, (2) after removing the malformed file, `GET /` recovers to 200 on the
+  SAME running server process with the good task's original content intact (no corruption).
+  Re-run, **PASS**:
+  ```
+  PASS: GET / with one malformed task file among the store degrades to a clean 500, not a hang/crash (M26-F4) (got 500)
+  PASS: GET / 500 response body carries a readable error message, not an empty/crashed response (M26-F4). body: quay serve: internal error — malformed task file: missing YAML frontmatter block
+  PASS: GET / recovers to 200 once the malformed file is removed — good task's on-disk content was never corrupted by the earlier crash, and the server process survived (M26-F4) (got status 200)
+  ```
+- **Severity assessment (iteration-1's, consistent with this report's ADV-005 disposition):** a
+  genuine availability/robustness bug, not a security vulnerability — no data corrupted, no
+  cross-workspace boundary crossed, self-heals once the bad file is fixed/removed. Reported at the
+  severity it actually has, not inflated.
+- **Fix disposition:** NOT fixed at the `store.js` level (same rationale as ADV-005 above) —
+  verified the ADV-001/ADV-002 downstream safe-degradation chain closes this exact scenario
+  end-to-end at the HTTP layer. `store.js#list()`'s partial-failure semantics (skip-and-warn vs.
+  throw-for-all) remains a real, explicitly-logged follow-up, out of this milestone's scope.
+
+### Cross-iteration convergence note (M26 ABSORB evidence)
+
+Both iterations, working from fresh independent worktrees off the same charter, converged on:
+finding the identical `provider.yml` stale-comment issue (M26-F1 / provider.yml row above), the
+identical `taskList()`-error-swallowing + `serve.js`-no-try/catch pair (M26-F2 / ADV-001+ADV-002),
+the identical POST-route open-redirect guard inconsistency (M26-F3 / ADV-003) — with iteration-1
+additionally verifying, via direct trace of `addParam()`'s URL-normalization behavior, that this
+specific route was already indirectly neutralized end-to-end regardless of the guard (see the
+reconciled inline comment in `serve.js` at the ADV-003/M26-F3 fix site for the full trace) — and
+the identical `store.js#list()` all-or-nothing-throw behavior (ADV-005 / M26-F4), reaching the same
+"log it, don't fix at the store layer this milestone" disposition independently. iteration-0 alone
+found the highest-severity issue of the audit (ADV-004, the path-traversal arbitrary-file-write
+bug) — a genuinely disjoint discovery, not covered by iteration-1's independent pass (iteration-1's
+Phase A did not reach the id-validation angle before its own scope wrapped up). iteration-1 alone
+contributed the dedicated `serve.js`-level M26-F4 regression test. No contradiction was found
+between the two iterations' real-bug findings; the only substantive disagreement (M26-F3/ADV-003's
+live-exploitability characterization) was resolved in favor of iteration-1's more precise trace
+during this merge's per-file reconciliation (see `serve.js`'s own reconciled comment).

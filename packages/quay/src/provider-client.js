@@ -15,19 +15,21 @@ export async function connectProvider({ command, args, env, cwd }) {
   const client = new Client({ name: "quay-core", version: "0.0.1" });
   await client.connect(transport);
 
+  // M26-adversarial-eval finding M26-F2 (Phase A audit): this previously
+  // returned `r.structuredContent?.tasks ?? []` with NO `r.isError` check —
+  // unlike taskGet/taskWrite/taskCheck below, which all check it. When the
+  // underlying Provider's task_list tool throws (e.g. a malformed task file
+  // crashing quay-native's store.list(), or a live gh-api rate-limit/network
+  // failure crashing quay-github's fetchAllIssues()), the MCP SDK converts
+  // that into an isError:true result with NO structuredContent — the old
+  // code silently coerced that into an empty array, so `quay serve`'s list
+  // page (and any other taskList() caller) rendered "0 tasks" with zero
+  // error indication, hiding both the real failure AND every other
+  // legitimate task in the store. Now: an isError result throws, matching
+  // the other three methods' existing behavior, so callers can catch it and
+  // surface a real error instead of a silently-empty list.
   async function taskList(filter = {}) {
     const r = await client.callTool({ name: "task_list", arguments: filter });
-    // M26-adversarial-eval finding ADV-001: taskList previously did not check
-    // r.isError (unlike taskGet/taskWrite/taskCheck below, which all do) --
-    // when the underlying Provider throws (e.g. one malformed task file
-    // breaking store.list()), the MCP SDK returns isError:true with no
-    // structuredContent, and this silently degraded to an empty array `[]`,
-    // indistinguishable from "workspace legitimately has zero tasks". A
-    // corrupted/malformed single task file could make the Web UI (and any
-    // other taskList caller) silently show zero tasks instead of surfacing
-    // an error -- worse than a crash for a task-management tool, since data
-    // appears lost rather than reporting a diagnosable fault. Now matches
-    // the other three passthroughs' isError handling.
     if (r.isError) throw new Error(r.content?.[0]?.text ?? "task_list failed");
     return r.structuredContent?.tasks ?? [];
   }
