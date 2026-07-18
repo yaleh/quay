@@ -52,6 +52,18 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    verification, not forced into new build work, no mid-milestone re-scope)? If not, split along a
    different seam or explicitly budget a multi-build milestone before authoring the charter — never
    carry an implicitly half-shipped value step forward.
+   **Plan-time line-budget gate (M18-milestone-model-ceiling-and-diversity-policy, DIR-012 item 2 —
+   mechanically-checkable, not narrative):** run
+   `scripts/it0-ceiling-line-budget-check.sh <charter-file>` against the drafted charter BEFORE
+   dispatch. This flags any charter whose scope plausibly exceeds the ~2000-line milestone ceiling
+   (`inherited-core.md`'s "Milestone ceiling expansion" subsection) without a nested phase/stage plan
+   — either an explicit `Line budget:`/`Phase`/`Stage` structure present in the charter text, or a
+   `Plan:` line pointing at an external phase/stage plan document. A charter under the small-
+   milestone norm (no declared line budget, or a declared budget ≤2000 WITH a phase/stage plan
+   present) PASSES. A charter that declares (or whose in-scope-item count/shape plausibly implies)
+   a budget above ~2000 lines with NO phase/stage plan reference FAILS/flags — fix by adding the
+   phase/stage plan reference, or resize/split the candidate, before dispatch; same "fix the
+   charter, not the script" discipline as the existing gate-hash check (Check 2 below).
    **Record each candidate's value type(s)** (mandatory, applies forward from m7) from
    `inherited-core.md`'s "Value-typed SELECT ledger" section — capability-growth / discovery /
    instrument-correction / risk-option / governance-integrity — alongside its VT Δv̂. VT Δv̂ is one
@@ -78,17 +90,6 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      the charter must state `inherited-core.md`'s "Web UI verification requirement" evidence rule
      explicitly in that clause's own text — a `curl` status check is never sufficient evidence for
      it (liveness/HARD-GATES only). See that section for the full mechanized rule.
-   - **Plan-time line-budget gate (M18-milestone-model-ceiling-and-diversity-policy, DIR-012 item 2):**
-     for any milestone (especially development-class, per `inherited-core.md`'s "Milestone-model
-     ceiling" section) whose scope plausibly approaches or exceeds the ~2000-line ceiling, state the
-     charter's own `Line budget: <N>` explicitly, and run
-     `scripts/it0-line-budget-check.sh <charter-file>` (added by this milestone; see it0 step below)
-     BEFORE dispatch. A FLAG result (scope plausibly over ~2000 lines with no phase/stage plan
-     reference) must not be dispatched as-is — either resize the charter down to the existing
-     small-milestone norm, or attach a phase/stage plan (nested ≤500/≤200-line phase/stage budgets,
-     per the ceiling section) before dispatch. This is a REAL mechanically-checkable gate, not a
-     narrative mention — the exact DIR-002-class "enforcement half never built" gap this milestone
-     exists to close.
    - the **in-scope gap subset only** (+ every OPEN blocking gap verbatim);
    - **binary Done-when clauses** (mandatory — §3.4; without them milestones drag, cf. exp1/exp4);
    - the **inner termination five conditions** (§3.2);
@@ -112,7 +113,7 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
        ceiling trigger — redesign the milestone's scope before dispatch, don't dispatch without an
        audit channel.
    (e) **plan-time line-budget gate** (M18-milestone-model-ceiling-and-diversity-policy) —
-       `scripts/it0-line-budget-check.sh <charter-file>` against the drafted charter; a FLAG (exit 1)
+       `scripts/it0-ceiling-line-budget-check.sh <charter-file>` against the drafted charter; a FLAG (exit 1)
        means the charter's scope plausibly exceeds the ~2000-line ceiling
        (`inherited-core.md`'s "Milestone-model ceiling" section) with no phase/stage plan
        reference — resize the charter or attach a phase/stage plan before dispatch, don't dispatch
