@@ -2,10 +2,11 @@
 id: exp5-M-COMPETITIVE-BENCH
 title: Comparative capability benchmark vs. a real competitor (formalize
   CB-016's ad hoc GitHub Issues/Linear yardstick)
-status: todo
+status: done
 labels:
   - milestone-candidate
   - surface:cross-cutting
+  - milestone:M27-competitive-bench
 parent: null
 children: []
 extra: {}
@@ -23,7 +24,13 @@ exploit (cross-exp comparison channel), method infra, no VT points
 Backlogged.
 
 ## Status mirror
-todo (open candidate, not yet selected/dispatched)
+done (ABSORBed @M27, 2026-07-18 — benchmark actually run against gh CLI + backlog.md by two
+independent iterations, 22 total findings [8 + 14, 4 convergent pairs] with GAP-002 [real
+title-less-task-creation data-integrity bug] found only by iteration-0; all 9 Done-when clauses
+MET, all 4 HARD-BLOCK gates PASS including the DoD meta-enforcer's third-ever real test; published
+to master via exp5-outer-driver merge; report at
+experiments/quay-perpetual-stream/milestones/M27-competitive-bench/benchmark-report.md; see
+dashboard.md's "ABSORB m27" entry for full detail)
 
 ---
 _2026-07-18T19:18:52.068Z_: Not selected @M24: DIR-015/DIR-016's standing hard floor already committed this SELECT pass to M-TASK-BACKLOG-PROJECTION-IMPL (self-hosting fix, blocks all future SELECT read-path work) — a governance/infra candidate whose own enabling half was itself unselectable until this milestone lands.
