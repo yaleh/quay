@@ -78,6 +78,17 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      the charter must state `inherited-core.md`'s "Web UI verification requirement" evidence rule
      explicitly in that clause's own text — a `curl` status check is never sufficient evidence for
      it (liveness/HARD-GATES only). See that section for the full mechanized rule.
+   - **Plan-time line-budget gate (M18-milestone-model-ceiling-and-diversity-policy, DIR-012 item 2):**
+     for any milestone (especially development-class, per `inherited-core.md`'s "Milestone-model
+     ceiling" section) whose scope plausibly approaches or exceeds the ~2000-line ceiling, state the
+     charter's own `Line budget: <N>` explicitly, and run
+     `scripts/it0-line-budget-check.sh <charter-file>` (added by this milestone; see it0 step below)
+     BEFORE dispatch. A FLAG result (scope plausibly over ~2000 lines with no phase/stage plan
+     reference) must not be dispatched as-is — either resize the charter down to the existing
+     small-milestone norm, or attach a phase/stage plan (nested ≤500/≤200-line phase/stage budgets,
+     per the ceiling section) before dispatch. This is a REAL mechanically-checkable gate, not a
+     narrative mention — the exact DIR-002-class "enforcement half never built" gap this milestone
+     exists to close.
    - the **in-scope gap subset only** (+ every OPEN blocking gap verbatim);
    - **binary Done-when clauses** (mandatory — §3.4; without them milestones drag, cf. exp1/exp4);
    - the **inner termination five conditions** (§3.2);
@@ -100,6 +111,12 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
        list; if Step 3 concludes no independent mechanism is reachable, that IS a §3.2 condition-3
        ceiling trigger — redesign the milestone's scope before dispatch, don't dispatch without an
        audit channel.
+   (e) **plan-time line-budget gate** (M18-milestone-model-ceiling-and-diversity-policy) —
+       `scripts/it0-line-budget-check.sh <charter-file>` against the drafted charter; a FLAG (exit 1)
+       means the charter's scope plausibly exceeds the ~2000-line ceiling
+       (`inherited-core.md`'s "Milestone-model ceiling" section) with no phase/stage plan
+       reference — resize the charter or attach a phase/stage plan before dispatch, don't dispatch
+       an unflagged oversized charter.
    Any check firing → fix before dispatch, per the procedures/scripts above (all under
    `experiments/quay-perpetual-stream/scripts/`).
 5. **DISPATCH INNER** — run the milestone as a bounded BAIME experiment to convergence. Per iteration

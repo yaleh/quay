@@ -206,6 +206,51 @@ DIR-004 already reached by direct review** — confirming the gauge is a faithfu
 that judgment, not a redescription that would give a different answer (same self-consistency
 pattern as the domain-misfit section's own M01-dist validation above).
 
+### Milestone-model ceiling — ≤2000-line milestone, nested ≤500/≤200 phase/stage budgets
+### (M18-milestone-model-ceiling-and-diversity-policy, DIR-012 item 2 / requested-action item 2;
+### source: `docs/proposals/exp5-quay-task-proposal-plan-skill.md` §4)
+
+The size definition and gauge above (M06-sizing) intentionally left the UPPER bound of "correctly
+sized" open — they define how to tell whether a GIVEN scope is sized right for a build+verify
+template, not how large a scope may safely grow. `docs/proposals/exp5-quay-task-proposal-plan-skill.md`
+§4 resolves that open question for development-class (product-code) milestones specifically,
+answering "a milestone is a whole plan, not a single phase":
+
+```
+milestone ≤ ~2000 lines   =  one whole plan (multiple phases)
+   phase  ≤ ~500  lines
+   stage  ≤ ~200  lines
+```
+
+**This ceiling amends, it does not replace, the size definition/gauge above.** The size
+definition's own core test — "does iteration-0 land ALL Done-when in one pass, with iteration-1
+doing real independent re-derivation, not empty verification and not forced into new build
+work" — still applies at every size. What changes is only the UPPER bound on how large a single
+coherent value step is allowed to be before that test can still hold: exp5's inner-convergence
+record (13/13 through M17, no mid-milestone re-scope) held only because milestones stayed small
+(the existing build+verify template's de facto ceiling was far below 2000 lines, never stated
+explicitly). Going to ~2000 lines WITHOUT a phase/stage decomposition would almost certainly force
+exactly the mid-milestone re-scope the size gauge above flags as OVER-SIZED.
+
+**The safety condition, stated explicitly (do not read the ≤2000 figure in isolation):** an
+expansion above the current small-milestone norm is safe **only when** the milestone is
+decomposed into a phase/stage plan with the nested ≤500/≤200-line budgets above — the plan is
+what contains the risk the larger ceiling introduces (design doc §4: "the two changes (bigger
+milestone + plan skill) therefore must ship together — the plan is what contains the risk the
+larger size introduces"). A milestone charter that claims the ≤2000-line ceiling WITHOUT a
+phase/stage plan attached has not earned the larger size — it should be resized down to the
+existing small-milestone norm, or the phase/stage plan must be produced before dispatch (see the
+plan-time line-budget gate in `OUTER-LOOP.md`'s SELECT/charter-authoring step, added by this same
+milestone).
+
+**Scope of this ceiling.** This is the size ceiling for **development-class** milestones (product
+code, the class this document's "Value-typed SELECT ledger" section below now names explicitly).
+Methodology/design-class milestones (doc-only deliverables, the M10-M17 precedent) are unaffected
+by this ceiling — a design doc has no comparable "lines of implementation" risk profile, and this
+section does not change how they are sized. This ceiling does NOT retroactively resize any
+already-completed milestone (M01-M17); it applies forward, the same non-retroactive posture the
+governance/infra hard floor below already uses for its own forward-only application (from m7).
+
 ## Value-typed SELECT ledger + governance/infra hard floor (M06-sizing Done-when clauses 2-3)
 
 VT (the chart-0/chart-1 capability-growth score) prices only ONE kind of milestone value. DIR-004's
@@ -247,6 +292,48 @@ candidate with zero or negative VT Δv̂ but a governance-integrity or instrumen
 type can and should outrank a positive-VT capability-growth candidate when the non-VT risk is
 higher (see M06-sizing's own SELECT log entry, dashboard.md, for a live worked instance: chosen
 over M-GH-WRITE/M-GH-PARENT which had the only positive VT Δv̂≈+3-4 among the m6 candidates).
+
+### Two-class diversity policy — methodology/design vs. development-class milestones
+### (M18-milestone-model-ceiling-and-diversity-policy, DIR-012 item 2 / requested-action item 2;
+### source: `docs/proposals/exp5-quay-task-proposal-plan-skill.md` §5)
+
+The value-typed ledger above classifies milestones by VALUE TYPE. This subsection adds a second,
+orthogonal classification — **milestone CLASS** — keyed on the same ledger's value types, that
+determines WHERE independent-re-derivation diversity is spent for a given milestone. Diversity is
+a budget, not a free good; where it should be spent differs by what kind of deliverable a
+milestone produces:
+
+| class | deliverable | value-type(s), per the ledger above | diversity strategy |
+|---|---|---|---|
+| **methodology / design** (the M10-M17 precedent — doc-only) | a design/doc artifact | typically `discovery` / `governance-integrity` / `instrument-correction` | **whole-milestone independent re-derivation, UNCHANGED** — iteration-1 independently re-derives the entire deliverable from a fresh worktree, exactly as M01-M17 already do. Cheap: the whole deliverable is a doc. |
+| **development** (the M16-CLI-EDIT-PARITY-IMPL precedent — real product-code changes) | working code, ≤~2000 lines per the ceiling above | typically `capability-growth` | **MAY, at a future charter's discretion, use the narrower pattern**: N-independent-proposal re-derivation + adjudication (upstream) → single implementation → light tail self-check (downstream: the existing adversarial-audit gate, unchanged) — INSTEAD OF whole-milestone dual iteration. |
+
+**Precondition, stated explicitly — this is a MAY, not a default, and is gated on a mechanism that
+does not yet exist:** a development-class milestone may use the narrower pattern **once the
+`quay-task-to-plan` skill (or an equivalent proposal-adjudication mechanism) actually exists** to
+run the N-independent-proposal step through. Until that mechanism exists, development-class
+milestones continue to run the existing whole-milestone dual-iteration pattern like every other
+milestone to date. This is a forward-looking POLICY STATEMENT for future milestones, not something
+any milestone can invoke today.
+
+**M18 itself does NOT switch to this pattern.** This milestone (M18) is itself method-infra/
+doc-editing (amending `inherited-core.md`/`OUTER-LOOP.md`), and even setting that aside, the
+`quay-task-to-plan` skill this policy's precondition names does not exist yet (DIR-012 item 3,
+explicitly future work — not built by this milestone; see this milestone's own charter,
+"Explicitly OUT of scope"). M18 runs, and has run, the existing whole-milestone independent
+dual-iteration pattern the same way M13-M17 did. Stated here explicitly so a skeptical future
+re-read cannot mistake this policy STATEMENT for a claim that M18 itself already used it.
+
+**Mechanism detail — see the design doc, not duplicated here.** The concrete pipeline shape a
+development-class milestone would run under the narrower pattern — "clamp at both ends" (N
+independent proposal subagents + adjudication upstream, single implementation with a plan-check in
+the middle, the existing adversarial-audit gate unchanged downstream) — is specified in
+`docs/proposals/exp5-quay-task-proposal-plan-skill.md` §6 ("The pipeline — clamp at both ends, plan-
+check in the middle"). This section states the POLICY (which class uses which diversity strategy,
+and under what precondition); it deliberately does not duplicate §6's full pipeline diagram or
+mechanism detail here, to keep this Tier-B pinned-substrate file's size controlled (DIR-009's
+charter-thinness discipline, applied to Tier-B as well as Tier-A) — a future charter invoking this
+policy should read §6 directly for the mechanism.
 
 ### Self-consistency check: retroactively applying the ledger to m1-m5 (read-only, M06-sizing
 ### Done-when clause 4 — does NOT rewrite dashboard.md's settled VT numbers)
