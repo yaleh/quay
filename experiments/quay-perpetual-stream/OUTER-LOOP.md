@@ -246,20 +246,23 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      to never (DIR-016's finding). Record the check's PASS/FAIL output directly in this ABSORB's log
      entry, mirroring the V_meta gate's row-update discipline.
    - **DoD meta-enforcer gate (DIR-017 / M25-dod-meta-enforcer, HARD BLOCK on step 7's
-     `milestone_counter++` — positioned immediately AFTER the adversarial-audit gate, V_meta
+     `milestone_counter++`):** runs immediately AFTER the adversarial-audit gate, V_meta
      consolidation-lag gate, and design-only-milestone impl-row gate above all individually clear,
-     and BEFORE the driver→master publish sub-step below):** this is a SEPARATE, additional check
-     from the three individual gates above — it does not replace any of their own HARD BLOCKs
-     (each stays exactly as specified above), it verifies that the RECORD of all four DoD clauses
-     (`inherited-core.md`'s "Definition of Done" section: adversarial-audit, V_meta-lag,
-     line-budget, impl-row) plus the no-self-exemption meta-clause is actually complete and
-     undrifted for this milestone. Run:
-     `scripts/it0-dod-check.sh <milestone-id> <charter-file> <dashboard-ABSORB-entry-text-or-file>`
-     — a non-zero exit is the SAME HARD BLOCK shape/placement as the three gates it wraps; step 7's
-     `milestone_counter++` **MUST NOT** run until it PASSes (exit 0). Record the check's raw
-     PASS/FAIL output directly in this ABSORB's log entry, mirroring the V_meta gate's and impl-row
-     gate's own row-update discipline. See `inherited-core.md`'s "Definition of Done" section for
-     the full clause definitions and the no-self-exemption waiver-line shape this gate enforces.
+     and BEFORE the driver→master publish sub-step below. This gate does NOT replace any of the
+     three individual gates above — each keeps its own HARD BLOCK text and evaluation as-is — it
+     adds ONE more standing check that the RECORD of all four DoD clauses (`inherited-core.md`'s
+     "Definition of Done" section: adversarial-audit, V_meta-lag, line-budget, impl-row) plus the
+     no-self-exemption meta-clause is actually complete and undrifted for this milestone. Run:
+     `scripts/it0-dod-check.sh <milestone-id> <charter-file> <absorb-entry-text-or-file>` — where
+     `<absorb-entry-text-or-file>` is this milestone's own ABSORB log entry (the same text just
+     produced by the three gates above, saved to a file if not already one). A non-zero exit is the
+     SAME HARD BLOCK shape/placement as the three gates it wraps: `milestone_counter++` **MUST NOT**
+     run until the check is re-run and PASSes (exit 0). Record the check's PASS/FAIL output directly
+     in this ABSORB's log entry, mirroring the V_meta gate's and impl-row gate's own row-update
+     discipline. (Line-budget, the fourth DoD clause, fires separately at plan-time per step 1 —
+     `it0-dod-check.sh` re-checks the charter's own line-budget clause here too, at ABSORB, as a
+     drift check that plan-time's PASS still holds against the FINAL charter text, but a plan-time
+     FAIL on that clause alone is not this gate's primary trigger point.)
    - **Driver → master publish sub-step (DIR-018 / M23-outer-driver-isolation, HARD sequencing —
      runs AFTER the adversarial-audit gate, V_meta consolidation-lag gate, design-only-milestone
      impl-row gate, AND the DoD meta-enforcer gate above all clear, and BEFORE step 7's
@@ -273,14 +276,14 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      landing on `master` mid-milestone racing an in-progress loop merge index): because the loop
      never writes to `master` directly between boundaries, there is nothing for a human commit to
      race until this single publish point, and that point is itself gated behind the audit/consolidation-
-     lag/impl-row/DoD-meta-enforcer HARD BLOCKs above. Any conflict at THIS merge is subject to the same no-silent-drop
-     reconciliation-note requirement as the master→driver merge at step 0 (DIR-018 item 3, see
-     above) — per-file resolution, both sides read, a reconciliation note recorded in this ABSORB's
-     log entry, never a blanket `--ours`/`--theirs`.
+     lag/impl-row/DoD-meta-enforcer HARD BLOCKs above. Any conflict at THIS merge is subject to the
+     same no-silent-drop reconciliation-note requirement as the master→driver merge at step 0
+     (DIR-018 item 3, see above) — per-file resolution, both sides read, a reconciliation note
+     recorded in this ABSORB's log entry, never a blanket `--ours`/`--theirs`.
 7. **UPDATE DASHBOARD** — VT, slope (marginal Δv), ρ, charter-thickness, discovery-latency,
    calibration-error, `V_meta consolidation lag` (re-derive milestones-since-confirmed for every
    ledger row per `v-meta-ledger.md`), milestone_counter++ (only after the V_meta gate, the
-   design-only-milestone impl-row gate, AND the DoD meta-enforcer gate above all clear, AND the
+   design-only-milestone impl-row gate, AND the DoD meta-enforcer gate above ALL clear, AND the
    driver→master publish sub-step above has landed the milestone's work on `master`).
    **`backlog.md`/`dashboard.md` regeneration (M24-task-backlog-projection-impl, design doc §13,
    applies forward from m24):** re-run `scripts/it0-backlog-regen.mjs` (generates the
