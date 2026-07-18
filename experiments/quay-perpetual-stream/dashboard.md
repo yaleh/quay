@@ -853,3 +853,20 @@ independently re-derived and confirmed by iteration-1, fresh worktree/fresh comm
   always `pwd`-confirm cwd immediately before any `git merge`/`git commit` when a linked worktree
   exists under the same milestone tree; recorded as a live instance of the σ-inherited-floor trap's
   sibling failure mode (silently-inherited *context*, not just silently-inherited baseline values).
+- **SELECT m11 = M-WEBUI-REVERIFY** 2026-07-18. `directives/pending/` drained: empty, nothing to
+  dispose before SELECT. `.halt` absent. Picked `backlog.md`'s `M-WEBUI-REVERIFY` row (DIR-006-
+  sourced, added at m10) — the leading candidate per checkpoint cp-02's own "Next" section: closes
+  the exact evidence gap DIR-006 found (Web UI cov 0.92 backed only by `curl`, now
+  ⚠️PROVISIONALLY UNCERTAIN), and is this experiment's first VT-scoring milestone since M10 built
+  the adversarial-audit-role gate — giving that gate its real first-proof trigger, as cp-02
+  predicted. Authored charter `charters/M11-webui-reverify.md`: type exploit, value type discovery
+  (primary) + risk/option (secondary), 6 Done-when clauses (real playwright/chrome-devtools trace at
+  both viewports; UQ-049/UQ-050 re-check; dashboard.md cov confirm-or-correct; no product code
+  touched; backlog row DONE; adversarial-audit dispatch required per Done-when 6, explicitly flagged
+  as this gate's first real trigger). Gate-hash check:
+  `it0-gate-hash-check.sh --by-reference charters/M11-webui-reverify.md` → **PASS**. it0 checks
+  recorded in-charter: ceiling arithmetic (max plausible upside +1.60 VT if cov→1.00), domain-misfit
+  audit-channel (the playwright/chrome-devtools trace itself IS the audit channel for this domain —
+  the exact mechanism DIR-006 found missing). Server reachability: M04-discover's own iteration-0
+  started `quay serve` on `localhost:4173` for its browser session — same startable local target,
+  not currently running, iteration-0 must start it fresh. Dispatching inner iteration-0 next.
