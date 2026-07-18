@@ -19,10 +19,10 @@
 #   it0-dir-projection-check.sh <experiment-dir> [tasks-json-file]
 #
 #   <experiment-dir>    e.g. experiments/quay-perpetual-stream (the dir containing directives/)
-#   [tasks-json-file]   optional: a pre-fetched `task list --labels directive --json` file to
+#   [tasks-json-file]   optional: a pre-fetched `task list --label directive --json` file to
 #                        check against (lets this run be tested/demonstrated deterministically
 #                        without a live MCP/CLI round-trip each time). If omitted, this script
-#                        invokes `node packages/quay/bin/quay.js task list --labels directive
+#                        invokes `node packages/quay/bin/quay.js task list --label directive
 #                        --json` itself (requires being run from the repo root with node on PATH).
 #
 # Exit codes: 0 = PASS (no divergence found); 1 = FAIL (at least one divergence found, listed);
@@ -57,7 +57,7 @@ else
   fi
   # Strip the native provider's stderr-ish banner line ("quay-native mcp: serving tasks from
   # ...") that the CLI currently prints to stdout ahead of the JSON payload on some invocations.
-  RAW_OUT=$(node packages/quay/bin/quay.js task list --labels directive --json 2>/dev/null)
+  RAW_OUT=$(node packages/quay/bin/quay.js task list --label directive --json 2>/dev/null)
   TASKS_JSON=$(echo "$RAW_OUT" | awk '/^\[/{found=1} found{print}')
   if [ -z "$TASKS_JSON" ]; then
     echo "ERROR: could not obtain task list JSON (empty output)" >&2

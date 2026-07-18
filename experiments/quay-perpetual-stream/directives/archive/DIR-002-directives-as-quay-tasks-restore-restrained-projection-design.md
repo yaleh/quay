@@ -1,6 +1,6 @@
 # DIR-002
 
-- status: deferred (drained at m4 outer-loop pass, 2026-07-18) — see disposition note below
+- status: applied (M05-dir-projection stability-confirmed iteration-1, 2026-07-18) — see resolution note below
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Directives-as-quay-tasks — the requirement stands; restore the restrained file-canonical + task-projection design (exp4 DIR-006's Option-B rollback was a transition failure rationalized as a decision)
@@ -111,3 +111,22 @@ archival — see iteration-0's own recommendation on whether an iteration-1 stab
 pass is warranted. If iteration-1 (or the outer-loop ABSORB step) confirms no regression, this
 directive should then be marked `status: applied` and moved to `archive/` at that point, citing
 this progress note plus the iteration-1 confirmation as evidence.
+
+**Final resolution (M05-dir-projection iteration-1, 2026-07-18):** independently re-verified from a
+fresh worktree (branch `exp5-m05-iteration-1`), not merely re-reading iteration-0's prose. All 6
+independent re-verification checks confirmed iteration-0's claims accurate, with ONE real
+correction found and fixed: the anti-drift check's live-invocation path
+(`it0-dir-projection-check.sh`, no JSON-file argument) and the `OUTER-LOOP.md` wiring text both
+used the CLI flag `--labels` (plural), which `packages/quay/bin/quay.js`'s `task list` silently
+ignores (the real flag is `--label`, singular) — confirmed live: `--labels directive` returned all
+165 tasks unfiltered, `--label directive` correctly returned 3. This bug was masked in
+iteration-0's own testing because every invocation there passed a pre-fetched JSON file (bypassing
+the live-CLI code path), and further masked at runtime by the `.mjs` companion's id-shape filter
+(`/^DIR-\d+$/`) which happened to produce the same correct-looking result on this repo's current
+data by coincidence, not by the flag actually working. Fixed in both files this iteration
+(`s/--labels directive/--label directive/`), re-verified: live-path FAIL output unchanged
+(DIR-004/DIR-005), full 31/31 test suite still green post-fix. All five Done-when clauses
+independently re-confirmed with fresh, self-run evidence (task_get, curl, screenshot, script
+FAIL/PASS x3 modes, test suite) — see `experiments/quay-perpetual-stream/milestones/
+M05-dir-projection/iterations/iteration-1.md`. Milestone recommendation: DONE (stable, 2nd
+consecutive clean iteration per charter §3.2 condition 1).

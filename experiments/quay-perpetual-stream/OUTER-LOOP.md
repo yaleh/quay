@@ -35,7 +35,7 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    This is where async human steering (§4.7) enters — at the boundary, never mid-milestone. `/quay-directive`
    writes here.
    **Also run `task_list --label directive`** (native provider MCP tool, or
-   `node packages/quay/bin/quay.js task list --labels directive --json` equivalently) and
+   `node packages/quay/bin/quay.js task list --label directive --json` equivalently) and
    **reconcile it against the files** (M-DIR-PROJECTION, DIR-002): every `label: directive` task
    found must correspond to a real `DIR-NNN.md` file (`pending/`, `archive/`, or `retracted/`), and
    each file's own `status:` line must agree with its task's `Status mirror:`/`extra.dirStatus`
