@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// it0-dod-check.mjs — DoD meta-enforcer, charter M25-dod-meta-enforcer (DIR-017 Step 1).
+// it0-dod-check.mjs — DoD meta-enforcer, charters M25-dod-meta-enforcer (DIR-017 Step 1, clauses
+// 0-5) and M32-dod-escrow-testfloor (DIR-017 Step 2, clauses 6-7).
 //
 // Given a milestone id, a charter file path, and an ABSORB-entry text file (a fixture standing in
-// for the real dashboard.md/ABSORB log excerpt for milestones not yet ABSORBed), runs all 5 DoD
-// clauses defined in `inherited-core.md`'s "Definition of Done" section:
+// for the real dashboard.md/ABSORB log excerpt for milestones not yet ABSORBed), runs all 8 DoD
+// clauses (0-7) defined in `inherited-core.md`'s "Definition of Done" section:
 //   1. Adversarial-audit gate  — documentation-discipline check only (does NOT re-run the audit
 //      subagent or re-derive its verdict): does the ABSORB-entry text contain an explicit
 //      disposition statement for this gate (a stated verdict, or an explicit "neither condition
@@ -25,10 +26,22 @@
 //      of the 4 clause names) for exemption-adjacent language with NO corresponding waiver line
 //      (`WAIVER: <milestone-id> | <clause-name> | ...`) present in the ABSORB-entry text. A hit
 //      with no matching waiver line is a FAIL, independent of clauses 1-4's own outcomes.
+//   6. Escrow-Δv gate (M32/DIR-017 Step 2) — documentation-discipline check only, mirroring
+//      clauses 1/2's shape. Fires ONLY when the milestone is design-only (same trigger as clause
+//      4, read from the "## Backlog row" section) AND the ABSORB-entry text claims a nonzero VT
+//      Δv. FAILs if that Δv claim lacks escrow/provisional language adjacent to it.
+//   7. Product-work test-floor gate (M32/DIR-017 Step 2) — trigger-condition-by-label check
+//      mirroring clause 4's shape, but the "what it checks" half is documentation-discipline
+//      (mirrors clauses 1/2). Fires when the milestone's backlog row's `surface:` label(s)
+//      indicate product-touching scope (cli/web-ui/provider-abi/mcp, or no surface label at all —
+//      fail-closed) as opposed to method-infra/docs/cross-cutting/packaging. FAILs if the
+//      ABSORB-entry text has neither a ≥80%-coverage disposition nor a matching test-floor
+//      WAIVER line (reuses clause 5's waiver-line syntax, clause name "test-floor").
 //
 // This script does NOT re-run the adversarial-audit subagent, does NOT recompute v-meta-ledger.md
-// arithmetic, and does NOT re-implement the line-budget/impl-row scripts' own logic — see
-// inherited-core.md's "Definition of Done" section for why (clauses 1/2 are documentation-
+// arithmetic, does NOT re-implement the line-budget/impl-row scripts' own logic, and does NOT
+// independently verify a claimed test-coverage percentage against a real coverage-tool run — see
+// inherited-core.md's "Definition of Done" section for why (clauses 1/2/6/7 are documentation-
 // discipline checks by design; clauses 3/4 wrap the existing scripts directly).
 //
 // Usage:
@@ -41,8 +54,8 @@
 // below for the section-isolation logic that makes the combined-fixture shape safe.
 //
 // Exit codes:
-//   0 = all 4 gate clauses PASS or legitimately N/A (with disposition present), AND no undeclared
-//       self-exemption found.
+//   0 = all 8 gate clauses (0-7) PASS or legitimately N/A (with disposition present), AND no
+//       undeclared self-exemption found.
 //   1 = at least one gate clause FAILs, OR a self-exemption is found with no waiver line.
 //   2 = usage/environment error (missing args, files not found, node unavailable, sibling script
 //       missing).
@@ -267,13 +280,27 @@ const dispositionedClauses = new Set();
 // valid ONLY for those two. Concretely: exemption language for line-budget/impl-row always
 // requires a matching WAIVER line, regardless of dispositionedClauses; exemption language for
 // adversarial-audit/V_meta-lag is still allowed to rely on the conditional-disposition carve-out.
+// M32 extension (clauses 6/7): both new clauses are, LIKE clauses 3/4, run UNCONDITIONALLY every
+// run (see clause 6/7 blocks below — they always call dispositionedClauses.add(...) regardless of
+// outcome, N/A-pass included). Per the SAME DIR-019 reasoning above, they therefore belong in
+// MECHANICALLY_UNCONDITIONAL_CLAUSES too — an "already dispositioned" state for escrow-delta-v or
+// test-floor is NOT evidence a self-exemption of them is legitimate, so exemption language for
+// either always requires a matching WAIVER line, never relying on the conditional-disposition
+// carve-out. NOTE: this block executes BEFORE the clause 6/7 blocks further below in file order,
+// so `dispositionedClauses` does not yet contain "escrow-delta-v"/"test-floor" at the time this
+// runs — harmless, since both are in MECHANICALLY_UNCONDITIONAL_CLAUSES and so the
+// already-dispositioned carve-out is skipped for them regardless of add-order; listed here purely
+// so a self-exemption of clause 6/7 in the charter's "Explicitly OUT of scope" section is still
+// caught by clause 5's scan.
 {
-  const MECHANICALLY_UNCONDITIONAL_CLAUSES = new Set(["line-budget", "impl-row"]);
+  const MECHANICALLY_UNCONDITIONAL_CLAUSES = new Set(["line-budget", "impl-row", "escrow-delta-v", "test-floor"]);
   const clauseNames = [
     { key: "adversarial-audit", pattern: /adversarial[- ]audit/i },
     { key: "V_meta consolidation-lag", pattern: /V_meta consolidation[- ]lag|V_meta[- ]lag/i },
     { key: "line-budget", pattern: /line[- ]budget/i },
     { key: "impl-row", pattern: /impl-row|-IMPL row/i },
+    { key: "escrow-delta-v", pattern: /escrow[- ]δ?v|escrow-delta-v|escrow[- ]Δv/i },
+    { key: "test-floor", pattern: /test[- ]floor/i },
   ];
   const outOfScopeMatch = charterText.match(/##+ Explicitly OUT of scope[\s\S]*?(\n##+ |$)/i);
   const outOfScopeText = outOfScopeMatch ? outOfScopeMatch[0] : "";
@@ -305,6 +332,170 @@ const dispositionedClauses = new Set();
     }
   } else {
     passes.push("clause5-no-self-exemption: no undeclared self-exemption language found (or all found exemptions have a matching WAIVER line)");
+  }
+}
+
+// --- Clause 6: Escrow-Δv gate (M32 / DIR-017 Step 2) ---
+// Documentation-discipline check, same shape as clauses 1/2 — does NOT re-derive whether a claimed
+// Δv figure is numerically correct, only whether its FINALITY is correctly qualified for a
+// design-only milestone. Trigger condition reuses clause 4's own design-only determination, read
+// from the SAME SOURCE clause 4 reads (the "## Backlog row" section's single pipe-delimited row
+// line for this milestone id — NOT the whole fixture/ABSORB/charter prose, which may discuss the
+// design-only markers in the negative, e.g. "no 'design delivered' wording" — a whole-text
+// substring scan would false-positive on such text, exactly as `it0-impl-row-check.sh` itself
+// avoids by scoping its own grep to the single matched row line).
+{
+  const clause6BacklogSectionMatch = absorbFileText.match(/## Backlog row\n([\s\S]*?)(\n##|\n?$)/);
+  const clause6BacklogRowLine = clause6BacklogSectionMatch
+    ? (clause6BacklogSectionMatch[1].split("\n").find((l) => l.trim().startsWith("|") && l.includes(`| ${milestoneId} |`)) || "")
+    : "";
+  const designOnlyMarkerRe = /design delivered|design[- ]doc only|design only|design \(doc only\)/i;
+  const futureImplChecklistRe = /done-when clauses a future implementing milestone( would need)?/i;
+  const isDesignOnly = designOnlyMarkerRe.test(clause6BacklogRowLine) || futureImplChecklistRe.test(clause6BacklogRowLine)
+    || futureImplChecklistRe.test(charterText); // charter's OWN checklist heading (not prose ABOUT it) is a legitimate second signal, mirroring inherited-core.md's clause-4 definition (a) OR (b)
+
+  if (!isDesignOnly) {
+    passes.push("clause6-escrow-delta-v: N/A — milestone is not design-only (rule does not apply)");
+    dispositionedClauses.add("escrow-delta-v");
+  } else {
+    // A "no VT chart cell" / "Δv̂: 0" style disposition means there is no Δv claim to escrow.
+    const noDeltaVClaim = /(δv̂?|delta[- ]?v)\s*[:=]?\s*0\b|no vt chart cell|no vt point/i.test(absorbText);
+    // A nonzero Δv claim: look for a VT-curve-append style statement (Δv/delta-v with a nonzero
+    // number, or explicit "VT-curve" append language) anywhere in the ABSORB-entry text.
+    const deltaVClaimRe = /(δv̂?|delta[- ]?v)[^\n.]{0,60}?[1-9][0-9.]*|VT[- ]curve[^\n.]{0,80}?append/i;
+    const hasNonzeroDeltaVClaim = !noDeltaVClaim && deltaVClaimRe.test(absorbText);
+
+    if (!hasNonzeroDeltaVClaim) {
+      passes.push("clause6-escrow-delta-v: PASS — design-only milestone claims no Δv (documented no-op, e.g. 'Δv̂: 0, no VT chart cell')");
+      dispositionedClauses.add("escrow-delta-v");
+    } else {
+      // Escrow language must appear reasonably close to the Δv claim AND not be a NEGATED mention
+      // (e.g. "with NO escrow/provisional language anywhere near the claim" must NOT count as
+      // compliant escrow language — a fixture-construction hazard caught while building this
+      // clause: prose describing the ABSENCE of escrow language contains the word "escrow" itself).
+      // Two containment measures: (1) the window is narrowed to the Δv claim's OWN
+      // bullet/paragraph only (bounded by blank lines / bullet starts, not a fixed ±150-char slice
+      // that can spill into an adjacent explanatory sentence); (2) within that window, an escrow
+      // keyword is only counted if NOT immediately preceded (within 3 words) by a negation word
+      // (no/not/without/lacks/lacking/absent/missing).
+      const claimMatch = absorbText.match(deltaVClaimRe);
+      const claimIdx = claimMatch ? claimMatch.index : -1;
+      let claimWindow = "";
+      if (claimIdx >= 0) {
+        const before = absorbText.slice(0, claimIdx);
+        const after = absorbText.slice(claimIdx);
+        const paraStart = Math.max(before.lastIndexOf("\n\n"), before.lastIndexOf("\n- "), before.lastIndexOf("\n* "));
+        const windowStart = paraStart >= 0 ? paraStart : Math.max(0, claimIdx - 150);
+        const afterParaEndMatch = after.match(/\n\n|\n[-*] /);
+        const windowEnd = afterParaEndMatch ? claimIdx + afterParaEndMatch.index : Math.min(absorbText.length, claimIdx + 150);
+        claimWindow = absorbText.slice(windowStart, windowEnd);
+      }
+      const escrowKeywordRe = /(escrow(ed)?|provisional|pending[- ](the )?-?impl|not yet (confirmed|final))/gi;
+      // A negation word "poisons" every escrow-keyword occurrence up to the next SENTENCE
+      // boundary (., —, or a blank-line/bullet break) — not merely the single nearest occurrence —
+      // because a real fixture (and plausibly a real ABSORB entry too) commonly lists several
+      // escrow-adjacent terms in one negated slash/quote-delimited list, e.g. `no
+      // "escrow"/"provisional"/"pending -IMPL" qualifier anywhere near this claim`. Find the
+      // nearest negation word BEFORE the keyword match and confirm no sentence-ending punctuation
+      // sits between them.
+      const negationWordRe = /\b(no|not|without|lacks?|lacking|absent|missing)\b/gi;
+      let hasAdjacentEscrowLang = false;
+      let kwMatch;
+      while ((kwMatch = escrowKeywordRe.exec(claimWindow)) !== null) {
+        const precedingText = claimWindow.slice(0, kwMatch.index);
+        // Nearest sentence boundary before this keyword (., —, or blank line) — negation only
+        // "reaches" back to there, not further.
+        let sentenceStart = 0;
+        for (const marker of [".", "—", "\n\n"]) {
+          const idx = precedingText.lastIndexOf(marker);
+          if (idx > sentenceStart) sentenceStart = idx + marker.length;
+        }
+        const sentenceSoFar = precedingText.slice(sentenceStart);
+        let negated = false;
+        let negMatch;
+        negationWordRe.lastIndex = 0;
+        while ((negMatch = negationWordRe.exec(sentenceSoFar)) !== null) {
+          negated = true;
+          break;
+        }
+        if (!negated) {
+          hasAdjacentEscrowLang = true;
+          break;
+        }
+      }
+
+      if (hasAdjacentEscrowLang) {
+        passes.push("clause6-escrow-delta-v: PASS — design-only milestone's Δv claim is explicitly marked escrowed/provisional");
+        dispositionedClauses.add("escrow-delta-v");
+      } else {
+        failures.push("clause6-escrow-delta-v: FAIL — design-only milestone claims a nonzero Δv with NO escrow/provisional language adjacent to the claim (Δv would be wrongly treated as final before the corresponding -IMPL row ships)");
+        dispositionedClauses.add("escrow-delta-v");
+      }
+    }
+  }
+}
+
+// --- Clause 7: Product-work test-floor gate (M32 / DIR-017 Step 2) ---
+// Trigger-condition-by-label check (mirrors clause 4's shape) + documentation-discipline check
+// (mirrors clauses 1/2/6) for the "what it checks" half. Reads the `surface:` label(s) from the
+// "## Backlog row" section (same source clause 4 already parses).
+{
+  const NON_PRODUCT_SURFACES = ["method-infra", "docs", "cross-cutting", "packaging"];
+  const PRODUCT_SURFACE_COMPONENTS = ["cli", "web-ui", "provider-abi", "mcp"];
+
+  const backlogSectionMatch = absorbFileText.match(/## Backlog row\n([\s\S]*?)(\n##|\n?$)/);
+  const backlogRowLine = backlogSectionMatch
+    ? backlogSectionMatch[1].split("\n").find((l) => l.trim().startsWith("|")) || ""
+    : "";
+  const surfaceLabelMatches = [...backlogRowLine.matchAll(/surface:([a-z0-9-]+)/gi)].map((m) => m[1].toLowerCase());
+
+  // A label "matches" a product-touching surface if it IS one of the 4 exact names, or (for
+  // compound labels like `cli-mcp-webui-docs`) if it CONTAINS one of the 4 component substrings
+  // (component-wise, not exact-string matching — a milestone cannot dodge the gate by folding a
+  // product surface into a multi-surface compound tag). `web-ui` is checked both hyphenated and
+  // as the de-hyphenated `webui` substring seen in some legacy compound labels (e.g.
+  // `cli-mcp-webui-docs`).
+  const labelIsProductTouching = (label) =>
+    PRODUCT_SURFACE_COMPONENTS.some((p) => label === p || label.includes(p) || label.includes(p.replace("-", "")));
+  const labelIsExactlyNonProduct = (label) => NON_PRODUCT_SURFACES.includes(label);
+
+  let triggerFires;
+  if (surfaceLabelMatches.length === 0) {
+    // No surface: label at all — fail-closed, treated as product-touching.
+    triggerFires = true;
+  } else if (surfaceLabelMatches.some(labelIsProductTouching)) {
+    // Any present label resolves to a product-touching surface (exact or compound-component) —
+    // fires regardless of any other co-present non-product labels.
+    triggerFires = true;
+  } else if (surfaceLabelMatches.every(labelIsExactlyNonProduct)) {
+    // Every present label is EXACTLY one of the 4 known non-product-touching names — N/A-passes.
+    triggerFires = false;
+  } else {
+    // At least one present label is neither a recognized product-touching nor a recognized
+    // non-product-touching surface (an unknown/future label) — fail-closed, treat as
+    // product-touching rather than silently exempting an unrecognized surface.
+    triggerFires = true;
+  }
+
+  if (!triggerFires) {
+    passes.push(`clause7-test-floor: N/A — surface label(s) [${surfaceLabelMatches.join(", ")}] are exclusively non-product-touching (method-infra/docs/cross-cutting/packaging)`);
+    dispositionedClauses.add("test-floor");
+  } else {
+    const coverageDispositionRe = /\b(test[- ]coverage|tests? exist|test floor)\b[^\n]{0,120}?(\b(8[0-9]|9[0-9]|100)(\.\d+)?\s*%|≥\s*80\s*%|full coverage|complete coverage)|(\b(8[0-9]|9[0-9]|100)(\.\d+)?\s*%|≥\s*80\s*%)[^\n]{0,120}?\b(test[- ]coverage|coverage|tests?)\b/i;
+    const waiverPattern = new RegExp(
+      `WAIVER:\\s*${milestoneId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\|\\s*[^|]*test-floor`,
+      "i"
+    );
+    const hasCoverageDisposition = coverageDispositionRe.test(absorbText);
+    const hasWaiver = waiverPattern.test(absorbText);
+
+    if (hasCoverageDisposition || hasWaiver) {
+      passes.push(`clause7-test-floor: PASS — product-touching surface [${surfaceLabelMatches.length ? surfaceLabelMatches.join(", ") : "none/fail-closed"}] has a ` + (hasCoverageDisposition ? "recorded ≥80% coverage disposition" : "matching test-floor WAIVER line"));
+      dispositionedClauses.add("test-floor");
+    } else {
+      failures.push(`clause7-test-floor: FAIL — product-touching surface [${surfaceLabelMatches.length ? surfaceLabelMatches.join(", ") : "none/fail-closed"}] has NEITHER a ≥80% test-coverage disposition NOR a matching test-floor WAIVER line in the ABSORB-entry text`);
+      dispositionedClauses.add("test-floor");
+    }
   }
 }
 

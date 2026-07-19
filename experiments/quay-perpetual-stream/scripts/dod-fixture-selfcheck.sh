@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# dod-fixture-selfcheck.sh — regression acceptance test for the DoD meta-enforcer (DIR-019).
+# dod-fixture-selfcheck.sh — regression acceptance test for the DoD meta-enforcer (DIR-019, extended
+# by M32-dod-escrow-testfloor / DIR-017 Step 2 for Clauses 6-7).
 #
 # This is the EXTERNAL, human-authored acceptance predicate for DIR-019 (and, transitively, for
 # DIR-017's human-verification gate step #2/#5). It does NOT trust the DoD enforcer's self-report:
@@ -11,6 +12,11 @@
 # script (the enforcer wrongly exits 0 where 1 is asserted). The fix belongs in
 # `it0-dod-check.mjs` clause 5, NOT in these fixtures. When the fix lands, this script must go green
 # with the fixtures UNCHANGED.
+#
+# M32 extension (DIR-017 Step 2): 4 new fixtures added below (2 clauses × violating/compliant pair
+# each) for Clause 6 (escrow-Δv) and Clause 7 (product-work test-floor) — the original 5 CASES above
+# are unchanged, same discipline as DIR-019's own "fixtures unchanged" rule for a fix to the
+# enforcer's own code.
 #
 # Usage:  dod-fixture-selfcheck.sh
 # Exit:   0 = all fixtures behaved as asserted; 1 = at least one mismatch; 2 = environment error.
@@ -29,6 +35,12 @@ CASES=(
   "M96-fake-linebudget-self-exempt|$FIX/self-exempt-linebudget-stub.md|1"
   "M95-fake-implrow-self-exempt|$FIX/self-exempt-implrow-stub.md|1"
   "M94-fake-missing-ac|$FIX/missing-ac-stub.md|1"
+  # M32-dod-escrow-testfloor (DIR-017 Step 2) additions — Clause 6 (escrow-Δv) and Clause 7
+  # (product-work test-floor). Existing 5 cases above UNCHANGED.
+  "M97-fake-escrow-violating|$FIX/escrow-deltav-violating-stub.md|1"
+  "M97B-fake-escrow-compliant|$FIX/escrow-deltav-compliant-stub.md|0"
+  "M93-fake-testfloor-violating|$FIX/test-floor-violating-stub.md|1"
+  "M93B-fake-testfloor-compliant|$FIX/test-floor-compliant-stub.md|0"
 )
 
 fail=0
