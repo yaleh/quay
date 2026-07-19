@@ -50,6 +50,10 @@ CASES=(
   # uncaught. See fixtures/dod/self-exempt-escrow-stub.md's own header for the live before/after
   # repro this fixture pins.
   "M92-fake-escrow-self-exempt|$FIX/self-exempt-escrow-stub.md|1"
+  # Acceptance-audit finding (post-merge, pre-ABSORB) — Clause 7's coverage-disposition regex was
+  # negation-blind; pins the sentence-scoped negation-window fix (mirrors Clause 6's own technique).
+  # See fixtures/dod/test-floor-negation-poison-stub.md's own header for the live before/after repro.
+  "M91-fake-testfloor-negation|$FIX/test-floor-negation-poison-stub.md|1"
 )
 
 fail=0

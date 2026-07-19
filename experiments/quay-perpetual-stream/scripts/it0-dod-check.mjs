@@ -481,12 +481,36 @@ const dispositionedClauses = new Set();
     passes.push(`clause7-test-floor: N/A — surface label(s) [${surfaceLabelMatches.join(", ")}] are exclusively non-product-touching (method-infra/docs/cross-cutting/packaging)`);
     dispositionedClauses.add("test-floor");
   } else {
-    const coverageDispositionRe = /\b(test[- ]coverage|tests? exist|test floor)\b[^\n]{0,120}?(\b(8[0-9]|9[0-9]|100)(\.\d+)?\s*%|≥\s*80\s*%|full coverage|complete coverage)|(\b(8[0-9]|9[0-9]|100)(\.\d+)?\s*%|≥\s*80\s*%)[^\n]{0,120}?\b(test[- ]coverage|coverage|tests?)\b/i;
+    const coverageDispositionRe = /\b(test[- ]coverage|tests? exist|test floor)\b[^\n]{0,120}?(\b(8[0-9]|9[0-9]|100)(\.\d+)?\s*%|≥\s*80\s*%|full coverage|complete coverage)|(\b(8[0-9]|9[0-9]|100)(\.\d+)?\s*%|≥\s*80\s*%)[^\n]{0,120}?\b(test[- ]coverage|coverage|tests?)\b/gi;
+    // A coverage-disposition-shaped match is discounted if the SAME SENTENCE also carries negation
+    // language (e.g. "no 80% test coverage floor was met" / "decided it wasn't necessary; coverage
+    // remains ~9%") — found live during the M32 acceptance audit: the un-negation-aware regex
+    // false-PASSed prose that plainly admits inadequate coverage while incidentally mentioning
+    // "80%"/"test coverage". Mirrors Clause 6's sentence-scoped negation-window technique.
+    const coverageNegationWordRe = /\b(no|not|without|lacks?|lacking|absent|missing|insufficient|inadequate|below|under|wasn'?t|isn'?t|doesn'?t|didn'?t|aren'?t|weren'?t|couldn'?t|shouldn'?t|wouldn'?t)\b/gi;
+    let hasCoverageDisposition = false;
+    let covMatch;
+    while ((covMatch = coverageDispositionRe.exec(absorbText)) !== null) {
+      const precedingText = absorbText.slice(0, covMatch.index);
+      let sentenceStart = 0;
+      for (const marker of [".", "—", "\n\n", ";"]) {
+        const idx = precedingText.lastIndexOf(marker);
+        if (idx > sentenceStart) sentenceStart = idx + marker.length;
+      }
+      const afterText = absorbText.slice(covMatch.index);
+      const sentenceEndMatch = afterText.match(/[.;—]|\n\n/);
+      const sentenceEnd = sentenceEndMatch ? covMatch.index + sentenceEndMatch.index : absorbText.length;
+      const fullSentence = absorbText.slice(sentenceStart, sentenceEnd);
+      coverageNegationWordRe.lastIndex = 0;
+      if (!coverageNegationWordRe.test(fullSentence)) {
+        hasCoverageDisposition = true;
+        break;
+      }
+    }
     const waiverPattern = new RegExp(
       `WAIVER:\\s*${milestoneId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\|\\s*[^|]*test-floor`,
       "i"
     );
-    const hasCoverageDisposition = coverageDispositionRe.test(absorbText);
     const hasWaiver = waiverPattern.test(absorbText);
 
     if (hasCoverageDisposition || hasWaiver) {

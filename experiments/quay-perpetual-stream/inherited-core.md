@@ -1136,6 +1136,22 @@ logic, and fixture *shape*) was independently valuable and is reflected in this 
 only the `MECHANICALLY_UNCONDITIONAL_CLAUSES` omission was rejected, on the specific evidence
 above, not on branch precedence or arrival order.
 
+### Acceptance-audit fix — Clause 7's coverage-disposition check was negation-blind (M32
+### acceptance audit, post-merge, 2026-07-19)
+
+The out-of-band acceptance-audit subagent (per Clause 1, unconditional) constructed two live
+adversarial ABSORB-entry texts and confirmed both FALSE-PASSed Clause 7 pre-fix: *"We considered
+aiming for 80% test coverage but decided it wasn't necessary; test coverage remains around 9%..."*
+and *"no 80% test coverage floor was met; tests exist only for the happy path."* Both mention the
+raw tokens ("80%", "test coverage") the regex looked for, without the regex checking whether the
+SAME SENTENCE negates them. Fixed by adding a sentence-scoped negation window to the
+coverage-disposition check, mirroring Clause 6's own negation-window technique (same negation-word
+list, extended with common contractions — `wasn't`/`isn't`/`doesn't`/etc. — since Clause 7's
+adversarial text used those where Clause 6's did not). Verified live against both adversarial
+strings post-fix (both now correctly FAIL), and pinned as a permanent regression fixture,
+`fixtures/dod/test-floor-negation-poison-stub.md` (`M91-fake-testfloor-negation`, asserted exit 1 in
+`dod-fixture-selfcheck.sh`) — full suite (11 fixtures) reconfirmed green after the fix.
+
 ### `scripts/it0-dod-check.{sh,mjs}` — the standing mechanical check
 Given a milestone id, its charter file path, and its dashboard/ABSORB-entry text (or a fixture file
 standing in for that text), runs all 7 clauses above (0-7, all named individually — there is no
