@@ -5,9 +5,10 @@
 # same `it0-*-check.sh` wraps `it0-*-check.mjs` convention as every existing pair in `scripts/`.
 #
 # Given a milestone id, a charter file path, and an ABSORB-entry text file, runs all DoD clauses
-# (0-8, including Clause 8 — task canonical-lifecycle-record, DIR-014 item 6 /
-# M40-dir014-task-canonical-lifecycle-record) defined in inherited-core.md's "Definition of Done"
-# section. See it0-dod-check.mjs's own header comment for the full per-clause implementation.
+# (0-9, including Clause 8 — task canonical-lifecycle-record, DIR-014 item 6 /
+# M40-dir014-task-canonical-lifecycle-record — and Clause 9 — needs-human split-or-commit, DIR-026)
+# defined in inherited-core.md's "Definition of Done" section. See it0-dod-check.mjs's own header
+# comment for the full per-clause implementation.
 #
 # Usage:
 #   it0-dod-check.sh <milestone-id> <charter-file> <absorb-entry-file>

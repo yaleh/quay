@@ -82,38 +82,26 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    selected (M-NN)` section stating the pass number and one-line reason (aged-out, smaller Δv̂, wrong
    value type for this pass's explore/exploit slot, etc.). This makes the SELECT reasoning
    inspectable per-task instead of only living in a dashboard/checkpoint narrative.
-   **Stamp the canonical-task-schema marker + author `## Proposal` + `## Plan` at THIS step
-   (canonical-task-schema v1):** when writing the SELECTed task via `task_write`, set
-   `extra.schema: "v1"` on it — the marker that makes the task schema-applicable to
-   `scripts/task-schema-check.sh` (without it the task reports N/A-legacy, a detectable switchover
-   error the pre-dispatch self-check below catches). Also write a mandatory `## Proposal` section (the
-   chosen approach text, authored per the proposal-to-plan / quay-task-to-plan pipeline) and a
-   `## Plan` section: a milestone-candidate MUST carry `## Plan` — a resolving `docs/plans/*.md` ref
-   if the milestone is staged, else `N/A — <reason>`. This couples with the existing Clause 8 (which
-   already checks Proposal/Plan for milestone-labelled tasks); the schema-marker check generalizes it.
-   **Author the task's AC + DoD at THIS (proposal) step — mandatory, the authoring half of DoD clause
-   0 (`inherited-core.md`'s "AC/DoD live in the TASK" rule):** before dispatch, write two sections
-   into the SELECTed candidate task's body via `task_write` (the task is the single canonical source
-   of truth for both — do NOT put them in the charter, which only references them). **Authored as GFM
-   checklists, UNCHECKED (DIR-020/M34-ac-dod-checklist-writeback, 2026-07-19):** each item is written
-   as `- [ ]` — a milestone starts with NOTHING ticked at SELECT time. Boxes are ticked to `- [x]`
-   ONLY later, by the per-milestone acceptance audit's write-back at step 6, as it independently
-   confirms each item — never here, never by the loop itself (self-ticking at authoring time is
-   exactly what this rule forbids). Pre-existing prose-form tasks are not retroactively converted;
-   checklist form is required going forward.
-   - `## Acceptance Criteria` — ≥1 concrete, individually-checkable criterion specific to this value
-     unit (what was formerly the charter's "Binary Done-when", now authored into the task), each as an
-     UNCHECKED `- [ ]` checklist item. Each criterion must name the artifact / test / observable
-     output that would prove it met (so the per-milestone acceptance audit at step 6 can try to
-     refute — and, if it cannot refute, tick — each one).
-   - `## Definition of Done` — a REFERENCE to the standard five clauses in `inherited-core.md`'s
-     "Definition of Done" section (never a copy), PLUS any task-specific extra done-conditions,
-     likewise authored as UNCHECKED `- [ ]` checklist items where task-specific extras are listed.
-   These MAY be revised while authoring the charter/plan, but the revision is made to the task's copy,
-   never forked into the charter. `scripts/it0-dod-check.sh` clause 0 mechanically HARD-blocks step 7's
-   `milestone_counter++` at ABSORB if either section is missing/empty/placeholder, OR (checklist-form
-   AC) if any `- [ ]` box remains unchecked — so authoring them here is not optional, and leaving a box
-   unticked past the audit's write-back is REFUTED-equivalent.
+   **Stamp `extra.schema:"v1"` + author `## Proposal` + `## Plan` at THIS step:** when writing the
+   SELECTed task via `task_write`, set `extra.schema:"v1"` (without it the task reports N/A-legacy —
+   the pre-dispatch self-check below catches a forgotten marker). Author a real `## Proposal` (the
+   chosen approach, per the proposal-to-plan / quay-task-to-plan pipeline) and a `## Plan` — a
+   milestone-candidate MUST carry one: a resolving `docs/plans/*.md` ref if staged, else
+   `N/A — <reason>` (Clause 8 / schema A1–A2 check the shape).
+   **Author the task's AC + DoD at THIS step — the authoring half of DoD Clause 0.** The task is the
+   SINGLE canonical source for both: do NOT copy them into the charter (which only references them),
+   and revise the task's copy, never fork into the charter (anti-drift).
+   - `## Acceptance Criteria` — ≥1 concrete criterion specific to this value unit. The checklist SHAPE
+     is enforced by `task-schema-check.sh` (A3) + Clause 0; the SUBSTANCE is NOT — each criterion must
+     NAME the artifact/test/observable output that proves it, so the step-6 audit can try to refute it.
+   - `## Definition of Done` — a REFERENCE to the standard five clauses (never an inlined copy) + any
+     task-specific extras, as checklist items.
+   **Never self-tick (DIR-020 — uncoded who/when invariant):** author every AC/DoD box UNCHECKED
+   `- [ ]`. Boxes go to `- [x]` ONLY at step 6, by the acceptance audit as it independently confirms
+   each item — never here, never by the loop itself. Clause 0 HARD-blocks step 7's `milestone_counter++`
+   on any missing/empty section OR any box left unchecked past the audit, but it CANNOT detect an
+   improperly self-ticked box — so the who/when rule is discipline, not code. Checklist form is
+   forward-only; pre-existing prose-form tasks are grandfathered.
    **Before dispatch, run `scripts/task-schema-check.sh tasks/<id>.md` against the SELECTed task; a
    FAIL blocks dispatch** (fix the task body, not the script — same discipline as the gate-hash /
    line-budget checks). This proves the schema was emitted by construction: `## Proposal` present,
@@ -135,18 +123,12 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    never a prose "later phase." A parent task is `done` iff ALL its children are `done`. This is the
    discipline that ends the "do a slice, leave the parent pending forever" failure — the exact
    pattern that let a core directive item be deferred across five milestones (see DIR-026 Finding).
-   **Plan-time line-budget gate (M18-milestone-model-ceiling-and-diversity-policy, DIR-012 item 2 —
-   mechanically-checkable, not narrative):** run
+   **Plan-time line-budget gate (M18/DIR-012 item 2 — mechanically checkable):** run
    `scripts/it0-ceiling-line-budget-check.sh <charter-file>` against the drafted charter BEFORE
-   dispatch. This flags any charter whose scope plausibly exceeds the ~2000-line milestone ceiling
-   (`inherited-core.md`'s "Milestone ceiling expansion" subsection) without a nested phase/stage plan
-   — either an explicit `Line budget:`/`Phase`/`Stage` structure present in the charter text, or a
-   `Plan:` line pointing at an external phase/stage plan document. A charter under the small-
-   milestone norm (no declared line budget, or a declared budget ≤2000 WITH a phase/stage plan
-   present) PASSES. A charter that declares (or whose in-scope-item count/shape plausibly implies)
-   a budget above ~2000 lines with NO phase/stage plan reference FAILS/flags — fix by adding the
-   phase/stage plan reference, or resize/split the candidate, before dispatch; same "fix the
-   charter, not the script" discipline as the existing gate-hash check (Check 2 below).
+   dispatch (fires again at step 4e). The ~2000-line ceiling + the item-count proxy + the
+   phase/stage-plan satisfaction rule (inline `Line budget:`/`Phase`/`Stage`, or a `Plan:` ref) all
+   live in the script; a FLAG = oversized with no phase/stage plan → add the plan reference or
+   resize/split before dispatch. **On ANY it0-check FAIL, fix the charter/task, never the script.**
    **Record each candidate's value type(s)** (mandatory, applies forward from m7) from
    `inherited-core.md`'s "Value-typed SELECT ledger" section — capability-growth / discovery /
    instrument-correction / risk-option / governance-integrity — alongside its VT Δv̂. VT Δv̂ is one
@@ -195,12 +177,9 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
        list; if Step 3 concludes no independent mechanism is reachable, that IS a §3.2 condition-3
        ceiling trigger — redesign the milestone's scope before dispatch, don't dispatch without an
        audit channel.
-   (e) **plan-time line-budget gate** (M18-milestone-model-ceiling-and-diversity-policy) —
-       `scripts/it0-ceiling-line-budget-check.sh <charter-file>` against the drafted charter; a FLAG (exit 1)
-       means the charter's scope plausibly exceeds the ~2000-line ceiling
-       (`inherited-core.md`'s "Milestone-model ceiling" section) with no phase/stage plan
-       reference — resize the charter or attach a phase/stage plan before dispatch, don't dispatch
-       an unflagged oversized charter.
+   (e) **plan-time line-budget gate** — `scripts/it0-ceiling-line-budget-check.sh <charter-file>`; a
+       FLAG (exit 1) = scope exceeds the ~2000-line ceiling with no phase/stage plan reference. Same
+       gate defined at step 1 (SPLIT-OR-COMMIT); this is its firing point against the drafted charter.
    Any check firing → fix before dispatch, per the procedures/scripts above (all under
    `experiments/quay-perpetual-stream/scripts/`).
 5. **DISPATCH INNER** — run the milestone as a bounded BAIME experiment to convergence. **Per-
@@ -343,111 +322,52 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      carry-forward reason directly in the ledger row (no silent deferral — a missing/blank
      disposition is not a valid resolution). Update the row's status/notes in `v-meta-ledger.md`
      accordingly as part of this ABSORB step, before proceeding to step 7.
-   - **Design-only-milestone impl-row gate (DIR-016 / M21-impl-row-enforcement, HARD BLOCK on step
-     7's `milestone_counter++`):** a milestone is **design-only** for this gate's purposes if EITHER
-     its own `backlog.md` row text states "design delivered"/"design-doc only" (or equivalent), OR
-     its deliverable includes a "Done-when clauses a future implementing milestone would need"
-     section (or equivalently-named dispatch-ready follow-up checklist). If THIS milestone is
-     design-only, its ABSORB **MUST** create a selectable, non-DONE `<M-NAME>-IMPL` candidate row in
-     `backlog.md` — sourced to the design doc's own "Done-when clauses a future implementing
-     milestone would need" checklist — **before** step 7's `milestone_counter++` may execute. Run
-     `scripts/it0-impl-row-check.sh <milestone-id> backlog.md` as the mechanical check; a non-zero
-     exit means the row is missing (or the milestone is design-only with no row yet) and
-     `milestone_counter++` **MUST NOT** run until the row exists and the script re-run PASSes. This
-     is the SAME HARD BLOCK shape and placement as the V_meta consolidation-lag gate immediately
-     above and the adversarial-audit gate above that — deferring a design-only milestone's
-     implementation as prose only, with no selectable row, is NOT a valid resolution of this gate,
-     because SELECT (step 1) only considers non-DONE rows and a deferral with no row is a deferral
-     to never (DIR-016's finding). Record the check's PASS/FAIL output directly in this ABSORB's log
-     entry, mirroring the V_meta gate's row-update discipline.
-   - **DoD meta-enforcer gate (DIR-017 / M25-dod-meta-enforcer Step 1 + M32-dod-escrow-testfloor
-     Step 2 + DIR-021 / M38-dod-gate-operative-real-milestone, HARD BLOCK on step 7's
-     `milestone_counter++`):** runs immediately AFTER the adversarial-audit gate, V_meta
-     consolidation-lag gate, and design-only-milestone impl-row gate above all individually clear,
-     and BEFORE the ABSORB `master` merge + `milestone_counter++` below. This gate does NOT replace any of the
-     three individual gates above — each keeps its own HARD BLOCK text and evaluation as-is — it
-     adds ONE more standing check that the RECORD of all six named DoD clauses
-     (`inherited-core.md`'s "Definition of Done" section: Clause 1 adversarial-audit, Clause 2
-     V_meta-lag, Clause 3 line-budget, Clause 4 impl-row, Clause 6 escrow-Δv, Clause 7 product-work
-     test-floor) plus the Clause 5 no-self-exemption meta-clause is actually complete and undrifted
-     for this milestone.
-
-     **PRIMARY invocation — `quay gate <milestone-task>` (QENG-1 gate engine + QENG-2 acceptance
-     meter; operative since DIR-021/M38, not merely designed):**
-     1. Write the ABSORB-entry-excerpt file (the same `awk`/paste extraction pattern used since
-        M25, e.g. `/tmp/m<NN>-absorb-entry.md`) FIRST — it must exist and contain this milestone's
-        actual ABSORB narrative (the disposition text just produced by the three gates above)
-        BEFORE the next step, or the check reads stale/missing content.
-     2. Confirm (or seed, if this is the milestone's first ABSORB-time run) the milestone task's
-        `extra.acceptance` via `quay task edit <milestone-task> --acceptance 'bash
-        experiments/quay-perpetual-stream/scripts/it0-dod-check.sh <task-id> <charter-file>
-        <absorb-entry-file-path>'` — the command references the FILE PATH written in step 1, task
-        id (not milestone id, per the convention confirmed at M37 ABSORB), repo-root-relative paths
-        (the acceptance runner's cwd = workspaceRoot = repo root). In practice this is normally
-        seeded once at SELECT time (step 1) with the eventual absorb-entry file path already
-        decided (e.g. `/tmp/m<NN>-absorb-entry.md`), so this ABSORB-time step is usually a
-        no-op re-confirmation, not a re-seed — see DIR-021's chicken/egg resolution note below.
-     3. Run **`quay gate <milestone-task>`** — this is the OPERATIVE invocation, not
-        `it0-dod-check.sh` called bare. It runs the identical `it0-dod-check.sh <id> <charter>
-        <absorb>` command under the hood (`it0-dod-check.sh` remains the underlying check logic;
-        `quay gate` is the wired invocation path — QENG-1 gate engine + QENG-2 acceptance meter,
-        default gate = `acceptance`), and additionally APPENDS a GateEvent (`verdict: pass|fail`,
-        actor `quay-cli`, timestamp, reason) to the engine's gate-event log. Exit 0 = PASS, exit 1 =
-        FAIL — the SAME HARD BLOCK shape/placement as the three gates this wraps:
-        `milestone_counter++` **MUST NOT** run until `quay gate <milestone-task>` is re-run and
-        exits 0.
-     4. Confirm the GateEvent landed: `quay gate-log <milestone-task> --json` — paste the raw JSON
-        array (not a paraphrase) into the ABSORB log entry.
-     5. Paste BOTH the `quay gate` command's literal stdout (`PASS` or `FAIL — <reason>`) AND the
-        `quay gate-log --json` GateEvent directly in this ABSORB's log entry, mirroring the V_meta
-        gate's and impl-row gate's own row-update discipline — this replaces the bare
-        `it0-dod-check.sh` stdout paste used at every prior milestone through M37.
-     (`quay complete <milestone-task>` is the equivalent DIR-023-lifecycle-adoption invocation once
-     that layer lands — precondition status=ready, runs the same acceptance gate, and on PASS writes
-     status=done directly; until DIR-023 is adopted, `quay gate` + a separate manual status/backlog
-     update is the standing path.)
-
-     **Named `impl-row`/`line-budget` engine gates (DIR-022 Layer 2 phase 1 / M39, ADDITIONAL
-     capability, not a required migration):** since M39, the design-only-milestone impl-row check
-     (above) and the plan-time/ABSORB-time line-budget check (step 1 and the "Underlying check
-     details" note above) are ALSO invokable as named `quay gate` engine gates —
-     `quay gate <task> --gate impl-row` and `quay gate <task> --gate line-budget` — for any real
-     milestone task that opts in by setting `task.extra.implRowArgs` (`["<milestone-id>",
-     "<backlog-file>"]`) or `task.extra.lineBudgetArgs` (`["<charter-file>"]`) respectively. Both are
-     thin wrappers over the SAME `it0-impl-row-check.sh` / `it0-ceiling-line-budget-check.sh` scripts
-     already used above (`packages/quay/src/gate/registry.js`, no gate logic duplicated); each run
-     appends a real GateEvent (`gate: "impl-row"` / `gate: "line-budget"`) queryable via
-     `quay gate-log <task> --json`, the same as the `dod`/`acceptance` gates. **This does NOT replace
-     the two mechanical checks above, and does NOT mandate migrating every milestone's ABSORB flow to
-     the named gates** — the bare `it0-*.sh` invocations documented above remain the standing,
-     unconditional path for every milestone; the named-gate path is an opt-in additional invocation
-     surface a milestone may use if it wants a GateEvent record of that specific check (see the M39
-     charter's explicit out-of-scope note).
-
-     **Chicken/egg ABSORB-ordering note (DIR-021):** the `extra.acceptance` command's
-     `<absorb-entry-file>` argument does not exist yet at SELECT time (the ABSORB narrative is
-     drafted live, mid-milestone) — this is resolved by the command referencing a FILE PATH (never
-     literal ABSORB text baked in at SELECT time), written immediately before `quay gate` is invoked
-     per step 1 above. This mirrors the `/tmp/m<NN>-absorb-entry.md` extraction pattern already
-     standing practice for every `it0-dod-check.sh` invocation since M25 (see dashboard.md's own
-     ABSORB entries, e.g. `/tmp/m37-absorb-entry.md`) — DIR-021 did not invent a new pattern, it
-     wired the SAME pattern through the engine instead of a bare shell call.
-
-     **Underlying check details (unchanged by the engine wiring):** Line-budget, Clause 3, fires
-     separately at plan-time per step 1 — `it0-dod-check.sh` re-checks the charter's own line-budget
-     clause here too, at ABSORB, as a drift check that plan-time's PASS still holds against the
-     FINAL charter text, but a plan-time FAIL on that clause alone is not this gate's primary
-     trigger point. Clause 6 escrow-Δv fires only for design-only milestones claiming a nonzero Δv —
-     see `inherited-core.md`'s Clause 6 for the exact trigger condition. Clause 7 product-work
-     test-floor fires for milestones whose backlog row carries a product-touching `surface:` label
-     (`surface:cli`/`surface:web-ui`/`surface:provider-abi`/`surface:mcp`, or no `surface:` label at
-     all — fail-closed) — see `inherited-core.md`'s Clause 7 for the exact trigger condition and the
-     non-product-touching exemptions (`surface:method-infra`/`surface:docs`/`surface:cross-cutting`/
-     `surface:packaging`). Reproduce the pass/fail behavior end-to-end against the fixtures at any
-     time: `quay gate QENG-5-DEMO-PASS` → exit 0; `quay gate QENG-5-DEMO-FAIL` → exit 1 (committed
-     fixture tasks whose meters run this exact script) — these remain useful as a smoke test of the
-     wiring itself, but are NOT a substitute for running `quay gate <milestone-task>` against the
-     REAL milestone at its own ABSORB.
+   - **Design-only-milestone impl-row gate (DIR-016/M21; HARD-BLOCKS step 7's `milestone_counter++`,
+     same shape/placement as the V_meta + adversarial-audit gates).** Check logic + the design-only
+     definition + the "row created ever, even if later SELECTed & DONE" semantics all live in
+     `scripts/it0-impl-row-check.sh` (wrapped as `it0-dod-check.mjs` Clause 4): run
+     `scripts/it0-impl-row-check.sh <milestone-id> backlog.md`; non-zero exit = the required selectable
+     non-DONE `<M-NAME>-IMPL` row is missing → counter++ MUST NOT run until it exists and the re-run
+     PASSes. **Rationale (uncoded):** prose-only deferral with no row is invalid — SELECT only sees
+     non-DONE rows, so no row = deferred to never (DIR-016). Record the check's PASS/FAIL in this
+     ABSORB's entry.
+   - **DoD meta-enforcer gate — `quay gate <milestone-task>` (DIR-017/M25 + M32 + DIR-021/M38;
+     HARD-BLOCKS step 7's `milestone_counter++`; operative since M38).** Runs AFTER the
+     adversarial-audit, V_meta-lag, and impl-row gates individually clear and BEFORE the `master`
+     merge + counter++. It does NOT replace them — it adds one standing check that the RECORD of all
+     six DoD clauses + the Clause-5 no-self-exemption meta-clause is complete and undrifted. Check
+     logic = `scripts/it0-dod-check.mjs` (Clauses 0–9, incl. Clause 3 line-budget, 6 escrow-Δv,
+     7 product-work test-floor — see `inherited-core.md` for each clause's trigger); the QENG engine
+     (`packages/quay/src/gate/`) is the operative wrapper. `quay gate` is the OPERATIVE invocation —
+     NOT a bare `it0-dod-check.sh` call.
+     - **Ordering + disposition authoring (DIR-021 — uncoded; the engine does NOT enforce this):**
+       write the ABSORB-entry file (`/tmp/m<NN>-absorb-entry.md`) FIRST, carrying this milestone's
+       real ABSORB narrative — the adversarial-audit verdict + V_meta-lag + line-budget/impl-row
+       dispositions just produced. Clauses 1/2/6/7 only scan for those disposition TOKENS, they do
+       not re-derive them — so un-authored dispositions pass silently unless you write them in. The
+       `extra.acceptance` command references this FILE PATH, never ABSORB text baked in at SELECT
+       (chicken/egg: the narrative is drafted live, mid-milestone).
+     - **`extra.acceptance` convention:** `bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+       <task-id> <charter-file> <absorb-entry-file>` — task-id (NOT milestone-id, per M37),
+       repo-root-relative paths (runner cwd = workspaceRoot = repo root). Normally seeded once at
+       SELECT (step 1) with the eventual `/tmp/m<NN>-absorb-entry.md` path, so this ABSORB-time step
+       is a no-op re-confirm.
+     - **Run + evidence:** `quay gate <milestone-task>` (exit 0 = PASS, 1 = FAIL; `milestone_counter++`
+       MUST NOT run until it re-runs and exits 0). Then paste BOTH the literal `quay gate` stdout AND
+       the raw `quay gate-log <milestone-task> --json` GateEvent array (not a paraphrase) into the
+       ABSORB entry — evidence, mirroring the other gates' row-update discipline.
+     - **M39 named gates (opt-in, NOT a required migration):** `quay gate <task> --gate impl-row|line-budget`
+       (opt in via `extra.implRowArgs`/`lineBudgetArgs`) are thin wrappers over the SAME
+       `it0-impl-row-check.sh`/`it0-ceiling-line-budget-check.sh` scripts (`registry.js`, no logic
+       duplicated), each appending a named GateEvent. They do NOT replace the bare checks and are NOT
+       mandatory — the bare `it0-*.sh` path stays the standing one.
+     - **Lifecycle future path:** `quay complete <milestone-task>` (DIR-023, once adopted; precondition
+       status=ready, runs the same acceptance gate, writes status=done on PASS) replaces today's
+       standing `quay gate` + manual status/backlog update.
+     - Line-budget (Clause 3) ALSO re-fires here as a drift check that plan-time's PASS still holds
+       against the FINAL charter (see step 1 / step 4e). Smoke-test the wiring anytime:
+       `quay gate QENG-5-DEMO-PASS` → 0, `quay gate QENG-5-DEMO-FAIL` → 1 (fixture tasks) — NOT a
+       substitute for gating the REAL milestone.
    - **ABSORB lands the milestone's work on `master` directly (DIR-027 retired DIR-018's
      driver→master publish sub-step; runs AFTER the adversarial-audit, V_meta consolidation-lag,
      design-only-milestone impl-row, AND DoD meta-enforcer gates above all clear, and BEFORE step 7's
