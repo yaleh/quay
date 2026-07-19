@@ -3,7 +3,7 @@ id: exp5-M-WEBUI-TRIGGER-HONESTY
 title: "Web UI action_buttons: stop overstating success when trigger delivery
   is degraded/async — either qualify the banner or perform a synchronous
   write when no live dispatcher is configured"
-status: todo
+status: in-progress
 labels:
   - milestone-candidate
   - surface:web-ui
@@ -49,8 +49,42 @@ Playwright/chrome-devtools browser automation (per the Web UI verification requi
 M10-audit-consolidation/DIR-006), not static source inspection, since that is exactly the
 evidence class that surfaced this gap in the first place.
 
+## Acceptance Criteria
+1. `packages/quay/src/serve.js`'s POST `/task/:id/action/:actionId` handler conditions the
+   `?success=` banner text on `deliverTrigger()`'s actual `result.delivered` value
+   (`"print"`/`"manda"`/`"mock"`), not an unconditional `"Task <id> advanced"` string — every
+   delivery mode's banner text must accurately describe what actually happened (no mode may claim
+   a synchronous status write occurred when it did not; `git diff --stat` confirms no
+   `packages/quay/bin/quay.js` status-write logic changed, i.e. this is a text/conditional fix, not
+   a new synchronous-write capability — that is G-S4-02, explicitly out of scope).
+2. The `"print"` (degraded, no live dispatcher) and `"manda"` (async dispatch, no delivery-
+   confirmation callback) cases both use "requested"-flavored language (not "advanced"/"done"),
+   since neither performs a synchronous status write; the task's `status`/`updatedAt` are not
+   claimed to have changed when they have not.
+3. Live browser verification (Playwright or chrome-devtools MCP, per M10-audit-consolidation/
+   DIR-006's Web UI verification requirement) confirms the corrected banner text actually renders
+   for at least the `"print"`-degraded case (the realistic default for a bare `quay serve` with no
+   `manda` configured) — not static source inspection alone, since that is exactly the evidence
+   class that missed this gap originally (M28's own finding).
+4. No regression to the existing `?success=`/`?error=` redirect-param contract or to any existing
+   `serve.test.mjs` assertion (`success-banner` element presence, `?success=` param presence on
+   gate-pass, absence on gate-fail) — full `packages/quay` test suite green before AND after.
+5. G-S4-02 (wiring a real synchronous/in-process delivery mode) is explicitly NOT attempted here —
+   confirm via `git diff --stat` that `src/action.js`'s `deliverTrigger()` delivery-mode logic
+   itself (the `mock`/`manda`/`print` branches) is unchanged; only the banner-text consumer in
+   `serve.js` changes.
+
+## Definition of Done
+References the standard `inherited-core.md` Definition of Done clauses (0 AC/DoD-present, 1
+per-milestone acceptance audit, 2 V_meta-lag, 3 line-budget, 4 impl-row, 5 no-self-exemption, 6
+escrow-Δv N/A — not design-only, 7 test-floor — `surface:web-ui` is product-touching, a real
+coverage disposition or waiver is required at ABSORB). No task-specific exemption from any clause.
+
 ## Status mirror
-todo (created @m29 DRAIN/SELECT boundary, 2026-07-18 — not yet SELECTed)
+todo (created @m29 DRAIN/SELECT boundary, 2026-07-18; SELECTed @m33 DRAIN/SELECT boundary,
+2026-07-19, scoped to G-S4-01 only per this task's own "future charter should decide scope"
+guidance — G-S4-02 remains open/deferred, a separate future candidate if still wanted after G-S4-01
+lands)
 
 ---
 ## Not selected (M29)
