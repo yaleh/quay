@@ -23,6 +23,12 @@ children:
   - exp5-M-CRYST-F1
   - exp5-M-CRYST-G1
   - exp5-M-CRYST-ANALYSIS
+  - exp5-M-CRYST-INV
+  - exp5-M-CRYST-ADR-CARRYFWD
+  - exp5-M-CRYST-ADR-DILUTION
+  - exp5-M-CRYST-INV
+  - exp5-M-CRYST-ADR-CARRYFWD
+  - exp5-M-CRYST-ADR-DILUTION
 extra: {}
 ---
 ## Proposal

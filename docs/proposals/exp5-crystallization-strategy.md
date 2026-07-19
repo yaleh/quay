@@ -94,14 +94,34 @@ Track **per-milestone code:doc increment ratio** on `dashboard.md`; a milestone 
 overwhelmingly new prose (beyond a threshold, excluding legitimate intent) is **flagged** — the same
 "make the invariant executable" discipline applied to the molten-ness metric itself.
 
-## 6. Sequencing
-1. **Land Plan A** (Axis 1, first move) — task-canonical directives; delete the two reconciliation
-   scripts. This is the first genuinely *subtractive* crystallization and removes the flagged
-   dual-source. Executed via the quay task model (proposal→task, AC/DoD, split-or-commit, independent
-   audit; deviations root-caused to docs/skills).
-2. Crystallize split-or-commit's prose rules into executable checks (Axis 2).
-3. Shrink iteration reports / ABSORB dispositions to GateEvent pointers (Axis 3; advances DIR-024).
-4. Add the north-star ratio metric + flag (Axis 5) — as an executable check, not prose.
+## 6. Sequencing (re-prioritized 2026-07-19 by the cross-experiment ANALYSIS)
+
+The exp1-5 analysis (`exp5-M-CRYST-ANALYSIS`) found the failure families are one root — *method
+expressed as prose the LLM re-interprets each cycle* — so **Axis 2′ (code-over-prompt) is the
+central lever, confirmed across 5 experiments**, and **"enforcement-WITH-design" is the #1 recurring
+structural fault** (a rule that lives only in prose gets paraphrased away, deferred, or never wired —
+exp4's worktree rule was paraphrased away 13 consecutive times; exp5's DIR-014 was shelfware 25
+milestones).
+
+0. **Standing INVARIANT (elevate to first-class — `exp5-M-CRYST-INV`):** no new rule / DoD clause /
+   method step is accepted without its **executable enforcement in the SAME milestone**. Generalizes
+   DIR-026 item 5. An ADR + a gate.
+1. **First wave (Plan A done): B1→B2→B3 (canonical task schema + executable validator + fix the
+   authoring SOURCES) as ONE enforcement-with-design unit; + A2 (unify `exp5-` namespace).** The
+   schema (B1) MUST land with its validator (B2) and the sources that emit it (B3) — never B1 alone
+   (that is the designed-not-wired disease).
+2. **D3 + Axis 2′ — RAISED to right behind the first wave** (was lower): rewrite OUTER-LOOP /
+   inherited-core / inner-iteration prompts, converting every deterministic step to code (~15-19
+   still-prose steps identified) and shrinking the prompt to the ~7-9 irreducible judgment steps.
+   This dissolves failure modes 1/2/3 at the root — a coded step cannot drift, be paraphrased, or be
+   "designed-not-wired".
+3. **D1/D2 (quay doc-management + formalized skills)** — the vehicle for §2's rewrites.
+4. **E1/E2 (quay ADR-management + extraction), including two new ADRs surfaced by the analysis:**
+   `ADR-CARRYFWD` (uncritical metric/baseline carry-forward — inherited-floor / V_meta-ceiling / VT₀)
+   and `ADR-DILUTION` (form-vs-substance Layer-A→Layer-B paraphrase dilution).
+5. **C1 (split-or-commit gates), F1/G1 (report→GateEvent pointers + north-star) — elevate F1/G1:**
+   the "done" ledger must be DERIVED from actual merged code, not a separately-edited doc (exp4's
+   merge-drift: 12 "closed" gaps never merged, caught only by git forensics).
 
 ## 7. Forward hook — quay as a document-management substrate
 This proposal's own future is Axis-1 applied to *documents at large*: proposals, plans, and design
