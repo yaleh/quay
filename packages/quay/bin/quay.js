@@ -97,6 +97,20 @@ function parseFlags(argv) {
   return { flags, positional };
 }
 
+// exp5-M-GATE-CLI-ARG-ORDER: the six verb-less commands (gate/gate-log/complete/
+// adjudicate/promote/retreat) take <task-id> as their first positional. The
+// top-level destructure `const [, , cmd, sub, ...rest] = process.argv` puts
+// argv[3] in `sub` and parses ONLY `rest`, so a LEADING flag (e.g.
+// `quay gate --gate dod ID`) was misread as the id AND its value was dropped
+// from the flag parse (flags.gate lost -> silently defaulted). Re-parse the full
+// `[sub, ...rest]` — exactly as the `run` command already does — so the id and
+// flags are recovered flag-aware, in either order. Returns { flags, id }; `id`
+// is undefined when no positional was given (caller must emit a usage error).
+function parseVerbless(sub, rest) {
+  const { flags, positional } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
+  return { flags, id: positional[0] };
+}
+
 // resolveProviderEnv is now imported from ../src/provider-env.js (QN-045):
 // this file, src/mcp-server.js, and src/serve.js all share the single
 // implementation there, closing the DESIGN.md §4.4 asymmetry.
@@ -795,41 +809,47 @@ async function main() {
   }
 
   if (cmd === "gate") {
-    // AC2: evaluate a named gate against <task> (id is in `sub`); exit 0 pass /
-    // 1 fail; append exactly one GateEvent. Mirrors `task check`'s exit-code
-    // plumbing (process.exitCode = ok ? 0 : 1).
-    const id = sub;
+    // AC2: evaluate a named gate against <task>; exit 0 pass / 1 fail; append
+    // exactly one GateEvent. Mirrors `task check`'s exit-code plumbing
+    // (process.exitCode = ok ? 0 : 1). Id + flags are flag-aware in either order
+    // (exp5-M-GATE-CLI-ARG-ORDER).
+    const { flags: vf, id } = parseVerbless(sub, rest);
+    if (!id) { console.error("quay gate: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
-      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: flags.file });
+      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
       // QENG-2 (proposal §4, review note 2): default gate is `acceptance` at the
       // CLI layer only (engine's own `gate="dod"` default is untouched — only
       // direct programmatic callers hit it). `--gate dod` still routes to QENG-1's
       // dod gate. QUAY_ACCEPTANCE_CWD pins the acceptance runner's cwd to the
       // workspace root without changing the engine's `(task, client)` signature.
-      const gate = flags.gate ?? "acceptance";
+      const gate = vf.gate ?? "acceptance";
       process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
       const { ok, reason } = await runGate({ client, id, gate, logPath });
       console.log(ok ? "PASS" : `FAIL — ${reason}`);
       process.exitCode = ok ? 0 : 1;
-    }, { providerId: flags.provider });
+    }, { providerId: vf.provider });
     return;
   }
 
   if (cmd === "gate-log") {
-    // AC3: read-only query of GateEvents for <task> (id is in `sub`), filtered
-    // by pipeline_id. Never appends. `--json` is read directly off flags.json
-    // (plain --json needs no jsonCommands allowlist change; that governs only
-    // the --format json alias — proposal review note #4).
-    const id = sub;
+    // AC3: read-only query of GateEvents for <task>, filtered by pipeline_id.
+    // Never appends. `--json` is read directly off flags.json. Id + flags are
+    // flag-aware in either order (exp5-M-GATE-CLI-ARG-ORDER). A missing id is an
+    // explicit usage error (exit 1) — chosen deliberately over the previous
+    // silent-empty output, to mirror the other five verb-less commands, which all
+    // require an id; querying ALL ids unfiltered is a distinct operation that
+    // would need its own explicit flag, not a missing-argument fallthrough.
+    const { flags: vf, id } = parseVerbless(sub, rest);
+    if (!id) { console.error("quay gate-log: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
       const events = runGateLogQuery(cfg.workspaceRoot, {
         pipelineId: id,
-        gate: flags.gate,
-        file: flags.file,
+        gate: vf.gate,
+        file: vf.file,
       });
-      if (flags.json) printJson(events);
+      if (vf.json) printJson(events);
       else events.forEach((e) => console.log(`${e.timestamp} ${e.gate} ${e.verdict}`));
-    }, { providerId: flags.provider });
+    }, { providerId: vf.provider });
     return;
   }
 
@@ -839,40 +859,44 @@ async function main() {
   // its own process.exitCode. QUAY_ACCEPTANCE_CWD is pinned before commands that
   // may run the acceptance gate (complete, and promote's ready→done delegate).
   if (cmd === "complete") {
-    const id = sub;
+    const { flags: vf, id } = parseVerbless(sub, rest);
+    if (!id) { console.error("quay complete: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
-      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: flags.file });
+      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
       process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
       await runComplete({ client, id, logPath });
-    }, { providerId: flags.provider });
+    }, { providerId: vf.provider });
     return;
   }
 
   if (cmd === "adjudicate") {
-    const id = sub;
+    const { flags: vf, id } = parseVerbless(sub, rest);
+    if (!id) { console.error("quay adjudicate: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
-      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: flags.file });
+      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
       await runAdjudicate({ client, id, logPath });
-    }, { providerId: flags.provider });
+    }, { providerId: vf.provider });
     return;
   }
 
   if (cmd === "promote") {
-    const id = sub;
+    const { flags: vf, id } = parseVerbless(sub, rest);
+    if (!id) { console.error("quay promote: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
-      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: flags.file });
+      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
       process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
       await runPromote({ client, id, logPath });
-    }, { providerId: flags.provider });
+    }, { providerId: vf.provider });
     return;
   }
 
   if (cmd === "retreat") {
-    const id = sub;
+    const { flags: vf, id } = parseVerbless(sub, rest);
+    if (!id) { console.error("quay retreat: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
-      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: flags.file });
-      await runRetreat({ client, id, reason: flags.reason, logPath });
-    }, { providerId: flags.provider });
+      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
+      await runRetreat({ client, id, reason: vf.reason, logPath });
+    }, { providerId: vf.provider });
     return;
   }
 

@@ -429,3 +429,16 @@ test("C [AC3]: `quay promote <done>` → nonzero + `illegal transition: done can
   assert.notEqual(r.status, 0, `expected nonzero; got ${r.status}, stdout=${r.stdout}`);
   assert.match(r.stderr, /illegal transition: done cannot forward/);
 });
+
+// --- exp5-M-GATE-CLI-ARG-ORDER: flag-before-id on the lifecycle verb-less commands ---
+test("C [ARG-ORDER]: `quay complete --file <log> <id>` (flag before id) == id-first", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("argorder-complete");
+  const logFile = path.join(workspaceRoot, "g.jsonl");
+  runNative(["task", "create", "LC-PASS", "--title", "ready+passing", "--status", "ready",
+    "--body", validSections + acDodChecked], tasksDir);
+  runQuay(["task", "edit", "LC-PASS", "--acceptance", "true"], workspaceRoot);
+  const r = runQuay(["complete", "--file", logFile, "LC-PASS"], workspaceRoot);
+  assert.equal(r.status, 0, `flag-first complete should exit 0; got ${r.status}, stderr=${r.stderr}, stdout=${r.stdout}`);
+  const after = JSON.parse(runQuay(["task", "view", "LC-PASS", "--json"], workspaceRoot).stdout);
+  assert.equal(after.status, "done");
+});

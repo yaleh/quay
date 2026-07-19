@@ -330,3 +330,26 @@ test("C1: `quay gate <task>` defaults to the acceptance gate when --gate is omit
   assert.equal(r.status, 1, `expected acceptance default fail-closed (exit 1); got ${r.status}, stdout=${r.stdout}, stderr=${r.stderr}`);
   assert.match(r.stdout, /no acceptance command defined/);
 });
+
+// --- exp5-M-GATE-CLI-ARG-ORDER: flag-before-id must parse identically to id-first ---
+// Bug: verb-less commands read `const id = sub` (raw argv[3]) and flags off
+// parseFlags(rest). A leading flag lands in `sub` (misread as the id) AND its value
+// is lost from the flag parse. Fix: re-parse [sub, ...rest] like `run` does.
+test("C [ARG-ORDER]: `quay gate --gate dod <id>` (flag before id) == id-first order", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("argorder-gate");
+  const logFile = path.join(workspaceRoot, "g.jsonl");
+  runNative(["task", "create", "COMPLIANT", "--title", "Compliant fixture",
+    "--status", "todo", "--body", validSections + acDodChecked], tasksDir);
+  // flag BEFORE the id — must behave identically to the documented id-first order,
+  // and --gate dod must actually route to the dod gate (not be silently lost).
+  const r = runQuay(["gate", "--gate", "dod", "COMPLIANT", "--file", logFile], workspaceRoot);
+  assert.equal(r.status, 0, `flag-first should exit 0 PASS; got ${r.status}, stderr=${r.stderr}, stdout=${r.stdout}`);
+  assert.match(r.stdout, /PASS/);
+});
+
+test("C [ARG-ORDER]: `quay gate-log` with NO id → explicit usage error (not silent empty)", () => {
+  const { workspaceRoot } = makeWorkspace("argorder-gatelog-noid");
+  const r = runQuay(["gate-log", "--gate", "acceptance"], workspaceRoot);
+  assert.notEqual(r.status, 0, `missing id should be a usage error (nonzero); got ${r.status}, stdout=${r.stdout}`);
+  assert.match(r.stderr + r.stdout, /missing required.*task-id|requires a .*task-id/i);
+});
