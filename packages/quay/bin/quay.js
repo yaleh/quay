@@ -15,6 +15,11 @@ import { QUAY_VERSION } from "../src/version.js";
 import { runGate } from "../src/gate/engine.js";
 import { listGates } from "../src/gate/registry.js";
 import { resolveGateLogPath, runGateLogQuery } from "../src/gate/gate-log.js";
+// QENG-3: complete/adjudicate/promote/retreat lifecycle — the thin
+// status-WRITING layer over the gate engine. Four verb-less top-level commands
+// (id in `sub`), each mirroring the `gate` branch's withProvider/resolveGateLogPath
+// plumbing. Illegal transitions throw → the top-level catch reports them.
+import { runComplete, runAdjudicate, runPromote, runRetreat } from "../src/gate/lifecycle.js";
 
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
@@ -181,6 +186,10 @@ Usage:
   quay task check <task-id> [--json]
   quay action list <task-id> [--json]
   quay action run <task-id> <action-id> [--json]
+  quay complete <task-id> [--file <log-path>]
+  quay adjudicate <task-id> [--file <log-path>]
+  quay promote <task-id> [--file <log-path>]
+  quay retreat <task-id> --reason <reason> [--file <log-path>]
   quay serve [--port <port>]
   quay mcp
 
@@ -233,6 +242,15 @@ Options for task edit:
   creating a titleless or empty-titled task — use 'quay task create' for a dedicated create path
   instead).
 
+Lifecycle commands (QENG-3) — status-writing verbs over the {todo,ready,done,needs-human} phases:
+  complete <id>     Precondition status=ready; runs the acceptance gate; on pass writes status=done
+                    (exit 0), on fail leaves status unchanged (exit 1). Not-ready → exit 1, no gate/write.
+  adjudicate <id>   Independent read-only audit pass; records an audit GateEvent (see gate-log);
+                    never writes status; exit 0 always.
+  promote <id>      One legal forward step (todo->ready via the dod gate; ready->done via complete).
+  retreat <id> --reason <r>   One legal backward step (done->ready, ready->todo); --reason is required
+                    and recorded in the GateEvent. An illegal transition exits nonzero with a message.
+  --file <log-path>  Override the GateEvent log path (default <workspaceRoot>/.quay/gate-events.jsonl)
 
 Examples:
   quay task list --prefix QX          List only QX-* tasks
@@ -798,8 +816,51 @@ async function main() {
     return;
   }
 
+  // QENG-3: complete/adjudicate/promote/retreat lifecycle. Verb-less top-level
+  // commands (id lands in `sub`), each mirroring the `gate` branch: withProvider
+  // resolves the client + cfg; logPath via resolveGateLogPath; each run* fn sets
+  // its own process.exitCode. QUAY_ACCEPTANCE_CWD is pinned before commands that
+  // may run the acceptance gate (complete, and promote's ready→done delegate).
+  if (cmd === "complete") {
+    const id = sub;
+    await withProvider(async (client, cfg) => {
+      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: flags.file });
+      process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+      await runComplete({ client, id, logPath });
+    }, { providerId: flags.provider });
+    return;
+  }
+
+  if (cmd === "adjudicate") {
+    const id = sub;
+    await withProvider(async (client, cfg) => {
+      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: flags.file });
+      await runAdjudicate({ client, id, logPath });
+    }, { providerId: flags.provider });
+    return;
+  }
+
+  if (cmd === "promote") {
+    const id = sub;
+    await withProvider(async (client, cfg) => {
+      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: flags.file });
+      process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+      await runPromote({ client, id, logPath });
+    }, { providerId: flags.provider });
+    return;
+  }
+
+  if (cmd === "retreat") {
+    const id = sub;
+    await withProvider(async (client, cfg) => {
+      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: flags.file });
+      await runRetreat({ client, id, reason: flags.reason, logPath });
+    }, { providerId: flags.provider });
+    return;
+  }
+
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <task list|view|create|edit|check|gate|gate-log|action list|run|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|action list|run|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
 }
 
