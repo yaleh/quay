@@ -311,17 +311,16 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      VT-scoring / (b) iteration-0 self-exemption are retained ONLY as escalation hints for how hard to
      push the refutation, never as a gate on WHETHER the audit runs.
    - **V_meta consolidation-lag gate (DIR-005 / M07-vmeta-gate, HARD BLOCK on step 7's
-     `milestone_counter++`):** before this milestone may be marked DONE / `milestone_counter`
-     incremented in step 7 below, check every row in `v-meta-ledger.md`. For each row whose status is
-     `confirmed` (past the φ 2-cross-domain-confirmation threshold) but not yet `consolidated`,
-     compute `milestones-since-confirmed = milestone_counter (current, pre-increment) − confirming
-     milestone number (recorded in the row)`. If this exceeds the `dashboard.md` `V_meta
-     consolidation lag` health track's alarm (**K=2**), step 7's `milestone_counter++` MUST NOT
-     execute until the row is resolved by EITHER (a) consolidating the row's pattern into
-     `inherited-core.md` at this ABSORB (pasted diff) OR (b) recording an explicit DATED
-     carry-forward reason directly in the ledger row (no silent deferral — a missing/blank
-     disposition is not a valid resolution). Update the row's status/notes in `v-meta-ledger.md`
-     accordingly as part of this ABSORB step, before proceeding to step 7.
+     `milestone_counter++`):** the arithmetic (`milestones-since-confirmed = milestone_counter −
+     confirming-milestone`; ALARM when `> K=2` for a `confirmed`-not-`consolidated` row lacking a DATED
+     carry-forward) is the single-source check `scripts/vmeta-lag-check.mjs` (wrapper `scripts/vmeta-lag-check.sh
+     [--counter <N>] v-meta-ledger.md`, selfcheck `vmeta-lag-selfcheck.sh`; a future `quay gate --gate
+     vmeta-lag` WRAPS it, M39 precedent — never a 2nd impl). Run it with `--counter <current
+     pre-increment milestone_counter>` and paste stdout as evidence; non-zero exit (ALARM) HARD-BLOCKS
+     step 7's `milestone_counter++`. **Uncoded (still yours, this ABSORB — the script does NOT do it):**
+     resolve each alarmed row by EITHER (a) consolidating its pattern into `inherited-core.md` (pasted
+     diff) OR (b) a DATED carry-forward reason in the ledger row — no silent deferral (missing/blank is
+     not a valid resolution); update the row in `v-meta-ledger.md`, then re-run to 0 before step 7.
    - **Design-only-milestone impl-row gate (DIR-016/M21; HARD-BLOCKS step 7's `milestone_counter++`,
      same shape/placement as the V_meta + adversarial-audit gates).** Check logic + the design-only
      definition + the "row created ever, even if later SELECTed & DONE" semantics all live in
