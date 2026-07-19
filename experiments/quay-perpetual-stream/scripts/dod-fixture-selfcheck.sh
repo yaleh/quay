@@ -13,10 +13,12 @@
 # `it0-dod-check.mjs` clause 5, NOT in these fixtures. When the fix lands, this script must go green
 # with the fixtures UNCHANGED.
 #
-# M32 extension (DIR-017 Step 2): 4 new fixtures added below (2 clauses × violating/compliant pair
-# each) for Clause 6 (escrow-Δv) and Clause 7 (product-work test-floor) — the original 5 CASES above
-# are unchanged, same discipline as DIR-019's own "fixtures unchanged" rule for a fix to the
-# enforcer's own code.
+# M32 extension (DIR-017 Step 2): 5 new fixtures added below — 4 (2 clauses × violating/compliant
+# pair each) for Clause 6 (escrow-Δv) and Clause 7 (product-work test-floor), plus a 5th
+# (self-exempt-escrow-stub.md) added during the two-iteration reconciliation ABSORB pinning the
+# MECHANICALLY_UNCONDITIONAL_CLAUSES decision (see inherited-core.md's Clause 6/7 reconciliation
+# note) — the original 5 CASES above are unchanged, same discipline as DIR-019's own "fixtures
+# unchanged" rule for a fix to the enforcer's own code.
 #
 # Usage:  dod-fixture-selfcheck.sh
 # Exit:   0 = all fixtures behaved as asserted; 1 = at least one mismatch; 2 = environment error.
@@ -41,6 +43,13 @@ CASES=(
   "M97B-fake-escrow-compliant|$FIX/escrow-deltav-compliant-stub.md|0"
   "M93-fake-testfloor-violating|$FIX/test-floor-violating-stub.md|1"
   "M93B-fake-testfloor-compliant|$FIX/test-floor-compliant-stub.md|0"
+  # Reconciliation-ABSORB addition (both M32 iteration branches merged) — pins the
+  # MECHANICALLY_UNCONDITIONAL_CLAUSES decision: Clause 6 (escrow-Δv) must be in that set (same
+  # DIR-019 shape as Clauses 3/4 — dispositionedClauses.add() fires on every branch including N/A),
+  # or an undeclared self-exemption of Clause 6 while its own trigger legitimately doesn't fire goes
+  # uncaught. See fixtures/dod/self-exempt-escrow-stub.md's own header for the live before/after
+  # repro this fixture pins.
+  "M92-fake-escrow-self-exempt|$FIX/self-exempt-escrow-stub.md|1"
 )
 
 fail=0

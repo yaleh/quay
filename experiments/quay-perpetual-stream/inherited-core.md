@@ -1083,6 +1083,59 @@ silent gap.
   evaluated independently of Clause 6 (different trigger axis: design-only-ness vs. surface label),
   positioned last in the clause sequence.
 
+### Reconciliation note — Clauses 6/7 belong in `MECHANICALLY_UNCONDITIONAL_CLAUSES` (M32
+### two-iteration reconciliation ABSORB, 2026-07-19)
+
+M32 ran two independent `baime:iteration-executor` iterations on separate branches
+(`exp5-m32-iteration-0`, `exp5-m32-iteration-1`); both delivered the same Clause 6/7 text and
+mechanization, but disagreed on one design point: should `escrow-delta-v`/`test-floor` be added to
+`it0-dod-check.mjs`'s `MECHANICALLY_UNCONDITIONAL_CLAUSES` set (the DIR-019 fix's carve-out list —
+see Clause 5 above)? Iteration-0 added them; iteration-1 deliberately did not, arguing Clause 6/7
+are documentation-discipline checks like Clauses 1/2, and that DIR-019's rationale for
+line-budget/impl-row (which "fire on literally every run regardless of content") doesn't transfer,
+because Clause 6/7's non-firing is conditioned on real backlog-row/task-label content.
+
+**Resolved in favor of iteration-0, on the merits — iteration-1's own code contradicts its
+report's central factual claim.** DIR-019's actual dispositive test (`it0-dod-check.mjs`'s own
+Clause-5 comment block, and the DIR-019 archived Finding) is not "is the clause's OUTCOME
+content-conditioned" — it is "does `dispositionedClauses.add(...)` get called on literally every
+code path, including the FAIL path, so that 'already dispositioned' becomes true unconditionally
+and the clause-5 carve-out becomes dead code." Reading iteration-1's own `it0-dod-check.mjs` diff
+line by line: its Clause 6 block calls `dispositionedClauses.add("escrow-deltav")` after the
+`if (unescrowed.length > 0) {...} else {...}` block — i.e. on the FAIL branch too, not only on
+N/A/PASS — and Clause 7's block does the same for `"test-floor"`. This is structurally IDENTICAL
+to Clauses 3/4's shape, not Clauses 1/2's (Clauses 1/2 only call `.add()` on their
+disposition-found branch; the "no disposition found" branch is a bare `failures.push(...)` with NO
+`.add()` call, which is what makes "already dispositioned" a REAL, non-vacuous signal for them).
+Iteration-1's report (§1, "Design decisions") asserts "both branches — trigger-fired and
+trigger-not-fired — call `dispositionedClauses.add`, same as Clauses 1/2, not Clauses 3/4's
+unconditional-every-run pattern" — this is factually incorrect about its own code as shown above.
+
+**Live reproduction (constructed during this reconciliation, not merely argued from reading code).**
+A fixture where Clause 6's trigger legitimately does NOT fire (milestone is not design-only) but
+the charter's "Explicitly OUT of scope" section still contains undeclared self-exemption language
+naming the escrow-Δv gate, with no waiver line: run against iteration-1's un-patched script, this
+produces a FALSE PASS (exit 0) — the exact DIR-019 bug shape, reproduced for Clause 6. Run against
+iteration-0's script (Clause 6/7 IN `MECHANICALLY_UNCONDITIONAL_CLAUSES`), the same fixture
+correctly FAILs (exit 1), naming the offending line. This refutes iteration-1's premise that
+content-conditioning of the TRIGGER prevents the self-exemption gap: a milestone can have Clause
+6's trigger legitimately not fire AND still carry free-form undeclared exemption prose for that
+clause in an unrelated section of the charter — the trigger's content-conditioning does nothing to
+stop that, because the exemption language and the trigger condition are independently authored
+text. This reproduction is now a permanent regression fixture,
+`fixtures/dod/self-exempt-escrow-stub.md` (`M92-fake-escrow-self-exempt`, asserted exit 1 in
+`dod-fixture-selfcheck.sh`), added during this reconciliation ABSORB alongside the 4 fixtures
+carried over from iteration-0's branch — mirroring exactly how DIR-019 itself added
+`self-exempt-linebudget-stub.md`/`self-exempt-implrow-stub.md` as the external, human-authored red
+tests for Clauses 3/4's own version of this bug.
+
+**Disposition:** `it0-dod-check.mjs`'s `MECHANICALLY_UNCONDITIONAL_CLAUSES` set is
+`["line-budget", "impl-row", "escrow-delta-v", "test-floor"]` (iteration-0's naming), confirmed
+correct by the live repro above. Iteration-1's engineering work (the Clause 6/7 prose, trigger
+logic, and fixture *shape*) was independently valuable and is reflected in this section's design —
+only the `MECHANICALLY_UNCONDITIONAL_CLAUSES` omission was rejected, on the specific evidence
+above, not on branch precedence or arrival order.
+
 ### `scripts/it0-dod-check.{sh,mjs}` — the standing mechanical check
 Given a milestone id, its charter file path, and its dashboard/ABSORB-entry text (or a fixture file
 standing in for that text), runs all 7 clauses above (0-7, all named individually — there is no

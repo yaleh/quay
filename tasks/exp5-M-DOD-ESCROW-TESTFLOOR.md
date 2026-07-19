@@ -5,7 +5,7 @@ title: "DIR-017 Step 2: add the escrow-Δv clause (a design-only milestone's Δv
   (product-touching work carries real tests >=80%, actually run) to
   inherited-core.md's Definition of Done, mechanically enforced by
   it0-dod-check.mjs as new Clause 6/7"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - surface:method-infra
@@ -84,4 +84,59 @@ must explicitly re-run `dod-fixture-selfcheck.sh` against the merged state (not 
 milestone's own self-report), mirroring the discipline DIR-019 established for Clause-5 work.
 
 ## Status mirror
-todo (SELECTed @m32 DRAIN/SELECT boundary, 2026-07-19)
+done (ABSORBed @m32, reconciliation merge, 2026-07-19)
+
+**Two-iteration reconciliation.** M32 ran as two independent `baime:iteration-executor` agents on
+separate branches, `exp5-m32-iteration-0` (HEAD `752221c`) and `exp5-m32-iteration-1` (HEAD
+`135d3ec`), each implementing Clause 6 (escrow-Δv) and Clause 7 (product-work test-floor)
+end-to-end (inherited-core.md text, it0-dod-check.mjs mechanization, 4 new fixtures each,
+dod-fixture-selfcheck.sh wiring). Reconciled onto `exp5-outer-driver` via
+`git merge --no-ff exp5-m32-iteration-0` (merge commit `6620870`), taking iteration-0's branch as
+primary, followed by a direct reconciliation commit that (a) adds a reconciliation note to
+`inherited-core.md` recording the resolved design disagreement, and (b) adds a new regression
+fixture (`fixtures/dod/self-exempt-escrow-stub.md`, `M92-fake-escrow-self-exempt`) that pins the
+decision with a live repro.
+
+**Reconciliation decision — `MECHANICALLY_UNCONDITIONAL_CLAUSES` question, resolved in favor of
+iteration-0.** The two iterations disagreed on whether Clause 6/7 (`escrow-delta-v`, `test-floor`)
+belong in `it0-dod-check.mjs`'s `MECHANICALLY_UNCONDITIONAL_CLAUSES` set (the DIR-019-fix carve-out
+list controlling whether Clause 5's no-self-exemption scan trusts an "already dispositioned" state
+as evidence of legitimate non-firing). Iteration-0 added them; iteration-1 did not, arguing Clause
+6/7 are documentation-discipline checks (like Clauses 1/2) whose non-firing is conditioned on real
+backlog-row content, unlike line-budget/impl-row which fire on literally every run regardless of
+content. This was resolved on the merits, not by branch precedence: reading both scripts' actual
+code line-by-line showed iteration-1's own Clause 6/7 blocks call `dispositionedClauses.add(...)`
+on EVERY branch including the FAIL branch — structurally identical to Clauses 3/4's
+always-dispositioned shape (the exact DIR-019 bug pattern), not to Clauses 1/2's shape (whose "no
+disposition found" branch has no `.add()` call at all, making "already dispositioned" a real,
+non-vacuous signal only for those two). Iteration-1's own report asserted the opposite about its
+own code; this claim was checked against the actual diff and found factually incorrect. A live
+fixture repro was constructed during reconciliation (a milestone where Clause 6's trigger
+legitimately does not fire, but the charter still carries undeclared self-exemption language for
+the escrow-Δv gate with no waiver line): against iteration-1's un-patched script this produced a
+FALSE PASS (exit 0); against iteration-0's script (Clause 6/7 in
+`MECHANICALLY_UNCONDITIONAL_CLAUSES`) it correctly FAILs (exit 1). This refutes iteration-1's
+premise — a milestone can have Clause 6's trigger legitimately not fire while still carrying
+free-form undeclared exemption prose for that clause elsewhere in the charter, because the trigger
+condition and the exemption language are independently authored text. See `inherited-core.md`'s
+"Reconciliation note — Clauses 6/7 belong in `MECHANICALLY_UNCONDITIONAL_CLAUSES`" subsection
+(directly after Clause 7) for the full write-up.
+
+**Fixture-ID disposition.** Both iterations added 4 fixtures under `fixtures/dod/` with matching
+filenames but different internal fake-milestone IDs. iteration-0's content/IDs (`M97-fake-escrow-
+violating`, `M97B-fake-escrow-compliant`, `M93-fake-testfloor-violating`, `M93B-fake-testfloor-
+compliant`) were kept (not merged with iteration-1's set — 2 fixtures per clause is sufficient);
+none of these IDs collide with the 5 pre-existing fixtures (`M94`-`M99`, excluding `M97`/`M93`
+which were unused). A 10th fixture (`M92-fake-escrow-self-exempt`) was added during reconciliation
+specifically to pin the `MECHANICALLY_UNCONDITIONAL_CLAUSES` decision.
+
+**Verification against the reconciled merged state (not either iteration's self-report):**
+- `bash scripts/dod-fixture-selfcheck.sh` — **10/10 fixtures PASS** (5 pre-existing + 4 from
+  iteration-0 + 1 new reconciliation fixture).
+- `bash scripts/it0-dir-projection-check.sh experiments/quay-perpetual-stream` — **PASS** (19 DIR
+  files vs. 17 label:directive tasks, no divergence).
+- `node scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream --write` — re-run, only a
+  timestamp diff (no content drift).
+
+**Realized Δv = 0** — this is a method-infra/governance-integrity milestone, no VT chart cell,
+mirrors the M25/M30/M31 precedent already established for this DoD-program lineage.

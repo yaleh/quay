@@ -32,4 +32,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_25 milestone-candidate task(s) as of 2026-07-19T02:18:22.521Z._
+_25 milestone-candidate task(s) as of 2026-07-19T02:53:31.451Z._
