@@ -165,3 +165,28 @@ of DIR-017's own ordering." M23 performs no work toward any of DIR-017's steps
 0-3 and does not touch `inherited-core.md` (confirmed by this milestone's own
 `git diff --stat` evidence). Deferred, out of scope for M23 — remains open for a
 future milestone's own SELECT/charter.
+
+**Disposition note (M32-dod-escrow-testfloor, reconciliation ABSORB, 2026-07-19, NOT a
+resolution — this DIR stays `pending`, status unchanged):** Step 2 is now
+**delivered by M32** — the two Step 2 clauses named above (escrow-Δv,
+product-work test-floor) are authored as Clause 6 and Clause 7 in
+`inherited-core.md`'s "Definition of Done" section, mechanically implemented in
+`scripts/it0-dod-check.mjs`, and regression-covered by 5 new fixtures under
+`fixtures/dod/` wired into `scripts/dod-fixture-selfcheck.sh` (10/10 fixtures PASS,
+original 5 unchanged). M32 ran as two independent iteration-executor branches that
+disagreed on one design point (whether Clause 6/7 belong in
+`it0-dod-check.mjs`'s `MECHANICALLY_UNCONDITIONAL_CLAUSES` set); this was resolved
+on the merits during reconciliation, with a live fixture repro
+(`fixtures/dod/self-exempt-escrow-stub.md`) pinning the decision — see
+`inherited-core.md`'s Clause 6/7 reconciliation note for the full reasoning.
+`OUTER-LOOP.md` step 6's DoD meta-enforcer gate text now names Clauses 6/7
+explicitly. Per this DIR's own clearance-note text, clearing the human-verification
+gate only unlocked Step 2 for SELECT — it does not itself complete Step 2, and this
+note records that a milestone has now done so; the external acceptance predicate
+(`dod-fixture-selfcheck.sh` green, fixtures unchanged in behavior/intent) is the
+evidence, not the DoD gate's own self-report. **Step 3 (leakage metrics onto
+`dashboard.md`) remains open and separately selectable** — M32 does not touch it,
+and a future SELECT may choose it or another backlog row may take priority; this
+note does not assume Step 3 is automatically next. This DIR's `status:`
+frontmatter stays `pending`; do not archive or flip to done on the strength of M32
+alone.

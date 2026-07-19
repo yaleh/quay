@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-DOD-ESCROW-TESTFLOOR | DIR-017 Step 2: add the escrow-Δv clause (a design-only milestone's Δv is provisional until its -IMPL ships) and the product-work test-floor clause (product-touching work carries real tests >=80%, actually run) to inherited-core.md's Definition of Done, mechanically enforced by it0-dod-check.mjs as new Clause 6/7 | DONE | explore, governance-integrity (primary) — closes two more Goodhart surfaces named by | milestone-candidate, surface:method-infra, milestone:M32-dod-escrow-testfloor |
 | exp5-M-CLI-GATE-ENFORCEMENT | quay task edit --status: decide and implement whether the CLI write path should itself enforce the task check gate, or explicitly document it as an unguarded setter (Skill-level discipline only) | DONE | governance-integrity (primary — this is the same "gate is both contestant and judge" class already | milestone-candidate, surface:cli, milestone:M31-cli-gate-enforcement |
 | exp5-M-QUAY-CLI-CREATE-ERGONOMICS | quay CLI task-creation ergonomics: fix silent title-less task creation (data-integrity bug), add a dedicated create verb, address stale --help text and MCP per-call latency | DONE | exploit (fix known real defects/gaps found via the competitive benchmark), capability-growth | milestone-candidate, surface:cli, milestone:M29-cli-create-ergonomics |
 | exp5-M-OUTCOME-EVAL | Outcome-based (job-to-be-done) evaluation: fixed real end-to-end task-board scenarios, binary pass/fail, dogfooding-gated | DONE | explore, method infra, no VT points | milestone-candidate, surface:cross-cutting, milestone:M28-outcome-eval |
@@ -31,4 +32,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_24 milestone-candidate task(s) as of 2026-07-19T01:50:50.556Z._
+_25 milestone-candidate task(s) as of 2026-07-19T03:07:35.071Z._

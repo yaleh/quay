@@ -268,24 +268,32 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      because SELECT (step 1) only considers non-DONE rows and a deferral with no row is a deferral
      to never (DIR-016's finding). Record the check's PASS/FAIL output directly in this ABSORB's log
      entry, mirroring the V_meta gate's row-update discipline.
-   - **DoD meta-enforcer gate (DIR-017 / M25-dod-meta-enforcer, HARD BLOCK on step 7's
-     `milestone_counter++`):** runs immediately AFTER the adversarial-audit gate, V_meta
-     consolidation-lag gate, and design-only-milestone impl-row gate above all individually clear,
-     and BEFORE the driver→master publish sub-step below. This gate does NOT replace any of the
-     three individual gates above — each keeps its own HARD BLOCK text and evaluation as-is — it
-     adds ONE more standing check that the RECORD of all four DoD clauses (`inherited-core.md`'s
-     "Definition of Done" section: adversarial-audit, V_meta-lag, line-budget, impl-row) plus the
-     no-self-exemption meta-clause is actually complete and undrifted for this milestone. Run:
-     `scripts/it0-dod-check.sh <milestone-id> <charter-file> <absorb-entry-text-or-file>` — where
-     `<absorb-entry-text-or-file>` is this milestone's own ABSORB log entry (the same text just
-     produced by the three gates above, saved to a file if not already one). A non-zero exit is the
-     SAME HARD BLOCK shape/placement as the three gates it wraps: `milestone_counter++` **MUST NOT**
-     run until the check is re-run and PASSes (exit 0). Record the check's PASS/FAIL output directly
-     in this ABSORB's log entry, mirroring the V_meta gate's and impl-row gate's own row-update
-     discipline. (Line-budget, the fourth DoD clause, fires separately at plan-time per step 1 —
-     `it0-dod-check.sh` re-checks the charter's own line-budget clause here too, at ABSORB, as a
-     drift check that plan-time's PASS still holds against the FINAL charter text, but a plan-time
-     FAIL on that clause alone is not this gate's primary trigger point.)
+   - **DoD meta-enforcer gate (DIR-017 / M25-dod-meta-enforcer Step 1 + M32-dod-escrow-testfloor
+     Step 2, HARD BLOCK on step 7's `milestone_counter++`):** runs immediately AFTER the
+     adversarial-audit gate, V_meta consolidation-lag gate, and design-only-milestone impl-row gate
+     above all individually clear, and BEFORE the driver→master publish sub-step below. This gate
+     does NOT replace any of the three individual gates above — each keeps its own HARD BLOCK text
+     and evaluation as-is — it adds ONE more standing check that the RECORD of all six named DoD
+     clauses (`inherited-core.md`'s "Definition of Done" section: Clause 1 adversarial-audit,
+     Clause 2 V_meta-lag, Clause 3 line-budget, Clause 4 impl-row, Clause 6 escrow-Δv, Clause 7
+     product-work test-floor) plus the Clause 5 no-self-exemption meta-clause is actually complete
+     and undrifted for this milestone. Run: `scripts/it0-dod-check.sh <milestone-id> <charter-file>
+     <absorb-entry-text-or-file>` — where `<absorb-entry-text-or-file>` is this milestone's own
+     ABSORB log entry (the same text just produced by the three gates above, saved to a file if not
+     already one). A non-zero exit is the SAME HARD BLOCK shape/placement as the three gates it
+     wraps: `milestone_counter++` **MUST NOT** run until the check is re-run and PASSes (exit 0).
+     Record the check's PASS/FAIL output directly in this ABSORB's log entry, mirroring the V_meta
+     gate's and impl-row gate's own row-update discipline. (Line-budget, Clause 3, fires separately
+     at plan-time per step 1 — `it0-dod-check.sh` re-checks the charter's own line-budget clause
+     here too, at ABSORB, as a drift check that plan-time's PASS still holds against the FINAL
+     charter text, but a plan-time FAIL on that clause alone is not this gate's primary trigger
+     point. Clause 6 escrow-Δv fires only for design-only milestones claiming a nonzero Δv — see
+     `inherited-core.md`'s Clause 6 for the exact trigger condition. Clause 7 product-work
+     test-floor fires for milestones whose backlog row carries a product-touching `surface:` label
+     (`surface:cli`/`surface:web-ui`/`surface:provider-abi`/`surface:mcp`, or no `surface:` label at
+     all — fail-closed) — see `inherited-core.md`'s Clause 7 for the exact trigger condition and the
+     non-product-touching exemptions (`surface:method-infra`/`surface:docs`/`surface:cross-cutting`/
+     `surface:packaging`).)
    - **Driver → master publish sub-step (DIR-018 / M23-outer-driver-isolation, HARD sequencing —
      runs AFTER the adversarial-audit gate, V_meta consolidation-lag gate, design-only-milestone
      impl-row gate, AND the DoD meta-enforcer gate above all clear, and BEFORE step 7's

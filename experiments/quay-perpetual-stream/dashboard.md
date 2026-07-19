@@ -2722,3 +2722,71 @@ m32 DRAIN/SELECT.
 
 ## Backlog row
 | exp5-M-CLI-GATE-ENFORCEMENT | quay task edit --status: decide and implement whether the CLI write path should itself enforce the task check gate, or explicitly document it as an unguarded setter (Skill-level discipline only) | DONE | governance-integrity (primary — this is the same "gate is both contestant and judge" class already | milestone-candidate, surface:cli, milestone:M31-cli-gate-enforcement |
+
+---
+## ABSORB m32: M32-dod-escrow-testfloor
+
+Charter `charters/M32-dod-escrow-testfloor.md` (DIR-017 Step 2, unblocked by the human-verification-
+gate clearance, commit `e6bc3a2`, 2026-07-19). Two independent iterations (`exp5-m32-iteration-0` HEAD
+`752221c`, `exp5-m32-iteration-1` HEAD `135d3ec`) both delivered Clause 6 (escrow-Δv) and Clause 7
+(product-work test-floor) in `inherited-core.md`, mechanized in `it0-dod-check.mjs`, but disagreed on
+one real design point: whether Clause 6/7 belong in `MECHANICALLY_UNCONDITIONAL_CLAUSES`. Reconciled
+onto `exp5-outer-driver` (`git merge --no-ff exp5-m32-iteration-0` at `6620870`, followed by a
+reconciliation commit `c28ac39`) in favor of iteration-0's design — resolved on the merits via a live
+fixture repro showing iteration-1's own code contradicted its report's central claim (both branches'
+Clause 6/7 blocks call `dispositionedClauses.add(...)` unconditionally including the FAIL path,
+structurally identical to Clauses 3/4, not Clauses 1/2 as iteration-1 asserted about its own diff).
+Full reconciliation write-up: `inherited-core.md`'s "Reconciliation note" subsection (after Clause 7)
+and `tasks/exp5-M-DOD-ESCROW-TESTFLOOR.md`'s Status mirror.
+
+**adversarial-audit gate**: fresh-context, out-of-band subagent re-verified all 5 ACs + DoD, live-
+reran `dod-fixture-selfcheck.sh` and `it0-dir-projection-check.sh` against the merged state (not
+trusting the reconciliation's self-report), and constructed new adversarial fixtures per-clause per
+the charter's own instruction. adversarial-audit verdict: **CONCERNS** — two findings, both resolved
+before this ABSORB closed: (1) Clause 7's coverage-disposition regex was negation-blind (false-PASSed
+ABSORB-entry prose that admits inadequate coverage while mentioning "80%"/"test coverage" nearby) —
+fixed with a sentence-scoped negation window mirroring Clause 6's own technique, commit `fa644a7`,
+pinned as `fixtures/dod/test-floor-negation-poison-stub.md` (`M91-fake-testfloor-negation`), full
+suite reconfirmed **11/11 PASS**. (2) the task's `status: done` was set ahead of this ledger-of-record
+ABSORB write (dashboard.md/milestone_counter/backlog.md) — a sequencing gap, now closed by this entry.
+Neither finding implicated the Clause 6/7 design or the reconciliation decision.
+
+**V_meta consolidation-lag gate**: checked `v-meta-ledger.md` — one row, already `consolidated` (m7
+ABSORB), no `confirmed`-and-unresolved rows, no K=2 alarm applies. V_meta consolidation-lag: clear,
+N/A this milestone.
+
+**Impl-row gate**: N/A — not design-only (ships real code: `inherited-core.md` clauses,
+`it0-dod-check.mjs` logic, fixtures, `OUTER-LOOP.md` text), gate does not apply per its own trigger
+condition (no exemption claimed).
+
+**Test-floor gate (Clause 7, self-check)**: N/A for this milestone's own surface — `surface:method-
+infra` is exclusively non-product-touching per Clause 7's own trigger condition (confirmed by the
+audit: `git diff --stat` from base `b93a391` touches zero `packages/quay` files), not a self-exemption
+dodge.
+
+**Realized Δv**: 0 (method infra/governance-integrity, no VT chart cell — confirmed explicitly by both
+iterations, the reconciliation, and the audit). VT chart-1 total unchanged: **111.15/120** (unchanged
+since m29/m31).
+
+**Backlog housekeeping**: `tasks/exp5-M-DOD-ESCROW-TESTFLOOR.md` → `status: done` (already set at
+reconciliation; status-mirror now also records the acceptance-audit findings and their resolution).
+`backlog.md` regenerated via `node scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream
+--write` — row `exp5-M-DOD-ESCROW-TESTFLOOR` flips `SELECTED` → `DONE`. `milestone_counter` →
+**32**. Checkpoint cadence: not yet due (next due at milestone_counter=35, every-5 rule; last written
+cp-30). Continuing directly to m33 DRAIN/SELECT.
+
+**DIR-017 status**: Step 2 delivered by this milestone. DIR-017 itself stays `status: pending` — Step 3
+(leakage metrics onto `dashboard.md`) remains open and separately selectable; the DIR's own clearance-
+note language ("Steps 2/3 unlock, do not complete them") is preserved, not silently treated as fully
+resolved.
+
+**DRAIN disposition of `directives/pending/` at this boundary:**
+- **DIR-017**: no longer excluded from SELECT — Step 2 (this milestone) is delivered; Step 3 (leakage
+  metrics) is now the natural next DIR-017-sourced SELECT candidate, but is evaluated at m33 DRAIN
+  against the rest of the open backlog (`exp5-M-NATIVE-RELATION-SYNC`, `exp5-M-WEBUI-TRIGGER-HONESTY`),
+  not silently assumed to be next by default — see Note-for-ABSORB item 5 in this milestone's charter.
+- `directives/pending/` contains only DIR-017 (status stays `pending`, Step 3 open); no other pending
+  directives to drain this boundary.
+
+## Backlog row
+| exp5-M-DOD-ESCROW-TESTFLOOR | DIR-017 Step 2: add the escrow-Δv clause (a design-only milestone's Δv is provisional until its -IMPL ships) and the product-work test-floor clause (product-touching work carries real tests >=80%, actually run) to inherited-core.md's Definition of Done, mechanically enforced by it0-dod-check.mjs as new Clause 6/7 | DONE | explore, governance-integrity (primary) — closes two more Goodhart surfaces named by | milestone-candidate, surface:method-infra, milestone:M32-dod-escrow-testfloor |
