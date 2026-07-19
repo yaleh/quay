@@ -27,6 +27,7 @@ children:
   - exp5-M-CRYST-B5-PARSER-UNIFY
   - exp5-M-CRYST-B6-VALIDATOR-COVERAGE
   - exp5-M-CRYST-B7-LOADBEARING-TEST-GATE
+  - exp5-M-CRYST-E3
 extra: {}
 ---
 ## Proposal
