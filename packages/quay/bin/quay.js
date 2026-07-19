@@ -9,6 +9,12 @@ import { connectProvider } from "../src/provider-client.js";
 import { composePayload, deliverTrigger } from "../src/action.js";
 import { resolveProviderEnv } from "../src/provider-env.js";
 import { QUAY_VERSION } from "../src/version.js";
+// QENG-1: gate engine + GateEvent log. `gate`/`gate-log` are verb-less
+// top-level commands (see the main() dispatch below and their arg-extraction
+// note). runGate appends one GateEvent per run; runGateLogQuery is read-only.
+import { runGate } from "../src/gate/engine.js";
+import { listGates } from "../src/gate/registry.js";
+import { resolveGateLogPath, runGateLogQuery } from "../src/gate/gate-log.js";
 
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
@@ -716,8 +722,51 @@ async function main() {
     return;
   }
 
+  // QENG-1: gate engine. `gate`/`gate-log` are verb-less top-level commands, so
+  // the task id lands in `sub` (not positional[0]), and `--list` is detected as
+  // `sub === "--list"` — parseFlags never runs on it, so `flags.list` is never
+  // set (proposal §"Architect review notes" #1). Both handlers sit before the
+  // generic-usage fallback.
+  if (cmd === "gate" && sub === "--list") {
+    // AC1: list registered gates, one per line, exit 0. No provider connection.
+    console.log(listGates().join("\n"));
+    return;
+  }
+
+  if (cmd === "gate") {
+    // AC2: evaluate a named gate against <task> (id is in `sub`); exit 0 pass /
+    // 1 fail; append exactly one GateEvent. Mirrors `task check`'s exit-code
+    // plumbing (process.exitCode = ok ? 0 : 1).
+    const id = sub;
+    await withProvider(async (client, cfg) => {
+      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: flags.file });
+      const { ok, reason } = await runGate({ client, id, gate: flags.gate, logPath });
+      console.log(ok ? "PASS" : `FAIL — ${reason}`);
+      process.exitCode = ok ? 0 : 1;
+    }, { providerId: flags.provider });
+    return;
+  }
+
+  if (cmd === "gate-log") {
+    // AC3: read-only query of GateEvents for <task> (id is in `sub`), filtered
+    // by pipeline_id. Never appends. `--json` is read directly off flags.json
+    // (plain --json needs no jsonCommands allowlist change; that governs only
+    // the --format json alias — proposal review note #4).
+    const id = sub;
+    await withProvider(async (client, cfg) => {
+      const events = runGateLogQuery(cfg.workspaceRoot, {
+        pipelineId: id,
+        gate: flags.gate,
+        file: flags.file,
+      });
+      if (flags.json) printJson(events);
+      else events.forEach((e) => console.log(`${e.timestamp} ${e.gate} ${e.verdict}`));
+    }, { providerId: flags.provider });
+    return;
+  }
+
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <task list|view|create|edit|check|action list|run|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <task list|view|create|edit|check|gate|gate-log|action list|run|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
 }
 
