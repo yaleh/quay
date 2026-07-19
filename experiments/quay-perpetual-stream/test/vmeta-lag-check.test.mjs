@@ -49,6 +49,22 @@ test("rowStatus: reads proposed|confirmed|consolidated from the status cell (bol
   assert.equal(rowStatus("proposed — noted"), "proposed");
   assert.equal(rowStatus("something else"), null);
 });
+// HARDENING (R5 review must-fix #1 — fail-open): the CURRENT status is the first NON-NEGATED lifecycle
+// word. A genuinely-overdue row phrased "not consolidated yet, still confirmed" must read as CONFIRMED
+// (→ reaches the arithmetic → alarms), NOT silently as consolidated by an unordered keyword scan.
+test("rowStatus: negated 'consolidated' does not win — overdue prose reads as confirmed", () => {
+  assert.equal(rowStatus("not consolidated yet, still confirmed — pending fold"), "confirmed");
+  assert.equal(rowStatus("confirmed — not yet consolidated"), "confirmed");
+  assert.equal(rowStatus("still confirmed but not yet consolidated"), "confirmed");
+});
+// CRITICAL false-positive guard (the live consolidated row records its confirmation history):
+// "**consolidated** … twice-confirmed …" must read as CONSOLIDATED, not be flagged for naming 'confirmed'.
+test("rowStatus: a consolidated row that records its confirmation history reads as consolidated", () => {
+  assert.equal(rowStatus("**consolidated** (m7 ABSORB) — recording the m3 confirming instance, twice-confirmed convention"), "consolidated");
+});
+test("rowStatus: repeated SAME keyword still reads that word", () => {
+  assert.equal(rowStatus("confirmed — confirmed again (m3, m5)"), "confirmed");
+});
 
 // ── confirmingMilestone ─────────────────────────────────────────────────────────────────────────
 test("confirmingMilestone: reads confirmed@m<N> marker", () => {
@@ -102,6 +118,13 @@ test("evaluateRow: confirmed but confirming-milestone unparseable → fail-close
   assert.equal(r.alarm, true);
   assert.match(r.reason, /confirming milestone/i);
 });
+// HARDENING (must-fix #2 — fail-open): a data row whose status cell carries NO non-negated lifecycle
+// word must fail-closed, not drop to status=null → silent PASS.
+test("evaluateRow: unrecognized/keyword-less status → fail-closed alarm", () => {
+  const r = evaluateRow({ status: null, confirming: 3, statusCell: "folding into inherited-core still pending" }, 6, 2);
+  assert.equal(r.alarm, true);
+  assert.match(r.reason, /unrecognized|absent|fail-closed/i);
+});
 
 // ── checkLedger (end-to-end over fixtures) ───────────────────────────────────────────────────────
 test("checkLedger: over-threshold-unconsolidated-no-carryforward → FAIL", () => {
@@ -130,6 +153,24 @@ test("checkLedger: explicit milestone_counter arg overrides the marker", () => {
 test("checkLedger: no table AND no counter → N/A (explicit, never silent-skip)", () => {
   const rep = checkLedger("# empty ledger\nno rows\n");
   assert.equal(rep.verdict, "N/A");
+});
+// HARDENING end-to-end (must-fix #1): an OVERDUE row phrased "not consolidated yet, still confirmed"
+// must FAIL — not silently PASS by being misread as consolidated.
+test("checkLedger: overdue row with ambiguous 'not consolidated, still confirmed' prose → FAIL (not silent PASS)", () => {
+  const text =
+    "milestone_counter: 40\n\n| insight | origin | confirm | status |\n|---|---|---|---|\n" +
+    "| CI≡audit | m1 | confirmed@m3 | not consolidated yet, still confirmed — pending fold |\n";
+  const rep = checkLedger(text);
+  assert.equal(rep.verdict, "FAIL", JSON.stringify(rep.evaluations));
+});
+// HARDENING end-to-end (must-fix #2): an overdue row whose status cell has NO lifecycle keyword must
+// FAIL-closed, not silently PASS via status=null.
+test("checkLedger: data row with a keyword-less status cell → FAIL-closed (not silent PASS)", () => {
+  const text =
+    "milestone_counter: 40\n\n| insight | origin | confirm | status |\n|---|---|---|---|\n" +
+    "| repo-root isolation | m3 | confirmed@m3 | folding into inherited-core still pending |\n";
+  const rep = checkLedger(text);
+  assert.equal(rep.verdict, "FAIL", JSON.stringify(rep.evaluations));
 });
 test("checkLedger: rows present but no milestone_counter derivable → fail-closed", () => {
   const text = "## Rows\n\n| a | b | c | status |\n|---|---|---|---|\n| x | m1 | confirmed@m3 | confirmed |\n";

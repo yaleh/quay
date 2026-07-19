@@ -1021,11 +1021,13 @@ added DIR-020/M34-ac-dod-checklist-writeback, 2026-07-19)
 ### Clause 2 — V_meta consolidation-lag gate (DIR-005 / M07-vmeta-gate)
 - **Trigger condition:** fires for every row in `v-meta-ledger.md` whose status is `confirmed`
   (past the φ 2-cross-domain-confirmation threshold, §4.2) but not yet `consolidated`.
-- **What it checks:** cited from `v-meta-ledger.md`'s schema (`insight | origin milestone |
-  confirmation count | status`) and its "Definitions" section — for each qualifying row, compute
-  `milestones-since-confirmed = milestone_counter (current, pre-increment) − confirming milestone
-  number`. This is compared against `dashboard.md`'s `V_meta consolidation lag` health track's
-  alarm threshold, **K=2**.
+- **What it checks:** the lag arithmetic (each qualifying row's `milestones-since-confirmed` vs the
+  **K=2** health-track threshold from `dashboard.md`) is computed by the SINGLE-SOURCE module
+  `scripts/vmeta-lag-check.mjs` (`checkLedger`, D3·R5) — **that module IS the definition** (fail-closed
+  on ambiguous / keyword-less / unparseable rows; explicit `N/A` on an empty ledger). The formula is
+  NOT restated here; read the module. The complementary `it0-dod-check.mjs` Clause 2 independently
+  scans the ABSORB text for the disposition TOKEN (that a resolution was narrated), never the
+  arithmetic — the two are additive, not a dual source.
 - **Pass/fail semantics:** if `milestones-since-confirmed` exceeds K=2 for any qualifying row, step
   7's `milestone_counter++` MUST NOT execute until the row is resolved by EITHER (a) consolidating
   the pattern into this file at the current ABSORB (pasted diff), OR (b) recording an explicit

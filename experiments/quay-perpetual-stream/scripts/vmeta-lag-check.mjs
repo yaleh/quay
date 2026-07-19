@@ -13,10 +13,12 @@
 //   `confirmed` (past the φ 2-cross-domain-confirmation threshold) but NOT yet `consolidated`, AND
 //   whose status cell carries NO explicit DATED carry-forward reason (a carry-forward marker plus an
 //   ISO YYYY-MM-DD date — "no silent deferral"). A `consolidated` row never alarms; a `proposed` row
-//   never alarms (it has not crossed the confirmation threshold). Fail-closed: a `confirmed` row
-//   whose confirming-milestone number cannot be parsed is treated as an ALARM (we cannot prove it is
-//   within threshold), never silently skipped. If the ledger has NO parseable rows AND no
-//   milestone_counter, the verdict is an EXPLICIT "N/A" — never a silent pass.
+//   never alarms (it has not crossed the confirmation threshold). FAIL-CLOSED (never silent PASS) on:
+//   a `confirmed` row whose confirming-milestone number is unparseable; an AMBIGUOUS status cell that
+//   names >1 distinct lifecycle word (e.g. an overdue row phrased "not consolidated yet, still
+//   confirmed" — must NOT be read as consolidated); and a data row whose status cell carries NO
+//   lifecycle keyword at all (unrecognized/absent → cannot classify → ALARM). If the ledger has NO
+//   parseable rows AND no milestone_counter, the verdict is an EXPLICIT "N/A" — never a silent pass.
 //
 //   This module ONLY computes the arithmetic + the disposition decision. It does NOT author the
 //   ABSORB narrative and does NOT itself edit the ledger — those remain human/loop actions the
@@ -50,11 +52,24 @@ export function parseRows(fullText) {
   return rows;
 }
 
-// ── rowStatus — read the lifecycle status word from a status cell (bold/decoration tolerated). ────
+// ── rowStatus — read the CURRENT lifecycle word from a status cell (bold/decoration tolerated). ────
+// FAIL-SAFE against natural prose (R5 review must-fix #1): the current status is the FIRST lifecycle
+// word that is NOT negated. This correctly reads "**consolidated** … twice-confirmed" as consolidated
+// (the confirmation is history), and "not consolidated yet, still confirmed" / "confirmed — not yet
+// consolidated" as confirmed (a genuinely confirmed-not-consolidated row that MUST reach the
+// arithmetic, not be silently read as consolidated by an unordered keyword scan). A cell with no
+// non-negated lifecycle word → null (→ fail-closed at evaluateRow, must-fix #2).
+const NEGATOR_BEFORE = /\b(not|no|never|isn'?t|aren'?t|un|yet\s+to(?:\s+be)?|to\s+be|awaiting)\s+(?:be\s+|being\s+|fully\s+|yet\s+)?$/i;
 export function rowStatus(statusCell) {
   if (statusCell == null) return null;
-  const m = String(statusCell).match(/\b(consolidated|confirmed|proposed)\b/i);
-  return m ? m[1].toLowerCase() : null;
+  const s = String(statusCell);
+  const re = /\b(consolidated|confirmed|proposed)\b/gi;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    const pre = s.slice(Math.max(0, m.index - 24), m.index);
+    if (!NEGATOR_BEFORE.test(pre)) return m[1].toLowerCase();
+  }
+  return null; // no non-negated lifecycle word (e.g. keyword-less or "not yet consolidated" only)
 }
 
 // ── confirmingMilestone — the milestone number at which the row crossed the φ threshold. ──────────
@@ -86,8 +101,14 @@ export function evaluateRow(row, milestoneCounter, K = K_DEFAULT) {
   if (status === "consolidated") {
     return { lag: null, alarm: false, reason: "consolidated — lag gate does not apply" };
   }
+  if (status === "proposed") {
+    return { lag: null, alarm: false, reason: "proposed — not past φ threshold, no lag gate" };
+  }
+  // FAIL-CLOSED (R5 review must-fix #2): a data row with NO non-negated lifecycle word (keyword-less,
+  // or "not yet consolidated" only) cannot be classified — it must ALARM, never silently pass as
+  // status=null. Only "consolidated"/"proposed" (above) and "confirmed" (below) pass cleanly.
   if (status !== "confirmed") {
-    return { lag: null, alarm: false, reason: `status=${status ?? "?"} — not past φ threshold, no lag gate` };
+    return { lag: null, alarm: true, reason: `unrecognized/absent lifecycle status (status=${status ?? "none"}) on a data row — fail-closed ALARM (never silent-skip)` };
   }
   // confirmed & not consolidated → arithmetic applies.
   if (row.confirming == null) {
