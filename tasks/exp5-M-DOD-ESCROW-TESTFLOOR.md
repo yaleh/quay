@@ -140,3 +140,23 @@ specifically to pin the `MECHANICALLY_UNCONDITIONAL_CLAUSES` decision.
 
 **Realized Δv = 0** — this is a method-infra/governance-integrity milestone, no VT chart cell,
 mirrors the M25/M30/M31 precedent already established for this DoD-program lineage.
+
+**Acceptance audit (Clause 1, unconditional) — verdict CONCERNS, both findings resolved before
+ledger ABSORB.** A fresh-context, out-of-band adversarial-audit subagent re-verified all 5 ACs, the
+DoD, and live-reran the fixture suite (not trusting the reconciliation's self-report). Two findings:
+(1) Clause 7's coverage-disposition regex was negation-blind — two live adversarial ABSORB-entry
+strings ("we considered 80% coverage but decided it wasn't necessary; coverage remains ~9%" / "no
+80% test coverage floor was met") false-PASSed. Fixed with a sentence-scoped negation window
+mirroring Clause 6's own technique (commit `fa644a7`), pinned as
+`fixtures/dod/test-floor-negation-poison-stub.md` (`M91-fake-testfloor-negation`) — full suite now
+**11/11 PASS**. (2) The audit correctly flagged that this task's own premature `status: done` claim
+did not yet correspond to a real `dashboard.md` ABSORB entry, `milestone_counter` bump, or
+`backlog.md` DONE flip — those are completed in this same ABSORB pass, immediately following this
+note (see `dashboard.md`'s "ABSORB m32" entry for the ledger-of-record write). Neither finding
+required a Clause 6/7 design change or implicated the reconciliation decision above.
+
+**Note on status timeline:** the `status: done` above was set by the reconciliation-merge step,
+ahead of the ledger-of-record ABSORB write (dashboard.md/milestone_counter/backlog.md) — a
+sequencing gap the acceptance audit correctly caught. By the time this note is read, that gap has
+been closed: see `dashboard.md`'s "ABSORB m32" entry for confirmation the ledger reflects this
+task's actual completion, not merely its self-declared frontmatter.
