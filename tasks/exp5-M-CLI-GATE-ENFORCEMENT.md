@@ -3,7 +3,7 @@ id: exp5-M-CLI-GATE-ENFORCEMENT
 title: "quay task edit --status: decide and implement whether the CLI write
   path should itself enforce the task check gate, or explicitly document it
   as an unguarded setter (Skill-level discipline only)"
-status: in-progress
+status: done
 labels:
   - milestone-candidate
   - surface:cli
@@ -53,10 +53,14 @@ Given this is a design decision with real backwards-compatibility implications, 
 `explore`-flavored charter component even though the surface itself (CLI) is well-understood.
 
 ## Status mirror
-in-progress (SELECTed @m31 DRAIN/SELECT boundary, 2026-07-19 — charter authored, decision made:
-(b) document unguarded-by-default + opt-in `--enforce-gate` flag reusing `task check`'s own logic.
-Full reasoning: `experiments/quay-perpetual-stream/charters/M31-cli-gate-enforcement.md`'s
-"Decision" section.)
+done (ABSORBed @m31, 2026-07-19 — decision (b) implemented: `task edit --status` stays an
+unguarded-by-default low-level primitive, new opt-in `--enforce-gate` flag reuses `client.taskCheck`
+(the same logic `task check` calls) rather than duplicating gate logic. Merged to `exp5-outer-driver`
+at `8b3af67`. Adversarial audit verdict: NO REFUTATION FOUND, one non-blocking CONCERNS item (missing
+automated test coverage for the combined `--append-notes`+`--status`+`--enforce-gate` path, closed
+manually by the audit's live probes). Realized Δv=0 (governance-integrity, no VT chart cell). Full
+details: `dashboard.md`'s "ABSORB m31" entry;
+`experiments/quay-perpetual-stream/milestones/M31-cli-gate-enforcement/audits/adversarial-audit.md`.)
 
 ---
 ## Not selected (M29)
