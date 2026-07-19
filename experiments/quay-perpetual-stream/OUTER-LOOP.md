@@ -33,20 +33,18 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
 3. Set `state: RUNNING`, `milestone_counter: 0`, `chart: 0`. Commit the dashboard.
 
 ## Outer cycle — one pass = one milestone
-0. **DRAIN human inbox** — read `directives/pending/`. Disposition each directive → a `backlog.md`
-   milestone candidate / a standing-rule amendment (`inherited-core.md` or `dashboard.md` control
-   limits) / an out-of-cycle action (VT chart transition, HALT); then move it to `directives/archive/`.
-   This is where async human steering (§4.7) enters — at the boundary, never mid-milestone. `/quay-directive`
-   writes here.
-   **Also run `task_list --label directive`** (native provider MCP tool, or
-   `node packages/quay/bin/quay.js task list --label directive --json` equivalently) and
-   **reconcile it against the files** (M-DIR-PROJECTION, DIR-002): every `label: directive` task
-   found must correspond to a real `DIR-NNN.md` file (`pending/`, `archive/`, or `retracted/`), and
-   each file's own `status:` line must agree with its task's `Status mirror:`/`extra.dirStatus`
-   field. Run `experiments/quay-perpetual-stream/scripts/it0-dir-projection-check.sh` to do this
-   mechanically rather than eyeballing the two lists — a non-zero exit means drift and must be
-   resolved (regenerate the stale projection via `/quay-directive`'s projection step, or fix the
-   underlying data) before the drain step is considered complete, not silently carried forward.
+0. **DRAIN human inbox** — read the pending directives via `task_list --label directive`
+   (native provider MCP tool, or `node packages/quay/bin/quay.js task list --label directive --json`)
+   filtered to those with `extra.dirStatus: pending`. **Directives are TASK-CANONICAL (DIR-028 /
+   Plan A): a directive IS a `label:directive` quay task — the single source of truth. There is no
+   `directives/*.md` file, no projection, and no anti-drift check** (all three were retired; the task,
+   stored as `tasks/DIR-NNN.md`, is git-tracked and canonical). Disposition each pending directive →
+   a milestone-candidate task / a standing-rule amendment (`inherited-core.md` or `dashboard.md`
+   control limits) / an out-of-cycle action (VT chart transition, HALT); then record its disposition
+   on the SAME task — set `extra.dirStatus` (`applied`/`deferred`/`rejected`) and append a
+   `## Resolution` to the task body. This is where async human steering (§4.7) enters — at the
+   boundary, never mid-milestone. `/quay-directive` creates these tasks directly (task-canonical);
+   there is no file-vs-task reconciliation to run (the dual source it compensated for is gone).
    **The loop runs DIRECTLY on `master` (DIR-027 retired DIR-018's driver-branch isolation).** There
    is no `exp5-outer-driver` integration branch and no master↔driver DRAIN/publish merge dance: the
    loop's own commit stream (charter authoring, per-iteration worktree base points, inner-merge
@@ -260,10 +258,10 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      appended `## Execution record` body section (milestone id, iteration(s), realized `Δv`, merge
      commit SHA(s), one-line outcome summary — the same shape as the backfilled tasks' `## Outcome`
      section) and set `status: done`. This is a DIFFERENT actor/time than the `milestone:M-NN`
-     selection-label write in step 1 (SELECT) and than the anti-drift checks' narrow status-mirror
-     contract (`it0-dir-projection-check.mjs`/a future backlog-projection check both explicitly
-     ignore `## Execution record` sections and `milestone:M-NN` labels when computing divergence, per
-     M24 Stage 1.2 — this write-back is expected content, not drift).
+     selection-label write in step 1 (SELECT). (Directives are now task-canonical with no anti-drift
+     check — DIR-028; the milestone/backlog-projection check, where present, explicitly ignores
+     `## Execution record` sections and `milestone:M-NN` labels when computing divergence, per M24
+     Stage 1.2 — this write-back is expected content, not drift.)
    - **Per-milestone acceptance audit (UNCONDITIONAL, 2026-07-19 — supersedes the old conditional
      adversarial-audit trigger; HARD BLOCK on this milestone's VT-curve append / Done-when-complete
      claim AND on step 7's `milestone_counter++`):** EVERY milestone, with NO cadence precondition,
@@ -477,7 +475,7 @@ only two — stop signals:
    leaving it for async human review.
 
 ## Human async control surface (never blocks the loop — §4.7)
-- **Steer:** `/quay-directive` (writes `directives/pending/DIR-NNN.md`) or a `backlog.md` edit, any
+- **Steer:** `/quay-directive` (creates a `label:directive` task — task-canonical, DIR-028) or a `backlog.md` edit, any
   time → drained by the outer layer at the next milestone boundary (cycle step 0), never mid-milestone.
 - **Stop:** `touch experiments/quay-perpetual-stream/.halt` → clean exit at next boundary.
 - **Review:** read `checkpoints/` and `dashboard.md` any time — no interaction required.
