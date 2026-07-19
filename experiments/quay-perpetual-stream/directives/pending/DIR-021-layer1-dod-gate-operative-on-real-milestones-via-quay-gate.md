@@ -1,0 +1,74 @@
+# DIR-021
+
+- status: pending
+- created_by: human (Yale Huang), asserted directly in this live conversation
+- created_at: 2026-07-19
+- title: Layer 1 of switching exp5 onto the quay engine — make the DoD gate OPERATIVE on REAL milestones via `quay gate`: SELECT seeds each real milestone task's `extra.acceptance` meter, and ABSORB invokes `quay gate <milestone-task>` as the operative DoD gate (the demo path QENG-5 proved must become the real path)
+
+## Finding
+
+The quay engine (QENG-0..5) is built and ONE demonstration path is wired, but exp5
+still runs on prose + `it0-*.sh`. Verified 2026-07-19 against `master`:
+- **0 / 15** real `exp5-M-*` milestone tasks carry an `extra.acceptance` meter (only
+  the two `QENG-5-DEMO-*` fixture tasks do).
+- `OUTER-LOOP.md` step 6's OPERATIVE DoD gate call is still the bare
+  `scripts/it0-dod-check.sh` (lines 263, 316). The `quay gate <milestone-task>`
+  line QENG-5 added (line 326) is a **reference/description only**, not the call the
+  loop makes.
+So a resumed exp5 loop uses the engine on NOTHING real — the engine is, for exp5,
+still shelfware at the operative level. QENG-5 closed the epic's AC with demo
+tasks; this DIR makes it real.
+
+## Requested action
+
+1. **SELECT (`OUTER-LOOP.md` step 1) seeds the meter on the REAL task.** When a
+   milestone is SELECTed, author its milestone-candidate task's
+   `extra.acceptance` = the runnable DoD-check command for that milestone, e.g.
+   `bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh <task-id>
+   <charter-file> <absorb-entry-file>` (repo-root-relative; the acceptance runner's
+   cwd = workspaceRoot = repo root). Via the shipped `quay task edit <id>
+   --acceptance '<cmd>'` — no new quay code.
+2. **ABSORB (step 6) invokes the engine as the OPERATIVE DoD gate.** The
+   "DoD meta-enforcer gate" sub-step must actually RUN `quay gate <milestone-task>`
+   (or `quay complete <milestone-task>` per DIR-023) — which runs the identical
+   `it0-dod-check.sh` THROUGH the engine and logs a GateEvent — as the gate that
+   HARD-BLOCKs `milestone_counter++`. Keep `it0-dod-check.mjs` as the underlying
+   check; the change is that the loop calls it via `quay gate`, and the pasted
+   ABSORB evidence is the `quay gate` output + the GateEvent, not a bare shell call.
+
+## Acceptance Criteria (runnable)
+- [ ] `quay task view <a-real-exp5-M-milestone> --json` shows a non-empty
+  `extra.acceptance` (a real milestone, not `QENG-5-DEMO-*`).
+- [ ] `quay gate <that-real-milestone-task>` exits 0 or 1 matching that milestone's
+  actual DoD verdict, AND `quay gate-log <that-real-milestone-task> --json` returns a
+  GateEvent for it.
+- [ ] `grep -nE "quay (gate|complete)" experiments/quay-perpetual-stream/OUTER-LOOP.md`
+  shows the step-6 DoD sub-step's OPERATIVE "run/confirm" instruction is a
+  `quay gate`/`quay complete <milestone-task>` call (not only the bare
+  `it0-dod-check.sh`).
+
+## Definition of Done — REAL LANDING is the bar, not artifacts
+
+This DIR is **NOT done** when the meter-seeding prose is added, `OUTER-LOOP.md` is
+edited, or a fixture gate passes. It is done **ONLY** when a **REAL exp5 milestone**
+(an actual `M-NN` with a real charter and ABSORB — NOT a demo/fixture task) has
+actually been **gated through `quay gate`/`quay complete` at its own ABSORB**,
+verifiable by:
+(a) a GateEvent keyed to that real milestone's task id in `quay gate-log`, AND
+(b) that milestone's own dashboard ABSORB entry pasting the `quay gate` command
+    output as the DoD-gate evidence (replacing the bare `it0-dod-check.sh` paste).
+A green fixture, an edited `OUTER-LOOP.md`, or a seeded meter alone is **necessary
+but NOT sufficient**. Escrow discipline: until (a)+(b) hold for a real milestone,
+this DIR stays `pending`.
+
+## Human verification when exp5 marks this DIR done
+1. Pick the milestone the loop ABSORBed at/after applying this DIR. `quay gate-log
+   <its-real-task-id> --json` MUST show a DoD GateEvent (verdict pass/fail) for it.
+2. Its dashboard ABSORB entry MUST paste `quay gate`/`quay complete` output, not a
+   bare `it0-dod-check.sh` line.
+3. `quay task view <its-real-task-id> --json` MUST show the `extra.acceptance` meter.
+4. Confirm it is a REAL milestone id, not `QENG-5-DEMO-*`. If the only evidence is
+   the demo tasks or a fixture, it is NOT landed — send back.
+
+## Resolution
+<!-- added when moved to archive/, or updated in place if deferred -->
