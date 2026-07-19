@@ -351,6 +351,23 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      status=done directly; until DIR-023 is adopted, `quay gate` + a separate manual status/backlog
      update is the standing path.)
 
+     **Named `impl-row`/`line-budget` engine gates (DIR-022 Layer 2 phase 1 / M39, ADDITIONAL
+     capability, not a required migration):** since M39, the design-only-milestone impl-row check
+     (above) and the plan-time/ABSORB-time line-budget check (step 1 and the "Underlying check
+     details" note above) are ALSO invokable as named `quay gate` engine gates —
+     `quay gate <task> --gate impl-row` and `quay gate <task> --gate line-budget` — for any real
+     milestone task that opts in by setting `task.extra.implRowArgs` (`["<milestone-id>",
+     "<backlog-file>"]`) or `task.extra.lineBudgetArgs` (`["<charter-file>"]`) respectively. Both are
+     thin wrappers over the SAME `it0-impl-row-check.sh` / `it0-ceiling-line-budget-check.sh` scripts
+     already used above (`packages/quay/src/gate/registry.js`, no gate logic duplicated); each run
+     appends a real GateEvent (`gate: "impl-row"` / `gate: "line-budget"`) queryable via
+     `quay gate-log <task> --json`, the same as the `dod`/`acceptance` gates. **This does NOT replace
+     the two mechanical checks above, and does NOT mandate migrating every milestone's ABSORB flow to
+     the named gates** — the bare `it0-*.sh` invocations documented above remain the standing,
+     unconditional path for every milestone; the named-gate path is an opt-in additional invocation
+     surface a milestone may use if it wants a GateEvent record of that specific check (see the M39
+     charter's explicit out-of-scope note).
+
      **Chicken/egg ABSORB-ordering note (DIR-021):** the `extra.acceptance` command's
      `<absorb-entry-file>` argument does not exist yet at SELECT time (the ABSORB narrative is
      drafted live, mid-milestone) — this is resolved by the command referencing a FILE PATH (never

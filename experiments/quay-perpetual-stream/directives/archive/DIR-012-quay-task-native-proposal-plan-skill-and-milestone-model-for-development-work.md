@@ -130,3 +130,24 @@ positive Δv̂ — size at SELECT time.
 - frontmatter status corrected `pending`→`applied` at this update to match the archive/ location and
   the outcome above (it had been left stale when the DRAIN moved the file — the M05 anti-drift check
   compares this line against the projection).
+
+## Follow-up — item-by-item true state (verified 2026-07-19)
+
+`status: applied` is correct for this DIR's **explicitly-scoped** deliverable (Requested action
+item 1), which its own Resolution above already scoped it to. Recording the full item state so
+the "applied" mark is not misread as "the whole proposal→plan program is wired":
+
+- **item 1 (charter the design-doc milestone) — DONE.** `M17-task-to-plan-skill-design.md` +
+  the `quay-task-to-plan` skill design; plan at `docs/plans/3-7-quay-task-to-plan-skill.md`.
+- **item 2 (milestone-model changes: ≤2000-line ceiling, nested ≤500/≤200 budgets, plan-time
+  line-budget gate, two-class diversity policy) — DONE (M18).** `inherited-core.md` lines
+  ~209-262 carry the ceiling + budgets; `OUTER-LOOP.md` step 1 wires
+  `scripts/it0-ceiling-line-budget-check.sh <charter-file>` as a real plan-time gate.
+- **item 3 (dogfood: run a development-class milestone THROUGH the `quay-task-to-plan` pipeline,
+  i.e. wire it into OUTER-LOOP DISPATCH) — NOT DONE.** `grep quay-task-to-plan
+  experiments/quay-perpetual-stream/OUTER-LOOP.md` is empty: the skill exists but the loop's
+  DISPATCH (step 5) never invokes it, and the two-class diversity policy is still worded
+  `MAY, at a future charter's discretion` rather than mandatory for the development class. **This
+  open gap is the same one tracked by [[DIR-014]] (its items 2&3), which is being reverted to
+  `pending` for it — it is NOT re-litigated here.** DIR-012 stays archived/applied on the
+  strength of item 1; the unbuilt wiring lives under DIR-014.

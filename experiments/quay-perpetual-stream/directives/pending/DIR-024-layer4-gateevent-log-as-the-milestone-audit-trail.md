@@ -41,6 +41,15 @@ the log as source-of-record. If any claimed verdict exists only in dashboard pro
 with no corresponding GateEvent, it is NOT landed. Stays `pending` until a real
 milestone's verdicts fully live in the log.
 
+**Anti-"thin log" clause (depends on Layer 2's completeness).** "Reconstructable from
+the log ALONE" is only real if the milestone actually RAN a full gate set — a milestone
+that logged only a single `dod` GateEvent trivially satisfies "every claimed verdict is
+in the log" while proving nothing. This DIR is landed only on a milestone whose log
+carries the SAME multi-gate set [[DIR-022]] requires (≥2 distinct non-`dod` GateEvents),
+so the "log is the audit trail" claim is tested against a real, non-trivial verdict set —
+not a one-line log. Layer 4 presupposes [[DIR-021]]/[[DIR-022]]/[[DIR-023]]'s real landing
+on that same milestone.
+
 ## Human verification when exp5 marks this DIR done
 1. Pick a real milestone ABSORBed under this DIR. Cross-check its dashboard-claimed
    gate verdicts against `quay gate-log <its-task> --json` — every claimed verdict

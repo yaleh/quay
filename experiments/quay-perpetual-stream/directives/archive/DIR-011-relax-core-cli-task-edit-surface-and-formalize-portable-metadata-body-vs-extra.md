@@ -84,3 +84,26 @@ surface — size it at SELECT time.
 - resolved_by: outer-loop drain (m12->m13 boundary), 2026-07-18
 - outcome: deferred
 - evidence: disposed as backlog.md candidate `M-CLI-EDIT-PARITY` (design-doc-only deliverable, per the human's own routing decision quoted in this file's Requested action). Not yet charter-ready; no Core CLI code changed. See `backlog.md`'s "DIR-009/DIR-010/DIR-011-sourced candidates" section for the full disposition record.
+
+## Follow-up — design AND implementation subsequently DELIVERED (verified 2026-07-19)
+
+This DIR's Resolution above ("deferred; no Core CLI code changed") was accurate only at the
+m12→m13 drain. Both halves have **since shipped** — the Core CLI now has full-field `task edit`
+parity. Verified against `master` on 2026-07-19:
+
+- **Design — DONE (M14-cli-edit-parity).** `docs/proposals/exp5-cli-edit-parity.md` (28.9 KB)
+  delivered as the design-doc milestone (ABSORB m14, `0a224f2`).
+- **Implementation — DONE (M16-cli-edit-parity-impl).** Commit `5f1f1be` "full task-edit flag
+  parity"; ABSORB m16 = `M-CLI-EDIT-PARITY-IMPL` (`473f29e`). `packages/quay/bin/quay.js`
+  `task edit` now accepts `--title / --body / --body-file (incl. "-" stdin) / --labels / --extra
+  / --parent / --children / --append-notes / --acceptance` — item 1's full-field parity plus the
+  `--body-file`/stdin whole-body-replacement mode the DIR asked to decide on. The status-only
+  restriction (QN-024) is gone.
+- **item 2 (provider-capability hard-error, not silent drop) & item 3 (portable-metadata rule:
+  body = cross-provider, `extra{}` = native-only)** were carried through the M14 design and the
+  M16 impl per that design.
+
+Outcome upgraded in substance from `deferred` to **applied**; the file stays archived.
+`status:` left as `deferred` only as the historical record of its disposition AT THIS DRAIN —
+the follow-up above is the authoritative current state. My earlier audit's "PROSE-ONLY" reading
+was wrong: it missed that M16 shipped the code.
