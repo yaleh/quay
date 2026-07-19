@@ -4,7 +4,7 @@ title: "DIR-022 Layer 2 (phase 1): register impl-row and line-budget as named
   quay engine gates — thin wrappers over the existing it0 scripts, ≥80%
   coverage, demonstrated against a real (non-fixture) exp5 task with real
   GateEvents"
-status: in-progress
+status: done
 labels:
   - milestone-candidate
   - surface:cli
