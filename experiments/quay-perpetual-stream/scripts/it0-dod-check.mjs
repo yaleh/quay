@@ -212,15 +212,21 @@ const dispositionedClauses = new Set();
 
 // --- Clause 5: No-self-exemption meta-clause ---
 // Scan the CHARTER's "Explicitly OUT of scope" section for exemption-adjacent language paired
-// with one of the 4 clause names, then require EITHER a matching WAIVER line in the ABSORB-entry
-// text OR that the same clause already has a recorded disposition this run (dispositionedClauses,
-// populated by clauses 1-4 above) — the latter is the mechanical form of inherited-core.md's
-// distinguishing test: a charter explaining WHY a clause's trigger legitimately did not fire is
-// NOT a self-exemption as long as the clause's own disposition was still independently recorded
-// (by clause 1-4's own check above, from the ABSORB-entry text) — only an exemption claim with NO
-// corresponding disposition recorded ANYWHERE (no waiver line, no clause-1-4 disposition) is
-// treated as an undeclared self-exemption.
+// with one of the 4 clause names, then require a matching WAIVER line in the ABSORB-entry text.
+//
+// DIR-019 fix: clauses 3 (line-budget) and 4 (impl-row) are executed UNCONDITIONALLY every run
+// (see clause 3/4 blocks above — they always call dispositionedClauses.add(...) regardless of
+// outcome). That means "already dispositioned" is NOT evidence a self-exemption of those two
+// clauses is legitimate — it is true on every single run, mechanically, so the carve-out was
+// dead code for them and let an undeclared self-exemption of line-budget/impl-row pass silently
+// (the exact bug DIR-019 reports). Only clauses 1 (adversarial-audit) and 2 (V_meta
+// consolidation-lag) are dispositioned CONDITIONALLY — their "already dispositioned" state means
+// a real, independently-recorded legitimate-non-firing determination, so the carve-out remains
+// valid ONLY for those two. Concretely: exemption language for line-budget/impl-row always
+// requires a matching WAIVER line, regardless of dispositionedClauses; exemption language for
+// adversarial-audit/V_meta-lag is still allowed to rely on the conditional-disposition carve-out.
 {
+  const MECHANICALLY_UNCONDITIONAL_CLAUSES = new Set(["line-budget", "impl-row"]);
   const clauseNames = [
     { key: "adversarial-audit", pattern: /adversarial[- ]audit/i },
     { key: "V_meta consolidation-lag", pattern: /V_meta consolidation[- ]lag|V_meta[- ]lag/i },
@@ -237,7 +243,7 @@ const dispositionedClauses = new Set();
     for (const rawLine of outOfScopeText.split("\n")) {
       for (const { key, pattern } of clauseNames) {
         if (pattern.test(rawLine) && exemptionLangPattern.test(rawLine)) {
-          if (dispositionedClauses.has(key)) continue; // legitimate non-firing, already dispositioned above
+          if (dispositionedClauses.has(key) && !MECHANICALLY_UNCONDITIONAL_CLAUSES.has(key)) continue; // legitimate non-firing, already dispositioned above (only for conditionally-dispositioned clauses 1/2)
           // Check for a corresponding waiver line for this milestone + this clause.
           const waiverPattern = new RegExp(
             `WAIVER:\\s*${milestoneId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\|\\s*[^|]*${key.split(" ")[0]}`,
