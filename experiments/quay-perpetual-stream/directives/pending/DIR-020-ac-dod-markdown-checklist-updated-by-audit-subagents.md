@@ -1,0 +1,72 @@
+# DIR-020
+
+- status: pending
+- created_by: human (Yale Huang), asserted directly in this live conversation
+- created_at: 2026-07-19
+- title: AC and DoD in the task body should be Markdown checklists, and the per-milestone acceptance-audit subagent should update them (tick each verified item) as part of its verification — so per-criterion satisfaction is visible and write-tracked in the canonical task itself, not only in the audit report / ABSORB log
+
+## Finding
+
+This session made AC and DoD task-native and audited every milestone (commit `bb3a199`, extended by
+M32 / DIR-017 Step 2): each milestone-candidate task body carries `## Acceptance Criteria` and
+`## Definition of Done` sections, authored at SELECT (`OUTER-LOOP.md` step 1), mechanically
+presence-checked by `it0-dod-check.mjs` Clause 0, and verified for SATISFACTION by the now-
+unconditional per-milestone acceptance audit (`OUTER-LOOP.md` step 6). Two gaps in that first cut:
+
+1. **AC/DoD are authored as prose bullet/numbered lists, not checklists.** There is no per-item state
+   in the task — a reader (or the audit) cannot see at a glance which criteria are met vs outstanding;
+   satisfaction lives only in the audit report / ABSORB-log prose, away from the canonical task.
+2. **The audit records its per-criterion verdict OUTSIDE the task.** The acceptance audit reads the
+   AC, refutes each criterion, and writes CONFIRMED/REFUTED into `milestones/M<NN>/audits/…` + the
+   ABSORB log — but never writes back into the task's own AC/DoD, so the task (the single source of
+   truth) does not itself carry the per-item pass/fail.
+
+## Requested action
+
+A minor refinement of the existing mechanism (NOT a new gate):
+
+1. **AC and DoD are Markdown checklists.** In `inherited-core.md`'s "AC/DoD live in the TASK" rule and
+   Clause 0: the `## Acceptance Criteria` and `## Definition of Done` sections MUST be authored as
+   GitHub-flavored Markdown checklists — one `- [ ]` item per criterion / done-condition. Update
+   `it0-dod-check.mjs` Clause 0's shape check to recognize `- [ ]` / `- [x]` lines as the valid
+   checkable-clause form (still requiring ≥1 real, non-placeholder item; DoD must still reference the
+   standard five clauses per the reference-plus-extras rule).
+2. **Author them UNCHECKED at SELECT.** `OUTER-LOOP.md` step 1's AC/DoD authoring sub-step writes each
+   AC criterion and DoD item as `- [ ]` (unchecked) — a milestone starts with nothing ticked.
+3. **The per-milestone acceptance-audit subagent updates the checklist.** `OUTER-LOOP.md` step 6's
+   audit, as it verifies each AC criterion / DoD item, WRITES BACK to the task via `task_write`: tick
+   `- [x]` for each item it confirms met (the citing evidence stays in the audit report), leave
+   `- [ ]` for any it cannot confirm. The audit is the ONLY writer that ticks boxes — the loop must
+   NOT self-tick at authoring time — so a ticked box is always an audit attestation, mirroring the
+   "generated, not hand-edited" projection discipline (DIR-002).
+4. **Tie the HARD block to remaining unchecked boxes.** At `milestone_counter++` time, any AC box
+   still `- [ ]` is REFUTED-equivalent and HARD-blocks, exactly as an unmet criterion does today — so
+   this changes the REPRESENTATION of AC satisfaction (visible per-item in the task) without weakening
+   the existing gate semantics. Wire this into the same step-6 / Clause-0 HARD-block sequence.
+5. **Keep it minimal + backward-compatible.** Composes with everything already built (Clauses 0-7, the
+   unconditional audit). The clause-0 shape check should ACCEPT the checklist form going forward; the
+   already-authored M32 task may be left as prose or migrated opportunistically — no retroactive sweep
+   required.
+
+Value type: governance-integrity (per-criterion acceptance becomes visible and write-tracked in the
+canonical task) + method-infra. Δv̂ ≈ 0 (methodology refinement).
+
+## Human verification when exp5 marks this DIR done
+
+Do NOT trust the DONE mark:
+1. **Checklist shape enforced.** A SELECTed milestone's `tasks/<id>.md` has `## Acceptance Criteria`
+   and `## Definition of Done` as `- [ ]` checklists; `it0-dod-check.mjs` Clause 0 accepts the
+   checklist form and still FAILs on an empty/placeholder-only AC (add/confirm a fixture).
+2. **Audit ticks boxes.** After a milestone's ABSORB, its task's AC boxes are `- [x]` where the audit
+   confirmed them, and the audit report cites the evidence for each tick — the boxes were flipped by
+   the audit write-back, not at authoring (check the SELECT-time task had them unchecked).
+3. **Unchecked box blocks.** A synthetic milestone whose AC still has a `- [ ]` at ABSORB is
+   HARD-blocked (fixture + mechanical check), same as an unmet criterion today.
+4. **Backward-compatible.** The pre-existing M32 (prose-form) task did not have to be rewritten for the
+   loop to keep passing.
+
+## Resolution
+<!-- added when moved to archive/, or updated in place if deferred:
+- resolved_by: iteration-N / milestone M-NN
+- outcome: applied | deferred | rejected
+- evidence: pointer to the design doc / iteration report section / commit -->
