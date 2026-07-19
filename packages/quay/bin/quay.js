@@ -20,6 +20,11 @@ import { resolveGateLogPath, runGateLogQuery } from "../src/gate/gate-log.js";
 // (id in `sub`), each mirroring the `gate` branch's withProvider/resolveGateLogPath
 // plumbing. Illegal transitions throw → the top-level catch reports them.
 import { runComplete, runAdjudicate, runPromote, runRetreat } from "../src/gate/lifecycle.js";
+// QENG-4: the `quay run` driver — autonomous loop AS CODE. Verb-less top-level
+// `run` command (NO positional id), mirroring the `complete` branch's plumbing
+// (withProvider → resolveGateLogPath → QUAY_ACCEPTANCE_CWD). `--once` = one
+// observation; bare `run` = bounded loop to fixpoint/sentinel/cap.
+import { runOnce, runLoop } from "../src/gate/driver.js";
 
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
@@ -190,6 +195,7 @@ Usage:
   quay adjudicate <task-id> [--file <log-path>]
   quay promote <task-id> [--file <log-path>]
   quay retreat <task-id> --reason <reason> [--file <log-path>]
+  quay run [--once] [--file <log-path>]
   quay serve [--port <port>]
   quay mcp
 
@@ -251,6 +257,17 @@ Lifecycle commands (QENG-3) — status-writing verbs over the {todo,ready,done,n
   retreat <id> --reason <r>   One legal backward step (done->ready, ready->todo); --reason is required
                     and recorded in the GateEvent. An illegal transition exits nonzero with a message.
   --file <log-path>  Override the GateEvent log path (default <workspaceRoot>/.quay/gate-events.jsonl)
+
+Driver command (QENG-4) — the autonomous loop AS CODE (scan -> gate -> complete):
+  run [--once]      Scan the board for actionable 'ready' tasks (status=ready AND a non-empty
+                    acceptance meter) and drive each through 'complete'. NO positional id — 'run'
+                    scans the board itself, lowest actionable id first (deterministic).
+                    --once  Process exactly ONE actionable task then stop (exit 0 always; a meter
+                            fail leaves the task ready + records a GateEvent — a driver observation,
+                            not an error). No actionable task -> prints "nothing to do", exit 0.
+                    (no flag)  Bounded loop until a fixpoint (no actionable tasks left) or the stop
+                            sentinel <workspaceRoot>/.quay/.stop (checked at each iteration boundary);
+                            both exit 0. Only the runaway safety ceiling (maxIterations) exits 1.
 
 Examples:
   quay task list --prefix QX          List only QX-* tasks
@@ -859,8 +876,45 @@ async function main() {
     return;
   }
 
+  // QENG-4: `quay run` driver — the autonomous loop AS CODE (capstone composing
+  // QENG-1/2/3). NO positional id: `run` scans the board itself. Mirrors the
+  // `complete` branch's plumbing (withProvider → resolveGateLogPath →
+  // QUAY_ACCEPTANCE_CWD pins the acceptance runner's cwd, QENG-2).
+  //   --once → one deterministic observation (lowest actionable id), exit 0
+  //            ALWAYS — a meter fail leaves the task `ready` + records a
+  //            GateEvent, a successful driver OBSERVATION, not a driver error.
+  //            runComplete sets process.exitCode=1 on a meter fail, so the
+  //            --once branch MUST reset it to 0 (see below).
+  //   (loop) → bounded scan→complete loop; exit 0 on fixpoint/sentinel; only the
+  //            runaway-cap safety ceiling maps to exit 1.
+  if (cmd === "run") {
+    // `run` takes NO positional id (it scans the board itself), so any flag
+    // lands in `sub` (e.g. `quay run --once` → sub="--once", rest=[]). Re-parse
+    // from [sub, ...rest] so `--once`/`--file`/`--provider` are all seen.
+    const { flags: runFlags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
+    await withProvider(async (client, cfg) => {
+      const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: runFlags.file });
+      process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+      if (runFlags.once) {
+        const r = await runOnce({ client, logPath });
+        if (!r.processed) console.log("nothing to do");
+        else console.log(`${r.processed}: ${r.ok ? "PASS — done" : `FAIL — ${r.reason} (left ready)`}`);
+        // CRITICAL (proposal review note 3): runComplete sets process.exitCode=1
+        // on a meter fail. AC1 requires `quay run --once` to exit 0 — the
+        // contract is "one observation made, exit 0", distinct from `complete`'s
+        // "this task passed/failed" exit code. Reset AFTER runOnce returns.
+        process.exitCode = 0;
+      } else {
+        const r = await runLoop({ client, cfg, logPath });
+        console.log(`run: ${r.completed.length} completed in ${r.iterations} iters (stop=${r.stopped})`);
+        if (r.stopped === "cap") process.exitCode = 1; // only the safety ceiling is nonzero
+      }
+    }, { providerId: runFlags.provider });
+    return;
+  }
+
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|action list|run|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|action list|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
 }
 
