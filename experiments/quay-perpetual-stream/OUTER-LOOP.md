@@ -311,11 +311,13 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      VT-scoring / (b) iteration-0 self-exemption are retained ONLY as escalation hints for how hard to
      push the refutation, never as a gate on WHETHER the audit runs.
    - **V_meta consolidation-lag gate (DIR-005 / M07-vmeta-gate, HARD BLOCK on step 7's
-     `milestone_counter++`):** the arithmetic (`milestones-since-confirmed = milestone_counter −
-     confirming-milestone`; ALARM when `> K=2` for a `confirmed`-not-`consolidated` row lacking a DATED
-     carry-forward) is the single-source check `scripts/vmeta-lag-check.mjs` (wrapper `scripts/vmeta-lag-check.sh
-     [--counter <N>] v-meta-ledger.md`, selfcheck `vmeta-lag-selfcheck.sh`; a future `quay gate --gate
-     vmeta-lag` WRAPS it, M39 precedent — never a 2nd impl). Run it with `--counter <current
+     `milestone_counter++`):** the lag arithmetic (per row, vs the **K=2** threshold; ALARM for a
+     `confirmed`-not-`consolidated` overdue row lacking a DATED carry-forward) is the SINGLE-SOURCE
+     check `scripts/vmeta-lag-check.mjs` — **that module IS the definition** (fail-closed on
+     ambiguous / keyword-less rows, explicit `N/A` on an empty ledger); the formula is NOT restated
+     here, read the module. Wrapper `scripts/vmeta-lag-check.sh [--counter <N>] v-meta-ledger.md`,
+     selfcheck `vmeta-lag-selfcheck.sh`; a future `quay gate --gate vmeta-lag` WRAPS it (M39
+     precedent — never a 2nd impl). Run it with `--counter <current
      pre-increment milestone_counter>` and paste stdout as evidence; non-zero exit (ALARM) HARD-BLOCKS
      step 7's `milestone_counter++`. **Uncoded (still yours, this ABSORB — the script does NOT do it):**
      resolve each alarmed row by EITHER (a) consolidating its pattern into `inherited-core.md` (pasted

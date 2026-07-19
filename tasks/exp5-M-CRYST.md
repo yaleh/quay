@@ -28,6 +28,7 @@ children:
   - exp5-M-CRYST-B6-VALIDATOR-COVERAGE
   - exp5-M-CRYST-B7-LOADBEARING-TEST-GATE
   - exp5-M-CRYST-E3
+  - exp5-M-CRYST-D4-LEDGER-STRUCTURED-STATUS
 extra: {}
 ---
 ## Proposal

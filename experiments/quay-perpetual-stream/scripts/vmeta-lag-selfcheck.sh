@@ -8,9 +8,8 @@
 # against the module. If a fixture behaves wrong, the fix belongs in `scripts/vmeta-lag-check.mjs`,
 # NOT in the fixture.
 #
-# The rule (DIR-005 / OUTER-LOOP.md ABSORB): milestones-since-confirmed = milestone_counter −
-# confirming-milestone; ALARM (exit 1) when > K=2 for any row that is `confirmed` but not
-# `consolidated` AND has no DATED carry-forward reason.
+# The rule is defined SOLELY by vmeta-lag-check.mjs (checkLedger); this selfcheck only asserts the
+# exit code per fixture — see the module's header for the arithmetic (do not restate it here).
 #
 # Usage:  vmeta-lag-selfcheck.sh
 # Exit:   0 = all fixtures behaved as asserted; 1 = at least one mismatch; 2 = environment error.
