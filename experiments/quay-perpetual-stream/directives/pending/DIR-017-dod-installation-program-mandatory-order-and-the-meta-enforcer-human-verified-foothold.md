@@ -96,6 +96,59 @@ Do NOT trust the DONE mark; check that the enforcer is real, not designed:
 6. Only after #1–#5 hold do you greenlight steps 2–3. If any fail, the DoD went in
    as shelfware — the exact failure this DIR exists to prevent; send it back.
 
+## Human-verification gate — CLEARED (2026-07-19, human: Yale Huang)
+
+**The irreducible, non-delegable human-verification gate is PASSED. Steps 2 and 3
+are hereby GREENLIT for SELECT.** This DIR's `status:` stays `pending` — clearing
+the gate only unlocks Steps 2/3 for a future SELECT; it does not complete them.
+Do NOT treat this note as a resolution or move the file to `archive/`.
+
+This clearance is grounded, not a rubber stamp: Step #5 of the checklist above
+was found FAILING when first verified (2026-07-19) — the meta-enforcer's clause 5
+was blind to a self-exemption of the line-budget and impl-row gates, because those
+two clauses were dispositioned unconditionally and clause 5 skipped any already-
+dispositioned clause. That defect was filed as **DIR-019**, fixed by
+**M30-dod-clause5-blind-spot-fix** (published to `master` at `a96ff23`,
+`milestone_counter` 29→30), and re-verified by a human against the published
+`master` snapshot before this clearance. The fix landed in the enforcer code, not
+the fixtures.
+
+Evidence — all 6 checklist points now hold (re-run 2026-07-19 in a detached
+worktree off `master`@`a96ff23`):
+
+- **#1 executable, not prose:** `scripts/it0-dod-check.{sh,mjs}` are a real bash +
+  node script pair; `inherited-core.md` has exactly ONE `## Definition of Done`
+  section (line ~853).
+- **#2 it actually blocks / #5 no-self-exempt is testable:** the external,
+  human-authored red test `scripts/dod-fixture-selfcheck.sh` now exits 0 with the
+  fixtures UNCHANGED (`git diff 8432a67 HEAD` on both `self-exempt-*` fixtures is
+  empty; the fix diff is in `it0-dod-check.mjs`, +15/−9):
+
+  ```
+  PASS: M98-fake-compliant — exit 0 (expected 0)
+  PASS: M99-fake-violating — exit 1 (expected 1)
+  PASS: M96-fake-linebudget-self-exempt — exit 1 (expected 1)
+  PASS: M95-fake-implrow-self-exempt — exit 1 (expected 1)
+  PASS: all 4 DoD fixtures behaved as asserted.
+  ```
+
+  Run singly, each self-exempt fixture now FAILs with clause 5 naming the exempted
+  gate (`... exempts "line-budget" ...` / `... exempts "impl-row" ...`, both
+  exit 1), and `compliant-stub.md` still exits 0 (legitimate no-ops not
+  false-failed).
+- **#3 wired as a HARD block:** `OUTER-LOOP.md` step 6 has the "DoD meta-enforcer
+  gate (DIR-017 / M25-dod-meta-enforcer, HARD BLOCK on step 7's
+  `milestone_counter++`)" sub-step — `milestone_counter++` MUST NOT run until it
+  PASSes.
+- **#4 the four existing gates are folded in:** `inherited-core.md` has Clause 1
+  (adversarial-audit), Clause 2 (V_meta-lag), Clause 3 (line-budget), Clause 4
+  (impl-row) as named clauses, plus Clause 5 (no-self-exemption).
+
+The acceptance predicate for any future Step 2/3 work remains external
+(`dod-fixture-selfcheck.sh` green with fixtures unchanged); the DoD gate's own
+PASS must not be used as evidence that Step 2/3 clauses are wired, per this DIR's
+own text.
+
 ## Resolution
 <!-- added when moved to archive/, or updated in place if deferred:
 - resolved_by: iteration-N / milestone M-NN
