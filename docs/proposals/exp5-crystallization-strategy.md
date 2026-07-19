@@ -111,7 +111,61 @@ first-class quay object with one canonical home and generated views, not a `docs
 into task bodies. This document is written to `docs/proposals/` under the *current* convention; its
 own migration into quay is the concrete first test of that future capability.
 
-## 8. Non-goals
+## 8. Canonical task schema — Axis 1+2 applied to task STRUCTURE
+
+**The task's SHAPE is itself multi-sourced** (the dual-source disease one level up). "What sections
+a task has" is defined inconsistently in ≥3 places: the `/quay-directive` skill (Finding / Requested
+action / AC / DoD / a vestigial empty Resolution — no Proposal), `OUTER-LOOP.md` SELECT (Proposal /
+Plan / AC / DoD — no Finding), and the DoD clauses (Clause 0 checks AC/DoD; Clause 8 checks
+Proposal/Plan for milestones only). Live evidence (DIR-028's own task): no `## Proposal`; a DoD in
+prose not a checklist; TWO `## Resolution` sections, one empty; a body `dirStatus: pending` line
+CONTRADICTING the frontmatter `dirStatus: applied` field (lifecycle stored twice).
+
+**Fix — ONE canonical task schema, uniform across every task kind (milestone AND directive), and
+EXECUTABLE (a validator, not prose):**
+- `## Proposal` — **required**: the proposed approach/change (a directive's Finding+Requested action
+  fold into it, or a short `## Context` lead-in precedes it).
+- `## Plan` — **optional**: a `docs/plans/*.md` reference or `N/A — <reason>`. A directive may omit
+  it (its implementation plan belongs to the milestone that resolves it).
+- `## Acceptance Criteria` — **required, GFM checklist** `- [ ]`.
+- `## Definition of Done` — **required, GFM checklist** `- [ ]` (fixes the prose-DoD inconsistency).
+- **Lifecycle is FIELDS ONLY** — `status` + `extra.dirStatus`. **Retire the `## Resolution` section
+  as a status mirror:** a Resolution/`## Execution record` is appended ONLY at close and holds
+  *evidence* (what/how/commits), never the status value and never an empty placeholder. The old
+  file-format template (inherited from `directives/README`) that mandated `## Resolution: outcome:
+  applied|deferred` — a duplicate of `dirStatus` — is the root source; it is removed.
+- **One validator, fixture-pinned:** extend DoD Clause 0 (or a dedicated `task-schema-check`) to
+  assert the whole schema (required sections present, AC/DoD checklist-form, no status-mirror
+  Resolution, no duplicated lifecycle line). All authoring paths (SELECT, `/quay-directive`) emit
+  this shape; the validator is the single executable definition. This collapses the ≥3 scattered
+  shape-definitions into ONE and fixes the milestone/directive asymmetry in one stroke.
+
+## 9. Formalized prompt-document style — the VEHICLE for the rewrites (baime skill-authoring)
+
+The crystallization requires rewriting molten prompt documents (the `/quay-directive` skill,
+`OUTER-LOOP.md` at 511 lines, `inherited-core.md`). Rewriting them as *more prose* is the additive
+paradox (§3). Instead adopt **baime's formalized style** (`skill-authoring` /
+`subagent-prompt-construction`) — which is itself a crystallization technology, applying the axes to
+the documents:
+- **`## Spec` λ-block (≤30 lines):** a compact symbolic contract (`λ(x)→y ∧ ∀ ∈ ≤ …`) replacing
+  paragraphs of prose — high density, low `L(G)` (Axis 2/4).
+- **`contracts:` frontmatter (≥3 grep/not-grep, `target: self`):** the document carries **executable
+  assertions about its own structure**, machine-verified — "the meter is runnable, not asserted"
+  applied to the document itself (Axis 2). `OUTER-LOOP.md` today has zero self-verification.
+- **Fixed structure + line bounds + `reference/` offload:** a canonical document schema (single
+  source for the document's shape — Axis 1), with detail loaded on demand (Axis 4).
+- **Isomorphism:** the SKILL.md fixed structure ≈ the §8 canonical *task* schema; `contracts:`
+  self-verification ≈ the schema validator. §8 and §9 are two faces of one move — a canonical schema
+  for an object + a formalized, self-verifying document that generates/checks it.
+
+**Tension to resolve (decision needed):** baime's `contracts:` are verified by the baime plugin's
+`validate-plugin.sh`; exp5's prompt docs are not baime-plugin skills. Either (a) build a small exp5
+contract-validator (a runnable meter for document conformance — itself an Axis-2 crystallization), or
+(b) bring the exp5 prompt docs under the baime plugin's skill format / the future quay document
+manager (§7). Recommendation: (a) now (cheap, unblocks the rewrites), converging toward (b) as §7's
+document-management capability lands.
+
+## 10. Non-goals
 - Do NOT crystallize by writing MORE rules — that is the additive-prose paradox (§3). Every item
   above is a deletion, a collapse, or an executable assertion.
 - Do NOT rewrite historical process narrative (past reports/dashboard log) — leave the record;
