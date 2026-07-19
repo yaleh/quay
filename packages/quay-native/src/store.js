@@ -154,6 +154,35 @@ export function createStore(tasksDir) {
     }
   }
 
+  // M35: writing a task's `parent` field touches multiple files (the child
+  // itself, plus its old and new parent(s)) -- withLock() alone (single id)
+  // is not enough. Deadlock-safety strategy: always acquire every lock this
+  // operation needs in one fixed, GLOBAL total order (ids sorted
+  // lexicographically) BEFORE running the read-modify-write body, and
+  // release in reverse order. Two concurrent multi-file writers that
+  // reference the same set of ids (in any order the CALLER supplied them)
+  // therefore always attempt to acquire those same locks in the SAME
+  // sequence -- the classic "lock ordering" deadlock-avoidance discipline
+  // (never let two lock-holders wait on each other in opposite order).
+  // Re-entrant/duplicate ids (e.g. old parent === new parent) are
+  // de-duplicated first so the same lock is never acquired twice by one
+  // call (acquireLock is not re-entrant; a duplicate would either deadlock
+  // against itself or double-release).
+  function withLocks(ids, fn) {
+    const sorted = [...new Set(ids)].sort();
+    const lockPaths = [];
+    try {
+      for (const id of sorted) {
+        lockPaths.push(acquireLock(id));
+      }
+      return fn();
+    } finally {
+      for (const lockPath of lockPaths.reverse()) {
+        releaseLock(lockPath);
+      }
+    }
+  }
+
   function listIds() {
     return fs
       .readdirSync(tasksDir)
@@ -303,8 +332,103 @@ export function createStore(tasksDir) {
   }
 
   /**
+   * M35: given a task id, scan every OTHER task file for ones that
+   * currently list `id` in their own `children` array -- the reverse
+   * index store.js does not otherwise maintain (mirrors github-client.js's
+   * `writeRelations()`, which re-derives its own `buildParentIndex()` from
+   * a full issue fetch rather than keeping a standing index). A full
+   * directory scan is O(n) in task count; acceptable at this store's scale
+   * (explicitly out of scope to add a persistent reverse-index/cache --
+   * charter M35-native-relation-sync). Returns ids only (not full
+   * view-models) since callers just need the id set for locking/mutation.
+   */
+  function findCurrentParents(id) {
+    const parents = [];
+    for (const otherId of listIds()) {
+      if (otherId === id) continue;
+      const raw = readRaw(otherId);
+      if (raw === null) continue;
+      const { frontmatter } = parse(raw);
+      if (Array.isArray(frontmatter.children) && frontmatter.children.includes(id)) {
+        parents.push(otherId);
+      }
+    }
+    return parents;
+  }
+
+  /**
+   * Remove `childId` from `parentId`'s `children` array on disk, if present.
+   * Caller must already hold `parentId`'s lock.
+   */
+  function removeChildRef(parentId, childId) {
+    const raw = readRaw(parentId);
+    if (raw === null) return; // parent file vanished concurrently -- nothing to clean up
+    const { frontmatter, body } = parse(raw);
+    const current = Array.isArray(frontmatter.children) ? frontmatter.children : [];
+    if (!current.includes(childId)) return; // already absent (e.g. another writer beat us to it)
+    const updated = { ...frontmatter, children: current.filter((c) => c !== childId) };
+    fs.writeFileSync(filePathFor(parentId), serialize(updated, body), "utf8");
+  }
+
+  /**
+   * Add `childId` to `parentId`'s `children` array on disk, if not already
+   * present. Caller must already hold `parentId`'s lock.
+   */
+  function addChildRef(parentId, childId) {
+    const raw = readRaw(parentId);
+    if (raw === null) return; // new parent id does not resolve to a real task -- nothing to add to
+    const { frontmatter, body } = parse(raw);
+    const current = Array.isArray(frontmatter.children) ? frontmatter.children : [];
+    if (current.includes(childId)) return; // already present
+    const updated = { ...frontmatter, children: [...current, childId] };
+    fs.writeFileSync(filePathFor(parentId), serialize(updated, body), "utf8");
+  }
+
+  /**
    * Raw file write — used by both `task create` (internal convenience,
    * not part of the ABI surface table but needed to seed tasks) and `edit`.
+   *
+   * M35: writing `parent` is now bidirectional, matching the github
+   * provider's `writeRelations()` contract (github-client.js ~L771-830):
+   * it removes `id` from every OTHER task's `children` array that
+   * currently lists it (reassignment or unset), and adds `id` to the new
+   * parent's `children` array (if not already present). `children` and
+   * `parent` fields, when both supplied in one call, are applied
+   * independently in the same order github uses (children first, then
+   * parent) -- there is no interaction between them (this task's own
+   * `children` lives in its own file; its `parent` link's mirror lives in
+   * some OTHER task's file).
+   *
+   * Lock-order / deadlock strategy: a parent-field write touches multiple
+   * files (child + old parent(s) + new parent), unlike every other field
+   * write() handles (single-file). To avoid a lock-order deadlock between
+   * two concurrent multi-file writers, the full set of ids this call needs
+   * is determined FIRST (via an unlocked `findCurrentParents()` pre-scan --
+   * see below for why an unlocked scan is safe here), then ALL locks for
+   * that set are acquired together via `withLocks()`, which sorts ids into
+   * one fixed global order before acquiring any of them (see withLocks()'s
+   * own comment). This guarantees two concurrent writers touching an
+   * overlapping id set always acquire their shared locks in the same
+   * relative order, so neither can be stuck holding lock A while waiting on
+   * lock B that the other holds while waiting on A.
+   *
+   * The pre-scan itself is unlocked (a plain read, not inside any lock) and
+   * so is inherently racy against a concurrent parent-write finishing
+   * between the scan and the lock acquisition -- but this is safe, not just
+   * tolerated: the CHILD's own lock is always in the acquired set (it is
+   * `id` itself), so once all locks are held, the parent-removal step
+   * below re-reads each candidate parent's file fresh (not the pre-scan's
+   * stale snapshot) and only removes `id` if it is still actually present
+   * (`removeChildRef` no-ops if absent) -- so a parent added or removed by
+   * a racing writer between the scan and the lock acquisition is simply
+   * re-validated, never blindly trusted. The only residual gap: a NEW
+   * concurrent parent relationship created *after* this call's lock set is
+   * fixed, naming an id outside that set, cannot be seen by this call --
+   * but that writer will itself acquire this child's lock (since it too
+   * must lock the child to write it) and will run either fully before or
+   * fully after this call, never interleaved, so no corruption results,
+   * only ordinary last-writer-wins sequencing (identical to every other
+   * field this store already handles).
    */
   function write(id, { title, status, labels, parent, children, extra, body, expectedStatus }) {
     if (status && !VALID_STATUSES.includes(status)) {
@@ -312,9 +436,18 @@ export function createStore(tasksDir) {
         `invalid status "${status}" — must be one of ${VALID_STATUSES.join(", ")}`
       );
     }
+
+    const parentWriteRequested = parent !== undefined;
+    // Unlocked pre-scan (see write()'s own doc comment above for why this
+    // is safe): determine which ids we need to lock BEFORE acquiring any
+    // lock, so withLocks() can sort the complete set into one fixed order.
+    const oldParentIds = parentWriteRequested ? findCurrentParents(id) : [];
+    const lockIds = [id, ...oldParentIds];
+    if (parentWriteRequested && parent) lockIds.push(parent);
+
     // QN-006: read-modify-write is lock-protected so CLI and MCP writers
     // (the same store.js core, design §6) never interleave on the same file.
-    return withLock(id, () => {
+    return withLocks(lockIds, () => {
       const existingRaw = readRaw(id);
       let frontmatter = { id, title, status, labels: labels ?? [], parent: parent ?? null, children: children ?? [] };
       let existingBody = "";
@@ -332,8 +465,12 @@ export function createStore(tasksDir) {
         if (title !== undefined) frontmatter.title = title;
         if (status !== undefined) frontmatter.status = status;
         if (labels !== undefined) frontmatter.labels = labels;
-        if (parent !== undefined) frontmatter.parent = parent;
+        // M35: children applied before parent, mirroring github's
+        // writeRelations() ordering (the two fields don't interact, but
+        // matching the reference order keeps behavior predictable across
+        // providers if a future caller ever supplies both at once).
         if (children !== undefined) frontmatter.children = children;
+        if (parent !== undefined) frontmatter.parent = parent;
         if (extra !== undefined) frontmatter.extra = extra;
       } else {
         // No existing file: there is no "current status" to compare against,
@@ -347,6 +484,21 @@ export function createStore(tasksDir) {
       const finalBody = body !== undefined ? body : existingBody;
       const raw = serialize(frontmatter, finalBody);
       fs.writeFileSync(filePathFor(id), raw, "utf8");
+
+      // M35: bidirectional relation sync -- only runs when `parent` was
+      // actually part of this write() call (parentWriteRequested), never
+      // as a side effect of some unrelated field write. All ids below are
+      // already covered by the `lockIds` set acquired above.
+      if (parentWriteRequested) {
+        for (const oldParentId of oldParentIds) {
+          if (parent && oldParentId === parent) continue; // already correctly parented there
+          removeChildRef(oldParentId, id);
+        }
+        if (parent) {
+          addChildRef(parent, id);
+        }
+      }
+
       return get(id);
     });
   }
