@@ -4,7 +4,8 @@
   are the real live gap; see "Reverted to pending" note directly below. Items 1 & 4 remain done.)
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
-- title: Actually build AND wire the proposal→plan process for development milestones — DIR-012 item 3 has been perpetually deferred with no backlog row, the two-class diversity policy is discretionary and gated on a skill that does not exist, and DISPATCH still never invokes proposal→plan (only an escapable line-budget gate enforces anything), so no subsequent task will go through the process the proposal designed
+- title: Make the quay task the SINGLE CANONICAL lifecycle record of a milestone — proposal embedded in the task body + plan tracked as a referenced link + AC/DoD as checklists (AC/DoD half already landed via DIR-020) — AND actually wire the proposal→plan process into DISPATCH for development milestones (DIR-012 item 3 perpetually deferred, the two-class diversity policy still discretionary, DISPATCH still never invokes proposal→plan, and no exp5-M-* task carries a `## Proposal`/plan reference), so the task board stops being an AC/DoD-only shell while the real proposal/plan design lives in scattered charter/docs files
+- scope_expanded: 2026-07-19 (human directive, this conversation) — folded the "proposal+plan must be tracked IN the quay task" requirement into this DIR per the human's "扩展/重写 DIR-014" decision; hybrid form chosen: proposal EMBEDDED in task body, plan tracked as a REFERENCE link (see new Requested action item 6 + the runnable Acceptance Criteria / Definition of Done sections added below)
 
 ## Reverted to pending (2026-07-19)
 
@@ -31,11 +32,18 @@ correctly-scoped ask.
   never the default, and is still preconditioned on a skill that (now) exists but is never invoked.
 - **item 5 — first customers** (M-TASK-BACKLOG-PROJECTION-IMPL etc. routed through the wired
   process) necessarily follows item 2, so it is still open too.
+- **item 6 — task = single canonical lifecycle record (NEW, folded in 2026-07-19):** NOT built.
+  0/24 `exp5-M-*` tasks carry a `## Proposal` section or a plan reference; only AC/DoD (DIR-020)
+  are task-native today. Proposal must be EMBEDDED in the task body and plan tracked as a
+  REFERENCE link, both enforced at authoring time (Clause 0-style HARD block). See Requested
+  action item 6 + the runnable Acceptance Criteria / Definition of Done sections below.
 
-Net: the skill was built but **never wired** — the exact "designed-but-not-wired" pattern this DIR
-was filed to end, now sitting one artifact further along (skill exists, DISPATCH ignores it). This
-is the single most important unclosed methodology-infrastructure gap in exp5's directive set as of
-2026-07-19. See also [[DIR-012]] item 3 (the same gap, upstream), whose follow-up note points here.
+Net: the skill was built but **never wired**, and the task board carries only AC/DoD while the
+proposal/plan design lives in scattered charter/docs files — the exact "designed-but-not-wired"
+pattern this DIR was filed to end, now sitting one artifact further along (skill exists, DISPATCH
+ignores it; AC/DoD are task-native but proposal/plan are not). This is the single most important
+unclosed methodology-infrastructure gap in exp5's directive set as of 2026-07-19. See also
+[[DIR-012]] item 3 (the same gap, upstream), whose follow-up note points here.
 
 ## Finding
 
@@ -123,8 +131,50 @@ proposal's §11 and DIR-012 item 3. Cover at least:
    milestones (M-TASK-BACKLOG-PROJECTION impl, the release-cadence impl) should be
    the first *other* development milestones routed through the now-wired process.
 
+6. **Make the quay task the SINGLE CANONICAL lifecycle record — proposal EMBEDDED,
+   plan REFERENCED (NEW, folded in 2026-07-19 per human directive; hybrid form).**
+   Today the loop authors `## Acceptance Criteria` + `## Definition of Done` into the
+   SELECTed task body (DIR-020/M34 — landed and enforced by DoD Clause 0), but the
+   milestone's *proposal* and *plan* live only in `charters/M-NN.md` and scattered
+   `docs/proposals/*` / `docs/plans/*` files — **0 of 24 `exp5-M-*` tasks carry a
+   `## Proposal` section or a plan reference** (verified 2026-07-19). The task board
+   is therefore an AC/DoD-only shell, not the single source of truth the DIR-009
+   task-canonical decision intended. Close this by making the task carry the WHOLE
+   lifecycle, in the hybrid shape the human chose:
+   - **(a) Proposal EMBEDDED in the task body.** At SELECT/authoring time (same
+     `task_write` step that already writes AC/DoD, `OUTER-LOOP.md` step 1), the loop
+     MUST also write the milestone's chosen proposal/approach as a `## Proposal`
+     body section — portable per DIR-011 (body = cross-provider, `extra{}` native-only
+     mirror), the same `task↔proposal` pairing DIR-012 item 1 already decided. This
+     applies to EVERY milestone (like AC/DoD), independent of whether the full
+     dev-class N-independent-proposal skill pipeline (items 1-3) runs — a
+     methodology/design milestone embeds its single chosen approach; a dev-class
+     milestone embeds the adjudicated proposal the skill produced. The QN/QC/QENG
+     tasks already do exactly this (`## Proposal` body section) — reuse that shape.
+   - **(b) Plan tracked as a REFERENCE link (NOT embedded, NOT a child-task tree).**
+     This deliberately does NOT reverse DIR-012's "phase/stage are not written into
+     the board" decision — the plan CONTENT stays a `docs/plans/*.md` file. What is
+     new: a dev-class milestone's task body MUST carry a `## Plan` section that
+     REFERENCES its `docs/plans/*.md` path (and, once DIR-023 lifecycle lands, a
+     status). A milestone that legitimately has no plan (methodology/design class,
+     no implementation) states `## Plan\nN/A — <reason>` explicitly rather than
+     omitting the section. Cross-check: the M05 anti-drift discipline style — the
+     reference must resolve (the `docs/plans/*.md` file exists) or the check fails.
+   - **(c) Mechanical enforcement at authoring time, same shape as Clause 0.** Extend
+     the DoD meta-enforcer's Clause 0 (AC/DoD presence check, `it0-dod-check.mjs`) —
+     or add a sibling clause — so a missing/empty/placeholder `## Proposal`, or a
+     `## Plan` whose referenced path does not resolve, HARD-BLOCKS `milestone_counter++`
+     exactly as a missing AC section already does. Prose-only is the failure mode this
+     DIR exists to end; the enforcement half must ship WITH the authoring half.
+
 Non-goals: do not re-open M17/M18/M19's already-landed design/policy/reconciliation
-work; do not change the methodology/design class's whole-milestone re-derivation.
+work; do not change the methodology/design class's whole-milestone re-derivation; **do
+NOT embed plan phase/stage content into the task board or as a child-task tree (item
+6b is a REFERENCE link only — DIR-012's "board tracks value, plan tracks process"
+decision stands); do NOT retroactively backfill `## Proposal`/`## Plan` onto the ≤m38
+milestones' tasks (applies FORWARD from the milestone that lands this, same as
+DIR-020's AC/DoD forward-only rule) — a backward sweep, if ever wanted, is its own
+separate scope.**
 
 Value type: capability-growth (a new working skill + an actually-invoked process) +
 governance-integrity (closes the designed-but-not-wired gap so the loop's own
@@ -132,7 +182,54 @@ development work becomes plan-disciplined). This is the milestone that finally m
 the proposal→plan design operative rather than shelfware; size the plan (it is
 itself ≤2000 lines per `docs/plans/3-7`) at SELECT time.
 
-## Resolution
+## Acceptance Criteria (runnable — artifacts are necessary-not-sufficient)
+
+Items 2/3/5 (DISPATCH wiring, de-optionalization, first customers) keep their original
+intent; the checks below are the runnable form, PLUS the new item-6 lifecycle-record checks.
+
+- [ ] **item 6a (proposal embedded):** the milestone that lands this DIR has, on its own
+  quay task, a non-empty `## Proposal` body section — `quay task view <that-milestone-task>
+  --json` (or the `tasks/<id>.md` body) shows `## Proposal` with real approach text, not a
+  placeholder. Forward-rule: every milestone SELECTed AFTER this lands likewise gets one.
+- [ ] **item 6b (plan referenced):** that same task carries a `## Plan` section that either
+  references an existing `docs/plans/*.md` path (the file resolves) OR states `N/A — <reason>`
+  for a no-implementation milestone. `grep -A2 '^## Plan' tasks/<id>.md` shows a resolving
+  reference or an explicit N/A.
+- [ ] **item 6c (enforcement is real, not prose):** a synthetic milestone-task stub with a
+  missing/placeholder `## Proposal` (or a `## Plan` whose referenced path does not exist) is
+  run through `scripts/it0-dod-check.{sh,mjs}` (Clause 0 or its new sibling) and EXITS NON-ZERO;
+  a compliant stub exits 0. A new RED fixture pair under `fixtures/dod/` is wired into
+  `scripts/dod-fixture-selfcheck.sh` and the suite stays green (all fixtures behave as asserted).
+- [ ] **item 2 (DISPATCH wired):** `grep -n quay-task-to-plan
+  experiments/quay-perpetual-stream/OUTER-LOOP.md` returns a match inside step 5 (DISPATCH INNER)
+  as the OPERATIVE route for a development-class milestone, not a mention.
+- [ ] **item 3 (de-optionalized):** `inherited-core.md`'s two-class diversity policy no longer
+  reads "MAY, at a future charter's discretion" for the development class — it is the DEFAULT,
+  and the plan-reference requirement (item 6b) is keyed on `capability-growth` type, not on a
+  self-declared >2000-line budget (closing the "keep it small to bypass" hatch).
+
+## Definition of Done — REAL LANDING is the bar, not artifacts
+
+NOT done when the skill is wired in prose, `OUTER-LOOP.md`/`inherited-core.md` are edited, or a
+fixture passes. Done ONLY when a **REAL development-class exp5 milestone** has actually been
+**driven through the wired proposal→plan pipeline AND carries its proposal embedded + plan
+referenced on its own quay task**, verifiable by:
+(a) that milestone's task shows a real `## Proposal` + a resolving `## Plan` reference (item 6a/6b);
+(b) `it0-dod-check` HARD-BLOCKS a synthetic proposal-missing / plan-reference-broken stub and passes
+    a compliant one, with the new fixtures committed and `dod-fixture-selfcheck.sh` green (item 6c);
+(c) `OUTER-LOOP.md` step 5 shows the `quay-task-to-plan` invocation as the operative dev-class route
+    (item 2), and the two-class policy is the default not discretionary (item 3);
+(d) at least one real milestone's DISPATCH actually ran the pipeline (not a fixture) — its iteration
+    record shows the N-independent-proposal re-derivation + adjudication + grounded plan-check.
+A green fixture, an edited doc, or a single seeded `## Proposal` alone is necessary but NOT
+sufficient. Escrow discipline: until (a)–(d) hold for a real milestone, this DIR stays `pending`.
+
+## Resolution (HISTORICAL — partial, from the "applied (partial)" era; SUPERSEDED by the revert + scope expansion above)
+
+> The Resolution below records the M20/M22 partial close as it stood before the 2026-07-19
+> audit reverted this DIR to `pending` and the human expanded its scope with item 6. It is
+> retained as history; the authoritative current state is the "Reverted to pending" note (top)
+> plus the Acceptance Criteria / Definition of Done sections directly above.
 - resolved_by: M20-task-to-plan-skill-proposal-step (Phase 6, m20) + M22-quay-task-to-plan-skill-phase7
   (Phase 7, m22, iteration-0)
 - outcome: **applied, partially** — requested-action item 1 (build the skill) is closed across the
