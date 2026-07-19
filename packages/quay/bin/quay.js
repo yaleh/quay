@@ -170,7 +170,8 @@ Usage:
   quay --version | -V
   quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--json|--format json]
   quay task view <task-id> [--json]
-  quay task edit <task-id> --status <status> [--json]
+  quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--extra <json>] [--json]
+  quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--expect-status <status>] [--append-notes <text>] [--json]
   quay task check <task-id> [--json]
   quay action list <task-id> [--json]
   quay action run <task-id> <action-id> [--json]
@@ -187,11 +188,39 @@ Options for task list:
   --json              Output as JSON
   --format json       Alias for --json (any other --format value is a usage error)
 
+Options for task create:
+  --title <title>      Title for the new task (REQUIRED — hard usage error, no provider call, if missing/empty)
+  --body <text>        Initial body text (mutually exclusive with --body-file)
+  --body-file <path>   Read initial body from a file ("-" for stdin; mutually exclusive with --body)
+  --status <status>    Initial status (todo, ready, done, needs-human)
+  --labels <a,b>       Comma-separated initial labels
+  --parent <id>        Parent task id
+  --children <a,b>     Comma-separated child task ids
+  --extra <json>       Extra metadata as a JSON object string
+  --json                Output the created task as JSON
+
+Options for task edit:
+  --title <title>       New title (see note below: required if <task-id> does not yet exist)
+  --status <status>     New status (todo, ready, done, needs-human)
+  --body <text>         Replace body with this text (mutually exclusive with --body-file)
+  --body-file <path>    Replace body with file contents ("-" for stdin; mutually exclusive with --body)
+  --labels <a,b>        Comma-separated labels (replaces existing labels)
+  --extra <json>        Extra metadata as a JSON object string (merged into existing extra)
+  --parent <id>         New parent task id
+  --children <a,b>      Comma-separated child task ids (replaces existing children)
+  --expect-status <status>  Compare-and-swap: fail if the task's current status is not this value
+  --append-notes <text>     Append text to the existing body (read-then-write convenience)
+  --json                 Output the edited task as JSON
+  Note: editing a task id that does NOT currently exist requires --title (this is an
+  upsert-as-create; a missing --title is refused with a usage error instead of silently
+  creating a titleless task — use 'quay task create' for a dedicated create path instead).
+
 Examples:
   quay task list --prefix QX          List only QX-* tasks
   quay task list --status todo        List todo tasks
   quay task list --search "bootstrap" List tasks with "bootstrap" in title or body
   quay task view QX-001               View task details
+  quay task create QX-002 --title "New task"  Create a new task (title required)
   quay task edit QX-001 --status done Mark task done
 `);
   } else {
@@ -240,7 +269,7 @@ async function main() {
   // --json (serve, mcp) never read wantsJson, so this is a no-op for them.
   const jsonFlag = resolveJsonFlag(flags);
   const jsonCommands =
-    (cmd === "task" && ["list", "view", "edit", "check"].includes(sub)) ||
+    (cmd === "task" && ["list", "view", "edit", "check", "create"].includes(sub)) ||
     (cmd === "action" && ["list", "run"].includes(sub));
   if (jsonFlag === null && jsonCommands) {
     console.error(`Error: unsupported --format value ${JSON.stringify(flags.format)} (only "json" is supported; use --json instead of --format for non-JSON output)`);
@@ -398,6 +427,48 @@ async function main() {
     return;
   }
 
+  if (cmd === "task" && sub === "create") {
+    // M29-cli-create-ergonomics (GAP-001): dedicated Core-CLI `task create`
+    // verb. --title is MANDATORY at the CLI-parsing layer — a hard usage
+    // error (no provider call made at all) if missing or empty. This is
+    // the structural/ergonomic complement to the `task edit` guard below;
+    // together they close GAP-002 (see that guard's own comment for the
+    // full mechanism trace).
+    const id = positional[0];
+    if (!id) {
+      console.error("quay task create: missing required <id> argument");
+      process.exitCode = 1;
+      return;
+    }
+    if (flags.body !== undefined && flags["body-file"] !== undefined) {
+      console.error("quay task create: --body and --body-file are mutually exclusive");
+      process.exitCode = 1;
+      return;
+    }
+    if (typeof flags.title !== "string" || flags.title.trim() === "") {
+      console.error("quay task create: --title <title> is required (and must be non-empty)");
+      process.exitCode = 1;
+      return;
+    }
+
+    const patch = { title: flags.title };
+    if (flags.status !== undefined) patch.status = flags.status;
+    if (flags.labels !== undefined) patch.labels = String(flags.labels).split(",").filter(Boolean);
+    if (flags.parent !== undefined) patch.parent = flags.parent;
+    if (flags.children !== undefined) patch.children = String(flags.children).split(",").filter(Boolean);
+    if (flags.extra !== undefined) patch.extra = JSON.parse(flags.extra);
+    if (flags.body !== undefined || flags["body-file"] !== undefined) {
+      patch.body = await resolveBody(flags);
+    }
+
+    await withProvider(async (client) => {
+      const t = await client.taskWrite({ id, ...patch });
+      if (wantsJson) printJson(t);
+      else console.log(`${t.id}: ${t.title} [${t.status}]`);
+    }, { providerId: flags.provider });
+    return;
+  }
+
   if (cmd === "task" && sub === "edit") {
     // QN-024 (iteration 10): generic task_write passthrough, provider-
     // agnostic — same withProvider() path as list/view, zero backend
@@ -441,6 +512,29 @@ async function main() {
     }
 
     await withProvider(async (client) => {
+      // M29-cli-create-ergonomics (GAP-002 fix): `task edit`'s own contract
+      // is "patch an EXISTING task." The silent-corruption failure mode
+      // (store.js#write()'s title-omission-on-create path, YAML.stringify
+      // dropping an `undefined` title key) is specific to editing a
+      // currently-non-existent id with no --title supplied — that path
+      // upserts a titleless record instead of failing. Guard: read first
+      // (taskGet), and if the id does not exist AND no --title was
+      // supplied, refuse with a clear usage error instead of proceeding to
+      // the taskWrite patch call below. This closes GAP-002 unconditionally
+      // for every flag combination reaching this handler (not just the one
+      // --status-only reproduction shape), because the check runs before
+      // ANY patch is applied, regardless of which other flags were passed.
+      if (flags.title === undefined) {
+        const existing = await client.taskGet(id);
+        if (!existing) {
+          console.error(
+            `quay task edit: task ${id} does not exist yet; creating a new task requires --title ` +
+            `(or use 'quay task create')`
+          );
+          process.exitCode = 1;
+          return;
+        }
+      }
       // M16-cli-edit-parity-impl (design doc §4 non-goals): --append-notes
       // is a Core-CLI-side read-then-write convenience, not a new ABI tool
       // — read the current body via taskGet, append the note text, then
@@ -553,7 +647,7 @@ async function main() {
   }
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <task list|view|edit|check|action list|run|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <task list|view|create|edit|check|action list|run|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
 }
 
