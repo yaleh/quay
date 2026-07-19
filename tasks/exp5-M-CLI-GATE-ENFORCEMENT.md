@@ -3,10 +3,11 @@ id: exp5-M-CLI-GATE-ENFORCEMENT
 title: "quay task edit --status: decide and implement whether the CLI write
   path should itself enforce the task check gate, or explicitly document it
   as an unguarded setter (Skill-level discipline only)"
-status: todo
+status: in-progress
 labels:
   - milestone-candidate
   - surface:cli
+  - milestone:M31-cli-gate-enforcement
 extra: {}
 ---
 ## Forward-looking candidate provenance
@@ -52,7 +53,10 @@ Given this is a design decision with real backwards-compatibility implications, 
 `explore`-flavored charter component even though the surface itself (CLI) is well-understood.
 
 ## Status mirror
-todo (created @m29 DRAIN/SELECT boundary, 2026-07-18 — not yet SELECTed)
+in-progress (SELECTed @m31 DRAIN/SELECT boundary, 2026-07-19 — charter authored, decision made:
+(b) document unguarded-by-default + opt-in `--enforce-gate` flag reusing `task check`'s own logic.
+Full reasoning: `experiments/quay-perpetual-stream/charters/M31-cli-gate-enforcement.md`'s
+"Decision" section.)
 
 ---
 ## Not selected (M29)
