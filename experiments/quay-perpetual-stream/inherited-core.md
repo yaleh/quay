@@ -865,10 +865,39 @@ it names them together, states each one's shape in a common four-field template,
 new **no-self-exemption meta-clause** that applies across all four.
 
 **Mechanical enforcement of this section:** `scripts/it0-dod-check.{sh,mjs}` (below) is the standing
-check that a given milestone's charter + ABSORB-entry record actually satisfies all five clauses
-below — wired into `OUTER-LOOP.md` step 6 as a HARD BLOCK on step 7's `milestone_counter++`, in the
-same gate sequence/position as the three narrative HARD BLOCKs it wraps (see "DoD meta-enforcer
-gate" in `OUTER-LOOP.md`).
+check that a given milestone's task + charter + ABSORB-entry record actually satisfies all six clauses
+below (clause 0 plus clauses 1-5) — wired into `OUTER-LOOP.md` step 6 as a HARD BLOCK on step 7's
+`milestone_counter++`, in the same gate sequence/position as the three narrative HARD BLOCKs it wraps
+(see "DoD meta-enforcer gate" in `OUTER-LOOP.md`).
+
+**AC/DoD live in the TASK, not the charter (proposal↔task / plan↔milestone alignment, 2026-07-19).**
+A milestone's Acceptance Criteria (AC) and Definition of Done (DoD) are authored at the **proposal**
+stage and recorded in the milestone-candidate **task** body (`tasks/<task-id>.md`) as two sections —
+`## Acceptance Criteria` and `## Definition of Done` — which are the SINGLE canonical source of truth
+for both. They MAY be revised at the plan/charter stage, but the revision is made to the task's copy;
+they are NEVER forked into the charter. The charter (the milestone's plan) **references** the task's
+AC/DoD and must not duplicate them — duplication is exactly the drift this whole section exists to
+kill. This aligns the four entities: **task↔proposal** (the value unit + its AC/DoD) and
+**milestone↔plan** (the sequenced implementation). AC = criteria specific to THIS value unit (what was
+formerly the per-charter "Binary Done-when", now moved into the task). DoD = the task's done-checklist:
+a **reference** to the standard five clauses below (NOT a copy — a copy goes stale when the standard
+changes) PLUS any task-specific extra done-conditions.
+
+### Clause 0 — AC + DoD present and well-formed in the task (2026-07-19)
+- **Trigger condition:** every milestone, unconditionally — there is no case in which a milestone
+  legitimately has no acceptance criteria.
+- **What it checks:** the milestone's task (`tasks/<task-id>.md`) contains a non-empty, well-formed
+  `## Acceptance Criteria` section with at least one concrete, individually-checkable clause (a
+  bullet/numbered line with real content — not empty, not a bare `TBD`/`TODO`/placeholder), AND a
+  non-empty `## Definition of Done` section that **references** the standard DoD (this section / the
+  five clauses below) and may add task-specific done-conditions. PRESENCE and SHAPE only — whether each
+  AC clause is actually MET is the per-milestone acceptance audit's job (`OUTER-LOOP.md` step 6), NOT
+  this mechanical check's.
+- **Pass/fail semantics:** exit 1 (FAIL, HARD-blocks `milestone_counter++`) if the task file is
+  missing, or either section is absent / empty / placeholder-only / (for DoD) does not reference the
+  standard; exit 0 (PASS) otherwise. Mechanized in `scripts/it0-dod-check.mjs` (below).
+- **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), as clause 0 of the DoD meta-enforcer
+  gate — the same HARD BLOCK as clauses 1-5.
 
 ### Clause 1 — Adversarial-audit gate (DIR-007 / M10-audit-consolidation)
 - **Trigger condition:** fires per the "Adversarial-audit cadence rule" section above — condition

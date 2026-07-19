@@ -28,6 +28,7 @@ CASES=(
   "M99-fake-violating|$FIX/violating-stub.md|1"
   "M96-fake-linebudget-self-exempt|$FIX/self-exempt-linebudget-stub.md|1"
   "M95-fake-implrow-self-exempt|$FIX/self-exempt-implrow-stub.md|1"
+  "M94-fake-missing-ac|$FIX/missing-ac-stub.md|1"
 )
 
 fail=0
