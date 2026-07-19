@@ -623,6 +623,118 @@ async function main() {
     }
   }
 
+  // --- M33 (G-S4-01, m33): POST action-route success banner text is
+  //     conditioned on deliverTrigger()'s result.delivered, not a hardcoded
+  //     "advanced" string. Covers the "print" (degraded, realistic default
+  //     for bare `quay serve`) and "mock" (QUAY_ACTION_MOCK_LOG) modes.
+  //     "manda" is not covered here — exercising it deterministically would
+  //     require a live daemon; action-mock-delivery.test.mjs/serve-action-
+  //     delivery.test.mjs already document that live-manda reachability is
+  //     non-deterministic in this sandbox (mandaAvailable() has been observed
+  //     to return both true and false across runs here), so gating an
+  //     assertion on it would itself be a flaky test — the same anti-pattern
+  //     those files were written to avoid.
+  {
+    const m33TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-m33-test-"));
+    const m33WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-m33-workspace-"));
+    fs.mkdirSync(path.join(m33WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(m33WorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${m33TasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${m33TasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+    // M33-P1: gate-pass todo task, used for the "print"-degraded banner assertion.
+    execFileSync("node", [nativeBin, "task", "create", "M33-P1", "--title", "M33 print-mode banner test task",
+      "--status", "todo", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: m33TasksDir },
+    });
+    // M33-M1: gate-pass todo task, used for the "mock"-mode banner assertion.
+    execFileSync("node", [nativeBin, "task", "create", "M33-M1", "--title", "M33 mock-mode banner test task",
+      "--status", "todo", "--body", VALID_SECTIONS], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: m33TasksDir },
+    });
+
+    const m33Port = port + 16;
+    const m33OrigCwd = process.cwd();
+    let m33Server;
+    try {
+      process.chdir(m33WorkspaceRoot);
+      m33Server = await startServer({ port: m33Port });
+
+      // --- "print" mode: force deliverTrigger()'s manda-availability check
+      // to fail deterministically by temporarily clearing PATH so the
+      // `manda` binary cannot be found (spawn ENOENT), rather than relying
+      // on ambient sandbox state (action-mock-delivery.test.mjs's own
+      // comments document that mandaAvailable()'s live outcome is NOT
+      // deterministic in this sandbox — observed both true and false across
+      // runs). No QUAY_ACTION_MOCK_LOG is set, so deliverTrigger() falls
+      // through past the (now-unreachable) manda branch to "print".
+      const prevPath = process.env.PATH;
+      process.env.PATH = "";
+      let printPost;
+      try {
+        printPost = await post(m33Port, "/task/M33-P1/action/advance");
+      } finally {
+        process.env.PATH = prevPath;
+      }
+      assert(printPost.status === 302,
+        `POST /task/M33-P1/action/advance (print mode, PATH cleared) returns 302 (got ${printPost.status})`);
+      assert(
+        printPost.headers.location && printPost.headers.location.includes("success="),
+        `POST /task/M33-P1/action/advance (print mode): redirect includes ?success= param (Location: ${printPost.headers.location})`
+      );
+      const printSuccessMsg = decodeURIComponent(
+        (printPost.headers.location.match(/success=([^&]*)/) || [, ""])[1]
+      );
+      assert(
+        printSuccessMsg.includes("requested") && !/advanced|done/i.test(printSuccessMsg),
+        `M33 G-S4-01: "print"-mode banner text uses "requested"-flavored language, not "advanced"/"done" (got "${printSuccessMsg}")`
+      );
+
+      // --- "mock" mode: QUAY_ACTION_MOCK_LOG selects the deterministic
+      // file-log delivery mode (QN-042/DIR-009), independent of manda/PATH
+      // state — the existing, already-established deterministic-test pattern.
+      const mockLogPath = path.join(m33TasksDir, "m33-action-mock.jsonl");
+      const prevMockLog = process.env.QUAY_ACTION_MOCK_LOG;
+      process.env.QUAY_ACTION_MOCK_LOG = mockLogPath;
+      let mockPost;
+      try {
+        mockPost = await post(m33Port, "/task/M33-M1/action/advance");
+      } finally {
+        if (prevMockLog === undefined) delete process.env.QUAY_ACTION_MOCK_LOG;
+        else process.env.QUAY_ACTION_MOCK_LOG = prevMockLog;
+      }
+      assert(mockPost.status === 302,
+        `POST /task/M33-M1/action/advance (mock mode) returns 302 (got ${mockPost.status})`);
+      assert(
+        mockPost.headers.location && mockPost.headers.location.includes("success="),
+        `POST /task/M33-M1/action/advance (mock mode): redirect includes ?success= param (Location: ${mockPost.headers.location})`
+      );
+      const mockSuccessMsg = decodeURIComponent(
+        (mockPost.headers.location.match(/success=([^&]*)/) || [, ""])[1]
+      );
+      assert(
+        !/advanced|done/i.test(mockSuccessMsg),
+        `M33 G-S4-01: "mock"-mode banner text does not claim "advanced"/"done" (got "${mockSuccessMsg}")`
+      );
+      assert(fs.existsSync(mockLogPath),
+        "M33: mock log file created by the POST action route in mock mode (confirms mock path was actually taken, not a false-positive banner match)");
+
+      // Distinct-strings check: print and mock banners must not be identical
+      // (each mode's own honest description, not one shared generic string).
+      assert(printSuccessMsg !== mockSuccessMsg,
+        `M33 G-S4-01: "print" and "mock" mode banners are distinct strings (print="${printSuccessMsg}", mock="${mockSuccessMsg}")`);
+
+    } finally {
+      if (m33Server) {
+        m33Server.close();
+        if (m33Server.client) await m33Server.client.close();
+      }
+      process.chdir(m33OrigCwd);
+      fs.rmSync(m33TasksDir, { recursive: true, force: true });
+      fs.rmSync(m33WorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
   // --- QX-016..QX-019 (experiment 4, iteration 4): multi-label filter, sticky actions,
   //     updatedAt display, and target-status tooltip backport ---
   {

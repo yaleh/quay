@@ -962,7 +962,21 @@ export async function startServer({ port = 4173 } = {}) {
         mockLogPath,
       });
       // QX-013 (iteration 3): on success, redirect with ?success= for feedback.
-      const successMsg = `Task ${t.id} advanced`;
+      // G-S4-01 (M33-webui-trigger-honesty, M28 Scenario 4 finding): the banner
+      // text MUST be conditioned on result.delivered, not a hardcoded
+      // "advanced" claim. None of deliverTrigger()'s three modes perform a
+      // synchronous task-status write (confirmed by reading action.js's
+      // deliverTrigger() in full — "mock" appends a JSON-lines test record,
+      // "manda" fires an async, fire-and-forget dispatch with no delivery-
+      // confirmation callback, "print" only logs to stdout) — so no mode may
+      // claim "advanced"/"done" wording. "print" and "manda" use "requested"-
+      // flavored language per AC 2; "mock" gets its own honest, non-"advanced"
+      // label since it is a test-only recording mode, not a production claim.
+      const successMsg = {
+        print: `Task ${t.id}: advance requested (no live dispatcher configured — run the printed command to complete it)`,
+        manda: `Task ${t.id}: advance requested (dispatched to manda, delivery not confirmed)`,
+        mock: `Task ${t.id}: advance recorded (mock delivery mode)`,
+      }[result.delivered] || `Task ${t.id}: advance requested`;
       const successRedirect = addParam(baseRedirect, "success", successMsg);
       res.writeHead(302, { Location: successRedirect });
       res.end();
