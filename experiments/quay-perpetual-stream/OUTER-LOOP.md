@@ -89,6 +89,20 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    selected (M-NN)` section stating the pass number and one-line reason (aged-out, smaller Δv̂, wrong
    value type for this pass's explore/exploit slot, etc.). This makes the SELECT reasoning
    inspectable per-task instead of only living in a dashboard/checkpoint narrative.
+   **Author the task's AC + DoD at THIS (proposal) step — mandatory, the authoring half of DoD clause
+   0 (`inherited-core.md`'s "AC/DoD live in the TASK" rule):** before dispatch, write two sections
+   into the SELECTed candidate task's body via `task_write` (the task is the single canonical source
+   of truth for both — do NOT put them in the charter, which only references them):
+   - `## Acceptance Criteria` — ≥1 concrete, individually-checkable criterion specific to this value
+     unit (what was formerly the charter's "Binary Done-when", now authored into the task). Each
+     criterion must name the artifact / test / observable output that would prove it met (so the
+     per-milestone acceptance audit at step 6 can try to refute each one).
+   - `## Definition of Done` — a REFERENCE to the standard five clauses in `inherited-core.md`'s
+     "Definition of Done" section (never a copy), PLUS any task-specific extra done-conditions.
+   These MAY be revised while authoring the charter/plan, but the revision is made to the task's copy,
+   never forked into the charter. `scripts/it0-dod-check.sh` clause 0 mechanically HARD-blocks step 7's
+   `milestone_counter++` at ABSORB if either section is missing/empty/placeholder — so authoring them
+   here is not optional.
    **Size the candidate BEFORE dispatch** using `inherited-core.md`'s "Milestone size definition +
    verify-iteration size gauge" section: does the proposed scope let iteration-0 land ALL Done-when
    in one pass, with iteration-1 having real material to independently re-derive (not empty
@@ -198,24 +212,33 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      contract (`it0-dir-projection-check.mjs`/a future backlog-projection check both explicitly
      ignore `## Execution record` sections and `milestone:M-NN` labels when computing divergence, per
      M24 Stage 1.2 — this write-back is expected content, not drift).
-   - **Adversarial-audit gate (DIR-007 / M10-audit-consolidation, HARD BLOCK on this milestone's VT-
-     curve append / Done-when-complete claim — distinct from, and in addition to, the inner
-     milestone's own iteration-1):** BEFORE this milestone's realized `Δv` is appended to the VT
-     curve or its Done-when clauses are recorded as complete, check whether this milestone meets
-     EITHER cadence-rule condition in `inherited-core.md`'s "Adversarial-audit cadence rule": (a) it
-     is VT-scoring (its SELECT-time value-typed ledger entry includes `capability-growth` and its
-     ABSORB would append a nonzero VT Δv), OR (b) its own iteration-0 recommended skipping
-     iteration-1 (a self-exemption attempt). **If either fires**, dispatch the adversarial-audit role
-     (`inherited-core.md`'s "Adversarial-audit role" section — a fresh-context `baime:iteration-
-     executor` call, `run_in_background=true`, dispatched by the OUTER loop itself, NEVER folded
-     into the inner milestone's own iteration-1) BEFORE this ABSORB step may complete. Output to
-     `milestones/M<NN>/audits/iteration-N-adversarial-audit.md`. A **REFUTED** verdict blocks the VT
-     append / Done-when-complete claim until the underlying record is corrected (same HARD BLOCK
-     shape as the V_meta consolidation-lag gate below); a **CONCERNS** verdict is recorded but
-     non-blocking; **NO REFUTATION FOUND** clears the gate. **If NEITHER condition fires** (the
-     default case — methodology-infra/governance milestones with no VT weight, per the explicit
-     non-blanket cadence rule), this gate is a documented no-op: state plainly in the ABSORB log
-     entry that neither condition applied and why, rather than silently omitting the check.
+   - **Per-milestone acceptance audit (UNCONDITIONAL, 2026-07-19 — supersedes the old conditional
+     adversarial-audit trigger; HARD BLOCK on this milestone's VT-curve append / Done-when-complete
+     claim AND on step 7's `milestone_counter++`):** EVERY milestone, with NO cadence precondition,
+     dispatch a fresh-context adversarial audit subagent (`inherited-core.md`'s "Adversarial-audit
+     role" — a fresh-context `baime:iteration-executor` call, `run_in_background=true`, dispatched by
+     the OUTER loop itself, NEVER folded into the inner milestone's own iteration-1). Its explicit
+     charge, in refute-first stance:
+       1. **AC satisfaction:** read the milestone's TASK (`tasks/<task-id>.md`) `## Acceptance
+          Criteria` section and, for EACH criterion, try to REFUTE that it is actually met — citing the
+          concrete artifact / test output / diff that proves it, NOT the implementer's self-report. Any
+          AC criterion it cannot confirm met ⇒ REFUTED.
+       2. **DoD satisfaction:** confirm the task's `## Definition of Done` (the standard five clauses +
+          any task-specific extras) is satisfied for this milestone.
+       3. **Mechanical gate green:** confirm `scripts/it0-dod-check.sh <task-id> <charter-file>
+          <absorb-entry-file>` exited 0 (ALL clauses incl. clause 0 AC/DoD-present). If it did not, the
+          audit is REFUTED by construction.
+     Output to `milestones/M<NN>/audits/iteration-N-acceptance-audit.md`, and state the verdict in the
+     ABSORB log entry using one of the tokens **REFUTED** / **CONCERNS** / **NO REFUTATION FOUND** (so
+     the DoD clause-1 documentation-discipline check sees a disposition). A **REFUTED** verdict is a
+     HARD BLOCK: the VT append / Done-when-complete claim and step 7's `milestone_counter++` MUST NOT
+     proceed until the underlying record is corrected and the audit re-run clears (same HARD BLOCK
+     shape as the V_meta consolidation-lag gate below). **CONCERNS** is recorded, non-blocking. **NO
+     REFUTATION FOUND** (no AC criterion refuted, DoD satisfied, mechanical gate green) clears it.
+     This gate ALWAYS runs and ALWAYS records a verdict — there is NO documented-no-op case any more; a
+     milestone can no longer avoid the audit by being non-VT. The former cadence-rule conditions (a)
+     VT-scoring / (b) iteration-0 self-exemption are retained ONLY as escalation hints for how hard to
+     push the refutation, never as a gate on WHETHER the audit runs.
    - **V_meta consolidation-lag gate (DIR-005 / M07-vmeta-gate, HARD BLOCK on step 7's
      `milestone_counter++`):** before this milestone may be marked DONE / `milestone_counter`
      incremented in step 7 below, check every row in `v-meta-ledger.md`. For each row whose status is

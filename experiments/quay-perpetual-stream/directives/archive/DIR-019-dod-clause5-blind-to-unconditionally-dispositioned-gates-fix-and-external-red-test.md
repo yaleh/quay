@@ -1,6 +1,6 @@
 # DIR-019
 
-- status: pending
+- status: applied
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-19
 - title: The DoD meta-enforcer's no-self-exemption clause (clause 5) is blind to self-exemptions of the two gates it can mechanically inspect (line-budget, impl-row), because those clauses are dispositioned unconditionally and clause 5 skips any already-dispositioned clause — fix clause 5, and gate DIR-017 Step 2/3 on an EXTERNAL, human-authored red test that does not trust the enforcer's own self-report

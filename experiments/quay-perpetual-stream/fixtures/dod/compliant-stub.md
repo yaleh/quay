@@ -49,3 +49,17 @@ backlog file) — this row contains NO "design delivered"/"design-doc only" mark
 clause correctly N/A-passes (rule does not apply):
 
 | M98-fake-compliant | Fake compliant milestone for it0-dod-check fixture testing — ships operational work, not design-only | DONE | explore | milestone-candidate, surface:method-infra |
+
+## Acceptance Criteria
+
+Synthetic AC for this fixture (clause-0 source) — each concrete and checkable:
+- The operational script exits 0 on compliant input and 1 on violating input.
+- A unit test covers both the pass and fail paths.
+- `--help` documents the new flag.
+
+## Definition of Done
+
+References the standard DoD (the five clauses in `inherited-core.md`'s "Definition of Done" section —
+adversarial-audit, V_meta-lag, line-budget, impl-row, no-self-exemption) plus this task's own extra:
+- Standard DoD clauses 1-5 all satisfied (see ABSORB-entry dispositions above).
+- Task-specific: the shipped script carries ≥80% test coverage on its own new lines.

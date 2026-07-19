@@ -116,6 +116,48 @@ const nops = [];
 // disposition recorded at all"). Populated by clauses 1-4 below as each runs.
 const dispositionedClauses = new Set();
 
+// --- Clause 0: AC + DoD present and well-formed in the TASK (single source of truth) ---
+// AC/DoD are authored at proposal stage and recorded in the task body (tasks/<id>.md), per
+// inherited-core.md's "AC/DoD live in the TASK" rule (proposal↔task / plan↔milestone). This clause
+// checks PRESENCE + SHAPE only — whether each AC criterion is actually MET is the per-milestone
+// acceptance audit's job (OUTER-LOOP.md step 6). Source text: the task file tasks/<milestoneId>.md
+// if found (real run), else the charter/fixture file text (fixture run, which embeds the two
+// sections at top level so a synthetic milestone can be exercised without a real task file).
+{
+  const taskCandidates = [
+    path.join(process.cwd(), "tasks", `${milestoneId}.md`),
+    path.join(__dirname, "..", "..", "..", "tasks", `${milestoneId}.md`),
+  ];
+  const taskPath = taskCandidates.find((p) => fs.existsSync(p));
+  const taskText = taskPath ? fs.readFileSync(taskPath, "utf8") : charterFileText;
+  const acSection = extractSection(taskText, "Acceptance Criteria");
+  const dodSection = extractSection(taskText, "Definition of Done");
+
+  const placeholderRe = /^\s*([-*]|\d+[.)])\s*(TBD|TODO|N\/A|xxx|\.\.\.)?\s*$/i;
+  const acClauses = acSection
+    ? acSection.split("\n").filter((l) =>
+        /^\s*([-*]|\d+[.)])\s+\S/.test(l) &&
+        l.replace(/^\s*([-*]|\d+[.)])\s+/, "").trim().length >= 8 &&
+        !placeholderRe.test(l))
+    : [];
+  const dodRefRe = /(standard|inherited-core|five clauses|clause\s*[1-5]|meta-enforcer)/i;
+
+  const clause0Fail = [];
+  if (acSection === null) clause0Fail.push("no '## Acceptance Criteria' section found in the task");
+  else if (acClauses.length === 0) clause0Fail.push("'## Acceptance Criteria' section has no concrete checkable clause (needs >=1 non-placeholder bullet/numbered line)");
+  if (dodSection === null) clause0Fail.push("no '## Definition of Done' section found in the task");
+  else if (dodSection.trim().length === 0) clause0Fail.push("'## Definition of Done' section is empty");
+  else if (!dodRefRe.test(dodSection)) clause0Fail.push("'## Definition of Done' section does not reference the standard DoD (must reference the standard five clauses / inherited-core, per the reference-plus-extras rule)");
+
+  const srcLabel = taskPath ? `[${path.relative(process.cwd(), taskPath)}]` : "[fixture text — no real task file]";
+  if (clause0Fail.length === 0) {
+    passes.push(`clause0-ac-dod-present: task AC has ${acClauses.length} checkable clause(s); DoD references the standard ${srcLabel}`);
+    dispositionedClauses.add("ac-dod");
+  } else {
+    for (const m of clause0Fail) failures.push(`clause0-ac-dod-present: ${m} ${srcLabel}`);
+  }
+}
+
 // --- Clause 1: Adversarial-audit gate — documentation-discipline check ---
 // A valid disposition is EITHER a stated verdict (REFUTED / CONCERNS / NO REFUTATION FOUND,
 // case-insensitive) OR an explicit no-op statement ("neither condition applied" or equivalent

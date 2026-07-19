@@ -58,3 +58,16 @@ row contains NO "design delivered"/"design-doc only" marker, so the impl-row cla
 N/A-passes; the ONLY intended failure is the line-budget self-exemption caught by clause 5:
 
 | M96-fake-linebudget-self-exempt | Fake milestone self-exempting the line-budget gate — ships operational work, not design-only | SELECTED | explore | milestone-candidate, surface:method-infra |
+
+## Acceptance Criteria
+
+Present + well-formed so clause 0 PASSes and the ONLY failure is clause 5 (line-budget self-exemption):
+- The helper returns the corrected value on the fixed input.
+- A unit test covers the corrected path.
+
+## Definition of Done
+
+References the standard DoD (the five clauses in `inherited-core.md` — adversarial-audit, V_meta-lag,
+line-budget, impl-row, no-self-exemption) plus:
+- Standard DoD clauses 1-5 satisfied (except the deliberately-injected line-budget self-exemption
+  this fixture exists to make clause 5 catch).

@@ -57,3 +57,16 @@ row contains NO "design delivered"/"design-doc only" marker, so the impl-row gat
 NOT fire (it N/A-passes); the ONLY intended failure is the impl-row self-exemption caught by clause 5:
 
 | M95-fake-implrow-self-exempt | Fake milestone self-exempting the impl-row gate — ships operational work, not design-only | SELECTED | explore | milestone-candidate, surface:method-infra |
+
+## Acceptance Criteria
+
+Present + well-formed so clause 0 PASSes and the ONLY failure is clause 5 (impl-row self-exemption):
+- The CLI flag parses correctly on the fixed input.
+- A regression test covers the fixed path.
+
+## Definition of Done
+
+References the standard DoD (the five clauses in `inherited-core.md` — adversarial-audit, V_meta-lag,
+line-budget, impl-row, no-self-exemption) plus:
+- Standard DoD clauses 1-5 satisfied (except the deliberately-injected impl-row self-exemption this
+  fixture exists to make clause 5 catch).
