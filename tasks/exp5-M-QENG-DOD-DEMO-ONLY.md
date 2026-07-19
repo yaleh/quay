@@ -4,12 +4,13 @@ title: "The QENG-5 'exp5 DoD via quay gate' wiring is demo-only (2 fixture
   tasks, QENG-5-DEMO-PASS/FAIL) — the REAL per-milestone DoD meta-enforcer
   gate at OUTER-LOOP.md step 6/7 still runs it0-dod-check.sh as a bare prose
   shell call, not through quay gate; decide whether/how to close that gap"
-status: todo
+status: superseded
 labels:
   - milestone-candidate
   - surface:method-infra
   - milestone:M37-discover-post-qeng
-extra: {}
+extra:
+  supersededBy: DIR-021
 ---
 ## Provenance
 Found during M37-discover-post-qeng's functional QENG survey (iteration-1, 2026-07-19) — direct
@@ -72,3 +73,21 @@ question, not a mechanical wiring task). Δv̂ small-to-moderate depending on wh
 methodology/governance, likely no VT chart cell (mirrors the DoD-program lineage's own no-VT-cell
 precedent), but real value in preventing the QENG-5 wiring from being cited as "done" when only 2
 static fixture tasks, never a real milestone, have actually exercised it.
+
+## Superseded — 2026-07-19 (m38 DRAIN)
+Superseded by `DIR-021` (`experiments/quay-perpetual-stream/directives/pending/DIR-021-layer1-dod-gate-operative-on-real-milestones-via-quay-gate.md`,
+`tasks/DIR-021.md`), a human-authored directive that landed on `master` async during M37 and was
+synced into `exp5-outer-driver` at m37→m38 DRAIN. DIR-021 names the identical gap this task found
+(the QENG-5 "quay gate" DoD wiring is demo-only; no real `exp5-M-*` milestone's ABSORB is actually
+gated through `quay gate`) and resolves this task's own AC choice explicitly: it picks branch (a)
+(extend the wiring to a real milestone via `extra.acceptance`, not leave it demo-only), and further
+specifies the chicken/egg ABSORB-ordering answer via its own escrow discipline (DIR-021 stays
+`pending` until a real milestone's GateEvent + ABSORB citation exist — it does not require the
+absorb-entry-file to exist before gate-invocation; see DIR-021's "Requested action" item 2, which
+keeps `it0-dod-check.mjs` as the underlying check and only changes the invocation path).
+DIR-021 is the higher-priority, more complete, ordered (Layer 1 of a 4-layer DIR-021..024 program),
+human-authored version of this exact finding — not a duplicate to run alongside, but the canonical
+successor. This task is marked `superseded`; no further work should be scoped against it directly.
+Any future milestone addressing this gap should charter against DIR-021 (and cite this task only as
+prior-art provenance for the finding, per DIR-021's own text acknowledging QENG-0's self-disclosed
+forward-work note).
