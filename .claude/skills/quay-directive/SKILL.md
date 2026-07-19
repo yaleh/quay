@@ -1,13 +1,13 @@
 ---
 name: quay-directive
-description: Draft a new experiments/<EXPERIMENT>/directives/pending/DIR-NNN-*.md from the discussion already in this conversation, auto-detecting which BAIME experiment is currently active, with a built-in safety check that its directives/ has no in-flight iteration changes outside pending/, then project it as a generated label:directive task via task_write (file stays canonical; task is a regenerated projection, never hand-edited — DIR-002/M-DIR-PROJECTION). Invoke after discussing the finding/action with the user, e.g. /quay-directive manda dispatch confirmed genuine.
+description: Draft a new experiments/<EXPERIMENT>/directives/pending/DIR-NNN-*.md from the discussion already in this conversation, auto-detecting which BAIME experiment is currently active, with a built-in safety check that its directives/ has no in-flight iteration changes outside pending/, then project it as a generated label:directive task via task_write (file stays canonical; task is a regenerated projection, never hand-edited — DIR-002/M-DIR-PROJECTION). Every DIR MUST carry runnable Acceptance Criteria + a real-landing Definition of Done (artifacts are necessary-not-sufficient — done means a real object actually operated through the mechanism, not a file created or a fixture passed). Invoke after discussing the finding/action with the user, e.g. /quay-directive manda dispatch confirmed genuine.
 allowed-tools: Bash, Read, Write, Edit
 ---
 
 # quay-directive
 
     worktree :: master → IsolatedWorktree   -- DEFAULT: never edit DIRs in the shared main tree (the autonomous loop races it)
-    draft :: ConversationContext → Brief? → DraftedInWorktree
+    draft :: ConversationContext → Brief? → DraftedInWorktree   -- MUST include runnable ## Acceptance Criteria + a real-landing ## Definition of Done (artifacts are necessary-not-sufficient; done = a REAL object through the mechanism)
     project :: DraftedFile → task_write → ProjectedTask   -- generated, never hand-edited (DIR-002/M-DIR-PROJECTION)
     land :: (DraftedFile, ProjectedTask) → commit → ff-merge → master   -- DEFAULT ends at Merged, not merely Drafted
 
@@ -105,6 +105,29 @@ discussed yet, stop and say so instead of inventing content.
    - `## Finding` and `## Requested action`: drawn from the conversation,
      written as concretely and checkably as the content already discussed
      — not vague restatements
+   - `## Acceptance Criteria` (MANDATORY): a checklist of `- [ ]` items, each a
+     **runnable command with an exit code** (or an equivalently mechanical,
+     grep/query-able check), never a prose claim. Mirror the shape used by the
+     recent DIRs: "`<cmd>` exits 0 / 1" — so "done" is machine-decidable, not a
+     matter of opinion.
+   - `## Definition of Done` (MANDATORY) — **the bar is REAL LANDING, not
+     artifacts.** State explicitly that the DIR is NOT done when a script/gate/
+     wiring exists, a file is created, or a fixture/test passes — those are
+     **necessary but NOT sufficient**. It is done ONLY when the change is actually
+     **operative on the real object of the experiment** (e.g. a REAL milestone —
+     not a demo/fixture task — actually passed through the new mechanism),
+     verifiable by a durable engine/system artifact keyed to that real object (a
+     GateEvent / engine-written status / log entry / regenerated projection for the
+     real id), and the system's own record (dashboard/ABSORB entry) pastes the real
+     command output. Include the escrow rule: the DIR stays `pending` until that
+     real-landing evidence exists. This is the anti-"designed-not-wired" clause —
+     the exact disease the directive mechanism keeps fighting; do not let a DIR be
+     closable by creating a file or going green on a fixture.
+   - `## Human verification when exp5 marks this DIR done` (recommended for any DIR
+     whose landing the autonomous loop will self-report): a short numbered checklist
+     that (a) names the real artifact to inspect, (b) distinguishes real-object
+     evidence from demo/fixture/prose evidence, and (c) ends with "if only
+     file-creation / fixture-green / prose exists, it is NOT landed — send back."
    - Leave `## Resolution` as a placeholder comment, to be filled in by
      whichever iteration applies it
 
