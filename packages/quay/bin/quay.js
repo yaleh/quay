@@ -171,7 +171,7 @@ Usage:
   quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--json|--format json]
   quay task view <task-id> [--json]
   quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--extra <json>] [--json]
-  quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--expect-status <status>] [--append-notes <text>] [--json]
+  quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--expect-status <status>] [--append-notes <text>] [--enforce-gate] [--json]
   quay task check <task-id> [--json]
   quay action list <task-id> [--json]
   quay action run <task-id> <action-id> [--json]
@@ -210,6 +210,13 @@ Options for task edit:
   --children <a,b>      Comma-separated child task ids (replaces existing children)
   --expect-status <status>  Compare-and-swap: fail if the task's current status is not this value
   --append-notes <text>     Append text to the existing body (read-then-write convenience)
+  --enforce-gate         Opt-in: when a --status change is present, run the same gate check
+                          'task check' performs BEFORE writing; refuses (exit 1, no write) if the
+                          gate fails, printing the gate's reason. Without this flag (the default),
+                          status transitions are UNGUARDED — no gate check is performed, matching
+                          today's behavior — analogous to 'git commit --no-verify': a deliberate
+                          low-level write path that does not enforce process gates unless asked to.
+                          A no-op guard-check if --status is not also given (e.g. --labels alone).
   --json                 Output the edited task as JSON
   (at least one of the above patch-producing flags, or --append-notes, is required)
   Note: editing a task id that does NOT currently exist requires a non-empty --title (this is an
@@ -564,6 +571,34 @@ async function main() {
           console.error(
             `quay task edit: task ${id} does not exist yet; creating a new task requires ` +
             `--title (or use 'quay task create')`
+          );
+          process.exitCode = 1;
+          return;
+        }
+      }
+      // M31-cli-gate-enforcement (charter Decision section): `task edit
+      // --status` is, and remains, UNGUARDED by default — a deliberate
+      // low-level write primitive analogous to `git commit --no-verify`,
+      // not a process-gate-enforcing command. This was a considered
+      // rejection of hard-block-by-default (option a in the charter),
+      // because flipping the default would be a breaking change to an
+      // already-shipped CLI surface with an unknown number of external
+      // callers (scripts, other agents' Skill-level automation) that may
+      // rely on being able to force a status transition. `--enforce-gate`
+      // is the additive, opt-in escape hatch for callers who DO want
+      // enforcement: it calls the exact same `client.taskCheck(id)` path
+      // `task check` uses (no duplicated gate logic) and refuses the write
+      // if the gate fails. Only fires when the patch includes a `status`
+      // field — Done-when clause 4, option (b): a non-status patch (e.g.
+      // --labels only) with --enforce-gate present is a deliberate no-op
+      // guard-check, not a check against irrelevant/stale gate state. See
+      // experiments/quay-perpetual-stream/charters/M31-cli-gate-
+      // enforcement.md for the full reasoning this comment summarizes.
+      if (flags["enforce-gate"] && patch.status !== undefined) {
+        const gateResult = await client.taskCheck(id);
+        if (gateResult.ok === false) {
+          console.error(
+            `quay task edit: --enforce-gate refused the write — gate check failed: ${gateResult.reason}`
           );
           process.exitCode = 1;
           return;
