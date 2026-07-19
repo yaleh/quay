@@ -72,6 +72,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import os from "node:os";
+// extractSection is now defined ONCE in task-schema.mjs (canonical-task-schema unit B1) and shared
+// here by import — the section-parsing logic is no longer forked between this enforcer and the
+// task-schema check. Behavior is identical (the function was moved verbatim, it is pure).
+import { extractSection } from "./task-schema.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -102,21 +106,9 @@ const absorbFileText = fs.readFileSync(absorbEntryFile, "utf8");
 //       section, not the whole combined file, otherwise the charter's self-exemption prose and
 //       the ABSORB-entry's disposition prose would contaminate each other's scan (a real fixture-
 //       construction hazard, not a hypothetical one — caught during this milestone's own build).
-function extractSection(fullText, heading) {
-  // Match the heading line, capture its own `#` depth, then stop the section body at the next
-  // line whose heading is at the SAME OR SHALLOWER depth (e.g. a "## Charter excerpt" section
-  // extends through any nested "### " subheadings and stops only at the next "## " or shallower —
-  // NOT at its own nested subsections, which would silently truncate the section).
-  const headingLineRe = new RegExp(`^(##+)\\s*${heading}\\s*$`, "im");
-  const headingMatch = fullText.match(headingLineRe);
-  if (!headingMatch) return null;
-  const depth = headingMatch[1].length;
-  const startIdx = headingMatch.index + headingMatch[0].length;
-  const rest = fullText.slice(startIdx);
-  const stopRe = new RegExp(`^#{1,${depth}}\\s`, "m");
-  const stopMatch = rest.match(stopRe);
-  return stopMatch ? rest.slice(0, stopMatch.index) : rest;
-}
+// NOTE: extractSection is imported from ./task-schema.mjs (moved there verbatim, canonical-task-
+// schema unit B1) — the depth-aware section-parsing logic is now shared, not forked between this
+// enforcer and the task-schema check. See its definition + doc in task-schema.mjs.
 
 const charterSection = extractSection(charterFileText, "Charter excerpt");
 const charterText = charterSection !== null ? charterSection : charterFileText;

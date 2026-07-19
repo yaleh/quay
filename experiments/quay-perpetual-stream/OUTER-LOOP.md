@@ -82,6 +82,15 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    selected (M-NN)` section stating the pass number and one-line reason (aged-out, smaller Δv̂, wrong
    value type for this pass's explore/exploit slot, etc.). This makes the SELECT reasoning
    inspectable per-task instead of only living in a dashboard/checkpoint narrative.
+   **Stamp the canonical-task-schema marker + author `## Proposal` + `## Plan` at THIS step
+   (canonical-task-schema v1):** when writing the SELECTed task via `task_write`, set
+   `extra.schema: "v1"` on it — the marker that makes the task schema-applicable to
+   `scripts/task-schema-check.sh` (without it the task reports N/A-legacy, a detectable switchover
+   error the pre-dispatch self-check below catches). Also write a mandatory `## Proposal` section (the
+   chosen approach text, authored per the proposal-to-plan / quay-task-to-plan pipeline) and a
+   `## Plan` section: a milestone-candidate MUST carry `## Plan` — a resolving `docs/plans/*.md` ref
+   if the milestone is staged, else `N/A — <reason>`. This couples with the existing Clause 8 (which
+   already checks Proposal/Plan for milestone-labelled tasks); the schema-marker check generalizes it.
    **Author the task's AC + DoD at THIS (proposal) step — mandatory, the authoring half of DoD clause
    0 (`inherited-core.md`'s "AC/DoD live in the TASK" rule):** before dispatch, write two sections
    into the SELECTed candidate task's body via `task_write` (the task is the single canonical source
@@ -105,6 +114,12 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    `milestone_counter++` at ABSORB if either section is missing/empty/placeholder, OR (checklist-form
    AC) if any `- [ ]` box remains unchecked — so authoring them here is not optional, and leaving a box
    unticked past the audit's write-back is REFUTED-equivalent.
+   **Before dispatch, run `scripts/task-schema-check.sh tasks/<id>.md` against the SELECTed task; a
+   FAIL blocks dispatch** (fix the task body, not the script — same discipline as the gate-hash /
+   line-budget checks). This proves the schema was emitted by construction: `## Proposal` present,
+   `## Plan` well-formed, AC/DoD as checklists, no empty/status-mirror `## Resolution`, no projection
+   scaffolding, and the `extra.schema:"v1"` marker present (an `N/A legacy` line means the marker was
+   forgotten above — add it and re-run).
    **Size the candidate BEFORE dispatch** using `inherited-core.md`'s "Milestone size definition +
    verify-iteration size gauge" section: does the proposed scope let iteration-0 land ALL Done-when
    in one pass, with iteration-1 having real material to independently re-derive (not empty

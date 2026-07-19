@@ -10,7 +10,8 @@ labels:
   - milestone:first-wave
 parent: exp5-M-CRYST
 children: []
-extra: {}
+extra:
+  schema: "v1"
 ---
 ## Proposal
 (Adjudicated from 2 independent blank-slate proposals via the proposal-to-plan discipline; the coupled enforcement-with-design unit B1+B2+B3 lands together.)
@@ -35,7 +36,12 @@ N/A — pending the PLAN stage (grounded plan authored next per the pipeline); w
 - [ ] `/quay-directive` skill + OUTER-LOOP SELECT emit the schema by construction (round-trip P2 passes with zero manual fixup).
 - [ ] Conformance sweep (P1) over `tasks/*.md` reports every task PASS or explicit-N/A (no silent skip).
 ## Definition of Done
-References inherited-core DoD. Real landing: B1+B2+B3 ship together; a REAL new directive + a REAL new milestone task both round-trip schema-clean; the sweep is green/explicit; net-subtractive (retired templates > added). No silent drift: the check catches a synthetic non-conforming task.
+References the standard inherited-core DoD clauses. Real landing, not artifacts:
+- [ ] B1+B2+B3 ship together (the coupled enforcement-with-design unit).
+- [ ] A REAL new directive AND a REAL milestone task both round-trip schema-clean (P2), read back and checked → PASS.
+- [ ] The conformance sweep (P1) is green/explicit — every task PASS or explicit-N/A-legacy, no silent skip.
+- [ ] Net-subtractive: retired templates/lines > added.
+- [ ] No silent drift: the check HARD-catches a synthetic non-conforming task (fixtures pin it).
 
 ---
 _2026-07-19T14:06:16.348Z_: ## Proposal-check (grounded, 2026-07-19) — CONCERNS (proceed; 7 plan-stage fixes)

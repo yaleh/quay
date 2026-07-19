@@ -38,6 +38,13 @@ was discussed, stop and say so instead of inventing content.
    +1, zero-pad to 3. Compute fresh every time; never reuse a number from memory.
 
 3. **Author the directive content** (drawn from the conversation, concrete and checkable):
+   - `## Proposal` (MANDATORY, canonical-task-schema v1) — the chosen approach, authored per the
+     proposal-to-plan discipline. For a directive this folds `## Finding` + `## Requested action`
+     behind a one-line Context lead-in (or is a distinct section preceding them). Real approach text,
+     never a stub — the schema check FAILs a missing/placeholder Proposal.
+   - `## Plan` (canonical-task-schema v1) — a directive MAY omit this, but stamping
+     `## Plan\n\nN/A — directive resolved via a milestone; no staged plan` makes the round-trip
+     unambiguous. If present it must be `N/A — <reason>` OR a resolving `docs/plans/*.md` path.
    - `## Finding` — the concrete finding/evidence discussed.
    - `## Requested action` — the specific, checkable action(s).
    - `## Acceptance Criteria` (MANDATORY) — a checklist of `- [ ]` items, each a **runnable command
@@ -60,9 +67,12 @@ was discussed, stop and say so instead of inventing content.
    is the native provider's own richer CLI (the Core CLI `task edit` is status-only in v1 and cannot
    write a body/extra):
    `QUAY_NATIVE_TASKS_DIR=./tasks node packages/quay-native/bin/quay-native.js task edit DIR-NNN
-   --labels directive --title "<title>" --extra '{"dirStatus":"pending"}' --body "<the full body:
-   ## Finding + ## Requested action + ## Acceptance Criteria + ## Definition of Done + (optional)
-   ## Human verification>" --status todo --json`.
+   --labels directive --title "<title>" --extra '{"dirStatus":"pending","schema":"v1"}' --body "<the
+   full body: ## Proposal + (## Plan) + ## Finding + ## Requested action + ## Acceptance Criteria +
+   ## Definition of Done + (optional) ## Human verification>" --status todo --json`.
+   - `extra.schema` MUST be `"v1"` — the canonical-task-schema marker. This is what makes the task
+     schema-applicable to `task-schema-check.sh`; without it the task reports N/A-legacy (a detectable
+     switchover error — the round-trip self-check in step 6 catches a forgotten marker loudly).
    - `id` = `DIR-NNN` (the computed id; use the experiment's prefix convention).
    - `labels` MUST include `directive` (this is what surfaces it in `task_list --label directive` and
      the Web UI `?label=directive` filter).
@@ -70,7 +80,9 @@ was discussed, stop and say so instead of inventing content.
    - `extra.dirStatus` = `pending` — the directive lifecycle field (pending | applied | deferred |
      rejected). **This is a task field, not a directory** — there is no `pending/`/`archive/` folder.
    - `body` = the full record from step 3. There is NO `Source:` line (the task is not a projection of
-     anything) and NO separate file. The web renders this body directly.
+     anything), NO body `dirStatus:` / `Status mirror:` line (lifecycle is the frontmatter
+     `extra.dirStatus` field ONLY — a body status-mirror line is projection scaffolding the schema
+     check FAILs), and NO separate file. The web renders this body directly.
    - Read it back (`task get <id>` / `task_get`) and show the user the result.
 
 5. **Lifecycle is a task-field change, never a file move.** When a milestone later resolves this
@@ -78,8 +90,21 @@ was discussed, stop and say so instead of inventing content.
    (`applied`/`deferred`/`rejected`) + `status: done` — via `task_write`. There is no file to move
    from `pending/` to `archive/`; `extra.dirStatus` IS the archive state. Deferred + a needs-more-work
    note means the directive stays a live `label:directive` task at its recorded `dirStatus`.
+   **Do NOT pre-seed an empty `## Resolution` at create time** (no `<!-- filled at close -->` stub —
+   the schema check FAILs an empty-placeholder Resolution). The resolving milestone appends a
+   `## Resolution` that carries **evidence** (or an `## Execution record`) — NEVER a bare
+   status-mirror that only restates `outcome: applied|deferred` with no evidence. Absence of
+   `## Resolution` on a still-open directive is correct; the schema forbids the empty-placeholder and
+   bare-status-mirror shapes, not the not-yet-resolved state.
 
-6. **Land it.** The loop now runs directly on `master` (DIR-027 retired the driver branch), and this
+6. **Self-check the round-trip BEFORE landing (canonical-task-schema v1).** After create + read-back,
+   run `node experiments/quay-perpetual-stream/scripts/task-schema-check.mjs tasks/DIR-NNN.md` (or the
+   `.sh` wrapper) and require **exit 0** before committing. A `FAIL` means fix the TASK body (not the
+   script — same discipline as the gate-hash / line-budget checks); an `N/A legacy` line means the
+   `extra.schema:"v1"` marker was forgotten in step 4 — add it. This makes the skill self-enforcing:
+   the schema is emitted by construction, verified before the commit below.
+
+   **Land it.** The loop now runs directly on `master` (DIR-027 retired the driver branch), and this
    skill runs off-loop. Commit the new/edited `tasks/DIR-NNN.md`:
    `git add tasks/DIR-NNN.md && git commit -m "DIR-NNN (<EXPERIMENT>): <one-line summary>"`.
    **Human-steering hygiene (DIR-027 item 5):** if the autonomous loop is running, either pause it
