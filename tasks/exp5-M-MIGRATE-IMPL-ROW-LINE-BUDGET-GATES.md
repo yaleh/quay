@@ -14,6 +14,8 @@ extra:
     exp5-M-MIGRATE-IMPL-ROW-LINE-BUDGET-GATES
     experiments/quay-perpetual-stream/charters/M39-migrate-impl-row-line-budget-gates.md
     /tmp/m39-absorb-entry.md
+  lineBudgetArgs:
+    - experiments/quay-perpetual-stream/charters/M39-migrate-impl-row-line-budget-gates.md
 ---
 ## Provenance
 SELECTed at m38→m39 DRAIN/SELECT boundary, 2026-07-19, directly from `DIR-022`
@@ -28,21 +30,21 @@ DIR-017's own established phased-program precedent. See the charter for full rea
 `experiments/quay-perpetual-stream/charters/M39-migrate-impl-row-line-budget-gates.md`.
 
 ## Acceptance Criteria
-- [ ] `packages/quay/src/gate/registry.js` gains two new named gates: `impl-row` and `line-budget`,
+- [x] `packages/quay/src/gate/registry.js` gains two new named gates: `impl-row` and `line-budget`,
   each a thin async `(task, client) => { ok, reason }` wrapper that shells out to the existing
   `it0-impl-row-check.sh` / `it0-ceiling-line-budget-check.sh` scripts respectively (no gate LOGIC
   duplicated — the scripts remain the source of truth). The gate reads its script arguments from
   `task.extra` via a convention consistent with the existing `acceptance` gate's `task.extra.acceptance`
   pattern, not a new ad hoc mechanism.
-- [ ] `quay gate --list` (or equivalent CLI surface) includes `impl-row` and `line-budget` alongside
+- [x] `quay gate --list` (or equivalent CLI surface) includes `impl-row` and `line-budget` alongside
   the existing `dod`/`acceptance`.
-- [ ] `quay gate <task> --gate impl-row` and `quay gate <task> --gate line-budget` each exit 0/1
+- [x] `quay gate <task> --gate impl-row` and `quay gate <task> --gate line-budget` each exit 0/1
   correctly against a REAL exp5 milestone task or task pair (not a synthetic `QENG-5-DEMO-*`-style
   fixture), and each appends a GateEvent queryable via `quay gate-log <task> --json`.
-- [ ] New gate code in `packages/quay/src/gate/registry.js` (and any new helper file it requires) has
+- [x] New gate code in `packages/quay/src/gate/registry.js` (and any new helper file it requires) has
   ≥80% line/branch coverage: `node --test --experimental-test-coverage packages/quay/test/*.mjs`
   (real output pasted in the report, not restated from memory).
-- [ ] `OUTER-LOOP.md` step 6's DoD meta-enforcer gate paragraph is updated so the impl-row and
+- [x] `OUTER-LOOP.md` step 6's DoD meta-enforcer gate paragraph is updated so the impl-row and
   line-budget checks are noted as ALSO invokable via `quay gate <task> --gate impl-row` / `--gate
   line-budget` for a real milestone that opts in — does NOT require migrating every milestone's ABSORB
   flow to use the named gates exclusively yet.
