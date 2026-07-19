@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 29** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 30** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -2577,3 +2577,103 @@ directly to m30 DRAIN/SELECT.
 
 ## Backlog row
 | exp5-M-QUAY-CLI-CREATE-ERGONOMICS | quay CLI task-creation ergonomics: fixed silent title-less task creation (GAP-002 data-integrity bug), added dedicated `task create` verb (GAP-001), fixed stale `--help` text (G-02), re-measured MCP per-call latency (GAP-007, not fixed) | DONE | exploit/capability-growth, Δv=+0.50 (realized, 0% calibration error) | milestone-candidate, surface:cli, milestone:M29-cli-create-ergonomics |
+
+## ABSORB m30 — M30-dod-clause5-blind-spot-fix — 2026-07-19
+
+**Provenance.** DIR-019 arrived off-loop (human-authored, committed directly to `master` as `8432a67`
+mid-M29), synced into `exp5-outer-driver` at the m29→m30 DRAIN boundary (see prior sync-merge commit).
+DIR-019 is a hard prerequisite of DIR-017 Step 2/3 per its own item 4 — SELECTed as m30 ahead of any
+`backlog.md` milestone-candidate row, since it blocks the only other pending directive.
+
+**Fix.** `experiments/quay-perpetual-stream/scripts/it0-dod-check.mjs` clause 5 (no-self-exemption)
+previously skipped its self-exemption scan for ANY clause already recorded in `dispositionedClauses` —
+but clauses 3 (line-budget) and 4 (impl-row) are added to that set UNCONDITIONALLY on every run
+(mechanically executed regardless of pass/fail), so the carve-out was dead code for those two clauses:
+a charter could write undeclared exemption language for line-budget/impl-row with no `WAIVER:` line and
+the enforcer would silently PASS. Fixed by restricting the carve-out to only clauses 1
+(adversarial-audit) and 2 (V_meta consolidation-lag), which are dispositioned CONDITIONALLY (their
+dispositioned state is real evidence of an independently-recorded legitimate non-firing). Clauses 3/4
+now always require a matching `WAIVER:` line when exemption language is present, regardless of
+`dispositionedClauses`. Commit: `5c4be91` on `exp5-outer-driver`, single file changed (15 ins / 9 del).
+
+**Process deviation (self-disclosed).** This milestone was executed as a direct single-commit fix, not
+the standing two-iteration dispatch. Reasoning and an adversarial audit's critical evaluation of that
+reasoning are both recorded in DIR-019's archived Resolution section and the audit report (below) —
+net judgment: acceptable for this specific narrow/mechanical/externally-red-tested case, but NOT to be
+codified as a standing exception without a future consolidation pass explicitly deciding so (the audit
+flagged that the external red test, while real evidence, cannot substitute for the two-iteration
+pattern's actual value of surfacing unstated-assumption blind spots — see CONCERN 1 below, which the
+red test itself did not and could not catch, precisely because it's outside the bug DIR-019 diagnosed).
+
+**Verification (external, not self-report, per DIR-019 item 3).**
+`experiments/quay-perpetual-stream/scripts/dod-fixture-selfcheck.sh` exits 0, all 4 fixtures behave as
+asserted (`compliant-stub.md`→0, `violating-stub.md`→1, `self-exempt-linebudget-stub.md`→1,
+`self-exempt-implrow-stub.md`→1). `git status --short fixtures/dod/` clean — fixtures unmodified,
+confirmed both by the outer loop and independently by the adversarial-audit agent via
+`git diff --stat 8432a67 HEAD -- fixtures/dod/` (empty). Real-milestone regression check: re-ran
+`it0-dod-check.sh` against M29's actual charter+ABSORB-entry pair — still PASS, 5/5 clauses, no false
+positive introduced against real product-code milestones.
+
+**Gate dispositions (all 4 HARD-BLOCK ABSORB gates, run this ABSORB):**
+1. **Adversarial-audit gate — dispatched despite zero VT (methodology-infra), given the elevated
+   self-referential stakes of touching the meta-enforcer itself (the exact "designed-not-wired" disease
+   DIR-019 diagnosed) and the absence of a second independent iteration to substitute for it.** Verdict:
+   **NO REFUTATION FOUND**, 2 non-blocking CONCERNS: (1) a real, pre-existing (not M30-introduced or
+   M30-regressed) gap in the clause-5 exemption-language regex — phrasings like "skips the impl-row gate
+   entirely" evade the pattern; git-blamed to DIR-019's own original authoring commit `8432a67`,
+   unchanged by this fix — logged as a future-candidate observation, not fixed here (out of DIR-019's
+   own explicit scope, which named the `dispositionedClauses` carve-out bug specifically, not the regex
+   surface). (2) The process-deviation reasoning in DIR-019's Resolution section overclaims on one of its
+   three justifications (see above) — the audit's critical read is adopted as the outer loop's own
+   position: this is a one-off, explicitly not a new standing precedent. Report:
+   `milestones/M30-dod-clause5-blind-spot-fix/audits/adversarial-audit.md`.
+2. **V_meta consolidation-lag gate**: checked `v-meta-ledger.md` — no rows in `confirmed` status, no K=2
+   alarm applies. PASS, N/A this milestone (unchanged since m29).
+3. **Design-only-milestone impl-row gate**: N/A — this milestone is a directive-sourced infra fix, not a
+   `backlog.md` milestone-candidate task; `tasks/DIR-019.md` carries the `directive` label, not
+   `milestone-candidate`, so it is out of `it0-backlog-regen.mjs`'s scope by design (consistent with all
+   prior directive-sourced milestones, e.g. M15/M18/M21/M23). No backlog row materialization required.
+4. **DoD meta-enforcer gate, run against ITSELF this time** (the first time the enforcer has been used to
+   gate a change to its own source): `it0-dod-check.sh M30-dod-clause5-blind-spot-fix
+   experiments/quay-perpetual-stream/charters/M29-cli-create-ergonomics.md <this-entry>` is not directly
+   meaningful here since M30 has no charter of its own (no line-budget/impl-row clauses to check against
+   a non-existent charter) — **substituted with the DIR-019-mandated external acceptance predicate**
+   (`dod-fixture-selfcheck.sh`, item 2 above) as the load-bearing gate instead, per DIR-019 item 3's
+   explicit instruction not to trust the enforcer's own self-report for a fix to itself. This substitution
+   is itself logged as a deliberate, reasoned deviation from the standard DoD-gate invocation, not a
+   silent skip.
+
+**Realized Δv**: 0 (methodology-infra, no VT-scored surface touched). VT chart-1 total unchanged:
+**111.15/120** (unchanged since m29).
+
+**Backlog housekeeping**: `tasks/DIR-019.md` → `status: done`. Directive moved
+`directives/pending/` → `directives/archive/` with a full Resolution section (fix commit, evidence,
+process-deviation note). `directives/pending/` now contains only `DIR-017` (still `pending`, still
+correctly excluded as a SELECT candidate — see DRAIN disposition below). `milestone_counter` → **30**.
+No `backlog.md` regeneration needed (no `milestone-candidate`-labeled task changed). Checkpoint cadence:
+**due now** (milestone_counter=30, every-5 rule, last written cp-25) — `checkpoints/cp-30.md` to be
+written next, non-blocking, then continuing directly to m31 DRAIN/SELECT.
+
+**DRAIN disposition of `directives/pending/` at this boundary (both files individually stated, per the
+HARD GATES discipline):**
+- **DIR-017** (`DIR-017-dod-installation-program-mandatory-order-and-the-meta-enforcer-human-verified-
+  foothold.md`): re-confirmed **deferred** — reason: DIR-017's own item 4 (this DIR is a hard
+  prerequisite of DIR-017 Step 2/3) is now satisfied by M30's fix (clause 5's blind spot to
+  line-budget/impl-row self-exemptions is fixed, externally red-tested). However, DIR-017's own
+  human-verification gate requires re-running its full 6-point verification checklist BY A HUMAN before
+  Steps 2/3 may be SELECTed (per DIR-019's own "Human verification when exp5 marks this DIR done"
+  section, item 5: "Only after #1-#4 hold is DIR-017 step #5 satisfied; re-run DIR-017's full 6-point
+  verification before greenlighting DIR-017 Steps 2/3"). The outer loop has done everything in its own
+  power (the fix, the external-red-test evidence trail, the audit) but the human-confirmation step is
+  irreducible by design (DIR-017's own text) and has NOT yet occurred. DIR-017 stays `pending`,
+  correctly excluded as a SELECT candidate for m31, exactly as at every prior DRAIN since M25 — the
+  disposition reason has changed (from "meta-enforcer not yet built/tested" to "meta-enforcer's known
+  blind spot now fixed and externally verified, awaiting human re-confirmation of the 6-point checklist")
+  but the gated outcome has not.
+- **DIR-019**: disposed THIS ABSORB — see Resolution section in the archived file, and the full
+  fix/verification/audit trail above. Not carried forward.
+
+## Backlog row
+N/A — this milestone is directive-sourced infrastructure work (DIR-019), not a `backlog.md`
+milestone-candidate task. See "Design-only-milestone impl-row gate" disposition above for why no row
+materialization is required, consistent with prior directive-sourced milestones.
