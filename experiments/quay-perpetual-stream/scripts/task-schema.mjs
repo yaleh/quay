@@ -17,21 +17,11 @@
 //   it0-dod-check.mjs Clause 8's milestone-number>=40 cutover, which only works for milestone-
 //   labelled tasks). These are two INDEPENDENT gates by design — see the divergence note below.
 //
-//   Kind (label-aware): `labels:` contains "adr" → adr; else "directive" → directive; else
-//   "milestone-candidate" → milestone-candidate; else → "other" (treated milestone-strict, fail-closed).
-//   Precedence is DELIBERATE: `adr` wins over the task labels, so a task carrying both `adr` and
-//   `milestone-candidate` is evaluated by ADR rules (Context/Decision/Consequences), never the task
-//   rules — an ADR is never a task. (No object carries both labels today; the order fixes it if one does.)
+//   Kind (label-aware): `labels:` contains "directive" → directive; contains "milestone-candidate"
+//   → milestone-candidate; else → "other" (treated milestone-strict, fail-closed). ADRs are NOT a
+//   task kind — they are a first-class quay object with their own store/validator
+//   (packages/quay-native/src/adr-store.js); this validator only ever sees tasks.
 //
-//   Two assertion sets by kind. kind=adr runs the ADR set {D1,D2,D3} + {A5,A6} (a decision record,
-//   NOT a task — no Proposal/Plan/AC/DoD). Every other kind runs the TASK set {A1..A4} + {A5,A6}:
-//
-//   ADR set (kind=adr, concise decision-record form — crystallization-strategy §10):
-//   D1 checkContext           — `## Context` present + non-placeholder (the situation forcing a decision).
-//   D2 checkDecision          — `## Decision` present + non-placeholder (the invariant/imperative).
-//   D3 checkConsequences      — `## Consequences` (or `## Consequences / Scope`) present + non-placeholder.
-//
-//   Task set (kind ∈ {directive, milestone-candidate, other}):
 //   A1 checkProposal          — `## Proposal` present and non-placeholder (real approach text).
 //   A2 checkPlan(kind)        — directive: `## Plan` MAY be absent (PASS); if present, well-formed
 //                               (`N/A — <reason>` OR a resolving docs/plans/*.md path).
@@ -151,38 +141,17 @@ export function hasSchemaMarker(task) {
 // ── Kind classification (label-aware). ────────────────────────────────────────────────────────────
 export function classifyKind(task) {
   const labels = task.labels || [];
-  if (labels.includes("adr")) return "adr";
   if (labels.includes("directive")) return "directive";
   if (labels.includes("milestone-candidate")) return "milestone-candidate";
   return "other";
 }
 
-// ── ADR-kind assertions (concise decision-record form, crystallization-strategy §10). ────────────
-// An ADR (label:adr) is NOT a task: it carries Context / Decision / Consequences, not Proposal /
-// Plan / AC / DoD. These three sections are REQUIRED + non-placeholder; the scaffolding + Resolution
-// rules still apply (A6/A5), but the task-shaped assertions (A1–A4 + Plan) do NOT.
-function checkSubstantiveSection(body, primaryHeading, altHeading, code, label) {
-  let sec = extractSection(body, primaryHeading);
-  if (sec === null && altHeading) sec = extractSection(body, altHeading);
-  if (sec === null) {
-    return { ok: false, code: `${code}-missing`, message: `no '## ${label}' section found in the ADR body` };
-  }
-  const trimmed = sec.trim();
-  const placeholderRe = /^\s*(TBD|TODO|N\/A|xxx|\.\.\.)?\s*$/i;
-  if (placeholderRe.test(trimmed) || trimmed.length < 20) {
-    return { ok: false, code: `${code}-placeholder`, message: `'## ${label}' is empty/placeholder-only (needs real content)` };
-  }
-  return { ok: true, code: `${code}-present`, message: `'## ${label}' present (${trimmed.length} chars)` };
-}
-export function checkContext(task) {
-  return checkSubstantiveSection(task.body, "Context", null, "context", "Context");
-}
-export function checkDecision(task) {
-  return checkSubstantiveSection(task.body, "Decision", null, "decision", "Decision");
-}
-export function checkConsequences(task) {
-  return checkSubstantiveSection(task.body, "Consequences", "Consequences / Scope", "consequences", "Consequences");
-}
+// NOTE: ADRs are NOT tasks and are NOT validated here. They are a first-class quay
+// object kind (packages/quay-native/src/adr-store.js — decision lifecycle, its own
+// store under adr/), reached via the Provider ABI. An earlier stopgap added a
+// `kind=adr` branch to THIS task validator (ADRs-as-label:adr-tasks); that conflation
+// was retired when the first-class ADR kind landed (E1). Do not re-add it — an ADR
+// is never a task.
 
 // ── Assertion A1: Proposal present and non-placeholder. ───────────────────────────────────────────
 export function checkProposal(task) {
@@ -320,15 +289,7 @@ export function checkTask(fullText) {
   if (!marker) {
     return { marker: false, kind, applicable: false, results: [], verdict: "N/A-legacy", failures: [] };
   }
-  const results = kind === "adr"
-    ? [
-        checkContext(task),
-        checkDecision(task),
-        checkConsequences(task),
-        checkResolution(task),
-        checkNoScaffolding(task),
-      ]
-    : [
+  const results = [
         checkProposal(task),
         checkPlan(task, kind),
         checkAcceptanceChecklist(task),

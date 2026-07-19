@@ -188,14 +188,25 @@ formalized style + `contracts:` self-verification are enforced by quay, uniforml
 Proposals/DIRs are prose *discussion records* — normal, but not solid enough for long-term
 development. The load-bearing content inside them is the set of **decision invariants**. Extract
 those into concise **ADRs** — the single source for "what we decided and why", replacing re-reads of
-long proposals. Resolved (2026-07-19): ADRs are **engine-tracked (`.epicd`-style)** and **quay is
-extended to manage them** as a first-class object kind (a `label:adr` / kind:adr quay object, so an
-ADR rides the §8 canonical schema + §7 doc-management + web visibility — an ADR is a labelled task
-instance with a formal Decision). Concise form: frontmatter (id/title/status/date/supersedes/refs) +
-**Context** (2-4 lines) + **Decision** (the invariant, imperative, may carry a λ-line) +
-**Consequences/Scope** (what it forbids/enables). Extract from proposals + DIR tasks; back-link
-task→ADR. (Reference: `manda/.epicd/decisions/`, `archguard/docs/adr/` — lean toward manda's
-3-section engine-tracked form, tightened.)
+long proposals.
+
+**Resolved (2026-07-19, CORRECTED): ADRs are a first-class quay object kind SEPARATE from tasks —
+NOT a `label:adr` task.** The first attempt made them `label:adr` tasks riding the §8 task schema;
+that was wrong and reproduced the status-mirror antipattern (`status: done` + `extra.adrStatus:
+accepted` — two contradicting status fields). The reason is fundamental: **a task is one-shot
+(executed once → `done`); an ADR is a standing decision continuously applied.** So, per epicd's
+`EntityType.Decision`, quay now models ADRs as their own kind (E1, landed): a dedicated store
+(`adr/`, a repo-root sibling of `tasks/`), a DECISION lifecycle (`proposed → accepted →
+superseded/deprecated`, or `rejected` — never "done"), no `parent`, a global `ADR-NNN` id, and
+`supersedes`/`superseded-by` links. Reached through the Provider ABI (`adr_list/adr_get/adr_write`);
+Core CLI `quay adr …`, Core MCP tools, and web `/adr` views; the native provider implements it, the
+GitHub provider declares it unsupported. Concise form: frontmatter (id/title/status/date/supersedes)
++ **Context** + **Decision** (the invariant, imperative, may carry a λ-line) + **Consequences/Scope**.
+Extract from proposals + DIR tasks. **Next pass (deferred):** continuous *enforcement* — an
+`applies-to` scope + a runnable `check` registered as a named `adr-<id>` quay gate (the gate-event
+log becomes the "ADR honored" ledger; ADR-TDD's check = the B7 gate). This is epicd's ADR-as-contract
+harness, which quay's gate engine (QENG) can deliver where epicd left it a proposal. (Reference:
+epicd `src/types/index.ts` `EntityType.Decision`, `manda/.epicd/decisions/`.)
 
 ## 11. Two deepening pillars (2026-07-19 — for continued discussion)
 

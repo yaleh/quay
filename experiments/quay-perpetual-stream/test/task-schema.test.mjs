@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import {
   extractSection, parseTask, hasSchemaMarker, classifyKind,
   checkProposal, checkPlan, checkAcceptanceChecklist, checkDodChecklist,
-  checkResolution, checkNoScaffolding, checkContext, checkDecision, checkConsequences,
+  checkResolution, checkNoScaffolding,
   checkTask,
 } from "../scripts/task-schema.mjs";
 
@@ -50,11 +50,11 @@ test("hasSchemaMarker: only true for extra.schema === v1", () => {
   assert.equal(hasSchemaMarker({ extra: { schema: "v2" } }), false);
   assert.equal(hasSchemaMarker({ extra: {} }), false);
 });
-test("classifyKind: directive / milestone-candidate / adr / other", () => {
+test("classifyKind: directive / milestone-candidate / other (ADRs are NOT a task kind)", () => {
   assert.equal(classifyKind({ labels: ["directive"] }), "directive");
   assert.equal(classifyKind({ labels: ["milestone-candidate"] }), "milestone-candidate");
-  assert.equal(classifyKind({ labels: ["adr"] }), "adr");           // NEW
   assert.equal(classifyKind({ labels: ["random"] }), "other");
+  // ADRs are a first-class quay kind (adr-store.js), never validated here.
 });
 
 // ── task-kind assertions (existing behavior — regression lock) ───────────────────────────────
@@ -93,23 +93,6 @@ test("checkNoScaffolding: clean vs source-line vs dirFile vs status-mirror; fals
   assert.equal(checkNoScaffolding({ body: "Status mirror: ` is stuck at pending while the file...", extra: {} }).ok, true);
 });
 
-// ── ADR-kind assertions (NEW — RED until task-schema.mjs gains the adr kind) ─────────────────
-test("checkContext: present+substantive vs missing vs placeholder", () => {
-  assert.equal(checkContext({ body: "## Context\n" + "why this decision ".repeat(4) }).ok, true);
-  assert.equal(checkContext({ body: "## Decision\nx" }).ok, false);
-  assert.equal(checkContext({ body: "## Context\nTBD" }).ok, false);
-});
-test("checkDecision: present+substantive vs missing vs placeholder", () => {
-  assert.equal(checkDecision({ body: "## Decision\n" + "the invariant we adopt ".repeat(3) }).ok, true);
-  assert.equal(checkDecision({ body: "## Context\nx" }).ok, false);
-  assert.equal(checkDecision({ body: "## Decision\n...\n" }).ok, false);
-});
-test("checkConsequences: accepts Consequences or Consequences / Scope heading", () => {
-  assert.equal(checkConsequences({ body: "## Consequences\n" + "what it forbids/enables ".repeat(3) }).ok, true);
-  assert.equal(checkConsequences({ body: "## Consequences / Scope\n" + "what it forbids/enables ".repeat(3) }).ok, true);
-  assert.equal(checkConsequences({ body: "## Decision\nx" }).ok, false);
-});
-
 // ── checkTask verdicts (the single entry point) ─────────────────────────────────────────────
 test("checkTask: unmarked → N/A-legacy (never silently skipped)", () => {
   const r = checkTask(fm(["directive"], "extra: {}") + "## Proposal\nx");
@@ -119,27 +102,4 @@ test("checkTask: unmarked → N/A-legacy (never silently skipped)", () => {
 test("checkTask: conformant directive → PASS", () => {
   const body = "## Proposal\n" + "real approach text ".repeat(4) + "\n## Acceptance Criteria\n- [ ] a\n## Definition of Done\n- [ ] inherited-core clause";
   assert.equal(checkTask(fm(["directive"]) + body).verdict, "PASS");
-});
-test("checkTask: conformant ADR → PASS (kind=adr, no Proposal/Plan/AC/DoD required)", () => {
-  const body =
-    "## Context\n" + "the situation forcing a decision ".repeat(3) +
-    "\n## Decision\n" + "the invariant we adopt henceforth ".repeat(3) +
-    "\n## Consequences\n" + "what this forbids and enables ".repeat(3);
-  const r = checkTask(fm(["adr"]) + body);
-  assert.equal(r.kind, "adr");
-  assert.equal(r.verdict, "PASS", JSON.stringify(r.failures));
-});
-test("checkTask: ADR missing Decision → FAIL", () => {
-  const body = "## Context\n" + "situation ".repeat(6) + "\n## Consequences\n" + "effects ".repeat(6);
-  const r = checkTask(fm(["adr"]) + body);
-  assert.equal(r.verdict, "FAIL");
-  assert.ok(r.failures.some((f) => f.code === "decision-missing"));
-});
-test("checkTask: ADR does NOT require Proposal/AC/DoD (a bare task-shape ADR still fails on its own sections)", () => {
-  // An adr with Proposal but no Context/Decision/Consequences must FAIL on the adr sections,
-  // proving the adr kind is evaluated by adr rules, not task rules.
-  const r = checkTask(fm(["adr"]) + "## Proposal\n" + "x".repeat(60));
-  assert.equal(r.kind, "adr");
-  assert.equal(r.verdict, "FAIL");
-  assert.ok(r.failures.some((f) => f.code === "context-missing"));
 });

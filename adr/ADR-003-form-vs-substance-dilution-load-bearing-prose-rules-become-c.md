@@ -1,17 +1,12 @@
 ---
-id: exp5-M-CRYST-ADR-DILUTION
-title: "ADR: form-vs-substance dilution — load-bearing prose rules become code
-  or self-verifying contracts (never re-narrated)"
-status: done
-labels:
-  - adr
-  - crystallization
-parent: exp5-M-CRYST
-children: []
-extra:
-  schema: v1
-  adrStatus: accepted
-  date: 2026-07-19
+id: ADR-003
+title: Form-vs-substance dilution — load-bearing prose rules become code or
+  self-verifying contracts (never re-narrated)
+status: accepted
+date: 2026-07-19
+tags:
+  - methodology
+  - code-over-prompt
 ---
 ## Context
 A load-bearing rule that lives only as prose in a pinned Layer-A document is repeatedly paraphrased away whenever a fresh Layer-B prompt is generated from it. Evidence: exp4 DIR-009 — the worktree-isolation rule was diluted 13 consecutive times across generated executor prompts until a pasted-output proof requirement finally forced it. Form-vs-substance dilution is a recurring failure family (see the crystallization ANALYSIS catalog).
