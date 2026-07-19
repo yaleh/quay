@@ -241,6 +241,23 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
           checklist syntax) has no boxes to tick — this sub-step is a documented no-op for it, state so
           explicitly. Any AC box still `- [ ]` after this write-back is REFUTED-equivalent and HARD-
           blocks step 3's mechanical gate below, exactly as an unmet criterion does.
+       1b. **Deviation-log write-back (DIR-017 Step 3/M36-dod-leakage-metrics, 2026-07-19).**
+          **Single writer, no split**: this SAME dispatched audit subagent performs EVERY deviation-row
+          write to `dashboard.md`'s "Homeostatic variables (DIR-017 Step 3)" table, at this SAME ABSORB,
+          for BOTH row kinds below — there is no second, separately-timed edit by "the outer loop
+          itself" as a distinct actor. The two kinds only differ in what the audit cites as `caught-by`:
+          (i) `caught-by: machine` — the audit's OWN REFUTED/CONCERNS finding this same pass, meeting
+          `inherited-core.md`'s "Deviation-record schema" section's "what qualifies as a deviation" test;
+          (ii) `caught-by: human` — an ABSORB entry (already drafted by the outer loop before this audit
+          sub-step runs, per step 6's own ordering) that self-discloses a process deviation or reports a
+          human-authored directive's finding — the audit reads that already-written disclosure and
+          transcribes it into the deviation table as evidence, it does not originate the finding. Mirrors
+          sub-step 1a's write-back discipline exactly: one writer, one dispatch point, no new
+          separately-scheduled process. This audit is ALSO responsible, at EVERY ABSORB it runs (not only
+          the one where a row was created), for checking whether any existing `fixed`-status row has
+          since accrued the external-verification evidence needed to promote it to `verified-eliminated`
+          (mirrors the V_meta consolidation-lag gate's own every-ABSORB re-check discipline, step 6's
+          second bullet below).
        2. **DoD satisfaction:** confirm the task's `## Definition of Done` (the standard five clauses +
           any task-specific extras) is satisfied for this milestone.
        3. **Mechanical gate green:** confirm `scripts/it0-dod-check.sh <task-id> <charter-file>

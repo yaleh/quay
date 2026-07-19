@@ -1206,3 +1206,105 @@ DIR-017 itself stays `pending` — Step 3 (leakage metrics onto `dashboard.md`) 
 separately selectable, per the DIR's own clearance-note text ("clearing the gate unlocks SELECT of
 Steps 2/3; it does not complete them"). See `directives/pending/DIR-017-*.md`'s "Human-verification
 gate — CLEARED" section.
+
+## Deviation-record schema (DIR-017 Step 3 / M36-dod-leakage-metrics)
+
+**Location choice: this section of `inherited-core.md`, NOT a new sibling file.** `v-meta-ledger.md`
+(a genuinely separate artifact, cited above) was split out because it has a different UPDATE CADENCE
+than `dashboard.md`'s narrative Log (edited whenever a confirmation count changes, independently
+diffable). A deviation log does not share that rationale: deviations are, by this schema's own
+design, discovered and resolved almost entirely AT ABSORB boundaries (the same moment the seven DoD
+clauses above are evaluated and the same moment `dashboard.md`'s Log already grows a new entry) — it
+has the SAME update cadence as the DoD-clause record this section already collects, not a distinct
+one. Putting the schema here also keeps the "leakage metrics" work adjacent to the DoD clauses it
+measures (a reader auditing Clause 1/5's real bite doesn't have to jump files), mirroring how Clauses
+0-7 above are themselves one collecting place for previously-scattered gates. The backfilled DATA
+(the actual rows) lives in `dashboard.md`'s new homeostatic-variables section below, matching how
+Clauses 0-7's own mechanical enforcement lives in a script but the DEFINITIONS live here — definition
+and computed-metrics are intentionally split the same way `v-meta-ledger.md`'s schema/definitions are
+split from `dashboard.md`'s health-track row that reads them.
+
+### What qualifies as a deviation
+A deviation is a **concrete, cite-able instance where a milestone's actual delivered state departed
+from what its charter/task claimed or from what a DoD clause (0-7 above) requires**, discovered either
+during that milestone's own ABSORB or by a later milestone/directive re-examining it. This is
+deliberately narrower than "any bug" — three included/excluded boundary cases, stated explicitly
+because DIR-017 Step 3's own worked-example set spans all of them:
+- **Included:** a mechanical DoD-clause gap that let a violation through undetected (M30, M32 below);
+  a charter/ABSORB claim that conflated or overstated a gate's applicability, caught and corrected
+  before or at ABSORB (M11 below); a real security/correctness defect found by an audit exercise
+  against shipped work (M26 below); a self-disclosed departure from the standing execution pattern,
+  logged by the loop against itself (M30's process-deviation sub-case below).
+- **Excluded (not a deviation for this schema):** an ordinary CONCERNS-level audit finding that is
+  fixed in the same ABSORB with no gate having been silently bypassed (routine iteration
+  back-and-forth, e.g. M12's merge/label/citation CONCERNS — those are normal audit output, not
+  evidence a mechanism failed to catch something it was supposed to catch); a `dashboard.md` Δv=0
+  disposition that is honestly stated as such (e.g. M35's Provider-ABI ceiling-saturation note) — an
+  honestly-recorded non-finding is not a deviation.
+- The distinguishing test, restated: did something depart from what the record CLAIMED or what a
+  standing gate REQUIRED, in a way that needed a correction after the fact — or was the record already
+  accurate the first time? Only the former is a deviation.
+
+### Record fields
+| field | meaning |
+|---|---|
+| `id` | short slug, `DEV-<NN>` (this milestone's backfill uses `DEV-01`..`DEV-05`, chronological by discovery date) |
+| `title` | one-line description |
+| `origin-milestone` | the milestone whose work the deviation is found IN (not necessarily the milestone that discovers it) |
+| `found-at` | the milestone/date the deviation was actually discovered (may be later than `origin-milestone`) |
+| `caught-by` | **machine** (an `it0-*` check failing at run time, OR an adversarial-audit subagent's CONCERNS-or-worse verdict — per DIR-017 Step 3's own Requested-action wording, the audit role is grouped under "machine" because it is a STANDING, mechanically-dispatched, out-of-band process per Clause 1, not an ad hoc human read) vs. **human** (a directive authored/asserted by the human, e.g. DIR-019/DIR-020, OR a human-verification-gate finding, e.g. DIR-017's own Step-1 human-confirmation requirement) |
+| `status` | `found` → `fixed` (the underlying defect is corrected) → `verified-eliminated` (**operational definition, mirrors DIR-019 item 3's own resolution discipline**: the fix has been confirmed by evidence EXTERNAL to the fixing milestone's own self-report — a re-run fixture/regression test, a second independent iteration, or an out-of-band audit re-check — not merely the fixing commit's own claim that it works) |
+| `age` | computed, see below |
+
+### Computing age
+`age (milestones) = found-at milestone number − origin-milestone number` when the origin is
+identifiable and distinct from the discovery point (a defect that sat latent before being caught);
+`age-to-resolution (milestones) = verified-eliminated milestone number − found-at milestone number`
+when the row has reached the terminal state (0 if fixed and verified in the same ABSORB the deviation
+was found in). Both are milestone-count spans, not calendar-date spans, because this stream's own
+`milestone_counter` is already the standing unit every other DoD clause above measures lag in
+(Clause 2's `milestones-since-confirmed`, Clause 5) — reusing it keeps this metric arithmetically
+comparable to the existing V_meta-lag health track rather than introducing a second unit of time.
+Calendar dates are recorded per-row for provenance but are NOT the primary age unit, since several
+ABSORBs in this stream's history land same-day (milestone-count is the more meaningful "how long did
+this sit uncaught" measure for a loop that runs milestones back-to-back, not paced by wall-clock).
+
+### Backfilled worked examples (best-effort, NOT exhaustive — see limitation note)
+**Limitation, stated explicitly per the charter's own scope note:** this backfill covers only the 5
+deviations the charter names as worked examples, re-verified directly against `dashboard.md`'s actual
+ABSORB-entry text (citations below), not a systematic sweep of all 35 milestones' history. A future
+candidate could extend this backfill; this milestone does not claim completeness.
+
+| id | title | origin-milestone | found-at | caught-by | status | age (ms) |
+|---|---|---|---|---|---|---|
+| DEV-01 | M11 charter conflated "VT-scoring" with the adversarial-audit gate's actual conjunctive test (capability-growth-typed AND nonzero Δv), narrating condition (a) as "applies" when it did not | m11 (M11-webui-reverify charter, Done-when 6 text) | m11 (same ABSORB — outer loop caught it during the "Adversarial-audit gate adjudication" sub-step, `dashboard.md` line ~983) | human (the outer-loop's own ABSORB-time adjudication reading the charter against the gate's precise wording — pre-dates DIR-017's Step-1 mechanical enforcer, M25, entirely; this is exactly the "designed-not-wired" class of gap DIR-017 was later authored to close mechanically) | verified-eliminated (corrected same-ABSORB; explicitly logged as "charter-authoring imprecision noted for future correction" — no re-occurrence of this exact conflation found in any later charter reviewed for this backfill) | 0 (found and resolved same milestone) |
+| DEV-02 | ADV-004: path-traversal arbitrary-file-write vulnerability in provider write paths | pre-m26 (latent in shipped code, exact introducing milestone not re-derived by this backfill — out of scope per the charter's best-effort framing) | m26 (M26-adversarial-eval, iteration-0's adversarial/security audit exercise, `dashboard.md` line ~2130) | machine (the DIR-001-item-4-mandated adversarial/security audit — a standing, out-of-band, mechanically-dispatched exercise per this schema's `caught-by` definition above, not an ad hoc human read) | verified-eliminated (fixed via `assertSafeId()` in the SAME ABSORB; full test suite re-verified 34/34 pass after the merge that included the fix — external re-test, not self-report) | 0 (found and resolved same milestone; latent age before m26 not computed, origin unknown) |
+| DEV-03 | `it0-dod-check.mjs` Clause 5 (no-self-exemption) carve-out was dead code for Clauses 3/4 (line-budget/impl-row) — a charter could write undeclared exemption language for those two clauses with no `WAIVER:` line and the enforcer would silently PASS | m25 (M25-dod-meta-enforcer, where Clause 5's carve-out logic was originally authored, commit `8432a67`-preceding) | ~m29→m30 boundary (DIR-019, human-authored off-loop, committed directly to `master`, synced at the m29→m30 DRAIN boundary; SELECTed as m30) | human (DIR-019, a human-authored directive — per this schema's `caught-by` definition, a directive is explicitly the human-side case) | verified-eliminated (fixed at M30, commit `5c4be91`; **externally re-tested per DIR-019 item 3's own mandate**, not self-report: `dod-fixture-selfcheck.sh` re-run confirms all 4 fixtures behave as asserted, plus a real-milestone regression check re-running `it0-dod-check.sh` against M29's actual charter+ABSORB pair still PASSes — `dashboard.md` line ~2608) | found-at − origin ≈ 5 ms (m25→m30); age-to-resolution = 0 (fixed and externally verified same milestone as found) |
+| DEV-04 | M30 was executed as a direct single-commit fix, not this stream's standing two-iteration dispatch pattern — a self-disclosed process departure, not a code defect | m30 (M30-dod-clause5-blind-spot-fix, the milestone's own execution choice) | m30 (self-disclosed in the SAME ABSORB entry — "Process deviation (self-disclosed)", `dashboard.md` line ~2601) | human — self-disclosed by the outer loop against its OWN process choice, then critically evaluated by the Clause-1 adversarial audit (a machine-class check per this schema) which flagged that the external red test "cannot substitute for the two-iteration pattern's actual value of surfacing unstated-assumption blind spots" — classified `human` because the ORIGINATING disclosure is the loop's own self-report, not a mechanical gate firing (the audit's critical review is a second, confirming layer, not the original catch) | fixed / **not verified-eliminated** — explicitly recorded as "acceptable for this specific narrow/mechanical/externally-red-tested case, but NOT to be codified as a standing exception without a future consolidation pass explicitly deciding so." No later milestone has since revisited this open question; status stays at `fixed` (the immediate instance was accepted, not reversed) rather than `verified-eliminated`, because "eliminated" would imply the underlying policy question (may single-commit fixes ever skip two-iteration dispatch) was settled, and the record explicitly says it was not | 0 (self-disclosed same milestone); this row is the schema's own worked example of a NON-terminal status, deliberately not force-fit into `verified-eliminated` |
+| DEV-05 | Clause 7's coverage-disposition regex was negation-blind — false-PASSed ABSORB-entry prose that admits inadequate coverage ("...decided it wasn't necessary...", "no 80% test coverage floor was met...") while still mentioning "80%"/"test coverage" nearby | m32 (M32-dod-escrow-testfloor, where Clause 7 was originally authored in the same milestone) | m32 (same ABSORB — the Clause-1 adversarial audit's own adversarial fixture construction caught it before the ABSORB closed, `dashboard.md` line ~2746 / `inherited-core.md` line ~1174) | machine (Clause-1 adversarial-audit CONCERNS-or-worse finding — the audit's own two adversarial strings both false-PASSed pre-fix, a direct machine-class catch per this schema) | verified-eliminated (fixed with a sentence-scoped negation window, commit `fa644a7`; pinned as a permanent regression fixture `fixtures/dod/test-floor-negation-poison-stub.md` (`M91-fake-testfloor-negation`) asserted in `dod-fixture-selfcheck.sh`; full suite reconfirmed 11/11 PASS post-fix — external, mechanized re-test, not self-report) | 0 (found and resolved same milestone) |
+
+Cross-reference: `dashboard.md`'s new "Homeostatic variables (DIR-017 Step 3)" section (below the
+existing Health tracks table) computes the four DIR-017 Step 3 metrics from this table.
+
+### Forward-update responsibility (mirrors DIR-020/M34's standing write-back naming)
+**The Clause-1 per-milestone acceptance-audit subagent is the SOLE standing writer of this log going
+forward, for every row of either `caught-by` kind** — at the SAME dispatch point it already runs
+(`OUTER-LOOP.md` step 6, immediately after the checklist write-back sub-step) — not a new,
+separately-scheduled process, and not a second actor. Concretely: whenever the audit's own charge
+(refute AC/DoD satisfaction, confirm the mechanical DoD gate is green) surfaces a REFUTED or CONCERNS
+finding that meets this section's "what qualifies as a deviation" test above, the audit writes a
+`caught-by: machine` row citing its own finding. Whenever an ABSORB entry (already drafted by the outer
+loop before this audit sub-step runs) self-discloses a process deviation (the DEV-04 pattern) or
+reports a human-authored directive's finding, the SAME audit reads that already-written disclosure and
+transcribes it into a `caught-by: human` row — the audit still performs the write; only the origin of
+the finding (not the writer) differs between the two row kinds. Both cases append/update a row in
+`dashboard.md`'s homeostatic-variables table (below) at that SAME ABSORB, using this section's schema.
+This mirrors DIR-020/M34's precedent exactly: that milestone named the Clause-1 audit as the standing
+checklist-tick writer at a specific, already-existing dispatch point rather than inventing a new
+process; this section names the SAME actor at the SAME dispatch point for deviation-row write-back,
+for the same reason (the audit is already reading the ABSORB record end-to-end at that moment — adding
+one more write-back sub-step to an existing pass is lower-drift than a new standing job). A `fixed`-
+status row's promotion to `verified-eliminated` is likewise the audit's job, checked at EVERY
+subsequent ABSORB it runs (not just the one where the row was created) — mirroring Clause 2's own
+"every ABSORB re-checks every ledger row" discipline, so promotion is not stranded waiting for a
+milestone that happens to reference the row directly.

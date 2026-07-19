@@ -324,6 +324,24 @@ its three findings were fixed/recorded as part of this same ABSORB pass rather t
 | V_meta consolidation lag | **0 rows past threshold-and-unresolved as of m7-complete.** The `domain-audit-channel≡CI-job` row (confirmed at m3, 3 milestones-since-confirmed by m6, already past K=2) was **resolved by consolidation at m7's own ABSORB** — folded into `inherited-core.md`'s "Domain-misfit audit-channel" section, ledger row status → `consolidated`. This is the gate's first real bite (DIR-005/M07-vmeta-gate Done-when 4): fired on a genuine pre-existing past-threshold case, resolved same-ABSORB rather than carried forward. The ledger's other row (m3's isolation-leak lesson) remains `proposed`, not yet past threshold. Symmetric to the discovery-latency track above: measures milestones-since-confirmed for any ledger row past the φ 2-confirmation threshold but not yet `consolidated`. | **>2 milestones (K=2)** since confirmed-but-not-consolidated |
 | Human-review cadence (M15-human-review-cadence, DIR-001 item 6) | **milestones-since-last-human-directive = 3** (as of m15 ABSORB, milestone_counter→15). Last human-initiated directive was DIR-011, arriving at the m12→m13 boundary in the same burst as DIR-009/DIR-010 (this dashboard's own `directives/pending/` log: all three dispositioned at the "DRAIN (m12→m13 boundary)" entry, `pending/` re-drained empty at every boundary since — m13→m14, m14→m15, and m15's own SELECT). Count = milestone_counter(15) − arrival milestone(12) = 3. Recomputed at each ABSORB purely from the drain evidence step 0 already produces — no new instrumentation. Full generalization tally of all 11 directives (arrival boundary / initiation mode / finding kind) recorded in `milestones/M15-human-review-cadence/iterations/iteration-0.md` (iteration-1 independently derived the identical 10/11-human, 1/11-self-raised split but computed the counter as-of-m14/pre-m15-completion = 2; reconciled to 3 at this ABSORB, since m15's own completion is itself a zero-new-directive data point that must be folded in — see the merged doc's outer-loop reconciliation reasoning in this milestone's ABSORB dashboard-log entry). **Explicitly NON-BLOCKING** — observational only, logged at each checkpoint (`OUTER-LOOP.md` step 8); carries no HARD BLOCK language anywhere it appears and must never gate `milestone_counter++`, unlike the V_meta consolidation-lag gate above (deliberate contrast — directives are asynchronous/human-paced by nature, not a mechanically resolvable backlog item). | **soft-alarm only, K=5** milestones since last human directive (recommend a human skim `checkpoints/cp-<NN>.md`; never blocks the loop) |
 
+## Homeostatic variables (DIR-017 Step 3 / M36-dod-leakage-metrics)
+
+Computed from `inherited-core.md`'s "Deviation-record schema" section and its 5 backfilled worked
+examples (`DEV-01`..`DEV-05`) — best-effort backfill, NOT exhaustive (see that section's own
+limitation note). All 4 metrics below are DIR-017 Step 3's own named metrics, verbatim.
+
+| variable | current value | arithmetic (cited) |
+|---|---|---|
+| (a) deviations caught by machine vs human | **2 machine : 3 human** (ratio 0.40 : 0.60) | DEV-01 human, DEV-02 machine, DEV-03 human, DEV-04 human, DEV-05 machine → machine={DEV-02,DEV-05}=2, human={DEV-01,DEV-03,DEV-04}=3, of 5 total |
+| (b) fraction reaching `verified-eliminated` | **4/5 = 80%** | DEV-01, DEV-02, DEV-03, DEV-05 = `verified-eliminated`; DEV-04 = `fixed` (deliberately NOT promoted — the record explicitly declines to treat the underlying process question as settled, see `inherited-core.md`'s DEV-04 row) |
+| (c) median deviation age | **0 milestones** (age-to-resolution, all 5 rows) | age-to-resolution values: DEV-01=0, DEV-02=0, DEV-03=0, DEV-04=0 (found+addressed same milestone, though status stayed `fixed` not `verified-eliminated`), DEV-05=0 → sorted [0,0,0,0,0], median = 0. **Caveat, stated honestly, not hidden**: this is a real number, not a placeholder, but it is a weak signal at N=5 — all 5 backfilled examples happen to be same-ABSORB catch-and-fix cases (partly a selection artifact: the charter's 5 named examples are the well-documented, already-resolved ones; DIR-019's own found-to-fixed-milestone span (DEV-03) is 5 milestones (m25→m30) if measured origin-to-found instead of found-to-resolution — a materially different, non-zero number depending which span the "age" question is really asking about). Future backfill extension (out of this milestone's scope) would sharpen this once more, especially non-same-ABSORB, rows exist. |
+| (d) product-value shipped per K milestones (K=5) | **full-stream: ≈3.26 Δv / 5 milestones · recent window (m29-m35): ≈0.64 Δv / 5 milestones** | Full-stream: sum of every genuine, same-chart, non-corrective capability-growth Realized Δv from `dashboard.md`'s own ABSORB log (the same 6 values already used as this stream's "qualifying-milestone slope" in `checkpoints/cp-30.md`/`cp-35.md` — m3's +13.08 and m4's −6.60 are a chart-basis expansion and an explicitly-stated measurement correction respectively, not delivered capability-growth work, and are excluded from the numerator for that reason, exactly as the existing qualifying-milestone convention already excludes them): m1=+6.0, m8=+9.00, m9=+5.38, m12=+1.54, m29=+0.50, m33=+0.40 → total = 6.0+9.00+5.38+1.54+0.50+0.40 = **22.82**. Denominator: **all 35** milestones absorbed so far (m1-m35) — reusing this stream's own already-established "qualifying rate 6/35" denominator convention (`checkpoints/cp-35.md`'s VT-trajectory section), since the question this metric answers ("how much value ships per K milestones of loop execution") is about the pace of the whole stream, not just the subset of milestones eligible to register a qualifying Δv → 22.82/35×5 ≈ **3.257**. Recent window (last 7 ABSORBed milestones, m29-m35, chosen because it is the DIR-017-program-era window, post the Clause 6/7/escrow-Δv-aware discipline): m29=+0.50, m30=0, m31=0, m32=0, m33=+0.40, m34=0, m35=0 → total = **0.90** over 7 milestones → 0.90/7×5 ≈ **0.643**. Both figures reported (not just one cherry-picked) because they answer different questions — full-stream shows the whole stream's average rate (front-loaded by m1/m8/m9/m12's early capability-growth milestones), recent-window shows the CURRENT rate under the now-mature DoD-governed regime (which has deliberately run mostly method-infra/governance milestones since m13, consistent with `inherited-core.md`'s explore-cadence floor, not a value-shipping slowdown). |
+
+**Forward-update responsibility**: see `inherited-core.md`'s "Forward-update responsibility" subsection
+(under the Deviation-record schema section) — the Clause-1 per-milestone acceptance-audit subagent is
+the standing writer of new/updated deviation rows (and, by extension, this table's 4 derived numbers),
+at its existing `OUTER-LOOP.md` step-6 dispatch point, not a new separately-scheduled process.
+
 ## Control limits (pre-declared; §6/§6.1)
 - inner budget = 10 (past → default HALT, continue needs authorization)
 - ΔV plateau <0.02 both layers, K=2 consecutive → stop
@@ -3053,3 +3071,105 @@ from DIR-017's own Step 3 text). Explicit choice deferred to the m36 DRAIN/SELEC
 
 ## Backlog row
 | exp5-M-NATIVE-RELATION-SYNC | Native provider: make parent/children relation writes bidirectional, matching the github provider's writeRelations() contract | DONE | exploit (primary) — fixes a real, dogfooding-confirmed provider-ABI asymmetry; capability-growth (secondary) | milestone-candidate, surface:provider-abi, milestone:M35-native-relation-sync |
+
+## ABSORB m36: M36-dod-leakage-metrics
+
+**Two-iteration convergence.** Both iterations independently proposed the SAME schema location
+(`inherited-core.md`'s "Deviation-record schema" section, not a new sibling file — both reasoned this
+from the same update-cadence argument: deviations are discovered/resolved at ABSORB, the same cadence
+the DoD clauses above already collect), the SAME `caught-by` machine/human classification for all 5
+backfilled deviations (2 machine: DEV-02/M26-ADV-004, DEV-05/M32-Clause-7-regex; 3 human:
+DEV-01/M11, DEV-03/DIR-019, DEV-04/M30), and the SAME forward-update split model (the Clause-1 audit
+is the sole standing writer, citing either its own finding or a self-disclosed ABSORB entry as the
+row's origin). Iteration-0 merged as primary (`git merge --no-ff exp5-m36-iteration-0`); iteration-1
+kept unmerged on `exp5-m36-iteration-1` for the record — genuinely equivalent design, not a wasted
+run (its `verified-eliminated`=100% alternative reading of DEV-04 was directly considered and
+rejected below, and its 3-digit `DEV-NNN` ID convention / richer per-row field set is noted as a
+worthwhile future refinement, not adopted this milestone to avoid unnecessary churn against
+iteration-0's already-cited `DEV-01..05` IDs).
+
+**Reconciliation (two real numeric divergences, both resolved on the merits, not by iteration-0
+default):**
+1. **Metric (b) verified-eliminated fraction**: iteration-0 computed 4/5=80% (DEV-04/M30's process
+   deviation held at `fixed`, not promoted); iteration-1 computed 5/5=100% (DEV-04 promoted). Resolved
+   in favor of iteration-0's 80% — `dashboard.md`'s own ABSORB m30 text (line ~2601, "Process deviation
+   (self-disclosed)") explicitly states the practice was judged "acceptable for this specific narrow/
+   mechanical/externally-red-tested case, but NOT to be codified as a standing exception without a
+   future consolidation pass explicitly deciding so" — promoting to `verified-eliminated` would
+   overstate a question the record itself says is still open. Independently re-confirmed by the
+   out-of-band acceptance audit below (its own reading of the same source text reached the same
+   conclusion).
+2. **Metric (d) denominator**: iteration-0's original text used 33 of 35 milestones (excluding m3/m4
+   from the denominator, not just the numerator). Reconciled post-merge to use all **35** milestones as
+   the denominator, matching this stream's own already-established "qualifying rate 6/35" convention
+   (`checkpoints/cp-35.md` line 37) — the metric answers "value shipped per K milestones of loop
+   execution," a question about the whole stream's pace, not just the numerator-eligible subset.
+   Result: 22.82/35×5 ≈ 3.257 (was 3.457 pre-fix). This fix was initially left as an uncommitted
+   working-tree edit at audit-dispatch time — the audit caught this (see below) and it is committed as
+   part of this ABSORB.
+
+**adversarial-audit gate: CONCERNS** (2 findings, both fixed before this ABSORB closed, non-blocking
+neither refuted the milestone's substance). The fresh-context, out-of-band audit independently
+invented a novel deviation not among the 5 backfilled examples and classified it against the schema
+(usable, one soft non-blocking gap noted), independently re-derived all 4 metrics from the raw
+backfill table (all matched the then-current dashboard text), and independently re-read the M30 ABSORB
+source text to confirm the metric-(b) 80% reconciliation above is the more faithful reading. Its 2
+CONCERNS: (1) the /33→/35 denominator fix for metric (d) existed only as an uncommitted working-tree
+edit at audit time — **fixed**, now committed as part of this ABSORB; (2) `OUTER-LOOP.md` sub-step 1b's
+original wording ("the audit... or the outer loop itself... appends/updates a row") permitted two
+readings of who literally performs a self-disclosed-row write — **fixed**, both `OUTER-LOOP.md` and
+`inherited-core.md`'s forward-update-responsibility text were tightened post-audit to state
+unambiguously that the SAME audit subagent performs every write, differing only in which finding it
+cites as the row's origin. Report: `milestones/M36-dod-leakage-metrics/report.iteration-0.md` /
+`report.iteration-1.md` (self-reports) plus the audit's own findings folded into this entry and into
+`tasks/exp5-M-DOD-LEAKAGE-METRICS.md`'s per-item evidence citations (all 5 AC + 2 DoD items ticked
+`- [x]` by the audit, per the standing DIR-020 write-back mechanism).
+
+**V_meta consolidation-lag gate**: N/A — `v-meta-ledger.md`'s one row remains `consolidated` since m7,
+no `confirmed`-and-unresolved rows outstanding (re-confirmed both by the outer loop and independently
+by the audit).
+
+**Escrow-Δv gate**: N/A — this milestone shipped the real `inherited-core.md`/`dashboard.md`/
+`OUTER-LOOP.md` artifacts directly (schema, backfill, computed metrics, forward-update text), not a
+design doc for later code, per the charter's own explicit scope decision. Independently re-confirmed
+by the audit via `git diff --stat` against the pre-M36 base — no design-only pattern present, no
+`-IMPL` follow-up row required or seeded.
+
+**Test-floor gate (Clause 7)**: N/A — `surface:method-infra`; `git diff --stat` (both by the outer loop
+and independently by the audit) confirms zero `packages/quay*` files touched. Files touched this
+milestone: `OUTER-LOOP.md`, `backlog.md`, `charters/M36-dod-leakage-metrics.md`, `dashboard.md`,
+`inherited-core.md`, `tasks/exp5-M-DOD-LEAKAGE-METRICS.md` — all method-infra/governance, no product
+surface.
+
+**DoD meta-enforcer gate**: `it0-dod-check.sh exp5-M-DOD-LEAKAGE-METRICS
+experiments/quay-perpetual-stream/charters/M36-dod-leakage-metrics.md <this-absorb-entry>` → run below,
+expected PASS given all clauses above are satisfied or correctly N/A.
+
+**Realized Δv**: 0 — governance-integrity/method-infra, no VT chart cell (mirrors the DoD-program
+lineage's own established no-VT-cell precedent, M25/M30/M31/M32/M34). VT chart-1 total unchanged:
+**111.55/120** (unchanged since m35).
+
+**Backlog housekeeping**: `tasks/exp5-M-DOD-LEAKAGE-METRICS.md` → `status: done` (checklist boxes
+ticked by the audit, see above). `backlog.md` regenerated via `node scripts/it0-backlog-regen.mjs
+experiments/quay-perpetual-stream --write` — row `exp5-M-DOD-LEAKAGE-METRICS` flips `SELECTED` →
+`DONE`. `milestone_counter` → **36**. **Checkpoint NOT due at this ABSORB** (every-5 rule, last written
+cp-35 at m35; next due at `milestone_counter=40`).
+
+**DRAIN disposition of `directives/pending/` at this boundary, and m37 SELECT-candidate note (do not
+silently assume):** DIR-017 is now **FULLY resolved** — all 3 steps delivered (Step 0: M21; Step 1:
+M25 + DIR-019-fix/M30; Step 2: M32; Step 3: this milestone, M36). DIR-017 should move
+`directives/pending/` → `directives/archive/` with a Resolution section at the m36→m37 DRAIN step
+(deferred to that step's own execution, not performed as part of this ABSORB entry, to keep ABSORB and
+DRAIN cleanly separated per this stream's own step ordering). Once archived, `directives/pending/`
+will be **empty** — confirmed via `backlog.md`'s own regenerated view: **zero open (non-DONE,
+non-STALE) `milestone-candidate` rows remain** (27 rows total, all `DONE` or `STALE`). This means m37
+DRAIN/SELECT has **no open directive and no open backlog candidate** — a genuinely new state for this
+stream (every prior DRAIN/SELECT since m25 has had at least one open item to reason among). The m37
+SELECT step must NOT silently default to inventing work; it should either (a) re-examine the 3 `STALE`
+backlog rows (`exp5-M-CLI-UX`, `exp5-M-DIRTASK`, `exp5-M-DOCS`) to judge whether any should be
+un-staled given the stream's current maturity, or (b) run a fresh discovery/exploration-typed milestone
+whose explicit purpose is to generate new forward-looking candidates (mirroring M04/M26/M27/M28's own
+discovery-channel precedent), stating explicitly which path was chosen and why — not defaulted.
+
+## Backlog row
+| exp5-M-DOD-LEAKAGE-METRICS | DIR-017 Step 3: add leakage metrics onto dashboard.md as homeostatic variables — deviations caught by machine vs human, fraction of recorded deviations reaching verified-eliminated, median deviation age, product-value shipped per K milestones — making the exp6 meta-objective measurable | DONE | governance-integrity (primary) — makes the exp6 meta-objective (self-correcting perpetual stream) measurable; explore | milestone-candidate, surface:method-infra, milestone:M36-dod-leakage-metrics |
