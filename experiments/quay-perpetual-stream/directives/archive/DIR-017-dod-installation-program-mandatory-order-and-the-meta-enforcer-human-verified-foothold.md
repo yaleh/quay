@@ -99,9 +99,22 @@ Do NOT trust the DONE mark; check that the enforcer is real, not designed:
 ## Human-verification gate — CLEARED (2026-07-19, human: Yale Huang)
 
 **The irreducible, non-delegable human-verification gate is PASSED. Steps 2 and 3
-are hereby GREENLIT for SELECT.** This DIR's `status:` stays `pending` — clearing
-the gate only unlocks Steps 2/3 for a future SELECT; it does not complete them.
-Do NOT treat this note as a resolution or move the file to `archive/`.
+are hereby GREENLIT for SELECT.**
+
+> **Historical note — this paragraph's original "stays `pending` / do not archive"
+> instruction is SUPERSEDED (updated 2026-07-19 after full-program verification).**
+> When this clearance was first written only **Step 1** was operative, so clearing the
+> gate only unlocked Steps 2/3 for a future SELECT and the file was deliberately kept
+> `pending`. Steps 2 and 3 have **since been delivered** — Step 2 by
+> `M32-dod-escrow-testfloor` (Clauses 6/7), Step 3 by `M36-dod-leakage-metrics`
+> (homeostatic variables on `dashboard.md`) — so all three steps of the ordered program
+> are now complete (see the final `## Resolution` below, outcome: applied). Re-verified
+> 2026-07-19: `scripts/dod-fixture-selfcheck.sh` → **13/13 PASS, exit 0** with fixtures
+> unchanged; `inherited-core.md` carries the single `## Definition of Done` with Clauses
+> 0–7; `OUTER-LOOP.md` step 6 wires it as the HARD BLOCK on `milestone_counter++`;
+> `dashboard.md` carries the Step-3 metrics. The DIR is therefore correctly **resolved
+> and archived** (`status: archived`). The clearance evidence below is retained as the
+> historical record of how the Step-1 foothold was human-verified.
 
 This clearance is grounded, not a rubber stamp: Step #5 of the checklist above
 was found FAILING when first verified (2026-07-19) — the meta-enforcer's clause 5

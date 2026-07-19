@@ -1,10 +1,41 @@
 # DIR-014
 
-- status: applied (partial — see Resolution: requested-action items 1 and 4-dogfood-record closed
-  via M20+M22; items 2 and 3 explicitly deferred, not built by either milestone)
+- status: pending (REVERTED 2026-07-19 from "applied (partial)" — items 2 & 3 are unbuilt and
+  are the real live gap; see "Reverted to pending" note directly below. Items 1 & 4 remain done.)
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Actually build AND wire the proposal→plan process for development milestones — DIR-012 item 3 has been perpetually deferred with no backlog row, the two-class diversity policy is discretionary and gated on a skill that does not exist, and DISPATCH still never invokes proposal→plan (only an escapable line-budget gate enforces anything), so no subsequent task will go through the process the proposal designed
+
+## Reverted to pending (2026-07-19)
+
+A directive audit re-verified this DIR against `master` and found its two core asks
+**still unbuilt** — confirming the Resolution's own honest note that they "remain real,
+unclosed gaps ... NOT silently dropped". Rather than re-file a fresh DIR (the Resolution's
+suggested route), this directive is **reverted to `pending`** so the outer loop re-drains it
+and SELECTs the missing work. It is deliberately NOT a duplicate — this is the original,
+correctly-scoped ask.
+
+**What is done (do NOT redo):**
+- **item 1 — build the `quay-task-to-plan` skill:** DONE (M20 proposal step + M22 Phase 7).
+  `.claude/skills/quay-task-to-plan/SKILL.md` (+ prompts/) exists.
+- **item 4 — dogfood-record (narrow bootstrap sense):** DONE (the build ran through the existing
+  `proposal-to-plan` substrate).
+
+**What is the LIVE GAP (this DIR's remaining scope):**
+- **item 2 — wire DISPATCH to invoke the skill:** NOT built. Re-verified 2026-07-19:
+  `grep -n quay-task-to-plan experiments/quay-perpetual-stream/OUTER-LOOP.md` → **no match**.
+  `OUTER-LOOP.md` step 5 (DISPATCH INNER) still runs the old whole-milestone dual-iteration on the
+  charter alone; no development-class milestone is routed through the proposal→plan pipeline.
+- **item 3 — de-optionalize the two-class diversity policy for the development class:** NOT built.
+  `inherited-core.md`'s policy still reads "MAY, at a future charter's discretion"; the pipeline is
+  never the default, and is still preconditioned on a skill that (now) exists but is never invoked.
+- **item 5 — first customers** (M-TASK-BACKLOG-PROJECTION-IMPL etc. routed through the wired
+  process) necessarily follows item 2, so it is still open too.
+
+Net: the skill was built but **never wired** — the exact "designed-but-not-wired" pattern this DIR
+was filed to end, now sitting one artifact further along (skill exists, DISPATCH ignores it). This
+is the single most important unclosed methodology-infrastructure gap in exp5's directive set as of
+2026-07-19. See also [[DIR-012]] item 3 (the same gap, upstream), whose follow-up note points here.
 
 ## Finding
 

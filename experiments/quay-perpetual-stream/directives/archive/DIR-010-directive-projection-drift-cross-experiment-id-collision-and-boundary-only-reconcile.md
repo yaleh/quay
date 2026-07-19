@@ -86,3 +86,26 @@ Cover at least:
 - resolved_by: outer-loop drain (m12->m13 boundary), 2026-07-18
 - outcome: deferred (partial mechanical fix applied immediately; namespace design deferred)
 - evidence: Gap B (DIR-006/007/008 stale status-mirrors) was fixed immediately at this drain via the existing regeneration mechanism (SKILL.md step 5c) — all 3 now mirror the file's `resolved` status, confirmed by `it0-dir-projection-check.sh` dropping from 5 to 2 divergences. Gap A (the DIR-004/DIR-005 cross-experiment id collision, item 1's namespace decision) was explicitly NOT hand-patched ad hoc, per this file's own item 4 instruction — it is folded into backlog.md's `M-TASK-BACKLOG-PROJECTION` candidate (same source as DIR-009) as a sub-section, to be resolved once that design is adopted. The 2 remaining divergences (`DIR-004`, `DIR-005` with no status-mirror field) are a known, documented, non-silent residue until then.
+
+## Follow-up — deferred items subsequently RESOLVED (verified 2026-07-19)
+
+The two items this DIR deferred (item 1 experiment-namespace design, item 4 disposition of
+the DIR-004/DIR-005 collision) have **since been made AND implemented** — this DIR is no
+longer a live "known residue". Verified against `master` on 2026-07-19:
+
+- **item 1 (namespace decision) — DONE.** The experiment-prefix option (`exp5-DIR-NNN`) was
+  chosen in the M13 design doc (`docs/proposals/exp5-task-backlog-primitive-projection.md`
+  §14 DIR-010 sub-section) and the anti-drift check now joins on an experiment discriminator:
+  `it0-dir-projection-check.sh experiments/quay-perpetual-stream` runs with `prefix='exp5'`.
+- **item 4 (re-project + regenerate) — DONE.** `tasks/exp5-DIR-004.md` / `tasks/exp5-DIR-005.md`
+  now exist as the correctly-namespaced projections; exp4's bare `DIR-004`/`DIR-005` no longer
+  collide because the join key is experiment-scoped. Implemented as part of
+  `M24-task-backlog-projection-impl` (DIR-015).
+- **Current state:** `it0-dir-projection-check.sh experiments/quay-perpetual-stream` →
+  **exit 0**, "24 DIR file(s) checked against 22 label:directive task(s) (prefix='exp5') — no
+  divergence." The check that this DIR reported at 5 divergences is now green.
+
+Outcome upgraded in substance from `deferred` to **applied** (the deferral was a routing
+decision, later carried out by M13/M24); the file stays archived. `status:` left as `deferred`
+only as the historical record of its disposition AT THIS DRAIN — the follow-up above is the
+authoritative current state.
