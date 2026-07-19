@@ -26,9 +26,8 @@ children:
   - exp5-M-CRYST-INV
   - exp5-M-CRYST-ADR-CARRYFWD
   - exp5-M-CRYST-ADR-DILUTION
-  - exp5-M-CRYST-INV
-  - exp5-M-CRYST-ADR-CARRYFWD
-  - exp5-M-CRYST-ADR-DILUTION
+  - exp5-M-CRYST-B5-PARSER-UNIFY
+  - exp5-M-CRYST-B6-VALIDATOR-COVERAGE
 extra: {}
 ---
 ## Proposal
@@ -39,3 +38,7 @@ Children below; sequence: first wave = B1→B2→B3 (canonical schema + validato
 - [ ] All child tasks are done or explicitly needs-human (external only, DIR-026).
 ## Definition of Done
 References inherited-core DoD. Done when every child lands for real (real object operated), net line count negative overall.
+
+## Progress
+- 2026-07-19 — FIRST WAVE LANDED (B1→B2→B3 + A2), independently adversarially reviewed (all 8 claims REAL, no blocking defect). The `extra.schema:"v1"` canonical-task-schema gate is operative on real objects (DIR-029 + B1/B2/B3/A2 PASS; sweep 5 pass / rest explicit N/A-legacy / 0 fail); single-source validator (`task-schema.mjs`, imported by `it0-dod-check.mjs`); both authoring sources fixed at root; A2 retired the two corrupted-title duplicate DIR-004/005 (net-negative, no content lost). Review C1/C2 tracked as B6 (validator coverage) / B5 (parser fork).
+- Next: D3/Axis-2′ (raised priority), D1/D2, E1/E2 (+INV enforcement-with-design, ADR-CARRYFWD, ADR-DILUTION), C1, F1, G1 per the re-prioritized §6 sequencing.
