@@ -29,8 +29,9 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
+| exp5-M-DOD-LEAKAGE-METRICS | DIR-017 Step 3: add leakage metrics onto dashboard.md as homeostatic variables — deviations caught by machine vs human, fraction of recorded deviations reaching verified-eliminated, median deviation age, product-value shipped per K milestones — making the exp6 meta-objective measurable | SELECTED | governance-integrity (primary) — makes the exp6 meta-objective (self-correcting perpetual stream) | milestone-candidate, surface:method-infra, milestone:M36-dod-leakage-metrics |
 | exp5-M-CLI-UX | CLI usability closeout (UQ-042..046) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:cli |
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_26 milestone-candidate task(s) as of 2026-07-19T04:37:46.088Z._
+_27 milestone-candidate task(s) as of 2026-07-19T04:45:01.858Z._
