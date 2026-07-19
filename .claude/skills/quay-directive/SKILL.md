@@ -1,13 +1,15 @@
 ---
 name: quay-directive
 description: Draft a new experiments/<EXPERIMENT>/directives/pending/DIR-NNN-*.md from the discussion already in this conversation, auto-detecting which BAIME experiment is currently active, with a built-in safety check that its directives/ has no in-flight iteration changes outside pending/, then project it as a generated label:directive task via task_write (file stays canonical; task is a regenerated projection, never hand-edited — DIR-002/M-DIR-PROJECTION). Invoke after discussing the finding/action with the user, e.g. /quay-directive manda dispatch confirmed genuine.
-allowed-tools: Bash, Read, Write
+allowed-tools: Bash, Read, Write, Edit
 ---
 
 # quay-directive
 
-    draft :: ConversationContext → Brief? → Drafted   -- ends at Drafted, never Committed
+    worktree :: master → IsolatedWorktree   -- DEFAULT: never edit DIRs in the shared main tree (the autonomous loop races it)
+    draft :: ConversationContext → Brief? → DraftedInWorktree
     project :: DraftedFile → task_write → ProjectedTask   -- generated, never hand-edited (DIR-002/M-DIR-PROJECTION)
+    land :: (DraftedFile, ProjectedTask) → commit → ff-merge → master   -- DEFAULT ends at Merged, not merely Drafted
 
 This skill is for **whichever quay BAIME experiment is currently active**,
 using the `experiments/<EXPERIMENT>/directives/` mechanism each experiment
@@ -75,7 +77,20 @@ discussed yet, stop and say so instead of inventing content.
    it to commit before drafting. Do not attempt to guess whether the
    conflict is "safe to ignore" — report it and let the user decide.
 
-3. **Draft the file**, following `experiments/quay-native-bootstrap/directives/README.md`'s
+3. **Create an isolated worktree off `master` — DEFAULT, do this BEFORE writing/editing any DIR
+   file.** The autonomous OUTER loop typically shares the main working tree and commits
+   continuously; creating or editing a DIR directly in the main tree races it — this has caused
+   real incidents (a silent auto-merge that dropped one side's content; a human commit landing on
+   the wrong branch mid-publish because the loop had checked out `master` under the editor). So by
+   default DO NOT touch the DIR in the main tree. Instead:
+   `git worktree add -b human/dir-NNN /home/<user>/work/quay-human master` (pick another path if
+   that one is occupied; the branch is throwaway). Do ALL of the drafting (step 4), writing (step
+   5) and projection (step 6) INSIDE that worktree, then commit + merge (steps 7-8). This default
+   applies to BOTH creating a new DIR and editing an existing one (adding a `## Resolution`,
+   flipping `status:`, refreshing a projection). Skip the worktree ONLY if the loop is provably not
+   running (no active driver; main tree idle for minutes) — and if you skip it, say so and why.
+
+4. **Draft the file**, following `experiments/quay-native-bootstrap/directives/README.md`'s
    `## File format` exactly (this format is inherited as-is by every later
    experiment's own `directives/`, whether or not that experiment has its
    own copy of the README):
@@ -93,17 +108,25 @@ discussed yet, stop and say so instead of inventing content.
    - Leave `## Resolution` as a placeholder comment, to be filled in by
      whichever iteration applies it
 
-4. **Write to `experiments/<EXPERIMENT>/directives/pending/DIR-NNN-<slug>.md`.** Do not
-   `git add`. Do not `git commit`. Show the user the full file contents,
-   plus the `<EXPERIMENT>` you resolved in step 0, and stop — committing
-   is an explicit, separate, human-confirmed step, same as every prior
-   directive in this mechanism.
+5. **Write to `<worktree>/experiments/<EXPERIMENT>/directives/pending/DIR-NNN-<slug>.md`** (inside
+   the step-3 worktree, NOT the main tree). Show the user the full file contents plus the
+   `<EXPERIMENT>` you resolved in step 0. Then do the projection (step 6) and commit + merge (steps
+   7-8): **by default this skill carries the DIR all the way to merged on `master`, not merely
+   drafted** — the worktree makes committing safe, so the old "stop at drafted, human commits
+   separately" caveat no longer applies. (If the human explicitly asked only to draft for review,
+   stop here and say so — but the default is to land it.)
 
-5. **Project a `label: directive` task (M-DIR-PROJECTION, DIR-002 — restrained
+6. **Project a `label: directive` task (M-DIR-PROJECTION, DIR-002 — restrained
    design: file stays canonical, the task is a GENERATED, regenerated-not-hand-
    edited projection; never a second authoritative copy).** This step runs
-   immediately after step 4, still inside this same invocation — it is not a
-   separate later action.
+   immediately after step 5, still inside this same invocation — it is not a
+   separate later action. **Do the projection INTO the step-3 worktree's task
+   store**, so the DIR file and its task projection commit together in step 7
+   and never observably diverge: point the provider at the worktree
+   (`QUAY_NATIVE_TASKS_DIR=<worktree>/tasks`), and since the worktree has no
+   `node_modules`, run the MAIN repo's provider CLI binary
+   (`node /path/to/main/packages/quay-native/bin/quay-native.js ...`) with that
+   env var — the write still lands in `<worktree>/tasks/DIR-NNN.md`.
 
    a. **Determine the task-store provider — never assume.** Check this
       workspace's `.quay/config.yml` for which provider has `enabled: true`
@@ -175,4 +198,24 @@ discussed yet, stop and say so instead of inventing content.
 
    d. Show the user the resulting task (a `task_get <DIR-NNN>` or equivalent
       readback), same evidence discipline as showing the file contents in
-      step 4.
+      step 5.
+
+7. **Commit in the worktree — DEFAULT.** `git -C <worktree> add` the DIR file AND the projected
+   `tasks/DIR-NNN.md`, then `git -C <worktree> commit -m "DIR-NNN (<EXPERIMENT>): <one-line summary>"`.
+   File and task commit together so they never observably diverge (the anti-drift check stays green).
+   The same applies when EDITING an existing DIR (a Resolution / `status:` flip): edit the file and
+   regenerate its projection in the worktree, then commit both together.
+
+8. **Merge to `master` by fast-forward at a clean window, then clean up — DEFAULT.**
+   - From the MAIN repo, confirm a clean window: no `.git/MERGE_HEAD`, `git ls-files -u` empty, and
+     `master` NOT checked out in any worktree (`git worktree list | grep -w master`).
+   - Confirm a true fast-forward: `git merge-base master human/dir-NNN` == `git rev-parse master`.
+   - Advance master by a REF UPDATE, never a checkout (so it can never collide with the loop's own
+     `git checkout master` publish sub-step): `git branch -f master human/dir-NNN`.
+   - Clean up: `git worktree remove <worktree>` and `git branch -D human/dir-NNN` (the commit is
+     preserved on `master`).
+   - The autonomous loop picks the DIR up on its next DRAIN (its `master → <driver-branch>` merge) —
+     do NOT push, and do NOT touch the loop's branch or the main working tree's checkout yourself.
+   - If the window is NOT clean (a publish/merge is mid-flight), wait and retry the ref update — never
+     force-checkout `master` while the loop may be using it. This is the same pattern proven on
+     DIR-019/DIR-020: draft off-loop in a worktree, land by ff at a clean window, let the loop absorb.
