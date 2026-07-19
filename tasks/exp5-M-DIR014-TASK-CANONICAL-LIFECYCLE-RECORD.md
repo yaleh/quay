@@ -3,7 +3,7 @@ id: exp5-M-DIR014-TASK-CANONICAL-LIFECYCLE-RECORD
 title: "DIR-014 phase 1 (item 6): quay task is the canonical lifecycle record —
   `## Proposal` embedded, `## Plan` referenced-or-N/A, both mechanically
   enforced by a new DoD sibling clause to Clause 0"
-status: in-progress
+status: done
 labels:
   - milestone-candidate
   - surface:method-infra
