@@ -338,6 +338,7 @@ async function main() {
   const jsonFlag = resolveJsonFlag(flags);
   const jsonCommands =
     (cmd === "task" && ["list", "view", "edit", "check", "create"].includes(sub)) ||
+    (cmd === "adr" && ["list", "show", "view", "new", "accept", "deprecate", "reject", "supersede"].includes(sub)) ||
     (cmd === "action" && ["list", "run"].includes(sub));
   if (jsonFlag === null && jsonCommands) {
     console.error(`Error: unsupported --format value ${JSON.stringify(flags.format)} (only "json" is supported; use --json instead of --format for non-JSON output)`);
@@ -345,6 +346,82 @@ async function main() {
     return;
   }
   const wantsJson = jsonFlag !== null && jsonFlag.json;
+
+  // ── ADR commands (separate object kind — decision lifecycle, not task lifecycle) ──
+  if (cmd === "adr") {
+    if (sub === "list") {
+      await withProvider(async (client) => {
+        const adrs = await client.adrList({ status: flags.status, tag: flags.tag });
+        if (wantsJson) printJson(adrs);
+        else if (adrs.length === 0) console.log("(no ADRs)");
+        else for (const a of adrs) console.log(`${a.id}\t${a.status}\t${a.title}`);
+      }, { providerId: flags.provider });
+      return;
+    }
+    if (sub === "show" || sub === "view") {
+      const id = positional[0];
+      await withProvider(async (client) => {
+        const a = await client.adrGet(id);
+        if (!a) { console.error(`no such ADR: ${id}`); process.exitCode = 1; return; }
+        if (wantsJson) printJson(a);
+        else {
+          console.log(`${a.id}: ${a.title} [${a.status}]${a.date ? `  (${a.date})` : ""}`);
+          if (a.supersedes?.length) console.log(`supersedes: ${a.supersedes.join(", ")}`);
+          if (a.supersededBy?.length) console.log(`superseded-by: ${a.supersededBy.join(", ")}`);
+          console.log(a.body);
+        }
+      }, { providerId: flags.provider });
+      return;
+    }
+    if (sub === "new") {
+      const id = positional[0];
+      if (!id) { console.error("quay adr new: missing required <id> (ADR-NNN)"); process.exitCode = 1; return; }
+      if (typeof flags.title !== "string" || flags.title.trim() === "") {
+        console.error("quay adr new: --title <title> is required"); process.exitCode = 1; return;
+      }
+      if (flags.body !== undefined && flags["body-file"] !== undefined) {
+        console.error("quay adr new: --body and --body-file are mutually exclusive"); process.exitCode = 1; return;
+      }
+      const body = flags["body-file"] !== undefined ? await fs.readFile(flags["body-file"], "utf8") : flags.body;
+      await withProvider(async (client) => {
+        const patch = { id, title: flags.title, status: flags.status ?? "proposed" };
+        if (flags.date !== undefined) patch.date = flags.date;
+        if (flags.supersedes !== undefined) patch.supersedes = String(flags.supersedes).split(",").filter(Boolean);
+        if (flags.tags !== undefined) patch.tags = String(flags.tags).split(",").filter(Boolean);
+        if (body !== undefined) patch.body = body;
+        const a = await client.adrWrite(patch);
+        if (wantsJson) printJson(a); else console.log(`created ${id}`);
+      }, { providerId: flags.provider });
+      return;
+    }
+    if (["accept", "deprecate", "reject"].includes(sub)) {
+      const statusMap = { accept: "accepted", deprecate: "deprecated", reject: "rejected" };
+      const id = positional[0];
+      if (!id) { console.error(`quay adr ${sub}: missing required <id>`); process.exitCode = 1; return; }
+      await withProvider(async (client) => {
+        const a = await client.adrWrite({ id, status: statusMap[sub] });
+        if (wantsJson) printJson(a); else console.log(`${id} → ${statusMap[sub]}`);
+      }, { providerId: flags.provider });
+      return;
+    }
+    if (sub === "supersede") {
+      const id = positional[0];
+      const by = flags.by;
+      if (!id || typeof by !== "string") { console.error("quay adr supersede <id> --by <newId>"); process.exitCode = 1; return; }
+      await withProvider(async (client) => {
+        await client.adrWrite({ id, status: "superseded", superseded_by: [by] });
+        const target = await client.adrGet(by);
+        const supersedes = [...new Set([...(target?.supersedes ?? []), id])];
+        await client.adrWrite({ id: by, supersedes });
+        if (wantsJson) printJson({ id, status: "superseded", superseded_by: [by] });
+        else console.log(`${id} superseded by ${by}`);
+      }, { providerId: flags.provider });
+      return;
+    }
+    console.error(`unknown adr subcommand: ${sub} (try: list, show, new, accept, deprecate, reject, supersede)`);
+    process.exitCode = 1;
+    return;
+  }
 
   if (cmd === "task" && sub === "list") {
     // QX-005: task list --help is caught above by the sub === "--help" branch.

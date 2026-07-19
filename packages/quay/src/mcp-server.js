@@ -379,6 +379,67 @@ export async function startMcpServer() {
     }
   );
 
+  // ── ADR tools — proxy the Provider's adr_list/adr_get/adr_write (separate
+  // object kind; a Provider MAY not support ADRs, in which case adrList returns
+  // [] and adr_get/adr_write surface isError, per provider-client.js).
+  server.registerTool(
+    "adr_list",
+    {
+      description: "List ADRs (Architecture Decision Records) on an enabled Provider, optionally filtered by status/tag. ADRs are a separate kind from tasks (decision lifecycle: proposed/accepted/superseded/deprecated/rejected).",
+      inputSchema: {
+        provider: z.string().optional(),
+        status: z.string().optional(),
+        tag: z.string().optional(),
+      },
+    },
+    async ({ provider, status, tag }) => {
+      const { client } = await getClient(provider);
+      const adrs = await client.adrList({ status, tag });
+      return { content: [{ type: "text", text: JSON.stringify(adrs, null, 2) }], structuredContent: { adrs } };
+    }
+  );
+
+  server.registerTool(
+    "adr_get",
+    {
+      description: "Get one ADR by id (ADR-NNN) from an enabled Provider. Returns isError:true if not found or the Provider does not support ADRs.",
+      inputSchema: { provider: z.string().optional(), id: z.string() },
+    },
+    async ({ provider, id }) => {
+      const { client } = await getClient(provider);
+      const adr = await client.adrGet(id);
+      if (!adr) return { isError: true, content: [{ type: "text", text: `no such ADR: ${id}` }] };
+      return { content: [{ type: "text", text: JSON.stringify(adr, null, 2) }], structuredContent: { adr } };
+    }
+  );
+
+  server.registerTool(
+    "adr_write",
+    {
+      description: "Write/patch one ADR on an enabled Provider. status ∈ proposed|accepted|superseded|deprecated|rejected (never 'done'). Returns isError:true on validation failure or if the Provider does not support ADRs.",
+      inputSchema: {
+        provider: z.string().optional(),
+        id: z.string(),
+        title: z.string().optional(),
+        status: z.string().optional(),
+        date: z.string().optional(),
+        supersedes: z.array(z.string()).optional(),
+        superseded_by: z.array(z.string()).optional(),
+        tags: z.array(z.string()).optional(),
+        body: z.string().optional(),
+      },
+    },
+    async ({ provider, id, ...patch }) => {
+      const { client } = await getClient(provider);
+      try {
+        const adr = await client.adrWrite({ id, ...patch });
+        return { content: [{ type: "text", text: JSON.stringify(adr, null, 2) }], structuredContent: { adr } };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+      }
+    }
+  );
+
   // action_list / action_run (DIR-010): mirror bin/quay.js's own `action
   // list`/`action run` subcommands (proposal §9's own "one capability set,
   // three bindings" list), so an Agent connected only via `quay mcp` can

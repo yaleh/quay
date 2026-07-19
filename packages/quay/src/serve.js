@@ -841,6 +841,7 @@ export async function startServer({ port = 4173 } = {}) {
           <!-- QX-015 orientation banner removed by DIR-007 (iteration 10): misleading
                needs-human placement + disproportionate layout cost. -->
           <h1>Quay — task list (${escapeHtml(manifest.id)} provider)</h1>
+          <p class="meta"><a href="/adr">ADRs →</a></p>
           ${errorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(errorParam)}</div>` : ""}
           ${successParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(successParam)}</div>` : ""}
           ${prefixNav ? html`<p class="meta">Prefix: ${prefixNav}</p>` : ""}
@@ -856,6 +857,57 @@ export async function startServer({ port = 4173 } = {}) {
             ${rows}
           </table>
           ${totalPages > 1 ? pageNav : ""}
+        </main></body></html>`);
+      return;
+    }
+
+    // ── ADR views (separate object kind — decision lifecycle, not tasks) ──
+    if (url.pathname === "/adr") {
+      const statusFilter = url.searchParams.get("status");
+      const adrs = await client.adrList(statusFilter ? { status: statusFilter } : {});
+      const rows = adrs.map((a) => html`<tr>
+        <td><a href="/adr/${encodeURIComponent(a.id)}">${escapeHtml(a.id)}</a></td>
+        <td>${escapeHtml(a.status)}</td>
+        <td>${escapeHtml(a.date || "")}</td>
+        <td>${escapeHtml(a.title || "")}</td>
+      </tr>`).join("\n");
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(html`<!doctype html>
+        <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${pageStyles()}<title>ADRs</title></head>
+        <body><main>
+          <p class="meta"><a href="/">← tasks</a></p>
+          <h1>ADRs (${adrs.length})</h1>
+          ${adrs.length === 0 ? html`<p class="meta">No ADRs.</p>` : html`<table>
+            <tr><th>id</th><th>status</th><th>date</th><th>title</th></tr>
+            ${rows}
+          </table>`}
+        </main></body></html>`);
+      return;
+    }
+
+    const adrM = /^\/adr\/([^/]+)$/.exec(url.pathname);
+    if (adrM) {
+      const id = decodeURIComponent(adrM[1]);
+      const a = await client.adrGet(id);
+      if (!a) {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("not found");
+        return;
+      }
+      const link = (x) => html`<a href="/adr/${encodeURIComponent(x)}">${escapeHtml(x)}</a>`;
+      const supersedesMeta = (a.supersedes && a.supersedes.length)
+        ? html`<p class="meta">supersedes: ${a.supersedes.map(link).join(" · ")}</p>` : "";
+      const supersededByMeta = (a.supersededBy && a.supersededBy.length)
+        ? html`<p class="meta">superseded by: ${a.supersededBy.map(link).join(" · ")}</p>` : "";
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(html`<!doctype html>
+        <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(a.id)}: ${escapeHtml(a.title)}">${pageStyles()}<title>${escapeHtml(a.id)}</title></head>
+        <body><main>
+          <p class="meta"><a href="/adr">← ADRs</a></p>
+          <h1>${escapeHtml(a.id)}: ${escapeHtml(a.title)}</h1>
+          <p class="meta">status: <strong>${escapeHtml(a.status)}</strong>${a.date ? ` · ${escapeHtml(a.date)}` : ""}</p>
+          ${supersedesMeta}${supersededByMeta}
+          <article>${renderMarkdown(a.body || "")}</article>
         </main></body></html>`);
       return;
     }

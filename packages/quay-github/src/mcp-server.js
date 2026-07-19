@@ -240,6 +240,28 @@ export async function startMcpServer({ owner, repo }) {
     }
   );
 
+  // ── ADR tools — quay-github does NOT support ADRs (they are architectural
+  // decisions, not GitHub Issues). Degrade cleanly so Core stays provider-
+  // agnostic: adr_list → empty (list views render "no ADRs" instead of erroring);
+  // adr_get / adr_write → a clear "not supported" isError (Core maps to null / a
+  // clear CLI error). No Issues/Discussions mapping is forced.
+  const ADR_UNSUPPORTED = "quay-github does not support ADRs (ADRs are not GitHub Issues); use the native provider for ADR storage.";
+  server.registerTool(
+    "adr_list",
+    { description: "ADRs are not supported by the GitHub provider; always returns an empty list.", inputSchema: { status: z.string().optional(), tag: z.string().optional() } },
+    async () => ({ content: [{ type: "text", text: "[]" }], structuredContent: { adrs: [] } })
+  );
+  server.registerTool(
+    "adr_get",
+    { description: "ADRs are not supported by the GitHub provider.", inputSchema: { id: z.string() } },
+    async () => ({ isError: true, content: [{ type: "text", text: ADR_UNSUPPORTED }] })
+  );
+  server.registerTool(
+    "adr_write",
+    { description: "ADRs are not supported by the GitHub provider.", inputSchema: { id: z.string() } },
+    async () => ({ isError: true, content: [{ type: "text", text: ADR_UNSUPPORTED }] })
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`quay-github mcp: serving tasks from github.com/${owner}/${repo} (read-only v1)`);

@@ -10,6 +10,7 @@ providers:
     mcp_entry: ["node", "./bin/quay-native.js", "mcp"]
     env:
       QUAY_NATIVE_TASKS_DIR: "./tasks"   # resolved relative to workspaceRoot at launch time
+      QUAY_NATIVE_ADR_DIR: "./adr"        # ADRs are a SEPARATE kind, stored in a sibling dir of tasks/
 
   github:
     enabled: false                       # not the DEFAULT provider (native is); select explicitly via `quay --provider github ...`
