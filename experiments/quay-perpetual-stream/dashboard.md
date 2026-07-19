@@ -2790,3 +2790,100 @@ resolved.
 
 ## Backlog row
 | exp5-M-DOD-ESCROW-TESTFLOOR | DIR-017 Step 2: add the escrow-Δv clause (a design-only milestone's Δv is provisional until its -IMPL ships) and the product-work test-floor clause (product-touching work carries real tests >=80%, actually run) to inherited-core.md's Definition of Done, mechanically enforced by it0-dod-check.mjs as new Clause 6/7 | DONE | explore, governance-integrity (primary) — closes two more Goodhart surfaces named by | milestone-candidate, surface:method-infra, milestone:M32-dod-escrow-testfloor |
+
+## ABSORB m33: M33-webui-trigger-honesty
+
+**Two-iteration independent convergence.** M33 ran as two independent `baime:iteration-executor`
+agents off `exp5-outer-driver` HEAD `c6e55dd` (post-m32-publish): `exp5-m33-iteration-0` (worktree/
+branch `milestones/M33-webui-trigger-honesty/worktrees/iteration-0`) and `exp5-m33-iteration-1`
+(same pattern, `iteration-1`), each blind to the other's materials. Both independently diagnosed the
+exact same root bug (`packages/quay/src/serve.js`'s POST `/task/:id/action/:actionId` handler
+hardcoding `const successMsg = \`Task ${t.id} advanced\`;` regardless of `deliverTrigger()`'s actual
+`result.delivered` value) and both independently converged on the same fix shape: condition the
+banner text on `result.delivered` with three distinct, honest strings, "requested"-flavored for
+`print`/`manda`. Merged iteration-0 as primary (`git merge --no-ff exp5-m33-iteration-0`, commit
+`576696c`, clean, no conflicts) — its version has a marginally more defensive fallback default for
+unrecognized `delivered` values. iteration-1's independently-derived fix and live-browser evidence
+(`evidence-iteration-1/print-mode-banner.png`, Playwright MCP, port 4193) were kept only as
+independent confirmation, not merged, per the standing reconciliation discipline.
+
+**adversarial-audit gate**: fresh-context, out-of-band subagent independently re-verified all 5 ACs +
+DoD against the merged `exp5-outer-driver` state (not trusting either iteration's self-report) —
+read `serve.js:975-979` directly (confirmed the `result.delivered`-keyed lookup with honest strings,
+no mode claims "advanced"/"done"), ran `git diff --stat b2515ec~1..576696c -- packages/quay/src/
+action.js` (empty — `action.js` byte-identical, G-S4-02 untouched), rendered and inspected
+`evidence-iteration-1/print-mode-banner.png` directly (real browser page, banner text matches the
+code and the cited server log `delivered: 'print'`), independently re-ran `node --test test/
+serve.test.mjs` (passes, 1/1, all 8 new M33 assertions PASS) and read the new test block
+(`serve.test.mjs:626-735`, deterministic PATH-clearing for print-mode and `QUAY_ACTION_MOCK_LOG` for
+mock-mode, guards against false-positive banner matches by also checking the mock log file was
+written), and confirmed scope hygiene (`git diff --stat` touches only `serve.js` +16/-1 and
+`serve.test.mjs` +112, no unrelated files). adversarial-audit verdict: **NO REFUTATION FOUND**.
+
+**V_meta consolidation-lag gate**: checked `v-meta-ledger.md` — one row, already `consolidated` (m7
+ABSORB), no `confirmed`-and-unresolved rows, no K=2 alarm applies. V_meta consolidation-lag: clear,
+N/A this milestone.
+
+**Impl-row gate**: N/A — not design-only, ships real code directly (gate does not apply per its own
+trigger condition, no exemption claimed).
+
+**Test-floor gate (Clause 7)**: fires — `surface:web-ui`, product-touching. Disposition: honest,
+partial-coverage-plus-waiver (not an inflated blanket percentage claim). The diff adds a 4-entry
+`successMsg` lookup (`print`/`manda`/`mock`/fallback) keyed on `result.delivered`. `serve.test.mjs`'s
+new M33 test block (lines 626-735) directly, deterministically exercises the **`print`** path (PATH-
+cleared to force `mandaAvailable()` ENOENT — the realistic default deployment, and the exact path
+AC 3's live-browser verification also covers) and the **`mock`** path (via `QUAY_ACTION_MOCK_LOG`),
+asserting the exact honest wording and the absence of `/advanced|done/i` — 2 of 4 entries, covering
+the two paths this sandbox can realistically and deterministically drive.
+`WAIVER: exp5-M-WEBUI-TRIGGER-HONESTY | test-floor | the "manda" entry is not live-tested — no manda
+daemon/dispatcher is available in this sandbox to drive a real async-dispatch path (same constraint
+both M33 iterations and the charter's own Current-state notes documented); the unmatched-fallback
+entry is a trivial defensive default of identical shape/risk to the tested entries, not independently
+branch-tested. Neither gap is silent — both are named here, dated 2026-07-19, with the reason.` The
+audit independently re-ran the test suite and confirms the tested paths pass.
+
+**Full `packages/quay` suite (regression check, AC4)**: re-ran every `test/*.test.mjs` file
+individually post-merge. All green except the one pre-existing, already-documented flake
+(`serve-github.test.mjs`, live-GitHub-data-dependent, fails identically pre- and post-M33, untouched
+by this diff — both iterations and the audit independently confirmed this). `cli-edit-parity-
+conformance.test.mjs` was killed by an ad-hoc 60s per-file timeout in the outer-loop's own regression
+script (unrelated to M33 — this file alone takes ~61s); re-ran it standalone with a 120s timeout,
+passes clean (1/1). No regression introduced by M33.
+
+**Realized Δv computed at this ABSORB** (per the standing VT-chart-1 rubric for `surface:web-ui`
+exploit fixes, mirroring m29's CLI-ergonomics precedent — a real UX-correctness fix on an already-
+scored surface, not a new capability cell): Web UI cov 0.92→0.94 (20×0.94=18.80, +0.40 vs m11's
+unchanged 18.40). **VT chart-1 total: 111.15/120 → 111.55/120** (≈0.9296 normalized, up from 0.9271
+at m29). Realized Δv=+0.40, matching the charter's own framing (Δv̂ TBD-not-escrowed at authoring,
+resolved at ABSORB per the m29 rubric precedent it cited) — no design-time VT estimate to compare
+against for calibration error, consistent with the charter's explicit deferral.
+
+VT curve append: `[ ..., (m29/M29-cli-create-ergonomics, 111.15/120), (m33/M33-webui-trigger-honesty,
+111.55/120, Δv=+0.40, CORRECTNESS-FIX — Web UI banner-honesty: G-S4-01 UX-trust defect fixed, small
+VT weight reflecting a correctness fix to an already-scored surface, not a new capability category) ]`.
+
+**Note for ABSORB — G-S4-02 disposition**: G-S4-02 (wiring a real synchronous/in-process delivery
+mode for bare `quay serve`) remains explicitly deferred, unchanged in scope estimate by this
+milestone's work — nothing surfaced during M33 (either iteration, or the audit) suggests G-S4-02 is
+either larger or smaller than the task's own original framing ("larger scope, may need its own
+design/line-budget"). It remains a legitimate future SELECT candidate; not selected this boundary.
+
+**Backlog housekeeping**: `tasks/exp5-M-WEBUI-TRIGGER-HONESTY.md` → `status: done`, Status mirror
+updated recording the merge commit, audit verdict, and Realized Δv. `backlog.md` regenerated via
+`node scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream --write` — row
+`exp5-M-WEBUI-TRIGGER-HONESTY` flips `in-progress`/`SELECTED` → `DONE`. `milestone_counter` → **33**.
+Checkpoint cadence: not yet due (next due at milestone_counter=35, every-5 rule; last written cp-30).
+Continuing directly to m34 DRAIN/SELECT.
+
+**DRAIN disposition of `directives/pending/` at this boundary, and m34 SELECT-candidate note (per
+this charter's own Note-for-ABSORB item 5, "do not silently assume")**: `directives/pending/`
+contains only DIR-017 (status stays `pending`, Step 3 — leakage metrics onto `dashboard.md` — remains
+open and separately selectable, not drained by this milestone which was scoped to G-S4-01 only). Two
+open exploit/capability-growth candidates now exist for m34 SELECT: `exp5-M-NATIVE-RELATION-SYNC`
+(untouched by M33, per the charter's own note) and a DIR-017-Step-3-sourced candidate
+(leakage-metrics-onto-dashboard, not yet materialized as its own task). Explicit choice deferred to
+the m34 DRAIN/SELECT step itself (next boundary), not defaulted here — per the same discipline used
+at m32→m33.
+
+## Backlog row
+| exp5-M-WEBUI-TRIGGER-HONESTY | Web UI action_buttons: stop overstating success when trigger delivery is degraded/async — condition the success banner on result.delivered (G-S4-01) | DONE | exploit (primary), capability-growth (secondary) | milestone-candidate, surface:web-ui, milestone:M33-webui-trigger-honesty |
