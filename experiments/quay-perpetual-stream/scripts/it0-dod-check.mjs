@@ -79,24 +79,29 @@ import { extractSection } from "./task-schema.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function usage() {
-  console.error("usage: node it0-dod-check.mjs <milestone-id> <charter-file> <absorb-entry-file>");
-  process.exit(2);
-}
-
-const [milestoneId, charterFile, absorbEntryFile] = process.argv.slice(2);
-if (!milestoneId || !charterFile || !absorbEntryFile) usage();
-
-for (const [label, p] of [["charter-file", charterFile], ["absorb-entry-file", absorbEntryFile]]) {
-  if (!fs.existsSync(p)) {
-    console.error(`ERROR: ${label} not found: ${p}`);
-    process.exit(2);
+// A usage/environment error (exit-code-2 path). runDodCheck() throws this instead of calling
+// process.exit(2) directly, so the pure function can be imported+unit-tested without terminating the
+// test process; the thin CLI wrapper (main) catches it and reproduces the EXACT legacy behavior
+// (console.error(message) then process.exit(2)). Behavior-preserving-by-construction: the message
+// strings below are byte-identical to the pre-restructure console.error(...) calls.
+class DodCheckEnvError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "DodCheckEnvError";
+    this.exitCode = 2;
   }
 }
 
-const charterFileText = fs.readFileSync(charterFile, "utf8");
-const absorbFileText = fs.readFileSync(absorbEntryFile, "utf8");
-
+// runDodCheck — the pure DoD-clause engine, extracted VERBATIM from the former top-level script body
+// (clauses 0-9). Given a milestone id + the already-read charter/absorb file TEXT (charterFileText /
+// absorbFileText — the whole-file text of each arg, which may be the same combined-fixture file),
+// runs all clauses and returns the accumulated result object. It performs the SAME on-disk reads the
+// original did (task-file lookup for clauses 0/8, shell-outs for clauses 3/4 via
+// it0-ceiling-line-budget-check.sh / it0-impl-row-check.sh), using `charterFile` only to pass the
+// charter path through to the line-budget shell-out exactly as before. Environment errors (missing
+// sibling script, malformed backlog section) throw DodCheckEnvError (exit-2) instead of calling
+// process.exit(2) — the ONLY structural change; every clause's logic is relocated unchanged.
+export function runDodCheck({ milestoneId, charterFile, charterFileText, absorbFileText }) {
 // Support two input shapes:
 //   (a) real milestone: charter-file is a real charter (charters/M-NN.md), absorb-entry-file is a
 //       real dashboard.md/ABSORB-log excerpt — used as-is, whole-file text.
@@ -238,8 +243,7 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
 {
   const scriptPath = path.join(__dirname, "it0-ceiling-line-budget-check.sh");
   if (!fs.existsSync(scriptPath)) {
-    console.error(`ERROR: sibling script not found: ${scriptPath}`);
-    process.exit(2);
+    throw new DodCheckEnvError(`ERROR: sibling script not found: ${scriptPath}`);
   }
   try {
     const out = execFileSync(scriptPath, [charterFile], { encoding: "utf8" });
@@ -251,8 +255,7 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
       failures.push(`clause3-line-budget: FAIL — ${out.split("\n")[0] || "(no output)"}`);
       dispositionedClauses.add("line-budget");
     } else {
-      console.error(`ERROR: it0-ceiling-line-budget-check.sh usage/environment error (exit ${e.status}): ${(e.stderr || "").toString().trim()}`);
-      process.exit(2);
+      throw new DodCheckEnvError(`ERROR: it0-ceiling-line-budget-check.sh usage/environment error (exit ${e.status}): ${(e.stderr || "").toString().trim()}`);
     }
   }
 }
@@ -264,20 +267,17 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
 {
   const scriptPath = path.join(__dirname, "it0-impl-row-check.sh");
   if (!fs.existsSync(scriptPath)) {
-    console.error(`ERROR: sibling script not found: ${scriptPath}`);
-    process.exit(2);
+    throw new DodCheckEnvError(`ERROR: sibling script not found: ${scriptPath}`);
   }
   const backlogSectionMatch = absorbFileText.match(/## Backlog row\n([\s\S]*?)(\n##|\n?$)/);
   if (!backlogSectionMatch) {
-    console.error(`ERROR: absorb-entry-file has no "## Backlog row" section (required to run the impl-row clause against a synthetic milestone)`);
-    process.exit(2);
+    throw new DodCheckEnvError(`ERROR: absorb-entry-file has no "## Backlog row" section (required to run the impl-row clause against a synthetic milestone)`);
   }
   const backlogRows = backlogSectionMatch[1]
     .split("\n")
     .filter((l) => l.trim().startsWith("|"));
   if (backlogRows.length === 0) {
-    console.error(`ERROR: "## Backlog row" section has no pipe-delimited row line`);
-    process.exit(2);
+    throw new DodCheckEnvError(`ERROR: "## Backlog row" section has no pipe-delimited row line`);
   }
   const tmpBacklog = path.join(os.tmpdir(), `it0-dod-check-backlog-${process.pid}-${Date.now()}.md`);
   fs.writeFileSync(tmpBacklog, backlogRows.join("\n") + "\n");
@@ -291,8 +291,7 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
       failures.push(`clause4-impl-row: FAIL — ${out.split("\n")[0] || "(no output)"}`);
       dispositionedClauses.add("impl-row");
     } else {
-      console.error(`ERROR: it0-impl-row-check.sh usage/environment error (exit ${e.status}): ${(e.stderr || "").toString().trim()}`);
-      process.exit(2);
+      throw new DodCheckEnvError(`ERROR: it0-impl-row-check.sh usage/environment error (exit ${e.status}): ${(e.stderr || "").toString().trim()}`);
     }
   } finally {
     fs.rmSync(tmpBacklog, { force: true });
@@ -687,19 +686,63 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
   }
 }
 
-console.log(`--- it0-dod-check: ${milestoneId} ---`);
-console.log(`charter: ${charterFile}`);
-console.log(`absorb-entry: ${absorbEntryFile}`);
-console.log("");
-for (const p of passes) console.log(`PASS: ${p}`);
-for (const n of nops) console.log(`N/A: ${n}`);
-for (const f of failures) console.log(`FAIL: ${f}`);
-console.log("");
-
-if (failures.length > 0) {
-  console.log(`FAIL: DoD check failed — ${failures.length} clause violation(s) found (see above).`);
-  process.exit(1);
-} else {
-  console.log(`PASS: DoD check passed — all clauses satisfied (${passes.length} disposition(s) confirmed), no undeclared self-exemption.`);
-  process.exit(0);
+  return { passes, failures, nops, dispositionedClauses, needsHuman };
 }
+
+// ── Thin CLI wrapper ─────────────────────────────────────────────────────────────────────────────
+// Parses argv, validates + reads the files (the exit-2 usage/file-not-found path, unchanged), calls
+// the pure runDodCheck(), and prints the SAME stdout lines in the SAME order/format the former
+// top-level body did, then exits 1 if any clause failed else 0. Environment errors surfaced by
+// runDodCheck (DodCheckEnvError) reproduce the legacy `console.error(msg); process.exit(2)` behavior.
+function usage() {
+  console.error("usage: node it0-dod-check.mjs <milestone-id> <charter-file> <absorb-entry-file>");
+  process.exit(2);
+}
+
+function main(argv) {
+  const [milestoneId, charterFile, absorbEntryFile] = argv.slice(2);
+  if (!milestoneId || !charterFile || !absorbEntryFile) usage();
+
+  for (const [label, p] of [["charter-file", charterFile], ["absorb-entry-file", absorbEntryFile]]) {
+    if (!fs.existsSync(p)) {
+      console.error(`ERROR: ${label} not found: ${p}`);
+      process.exit(2);
+    }
+  }
+
+  const charterFileText = fs.readFileSync(charterFile, "utf8");
+  const absorbFileText = fs.readFileSync(absorbEntryFile, "utf8");
+
+  let result;
+  try {
+    result = runDodCheck({ milestoneId, charterFile, charterFileText, absorbFileText });
+  } catch (e) {
+    if (e instanceof DodCheckEnvError) {
+      console.error(e.message);
+      process.exit(e.exitCode);
+    }
+    throw e;
+  }
+  const { passes, failures, nops } = result;
+
+  console.log(`--- it0-dod-check: ${milestoneId} ---`);
+  console.log(`charter: ${charterFile}`);
+  console.log(`absorb-entry: ${absorbEntryFile}`);
+  console.log("");
+  for (const p of passes) console.log(`PASS: ${p}`);
+  for (const n of nops) console.log(`N/A: ${n}`);
+  for (const f of failures) console.log(`FAIL: ${f}`);
+  console.log("");
+
+  if (failures.length > 0) {
+    console.log(`FAIL: DoD check failed — ${failures.length} clause violation(s) found (see above).`);
+    process.exit(1);
+  } else {
+    console.log(`PASS: DoD check passed — all clauses satisfied (${passes.length} disposition(s) confirmed), no undeclared self-exemption.`);
+    process.exit(0);
+  }
+}
+
+// Run the CLI only when invoked directly (node it0-dod-check.mjs ...), NOT when imported by a test.
+const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isDirect) main(process.argv);
