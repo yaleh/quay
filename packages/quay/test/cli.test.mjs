@@ -262,6 +262,63 @@ async function main() {
     assert(fail.ok === false, "quay task check <failing task> reports ok:false");
   }
 
+  // 4b. M31-cli-gate-enforcement: `task edit <id> --status <x> --enforce-gate`.
+  //     CLI-2 (status todo, AC section present but UNCHECKED) is a real
+  //     gate-failing fixture against the native provider's own author->ready
+  //     gate (store.js#check()) — `task check CLI-2` already asserts
+  //     ok:false above (test 4), so `--enforce-gate` must refuse the SAME
+  //     write for the SAME reason, by calling that exact same check.
+  //
+  //     Decision (charter M31-cli-gate-enforcement, "Decision" section):
+  //     default `task edit --status` remains UNGUARDED (git commit
+  //     --no-verify analogy) — `--enforce-gate` is opt-in only. This block
+  //     verifies both directions: refuse-on-fail (4b-i), the default-
+  //     unguarded write still succeeds against the SAME fixture without the
+  //     flag (4b-ii, zero regression / Done-when clause 3), and succeed-on-
+  //     pass with the flag present (4b-iii, Done-when clause 2).
+  {
+    // 4b-i. --enforce-gate refuses a gate-failing status transition: exit 1,
+    //       no write performed, result.reason surfaced in the error message.
+    const rRefuse = run(["task", "edit", "CLI-2", "--status", "ready", "--enforce-gate", "--json"], spawnOpts);
+    assert(rRefuse.status === 1, "quay task edit CLI-2 --status ready --enforce-gate exits 1 (gate fails)");
+    assert(
+      rRefuse.stderr.includes("AC checkboxes checked") || rRefuse.stderr.includes("checked"),
+      `quay task edit --enforce-gate refusal surfaces the gate's result.reason in the error message (got stderr: ${rRefuse.stderr.slice(0, 300)})`
+    );
+    const viewAfterRefuse = run(["task", "view", "CLI-2", "--json"], spawnOpts);
+    const afterRefuse = JSON.parse(viewAfterRefuse.stdout);
+    assert(afterRefuse.status === "todo", "quay task edit --enforce-gate refusal performs NO write — CLI-2 status unchanged (still todo)");
+
+    // 4b-ii. WITHOUT --enforce-gate, the identical status transition against
+    //        the SAME gate-failing fixture succeeds — current unguarded
+    //        default behavior is unchanged (Done-when clause 3, zero regression).
+    const rUnguarded = run(["task", "edit", "CLI-2", "--status", "ready", "--json"], spawnOpts);
+    assert(rUnguarded.status === 0, "quay task edit CLI-2 --status ready (no --enforce-gate) still succeeds unguarded against the same gate-failing fixture (Done-when clause 3)");
+    const unguarded = JSON.parse(rUnguarded.stdout);
+    assert(unguarded.status === "ready", "quay task edit CLI-2 --status ready (no --enforce-gate) actually persists the new status");
+
+    // Reset CLI-2 back to todo (still gate-failing) for the remaining checks.
+    run(["task", "edit", "CLI-2", "--status", "todo"], spawnOpts);
+
+    // 4b-iii. --enforce-gate succeeds identically to an unguarded write when
+    //         the gate PASSES (Done-when clause 2) — use CLI-1, a passing
+    //         fixture (AC fully checked), same exit code / output shape.
+    const rPass = run(["task", "edit", "CLI-1", "--status", "todo", "--enforce-gate", "--json"], spawnOpts);
+    assert(rPass.status === 0, "quay task edit CLI-1 --status todo --enforce-gate exits 0 when the gate passes");
+    const passResult = JSON.parse(rPass.stdout);
+    assert(passResult.status === "todo", "quay task edit --enforce-gate (gate passes) actually persists the new status, same output shape as unguarded");
+
+    // 4b-iv. Done-when clause 4: --enforce-gate combined with a non-status
+    //        patch (e.g. --labels only, no --status) is a documented no-op
+    //        guard-check — this milestone chooses option (b): explicit no-op
+    //        without a status field present (see report for full reasoning).
+    //        Verify it does NOT refuse even though CLI-2 (currently todo,
+    //        gate-failing) is the target — because no status change is
+    //        requested, the gate is never invoked.
+    const rLabelsOnly = run(["task", "edit", "CLI-2", "--labels", "a,b", "--enforce-gate", "--json"], spawnOpts);
+    assert(rLabelsOnly.status === 0, "quay task edit CLI-2 --labels a,b --enforce-gate (no --status field) succeeds as a no-op guard-check — Done-when clause 4, option (b)");
+  }
+
   // 5. `quay action list <id> --json` — action_buttons filtered by
   //    whenStatus against the task's live status.
   {
@@ -911,6 +968,13 @@ async function main() {
       assert(r.stdout.includes("task view"), "quay --help output includes 'task view'");
       assert(r.stdout.includes("--prefix"), "quay --help output mentions --prefix flag (QX-002 cross-link)");
       assert(r.stdout.includes("quay"), "quay --help output includes the tool name");
+      // M31-cli-gate-enforcement Done-when clause 5: --help documents BOTH
+      // the default-unguarded behavior and --enforce-gate.
+      assert(r.stdout.includes("--enforce-gate"), "quay --help output mentions --enforce-gate flag (M31-cli-gate-enforcement)");
+      assert(
+        r.stdout.includes("UNGUARDED") || r.stdout.includes("unguarded"),
+        "quay --help output documents that status transitions are unguarded by default (M31-cli-gate-enforcement)"
+      );
     }
 
     // quay -h: alias, also exits 0
