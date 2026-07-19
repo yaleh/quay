@@ -14,6 +14,9 @@ extra:
     exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE
     experiments/quay-perpetual-stream/charters/M38-dod-gate-operative-real-milestone.md
     /tmp/m38-absorb-entry.md
+  implRowArgs:
+    - exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE
+    - experiments/quay-perpetual-stream/backlog.md
 ---
 ## Provenance
 SELECTed at m37→m38 DRAIN/SELECT boundary, 2026-07-19, directly from `DIR-021`
