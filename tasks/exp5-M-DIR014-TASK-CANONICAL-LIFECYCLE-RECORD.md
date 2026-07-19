@@ -82,21 +82,53 @@ new documentation subsection appended to an existing doc). It does not warrant a
 approach, and the Acceptance Criteria below fully specify what "done" looks like.
 
 ## Acceptance Criteria
-- [ ] **item 6a (proposal embedded):** this task's own `## Proposal` section (above) is non-empty,
-  real approach text, not a placeholder.
-- [ ] **item 6b (plan referenced):** this task's own `## Plan` section (above) states `N/A` with
-  explicit reasoning (small mechanical change, no staged implementation).
-- [ ] **item 6c (enforcement is real, not prose):** a new DoD sibling clause exists in BOTH
+- [x] **item 6a (proposal embedded):** this task's own `## Proposal` section (above) is non-empty,
+  real approach text, not a placeholder. (Confirmed by adversarial audit, 2026-07-19: read the
+  `## Proposal` section directly — 4390 chars, names the exact clause number/placement, the exact
+  helper reused, the exact PASS/FAIL rules, and a named rejected alternative with reasoning; `git
+  diff 8c3c2bf..HEAD --stat -- tasks/` shows zero changes to this task file, confirming the Proposal
+  predates this milestone's own build and was genuinely dogfooded, not written to order. See
+  `experiments/quay-perpetual-stream/milestones/M40-dir014-task-canonical-lifecycle-record/audit.md`
+  AC1.)
+- [x] **item 6b (plan referenced):** this task's own `## Plan` section (above) states `N/A` with
+  explicit reasoning (small mechanical change, no staged implementation). (Confirmed by adversarial
+  audit, 2026-07-19: read the `## Plan` section directly — states `N/A — <reason>` with reasoning
+  tied to the actual scope of the change, correctly characterizing it as small/mechanical, matching
+  the real diff shape (812 insertions across 8 files, mostly fixtures/reports). See audit.md AC2.)
+- [x] **item 6c (enforcement is real, not prose):** a new DoD sibling clause exists in BOTH
   `it0-dod-check.sh` and `it0-dod-check.mjs`, HARD-BLOCKING when a task's `## Proposal` is
   missing/placeholder, or `## Plan` is missing, or `## Plan` references a `docs/plans/*.md` path
   that does not resolve. 2 new RED/GREEN fixtures exist under `fixtures/dod/`, wired into
-  `dod-fixture-selfcheck.sh`, and the full fixture suite (old + new) is green.
-- [ ] `inherited-core.md` gains a new subsection documenting the clause, cross-referencing DIR-014
+  `dod-fixture-selfcheck.sh`, and the full fixture suite (old + new) is green. (Confirmed by
+  adversarial audit, 2026-07-19: independently re-ran `dod-fixture-selfcheck.sh` — 15/15 fixtures
+  PASS; read both new fixture files directly and confirmed the RED/GREEN split is genuinely isolated
+  to Proposal/Plan content (clause0-7 output byte-identical between RED and GREEN, only clause8
+  differs, naming both violations in the RED case); read `it0-dod-check.sh` in full and confirmed
+  it's a pure delegate for ALL 9 clauses (no clause-specific `.sh` logic exists for any clause, so
+  Clause 8's absence from `.sh` logic is not an asymmetry); grepped `it0-dod-check.mjs` directly and
+  confirmed `"task-canonical-lifecycle-record"` is in `MECHANICALLY_UNCONDITIONAL_CLAUSES` and
+  `clauseNames`; independently constructed and confirmed a self-exemption attempt is caught by
+  Clause 5. CONCERN (non-blocking): the forward-only cutover mechanism has a fail-open edge case for
+  future tasks lacking a `milestone:M<N>` label — see audit.md CONCERNS #1 for full analysis and
+  repro. See audit.md AC3.)
+- [x] `inherited-core.md` gains a new subsection documenting the clause, cross-referencing DIR-014
   item 6, without altering the two-class diversity policy's dev-class discretionary language.
-- [ ] This milestone's own ABSORB DoD check (`quay gate exp5-M-DIR014-TASK-CANONICAL-LIFECYCLE-RECORD`,
+  (Confirmed by adversarial audit, 2026-07-19: read the new subsection directly — placed immediately
+  after Clause 0's own documentation block, before Clause 1's; follows the same four-field template;
+  cross-references "DIR-014 item 6" by name. `git diff 8c3c2bf..HEAD -- inherited-core.md | grep
+  "^@@"` shows all 3 hunks confined to lines 851-991; the two-class diversity policy sections (lines
+  232, 378, independently grepped) show zero overlap. See audit.md AC4.)
+- [x] This milestone's own ABSORB DoD check (`quay gate exp5-M-DIR014-TASK-CANONICAL-LIFECYCLE-RECORD`,
   or `it0-dod-check.sh` if the clause is not engine-wired this phase — state which) genuinely
   evaluates the new clause against THIS task's own body and PASSes because the `## Proposal`/
-  `## Plan` sections above are present and well-formed.
+  `## Plan` sections above are present and well-formed. (Confirmed by adversarial audit, 2026-07-19:
+  independently ran `it0-dod-check.sh exp5-M-DIR014-TASK-CANONICAL-LIFECYCLE-RECORD
+  charters/M40-dir014-task-canonical-lifecycle-record.md <own fresh absorb-entry file>` — Clause 8
+  PASSes, citing the real 4390-char count (matching iteration-0's own transcript, confirming it's
+  not fabricated) and `[tasks/exp5-M-DIR014-TASK-CANONICAL-LIFECYCLE-RECORD.md]` as its source,
+  proving it read the real task file, not a fixture fallback. `it0-dod-check.sh` used (Clause 8 is
+  not yet `quay gate`-engine-wired this phase, per iteration-0's own explicit statement, confirmed
+  correct). See audit.md AC5.)
 
 ## Definition of Done
 References the standard `inherited-core.md` Definition of Done clauses (0 AC/DoD-present
