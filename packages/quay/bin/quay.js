@@ -171,7 +171,7 @@ Usage:
   quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--json|--format json]
   quay task view <task-id> [--json]
   quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--extra <json>] [--json]
-  quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--expect-status <status>] [--append-notes <text>] [--json]
+  quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--expect-status <status>] [--append-notes <text>] [--enforce-gate] [--json]
   quay task check <task-id> [--json]
   quay action list <task-id> [--json]
   quay action run <task-id> <action-id> [--json]
@@ -210,12 +210,20 @@ Options for task edit:
   --children <a,b>      Comma-separated child task ids (replaces existing children)
   --expect-status <status>  Compare-and-swap: fail if the task's current status is not this value
   --append-notes <text>     Append text to the existing body (read-then-write convenience)
+  --enforce-gate         Opt-in gate check: when the patch includes --status, run the same check
+                          'task check' performs BEFORE writing; refuse (exit 1, no write) if the
+                          gate fails, printing the gate's reason. No-op if --status is not part of
+                          this edit.
   --json                 Output the edited task as JSON
   (at least one of the above patch-producing flags, or --append-notes, is required)
   Note: editing a task id that does NOT currently exist requires a non-empty --title (this is an
   upsert-as-create; a missing or empty --title is refused with a usage error instead of silently
   creating a titleless or empty-titled task — use 'quay task create' for a dedicated create path
   instead).
+  Note: status transitions via this command are UNGUARDED by default — no gate check runs unless
+  --enforce-gate is passed, analogous to 'git commit --no-verify'. This is a deliberate design
+  decision (task edit is a low-level, provider-agnostic write primitive); pass --enforce-gate to
+  opt into the same gate 'task check' enforces.
 
 
 Examples:
@@ -485,7 +493,24 @@ async function main() {
     // --children/--expect-status/--append-notes. `--status` is no longer
     // solely required; the guard below now requires at least one
     // patch-producing flag instead.
+    //
+    // M31-cli-gate-enforcement: this handler's status-transition write is,
+    // by design, UNGUARDED by default — it does not consult `task check`'s
+    // gate logic before writing, analogous to `git commit --no-verify`.
+    // `task edit` is a low-level, provider-agnostic primitive (the generic
+    // taskWrite passthrough); a caller who wants gate enforcement opts in
+    // explicitly via --enforce-gate, which calls the SAME client.taskCheck(id)
+    // logic `task check` uses (no duplicated gate logic) before the write,
+    // and refuses (exit 1, no write) if result.ok === false. This was a
+    // deliberate charter-time decision (option (b) hard-block-by-default was
+    // explicitly rejected: an unknown number of existing callers may rely on
+    // being able to force a transition past a gate they've manually verified
+    // is safe to bypass) — see charter's "Decision" section for the full
+    // reasoning: experiments/quay-perpetual-stream/charters/
+    // M31-cli-gate-enforcement.md. A future reader should not have to
+    // re-derive this from scratch.
     const id = positional[0];
+    const enforceGate = flags["enforce-gate"] !== undefined;
 
     if (flags.body !== undefined && flags["body-file"] !== undefined) {
       console.error("quay task edit: --body and --body-file are mutually exclusive");
@@ -515,6 +540,24 @@ async function main() {
     }
 
     await withProvider(async (client) => {
+      // M31-cli-gate-enforcement (in-scope item 1): opt-in gate enforcement.
+      // Only fires when --enforce-gate is present AND the patch includes a
+      // `status` field — a non-status patch (e.g. --labels-only) is a
+      // documented no-op guard-check (charter Done-when clause 4, option
+      // (b): explicit no-op without a status change), since no other
+      // patch-producing flag can move a task across a gate boundary. Calls
+      // the identical `client.taskCheck(id)` logic `task check` itself
+      // calls — no new gate-evaluation logic is written here.
+      if (enforceGate && patch.status !== undefined) {
+        const gateResult = await client.taskCheck(id);
+        if (gateResult.ok === false) {
+          console.error(
+            `quay task edit: --enforce-gate refused this write — gate check failed: ${gateResult.reason}`
+          );
+          process.exitCode = 1;
+          return;
+        }
+      }
       // M16-cli-edit-parity-impl (design doc §4 non-goals): --append-notes
       // is a Core-CLI-side read-then-write convenience, not a new ABI tool
       // — read the current body via taskGet, append the note text, then
