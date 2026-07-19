@@ -2,10 +2,11 @@
 id: exp5-M-CRYST-A2
 title: A2 [subtractive] Unify directive/task id namespace on exp5- prefix; clean
   foreign experiment-4 DIR-004/005 dangling scaffolding (DIR-010 residue)
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - crystallization
+  - milestone:first-wave
 parent: exp5-M-CRYST
 children: []
 extra: {}

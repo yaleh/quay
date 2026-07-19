@@ -3,7 +3,7 @@ id: exp5-M-CRYST-B1
 title: B1 Canonical task schema — one shape for all task kinds (Proposal req /
   Plan opt / AC,DoD checklists; lifecycle via fields; retire status-mirror
   Resolution)
-status: ready
+status: done
 labels:
   - milestone-candidate
   - crystallization

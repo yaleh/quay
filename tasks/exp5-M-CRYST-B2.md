@@ -2,10 +2,11 @@
 id: exp5-M-CRYST-B2
 title: B2 [executable] Task-schema validator (extend Clause 0 or a
   task-schema-check), fixture-pinned
-status: todo
+status: done
 labels:
   - milestone-candidate
   - crystallization
+  - milestone:first-wave
 parent: exp5-M-CRYST
 children: []
 extra:

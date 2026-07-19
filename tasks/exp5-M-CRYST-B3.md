@@ -3,10 +3,11 @@ id: exp5-M-CRYST-B3
 title: "B3 [subtractive+root-cause] Fix authoring SOURCES: /quay-directive skill
   + OUTER-LOOP SELECT emit the schema; retire empty-Resolution template +
   dirStatus body-line dup"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - crystallization
+  - milestone:first-wave
 parent: exp5-M-CRYST
 children: []
 extra:
