@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // it0-dod-check.mjs — DoD meta-enforcer, charters M25-dod-meta-enforcer (DIR-017 Step 1, clauses
-// 0-5) and M32-dod-escrow-testfloor (DIR-017 Step 2, clauses 6-7).
+// 0-5), M32-dod-escrow-testfloor (DIR-017 Step 2, clauses 6-7), and
+// M40-dir014-task-canonical-lifecycle-record (DIR-014 item 6, clause 8).
 //
 // Given a milestone id, a charter file path, and an ABSORB-entry text file (a fixture standing in
-// for the real dashboard.md/ABSORB log excerpt for milestones not yet ABSORBed), runs all 8 DoD
-// clauses (0-7) defined in `inherited-core.md`'s "Definition of Done" section:
+// for the real dashboard.md/ABSORB log excerpt for milestones not yet ABSORBed), runs all 9 DoD
+// clauses (0-8) defined in `inherited-core.md`'s "Definition of Done" section:
 //   1. Adversarial-audit gate  — documentation-discipline check only (does NOT re-run the audit
 //      subagent or re-derive its verdict): does the ABSORB-entry text contain an explicit
 //      disposition statement for this gate (a stated verdict, or an explicit "neither condition
@@ -37,6 +38,12 @@
 //      fail-closed) as opposed to method-infra/docs/cross-cutting/packaging. FAILs if the
 //      ABSORB-entry text has neither a ≥80%-coverage disposition nor a matching test-floor
 //      WAIVER line (reuses clause 5's waiver-line syntax, clause name "test-floor").
+//   8. Task canonical-lifecycle-record gate (M40-dir014-task-canonical-lifecycle-record / DIR-014
+//      item 6) — reuses the SAME extractSection()-style helper Clause 0 uses to pull the target
+//      task's `## Proposal` and `## Plan` sections. FAILs if `## Proposal` is missing/empty/
+//      placeholder, OR `## Plan` is missing, OR `## Plan` references a `docs/plans/*.md` path that
+//      does not resolve on disk. PASSes if `## Plan` states `N/A — <reason>` or references a
+//      resolving `docs/plans/*.md` path, and `## Proposal` has real content.
 //
 // This script does NOT re-run the adversarial-audit subagent, does NOT recompute v-meta-ledger.md
 // arithmetic, does NOT re-implement the line-budget/impl-row scripts' own logic, and does NOT
@@ -54,7 +61,7 @@
 // below for the section-isolation logic that makes the combined-fixture shape safe.
 //
 // Exit codes:
-//   0 = all 8 gate clauses (0-7) PASS or legitimately N/A (with disposition present), AND no
+//   0 = all 9 gate clauses (0-8) PASS or legitimately N/A (with disposition present), AND no
 //       undeclared self-exemption found.
 //   1 = at least one gate clause FAILs, OR a self-exemption is found with no waiver line.
 //   2 = usage/environment error (missing args, files not found, node unavailable, sibling script
@@ -313,7 +320,7 @@ const dispositionedClauses = new Set();
 // so a self-exemption of clause 6/7 in the charter's "Explicitly OUT of scope" section is still
 // caught by clause 5's scan.
 {
-  const MECHANICALLY_UNCONDITIONAL_CLAUSES = new Set(["line-budget", "impl-row", "escrow-delta-v", "test-floor"]);
+  const MECHANICALLY_UNCONDITIONAL_CLAUSES = new Set(["line-budget", "impl-row", "escrow-delta-v", "test-floor", "task-canonical-lifecycle-record"]);
   const clauseNames = [
     { key: "adversarial-audit", pattern: /adversarial[- ]audit/i },
     { key: "V_meta consolidation-lag", pattern: /V_meta consolidation[- ]lag|V_meta[- ]lag/i },
@@ -321,6 +328,7 @@ const dispositionedClauses = new Set();
     { key: "impl-row", pattern: /impl-row|-IMPL row/i },
     { key: "escrow-delta-v", pattern: /escrow[- ]δ?v|escrow-delta-v|escrow[- ]Δv/i },
     { key: "test-floor", pattern: /test[- ]floor/i },
+    { key: "task-canonical-lifecycle-record", pattern: /task canonical[- ]lifecycle[- ]record|proposal\/plan|proposal-plan/i },
   ];
   const outOfScopeMatch = charterText.match(/##+ Explicitly OUT of scope[\s\S]*?(\n##+ |$)/i);
   const outOfScopeText = outOfScopeMatch ? outOfScopeMatch[0] : "";
@@ -540,6 +548,102 @@ const dispositionedClauses = new Set();
       failures.push(`clause7-test-floor: FAIL — product-touching surface [${surfaceLabelMatches.length ? surfaceLabelMatches.join(", ") : "none/fail-closed"}] has NEITHER a ≥80% test-coverage disposition NOR a matching test-floor WAIVER line in the ABSORB-entry text`);
       dispositionedClauses.add("test-floor");
     }
+  }
+}
+
+// --- Clause 8: Task canonical-lifecycle-record gate (DIR-014 item 6 / M40-dir014-task-canonical-
+// lifecycle-record) ---
+// Trigger condition: FORWARD-ONLY, mirroring DIR-020/M34's own "checklist form MANDATED going
+// forward ... NOT retroactively rewritten ... no retroactive sweep required" precedent for Clause 0
+// — and this milestone's own charter's explicit "Explicitly OUT of scope: Retroactively backfilling
+// `## Proposal`/`## Plan` onto the ≤M39 milestones' tasks ... this is forward-only, same as
+// DIR-020's AC/DoD rule." A brand-new REQUIRED SECTION (unlike Clause 0's checklist-vs-prose SHAPE
+// distinction, where the section always existed) cannot be made unconditional without violating
+// that explicit out-of-scope constraint — every one of the 23 pre-M40 `exp5-M-*` tasks lacks a
+// `## Proposal` section entirely (verified at charter-authoring time, see charter's "Current-state
+// notes"), so an unconditional trigger would HARD-BLOCK all of them retroactively, exactly what is
+// disclaimed. Cutover mechanism: reuse the EXISTING `milestone:M<N>` task label convention (already
+// present on most `exp5-M-*` tasks, see e.g. this task's own `milestone:M40-...` label) — the
+// clause fires only for tasks whose label's milestone number is >= 40 (this milestone, the first to
+// require the section). A task with NO `milestone:M<N>` label, or one whose label's N < 40, is
+// legacy/pre-cutover and N/A-passes (grandfathered), stated explicitly, not silently skipped.
+{
+  const taskCandidates = [
+    path.join(process.cwd(), "tasks", `${milestoneId}.md`),
+    path.join(__dirname, "..", "..", "..", "tasks", `${milestoneId}.md`),
+  ];
+  const taskPath = taskCandidates.find((p) => fs.existsSync(p));
+  const taskText = taskPath ? fs.readFileSync(taskPath, "utf8") : charterFileText;
+  const srcLabel = taskPath ? `[${path.relative(process.cwd(), taskPath)}]` : "[fixture text — no real task file]";
+
+  const CLAUSE8_CUTOVER_MILESTONE_NUM = 40;
+  const milestoneLabelMatch = taskText.match(/milestone:M(\d+)/i);
+  const taskMilestoneNum = milestoneLabelMatch ? parseInt(milestoneLabelMatch[1], 10) : null;
+  const clause8Applies = taskMilestoneNum !== null && taskMilestoneNum >= CLAUSE8_CUTOVER_MILESTONE_NUM;
+
+  if (!clause8Applies) {
+    const reason = taskMilestoneNum === null
+      ? "no 'milestone:M<N>' label found — legacy/unlabeled task, predates the DIR-014 item 6 cutover"
+      : `milestone:M${taskMilestoneNum} < M${CLAUSE8_CUTOVER_MILESTONE_NUM} cutover — legacy task, predates DIR-014 item 6 (forward-only, no retroactive backfill per this milestone's own charter)`;
+    passes.push(`clause8-task-canonical-lifecycle-record: N/A — ${reason} ${srcLabel}`);
+    dispositionedClauses.add("task-canonical-lifecycle-record");
+  } else {
+
+  const proposalSection = extractSection(taskText, "Proposal");
+  const planSection = extractSection(taskText, "Plan");
+
+  // Placeholder detection mirrors Clause 0's own placeholderRe intent, but applied to a whole
+  // section body rather than a single bullet line: a proposal is a placeholder if, after stripping
+  // whitespace, it is empty OR consists solely of a single short boilerplate token (TBD/TODO/N/A/
+  // xxx/...), OR its real (non-blank) content is under a minimal length threshold that no genuine
+  // approach description could plausibly satisfy.
+  const proposalPlaceholderRe = /^\s*(TBD|TODO|N\/A|xxx|\.\.\.)?\s*$/i;
+  const proposalBodyTrimmed = proposalSection === null ? "" : proposalSection.trim();
+  const proposalIsPlaceholder = proposalSection === null
+    || proposalPlaceholderRe.test(proposalBodyTrimmed)
+    || proposalBodyTrimmed.length < 40;
+
+  const clause8Fail = [];
+  if (proposalSection === null) {
+    clause8Fail.push("no '## Proposal' section found in the task (item 6a requires an embedded proposal)");
+  } else if (proposalIsPlaceholder) {
+    clause8Fail.push("'## Proposal' section is empty/placeholder-only (needs real approach text, not a stub)");
+  }
+
+  if (planSection === null) {
+    clause8Fail.push("no '## Plan' section found in the task (item 6b requires either N/A-with-reasoning or a resolving docs/plans/*.md reference)");
+  } else {
+    const planBodyTrimmed = planSection.trim();
+    const naRe = /^\s*N\/A\s*[—\-:]\s*\S+/i;
+    const planPathMatches = [...planBodyTrimmed.matchAll(/docs\/plans\/[A-Za-z0-9._\/-]*\.md/g)].map((m) => m[0]);
+
+    if (planPathMatches.length > 0) {
+      // A docs/plans/*.md path is referenced — every referenced path must resolve on disk
+      // (relative to repo root, mirroring how the task-file lookup above resolves relative paths).
+      const repoRootCandidates = [
+        process.cwd(),
+        path.join(__dirname, "..", "..", ".."),
+      ];
+      const unresolvedPaths = planPathMatches.filter((p) =>
+        !repoRootCandidates.some((root) => fs.existsSync(path.join(root, p)))
+      );
+      if (unresolvedPaths.length > 0) {
+        clause8Fail.push(`'## Plan' references docs/plans/*.md path(s) that do NOT resolve on disk: ${unresolvedPaths.join(", ")}`);
+      }
+    } else if (naRe.test(planBodyTrimmed)) {
+      // N/A with reasoning — compliant, no further check.
+    } else {
+      clause8Fail.push("'## Plan' section neither states 'N/A — <reason>' nor references a docs/plans/*.md path (item 6b requires one or the other, not silent absence-of-either-form content)");
+    }
+  }
+
+  if (clause8Fail.length === 0) {
+    passes.push(`clause8-task-canonical-lifecycle-record: task carries a real '## Proposal' (${proposalBodyTrimmed.length} chars) and a well-formed '## Plan' ${srcLabel}`);
+    dispositionedClauses.add("task-canonical-lifecycle-record");
+  } else {
+    for (const m of clause8Fail) failures.push(`clause8-task-canonical-lifecycle-record: ${m} ${srcLabel}`);
+    dispositionedClauses.add("task-canonical-lifecycle-record");
+  }
   }
 }
 

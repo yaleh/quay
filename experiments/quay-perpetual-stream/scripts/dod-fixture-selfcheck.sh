@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # dod-fixture-selfcheck.sh — regression acceptance test for the DoD meta-enforcer (DIR-019, extended
-# by M32-dod-escrow-testfloor / DIR-017 Step 2 for Clauses 6-7).
+# by M32-dod-escrow-testfloor / DIR-017 Step 2 for Clauses 6-7, and by
+# M40-dir014-task-canonical-lifecycle-record / DIR-014 item 6 for Clause 8).
 #
 # This is the EXTERNAL, human-authored acceptance predicate for DIR-019 (and, transitively, for
 # DIR-017's human-verification gate step #2/#5). It does NOT trust the DoD enforcer's self-report:
@@ -58,6 +59,12 @@ CASES=(
   # unchecked-box-HARD-blocks-at-ABSORB semantics (Clause 0). Existing 11 cases above UNCHANGED.
   "M90-fake-checklist-unchecked|$FIX/checklist-unchecked-box-stub.md|1"
   "M90B-fake-checklist-checked|$FIX/checklist-all-checked-compliant-stub.md|0"
+  # M40-dir014-task-canonical-lifecycle-record (DIR-014 item 6, 2026-07-19) additions — Clause 8
+  # (task canonical-lifecycle-record: `## Proposal` embedded + `## Plan` referenced-or-N/A).
+  # Existing 13 cases above UNCHANGED. Both fixtures carry a `milestone:M4x-...` label (>= the M40
+  # cutover) so Clause 8 actually fires rather than N/A-passing as grandfathered/legacy.
+  "M40C-fake-canonical-violating|$FIX/task-canonical-record-violating-stub.md|1"
+  "M40B-fake-canonical-compliant|$FIX/task-canonical-record-compliant-stub.md|0"
 )
 
 fail=0
