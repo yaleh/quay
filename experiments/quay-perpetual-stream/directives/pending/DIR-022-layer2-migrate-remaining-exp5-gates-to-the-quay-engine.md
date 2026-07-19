@@ -49,6 +49,23 @@ engine**, verifiable by:
 Registry code + green fixtures are necessary but NOT sufficient — a real milestone
 must have passed its full gate set through the engine. Stays `pending` until then.
 
+**Anti-"thin milestone" clause (closes the `applicable` escape hatch).** "All its
+applicable gates" MUST NOT be gamed by landing this DIR on a milestone that claims
+only `dod` (or one gate) applies. This DIR is landed **only** on a milestone whose
+ABSORB genuinely exercises **≥2 DISTINCT non-`dod` gates** engine-run (e.g. a
+design-only milestone that triggers BOTH `impl-row` AND `escrow-Δv`, or a
+product-code milestone that triggers `test-floor` AND `line-budget`), with a
+GateEvent per gate in the log. If the chosen milestone legitimately has few
+applicable gates, that is NOT sufficient evidence — pick (or wait for) a milestone
+that actually drives the migrated gate set, or the migration is unproven. A
+`QENG-5-DEMO-*` fixture task or any synthetic stub is explicitly disallowed as the
+landing milestone (same bar as [[DIR-021]]).
+
+**Layer ordering (no leap-frogging).** Layer 2 presupposes Layer 1's REAL landing:
+the milestone that lands this DIR must ALSO have its `dod` gate engine-run per
+[[DIR-021]] (its `dod` GateEvent present in the same `gate-log`). A milestone whose
+`dod` path is still bare `it0-dod-check.sh` cannot be used to mark Layer 2 done.
+
 ## Human verification when exp5 marks this DIR done
 1. For a real milestone ABSORBed under this DIR, `quay gate-log <its-task-id> --json`
    MUST show a GateEvent per applicable gate (audit / vmeta / impl-row / escrow /

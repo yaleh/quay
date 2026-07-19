@@ -47,6 +47,12 @@ Done **ONLY** when a **REAL exp5 milestone was advanced to `done` BY `quay compl
 A command that exists but was never used to complete a real milestone is NOT landed.
 Stays `pending` until a real milestone's `done` came from the engine.
 
+**Layer ordering (no leap-frogging).** The milestone that lands this DIR must ALSO have
+its gate set engine-run per [[DIR-021]]/[[DIR-022]] — `quay complete` runs the gate set
+and advances, so its `complete` GateEvent must sit alongside real `dod` + non-`dod` gate
+GateEvents for that same task in the log. A `complete` written over a milestone whose
+gates were still prose/`it0-*.sh` does not satisfy Layer 3.
+
 ## Human verification when exp5 marks this DIR done
 1. `quay gate-log <a-real-milestone-task> --json` MUST show a `complete` GateEvent
    for a real milestone; its `done` status must be traceable to that `quay complete`.

@@ -36,18 +36,52 @@ DIR-017's own established phased-program precedent. See the charter for full rea
   duplicated — the scripts remain the source of truth). The gate reads its script arguments from
   `task.extra` via a convention consistent with the existing `acceptance` gate's `task.extra.acceptance`
   pattern, not a new ad hoc mechanism.
+  (Confirmed by adversarial audit, 2026-07-19: read `packages/quay/src/gate/registry.js` in full —
+  `makeIt0Gate()` factory only assembles a shell-quoted command and delegates to the existing
+  `runAcceptance()` from `acceptance-runner.js`; no spawn/timeout/exit-code logic duplicated, no
+  it0-script logic reimplemented — verified against both scripts' own header/arg-contract comments.)
 - [x] `quay gate --list` (or equivalent CLI surface) includes `impl-row` and `line-budget` alongside
   the existing `dod`/`acceptance`.
+  (Confirmed by adversarial audit, 2026-07-19: `node packages/quay/bin/quay.js gate --list` →
+  `dod`, `acceptance`, `impl-row`, `line-budget`.)
 - [x] `quay gate <task> --gate impl-row` and `quay gate <task> --gate line-budget` each exit 0/1
   correctly against a REAL exp5 milestone task or task pair (not a synthetic `QENG-5-DEMO-*`-style
   fixture), and each appends a GateEvent queryable via `quay gate-log <task> --json`.
+  (Confirmed by adversarial audit, 2026-07-19: `node packages/quay/bin/quay.js gate
+  exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE --gate impl-row --file /tmp/audit-m39-gatelog.jsonl` →
+  PASS exit 0; `node packages/quay/bin/quay.js gate exp5-M-MIGRATE-IMPL-ROW-LINE-BUDGET-GATES --gate
+  line-budget --file /tmp/audit-m39-gatelog.jsonl` → PASS exit 0; `quay gate-log ... --json` for both
+  tasks shows real GateEvents with `gate: "impl-row"` / `gate: "line-budget"`, `verdict: "pass"`.
+  Both target tasks are real exp5 tasks, not fixtures.)
 - [x] New gate code in `packages/quay/src/gate/registry.js` (and any new helper file it requires) has
   ≥80% line/branch coverage: `node --test --experimental-test-coverage packages/quay/test/*.mjs`
   (real output pasted in the report, not restated from memory).
+  (Confirmed by adversarial audit, 2026-07-19: independently re-ran `node --test
+  --experimental-test-coverage packages/quay/test/*.mjs` — coverage table shows `registry.js
+  100.00 | 100.00 | 100.00` and `acceptance-runner.js 100.00 | 100.00 | 100.00`, both well over the
+  80% bar. Overall suite exit 1 due to one unrelated, pre-existing, network-dependent failure in
+  `serve-github.test.mjs` — untouched by this milestone's diff, confirmed via `git show 1517b8f
+  --stat`.)
 - [x] `OUTER-LOOP.md` step 6's DoD meta-enforcer gate paragraph is updated so the impl-row and
   line-budget checks are noted as ALSO invokable via `quay gate <task> --gate impl-row` / `--gate
   line-budget` for a real milestone that opts in — does NOT require migrating every milestone's ABSORB
   flow to use the named gates exclusively yet.
+  (Confirmed by adversarial audit, 2026-07-19: `grep -n "quay gate.*--gate impl-row\|quay gate.*--gate
+  line-budget" experiments/quay-perpetual-stream/OUTER-LOOP.md` → hit at line 358; surrounding
+  paragraph correctly frames it as an additional opt-in surface, not a mandatory migration.)
+
+## Adversarial audit note (2026-07-19) — ABSORB not yet complete
+All 5 ACs above are independently confirmed and genuinely met (see
+`experiments/quay-perpetual-stream/milestones/M39-migrate-impl-row-line-budget-gates/audit.md` for
+full evidence). However, **this milestone's own ABSORB step has not run**: `dashboard.md` has no
+M39 log entry (last entry is m38, `milestone_counter → 38`), `backlog.md` has no M39 row, this
+task's `status:` frontmatter is still `in-progress`, and `it0-dod-check.sh` for this task's own
+composite acceptance meter has never produced a completed absorb-entry file
+(`/tmp/m39-absorb-entry.md` does not exist). Per `inherited-core.md`, `milestone_counter++` is
+gated on the DoD clauses being evaluated AND LOGGED, not merely satisfied — do not mark this
+milestone DONE / advance `milestone_counter` to 39 until the outer loop runs the real ABSORB step
+(dashboard.md log entry, backlog.md row, task status → done). See the audit report's "Blocking gap"
+section for full detail.
 
 ## Definition of Done
 References the standard `inherited-core.md` Definition of Done clauses (0 AC/DoD-present
