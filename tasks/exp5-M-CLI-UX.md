@@ -28,3 +28,19 @@ todo/stale (backfilled from backlog.md STALE row, m2 SELECT boundary — never d
 
 ---
 _2026-07-18T19:18:52.064Z_: Not selected @M24: DIR-015/DIR-016's standing hard floor already committed this SELECT pass to M-TASK-BACKLOG-PROJECTION-IMPL (self-hosting fix, blocks all future SELECT read-path work) — a governance/infra candidate whose own enabling half was itself unselectable until this milestone lands.
+
+---
+_2026-07-19 (M37-discover-post-qeng iteration-0 re-triage)_: **Re-examined against current state,
+CONFIRMED STILL STALE**, current-state reason (not a re-assertion of the backfill-era text): this
+row's own named scope (UQ-042..046, CLI search-header grammar/synopsis/`--format` normalization
+issues) is independently re-confirmed CLOSED as of this iteration — `grep -n "UQ-04[2-6]"
+experiments/quay-continuous-bootstrap/gap-list.md` shows all 5 struck through and closed at exp4
+iteration 15 (QX-058/QX-059), with zero reopening since. There is no live CLI-UX scope left under
+THIS row's own title/scope. Separately (NOT a reason to un-stale this row, since its own named scope
+is exhausted and dead): this same M37 discovery sweep DID find fresh, genuine, currently-live CLI-UX
+gaps in the NEW QENG-1..4 gate/lifecycle surface (raw stack traces on guarded-error paths, an
+exit-code leak in `quay run`, and a missing `--help` synopsis entry for `gate`/`gate-log`) —
+those are captured as their own new candidate tasks (`exp5-M-GATE-CLI-ERROR-UX`,
+`exp5-M-GATE-HELP-SYNOPSIS-GAP`) rather than folded into this row, because this row's own scope
+(UQ-042..046) is a distinct, already-fully-closed matter and reusing its id/title for unrelated new
+findings would misrepresent both the old and the new work's provenance.
