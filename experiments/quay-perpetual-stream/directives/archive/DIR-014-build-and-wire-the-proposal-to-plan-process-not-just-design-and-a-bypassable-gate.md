@@ -1,7 +1,8 @@
 # DIR-014
 
-- status: pending (REVERTED 2026-07-19 from "applied (partial)" — items 2 & 3 are unbuilt and
-  are the real live gap; see "Reverted to pending" note directly below. Items 1 & 4 remain done.)
+- status: applied (CLOSED 2026-07-19 — ALL items 1-6 delivered; the wired pipeline ran on a
+  REAL development milestone (M42) and caught a real approach bug both naive proposals missed.
+  See "## Resolution — CLOSED" at the bottom. Superseded the earlier REVERTED-to-pending note.)
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Make the quay task the SINGLE CANONICAL lifecycle record of a milestone — proposal embedded in the task body + plan tracked as a referenced link + AC/DoD as checklists (AC/DoD half already landed via DIR-020) — AND actually wire the proposal→plan process into DISPATCH for development milestones (DIR-012 item 3 perpetually deferred, the two-class diversity policy still discretionary, DISPATCH still never invokes proposal→plan, and no exp5-M-* task carries a `## Proposal`/plan reference), so the task board stops being an AC/DoD-only shell while the real proposal/plan design lives in scattered charter/docs files
@@ -269,3 +270,24 @@ sufficient. Escrow discipline: until (a)–(d) hold for a real milestone, this D
     (`M-TASK-BACKLOG-PROJECTION-IMPL`, materialized at m21 per DIR-015/DIR-016, still pending its own
     SELECT+charter+dispatch) — not actioned by this DIR's resolution; that remains DIR-015 item 2's
     own open scope.
+
+## Resolution — CLOSED (2026-07-19)
+- resolved_by: items 1 (M20/M22), 2+3 (human-direct wiring, master `7c0b275` — OUTER-LOOP step 5a +
+  inherited-core de-optionalization, independently audited NO REFUTATION FOUND), 4+5
+  (M42-gate-cli-arg-order — the wired pipeline's first live customer / dogfood), 6 (M40 Clause 8).
+- outcome: **applied — the full program is delivered and the pipeline is PROVEN on a real milestone.**
+  - **item 1** build skill: DONE (M20/M22).
+  - **item 2** wire DISPATCH: DONE — OUTER-LOOP step 5a mandatorily routes development-class
+    milestones through `quay-task-to-plan` (executed cycle step, not prose).
+  - **item 3** de-optionalize: DONE — inherited-core two-class policy is MUST(DEFAULT), not MAY.
+  - **item 4** dogfood + **item 5** first customer: DONE — M42-gate-cli-arg-order ran through step
+    5a's pipeline. Evidence it is REAL, not ceremony: 2 independent proposals converged on the
+    surface fix but a grounded adjudication caught that BOTH were insufficient (parseFlags(rest)
+    mis-parses a leading flag), so a single-proposal path would have SHIPPED a regression. The
+    pipeline's upstream diversity caught an expensive approach error before code was written —
+    exactly its purpose. See `milestones/M42-gate-cli-arg-order/iterations/iteration-0.md`.
+  - **item 6** task = canonical lifecycle record: DONE (M40, DoD Clause 8).
+- evidence: master commits `7c0b275` (items 2/3, audited), `3ae3455`-line M42 (items 4/5:
+  code fix + tests 144/144 non-network green + task write-back + dogfood record, audited NO
+  REFUTATION FOUND); M40 (item 6). The "designed-but-not-wired" disease this DIR was filed to end
+  is, for the proposal→plan mechanism, ended: it is wired, mandatory, and has run for real.
