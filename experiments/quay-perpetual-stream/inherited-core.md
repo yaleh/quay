@@ -899,24 +899,27 @@ changes) PLUS any task-specific extra done-conditions.
 - **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), as clause 0 of the DoD meta-enforcer
   gate — the same HARD BLOCK as clauses 1-5.
 
-### Clause 1 — Adversarial-audit gate (DIR-007 / M10-audit-consolidation)
-- **Trigger condition:** fires per the "Adversarial-audit cadence rule" section above — condition
-  (a) the milestone is VT-scoring (capability-growth-typed SELECT entry AND a nonzero realized VT
-  Δv at ABSORB), OR condition (b) the milestone's own iteration-0 recommended skipping iteration-1
-  (a self-exemption attempt). Methodology-infra/governance milestones with no VT weight are EXEMPT
-  BY DEFAULT unless (b) fires for them specifically.
-- **What it checks:** cited from "Adversarial-audit role" and "Adversarial-audit cadence rule"
-  above — a fresh-context, out-of-band subagent dispatched by the OUTER loop (never the inner
-  milestone's own iterations), explicitly charged to try to REFUTE the milestone's Done-when claims
-  and VT Δv, not merely re-derive them.
-- **Pass/fail semantics:** verdict is one of **REFUTED** (names a specific claim and why — BLOCKS
-  the VT-curve append / Done-when-complete claim until corrected), **CONCERNS** (weaker findings,
-  non-blocking, recorded), or **NO REFUTATION FOUND** (clears the gate). If neither trigger
-  condition fires, the gate is a **documented no-op** — the ABSORB log entry must still state
-  plainly that neither condition applied and why, rather than silently omitting the check.
-- **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), the "Adversarial-audit gate"
-  sub-step (see `OUTER-LOOP.md` step 6, immediately after the execution-provenance task write-back
-  sub-step and before the V_meta consolidation-lag gate sub-step).
+### Clause 1 — Per-milestone acceptance audit (DIR-007 / M10-audit-consolidation; made
+UNCONDITIONAL 2026-07-19, superseding the original conditional cadence rule)
+- **Trigger condition:** EVERY milestone, unconditionally — no cadence precondition. (The original
+  cadence-rule conditions — (a) VT-scoring, (b) iteration-0 self-exemption attempt — are retained
+  ONLY as escalation hints for how hard to push the refutation, never as a gate on whether the audit
+  runs. There is no longer a documented-no-op case for this clause.)
+- **What it checks:** a fresh-context, out-of-band subagent dispatched by the OUTER loop (never the
+  inner milestone's own iterations), explicitly charged, in refute-first stance, to: (1) read the
+  milestone's task `## Acceptance Criteria` section and try to REFUTE that each criterion is
+  actually met, citing the concrete artifact/test output/diff, not the implementer's self-report —
+  any criterion it cannot confirm met ⇒ REFUTED; (2) confirm the task's `## Definition of Done` is
+  satisfied; (3) confirm `scripts/it0-dod-check.sh` exited 0 (all clauses incl. clause 0) — if not,
+  the audit is REFUTED by construction.
+- **Pass/fail semantics:** verdict is one of **REFUTED** (names a specific claim and why — HARD
+  BLOCKS the VT-curve append / Done-when-complete claim AND step 7's `milestone_counter++` until
+  corrected and re-audited), **CONCERNS** (weaker findings, non-blocking, recorded), or **NO
+  REFUTATION FOUND** (clears the gate). The ABSORB log entry must always record one of these three
+  tokens adjacent to "adversarial-audit" / this audit's name — there is no silent-omission case.
+- **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), the "Per-milestone acceptance
+  audit" sub-step (immediately after the execution-provenance task write-back sub-step and before
+  the V_meta consolidation-lag gate sub-step).
 
 ### Clause 2 — V_meta consolidation-lag gate (DIR-005 / M07-vmeta-gate)
 - **Trigger condition:** fires for every row in `v-meta-ledger.md` whose status is `confirmed`
