@@ -3173,3 +3173,108 @@ discovery-channel precedent), stating explicitly which path was chosen and why �
 
 ## Backlog row
 | exp5-M-DOD-LEAKAGE-METRICS | DIR-017 Step 3: add leakage metrics onto dashboard.md as homeostatic variables — deviations caught by machine vs human, fraction of recorded deviations reaching verified-eliminated, median deviation age, product-value shipped per K milestones — making the exp6 meta-objective measurable | DONE | governance-integrity (primary) — makes the exp6 meta-objective (self-correcting perpetual stream) measurable; explore | milestone-candidate, surface:method-infra, milestone:M36-dod-leakage-metrics |
+
+## ABSORB m37: M37-discover-post-qeng
+
+**SELECT reasoning recap:** `directives/pending/` was empty at this DRAIN boundary (DIR-017 archived
+this same step, see the standalone DIR-017-archival commit) and `backlog.md` had zero open
+(non-DONE, non-STALE) candidates. Per m36 ABSORB's own explicit instruction, this SELECT could not
+silently default — it had to choose between (a) re-triaging the 3 STALE rows, or (b) a fresh
+discovery milestone. Chose **(b), folding (a) in as an explicit sub-task**, because a large async
+human-authored initiative (QENG-0..5, `packages/quay/src/gate/*.js`, 7 files) landed on `master`
+since m35 and had never been examined by any exp5 milestone — a genuinely new, unexamined,
+already-shipped product surface, not just abstract discovery for its own sake.
+
+**Two-iteration convergence:** both iterations independently converged on: the core QENG surface
+works as advertised (live-reproduced `quay gate`/`gate-log`/`complete`/`adjudicate`/`promote`/
+`retreat`/`run`, GateEvent logging confirmed); the "TDD, cov 100%" commit-message claims are true
+for line/func coverage across all 7 `gate/*.js` files (89 tests, both iterations independently ran
+the suite); all 3 STALE backlog rows remain genuinely STALE under current-state re-grounding (not
+re-assertion of the old backfill-era text); and the it0-*/`quay gate` relationship recommendation —
+remain independent-and-parallel, do not unify (a real layering-violation risk otherwise), the
+existing `OUTER-LOOP.md` "Engine route" bridge is the architecturally correct meeting point. Both
+iterations also independently discovered the SAME real defect via live reproduction: the 6 QENG
+verb-less CLI commands mis-parse a leading flag as the task id (`quay gate --gate dod <id>` throws
+`Error: no such task: --gate`), traced by iteration-1 to its root cause (`bin/quay.js`'s
+`sub = process.argv[3]` raw-positional extraction, unlike `task view/edit/create`'s flag-aware
+`parseFlags()` path).
+
+**Reconciliation (candidate-task set, not a numeric divergence this time):** the two iterations
+proposed different decompositions of their overlapping findings — iteration-0 authored one broader
+`exp5-M-GATE-CLI-ERROR-UX` task covering both the stack-trace presentation issue AND a separately
+-found `quay run` exit-code leak (a fixpoint stop that included a failed task incorrectly inherits
+exit 1); iteration-1 authored a root-cause-focused `exp5-M-GATE-CLI-ARG-ORDER` task PLUS a narrower
+`exp5-M-GATE-ERROR-UX` task that overlapped with iteration-0's but omitted the exit-code-leak finding.
+Reconciled on the merits (`git merge --no-ff` of iteration-0 as primary, then hand-added
+iteration-1's non-overlapping tasks): kept iteration-0's `exp5-M-GATE-CLI-ERROR-UX` (the superset),
+iteration-0's 3 docs/MCP-discoverability findings (`exp5-M-GATE-HELP-SYNOPSIS-GAP`,
+`exp5-M-GATE-README-DOCS`, `exp5-M-GATE-MCP-PARITY-GAP`, none covered by iteration-1), iteration-1's
+`exp5-M-GATE-CLI-ARG-ORDER` (a genuinely distinct root cause, not a restatement), and iteration-1's
+`exp5-M-QENG-DOD-DEMO-ONLY` (a method-infra decision point iteration-0 did not surface). Dropped
+iteration-1's narrower `exp5-M-GATE-ERROR-UX` as subsumed. Final candidate-task count: **6**, at the
+charter's stated upper bound. The initial reconciliation commit (`fd6add3`) did not write down this
+fold-reasoning explicitly; the out-of-band acceptance audit flagged this as a non-blocking CONCERNS
+finding, fixed by a follow-up commit (`e83da20`) recording the reasoning after the fact.
+
+**adversarial-audit gate: CONCERNS** (1 non-blocking finding, fixed). The dispatched out-of-band
+acceptance-audit subagent independently re-ran the full QENG test/coverage suite itself (89/89 pass,
+coverage numbers matching both iterations exactly), independently reproduced the flag-before-id
+crash and the `quay run` exit-code leak in a fresh sandbox, independently grep-verified the
+`--help`/README/MCP-registration gaps, and independently re-checked all 3 STALE-row re-triage
+citations against `gap-list.md`/`tasks/DIR-004.md`/`tasks/DIR-006.md` directly (catching, in the
+process, that the DIRTASK row's citation-correction claim — DIR-006 being a different directive than
+originally cited — was itself accurate). The one CONCERNS finding: the reconciliation's fold-reasoning
+for dropping iteration-1's `exp5-M-GATE-ERROR-UX` wasn't written down at merge time — fixed via commit
+`e83da20` above, before this ABSORB closed. The audit ticked all 4 AC + 2 DoD checklist items in
+`tasks/exp5-M-DISCOVER-POST-QENG.md` with inline "(Confirmed: ...)" evidence citations to its own
+original commands, not copied from either report.
+
+**V_meta consolidation-lag (Clause 2):** N/A, re-confirmed — `v-meta-ledger.md`'s one row remains
+`consolidated` since m7, no `confirmed`-and-unresolved rows outstanding.
+
+**Escrow-Δv (Clause 6):** N/A — this milestone's own output IS the new backlog rows (discovery
+deliverable), not a design doc awaiting a future `-IMPL` follow-up of THIS milestone's own work. The
+6 new candidate tasks are themselves ordinary future SELECT candidates, subject to their own
+Clause 6 determination when/if they are later SELECTed and scoped as design-only.
+
+**Test-floor (Clause 7):** N/A — `git diff --stat b9c1b44~1 exp5-outer-driver -- packages/quay`
+confirms zero `packages/quay*` product files modified across this milestone's full commit range
+(charter through reconciliation); discovery/survey-only, no code shipped.
+
+**Impl-row (Clause 4):** N/A — same reasoning as escrow-Δv above; not a design-only artifact of a
+specific feature awaiting its own follow-up row.
+
+**DoD meta-enforcer gate:** `it0-dod-check.sh M37-discover-post-qeng
+charters/M37-discover-post-qeng.md /tmp/m37-absorb-entry.md` — expected PASS given all clauses above
+are satisfied or correctly N/A (run and confirmed below, after this entry is extracted).
+
+**Realized Δv**: 0 — explore/discovery, no VT chart cell (mirrors M04/M26/M27/M28's own established
+no-VT-cell precedent for discovery-channel milestones). VT chart-1 total unchanged: **111.55/120**
+(unchanged since m35; any Δv from the 6 new candidate tasks accrues later, when they are themselves
+SELECTed and delivered). `milestone_counter` → **37**.
+
+**Backlog housekeeping**: `tasks/exp5-M-DISCOVER-POST-QENG.md` → `status: done` (checklist boxes
+ticked by the audit, see above). 6 new `milestone-candidate` tasks authored:
+`exp5-M-GATE-CLI-ARG-ORDER`, `exp5-M-GATE-CLI-ERROR-UX`, `exp5-M-GATE-HELP-SYNOPSIS-GAP`,
+`exp5-M-GATE-README-DOCS`, `exp5-M-GATE-MCP-PARITY-GAP`, `exp5-M-QENG-DOD-DEMO-ONLY` — all `status:
+todo`, `milestone-candidate` labeled, open for a future SELECT. All 3 STALE rows
+(`exp5-M-CLI-UX`/`exp5-M-DIRTASK`/`exp5-M-DOCS`) re-confirmed STALE with current-state-grounded
+notes appended to each task file (not re-staled without evidence, not un-staled without evidence —
+the re-triage genuinely concluded "still STALE" for all 3). `backlog.md` regenerated via `node
+scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream --write` — now **33
+milestone-candidate rows total** (27 prior + 6 new), 1 flips `SELECTED`→`DONE`
+(`exp5-M-DISCOVER-POST-QENG`), 6 new open rows. **Checkpoint NOT due at this ABSORB** (every-5 rule,
+last written cp-35 at m35; next due at `milestone_counter=40`).
+
+**DRAIN disposition of `directives/pending/` at this boundary, and m38 SELECT-candidate note (do not
+silently assume):** `directives/pending/` remains **empty** (no new directive arrived this cycle).
+`backlog.md` now has **6 genuinely open candidates** (all authored this milestone) — a materially
+different m38 SELECT situation than m37's own zero-candidate boundary. m38 SELECT should choose among
+these 6 on the merits (value type, cadence, and any dependency ordering — e.g. `exp5-M-GATE-CLI-ARG-ORDER`
+and `exp5-M-GATE-CLI-ERROR-UX` touch overlapping code paths in the same files and may be worth either
+sequencing or combining at charter time; `exp5-M-QENG-DOD-DEMO-ONLY` is a governance/method-infra
+decision point rather than a product fix, a different value-type class than the other 5) — not
+defaulted to backlog order.
+
+## Backlog row
+| exp5-M-DISCOVER-POST-QENG | Discovery pass: survey the new QENG gate/lifecycle engine surface (packages/quay/src/gate/*.js), re-triage the 3 STALE backlog rows, and recommend how exp5's own it0-* checks relate to the new quay gate route | DONE | explore / discovery (primary) | milestone-candidate, surface:cross-cutting, milestone:M37-discover-post-qeng |
