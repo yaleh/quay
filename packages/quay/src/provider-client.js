@@ -63,6 +63,28 @@ export async function connectProvider({ command, args, env, cwd }) {
     return r.structuredContent ?? null;
   }
 
+  // ── ADR ABI (separate object kind — a provider MAY support ADRs; the native
+  // provider does, the github provider declares them unsupported). adrList
+  // degrades to [] on isError so an ADR-less provider renders cleanly; adrGet
+  // returns null on isError (mirrors taskGet); adrWrite throws (mirrors taskWrite).
+  async function adrList(filter = {}) {
+    const r = await client.callTool({ name: "adr_list", arguments: filter });
+    if (r.isError) return [];
+    return r.structuredContent?.adrs ?? [];
+  }
+
+  async function adrGet(id) {
+    const r = await client.callTool({ name: "adr_get", arguments: { id } });
+    if (r.isError) return null;
+    return r.structuredContent?.adr ?? null;
+  }
+
+  async function adrWrite(patch) {
+    const r = await client.callTool({ name: "adr_write", arguments: patch });
+    if (r.isError) throw new Error(r.content?.[0]?.text ?? "adr_write failed");
+    return r.structuredContent?.adr ?? null;
+  }
+
   async function manifest() {
     const r = await client.readResource({ uri: "provider://manifest" });
     return JSON.parse(r.contents[0].text);
@@ -72,5 +94,5 @@ export async function connectProvider({ command, args, env, cwd }) {
     await client.close();
   }
 
-  return { taskList, taskGet, taskWrite, taskCheck, manifest, close };
+  return { taskList, taskGet, taskWrite, taskCheck, adrList, adrGet, adrWrite, manifest, close };
 }

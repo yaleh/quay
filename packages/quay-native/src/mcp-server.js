@@ -3,14 +3,20 @@
 // task_get for v0 (required, `data.read`); task_write/task_check added since
 // time permitted (design §6 symmetry — same store.js core as the CLI).
 
+import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { createStore } from "./store.js";
+import { createAdrStore } from "./adr-store.js";
 import { readManifest } from "./manifest.js";
 
-export async function startMcpServer({ tasksDir }) {
+export async function startMcpServer({ tasksDir, adrDir }) {
   const store = createStore(tasksDir);
+  // ADRs are a SEPARATE kind (adr-store.js), stored in a sibling directory of
+  // tasks/ — default to `<parent-of-tasksDir>/adr` when adrDir is not supplied.
+  const resolvedAdrDir = adrDir ?? path.join(path.dirname(tasksDir), "adr");
+  const adrStore = createAdrStore(resolvedAdrDir);
 
   const server = new McpServer({
     name: "quay-native",
@@ -145,8 +151,76 @@ export async function startMcpServer({ tasksDir }) {
     }
   );
 
+  // ── ADR tools (separate object kind — decision lifecycle, not task lifecycle) ──
+  // adr_list — data.read
+  server.registerTool(
+    "adr_list",
+    {
+      description: "List ADRs (Architecture Decision Records) in the native store, optionally filtered by status/tag.",
+      inputSchema: { status: z.string().optional(), tag: z.string().optional() },
+    },
+    async ({ status, tag }) => {
+      const adrs = adrStore.list({ status, tag });
+      return {
+        content: [{ type: "text", text: JSON.stringify(adrs, null, 2) }],
+        structuredContent: { adrs },
+      };
+    }
+  );
+
+  // adr_get — data.read
+  server.registerTool(
+    "adr_get",
+    {
+      description: "Get one ADR by id (ADR-NNN) from the native store.",
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      let adr = null;
+      try {
+        adr = adrStore.get(id);
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+      if (!adr) return { isError: true, content: [{ type: "text", text: `no such ADR: ${id}` }] };
+      return {
+        content: [{ type: "text", text: JSON.stringify(adr, null, 2) }],
+        structuredContent: { adr },
+      };
+    }
+  );
+
+  // adr_write — data.write. Status is the DECISION lifecycle (never "done").
+  server.registerTool(
+    "adr_write",
+    {
+      description: "Write/patch one ADR (frontmatter + body) in the native store. status ∈ proposed|accepted|superseded|deprecated|rejected.",
+      inputSchema: {
+        id: z.string(),
+        title: z.string().optional(),
+        status: z.string().optional(),
+        date: z.string().optional(),
+        supersedes: z.array(z.string()).optional(),
+        superseded_by: z.array(z.string()).optional(),
+        tags: z.array(z.string()).optional(),
+        body: z.string().optional(),
+      },
+    },
+    async ({ id, superseded_by, ...rest }) => {
+      try {
+        const adr = adrStore.write(id, { ...rest, supersededBy: superseded_by });
+        return {
+          content: [{ type: "text", text: JSON.stringify(adr, null, 2) }],
+          structuredContent: { adr },
+        };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
+    }
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Server now runs until stdin closes; log to stderr (stdout is the MCP channel).
-  console.error(`quay-native mcp: serving tasks from ${tasksDir}`);
+  console.error(`quay-native mcp: serving tasks from ${tasksDir}, ADRs from ${resolvedAdrDir}`);
 }

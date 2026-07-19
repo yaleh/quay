@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createStore } from "../src/store.js";
+import { createAdrStore } from "../src/adr-store.js";
 import { readManifest } from "../src/manifest.js";
 
 function findRepoRoot(startDir) {
@@ -40,6 +41,16 @@ function resolveTasksDir() {
   return path.resolve(process.cwd(), "tasks");
 }
 
+function resolveAdrDir() {
+  // ADRs live in a directory that SHARES a common parent with tasks/ (a repo-root
+  // sibling by default). Env override QUAY_NATIVE_ADR_DIR, else repo-root ./adr.
+  const envDir = process.env.QUAY_NATIVE_ADR_DIR;
+  if (envDir) return path.resolve(envDir);
+  const repoRoot = findRepoRoot(process.cwd());
+  if (repoRoot) return path.resolve(repoRoot, "adr");
+  return path.resolve(process.cwd(), "adr");
+}
+
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
 }
@@ -70,7 +81,45 @@ async function main() {
 
   if (cmd === "mcp") {
     const { startMcpServer } = await import("../src/mcp-server.js");
-    await startMcpServer({ tasksDir: resolveTasksDir() });
+    await startMcpServer({ tasksDir: resolveTasksDir(), adrDir: resolveAdrDir() });
+    return;
+  }
+
+  if (cmd === "adr") {
+    const adrStore = createAdrStore(resolveAdrDir());
+    const { flags, positional } = parseFlags(rest);
+
+    if (sub === "list") {
+      const adrs = adrStore.list({ status: flags.status, tag: flags.tag });
+      if (flags.json) printJson(adrs);
+      else for (const a of adrs) console.log(`${a.id}\t${a.status}\t${a.title}`);
+      return;
+    }
+    if (sub === "get") {
+      const a = adrStore.get(positional[0]);
+      if (!a) { console.error(`no such ADR: ${positional[0]}`); process.exitCode = 1; return; }
+      if (flags.json) printJson(a);
+      else { console.log(`${a.id}: ${a.title} [${a.status}]`); console.log(a.body); }
+      return;
+    }
+    if (sub === "write" || sub === "new" || sub === "edit") {
+      const id = positional[0];
+      const patch = {};
+      if (flags.title !== undefined) patch.title = flags.title;
+      if (flags.status !== undefined) patch.status = flags.status;
+      if (flags.date !== undefined) patch.date = flags.date;
+      if (flags.supersedes !== undefined) patch.supersedes = String(flags.supersedes).split(",").filter(Boolean);
+      if (flags["superseded-by"] !== undefined) patch.supersededBy = String(flags["superseded-by"]).split(",").filter(Boolean);
+      if (flags.tags !== undefined) patch.tags = String(flags.tags).split(",").filter(Boolean);
+      if (flags["body-file"] !== undefined) patch.body = fs.readFileSync(flags["body-file"], "utf8");
+      else if (flags.body !== undefined) patch.body = flags.body;
+      const a = adrStore.write(id, patch);
+      if (flags.json) printJson(a);
+      else console.log(`wrote ${id}`);
+      return;
+    }
+    console.error(`unknown adr subcommand: ${sub}`);
+    process.exitCode = 1;
     return;
   }
 
