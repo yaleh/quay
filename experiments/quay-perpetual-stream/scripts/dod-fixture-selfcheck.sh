@@ -54,6 +54,10 @@ CASES=(
   # negation-blind; pins the sentence-scoped negation-window fix (mirrors Clause 6's own technique).
   # See fixtures/dod/test-floor-negation-poison-stub.md's own header for the live before/after repro.
   "M91-fake-testfloor-negation|$FIX/test-floor-negation-poison-stub.md|1"
+  # DIR-020/M34-ac-dod-checklist-writeback (2026-07-19) additions — checklist-form AC/DoD, the new
+  # unchecked-box-HARD-blocks-at-ABSORB semantics (Clause 0). Existing 11 cases above UNCHANGED.
+  "M90-fake-checklist-unchecked|$FIX/checklist-unchecked-box-stub.md|1"
+  "M90B-fake-checklist-checked|$FIX/checklist-all-checked-compliant-stub.md|0"
 )
 
 fail=0

@@ -92,17 +92,26 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    **Author the task's AC + DoD at THIS (proposal) step — mandatory, the authoring half of DoD clause
    0 (`inherited-core.md`'s "AC/DoD live in the TASK" rule):** before dispatch, write two sections
    into the SELECTed candidate task's body via `task_write` (the task is the single canonical source
-   of truth for both — do NOT put them in the charter, which only references them):
+   of truth for both — do NOT put them in the charter, which only references them). **Authored as GFM
+   checklists, UNCHECKED (DIR-020/M34-ac-dod-checklist-writeback, 2026-07-19):** each item is written
+   as `- [ ]` — a milestone starts with NOTHING ticked at SELECT time. Boxes are ticked to `- [x]`
+   ONLY later, by the per-milestone acceptance audit's write-back at step 6, as it independently
+   confirms each item — never here, never by the loop itself (self-ticking at authoring time is
+   exactly what this rule forbids). Pre-existing prose-form tasks are not retroactively converted;
+   checklist form is required going forward.
    - `## Acceptance Criteria` — ≥1 concrete, individually-checkable criterion specific to this value
-     unit (what was formerly the charter's "Binary Done-when", now authored into the task). Each
-     criterion must name the artifact / test / observable output that would prove it met (so the
-     per-milestone acceptance audit at step 6 can try to refute each one).
+     unit (what was formerly the charter's "Binary Done-when", now authored into the task), each as an
+     UNCHECKED `- [ ]` checklist item. Each criterion must name the artifact / test / observable
+     output that would prove it met (so the per-milestone acceptance audit at step 6 can try to
+     refute — and, if it cannot refute, tick — each one).
    - `## Definition of Done` — a REFERENCE to the standard five clauses in `inherited-core.md`'s
-     "Definition of Done" section (never a copy), PLUS any task-specific extra done-conditions.
+     "Definition of Done" section (never a copy), PLUS any task-specific extra done-conditions,
+     likewise authored as UNCHECKED `- [ ]` checklist items where task-specific extras are listed.
    These MAY be revised while authoring the charter/plan, but the revision is made to the task's copy,
    never forked into the charter. `scripts/it0-dod-check.sh` clause 0 mechanically HARD-blocks step 7's
-   `milestone_counter++` at ABSORB if either section is missing/empty/placeholder — so authoring them
-   here is not optional.
+   `milestone_counter++` at ABSORB if either section is missing/empty/placeholder, OR (checklist-form
+   AC) if any `- [ ]` box remains unchecked — so authoring them here is not optional, and leaving a box
+   unticked past the audit's write-back is REFUTED-equivalent.
    **Size the candidate BEFORE dispatch** using `inherited-core.md`'s "Milestone size definition +
    verify-iteration size gauge" section: does the proposed scope let iteration-0 land ALL Done-when
    in one pass, with iteration-1 having real material to independently re-derive (not empty
@@ -223,11 +232,21 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
           Criteria` section and, for EACH criterion, try to REFUTE that it is actually met — citing the
           concrete artifact / test output / diff that proves it, NOT the implementer's self-report. Any
           AC criterion it cannot confirm met ⇒ REFUTED.
+       1a. **Checklist write-back (DIR-020/M34-ac-dod-checklist-writeback, 2026-07-19 — checklist-form
+          tasks only):** as each AC/DoD item is confirmed in step 1, the audit WRITES BACK to the task
+          file directly (a `task_write`-equivalent edit) ticking `- [x]` for that item, citing the
+          supporting evidence in its own audit report (not in the tick itself) — leaving `- [ ]` for
+          any item it cannot confirm. The audit is the **ONLY** writer that ticks boxes; SELECT (step
+          1) always authors `- [ ]` and must never self-tick. A prose-form task (pre-existing, no
+          checklist syntax) has no boxes to tick — this sub-step is a documented no-op for it, state so
+          explicitly. Any AC box still `- [ ]` after this write-back is REFUTED-equivalent and HARD-
+          blocks step 3's mechanical gate below, exactly as an unmet criterion does.
        2. **DoD satisfaction:** confirm the task's `## Definition of Done` (the standard five clauses +
           any task-specific extras) is satisfied for this milestone.
        3. **Mechanical gate green:** confirm `scripts/it0-dod-check.sh <task-id> <charter-file>
-          <absorb-entry-file>` exited 0 (ALL clauses incl. clause 0 AC/DoD-present). If it did not, the
-          audit is REFUTED by construction.
+          <absorb-entry-file>` exited 0 (ALL clauses incl. clause 0 AC/DoD-present, which now also
+          HARD-blocks on any remaining unchecked `- [ ]` box for checklist-form tasks). If it did not,
+          the audit is REFUTED by construction.
      Output to `milestones/M<NN>/audits/iteration-N-acceptance-audit.md`, and state the verdict in the
      ABSORB log entry using one of the tokens **REFUTED** / **CONCERNS** / **NO REFUTATION FOUND** (so
      the DoD clause-1 documentation-discipline check sees a disposition). A **REFUTED** verdict is a

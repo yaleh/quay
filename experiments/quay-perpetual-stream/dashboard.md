@@ -2887,3 +2887,87 @@ at m32→m33.
 
 ## Backlog row
 | exp5-M-WEBUI-TRIGGER-HONESTY | Web UI action_buttons: stop overstating success when trigger delivery is degraded/async — condition the success banner on result.delivered (G-S4-01) | DONE | exploit (primary), capability-growth (secondary) | milestone-candidate, surface:web-ui, milestone:M33-webui-trigger-honesty |
+
+## ABSORB m34: M34-ac-dod-checklist-writeback
+
+**DRAIN note**: a fresh human directive, DIR-020, landed on `master` mid-cycle (asserted directly in
+the live conversation, 2026-07-19) and was synced into `exp5-outer-driver` at this DRAIN step. Per
+the standing convention that a live human directive takes priority over standing backlog candidates
+(mirrors DIR-017's own prioritization), DIR-020 was SELECTed as m34 over both
+`exp5-M-NATIVE-RELATION-SYNC` and the DIR-017-Step-3-sourced candidate — neither of which was
+silently dropped, both remain open for m35 SELECT (see DRAIN note below).
+
+**Two-iteration independent convergence.** M34 ran as two independent `baime:iteration-executor`
+agents off `exp5-outer-driver` HEAD `711908b` (post-m34-SELECT-commit): `exp5-m34-iteration-0` and
+`exp5-m34-iteration-1`, each blind to the other's materials. Both independently arrived at the same
+design: a GFM-checkbox-line regex distinguishing `- [ ]` (unchecked) from `- [x]`/`- [X]` (checked)
+within the AC section, HARD-blocking Clause 0 on any remaining unchecked item while leaving prose-form
+AC (no checkbox tokens) fully untouched — the same backward-compatibility boundary, the same
+"name the specific unchecked item(s) in the failure message" semantics, and both wired a compliant/
+violating fixture pair into `dod-fixture-selfcheck.sh`. Merged iteration-0 as primary
+(`git merge --no-ff exp5-m34-iteration-0`, clean, no conflicts) — both diffs verified directly (not
+trusting either self-report); iteration-1's independently-derived diff was kept as confirmation only.
+
+**adversarial-audit gate**: fresh-context, out-of-band subagent independently re-verified all 5 ACs +
+DoD against the merged state — re-derived Clause 0's live logic against the REAL
+`tasks/exp5-M-DOD-ESCROW-TESTFLOOR.md` (prose-form, 5 clauses, `isChecklistForm: false`, PASS,
+confirming backward-compat without trusting the reports), ran `bash
+scripts/dod-fixture-selfcheck.sh` itself (13/13 PASS), read the two new checklist fixtures directly
+and confirmed the violating one genuinely has an unchecked box and the compliant one does not, and —
+most importantly — constructed its OWN independent synthetic task file (unrelated to either report)
+and ran `it0-dod-check.mjs` against it directly, confirming the unchecked-item-naming and
+unchecked→checked PASS transition are real mechanism behavior, not narrated. The audit then performed
+the ACTUAL write-back this milestone's own mechanism calls for, live, on
+`tasks/exp5-M-AC-DOD-CHECKLIST-AUDIT-WRITEBACK.md` — ticking all 7 AC/DoD boxes with inline evidence
+citations (see that task file's current state) — the first real (non-simulated) instance of the
+write-back mechanism DIR-020 requested. Explicitly reasoned about this milestone's self-reference
+(it changes the very audit mechanism verifying it) and concluded the fresh-context/out-of-band/
+refute-first design already neutralizes the circularity risk, precisely because the audit re-derived
+everything from the real files rather than trusting either iteration's narration.
+adversarial-audit verdict: **NO REFUTATION FOUND**.
+
+**V_meta consolidation-lag gate**: checked `v-meta-ledger.md` — one row, already `consolidated` (m7
+ABSORB), no `confirmed`-and-unresolved rows, no K=2 alarm applies. V_meta consolidation-lag: clear,
+N/A this milestone.
+
+**Impl-row gate**: N/A — not design-only, ships real code/doc changes directly (gate does not apply
+per its own trigger condition, no exemption claimed).
+
+**Test-floor gate (Clause 7)**: N/A — `surface:method-infra`, exclusively non-product-touching;
+`git diff --stat 711908b..HEAD` (SELECT commit to merged state) confirms zero `packages/quay/` files
+touched. Not a self-exemption dodge — the trigger condition genuinely does not fire.
+
+**DoD meta-enforcer gate** (self-referential — the mechanism this milestone extends checking itself):
+`it0-dod-check.sh exp5-M-AC-DOD-CHECKLIST-AUDIT-WRITEBACK
+experiments/quay-perpetual-stream/charters/M34-ac-dod-checklist-writeback.md <this-absorb-entry>` →
+**PASS**, all 8 clauses, including the very Clause 0 this milestone just extended now correctly
+recognizing the task's own checklist-form AC (post-audit-write-back, all 7 boxes `- [x]`) as
+satisfied — the first real (non-fixture) exercise of the checklist-form path in production use.
+
+**Realized Δv = 0** — governance-integrity/method-infra, no VT chart cell (mirrors M25/M30/M31/M32's
+own no-VT-cell precedent for this DoD-program lineage). VT chart-1 total unchanged: **111.55/120**
+(unchanged since m33).
+
+**Backlog housekeeping**: `tasks/exp5-M-AC-DOD-CHECKLIST-AUDIT-WRITEBACK.md` → `status: done`
+(updated below, alongside its already-ticked checklist boxes from the audit write-back).
+`backlog.md` regenerated via `node scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream
+--write` — row `exp5-M-AC-DOD-CHECKLIST-AUDIT-WRITEBACK` flips `SELECTED` → `DONE`.
+`milestone_counter` → **34**. **Checkpoint cadence: due at the NEXT milestone's ABSORB**
+(milestone_counter=35, every-5 rule; last written cp-30) — not this one, per the charter's own
+explicit reminder to re-verify the exact counter value rather than miscount.
+
+**DIR-020 disposition**: DIR-020's requested action (5 items) delivered by this milestone. Per
+DIR-020's own "Resolution" template, mark `resolved_by: m34/M34-ac-dod-checklist-writeback`,
+`outcome: applied`, move `directives/pending/DIR-020-*.md` → `directives/archive/` at this ABSORB
+(mirrors how DIR-018/DIR-019 were archived on full resolution — distinct from DIR-017, which stays
+`pending` because its Step 3 remains genuinely open).
+
+**DRAIN disposition of `directives/pending/` at this boundary, and m35 SELECT-candidate note (do not
+silently assume)**: after DIR-020 archives, `directives/pending/` contains only DIR-017 (Step 3,
+leakage metrics onto `dashboard.md`, still open). Two open exploit/capability-growth candidates remain
+for m35 SELECT: `exp5-M-NATIVE-RELATION-SYNC` (untouched since its own task creation) and a
+DIR-017-Step-3-sourced candidate (not yet materialized as its own task). Explicit choice deferred to
+the m35 DRAIN/SELECT step itself, not defaulted here — per the same discipline used at m32→m33→m34.
+
+## Backlog row
+| exp5-M-AC-DOD-CHECKLIST-AUDIT-WRITEBACK | DIR-020: AC/DoD in task bodies become GitHub-flavored Markdown checklists (- [ ]/- [x]), authored unchecked at SELECT, ticked ONLY by the per-milestone acceptance-audit subagent's write-back as it confirms each item — Clause 0 updated to accept the checklist shape, an unchecked box at ABSORB HARD-blocks exactly as an unmet criterion does today | DONE | governance-integrity (primary) — per-criterion AC/DoD satisfaction becomes visible and write-tracked | milestone-candidate, surface:method-infra, milestone:M34-ac-dod-checklist-writeback |

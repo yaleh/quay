@@ -1,6 +1,6 @@
 # DIR-020
 
-- status: pending
+- status: applied
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-19
 - title: AC and DoD in the task body should be Markdown checklists, and the per-milestone acceptance-audit subagent should update them (tick each verified item) as part of its verification — so per-criterion satisfaction is visible and write-tracked in the canonical task itself, not only in the audit report / ABSORB log
@@ -66,7 +66,13 @@ Do NOT trust the DONE mark:
    loop to keep passing.
 
 ## Resolution
-<!-- added when moved to archive/, or updated in place if deferred:
-- resolved_by: iteration-N / milestone M-NN
-- outcome: applied | deferred | rejected
-- evidence: pointer to the design doc / iteration report section / commit -->
+- resolved_by: m34 / M34-ac-dod-checklist-writeback
+- outcome: applied
+- evidence: `experiments/quay-perpetual-stream/inherited-core.md` (Clause 0/Clause 1 text updated),
+  `experiments/quay-perpetual-stream/scripts/it0-dod-check.mjs` (checklist-shape detection +
+  unchecked-box HARD-block), `experiments/quay-perpetual-stream/OUTER-LOOP.md` (steps 1/6 updated),
+  `experiments/quay-perpetual-stream/fixtures/dod/checklist-*-stub.md` (2 new fixtures, 13/13 suite
+  PASS), and a real (non-simulated) write-back instance on
+  `tasks/exp5-M-AC-DOD-CHECKLIST-AUDIT-WRITEBACK.md` performed by this milestone's own acceptance
+  audit — all 4 "Human verification" items independently confirmed by a fresh-context adversarial
+  audit, verdict NO REFUTATION FOUND. See `dashboard.md`'s "ABSORB m34" entry for the full write-up.
