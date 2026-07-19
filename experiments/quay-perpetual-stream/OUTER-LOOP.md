@@ -319,7 +319,17 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      already one). A non-zero exit is the SAME HARD BLOCK shape/placement as the three gates it
      wraps: `milestone_counter++` **MUST NOT** run until the check is re-run and PASSes (exit 0).
      Record the check's PASS/FAIL output directly in this ABSORB's log entry, mirroring the V_meta
-     gate's and impl-row gate's own row-update discipline. (Line-budget, Clause 3, fires separately
+     gate's and impl-row gate's own row-update discipline.
+     **Engine route (QENG-5 / epicd-engine-port — the executable, self-logging invocation path):**
+     this same DoD check now runs THROUGH the quay gate engine rather than as a bare prose shell
+     call. The milestone's task carries `extra.acceptance` = the `it0-dod-check.sh <id> <charter>
+     <absorb>` command above, and the gate is invoked as **`quay gate <milestone-task>`** (QENG-1
+     gate engine + QENG-2 acceptance meter), which runs the identical `it0-dod-check.sh` and records
+     a GateEvent (`verdict: pass|fail`, queryable via `quay gate-log <milestone-task>`), so the DoD
+     verdict is a machine-logged engine event, not a prose claim. `it0-dod-check.sh` remains the
+     underlying check; `quay gate` / `quay complete` is the wired invocation path. Reproduce the
+     pass/fail behavior end-to-end: `quay gate QENG-5-DEMO-PASS` → exit 0; `quay gate
+     QENG-5-DEMO-FAIL` → exit 1 (committed fixture tasks whose meters run this exact script). (Line-budget, Clause 3, fires separately
      at plan-time per step 1 — `it0-dod-check.sh` re-checks the charter's own line-budget clause
      here too, at ABSORB, as a drift check that plan-time's PASS still holds against the FINAL
      charter text, but a plan-time FAIL on that clause alone is not this gate's primary trigger

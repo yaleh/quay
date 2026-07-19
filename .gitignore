@@ -13,3 +13,4 @@ experiment/timing/*.log
 # BAIME experiment throwaway checkouts / build output — never track
 **/worktrees/
 **/dist-sea/
+.quay/gate-events.jsonl
