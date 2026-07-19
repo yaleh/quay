@@ -5,7 +5,7 @@ title: "DIR-020: AC/DoD in task bodies become GitHub-flavored Markdown checklist
   acceptance-audit subagent's write-back as it confirms each item — Clause 0
   updated to accept the checklist shape, an unchecked box at ABSORB HARD-blocks
   exactly as an unmet criterion does today"
-status: in-progress
+status: done
 labels:
   - milestone-candidate
   - surface:method-infra
@@ -30,33 +30,49 @@ in the canonical task itself, not only in the audit report/ABSORB log prose. met
 precedent for this DoD-program lineage).
 
 ## Acceptance Criteria
-- [ ] `inherited-core.md`'s "AC/DoD live in the TASK" rule and Definition of Done Clause 0's text are
+- [x] `inherited-core.md`'s "AC/DoD live in the TASK" rule and Definition of Done Clause 0's text are
   updated to require the `## Acceptance Criteria` / `## Definition of Done` sections be authored as
-  GitHub-flavored Markdown checklists (`- [ ]` per item), not prose bullet/numbered lists.
-- [ ] `scripts/it0-dod-check.mjs` Clause 0's shape check is updated to recognize `- [ ]`/`- [x]` lines
+  GitHub-flavored Markdown checklists (`- [ ]` per item), not prose bullet/numbered lists. (Confirmed:
+  `inherited-core.md` lines 877-904 — "AC/DoD live in the TASK" rule's new "Checklist form, going
+  forward" paragraph at lines 890-904, and Clause 0's rewritten "What it checks"/"Pass/fail semantics"
+  at lines 906-928, read directly by this audit.)
+- [x] `scripts/it0-dod-check.mjs` Clause 0's shape check is updated to recognize `- [ ]`/`- [x]` lines
   as the valid checkable-clause form (still requiring ≥1 real, non-placeholder item; DoD must still
   reference the standard clauses per the reference-plus-extras rule) — prose-form (pre-existing tasks,
-  e.g. M32's) remains accepted too, no retroactive rewrite required (backward-compatible).
-- [ ] `OUTER-LOOP.md` step 1's AC/DoD authoring sub-step text is updated: AC/DoD are authored as
-  UNCHECKED (`- [ ]`) checklists at SELECT time — a milestone starts with nothing ticked.
-- [ ] `OUTER-LOOP.md` step 6's per-milestone acceptance-audit sub-step text is updated: the audit
+  e.g. M32's) remains accepted too, no retroactive rewrite required (backward-compatible). (Confirmed:
+  `scripts/it0-dod-check.mjs` lines 158-192 read directly; independently re-derived Clause 0's logic
+  against the real `tasks/exp5-M-DOD-ESCROW-TESTFLOOR.md` — 5 checkable clauses, `isChecklistForm:
+  false`, PASS — this audit's own script run, not the reports' transcript.)
+- [x] `OUTER-LOOP.md` step 1's AC/DoD authoring sub-step text is updated: AC/DoD are authored as
+  UNCHECKED (`- [ ]`) checklists at SELECT time — a milestone starts with nothing ticked. (Confirmed:
+  `OUTER-LOOP.md` lines 92-114 read directly, states this explicitly.)
+- [x] `OUTER-LOOP.md` step 6's per-milestone acceptance-audit sub-step text is updated: the audit
   subagent, as it confirms each AC/DoD item, WRITES BACK to the task file (ticking `- [x]` for each
   confirmed item, leaving `- [ ]` for any it cannot confirm) — the audit is the ONLY writer that ticks
   boxes; the loop must not self-tick at authoring time. A live demonstration of this write-back
   actually happening (not just documented) is required for THIS milestone's own acceptance audit.
-- [ ] A synthetic/fixture milestone whose AC still has an unchecked `- [ ]` box at ABSORB is
+  (Confirmed: `OUTER-LOOP.md` lines 235-243, new "1a. Checklist write-back" sub-step, read directly.
+  Live demonstration: this audit itself performed a real write-back — see this edit, and the
+  independent synthetic-task demonstration in `/tmp/audit-writeback-check/` run by this audit, showing
+  `- [ ]`→named-failure→ticked→PASS via `it0-dod-check.mjs`, not the implementer's own transcript.)
+- [x] A synthetic/fixture milestone whose AC still has an unchecked `- [ ]` box at ABSORB is
   HARD-blocked by `it0-dod-check.mjs`, exactly as an unmet criterion does today (new fixture pinning
-  this, added to `fixtures/dod/` + wired into `dod-fixture-selfcheck.sh`).
+  this, added to `fixtures/dod/` + wired into `dod-fixture-selfcheck.sh`). (Confirmed: this audit ran
+  `bash scripts/dod-fixture-selfcheck.sh` directly — 13/13 PASS, exit 0 — and read
+  `fixtures/dod/checklist-unchecked-box-stub.md` / `checklist-all-checked-compliant-stub.md` directly,
+  confirming the violating fixture genuinely has one `- [ ]` item and the compliant one has none.)
 
 ## Definition of Done
-- [ ] References the standard `inherited-core.md` Definition of Done clauses (0 AC/DoD-present — this
+- [x] References the standard `inherited-core.md` Definition of Done clauses (0 AC/DoD-present — this
   milestone directly extends Clause 0's shape rule, 1 per-milestone acceptance audit — this
   milestone's own audit must demonstrate the write-back live, 2 V_meta-lag, 3 line-budget, 4 impl-row
   — N/A, ships real code, 5 no-self-exemption, 6 escrow-Δv — N/A, not design-only, 7 test-floor —
   `surface:method-infra`, non-product-touching, N/A per Clause 7's own trigger condition). No
-  task-specific exemption from any clause.
-- [ ] `dod-fixture-selfcheck.sh` full suite still exits 0 with the new checklist-shape fixture(s)
-  added and all pre-existing fixtures unaffected/unchanged.
+  task-specific exemption from any clause. (Confirmed by this audit's own re-reads of the relevant
+  `inherited-core.md` clauses and `git diff --stat 711908b..HEAD` scope check, below.)
+- [x] `dod-fixture-selfcheck.sh` full suite still exits 0 with the new checklist-shape fixture(s)
+  added and all pre-existing fixtures unaffected/unchanged. (Confirmed: this audit's own run, 13/13
+  PASS, exit 0, matching both iteration reports' claims independently.)
 
 ## Status mirror
 SELECTed @m34 DRAIN/SELECT boundary, 2026-07-19. This task itself is authored with checklist-form
