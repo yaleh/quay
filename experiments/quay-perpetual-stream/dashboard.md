@@ -2677,3 +2677,48 @@ HARD GATES discipline):**
 N/A — this milestone is directive-sourced infrastructure work (DIR-019), not a `backlog.md`
 milestone-candidate task. See "Design-only-milestone impl-row gate" disposition above for why no row
 materialization is required, consistent with prior directive-sourced milestones.
+
+---
+## ABSORB m31: M31-cli-gate-enforcement
+
+Charter `charters/M31-cli-gate-enforcement.md`. Both iterations converged on the same design decision
+(option (b) from `tasks/exp5-M-CLI-GATE-ENFORCEMENT.md`'s three-way choice): `task edit --status` stays
+an unguarded-by-default low-level primitive (mirrors `git commit --no-verify`), with a new opt-in
+`--enforce-gate` flag that reuses `client.taskCheck` — the identical gate logic `task check` itself
+calls — rather than duplicating it. Merged to `exp5-outer-driver` at `8b3af67`.
+
+**adversarial-audit gate** (`milestones/M31-cli-gate-enforcement/audits/adversarial-audit.md`):
+independently re-verified every checkable claim against the live merged code, not trusted from prose —
+single gate-check block at `packages/quay/bin/quay.js:564`, no duplicated gate logic, `node -c` clean, no
+duplicate `edit` handler, both new/existing test files pass live, live adversarial probes against scratch
+`/tmp` fixtures (real repo `tasks/` untouched) confirmed the combined `--append-notes` + `--status`
+gating and the `--enforce-gate` + `--expect-status` (CAS) interaction both behave sensibly, all 9
+Done-when clauses re-verified against the merged state. adversarial-audit verdict: **NO REFUTATION
+FOUND.** One non-blocking CONCERNS item: the combined `--append-notes`+`--status`+`--enforce-gate` path
+had zero automated test coverage in either iteration or the merged suite (only manually verified live by
+the audit) — recommend, not require, a permanent regression test later. `serve-github.test.mjs`'s
+isolated failure reconfirmed pre-existing/unrelated (live-GitHub listing-page assertion), not a
+regression.
+
+**V_meta consolidation-lag gate**: checked `v-meta-ledger.md` — no rows in `confirmed` status, no K=2
+alarm applies. V_meta consolidation-lag: clear, N/A this milestone (unchanged since m29/m30).
+
+**Realized Δv**: 0 (governance-integrity, no VT chart cell — confirmed explicitly by both iterations and
+the audit). VT chart-1 total unchanged: **111.15/120** (unchanged since m29/m30).
+
+**Backlog housekeeping**: `tasks/exp5-M-CLI-GATE-ENFORCEMENT.md` → `status: done`, status-mirror section
+updated with the merge commit and audit verdict. `backlog.md` regenerated via `it0-backlog-regen.mjs`
+(this candidate IS a `milestone-candidate`-labeled task, unlike M30's directive-sourced skip) — row
+`exp5-M-CLI-GATE-ENFORCEMENT` flips `open` → `DONE`. `milestone_counter` → **31**. Checkpoint cadence:
+not yet due (next due at milestone_counter=35, every-5 rule; last written cp-30). Continuing directly to
+m32 DRAIN/SELECT.
+
+**DRAIN disposition of `directives/pending/` at this boundary:**
+- **DIR-017**: re-confirmed **deferred**, same reasoning as at m31's own predecessor boundary — the
+  meta-enforcer blind spot is fixed and externally red-tested (DIR-019, ABSORBed m30), but DIR-017's own
+  6-point human-verification checklist has not yet been re-run by a human. Stays `pending`, correctly
+  excluded as a SELECT candidate for m32.
+- `directives/pending/` contains only DIR-017; no other pending directives to drain this boundary.
+
+## Backlog row
+| exp5-M-CLI-GATE-ENFORCEMENT | quay task edit --status: decide and implement whether the CLI write path should itself enforce the task check gate, or explicitly document it as an unguarded setter (Skill-level discipline only) | DONE | governance-integrity (primary — this is the same "gate is both contestant and judge" class already | milestone-candidate, surface:cli, milestone:M31-cli-gate-enforcement |
