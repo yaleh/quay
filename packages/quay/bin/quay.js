@@ -177,7 +177,7 @@ Usage:
   quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--json|--format json]
   quay task view <task-id> [--json]
   quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--extra <json>] [--json]
-  quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--expect-status <status>] [--append-notes <text>] [--enforce-gate] [--json]
+  quay task edit <task-id> [--title <title>] [--status <status>] [--body <text>|--body-file <path>] [--labels <a,b>] [--extra <json>] [--parent <id>] [--children <a,b>] [--expect-status <status>] [--acceptance <cmd>] [--append-notes <text>] [--enforce-gate] [--json]
   quay task check <task-id> [--json]
   quay action list <task-id> [--json]
   quay action run <task-id> <action-id> [--json]
@@ -215,6 +215,9 @@ Options for task edit:
   --parent <id>         New parent task id
   --children <a,b>      Comma-separated child task ids (replaces existing children)
   --expect-status <status>  Compare-and-swap: fail if the task's current status is not this value
+  --acceptance <cmd>        Set the runnable acceptance meter (stored in extra.acceptance; run by
+                            'quay gate <id>', the default gate). Repeatable: multiple values are
+                            joined with ' && '. Merged into existing extra without clobbering.
   --append-notes <text>     Append text to the existing body (read-then-write convenience)
   --enforce-gate         Opt-in: when a --status change is present, run the same gate check
                           'task check' performs BEFORE writing; refuses (exit 1, no write) if the
@@ -523,6 +526,19 @@ async function main() {
       return;
     }
 
+    // QENG-2: --acceptance sets extra.acceptance (a runnable meter). Syntactic
+    // type check runs here (before withProvider), because the "at least one
+    // patch-producing flag" guard below runs before the provider callback too;
+    // the actual read-merge-write needs client.taskGet and so happens INSIDE
+    // withProvider (proposal §2 / review note 1). A bare `--acceptance` (no
+    // value) parses to boolean true and is rejected here.
+    if (flags.acceptance !== undefined
+        && typeof flags.acceptance !== "string" && !Array.isArray(flags.acceptance)) {
+      console.error("quay task edit: --acceptance requires a command string");
+      process.exitCode = 1;
+      return;
+    }
+
     const patch = {};
     if (flags.title !== undefined) patch.title = flags.title;
     if (flags.status !== undefined) patch.status = flags.status;
@@ -535,10 +551,11 @@ async function main() {
     }
     if (flags["expect-status"] !== undefined) patch.expectedStatus = flags["expect-status"];
 
-    if (Object.keys(patch).length === 0 && flags["append-notes"] === undefined) {
+    if (Object.keys(patch).length === 0 && flags["append-notes"] === undefined
+        && flags.acceptance === undefined) {
       console.error(
         "quay task edit: at least one of --title/--status/--body/--body-file/--labels/--extra/" +
-        "--parent/--children/--append-notes is required"
+        "--parent/--children/--acceptance/--append-notes is required"
       );
       process.exitCode = 1;
       return;
@@ -630,6 +647,15 @@ async function main() {
           process.exitCode = 1;
           return;
         }
+      }
+      // QENG-2 (proposal §2, review note 1): read-merge-write extra.acceptance
+      // INSIDE withProvider (needs client.taskGet). A list value is joined with
+      // `&&` so the stored value is always one string the acceptance gate runs
+      // as-is. Merge preserves other extra keys and any --extra patch.
+      if (flags.acceptance !== undefined) {
+        const cmd = Array.isArray(flags.acceptance) ? flags.acceptance.join(" && ") : flags.acceptance;
+        const current = await client.taskGet(id);
+        patch.extra = { ...(current?.extra ?? {}), ...(patch.extra ?? {}), acceptance: cmd };
       }
       const t = await client.taskWrite({ id, ...patch });
       if (wantsJson) printJson(t);
@@ -740,7 +766,14 @@ async function main() {
     const id = sub;
     await withProvider(async (client, cfg) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: flags.file });
-      const { ok, reason } = await runGate({ client, id, gate: flags.gate, logPath });
+      // QENG-2 (proposal §4, review note 2): default gate is `acceptance` at the
+      // CLI layer only (engine's own `gate="dod"` default is untouched — only
+      // direct programmatic callers hit it). `--gate dod` still routes to QENG-1's
+      // dod gate. QUAY_ACCEPTANCE_CWD pins the acceptance runner's cwd to the
+      // workspace root without changing the engine's `(task, client)` signature.
+      const gate = flags.gate ?? "acceptance";
+      process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+      const { ok, reason } = await runGate({ client, id, gate, logPath });
       console.log(ok ? "PASS" : `FAIL — ${reason}`);
       process.exitCode = ok ? 0 : 1;
     }, { providerId: flags.provider });

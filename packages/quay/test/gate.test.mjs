@@ -312,11 +312,21 @@ test("C1: gate-log without --json prints one human line per event (read-only, no
   assert.match(log.stdout, /dod pass/);
 });
 
-test("C1: `quay gate <task>` defaults to the dod gate when --gate is omitted", () => {
+// QENG-2 (docs/plans/9-quay-acceptance-meter.md §4): the CLI default gate was
+// changed from `dod` to `acceptance` — `quay gate X` (no --gate) now runs the
+// task's runnable acceptance meter, fail-closed when unset. The engine's own
+// `runGate({ gate = "dod" })` default is untouched (only programmatic callers
+// hit it); explicit `--gate dod` still routes to QENG-1's dod gate (asserted by
+// the C1 [AC2] test above and acceptance.test.mjs's dod-regression test). This
+// test, which previously asserted the OLD `dod` CLI default, is updated to the
+// new contract: no --gate + no acceptance meter => fail-closed (exit 1).
+test("C1: `quay gate <task>` defaults to the acceptance gate when --gate is omitted (QENG-2)", () => {
   const { workspaceRoot, tasksDir } = makeWorkspace("ac2-default");
   const logFile = path.join(workspaceRoot, "g.jsonl");
   runNative(["task", "create", "COMPLIANT", "--title", "Compliant fixture",
     "--status", "todo", "--body", validSections + acDodChecked], tasksDir);
+  // No acceptance meter set => the default acceptance gate fails closed (exit 1).
   const r = runQuay(["gate", "COMPLIANT", "--file", logFile], workspaceRoot);
-  assert.equal(r.status, 0, `expected default-gate PASS; got ${r.status}, stderr=${r.stderr}`);
+  assert.equal(r.status, 1, `expected acceptance default fail-closed (exit 1); got ${r.status}, stdout=${r.stdout}, stderr=${r.stderr}`);
+  assert.match(r.stdout, /no acceptance command defined/);
 });
