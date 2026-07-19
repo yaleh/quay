@@ -31,6 +31,7 @@ CASES=(
   # HARDENING (R5 review must-fix #1/#2 — fail-open cases that previously silently PASSed):
   "ambiguous-overdue-prose|$FIX/ambiguous-overdue-prose.md|1"
   "keywordless-status|$FIX/keywordless-status.md|1"
+  "not-yet-fully-consolidated|$FIX/not-yet-fully-consolidated.md|1"
 )
 
 fail=0

@@ -49,21 +49,29 @@ test("rowStatus: reads proposed|confirmed|consolidated from the status cell (bol
   assert.equal(rowStatus("proposed — noted"), "proposed");
   assert.equal(rowStatus("something else"), null);
 });
-// HARDENING (R5 review must-fix #1 — fail-open): the CURRENT status is the first NON-NEGATED lifecycle
-// word. A genuinely-overdue row phrased "not consolidated yet, still confirmed" must read as CONFIRMED
-// (→ reaches the arithmetic → alarms), NOT silently as consolidated by an unordered keyword scan.
-test("rowStatus: negated 'consolidated' does not win — overdue prose reads as confirmed", () => {
-  assert.equal(rowStatus("not consolidated yet, still confirmed — pending fold"), "confirmed");
+// HARDENING (R5 review must-fix #1 — FAIL-CLOSED leading-token): the status is the LEADING clean
+// lifecycle token; trailing prose is ignored. A cell that leads with "confirmed" reads confirmed
+// (→ arithmetic → alarm if overdue); a cell that does NOT lead cleanly → null → fail-closed at
+// evaluateRow. This closes the fail-open the negation heuristic missed.
+test("rowStatus: leads with a clean lifecycle token → that status; trailing prose ignored", () => {
   assert.equal(rowStatus("confirmed — not yet consolidated"), "confirmed");
-  assert.equal(rowStatus("still confirmed but not yet consolidated"), "confirmed");
+  assert.equal(rowStatus("proposed — noted, never applied"), "proposed");
+  assert.equal(rowStatus("confirmed — confirmed again (m3, m5)"), "confirmed");
 });
 // CRITICAL false-positive guard (the live consolidated row records its confirmation history):
-// "**consolidated** … twice-confirmed …" must read as CONSOLIDATED, not be flagged for naming 'confirmed'.
-test("rowStatus: a consolidated row that records its confirmation history reads as consolidated", () => {
-  assert.equal(rowStatus("**consolidated** (m7 ABSORB) — recording the m3 confirming instance, twice-confirmed convention"), "consolidated");
+// "**consolidated** (m7…) … not a carry-forward … twice-confirmed" must read CONSOLIDATED (trailing
+// 'not'/'confirmed' are history, ignored) — a naive scan wrongly flagged it.
+test("rowStatus: a consolidated row recording its history reads consolidated (trailing not/confirmed ignored)", () => {
+  assert.equal(rowStatus("**consolidated** (m7 ABSORB) — recording the m3 confirming instance; resolved by consolidation, not a carry-forward; twice-confirmed convention"), "consolidated");
 });
-test("rowStatus: repeated SAME keyword still reads that word", () => {
-  assert.equal(rowStatus("confirmed — confirmed again (m3, m5)"), "confirmed");
+// FAIL-CLOSED against the 5 realistic overdue phrasings the re-review found still fail-open:
+test("rowStatus: overdue phrasings that must NOT read as consolidated → null (fail-closed)", () => {
+  assert.equal(rowStatus("not yet fully consolidated, confirmed@m3"), null);   // leads with "not"
+  assert.equal(rowStatus("not-yet-consolidated, confirmed@m3"), null);         // hyphenated leading negation
+  assert.equal(rowStatus("consolidated pending; confirmed@m3"), null);         // post-positive qualifier
+  assert.equal(rowStatus("consolidated? no — confirmed@m3"), null);            // post-positive negation
+  assert.equal(rowStatus("consolidated: FALSE; confirmed@m3"), null);          // post-positive false
+  assert.equal(rowStatus("not consolidated yet, still confirmed — pending fold"), null); // leads "not"
 });
 
 // ── confirmingMilestone ─────────────────────────────────────────────────────────────────────────
@@ -162,6 +170,14 @@ test("checkLedger: overdue row with ambiguous 'not consolidated, still confirmed
     "| CI≡audit | m1 | confirmed@m3 | not consolidated yet, still confirmed — pending fold |\n";
   const rep = checkLedger(text);
   assert.equal(rep.verdict, "FAIL", JSON.stringify(rep.evaluations));
+});
+// HARDENING end-to-end (re-review's most-damaging case): "not yet fully consolidated" (two qualifier
+// words) must FAIL — it defeated the earlier negation heuristic and silently PASSed.
+test("checkLedger: overdue 'not yet fully consolidated, confirmed@m3' → FAIL (not silent PASS)", () => {
+  const text =
+    "milestone_counter: 40\n\n| insight | origin | confirm | status |\n|---|---|---|---|\n" +
+    "| CI≡audit | m1 | confirmed@m3 | not yet fully consolidated, confirmed@m3 — fold pending |\n";
+  assert.equal(checkLedger(text).verdict, "FAIL");
 });
 // HARDENING end-to-end (must-fix #2): an overdue row whose status cell has NO lifecycle keyword must
 // FAIL-closed, not silently PASS via status=null.

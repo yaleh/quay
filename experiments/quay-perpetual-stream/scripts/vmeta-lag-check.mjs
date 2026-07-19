@@ -52,24 +52,32 @@ export function parseRows(fullText) {
   return rows;
 }
 
-// ── rowStatus — read the CURRENT lifecycle word from a status cell (bold/decoration tolerated). ────
-// FAIL-SAFE against natural prose (R5 review must-fix #1): the current status is the FIRST lifecycle
-// word that is NOT negated. This correctly reads "**consolidated** … twice-confirmed" as consolidated
-// (the confirmation is history), and "not consolidated yet, still confirmed" / "confirmed — not yet
-// consolidated" as confirmed (a genuinely confirmed-not-consolidated row that MUST reach the
-// arithmetic, not be silently read as consolidated by an unordered keyword scan). A cell with no
-// non-negated lifecycle word → null (→ fail-closed at evaluateRow, must-fix #2).
-const NEGATOR_BEFORE = /\b(not|no|never|isn'?t|aren'?t|un|yet\s+to(?:\s+be)?|to\s+be|awaiting)\s+(?:be\s+|being\s+|fully\s+|yet\s+)?$/i;
+// ── rowStatus — read the CURRENT lifecycle word from a status cell (FAIL-CLOSED, leading-token). ───
+// R5 review must-fix #1: robustly parsing arbitrary prose negation is a losing game (ADR-004 — soft
+// prose is erodible). So instead of scanning for negators anywhere, read ONLY the LEADING canonical
+// token: the cell MUST start with exactly one lifecycle word (optionally **bold**); everything after
+// it is history/notes and is IGNORED (so "**consolidated** (m7…) … not a carry-forward … twice-
+// confirmed" cleanly reads consolidated, ignoring the trailing "not"/"confirmed"). FAIL-CLOSED (→ null
+// → alarm at evaluateRow) when the cell does NOT lead with a clean token — i.e. it leads with a
+// non-lifecycle word ("not yet fully consolidated…", "not-yet-consolidated", "folding into…"), OR the
+// leading token is immediately followed by a status-contradicting qualifier ("consolidated pending",
+// "consolidated? no", "consolidated: FALSE"). This errs toward ALARM, never a silent PASS.
+// NOTE (ADR-004 follow-up): the real hard fix is a STRUCTURED status field in the ledger, not prose;
+// this leading-token parser is the fail-closed interim. Tracked for the next ledger-format increment.
+const QUALIFIER_AFTER = /^(pending|not|no|false|incomplete|partial|wip|todo|awaiting|yet|maybe|unclear|tbd|unconfirmed|unconsolidated)\b/i;
+const NOTE_DELIM = /^\s*[—–(,;·]/; // a note/history follows → the leading token stands (em/en-dash, paren, comma, semicolon, mid-dot)
 export function rowStatus(statusCell) {
   if (statusCell == null) return null;
-  const s = String(statusCell);
-  const re = /\b(consolidated|confirmed|proposed)\b/gi;
-  let m;
-  while ((m = re.exec(s)) !== null) {
-    const pre = s.slice(Math.max(0, m.index - 24), m.index);
-    if (!NEGATOR_BEFORE.test(pre)) return m[1].toLowerCase();
-  }
-  return null; // no non-negated lifecycle word (e.g. keyword-less or "not yet consolidated" only)
+  const s = String(statusCell).replace(/\*+/g, "").trim(); // strip bold decoration
+  const m = s.match(/^(consolidated|confirmed|proposed)\b([\s\S]*)$/i);
+  if (!m) return null;                       // does not LEAD with a lifecycle word → fail-closed
+  const status = m[1].toLowerCase();
+  const rest = m[2];
+  if (rest === "") return status;            // token alone
+  if (NOTE_DELIM.test(rest)) return status;  // token — <note>  (trailing prose ignored)
+  const ws = rest.match(/^\s+(\S+)/);         // token <word> …  (no delimiter between)
+  if (ws) return QUALIFIER_AFTER.test(ws[1]) ? null : status; // "consolidated pending" → fail-closed
+  return null;                               // token immediately followed by ?/:/@… → fail-closed
 }
 
 // ── confirmingMilestone — the milestone number at which the row crossed the φ threshold. ──────────
