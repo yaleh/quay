@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE | DIR-021 Layer 1: make the DoD gate OPERATIVE on a REAL milestone via quay gate — seed this milestone's own extra.acceptance meter, invoke quay gate at this milestone's own ABSORB (not a fixture), and promote the OUTER-LOOP.md engine route from side-note to primary instruction | DONE | governance-integrity (primary — closes the self-disclosed QENG-0 shelfware-risk forward-work note, | milestone-candidate, surface:method-infra, milestone:M38-dod-gate-operative-real-milestone |
 | exp5-M-DISCOVER-POST-QENG | Discovery pass: survey the new QENG gate/lifecycle engine surface (packages/quay/src/gate/*.js), re-triage the 3 STALE backlog rows, and recommend how exp5's own it0-* checks relate to the new quay gate route | DONE | explore / discovery (primary) — mirrors M04/M26/M27/M28's discovery-channel precedent. Δv̂ ≈ 0 | milestone-candidate, surface:cross-cutting, milestone:M37-discover-post-qeng |
 | exp5-M-DOD-LEAKAGE-METRICS | DIR-017 Step 3: add leakage metrics onto dashboard.md as homeostatic variables — deviations caught by machine vs human, fraction of recorded deviations reaching verified-eliminated, median deviation age, product-value shipped per K milestones — making the exp6 meta-objective measurable | DONE | governance-integrity (primary) — makes the exp6 meta-objective (self-correcting perpetual stream) | milestone-candidate, surface:method-infra, milestone:M36-dod-leakage-metrics |
 | exp5-M-NATIVE-RELATION-SYNC | Native provider: make parent/children relation writes bidirectional (or explicitly document children as non-authoritative), matching the github provider's writeRelations() contract | DONE | exploit (fix a real, dogfooding-confirmed provider-ABI asymmetry), capability-growth (secondary — | milestone-candidate, surface:provider-abi, milestone:M35-native-relation-sync |
@@ -41,4 +42,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_34 milestone-candidate task(s) as of 2026-07-19T08:04:38.662Z._
+_35 milestone-candidate task(s) as of 2026-07-19T08:19:06.218Z._

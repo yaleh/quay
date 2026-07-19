@@ -3278,3 +3278,112 @@ defaulted to backlog order.
 
 ## Backlog row
 | exp5-M-DISCOVER-POST-QENG | Discovery pass: survey the new QENG gate/lifecycle engine surface (packages/quay/src/gate/*.js), re-triage the 3 STALE backlog rows, and recommend how exp5's own it0-* checks relate to the new quay gate route | DONE | explore / discovery (primary) | milestone-candidate, surface:cross-cutting, milestone:M37-discover-post-qeng |
+
+## ABSORB m38: M38-dod-gate-operative-real-milestone
+
+**Source:** DIR-021 (Layer 1 of the DIR-021..024 ordered quay-engine-adoption program), human-authored,
+landed async during M37, synced into `exp5-outer-driver` at m37→m38 DRAIN.
+
+**SELECT reasoning recap:** DIR-021 chosen over the 6 M37-produced backlog candidates because (1) a
+pending human-authored directive takes priority over self-generated backlog rows per the standing
+DIR-017/019/020-over-backlog precedent, (2) it is Layer 1 of an explicit ordered 4-layer program
+(later layers depend on Layer 1's `quay gate` invocation path being real), (3) it closes a
+self-disclosed shelfware risk QENG-0's own progress note named as remaining forward work. Before
+charter-authoring, `exp5-M-QENG-DOD-DEMO-ONLY` (the M37 candidate naming the identical gap) was marked
+`superseded` by DIR-021 rather than run in parallel — DIR-021 is the more complete, ordered, canonical
+version of the same finding.
+
+**Two-iteration summary:** both iteration-0 and iteration-1 independently seeded `extra.acceptance` on
+the real task, drafted an ABSORB-entry-excerpt file, ran `quay gate` for real (both observed the
+honest FAIL/exit 1 verdict, since Clause 0 correctly HARD-blocks pending the unconditional acceptance
+audit's write-back), confirmed a real GateEvent via `quay gate-log --json`, and restructured
+`OUTER-LOOP.md` step 6 so `quay gate`/`quay complete <milestone-task>` is the PRIMARY instruction
+(both preserved the old "Engine route" side-note's content, merged not deleted). The two
+`OUTER-LOOP.md` edits were functionally equivalent (same 5-step operative procedure, same chicken/egg
+resolution); iteration-0's version was selected as primary for its clearer numbered-step structure
+and merged via `git merge --no-ff exp5-m38-iteration-0` (commit `83a83a6`). The `extra.acceptance`
+path was then normalized from iteration-0's `/tmp/m38-iter0-absorb-entry.md` to the canonical
+`/tmp/m38-absorb-entry.md` (commit `2d53743`), matching the `/tmp/m<NN>-absorb-entry.md` pattern
+standing since M25.
+
+**adversarial-audit gate: PASS (NO REFUTATION FOUND).** Out-of-band, fresh-context, refute-first
+subagent independently re-ran every verification command itself (not copied from either iteration's
+report) in the actual `exp5-outer-driver` worktree: `quay task view --json` (confirmed non-empty,
+file-path-referencing `extra.acceptance`), `quay gate exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE`
+(pre-write-back: `FAIL — acceptance failed (exit 1)`, GateEvent `b976110c-938e-4ca0-95a2-d6a9b2fe6801`
+verdict `fail`), the `OUTER-LOOP.md` grep (10 matches inside the numbered PRIMARY procedure, old
+content preserved not deleted), and `git diff --stat 685b178 HEAD -- packages/quay` (empty, Clause 7
+N/A confirmed). Ticked all 5 AC checklist items in
+`tasks/exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE.md` with inline original-evidence citations. After
+write-back, re-ran `quay gate exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE` a second time: **PASS, exit
+0**, GateEvent `167afa43-04e3-435c-9db8-561c632d4818` verdict `pass` — the first real, non-fixture DoD
+gate PASS achieved through the engine for any exp5 milestone, closing DIR-021's own "REAL LANDING is
+the bar" Definition of Done (clause (a): GateEvent keyed to the real task id exists; clause (b): this
+ABSORB entry pastes the `quay gate` output + GateEvent as evidence, not a bare `it0-dod-check.sh`
+paste). One non-blocking **CONCERN**: `.quay/gate-events.jsonl` is gitignored and per-worktree — an
+iteration's own `gate-log` citation does not automatically carry into the merged branch; whoever
+performs the final ABSORB gate-check must re-run `quay gate` in the actual branch/worktree being
+ABSORBed (as this audit did), not just cite an iteration worktree's copy. Flagged for DIR-021 Layer 2+
+process discipline. Full findings:
+`experiments/quay-perpetual-stream/milestones/M38-dod-gate-operative-real-milestone/audit.md`.
+
+**V_meta consolidation-lag (Clause 2):** clear — `v-meta-ledger.md`'s one row remains `consolidated`
+since m7, no `confirmed`-and-unresolved rows outstanding, no rows past threshold.
+
+**Escrow-Δv (Clause 6):** N/A — not a design-only milestone; this milestone's own real exercise of
+`quay gate` against its own real task IS the delivered artifact, not a design doc awaiting a future
+`-IMPL` follow-up.
+
+**Test-floor (Clause 7):** N/A — `git diff --stat 685b178 HEAD -- packages/quay` confirmed empty by
+both the merge and the adversarial audit independently; only `OUTER-LOOP.md` prose and
+`tasks/exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE.md` metadata were touched, no `packages/quay*` product
+files.
+
+**Impl-row (Clause 4):** N/A — same reasoning as escrow-Δv above.
+
+**DoD meta-enforcer gate — OPERATIVE via `quay gate`, not the bare shell call (first time, per this
+milestone's own AC):**
+```
+$ node packages/quay/bin/quay.js gate exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE
+PASS
+$ echo $?
+0
+$ node packages/quay/bin/quay.js gate-log exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE --json
+[{"id":"b976110c-938e-4ca0-95a2-d6a9b2fe6801", "gate":"acceptance", "actor":"quay-cli", "verdict":"fail", "timestamp":"2026-07-19T08:14:55.553Z", "payload":{"reason":"acceptance failed (exit 1)"}},
+ {"id":"167afa43-04e3-435c-9db8-561c632d4818", "gate":"acceptance", "actor":"quay-cli", "verdict":"pass", "timestamp":"2026-07-19T08:16:09.545Z", "payload":{"reason":"acceptance passed (exit 0)"}},
+ {"id":"66a4a9d2-5b43-433d-9d7a-1b87e208c63e", "gate":"acceptance", "actor":"quay-cli", "verdict":"pass", "timestamp":"2026-07-19T08:17:15.992Z", "payload":{"reason":"acceptance passed (exit 0)"}}]
+```
+(fail→pass trail: the FAIL predates the audit's write-back ticking the 5 AC boxes; the two PASS
+events are post-write-back — the audit's own re-run, plus this ABSORB step's own re-confirmation
+re-run above, both real, both in the `exp5-outer-driver` worktree. The PASS is
+post-write-back, confirming Clause 0 genuinely gates on checklist completion.) `milestone_counter++`
+is unblocked by this real `quay gate` PASS.
+
+**Realized Δv**: 0 — governance-integrity/method-infra, no VT chart cell (mirrors the DoD-program
+lineage's own established no-VT-cell precedent, M25/M30/M31/M32/M34/M36). VT chart-1 total unchanged:
+**111.55/120**. `milestone_counter` → **38**.
+
+**Backlog housekeeping**: `tasks/exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE.md` → `status: done`.
+`OUTER-LOOP.md` step 6 updated so `quay gate`/`quay complete <milestone-task>` is the PRIMARY DoD
+meta-enforcer instruction going forward (all future milestones' ABSORB should invoke `quay gate
+<milestone-task>` for real, per this milestone's own precedent, not fall back to a bare
+`it0-dod-check.sh` shell call). `backlog.md` regenerated via `node scripts/it0-backlog-regen.mjs
+experiments/quay-perpetual-stream --write`. **Checkpoint NOT due at this ABSORB** (every-5 rule, last
+written cp-35 at m35; next due at `milestone_counter=40`).
+
+**DRAIN disposition of `directives/pending/` at this boundary, and m39 SELECT-candidate note (do not
+silently assume):** `directives/pending/` retains **3 directives** (`DIR-022`, `DIR-023`, `DIR-024` —
+Layers 2-4 of the same ordered program; DIR-021 itself is now delivered but stays `pending` per its
+own escrow-discipline text until a human marks it archived/resolved — this ABSORB does not
+self-archive DIR-021, it only delivers the real-landing proof DIR-021's own DoD requires). `backlog.md`
+also retains **6 open M37-produced candidates** (`exp5-M-GATE-CLI-ARG-ORDER`,
+`exp5-M-GATE-CLI-ERROR-UX`, `exp5-M-GATE-HELP-SYNOPSIS-GAP`, `exp5-M-GATE-README-DOCS`,
+`exp5-M-GATE-MCP-PARITY-GAP`), plus 3 STALE rows. m39 SELECT should weigh: (a) DIR-022 (Layer 2 —
+migrate the OTHER exp5 gates to run through the engine) is now unblocked since Layer 1 landed, and
+continues the ordered program's own dependency sequencing; (b) the 6 open backlog candidates remain
+independently valid and un-superseded. Per the same DIR-over-backlog precedent applied at m38 SELECT,
+DIR-022 is the likely next choice, but this should be reasoned explicitly at m39 SELECT time, not
+defaulted.
+
+## Backlog row
+| exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE | DIR-021 Layer 1: make the DoD gate OPERATIVE on a REAL milestone via quay gate | governance-integrity (primary) + explore (secondary) | no VT chart cell | milestone-candidate, surface:method-infra, milestone:M38-dod-gate-operative-real-milestone |

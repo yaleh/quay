@@ -4,7 +4,7 @@ title: "DIR-021 Layer 1: make the DoD gate OPERATIVE on a REAL milestone via
   quay gate — seed this milestone's own extra.acceptance meter, invoke quay gate
   at this milestone's own ABSORB (not a fixture), and promote the OUTER-LOOP.md
   engine route from side-note to primary instruction"
-status: in-progress
+status: done
 labels:
   - milestone-candidate
   - surface:method-infra
@@ -104,4 +104,7 @@ lineage's own no-VT-cell precedent — M25/M32/M36).
 
 ## Status mirror
 SELECTed @m38 DRAIN/SELECT boundary, 2026-07-19, from DIR-021 (Layer 1 of the DIR-021..024 ordered
-quay-engine-adoption program). See charter for full SELECT reasoning.
+quay-engine-adoption program). DONE @m38 ABSORB, 2026-07-19 — adversarial audit ticked all 5 AC
+items with original evidence; `quay gate exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE` PASSes (exit 0)
+in `exp5-outer-driver`, first real GateEvent trail (fail→pass) for a non-fixture exp5 milestone. See
+`dashboard.md`'s "ABSORB m38" entry.
