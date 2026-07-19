@@ -3,7 +3,7 @@ id: exp5-M-QUAY-CLI-CREATE-ERGONOMICS
 title: "quay CLI task-creation ergonomics: fix silent title-less task creation
   (data-integrity bug), add a dedicated create verb, address stale --help text
   and MCP per-call latency"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - surface:cli
@@ -57,6 +57,11 @@ level, rather than patching `task edit`'s upsert path to special-case missing ti
 depending on line-budget at SELECT time.
 
 ## Status mirror
-ready (SELECTed @M29, 2026-07-18 — anchored on GAP-002, explicitly flagged by M27's own report
-as "the single most severe finding of the whole benchmark," a real data-integrity bug; exploit
-pick balancing a recent explore-heavy run of milestones)
+done (ABSORBed @M29, 2026-07-19 — GAP-002+GAP-001 fixed together in `packages/quay/bin/quay.js`
+(new `task create` verb + hardened `task edit` existence/empty-title guard, the latter tightened
+during the merge to catch an empty-string `--title` case iteration-1's skepticism pass found);
+G-02 fixed (--help text); GAP-007 re-measured 2.25x-3.13x, consistent with M27's ~2.6x, not fixed
+per charter's explicit judgment call. Realized Δv=+0.50, exact match to charter's Δv̂≈0.5.
+Adversarial-audit gate (REQUIRED, first real non-no-op firing recently): NO REFUTATION FOUND.
+DoD meta-enforcer: PASS (5th-ever real test, 1st against real product code). Full details:
+`dashboard.md`'s "ABSORB m29" entry.)
