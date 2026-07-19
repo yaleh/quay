@@ -191,7 +191,34 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    M23-outer-driver-isolation — the driver branch, kept current by step 0's master→driver merge, is
    the base point for every iteration worktree/branch this milestone dispatches; the per-iteration
    worktree pattern itself — `milestones/M<NN>/worktrees/iteration-{0,1}` — is unchanged, only its
-   base point moved). Per iteration use `baime:iteration-executor` fed the charter (Tier-A) only.
+   base point moved).
+
+   **5a. Class routing (DIR-014 items 2/3 — MANDATORY, not discretionary; the
+   `quay-task-to-plan` skill now EXISTS, M20/M22, so its precondition is satisfied).** Before the
+   implementation iteration, route by the milestone's CLASS (per `inherited-core.md`'s two-class
+   diversity policy — keyed on the value-typed ledger):
+   - **Development-class** (deliverable is working product/skill code; typically `capability-growth`-
+     typed — the M16-CLI-EDIT-PARITY-IMPL precedent): the loop **MUST** run the proposal→plan pipeline
+     FIRST — invoke the `quay-task-to-plan` skill on the milestone's grouped task(s):
+     `/quay-task-to-plan <milestone-task-id>` (or the skill's `.claude/skills/quay-task-to-plan/`
+     Steps directly). It runs **N independent blank-slate proposal subagents → adjudication (M13-
+     style) → writes the reconciled proposal back to the task's `## Proposal` body (DIR-011 portable)
+     → authors a milestone-level plan (`docs/plans/*.md`, referenced from the task's `## Plan` per
+     Clause 8) → iterates a grounded convergent plan-check** (~2-3 rounds, Phase-5 stopping rule).
+     THEN the implementation iteration (`baime:iteration-executor`) implements **against that checked
+     plan**, gated per stage by the TDD ≥80% hard gate, with the existing downstream adversarial-audit
+     gate (Clause 1) unchanged. The pipeline's N-independent-proposal step IS this class's upstream
+     diversity — the whole-milestone iteration-1 re-derivation is NOT additionally run (independence
+     is spent upstream at the proposal + downstream at the audit gate). This is **no longer a MAY**: a
+     development-class milestone that skips the pipeline is a DoD violation (Clause 3's line-budget
+     gate + Clause 8's plan-reference requirement both bite; see also DIR-014).
+   - **Methodology/design-class** (deliverable is a design/methodology doc or substrate edit;
+     typically `discovery`/`governance-integrity`-typed — the M10-M17 precedent): **UNCHANGED** —
+     whole-milestone independent dual-iteration (iteration-0 builds, iteration-1 re-derives the whole
+     deliverable from a fresh worktree), exactly as m1-m40. No pipeline invocation.
+
+   Per iteration use `baime:iteration-executor` fed the charter (Tier-A) only (development-class:
+   fed the charter AND the checked plan from 5a).
    Terminate on the first of (§3.2):
    Done-when complete | ΔV<0.02 both-layers K=2 consecutive | ceiling→redesign-OR-stop | past
    budget≈10 & nothing climbing | external HALT. Record under `milestones/M<NN>/`.

@@ -322,23 +322,21 @@ milestone produces:
 | class | deliverable | value-type(s), per the ledger above | diversity strategy |
 |---|---|---|---|
 | **methodology / design** (the M10-M17 precedent — doc-only) | a design/doc artifact | typically `discovery` / `governance-integrity` / `instrument-correction` | **whole-milestone independent re-derivation, UNCHANGED** — iteration-1 independently re-derives the entire deliverable from a fresh worktree, exactly as M01-M17 already do. Cheap: the whole deliverable is a doc. |
-| **development** (the M16-CLI-EDIT-PARITY-IMPL precedent — real product-code changes) | working code, ≤~2000 lines per the ceiling above | typically `capability-growth` | **MAY, at a future charter's discretion, use the narrower pattern**: N-independent-proposal re-derivation + adjudication (upstream) → single implementation → light tail self-check (downstream: the existing adversarial-audit gate, unchanged) — INSTEAD OF whole-milestone dual iteration. |
+| **development** (the M16-CLI-EDIT-PARITY-IMPL precedent — real product-code changes) | working code, ≤~2000 lines per the ceiling above | typically `capability-growth` | **MUST (DEFAULT, DIR-014 items 2/3 — no longer discretionary)** use the narrower pattern: N-independent-proposal re-derivation + adjudication (upstream) → single implementation → light tail self-check (downstream: the existing adversarial-audit gate, unchanged) — INSTEAD OF whole-milestone dual iteration, run via the `quay-task-to-plan` skill wired into `OUTER-LOOP.md` step 5a. |
 
-**Precondition, stated explicitly — this is a MAY, not a default, and is gated on a mechanism that
-does not yet exist:** a development-class milestone may use the narrower pattern **once the
-`quay-task-to-plan` skill (or an equivalent proposal-adjudication mechanism) actually exists** to
-run the N-independent-proposal step through. Until that mechanism exists, development-class
-milestones continue to run the existing whole-milestone dual-iteration pattern like every other
-milestone to date. This is a forward-looking POLICY STATEMENT for future milestones, not something
-any milestone can invoke today.
+**No longer a MAY — the precondition is now SATISFIED (DIR-014 items 2/3, 2026-07-19).** The
+`quay-task-to-plan` skill that this policy's precondition named **now exists** (built M20/M22) **and
+is wired into `OUTER-LOOP.md` step 5a as a MANDATORY dispatch route** for development-class
+milestones. So the earlier discretionary framing (a charter-by-charter option, gated on the skill's
+future existence) is retired: a development-class (`capability-growth`-typed, product/skill-code) milestone **MUST** run
+the proposal→plan pipeline via step 5a — it is the DEFAULT, not a charter-by-charter option. A
+development-class milestone that runs the old whole-milestone dual-iteration instead of the pipeline
+is a policy/DoD violation. The methodology/design class is unchanged (whole-milestone re-derivation).
 
-**M18 itself does NOT switch to this pattern.** This milestone (M18) is itself method-infra/
-doc-editing (amending `inherited-core.md`/`OUTER-LOOP.md`), and even setting that aside, the
-`quay-task-to-plan` skill this policy's precondition names does not exist yet (DIR-012 item 3,
-explicitly future work — not built by this milestone; see this milestone's own charter,
-"Explicitly OUT of scope"). M18 runs, and has run, the existing whole-milestone independent
-dual-iteration pattern the same way M13-M17 did. Stated here explicitly so a skeptical future
-re-read cannot mistake this policy STATEMENT for a claim that M18 itself already used it.
+**Historical note (M18, superseded 2026-07-19):** when M18 first wrote this policy, the skill did
+not exist, so the policy was a forward-looking STATEMENT and M18 itself correctly did not use the
+pattern. That precondition is now met (DIR-014 items 2/3 wired the skill into DISPATCH and
+de-optionalized this policy); the "does not exist yet / future work" caveat no longer applies.
 
 **Mechanism detail — see the design doc, not duplicated here.** The concrete pipeline shape a
 development-class milestone would run under the narrower pattern — "clamp at both ends" (N
@@ -396,34 +394,32 @@ whole is not wasteful the way re-deriving 2000 lines of implementation would be.
 
 **Class 2 — development-class milestones** (the M16-CLI-EDIT-PARITY-IMPL precedent — real
 product-code changes; typically `capability-growth`-typed): deliverable is working code. Diversity
-strategy: **MAY, at a future charter's discretion, use a narrower pattern instead of whole-milestone
-dual iteration** — N-independent-proposal re-derivation (catching the expensive, cheap-to-catch-
-early APPROACH error, before any code is written) + a single implementation pass + a light tail
-self-check (independence is already spent at both ends: upstream at the proposal, downstream at the
-existing adversarial-audit gate, DIR-007/M10, unchanged and reused). The reasoning: re-deriving
-~2000 lines of already-approved implementation wholesale is waste; re-deriving the APPROACH is not,
-because a wrong approach caught after 2000 lines are written is catastrophically late while the same
-error is nearly free to catch before any code exists. M13's own two independent iterations diverging
-on a real design decision (the DIR-010 namespace question) is the existence proof this pattern is
-already latent in exp5's practice, just not yet named/available as a lighter-weight option.
+strategy: **MUST (DEFAULT — DIR-014 items 2/3, no longer discretionary) use the narrower pattern
+instead of whole-milestone dual iteration** — N-independent-proposal re-derivation (catching the
+expensive, cheap-to-catch-early APPROACH error, before any code is written) + a single implementation
+pass + a light tail self-check (independence is already spent at both ends: upstream at the proposal,
+downstream at the existing adversarial-audit gate, DIR-007/M10, unchanged and reused). The reasoning:
+re-deriving ~2000 lines of already-approved implementation wholesale is waste; re-deriving the
+APPROACH is not, because a wrong approach caught after 2000 lines are written is catastrophically late
+while the same error is nearly free to catch before any code exists. M13's own two independent
+iterations diverging on a real design decision (the DIR-010 namespace question) is the existence proof
+this pattern is already latent in exp5's practice.
 
-**Precondition, stated explicitly (this is a MAY, not an automatic switch):** the narrower
-development-class pattern is available to a future charter only ONCE a proposal-adjudication
-mechanism actually exists to run the N-independent-proposal step through — concretely, the
-`quay-task-to-plan` skill (DIR-012 item 3, not yet built as of this milestone) or an equivalent. Until
-that mechanism exists, EVERY milestone — methodology/design-class and development-class alike —
-continues to run the existing whole-milestone dual-iteration pattern. A charter may not invoke the
-narrower development-class pattern by name alone; it must cite the actual adjudication mechanism it
-is using.
+**Precondition is now SATISFIED — this is the DEFAULT, not a MAY (DIR-014 items 2/3, 2026-07-19):**
+the proposal-adjudication mechanism this pattern requires — the `quay-task-to-plan` skill — **now
+exists** (built M20/M22) **and is wired into `OUTER-LOOP.md` step 5a as the MANDATORY dispatch route**
+for development-class milestones. So this is no longer "available to a future charter's discretion":
+EVERY development-class (`capability-growth`-typed, product/skill-code) milestone MUST run the
+proposal→plan pipeline via step 5a; the methodology/design class continues whole-milestone
+re-derivation, unchanged. A development-class charter does not need to opt in by name — step 5a routes
+it automatically by class; a development-class milestone that skips the pipeline is a policy/DoD
+violation (Clause 3 line-budget + Clause 8 plan-reference both bite).
 
-**This milestone (M18) itself does NOT switch patterns.** M18 is itself method-infra/doc-editing
-(this file and `OUTER-LOOP.md`), and even setting that aside, the `quay-task-to-plan` skill this
-policy's precondition requires does not exist yet (DIR-012 item 3 remains explicitly future work,
-out of scope here — see this milestone's charter, "Explicitly OUT of scope"). M18 runs, and is
-recorded as running, the existing whole-milestone dual-iteration pattern exactly like M13-M17. This
-statement is deliberately explicit and self-referential precisely because the ledger/policy being
-amended here is the kind of substrate a later milestone might misread as retroactively applying to
-the milestone that wrote it — it does not.
+**Historical note (M18, superseded 2026-07-19):** when M18 wrote this policy the skill did not exist,
+so M18 correctly did not switch patterns and the policy was a forward-looking statement. DIR-014 items
+2/3 have since built the wiring and de-optionalized the policy; the "not yet built / future work"
+caveat no longer applies. This note is retained so a later re-read understands the MAY→MUST transition
+happened at DIR-014, not at M18.
 
 **Mechanism detail (the pipeline shape "clamp at both ends" refers to):** see
 `docs/proposals/exp5-quay-task-proposal-plan-skill.md` §6 for the full pipeline diagram (task →
