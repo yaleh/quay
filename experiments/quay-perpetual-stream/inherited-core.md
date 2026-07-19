@@ -874,7 +874,8 @@ clauses below (clause 0 plus clauses 1-7) — wired into `OUTER-LOOP.md` step 6 
 step 7's `milestone_counter++`, in the same gate sequence/position as the three narrative HARD
 BLOCKs it wraps (see "DoD meta-enforcer gate" in `OUTER-LOOP.md`).
 
-**AC/DoD live in the TASK, not the charter (proposal↔task / plan↔milestone alignment, 2026-07-19).**
+**AC/DoD live in the TASK, not the charter (proposal↔task / plan↔milestone alignment, 2026-07-19;
+checklist form MANDATED going forward, DIR-020/M34-ac-dod-checklist-writeback, 2026-07-19).**
 A milestone's Acceptance Criteria (AC) and Definition of Done (DoD) are authored at the **proposal**
 stage and recorded in the milestone-candidate **task** body (`tasks/<task-id>.md`) as two sections —
 `## Acceptance Criteria` and `## Definition of Done` — which are the SINGLE canonical source of truth
@@ -886,17 +887,40 @@ kill. This aligns the four entities: **task↔proposal** (the value unit + its A
 formerly the per-charter "Binary Done-when", now moved into the task). DoD = the task's done-checklist:
 a **reference** to the standard five clauses below (NOT a copy — a copy goes stale when the standard
 changes) PLUS any task-specific extra done-conditions.
+**Checklist form, going forward:** `## Acceptance Criteria` and `## Definition of Done` MUST be
+authored as GitHub-flavored Markdown checklists — one `- [ ]` item per criterion / done-condition, NOT
+a prose bullet/numbered list. They are authored **UNCHECKED** (`- [ ]`) at SELECT time (`OUTER-LOOP.md`
+step 1) — a milestone starts with nothing ticked. The per-milestone acceptance audit
+(`OUTER-LOOP.md` step 6, Clause 1) is the **ONLY** writer that ticks a box to `- [x]`, and only as it
+independently confirms that specific item met, citing evidence in its own audit report — the loop
+itself must NEVER self-tick a box at authoring time, so a ticked box is always an audit attestation
+(mirrors the "generated, not hand-edited" projection discipline, DIR-002). **Unchecked-box-blocks
+semantics:** any AC box still `- [ ]` at `milestone_counter++` time (step 7) is REFUTED-equivalent and
+HARD-blocks, exactly as an unmet criterion does today — this changes the REPRESENTATION of AC
+satisfaction (visible per-item in the task itself), not the underlying gate semantics. **Backward
+compatibility:** pre-existing prose-form tasks (e.g. M32's `exp5-M-DOD-ESCROW-TESTFLOOR`) are NOT
+retroactively rewritten — Clause 0 continues to accept prose-form AC/DoD unchanged; checklist form is
+required for tasks authored from DIR-020/M34 onward, migrated opportunistically for older tasks, no
+retroactive sweep required.
 
-### Clause 0 — AC + DoD present and well-formed in the task (2026-07-19)
+### Clause 0 — AC + DoD present and well-formed in the task (2026-07-19; checklist-form + unchecked-box
+HARD-block semantics added DIR-020/M34-ac-dod-checklist-writeback, 2026-07-19)
 - **Trigger condition:** every milestone, unconditionally — there is no case in which a milestone
   legitimately has no acceptance criteria.
 - **What it checks:** the milestone's task (`tasks/<task-id>.md`) contains a non-empty, well-formed
-  `## Acceptance Criteria` section with at least one concrete, individually-checkable clause (a
-  bullet/numbered line with real content — not empty, not a bare `TBD`/`TODO`/placeholder), AND a
-  non-empty `## Definition of Done` section that **references** the standard DoD (this section / the
-  five clauses below) and may add task-specific done-conditions. PRESENCE and SHAPE only — whether each
-  AC clause is actually MET is the per-milestone acceptance audit's job (`OUTER-LOOP.md` step 6), NOT
-  this mechanical check's.
+  `## Acceptance Criteria` section with at least one concrete, individually-checkable clause — either
+  a GFM checklist line (`- [ ]`/`- [x] text`, the required form for tasks authored going forward) or a
+  prose bullet/numbered line with real content (the pre-existing form, still accepted for backward
+  compatibility — not empty, not a bare `TBD`/`TODO`/placeholder), AND a non-empty
+  `## Definition of Done` section that **references** the standard DoD (this section / the five
+  clauses below) and may add task-specific done-conditions. PRESENCE and SHAPE, PLUS — for
+  checklist-form AC specifically — **unchecked-box HARD-block**: any `- [ ]` (unchecked) item
+  remaining in the AC section is treated as an unmet criterion and FAILs this clause, naming the
+  specific unchecked item(s) in the failure output (mirrors an unmet-criterion HARD-block; a
+  prose-form AC has no per-item checked/unchecked state and is unaffected by this sub-check). Whether
+  each AC clause is actually MET is still fundamentally the per-milestone acceptance audit's job
+  (`OUTER-LOOP.md` step 6) — this mechanical check only verifies that the audit's ticks (or lack
+  thereof) are reflected in the task file, it does not itself judge satisfaction.
 - **Pass/fail semantics:** exit 1 (FAIL, HARD-blocks `milestone_counter++`) if the task file is
   missing, or either section is absent / empty / placeholder-only / (for DoD) does not reference the
   standard; exit 0 (PASS) otherwise. Mechanized in `scripts/it0-dod-check.mjs` (below).
@@ -904,7 +928,8 @@ changes) PLUS any task-specific extra done-conditions.
   gate — the same HARD BLOCK as clauses 1-5.
 
 ### Clause 1 — Per-milestone acceptance audit (DIR-007 / M10-audit-consolidation; made
-UNCONDITIONAL 2026-07-19, superseding the original conditional cadence rule)
+UNCONDITIONAL 2026-07-19, superseding the original conditional cadence rule; checklist write-back
+added DIR-020/M34-ac-dod-checklist-writeback, 2026-07-19)
 - **Trigger condition:** EVERY milestone, unconditionally — no cadence precondition. (The original
   cadence-rule conditions — (a) VT-scoring, (b) iteration-0 self-exemption attempt — are retained
   ONLY as escalation hints for how hard to push the refutation, never as a gate on whether the audit
@@ -916,11 +941,21 @@ UNCONDITIONAL 2026-07-19, superseding the original conditional cadence rule)
   any criterion it cannot confirm met ⇒ REFUTED; (2) confirm the task's `## Definition of Done` is
   satisfied; (3) confirm `scripts/it0-dod-check.sh` exited 0 (all clauses incl. clause 0) — if not,
   the audit is REFUTED by construction.
+- **Checklist write-back (DIR-020/M34, checklist-form tasks only):** as the audit confirms each AC/DoD
+  item, it WRITES BACK to the task file directly (a `task_write`-equivalent edit), ticking `- [x]` for
+  each item it confirms met — citing the supporting evidence in its own audit report, not in the tick
+  itself — and leaving `- [ ]` for any item it cannot confirm. The audit is the **ONLY** writer that
+  ticks boxes; the loop must never self-tick at authoring time (SELECT always authors `- [ ]`). A
+  prose-form task (no checklist syntax) has no boxes to tick and this sub-step is a no-op for it —
+  state so explicitly rather than silently skipping.
 - **Pass/fail semantics:** verdict is one of **REFUTED** (names a specific claim and why — HARD
   BLOCKS the VT-curve append / Done-when-complete claim AND step 7's `milestone_counter++` until
   corrected and re-audited), **CONCERNS** (weaker findings, non-blocking, recorded), or **NO
   REFUTATION FOUND** (clears the gate). The ABSORB log entry must always record one of these three
-  tokens adjacent to "adversarial-audit" / this audit's name — there is no silent-omission case.
+  tokens adjacent to "adversarial-audit" / this audit's name — there is no silent-omission case. For
+  checklist-form tasks, ANY AC box still `- [ ]` after the audit's write-back is REFUTED-equivalent
+  and HARD-blocks exactly as an unmet criterion does (Clause 0's unchecked-box sub-check enforces this
+  mechanically at `milestone_counter++` time).
 - **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), the "Per-milestone acceptance
   audit" sub-step (immediately after the execution-provenance task write-back sub-step and before
   the V_meta consolidation-lag gate sub-step).
