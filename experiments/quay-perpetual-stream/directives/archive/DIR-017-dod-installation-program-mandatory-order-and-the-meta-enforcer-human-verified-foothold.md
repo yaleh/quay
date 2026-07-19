@@ -1,6 +1,6 @@
 # DIR-017
 
-- status: pending
+- status: archived
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-18
 - title: Install the missing Definition of Done as an ORDERED program on the running exp5 stream — self-host the record first, then a single standing mechanically-enforced non-self-exemptible DoD meta-enforcer (the load-bearing foothold, human-verified operative before anything else proceeds), then the remaining clauses, then the leakage metrics — resolving the self-referential bootstrapping risk that the drifting mechanism will otherwise install its own DoD as shelfware
@@ -190,3 +190,62 @@ and a future SELECT may choose it or another backlog row may take priority; this
 note does not assume Step 3 is automatically next. This DIR's `status:`
 frontmatter stays `pending`; do not archive or flip to done on the strength of M32
 alone.
+
+## Resolution
+- resolved_by: M36-dod-leakage-metrics (outer-loop, two independent iteration-executor
+  branches, reconciled on the merits — see `dashboard.md`'s "ABSORB m36" entry for the full
+  two-iteration comparison and both numeric reconciliations)
+- outcome: applied — all three steps of DIR-017's ordered program are now delivered:
+  - **Step 1** (DoD meta-enforcer foothold): delivered M25-dod-meta-enforcer, unified
+    adversarial-audit/V_meta-lag/line-budget/-IMPL-row gates into `inherited-core.md`'s DoD
+    section with a mechanical `it0-dod-check.mjs` HARD-BLOCK on `milestone_counter++`; the
+    Clause-5 blind spot subsequently found and fixed at M30 (DIR-019).
+  - **Step 2** (escrow-Δv + product-work test-floor clauses): delivered M32-dod-escrow-testfloor,
+    authored as Clause 6/7, regression-covered by 5 new fixtures (10/10 fixtures PASS).
+  - **Step 3** (leakage metrics as homeostatic variables): delivered M36-dod-leakage-metrics —
+    a structured deviation-record schema (`inherited-core.md` lines 1210-1306: fields
+    id/title/origin-milestone/found-at/caught-by/status/age, `verified-eliminated` terminal
+    state), retroactively backfilled with 5 worked examples (DEV-01..DEV-05), and a
+    "Homeostatic variables" section in `dashboard.md` (lines 327-343) computing all 4 named
+    metrics with real, hand-verified arithmetic: (a) machine:human = 2:3 (0.40:0.60), (b)
+    verified-eliminated fraction = 4/5 = 80% (reconciled between the two iterations by direct
+    re-reading of the M30 ABSORB source text, which explicitly withheld standing-exception
+    status from that deviation), (c) median age-to-resolution = 0, (d) product-value shipped
+    per 5 milestones ≈ 3.257 (Realized-Δv sum 22.82 over a denominator of 35, reconciled to
+    match the stream's own established "qualifying rate 6/35" convention from `checkpoints/cp-35.md`).
+    Forward-update responsibility named explicitly: the Clause-1 per-milestone acceptance-audit
+    subagent is the sole standing writer of the deviation log going forward, for both
+    machine-caught and human/self-disclosed rows alike (text in `OUTER-LOOP.md` step 6 sub-step
+    1b and `inherited-core.md`'s "Forward-update responsibility" subsection were both tightened
+    post-audit to remove an ambiguity the M36 acceptance audit itself flagged — see below).
+- evidence: `dashboard.md`'s "ABSORB m36" entry (full two-iteration convergence/reconciliation
+  narrative); `inherited-core.md` lines 1210-1306 (schema + backfill); `dashboard.md` lines
+  327-343 (homeostatic-variables table); `tasks/exp5-M-DOD-LEAKAGE-METRICS.md` (all 5 AC + 2 DoD
+  checklist items ticked with inline "(Confirmed: ...)" evidence citations by the out-of-band
+  Clause-1 acceptance audit, which independently re-derived all 4 metrics by hand and caught 2
+  real non-blocking issues before ABSORB closed — an uncommitted denominator fix, and the
+  forward-update-responsibility wording ambiguity, both fixed).
+- **Process note**: this is the third and final step of an intentionally *ordered* program —
+  Step 3 depended on Steps 1/2's mechanical foothold being in place first, per this DIR's own
+  original ordering requirement, which is why it was deferred across M23/M25/M30/M32 before being
+  SELECTed at m36. The human-verification gate (below) was cleared for Steps 2/3 on 2026-07-19,
+  prior to M36's own dispatch, unlocking this milestone for SELECT.
+
+## Human verification when exp5 marks this DIR done
+
+Do NOT trust the DONE mark on the strength of the DoD enforcer's own PASS alone:
+1. **The deviation schema is usable, not just documented.** Read `inherited-core.md` lines
+   1210-1306 and independently classify a deviation NOT among the 5 backfilled examples — all 7
+   schema fields should populate unambiguously (the M36 acceptance audit did this with a
+   hypothetical future M40/M43 case as a stress test).
+2. **The 4 metrics are real arithmetic, not placeholders.** Recompute all 4 numbers in
+   `dashboard.md` lines 327-343 by hand from the DEV-01..DEV-05 backfill table; they should match
+   (a) 0.40:0.60, (b) 80%, (c) median age 0, (d) ≈3.257 with denominator 35.
+3. **The forward-update-responsibility text is unambiguous.** Read `OUTER-LOOP.md` step 6
+   sub-step 1b and `inherited-core.md`'s "Forward-update responsibility" subsection — both should
+   state, without room for a second reading, that the SAME Clause-1 acceptance-audit subagent
+   writes every deviation-log row, for both machine-caught and self-disclosed kinds.
+4. **All three steps are genuinely done, not merely SELECTed.** Steps 1/2's own prior
+   human-verification points (see DIR-019's archived checklist for Step 1's clause-5 fix) should
+   still hold under re-check; this DIR does not re-verify them, only Step 3 and the program's
+   completion as a whole.
