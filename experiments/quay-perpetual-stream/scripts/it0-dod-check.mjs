@@ -155,16 +155,36 @@ const dispositionedClauses = new Set();
     : [];
   const dodRefRe = /(standard|inherited-core|five clauses|clause\s*[1-5]|meta-enforcer)/i;
 
+  // Checklist-form detection (DIR-020/M34-ac-dod-checklist-writeback, 2026-07-19): a GFM checklist
+  // line is `- [ ] text` (unchecked) or `- [x]`/`- [X]` text (checked). This is a STRICTER shape
+  // than the general acClauses bullet/numbered-line filter above (which already structurally
+  // matches checklist lines via the `[-*]` + `\s+\S` pattern — the `[` of `[ ]` satisfies `\S`).
+  // Distinguishing checked vs. unchecked, and HARD-blocking on any remaining unchecked item, is the
+  // NEW mechanism this milestone adds — not a shape-regex tweak. Prose-form AC (numbered lines,
+  // plain bullets with no `[ ]`/`[x]` token) has ZERO lines matching either checklist regex below,
+  // so `isChecklistForm` is false and this whole sub-check is skipped, preserving full backward
+  // compatibility with pre-existing prose-form tasks (e.g. M32's `exp5-M-DOD-ESCROW-TESTFLOOR`).
+  const uncheckedBoxRe = /^\s*[-*]\s+\[\s\]\s+(\S.*)$/;
+  const checkedBoxRe = /^\s*[-*]\s+\[[xX]\]\s+(\S.*)$/;
+  const acLines = acSection ? acSection.split("\n") : [];
+  const uncheckedBoxes = acLines.filter((l) => uncheckedBoxRe.test(l)).map((l) => l.match(uncheckedBoxRe)[1].trim());
+  const checkedBoxes = acLines.filter((l) => checkedBoxRe.test(l));
+  const isChecklistForm = (uncheckedBoxes.length + checkedBoxes.length) > 0;
+
   const clause0Fail = [];
   if (acSection === null) clause0Fail.push("no '## Acceptance Criteria' section found in the task");
   else if (acClauses.length === 0) clause0Fail.push("'## Acceptance Criteria' section has no concrete checkable clause (needs >=1 non-placeholder bullet/numbered line)");
+  else if (isChecklistForm && uncheckedBoxes.length > 0) {
+    clause0Fail.push(`checklist-form AC has ${uncheckedBoxes.length} unchecked item(s) remaining (REFUTED-equivalent, HARD-blocks exactly as an unmet criterion does): ${uncheckedBoxes.map((t) => `"${t}"`).join(", ")}`);
+  }
   if (dodSection === null) clause0Fail.push("no '## Definition of Done' section found in the task");
   else if (dodSection.trim().length === 0) clause0Fail.push("'## Definition of Done' section is empty");
   else if (!dodRefRe.test(dodSection)) clause0Fail.push("'## Definition of Done' section does not reference the standard DoD (must reference the standard five clauses / inherited-core, per the reference-plus-extras rule)");
 
   const srcLabel = taskPath ? `[${path.relative(process.cwd(), taskPath)}]` : "[fixture text — no real task file]";
   if (clause0Fail.length === 0) {
-    passes.push(`clause0-ac-dod-present: task AC has ${acClauses.length} checkable clause(s); DoD references the standard ${srcLabel}`);
+    const shapeNote = isChecklistForm ? `checklist-form, ${checkedBoxes.length}/${checkedBoxes.length + uncheckedBoxes.length} checked` : "prose-form";
+    passes.push(`clause0-ac-dod-present: task AC has ${acClauses.length} checkable clause(s) (${shapeNote}); DoD references the standard ${srcLabel}`);
     dispositionedClauses.add("ac-dod");
   } else {
     for (const m of clause0Fail) failures.push(`clause0-ac-dod-present: ${m} ${srcLabel}`);
