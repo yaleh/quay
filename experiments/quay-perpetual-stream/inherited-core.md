@@ -1287,13 +1287,17 @@ Cross-reference: `dashboard.md`'s new "Homeostatic variables (DIR-017 Step 3)" s
 existing Health tracks table) computes the four DIR-017 Step 3 metrics from this table.
 
 ### Forward-update responsibility (mirrors DIR-020/M34's standing write-back naming)
-**The Clause-1 per-milestone acceptance-audit subagent is the standing writer of this log going
-forward**, at the SAME dispatch point it already runs (`OUTER-LOOP.md` step 6, immediately after the
-checklist write-back sub-step) — not a new, separately-scheduled process. Concretely: whenever the
-audit's own charge (refute AC/DoD satisfaction, confirm the mechanical DoD gate is green) surfaces a
-REFUTED or CONCERNS finding that meets this section's "what qualifies as a deviation" test above, OR
-whenever an ABSORB entry self-discloses a process deviation (the DEV-04 pattern), the audit — for
-audit-caught rows — or the outer loop itself — for self-disclosed rows — appends/updates a row in
+**The Clause-1 per-milestone acceptance-audit subagent is the SOLE standing writer of this log going
+forward, for every row of either `caught-by` kind** — at the SAME dispatch point it already runs
+(`OUTER-LOOP.md` step 6, immediately after the checklist write-back sub-step) — not a new,
+separately-scheduled process, and not a second actor. Concretely: whenever the audit's own charge
+(refute AC/DoD satisfaction, confirm the mechanical DoD gate is green) surfaces a REFUTED or CONCERNS
+finding that meets this section's "what qualifies as a deviation" test above, the audit writes a
+`caught-by: machine` row citing its own finding. Whenever an ABSORB entry (already drafted by the outer
+loop before this audit sub-step runs) self-discloses a process deviation (the DEV-04 pattern) or
+reports a human-authored directive's finding, the SAME audit reads that already-written disclosure and
+transcribes it into a `caught-by: human` row — the audit still performs the write; only the origin of
+the finding (not the writer) differs between the two row kinds. Both cases append/update a row in
 `dashboard.md`'s homeostatic-variables table (below) at that SAME ABSORB, using this section's schema.
 This mirrors DIR-020/M34's precedent exactly: that milestone named the Clause-1 audit as the standing
 checklist-tick writer at a specific, already-existing dispatch point rather than inventing a new
