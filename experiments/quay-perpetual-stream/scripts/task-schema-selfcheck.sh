@@ -29,6 +29,7 @@ CASES=(
   # PASS cases (marked, conformant).
   "milestone-compliant|$FIX/milestone-compliant-stub.md|0"
   "directive-compliant|$FIX/directive-compliant-stub.md|0"
+  "adr-compliant|$FIX/adr-compliant-stub.md|0"
   # One FAIL fixture per assertion (marked, isolates exactly one violation).
   "fail-A1-proposal-missing|$FIX/fail-proposal-missing-stub.md|1"
   "fail-A2-plan-missing-milestone|$FIX/fail-plan-missing-milestone-stub.md|1"
@@ -38,6 +39,7 @@ CASES=(
   "fail-A5-resolution-statusmirror|$FIX/fail-resolution-statusmirror-stub.md|1"
   "fail-A6-scaffolding-source|$FIX/fail-scaffolding-source-stub.md|1"
   "fail-A6-scaffolding-dirfile|$FIX/fail-scaffolding-dirfile-stub.md|1"
+  "fail-adr-decision-missing|$FIX/fail-adr-decision-missing-stub.md|1"
   # CRITICAL false-positive guard — MARKED + conformant despite DIR-009/010 prose shapes → PASS.
   "ok-prose-mentions-source|$FIX/ok-prose-mentions-source-stub.md|0"
 )

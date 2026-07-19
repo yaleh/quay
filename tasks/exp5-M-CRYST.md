@@ -28,6 +28,8 @@ children:
   - exp5-M-CRYST-ADR-DILUTION
   - exp5-M-CRYST-B5-PARSER-UNIFY
   - exp5-M-CRYST-B6-VALIDATOR-COVERAGE
+  - exp5-M-CRYST-ADR-TDD
+  - exp5-M-CRYST-B7-LOADBEARING-TEST-GATE
 extra: {}
 ---
 ## Proposal
@@ -41,4 +43,6 @@ References inherited-core DoD. Done when every child lands for real (real object
 
 ## Progress
 - 2026-07-19 — FIRST WAVE LANDED (B1→B2→B3 + A2), independently adversarially reviewed (all 8 claims REAL, no blocking defect). The `extra.schema:"v1"` canonical-task-schema gate is operative on real objects (DIR-029 + B1/B2/B3/A2 PASS; sweep 5 pass / rest explicit N/A-legacy / 0 fail); single-source validator (`task-schema.mjs`, imported by `it0-dod-check.mjs`); both authoring sources fixed at root; A2 retired the two corrupted-title duplicate DIR-004/005 (net-negative, no content lost). Review C1/C2 tracked as B6 (validator coverage) / B5 (parser fork).
-- Next: D3/Axis-2′ (raised priority), D1/D2, E1/E2 (+INV enforcement-with-design, ADR-CARRYFWD, ADR-DILUTION), C1, F1, G1 per the re-prioritized §6 sequencing.
+- 2026-07-19 — D3 INCREMENT 1 (Axis-2′): OUTER-LOOP gate-narration compressed to code-pointers (525→445, net −80), independently reviewed LOSSLESS.
+- 2026-07-19 — ADR MECHANISM ESTABLISHED (lean, per §10): ADRs are `label:adr` + `extra.schema:"v1"` quay objects validated as a new `kind=adr` in `task-schema.mjs` (Context/Decision/Consequences, NOT Proposal/Plan/AC/DoD). First 3 ADRs authored/converted + PASS: ADR-TDD (new), ADR-CARRYFWD, ADR-DILUTION. **TDD debt paid + policy pinned:** `task-schema.mjs` backfilled with `test/task-schema.test.mjs` (20 tests, 98.84% line / 100% func coverage) via a real RED→GREEN cycle on the adr kind — dogfooding ADR-TDD (load-bearing method-infra gates must be fixture-first + covered). Full quay ADR-management feature deferred to E1/D1.
+- Next: D3 R5–R8 (new single-source checks), D1/D2, E1/E2 (+INV enforcement-with-design), C1, F1, G1 per the re-prioritized §6 sequencing.

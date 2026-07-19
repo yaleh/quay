@@ -1,19 +1,25 @@
 ---
 id: exp5-M-CRYST-ADR-DILUTION
-title: ADR form-vs-substance dilution (Layer-A pinned doc → Layer-B generated
-  prompt paraphrases the rule away) — fixed by code-over-prompt + self-verifying
-  doc contracts
-status: todo
+title: "ADR: form-vs-substance dilution — load-bearing prose rules become code
+  or self-verifying contracts (never re-narrated)"
+status: done
 labels:
-  - crystallization
   - adr
+  - crystallization
 parent: exp5-M-CRYST
 children: []
-extra: {}
+extra:
+  schema: v1
+  adrStatus: accepted
+  date: 2026-07-19
 ---
-## Proposal
-ADR: a rule that lives only in prose in a pinned document (Layer A) is repeatedly paraphrased away when a fresh prompt is generated from it (Layer B). Evidence: exp4 DIR-009 (worktree-isolation rule diluted 13 consecutive times until pasted-output proof forced it). Decision: load-bearing rules become CODE (a coded step cannot be paraphrased) or self-verifying contracts on the document; generated prompts must transclude/verify, never re-narrate.
-## Acceptance Criteria
-- [ ] ADR captured (E1 form); links to code-over-prompt (D3/Axis-2′) + contracts (D1/D2) as the fix.
-## Definition of Done
-Real: the ADR is the cited rationale for the code-over-prompt work; a real generated prompt transcludes/verifies rather than re-narrates a load-bearing rule.
+## Context
+A load-bearing rule that lives only as prose in a pinned Layer-A document is repeatedly paraphrased away whenever a fresh Layer-B prompt is generated from it. Evidence: exp4 DIR-009 — the worktree-isolation rule was diluted 13 consecutive times across generated executor prompts until a pasted-output proof requirement finally forced it. Form-vs-substance dilution is a recurring failure family (see the crystallization ANALYSIS catalog).
+
+## Decision
+Load-bearing rules become **CODE** (a coded step cannot be paraphrased) **OR self-verifying `contracts:` on the document.** Generated/derived prompts must **transclude or verify** the rule, **never re-narrate** it — re-narration is where dilution enters.
+
+## Consequences
+- **Forbids:** a load-bearing invariant existing only as re-narratable prose in a pinned doc; a generated prompt paraphrasing (rather than transcluding/verifying) such a rule.
+- **Enables:** this ADR is the cited rationale for the code-over-prompt work (D3 / Axis-2′) and the self-verifying-contracts work (D1/D2) — they are the fix, not incidental refactors.
+- **Landing test:** a real generated prompt transcludes/verifies a load-bearing rule rather than re-narrating it.
