@@ -241,6 +241,18 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
           checklist syntax) has no boxes to tick — this sub-step is a documented no-op for it, state so
           explicitly. Any AC box still `- [ ]` after this write-back is REFUTED-equivalent and HARD-
           blocks step 3's mechanical gate below, exactly as an unmet criterion does.
+       1b. **Deviation-log write-back (DIR-017 Step 3/M36-dod-leakage-metrics, 2026-07-19).** As this
+          same audit pass surfaces a REFUTED or CONCERNS finding meeting `inherited-core.md`'s
+          "Deviation-record schema" section's "what qualifies as a deviation" test, OR whenever an
+          ABSORB entry self-discloses a process deviation, the audit (audit-caught rows) or the outer
+          loop itself (self-disclosed rows) appends/updates a row in `dashboard.md`'s "Homeostatic
+          variables (DIR-017 Step 3)" section's backing table (schema and current rows both cited from
+          `inherited-core.md`) at this SAME ABSORB — mirroring sub-step 1a's write-back discipline for
+          the SAME audit pass, not a separately-scheduled process. This audit is ALSO responsible, at
+          EVERY ABSORB it runs (not only the one where a row was created), for checking whether any
+          existing `fixed`-status row has since accrued the external-verification evidence needed to
+          promote it to `verified-eliminated` (mirrors the V_meta consolidation-lag gate's own
+          every-ABSORB re-check discipline, step 6's second bullet below).
        2. **DoD satisfaction:** confirm the task's `## Definition of Done` (the standard five clauses +
           any task-specific extras) is satisfied for this milestone.
        3. **Mechanical gate green:** confirm `scripts/it0-dod-check.sh <task-id> <charter-file>
