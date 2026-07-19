@@ -1788,6 +1788,71 @@ async function main() {
     }
   }
 
+  // --- DIR-025/M41: GFM task-list checkbox glyph rendering ---
+  // The directive-task full-body projection (DIR-025) puts raw `## Acceptance Criteria` /
+  // `## Definition of Done` checklists (with `- [ ]` / `- [x]` items) into task bodies for the
+  // first time at scale. Verified live against `/task/DIR-021` that the bracket glyphs rendered
+  // as literal `[ ]` text inside `<li>`, not a checkbox — this is the "specific construct
+  // rendering incorrectly" case DIR-025's own Requested action item 4 names as the (only)
+  // trigger for a minimal serve.js tweak. This test locks in that fix: renderMarkdown() now
+  // emits a disabled `<input type="checkbox">` for `- [ ]` / `- [x]` list items instead of
+  // leaving the bracket glyph as plain text, and preserves existing plain-`-`/ordered-list
+  // rendering unaffected.
+  {
+    const cbTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-checkbox-test-"));
+    const cbWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-checkbox-workspace-"));
+    fs.mkdirSync(path.join(cbWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(cbWorkspaceRoot, ".quay", "config.yml"),
+      `providers:\n  native:\n    enabled: true\n    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"\n    tasks_dir: "${cbTasksDir.replaceAll("\\", "\\\\")}"\n    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]\n    env:\n      QUAY_NATIVE_TASKS_DIR: "${cbTasksDir.replaceAll("\\", "\\\\")}"\n`
+    );
+
+    const CHECKBOX_BODY =
+      "## Acceptance Criteria\n" +
+      "- [ ] an unchecked item\n" +
+      "- [x] a checked item\n" +
+      "- a plain unordered item with no checkbox\n";
+    execFileSync("node", [nativeBin, "task", "create", "CBX-1", "--title", "Checkbox render task",
+      "--status", "todo", "--body", CHECKBOX_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: cbTasksDir },
+    });
+
+    const cbPort = port + 17;
+    const cbOrigCwd = process.cwd();
+    let cbServer;
+    try {
+      process.chdir(cbWorkspaceRoot);
+      cbServer = await startServer({ port: cbPort });
+
+      const cbResp = await get(cbPort, "/task/CBX-1");
+      assert(cbResp.status === 200, `GET /task/CBX-1 returns 200 (got ${cbResp.status})`);
+      assert(
+        /<input type="checkbox" disabled>/.test(cbResp.body),
+        "unchecked '- [ ]' item renders as a disabled, unchecked <input type=\"checkbox\">"
+      );
+      assert(
+        /<input type="checkbox" disabled checked>/.test(cbResp.body),
+        "checked '- [x]' item renders as a disabled, checked <input type=\"checkbox\" checked>"
+      );
+      assert(
+        !/<li>\[ \]/.test(cbResp.body) && !/<li>\[x\]/i.test(cbResp.body),
+        "no raw '[ ]'/'[x]' bracket-glyph text leaks into a plain <li> (the pre-fix behavior)"
+      );
+      assert(
+        /<li>a plain unordered item with no checkbox<\/li>/.test(cbResp.body),
+        "a plain '- item' (no checkbox prefix) still renders as an ordinary <li>, unaffected by the checkbox tweak"
+      );
+    } finally {
+      if (cbServer) {
+        cbServer.close();
+        if (cbServer.client) await cbServer.client.close();
+      }
+      process.chdir(cbOrigCwd);
+      fs.rmSync(cbTasksDir, { recursive: true, force: true });
+      fs.rmSync(cbWorkspaceRoot, { recursive: true, force: true });
+    }
+  }
+
   console.log(failures === 0 ? "\nAll QN-031 serve/action regression tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }

@@ -1,6 +1,6 @@
 # DIR-025
 
-- status: pending
+- status: applied (CLOSED 2026-07-19 — full-body directive projection landed & web-verified; see "## Resolution — CLOSED")
 - created_by: human (Yale Huang), asserted directly in this live conversation
 - created_at: 2026-07-19
 - title: The `/quay-directive` projection writes a THIN task body (Source + one-paragraph summary + status mirror), so a directive's Acceptance Criteria, Definition of Done, full proposal (Finding + Requested action), and plan reference live ONLY in the DIR file and are invisible in the quay web UI — change the projection so a directive task's body is the FULL, regenerated record (proposal + AC + DoD + plan reference), making the directive task the single canonical VIEWABLE record, per DIR-014 item 6's principle applied to directive tasks
@@ -149,3 +149,23 @@ mechanism, this DIR stays `pending`.
 - resolved_by: iteration-N / milestone M-NN
 - outcome: applied | deferred | rejected
 - evidence: pointer to the design doc / iteration report section / commit -->
+
+## Resolution — CLOSED (2026-07-19)
+- resolved_by: mechanism harvested from the loop's paused **M41-dir025-directive-task-full-projection**
+  (iteration-1), re-applied cleanly on `master` and re-run there (the M41 branch was stranded on a
+  stale driver base + conflicted with concurrent human edits, so its correct pieces were harvested
+  rather than merged — the loop's real work is preserved).
+- outcome: **applied — real-landing verified in the web.**
+  - `scripts/it0-dir-task-project.mjs` regenerates a directive task's body as the FULL record
+    (Source + complete Finding + Requested action + AC + DoD + plan reference + Status mirror),
+    GENERATED-not-hand-edited (byte-for-byte idempotent on re-run — DIR-002 discipline).
+  - All 24 projected directive tasks re-projected under the new contract; `## Finding`/`## Requested
+    action`/`## Acceptance Criteria`/`## Definition of Done` now live in the task body verbatim.
+  - `.claude/skills/quay-directive/SKILL.md` step 6b contract updated to the 7-part full record +
+    points at the script.
+  - `packages/quay/src/serve.js`: GFM `- [ ]`/`- [x]` checklist items render as a real disabled
+    `<input type="checkbox">` (the one construct DIR-025 item 4 named), + regression tests.
+- evidence: **Playwright + curl on a live `quay serve` — `/task/DIR-021` renders Finding, Requested
+  action, Acceptance Criteria (as real checkboxes), and Definition of Done in full** (the same page
+  that previously showed only a 3-line summary — see this DIR's own Finding). Anti-drift green (26
+  files / 24 tasks, no divergence); independently audited NO REFUTATION FOUND.

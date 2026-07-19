@@ -114,6 +114,8 @@ button:hover { background: #0052a3; }
 .body h2, .body h3 { margin-top: 1rem; }
 .body ul, .body ol { margin: 0.4rem 0 0.4rem 1.5rem; }
 .body li { margin: 0.15rem 0; }
+.body li.task-list-item { list-style: none; margin-left: -1.2rem; }
+.body li.task-list-item input[type="checkbox"] { margin-right: 0.35em; }
 .body pre {
   background: #f1f3f5;
   border-radius: 4px;
@@ -229,7 +231,23 @@ function renderMarkdown(text) {
     if (!inList) return;
     const tag = inList;
     out.push(`<${tag}>`);
-    for (const item of listBuf) out.push(`<li>${inlineMarkdown(item)}</li>`);
+    for (const item of listBuf) {
+      // DIR-025/M41: GFM task-list checkbox glyphs (`[ ]` / `[x]`) at the start of a list
+      // item — as found rendering literally (e.g. "[ ] some AC text") when the full DIR
+      // Acceptance Criteria / Definition of Done checklists were first projected into
+      // directive task bodies. Render as a real (disabled, state-only) checkbox input
+      // instead of leaving the bracket glyph as plain text. Minimal, additive tweak only —
+      // does not touch any other list/paragraph rendering path.
+      const cbm = /^\[([ xX])\]\s+(.*)$/.exec(item);
+      if (cbm) {
+        const checked = cbm[1].toLowerCase() === "x";
+        out.push(
+          `<li class="task-list-item"><input type="checkbox" disabled${checked ? " checked" : ""}> ${inlineMarkdown(cbm[2])}</li>`
+        );
+      } else {
+        out.push(`<li>${inlineMarkdown(item)}</li>`);
+      }
+    }
     out.push(`</${tag}>`);
     listBuf = [];
     inList = null;

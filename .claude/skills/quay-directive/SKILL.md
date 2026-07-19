@@ -195,14 +195,27 @@ discussed yet, stop and say so instead of inventing content.
         directive is the natural mapping — this is the task's OWN lifecycle
         status, distinct from the mirror field below; do not conflate them).
       - `body`: a GENERATED projection, always fully regenerated from the file
-        (never hand-edited, never incrementally patched) — exactly three
-        parts, in this order:
+        (never hand-edited, never incrementally patched) — the FULL record
+        (DIR-025/M41: a directive task must be a single canonical VIEWABLE
+        record, not a thin summary — the same "task = single canonical
+        record" principle DIR-014 item 6 established for milestone tasks),
+        in this order. **Use `scripts/it0-dir-task-project.mjs <dir-id>
+        --experiment-dir=<path> --write` to generate/refresh this body — it
+        implements exactly this contract; do not hand-assemble it.**
         1. A link line: `` Source: `experiments/<EXPERIMENT>/directives/pending/DIR-NNN-<slug>.md` ``
            (or `archive/`/`retracted/` if the file has since moved — re-derive
            the real current path, do not assume `pending/`).
-        2. The Finding section's first paragraph (summary), copied verbatim —
-           not paraphrased, not the whole Finding section.
-        3. A status-mirror line, exactly: `Status mirror: <value>` where
+        2. The COMPLETE `## Finding` section, verbatim in full (not only its
+           first paragraph) — the whole finding, exactly as written in the file.
+        3. The COMPLETE `## Requested action` section, verbatim in full — together
+           with the Finding, this is the directive's full proposal.
+        4. The COMPLETE `## Acceptance Criteria` checklist, verbatim, with its
+           `- [ ]` items preserved exactly as written (checkbox glyphs intact).
+        5. The COMPLETE `## Definition of Done` section, verbatim in full.
+        6. Any **plan reference** the DIR carries (e.g. a `## Plan` section or a
+           `docs/plans/*.md` path cited in the file), verbatim, if present in the
+           file — omit this part if the DIR carries no such reference.
+        7. A status-mirror line, exactly: `Status mirror: <value>` where
            `<value>` is copied byte-for-byte from the DIR file's own
            `status:` frontmatter line at the moment of projection (one of
            `pending | applied | deferred | rejected`). This is the field the
@@ -211,6 +224,10 @@ discussed yet, stop and say so instead of inventing content.
            refreshed, the check is designed to FAIL, by design (that IS the
            enforcement DIR-002 asked for; do not treat a stale mirror as
            harmless).
+        It remains a GENERATED projection (DIR-002/M-DIR-PROJECTION): fully
+        regenerated from the file at every projection/re-projection, never
+        hand-edited, never incrementally patched — re-running this step against
+        an unchanged file must reproduce the exact same body byte-for-byte.
       - `extra`: `{"dirFile": "<path-to-the-DIR-NNN.md-file>", "dirStatus":
         "<same-value-as-the-status-mirror-line>"}` — a machine-readable
         duplicate of the same two facts already in the body, so the anti-drift
