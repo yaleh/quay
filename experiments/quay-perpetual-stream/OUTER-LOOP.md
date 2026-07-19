@@ -305,41 +305,76 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      to never (DIR-016's finding). Record the check's PASS/FAIL output directly in this ABSORB's log
      entry, mirroring the V_meta gate's row-update discipline.
    - **DoD meta-enforcer gate (DIR-017 / M25-dod-meta-enforcer Step 1 + M32-dod-escrow-testfloor
-     Step 2, HARD BLOCK on step 7's `milestone_counter++`):** runs immediately AFTER the
-     adversarial-audit gate, V_meta consolidation-lag gate, and design-only-milestone impl-row gate
-     above all individually clear, and BEFORE the driver→master publish sub-step below. This gate
-     does NOT replace any of the three individual gates above — each keeps its own HARD BLOCK text
-     and evaluation as-is — it adds ONE more standing check that the RECORD of all six named DoD
-     clauses (`inherited-core.md`'s "Definition of Done" section: Clause 1 adversarial-audit,
-     Clause 2 V_meta-lag, Clause 3 line-budget, Clause 4 impl-row, Clause 6 escrow-Δv, Clause 7
-     product-work test-floor) plus the Clause 5 no-self-exemption meta-clause is actually complete
-     and undrifted for this milestone. Run: `scripts/it0-dod-check.sh <milestone-id> <charter-file>
-     <absorb-entry-text-or-file>` — where `<absorb-entry-text-or-file>` is this milestone's own
-     ABSORB log entry (the same text just produced by the three gates above, saved to a file if not
-     already one). A non-zero exit is the SAME HARD BLOCK shape/placement as the three gates it
-     wraps: `milestone_counter++` **MUST NOT** run until the check is re-run and PASSes (exit 0).
-     Record the check's PASS/FAIL output directly in this ABSORB's log entry, mirroring the V_meta
-     gate's and impl-row gate's own row-update discipline.
-     **Engine route (QENG-5 / epicd-engine-port — the executable, self-logging invocation path):**
-     this same DoD check now runs THROUGH the quay gate engine rather than as a bare prose shell
-     call. The milestone's task carries `extra.acceptance` = the `it0-dod-check.sh <id> <charter>
-     <absorb>` command above, and the gate is invoked as **`quay gate <milestone-task>`** (QENG-1
-     gate engine + QENG-2 acceptance meter), which runs the identical `it0-dod-check.sh` and records
-     a GateEvent (`verdict: pass|fail`, queryable via `quay gate-log <milestone-task>`), so the DoD
-     verdict is a machine-logged engine event, not a prose claim. `it0-dod-check.sh` remains the
-     underlying check; `quay gate` / `quay complete` is the wired invocation path. Reproduce the
-     pass/fail behavior end-to-end: `quay gate QENG-5-DEMO-PASS` → exit 0; `quay gate
-     QENG-5-DEMO-FAIL` → exit 1 (committed fixture tasks whose meters run this exact script). (Line-budget, Clause 3, fires separately
-     at plan-time per step 1 — `it0-dod-check.sh` re-checks the charter's own line-budget clause
-     here too, at ABSORB, as a drift check that plan-time's PASS still holds against the FINAL
-     charter text, but a plan-time FAIL on that clause alone is not this gate's primary trigger
-     point. Clause 6 escrow-Δv fires only for design-only milestones claiming a nonzero Δv — see
-     `inherited-core.md`'s Clause 6 for the exact trigger condition. Clause 7 product-work
+     Step 2 + DIR-021 / M38-dod-gate-operative-real-milestone, HARD BLOCK on step 7's
+     `milestone_counter++`):** runs immediately AFTER the adversarial-audit gate, V_meta
+     consolidation-lag gate, and design-only-milestone impl-row gate above all individually clear,
+     and BEFORE the driver→master publish sub-step below. This gate does NOT replace any of the
+     three individual gates above — each keeps its own HARD BLOCK text and evaluation as-is — it
+     adds ONE more standing check that the RECORD of all six named DoD clauses
+     (`inherited-core.md`'s "Definition of Done" section: Clause 1 adversarial-audit, Clause 2
+     V_meta-lag, Clause 3 line-budget, Clause 4 impl-row, Clause 6 escrow-Δv, Clause 7 product-work
+     test-floor) plus the Clause 5 no-self-exemption meta-clause is actually complete and undrifted
+     for this milestone.
+
+     **PRIMARY invocation — `quay gate <milestone-task>` (QENG-1 gate engine + QENG-2 acceptance
+     meter; operative since DIR-021/M38, not merely designed):**
+     1. Write the ABSORB-entry-excerpt file (the same `awk`/paste extraction pattern used since
+        M25, e.g. `/tmp/m<NN>-absorb-entry.md`) FIRST — it must exist and contain this milestone's
+        actual ABSORB narrative (the disposition text just produced by the three gates above)
+        BEFORE the next step, or the check reads stale/missing content.
+     2. Confirm (or seed, if this is the milestone's first ABSORB-time run) the milestone task's
+        `extra.acceptance` via `quay task edit <milestone-task> --acceptance 'bash
+        experiments/quay-perpetual-stream/scripts/it0-dod-check.sh <task-id> <charter-file>
+        <absorb-entry-file-path>'` — the command references the FILE PATH written in step 1, task
+        id (not milestone id, per the convention confirmed at M37 ABSORB), repo-root-relative paths
+        (the acceptance runner's cwd = workspaceRoot = repo root). In practice this is normally
+        seeded once at SELECT time (step 1) with the eventual absorb-entry file path already
+        decided (e.g. `/tmp/m<NN>-absorb-entry.md`), so this ABSORB-time step is usually a
+        no-op re-confirmation, not a re-seed — see DIR-021's chicken/egg resolution note below.
+     3. Run **`quay gate <milestone-task>`** — this is the OPERATIVE invocation, not
+        `it0-dod-check.sh` called bare. It runs the identical `it0-dod-check.sh <id> <charter>
+        <absorb>` command under the hood (`it0-dod-check.sh` remains the underlying check logic;
+        `quay gate` is the wired invocation path — QENG-1 gate engine + QENG-2 acceptance meter,
+        default gate = `acceptance`), and additionally APPENDS a GateEvent (`verdict: pass|fail`,
+        actor `quay-cli`, timestamp, reason) to the engine's gate-event log. Exit 0 = PASS, exit 1 =
+        FAIL — the SAME HARD BLOCK shape/placement as the three gates this wraps:
+        `milestone_counter++` **MUST NOT** run until `quay gate <milestone-task>` is re-run and
+        exits 0.
+     4. Confirm the GateEvent landed: `quay gate-log <milestone-task> --json` — paste the raw JSON
+        array (not a paraphrase) into the ABSORB log entry.
+     5. Paste BOTH the `quay gate` command's literal stdout (`PASS` or `FAIL — <reason>`) AND the
+        `quay gate-log --json` GateEvent directly in this ABSORB's log entry, mirroring the V_meta
+        gate's and impl-row gate's own row-update discipline — this replaces the bare
+        `it0-dod-check.sh` stdout paste used at every prior milestone through M37.
+     (`quay complete <milestone-task>` is the equivalent DIR-023-lifecycle-adoption invocation once
+     that layer lands — precondition status=ready, runs the same acceptance gate, and on PASS writes
+     status=done directly; until DIR-023 is adopted, `quay gate` + a separate manual status/backlog
+     update is the standing path.)
+
+     **Chicken/egg ABSORB-ordering note (DIR-021):** the `extra.acceptance` command's
+     `<absorb-entry-file>` argument does not exist yet at SELECT time (the ABSORB narrative is
+     drafted live, mid-milestone) — this is resolved by the command referencing a FILE PATH (never
+     literal ABSORB text baked in at SELECT time), written immediately before `quay gate` is invoked
+     per step 1 above. This mirrors the `/tmp/m<NN>-absorb-entry.md` extraction pattern already
+     standing practice for every `it0-dod-check.sh` invocation since M25 (see dashboard.md's own
+     ABSORB entries, e.g. `/tmp/m37-absorb-entry.md`) — DIR-021 did not invent a new pattern, it
+     wired the SAME pattern through the engine instead of a bare shell call.
+
+     **Underlying check details (unchanged by the engine wiring):** Line-budget, Clause 3, fires
+     separately at plan-time per step 1 — `it0-dod-check.sh` re-checks the charter's own line-budget
+     clause here too, at ABSORB, as a drift check that plan-time's PASS still holds against the
+     FINAL charter text, but a plan-time FAIL on that clause alone is not this gate's primary
+     trigger point. Clause 6 escrow-Δv fires only for design-only milestones claiming a nonzero Δv —
+     see `inherited-core.md`'s Clause 6 for the exact trigger condition. Clause 7 product-work
      test-floor fires for milestones whose backlog row carries a product-touching `surface:` label
      (`surface:cli`/`surface:web-ui`/`surface:provider-abi`/`surface:mcp`, or no `surface:` label at
      all — fail-closed) — see `inherited-core.md`'s Clause 7 for the exact trigger condition and the
      non-product-touching exemptions (`surface:method-infra`/`surface:docs`/`surface:cross-cutting`/
-     `surface:packaging`).)
+     `surface:packaging`). Reproduce the pass/fail behavior end-to-end against the fixtures at any
+     time: `quay gate QENG-5-DEMO-PASS` → exit 0; `quay gate QENG-5-DEMO-FAIL` → exit 1 (committed
+     fixture tasks whose meters run this exact script) — these remain useful as a smoke test of the
+     wiring itself, but are NOT a substitute for running `quay gate <milestone-task>` against the
+     REAL milestone at its own ABSORB.
    - **Driver → master publish sub-step (DIR-018 / M23-outer-driver-isolation, HARD sequencing —
      runs AFTER the adversarial-audit gate, V_meta consolidation-lag gate, design-only-milestone
      impl-row gate, AND the DoD meta-enforcer gate above all clear, and BEFORE step 7's

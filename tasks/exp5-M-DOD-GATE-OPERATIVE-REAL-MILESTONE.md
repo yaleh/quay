@@ -1,15 +1,19 @@
 ---
 id: exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE
 title: "DIR-021 Layer 1: make the DoD gate OPERATIVE on a REAL milestone via
-  quay gate — seed this milestone's own extra.acceptance meter, invoke
-  quay gate at this milestone's own ABSORB (not a fixture), and promote the
-  OUTER-LOOP.md engine route from side-note to primary instruction"
+  quay gate — seed this milestone's own extra.acceptance meter, invoke quay gate
+  at this milestone's own ABSORB (not a fixture), and promote the OUTER-LOOP.md
+  engine route from side-note to primary instruction"
 status: in-progress
 labels:
   - milestone-candidate
   - surface:method-infra
   - milestone:M38-dod-gate-operative-real-milestone
-extra: {}
+extra:
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE
+    experiments/quay-perpetual-stream/charters/M38-dod-gate-operative-real-milestone.md
+    /tmp/m38-iter0-absorb-entry.md
 ---
 ## Provenance
 SELECTed at m37→m38 DRAIN/SELECT boundary, 2026-07-19, directly from `DIR-021`
