@@ -3,7 +3,7 @@ id: exp5-M-WEBUI-TRIGGER-HONESTY
 title: "Web UI action_buttons: stop overstating success when trigger delivery
   is degraded/async — either qualify the banner or perform a synchronous
   write when no live dispatcher is configured"
-status: in-progress
+status: done
 labels:
   - milestone-candidate
   - surface:web-ui
@@ -81,10 +81,29 @@ escrow-Δv N/A — not design-only, 7 test-floor — `surface:web-ui` is product
 coverage disposition or waiver is required at ABSORB). No task-specific exemption from any clause.
 
 ## Status mirror
-todo (created @m29 DRAIN/SELECT boundary, 2026-07-18; SELECTed @m33 DRAIN/SELECT boundary,
-2026-07-19, scoped to G-S4-01 only per this task's own "future charter should decide scope"
-guidance — G-S4-02 remains open/deferred, a separate future candidate if still wanted after G-S4-01
-lands)
+done (ABSORBed @m33, 2026-07-19; created @m29 DRAIN/SELECT boundary, 2026-07-18; SELECTed @m33
+DRAIN/SELECT boundary, 2026-07-19, scoped to G-S4-01 only per this task's own "future charter should
+decide scope" guidance — G-S4-02 remains open/deferred, a separate future candidate if still wanted
+after G-S4-01 lands)
+
+**Two-iteration independent convergence.** Both `exp5-m33-iteration-0` and `exp5-m33-iteration-1`
+independently diagnosed the same root bug and converged on the same fix shape (condition
+`serve.js`'s success banner on `deliverTrigger()`'s `result.delivered`). Merged iteration-0 as
+primary (`git merge --no-ff exp5-m33-iteration-0`, commit `576696c`) — its version has a marginally
+more defensive fallback default. iteration-1's fix and live-browser evidence kept as independent
+confirmation only, not merged.
+
+**Acceptance audit (Clause 1, unconditional) — verdict NO REFUTATION FOUND.** A fresh-context,
+out-of-band adversarial-audit subagent independently re-verified all 5 ACs against the merged state:
+read `serve.js:975-979` directly (honest, `result.delivered`-conditioned banner text confirmed), ran
+`git diff --stat` confirming `action.js` byte-identical (G-S4-02 untouched), inspected the live-
+browser evidence screenshot directly, independently re-ran `node --test test/serve.test.mjs` (passes,
+1/1, all 8 new assertions PASS), and confirmed scope hygiene. See `dashboard.md`'s "ABSORB m33" entry
+for the full write-up.
+
+**Realized Δv = +0.40** (Web UI cov 0.92→0.94, weight 20, per the standing VT-chart-1 rubric for
+`surface:web-ui` exploit fixes, mirroring m29's precedent). VT chart-1 total: 111.15/120 →
+**111.55/120**.
 
 ---
 ## Not selected (M29)
