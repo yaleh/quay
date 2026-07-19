@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-NATIVE-RELATION-SYNC | Native provider: make parent/children relation writes bidirectional (or explicitly document children as non-authoritative), matching the github provider's writeRelations() contract | DONE | exploit (fix a real, dogfooding-confirmed provider-ABI asymmetry), capability-growth (secondary — | milestone-candidate, surface:provider-abi, milestone:M35-native-relation-sync |
 | exp5-M-AC-DOD-CHECKLIST-AUDIT-WRITEBACK | DIR-020: AC/DoD in task bodies become GitHub-flavored Markdown checklists (- [ ]/- [x]), authored unchecked at SELECT, ticked ONLY by the per-milestone acceptance-audit subagent's write-back as it confirms each item — Clause 0 updated to accept the checklist shape, an unchecked box at ABSORB HARD-blocks exactly as an unmet criterion does today | DONE | governance-integrity (primary) — per-criterion AC/DoD satisfaction becomes visible and write-tracked | milestone-candidate, surface:method-infra, milestone:M34-ac-dod-checklist-writeback |
 | exp5-M-WEBUI-TRIGGER-HONESTY | Web UI action_buttons: stop overstating success when trigger delivery is degraded/async — either qualify the banner or perform a synchronous write when no live dispatcher is configured | DONE | exploit (fix a real, dogfooding-confirmed UX-honesty defect), capability-growth (secondary — Web | milestone-candidate, surface:web-ui |
 | exp5-M-DOD-ESCROW-TESTFLOOR | DIR-017 Step 2: add the escrow-Δv clause (a design-only milestone's Δv is provisional until its -IMPL ships) and the product-work test-floor clause (product-touching work carries real tests >=80%, actually run) to inherited-core.md's Definition of Done, mechanically enforced by it0-dod-check.mjs as new Clause 6/7 | DONE | explore, governance-integrity (primary) — closes two more Goodhart surfaces named by | milestone-candidate, surface:method-infra, milestone:M32-dod-escrow-testfloor |
@@ -28,9 +29,8 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| exp5-M-NATIVE-RELATION-SYNC | Native provider: make parent/children relation writes bidirectional (or explicitly document children as non-authoritative), matching the github provider's writeRelations() contract | SELECTED | exploit (fix a real, dogfooding-confirmed provider-ABI asymmetry), capability-growth (secondary — | milestone-candidate, surface:provider-abi, milestone:M35-native-relation-sync |
 | exp5-M-CLI-UX | CLI usability closeout (UQ-042..046) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:cli |
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_26 milestone-candidate task(s) as of 2026-07-19T04:18:41.434Z._
+_26 milestone-candidate task(s) as of 2026-07-19T04:37:46.088Z._
