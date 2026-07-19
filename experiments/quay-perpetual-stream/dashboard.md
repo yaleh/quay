@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 39** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 40** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -3512,3 +3512,106 @@ ABSORB must not forget the checkpoint write.
 
 ## Backlog row
 | exp5-M-MIGRATE-IMPL-ROW-LINE-BUDGET-GATES | DIR-022 Layer 2 phase 1: register impl-row and line-budget as named quay engine gates | governance-integrity (primary) + capability-growth (secondary) | no VT chart cell | milestone-candidate, surface:cli, milestone:M39-migrate-impl-row-line-budget-gates |
+## ABSORB m40: M40-dir014-task-canonical-lifecycle-record
+
+**Source / SELECT recap:** `DIR-014` item 6 (task = canonical lifecycle record), chosen over DIR-022
+phase 2 (routine, non-time-sensitive continuation) and 6 open backlog candidates. DIR-014 was
+reverted to `pending` earlier the same day (commit `3aa40bd`, human directive audit) and
+scope-expanded (commit `5c7ac2f`) with the new item 6. Chosen for freshness/human-emphasis over
+DIR-022's routine continuation, per the standing DIR-over-backlog precedent. Scoped explicitly to
+"phase 1 = item 6 only" (task carries `## Proposal` embedded + `## Plan` referenced-or-N/A,
+mechanically enforced by a new DoD sibling Clause 8), deferring items 2/3/5 (DISPATCH wiring,
+policy de-optionalization, dogfood customers) to a later DIR-014 phase — mirrors the
+DIR-017/DIR-022 phased-program precedent.
+
+**Two-iteration summary:** both iterations independently implemented Clause 8 (task
+canonical-lifecycle-record) in `it0-dod-check.mjs`, reusing the existing `extractSection()` helper,
+with 2 new RED/GREEN fixtures and an `inherited-core.md` subsection. They diverged on ONE design
+point: iteration-0 (merged as primary) gated Clause 8's trigger on the task's own `milestone:M<N>`
+label (N≥40 fires, N<40 or absent grandfathers as N/A) — justified directly by the charter's own
+"Explicitly OUT of scope: no retroactive backfill onto ≤M39 tasks" constraint, and verified against
+all 24 real pre-existing `exp5-M-*` tasks (23 have no `## Proposal`, would all HARD-block under an
+unconditional trigger). Iteration-1 (kept as independent-verification record, not merged, report at
+`report.iteration-1.md`) instead made the trigger genuinely unconditional, patching 4 pre-existing
+GREEN *fixtures* (not real tasks) to carry minimal Proposal/Plan stubs so they stay compliant.
+Reconciled by merging iteration-0 (`c90c0cc`) as primary, since it more directly honors the
+charter's explicit forward-only constraint without touching any pre-existing fixture content;
+iteration-1's branch was force-deleted after its report was preserved.
+
+**adversarial-audit gate: NO REFUTATION FOUND at AC-content level, with one genuine non-blocking
+CONCERN** (full report: `experiments/quay-perpetual-stream/milestones/M40-dir014-task-canonical-lifecycle-record/audit.md`).
+The audit independently re-ran every claim with its own commands: read both `## Proposal`
+(4390 chars, real/specific) and `## Plan` (`N/A` with genuine reasoning) sections directly on this
+task; confirmed Clause 8 genuinely wired into both `it0-dod-check.mjs` (full implementation) and
+`it0-dod-check.sh` (confirmed a pure delegate for ALL 9 clauses, not a new asymmetry); independently
+re-ran `dod-fixture-selfcheck.sh` — 15/15 fixtures PASS; read both new fixtures directly and
+confirmed the RED/GREEN split is genuinely isolated to Proposal/Plan content (clauses 0-7
+byte-identical between them); confirmed `inherited-core.md`'s new subsection is correctly placed
+and the two-class diversity policy sections are untouched (diffed directly, zero overlap);
+independently re-ran the self-referential `it0-dod-check.sh` invocation and confirmed Clause 8
+PASSes citing the real task file. All 5 AC checkboxes were independently re-confirmed and ticked
+`[x]` with the audit's own fresh evidence citations (see
+`tasks/exp5-M-DIR014-TASK-CANONICAL-LIFECYCLE-RECORD.md`).
+
+**CONCERN (non-blocking, carried forward as an open item):** the audit constructed a concrete repro
+showing iteration-0's `milestone:M<N>`-label-based grandfather mechanism **fails open** — a future
+(post-M40) task that simply omits the `milestone:M<N>` label entirely N/A-passes Clause 8 silently,
+indistinguishable from a legitimate pre-M40 legacy task, even with a placeholder `## Proposal` and a
+broken `## Plan` reference. The audit notes iteration-1's unconditional-trigger design (kept as an
+unmerged record) does not have this hole for real tasks, and suggests it as a follow-up fix
+direction. This does not refute AC3/item-6c as literally worded (a real, working HARD-BLOCK exists
+and correctly fires against both fixtures and this milestone's own real task) but is a genuine
+robustness gap worth a future milestone. Also flagged: iteration-0's report transcript for the
+pre-M40 grandfather spot-check was not fully reproducible as literally written (needed a
+`## Backlog row` section in the throwaway absorb-entry file first) — a transcript-completeness gap,
+not a fabricated result; the underlying grandfather behavior is genuine.
+
+**V_meta consolidation-lag (Clause 2):** clear — `v-meta-ledger.md`'s one row remains `consolidated`
+since m7, no `confirmed`-and-unresolved rows outstanding, no rows past threshold.
+
+**Escrow-Δv (Clause 6):** N/A — not design-only; real DoD-clause code + fixtures + docs were
+delivered directly, not a design doc awaiting a future `-IMPL` follow-up.
+
+**Impl-row (Clause 4):** N/A — same reasoning; this milestone's own output IS the mechanism.
+
+**Test-floor (Clause 7):** N/A — `surface:method-infra`, no `packages/quay*` product files touched
+(independently confirmed by the audit via `git diff 8c3c2bf..HEAD --stat -- 'packages/quay*'` —
+zero output). The new fixture pair plus `dod-fixture-selfcheck.sh`'s 15/15-green re-run is the test
+evidence for this change, per the charter's own disposition.
+
+**DoD meta-enforcer gate — invoked via `it0-dod-check.sh` (task id first, per convention), Clause 8
+not yet engine-wired via `quay gate` this phase (state which, per AC5's own instruction):**
+```
+$ bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh exp5-M-DIR014-TASK-CANONICAL-LIFECYCLE-RECORD experiments/quay-perpetual-stream/charters/M40-dir014-task-canonical-lifecycle-record.md /tmp/m40-absorb-entry.md
+```
+(re-run below as part of finalizing this ABSORB entry, after the checklist write-back and this text
+exist on disk — mirrors the M38/M39 chicken/egg ABSORB-ordering pattern.)
+
+**Realized Δv**: small-to-moderate — governance-integrity (primary: closes DIR-009's "task =
+canonical record" gap's remaining AC/DoD-only portion) + capability-growth (secondary: a genuinely
+new, reusable, mechanically-enforced task shape, Clause 8). No VT chart cell (mirrors the
+DoD-program lineage's own no-VT-cell precedent — M25/M30/M31/M32/M34/M36/M38/M39). VT chart-1 total
+unchanged: **111.55/120**. `milestone_counter` → **40**.
+
+**Backlog housekeeping**: `tasks/exp5-M-DIR014-TASK-CANONICAL-LIFECYCLE-RECORD.md` → `status: done`.
+`backlog.md` regenerated via `node scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream
+--write`. DIR-014 stays `pending` (only phase 1/item 6 delivered; items 2/3/5 remain — file not
+touched by this milestone beyond being its source).
+
+**Checkpoint DUE at this ABSORB (per the every-5-milestone cadence, last written cp-35 at m35):**
+`checkpoints/cp-40.md` written as part of this ABSORB, covering m36-m40.
+
+**DRAIN disposition of `directives/pending/` at this boundary, and m41 SELECT-candidate note:**
+`directives/pending/` retains `DIR-014` (phase 1 only delivered, items 2/3/5 remain — a larger,
+more judgment-risk-laden undertaking requiring the full N-independent-proposal dev-class pipeline),
+`DIR-021` (delivered, stays pending per its own escrow discipline), `DIR-022` (phase 1 delivered,
+4 judgment-heavy gates remain: adversarial-audit, V_meta-lag, escrow-Δv, test-floor), `DIR-023`,
+`DIR-024` (Layers 3-4, depend on DIR-022 finishing). `backlog.md` also retains the same 6 open
+M37-produced candidates. m41 SELECT should weigh: (a) the fail-open grandfather-gap follow-up
+flagged by this milestone's own audit (a small, well-scoped fix — adopt iteration-1's
+unconditional-trigger design, or add a companion "label must be present" check); (b) DIR-022 phase 2
+(4 remaining judgment-heavy gates); (c) DIR-014 phase 2 (items 2/3/5); (d) the 6 open backlog
+candidates. Must be reasoned explicitly at m41 SELECT, not defaulted.
+
+## Backlog row
+| exp5-M-DIR014-TASK-CANONICAL-LIFECYCLE-RECORD | DIR-014 phase 1 (item 6): task canonical lifecycle record — `## Proposal` embedded, `## Plan` referenced-or-N/A, new DoD Clause 8 | governance-integrity (primary) + capability-growth (secondary) | no VT chart cell | milestone-candidate, surface:method-infra, milestone:M40-dir014-task-canonical-lifecycle-record |

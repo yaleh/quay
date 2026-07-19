@@ -851,7 +851,7 @@ M21-impl-row-enforcement. See `directives/archive/DIR-016-*.md`'s `## Resolution
 full evidence trail.
 
 ## Definition of Done (M25-dod-meta-enforcer / DIR-017 Step 1, extended by M32-dod-escrow-testfloor
-/ DIR-017 Step 2)
+/ DIR-017 Step 2, extended by M40-dir014-task-canonical-lifecycle-record / DIR-014 item 6)
 
 DIR-017's Finding names a real risk: four ABSORB-time gates (adversarial-audit, V_meta
 consolidation-lag, line-budget, design-only-milestone impl-row) had each been added incrementally,
@@ -866,11 +866,14 @@ it names them together, states each one's shape in a common four-field template,
 new **no-self-exemption meta-clause** that applies across all four. DIR-017 Step 2
 (M32-dod-escrow-testfloor) later adds two more clauses to this same collecting place — Clause 6
 (escrow-Δv) and Clause 7 (product-work test-floor), same four-field template, same standing
-mechanical enforcement — see below.
+mechanical enforcement — see below. DIR-014 item 6 (M40-dir014-task-canonical-lifecycle-record)
+adds a ninth clause — Clause 8 (task canonical-lifecycle-record) — same four-field template,
+documented in its own subsection immediately after Clause 0's (the two are closely related: Clause
+0 checks AC/DoD presence, Clause 8 checks Proposal/Plan presence).
 
 **Mechanical enforcement of this section:** `scripts/it0-dod-check.{sh,mjs}` (below) is the standing
-check that a given milestone's task + charter + ABSORB-entry record actually satisfies all eight
-clauses below (clause 0 plus clauses 1-7) — wired into `OUTER-LOOP.md` step 6 as a HARD BLOCK on
+check that a given milestone's task + charter + ABSORB-entry record actually satisfies all nine
+clauses below (clause 0 plus clauses 1-8) — wired into `OUTER-LOOP.md` step 6 as a HARD BLOCK on
 step 7's `milestone_counter++`, in the same gate sequence/position as the three narrative HARD
 BLOCKs it wraps (see "DoD meta-enforcer gate" in `OUTER-LOOP.md`).
 
@@ -926,6 +929,65 @@ HARD-block semantics added DIR-020/M34-ac-dod-checklist-writeback, 2026-07-19)
   standard; exit 0 (PASS) otherwise. Mechanized in `scripts/it0-dod-check.mjs` (below).
 - **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), as clause 0 of the DoD meta-enforcer
   gate — the same HARD BLOCK as clauses 1-5.
+
+### Clause 0's sibling — task canonical-lifecycle-record gate (DIR-014 item 6 /
+M40-dir014-task-canonical-lifecycle-record, 2026-07-19) — documented as "Clause 8" below
+
+DIR-014 item 6 names a gap adjacent to, but distinct from, Clause 0's own AC/DoD-presence check:
+Clause 0 verifies a task carries acceptance criteria and a done-checklist, but nothing previously
+verified a task also carries the **design record** for HOW those criteria will be met — the
+`## Proposal` (chosen approach, embedded inline so it cannot drift out of sync with the task the
+way a separately-tracked design doc can) and the `## Plan` (either a reference to a real
+`docs/plans/*.md` staged-implementation file, or an explicit `N/A — <reason>` for small mechanical
+changes that don't warrant one). Before this milestone, 0 of the 24 `exp5-M-*` milestone tasks in
+this repo carried a `## Proposal` section at all — the requirement existed only as DoD prose
+("should have a proposal"), which is not a gate. This subsection makes the task the single
+canonical lifecycle record (proposal embedded + plan referenced-or-N/A) and mechanically enforces
+it, mirroring Clause 0's own presence-and-shape enforcement pattern one level up the lifecycle (AC
+answers "what does done mean", Proposal/Plan answers "how do we get there and is there a staged
+plan").
+
+### Clause 8 — Task canonical-lifecycle-record gate (DIR-014 item 6 /
+M40-dir014-task-canonical-lifecycle-record)
+- **Trigger condition:** FORWARD-ONLY — fires only for tasks whose `milestone:M<N>` label (the
+  existing task-label convention) has `N >= 40` (this milestone, the first to require the section).
+  A task with no `milestone:M<N>` label at all, or `N < 40`, is legacy/pre-cutover and N/A-passes,
+  stated explicitly rather than silently skipped — mirrors DIR-020/M34's own "checklist form
+  MANDATED going forward ... NOT retroactively rewritten ... no retroactive sweep required"
+  precedent for Clause 0's checklist-vs-prose distinction, and this milestone's own charter's
+  explicit "Explicitly OUT of scope: Retroactively backfilling `## Proposal`/`## Plan` onto the
+  ≤M39 milestones' tasks ... forward-only, same as DIR-020's AC/DoD rule." Unlike Clause 0's
+  checklist-vs-prose SHAPE distinction (where the section always existed), this is a brand-new
+  REQUIRED SECTION — an unconditional trigger would retroactively HARD-block all 23 pre-M40
+  `exp5-M-*` tasks that predate the requirement, which the charter explicitly disclaims.
+- **What it checks:** the milestone's task (`tasks/<task-id>.md`, same source Clause 0 reads, via
+  the same `extractSection()`-style regex helper — not a parallel implementation) contains a
+  non-empty, non-placeholder `## Proposal` section (the milestone's own single chosen approach,
+  embedded inline — not a pointer to a doc that can drift), AND a `## Plan` section that EITHER (a)
+  states `N/A` (case-insensitive) followed by a dash/colon and real reasoning, OR (b) references a
+  `docs/plans/*.md`-shaped path that resolves on disk (relative to repo root). A `## Plan` that
+  references a `docs/plans/*.md` path which does NOT resolve is a FAIL even though the section is
+  non-empty — a broken reference is worse than an honest `N/A`.
+- **Pass/fail semantics:** exit 1 (FAIL, HARD-blocks `milestone_counter++`) if the trigger fires
+  (task's `milestone:M<N>` label has `N >= 40`) and EITHER `## Proposal` is missing/empty/
+  placeholder-only, OR `## Plan` is missing entirely, OR `## Plan` references a `docs/plans/*.md`
+  path that does not resolve. exit 0 (PASS) if: the trigger does not fire (legacy/no-label task,
+  N/A); OR the trigger fires and both sections are well-formed per the above. Mechanized in
+  `scripts/it0-dod-check.mjs` (Clause 8) and `scripts/it0-dod-check.sh` (thin wrapper, same as
+  Clause 0). Two regression fixtures pin this clause in isolation:
+  `fixtures/dod/task-canonical-record-compliant-stub.md` (GREEN) and
+  `fixtures/dod/task-canonical-record-violating-stub.md` (RED), both wired into
+  `scripts/dod-fixture-selfcheck.sh`.
+- **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), as clause 8 (last in sequence) of
+  the DoD meta-enforcer gate — the same HARD BLOCK as clauses 0-7. Belongs in
+  `MECHANICALLY_UNCONDITIONAL_CLAUSES` (Clause 5's self-exemption scan) for the SAME DIR-019 reason
+  Clauses 3/4/6/7 do — it runs (and calls `dispositionedClauses.add(...)`) on every single
+  invocation regardless of outcome, including its own N/A/grandfathered branch, so "already
+  dispositioned" is not evidence a self-exemption of it is legitimate.
+- **Explicitly out of scope (deferred to a later DIR-014 phase):** DISPATCH wiring of
+  `quay-task-to-plan` for dev-class milestones (items 2/3), and dogfood customers routed through the
+  wired pipeline (item 5) — this clause only enforces the task-record SHAPE, not the pipeline
+  invocation that writes into it.
 
 ### Clause 1 — Per-milestone acceptance audit (DIR-007 / M10-audit-consolidation; made
 UNCONDITIONAL 2026-07-19, superseding the original conditional cadence rule; checklist write-back
