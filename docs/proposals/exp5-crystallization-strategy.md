@@ -158,14 +158,48 @@ the documents:
   self-verification ≈ the schema validator. §8 and §9 are two faces of one move — a canonical schema
   for an object + a formalized, self-verifying document that generates/checks it.
 
-**Tension to resolve (decision needed):** baime's `contracts:` are verified by the baime plugin's
-`validate-plugin.sh`; exp5's prompt docs are not baime-plugin skills. Either (a) build a small exp5
-contract-validator (a runnable meter for document conformance — itself an Axis-2 crystallization), or
-(b) bring the exp5 prompt docs under the baime plugin's skill format / the future quay document
-manager (§7). Recommendation: (a) now (cheap, unblocks the rewrites), converging toward (b) as §7's
-document-management capability lands.
+**Resolved (2026-07-19): the contract-validator becomes a QUAY document-management capability** — not
+an exp5-local script. quay is extended to manage documents/decisions (skills, prompt docs, ADRs) as
+first-class objects with contracts/validation and generated views (this is §7 made concrete). The
+formalized style + `contracts:` self-verification are enforced by quay, uniformly.
 
-## 10. Non-goals
+## 10. ADRs — crystallize DECISIONS out of prose (engine-tracked, quay-managed)
+
+Proposals/DIRs are prose *discussion records* — normal, but not solid enough for long-term
+development. The load-bearing content inside them is the set of **decision invariants**. Extract
+those into concise **ADRs** — the single source for "what we decided and why", replacing re-reads of
+long proposals. Resolved (2026-07-19): ADRs are **engine-tracked (`.epicd`-style)** and **quay is
+extended to manage them** as a first-class object kind (a `label:adr` / kind:adr quay object, so an
+ADR rides the §8 canonical schema + §7 doc-management + web visibility — an ADR is a labelled task
+instance with a formal Decision). Concise form: frontmatter (id/title/status/date/supersedes/refs) +
+**Context** (2-4 lines) + **Decision** (the invariant, imperative, may carry a λ-line) +
+**Consequences/Scope** (what it forbids/enables). Extract from proposals + DIR tasks; back-link
+task→ADR. (Reference: `manda/.epicd/decisions/`, `archguard/docs/adr/` — lean toward manda's
+3-section engine-tracked form, tightened.)
+
+## 11. Two deepening pillars (2026-07-19 — for continued discussion)
+
+- **Axis 2′ — replace LLM-prompt text with CODE wherever the step is DETERMINISTIC (the sharpest
+  crystallization lever).** Geometric-info-theory: a prompt that instructs a deterministic procedure
+  is molten — non-deterministic, expensive, unverifiable. A script is crystalline. Every *repeatable
+  method step that can be code* should BE code; the prompt shrinks to the genuine-judgment residue.
+  Apply this across ALL repeatable method text (resolved scope: skills, `OUTER-LOOP.md`,
+  `inherited-core.md`, inner-iteration prompts). This is the primary way §9's rewrites become
+  net-subtractive rather than reformatting.
+- **Discovery input — cross-experiment pattern analysis.** Before/while crystallizing, analyze exp5
+  AND earlier experiments (exp1-4) development history to extract the recurring PATTERNS and typical
+  FAILURE MODES (the molten / dual-source / designed-not-wired / phased-deferral families surfaced
+  this session are almost certainly a subset). Crystallization should target the real recurring
+  problems, not only what one session happened to hit. This analysis feeds and re-prioritizes the
+  plan.
+
+## 12. Resolved authoring detail (2026-07-19)
+The `## Proposal` section's authoring + checking (for directives AND tasks) follows the
+`proposal-to-plan` skill's proposal create-and-review discipline — not a mechanical fold of
+Finding+Requested action. Namespace: unify on the `exp5-` prefix for all exp5 directive/task ids
+(retire the bare/`experiment-4`-colliding ids).
+
+## 13. Non-goals
 - Do NOT crystallize by writing MORE rules — that is the additive-prose paradox (§3). Every item
   above is a deletion, a collapse, or an executable assertion.
 - Do NOT rewrite historical process narrative (past reports/dashboard log) — leave the record;
