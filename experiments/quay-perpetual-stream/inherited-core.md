@@ -850,7 +850,8 @@ Source: DIR-016 (filed together with DIR-015, its first concrete instance), reso
 M21-impl-row-enforcement. See `directives/archive/DIR-016-*.md`'s `## Resolution` section for the
 full evidence trail.
 
-## Definition of Done (M25-dod-meta-enforcer, DIR-017 Step 1)
+## Definition of Done (M25-dod-meta-enforcer / DIR-017 Step 1, extended by M32-dod-escrow-testfloor
+/ DIR-017 Step 2)
 
 DIR-017's Finding names a real risk: four ABSORB-time gates (adversarial-audit, V_meta
 consolidation-lag, line-budget, design-only-milestone impl-row) had each been added incrementally,
@@ -862,13 +863,16 @@ no mechanism preventing a future charter from narrating its way around one of th
 block). This section is that single collecting place. It does not redefine any of the four gates'
 own mechanics (each stays exactly as specified in its own section, cited below, not re-derived) —
 it names them together, states each one's shape in a common four-field template, and adds a fifth,
-new **no-self-exemption meta-clause** that applies across all four.
+new **no-self-exemption meta-clause** that applies across all four. DIR-017 Step 2
+(M32-dod-escrow-testfloor) later adds two more clauses to this same collecting place — Clause 6
+(escrow-Δv) and Clause 7 (product-work test-floor), same four-field template, same standing
+mechanical enforcement — see below.
 
 **Mechanical enforcement of this section:** `scripts/it0-dod-check.{sh,mjs}` (below) is the standing
-check that a given milestone's task + charter + ABSORB-entry record actually satisfies all six clauses
-below (clause 0 plus clauses 1-5) — wired into `OUTER-LOOP.md` step 6 as a HARD BLOCK on step 7's
-`milestone_counter++`, in the same gate sequence/position as the three narrative HARD BLOCKs it wraps
-(see "DoD meta-enforcer gate" in `OUTER-LOOP.md`).
+check that a given milestone's task + charter + ABSORB-entry record actually satisfies all eight
+clauses below (clause 0 plus clauses 1-7) — wired into `OUTER-LOOP.md` step 6 as a HARD BLOCK on
+step 7's `milestone_counter++`, in the same gate sequence/position as the three narrative HARD
+BLOCKs it wraps (see "DoD meta-enforcer gate" in `OUTER-LOOP.md`).
 
 **AC/DoD live in the TASK, not the charter (proposal↔task / plan↔milestone alignment, 2026-07-19).**
 A milestone's Acceptance Criteria (AC) and Definition of Done (DoD) are authored at the **proposal**
@@ -1003,19 +1007,98 @@ an explicit, human-visible **waiver line** logged in `dashboard.md`. Concretely:
   clause 5, indistinguishable from an undeclared silent skip (cited, not re-derived, from clauses 1
   and 2's own "documented no-op"/row-update requirements above).
 
+### Clause 6 — Escrow-Δv gate (DIR-017 Step 2 / M32-dod-escrow-testfloor)
+Closes the Goodhart-at-the-metric surface DIR-017 Step 2 names verbatim: *"a design-only
+milestone's Δv is provisional until its `-IMPL` ships — counters Goodhart at the metric."* A
+design-only milestone (same definition as Clause 4 above — its `backlog.md` row states "design
+delivered"/"design-doc only", or its deliverable includes a "Done-when clauses a future
+implementing milestone would need" section) must not have any VT Δv it claims folded into the
+confirmed VT-curve total as final; it must be recorded as **provisional/escrowed** until the
+corresponding `-IMPL` row (mandated by Clause 4) itself ABSORBs.
+
+- **Trigger condition:** fires ONLY when the milestone is design-only per Clause 4's own trigger
+  definition (cited, not re-derived — "design delivered"/"design-doc only" backlog-row marker, or
+  an equivalent future-implementer checklist) AND the milestone's ABSORB-entry text claims a
+  nonzero VT Δv (i.e. contains VT-curve-append language for this milestone, not the standard
+  `Δv̂: 0, no VT chart cell` method-infra disposition that governance/method-infra milestones
+  already record). A design-only milestone that claims **no** Δv (the M25/M30/M31/M32-style "no VT
+  chart cell" disposition) does not trigger this clause — there is nothing to escrow. A milestone
+  that is NOT design-only N/A-passes unconditionally (mirrors Clause 4's own N/A-pass shape).
+- **What it checks:** whether the ABSORB-entry text's VT-Δv-claim language for a design-only
+  milestone uses explicit escrow/provisional wording (e.g. "escrowed", "provisional Δv",
+  "pending -IMPL", "not yet confirmed/final") DIRECTLY ADJACENT to the Δv claim, rather than
+  presenting the number as folded into the confirmed VT-curve total with no such qualifier. This
+  is a documentation-discipline check (same shape as Clauses 1/2) — it does NOT re-derive whether
+  the Δv figure itself is numerically correct, only whether its FINALITY is correctly qualified.
+- **Pass/fail semantics:** exit 1 (FAIL, HARD-blocks step 7's `milestone_counter++`) if the
+  milestone is design-only, claims a nonzero Δv, and the ABSORB-entry text lacks escrow/provisional
+  language adjacent to that claim. exit 0 (PASS) if: the milestone is not design-only (N/A-pass);
+  OR is design-only but claims no Δv (documented no-op, e.g. "Δv̂: 0, no VT chart cell — method
+  infra"); OR is design-only, claims a Δv, AND that claim is explicitly marked
+  escrowed/provisional. **De-escrow condition** (stated here for completeness, not itself
+  mechanically checked by this clause — it is Clause 4's `-IMPL` row's own future ABSORB that
+  performs the de-escrow): an escrowed Δv becomes final/confirmed only when the corresponding
+  `-IMPL` row's own ABSORB entry records that the `-IMPL` milestone itself shipped and was
+  ABSORBed; that future ABSORB is responsible for updating the VT-curve total from
+  provisional to confirmed, or reversing it if the `-IMPL` never lands as designed.
+- **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), the "DoD meta-enforcer gate"
+  sub-step (same invocation point as Clauses 0-5, run together by `scripts/it0-dod-check.mjs`) —
+  immediately after Clause 4 (impl-row), since Clause 6's own trigger condition depends on Clause
+  4's design-only determination.
+
+### Clause 7 — Product-work test-floor gate (DIR-017 Step 2 / M32-dod-escrow-testfloor)
+Closes the second Goodhart surface DIR-017 Step 2 names verbatim: *"the product-work test-floor
+clause (product-touching work carries real tests ≥80%, actually run)."* For milestones whose scope
+touches shipped product code, the ABSORB entry must record a test-coverage disposition — never a
+silent gap.
+
+- **Trigger condition:** fires when the milestone's `backlog.md` row (or task `labels:`
+  frontmatter, same source) carries a **product-touching** `surface:` label — currently
+  `surface:cli`, `surface:web-ui`, `surface:provider-abi`, `surface:mcp` (and any compound label
+  whose components resolve to one of these, e.g. `surface:cli-mcp-webui-docs` fires because it
+  contains `cli`/`mcp`/`web-ui` components even though it is not an exact match — component-wise
+  matching, not exact-string matching, so a milestone cannot dodge the gate by labeling itself with
+  a multi-surface compound tag). It does NOT fire for **non-product-touching** labels —
+  `surface:method-infra`, `surface:docs`, `surface:cross-cutting`, `surface:packaging` — which are
+  pure methodology/dashboard/docs/build-tooling infra, mirroring Clause 4's trigger-condition-by-
+  label shape. A milestone with NO `surface:` label at all is treated as product-touching by
+  default (fail-closed, not fail-open — the absence of a label is not evidence of non-product
+  scope) and this clause fires.
+- **What it checks:** whether the ABSORB-entry text records a test-coverage disposition for the
+  touched surface — EITHER (a) a coverage statement of the shape "tests exist, ≥80%, actually run"
+  (accepts phrasings referencing a coverage percentage ≥80, or an explicit "full"/"complete"
+  coverage claim paired with a cited test-run command/output), OR (b) an explicit, DATED, reasoned
+  **waiver** of the shape `WAIVER: <milestone-id> | test-floor | <one-line reason> | <date>` (same
+  waiver-line shape Clause 5 already defines and that clause 5's own scanner already looks for,
+  reused here rather than inventing a second waiver syntax). A silent absence of both is a FAIL —
+  there is no third, undeclared-no-op case for this clause, mirroring how Clause 1 was made
+  unconditional (no cadence-precondition escape hatch).
+- **Pass/fail semantics:** exit 1 (FAIL, HARD-blocks step 7's `milestone_counter++`) if the
+  trigger fires (product-touching surface, or no `surface:` label) and the ABSORB-entry text
+  contains NEITHER a coverage disposition NOR a matching test-floor WAIVER line. exit 0 (PASS) if:
+  the milestone's surface is exclusively non-product-touching (N/A-pass); OR the trigger fires and
+  a coverage disposition or waiver line is present.
+- **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), the "DoD meta-enforcer gate"
+  sub-step (same invocation point as Clauses 0-6, run together by `scripts/it0-dod-check.mjs`) —
+  evaluated independently of Clause 6 (different trigger axis: design-only-ness vs. surface label),
+  positioned last in the clause sequence.
+
 ### `scripts/it0-dod-check.{sh,mjs}` — the standing mechanical check
 Given a milestone id, its charter file path, and its dashboard/ABSORB-entry text (or a fixture file
-standing in for that text), runs all 5 clauses above and exits 0 (all PASS/legitimately N/A, no
-undeclared self-exemption), 1 (at least one clause FAILs, or an undeclared self-exemption is found),
-or 2 (usage/environment error) — mirroring every sibling `it0-*.{sh,mjs}` pair's exit-code
-convention. See the script's own header comment for the exact per-clause implementation (clauses 3/4
-shell out to the existing `it0-ceiling-line-budget-check.sh`/`it0-impl-row-check.sh` directly;
-clauses 1/2 check documentation-discipline, not the underlying judgment call; clause 5 is a
-pattern/waiver-line scan). Wired into `OUTER-LOOP.md` step 6 as a HARD BLOCK on step 7's
+standing in for that text), runs all 7 clauses above (0-7, all named individually — there is no
+clause numbered "6-7 combined") and exits 0 (all PASS/legitimately N/A, no undeclared
+self-exemption), 1 (at least one clause FAILs, or an undeclared self-exemption is found), or 2
+(usage/environment error) — mirroring every sibling `it0-*.{sh,mjs}` pair's exit-code convention.
+See the script's own header comment for the exact per-clause implementation (clauses 3/4 shell out
+to the existing `it0-ceiling-line-budget-check.sh`/`it0-impl-row-check.sh` directly; clauses 1/2/6/7
+check documentation-discipline, not an underlying judgment call/arithmetic re-derivation; clause 5
+is a pattern/waiver-line scan). Wired into `OUTER-LOOP.md` step 6 as a HARD BLOCK on step 7's
 `milestone_counter++`, positioned immediately after the three existing HARD BLOCKs it wraps and
 before the driver→master publish sub-step — see `OUTER-LOOP.md`'s "DoD meta-enforcer gate" sub-step.
 
-Source: DIR-017 (`directives/pending/DIR-017-*.md`), Step 1 only — resolved by
-M25-dod-meta-enforcer. DIR-017 itself stays `pending` until a human confirms this step is operative
-before Steps 2-3 (the escrow-Δv clause, product-work test-floor clause, leakage metrics) may be
-SELECTed. See `directives/pending/DIR-017-*.md`'s "Human-verification gate" section.
+Source: DIR-017 (`directives/pending/DIR-017-*.md`), Steps 1-2 — Step 1 (Clauses 0-5) resolved by
+M25-dod-meta-enforcer; Step 2 (Clauses 6-7, this section) resolved by M32-dod-escrow-testfloor.
+DIR-017 itself stays `pending` — Step 3 (leakage metrics onto `dashboard.md`) remains open,
+separately selectable, per the DIR's own clearance-note text ("clearing the gate unlocks SELECT of
+Steps 2/3; it does not complete them"). See `directives/pending/DIR-017-*.md`'s "Human-verification
+gate — CLEARED" section.
