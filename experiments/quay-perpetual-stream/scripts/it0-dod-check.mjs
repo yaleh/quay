@@ -61,7 +61,7 @@
 // below for the section-isolation logic that makes the combined-fixture shape safe.
 //
 // Exit codes:
-//   0 = all 9 gate clauses (0-8) PASS or legitimately N/A (with disposition present), AND no
+//   0 = all 10 gate clauses (0-9) PASS or legitimately N/A (with disposition present), AND no
 //       undeclared self-exemption found.
 //   1 = at least one gate clause FAILs, OR a self-exemption is found with no waiver line.
 //   2 = usage/environment error (missing args, files not found, node unavailable, sibling script
@@ -136,6 +136,17 @@ const nops = [];
 // disposition recorded at all"). Populated by clauses 1-4 below as each runs.
 const dispositionedClauses = new Set();
 
+// DIR-026 (SPLIT-OR-COMMIT): a milestone that cannot fully complete for a factor OUTSIDE project
+// control marks the terminal `needs-human` lifecycle outcome instead of a partial/pending delivery.
+// Detect a declared needs-human outcome (e.g. a line `OUTCOME: needs-human — <reason>` /
+// `Terminal outcome: needs-human ...`) in the ABSORB-entry or charter text, and capture the stated
+// reason. Clause 0 waives its unchecked-AC hard-block for a declared needs-human (a blocked
+// milestone legitimately has incomplete AC); Clause 9 validates the reason is a genuine EXTERNAL
+// blocker (in-project difficulty is NOT a valid needs-human reason — it must be split-and-completed).
+const needsHumanRe = /^\s*(?:OUTCOME|STATUS|Terminal outcome|Outcome)\s*[:=]\s*needs-human\b\s*[—:-]?\s*(.*)$/im;
+const needsHumanMatch = (absorbText + "\n" + charterText).match(needsHumanRe);
+const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? needsHumanMatch[1].trim() : "" };
+
 // --- Clause 0: AC + DoD present and well-formed in the TASK (single source of truth) ---
 // AC/DoD are authored at proposal stage and recorded in the task body (tasks/<id>.md), per
 // inherited-core.md's "AC/DoD live in the TASK" rule (proposal↔task / plan↔milestone). This clause
@@ -181,7 +192,11 @@ const dispositionedClauses = new Set();
   const clause0Fail = [];
   if (acSection === null) clause0Fail.push("no '## Acceptance Criteria' section found in the task");
   else if (acClauses.length === 0) clause0Fail.push("'## Acceptance Criteria' section has no concrete checkable clause (needs >=1 non-placeholder bullet/numbered line)");
-  else if (isChecklistForm && uncheckedBoxes.length > 0) {
+  else if (isChecklistForm && uncheckedBoxes.length > 0 && !needsHuman.declared) {
+    // DIR-026: an unchecked AC box hard-blocks a milestone claiming DONE (no partial/pending). A
+    // milestone that instead declares the terminal `needs-human` outcome legitimately has
+    // incomplete AC (it is externally blocked, not done) — the unchecked-box block is waived here;
+    // Clause 9 then validates that the needs-human reason is a genuine EXTERNAL blocker.
     clause0Fail.push(`checklist-form AC has ${uncheckedBoxes.length} unchecked item(s) remaining (REFUTED-equivalent, HARD-blocks exactly as an unmet criterion does): ${uncheckedBoxes.map((t) => `"${t}"`).join(", ")}`);
   }
   if (dodSection === null) clause0Fail.push("no '## Definition of Done' section found in the task");
@@ -644,6 +659,39 @@ const dispositionedClauses = new Set();
     for (const m of clause8Fail) failures.push(`clause8-task-canonical-lifecycle-record: ${m} ${srcLabel}`);
     dispositionedClauses.add("task-canonical-lifecycle-record");
   }
+  }
+}
+
+// --- Clause 9: SPLIT-OR-COMMIT — no partial/pending outcome; `needs-human` only for factors
+// OUTSIDE project control (DIR-026). A milestone's ABSORB outcome must be exactly one of:
+//   (i) fully done (every AC/DoD green — enforced by clauses 0-8; a "partial" ABSORB with an
+//       unchecked AC box is already HARD-blocked by clause 0's unchecked-box sub-check), OR
+//   (ii) the terminal `needs-human` outcome with a reason naming a factor OUTSIDE project control.
+// This clause validates the (ii) path: an IN-PROJECT reason (architecture mismatch, algorithm
+// complexity, change volume, refactor scope, "too hard") is NOT a valid `needs-human` reason — such
+// work MUST be split-smaller-and-completed, so an in-project `needs-human` is itself a DoD violation.
+// When no `needs-human` outcome is declared, this clause is N/A (the done path is clauses 0-8). ---
+{
+  if (!needsHuman.declared) {
+    nops.push("clause9-split-or-commit: no `needs-human` outcome declared — N/A (the done path is governed by clauses 0-8; a partial/unchecked-AC ABSORB is HARD-blocked by clause 0)");
+    dispositionedClauses.add("split-or-commit");
+  } else {
+    const reason = needsHuman.reason;
+    const inProjectRe = /\b(architecture|architectural|algorithm|too\s+complex|complexity|change\s+volume|too\s+(many|much|big|hard)|refactor(ing)?|mismatch(ed)?|difficult|"?this\s+is\s+hard"?)\b/i;
+    const externalRe = /\b(external|upstream|third[-\s]?party|credential|token|dataset|data\s+source|service\s+(is\s+)?(down|unavailable|outage)|api\b|network|rate[-\s]?limit|not\s+yet\s+(released|available|published)|awaiting\s+.*(release|access|approval)|blocked\s+by\s+.*(service|api|resource|credential|dataset|upstream|vendor))\b/i;
+    if (!reason || reason.replace(/[—:\-\s]/g, "").length < 8) {
+      failures.push("clause9-split-or-commit: `needs-human` declared but no specific external blocker named — a bare/empty reason is not sufficient; name the OUTSIDE-project factor (DIR-026)");
+      dispositionedClauses.add("split-or-commit");
+    } else if (inProjectRe.test(reason) && !externalRe.test(reason)) {
+      failures.push(`clause9-split-or-commit: \`needs-human\` reason is an IN-PROJECT factor ("${reason}") — NOT a valid failure reason. In-project difficulty (architecture/algorithm/change-volume/refactor/"too hard") MUST be split-smaller-and-completed, not marked needs-human (DIR-026)`);
+      dispositionedClauses.add("split-or-commit");
+    } else if (externalRe.test(reason)) {
+      passes.push(`clause9-split-or-commit: \`needs-human\` with a genuine OUTSIDE-project blocker ("${reason}") — a legitimate terminal outcome`);
+      dispositionedClauses.add("split-or-commit");
+    } else {
+      failures.push(`clause9-split-or-commit: \`needs-human\` reason ("${reason}") does not name a recognizable OUTSIDE-project blocker (external service/resource/credential/dataset/upstream/API/network). If genuinely external, state it explicitly; if in-project, split-and-complete instead (DIR-026)`);
+      dispositionedClauses.add("split-or-commit");
+    }
   }
 }
 

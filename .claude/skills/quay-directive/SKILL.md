@@ -123,6 +123,13 @@ discussed yet, stop and say so instead of inventing content.
      real-landing evidence exists. This is the anti-"designed-not-wired" clause —
      the exact disease the directive mechanism keeps fighting; do not let a DIR be
      closable by creating a file or going green on a fixture.
+     **"Necessary-not-sufficient" here means ONLY the anti-fakery bar (a real object
+     must operate — Reading A); it does NOT license phased/partial delivery.** Per
+     DIR-026 (SPLIT-OR-COMMIT): there is no "did a slice, parent stays pending"
+     outcome — if a DIR's scope cannot be fully completed by one milestone, it is
+     SPLIT into completable board children (each done-or-`needs-human`), not deferred
+     in prose; and `needs-human` is legitimate only for a factor OUTSIDE project
+     control, never for in-project difficulty (which must be split-and-completed).
    - `## Human verification when exp5 marks this DIR done` (recommended for any DIR
      whose landing the autonomous loop will self-report): a short numbered checklist
      that (a) names the real artifact to inspect, (b) distinguishes real-object

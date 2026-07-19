@@ -1265,6 +1265,49 @@ separately selectable, per the DIR's own clearance-note text ("clearing the gate
 Steps 2/3; it does not complete them"). See `directives/pending/DIR-017-*.md`'s "Human-verification
 gate — CLEARED" section.
 
+### Clause 9 — Split-or-commit / `needs-human` legitimacy (DIR-026)
+
+**SPLIT-OR-COMMIT replaces the phased/partial-delivery escrow.** The phrase "artifacts are
+necessary-not-sufficient" had two readings; DIR-026 keeps ONE and deletes the other:
+- **KEPT (anti-fakery, "Reading A"):** *done = the real object actually operated through the
+  mechanism — NOT a file created, a fixture passed, or a doc edited.* A green artifact is
+  necessary but not sufficient; a milestone is done only when its real object works. This
+  guarantee survives unchanged.
+- **DELETED (phased-partial tolerance, "Reading B"):** the reading that "the DoD tolerates
+  phased/partial delivery, so a milestone may ship a slice and leave the parent `pending`." That
+  reading was the deferral loophole (it let DIR-014's core item be deferred across five
+  milestones). **There is no partial/pending completion state.**
+
+**The two-outcome rule.** A milestone's ABSORB outcome is exactly one of:
+1. **`done`** — every AC/DoD clause is satisfied (Clauses 0-8; a partial ABSORB with an unchecked
+   AC box is HARD-blocked by Clause 0's unchecked-box sub-check). OR
+2. **`needs-human`** — the terminal lifecycle state (`packages/quay/src/gate/lifecycle.js`:
+   `needs-human` has no automated edge), used when completion is blocked by a factor **OUTSIDE
+   project control**.
+
+**Planning-time split rule (OUTER-LOOP step 1 / SELECT).** If a candidate cannot be FULLY completed
+within one milestone, it MUST be split via `task edit --children` into completable sub-tasks and one
+child SELECTed — never "select a task, do part of it." The remainder becomes explicit board children,
+never a prose "later phase." A parent task is `done` iff all its children are `done`. (This
+generalizes DIR-016's "materialize an `-IMPL` row for a design-only milestone" to ALL partial work.)
+
+**`needs-human` legitimacy — the critical constraint.** `needs-human` is legitimate **ONLY** for a
+factor OUTSIDE project control — an external service outage, a missing external
+credential/dataset/resource, an upstream dependency not yet released, or equivalent. **In-project
+factors are NOT valid reasons and MUST be resolutely completed:** a mismatched/inconvenient
+architecture, an overly complex algorithm, a large change volume, refactor scope, or "this is hard"
+do NOT justify `needs-human` — they justify SPLITTING smaller and then completing. A `needs-human`
+whose stated reason is an in-project factor is itself a DoD violation.
+
+**What it checks (mechanical, `it0-dod-check.mjs` Clause 9 + Clause 0 waiver):** when the ABSORB text
+declares a `needs-human` outcome (`OUTCOME: needs-human — <reason>`), Clause 0 waives its unchecked-AC
+block (a blocked milestone legitimately has incomplete AC) and Clause 9 validates the reason: an
+in-project-factor reason FAILs; a named external blocker PASSes; a bare/unspecified reason FAILs.
+When no `needs-human` is declared, Clause 9 is N/A and the `done` path is governed by Clauses 0-8.
+Fixtures: `fixtures/dod/needs-human-external-stub.md` (external → PASS),
+`needs-human-internal-stub.md` (in-project → FAIL); the partial-vs-full pair is the existing
+checklist-unchecked (FAIL) / checklist-checked (PASS) fixtures. Source: DIR-026.
+
 ## Deviation-record schema (DIR-017 Step 3 / M36-dod-leakage-metrics)
 
 **Location choice: this section of `inherited-core.md`, NOT a new sibling file.** `v-meta-ledger.md`

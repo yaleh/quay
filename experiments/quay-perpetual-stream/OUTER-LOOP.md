@@ -118,6 +118,15 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    verification, not forced into new build work, no mid-milestone re-scope)? If not, split along a
    different seam or explicitly budget a multi-build milestone before authoring the charter — never
    carry an implicitly half-shipped value step forward.
+   **SPLIT-OR-COMMIT (DIR-026 — MANDATORY, not a suggestion):** if the candidate cannot be FULLY
+   completed within THIS one milestone, it MUST be **split** via `task edit --children <child-ids>`
+   (M12 parent/children) into sub-tasks each of which IS fully completable within a milestone
+   (recursively, until each child fits the ceiling AND is completable), and ONE child is SELECTed.
+   **Selecting a task with the intent to complete only PART of it is prohibited** — split first, then
+   select a whole child; the remainder becomes explicit board children (each with its own AC/DoD),
+   never a prose "later phase." A parent task is `done` iff ALL its children are `done`. This is the
+   discipline that ends the "do a slice, leave the parent pending forever" failure — the exact
+   pattern that let a core directive item be deferred across five milestones (see DIR-026 Finding).
    **Plan-time line-budget gate (M18-milestone-model-ceiling-and-diversity-policy, DIR-012 item 2 —
    mechanically-checkable, not narrative):** run
    `scripts/it0-ceiling-line-budget-check.sh <charter-file>` against the drafted charter BEFORE
@@ -238,6 +247,19 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    adaptations to the log; check φ — if a prior adaptation was just reused unchanged by THIS
    (different-domain) milestone, **CONSOLIDATE**: merge it into `inherited-core.md` and retire the
    citation (§4.2).
+   - **SPLIT-OR-COMMIT — two terminal outcomes ONLY, no partial/pending (DIR-026, inherited-core
+     Clause 9):** once a milestone has started, at ABSORB it is in exactly ONE of two outcomes:
+     (i) **`done`** — every AC/DoD clause satisfied (Clauses 0-8 below; a "partial" ABSORB with an
+     unchecked AC box is HARD-blocked by Clause 0); OR (ii) **`needs-human`** — the task is set to the
+     terminal `needs-human` lifecycle status with a recorded `OUTCOME: needs-human — <reason>` line in
+     the ABSORB entry. **There is NO "shipped a slice, parent stays pending" outcome.** `needs-human`
+     is legitimate **ONLY** for a factor OUTSIDE project control (external service/resource/credential/
+     dataset/upstream); an IN-PROJECT reason (architecture mismatch, algorithm complexity, change
+     volume, refactor scope, "too hard") is NOT valid and is a DoD violation — such work must be
+     SPLIT smaller (step 1) and completed. `it0-dod-check.mjs` Clause 9 mechanically enforces the
+     `needs-human` reason (in-project → FAIL; external → PASS); Clause 0 waives its unchecked-AC block
+     only for a declared `needs-human`. A `needs-human` outcome does NOT advance `milestone_counter`
+     as a completion — it is a tracked terminal failure the human reviews.
    - **Execution-provenance task write-back (M24-task-backlog-projection-impl, DIR-015 item 2 / m13
      design doc §10):** for the milestone-candidate task(s) just executed this pass — including any
      in-scope DIR-labeled task whose underlying directive this milestone resolved — `task_write` an

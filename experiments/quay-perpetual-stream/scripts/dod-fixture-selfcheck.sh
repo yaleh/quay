@@ -65,6 +65,16 @@ CASES=(
   # cutover) so Clause 8 actually fires rather than N/A-passing as grandfathered/legacy.
   "M40C-fake-canonical-violating|$FIX/task-canonical-record-violating-stub.md|1"
   "M40B-fake-canonical-compliant|$FIX/task-canonical-record-compliant-stub.md|0"
+
+  # DIR-026 SPLIT-OR-COMMIT (Clause 9, 2026-07-19) — `needs-human` is a legitimate terminal outcome
+  # ONLY for a factor OUTSIDE project control; an in-project reason (architecture/algorithm/change-
+  # volume/"too hard") is a DoD violation that must be split-and-completed instead. Both fixtures have
+  # INTENTIONALLY-unchecked checklist AC (a needs-human milestone did not complete) — proving clause
+  # 0's unchecked-box block is correctly WAIVED for a declared needs-human, and clause 9 then decides.
+  # The "partial vs full" pair DIR-026 also names is already covered above by the checklist
+  # unchecked→FAIL (M90) / all-checked→PASS (M90B) fixtures (a partial ABSORB = an unchecked box).
+  "M42D-fake-needs-human-external|$FIX/needs-human-external-stub.md|0"
+  "M42C-fake-needs-human-internal|$FIX/needs-human-internal-stub.md|1"
 )
 
 fail=0
