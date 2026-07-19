@@ -21,7 +21,7 @@ Adopt, as analytical tools, the **validated layers only**:
 
 EXPLICITLY REJECT citing the continuous math (Fisher / natural gradient / intrinsic dimension / `ρ`) as rigor or as justification for any decision. Fluency of a geometric argument is not evidence — especially from an LLM.
 
-<!-- enforcement (E3, deferred): applies-to adr,plan,proposal; check no accepted decision cites Fisher/natural-gradient/intrinsic-dimension/compression-ratio as a load-bearing justification (grep guard); L_T..L_S referenced as a checklist is allowed -->
+<!-- enforcement: N/A — a stance on analytical honesty (which tools to trust), irreducibly judgment. A naive grep guard would false-positive on the reference docs and on ADRs that NAME these terms in order to reject them (the "cited as justification" vs "named to reject" distinction is semantic, not grep-able). Honored by discipline, not a gate. (OQ2, human-confirmed 2026-07-19.) -->
 
 ## Consequences
 - **Forbids:** grounding a decision in the continuous-dynamics layer; presenting a geometric metaphor as proof without an out-of-sample check.

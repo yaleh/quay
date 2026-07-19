@@ -16,7 +16,7 @@ Typical development on this repo is already executed by an autonomous outer loop
 ## Decision
 Typical development activity is executed through a **Claude Code workflow, run in the background**, with granularity **aligned to a milestone** (one workflow episode ≈ one milestone). Human steering follows DIR-027 hygiene: pause via the `.halt` sentinel, or work in a private worktree off `master` and fast-forward at a clean window — never race the loop on `master`.
 
-<!-- enforcement (E3, deferred): applies-to process; check a milestone's work landed via a workflow episode (worktree merged at ABSORB) rather than an ad-hoc direct commit that bypassed the loop; hard to mechanize fully — reserved -->
+<!-- enforcement: N/A — a process norm, not a Π_{S→E} candidate (not cleanly mechanizable: "landed via a workflow episode vs ad-hoc commit" has no crisp check). Honored by discipline, not a gate. (OQ1, human-confirmed 2026-07-19.) -->
 
 ## Consequences
 - **Forbids:** open-ended, granularity-free background runs that don't bottom out at a milestone boundary; racing the loop on `master`.
