@@ -189,7 +189,7 @@ Options for task list:
   --format json       Alias for --json (any other --format value is a usage error)
 
 Options for task create:
-  --title <title>      Title for the new task (REQUIRED — hard usage error, no provider call, if missing/empty)
+  --title <title>      Title for the new task (REQUIRED — hard usage error, no provider call, if missing or empty)
   --body <text>        Initial body text (mutually exclusive with --body-file)
   --body-file <path>   Read initial body from a file ("-" for stdin; mutually exclusive with --body)
   --status <status>    Initial status (todo, ready, done, needs-human)
@@ -200,7 +200,7 @@ Options for task create:
   --json                Output the created task as JSON
 
 Options for task edit:
-  --title <title>       New title (see note below: required if <task-id> does not yet exist)
+  --title <title>       New title (see note below: required and non-empty if <task-id> does not yet exist)
   --status <status>     New status (todo, ready, done, needs-human)
   --body <text>         Replace body with this text (mutually exclusive with --body-file)
   --body-file <path>    Replace body with file contents ("-" for stdin; mutually exclusive with --body)
@@ -211,16 +211,19 @@ Options for task edit:
   --expect-status <status>  Compare-and-swap: fail if the task's current status is not this value
   --append-notes <text>     Append text to the existing body (read-then-write convenience)
   --json                 Output the edited task as JSON
-  Note: editing a task id that does NOT currently exist requires --title (this is an
-  upsert-as-create; a missing --title is refused with a usage error instead of silently
-  creating a titleless task — use 'quay task create' for a dedicated create path instead).
+  (at least one of the above patch-producing flags, or --append-notes, is required)
+  Note: editing a task id that does NOT currently exist requires a non-empty --title (this is an
+  upsert-as-create; a missing or empty --title is refused with a usage error instead of silently
+  creating a titleless or empty-titled task — use 'quay task create' for a dedicated create path
+  instead).
+
 
 Examples:
   quay task list --prefix QX          List only QX-* tasks
   quay task list --status todo        List todo tasks
   quay task list --search "bootstrap" List tasks with "bootstrap" in title or body
   quay task view QX-001               View task details
-  quay task create QX-002 --title "New task"  Create a new task (title required)
+  quay task create QX-002 --title "New task"  Create a new task (--title required, non-empty)
   quay task edit QX-001 --status done Mark task done
 `);
   } else {
@@ -512,29 +515,6 @@ async function main() {
     }
 
     await withProvider(async (client) => {
-      // M29-cli-create-ergonomics (GAP-002 fix): `task edit`'s own contract
-      // is "patch an EXISTING task." The silent-corruption failure mode
-      // (store.js#write()'s title-omission-on-create path, YAML.stringify
-      // dropping an `undefined` title key) is specific to editing a
-      // currently-non-existent id with no --title supplied — that path
-      // upserts a titleless record instead of failing. Guard: read first
-      // (taskGet), and if the id does not exist AND no --title was
-      // supplied, refuse with a clear usage error instead of proceeding to
-      // the taskWrite patch call below. This closes GAP-002 unconditionally
-      // for every flag combination reaching this handler (not just the one
-      // --status-only reproduction shape), because the check runs before
-      // ANY patch is applied, regardless of which other flags were passed.
-      if (flags.title === undefined) {
-        const existing = await client.taskGet(id);
-        if (!existing) {
-          console.error(
-            `quay task edit: task ${id} does not exist yet; creating a new task requires --title ` +
-            `(or use 'quay task create')`
-          );
-          process.exitCode = 1;
-          return;
-        }
-      }
       // M16-cli-edit-parity-impl (design doc §4 non-goals): --append-notes
       // is a Core-CLI-side read-then-write convenience, not a new ABI tool
       // — read the current body via taskGet, append the note text, then
@@ -554,6 +534,40 @@ async function main() {
         if (wantsJson) printJson(t);
         else console.log(`${t.id}: ${t.title} [${t.status}] (note appended)`);
         return;
+      }
+      // M29-cli-create-ergonomics (GAP-002 fix): task edit's own contract is
+      // "patch an EXISTING task" — the actual silent-corruption failure mode
+      // (M27-competitive-bench's most severe finding) is specific to editing
+      // a NON-EXISTENT id with no (usable) --title, which reaches the native
+      // provider's store.js#write() upsert-as-create path with title
+      // `undefined` and silently omits the title key from the serialized
+      // frontmatter (YAML.stringify drops undefined-valued keys). Guard:
+      // read-before-write via taskGet — if the id does not currently exist
+      // AND no non-empty --title was supplied, refuse with a clear usage
+      // error instead of silently upserting a titleless (or, per iteration-1's
+      // own skepticism-pass finding, empty-titled) record. This covers every
+      // non-title flag combination (--status/--body/--labels/--parent/
+      // --children/--extra/--expect-status), not just the --status-only
+      // shape M27 happened to reproduce, because the guard fires on the
+      // (missing-or-empty-title, non-existent-id) precondition alone,
+      // independent of which other flags were supplied.
+      //
+      // Empty-string --title check added independently by iteration-1 after
+      // discovering `task edit <new-id> --title "" --status todo` slipped
+      // past a title!==undefined-only guard and wrote `title: ""` — a
+      // different but sibling degenerate-title defect to GAP-002's literal
+      // "no title key at all" symptom, closed here under the same guard for
+      // consistency with `task create`'s own empty-title rejection above.
+      if (patch.title === undefined || String(patch.title).trim() === "") {
+        const existing = await client.taskGet(id);
+        if (!existing) {
+          console.error(
+            `quay task edit: task ${id} does not exist yet; creating a new task requires ` +
+            `--title (or use 'quay task create')`
+          );
+          process.exitCode = 1;
+          return;
+        }
       }
       const t = await client.taskWrite({ id, ...patch });
       if (wantsJson) printJson(t);
