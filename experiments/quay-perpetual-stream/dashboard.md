@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 54** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M54 ABSORB header sync): body log's m54 ABSORB entry below sets milestone_counter → 54;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53).
-54 % 5 != 0 — no checkpoint due this milestone; next checkpoint due at m55 (the VERY NEXT milestone). -->
+**milestone_counter: 55** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M55 ABSORB header sync): body log's m55 ABSORB entry below sets milestone_counter → 55;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54).
+55 % 5 == 0 — CHECKPOINT DUE this milestone, see checkpoints/cp-55.md. -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -5031,3 +5031,115 @@ above).
 
 ## Backlog row
 | exp5-M-GATE-README-DOCS | `packages/quay/README.md` had zero mentions of the QENG-1..4 gate/lifecycle/driver CLI surface — added a new "Gate & lifecycle commands (QENG-1..4)" section documenting `gate`/`gate-log`/`complete`/`adjudicate`/`promote`/`retreat`/`run`, with the `gate --list` example clarified as illustrative per the audit's required fix | capability-discoverability (primary) | no VT chart cell | milestone-candidate, surface:docs, milestone:M37-discover-post-qeng, milestone:M54 |
+
+## M55 — M55-dir037-gh-enobufs-fix (DIR-037)
+
+**Task:** [[DIR-037]] (`tasks/DIR-037.md`) — "harden quay-github for a REAL foreign repo": fix the
+`ENOBUFS`/maxBuffer overflow that `DIR-036-A`'s live deployment attempt surfaced when pointing
+quay-github at `yaleh/archguard` (a real, ~56-issue foreign repo). `LOOP-EXECUTABLE` (in-repo quay
+work, `milestone-candidate`, NOT `human-steered` — unlike its off-repo `DIR-036` parent). **Merge
+commit:** `728242a` merged via `--no-ff` into `master` at this ABSORB (built/finalized commit
+`752738f`, worktree `milestones/M55/worktrees/iteration-0`, base `master` `8a747c2`).
+
+**SELECT note:** the confirmed live blocker recorded in DIR-037's own Finding section
+(`Error: spawnSync gh ENOBUFS` at `provider-client.js:33`, root cause `github-client.js:31/40`'s
+unbounded `execFileSync("gh", ["api", ...])`) made this the clear next pick — a concrete,
+already-diagnosed, real-repo-surfaced bug fix, not a fresh exploration.
+
+**Adversarial-audit verdict: PASS.** An independent audit, with no access to the build-phase
+agent's self-report, confirmed:
+- **Single-sourced fix**: a new `execGh(args)` helper in
+  `packages/quay-github/src/github-client.js` wraps the module's ONE
+  `execFileSync("gh", ["api", ...])` call site with `maxBuffer: 64 MiB` (overridable via
+  `QUAY_GITHUB_MAX_BUFFER`); `ghApiJson`/`ghApiRun` both route through it.
+  `grep -nE 'execFileSync\("gh"' packages/quay-github/src/github-client.js` confirms exactly one
+  real call site remains (inside `execGh` itself) — no bare unbounded call left.
+- **RED→GREEN regression test** (`packages/quay-github/test/gh-api-buffer.test.mjs`, 3 cases,
+  ADR-001 discipline): verified genuine — pre-fix throws `ENOBUFS` on a synthetic ~1.3 MiB payload
+  via a real stubbed-`gh`-executable subprocess spawn (not a mocked `execFileSync`); post-fix
+  parses the same oversized payload cleanly; `QUAY_GITHUB_MAX_BUFFER` override genuinely wired
+  (verified below the payload size, observing the overflow return).
+- **REAL LANDING — the hard DoD bar, independently re-verified by the auditor**: with `gh`
+  authenticated, `quay task list --json` against `yaleh/archguard` exited 0 and returned 56 real
+  issues (real ids/titles/status), cross-checked against `gh issue list --repo yaleh/archguard
+  --state all --limit 200 --json number` independently returning the same count. `quay task view
+  gh-58 --json` returned a real issue matching `gh issue view 58 --repo yaleh/archguard` exactly
+  (title verbatim, `closed`→`done` state mapping correct) — a real object operated through the
+  mechanism (DIR-026), not a synthetic fixture.
+- Only ONE distinct blocker was surfaced running end-to-end against `yaleh/archguard` — no SPLIT
+  into children required (DIR-026 SPLIT-OR-COMMIT).
+- Full suite (excluding `serve-github`/`provider-abi-conformance`): 275 tests, 272 pass, 3 fail —
+  the known pre-existing flaky baseline (`dir032-audit-independence` M44 A2/C1, `web-ui-browser`),
+  no new regressions. `packages/quay-github/test/*.mjs` in isolation: 15/15 pass.
+  `delivery-standalone-smoke.sh` → 0 RED. `task-schema-check.sh` → PASS.
+  `dod-fixture-selfcheck.sh` → 17/17 PASS.
+- **Two non-blocking qualifications, both dispositioned at this ABSORB**: (a) DIR-037's own
+  AC/DoD text said `quay task get <id>`, but the real CLI verb is `quay task view <id>` — an AC
+  documentation typo; the build agent correctly used the real verb. **Fixed at this ABSORB**: all
+  AC/DoD/Requested-action/Proposal wording updated to `task view` to match the actually-implemented
+  and tested CLI verb (docs-only correction, no behavior change). (b) The `## Plan` section's
+  `N/A — <reason>` prefix followed by a real narrative is a legitimate, schema-approved pattern (the
+  schema's regex only requires the prefix present, not exclusive) — no issue, no fix needed.
+
+**Mechanical gates (real runs, this ABSORB, from inside the worktree before merge):**
+```
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 55 experiments/quay-perpetual-stream/v-meta-ledger.md
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh   → tree-hygiene: clean.
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+$ node packages/quay/bin/quay.js gate DIR-037 --gate dod   → PASS
+```
+**Test-floor (this ABSORB's own independent re-run, `packages/quay` + `packages/quay-github`,
+excluding `serve-github`/`provider-abi-conformance`, run BOTH pre-merge in the worktree AND
+post-merge on `master`):** **275 tests / 272 pass / 3 fail** in both runs — identical known
+pre-existing flaky baseline (`dir032-audit-independence` M44 A2/C1, `web-ui-browser`); no new
+regressions from this milestone's change.
+
+**Impl-row (Clause 4):** N/A — real code-landing milestone (the task's own AC/DoD are the
+real-landing proof), not a design-only artifact needing a future implementing row.
+**Line-budget (Clause 3):** N/A — no formal charter file authored (DIR-014 §5a class-routing: a
+genuine inline Plan narrative was authored on the task itself instead of a separate `docs/plans/`
+doc, matching the task's own explicit authoring rationale).
+**Split-or-commit (Clause 9):** N/A — no `needs-human` outcome; only one distinct blocker, task
+reached `done` in full.
+
+**Realized Δv**: capability-growth / robustness (primary — quay-github's read path now works
+end-to-end against a REAL, larger-than-quay's-own-repo foreign GitHub repo; a genuine product
+robustness gap invisible on quay's own tiny backlog, closed with real external evidence rather
+than a synthetic-only test). No VT chart cell (Provider-ABI VT-cell ceiling artifact, open since
+cp-35: `cov=1.0000` since m12 means no further correctness fix to `packages/quay-github/` can
+register a chart-1 Δv — a pre-existing, tracked scoring-ceiling limitation, not a judgment that
+this fix lacks real value). VT chart-1 total unchanged: **111.55/120**. `milestone_counter` → **55**
+(55 % 5 == 0 — **CHECKPOINT DUE this milestone**, see `checkpoints/cp-55.md`).
+
+**Backlog housekeeping**: `tasks/DIR-037.md` → `status: done`, `extra.dirStatus: resolved`, all 4 AC
++ all 3 DoD boxes ticked against independently re-verified evidence, `## Resolution` section added
+citing commit `752738f`, the audit's PASS verdict, and the evidence summarized above; AC-wording
+typo (`task get`→`task view`) fixed throughout. `backlog.md` regenerated via
+`node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M55/worktrees/iteration-0` removed (`git
+worktree remove`), `milestones/M55-dir037-gh-enobufs-fix` branch deleted (`git branch -d`, fully
+merged, confirmed ancestor of `master` before deletion). `worktree-branch-hygiene-check.sh`/
+`tree-hygiene-check.sh` both report clean, 0 registered worktrees post-prune.
+
+**Checkpoint disposition: DUE this ABSORB** (`milestone_counter` = 55, a multiple of 5) — see
+`checkpoints/cp-55.md` (Checkpoint 11, covering the m51-m55 window).
+
+**Note on off-loop human activity since the M54 ABSORB:** `master` advanced with one further
+human-authored, off-loop commit between this milestone's worktree branching (`8a747c2`) and this
+ABSORB: `DIR-038` (`f4d0fec`/`ae3ffa3`, "re-base the evaluation mechanism — outward VT term +
+governance:product signal + rolling-window halt denominator"), authored per DIR-027 steering
+hygiene. Confirmed no conflict with this milestone's own merge (clean dry-run merge test performed
+before the real merge). `DIR-038` remains `status: todo`, human-steered/pending — out of scope for
+this milestone, not touched.
+
+**DRAIN disposition of `directives/pending/` (task-canonical, per DIR-028) at this boundary:**
+`DIR-036` (parent) remains `todo`/unblocked (its own `blockedBy: DIR-037` is now satisfied, since
+DIR-037 is `done`) — a legitimate future SELECT candidate. `DIR-036-A`/`DIR-036-B` and `DIR-038`
+all remain `todo`, human-steered/pending, not autonomously actionable without explicit human
+go-ahead (foreign-repo deployment / driver-self-rewrite blast-radius categories respectively).
+
+## Backlog row
+| DIR-037 | quay-github's `execFileSync("gh", ["api",...])` had no `maxBuffer`, overflowing (`ENOBUFS`) on any real foreign repo larger than quay's own tiny backlog — single-sourced fix via a new `execGh(args)` helper (64 MiB default, `QUAY_GITHUB_MAX_BUFFER` override), RED→GREEN regression test, REAL yaleh/archguard `task list`/`task view` landing cross-checked against `gh` CLI (56 issues, exact match) | capability-growth/robustness (primary) | no VT chart cell (Provider-ABI ceiling artifact) | directive, milestone-candidate, surface:mcp, milestone:M55-dir037-gh-enobufs-fix |

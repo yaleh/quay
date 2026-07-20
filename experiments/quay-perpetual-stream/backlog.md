@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| DIR-037 | Harden quay-github for a REAL foreign repo: fix the ENOBUFS/maxBuffer overflow (surfaced live by the DIR-036-A archguard deployment) so `quay task list/get` works end-to-end against yaleh/archguard's real issues via the ABI — the read-path prerequisite for migrating archguard's Backlog.md + GitHub tasks into quay. LOOP-EXECUTABLE (in-repo quay work; not human-steered). | DONE | - | directive, milestone-candidate |
 | exp5-M-GATE-README-DOCS | packages/quay/README.md has ZERO mentions of the entire QENG-1..4 gate/lifecycle/driver CLI surface (gate, gate-log, complete, adjudicate, promote, retreat, run) — a real, shipped, user-facing command family is fully undocumented in the package's own README | DONE | exploit (docs gap on an already-shipped, user-facing CLI surface). | milestone-candidate, surface:docs, milestone:M37-discover-post-qeng |
 | exp5-M-GATE-MCP-PARITY-GAP | The entire QENG-1..4 gate/lifecycle/driver engine is reachable ONLY via raw CLI — quay's own MCP server (the surface an AI agent, quay's stated primary user, actually drives) exposes just the pre-QENG task_list/get/write/check + action_list/run tools, none of gate/complete/ promote/retreat/adjudicate/run/gate-log | DONE | explore (identifies a design gap; the fix requires deciding an MCP tool surface, not a 1-line patch). | milestone-candidate, surface:mcp, milestone:M37-discover-post-qeng, milestone:M53 |
 | DIR-035-D | DIR-035 split D: single-source the methodology kit (stop per-experiment inherited-core duplication) + wire delivery-standalone-smoke as a named delivery conformance gate | DONE | - | directive, milestone-candidate |
@@ -73,4 +74,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_66 milestone-candidate task(s) as of 2026-07-20T10:48:54.074Z._
+_67 milestone-candidate task(s) as of 2026-07-20T11:19:10.773Z._
