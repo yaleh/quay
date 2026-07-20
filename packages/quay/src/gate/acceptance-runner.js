@@ -39,7 +39,10 @@ export function runAcceptance({ command, cwd, timeoutMs = 60000 }) {
       code: null,
       signal: "SIGKILL",
       timedOut: true,
-      reason: `acceptance timed out after ${timeoutMs}ms (killed)`,
+      // DIR-046-C: name the actual knob to raise, not just the fact of the
+      // timeout — this is the exact discoverability gap session 8b74052c hit
+      // (the user spent ~15min grepping installed source for the env var).
+      reason: `acceptance timed out after ${timeoutMs}ms (killed) — raise gates.yml timeoutMs / --timeout`,
     };
   }
   // Any other spawn error (e.g. bad cwd / unrunnable shell).

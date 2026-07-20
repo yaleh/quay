@@ -176,6 +176,42 @@ async function resolveBody(flags) {
   return flags.body; // short-string mode, already validated present by the caller
 }
 
+// DIR-046-A — pin the acceptance runner's cwd/timeout env vars for gates that
+// read them (registry.js#resolveRunnerOptions), with an EXPLICIT-OVERRIDE-
+// WINS precedence, replacing the previous unconditional
+// `process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot` at each of the 4
+// call sites (gate/complete/promote/run), which clobbered any pre-set env var
+// or explicit flag (the exact session-8b74052c bug: the user reverse-
+// engineered QUAY_ACCEPTANCE_CWD and set it, but the CLI overwrote it).
+//
+// Precedence (cwd): explicit `--cwd <dir>` flag > a PRE-SET QUAY_ACCEPTANCE_CWD
+// (already in the env before this process's own CLI logic runs) >
+// `cfg.workspaceRoot` (the default — unchanged behavior with no override).
+// A gates.yml per-gate `cwd` is a THIRD source, applied inside
+// `registry.js#resolveRunnerOptions` itself (this function has no per-gate
+// visibility at the CLI layer, only a per-INVOCATION one) — see that
+// function's own precedence rule for how the two layers compose.
+//
+// Precedence (timeout): explicit `--timeout <ms>` flag > a pre-set
+// `QUAY_ACCEPTANCE_TIMEOUT_MS` > left unset (registry.js's own 60000ms
+// default / a gates.yml per-gate `timeoutMs` apply from there).
+//
+// @param {{ workspaceRoot: string, cwd?: string, timeout?: string|number }} args
+function pinAcceptanceEnv({ workspaceRoot, cwd, timeout }) {
+  if (cwd) {
+    process.env.QUAY_ACCEPTANCE_CWD = cwd;
+  } else if (!process.env.QUAY_ACCEPTANCE_CWD) {
+    process.env.QUAY_ACCEPTANCE_CWD = workspaceRoot;
+  }
+  // else: a pre-set QUAY_ACCEPTANCE_CWD already wins — leave it untouched.
+  if (timeout !== undefined) {
+    process.env.QUAY_ACCEPTANCE_TIMEOUT_MS = String(timeout);
+  }
+  // else: leave QUAY_ACCEPTANCE_TIMEOUT_MS as whatever the environment
+  // already has (unset by default) — registry.js's own precedence takes it
+  // from there (env > gates.yml timeoutMs > 60000ms default).
+}
+
 async function withProvider(fn, { providerId } = {}) {
   const cfg = loadConfig();
   const provider = activeProvider(cfg, providerId);
@@ -242,14 +278,14 @@ Usage:
   quay task check <task-id> [--json]
   quay action list <task-id> [--json]
   quay action run <task-id> <action-id> [--json]
-  quay gate <task-id> [--gate <name>]
+  quay gate <task-id> [--gate <name>] [--cwd <dir>] [--timeout <ms>]
   quay gate --list
   quay gate-log <task-id> [--gate <name>] [--json] [--file <log-path>]
-  quay complete <task-id> [--file <log-path>]
+  quay complete <task-id> [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
   quay adjudicate <task-id> [--file <log-path>]
-  quay promote <task-id> [--file <log-path>]
+  quay promote <task-id> [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
   quay retreat <task-id> --reason <reason> [--file <log-path>]
-  quay run [--once] [--file <log-path>]
+  quay run [--once] [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
   quay serve [--port <port>]
   quay mcp
 
@@ -313,6 +349,16 @@ Gate engine commands (QENG-1/2) — evaluate a named check and append an immutab
   --json            With 'gate-log': output the GateEvent array as JSON instead of human-readable text.
   --file <log-path>  Override the GateEvent log path for 'gate-log' (default
                     <workspaceRoot>/.quay/gate-events.jsonl).
+  --cwd <dir>       DIR-046: run the acceptance command IN <dir> instead of the workspace root
+                    (e.g. gate a milestone worktree BEFORE merge, not the main repo). Wins over
+                    both the workspaceRoot default AND a pre-set QUAY_ACCEPTANCE_CWD env var.
+                    Also honored by 'complete'/'promote'/'run'. A gates.yml per-gate 'cwd' field
+                    is a lower-precedence third option (see .quay/gates.yml's own doc comment).
+  --timeout <ms>    DIR-046: override the acceptance runner's kill deadline in milliseconds
+                    (default 60000). Also honored by 'complete'/'promote'/'run'. A gates.yml
+                    per-gate 'timeoutMs' field is a lower-precedence workspace-data alternative —
+                    a TIMEOUT failure's reason names both knobs ("raise gates.yml timeoutMs /
+                    --timeout").
 
 Lifecycle commands (QENG-3) — status-writing verbs over the {todo,ready,done,needs-human} phases:
   complete <id>     Precondition status=ready; runs the acceptance gate; on pass writes status=done
@@ -959,10 +1005,10 @@ async function main() {
       // QENG-2 (proposal §4, review note 2): default gate is `acceptance` at the
       // CLI layer only (engine's own `gate="dod"` default is untouched — only
       // direct programmatic callers hit it). `--gate dod` still routes to QENG-1's
-      // dod gate. QUAY_ACCEPTANCE_CWD pins the acceptance runner's cwd to the
-      // workspace root without changing the engine's `(task, client)` signature.
+      // dod gate. DIR-046-A: `--cwd`/`--timeout` (or a pre-set env var) win over
+      // the workspaceRoot pin — see pinAcceptanceEnv's own doc comment.
       const gate = vf.gate ?? "acceptance";
-      process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout });
       // DIR-035-B: thread the resolved workspace root through so a named
       // gate declared in THIS workspace's own `.quay/gates.yml` resolves
       // correctly regardless of the process's cwd at invocation time.
@@ -1010,7 +1056,9 @@ async function main() {
     if (!id) { console.error("quay complete: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
-      process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+      // DIR-046-A: `--cwd`/`--timeout` (or a pre-set env var) win over the
+      // workspaceRoot pin — see pinAcceptanceEnv's own doc comment.
+      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout });
       // M56-gate-cli-error-ux (AC1): missing-task is a guarded error.
       await withGuardedErrors(async () => {
         await runComplete({ client, id, logPath });
@@ -1037,7 +1085,9 @@ async function main() {
     if (!id) { console.error("quay promote: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
-      process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+      // DIR-046-A: `--cwd`/`--timeout` (or a pre-set env var) win over the
+      // workspaceRoot pin — see pinAcceptanceEnv's own doc comment.
+      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout });
       // M56-gate-cli-error-ux (AC1): missing-task / illegal-transition are
       // guarded errors — assertTransition() throws `illegal transition: ...`.
       await withGuardedErrors(async () => {
@@ -1079,7 +1129,9 @@ async function main() {
     const { flags: runFlags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
     await withProvider(async (client, cfg) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: runFlags.file });
-      process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+      // DIR-046-A: `--cwd`/`--timeout` (or a pre-set env var) win over the
+      // workspaceRoot pin — see pinAcceptanceEnv's own doc comment.
+      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: runFlags.cwd, timeout: runFlags.timeout });
       if (runFlags.once) {
         const r = await runOnce({ client, logPath });
         if (!r.processed) console.log("nothing to do");
