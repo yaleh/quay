@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 52** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M52 ABSORB header sync): body log's m52 ABSORB entry below sets milestone_counter → 52;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51).
-52 % 5 != 0 — no checkpoint due this milestone; next checkpoint due at m55. -->
+**milestone_counter: 53** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M53 ABSORB header sync): body log's m53 ABSORB entry below sets milestone_counter → 53;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52).
+53 % 5 != 0 — no checkpoint due this milestone; next checkpoint due at m55. -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -4852,3 +4852,91 @@ future SELECT now that `blockedBy: DIR-035-D` is satisfied.
 
 ## Backlog row
 | DIR-035-D | DIR-035 split D: single-source the methodology kit + wire delivery-standalone-smoke as a named delivery conformance gate (AC-4 foreign-repo deployment deferred to DIR-036-A/B) | governance-integrity (primary) | no VT chart cell | milestone-candidate, human-steered, surface:cli, milestone:M52-dir035-d-kit-singlesource |
+
+## M53 — M53-mcp-gate-parity (exp5-M-GATE-MCP-PARITY-GAP)
+
+**Task:** [[exp5-M-GATE-MCP-PARITY-GAP]] (`tasks/exp5-M-GATE-MCP-PARITY-GAP.md`) — an
+M37-discover-post-qeng-authored `milestone-candidate`, `explore`-typed: the entire QENG-1..4 gate/
+lifecycle/driver engine (`quay gate`/`gate-log`/`complete`/`adjudicate`/`promote`/`retreat`/`run`)
+was reachable ONLY via raw CLI — quay's own MCP server exposed just the pre-QENG
+`task_list`/`task_get`/`task_write`/`task_check`/`action_list`/`action_run` tools, invisible to
+exactly the agent-driven MCP workflow this whole BAIME apparatus runs in. **Merge commit:**
+`890e87b` merged via `--no-ff` into `master` at this ABSORB (built commit `c476797`, finalized
+commit `e3dca49`, worktree `milestones/M53/worktrees/iteration-0`, base `master` `349c2ec`).
+
+**SELECT note:** not selected at M51 (deferred in favor of the smaller, more concrete
+`exp5-M-GATE-HELP-SYNOPSIS-GAP` per checkpoint cp-50's exploit-typed-pick-drought guidance);
+selected at M53 as the next `milestone-candidate` from the same M37-discover-post-qeng batch.
+
+**Adversarial-audit verdict: PASS.** An independent audit, with no access to the build-phase
+agent's self-report, confirmed:
+- 6 new MCP tools registered in `packages/quay/src/mcp-server.js` — `gate_run`, `gate_log`,
+  `lifecycle_complete`, `lifecycle_adjudicate`, `lifecycle_promote`, `lifecycle_retreat` — all
+  verified to delegate directly (no duplicated logic) to the existing `src/gate/{engine,gate-log,
+  lifecycle}.js` functions, following the same style (zod schema, description, handler) as the
+  pre-existing 6 tools.
+- `run` (autonomous scan-loop) is **deliberately excluded** — sound architectural reasoning
+  (unbounded loop incompatible with MCP's single-call contract), documented on the task itself and
+  in `docs/plans/14-mcp-gate-lifecycle-parity.md`. No followup task needed.
+- New test coverage in `packages/quay/test/mcp-server.test.mjs` (real subprocess + real MCP
+  client), verified non-trivial (checks actual persisted state changes) — all pass.
+- No new security surface — MCP tools trigger the exact same shell-exec path the CLI already
+  exposes via `task.extra.acceptance`.
+- DIR-014 §5a pipeline skip judged "acceptable for this low-complexity, well-bounded change" —
+  defensible but marginal, noted as a precedent to monitor for future larger-scope milestones, not
+  a blocker.
+- Full suite: 260 tests, 257 pass / 3 fail (audit's own re-run) — matches known pre-existing flaky
+  baseline (`adr-gate` E3 A2, `dir032-audit-independence` M44 A2/C1, `web-ui-browser`), no new
+  regressions.
+- `delivery-standalone-smoke.sh` → 0 RED. `dod-fixture-selfcheck.sh` → 17/17 PASS.
+  `task-schema-check.sh` → PASS.
+
+**Mechanical gates (real runs, this ABSORB, from inside the worktree before merge):**
+```
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 53 experiments/quay-perpetual-stream/v-meta-ledger.md
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh   → tree-hygiene: clean.
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+$ node packages/quay/bin/quay.js gate exp5-M-GATE-MCP-PARITY-GAP --gate dod   → PASS
+```
+**Test-floor (this ABSORB's own independent re-run, clean state on `master` post-merge,
+`packages/quay` only, excluding `serve-github`/`provider-abi-conformance`):** **260 tests / 256
+pass / 4 fail** — matches the known pre-existing flaky baseline (`adr-gate E3 A2`,
+`dir032-audit-independence` M44 A2/C1, `web-ui-browser`); no new regressions from this milestone's
+changes.
+
+**Impl-row (Clause 4):** N/A — real code-landing milestone (the task's own AC/DoD are the
+real-landing proof), not a design-only artifact needing a future implementing row.
+**Line-budget (Clause 3):** N/A — no formal charter file authored (DIR-014 §5a skip, ruled
+defensible-but-marginal by audit; small, well-bounded, precedented-style change).
+**Split-or-commit (Clause 9):** N/A — no `needs-human` outcome; task reached `done` in full.
+
+**Realized Δv**: capability-growth (primary — the QENG gate/lifecycle engine, previously invisible
+to MCP-driven agents, is now directly callable via 6 new MCP tools, closing the CLI-only gap this
+experiment's own agent-driven methodology depends on). No VT chart cell (MCP surface weight/
+coverage in the VT table already assumed near-parity; this closes a real but previously-uninstrumented
+gap rather than moving the VT table's own number). VT chart-1 total unchanged: **111.55/120**.
+`milestone_counter` → **53** (53 % 5 != 0 — no checkpoint due; next checkpoint due at **m55**).
+
+**Backlog housekeeping**: `tasks/exp5-M-GATE-MCP-PARITY-GAP.md` → `status: done`, all 4 AC + the
+DoD box ticked against independently re-verified evidence, `## Resolution` + `## Status mirror`
+sections added citing commit `c476797` and the audit's PASS verdict. `backlog.md` regenerated via
+`node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs
+experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M53/worktrees/iteration-0` removed (`git
+worktree remove`), `milestones/M53-mcp-gate-parity` branch deleted (`git branch -d`, fully merged,
+confirmed ancestor of `master` before deletion). The now-empty `milestones/M53/` directory (and its
+leftover untracked `absorb-entry-DRAFT.md`) removed. `worktree-branch-hygiene-check.sh`/
+`tree-hygiene-check.sh` both report clean, 0 registered worktrees post-prune.
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 53, not a multiple of 5;
+next checkpoint due at **m55**).
+
+**DRAIN disposition of `directives/pending/` (task-canonical, per DIR-028) at this boundary:** no
+change from M52's disposition. `DIR-035` (parent) stays `pending`; `DIR-036` remains `todo`,
+unblocked for a future SELECT.
+
+## Backlog row
+| exp5-M-GATE-MCP-PARITY-GAP | Entire QENG gate/lifecycle engine was CLI-only, invisible to MCP-driven agents — added 6 new MCP tools (`gate_run`/`gate_log`/`lifecycle_{complete,adjudicate,promote,retreat}`), `run` deliberately excluded (documented reasoning) | capability-growth (primary) | no VT chart cell | milestone-candidate, surface:mcp, milestone:M37-discover-post-qeng, milestone:M53 |
