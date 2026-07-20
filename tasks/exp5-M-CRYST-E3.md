@@ -19,8 +19,44 @@ Mechanism (epicd's ADR-as-contract harness, which quay's gate engine can actuall
 
 Depends on B7 (provides ADR-001's concrete check). Reference: epicd `docs/proposals/2026-07-03-adr-as-contract-harness.md`.
 
+### Adjudicated approach (quay-task-to-plan pipeline, M42 SELECT, 2026-07-20)
+Two proposal drafts converged on the core mechanism (a `makeAdrGate`-shaped factory reusing the
+existing `runAcceptance` runner, registered as a STATIC `gateRegistry["adr-001"]` entry — no dynamic
+per-id resolver, out of this task's AC scope) and diverged on how `enforcement` is shaped in ADR
+frontmatter: a raw runnable-command STRING (same convention family as `task.extra.acceptance`) vs a
+structured `{check, args}` object with an internal lookup table. **Adjudicated: the raw command
+STRING wins** — B7's real invocation (`loadbearing-test-gate.sh --scripts <dir> [--tests <dir>]
+...`) doesn't reduce to one-fixed-script-plus-positional-args the way `impl-row`/`line-budget` do, so
+a structured shape adds indirection without a real safety gain (execution is `runAcceptance`'s
+`spawnSync(shell:true)` either way). The one Proposal-2 refinement folded in: register via a small
+declarative table (`ADR_GATE_IDS`) iterated once at module load, so a future ADR gets a one-line
+addition rather than a copy-pasted call site.
+
+**Final design:**
+- `adr-store.js` view-model gains `appliesTo` (from `applies-to`) + `enforcement` (raw command
+  string, verbatim) — additive, non-breaking; `list()` gains an `appliesTo` glob-match filter.
+- `registry.js` gains `makeAdrGate(adrId, adrDir)`: reads the ADR **at gate-run time** (not
+  module-load time — so an `enforcement` edit takes effect without a restart), fails closed if
+  missing/not-`accepted`/no `enforcement`, else runs the command via the existing `runAcceptance`.
+  `ADR_GATE_IDS = ["ADR-001"]` drives registration of `gateRegistry["adr-001"]`.
+- ADR-001 gains `applies-to: ["experiments/quay-perpetual-stream/scripts/**"]` +
+  `enforcement: "bash experiments/quay-perpetual-stream/scripts/loadbearing-test-gate.sh --scripts
+  experiments/quay-perpetual-stream/scripts"`.
+- Consult surface: `quay-native adr list --applies-to <path>` (+ MCP passthrough), extending the
+  existing `list()` filter shape (mirrors `--status`/`--tag`).
+
+Full N=2 proposal drafts + adjudication reasoning:
+`experiments/quay-perpetual-stream/milestones/M42-cryst-e3-adr-gate/pipeline/{proposals,adjudication}.md`.
+**Process-fidelity note:** no genuinely-isolated Task-agent dispatch tool was reachable this pass
+(same finding as M41) — the two proposals were drafted sequentially by the same orchestrator
+context (proposal 2 was not shown proposal 1's content beforehand, but same-context anchoring is a
+real, undischarged risk), stated here rather than silently presented as true independent dispatch.
+
 ## Plan
-N/A — product code across `adr-store.js` (surface applies-to/enforcement), the QENG gate registry (register `adr-<id>` gates), and a consult surface; strict TDD per ADR-001 (red→green, ≥80% coverage).
+`docs/plans/10-adr-gate-enforcement.md` (milestone-level plan record, quay-task-to-plan pipeline Stage
+7.1) — product code across `adr-store.js` (surface applies-to/enforcement), the QENG gate registry
+(register `adr-001` gate via `makeAdrGate`), and a consult surface; strict TDD per ADR-001 (red→green,
+≥80% coverage).
 
 ## Acceptance Criteria
 - [ ] An `accepted` ADR carrying `applies-to` + `enforcement` registers as a named `adr-<id>` quay gate; running it appends a real GateEvent (`gate: "adr-<id>"`, verdict pass|fail) queryable via `quay gate-log`.
