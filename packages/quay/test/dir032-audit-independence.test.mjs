@@ -20,7 +20,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { gateRegistry, listGates } from "../src/gate/registry.js";
+import { resolveGate, listGates } from "../src/gate/registry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.js");
@@ -36,6 +36,11 @@ const ABSENT_ID_FIXTURE = path.join(FIXTURES_DIR, "absent-id-m43-style.md");
 const SELF_AUDIT_FIXTURE = path.join(FIXTURES_DIR, "self-audit-matching-id.md");
 const INDEPENDENT_FIXTURE = path.join(FIXTURES_DIR, "genuinely-independent.md");
 const ORCH_ID = "orchestrator-session-abc123"; // matches self-audit-matching-id.md's recorded id
+// DIR-035-B: `audit-independence` is no longer a module-level `gateRegistry`
+// entry — it is THIS repo's own `.quay/gates.yml`-declared workspace gate.
+// `resolveGate(name, REPO_ROOT)` resolves it exactly as `quay gate` would
+// when run from this repo's own workspace root.
+const gate = (name) => resolveGate(name, REPO_ROOT);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,7 +66,9 @@ function runNative(args, tasksDir) {
   });
 }
 
-// mirrors dir022-remaining-gates.test.mjs / it0-gates.test.mjs makeWorkspace()
+// mirrors dir022-remaining-gates.test.mjs / it0-gates.test.mjs makeWorkspace(),
+// PLUS (DIR-035-B) a `.quay/gates.yml` declaring `audit-independence` as THIS
+// test workspace's own data, pointed at the REAL repo script (REPO_ROOT).
 function makeWorkspace(tag) {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m44-${tag}-tasks-`));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m44-${tag}-ws-`));
@@ -80,6 +87,16 @@ function makeWorkspace(tag) {
       "",
     ].join("\n")
   );
+  fs.writeFileSync(
+    path.join(workspaceRoot, ".quay", "gates.yml"),
+    [
+      "it0:",
+      "  - name: audit-independence",
+      `    script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/audit-independence-check.sh").replaceAll("\\", "\\\\")}"`,
+      "    argsKey: auditIndependenceArgs",
+      "",
+    ].join("\n")
+  );
   return { workspaceRoot, tasksDir };
 }
 
@@ -92,18 +109,18 @@ test("M44 A1: listGates() includes 'audit-independence'", () => {
 });
 
 test("M44 A1: audit-independence gate fails-closed when extra.auditIndependenceArgs is unset", async () => {
-  const r = await gateRegistry["audit-independence"]({ id: "T", extra: {} });
+  const r = await gate("audit-independence")({ id: "T", extra: {} });
   assert.equal(r.ok, false);
   assert.match(r.reason, /no audit-independence arguments defined/);
 });
 
 test("M44 A1: audit-independence gate fails-closed when extra.auditIndependenceArgs is an empty array", async () => {
-  const r = await gateRegistry["audit-independence"]({ id: "T", extra: { auditIndependenceArgs: [] } });
+  const r = await gate("audit-independence")({ id: "T", extra: { auditIndependenceArgs: [] } });
   assert.equal(r.ok, false);
 });
 
 test("M44 A1: audit-independence gate fails-closed when task.extra itself is undefined", async () => {
-  const r = await gateRegistry["audit-independence"]({ id: "T" });
+  const r = await gate("audit-independence")({ id: "T" });
   assert.equal(r.ok, false);
   assert.match(r.reason, /no audit-independence arguments defined/);
 });
@@ -117,7 +134,7 @@ test("M44 A1: audit-independence gate fails-closed when task.extra itself is und
 
 test("M44 A2: audit-independence gate FAILs for the absent-id (M41/M42/M43-style self-audit) fixture (real script)", async () => {
   assert.ok(fs.existsSync(ABSENT_ID_FIXTURE), "absent-id-m43-style.md fixture must exist");
-  const r = await gateRegistry["audit-independence"]({
+  const r = await gate("audit-independence")({
     id: "T",
     extra: { auditIndependenceArgs: ["--orchestrator-id", ORCH_ID, ABSENT_ID_FIXTURE] },
   });
@@ -126,7 +143,7 @@ test("M44 A2: audit-independence gate FAILs for the absent-id (M41/M42/M43-style
 
 test("M44 A2: audit-independence gate FAILs for a recorded-but-MATCHING session id (real self-audit shape, real script)", async () => {
   assert.ok(fs.existsSync(SELF_AUDIT_FIXTURE), "self-audit-matching-id.md fixture must exist");
-  const r = await gateRegistry["audit-independence"]({
+  const r = await gate("audit-independence")({
     id: "T",
     extra: { auditIndependenceArgs: ["--orchestrator-id", ORCH_ID, SELF_AUDIT_FIXTURE] },
   });
@@ -135,7 +152,7 @@ test("M44 A2: audit-independence gate FAILs for a recorded-but-MATCHING session 
 
 test("M44 A2: audit-independence gate PASSes for a genuinely distinct session id (real script)", async () => {
   assert.ok(fs.existsSync(INDEPENDENT_FIXTURE), "genuinely-independent.md fixture must exist");
-  const r = await gateRegistry["audit-independence"]({
+  const r = await gate("audit-independence")({
     id: "T",
     extra: { auditIndependenceArgs: ["--orchestrator-id", ORCH_ID, INDEPENDENT_FIXTURE] },
   });
@@ -143,7 +160,7 @@ test("M44 A2: audit-independence gate PASSes for a genuinely distinct session id
 });
 
 test("M44 A2: audit-independence gate FAILs (fail-closed) when no --orchestrator-id is supplied at all, even against the PASS fixture", async () => {
-  const r = await gateRegistry["audit-independence"]({
+  const r = await gate("audit-independence")({
     id: "T",
     extra: { auditIndependenceArgs: [INDEPENDENT_FIXTURE] },
   });
@@ -151,7 +168,7 @@ test("M44 A2: audit-independence gate FAILs (fail-closed) when no --orchestrator
 });
 
 test("M44 A2: audit-independence gate maps a script usage-error (exit 2, missing artifact file) to ok:false", async () => {
-  const r = await gateRegistry["audit-independence"]({
+  const r = await gate("audit-independence")({
     id: "T",
     extra: { auditIndependenceArgs: ["--orchestrator-id", ORCH_ID, "/no/such/audit-artifact.md"] },
   });
@@ -266,7 +283,7 @@ test("M44 D1: audit-independence gate FAILs for real against the M43 milestone's
   // if M43's audit note lives inside dashboard.md prose rather than its own
   // file) — either way this proves the gate FAILs the diagnosed shape for real.
   const artifact = realArtifact ?? ABSENT_ID_FIXTURE;
-  const r = await gateRegistry["audit-independence"]({
+  const r = await gate("audit-independence")({
     id: "exp5-M-DIR032-AUDIT-INDEPENDENCE",
     extra: { auditIndependenceArgs: ["--orchestrator-id", ORCH_ID, artifact] },
   });

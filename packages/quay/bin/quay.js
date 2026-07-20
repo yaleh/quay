@@ -878,8 +878,20 @@ async function main() {
   // set (proposal §"Architect review notes" #1). Both handlers sit before the
   // generic-usage fallback.
   if (cmd === "gate" && sub === "--list") {
-    // AC1: list registered gates, one per line, exit 0. No provider connection.
-    console.log(listGates().join("\n"));
+    // AC1: list registered gates, one per line, exit 0. No provider connection
+    // (loadConfig() only reads .quay/config.yml — no MCP process spawned).
+    // DIR-035-B: pass this workspace's own root explicitly so `--list` reflects
+    // ITS `.quay/gates.yml`-declared gates + the product's built-ins, not
+    // whatever workspace happens to be discoverable from cwd. A workspace with
+    // no `.quay/config.yml` at all (loadConfig throws) falls back to cwd-based
+    // auto-discovery (listGates()'s own default), same as before this change.
+    let workspaceRoot;
+    try {
+      workspaceRoot = loadConfig().workspaceRoot;
+    } catch {
+      workspaceRoot = undefined;
+    }
+    console.log(listGates(workspaceRoot).join("\n"));
     return;
   }
 
@@ -899,7 +911,10 @@ async function main() {
       // workspace root without changing the engine's `(task, client)` signature.
       const gate = vf.gate ?? "acceptance";
       process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
-      const { ok, reason } = await runGate({ client, id, gate, logPath });
+      // DIR-035-B: thread the resolved workspace root through so a named
+      // gate declared in THIS workspace's own `.quay/gates.yml` resolves
+      // correctly regardless of the process's cwd at invocation time.
+      const { ok, reason } = await runGate({ client, id, gate, logPath, workspaceRoot: cfg.workspaceRoot });
       console.log(ok ? "PASS" : `FAIL — ${reason}`);
       process.exitCode = ok ? 0 : 1;
     }, { providerId: vf.provider });

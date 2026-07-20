@@ -1,0 +1,50 @@
+# .quay/gates.yml — WORKSPACE-OWNED gate data (DIR-035-B / ADR-013 Decision item 2).
+#
+# The product (packages/quay/src/gate/registry.js) ships the gate ENGINE + two
+# generic factories (`makeIt0Gate`, wrapping one fixed script + a task.extra
+# args array; `makeAdrGate`, deriving a gate from an ADR's own `enforcement:`
+# field) plus its two true built-ins (`dod`, `acceptance`) and the D1
+# `doc-<id>` document-contract gates. Everything else — WHICH scripts get a
+# named `it0`-style gate, and WHICH ADRs get an auto-wired `adr-<id>` gate —
+# is THIS repo's own workspace data, read at gate-run time (mirrors the
+# existing `adr-<id>` gate's own "derived from the ADR store's `enforcement:`
+# field at gate-run time, not baked into the module" pattern — this file is
+# just that same idea applied one level up, to WHICH ids get wired at all).
+#
+# A fresh non-exp5 workspace with no gates.yml (or an empty one) sees only the
+# product's built-in gates (`dod`, `acceptance`) plus its OWN `doc-*` gates it
+# defines here — nothing exp5-specific. This repo (exp5's own workspace)
+# declares its 5 it0/vmeta/audit/dogfood gates + its 1 wired ADR below, to
+# preserve the exact pre-DIR-035-B gate set/behavior for its own OUTER-LOOP
+# ABSORB usage.
+#
+# Schema:
+#   it0:   list of { name, script, argsKey } — each becomes a gate named
+#          `name`, wrapping `script` (resolved relative to workspaceRoot) via
+#          the SAME `makeIt0Gate(scriptPath, argsKey, label)` factory
+#          registry.js already ships (task.extra[argsKey] holds the script's
+#          positional args, per the factory's own fail-closed convention).
+#   adr:   list of ADR ids (e.g. "ADR-001") to auto-wire as `adr-<id>` gates
+#          via the existing `makeAdrGate` factory (ADR dir resolved from this
+#          workspace's own native-provider QUAY_NATIVE_ADR_DIR, falling back
+#          to `<workspaceRoot>/adr`).
+
+it0:
+  - name: impl-row
+    script: "./experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh"
+    argsKey: implRowArgs
+  - name: line-budget
+    script: "./experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh"
+    argsKey: lineBudgetArgs
+  - name: vmeta-lag
+    script: "./experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh"
+    argsKey: vmetaLagArgs
+  - name: audit-independence
+    script: "./experiments/quay-perpetual-stream/scripts/audit-independence-check.sh"
+    argsKey: auditIndependenceArgs
+  - name: dogfood-evidence
+    script: "./experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh"
+    argsKey: dogfoodEvidenceArgs
+
+adr:
+  - "ADR-001"
