@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 53** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M53 ABSORB header sync): body log's m53 ABSORB entry below sets milestone_counter → 53;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52).
-53 % 5 != 0 — no checkpoint due this milestone; next checkpoint due at m55. -->
+**milestone_counter: 54** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M54 ABSORB header sync): body log's m54 ABSORB entry below sets milestone_counter → 54;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53).
+54 % 5 != 0 — no checkpoint due this milestone; next checkpoint due at m55 (the VERY NEXT milestone). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -4940,3 +4940,94 @@ unblocked for a future SELECT.
 
 ## Backlog row
 | exp5-M-GATE-MCP-PARITY-GAP | Entire QENG gate/lifecycle engine was CLI-only, invisible to MCP-driven agents — added 6 new MCP tools (`gate_run`/`gate_log`/`lifecycle_{complete,adjudicate,promote,retreat}`), `run` deliberately excluded (documented reasoning) | capability-growth (primary) | no VT chart cell | milestone-candidate, surface:mcp, milestone:M37-discover-post-qeng, milestone:M53 |
+
+## M54 — exp5-M-GATE-README-DOCS
+
+`packages/quay/README.md` had ZERO mentions of the entire QENG-1..4 gate/lifecycle/driver CLI
+surface (`gate`, `gate-log`, `complete`, `adjudicate`, `promote`, `retreat`, `run`) — a real,
+shipped, user-facing command family fully undocumented in the package's own README. Selected from
+the M37-discover-post-qeng batch (deferred at M51 in favor of the smaller
+`exp5-M-GATE-HELP-SYNOPSIS-GAP`).
+
+**What changed:** a new `### Gate & lifecycle commands (QENG-1..4)` section added to
+`packages/quay/README.md` (nested under the existing `## Usage` heading, matching the file's
+existing heading-depth/code-fence conventions), documenting `quay gate <task-id> [--gate <name>]`
+/ `quay gate --list`, the `dod`/`acceptance` gates and `task.extra.acceptance`, `quay gate-log`
+(human + `--json` forms), the `complete`/`adjudicate`/`promote`/`retreat` lifecycle verbs over the
+`{todo, ready, done, needs-human}` transition model, and `quay run [--once]` as the autonomous
+driver loop — with worked CLI examples throughout, live-reproduced before being written down.
+
+**Adversarial-audit verdict: PASS-WITH-QUALIFICATIONS.** An independent audit confirmed the new
+section accurate against real re-run CLI behavior, confirmed the MCP-tool exclusion correctly
+scoped (task's AC names only CLI verbs), confirmed no README-content test precedent exists to
+extend, and confirmed the schema-check "N/A legacy" result is correct (task predates the
+`extra.schema:"v1"` convention, grandfathered per `OUTER-LOOP.md`). **One required fix** before
+merge: the `gate --list` worked example showed only 2 gates (`dod`, `acceptance`) without marking
+itself as illustrative of a fresh/minimal workspace — this repo's own `.quay/gates.yml` actually
+wires 11 gates. Fixed by adding a clarifying note directly after the example: "(Example output for
+a fresh/minimal workspace; a workspace with `.quay/gates.yml` custom gates — like this repo's own
+— will list additional named gates beyond `dod`/`acceptance`.)" Applied pre-merge; audit did not
+require a re-audit round for this scoped, mechanical fix.
+
+**Mechanical gates (real runs, this ABSORB, from inside the worktree before merge):**
+```
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 54 experiments/quay-perpetual-stream/v-meta-ledger.md
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh   → tree-hygiene: clean.
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+$ node packages/quay/bin/quay.js gate exp5-M-GATE-README-DOCS --gate dod   → PASS
+```
+**Test-floor (this ABSORB's own independent re-run, `packages/quay` only, excluding
+`serve-github`/`provider-abi-conformance`):** **260 tests / 256 pass / 4 fail** — confirmed
+identical on `master` pre-merge (same 4 failures: `adr-gate` E3 A2, `delivery-standalone-smoke-gate`
+M52 A2, `dir032-audit-independence` M44 A2/C1, `web-ui-browser`) — no new regressions from this
+milestone's README-only change. `dod-fixture-selfcheck.sh` → 17/17 PASS.
+`delivery-standalone-smoke.sh` → 0 RED.
+
+**Impl-row (Clause 4):** N/A — real docs-landing milestone (the task's own AC/DoD are the
+real-landing proof), not a design-only artifact.
+**Line-budget (Clause 3):** N/A — no formal charter file authored (`surface:docs`, DIR-014 §5a
+skip, same class-routing rationale as M51's help-synopsis fix).
+**Split-or-commit (Clause 9):** N/A — no `needs-human` outcome; task reached `done` in full.
+
+**Realized Δv**: capability-discoverability (primary — the already-shipped QENG gate/lifecycle/
+driver CLI surface is now discoverable by a new user reading the README alone, closing a real
+usability gap distinct from the earlier `--help` synopsis fix). No VT chart cell (Docs surface
+weight/coverage in the VT table already assumed this gap closed at a coarser grain; this closes a
+concrete instance rather than moving the VT table's own number). VT chart-1 total unchanged:
+**111.55/120**. `milestone_counter` → **54** (54 % 5 != 0 — no checkpoint due; next checkpoint due
+at **m55**, the VERY NEXT milestone).
+
+**Backlog housekeeping**: `tasks/exp5-M-GATE-README-DOCS.md` → `status: done`, all 3 AC + the DoD
+box ticked against independently re-verified evidence, `## Resolution` section added citing commit
+`ef259dd` and the audit's PASS-WITH-QUALIFICATIONS verdict + the gate --list clarification fix.
+`backlog.md` regenerated via `node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs
+experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M54/worktrees/iteration-0` removed (`git
+worktree remove`), `milestones/M54-gate-readme-docs` branch deleted (`git branch -d`, fully merged,
+confirmed ancestor of `master` before deletion). Merge commit `b3844a6` (`--no-ff`, built commit
+`ef259dd`, finalized commit `4a3e69d`) merged into `master`.
+`worktree-branch-hygiene-check.sh`/`tree-hygiene-check.sh` both report clean.
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 54, not a multiple of 5;
+next checkpoint due at **m55**, the VERY NEXT milestone).
+
+**Off-loop human-steered items (not autonomously actionable by SELECT without explicit human
+go-ahead):** `DIR-036-A` ("Level 2: deploy quay on archguard via ABI") and `DIR-036-B` ("Level 3:
+kit drives a real archguard milestone") were authored **off-loop by the human**, per DIR-027
+steering hygiene, in commits `f94f7ab`/`de3f586` (landed directly to `master` between this
+milestone's worktree branching and its ABSORB — confirmed no conflict with this milestone's own
+merge). Both currently `status: todo`. Per the loop's standing policy on foreign-repo/blast-radius
+actions (deploying quay onto the archguard repo, driving a real archguard milestone), these remain
+`human-steered`/pending and are **not** to be autonomously SELECTed without explicit human
+go-ahead — flagged here for visibility, out of scope for this milestone's own DRAIN/SELECT.
+
+**DRAIN disposition of `directives/pending/` (task-canonical, per DIR-028) at this boundary:** no
+change from M53's disposition. `DIR-035` (parent) stays `pending`; `DIR-036` remains `todo`,
+unblocked for a future SELECT (its children `DIR-036-A`/`DIR-036-B` now exist, human-steered, per
+above).
+
+## Backlog row
+| exp5-M-GATE-README-DOCS | `packages/quay/README.md` had zero mentions of the QENG-1..4 gate/lifecycle/driver CLI surface — added a new "Gate & lifecycle commands (QENG-1..4)" section documenting `gate`/`gate-log`/`complete`/`adjudicate`/`promote`/`retreat`/`run`, with the `gate --list` example clarified as illustrative per the audit's required fix | capability-discoverability (primary) | no VT chart cell | milestone-candidate, surface:docs, milestone:M37-discover-post-qeng, milestone:M54 |
