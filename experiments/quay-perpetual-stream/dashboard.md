@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 59** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M59 ABSORB header sync): body log's m59 ABSORB entry below sets milestone_counter → 59;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57/m58).
-59 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m60, the VERY NEXT milestone). -->
+**milestone_counter: 60** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M60 ABSORB header sync): body log's m60 ABSORB entry below sets milestone_counter → 60;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57/m58/m59).
+60 % 5 == 0 — CHECKPOINT DUE this milestone, written as checkpoints/cp-60.md (next checkpoint at m65). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -5541,3 +5541,121 @@ conflict with this milestone's own merge (clean dry-run merge test performed bef
 
 ## Backlog row
 | DIR-042-A | the gate ENGINE was already data-driven (ADR-013), but the DoD-check LOGIC (test-pass / coverage-floor / RED→GREEN evidence) existed only as exp5's own `experiments/quay-perpetual-stream/scripts/it0-*.sh`, node:test-shaped and exp5-located — a foreign project had to reimplement rather than configure it; closed via 3 new generic gate factories (`makeTestPassGate`/`makeCoverageFloorGate`/`makeRedGreenGate`) parameterized purely by `.quay/gates.yml` workspace data, plus exp5's own it0-dod-check regression suite re-expressed as a CONSUMER of the new `test-pass` gate | capability-growth (primary) | no new VT chart cell (gate-engine/tooling surface, not a chart-1-scored axis) | directive, milestone-candidate, milestone:M59-dir042a-dod-gate-set |
+
+## M60 — M60-dir042b-loop-driver-skill (DIR-042-B) + DIR-042 parent closure
+
+**Task:** [[DIR-042-B]] (`tasks/DIR-042-B.md`) — DIR-042 child B: deliver a shippable, slim,
+runner-agnostic loop-driver Claude Code skill (SELECT→execute→gate→done/needs-human→repeat),
+research-layer-free (no VT/value-ledger/checkpoints/`experiments/**` references), demonstrated
+driving a real task through the full cycle on a non-exp5 board with a non-node:test acceptance
+command configured purely as workspace data. **Merge commit:** `0f637dc`, merge of
+`milestones/M60-dir042b-loop-driver-skill` (build `8b16bc2`, completion write-back `c873dbb`) into
+`master` at this ABSORB (worktree `milestones/M60/worktrees/iteration-0`, base `master` `608f091`,
+the M59 ABSORB commit).
+
+**Independent audit verdict: PASS-WITH-QUALIFICATIONS, one non-blocking note.** An independent
+audit, with no access to the build-phase agent's self-report, confirmed:
+- `plugin/skills/loop-driver/SKILL.md` grep-clean of `VT\b|value-ledger|checkpoints?|experiments/|
+  inherited-core|exp5|M60|DIR-042`.
+- `plugin/test/plugin-packaging.test.mjs`: 7/7 pass (including a new dedicated loop-driver
+  research-layer-leak assertion).
+- `bash packages/quay/test/delivery-standalone-smoke.sh`: 0 RED.
+- `task-schema-check.sh tasks/DIR-042-B.md`: PASS.
+- The audit built its own independent scratch workspace (`/tmp/loop-driver-demo`) with a
+  DEMO-PASS and a DEMO-FAIL fixture task and confirmed both paths work correctly following the
+  skill literally.
+- **One qualification**: AC #2 requires "captured transcript/output in the milestone record" — the
+  build phase's own PASS/FAIL demo was never committed as evidence into DIR-042-B's own body. The
+  audit's independent re-construction was judged sufficient proof the mechanism works, but
+  recommended adding a captured-output/Validation section as part of closing out the milestone.
+  Final audit recommendation: MERGE (with that note addressed).
+
+**Completion-phase (this ABSORB) independent re-verification**, before the checklist write-back
+(the audit used an Explore agent with no Edit access, so ticking fell to completion, per the
+normal DIR-020 convention) — every claim above was re-run directly, not just re-read from the
+audit:
+- **Zero research-layer leak**: `grep -riE 'VT\b|value-ledger|checkpoints?|experiments/|
+  inherited-core|exp5|M60|DIR-042' plugin/skills/loop-driver/SKILL.md` → re-run, no match.
+- **`plugin-packaging.test.mjs`**: re-run, 7/7 pass, identical to the audit's own count.
+- **`delivery-standalone-smoke.sh`**: re-run, 0 RED, 5/5 checks pass.
+- **Fresh, independently-constructed PASS/FAIL demo** (NOT reusing the build's or the audit's own
+  scratch workspace — a brand-new one, `/tmp/loop-driver-demo-ws-ZDUh`, `.quay/config.yml` pointing
+  at this worktree's `packages/quay-native`), two fixture tasks with `extra.acceptance` as pure
+  workspace data (`test -f /etc/hostname` for SCR-PASS, `test -f /nonexistent/impossible/path` for
+  SCR-FAIL) — `select-ready` picked up both; `quay gate SCR-PASS` → `PASS` (exit 0) → `task edit
+  --status done` → confirmed `done`; `quay gate SCR-FAIL` → `FAIL — acceptance failed (exit 1)`
+  (exit 1) → `task edit --status needs-human` → confirmed `needs-human`; final `select-ready`
+  returned `[]`, confirming the `Idle` termination condition per the skill's own `driveLoop` spec.
+  This transcript was added verbatim as a new `## Validation` section on `tasks/DIR-042-B.md`,
+  directly closing the audit's one qualification.
+- All 4 AC + 4 DoD checkboxes ticked with inline evidence citations; `status: todo` → `done`,
+  `extra.dirStatus: pending` → `resolved`.
+- `node packages/quay/bin/quay.js gate DIR-042-B --gate dod` → **PASS**, re-run after the
+  checklist write-back.
+
+**DIR-042 parent CLOSED at this ABSORB.** Per DIR-042's own Split section and DoD clause 4 ("the
+parent is done only when a real non-exp5 loop cycle ran on the product deliverables"), both
+children are now `done` with independently re-verified real-landing evidence: [[DIR-042-A]] (M59,
+generic DoD gate factories + a real scratch-workspace coverage-floor RED/GREEN demo) and
+[[DIR-042-B]] (M60, the loop-driver skill + the real scratch-workspace PASS/FAIL demo above), both
+using a non-node:test acceptance command supplied as pure workspace config. Judged sufficient to
+satisfy the parent's own AC/DoD (the parent AC's "e.g. archguard's native board with a vitest
+acceptance" is an illustrative example, not read as a hard requirement of vitest specifically —
+both children equally satisfy the underlying runner-agnostic, non-node:test intent). `tasks/
+DIR-042.md`: all 4 AC + 4 DoD checkboxes ticked citing both children's evidence; `status: todo` →
+`done`, `extra.dirStatus: pending` → `resolved`.
+
+**Test-floor (this ABSORB's own independent re-run, before merge):** quay core (excluding
+`serve-github`/`provider-abi-conformance`) — **284 tests, 280 pass, 4 pre-existing flaky failures**
+(`dir032-audit-independence` E3 A2 / M44 A2 / M44 C1, `web-ui-browser`) — identical failure set to
+every prior ABSORB since M56 through M59, confirmed NOT introduced by this milestone. This resolves
+the M59/M60-audit count-variance note in `284/280/4`'s favor as this record's own ground truth
+(directly re-run by the completion phase itself, not inherited from either prior report).
+
+**Impl-row (Clause 4):** N/A — real code-landing milestone (the task's own AC/DoD are the
+real-landing proof), not a design-only artifact needing a future implementing row.
+**Line-budget (Clause 3):** N/A — no formal charter file authored; executed directly from the
+directive's own Proposal + Requested action + AC/DoD.
+**Split-or-commit (Clause 9):** DIR-042 was SPLIT into children A/B at `309bbd4` (M59's own base
+commit) per DIR-026; this ABSORB lands child B AND closes the parent (both children now `done`).
+
+**Realized Δv**: capability-growth (primary) — the product now ships a shippable, slim,
+runner-agnostic, research-layer-free loop-driver skill (`plugin/skills/loop-driver/SKILL.md`)
+usable by any foreign project installing the quay plugin, completing the gated-continuous-dev-loop
+productization DIR-042 set out to deliver (alongside DIR-042-A's gate set). No new VT chart-1 cell
+claimed at this ABSORB (a skill/tooling-distribution surface, not a chart-1-scored axis) —
+consistent with DIR-040/DIR-041/DIR-042-A's precedent of capability-growth milestones landing
+outside the chart-1 scoring domain. `milestone_counter` → **60** (60 % 5 == 0 — **CHECKPOINT DUE**,
+written as `checkpoints/cp-60.md`).
+
+**Backlog housekeeping**: `tasks/DIR-042-B.md` — all 4 AC + 4 DoD checkboxes ticked at this
+completion step per independently-verified evidence (see above); `status: todo` → `done`,
+`extra.dirStatus: pending` → `resolved`. `tasks/DIR-042.md` (parent) — all 4 AC + 4 DoD checkboxes
+ticked citing both children's evidence; `status: todo` → `done`, `extra.dirStatus: pending` →
+`resolved`. `backlog.md` regenerated via `node
+experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs
+experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M60/worktrees/iteration-0` removed (`git
+worktree remove`, then `git worktree prune` after a stale-gitdir race; empty `milestones/M60/`
+directory removed), `milestones/M60-dir042b-loop-driver-skill` branch deleted (`git branch -d`,
+fully merged, confirmed ancestor of `master` before deletion).
+
+**Checkpoint disposition: DUE this ABSORB** (`milestone_counter` = 60, a multiple of 5). Written to
+`experiments/quay-perpetual-stream/checkpoints/cp-60.md` — Checkpoint 12, covering m56-m60.
+
+**Note on off-loop human activity since the M59 ABSORB:** `master` advanced with one further
+human-authored, off-loop commit between this milestone's worktree branching (`608f091`, the M59
+ABSORB commit) and this ABSORB — DIR-045 ("formalize the loop-driver skill — follow-on to
+DIR-042-B, loop-executable"), a follow-on directive (`status: todo`, `blockedBy: DIR-042-B`)
+proposing to refactor the DIR-042-B skill into a formalized `iterate` contract + a per-workspace
+`.quay/loop.yml` params schema. It adds only a new `tasks/DIR-045.md` file — no touch to
+DIR-042/DIR-042-B or `plugin/skills/loop-driver/SKILL.md` — confirmed no conflict with this
+milestone's own merge via a clean dry-run merge test (`git merge --no-ff --no-commit`, then
+aborted) performed before the real merge. DIR-045 itself remains `todo`/`pending`, correctly NOT
+autonomously SELECTed this ABSORB (it is blocked by DIR-042-B, which lands only at this very
+ABSORB) — flagged for visibility, a natural next-milestone SELECT candidate now that its blocker is
+resolved.
+
+## Backlog row
+| DIR-042-B | `OUTER-LOOP.md` was exp5's own driver, entangled with the research layer (VT/value-ledger/checkpoints/`inherited-core`) — there was no slim, product-level "SELECT→execute→gate→done→repeat" skill a foreign project could install and run; closed via a new `plugin/skills/loop-driver/SKILL.md` (grep-clean of all research-layer terms), demonstrated end-to-end (PASS→done, FAIL→needs-human) against a scratch native-provider workspace with a shell-one-liner `extra.acceptance` as pure config; DIR-042 PARENT also closed this ABSORB (both children done, real-landing evidence on both halves) | capability-growth (primary) | no new VT chart cell (skill/tooling-distribution surface, not a chart-1-scored axis) | directive, milestone-candidate, milestone:M60-dir042b-loop-driver-skill |
