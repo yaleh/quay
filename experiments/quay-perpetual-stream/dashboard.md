@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 48** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M48 ABSORB header sync): body log's m48 ABSORB entry below sets milestone_counter → 48;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47).
-48 % 5 != 0 — no checkpoint due this milestone. -->
+**milestone_counter: 49** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M49 ABSORB header sync): body log's m49 ABSORB entry below sets milestone_counter → 49;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48).
+49 % 5 != 0 — no checkpoint due this milestone. -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -4451,3 +4451,94 @@ DIR-035-B/C/D remain open `milestone-candidate` tasks for future SELECT passes, 
 
 ## Backlog row
 | DIR-035-A | DIR-035 split A: ABI, not file paths — remove Core's `../../../quay-native` relative imports (delivery-standalone-smoke blockers 2/3/4) | capability-growth (primary) + governance-integrity (secondary) | no VT chart cell | milestone-candidate, human-steered, surface:cli, milestone:M48-dir035-split-abi-imports |
+
+## M49 — M49-dir035-b-data-driven-gates (DIR-035-B)
+
+**Task:** [[DIR-035-B]] (`tasks/DIR-035-B.md`) — second child of [[DIR-035]] (ADR-013 delivery-
+boundary separation), split per DIR-026 SPLIT-OR-COMMIT into 4 independently-completable children
+(A/B/C/D). DIR-035-B's scope: **data-driven gate set** — remove the 5 hardcoded
+`experiments/quay-perpetual-stream/scripts/*.sh` path constants + `ADR_GATE_IDS = ["ADR-001"]` from
+`packages/quay/src/gate/registry.js`'s shipped default registry, sourcing them instead from
+workspace data (`.quay/gates.yml`), mirroring the `adr-<id>` gate's own "derived at gate-run time"
+pattern (delivery-standalone-smoke blockers 1/5). **Merge commit:** `a55079e` (worktree
+`.worktrees/M49-dir035-b`, built commit `79e9e00`, base `master` `8bf8a92`).
+
+**Adversarial-audit verdict: PASS.** A fresh-context subagent, with NO access to the build-phase
+agent's self-report, independently re-ran every check itself rather than trusting the builder's
+claims:
+- `bash packages/quay/test/delivery-standalone-smoke.sh` — **0 RED** (down from 2 RED, combined
+  DIR-035 A+B: 5 RED → 0 RED): blockers 1 ("no experiment references in delivered files") and 5
+  ("no undelivered gate scripts") confirmed GREEN.
+- `grep -rnE 'experiments/quay-perpetual-stream' packages/quay/src packages/quay/bin` — empty,
+  confirmed.
+- A fresh non-exp5 workspace's `gate --list` (real temp workspace, no `.quay/gates.yml`, no
+  `experiments/`) shows ONLY `dod`, `acceptance`, `doc-quay-directive-skill` — confirmed
+  independently.
+- This repo's own root workspace `gate --list` (via the new `.quay/gates.yml`) still shows all 9
+  original gates (`dod`, `acceptance`, `doc-quay-directive-skill`, `impl-row`, `line-budget`,
+  `vmeta-lag`, `audit-independence`, `dogfood-evidence`, `adr-001`) — confirmed; `.quay/gates.yml`'s
+  script paths/argsKeys diffed byte-identical to the old hardcoded constants (no behavior change for
+  exp5's own gate usage).
+- `dod-fixture-selfcheck.sh`: 17/17 PASS, confirmed independently.
+- `impl-row` and `line-budget` gates independently exercised against a real task and resolve/execute
+  correctly (no "unknown gate" errors).
+- Full test suite: 253 tests / 249 pass / 4 fail — the SAME 4 failures reproduce on unmodified
+  `master` (adr-gate E3 A2, dir032-audit-independence M44 A2/C1, web-ui-browser), confirmed via
+  merge-base check (pre-existing, no regression). (Auditor's own suite run had timed out before
+  completing; this milestone's own ABSORB re-ran the full suite to close that gap — see Mechanical
+  gates below.)
+
+**Mechanical gates (real runs, this ABSORB, on `master` post-merge):**
+```
+$ bash packages/quay/test/delivery-standalone-smoke.sh   → SMOKE VERDICT: 0 RED
+$ grep -rnE 'experiments/quay-perpetual-stream' packages/quay/src packages/quay/bin   → (empty)
+$ bash experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh --counter 49 experiments/quay-perpetual-stream/v-meta-ledger.md
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh   → tree-hygiene: clean.
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+info: prunable merged iteration branches=0; registered iteration worktrees=0.
+```
+**Test-floor (product-touching, `packages/quay/src` + `packages/quay/bin` + `.quay/gates.yml`
+edited):** PASS — full `packages/quay` suite (excluding live-GitHub) re-run in full (not
+spot-checked, closing the gap the independent auditor's own timed-out run left): 253 tests / 249
+pass / 4 fail (same 4 pre-existing failures as `master` baseline) — no regression.
+**Impl-row (Clause 4):** N/A — this is a real code-landing milestone (DIR-035-B's own AC/DoD are
+the real-landing proof), not a design-only artifact needing a future implementing row.
+**Line-budget (Clause 3):** N/A — no formal charter file was authored for this directive-driven
+split-child milestone (same no-charter precedent as M46/M47/M48's directive-driven ABSORBs).
+**Split-or-commit (Clause 9):** N/A — no `needs-human` outcome declared; DIR-035-B reached `done`.
+
+**Realized Δv**: governance-integrity (primary — closes the second of DIR-035's three named
+delivery-boundary rules, moves `delivery-standalone-smoke` from 2→0 RED, combined DIR-035 A+B: 5→0
+RED) + capability-growth (secondary — the gate engine is now genuinely reusable by a foreign
+workspace, not exp5-coupled). No VT chart cell (same no-VT-cell precedent as prior
+method-infra/architecture-fix milestones touching the meta-layer). VT chart-1 total unchanged:
+**111.55/120**. `milestone_counter` → **49** (49 % 5 != 0 — no checkpoint due).
+
+**Backlog housekeeping**: `tasks/DIR-035-B.md` → `status: done`, `dirStatus: resolved`, all 4 AC +
+3 DoD boxes ticked against independently re-verified evidence, `## Resolution` section added citing
+commit `79e9e00` and the audit's own re-verification. `tasks/DIR-035.md` → left `status: todo`,
+`dirStatus: pending` (DIR-035-C/D not yet done, per DIR-026 parent/children discipline — a parent is
+`done` iff ALL children are `done`); its `## Split` section updated to record DIR-035-A and
+DIR-035-B's real landing. `backlog.md` regenerated via
+`node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `.worktrees/M49-dir035-b` removed (`git worktree remove
+--force`), `milestones/M49-dir035-b-data-driven-gates` branch deleted (`git branch -d`, was fully
+merged, `git merge-base` confirmed ancestor of `master`). Note: this milestone's worktree used the
+`.worktrees/<name>` location pattern rather than M48's `milestones/M<NN>/worktrees/iteration-N`
+pattern; `worktree-branch-hygiene-check.sh`/`tree-hygiene-check.sh` both handled this location
+correctly (they enumerate live `git worktree list` state / scan for un-gitignored scratch, not a
+hardcoded path-pattern assumption) — both report clean, 0/0, post-prune.
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 49, not a multiple of 5; next
+due at 50).
+
+**DRAIN disposition of `directives/pending/` (task-canonical, per DIR-028) at this boundary:** no
+change from M48's disposition for the carried-forward set. `DIR-035` (parent) stays `pending` —
+DIR-035-C/D remain open `milestone-candidate` tasks for future SELECT passes, in dependency order
+(C before D, per DIR-035's own Split section).
+
+## Backlog row
+| DIR-035-B | DIR-035 split B: data-driven gate set — move it0-*/vmeta-lag/audit-independence/dogfood-evidence built-ins out of the product's default registry (delivery-standalone-smoke blockers 1/5) | governance-integrity (primary) + capability-growth (secondary) | no VT chart cell | milestone-candidate, human-steered, surface:cli, milestone:M49-dir035-b-data-driven-gates |
