@@ -3852,3 +3852,109 @@ directive supersedes it at the next DRAIN.
 
 ## Backlog row
 | exp5-M-CRYST-E3 | E3 adr-as-contract enforcement — applies-to scope + runnable check as a named adr-<id> quay gate (the 'continuously applied' half of E1) | governance-integrity (primary) + capability-growth (secondary) | no VT chart cell | milestone-candidate, crystallization, milestone:M42-cryst-e3 |
+
+## ABSORB m43 — M43-dir022-remaining-gates — 2026-07-20
+**Task:** `exp5-M-DIR022-REMAINING-GATES` (DIR-030 item 3 of 4). **Charter:**
+`experiments/quay-perpetual-stream/charters/M43-dir022-remaining-gates.md`. **Merge commit:** `6ce40fb`
+(fast-forward `f67fd24..6ce40fb`).
+
+Registered `vmeta-lag` (wraps `vmeta-lag-check.sh`) and `dogfood-evidence` (wraps
+`it0-dogfood-evidence-gate.sh`) as new named engine gates in `packages/quay/src/gate/registry.js`, using
+the SAME `makeIt0Gate` factory `impl-row`/`line-budget` already use (M39 precedent). Re-derived scope at
+SELECT time by reading `it0-dod-check.mjs`/`vmeta-lag-check.mjs`/`lifecycle.js` directly rather than
+trusting the task's original title: `escrow-Δv`/`test-floor` are NOT standalone scripts (Clauses 6/7
+inside `it0-dod-check.mjs`, already covered by the existing `dod` gate — registering them separately
+would duplicate logic); `audit` already exists as a GateEvent name via `quay adjudicate` →
+`lifecycle.js#runAdjudicate`, a DIFFERENT check than this stream's own per-milestone adversarial-audit
+narrative. Both non-registrations are documented as code comments in `registry.js` (grep-checkable, not
+merely asserted in this entry).
+
+18 new tests (`packages/quay/test/dir022-remaining-gates.test.mjs`) — fail-closed behavior, real-script
+pass/fail branches, real CLI + GateEvent path, and a real-world demonstration against this repo's own
+`v-meta-ledger.md` and this milestone's own charter file. All 18 PASS. `registry.js` line coverage:
+**85.02%** (≥80% test floor, ADR-001). Full suite (excl. live-GitHub): 181/183 pass — the 2 failures
+(`adr-gate.test.mjs` E3 A2, `web-ui-browser.test.mjs`) CONFIRMED pre-existing on a clean `master`
+checkout (fresh clone + `npm install`), unrelated to this change.
+
+**DoD proof (AC3) — this milestone's own real ABSORB, ≥2 distinct non-`dod` gates:**
+```
+$ quay gate exp5-M-DIR022-REMAINING-GATES --gate vmeta-lag   → PASS (GateEvent: pass, "acceptance passed (exit 0)")
+$ quay gate exp5-M-DIR022-REMAINING-GATES --gate line-budget → PASS (GateEvent: pass, "acceptance passed (exit 0)")
+$ quay gate exp5-M-DIR022-REMAINING-GATES --gate dogfood-evidence (no args set) → FAIL fail-closed (GateEvent: fail)
+$ quay gate exp5-M-DIR022-REMAINING-GATES --gate dod          → PASS (GateEvent: pass, "all four artifacts present; eligible to move to ready")
+```
+
+**Mechanical gate — it0-dod-check**: all 9 clauses PASS (clause0 checklist 3/3 checked, clause1 audit
+disposition present, clause2 V_meta consolidation-lag disposition present, clause3 line-budget PASS,
+clause4 impl-row N/A, clause5 no-self-exemption clean, clause6 escrow-Δv N/A [not design-only], clause7
+test-floor PASS [`surface:cli`, 85.02% ≥80%], clause8 task-canonical-lifecycle-record PASS; clause9
+split-or-commit N/A [no `needs-human` declared]). Full paste in
+`milestones/M43-dir022-remaining-gates/audits/iteration-0-acceptance-audit.md`.
+
+**V_meta consolidation-lag gate**: PASS — `vmeta-lag-check.sh --counter 43 v-meta-ledger.md` (run via the
+new `vmeta-lag` gate) found no ALARM row past K=2 without a dated carry-forward.
+
+**Adversarial audit — DISCLOSED DEVIATION, DIR-032 (third consecutive occurrence, M41→M42→M43):**
+Independent-subagent dispatch was RE-TESTED this pass (not assumed unreachable from precedent alone):
+`mcp__plugin_manda_manda__Agent` called directly with `subagent_type: general-purpose` →
+`MCP error -32602: cap request requires to= (or a configured Self broker); refusing to post to the
+unaddressed legacy channel`. No `to=` broker address is discoverable from the environment. This CONFIRMS
+the identical nested-session degradation DIR-032 diagnosed at M41/M42 also applies to this session.
+Per DIR-026's `needs-human` legitimacy constraint (external-blockers-only), this is judged an
+EXTERNAL/environmental blocker for the **audit-independence sub-mechanism only** — it does NOT block
+this milestone's own deliverable (complete, tested, real per the AC/DoD checklist above). Per DIR-032's
+own text, this audit is explicitly flagged **NOT INDEPENDENT** (self-audit) rather than silently passed
+as independent. **adversarial-audit verdict: NO REFUTATION FOUND** (self-audit, independence NOT met).
+DIR-032's own requested actions (generic-vehicle edit to `OUTER-LOOP.md` §6, the mechanical
+`audit-independence-check.mjs` gate) are OUT OF SCOPE for this milestone's own charter (scoped to
+vmeta-lag/dogfood-evidence only) — DIR-032 stays `pending`, tracked as its own future milestone. Retro-
+flagged M41/M42 (and self-flagged M43) as self-audited in `inherited-core.md`'s Deviation-record schema
+table as new rows **DEV-06** (M41), **DEV-07** (M42), **DEV-08** (M43) — all `found`/`not fixed`, per
+DIR-032 item 3's explicit request.
+
+**Out-of-band commit note (DIR-031/DIR-027 hygiene):** an out-of-band human commit (`1eef75a` merging
+`f33d940`, authoring DIR-032) landed on `master` mid-pass, between this pass's DRAIN (HEAD `3a64f6e`) and
+worktree setup (HEAD `f67fd24`, already including `1eef75a`). Verified zero file overlap
+(`git diff --stat b5c4f80 f33d940` — DIR-032 touched only `tasks/DIR-032.md`); fast-forwarded cleanly.
+
+**Realized Δv**: governance-integrity (primary — closes the DIR-022 remainder, unblocks DIR-024's
+gate-log audit trail) + capability-growth (secondary — two new reusable named engine gates). No VT chart
+cell (mirrors the DoD-program lineage's own no-VT-cell precedent — M25/M30/M31/M32/M34/M36/M38/M39/M40/
+M41/M42). VT chart-1 total unchanged: **111.55/120**. `milestone_counter` → **43**.
+
+**Backlog housekeeping**: `tasks/exp5-M-DIR022-REMAINING-GATES.md` → `status: done`, checklist boxes
+ticked (self-audit write-back), `## Execution record` appended. `backlog.md` regenerated via
+`node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream
+--write`.
+
+**Checkpoint disposition:** NOT due this ABSORB (last written `cp-40.md` at m40, every-5 cadence — next
+due at m45; `milestone_counter` is now 43, not a multiple of 5).
+
+**DIR-030 disposition (`## Resolution update (M43 ABSORB)` on `tasks/DIR-030.md`):** window is now
+**3/4** (G1 m41, E3 m42, this task m43) — MEETS the ≥3/4 threshold. D1 (`exp5-M-CRYST-D1`) becomes
+eligible for the FIRST time at the next SELECT (m44), per the directive's own AC. State explicitly: do
+NOT silently leave D1 gated — it is now unblocked.
+
+**DIR-032 disposition:** stays `pending`. This pass empirically re-confirmed its diagnosis (a THIRD
+consecutive nested-session degradation) rather than resolving it; the disclosed-not-silent handling this
+ABSORB used is a stopgap consistent with DIR-032's own "BLOCKING, not license to self-audit" text (the
+milestone's real work still landed; the audit conclusion is explicitly marked non-independent, not
+laundered as independent). DIR-032's own requested actions remain open for a future milestone: (1) edit
+`OUTER-LOOP.md` §6 to name a generic `Explore`/`general-purpose` vehicle instead of
+`baime:iteration-executor`; (2) build+wire `scripts/audit-independence-check.mjs` as a HARD ABSORB gate.
+
+**DRAIN disposition of `directives/pending/` at this boundary, m44 SELECT-candidate note:**
+`directives/pending/` retains `DIR-030` (now `resolved` per the ≥3/4 threshold met above — D1 unblocked),
+`DIR-014` (phase 1 only; items 2/3/5 remain), `DIR-021` (delivered, stays pending per its own escrow
+discipline), `DIR-022` (parent — phase 1 [M39] + this milestone's remainder [vmeta-lag/dogfood-evidence]
+now landed; `escrow-Δv`/`test-floor`/`audit` deliberately NOT separately gated, documented — reconsider
+whether DIR-022 itself can now be marked resolved at m44's DRAIN), `DIR-023`, `DIR-024` (Layers 3-4,
+depend on DIR-022), `DIR-026` (SPLIT-OR-COMMIT, tracked separately), `DIR-031` (Tier-1 hygiene, landed
+off-loop, no further action), **`DIR-032`** (NEW — audit independence, `pending`, third consecutive
+degradation confirmed this pass, own future milestone owed). The human-steered fence on D2/D3/F1 still
+excludes those from autonomous SELECT. m44 SELECT should consider **`exp5-M-CRYST-D1`** now-eligible per
+DIR-030's ≥3/4 threshold, alongside DIR-032's own remediation as a competing governance-integrity
+candidate — a judgment call for the next pass, not resolved here.
+
+## Backlog row
+| exp5-M-DIR022-REMAINING-GATES | DIR-022 remainder — vmeta-lag + dogfood-evidence registered as named engine gates; escrow-Δv/test-floor/audit non-duplication documented; multi-gate real ABSORB proof | governance-integrity (primary) + capability-growth (secondary) | no VT chart cell | milestone-candidate, surface:cli, milestone:M43-dir022-remaining-gates |

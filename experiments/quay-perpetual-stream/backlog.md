@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-DIR022-REMAINING-GATES | DIR-022 remainder: register the OTHER gates (audit, vmeta-lag, escrow, test-floor) as named engine gates + prove multi-gate ABSORB on a REAL milestone | DONE | - | milestone-candidate, milestone:M43-dir022-remaining-gates |
 | exp5-M-CRYST-E3 | E3 adr-as-contract enforcement — applies-to scope + runnable check as a named adr-<id> quay gate (the 'continuously applied' half of E1) | DONE | - | milestone-candidate, crystallization, milestone:M42-cryst-e3 |
 | exp5-M-CRYST-G1 | G1 [executable] North-star metric: per-milestone code:doc increment ratio on dashboard + flag | DONE | - | milestone-candidate, crystallization, observability, milestone:M41-cryst-g1 |
 | exp5-M-CRYST-B7-LOADBEARING-TEST-GATE | B7 Enforce ADR-TDD clause 2: gate that flags a load-bearing scripts/*.mjs lacking a sibling *.test.mjs | DONE | - | milestone-candidate, crystallization |
@@ -44,10 +45,9 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| exp5-M-TS-MIGRATION | TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety | open | - | milestone-candidate, crystallization, human-steered |
 | exp5-M-CRYST-INV | INV [invariant] enforcement-WITH-design: no new rule/DoD-clause/method-step accepted without its executable enforcement in the SAME milestone (generalizes DIR-026 item 5) — the #1 cross-experiment structural fault | open | - | milestone-candidate, crystallization, invariant |
-| exp5-M-DIR022-REMAINING-GATES | DIR-022 remainder: register the OTHER gates (audit, vmeta-lag, escrow, test-floor) as named engine gates + prove multi-gate ABSORB on a REAL milestone | open | - | milestone-candidate |
 | exp5-M-CRYST-D1 | D1 quay DOCUMENT-MANAGEMENT capability (contract-validator as a quay feature; formalized-style + self-verifying contracts enforced by quay) | open | - | milestone-candidate, crystallization |
+| exp5-M-TS-MIGRATION | TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety | open | - | milestone-candidate, crystallization, human-steered |
 | exp5-M-CRYST-B4 | B4 Migrate existing tasks to the canonical schema (or forward-only + validator flags legacy) | open | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-E2 | E2 Extract ADRs from proposals + DIR tasks (single-source DIR-002→028, split-or-commit DIR-026, single-branch DIR-027, proposal→plan DIR-014, AC/DoD-in-task DIR-020, QENG, Provider ABI, ...) | open | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-F1 | F1 [subtractive] Shrink iteration reports / ABSORB dispositions to GateEvent pointers (advances DIR-021/022/024) | open | - | milestone-candidate, crystallization, human-steered |
@@ -67,4 +67,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_60 milestone-candidate task(s) as of 2026-07-20T03:37:16.703Z._
+_60 milestone-candidate task(s) as of 2026-07-20T03:54:30.443Z._
