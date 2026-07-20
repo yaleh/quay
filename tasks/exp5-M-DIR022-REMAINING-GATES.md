@@ -24,3 +24,6 @@ N/A — thin `registry.js` wrappers over the existing it0/vmeta scripts (no logi
 References the standard inherited-core DoD clauses. Real landing:
 - [ ] The remaining gates are engine-registered and run through the engine on a REAL milestone (not a throwaway worktree), each with a durable GateEvent.
 - [ ] Single-source preserved (registry WRAPS scripts, never reimplements); closes the DIR-022 remainder audited 2026-07-20. Unblocks DIR-024 (gate-log audit trail).
+
+## Not selected (M41)
+DIR-030 ranks this #3 in the observe-and-enforce cluster, after G1 and E3. Not selected this pass: G1 is ranked first and is the smaller unit. Reconsider at M43 (or M42 if E3 is deferred).

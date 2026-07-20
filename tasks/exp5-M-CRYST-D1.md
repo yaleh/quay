@@ -9,7 +9,7 @@ labels:
 parent: exp5-M-CRYST
 children: []
 extra:
-  schema: "v1"
+  schema: v1
 ---
 ## Proposal
 Extend quay to manage repeatable method documents/decisions as first-class objects with contracts/validation + generated views (resolves decision①→quay; §7 concrete). The contract-validator is a quay capability, not an exp5 script. Unblocks D2/D3-§9 (contracts validated BY quay) and E2 back-links. Reuse the E1 ADR-kind pattern (a doc kind with a self-verifying `contracts:` block; single-source module wrapped by a gate).
@@ -22,3 +22,6 @@ N/A — product code across packages (a Core doc-management kind + contract-vali
 References the standard inherited-core DoD clauses. Real landing:
 - [ ] A REAL method doc is managed + validated through quay (not a fixture) — the contract-validator flags a real non-conforming doc.
 - [ ] Strict TDD (product code); no dual source (validator logic once, wrapped by a gate); unblocks D2/D3-§9/E2.
+
+## Not selected (M41)
+DIR-030 explicitly requires the observe-and-enforce cluster (G1→E3→DIR022-REMAINING→INV) to land BEFORE D1, with D1 not selectable until ≥3 of the four have landed. Not selected this pass (0/4 landed so far) — foundational but per DIR-030's steer, deferred until the window closes.

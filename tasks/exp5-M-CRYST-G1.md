@@ -7,10 +7,11 @@ labels:
   - milestone-candidate
   - crystallization
   - observability
+  - milestone:M41-cryst-g1
 parent: exp5-M-CRYST
 children: []
 extra:
-  schema: "v1"
+  schema: v1
 ---
 ## Proposal
 Make CONVERGENCE observable — the meter for "are we crystallizing?" (implements **ADR-007** instrument-the-dark-axes; the closure half of ADR-006's L_T..L_S checklist). Today only L_T + half L_C are lit; L_D/L_G/L_S are dark, so we cannot quantitatively SEE convergence. Build cheap executable proxies per milestone, recorded on `dashboard.md` + flagged:

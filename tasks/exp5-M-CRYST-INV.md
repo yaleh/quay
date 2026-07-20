@@ -12,7 +12,7 @@ labels:
 parent: exp5-M-CRYST
 children: []
 extra:
-  schema: "v1"
+  schema: v1
 ---
 ## Proposal
 Establish a first-class standing invariant: a rule/DoD-clause/method-step is not 'done' unless its EXECUTABLE enforcement (a gate/check/code) + a fixture land in the SAME milestone. Cross-experiment ANALYSIS: designed-not-wired + form-vs-substance dilution + phased-deferral are one fault — prose-only rules get paraphrased/deferred/never-wired (exp4 worktree rule paraphrased away 13x; exp5 DIR-014 shelfware 25 milestones). Realize as (a) an ADR + governing invariant, (b) a mechanical gate that HARD-blocks accepting a new clause without its enforcement + fixture.
@@ -29,3 +29,6 @@ N/A — the gate is one single-source `scripts/*.mjs` check + fixtures (RED-then
 References the standard inherited-core DoD clauses. Real landing:
 - [x] The invariant is established as governance (ADR-011 + inherited-core standing-invariants section).
 - [ ] The gate blocks a real synthetic 'design-only new clause' and passes an enforced one; wired into ABSORB (the remaining, post-restart deliverable).
+
+## Not selected (M41)
+DIR-030 ranks this #4 (last) in the observe-and-enforce cluster. Not selected this pass: smallest Δv̂ of the four (governance half already landed pre-restart; only the gate half remains) and DIR-030 explicitly orders it after G1/E3/DIR022-REMAINING. Reconsider once the earlier three land.

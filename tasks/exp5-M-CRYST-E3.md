@@ -31,3 +31,6 @@ References the standard inherited-core DoD clauses; the bar is REAL LANDING, not
 - [ ] A REAL ADR (ADR-001) is enforced by its named gate on a real change (GateEvent recorded), demonstrating "continuously applied", not asserted.
 - [ ] Single-source: the ADR's check LOGIC is one script; the quay gate WRAPS it (no second implementation) — same dual-source guard as D3/M39.
 - [ ] Strict TDD across the touched packages; no regression to the E1 ADR surfaces.
+
+## Not selected (M41)
+DIR-030 ranks this #2 in the observe-and-enforce cluster (after G1). Not selected this pass: G1 is smaller/more self-contained (pure new metric scripts, no touch to `adr-store.js`/registry), and DIR-030's own ordering puts it first. Reconsider at M42.

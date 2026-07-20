@@ -14,3 +14,6 @@ experiment/timing/*.log
 **/worktrees/
 **/dist-sea/
 .quay/gate-events.jsonl
+
+# archguard MCP tool's own local cache/metrics — not source, regenerated per-session
+.archguard/
