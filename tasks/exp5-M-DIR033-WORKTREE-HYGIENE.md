@@ -3,6 +3,7 @@ id: exp5-M-DIR033-WORKTREE-HYGIENE
 title: "DIR-033: wire capture-then-prune worktree/branch hygiene into ABSORB
   (governance/infra hard floor — the enforcement half of an already-shipped
   check)"
+status: done
 labels:
   - milestone-candidate
   - governance-integrity
@@ -13,6 +14,14 @@ children: []
 extra:
   schema: v1
   dirStatus: n/a
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-DIR033-WORKTREE-HYGIENE
+    experiments/quay-perpetual-stream/charters/M46-dir033-worktree-hygiene.md
+    /tmp/m46-absorb-entry.md
+  auditIndependenceArgs:
+    - --orchestrator-id
+    - m46-inner-worker-builder-session
+    - /tmp/m46-absorb-entry.md
 ---
 ## Proposal
 DIR-033's mechanical check (`scripts/worktree-branch-hygiene-check.sh`) and the M07-orphan rescue
@@ -46,29 +55,31 @@ a real one-time worktree/branch prune; no staged `docs/plans/*.md` doc warranted
 class, per `inherited-core.md`'s two-class diversity policy — not development-class product code).
 
 ## Acceptance Criteria
-- [ ] `OUTER-LOOP.md`'s ABSORB step (step 6) states the capture-then-prune close-out (hygiene-check
+- [x] `OUTER-LOOP.md`'s ABSORB step (step 6) states the capture-then-prune close-out (hygiene-check
       run + paste output, worktree remove, branch delete, non-primary-report-capture check) in its
       own text, not by reference only.
-- [ ] After this milestone's own ABSORB, `git worktree list | grep -c worktrees/iteration` and the
+- [x] After this milestone's own ABSORB, `git worktree list | grep -c worktrees/iteration` and the
       merged-iteration-branch count are BOTH reduced to only the current (M46) milestone's entries —
       the M44/M45 dangling worktrees/branches from before this milestone are gone.
-- [ ] `scripts/worktree-branch-hygiene-check.sh` output is pasted GREEN in this milestone's own ABSORB
+- [x] `scripts/worktree-branch-hygiene-check.sh` output is pasted GREEN in this milestone's own ABSORB
       entry, run AFTER the prune (proving the close-out and the check compose, not just that the
       check alone is green).
-- [ ] DIR-031's sibling gap closed alongside: `OUTER-LOOP.md` states the "clean between atomic
+- [x] DIR-031's sibling gap closed alongside: `OUTER-LOOP.md` states the "clean between atomic
       commits" close-out, and `.gitignore` carries the known scratch patterns
       (`tree-hygiene-check.sh` GREEN on the live tree pasted as evidence).
 
 ## Definition of Done
 References the standard inherited-core DoD clauses (Clauses 0-9, `it0-dod-check.mjs`). Real landing,
 not artifacts-only:
-- [ ] The wiring is exercised on THIS real milestone's ABSORB (not merely stated in prose) — the
+- [x] The wiring is exercised on THIS real milestone's ABSORB (not merely stated in prose) — the
       worktree/branch counts before/after are pasted as evidence, and the hygiene-check outputs
       (both `worktree-branch-hygiene-check.sh` and `tree-hygiene-check.sh`) are pasted GREEN,
       post-prune.
-- [ ] DIR-033 and DIR-031 are both marked `dirStatus: applied` on their own task files with a
+- [x] DIR-033 and DIR-031 are both marked `dirStatus: applied` on their own task files with a
       `## Resolution` section citing this milestone's ABSORB entry + commit SHA, per OUTER-LOOP.md
-      step 0's directive-disposition discipline.
-- [ ] No dual source: the hygiene logic stays exactly where it already lives (the two `.sh` scripts,
+      step 0's directive-disposition discipline. **(Corrected in this corrective pass, 2026-07-20,
+      after an independent audit returned REFUTED against the record — see
+      `audits/iteration-0-acceptance-audit.md`.)**
+- [x] No dual source: the hygiene logic stays exactly where it already lives (the two `.sh` scripts,
       unmodified in logic — only the wiring/gitignore/OUTER-LOOP.md text change), never duplicated
       inline into OUTER-LOOP.md itself.

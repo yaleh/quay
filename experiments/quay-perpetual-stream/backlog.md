@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-DIR033-WORKTREE-HYGIENE | DIR-033: wire capture-then-prune worktree/branch hygiene into ABSORB (governance/infra hard floor — the enforcement half of an already-shipped check) | DONE | - | milestone-candidate, governance-integrity, human-steered, milestone:M46-dir033-worktree-hygiene |
 | exp5-M-CRYST-D1 | D1 quay DOCUMENT-MANAGEMENT capability (contract-validator as a quay feature; formalized-style + self-verifying contracts enforced by quay) | DONE | - | milestone-candidate, crystallization, milestone:M45-cryst-d1-doc-management |
 | exp5-M-DIR032-AUDIT-INDEPENDENCE | DIR-032: generic-vehicle OUTER-LOOP audit dispatch + machine-checkable audit-independence HARD gate (close both halves together, per SELECT's governance/infra hard floor) | DONE | - | milestone-candidate, governance-integrity, human-steered, milestone:M44-dir032-audit-independence |
 | exp5-M-DIR022-REMAINING-GATES | DIR-022 remainder: register the OTHER gates (audit, vmeta-lag, escrow, test-floor) as named engine gates + prove multi-gate ABSORB on a REAL milestone | DONE | - | milestone-candidate, milestone:M43-dir022-remaining-gates |
@@ -47,16 +48,16 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| exp5-M-CRYST-INV | INV [invariant] enforcement-WITH-design: no new rule/DoD-clause/method-step accepted without its executable enforcement in the SAME milestone (generalizes DIR-026 item 5) — the #1 cross-experiment structural fault | open | - | milestone-candidate, crystallization, invariant |
-| exp5-M-TS-MIGRATION | TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety | open | - | milestone-candidate, crystallization, human-steered |
 | exp5-M-CRYST-B4 | B4 Migrate existing tasks to the canonical schema (or forward-only + validator flags legacy) | open | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-E2 | E2 Extract ADRs from proposals + DIR tasks (single-source DIR-002→028, split-or-commit DIR-026, single-branch DIR-027, proposal→plan DIR-014, AC/DoD-in-task DIR-020, QENG, Provider ABI, ...) | open | - | milestone-candidate, crystallization |
+| exp5-M-CRYST-C1 | C1 [executable] Crystallize split-or-commit's SELECT-split rule + parent-done-iff-children from prose into gates (DIR-026 half-done) | open | - | milestone-candidate, crystallization |
+| exp5-M-CRYST-INV | INV [invariant] enforcement-WITH-design: no new rule/DoD-clause/method-step accepted without its executable enforcement in the SAME milestone (generalizes DIR-026 item 5) — the #1 cross-experiment structural fault | open | - | milestone-candidate, crystallization, invariant |
+| exp5-M-TS-MIGRATION | TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety | open | - | milestone-candidate, crystallization, human-steered |
 | exp5-M-CRYST-F1 | F1 [subtractive] Shrink iteration reports / ABSORB dispositions to GateEvent pointers (advances DIR-021/022/024) | open | - | milestone-candidate, crystallization, human-steered |
 | exp5-M-CRYST-D2 | D2 Rewrite skills (/quay-directive, quay-task-to-plan) in baime formalized style (λ-Spec + contracts:) | open | - | milestone-candidate, crystallization, human-steered |
 | exp5-M-CRYST-D3 | D3 [subtractive] Rewrite OUTER-LOOP + inherited-core + inner-iteration prompts in formalized style; replace deterministic prompt steps with code (Axis 2′) | SELECTED | - | milestone-candidate, crystallization, milestone:first-wave, human-steered |
 | exp5-M-CRYST | Crystallization program — molten prose → executable single-source (geometric-info-theory) | open | - | milestone-candidate, crystallization, epic |
 | exp5-M-CRYST-D4-LEDGER-STRUCTURED-STATUS | D4 [hard-fix] Structured V_meta-ledger status field — retire the prose status parser (ADR-004; closes R5's prose-parsing residual) | open | - | milestone-candidate, crystallization |
-| exp5-M-CRYST-C1 | C1 [executable] Crystallize split-or-commit's SELECT-split rule + parent-done-iff-children from prose into gates (DIR-026 half-done) | open | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-B6-VALIDATOR-COVERAGE | B6 Validator coverage: assert directive Finding/Requested-action; document semantic-emptiness non-goal (review C1) | open | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-B5-PARSER-UNIFY | B5 [subtractive] Unify the parser fork: regenerate-backlog-view.mjs imports the canonical extractSection (review C2) | open | - | milestone-candidate, crystallization |
 | exp5-M-QENG-DOD-DEMO-ONLY | The QENG-5 'exp5 DoD via quay gate' wiring is demo-only (2 fixture tasks, QENG-5-DEMO-PASS/FAIL) — the REAL per-milestone DoD meta-enforcer gate at OUTER-LOOP.md step 6/7 still runs it0-dod-check.sh as a bare prose shell call, not through quay gate; decide whether/how to close that gap | SELECTED | governance-integrity (closes a self-disclosed "shelfware risk" the QENG-0 epic itself named as | milestone-candidate, surface:method-infra, milestone:M37-discover-post-qeng |
@@ -68,4 +69,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_61 milestone-candidate task(s) as of 2026-07-20T05:15:25.889Z._
+_62 milestone-candidate task(s) as of 2026-07-20T05:40:46.761Z._

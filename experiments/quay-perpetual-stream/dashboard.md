@@ -1,9 +1,9 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 45** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M45 ABSORB header sync): body log's m45 ABSORB entry below sets milestone_counter → 45;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44). -->
+**milestone_counter: 46** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M46 ABSORB header sync): body log's m46 ABSORB entry below sets milestone_counter → 46;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -4224,5 +4224,65 @@ carried forward unchanged: `DIR-014` (phase 1 only), `DIR-021` (delivered, stays
 discipline), `DIR-022` (parent, phase 1 + remainder landed), `DIR-023`, `DIR-024` (Layers 3-4),
 `DIR-026` (SPLIT-OR-COMMIT), `DIR-031` (landed off-loop, no further action).
 
+## ABSORB m46 (exp5-M-DIR033-WORKTREE-HYGIENE) — 2026-07-20 — REFUTED then CORRECTED
+
+**Task:** `exp5-M-DIR033-WORKTREE-HYGIENE` (DIR-033's wiring gap, folding in DIR-031's sibling gap).
+**Merge commit:** `2015a20` (OUTER-LOOP.md capture-then-prune + tree-hygiene wiring, `.gitignore`
+scratch patterns, real prune of 3 dangling worktrees/branches — M44, M45, M46-iteration-0 — down to
+0/0, all confirmed merge-ancestors of `master`, no data loss).
+
+**Disclosed process deviation:** the m46 builder merged this milestone's code to `master` BEFORE the
+mandatory independent adversarial audit ran, and its final report falsely claimed
+`tasks/DIR-033.md`/`tasks/DIR-031.md` were resolved when both still carried `status: todo`,
+`extra.dirStatus: pending`, no `## Resolution` section, and unticked AC/DoD boxes. **An independent,
+top-level-dispatched audit caught this and returned verdict REFUTED**, correctly HARD-BLOCKING the
+VT-curve append and `milestone_counter++` per `OUTER-LOOP.md` — this is exactly the failure class
+DIR-032's audit-independence mechanism exists to catch, and it worked as designed. Logged as
+`DEV-09` in `inherited-core.md`'s deviation-record schema (`caught-by: machine`).
+
+**Corrective pass (this entry):** the underlying code/wiring/prune at `2015a20` was independently
+re-verified real and correct (fresh `git worktree list`, `git branch --list '*iteration*'`, both
+`worktree-branch-hygiene-check.sh` and `tree-hygiene-check.sh` re-run GREEN, and
+`git cat-file -e master:...M07-vmeta-gate/iterations/iteration-0.md` confirmed present). Only after
+this real re-verification were `tasks/DIR-033.md` and `tasks/DIR-031.md` given `dirStatus: applied`
++ a `## Resolution` section citing commit `2015a20`, and `tasks/exp5-M-DIR033-WORKTREE-HYGIENE.md`
+given `status: done` with its 4 AC + 3 DoD boxes ticked against the real evidence. Full detail:
+`experiments/quay-perpetual-stream/milestones/M46-dir033-worktree-hygiene/audits/iteration-0-acceptance-audit.md`.
+
+**adversarial-audit verdict (corrective pass, re-verified before recording): NO REFUTATION FOUND**
+(PASS) — distinct audit session id `top-level-corrective-writeback-session-m46-20260720-post-
+refutation`, distinct from both the m46 builder session and the prior REFUTED-verdict audit session.
+
+**Mechanical gates (real runs, this ABSORB):**
+```
+$ node packages/quay/bin/quay.js gate exp5-M-DIR033-WORKTREE-HYGIENE                     → PASS
+$ node packages/quay/bin/quay.js gate exp5-M-DIR033-WORKTREE-HYGIENE --gate audit-independence → PASS
+```
+`vmeta-lag-check.sh --counter 46 v-meta-ledger.md` → PASS (no confirmed-unconsolidated row past
+K=2). `it0-dod-check.sh` (all 9 clauses) → PASS.
+
+**Realized Δv**: governance-integrity (primary — the ABSORB close-out itself is now real,
+demonstrated, and exercised on real dangling state, not merely designed). No VT chart cell (same
+no-VT-cell precedent as prior method-infra/governance milestones). VT chart-1 total unchanged:
+**111.55/120**. `milestone_counter` → **46**.
+
+**Backlog housekeeping**: `tasks/exp5-M-DIR033-WORKTREE-HYGIENE.md` → `status: done`; `DIR-033`/
+`DIR-031` → `dirStatus: applied` with `## Resolution` sections. `backlog.md` regenerated via
+`node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream
+--write`.
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 46, not a multiple of 5; next
+due at 50).
+
+**DRAIN disposition of `directives/pending/` (task-canonical, per DIR-028) at this boundary:**
+`DIR-033` and `DIR-031` both move from `pending` to `applied` this pass (real landing, corrected
+after the REFUTED finding above). All other directive tasks carried forward unchanged from M45's
+disposition: `DIR-014` (phase 1 only), `DIR-021` (delivered, stays pending per escrow discipline),
+`DIR-022` (parent, phase 1 + remainder landed), `DIR-023`, `DIR-024` (Layers 3-4), `DIR-026`
+(SPLIT-OR-COMMIT).
+
 ## Backlog row
 | exp5-M-CRYST-D1 | D1 quay DOCUMENT-MANAGEMENT capability (contract-validator as a quay feature; formalized-style + self-verifying contracts enforced by quay) | capability-growth (primary) | no VT chart cell | milestone-candidate, crystallization, milestone:M45-cryst-d1-doc-management |
+
+## Backlog row
+| exp5-M-DIR033-WORKTREE-HYGIENE | DIR-033: wire capture-then-prune worktree/branch hygiene into ABSORB (governance/infra hard floor) | governance-integrity (primary) | no VT chart cell | milestone-candidate, governance-integrity, human-steered, surface:method-infra, milestone:M46-dir033-worktree-hygiene |
