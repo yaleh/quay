@@ -72,6 +72,20 @@ const VMETA_LAG_SCRIPT = path.join(
   REPO_ROOT,
   "experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh"
 );
+// DIR-032 (M44): audit-independence wraps audit-independence-check.sh — the
+// SAME "invocation surface, not a second implementation" shape as vmeta-lag.
+// Its script takes `[--orchestrator-id <id>] <audit-artifact.md>`, which is
+// still just a flat array of positional-ish args (an optional flag pair +
+// one required path) — the SAME `makeIt0Gate(scriptPath, argsKey, label)`
+// factory below handles it unchanged: `task.extra.auditIndependenceArgs`,
+// e.g. `["--orchestrator-id","<id>","<artifact-path>"]` or just
+// `["<artifact-path>"]` (the script also reads QUAY_ORCHESTRATOR_SESSION_ID
+// from the environment as a fallback, mirroring vmeta-lag's own optional-flag
+// shape).
+const AUDIT_INDEPENDENCE_SCRIPT = path.join(
+  REPO_ROOT,
+  "experiments/quay-perpetual-stream/scripts/audit-independence-check.sh"
+);
 const DOGFOOD_EVIDENCE_SCRIPT = path.join(
   REPO_ROOT,
   "experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh"
@@ -212,6 +226,12 @@ export const gateRegistry = {
   // e.g. ["<iteration-report.md>"] (optional 2nd arg: window-lines).
   "vmeta-lag": makeIt0Gate(VMETA_LAG_SCRIPT, "vmetaLagArgs", "vmeta-lag"),
   "dogfood-evidence": makeIt0Gate(DOGFOOD_EVIDENCE_SCRIPT, "dogfoodEvidenceArgs", "dogfood-evidence"),
+  // DIR-032 (M44, exp5-M-DIR032-AUDIT-INDEPENDENCE): HARD-blocks a self-audit
+  // (absent or matching session/agent id) from ever passing this gate — see
+  // OUTER-LOOP.md's Per-milestone acceptance audit section for how this is
+  // wired into ABSORB. `task.extra.auditIndependenceArgs`, e.g.
+  // `["--orchestrator-id","<id>","<audit-artifact.md>"]`.
+  "audit-independence": makeIt0Gate(AUDIT_INDEPENDENCE_SCRIPT, "auditIndependenceArgs", "audit-independence"),
   // NOTE — deliberately NOT registered here (M43 SELECT-time re-derivation,
   // see tasks/exp5-M-DIR022-REMAINING-GATES.md `## Proposal` for the full
   // rationale):

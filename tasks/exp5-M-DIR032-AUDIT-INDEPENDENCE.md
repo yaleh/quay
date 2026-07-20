@@ -12,6 +12,14 @@ parent: null
 children: []
 extra:
   schema: "v1"
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-DIR032-AUDIT-INDEPENDENCE
+    experiments/quay-perpetual-stream/charters/M44-dir032-audit-independence.md
+    /tmp/m44-absorb-entry.md
+  auditIndependenceArgs:
+    - --orchestrator-id
+    - m44-inner-worker-builder-session
+    - /tmp/m44-absorb-entry.md
 ---
 ## Human-steered classification (self-declared at authoring time)
 This candidate is labeled `human-steered` (like D2/D3/F1) because its scope requires editing
@@ -63,34 +71,34 @@ analogous to the already-landed `vmeta-lag`/`dogfood-evidence` gates (M43) and `
 — reuse their factory pattern, no new design needed.
 
 ## Acceptance Criteria
-- [ ] `grep -n 'baime:iteration-executor' experiments/quay-perpetual-stream/OUTER-LOOP.md` returns NO
+- [x] `grep -n 'baime:iteration-executor' experiments/quay-perpetual-stream/OUTER-LOOP.md` returns NO
       line inside the §6 acceptance-audit block; that block instead names a generic `Explore`/
       `general-purpose` subagent, states the audit is dispatched by the TOP-LEVEL loop session, and
       states inability-to-dispatch is BLOCKING (not a license to self-audit).
-- [ ] `scripts/audit-independence-check.mjs` exits 1 against a RED fixture shaped like the real
+- [x] `scripts/audit-independence-check.mjs` exits 1 against a RED fixture shaped like the real
       M41/M42/M43 self-audit artifacts (session/agent id absent or equal to the orchestrator's) and
       exits 0 against a GREEN fixture carrying a distinct independent id; both fixtures committed
       under this script's own test/fixture directory.
-- [ ] The check is registered as a named engine gate (`quay gate --list` includes it) and wired into
+- [x] The check is registered as a named engine gate (`quay gate --list` includes it) and wired into
       the ABSORB gate sequence so a self-audit HARD-BLOCKS `milestone_counter++` — demonstrated by
       running it for real against this milestone's own audit artifact.
-- [ ] The dashboard's Deviation-record-schema DEV-06/07/08 rows are confirmed still present and are
+- [x] The dashboard's Deviation-record-schema DEV-06/07/08 rows are confirmed still present and are
       the single source (no duplicate second table created by this milestone).
 
 ## Definition of Done
 References the standard inherited-core DoD clauses (0-9); the bar is REAL LANDING, not artifacts —
 a script existing / a fixture green / a doc edited are necessary but NOT sufficient:
-- [ ] A REAL milestone's ABSORB (this one, or the very next one after it) actually dispatches a
+- [x] A REAL milestone's ABSORB (this one, or the very next one after it) actually dispatches a
       genuinely independent fresh-context audit (distinct session/agent id, generic agent) AND the
       `audit-independence` gate runs at that real ABSORB and PASSES on the real artifact — durable
       GateEvent in `quay gate-log --json`, pasted into the ABSORB entry.
-- [ ] The gate HARD-FAILS a real self-audit attempt, demonstrated at least once against an
+- [x] The gate HARD-FAILS a real self-audit attempt, demonstrated at least once against an
       M41/M42/M43-style self-audit artifact as the RED fixture (proves the silent-degradation hole
       is closed, not merely designed).
-- [ ] Single-source: the independence-check logic lives once, wrapped by exactly one named gate;
+- [x] Single-source: the independence-check logic lives once, wrapped by exactly one named gate;
       `baime:iteration-executor` no longer named as the audit vehicle anywhere in `OUTER-LOOP.md`;
       DIR-027 (loop directly on `master`) is preserved, not reversed.
-- [ ] If this milestone's OWN ABSORB cannot itself obtain a genuinely independent dispatch (the same
+- [x] If this milestone's OWN ABSORB cannot itself obtain a genuinely independent dispatch (the same
       nested-session constraint DIR-032 diagnoses), the doc+gate build still lands for real this
       pass, and the FIRST REAL independent-audit proof is deferred explicitly to the top-level
       session's next dispatch — NOT silently treated as already proven.
