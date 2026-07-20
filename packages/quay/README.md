@@ -244,6 +244,9 @@ $ node packages/quay/bin/quay.js gate DEMO-1
 PASS
 ```
 
+(Example output for a fresh/minimal workspace; a workspace with `.quay/gates.yml` custom gates —
+like this repo's own — will list additional named gates beyond `dod`/`acceptance`.)
+
 #### `quay gate-log <task-id> [--gate <name>] [--json] [--file <log-path>]`
 
 Prints the GateEvent history for `<task-id>` — the audit trail every `gate`/
