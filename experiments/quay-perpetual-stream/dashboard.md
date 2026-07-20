@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 57** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M57 ABSORB header sync): body log's m57 ABSORB entry below sets milestone_counter → 57;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56).
-57 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m60). -->
+**milestone_counter: 58** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M58 ABSORB header sync): body log's m58 ABSORB entry below sets milestone_counter → 58;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57).
+58 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m60). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -5354,3 +5354,104 @@ gap noted here for visibility, not fixed by this milestone — out of DIR-041's 
 
 ## Backlog row
 | DIR-041 | quay-github's `task_write` supported edit (title/body/status/labels/children) but NOT create — a GitHub-backed project could be VIEWED but not fully MANAGED through quay, the last hole in Provider-ABI write parity; closed via a new `create()` (POST through the shared `execGh`/`ghApiJson` helper, fail-closed on missing title), 6 new RED→GREEN tests, and a REAL round-trip (issue gh-30 created+closed on yaleh/quay, cross-checked via `gh issue view`) | capability-growth (primary) | no new VT chart cell (Provider-ABI VT-cell ceiling artifact, open since cp-35) | directive, milestone-candidate, milestone:M57-dir041-github-writeback |
+
+## M58 — M58-dir040-plugin-packaging (DIR-040)
+
+**Task:** [[DIR-040]] (`tasks/DIR-040.md`) — package quay as a Claude Code plugin: bundle the quay MCP
+server + the quay-native author/execute skills + a WORKSPACE-PORTABLE directive skill (de-hardcoded
+from the exp5 layout, shipping its own schema-check) + a plugin manifest, so any project installs
+quay's task tools + authoring methodology in one step. **Merge commit:** merge of
+`milestones/M58-dir040-plugin-packaging` (build `8d93010`) into `master` at this ABSORB (worktree
+`milestones/M58/worktrees/iteration-0`, base `master` `789c128`, the M57 ABSORB commit).
+
+**Correction to the M57 ABSORB's DRAIN note:** the M57 entry above states DIR-040 was "real-landed
+pre-M56" with only a stale frontmatter gap. That was inaccurate — the actual plugin bundle
+(`.claude-plugin/`, `plugin/`) did not exist until this M58 milestone's own worktree build. Flagging
+the discrepancy here rather than silently carrying it forward; no action needed since DIR-040 is now
+genuinely landed as of this ABSORB.
+
+**Independent audit verdict: PASS, zero required fixes.** An independent audit, with no access to the
+build-phase agent's self-report, confirmed all 4 AC + 4 DoD clauses; the completion step (this
+ABSORB) independently re-verified the audit's key claims itself before the checklist write-back
+(the audit used an Explore agent with no Edit access, so ticking fell to completion, per the normal
+DIR-020 convention):
+- **Plugin manifest + foreign install**: `.claude-plugin/marketplace.json` + `plugin/.claude-plugin/plugin.json`
+  valid; `/tmp/m58-foreign-ws` is a real foreign workspace (no `experiments/` dir at all) containing a
+  real git-tracked `tasks/DIR-001.md`, created via the plugin's own bundled workflow, re-verified
+  directly: `node plugin/scripts/task-schema-check.mjs /tmp/m58-foreign-ws/tasks/DIR-001.md` → **PASS,
+  exit 0**.
+- **Directive skill portability, no exp5 leaks**: `grep -rn "experiments/quay-perpetual-stream|exp5"`
+  over `plugin/skills/` and the shipped `plugin/scripts/task-schema*` files → **no matches** (only the
+  internal `plugin/scripts/sync-vendor.sh` build tool references exp5, as its copy source — not a
+  shipped/foreign-workspace-facing file).
+- **Author/execute skills bundled + single-sourced**: `plugin/.claude-plugin/plugin.json`'s `commands`
+  array lists all 3 skills; `diff plugin/skills/{author,execute}/SKILL.md
+  packages/quay-native/skills/{author,execute}/SKILL.md` → **byte-identical**, re-run directly.
+- **Single-source (ADR-004)**: `plugin/scripts/sync-vendor.sh` is the sole writer of the vendored
+  mirrors (MCP server + schema-check copies); no drifting duplicate copies found.
+- **exp5's own directive skill unregressed**: `git diff 789c128 -- .claude/skills/quay-directive/SKILL.md
+  experiments/quay-perpetual-stream/scripts/` → **empty**, re-run directly (both against the merge-base
+  and against the moved `master` tip) — exp5's own copies untouched.
+- **6/6 new plugin-packaging tests** (`plugin/test/plugin-packaging.test.mjs`) re-run directly, all
+  pass (manifest validity, skill bundling, MCP config, byte-identity, no-leak assertions).
+- `node packages/quay/bin/quay.js gate DIR-040 --gate dod` → **PASS** (re-run after the checklist
+  write-back; the pre-write-back gate failure was solely the unticked-checkbox gap, as expected).
+- `delivery-standalone-smoke.sh` → **0 RED**, re-run directly.
+
+**Test-floor (this ABSORB's own independent re-run, before merge):** quay-github — **21/21 pass**.
+quay-native (excluding live suites) — **23/26 pass**, 3 pre-existing flaky failures (same class
+flagged at prior ABSORBs). quay core (excluding `serve-github`/`provider-abi-conformance`) —
+**260/264 pass, 4 pre-existing flaky failures** (`dir032-audit-independence` E3 A2 / M44 A2 / M44 C1,
+`web-ui-browser`) — reproduced identically when re-run directly against `master` itself (not just the
+worktree), confirming these are pre-existing and NOT introduced by this milestone.
+
+**Disclosed gaps judged non-blocking** (per the audit, spot-checked, not re-litigated here): a heavier
+vendored-tree delivery instead of a single SEA binary — abandoned due to a genuine pre-existing
+`import.meta.url`-under-CJS bug in `gate/registry.js`, correctly out of scope for DIR-040; the plugin
+vendors Core only, not quay-native (in-scope per DIR-040's own scope line, which explicitly defers the
+full OUTER-LOOP port to [[DIR-036-B]]); a stale pre-fix leak string may remain in the LOCAL
+`/tmp` install cache only, not in the shipped source — irrelevant to the deliverable.
+
+**Impl-row (Clause 4):** N/A — real code-landing milestone (the task's own AC/DoD are the real-landing
+proof), not a design-only artifact needing a future implementing row.
+**Line-budget (Clause 3):** N/A — no formal charter file authored; executed directly from the
+directive's own Proposal + AC/DoD.
+**Split-or-commit (Clause 9):** N/A — no `needs-human` outcome; all 4 AC + 4 DoD clauses satisfied in
+one pass, no split needed (DIR-040's own 4th DoD clause anticipated a possible split into A/B; it did
+not occur).
+
+**Realized Δv**: capability-growth (primary) — quay's task tools + authoring methodology are now
+installable into ANY foreign project in one step (a real plugin bundle + a workspace-portable
+directive skill), not locked to quay's own repo layout; the actual enabler DIR-036-B's `blockedBy` note
+names as a prerequisite. No new VT chart-1 cell claimed at this ABSORB (a distribution/packaging
+surface, not a chart-1-scored capability axis) — consistent with DIR-037/DIR-041's precedent of
+capability-growth milestones landing outside the chart-1 scoring domain. `milestone_counter` → **58**
+(58 % 5 != 0 — no checkpoint due, next checkpoint at m60).
+
+**Backlog housekeeping**: `tasks/DIR-040.md` — all 4 AC + 4 DoD checkboxes ticked at this completion
+step per independently-verified evidence (see above); `status: todo` → `done`, `extra.dirStatus:
+pending` → `resolved`. `backlog.md` regenerated via `node
+experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M58/worktrees/iteration-0` removed (`git worktree
+remove`), `milestones/M58-dir040-plugin-packaging` branch deleted (`git branch -d`, fully merged,
+confirmed ancestor of `master` before deletion).
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 58, not a multiple of 5; next
+checkpoint due at `milestone_counter` = 60, last written cp-55 at m55).
+
+**Note on off-loop human activity since the M57 ABSORB:** `master` advanced with two further
+human-authored, off-loop commits between this milestone's worktree branching (`789c128`) and this
+ABSORB: [[DIR-042]] (productize the gated dev loop, runner-agnostic — loop-executable) and [[DIR-043]]
+(continuous external-dogfooding/discovery channel — human-steered). Confirmed no conflict with this
+milestone's own merge (clean dry-run merge test performed before the real merge; both DIR-042.md and
+DIR-043.md confirmed present and unmodified in `master` post-merge).
+
+**DIR-036-B prereq status (for the record, per the standing DIR-027 human-steering policy — DIR-036-B
+itself is NOT touched here):** DIR-036-B's `blockedBy` note names DIR-040 + DIR-041 as its two
+loop-executable prerequisites. DIR-041 landed at M57; DIR-040 lands at this M58 ABSORB. **Both named
+prerequisites are now satisfied** — DIR-036-B remains `human-steered`/`todo`, held for explicit human
+go-ahead per standing policy, not autonomously actioned by this milestone.
+
+## Backlog row
+| DIR-040 | quay's task tools + authoring skills existed only as loose npm files with no installable plugin bundle, and the bundled directive skill was hardcoded to the exp5 experiment layout (unusable in any other workspace); closed via a Claude Code plugin manifest (MCP server + author/execute skills + a workspace-portable directive skill shipping its own schema-check), verified with a REAL foreign-workspace install (`/tmp/m58-foreign-ws`, no `experiments/` dir, a real `tasks/DIR-001.md` passing the shipped schema-check) | capability-growth (primary) | no new VT chart cell (packaging/distribution surface, not a chart-1-scored axis) | directive, milestone-candidate, milestone:M58-dir040-plugin-packaging |
