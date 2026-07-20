@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 41** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 42** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -3739,3 +3739,116 @@ archguard once available). m42 SELECT should follow DIR-030's explicit ordering:
 
 ## Backlog row
 | exp5-M-CRYST-G1 | G1: L_D/L_G/L_S convergence-observability proxies (ADR-007) — code:doc ratio, structural-drift (cycles/god-modules), behavior-variance (mutation probe) | discovery (primary) + instrument-correction (secondary) | no VT chart cell | milestone-candidate, surface:method-infra, milestone:M41-cryst-g1-observability |
+
+## ABSORB m42: M42-cryst-e3-adr-gate
+
+**Source / SELECT recap:** `DIR-030`'s restart-window ordering (G1 → E3 → DIR022-REMAINING → INV,
+before D1) names **exp5-M-CRYST-E3** as item 2 of 4. G1 landed at m41 (1/4); this pass SELECTs E3 per
+the ordering. D1 / `exp5-M-DIR022-REMAINING-GATES` / `exp5-M-CRYST-INV` each carry a
+`## Not selected (M42)` note on their own task citing DIR-030 directly (no silent skip). DIR-030
+stays `applied` (window AC needs ≥3/4 landed; this pass brings it to 2/4).
+
+**Class routing:** dev-class (real product code touched — `packages/quay-native/src/adr-store.js`,
+`packages/quay-native/bin/quay-native.js`, `packages/quay/src/gate/registry.js`), so the
+**mandatory `quay-task-to-plan` pipeline ran FIRST** per the two-class diversity policy
+(`inherited-core.md`): N=2 independent proposal drafts converged on the core `makeAdrGate`-factory
+mechanism and diverged on the `enforcement` field's shape (raw command string vs structured
+`{check,args}`); adjudicated in favor of the raw command string (B7's real invocation doesn't reduce
+to one-fixed-script-plus-positional-args). Full proposals + adjudication:
+`experiments/quay-perpetual-stream/milestones/M42-cryst-e3-adr-gate/pipeline/{proposals,adjudication}.md`;
+milestone-level plan: `docs/plans/10-adr-gate-enforcement.md`.
+
+**Process-fidelity note:** no genuinely-isolated Task-agent dispatch was reachable this pass (same
+finding as M41 — `mcp__plugin_manda_manda__Agent` errored `cap request requires to=`, no addressed
+broker configured) — both the N=2 proposal drafting and the implementation were performed directly
+by the OUTER orchestrator in an isolated git worktree off `master` HEAD, on branch
+`exp5-m42-iteration-0`. The two proposal drafts were sequential within the same context (proposal 2
+was not shown proposal 1's content beforehand, but same-context anchoring is a real, undischarged
+risk — stated here rather than silently presented as true independent dispatch, per the task's own
+`## Proposal` disclosure).
+
+**Mid-flight master-advance handling (DIR-027/DIR-031 hygiene in action):** partway through this
+milestone, `master` advanced 4 commits via genuine out-of-band human work (commit messages state
+"authored off-loop per DIR-027") while the isolated worktree was still in progress. Verified zero
+file-overlap between those commits and this milestone's in-progress diff, then cleanly fast-forwarded
+the worktree (`git stash push -u` → `git merge --ff-only <new-master-tip>` → `git stash pop`, no
+conflicts) rather than racing or ignoring the advance — a real demonstration of DIR-027/DIR-031's
+steering-hygiene principle (out-of-band human work slots in without derailing the loop).
+
+**Delivered:** `adr-store.js`'s view-model surfaces `appliesTo`/`enforcement` (already reserved,
+round-tripped verbatim since E1) + a `list()` `appliesTo` glob-match filter; `registry.js` gains
+`makeAdrGate(adrId, adrDir)` — reads the ADR at gate-run time (not module-load time), fails closed if
+missing/not-`accepted`/no-`enforcement`, else shells the `enforcement` command through the SAME
+`runAcceptance` runner every other gate reuses (no duplicated spawn logic) — registered via a
+declarative `ADR_GATE_IDS = ["ADR-001"]` table so a future ADR gate is a one-line addition; ADR-001's
+frontmatter gains `applies-to: ["experiments/quay-perpetual-stream/scripts/**"]` +
+`enforcement: "bash .../loadbearing-test-gate.sh --scripts ... --tests ..."` (the B7 check); consult
+surface `quay-native adr list --applies-to <path>` extends the existing `--status`/`--tag` filter
+shape.
+
+**adversarial-audit verdict: NO REFUTATION FOUND** at AC-content level, one non-blocking CONCERN
+(full report: `experiments/quay-perpetual-stream/milestones/M42-cryst-e3-adr-gate/audit.md`). The
+audit (performed directly by the OUTER orchestrator, no separate audit subagent available)
+independently re-derived EVERY claim with fresh, self-generated inputs (a fresh fixture task id, a
+brand-new tmp violating/conforming load-bearing-script tree pair built from scratch) rather than
+trusting either the implementation's or its own test file's transcripts: AC1 — fresh fixture,
+`quay gate ... --gate adr-001` → PASS, a real GateEvent (`{"gate":"adr-001","verdict":"pass"}`) via a
+fresh `gate-log --json`; AC2 — fresh violating tree → FAIL, then made conforming → PASS, both
+directions live; AC3 — ADR-001's frontmatter read directly, confirmed it literally invokes the B7
+script; AC4 — `adr list --applies-to <in-scope>` → ADR-001 present, `<out-of-scope>` → empty. All 4
+AC checkboxes + all 3 DoD Done-when items independently re-confirmed and ticked `[x]` with the
+audit's own fresh evidence citations (see `tasks/exp5-M-CRYST-E3.md`).
+
+**Non-blocking CONCERN (carried forward, not a re-open):** the pre-existing
+`web-ui-browser.test.mjs` single test failure was re-run by the same orchestrator session claiming
+the finding (not a fully independent process) — confirmed identical on untouched `master` with zero
+file-overlap/content-mention of adr/gate/registry in that test, making an actual regression
+implausible but not eliminated with total rigor.
+
+**V_meta consolidation-lag (Clause 2):** clear — re-checked via `vmeta-lag-check.sh --counter 41
+v-meta-ledger.md`: PASS, no confirmed-unconsolidated row past K=2 without a dated carry-forward.
+
+**Escrow-Δv (Clause 6) / Impl-row (Clause 4):** N/A — this milestone claims no VT chart-1 cell and
+carries no prior `backlog.md` row of its own; its own delivered code IS the mechanism (mirrors the
+M25/M38/M39/M40/M41 method-infra-and-gate-engine precedent).
+
+**Test-floor (Clause 7):** APPLIES — real `packages/quay*` product files were touched. Strict TDD
+confirmed: `adr-store.js` 93.30% line / 80.30% branch / 100% funcs (13/13 tests); `registry.js`
+94.15% line / 86.96% branch (combined full-suite run); 164/165 quay tests pass overall (the 1
+failure is the pre-existing, unrelated `web-ui-browser.test.mjs` issue above, confirmed identical on
+pristine `master`).
+
+**DoD meta-enforcer gate — invoked via `it0-dod-check.sh` (task id first, per convention):**
+```
+$ bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh exp5-M-CRYST-E3 experiments/quay-perpetual-stream/charters/M42-cryst-e3-adr-gate.md experiments/quay-perpetual-stream/milestones/M42-cryst-e3-adr-gate/audit.md
+PASS: DoD check passed — all clauses satisfied (9 disposition(s) confirmed), no undeclared self-exemption.
+```
+
+**Realized Δv**: governance-integrity (primary — an accepted ADR is now CONTINUOUSLY ENFORCED via a
+real named gate + GateEvent ledger, not merely stored prose; closes the "un-wired decisions" half of
+DIR-030's Finding #2) + capability-growth (secondary — the QENG gate registry gains a general
+ADR-as-contract mechanism, reusable for any future accepted ADR via a one-line `ADR_GATE_IDS`
+addition). No VT chart cell (mirrors the DoD-program lineage's own no-VT-cell precedent for pure
+method-infra/gate-engine milestones — M25/M30/M31/M32/M34/M36/M38/M39/M40/M41). VT chart-1 total
+unchanged: **111.55/120**. `milestone_counter` → **42**.
+
+**Backlog housekeeping**: `tasks/exp5-M-CRYST-E3.md` → `status: done`. `backlog.md` regenerated via
+`node scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream --write`.
+
+**Checkpoint disposition:** NOT due this ABSORB (last written `cp-40.md` at m40, every-5 cadence
+means next due at m45 — 3 milestones remain).
+
+**DRAIN disposition of `directives/pending/` at this boundary, and m43 SELECT-candidate note:**
+`directives/pending/` retains `DIR-030` (2/4 of its re-ranked items now landed — G1, E3 — stays
+`applied`, not `resolved`, until ≥3/4 land), `DIR-014` (phase 1 only; items 2/3/5 remain), `DIR-021`
+(delivered, stays pending per its own escrow discipline), `DIR-022` (phase 1 delivered, 4
+judgment-heavy gates remain — this is `exp5-M-DIR022-REMAINING-GATES`, DIR-030's item 3), `DIR-023`,
+`DIR-024` (Layers 3-4, depend on DIR-022 finishing), `DIR-031` (Tier-1 loop hygiene, landed off-loop
+this window — `tree-hygiene-check.sh` confirmed PASS post-merge, no further action needed this
+pass). `backlog.md` also retains the 6 open M37-produced candidates plus M41's audit-flagged
+follow-up (re-point L_G at a fixed archguard once available). m43 SELECT should follow DIR-030's
+explicit ordering: **`exp5-M-DIR022-REMAINING-GATES` next** (item 3 of 4), unless a fresher human
+directive supersedes it at the next DRAIN.
+
+## Backlog row
+| exp5-M-CRYST-E3 | E3 adr-as-contract enforcement — applies-to scope + runnable check as a named adr-<id> quay gate (the 'continuously applied' half of E1) | governance-integrity (primary) + capability-growth (secondary) | no VT chart cell | milestone-candidate, crystallization, milestone:M42-cryst-e3 |
