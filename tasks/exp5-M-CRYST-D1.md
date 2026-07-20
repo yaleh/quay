@@ -28,3 +28,6 @@ DIR-030 explicitly requires the observe-and-enforce cluster (G1→E3→DIR022-RE
 
 ## Not selected (M42)
 Still gated by DIR-030 (1/4 — only G1 — landed after m41). This pass selects exp5-M-CRYST-E3 (item 2 of 4) per DIR-030's ordering. D1 remains ineligible until ≥3/4 land.
+
+## Not selected (M43)
+2/4 landed (G1, E3). Still short of the ≥3/4 threshold — D1 remains ineligible. This pass selects `exp5-M-DIR022-REMAINING-GATES` (item 3 of 4) per DIR-030's ordering.

@@ -35,3 +35,6 @@ DIR-030 ranks this #4 (last) in the observe-and-enforce cluster. Not selected th
 
 ## Not selected (M42)
 Still last in DIR-030's ordering (after G1 — landed — E3, DIR022-REMAINING). E3 is selected this pass. Reconsider once E3 and DIR022-REMAINING land.
+
+## Not selected (M43)
+Still last (item 4 of 4) in DIR-030's ordering. This pass selects `exp5-M-DIR022-REMAINING-GATES` (item 3 of 4) — G1+E3 landed (2/4), DIR022-REMAINING is next per the ordering, INV remains last.
