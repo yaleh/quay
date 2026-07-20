@@ -75,5 +75,11 @@ stated waiver required). No task-specific exemption from any clause.
 - [ ] All standard clauses satisfied or explicitly N/A per their own trigger condition (re-verified at
   ABSORB, not assumed).
 
-## Status mirror
-Authored @M37-discover-post-qeng iteration-0 DRAIN sweep, 2026-07-19. Not yet SELECTed.
+## Not selected (M51)
+Considered at M51 SELECT (2026-07-20) alongside `exp5-M-GATE-README-DOCS` and
+`exp5-M-GATE-CLI-ERROR-UX`, against `exp5-M-GATE-HELP-SYNOPSIS-GAP` (the winner). Per checkpoint
+cp-50's recommendation to break a 5-milestone exploit-typed-pick drought, M51 picked the smallest,
+most concrete, directly VT-moving exploit-typed fix available — a ~15-line, mechanically-testable
+CLI-help synopsis gap. This MCP-parity gap is `explore`-typed (a design gap requiring a reasoned
+decision on which QENG commands become MCP tools, not a 1-line patch) — a poor fit for this pass's
+exploit slot, and larger in scope besides. Remains a live `milestone-candidate` for a future SELECT.

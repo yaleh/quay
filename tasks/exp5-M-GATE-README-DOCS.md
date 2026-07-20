@@ -58,5 +58,11 @@ this task, only README.md prose). No task-specific exemption from any clause.
 - [ ] All standard clauses satisfied or explicitly N/A per their own trigger condition (re-verified at
   ABSORB, not assumed).
 
-## Status mirror
-Authored @M37-discover-post-qeng iteration-0 DRAIN sweep, 2026-07-19. Not yet SELECTed.
+## Not selected (M51)
+Considered at M51 SELECT (2026-07-20) alongside `exp5-M-GATE-CLI-ERROR-UX` and
+`exp5-M-GATE-MCP-PARITY-GAP`, against `exp5-M-GATE-HELP-SYNOPSIS-GAP` (the winner). Per checkpoint
+cp-50's recommendation to break a 5-milestone exploit-typed-pick drought, M51 picked the smallest,
+most concrete, directly VT-moving exploit-typed fix available — a ~15-line, mechanically-testable
+CLI-help synopsis gap. This README-docs gap is real and still exploit-typed, but larger in surface
+(a new README section, cross-checked against live survey evidence) and less immediately concrete
+than the synopsis fix. Remains a live `milestone-candidate` for a future SELECT.
