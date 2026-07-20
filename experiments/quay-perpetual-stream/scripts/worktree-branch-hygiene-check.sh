@@ -25,7 +25,9 @@ MILESTONE_MD_PREFIX="experiments/quay-perpetual-stream/milestones/"
 fail=0
 orphans=""
 
-iter_branches() { git branch --format='%(refname:short)' | grep -E '^exp5-m[0-9]+-iteration-[01]$'; }
+# Match BOTH the legacy `exp5-m<N>-iteration-<0|1>` and the current `m<N>-<slug>-iteration-<0|1>`
+# milestone-iteration branch naming (the loop's convention changed at ~M44); excludes human/* etc.
+iter_branches() { git branch --format='%(refname:short)' | grep -E '^(exp5-)?m[0-9]+-.*iteration-[01]$'; }
 
 for b in $(iter_branches); do
   # merged into master → its content is on master; dangling worktree/branch is mere cruft, not drift.
