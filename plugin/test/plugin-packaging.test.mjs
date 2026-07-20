@@ -1,10 +1,12 @@
-// plugin/test/plugin-packaging.test.mjs — pins the DIR-040 plugin-packaging invariants:
+// plugin/test/plugin-packaging.test.mjs — pins the DIR-040 (+ DIR-042-B) plugin-packaging invariants:
 //   1. the marketplace + plugin manifests are valid JSON with the shape Claude Code expects
-//   2. plugin.json's commands[] actually lists the 3 bundled skills
+//   2. plugin.json's commands[] actually lists the 4 bundled skills
 //   3. the bundled author/execute skills are byte-identical to their ONE canonical source
 //      (packages/quay-native/skills/{author,execute}/SKILL.md) — single-source, ADR-004
 //   4. none of the shipped/foreign-workspace-facing files leak this repo's own internal
 //      experiment-layout path (experiments/quay-perpetual-stream/**) or "exp5" attribution
+//   5. the loop-driver skill (DIR-042-B) carries no research-layer references (VT/value-ledger/
+//      checkpoints/experiments/**)
 //
 // Run: node --test plugin/test/plugin-packaging.test.mjs
 import { test } from 'node:test';
@@ -30,11 +32,16 @@ test('marketplace.json is valid JSON and lists the quay plugin pointing at ./plu
   assert.equal(entry.source, './plugin');
 });
 
-test('plugin.json is valid JSON and declares the 3 bundled skills', () => {
+test('plugin.json is valid JSON and declares the 4 bundled skills', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');
   assert.ok(Array.isArray(manifest.commands));
-  const wanted = ['./skills/author/SKILL.md', './skills/execute/SKILL.md', './skills/quay-directive/SKILL.md'];
+  const wanted = [
+    './skills/author/SKILL.md',
+    './skills/execute/SKILL.md',
+    './skills/quay-directive/SKILL.md',
+    './skills/loop-driver/SKILL.md',
+  ];
   for (const w of wanted) {
     assert.ok(manifest.commands.includes(w), `plugin.json commands[] must include ${w}`);
   }
@@ -100,6 +107,7 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
     path.join(pluginDir, 'skills', 'author', 'SKILL.md'),
     path.join(pluginDir, 'skills', 'execute', 'SKILL.md'),
     path.join(pluginDir, 'skills', 'quay-directive', 'SKILL.md'),
+    path.join(pluginDir, 'skills', 'loop-driver', 'SKILL.md'),
   ];
   const leakPattern = /experiments\/quay-perpetual-stream|\bexp5\b/i;
   for (const f of shippedFiles) {
@@ -109,4 +117,13 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
       `${f} leaks an internal experiment-layout reference (experiments/quay-perpetual-stream or "exp5") — must be workspace-portable`
     );
   }
+});
+
+test('loop-driver skill (DIR-042-B) has zero research-layer references (VT/value-ledger/checkpoints/experiments/**)', () => {
+  const src = readFileSync(path.join(pluginDir, 'skills', 'loop-driver', 'SKILL.md'), 'utf8');
+  const researchLeakPattern = /\bVT\b|value-ledger|checkpoints?|experiments\/|inherited-core|\bexp5\b/i;
+  assert.ok(
+    !researchLeakPattern.test(src),
+    'loop-driver SKILL.md must contain zero VT/value-ledger/checkpoints/experiments/**/exp5 references'
+  );
 });
