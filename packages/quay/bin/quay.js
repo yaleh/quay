@@ -25,6 +25,11 @@ import { runComplete, runAdjudicate, runPromote, runRetreat } from "../src/gate/
 // (withProvider → resolveGateLogPath → QUAY_ACCEPTANCE_CWD). `--once` = one
 // observation; bare `run` = bounded loop to fixpoint/sentinel/cap.
 import { runOnce, runLoop } from "../src/gate/driver.js";
+// DIR-039 (A): generic provider-to-provider migration over the Provider ABI.
+// Verb-less-style top-level `migrate` command (no positional task id) —
+// mirrors `run`'s own no-positional-id shape (both scan/act over the whole
+// board, not a single task).
+import { migrateTasks } from "../src/migrate.js";
 
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
@@ -230,6 +235,24 @@ async function withProvider(fn, { providerId } = {}) {
   }
 }
 
+// DIR-039 (A): connect to a single named provider, same resolution logic
+// withProvider() uses, but returning the live client (not running a
+// callback then closing it) — needed by `migrate`, which must hold TWO
+// provider connections (source + target) open simultaneously, unlike every
+// other command here (exactly one active provider at a time).
+async function connectNamedProvider(cfg, providerId) {
+  const provider = activeProvider(cfg, providerId);
+  const providerDir = path.resolve(cfg.workspaceRoot, provider.path ?? ".");
+  const [command, ...args] = provider.mcp_entry;
+  const client = await connectProvider({
+    command,
+    args,
+    cwd: providerDir,
+    env: resolveProviderEnv(cfg, provider),
+  });
+  return { client, provider };
+}
+
 // QX-022 (experiment 4, iteration 5): relative-time helper for CLI timestamp column.
 // Mirror of serve.js's relativeTime() — kept self-contained here to avoid importing
 // serve.js (which starts an HTTP server as a side effect of startServer() being called
@@ -286,6 +309,7 @@ Usage:
   quay promote <task-id> [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
   quay retreat <task-id> --reason <reason> [--file <log-path>]
   quay run [--once] [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
+  quay migrate --from <providerId> --to <providerId> [--json]
   quay serve [--port <port>]
   quay mcp
 
@@ -380,6 +404,20 @@ Driver command (QENG-4) — the autonomous loop AS CODE (scan -> gate -> complet
                     (no flag)  Bounded loop until a fixpoint (no actionable tasks left) or the stop
                             sentinel <workspaceRoot>/.quay/.stop (checked at each iteration boundary);
                             both exit 0. Only the runaway safety ceiling (maxIterations) exits 1.
+
+Migration command (DIR-039) — generic ABI provider-to-provider task migration:
+  migrate --from <providerId> --to <providerId>
+                    Reads EVERY task from the --from provider via the Provider ABI (task_list) and
+                    writes each one to the --to provider via the ABI (task_write) — provider-
+                    agnostic, works for any pair declared in .quay/config.yml (e.g. --from github
+                    --to native). Both providers connect simultaneously (does not require either
+                    to be the config's 'enabled' default). Exit 0 if every task migrated cleanly;
+                    exit 1 if any per-task write failed (errors are still reported, not fatal to the
+                    whole run — a partial migration is visible, not silently swallowed).
+  --from <providerId>  Source provider id (must exist in .quay/config.yml's providers map)
+  --to <providerId>    Target provider id (must exist in .quay/config.yml's providers map, and
+                        differ from --from)
+  --json              Output a { total, migrated, errors } JSON summary instead of one line per task
 
 Examples:
   quay task list --prefix QX          List only QX-* tasks
@@ -1156,8 +1194,59 @@ async function main() {
     return;
   }
 
+  // DIR-039 (A): `quay migrate --from <providerId> --to <providerId>` — the
+  // generic ABI provider-to-provider migration command. No positional task
+  // id (mirrors `run`'s own shape: it acts over the WHOLE board, not one
+  // task), so any flag lands in `sub` exactly like `run` — re-parse from
+  // [sub, ...rest].
+  if (cmd === "migrate") {
+    const { flags: mf } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
+    if (typeof mf.from !== "string" || mf.from.trim() === "") {
+      console.error("quay migrate: --from <providerId> is required");
+      process.exitCode = 1;
+      return;
+    }
+    if (typeof mf.to !== "string" || mf.to.trim() === "") {
+      console.error("quay migrate: --to <providerId> is required");
+      process.exitCode = 1;
+      return;
+    }
+    if (mf.from === mf.to) {
+      console.error("quay migrate: --from and --to must name different providers");
+      process.exitCode = 1;
+      return;
+    }
+    const cfg = loadConfig();
+    const { client: source } = await connectNamedProvider(cfg, mf.from);
+    try {
+      const { client: target } = await connectNamedProvider(cfg, mf.to);
+      try {
+        const result = await migrateTasks({
+          source,
+          target,
+          onTask: mf.json ? undefined : (t) => console.log(`migrated ${t.id}: ${t.title}`),
+        });
+        if (mf.json) {
+          printJson(result);
+        } else {
+          console.log(
+            `migrate --from ${mf.from} --to ${mf.to}: ${result.migrated.length}/${result.total} tasks migrated` +
+              (result.errors.length ? `, ${result.errors.length} error(s)` : "")
+          );
+          for (const e of result.errors) console.error(`  error: ${e.id ?? "(no id)"}: ${e.error}`);
+        }
+        process.exitCode = result.errors.length > 0 ? 1 : 0;
+      } finally {
+        await target.close();
+      }
+    } finally {
+      await source.close();
+    }
+    return;
+  }
+
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|action list|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|action list|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
 }
 
