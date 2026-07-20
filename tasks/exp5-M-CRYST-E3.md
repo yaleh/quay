@@ -2,7 +2,7 @@
 id: exp5-M-CRYST-E3
 title: E3 adr-as-contract enforcement — applies-to scope + runnable check as a
   named adr-<id> quay gate (the 'continuously applied' half of E1)
-status: todo
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -59,15 +59,18 @@ real, undischarged risk), stated here rather than silently presented as true ind
 ≥80% coverage).
 
 ## Acceptance Criteria
-- [ ] An `accepted` ADR carrying `applies-to` + `enforcement` registers as a named `adr-<id>` quay gate; running it appends a real GateEvent (`gate: "adr-<id>"`, verdict pass|fail) queryable via `quay gate-log`.
-- [ ] A change that VIOLATES an in-scope ADR makes its gate FAIL; a conforming change PASSES; fixtures pin both.
-- [ ] ADR-001 is wired to the B7 check as its enforcement, and honoring/violating it is a GateEvent on a REAL object — not a prose claim.
-- [ ] A consult surface lists the `accepted` ADRs whose `applies-to` matches a given path/scope (so the loop can apply them at SELECT/plan/review).
+- [x] An `accepted` ADR carrying `applies-to` + `enforcement` registers as a named `adr-<id>` quay gate; running it appends a real GateEvent (`gate: "adr-<id>"`, verdict pass|fail) queryable via `quay gate-log`. — Confirmed by ABSORB adversarial audit (`experiments/quay-perpetual-stream/milestones/M42-cryst-e3-adr-gate/audit.md` AC1): fresh fixture task, `quay gate ... --gate adr-001` → PASS, `quay gate-log --json` returned a real `{"gate":"adr-001","verdict":"pass"}` GateEvent.
+- [x] A change that VIOLATES an in-scope ADR makes its gate FAIL; a conforming change PASSES; fixtures pin both. — Confirmed (audit.md AC2): independently built tmp violating/conforming load-bearing-script trees from scratch, ran `loadbearing-test-gate.sh` directly against each — FAIL then PASS, both directions live.
+- [x] ADR-001 is wired to the B7 check as its enforcement, and honoring/violating it is a GateEvent on a REAL object — not a prose claim. — Confirmed (audit.md AC3): `adr/ADR-001-*.md` frontmatter's `enforcement:` field literally invokes `loadbearing-test-gate.sh` against the real `experiments/quay-perpetual-stream/scripts`/`test` dirs.
+- [x] A consult surface lists the `accepted` ADRs whose `applies-to` matches a given path/scope (so the loop can apply them at SELECT/plan/review). — Confirmed (audit.md AC4): `quay-native adr list --applies-to <path> --json` returns ADR-001 for an in-scope path, empty array for an out-of-scope path.
 ## Definition of Done
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts:
-- [ ] A REAL ADR (ADR-001) is enforced by its named gate on a real change (GateEvent recorded), demonstrating "continuously applied", not asserted.
-- [ ] Single-source: the ADR's check LOGIC is one script; the quay gate WRAPS it (no second implementation) — same dual-source guard as D3/M39.
-- [ ] Strict TDD across the touched packages; no regression to the E1 ADR surfaces.
+- [x] A REAL ADR (ADR-001) is enforced by its named gate on a real change (GateEvent recorded), demonstrating "continuously applied", not asserted. — Confirmed (audit.md).
+- [x] Single-source: the ADR's check LOGIC is one script; the quay gate WRAPS it (no second implementation) — same dual-source guard as D3/M39. — Confirmed (audit.md): `makeAdrGate` reuses the same `runAcceptance` runner every other gate uses; no duplicated spawn logic; check logic lives only in `loadbearing-test-gate.mjs`/`.sh`.
+- [x] Strict TDD across the touched packages; no regression to the E1 ADR surfaces. — Confirmed (audit.md): `adr-store.js` 93.30% line/80.30% branch/100% funcs (13/13 tests); `registry.js` 94.15% line/86.96% branch (combined full-suite run); 164/165 quay tests pass (the 1 failure is a pre-existing unrelated browser-env issue, confirmed identical on pristine master).
 
 ## Not selected (M41)
 DIR-030 ranks this #2 in the observe-and-enforce cluster (after G1). Not selected this pass: G1 is smaller/more self-contained (pure new metric scripts, no touch to `adr-store.js`/registry), and DIR-030's own ordering puts it first. Reconsider at M42.
+
+## ABSORB (M42, 2026-07-20)
+SELECTed and landed this pass — see `experiments/quay-perpetual-stream/charters/M42-cryst-e3-adr-gate.md`, `experiments/quay-perpetual-stream/milestones/M42-cryst-e3-adr-gate/{iterations/report.iteration-0.md,audit.md}`. All 4 ACs + 3 DoD clauses ticked above with audit evidence. DIR-030 window progress becomes 2/4 (G1 + E3) — still short of the ≥3/4 needed before D1 is eligible.

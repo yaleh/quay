@@ -106,3 +106,49 @@ test("a title/slug change keeps the same id file (no orphan)", () => {
   assert.equal(files.length, 1, "exactly one file for ADR-001");
   assert.equal(s.get("ADR-001").title, "Second Title");
 });
+
+test("get()/list() surface appliesTo/enforcement from frontmatter (E3, view-model extension)", () => {
+  const dir = tmpDir();
+  const s = createAdrStore(dir);
+  s.write("ADR-001", { title: "a", status: "accepted", body: "## Decision\nd" });
+  const file = fs.readdirSync(dir).find((f) => f.startsWith("ADR-001"));
+  const raw = fs.readFileSync(path.join(dir, file), "utf8");
+  fs.writeFileSync(
+    path.join(dir, file),
+    raw.replace(
+      /^---\n/,
+      "---\napplies-to:\n  - 'packages/**'\nenforcement: 'echo ok'\n"
+    )
+  );
+  const got = s.get("ADR-001");
+  assert.deepEqual(got.appliesTo, ["packages/**"]);
+  assert.equal(got.enforcement, "echo ok");
+  assert.deepEqual(s.list()[0].appliesTo, ["packages/**"]);
+});
+
+test("get()/list() default appliesTo/enforcement safely when absent", () => {
+  const dir = tmpDir();
+  const s = createAdrStore(dir);
+  s.write("ADR-001", { title: "a", status: "accepted", body: "## Decision\nd" });
+  const got = s.get("ADR-001");
+  assert.deepEqual(got.appliesTo, []);
+  assert.equal(got.enforcement, undefined);
+});
+
+test("list({ appliesTo }) filters to ADRs whose applies-to glob-matches the given path", () => {
+  const dir = tmpDir();
+  const s = createAdrStore(dir);
+  s.write("ADR-001", { title: "a", status: "accepted", body: "## Decision\nd" });
+  s.write("ADR-002", { title: "b", status: "accepted", body: "## Decision\nd" });
+  for (const [id, glob] of [["ADR-001", "experiments/quay-perpetual-stream/scripts/**"], ["ADR-002", "docs/**"]]) {
+    const file = fs.readdirSync(dir).find((f) => f.startsWith(id));
+    const raw = fs.readFileSync(path.join(dir, file), "utf8");
+    fs.writeFileSync(path.join(dir, file), raw.replace(/^---\n/, `---\napplies-to:\n  - '${glob}'\n`));
+  }
+  const matched = s.list({ appliesTo: "experiments/quay-perpetual-stream/scripts/loadbearing-test-gate.mjs" });
+  assert.deepEqual(matched.map((a) => a.id), ["ADR-001"]);
+  const matchedDocs = s.list({ appliesTo: "docs/proposals/x.md" });
+  assert.deepEqual(matchedDocs.map((a) => a.id), ["ADR-002"]);
+  const matchedNone = s.list({ appliesTo: "packages/quay/src/gate/registry.js" });
+  assert.deepEqual(matchedNone.map((a) => a.id), []);
+});
