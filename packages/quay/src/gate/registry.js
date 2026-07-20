@@ -49,6 +49,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAcceptance } from "./acceptance-runner.js";
+import { createAdrStore } from "../../../quay-native/src/adr-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/quay/src/gate -> repo root is 4 levels up.
@@ -61,6 +62,7 @@ const LINE_BUDGET_SCRIPT = path.join(
   REPO_ROOT,
   "experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh"
 );
+const ADR_DIR = path.join(REPO_ROOT, "adr");
 
 /**
  * Shell-quote one argument for safe interpolation into a `runAcceptance`
@@ -104,6 +106,64 @@ function makeIt0Gate(scriptPath, argsKey, label) {
 }
 
 /**
+ * E3 (exp5-M-CRYST-E3, DIR-030 item 2/4) — adr-as-contract enforcement: wire an
+ * `accepted` ADR carrying a real `enforcement` command as a named `adr-<id>` gate.
+ * Its GateEvents become the "ADR honored" ledger (`quay gate-log`) — this is the
+ * "continuously applied" half E1 deliberately deferred (E1 only reserved the
+ * `applies-to`/`enforcement` frontmatter fields, round-tripped verbatim, unconsumed
+ * until now).
+ *
+ * Reads the ADR at GATE-RUN TIME (not module-load time), so an edit to the ADR's
+ * `enforcement` field takes effect without a process restart. Fails closed (same
+ * discipline as `acceptance`'s unset-meter branch / `makeIt0Gate`'s unset-args
+ * branch) when the ADR is missing, not `accepted`, or has no non-empty
+ * `enforcement` string — an un-enforceable ADR must never silently PASS.
+ *
+ * Adjudicated design choice (see tasks/exp5-M-CRYST-E3.md `## Proposal` /
+ * docs/plans/10-adr-gate-enforcement.md): `enforcement` is a raw runnable COMMAND
+ * STRING (same convention family as `task.extra.acceptance`), not a structured
+ * `{check,args}` object — B7's real invocation shape (`loadbearing-test-gate.sh
+ * --scripts <dir> [--tests <dir>] ...`) does not reduce to one-fixed-script-plus-
+ * positional-args the way `impl-row`/`line-budget` do, so a raw command string is
+ * the better fit; execution safety is identical either way (both ultimately hit
+ * `runAcceptance`'s `spawnSync(shell:true)`).
+ *
+ * @param {string} adrId    e.g. "ADR-001"
+ * @param {string} adrDir   absolute path to the adr/ directory
+ */
+function makeAdrGate(adrId, adrDir) {
+  return async (task) => {
+    const adrStore = createAdrStore(adrDir);
+    const adr = adrStore.get(adrId);
+    if (!adr) {
+      return { ok: false, reason: `no such ADR: ${adrId}` };
+    }
+    if (adr.status !== "accepted") {
+      return {
+        ok: false,
+        reason: `${adrId} is not accepted (status: ${adr.status}) — an ADR must be accepted before its gate can enforce it`,
+      };
+    }
+    const command = adr.enforcement;
+    if (typeof command !== "string" || command.trim() === "") {
+      return {
+        ok: false,
+        reason: `${adrId} has no enforcement command defined (set its \`enforcement:\` frontmatter field to a runnable check)`,
+      };
+    }
+    const cwd = process.env.QUAY_ACCEPTANCE_CWD || process.cwd();
+    const timeoutMs = Number(process.env.QUAY_ACCEPTANCE_TIMEOUT_MS) || 60000;
+    const { ok, reason } = runAcceptance({ command, cwd, timeoutMs });
+    return { ok, reason };
+  };
+}
+
+// Declarative table of which ADRs are wired as gates so far (per proposal 2's
+// folded-in refinement — a future ADR gate is a one-line addition here, not a
+// copy-pasted `makeAdrGate` call site). First wired case: ADR-001 → B7.
+const ADR_GATE_IDS = ["ADR-001"];
+
+/**
  * name -> async (task, client) => { ok: boolean, reason: string }
  * @type {Record<string, (task: any, client: any) => Promise<{ ok: boolean, reason: string }>>}
  */
@@ -131,6 +191,13 @@ export const gateRegistry = {
   "impl-row": makeIt0Gate(IMPL_ROW_SCRIPT, "implRowArgs", "impl-row"),
   "line-budget": makeIt0Gate(LINE_BUDGET_SCRIPT, "lineBudgetArgs", "line-budget"),
 };
+
+// E3: register one `adr-<id>` gate per ADR_GATE_IDS entry (lowercase numeric
+// suffix, e.g. "ADR-001" -> "adr-001", per the task's own AC1 naming convention).
+for (const adrId of ADR_GATE_IDS) {
+  const gateName = adrId.toLowerCase();
+  gateRegistry[gateName] = makeAdrGate(adrId, ADR_DIR);
+}
 
 /** @returns {string[]} registered gate names */
 export function listGates() {

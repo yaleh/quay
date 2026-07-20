@@ -7,6 +7,9 @@ date: 2026-07-19
 tags:
   - testing
   - method-infra
+applies-to:
+  - "experiments/quay-perpetual-stream/scripts/**"
+enforcement: "bash experiments/quay-perpetual-stream/scripts/loadbearing-test-gate.sh --scripts experiments/quay-perpetual-stream/scripts --tests experiments/quay-perpetual-stream/test"
 ---
 ## Context
 TDD is a real hard gate in exp5, but its policy is scattered across ≥5 places — `docs/proposals/exp5-quay-task-proposal-plan-skill.md` §15, `OUTER-LOOP.md`, `inherited-core.md`, `docs/plans/*`, and the enforcement half in `it0-dod-check.mjs` Clause 7 — with a "product code only" nuance (`docs/plans/2` line 25). That nuance let a load-bearing method-infra validator (`scripts/task-schema.mjs`, now a gate other code imports and depends on) ship with acceptance fixtures but no unit tests, no coverage, and no red→green cycle — landed off-loop, so the Clause-7 test-floor never even ran. A load-bearing decision re-interpreted per cycle instead of pinned once is exactly the molten-prose disease; this ADR is its single source.

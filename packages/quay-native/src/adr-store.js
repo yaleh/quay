@@ -116,10 +116,30 @@ export function createAdrStore(adrDir) {
       supersedes: frontmatter.supersedes ?? [],
       supersededBy: frontmatter["superseded-by"] ?? [],
       tags: frontmatter.tags ?? [],
+      // E3 (exp5-M-CRYST-E3): surface the applies-to/enforcement fields E1 reserved
+      // (round-tripped verbatim, previously unconsumed) — the "continuously applied"
+      // half. Additive/non-breaking: absent → empty array / undefined, same
+      // safe-default shape as supersedes/tags above.
+      appliesTo: frontmatter["applies-to"] ?? [],
+      enforcement: frontmatter.enforcement,
       body,
     };
     if (updatedAt !== undefined) vm.updatedAt = updatedAt;
     return vm;
+  }
+
+  // E3: minimal glob matcher for the `applies-to` consult surface — reuses Node's
+  // built-in path.matchesGlob (no new dependency). Match if ANY of the ADR's
+  // applies-to globs matches the given path.
+  function appliesToMatches(appliesTo, targetPath) {
+    if (!Array.isArray(appliesTo) || appliesTo.length === 0) return false;
+    return appliesTo.some((glob) => {
+      try {
+        return path.matchesGlob(targetPath, glob);
+      } catch {
+        return false;
+      }
+    });
   }
 
   function get(id) {
@@ -145,6 +165,7 @@ export function createAdrStore(adrDir) {
       })
       .filter((a) => (filter.status ? a.status === filter.status : true))
       .filter((a) => (filter.tag ? (a.tags || []).includes(filter.tag) : true))
+      .filter((a) => (filter.appliesTo ? appliesToMatches(a.appliesTo, filter.appliesTo) : true))
       .sort((a, b) => String(a.id).localeCompare(String(b.id)));
   }
 

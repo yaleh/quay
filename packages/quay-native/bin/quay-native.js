@@ -90,7 +90,10 @@ async function main() {
     const { flags, positional } = parseFlags(rest);
 
     if (sub === "list") {
-      const adrs = adrStore.list({ status: flags.status, tag: flags.tag });
+      // E3: `--applies-to <path>` is the consult surface — filter to ADRs
+      // whose `applies-to` glob(s) match the given repo-relative path (see
+      // adr-store.js#appliesToMatches). Composable with --status/--tag.
+      const adrs = adrStore.list({ status: flags.status, tag: flags.tag, appliesTo: flags["applies-to"] });
       if (flags.json) printJson(adrs);
       else for (const a of adrs) console.log(`${a.id}\t${a.status}\t${a.title}`);
       return;
