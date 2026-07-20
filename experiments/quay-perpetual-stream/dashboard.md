@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 50** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M50 ABSORB header sync): body log's m50 ABSORB entry below sets milestone_counter → 50;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49).
-50 % 5 == 0 — CHECKPOINT DUE this milestone, see checkpoints/cp-50.md. -->
+**milestone_counter: 51** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M51 ABSORB header sync): body log's m51 ABSORB entry below sets milestone_counter → 51;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50).
+51 % 5 != 0 — no checkpoint due this milestone; next checkpoint due at m55. -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -4661,3 +4661,94 @@ dependency order per DIR-035's own Split section (presupposes A/B/C, now all `do
 
 ## Backlog row
 | DIR-035-C | DIR-035 split C: experiment state ≠ product data — ship a minimal documented sample task store + audit files whitelists (delivery-standalone-smoke store-separation half) | governance-integrity (primary) + capability-growth (secondary) | no VT chart cell | milestone-candidate, human-steered, surface:cli, milestone:M50-dir035-c-sample-store |
+
+## M51 — M51-gate-help-synopsis (exp5-M-GATE-HELP-SYNOPSIS-GAP)
+
+**Task:** [[exp5-M-GATE-HELP-SYNOPSIS-GAP]] (`tasks/exp5-M-GATE-HELP-SYNOPSIS-GAP.md`) — an
+M37-discover-post-qeng-authored `milestone-candidate`, `exploit`-typed: `quay --help`'s top-level
+`Usage:` synopsis block listed every other QENG-era lifecycle command (`complete`/`adjudicate`/
+`promote`/`retreat`/`run`) but had zero lines for `quay gate <id>` / `quay gate-log <id>`, even
+though both are real, wired, independently-verified-working QENG-1/2 commands — discoverable only
+by already knowing the command name. **Merge commit:** `e5a2f48` merged via `--no-ff` into `master`
+at this ABSORB (built commit `87303a0`, worktree `milestones/M51/worktrees/iteration-0`, base
+`master` `f9d3fdd`).
+
+**SELECT note:** chosen at this pass's SELECT over the other 3 `milestone-candidate` tasks
+authored at the same M37-discover-post-qeng sweep (`exp5-M-GATE-README-DOCS`,
+`exp5-M-GATE-CLI-ERROR-UX`, `exp5-M-GATE-MCP-PARITY-GAP`) per checkpoint cp-50's carried-forward
+recommendation to break the 5-milestone exploit-typed-pick drought (M46-M50 were all
+DIR-033/034/035-family governance/architecture milestones) — this was the smallest, most concrete,
+directly VT-moving exploit-typed fix on the open candidate list. `## Not selected (M51)` notes
+appended to the 3 other candidates; all three remain live for a future SELECT.
+
+**Adversarial-audit verdict: PASS.** An independent audit confirmed:
+- The synopsis gains explicit lines for `quay gate <task-id> [--gate <name>]`, `quay gate --list`,
+  and `quay gate-log <task-id> [--gate <name>] [--json] [--file <log-path>]`, matching the existing
+  `complete`/`adjudicate`/`promote`/`retreat`/`run` line style and placement.
+- A new "Gate engine commands (QENG-1/2)" options section documents `--gate`, `--list`, `--json`,
+  `--file`.
+- `packages/quay/test/cli.test.mjs`'s new assertions (~lines 978-1004) are substantive (isolate the
+  synopsis slice correctly, not tautological), all pass.
+- DIR-014 §5a judgment call to skip the `quay-task-to-plan` pipeline for this ~15-line additive
+  docs/CLI-help fix ruled **defensible**.
+- Full suite (excluding `serve-github`/`provider-abi-conformance`): 253 tests, 250 pass, 3 fail in
+  the audit's run — all 3 the known pre-existing flaky baseline (`adr-gate E3 A2`'s
+  invocation-environment-sensitive pass/fail, `dir032-audit-independence` M44 A2/C1,
+  `web-ui-browser`), no new regressions. This ABSORB's own independent re-run (from a clean
+  worktree state, `packages/quay` only) reproduced **253 tests, 249 pass, 4 fail** — the
+  `adr-gate E3 A2` swing is the same pre-existing invocation-sensitivity documented since M50/DEV-11
+  (depends on `QUAY_ACCEPTANCE_CWD`), not a regression from this milestone's change; the other 3
+  failures (`dir032-audit-independence` M44 A2/C1, `web-ui-browser`) are identical to the audit's
+  and to the standing `master` baseline.
+- `task-schema-check.sh` PASS, schema v1 conformant; Proposal/Plan/AC/DoD consistent, no drift.
+- Task's AC/DoD boxes ticked + `## Resolution` section added at this ABSORB, per the audit's
+  confirmed findings (DIR-020: audit ticks, not build/SELECT).
+
+**Mechanical gates (real runs, this ABSORB, from inside the worktree before merge):**
+```
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 51 experiments/quay-perpetual-stream/v-meta-ledger.md
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh   → tree-hygiene: clean.
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+$ node packages/quay/bin/quay.js gate exp5-M-GATE-HELP-SYNOPSIS-GAP --gate dod   → PASS
+```
+
+**Impl-row (Clause 4):** N/A — real code-landing milestone (the task's own AC/DoD are the
+real-landing proof), not a design-only artifact needing a future implementing row.
+**Line-budget (Clause 3):** N/A — a ~15-line additive CLI-help/docs fix, no charter file authored
+(DIR-014 §5a skip, ruled defensible by audit).
+**Split-or-commit (Clause 9):** N/A — no `needs-human` outcome; task reached `done` in full.
+
+**Realized Δv**: capability-growth / discoverability (primary — `quay gate`/`quay gate-log`, the
+two QENG-1/2 entry-point commands, are now discoverable from `quay --help`'s synopsis block without
+already knowing the command names) + a mechanical regression guard (the new `cli.test.mjs`
+assertion) closing a docs/CLI-surface gap that could otherwise silently recur on a future command
+addition. No VT chart cell (docs/CLI-help surface, same no-VT-cell precedent as prior small
+CLI-surface-polish milestones — the CLI surface weight/coverage in the VT table is unaffected).
+VT chart-1 total unchanged: **111.55/120**. `milestone_counter` → **51** (51 % 5 != 0 — no
+checkpoint due; next checkpoint due at **m55**).
+
+**Backlog housekeeping**: `tasks/exp5-M-GATE-HELP-SYNOPSIS-GAP.md` → `status: done`, all 3 AC + the
+DoD box ticked against independently re-verified evidence, `## Resolution` section added citing
+commit `87303a0` and the audit's PASS verdict. `## Not selected (M51)` notes appended to
+`tasks/exp5-M-GATE-README-DOCS.md`, `tasks/exp5-M-GATE-CLI-ERROR-UX.md`, and
+`tasks/exp5-M-GATE-MCP-PARITY-GAP.md` — all three remain open `milestone-candidate` tasks.
+`backlog.md` regenerated via `node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs
+experiments/quay-perpetual-stream --write`. `DIR-035` unchanged (`status: todo`, `dirStatus:
+pending`) — only `DIR-035-D` remains open, not part of this milestone's scope.
+
+**Worktree/branch hygiene close-out:** `milestones/M51/worktrees/iteration-0` removed (`git
+worktree remove`), `milestones/M51-gate-help-synopsis` branch deleted (`git branch -d`, fully
+merged, confirmed ancestor of `master` before deletion). `worktree-branch-hygiene-check.sh`/
+`tree-hygiene-check.sh` both report clean, 0 registered worktrees post-prune.
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 51, not a multiple of 5;
+next checkpoint due at **m55**).
+
+**DRAIN disposition of `directives/pending/` (task-canonical, per DIR-028) at this boundary:** no
+change from M50's disposition for the carried-forward set. `DIR-035` (parent) stays `pending` —
+only `DIR-035-D` remains an open `milestone-candidate` task for a future SELECT pass.
+
+## Backlog row
+| exp5-M-GATE-HELP-SYNOPSIS-GAP | `quay --help` top-level Usage synopsis omitted `quay gate`/`quay gate-log` — add synopsis lines + dedicated QENG-1/2 options section + regression test | capability-growth (discoverability, primary) | no VT chart cell | milestone-candidate, surface:cli, milestone:M37-discover-post-qeng, milestone:M51 |
