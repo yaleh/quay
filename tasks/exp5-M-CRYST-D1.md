@@ -8,11 +8,17 @@ labels:
   - crystallization
 parent: exp5-M-CRYST
 children: []
-extra: {}
+extra:
+  schema: "v1"
 ---
 ## Proposal
-Extend quay to manage repeatable method documents/decisions as first-class objects with contracts/validation + generated views (resolves decision①→quay; §7 concrete). The contract-validator is a quay capability, not an exp5 script.
+Extend quay to manage repeatable method documents/decisions as first-class objects with contracts/validation + generated views (resolves decision①→quay; §7 concrete). The contract-validator is a quay capability, not an exp5 script. Unblocks D2/D3-§9 (contracts validated BY quay) and E2 back-links. Reuse the E1 ADR-kind pattern (a doc kind with a self-verifying `contracts:` block; single-source module wrapped by a gate).
+## Plan
+N/A — product code across packages (a Core doc-management kind + contract-validator, reached via the Provider ABI, like E1); strict TDD per ADR-001 (red→green, ≥80% coverage); no staged docs/plans doc warranted.
 ## Acceptance Criteria
-- [ ] quay validates a document's self-contracts (grep/not-grep target:self) and surfaces conformance; a non-conforming doc is flagged.
+- [ ] quay validates a document's self-`contracts:` (grep/not-grep, `target:self`) and surfaces conformance; a non-conforming doc is flagged (not silently passed).
+- [ ] A real method doc (e.g. a skill or OUTER-LOOP) is managed + validated through quay end-to-end; single-source (the contract logic lives once, a gate wraps it).
 ## Definition of Done
-Real: a real method doc is managed+validated through quay.
+References the standard inherited-core DoD clauses. Real landing:
+- [ ] A REAL method doc is managed + validated through quay (not a fixture) — the contract-validator flags a real non-conforming doc.
+- [ ] Strict TDD (product code); no dual source (validator logic once, wrapped by a gate); unblocks D2/D3-§9/E2.

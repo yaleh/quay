@@ -8,11 +8,17 @@ labels:
   - crystallization
 parent: exp5-M-CRYST
 children: []
-extra: {}
+extra:
+  schema: "v1"
 ---
 ## Proposal
-Bring existing tasks to the B1 schema (add Proposal where milestone tasks lack it, DoD→checklist, strip status-mirror Resolutions), or adopt forward-only with the validator flagging legacy.
+Bring existing tasks to the B1 schema (stamp `extra.schema:"v1"`, add `## Proposal`/`## Plan` where milestone tasks lack them, DoD→checklist, strip any status-mirror Resolution), OR adopt forward-only with the validator N/A-flagging legacy EXPLICITLY. Note: the SELECTed-milestone path already self-heals (B3 wiring stamps + authors at SELECT; the pre-dispatch `task-schema-check` blocks dispatch of a non-conformant task) — so B4 is the BACKFILL for the long tail of un-selected candidates, so the board reads uniformly and the sweep has 0 silent skips.
+## Plan
+N/A — a mechanical sweep + per-task stamp/author (or a documented forward-only grandfather); no code, no staged docs/plans doc warranted.
 ## Acceptance Criteria
-- [ ] B2 validator passes (or explicitly grandfathers pre-cutover tasks) across the live board.
+- [ ] `task-schema-check tasks/*.md` reports every task PASS or EXPLICIT N/A-legacy (no silent skip); the live board is schema-consistent OR its heterogeneity is validator-tracked.
+- [ ] No task carries a status-mirror Resolution or projection scaffolding (the precise `checkNoScaffolding`, not a naive grep).
 ## Definition of Done
-Real: the board is schema-consistent (or heterogeneity is validator-tracked, not silent).
+References the standard inherited-core DoD clauses. Real landing:
+- [ ] The live board is schema-consistent (or grandfathered-and-tracked, never silently) — verified by the sweep on `tasks/*.md`.
+- [ ] Subtractive where it strips scaffolding; no new drift introduced.
