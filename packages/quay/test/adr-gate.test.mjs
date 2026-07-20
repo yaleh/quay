@@ -22,7 +22,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { gateRegistry, listGates } from "../src/gate/registry.js";
+import { resolveGate, listGates } from "../src/gate/registry.js";
 import { createAdrStore } from "../src/adr-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +36,8 @@ const LOADBEARING_GATE_SCRIPT = path.join(
   REPO_ROOT,
   "experiments/quay-perpetual-stream/scripts/loadbearing-test-gate.sh"
 );
+
+const gate = (name) => resolveGate(name, REPO_ROOT);
 
 function tmpDir(tag) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `quay-e3-${tag}-`));
@@ -79,6 +81,10 @@ function makeWorkspace(tag) {
       `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
       "",
     ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(workspaceRoot, ".quay", "gates.yml"),
+    ["adr:", '  - "ADR-001"', ""].join("\n")
   );
   return { workspaceRoot, tasksDir };
 }
@@ -182,10 +188,10 @@ test("E3: adr-001 gate fails-closed when the real ADR-001 has no enforcement com
 // ===========================================================================
 
 test("E3 A2: the REAL ADR-001 gate PASSes against the real repo's own scripts/ (conforming, B7's own domain)", async () => {
-  // Exercises gateRegistry["adr-001"] EXACTLY as registered (against the real
+  // Exercises the adr-001 gate EXACTLY as resolved (against the real
   // repo's adr/ dir and ADR-001's real enforcement command) — the direct
   // real-object proof the task's AC3 requires.
-  const r = await gateRegistry["adr-001"]({ id: "T" });
+  const r = await gate("adr-001")({ id: "T" });
   assert.equal(r.ok, true, `expected pass against the real repo; got reason=${r.reason}`);
 });
 

@@ -20,7 +20,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { gateRegistry, listGates } from "../src/gate/registry.js";
+import { resolveGate, listGates } from "../src/gate/registry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.js");
@@ -28,6 +28,11 @@ const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-n
 const nativeProviderDir = path.dirname(nativeBin);
 // repo root: packages/quay/test -> repo root is 3 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+// DIR-035-B: `vmeta-lag`/`dogfood-evidence` are no longer module-level
+// `gateRegistry` entries — they are THIS repo's own `.quay/gates.yml`-declared
+// workspace gates. `resolveGate(name, REPO_ROOT)` resolves them exactly as
+// `quay gate` would when run from this repo's own workspace root.
+const gate = (name) => resolveGate(name, REPO_ROOT);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,7 +62,9 @@ function runNative(args, tasksDir) {
   });
 }
 
-// mirrors it0-gates.test.mjs / gate.test.mjs makeWorkspace()
+// mirrors it0-gates.test.mjs / gate.test.mjs makeWorkspace(), PLUS (DIR-035-B)
+// a `.quay/gates.yml` declaring `vmeta-lag`/`dogfood-evidence` as THIS test
+// workspace's own data, pointed at the REAL repo scripts (REPO_ROOT).
 function makeWorkspace(tag) {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m43-${tag}-tasks-`));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m43-${tag}-ws-`));
@@ -73,6 +80,19 @@ function makeWorkspace(tag) {
       `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
       "    env:",
       `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(workspaceRoot, ".quay", "gates.yml"),
+    [
+      "it0:",
+      "  - name: vmeta-lag",
+      `    script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh").replaceAll("\\", "\\\\")}"`,
+      "    argsKey: vmetaLagArgs",
+      "  - name: dogfood-evidence",
+      `    script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh").replaceAll("\\", "\\\\")}"`,
+      "    argsKey: dogfoodEvidenceArgs",
       "",
     ].join("\n")
   );
@@ -116,30 +136,30 @@ test("M43 A1: listGates() includes 'vmeta-lag' and 'dogfood-evidence'", () => {
 });
 
 test("M43 A1: vmeta-lag gate fails-closed when extra.vmetaLagArgs is unset", async () => {
-  const r = await gateRegistry["vmeta-lag"]({ id: "T", extra: {} });
+  const r = await gate("vmeta-lag")({ id: "T", extra: {} });
   assert.equal(r.ok, false);
   assert.match(r.reason, /no vmeta-lag arguments defined/);
 });
 
 test("M43 A1: vmeta-lag gate fails-closed when extra.vmetaLagArgs is an empty array", async () => {
-  const r = await gateRegistry["vmeta-lag"]({ id: "T", extra: { vmetaLagArgs: [] } });
+  const r = await gate("vmeta-lag")({ id: "T", extra: { vmetaLagArgs: [] } });
   assert.equal(r.ok, false);
 });
 
 test("M43 A1: vmeta-lag gate fails-closed when task.extra itself is undefined", async () => {
-  const r = await gateRegistry["vmeta-lag"]({ id: "T" });
+  const r = await gate("vmeta-lag")({ id: "T" });
   assert.equal(r.ok, false);
   assert.match(r.reason, /no vmeta-lag arguments defined/);
 });
 
 test("M43 A1: dogfood-evidence gate fails-closed when extra.dogfoodEvidenceArgs is unset", async () => {
-  const r = await gateRegistry["dogfood-evidence"]({ id: "T", extra: {} });
+  const r = await gate("dogfood-evidence")({ id: "T", extra: {} });
   assert.equal(r.ok, false);
   assert.match(r.reason, /no dogfood-evidence arguments defined/);
 });
 
 test("M43 A1: dogfood-evidence gate fails-closed when extra.dogfoodEvidenceArgs is an empty array", async () => {
-  const r = await gateRegistry["dogfood-evidence"]({ id: "T", extra: { dogfoodEvidenceArgs: [] } });
+  const r = await gate("dogfood-evidence")({ id: "T", extra: { dogfoodEvidenceArgs: [] } });
   assert.equal(r.ok, false);
 });
 
@@ -151,7 +171,7 @@ test("M43 A1: dogfood-evidence gate fails-closed when extra.dogfoodEvidenceArgs 
 test("M43 A2: vmeta-lag gate PASSes for a consolidated (non-alarmed) ledger row (real script)", async () => {
   const dir = tmpDir("a2-vmetalag-pass");
   const ledger = writeLedgerFixture(dir, { alarm: false });
-  const r = await gateRegistry["vmeta-lag"]({
+  const r = await gate("vmeta-lag")({
     id: "T",
     extra: { vmetaLagArgs: ["--counter", "3", ledger] },
   });
@@ -161,7 +181,7 @@ test("M43 A2: vmeta-lag gate PASSes for a consolidated (non-alarmed) ledger row 
 test("M43 A2: vmeta-lag gate FAILs for a confirmed-overdue-past-K row with no dated carry-forward (real script)", async () => {
   const dir = tmpDir("a2-vmetalag-fail");
   const ledger = writeLedgerFixture(dir, { alarm: true });
-  const r = await gateRegistry["vmeta-lag"]({
+  const r = await gate("vmeta-lag")({
     id: "T",
     extra: { vmetaLagArgs: ["--counter", "10", ledger] },
   });
@@ -169,7 +189,7 @@ test("M43 A2: vmeta-lag gate FAILs for a confirmed-overdue-past-K row with no da
 });
 
 test("M43 A2: vmeta-lag gate maps a script usage-error (exit 2, missing ledger file) to ok:false", async () => {
-  const r = await gateRegistry["vmeta-lag"]({
+  const r = await gate("vmeta-lag")({
     id: "T",
     extra: { vmetaLagArgs: ["/no/such/ledger.md"] },
   });
@@ -179,7 +199,7 @@ test("M43 A2: vmeta-lag gate maps a script usage-error (exit 2, missing ledger f
 test("M43 A2: dogfood-evidence gate PASSes for a claimed-met clause with nearby fenced evidence (real script)", async () => {
   const dir = tmpDir("a2-dogfood-pass");
   const report = writeReportFixture(dir, { hasEvidence: true });
-  const r = await gateRegistry["dogfood-evidence"]({
+  const r = await gate("dogfood-evidence")({
     id: "T",
     extra: { dogfoodEvidenceArgs: [report] },
   });
@@ -189,7 +209,7 @@ test("M43 A2: dogfood-evidence gate PASSes for a claimed-met clause with nearby 
 test("M43 A2: dogfood-evidence gate FAILs for a claimed-met clause with no nearby fenced evidence (real script)", async () => {
   const dir = tmpDir("a2-dogfood-fail");
   const report = writeReportFixture(dir, { hasEvidence: false });
-  const r = await gateRegistry["dogfood-evidence"]({
+  const r = await gate("dogfood-evidence")({
     id: "T",
     extra: { dogfoodEvidenceArgs: [report, "1"] }, // tiny window forces a miss
   });
@@ -197,7 +217,7 @@ test("M43 A2: dogfood-evidence gate FAILs for a claimed-met clause with no nearb
 });
 
 test("M43 A2: dogfood-evidence gate maps a script usage-error (exit 2, missing report file) to ok:false", async () => {
-  const r = await gateRegistry["dogfood-evidence"]({
+  const r = await gate("dogfood-evidence")({
     id: "T",
     extra: { dogfoodEvidenceArgs: ["/no/such/report.md"] },
   });
@@ -285,7 +305,7 @@ test("M43 C1: `quay gate <task> --gate vmeta-lag` FAILs (exit 1) for real when a
 test("M43 D1: vmeta-lag gate PASSes for real against this repo's own v-meta-ledger.md", async () => {
   const ledger = path.join(REPO_ROOT, "experiments/quay-perpetual-stream/v-meta-ledger.md");
   assert.ok(fs.existsSync(ledger), "real v-meta-ledger.md must exist in this worktree");
-  const r = await gateRegistry["vmeta-lag"]({
+  const r = await gate("vmeta-lag")({
     id: "exp5-M-DIR022-REMAINING-GATES",
     extra: { vmetaLagArgs: ["--counter", "43", ledger] },
   });
@@ -302,7 +322,7 @@ test("M43 D1: line-budget gate PASSes for real against this milestone's OWN real
     "experiments/quay-perpetual-stream/charters/M43-dir022-remaining-gates.md"
   );
   assert.ok(fs.existsSync(charter), "real M43 charter must exist in this worktree");
-  const r = await gateRegistry["line-budget"]({
+  const r = await gate("line-budget")({
     id: "exp5-M-DIR022-REMAINING-GATES",
     extra: { lineBudgetArgs: [charter] },
   });

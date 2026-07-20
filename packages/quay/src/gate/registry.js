@@ -1,10 +1,11 @@
 // Gate registry — name -> async gateFn(task, client) -> { ok, reason } (QENG-1).
 //
-// Ships exactly one gate, `dod`, a thin adapter over the existing `taskCheck`
-// passthrough (`src/provider-client.js`), which itself routes to quay-native
-// `store.js#check()`. This generalizes quay's already-shipped author->ready /
-// execute->done gate into the first named engine gate — no gate logic is
-// duplicated (proposal §"Gate registry + the `dod` gate").
+// Ships exactly one true built-in gate, `dod`, a thin adapter over the
+// existing `taskCheck` passthrough (`src/provider-client.js`), which itself
+// routes to quay-native `store.js#check()`. This generalizes quay's
+// already-shipped author->ready / execute->done gate into the first named
+// engine gate — no gate logic is duplicated (proposal §"Gate registry + the
+// `dod` gate").
 //
 // `dod` is status-relative (inherited from `check()`): it runs whichever gate
 // matches the task's current status. See proposal §"Gate registry" and the
@@ -17,37 +18,46 @@
 // handler (QUAY_ACCEPTANCE_CWD / QUAY_ACCEPTANCE_TIMEOUT_MS) so the engine's
 // `(task, client)` gate contract stays unchanged (proposal §3, Trade-offs).
 //
-// DIR-022 Layer 2 phase 1 (M39) adds two more named gates, `impl-row` and
-// `line-budget` — thin wrappers over this project's existing standing mechanical
-// checks (`experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh`
-// and `it0-ceiling-line-budget-check.sh`). Per DIR-022's own instruction
-// ("Reuse the it0 scripts as-is — do NOT rewrite gate logic"), NEITHER gate
-// re-implements any check: both shell out to the real script via the same
-// `runAcceptance` runner QENG-2 already ships (spawnSync, real process I/O,
-// enforced timeout, real exit-code mapping) — no second command-runner is
-// introduced.
+// DIR-035-B (M49) / ADR-013 Decision item 2: the product ships the gate ENGINE
+// + generic FACTORIES (`makeIt0Gate`, `makeAdrGate`) only. WHICH scripts get an
+// `it0`-style named gate, and WHICH ADRs get an auto-wired `adr-<id>` gate, is
+// no longer baked into this module as hardcoded `experiments/quay-perpetual-
+// stream/**` path constants / an `ADR_GATE_IDS` array — it is now WORKSPACE
+// DATA, read from `<workspaceRoot>/.quay/gates.yml` at gate-list/gate-run time
+// (see `loadWorkspaceGates` below) — the same "derived at gate-run time, not
+// baked into the module" discipline the `adr-<id>` gate already used for ITS
+// data (an ADR's own `enforcement:` frontmatter field); this just applies it
+// one level up, to WHICH ids get wired at all. A fresh non-research workspace
+// with no `gates.yml` (or none of these keys set) sees only the two built-ins
+// above (`dod`, `acceptance`) plus its own `doc-*` gates (DOCUMENT_GATE_IDS
+// below is a genuinely product-owned mechanism, not research-specific data,
+// so it stays baked in — same reasoning the D1 milestone task itself gives).
+// This repo's own research-loop gates (5 it0/vmeta/audit/dogfood scripts plus
+// 1 wired ADR) now live in THIS repo's own `.quay/gates.yml`, preserving the
+// exact prior gate set/behavior for this repo's own workspace.
 //
-// Argument convention (documented here per the charter's AC1 requirement):
-// each gate reads its script's positional arguments from a DEDICATED
-// `task.extra.*` key holding an array of strings — `task.extra.implRowArgs`
-// / `task.extra.lineBudgetArgs` — rather than a single pre-joined command
-// string. This is a deliberate, minimal extension of the existing
-// `task.extra.acceptance` convention: `acceptance` stores a full shell
-// command because it wraps an ARBITRARY runnable meter chosen by the task
-// author, whereas `impl-row`/`line-budget` wrap ONE FIXED script each (the
-// same it0 script for every task that uses the gate) — only the script's
-// own positional arguments vary per task. Storing just the args (not the
-// whole command line) keeps the fixed script path out of every task file
-// (avoids repo-relative-path drift across tasks) and keeps the two gates
-// symmetric with each other. Both arrays are optional; each script tolerates
-// its own optional trailing argument (see the scripts' own `${2:-default}`
-// fallbacks), so an absent args array is not automatically a hard failure —
-// only a missing REQUIRED first argument is (mirrored below as a fail-closed
+// Per-gate argument convention (documented here per the charter's AC1
+// requirement, unchanged by DIR-035-B): each `it0`-style gate reads its
+// script's positional arguments from a DEDICATED `task.extra.*` key holding
+// an array of strings (e.g. `task.extra.implRowArgs`), rather than a single
+// pre-joined command string — a deliberate, minimal extension of the existing
+// `task.extra.acceptance` convention: `acceptance` stores a full shell command
+// because it wraps an ARBITRARY runnable meter chosen by the task author,
+// whereas an `it0`-style gate wraps ONE FIXED script (declared once in
+// `gates.yml`, not per task) — only the script's own positional arguments
+// vary per task. Storing just the args (not the whole command line) keeps the
+// fixed script path out of every task file and keeps every such gate
+// symmetric with its siblings. The args array is optional; each script
+// tolerates its own optional trailing argument (see the scripts' own
+// `${2:-default}` fallbacks), so an absent args array is not automatically a
+// hard failure — only a missing REQUIRED first argument is (a fail-closed
 // `ok:false` with a clear reason, same shape as the `acceptance` gate's
 // unset-meter fail-closed branch).
 
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import YAML from "yaml";
 import { runAcceptance } from "./acceptance-runner.js";
 // ADR-013 / DIR-035-A: these are generic filesystem-frontmatter stores with no
 // dependency on any Provider's task vocabulary — they were misplaced under
@@ -58,47 +68,16 @@ import { runAcceptance } from "./acceptance-runner.js";
 import { createAdrStore } from "../adr-store.js";
 import { createDocumentStore } from "../document-store.js";
 import { validateContracts } from "../contract-validator.js";
+import { findConfig } from "../config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// packages/quay/src/gate -> repo root is 4 levels up.
+// packages/quay/src/gate -> repo root is 4 levels up. Used ONLY for the
+// product's OWN built-in doc-gate data (DOCUMENT_GATE_IDS/DOCUMENTS_DIR
+// below), which is genuinely product-owned, not research-specific — see the
+// header comment. Everything research-loop-specific now resolves relative to
+// a WORKSPACE root discovered at gate-run time (loadWorkspaceGates), never
+// this module's own directory.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
-const IMPL_ROW_SCRIPT = path.join(
-  REPO_ROOT,
-  "experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh"
-);
-const LINE_BUDGET_SCRIPT = path.join(
-  REPO_ROOT,
-  "experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh"
-);
-// DIR-022 remainder (M43): vmeta-lag wraps vmeta-lag-check.sh — the thin
-// `.sh` wrapper already shipped over vmeta-lag-check.mjs (the module IS the
-// canonical arithmetic, per its own header comment; the `.sh` wrapper is the
-// SAME "invocation surface, not a second implementation" shape task-schema-
-// check.sh's own `.sh`-wraps-`.mjs` pattern uses) — mirrors `impl-row`/
-// `line-budget`'s own choice to wrap the executable `.sh` entry point.
-const VMETA_LAG_SCRIPT = path.join(
-  REPO_ROOT,
-  "experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh"
-);
-// DIR-032 (M44): audit-independence wraps audit-independence-check.sh — the
-// SAME "invocation surface, not a second implementation" shape as vmeta-lag.
-// Its script takes `[--orchestrator-id <id>] <audit-artifact.md>`, which is
-// still just a flat array of positional-ish args (an optional flag pair +
-// one required path) — the SAME `makeIt0Gate(scriptPath, argsKey, label)`
-// factory below handles it unchanged: `task.extra.auditIndependenceArgs`,
-// e.g. `["--orchestrator-id","<id>","<artifact-path>"]` or just
-// `["<artifact-path>"]` (the script also reads QUAY_ORCHESTRATOR_SESSION_ID
-// from the environment as a fallback, mirroring vmeta-lag's own optional-flag
-// shape).
-const AUDIT_INDEPENDENCE_SCRIPT = path.join(
-  REPO_ROOT,
-  "experiments/quay-perpetual-stream/scripts/audit-independence-check.sh"
-);
-const DOGFOOD_EVIDENCE_SCRIPT = path.join(
-  REPO_ROOT,
-  "experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh"
-);
-const ADR_DIR = path.join(REPO_ROOT, "adr");
 
 /**
  * Shell-quote one argument for safe interpolation into a `runAcceptance`
@@ -160,7 +139,7 @@ function makeIt0Gate(scriptPath, argsKey, label) {
  * STRING (same convention family as `task.extra.acceptance`), not a structured
  * `{check,args}` object — B7's real invocation shape (`loadbearing-test-gate.sh
  * --scripts <dir> [--tests <dir>] ...`) does not reduce to one-fixed-script-plus-
- * positional-args the way `impl-row`/`line-budget` do, so a raw command string is
+ * positional-args the way an `it0`-style gate does, so a raw command string is
  * the better fit; execution safety is identical either way (both ultimately hit
  * `runAcceptance`'s `spawnSync(shell:true)`).
  *
@@ -253,16 +232,15 @@ export function registerDocumentGate(gateName, docDir, docId) {
   gateRegistry[gateName] = makeDocumentContractGate(docId, docDir);
 }
 
-// Declarative table of which ADRs are wired as gates so far (per proposal 2's
-// folded-in refinement — a future ADR gate is a one-line addition here, not a
-// copy-pasted `makeAdrGate` call site). First wired case: ADR-001 → B7.
-const ADR_GATE_IDS = ["ADR-001"];
-
 const DOCUMENTS_DIR = path.join(REPO_ROOT, "docs-managed");
 
 // D1: declarative table of which managed documents are wired as gates so far
-// (same shape as ADR_GATE_IDS) — `{gateName, docId}` pairs, one real wired
-// case landed in Stage 5 (the retrofitted quay-directive skill doc).
+// — `{gateName, docId}` pairs, one real wired case landed in Stage 5 (the
+// retrofitted quay-directive skill doc). Unlike the retired ADR_GATE_IDS /
+// the 5 it0-script constants, this table is genuinely product-owned (the
+// document store + gate factory ship as product code, and DOC-001 is the
+// product's OWN quay-directive skill doc, not research-loop data) — see the
+// D1 milestone task for the original rationale. Left baked in by design.
 const DOCUMENT_GATE_IDS = [{ gateName: "doc-quay-directive-skill", docId: "DOC-001" }];
 
 /**
@@ -289,23 +267,6 @@ export const gateRegistry = {
     const { ok, reason } = runAcceptance({ command, cwd, timeoutMs });
     return { ok, reason };
   },
-  // DIR-022 Layer 2 phase 1 (M39): thin wrappers, see comment block above.
-  "impl-row": makeIt0Gate(IMPL_ROW_SCRIPT, "implRowArgs", "impl-row"),
-  "line-budget": makeIt0Gate(LINE_BUDGET_SCRIPT, "lineBudgetArgs", "line-budget"),
-  // DIR-022 remainder (M43): the SAME
-  // `makeIt0Gate` factory, two more real standalone it0/vmeta scripts.
-  // `vmeta-lag`: task.extra.vmetaLagArgs, e.g. ["--counter","43","v-meta-ledger.md"]
-  // or just ["v-meta-ledger.md"] (the `--counter` flag is optional, per the
-  // script's own usage). `dogfood-evidence`: task.extra.dogfoodEvidenceArgs,
-  // e.g. ["<iteration-report.md>"] (optional 2nd arg: window-lines).
-  "vmeta-lag": makeIt0Gate(VMETA_LAG_SCRIPT, "vmetaLagArgs", "vmeta-lag"),
-  "dogfood-evidence": makeIt0Gate(DOGFOOD_EVIDENCE_SCRIPT, "dogfoodEvidenceArgs", "dogfood-evidence"),
-  // DIR-032 (M44): HARD-blocks a self-audit
-  // (absent or matching session/agent id) from ever passing this gate — see
-  // OUTER-LOOP.md's Per-milestone acceptance audit section for how this is
-  // wired into ABSORB. `task.extra.auditIndependenceArgs`, e.g.
-  // `["--orchestrator-id","<id>","<audit-artifact.md>"]`.
-  "audit-independence": makeIt0Gate(AUDIT_INDEPENDENCE_SCRIPT, "auditIndependenceArgs", "audit-independence"),
   // NOTE — deliberately NOT registered here (M43 SELECT-time re-derivation,
   // see the DIR-022-remainder milestone task's `## Proposal` for the full
   // rationale):
@@ -328,21 +289,124 @@ export const gateRegistry = {
   //     oversight.
 };
 
-// E3: register one `adr-<id>` gate per ADR_GATE_IDS entry (lowercase numeric
-// suffix, e.g. "ADR-001" -> "adr-001", per the task's own AC1 naming convention).
-for (const adrId of ADR_GATE_IDS) {
-  const gateName = adrId.toLowerCase();
-  gateRegistry[gateName] = makeAdrGate(adrId, ADR_DIR);
-}
-
 // D1: register one `doc-<name>` gate per DOCUMENT_GATE_IDS entry — same shape
-// as the ADR loop above, via the exported `registerDocumentGate` helper so
-// tests exercise the exact same code path.
+// as the (now-retired) module-level ADR loop used to have, via the exported
+// `registerDocumentGate` helper so tests exercise the exact same code path.
 for (const { gateName, docId } of DOCUMENT_GATE_IDS) {
   registerDocumentGate(gateName, DOCUMENTS_DIR, docId);
 }
 
-/** @returns {string[]} registered gate names */
-export function listGates() {
-  return Object.keys(gateRegistry);
+/**
+ * DIR-035-B: locate this process's workspace root the SAME way `config.js`'s
+ * `findConfig` does (walk up from `startDir` for `.quay/config.yml`), so gate
+ * discovery works both from a real CLI invocation (cwd = workspaceRoot, per
+ * `withProvider`'s own resolution) and from an in-process test/module caller
+ * that never constructed a `cfg` object (e.g. this repo's own existing
+ * `listGates()`/`gateRegistry[...]` unit tests, which run with cwd =
+ * `packages/quay` — three levels below this repo's own `.quay/config.yml`).
+ *
+ * Returns `null` (never throws) when no `.quay/config.yml` is found upward
+ * from `startDir` — a bare `node -e "require(...)"` outside any workspace
+ * simply sees the built-ins only, exactly like a fresh workspace with an
+ * empty `gates.yml`.
+ *
+ * @param {string} [startDir]
+ * @returns {string|null}
+ */
+function discoverWorkspaceRoot(startDir = process.cwd()) {
+  const configPath = findConfig(startDir);
+  if (!configPath) return null;
+  // configPath is <workspaceRoot>/.quay/config.yml
+  return path.dirname(path.dirname(configPath));
+}
+
+/**
+ * Read `<workspaceRoot>/.quay/gates.yml` (if present) and return its parsed
+ * `{it0, adr}` shape. Missing file / unparsable YAML / missing keys all
+ * degrade to `{it0: [], adr: []}` (fail-quiet, not fail-closed here — an
+ * ABSENT gates.yml is the fresh-workspace default, not an error condition;
+ * the gates it WOULD have declared simply don't exist, which is the whole
+ * point of AC3).
+ *
+ * @param {string} workspaceRoot
+ * @returns {{it0: Array<{name:string, script:string, argsKey:string}>, adr: string[]}}
+ */
+function readGatesConfig(workspaceRoot) {
+  const empty = { it0: [], adr: [] };
+  if (!workspaceRoot) return empty;
+  const gatesPath = path.join(workspaceRoot, ".quay", "gates.yml");
+  if (!fs.existsSync(gatesPath)) return empty;
+  let parsed;
+  try {
+    parsed = YAML.parse(fs.readFileSync(gatesPath, "utf8"));
+  } catch {
+    return empty; // malformed gates.yml -> no workspace gates, not a hard crash
+  }
+  const it0 = Array.isArray(parsed?.it0) ? parsed.it0 : [];
+  const adr = Array.isArray(parsed?.adr) ? parsed.adr : [];
+  return { it0, adr };
+}
+
+/**
+ * Build the WORKSPACE-DATA-DRIVEN gate set for `workspaceRoot`: one
+ * `makeIt0Gate` per `gates.yml`'s `it0[]` entry (script path resolved
+ * relative to `workspaceRoot`) plus one `makeAdrGate` per `gates.yml`'s
+ * `adr[]` entry (lowercased, e.g. "ADR-001" -> "adr-001", per the original
+ * E3 AC1 naming convention — unchanged). The ADR store dir mirrors this
+ * workspace's own native-provider convention (`QUAY_NATIVE_ADR_DIR`,
+ * `.quay/config.yml`'s `providers.native.env`), falling back to
+ * `<workspaceRoot>/adr` when unset — the same default quay-native itself uses.
+ *
+ * Returns `{}` for a workspace with no `gates.yml` (or an empty one) — the
+ * fresh non-research workspace case (AC3).
+ *
+ * @param {string|null} workspaceRoot
+ * @returns {Record<string, (task: any, client: any) => Promise<{ok: boolean, reason: string}>>}
+ */
+export function loadWorkspaceGates(workspaceRoot) {
+  if (!workspaceRoot) return {};
+  const { it0, adr } = readGatesConfig(workspaceRoot);
+  const gates = {};
+  for (const entry of it0) {
+    if (!entry?.name || !entry?.script || !entry?.argsKey) continue;
+    const scriptPath = path.isAbsolute(entry.script)
+      ? entry.script
+      : path.resolve(workspaceRoot, entry.script);
+    gates[entry.name] = makeIt0Gate(scriptPath, entry.argsKey, entry.name);
+  }
+  const adrDir = path.join(workspaceRoot, "adr");
+  for (const adrId of adr) {
+    if (typeof adrId !== "string" || adrId.trim() === "") continue;
+    gates[adrId.toLowerCase()] = makeAdrGate(adrId, adrDir);
+  }
+  return gates;
+}
+
+/**
+ * Resolve a gate function by name for `workspaceRoot` — the single lookup
+ * point used by both `listGates` and the engine (`engine.js#runGate`). Checks
+ * the product's own baked-in `gateRegistry` FIRST (built-ins + doc-* gates
+ * always win a name collision, since they are the stable, product-owned
+ * surface), then falls back to this workspace's own `gates.yml`-declared
+ * gates. `workspaceRoot` defaults to `discoverWorkspaceRoot()` when omitted,
+ * so existing in-process callers (module-level `gateRegistry[name]` access,
+ * and this repo's own unit tests) keep resolving this repo's real gates
+ * without change, as long as they run with a cwd under this repo.
+ *
+ * @param {string} name
+ * @param {string} [workspaceRoot]
+ * @returns {((task: any, client: any) => Promise<{ok: boolean, reason: string}>) | undefined}
+ */
+export function resolveGate(name, workspaceRoot = discoverWorkspaceRoot()) {
+  if (gateRegistry[name]) return gateRegistry[name];
+  return loadWorkspaceGates(workspaceRoot)[name];
+}
+
+/**
+ * @param {string} [workspaceRoot] defaults to `discoverWorkspaceRoot()`
+ * @returns {string[]} registered gate names (built-ins + this workspace's own
+ *   `gates.yml`-declared gates)
+ */
+export function listGates(workspaceRoot = discoverWorkspaceRoot()) {
+  return [...Object.keys(gateRegistry), ...Object.keys(loadWorkspaceGates(workspaceRoot))];
 }

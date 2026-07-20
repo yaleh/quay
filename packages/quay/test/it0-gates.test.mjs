@@ -22,7 +22,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { gateRegistry, listGates } from "../src/gate/registry.js";
+import { resolveGate, listGates } from "../src/gate/registry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.js");
@@ -30,6 +30,11 @@ const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-n
 const nativeProviderDir = path.dirname(nativeBin);
 // repo root: packages/quay/test -> repo root is 3 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+// DIR-035-B: `impl-row`/`line-budget` are no longer module-level `gateRegistry`
+// entries — they are THIS repo's own `.quay/gates.yml`-declared workspace
+// gates. `resolveGate(name, REPO_ROOT)` resolves them exactly as `quay gate`
+// would when run from this repo's own workspace root (see registry.js).
+const gate = (name) => resolveGate(name, REPO_ROOT);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,7 +64,11 @@ function runNative(args, tasksDir) {
   });
 }
 
-// mirrors gate.test.mjs / acceptance.test.mjs makeWorkspace()
+// mirrors gate.test.mjs / acceptance.test.mjs makeWorkspace(), PLUS (DIR-035-B)
+// a `.quay/gates.yml` declaring `impl-row`/`line-budget` as THIS test
+// workspace's own data — the exact shape a real exp5-style workspace uses,
+// pointed at the REAL repo scripts (REPO_ROOT) so the CLI path still exercises
+// real process I/O, not a synthetic fixture script.
 function makeWorkspace(tag) {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m39-${tag}-tasks-`));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m39-${tag}-ws-`));
@@ -75,6 +84,19 @@ function makeWorkspace(tag) {
       `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
       "    env:",
       `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(workspaceRoot, ".quay", "gates.yml"),
+    [
+      "it0:",
+      "  - name: impl-row",
+      `    script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh").replaceAll("\\", "\\\\")}"`,
+      "    argsKey: implRowArgs",
+      "  - name: line-budget",
+      `    script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh").replaceAll("\\", "\\\\")}"`,
+      "    argsKey: lineBudgetArgs",
       "",
     ].join("\n")
   );
@@ -115,38 +137,38 @@ test("M39 A1: listGates() includes 'impl-row' and 'line-budget'", () => {
 });
 
 test("M39 A1: impl-row gate fails-closed when extra.implRowArgs is unset", async () => {
-  const r = await gateRegistry["impl-row"]({ id: "T", extra: {} });
+  const r = await gate("impl-row")({ id: "T", extra: {} });
   assert.equal(r.ok, false);
   assert.match(r.reason, /no impl-row arguments defined/);
 });
 
 test("M39 A1: impl-row gate fails-closed when extra.implRowArgs is an empty array", async () => {
-  const r = await gateRegistry["impl-row"]({ id: "T", extra: { implRowArgs: [] } });
+  const r = await gate("impl-row")({ id: "T", extra: { implRowArgs: [] } });
   assert.equal(r.ok, false);
   assert.match(r.reason, /no impl-row arguments defined/);
 });
 
 test("M39 A1: impl-row gate fails-closed when extra.implRowArgs[0] is not a non-empty string", async () => {
-  const r1 = await gateRegistry["impl-row"]({ id: "T", extra: { implRowArgs: [""] } });
+  const r1 = await gate("impl-row")({ id: "T", extra: { implRowArgs: [""] } });
   assert.equal(r1.ok, false);
-  const r2 = await gateRegistry["impl-row"]({ id: "T", extra: { implRowArgs: [42] } });
+  const r2 = await gate("impl-row")({ id: "T", extra: { implRowArgs: [42] } });
   assert.equal(r2.ok, false);
 });
 
 test("M39 A1: impl-row gate fails-closed when task.extra itself is undefined", async () => {
-  const r = await gateRegistry["impl-row"]({ id: "T" });
+  const r = await gate("impl-row")({ id: "T" });
   assert.equal(r.ok, false);
   assert.match(r.reason, /no impl-row arguments defined/);
 });
 
 test("M39 A1: line-budget gate fails-closed when extra.lineBudgetArgs is unset", async () => {
-  const r = await gateRegistry["line-budget"]({ id: "T", extra: {} });
+  const r = await gate("line-budget")({ id: "T", extra: {} });
   assert.equal(r.ok, false);
   assert.match(r.reason, /no line-budget arguments defined/);
 });
 
 test("M39 A1: line-budget gate fails-closed when extra.lineBudgetArgs is an empty array", async () => {
-  const r = await gateRegistry["line-budget"]({ id: "T", extra: { lineBudgetArgs: [] } });
+  const r = await gate("line-budget")({ id: "T", extra: { lineBudgetArgs: [] } });
   assert.equal(r.ok, false);
 });
 
@@ -158,7 +180,7 @@ test("M39 A1: line-budget gate fails-closed when extra.lineBudgetArgs is an empt
 test("M39 A2: impl-row gate PASSes for a non-design-only backlog row (real script)", async () => {
   const dir = tmpDir("a2-implrow-pass");
   const backlog = writeBacklogFixture(dir, { designOnly: false });
-  const r = await gateRegistry["impl-row"]({
+  const r = await gate("impl-row")({
     id: "T",
     extra: { implRowArgs: ["M-FIXTURE", backlog] },
   });
@@ -168,7 +190,7 @@ test("M39 A2: impl-row gate PASSes for a non-design-only backlog row (real scrip
 test("M39 A2: impl-row gate FAILs for a design-only row with no -IMPL row (real script)", async () => {
   const dir = tmpDir("a2-implrow-fail");
   const backlog = writeBacklogFixture(dir, { designOnly: true });
-  const r = await gateRegistry["impl-row"]({
+  const r = await gate("impl-row")({
     id: "T",
     extra: { implRowArgs: ["M-FIXTURE", backlog] },
   });
@@ -176,7 +198,7 @@ test("M39 A2: impl-row gate FAILs for a design-only row with no -IMPL row (real 
 });
 
 test("M39 A2: impl-row gate maps a script usage-error (exit 2, missing backlog file) to ok:false", async () => {
-  const r = await gateRegistry["impl-row"]({
+  const r = await gate("impl-row")({
     id: "T",
     extra: { implRowArgs: ["M-NOPE", "/no/such/backlog.md"] },
   });
@@ -186,7 +208,7 @@ test("M39 A2: impl-row gate maps a script usage-error (exit 2, missing backlog f
 test("M39 A2: line-budget gate PASSes for a small-scope charter (real script)", async () => {
   const dir = tmpDir("a2-linebudget-pass");
   const charter = writeCharterFixture(dir, { overBudget: false });
-  const r = await gateRegistry["line-budget"]({
+  const r = await gate("line-budget")({
     id: "T",
     extra: { lineBudgetArgs: [charter] },
   });
@@ -196,7 +218,7 @@ test("M39 A2: line-budget gate PASSes for a small-scope charter (real script)", 
 test("M39 A2: line-budget gate FAILs for an over-budget charter with no phase/stage plan (real script)", async () => {
   const dir = tmpDir("a2-linebudget-fail");
   const charter = writeCharterFixture(dir, { overBudget: true });
-  const r = await gateRegistry["line-budget"]({
+  const r = await gate("line-budget")({
     id: "T",
     extra: { lineBudgetArgs: [charter] },
   });
@@ -204,7 +226,7 @@ test("M39 A2: line-budget gate FAILs for an over-budget charter with no phase/st
 });
 
 test("M39 A2: line-budget gate maps a script usage-error (exit 2, missing charter file) to ok:false", async () => {
-  const r = await gateRegistry["line-budget"]({
+  const r = await gate("line-budget")({
     id: "T",
     extra: { lineBudgetArgs: ["/no/such/charter.md"] },
   });
@@ -217,7 +239,7 @@ test("M39 A2: impl-row gate tolerates an optional second arg (backlog-file overr
   const weirdDir = path.join(dir, "weird's dir");
   fs.mkdirSync(weirdDir, { recursive: true });
   const backlog = writeBacklogFixture(weirdDir, { designOnly: false });
-  const r = await gateRegistry["impl-row"]({
+  const r = await gate("impl-row")({
     id: "T",
     extra: { implRowArgs: ["M-FIXTURE", backlog] },
   });
@@ -311,7 +333,7 @@ test("M39 C1 [AC3]: `quay gate <task> --gate impl-row` FAILs (exit 1) for real w
 test("M39 D1: impl-row gate PASSes for real against the M38 real milestone task + real backlog.md", async () => {
   const backlog = path.join(REPO_ROOT, "experiments/quay-perpetual-stream/backlog.md");
   assert.ok(fs.existsSync(backlog), "real backlog.md must exist in this worktree");
-  const r = await gateRegistry["impl-row"]({
+  const r = await gate("impl-row")({
     id: "exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE",
     extra: { implRowArgs: ["exp5-M-DOD-GATE-OPERATIVE-REAL-MILESTONE", backlog] },
   });
@@ -324,7 +346,7 @@ test("M39 D1: line-budget gate PASSes for real against this milestone's OWN real
     "experiments/quay-perpetual-stream/charters/M39-migrate-impl-row-line-budget-gates.md"
   );
   assert.ok(fs.existsSync(charter), "real M39 charter must exist in this worktree");
-  const r = await gateRegistry["line-budget"]({
+  const r = await gate("line-budget")({
     id: "exp5-M-MIGRATE-IMPL-ROW-LINE-BUDGET-GATES",
     extra: { lineBudgetArgs: [charter] },
   });

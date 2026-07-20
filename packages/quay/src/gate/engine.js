@@ -7,7 +7,7 @@
 // `taskCheck` returns.
 
 import { randomUUID } from "node:crypto";
-import { gateRegistry } from "./registry.js";
+import { resolveGate } from "./registry.js";
 import { appendGateEvent } from "./gate-event-store.js";
 
 /**
@@ -17,16 +17,24 @@ import { appendGateEvent } from "./gate-event-store.js";
  * Unknown gate name and missing task both throw (fail loud — the CLI's
  * top-level catch reports them).
  *
+ * DIR-035-B: gate resolution is now WORKSPACE-DATA-driven for anything beyond
+ * the product's own built-ins (`registry.js#resolveGate`) — `workspaceRoot`
+ * (when supplied, e.g. from `cfg.workspaceRoot` at the CLI layer) selects that
+ * workspace's own `.quay/gates.yml`-declared gates; omitted, it falls back to
+ * auto-discovery from `process.cwd()` (unchanged behavior for existing
+ * in-process callers/tests that never threaded a workspaceRoot through).
+ *
  * @param {Object} args
  * @param {any} args.client   provider client (taskGet / taskCheck)
  * @param {string} args.id    task id
  * @param {string} [args.gate="dod"]
  * @param {string} args.logPath
  * @param {string} [args.actor="quay-cli"]
+ * @param {string} [args.workspaceRoot]
  * @returns {Promise<{ ok: boolean, reason: string, event: import("./gate-event-store.js").GateEvent }>}
  */
-export async function runGate({ client, id, gate = "dod", logPath, actor = "quay-cli" }) {
-  const fn = gateRegistry[gate];
+export async function runGate({ client, id, gate = "dod", logPath, actor = "quay-cli", workspaceRoot }) {
+  const fn = resolveGate(gate, workspaceRoot);
   if (!fn) throw new Error(`unknown gate: ${gate}`);
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
