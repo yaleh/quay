@@ -9,6 +9,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { createStore } from "../src/store.js";
 import { createAdrStore } from "../src/adr-store.js";
+import { createDocumentStore } from "../src/document-store.js";
+import { validateContracts } from "../src/contract-validator.js";
 import { readManifest } from "../src/manifest.js";
 
 function findRepoRoot(startDir) {
@@ -49,6 +51,18 @@ function resolveAdrDir() {
   const repoRoot = findRepoRoot(process.cwd());
   if (repoRoot) return path.resolve(repoRoot, "adr");
   return path.resolve(process.cwd(), "adr");
+}
+
+function resolveDocsDir() {
+  // D1 (exp5-M-CRYST-D1): managed documents live in a directory that SHARES a
+  // common parent with tasks/ and adr/ (a repo-root sibling by default), same
+  // resolution shape as resolveAdrDir(). Env override QUAY_NATIVE_DOCS_DIR,
+  // else repo-root ./docs-managed.
+  const envDir = process.env.QUAY_NATIVE_DOCS_DIR;
+  if (envDir) return path.resolve(envDir);
+  const repoRoot = findRepoRoot(process.cwd());
+  if (repoRoot) return path.resolve(repoRoot, "docs-managed");
+  return path.resolve(process.cwd(), "docs-managed");
 }
 
 function printJson(obj) {
@@ -122,6 +136,69 @@ async function main() {
       return;
     }
     console.error(`unknown adr subcommand: ${sub}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (cmd === "doc") {
+    const docStore = createDocumentStore(resolveDocsDir());
+    const { flags, positional } = parseFlags(rest);
+
+    if (sub === "list") {
+      const docs = docStore.list({ status: flags.status, kind: flags.kind });
+      if (flags.json) printJson(docs);
+      else for (const d of docs) console.log(`${d.id}\t${d.status}\t${d.kind}\t${d.title}`);
+      return;
+    }
+    if (sub === "get") {
+      const d = docStore.get(positional[0]);
+      if (!d) { console.error(`no such document: ${positional[0]}`); process.exitCode = 1; return; }
+      if (flags.json) printJson(d);
+      else { console.log(`${d.id}: ${d.title} [${d.status}]`); console.log(d.body); }
+      return;
+    }
+    if (sub === "write" || sub === "new" || sub === "edit") {
+      const id = positional[0];
+      const patch = {};
+      if (flags.title !== undefined) patch.title = flags.title;
+      if (flags.status !== undefined) patch.status = flags.status;
+      if (flags.kind !== undefined) patch.kind = flags.kind;
+      if (flags.contracts !== undefined) patch.contracts = JSON.parse(flags.contracts);
+      if (flags["body-file"] !== undefined) patch.body = fs.readFileSync(flags["body-file"], "utf8");
+      else if (flags.body !== undefined) patch.body = flags.body;
+      const d = docStore.write(id, patch);
+      if (flags.json) printJson(d);
+      else console.log(`wrote ${id}`);
+      return;
+    }
+    if (sub === "validate") {
+      // D1 Stage 5: the consult surface for contract-validator.js — prints the
+      // per-assertion pass/fail table (or the raw {ok, results} JSON), exits
+      // 0/1 the SAME way `task check`/gate fns do (fail-closed on a missing
+      // document, mirrored from `doc get`'s own not-found branch).
+      const id = positional[0];
+      const d = docStore.get(id);
+      if (!d) {
+        if (flags.json) printJson({ ok: false, results: [{ ok: false, reason: `no such document: ${id}` }] });
+        else console.error(`no such document: ${id}`);
+        process.exitCode = 1;
+        return;
+      }
+      const { ok, results } = validateContracts(d);
+      if (flags.json) {
+        printJson({ ok, results });
+      } else {
+        for (const r of results) {
+          const verdict = r.ok ? "PASS" : "FAIL";
+          const label = r.description ?? r.pattern ?? "(unlabeled)";
+          console.log(`${verdict}\t${r.type ?? "?"}\t${label}${r.ok ? "" : `\t${r.reason ?? ""}`}`);
+        }
+        console.log(`${id}: ${ok ? "PASS" : "FAIL"}`);
+      }
+      process.exitCode = ok ? 0 : 1;
+      return;
+    }
+    console.error(`unknown doc subcommand: ${sub}`);
     process.exitCode = 1;
     return;
   }

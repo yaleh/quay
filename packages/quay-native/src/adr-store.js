@@ -7,6 +7,10 @@
 // This store is deliberately independent of store.js (no shared task vocabulary):
 // the ~5 lines of frontmatter parse/serialize are trivial, not load-bearing logic,
 // and keeping the two stores separate is the whole point of the ADR/task split.
+// The generic frontmatter/lock/filename plumbing (Stage 1, exp5-M-CRYST-D1) IS
+// shared, via frontmatter-store-base.js, with the sibling document-store.js —
+// only the SCHEMA (valid statuses, owned frontmatter keys, view-model shape)
+// stays independent per kind; see that module's header comment for why.
 //
 // ADR view-model: { id, title, status, date, supersedes, supersededBy, tags, body, updatedAt }
 // Reserved (round-tripped verbatim, not yet consumed — next-pass enforcement):
@@ -14,24 +18,21 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import YAML from "yaml";
+import {
+  parseFrontmatter,
+  serializeFrontmatter,
+  fileNameForId as sharedFileNameForId,
+  withFileLock,
+  slugify,
+} from "./frontmatter-store-base.js";
 
 export const VALID_ADR_STATUSES = ["proposed", "accepted", "superseded", "deprecated", "rejected"];
 
 const ADR_ID_RE = /^ADR-\d{3,}$/;
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 
 // Frontmatter keys the view-model owns explicitly; everything else in the
 // frontmatter (applies-to, enforcement, any future field) is preserved verbatim.
 const OWNED_KEYS = new Set(["id", "title", "status", "date", "supersedes", "superseded-by", "tags"]);
-
-function slugify(title) {
-  return String(title || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60) || "adr";
-}
 
 /**
  * @param {string} adrDir absolute path to the ADR directory (sibling of tasks/)
@@ -54,57 +55,25 @@ export function createAdrStore(adrDir) {
 
   // Files are `ADR-NNN-<slug>.md` but the logical id is `ADR-NNN`. Resolve the
   // on-disk filename for an id by exact or `<id>-` prefix match (the dash
-  // delimiter prevents ADR-001 from matching ADR-0011).
+  // delimiter prevents ADR-001 from matching ADR-0011) — shared helper.
   function fileNameForId(id) {
-    const files = fs.readdirSync(adrDir).filter((f) => f.endsWith(".md"));
-    return files.find((f) => f === `${id}.md` || f.startsWith(`${id}-`)) ?? null;
+    return sharedFileNameForId(adrDir, id);
   }
-
-  function lockPathFor(id) {
-    return path.join(adrDir, `${id}.lock`);
-  }
-
-  const STALE_LOCK_MS = 5000;
-  const LOCK_TIMEOUT_MS = 3000;
 
   function withLock(id, fn) {
-    const lockPath = lockPathFor(id);
-    const deadline = Date.now() + LOCK_TIMEOUT_MS;
-    for (;;) {
-      try {
-        const fd = fs.openSync(lockPath, "wx");
-        fs.writeSync(fd, String(process.pid));
-        fs.closeSync(fd);
-        break;
-      } catch (err) {
-        if (err.code !== "EEXIST") throw err;
-        try {
-          const stat = fs.statSync(lockPath);
-          if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
-            fs.rmSync(lockPath, { force: true });
-            continue;
-          }
-        } catch {
-          continue;
-        }
-        if (Date.now() > deadline) throw new Error(`timed out acquiring ADR lock for ${id}`);
-      }
-    }
-    try {
-      return fn();
-    } finally {
-      fs.rmSync(lockPath, { force: true });
-    }
+    return withFileLock(adrDir, id, fn);
   }
 
   function parse(raw) {
-    const m = FRONTMATTER_RE.exec(raw);
-    if (!m) throw new Error("malformed ADR file: missing YAML frontmatter block");
-    return { frontmatter: YAML.parse(m[1]) ?? {}, body: m[2] ?? "" };
+    try {
+      return parseFrontmatter(raw);
+    } catch {
+      throw new Error("malformed ADR file: missing YAML frontmatter block");
+    }
   }
 
   function serialize(frontmatter, body) {
-    return `---\n${YAML.stringify(frontmatter).trimEnd()}\n---\n${body}`;
+    return serializeFrontmatter(frontmatter, body);
   }
 
   function toViewModel(frontmatter, body, updatedAt) {
