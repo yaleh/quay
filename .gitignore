@@ -17,3 +17,14 @@ experiment/timing/*.log
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/
+
+# DIR-031 tree-hygiene: known scratch/backup/tool-output patterns the outer loop's own steps
+# (e.g. the L_S mutation proxy) can leave untracked in the main tree — never leave these un-ignored.
+*.l-s-backup
+*.bak
+*.tmp
+*.orig
+*.swp
+*.swo
+*.rej
+.mutation-backup/

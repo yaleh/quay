@@ -401,6 +401,37 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      never a blanket `--ours`/`--theirs`. (The M18 race DIR-018 originally addressed is now handled by
      DIR-027's human-steering hygiene — pause `.halt` or use a private worktree off `master` — see
      step 0.)
+   - **ABSORB close-out: capture then prune (DIR-033/M46-dir033-worktree-hygiene, additive — runs
+     AFTER the `master` merge above, as the last sub-step of ABSORB before step 7's
+     `milestone_counter++`).** The loop runs (at least) one iteration worktree per milestone off
+     `master` (step 5) and merges its content in; left alone, the worktree and its now-merged branch
+     dangle forever (measured pre-fix: 38 registered iteration worktrees/merged branches, nearly all
+     long-completed, plus one, `exp5-m07-iteration-0`, that silently orphaned a 273-line report never
+     captured to `master`). Close out EVERY milestone's ABSORB with:
+     1. **Capture first.** If a non-primary iteration (or any iteration whose content did not land via
+        the main merge) produced a report/audit `.md` not already on `master`, cherry-pick JUST that
+        evidence file onto `master` (never the superseded code/OUTER-LOOP/ledger edits — the primary
+        iteration's are canonical). Verify explicitly which case applies; do not assume "no capture
+        needed" without checking.
+     2. **Then prune.** `git worktree remove` this milestone's iteration worktree(s) and `git branch -d`
+        their now-merged branches (a deliberately-kept non-primary branch is pruned once its evidence
+        is captured to `master` per step 1 — keeping the branch itself is never how provenance is
+        preserved).
+     3. **Evidence.** Run `scripts/worktree-branch-hygiene-check.sh` and paste its output (GREEN = no
+        orphaned milestone evidence in any remaining un-merged iteration branch; the check also prints
+        informational prunable-cruft counts, which should be near-zero for the current milestone right
+        after this close-out). A FAIL here means step 1 above was skipped or done wrong — go back and
+        capture the missing evidence before re-pruning, never delete a branch holding un-captured
+        content.
+   - **ABSORB close-out: tree stays clean between atomic per-step commits (DIR-031/M46-dir033-
+     worktree-hygiene, additive).** Since DIR-027 runs the outer loop directly on `master` in the main
+     working tree, commit the loop's OWN per-step bookkeeping (SELECT / charter / ABSORB) atomically,
+     each its own commit, so `git status` on `master` is clean between steps — a reliable window for
+     out-of-band human/steering work to slot in without racing. Never leave un-gitignored scratch
+     (backup/temp/tool-output files a step's own proxies generate, e.g. `*.l-s-backup`) untracked on
+     `master` — either gitignore the pattern or generate it only inside a worktree. Run
+     `scripts/tree-hygiene-check.sh` and paste its output (GREEN = no un-gitignored scratch) as part of
+     this same close-out's evidence.
 7. **UPDATE DASHBOARD** — VT, slope (marginal Δv), ρ, charter-thickness, discovery-latency,
    calibration-error, `V_meta consolidation lag` (re-derive milestones-since-confirmed for every
    ledger row per `v-meta-ledger.md`), milestone_counter++ (only after the V_meta gate, the
