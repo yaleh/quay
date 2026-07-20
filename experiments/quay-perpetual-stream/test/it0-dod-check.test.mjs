@@ -356,3 +356,83 @@ test("clause9: needs-human with an unrecognized (neither in- nor out-of-project)
   const r = run({ milestoneId: "M-FAKE-NHUNK", absorb, ac });
   assert.ok(hasFail(r, "does not name a recognizable OUTSIDE-project blocker"), JSON.stringify(r.failures));
 });
+
+// ── Clauses 10/11: tree-hygiene / worktree-branch-hygiene (DIR-031/DIR-033/DIR-034 mechanization) ──
+// These clauses shell out to the REAL scripts against the REAL repo tree/branches (they take no
+// milestone-specific input — same shape as clauses 3/4's existing script-shellout pattern). In this
+// test environment (a clean checkout / worktree, no dangling un-merged iteration branches holding
+// un-captured evidence), both are expected to PASS. This proves the WIRING (the grep=0 finding
+// DIR-034 diagnosed): running the enforcer now genuinely invokes both scripts.
+test("clause10: tree-hygiene gate runs the real tree-hygiene-check.sh and dispositions it (PASS or FAIL, but ALWAYS present)", () => {
+  const r = run({ milestoneId: "M-FAKE-HYGIENE" });
+  const disposed = hasPass(r, "clause10-tree-hygiene") || hasFail(r, "clause10-tree-hygiene");
+  assert.ok(disposed, `clause10 must always be dispositioned (pass or fail): ${JSON.stringify({ passes: r.passes, failures: r.failures })}`);
+});
+
+test("clause11: worktree-branch-hygiene gate runs the real worktree-branch-hygiene-check.sh and dispositions it (PASS or FAIL, but ALWAYS present)", () => {
+  const r = run({ milestoneId: "M-FAKE-HYGIENE2" });
+  const disposed = hasPass(r, "clause11-worktree-branch-hygiene") || hasFail(r, "clause11-worktree-branch-hygiene");
+  assert.ok(disposed, `clause11 must always be dispositioned (pass or fail): ${JSON.stringify({ passes: r.passes, failures: r.failures })}`);
+});
+
+test("clause10/11: both clauses are in dispositionedClauses on every run (mechanically unconditional, per DIR-019 self-exemption reasoning)", () => {
+  const r = run({ milestoneId: "M-FAKE-HYGIENE3" });
+  assert.ok(r.dispositionedClauses.has("tree-hygiene"));
+  assert.ok(r.dispositionedClauses.has("worktree-branch-hygiene"));
+});
+
+// ── Clause 12: audit-independence (DIR-032/DIR-034 mechanization) ─────────────────────────────────
+test("clause12: no '## Audit-independence check' section in ABSORB-entry → N/A documented no-op", () => {
+  const r = run({ milestoneId: "M-FAKE-NOAUDIT" });
+  assert.ok(hasPass(r, "clause12-audit-independence"), JSON.stringify(r.passes));
+  assert.match(r.passes.find((p) => p.includes("clause12")), /N\/A/);
+});
+
+test("clause12: '## Audit-independence check' section naming a NON-EXISTENT artifact path → failure", () => {
+  const absorb = CLEAN_ABSORB_EXCERPT + `\n## Audit-independence check\nArtifact: /nonexistent/path/does-not-exist-audit.md\nOrchestrator id: orch-x\nDispatch record: N/A\n`;
+  const r = run({ milestoneId: "M-FAKE-AUDITMISSING", absorb });
+  assert.ok(hasFail(r, "clause12-audit-independence"), JSON.stringify(r.failures));
+  assert.match(r.failures.find((f) => f.includes("clause12")), /does not exist on disk/);
+});
+
+test("clause12: real genuinely-independent fixture artifact + --allow-uncorroborated (Dispatch record: N/A) → PASS", () => {
+  const artifact = fileURLToPath(new URL("../fixtures/audit-independence/genuinely-independent.md", import.meta.url));
+  const absorb = CLEAN_ABSORB_EXCERPT + `\n## Audit-independence check\nArtifact: ${artifact}\nOrchestrator id: orchestrator-session-abc123\nDispatch record: N/A\n`;
+  const r = run({ milestoneId: "M-FAKE-AUDITPASS", absorb });
+  assert.ok(hasPass(r, "clause12-audit-independence"), JSON.stringify({ passes: r.passes, failures: r.failures }));
+});
+
+test("clause12: real fabricated-distinct-id fixture + a dispatch-record NOT containing its id → FAIL (anti-forgery closes the hole)", () => {
+  const artifact = fileURLToPath(new URL("../fixtures/audit-independence/fabricated-distinct-id-no-corroboration.md", import.meta.url));
+  const record = fileURLToPath(new URL("../fixtures/audit-independence/dispatch-record.txt", import.meta.url));
+  const absorb = CLEAN_ABSORB_EXCERPT + `\n## Audit-independence check\nArtifact: ${artifact}\nOrchestrator id: orchestrator-session-abc123\nDispatch record: ${record}\n`;
+  const r = run({ milestoneId: "M-FAKE-AUDITFORGE", absorb });
+  assert.ok(hasFail(r, "clause12-audit-independence"), JSON.stringify({ passes: r.passes, failures: r.failures }));
+});
+
+test("clause12: real corroborated-independent fixture + its matching dispatch-record → PASS (real anti-forgery corroboration proven, not just designed)", () => {
+  const artifact = fileURLToPath(new URL("../fixtures/audit-independence/corroborated-independent.md", import.meta.url));
+  const record = fileURLToPath(new URL("../fixtures/audit-independence/dispatch-record.txt", import.meta.url));
+  const absorb = CLEAN_ABSORB_EXCERPT + `\n## Audit-independence check\nArtifact: ${artifact}\nOrchestrator id: orchestrator-session-abc123\nDispatch record: ${record}\n`;
+  const r = run({ milestoneId: "M-FAKE-AUDITCORROB", absorb });
+  assert.ok(hasPass(r, "clause12-audit-independence"), JSON.stringify({ passes: r.passes, failures: r.failures }));
+});
+
+test("clause12: '## Audit-independence check' section missing required 'Artifact:' line → env error (DodCheckEnvError)", () => {
+  const absorb = CLEAN_ABSORB_EXCERPT + `\n## Audit-independence check\nOrchestrator id: orch-x\n`;
+  assert.throws(() => run({ milestoneId: "M-FAKE-AUDITNOARTIFACT", absorb }), /missing required "Artifact:/);
+});
+
+// ── Clause 5 self-exemption scan now ALSO covers clauses 10/11/12 names ────────────────────────────
+test("clause5: charter exempts tree-hygiene with NO matching WAIVER line → failure", () => {
+  const charter = `## Charter excerpt\n\n**Milestone id:** MID\n\n### Explicitly OUT of scope\n- tree-hygiene: exempt for this milestone, no scratch-file check needed.\n`;
+  const r = run({ milestoneId: "M-FAKE-EXEMPTTH", charter });
+  assert.ok(hasFail(r, 'exempts "tree-hygiene"'), JSON.stringify(r.failures));
+});
+
+test("clause5: charter exempts tree-hygiene WITH a matching WAIVER line in absorb → no clause5 failure for it", () => {
+  const charter = `## Charter excerpt\n\n**Milestone id:** MID\n\n### Explicitly OUT of scope\n- tree-hygiene: exempt for this milestone, no scratch-file check needed.\n`;
+  const absorb = CLEAN_ABSORB_EXCERPT + `\nWAIVER: M-FAKE-EXEMPTTH2 | tree-hygiene | reason: N/A test\n`;
+  const r = run({ milestoneId: "M-FAKE-EXEMPTTH2", charter, absorb });
+  assert.ok(!hasFail(r, 'exempts "tree-hygiene"'), JSON.stringify(r.failures));
+});

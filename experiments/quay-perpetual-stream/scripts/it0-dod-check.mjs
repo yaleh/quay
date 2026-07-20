@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // it0-dod-check.mjs — DoD meta-enforcer, charters M25-dod-meta-enforcer (DIR-017 Step 1, clauses
-// 0-5), M32-dod-escrow-testfloor (DIR-017 Step 2, clauses 6-7), and
-// M40-dir014-task-canonical-lifecycle-record (DIR-014 item 6, clause 8).
+// 0-5), M32-dod-escrow-testfloor (DIR-017 Step 2, clauses 6-7),
+// M40-dir014-task-canonical-lifecycle-record (DIR-014 item 6, clause 8), and
+// M47-dir034-mechanize-enforcement (DIR-034, clauses 10-12 — folds the previously prose-only
+// tree-hygiene/worktree-branch-hygiene/audit-independence checks into this MECHANICAL gate).
 //
 // Given a milestone id, a charter file path, and an ABSORB-entry text file (a fixture standing in
-// for the real dashboard.md/ABSORB log excerpt for milestones not yet ABSORBed), runs all 9 DoD
-// clauses (0-8) defined in `inherited-core.md`'s "Definition of Done" section:
+// for the real dashboard.md/ABSORB log excerpt for milestones not yet ABSORBed), runs all 13 DoD
+// clauses (0-12) defined in `inherited-core.md`'s "Definition of Done" section:
 //   1. Adversarial-audit gate  — documentation-discipline check only (does NOT re-run the audit
 //      subagent or re-derive its verdict): does the ABSORB-entry text contain an explicit
 //      disposition statement for this gate (a stated verdict, or an explicit "neither condition
@@ -44,12 +46,28 @@
 //      placeholder, OR `## Plan` is missing, OR `## Plan` references a `docs/plans/*.md` path that
 //      does not resolve on disk. PASSes if `## Plan` states `N/A — <reason>` or references a
 //      resolving `docs/plans/*.md` path, and `## Proposal` has real content.
+//   10. Tree-hygiene gate (DIR-031/DIR-034) — shells out to the EXISTING `tree-hygiene-check.sh`
+//       directly (reused, not re-implemented) against the REAL repo tree. Runs UNCONDITIONALLY
+//       every check (mirrors clauses 3/4's shape). Mechanizes what was, before M47, ONLY an
+//       OUTER-LOOP.md prose ABSORB close-out — an ABSORB that skipped the prose step passed this
+//       gate silently pre-DIR-034.
+//   11. Worktree/branch-hygiene gate (DIR-033/DIR-034) — shells out to the EXISTING
+//       `worktree-branch-hygiene-check.sh` directly, against the real repo's registered
+//       branches/worktrees. Same mechanization rationale/shape as clause 10.
+//   12. Audit-independence gate (DIR-032/DIR-034) — shells out to the EXISTING
+//       `audit-independence-check.sh` (which wraps `audit-independence-check.mjs`) against the real
+//       audit artifact this milestone produced. Conditionally dispositioned (like clauses 1/2/6/7):
+//       fires only when the ABSORB-entry text embeds a `## Audit-independence check` section naming
+//       the artifact path / orchestrator id / dispatch-record path; N/A-passes (documented no-op)
+//       when that section is absent. Mechanizes what was, before M47, an engine-registered gate
+//       (DIR-032/M44) never invoked by THIS enforcer (grep=0) — only cited in OUTER-LOOP.md prose.
 //
 // This script does NOT re-run the adversarial-audit subagent, does NOT recompute v-meta-ledger.md
-// arithmetic, does NOT re-implement the line-budget/impl-row scripts' own logic, and does NOT
-// independently verify a claimed test-coverage percentage against a real coverage-tool run — see
-// inherited-core.md's "Definition of Done" section for why (clauses 1/2/6/7 are documentation-
-// discipline checks by design; clauses 3/4 wrap the existing scripts directly).
+// arithmetic, does NOT re-implement the line-budget/impl-row/tree-hygiene/worktree-branch-hygiene/
+// audit-independence scripts' own logic, and does NOT independently verify a claimed test-coverage
+// percentage against a real coverage-tool run — see inherited-core.md's "Definition of Done" section
+// for why (clauses 1/2/6/7 are documentation-discipline checks by design; clauses 3/4/10/11/12 wrap
+// the existing scripts directly).
 //
 // Usage:
 //   node it0-dod-check.mjs <milestone-id> <charter-file> <absorb-entry-file>
@@ -61,7 +79,7 @@
 // below for the section-isolation logic that makes the combined-fixture shape safe.
 //
 // Exit codes:
-//   0 = all 10 gate clauses (0-9) PASS or legitimately N/A (with disposition present), AND no
+//   0 = all 13 gate clauses (0-12) PASS or legitimately N/A (with disposition present), AND no
 //       undeclared self-exemption found.
 //   1 = at least one gate clause FAILs, OR a self-exemption is found with no waiver line.
 //   2 = usage/environment error (missing args, files not found, node unavailable, sibling script
@@ -326,7 +344,14 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
 // so a self-exemption of clause 6/7 in the charter's "Explicitly OUT of scope" section is still
 // caught by clause 5's scan.
 {
-  const MECHANICALLY_UNCONDITIONAL_CLAUSES = new Set(["line-budget", "impl-row", "escrow-delta-v", "test-floor", "task-canonical-lifecycle-record"]);
+  // M47/DIR-034: clauses 10/11 (tree-hygiene, worktree-branch-hygiene) run UNCONDITIONALLY every
+  // run (see their blocks above — always dispositioned regardless of outcome), so they belong in
+  // MECHANICALLY_UNCONDITIONAL_CLAUSES for the SAME DIR-019 reasoning as line-budget/impl-row/etc:
+  // an "already dispositioned" state is not evidence a self-exemption of them is legitimate. Clause
+  // 12 (audit-independence) is, by contrast, CONDITIONALLY dispositioned (like clauses 1/2) — it
+  // legitimately N/A-passes when no audit ran this milestone — so it is NOT listed here, mirroring
+  // clauses 1/2's own placement.
+  const MECHANICALLY_UNCONDITIONAL_CLAUSES = new Set(["line-budget", "impl-row", "escrow-delta-v", "test-floor", "task-canonical-lifecycle-record", "tree-hygiene", "worktree-branch-hygiene"]);
   const clauseNames = [
     { key: "adversarial-audit", pattern: /adversarial[- ]audit/i },
     { key: "V_meta consolidation-lag", pattern: /V_meta consolidation[- ]lag|V_meta[- ]lag/i },
@@ -335,6 +360,9 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
     { key: "escrow-delta-v", pattern: /escrow[- ]δ?v|escrow-delta-v|escrow[- ]Δv/i },
     { key: "test-floor", pattern: /test[- ]floor/i },
     { key: "task-canonical-lifecycle-record", pattern: /task canonical[- ]lifecycle[- ]record|proposal\/plan|proposal-plan/i },
+    { key: "tree-hygiene", pattern: /tree[- ]hygiene/i },
+    { key: "worktree-branch-hygiene", pattern: /worktree[- ]branch[- ]hygiene|worktree\/branch[- ]hygiene/i },
+    { key: "audit-independence", pattern: /audit[- ]independence/i },
   ];
   const outOfScopeMatch = charterText.match(/##+ Explicitly OUT of scope[\s\S]*?(\n##+ |$)/i);
   const outOfScopeText = outOfScopeMatch ? outOfScopeMatch[0] : "";
@@ -682,6 +710,128 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
     } else {
       failures.push(`clause9-split-or-commit: \`needs-human\` reason ("${reason}") does not name a recognizable OUTSIDE-project blocker (external service/resource/credential/dataset/upstream/API/network). If genuinely external, state it explicitly; if in-project, split-and-complete instead (DIR-026)`);
       dispositionedClauses.add("split-or-commit");
+    }
+  }
+}
+
+// --- Clause 10: Tree-hygiene gate (DIR-031/DIR-034) — reuse tree-hygiene-check.sh directly ---
+// DIR-034 finding: DIR-031's tree-hygiene-check.sh was runnable and wired into OUTER-LOOP.md as an
+// ABSORB PROSE close-out only — this mechanical gate did NOT invoke it (grep=0), so an ABSORB that
+// simply forgot the prose step passed the mechanical gate silently. Mechanize it here: runs
+// UNCONDITIONALLY every check (mirrors clauses 3/4's shape — always dispositioned, never
+// conditionally-skippable), shelling out to the EXISTING script (reused, never reimplemented) against
+// the real repo tree. Exit 0 = clean (PASS); exit 1 = scratch found (FAIL); any other exit is a usage/
+// environment error surfaced as DodCheckEnvError (fail-loud, not silently ignored).
+{
+  const scriptPath = path.join(__dirname, "tree-hygiene-check.sh");
+  if (!fs.existsSync(scriptPath)) {
+    throw new DodCheckEnvError(`ERROR: sibling script not found: ${scriptPath}`);
+  }
+  try {
+    const out = execFileSync(scriptPath, [], { encoding: "utf8" });
+    passes.push(`clause10-tree-hygiene: PASS — ${out.trim().split("\n")[0]}`);
+    dispositionedClauses.add("tree-hygiene");
+  } catch (e) {
+    const out = (e.stdout || "").toString().trim();
+    if (e.status === 1) {
+      failures.push(`clause10-tree-hygiene: FAIL — ${out.split("\n")[0] || "(no output)"}`);
+      dispositionedClauses.add("tree-hygiene");
+    } else {
+      throw new DodCheckEnvError(`ERROR: tree-hygiene-check.sh usage/environment error (exit ${e.status}): ${(e.stderr || "").toString().trim()}`);
+    }
+  }
+}
+
+// --- Clause 11: Worktree/branch-hygiene gate (DIR-033/DIR-034) — reuse worktree-branch-hygiene-
+// check.sh directly ---
+// Same mechanization rationale as clause 10, for DIR-033's check: runs UNCONDITIONALLY against the
+// real repo state (registered branches/worktrees), reusing the existing script verbatim.
+{
+  const scriptPath = path.join(__dirname, "worktree-branch-hygiene-check.sh");
+  if (!fs.existsSync(scriptPath)) {
+    throw new DodCheckEnvError(`ERROR: sibling script not found: ${scriptPath}`);
+  }
+  try {
+    const out = execFileSync(scriptPath, [], { encoding: "utf8" });
+    passes.push(`clause11-worktree-branch-hygiene: PASS — ${out.trim().split("\n")[0]}`);
+    dispositionedClauses.add("worktree-branch-hygiene");
+  } catch (e) {
+    const out = (e.stdout || "").toString().trim();
+    if (e.status === 1) {
+      failures.push(`clause11-worktree-branch-hygiene: FAIL — ${out.split("\n")[0] || "(no output)"}`);
+      dispositionedClauses.add("worktree-branch-hygiene");
+    } else {
+      throw new DodCheckEnvError(`ERROR: worktree-branch-hygiene-check.sh usage/environment error (exit ${e.status}): ${(e.stderr || "").toString().trim()}`);
+    }
+  }
+}
+
+// --- Clause 12: Audit-independence gate (DIR-032/DIR-034) — reuse audit-independence-check.mjs
+// directly, via its CLI (audit-independence-check.sh) ---
+// DIR-034 finding: audit-independence-check.mjs/`audit-independence` named engine gate existed and
+// was engine-registered (DIR-032/M44), but this mechanical DoD enforcer never invoked it (grep=0) —
+// only OUTER-LOOP.md prose named it as part of the ABSORB sequence. Mechanize it here too.
+//
+// Trigger + inputs: this clause is conditionally dispositioned (like clauses 1/2/6/7) because it
+// needs the real audit artifact PATH + orchestrator id to run against — those are milestone-specific
+// and not knowable from a bare charter/absorb-entry pair without a naming convention. Convention:
+// the ABSORB-entry text embeds a fenced `## Audit-independence check` section with three lines:
+//   Artifact: <path to milestones/M<NN>/audits/*.md, repo-root-relative>
+//   Orchestrator id: <the orchestrating session/agent id>
+//   Dispatch record: <path to a dispatch-record file, or "N/A" to invoke --allow-uncorroborated>
+// If that section is ABSENT, this clause N/A-passes with an explicit disposition (documented no-op,
+// same shape as clauses 1/2's "no verdict but no-op stated" path) — it does NOT silently skip; the
+// no-op is itself a recorded, refutable disposition the audit can catch if untrue for a real
+// milestone that actually ran an adversarial audit. If the section IS present, the clause shells out
+// to `audit-independence-check.sh` for real and requires exit 0.
+{
+  const auditSectionMatch = absorbFileText.match(/## Audit-independence check\n([\s\S]*?)(\n##|\n?$)/i);
+  if (!auditSectionMatch) {
+    passes.push("clause12-audit-independence: N/A — no '## Audit-independence check' section in the ABSORB-entry text (documented no-op; a milestone that actually ran an adversarial audit must include this section, or the acceptance audit should refute this no-op)");
+    dispositionedClauses.add("audit-independence");
+  } else {
+    const sectionText = auditSectionMatch[1];
+    const artifactMatch = sectionText.match(/Artifact:\s*(\S.*)$/im);
+    const orchIdMatch = sectionText.match(/Orchestrator id:\s*(\S.*)$/im);
+    const recordMatch = sectionText.match(/Dispatch record:\s*(\S.*)$/im);
+
+    if (!artifactMatch) {
+      throw new DodCheckEnvError(`ERROR: '## Audit-independence check' section present but missing required "Artifact: <path>" line`);
+    }
+    const artifactPath = artifactMatch[1].trim();
+    const orchestratorId = orchIdMatch ? orchIdMatch[1].trim() : "";
+    const recordValue = recordMatch ? recordMatch[1].trim() : "";
+
+    const scriptPath = path.join(__dirname, "audit-independence-check.sh");
+    if (!fs.existsSync(scriptPath)) {
+      throw new DodCheckEnvError(`ERROR: sibling script not found: ${scriptPath}`);
+    }
+    const resolvedArtifact = path.isAbsolute(artifactPath) ? artifactPath : path.join(process.cwd(), artifactPath);
+    if (!fs.existsSync(resolvedArtifact)) {
+      failures.push(`clause12-audit-independence: FAIL — declared audit artifact does not exist on disk: ${artifactPath}`);
+      dispositionedClauses.add("audit-independence");
+    } else {
+      const args = [];
+      if (orchestratorId) args.push("--orchestrator-id", orchestratorId);
+      if (recordValue && recordValue.toUpperCase() !== "N/A") {
+        args.push("--dispatch-record", path.isAbsolute(recordValue) ? recordValue : path.join(process.cwd(), recordValue));
+      } else if (recordValue && recordValue.toUpperCase() === "N/A") {
+        args.push("--allow-uncorroborated");
+      }
+      args.push(resolvedArtifact);
+      try {
+        const out = execFileSync(scriptPath, args, { encoding: "utf8" });
+        passes.push(`clause12-audit-independence: PASS — ${out.trim().split("\n").filter((l) => l.startsWith("PASS")).pop() || out.trim().split("\n").pop()}`);
+        dispositionedClauses.add("audit-independence");
+      } catch (e) {
+        const out = (e.stdout || "").toString().trim();
+        if (e.status === 1) {
+          failures.push(`clause12-audit-independence: FAIL — ${out.split("\n").filter((l) => l.startsWith("FAIL")).pop() || out.split("\n").pop() || "(no output)"}`);
+          dispositionedClauses.add("audit-independence");
+        } else {
+          throw new DodCheckEnvError(`ERROR: audit-independence-check.sh usage/environment error (exit ${e.status}): ${(e.stderr || "").toString().trim()}`);
+        }
+      }
     }
   }
 }
