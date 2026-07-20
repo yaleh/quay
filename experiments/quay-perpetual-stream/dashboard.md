@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 61** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M61 ABSORB header sync): body log's m61 ABSORB entry below sets milestone_counter → 61;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57/m58/m59/m60).
-61 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m65). -->
+**milestone_counter: 62** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M62 ABSORB header sync): body log's m62 ABSORB entry below sets milestone_counter → 62;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57/m58/m59/m60/m61).
+62 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m65). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -5784,3 +5784,103 @@ info: prunable merged iteration branches=0; registered iteration worktrees=0 (AB
 
 ## Backlog row
 | DIR-046 | `quay gate`'s acceptance CWD was UNCONDITIONALLY pinned to `workspaceRoot`, silently clobbering an explicit override — a foreign worktree-before-merge iteration (DIR-027's own hygiene pattern) could not be gated in its own tree; the 60s default timeout was also too short for a real suite and env-only/undiscoverable. Closed via explicit-override-wins CWD precedence (`--cwd` flag > pre-set env > `gates.yml` per-gate `cwd` > default), a per-gate `timeoutMs` in `.quay/gates.yml`, and `--help`/timeout-reason discoverability — reproducing and fixing the real session-`8b74052c` friction, not a hypothetical | capability-growth (primary) | no new VT chart cell (gate-engine/CLI-ergonomics surface, not a chart-1-scored axis) | directive, milestone-candidate, milestone:M61-dir046-gate-ergonomics |
+
+## M62 — M62-dir039-migration (DIR-039)
+
+**Task:** [[DIR-039]] (`tasks/DIR-039.md`) — quay task migration/import capability: (A) a generic
+provider-to-provider migration via the ABI (`quay migrate --from <p> --to <p>`, single write
+chokepoint `writeOneTask`/`migrateTasks` in `packages/quay/src/migrate.js`), demonstrated
+`--from github --to native` against `yaleh/archguard`; (B) a new read-only `quay-backlog` provider
+(mirroring `quay-github`'s shape) for archguard's local Backlog.md board
+(`/home/yale/work/archguard/backlog/tasks/*.md`), so (A)'s generic migrate handles it for free —
+no split needed, both landed together sharing one write path. This is the "read → consolidate"
+step DIR-037's scope note deferred, and the prerequisite for archguard's eventual adoption of quay
+(the cutover decision itself stays out of scope, a later human step). **Merge commit:** `7ca6043`,
+merge of `milestones/M62-dir039-migration` (build `c005bbd`, completion write-back `9bfe1be`) into
+`master` at this ABSORB (worktree `milestones/M62/worktrees/iteration-0`, base `master` `95c6016`,
+the M62 SELECT commit — unchanged at merge time; no intervening off-loop commits, confirmed via
+`git log master..milestones/M62-dir039-migration` / the reverse direction before merging: the
+reverse showed zero commits).
+
+**Independent audit verdict: NO REFUTATION FOUND.** An independent audit, with no access to the
+build-phase agent's self-report, confirmed:
+- AC(A) (generic ABI migration): PASS — real-run `quay migrate --from github --to native --json`
+  against `yaleh/archguard` into a fresh native store: `{"total":56,"migrated":56,"errors":[]}`,
+  target file count 56 (matches source exactly), 2 spot-checks (gh-58, gh-41) byte-exact
+  id/title/status/body source↔target.
+- AC(B) (Backlog.md adapter): PASS — real-run `quay migrate --from backlog --to native --json`
+  against archguard's actual `backlog/tasks/*.md` board into a fresh native store:
+  `{"total":28,"migrated":28,"errors":[]}`; source file count 28, target file count 27 due to a
+  **documented genuine pre-existing `TASK-1` id collision** in the source board data itself (two
+  distinct files both declare `id: TASK-1`; the later-processed one wins per ABI-write semantics —
+  correctly identified as an honest reflection of source-data quality, not a migration-engine
+  bug). Spot-checks: TASK-1 (byte-exact vs the winning source file) and TASK-10 (clean
+  non-collision round-trip, byte-exact).
+- Single-source (ADR-004): PASS — `packages/quay/test/migrate-single-source.test.mjs` (3/3 pass),
+  grep-based invariants confirm exactly one `target.taskWrite(` call site and no parallel bulk-copy
+  loop anywhere else in `src/*.js`.
+- No regression: PASS — quay 300/304 (4 pre-existing failures, confirmed identical via
+  stash-and-compare), quay-github 21/21, quay-backlog (new) 12/12, quay-native 23/26 (3
+  pre-existing env failures, zero quay-native files touched by this milestone).
+- Archguard repo NOT mutated, NO cutover performed: PASS — both migrations wrote only to scratch
+  target dirs (`/tmp/m62-migrate-target-tasks{,-b}`); both source reads are read-only (`gh` API /
+  filesystem read); `quay-backlog` has no `task_write` MCP tool registered at all (the write
+  surface does not exist, not merely a no-op).
+
+**Completion-phase (this ABSORB) independent re-verification** — a THIRD independent pass (after
+build self-report + audit), every test suite re-run directly from the worktree before merge:
+```
+packages/quay      (excl. serve-github/provider-abi-conformance): 300 pass / 4 fail / 304 total
+  same 4 pre-existing failures: adr-gate E3 A2, dir032-audit-independence M44 A2 + M44 C1,
+  web-ui-browser.test.mjs
+packages/quay-native: 23 pass / 3 fail / 26 total
+  same 3 pre-existing failures: cas-writer-helper.mjs, concurrent-writer.mjs, reparent-writer.mjs
+packages/quay-github: 21 pass / 0 fail / 21 total
+packages/quay-backlog: 12 pass / 0 fail / 12 total
+```
+All four tallies IDENTICAL across all three independent passes (build, audit, completion) — no
+drift. All 8 AC/DoD checkboxes ticked on `tasks/DIR-039.md` with inline evidence citations and a
+new `## Validation` section (mirroring the DIR-042-B/DIR-046 precedent); `status: todo` → `done`,
+`extra.dirStatus: pending` → `resolved`.
+
+**Mechanical ABSORB gates (this ABSORB's own real runs, pasted verbatim):**
+```
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh
+tree-hygiene: clean — no un-gitignored scratch left in the main tree.
+
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+info: prunable merged iteration branches=0; registered iteration worktrees=1 (ABSORB should prune these).
+
+$ node packages/quay/bin/quay.js gate DIR-039 --gate dod
+PASS
+
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 62 experiments/quay-perpetual-stream/v-meta-ledger.md
+V_meta consolidation-lag check — experiments/quay-perpetual-stream/v-meta-ledger.md
+milestone_counter=62 K=2
+  [ok] consolidated | lag=- | consolidated — lag gate does not apply | domain-audit-channel≡CI-job pattern (+ per-subcommand audit exercise)
+  [ok] proposed | lag=- | proposed — not past φ threshold, no lag gate | repo-root isolation-leak lesson
+
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+```
+
+**Backlog housekeeping**: `tasks/DIR-039.md` — all 4 AC + 4 DoD checkboxes ticked at this
+completion step per independently-verified evidence (see above); `status: todo` → `done`,
+`extra.dirStatus: pending` → `resolved`. `backlog.md` regenerated via `node
+experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream
+--write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M62/worktrees/iteration-0` removed (`git
+worktree remove`), `milestones/M62-dir039-migration` branch deleted (`git branch -d`, fully
+merged, confirmed ancestor of `master` before deletion).
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 62, not a multiple of 5;
+next checkpoint at m65).
+
+**Note on off-loop master activity since the M61 ABSORB:** none — `master` HEAD at this
+milestone's worktree branch time (`95c6016`, the M62 SELECT commit) was unchanged at merge time;
+no intervening off-loop commits, confirmed via `git log master..milestones/M62-dir039-migration` /
+the reverse direction both showing the expected result (2 commits ahead, 0 behind) before merging.
+
+## Backlog row
+| DIR-039 | archguard runs TWO task backends (GitHub issues + a local Backlog.md board) with NO path for quay to WRITE into a quay-native store or read Backlog.md at all — the prerequisite for archguard adopting quay. Closed via (A) a generic ABI provider-to-provider `quay migrate` command (single write chokepoint, real-run 56/56 against `yaleh/archguard`) and (B) a new read-only `quay-backlog` provider for Backlog.md (real-run 28/28 against archguard's actual board, including an honestly-documented genuine source-data id collision) — both sharing the same generic migration path, no duplicated write logic | capability-growth (primary), feeds DIR-038-C's outward-VT term | no new VT chart cell (migration/import capability surface, not a chart-1-scored axis) | directive, milestone-candidate, milestone:M62 |
