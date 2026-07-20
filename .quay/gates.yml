@@ -33,6 +33,20 @@
 #          workspaceRoot) via `makeFixedScriptGate(scriptPath, label)` — the
 #          missing zero-arg case in the same factory family as `it0` (which
 #          requires >=1 positional arg per invocation).
+#   testPass: list of { name, command } (DIR-042-A) — each becomes a gate
+#          named `name`, running `command` (an arbitrary shell command, this
+#          repo's own choice of test invocation) via `makeTestPassGate`, PASS
+#          iff exit 0. Below, this repo dogfoods it for its OWN DoD
+#          meta-enforcer's regression suite (single-source: the CHECK LOGIC
+#          — "run a command, PASS iff exit 0" — lives once in the product
+#          gate, this repo only supplies its own command as data).
+#   coverageFloor: list of { name, command, floor, pattern? } — `command`
+#          reports a coverage percentage, `floor` is the minimum acceptable
+#          value; `pattern` (optional) is a regex overriding the default
+#          `NN(.N)%` extraction. See `makeCoverageFloorGate`.
+#   redGreen: list of { name, red, green } — `red` must exit non-zero, `green`
+#          must exit 0; PASS iff both hold (a real RED->GREEN transition).
+#          See `makeRedGreenGate`.
 
 it0:
   - name: impl-row
@@ -58,3 +72,12 @@ adr:
 fixed:
   - name: delivery-standalone-smoke
     script: "./packages/quay/test/delivery-standalone-smoke.sh"   # ADR-013 / DIR-035-D, wired 2026-07-20
+
+# DIR-042-A: this repo's own DoD-meta-enforcer regression suite (its own real
+# `node --test` invocation), re-expressed as a CONSUMER of the product's
+# generic `test-pass` gate factory rather than a second implementation —
+# proves single-source dogfooding (ADR-004). PASS iff the suite exits 0
+# (all cases pass); command supplied here as pure workspace data.
+testPass:
+  - name: it0-dod-check-tests
+    command: "node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs"
