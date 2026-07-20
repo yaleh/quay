@@ -38,3 +38,11 @@ Still last in DIR-030's ordering (after G1 — landed — E3, DIR022-REMAINING).
 
 ## Not selected (M43)
 Still last (item 4 of 4) in DIR-030's ordering. This pass selects `exp5-M-DIR022-REMAINING-GATES` (item 3 of 4) — G1+E3 landed (2/4), DIR022-REMAINING is next per the ordering, INV remains last.
+
+## Not selected (M45)
+DIR-030's window closed at m43 (≥3/4). This pass compares INV against `exp5-M-CRYST-D1`, now the
+first fully-eligible capability-growth candidate (per M44 ABSORB's own note) with no competing
+governance-integrity candidate at DIR-032's prior urgency currently open. INV's gate-half is real
+but smaller/narrower value (a meta-check on future milestones' own DoD-clause additions) vs D1's
+foundational capability (doc-management + contract-validator unblocking D2/D3/E2). D1 SELECTed
+this pass; INV remains open, unblocked, for a future SELECT.

@@ -50,6 +50,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAcceptance } from "./acceptance-runner.js";
 import { createAdrStore } from "../../../quay-native/src/adr-store.js";
+import { createDocumentStore } from "../../../quay-native/src/document-store.js";
+import { validateContracts } from "../../../quay-native/src/contract-validator.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/quay/src/gate -> repo root is 4 levels up.
@@ -186,10 +188,76 @@ function makeAdrGate(adrId, adrDir) {
   };
 }
 
+/**
+ * D1 (exp5-M-CRYST-D1) — document-as-contract enforcement: the SAME
+ * "continuously applied" shape as `makeAdrGate`, but for the NEW `document`
+ * object kind (document-store.js, Stage 2) rather than an ADR. Unlike
+ * `makeAdrGate`, this does NOT shell out via `runAcceptance` — a document's
+ * `contracts` check the document's OWN live body content in-process
+ * (`contract-validator.js#validateContracts`, Stage 3), so there is no
+ * external command to run; the validation itself is synchronous, but the
+ * gate fn is still declared `async` to match the `(task, client) =>
+ * Promise<{ok, reason}>` contract every other gate in this registry follows
+ * (`engine.js` always `await`s the gate fn — Node/JS awaits a non-Promise
+ * value fine, so this is a documentation-only note per the plan-check, not a
+ * required code change).
+ *
+ * Fails closed (same discipline as `makeAdrGate`) when the document is
+ * missing or has no (or empty) `contracts` — an unenforceable document must
+ * never silently PASS, mirroring an ADR with no `enforcement` command.
+ *
+ * @param {string} docId   e.g. "DOC-001"
+ * @param {string} docDir  absolute path to the managed-documents directory
+ */
+function makeDocumentContractGate(docId, docDir) {
+  return async (task) => {
+    const store = createDocumentStore(docDir);
+    const doc = store.get(docId);
+    if (!doc) {
+      return { ok: false, reason: `no such document: ${docId}` };
+    }
+    if (!Array.isArray(doc.contracts) || doc.contracts.length === 0) {
+      return {
+        ok: false,
+        reason: `${docId} has no contracts defined (set its \`contracts:\` frontmatter field to a non-empty list of self-checks)`,
+      };
+    }
+    const { ok, results } = validateContracts(doc);
+    if (ok) return { ok: true, reason: `all ${results.length} contract(s) passed` };
+    const failed = results.filter((r) => !r.ok);
+    const reason = failed
+      .map((r) => r.reason ?? `pattern ${JSON.stringify(r.pattern)} (${r.type}) failed`)
+      .join("; ");
+    return { ok: false, reason };
+  };
+}
+
+/**
+ * Register a `doc-<name>` gate for a given document id + directory. Exported
+ * so tests can register throwaway fixture gates the SAME way the module's
+ * own DOCUMENT_GATE_IDS-driven loop below does (mirrors E3's own precedent of
+ * exercising `makeAdrGate`'s logic against fixture dirs, but here proves the
+ * exact registered code path via a real dynamically-added gate name).
+ *
+ * @param {string} gateName full gate name, e.g. "doc-quay-directive-skill"
+ * @param {string} docDir   absolute path to the managed-documents directory
+ * @param {string} docId    e.g. "DOC-001"
+ */
+export function registerDocumentGate(gateName, docDir, docId) {
+  gateRegistry[gateName] = makeDocumentContractGate(docId, docDir);
+}
+
 // Declarative table of which ADRs are wired as gates so far (per proposal 2's
 // folded-in refinement — a future ADR gate is a one-line addition here, not a
 // copy-pasted `makeAdrGate` call site). First wired case: ADR-001 → B7.
 const ADR_GATE_IDS = ["ADR-001"];
+
+const DOCUMENTS_DIR = path.join(REPO_ROOT, "docs-managed");
+
+// D1: declarative table of which managed documents are wired as gates so far
+// (same shape as ADR_GATE_IDS) — `{gateName, docId}` pairs, one real wired
+// case landed in Stage 5 (the retrofitted quay-directive skill doc).
+const DOCUMENT_GATE_IDS = [{ gateName: "doc-quay-directive-skill", docId: "DOC-001" }];
 
 /**
  * name -> async (task, client) => { ok: boolean, reason: string }
@@ -259,6 +327,13 @@ export const gateRegistry = {
 for (const adrId of ADR_GATE_IDS) {
   const gateName = adrId.toLowerCase();
   gateRegistry[gateName] = makeAdrGate(adrId, ADR_DIR);
+}
+
+// D1: register one `doc-<name>` gate per DOCUMENT_GATE_IDS entry — same shape
+// as the ADR loop above, via the exported `registerDocumentGate` helper so
+// tests exercise the exact same code path.
+for (const { gateName, docId } of DOCUMENT_GATE_IDS) {
+  registerDocumentGate(gateName, DOCUMENTS_DIR, docId);
 }
 
 /** @returns {string[]} registered gate names */
