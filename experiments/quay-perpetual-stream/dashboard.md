@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 55** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M55 ABSORB header sync): body log's m55 ABSORB entry below sets milestone_counter → 55;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54).
-55 % 5 == 0 — CHECKPOINT DUE this milestone, see checkpoints/cp-55.md. -->
+**milestone_counter: 56** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M56 ABSORB header sync): body log's m56 ABSORB entry below sets milestone_counter → 56;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55).
+56 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m60). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -5143,3 +5143,98 @@ go-ahead (foreign-repo deployment / driver-self-rewrite blast-radius categories 
 
 ## Backlog row
 | DIR-037 | quay-github's `execFileSync("gh", ["api",...])` had no `maxBuffer`, overflowing (`ENOBUFS`) on any real foreign repo larger than quay's own tiny backlog — single-sourced fix via a new `execGh(args)` helper (64 MiB default, `QUAY_GITHUB_MAX_BUFFER` override), RED→GREEN regression test, REAL yaleh/archguard `task list`/`task view` landing cross-checked against `gh` CLI (56 issues, exact match) | capability-growth/robustness (primary) | no VT chart cell (Provider-ABI ceiling artifact) | directive, milestone-candidate, surface:mcp, milestone:M55-dir037-gh-enobufs-fix |
+
+## M56 — exp5-M-GATE-CLI-ERROR-UX
+
+**Task:** [[exp5-M-GATE-CLI-ERROR-UX]] (`tasks/exp5-M-GATE-CLI-ERROR-UX.md`) — QENG gate/lifecycle
+CLI surface: replace raw stack traces on guarded-error paths with clean one-line messages, and fix
+`quay run`'s exit-code leak on a `fixpoint` stop that included a failed task. Materialized at the
+M37-discover-post-qeng discovery milestone from live CLI exercise (not code-reading alone).
+**Merge commit:** merge of `milestones/M56-gate-cli-error-ux` (build `058569f`, finalize `87407b4`)
+into `master` at this ABSORB (worktree `milestones/M56/worktrees/iteration-0`, base `master`
+`e3fd982`).
+
+**Adversarial-audit verdict: PASS-WITH-QUALIFICATIONS.** An independent audit, with no access to the
+build-phase agent's self-report, confirmed:
+- **Guarded-error UX (Finding 1)**: `withGuardedErrors(fn)` + `GUARDED_ERROR_PATTERN` in
+  `packages/quay/bin/quay.js` only suppress stack traces on the 3 known guarded-error message shapes
+  (`unknown gate:`, `no such task:`, `illegal transition:`); the audit tried to trigger an
+  unrecognized error and confirmed it still re-throws with its full stack trace via the top-level
+  `main().catch()` — no over-broad swallowing.
+- **Exit-code fix (Finding 2)**: `run`'s non-`--once` branch now sets
+  `process.exitCode = r.stopped === "cap" ? 1 : 0` — audit confirmed a mixed pass/fail 2-task board
+  now exits 0 at a clean `fixpoint` stop (was 1, the leak), and confirmed a genuine `--cap`-hit
+  scenario still correctly exits 1.
+- **Tests verified substantive**: 75/75 pass in `gate`/`lifecycle`/`driver` test files; audit
+  checked actual stderr content for stack-trace-absence, not just exit codes.
+- **`adjudicate`-wrapping confirmed in-scope**, not overreach — the task's own Proposal explicitly
+  names `gate, complete, adjudicate, promote, retreat` as the five commands to wrap.
+- Full suite: 276 passing, 3 known baseline failures (`dir032-audit-independence` M44 A2/C1,
+  `web-ui-browser`), no new regressions. `delivery-standalone-smoke.sh` → 0 RED, no leftover
+  experiment-path strings in delivered source. `task-schema-check` → PASS.
+  `dod-fixture-selfcheck.sh` → 17/17 PASS.
+- **One qualification, dispositioned at this finalization**: run an `archguard` pass on the diff
+  before merge, per CLAUDE.md's "consult archguard before calling a milestone done" (ADR-007) —
+  judged low-risk given the tiny, localized scope but formally recommended rather than skipped.
+  **Addressed**: `archguard_analyze_git` + `archguard_get_change_risk`/`get_change_context`/
+  `get_evidence_pack` run against the 4 changed files (`bin/quay.js`,
+  `test/{gate,lifecycle,driver}.test.mjs`). No new imports/requires introduced by the diff (confirmed
+  by direct diff inspection). Co-change neighbors for `bin/quay.js` are exactly the expected in-scope
+  test files (`gate`/`lifecycle`/`driver.test.mjs`) plus `registry.js` — confirming the change stayed
+  contained to its stated scope. Risk scores came back "high" for all 4 touched files, but driven
+  entirely by `authorCount`/`recency`/`churn` factors common to this whole single-author, actively-
+  churning experiment repo (the same heuristic would flag almost any recently-touched file here), not
+  a signal specific to this diff's structure. Structural `archguard_analyze` (needed for
+  cycle/god-package detection) failed with "No query scopes were persisted" — a pre-existing tooling
+  gap (this plain-ESM/no-tsconfig repo isn't set up for archguard's TS structural parser), unrelated
+  to this change. Net: no cycles, no god-package growth, no concerning dependency signal found for
+  this diff — consistent with the audit's own "low-risk given the tiny, localized scope"
+  characterization.
+
+**Mechanical gates (real runs, this ABSORB, from inside the worktree before merge):**
+```
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 56 experiments/quay-perpetual-stream/v-meta-ledger.md
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh   → tree-hygiene: clean.
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+$ node packages/quay/bin/quay.js gate exp5-M-GATE-CLI-ERROR-UX --gate dod   → PASS
+```
+**Test-floor (this ABSORB's own independent re-run, `packages/quay` + `packages/quay-github`,
+excluding `serve-github`/`provider-abi-conformance`):** **279 tests / 276 pass / 3 fail** — identical
+known pre-existing flaky baseline (`dir032-audit-independence` M44 A2/C1, `web-ui-browser`); no new
+regressions from this milestone's change.
+
+**Impl-row (Clause 4):** N/A — real code-landing milestone (the task's own AC/DoD are the
+real-landing proof), not a design-only artifact needing a future implementing row.
+**Line-budget (Clause 3):** N/A — no formal charter file authored (task's own `## Plan` states the
+change is small enough to execute directly from the Proposal + AC/DoD, no `docs/plans/*.md` staged).
+**Split-or-commit (Clause 9):** N/A — no `needs-human` outcome; both findings fixed in full.
+
+**Realized Δv**: capability-growth / robustness (primary — the CLI's guarded-error paths now match
+`complete`'s existing clean-message UX rather than dumping raw stack traces for well-understood,
+already-named error conditions; `quay run`'s exit code is now trustworthy for scripting/CI/future
+outer-loop automation against a `fixpoint` stop, closing a real silent-failure-detection gap). No
+new VT chart cell claimed (surface:cli robustness/UX fix, not new coverage). VT chart-1 total
+unchanged: **111.55/120**. `milestone_counter` → **56** (56 % 5 != 0 — no checkpoint due, next
+checkpoint at m60).
+
+**Backlog housekeeping**: `tasks/exp5-M-GATE-CLI-ERROR-UX.md` → `status: done`, all 3 AC + 1 DoD
+boxes ticked against independently re-verified evidence, `## Resolution` section added citing commit
+`058569f`, the audit's PASS-WITH-QUALIFICATIONS verdict, the archguard check result, and key evidence
+(stack-trace suppression, exit-code fix, test coverage). `backlog.md` regenerated via
+`node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M56/worktrees/iteration-0` removed (`git worktree
+remove`), `milestones/M56-gate-cli-error-ux` branch deleted (`git branch -d`, fully merged, confirmed
+ancestor of `master` before deletion). `worktree-branch-hygiene-check.sh`/`tree-hygiene-check.sh`
+both report clean.
+
+**Note on off-loop human activity since this milestone's worktree base:** `master` advanced with
+further human-authored, off-loop commits between this milestone's worktree base (`e3fd982`) and this
+ABSORB (`DIR-039` quay migration/import capability, `DIR-040` package quay as a Claude Code plugin,
+authored per DIR-027 steering hygiene). Confirmed no conflict with this milestone's own merge (clean
+dry-run merge test performed before the real merge). Neither directive is touched by this milestone.
+
+## Backlog row
+| exp5-M-GATE-CLI-ERROR-UX | QENG gate/lifecycle/`run` CLI surface had raw Node stack traces on 3 known guarded-error shapes (unknown gate / no such task / illegal transition) instead of `complete`'s clean one-line message, and `quay run` leaked `process.exitCode=1` from an earlier per-task acceptance-gate fail into an otherwise-clean `fixpoint` stop — fixed via `withGuardedErrors`/`GUARDED_ERROR_PATTERN` helper (5 commands wrapped) + an unconditional `process.exitCode = r.stopped === "cap" ? 1 : 0` reset, both regression-tested at the CLI-subprocess level | capability-growth/robustness (primary) | no new VT chart cell (UX/robustness fix) | milestone-candidate, surface:cli, milestone:M37-discover-post-qeng, milestone:M56 |
