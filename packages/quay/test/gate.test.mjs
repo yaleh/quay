@@ -331,6 +331,32 @@ test("C1: `quay gate <task>` defaults to the acceptance gate when --gate is omit
   assert.match(r.stdout, /no acceptance command defined/);
 });
 
+// --- exp5-M-GATE-CLI-ERROR-UX AC1: guarded errors are clean, no raw stack trace ---
+// engine.js's `runGate` throws on an unknown gate name / missing task by design
+// (the top-level catch USED to be the only handler, printing `err.stack` — a
+// raw Node stack trace with `at Object.` / `    at ` frames). This asserts the
+// FIXED behavior: a clean one-line message on stderr, exit 1, NO stack frames.
+const STACK_FRAME_PATTERN = /\bat (Object\.|async |\S+\s\()/;
+
+test("C [ERROR-UX]: `quay gate <id> --gate bogus` → clean `unknown gate: bogus` message, no stack trace", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("erruex-unknown-gate");
+  runNative(["task", "create", "EU-1", "--title", "err ux fixture", "--status", "todo",
+    "--body", validSections + acDodChecked], tasksDir);
+  const r = runQuay(["gate", "EU-1", "--gate", "bogus"], workspaceRoot);
+  assert.notEqual(r.status, 0, `expected nonzero exit; got ${r.status}`);
+  assert.match(r.stderr, /^unknown gate: bogus\s*$/m, `expected exact clean message line; got stderr=${JSON.stringify(r.stderr)}`);
+  assert.ok(!STACK_FRAME_PATTERN.test(r.stderr), `stderr must NOT contain a raw stack trace; got: ${r.stderr}`);
+  assert.ok(!r.stderr.includes(".js:"), `stderr must not contain a file:line stack frame; got: ${r.stderr}`);
+});
+
+test("C [ERROR-UX]: `quay gate <nonexistent-id>` → clean `no such task: ...` message, no stack trace", () => {
+  const { workspaceRoot } = makeWorkspace("erruex-missing-task");
+  const r = runQuay(["gate", "NOPE-DOES-NOT-EXIST"], workspaceRoot);
+  assert.notEqual(r.status, 0, `expected nonzero exit; got ${r.status}`);
+  assert.match(r.stderr, /^no such task: NOPE-DOES-NOT-EXIST\s*$/m, `expected exact clean message line; got stderr=${JSON.stringify(r.stderr)}`);
+  assert.ok(!STACK_FRAME_PATTERN.test(r.stderr), `stderr must NOT contain a raw stack trace; got: ${r.stderr}`);
+});
+
 // --- exp5-M-GATE-CLI-ARG-ORDER: flag-before-id must parse identically to id-first ---
 // Bug: verb-less commands read `const id = sub` (raw argv[3]) and flags off
 // parseFlags(rest). A leading flag lands in `sub` (misread as the id) AND its value

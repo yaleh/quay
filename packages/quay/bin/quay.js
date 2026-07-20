@@ -30,6 +30,43 @@ function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
 }
 
+// M56-gate-cli-error-ux (AC1): the QENG gate/lifecycle engine (engine.js
+// `runGate`, lifecycle.js `assertTransition` via runPromote/runRetreat) throws
+// a plain Error on a small, closed set of EXPECTED/guarded conditions —
+// unknown gate name, unknown task id, illegal lifecycle transition — by
+// design (lifecycle.js's own header comment: "Illegal transitions throw").
+// Previously these fell through to the generic top-level `main().catch()`
+// handler, which prints `err.stack` — a raw Node stack trace — for what is,
+// in every one of these cases, a well-understood, already-named error
+// condition (unlike `complete`'s analogous not-ready precondition, which
+// already prints a clean one-line message with no stack trace). This helper
+// recognizes exactly those three message shapes and prints them the same way
+// `complete`'s guarded path already does: `console.error(message)` +
+// `process.exitCode = 1`, no stack. Any OTHER thrown error (a genuine,
+// unanticipated bug) is NOT recognized here and re-thrown, so it still falls
+// through to the top-level catch and DOES print its stack trace — that
+// remains correct/desired for a true programmer error.
+const GUARDED_ERROR_PATTERN = /^(unknown gate: |no such task: |illegal transition: )/;
+
+/**
+ * Run `fn`; on a thrown Error matching the guarded-error shapes above, print
+ * its message cleanly (no stack) and set exit code 1 instead of letting it
+ * propagate to the top-level stack-trace handler. Any other error re-throws.
+ * @param {() => Promise<void>} fn
+ */
+async function withGuardedErrors(fn) {
+  try {
+    await fn();
+  } catch (err) {
+    if (err instanceof Error && GUARDED_ERROR_PATTERN.test(err.message)) {
+      console.error(err.message);
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
+  }
+}
+
 // CB-021 (M08-merge-recover): `--format json` is a documented alias for
 // `--json` (both flags are accepted everywhere `--json` is; see printHelp()).
 // Any other `--format <value>` (e.g. `--format yaml`, `--format` with no
@@ -929,9 +966,13 @@ async function main() {
       // DIR-035-B: thread the resolved workspace root through so a named
       // gate declared in THIS workspace's own `.quay/gates.yml` resolves
       // correctly regardless of the process's cwd at invocation time.
-      const { ok, reason } = await runGate({ client, id, gate, logPath, workspaceRoot: cfg.workspaceRoot });
-      console.log(ok ? "PASS" : `FAIL — ${reason}`);
-      process.exitCode = ok ? 0 : 1;
+      // M56-gate-cli-error-ux (AC1): unknown-gate / missing-task are
+      // guarded (expected) errors — see withGuardedErrors' own comment.
+      await withGuardedErrors(async () => {
+        const { ok, reason } = await runGate({ client, id, gate, logPath, workspaceRoot: cfg.workspaceRoot });
+        console.log(ok ? "PASS" : `FAIL — ${reason}`);
+        process.exitCode = ok ? 0 : 1;
+      });
     }, { providerId: vf.provider });
     return;
   }
@@ -970,7 +1011,10 @@ async function main() {
     await withProvider(async (client, cfg) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
       process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
-      await runComplete({ client, id, logPath });
+      // M56-gate-cli-error-ux (AC1): missing-task is a guarded error.
+      await withGuardedErrors(async () => {
+        await runComplete({ client, id, logPath });
+      });
     }, { providerId: vf.provider });
     return;
   }
@@ -980,7 +1024,10 @@ async function main() {
     if (!id) { console.error("quay adjudicate: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
-      await runAdjudicate({ client, id, logPath });
+      // M56-gate-cli-error-ux (AC1): missing-task is a guarded error.
+      await withGuardedErrors(async () => {
+        await runAdjudicate({ client, id, logPath });
+      });
     }, { providerId: vf.provider });
     return;
   }
@@ -991,7 +1038,11 @@ async function main() {
     await withProvider(async (client, cfg) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
       process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
-      await runPromote({ client, id, logPath });
+      // M56-gate-cli-error-ux (AC1): missing-task / illegal-transition are
+      // guarded errors — assertTransition() throws `illegal transition: ...`.
+      await withGuardedErrors(async () => {
+        await runPromote({ client, id, logPath });
+      });
     }, { providerId: vf.provider });
     return;
   }
@@ -1001,7 +1052,11 @@ async function main() {
     if (!id) { console.error("quay retreat: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
-      await runRetreat({ client, id, reason: vf.reason, logPath });
+      // M56-gate-cli-error-ux (AC1): missing-task / illegal-transition are
+      // guarded errors — assertTransition() throws `illegal transition: ...`.
+      await withGuardedErrors(async () => {
+        await runRetreat({ client, id, reason: vf.reason, logPath });
+      });
     }, { providerId: vf.provider });
     return;
   }
@@ -1037,7 +1092,13 @@ async function main() {
       } else {
         const r = await runLoop({ client, cfg, logPath });
         console.log(`run: ${r.completed.length} completed in ${r.iterations} iters (stop=${r.stopped})`);
-        if (r.stopped === "cap") process.exitCode = 1; // only the safety ceiling is nonzero
+        // AC2 (M56-gate-cli-error-ux): a `fixpoint`/`sentinel` stop exits 0
+        // regardless of whether any individual task failed its acceptance gate
+        // along the way (runComplete unconditionally sets process.exitCode=1 on
+        // a per-task meter fail, inside runLoop — there is no equivalent reset
+        // for the non-`--once` branch, unlike `--once` above). Only the runaway
+        // safety `cap` ceiling is a real driver-level failure and maps to exit 1.
+        process.exitCode = r.stopped === "cap" ? 1 : 0;
       }
     }, { providerId: runFlags.provider });
     return;

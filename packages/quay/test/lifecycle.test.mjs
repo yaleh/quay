@@ -411,23 +411,39 @@ test("C [AC2]: `quay adjudicate <id>` → exit 0; `gate-log --gate audit --json`
 });
 
 // --- AC3: illegal transitions rejected nonzero + message --------------------
+// exp5-M-GATE-CLI-ERROR-UX (AC1): these guarded illegal-transition throws
+// previously fell through to the generic top-level catch, which prints
+// `err.stack` (a raw Node stack trace, e.g. "at assertTransition (.../lifecycle.js:57:11)").
+// Assert BOTH the clean one-line message AND the absence of any stack frame.
+const STACK_FRAME_PATTERN = /\bat (Object\.|async |\S+\s\()/;
 
-test("C [AC3]: `quay retreat <todo> --reason x` → nonzero + `illegal transition: todo cannot back`", () => {
+test("C [AC3]: `quay retreat <todo> --reason x` → nonzero + `illegal transition: todo cannot back`, no stack trace", () => {
   const { workspaceRoot, tasksDir } = makeWorkspace("ac3-retreat");
   runNative(["task", "create", "LC-RT", "--title", "todo retreat", "--status", "todo",
     "--body", validSections + acDodChecked], tasksDir);
   const r = runQuay(["retreat", "LC-RT", "--reason", "x"], workspaceRoot);
   assert.notEqual(r.status, 0, `expected nonzero; got ${r.status}, stdout=${r.stdout}`);
-  assert.match(r.stderr, /illegal transition: todo cannot back/);
+  assert.match(r.stderr, /^illegal transition: todo cannot back\s*$/m, `expected exact clean message line; got stderr=${JSON.stringify(r.stderr)}`);
+  assert.ok(!STACK_FRAME_PATTERN.test(r.stderr), `stderr must NOT contain a raw stack trace; got: ${r.stderr}`);
+  assert.ok(!r.stderr.includes(".js:"), `stderr must not contain a file:line stack frame; got: ${r.stderr}`);
 });
 
-test("C [AC3]: `quay promote <done>` → nonzero + `illegal transition: done cannot forward`", () => {
+test("C [AC3]: `quay promote <done>` → nonzero + `illegal transition: done cannot forward`, no stack trace", () => {
   const { workspaceRoot, tasksDir } = makeWorkspace("ac3-promote");
   runNative(["task", "create", "LC-PM", "--title", "done promote", "--status", "done",
     "--body", validSections + acDodChecked], tasksDir);
   const r = runQuay(["promote", "LC-PM"], workspaceRoot);
   assert.notEqual(r.status, 0, `expected nonzero; got ${r.status}, stdout=${r.stdout}`);
-  assert.match(r.stderr, /illegal transition: done cannot forward/);
+  assert.match(r.stderr, /^illegal transition: done cannot forward\s*$/m, `expected exact clean message line; got stderr=${JSON.stringify(r.stderr)}`);
+  assert.ok(!STACK_FRAME_PATTERN.test(r.stderr), `stderr must NOT contain a raw stack trace; got: ${r.stderr}`);
+});
+
+test("C [AC3]: `quay promote <nonexistent-id>` → clean `no such task: ...` message, no stack trace", () => {
+  const { workspaceRoot } = makeWorkspace("ac3-promote-missing");
+  const r = runQuay(["promote", "NOPE-MISSING"], workspaceRoot);
+  assert.notEqual(r.status, 0, `expected nonzero; got ${r.status}, stdout=${r.stdout}`);
+  assert.match(r.stderr, /^no such task: NOPE-MISSING\s*$/m, `expected exact clean message line; got stderr=${JSON.stringify(r.stderr)}`);
+  assert.ok(!STACK_FRAME_PATTERN.test(r.stderr), `stderr must NOT contain a raw stack trace; got: ${r.stderr}`);
 });
 
 // --- exp5-M-GATE-CLI-ARG-ORDER: flag-before-id on the lifecycle verb-less commands ---
