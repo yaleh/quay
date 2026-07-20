@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 40** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 41** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -3615,3 +3615,127 @@ candidates. Must be reasoned explicitly at m41 SELECT, not defaulted.
 
 ## Backlog row
 | exp5-M-DIR014-TASK-CANONICAL-LIFECYCLE-RECORD | DIR-014 phase 1 (item 6): task canonical lifecycle record — `## Proposal` embedded, `## Plan` referenced-or-N/A, new DoD Clause 8 | governance-integrity (primary) + capability-growth (secondary) | no VT chart cell | milestone-candidate, surface:method-infra, milestone:M40-dir014-task-canonical-lifecycle-record |
+
+## ABSORB m41: M41-cryst-g1-observability
+
+**Source / SELECT recap:** `DIR-030` (restart-steering re-ranking, commit `ba1edb8`) explicitly
+re-ordered the restart priority to **G1 → E3 → DIR022-REMAINING → INV before D1**. `exp5-M-CRYST-G1`
+(ADR-007 instrument-the-dark-axes: L_D/L_G/L_S convergence proxies) SELECTed as the first item in
+that ordering. `exp5-M-CRYST-E3`, `exp5-M-DIR022-REMAINING-GATES`, `exp5-M-CRYST-INV`, and
+`exp5-M-CRYST-D1` were each explicitly considered and NOT selected this pass, each recording a
+"Not selected (M41)" section on its own task citing DIR-030's ordering directly (no silent skip).
+DIR-030 recorded as `applied` (partial — 1 of its re-ranked items delivered; stays open as a
+multi-milestone WINDOW directive per its own AC, which needs ≥3/4 items landed before D1 is eligible).
+Class routing: design-class (method-infra surface, no product-code AC), per the M38/M39/M40
+`surface:method-infra` convention — whole-milestone dual independent iteration, not the
+N-independent-proposal dev-class pipeline (that pipeline is reserved for product-code milestones per
+DIR-014).
+
+**Note on stale pre-restart milestone directories:** `M41-dir025-directive-task-full-projection`
+(empty/untracked) and `M42-gate-cli-arg-order` (an orphaned tracked file, commit `3ae3455`, no
+ABSORB entry ever recorded for either) were found pre-existing from before the DIR-030 restart. This
+milestone used the disambiguated directory name `M41-cryst-g1-observability` to avoid colliding with
+that stale state; neither stale directory was touched, deleted, or absorbed by this pass (out of
+scope — flagged for a future cleanup, not silently resolved).
+
+**No `baime:iteration-executor` subagent dispatch was available this pass** (searched via ToolSearch
+and filesystem; only daemon-based dispatch tooling exists, no native subagent_type routing was
+reachable) — both iterations were executed directly by the OUTER orchestrator in isolated git
+worktrees off `master` HEAD (`ba1edb8`), each on its own branch (`exp5-m41-iteration-0`,
+`exp5-m41-iteration-1`), preserving independent-verification discipline by deliberately using
+different internal derivations per proxy (see iteration reports for the specific technical
+divergences: L_D collapsed-diff vs per-commit-summed numstat; L_G adjacency-map-first vs
+edge-list-first; L_S single-pass-mutant-generation vs descriptor/materialize-split, plus a broader
+operator set in iteration-1 including a genuine DIR-019 fix — see below).
+
+**Two-iteration summary:** both iterations independently built all 3 convergence proxies
+(`scripts/git-lens-l-{d,g,s}-*.mjs` + `git-lens-selfcheck.sh` + fixtures). Both independently probed
+`archguard_analyze` live and got the identical failure (`"Analysis failed: No query scopes were
+persisted."`) across every `lang`/`sources`/`noCache` combination tried — a real, disclosed upstream
+gap for this plain-JS/ESM repo (not a design choice), documented explicitly in both scripts' headers
+per CLAUDE.md's "report bugs, use aggressively" instruction for archguard. Both iterations' real
+(non-fixture) findings against the live repo AGREE: L_G is EXACT (0 cycles; 3 identical god-modules:
+`packages/quay-github/src/github-client.js` 851L/fanin8, `packages/quay-native/src/store.js`
+729L/fanin14, `packages/quay/src/serve.js` 1079L/fanin8) despite fully independent internal
+derivations; L_D and L_S agree in VERDICT with small, explainable numeric variance (L_D:
+ratio=2.758 vs 2.832, per-commit churn summation counts more than a collapsed diff; L_S:
+mutationScore=0.097 vs 0.094, iteration-1's broader operator set — including `++`/`--` — adds one
+extra survived mutant out of 32 vs 31). Iteration-1 hit a genuine DIR-019 case during its own build:
+a first draft of its L_S operator set omitted relational `<`/`>` flips, causing its own weak-module
+fixture to land exactly on the FLAG_THRESHOLD boundary (0.5, not `< 0.5`) instead of FLAGGING — fixed
+in the SCRIPT (added `flip-lt`/`flip-gt` operators with lookaround-guarded regexes to avoid
+double-mutating `<=`/`>=`), not the fixture, per DIR-019 discipline. Reconciled by merging
+iteration-0 (`cb6e839`, merge commit `d9bcca0`) as PRIMARY — authored first, and its real findings
+were exactly what iteration-1 independently cross-validated; iteration-1's branch
+(`exp5-m41-iteration-1`) is kept (not force-deleted) alongside its report, both being small and the
+cross-validation itself being the milestone's core evidentiary value.
+
+**adversarial-audit verdict: NO REFUTATION FOUND at AC-content level**, one non-blocking CONCERN
+(full report: `experiments/quay-perpetual-stream/milestones/M41-cryst-g1-observability/audit.md`).
+The audit (performed directly by the OUTER orchestrator, no separate audit subagent available)
+independently re-ran EVERY claim with its own fresh commands, not trusting either iteration report's
+transcripts: re-ran the fixture selfcheck on post-merge `master` (7/7 PASS); re-ran all 3 real
+findings directly against `master` HEAD (L_D, L_G, L_S all reproduced exactly, matching the reports);
+independently re-probed `archguard_analyze` a THIRD time this milestone (fresh MCP call) and got the
+identical failure, confirming the gap is genuinely reproducible, not a fluke; confirmed via
+`git status --porcelain` before/after the L_S mutation probe that `packages/quay/src/gate/registry.js`
+was left in a clean state (no residual `.l-s-backup`, no diff); confirmed via
+`git diff ba1edb8..HEAD --stat -- 'packages/quay*'` (empty output) that zero product-code files were
+touched, making Test-floor genuinely N/A. All 3 AC checkboxes + both DoD Done-when items were
+independently re-confirmed and ticked `[x]` with the audit's own fresh evidence citations (see
+`tasks/exp5-M-CRYST-G1.md`).
+
+**Non-blocking CONCERN (carried forward as an open item):** the L_G/L_S fallback proxies are a
+plain-JS approximation of the archguard-backed design the task's own `## Proposal` originally
+envisioned. This is disclosed explicitly (not silently substituted) — but the fallback's
+god-module/cycle heuristics are simpler than a true dependency-graph tool would provide (in
+particular, no duplicated-abstraction detection). Follow-up: once the archguard
+"No query scopes were persisted" gap is fixed upstream for plain-JS/ESM projects, a follow-up
+milestone should re-point L_G at the real archguard API and diff its findings against this
+fallback's.
+
+**V_meta consolidation-lag (Clause 2):** clear — re-checked via `vmeta-lag-check.sh --counter 40
+v-meta-ledger.md`: PASS, no confirmed-unconsolidated row past K=2 without a dated carry-forward
+(both existing rows remain `consolidated`/`proposed`).
+
+**Escrow-Δv (Clause 6):** N/A — not design-only; real proxy code + fixtures + selfcheck + reports
+were delivered directly, not a design doc awaiting a future `-IMPL` follow-up.
+
+**Impl-row (Clause 4):** N/A — same reasoning; this milestone's own output IS the mechanism.
+
+**Test-floor (Clause 7):** N/A — `surface:method-infra`, no `packages/quay*` product files touched
+(independently confirmed by the audit via `git diff ba1edb8..HEAD --stat -- 'packages/quay*'` — zero
+output). The 7 new fixture pairs plus `git-lens-selfcheck.sh`'s 7/7-green re-run is the test evidence
+for this change, per the charter's own disposition.
+
+**DoD meta-enforcer gate — invoked via `it0-dod-check.sh` (task id first, per convention):**
+```
+$ bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh exp5-M-CRYST-G1 experiments/quay-perpetual-stream/charters/M41-cryst-g1-observability.md experiments/quay-perpetual-stream/milestones/M41-cryst-g1-observability/audit.md
+PASS: DoD check passed — all clauses satisfied (9 disposition(s) confirmed), no undeclared self-exemption.
+```
+
+**Realized Δv**: discovery (primary — L_D/L_G/L_S were fully dark axes per ADR-006/007's own
+checklist; they are now genuinely MEASURABLE, not asserted, closing a 40-milestone-old instrument
+gap) + instrument-correction (secondary — the archguard gap is now explicitly documented with a
+working, cross-validated fallback rather than silently worked around). No VT chart cell (mirrors the
+DoD-program lineage's own no-VT-cell precedent for pure method-infra milestones — M25/M30/M31/M32/
+M34/M36/M38/M39/M40). VT chart-1 total unchanged: **111.55/120**. `milestone_counter` → **41**.
+
+**Backlog housekeeping**: `tasks/exp5-M-CRYST-G1.md` → `status: done`. `backlog.md` regenerated via
+`node scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream --write`.
+
+**Checkpoint disposition:** NOT due this ABSORB (last written `cp-40.md` at m40, every-5 cadence
+means next due at m45 — 4 milestones remain).
+
+**DRAIN disposition of `directives/pending/` at this boundary, and m42 SELECT-candidate note:**
+`directives/pending/` retains `DIR-030` (this milestone delivered 1/4 of its re-ranked items — G1 —
+stays `applied`, not `resolved`, until ≥3/4 land), `DIR-014` (phase 1 only; items 2/3/5 remain),
+`DIR-021` (delivered, stays pending per its own escrow discipline), `DIR-022` (phase 1 delivered,
+4 judgment-heavy gates remain — this is `exp5-M-DIR022-REMAINING-GATES`, DIR-030's item 3),
+`DIR-023`, `DIR-024` (Layers 3-4, depend on DIR-022 finishing). `backlog.md` also retains the 6 open
+M37-produced candidates plus this milestone's own audit-flagged follow-up (re-point L_G at a fixed
+archguard once available). m42 SELECT should follow DIR-030's explicit ordering: **E3 next**
+(`exp5-M-CRYST-E3`), unless a fresher human directive supersedes it at the next DRAIN.
+
+## Backlog row
+| exp5-M-CRYST-G1 | G1: L_D/L_G/L_S convergence-observability proxies (ADR-007) — code:doc ratio, structural-drift (cycles/god-modules), behavior-variance (mutation probe) | discovery (primary) + instrument-correction (secondary) | no VT chart cell | milestone-candidate, surface:method-infra, milestone:M41-cryst-g1-observability |
