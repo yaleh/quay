@@ -1,9 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 46** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M46 ABSORB header sync): body log's m46 ABSORB entry below sets milestone_counter → 46;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45). -->
+**milestone_counter: 47** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M47 ABSORB header sync): body log's m47 ABSORB entry below sets milestone_counter → 47;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46).
+47 % 5 != 0 — no checkpoint due this milestone. -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -4286,3 +4287,75 @@ disposition: `DIR-014` (phase 1 only), `DIR-021` (delivered, stays pending per e
 
 ## Backlog row
 | exp5-M-DIR033-WORKTREE-HYGIENE | DIR-033: wire capture-then-prune worktree/branch hygiene into ABSORB (governance/infra hard floor) | governance-integrity (primary) | no VT chart cell | milestone-candidate, governance-integrity, human-steered, surface:method-infra, milestone:M46-dir033-worktree-hygiene |
+
+## M47 — M47-dir034-mechanize-enforcement (DIR-034)
+
+**Task:** [[DIR-034]] (`tasks/DIR-034.md`) — fold DIR-031/032/033's tree-hygiene/worktree-branch-
+hygiene/audit-independence checks into the MECHANICAL `it0-dod-check.mjs` ABSORB gate (clauses
+10-12) so they HARD-block `milestone_counter++`, un-skippable independent of any prose close-out;
+and close the audit-independence forgeable-string hole with dispatch-record anti-forgery
+corroboration. **Merge commit:** `f26302d` (worktree `m47-dir034-mechanize-enforcement-iteration-0`,
+built off `master` `aec994f`, commits `f1e5176` + corrective `d018165`).
+
+**Original independent-audit verdict: FAIL/CONCERNS.** A real top-level `Agent`-tool dispatch
+(session id `m47-independent-audit-explore-agent-2026-07-20-faildisposition`, corroborated by
+`audits/dispatch-record.txt`) reviewed the builder's draft ABSORB and found two issues: (1) an
+overclaimed "79/79 tests pass" — actually 78/79, traced to a test-design flaw (a unit test + 6
+`dod-fixture-selfcheck.sh` fixtures unknowingly asserted overall pass/exit against clauses 10/11's
+intentional real-ambient-repo-state shelling, coupling their outcome to whatever worktree/branch
+state existed wherever they ran); (2) DIR-034's DoD item requiring the anti-forgery corroboration
+mechanism to be exercised against a REAL (non-fixture) dispatched-audit artifact was genuinely
+unmet — the builder's own draft honestly flagged this as open.
+
+**Corrective pass (this entry, commit `d018165`):** (1) fixed the test-design flaw by
+disaggregating clause10/11's real-state divergence from the clauses each harness actually targets
+— clause 11's detection logic (correctly flagging this milestone's own then-unmerged worktree) was
+NOT weakened; re-run: 79/79 unit tests, 17/17 DoD fixtures, 7/7 audit-independence fixtures,
+deterministic regardless of ambient state. (2) closed the real-corroboration DoD item using THIS
+actual audit dispatch as the live case: `audits/iteration-0-acceptance-audit.md` (replacing the
+draft `audits/PENDING.md`) carries the real session id, corroborated by
+`audits/dispatch-record.txt` (written independently/first by the top-level orchestrator);
+`audit-independence-check.mjs` run for real against this real artifact + real dispatch-record
+genuinely PASSes (corroborated); a fabricated-session-id variant of the same real artifact
+genuinely FAILs. Logged as `DEV-10` in `inherited-core.md`'s deviation-record schema
+(`caught-by: machine`, smaller severity than DEV-09 — a test-design miscount, not a
+merge-before-audit ordering violation).
+
+**Final adversarial-audit verdict (corrected): PASS.**
+
+**Mechanical gates (real runs, post-merge, on `master`):**
+```
+$ node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs experiments/quay-perpetual-stream/test/audit-independence-check.test.mjs
+ℹ tests 79 / pass 79 / fail 0
+
+$ bash experiments/quay-perpetual-stream/scripts/dod-fixture-selfcheck.sh   → PASS: all 17 DoD fixtures behaved as asserted.
+$ bash experiments/quay-perpetual-stream/scripts/audit-independence-selfcheck.sh → PASS: all 7 audit-independence fixtures behaved as asserted.
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+info: prunable merged iteration branches=0; registered iteration worktrees=0.
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh → tree-hygiene: clean.
+```
+Real block-then-clear demonstrated: clause 11 genuinely FAILed against this milestone's own
+unmerged worktree/branch throughout its build (see `audits/iteration-0-acceptance-audit.md`'s
+transcripts); post-merge + prune (`git worktree remove --force` + `git branch -D
+m47-dir034-mechanize-enforcement-iteration-0`), the same check genuinely reports clean, 0/0 — the
+real HARD-FAIL→GREEN transition DIR-034's DoD demands.
+
+**Realized Δv**: governance-integrity (primary — enforcement is now mechanical and
+anti-forgery-corroborated, not prose-plus-honesty). No VT chart cell (same no-VT-cell precedent as
+prior method-infra/governance milestones). VT chart-1 total unchanged: **111.55/120**.
+`milestone_counter` → **47** (47 % 5 != 0 — no checkpoint due).
+
+**Backlog housekeeping**: `tasks/DIR-034.md` → `status: done`, `dirStatus: resolved`, all 4 AC + 3
+DoD boxes ticked against real re-verified evidence, `## Resolution` section added. `backlog.md`
+regenerated via `node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs
+experiments/quay-perpetual-stream --write`.
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 47, not a multiple of 5;
+next due at 50).
+
+**Lightweight re-DRAIN for m48 candidates:** see `## SELECT reasoning` note in
+`audits/iteration-0-acceptance-audit.md`'s lineage / the M48 candidate note below.
+
+## Backlog row
+| DIR-034 | Enforcement mechanization + independence anti-forgery: fold tree-hygiene/worktree-branch-hygiene/audit-independence into the mechanical ABSORB counter-gate; make audit session-id unforgeable | governance-integrity (primary) | no VT chart cell | milestone-candidate, governance-integrity, human-steered, surface:method-infra, milestone:M47-dir034-mechanize-enforcement |
