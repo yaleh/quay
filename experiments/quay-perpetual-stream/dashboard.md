@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 58** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M58 ABSORB header sync): body log's m58 ABSORB entry below sets milestone_counter → 58;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57).
-58 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m60). -->
+**milestone_counter: 59** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M59 ABSORB header sync): body log's m59 ABSORB entry below sets milestone_counter → 59;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57/m58).
+59 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m60, the VERY NEXT milestone). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -5455,3 +5455,89 @@ go-ahead per standing policy, not autonomously actioned by this milestone.
 
 ## Backlog row
 | DIR-040 | quay's task tools + authoring skills existed only as loose npm files with no installable plugin bundle, and the bundled directive skill was hardcoded to the exp5 experiment layout (unusable in any other workspace); closed via a Claude Code plugin manifest (MCP server + author/execute skills + a workspace-portable directive skill shipping its own schema-check), verified with a REAL foreign-workspace install (`/tmp/m58-foreign-ws`, no `experiments/` dir, a real `tasks/DIR-001.md` passing the shipped schema-check) | capability-growth (primary) | no new VT chart cell (packaging/distribution surface, not a chart-1-scored axis) | directive, milestone-candidate, milestone:M58-dir040-plugin-packaging |
+
+## M59 — M59-dir042a-dod-gate-set (DIR-042-A)
+
+**Task:** [[DIR-042-A]] (`tasks/DIR-042-A.md`) — DIR-042 child A: deliver a generic, runner-agnostic
+DoD gate SET (test-pass / coverage-floor / red-green) as a product deliverable, parameterized entirely
+by workspace config (command + threshold), with zero test-runner/language name anywhere in delivered
+`packages/**` code; then re-express at least one of exp5's own `it0-*.sh` DoD checks as a CONSUMER of
+the new product gate(s), closing the single-source gap DIR-042's Finding identified. **Merge commit:**
+merge of `milestones/M59-dir042a-dod-gate-set` (build `60545cf`) into `master` at this ABSORB (worktree
+`milestones/M59/worktrees/iteration-0`, base `master` `309bbd4`, the DIR-042 SPLIT commit).
+
+**Independent audit verdict: PASS-WITH-QUALIFICATIONS, zero required fixes.** An independent audit,
+with no access to the build-phase agent's self-report, confirmed all 4 AC + 4 DoD clauses; the
+completion step (this ABSORB) independently re-verified the audit's key claims itself before the
+checklist write-back (the audit used an Explore agent with no Edit access, so ticking fell to
+completion, per the normal DIR-020 convention):
+- **Zero runner-name leak (AC1)**: `grep -riE 'vitest|node --test|go test|pytest|jest' packages/*/src
+  packages/*/bin -r` over delivered code → **no matches**, re-run directly.
+- **Coverage-floor genuinely PASS/FAIL (AC2)**: `packages/quay/test/dod-gate-set.test.mjs`, 20/20 pass,
+  re-run directly — real scratch-workspace RED case (`echo coverage: 42.0%` vs floor 80 → fails,
+  reason matches `/42/` and `/below floor/`) and GREEN case (`echo coverage: 95.5%` vs floor 80 →
+  passes), plus an exact-floor boundary (`80%` vs floor 80 → passes, `>=` semantics), a custom-pattern
+  override case, and fail-closed behavior on missing command/floor/unparseable output — all via the
+  same `loadWorkspaceGates()` config-loading path `quay gate` itself uses (not a fixture-only
+  assertion bypassing the real loader).
+- **exp5 consumer re-expression, single-source (AC3)**: `.quay/gates.yml` gained a `testPass` entry
+  `it0-dod-check-tests` running `node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs`;
+  `node packages/quay/bin/quay.js gate DIR-042-A --gate it0-dod-check-tests` → **PASS**, re-run
+  directly. The check LOGIC ("run a command, PASS iff exit 0") lives once in `makeTestPassGate`, not
+  duplicated in exp5's own script — judged by the audit (and independently confirmed here) as
+  satisfying the AC's actual wording; this is additive dogfooding (no prior gate existed for this check
+  before), not required to delete the pre-existing `it0-dod-check.sh` shell entry point, which remains
+  a valid separate invocation.
+- **delivery-standalone-smoke stays 0 RED (AC4)**: re-run directly, **5/5 checks pass, 0 RED**.
+- `node packages/quay/bin/quay.js gate DIR-042-A --gate dod` → **PASS** (re-run after the checklist
+  write-back; the pre-write-back gate failure was solely the unticked-checkbox gap, as expected).
+
+**Test-floor (this ABSORB's own independent re-run, before merge):** quay core (excluding
+`serve-github`/`provider-abi-conformance`) — **284 tests, 280 pass, 4 pre-existing flaky failures**
+(`dir032-audit-independence` E3 A2 / M44 A2 / M44 C1, `web-ui-browser`) — same class flagged at every
+prior ABSORB since M56/M57/M58, confirmed NOT introduced by this milestone (identical failure set,
+same reasons).
+
+**Disclosed gap judged non-blocking** (per the audit, spot-checked, not re-litigated here):
+coverage-floor's regex extraction is best-effort (overridable via an optional `pattern` param) — not a
+requirement violation since AC2 only requires the command+threshold be workspace-configurable, which
+they are.
+
+**Impl-row (Clause 4):** N/A — real code-landing milestone (the task's own AC/DoD are the real-landing
+proof), not a design-only artifact needing a future implementing row.
+**Line-budget (Clause 3):** N/A — no formal charter file authored; executed directly from the
+directive's own Proposal + Requested action + AC/DoD.
+**Split-or-commit (Clause 9):** DIR-042 was already SPLIT into children A/B at `309bbd4` (this
+milestone's own base commit) per DIR-026; this ABSORB lands child A only. Parent [[DIR-042]] stays
+`status: todo`/`dirStatus: pending` — untouched by this milestone, correctly held per DIR-026 until
+sibling [[DIR-042-B]] (the loop-driver skill) also lands.
+
+**Realized Δv**: capability-growth (primary) — the product's gate engine now ships a generic,
+workspace-configurable DoD gate SET (test-pass/coverage-floor/red-green) usable by ANY foreign project
+via pure `.quay/gates.yml` data, not locked to exp5's own node:test-shaped `it0-*.sh` scripts; exp5
+itself now dogfoods the product gate for its own DoD meta-enforcer regression suite, proving
+single-source (ADR-004). No new VT chart-1 cell claimed at this ABSORB (a gate-engine/tooling surface,
+not a chart-1-scored capability axis) — consistent with DIR-040/DIR-041's precedent of
+capability-growth milestones landing outside the chart-1 scoring domain. `milestone_counter` → **59**
+(59 % 5 != 0 — no checkpoint due, next checkpoint at m60, the VERY NEXT milestone).
+
+**Backlog housekeeping**: `tasks/DIR-042-A.md` — all 4 AC + 4 DoD checkboxes ticked at this completion
+step per independently-verified evidence (see above); `status: todo` → `done`, `extra.dirStatus:
+pending` → `resolved`. `backlog.md` regenerated via `node
+experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M59/worktrees/iteration-0` removed (`git worktree
+remove`), `milestones/M59-dir042a-dod-gate-set` branch deleted (`git branch -d`, fully merged,
+confirmed ancestor of `master` before deletion).
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 59, not a multiple of 5; next
+checkpoint due at `milestone_counter` = 60 — the VERY NEXT milestone).
+
+**Note on off-loop human activity since the M58 ABSORB:** `master` advanced with further human-authored,
+off-loop commits between this milestone's worktree branching (`309bbd4`, the DIR-042 SPLIT commit) and
+this ABSORB, including DIR-044 approval/merge and the TS-migration-P0 approval/merge. Confirmed no
+conflict with this milestone's own merge (clean dry-run merge test performed before the real merge via
+`git merge-tree`; no conflict markers in the resulting tree, both hunks purely additive).
+
+## Backlog row
+| DIR-042-A | the gate ENGINE was already data-driven (ADR-013), but the DoD-check LOGIC (test-pass / coverage-floor / RED→GREEN evidence) existed only as exp5's own `experiments/quay-perpetual-stream/scripts/it0-*.sh`, node:test-shaped and exp5-located — a foreign project had to reimplement rather than configure it; closed via 3 new generic gate factories (`makeTestPassGate`/`makeCoverageFloorGate`/`makeRedGreenGate`) parameterized purely by `.quay/gates.yml` workspace data, plus exp5's own it0-dod-check regression suite re-expressed as a CONSUMER of the new `test-pass` gate | capability-growth (primary) | no new VT chart cell (gate-engine/tooling surface, not a chart-1-scored axis) | directive, milestone-candidate, milestone:M59-dir042a-dod-gate-set |
