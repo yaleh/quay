@@ -1,0 +1,43 @@
+# provider.yml — the Backlog.md Provider's static self-declaration
+# (quay-proposal.md §10). Travels with the Provider.
+#
+# DIR-039 (B): a READ-ONLY provider over a Backlog.md board (markdown +
+# YAML-frontmatter task files, e.g. archguard's own `backlog/tasks/*.md`).
+# Deliberately read-only (capabilities.data.write: false) — this milestone's
+# scope is IMPORT (making a Backlog.md board readable through the Provider
+# ABI so DIR-039 (A)'s generic `quay migrate` can consume it), not adding a
+# new write surface onto someone else's board format.
+
+id: backlog
+name: "quay-backlog"
+description: >
+  Backlog.md board Provider (v1, read-only): maps a local Backlog.md board's
+  markdown+frontmatter task files onto the canonical task view-model
+  (DESIGN.md). Third heterogeneous backend, proving the ABI transfers again
+  (DIR-039) — read-only, no write/gate surface.
+
+capabilities:
+  data.read: true     # task_list, task_get — required
+  manifest: true      # this file / provider://manifest — required
+  data.write: false   # read-only by design (see header note above)
+  gate: false         # no gate/acceptance-meter concept on a Backlog.md board
+  skill: false        # no status_skill_map / action_buttons — read-only, no lifecycle to drive
+
+# status model (design §3) — same 4-state vocabulary as every other
+# Provider; Backlog.md's own free-form status strings ("Basic: Backlog",
+# "Epic: Done", ...) are mapped onto this model by backlog-client.js's
+# mapStatus() (see that function's own doc comment for the exact rule).
+statuses:
+  - id: todo
+    terminal: false
+  - id: ready
+    terminal: false
+  - id: done
+    terminal: true
+  - id: "needs-human"
+    terminal: true
+
+env:
+  QUAY_BACKLOG_TASKS_DIR: null   # documentary — actual value supplied via .quay/config.yml's provider.env
+
+mcp_entry: ["node", "./bin/quay-backlog.js", "mcp"]
