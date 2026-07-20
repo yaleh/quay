@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 56** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M56 ABSORB header sync): body log's m56 ABSORB entry below sets milestone_counter → 56;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55).
-56 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m60). -->
+**milestone_counter: 57** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M57 ABSORB header sync): body log's m57 ABSORB entry below sets milestone_counter → 57;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56).
+57 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m60). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -5238,3 +5238,119 @@ dry-run merge test performed before the real merge). Neither directive is touche
 
 ## Backlog row
 | exp5-M-GATE-CLI-ERROR-UX | QENG gate/lifecycle/`run` CLI surface had raw Node stack traces on 3 known guarded-error shapes (unknown gate / no such task / illegal transition) instead of `complete`'s clean one-line message, and `quay run` leaked `process.exitCode=1` from an earlier per-task acceptance-gate fail into an otherwise-clean `fixpoint` stop — fixed via `withGuardedErrors`/`GUARDED_ERROR_PATTERN` helper (5 commands wrapped) + an unconditional `process.exitCode = r.stopped === "cap" ? 1 : 0` reset, both regression-tested at the CLI-subprocess level | capability-growth/robustness (primary) | no new VT chart cell (UX/robustness fix) | milestone-candidate, surface:cli, milestone:M37-discover-post-qeng, milestone:M56 |
+
+## M57 — M57-dir041-github-writeback (DIR-041)
+
+**Task:** [[DIR-041]] (`tasks/DIR-041.md`) — quay-github WRITE-BACK: lift the GitHub provider out of
+read-only v1 by implementing `task_write` CREATE (POST a new GitHub issue) via the Provider ABI, so
+quay can MANAGE (not just view) a GitHub-backed project. **Merge commit:** merge of
+`milestones/M57-dir041-github-writeback` (build `2fd513a`) into `master` at this ABSORB (worktree
+`milestones/M57/worktrees/iteration-0`, base `master` `3195c2e`, the M56 ABSORB commit).
+
+**Build-phase correction on landing (recorded in-task, `## Finding (correction, M57 build)`):** the
+directive's own framing ("read-only v1", "github write ≈ 1/5") was stale by build time — title/body/
+labels write (M09-gh-write) and parent/children write via the body-checkbox convention
+(M12-abi-parent-write) had already landed and were already live-tested against real yaleh/quay
+issues (gh-3/gh-4/gh-5/gh-7/gh-11/gh-12/gh-13/gh-14). PR-ABI-001's "silent field drop" was likewise
+already closed pre-M57 (`TASK_WRITE_SUPPORTED_FIELDS` allowlist + zod `.catchall` hard-error floor in
+`mcp-server.js`). The genuinely missing piece was narrower than the Proposal stated: **CREATE**
+(POST a brand-new issue, since GitHub assigns issue numbers itself and no prior convention let a
+caller name an as-yet-nonexistent id) — this milestone closes exactly that gap.
+
+**Independent audit verdict: PASS, zero required fixes.** An independent audit, with no access to the
+build-phase agent's self-report, confirmed:
+- **Real round-trip**: issue **gh-30** created on `yaleh/quay` via `task_write id:"gh-new"` (title +
+  body + labels), then closed via `task_write status:"done"` — independently cross-checked with
+  `gh issue view 30 --repo yaleh/quay` (title/body/label/`state:CLOSED` all match). Edit-field write
+  (title/body/labels/status/parent/children) was already real-landed pre-M57 against gh-3/gh-5/gh-7/
+  gh-11/gh-12/gh-13/gh-14; CREATE was the sole delta this milestone added.
+- **PR-ABI-001 re-confirmed closed** after adding CREATE: `task_write-hard-error-floor-probe` in
+  `provider-abi-conformance.test.mjs` still asserts an unsupported field (e.g. `assignee`) returns
+  `isError:true`, never a silent drop.
+- **Single-source**: `create()` calls `ghApiJson`, built on the same shared `execGh` runner (DIR-037)
+  as every other write path — no ad-hoc `execFileSync("gh", …)` introduced.
+- **6 new RED→GREEN tests** (`create.test.mjs`, `create-mcp.test.mjs`) pin the CREATE mapping
+  (missing-title fail-closed, title-only POST, body+labels round-trip, MCP-transport create, and a
+  follow-up edit against the newly-assigned real id).
+- **Provider-ABI conformance suite: 25/25 scenario cells pass** (github write now covered, DIR-037
+  read path unregressed).
+- `node packages/quay/bin/quay.js gate DIR-041 --gate dod` → **PASS**.
+- `delivery-standalone-smoke.sh` → **0 RED** (no experiment-path leaks in delivered source, CLI/gate
+  engine load standalone).
+- `task-schema-check` → **PASS**.
+- quay-github package suite: **all tests green** across `view-model`/`write`/`cli`/`compound-gate`/
+  `gate`/`gate-gameability`/`gh-api-buffer`/`mcp-server`/`pagination`/`task-check-passthrough`/
+  `adr-unsupported`/`create`/`create-mcp` test files.
+- quay core suite (excluding `serve-github`/`provider-abi-conformance`, which hit live GitHub):
+  **260/264 pass, 4 pre-existing flaky failures** (`dir032-audit-independence` E3 A2 / M44 A2 / M44
+  C1, `web-ui-browser`) — same known baseline class flagged at every recent ABSORB, no new
+  regressions.
+- **One flagged process deviation** (not a landing defect): the build phase self-ticked DIR-041's
+  AC/DoD checkboxes itself, rather than leaving that to the completion/audit step per the normal
+  DIR-020 convention (build proposes evidence, completion/audit ticks). The audit independently
+  re-verified every ticked box against real evidence and found all of them genuinely supported, so no
+  re-derivation was needed at this ABSORB — but future build phases should leave AC/DoD ticking to
+  the completion step.
+
+**Mechanical gates (real runs, this ABSORB, from inside the worktree/master before + after merge):**
+```
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 57 experiments/quay-perpetual-stream/v-meta-ledger.md
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh   → tree-hygiene: clean.
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+$ node packages/quay/bin/quay.js gate DIR-041 --gate dod   → PASS
+```
+**Test-floor (this ABSORB's own independent re-run, before merge, `packages/quay-github` full suite +
+`packages/quay` excluding `serve-github`/`provider-abi-conformance`):** quay-github — all test files
+green (13 files, incl. the 2 new CREATE test files). quay core — **264 tests / 260 pass / 4 fail** —
+identical known pre-existing flaky baseline (`dir032-audit-independence` E3 A2/M44 A2/M44 C1,
+`web-ui-browser`); no new regressions from this milestone's change. `delivery-standalone-smoke.sh` →
+0 RED, re-run independently at this ABSORB (not just trusted from the audit).
+
+**Impl-row (Clause 4):** N/A — real code-landing milestone (the task's own AC/DoD are the
+real-landing proof), not a design-only artifact needing a future implementing row.
+**Line-budget (Clause 3):** N/A — no formal charter file authored; executed directly from the
+directive's own Proposal + AC/DoD (SPLIT-OR-COMMIT's "if split" condition never triggered — see the
+task's own DoD note on the deliberately-unchecked 4th DoD box).
+**Split-or-commit (Clause 9):** N/A — no `needs-human` outcome; the sole remaining gap (CREATE) fixed
+in full, single milestone, not split into children.
+
+**Realized Δv**: capability-growth (primary) — GitHub-backed projects can now be fully MANAGED
+through quay (create + edit + status + labels + children), not just viewed; closes the last hole in
+the Provider ABI's write-half parity across native/github providers. VT chart-1 total unchanged at
+**111.55/120** (Provider-ABI VT-cell ceiling artifact, open since cp-35: `cov=1.0000` since m12 means
+no further github-provider fix registers a new chart-1 Δv — a pre-existing, tracked scoring-ceiling
+limitation, not a judgment that this fix lacks real value). `milestone_counter` → **57** (57 % 5 != 0
+— no checkpoint due, next checkpoint at m60).
+
+**Backlog housekeeping**: `tasks/DIR-041.md` → `status: done`, `extra.dirStatus: resolved` (both were
+stale at `todo`/`pending` in the build-phase commit despite all AC/DoD checkboxes being ticked;
+corrected at this completion step, consistent with the DIR-020 convention). `backlog.md` regenerated
+via `node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M57/worktrees/iteration-0` removed (`git worktree
+remove`), `milestones/M57-dir041-github-writeback` branch deleted (`git branch -d`, fully merged,
+confirmed ancestor of `master` before deletion). `worktree-branch-hygiene-check.sh`/
+`tree-hygiene-check.sh` both report clean, 0 registered worktrees post-prune.
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 57, not a multiple of 5; next
+checkpoint due at `milestone_counter` = 60, last written cp-55 at m55).
+
+**Note on off-loop human activity since the M56 ABSORB:** `master` advanced with one further
+human-authored, off-loop commit between this milestone's worktree branching (`3195c2e`) and this
+ABSORB: `DIR-036-B` prereq-gating + no-split decision (`8c293fa`/`7f95c3c`), authored per DIR-027
+steering hygiene. Confirmed no conflict with this milestone's own merge (clean dry-run merge test via
+a disposable worktree performed before the real merge). `DIR-036-B` remains `todo`, human-steered/
+pending — out of scope for this milestone, not touched.
+
+**DRAIN disposition of `directives/pending/` (task-canonical, per DIR-028) at this boundary:**
+`DIR-036` (parent) remains `todo`/unblocked, a legitimate future SELECT candidate now that one more of
+its listed prereqs (DIR-041) is done — its `blockedBy` note (set at DIR-036-B) already anticipated
+this. `DIR-036-A` is `done`; `DIR-036-B`/`DIR-038`/`DIR-039` remain `todo`, human-steered/pending, not
+autonomously actionable without explicit human go-ahead. `DIR-040` remains `status: todo`/
+`dirStatus: pending` in its frontmatter despite being real-landed pre-M56 (a pre-existing bookkeeping
+gap noted here for visibility, not fixed by this milestone — out of DIR-041's scope).
+
+## Backlog row
+| DIR-041 | quay-github's `task_write` supported edit (title/body/status/labels/children) but NOT create — a GitHub-backed project could be VIEWED but not fully MANAGED through quay, the last hole in Provider-ABI write parity; closed via a new `create()` (POST through the shared `execGh`/`ghApiJson` helper, fail-closed on missing title), 6 new RED→GREEN tests, and a REAL round-trip (issue gh-30 created+closed on yaleh/quay, cross-checked via `gh issue view`) | capability-growth (primary) | no new VT chart cell (Provider-ABI VT-cell ceiling artifact, open since cp-35) | directive, milestone-candidate, milestone:M57-dir041-github-writeback |
