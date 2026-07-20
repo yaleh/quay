@@ -1,10 +1,9 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 43** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M44 SELECT, non-blocking header sync): body log's m43 ABSORB entry already set
-milestone_counter → 43; this header field was stale at 42 (same staleness pattern flagged once
-before at m39, see line ~3490 history) — corrected here so DRAIN/SELECT reads the true state. -->
+**milestone_counter: 44** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M44 ABSORB header sync): body log's m44 ABSORB entry below sets milestone_counter → 44;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -4037,3 +4036,95 @@ directly). Predicted `Y` (realized-Δv metric): (a) `OUTER-LOOP.md` §6 no longe
 registered as a named engine gate; (c) whether a REAL independent-audit proof can be obtained THIS
 pass depends on whether the top-level session (not this nested one) can genuinely dispatch a fresh
 `Explore`/`general-purpose` subagent — tracked explicitly as a pending TODO, not assumed.
+
+## ABSORB m44 — M44-dir032-audit-independence — 2026-07-20
+
+**Task:** `exp5-M-DIR032-AUDIT-INDEPENDENCE` (DIR-032, both requested-action halves in one
+milestone, per SELECT's governance/infra hard floor above). **Charter:**
+`experiments/quay-perpetual-stream/charters/M44-dir032-audit-independence.md`. **Merge commit:**
+merge of `m44-dir032-audit-independence-iteration-0` (worktree HEAD `3feaa95`, built commit
+`bcbeda9`) into `master`, `--no-ff`, clean (no conflicts).
+
+**Delivered** (built by the inner worker, worktree-isolated, then independently audited):
+`experiments/quay-perpetual-stream/scripts/audit-independence-check.mjs` (+ `.sh` wrapper + 4-case
+selfcheck + 3 fixtures under `experiments/quay-perpetual-stream/fixtures/audit-independence/`) — the
+single canonical fail-closed independence rule (absent id → FAIL; id equals orchestrator's own →
+FAIL self-audit; distinct id → PASS); `experiments/quay-perpetual-stream/test/audit-independence-check.test.mjs`
+(20/20, 98.37% line coverage); a new `"audit-independence"` named gate in
+`packages/quay/src/gate/registry.js` (same `makeIt0Gate` thin-wrap pattern as `vmeta-lag`/
+`dogfood-evidence`, M39/M43 precedent) with `packages/quay/test/dir032-audit-independence.test.mjs`
+(14/14, including a real run of the gate against the ACTUAL M43 self-audit artifact — correctly
+FAILs, proving the closed hole is real, not fixture-only); and the `OUTER-LOOP.md` §6 edit replacing
+`baime:iteration-executor` with generic `Explore`/`general-purpose` subagent language + explicit
+BLOCKING-not-license wording (grep-verified: 0 remaining references inside the acceptance-audit
+block).
+
+**Adversarial audit — genuinely independent this time, per DIR-032's own fix (closes the M41→M42→M43
+self-audit streak, DEV-06/07/08):** the inner worker (worktree-isolated, itself forbidden by DIR-032's
+rule from dispatching further subagents) stopped at a DRAFT ABSORB entry (`audits/PENDING.md`) with
+the audit verdict explicitly marked TODO. The TOP-LEVEL loop session then dispatched a fresh-context
+`Explore`-type subagent, distinct from the builder's own session, to perform the audit for real. That
+audit's own recorded session id is `top-level-orchestrator-dispatch-explore-agent-m44-20260720-fresh-context`,
+distinct from the builder session id used as the `--orchestrator-id` comparison
+(`m44-inner-worker-builder-session`) — the `audit-independence` gate PASSes against this real pairing
+(see below), demonstrating the mechanism operates on its own real deliverable, not only fixtures.
+
+**adversarial-audit verdict: NO REFUTATION FOUND** (PASS) — all 4 ACs confirmed met by direct
+inspection of real artifacts (grep output, test runs, gate invocations), not self-report; all 5 DoD
+clauses satisfied, including Clause 1 (the real independent-audit proof previously deferred at M43's
+handling of DIR-032 is now supplied by THIS audit itself). Full detail:
+`milestones/M44-dir032-audit-independence/audits/iteration-0-acceptance-audit.md`.
+
+**Mechanical gates (real runs, this ABSORB):**
+```
+$ node packages/quay/bin/quay.js gate exp5-M-DIR032-AUDIT-INDEPENDENCE                    → PASS
+$ node packages/quay/bin/quay.js gate exp5-M-DIR032-AUDIT-INDEPENDENCE --gate audit-independence → PASS
+```
+Both produce durable GateEvents in `quay gate-log exp5-M-DIR032-AUDIT-INDEPENDENCE --json` (pasted
+in full in the audit file above). `it0-dod-check.mjs` (bare, same clause set): all 9 clauses
+PASS/N/A (clause0 checklist 4/4 AC boxes ticked by this audit's write-back; clause9 N/A — no
+`needs-human` outcome). Line-budget gate: PASS (charter within small-milestone norm).
+
+**V_meta consolidation-lag gate: clear** — no new v-meta-ledger insight claimed by this milestone;
+DEV-06/07/08 rows confirmed still present in `inherited-core.md`, not re-added, no rows past K=2
+requiring action (AC4 confirmed).
+
+**Tests:** full non-live-GitHub suite re-run at ABSORB: 196/197 pass — the 1 remaining failure
+(`web-ui-browser.test.mjs`) is the same pre-existing browser-e2e failure confirmed to reproduce
+identically on `master` HEAD directly, unrelated to this milestone.
+
+**Realized Δv**: governance-integrity (primary — closes a 3-milestone-long silent self-audit
+degradation of the loop's strongest verification gate) + risk/option (secondary — the degradation
+pattern cannot recur silently: a self-audit now HARD-fails `milestone_counter++` via the
+`audit-independence` gate). No VT chart cell (same no-VT-cell precedent as the DoD-program lineage).
+VT chart-1 total unchanged: **111.55/120**. `milestone_counter` → **44**.
+
+**Backlog housekeeping**: `tasks/exp5-M-DIR032-AUDIT-INDEPENDENCE.md` → `status: done`, all 4 AC +
+5 DoD checklist boxes ticked (audit write-back, not self-ticked), `## Execution record` to be
+appended. `backlog.md` regenerated via
+`node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream
+--write`.
+
+**Checkpoint disposition:** NOT due this ABSORB (`milestone_counter` = 44, not a multiple of 5; next
+due at m45, last written `cp-40.md` at m40).
+
+**DIR-032 disposition:** **RESOLVED** — both requested-action halves (the `OUTER-LOOP.md` §6
+generic-vehicle doc edit, and the mechanical `audit-independence-check.mjs` HARD gate) are landed,
+merged to `master`, and independently audit-verified this same pass, closing the deferral M43's
+ABSORB explicitly disclosed (never silently assumed done). See `tasks/DIR-032.md`'s own
+`## Resolution` section for the full disposition record superseding M43's partial handling.
+
+**DIR-030 disposition:** unchanged from M43 — `exp5-M-CRYST-D1` remains the first fully-eligible,
+un-gated capability-growth candidate, carried forward to m45's SELECT (see `## Not selected (M44)`
+on `tasks/exp5-M-CRYST-D1.md`).
+
+**DRAIN disposition of `directives/pending/` (task-canonical, per DIR-028) at this boundary:**
+`DIR-032` flips from `pending` to `resolved`. Remaining open directive tasks carried forward
+unchanged from M43's disposition: `DIR-014` (phase 1 only), `DIR-021` (delivered, stays pending per
+escrow discipline), `DIR-022` (parent, phase 1 + remainder landed), `DIR-023`, `DIR-024` (Layers
+3-4), `DIR-026` (SPLIT-OR-COMMIT), `DIR-031` (landed off-loop, no further action). m45 SELECT should
+consider **`exp5-M-CRYST-D1`** as the leading eligible capability-growth candidate — no competing
+governance-integrity candidate is currently open at the same urgency DIR-032 carried.
+
+## Backlog row
+| exp5-M-DIR032-AUDIT-INDEPENDENCE | DIR-032: generic-vehicle OUTER-LOOP audit dispatch + machine-checkable audit-independence HARD gate | governance-integrity (primary) + risk/option (secondary) | no VT chart cell | milestone-candidate, human-steered, governance-integrity, surface:cli, milestone:M44-dir032-audit-independence |

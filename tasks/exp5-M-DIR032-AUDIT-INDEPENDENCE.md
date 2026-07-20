@@ -2,7 +2,7 @@
 id: exp5-M-DIR032-AUDIT-INDEPENDENCE
 title: "DIR-032: generic-vehicle OUTER-LOOP audit dispatch + machine-checkable audit-independence
   HARD gate (close both halves together, per SELECT's governance/infra hard floor)"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - governance-integrity
@@ -102,3 +102,18 @@ a script existing / a fixture green / a doc edited are necessary but NOT suffici
       nested-session constraint DIR-032 diagnoses), the doc+gate build still lands for real this
       pass, and the FIRST REAL independent-audit proof is deferred explicitly to the top-level
       session's next dispatch — NOT silently treated as already proven.
+
+## Execution record
+Milestone M44-dir032-audit-independence, iteration-0. Inner worker built both requested-action
+halves in an isolated worktree (`audit-independence-check.mjs` + fixtures + tests, `registry.js`
+`audit-independence` gate + tests, `OUTER-LOOP.md` §6 generic-vehicle edit) and stopped at a DRAFT
+ABSORB entry (verdict TODO), per DIR-032's own rule forbidding a nested subagent from dispatching
+further subagents. The TOP-LEVEL loop session then dispatched a genuinely independent, fresh-context
+`Explore`-type subagent (distinct session id) to audit the real worktree artifacts. Verdict: PASS,
+all 4 ACs and all 5 DoD clauses independently confirmed — see
+`milestones/M44-dir032-audit-independence/audits/iteration-0-acceptance-audit.md`. Both gates
+(`quay gate exp5-M-DIR032-AUDIT-INDEPENDENCE` and `--gate audit-independence`) PASS with durable
+GateEvents. Merge: `--no-ff` merge of `m44-dir032-audit-independence-iteration-0` into `master`,
+clean, no conflicts. Realized Δv: no VT chart cell (governance-integrity/risk-option, mirrors the
+DoD-program lineage's own no-VT-cell precedent). DIR-032 fully resolved (see `tasks/DIR-032.md`'s
+`## Resolution (M44 ABSORB, RESOLVED)`).
