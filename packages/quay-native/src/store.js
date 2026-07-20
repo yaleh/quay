@@ -1,3 +1,4 @@
+// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay-native core: task store logic (raw file ops).
 // One core implementation, consumed identically by the CLI (bin/quay-native.js)
 // and the MCP server (src/mcp-server.js) — design §6 CLI/MCP symmetry.

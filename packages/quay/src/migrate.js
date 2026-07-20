@@ -1,3 +1,4 @@
+// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // DIR-039 (A): generic provider-to-provider migration over the Provider ABI.
 // The Core is written against the task view-model only (CLAUDE.md) — this
 // module reads EVERY task from a source provider client via `taskList`/
