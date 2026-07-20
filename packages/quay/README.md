@@ -203,6 +203,127 @@ $ node packages/quay/bin/quay.js action run QN-001 advance
   ...
 ```
 
+### Gate & lifecycle commands (QENG-1..4)
+
+`quay` ships a small **gate engine + lifecycle-transition layer** on top of
+the same task view-model: a **gate** evaluates a named check against a task
+and appends an immutable **GateEvent** to
+`<workspaceRoot>/.quay/gate-events.jsonl` (gitignored); **lifecycle** verbs
+drive a task's `status` forward/backward over the `{todo, ready, done,
+needs-human}` phases, each write itself gated by a gate check. A **driver**
+loop (`run`) scans the board and drives every actionable task through
+`complete`, unattended.
+
+#### `quay gate <task-id> [--gate <name>]` / `quay gate --list`
+
+Runs a named gate check against `<task-id>` and appends a GateEvent (see
+`gate-log` below). Exit code mirrors the verdict: `0` = PASS, `1` = FAIL.
+
+- (no `--gate`) — runs the **`acceptance`** gate: executes
+  `task.extra.acceptance` (set via `task edit --acceptance <cmd>`, see
+  above) as a shell command. **Fail-closed** if `extra.acceptance` is unset
+  (no runnable meter = FAIL, not a silent pass).
+- `--gate dod` — runs the **`dod`** gate: a status-relative check (the same
+  one `task check` runs) that a task's Proposal/Plan/Acceptance
+  Criteria/Definition of Done sections are actually present before it may
+  advance `todo -> ready`.
+- `--gate <name>` — select any other registered gate (e.g. a workspace's own
+  named gates declared in `.quay/gates.yml`, if present).
+- `--list` (no task id required) — list every registered gate name for this
+  workspace instead of running one.
+
+```
+$ node packages/quay/bin/quay.js gate --list
+dod
+acceptance
+
+$ node packages/quay/bin/quay.js task edit DEMO-1 --acceptance true --json
+{ "id": "DEMO-1", "extra": { "acceptance": "true" }, ... }
+
+$ node packages/quay/bin/quay.js gate DEMO-1
+PASS
+```
+
+(Example output for a fresh/minimal workspace; a workspace with `.quay/gates.yml` custom gates —
+like this repo's own — will list additional named gates beyond `dod`/`acceptance`.)
+
+#### `quay gate-log <task-id> [--gate <name>] [--json] [--file <log-path>]`
+
+Prints the GateEvent history for `<task-id>` — the audit trail every `gate`/
+lifecycle-verb call appends to. Human-readable by default; `--json` prints
+the raw GateEvent array. `--file <log-path>` overrides the log path (default
+`<workspaceRoot>/.quay/gate-events.jsonl`).
+
+```
+$ node packages/quay/bin/quay.js gate-log DEMO-1
+2026-07-20T10:25:04.436Z acceptance pass
+
+$ node packages/quay/bin/quay.js gate-log DEMO-1 --json
+[
+  {
+    "id": "0583c50b-...",
+    "item_id": "DEMO-1",
+    "gate": "acceptance",
+    "actor": "quay-cli",
+    "verdict": "pass",
+    "timestamp": "2026-07-20T10:25:04.436Z",
+    "payload": { "reason": "acceptance passed (exit 0)" }
+  }
+]
+```
+
+#### Lifecycle verbs — `complete` / `adjudicate` / `promote` / `retreat`
+
+These are the status-writing verbs over the `{todo, ready, done,
+needs-human}` phases; each forward write runs a gate check first and refuses
+to write on FAIL.
+
+- **`quay complete <task-id> [--file <log-path>]`** — precondition
+  `status=ready`; runs the `acceptance` gate; on PASS writes `status=done`
+  (exit 0); on FAIL leaves status unchanged (exit 1). A task not in `ready`
+  exits 1 with no gate run and no write.
+- **`quay adjudicate <task-id> [--file <log-path>]`** — an independent,
+  read-only audit pass: records an audit GateEvent but never writes
+  `status`. Always exits 0.
+- **`quay promote <task-id> [--file <log-path>]`** — advances exactly one
+  legal forward step: `todo -> ready` via the `dod` gate, or `ready -> done`
+  via the same path as `complete`.
+- **`quay retreat <task-id> --reason <reason> [--file <log-path>]`** — moves
+  exactly one legal step backward (`done -> ready`, `ready -> todo`).
+  `--reason` is required and is recorded in the GateEvent. An illegal
+  transition (e.g. retreating from `todo`) exits nonzero with a message.
+
+```
+$ node packages/quay/bin/quay.js complete DEMO-1
+PASS — status=done
+
+$ node packages/quay/bin/quay.js retreat DEMO-1 --reason "re-open for a fix"
+RETREAT done → ready (re-open for a fix)
+
+$ node packages/quay/bin/quay.js promote DEMO-1
+PASS — status=done
+```
+
+#### `quay run [--once] [--file <log-path>]`
+
+The autonomous driver loop, **as code**: scans the board for actionable
+`ready` tasks (status `ready` AND a non-empty `extra.acceptance` meter) and
+drives each through `complete`, lowest task-id first (deterministic).
+
+- `--once` — process exactly ONE actionable task then stop; always exits 0
+  (a meter FAIL is recorded as a GateEvent and leaves the task `ready`, not
+  treated as an error). No actionable task -> prints `nothing to do`, exit 0.
+- (no flag) — loops to a fixpoint (no actionable tasks left) or until the
+  stop sentinel `<workspaceRoot>/.quay/.stop` appears (checked at each
+  iteration boundary); both exit 0. Only the runaway safety ceiling
+  (`maxIterations`) exits 1.
+
+```
+$ node packages/quay/bin/quay.js run --once
+FAIL — acceptance failed (exit 1)
+DEMO-2: FAIL — acceptance failed (exit 1) (left ready)
+```
+
 ### `quay serve [--port <port>]`
 
 Starts the web UI (task list + detail pages). The list page supports the
