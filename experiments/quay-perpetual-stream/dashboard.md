@@ -1,7 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 42** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 43** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M44 SELECT, non-blocking header sync): body log's m43 ABSORB entry already set
+milestone_counter → 43; this header field was stale at 42 (same staleness pattern flagged once
+before at m39, see line ~3490 history) — corrected here so DRAIN/SELECT reads the true state. -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -3958,3 +3961,79 @@ candidate — a judgment call for the next pass, not resolved here.
 
 ## Backlog row
 | exp5-M-DIR022-REMAINING-GATES | DIR-022 remainder — vmeta-lag + dogfood-evidence registered as named engine gates; escrow-Δv/test-floor/audit non-duplication documented; multi-gate real ABSORB proof | governance-integrity (primary) + capability-growth (secondary) | no VT chart cell | milestone-candidate, surface:cli, milestone:M43-dir022-remaining-gates |
+
+---
+
+### M44 SELECT (2026-07-20)
+
+**Header sync (non-blocking):** the dashboard header's `milestone_counter` field was stale at 42
+(the m43 ABSORB log entry above already set it to 43) — corrected at the top of this file before
+this SELECT read state, same staleness class flagged once before at m39.
+
+**Candidate set considered** (`task_list --label milestone-candidate --status todo`, human-steered
+D2/F1/TS-MIGRATION excluded per the standing fence): `exp5-M-CLI-UX` (STALE), `exp5-M-CRYST` (epic,
+not directly selectable), `exp5-M-CRYST-B4/B5/B6/C1/D4/E2/INV`, **`exp5-M-CRYST-D1`** (now eligible
+— DIR-030's ≥3/4 window closed at m43), **`exp5-M-DIR032-AUDIT-INDEPENDENCE`** (NEW this pass —
+authored below to disposition the pending `DIR-032` directive), `exp5-M-DIRTASK`/`exp5-M-DOCS`
+(STALE), `exp5-M-GATE-CLI-ERROR-UX/HELP-SYNOPSIS-GAP/MCP-PARITY-GAP/README-DOCS`.
+
+**Decision: SELECT `exp5-M-DIR032-AUDIT-INDEPENDENCE` for M44, over D1.**
+
+Reasoning (`inherited-core.md`'s value-typed SELECT ledger, applied explicitly):
+1. **Value type.** DIR-032 is `governance-integrity` (the ABSORB adversarial audit — the loop's
+   single strongest verification gate, the verification-asymmetry guarantee ADR-005 depends on —
+   has silently degraded to self-audit for THREE consecutive milestones, M41→M42→M43, each time
+   still reporting "NO REFUTATION FOUND") + `risk/option` (closing a repeat-degradation pattern
+   before a 4th instance). D1 is `capability-growth` (real, foundational, now eligible, but not
+   itself decaying while it waits).
+2. **Governance/infra hard floor (mandatory check, applied here):** DIR-032's own two requested
+   actions — (a) the `OUTER-LOOP.md` §6 generic-vehicle doc edit, and (b) the mechanical
+   `audit-independence-check.mjs` HARD gate — are its OWN enabling+enforcement halves. Both are
+   scoped together into `exp5-M-DIR032-AUDIT-INDEPENDENCE` (authored this pass, `tasks/
+   exp5-M-DIR032-AUDIT-INDEPENDENCE.md`, schema v1, `task-schema-check.sh` PASS) precisely so this
+   candidate does NOT repeat the DIR-002/DIR-006 "declare but don't enforce" failure the ledger's
+   hard floor names — a scope covering only the doc half (or only the gate half) would have been
+   rejected/resized here, never dispatched partial.
+3. **Ranking discipline** (`inherited-core.md`: "a candidate with zero/negative VT Δv̂ but a
+   governance-integrity/risk-option type can and should outrank a positive-VT capability-growth
+   candidate when the non-VT risk is higher"): DIR-032 carries no VT chart cell (same no-VT-cell
+   precedent as the DoD-program lineage, M25 onward) but the non-VT risk — every milestone this
+   directive stays open, the loop's strongest gate keeps silently degrading, undetected by any
+   mechanical check — is judged higher than deferring D1 one more pass. D1 is fully eligible, not
+   re-gated by any directive, and is recorded as the FIRST candidate for m45 (`## Not selected
+   (M44)` appended to `tasks/exp5-M-CRYST-D1.md`).
+4. **Explore/exploit + class routing.** `exploit`-typed (existing diagnosed gap, known fix shape,
+   direct precedent — the M39/M42/M43 thin-registry-wrapper pattern for the gate half). **Class:
+   development** (deliverable is real product/methodology code — an `OUTER-LOOP.md` doc edit +
+   a new `scripts/audit-independence-check.mjs` module + a `registry.js` gate wire-up) — routes
+   through the `quay-task-to-plan` pipeline (step 5a) per the two-class policy, NOT whole-milestone
+   dual-iteration.
+5. **CORRECTION (caught before dispatch, same SELECT pass): this candidate is driver-self-rewrite,
+   not an ordinary autonomous-SELECT candidate.** Its scope requires editing `OUTER-LOOP.md` itself
+   (§6, the acceptance-audit block) — exactly the class step 1's `human-steered` fence excludes from
+   *autonomous* SELECT (the D3/D2/F1 precedent: "rewriting THIS file / inherited-core / the loop's
+   own skills"). `exp5-M-DIR032-AUDIT-INDEPENDENCE` is therefore labeled `human-steered` at authoring
+   time (not left unfenced) and is being executed under the fence's own named exception — "the D3
+   behavior-preserving + golden-replay discipline" — under **explicit human direction** for this one
+   pass (this milestone was named by the human dispatching this pass, not picked by an unattended
+   autonomous ranking), with a small, additive/behavior-preserving edit + independently fixture-pinned
+   mechanical check. This does NOT set a precedent for autonomous SELECT to un-fence it going forward;
+   a human must remove the label for that.
+
+**Selection write-back:** `exp5-M-DIR032-AUDIT-INDEPENDENCE` labeled `milestone:M44-dir032-audit-independence`
+at dispatch (see task file); `exp5-M-CRYST-D1` got the `## Not selected (M44)` note above (this same
+reasoning, condensed). Other candidates in the considered set were not individually re-compared this
+pass beyond the STALE/human-steered dispositions already on their own task bodies — no new information
+changes their standing.
+
+**Task-schema-check + line-budget gate:** `task-schema-check.sh tasks/exp5-M-DIR032-AUDIT-INDEPENDENCE.md`
+→ PASS (schema v1 conformant, kind=milestone-candidate). Line-budget gate to be run against the drafted
+charter before dispatch (step 4e), per the mechanized it0 checks.
+
+**Value hypothesis (`Δv̂`):** no VT chart cell (governance-integrity type, consistent with the
+DoD-program lineage's own precedent — the gate/doc pair does not grow a chart-0/chart-1 surface
+directly). Predicted `Y` (realized-Δv metric): (a) `OUTER-LOOP.md` §6 no longer names
+`baime:iteration-executor`; (b) `audit-independence-check.mjs` exists, RED+GREEN fixture-pinned,
+registered as a named engine gate; (c) whether a REAL independent-audit proof can be obtained THIS
+pass depends on whether the top-level session (not this nested one) can genuinely dispatch a fresh
+`Explore`/`general-purpose` subagent — tracked explicitly as a pending TODO, not assumed.
