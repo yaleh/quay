@@ -27,3 +27,6 @@ References the standard inherited-core DoD clauses. Real landing:
 
 ## Not selected (M41)
 DIR-030 ranks this #3 in the observe-and-enforce cluster, after G1 and E3. Not selected this pass: G1 is ranked first and is the smaller unit. Reconsider at M43 (or M42 if E3 is deferred).
+
+## Not selected (M42)
+DIR-030 ranks this #3, after G1 (landed m41) and E3. E3 is selected this pass per the ordering — this task is next in line for M43 pending E3's landing.

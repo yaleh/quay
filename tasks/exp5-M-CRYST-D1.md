@@ -25,3 +25,6 @@ References the standard inherited-core DoD clauses. Real landing:
 
 ## Not selected (M41)
 DIR-030 explicitly requires the observe-and-enforce cluster (G1→E3→DIR022-REMAINING→INV) to land BEFORE D1, with D1 not selectable until ≥3 of the four have landed. Not selected this pass (0/4 landed so far) — foundational but per DIR-030's steer, deferred until the window closes.
+
+## Not selected (M42)
+Still gated by DIR-030 (1/4 — only G1 — landed after m41). This pass selects exp5-M-CRYST-E3 (item 2 of 4) per DIR-030's ordering. D1 remains ineligible until ≥3/4 land.

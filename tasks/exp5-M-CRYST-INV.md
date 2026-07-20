@@ -32,3 +32,6 @@ References the standard inherited-core DoD clauses. Real landing:
 
 ## Not selected (M41)
 DIR-030 ranks this #4 (last) in the observe-and-enforce cluster. Not selected this pass: smallest Δv̂ of the four (governance half already landed pre-restart; only the gate half remains) and DIR-030 explicitly orders it after G1/E3/DIR022-REMAINING. Reconsider once the earlier three land.
+
+## Not selected (M42)
+Still last in DIR-030's ordering (after G1 — landed — E3, DIR022-REMAINING). E3 is selected this pass. Reconsider once E3 and DIR022-REMAINING land.
