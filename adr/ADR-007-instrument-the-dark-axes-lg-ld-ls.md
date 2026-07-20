@@ -1,8 +1,10 @@
 ---
 id: ADR-007
 title: Instrument the dark axes L_G/L_D/L_S — a milestone is not judged on L_T alone
-status: proposed
+status: accepted
 date: 2026-07-19
+accepted-date: 2026-07-20
+enforcement: "bash experiments/quay-perpetual-stream/scripts/git-lens-selfcheck.sh"
 supersedes: []
 superseded-by: []
 tags:
@@ -21,7 +23,18 @@ A milestone MUST NOT be judged on `L_T` (tests pass) alone. Build **cheap execut
 - `L_S` (stability / behavior variance): **mutation / property tests**.
 This is an instance of ADR-006 and a specific application of ADR-005 (cheap verification over more generation).
 
-<!-- enforcement (E3, deferred): applies-to milestone; check the milestone DoD records an L_D/L_G reading (archguard: no new cycle, no new god-package) and an L_S reading (mutation/property test) or an explicit "axis still dark" note; fail-closed if all three are silently absent -->
+<!-- enforcement (WIRED 2026-07-20 as the `adr-007` gate, via .quay/gates.yml → makeAdrGate): the
+     frontmatter `enforcement:` command runs `git-lens-selfcheck.sh` — the fixture-backed RED/GREEN
+     regression gate for the three L_D/L_G/L_S proxies (landed M41). This is a REAL fail-closed
+     guarantee, but a NARROWER one than the original spec below: it guards the INSTRUMENT against rot
+     (the proxies still detect a prose-heavy diff / a new cycle / a weak module), NOT that any given
+     milestone actually CONSULTED it. Enforcement + fixture both already landed (M41), so this
+     satisfies ADR-011 for the instrument-integrity half.
+     STILL FUTURE WORK (a proper milestone, not an off-loop edit): the per-milestone predicate — check
+     the milestone DoD records an L_D/L_G reading (no new cycle / no new god-package) + an L_S reading,
+     or an explicit "axis still dark" note; fail-closed if all three are silently absent. A live
+     git-lens gate over the milestone's own diff would RED immediately on exp5's ~1:8 code:doc ratio
+     — which is the point (see DIR-036 / the 2026-07-20 evaluation). -->
 
 ## Consequences
 - **Forbids:** an ABSORB/DoD that reports only `L_T` green while `L_G/L_D/L_S` are silently unexamined.
