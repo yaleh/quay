@@ -13,7 +13,9 @@ children: []
 extra:
   dirStatus: pending
   schema: v1
-  blockedBy: none — DIR-035-D done (M52), dependency gate green
+  blockedBy: DIR-037 (quay-github ENOBUFS/maxBuffer fix — surfaced live by this
+    deployment; `quay task list` against yaleh/archguard cannot complete until
+    DIR-037 lands). DIR-035-D dependency already satisfied (M52).
 ---
 ## Proposal
 Level 2 of ADR-013's Validation Ladder — the FIRST time quay-the-product drives a real task board OFF its own repo. Deploy the now-standalone quay (delivery-standalone-smoke 0 RED; DIR-035 A–D done, [[DIR-035-D]] landed M52) against **archguard** (primary target so this deployment and [[DIR-036-B]]'s application land on the SAME foreign repo, matching ADR-013's own named example; meta-cc is a fast second deployment afterward). A `.quay/config.yml` in an archguard checkout enables a quay provider — quay-github mapping archguard's GitHub issues, or quay-native over archguard's own task store, whichever archguard actually uses. Core reaches it ONLY through the Provider ABI, never a `../../../` file path. This is the external, unbounded, honest value signal that re-lights `L_T` (2026-07-20 evaluation; [[DIR-036]]; ADR-010 link). Child of [[DIR-036]].
