@@ -3,11 +3,12 @@ id: exp5-M-GATE-CLI-ERROR-UX
 title: "QENG gate/lifecycle CLI surface: replace raw stack traces on
   guarded-error paths with clean one-line messages, and fix quay run's
   exit-code leak on a fixpoint stop that included a failed task"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - surface:cli
   - milestone:M37-discover-post-qeng
+  - milestone:M56
 extra:
   schema: "v1"
 ---
@@ -123,19 +124,19 @@ no `docs/plans/*.md` staged, and a full plan-authoring pipeline detour (DIR-014 
 `quay-task-to-plan`) is disproportionate to a change scoped precisely by the task's own two Findings.
 
 ## Acceptance Criteria
-- [ ] `promote`/`retreat`'s illegal-transition throws, and `gate`'s unknown-gate/missing-task throws,
+- [x] `promote`/`retreat`'s illegal-transition throws, and `gate`'s unknown-gate/missing-task throws,
   produce a clean one-line error message (mirroring `complete`'s existing "not-ready" precondition
   message shape: no stack trace) instead of falling through to the generic top-level catch — OR, if
   the decision is to keep the stack-trace behavior deliberately (e.g. because these ARE genuinely
   exceptional/programmer-error conditions distinct from `complete`'s expected-and-common precondition
   case), that decision is explicitly documented with a stated reason, not left as an undocumented
   inconsistency.
-- [ ] `quay run` (non-`--once`) exits 0 on a `fixpoint` or `sentinel` stop regardless of whether any
+- [x] `quay run` (non-`--once`) exits 0 on a `fixpoint` or `sentinel` stop regardless of whether any
   individual task failed its acceptance gate along the way, and exits nonzero ONLY on the `cap`
   ceiling — matching the handler's own existing inline comment's stated intent. A regression test
   reproduces the exact scenario in this task's Finding 2 (mixed pass/fail board reaching fixpoint)
   and asserts exit code 0.
-- [ ] Both fixes are covered by new or extended tests in `packages/quay/test/lifecycle.test.mjs` /
+- [x] Both fixes are covered by new or extended tests in `packages/quay/test/lifecycle.test.mjs` /
   `packages/quay/test/driver.test.mjs` (or a new test file), run against real CLI invocation (not
   just the underlying `run*`/`runLoop` functions in isolation), and the existing gate/lifecycle/driver
   suite (currently 89+ tests, 100% line/func coverage on all 7 `src/gate/*.js` files per this
@@ -146,8 +147,56 @@ References the standard `inherited-core.md` Definition of Done clauses (0 AC/DoD
 per-milestone acceptance audit, 2 V_meta-lag, 3 line-budget, 4 impl-row, 5 no-self-exemption, 6
 escrow-Δv, 7 test-floor — APPLIES, `surface:cli` is product-touching, ≥80% coverage disposition or a
 stated waiver required). No task-specific exemption from any clause.
-- [ ] All standard clauses satisfied or explicitly N/A per their own trigger condition (re-verified at
+- [x] All standard clauses satisfied or explicitly N/A per their own trigger condition (re-verified at
   ABSORB, not assumed).
+
+## Resolution
+Landed at commit `058569f` (M56 iteration-0, `milestones/M56-gate-cli-error-ux`), merged to `master`
+at M56 ABSORB. Independent audit verdict: **PASS-WITH-QUALIFICATIONS**.
+
+**Finding 1 fix (guarded-error UX)** — `withGuardedErrors(fn)` + `GUARDED_ERROR_PATTERN` added to
+`packages/quay/bin/quay.js`. Audit-verified: catches ONLY the three known guarded-error message
+shapes (`unknown gate: `, `no such task: `, `illegal transition: `), printing a clean one-line
+`console.error(err.message)` + `process.exitCode = 1` (mirroring `complete`'s existing precondition
+path) — any unrecognized error re-throws unchanged and still surfaces its full stack trace via the
+top-level `main().catch()` handler (audit confirmed this by attempting to trigger an unrecognized
+error and observing the stack trace was NOT suppressed). Wraps the five verb-less commands
+(`gate`, `complete`, `adjudicate`, `promote`, `retreat`) — confirmed in-scope per this task's own
+Proposal, which explicitly names all five as the wrap targets (not audit overreach).
+
+**Finding 2 fix (exit-code leak)** — `run`'s non-`--once` branch now sets
+`process.exitCode = r.stopped === "cap" ? 1 : 0` unconditionally (was: only set to 1 on `cap`, no
+reset otherwise, so an earlier per-task `runComplete` acceptance-fail inside `runLoop` silently
+leaked exit 1 into a clean `fixpoint` stop). Audit-verified live: a mixed pass/fail 2-task board
+reaching `fixpoint` now exits 0 (was 1, the leak); a genuine `--cap`-hit scenario still correctly
+exits 1 (fix did not break the intended-nonzero path).
+
+**Test coverage** — new/extended tests in `gate.test.mjs`, `lifecycle.test.mjs`, `driver.test.mjs`
+assert stderr content (stack-trace-absence via pattern match, not just exit codes) for the guarded
+paths, plus the exact Finding 2 mixed-board-fixpoint-exits-0 regression scenario. 75/75 tests pass
+in these three files; full suite (excluding live-GitHub-dependent `serve-github`/
+`provider-abi-conformance`) re-run independently at ABSORB: 276 passing, 3 known pre-existing
+baseline failures (dir032-audit-independence M44 A2/C1, web-ui-browser), no new regressions.
+
+**Archguard check (the audit's one qualification)** — re-run at finalization per CLAUDE.md's
+"consult archguard before calling a milestone done" (ADR-007). `archguard_analyze_git` +
+`archguard_get_change_risk`/`get_change_context`/`get_evidence_pack` ran against the 4 changed files
+(`bin/quay.js`, `test/{gate,lifecycle,driver}.test.mjs`): no new imports/requires introduced by the
+diff (confirmed by direct diff inspection); co-change neighbors for `bin/quay.js` are exactly the
+expected in-scope test files + `registry.js`, confirming the change stayed contained to its stated
+scope. Risk scores came back "high" for all four touched files, but driven entirely by
+`authorCount`/`recency`/`churn` factors — this whole repo is single-author with very recent/frequent
+activity across the board (the same heuristic would flag almost any recently-touched file in this
+experiment), not a signal specific to this diff's structure. Structural `archguard_analyze` (needed
+for cycle/god-package detection) failed with "No query scopes were persisted" — a pre-existing
+tooling gap (this plain-ESM/no-tsconfig repo isn't set up for archguard's TS structural parser),
+not introduced by or specific to this change. No cycles, no god-package growth, no concerning
+dependency signal found for this diff — consistent with the audit's own "low-risk given the tiny,
+localized scope" characterization.
+
+**Other audit-confirmed evidence**: `delivery-standalone-smoke.sh` 0 RED, no leftover
+experiment-path strings in delivered source; `task-schema-check` PASS; `dod-fixture-selfcheck.sh`
+17/17 PASS.
 
 ## Not selected (M51)
 Considered at M51 SELECT (2026-07-20) alongside `exp5-M-GATE-README-DOCS` and
