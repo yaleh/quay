@@ -205,6 +205,9 @@ Usage:
   quay task check <task-id> [--json]
   quay action list <task-id> [--json]
   quay action run <task-id> <action-id> [--json]
+  quay gate <task-id> [--gate <name>]
+  quay gate --list
+  quay gate-log <task-id> [--gate <name>] [--json] [--file <log-path>]
   quay complete <task-id> [--file <log-path>]
   quay adjudicate <task-id> [--file <log-path>]
   quay promote <task-id> [--file <log-path>]
@@ -261,6 +264,18 @@ Options for task edit:
   upsert-as-create; a missing or empty --title is refused with a usage error instead of silently
   creating a titleless or empty-titled task — use 'quay task create' for a dedicated create path
   instead).
+
+Gate engine commands (QENG-1/2) — evaluate a named check and append an immutable GateEvent:
+  gate <task-id>    Run a named gate check against <task-id> (default gate: acceptance — runs
+                    task.extra.acceptance as a shell command, fail-closed if unset). Exit 0 = PASS,
+                    1 = FAIL. Appends a GateEvent to the log (see gate-log).
+  gate --list       List every registered gate name (no task id required).
+  gate-log <task-id>  Print the GateEvent history for <task-id> (human-readable by default).
+  --gate <name>     Select a non-default named gate for 'gate'/'gate-log' (e.g. --gate dod).
+  --list            With 'gate' (no task id): list registered gate names instead of running one.
+  --json            With 'gate-log': output the GateEvent array as JSON instead of human-readable text.
+  --file <log-path>  Override the GateEvent log path for 'gate-log' (default
+                    <workspaceRoot>/.quay/gate-events.jsonl).
 
 Lifecycle commands (QENG-3) — status-writing verbs over the {todo,ready,done,needs-human} phases:
   complete <id>     Precondition status=ready; runs the acceptance gate; on pass writes status=done
