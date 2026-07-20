@@ -10,7 +10,9 @@ labels:
   - milestone-candidate
   - surface:mcp
   - milestone:M37-discover-post-qeng
-extra: {}
+  - milestone:M53
+extra:
+  schema: "v1"
 ---
 ## Provenance
 Materialized at the M37-discover-post-qeng discovery milestone (2026-07-19), from direct inspection
@@ -51,6 +53,38 @@ some of the 7 (e.g. `run`'s long-lived autonomous loop) may not map cleanly onto
 single-call-response tool shape and could legitimately warrant a narrower MCP surface (e.g. `gate`/
 `complete`/`adjudicate`/`gate-log` as tools, `run`/`promote`/`retreat` deliberately left CLI-only)
 rather than a 1:1 port.
+
+## Proposal
+Expose 6 of the 7 QENG CLI commands as MCP tools in `packages/quay/src/mcp-server.js`, mirroring the
+existing 6 pre-QENG tools' style (zod schema, description, handler delegating to the same underlying
+`src/gate/*.js` functions `bin/quay.js` already calls — zero duplicated logic):
+
+- `gate` → **`gate_run`** (default gate `"acceptance"`, matching the CLI's own default; optional
+  `gate`/`provider`/`file` arguments)
+- `gate-log` → **`gate_log`** (read-only query; optional `gate`/`provider`/`file`/`since`/`until`/
+  `limit`/`offset` arguments)
+- `complete` → **`lifecycle_complete`**
+- `adjudicate` → **`lifecycle_adjudicate`**
+- `promote` → **`lifecycle_promote`**
+- `retreat` → **`lifecycle_retreat`** (`reason` required)
+
+`run` (and its `--once` mode) is **deliberately excluded**: it is an unbounded/long-lived autonomous
+scan→complete loop, the opposite of MCP's single-call/single-response contract, and an agent that wants
+"advance the next actionable task" already has the primitives to do so explicitly via `task_list` +
+`gate_run`/`lifecycle_complete` without delegating the scan to an opaque, potentially long-running tool
+call. Full reasoning + per-command tradeoff table: `docs/plans/14-mcp-gate-lifecycle-parity.md`.
+
+A gate/lifecycle FAIL (e.g. an unmet acceptance meter, an illegal transition attempted via `promote`'s
+underlying gate) is reported as a normal successful tool call (`ok:false` in `structuredContent`, NOT
+`isError:true`) — mirroring how the existing `task_check` tool already treats a failing gate as a
+successful read, not a crash. `isError:true` is reserved for genuine call failures: unknown task id,
+unknown gate name, illegal transition (`assertTransition` throws), missing task, missing/empty
+`retreat` reason.
+
+## Plan
+`docs/plans/14-mcp-gate-lifecycle-parity.md` — full decision table, design notes carried from the CLI
+branches (provider argument, gate-log path resolution, `QUAY_ACCEPTANCE_CWD`, exit-code→isError
+mapping, `retreat`'s required-reason zod-level enforcement), and the test plan.
 
 ## Acceptance Criteria
 - [ ] A reasoned decision is made and documented on which of the 7 QENG commands (`gate`,
