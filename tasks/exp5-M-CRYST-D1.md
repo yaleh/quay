@@ -2,26 +2,35 @@
 id: exp5-M-CRYST-D1
 title: D1 quay DOCUMENT-MANAGEMENT capability (contract-validator as a quay
   feature; formalized-style + self-verifying contracts enforced by quay)
-status: todo
+status: done
 labels:
   - milestone-candidate
   - crystallization
+  - milestone:M45-cryst-d1-doc-management
 parent: exp5-M-CRYST
 children: []
 extra:
-  schema: v1
+  schema: "v1"
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-CRYST-D1
+    experiments/quay-perpetual-stream/charters/M45-cryst-d1-doc-management.md
+    /tmp/m45-absorb-entry.md
+  auditIndependenceArgs:
+    - --orchestrator-id
+    - m45-inner-worker-builder-session
+    - /tmp/m45-absorb-entry.md
 ---
 ## Proposal
 Extend quay to manage repeatable method documents/decisions as first-class objects with contracts/validation + generated views (resolves decision①→quay; §7 concrete). The contract-validator is a quay capability, not an exp5 script. Unblocks D2/D3-§9 (contracts validated BY quay) and E2 back-links. Reuse the E1 ADR-kind pattern (a doc kind with a self-verifying `contracts:` block; single-source module wrapped by a gate).
 ## Plan
 N/A — product code across packages (a Core doc-management kind + contract-validator, reached via the Provider ABI, like E1); strict TDD per ADR-001 (red→green, ≥80% coverage); no staged docs/plans doc warranted.
 ## Acceptance Criteria
-- [ ] quay validates a document's self-`contracts:` (grep/not-grep, `target:self`) and surfaces conformance; a non-conforming doc is flagged (not silently passed).
-- [ ] A real method doc (e.g. a skill or OUTER-LOOP) is managed + validated through quay end-to-end; single-source (the contract logic lives once, a gate wraps it).
+- [x] quay validates a document's self-`contracts:` (grep/not-grep, `target:self`) and surfaces conformance; a non-conforming doc is flagged (not silently passed).
+- [x] A real method doc (e.g. a skill or OUTER-LOOP) is managed + validated through quay end-to-end; single-source (the contract logic lives once, a gate wraps it).
 ## Definition of Done
 References the standard inherited-core DoD clauses. Real landing:
-- [ ] A REAL method doc is managed + validated through quay (not a fixture) — the contract-validator flags a real non-conforming doc.
-- [ ] Strict TDD (product code); no dual source (validator logic once, wrapped by a gate); unblocks D2/D3-§9/E2.
+- [x] A REAL method doc is managed + validated through quay (not a fixture) — the contract-validator flags a real non-conforming doc.
+- [x] Strict TDD (product code); no dual source (validator logic once, wrapped by a gate); unblocks D2/D3-§9/E2.
 
 ## Not selected (M41)
 DIR-030 explicitly requires the observe-and-enforce cluster (G1→E3→DIR022-REMAINING→INV) to land BEFORE D1, with D1 not selectable until ≥3 of the four have landed. Not selected this pass (0/4 landed so far) — foundational but per DIR-030's steer, deferred until the window closes.
@@ -45,3 +54,19 @@ candidate when the non-VT risk is higher"): DIR-032 outranks D1 this pass. D1 is
 should be the FIRST candidate considered at the m45 SELECT once DIR-032 lands (or is itself
 resized/deferred with justification) — it is not being re-gated by any directive, only outranked
 for this one pass by a higher-priority governance-integrity risk.
+
+## SELECTed (M45)
+This pass re-DRAINed the task store (`task_list --label directive`: 0 with `extra.dirStatus:
+pending`; `task_list --label milestone-candidate --status todo`: no new human-authored or
+`label:human-steered`-cleared item landed since M44) and confirmed no out-of-band human commit
+landed on `master` since M44 ABSORB (`git log`/`git status` clean, `e800326` is current HEAD).
+DIR-032 (the item that outranked D1 at M44) is now `done`/`resolved` — no competing
+governance-integrity/risk-option candidate at the same urgency is currently open. Compared against
+the other open, non-`human-steered` crystallization candidates (`INV`, `B4`, `E2`,
+`D4-LEDGER-STRUCTURED-STATUS`, `C1`, `B6-VALIDATOR-COVERAGE`, `B5-PARSER-UNIFY`) — each is a small
+design/instrument-correction fix with no active-degradation urgency comparable to what DIR-032
+carried; none is cited by any pending directive this pass. Per M44 ABSORB's own note, D1 is "the
+FIRST candidate considered at the m45 SELECT" — **SELECTed this pass** as the leading eligible
+capability-growth candidate. Dev-class (real product code: Core doc-management kind +
+contract-validator per DIR-014/5a two-class routing) — routed through the `quay-task-to-plan`
+pipeline. See charter `experiments/quay-perpetual-stream/charters/M45-cryst-d1-doc-management.md`.
