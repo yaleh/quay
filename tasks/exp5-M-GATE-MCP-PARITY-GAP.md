@@ -5,7 +5,7 @@ title: "The entire QENG-1..4 gate/lifecycle/driver engine is reachable ONLY
   stated primary user, actually drives) exposes just the pre-QENG
   task_list/get/write/check + action_list/run tools, none of gate/complete/
   promote/retreat/adjudicate/run/gate-log"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - surface:mcp
@@ -87,17 +87,17 @@ branches (provider argument, gate-log path resolution, `QUAY_ACCEPTANCE_CWD`, ex
 mapping, `retreat`'s required-reason zod-level enforcement), and the test plan.
 
 ## Acceptance Criteria
-- [ ] A reasoned decision is made and documented on which of the 7 QENG commands (`gate`,
+- [x] A reasoned decision is made and documented on which of the 7 QENG commands (`gate`,
   `gate-log`, `complete`, `adjudicate`, `promote`, `retreat`, `run`) should become MCP tools, with
   the tradeoffs stated per command (e.g. `run`'s long-running-loop shape vs. MCP's single-call
   contract) — not a blanket "port everything" or "port nothing" without reasoning.
-- [ ] The commands selected for MCP exposure are implemented as `server.registerTool(...)` entries in
+- [x] The commands selected for MCP exposure are implemented as `server.registerTool(...)` entries in
   `packages/quay/src/mcp-server.js`, following the existing 6 tools' style (zod schema, description,
   handler delegating to the same underlying `src/gate/*.js` functions the CLI already uses — no
   duplicated gate/lifecycle logic, mirroring the CLI's own reuse discipline).
-- [ ] New MCP-level tests (mirroring `packages/quay/test/mcp-server.test.mjs`'s existing style) cover
+- [x] New MCP-level tests (mirroring `packages/quay/test/mcp-server.test.mjs`'s existing style) cover
   each newly-registered tool's happy path and at least one guarded-failure path.
-- [ ] If any of the 7 commands is deliberately EXCLUDED from MCP exposure, the exclusion reasoning is
+- [x] If any of the 7 commands is deliberately EXCLUDED from MCP exposure, the exclusion reasoning is
   written down in this task's own resolution notes (or a follow-up doc it references) so a future
   milestone doesn't have to re-derive it from scratch.
 
@@ -106,8 +106,48 @@ References the standard `inherited-core.md` Definition of Done clauses (0 AC/DoD
 per-milestone acceptance audit, 2 V_meta-lag, 3 line-budget, 4 impl-row, 5 no-self-exemption, 6
 escrow-Δv, 7 test-floor — APPLIES, `surface:mcp` is product-touching, ≥80% coverage disposition or a
 stated waiver required). No task-specific exemption from any clause.
-- [ ] All standard clauses satisfied or explicitly N/A per their own trigger condition (re-verified at
+- [x] All standard clauses satisfied or explicitly N/A per their own trigger condition (re-verified at
   ABSORB, not assumed).
+
+## Resolution
+Landed at M53 ABSORB (2026-07-20), commit `c476797` on branch `milestones/M53-mcp-gate-parity`,
+merged `--no-ff` into `master`. Independently audited verdict: **PASS**.
+
+Key evidence:
+- 6 new MCP tools registered in `packages/quay/src/mcp-server.js` — `gate_run`, `gate_log`,
+  `lifecycle_complete`, `lifecycle_adjudicate`, `lifecycle_promote`, `lifecycle_retreat` — each
+  verified to delegate directly (no duplicated logic) to the existing `src/gate/{engine,gate-log,
+  lifecycle}.js` functions the CLI already calls, following the same zod-schema/description/handler
+  style as the pre-existing 6 tools.
+- `run` (the autonomous scan→complete loop) is **deliberately excluded**: its unbounded/long-lived
+  loop shape is the opposite of MCP's single-call/single-response contract; an agent that wants
+  "advance the next actionable task" already has the primitives (`task_list` + `gate_run`/
+  `lifecycle_complete`) without delegating the scan to an opaque, potentially long-running tool call.
+  Full reasoning + per-command tradeoff table: `docs/plans/14-mcp-gate-lifecycle-parity.md`. No
+  followup task needed for this exclusion.
+- Error-handling convention matches the existing `task_check` precedent: a gate/lifecycle FAIL
+  (unmet acceptance meter, illegal transition) is a normal successful tool call (`ok:false` in
+  `structuredContent`), NOT `isError:true` — `isError:true` is reserved for genuine call failures
+  (unknown task/gate, illegal transition attempted, missing task, missing/empty `retreat` reason).
+- New MCP-level test coverage added in `packages/quay/test/mcp-server.test.mjs` (real subprocess +
+  real MCP client), independently verified non-trivial (checks actual persisted state changes, not
+  just shape) — all pass.
+- No new security surface: the new MCP tools trigger the exact same shell-exec path the CLI already
+  exposes via `task.extra.acceptance`.
+- DIR-014 §5a full-pipeline skip for this milestone judged "acceptable for this low-complexity,
+  well-bounded change" by the audit — defensible but marginal, noted as a precedent to monitor for
+  future larger-scope milestones, not a blocker.
+- Full suite (excluding `serve-github`/`provider-abi-conformance`, live-GitHub-dependent per project
+  convention): 260 tests, 257 pass / 3 fail (audit's own re-run) — matches the known pre-existing
+  flaky baseline (adr-gate E3 A2, dir032-audit-independence M44 A2/C1, web-ui-browser), no new
+  regressions.
+- `delivery-standalone-smoke.sh` → 0 RED. `dod-fixture-selfcheck.sh` → 17/17 PASS.
+  `task-schema-check.sh` → PASS.
+
+## Status mirror
+Authored @M37-discover-post-qeng iteration-0 DRAIN sweep, 2026-07-19. Not selected @M51 (deferred to
+`exp5-M-GATE-HELP-SYNOPSIS-GAP`, the smaller exploit-typed pick). SELECTed @M53 (2026-07-20), landed
+and audited PASS same milestone.
 
 ## Not selected (M51)
 Considered at M51 SELECT (2026-07-20) alongside `exp5-M-GATE-README-DOCS` and
