@@ -1336,6 +1336,198 @@ async function main() {
     fs.rmSync(qx44WorkspaceRoot, { recursive: true, force: true });
   }
 
+  // ---- 12. QENG gate/lifecycle MCP tools (M53/exp5-M-GATE-MCP-PARITY-GAP) ----
+  // gate_run, gate_log, lifecycle_complete, lifecycle_adjudicate,
+  // lifecycle_promote, lifecycle_retreat -- one happy path + at least one
+  // guarded-failure path each, against a fresh isolated workspace/task store.
+  {
+    const gateTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-gate-tasks-"));
+    const gateWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-gate-workspace-"));
+    fs.mkdirSync(path.join(gateWorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(gateWorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir}"`,
+        `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${gateTasksDir}"`,
+        "",
+      ].join("\n")
+    );
+
+    // GATE-PASS: status=ready, extra.acceptance is a trivially-true shell
+    // command -- gate_run should PASS and lifecycle_complete should advance
+    // it to done.
+    execFileSync("node", [nativeBin, "task", "create", "GATE-PASS", "--title", "Gate MCP tool demo (pass)",
+      "--status", "ready", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "edit", "GATE-PASS", "--extra", JSON.stringify({ acceptance: "true" })], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
+    });
+
+    // GATE-FAIL: status=ready, extra.acceptance is a trivially-false command
+    // -- gate_run should FAIL (ok:false, not isError) and lifecycle_complete
+    // should leave it ready.
+    execFileSync("node", [nativeBin, "task", "create", "GATE-FAIL", "--title", "Gate MCP tool demo (fail)",
+      "--status", "ready", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "edit", "GATE-FAIL", "--extra", JSON.stringify({ acceptance: "false" })], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
+    });
+
+    // GATE-TODO: status=todo -- used for lifecycle_promote (todo->ready via
+    // the 'dod' gate) and as an illegal-retreat target (todo has no back edge).
+    execFileSync("node", [nativeBin, "task", "create", "GATE-TODO", "--title", "Gate MCP tool demo (todo)",
+      "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
+    });
+
+    const { client: coreGate, transport: coreGateTransport } = await connectStdio(
+      "node", [coreBin, "mcp"], gateWorkspaceRoot
+    );
+
+    // gate_run: happy path (PASS).
+    {
+      const r = await coreGate.callTool({ name: "gate_run", arguments: { id: "GATE-PASS" } });
+      assert(r.isError !== true, "gate_run on GATE-PASS returns no error");
+      assert(r.structuredContent?.ok === true, `gate_run on GATE-PASS returns ok:true (got: ${JSON.stringify(r.structuredContent)})`);
+    }
+    // gate_run: guarded-failure path (meter FAIL is ok:false, not isError).
+    {
+      const r = await coreGate.callTool({ name: "gate_run", arguments: { id: "GATE-FAIL" } });
+      assert(r.isError !== true, "gate_run on GATE-FAIL (failing meter) is NOT isError -- a gate FAIL is a normal successful call");
+      assert(r.structuredContent?.ok === false, `gate_run on GATE-FAIL returns ok:false (got: ${JSON.stringify(r.structuredContent)})`);
+    }
+    // gate_run: unknown task id -> isError.
+    {
+      const r = await coreGate.callTool({ name: "gate_run", arguments: { id: "NOPE-999" } });
+      assert(r.isError === true, "gate_run with an unknown task id returns isError:true");
+    }
+
+    // gate_log: read back the two gate_run calls above (no append -- pure read).
+    {
+      const r = await coreGate.callTool({ name: "gate_log", arguments: { id: "GATE-PASS" } });
+      assert(r.isError !== true, "gate_log on GATE-PASS returns no error");
+      const events = r.structuredContent?.events ?? [];
+      assert(
+        events.length >= 1 && events[events.length - 1].verdict === "pass" && events[events.length - 1].gate === "acceptance",
+        `gate_log on GATE-PASS returns the prior gate_run's pass GateEvent (got: ${JSON.stringify(events)})`
+      );
+    }
+    {
+      const r = await coreGate.callTool({ name: "gate_log", arguments: { id: "GATE-FAIL" } });
+      const events = r.structuredContent?.events ?? [];
+      assert(
+        events.length >= 1 && events[events.length - 1].verdict === "fail",
+        `gate_log on GATE-FAIL returns the prior gate_run's fail GateEvent (got: ${JSON.stringify(events)})`
+      );
+    }
+    // gate_log: a task with no GateEvents yet -> empty array, no error.
+    {
+      const r = await coreGate.callTool({ name: "gate_log", arguments: { id: "GATE-TODO" } });
+      assert(r.isError !== true, "gate_log on a task with no GateEvents returns no error");
+      assert(Array.isArray(r.structuredContent?.events) && r.structuredContent.events.length === 0, "gate_log on GATE-TODO (no gate run yet) returns an empty events array");
+    }
+
+    // lifecycle_complete: happy path -- GATE-PASS (status=ready, meter true) -> done.
+    {
+      const r = await coreGate.callTool({ name: "lifecycle_complete", arguments: { id: "GATE-PASS" } });
+      assert(r.isError !== true, "lifecycle_complete on GATE-PASS returns no error");
+      assert(r.structuredContent?.ok === true, `lifecycle_complete on GATE-PASS returns ok:true (got: ${JSON.stringify(r.structuredContent)})`);
+      const after = await coreGate.callTool({ name: "task_get", arguments: { id: "GATE-PASS" } });
+      assert(after.structuredContent?.task?.status === "done", "lifecycle_complete on GATE-PASS persists status=done");
+    }
+    // lifecycle_complete: guarded-failure path -- GATE-TODO is not 'ready' -> ok:false, no write.
+    {
+      const r = await coreGate.callTool({ name: "lifecycle_complete", arguments: { id: "GATE-TODO" } });
+      assert(r.isError !== true, "lifecycle_complete on a non-ready task (GATE-TODO) returns no error (a normal ok:false result)");
+      assert(r.structuredContent?.ok === false, `lifecycle_complete on GATE-TODO (status=todo, not ready) returns ok:false (got: ${JSON.stringify(r.structuredContent)})`);
+      const after = await coreGate.callTool({ name: "task_get", arguments: { id: "GATE-TODO" } });
+      assert(after.structuredContent?.task?.status === "todo", "lifecycle_complete's precondition failure left GATE-TODO's status unchanged (todo)");
+    }
+
+    // lifecycle_adjudicate: read-only audit pass over the task's OWN
+    // ready/done gate (client.taskCheck -- AC-checkbox based), NOT the
+    // extra.acceptance meter gate_run/lifecycle_complete use -- so GATE-FAIL
+    // (AC/DoD boxes are checked, meter is merely false) reports ok:true here;
+    // it never writes status either way.
+    {
+      const r = await coreGate.callTool({ name: "lifecycle_adjudicate", arguments: { id: "GATE-FAIL" } });
+      assert(r.isError !== true, "lifecycle_adjudicate on GATE-FAIL returns no error");
+      assert(r.structuredContent?.ok === true, `lifecycle_adjudicate on GATE-FAIL reports ok:true (its check is the AC/DoD-checkbox gate, not the acceptance meter -- got: ${JSON.stringify(r.structuredContent)})`);
+      const after = await coreGate.callTool({ name: "task_get", arguments: { id: "GATE-FAIL" } });
+      assert(after.structuredContent?.task?.status === "ready", "lifecycle_adjudicate never writes status -- GATE-FAIL is still 'ready'");
+    }
+    // lifecycle_adjudicate: unknown task id -> isError.
+    {
+      const r = await coreGate.callTool({ name: "lifecycle_adjudicate", arguments: { id: "NOPE-999" } });
+      assert(r.isError === true, "lifecycle_adjudicate with an unknown task id returns isError:true");
+    }
+
+    // lifecycle_promote: happy path -- GATE-TODO (todo) -> ready via the 'dod' gate.
+    {
+      const r = await coreGate.callTool({ name: "lifecycle_promote", arguments: { id: "GATE-TODO" } });
+      assert(r.isError !== true, "lifecycle_promote on GATE-TODO returns no error");
+      assert(r.structuredContent?.ok === true && r.structuredContent?.to === "ready", `lifecycle_promote on GATE-TODO (todo, AC/DoD checked) advances to 'ready' (got: ${JSON.stringify(r.structuredContent)})`);
+      const after = await coreGate.callTool({ name: "task_get", arguments: { id: "GATE-TODO" } });
+      assert(after.structuredContent?.task?.status === "ready", "lifecycle_promote persisted GATE-TODO's new status (ready)");
+    }
+    // lifecycle_promote: guarded-failure path -- GATE-TODO is now 'ready';
+    // promoting again with a failing meter needs a fresh meter — reuse
+    // GATE-FAIL (still 'ready', meter false): promote delegates to complete,
+    // which should report ok:false, status unchanged.
+    {
+      const r = await coreGate.callTool({ name: "lifecycle_promote", arguments: { id: "GATE-FAIL" } });
+      assert(r.isError !== true, "lifecycle_promote on GATE-FAIL (ready, failing meter) returns no error (a normal ok:false result)");
+      assert(r.structuredContent?.ok === false && r.structuredContent?.to === null, `lifecycle_promote on GATE-FAIL reports ok:false, to:null (delegates to complete, meter fails) (got: ${JSON.stringify(r.structuredContent)})`);
+    }
+    // lifecycle_promote: illegal forward edge -- GATE-PASS is already 'done' -> isError.
+    {
+      const r = await coreGate.callTool({ name: "lifecycle_promote", arguments: { id: "GATE-PASS" } });
+      assert(r.isError === true, "lifecycle_promote on an already-'done' task (no forward edge) returns isError:true");
+      assert(/illegal transition/.test(r.content?.[0]?.text ?? ""), `lifecycle_promote's illegal-edge error names the illegal transition (got: ${r.content?.[0]?.text})`);
+    }
+
+    // lifecycle_retreat: happy path -- GATE-TODO is now 'ready'; retreat -> todo.
+    {
+      const r = await coreGate.callTool({ name: "lifecycle_retreat", arguments: { id: "GATE-TODO", reason: "M53 test: exercising retreat" } });
+      assert(r.isError !== true, "lifecycle_retreat on GATE-TODO (ready) returns no error");
+      assert(r.structuredContent?.ok === true && r.structuredContent?.to === "todo", `lifecycle_retreat on GATE-TODO (ready) rolls back to 'todo' (got: ${JSON.stringify(r.structuredContent)})`);
+      const after = await coreGate.callTool({ name: "task_get", arguments: { id: "GATE-TODO" } });
+      assert(after.structuredContent?.task?.status === "todo", "lifecycle_retreat persisted GATE-TODO's rolled-back status (todo)");
+    }
+    // lifecycle_retreat: illegal backward edge -- GATE-TODO is 'todo' (no back edge) -> isError.
+    {
+      const r = await coreGate.callTool({ name: "lifecycle_retreat", arguments: { id: "GATE-TODO", reason: "attempting an illegal retreat" } });
+      assert(r.isError === true, "lifecycle_retreat on a 'todo' task (no backward edge) returns isError:true");
+      assert(/illegal transition/.test(r.content?.[0]?.text ?? ""), `lifecycle_retreat's illegal-edge error names the illegal transition (got: ${r.content?.[0]?.text})`);
+    }
+    // lifecycle_retreat: missing `reason` is rejected at the MCP input-schema
+    // level (zod z.string().min(1)) before the handler runs -- the SDK's
+    // own validateToolInput() surfaces this as isError:true with an
+    // "Input validation error" message (NOT a rejected/thrown callTool()
+    // promise -- confirmed directly against this SDK version), so the
+    // handler (and thus runRetreat's own internal empty-reason guard) never
+    // executes.
+    {
+      const r = await coreGate.callTool({ name: "lifecycle_retreat", arguments: { id: "GATE-FAIL" } });
+      assert(r.isError === true, "lifecycle_retreat with no `reason` argument returns isError:true (rejected by MCP input validation before the handler runs)");
+      assert(
+        /Input validation error/.test(r.content?.[0]?.text ?? ""),
+        `the missing-reason rejection is an MCP input-validation error, not runRetreat's own internal guard (got: ${r.content?.[0]?.text})`
+      );
+    }
+
+    await coreGateTransport.close();
+    fs.rmSync(gateTasksDir, { recursive: true, force: true });
+    fs.rmSync(gateWorkspaceRoot, { recursive: true, force: true });
+  }
+
   // ---- Cleanup ----
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
   fs.rmSync(tasksDirA, { recursive: true, force: true });

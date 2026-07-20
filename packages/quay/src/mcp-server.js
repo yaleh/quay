@@ -48,6 +48,16 @@ import { connectProvider } from "./provider-client.js";
 import { composePayload, deliverTrigger } from "./action.js";
 import { resolveProviderEnv } from "./provider-env.js";
 import { QUAY_VERSION } from "./version.js";
+// DIR-007/QENG MCP parity: the QENG gate/lifecycle engine's MCP tools below
+// (gate_run/gate_log/lifecycle_*) delegate straight into these SAME
+// functions bin/quay.js's own gate/gate-log/complete/adjudicate/promote/
+// retreat branches call -- zero duplicated gate/lifecycle logic, mirroring
+// the CLI's own reuse discipline. `run` is deliberately NOT exposed here --
+// see docs/plans/14-mcp-gate-lifecycle-parity.md for the full per-command
+// decision table (unbounded autonomous loop vs. MCP's single-call contract).
+import { runGate } from "./gate/engine.js";
+import { resolveGateLogPath, runGateLogQuery } from "./gate/gate-log.js";
+import { runComplete, runAdjudicate, runPromote, runRetreat, assertTransition } from "./gate/lifecycle.js";
 
 // QX-035 (experiment 4, iteration 10): read package version at startup for
 // Mitigation A (_version field in task_list response) and Mitigation B
@@ -375,6 +385,216 @@ export async function startMcpServer() {
           isError: true,
           content: [{ type: "text", text: err?.message ?? String(err) }],
         };
+      }
+    }
+  );
+
+  // ── QENG gate/lifecycle tools (DIR-007 MCP parity) ──
+  // Every tool below delegates to the SAME src/gate/*.js functions
+  // bin/quay.js's own gate/gate-log/complete/adjudicate/promote/retreat
+  // branches call -- zero duplicated gate/lifecycle logic. `run` (the
+  // autonomous scan->complete loop) is deliberately NOT exposed here; see
+  // docs/plans/14-mcp-gate-lifecycle-parity.md for the full decision.
+  //
+  // Convention shared by all 6 tools below: a gate/lifecycle FAIL (unmet
+  // acceptance meter, illegal transition attempted, etc.) is a normal
+  // SUCCESSFUL tool call reporting `ok:false` in structuredContent -- NOT
+  // isError:true -- mirroring how the existing task_check tool already
+  // treats a failing gate as a successful read, not a crash. isError:true is
+  // reserved for genuine call failures (unknown task id, unknown gate name,
+  // illegal transition attempted via promote/retreat, missing/empty
+  // `retreat` reason).
+
+  // gate_run — mirrors `quay gate <task-id> [--gate <name>]`. Default gate
+  // is "acceptance" at the MCP-tool layer only, matching the CLI's own
+  // `vf.gate ?? "acceptance"` default (the engine's own `runGate` default,
+  // "dod", is for direct programmatic callers and stays unchanged).
+  server.registerTool(
+    "gate_run",
+    {
+      description:
+        "Run a named gate check against one task on an enabled Provider (defaults to the default-enabled Provider), appending one GateEvent to the gate-events log. " +
+        "Defaults to the 'acceptance' gate (runs task.extra.acceptance as a shell command, fail-closed if unset) -- matching `quay gate <task-id>`'s own CLI default. " +
+        "Pass `gate` to select a different registered gate (e.g. 'dod'). " +
+        "Returns { ok, reason, event } -- ok:false is a NORMAL result (gate not satisfied), not an error. " +
+        "Mirrors `quay gate <task-id> [--gate <name>]`.",
+      inputSchema: {
+        provider: z.string().optional().describe("Provider id to query (defaults to the first-enabled Provider in .quay/config.yml)."),
+        id: z.string().describe("Task id to run the gate against (e.g. 'QX-029')."),
+        gate: z.string().optional().describe("Gate name to run (default: 'acceptance', matching the CLI's own default). Use `--gate dod`'s equivalent, e.g. gate: 'dod', to run the author gate instead."),
+        file: z.string().optional().describe("Override the GateEvent log path (default <workspaceRoot>/.quay/gate-events.jsonl)."),
+      },
+    },
+    async ({ provider, id, gate, file }) => {
+      try {
+        const { client } = await getClient(provider);
+        const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
+        process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+        const result = await runGate({ client, id, gate: gate ?? "acceptance", logPath, workspaceRoot: cfg.workspaceRoot });
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+      }
+    }
+  );
+
+  // gate_log — read-only query, never appends. Mirrors `quay gate-log <task-id>`.
+  server.registerTool(
+    "gate_log",
+    {
+      description:
+        "Read-only query of GateEvent history for one task on an enabled Provider (defaults to the default-enabled Provider). Never appends. " +
+        "Returns the matching GateEvent array (newest last), optionally filtered by gate name / actor / time range / pagination. " +
+        "Mirrors `quay gate-log <task-id> [--gate <name>] [--json]`.",
+      inputSchema: {
+        provider: z.string().optional().describe("Provider id (only affects workspaceRoot resolution; the gate-event log is workspace-wide, not per-Provider)."),
+        id: z.string().describe("Task id to filter GateEvents by (pipeline_id)."),
+        gate: z.string().optional().describe("Filter by gate name (e.g. 'acceptance', 'dod')."),
+        actor: z.string().optional().describe("Filter by actor."),
+        since: z.string().optional().describe("ISO timestamp lower bound (inclusive)."),
+        until: z.string().optional().describe("ISO timestamp upper bound (inclusive)."),
+        limit: z.number().int().optional().describe("Max number of events to return."),
+        offset: z.number().int().optional().describe("Number of matching events to skip before applying limit."),
+        file: z.string().optional().describe("Override the GateEvent log path (default <workspaceRoot>/.quay/gate-events.jsonl)."),
+      },
+    },
+    async ({ provider, id, gate, actor, since, until, limit, offset, file }) => {
+      try {
+        await getClient(provider); // validates provider id / resolves workspaceRoot use, same as other tools
+        const events = runGateLogQuery(cfg.workspaceRoot, { pipelineId: id, gate, actor, since, until, limit, offset, file });
+        return {
+          content: [{ type: "text", text: JSON.stringify(events, null, 2) }],
+          structuredContent: { events },
+        };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+      }
+    }
+  );
+
+  // lifecycle_complete — mirrors `quay complete <task-id>`.
+  server.registerTool(
+    "lifecycle_complete",
+    {
+      description:
+        "Precondition: task status is 'ready'. Runs the acceptance gate; on pass writes status='done' and appends a 'complete' GateEvent (exit-0-equivalent); on fail, status is left unchanged (exit-1-equivalent). " +
+        "Not-ready task -> ok:false, no gate run, no write. Returns { ok, reason }. Mirrors `quay complete <task-id>`.",
+      inputSchema: {
+        provider: z.string().optional().describe("Provider id to write to (defaults to the first-enabled Provider in .quay/config.yml)."),
+        id: z.string().describe("Task id to complete (must currently be status='ready')."),
+        file: z.string().optional().describe("Override the GateEvent log path (default <workspaceRoot>/.quay/gate-events.jsonl)."),
+      },
+    },
+    async ({ provider, id, file }) => {
+      try {
+        const { client } = await getClient(provider);
+        const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
+        process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+        const result = await runComplete({ client, id, logPath });
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+      }
+    }
+  );
+
+  // lifecycle_adjudicate — read-only independent audit pass, never writes
+  // status. Mirrors `quay adjudicate <task-id>`.
+  server.registerTool(
+    "lifecycle_adjudicate",
+    {
+      description:
+        "Independent, read-only audit pass over one task: records the mechanical state observed via the task's own gate check as an 'audit' GateEvent, WITHOUT delegating verdict authority to it. Never writes status. " +
+        "Returns { ok, reason }. Mirrors `quay adjudicate <task-id>`.",
+      inputSchema: {
+        provider: z.string().optional().describe("Provider id to query (defaults to the first-enabled Provider in .quay/config.yml)."),
+        id: z.string().describe("Task id to adjudicate."),
+        file: z.string().optional().describe("Override the GateEvent log path (default <workspaceRoot>/.quay/gate-events.jsonl)."),
+      },
+    },
+    async ({ provider, id, file }) => {
+      try {
+        const { client } = await getClient(provider);
+        const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
+        const result = await runAdjudicate({ client, id, logPath });
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+      }
+    }
+  );
+
+  // lifecycle_promote — one legal forward step over the lifecycle
+  // TRANSITIONS map (ready->done delegates to complete; todo->ready runs the
+  // 'dod' author gate). Illegal forward edge -> isError:true (assertTransition
+  // throws). Mirrors `quay promote <task-id>`.
+  server.registerTool(
+    "lifecycle_promote",
+    {
+      description:
+        "Advance one task by exactly one legal forward lifecycle step (todo->ready via the 'dod' gate; ready->done via the same path as lifecycle_complete). " +
+        "Returns { ok, reason, to }: on gate fail, ok:false and to:null (status unchanged). An ILLEGAL forward edge (e.g. task already 'done', or 'needs-human') returns isError:true. " +
+        "Mirrors `quay promote <task-id>`.",
+      inputSchema: {
+        provider: z.string().optional().describe("Provider id to write to (defaults to the first-enabled Provider in .quay/config.yml)."),
+        id: z.string().describe("Task id to promote."),
+        file: z.string().optional().describe("Override the GateEvent log path (default <workspaceRoot>/.quay/gate-events.jsonl)."),
+      },
+    },
+    async ({ provider, id, file }) => {
+      try {
+        const { client } = await getClient(provider);
+        const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
+        process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+        const result = await runPromote({ client, id, logPath });
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+      }
+    }
+  );
+
+  // lifecycle_retreat — one legal backward step; `reason` is REQUIRED (it IS
+  // the deliverable of a retreat) -- enforced both at the zod-schema level
+  // (missing argument rejected before the handler runs) and by runRetreat's
+  // own internal guard. No gate runs. Mirrors `quay retreat <task-id> --reason <r>`.
+  server.registerTool(
+    "lifecycle_retreat",
+    {
+      description:
+        "Roll one task back by exactly one legal backward lifecycle step (done->ready, ready->todo). `reason` is REQUIRED -- it is the deliverable of a retreat and is recorded in the GateEvent payload. " +
+        "No gate runs (retreat always succeeds for a legal edge, regardless of gate state). An ILLEGAL backward edge (e.g. task is 'todo' or 'needs-human') returns isError:true. " +
+        "Returns { ok, to }. Mirrors `quay retreat <task-id> --reason <r>`.",
+      inputSchema: {
+        provider: z.string().optional().describe("Provider id to write to (defaults to the first-enabled Provider in .quay/config.yml)."),
+        id: z.string().describe("Task id to retreat."),
+        reason: z.string().min(1).describe("Required: why this task is being rolled back. Recorded in the GateEvent payload."),
+        file: z.string().optional().describe("Override the GateEvent log path (default <workspaceRoot>/.quay/gate-events.jsonl)."),
+      },
+    },
+    async ({ provider, id, reason, file }) => {
+      try {
+        const { client } = await getClient(provider);
+        const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
+        const result = await runRetreat({ client, id, reason, logPath });
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
       }
     }
   );
