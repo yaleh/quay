@@ -27,17 +27,50 @@ const STATUS_PRECEDENCE = ["done", "needs-human", "ready", "todo"];
 // GraphQL sub-issue API integration.
 const CHILD_CHECKBOX_RE = /^\s*-\s*\[[ xX]\]\s*#(\d+)\s*$/gm;
 
-function ghApiJson(args) {
-  const out = execFileSync("gh", ["api", ...args], { encoding: "utf8" });
+// DIR-037 (M55): live-verified against a REAL foreign repo (yaleh/archguard,
+// 44+ open issues) — `gh api`'s response for a repo with many/large issues
+// overflows Node's `child_process.execFileSync` DEFAULT `maxBuffer` (1 MiB),
+// throwing `Error: spawnSync gh ENOBUFS`. quay's own tiny backlog never
+// triggers this; any real-world foreign repo does immediately (Finding,
+// tasks/DIR-037.md). Single-sourced fix: EVERY `gh api` call goes through
+// this ONE helper (`execGh`), which sets a generous `maxBuffer` — no
+// per-call-site patching. 64 MiB comfortably covers a full-history
+// `--paginate`-free single-page fetch (`fetchAllIssues`'s own
+// `DEFAULT_MAX_ISSUES`/pageIssues cap already bounds page COUNT; this bounds
+// the BYTE size of any one page's response) while still failing loudly
+// (a plain thrown Error) rather than hanging forever on a truly pathological
+// response. Override via QUAY_GITHUB_MAX_BUFFER (bytes) for a caller that
+// knowingly needs more.
+const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024; // 64 MiB
+
+function ghApiMaxBuffer() {
+  const override = Number(process.env.QUAY_GITHUB_MAX_BUFFER);
+  return Number.isFinite(override) && override > 0 ? override : DEFAULT_MAX_BUFFER;
+}
+
+/** THE single choke point for every `gh api ...` subprocess call in this
+ * module (DIR-037/M55) — sets `maxBuffer` so a real foreign repo's larger
+ * response does not overflow Node's 1 MiB execFileSync default (ENOBUFS).
+ * `ghApiJson`/`ghApiRun` are thin callers; do not call `execFileSync("gh",
+ * ...)` anywhere else in this file — route through here instead. */
+function execGh(args) {
+  return execFileSync("gh", ["api", ...args], {
+    encoding: "utf8",
+    maxBuffer: ghApiMaxBuffer(),
+  });
+}
+
+export function ghApiJson(args) {
+  const out = execGh(args);
   return JSON.parse(out);
 }
 
-function ghApiRun(args) {
+export function ghApiRun(args) {
   // Same subprocess convention as ghApiJson, but for calls whose return
   // value we don't need to parse (e.g. PATCH with no interesting body use,
   // or calls made purely for a side effect). Still returns parsed JSON when
   // the API gives one, for callers that want to inspect it.
-  const out = execFileSync("gh", ["api", ...args], { encoding: "utf8" });
+  const out = execGh(args);
   return out ? JSON.parse(out) : null;
 }
 
