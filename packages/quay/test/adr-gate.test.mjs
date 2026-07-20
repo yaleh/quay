@@ -23,7 +23,7 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { gateRegistry, listGates } from "../src/gate/registry.js";
-import { createAdrStore } from "../../quay-native/src/adr-store.js";
+import { createAdrStore } from "../src/adr-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.js");

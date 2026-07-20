@@ -1,13 +1,14 @@
-// quay-native: managed-document store (Stage 2, exp5-M-CRYST-D1 / D1
-// "quay DOCUMENT-MANAGEMENT capability"). A "document" is a SEPARATE object
-// kind from both tasks (store.js) and ADRs (adr-store.js): it is a managed
-// METHOD ARTIFACT (a skill, a methodology doc, a template) with its OWN
-// draft→active→retired lifecycle — NOT a decision (adr-store.js's
-// proposed→accepted→superseded/deprecated/rejected) and NOT a task (no
-// parent/children/role, no todo→done). Reuses the SAME generic frontmatter/
-// lock/filename-resolution mechanics as adr-store.js via
-// frontmatter-store-base.js (Stage 1) — mechanics are shared, schemas are not
-// (mirrors adr-store.js's own ADR/task separation rationale).
+// quay Core: managed-document store ("quay DOCUMENT-MANAGEMENT capability").
+// A "document" is a SEPARATE object kind from both tasks (a Provider's own
+// store) and ADRs (adr-store.js): it is a managed METHOD ARTIFACT (a skill, a
+// methodology doc, a template) with its OWN draft→active→retired lifecycle —
+// NOT a decision (adr-store.js's proposed→accepted→superseded/deprecated/
+// rejected) and NOT a task (no parent/children/role, no todo→done). Reuses the
+// SAME generic frontmatter/lock/filename-resolution mechanics as adr-store.js
+// via frontmatter-store-base.js — mechanics are shared, schemas are not
+// (mirrors adr-store.js's own ADR/task separation rationale). Lives in Core
+// (`quay`), not a Provider package, for the same reason as adr-store.js —
+// see that module's header comment.
 //
 // The load-bearing NEW capability this store adds: a `contracts` field — a
 // list of self-verifying assertions `{ target: "self", type: "grep"|

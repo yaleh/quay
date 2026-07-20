@@ -1,4 +1,4 @@
-// quay-native: shared frontmatter-store-base helper (Stage 1, exp5-M-CRYST-D1).
+// quay Core: shared frontmatter-store-base helper.
 //
 // Factored out of adr-store.js so a NEW sibling kind (document-store.js) can
 // reuse the same parse/serialize/lockfile/filename-resolution mechanics
@@ -10,7 +10,7 @@
 //
 // Every function here takes its target directory as an explicit parameter —
 // no hardcoded `adr/`/`docs-managed/` path — so it is safely reusable by any
-// number of sibling stores (plan-check round-1 finding, exp5-M-CRYST-D1).
+// number of sibling stores.
 
 import fs from "node:fs";
 import path from "node:path";

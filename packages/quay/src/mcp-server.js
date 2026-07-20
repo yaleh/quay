@@ -53,8 +53,8 @@ import { QUAY_VERSION } from "./version.js";
 // Mitigation A (_version field in task_list response) and Mitigation B
 // (Version: in tool description). ENV-001 mitigation — lets AI agent consumers
 // detect MCP server staleness by comparing _version against their expected version.
-// (M01-dist, exp5 it0: extracted to ./version.js so the SEA build can alias
-// it to a build-time-embedded shim — see scripts/version-sea-shim.js.)
+// (Extracted to ./version.js so the SEA build can alias it to a
+// build-time-embedded shim — see scripts/version-sea-shim.js.)
 
 // resolveProviderEnv is now imported from ./provider-env.js (QN-045): this
 // file, bin/quay.js, and serve.js all share the single implementation there

@@ -1,16 +1,20 @@
-// quay-native: ADR (Architecture Decision Record) store — a SEPARATE object kind
-// from tasks (store.js). An ADR is NOT a task: it has a DECISION lifecycle
-// (proposed→accepted→superseded/deprecated, or rejected), never todo→done; it has
-// NO parent/children/role; its id is a flat global ADR-NNN. A task is one-shot
-// (executed once, then done); an ADR is a standing decision continuously applied.
+// quay Core: ADR (Architecture Decision Record) store — a SEPARATE object kind
+// from tasks (a Provider's own store, e.g. quay-native's store.js). An ADR is
+// NOT a task: it has a DECISION lifecycle (proposed→accepted→superseded/
+// deprecated, or rejected), never todo→done; it has NO parent/children/role;
+// its id is a flat global ADR-NNN. A task is one-shot (executed once, then
+// done); an ADR is a standing decision continuously applied.
 //
-// This store is deliberately independent of store.js (no shared task vocabulary):
-// the ~5 lines of frontmatter parse/serialize are trivial, not load-bearing logic,
-// and keeping the two stores separate is the whole point of the ADR/task split.
-// The generic frontmatter/lock/filename plumbing (Stage 1, exp5-M-CRYST-D1) IS
-// shared, via frontmatter-store-base.js, with the sibling document-store.js —
-// only the SCHEMA (valid statuses, owned frontmatter keys, view-model shape)
-// stays independent per kind; see that module's header comment for why.
+// This store is deliberately independent of any task store (no shared task
+// vocabulary): the ~5 lines of frontmatter parse/serialize are trivial, not
+// load-bearing logic. It is a generic filesystem-frontmatter store with no
+// dependency on a Provider's internals, so it lives in Core (`quay`), not a
+// Provider package — a Provider that wants it (e.g. quay-native's own CLI/MCP
+// verbs) imports it back as a declared dependency, never the reverse. The
+// generic frontmatter/lock/filename plumbing IS shared, via
+// frontmatter-store-base.js, with the sibling document-store.js — only the
+// SCHEMA (valid statuses, owned frontmatter keys, view-model shape) stays
+// independent per kind; see that module's header comment for why.
 //
 // ADR view-model: { id, title, status, date, supersedes, supersededBy, tags, body, updatedAt }
 // Reserved (round-tripped verbatim, not yet consumed — next-pass enforcement):
@@ -85,9 +89,9 @@ export function createAdrStore(adrDir) {
       supersedes: frontmatter.supersedes ?? [],
       supersededBy: frontmatter["superseded-by"] ?? [],
       tags: frontmatter.tags ?? [],
-      // E3 (exp5-M-CRYST-E3): surface the applies-to/enforcement fields E1 reserved
-      // (round-tripped verbatim, previously unconsumed) — the "continuously applied"
-      // half. Additive/non-breaking: absent → empty array / undefined, same
+      // Surface the applies-to/enforcement fields reserved above (round-tripped
+      // verbatim, previously unconsumed) — the "continuously applied" half.
+      // Additive/non-breaking: absent → empty array / undefined, same
       // safe-default shape as supersedes/tags above.
       appliesTo: frontmatter["applies-to"] ?? [],
       enforcement: frontmatter.enforcement,
