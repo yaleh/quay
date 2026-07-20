@@ -97,10 +97,28 @@ function run(opts) {
 const hasFail = (r, needle) => r.failures.some((f) => f.includes(needle));
 const hasPass = (r, needle) => r.passes.some((p) => p.includes(needle));
 
-// ── Baseline: a clean milestone produces NO failures ─────────────────────────────────────────────
-test("clean milestone: no failures, clauses 0/1/2/5 pass", () => {
+// ── Baseline: a clean fixture produces NO failures on clauses 0/1/2/5 ────────────────────────────
+// NOTE (test-design fix, M47/DIR-034 audit finding 1): clauses 10/11 (tree-hygiene,
+// worktree-branch-hygiene) deliberately shell out to the REAL repo's ambient git state (branches/
+// worktrees on disk right now) — that is correct, intentional behavior (DIR-034's whole point is
+// mechanical, unconditional, real-repo enforcement, not a fixture-isolated no-op). Consequently
+// this in-memory-fixture test, which exercises clauses 0/1/2/5 with a synthetic charter/absorb
+// text, must NOT assert `r.failures.length === 0` — that couples this test's outcome to whatever
+// worktrees/branches happen to exist in the ambient repo wherever it runs (e.g. it correctly FAILed
+// while this very M47 milestone's own iteration-0 worktree was unmerged, which clause 11 is right to
+// flag — that is clause 11 working, not a bug). Assert ONLY on the four clauses this test actually
+// targets; clauses 10/11's own real-repo-shelling-out behavior is covered by their OWN dedicated
+// tests below ("clause10:"/"clause11:"), which correctly accept either PASS or FAIL as valid.
+test("clean milestone: clauses 0/1/2/5 pass (independent of ambient clause10/11 repo state)", () => {
   const r = run({ milestoneId: "M-FAKE-CLEAN" });
-  assert.equal(r.failures.length, 0, `unexpected failures: ${JSON.stringify(r.failures)}`);
+  const nonHygieneFailures = r.failures.filter(
+    (f) => !f.startsWith("clause10-tree-hygiene") && !f.startsWith("clause11-worktree-branch-hygiene")
+  );
+  assert.equal(
+    nonHygieneFailures.length,
+    0,
+    `unexpected non-hygiene failures: ${JSON.stringify(nonHygieneFailures)}`
+  );
   assert.ok(hasPass(r, "clause0-ac-dod-present"));
   assert.ok(hasPass(r, "clause1-adversarial-audit"));
   assert.ok(hasPass(r, "clause2-vmeta-lag"));

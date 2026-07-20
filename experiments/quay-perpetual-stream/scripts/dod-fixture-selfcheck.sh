@@ -80,10 +80,31 @@ CASES=(
 fail=0
 for c in "${CASES[@]}"; do
   IFS='|' read -r id file want <<< "$c"
-  "$CHECK" "$id" "$file" "$file" >/dev/null 2>&1
+  out="$("$CHECK" "$id" "$file" "$file" 2>&1)"
   got=$?
+  # M47/DIR-034 note (test-design fix, same class as the it0-dod-check.test.mjs "clean milestone"
+  # fix): clauses 10/11 (tree-hygiene, worktree-branch-hygiene) were folded into the mechanical gate
+  # as UNCONDITIONAL checks against the REAL ambient repo's tree/branches/worktrees — that is
+  # correct, intentional behavior (DIR-034's whole point). These 17 CASES fixtures were authored
+  # (M25/M32/M40/M42, pre-DIR-034) to exercise clauses 0-9 only via synthetic charter/absorb text and
+  # assert the CLI's OVERALL exit code; they have no way to control the ambient repo's real git state
+  # (e.g. this selfcheck correctly gets a real clause-11 FAIL whenever an unmerged milestone-iteration
+  # branch genuinely exists — clause 11 working, not a bug). So: if the ONLY reason actual exit
+  # diverges from expected is a clause10/11 FAIL line (never a clause 0-9 mismatch), don't fail this
+  # fixture — clauses 10/11's own real-repo-shelling-out behavior has its own dedicated coverage
+  # (dod-fixture-selfcheck's job here is clauses 0-9; clause10/11 real-state coverage lives in
+  # it0-dod-check.test.mjs's "clause10:"/"clause11:" tests, which accept either PASS or FAIL as valid).
+  only_hygiene_diff=0
+  if [ "$got" != "$want" ] && [ "$want" = "0" ] && [ "$got" = "1" ]; then
+    non_hygiene_fail="$(printf '%s\n' "$out" | grep '^FAIL: clause' | grep -v -E '^FAIL: clause1[01]-(tree-hygiene|worktree-branch-hygiene)' || true)"
+    if [ -z "$non_hygiene_fail" ]; then
+      only_hygiene_diff=1
+    fi
+  fi
   if [ "$got" = "$want" ]; then
     echo "PASS: $id — exit $got (expected $want) [$file]"
+  elif [ "$only_hygiene_diff" = 1 ]; then
+    echo "PASS (clauses 0-9 only; clause10/11 real-ambient-repo state diverged, not this fixture's concern): $id — exit $got, expected $want [$file]"
   else
     echo "FAIL: $id — exit $got but EXPECTED $want [$file]"
     fail=1
