@@ -8,7 +8,9 @@ labels:
   - milestone-candidate
   - surface:cli
   - milestone:M37-discover-post-qeng
-extra: {}
+  - milestone:M51
+extra:
+  schema: v1
 ---
 ## Provenance
 Materialized at the M37-discover-post-qeng discovery milestone (2026-07-19), from direct exercise of
@@ -47,6 +49,21 @@ Additionally: `gate`'s own detailed options (the `--gate <name>` flag, `--list` 
 own detailed options (`--gate`, `--json`, `--file`, positional `<task-id>`) are not given a dedicated
 "Options for gate" / "Options for gate-log" section either, unlike every other command family
 (`task list`, `task create`, `task edit`, etc., each of which gets its own "Options for X" block).
+
+## Proposal
+Add the two missing lines (`quay gate <task-id> [--gate <name>]`, `quay gate --list`, and `quay
+gate-log <task-id> [--gate <name>] [--json] [--file <log-path>]`) to the top-level `Usage:` synopsis
+block in `printHelp()` (`packages/quay/bin/quay.js`), directly adjacent to the existing
+`complete`/`adjudicate`/`promote`/`retreat`/`run` lines, matching their exact style. Add a dedicated
+"Options for gate / gate-log" section (grouped alongside the existing "Lifecycle commands (QENG-3)" /
+"Driver command (QENG-4)" section headers) documenting `--gate <name>`, `--list`, `--json`, and
+`--file`. Extend `packages/quay/test/cli.test.mjs`'s existing `--help` content-assertion block with
+assertions that the synopsis contains `quay gate` and `quay gate-log`, so a future regression is
+caught mechanically. This is a documentation-only change to an already-shipped, already-tested CLI
+surface (QENG-1/2) — no behavior change to the gate engine itself.
+
+## Plan
+N/A — docs/CLI-help-only fix, no separate plan doc needed.
 
 ## Acceptance Criteria
 - [ ] `quay --help`'s top-level `Usage:` synopsis block gains explicit lines for `quay gate <task-id>

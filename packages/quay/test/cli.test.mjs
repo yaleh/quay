@@ -975,6 +975,33 @@ async function main() {
         r.stdout.includes("UNGUARDED") || r.stdout.includes("unguarded"),
         "quay --help output documents that status transitions are unguarded by default (M31-cli-gate-enforcement)"
       );
+      // exp5-M-GATE-HELP-SYNOPSIS-GAP (M51): the top-level Usage synopsis block must list
+      // `quay gate <id>` / `quay gate --list` / `quay gate-log <id>` explicitly, matching the
+      // existing complete/adjudicate/promote/retreat/run lines — not just be mentioned in passing
+      // inside another command's option text. Assert against the SYNOPSIS block specifically (lines
+      // starting with two-space indent, "quay gate"/"quay gate-log"), not just substring presence
+      // anywhere in the help text (which would trivially pass from the Options-section prose alone).
+      const synopsisBlock = r.stdout.slice(r.stdout.indexOf("Usage:"), r.stdout.indexOf("\n\nOptions for task list:"));
+      const gateSynopsisLines = synopsisBlock.split("\n").filter((l) => /^\s*quay gate\b/.test(l));
+      assert(
+        gateSynopsisLines.some((l) => /^\s*quay gate <task-id>/.test(l)),
+        "quay --help Usage synopsis includes a 'quay gate <task-id>' line"
+      );
+      assert(
+        gateSynopsisLines.some((l) => /^\s*quay gate --list/.test(l)),
+        "quay --help Usage synopsis includes a 'quay gate --list' line"
+      );
+      assert(
+        gateSynopsisLines.some((l) => /^\s*quay gate-log <task-id>/.test(l)),
+        "quay --help Usage synopsis includes a 'quay gate-log <task-id>' line"
+      );
+      // Dedicated options section for gate/gate-log (documenting --gate/--list/--json/--file),
+      // mirroring the existing "Lifecycle commands (QENG-3)" / "Driver command (QENG-4)" sections.
+      assert(
+        /gate/i.test(r.stdout) && /--gate <name>/.test(r.stdout),
+        "quay --help documents the --gate <name> flag in a dedicated gate/gate-log options section"
+      );
+      assert(r.stdout.includes("--list"), "quay --help documents the --list flag for 'gate'");
     }
 
     // quay -h: alias, also exits 0
