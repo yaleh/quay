@@ -1,9 +1,9 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 44** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M44 ABSORB header sync): body log's m44 ABSORB entry below sets milestone_counter → 44;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43). -->
+**milestone_counter: 45** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M45 ABSORB header sync): body log's m45 ABSORB entry below sets milestone_counter → 45;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -4128,3 +4128,101 @@ governance-integrity candidate is currently open at the same urgency DIR-032 car
 
 ## Backlog row
 | exp5-M-DIR032-AUDIT-INDEPENDENCE | DIR-032: generic-vehicle OUTER-LOOP audit dispatch + machine-checkable audit-independence HARD gate | governance-integrity (primary) + risk/option (secondary) | no VT chart cell | milestone-candidate, human-steered, governance-integrity, surface:cli, milestone:M44-dir032-audit-independence |
+
+## M45 SELECT (2026-07-20)
+
+Re-DRAINed the task store: `task_list --label directive` → 0 with `extra.dirStatus: pending`;
+`task_list --label milestone-candidate --status todo` → no new human-authored or
+`label:human-steered`-cleared item since M44. `git log`/`git status` confirmed clean, `e800326`
+(M44 ABSORB HEAD) was the current HEAD at SELECT time. DIR-032 (the item that outranked D1 at M44)
+is now `done`/resolved — no competing governance-integrity/risk-option candidate at the same
+urgency is currently open. Compared D1 against the other open, non-`human-steered` crystallization
+candidates (`INV`, `B4`, `E2`, `D4-LEDGER-STRUCTURED-STATUS`, `C1`, `B6-VALIDATOR-COVERAGE`,
+`B5-PARSER-UNIFY`) — each a smaller design/instrument-correction fix with no comparable urgency.
+**SELECTed `exp5-M-CRYST-D1`** (D1 quay DOCUMENT-MANAGEMENT capability), the first fully-eligible
+capability-growth candidate per M44 ABSORB's own note. Dev-class, routed through the
+`quay-task-to-plan` pipeline. See `tasks/exp5-M-CRYST-D1.md`'s `## SELECTed (M45)` section and
+charter `experiments/quay-perpetual-stream/charters/M45-cryst-d1-doc-management.md`.
+
+## ABSORB m45 — M45-cryst-d1-doc-management — 2026-07-20
+
+**Task:** `exp5-M-CRYST-D1` (D1 quay DOCUMENT-MANAGEMENT capability). **Charter:**
+`experiments/quay-perpetual-stream/charters/M45-cryst-d1-doc-management.md`. **Merge commit:**
+merge of `m45-cryst-d1-doc-management-iteration-0` (worktree HEAD/built commit `b1379f6`, base
+`e800326`) into `master`, `--no-ff`, clean (no conflicts — the only overlapping file,
+`tasks/exp5-M-CRYST-D1.md`, auto-merged cleanly since the SELECT-time base edit and the worktree's
+own body edits touched disjoint sections).
+
+**Delivered** (built by the inner worker, worktree-isolated, then independently audited):
+`packages/quay-native/src/frontmatter-store-base.js` (shared parse/serialize/lock/filename-
+resolution helper factored out of `adr-store.js`, 100% line coverage); `adr-store.js` refactored
+onto the shared helper (behavior-preserving — all 29 existing adr-store/adr-abi/adr-gate tests
+still pass unchanged); `packages/quay-native/src/document-store.js` (new sibling
+`createDocumentStore`, `draft`/`active`/`retired` lifecycle, `contracts:` field, 100% line
+coverage); `packages/quay-native/src/contract-validator.js` (`validateContracts()`,
+grep/not-grep/`target:self`, fail-closed on malformed entries, 100% line coverage);
+`makeDocumentContractGate` + `registerDocumentGate` in `packages/quay/src/gate/registry.js`
+(in-process, structurally parallel to E3's `makeAdrGate`); `quay-native doc
+{list,get,write,validate}` CLI verb; a real retrofit of `.claude/skills/quay-directive/SKILL.md`
+as `docs-managed/DOC-001-quay-directive-skill.md` (2 real, currently-true self-contracts, both
+PASS) + one synthetic violating fixture proving the FAIL path end-to-end via a real registered
+gate + `quay gate`/`gate-log` round-trip.
+
+**Adversarial audit — independent, top-level dispatch (DIR-032 discipline honored):** the inner
+worker (worktree-isolated, itself forbidden by DIR-032's rule from dispatching further subagents)
+stopped at a DRAFT ABSORB entry (`audits/PENDING.md`) with the verdict explicitly marked PENDING.
+The TOP-LEVEL loop session then dispatched a fresh-context `Explore`-type subagent (session id
+`top-level-orchestrator-dispatch-explore-agent-m45-20260720-fresh-context`, distinct from the
+builder session `m45-inner-worker-builder-session`) to perform the audit for real.
+
+**adversarial-audit verdict: NO REFUTATION FOUND** (PASS) — both ACs confirmed met by direct
+inspection of real artifacts (test runs, gate invocations, direct file reads of
+`.claude/skills/quay-directive/SKILL.md`, not trusting the draft's claims), both DoD clauses
+satisfied (real end-to-end management/validation, not fixture-only; strict TDD, 49 new tests,
+100%/89% coverage, RED-before-GREEN manually re-verified, zero regressions). Full detail:
+`milestones/M45-cryst-d1-doc-management/audits/iteration-0-acceptance-audit.md`.
+
+**Mechanical gates (real runs, this ABSORB):**
+```
+$ node packages/quay/bin/quay.js gate exp5-M-CRYST-D1                     → PASS
+$ node packages/quay/bin/quay.js gate exp5-M-CRYST-D1 --gate audit-independence → PASS
+```
+`vmeta-lag-check.sh --counter 45 v-meta-ledger.md` → PASS (no confirmed-unconsolidated row past
+K=2). `it0-ceiling-line-budget-check.sh` (charter) → PASS. `it0-impl-row-check.sh` — N/A per the
+charter (this milestone's own output is the real-landing proof itself, same disposition class as
+prior small-milestone norms).
+
+**Tests:** full non-live-GitHub suite re-run at ABSORB in both packages. `packages/quay`: 205/207
+pass — the 2 remaining failures (`adr-gate.test.mjs`'s "E3 A2" case, `web-ui-browser.test.mjs`)
+reproduce identically on pre-merge `master` HEAD (`e800326`), confirmed pre-existing/environmental,
+unrelated to this milestone. `packages/quay-native`: 69/69 real test files pass (3 files matched by
+the bare `ls test/*.mjs` glob — `cas-writer-helper.mjs`, `concurrent-writer.mjs`,
+`reparent-writer.mjs` — are non-test helper scripts spawned by `cas-write.test.mjs`'s
+concurrent-race fixture, not actual test suites; pre-existing on `master` before this merge,
+unrelated to D1).
+
+**Realized Δv**: capability-growth (primary — a new quay-native document-management object kind +
+single-source contract-validator, reused across both the ADR and document kinds via the shared
+`frontmatter-store-base.js`). No VT chart cell (same no-VT-cell precedent as prior
+instrument/kind-addition milestones). VT chart-1 total unchanged: **111.55/120**.
+`milestone_counter` → **45**.
+
+**Backlog housekeeping**: `tasks/exp5-M-CRYST-D1.md` → `status: done`, both AC + both DoD checklist
+boxes ticked (audit write-back). `backlog.md` regenerated via
+`node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream
+--write`.
+
+**Checkpoint disposition: DUE this ABSORB** (`milestone_counter` = 45, multiple of 5) — written as
+`checkpoints/cp-45.md` (last written `cp-40.md` at m40).
+
+**DIR-030 disposition:** fully resolved — D1 was the last item gated by DIR-030's 3/4-landed
+window; D1 landing this pass closes the cluster's remaining named item.
+
+**DRAIN disposition of `directives/pending/` (task-canonical, per DIR-028) at this boundary:** no
+change from M44's disposition — no new directive landed this pass. Remaining open directive tasks
+carried forward unchanged: `DIR-014` (phase 1 only), `DIR-021` (delivered, stays pending per escrow
+discipline), `DIR-022` (parent, phase 1 + remainder landed), `DIR-023`, `DIR-024` (Layers 3-4),
+`DIR-026` (SPLIT-OR-COMMIT), `DIR-031` (landed off-loop, no further action).
+
+## Backlog row
+| exp5-M-CRYST-D1 | D1 quay DOCUMENT-MANAGEMENT capability (contract-validator as a quay feature; formalized-style + self-verifying contracts enforced by quay) | capability-growth (primary) | no VT chart cell | milestone-candidate, crystallization, milestone:M45-cryst-d1-doc-management |

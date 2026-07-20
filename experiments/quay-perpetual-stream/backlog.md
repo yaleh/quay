@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-CRYST-D1 | D1 quay DOCUMENT-MANAGEMENT capability (contract-validator as a quay feature; formalized-style + self-verifying contracts enforced by quay) | DONE | - | milestone-candidate, crystallization, milestone:M45-cryst-d1-doc-management |
 | exp5-M-DIR032-AUDIT-INDEPENDENCE | DIR-032: generic-vehicle OUTER-LOOP audit dispatch + machine-checkable audit-independence HARD gate (close both halves together, per SELECT's governance/infra hard floor) | DONE | - | milestone-candidate, governance-integrity, human-steered, milestone:M44-dir032-audit-independence |
 | exp5-M-DIR022-REMAINING-GATES | DIR-022 remainder: register the OTHER gates (audit, vmeta-lag, escrow, test-floor) as named engine gates + prove multi-gate ABSORB on a REAL milestone | DONE | - | milestone-candidate, milestone:M43-dir022-remaining-gates |
 | exp5-M-CRYST-E3 | E3 adr-as-contract enforcement — applies-to scope + runnable check as a named adr-<id> quay gate (the 'continuously applied' half of E1) | DONE | - | milestone-candidate, crystallization, milestone:M42-cryst-e3 |
@@ -46,7 +47,6 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| exp5-M-CRYST-D1 | D1 quay DOCUMENT-MANAGEMENT capability (contract-validator as a quay feature; formalized-style + self-verifying contracts enforced by quay) | open | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-INV | INV [invariant] enforcement-WITH-design: no new rule/DoD-clause/method-step accepted without its executable enforcement in the SAME milestone (generalizes DIR-026 item 5) — the #1 cross-experiment structural fault | open | - | milestone-candidate, crystallization, invariant |
 | exp5-M-TS-MIGRATION | TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety | open | - | milestone-candidate, crystallization, human-steered |
 | exp5-M-CRYST-B4 | B4 Migrate existing tasks to the canonical schema (or forward-only + validator flags legacy) | open | - | milestone-candidate, crystallization |
@@ -68,4 +68,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_61 milestone-candidate task(s) as of 2026-07-20T04:30:49.700Z._
+_61 milestone-candidate task(s) as of 2026-07-20T05:15:25.889Z._
