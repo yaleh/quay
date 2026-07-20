@@ -1,0 +1,17 @@
+{
+	"name": "quay",
+	"version": "0.3.5",
+	"description": "quay: a provider-agnostic task board. Bundles the quay MCP server (Core `quay mcp`, aggregating whichever Provider is enabled in the target workspace's .quay/config.yml), the quay-native author/execute authoring skills, and a workspace-portable quay-directive skill (auto-detects this workspace's task store — no experiments/ dir required).",
+	"author": {
+		"name": "Yale Huang",
+		"url": "https://github.com/yaleh"
+	},
+	"license": "MIT",
+	"homepage": "https://github.com/yaleh/quay",
+	"repository": "https://github.com/yaleh/quay",
+	"commands": [
+		"./skills/author/SKILL.md",
+		"./skills/execute/SKILL.md",
+		"./skills/quay-directive/SKILL.md"
+	]
+}
