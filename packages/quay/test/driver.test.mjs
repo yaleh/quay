@@ -412,6 +412,36 @@ test("C [AC2]: `quay run` drives ALL actionable tasks to a fixpoint (exit 0)", (
   }
 });
 
+// --- exp5-M-GATE-CLI-ERROR-UX AC2 regression: exit-code leak on a fixpoint
+// stop that included a failed task ------------------------------------------
+//
+// Reproduces this task's Finding 2 exactly: a 2-task board where ONE task has
+// a real failing acceptance meter ("false") and the loop still reaches a
+// clean `fixpoint` (not `cap`) after attempting it. BEFORE the fix, `run`
+// leaked `process.exitCode = 1` from that failed task's `runComplete` call
+// even though the driver's own inline comment says only the `cap` ceiling
+// should be nonzero — this asserts the CORRECTED behavior: exit 0.
+
+test("C [AC2 regression]: `quay run` exits 0 on a fixpoint stop that included a failed task (exit-code leak fix)", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("ac2-mixed-fixpoint");
+  seedReadyTask("RUN-MIX-FAIL", tasksDir, workspaceRoot, "false"); // real failing meter
+  seedReadyTask("RUN-MIX-PASS", tasksDir, workspaceRoot, "true");  // passes
+
+  const r = runQuay(["run"], workspaceRoot);
+  assert.equal(
+    r.status,
+    0,
+    `fixpoint stop with a failed task along the way must still exit 0; got ${r.status}, stdout=${r.stdout}, stderr=${r.stderr}`
+  );
+  assert.match(r.stdout, /FAIL — acceptance failed/);
+  assert.match(r.stdout, /run: 1 completed in 2 iters \(stop=fixpoint\)/);
+
+  const failTask = JSON.parse(runQuay(["task", "view", "RUN-MIX-FAIL", "--json"], workspaceRoot).stdout);
+  assert.equal(failTask.status, "ready", "the failed task stays ready (attempted once, not retried)");
+  const passTask = JSON.parse(runQuay(["task", "view", "RUN-MIX-PASS", "--json"], workspaceRoot).stdout);
+  assert.equal(passTask.status, "done", "the other task still completes despite the earlier failure");
+});
+
 // --- AC3 (POC): one exp5 OUTER-LOOP ABSORB step as a `quay run --once` --------
 // The analogy (prose only — NEVER reads/runs/edits experiments/quay-perpetual-
 // stream/**): exp5's OUTER-LOOP ABSORB step advances a `ready` milestone task

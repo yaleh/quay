@@ -8,7 +8,8 @@ labels:
   - milestone-candidate
   - surface:cli
   - milestone:M37-discover-post-qeng
-extra: {}
+extra:
+  schema: "v1"
 ---
 ## Provenance
 Materialized at the M37-discover-post-qeng discovery milestone (2026-07-19), from direct exercise of
@@ -82,6 +83,44 @@ weren't ready yet" from "hit the safety ceiling" without parsing stdout text.
 
 Both findings are real, reproducible, currently-shipped behavior — not speculative or invented for
 this task's sake.
+
+## Proposal
+Fix both findings at their smallest correct scope, at the CLI-command layer only (no change to
+`engine.js`/`lifecycle.js`'s own throw/exit-code semantics — those stay exactly as documented, since
+downstream unit tests already assert the exact throw message shapes):
+
+1. **Guarded-error message cleanup (Finding 1).** Add one small helper in `bin/quay.js`,
+   `withGuardedErrors(fn)`, that runs the command body and catches ONLY errors matching the three
+   already-fixed, already-well-known message shapes the engine/lifecycle modules throw by design
+   (`unknown gate: `, `no such task: `, `illegal transition: `) — printing `console.error(err.message)`
+   + `process.exitCode = 1` (mirroring `complete`'s existing not-ready precondition path exactly), and
+   RE-THROWING anything else unchanged (so a genuine unanticipated bug still surfaces its real stack
+   trace via the top-level `main().catch()`, which is correct and desired for that case). Wrap the
+   `gate`, `complete`, `adjudicate`, `promote`, `retreat` command bodies with it (the five verb-less
+   commands that route through `runGate`/`runComplete`/`runAdjudicate`/`runPromote`/`runRetreat`).
+   Chosen over: (a) changing `engine.js`/`lifecycle.js` to return `{ok:false,...}` instead of throwing —
+   rejected, larger surface change, breaks the existing unit tests' `assert.rejects(...)` expectations,
+   and the task's own AC explicitly allows "keep throwing, if documented" as a valid alternative,
+   which this proposal does NOT need since a thin CLI-layer catch is strictly smaller; (b) a bespoke
+   try/catch duplicated per command — rejected, five near-identical blocks vs. one shared helper.
+2. **`run` exit-code fix (Finding 2).** In the `run` command's non-`--once` branch, replace the
+   existing `if (r.stopped === "cap") process.exitCode = 1;` (a write with no corresponding reset) with
+   an unconditional `process.exitCode = r.stopped === "cap" ? 1 : 0;` — this both fixes the leak (a
+   `fixpoint`/`sentinel` stop no longer inherits a stray 1 from an earlier `runComplete` fail) and keeps
+   the existing correct `cap` behavior. No change to `driver.js`/`runComplete`'s own exit-code writes —
+   those stay correct for `--once` and for `complete` itself; only the `run` (loop) branch needed an
+   explicit final reset, matching the pattern the `--once` branch already uses one code path above it.
+3. **Tests** — new/extended CLI-subprocess-level tests (not just direct `run*`/`runLoop` calls) in
+   `lifecycle.test.mjs` / `driver.test.mjs` / `gate.test.mjs` asserting: (a) stderr contains the clean
+   one-line message and does NOT match a stack-frame pattern (`at Object.`, `    at `, `.js:<line>`) for
+   promote/retreat illegal-transition and gate unknown-gate/missing-task; (b) a mixed pass/fail 2-task
+   board reaching `fixpoint` via `quay run` exits 0 (this task's exact Finding 2 scenario).
+
+## Plan
+N/A — change is small enough (~2 files, +/-60 lines of new tests, ~20 lines of handler code,
+single-file-plus-tests) to execute directly from the `## Proposal` above + the AC/DoD checklists;
+no `docs/plans/*.md` staged, and a full plan-authoring pipeline detour (DIR-014 §5a
+`quay-task-to-plan`) is disproportionate to a change scoped precisely by the task's own two Findings.
 
 ## Acceptance Criteria
 - [ ] `promote`/`retreat`'s illegal-transition throws, and `gate`'s unknown-gate/missing-task throws,
