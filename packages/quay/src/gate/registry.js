@@ -62,6 +62,20 @@ const LINE_BUDGET_SCRIPT = path.join(
   REPO_ROOT,
   "experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh"
 );
+// DIR-022 remainder (M43): vmeta-lag wraps vmeta-lag-check.sh — the thin
+// `.sh` wrapper already shipped over vmeta-lag-check.mjs (the module IS the
+// canonical arithmetic, per its own header comment; the `.sh` wrapper is the
+// SAME "invocation surface, not a second implementation" shape task-schema-
+// check.sh's own `.sh`-wraps-`.mjs` pattern uses) — mirrors `impl-row`/
+// `line-budget`'s own choice to wrap the executable `.sh` entry point.
+const VMETA_LAG_SCRIPT = path.join(
+  REPO_ROOT,
+  "experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh"
+);
+const DOGFOOD_EVIDENCE_SCRIPT = path.join(
+  REPO_ROOT,
+  "experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh"
+);
 const ADR_DIR = path.join(REPO_ROOT, "adr");
 
 /**
@@ -190,6 +204,34 @@ export const gateRegistry = {
   // DIR-022 Layer 2 phase 1 (M39): thin wrappers, see comment block above.
   "impl-row": makeIt0Gate(IMPL_ROW_SCRIPT, "implRowArgs", "impl-row"),
   "line-budget": makeIt0Gate(LINE_BUDGET_SCRIPT, "lineBudgetArgs", "line-budget"),
+  // DIR-022 remainder (M43, exp5-M-DIR022-REMAINING-GATES): the SAME
+  // `makeIt0Gate` factory, two more real standalone it0/vmeta scripts.
+  // `vmeta-lag`: task.extra.vmetaLagArgs, e.g. ["--counter","43","v-meta-ledger.md"]
+  // or just ["v-meta-ledger.md"] (the `--counter` flag is optional, per the
+  // script's own usage). `dogfood-evidence`: task.extra.dogfoodEvidenceArgs,
+  // e.g. ["<iteration-report.md>"] (optional 2nd arg: window-lines).
+  "vmeta-lag": makeIt0Gate(VMETA_LAG_SCRIPT, "vmetaLagArgs", "vmeta-lag"),
+  "dogfood-evidence": makeIt0Gate(DOGFOOD_EVIDENCE_SCRIPT, "dogfoodEvidenceArgs", "dogfood-evidence"),
+  // NOTE — deliberately NOT registered here (M43 SELECT-time re-derivation,
+  // see tasks/exp5-M-DIR022-REMAINING-GATES.md `## Proposal` for the full
+  // rationale):
+  //   * `escrow-delta-v` / `test-floor` — these are NOT standalone scripts;
+  //     they are Clauses 6/7 INSIDE `it0-dod-check.mjs`, already run (and
+  //     gated) via the `dod` gate above. A separate named gate would either
+  //     re-invoke the same script with a non-existent "run only clause 6/7"
+  //     flag, or duplicate the text-scanning logic — both violate this
+  //     task's own single-source DoD requirement. `dod` already covers them.
+  //   * `audit` — already exists as a GateEvent NAME via `quay adjudicate`
+  //     (`lifecycle.js#runAdjudicate`, wraps `taskCheck`), which is a
+  //     DIFFERENT check than the exp5 per-milestone adversarial-audit
+  //     narrative (OUTER-LOOP.md step 6). Adding a second `gateRegistry.audit`
+  //     entry here would collide with that existing name under a different
+  //     meaning; the exp5 per-milestone audit itself has no single mechanical
+  //     script to wrap (it is a dispatched subagent's refute-first read of
+  //     AC/DoD, not a fixed command) — there is nothing to wrap without
+  //     inventing a synthetic pass/fail script that doesn't reflect the real
+  //     audit's actual judgment. Left unregistered by design, not omitted by
+  //     oversight.
 };
 
 // E3: register one `adr-<id>` gate per ADR_GATE_IDS entry (lowercase numeric
