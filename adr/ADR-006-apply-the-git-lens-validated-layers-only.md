@@ -1,8 +1,9 @@
 ---
 id: ADR-006
 title: Apply the GIT lens — validated layers only (goal-closure L_T..L_S + hard-over-soft + Π_{S→E}); reject the continuous math
-status: proposed
+status: accepted
 date: 2026-07-19
+accepted-date: 2026-07-20
 supersedes: []
 superseded-by: []
 tags:
@@ -21,7 +22,7 @@ Adopt, as analytical tools, the **validated layers only**:
 
 EXPLICITLY REJECT citing the continuous math (Fisher / natural gradient / intrinsic dimension / `ρ`) as rigor or as justification for any decision. Fluency of a geometric argument is not evidence — especially from an LLM.
 
-<!-- enforcement: N/A — a stance on analytical honesty (which tools to trust), irreducibly judgment. A naive grep guard would false-positive on the reference docs and on ADRs that NAME these terms in order to reject them (the "cited as justification" vs "named to reject" distinction is semantic, not grep-able). Honored by discipline, not a gate. (OQ2, human-confirmed 2026-07-19.) -->
+<!-- enforcement: N/A — a stance on analytical honesty (which tools to trust), irreducibly judgment. A naive grep guard would false-positive on the reference docs and on ADRs that NAME these terms in order to reject them (the "cited as justification" vs "named to reject" distinction is semantic, not grep-able). Honored by discipline, not a gate. (OQ2, human-confirmed 2026-07-19.) Promoted proposed→accepted 2026-07-20: enforcement question resolved N/A, nothing left to land per ADR-011. -->
 
 ## Consequences
 - **Forbids:** grounding a decision in the continuous-dynamics layer; presenting a geometric metaphor as proof without an out-of-sample check.

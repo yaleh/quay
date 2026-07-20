@@ -1,8 +1,9 @@
 ---
 id: ADR-009
 title: Drive development via background Claude Code workflows at milestone granularity
-status: proposed
+status: accepted
 date: 2026-07-19
+accepted-date: 2026-07-20
 supersedes: []
 superseded-by: []
 tags:
@@ -16,7 +17,7 @@ Typical development on this repo is already executed by an autonomous outer loop
 ## Decision
 Typical development activity is executed through a **Claude Code workflow, run in the background**, with granularity **aligned to a milestone** (one workflow episode ≈ one milestone). Human steering follows DIR-027 hygiene: pause via the `.halt` sentinel, or work in a private worktree off `master` and fast-forward at a clean window — never race the loop on `master`.
 
-<!-- enforcement: N/A — a process norm, not a Π_{S→E} candidate (not cleanly mechanizable: "landed via a workflow episode vs ad-hoc commit" has no crisp check). Honored by discipline, not a gate. (OQ1, human-confirmed 2026-07-19.) -->
+<!-- enforcement: N/A — a process norm, not a Π_{S→E} candidate (not cleanly mechanizable: "landed via a workflow episode vs ad-hoc commit" has no crisp check). Honored by discipline, not a gate. (OQ1, human-confirmed 2026-07-19.) Promoted proposed→accepted 2026-07-20: enforcement question resolved N/A, nothing left to land per ADR-011. -->
 
 ## Consequences
 - **Forbids:** open-ended, granularity-free background runs that don't bottom out at a milestone boundary; racing the loop on `master`.
