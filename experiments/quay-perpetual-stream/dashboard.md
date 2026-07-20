@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 51** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M51 ABSORB header sync): body log's m51 ABSORB entry below sets milestone_counter → 51;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50).
-51 % 5 != 0 — no checkpoint due this milestone; next checkpoint due at m55. -->
+**milestone_counter: 52** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M52 ABSORB header sync): body log's m52 ABSORB entry below sets milestone_counter → 52;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51).
+52 % 5 != 0 — no checkpoint due this milestone; next checkpoint due at m55. -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -4752,3 +4752,103 @@ only `DIR-035-D` remains an open `milestone-candidate` task for a future SELECT 
 
 ## Backlog row
 | exp5-M-GATE-HELP-SYNOPSIS-GAP | `quay --help` top-level Usage synopsis omitted `quay gate`/`quay gate-log` — add synopsis lines + dedicated QENG-1/2 options section + regression test | capability-growth (discoverability, primary) | no VT chart cell | milestone-candidate, surface:cli, milestone:M37-discover-post-qeng, milestone:M51 |
+
+## M52 — M52-dir035-d-kit-singlesource (DIR-035-D)
+
+**Task:** [[DIR-035-D]] (`tasks/DIR-035-D.md`) — fourth (last) child of [[DIR-035]] (ADR-013
+delivery-boundary separation), split per DIR-026 SPLIT-OR-COMMIT into 4 independently-completable
+children (A/B/C/D). DIR-035-D's scope: **methodology-kit single-sourcing** (stop per-experiment
+`inherited-core` duplication) + **wire `delivery-standalone-smoke` as a named delivery conformance
+gate** (Requested action items 1+2 of DIR-035; item 3, the real foreign-repo deployment, is a
+later directive's own scope — see below). **Merge commit:** `737b822` merged via `--no-ff` into
+`master` at this ABSORB (built commit `90bbd07`, finalized commit `0fda10e`, worktree
+`milestones/M52/worktrees/iteration-0`, base `master` `8a15add`).
+
+**Adversarial-audit verdict: PASS-WITH-QUALIFICATIONS.** An independent audit, with no access to the
+build-phase agent's self-report, confirmed:
+- **Kit single-source (AC-1): PASS.** Repo-wide search confirmed exactly one live
+  `inherited-core*.md` file; the other experiment dirs use an unrelated `ITERATION-PROMPTS.md`
+  mechanism, not a duplicate copy. `inherited-core.md` gained a "Kit version + single-source
+  convention" section (v1, SHA `b17caab`).
+- **Named-gate wiring (AC-2/AC-3): PASS.** `makeFixedScriptGate` in `packages/quay/src/gate/
+  registry.js` is genuine non-duplicative reuse of the existing runner. `.quay/gates.yml` wires
+  `delivery-standalone-smoke`; `quay gate DIR-035-D --gate delivery-standalone-smoke` → PASS with a
+  real GateEvent; `gate --list` surfaces it. 7 new tests in
+  `packages/quay/test/delivery-standalone-smoke-gate.test.mjs` all pass, substantive not
+  tautological.
+- `delivery-standalone-smoke.sh` → 0 RED. Full suite: 260 tests, 257 pass / 3 fail (256/4 in the
+  build agent's own run — same known pre-existing flaky baseline: `adr-gate E3 A2`
+  env-sensitivity, `dir032-audit-independence` M44 A2/C1, `web-ui-browser`). No new regressions.
+  `dod-fixture-selfcheck.sh` 17/17 PASS. `task-schema-check.sh tasks/DIR-035-D.md` PASS.
+- DIR-014 §5a routing (single Proposal+plan-doc, not the full N-independent-proposal pipeline)
+  ruled acceptable, matching DIR-035-A/B/C precedent. `extra.acceptance` left unset, also matching
+  precedent.
+- **One required fix, applied at this ABSORB before closure:** AC-4 (foreign-repo deployment) was
+  correctly not attempted this milestone, but its deferral to `tasks/DIR-036.md`
+  (`blockedBy: DIR-035-D`, re-splitting the exact same scope into DIR-036-A (Level 2 deployment) /
+  DIR-036-B (Level 3 application)) was documented only in the build's plan doc
+  (`docs/plans/13-dir035-d-kit-singlesource-and-smoke-gate.md`), not TASK-CANONICALLY on DIR-035-D
+  itself — a DIR-009/DIR-028 single-source-of-truth violation. **Fixed:** DIR-035-D's own AC-4 text
+  now states the deferral explicitly, and a new `## Scope Note (Accepted Deferral)` section on the
+  task itself names DIR-036-A/B by task ID. `tasks/DIR-036.md` was NOT touched (still `todo`/
+  `blockedBy: DIR-035-D`, exactly as authored).
+
+**Mechanical gates (real runs, this ABSORB, from inside the worktree before merge):**
+```
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 52 experiments/quay-perpetual-stream/v-meta-ledger.md
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh   → tree-hygiene: clean.
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+$ node packages/quay/bin/quay.js gate DIR-035-D --gate dod   → PASS
+```
+**Test-floor (this ABSORB's own independent re-run, clean state, `packages/quay` only, excluding
+`serve-github`/`provider-abi-conformance`):** **260 tests / 256 pass / 4 fail** — matches the known
+pre-existing flaky baseline (`adr-gate E3 A2`, `dir032-audit-independence` M44 A2/C1,
+`web-ui-browser`); no new regressions from this milestone's changes.
+
+**Impl-row (Clause 4):** N/A — real code-landing milestone (the task's own AC/DoD, minus the
+deferred AC-4, are the real-landing proof), not a design-only artifact needing a future
+implementing row.
+**Line-budget (Clause 3):** N/A — no formal charter file authored (same no-charter precedent as
+M46-M51's directive-driven ABSORBs).
+**Split-or-commit (Clause 9):** N/A — no `needs-human` outcome declared; DIR-035-D reached `done`
+(with the AC-4 scope explicitly reassigned to DIR-036-A/B, not left ambiguous).
+
+**Realized Δv**: governance-integrity (primary — closes the fourth and last of DIR-035's named
+delivery-boundary rules within DIR-035-D's own amended scope; the methodology kit is now
+single-sourced with an explicit version-pin convention, and `delivery-standalone-smoke` is a
+mechanically-enforced named gate rather than a script someone has to remember to run). No VT chart
+cell (same no-VT-cell precedent as prior method-infra/architecture-fix milestones touching the
+meta-layer). VT chart-1 total unchanged: **111.55/120**. `milestone_counter` → **52** (52 % 5 != 0
+— no checkpoint due; next checkpoint due at **m55**).
+
+**Backlog housekeeping**: `tasks/DIR-035-D.md` → `status: done`, `dirStatus: resolved`, AC-1/2/3
+fully ticked, AC-4 ticked as "satisfied via documented deferral", all DoD boxes ticked, `##
+Resolution` section finalized citing commit `90bbd07`, the audit's PASS-WITH-QUALIFICATIONS
+verdict, and the evidence summarized above; new `## Scope Note (Accepted Deferral)` section added
+naming DIR-036-A/B by task ID. `tasks/DIR-035.md` (parent) — **`## Split` section updated to record
+DIR-035-D's landing, but status/dirStatus deliberately left `todo`/`pending`**: all four children
+(A/B/C/D) are now `done`, but DIR-035's OWN (unedited) AC/DoD require the deployment-level
+foreign-repo demonstration, which DIR-035-D's own Scope Note explicitly defers to [[DIR-036]]
+rather than completing — "all children done" does not, in this case, imply the parent's own
+(broader) DoD is satisfied (DIR-026 SPLIT-OR-COMMIT / M12 parent/children discipline, applied
+correctly rather than mechanically). `tasks/DIR-036.md` untouched. `backlog.md` regenerated via
+`node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs
+experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M52/worktrees/iteration-0` removed (`git
+worktree remove`), `milestones/M52-dir035-d-kit-singlesource` branch deleted (`git branch -d`,
+fully merged, confirmed ancestor of `master` before deletion). `worktree-branch-hygiene-check.sh`/
+`tree-hygiene-check.sh` both report clean, 0 registered worktrees post-prune.
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 52, not a multiple of 5;
+next checkpoint due at **m55**).
+
+**DRAIN disposition of `directives/pending/` (task-canonical, per DIR-028) at this boundary:**
+`DIR-035` (parent) stays `pending` — DIR-035-A/B/C/D are all now `done`, but the parent's own
+deployment-level AC/DoD await [[DIR-036]]'s children. `DIR-036` remains `todo`, unblocked for a
+future SELECT now that `blockedBy: DIR-035-D` is satisfied.
+
+## Backlog row
+| DIR-035-D | DIR-035 split D: single-source the methodology kit + wire delivery-standalone-smoke as a named delivery conformance gate (AC-4 foreign-repo deployment deferred to DIR-036-A/B) | governance-integrity (primary) | no VT chart cell | milestone-candidate, human-steered, surface:cli, milestone:M52-dir035-d-kit-singlesource |

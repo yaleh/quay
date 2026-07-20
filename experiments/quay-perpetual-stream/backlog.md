@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| DIR-035-D | DIR-035 split D: single-source the methodology kit (stop per-experiment inherited-core duplication) + wire delivery-standalone-smoke as a named delivery conformance gate | DONE | - | directive, milestone-candidate |
 | exp5-M-GATE-HELP-SYNOPSIS-GAP | `quay --help`'s top-level Usage synopsis omits `quay gate <id>` and `quay gate-log <id>` entirely — the two QENG-1/2 entry-point commands are documented only as passing mentions inside OTHER commands' help text | DONE | exploit (docs/discoverability fix on an already-shipped CLI surface). | milestone-candidate, surface:cli, milestone:M37-discover-post-qeng, milestone:M51 |
 | DIR-035-C | DIR-035 split C: experiment state is not product data — delivered product ships an empty/minimal example store, not the multi-experiment tasks/ backlog | DONE | - | directive, milestone-candidate |
 | DIR-035-B | DIR-035 split B: data-driven gate set — move it0-*/vmeta-lag/audit-independence/dogfood-evidence built-ins out of the product's default registry (delivery-standalone-smoke blockers 1/5) | DONE | - | directive, milestone-candidate |
@@ -55,7 +56,6 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-GATE-CLI-ERROR-UX | QENG gate/lifecycle CLI surface: replace raw stack traces on guarded-error paths with clean one-line messages, and fix quay run's exit-code leak on a fixpoint stop that included a failed task | SELECTED | exploit (UX/robustness fix on an already-shipped, real CLI surface). | milestone-candidate, surface:cli, milestone:M37-discover-post-qeng |
 | exp5-M-GATE-MCP-PARITY-GAP | The entire QENG-1..4 gate/lifecycle/driver engine is reachable ONLY via raw CLI — quay's own MCP server (the surface an AI agent, quay's stated primary user, actually drives) exposes just the pre-QENG task_list/get/write/check + action_list/run tools, none of gate/complete/ promote/retreat/adjudicate/run/gate-log | SELECTED | explore (identifies a design gap; the fix requires deciding an MCP tool surface, not a 1-line patch). | milestone-candidate, surface:mcp, milestone:M37-discover-post-qeng |
 | exp5-M-GATE-README-DOCS | packages/quay/README.md has ZERO mentions of the entire QENG-1..4 gate/lifecycle/driver CLI surface (gate, gate-log, complete, adjudicate, promote, retreat, run) — a real, shipped, user-facing command family is fully undocumented in the package's own README | SELECTED | exploit (docs gap on an already-shipped, user-facing CLI surface). | milestone-candidate, surface:docs, milestone:M37-discover-post-qeng |
-| DIR-035-D | DIR-035 split D: single-source the methodology kit (stop per-experiment inherited-core duplication) + wire delivery-standalone-smoke as a named delivery conformance gate | open | - | directive, milestone-candidate |
 | exp5-M-CRYST-B4 | B4 Migrate existing tasks to the canonical schema (or forward-only + validator flags legacy) | open | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-E2 | E2 Extract ADRs from proposals + DIR tasks (single-source DIR-002→028, split-or-commit DIR-026, single-branch DIR-027, proposal→plan DIR-014, AC/DoD-in-task DIR-020, QENG, Provider ABI, ...) | open | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-C1 | C1 [executable] Crystallize split-or-commit's SELECT-split rule + parent-done-iff-children from prose into gates (DIR-026 half-done) | open | - | milestone-candidate, crystallization |
@@ -73,4 +73,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_66 milestone-candidate task(s) as of 2026-07-20T09:18:26.060Z._
+_66 milestone-candidate task(s) as of 2026-07-20T09:45:45.182Z._
