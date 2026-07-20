@@ -8,9 +8,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createStore } from "../src/store.js";
-import { createAdrStore } from "../src/adr-store.js";
-import { createDocumentStore } from "../src/document-store.js";
-import { validateContracts } from "../src/contract-validator.js";
+// ADR/document/contract-validator are generic filesystem-frontmatter stores
+// with no dependency on quay-native's task vocabulary (store.js) — they now
+// live in `quay` (Core), which needs them standalone for its gate registry
+// (ADR-013 / DIR-035-A). quay-native imports them back as a declared
+// workspace dependency (`quay` in package.json) — a Provider depending on
+// Core's generic utility library, NOT the ABI-violating direction (Core
+// reaching into a Provider's task-store internals by relative path).
+import { createAdrStore } from "quay/src/adr-store.js";
+import { createDocumentStore } from "quay/src/document-store.js";
+import { validateContracts } from "quay/src/contract-validator.js";
 import { readManifest } from "../src/manifest.js";
 
 function findRepoRoot(startDir) {

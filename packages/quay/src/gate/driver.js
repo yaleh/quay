@@ -2,8 +2,8 @@
 // composes QENG-1/2/3 without restating them: it scans the board for actionable
 // `ready` tasks, drives each through QENG-3 `runComplete` (which runs the QENG-2
 // acceptance gate + appends a QENG-1 GateEvent + writes the status), and stops at
-// a fixpoint or a stop sentinel. This is what would eventually replace exp5's
-// ~330-line prose OUTER-LOOP.md — the loop calls one command instead of
+// a fixpoint or a stop sentinel. This is what would eventually replace a
+// hand-run prose outer-loop driver — the loop calls one command instead of
 // interpreting prose.
 //
 // Adds NO new gate logic and touches NO Provider ABI beyond `taskList` (scan) +

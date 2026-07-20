@@ -18,7 +18,7 @@
 // `(task, client)` gate contract stays unchanged (proposal §3, Trade-offs).
 //
 // DIR-022 Layer 2 phase 1 (M39) adds two more named gates, `impl-row` and
-// `line-budget` — thin wrappers over exp5's existing standing mechanical
+// `line-budget` — thin wrappers over this project's existing standing mechanical
 // checks (`experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh`
 // and `it0-ceiling-line-budget-check.sh`). Per DIR-022's own instruction
 // ("Reuse the it0 scripts as-is — do NOT rewrite gate logic"), NEITHER gate
@@ -49,9 +49,15 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAcceptance } from "./acceptance-runner.js";
-import { createAdrStore } from "../../../quay-native/src/adr-store.js";
-import { createDocumentStore } from "../../../quay-native/src/document-store.js";
-import { validateContracts } from "../../../quay-native/src/contract-validator.js";
+// ADR-013 / DIR-035-A: these are generic filesystem-frontmatter stores with no
+// dependency on any Provider's task vocabulary — they were misplaced under
+// quay-native (a Provider) purely because that's where they were first added
+// (E1/E3/D1); Core needs them standalone for its own gate registry, so they
+// now live here as Core-owned modules (moved, not duplicated — quay-native's
+// own CLI/MCP-server imports them back from `quay` as a declared dependency).
+import { createAdrStore } from "../adr-store.js";
+import { createDocumentStore } from "../document-store.js";
+import { validateContracts } from "../contract-validator.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/quay/src/gate -> repo root is 4 levels up.
@@ -136,7 +142,7 @@ function makeIt0Gate(scriptPath, argsKey, label) {
 }
 
 /**
- * E3 (exp5-M-CRYST-E3, DIR-030 item 2/4) — adr-as-contract enforcement: wire an
+ * E3 (DIR-030 item 2/4) — adr-as-contract enforcement: wire an
  * `accepted` ADR carrying a real `enforcement` command as a named `adr-<id>` gate.
  * Its GateEvents become the "ADR honored" ledger (`quay gate-log`) — this is the
  * "continuously applied" half E1 deliberately deferred (E1 only reserved the
@@ -149,7 +155,7 @@ function makeIt0Gate(scriptPath, argsKey, label) {
  * branch) when the ADR is missing, not `accepted`, or has no non-empty
  * `enforcement` string — an un-enforceable ADR must never silently PASS.
  *
- * Adjudicated design choice (see tasks/exp5-M-CRYST-E3.md `## Proposal` /
+ * Adjudicated design choice (see the E3 milestone task's `## Proposal` /
  * docs/plans/10-adr-gate-enforcement.md): `enforcement` is a raw runnable COMMAND
  * STRING (same convention family as `task.extra.acceptance`), not a structured
  * `{check,args}` object — B7's real invocation shape (`loadbearing-test-gate.sh
@@ -189,7 +195,7 @@ function makeAdrGate(adrId, adrDir) {
 }
 
 /**
- * D1 (exp5-M-CRYST-D1) — document-as-contract enforcement: the SAME
+ * D1 — document-as-contract enforcement: the SAME
  * "continuously applied" shape as `makeAdrGate`, but for the NEW `document`
  * object kind (document-store.js, Stage 2) rather than an ADR. Unlike
  * `makeAdrGate`, this does NOT shell out via `runAcceptance` — a document's
@@ -286,7 +292,7 @@ export const gateRegistry = {
   // DIR-022 Layer 2 phase 1 (M39): thin wrappers, see comment block above.
   "impl-row": makeIt0Gate(IMPL_ROW_SCRIPT, "implRowArgs", "impl-row"),
   "line-budget": makeIt0Gate(LINE_BUDGET_SCRIPT, "lineBudgetArgs", "line-budget"),
-  // DIR-022 remainder (M43, exp5-M-DIR022-REMAINING-GATES): the SAME
+  // DIR-022 remainder (M43): the SAME
   // `makeIt0Gate` factory, two more real standalone it0/vmeta scripts.
   // `vmeta-lag`: task.extra.vmetaLagArgs, e.g. ["--counter","43","v-meta-ledger.md"]
   // or just ["v-meta-ledger.md"] (the `--counter` flag is optional, per the
@@ -294,14 +300,14 @@ export const gateRegistry = {
   // e.g. ["<iteration-report.md>"] (optional 2nd arg: window-lines).
   "vmeta-lag": makeIt0Gate(VMETA_LAG_SCRIPT, "vmetaLagArgs", "vmeta-lag"),
   "dogfood-evidence": makeIt0Gate(DOGFOOD_EVIDENCE_SCRIPT, "dogfoodEvidenceArgs", "dogfood-evidence"),
-  // DIR-032 (M44, exp5-M-DIR032-AUDIT-INDEPENDENCE): HARD-blocks a self-audit
+  // DIR-032 (M44): HARD-blocks a self-audit
   // (absent or matching session/agent id) from ever passing this gate — see
   // OUTER-LOOP.md's Per-milestone acceptance audit section for how this is
   // wired into ABSORB. `task.extra.auditIndependenceArgs`, e.g.
   // `["--orchestrator-id","<id>","<audit-artifact.md>"]`.
   "audit-independence": makeIt0Gate(AUDIT_INDEPENDENCE_SCRIPT, "auditIndependenceArgs", "audit-independence"),
   // NOTE — deliberately NOT registered here (M43 SELECT-time re-derivation,
-  // see tasks/exp5-M-DIR022-REMAINING-GATES.md `## Proposal` for the full
+  // see the DIR-022-remainder milestone task's `## Proposal` for the full
   // rationale):
   //   * `escrow-delta-v` / `test-floor` — these are NOT standalone scripts;
   //     they are Clauses 6/7 INSIDE `it0-dod-check.mjs`, already run (and
@@ -311,10 +317,10 @@ export const gateRegistry = {
   //     task's own single-source DoD requirement. `dod` already covers them.
   //   * `audit` — already exists as a GateEvent NAME via `quay adjudicate`
   //     (`lifecycle.js#runAdjudicate`, wraps `taskCheck`), which is a
-  //     DIFFERENT check than the exp5 per-milestone adversarial-audit
+  //     DIFFERENT check than this project's per-milestone adversarial-audit
   //     narrative (OUTER-LOOP.md step 6). Adding a second `gateRegistry.audit`
   //     entry here would collide with that existing name under a different
-  //     meaning; the exp5 per-milestone audit itself has no single mechanical
+  //     meaning; this project's per-milestone audit itself has no single mechanical
   //     script to wrap (it is a dispatched subagent's refute-first read of
   //     AC/DoD, not a fixed command) — there is nothing to wrap without
   //     inventing a synthetic pass/fail script that doesn't reflect the real

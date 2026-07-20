@@ -1,4 +1,4 @@
-// quay-native: single-source contract validator (Stage 3, exp5-M-CRYST-D1).
+// quay Core: single-source contract validator.
 //
 // document-store.js round-trips a document's `contracts` field VERBATIM
 // (it does not interpret it — see that module's header comment). This module

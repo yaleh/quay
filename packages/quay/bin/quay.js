@@ -97,7 +97,7 @@ function parseFlags(argv) {
   return { flags, positional };
 }
 
-// exp5-M-GATE-CLI-ARG-ORDER: the six verb-less commands (gate/gate-log/complete/
+// Verb-less CLI arg ordering: the six verb-less commands (gate/gate-log/complete/
 // adjudicate/promote/retreat) take <task-id> as their first positional. The
 // top-level destructure `const [, , cmd, sub, ...rest] = process.argv` puts
 // argv[3] in `sub` and parses ONLY `rest`, so a LEADING flag (e.g.
@@ -640,8 +640,7 @@ async function main() {
     // explicitly rejected: an unknown number of existing callers may rely on
     // being able to force a transition past a gate they've manually verified
     // is safe to bypass) — see charter's "Decision" section for the full
-    // reasoning: experiments/quay-perpetual-stream/charters/
-    // M31-cli-gate-enforcement.md. A future reader should not have to
+    // reasoning: the M31-cli-gate-enforcement design record. A future reader should not have to
     // re-derive this from scratch.
     const id = positional[0];
     const enforceGate = flags["enforce-gate"] !== undefined;
@@ -708,8 +707,7 @@ async function main() {
       // combined --append-notes + --status write is also gated — the
       // gate's purpose (don't let a status transition slip past `task
       // check`) applies regardless of which code path performs the write.
-      // See experiments/quay-perpetual-stream/charters/
-      // M31-cli-gate-enforcement.md for the full reasoning.
+      // See the M31-cli-gate-enforcement design record for the full reasoning.
       if (enforceGate && patch.status !== undefined) {
         const gateResult = await client.taskCheck(id);
         if (gateResult.ok === false) {
@@ -889,7 +887,7 @@ async function main() {
     // AC2: evaluate a named gate against <task>; exit 0 pass / 1 fail; append
     // exactly one GateEvent. Mirrors `task check`'s exit-code plumbing
     // (process.exitCode = ok ? 0 : 1). Id + flags are flag-aware in either order
-    // (exp5-M-GATE-CLI-ARG-ORDER).
+    // (see the verb-less CLI arg-ordering note above).
     const { flags: vf, id } = parseVerbless(sub, rest);
     if (!id) { console.error("quay gate: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
@@ -911,7 +909,8 @@ async function main() {
   if (cmd === "gate-log") {
     // AC3: read-only query of GateEvents for <task>, filtered by pipeline_id.
     // Never appends. `--json` is read directly off flags.json. Id + flags are
-    // flag-aware in either order (exp5-M-GATE-CLI-ARG-ORDER). A missing id is an
+    // flag-aware in either order (see the verb-less CLI arg-ordering note above).
+    // A missing id is an
     // explicit usage error (exit 1) — chosen deliberately over the previous
     // silent-empty output, to mirror the other five verb-less commands, which all
     // require an id; querying ALL ids unfiltered is a distinct operation that

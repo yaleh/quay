@@ -8,7 +8,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { createStore } from "./store.js";
-import { createAdrStore } from "./adr-store.js";
+// ADR store is a generic filesystem-frontmatter store, now owned by `quay`
+// (Core) — see bin/quay-native.js for the full rationale (ADR-013 / DIR-035-A).
+import { createAdrStore } from "quay/src/adr-store.js";
 import { readManifest } from "./manifest.js";
 
 export async function startMcpServer({ tasksDir, adrDir }) {
