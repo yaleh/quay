@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 60** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M60 ABSORB header sync): body log's m60 ABSORB entry below sets milestone_counter → 60;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57/m58/m59).
-60 % 5 == 0 — CHECKPOINT DUE this milestone, written as checkpoints/cp-60.md (next checkpoint at m65). -->
+**milestone_counter: 61** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M61 ABSORB header sync): body log's m61 ABSORB entry below sets milestone_counter → 61;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57/m58/m59/m60).
+61 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m65). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -5659,3 +5659,128 @@ resolved.
 
 ## Backlog row
 | DIR-042-B | `OUTER-LOOP.md` was exp5's own driver, entangled with the research layer (VT/value-ledger/checkpoints/`inherited-core`) — there was no slim, product-level "SELECT→execute→gate→done→repeat" skill a foreign project could install and run; closed via a new `plugin/skills/loop-driver/SKILL.md` (grep-clean of all research-layer terms), demonstrated end-to-end (PASS→done, FAIL→needs-human) against a scratch native-provider workspace with a shell-one-liner `extra.acceptance` as pure config; DIR-042 PARENT also closed this ABSORB (both children done, real-landing evidence on both halves) | capability-growth (primary) | no new VT chart cell (skill/tooling-distribution surface, not a chart-1-scored axis) | directive, milestone-candidate, milestone:M60-dir042b-loop-driver-skill |
+
+## M61 — M61-dir046-gate-ergonomics (DIR-046)
+
+**Task:** [[DIR-046]] (`tasks/DIR-046.md`) — quay gate ergonomics for foreign worktrees + long
+suites: (A) an explicit acceptance CWD override (`--cwd` flag / pre-set `QUAY_ACCEPTANCE_CWD` /
+`gates.yml` per-gate `cwd`) now wins over the CLI's unconditional workspaceRoot pin; (B) a
+per-gate `timeoutMs` in `.quay/gates.yml` lets a workspace declare its own suite's time budget
+as data; (C) `--cwd`/`--timeout` documented in `quay --help`, and a TIMEOUT failure's reason
+names the knob to raise. Surfaced by the FIRST real archguard external-dogfooding iteration
+(meta-cc session `8b74052c`) where the gate ran in the WRONG tree (the main repo, not the
+worktree) and timed out at 60s. **Merge commit:** `ececc8a`, merge of
+`milestones/M61-dir046-gate-ergonomics` (build `9368b89`, completion write-back `78625c9`) into
+`master` at this ABSORB (worktree `milestones/M61/worktrees/iteration-0`, base `master`
+`6731760`, the M61 SELECT commit — unchanged at merge time; no intervening off-loop commits).
+
+**Independent audit verdict: NO REFUTATION FOUND — recommend MERGE.** An independent audit, with
+no access to the build-phase agent's self-report, confirmed:
+- AC1 (CWD override precedence: `--cwd` flag > pre-set `QUAY_ACCEPTANCE_CWD` env > `gates.yml`
+  per-gate `cwd` > `workspaceRoot` default): PASS, 3 tests confirmed independently.
+- AC2 (per-gate `timeoutMs` in `gates.yml`): PASS, 3 tests confirmed independently (own fixture:
+  a 300ms sleep passes with a 5000ms budget, fails with a 50ms budget).
+- AC3 (discoverability: `--help` documents `--cwd`/`--timeout`; a timeout reason names the
+  knob): PASS, ran `quay --help` itself and triggered a real timeout.
+- AC4 (no regression): PASS — baseline 284 tests/280 pass/4 pre-existing flaky failures
+  (`adr-gate` E3 A2, `dir032-audit-independence` M44 A2/C1, `web-ui-browser`) on `master`; branch
+  has 293 tests/289 pass/same 4 failures, no new regressions.
+- DoD real-landing (session-`8b74052c` scenario reproduced): PASS — the audit independently built
+  its OWN scratch fixture (main-repo vs worktree dirs with different `marker.txt` content) and
+  confirmed via real `quay gate`/`gate-log` CLI invocations (not just unit tests) that: no
+  override → runs in the main-repo (wrong tree); `--cwd` override → runs in the worktree
+  (correct); a pre-set env var → also honored; the `timeoutMs` fixture behaves correctly both
+  directions.
+- Checkboxes confirmed still unticked (`- [ ]`) in `tasks/DIR-046.md` at audit time — DIR-020
+  compliant, no self-tick deviation.
+- `delivery-standalone-smoke.sh`: 0 RED.
+- **One cosmetic, non-blocking note**: `.quay/gates.yml`'s own schema-documentation comment did
+  not mention the new optional `cwd`/`timeoutMs` per-gate fields — the code/tests were already
+  correct, only the comment was stale.
+
+**Completion-phase (this ABSORB) independent re-verification**, before the checklist write-back —
+every claim above was re-run directly, not just re-read from the audit:
+- **`node --test test/gate-ergonomics.test.mjs`** (from `packages/quay`): re-run, **9/9 pass**,
+  identical to the audit's own count (the "A [RED->GREEN]" test named explicitly, plus 2 more A
+  tests, 3 B tests, 3 C tests).
+- **`quay --help`**: re-run, `--cwd`/`--timeout` documented with the DIR-046 precedence text.
+- **Full quay core suite** (excluding `serve-github`/`provider-abi-conformance`), re-run
+  independently from the worktree: **293 tests, 289 pass, 4 fail** — the SAME 4 pre-existing
+  flaky failures present at every prior ABSORB since M56 (`adr-gate` E3 A2,
+  `dir032-audit-independence` M44 A2/C1, `web-ui-browser`), confirmed NOT introduced by this
+  milestone (verified by grepping the failure names, not just trusting the count).
+- **`delivery-standalone-smoke.sh`**: re-run, 0 RED, 5/5 checks pass.
+- **Cosmetic gap closed**: `.quay/gates.yml`'s schema-documentation comment updated to document
+  the DIR-046 precedence rule (`--cwd`/pre-set env > gates.yml per-gate `cwd`/`timeoutMs` >
+  default) and which entry types (`it0`/`fixed`/`testPass`/`coverageFloor`/`redGreen`) accept the
+  new optional fields — verified against `resolveRunnerOptions()`'s own call sites in
+  `registry.js` before wording the comment (all factories that call `resolveRunnerOptions`
+  accept a `gateConfig` argument, confirmed by `grep -n gateConfig`).
+- All 4 AC + 3 DoD checkboxes ticked on `tasks/DIR-046.md` with inline evidence citations; a new
+  `## Validation` section added with captured command output (mirroring the M60/DIR-042-B
+  precedent). `status: todo` → `done`, `extra.dirStatus: pending` → `resolved`.
+- `node packages/quay/bin/quay.js gate DIR-046 --gate dod` → **PASS**, re-run after the checklist
+  write-back.
+
+**Test-floor (this ABSORB's own independent re-run, before merge):** quay core (excluding
+`serve-github`/`provider-abi-conformance`) — **293 tests, 289 pass, 4 pre-existing flaky
+failures** (`adr-gate` E3 A2, `dir032-audit-independence` M44 A2/C1, `web-ui-browser`) —
+identical failure set to every prior ABSORB since M56 through M60, confirmed NOT introduced by
+this milestone. Test count rose from 284→293 (+9), fully accounted for by the new
+`gate-ergonomics.test.mjs` (9 tests, all passing).
+
+**Impl-row (Clause 4):** N/A — real code-landing milestone (the task's own AC/DoD are the
+real-landing proof), not a design-only artifact needing a future implementing row.
+**Line-budget (Clause 3):** N/A — no formal charter file authored; executed directly from the
+directive's own Proposal + Requested action + AC/DoD.
+**Split-or-commit (Clause 9):** N/A — DIR-046's own SPLIT-OR-COMMIT clause allowed A/B/C to land
+together or split; all three (CWD precedence, per-gate `timeoutMs`, discoverability) landed
+together this single milestone, no split needed.
+
+**Realized Δv**: capability-growth (primary) — the product now supports gating a milestone
+worktree BEFORE merge (the DIR-027 worktree-before-merge hygiene pattern), and lets a
+workspace declare its own suite's time budget as `gates.yml` data instead of only via an
+undiscoverable env var — closing a real friction hit by the first external archguard
+dogfooding session, not a hypothetical. No new VT chart-1 cell claimed at this ABSORB (a
+gate-engine/CLI-ergonomics surface, not a chart-1-scored axis) — consistent with
+DIR-040/DIR-041/DIR-042-A/DIR-042-B's precedent of capability-growth milestones landing outside
+the chart-1 scoring domain. `milestone_counter` → **61** (61 % 5 != 0 — **NOT due**, next
+checkpoint at m65).
+
+**Backlog housekeeping**: `tasks/DIR-046.md` — all 4 AC + 3 DoD checkboxes ticked at this
+completion step per independently-verified evidence (see above); `status: todo` → `done`,
+`extra.dirStatus: pending` → `resolved`. `backlog.md` regenerated via `node
+experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs
+experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M61/worktrees/iteration-0` removed (`git
+worktree remove`), `milestones/M61-dir046-gate-ergonomics` branch deleted (`git branch -d`, fully
+merged, confirmed ancestor of `master` before deletion).
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 61, not a multiple of 5;
+next checkpoint at m65).
+
+**Note on off-loop master activity since the M60 ABSORB:** none — `master` HEAD at this
+milestone's worktree branch time (`6731760`, the M61 SELECT commit) was unchanged at merge time;
+no intervening off-loop commits, confirmed via `git log master -5` before merging.
+
+**Mechanical ABSORB gates (this ABSORB's own real runs, pasted verbatim):**
+```
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 61 experiments/quay-perpetual-stream/v-meta-ledger.md
+V_meta consolidation-lag check — experiments/quay-perpetual-stream/v-meta-ledger.md
+milestone_counter=61 K=2
+  [ok] consolidated | lag=- | consolidated — lag gate does not apply | domain-audit-channel≡CI-job pattern (+ per-subcommand audit exercise)
+  [ok] proposed | lag=- | proposed — not past φ threshold, no lag gate | repo-root isolation-leak lesson
+
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh
+tree-hygiene: clean — no un-gitignored scratch left in the main tree.
+
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+info: prunable merged iteration branches=0; registered iteration worktrees=0 (ABSORB should prune these).
+```
+
+## Backlog row
+| DIR-046 | `quay gate`'s acceptance CWD was UNCONDITIONALLY pinned to `workspaceRoot`, silently clobbering an explicit override — a foreign worktree-before-merge iteration (DIR-027's own hygiene pattern) could not be gated in its own tree; the 60s default timeout was also too short for a real suite and env-only/undiscoverable. Closed via explicit-override-wins CWD precedence (`--cwd` flag > pre-set env > `gates.yml` per-gate `cwd` > default), a per-gate `timeoutMs` in `.quay/gates.yml`, and `--help`/timeout-reason discoverability — reproducing and fixing the real session-`8b74052c` friction, not a hypothetical | capability-growth (primary) | no new VT chart cell (gate-engine/CLI-ergonomics surface, not a chart-1-scored axis) | directive, milestone-candidate, milestone:M61-dir046-gate-ergonomics |
