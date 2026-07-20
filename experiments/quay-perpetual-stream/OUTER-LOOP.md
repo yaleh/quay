@@ -266,9 +266,24 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      adversarial-audit trigger; HARD BLOCK on this milestone's VT-curve append / Done-when-complete
      claim AND on step 7's `milestone_counter++`):** EVERY milestone, with NO cadence precondition,
      dispatch a fresh-context adversarial audit subagent (`inherited-core.md`'s "Adversarial-audit
-     role" — a fresh-context `baime:iteration-executor` call, `run_in_background=true`, dispatched by
-     the OUTER loop itself, NEVER folded into the inner milestone's own iteration-1). Its explicit
-     charge, in refute-first stance:
+     role" — a fresh-context **generic `Explore`/`general-purpose` subagent** (whichever is
+     available), `run_in_background=true`. (DIR-032: the previously-named plugin agent type was
+     never the vehicle any working independent audit in this project's history actually used, and is
+     not reliably registered in every runtime — retired here in favor of the generic vehicle above.)
+     The dispatch MUST originate
+     from the **TOP-LEVEL loop session** — the only context where the Agent tool to spawn a genuinely
+     independent fresh-context subagent is available; a NESTED session (e.g. this milestone itself
+     running as a dispatched subagent) cannot spawn further subagents and must not attempt to. If the
+     loop finds itself unable to dispatch a real independent subagent, that is a **BLOCKING
+     condition** — halt this ABSORB sub-step and hand back to the top-level session — **NEVER a
+     license to fall back to a same-context self-audit while still reporting a pass** (the exact
+     silent-degradation failure DIR-032 diagnosed at M41/M42/M43, DEV-06/07/08). Independence is
+     verified mechanically, not just asserted: `scripts/audit-independence-check.mjs` (wrapped by the
+     `audit-independence` named engine gate) HARD-FAILS `milestone_counter++` when the audit
+     artifact's session/agent id is absent or equals the orchestrator's own, and PASSes only on a
+     distinct independent id — run it against the real audit artifact as part of this sub-step, never
+     skip it. It is NEVER folded into the inner milestone's own iteration-1. Its explicit charge, in
+     refute-first stance:
        1. **AC satisfaction:** read the milestone's TASK (`tasks/<task-id>.md`) `## Acceptance
           Criteria` section and, for EACH criterion, try to REFUTE that it is actually met — citing the
           concrete artifact / test output / diff that proves it, NOT the implementer's self-report. Any
