@@ -35,6 +35,25 @@ branch anywhere in Core — confirmed by grep, see iteration 4's own
 `--provider` flag introduction and iteration 26's own equivalent check for
 `mcp-server.js`).
 
+### 1.1 Delivered product data vs. this repo's own experiment backlog (DIR-035-C)
+
+None of the three bindings above ships bundled with this repo's own
+`tasks/` directory — that directory is this repo's live `quay-perpetual-
+stream` BAIME experiment backlog (methodology-layer state, not product
+data), and it is deliberately absent from every package's npm `files`
+whitelist (`packages/quay/package.json`, `packages/quay-native/
+package.json`, `packages/quay-github/package.json` all omit any path
+reaching the repo-root `tasks/`). What a fresh install DOES ship is a
+minimal, documented **sample task store** —
+`packages/quay-native/examples/sample-workspace/` — 5 illustrative tasks
+covering a compound/primitive parent-child pair, standalone primitives,
+and multi-label/AC-DoD body shapes, verified to round-trip through both
+`quay-native`'s own CLI and Core's CLI/MCP path when pointed at that
+directory in isolation (`QUAY_NATIVE_TASKS_DIR=.../sample-workspace/tasks`
+or the directory's own bundled `.quay/config.yml`). See the root
+`README.md`'s "Sample workspace vs. this repo's own backlog" section and
+that directory's own `README.md` for the full walkthrough.
+
 ## 2. `quay mcp` — Core's own MCP server (DIR-007)
 
 ### 2.1 Why this exists

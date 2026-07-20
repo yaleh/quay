@@ -13,7 +13,7 @@ experiment/timing/*.log
 # BAIME experiment throwaway checkouts / build output — never track
 **/worktrees/
 **/dist-sea/
-.quay/gate-events.jsonl
+**/.quay/gate-events.jsonl
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/

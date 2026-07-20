@@ -27,6 +27,39 @@ Plan / AC (Acceptance Criteria) / DoD sections. Every Provider exposes the
 same shape; `quay` Core is written against that shape only, never against
 a specific backend.
 
+## Sample workspace vs. this repo's own backlog
+
+A fresh `quay`/`quay-native` install does **not** start from this
+repository's own `tasks/` directory — that directory is this repo's own
+**~267-file live dogfooding backlog** (the `quay-perpetual-stream` BAIME
+research experiment's actual task board, tracked at the repo root and
+driven by the outer loop under `experiments/`). It is experiment state, not
+product data, and it is not part of any package's npm `files` whitelist
+(`packages/quay/package.json`, `packages/quay-native/package.json`,
+`packages/quay-github/package.json` — audited; none lists `tasks` or any
+path reaching the repo-root `tasks/` directory, so it is never shipped in
+an installed `quay`/`quay-native`/`quay-github` tarball).
+
+Instead, `packages/quay-native` ships a minimal, documented **sample task
+store** — [`packages/quay-native/examples/sample-workspace/`](packages/quay-native/examples/sample-workspace/)
+— 5 illustrative tasks (one compound "epic" with two primitive children,
+plus two standalone primitives) demonstrating the same view-model shape
+(`role` derived from `children`, `labels`, and the
+`## Proposal`/`## Plan`/`## Acceptance Criteria`/`## Definition of Done`
+body sections) without any of this repo's own experiment history. Point
+`quay-native` (or `quay` Core) at ONLY that directory to see it work in
+isolation:
+
+```sh
+cd packages/quay-native/examples/sample-workspace
+QUAY_NATIVE_TASKS_DIR="$(pwd)/tasks" node ../../bin/quay-native.js task list
+```
+
+See that directory's own `README.md` for the full walkthrough (including
+the equivalent `quay` Core invocation via its bundled `.quay/config.yml`).
+This is what a real `npm install quay-native` user gets a working example
+from — not this repo's live backlog.
+
 ## Install
 
 Requires Node.js >= 20 (this repo is developed against Node v25; see each

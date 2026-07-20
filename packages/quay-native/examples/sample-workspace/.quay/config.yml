@@ -1,0 +1,26 @@
+# .quay/config.yml — example config for the minimal sample task store shipped
+# with quay-native (packages/quay-native/examples/sample-workspace/).
+#
+# This is what a FRESH `quay`/`quay-native` install starts from — a handful of
+# illustrative tasks (see ../tasks/SAMPLE-*.md), not this repo's own live
+# ~267-file experiment backlog (tracked separately at the repo root's own
+# `tasks/`, driven by `<repo-root>/.quay/config.yml`). See README.md's
+# "Sample workspace vs. this repo's own backlog" section.
+#
+# `mcp_entry`/`path` below are written relative to a copy of this
+# sample-workspace directory placed inside an installed quay-native package
+# (i.e. after `npm install quay-native`, `path`/`mcp_entry` resolve against
+# node_modules/quay-native's own bin/ — adjust the relative depth if you copy
+# this directory elsewhere).
+
+providers:
+  native:
+    enabled: true
+    path: "../.."                            # packages/quay-native (this Provider's own root);
+                                              # provider.path is resolved relative to workspaceRoot
+                                              # (this .quay/config.yml's directory) and becomes the
+                                              # spawned provider process's cwd
+    tasks_dir: "./tasks"                     # this sample-workspace's own tasks/ dir
+    mcp_entry: ["node", "./bin/quay-native.js", "mcp"]   # resolved relative to provider.path (cwd), NOT workspaceRoot
+    env:
+      QUAY_NATIVE_TASKS_DIR: "./tasks"       # resolved relative to workspaceRoot at launch time
