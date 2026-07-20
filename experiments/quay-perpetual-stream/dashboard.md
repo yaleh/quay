@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 47** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M47 ABSORB header sync): body log's m47 ABSORB entry below sets milestone_counter → 47;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46).
-47 % 5 != 0 — no checkpoint due this milestone. -->
+**milestone_counter: 48** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M48 ABSORB header sync): body log's m48 ABSORB entry below sets milestone_counter → 48;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47).
+48 % 5 != 0 — no checkpoint due this milestone. -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -4359,3 +4359,95 @@ next due at 50).
 
 ## Backlog row
 | DIR-034 | Enforcement mechanization + independence anti-forgery: fold tree-hygiene/worktree-branch-hygiene/audit-independence into the mechanical ABSORB counter-gate; make audit session-id unforgeable | governance-integrity (primary) | no VT chart cell | milestone-candidate, governance-integrity, human-steered, surface:method-infra, milestone:M47-dir034-mechanize-enforcement |
+
+## M48 — M48-dir035-split-abi-imports (DIR-035-A)
+
+**Task:** [[DIR-035-A]] (`tasks/DIR-035-A.md`) — first child of [[DIR-035]] (ADR-013 delivery-
+boundary separation), split per DIR-026 SPLIT-OR-COMMIT into 4 independently-completable children
+(A/B/C/D) since DIR-035 itself packs three architecturally distinct standing rules and could not be
+completed in one milestone. DIR-035-A's scope: **ABI, not file paths** — remove Core's
+`../../../quay-native` relative imports (delivery-standalone-smoke blockers 2/3/4). **Merge commit:**
+`513ec7d` (worktree `milestones/M48/worktrees/iteration-0`, built commit `81fd6066`, base `master`
+`8a22188`).
+
+**Adversarial-audit verdict: PASS.** A fresh-context Explore/general-purpose subagent, with NO
+access to the build-phase agent's self-report, independently re-ran every check itself rather than
+trusting the builder's claims:
+- `bash packages/quay/test/delivery-standalone-smoke.sh` — **2 RED** (down from 5 RED): blockers 1
+  and 5 remain (both explicitly DIR-035-B's data-driven-gate-set scope, out of DIR-035-A's scope);
+  blockers 2 ("no cross-package relative imports"), 3 ("CLI loads standalone"), and 4 ("gate --list
+  loads standalone") confirmed GREEN.
+- `grep -rnE '\.\./\.\./\.\./quay-(native|github)' packages/quay/src packages/quay/bin` — empty,
+  confirmed.
+- Full test suite: 287 tests / 284 pass / 3 fail — the SAME 3 failures reproduce on unmodified
+  `master`, confirmed via merge-base check (pre-existing, no regression). The moved modules' own
+  relocated unit tests (adr-store, document-store, contract-validator, frontmatter-store-base) and
+  quay-native's document-CLI tests all pass at their new location.
+- Architectural call (moving `adr-store.js`/`document-store.js`/`contract-validator.js`/
+  `frontmatter-store-base.js` from `quay-native/src` into `quay/src`, with `quay-native` declaring
+  `"quay": "*"` as a dependency and importing them back, rather than a literal ABI passthrough)
+  judged SOUND by code inspection (the modules are generic filesystem-frontmatter stores with no
+  Provider-specific dependency) and explicitly sanctioned by ADR-013's own text ("a declared
+  dependency on a Core-owned or shared package, not a reach across the workspace tree").
+- `quay-native adr list` and `quay-native mcp` verified working live via the new import path.
+
+**Mechanical gates (real runs, this ABSORB, on `master` post-merge):**
+```
+$ bash packages/quay/test/delivery-standalone-smoke.sh   → SMOKE VERDICT: 2 RED (blockers 1, 5 — DIR-035-B scope)
+$ grep -rnE '\.\./\.\./\.\./quay-(native|github)' packages/quay/src packages/quay/bin   → (empty)
+$ bash experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh --counter 48 v-meta-ledger.md   → PASS (no confirmed-unconsolidated row past K=2)
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh   → tree-hygiene: clean.
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+info: prunable merged iteration branches=0; registered iteration worktrees=0.
+```
+**Test-floor (product-touching, `packages/quay/src` + `packages/quay-native/src` edited):** PASS —
+full `packages/quay` suite (excluding live-GitHub) re-run with `--experimental-test-coverage`: 253
+tests / 249 pass / 4 fail (same 4 pre-existing failures as `master` baseline), line coverage
+**87.21%** ≥ 80% floor. `packages/quay-native`: 26 tests / 23 pass / 3 fail (same 3 pre-existing
+failures as `master` baseline). Combined: 287 tests / 284 pass / 3 (repo-unique) pre-existing
+failures — no regression.
+**Impl-row (Clause 4):** N/A — this is a real code-landing milestone (DIR-035-A's own AC/DoD are
+the real-landing proof), not a design-only artifact needing a future implementing row.
+**Line-budget (Clause 3):** N/A — no formal charter file was authored for this directive-driven
+split-child milestone (same no-charter precedent as M46/M47's directive-driven ABSORBs); scope was
+bounded by DIR-035-A's own Requested-action list (5 items), matching the realized diff (25 files,
+~360 lines).
+**Split-or-commit (Clause 9):** N/A — no `needs-human` outcome declared; DIR-035-A reached `done`.
+
+**Realized Δv**: capability-growth (primary — the Provider-ABI violation is closed, a real
+architecture fix) + governance-integrity (secondary — closes one of DIR-035's three named delivery-
+boundary rules, moves `delivery-standalone-smoke` from 5→2 RED). No VT chart cell (same no-VT-cell
+precedent as prior method-infra/architecture-fix milestones touching the meta-layer). VT chart-1
+total unchanged: **111.55/120**. `milestone_counter` → **48** (48 % 5 != 0 — no checkpoint due).
+
+**Backlog housekeeping**: `tasks/DIR-035-A.md` → `status: done`, `dirStatus: resolved`, all 3 AC + 3
+DoD boxes ticked against independently re-verified evidence, `## Resolution` section added citing
+commit `81fd6066` and the audit's own re-verification. `tasks/DIR-035.md` → left `status: todo`,
+`dirStatus: pending` (DIR-035-B/C/D not yet done, per DIR-026 parent/children discipline — a parent
+is `done` iff ALL children are `done`); its `## Split` section updated to record DIR-035-A's real
+landing. `backlog.md` regenerated via `node experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs
+experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M48/worktrees/iteration-0` removed
+(`git worktree remove --force`), `milestones/M48-dir035-split-abi-imports` branch deleted
+(`git branch -D`, was fully merged, `git merge-base` confirmed ancestor of `master`).
+`worktree-branch-hygiene-check.sh`/`tree-hygiene-check.sh` both report clean, 0/0, post-prune.
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 48, not a multiple of 5; next
+due at 50).
+
+**Architectural-interpretation note (transparency, not a deviation):** the build agent chose to move
+the four generic stores into Core (`packages/quay/src`) rather than reach them via a literal
+Provider-ABI passthrough. This was a judgment call at build time, endorsed by the independent audit
+as sound and as the alternative DIR-035's own Requested-action text explicitly names — so it is
+**not styled as a process deviation** (no `DEV-NN` row added), but is documented here for
+transparency per the general single-source/no-silent-interpretation discipline.
+
+**DRAIN disposition of `directives/pending/` (task-canonical, per DIR-028) at this boundary:** no
+change from M47's disposition for the carried-forward set. `DIR-035` (parent) stays `pending` —
+DIR-035-B/C/D remain open `milestone-candidate` tasks for future SELECT passes, in dependency order
+(B before C before D, per DIR-035's own Split section).
+
+## Backlog row
+| DIR-035-A | DIR-035 split A: ABI, not file paths — remove Core's `../../../quay-native` relative imports (delivery-standalone-smoke blockers 2/3/4) | capability-growth (primary) + governance-integrity (secondary) | no VT chart cell | milestone-candidate, human-steered, surface:cli, milestone:M48-dir035-split-abi-imports |
