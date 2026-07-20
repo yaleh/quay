@@ -397,6 +397,49 @@ async function main() {
       `task_write children=[] on gh-13 -> children=${JSON.stringify(removeTask?.children)}, role=${removeTask?.role}`);
   }
 
+  // --- github / CREATE (DIR-041, M57) ---
+  // The one write surface that genuinely did NOT exist before this
+  // milestone (title/body/labels/status/parent/children EDIT were all
+  // already real, live-tested writes -- see the blocks above). Proves
+  // task_write with id: CREATE_SENTINEL_ID ("gh-new") creates a REAL new
+  // issue on the real repo (not a stub), then immediately closes it
+  // (status: "done" -> issue.state: "closed") so this conformance run
+  // leaves no open scratch issue behind in yaleh/quay. Mirrors the
+  // capture-then-clean discipline DIR-041's own DoD requires ("gh issue
+  // view" confirmation + cleanup), just expressed as an automated,
+  // repeatable probe instead of a one-off manual session.
+  {
+    const createRes = await githubClient.callTool({
+      name: "task_write",
+      arguments: {
+        id: "gh-new",
+        title: "[quay-abi-conformance probe] DIR-041/M57 CREATE round-trip -- safe to ignore/close",
+        body: "Created by packages/quay/test/provider-abi-conformance.test.mjs's own CREATE probe " +
+          "(DIR-041, M57). This issue is closed by the SAME test run immediately after creation; " +
+          "if you see this still open, the test's own close-follow-up step failed partway.",
+        labels: ["quay-abi-conformance-probe"],
+      },
+    });
+    const created = createRes.structuredContent?.task;
+    record("github", "primitive", "task_write-create",
+      !createRes.isError && typeof created?.id === "string" && /^gh-\d+$/.test(created.id) &&
+        created?.title?.startsWith("[quay-abi-conformance probe]"),
+      `task_write id:"gh-new" -> REAL created id=${created?.id}, title=${JSON.stringify(created?.title)}`);
+
+    if (created?.id) {
+      // Immediate cleanup: close the real issue this probe just created, so
+      // repeated conformance runs don't accumulate open scratch issues.
+      const closeRes = await githubClient.callTool({
+        name: "task_write",
+        arguments: { id: created.id, status: "done" },
+      });
+      const closed = closeRes.structuredContent?.task;
+      record("github", "primitive", "task_write-create-cleanup-close",
+        !closeRes.isError && closed?.status === "done",
+        `follow-up task_write id:${created.id} status:"done" (cleanup) -> status=${closed?.status}`);
+    }
+  }
+
   await githubClient.close();
 
   // ============================= SUMMARY =================================

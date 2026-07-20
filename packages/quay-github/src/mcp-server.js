@@ -1,16 +1,18 @@
 // quay-github mcp — the GitHub Provider's formal ABI transport (proposal §5.1).
 // Mirrors quay-native's src/mcp-server.js shape (design §6: "native as ABI
 // conformance reference" — the GitHub Provider should structurally resemble
-// the reference, not invent a new shape). v1: provider://manifest, task_list,
-// task_get (data.read + manifest, QN-002); task_write (status-only, QN-024);
-// task_check (gate, primitive tasks only, QN-028, iteration 17). `skill`
-// (status→Skill map / action buttons) remains a distinct, unimplemented
-// capability — a separate follow-up, not part of this file's current scope.
+// the reference, not invent a new shape). provider://manifest, task_list,
+// task_get (data.read + manifest, QN-002); task_write — CREATE (DIR-041,
+// M57) + full edit (title/body/status/labels/parent/children — QN-024,
+// M09-gh-write, M12-abi-parent-write); task_check (gate, primitive +
+// compound tasks, QN-028/QN-035). `skill` (status→Skill map / action
+// buttons) remains a distinct, unimplemented capability — a separate
+// follow-up, not part of this file's current scope.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { createGithubClient } from "./github-client.js";
+import { createGithubClient, CREATE_SENTINEL_ID } from "./github-client.js";
 import { readManifest } from "./manifest.js";
 
 export async function startMcpServer({ owner, repo }) {
@@ -139,12 +141,19 @@ export async function startMcpServer({ owner, repo }) {
     "task_write",
     {
       description:
-        "Patch one task's status/title/body/labels/parent/children in the GitHub Provider's " +
-        "backing repository. `parent`/`children` are implemented via the checkbox-in-body " +
-        "convention (cross-issue body-text mutation for `parent`, own-body mutation for " +
-        "`children`; existing checked state is preserved) — see github-client.js's " +
-        "writeRelations()/setChildCheckboxes() for the exact semantics. Any other unrecognized " +
-        "field returns an explicit error rather than silently no-op'ing.",
+        `Create (id: "${CREATE_SENTINEL_ID}") or patch (any real "gh-<n>" id) a task in the ` +
+        "GitHub Provider's backing repository. CREATE (DIR-041, M57): pass " +
+        `id: "${CREATE_SENTINEL_ID}" with a required \`title\` (GitHub issues cannot exist ` +
+        "without one) plus optional body/labels; the response's task.id is the REAL " +
+        "\"gh-<n>\" id GitHub assigned (issue numbers cannot be chosen by the caller, unlike " +
+        "the native Provider's filename-derived ids) — status/parent/children on the SAME " +
+        "call are applied as follow-up writes against that real id once it exists. EDIT: " +
+        "patch status/title/body/labels/parent/children on an existing task. `parent`/" +
+        "`children` are implemented via the checkbox-in-body convention (cross-issue " +
+        "body-text mutation for `parent`, own-body mutation for `children`; existing checked " +
+        "state is preserved) — see github-client.js's writeRelations()/setChildCheckboxes() " +
+        "for the exact semantics. Any other unrecognized field returns an explicit error " +
+        "rather than silently no-op'ing.",
       inputSchema: taskWriteInputSchema,
     },
     async (rawArgs) => {
@@ -184,7 +193,39 @@ export async function startMcpServer({ owner, repo }) {
         };
       }
       try {
+        // DIR-041 (M57): id === CREATE_SENTINEL_ID ("gh-new") means CREATE, not
+        // edit -- see github-client.js#create()'s own header comment for the
+        // full rationale (GitHub assigns issue numbers itself; the ABI's
+        // `id: string` (required) shape is unchanged, this sentinel is the
+        // documented convention that closes the gap). `title` is required for
+        // create (enforced by client.create() itself, fail-closed, not here).
+        // Any of status/parent/children supplied on the SAME create call are
+        // applied as follow-up writes against the REAL id the create just
+        // returned -- title/body/labels are folded into the single POST.
         let task;
+        let realId = id;
+        if (id === CREATE_SENTINEL_ID) {
+          task = client.create({ title, body, labels });
+          if (!task) {
+            return {
+              isError: true,
+              content: [{ type: "text", text: "task_write: create failed (no task returned)" }],
+            };
+          }
+          realId = task.id;
+          if (status !== undefined) task = client.setStatus(realId, status);
+          const relationFields = {};
+          if (parent !== undefined) relationFields.parent = parent;
+          if (children !== undefined) relationFields.children = children;
+          if (Object.keys(relationFields).length > 0) {
+            task = client.writeRelations(realId, relationFields);
+          }
+          return {
+            content: [{ type: "text", text: JSON.stringify(task, null, 2) }],
+            structuredContent: { task },
+          };
+        }
+
         if (status !== undefined) {
           task = client.setStatus(id, status);
         }
@@ -264,5 +305,5 @@ export async function startMcpServer({ owner, repo }) {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`quay-github mcp: serving tasks from github.com/${owner}/${repo} (read-only v1)`);
+  console.error(`quay-github mcp: serving tasks from github.com/${owner}/${repo} (read + write: create/edit)`);
 }
