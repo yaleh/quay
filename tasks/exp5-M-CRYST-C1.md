@@ -9,7 +9,7 @@ labels:
 parent: exp5-M-CRYST
 children: []
 extra:
-  schema: "v1"
+  schema: v1
 ---
 ## Proposal
 DIR-026's SELECT-split rule and parent-done-iff-children are prose only (today only needs-human-reason is a coded clause); make them executable checks. **C1 is the SINGLE OWNER of the `parent-done-iff-children` check** — a thin single-source `scripts/*.mjs` module (wrappable by a future `quay gate --gate <name>`, M39 precedent). D3·R7 was de-scoped to reference this check, never re-implement it (dual-source guard). Note: the native store's `store.js` already derives a `stale-done` status for a compound task whose subtree isn't fully done — C1 lifts that invariant to the OUTER-LOOP milestone boundary (parent milestone `done` ⇔ all children `done`), so reconcile with / reuse that logic rather than forking a third copy.
@@ -24,3 +24,9 @@ N/A — one check module + selfcheck fixtures (RED-then-GREEN per ADR-001/TDD); 
 References the standard inherited-core DoD clauses. Real landing:
 - [ ] A REAL milestone boundary is gated by these checks (not just a fixture) — the parent-done-iff-children + SELECT-split rules HARD-block at the boundary.
 - [ ] Single-source: exactly one implementation of parent-done-iff-children in the repo; D3·R7 and any OUTER-LOOP prose point at it.
+
+## Not selected (M46)
+Considered alongside the crystallization epic's usual candidate set, compared against
+`exp5-M-DIR033-WORKTREE-HYGIENE` (fresh pending directive, live measured present-drift evidence).
+No new urgency signal on C1 this pass (unchanged since last considered); deferred again — remains
+open.

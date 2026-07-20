@@ -9,7 +9,7 @@ labels:
 parent: exp5-M-CRYST
 children: []
 extra:
-  schema: "v1"
+  schema: v1
 ---
 ## Proposal
 Bring existing tasks to the B1 schema (stamp `extra.schema:"v1"`, add `## Proposal`/`## Plan` where milestone tasks lack them, DoD→checklist, strip any status-mirror Resolution), OR adopt forward-only with the validator N/A-flagging legacy EXPLICITLY. Note: the SELECTed-milestone path already self-heals (B3 wiring stamps + authors at SELECT; the pre-dispatch `task-schema-check` blocks dispatch of a non-conformant task) — so B4 is the BACKFILL for the long tail of un-selected candidates, so the board reads uniformly and the sweep has 0 silent skips.
@@ -22,3 +22,9 @@ N/A — a mechanical sweep + per-task stamp/author (or a documented forward-only
 References the standard inherited-core DoD clauses. Real landing:
 - [ ] The live board is schema-consistent (or grandfathered-and-tracked, never silently) — verified by the sweep on `tasks/*.md`.
 - [ ] Subtractive where it strips scaffolding; no new drift introduced.
+
+## Not selected (M46)
+Considered alongside the crystallization epic's usual candidate set, compared against
+`exp5-M-DIR033-WORKTREE-HYGIENE` (fresh pending directive, live measured present-drift evidence).
+No new urgency signal on B4 this pass (unchanged since last considered); deferred again — remains
+open.

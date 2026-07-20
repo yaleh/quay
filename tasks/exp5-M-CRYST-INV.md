@@ -46,3 +46,14 @@ governance-integrity candidate at DIR-032's prior urgency currently open. INV's 
 but smaller/narrower value (a meta-check on future milestones' own DoD-clause additions) vs D1's
 foundational capability (doc-management + contract-validator unblocking D2/D3/E2). D1 SELECTed
 this pass; INV remains open, unblocked, for a future SELECT.
+
+## Not selected (M46)
+Compared against `exp5-M-DIR033-WORKTREE-HYGIENE` (fresh pending directive DIR-033, arrived and
+flagged in the prior pass's re-DRAIN). DIR-033 carries the SAME governance/infra hard-floor shape
+INV itself illustrates (a shipped check with a missing enforcement-wiring half) but with (a) live
+measured evidence of present drift (an orphaned M07 report, since rescued, and 2 currently-dangling
+un-pruned worktrees/branches TODAY), and (b) fresher directive urgency (a `human-steered` pending
+DIR vs. INV's own repeatedly-deferred backlog status, now 5 passes running). DIR-033 selected this
+pass; INV remains open, unblocked, still a strong future candidate — its own narrower scope (a
+meta-gate on FUTURE rule-additions, forward-looking) makes it lower urgency than closing a PRESENT
+drift instance.
