@@ -13,10 +13,15 @@ children: []
 extra:
   dirStatus: pending
   schema: v1
-  blockedBy: "DIR-036-A done (827e995, 2026-07-20) — unblocked; but remains
-    human-steered: needs the single-sourced kit ported to archguard's TS/vitest
-    stack + a coexistence decision with archguard's existing Backlog.md loop
-    before dispatch."
+  blockedBy: "Prerequisites (loop-executable, queued in exp5 SELECT): DIR-040
+    (portable kit/skills — smooths the kit drop-in) + DIR-041 (github write-back
+    — lets the archguard loop write status; or DIR-039 for a quay-native board).
+    NOT being split into children (2026-07-20 decision: all children would be
+    human-executed anyway — splitting adds bookkeeping without value). Execute
+    DIR-036-B directly once the prereqs land. Remains human-steered: an off-repo
+    bootstrap = coexistence decision with archguard's Backlog.md loop +
+    it0-dod-check ported to archguard's TS/vitest stack + start a loop session
+    on a real archguard milestone."
 ---
 ## Proposal
 Level 3 of ADR-013's Validation Ladder — the methodology KIT (single-sourced at [[DIR-035-D]]) drives ONE real OUTER-LOOP milestone DEVELOPING archguard, DoD-audited by the it0 meta-enforcer. This is the **V_meta transfer test**: the loop's methodology, moved off quay's own repo, produces a real code milestone on a foreign product. The loop's `V_meta` has never had an external gradient — every prior milestone developed quay itself; this is the first time the methodology is measured against a repo it did not grow up in. Depends on [[DIR-036-A]] (product deployed on archguard first). Child of [[DIR-036]].
