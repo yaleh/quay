@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| DIR-035-C | DIR-035 split C: experiment state is not product data — delivered product ships an empty/minimal example store, not the multi-experiment tasks/ backlog | DONE | - | directive, milestone-candidate |
 | DIR-035-B | DIR-035 split B: data-driven gate set — move it0-*/vmeta-lag/audit-independence/dogfood-evidence built-ins out of the product's default registry (delivery-standalone-smoke blockers 1/5) | DONE | - | directive, milestone-candidate |
 | DIR-035-A | DIR-035 split A: ABI, not file paths — remove Core's ../../../quay-native relative imports (delivery-standalone-smoke blockers 2/3/4) | DONE | - | directive, milestone-candidate |
 | exp5-M-DIR033-WORKTREE-HYGIENE | DIR-033: wire capture-then-prune worktree/branch hygiene into ABSORB (governance/infra hard floor — the enforcement half of an already-shipped check) | DONE | - | milestone-candidate, governance-integrity, human-steered, milestone:M46-dir033-worktree-hygiene |
@@ -50,7 +51,6 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| DIR-035-C | DIR-035 split C: experiment state is not product data — delivered product ships an empty/minimal example store, not the multi-experiment tasks/ backlog | open | - | directive, milestone-candidate |
 | DIR-035-D | DIR-035 split D: single-source the methodology kit (stop per-experiment inherited-core duplication) + wire delivery-standalone-smoke as a named delivery conformance gate | open | - | directive, milestone-candidate |
 | exp5-M-CRYST-B4 | B4 Migrate existing tasks to the canonical schema (or forward-only + validator flags legacy) | open | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-E2 | E2 Extract ADRs from proposals + DIR tasks (single-source DIR-002→028, split-or-commit DIR-026, single-branch DIR-027, proposal→plan DIR-014, AC/DoD-in-task DIR-020, QENG, Provider ABI, ...) | open | - | milestone-candidate, crystallization |
@@ -73,4 +73,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_66 milestone-candidate task(s) as of 2026-07-20T07:49:36.105Z._
+_66 milestone-candidate task(s) as of 2026-07-20T08:40:43.369Z._

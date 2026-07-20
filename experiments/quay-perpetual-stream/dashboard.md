@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 49** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M49 ABSORB header sync): body log's m49 ABSORB entry below sets milestone_counter → 49;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48).
-49 % 5 != 0 — no checkpoint due this milestone. -->
+**milestone_counter: 50** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M50 ABSORB header sync): body log's m50 ABSORB entry below sets milestone_counter → 50;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49).
+50 % 5 == 0 — CHECKPOINT DUE this milestone, see checkpoints/cp-50.md. -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -4542,3 +4542,122 @@ DIR-035-C/D remain open `milestone-candidate` tasks for future SELECT passes, in
 
 ## Backlog row
 | DIR-035-B | DIR-035 split B: data-driven gate set — move it0-*/vmeta-lag/audit-independence/dogfood-evidence built-ins out of the product's default registry (delivery-standalone-smoke blockers 1/5) | governance-integrity (primary) + capability-growth (secondary) | no VT chart cell | milestone-candidate, human-steered, surface:cli, milestone:M49-dir035-b-data-driven-gates |
+
+## M50 — M50-dir035-c-sample-store (DIR-035-C)
+
+**Task:** [[DIR-035-C]] (`tasks/DIR-035-C.md`) — third child of [[DIR-035]] (ADR-013 delivery-
+boundary separation), split per DIR-026 SPLIT-OR-COMMIT into 4 independently-completable children
+(A/B/C/D). DIR-035-C's scope: **experiment state ≠ product data** — ship a minimal documented
+sample task store (`packages/quay-native/examples/sample-workspace/`, 5 illustrative tasks
+demonstrating the view-model shape) alongside `packages/quay-native`, separate from this repo's
+own live `tasks/` experiment backlog; audit `packages/*/package.json` `files` whitelists; document
+the sample-vs-live-backlog distinction. **Merge commit:** `b17caab` merged via `--no-ff` into
+`master` at this ABSORB (built commit `a0cd575`, worktree `milestones/M50/worktrees/iteration-0`,
+base `master` `4b892e6`).
+
+**Adversarial-audit verdict: PASS with qualifications.** An independent fresh-context subagent,
+with NO access to the build-phase agent's self-report, independently re-ran every check itself:
+- Master untouched (`4b892e6`), branch unmerged prior to audit — confirmed.
+- Sample workspace round-trip fully confirmed: `task list` (5 tasks), `task check SAMPLE-1A`
+  PASS/terminal, `task check SAMPLE-1` FAIL 1/2 AC — all exact matches, via BOTH direct
+  `quay-native` env-var invocation AND Core's own `.quay/config.yml` path.
+- `files` whitelist fix confirmed real: `quay-native`/`quay-github` `package.json` genuinely
+  lacked `files` arrays pre-fix (verified via `git show 4b892e6:...`), now fixed; `npm pack
+  --dry-run` confirmed no repo-backlog paths ship in any of the 3 tarballs, and
+  `examples/sample-workspace` IS included in `quay-native`'s tarball.
+- `delivery-standalone-smoke.sh`: 0 RED, confirmed independently.
+- README.md/DESIGN.md diffs confirmed to substantively (not just token-mention) document the
+  sample-vs-backlog distinction, accurately.
+- DIR-035-C's AC/DoD boxes confirmed still unticked pre-audit, status/dirStatus untouched —
+  ticked at this ABSORB, by this corrective pass, per the audit's confirmed findings.
+- **Discrepancy flagged (non-blocking, minor, logged as DEV-11):** the build agent self-reported
+  "253 tests, 249 pass, 4 fail" naming `adr-gate E3 A2` as one of the 4 failures. The auditor
+  independently found "253 tests, 250 pass, 3 fail" on BOTH the worktree AND a fresh `master`
+  checkout — IDENTICAL on both, meaning `adr-gate E3 A2` was actually PASSING in the auditor's run
+  and was NOT a new regression; pre-existing test flakiness (M49's own build report separately
+  noted this exact test is "exit 127, environment-path-resolution sensitive to direct in-process
+  call without `QUAY_ACCEPTANCE_CWD`" — its pass/fail depends on invocation environment/cwd, not on
+  this milestone's changes). Since worktree and master matched EXACTLY in the auditor's own
+  independent run, there is no regression either way — just an inaccurate self-report by the build
+  agent about which/how-many tests failed. See "Test-floor" below for THIS ABSORB's own
+  authoritative re-run, closing the loop on which count is real.
+- Minor gitignore hygiene note (fixed at this ABSORB): `.quay/gate-events.jsonl` gitignore pattern
+  did not match nested paths like `packages/quay-native/examples/sample-workspace/.quay/
+  gate-events.jsonl` (only matched at repo root) — broadened to `**/.quay/gate-events.jsonl`; the
+  runtime-generated stray file from exercising the sample workspace's own gate commands was
+  confirmed not committed.
+
+**Mechanical gates (real runs, this ABSORB, from inside the worktree before merge):**
+```
+$ bash packages/quay/test/delivery-standalone-smoke.sh   → SMOKE VERDICT: 0 RED
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 50 experiments/quay-perpetual-stream/v-meta-ledger.md
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh   → tree-hygiene: clean.
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+info: prunable merged iteration branches=0; registered iteration worktrees=1 (pre-prune; 0 post-prune, see close-out below).
+```
+**Test-floor (product-touching, `packages/quay-native/examples/`, `packages/*/package.json`,
+README.md/DESIGN.md edited) — THIS ABSORB's own authoritative re-run, not a repaste of the
+builder's or auditor's numbers:** full `packages/quay` suite (excluding live-GitHub), run twice for
+determinism from inside the worktree via `node --test --test-reporter=tap $(ls test/*.mjs | grep
+-vE 'serve-github|provider-abi-conformance')`: **253 tests / 249 pass / 4 fail**, identical both
+runs. Failing tests (identical both runs): `E3 A2: the REAL ADR-001 gate PASSes against the real
+repo's own scripts/ (conforming, B7's own domain)` (adr-gate.test.mjs, exit 127), `M44 A2:
+audit-independence gate PASSes for a genuinely distinct session id (real script)`
+(dir032-audit-independence.test.mjs), `` M44 C1: `quay gate <task> --gate audit-independence`
+PASSes for real (independent fixture) and appends a real GateEvent `` (same file),
+`test/web-ui-browser.test.mjs`. This reproduces the BUILD AGENT's original 249/4 count, not the
+auditor's 250/3 — confirming `adr-gate E3 A2`'s pass/fail is genuinely invocation-environment-
+sensitive (as documented: it depends on `QUAY_ACCEPTANCE_CWD`, which only `quay gate`'s own
+wrapper pins) rather than either party being simply wrong; the other 2 failures
+(`dir032-audit-independence` M44 A2/C1, `web-ui-browser`) reproduce identically in all three runs
+(build agent's, auditor's, this ABSORB's) and are the same pre-existing `master`-baseline failures
+carried since ≥M49 — no regression from this milestone's changes either way. `packages/quay-native`
+suite: 26 tests / 23 pass / 3 fail (`cas-writer-helper`, `concurrent-writer`, `reparent-writer`) —
+identical to the M49 baseline, no regression.
+**Impl-row (Clause 4):** N/A — this is a real code-landing milestone (DIR-035-C's own AC/DoD are
+the real-landing proof), not a design-only artifact needing a future implementing row.
+**Line-budget (Clause 3):** N/A — no formal charter file was authored for this directive-driven
+split-child milestone (same no-charter precedent as M46/M47/M48/M49's directive-driven ABSORBs).
+**Split-or-commit (Clause 9):** N/A — no `needs-human` outcome declared; DIR-035-C reached `done`.
+
+**Realized Δv**: governance-integrity (primary — closes the third of DIR-035's four named
+delivery-boundary rules; a fresh `npm install quay-native` user now has a working, documented
+sample workspace instead of no example at all) + capability-growth (secondary — the sample
+workspace is itself a small reusable demo asset, and the files-whitelist audit closes an
+incidental packaging leak in `quay-native`/`quay-github`). No VT chart cell (same no-VT-cell
+precedent as prior method-infra/architecture-fix milestones touching the meta-layer). VT chart-1
+total unchanged: **111.55/120**. `milestone_counter` → **50** (50 % 5 == 0 — **CHECKPOINT DUE**,
+see `checkpoints/cp-50.md`).
+
+**Backlog housekeeping**: `tasks/DIR-035-C.md` → `status: done`, `dirStatus: resolved`, all 3 AC +
+the DoD box ticked against independently re-verified evidence, `## Resolution` section added
+citing commit `a0cd575` and the audit's own re-verification (including the DEV-11 discrepancy note,
+disclosed transparently, not concealed). `tasks/DIR-035.md` → left `status: todo`, `dirStatus:
+pending` (DIR-035-D not yet done, per DIR-026 parent/children discipline — a parent is `done` iff
+ALL children are `done`); its `## Split` section updated to record DIR-035-A/B/C's real landing —
+only DIR-035-D remains open. `backlog.md` regenerated via `node
+experiments/quay-perpetual-stream/scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream
+--write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M50/worktrees/iteration-0` removed (`git
+worktree remove --force`), `milestones/M50-dir035-c-sample-store` branch deleted (`git branch -d`,
+was fully merged, `git merge-base --is-ancestor` confirmed ancestor of `master` before deletion).
+`worktree-branch-hygiene-check.sh`/`tree-hygiene-check.sh` both report clean, 0/0, post-prune.
+
+**Checkpoint disposition: DUE this ABSORB** (`milestone_counter` = 50, a multiple of 5). Written to
+`experiments/quay-perpetual-stream/checkpoints/cp-50.md` — a health snapshot across all tracks, a
+re-test of the standing hypothesis, and explicit carry-forward of the still-open exploit-typed-pick
+and VT-flat/qualifying-rate-decline watch items from cp-45 (both still unresolved after m46-m50, a
+4th and 5th consecutive DIR-035-family governance/architecture window respectively — flagged
+explicitly for m51's SELECT, not silently dropped). Non-blocking — the loop continues directly to
+m51 DRAIN/SELECT after writing it.
+
+**DRAIN disposition of `directives/pending/` (task-canonical, per DIR-028) at this boundary:** no
+change from M49's disposition for the carried-forward set. `DIR-035` (parent) stays `pending` —
+only `DIR-035-D` remains an open `milestone-candidate` task for a future SELECT pass, last in
+dependency order per DIR-035's own Split section (presupposes A/B/C, now all `done`).
+
+## Backlog row
+| DIR-035-C | DIR-035 split C: experiment state ≠ product data — ship a minimal documented sample task store + audit files whitelists (delivery-standalone-smoke store-separation half) | governance-integrity (primary) + capability-growth (secondary) | no VT chart cell | milestone-candidate, human-steered, surface:cli, milestone:M50-dir035-c-sample-store |
