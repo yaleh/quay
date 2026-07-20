@@ -5,6 +5,17 @@ path + git SHA to this file; it is NOT inlined per iteration). Consolidation (§
 when a milestone adaptation is reused unchanged by a later different-domain milestone (φ confirmed),
 merge it here and retire its delta citation.
 
+## Standing invariants (govern EVERY milestone)
+- **Enforcement lands WITH design (ADR-011, the #1 cross-experiment fault; sharper-timing corollary
+  of ADR-004 hard-over-soft).** A new rule / DoD-clause / method-step is **NOT "done" unless its
+  executable enforcement (a gate/check/code) AND a fixture proving it land in the SAME milestone.**
+  Phased "design now, wire the enforcement later" is prohibited — a design without its landed
+  enforcement is `pending`, not done (DIR-026's "a slice is not done" applied to method changes).
+  Partially enforced today by Clause 5 (no-self-exemption), the DoD real-landing bar, and the B7
+  load-bearing-test-gate; the full mechanical gate is tracked as `exp5-M-CRYST-INV`. This is why the
+  crystallization program exists — see `docs/proposals/exp5-crystallization-strategy.md` and
+  `adr/ADR-004`/`ADR-011`.
+
 ## Extracted skills (read in order — delta chain)
 1. `.claude/skills/quay-native-methodology/` — full base (gate mechanics `task check`, directive
    lifecycle, G3 out-of-band audit discipline, provenance/σ ledger).

@@ -8,6 +8,7 @@ labels:
   - milestone-candidate
   - crystallization
   - milestone:first-wave
+  - human-steered
 parent: exp5-M-CRYST
 children: []
 extra:

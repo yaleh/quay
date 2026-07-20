@@ -75,6 +75,12 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    explore milestone per 5**. Exploit = high-value, high-ρ, method handles it; explore = new
    surface/domain that grows the reusable core. Prefer aged high-value items (DIR-004 Distribution is
    URGENT).
+   **EXCLUDE `label:human-steered` candidates from autonomous SELECT.** These are driver-self-rewrite
+   milestones (e.g. rewriting THIS file / inherited-core / the loop's own skills / its ABSORB format —
+   currently D3, D2, F1) that are unsafe to run autonomously mid-loop (the bootstrap hazard). They are
+   completed human-steered off-loop, OR only under the D3 behavior-preserving + golden-replay
+   discipline; a human removes the `human-steered` label when a candidate is cleared for autonomous
+   selection. Filter them out here before ranking.
    **Write the selection back onto the task store as part of this step:** the chosen candidate task
    gets `milestone:M-NN` appended to its `labels` (via `task_write`) at dispatch time, and every OTHER
    candidate task actually considered this pass (i.e. compared against the winner, not the full
