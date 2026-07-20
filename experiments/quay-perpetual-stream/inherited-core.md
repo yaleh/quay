@@ -5,6 +5,43 @@ path + git SHA to this file; it is NOT inlined per iteration). Consolidation (§
 when a milestone adaptation is reused unchanged by a later different-domain milestone (φ confirmed),
 merge it here and retire its delta citation.
 
+## Kit version + single-source convention (DIR-035-D, ADR-013 Decision item 3 / Consequences)
+
+**This file IS the one canonical "continuous-development-with-Claude-Code" methodology kit** — the
+BAIME outer/inner loop pattern (`OUTER-LOOP.md`'s operational steps), this Tier-B pinned-methodology
+substrate, the DoD meta-enforcer (`scripts/it0-dod-check.mjs` + the QENG gate engine wrapping it),
+the general `scripts/it0-*`/`vmeta-lag`/`audit-independence`/`dogfood-evidence` gate scripts, and
+`adr/ADR-001..013`. There is exactly ONE copy of this kit in this repo, at this path.
+
+**Kit version:** `v1` (informal — no prior versioned releases; this is the first explicit version
+tag). **Last consolidated at:** git SHA `b17caab` (the commit that last touched this file, per
+`git log -1 -- experiments/quay-perpetual-stream/inherited-core.md`, as of DIR-035-D/M52).
+
+**Single-source rule for any FUTURE second experiment (or a foreign-repo transfer per DIR-036):** a
+new experiment directory MUST NOT copy this file's content. It must instead:
+1. Reference this kit BY PATH (a relative path from the new experiment's own directory to this
+   file, e.g. `../quay-perpetual-stream/inherited-core.md`, mirroring the EXACT by-reference
+   discipline `OUTER-LOOP.md` already uses for itself: "a pinned pointer (path + git SHA) to
+   `inherited-core.md` — Tier-B, not inlined" — applied here one level up, kit-vs-second-experiment
+   rather than charter-vs-kit-within-one-experiment).
+2. Record, in its OWN (thin) instance-state doc, the **kit version + git SHA it is pinned to**
+   (the same two facts recorded above), so a later kit consolidation can tell which experiments are
+   stale against the canonical file without diffing full copies.
+3. Carry ONLY its own mutable instance state (its own `dashboard.md`-equivalent, its own DIR/task
+   backlog, its own charters/milestones) — never a forked/edited copy of this file itself. If an
+   experiment genuinely needs a methodology DELTA the kit doesn't yet have, that delta is proposed
+   as an edit to THIS file (consolidation, §4.2's existing discipline), not a private fork.
+
+**Audit finding (2026-07-20, DIR-035-D/M52):** a repo-wide search for `inherited-core*.md`-shaped
+files found exactly this ONE live file. The four other experiment directories
+(`quay-native-bootstrap`, `quay-webui-bootstrap`, `quay-continuous-bootstrap`,
+`quay-core-bootstrap`) are all closed/historical and predate this file's introduction (exp5 is the
+first and only experiment to adopt the Tier-B `inherited-core.md` convention) — each instead has
+its own bespoke `ITERATION-PROMPTS.md`, a different, pre-Tier-B mechanism, not a copy of this kit.
+**There is no live duplication to consolidate today**; this section exists so the convention is in
+place and followable BEFORE a second experiment (or DIR-036's foreign-repo transfer) is ever
+started, rather than discovered as a violation after the fact.
+
 ## Standing invariants (govern EVERY milestone)
 - **Enforcement lands WITH design (ADR-011, the #1 cross-experiment fault; sharper-timing corollary
   of ADR-004 hard-over-soft).** A new rule / DoD-clause / method-step is **NOT "done" unless its
