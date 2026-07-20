@@ -19,11 +19,20 @@
 # set/behavior for its own OUTER-LOOP ABSORB usage (plus DIR-035-D's addition).
 #
 # Schema:
-#   it0:   list of { name, script, argsKey } — each becomes a gate named
-#          `name`, wrapping `script` (resolved relative to workspaceRoot) via
-#          the SAME `makeIt0Gate(scriptPath, argsKey, label)` factory
-#          registry.js already ships (task.extra[argsKey] holds the script's
-#          positional args, per the factory's own fail-closed convention).
+#   DIR-046 (A/B): every entry type below MAY also carry optional per-gate
+#          `cwd` (absolute, or relative to workspaceRoot) and `timeoutMs`
+#          (milliseconds) overrides, read by `resolveRunnerOptions()`.
+#          Precedence (highest wins): CLI `--cwd`/`--timeout` (folded into
+#          `QUAY_ACCEPTANCE_CWD`/`QUAY_ACCEPTANCE_TIMEOUT_MS` by the CLI layer,
+#          so a pre-set env var also wins here) > this gate's own entry
+#          `cwd`/`timeoutMs` below > default (workspaceRoot / 60000ms).
+#
+#   it0:   list of { name, script, argsKey, cwd?, timeoutMs? } — each becomes
+#          a gate named `name`, wrapping `script` (resolved relative to
+#          workspaceRoot) via the SAME `makeIt0Gate(scriptPath, argsKey, label)`
+#          factory registry.js already ships (task.extra[argsKey] holds the
+#          script's positional args, per the factory's own fail-closed
+#          convention).
 #   adr:   list of ADR ids (e.g. "ADR-001") to auto-wire as `adr-<id>` gates
 #          via the existing `makeAdrGate` factory (ADR dir resolved from this
 #          workspace's own native-provider QUAY_NATIVE_ADR_DIR, falling back
