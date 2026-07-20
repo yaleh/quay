@@ -23,24 +23,31 @@ FIX="fixtures/audit-independence"
 [ -x "$CHECK" ] || { echo "ERROR: $CHECK not found/executable" >&2; exit 2; }
 
 ORCH_ID="orchestrator-session-abc123"
+RECORD="$FIX/dispatch-record.txt"
 
-# id | fixture file | orchestrator-id arg (or "" for none) | expected exit code (0 = PASS; 1 = FAIL)
+# id | fixture file | extra check args (space-separated, may be empty) | expected exit code
+# (0 = PASS; 1 = FAIL; 2 = env error)
 CASES=(
-  "absent-id-m43-style|$FIX/absent-id-m43-style.md|$ORCH_ID|1"
-  "self-audit-matching-id|$FIX/self-audit-matching-id.md|$ORCH_ID|1"
-  "genuinely-independent|$FIX/genuinely-independent.md|$ORCH_ID|0"
+  "absent-id-m43-style|$FIX/absent-id-m43-style.md|--orchestrator-id $ORCH_ID|1"
+  "self-audit-matching-id|$FIX/self-audit-matching-id.md|--orchestrator-id $ORCH_ID|1"
+  # DIR-034: a bare distinct id with NO dispatch-record supplied is now FAIL by default (closes the
+  # forgeable-string hole DIR-034 diagnosed) — this fixture was PASS pre-DIR-034.
+  "genuinely-independent-no-record|$FIX/genuinely-independent.md|--orchestrator-id $ORCH_ID|1"
   # No orchestrator id supplied at all — fail-closed, even against the GREEN fixture.
   "no-orchestrator-id-supplied|$FIX/genuinely-independent.md||1"
+  # Pre-DIR-034 escape hatch still available, explicitly opted into.
+  "genuinely-independent-allow-uncorroborated|$FIX/genuinely-independent.md|--orchestrator-id $ORCH_ID --allow-uncorroborated|0"
+  # DIR-034 anti-forgery: a fabricated distinct id with NO matching dispatch-record entry → FAIL.
+  "fabricated-distinct-id-no-corroboration|$FIX/fabricated-distinct-id-no-corroboration.md|--orchestrator-id $ORCH_ID --dispatch-record $RECORD|1"
+  # DIR-034 anti-forgery: a distinct id CORROBORATED by the dispatch-record → PASS.
+  "corroborated-independent|$FIX/corroborated-independent.md|--orchestrator-id $ORCH_ID --dispatch-record $RECORD|0"
 )
 
 fail=0
 for c in "${CASES[@]}"; do
-  IFS='|' read -r id file orch want <<< "$c"
-  if [ -n "$orch" ]; then
-    "$CHECK" --orchestrator-id "$orch" "$file" >/dev/null 2>&1
-  else
-    "$CHECK" "$file" >/dev/null 2>&1
-  fi
+  IFS='|' read -r id file extra want <<< "$c"
+  # shellcheck disable=SC2086
+  "$CHECK" $extra "$file" >/dev/null 2>&1
   got=$?
   if [ "$got" = "$want" ]; then
     echo "PASS: $id — exit $got (expected $want) [$file]"

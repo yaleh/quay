@@ -1,0 +1,5 @@
+# dispatch-record fixture — one line per genuinely-dispatched Agent-tool/Task subagent id,
+# written by the TOP-LEVEL orchestrator AT DISPATCH TIME (before the subagent runs). A real
+# dispatch-record is a runtime-maintained ledger; this fixture stands in for one in tests.
+explore-subagent-corrob-4e2b1a
+explore-subagent-9f3e7a21-distinct

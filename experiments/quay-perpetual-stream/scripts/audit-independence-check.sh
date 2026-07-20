@@ -8,15 +8,21 @@
 # ONE single-source module.
 #
 # Usage:
-#   audit-independence-check.sh [--orchestrator-id <id>] <audit-artifact.md>
+#   audit-independence-check.sh [--orchestrator-id <id>] [--dispatch-record <file>]
+#                                [--allow-uncorroborated] <audit-artifact.md>
 #
-# Exit codes: 0 = PASS (genuinely independent audit); 1 = FAIL (self-audit or absent id);
-# 2 = usage/environment error.
+# DIR-034: a distinct session id alone is no longer sufficient — it must be corroborated by an
+# independent dispatch-record file (see audit-independence-check.mjs's header) or the check
+# fails closed (BLOCKING). `--allow-uncorroborated` reverts to the pre-DIR-034 distinct-string-only
+# behavior and must never be the default caller path.
+#
+# Exit codes: 0 = PASS (genuinely independent, corroborated audit); 1 = FAIL (self-audit, absent id,
+# or an uncorroborated/fabricated distinct id); 2 = usage/environment error.
 
 set -u
 
 if [ "$#" -lt 1 ]; then
-  echo "Usage: $0 [--orchestrator-id <id>] <audit-artifact.md>" >&2
+  echo "Usage: $0 [--orchestrator-id <id>] [--dispatch-record <file>] [--allow-uncorroborated] <audit-artifact.md>" >&2
   exit 2
 fi
 

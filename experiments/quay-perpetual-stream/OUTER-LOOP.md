@@ -362,6 +362,25 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      7 product-work test-floor — see `inherited-core.md` for each clause's trigger); the QENG engine
      (`packages/quay/src/gate/`) is the operative wrapper. `quay gate` is the OPERATIVE invocation —
      NOT a bare `it0-dod-check.sh` call.
+     - **Mechanical enforcement of the three ABSORB-close-out hygiene/independence checks
+       (DIR-034/M47-dir034-mechanize-enforcement, 2026-07-20).** `it0-dod-check.mjs` Clauses
+       10 (tree-hygiene), 11 (worktree-branch-hygiene), and 12 (audit-independence) now WRAP
+       `tree-hygiene-check.sh`, `worktree-branch-hygiene-check.sh`, and
+       `audit-independence-check.sh` respectively (grep confirms one real invocation each, no
+       reimplemented logic — single-source preserved) and HARD-FAIL `milestone_counter++` through
+       THIS SAME gate — not merely through the prose close-out sub-steps below. Clauses 10/11 are
+       MECHANICALLY UNCONDITIONAL (always dispositioned, never legitimately skipped, per the
+       DIR-019 self-exemption discipline); clause 12 is conditional on the ABSORB-entry carrying a
+       `## Audit-independence check` section (`Artifact:`/`Orchestrator id:`/`Dispatch record:`
+       lines) — its absence is a documented no-op, its presence runs the real anti-forgery check
+       against the named artifact, requiring the audit artifact's session id to be CORROBORATED by
+       an independent dispatch-record (not merely distinct-but-self-fabricated — DIR-034 closed
+       that hole). **The prose sub-steps below (capture-then-prune / tree-clean-between-steps /
+       audit-independence narrative) remain the authoritative OPERATOR GUIDANCE for what to DO when
+       a check fails — they are demoted from "the enforcement of record" to "how to fix it once the
+       mechanical gate catches it."** A future ABSORB that forgets to run/paste one of the three
+       prose steps is no longer a silent pass: the SAME `quay gate`/`it0-dod-check` invocation this
+       section already requires will HARD-FAIL on clauses 10/11/12 regardless.
      - **Ordering + disposition authoring (DIR-021 — uncoded; the engine does NOT enforce this):**
        write the ABSORB-entry file (`/tmp/m<NN>-absorb-entry.md`) FIRST, carrying this milestone's
        real ABSORB narrative — the adversarial-audit verdict + V_meta-lag + line-budget/impl-row
@@ -422,7 +441,9 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
         informational prunable-cruft counts, which should be near-zero for the current milestone right
         after this close-out). A FAIL here means step 1 above was skipped or done wrong — go back and
         capture the missing evidence before re-pruning, never delete a branch holding un-captured
-        content.
+        content. **Mechanically enforced (DIR-034/M47, since M47): this same check is also Clause 11 of
+        `it0-dod-check.mjs`, run as part of the DoD meta-enforcer gate above — this paste is evidence
+        for the record, not the only thing standing between a skipped step and `milestone_counter++`.**
    - **ABSORB close-out: tree stays clean between atomic per-step commits (DIR-031/M46-dir033-
      worktree-hygiene, additive).** Since DIR-027 runs the outer loop directly on `master` in the main
      working tree, commit the loop's OWN per-step bookkeeping (SELECT / charter / ABSORB) atomically,
@@ -431,7 +452,10 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
      (backup/temp/tool-output files a step's own proxies generate, e.g. `*.l-s-backup`) untracked on
      `master` — either gitignore the pattern or generate it only inside a worktree. Run
      `scripts/tree-hygiene-check.sh` and paste its output (GREEN = no un-gitignored scratch) as part of
-     this same close-out's evidence.
+     this same close-out's evidence. **Mechanically enforced (DIR-034/M47, since M47): this same check
+     is also Clause 10 of `it0-dod-check.mjs`, run as part of the DoD meta-enforcer gate above — this
+     paste is evidence for the record, not the only thing standing between a skipped step and
+     `milestone_counter++`.**
 7. **UPDATE DASHBOARD** — VT, slope (marginal Δv), ρ, charter-thickness, discovery-latency,
    calibration-error, `V_meta consolidation lag` (re-derive milestones-since-confirmed for every
    ledger row per `v-meta-ledger.md`), milestone_counter++ (only after the V_meta gate, the
