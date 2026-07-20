@@ -14,9 +14,9 @@
 # A fresh non-exp5 workspace with no gates.yml (or an empty one) sees only the
 # product's built-in gates (`dod`, `acceptance`) plus its OWN `doc-*` gates it
 # defines here — nothing exp5-specific. This repo (exp5's own workspace)
-# declares its 5 it0/vmeta/audit/dogfood gates + its 1 wired ADR below, to
-# preserve the exact pre-DIR-035-B gate set/behavior for its own OUTER-LOOP
-# ABSORB usage.
+# declares its 5 it0/vmeta/audit/dogfood gates + its 2 wired ADRs + 1 fixed
+# delivery-conformance gate below, to preserve the exact pre-DIR-035-B gate
+# set/behavior for its own OUTER-LOOP ABSORB usage (plus DIR-035-D's addition).
 #
 # Schema:
 #   it0:   list of { name, script, argsKey } — each becomes a gate named
@@ -28,6 +28,11 @@
 #          via the existing `makeAdrGate` factory (ADR dir resolved from this
 #          workspace's own native-provider QUAY_NATIVE_ADR_DIR, falling back
 #          to `<workspaceRoot>/adr`).
+#   fixed: list of { name, script } (DIR-035-D) — each becomes a gate named
+#          `name`, wrapping a ZERO-ARGUMENT `script` (resolved relative to
+#          workspaceRoot) via `makeFixedScriptGate(scriptPath, label)` — the
+#          missing zero-arg case in the same factory family as `it0` (which
+#          requires >=1 positional arg per invocation).
 
 it0:
   - name: impl-row
@@ -49,3 +54,7 @@ it0:
 adr:
   - "ADR-001"
   - "ADR-007"   # dark-axis instrument regression gate (git-lens-selfcheck); wired 2026-07-20
+
+fixed:
+  - name: delivery-standalone-smoke
+    script: "./packages/quay/test/delivery-standalone-smoke.sh"   # ADR-013 / DIR-035-D, wired 2026-07-20

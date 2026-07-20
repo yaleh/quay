@@ -121,6 +121,29 @@ function makeIt0Gate(scriptPath, argsKey, label) {
 }
 
 /**
+ * DIR-035-D — a thin sibling of `makeIt0Gate` for a FIXED script that takes
+ * NO `task.extra` args at all (unlike the it0-style scripts, which require
+ * >=1 positional arg). `delivery-standalone-smoke.sh` is exactly this shape:
+ * a zero-argument conformance check. Reuses the SAME `runAcceptance` runner
+ * (no new process-spawn logic) — this is the missing zero-arg case in the
+ * same factory family, not a duplication of `makeIt0Gate`'s args-required
+ * logic (see `docs/plans/13-dir035-d-kit-singlesource-and-smoke-gate.md`).
+ *
+ * @param {string} scriptPath absolute path to the fixed script
+ * @param {string} label      short label used in fail-closed reason text (unused today, kept for
+ *                            symmetry with `makeIt0Gate`'s signature / future error messages)
+ */
+function makeFixedScriptGate(scriptPath, _label) {
+  return async () => {
+    const command = shQuote(scriptPath);
+    const cwd = process.env.QUAY_ACCEPTANCE_CWD || process.cwd();
+    const timeoutMs = Number(process.env.QUAY_ACCEPTANCE_TIMEOUT_MS) || 60000;
+    const { ok, reason } = runAcceptance({ command, cwd, timeoutMs });
+    return { ok, reason };
+  };
+}
+
+/**
  * E3 (DIR-030 item 2/4) — adr-as-contract enforcement: wire an
  * `accepted` ADR carrying a real `enforcement` command as a named `adr-<id>` gate.
  * Its GateEvents become the "ADR honored" ledger (`quay gate-log`) — this is the
@@ -322,17 +345,21 @@ function discoverWorkspaceRoot(startDir = process.cwd()) {
 
 /**
  * Read `<workspaceRoot>/.quay/gates.yml` (if present) and return its parsed
- * `{it0, adr}` shape. Missing file / unparsable YAML / missing keys all
- * degrade to `{it0: [], adr: []}` (fail-quiet, not fail-closed here — an
- * ABSENT gates.yml is the fresh-workspace default, not an error condition;
- * the gates it WOULD have declared simply don't exist, which is the whole
- * point of AC3).
+ * `{it0, adr, fixed}` shape. Missing file / unparsable YAML / missing keys
+ * all degrade to `{it0: [], adr: [], fixed: []}` (fail-quiet, not
+ * fail-closed here — an ABSENT gates.yml is the fresh-workspace default, not
+ * an error condition; the gates it WOULD have declared simply don't exist,
+ * which is the whole point of AC3).
+ *
+ * `fixed` (DIR-035-D) — zero-argument scripts wired via `makeFixedScriptGate`
+ * (e.g. `delivery-standalone-smoke.sh`), parallel to `it0` but with no
+ * `argsKey` (the script takes no positional args at all).
  *
  * @param {string} workspaceRoot
- * @returns {{it0: Array<{name:string, script:string, argsKey:string}>, adr: string[]}}
+ * @returns {{it0: Array<{name:string, script:string, argsKey:string}>, adr: string[], fixed: Array<{name:string, script:string}>}}
  */
 function readGatesConfig(workspaceRoot) {
-  const empty = { it0: [], adr: [] };
+  const empty = { it0: [], adr: [], fixed: [] };
   if (!workspaceRoot) return empty;
   const gatesPath = path.join(workspaceRoot, ".quay", "gates.yml");
   if (!fs.existsSync(gatesPath)) return empty;
@@ -344,15 +371,18 @@ function readGatesConfig(workspaceRoot) {
   }
   const it0 = Array.isArray(parsed?.it0) ? parsed.it0 : [];
   const adr = Array.isArray(parsed?.adr) ? parsed.adr : [];
-  return { it0, adr };
+  const fixed = Array.isArray(parsed?.fixed) ? parsed.fixed : [];
+  return { it0, adr, fixed };
 }
 
 /**
  * Build the WORKSPACE-DATA-DRIVEN gate set for `workspaceRoot`: one
  * `makeIt0Gate` per `gates.yml`'s `it0[]` entry (script path resolved
- * relative to `workspaceRoot`) plus one `makeAdrGate` per `gates.yml`'s
- * `adr[]` entry (lowercased, e.g. "ADR-001" -> "adr-001", per the original
- * E3 AC1 naming convention — unchanged). The ADR store dir mirrors this
+ * relative to `workspaceRoot`), one `makeAdrGate` per `gates.yml`'s `adr[]`
+ * entry (lowercased, e.g. "ADR-001" -> "adr-001", per the original E3 AC1
+ * naming convention — unchanged), plus one `makeFixedScriptGate` per
+ * `gates.yml`'s `fixed[]` entry (DIR-035-D — a zero-argument script, e.g.
+ * `delivery-standalone-smoke.sh`). The ADR store dir mirrors this
  * workspace's own native-provider convention (`QUAY_NATIVE_ADR_DIR`,
  * `.quay/config.yml`'s `providers.native.env`), falling back to
  * `<workspaceRoot>/adr` when unset — the same default quay-native itself uses.
@@ -365,7 +395,7 @@ function readGatesConfig(workspaceRoot) {
  */
 export function loadWorkspaceGates(workspaceRoot) {
   if (!workspaceRoot) return {};
-  const { it0, adr } = readGatesConfig(workspaceRoot);
+  const { it0, adr, fixed } = readGatesConfig(workspaceRoot);
   const gates = {};
   for (const entry of it0) {
     if (!entry?.name || !entry?.script || !entry?.argsKey) continue;
@@ -378,6 +408,13 @@ export function loadWorkspaceGates(workspaceRoot) {
   for (const adrId of adr) {
     if (typeof adrId !== "string" || adrId.trim() === "") continue;
     gates[adrId.toLowerCase()] = makeAdrGate(adrId, adrDir);
+  }
+  for (const entry of fixed) {
+    if (!entry?.name || !entry?.script) continue;
+    const scriptPath = path.isAbsolute(entry.script)
+      ? entry.script
+      : path.resolve(workspaceRoot, entry.script);
+    gates[entry.name] = makeFixedScriptGate(scriptPath, entry.name);
   }
   return gates;
 }
