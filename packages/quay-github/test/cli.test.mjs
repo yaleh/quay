@@ -165,17 +165,22 @@ function main() {
     assert(r.status === (result.ok ? 0 : 1), "quay-github task check gh-4 --json exit code mirrors result.ok");
   }
 
-  // 5. `task edit <id>` with NO --status flag — the required-flag error
-  //    path. This returns BEFORE client.setStatus is ever called (see
-  //    bin/quay-github.js: the `if (!flags.status)` check precedes the
-  //    `client.setStatus(...)` call) — confirmed by reading the source
-  //    before writing this assertion. No live write occurs.
+  // 5. `task edit <id>` with NO write flag at all — the required-flag error
+  //    path. This returns BEFORE any client.setStatus/writeFields/
+  //    writeRelations call is ever made (see bin/quay-github.js: the
+  //    `hasAnyWriteFlag` guard precedes every write call) — confirmed by
+  //    reading the source before writing this assertion. No live write
+  //    occurs. (DIR-041/M57: `edit` was extended from status-only to the
+  //    full field surface — status/title/body/labels/parent/children — so
+  //    this guard now checks for ANY of those, not just --status; the
+  //    error text still names --status among the required set, so this
+  //    assertion's substring checks are unaffected.)
   {
     const r = run(["task", "edit", "gh-3"]);
-    assert(r.status === 1, "quay-github task edit <id> (no --status) exits 1");
+    assert(r.status === 1, "quay-github task edit <id> (no write flags) exits 1");
     assert(
       r.stderr.includes("--status") && r.stderr.includes("required"),
-      "quay-github task edit <id> (no --status) prints the required-flag error, never reaching client.setStatus"
+      "quay-github task edit <id> (no write flags) prints the required-flag error, never reaching any write call"
     );
   }
 

@@ -1,11 +1,13 @@
-# quay-github — Design (v1.4: read + status-write + gate (primitive + compound/epic) + skill)
+# quay-github — Design (v1.5: read + full write (create + edit) + gate (primitive + compound/epic) + skill)
 
-- **Status:** v1.4 implemented — `data.read` + `manifest` (v1, QN-002),
-  minimal status-only `data.write` (QN-024, iteration 10), `gate` (QN-028,
+- **Status:** v1.5 implemented — `data.read` + `manifest` (v1, QN-002),
+  full `data.write` — CREATE (DIR-041, M57, §3.8) plus edit of title/body/
+  status/labels/parent/children (QN-024 status-only start, extended by
+  M09-gh-write/PR-ABI-001 and M12-abi-parent-write, §3.4), `gate` (QN-028,
   iteration 17, primitive tasks; extended to compound/epic tasks by
   QN-035, iteration 25, DIR-006), and `skill` (QN-029, iteration 18) —
-  see §5/§3.5/§3.6 and `provider.yml`'s own inline comments for the
-  current, honest scope of each. `skill` required a real fix one layer
+  see §5/§3.4/§3.5/§3.6/§3.8 and `provider.yml`'s own inline comments for
+  the current, honest scope of each. `skill` required a real fix one layer
   below `provider.yml` itself — see §3.6 for why a config-only
   declaration would have been dishonest. This Provider's own MCP stdio
   transport (`src/mcp-server.js`) gained its first dedicated regression
@@ -33,7 +35,12 @@ status-only `data.write` on top of that read-only base — see §3.4. `gate`
 was added in iteration 17 (QN-028, see §3.5) after 13 consecutive
 iterations of honestly finding no natural reason to implement it. `skill`
 was added in iteration 18 (QN-029, see §3.6), the last capability named in
-`provider.yml`'s original v1 comment set.
+`provider.yml`'s original v1 comment set. **`data.write` did not stay
+status-only:** M09-gh-write/PR-ABI-001 and M12-abi-parent-write later
+extended it to title/body/labels/parent/children edit, and DIR-041/M57
+(§3.8) closed the remaining gap with a real CREATE path — this Provider is
+no longer read-only in any sense; see §5 for the current capability
+summary.
 
 ## 2. Backing store
 
@@ -159,11 +166,19 @@ closes the issue (`issue.state = "closed"`) rather than relying on a
 label, matching §3's own read-side rule that `state == "closed"` takes
 precedence over any label.
 
-**Scope, deliberately narrow (G5):** only `status` is writable. `title`,
-`body`, `labels` (non-status), `parent`, `children` remain read-only in
-v1.1 — there is no AC/DoD requirement or observed drift motivating a
-broader write surface yet, and adding one now would be anticipatory
-gold-plating.
+**Scope at iteration 10 (QN-024): only `status` was writable.** `title`,
+`body`, `labels` (non-status), `parent`, `children` were read-only
+placeholders through v1.1. **This narrowness did not survive:**
+`title`/`body`/`labels` write was added by M09-gh-write (PR-ABI-001,
+`writeFields()` below) and `parent`/`children` write by M12-abi-parent-write
+(`writeRelations()`/`setChildCheckboxes()`, §3.2's checkbox convention
+applied in the write direction) — see those functions' own header comments
+in `github-client.js` for the full mapping. **This subsection is preserved
+for its historical write-semantics detail (the status↔label/state mapping
+rule is unchanged since QN-024), not because the "status-only" framing is
+still accurate — it is not; see §5 for the current, honest capability
+summary and §3.8 for the CREATE path this milestone (DIR-041/M57) added on
+top of all of the above.**
 
 **Live-verified, not merely unit-tested:** two real writes were performed
 against this repository's actual issue #4 during QN-024 (one via
@@ -396,6 +411,63 @@ teeth; restoring produced a byte-identical diff and a full green re-run.
 
 Covered by `test/mcp-server.test.mjs`.
 
+### 3.8 CREATE path (DIR-041, M57)
+
+**Gap closed, named honestly since QN-024:** every write field
+(title/body/status/labels/parent/children) had a real EDIT path against an
+EXISTING issue by M12-abi-parent-write, but `task_write`/`task create` had
+no way to bring a NEW issue into existence at all — the package's own
+`package.json` description, this file's own §3.4, and `mcp-server.js`'s own
+startup log all still (incorrectly) read "read-only v1" long after edit had
+in fact reached full field coverage; this milestone also corrects those
+stale strings, not just the code gap.
+
+**The id problem, and the resolved convention.** Unlike `quay-native`,
+where a task's id is caller-chosen (the filename), GitHub assigns an
+issue's number itself at creation time — there is no id to pass to a create
+call before the create happens. Resolved via a reserved **sentinel id**,
+`"gh-new"` (exported as `CREATE_SENTINEL_ID` from `github-client.js`):
+passing `task_write({ id: "gh-new", title, ... })` means CREATE, not edit.
+This keeps the ABI's `id: string` (required) shape completely unchanged at
+both the per-Provider MCP schema and Core's own generic `task_write` proxy
+schema — no new "id can be omitted" branch was added to either, avoiding a
+divergence from `quay-native`'s own required-id contract. Any OTHER string
+that is not a real `gh-<n>` issue reference is still handled by the
+existing edit-path 404 (`get(id)` returns `null` for a nonexistent issue
+number) — so a typo'd id fails loudly, exactly as before this milestone.
+
+**What create() does:** POSTs `repos/<owner>/<repo>/issues` with the given
+`title` (required — a GitHub issue cannot exist without one; enforced with
+a clear thrown error, fail-closed, not a silent no-op) and optional
+`body`/`labels`, then re-reads the new issue via the existing `get()` path
+so the returned view-model is derived exactly the same way any other
+`get()` result is (same status-derivation, same `role`/`children` parsing).
+`status`/`parent`/`children` are deliberately NOT accepted by `create()`
+itself — mirroring `writeFields()`'s own "status is a separate concern"
+discipline — a caller wanting a non-default initial status or relations on
+the newly-created issue supplies them in the SAME `task_write` call, and
+`mcp-server.js`'s task_write handler (and `bin/quay-github.js`'s `task
+create` CLI verb) perform the two-step decomposition server-side: create
+first, then a follow-up `setStatus`/`writeRelations` call against the REAL
+id the create just returned. This is symmetrical with how Core's own `task
+create` CLI (`packages/quay/bin/quay.js`) already always sends one merged
+patch object per call — no Core-side change was needed; the decomposition
+lives entirely inside this Provider.
+
+**Live-verified against a real repo, not merely stubbed:** a probe issue
+was created in `yaleh/quay` via `quay-github`'s own CLI/`quay`'s Core CLI
+against the `github` provider, confirmed present via `gh issue view`,
+edited (title/body/labels/status all reflected), then closed — see the
+M57 milestone record / iteration report for the exact commands and
+`gh issue view` transcripts. Unit-level coverage (stubbed `gh`, following
+`gh-api-buffer.test.mjs`'s real-subprocess-on-PATH pattern, since the real
+`yaleh/quay` issue backlog is too small/precious to target with an
+automated, repeatable CREATE test) lives in `test/create.test.mjs`
+(`create()` itself) and `test/create-mcp.test.mjs` (the MCP-level
+`CREATE_SENTINEL_ID` routing, over the real stdio transport).
+
+Covered by `test/create.test.mjs`, `test/create-mcp.test.mjs`.
+
 ## 4. What transferred cleanly vs. what required backend-specific work
 
 **Transferred unmodified (zero Core changes, zero ABI changes):**
@@ -458,13 +530,19 @@ budgeted, proposal §16):**
   *naive* approach (a config-only `provider.yml` declaration) would have
   been backend-specific-*looking* but actually silently wrong — see §3.6.
 
-## 5. Capabilities (v1.4)
+## 5. Capabilities (v1.5)
 
 ```
 data.read: true    # task_list, task_get
 manifest:  true    # provider://manifest
-data.write: true   # QN-024 (iteration 10): status-only patch — see §3.4.
-                   # title/body/labels/parent/children remain unimplemented.
+data.write: true   # CREATE (DIR-041, M57, §3.8) + full edit (status/title/
+                   # body/labels/parent/children — QN-024 status-only
+                   # start, extended by M09-gh-write/PR-ABI-001 and
+                   # M12-abi-parent-write, §3.4). Write coverage is now
+                   # 1.0 across every canonical view-model field GitHub can
+                   # express (parent/children via the documented body-
+                   # checkbox convention, not a native field — see §3.2/§3.8
+                   # for the documented boundary).
 gate:       true    # QN-028 (iteration 17): task_check, primitive tasks;
                    # extended to compound/epic tasks by QN-035 (iteration
                    # 25, DIR-006) — see §3.5.
@@ -473,13 +551,16 @@ skill:      true    # QN-029 (iteration 18): status_skill_map/action_buttons
                    # since QN-035 (iteration 25).
 ```
 
-Matches `provider.yml`'s own capability booleans verbatim (re-verified
-iteration 38, QN-049: the booleans themselves were never wrong, but both
-this section's own comments and `provider.yml`'s own inline comments had
-drifted stale since iteration 25/QN-035 — both described "primitive tasks
-only" for `gate`/`skill` 12 iterations after compound/epic support was
-implemented and live-verified. Corrected here and in `provider.yml`
-directly; see §3.5/§3.6 above, which had already been kept accurate).
+Matches `provider.yml`'s own capability booleans verbatim. (Historical
+note, iteration 38/QN-049: the booleans themselves were never wrong, but
+comments in this section and in `provider.yml` have twice drifted stale
+after a real capability extension landed in code before the prose caught
+up — once for `gate`/`skill`'s compound/epic scope (QN-035, corrected at
+QN-049), and again for `data.write`'s create/full-edit scope (M09-gh-write
+through M12-abi-parent-write, corrected here at DIR-041/M57). Both
+corrections are the SAME lesson: update this section and `provider.yml`'s
+inline comments in the SAME commit that lands the capability, not as a
+later cleanup pass.)
 
 ## 6. Iteration 27 — first live `quay:execute` Skill-level `executeEpic` drive
 

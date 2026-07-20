@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 // quay-github — the GitHub Provider's binary (glossary.md pattern:
-// quay-<providerId>). v1: `mcp` subcommand only — no raw `task` CLI
-// subcommands required by the ABI (QN-002 Plan Phase 1: "a raw local CLI
-// mirroring quay-native's convenience commands is not required by the ABI,
-// only the MCP surface is"). A thin `task list`/`task get` convenience is
-// still provided for manual smoke-testing/debugging, reusing the same
+// quay-<providerId>). `mcp` is the formal ABI transport; `task` subcommands
+// below are a convenience CLI mirroring quay-native's own, reusing the same
 // github-client.js core the MCP server uses (symmetry, design §6, applied
-// to whatever subset of the ABI this Provider implements). `task edit
-// --status <s>` (QN-024, iteration 10) is the new minimal write-path
-// convenience — same CLI-as-golden-harness principle applied to whatever
-// subset of the write ABI this Provider implements (status-only, v1).
+// to whatever subset of the ABI this Provider implements — not required by
+// the ABI itself, QN-002 Plan Phase 1). `task edit` now covers the full
+// write surface (status/title/body/labels/parent/children — QN-024,
+// M09-gh-write, M12-abi-parent-write); `task create` (DIR-041, M57) closes
+// the last remaining write gap: a real issue CREATE (--title required,
+// optional --body/--labels/--status/--parent/--children), printing the REAL
+// "gh-<n>" id GitHub assigned (issue numbers cannot be chosen by the
+// caller, unlike quay-native's filename-derived ids).
 
 import { createGithubClient } from "../src/github-client.js";
 
@@ -92,14 +93,75 @@ async function main() {
       return;
     }
 
-    if (sub === "edit") {
-      const id = positional[0];
-      if (!flags.status) {
-        console.error("quay-github task edit: --status <s> is required (v1 write capability is status-only, QN-024)");
+    if (sub === "create") {
+      // DIR-041 (M57): real issue CREATE. --title is required (GitHub
+      // issues cannot exist without one; client.create() itself also
+      // enforces this, fail-closed); --status/--parent/--children, if
+      // given, are applied as follow-up writes against the REAL id
+      // client.create() returns (mirrors mcp-server.js's task_write
+      // create-then-follow-up decomposition for the SAME reason: GitHub
+      // assigns the issue number, so no id exists to write relations
+      // against until after the POST completes).
+      if (typeof flags.title !== "string" || flags.title.trim() === "") {
+        console.error("quay-github task create: --title <title> is required (and must be non-empty)");
         process.exitCode = 1;
         return;
       }
-      const t = client.setStatus(id, flags.status);
+      const labels = flags.labels !== undefined
+        ? String(flags.labels).split(",").filter(Boolean)
+        : undefined;
+      let t = client.create({ title: flags.title, body: flags.body, labels });
+      if (flags.status !== undefined) t = client.setStatus(t.id, flags.status);
+      const relationFields = {};
+      if (flags.parent !== undefined) relationFields.parent = flags.parent;
+      if (flags.children !== undefined) {
+        relationFields.children = String(flags.children).split(",").filter(Boolean);
+      }
+      if (Object.keys(relationFields).length > 0) {
+        t = client.writeRelations(t.id, relationFields);
+      }
+      if (flags.json) printJson(t);
+      else console.log(`${t.id}: ${t.title} [${t.status}]`);
+      return;
+    }
+
+    if (sub === "edit") {
+      const id = positional[0];
+      const hasAnyWriteFlag =
+        flags.status !== undefined ||
+        flags.title !== undefined ||
+        flags.body !== undefined ||
+        flags.labels !== undefined ||
+        flags.parent !== undefined ||
+        flags.children !== undefined;
+      if (!hasAnyWriteFlag) {
+        console.error(
+          "quay-github task edit: at least one of --status/--title/--body/--labels/--parent/--children is required"
+        );
+        process.exitCode = 1;
+        return;
+      }
+      let t;
+      if (flags.status !== undefined) {
+        t = client.setStatus(id, flags.status);
+      }
+      const otherFields = {};
+      if (flags.title !== undefined) otherFields.title = flags.title;
+      if (flags.body !== undefined) otherFields.body = flags.body;
+      if (flags.labels !== undefined) {
+        otherFields.labels = String(flags.labels).split(",").filter(Boolean);
+      }
+      if (Object.keys(otherFields).length > 0) {
+        t = client.writeFields(id, otherFields);
+      }
+      const relationFields = {};
+      if (flags.parent !== undefined) relationFields.parent = flags.parent;
+      if (flags.children !== undefined) {
+        relationFields.children = String(flags.children).split(",").filter(Boolean);
+      }
+      if (Object.keys(relationFields).length > 0) {
+        t = client.writeRelations(id, relationFields);
+      }
       if (flags.json) printJson(t);
       else console.log(`${t.id}: ${t.title} [${t.status}]`);
       return;
@@ -117,7 +179,7 @@ async function main() {
       return;
     }
 
-    console.error(`unknown task subcommand: ${sub} (v1 supports list/get/edit --status/check only)`);
+    console.error(`unknown task subcommand: ${sub} (supports list/get/create/edit/check)`);
     process.exitCode = 1;
     return;
   }

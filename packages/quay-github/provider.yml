@@ -1,20 +1,25 @@
 # provider.yml — the GitHub Provider's static self-declaration
 # (quay-proposal.md §10, QN-002's Plan/AC). Travels with the Provider.
 #
-# v1.4 walking skeleton (G5): read + minimal status-only write (QN-024,
-# iteration 10) + gate (QN-028, iteration 17, primitive tasks; extended to
-# compound/epic tasks QN-035, iteration 25, DIR-006) + skill (QN-029,
-# iteration 18: status_skill_map/action_buttons, backed by the
+# v1.5 (DIR-041, M57): read + full write (create + edit title/body/status/
+# labels/parent/children) + gate (QN-028, iteration 17, primitive tasks;
+# extended to compound/epic tasks QN-035, iteration 25, DIR-006) + skill
+# (QN-029, iteration 18: status_skill_map/action_buttons, backed by the
 # now-provider-parameterized quay:author/quay:execute Skills — see
 # packages/quay-native/skills/{author,execute}/SKILL.md's iteration-18
 # honesty notes; this was NOT free — it required fixing a real hardcoded-
 # to-quay-native limitation in those Skills first, not just this file).
+# Edit (title/body/labels/status/parent/children) landed across QN-024/
+# M09-gh-write/M12-abi-parent-write; CREATE (a genuinely new issue via
+# task_write id:"gh-new") was the one remaining write-surface gap, closed
+# by DIR-041/M57 — see github-client.js's create()/CREATE_SENTINEL_ID and
+# DESIGN.md §3.8.
 
 id: github
 name: "quay-github"
 description: >
-  GitHub Provider (v1, read + status-write + gate + skill): maps this
-  repository's Issues onto the canonical task view-model (DESIGN.md).
+  GitHub Provider (v1.5, read + create + full edit + gate + skill): maps
+  this repository's Issues onto the canonical task view-model (DESIGN.md).
   Second real backend, proves the ABI transfers to a heterogeneous store
   (proposal §14), and that the Skill layer itself transfers, not just the
   ABI surfaces.
@@ -25,15 +30,20 @@ capabilities:
   data.write: true   # QN-024 (iteration 10) added status-only write; M09-gh-write
                      # (title/body/labels) and M12-abi-parent-write (parent/
                      # children, via cross-issue body-checkbox mutation) closed
-                     # the remaining write surface — Provider-ABI write coverage
-                     # is 13/13 = 1.0000 as of M12's ABSORB (dashboard.md line
-                     # 189). This comment previously (through M25) still read
-                     # "title/body/labels/parent/children remain unimplemented",
-                     # which M26-adversarial-eval's audit found stale and
-                     # corrected here — see M26's audit-report.md finding
-                     # M26-F1/ADV (both iterations independently found this).
-                     # See github-client.js#writeFields/#writeRelations for
-                     # the actual implementations.
+                     # the remaining EDIT-field write surface — Provider-ABI
+                     # write coverage is 13/13 = 1.0000 as of M12's ABSORB
+                     # (dashboard.md line 189). This comment previously
+                     # (through M25) still read "title/body/labels/parent/
+                     # children remain unimplemented", which M26-adversarial-
+                     # eval's audit found stale and corrected here — see M26's
+                     # audit-report.md finding M26-F1/ADV (both iterations
+                     # independently found this).
+                     # DIR-041 (M57) closed the one write surface that was
+                     # STILL genuinely missing after M12/M26: CREATE (a brand
+                     # new issue — task_write with id:"gh-new"). See
+                     # github-client.js#writeFields/#writeRelations/#create for
+                     # the actual implementations, DESIGN.md §3.8 for the
+                     # CREATE-sentinel design rationale.
   gate: true          # QN-028 (iteration 17): task_check, primitive tasks;
                      # extended to compound/epic (children non-empty) tasks
                      # by QN-035 (iteration 25, DIR-006) via a ported,

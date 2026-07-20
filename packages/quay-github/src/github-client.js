@@ -27,6 +27,14 @@ const STATUS_PRECEDENCE = ["done", "needs-human", "ready", "todo"];
 // GraphQL sub-issue API integration.
 const CHILD_CHECKBOX_RE = /^\s*-\s*\[[ xX]\]\s*#(\d+)\s*$/gm;
 
+// DIR-041 (M57): the sentinel id a caller passes to `task_write` to mean
+// "create a NEW issue" rather than "edit an existing one" -- see
+// `create()`'s own header comment below for the full rationale. Exported so
+// mcp-server.js's task_write handler and tests both reference this ONE
+// source instead of re-typing the literal string ("gh-new") in more than
+// one place.
+export const CREATE_SENTINEL_ID = "gh-new";
+
 // DIR-037 (M55): live-verified against a REAL foreign repo (yaleh/archguard,
 // 44+ open issues) — `gh api`'s response for a repo with many/large issues
 // overflows Node's `child_process.execFileSync` DEFAULT `maxBuffer` (1 MiB),
@@ -688,6 +696,42 @@ export function createGithubClient({ owner, repo }) {
     return get(id);
   }
 
+  // DIR-041 (M57): real issue CREATE, closing the last remaining gap in
+  // quay-github's write surface (title/body/status/labels/parent/children
+  // were already implemented -- see writeFields/writeRelations/setStatus
+  // above; this file's own history had drifted the "read-only v1" framing
+  // well past its actual capability). POSTs a new issue with the given
+  // title (required -- GitHub issues cannot exist without one) and,
+  // optionally, body + labels; `status`/`parent`/`children` are intentionally
+  // NOT accepted here (mirrors writeFields's own status-write-is-a-separate-
+  // concern discipline) -- a caller wanting a non-default initial status or
+  // relations issues a FOLLOW-UP setStatus/writeRelations call against the
+  // real id this function returns, exactly the two-step shape Core's own
+  // `task create` CLI verb already uses when it forwards extra fields
+  // through the SAME generic task_write patch object (see bin/quay.js's
+  // `task create` handler: it always sends the full merged patch in one
+  // task_write call; this Provider's mcp-server.js task_write handler
+  // below performs that same two-step decomposition server-side so ONE
+  // client-visible task_write call, with `id: "gh-new"` PLUS status/labels/
+  // parent/children fields all present, still lands correctly).
+  function create({ title, body, labels } = {}) {
+    if (typeof title !== "string" || title.trim() === "") {
+      throw new Error(
+        "quay-github: create requires a non-empty title (GitHub issues cannot exist without one)"
+      );
+    }
+    const postFields = { title };
+    if (body !== undefined) postFields.body = body;
+    const issue = ghApiJson([
+      `repos/${owner}/${repo}/issues`,
+      "-X",
+      "POST",
+      ...Object.entries(postFields).flatMap(([k, v]) => ["-f", `${k}=${v}`]),
+      ...(labels ?? []).map((label) => ["-f", `labels[]=${label}`]).flat(),
+    ]);
+    return get(`gh-${issue.number}`);
+  }
+
   // M09-gh-write (PR-ABI-001, real write): title/body/labels write. Applies
   // whichever of `title`/`body`/`labels` are present in `fields` via `gh api
   // ... -X PATCH` (title/body, same PATCH-on-self endpoint setStatus already
@@ -879,5 +923,5 @@ export function createGithubClient({ owner, repo }) {
     return checkGate(task, get);
   }
 
-  return { list, get, setStatus, writeFields, writeRelations, check };
+  return { list, get, setStatus, writeFields, writeRelations, check, create };
 }
