@@ -1,15 +1,18 @@
 ---
 id: exp5-M-TS-MIGRATION
-title: "TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety"
+title: "TS migration program (ADR-012): gradually port quay product code
+  JS→TypeScript, phased + behavior-preserving, to unlock archguard +
+  type-safety"
 status: todo
 labels:
   - milestone-candidate
   - crystallization
   - human-steered
 parent: null
-children: []
+children:
+  - exp5-M-TS-MIGRATION-P0
 extra:
-  schema: "v1"
+  schema: v1
 ---
 ## Proposal
 Execute ADR-012: gradually migrate quay product code (`packages/**`) from JS/ESM to TypeScript — NOT a big-bang, NOT Go. TS is a JS superset, so the migration is behavior-preserving-by-construction and file-by-file, exploiting Node 25 native type-stripping (runs `.ts` with no build step) + `allowJs` coexistence, keeping npm workspaces / `node --test` / the MCP SDK. Types are `L_C` constraint-hardening (a crystallization move) and unlock archguard (the `L_G/L_D` instrument for G1/ADR-007). Labeled `human-steered`: it touches product code broadly and must proceed only under the behavior-preserving + golden-diff discipline (never a mid-loop autonomous self-rewrite).
