@@ -1,13 +1,16 @@
-// loop-params.test.mjs — RED→GREEN tests for readLoopParams (DIR-045 AC2)
+// loop-params.test.mjs — RED→GREEN tests for readLoopParams (DIR-045 AC2 / DIR-050 unified format)
 //
 // Contract: readLoopParams(workspaceRoot) → params | throws Error("FAIL-CLOSED: ...")
 //   FAIL-CLOSED cases (throw):
-//     - missing .quay/loop.yml
+//     - no loop config found (neither unified config.yml loop: section nor .quay/loop.yml)
 //     - malformed YAML
 //     - missing required field `board`
 //     - missing required field `gates`
 //     - invalid `stop` value
 //   GREEN cases (returns valid params):
+//     - unified format (.quay/config.yml with loop: section) — DIR-050
+//     - legacy fallback (.quay/loop.yml only) — DIR-050 back-compat
+//     - unified preferred when both exist — DIR-050
 //     - minimal valid params (board + gates)
 //     - full valid params (all fields)
 //     - exp5 params shape
@@ -40,8 +43,22 @@ function writeLoopYml(ws, content) {
 // RED cases — must throw Error with "FAIL-CLOSED" in message
 // ---------------------------------------------------------------------------
 
-test("RED: missing .quay/loop.yml throws FAIL-CLOSED", () => {
+test("RED: missing .quay/loop.yml (and no unified config) throws FAIL-CLOSED", () => {
   const ws = tmpWs("missing");
+  assert.throws(
+    () => readLoopParams(ws),
+    (err) => {
+      assert(err instanceof Error, "must be Error");
+      assert(err.message.includes("FAIL-CLOSED"), `got: ${err.message}`);
+      return true;
+    }
+  );
+});
+
+test("RED: .quay/config.yml exists but has no loop: section, and no loop.yml → throws FAIL-CLOSED", () => {
+  const ws = tmpWs("unified-no-loop");
+  // write a config.yml without loop: section (providers only)
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), "providers:\n  native:\n    enabled: true\n");
   assert.throws(
     () => readLoopParams(ws),
     (err) => {
@@ -110,7 +127,7 @@ test("RED: invalid stop value throws FAIL-CLOSED", () => {
 // GREEN cases — must return valid params object
 // ---------------------------------------------------------------------------
 
-test("GREEN: minimal valid params (board + gates as array)", () => {
+test("GREEN: minimal valid params (board + gates as array) — legacy loop.yml", () => {
   const ws = tmpWs("minimal");
   writeLoopYml(ws, "board: native\ngates: [vitest]");
   const params = readLoopParams(ws);
@@ -119,12 +136,100 @@ test("GREEN: minimal valid params (board + gates as array)", () => {
   // defaults
   assert.equal(params.stop, "once");
   assert.equal(params.policy, "ready-first");
-  assert.equal(params.coexist, null);
+  // DIR-050: coexist is retired — not in return value
+  assert.equal(params.coexist, undefined);
   // DIR-048 new defaults
   assert.equal(params.execution, "dispatched");
   assert.equal(params.audit, "adversarial");
   // DIR-049 default: concurrency 1 (serial)
   assert.equal(params.concurrency, 1);
+});
+
+// ---------------------------------------------------------------------------
+// DIR-050: unified format tests
+// ---------------------------------------------------------------------------
+
+test("DIR-050 GREEN: unified config.yml with loop: section is read (preferred over loop.yml)", () => {
+  const ws = tmpWs("unified-preferred");
+  // Write unified config.yml with loop: section
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), [
+    "providers:",
+    "  native:",
+    "    enabled: true",
+    "loop:",
+    "  board: native",
+    "  gates: [vitest]",
+    "  stop: once",
+  ].join("\n"));
+  // Also write a legacy loop.yml with DIFFERENT board — unified should win
+  writeLoopYml(ws, "board: legacy-board\ngates: [legacy-gate]");
+  const params = readLoopParams(ws);
+  assert.equal(params.board, "native", "unified config.yml loop: section must win over loop.yml");
+  assert.deepEqual(params.gates, ["vitest"]);
+  assert.equal(params.stop, "once");
+});
+
+test("DIR-050 GREEN: unified config.yml loop: section — all fields parsed correctly", () => {
+  const ws = tmpWs("unified-full");
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), [
+    "providers:",
+    "  native:",
+    "    enabled: true",
+    "loop:",
+    "  board: native",
+    "  gates: [vitest, dod]",
+    "  stop: \"until(.halt)\"",
+    "  policy: value-typed-ledger",
+    "  execution: inline",
+    "  audit: none",
+    "  concurrency: 4",
+  ].join("\n"));
+  const params = readLoopParams(ws);
+  assert.equal(params.board, "native");
+  assert.deepEqual(params.gates, ["vitest", "dod"]);
+  assert.equal(params.stop, "until(.halt)");
+  assert.equal(params.policy, "value-typed-ledger");
+  assert.equal(params.execution, "inline");
+  assert.equal(params.audit, "none");
+  assert.equal(params.concurrency, 4);
+});
+
+test("DIR-050 GREEN: legacy loop.yml fallback when config.yml has no loop: section", () => {
+  const ws = tmpWs("legacy-fallback");
+  // config.yml without loop: section
+  fs.writeFileSync(path.join(ws, ".quay", "config.yml"), "providers:\n  native:\n    enabled: true\n");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\nstop: once");
+  const params = readLoopParams(ws);
+  assert.equal(params.board, "native");
+  assert.deepEqual(params.gates, ["vitest"]);
+  assert.equal(params.stop, "once");
+});
+
+test("DIR-050 GREEN: legacy loop.yml fallback when no config.yml at all", () => {
+  const ws = tmpWs("no-config-legacy");
+  writeLoopYml(ws, "board: native\ngates: [vitest]");
+  const params = readLoopParams(ws);
+  assert.equal(params.board, "native");
+  assert.deepEqual(params.gates, ["vitest"]);
+});
+
+test("DIR-050 GREEN: coexist in legacy loop.yml is silently ignored (backward-compat)", () => {
+  const ws = tmpWs("coexist-ignored");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\ncoexist: pause(backlog/.loop-stop)");
+  const params = readLoopParams(ws);
+  assert.equal(params.board, "native");
+  // coexist must NOT be in result (retired)
+  assert.equal(params.coexist, undefined);
+  // other fields still work
+  assert.equal(params.execution, "dispatched");
+});
+
+test("DIR-050 GREEN: coexist: null in legacy loop.yml is silently ignored", () => {
+  const ws = tmpWs("coexist-null-ignored");
+  writeLoopYml(ws, "board: native\ngates: [it0-set]\nstop: \"until(.halt)\"\ncoexist: null");
+  const params = readLoopParams(ws);
+  assert.equal(params.coexist, undefined);
+  assert.equal(params.board, "native");
 });
 
 test("GREEN: routines defaults to [] (no routine track); a valid routine parses (DIR-051)", () => {
@@ -219,7 +324,7 @@ test("GREEN: minimal valid params (board + gates as string)", () => {
   assert.deepEqual(params.gates, ["vitest"]);
 });
 
-test("GREEN: full valid params", () => {
+test("GREEN: full valid params (coexist in YAML is silently ignored per DIR-050)", () => {
   const ws = tmpWs("full");
   writeLoopYml(ws, [
     "board: native",
@@ -233,7 +338,8 @@ test("GREEN: full valid params", () => {
   assert.deepEqual(params.gates, ["vitest", "dod"]);
   assert.equal(params.stop, "once");
   assert.equal(params.policy, "ready-first");
-  assert.equal(params.coexist, "pause(backlog/.loop-stop)");
+  // DIR-050: coexist retired — not in return value
+  assert.equal(params.coexist, undefined);
 });
 
 test("GREEN: stop=until(.halt) is valid", () => {
@@ -250,23 +356,23 @@ test("GREEN: stop=until(empty) is valid", () => {
   assert.equal(params.stop, "until(empty)");
 });
 
-test("GREEN: exp5 params shape", () => {
+test("GREEN: exp5 params shape (coexist removed per DIR-050)", () => {
   const ws = tmpWs("exp5");
   writeLoopYml(ws, [
     "board: native",
     "gates: [it0-set]",
     "stop: \"until(.halt)\"",
     "policy: value-typed-ledger",
-    "coexist: null",
   ].join("\n"));
   const params = readLoopParams(ws);
   assert.equal(params.board, "native");
   assert.deepEqual(params.gates, ["it0-set"]);
   assert.equal(params.stop, "until(.halt)");
   assert.equal(params.policy, "value-typed-ledger");
+  assert.equal(params.coexist, undefined);
 });
 
-test("GREEN: archguard params shape", () => {
+test("GREEN: archguard params shape (coexist silently ignored per DIR-050)", () => {
   const ws = tmpWs("archguard");
   writeLoopYml(ws, [
     "board: native",
@@ -280,7 +386,8 @@ test("GREEN: archguard params shape", () => {
   assert.deepEqual(params.gates, ["vitest"]);
   assert.equal(params.stop, "once");
   assert.equal(params.policy, "ready-first");
-  assert.equal(params.coexist, "pause(backlog/.loop-stop)");
+  // DIR-050: coexist retired — silently ignored in legacy YAML
+  assert.equal(params.coexist, undefined);
   // DIR-048: new defaults present even when not specified
   assert.equal(params.execution, "dispatched");
   assert.equal(params.audit, "adversarial");

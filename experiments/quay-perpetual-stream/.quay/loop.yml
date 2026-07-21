@@ -10,13 +10,12 @@
 # stop:   until(.halt) — exp5 runs perpetually until the .halt sentinel is placed
 #         at experiments/quay-perpetual-stream/.halt (DIR-027 hygiene)
 # policy: value-typed-ledger — exp5's own milestone-selection ranking
-# coexist: null — no peer loop to coordinate with
+# coexist: RETIRED (DIR-050) — field removed from schema, silently ignored if present
 
 board: native
 gates: [it0-set]
 stop: "until(.halt)"
 policy: value-typed-ledger
-coexist: null
 
 # concurrency (DIR-049): max touches-disjoint batch width. Set to 2 by human directive.
 # HONEST CAVEAT (same as routines below): exp5 is driven by the bespoke OUTER-LOOP.md, which
