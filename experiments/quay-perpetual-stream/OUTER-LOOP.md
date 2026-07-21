@@ -488,14 +488,21 @@ only two — stop signals:
    no worthwhile explore chart, OR the standing hypothesis is falsified (a milestone failed to
    converge / degradation across tracks) → write the checkpoint flagged `HALT-RECOMMENDED` and stop,
    leaving it for async human review.
-   **"VT slope" = the ROLLING per-milestone slope over the last K≥5 milestones INCLUDING zero-Δv ones,
-   computed by `scripts/rolling-slope-check.mjs` (`windowSlope`/`haltVerdict`) — that module IS the
-   single definition (DIR-038-A). The old "qualifying-only" denominator (mean of ONLY the nonzero
-   capability-growth milestones) is RETIRED: it froze at 3.80 and structurally could not see a stall —
-   16 consecutive zero-VT milestones (M34–M49) never tripped `< +1.0`, while the honest rolling slope
-   over that region is ≈0. A checkpoint MUST report the rolling number (e.g. m29–m35 ≈ 0.64 per 5),
-   never the 3.80 artifact. NON-WAIVABLE anti-gaming guard: the honest rolling slope may never EXCEED
-   the qualifying-only figure (retiring an inflated denominator can only lower/hold it) — `honestNotInflated`.**
+   **Two mechanical halt inputs (DIR-038-A + B) — a checkpoint MUST compute and report both:**
+   - **VT slope** = the ROLLING per-milestone slope over the last K≥5 milestones INCLUDING zero-Δv ones,
+     from `scripts/rolling-slope-check.mjs` (`windowSlope`/`haltVerdict`) — that module IS the single
+     definition (DIR-038-A). The old "qualifying-only" denominator (mean of ONLY the nonzero
+     capability-growth milestones) is RETIRED: it froze at 3.80 and structurally could not see a stall —
+     16 consecutive zero-VT milestones (M34–M49) never tripped `< +1.0`, while the honest rolling slope
+     over that region is ≈0. Report the rolling number (e.g. m29–m35 ≈ 0.64 per 5), never the 3.80
+     artifact. Anti-gaming guard `honestNotInflated` FAILS-LOUD (exit 1) if the rolling slope exceeds
+     the qualifying-only figure — a re-based ruler that scores the loop BETTER is presumptively gaming.
+   - **governance:product ratio** = governance-lines : product-lines over the checkpoint window, from
+     `scripts/governance-product-ratio-check.mjs` (`sumByClass`/`haltInput`; PRODUCT = `packages/`,
+     `plugin/`; GOVERNANCE = the method/eval layer). A breach of the declared threshold (default 5:1) IS
+     "degradation across tracks" and trips `HALT-RECOMMENDED` — a loop building its OWN instruments while
+     the product freezes (recorded restart window ≈8:1) is a real degradation, not a value type to
+     narrate away. This wires the previously-prose "degradation" halt condition to a runnable check (DIR-038-B).
 
 ## Human async control surface (never blocks the loop — §4.7)
 - **Steer:** `/quay-directive` (creates a `label:directive` task — task-canonical, DIR-028) or a `backlog.md` edit, any
