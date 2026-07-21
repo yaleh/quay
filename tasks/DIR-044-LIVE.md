@@ -10,7 +10,9 @@ labels:
   - milestone-candidate
   - human-steered
 parent: DIR-044
-children: []
+children:
+  - exp5-M-LIVE-A-native-testcov
+  - exp5-M-LIVE-B-core-testcov
 extra:
   dirStatus: resolved
   schema: v1

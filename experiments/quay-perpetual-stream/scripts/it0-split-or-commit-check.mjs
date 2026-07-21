@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// it0-split-or-commit-check.mjs — single-source enforcement for the two split-or-commit rules
+// it0-split-or-commit-check.mjs — single-source enforcement for the split-or-commit rules
 // from DIR-026 that were previously prose-only in OUTER-LOOP.md:
 //
 //   1. PARENT-DONE-IFF-CHILDREN: A milestone task marked `done` with `role:compound` (or
@@ -11,6 +11,11 @@
 //      children array is a violation — it should have been split into children before being
 //      SELECTed for a milestone. Selecting a compound task without splitting first is
 //      prohibited by DIR-026.
+//
+//   3. CHILD-LINK-SYMMETRY: A task declaring `parent: Y` MUST be listed in Y's `children` (and Y
+//      must exist). A one-way link makes CHECK 1 exclude the orphaned child, so a parent/program
+//      can be judged `done` while a real phase is still open — the exact modeling hole that made
+//      exp5-M-TS-MIGRATION (children: [P0-only]) read as complete while P1-P4 were unlisted.
 //
 // D3·R7 enforcement pointer: OUTER-LOOP.md's prose description of parent-done-iff-children
 // at Step 1 / SPLIT-OR-COMMIT references THIS script as the mechanical enforcement.
@@ -150,13 +155,41 @@ export function runChecks(taskMap) {
     }
   }
 
+  // CHECK 3: CHILD-LINK-SYMMETRY
+  // For every task that declares `parent: Y`, Y must EXIST and must list this task in its `children`.
+  // A one-way link (child points up, but the parent omits it from `children`) makes CHECK 1's
+  // parent-done-iff-children computation silently EXCLUDE this child — so the parent can be marked
+  // `done` while this orphaned phase is still open. This is the "program judged prematurely done"
+  // hole: exp5-M-TS-MIGRATION's children listed only P0 (done) while P1 declared the parent but was
+  // omitted, so the whole TS program read as complete before P1-P4 ran. A hard graph invariant over
+  // the stored links — NOT a parse of proposal prose (which drifts, ADR-004).
+  for (const [id, t] of taskMap) {
+    const parentId = t.parent;
+    if (!parentId || parentId === "null") continue; // no parent declared
+    const parent = taskMap.get(parentId);
+    if (!parent) {
+      failures.push(
+        `CHILD-LINK-SYMMETRY: task "${id}" declares parent "${parentId}" but no such task exists — dangling parent link (DIR-026)`
+      );
+      continue;
+    }
+    const siblings = parent.children || [];
+    if (!siblings.includes(id)) {
+      failures.push(
+        `CHILD-LINK-SYMMETRY: task "${id}" declares parent "${parentId}" but "${parentId}".children omits it — a one-way link lets the parent be marked done while this child is excluded from parent-done-iff-children, judging the program prematurely complete (DIR-026)`
+      );
+    }
+  }
+
   return { failures };
 }
 
-// ── selftest — runs three fixture cases internally using temp task files. ─────────────────────────
+// ── selftest — runs fixture cases internally using temp task files. ───────────────────────────────
 // RED case 1: parent `done` with a child that is `ready` → FAIL
 // RED case 2: compound task with `todo` status and NO children → FAIL
-// GREEN case: parent `done` with all children `done` + compound `todo` with children → PASS
+// RED case 3: child declares `parent` but the parent's `children` omits it (link asymmetry) → FAIL
+// RED case 4: child declares a `parent` that does not exist (dangling link) → FAIL
+// GREEN case: parent `done` with all children `done` + compound `todo` with children + symmetric links → PASS
 export function selftest() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "it0-split-or-commit-"));
   let allPassed = true;
@@ -166,7 +199,8 @@ export function selftest() {
       fields.children && fields.children.length > 0
         ? `children:\n${fields.children.map((c) => `  - ${c}`).join("\n")}`
         : "children: []";
-    const content = `---\nid: ${id}\nstatus: ${fields.status}\nrole: ${fields.role || "primitive"}\n${childrenBlock}\n---\n`;
+    const parentLine = `parent: ${fields.parent || "null"}`;
+    const content = `---\nid: ${id}\nstatus: ${fields.status}\nrole: ${fields.role || "primitive"}\n${parentLine}\n${childrenBlock}\n---\n`;
     fs.writeFileSync(path.join(dir, `${id}.md`), content);
   }
 
@@ -204,20 +238,33 @@ export function selftest() {
     "compound-unsplit": { status: "todo", role: "compound", children: [] },
   }, true /* expect FAIL */);
 
-  // GREEN case: parent `done` with all children `done` + compound `todo` with children
+  // RED case 3: child declares `parent` but the parent's `children` omits it (link asymmetry) —
+  // the exact TS-MIGRATION bug: parent looks done-able while an orphaned phase is still open.
+  runFixture("red-child-link-asymmetry", {
+    "prog-parent": { status: "done", role: "compound", children: ["phase-0"] },
+    "phase-0": { status: "done", role: "primitive", parent: "prog-parent", children: [] },
+    "phase-1": { status: "todo", role: "primitive", parent: "prog-parent", children: [] }, // omitted from parent.children
+  }, true /* expect FAIL */);
+
+  // RED case 4: child declares a `parent` that does not exist (dangling link)
+  runFixture("red-dangling-parent", {
+    "orphan": { status: "todo", role: "primitive", parent: "ghost-parent", children: [] },
+  }, true /* expect FAIL */);
+
+  // GREEN case: parent `done` with all children `done` + compound `todo` with children + SYMMETRIC links
   runFixture("green-compliant", {
     "parent-done": { status: "done", role: "compound", children: ["child-a", "child-b"] },
-    "child-a": { status: "done", role: "primitive", children: [] },
-    "child-b": { status: "done", role: "primitive", children: [] },
+    "child-a": { status: "done", role: "primitive", parent: "parent-done", children: [] },
+    "child-b": { status: "done", role: "primitive", parent: "parent-done", children: [] },
     "compound-with-children": { status: "todo", role: "compound", children: ["sub-x"] },
-    "sub-x": { status: "todo", role: "primitive", children: [] },
+    "sub-x": { status: "todo", role: "primitive", parent: "compound-with-children", children: [] },
   }, false /* expect PASS */);
 
   // Clean up
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
   if (allPassed) {
-    console.log("SELFTEST: all 3 fixture cases PASS.");
+    console.log("SELFTEST: all 5 fixture cases PASS.");
     return true;
   } else {
     console.error("SELFTEST: one or more fixture cases FAILED.");
@@ -254,7 +301,7 @@ if (isDirect) {
     for (const f of failures) console.log(`  - ${f}`);
     process.exit(1);
   } else {
-    console.log(`PASS: ${taskMap.size} task(s) checked — no split-or-commit violations (parent-done-iff-children + SELECT-split rules satisfied).`);
+    console.log(`PASS: ${taskMap.size} task(s) checked — no split-or-commit violations (parent-done-iff-children + SELECT-split + child-link-symmetry rules satisfied).`);
     process.exit(0);
   }
 }
