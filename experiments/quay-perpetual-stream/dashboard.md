@@ -619,3 +619,14 @@ m85 · exp5-M-TS-MIGRATION-P3-B-3 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND 
 **Charter:** `experiments/quay-perpetual-stream/charters/M86-dir056-probe-spec.md`
 
 m86 · DIR-056 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=5be0d06 · → milestones/M86/
+
+## SELECT M87 — DIR-050
+
+**Selected:** DIR-050 — consolidate per-workspace `.quay/` config surface: fold `config.yml` + `gates.yml` + `loop.yml` into ONE `.quay/config.yml` with `providers`/`gates`/`loop` sections; retire `coexist` dead param.
+
+**Rationale:** Exploit pick. M86 completed the probe-spec formalization; M87 continues method-infra cleanup. DIR-050 removes cross-file config indirection (loop.yml.board references config.yml.providers; loop.yml.gates references gates.yml), gives each workspace a single source of truth, and retires `coexist` (speculative generality with no live scenario — YAGNI/ADR-004). Mechanical, LOOP-EXECUTABLE, backward-compatible reader preserves legacy 3-file workspaces.
+
+**Deferred:** DIR-052 (real self-validation routine fire), DIR-053 (arch-analysis routine fire), DIR-055 (meta-cc mining routine). P4 (TS migration method-infra, 5235L — split-or-commit needed).
+
+**Task:** [[DIR-050]] (`tasks/DIR-050.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M87-dir050-config-consolidation.md`
