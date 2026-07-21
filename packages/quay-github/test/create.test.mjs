@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createGithubClient, CREATE_SENTINEL_ID } from "../src/github-client.js";
+import { createGithubClient, CREATE_SENTINEL_ID } from "../src/github-client.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

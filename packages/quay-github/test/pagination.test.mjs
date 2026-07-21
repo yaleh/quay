@@ -9,7 +9,7 @@
 // not merely inspected by reading code.
 //
 // Run: node test/pagination.test.mjs
-import { pageIssues } from "../src/github-client.js";
+import { pageIssues } from "../src/github-client.ts";
 
 let failures = 0;
 function assert(cond, msg) {

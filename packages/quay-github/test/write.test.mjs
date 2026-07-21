@@ -6,7 +6,7 @@
 // automated, repeatable test file).
 //
 // Run: node test/write.test.mjs
-import { computeStatusWrite } from "../src/github-client.js";
+import { computeStatusWrite } from "../src/github-client.ts";
 
 let failures = 0;
 function assert(cond, msg) {
