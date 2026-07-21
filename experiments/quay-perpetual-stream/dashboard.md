@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 65** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 66** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below). -->
@@ -6147,3 +6147,30 @@ info: prunable merged iteration branches=0; registered iteration worktrees=0
 **Deferred this pass:**
 - exp5-M-CRYST-INV: governance-integrity but forward-looking (meta-gate on FUTURE clause-additions); C1 closes a PRESENT boundary enforcement gap first.
 - DIR-038, DIR-044: D3 driver-self-rewrite class; still deferred pending dedicated scoped dispatch.
+
+---
+## M66 ABSORB — exp5-M-CRYST-C1
+
+**Milestone:** M66 · **Task:** exp5-M-CRYST-C1 · **Status:** done  
+**Commits:** 0b509a4 (BUILD), a3b68d5 (audit fix), 83bfe07 (MERGE)  
+**Type:** governance-integrity · **VT Δ:** 0 (methodology gate, no product surface change)
+
+### What landed
+- `experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.mjs` — single-source enforcement of DIR-026's two prose-only rules:
+  1. **parent-done-iff-children**: A `done` compound task must have all children `done`
+  2. **SELECT-split**: A compound `todo`/`ready` task with empty children array is a violation
+- Uses flat direct-child lookup (not recursive walk) — distinct from `store.js#childrenStatus`, no duplication
+- 22 tests, 22 pass; selftest passes; RED+GREEN fixtures pin both violation types
+- `split-or-commit` named gate registered in `.quay/gates.yml` — `quay gate --gate split-or-commit` PASS on 289 real tasks
+- `OUTER-LOOP.md` gains D3·R7 enforcement pointer comment
+
+### Audit
+Adversarial audit found one blocking issue: initial `effectiveStatus()` was a recursive childrenStatus-style re-implementation (AC2 "no third copy" violated). Fixed by outer loop: replaced with flat algorithm before ABSORB. Post-fix audit: NO REFUTATION FOUND.
+
+### DoD gate
+- `quay gate exp5-M-CRYST-C1 --gate dod` (worktree) → PASS
+- `quay gate exp5-M-CRYST-C1 --gate split-or-commit` (master) → PASS
+
+| ID | Title | Type | VT Δ |
+|---|---|---|---|
+| exp5-M-CRYST-C1 | C1 crystallize split-or-commit gates | governance-integrity | 0 |
