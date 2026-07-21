@@ -127,6 +127,30 @@ test("GREEN: minimal valid params (board + gates as array)", () => {
   assert.equal(params.concurrency, 1);
 });
 
+test("GREEN: routines defaults to [] (no routine track); a valid routine parses (DIR-051)", () => {
+  const ws0 = tmpWs("routines-default");
+  writeLoopYml(ws0, "board: native\ngates: [vitest]");
+  assert.deepEqual(readLoopParams(ws0).routines, []);
+  const ws = tmpWs("routines-valid");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\nroutines:\n  - name: self-validation\n    trigger: every(5)\n    dispatch: adversarial-explore");
+  const r = readLoopParams(ws).routines;
+  assert.equal(r.length, 1);
+  assert.equal(r[0].name, "self-validation");
+  assert.equal(r[0].trigger, "every(5)");
+});
+
+test("RED: a malformed routine throws FAIL-CLOSED (DIR-051)", () => {
+  const ws1 = tmpWs("routine-bad-trigger");
+  writeLoopYml(ws1, "board: native\ngates: [vitest]\nroutines:\n  - name: x\n    trigger: weekly\n    dispatch: y");
+  assert.throws(() => readLoopParams(ws1), /FAIL-CLOSED.*trigger/);
+  const ws2 = tmpWs("routine-no-name");
+  writeLoopYml(ws2, "board: native\ngates: [vitest]\nroutines:\n  - trigger: every(5)\n    dispatch: y");
+  assert.throws(() => readLoopParams(ws2), /FAIL-CLOSED.*name/);
+  const ws3 = tmpWs("routine-not-array");
+  writeLoopYml(ws3, "board: native\ngates: [vitest]\nroutines: nope");
+  assert.throws(() => readLoopParams(ws3), /FAIL-CLOSED.*array/);
+});
+
 test("GREEN: concurrency N opts into cross-milestone batching (DIR-049)", () => {
   const ws = tmpWs("concurrency-n");
   writeLoopYml(ws, "board: native\ngates: [vitest]\nconcurrency: 3");

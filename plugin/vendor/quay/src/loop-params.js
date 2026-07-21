@@ -130,6 +130,31 @@ export function readLoopParams(workspaceRoot) {
     );
   }
 
+  // 12. Optional: routines — a standing routine track (DIR-051). Array of { name, trigger, dispatch }
+  //     fired on a cadence/condition independent of the ready-queue SELECT; DEFAULT [] (no routines =
+  //     today's behavior). Each entry validated fail-closed: name (non-empty string), trigger
+  //     ("every(N)" with N>=1 | "on(<word>)"), dispatch (non-empty string). The scheduler logic lives
+  //     in routine-scheduler.mjs (parseTrigger/isDue); this only validates shape.
+  const routines = parsed?.routines ?? [];
+  if (!Array.isArray(routines)) {
+    throw new Error(`FAIL-CLOSED: .quay/loop.yml field 'routines' must be an array (got ${typeof routines})`);
+  }
+  for (const [i, r] of routines.entries()) {
+    if (!r || typeof r.name !== "string" || !r.name.trim()) {
+      throw new Error(`FAIL-CLOSED: .quay/loop.yml routines[${i}] needs a non-empty string 'name'`);
+    }
+    if (typeof r.trigger !== "string" || !/^(every\(\s*\d+\s*\)|on\(\s*[\w-]+\s*\))$/.test(r.trigger.trim())) {
+      throw new Error(`FAIL-CLOSED: .quay/loop.yml routines[${i}] ('${r.name}') trigger "${r.trigger}" is invalid — must be "every(N)" (N>=1) or "on(<event>)"`);
+    }
+    const m = r.trigger.trim().match(/^every\(\s*(\d+)\s*\)$/);
+    if (m && Number(m[1]) < 1) {
+      throw new Error(`FAIL-CLOSED: .quay/loop.yml routines[${i}] ('${r.name}') trigger "every(${m[1]})" invalid — N must be >= 1`);
+    }
+    if (typeof r.dispatch !== "string" || !r.dispatch.trim()) {
+      throw new Error(`FAIL-CLOSED: .quay/loop.yml routines[${i}] ('${r.name}') needs a non-empty string 'dispatch' action`);
+    }
+  }
+
   return {
     board: parsed.board.trim(),
     gates,
@@ -139,5 +164,6 @@ export function readLoopParams(workspaceRoot) {
     execution,
     audit,
     concurrency,
+    routines,
   };
 }

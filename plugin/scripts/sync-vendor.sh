@@ -65,7 +65,7 @@ chmod +x "${PLUGIN_DIR}/scripts/task-schema-check.sh"
 # with the plugin (a consumer workspace like archguard has no experiments/ dir). Self-contained (they
 # only import each other, relative). Canonical source stays experiments/; these are vendored copies.
 echo "[sync-vendor] mirroring the DIR-044 concurrency scripts -> plugin/scripts/ ..."
-for s in touches-orthogonality-check concurrent-batch-scheduler serial-fanin-absorb anti-drift-touches-check; do
+for s in touches-orthogonality-check concurrent-batch-scheduler serial-fanin-absorb anti-drift-touches-check routine-scheduler; do
   cp "${REPO_ROOT}/experiments/quay-perpetual-stream/scripts/${s}.mjs" "${PLUGIN_DIR}/scripts/${s}.mjs"
 done
 

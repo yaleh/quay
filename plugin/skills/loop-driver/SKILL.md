@@ -41,6 +41,7 @@ coexist:     null            # pause-hook (e.g. "pause(backlog/.loop-stop)") or 
 execution:   dispatched      # dispatched (DEFAULT) | inline — build isolation
 audit:       adversarial     # adversarial (DEFAULT) | none — independent fresh-context verify
 concurrency: 1               # 1 (DEFAULT) = serial | N = max touches-disjoint batch width (DIR-049)
+routines: []                 # [] (DEFAULT) = no routine track | [{name,trigger,dispatch}] (DIR-051)
 ```
 
 The skill reads this file first via `readLoopParams` (`src/loop-params.js`). If absent or malformed, it refuses to run (FAIL-CLOSED). No runner name, project name, or workspace path is hardcoded in this skill.
@@ -52,6 +53,8 @@ The skill reads this file first via `readLoopParams` (`src/loop-params.js`). If 
 2. **Dispatch N (concurrent):** for each batched task run steps 3→6b — `isolate` (own worktree) + `build` (dispatched subagent) + `gate` + `6b audit` (fresh-context) — CONCURRENTLY. The driver stays a lean orchestrator and polls all N.
 3. **Fan-in (serial):** collect the survivors (gate PASS **and** audit NO-REFUTATION). Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/anti-drift-touches-check.mjs" <ran-batch-manifest.json>` on the REAL diffs — a mis-declared overlap HARD-FAILs the batch (NON-WAIVABLE, do not merge). Then `node "${CLAUDE_PLUGIN_ROOT}/scripts/serial-fanin-absorb.mjs"` for the deterministic merge plan; merge each survivor one-at-a-time and mark it `done`. A build that FAILED gate or was REFUTED → `needs-human`, EXCLUDED from fan-in (partial-batch: disjoint survivors still land).
 Guardrails (all from DIR-044): conservative-default-serialize, learning-never-batched, anti-drift HARD, native-only (no manda).
+
+**Routines (`routines: [...]`, DIR-051) — a standing track parallel to SELECT.** Default `[]` = no routines (today's behavior). A routine is `{name, trigger, dispatch}`: `trigger` is `every(N)` (fire when the iteration counter is a positive multiple of N) or `on(<event>)` (fire on `checkpoint`/`idle`/…). Each iterate, AFTER SELECT (or when idle), evaluate which routines are DUE with `node "${CLAUDE_PLUGIN_ROOT}/scripts/routine-scheduler.mjs" --iteration <n> [--event <e>] <routines.json>` (exit 0 + lists the due ones; exit 3 = none due). For each DUE routine: DISPATCH a fresh-context background agent (the `execution: dispatched` infra) to perform its `dispatch` action (e.g. an adversarial self-probe, an archguard/proxy architecture read). The agent's findings are **FILED as evidence-backed tasks** (`## Finding`-bearing) onto the board behind a **quality/dedup/rate gate** (real + actionable + not-already-filed + ≤K per window). **FILE-ONLY invariant (NON-WAIVABLE):** a routine NEVER executes its own findings — the SELECT track drives the filed tasks under the normal gate + audit. This preserves the approval boundary: routines DISCOVER, SELECT+audit DECIDE. Routine scheduling never dispatches manda.
 
 ## Steps
 
