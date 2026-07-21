@@ -1,4 +1,3 @@
-// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay serve — starts Web + provider host (proposal §9). v0 walking
 // skeleton (G5): a crude but real list/detail HTTP view, no framework, no
 // styling beyond what's needed to prove the loop. The Core renders
@@ -11,20 +10,20 @@
 // inline markdown-to-HTML renderer replacing the bare <pre> body dump on
 // the detail page. No external dependency.
 
-import http from "node:http";
+import http, { type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import path from "node:path";
 import { loadConfig, activeProvider } from "./config.ts";
-import { connectProvider } from "./provider-client.ts";
+import { connectProvider, type ProviderClient } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
 
-function html(strings, ...values) {
-  return strings.reduce((acc, s, i) => acc + s + (values[i] ?? ""), "");
+function html(strings: TemplateStringsArray, ...values: unknown[]): string {
+  return strings.reduce((acc: string, s: string, i: number) => acc + s + (values[i] ?? ""), "");
 }
 
-function escapeHtml(s) {
+function escapeHtml(s: unknown): string {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  }[c]));
+  }[c] as string));
 }
 
 // QX-028 (experiment 4, iteration 7): strip structural heading lines from
@@ -37,7 +36,7 @@ function escapeHtml(s) {
 // so that `# comment` lines inside ``` fences are NOT stripped. Only lines
 // outside a fence that match /^#+\s/ are heading boilerplate; lines inside
 // fences are code content that should remain searchable.
-function stripHeadings(text) {
+function stripHeadings(text: string | undefined | null): string {
   let inFence = false;
   return (text || "").split("\n").filter((line) => {
     if (/^```/.test(line)) { inFence = !inFence; return true; }
@@ -48,8 +47,8 @@ function stripHeadings(text) {
 
 // QW-001: minimal, consistent CSS system — applied via <link> in every page's
 // <head>. No external file: inlined as a <style> block so the single-file
-// serve.js remains self-contained (G5: no framework, no build step).
-function pageStyles() {
+// serve.ts remains self-contained (G5: no framework, no build step).
+function pageStyles(): string {
   return `<style>
 *, *::before, *::after { box-sizing: border-box; }
 body {
@@ -218,17 +217,17 @@ hr { border: none; border-top: 1px solid #dee2e6; margin: 1rem 0; }
 // bold (**...**), inline code (`...`), unordered lists (- item), ordered
 // lists (1. item), horizontal rules (---/***), and paragraph breaks.
 // Uses a line-by-line state machine; no external dependency.
-function renderMarkdown(text) {
+function renderMarkdown(text: string | undefined | null): string {
   const lines = String(text ?? "").split(/\r?\n/);
-  const out = [];
+  const out: string[] = [];
   let inFence = false;
   let fenceLang = "";
-  let fenceBuf = [];
-  let inList = null; // "ul" | "ol" | null
-  let listBuf = [];
-  let paraBuf = [];
+  let fenceBuf: string[] = [];
+  let inList: "ul" | "ol" | null = null;
+  let listBuf: string[] = [];
+  let paraBuf: string[] = [];
 
-  function flushList() {
+  function flushList(): void {
     if (!inList) return;
     const tag = inList;
     out.push(`<${tag}>`);
@@ -254,7 +253,7 @@ function renderMarkdown(text) {
     inList = null;
   }
 
-  function flushPara() {
+  function flushPara(): void {
     if (paraBuf.length === 0) return;
     const text2 = paraBuf.join(" ");
     if (text2.trim()) out.push(`<p>${inlineMarkdown(text2)}</p>`);
@@ -342,7 +341,7 @@ function renderMarkdown(text) {
 
 // Inline markdown: code spans, bold, italic — with correct HTML escaping.
 // Process segments: alternate between code spans and the rest.
-function inlineMarkdown(text) {
+function inlineMarkdown(text: string): string {
   // Process segments: alternate between code spans and the rest.
   const parts = text.split(/(`[^`]*`)/);
   return parts.map((part, i) => {
@@ -362,7 +361,7 @@ function inlineMarkdown(text) {
 // QX-018 (experiment 4, iteration 4): relative-time helper for updatedAt display.
 // Given a millisecond timestamp, returns a human-readable "X ago" string.
 // Used on both the list page (updated column) and detail page (last updated meta).
-function relativeTime(ts) {
+function relativeTime(ts: number): string {
   const elapsed = Date.now() - ts;
   if (elapsed < 0) return "just now";
   const seconds = Math.floor(elapsed / 1000);
@@ -395,7 +394,7 @@ function relativeTime(ts) {
 // "/", "\", or a C0 control character (which covers both confirmed bypass
 // shapes and the general class they belong to), in addition to the
 // original external-scheme and protocol-relative checks.
-function isSafeRelativeRedirect(v) {
+function isSafeRelativeRedirect(v: string | null): boolean {
   if (!v || typeof v !== "string") return false;
   if (!v.startsWith("/")) return false;
   const second = v.charCodeAt(1);
@@ -405,9 +404,13 @@ function isSafeRelativeRedirect(v) {
   return true;
 }
 
-export async function startServer({ port = 4173 } = {}) {
+export interface StartServerOptions {
+  port?: number;
+}
+
+export async function startServer({ port = 4173 }: StartServerOptions = {}): Promise<Server & { client: ProviderClient }> {
   const cfg = loadConfig();
-  const provider = activeProvider(cfg);
+  const provider = activeProvider(cfg, undefined);
   const providerDir = path.resolve(cfg.workspaceRoot, provider.path ?? ".");
   const [command, ...args] = provider.mcp_entry;
 
@@ -430,7 +433,7 @@ export async function startServer({ port = 4173 } = {}) {
   // QX-013 (iteration 3): helper to append a query param to an existing URL path
   // (which may already have params). Used to add ?error= and ?success= to redirect
   // targets without clobbering existing filter params already in the target URL.
-  function addParam(urlPath, key, value) {
+  function addParam(urlPath: string, key: string, value: string): string {
     const u = new URL(urlPath, "http://x");
     u.searchParams.set(key, value);
     return u.pathname + "?" + u.searchParams.toString();
@@ -448,7 +451,7 @@ export async function startServer({ port = 4173 } = {}) {
   // just the taskList() case) results in a clean 500 response instead of a
   // hung connection or an uncaught rejection that could take the whole
   // server down.
-  const server = http.createServer(async (req, res) => {
+  const server = http.createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // M26-adversarial-eval finding ADV-002/M26-F2 (both iterations
     // independently found this): this handler previously had no try/catch
     // anywhere -- a thrown/rejected error from any route (e.g. the Provider
@@ -467,7 +470,7 @@ export async function startServer({ port = 4173 } = {}) {
     try {
       await handleRequest(req, res);
     } catch (err) {
-      console.error(`[quay serve] request handler error (${req.method} ${req.url}):`, err.stack || String(err));
+      console.error(`[quay serve] request handler error (${req.method} ${req.url}):`, (err as Error).stack || String(err));
       if (!res.headersSent) {
         res.writeHead(500, { "Content-Type": "text/plain" });
         res.end("internal server error");
@@ -477,8 +480,8 @@ export async function startServer({ port = 4173 } = {}) {
     }
   });
 
-  async function handleRequest(req, res) {
-    const url = new URL(req.url, `http://${req.headers.host}`);
+  async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const url = new URL(req.url as string, `http://${req.headers.host}`);
 
     if (url.pathname === "/") {
       const allTasks = await client.taskList({});
@@ -539,8 +542,8 @@ export async function startServer({ port = 4173 } = {}) {
         );
       } else if (sortKey === "updated") {
         tasks = filtered.slice().sort((a, b) => {
-          const ta = typeof a.updatedAt === "number" ? a.updatedAt : -Infinity;
-          const tb = typeof b.updatedAt === "number" ? b.updatedAt : -Infinity;
+          const ta = typeof (a as unknown as Record<string, unknown>).updatedAt === "number" ? (a as unknown as Record<string, unknown>).updatedAt as number : -Infinity;
+          const tb = typeof (b as unknown as Record<string, unknown>).updatedAt === "number" ? (b as unknown as Record<string, unknown>).updatedAt as number : -Infinity;
           return tb - ta; // descending: most-recently-modified first
         });
       } else {
@@ -583,13 +586,13 @@ export async function startServer({ port = 4173 } = {}) {
       const rows = pageTasks
         .map(
           (t) => {
-            const applicableButtons = (manifest.action_buttons ?? []).filter(
+            const applicableButtons = ((manifest.action_buttons ?? []) as Array<{ id: string; label: string; whenStatus?: string[] }>).filter(
               (b) => !b.whenStatus || b.whenStatus.includes(t.status)
             );
             // QX-014 (iteration 3): action buttons include title= tooltip.
             // QX-019 (iteration 4): backport target-status tooltip to list page (UQ-018).
             // Compute next status per-task using the same map as the detail page.
-            const listNextStatusMap = { todo: "ready", ready: "done" };
+            const listNextStatusMap: Record<string, string> = { todo: "ready", ready: "done" };
             const listNextStatus = listNextStatusMap[t.status];
             const actionCell = applicableButtons.length > 0
               ? applicableButtons.map((b) => {
@@ -602,8 +605,9 @@ export async function startServer({ port = 4173 } = {}) {
                 }).join("")
               : "";
             // QX-018 (iteration 4): show updatedAt as relative time in list row.
-            const updatedCell = typeof t.updatedAt === "number"
-              ? escapeHtml(relativeTime(t.updatedAt))
+            const updatedAt = (t as unknown as Record<string, unknown>).updatedAt;
+            const updatedCell = typeof updatedAt === "number"
+              ? escapeHtml(relativeTime(updatedAt))
               : "—";
             // QX-011 (iteration 3): task title link includes ?from= so the detail page
             // back link can return to the current filtered list view (UQ-009).
@@ -635,11 +639,11 @@ export async function startServer({ port = 4173 } = {}) {
       // (already resolved from ?pageSize= or the default above) so every
       // EXISTING buildHref(...) call site needs no change; the page-size
       // selector links below pass an explicit override as a 7th argument.
-      function buildHref(status, sort, label, pg, prefix, q, pageSizeOverride = PAGE_SIZE) {
+      function buildHref(status: string | null, sort: string | null, label: string | string[] | null, pg: number | null, prefix: string | null, q: string | null, pageSizeOverride: number = PAGE_SIZE): string {
         const params = new URLSearchParams();
         if (prefix) params.set("prefix", prefix);
         if (status) params.set("status", status);
-        const labels = [].concat(label).filter(Boolean);
+        const labels = ([] as string[]).concat(label as string[]).filter(Boolean);
         for (const l of labels) params.append("label", l);
         if (sort) params.set("sort", sort);
         if (q) params.set("q", q);
@@ -718,7 +722,7 @@ export async function startServer({ port = 4173 } = {}) {
             (t.title + " " + stripHeadings(t.body)).toLowerCase().includes(qFilter.toLowerCase())
           )
         : filteredByStatus;
-      const labelCounts = new Map();
+      const labelCounts = new Map<string, number>();
       for (const t of filteredByStatusAndSearch) {
         for (const l of (Array.isArray(t.labels) ? t.labels : [])) {
           labelCounts.set(l, (labelCounts.get(l) || 0) + 1);
@@ -785,7 +789,7 @@ export async function startServer({ port = 4173 } = {}) {
         </p>` : html`<p class="meta">Page 1 of ${totalPages} (${totalTasks} tasks)</p>`;
       // CB-006/CB-022 (M08-merge-recover): page-size selector — 10/20/50/100,
       // mirroring the CLI's --page-size flag and the MCP task_list pageSize
-      // param (mcp-server.js). Changing page size always resets to page 1
+      // param (mcp-server.ts). Changing page size always resets to page 1
       // (pg=null passed to buildHref) since the prior page number may no
       // longer be meaningful at a different page size.
       const pageSizeOptions = [10, 20, 50, 100];
@@ -869,7 +873,7 @@ export async function startServer({ port = 4173 } = {}) {
       const rows = adrs.map((a) => html`<tr>
         <td><a href="/adr/${encodeURIComponent(a.id)}">${escapeHtml(a.id)}</a></td>
         <td>${escapeHtml(a.status)}</td>
-        <td>${escapeHtml(a.date || "")}</td>
+        <td>${escapeHtml((a as unknown as Record<string, unknown>).date as string || "")}</td>
         <td>${escapeHtml(a.title || "")}</td>
       </tr>`).join("\n");
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -895,18 +899,19 @@ export async function startServer({ port = 4173 } = {}) {
         res.end("not found");
         return;
       }
-      const link = (x) => html`<a href="/adr/${encodeURIComponent(x)}">${escapeHtml(x)}</a>`;
-      const supersedesMeta = (a.supersedes && a.supersedes.length)
-        ? html`<p class="meta">supersedes: ${a.supersedes.map(link).join(" · ")}</p>` : "";
-      const supersededByMeta = (a.supersededBy && a.supersededBy.length)
-        ? html`<p class="meta">superseded by: ${a.supersededBy.map(link).join(" · ")}</p>` : "";
+      const adrExt = a as unknown as Record<string, unknown>;
+      const link = (x: string) => html`<a href="/adr/${encodeURIComponent(x)}">${escapeHtml(x)}</a>`;
+      const supersedesMeta = (adrExt.supersedes && (adrExt.supersedes as string[]).length)
+        ? html`<p class="meta">supersedes: ${(adrExt.supersedes as string[]).map(link).join(" · ")}</p>` : "";
+      const supersededByMeta = (adrExt.supersededBy && (adrExt.supersededBy as string[]).length)
+        ? html`<p class="meta">superseded by: ${(adrExt.supersededBy as string[]).map(link).join(" · ")}</p>` : "";
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html`<!doctype html>
         <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(a.id)}: ${escapeHtml(a.title)}">${pageStyles()}<title>${escapeHtml(a.id)}</title></head>
         <body><main>
           <p class="meta"><a href="/adr">← ADRs</a></p>
           <h1>${escapeHtml(a.id)}: ${escapeHtml(a.title)}</h1>
-          <p class="meta">status: <strong>${escapeHtml(a.status)}</strong>${a.date ? ` · ${escapeHtml(a.date)}` : ""}</p>
+          <p class="meta">status: <strong>${escapeHtml(a.status)}</strong>${adrExt.date ? ` · ${escapeHtml(adrExt.date as string)}` : ""}</p>
           ${supersedesMeta}${supersededByMeta}
           <article>${renderMarkdown(a.body || "")}</article>
         </main></body></html>`);
@@ -927,13 +932,13 @@ export async function startServer({ port = 4173 } = {}) {
       // not // or \ or a control-char-prefixed variant -- see
       // isSafeRelativeRedirect()'s own doc comment, ADV-003).
       const fromParam = url.searchParams.get("from");
-      const backHref = isSafeRelativeRedirect(fromParam) ? fromParam : "/";
+      const backHref = isSafeRelativeRedirect(fromParam) ? fromParam as string : "/";
       // QX-013 (iteration 3): read ?error= and ?success= for post-action feedback.
       const detailErrorParam = url.searchParams.get("error");
       const detailSuccessParam = url.searchParams.get("success");
       // QX-014 (iteration 3): compute target status for tooltip on detail page.
-      const nextStatusMap = { todo: "ready", ready: "done" };
-      const buttons = (manifest.action_buttons ?? [])
+      const nextStatusMap: Record<string, string> = { todo: "ready", ready: "done" };
+      const buttons = ((manifest.action_buttons ?? []) as Array<{ id: string; label: string; whenStatus?: string[] }>)
         .filter((b) => !b.whenStatus || b.whenStatus.includes(t.status))
         .map((b) => {
           const nextStatus = nextStatusMap[t.status];
@@ -957,6 +962,7 @@ export async function startServer({ port = 4173 } = {}) {
             html`<a href="/task/${escapeHtml(c)}">${escapeHtml(c)}</a>`
           ).join(" · ")}</p>`
         : "";
+      const tExt = t as unknown as Record<string, unknown>;
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(html`<!doctype html>
         <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(t.id)}: ${escapeHtml(t.title)}">${pageStyles()}<title>${escapeHtml(t.id)}</title></head>
@@ -967,7 +973,7 @@ export async function startServer({ port = 4173 } = {}) {
           ${detailErrorParam ? html`<div class="error-banner" role="alert"><strong>Error:</strong> ${escapeHtml(detailErrorParam)}</div>` : ""}
           ${detailSuccessParam ? html`<div class="success-banner" role="status"><strong>Done:</strong> ${escapeHtml(detailSuccessParam)}</div>` : ""}
           <p class="meta">role: ${escapeHtml(t.role)} · labels: ${escapeHtml((t.labels || []).join(", "))}${parentMeta}</p>
-          ${typeof t.updatedAt === "number" ? html`<p class="meta">last updated: ${escapeHtml(relativeTime(t.updatedAt))}</p>` : ""}
+          ${typeof tExt.updatedAt === "number" ? html`<p class="meta">last updated: ${escapeHtml(relativeTime(tExt.updatedAt as number))}</p>` : ""}
           ${childrenMeta}
           <div>${buttons}</div>
           ${t.status === "needs-human" && buttons.length > 0
@@ -1005,12 +1011,12 @@ export async function startServer({ port = 4173 } = {}) {
       // directly, via backHref, rendered straight into an href attribute) -- not a
       // confirmed live open-redirect on the POST route itself.
       const fromParam = url.searchParams.get("from");
-      const baseRedirect = isSafeRelativeRedirect(fromParam) ? fromParam : `/task/${t.id}`;
+      const baseRedirect = isSafeRelativeRedirect(fromParam) ? fromParam as string : `/task/${t.id}`;
       // QX-013 (experiment 4, iteration 3): gate-check BEFORE delivering the trigger.
       // If gate is blocked (ok: false), redirect back with ?error= instead of silently
       // delivering. Closes UQ-013 (silent gate-fail feedback). The gate check uses the
       // same client.taskCheck() the CLI/MCP 'quay task check' uses — no new API surface.
-      const gateResult = await client.taskCheck(decodedId);
+      const gateResult = await client.taskCheck(decodedId) as { ok: boolean; reason?: string };
       if (!gateResult.ok) {
         const errorMsg = gateResult.reason
           ? `Gate check failed: ${gateResult.reason}`
@@ -1024,30 +1030,30 @@ export async function startServer({ port = 4173 } = {}) {
       const payloadObj = composePayload({ providerManifest: manifest, task: t, actionId: decodeURIComponent(actionId) });
       // QN-042 (DIR-009): QUAY_ACTION_MOCK_LOG opts into the deterministic
       // mock/file-log delivery mode instead of manda/print — see
-      // src/action.js#deliverTrigger's own doc comment.
+      // src/action.ts#deliverTrigger's own doc comment.
       const mockLogPath = process.env.QUAY_ACTION_MOCK_LOG || undefined;
       const result = await deliverTrigger({
         root: cfg.workspaceRoot,
         channel: `task-${t.id}`,
         payloadObj,
         mockLogPath,
-      });
+      }) as { delivered: string };
       // QX-013 (iteration 3): on success, redirect with ?success= for feedback.
       // G-S4-01 (M33-webui-trigger-honesty, M28 Scenario 4 finding): the banner
       // text MUST be conditioned on result.delivered, not a hardcoded
       // "advanced" claim. None of deliverTrigger()'s three modes perform a
-      // synchronous task-status write (confirmed by reading action.js's
+      // synchronous task-status write (confirmed by reading action.ts's
       // deliverTrigger() in full — "mock" appends a JSON-lines test record,
       // "manda" fires an async, fire-and-forget dispatch with no delivery-
       // confirmation callback, "print" only logs to stdout) — so no mode may
       // claim "advanced"/"done" wording. "print" and "manda" use "requested"-
       // flavored language per AC 2; "mock" gets its own honest, non-"advanced"
       // label since it is a test-only recording mode, not a production claim.
-      const successMsg = {
+      const successMsg = ({
         print: `Task ${t.id}: advance requested (no live dispatcher configured — run the printed command to complete it)`,
         manda: `Task ${t.id}: advance requested (dispatched to manda, delivery not confirmed)`,
         mock: `Task ${t.id}: advance recorded (mock delivery mode)`,
-      }[result.delivered] || `Task ${t.id}: advance requested`;
+      } as Record<string, string>)[result.delivered] || `Task ${t.id}: advance requested`;
       const successRedirect = addParam(baseRedirect, "success", successMsg);
       res.writeHead(302, { Location: successRedirect });
       res.end();
@@ -1074,6 +1080,6 @@ export async function startServer({ port = 4173 } = {}) {
   // instead of leaving it running after http.Server.close(). This is a pure
   // addition (a new property on the returned object) — no existing caller's
   // behavior changes, since nothing previously read `server.client`.
-  server.client = client;
-  return server;
+  (server as Server & { client: ProviderClient }).client = client;
+  return server as Server & { client: ProviderClient };
 }

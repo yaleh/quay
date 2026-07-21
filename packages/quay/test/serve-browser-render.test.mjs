@@ -47,7 +47,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
-import { startServer } from "../src/serve.js";
+import { startServer } from "../src/serve.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
