@@ -25,6 +25,11 @@
 // writes the regenerated markdown file. It does not call task_write.
 
 import fs from "node:fs";
+import { extractSection } from "./task-schema.mjs";
+
+// extractSection is imported from task-schema.mjs (the single canonical definition per ADR-004).
+// The canonical function returns null when the section is not found and untrimmed text when found.
+// Call sites use `|| fallback` (handles both null and undefined) and apply .trim() where needed.
 
 const args = process.argv.slice(2);
 const positional = args.filter((a) => !a.startsWith("--"));
@@ -55,26 +60,23 @@ try {
 }
 if (!Array.isArray(tasks)) tasks = [tasks];
 
-function extractSection(body, heading) {
-  if (!body) return undefined;
-  const re = new RegExp(`##\\s*${heading}\\s*\\n([\\s\\S]*?)(?=\\n##\\s|$)`, "i");
-  const m = re.exec(body);
-  return m ? m[1].trim() : undefined;
-}
-
 function isDoneOrStale(t) {
   return t.status === "done" || (t.labels || []).includes("stale");
 }
 
 function fmtRow(t) {
-  const valueType = extractSection(t.body, "Value type / cadence") || "(unspecified)";
-  const source = extractSection(t.body, "Source") || "(unspecified)";
-  const outcome =
-    extractSection(t.body, "Outcome \\(verbatim from backlog\\.md DONE column.*?\\)") ||
-    extractSection(t.body, "Outcome") ||
-    extractSection(t.body, "Status mirror") ||
-    "(no outcome/status-mirror text found)";
-  const notSelected = extractSection(t.body, "Not selected \\(.*?\\)");
+  // extractSection returns null when not found; null ?? fallback handles it. .trim() strips the
+  // leading newline the canonical (depth-aware) implementation includes before the section body.
+  const valueType = (extractSection(t.body, "Value type / cadence") ?? "").trim() || "(unspecified)";
+  const source = (extractSection(t.body, "Source") ?? "").trim() || "(unspecified)";
+  const outcome = (
+    (extractSection(t.body, "Outcome \\(verbatim from backlog\\.md DONE column.*?\\)") ??
+     extractSection(t.body, "Outcome") ??
+     extractSection(t.body, "Status mirror") ??
+     "(no outcome/status-mirror text found)")
+  ).trim();
+  const notSelectedRaw = extractSection(t.body, "Not selected \\(.*?\\)");
+  const notSelected = notSelectedRaw !== null ? notSelectedRaw.trim() : null;
   const milestoneLabel = (t.labels || []).find((l) => l.startsWith("milestone:"));
   let line = `| ${t.id} | ${t.title} | ${source} | ${valueType} | ${t.status}${milestoneLabel ? ` (${milestoneLabel})` : ""} | ${outcome.replace(/\n/g, " ")} |`;
   if (notSelected) {
