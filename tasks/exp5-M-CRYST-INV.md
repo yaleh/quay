@@ -4,7 +4,7 @@ title: "INV [invariant] enforcement-WITH-design: no new
   rule/DoD-clause/method-step accepted without its executable enforcement in the
   SAME milestone (generalizes DIR-026 item 5) — the #1 cross-experiment
   structural fault"
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - crystallization

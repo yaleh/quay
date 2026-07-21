@@ -6174,3 +6174,14 @@ Adversarial audit found one blocking issue: initial `effectiveStatus()` was a re
 | ID | Title | Type | VT Δ |
 |---|---|---|---|
 | exp5-M-CRYST-C1 | C1 crystallize split-or-commit gates | governance-integrity | 0 |
+
+---
+## M67 SELECT — exp5-M-CRYST-INV
+
+**Selected:** exp5-M-CRYST-INV — INV enforcement-with-design gate-half (ADR-011; the #1 cross-experiment structural fault)
+
+**Rationale:** Governance-integrity pick. exp5-M-CRYST-D3 (only `ready`) is human-steered — excluded. INV is the natural M66 successor: C1 (M66) closed the PRESENT boundary enforcement gap; INV closes the FORWARD-LOOKING gap (a gate that blocks adding new rules/clauses without same-milestone enforcement). Deferred 7+ times, LOOP-EXECUTABLE, tiny scope (one `scripts/*.mjs` check + fixtures + gate wiring). ADR-011 governance-half is already done; only the mechanical check remains.
+
+**Deferred this pass:**
+- exp5-M-CRYST-D3: human-steered (excluded from autonomous SELECT)
+- DIR-038, DIR-044: D3 driver-self-rewrite class, still deferred
