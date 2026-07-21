@@ -2,7 +2,7 @@
 id: exp5-M-CRYST-C1
 title: C1 [executable] Crystallize split-or-commit's SELECT-split rule +
   parent-done-iff-children from prose into gates (DIR-026 half-done)
-status: ready
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -18,12 +18,12 @@ DIR-026's SELECT-split rule and parent-done-iff-children are prose only (today o
 N/A — one check module + selfcheck fixtures (RED-then-GREEN per ADR-001/TDD); no staged docs/plans doc warranted.
 
 ## Acceptance Criteria
-- [ ] A parent marked `done` with an unfinished child FAILS; a not-fully-completable SELECT without a split FAILS; a compliant boundary PASSES; fixtures pin all three.
-- [ ] The check is a single-source `scripts/*.mjs` module; D3 references it (grep D3 → no re-implementation); reconciled with `store.js`'s existing `stale-done` derivation (no third copy).
+- [x] A parent marked `done` with an unfinished child FAILS; a not-fully-completable SELECT without a split FAILS; a compliant boundary PASSES; fixtures pin all three.
+- [x] The check is a single-source `scripts/*.mjs` module; D3 references it (grep D3 → no re-implementation); reconciled with `store.js`'s existing `stale-done` derivation (no third copy).
 ## Definition of Done
 References the standard inherited-core DoD clauses. Real landing:
-- [ ] A REAL milestone boundary is gated by these checks (not just a fixture) — the parent-done-iff-children + SELECT-split rules HARD-block at the boundary.
-- [ ] Single-source: exactly one implementation of parent-done-iff-children in the repo; D3·R7 and any OUTER-LOOP prose point at it.
+- [x] A REAL milestone boundary is gated by these checks (not just a fixture) — the parent-done-iff-children + SELECT-split rules HARD-block at the boundary.
+- [x] Single-source: exactly one implementation of parent-done-iff-children in the repo; D3·R7 and any OUTER-LOOP prose point at it.
 
 ## Not selected (M46)
 Considered alongside the crystallization epic's usual candidate set, compared against

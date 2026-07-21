@@ -99,3 +99,8 @@ testPass:
     command: "node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs"
   - name: ts-typecheck
     command: "npx tsc --noEmit"
+  # C1 / exp5-M-CRYST-C1 / DIR-026: split-or-commit gate — enforces parent-done-iff-children
+  # and SELECT-split rules against the workspace's task store. PASS iff no violations found.
+  # Single-source: logic lives exclusively in it0-split-or-commit-check.mjs (no re-implementation).
+  - name: split-or-commit
+    command: "node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.mjs ."
