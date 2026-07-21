@@ -525,3 +525,15 @@ m78 · DIR-054 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=b4c0a1a ·
 
 
 m79 · exp5-M-TS-MIGRATION-P2 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=b74aa2e · → milestones/M79/
+
+
+## SELECT M80 — exp5-M-TS-MIGRATION-P3-A
+
+**Selected:** exp5-M-TS-MIGRATION-P3-A — TS migration P3-A: port quay-native src/ to TypeScript
+
+**Rationale:** Exploit pick. P3 was split per DIR-026 SPLIT-OR-COMMIT into three per-package children (P3-A: quay-native, P3-B: quay Core, P3-C: quay-github). P3-A is selected first: most self-contained (3 files, ~1013 lines, no dependencies on other packages' ports), highest confidence in a clean iteration-0. Removes `@ts-nocheck` from `store.js` and `mcp-server.js`, adds named types using `Task`/`AdrRecord`/`Manifest` from `abi.ts` (M79). Behavior-preserving by construction; golden-diff discipline; autonomous per parent's cleared human-steered gate.
+
+**Deferred:** P3-B (quay Core internals), P3-C (quay-github), DIR-056 (probe-spec), DIR-050 (config consolidation).
+
+**Task:** [[exp5-M-TS-MIGRATION-P3-A]] (`tasks/exp5-M-TS-MIGRATION-P3-A.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M80-ts-migration-p3a.md`
