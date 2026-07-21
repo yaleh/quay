@@ -539,3 +539,15 @@ m79 · exp5-M-TS-MIGRATION-P2 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · m
 **Charter:** `experiments/quay-perpetual-stream/charters/M80-ts-migration-p3a.md`
 
 m80 · exp5-M-TS-MIGRATION-P3-A · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=0864f89 · → milestones/M80/
+
+
+## SELECT M81 — exp5-M-TS-MIGRATION-P3-C
+
+**Selected:** exp5-M-TS-MIGRATION-P3-C — TS migration P3-C: port quay-github src/ to TypeScript
+
+**Rationale:** Exploit pick. Continuation of ADR-012 P3 program. P3-C (quay-github, 3 files, 1254 lines) is the natural next step after P3-A (quay-native, M80). P3-B (quay Core, 19 files, ~2837 lines) is explicitly deferred — too large for one milestone, needs further per-module splitting. P3-C is bounded, similar scope to P3-A, and removes `@ts-nocheck` from `github-client.js` + `mcp-server.js`, wiring `Task` from `abi.ts` into the GitHub → view-model mapping.
+
+**Deferred:** P3-B (quay Core internals — needs per-module split at SELECT), DIR-056, DIR-050.
+
+**Task:** [[exp5-M-TS-MIGRATION-P3-C]] (`tasks/exp5-M-TS-MIGRATION-P3-C.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M81-ts-migration-p3c.md`
