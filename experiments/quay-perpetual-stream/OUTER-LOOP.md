@@ -245,6 +245,15 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
    adaptations to the log; check φ — if a prior adaptation was just reused unchanged by THIS
    (different-domain) milestone, **CONSOLIDATE**: merge it into `inherited-core.md` and retire the
    citation (§4.2).
+   **Log write format (DIR-054/M78 — rolling-window discipline; replaces the multi-section per-milestone
+   block format for ALL future milestones):** emit ONE LINE into `dashboard.md`'s `## Log` section per
+   milestone ABSORB, using this exact format:
+   `m<NN> · <task-id> · Δv=<realized> (v̂=<estimate>) · audit=<verdict> · merge=<sha> · → milestones/M<NN>/`
+   where `<verdict>` is one of `NO REFUTATION FOUND` / `CONCERNS` / `REFUTED`. Example:
+   `m78 · DIR-054 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=abc1234 · → milestones/M78/`
+   Full ABSORB narrative lives in `milestones/M<NN>/iteration-0.md` (the iteration report); the `## Log`
+   row is a pointer only — do NOT expand it into a multi-section block. The dashboard-context-budget gate
+   enforces the 1200-line cap; a fat ## Log entry that busts the cap is a gate failure.
    - **SPLIT-OR-COMMIT — two terminal outcomes ONLY, no partial/pending (DIR-026, inherited-core
      Clause 9):** once a milestone has started, at ABSORB it is in exactly ONE of two outcomes:
      (i) **`done`** — every AC/DoD clause satisfied (Clauses 0-8 below; a "partial" ABSORB with an
@@ -415,6 +424,15 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
        against the FINAL charter (see step 1 / step 4e). Smoke-test the wiring anytime:
        `quay gate QENG-5-DEMO-PASS` → 0, `quay gate QENG-5-DEMO-FAIL` → 1 (fixture tasks) — NOT a
        substitute for gating the REAL milestone.
+   - **Dashboard context-budget gate (DIR-054/M78; HARD-BLOCKS step 7's `milestone_counter++`):**
+     run `bash experiments/quay-perpetual-stream/scripts/it0-dashboard-line-budget-check.sh` and
+     paste stdout as evidence; non-zero exit HARD-BLOCKS `milestone_counter++`. The gate enforces a
+     1200-line cap on `experiments/quay-perpetual-stream/dashboard.md` — the ## Log section must
+     retain only the last ~5 milestones (rolling window); older entries are archived to
+     `experiments/quay-perpetual-stream/dashboard-archive/`. If the gate fires, apply the rolling
+     cut (archive m25..m<NN-5> content) THIS ABSORB before proceeding. Selfcheck:
+     `experiments/quay-perpetual-stream/scripts/it0-dashboard-line-budget-check-selfcheck.sh`
+     (RED+GREEN fixture pair, DIR-019 discipline).
    - **ABSORB lands the milestone's work on `master` directly (DIR-027 retired DIR-018's
      driver→master publish sub-step; runs AFTER the adversarial-audit, V_meta consolidation-lag,
      design-only-milestone impl-row, AND DoD meta-enforcer gates above all clear, and BEFORE step 7's
