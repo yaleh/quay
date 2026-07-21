@@ -2,7 +2,7 @@
 id: exp5-M-CRYST-D4-LEDGER-STRUCTURED-STATUS
 title: D4 [hard-fix] Structured V_meta-ledger status field — retire the prose
   status parser (ADR-004; closes R5's prose-parsing residual)
-status: ready
+status: done
 labels:
   - milestone-candidate
   - crystallization

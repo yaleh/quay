@@ -17,3 +17,24 @@ gates: [it0-set]
 stop: "until(.halt)"
 policy: value-typed-ledger
 coexist: null
+
+# routines (DIR-051): the standing discovery track — the two most productive moves of
+# this experiment made configurable. self-validation industrialises the fresh-context
+# adversarial audit that found a real defect at EVERY recent milestone (DIR-052);
+# architecture-analysis lights the L_G/L_D dark axes on quay's own code (DIR-053).
+#
+# HONEST STATUS (do not over-read this config): exp5 is driven by the BESPOKE
+# experiments/quay-perpetual-stream/OUTER-LOOP.md, which does NOT yet read this file's
+# routines: key (it predates DIR-045's loop.yml and consumes none of these params).
+# So these entries are DECLARATIVE INTENT + the schema-valid config that DIR-052/053
+# will consume once they teach OUTER-LOOP's checkpoint step to run routine-scheduler.mjs
+# + dispatch the probe + file behind routine-file-gate.mjs. They are schema-validated by
+# readLoopParams (so not malformed) but INERT under OUTER-LOOP until that wiring lands.
+# The LIVE fire path today is archguard's loop.yml (portable skill already reads routines).
+routines:
+  - name: self-validation
+    trigger: on(checkpoint)
+    dispatch: adversarial-explore
+  - name: architecture-analysis
+    trigger: on(checkpoint)
+    dispatch: arch-analyze
