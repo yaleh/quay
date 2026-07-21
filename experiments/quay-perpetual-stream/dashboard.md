@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 73** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 74** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -6385,3 +6385,32 @@ Initial build: Resolution section contained only summary footer ("291 total, 54 
 | ID | Title | Type | VT Δ |
 |---|---|---|---|
 | exp5-M-CRYST-B4 | B4 task schema forward-only grandfather close-out | crystallization/administrative | 0 |
+
+
+---
+## M74 ABSORB — DIR-044 concurrent-scheduler MECHANISM (dedicated D3 dispatch)
+
+**Milestone:** M74 · **Task:** [[DIR-044]] (mechanism) · **Status:** done (mechanism); DIR-044 directive PARTIAL — live-run split to [[DIR-044-LIVE]]  
+**Charter:** `charters/M74-dir044-concurrent-scheduler.md` · **Type:** capability-growth + governance-integrity · **VT Δ:** 0 (method-infra, no VT cell)  
+**Dispatch:** human-directed, off-loop in the `.halt` window (loop paused at M73→M74 boundary); every increment landed via private worktree + ff-merge (DIR-027). `milestone_counter` untouched until this ABSORB.  
+**Commits:** 38c0933 (inc1), e12a736 (inc2), 6cb65a6 (inc3), 57941c9 (inc4), 8d8911e (inc5), 5879517 + b8b94c5 (audit hardening).
+
+### What landed (the DIR-044 mechanism, 5 increments, TDD)
+- `touches-orthogonality-check.mjs` — disjoint/overlap verdict; CONSERVATIVE fail-closed (absent/overbroad/typo → serialize). Single-source `matchGlob`/`normalizePath`/`isOverbroadDeclaration`/`checkTouchesPair`.
+- `concurrent-batch-scheduler.mjs` — greedy maximal disjoint EXECUTION batch; excludes shared-state-touching + learning-type candidates; computes the dispatch PLAN (native-only, spawns no agents itself, no manda).
+- `serial-fanin-absorb.mjs` — deterministic id-sorted fan-in (background builds finish in nondeterministic order → reproducible plan); counter +N, deterministic dashboard append.
+- `anti-drift-touches-check.mjs` — NON-WAIVABLE after-the-fact HARD guardrail; bites a mis-declared/overbroad/stray-write batch.
+- `golden-replay-dir044.mjs` — replays the RECORDED real pair DIR-039 (M62) ∥ DIR-042-A (M59) through the whole pipeline → reproduces the frozen serial oracle (counter +2, both entries, disjoint, no drift). Exit 0.
+- **78 DIR-044 tests, 7/7 selfchecks, 92–98% line coverage; full exp5 suite 232/232 green.**
+
+### Audit (charter Step 5 — fresh-context, 3 rounds)
+Round 1: CONFIRMED golden-replay (disjointness independently re-derived from git `7ca6043`/`3e7556b`; `comm -12` empty; fixtures byte-faithful) but REFUTED the guardrail's airtightness — **H3**: an overbroad-but-legal glob (`packages/**`) defeated the out-of-declared arm with no dishonest input. Round-1 syntactic fix was re-broken in round 2 (`packages/**/*`, `**/*.js`, …); replaced with a SEMANTIC anchoring-depth rule + canonical path normalization. **Round 3: H3 CLOSED, H1 CLOSED, no new refutation, no false-positive.** (Exactly the multi-round D3 hardening the vmeta-lag-check lineage records.)
+
+### Honest disposition (DoD item 1 NOT met — split, not fabricated)
+The mechanism is proved on the RECORDED diffs only. No LIVE `Agent(run_in_background)` ≥2-wide batch was dispatched (the scheduler computes the plan; live dispatch is the driver's job). DoD item 1 ("a REAL ≥2-wide batch actually RAN via native background subagents on exp5's own loop") is therefore UNCHECKED and split to the follow-on [[DIR-044-LIVE]] — it needs two real ready disjoint milestone-candidates + the driver wired to dispatch from the plan, occurring on first real use. **The DIR-044 directive is NOT fully drained; it0 Clause 0 would correctly flag the open box.** M74 delivered and audited the complete mechanism; the directive completes when DIR-044-LIVE lands.
+
+**Side-fix this window (unrelated to DIR-044):** `bf0a492` repaired a pre-existing red test (`task-schema.test.mjs` "conformant directive → PASS") the loop's own M69/B6 shipped stale when it added the A7 validator; exp5 suite now fully green.
+
+| ID | Title | Type | VT Δ |
+|---|---|---|---|
+| DIR-044 (mechanism) | Cross-milestone concurrent-scheduler mechanism (touches/batch/fan-in/anti-drift + golden-replay) | capability-growth/governance-integrity | 0 |
