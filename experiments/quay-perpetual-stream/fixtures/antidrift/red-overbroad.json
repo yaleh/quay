@@ -1,4 +1,4 @@
 [
-  { "id": "A", "declaredGlobs": ["packages/**"], "actualFiles": ["packages/quay/x.js", "packages/UNRELATED/stray.js"] },
+  { "id": "A", "declaredGlobs": ["packages/**/*"], "actualFiles": ["packages/quay/x.js", "packages/UNRELATED/stray.js"] },
   { "id": "B", "declaredGlobs": ["experiments/quay-perpetual-stream/scripts/task-schema-check.mjs"], "actualFiles": ["experiments/quay-perpetual-stream/scripts/task-schema-check.mjs"] }
 ]

@@ -137,14 +137,22 @@ test("checkTouchesPair: a single-top-segment /** declaration is overbroad → co
 });
 
 // ── isOverbroadDeclaration (single-source predicate, shared with anti-drift) ───────────────────────
-test("isOverbroadDeclaration: bare wildcards and single-top-segment /** are overbroad; deeper is not", () => {
+test("isOverbroadDeclaration: SEMANTIC anchoring-depth rule (<2 concrete segments before a wildcard)", () => {
+  // overbroad — fewer than 2 concrete leading segments before the first wildcard
   assert.equal(isOverbroadDeclaration("**"), true);
   assert.equal(isOverbroadDeclaration("*"), true);
   assert.equal(isOverbroadDeclaration("packages/**"), true);
-  assert.equal(isOverbroadDeclaration("./tasks/**"), true);      // leading ./ stripped
-  assert.equal(isOverbroadDeclaration("packages/quay/**"), false); // depth ≥ 2 is a real scope
+  assert.equal(isOverbroadDeclaration("./tasks/**"), true);       // leading ./ stripped
+  // the increment-5 audit's evasions of the old syntactic rule — all must now be caught:
+  assert.equal(isOverbroadDeclaration("packages/**/*"), true);
+  assert.equal(isOverbroadDeclaration("**/*.js"), true);
+  assert.equal(isOverbroadDeclaration("packages//**"), true);     // // collapsed
+  assert.equal(isOverbroadDeclaration("packages/*/**"), true);    // first wildcard at depth 1
+  // precise — ≥2 concrete leading segments, or an exact path at any depth
+  assert.equal(isOverbroadDeclaration("packages/quay/**"), false);
   assert.equal(isOverbroadDeclaration("packages/quay/src/gate/registry.js"), false);
   assert.equal(isOverbroadDeclaration("packages/quay/src/gate/*.js"), false);
+  assert.equal(isOverbroadDeclaration("a/b/**/*.js"), false);
 });
 
 test("checkTouchesPair: absent touches on either side → CONSERVATIVE not-disjoint", () => {

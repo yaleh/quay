@@ -111,10 +111,36 @@ test("checkAntiDrift: cross-build overlap survives path-shape differences (./ pr
   assert.equal(ov.file, "shared/s.js");
 });
 
-test("normalizePath: strips leading ./, trailing /, collapses //", () => {
+test("normalizePath: strips leading ./, trailing /, collapses //, resolves ./.. segments", () => {
   assert.equal(normalizePath("./a/b.js"), "a/b.js");
   assert.equal(normalizePath("a//b.js"), "a/b.js");
   assert.equal(normalizePath("a/b/"), "a/b");
+  assert.equal(normalizePath("a/./b.js"), "a/b.js");       // dot segment (audit H1 class)
+  assert.equal(normalizePath("a/../a/b.js"), "a/b.js");    // parent segment
+  assert.equal(normalizePath(".//a/b.js"), "a/b.js");      // the .// normalization bug
+  assert.equal(normalizePath("a\\b.js"), "a/b.js");        // backslashes
+});
+
+test("checkAntiDrift: dot-segment path variants of the same file still collide (audit H1 dot-class)", () => {
+  const r = checkAntiDrift([
+    { id: "A", declaredGlobs: ["a/**"], actualFiles: ["a/./b.js"] },
+    { id: "B", declaredGlobs: ["a/**"], actualFiles: ["a/b.js"] },
+  ]);
+  // NB: a/** is overbroad? no — "a" is 1 concrete segment before ** → overbroad. Use deeper decls:
+  const r2 = checkAntiDrift([
+    { id: "A", declaredGlobs: ["a/sub/**"], actualFiles: ["a/sub/../sub/b.js"] },
+    { id: "B", declaredGlobs: ["a/sub/**"], actualFiles: ["a/sub/b.js"] },
+  ]);
+  assert.equal(r2.ok, false);
+  assert.ok(r2.violations.find((v) => v.type === "cross-build-overlap" && v.file === "a/sub/b.js"));
+});
+
+test("checkAntiDrift: the audit's overbroad evasions (packages/**/*, **/*.js) are now HARD FAIL", () => {
+  for (const g of ["packages/**/*", "**/*.js", "packages/*/**"]) {
+    const r = checkAntiDrift([{ id: "A", declaredGlobs: [g], actualFiles: ["packages/UNRELATED/stray.js"] }]);
+    assert.equal(r.ok, false, `expected ${g} to be rejected as overbroad`);
+    assert.ok(r.violations.find((v) => v.type === "overbroad-declaration"), `no overbroad violation for ${g}`);
+  }
 });
 
 // ── main() over JSON manifests (green + the two RED guardrail-bites cases) ────────────────────────

@@ -17,19 +17,43 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Globs treated as too broad to reason about safely → conservative overlap.
+// Kept for reference / callers; the authoritative test is isOverbroadDeclaration (semantic, below).
 export const OVERBROAD = new Set(["**", "*", "**/*", "./**", "**/**"]);
 
-// A DECLARATION is overbroad (unsafe to reason about / meaningless as a scope) if it is a bare
-// wildcard (OVERBROAD) OR a single top-level segment followed by `/**` (e.g. `packages/**`,
-// `tasks/**`) — broad enough to absorb an unrelated stray write. `packages/quay/**` (depth ≥ 2) is
-// fine. Single-source: both the pre-flight orthogonality gate AND the after-the-fact anti-drift
-// guardrail use THIS predicate (ADR-004) — hardening from the DIR-044 increment-4 adversarial audit
-// (finding H3: an overbroad-but-legal directory glob defeated the out-of-declared arm).
+// Canonicalize a repo-relative path or glob: forward slashes, strip a leading `./`, collapse `//`,
+// resolve `.`/`..` segments, drop a trailing `/`. Wildcard segments (`*`, `**`) are preserved. This
+// is single-source (used by matchGlob callers, isOverbroadDeclaration, and anti-drift) so path-shape
+// tricks (`./`, `//`, `a/./b`, `a/../a/b`, trailing `/`, backslashes) cannot spoof identity — closes
+// the DIR-044 increment-5 audit's H1 (dot-segment) class and the `.//`→`/a` normalization bug.
+export function normalizePath(p) {
+  const parts = String(p).replace(/\\/g, "/").split("/");
+  const out = [];
+  for (const seg of parts) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") { out.pop(); continue; }
+    out.push(seg);
+  }
+  return out.join("/");
+}
+
+// A DECLARATION is overbroad — too broad to meaningfully constrain a milestone's writes — when, after
+// canonicalization, it contains a wildcard reachable with FEWER THAN TWO concrete (wildcard-free)
+// leading path segments. So `**`, `*`, `**/*.js`, `packages/**`, `packages/**/*`, `packages/*/**` are
+// ALL overbroad (they can absorb an unrelated stray write across a whole top-level tree), while an
+// exact path (no wildcard, any depth) and a ≥2-segment-anchored glob (`packages/quay/**`,
+// `packages/quay/src/gate/*.js`) are precise enough. This is SEMANTIC (anchoring depth), not a list
+// of banned spellings — hardening from the DIR-044 increment-5 adversarial audit, which showed a
+// syntactic single-spelling ban (`^[^/]+/\*\*$`) was evaded by `packages/**/*`, `**/*.js`, etc.
+// Single-source (ADR-004): the pre-flight orthogonality gate AND the anti-drift guardrail both use it.
 export function isOverbroadDeclaration(glob) {
-  const g = String(glob).trim().replace(/^\.\//, "");
-  if (OVERBROAD.has(g)) return true;
-  return /^[^/]+\/\*\*$/.test(g); // one top segment + /**
+  const g = normalizePath(glob);
+  if (g === "" || OVERBROAD.has(g)) return true;
+  let concrete = 0;
+  for (const seg of g.split("/")) {
+    if (/[*?]/.test(seg)) return concrete < 2; // first wildcard segment: need ≥2 concrete before it
+    concrete++;
+  }
+  return false; // no wildcard at all → an exact path, precise at any depth
 }
 
 // ── parseTouches ─────────────────────────────────────────────────────────────────────────────────

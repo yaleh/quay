@@ -12,15 +12,12 @@
 
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { matchGlob, isOverbroadDeclaration } from "./touches-orthogonality-check.mjs";
+import { matchGlob, isOverbroadDeclaration, normalizePath } from "./touches-orthogonality-check.mjs";
 
-// Normalize a repo-relative path for comparison: strip a leading `./` and any trailing `/`, collapse
-// duplicate slashes. Closes the audit's H1 (a `./shared.js` vs `shared.js` cross-build overlap that
-// exact-string `==` missed). Case is NOT folded — paths are case-significant on the Linux repo, and
-// `git diff` emits exact case; folding would create false negatives here.
-export function normalizePath(p) {
-  return String(p).replace(/^\.\//, "").replace(/\/{2,}/g, "/").replace(/\/+$/, "");
-}
+// normalizePath (canonical: strips ./, collapses //, resolves ./.. segments, drops trailing /, case
+// preserved for the case-significant Linux repo) is single-source in touches-orthogonality-check.mjs
+// and re-exported here for this module's tests. Closes the audit's H1 dot-segment class.
+export { normalizePath };
 
 // ── fileWithinDeclared ───────────────────────────────────────────────────────────────────────────
 // True iff `file` matches at least one declared glob. An empty declaration → nothing is within
