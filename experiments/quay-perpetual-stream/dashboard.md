@@ -593,3 +593,14 @@ m83 · exp5-M-ARCH-AUDIT-POST-TS-P3 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUN
 **Charter:** `experiments/quay-perpetual-stream/charters/M84-ts-migration-p3b2.md`
 
 m84 · exp5-M-TS-MIGRATION-P3-B-2 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=3a4d029 · → milestones/M84/
+
+## SELECT M85 — exp5-M-TS-MIGRATION-P3-B-3
+
+**Selected:** exp5-M-TS-MIGRATION-P3-B-3 — TS migration P3-B-3: serve.js + mcp-server.js (2 files, 1872 lines)
+
+**Rationale:** Exploit pick. P3-B-2 (gate/) landed in M84 — mcp-server.js's 3 gate/ dependencies are now .ts. This is the final child of P3-B; completing it closes out Core src/ TS migration (only bin/quay.js entry remains). M83 audit: serve.js=LOW risk (3 TS imports + stdlib); mcp-server.js=MEDIUM (MCP SDK + zod types, all well-defined).
+
+**Deferred:** P4 (method-infra scripts), DIR-050, DIR-056.
+
+**Task:** [[exp5-M-TS-MIGRATION-P3-B-3]] (`tasks/exp5-M-TS-MIGRATION-P3-B-3.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M85-ts-migration-p3b3.md`
