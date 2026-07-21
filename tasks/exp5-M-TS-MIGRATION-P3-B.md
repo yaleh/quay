@@ -6,8 +6,12 @@ labels:
   - milestone-candidate
   - crystallization
 parent: exp5-M-TS-MIGRATION-P3
-children: []
-extra: {}
+children:
+  - exp5-M-TS-MIGRATION-P3-B-1
+  - exp5-M-TS-MIGRATION-P3-B-2
+  - exp5-M-TS-MIGRATION-P3-B-3
+extra:
+  role: compound
 ---
 ## Context
 
