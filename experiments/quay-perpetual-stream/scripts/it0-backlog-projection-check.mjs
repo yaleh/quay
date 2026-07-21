@@ -24,7 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { createStore } from "../../../packages/quay-native/src/store.js";
+import { createStore } from "../../../packages/quay-native/src/store.ts";
 
 function usage() {
   console.error("usage: node it0-backlog-projection-check.mjs <experiment-dir>");

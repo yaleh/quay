@@ -16,7 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createStore } from "../../../packages/quay-native/src/store.js";
+import { createStore } from "../../../packages/quay-native/src/store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

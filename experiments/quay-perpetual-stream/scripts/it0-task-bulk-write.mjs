@@ -7,7 +7,7 @@
 // patch objects from argv[2] (a file path) and calls store.write() for each, printing the
 // resulting task JSON. Run with CWD = the target worktree/repo root.
 import fs from "node:fs";
-import { createStore } from "../../../packages/quay-native/src/store.js";
+import { createStore } from "../../../packages/quay-native/src/store.ts";
 
 const specPath = process.argv[2];
 if (!specPath) {
