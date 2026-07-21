@@ -632,3 +632,14 @@ m86 · DIR-056 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=5be0d06 ·
 **Charter:** `experiments/quay-perpetual-stream/charters/M87-dir050-config-consolidation.md`
 
 m87 · DIR-050 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=8a4fb85 · → milestones/M87/
+
+## SELECT M88 — exp5-M-HISTORY-MINING-EXPLORE
+
+**Selected:** exp5-M-HISTORY-MINING-EXPLORE — meta-cc session-history mining exploration: surface hidden defects, ADR candidates, and crystallizable patterns from exp5 Claude Code session history (M88 mandatory explore; first use of history-mining.md probe concept).
+
+**Rationale:** Explore pick (mandatory: M84–M87 were four consecutive exploits; ≥1-in-5 rule requires explore at M88). The process/provenance axis — what recurred, what was learned, what drifted — is currently dark. Every high-value correction in exp5 has come from ad-hoc human meta-cc runs. This milestone mines the session history systematically using the REFUTE-first history-mining.md probe concept shipped in M86 (DIR-056). Not DIR-055 (standing routine): this is a one-time manual exploration that validates the concept and fills the dark axis.
+
+**Deferred:** DIR-052 (real self-validation routine fire), DIR-053 (arch-analysis routine fire), DIR-055 (meta-cc mining standing routine). P4 (TS migration method-infra, 5235L — split-or-commit needed).
+
+**Task:** [[exp5-M-HISTORY-MINING-EXPLORE]] (`tasks/exp5-M-HISTORY-MINING-EXPLORE.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M88-history-mining-explore.md`
