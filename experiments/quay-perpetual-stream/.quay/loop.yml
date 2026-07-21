@@ -1,0 +1,19 @@
+# .quay/loop.yml — quay-perpetual-stream (exp5) loop params (DIR-045).
+#
+# The loop-driver skill reads this file first; absent/malformed = FAIL-CLOSED.
+# This is exp5's instance of the universal `iterate` contract — the SAME skill
+# as archguard uses (archguard/.quay/loop.yml), differing ONLY in these params.
+#
+# board:  native provider (tasks/*.md in this repo's task store)
+# gates:  it0-set alias stands for the DoD meta-enforcer gate set used by exp5's
+#         outer loop (declared in this workspace's .quay/gates.yml — never in the skill)
+# stop:   until(.halt) — exp5 runs perpetually until the .halt sentinel is placed
+#         at experiments/quay-perpetual-stream/.halt (DIR-027 hygiene)
+# policy: value-typed-ledger — exp5's own milestone-selection ranking
+# coexist: null — no peer loop to coordinate with
+
+board: native
+gates: [it0-set]
+stop: "until(.halt)"
+policy: value-typed-ledger
+coexist: null
