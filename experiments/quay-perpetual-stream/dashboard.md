@@ -567,3 +567,14 @@ m81 · exp5-M-TS-MIGRATION-P3-C · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND ·
 **Charter:** `experiments/quay-perpetual-stream/charters/M82-ts-migration-p3b1.md`
 
 m82 · exp5-M-TS-MIGRATION-P3-B-1 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=4e70d8c · → milestones/M82/
+
+## SELECT M83 — exp5-M-ARCH-AUDIT-POST-TS-P3
+
+**Selected:** exp5-M-ARCH-AUDIT-POST-TS-P3 — Architecture health audit post-TS-P3 migration (archguard L_D/L_G)
+
+**Rationale:** Explore pick (mandatory: M79-M82 were 4 consecutive exploits; ≥1-in-5 rule requires explore at M83). After 5 TS migration milestones, the codebase has substantial TS coverage for the first time — this is the first opportunity to run archguard's L_D/L_G lens on the real typed surface (ADR-007 obligation). Findings will map remaining P3-B-2/B-3 risks and file blocking issues if any.
+
+**Deferred:** P3-B-2 (gate/), P3-B-3 (serve+mcp), P4 (method-infra), DIR-050, DIR-056.
+
+**Task:** [[exp5-M-ARCH-AUDIT-POST-TS-P3]] (`tasks/exp5-M-ARCH-AUDIT-POST-TS-P3.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M83-arch-audit-post-ts-p3.md`
