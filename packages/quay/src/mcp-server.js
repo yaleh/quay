@@ -45,7 +45,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import path from "node:path";
 import { loadConfig, activeProvider } from "./config.js";
-import { connectProvider } from "./provider-client.js";
+import { connectProvider } from "./provider-client.ts";
 import { composePayload, deliverTrigger } from "./action.js";
 import { resolveProviderEnv } from "./provider-env.js";
 import { QUAY_VERSION } from "./version.js";
