@@ -37,7 +37,7 @@
 // original's header first.
 //
 // Run: node test/gate-gameability.test.mjs
-import { checkGate } from "../src/github-client.js";
+import { checkGate } from "../src/github-client.ts";
 
 let failures = 0;
 function assert(cond, msg) {

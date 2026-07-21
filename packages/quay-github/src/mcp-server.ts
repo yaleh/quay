@@ -1,4 +1,3 @@
-// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay-github mcp — the GitHub Provider's formal ABI transport (proposal §5.1).
 // Mirrors quay-native's src/mcp-server.js shape (design §6: "native as ABI
 // conformance reference" — the GitHub Provider should structurally resemble
@@ -13,10 +12,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { createGithubClient, CREATE_SENTINEL_ID } from "./github-client.js";
-import { readManifest } from "./manifest.js";
+import { createGithubClient, CREATE_SENTINEL_ID } from "./github-client.ts";
+import { readManifest } from "./manifest.ts";
 
-export async function startMcpServer({ owner, repo }) {
+export async function startMcpServer({ owner, repo }: { owner: string; repo: string }): Promise<void> {
   const client = createGithubClient({ owner, repo });
 
   const server = new McpServer({
@@ -55,7 +54,7 @@ export async function startMcpServer({ owner, repo }) {
     async ({ status, label }) => {
       const tasks = client.list({ status, label });
       return {
-        content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(tasks, null, 2) }],
         structuredContent: { tasks },
       };
     }
@@ -74,11 +73,11 @@ export async function startMcpServer({ owner, repo }) {
       if (!task) {
         return {
           isError: true,
-          content: [{ type: "text", text: `no such task: ${id}` }],
+          content: [{ type: "text" as const, text: `no such task: ${id}` }],
         };
       }
       return {
-        content: [{ type: "text", text: JSON.stringify(task, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }],
         structuredContent: { task },
       };
     }
@@ -87,7 +86,7 @@ export async function startMcpServer({ owner, repo }) {
   // task_write — data.write. QN-024 (iteration 10) shipped status-only
   // write; M09-gh-write (PR-ABI-001) extended this to real title/body/labels
   // write; M12-abi-parent-write extends it further to real parent/children
-  // write (cross-issue checkbox-in-body mutation, github-client.js's
+  // write (cross-issue checkbox-in-body mutation, github-client.ts's
   // writeRelations()/setChildCheckboxes() — see that file's header comment
   // for the exact write-semantics decision: writing `children` mutates the
   // task's own body; writing `parent` mutates the target parent's body and
@@ -152,7 +151,7 @@ export async function startMcpServer({ owner, repo }) {
         "patch status/title/body/labels/parent/children on an existing task. `parent`/" +
         "`children` are implemented via the checkbox-in-body convention (cross-issue " +
         "body-text mutation for `parent`, own-body mutation for `children`; existing checked " +
-        "state is preserved) — see github-client.js's writeRelations()/setChildCheckboxes() " +
+        "state is preserved) — see github-client.ts's writeRelations()/setChildCheckboxes() " +
         "for the exact semantics. Any other unrecognized field returns an explicit error " +
         "rather than silently no-op'ing.",
       inputSchema: taskWriteInputSchema,
@@ -164,7 +163,7 @@ export async function startMcpServer({ owner, repo }) {
           isError: true,
           content: [
             {
-              type: "text",
+              type: "text" as const,
               text:
                 `task_write: unsupported field(s) [${unsupported.join(", ")}] — this Provider ` +
                 `does not implement writing ${unsupported.join("/")}. Supported fields: ` +
@@ -186,7 +185,7 @@ export async function startMcpServer({ owner, repo }) {
           isError: true,
           content: [
             {
-              type: "text",
+              type: "text" as const,
               text:
                 "task_write: at least one of status/title/body/labels/parent/children is required",
             },
@@ -195,7 +194,7 @@ export async function startMcpServer({ owner, repo }) {
       }
       try {
         // DIR-041 (M57): id === CREATE_SENTINEL_ID ("gh-new") means CREATE, not
-        // edit -- see github-client.js#create()'s own header comment for the
+        // edit -- see github-client.ts#create()'s own header comment for the
         // full rationale (GitHub assigns issue numbers itself; the ABI's
         // `id: string` (required) shape is unchanged, this sentinel is the
         // documented convention that closes the gap). `title` is required for
@@ -204,56 +203,56 @@ export async function startMcpServer({ owner, repo }) {
         // applied as follow-up writes against the REAL id the create just
         // returned -- title/body/labels are folded into the single POST.
         let task;
-        let realId = id;
+        let realId = id as string;
         if (id === CREATE_SENTINEL_ID) {
-          task = client.create({ title, body, labels });
+          task = client.create({ title: title as string | undefined, body: body as string | undefined, labels: labels as string[] | undefined });
           if (!task) {
             return {
               isError: true,
-              content: [{ type: "text", text: "task_write: create failed (no task returned)" }],
+              content: [{ type: "text" as const, text: "task_write: create failed (no task returned)" }],
             };
           }
           realId = task.id;
-          if (status !== undefined) task = client.setStatus(realId, status);
-          const relationFields = {};
-          if (parent !== undefined) relationFields.parent = parent;
-          if (children !== undefined) relationFields.children = children;
+          if (status !== undefined) task = client.setStatus(realId, status as string);
+          const relationFields: { parent?: string | null; children?: string[] } = {};
+          if (parent !== undefined) relationFields.parent = parent as string | null;
+          if (children !== undefined) relationFields.children = children as string[];
           if (Object.keys(relationFields).length > 0) {
             task = client.writeRelations(realId, relationFields);
           }
           return {
-            content: [{ type: "text", text: JSON.stringify(task, null, 2) }],
+            content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }],
             structuredContent: { task },
           };
         }
 
         if (status !== undefined) {
-          task = client.setStatus(id, status);
+          task = client.setStatus(id as string, status as string);
         }
-        const otherFields = {};
-        if (title !== undefined) otherFields.title = title;
-        if (body !== undefined) otherFields.body = body;
-        if (labels !== undefined) otherFields.labels = labels;
+        const otherFields: { title?: string; body?: string; labels?: string[] } = {};
+        if (title !== undefined) otherFields.title = title as string;
+        if (body !== undefined) otherFields.body = body as string;
+        if (labels !== undefined) otherFields.labels = labels as string[];
         if (Object.keys(otherFields).length > 0) {
-          task = client.writeFields(id, otherFields);
+          task = client.writeFields(id as string, otherFields);
         }
-        const relationFields = {};
-        if (parent !== undefined) relationFields.parent = parent;
-        if (children !== undefined) relationFields.children = children;
+        const relationFields: { parent?: string | null; children?: string[] } = {};
+        if (parent !== undefined) relationFields.parent = parent as string | null;
+        if (children !== undefined) relationFields.children = children as string[];
         if (Object.keys(relationFields).length > 0) {
-          task = client.writeRelations(id, relationFields);
+          task = client.writeRelations(id as string, relationFields);
         }
         if (!task) {
-          return { isError: true, content: [{ type: "text", text: `no such task: ${id}` }] };
+          return { isError: true, content: [{ type: "text" as const, text: `no such task: ${id}` }] };
         }
         return {
-          content: [{ type: "text", text: JSON.stringify(task, null, 2) }],
+          content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }],
           structuredContent: { task },
         };
       } catch (err) {
         return {
           isError: true,
-          content: [{ type: "text", text: `task_write failed: ${err.message}` }],
+          content: [{ type: "text" as const, text: `task_write failed: ${(err as Error).message}` }],
         };
       }
     }
@@ -265,7 +264,7 @@ export async function startMcpServer({ owner, repo }) {
   // (provider-client.js, QN-027) works against this Provider with zero
   // Core-side changes — the actual reusability/transfer proof this task
   // exists to produce. Primitive-task scope only (G5) — see
-  // github-client.js's checkGate() header note.
+  // github-client.ts's checkGate() header note.
   server.registerTool(
     "task_check",
     {
@@ -276,7 +275,7 @@ export async function startMcpServer({ owner, repo }) {
     async ({ id }) => {
       const result = client.check(id);
       return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
         structuredContent: result,
       };
     }
@@ -291,17 +290,17 @@ export async function startMcpServer({ owner, repo }) {
   server.registerTool(
     "adr_list",
     { description: "ADRs are not supported by the GitHub provider; always returns an empty list.", inputSchema: { status: z.string().optional(), tag: z.string().optional() } },
-    async () => ({ content: [{ type: "text", text: "[]" }], structuredContent: { adrs: [] } })
+    async () => ({ content: [{ type: "text" as const, text: "[]" }], structuredContent: { adrs: [] } })
   );
   server.registerTool(
     "adr_get",
     { description: "ADRs are not supported by the GitHub provider.", inputSchema: { id: z.string() } },
-    async () => ({ isError: true, content: [{ type: "text", text: ADR_UNSUPPORTED }] })
+    async () => ({ isError: true, content: [{ type: "text" as const, text: ADR_UNSUPPORTED }] })
   );
   server.registerTool(
     "adr_write",
     { description: "ADRs are not supported by the GitHub provider.", inputSchema: { id: z.string() } },
-    async () => ({ isError: true, content: [{ type: "text", text: ADR_UNSUPPORTED }] })
+    async () => ({ isError: true, content: [{ type: "text" as const, text: ADR_UNSUPPORTED }] })
   );
 
   const transport = new StdioServerTransport();

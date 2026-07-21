@@ -398,7 +398,7 @@ async function main() {
   //     confirm github-client.js's port would also be caught by this new
   //     passthrough coverage were it ever reintroduced). ---
   {
-    const srcPath = path.join(__dirname, "..", "src", "github-client.js");
+    const srcPath = path.join(__dirname, "..", "src", "github-client.ts");
     const original = fs.readFileSync(srcPath, "utf8");
     const needle =
       '  if (status === "done") {\n' +
@@ -522,7 +522,7 @@ async function main() {
   //     the READY branch specifically (distinct code from Case 3's DONE
   //     branch fix). ---
   {
-    const srcPath = path.join(__dirname, "..", "src", "github-client.js");
+    const srcPath = path.join(__dirname, "..", "src", "github-client.ts");
     const original = fs.readFileSync(srcPath, "utf8");
     const needle =
       '    // QN-035 (DIR-006): for a compound (epic) task, the execute->done gate\n' +
@@ -566,7 +566,7 @@ async function main() {
   //     confirm a clean re-run — same disclosed technique QN-069's own Plan
   //     step 2 used against store.js, applied here to github-client.js. ---
   {
-    const srcPath = path.join(__dirname, "..", "src", "github-client.js");
+    const srcPath = path.join(__dirname, "..", "src", "github-client.ts");
     const original = fs.readFileSync(srcPath, "utf8");
     const needle = 'if (status === "needs-human") {\n    return { id, gate: "none", ok: false, reason: "soft stop; human action required" };\n  }\n\n  ';
     if (!original.includes(needle)) {

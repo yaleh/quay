@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ghApiJson } from "../src/github-client.js";
+import { ghApiJson } from "../src/github-client.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

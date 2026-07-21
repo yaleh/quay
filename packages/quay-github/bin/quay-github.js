@@ -12,7 +12,7 @@
 // "gh-<n>" id GitHub assigned (issue numbers cannot be chosen by the
 // caller, unlike quay-native's filename-derived ids).
 
-import { createGithubClient } from "../src/github-client.js";
+import { createGithubClient } from "../src/github-client.ts";
 
 function resolveRepo() {
   const envRepo = process.env.QUAY_GITHUB_REPO; // "owner/repo"
@@ -55,13 +55,13 @@ async function main() {
   const { owner, repo } = resolveRepo();
 
   if (cmd === "mcp") {
-    const { startMcpServer } = await import("../src/mcp-server.js");
+    const { startMcpServer } = await import("../src/mcp-server.ts");
     await startMcpServer({ owner, repo });
     return;
   }
 
   if (cmd === "manifest") {
-    const { readManifest } = await import("../src/manifest.js");
+    const { readManifest } = await import("../src/manifest.ts");
     printJson(readManifest());
     return;
   }

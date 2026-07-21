@@ -1,9 +1,9 @@
-// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // Thin wrapper over `gh api` (CLI-first, matching quay-native's own design
 // ethos — design §1; DESIGN.md §2). Reads real issues from a GitHub
 // repository and maps them onto the canonical view-model (DESIGN.md §3).
 
 import { execFileSync } from "node:child_process";
+import type { Task } from "../../quay/src/abi.ts";
 
 const STATUS_LABEL_RE = /^status:(.+)$/;
 const LANE_LABEL_RE = /^lane:(.+)$/;
@@ -31,7 +31,7 @@ const CHILD_CHECKBOX_RE = /^\s*-\s*\[[ xX]\]\s*#(\d+)\s*$/gm;
 // DIR-041 (M57): the sentinel id a caller passes to `task_write` to mean
 // "create a NEW issue" rather than "edit an existing one" -- see
 // `create()`'s own header comment below for the full rationale. Exported so
-// mcp-server.js's task_write handler and tests both reference this ONE
+// mcp-server.ts's task_write handler and tests both reference this ONE
 // source instead of re-typing the literal string ("gh-new") in more than
 // one place.
 export const CREATE_SENTINEL_ID = "gh-new";
@@ -52,7 +52,7 @@ export const CREATE_SENTINEL_ID = "gh-new";
 // knowingly needs more.
 const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024; // 64 MiB
 
-function ghApiMaxBuffer() {
+function ghApiMaxBuffer(): number {
   const override = Number(process.env.QUAY_GITHUB_MAX_BUFFER);
   return Number.isFinite(override) && override > 0 ? override : DEFAULT_MAX_BUFFER;
 }
@@ -62,19 +62,19 @@ function ghApiMaxBuffer() {
  * response does not overflow Node's 1 MiB execFileSync default (ENOBUFS).
  * `ghApiJson`/`ghApiRun` are thin callers; do not call `execFileSync("gh",
  * ...)` anywhere else in this file — route through here instead. */
-function execGh(args) {
+function execGh(args: string[]): string {
   return execFileSync("gh", ["api", ...args], {
     encoding: "utf8",
     maxBuffer: ghApiMaxBuffer(),
   });
 }
 
-export function ghApiJson(args) {
+export function ghApiJson(args: string[]): unknown {
   const out = execGh(args);
   return JSON.parse(out);
 }
 
-export function ghApiRun(args) {
+export function ghApiRun(args: string[]): unknown {
   // Same subprocess convention as ghApiJson, but for calls whose return
   // value we don't need to parse (e.g. PATCH with no interesting body use,
   // or calls made purely for a side effect). Still returns parsed JSON when
@@ -86,10 +86,10 @@ export function ghApiRun(args) {
 /** Extract child issue numbers referenced via task-list checkboxes in an
  * issue body (e.g. "- [ ] #12"). Returns an array of "gh-<n>" ids, in the
  * order they appear, de-duplicated. */
-export function extractChildRefs(body) {
+export function extractChildRefs(body: string | null | undefined): string[] {
   if (!body) return [];
-  const seen = new Set();
-  const out = [];
+  const seen = new Set<string>();
+  const out: string[] = [];
   for (const m of body.matchAll(CHILD_CHECKBOX_RE)) {
     const id = `gh-${m[1]}`;
     if (!seen.has(id)) {
@@ -109,14 +109,15 @@ export function extractChildRefs(body) {
  *   (e.g. single-issue `get()` without a full list), `parent` is left null
  *   -- a known, documented single-issue-lookup limitation (see DESIGN.md §3).
  */
-export function issueToViewModel(issue, parentIndex = null) {
-  const labelNames = (issue.labels ?? []).map((l) =>
+export function issueToViewModel(issue: Record<string, unknown>, parentIndex: Map<string, string[]> | null = null): Task {
+  const rawLabels = (issue.labels as Array<string | { name: string }> | undefined) ?? [];
+  const labelNames = rawLabels.map((l) =>
     typeof l === "string" ? l : l.name
   );
 
-  const statusLabelsFound = [];
-  let lane = null;
-  const otherLabels = [];
+  const statusLabelsFound: string[] = [];
+  let lane: string | null = null;
+  const otherLabels: string[] = [];
 
   for (const name of labelNames) {
     const statusMatch = STATUS_LABEL_RE.exec(name);
@@ -130,9 +131,9 @@ export function issueToViewModel(issue, parentIndex = null) {
     }
   }
 
-  let status = "todo";
+  let status: Task["status"] = "todo";
   if (statusLabelsFound.length === 1) {
-    status = statusLabelsFound[0];
+    status = statusLabelsFound[0] as Task["status"];
   } else if (statusLabelsFound.length > 1) {
     // Multiple status:* labels present -- apply the documented precedence
     // rule rather than last-write-wins. Unrecognized label values (not in
@@ -145,7 +146,7 @@ export function issueToViewModel(issue, parentIndex = null) {
       const rb = bi === -1 ? STATUS_PRECEDENCE.length : bi;
       return ra - rb;
     });
-    status = ranked[0];
+    status = ranked[0] as Task["status"];
   }
 
   // issue.state == "closed" always wins -> done, regardless of any
@@ -154,8 +155,10 @@ export function issueToViewModel(issue, parentIndex = null) {
     status = "done";
   }
 
-  const children = extractChildRefs(issue.body);
-  const parents = parentIndex?.get(`gh-${issue.number}`) ?? [];
+  const body = (issue.body as string | null | undefined) ?? "";
+  const children = extractChildRefs(body);
+  const issueNumber = issue.number as number;
+  const parents = parentIndex?.get(`gh-${issueNumber}`) ?? [];
   // Canonical view-model's `parent` is singular (design §7.1); if more than
   // one open issue's checkbox list references this issue, that is itself a
   // data-quality problem in the source repo, not something this Provider
@@ -163,23 +166,25 @@ export function issueToViewModel(issue, parentIndex = null) {
   // and the ambiguity is surfaced via `extra.multipleParents`.
   const parent = parents.length > 0 ? parents[0] : null;
 
+  const extra: Record<string, unknown> = {
+    number: issueNumber,
+    html_url: issue.html_url,
+    user: (issue.user as { login?: string } | null | undefined)?.login ?? null,
+    state: issue.state,
+    ...(parents.length > 1 ? { multipleParents: parents } : {}),
+    ...(lane !== null ? { lane } : {}),
+  };
+
   return {
-    id: `gh-${issue.number}`,
-    title: issue.title,
+    id: `gh-${issueNumber}`,
+    title: issue.title as string,
     status,
-    lane,
+    role: children.length > 0 ? "compound" : "primitive", // derived, same convention as native (design §2)
     labels: otherLabels,
     parent,
     children,
-    role: children.length > 0 ? "compound" : "primitive", // derived, same convention as native (design §2)
-    extra: {
-      number: issue.number,
-      html_url: issue.html_url,
-      user: issue.user?.login ?? null,
-      state: issue.state,
-      ...(parents.length > 1 ? { multipleParents: parents } : {}),
-    },
-    body: issue.body ?? "",
+    body,
+    extra,
   };
 }
 
@@ -194,14 +199,14 @@ export function issueToViewModel(issue, parentIndex = null) {
 // original position; new lines are appended after the last existing
 // checkbox line (or at the end of the body, with a blank-line separator,
 // if the body has no checkbox lines yet).
-export function setChildCheckboxes(body, desiredChildIds) {
+export function setChildCheckboxes(body: string | null | undefined, desiredChildIds: string[]): string {
   const src = body || "";
   const desired = new Set(desiredChildIds);
 
   // Pass 1: scan existing checkbox lines, recording their checked state and
   // whether each is still desired. De-duplicate on first occurrence, same
   // as extractChildRefs.
-  const existingState = new Map(); // id -> checked (bool)
+  const existingState = new Map<string, boolean>(); // id -> checked (bool)
   let lastCheckboxLineEnd = -1;
   const lineRe = /^([ \t]*-\s*\[([ xX])\]\s*#(\d+)\s*)$/gm;
   for (const m of src.matchAll(lineRe)) {
@@ -214,7 +219,7 @@ export function setChildCheckboxes(body, desiredChildIds) {
   // desired, preserving checked-state for ids that are kept, and preserving
   // every other line verbatim.
   const lines = src.split("\n");
-  const outLines = [];
+  const outLines: string[] = [];
   for (const line of lines) {
     const m = /^([ \t]*)-\s*\[([ xX])\]\s*#(\d+)\s*$/.exec(line);
     if (m) {
@@ -247,11 +252,11 @@ export function setChildCheckboxes(body, desiredChildIds) {
 
 /** Build a childId -> [parentIds] index from a full list of raw issues, by
  * scanning each issue's body for task-list checkbox refs (DESIGN.md §3). */
-function buildParentIndex(issues) {
-  const index = new Map();
+function buildParentIndex(issues: Array<Record<string, unknown>>): Map<string, string[]> {
+  const index = new Map<string, string[]>();
   for (const issue of issues) {
     const parentId = `gh-${issue.number}`;
-    for (const childId of extractChildRefs(issue.body)) {
+    for (const childId of extractChildRefs(issue.body as string | null | undefined)) {
       const list = index.get(childId) ?? [];
       list.push(parentId);
       index.set(childId, list);
@@ -284,9 +289,9 @@ const DEFAULT_MAX_ISSUES = 500;
  * @returns {any[]} the concatenated issues across all fetched pages
  * @throws if the cap is reached without a natural (short) final page
  */
-export function pageIssues({ maxIssues, perPage, fetchPage }) {
+export function pageIssues({ maxIssues, perPage, fetchPage }: { maxIssues: number; perPage: number; fetchPage: (page: number, perPage: number) => Array<Record<string, unknown>> }): Array<Record<string, unknown>> {
   const maxPages = Math.ceil(maxIssues / perPage);
-  const issues = [];
+  const issues: Array<Record<string, unknown>> = [];
   for (let page = 1; page <= maxPages; page++) {
     const batch = fetchPage(page, perPage);
     issues.push(...batch);
@@ -321,7 +326,7 @@ export function pageIssues({ maxIssues, perPage, fetchPage }) {
 //   status:* label, `status:<status>` -- all other existing status:*
 //   labels are removed first, to avoid reintroducing the multi-label
 //   precedence ambiguity DESIGN.md §3.1 already had to solve for read.
-export function computeStatusWrite({ currentLabelNames, status }) {
+export function computeStatusWrite({ currentLabelNames, status }: { currentLabelNames: string[]; status: string }): { close: boolean; addLabels: string[]; removeLabels: string[] } {
   if (status === "done") {
     return { close: true, addLabels: [], removeLabels: [] };
   }
@@ -361,7 +366,7 @@ const MIN_SECTION_CHARS = 40;
  * extractSection -- JS has no \Z anchor; `(?![\s\S])` is the correct
  * end-of-string lookahead (native's own QN-005 fix, ported verbatim to
  * avoid reintroducing the same bug in a second implementation). */
-function extractGateSection(body, headings) {
+function extractGateSection(body: string | null | undefined, headings: string[]): string {
   for (const h of headings) {
     const re = new RegExp(`^##\\s+${h}\\b([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im");
     const m = re.exec(body || "");
@@ -370,8 +375,8 @@ function extractGateSection(body, headings) {
   return "";
 }
 
-function gateArtifactSections(body) {
-  const has = (heading) => {
+function gateArtifactSections(body: string | null | undefined): { proposal: boolean; plan: boolean; ac: boolean; dod: boolean } {
+  const has = (heading: string) => {
     if (!new RegExp(`^##\\s+${heading}\\b`, "im").test(body || "")) return false;
     const content = extractGateSection(body, [heading]);
     const nonWhitespaceLen = content.replace(/\s/g, "").length;
@@ -383,6 +388,19 @@ function gateArtifactSections(body) {
     ac: has("AC") || has("Acceptance Criteria"),
     dod: has("DoD") || has("Definition of Done"),
   };
+}
+
+interface ChildStatusEntry {
+  id: string;
+  status: string;
+  childrenStatus?: ChildStatusEntry[];
+}
+
+interface TaskLike {
+  id: string;
+  role: string;
+  children: string[];
+  status?: string;
 }
 
 /**
@@ -412,7 +430,7 @@ function gateArtifactSections(body) {
  * @param {(childId: string) => ({id:string, status:string, role:string, children:string[]}|null)} getTask
  * @param {Set<string>} visited ids seen earlier in the current walk (cycle guard)
  */
-export function childrenStatus(task, getTask, visited = new Set()) {
+export function childrenStatus(task: TaskLike, getTask: (childId: string) => TaskLike | null, visited: Set<string> = new Set()): ChildStatusEntry[] {
   if (visited.has(task.id)) {
     // Should not normally be reached (callers guard before recursing), kept
     // as a defensive no-op-safe fallback, matching store.js's own comment.
@@ -429,10 +447,10 @@ export function childrenStatus(task, getTask, visited = new Set()) {
     if (child.role === "compound") {
       const grandkids = childrenStatus(child, getTask, nextVisited);
       const subtreeOk = grandkids.every((g) => g.status === "done");
-      const status = child.status === "done" && !subtreeOk ? "stale-done" : child.status;
+      const status = child.status === "done" && !subtreeOk ? "stale-done" : (child.status ?? "todo");
       return { id: childId, status, childrenStatus: grandkids };
     }
-    return { id: childId, status: child.status };
+    return { id: childId, status: child.status ?? "todo" };
   });
 }
 
@@ -457,7 +475,7 @@ export function childrenStatus(task, getTask, visited = new Set()) {
  *   existing call site before this iteration) are unaffected and require no
  *   change.
  */
-export function checkGate(task, getChildTask) {
+export function checkGate(task: { id: string; status: string; body?: string | null; role?: string; children?: string[] }, getChildTask?: (childId: string) => TaskLike | null): Record<string, unknown> {
   const { id, status, body, role, children } = task;
   const artifacts = gateArtifactSections(body);
   const allArtifactsPresent = Object.values(artifacts).every(Boolean);
@@ -512,11 +530,12 @@ export function checkGate(task, getChildTask) {
     // childrenStatus is `[]` and `.every(...)` over an empty array is
     // vacuously true.
     const isCompound = role === "compound" && (children || []).length > 0;
-    const kids = isCompound ? childrenStatus({ id, role, children }, getChildTask) : [];
+    const taskLike: TaskLike = { id, role: role ?? "primitive", children: children ?? [], status };
+    const kids = isCompound ? childrenStatus(taskLike, getChildTask ?? (() => null)) : [];
     const childrenOk = kids.every((c) => c.status === "done");
     const ok = acOk && childrenOk;
     const badChildren = kids.filter((c) => c.status !== "done");
-    let reason;
+    let reason: string;
     if (!acOk) {
       reason = `${checked.length}/${checkboxes.length} AC checkboxes checked`;
     } else if (!childrenOk) {
@@ -526,7 +545,7 @@ export function checkGate(task, getChildTask) {
     } else {
       reason = "all AC checkboxes checked; eligible to move to done";
     }
-    const result = {
+    const result: Record<string, unknown> = {
       id,
       gate: "execute->done",
       ok,
@@ -545,7 +564,8 @@ export function checkGate(task, getChildTask) {
     // store.js's own QN-012 fix (see file header note). Primitive tasks
     // are unaffected -- degrades to the original unconditional behavior.
     const isCompound = role === "compound" && (children || []).length > 0;
-    const kids = isCompound ? childrenStatus({ id, role, children }, getChildTask) : [];
+    const taskLike: TaskLike = { id, role: role ?? "primitive", children: children ?? [], status };
+    const kids = isCompound ? childrenStatus(taskLike, getChildTask ?? (() => null)) : [];
     const childrenOk = kids.every((c) => c.status === "done");
     if (isCompound && !childrenOk) {
       const badChildren = kids.filter((c) => c.status !== "done");
@@ -559,7 +579,7 @@ export function checkGate(task, getChildTask) {
         childrenStatus: kids,
       };
     }
-    const result = { id, gate: "none", ok: true, reason: "terminal" };
+    const result: Record<string, unknown> = { id, gate: "none", ok: true, reason: "terminal" };
     if (isCompound) result.childrenStatus = kids;
     return result;
   }
@@ -574,10 +594,10 @@ export function checkGate(task, getChildTask) {
 /**
  * @param {{owner: string, repo: string}} opts
  */
-export function createGithubClient({ owner, repo }) {
+export function createGithubClient({ owner, repo }: { owner: string; repo: string }) {
   const maxIssues = Number(process.env.QUAY_GITHUB_MAX_ISSUES) || DEFAULT_MAX_ISSUES;
 
-  function fetchAllIssues() {
+  function fetchAllIssues(): Array<Record<string, unknown>> {
     // Request the max per-page size (100) to minimize round-trips, and cap
     // total pages fetched so a single `task list` call cannot silently
     // balloon into an unbounded crawl of a very large repo's full history.
@@ -600,11 +620,11 @@ export function createGithubClient({ owner, repo }) {
           `per_page=${pp}`,
           "-f",
           `page=${page}`,
-        ]),
+        ]) as Array<Record<string, unknown>>,
     });
   }
 
-  function list({ status, label } = {}) {
+  function list({ status, label }: { status?: string; label?: string } = {}): Task[] {
     const rawIssues = fetchAllIssues().filter((i) => !i.pull_request); // exclude PRs, which the issues API also returns
     const parentIndex = buildParentIndex(rawIssues);
     let tasks = rawIssues.map((issue) => issueToViewModel(issue, parentIndex));
@@ -613,13 +633,13 @@ export function createGithubClient({ owner, repo }) {
     return tasks;
   }
 
-  function get(id) {
+  function get(id: string): Task | null {
     const m = /^gh-(\d+)$/.exec(id);
     if (!m) return null;
     const number = m[1];
-    let issue;
+    let issue: Record<string, unknown>;
     try {
-      issue = ghApiJson([`repos/${owner}/${repo}/issues/${number}`]);
+      issue = ghApiJson([`repos/${owner}/${repo}/issues/${number}`]) as Record<string, unknown>;
     } catch {
       return null;
     }
@@ -640,12 +660,13 @@ export function createGithubClient({ owner, repo }) {
   // and replaces status:* label(s) per computeStatusWrite's pure decision
   // logic above, then returns the fresh view-model (single-issue lookup,
   // so `parent` is left null per the existing get() limitation).
-  function setStatus(id, status) {
+  function setStatus(id: string, status: string): Task | null {
     const m = /^gh-(\d+)$/.exec(id);
     if (!m) throw new Error(`quay-github: invalid task id for setStatus: ${id}`);
     const number = m[1];
-    const issue = ghApiJson([`repos/${owner}/${repo}/issues/${number}`]);
-    const currentLabelNames = (issue.labels ?? []).map((l) =>
+    const issue = ghApiJson([`repos/${owner}/${repo}/issues/${number}`]) as Record<string, unknown>;
+    const rawLabels = (issue.labels as Array<string | { name: string }> | undefined) ?? [];
+    const currentLabelNames = rawLabels.map((l) =>
       typeof l === "string" ? l : l.name
     );
     const plan = computeStatusWrite({ currentLabelNames, status });
@@ -711,17 +732,17 @@ export function createGithubClient({ owner, repo }) {
   // `task create` CLI verb already uses when it forwards extra fields
   // through the SAME generic task_write patch object (see bin/quay.js's
   // `task create` handler: it always sends the full merged patch in one
-  // task_write call; this Provider's mcp-server.js task_write handler
+  // task_write call; this Provider's mcp-server.ts task_write handler
   // below performs that same two-step decomposition server-side so ONE
   // client-visible task_write call, with `id: "gh-new"` PLUS status/labels/
   // parent/children fields all present, still lands correctly).
-  function create({ title, body, labels } = {}) {
+  function create({ title, body, labels }: { title?: string; body?: string; labels?: string[] } = {}): Task | null {
     if (typeof title !== "string" || title.trim() === "") {
       throw new Error(
         "quay-github: create requires a non-empty title (GitHub issues cannot exist without one)"
       );
     }
-    const postFields = { title };
+    const postFields: Record<string, string> = { title };
     if (body !== undefined) postFields.body = body;
     const issue = ghApiJson([
       `repos/${owner}/${repo}/issues`,
@@ -729,7 +750,7 @@ export function createGithubClient({ owner, repo }) {
       "POST",
       ...Object.entries(postFields).flatMap(([k, v]) => ["-f", `${k}=${v}`]),
       ...(labels ?? []).map((label) => ["-f", `labels[]=${label}`]).flat(),
-    ]);
+    ]) as Record<string, unknown>;
     return get(`gh-${issue.number}`);
   }
 
@@ -748,17 +769,17 @@ export function createGithubClient({ owner, repo }) {
   // semantics; mixing the two write paths in one function would reintroduce
   // exactly the kind of implicit precedence ambiguity DESIGN.md §3.1 already
   // had to solve once for read.
-  function writeFields(id, fields) {
+  function writeFields(id: string, fields: { title?: string; body?: string; labels?: string[] }): Task | null {
     const m = /^gh-(\d+)$/.exec(id);
     if (!m) throw new Error(`quay-github: invalid task id for writeFields: ${id}`);
     const number = m[1];
 
-    const patchFields = {};
+    const patchFields: Record<string, string> = {};
     if (Object.prototype.hasOwnProperty.call(fields, "title")) {
-      patchFields.title = fields.title;
+      patchFields.title = fields.title!;
     }
     if (Object.prototype.hasOwnProperty.call(fields, "body")) {
-      patchFields.body = fields.body;
+      patchFields.body = fields.body!;
     }
     if (Object.keys(patchFields).length > 0) {
       ghApiRun([
@@ -770,8 +791,9 @@ export function createGithubClient({ owner, repo }) {
     }
 
     if (Object.prototype.hasOwnProperty.call(fields, "labels")) {
-      const issue = ghApiJson([`repos/${owner}/${repo}/issues/${number}`]);
-      const currentLabelNames = (issue.labels ?? []).map((l) =>
+      const issue = ghApiJson([`repos/${owner}/${repo}/issues/${number}`]) as Record<string, unknown>;
+      const rawLabels = (issue.labels as Array<string | { name: string }> | undefined) ?? [];
+      const currentLabelNames = rawLabels.map((l) =>
         typeof l === "string" ? l : l.name
       );
       // Only touch "other" (non-status:*/non-lane:*) labels -- status/lane
@@ -809,12 +831,12 @@ export function createGithubClient({ owner, repo }) {
   // Fetch one issue's raw body by number (helper shared by writeRelations
   // below -- separate from the view-model-returning get() since this needs
   // the raw body text to feed setChildCheckboxes, not the derived model).
-  function fetchRawBody(number) {
-    const issue = ghApiJson([`repos/${owner}/${repo}/issues/${number}`]);
-    return issue.body ?? "";
+  function fetchRawBody(number: string): string {
+    const issue = ghApiJson([`repos/${owner}/${repo}/issues/${number}`]) as Record<string, unknown>;
+    return (issue.body as string | null | undefined) ?? "";
   }
 
-  function patchBody(number, newBody) {
+  function patchBody(number: string, newBody: string): void {
     ghApiRun([
       `repos/${owner}/${repo}/issues/${number}`,
       "-X",
@@ -846,7 +868,7 @@ export function createGithubClient({ owner, repo }) {
   //     are applied independently (children first, then parent) -- there is
   //     no interaction between the two (a task's own children live in its
   //     own body; its parent link lives in some OTHER issue's body).
-  function writeRelations(id, fields) {
+  function writeRelations(id: string, fields: { parent?: string | null; children?: string[] }): Task | null {
     const m = /^gh-(\d+)$/.exec(id);
     if (!m) throw new Error(`quay-github: invalid task id for writeRelations: ${id}`);
     const number = m[1];
@@ -874,7 +896,7 @@ export function createGithubClient({ owner, repo }) {
         const oldParentIssue = allIssues.find(
           (i) => String(i.number) === oldParentMatch[1]
         );
-        const oldParentBody = oldParentIssue?.body ?? "";
+        const oldParentBody = (oldParentIssue?.body as string | null | undefined) ?? "";
         const oldParentChildren = extractChildRefs(oldParentBody).filter((c) => c !== id);
         const newOldParentBody = setChildCheckboxes(oldParentBody, oldParentChildren);
         if (newOldParentBody !== oldParentBody) {
@@ -892,7 +914,7 @@ export function createGithubClient({ owner, repo }) {
         const newParentIssue = allIssues.find(
           (i) => String(i.number) === newParentMatch[1]
         );
-        const newParentBody = newParentIssue?.body ?? "";
+        const newParentBody = (newParentIssue?.body as string | null | undefined) ?? "";
         const newParentChildren = extractChildRefs(newParentBody);
         if (!newParentChildren.includes(id)) {
           const updatedNewParentBody = setChildCheckboxes(newParentBody, [
@@ -913,7 +935,7 @@ export function createGithubClient({ owner, repo }) {
   // applies the pure checkGate() function above. Returns the same shape
   // native's own `check()` returns; `{id, ok:false, reason:"not found"}`
   // if the task does not exist, matching store.js's own not-found shape.
-  function check(id) {
+  function check(id: string): Record<string, unknown> {
     const task = get(id);
     if (!task) return { id, ok: false, reason: "not found" };
     // QN-035 (DIR-006): supply `get` itself as the child-fetcher -- a

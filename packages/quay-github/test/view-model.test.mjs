@@ -12,7 +12,7 @@
 // iteration-5.md for the honest scope note on this).
 //
 // Run: node test/view-model.test.mjs
-import { issueToViewModel } from "../src/github-client.js";
+import { issueToViewModel } from "../src/github-client.ts";
 
 let failures = 0;
 function assert(cond, msg) {
