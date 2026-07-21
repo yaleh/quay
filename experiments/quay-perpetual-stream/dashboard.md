@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 66** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 67** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below). -->
@@ -6185,3 +6185,30 @@ Adversarial audit found one blocking issue: initial `effectiveStatus()` was a re
 **Deferred this pass:**
 - exp5-M-CRYST-D3: human-steered (excluded from autonomous SELECT)
 - DIR-038, DIR-044: D3 driver-self-rewrite class, still deferred
+
+---
+## M67 ABSORB — exp5-M-CRYST-INV
+
+**Milestone:** M67 · **Task:** exp5-M-CRYST-INV · **Status:** done  
+**Commits:** 7c9f9ed (BUILD), 0af390f (audit fix), M67 MERGE  
+**Type:** governance-integrity · **VT Δ:** 0 (methodology gate, no product surface change)
+
+### What landed
+- `experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.mjs` — bidirectional ADR-011 gate:
+  - Direction 1 (design→enforcement): every `### Clause N` in inherited-core.md must have a `// --- Clause N:` block in it0-dod-check.mjs
+  - Direction 2 (enforcement→design): every enforcement block in it0-dod-check.mjs must have a documented clause in inherited-core.md
+- 13 tests, 13 pass; 4 selftest fixture cases pass
+- `enforcement-with-design` named gate in `.quay/gates.yml` → PASS on real 13-clause corpus
+- `inherited-core.md`: Added Clause 10 (tree-hygiene), 11 (worktree-hygiene), 12 (audit-independence) to DoD section — resolving pre-existing design drift (enforced but undocumented)
+- ADR-011 enforcement comment updated: `(INV, deferred)` → `LANDED (M67)`
+
+### Audit
+Initial build had one-directional check only. Adversarial audit found Clauses 10-12 had enforcement in it0-dod-check.mjs but no design documentation in inherited-core.md — violating ADR-011 in the reverse direction. Fix: made check bidirectional + added Clause 10-12 design docs. Post-fix audit: NO REFUTATION FOUND.
+
+### DoD gate
+- `quay gate exp5-M-CRYST-INV --gate enforcement-with-design` → PASS
+- `quay gate exp5-M-CRYST-INV --gate dod` → PASS
+
+| ID | Title | Type | VT Δ |
+|---|---|---|---|
+| exp5-M-CRYST-INV | INV enforcement-with-design gate (ADR-011 gate-half) | governance-integrity | 0 |
