@@ -6136,3 +6136,14 @@ info: prunable merged iteration branches=0; registered iteration worktrees=0
 
 ## Backlog row
 | DIR-047 | archguard loop-driver dogfood (M64) exposed that seeded quay-native tasks land `todo` and are invisible to the loop's `ready` predicate — manual promotion required every cycle. Closed via a per-provider `default_task_status` key in `.quay/config.yml` (writer-side knob, keeps the SELECT predicate a fixed universal `ready`): one `resolveDefaultStatus()` helper (fail-closed on illegal values) single-sourced across CLI `task create`, MCP `task_write`, and migrate writers; backward-compatible (absent/`todo` → today's behavior unchanged). Real e2e: archguard config set to `ready`, TASK-29 created with no `--status` → landed `ready`, immediately selectable by the loop driver (archguard commit `687d9ea`). | capability-growth (primary) | no new VT chart cell (config surface, not chart-1-scored axis) | directive, milestone-candidate, milestone:M65 |
+
+---
+## M66 SELECT — exp5-M-CRYST-C1
+
+**Selected:** exp5-M-CRYST-C1 — C1 [executable] Crystallize split-or-commit's SELECT-split rule + parent-done-iff-children from prose into gates (DIR-026 half-done)
+
+**Rationale:** Governance-integrity pick. No `ready` tasks after D3 (human-steered) excluded. C1 was the leading crystallization candidate per its M65 deferred-note ("next to consider"), aged 2 passes (M46, M65). Makes DIR-026's SELECT-split + parent-done-iff-children HARD-enforceable at ABSORB — converts a critical process rule from prose to a single-source scripts/*.mjs gate with RED+GREEN fixtures. LOOP-EXECUTABLE: no human-steered label, no driver mutation, small blast radius (new gate module + fixture only).
+
+**Deferred this pass:**
+- exp5-M-CRYST-INV: governance-integrity but forward-looking (meta-gate on FUTURE clause-additions); C1 closes a PRESENT boundary enforcement gap first.
+- DIR-038, DIR-044: D3 driver-self-rewrite class; still deferred pending dedicated scoped dispatch.

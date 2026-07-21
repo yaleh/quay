@@ -60,3 +60,6 @@ drift instance.
 
 ## Not selected (M65)
 Still deferred — [[DIR-047]] selected this pass (fresh dogfood directive, direct capability-growth, smaller scope). INV remains strong but forward-looking; DIR-047 closes a PRESENT friction point first.
+
+## Not selected (M66)
+[[exp5-M-CRYST-C1]] selected instead — also governance-integrity/crystallization, explicitly noted as "the next crystallization milestone to consider" in its M65 note, makes DIR-026 split-or-commit immediately machine-enforceable at milestone boundaries. INV (forward-looking meta-gate on FUTURE clause-additions) remains lower urgency while present-boundary gaps still open.

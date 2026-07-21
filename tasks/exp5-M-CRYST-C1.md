@@ -2,7 +2,7 @@
 id: exp5-M-CRYST-C1
 title: C1 [executable] Crystallize split-or-commit's SELECT-split rule +
   parent-done-iff-children from prose into gates (DIR-026 half-done)
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - crystallization
