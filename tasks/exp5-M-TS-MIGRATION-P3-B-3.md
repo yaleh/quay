@@ -1,7 +1,7 @@
 ---
 id: exp5-M-TS-MIGRATION-P3-B-3
 title: "TS migration P3-B-3: port quay Core serve.js and mcp-server.js to TypeScript"
-status: ready
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -40,16 +40,27 @@ N/A — single-pass implementation (behavior-preserving TS port, like P3-B-1 and
 
 ## Acceptance Criteria
 
-- [ ] Both files renamed to `.ts` (`serve.ts`, `mcp-server.ts`) with named types (no `any` on public-facing shapes)
-- [ ] `npx tsc --noEmit` exits 0 across the repo
-- [ ] Test suite baselines maintained (fail count ≤ master baseline)
-- [ ] No runtime behavior change (golden-diff)
+- [x] Both files renamed to `.ts` (`serve.ts`, `mcp-server.ts`) with named types (no `any` on public-facing shapes)
+- [x] `npx tsc --noEmit` exits 0 across the repo
+- [x] Test suite baselines maintained (fail count ≤ master baseline)
+- [x] No runtime behavior change (golden-diff)
 
 ## Definition of Done
 
 Per standard inherited-core DoD clauses (see `experiments/quay-perpetual-stream/inherited-core.md`):
 
-- [ ] `serve.ts` and `mcp-server.ts` exist (replacing `.js` counterparts)
-- [ ] `tsc --noEmit` exits 0
-- [ ] Test baselines held (fail count ≤ master baseline)
-- [ ] Acceptance gate PASS
+- [x] `serve.ts` and `mcp-server.ts` exist (replacing `.js` counterparts)
+- [x] `tsc --noEmit` exits 0
+- [x] Test baselines held (fail count ≤ master baseline)
+- [x] Acceptance gate PASS
+
+## Execution record
+
+- Milestone: M85
+- Iteration: 0
+- Worktree branch: `exp5-m85-iteration-0`
+- Implementation commit: `a9959be`
+- Audit session id: `m85-iter0-ts-migration-p3b3-2026-07-21`
+- Audit verdict: NO REFUTATION FOUND
+- Realized Δv: 0 (L_C hardening, ADR-012)
+- Outcome: serve.ts + mcp-server.ts typed; tsc exit 0; 388/380/8 (≤11); quay-github 21/21/0
