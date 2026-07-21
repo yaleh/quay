@@ -8,7 +8,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { createStore } from "../src/store.js";
+import YAML from "yaml";
+import { createStore, resolveDefaultStatus } from "../src/store.js";
 // ADR/document/contract-validator are generic filesystem-frontmatter stores
 // with no dependency on quay-native's task vocabulary (store.js) — they now
 // live in `quay` (Core), which needs them standalone for its gate registry
@@ -73,6 +74,31 @@ function resolveDocsDir() {
   return path.resolve(process.cwd(), "docs-managed");
 }
 
+/**
+ * DIR-047: load the per-provider `default_task_status` from .quay/config.yml.
+ * Walks upward from CWD using the same root-finding logic as resolveTasksDir().
+ * Returns the validated default status string, or undefined when the key is
+ * absent (callers fall back to "todo" via createStore's own storeDefaultStatus
+ * logic — one fallback, not two, per ADR-004).
+ * Throws a clear error when the key is present but its value is not valid.
+ */
+function loadDefaultStatus() {
+  const repoRoot = findRepoRoot(process.cwd());
+  if (!repoRoot) return undefined;
+  const configPath = path.join(repoRoot, ".quay", "config.yml");
+  if (!fs.existsSync(configPath)) return undefined;
+  const raw = fs.readFileSync(configPath, "utf8");
+  const cfg = YAML.parse(raw);
+  const providers = cfg?.providers ?? {};
+  // Find the enabled provider (mirrors activeProvider() in quay/src/config.js).
+  const enabledKey = Object.keys(providers).find((k) => providers[k].enabled);
+  if (!enabledKey) return undefined;
+  const raw_default = providers[enabledKey]?.default_task_status;
+  if (raw_default === undefined || raw_default === null) return undefined;
+  // resolveDefaultStatus() throws a clear error on illegal values — fail closed.
+  return resolveDefaultStatus(String(raw_default));
+}
+
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
 }
@@ -103,7 +129,11 @@ async function main() {
 
   if (cmd === "mcp") {
     const { startMcpServer } = await import("../src/mcp-server.js");
-    await startMcpServer({ tasksDir: resolveTasksDir(), adrDir: resolveAdrDir() });
+    // DIR-047: load and validate the per-provider default_task_status from
+    // .quay/config.yml, then pass it to the MCP server so task_write (status
+    // omitted on a new task) uses the same configured default as the CLI.
+    const defaultStatus = loadDefaultStatus();
+    await startMcpServer({ tasksDir: resolveTasksDir(), adrDir: resolveAdrDir(), defaultStatus });
     return;
   }
 
@@ -217,7 +247,12 @@ async function main() {
   }
 
   if (cmd === "task") {
-    const store = createStore(resolveTasksDir());
+    // DIR-047: load the per-provider default_task_status from .quay/config.yml
+    // (validated; throws a clear error on illegal values) and pass it to the
+    // store as a single-source default (ADR-004). Undefined when key is absent
+    // — createStore falls back to "todo", preserving backward compatibility.
+    const defaultStatus = loadDefaultStatus();
+    const store = createStore(resolveTasksDir(), { defaultStatus });
     const { flags, positional } = parseFlags(rest);
 
     if (sub === "list") {
@@ -300,7 +335,12 @@ async function main() {
       }
       const patch = {
         title: flags.title ?? id,
-        status: flags.status ?? "todo",
+        // DIR-047: omit status when not supplied — the store applies
+        // storeDefaultStatus (from .quay/config.yml default_task_status, or
+        // "todo" when absent) for new tasks, so there is no ?? "todo" here.
+        // An explicit --status flag always wins (undefined → store default,
+        // a real string → that string, validated by store.write()).
+        status: flags.status,
         labels: flags.labels ? String(flags.labels).split(",").filter(Boolean) : [],
         parent: flags.parent,
         body: flags.body ?? "",

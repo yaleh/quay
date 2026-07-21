@@ -14,6 +14,25 @@ import YAML from "yaml";
 export const VALID_STATUSES = ["todo", "ready", "done", "needs-human"];
 
 /**
+ * DIR-047: validate a `default_task_status` value from config.
+ * Returns the value unchanged when valid; throws a clear error when illegal.
+ * This is the single-source validator for the config key — call it at config
+ * load time so callers (CLI, MCP server) fail closed before any task is created.
+ *
+ * @param {string} value the raw value from .quay/config.yml
+ * @returns {string} the value, confirmed valid
+ * @throws {Error} when value is not in VALID_STATUSES
+ */
+export function resolveDefaultStatus(value) {
+  if (!VALID_STATUSES.includes(value)) {
+    throw new Error(
+      `invalid default_task_status "${value}" — must be one of ${VALID_STATUSES.join(", ")}`
+    );
+  }
+  return value;
+}
+
+/**
  * QN-015: thrown by `write()` when a caller supplies `expectedStatus` and the
  * task's actual current status (read inside the same lock acquisition used
  * for the read-modify-write) does not match — a distinguishable class (not a
@@ -39,8 +58,15 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 
 /**
  * @param {string} tasksDir absolute path to the tasks directory
+ * @param {{ defaultStatus?: string }} [opts] optional configuration
+ *   opts.defaultStatus — the per-provider `default_task_status` from
+ *   .quay/config.yml; applied when creating a NEW task with no explicit status.
+ *   Must be a validated value (call resolveDefaultStatus() before passing here).
+ *   Omit or pass undefined to preserve the original "todo" fallback (ADR-004:
+ *   single-source — this is the ONE place the creation default is resolved).
  */
-export function createStore(tasksDir) {
+export function createStore(tasksDir, opts) {
+  const storeDefaultStatus = opts?.defaultStatus ?? "todo";
   fs.mkdirSync(tasksDir, { recursive: true });
 
   // M26-adversarial-eval finding ADV-004 (highest-severity real finding of
@@ -481,6 +507,14 @@ export function createStore(tasksDir) {
           throw new ConflictError(id, expectedStatus, null);
         }
         frontmatter.extra = extra ?? {};
+        // DIR-047 (ADR-004 single-source): apply the configured creation
+        // default when creating a NEW task with no explicit status.
+        // storeDefaultStatus is the per-provider default_task_status from
+        // .quay/config.yml (already validated), falling back to "todo" when
+        // absent — preserving byte-for-byte backward compatibility.
+        if (frontmatter.status === undefined) {
+          frontmatter.status = storeDefaultStatus;
+        }
       }
       const finalBody = body !== undefined ? body : existingBody;
       const raw = serialize(frontmatter, finalBody);
