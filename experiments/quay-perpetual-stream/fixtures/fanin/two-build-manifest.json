@@ -1,0 +1,4 @@
+[
+  { "id": "M-dir039-migration", "dashboardEntry": "DIR-039 migration/import capability landed (fan-in golden replay)" },
+  { "id": "M-dir042a-dod-gate-set", "dashboardEntry": "DIR-042-A generic runner-agnostic DoD gate set landed (fan-in golden replay)" }
+]
