@@ -6299,3 +6299,12 @@ Initial build missed updating `plugin/scripts/task-schema.mjs` — dual-source v
 | ID | Title | Type | VT Δ |
 |---|---|---|---|
 | exp5-M-CRYST-D4-LEDGER-STRUCTURED-STATUS | D4 structured [tag] ledger status field; retire prose parser | hard-fix/governance-integrity | 0 |
+
+---
+## M71 SELECT — DIR-048
+
+**Selected:** DIR-048 — Dispatched-execution + adversarial-audit BY DEFAULT for the portable loop-driver
+
+**Rationale:** Capability-growth pick after 5 consecutive crystallization milestones (M66-M70). DIR-048 is a fresh LOOP-EXECUTABLE directive surfaced by the archguard dogfood (build ran inline, no independent audit). The task makes the two-layer model (dispatched build + adversarial audit) the DEFAULT for the portable loop-driver skill (`execution: dispatched`, `audit: adversarial`), with `inline`/`none` as explicit opt-outs. This closes the capability gap between exp5's bespoke OUTER-LOOP (two-layer) and the portable skill (inline self-gated). SPLIT-OR-COMMIT: if both knobs cannot land in one milestone, the outcome is `needs-human`.
+
+**Deferred:** exp5-M-CRYST-B4, exp5-M-CRYST-E2 (crystallization series, lower urgency vs. fresh directive); DIR-038/DIR-044 (human-steered).

@@ -32,3 +32,6 @@ open.
 
 ## Not selected (M70)
 D4 [hard-fix] selected instead — ADR authoring is documentation work with softer urgency; D4's hard-fix label and open prose-parsing residual take priority.
+
+## Not selected (M71)
+DIR-048 selected instead — capability-growth pick (two-layer portable loop-driver); ADR authoring deferred again.

@@ -34,3 +34,6 @@ No new urgency signal; mechanical sweep with no external dogfood component. [[DI
 
 ## Not selected (M70)
 D4 [hard-fix] selected instead — closes the ADR-004 prose-parsing residual in vmeta-lag-check (structured-field vs interim leading-token parser), higher urgency (hard-fix label) than an administrative backfill sweep.
+
+## Not selected (M71)
+DIR-048 selected instead — fresh LOOP-EXECUTABLE directive with real dogfood motivation; capability-growth pick after 5 consecutive crystallization milestones (M66-M70).
