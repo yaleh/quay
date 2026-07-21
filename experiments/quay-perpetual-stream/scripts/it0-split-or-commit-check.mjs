@@ -17,11 +17,12 @@
 // <!-- enforcement: scripts/it0-split-or-commit-check.mjs -->
 //
 // Reconciliation with store.js: packages/quay-native/src/store.js's `childrenStatus()`
-// function already detects compound tasks with incomplete subtrees (returning "stale-done").
-// This script lifts that same invariant to the OUTER-LOOP milestone boundary without forking
-// the logic — it reuses the same pattern (walk children, check status recursively) directly
-// on the raw task files (no store.js import required; the check runs on the task directory
-// without needing a running quay instance).
+// detects compound tasks with incomplete subtrees via a recursive view-model tree walk. This
+// script uses a FLAT per-task check instead — each done compound task is checked against its
+// direct children's stored status; deeper violations are caught at each level independently.
+// A recursive walk is not needed (and would duplicate logic) for a gate that runs on the full
+// task set: every boundary is checked by the same rule, one error per violated level.
+// No store.js import is required; the check runs on raw task files without a running quay instance.
 //
 // Usage:
 //   node it0-split-or-commit-check.mjs <workspace-root>
@@ -102,45 +103,18 @@ function isCompound(t) {
 }
 
 // ── runChecks — pure function: given a Map<id, task>, returns {failures: string[]}. ──────────────
-// Reconciliation with store.js childrenStatus(): the same recursive pattern is applied here
-// (walk children, check each child's status, recurse for compound children) without importing
-// store.js — a standalone check for the outer-loop gate context.
+// Reconciliation with store.js childrenStatus(): store.js does a recursive tree walk to build a
+// view-model (propagating "stale-done" up to callers). This gate uses a FLAT per-task check
+// instead: each done compound task is checked against its direct children's stored status. Deeper
+// violations (e.g. grandparent→parent→grandchild) are caught at each level independently by the
+// same rule when the gate runs on the full task set. This avoids duplicating the recursive walk
+// and is the right shape for a gate: produce one clear error per violated boundary.
 export function runChecks(taskMap) {
   const failures = [];
 
-  // Collect violations. Use a cache to avoid redundant subtree walks.
-  const statusCache = new Map();
-
-  function effectiveStatus(id, visited = new Set()) {
-    if (statusCache.has(id)) return statusCache.get(id);
-    if (visited.has(id)) {
-      // Cycle guard (same as store.js childrenStatus' cycle-safety pattern).
-      return "missing";
-    }
-    const t = taskMap.get(id);
-    if (!t) return "missing";
-    if (!isCompound(t)) {
-      statusCache.set(id, t.status);
-      return t.status;
-    }
-    // Compound task: status is only truly "done" if ALL children are effectively done.
-    const children = t.children || [];
-    if (children.length === 0) {
-      // Compound with no children: propagate stored status as-is for this sub-function;
-      // SELECT-split violations are checked separately below.
-      statusCache.set(id, t.status);
-      return t.status;
-    }
-    const nextVisited = new Set(visited);
-    nextVisited.add(id);
-    const allChildrenDone = children.every((cid) => effectiveStatus(cid, nextVisited) === "done");
-    const effective = t.status === "done" && !allChildrenDone ? "stale-done" : t.status;
-    statusCache.set(id, effective);
-    return effective;
-  }
-
   // CHECK 1: PARENT-DONE-IFF-CHILDREN
-  // For every compound task with status `done`, verify all children are also effectively done.
+  // For every compound task with status `done`, verify all direct children also have status `done`.
+  // Each level of a nested compound hierarchy is checked independently (flat, not recursive).
   for (const [id, t] of taskMap) {
     if (t.status !== "done") continue;
     if (!isCompound(t)) continue;
@@ -149,11 +123,10 @@ export function runChecks(taskMap) {
 
     const nonDoneChildren = [];
     for (const childId of children) {
-      const childEffective = effectiveStatus(childId);
-      if (childEffective !== "done") {
-        const child = taskMap.get(childId);
-        const childStatus = child ? child.status : "missing";
-        nonDoneChildren.push(`${childId} (status: ${childEffective !== childStatus ? `${childStatus}/effective:${childEffective}` : childStatus})`);
+      const child = taskMap.get(childId);
+      const childStatus = child ? child.status : "missing";
+      if (childStatus !== "done") {
+        nonDoneChildren.push(`${childId} (status: ${childStatus})`);
       }
     }
     if (nonDoneChildren.length > 0) {
