@@ -17,6 +17,17 @@ Requested action behind a one-line context lead-in. This directive has NO `## Pl
 allowed for a directive by the label-aware A2 branch — proving a directive with no Plan does NOT fail
 where a milestone-candidate would. Real approach text, comfortably past the placeholder floor.
 
+## Finding
+
+The directive lifecycle was split across two sources (a task file and a separate directives/*.md file),
+creating drift between the authoritative record and its projection. Task-canonical storage eliminates
+that split by making the quay task the single source of truth for every directive.
+
+## Requested action
+
+Retire the dual-source directives/*.md projection mechanism: the quay task IS the directive, no
+separate file, no anti-drift check needed. Apply going forward to all new directives.
+
 ## Acceptance Criteria
 
 - [ ] A runnable grep/query check with an exit code confirms the directive is applied.

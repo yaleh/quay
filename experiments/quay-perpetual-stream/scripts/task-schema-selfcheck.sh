@@ -38,6 +38,9 @@ CASES=(
   "fail-A5-resolution-statusmirror|$FIX/fail-resolution-statusmirror-stub.md|1"
   "fail-A6-scaffolding-source|$FIX/fail-scaffolding-source-stub.md|1"
   "fail-A6-scaffolding-dirfile|$FIX/fail-scaffolding-dirfile-stub.md|1"
+  # A7: directive-kind section-presence (Finding + Requested action required).
+  "fail-A7-directive-missing-finding|$FIX/fail-directive-missing-finding-stub.md|1"
+  "fail-A7-directive-missing-requested-action|$FIX/fail-directive-missing-requested-action-stub.md|1"
   # CRITICAL false-positive guard — MARKED + conformant despite DIR-009/010 prose shapes → PASS.
   "ok-prose-mentions-source|$FIX/ok-prose-mentions-source-stub.md|0"
 )
