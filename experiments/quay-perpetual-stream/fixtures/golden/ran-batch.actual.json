@@ -1,0 +1,54 @@
+[
+  {
+    "id": "M-dir039-migration",
+    "declaredGlobs": [
+      "package-lock.json",
+      "packages/quay-backlog/bin/quay-backlog.js",
+      "packages/quay-backlog/package.json",
+      "packages/quay-backlog/provider.yml",
+      "packages/quay-backlog/src/backlog-client.js",
+      "packages/quay-backlog/src/manifest.js",
+      "packages/quay-backlog/src/mcp-server.js",
+      "packages/quay-backlog/test/backlog-client.test.mjs",
+      "packages/quay-backlog/test/mcp-server.test.mjs",
+      "packages/quay/bin/quay.js",
+      "packages/quay/src/migrate.js",
+      "packages/quay/test/cli-migrate.test.mjs",
+      "packages/quay/test/migrate-single-source.test.mjs",
+      "packages/quay/test/migrate.test.mjs",
+      "tasks/DIR-039.md"
+    ],
+    "actualFiles": [
+      "package-lock.json",
+      "packages/quay-backlog/bin/quay-backlog.js",
+      "packages/quay-backlog/package.json",
+      "packages/quay-backlog/provider.yml",
+      "packages/quay-backlog/src/backlog-client.js",
+      "packages/quay-backlog/src/manifest.js",
+      "packages/quay-backlog/src/mcp-server.js",
+      "packages/quay-backlog/test/backlog-client.test.mjs",
+      "packages/quay-backlog/test/mcp-server.test.mjs",
+      "packages/quay/bin/quay.js",
+      "packages/quay/src/migrate.js",
+      "packages/quay/test/cli-migrate.test.mjs",
+      "packages/quay/test/migrate-single-source.test.mjs",
+      "packages/quay/test/migrate.test.mjs",
+      "tasks/DIR-039.md"
+    ]
+  },
+  {
+    "id": "M-dir042a-dod-gate-set",
+    "declaredGlobs": [
+      ".quay/gates.yml",
+      "packages/quay/src/gate/registry.js",
+      "packages/quay/test/dod-gate-set.test.mjs",
+      "tasks/DIR-042-A.md"
+    ],
+    "actualFiles": [
+      ".quay/gates.yml",
+      "packages/quay/src/gate/registry.js",
+      "packages/quay/test/dod-gate-set.test.mjs",
+      "tasks/DIR-042-A.md"
+    ]
+  }
+]
