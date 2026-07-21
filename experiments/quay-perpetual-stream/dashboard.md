@@ -6239,3 +6239,12 @@ Initial build had one-directional check only. Adversarial audit found Clauses 10
 | ID | Title | Type | VT Δ |
 |---|---|---|---|
 | exp5-M-CRYST-B5-PARSER-UNIFY | B5 unify extractSection parser fork | subtractive | 0 |
+
+---
+## M69 SELECT — exp5-M-CRYST-B6-VALIDATOR-COVERAGE
+
+**Selected:** exp5-M-CRYST-B6-VALIDATOR-COVERAGE — B6 Validator coverage: add directive Finding/Requested-action section-presence check; document semantic-emptiness non-goal
+
+**Rationale:** B-series continuation (B5 done M68; C1 dependency cleared M66). Closes a known structural validator gap: directives missing `## Finding` or `## Requested action` currently PASS the validator silently. Adds label-aware section-presence check, fixture-pinned. LOOP-EXECUTABLE, no driver mutation, small scope.
+
+**Deferred:** DIR-038/DIR-044 (D3 driver-rewrite class, still deferred).

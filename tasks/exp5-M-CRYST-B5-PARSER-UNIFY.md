@@ -43,3 +43,5 @@ would cause truncation differences in the `## Value type / cadence`, `## Source`
 
 **C2 note:** No C2 (task-schema validator) implications arose. The canonical `extractSection` in
 `task-schema.mjs` is unchanged; this task only consumed it, not altered it.
+## Not selected (M69)
+Done (M68). Not applicable.

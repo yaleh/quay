@@ -2,7 +2,7 @@
 id: exp5-M-CRYST-B6-VALIDATOR-COVERAGE
 title: "B6 Validator coverage: assert directive Finding/Requested-action;
   document semantic-emptiness non-goal (review C1)"
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - crystallization
