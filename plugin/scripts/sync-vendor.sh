@@ -61,6 +61,14 @@ cp "${REPO_ROOT}/experiments/quay-perpetual-stream/scripts/task-schema-check.mjs
 cp "${REPO_ROOT}/experiments/quay-perpetual-stream/scripts/task-schema-check.sh" "${PLUGIN_DIR}/scripts/task-schema-check.sh"
 chmod +x "${PLUGIN_DIR}/scripts/task-schema-check.sh"
 
+# DIR-049: the concurrent-scheduler scripts the loop-driver skill calls at concurrency > 1 MUST ship
+# with the plugin (a consumer workspace like archguard has no experiments/ dir). Self-contained (they
+# only import each other, relative). Canonical source stays experiments/; these are vendored copies.
+echo "[sync-vendor] mirroring the DIR-044 concurrency scripts -> plugin/scripts/ ..."
+for s in touches-orthogonality-check concurrent-batch-scheduler serial-fanin-absorb anti-drift-touches-check; do
+  cp "${REPO_ROOT}/experiments/quay-perpetual-stream/scripts/${s}.mjs" "${PLUGIN_DIR}/scripts/${s}.mjs"
+done
+
 # Sanitize plugin-specific project-internal attribution: the source files'
 # header comments say "(exp5 / canonical-task-schema unit ...)" — an internal
 # label meaningful only inside the quay repo's own experiments/ layer, not a
