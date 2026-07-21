@@ -69,6 +69,30 @@ normalized, vs chart-0's 88.25/100 = 0.8825 normalized — the two totals are on
 not directly comparable without normalizing; recorded both raw and normalized to avoid an
 apples-to-oranges Δv claim next milestone).
 
+### OUTWARD VT term (DIR-038-C) — the unbounded, additive dimension the cov ruler could not see
+
+The `Σ weight·cov` model above is BOUNDED (`cov ∈ [0,1]`) and near-saturated (≈0.93), so it scores only
+FILLING pre-enumerated surfaces — never ADDING a capability or being USED externally. Two real forms of
+value scored **0** under it and are now captured by an explicit **unbounded** term, `outwardVT` (single
+source: `scripts/outward-vt-check.mjs`; soft weights, revisable at a checkpoint like the cov weights):
+
+`outwardVT = 10·externalDeployments + 1·foreignTasksDriven + 5·newCapabilities` — no ceiling (a sum of
+unbounded counts), the property the bounded cov cells structurally lack.
+
+**Realized outward VT (this restart window, REAL objects — not a placeholder):**
+| signal | count | ×weight | provenance |
+|---|---|---|---|
+| external deployments | 1 | 10 | quay is archguard's task backend (DIR-036-B) — `/home/yale/work/archguard/.quay/` + `quay-tasks/` |
+| foreign tasks driven | 9 | 9 | quay's loop autonomously drove to done: TASK-24/25, DIR-001/002, TASK-29, TASK-EXP-A, ARCH-CONC-A/B/C |
+| new capabilities | 5 | 25 | cov-uncell-able: document-management (M45), migrate (DIR-039), concurrent-scheduler (DIR-044), dispatched+audit (DIR-048), autonomous concurrency (DIR-049) |
+| **outward VT term** | | **44** | non-saturating, confirmed by `outward-vt-check.mjs` |
+
+**Re-score (AC #1): M45 document-management** scored **cov = 0** ("no VT chart cell"); under the outward
+term it contributes as **1 new capability = 5 points → non-zero** (`rescore(0,1).rescued === true`). The
+ruler now READS the external `L_T` signal DIR-036 produces, so capability-adding and external use register
+value without a pre-enumerated cov cell. (Integrating the outward term into the per-milestone Δv that
+feeds the rolling-slope halt — A — is the terminal DIR-038 step once the outward cadence is a standing input.)
+
 VT curve (append, chart-1 basis from m3 forward):
 `[ (m0, 82.25/100), (m1/M-DIST, 88.25/100, Δv=+6.0), (m2/M-GATES, 88.25/100, Δv=0, methodology-infra
 no VT points), (m3/M-ABI-EVAL, 101.33/120, chart transition — not a direct Δv vs m2's 88.25/100;

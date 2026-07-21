@@ -1,0 +1,10 @@
+{
+  "externalDeployments": 1,
+  "foreignTasksDriven": 9,
+  "newCapabilities": 5,
+  "_provenance": {
+    "externalDeployments": "quay deployed as archguard's task backend (DIR-036-B): /home/yale/work/archguard/.quay/ + quay-tasks/",
+    "foreignTasksDriven": "quay's loop autonomously drove to done: TASK-24, TASK-25, DIR-001, DIR-002, TASK-29 (DIR-048-era loop), TASK-EXP-A (DIR-048), ARCH-CONC-A/B/C (DIR-049) = 9",
+    "newCapabilities": "capabilities the bounded cov ruler scored 0 / no-VT-cell: document-management (M45), migrate/import (DIR-039), concurrent-scheduler (DIR-044), dispatched+adversarial (DIR-048), autonomous N-wide concurrency (DIR-049) = 5"
+  }
+}
