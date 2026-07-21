@@ -1,7 +1,7 @@
 ---
 id: exp5-M-TS-MIGRATION-P3-B
 title: "TS migration P3-B: port quay Core package internals to TypeScript"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - crystallization
