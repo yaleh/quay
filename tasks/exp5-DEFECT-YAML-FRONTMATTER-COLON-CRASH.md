@@ -5,6 +5,12 @@ status: todo
 labels:
   - milestone-candidate
   - defect
+extra:
+  schema: "v1"
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH
+    experiments/quay-perpetual-stream/charters/M89-yaml-frontmatter-crash.md
+    /tmp/m89-absorb-entry.md
 ---
 ## Proposal
 
@@ -32,25 +38,35 @@ string values containing `: ` sequences to be quoted, but the task_write path do
 or auto-quote YAML values before writing.
 
 **Impact:** The loop could not read its own task board at session start. Every tool call that
-needs the task list failed until the offending task file was manually fixed.
+needs the task list failed until the offending task file was manually fixed. This is a
+production-safety defect: one corrupted task silently blocks the entire loop.
+
+**Fix approach:** Post-write YAML validation in `quay-native`'s task-write path — after writing
+the file, immediately re-parse it and return an error if parsing fails. The writer already has
+the data; this is a single read-back check. Optionally also auto-quote or sanitize string values
+that contain `: ` patterns before writing (belt-and-suspenders).
 
 ## Plan
 
-N/A — two options (either or both): (a) `task_write` validates YAML after writing and rejects
-malformed frontmatter, (b) the frontmatter parser uses lenient string handling (YAML `|` block
-scalar or auto-quotes string values). The simplest fix is (a): a post-write YAML parse check
-in `quay-native`'s task-write path that returns an error if the written file is not valid YAML.
+N/A — bounded fix: add a post-write YAML validation call in `packages/quay-native/src/` task
+write path + add a RED→GREEN test covering the `: ` in frontmatter value case. Expected scope:
+~50L product code change + ~30L new test. Well within 2000L ceiling.
 
 ## Acceptance Criteria
 
-- [ ] `quay-native` task_write (or its YAML serializer) validates the written YAML frontmatter and returns an error if the resulting file would fail to parse
-- [ ] A test case covers: writing a task with a `dirStatus` value containing `key: value` patterns, confirms the write either succeeds with a quoted value OR returns a validation error
-- [ ] `mcp__plugin_quay_quay__task_list` no longer returns a parse error when one task has a frontmatter value with `: ` in it
+- [ ] `quay-native` task write path validates YAML post-write and returns an error if the written file would fail to parse (not silently corrupt the store)
+- [ ] A RED→GREEN test covers: writing a task whose frontmatter value contains `key: value` patterns (`: ` in a string value), confirms the write either succeeds with valid YAML OR returns a clear validation error — not a silent corrupt file
+- [ ] `task_list` no longer crashes for all tasks when one task has a frontmatter value with `: ` in it — the bad task is rejected at write time, not at read time
 
 ## Definition of Done
 
-References the standard inherited-core DoD clauses.
+References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts.
 
-- [ ] quay-native task_write includes post-write YAML validation
-- [ ] Test coverage for the colon-in-value case
-- [ ] Adversarial audit disposition recorded
+- [ ] Post-write YAML validation added to `quay-native` task write path; the `: ` case is rejected or auto-quoted
+- [ ] RED→GREEN test pinning the fix (no fixture; the test must exercise the real write path)
+- [ ] Adversarial audit disposition recorded (NO REFUTATION FOUND / CONCERNS / REFUTED)
+- [ ] Acceptance gate PASS
+
+## Not selected (M88)
+
+M88 was the explore milestone that filed this task (from history-mining). Not selected at M88 because M88 was itself this exploration.

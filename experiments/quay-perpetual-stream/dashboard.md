@@ -645,3 +645,14 @@ m87 · DIR-050 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=8a4fb85 ·
 **Charter:** `experiments/quay-perpetual-stream/charters/M88-history-mining-explore.md`
 
 m88 · exp5-M-HISTORY-MINING-EXPLORE · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=3f196ca · → milestones/M88/
+
+## SELECT M89 — exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH
+
+**Selected:** exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH — fix YAML frontmatter colon crash: a single task with `: ` in a frontmatter value crashes `task_list` for the entire task store; add post-write YAML validation to `quay-native` task write path.
+
+**Rationale:** Exploit pick. Production-safety defect surfaced by M88 history-mining: unquoted colon in frontmatter value (`routines: run` substring in `dirStatus`) blocks the loop from reading its own task board at session start. One corrupted task takes down the whole board. No existing validation gate prevents this. Fix is bounded (~80L) and urgent.
+
+**Deferred:** exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP (process fix, lower urgency than board crash), DIR-052 (routine fire, real-fire DoD needed), DIR-055 (standing routine). P4 (TS migration method-infra, 5235L — split needed).
+
+**Task:** [[exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH]] (`tasks/exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M89-yaml-frontmatter-crash.md`

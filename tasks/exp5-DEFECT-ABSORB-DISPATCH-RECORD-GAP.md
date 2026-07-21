@@ -45,3 +45,7 @@ References the standard inherited-core DoD clauses.
 - [ ] `OUTER-LOOP.md` updated with dispatch-record sample
 - [ ] At least one real ABSORB entry (next milestone's ABSORB) passes clause12 on first attempt without manual intervention
 - [ ] Adversarial audit disposition recorded
+
+## Not selected (M89)
+
+Not selected M89 — ranked below exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH this pass. YAML crash is production-safety (blocks task board at loop start); dispatch-record gap is a process fix (already manually worked-around in M88 ABSORB). YAML crash selected first.
