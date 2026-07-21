@@ -1,18 +1,24 @@
-// loop-params.js — reads and validates .quay/loop.yml for the loop-driver skill (DIR-045).
+// loop-params.js — reads and validates .quay/loop.yml for the loop-driver skill (DIR-045/DIR-048).
 //
 // Contract: readLoopParams(workspaceRoot) → LoopParams | throws Error("FAIL-CLOSED: ...")
 //
 // FAIL-CLOSED: missing file, malformed YAML, or missing required fields ALL throw.
 // A skill that cannot read its params refuses to run — no silent defaults for
-// the required fields (board, gates). Optional fields (stop, policy, coexist)
-// have safe defaults.
+// the required fields (board, gates). Optional fields (stop, policy, coexist,
+// execution, audit) have safe defaults.
 //
 // Schema (.quay/loop.yml):
-//   board:   string   REQUIRED — provider name (e.g. "native")
-//   gates:   string|string[]  REQUIRED — gate name(s) refs into .quay/gates.yml
-//   stop:    string   OPTIONAL — "once" | "until(.halt)" | "until(empty)" | default "once"
-//   policy:  string   OPTIONAL — select-ranking policy; default "ready-first"
-//   coexist: string|null OPTIONAL — pause-hook (e.g. "pause(backlog/.loop-stop)"); default null
+//   board:     string   REQUIRED — provider name (e.g. "native")
+//   gates:     string|string[]  REQUIRED — gate name(s) refs into .quay/gates.yml
+//   stop:      string   OPTIONAL — "once" | "until(.halt)" | "until(empty)" | default "once"
+//   policy:    string   OPTIONAL — select-ranking policy; default "ready-first"
+//   coexist:   string|null OPTIONAL — pause-hook (e.g. "pause(backlog/.loop-stop)"); default null
+//   execution: string   OPTIONAL — "dispatched" (DEFAULT) | "inline"
+//                         dispatched: build runs in a fresh background subagent (FAIL-CLOSED if no Agent tool)
+//                         inline: build runs in the driver's own context (explicit opt-out)
+//   audit:     string   OPTIONAL — "adversarial" (DEFAULT) | "none"
+//                         adversarial: fresh-context subagent audits diff before land; refutation blocks land
+//                         none: gate-output only; no independent audit (explicit opt-out)
 //
 // Valid `stop` values: "once", "until(.halt)", "until(empty)", or until(K·ΔV<ε) prefix.
 
@@ -22,12 +28,15 @@ import YAML from "yaml";
 
 const VALID_STOP_RE = /^(once|until\(.+\))$/;
 
+const VALID_EXECUTION = new Set(["dispatched", "inline"]);
+const VALID_AUDIT = new Set(["adversarial", "none"]);
+
 /**
  * Read and validate `.quay/loop.yml` from workspaceRoot.
  * Throws Error("FAIL-CLOSED: ...") on any validation failure.
  *
  * @param {string} workspaceRoot
- * @returns {{ board: string, gates: string[], stop: string, policy: string, coexist: string|null }}
+ * @returns {{ board: string, gates: string[], stop: string, policy: string, coexist: string|null, execution: string, audit: string }}
  */
 export function readLoopParams(workspaceRoot) {
   const loopYmlPath = path.join(workspaceRoot, ".quay", "loop.yml");
@@ -94,11 +103,29 @@ export function readLoopParams(workspaceRoot) {
       ? parsed.coexist.trim() || null
       : null;
 
+  // 9. Optional: execution — "dispatched" (DEFAULT) | "inline"
+  const execution = parsed?.execution ?? "dispatched";
+  if (!VALID_EXECUTION.has(execution)) {
+    throw new Error(
+      `FAIL-CLOSED: .quay/loop.yml field 'execution' value "${execution}" is invalid — must be "dispatched" or "inline"`
+    );
+  }
+
+  // 10. Optional: audit — "adversarial" (DEFAULT) | "none"
+  const audit = parsed?.audit ?? "adversarial";
+  if (!VALID_AUDIT.has(audit)) {
+    throw new Error(
+      `FAIL-CLOSED: .quay/loop.yml field 'audit' value "${audit}" is invalid — must be "adversarial" or "none"`
+    );
+  }
+
   return {
     board: parsed.board.trim(),
     gates,
     stop: stop.trim(),
     policy,
     coexist,
+    execution,
+    audit,
   };
 }
