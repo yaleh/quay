@@ -6072,3 +6072,26 @@ info: prunable merged iteration branches=0; registered iteration worktrees=0.
 
 ## Backlog row
 | DIR-045 | the loop-driver skill (DIR-042-B, M60) was a slim prose driver with no formal contract — a foreign project launching via it had to inline a fat prose driver with hardcoded params, the wrong abstraction level. Closed via (1) formal `iterate` contract (baime prompt-doc style, 6 typed sub-steps + inline invariants, single-sourced), (2) `readLoopParams` FAIL-CLOSED params reader (`.quay/loop.yml` schema: board/gates/stop/coexist/policy), (3) 12/12 RED+GREEN params tests, (4) one contract + two real params files proved via real archguard TASK-25 iteration (real diff `da04248` + vitest gate PASS in deps-ready worktree) + exp5 loop.yml | capability-growth (primary) + governance-integrity (secondary), builds on DIR-042-B (M60) + DIR-046 (M61) | no new VT chart cell (skill-layer/governance-integrity surface, not chart-1-scored axis) | directive, milestone-candidate, milestone:M64 |
+
+## SELECT M65 — 2026-07-21
+
+**Selected task:** [[DIR-047]] (`tasks/DIR-047.md`) — configurable creation default status via `.quay/config.yml`: a per-provider `default_task_status` key that replaces the hardcoded `?? "todo"` fallback in task creation.
+
+**Class:** LOOP-EXECUTABLE (product config surface; no driver mutation; no charter file, per M47+ no-charter-for-LOOP-EXECUTABLE precedent).
+
+**SELECT reasoning:** DIR-047 is the strongest candidate this pass:
+1. **Fresh from M64 dogfood** — surfaced by the archguard loop-driver dogfood (seeded tasks sat `todo`, invisible to the loop's `ready` predicate). Immediate follow-on to close the friction.
+2. **LOOP-EXECUTABLE** — pure product config surface. No driver mutation, no D3 golden-replay. Blast radius: `packages/quay-native/bin/quay-native.js` creation path + config loader.
+3. **High capability-growth value** — directly unblocks archguard adoption: with `default_task_status: ready`, new quay-native tasks land `ready` with zero manual promotion. The loop-driver's fixed `ready` predicate stays clean.
+4. **Smaller scope** than the crystallization candidates (C1, INV); those remain strong for M66+.
+5. **M65 is a checkpoint milestone** (65 % 5 == 0 — checkpoint due at ABSORB). DIR-047's small scope fits a checkpoint milestone well — clean, contained, easy for the checkpoint to assess.
+
+**Candidates not selected:**
+- [[exp5-M-CRYST-C1]] (executable split-or-commit gates), [[exp5-M-CRYST-INV]] (invariant enforcement): strong governance-integrity; deferred — DIR-047 wins for freshness + capability-growth.
+- [[DIR-038]] / [[DIR-044]]: still D3 driver-rewrite class; deferred.
+
+**Value hypothesis (Δv̂):** no new VT chart cell (product config surface / capability-growth type; the fix removes adoption friction, not a chart-1-scored surface). Type: capability-growth (primary). Realized Δv recorded at M65 ABSORB.
+
+**Schema check:** `bash experiments/quay-perpetual-stream/scripts/task-schema-check.sh tasks/DIR-047.md` → PASS.
+
+**Milestone label:** `milestone:M65` added to `tasks/DIR-047.md`.

@@ -30,3 +30,6 @@ Considered alongside the crystallization epic's usual candidate set, compared ag
 `exp5-M-DIR033-WORKTREE-HYGIENE` (fresh pending directive, live measured present-drift evidence).
 No new urgency signal on C1 this pass (unchanged since last considered); deferred again — remains
 open.
+
+## Not selected (M65)
+Strong governance-integrity candidate (executable enforcement of split-or-commit), but [[DIR-047]] wins this pass — fresh from the M64 archguard dogfood finding, higher immediate capability-growth value (directly unblocks archguard loop-driver adoption), and smaller blast radius. C1 remains the next crystallization milestone to consider.

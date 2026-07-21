@@ -57,3 +57,6 @@ DIR vs. INV's own repeatedly-deferred backlog status, now 5 passes running). DIR
 pass; INV remains open, unblocked, still a strong future candidate — its own narrower scope (a
 meta-gate on FUTURE rule-additions, forward-looking) makes it lower urgency than closing a PRESENT
 drift instance.
+
+## Not selected (M65)
+Still deferred — [[DIR-047]] selected this pass (fresh dogfood directive, direct capability-growth, smaller scope). INV remains strong but forward-looking; DIR-047 closes a PRESENT friction point first.
