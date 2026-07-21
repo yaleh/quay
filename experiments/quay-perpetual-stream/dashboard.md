@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 76** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 77** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -6468,3 +6468,38 @@ DIR-044-LIVE DoD satisfied on exp5's OWN repo: a real ≥2-wide batch ran via na
 |---|---|---|---|
 | exp5-M-LIVE-A | offline test: quay-native long-form heading gate resolution | product/test-coverage | 0 |
 | exp5-M-LIVE-B | offline test: quay Core resolveProviderEnv | product/test-coverage | 0 |
+
+---
+
+## M77 ABSORB — exp5-M-TS-MIGRATION-P1 (TS migration P1: provider-client.js → .ts)
+
+**Milestone:** M77 · **counter 76 → 77** · **Task:** [[exp5-M-TS-MIGRATION-P1]] · **Type:** capability-growth (L_C hardening) + governance-integrity (ADR-012) · **VT Δ:** 0
+
+**Charter:** `charters/M77-ts-migration-p1.md` (amended 2026-07-21 to include caller import extension updates)  
+**Worktree:** `milestones/M77/worktrees/iteration-0` (branch `exp5-m77-iteration-0`, commit `a630814`)  
+**Merge:** `9ca2b0a` (2026-07-21)
+
+### Iteration summary
+
+**iteration-0 scope-discovery** (first pass): TypeScript Bundler moduleResolution `.js`→`.ts` fallback is compile-time only; Node.js runtime requires exact extension. Result: needs-human initially, then charter amended (in-project fix, not external blocker).
+
+**iteration-0 retry** (successful):
+- `packages/quay/src/provider-client.js` → `provider-client.ts` with named interfaces `ConnectProviderOptions` (parameter) + `ProviderClient` (return); no `@ts-nocheck`; no `any` on public signature
+- 4 caller import extensions updated `.js`→`.ts` (3 named in charter + `test/task-check.test.mjs` discovered during execution)
+- `npx tsc --noEmit` → exit 0; test suite 342/338/4 (exact master baseline)
+
+### Gate dispositions
+
+- **adversarial-audit:** NO REFUTATION FOUND — agent `a6ec1c7e707f2bf90` (distinct from orchestrator `a653b2e9`). All 5 Done-when confirmed from raw output.
+- **V_meta consolidation-lag (--counter 76):** PASS — no rows past threshold; V_meta consolidation-lag: clear.
+- **impl-row gate:** PASS — not design-only.
+- **quay gate exp5-M-TS-MIGRATION-P1:** PASS (GateEvent `b75db8be`, 2026-07-21T17:21:20Z)
+- **Merge:** clean, no conflicts. Reconciliation note: only 5 package files changed in branch (provider-client.ts + 4 import fixes); milestone evidence files (iteration-0.md, audit) committed separately to master.
+
+### Adaptation log
+
+Scope-sizing lesson: TS migration milestones must enumerate ALL importers of the ported module, not just non-test callers. Charter listed 3 callers; 4 existed. Future charters: run `grep -r "provider-client.js"` before scope declaration.
+
+| ID | Title | Type | VT Δ |
+|---|---|---|---|
+| exp5-M-TS-MIGRATION-P1 | TS migration P1: provider-client.js → .ts (ADR-012 L_C hardening) | capability-growth / governance-integrity | 0 |

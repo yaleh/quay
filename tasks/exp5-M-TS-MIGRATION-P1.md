@@ -4,7 +4,7 @@ title: "TS migration P1 (leaf modules, ADR-012): port pure-logic leaf modules
   (task-schema, provider-client, gate registry — no wide product-code rewrite
   yet) to real .ts, behavior-preserving + golden-diff. Loop-executable,
   human-authorized slice of exp5-M-TS-MIGRATION, phase 2 of 5 (P0 done)."
-status: todo
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -48,18 +48,25 @@ N/A — split-or-commit (DIR-026): each milestone under this task ports 1 (or a 
 Loop: SELECT this task per normal `ready`-status pickup once promoted; scope strictly to the candidate file list above (or a subset); if a candidate is found to have broad fan-in beyond "leaf", stop and land as `needs-human` with the finding recorded rather than widening scope.
 
 ## Acceptance Criteria
-- [ ] At least one leaf module from the candidate list is renamed `.js`→`.ts` with real (non-`any`) types on its public surface.
-- [ ] `tsc --noEmit` gate (wired at P0) stays GREEN including the newly-typed file(s).
-- [ ] The existing test suite covering the ported module(s) stays green, unmodified in assertions (behavior-preserving — golden-diff, no logic change).
-- [ ] Any P0 `// @ts-nocheck` ramp marker on the ported file(s) is removed (the file is now real-typed, not just tolerated).
-- [ ] Scope stayed within "leaf pure-logic module" — no Provider ABI surface change, no CLI/MCP/web-UI logic change. Exception: trivially behavior-preserving caller import extension changes (`.js` → `.ts`) in `mcp-server.js`, `serve.js`, `quay.js` are authorized (no logic, no ABI, only the import string extension changes; Node 25 resolves `.ts` natively).
+- [x] At least one leaf module from the candidate list is renamed `.js`→`.ts` with real (non-`any`) types on its public surface.
+- [x] `tsc --noEmit` gate (wired at P0) stays GREEN including the newly-typed file(s).
+- [x] The existing test suite covering the ported module(s) stays green, unmodified in assertions (behavior-preserving — golden-diff, no logic change).
+- [x] Any P0 `// @ts-nocheck` ramp marker on the ported file(s) is removed (the file is now real-typed, not just tolerated).
+- [x] Scope stayed within "leaf pure-logic module" — no Provider ABI surface change, no CLI/MCP/web-UI logic change. Exception: trivially behavior-preserving caller import extension changes (`.js` → `.ts`) in `mcp-server.js`, `serve.js`, `quay.js` are authorized (no logic, no ABI, only the import string extension changes; Node 25 resolves `.ts` natively).
 
 ## Definition of Done
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts:
-- [ ] At least one real `.ts` leaf module lands on master, typed, gate-green, test-green — captured (DIR-026 real object), not a fixture.
-- [ ] Existing suite green throughout (behavior-preserving); no product behavior changed.
-- [ ] Scope discipline held: broad/ABI/CLI/MCP/web-UI changes were NOT pulled into this phase; any such need was flagged for P2+ instead.
-- [ ] The parent [[exp5-M-TS-MIGRATION]] P1 progress is reflected (parent AC item 1 partially covers P0; this phase's own real evidence lives here, not duplicated into the parent body).
+- [x] At least one real `.ts` leaf module lands on master, typed, gate-green, test-green — captured (DIR-026 real object), not a fixture.
+- [x] Existing suite green throughout (behavior-preserving); no product behavior changed.
+- [x] Scope discipline held: broad/ABI/CLI/MCP/web-UI changes were NOT pulled into this phase; any such need was flagged for P2+ instead.
+- [x] The parent [[exp5-M-TS-MIGRATION]] P1 progress is reflected (parent AC item 1 partially covers P0; this phase's own real evidence lives here, not duplicated into the parent body).
+
+## Execution record
+
+Milestone: M77 | Iteration: iteration-0 (branch `exp5-m77-iteration-0`, commit `a630814`)  
+Realized Δv: 0 (L_C hardening, no VT surface coverage change)  
+Merge SHA: 9ca2b0a (merge into master 2026-07-21)  
+Outcome: done — `provider-client.js` → `provider-client.ts` with named interfaces `ConnectProviderOptions` + `ProviderClient`; 4 callers updated (.js→.ts extension); tsc exits 0; test suite 338/342 (baseline match). Adversarial audit: NO REFUTATION FOUND. quay gate: PASS.
 
 ## Human verification when exp5 marks this done
 1. Does at least one real `.ts` file exist in `packages/**` with meaningful (non-`any`) types, distinct from the P0 tooling ramp?
