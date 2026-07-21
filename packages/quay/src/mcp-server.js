@@ -423,14 +423,21 @@ export async function startMcpServer() {
         provider: z.string().optional().describe("Provider id to query (defaults to the first-enabled Provider in .quay/config.yml)."),
         id: z.string().describe("Task id to run the gate against (e.g. 'QX-029')."),
         gate: z.string().optional().describe("Gate name to run (default: 'acceptance', matching the CLI's own default). Use `--gate dod`'s equivalent, e.g. gate: 'dod', to run the author gate instead."),
+        timeoutMs: z.number().int().positive().optional().describe("Kill deadline in ms for the acceptance runner (MCP parity with the CLI's --timeout; DIR-049 B1). Highest precedence: overrides the gate's gates.yml timeoutMs and the 60000 default. Needed for long suites (e.g. a ~137s `npx vitest run` via an acceptance gate would otherwise time out at the 60s default)."),
         file: z.string().optional().describe("Override the GateEvent log path (default <workspaceRoot>/.quay/gate-events.jsonl)."),
       },
     },
-    async ({ provider, id, gate, file }) => {
+    async ({ provider, id, gate, timeoutMs, file }) => {
+      const prevTimeout = process.env.QUAY_ACCEPTANCE_TIMEOUT_MS;
       try {
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
         process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+        // DIR-049 B1: thread an explicit timeout into the acceptance runner (the MCP path previously
+        // had NO way to raise it, so a long acceptance-gate command always hit the 60000 default —
+        // the archguard DIR-048 friction). `resolveRunnerOptions` reads QUAY_ACCEPTANCE_TIMEOUT_MS at
+        // highest precedence; set it here so gate_run reaches parity with the CLI `--timeout`.
+        if (timeoutMs !== undefined) process.env.QUAY_ACCEPTANCE_TIMEOUT_MS = String(timeoutMs);
         const result = await runGate({ client, id, gate: gate ?? "acceptance", logPath, workspaceRoot: cfg.workspaceRoot });
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -438,6 +445,10 @@ export async function startMcpServer() {
         };
       } catch (err) {
         return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+      } finally {
+        // restore so one gate_run's explicit timeout never leaks into later env-driven resolutions
+        if (prevTimeout === undefined) delete process.env.QUAY_ACCEPTANCE_TIMEOUT_MS;
+        else process.env.QUAY_ACCEPTANCE_TIMEOUT_MS = prevTimeout;
       }
     }
   );
