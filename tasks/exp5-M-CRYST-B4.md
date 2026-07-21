@@ -37,3 +37,6 @@ D4 [hard-fix] selected instead — closes the ADR-004 prose-parsing residual in 
 
 ## Not selected (M71)
 DIR-048 selected instead — fresh LOOP-EXECUTABLE directive with real dogfood motivation; capability-growth pick after 5 consecutive crystallization milestones (M66-M70).
+
+## Not selected (M72)
+E2 selected instead — ADR extraction produces concrete deliverables (new ADRs for load-bearing decisions); B4's AC1 already met by existing N/A-legacy-explicit schema behavior.

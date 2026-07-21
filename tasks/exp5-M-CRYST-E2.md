@@ -3,7 +3,7 @@ id: exp5-M-CRYST-E2
 title: E2 Extract ADRs from proposals + DIR tasks (single-source DIR-002→028,
   split-or-commit DIR-026, single-branch DIR-027, proposal→plan DIR-014,
   AC/DoD-in-task DIR-020, QENG, Provider ABI, ...)
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - crystallization

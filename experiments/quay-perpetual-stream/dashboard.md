@@ -6330,3 +6330,12 @@ Initial build missed updating `plugin/scripts/task-schema.mjs` — dual-source v
 | ID | Title | Type | VT Δ |
 |---|---|---|---|
 | DIR-048 | loop-driver execution/audit defaults (schema+skill; live proof outstanding) | capability-growth | 0 |
+
+---
+## M72 SELECT — exp5-M-CRYST-E2
+
+**Selected:** exp5-M-CRYST-E2 — E2 Extract ADRs from proposals + DIR tasks
+
+**Rationale:** Crystallization pick. The load-bearing design decisions in exp5's methodology (SPLIT-OR-COMMIT/DIR-026, single-branch/DIR-027, Provider ABI, QENG) are prose-scattered across DIR tasks and proposals — not yet single-sourced in the `adr/` store (the E1 kind already exists). E2 extracts ≥1 recurring decision into a schema-valid ADR with back-links and enforcement pointer. Primary target: SPLIT-OR-COMMIT (DIR-026) — fires at every milestone, most referenced by name, no dedicated ADR. LOOP-EXECUTABLE, bounded, no code changes needed.
+
+**Deferred:** exp5-M-CRYST-B4 (task migration sweep; AC1 already met by N/A-legacy-explicit behavior); DIR-038/DIR-044 (human-steered); DIR-048 (needs-human; live proof outstanding).
