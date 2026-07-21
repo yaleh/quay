@@ -1,4 +1,3 @@
-// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // DIR-039 (A): generic provider-to-provider migration over the Provider ABI.
 // The Core is written against the task view-model only (CLAUDE.md) — this
 // module reads EVERY task from a source provider client via `taskList`/
@@ -15,20 +14,23 @@
 // `writeOneTask()` this file also exports) so there is exactly one native-
 // write call site for both import paths, not two parallel ones.
 
+import type { ProviderClient } from "./provider-client.ts";
+import type { Task } from "./abi.ts";
+
 /**
  * Write one task view-model through the target provider's `taskWrite` ABI
  * call. This is the SINGLE native-write chokepoint both (A) generic
  * migration and (B) the Backlog.md importer funnel through — grep for
  * `writeOneTask` to confirm no second task-writing code path exists.
  *
- * @param {object} target a connected provider client (provider-client.js's
+ * @param target a connected provider client (provider-client.js's
  *   connectProvider() return shape: { taskWrite, ... })
- * @param {object} task the source task view-model
+ * @param task the source task view-model
  *   ({ id, title, status, labels, parent, children, body, extra? })
- * @returns {Promise<object>} the target provider's resulting task view-model
+ * @returns the target provider's resulting task view-model
  */
-export async function writeOneTask(target, task) {
-  const patch = {
+export async function writeOneTask(target: Pick<ProviderClient, "taskWrite">, task: Task): Promise<Task> {
+  const patch: Record<string, unknown> = {
     id: task.id,
     title: task.title,
     status: task.status,
@@ -56,17 +58,15 @@ export async function writeOneTask(target, task) {
  * `writeOneTask()` (the single native-write chokepoint) for every task
  * returned. Provider-agnostic: this function never branches on which
  * concrete provider `source`/`target` are.
- *
- * @param {object} args
- * @param {object} args.source connected source provider client
- * @param {object} args.target connected target provider client
- * @param {(task: object) => void} [args.onTask] optional per-task progress callback
- * @returns {Promise<{ total: number, migrated: object[], errors: Array<{id: string, error: string}> }>}
  */
-export async function migrateTasks({ source, target, onTask }) {
+export async function migrateTasks({ source, target, onTask }: {
+  source: Pick<ProviderClient, "taskList">;
+  target: Pick<ProviderClient, "taskWrite">;
+  onTask?: (task: Task) => void;
+}): Promise<{ total: number; migrated: Task[]; errors: Array<{ id: string; error: string }> }> {
   const tasks = await source.taskList({});
-  const migrated = [];
-  const errors = [];
+  const migrated: Task[] = [];
+  const errors: Array<{ id: string; error: string }> = [];
   for (const task of tasks) {
     try {
       const written = await writeOneTask(target, task);

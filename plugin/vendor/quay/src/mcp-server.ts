@@ -1,4 +1,3 @@
-// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay mcp — the Core's own MCP server (DIR-007; quay-proposal.md §5's
 // "MCP projection -> Agent" architecture claim). This is the consumer-layer
 // binding an Agent (Claude Code) connects to ONCE, regardless of how many
@@ -12,7 +11,7 @@
 //       own server files), and
 //   (b) an MCP CLIENT (fan-out) — for each Provider currently
 //       `enabled: true` in .quay/config.yml, it connects to that Provider's
-//       own MCP server via connectProvider() (provider-client.js's existing,
+//       own MCP server via connectProvider() (provider-client.ts's existing,
 //       unmodified taskList/taskGet/taskWrite/taskCheck/manifest functions —
 //       zero changes to that file were needed for this).
 //
@@ -44,11 +43,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import path from "node:path";
-import { loadConfig, activeProvider } from "./config.js";
-import { connectProvider } from "./provider-client.js";
-import { composePayload, deliverTrigger } from "./action.js";
-import { resolveProviderEnv } from "./provider-env.js";
-import { QUAY_VERSION } from "./version.js";
+import { loadConfig, activeProvider } from "./config.ts";
+import { connectProvider, type ProviderClient } from "./provider-client.ts";
+import { composePayload, deliverTrigger } from "./action.ts";
+import { resolveProviderEnv } from "./provider-env.ts";
+import { QUAY_VERSION } from "./version.ts";
 // DIR-007/QENG MCP parity: the QENG gate/lifecycle engine's MCP tools below
 // (gate_run/gate_log/lifecycle_*) delegate straight into these SAME
 // functions bin/quay.js's own gate/gate-log/complete/adjudicate/promote/
@@ -56,24 +55,29 @@ import { QUAY_VERSION } from "./version.js";
 // the CLI's own reuse discipline. `run` is deliberately NOT exposed here --
 // see docs/plans/14-mcp-gate-lifecycle-parity.md for the full per-command
 // decision table (unbounded autonomous loop vs. MCP's single-call contract).
-import { runGate } from "./gate/engine.js";
-import { resolveGateLogPath, runGateLogQuery } from "./gate/gate-log.js";
-import { runComplete, runAdjudicate, runPromote, runRetreat, assertTransition } from "./gate/lifecycle.js";
+import { runGate } from "./gate/engine.ts";
+import { resolveGateLogPath, runGateLogQuery } from "./gate/gate-log.ts";
+import { runComplete, runAdjudicate, runPromote, runRetreat } from "./gate/lifecycle.ts";
 
 // QX-035 (experiment 4, iteration 10): read package version at startup for
 // Mitigation A (_version field in task_list response) and Mitigation B
 // (Version: in tool description). ENV-001 mitigation — lets AI agent consumers
 // detect MCP server staleness by comparing _version against their expected version.
-// (Extracted to ./version.js so the SEA build can alias it to a
+// (Extracted to ./version.ts so the SEA build can alias it to a
 // build-time-embedded shim — see scripts/version-sea-shim.js.)
 
-// resolveProviderEnv is now imported from ./provider-env.js (QN-045): this
-// file, bin/quay.js, and serve.js all share the single implementation there
+// resolveProviderEnv is now imported from ./provider-env.ts (QN-045): this
+// file, bin/quay.js, and serve.ts all share the single implementation there
 // — the "duplicated here rather than imported" note this comment previously
-// carried is resolved; see provider-env.js's own header for why (DESIGN.md
+// carried is resolved; see provider-env.ts's own header for why (DESIGN.md
 // §4.4's asymmetry).
 
-async function connectToProvider(cfg, providerId) {
+interface ConnectedProvider {
+  id: string;
+  client: ProviderClient;
+}
+
+async function connectToProvider(cfg: ReturnType<typeof loadConfig>, providerId: string | undefined): Promise<ConnectedProvider> {
   const provider = activeProvider(cfg, providerId);
   const providerDir = path.resolve(cfg.workspaceRoot, provider.path ?? ".");
   const [command, ...args] = provider.mcp_entry;
@@ -90,12 +94,12 @@ async function connectToProvider(cfg, providerId) {
 // Provider currently enabled: true"). Order follows Object.entries() order
 // of the config's `providers` map (insertion order — deterministic given a
 // single config file).
-function enabledProviderIds(cfg) {
-  const providers = cfg.config.providers ?? {};
+function enabledProviderIds(cfg: ReturnType<typeof loadConfig>): string[] {
+  const providers = (cfg.config as Record<string, unknown>).providers as Record<string, { enabled?: boolean }> ?? {};
   return Object.keys(providers).filter((id) => providers[id].enabled);
 }
 
-export async function startMcpServer() {
+export async function startMcpServer(): Promise<void> {
   const cfg = loadConfig();
   const enabledIds = enabledProviderIds(cfg);
   if (enabledIds.length === 0) {
@@ -107,8 +111,8 @@ export async function startMcpServer() {
   // startup) so a workspace with N enabled Providers but a session that only
   // ever touches one doesn't pay the spawn cost for the others. Connections
   // are cached and reused, and closed together on server shutdown.
-  const clients = new Map(); // providerId -> Promise<{id, client}>
-  function getClient(providerId) {
+  const clients = new Map<string, Promise<ConnectedProvider>>(); // providerId -> Promise<{id, client}>
+  function getClient(providerId: string | undefined): Promise<ConnectedProvider> {
     const id = providerId || defaultId;
     if (!enabledIds.includes(id)) {
       throw new Error(
@@ -118,7 +122,7 @@ export async function startMcpServer() {
     if (!clients.has(id)) {
       clients.set(id, connectToProvider(cfg, id));
     }
-    return clients.get(id);
+    return clients.get(id) as Promise<ConnectedProvider>;
   }
 
   const server = new McpServer({
@@ -167,17 +171,17 @@ export async function startMcpServer() {
   // term matches a standard section name (e.g. "Proposal" matching every
   // task that uses the Proposal/Plan/AC/DoD template).
   //
-  // QX-028 added this helper to bin/quay.js and serve.js. Inlined here
-  // rather than imported because mcp-server.js is a separate entry point —
-  // importing from serve.js or bin/quay.js would create cross-entry-point
+  // QX-028 added this helper to bin/quay.js and serve.ts. Inlined here
+  // rather than imported because mcp-server.ts is a separate entry point —
+  // importing from serve.ts or bin/quay.js would create cross-entry-point
   // dependencies that don't exist anywhere else in this package. The
   // implementation is identical in all three locations by design.
   //
-  // QX-041 (experiment 4, iteration 11) added inFence tracking to serve.js
+  // QX-041 (experiment 4, iteration 11) added inFence tracking to serve.ts
   // to preserve `# comment` lines inside fenced code blocks from being
   // stripped. QX-044 (experiment 4, iteration 12) syncs that fix here
-  // (SH-005: the mcp-server.js inline copy was not updated by QX-041).
-  function stripHeadings(text) {
+  // (SH-005: the mcp-server.ts inline copy was not updated by QX-041).
+  function stripHeadings(text: string): string {
     let inFence = false;
     return (text || "").split("\n").filter((line) => {
       if (/^```/.test(line)) { inFence = !inFence; return true; }
@@ -198,7 +202,7 @@ export async function startMcpServer() {
   //
   // QX-029 (experiment 4, iteration 8): added optional `search` parameter —
   // closes CB-014 (partial: search parity). Title+body search with heading
-  // exclusion via stripHeadings(). Same logic as bin/quay.js + serve.js.
+  // exclusion via stripHeadings(). Same logic as bin/quay.js + serve.ts.
   //
   // QX-030 (experiment 4, iteration 8): added optional `page` / `pageSize`
   // pagination parameters — closes CB-010 and UQ-008 (MCP response size).
@@ -242,7 +246,7 @@ export async function startMcpServer() {
     async ({ provider, status, label, prefix, search, page, pageSize }) => {
       const { client } = await getClient(provider);
       // QX-032: normalize label to an array (backward-compatible — single string still works).
-      const labelFilters = Array.isArray(label) ? label : (label ? [label] : []);
+      const labelFilters: string[] = Array.isArray(label) ? label : (label ? [label] : []);
       let tasks = await client.taskList({ status });
       // QX-032: client-side AND-join label filter — matches CLI (--label A --label B) and
       // Web UI (?label=A&label=B) semantics. Empty labelFilters = no filter applied.
@@ -264,8 +268,8 @@ export async function startMcpServer() {
       }
       // QX-030: pagination — applied after all filters so page/total reflect filtered set.
       const total = tasks.length;
-      const pageNum = Math.max(1, parseInt(page) || 1);
-      const size = Math.min(200, Math.max(1, parseInt(pageSize) || 50));
+      const pageNum = Math.max(1, parseInt(String(page)) || 1);
+      const size = Math.min(200, Math.max(1, parseInt(String(pageSize)) || 50));
       const start = (pageNum - 1) * size;
       const paged = tasks.slice(start, start + size);
       const totalPages = Math.ceil(total / size);
@@ -273,7 +277,7 @@ export async function startMcpServer() {
       // AI agents detect MCP server staleness by comparing against expected version.
       const result = { tasks: paged, total, page: pageNum, pageSize: size, totalPages, _version: QUAY_VERSION };
       return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
         structuredContent: result,
       };
     }
@@ -301,17 +305,17 @@ export async function startMcpServer() {
       if (!task) {
         return {
           isError: true,
-          content: [{ type: "text", text: `no such task: ${id} (provider: ${provider || defaultId})` }],
+          content: [{ type: "text" as const, text: `no such task: ${id} (provider: ${provider || defaultId})` }],
         };
       }
       return {
-        content: [{ type: "text", text: JSON.stringify(task, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }],
         structuredContent: { task },
       };
     }
   );
 
-  // task_write — generic passthrough (provider-client.js's own taskWrite is
+  // task_write — generic passthrough (provider-client.ts's own taskWrite is
   // already provider-agnostic per QN-024's comment; whether the selected
   // Provider actually implements data.write is between the caller and that
   // Provider's own manifest, same discipline as bin/quay.js's `task edit`).
@@ -336,7 +340,7 @@ export async function startMcpServer() {
         parent: z.string().nullable().optional().describe("Parent task id, or null to clear. Omit to leave unchanged."),
         children: z.array(z.string()).optional().describe("Replacement children array. Omit to leave unchanged."),
         body: z.string().optional().describe("Full replacement body (markdown). Omit to leave unchanged."),
-        extra: z.record(z.any()).optional().describe("Extra frontmatter fields as a key/value map."),
+        extra: z.record(z.string(), z.any()).optional().describe("Extra frontmatter fields as a key/value map."),
         expectedStatus: z.string().optional().describe("Optimistic-locking guard: if task's current status differs from this value, the write is refused with isError:true (no mutation). Omit to skip the check."),
       },
     },
@@ -345,13 +349,13 @@ export async function startMcpServer() {
       try {
         const task = await client.taskWrite({ id, ...patch });
         return {
-          content: [{ type: "text", text: JSON.stringify(task, null, 2) }],
+          content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }],
           structuredContent: { task },
         };
       } catch (err) {
         return {
           isError: true,
-          content: [{ type: "text", text: err?.message ?? String(err) }],
+          content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }],
         };
       }
     }
@@ -378,20 +382,20 @@ export async function startMcpServer() {
       try {
         const result = await client.taskCheck(id);
         return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          structuredContent: result,
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          structuredContent: result as Record<string, unknown>,
         };
       } catch (err) {
         return {
           isError: true,
-          content: [{ type: "text", text: err?.message ?? String(err) }],
+          content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }],
         };
       }
     }
   );
 
   // ── QENG gate/lifecycle tools (DIR-007 MCP parity) ──
-  // Every tool below delegates to the SAME src/gate/*.js functions
+  // Every tool below delegates to the SAME src/gate/*.ts functions
   // bin/quay.js's own gate/gate-log/complete/adjudicate/promote/retreat
   // branches call -- zero duplicated gate/lifecycle logic. `run` (the
   // autonomous scan->complete loop) is deliberately NOT exposed here; see
@@ -438,13 +442,13 @@ export async function startMcpServer() {
         // the archguard DIR-048 friction). `resolveRunnerOptions` reads QUAY_ACCEPTANCE_TIMEOUT_MS at
         // highest precedence; set it here so gate_run reaches parity with the CLI `--timeout`.
         if (timeoutMs !== undefined) process.env.QUAY_ACCEPTANCE_TIMEOUT_MS = String(timeoutMs);
-        const result = await runGate({ client, id, gate: gate ?? "acceptance", logPath, workspaceRoot: cfg.workspaceRoot });
+        const result = await runGate({ client: client as Parameters<typeof runGate>[0]['client'], id, gate: gate ?? "acceptance", logPath, workspaceRoot: cfg.workspaceRoot });
         return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          structuredContent: result,
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          structuredContent: result as unknown as Record<string, unknown>,
         };
       } catch (err) {
-        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
       } finally {
         // restore so one gate_run's explicit timeout never leaks into later env-driven resolutions
         if (prevTimeout === undefined) delete process.env.QUAY_ACCEPTANCE_TIMEOUT_MS;
@@ -478,11 +482,11 @@ export async function startMcpServer() {
         await getClient(provider); // validates provider id / resolves workspaceRoot use, same as other tools
         const events = runGateLogQuery(cfg.workspaceRoot, { pipelineId: id, gate, actor, since, until, limit, offset, file });
         return {
-          content: [{ type: "text", text: JSON.stringify(events, null, 2) }],
+          content: [{ type: "text" as const, text: JSON.stringify(events, null, 2) }],
           structuredContent: { events },
         };
       } catch (err) {
-        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
       }
     }
   );
@@ -505,13 +509,13 @@ export async function startMcpServer() {
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
         process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
-        const result = await runComplete({ client, id, logPath });
+        const result = await runComplete({ client: client as unknown as Parameters<typeof runComplete>[0]['client'], id, logPath });
         return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          structuredContent: result,
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          structuredContent: result as unknown as Record<string, unknown>,
         };
       } catch (err) {
-        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
       }
     }
   );
@@ -534,13 +538,13 @@ export async function startMcpServer() {
       try {
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
-        const result = await runAdjudicate({ client, id, logPath });
+        const result = await runAdjudicate({ client: client as unknown as Parameters<typeof runAdjudicate>[0]['client'], id, logPath });
         return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          structuredContent: result,
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          structuredContent: result as unknown as Record<string, unknown>,
         };
       } catch (err) {
-        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
       }
     }
   );
@@ -567,13 +571,13 @@ export async function startMcpServer() {
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
         process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
-        const result = await runPromote({ client, id, logPath });
+        const result = await runPromote({ client: client as unknown as Parameters<typeof runPromote>[0]['client'], id, logPath });
         return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          structuredContent: result,
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          structuredContent: result as unknown as Record<string, unknown>,
         };
       } catch (err) {
-        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
       }
     }
   );
@@ -600,20 +604,20 @@ export async function startMcpServer() {
       try {
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
-        const result = await runRetreat({ client, id, reason, logPath });
+        const result = await runRetreat({ client: client as unknown as Parameters<typeof runRetreat>[0]['client'], id, reason, logPath });
         return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          structuredContent: result,
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          structuredContent: result as unknown as Record<string, unknown>,
         };
       } catch (err) {
-        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
       }
     }
   );
 
   // ── ADR tools — proxy the Provider's adr_list/adr_get/adr_write (separate
   // object kind; a Provider MAY not support ADRs, in which case adrList returns
-  // [] and adr_get/adr_write surface isError, per provider-client.js).
+  // [] and adr_get/adr_write surface isError, per provider-client.ts).
   server.registerTool(
     "adr_list",
     {
@@ -627,7 +631,7 @@ export async function startMcpServer() {
     async ({ provider, status, tag }) => {
       const { client } = await getClient(provider);
       const adrs = await client.adrList({ status, tag });
-      return { content: [{ type: "text", text: JSON.stringify(adrs, null, 2) }], structuredContent: { adrs } };
+      return { content: [{ type: "text" as const, text: JSON.stringify(adrs, null, 2) }], structuredContent: { adrs } };
     }
   );
 
@@ -640,8 +644,8 @@ export async function startMcpServer() {
     async ({ provider, id }) => {
       const { client } = await getClient(provider);
       const adr = await client.adrGet(id);
-      if (!adr) return { isError: true, content: [{ type: "text", text: `no such ADR: ${id}` }] };
-      return { content: [{ type: "text", text: JSON.stringify(adr, null, 2) }], structuredContent: { adr } };
+      if (!adr) return { isError: true, content: [{ type: "text" as const, text: `no such ADR: ${id}` }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(adr, null, 2) }], structuredContent: { adr } };
     }
   );
 
@@ -665,9 +669,9 @@ export async function startMcpServer() {
       const { client } = await getClient(provider);
       try {
         const adr = await client.adrWrite({ id, ...patch });
-        return { content: [{ type: "text", text: JSON.stringify(adr, null, 2) }], structuredContent: { adr } };
+        return { content: [{ type: "text" as const, text: JSON.stringify(adr, null, 2) }], structuredContent: { adr } };
       } catch (err) {
-        return { isError: true, content: [{ type: "text", text: err?.message ?? String(err) }] };
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
       }
     }
   );
@@ -702,14 +706,14 @@ export async function startMcpServer() {
       if (!task) {
         return {
           isError: true,
-          content: [{ type: "text", text: `no such task: ${id} (provider: ${provider || defaultId})` }],
+          content: [{ type: "text" as const, text: `no such task: ${id} (provider: ${provider || defaultId})` }],
         };
       }
-      const buttons = (manifest.action_buttons ?? []).filter(
+      const buttons = ((manifest.action_buttons ?? []) as Array<{ id: string; label: string; whenStatus?: string[] }>).filter(
         (b) => !b.whenStatus || b.whenStatus.includes(task.status)
       );
       return {
-        content: [{ type: "text", text: JSON.stringify(buttons, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(buttons, null, 2) }],
         structuredContent: { buttons },
       };
     }
@@ -718,7 +722,7 @@ export async function startMcpServer() {
   // action_run — same compose+deliver logic as bin/quay.js's `action run`.
   // Supports the DIR-009 mock/file-log delivery mode via an explicit
   // `mockLogPath` argument (rather than only the QUAY_ACTION_MOCK_LOG env
-  // var bin/quay.js/serve.js read), so this tool's own regression test can
+  // var bin/quay.js/serve.ts read), so this tool's own regression test can
   // select deterministic delivery per-call without relying on process-wide
   // env state -- the same underlying deliverTrigger() contract, just wired
   // through an explicit MCP tool argument instead of an env var, since MCP
@@ -743,7 +747,7 @@ export async function startMcpServer() {
       if (!task) {
         return {
           isError: true,
-          content: [{ type: "text", text: `no such task: ${id} (provider: ${provider || defaultId})` }],
+          content: [{ type: "text" as const, text: `no such task: ${id} (provider: ${provider || defaultId})` }],
         };
       }
       let payloadObj;
@@ -752,7 +756,7 @@ export async function startMcpServer() {
       } catch (err) {
         return {
           isError: true,
-          content: [{ type: "text", text: err?.message ?? String(err) }],
+          content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }],
         };
       }
       const channel = `task-${id}`;
@@ -765,7 +769,7 @@ export async function startMcpServer() {
       });
       const combined = { ...payloadObj, channel, ...result };
       return {
-        content: [{ type: "text", text: JSON.stringify(combined, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(combined, null, 2) }],
         structuredContent: combined,
       };
     }

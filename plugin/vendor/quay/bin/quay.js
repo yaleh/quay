@@ -5,32 +5,32 @@
 
 import path from "node:path";
 import fs from "node:fs/promises";
-import { loadConfig, activeProvider } from "../src/config.js";
-import { connectProvider } from "../src/provider-client.js";
-import { composePayload, deliverTrigger } from "../src/action.js";
-import { resolveProviderEnv } from "../src/provider-env.js";
-import { QUAY_VERSION } from "../src/version.js";
+import { loadConfig, activeProvider } from "../src/config.ts";
+import { connectProvider } from "../src/provider-client.ts";
+import { composePayload, deliverTrigger } from "../src/action.ts";
+import { resolveProviderEnv } from "../src/provider-env.ts";
+import { QUAY_VERSION } from "../src/version.ts";
 // QENG-1: gate engine + GateEvent log. `gate`/`gate-log` are verb-less
 // top-level commands (see the main() dispatch below and their arg-extraction
 // note). runGate appends one GateEvent per run; runGateLogQuery is read-only.
-import { runGate } from "../src/gate/engine.js";
-import { listGates } from "../src/gate/registry.js";
-import { resolveGateLogPath, runGateLogQuery } from "../src/gate/gate-log.js";
+import { runGate } from "../src/gate/engine.ts";
+import { listGates } from "../src/gate/registry.ts";
+import { resolveGateLogPath, runGateLogQuery } from "../src/gate/gate-log.ts";
 // QENG-3: complete/adjudicate/promote/retreat lifecycle — the thin
 // status-WRITING layer over the gate engine. Four verb-less top-level commands
 // (id in `sub`), each mirroring the `gate` branch's withProvider/resolveGateLogPath
 // plumbing. Illegal transitions throw → the top-level catch reports them.
-import { runComplete, runAdjudicate, runPromote, runRetreat } from "../src/gate/lifecycle.js";
+import { runComplete, runAdjudicate, runPromote, runRetreat } from "../src/gate/lifecycle.ts";
 // QENG-4: the `quay run` driver — autonomous loop AS CODE. Verb-less top-level
 // `run` command (NO positional id), mirroring the `complete` branch's plumbing
 // (withProvider → resolveGateLogPath → QUAY_ACCEPTANCE_CWD). `--once` = one
 // observation; bare `run` = bounded loop to fixpoint/sentinel/cap.
-import { runOnce, runLoop } from "../src/gate/driver.js";
+import { runOnce, runLoop } from "../src/gate/driver.ts";
 // DIR-039 (A): generic provider-to-provider migration over the Provider ABI.
 // Verb-less-style top-level `migrate` command (no positional task id) —
 // mirrors `run`'s own no-positional-id shape (both scan/act over the whole
 // board, not a single task).
-import { migrateTasks } from "../src/migrate.js";
+import { migrateTasks } from "../src/migrate.ts";
 
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
@@ -989,7 +989,7 @@ async function main() {
   }
 
   if (cmd === "serve") {
-    const { startServer } = await import("../src/serve.js");
+    const { startServer } = await import("../src/serve.ts");
     // `serve` has no subcommand token — reparse from argv[2] so `--port` etc.
     // is read correctly instead of being swallowed into `sub`.
     const { flags: serveFlags } = parseFlags(process.argv.slice(3));
@@ -1004,7 +1004,7 @@ async function main() {
     // an Agent (Claude Code) registers `quay mcp` once instead of each
     // Provider's own `<provider> mcp` separately. No subcommand token or
     // flags — mirrors quay-native/quay-github's own `mcp` subcommand shape.
-    const { startMcpServer } = await import("../src/mcp-server.js");
+    const { startMcpServer } = await import("../src/mcp-server.ts");
     await startMcpServer();
     return;
   }

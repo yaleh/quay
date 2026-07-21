@@ -1,4 +1,4 @@
-// loop-params.js — reads and validates .quay/loop.yml for the loop-driver skill (DIR-045/DIR-048).
+// loop-params.js — reads and validates .quay/loop.yml for the loop-driver skill (DIR-045/DIR-048/DIR-056).
 //
 // Contract: readLoopParams(workspaceRoot) → LoopParams | throws Error("FAIL-CLOSED: ...")
 //
@@ -36,7 +36,7 @@ const VALID_AUDIT = new Set(["adversarial", "none"]);
  * Throws Error("FAIL-CLOSED: ...") on any validation failure.
  *
  * @param {string} workspaceRoot
- * @returns {{ board: string, gates: string[], stop: string, policy: string, coexist: string|null, execution: string, audit: string }}
+ * @returns {{ board: string, gates: string[], stop: string, policy: string, coexist: string|null, execution: string, audit: string, concurrency: number, routines: Array<object> }}
  */
 export function readLoopParams(workspaceRoot) {
   const loopYmlPath = path.join(workspaceRoot, ".quay", "loop.yml");
@@ -130,11 +130,13 @@ export function readLoopParams(workspaceRoot) {
     );
   }
 
-  // 12. Optional: routines — a standing routine track (DIR-051). Array of { name, trigger, dispatch }
-  //     fired on a cadence/condition independent of the ready-queue SELECT; DEFAULT [] (no routines =
-  //     today's behavior). Each entry validated fail-closed: name (non-empty string), trigger
-  //     ("every(N)" with N>=1 | "on(<word>)"), dispatch (non-empty string). The scheduler logic lives
-  //     in routine-scheduler.mjs (parseTrigger/isDue); this only validates shape.
+  // 12. Optional: routines — a standing routine track (DIR-051/DIR-056). Array of
+  //     { name, trigger, dispatch?, probe? } fired on a cadence/condition independent of the
+  //     ready-queue SELECT; DEFAULT [] (no routines = today's behavior). Each entry validated
+  //     fail-closed: name (non-empty string), trigger ("every(N)" with N>=1 | "on(<word>)"),
+  //     and at least one of: dispatch (non-empty string, legacy) OR probe (non-empty string,
+  //     DIR-056 probe-spec name). The scheduler logic lives in routine-scheduler.mjs
+  //     (parseTrigger/isDue/resolveRoutineAction); this only validates shape.
   const routines = parsed?.routines ?? [];
   if (!Array.isArray(routines)) {
     throw new Error(`FAIL-CLOSED: .quay/loop.yml field 'routines' must be an array (got ${typeof routines})`);
@@ -150,8 +152,11 @@ export function readLoopParams(workspaceRoot) {
     if (m && Number(m[1]) < 1) {
       throw new Error(`FAIL-CLOSED: .quay/loop.yml routines[${i}] ('${r.name}') trigger "every(${m[1]})" invalid — N must be >= 1`);
     }
-    if (typeof r.dispatch !== "string" || !r.dispatch.trim()) {
-      throw new Error(`FAIL-CLOSED: .quay/loop.yml routines[${i}] ('${r.name}') needs a non-empty string 'dispatch' action`);
+    // DIR-056: must have at least one of dispatch (legacy) or probe (new).
+    const hasDispatch = typeof r.dispatch === "string" && r.dispatch.trim();
+    const hasProbe = typeof r.probe === "string" && r.probe.trim();
+    if (!hasDispatch && !hasProbe) {
+      throw new Error(`FAIL-CLOSED: .quay/loop.yml routines[${i}] ('${r.name}') needs at least one of 'dispatch' (legacy) or 'probe' (DIR-056 probe-spec name)`);
     }
   }
 

@@ -43,7 +43,7 @@ concurrency: 2
 routines:
   - name: self-validation
     trigger: on(checkpoint)
-    dispatch: adversarial-explore
+    probe: self-validation
   - name: architecture-analysis
     trigger: on(checkpoint)
-    dispatch: arch-analyze
+    probe: architecture-analysis

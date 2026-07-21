@@ -15,31 +15,36 @@
 // compare-and-swap (store.js ConflictError, QN-015) rather than last-writer-wins.
 
 import { randomUUID } from "node:crypto";
-import { runGate } from "./engine.js";
-import { appendGateEvent } from "./gate-event-store.js";
+import { runGate } from "./engine.ts";
+import { appendGateEvent, type GateEvent } from "./gate-event-store.ts";
+import type { Task } from "../abi.ts";
+
+interface ProviderClient {
+  taskGet: (id: string) => Promise<Task | null>;
+  taskWrite: (args: { id: string; status: string; expectedStatus: string }) => Promise<unknown>;
+  taskCheck: (id: string) => Promise<{ ok: boolean; reason: string }>;
+}
 
 /**
  * The legal-transition adjacency map. `forward` = promote target, `back` =
  * retreat target. Each forward edge is a gate `check()` already models; back
  * edges are single-step rework rollbacks. `needs-human` has NO automated edge
  * in or out — clearing it is a deliberate `quay task edit --status` write.
- *
- * @type {Record<string, { forward: string|null, back: string|null }>}
  */
-export const TRANSITIONS = {
+export const TRANSITIONS: Record<string, { forward: string | null; back: string | null }> = {
   todo: { forward: "ready", back: null },
   ready: { forward: "done", back: "todo" },
   done: { forward: null, back: "ready" },
   "needs-human": { forward: null, back: null },
 };
 
-/** @param {string} status @returns {string|null} next status, or null if terminal/unknown */
-export function legalForward(status) {
+/** next status, or null if terminal/unknown */
+export function legalForward(status: string): string | null {
   return TRANSITIONS[status]?.forward ?? null;
 }
 
-/** @param {string} status @returns {string|null} previous status, or null if none/unknown */
-export function legalBack(status) {
+/** previous status, or null if none/unknown */
+export function legalBack(status: string): string | null {
   return TRANSITIONS[status]?.back ?? null;
 }
 
@@ -47,19 +52,24 @@ export function legalBack(status) {
  * Throw on an illegal transition (a null edge). `dir` is "forward" | "back".
  * The message is exactly `illegal transition: <status> cannot <dir>` so the
  * CLI's top-level catch surfaces it verbatim (AC3).
- *
- * @param {string} status
- * @param {"forward"|"back"} dir
  */
-export function assertTransition(status, dir) {
+export function assertTransition(status: string, dir: "forward" | "back"): void {
   const target = dir === "forward" ? legalForward(status) : legalBack(status);
   if (target === null) {
     throw new Error(`illegal transition: ${status} cannot ${dir}`);
   }
 }
 
+interface LifecycleEventArgs {
+  id: string;
+  gate: string;
+  actor: string;
+  verdict: string;
+  payload: unknown;
+}
+
 /** Assemble a QENG-1-shaped GateEvent (item_id == pipeline_id == task id). */
-function mkLifecycleEvent({ id, gate, actor, verdict, payload }) {
+function mkLifecycleEvent({ id, gate, actor, verdict, payload }: LifecycleEventArgs): GateEvent {
   return {
     id: randomUUID(),
     item_id: id,
@@ -72,20 +82,38 @@ function mkLifecycleEvent({ id, gate, actor, verdict, payload }) {
   };
 }
 
+export interface LifecycleArgs {
+  client: ProviderClient;
+  id: string;
+  logPath: string;
+  actor?: string;
+}
+
+export interface RetreatArgs extends LifecycleArgs {
+  reason: string;
+}
+
+export interface LifecycleResult {
+  ok: boolean;
+  reason: string;
+}
+
+export interface PromoteResult extends LifecycleResult {
+  to: string | null;
+}
+
+export interface RetreatResult {
+  ok: boolean;
+  to: string | null;
+}
+
 /**
  * `quay complete <task>` — precondition status==="ready"; run the acceptance
  * gate; on pass write status=done + log a `complete` pass event; on fail exit 1,
  * status UNCHANGED. Not-`ready` → exit 1, no gate, no write (store.write does not
  * enforce edges and acceptance is status-independent — the guard is load-bearing).
- *
- * @param {Object} args
- * @param {any} args.client
- * @param {string} args.id
- * @param {string} args.logPath
- * @param {string} [args.actor="quay-cli"]
- * @returns {Promise<{ok: boolean, reason: string}>}
  */
-export async function runComplete({ client, id, logPath, actor = "quay-cli" }) {
+export async function runComplete({ client, id, logPath, actor = "quay-cli" }: LifecycleArgs): Promise<LifecycleResult> {
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
   if (task.status !== "ready") {
@@ -116,15 +144,8 @@ export async function runComplete({ client, id, logPath, actor = "quay-cli" }) {
  * mechanical state it can observe (`client.taskCheck`) as an `audit` GateEvent,
  * WITHOUT delegating verdict authority to it. Never writes status; exit 0 always
  * (proposal §"record-only in v0").
- *
- * @param {Object} args
- * @param {any} args.client
- * @param {string} args.id
- * @param {string} args.logPath
- * @param {string} [args.actor="quay-cli"]
- * @returns {Promise<{ok: boolean, reason: string}>}
  */
-export async function runAdjudicate({ client, id, logPath, actor = "quay-cli" }) {
+export async function runAdjudicate({ client, id, logPath, actor = "quay-cli" }: LifecycleArgs): Promise<LifecycleResult> {
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
   const r = await client.taskCheck(id);
@@ -146,15 +167,8 @@ export async function runAdjudicate({ client, id, logPath, actor = "quay-cli" })
  * `quay promote <task>` — one legal forward step over TRANSITIONS. `ready→done`
  * delegates to runComplete (the single gate-guarded path to done); `todo→ready`
  * runs the `dod` author gate then writes. Illegal forward edge → throws.
- *
- * @param {Object} args
- * @param {any} args.client
- * @param {string} args.id
- * @param {string} args.logPath
- * @param {string} [args.actor="quay-cli"]
- * @returns {Promise<{ok: boolean, reason: string, to: string|null}>}
  */
-export async function runPromote({ client, id, logPath, actor = "quay-cli" }) {
+export async function runPromote({ client, id, logPath, actor = "quay-cli" }: LifecycleArgs): Promise<PromoteResult> {
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
   assertTransition(task.status, "forward");
@@ -172,7 +186,7 @@ export async function runPromote({ client, id, logPath, actor = "quay-cli" }) {
     process.exitCode = 1;
     return { ok: false, reason, to: null };
   }
-  await client.taskWrite({ id, status: next, expectedStatus: task.status });
+  await client.taskWrite({ id, status: next!, expectedStatus: task.status });
   appendGateEvent(
     logPath,
     mkLifecycleEvent({ id, gate: "promote", actor, verdict: "pass", payload: { from: task.status, to: next } })
@@ -186,16 +200,8 @@ export async function runPromote({ client, id, logPath, actor = "quay-cli" }) {
  * `--reason` is REQUIRED (it IS the deliverable of a retreat): missing/empty →
  * exit 1, no write. Illegal back edge → throws. No gate runs — retreat rolls
  * back regardless; the reason is recorded in the payload.
- *
- * @param {Object} args
- * @param {any} args.client
- * @param {string} args.id
- * @param {string} args.reason
- * @param {string} args.logPath
- * @param {string} [args.actor="quay-cli"]
- * @returns {Promise<{ok: boolean, to: string|null}>}
  */
-export async function runRetreat({ client, id, reason, logPath, actor = "quay-cli" }) {
+export async function runRetreat({ client, id, reason, logPath, actor = "quay-cli" }: RetreatArgs): Promise<RetreatResult> {
   if (typeof reason !== "string" || reason.trim() === "") {
     console.error("quay retreat: --reason <r> is required (the reason is the deliverable of a retreat)");
     process.exitCode = 1;
@@ -206,7 +212,7 @@ export async function runRetreat({ client, id, reason, logPath, actor = "quay-cl
   assertTransition(task.status, "back");
   const prev = legalBack(task.status);
 
-  await client.taskWrite({ id, status: prev, expectedStatus: task.status });
+  await client.taskWrite({ id, status: prev!, expectedStatus: task.status });
   appendGateEvent(
     logPath,
     mkLifecycleEvent({ id, gate: "retreat", actor, verdict: "pass", payload: { from: task.status, to: prev, reason } })

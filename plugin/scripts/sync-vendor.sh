@@ -64,8 +64,10 @@ chmod +x "${PLUGIN_DIR}/scripts/task-schema-check.sh"
 # DIR-049: the concurrent-scheduler scripts the loop-driver skill calls at concurrency > 1 MUST ship
 # with the plugin (a consumer workspace like archguard has no experiments/ dir). Self-contained (they
 # only import each other, relative). Canonical source stays experiments/; these are vendored copies.
-echo "[sync-vendor] mirroring the DIR-044 concurrency scripts -> plugin/scripts/ ..."
-for s in touches-orthogonality-check concurrent-batch-scheduler serial-fanin-absorb anti-drift-touches-check routine-scheduler routine-file-gate; do
+# DIR-056: read-probe-spec.mjs added — the probe spec loader, single-source in exp5/scripts/,
+# referenced by the skill at dispatch time; also vendored so the plugin ships a complete runtime.
+echo "[sync-vendor] mirroring the DIR-044 concurrency scripts + DIR-056 probe loader -> plugin/scripts/ ..."
+for s in touches-orthogonality-check concurrent-batch-scheduler serial-fanin-absorb anti-drift-touches-check routine-scheduler routine-file-gate read-probe-spec; do
   cp "${REPO_ROOT}/experiments/quay-perpetual-stream/scripts/${s}.mjs" "${PLUGIN_DIR}/scripts/${s}.mjs"
 done
 

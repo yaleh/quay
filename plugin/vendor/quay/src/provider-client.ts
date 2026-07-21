@@ -1,12 +1,31 @@
-// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // The Core's MCP client over the Provider ABI (proposal §5, §9). quay (Core)
 // is provider-agnostic: it launches whatever `mcp_entry` the active Provider's
 // config declares and speaks the uniform data-only ABI — no backend branch.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { Task, AdrRecord, Manifest } from './abi.ts';
 
-export async function connectProvider({ command, args, env, cwd }) {
+export interface ConnectProviderOptions {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+}
+
+export interface ProviderClient {
+  taskList(filter?: Record<string, unknown>): Promise<Task[]>;
+  taskGet(id: string): Promise<Task>;
+  taskWrite(patch: Record<string, unknown>): Promise<Task>;
+  taskCheck(id: string): Promise<unknown>;          // gate result — keep unknown
+  adrList(filter?: Record<string, unknown>): Promise<AdrRecord[]>;
+  adrGet(id: string): Promise<AdrRecord>;
+  adrWrite(patch: Record<string, unknown>): Promise<AdrRecord>;
+  manifest(): Promise<Manifest>;
+  close(): Promise<void>;
+}
+
+export async function connectProvider({ command, args, env, cwd }: ConnectProviderOptions): Promise<ProviderClient> {
   const transport = new StdioClientTransport({
     command,
     args,
@@ -29,16 +48,16 @@ export async function connectProvider({ command, args, env, cwd }) {
   // legitimate task in the store. Now: an isError result throws, matching
   // the other three methods' existing behavior, so callers can catch it and
   // surface a real error instead of a silently-empty list.
-  async function taskList(filter = {}) {
+  async function taskList(filter: Record<string, unknown> = {}): Promise<Task[]> {
     const r = await client.callTool({ name: "task_list", arguments: filter });
-    if (r.isError) throw new Error(r.content?.[0]?.text ?? "task_list failed");
-    return r.structuredContent?.tasks ?? [];
+    if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "task_list failed");
+    return (r.structuredContent as {tasks?: Task[]})?.tasks ?? [];
   }
 
-  async function taskGet(id) {
+  async function taskGet(id: string): Promise<Task> {
     const r = await client.callTool({ name: "task_get", arguments: { id } });
-    if (r.isError) return null;
-    return r.structuredContent?.task ?? null;
+    if (r.isError) return null as unknown as Task;
+    return (r.structuredContent as {task?: Task})?.task ?? null as unknown as Task;
   }
 
   // QN-024 (iteration 10): generic task_write passthrough — no
@@ -46,10 +65,10 @@ export async function connectProvider({ command, args, env, cwd }) {
   // task_write (data.write capability) is between the caller and the
   // Provider's own manifest; Core just forwards whatever patch fields are
   // given, same as taskList/taskGet forward whatever filter/id is given.
-  async function taskWrite(patch) {
+  async function taskWrite(patch: Record<string, unknown>): Promise<Task> {
     const r = await client.callTool({ name: "task_write", arguments: patch });
-    if (r.isError) throw new Error(r.content?.[0]?.text ?? "task_write failed");
-    return r.structuredContent?.task ?? null;
+    if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "task_write failed");
+    return (r.structuredContent as {task?: Task})?.task ?? null as unknown as Task;
   }
 
   // QN-027 (iteration 13): generic task_check passthrough, mirroring
@@ -58,9 +77,9 @@ export async function connectProvider({ command, args, env, cwd }) {
   // capability) is between the caller and the Provider's own manifest;
   // Core just forwards the id and returns whatever the Provider's gate
   // reports, same as taskList/taskGet/taskWrite already do.
-  async function taskCheck(id) {
+  async function taskCheck(id: string): Promise<unknown> {
     const r = await client.callTool({ name: "task_check", arguments: { id } });
-    if (r.isError) throw new Error(r.content?.[0]?.text ?? "task_check failed");
+    if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "task_check failed");
     return r.structuredContent ?? null;
   }
 
@@ -68,30 +87,30 @@ export async function connectProvider({ command, args, env, cwd }) {
   // provider does, the github provider declares them unsupported). adrList
   // degrades to [] on isError so an ADR-less provider renders cleanly; adrGet
   // returns null on isError (mirrors taskGet); adrWrite throws (mirrors taskWrite).
-  async function adrList(filter = {}) {
+  async function adrList(filter: Record<string, unknown> = {}): Promise<AdrRecord[]> {
     const r = await client.callTool({ name: "adr_list", arguments: filter });
     if (r.isError) return [];
-    return r.structuredContent?.adrs ?? [];
+    return (r.structuredContent as {adrs?: AdrRecord[]})?.adrs ?? [];
   }
 
-  async function adrGet(id) {
+  async function adrGet(id: string): Promise<AdrRecord> {
     const r = await client.callTool({ name: "adr_get", arguments: { id } });
-    if (r.isError) return null;
-    return r.structuredContent?.adr ?? null;
+    if (r.isError) return null as unknown as AdrRecord;
+    return (r.structuredContent as {adr?: AdrRecord})?.adr ?? null as unknown as AdrRecord;
   }
 
-  async function adrWrite(patch) {
+  async function adrWrite(patch: Record<string, unknown>): Promise<AdrRecord> {
     const r = await client.callTool({ name: "adr_write", arguments: patch });
-    if (r.isError) throw new Error(r.content?.[0]?.text ?? "adr_write failed");
-    return r.structuredContent?.adr ?? null;
+    if (r.isError) throw new Error((r.content as Array<{text?: string}>)?.[0]?.text ?? "adr_write failed");
+    return (r.structuredContent as {adr?: AdrRecord})?.adr ?? null as unknown as AdrRecord;
   }
 
-  async function manifest() {
+  async function manifest(): Promise<Manifest> {
     const r = await client.readResource({ uri: "provider://manifest" });
-    return JSON.parse(r.contents[0].text);
+    return JSON.parse((r.contents[0] as {text: string}).text) as Manifest;
   }
 
-  async function close() {
+  async function close(): Promise<void> {
     await client.close();
   }
 
