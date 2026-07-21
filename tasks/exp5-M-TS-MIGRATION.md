@@ -10,11 +10,15 @@ labels:
 parent: null
 children:
   - exp5-M-TS-MIGRATION-P0
+  - exp5-M-TS-MIGRATION-P1
+  - exp5-M-TS-MIGRATION-P2
+  - exp5-M-TS-MIGRATION-P3
+  - exp5-M-TS-MIGRATION-P4
 extra:
   schema: v1
 ---
 ## Proposal
-Execute ADR-012: gradually migrate quay product code (`packages/**`) from JS/ESM to TypeScript — NOT a big-bang, NOT Go. TS is a JS superset, so the migration is behavior-preserving-by-construction and file-by-file, exploiting Node 25 native type-stripping (runs `.ts` with no build step) + `allowJs` coexistence, keeping npm workspaces / `node --test` / the MCP SDK. Types are `L_C` constraint-hardening (a crystallization move) and unlock archguard (the `L_G/L_D` instrument for G1/ADR-007). Labeled `human-steered`: it touches product code broadly and must proceed only under the behavior-preserving + golden-diff discipline (never a mid-loop autonomous self-rewrite).
+Execute ADR-012: gradually migrate quay product code (`packages/**`) from JS/ESM to TypeScript — NOT a big-bang, NOT Go. TS is a JS superset, so the migration is behavior-preserving-by-construction and file-by-file, exploiting Node 25 native type-stripping (runs `.ts` with no build step) + `allowJs` coexistence, keeping npm workspaces / `node --test` / the MCP SDK. Types are `L_C` constraint-hardening (a crystallization move) and unlock archguard (the `L_G/L_D` instrument for G1/ADR-007). It touches product code broadly and must proceed only under the behavior-preserving + golden-diff discipline (never a mid-loop autonomous self-rewrite). **The `human-steered` label was cleared by human directive (2026-07-21): P1–P4 are now autonomously loop-executable; the safety that replaced the label is the EXECUTABLE behavior-preserving discipline baked into each phase charter's Plan/DoD (`tsc --noEmit` gate + full-suite golden-diff before/after), NOT a prose promise.**
 
 Phased (each phase is its own split-or-commit milestone per DIR-026):
 - **P0 tooling** — tsconfig (`allowJs`+`checkJs`, `strict` ramped), `tsc --noEmit` type gate wired into the DoD/gates, Node 25 type-strip run path, `node --test` on `.ts` confirmed.
