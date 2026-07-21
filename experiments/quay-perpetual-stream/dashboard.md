@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 86** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 87** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -630,3 +630,5 @@ m86 · DIR-056 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=5be0d06 ·
 
 **Task:** [[DIR-050]] (`tasks/DIR-050.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M87-dir050-config-consolidation.md`
+
+m87 · DIR-050 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=8a4fb85 · → milestones/M87/
