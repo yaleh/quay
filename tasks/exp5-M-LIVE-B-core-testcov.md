@@ -4,7 +4,7 @@ title: "LIVE-batch B (DIR-044-LIVE proof): add a focused offline unit test for
   one currently-undertested PURE function in quay Core — real coverage gain,
   touches ONLY packages/quay/test/**, no src/shared-state change, NOT a
   live-github suite."
-status: ready
+status: done
 labels:
   - milestone-candidate
 parent: DIR-044-LIVE
@@ -22,9 +22,9 @@ The other half of the real ≥2-wide concurrent batch proving [[DIR-044-LIVE]]. 
 N/A — a single small test-coverage add; the gate is the new test passing under `node --test`.
 
 ## Acceptance Criteria
-- [ ] A new `packages/quay/test/*.test.mjs` file adds ≥1 real assertion for a pure Core function; `node --test <file>` exits 0 offline.
-- [ ] Only files under `packages/quay/test/**` were modified (no src, no shared state) — verifiable by `git diff --name-only`.
+- [x] A new `packages/quay/test/*.test.mjs` file adds ≥1 real assertion for a pure Core function; `node --test <file>` exits 0 offline.
+- [x] Only files under `packages/quay/test/**` were modified (no src, no shared state) — verifiable by `git diff --name-only`.
 
 ## Definition of Done
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts.
-- [ ] The new test runs green offline (real object, not a stub); scoped to `packages/quay/test/**`.
+- [x] The new test runs green offline (real object, not a stub); scoped to `packages/quay/test/**`.

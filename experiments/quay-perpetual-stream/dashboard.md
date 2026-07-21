@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 74** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 76** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -6414,3 +6414,33 @@ The mechanism is proved on the RECORDED diffs only. No LIVE `Agent(run_in_backgr
 | ID | Title | Type | VT Δ |
 |---|---|---|---|
 | DIR-044 (mechanism) | Cross-milestone concurrent-scheduler mechanism (touches/batch/fan-in/anti-drift + golden-replay) | capability-growth/governance-integrity | 0 |
+
+
+---
+## M75 + M76 FAN-IN ABSORB — DIR-044-LIVE (first REAL ≥2-wide concurrent batch)
+
+**Milestones:** M75 ∥ M76 (concurrent) · **counter 74 → 76** · **Task:** [[DIR-044-LIVE]] (closes [[DIR-044]] DoD item 1) · **Type:** capability-proof + product (real test coverage) · **VT Δ:** 0
+
+**This is the live end-to-end proof the M74 mechanism was golden-replayed against but never actually ran.** Two disjoint execution milestone-candidates were dispatched as REAL native background subagents (`Agent(run_in_background=true)`), each in its own worktree, then serial-fan-in ABSORBed — no driver rewrite, human-orchestrated in the `.halt` window.
+
+### Pre-flight (mechanism, M74)
+- `touches-orthogonality-check` on the two tasks → **DISJOINT** (exit 0).
+- `concurrent-batch-scheduler` → **2-wide batch** [M75, M76].
+
+### Concurrent builds (real background subagents, each gated offline)
+- **M75** exp5-M-LIVE-A (worktree `quay-live-A`, branch `live/M75-native-testcov`, commit `0fbe6a2`): new `packages/quay-native/test/live-a-longform-headings.test.mjs` — pins `createStore().check()` long-form heading alias resolution (`## Acceptance Criteria`/`## Definition of Done` via `extractSection`), a real coverage gap. `node --test` → 2/2 pass offline. Scope: only `packages/quay-native/test/**`.
+- **M76** exp5-M-LIVE-B (worktree `quay-live-B`, branch `live/M76-core-testcov`, commit `eb432b7`): new `packages/quay/test/live-b-provider-env.test.mjs` — direct per-branch coverage for the pure `resolveProviderEnv` (QN-045) never unit-tested before. `node --test` → 7/7 pass offline. Scope: only `packages/quay/test/**`.
+
+### Serial fan-in (the deferred shared-state writes)
+- `serial-fanin-absorb --counter 74` → plan: counter 74→76, deterministic id-sorted order M75→M76.
+- Merges: M75 ff → `0fbe6a2`; M76 conflict-free real merge → `4d87291`. **NO merge conflict.**
+- `anti-drift-touches-check` on the ACTUAL post-build diffs → **ANTI-DRIFT OK** (no out-of-declared write, no cross-build overlap — the two real diffs stayed exactly within their declared `## Touches`).
+- Behavior-preserving: both new tests green on merged master (9/9 combined); shared exp5 state untouched by either build (only this fan-in wrote counter/dashboard).
+
+### Outcome
+DIR-044-LIVE DoD satisfied on exp5's OWN repo: a real ≥2-wide batch ran via native background subagents, fan-in ABSORBed cleanly (counter +2, both entries, no conflict), anti-drift PASS on real diffs. **[[DIR-044]] is now fully done** — the mechanism (M74) + the live proof (M75∥M76) both landed.
+
+| ID | Title | Type | VT Δ |
+|---|---|---|---|
+| exp5-M-LIVE-A | offline test: quay-native long-form heading gate resolution | product/test-coverage | 0 |
+| exp5-M-LIVE-B | offline test: quay Core resolveProviderEnv | product/test-coverage | 0 |
