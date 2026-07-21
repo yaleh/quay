@@ -18,6 +18,15 @@ stop: "until(.halt)"
 policy: value-typed-ledger
 coexist: null
 
+# concurrency (DIR-049): max touches-disjoint batch width. Set to 2 by human directive.
+# HONEST CAVEAT (same as routines below): exp5 is driven by the bespoke OUTER-LOOP.md, which
+# does NOT read this key — so this is DECLARATIVE and INERT until OUTER-LOOP consumes it. And
+# note DIR-049 explicitly holds that exp5's methodology milestones carry SELECT←ABSORB learning
+# dependencies and are NOT concurrency-safe (unlike archguard's independent refactor tasks); if
+# OUTER-LOOP is ever wired to honor this, batching MUST still respect that dependency (only
+# genuinely touches-disjoint, learning-independent milestones may run in parallel).
+concurrency: 2
+
 # routines (DIR-051): the standing discovery track — the two most productive moves of
 # this experiment made configurable. self-validation industrialises the fresh-context
 # adversarial audit that found a real defect at EVERY recent milestone (DIR-052);
