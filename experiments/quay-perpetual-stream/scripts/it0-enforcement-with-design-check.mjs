@@ -93,8 +93,12 @@ export function parseDodCheckClauses(dodCheckText) {
   return enforcedNums;
 }
 
-// ── runChecks — pure function: given the text of both files, returns {failures, passes, unenforced} ─
-// This is the core gate logic, testable without touching the filesystem.
+// ── runChecks — pure function: given the text of both files, returns {failures, passes} ────────────
+// Bidirectional check (both halves of ADR-011):
+//   1. ENFORCEMENT-MISSING: every clause in inherited-core.md must have an enforcement block in dod-check
+//   2. DESIGN-MISSING: every enforcement block in dod-check must have a clause heading in inherited-core.md
+// Both directions are required: enforcement-without-design violates ADR-011 just as much as
+// design-without-enforcement. The check is the current-state invariant: all clauses aligned in both files.
 export function runChecks(inheritedCoreText, dodCheckText) {
   const failures = [];
   const passes = [];
@@ -109,25 +113,31 @@ export function runChecks(inheritedCoreText, dodCheckText) {
     return { failures, passes, coreClauses: [], enforcedClauses };
   }
 
-  const unenforced = [];
-  for (const n of coreClauses) {
-    if (!enforcedClauses.has(n)) {
-      unenforced.push(n);
-    }
+  // Direction 1: design → enforcement (every documented clause must be enforced)
+  const unenforced = coreClauses.filter((n) => !enforcedClauses.has(n));
+  for (const n of unenforced) {
+    failures.push(
+      `ENFORCEMENT-MISSING: Clause ${n} is declared in inherited-core.md '## Definition of Done' ` +
+      `but has NO corresponding '// --- Clause ${n}:' enforcement block in it0-dod-check.mjs ` +
+      `— violates ADR-011 (enforcement must land WITH design in the same milestone)`
+    );
   }
 
-  if (unenforced.length > 0) {
-    for (const n of unenforced) {
-      failures.push(
-        `ENFORCEMENT-MISSING: Clause ${n} is declared in inherited-core.md '## Definition of Done' ` +
-        `but has NO corresponding '// --- Clause ${n}:' enforcement block in it0-dod-check.mjs ` +
-        `— violates ADR-011 (enforcement must land WITH design in the same milestone)`
-      );
-    }
-  } else {
+  // Direction 2: enforcement → design (every enforced clause must be documented)
+  const coreSet = new Set(coreClauses);
+  const undocumented = [...enforcedClauses].filter((n) => !coreSet.has(n)).sort((a, b) => a - b);
+  for (const n of undocumented) {
+    failures.push(
+      `DESIGN-MISSING: Clause ${n} has an enforcement block in it0-dod-check.mjs ` +
+      `but NO corresponding '### Clause ${n}' heading in inherited-core.md '## Definition of Done' ` +
+      `— enforcement without design documentation violates ADR-011`
+    );
+  }
+
+  if (failures.length === 0) {
     passes.push(
-      `PASS: all ${coreClauses.length} DoD clause(s) in inherited-core.md ` +
-      `(Clauses ${coreClauses.join(", ")}) have a corresponding enforcement block in it0-dod-check.mjs`
+      `PASS: all ${coreClauses.length} DoD clause(s) (Clauses ${coreClauses.join(", ")}) are ` +
+      `documented in inherited-core.md AND have enforcement blocks in it0-dod-check.mjs (bidirectional)`
     );
   }
 
@@ -242,6 +252,25 @@ function checkClause4() {}
 `;
 
   runFixture("red-no-dod-section", RED_NO_DOD_SECTION, GREEN_DOD_CHECK, true /* expect FAIL */);
+
+  // ── RED fixture (reverse direction): dod-check enforces Clause 10 not documented in inherited-core ─
+  const RED_UNDOCUMENTED_ENFORCEMENT_CORE = `
+## Definition of Done
+
+### Clause 0 — AC + DoD present
+### Clause 1 — Per-milestone acceptance audit
+
+## Next section
+`;
+  const RED_UNDOCUMENTED_ENFORCEMENT_CHECK = `
+// --- Clause 0: AC + DoD present ---
+function checkClause0() {}
+// --- Clause 1: Adversarial-audit gate ---
+function checkClause1() {}
+// --- Clause 10: New enforcement without design ---
+function checkClause10() {}
+`;
+  runFixture("red-enforcement-without-design", RED_UNDOCUMENTED_ENFORCEMENT_CORE, RED_UNDOCUMENTED_ENFORCEMENT_CHECK, true /* expect FAIL */);
 
   if (allPassed) {
     console.log("SELFTEST: all fixture cases PASS.");

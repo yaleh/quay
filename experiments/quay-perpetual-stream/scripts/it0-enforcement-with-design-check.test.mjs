@@ -228,9 +228,8 @@ test("RED: runChecks FAILs for multiple missing enforcement clauses (lists all)"
   assert.ok(failures.some((f) => f.includes("Clause 11")), "should report Clause 11 missing");
 });
 
-test("GREEN: runChecks PASSes when dod-check has MORE clauses than inherited-core (no false positives)", () => {
-  // dod-check may enforce more clause numbers than inherited-core names — that's fine,
-  // the check is one-directional: every core clause must be in dod-check, not vice versa.
+test("RED: runChecks FAILs when dod-check enforces a clause with no design doc in inherited-core (reverse direction)", () => {
+  // Bidirectional check: enforcement without design documentation also violates ADR-011.
   const inheritedCore = `
 ## Definition of Done
 
@@ -240,10 +239,32 @@ test("GREEN: runChecks PASSes when dod-check has MORE clauses than inherited-cor
 `;
   const dodCheck = `
 // --- Clause 0: AC + DoD present ---
-// --- Clause 1: extra clause only in dod-check, not in inherited-core ---
-// --- Clause 2: another extra ---
+// --- Clause 1: enforcement without design — Clause 1 is not in inherited-core ---
+// --- Clause 2: another undocumented enforcement ---
+`;
+  const { failures, passes } = runChecks(inheritedCore, dodCheck);
+  assert.ok(failures.length === 2, `expected 2 failures (Clause 1 and 2 undocumented), got ${failures.length}: ${failures.join("; ")}`);
+  assert.ok(failures.some((f) => f.includes("Clause 1") && f.includes("DESIGN-MISSING")), "should flag Clause 1 as DESIGN-MISSING");
+  assert.ok(failures.some((f) => f.includes("Clause 2") && f.includes("DESIGN-MISSING")), "should flag Clause 2 as DESIGN-MISSING");
+  assert.equal(passes.length, 0, "should have no passes when violations exist");
+});
+
+test("GREEN: runChecks PASSes when all clauses are documented in inherited-core AND enforced in dod-check (bidirectional PASS)", () => {
+  // Bidirectional: every documented clause is enforced, AND every enforced clause is documented.
+  const inheritedCore = `
+## Definition of Done
+
+### Clause 0 — AC + DoD present
+### Clause 1 — Per-milestone acceptance audit
+
+## Next
+`;
+  const dodCheck = `
+// --- Clause 0: AC + DoD present ---
+// --- Clause 1: Adversarial-audit gate ---
 `;
   const { failures, passes } = runChecks(inheritedCore, dodCheck);
   assert.equal(failures.length, 0, `should have no failures, got: ${failures.join("; ")}`);
   assert.ok(passes.length > 0, "should have pass message");
+  assert.ok(passes.some((p) => p.includes("bidirectional")), "pass message should mention bidirectional");
 });

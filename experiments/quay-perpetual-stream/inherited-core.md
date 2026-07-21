@@ -1358,6 +1358,37 @@ Fixtures: `fixtures/dod/needs-human-external-stub.md` (external → PASS),
 `needs-human-internal-stub.md` (in-project → FAIL); the partial-vs-full pair is the existing
 checklist-unchecked (FAIL) / checklist-checked (PASS) fixtures. Source: DIR-026.
 
+### Clause 10 — Tree-hygiene gate (DIR-031 / DIR-034 mechanization)
+
+**Verifies the repository working tree is clean** — no scratch/temp files, untracked artifacts, or
+leftover build products that would indicate the milestone's own worktree was left dirty.
+Implemented by `experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh`, invoked
+unconditionally at every ABSORB (same shape as Clauses 3/4 — always dispositioned, never
+conditionally skippable). DIR-034 mechanized this: previously the prose ABSORB step required
+running the script manually; Clause 10 wires it into the DoD gate so a dirty tree is a HARD block.
+Exit 0 = clean (PASS); exit 1 = scratch found (FAIL).
+<!-- enforcement: scripts/it0-dod-check.mjs (Clause 10 block); source: tree-hygiene-check.sh -->
+
+### Clause 11 — Worktree/branch-hygiene gate (DIR-033 / DIR-034 mechanization)
+
+**Verifies no orphaned milestone worktrees or stale branches remain** after ABSORB.
+Implemented by `experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh`,
+invoked unconditionally. DIR-033 established the capture-then-prune discipline; DIR-034 mechanized
+it into this clause so a dangling worktree/branch is a HARD block (not a prose reminder). Exit 0 =
+clean (PASS); exit 1 = stale worktrees/branches found (FAIL).
+<!-- enforcement: scripts/it0-dod-check.mjs (Clause 11 block); source: worktree-branch-hygiene-check.sh -->
+
+### Clause 12 — Audit-independence gate (DIR-032 / DIR-034 mechanization)
+
+**Verifies that the per-milestone adversarial audit was dispatched by an INDEPENDENT agent** — not
+the orchestrating context that built the milestone. Implemented by
+`experiments/quay-perpetual-stream/scripts/audit-independence-check.mjs` (registered as named gate
+`audit-independence`). DIR-034 mechanized this: previously the audit-independence check was prose;
+Clause 12 requires the ABSORB entry to carry an `## Audit-independence check` section with the
+artifact path + orchestrator id, which the gate verifies. Conditionally dispositioned (like Clauses
+1/2/6/7): if the section is ABSENT, the clause N/A-passes with a recorded no-op.
+<!-- enforcement: scripts/it0-dod-check.mjs (Clause 12 block); source: audit-independence-check.mjs -->
+
 ## Deviation-record schema (DIR-017 Step 3 / M36-dod-leakage-metrics)
 
 **Location choice: this section of `inherited-core.md`, NOT a new sibling file.** `v-meta-ledger.md`
