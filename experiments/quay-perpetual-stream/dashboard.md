@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 63** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M63 ABSORB header sync): body log's m63 ABSORB entry below sets milestone_counter → 63;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57/m58/m59/m60/m61/m62).
-63 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m65). -->
+**milestone_counter: 64** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M64 ABSORB header sync): body log's m64 ABSORB entry below sets milestone_counter → 64;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57/m58/m59/m60/m61/m62/m63).
+64 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m65). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -6015,3 +6015,60 @@ risk identified in the M60 finding. Realized Δv will be recorded at M64 ABSORB.
 **Schema check:** `bash experiments/quay-perpetual-stream/scripts/task-schema-check.sh tasks/DIR-045.md` → PASS (schema v1, directive, well-formed).
 
 **Milestone label:** `milestone:M64` added to `tasks/DIR-045.md` via `quay task edit DIR-045 --labels "directive,milestone-candidate,milestone:M64"`.
+
+## M64 — M64-dir045-loop-driver-formal (DIR-045)
+
+**Task:** [[DIR-045]] (`tasks/DIR-045.md`) — loop-driver formalization: refactor the DIR-042-B loop-driver skill to a formal `iterate` contract (baime prompt-doc style, 6 typed sub-steps: select/isolate/build/gate/record/land, inline invariants block), add `.quay/loop.yml` params schema + FAIL-CLOSED reader (`packages/quay/src/loop-params.js`), prove universality by driving a REAL archguard TASK-25 iteration from archguard's `.quay/loop.yml` (real diff `da04248` + vitest gate PASS, 3955 tests, deps-ready worktree, `--cwd <worktree>` gate cwd per DIR-046). **Merge commit:** `c42d3c0`, merge of `milestones/M64-dir045-loop-driver-formal` (build `42a63e7`, includes cherry-pick `765058c` of human off-loop DIR-047 commit `5de1493`) into `master` at this ABSORB.
+
+**Independent audit verdict: NO REFUTATION FOUND.** Fresh-context Explore subagent (`adb51ea9ffd327614`), distinct from orchestrator session `86fab6a3-da7c-4692-a726-6385314e709c`. All 6 AC + 5 DoD items confirmed with concrete artifact evidence; no refutation found. Audit ran read-only (Explore type); outer loop wrote the audit report to `milestones/M64/audits/iteration-0-acceptance-audit.md`. All AC/DoD boxes ticked `[x]` by the iteration agent; audit confirmed correctness.
+
+**Key delivered artifacts:**
+- `plugin/skills/loop-driver/SKILL.md` — formal `iterate :: Board × Kit × Gates → Milestone` contract with 6 typed sub-steps + inline invariants. Single-sourced (1 match of `iterate ::` across the repo, no per-project copies).
+- `packages/quay/src/loop-params.js` — `readLoopParams(workspaceRoot)`: FAIL-CLOSED params reader.
+- `packages/quay/test/loop-params.test.mjs` — 12 RED+GREEN tests (5 FAIL-CLOSED RED + 7 GREEN): 12/12 PASS.
+- `experiments/quay-perpetual-stream/.quay/loop.yml` — exp5 params (`board:native, gates:[it0-set], stop:until(.halt), policy:value-typed-ledger`).
+- `/home/yale/work/archguard/.quay/loop.yml` (external) — archguard params (`board:native, gates:[vitest], stop:once, policy:ready-first`).
+- Archguard TASK-25 done: `buildSuggestedPatternConfig` → `src/analysis/test-pattern-suggester.ts` (ADR-006); real vitest gate PASS in worktree; commit `da04248`.
+
+**Reconciliation note:** Human DIR-047 commit `5de1493` (configurable creation default status) landed on master off `1786ff0` (M64 SELECT) while M64 BUILD was in-flight. M64 BUILD `42a63e7` and DIR-047 `5de1493` both branched from `1786ff0` (non-overlapping files). Cherry-picked `5de1493` as `765058c` onto the milestone branch before merging. Merge `c42d3c0` was clean — both sides contributed non-overlapping files; no content discarded; DIR-047 fully included.
+
+**Mechanical gates (all PASS, required before `milestone_counter++`):**
+
+```
+$ node packages/quay/bin/quay.js gate DIR-045 --gate dod
+PASS
+
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 63 experiments/quay-perpetual-stream/v-meta-ledger.md
+V_meta consolidation-lag check — milestone_counter=63 K=2
+  [ok] consolidated | lag=- | domain-audit-channel≡CI-job pattern
+  [ok] proposed | lag=- | repo-root isolation-leak lesson
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+
+$ bash experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh DIR-045 experiments/quay-perpetual-stream/backlog.md
+PASS: DIR-045 is not design-only — impl-row gate does not apply.
+
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh
+tree-hygiene: clean — no un-gitignored scratch left in the main tree.
+
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+info: prunable merged iteration branches=0; registered iteration worktrees=0.
+```
+
+**DoD gate-log (GateEvent array):**
+```json
+[
+  {"id":"192f78da-7b17-40b2-a95b-37b719d843a3","item_id":"DIR-045","gate":"dod","verdict":"pass","timestamp":"2026-07-21T04:28:04.300Z"},
+  {"id":"25b4946b-98ec-4cd9-b877-f2c53a0054e4","item_id":"DIR-045","gate":"dod","verdict":"pass","timestamp":"2026-07-21T04:30:34.048Z"},
+  {"id":"7631c42a-01b2-434a-8575-2525eb4029fc","item_id":"DIR-045","gate":"dod","verdict":"pass","timestamp":"2026-07-21T04:34:20.387Z"}
+]
+```
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 64, 64 % 5 != 0; next checkpoint at m65 — VERY NEXT milestone).
+
+**Worktree/branch hygiene close-out:** `milestones/M64/worktrees/iteration-0` removed (`git worktree remove --force`); `milestones/M64-dir045-loop-driver-formal` branch deleted (`git branch -d`, fully merged at `c42d3c0`). Post-prune hygiene: clean (0 registered iteration worktrees, 0 prunable merged branches).
+
+**Deviation log:** Off-loop DIR-047 human commit landed on master during M64 BUILD; reconciled via cherry-pick + clean 3-way merge (no content loss). Not a process deviation — DIR-027 human-steering hygiene permits off-loop commits to master; loop handled it at ABSORB boundary per standard procedure.
+
+## Backlog row
+| DIR-045 | the loop-driver skill (DIR-042-B, M60) was a slim prose driver with no formal contract — a foreign project launching via it had to inline a fat prose driver with hardcoded params, the wrong abstraction level. Closed via (1) formal `iterate` contract (baime prompt-doc style, 6 typed sub-steps + inline invariants, single-sourced), (2) `readLoopParams` FAIL-CLOSED params reader (`.quay/loop.yml` schema: board/gates/stop/coexist/policy), (3) 12/12 RED+GREEN params tests, (4) one contract + two real params files proved via real archguard TASK-25 iteration (real diff `da04248` + vitest gate PASS in deps-ready worktree) + exp5 loop.yml | capability-growth (primary) + governance-integrity (secondary), builds on DIR-042-B (M60) + DIR-046 (M61) | no new VT chart cell (skill-layer/governance-integrity surface, not chart-1-scored axis) | directive, milestone-candidate, milestone:M64 |
