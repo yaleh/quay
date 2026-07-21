@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-TS-MIGRATION-P2 | TS migration P2 (ABI boundary, ADR-012): express the Provider ABI (task + ADR view-models) as TypeScript interfaces — the ABI contract becomes a type — behavior-preserving, autonomous under the golden-diff discipline. | DONE | - | milestone-candidate, crystallization |
 | DIR-054 | dashboard.md context-budget discipline (LOOP-EXECUTABLE): retire the unbounded append-only `## Log`. Make the ABSORB write a ONE-LINE summary row (id · Δv · audit verdict · merge SHA · pointer), keep only a ROLLING WINDOW of the last N milestones live (older → archive or drop; git history is the real provenance), and enforce it with a MECHANICAL dashboard line-budget gate that HARD-blocks milestone_counter++ over the cap. Same pathology exp5 already retired once as exp3's provenance.md. | DONE | - | directive, milestone-candidate |
 | DIR-045 | Follow-on to DIR-042-B: formalize the loop-driver skill to ONE universal `iterate` contract + a per-workspace `.quay/loop.yml` params block + a thin launcher — so a single driver parameterizes over projects (exp5 + archguard both become params instances, proven by driving a REAL archguard iteration from a params file), in the baime formalized prompt-doc style. LOOP-EXECUTABLE. | DONE | - | directive, milestone-candidate, milestone:M64 |
 | exp5-M-TS-MIGRATION-P1 | TS migration P1 (leaf modules, ADR-012): port pure-logic leaf modules (task-schema, provider-client, gate registry — no wide product-code rewrite yet) to real .ts, behavior-preserving + golden-diff. Loop-executable, human-authorized slice of exp5-M-TS-MIGRATION, phase 2 of 5 (P0 done). | DONE | - | milestone-candidate, crystallization, milestone:M-77 |
@@ -90,7 +91,6 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-TS-MIGRATION | TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety | open | - | milestone-candidate, crystallization |
 | exp5-M-TS-MIGRATION-P4 | TS migration P4 (exp5 method-infra scripts, ADR-012): migrate the load-bearing gates/scripts to TS under the golden-diff discipline (like the it0-dod-check restructure) — behavior-preserving, autonomous. | open | - | milestone-candidate, crystallization |
 | exp5-M-TS-MIGRATION-P3 | TS migration P3 (per-package, ADR-012): port the packages internally to TS — quay-native store → Core CLI/serve/mcp → quay-github — behavior-preserving, autonomous under the golden-diff discipline; split per-package at SELECT. | open | - | milestone-candidate, crystallization |
-| exp5-M-TS-MIGRATION-P2 | TS migration P2 (ABI boundary, ADR-012): express the Provider ABI (task + ADR view-models) as TypeScript interfaces — the ABI contract becomes a type — behavior-preserving, autonomous under the golden-diff discipline. | open | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-F1 | F1 [subtractive] Shrink iteration reports / ABSORB dispositions to GateEvent pointers (advances DIR-021/022/024) | open | - | milestone-candidate, crystallization, human-steered |
 | exp5-M-CRYST-D2 | D2 Rewrite skills (/quay-directive, quay-task-to-plan) in baime formalized style (λ-Spec + contracts:) | open | - | milestone-candidate, crystallization, human-steered |
 | exp5-M-CRYST-D3 | D3 [subtractive] Rewrite OUTER-LOOP + inherited-core + inner-iteration prompts in formalized style; replace deterministic prompt steps with code (Axis 2′) | SELECTED | - | milestone-candidate, crystallization, milestone:first-wave, human-steered |
@@ -100,4 +100,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_93 milestone-candidate task(s) as of 2026-07-21T17:57:22.542Z._
+_93 milestone-candidate task(s) as of 2026-07-21T18:21:56.153Z._

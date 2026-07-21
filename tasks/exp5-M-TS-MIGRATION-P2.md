@@ -3,7 +3,7 @@ id: exp5-M-TS-MIGRATION-P2
 title: "TS migration P2 (ABI boundary, ADR-012): express the Provider ABI (task
   + ADR view-models) as TypeScript interfaces — the ABI contract becomes a type
   — behavior-preserving, autonomous under the golden-diff discipline."
-status: ready
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -44,12 +44,19 @@ milestone. Behavior-preservation is verified mechanically, not asserted:
   type change any runtime path? is it a real contract type, not `any`-laundered?).
 
 ## Acceptance Criteria
-- [ ] The Provider ABI task + ADR view-models exist as TypeScript interfaces (not `any`/loose records); native, github, and Core typecheck against them under `tsc --noEmit` (the P0 gate), which passes.
-- [ ] Behavior-preserving: the full existing test + selfcheck + gate suite (incl. provider-ABI conformance) is green before AND after; a golden-diff shows no runtime behavior change.
-- [ ] No dual source of the contract: the TS interface is THE ABI contract (prose/docs reference it, do not re-specify it) — ADR-004 single-source.
+- [x] The Provider ABI task + ADR view-models exist as TypeScript interfaces (not `any`/loose records); native, github, and Core typecheck against them under `tsc --noEmit` (the P0 gate), which passes.
+- [x] Behavior-preserving: the full existing test + selfcheck + gate suite (incl. provider-ABI conformance) is green before AND after; a golden-diff shows no runtime behavior change.
+- [x] No dual source of the contract: the TS interface is THE ABI contract (prose/docs reference it, do not re-specify it) — ADR-004 single-source.
 
 ## Definition of Done
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts:
-- [ ] The ABI view-models are TS interfaces, `tsc --noEmit` passes, and both providers + Core typecheck against them — pasted evidence, on a real milestone.
-- [ ] Full suite/selfchecks/gates green before/after (behavior-preserving); the it0 DoD meta-enforcer passes; TDD per ADR-001; a fresh-context adversarial audit confirms no runtime drift and no `any`-laundering of the contract.
-- [ ] Per DIR-026 SPLIT-OR-COMMIT: lands done-or-`needs-human`; parent [[exp5-M-TS-MIGRATION]] is done only when ALL its children (P0–P4) are done.
+- [x] The ABI view-models are TS interfaces, `tsc --noEmit` passes, and both providers + Core typecheck against them — pasted evidence, on a real milestone.
+- [x] Full suite/selfchecks/gates green before/after (behavior-preserving); the it0 DoD meta-enforcer passes; TDD per ADR-001; a fresh-context adversarial audit confirms no runtime drift and no `any`-laundering of the contract.
+- [x] Per DIR-026 SPLIT-OR-COMMIT: lands done-or-`needs-human`; parent [[exp5-M-TS-MIGRATION]] is done only when ALL its children (P0–P4) are done.
+
+## Execution record
+
+Milestone: M79 | Iteration: iteration-0 (branch `exp5-m79-iteration-0`, commit `5f7ad7c`)  
+Realized Δv: 0 (L_C hardening, no VT chart cell)  
+Merge SHA: b74aa2e (merge into master 2026-07-21)  
+Outcome: done — `packages/quay/src/abi.ts` created with Task/AdrRecord/Manifest interfaces; `ProviderClient` methods typed (no `any`); tsc exits 0; test suite 342/338/4 baseline. Adversarial audit: NO REFUTATION FOUND (non-blocking: null casts noted for P3).
