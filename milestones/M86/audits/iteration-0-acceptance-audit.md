@@ -3,10 +3,14 @@ milestone: M86
 iteration: 0
 task: DIR-056
 audit_session_id: m86-iter0-dir056-probe-spec-2026-07-21
+audit_agent_id: ac352f6b3024f4eca
+orchestrator_id: a653b2e9-8c25-4560-8c85-bd3e757e56f3
 auditor: fresh-context subagent (Claude Sonnet 4.6)
 date: 2026-07-21
 verdict: NO REFUTATION FOUND
 ---
+
+**Audit session id:** m86-iter0-dir056-probe-spec-2026-07-21
 
 # M86 Iteration-0 Acceptance Audit: DIR-056 probe-spec formalization
 
