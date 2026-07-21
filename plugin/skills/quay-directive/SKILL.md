@@ -1,6 +1,6 @@
 ---
 name: quay-directive
-description: Record a new directive for THIS workspace's quay task store as a TASK-CANONICAL quay task (label:directive) via task_write — the task IS the single source of truth (DIR-028/Plan A; NO directives/*.md file, NO projection, NO anti-drift check). Workspace-portable: works in any project with a .quay/config.yml, with or without an experiments/ dir. Every directive MUST carry runnable Acceptance Criteria + a real-landing Definition of Done (a file/fixture is necessary-not-sufficient — done = a real object actually operated through the mechanism, DIR-026 Reading A). Invoke after discussing the finding/action in this conversation, e.g. /quay-directive manda dispatch confirmed genuine.
+description: "Record a new directive for THIS workspace's quay task store as a TASK-CANONICAL quay task (label:directive) via task_write — the task IS the single source of truth (DIR-028/Plan A; NO directives/*.md file, NO projection, NO anti-drift check). Workspace-portable: works in any project with a .quay/config.yml, with or without an experiments/ dir. Every directive MUST carry runnable Acceptance Criteria + a real-landing Definition of Done (a file/fixture is necessary-not-sufficient — done = a real object actually operated through the mechanism, DIR-026 Reading A). Invoke after discussing the finding/action in this conversation, e.g. /quay-directive manda dispatch confirmed genuine."
 allowed-tools: Bash, Read, Write, Edit
 ---
 
