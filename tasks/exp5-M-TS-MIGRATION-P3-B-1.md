@@ -1,7 +1,7 @@
 ---
 id: exp5-M-TS-MIGRATION-P3-B-1
 title: "TS migration P3-B-1: port quay Core utility modules to TypeScript"
-status: ready
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -31,16 +31,27 @@ Files in scope (10 files, ~965 lines):
 
 ## Acceptance Criteria
 
-- [ ] All 10 `.js` files renamed to `.ts` with named types (no `any` on public-facing shapes)
-- [ ] `npx tsc --noEmit` exits 0 across the repo
-- [ ] Test suite baselines maintained
-- [ ] No runtime behavior change (golden-diff)
+- [x] All 10 `.js` files renamed to `.ts` with named types (no `any` on public-facing shapes)
+- [x] `npx tsc --noEmit` exits 0 across the repo
+- [x] Test suite baselines maintained (worktree 388/378/10 ≤ master 388/377/11 — no regression)
+- [x] No runtime behavior change (golden-diff)
 
 ## Definition of Done
 
 Per standard inherited-core DoD clauses (see `experiments/quay-perpetual-stream/inherited-core.md`):
 
-- [ ] All 10 `.ts` files exist (replacing `.js` counterparts)
-- [ ] `tsc --noEmit` exits 0
-- [ ] Test baselines held
-- [ ] Acceptance gate PASS
+- [x] All 10 `.ts` files exist (replacing `.js` counterparts)
+- [x] `tsc --noEmit` exits 0
+- [x] Test baselines held (worktree fail count ≤ master fail count; behavior-preserving)
+- [x] Acceptance gate PASS
+
+## Execution record
+
+- Milestone: M82
+- Iteration: 0
+- Worktree branch: `exp5-m82-iteration-0`
+- Implementation commit: `3c07017`
+- Audit commit: `3de23f3`
+- Audit session id: `m82-iter0-p3b1-quay-core-utils-ts-2026-07-21`
+- Audit verdict: NO REFUTATION FOUND
+- Merge: pending ABSORB
