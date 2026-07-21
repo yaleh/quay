@@ -31,3 +31,6 @@ open.
 
 ## Not selected (M64)
 No new urgency signal; mechanical sweep with no external dogfood component. [[DIR-045]] selected instead — aged 2 passes, LOOP-EXECUTABLE with real archguard iteration proof, higher capability-growth value.
+
+## Not selected (M70)
+D4 [hard-fix] selected instead — closes the ADR-004 prose-parsing residual in vmeta-lag-check (structured-field vs interim leading-token parser), higher urgency (hard-fix label) than an administrative backfill sweep.

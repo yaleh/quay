@@ -6268,3 +6268,13 @@ Initial build missed updating `plugin/scripts/task-schema.mjs` — dual-source v
 | ID | Title | Type | VT Δ |
 |---|---|---|---|
 | exp5-M-CRYST-B6-VALIDATOR-COVERAGE | B6 directive Finding/Requested-action validator (A7) | governance-integrity | 0 |
+
+
+---
+## M70 SELECT — exp5-M-CRYST-D4-LEDGER-STRUCTURED-STATUS
+
+**Selected:** exp5-M-CRYST-D4-LEDGER-STRUCTURED-STATUS — D4 [hard-fix] Structured V_meta-ledger status field — retire the prose status parser (ADR-004; closes R5's prose-parsing residual)
+
+**Rationale:** `hard-fix` label — the V_meta-lag check currently parses status from free prose via a fail-closed leading-token parser (an INTERIM fix). The hard fix (ADR-004 Π_{S→E}: hard over soft) is a structured machine-readable status field in `v-meta-ledger.md`, read directly by `vmeta-lag-check.mjs`, fail-closed on any non-conforming row. Removes a class of prose-parsing fragility. LOOP-EXECUTABLE, no driver mutation.
+
+**Deferred:** exp5-M-CRYST-B4 (task migration sweep, no urgency signal); exp5-M-CRYST-E2 (ADR authoring, documentation work); DIR-038/DIR-044 (human-steered driver-rewrite class).
