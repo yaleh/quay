@@ -18,7 +18,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Globs treated as too broad to reason about safely → conservative overlap.
-const OVERBROAD = new Set(["**", "*", "**/*", "./**", "**/**"]);
+export const OVERBROAD = new Set(["**", "*", "**/*", "./**", "**/**"]);
+
+// A DECLARATION is overbroad (unsafe to reason about / meaningless as a scope) if it is a bare
+// wildcard (OVERBROAD) OR a single top-level segment followed by `/**` (e.g. `packages/**`,
+// `tasks/**`) — broad enough to absorb an unrelated stray write. `packages/quay/**` (depth ≥ 2) is
+// fine. Single-source: both the pre-flight orthogonality gate AND the after-the-fact anti-drift
+// guardrail use THIS predicate (ADR-004) — hardening from the DIR-044 increment-4 adversarial audit
+// (finding H3: an overbroad-but-legal directory glob defeated the out-of-declared arm).
+export function isOverbroadDeclaration(glob) {
+  const g = String(glob).trim().replace(/^\.\//, "");
+  if (OVERBROAD.has(g)) return true;
+  return /^[^/]+\/\*\*$/.test(g); // one top segment + /**
+}
 
 // ── parseTouches ─────────────────────────────────────────────────────────────────────────────────
 // Extract the `## Touches` section's path globs. Accepts `- ` and `* ` bullets; strips a leading `./`.
@@ -130,7 +142,7 @@ export function checkTouchesPair(parsedA, parsedB, expand) {
     if (!p.hasSection || p.globs.length === 0) {
       return { disjoint: false, overlaps: [], reason: `conservative: side ${who} declares no/empty ## Touches → serialize` };
     }
-    const bad = p.globs.find((g) => OVERBROAD.has(g.trim()));
+    const bad = p.globs.find((g) => isOverbroadDeclaration(g));
     if (bad) {
       return { disjoint: false, overlaps: [], reason: `conservative: side ${who} has overbroad glob "${bad}" → serialize` };
     }

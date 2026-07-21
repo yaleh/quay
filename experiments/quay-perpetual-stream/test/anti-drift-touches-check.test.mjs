@@ -11,6 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   fileWithinDeclared,
+  normalizePath,
   checkAntiDrift,
   main,
 } from "../scripts/anti-drift-touches-check.mjs";
@@ -85,6 +86,37 @@ test("checkAntiDrift: three builds, one pair overlaps → the specific pair is r
   assert.deepEqual([ov.a, ov.b].sort(), ["A", "B"]);
 });
 
+// ── hardening from the increment-4 adversarial audit (H3 overbroad, H1 normalization) ─────────────
+test("checkAntiDrift: an OVERBROAD declaration (packages/**) is rejected — closes audit H3", () => {
+  // Without this, `packages/**` would absorb a stray write and the out-of-declared arm is toothless.
+  const r = checkAntiDrift([
+    { id: "A", declaredGlobs: ["packages/**"], actualFiles: ["packages/quay/x.js", "packages/UNRELATED/stray.js"] },
+    { id: "B", declaredGlobs: ["experiments/**/z.js"], actualFiles: ["experiments/a/z.js"] },
+  ]);
+  assert.equal(r.ok, false);
+  const ob = r.violations.find((v) => v.type === "overbroad-declaration");
+  assert.ok(ob, "expected an overbroad-declaration violation");
+  assert.equal(ob.build, "A");
+  assert.equal(ob.glob, "packages/**");
+});
+
+test("checkAntiDrift: cross-build overlap survives path-shape differences (./ prefix) — closes audit H1", () => {
+  const r = checkAntiDrift([
+    { id: "A", declaredGlobs: ["shared/s.js"], actualFiles: ["./shared/s.js"] },
+    { id: "B", declaredGlobs: ["shared/s.js"], actualFiles: ["shared/s.js"] },
+  ]);
+  assert.equal(r.ok, false);
+  const ov = r.violations.find((v) => v.type === "cross-build-overlap");
+  assert.ok(ov, "the ./-prefixed path must still be seen as the same file");
+  assert.equal(ov.file, "shared/s.js");
+});
+
+test("normalizePath: strips leading ./, trailing /, collapses //", () => {
+  assert.equal(normalizePath("./a/b.js"), "a/b.js");
+  assert.equal(normalizePath("a//b.js"), "a/b.js");
+  assert.equal(normalizePath("a/b/"), "a/b");
+});
+
 // ── main() over JSON manifests (green + the two RED guardrail-bites cases) ────────────────────────
 test("main: GREEN manifest (clean batch) → exit 0", async () => {
   assert.equal(await main(["node", "s", fx("green.json")]), 0);
@@ -96,6 +128,10 @@ test("main: RED manifest (cross-build overlap) → exit 1 (guardrail bites)", as
 
 test("main: RED manifest (wrote outside declared) → exit 1 (guardrail bites)", async () => {
   assert.equal(await main(["node", "s", fx("red-stray.json")]), 1);
+});
+
+test("main: RED manifest (overbroad declaration) → exit 1 (guardrail bites — audit H3)", async () => {
+  assert.equal(await main(["node", "s", fx("red-overbroad.json")]), 1);
 });
 
 test("main: missing manifest → exit 2", async () => {

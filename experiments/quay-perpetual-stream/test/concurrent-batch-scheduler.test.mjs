@@ -71,16 +71,27 @@ test("assembleBatch: two disjoint execution candidates → both batched", () => 
 
 test("assembleBatch: an overlapping candidate is deferred, not batched", () => {
   const cands = [
-    parseCandidate("A", "**type:** execution\n## Touches\n- g/reg.js"),
-    parseCandidate("B", "**type:** execution\n## Touches\n- g/**"), // overlaps A on g/reg.js
+    parseCandidate("A", "**type:** execution\n## Touches\n- g/sub/reg.js"),
+    parseCandidate("B", "**type:** execution\n## Touches\n- g/sub/**"), // depth-2 glob overlaps A on g/sub/reg.js
     parseCandidate("C", "**type:** execution\n## Touches\n- z/c.js"),
   ];
-  const expand = fakeExpand({ "g/reg.js": ["g/reg.js"], "g/**": ["g/reg.js", "g/x.js"], "z/c.js": ["z/c.js"] });
+  const expand = fakeExpand({ "g/sub/reg.js": ["g/sub/reg.js"], "g/sub/**": ["g/sub/reg.js", "g/sub/x.js"], "z/c.js": ["z/c.js"] });
   const r = assembleBatch(cands, { expand });
   assert.deepEqual(r.batch, ["A", "C"]);          // A anchors, C disjoint from A → in; B overlaps A → out
   assert.equal(r.deferred.length, 1);
   assert.equal(r.deferred[0].id, "B");
   assert.match(r.deferred[0].reason, /overlap/i);
+});
+
+test("assembleBatch: a '…-learning' type is also never batched (tightened exclusion)", () => {
+  const cands = [
+    parseCandidate("A", "**type:** execution\n## Touches\n- x/a.js"),
+    parseCandidate("SNEAK", "**type:** execution-learning\n## Touches\n- y/b.js"),
+  ];
+  const r = assembleBatch(cands, { expand: fakeExpand({ "x/a.js": ["x/a.js"], "y/b.js": ["y/b.js"] }) });
+  assert.deepEqual(r.batch, ["A"]);
+  assert.equal(r.deferred[0].id, "SNEAK");
+  assert.match(r.deferred[0].reason, /learning/i);
 });
 
 test("assembleBatch: learning-type is NEVER batched (always serial), even if disjoint", () => {

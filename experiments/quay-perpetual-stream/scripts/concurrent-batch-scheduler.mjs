@@ -100,7 +100,10 @@ export function assembleBatch(candidates, { expand }) {
 }
 
 function isLearning(type) {
-  return /^learning/.test(String(type));
+  // Conservative: any type MENTIONING "learning" (not only a leading token) is treated as learning
+  // and never batched — hardening from the DIR-044 increment-4 audit (a "…-learning" type must not
+  // sneak into a batch).
+  return /learning/i.test(String(type));
 }
 
 // checkTouchesPair(x, x) returns disjoint:false with reason "overlapping file-sets" (a set overlaps

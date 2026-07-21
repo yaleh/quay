@@ -13,6 +13,7 @@ CASES=(
   "clean-batch|$FIX/green.json|0"
   "mis-declared-overlap-BITES|$FIX/red-overlap.json|1"
   "stray-write-BITES|$FIX/red-stray.json|1"
+  "overbroad-declaration-BITES|$FIX/red-overbroad.json|1"
 )
 fail=0
 for c in "${CASES[@]}"; do

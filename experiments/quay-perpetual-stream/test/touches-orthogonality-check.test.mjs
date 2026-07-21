@@ -20,6 +20,7 @@ import {
   filesDisjoint,
   checkTouchesPair,
   findRepoRoot,
+  isOverbroadDeclaration,
   main,
 } from "../scripts/touches-orthogonality-check.mjs";
 
@@ -120,11 +121,30 @@ test("checkTouchesPair: disjoint declared file-sets → disjoint", () => {
 });
 
 test("checkTouchesPair: overlapping expansion → not disjoint, overlap reported", () => {
-  const A = parseTouches("## Touches\n- g/reg.js");
-  const B = parseTouches("## Touches\n- g/**");
-  const r = checkTouchesPair(A, B, fakeExpand({ "g/reg.js": ["g/reg.js"], "g/**": ["g/reg.js", "g/x.js"] }));
+  const A = parseTouches("## Touches\n- g/sub/reg.js");
+  const B = parseTouches("## Touches\n- g/sub/**"); // depth-2 glob: a legitimate narrow scope, not overbroad
+  const r = checkTouchesPair(A, B, fakeExpand({ "g/sub/reg.js": ["g/sub/reg.js"], "g/sub/**": ["g/sub/reg.js", "g/sub/x.js"] }));
   assert.equal(r.disjoint, false);
-  assert.deepEqual(r.overlaps, ["g/reg.js"]);
+  assert.deepEqual(r.overlaps, ["g/sub/reg.js"]);
+});
+
+test("checkTouchesPair: a single-top-segment /** declaration is overbroad → conservative serialize", () => {
+  const A = parseTouches("## Touches\n- packages/**"); // one top segment + /** → too broad to batch
+  const B = parseTouches("## Touches\n- y/b.js");
+  const r = checkTouchesPair(A, B, fakeExpand({ "packages/**": ["packages/x.js"], "y/b.js": ["y/b.js"] }));
+  assert.equal(r.disjoint, false);
+  assert.match(r.reason, /overbroad/i);
+});
+
+// ── isOverbroadDeclaration (single-source predicate, shared with anti-drift) ───────────────────────
+test("isOverbroadDeclaration: bare wildcards and single-top-segment /** are overbroad; deeper is not", () => {
+  assert.equal(isOverbroadDeclaration("**"), true);
+  assert.equal(isOverbroadDeclaration("*"), true);
+  assert.equal(isOverbroadDeclaration("packages/**"), true);
+  assert.equal(isOverbroadDeclaration("./tasks/**"), true);      // leading ./ stripped
+  assert.equal(isOverbroadDeclaration("packages/quay/**"), false); // depth ≥ 2 is a real scope
+  assert.equal(isOverbroadDeclaration("packages/quay/src/gate/registry.js"), false);
+  assert.equal(isOverbroadDeclaration("packages/quay/src/gate/*.js"), false);
 });
 
 test("checkTouchesPair: absent touches on either side → CONSERVATIVE not-disjoint", () => {
