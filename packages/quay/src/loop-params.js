@@ -119,6 +119,17 @@ export function readLoopParams(workspaceRoot) {
     );
   }
 
+  // 11. Optional: concurrency — max touches-disjoint batch width (DIR-049). Integer >= 1; DEFAULT 1
+  //     (serial — one dispatched build per iterate, i.e. DIR-048 behavior). N > 1 opts a workspace INTO
+  //     cross-milestone concurrency (safe only where tasks are touches-disjoint + carry no SELECT←ABSORB
+  //     learning dependency). Fail-closed on non-integer / < 1.
+  const concurrency = parsed?.concurrency ?? 1;
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new Error(
+      `FAIL-CLOSED: .quay/loop.yml field 'concurrency' value "${concurrency}" is invalid — must be an integer >= 1 (1 = serial, the default)`
+    );
+  }
+
   return {
     board: parsed.board.trim(),
     gates,
@@ -127,5 +138,6 @@ export function readLoopParams(workspaceRoot) {
     coexist,
     execution,
     audit,
+    concurrency,
   };
 }

@@ -32,19 +32,26 @@ invariants (∀ iteration):
 ## Params — `.quay/loop.yml` (REQUIRED, fail-closed if absent/malformed)
 
 ```yaml
-# Schema: board REQUIRED, gates REQUIRED, stop/policy/coexist/execution/audit OPTIONAL
-board:     native            # provider name (matches .quay/config.yml providers key)
-gates:     [vitest]          # gate name(s) from .quay/gates.yml; PASS iff all pass
-stop:      once              # once | until(.halt) | until(empty) | until(<condition>)
-policy:    ready-first       # select ranking: ready-first | value-typed-ledger | …
-coexist:   null              # pause-hook (e.g. "pause(backlog/.loop-stop)") or null
-execution: dispatched        # dispatched (DEFAULT) | inline — build isolation
-audit:     adversarial       # adversarial (DEFAULT) | none — independent fresh-context verify
+# Schema: board REQUIRED, gates REQUIRED, stop/policy/coexist/execution/audit/concurrency OPTIONAL
+board:       native          # provider name (matches .quay/config.yml providers key)
+gates:       [vitest]        # gate name(s) from .quay/gates.yml; PASS iff all pass
+stop:        once            # once | until(.halt) | until(empty) | until(<condition>)
+policy:      ready-first     # select ranking: ready-first | value-typed-ledger | …
+coexist:     null            # pause-hook (e.g. "pause(backlog/.loop-stop)") or null
+execution:   dispatched      # dispatched (DEFAULT) | inline — build isolation
+audit:       adversarial     # adversarial (DEFAULT) | none — independent fresh-context verify
+concurrency: 1               # 1 (DEFAULT) = serial | N = max touches-disjoint batch width (DIR-049)
 ```
 
 The skill reads this file first via `readLoopParams` (`src/loop-params.js`). If absent or malformed, it refuses to run (FAIL-CLOSED). No runner name, project name, or workspace path is hardcoded in this skill.
 
 **Default behavior (no `execution`/`audit` keys):** build runs in a fresh background subagent (`execution: dispatched`) and a fresh-context adversarial auditor runs before land (`audit: adversarial`). This is the two-layer model. To opt out to single-context/self-gated behavior (constrained/trivial workspaces), set `execution: inline` + `audit: none` explicitly in `loop.yml`.
+
+**Concurrency (`concurrency > 1`, DIR-049) — opt-in cross-milestone batching.** Default `1` = serial (one dispatched build per iterate = steps 2→7 below). Concurrency defaults OFF (unlike dispatch/audit which default ON) because it trades safety for throughput and is safe ONLY where ready tasks are touches-disjoint AND carry no SELECT←ABSORB learning dependency (e.g. archguard's independent refactors qualify; exp5 methodology milestones do not). When `concurrency = N > 1`, one iterate = one BATCH, orchestrated by CALLING the DIR-044 scripts (single-source — never re-implement them):
+1. **SELECT → batch:** run `scripts/concurrent-batch-scheduler.mjs --root <ws> <ready-charter/task files>` to assemble a maximal touches-disjoint, execution-type batch up to width N. Tasks lacking a `## Touches` declaration, overbroad, or learning-type → conservative-serialize (not batched). A 1-wide result = fall back to serial (steps 2→7).
+2. **Dispatch N (concurrent):** for each batched task run steps 3→6b — `isolate` (own worktree) + `build` (dispatched subagent) + `gate` + `6b audit` (fresh-context) — CONCURRENTLY. The driver stays a lean orchestrator and polls all N.
+3. **Fan-in (serial):** collect the survivors (gate PASS **and** audit NO-REFUTATION). Run `scripts/anti-drift-touches-check.mjs <ran-batch-manifest.json>` on the REAL diffs — a mis-declared overlap HARD-FAILs the batch (NON-WAIVABLE, do not merge). Then `scripts/serial-fanin-absorb.mjs` for the deterministic merge plan; merge each survivor one-at-a-time and mark it `done`. A build that FAILED gate or was REFUTED → `needs-human`, EXCLUDED from fan-in (partial-batch: disjoint survivors still land).
+Guardrails (all from DIR-044): conservative-default-serialize, learning-never-batched, anti-drift HARD, native-only (no manda).
 
 ## Steps
 
@@ -70,7 +77,9 @@ select :: Board ⇀ Task        ⊨ exclude label:human-steered
 ```
 isolate :: Task → Worktree    ⊨ ¬on-master ; ⊨ deps-ready
 ```
-`git worktree add <path> -b <branch>` off HEAD. Branch name: `milestones/<ws>/<task.id>` (workspace-local convention). Ensure deps are present in the worktree: symlink `node_modules` (or `venv`) from the main workspace, or install. The runner MUST work in the worktree without manual intervention.
+`git worktree add <path> -b <branch>` off HEAD. Branch name: `milestones/<ws>/<task.id>` (workspace-local convention). Ensure deps are present in the worktree: symlink `node_modules` (or `venv`) from the main workspace, or install.
+
+**`deps-ready` includes untracked-but-required files (DIR-049 B2).** A fresh worktree contains only tracked files; any UNTRACKED file the gate needs (a generated fixture, a local `.agents/skills/**` reference, an un-committed config) is absent, and the gate then fails on an environmental gap, not a real defect. After creating the worktree, copy the workspace's untracked-but-required files into it — `git -C <mainWorkspace> ls-files --others --exclude-standard` lists candidates; sync those the runner reads. The runner MUST work in the worktree without manual intervention: under `execution: dispatched` there is no human to copy a missing file per build, and a DIR-049 concurrent batch has N worktrees each hitting this.
 
 ### 4. Build
 ```

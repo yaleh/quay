@@ -123,6 +123,26 @@ test("GREEN: minimal valid params (board + gates as array)", () => {
   // DIR-048 new defaults
   assert.equal(params.execution, "dispatched");
   assert.equal(params.audit, "adversarial");
+  // DIR-049 default: concurrency 1 (serial)
+  assert.equal(params.concurrency, 1);
+});
+
+test("GREEN: concurrency N opts into cross-milestone batching (DIR-049)", () => {
+  const ws = tmpWs("concurrency-n");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\nconcurrency: 3");
+  assert.equal(readLoopParams(ws).concurrency, 3);
+});
+
+test("RED: concurrency 0 throws FAIL-CLOSED (must be integer >= 1)", () => {
+  const ws = tmpWs("concurrency-0");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\nconcurrency: 0");
+  assert.throws(() => readLoopParams(ws), /FAIL-CLOSED.*concurrency/);
+});
+
+test("RED: concurrency non-integer throws FAIL-CLOSED", () => {
+  const ws = tmpWs("concurrency-frac");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\nconcurrency: 2.5");
+  assert.throws(() => readLoopParams(ws), /FAIL-CLOSED.*concurrency/);
 });
 
 test("GREEN: minimal valid params (board + gates as string)", () => {
