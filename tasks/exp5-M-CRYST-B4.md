@@ -28,3 +28,6 @@ Considered alongside the crystallization epic's usual candidate set, compared ag
 `exp5-M-DIR033-WORKTREE-HYGIENE` (fresh pending directive, live measured present-drift evidence).
 No new urgency signal on B4 this pass (unchanged since last considered); deferred again — remains
 open.
+
+## Not selected (M64)
+No new urgency signal; mechanical sweep with no external dogfood component. [[DIR-045]] selected instead — aged 2 passes, LOOP-EXECUTABLE with real archguard iteration proof, higher capability-growth value.

@@ -5977,3 +5977,41 @@ both sides before merge.
 
 ## Backlog row
 | exp5-M-TS-MIGRATION-P0 | JS codebase has 0 `.ts` files and no `tsconfig` — the TS migration tooling foundation is missing entirely. Closed via (1) `tsconfig.json` (allowJs+checkJs, strict:false), (2) `ts-typecheck` quay gate running `npx tsc --noEmit`, (3) Node 25 native `.ts` module + test (no build step), (4) `// @ts-nocheck` ramp on 16 JS files (ADR-012 gradual-adoption discipline). P1–P4 (broad product-code migration) remain human-steered. | crystallization (TS tooling foundation), unblocks P1+ under ADR-012 | no new VT chart cell (tooling/crystallization surface, not a chart-1-scored axis) | milestone-candidate, crystallization, milestone:M63 |
+
+## SELECT M64 — 2026-07-21
+
+**Selected task:** [[DIR-045]] (`tasks/DIR-045.md`) — loop-driver formalization: refactor the
+[[DIR-042-B]] loop-driver skill to a formal `iterate` contract (baime prompt-doc style — typed
+sub-steps + inline invariants), add a per-workspace `.quay/loop.yml` params schema (board/gates/
+stop/coexist/policy), and prove universality by driving a REAL archguard iteration from archguard's
+`.quay/loop.yml` — one contract, two params files.
+
+**Class:** LOOP-EXECUTABLE (skill-layer formalization; no driver mutation; no charter file, per
+M47+ no-charter-for-LOOP-EXECUTABLE precedent).
+
+**SELECT reasoning:** DIR-045 is the strongest candidate this pass:
+1. **Aged 2 passes** (deferred at M61 for DIR-046's live bug; deferred at M63 for TS tooling P0).
+   Priority ages in.
+2. **LOOP-EXECUTABLE** with no driver mutation — skill-layer only, no D3 golden-replay guardrails
+   required. Blast radius is confined to `plugin/skills/loop-driver/SKILL.md`.
+3. **External dogfood**: a real archguard iteration proves universality in a way a fixture cannot.
+   `/home/yale/work/archguard` is present and accessible.
+4. **Higher capability-growth value** than the competing crystallization candidate (exp5-M-CRYST-B4,
+   mechanical backfill, no dogfood), and lower risk than the driver-rewrite candidates (DIR-038,
+   DIR-044 — same D3 class, still deferred to dedicated dispatch).
+5. **Builds directly on two recent landings**: DIR-042-B (M60, the slim driver skill this
+   formalizes) + DIR-046 (M61, gate-cwd knob DIR-045 now uses).
+
+**Candidates not selected:**
+- [[DIR-038]] / [[DIR-044]]: still the same driver-rewrite class; D3 mandatory; deferred pending
+  dedicated scoped dispatch.
+- [[exp5-M-CRYST-B4]]: mechanical schema sweep; no external dogfood; no new urgency.
+
+**Value hypothesis (Δv̂):** no new VT chart cell (skill-layer / governance-integrity surface, not
+a chart-1-scored axis). Type: capability-growth (primary) + governance-integrity (secondary). The
+formal `iterate` contract + params file split eliminates the per-project prose-driver duplication
+risk identified in the M60 finding. Realized Δv will be recorded at M64 ABSORB.
+
+**Schema check:** `bash experiments/quay-perpetual-stream/scripts/task-schema-check.sh tasks/DIR-045.md` → PASS (schema v1, directive, well-formed).
+
+**Milestone label:** `milestone:M64` added to `tasks/DIR-045.md` via `quay task edit DIR-045 --labels "directive,milestone-candidate,milestone:M64"`.
