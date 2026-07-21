@@ -51,7 +51,7 @@ driveLoop(provider, stop=until(.halt), maxIterations=∞) = {
 
 0. **`halt-check`** — before every iteration, run `test -f .quay/.loop-stop`. If it exists, log a clean stop message and exit. Never remove the file — let the human decide when to clear it.
 
-1. **`select-ready`** — `quay task list --status ready --provider <provider>` (or MCP `task_list` with `status: "ready"`). Take the first returned task. If empty and `stop=until(.halt)` (default): log "queue empty — sleeping 300 s" then `sleep 300`, then go back to step 0. If empty and stop is `once` or `until(∅ ready)`: exit cleanly (`Idle`). Never fabricate a task.
+1. **`select-ready`** — `quay task list --status ready --provider <provider>` (or MCP `task_list` with `status: "ready"`). Take the first returned task. If empty and `stop=until(.halt)` (default): log "queue empty — sleeping N s" then **call `Bash("sleep N")` to actually block** — do NOT just narrate the intent. If empty and stop is `once` or `until(∅ ready)`: exit cleanly (`Idle`). Never fabricate a task.
 
 2. **`execute-task`** — invoke `quay:execute` against the selected task id and provider. That skill implements the task's plan, self-audits AC/DoD, and leaves the task unchanged if it could not make progress. This driver delegates — it does not re-implement.
 
@@ -65,13 +65,19 @@ driveLoop(provider, stop=until(.halt), maxIterations=∞) = {
 
 Default: first FAIL → `needs-human` immediately. No silent infinite retry. A workspace may extend step 4 to retry up to N times before falling back — that is workspace policy, not hardcoded here.
 
-### Idle sleep duration
+### Idle sleep duration and wakeup mechanism
 
-Default 300 s (5 min). A workspace's `.quay/loop.yml` `idle_sleep_s` key (DIR-045 params) overrides this when present; if the key is absent the default applies. The skill reads it with `grep idle_sleep_s .quay/loop.yml 2>/dev/null` and falls back to 300.
+**CRITICAL:** On idle, you MUST call `Bash("sleep N")` — do NOT merely emit text saying "scheduling a wakeup." ScheduleWakeup is only available inside a `/loop` session context and MUST NOT be called here. The `Bash sleep` is the only portable mechanism; it blocks this session for N seconds, then the outer loop resumes from step 0 naturally.
+
+Default N = 300 s (5 min). Read override: `grep -m1 'idle_sleep_s' .quay/loop.yml 2>/dev/null | grep -oE '[0-9]+'` — use that value if present, else 300.
+
+**Invocation modes:**
+- **`/loop /quay:loop-driver <args>`** — preferred for long-running persistent loops. `/loop` re-invokes the skill automatically on each return; each call handles one select→execute→gate→settle cycle, and the natural iteration boundary maps cleanly to ScheduleWakeup delay (the `/loop` framework schedules the next). In this mode the idle branch still calls `Bash("sleep N")` to delay before returning (so `/loop` does not spin at zero cost when the queue is empty).
+- **`/quay:loop-driver`** direct — runs the full persistent while-loop in one session call; the `Bash("sleep N")` blocks inline for each idle period. The session must stay alive for the loop to continue; if the session exits, the loop stops.
 
 ## Gaps (honestly declared)
 
 - The `execute` step requires `quay:execute` to be installed; if absent, step 2 cannot make progress (workspace-composition precondition).
-- `sleep 300` blocks the session process — a workspace running the loop under `/loop` may instead use ScheduleWakeup for a cleaner idle wait; the skill uses `sleep` as the portable fallback since it cannot assume the host's loop primitive.
 - Sequential only — no subagent parallelism assumed.
 - Retry policy is intentionally simple; automatic remediation of a failing gate is a human's job.
+- In direct-invocation mode, if the session is closed or times out during a `sleep`, the loop stops. Use `/loop /quay:loop-driver` for a more resilient persistent loop.
