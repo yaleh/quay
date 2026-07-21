@@ -17,9 +17,9 @@ import { createStore, resolveDefaultStatus } from "../src/store.ts";
 // workspace dependency (`quay` in package.json) — a Provider depending on
 // Core's generic utility library, NOT the ABI-violating direction (Core
 // reaching into a Provider's task-store internals by relative path).
-import { createAdrStore } from "quay/src/adr-store.js";
-import { createDocumentStore } from "quay/src/document-store.js";
-import { validateContracts } from "quay/src/contract-validator.js";
+import { createAdrStore } from "quay/src/adr-store.ts";
+import { createDocumentStore } from "quay/src/document-store.ts";
+import { validateContracts } from "quay/src/contract-validator.ts";
 import { readManifest } from "../src/manifest.ts";
 
 function findRepoRoot(startDir) {
