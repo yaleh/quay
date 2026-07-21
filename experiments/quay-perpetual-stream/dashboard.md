@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 70** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 71** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -6308,3 +6308,25 @@ Initial build missed updating `plugin/scripts/task-schema.mjs` — dual-source v
 **Rationale:** Capability-growth pick after 5 consecutive crystallization milestones (M66-M70). DIR-048 is a fresh LOOP-EXECUTABLE directive surfaced by the archguard dogfood (build ran inline, no independent audit). The task makes the two-layer model (dispatched build + adversarial audit) the DEFAULT for the portable loop-driver skill (`execution: dispatched`, `audit: adversarial`), with `inline`/`none` as explicit opt-outs. This closes the capability gap between exp5's bespoke OUTER-LOOP (two-layer) and the portable skill (inline self-gated). SPLIT-OR-COMMIT: if both knobs cannot land in one milestone, the outcome is `needs-human`.
 
 **Deferred:** exp5-M-CRYST-B4, exp5-M-CRYST-E2 (crystallization series, lower urgency vs. fresh directive); DIR-038/DIR-044 (human-steered).
+
+---
+## M71 ABSORB — DIR-048 (needs-human)
+
+**Milestone:** M71 · **Task:** DIR-048 · **Status:** needs-human (SPLIT-OR-COMMIT: DoD1+DoD2 unmet)
+**Commit:** f72d5c8 · **Type:** capability-growth · **VT Δ:** 0
+
+### What landed
+- `packages/quay/src/loop-params.js`: `execution` (default `"dispatched"`) and `audit` (default `"adversarial"`) fields added to `readLoopParams()`; fail-closed on illegal values; return shape extended; module header updated
+- `packages/quay/test/loop-params.test.mjs`: 21 tests (9 new DIR-048 tests); all GREEN — defaults, valid/illegal values, opt-out combo
+- `plugin/skills/loop-driver/SKILL.md`: params schema updated; Step 4 Build branched on `execution` (dispatched default = spawn background subagent; inline = old behavior); Step 6b Adversarial Audit added (adversarial default = fresh-context refutation subagent; none = gate-output only); fail-closed note for Agent-tool unavailability
+
+### What's outstanding (blocks `done`)
+**DoD1:** A REAL dispatched iterate on a real workspace with subagent session file evidence — NOT demonstrated. The schema and skill prompt are ready; the live proof requires running the updated skill on archguard or similar.
+**DoD2:** A REAL adversarial audit routing a broken task to `needs-human` — NOT demonstrated.
+**AC#5 runtime:** Agent-tool unavailability fail-closed documented in SKILL.md but not tested by a running iterate.
+
+### Audit verdict: REFUTATION FOUND (DoD1+DoD2 unmet — DIR-026 real-object rule)
+
+| ID | Title | Type | VT Δ |
+|---|---|---|---|
+| DIR-048 | loop-driver execution/audit defaults (schema+skill; live proof outstanding) | capability-growth | 0 |
