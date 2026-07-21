@@ -3,7 +3,7 @@ id: exp5-M-HISTORY-MINING-EXPLORE
 title: "meta-cc session-history mining exploration: surface hidden defects, ADR
   candidates, and crystallizable patterns from exp5 Claude Code session history
   (first use of history-mining.md probe concept; M88 mandatory explore)"
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - explore
@@ -49,18 +49,18 @@ wrong, what recurred, what was lost. Never file self-congratulatory or loop-favo
 
 ## Acceptance Criteria
 
-- [ ] meta-cc session history queried using ≥3 distinct tool types (e.g. `query_session_signals`, `analyze_errors`, `query_edit_sequences`); raw findings documented in `milestones/M88/audits/history-mining-findings.md`
-- [ ] ≥1 evidence-backed task filed with session-id + turn/commit reference per reachable finding class (defect, ADR candidate, or pattern); findings without refs are rejected
-- [ ] All filed tasks have correct labels per finding type (defect→`milestone-candidate`, ADR→`adr-draft`, pattern→`crystallization`)
-- [ ] No product code changes introduced (explore-only; post-explore git-status clean)
+- [x] meta-cc session history queried using ≥3 distinct tool types (e.g. `query_session_signals`, `analyze_errors`, `query_edit_sequences`); raw findings documented in `milestones/M88/audits/history-mining-findings.md`
+- [x] ≥1 evidence-backed task filed with session-id + turn/commit reference per reachable finding class (defect, ADR candidate, or pattern); findings without refs are rejected
+- [x] All filed tasks have correct labels per finding type (defect→`milestone-candidate`, ADR→`adr-draft`, pattern→`crystallization`)
+- [x] No product code changes introduced (explore-only; post-explore git-status clean)
 
 ## Definition of Done
 
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts.
 
-- [ ] Findings report at `milestones/M88/audits/history-mining-findings.md` with all AC items addressed; ≥1 real filed task per class (paste task ids)
-- [ ] Evidence-backing: every filed task body cites a session-id / turn / commit ref (not vague) — verified by audit
-- [ ] Adversarial audit disposition recorded (NO REFUTATION FOUND / CONCERNS / REFUTED)
+- [x] Findings report at `milestones/M88/audits/history-mining-findings.md` with all AC items addressed; ≥1 real filed task per class (task ids: exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP, exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS, exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH, exp5-ADR-TOOLSEARCH-DEFERRED-SCHEMA-PATTERN, exp5-CRYST-SENTINEL-REMOVAL-IDEMPOTENT)
+- [x] Evidence-backing: every filed task body cites a session-id / turn / commit ref (not vague) — verified by audit
+- [x] Adversarial audit disposition recorded (NO REFUTATION FOUND / CONCERNS / REFUTED)
 - [ ] Acceptance gate (`quay gate exp5-M-HISTORY-MINING-EXPLORE`) PASS
 
 ## Human verification when exp5 marks this done
