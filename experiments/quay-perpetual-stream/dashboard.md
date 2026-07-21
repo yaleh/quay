@@ -6503,3 +6503,15 @@ Scope-sizing lesson: TS migration milestones must enumerate ALL importers of the
 | ID | Title | Type | VT Δ |
 |---|---|---|---|
 | exp5-M-TS-MIGRATION-P1 | TS migration P1: provider-client.js → .ts (ADR-012 L_C hardening) | capability-growth / governance-integrity | 0 |
+
+## SELECT M78 — DIR-054 dashboard context-budget discipline
+
+**Selected:** DIR-054 — dashboard.md context-budget discipline (rolling-window cut + line-budget gate + ABSORB summary-row format)
+
+**Rationale:** Explore pick (method-infra). M73–M77 were all exploit-typed (6 consecutive); the ≥1 explore per 5 rule requires an explore at M78. DIR-054 is the highest-urgency explore candidate: `dashboard.md` is 6505 lines / ~545 KB, with 94% dead narrative — a direct per-iteration context tax that worsens with every milestone, and the same pathology exp5 retired from exp3's `provenance.md`. The fix is bounded, loop-executable, and makes the constraint mechanical (runnable gate) rather than prose.
+
+**Deferred:** DIR-056 (probe-spec formalization, prerequisite for DIR-055/052/053 standing routines); exp5-M-TS-MIGRATION-P2 (TS migration next phase); DIR-050 (config consolidation) — all remain strong candidates but none has DIR-054's operational urgency.
+
+**Task:** [[DIR-054]] (`tasks/DIR-054.md`) — dashboard.md context-budget discipline  
+**Charter:** `experiments/quay-perpetual-stream/charters/M78-dir054-dashboard-line-budget.md`
+
