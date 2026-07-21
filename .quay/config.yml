@@ -1,6 +1,9 @@
-# .quay/config.yml — per-workspace config (quay-proposal.md §10). Travels
-# with the user's project; distinct from provider.yml, which travels with
-# the Provider code.
+# .quay/config.yml — unified per-workspace config (DIR-050). Travels with the
+# user's project; distinct from provider.yml, which travels with the Provider code.
+#
+# Unified format (DIR-050): providers: / gates: / loop: sections in ONE file.
+# Legacy separate-file workspaces (.quay/gates.yml, .quay/loop.yml) continue to
+# work — readers try the unified section first, fall back to the legacy file.
 
 providers:
   native:
@@ -18,3 +21,44 @@ providers:
     mcp_entry: ["node", "./bin/quay-github.js", "mcp"]
     env:
       QUAY_GITHUB_REPO: "yaleh/quay"     # owner/repo this Provider reads issues from
+
+# DIR-050: gates section (previously .quay/gates.yml). The legacy gates.yml
+# remains as a back-compat fallback for workspaces that haven't migrated, but
+# this section is now the SINGLE SOURCE OF TRUTH for this workspace.
+gates:
+  it0:
+    - name: impl-row
+      script: "./experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh"
+      argsKey: implRowArgs
+    - name: line-budget
+      script: "./experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh"
+      argsKey: lineBudgetArgs
+    - name: vmeta-lag
+      script: "./experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh"
+      argsKey: vmetaLagArgs
+    - name: audit-independence
+      script: "./experiments/quay-perpetual-stream/scripts/audit-independence-check.sh"
+      argsKey: auditIndependenceArgs
+    - name: dogfood-evidence
+      script: "./experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh"
+      argsKey: dogfoodEvidenceArgs
+
+  adr:
+    - "ADR-001"
+    - "ADR-007"   # dark-axis instrument regression gate (git-lens-selfcheck); wired 2026-07-20
+
+  fixed:
+    - name: delivery-standalone-smoke
+      script: "./packages/quay/test/delivery-standalone-smoke.sh"   # ADR-013 / DIR-035-D, wired 2026-07-20
+
+  testPass:
+    - name: it0-dod-check-tests
+      command: "node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs"
+    - name: ts-typecheck
+      command: "npx tsc --noEmit"
+    # C1 / exp5-M-CRYST-C1 / DIR-026: split-or-commit gate
+    - name: split-or-commit
+      command: "node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.mjs ."
+    # INV / exp5-M-CRYST-INV / ADR-011: enforcement-with-design gate
+    - name: enforcement-with-design
+      command: "node experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.mjs ."

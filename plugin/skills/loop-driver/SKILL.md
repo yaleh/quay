@@ -21,30 +21,31 @@ iterate :: Board × Kit × Gates → Milestone        -- once ; or iterate* unti
 invariants (∀ iteration):
   worktree ⊥ master
   · gate fail-closed
-  · coexist: pause(peer-loop) if coexist ≠ ∅
   · evidence real ≠ fixture
-  · runner ∈ workspace .quay/gates.yml ONLY (never the driver)
-  · params ∈ workspace .quay/loop.yml ONLY (never hardcoded in this skill)
+  · runner ∈ workspace gates config ONLY (never the driver)
+  · params ∈ workspace .quay/config.yml (loop: section) or .quay/loop.yml ONLY (never hardcoded in this skill)
   · execution=dispatched: build subagent ⊥ driver context ; FAIL-CLOSED if no Agent tool
   · audit=adversarial: auditor ⊥ build context (fresh-context) ; refutation blocks land
 ```
 
-## Params — `.quay/loop.yml` (REQUIRED, fail-closed if absent/malformed)
+## Params — `.quay/config.yml` (loop: section) or `.quay/loop.yml` (REQUIRED, fail-closed if absent/malformed)
+
+DIR-050: the reader tries `.quay/config.yml` (loop: section) first; falls back to `.quay/loop.yml`.
 
 ```yaml
-# Schema: board REQUIRED, gates REQUIRED, stop/policy/coexist/execution/audit/concurrency OPTIONAL
+# Schema: board REQUIRED, gates REQUIRED, stop/policy/execution/audit/concurrency OPTIONAL
+# coexist: RETIRED (DIR-050) — silently ignored if present in legacy YAML
 board:       native          # provider name (matches .quay/config.yml providers key)
-gates:       [vitest]        # gate name(s) from .quay/gates.yml; PASS iff all pass
+gates:       [vitest]        # gate name(s) from gates config; PASS iff all pass
 stop:        once            # once | until(.halt) | until(empty) | until(<condition>)
 policy:      ready-first     # select ranking: ready-first | value-typed-ledger | …
-coexist:     null            # pause-hook (e.g. "pause(backlog/.loop-stop)") or null
 execution:   dispatched      # dispatched (DEFAULT) | inline — build isolation
 audit:       adversarial     # adversarial (DEFAULT) | none — independent fresh-context verify
 concurrency: 1               # 1 (DEFAULT) = serial | N = max touches-disjoint batch width (DIR-049)
 routines: []                 # [] (DEFAULT) = no routine track | [{name,trigger,dispatch}] (DIR-051)
 ```
 
-The skill reads this file first via `readLoopParams` (`src/loop-params.js`). If absent or malformed, it refuses to run (FAIL-CLOSED). No runner name, project name, or workspace path is hardcoded in this skill.
+The skill reads params via `readLoopParams` (`src/loop-params.js`). If absent or malformed, it refuses to run (FAIL-CLOSED). No runner name, project name, or workspace path is hardcoded in this skill.
 
 **Default behavior (no `execution`/`audit` keys):** build runs in a fresh background subagent (`execution: dispatched`) and a fresh-context adversarial auditor runs before land (`audit: adversarial`). This is the two-layer model. To opt out to single-context/self-gated behavior (constrained/trivial workspaces), set `execution: inline` + `audit: none` explicitly in `loop.yml`.
 
@@ -68,7 +69,7 @@ params = readLoopParams(workspaceRoot)   -- src/loop-params.js ; throws FAIL-CLO
 select :: Board ⇀ Task
 ```
 If `params.stop = until(.halt)`: `test -f .halt` (workspaceRoot-relative). If present, log "halt sentinel present — stopping" and return. Never remove the file.
-If `params.coexist` names a peer sentinel: test for it. If present, log and pause before proceeding.
+<!-- coexist retired (DIR-050): no peer-sentinel check. -->
 
 ### 2. Select
 ```
