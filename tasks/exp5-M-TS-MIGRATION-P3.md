@@ -1,16 +1,20 @@
 ---
 id: exp5-M-TS-MIGRATION-P3
-title: "TS migration P3 (per-package, ADR-012): port the packages internally to TS
-  — quay-native store → Core CLI/serve/mcp → quay-github — behavior-preserving,
-  autonomous under the golden-diff discipline; split per-package at SELECT."
+title: "TS migration P3 (per-package, ADR-012): port the packages internally to
+  TS — quay-native store → Core CLI/serve/mcp → quay-github —
+  behavior-preserving, autonomous under the golden-diff discipline; split
+  per-package at SELECT."
 status: todo
 labels:
   - milestone-candidate
   - crystallization
 parent: exp5-M-TS-MIGRATION
-children: []
+children:
+  - exp5-M-TS-MIGRATION-P3-A
+  - exp5-M-TS-MIGRATION-P3-B
+  - exp5-M-TS-MIGRATION-P3-C
 extra:
-  schema: v1
+  role: compound
 ---
 ## Proposal
 Phase P3 of [[exp5-M-TS-MIGRATION]] (ADR-012). With the ABI boundary typed (P2), migrate the packages'
