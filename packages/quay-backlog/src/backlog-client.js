@@ -1,3 +1,4 @@
+// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay-backlog — a READ-ONLY Provider ABI client over a Backlog.md board
 // (https://github.com/MrLesk/Backlog.md-style local task store: markdown
 // files with YAML frontmatter under `<board>/backlog/tasks/*.md`). Built

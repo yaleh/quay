@@ -1,3 +1,4 @@
+// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // Gate registry — name -> async gateFn(task, client) -> { ok, reason } (QENG-1).
 //
 // Ships exactly one true built-in gate, `dod`, a thin adapter over the

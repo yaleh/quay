@@ -1,3 +1,4 @@
+// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay Core: managed-document store ("quay DOCUMENT-MANAGEMENT capability").
 // A "document" is a SEPARATE object kind from both tasks (a Provider's own
 // store) and ADRs (adr-store.js): it is a managed METHOD ARTIFACT (a skill, a

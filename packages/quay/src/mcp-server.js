@@ -1,3 +1,4 @@
+// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay mcp — the Core's own MCP server (DIR-007; quay-proposal.md §5's
 // "MCP projection -> Agent" architecture claim). This is the consumer-layer
 // binding an Agent (Claude Code) connects to ONCE, regardless of how many

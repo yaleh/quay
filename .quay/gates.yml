@@ -87,6 +87,15 @@ fixed:
 # generic `test-pass` gate factory rather than a second implementation —
 # proves single-source dogfooding (ADR-004). PASS iff the suite exits 0
 # (all cases pass); command supplied here as pure workspace data.
+#
+# ADR-012/exp5-M-TS-MIGRATION-P0: the `tsc --noEmit` type gate. Reuses
+# `makeTestPassGate` (DIR-042-A) rather than a new factory — "PASS iff exit
+# 0" is exactly the tsc --noEmit contract too, so no new gate shape is
+# warranted (ADR-013 data-driven-gates discipline: the command is workspace
+# data, never hardcoded in packages/quay/src/**). `npx tsc` resolves the
+# root tsconfig.json (package.json devDependency-pinned typescript@7.0.2).
 testPass:
   - name: it0-dod-check-tests
     command: "node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs"
+  - name: ts-typecheck
+    command: "npx tsc --noEmit"

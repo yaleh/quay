@@ -1,3 +1,4 @@
+// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay serve — starts Web + provider host (proposal §9). v0 walking
 // skeleton (G5): a crude but real list/detail HTTP view, no framework, no
 // styling beyond what's needed to prove the loop. The Core renders

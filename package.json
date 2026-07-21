@@ -7,5 +7,9 @@
   ],
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "typescript": "7.0.2"
   }
 }
