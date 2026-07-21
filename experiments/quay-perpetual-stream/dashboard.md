@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 68** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 69** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below). -->
@@ -6248,3 +6248,23 @@ Initial build had one-directional check only. Adversarial audit found Clauses 10
 **Rationale:** B-series continuation (B5 done M68; C1 dependency cleared M66). Closes a known structural validator gap: directives missing `## Finding` or `## Requested action` currently PASS the validator silently. Adds label-aware section-presence check, fixture-pinned. LOOP-EXECUTABLE, no driver mutation, small scope.
 
 **Deferred:** DIR-038/DIR-044 (D3 driver-rewrite class, still deferred).
+
+---
+## M69 ABSORB — exp5-M-CRYST-B6-VALIDATOR-COVERAGE
+
+**Milestone:** M69 · **Task:** exp5-M-CRYST-B6-VALIDATOR-COVERAGE · **Status:** done  
+**Commits:** 65f99e6 (BUILD), ed47b0f (plugin sync), M69 MERGE  
+**Type:** governance-integrity · **VT Δ:** 0
+
+### What landed
+- `task-schema.mjs` (both experiments + plugin copies): assertion A7 `checkDirectiveSections` — for `kind=directive`, both `## Finding` AND `## Requested action` must be present; absence → FAIL with code `directive-sections-missing`
+- 2 new RED fixtures; `task-schema-selfcheck.sh` now has 14 fixtures, exits 0
+- Module header: schema view updated to list A7; explicit NON-GOAL block (structural gate cannot detect semantic emptiness)
+- 38-task regression sweep: 0 regressions
+
+### Audit
+Initial build missed updating `plugin/scripts/task-schema.mjs` — dual-source violation caught by audit. Fixed by syncing both copies before ABSORB. Post-fix audit: NO REFUTATION FOUND.
+
+| ID | Title | Type | VT Δ |
+|---|---|---|---|
+| exp5-M-CRYST-B6-VALIDATOR-COVERAGE | B6 directive Finding/Requested-action validator (A7) | governance-integrity | 0 |

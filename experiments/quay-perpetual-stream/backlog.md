@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-CRYST-B6-VALIDATOR-COVERAGE | B6 Validator coverage: assert directive Finding/Requested-action; document semantic-emptiness non-goal (review C1) | DONE | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-B5-PARSER-UNIFY | B5 [subtractive] Unify the parser fork: regenerate-backlog-view.mjs imports the canonical extractSection (review C2) | DONE | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-INV | INV [invariant] enforcement-WITH-design: no new rule/DoD-clause/method-step accepted without its executable enforcement in the SAME milestone (generalizes DIR-026 item 5) — the #1 cross-experiment structural fault | DONE | - | milestone-candidate, crystallization, invariant |
 | exp5-M-CRYST-C1 | C1 [executable] Crystallize split-or-commit's SELECT-split rule + parent-done-iff-children from prose into gates (DIR-026 half-done) | DONE | - | milestone-candidate, crystallization |
@@ -80,10 +81,9 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-CRYST-D3 | D3 [subtractive] Rewrite OUTER-LOOP + inherited-core + inner-iteration prompts in formalized style; replace deterministic prompt steps with code (Axis 2′) | SELECTED | - | milestone-candidate, crystallization, milestone:first-wave, human-steered |
 | exp5-M-CRYST | Crystallization program — molten prose → executable single-source (geometric-info-theory) | open | - | milestone-candidate, crystallization, epic |
 | exp5-M-CRYST-D4-LEDGER-STRUCTURED-STATUS | D4 [hard-fix] Structured V_meta-ledger status field — retire the prose status parser (ADR-004; closes R5's prose-parsing residual) | open | - | milestone-candidate, crystallization |
-| exp5-M-CRYST-B6-VALIDATOR-COVERAGE | B6 Validator coverage: assert directive Finding/Requested-action; document semantic-emptiness non-goal (review C1) | open | - | milestone-candidate, crystallization |
 | exp5-M-QENG-DOD-DEMO-ONLY | The QENG-5 'exp5 DoD via quay gate' wiring is demo-only (2 fixture tasks, QENG-5-DEMO-PASS/FAIL) — the REAL per-milestone DoD meta-enforcer gate at OUTER-LOOP.md step 6/7 still runs it0-dod-check.sh as a bare prose shell call, not through quay gate; decide whether/how to close that gap | SELECTED | governance-integrity (closes a self-disclosed "shelfware risk" the QENG-0 epic itself named as | milestone-candidate, surface:method-infra, milestone:M37-discover-post-qeng |
 | exp5-M-CLI-UX | CLI usability closeout (UQ-042..046) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:cli |
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_79 milestone-candidate task(s) as of 2026-07-21T05:47:12.415Z._
+_79 milestone-candidate task(s) as of 2026-07-21T05:56:36.432Z._
