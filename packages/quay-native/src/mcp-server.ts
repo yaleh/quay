@@ -1,4 +1,3 @@
-// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay-native mcp — the native Provider's formal ABI transport (proposal §5.1).
 // Data-only (glossary.md "The ABI (over MCP)"): provider://manifest, task_list,
 // task_get for v0 (required, `data.read`); task_write/task_check added since
@@ -8,13 +7,13 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { createStore } from "./store.js";
+import { createStore } from "./store.ts";
 // ADR store is a generic filesystem-frontmatter store, now owned by `quay`
 // (Core) — see bin/quay-native.js for the full rationale (ADR-013 / DIR-035-A).
 import { createAdrStore } from "quay/src/adr-store.js";
-import { readManifest } from "./manifest.js";
+import { readManifest } from "./manifest.ts";
 
-export async function startMcpServer({ tasksDir, adrDir, defaultStatus }) {
+export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { tasksDir: string; adrDir?: string; defaultStatus?: string }): Promise<void> {
   // DIR-047: pass the per-provider default_task_status through to the store
   // (already validated by the caller — see bin/quay-native.js loadDefaultStatus()).
   // ADR-004 single-source: the store is the one place the creation default is
@@ -106,10 +105,10 @@ export async function startMcpServer({ tasksDir, adrDir, defaultStatus }) {
         // zod-based input validation silently stripped it before it ever
         // reached store.write(), even though store.write() itself has always
         // handled `extra` correctly (the CLI's `edit --extra` path proves
-        // this). z.record(z.any()) accepts an arbitrary JSON object, matching
+        // this). z.record(z.string(), z.any()) accepts an arbitrary JSON object, matching
         // the CLI's own `JSON.parse(flags.extra)` looseness (no schema
         // validation beyond "is it an object" — G5, do not gold-plate).
-        extra: z.record(z.any()).optional(),
+        extra: z.record(z.string(), z.any()).optional(),
         // QN-015: CAS option, symmetric with the CLI's --expect-status flag
         // (design §6). Omitted entirely => store.write()'s existing,
         // unaffected behavior (no CAS check performed).

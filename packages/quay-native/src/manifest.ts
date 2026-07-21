@@ -7,11 +7,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
+import type { Manifest } from '../../quay/src/abi.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MANIFEST_PATH = path.join(__dirname, "..", "provider.yml");
 
-export function readManifest(manifestPath = DEFAULT_MANIFEST_PATH) {
+export function readManifest(manifestPath: string = DEFAULT_MANIFEST_PATH): Manifest {
   const raw = fs.readFileSync(manifestPath, "utf8");
   return YAML.parse(raw);
 }

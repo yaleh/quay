@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createStore } from "../src/store.js";
+import { createStore } from "../src/store.ts";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -79,9 +79,9 @@ async function testCliAndMcpShareOneLockedPath() {
   // AC#4: no separate unlocked write function exists — verify by source
   // inspection that store.js's exported write/appendNote are the only
   // mutators, both wrapped by withLock (grep-level check, honest and simple).
-  const src = fs.readFileSync(path.join(__dirname, "..", "src", "store.js"), "utf8");
-  const hasWithLockInWrite = /function write\(id, \{[^}]*\}\) \{[\s\S]*?return withLock\(/.test(src);
-  const hasWithLockInAppendNote = /function appendNote\(id, note\) \{[\s\S]*?return withLock\(/.test(src);
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "store.ts"), "utf8");
+  const hasWithLockInWrite = /function write\(id[^,]*, \{[^}]*\}[^)]*\)[^{]*\{[\s\S]*?return withLock\(/.test(src);
+  const hasWithLockInAppendNote = /function appendNote\(id[^,]*, note[^)]*\)[^{]*\{[\s\S]*?return withLock\(/.test(src);
   assert(hasWithLockInWrite, "write() routes through withLock()");
   assert(hasWithLockInAppendNote, "appendNote() routes through withLock()");
 }

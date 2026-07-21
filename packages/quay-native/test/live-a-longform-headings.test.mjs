@@ -28,7 +28,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { createStore } from "../src/store.js";
+import { createStore } from "../src/store.ts";
 
 // substantive prose long enough to exceed the parser's MIN_SECTION_CHARS
 // (40 non-whitespace chars) so a section counts as "present" on content, not

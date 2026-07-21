@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import { createStore, resolveDefaultStatus } from "../src/store.js";
+import { createStore, resolveDefaultStatus } from "../src/store.ts";
 // ADR/document/contract-validator are generic filesystem-frontmatter stores
 // with no dependency on quay-native's task vocabulary (store.js) — they now
 // live in `quay` (Core), which needs them standalone for its gate registry
@@ -20,7 +20,7 @@ import { createStore, resolveDefaultStatus } from "../src/store.js";
 import { createAdrStore } from "quay/src/adr-store.js";
 import { createDocumentStore } from "quay/src/document-store.js";
 import { validateContracts } from "quay/src/contract-validator.js";
-import { readManifest } from "../src/manifest.js";
+import { readManifest } from "../src/manifest.ts";
 
 function findRepoRoot(startDir) {
   // Walk upward looking for the workspace marker (.quay/config.yml) so the
@@ -128,7 +128,7 @@ async function main() {
   const [, , cmd, sub, ...rest] = process.argv;
 
   if (cmd === "mcp") {
-    const { startMcpServer } = await import("../src/mcp-server.js");
+    const { startMcpServer } = await import("../src/mcp-server.ts");
     // DIR-047: load and validate the per-provider default_task_status from
     // .quay/config.yml, then pass it to the MCP server so task_write (status
     // omitted on a new task) uses the same configured default as the CLI.

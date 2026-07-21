@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createStore } from "../src/store.js";
+import { createStore } from "../src/store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tasksDir = path.join(__dirname, ".tmp-compound-gate-test");
