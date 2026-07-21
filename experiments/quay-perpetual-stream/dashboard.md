@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 67** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 68** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below). -->
@@ -6221,3 +6221,21 @@ Initial build had one-directional check only. Adversarial audit found Clauses 10
 **Rationale:** Subtractive crystallization. exp5-M-CRYST-D3 (only `ready`) is human-steered — excluded. After two governance-integrity gate picks (M66 C1, M67 INV), B5 is the tightest next crystallization task: concrete subtractive refactor (remove duplicate parser function, import canonical single-source), verifiable output (grep shows one definition + backlog view unchanged), small blast radius. LOOP-EXECUTABLE.
 
 **Deferred:** DIR-038, DIR-044 (D3 driver-rewrite class); exp5-M-CRYST-B4 (task migration sweep, larger scope).
+
+---
+## M68 ABSORB — exp5-M-CRYST-B5-PARSER-UNIFY
+
+**Milestone:** M68 · **Task:** exp5-M-CRYST-B5-PARSER-UNIFY · **Status:** done  
+**Commit:** 4241064 · **Type:** subtractive/governance-integrity · **VT Δ:** 0
+
+### What landed
+- `regenerate-backlog-view.mjs`: removed local 7-line `extractSection` definition; imported canonical version from `task-schema.mjs`
+- Call sites adapted with `?? ""` + `.trim()` to bridge behavioral difference (canonical returns null on miss, untrimmed on hit vs local returned undefined, pre-trimmed)
+- Backlog regen output byte-identical before/after (tested on 79 tasks)
+- `grep -rn "function extractSection" scripts/` → exactly 1 result (task-schema.mjs:65)
+
+### Audit: NO REFUTATION FOUND — clean pass, no issues
+
+| ID | Title | Type | VT Δ |
+|---|---|---|---|
+| exp5-M-CRYST-B5-PARSER-UNIFY | B5 unify extractSection parser fork | subtractive | 0 |
