@@ -105,11 +105,13 @@ function makeWorkspace(tag) {
 
 function writeLedgerFixture(dir, { alarm }) {
   const file = path.join(dir, "v-meta-ledger.md");
+  // M70/D4 (ADR-004 structured [tag] field): status cells must start with [tag]
   const row = alarm
-    ? "| some insight | m1 | 2 | **confirmed** (m1) |\n"
-    : "| some insight | m1 | 2 | **consolidated** (m1) |\n";
+    ? "| some insight | m1 | 2 | **[confirmed]** (m1) |\n"
+    : "| some insight | m1 | 2 | **[consolidated]** (m1) |\n";
   fs.writeFileSync(
     file,
+    "milestone_counter: 3\n\n" +
     "| insight | origin milestone | confirmation count | status |\n" +
       "|---|---|---|---|\n" +
       row

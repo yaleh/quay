@@ -1,9 +1,9 @@
 // vmeta-lag-check.mjs — the ONE canonical implementation of the V_meta consolidation-lag ARITHMETIC
-// (exp5-M-CRYST-D3 increment R5, Axis-2′). This module IS the rule: pure, side-effect-free check
-// functions consumed by the standalone CLI (vmeta-lag-check.mjs's own main below, invoked via
-// vmeta-lag-check.sh) and wrappable, unchanged, by a future `quay gate --gate vmeta-lag` (M39
-// registry precedent — a named gate WRAPS this, never reimplements the logic). If this header
-// comment and the code ever disagree, THE CODE WINS.
+// (exp5-M-CRYST-D3 increment R5, Axis-2′; R5 prose-parsing residual RESOLVED in M70/D4). This
+// module IS the rule: pure, side-effect-free check functions consumed by the standalone CLI
+// (vmeta-lag-check.mjs's own main below, invoked via vmeta-lag-check.sh) and wrappable, unchanged,
+// by a future `quay gate --gate vmeta-lag` (M39 registry precedent — a named gate WRAPS this, never
+// reimplements the logic). If this header comment and the code ever disagree, THE CODE WINS.
 //
 // ── The rule (DIR-005 §"Requested action" 2/3 + OUTER-LOOP.md ABSORB "V_meta consolidation-lag
 //    gate") ──────────────────────────────────────────────────────────────────────────────────────
@@ -14,11 +14,20 @@
 //   whose status cell carries NO explicit DATED carry-forward reason (a carry-forward marker plus an
 //   ISO YYYY-MM-DD date — "no silent deferral"). A `consolidated` row never alarms; a `proposed` row
 //   never alarms (it has not crossed the confirmation threshold). FAIL-CLOSED (never silent PASS) on:
-//   a `confirmed` row whose confirming-milestone number is unparseable; an AMBIGUOUS status cell that
-//   names >1 distinct lifecycle word (e.g. an overdue row phrased "not consolidated yet, still
-//   confirmed" — must NOT be read as consolidated); and a data row whose status cell carries NO
-//   lifecycle keyword at all (unrecognized/absent → cannot classify → ALARM). If the ledger has NO
-//   parseable rows AND no milestone_counter, the verdict is an EXPLICIT "N/A" — never a silent pass.
+//   a `confirmed` row whose confirming-milestone number is unparseable; a data row whose status cell
+//   does NOT begin with a structured `[tag]` (see rowStatus below); and a data row whose status cell
+//   carries NO structured tag at all (unrecognized/absent → cannot classify → ALARM). If the ledger
+//   has NO parseable rows AND no milestone_counter, the verdict is an EXPLICIT "N/A" — never a
+//   silent pass.
+//
+//   Status cells MUST start with a structured machine-readable tag: `[consolidated]`, `[confirmed]`,
+//   or `[proposed]` (optionally **bold**-wrapped). Everything after the tag is narrative/history and
+//   is IGNORED by the parser. Examples:
+//     [consolidated] (m7 ABSORB, 2026-07-18) — folded into inherited-core.md
+//     [confirmed] — m3 ABSORB, 2026-07-18 — 2 cross-domain confirmations
+//     [proposed] — noted, never applied
+//   A cell that does NOT start with one of these tags → null → fail-closed ALARM (ADR-004: hard over
+//   soft; closes the R5 prose-parsing residual that was an interim leading-token heuristic).
 //
 //   This module ONLY computes the arithmetic + the disposition decision. It does NOT author the
 //   ABSORB narrative and does NOT itself edit the ledger — those remain human/loop actions the
@@ -52,32 +61,22 @@ export function parseRows(fullText) {
   return rows;
 }
 
-// ── rowStatus — read the CURRENT lifecycle word from a status cell (FAIL-CLOSED, leading-token). ───
-// R5 review must-fix #1: robustly parsing arbitrary prose negation is a losing game (ADR-004 — soft
-// prose is erodible). So instead of scanning for negators anywhere, read ONLY the LEADING canonical
-// token: the cell MUST start with exactly one lifecycle word (optionally **bold**); everything after
-// it is history/notes and is IGNORED (so "**consolidated** (m7…) … not a carry-forward … twice-
-// confirmed" cleanly reads consolidated, ignoring the trailing "not"/"confirmed"). FAIL-CLOSED (→ null
-// → alarm at evaluateRow) when the cell does NOT lead with a clean token — i.e. it leads with a
-// non-lifecycle word ("not yet fully consolidated…", "not-yet-consolidated", "folding into…"), OR the
-// leading token is immediately followed by a status-contradicting qualifier ("consolidated pending",
-// "consolidated? no", "consolidated: FALSE"). This errs toward ALARM, never a silent PASS.
-// NOTE (ADR-004 follow-up): the real hard fix is a STRUCTURED status field in the ledger, not prose;
-// this leading-token parser is the fail-closed interim. Tracked for the next ledger-format increment.
-const QUALIFIER_AFTER = /^(pending|not|no|false|incomplete|partial|wip|todo|awaiting|yet|maybe|unclear|tbd|unconfirmed|unconsolidated)\b/i;
-const NOTE_DELIM = /^\s*[—–(,;·]/; // a note/history follows → the leading token stands (em/en-dash, paren, comma, semicolon, mid-dot)
+// ── rowStatus — read the CURRENT lifecycle word from a STRUCTURED status cell (FAIL-CLOSED). ────────
+// ADR-004 hard-over-soft (M70/D4): the status cell MUST start with a structured machine-readable tag
+// `[consolidated]`, `[confirmed]`, or `[proposed]` (optionally **bold**-wrapped as `**[tag]**`).
+// Everything after the tag is narrative/history and is IGNORED. A cell that does NOT start with a
+// valid tag returns null (fail-closed → alarm at evaluateRow). This replaces the R5 prose leading-
+// token heuristic (an INTERIM); the structured field removes the entire class of prose-parsing
+// fragility (not just the specific instances R5 found). The ledger's Schema section documents the
+// format requirement. Closing the R5 prose-parsing residual — ADR-004 principle: hard over soft.
 export function rowStatus(statusCell) {
   if (statusCell == null) return null;
-  const s = String(statusCell).replace(/\*+/g, "").trim(); // strip bold decoration
-  const m = s.match(/^(consolidated|confirmed|proposed)\b([\s\S]*)$/i);
-  if (!m) return null;                       // does not LEAD with a lifecycle word → fail-closed
-  const status = m[1].toLowerCase();
-  const rest = m[2];
-  if (rest === "") return status;            // token alone
-  if (NOTE_DELIM.test(rest)) return status;  // token — <note>  (trailing prose ignored)
-  const ws = rest.match(/^\s+(\S+)/);         // token <word> …  (no delimiter between)
-  if (ws) return QUALIFIER_AFTER.test(ws[1]) ? null : status; // "consolidated pending" → fail-closed
-  return null;                               // token immediately followed by ?/:/@… → fail-closed
+  // Strip optional bold markers (** or *) and trim; then match the structured [tag]
+  const s = String(statusCell).trim();
+  // Accept `[tag]` or `**[tag]**` as the very first token (case-insensitive)
+  const m = s.match(/^\*{0,2}\[(consolidated|confirmed|proposed)\]\*{0,2}/i);
+  if (!m) return null; // no structured tag at start → fail-closed
+  return m[1].toLowerCase();
 }
 
 // ── confirmingMilestone — the milestone number at which the row crossed the φ threshold. ──────────
