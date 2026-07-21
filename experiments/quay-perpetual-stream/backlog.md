@@ -6,6 +6,7 @@ Sort: recency (updatedAt desc) — alternate view
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-ARCH-AUDIT-POST-TS-P3 | Architecture health audit post-TS-P3 migration (archguard L_D/L_G) | DONE | - | milestone-candidate, crystallization, explore |
 | exp5-M-TS-MIGRATION-P3-B-1 | TS migration P3-B-1: port quay Core utility modules to TypeScript | DONE | - | milestone-candidate, crystallization |
 | exp5-M-TS-MIGRATION-P3-B | TS migration P3-B: port quay Core package internals to TypeScript | open | - | milestone-candidate, crystallization |
 | exp5-M-TS-MIGRATION-P3-B-3 | TS migration P3-B-3: port quay Core serve.js and mcp-server.js to TypeScript | open | - | milestone-candidate, crystallization |
@@ -106,4 +107,4 @@ Sort: recency (updatedAt desc) — alternate view
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
 
-_99 milestone-candidate task(s) as of 2026-07-21T20:48:45.727Z._
+_100 milestone-candidate task(s) as of 2026-07-21T21:00:51.691Z._

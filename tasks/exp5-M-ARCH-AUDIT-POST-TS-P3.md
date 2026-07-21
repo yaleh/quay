@@ -1,7 +1,7 @@
 ---
 id: exp5-M-ARCH-AUDIT-POST-TS-P3
 title: "Architecture health audit post-TS-P3 migration (archguard L_D/L_G)"
-status: ready
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -38,17 +38,27 @@ needed; scope is one audit pass producing one report artifact.
 
 ## Acceptance Criteria
 
-- [ ] archguard dependency analysis run on packages/quay, packages/quay-native, packages/quay-github; raw findings documented in `milestones/M83/audits/arch-audit.md`
-- [ ] any dependency cycles identified and filed as tasks (or explicitly noted as none-found)
-- [ ] god-package / high-fan-out smells identified (or noted as none-found)
-- [ ] remaining migration risk map for P3-B-2 (gate/) and P3-B-3 (serve+mcp) documented in the audit report
-- [ ] no regressions introduced (explore-only — no product code changes)
+- [x] archguard dependency analysis run on packages/quay, packages/quay-native, packages/quay-github; raw findings documented in `milestones/M83/audits/arch-audit.md`
+- [x] any dependency cycles identified and filed as tasks (or explicitly noted as none-found) — NONE FOUND
+- [x] god-package / high-fan-out smells identified (or noted as none-found) — NONE FOUND
+- [x] remaining migration risk map for P3-B-2 (gate/) and P3-B-3 (serve+mcp) documented in the audit report
+- [x] no regressions introduced (explore-only — no product code changes)
 
 ## Definition of Done
 
 Per standard inherited-core DoD clauses (see `experiments/quay-perpetual-stream/inherited-core.md`):
 
-- [ ] Audit report exists at `milestones/M83/audits/arch-audit.md` with all AC items addressed
-- [ ] Any blocking findings filed as tasks before ABSORB
-- [ ] Adversarial audit disposition recorded
-- [ ] Acceptance gate PASS
+- [x] Audit report exists at `milestones/M83/audits/arch-audit.md` with all AC items addressed
+- [x] Any blocking findings filed as tasks before ABSORB — none found
+- [x] Adversarial audit disposition recorded — NO REFUTATION FOUND
+- [x] Acceptance gate PASS
+
+## Execution record
+
+- Milestone: M83
+- Iteration: 0
+- Worktree branch: `exp5-m83-iteration-0`
+- Implementation commit: `9eefe58`
+- Audit session id: `m83-iter0-arch-audit-post-ts-p3-2026-07-21`
+- Audit verdict: NO REFUTATION FOUND
+- Merge: pending ABSORB
