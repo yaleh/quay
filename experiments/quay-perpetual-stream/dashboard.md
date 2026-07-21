@@ -511,3 +511,15 @@ Scope-sizing lesson: TS migration milestones must enumerate ALL importers of the
 
 m78 · DIR-054 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=b4c0a1a · → milestones/M78/
 
+
+## SELECT M79 — exp5-M-TS-MIGRATION-P2
+
+**Selected:** exp5-M-TS-MIGRATION-P2 — TS migration P2: Provider ABI view-model TypeScript interfaces
+
+**Rationale:** Exploit pick. M78 was explore (dashboard budget gate); M79 can be exploit per the ≥1-in-5 rule. TS-P2 is the highest-value continuation: the Provider ABI contract (`{id, title, status, role, labels, parent/children, body}`) gains compile-time TypeScript types, hardening the exact architectural seam around which all three packages are organised. Bounded scope (1 new `abi.ts` + update to `provider-client.ts`), autonomous per parent's cleared human-steered gate (2026-07-21), behavior-preserving by construction (TS is JS superset; tsc --noEmit gate).
+
+**Deferred:** DIR-056 (probe-spec formalization), DIR-050 (config consolidation), DIR-052/053/055 (standing routines).
+
+**Task:** [[exp5-M-TS-MIGRATION-P2]] (`tasks/exp5-M-TS-MIGRATION-P2.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M79-ts-migration-p2.md`
+

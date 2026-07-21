@@ -1,9 +1,9 @@
 ---
 id: exp5-M-TS-MIGRATION-P2
-title: "TS migration P2 (ABI boundary, ADR-012): express the Provider ABI (task +
-  ADR view-models) as TypeScript interfaces — the ABI contract becomes a type —
-  behavior-preserving, autonomous under the golden-diff discipline."
-status: todo
+title: "TS migration P2 (ABI boundary, ADR-012): express the Provider ABI (task
+  + ADR view-models) as TypeScript interfaces — the ABI contract becomes a type
+  — behavior-preserving, autonomous under the golden-diff discipline."
+status: ready
 labels:
   - milestone-candidate
   - crystallization
@@ -11,6 +11,10 @@ parent: exp5-M-TS-MIGRATION
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-TS-MIGRATION-P2
+    experiments/quay-perpetual-stream/charters/M79-ts-migration-p2.md
+    /tmp/m79-absorb-entry.md
 ---
 ## Proposal
 Phase P2 of [[exp5-M-TS-MIGRATION]] (ADR-012). With the TS tooling landed (P0) and the pure-logic leaf
