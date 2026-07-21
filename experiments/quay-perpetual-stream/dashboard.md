@@ -580,3 +580,14 @@ m82 · exp5-M-TS-MIGRATION-P3-B-1 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND 
 **Charter:** `experiments/quay-perpetual-stream/charters/M83-arch-audit-post-ts-p3.md`
 
 m83 · exp5-M-ARCH-AUDIT-POST-TS-P3 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=f4b9780 · → milestones/M83/
+
+## SELECT M84 — exp5-M-TS-MIGRATION-P3-B-2
+
+**Selected:** exp5-M-TS-MIGRATION-P3-B-2 — TS migration P3-B-2: quay Core gate/ subdirectory (7 files, 1316 lines)
+
+**Rationale:** Exploit pick. M83 archguard audit confirmed: no cycles in gate/, all external imports are stdlib+yaml+already-migrated TS; registry.js is MEDIUM risk (696L) but manageable. mcp-server.js (P3-B-3) imports 3 gate/ files — P3-B-2 must precede P3-B-3. Natural continuation of TS migration momentum.
+
+**Deferred:** P3-B-3 (serve+mcp), P4 (method-infra), DIR-050, DIR-056.
+
+**Task:** [[exp5-M-TS-MIGRATION-P3-B-2]] (`tasks/exp5-M-TS-MIGRATION-P3-B-2.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M84-ts-migration-p3b2.md`
