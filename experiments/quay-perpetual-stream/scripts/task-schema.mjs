@@ -7,7 +7,7 @@
 // the code ever disagree, THE CODE WINS (the comment is regenerable, never a second authoritative
 // source doc).
 //
-// ── Schema view (6 assertions, evaluated only on tasks bearing the marker) ────────────────────────
+// ── Schema view (7 assertions, evaluated only on tasks bearing the marker) ────────────────────────
 //
 //   Marker (grandfather boundary, FORWARD-ONLY): a task is schema-applicable iff its frontmatter
 //   carries `extra.schema: "v1"`. Unmarked tasks (all pre-existing legacy tasks) are reported
@@ -44,6 +44,14 @@
 //                               mid-prose / line-wrapped mentions of "Source"/"Status mirror"/"dirFile"
 //                               do NOT fire (verified against tasks/DIR-009.md:231, DIR-010.md:121,
 //                               and the exp5-M-CRYST-B1/DIR-028 prose "dirFile" mentions).
+//   A7 checkDirectiveSections — directive-kind ONLY: `## Finding` AND `## Requested action` MUST
+//                               both be present (required by the /quay-directive authoring template).
+//                               milestone-candidate/other: assertion is skipped (PASS vacuously).
+//
+//   NON-GOAL — semantic emptiness: A structural gate cannot detect a syntactically valid but
+//   meaningless checklist item (a `- [ ]` box with ≥40 chars of boilerplate passes A3/A4). Closing
+//   that gap is irreducibly a human/DoD-audit concern — the DoD audit's job, not this structural
+//   gate's. This is an explicit, accepted limitation, NOT an oversight.
 //
 //   Verdict: applicable && no failures → "PASS"; applicable && >=1 failure → "FAIL"; !applicable →
 //   "N/A-legacy" (results = []). Every task produces EXACTLY ONE of {PASS, FAIL, N/A-legacy} — no
@@ -281,6 +289,24 @@ export function checkNoScaffolding(task) {
   return { ok: false, code: hits[0].code, message: `projection scaffolding present — ${hits.map((h) => h.what).join("; ")}` };
 }
 
+// ── Assertion A7: Directive sections — Finding + Requested action required for directive kind. ────
+// The /quay-directive authoring template mandates both `## Finding` and `## Requested action`.
+// For milestone-candidate/other kinds, this assertion is vacuously skipped (returns ok:true).
+export function checkDirectiveSections(task, kind) {
+  if (kind !== "directive") {
+    return { ok: true, code: "directive-sections-na", message: `kind=${kind}: A7 directive-sections check not applicable` };
+  }
+  const findingSec = extractSection(task.body, "Finding");
+  const requestedSec = extractSection(task.body, "Requested action");
+  const missing = [];
+  if (findingSec === null) missing.push("'## Finding'");
+  if (requestedSec === null) missing.push("'## Requested action'");
+  if (missing.length > 0) {
+    return { ok: false, code: "directive-sections-missing", message: `directive task is missing required section(s): ${missing.join(", ")} (required by the /quay-directive authoring template)` };
+  }
+  return { ok: true, code: "directive-sections-present", message: "'## Finding' and '## Requested action' both present" };
+}
+
 // ── checkTask — the SINGLE entry point both callers use. ──────────────────────────────────────────
 export function checkTask(fullText) {
   const task = parseTask(fullText);
@@ -296,6 +322,7 @@ export function checkTask(fullText) {
         checkDodChecklist(task),
         checkResolution(task),
         checkNoScaffolding(task),
+        checkDirectiveSections(task, kind),
       ];
   const failures = results.filter((r) => !r.ok);
   return {

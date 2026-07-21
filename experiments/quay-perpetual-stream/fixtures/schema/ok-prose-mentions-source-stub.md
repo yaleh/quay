@@ -30,6 +30,18 @@ The mentions here of the word `Source` mid-sentence (e.g. "the Source of truth i
 inline `extra.dirFile` reference, and a `See \`backlog.md\`'s … Source … ` fragment are all prose and
 must NOT trip the anchored `^Source: \`experiments/` regex.
 
+## Finding
+
+The A6 scaffolding regexes were designed to detect projection scaffolding (Source: `experiments/`
+lines, extra.dirFile frontmatter, and Status-mirror lines), but naive implementations would false-
+positive on mid-prose mentions of these same tokens. The two STATUS_MIRROR_RE false-positive shapes
+from tasks/DIR-009.md:231 and DIR-010.md:121 must NOT fire even when reproduced verbatim in a task.
+
+## Requested action
+
+Ensure the anchored regexes (^Source:, STATUS_MIRROR_RE) are false-positive-safe; verify via this
+fixture that a directive task carrying these prose mentions still PASSes A6 after adding A7 sections.
+
 ## Acceptance Criteria
 
 - [ ] a runnable check with an exit code confirms this fixture PASSes (not flagged).

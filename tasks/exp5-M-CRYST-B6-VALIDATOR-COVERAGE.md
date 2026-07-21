@@ -2,7 +2,7 @@
 id: exp5-M-CRYST-B6-VALIDATOR-COVERAGE
 title: "B6 Validator coverage: assert directive Finding/Requested-action;
   document semantic-emptiness non-goal (review C1)"
-status: ready
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -18,10 +18,10 @@ Adversarial review of the first wave (2026-07-19) found a validator coverage gap
 N/A — extend `checkTask` with one label-aware section-presence assertion + a fixture; no staged docs/plans doc warranted.
 
 ## Acceptance Criteria
-- [ ] For kind=directive, a task missing `## Finding` OR `## Requested action` FAILs; a compliant directive PASSes; fixtures pin both; `task-schema-selfcheck.sh` exits 0.
-- [ ] The header-comment schema view is regenerated to list the new assertion (comment stays a generated view of the code, no drift).
-- [ ] The semantic-emptiness limitation is stated as an explicit non-goal in the module header (structural gate cannot judge meaning; that is the DoD audit's job).
+- [x] For kind=directive, a task missing `## Finding` OR `## Requested action` FAILs; a compliant directive PASSes; fixtures pin both; `task-schema-selfcheck.sh` exits 0.
+- [x] The header-comment schema view is regenerated to list the new assertion (comment stays a generated view of the code, no drift).
+- [x] The semantic-emptiness limitation is stated as an explicit non-goal in the module header (structural gate cannot judge meaning; that is the DoD audit's job).
 ## Definition of Done
 References the standard inherited-core DoD clauses. Real landing:
-- [ ] The validator HARD-fails a real directive missing Finding/Requested-action; existing 5 marked tasks still PASS (no regression in the sweep).
-- [ ] Non-goal documented; no false claim that the structural gate detects semantic emptiness.
+- [x] The validator HARD-fails a real directive missing Finding/Requested-action; existing 5 marked tasks still PASS (no regression in the sweep).
+- [x] Non-goal documented; no false claim that the structural gate detects semantic emptiness.
