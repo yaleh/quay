@@ -20,7 +20,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { resolveGate, listGates } from "../src/gate/registry.js";
+import { resolveGate, listGates } from "../src/gate/registry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.js");

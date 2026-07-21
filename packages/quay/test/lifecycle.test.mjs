@@ -29,8 +29,8 @@ import {
   runAdjudicate,
   runPromote,
   runRetreat,
-} from "../src/gate/lifecycle.js";
-import { queryGateEvents } from "../src/gate/gate-event-store.js";
+} from "../src/gate/lifecycle.ts";
+import { queryGateEvents } from "../src/gate/gate-event-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.js");

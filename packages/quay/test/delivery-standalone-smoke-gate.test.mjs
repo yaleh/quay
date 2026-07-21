@@ -15,7 +15,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { resolveGate, listGates } from "../src/gate/registry.js";
+import { resolveGate, listGates } from "../src/gate/registry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.js");
@@ -100,7 +100,7 @@ test("M52 A2: delivery-standalone-smoke gate PASSes for real (0 RED, real script
 }, { timeout: 60000 });
 
 test("M52 A2: a fixed gate pointed at a non-existent script fails closed (ok:false)", async () => {
-  const { resolveGate: rg } = await import("../src/gate/registry.js");
+  const { resolveGate: rg } = await import("../src/gate/registry.ts");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-m52-fixed-bad-"));
   fs.mkdirSync(path.join(dir, ".quay"), { recursive: true });
   fs.writeFileSync(

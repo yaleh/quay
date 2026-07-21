@@ -56,9 +56,9 @@ import { QUAY_VERSION } from "./version.ts";
 // the CLI's own reuse discipline. `run` is deliberately NOT exposed here --
 // see docs/plans/14-mcp-gate-lifecycle-parity.md for the full per-command
 // decision table (unbounded autonomous loop vs. MCP's single-call contract).
-import { runGate } from "./gate/engine.js";
-import { resolveGateLogPath, runGateLogQuery } from "./gate/gate-log.js";
-import { runComplete, runAdjudicate, runPromote, runRetreat, assertTransition } from "./gate/lifecycle.js";
+import { runGate } from "./gate/engine.ts";
+import { resolveGateLogPath, runGateLogQuery } from "./gate/gate-log.ts";
+import { runComplete, runAdjudicate, runPromote, runRetreat, assertTransition } from "./gate/lifecycle.ts";
 
 // QX-035 (experiment 4, iteration 10): read package version at startup for
 // Mitigation A (_version field in task_list response) and Mitigation B

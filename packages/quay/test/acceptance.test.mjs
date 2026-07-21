@@ -19,8 +19,8 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { runAcceptance } from "../src/gate/acceptance-runner.js";
-import { gateRegistry, listGates } from "../src/gate/registry.js";
+import { runAcceptance } from "../src/gate/acceptance-runner.ts";
+import { gateRegistry, listGates } from "../src/gate/registry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.js");

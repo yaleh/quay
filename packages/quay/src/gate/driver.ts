@@ -15,7 +15,45 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { runComplete } from "./lifecycle.js";
+import { runComplete } from "./lifecycle.ts";
+import type { Task } from "../abi.ts";
+
+interface DriverClient {
+  taskList: (filter: { status: string }) => Promise<Task[]>;
+  taskGet: (id: string) => Promise<Task | null>;
+  taskWrite: (args: { id: string; status: string; expectedStatus: string }) => Promise<unknown>;
+  taskCheck: (id: string) => Promise<{ ok: boolean; reason: string }>;
+}
+
+export interface LoopConfig {
+  workspaceRoot: string;
+}
+
+export interface RunOnceArgs {
+  client: DriverClient;
+  logPath: string;
+  actor?: string;
+}
+
+export interface RunLoopArgs {
+  client: DriverClient;
+  cfg: LoopConfig;
+  logPath: string;
+  actor?: string;
+  maxIterations?: number;
+}
+
+export interface RunOnceResult {
+  processed: string | null;
+  ok: boolean | null;
+  reason: string | null;
+}
+
+export interface RunLoopResult {
+  iterations: number;
+  completed: string[];
+  stopped: "fixpoint" | "sentinel" | "cap";
+}
 
 /**
  * Pure predicate — no I/O, unit-testable in isolation. A task is ACTIONABLE iff
@@ -29,14 +67,11 @@ import { runComplete } from "./lifecycle.js";
  * would re-select that same un-completable task → the loop spins forever.
  * Requiring a meter makes meterless `ready` tasks NOT actionable → skipped
  * (never selected, never mutated) — the first anti-spin layer.
- *
- * @param {any} task
- * @returns {boolean}
  */
-export function isActionable(task) {
+export function isActionable(task: Task): boolean {
   return task?.status === "ready"
-    && typeof task?.extra?.acceptance === "string"
-    && task.extra.acceptance.trim() !== "";
+    && typeof (task?.extra as Record<string, unknown>)?.acceptance === "string"
+    && ((task.extra as Record<string, unknown>).acceptance as string).trim() !== "";
 }
 
 /**
@@ -47,12 +82,8 @@ export function isActionable(task) {
  * `seen` (default empty) removes ids already attempted this run — see `runLoop`:
  * because the scan subtracts `seen`, a failing-meter `ready` task is attempted at
  * most once per run and the scan drains to `[]` → clean fixpoint.
- *
- * @param {any} client
- * @param {Set<string>} [seen]
- * @returns {Promise<string[]>}
  */
-export async function scanActionable(client, seen = new Set()) {
+export async function scanActionable(client: DriverClient, seen: Set<string> = new Set()): Promise<string[]> {
   const tasks = await client.taskList({ status: "ready" });
   return tasks
     .filter(isActionable)
@@ -72,14 +103,8 @@ export async function scanActionable(client, seen = new Set()) {
  * subsequent `--once` (a fresh process) picks the SAME task again. That is by
  * design (one process = one deterministic observation), NOT progress on other
  * tasks — forward progress across a failing task is `runLoop`'s job.
- *
- * @param {Object} args
- * @param {any} args.client
- * @param {string} args.logPath
- * @param {string} [args.actor="quay-cli"]
- * @returns {Promise<{ processed: string|null, ok: boolean|null, reason: string|null }>}
  */
-export async function runOnce({ client, logPath, actor = "quay-cli" }) {
+export async function runOnce({ client, logPath, actor = "quay-cli" }: RunOnceArgs): Promise<RunOnceResult> {
   const [id] = await scanActionable(client);
   if (!id) return { processed: null, ok: null, reason: null };
   const { ok, reason } = await runComplete({ client, id, logPath, actor });
@@ -103,18 +128,10 @@ export async function runOnce({ client, logPath, actor = "quay-cli" }) {
  * Because `scanActionable` subtracts `seen`, once every actionable id has been
  * attempted the scan returns [] → clean fixpoint (not cap), while OTHER ready
  * tasks still make forward progress.
- *
- * @param {Object} args
- * @param {any} args.client
- * @param {{ workspaceRoot: string }} args.cfg
- * @param {string} args.logPath
- * @param {string} [args.actor="quay-cli"]
- * @param {number} [args.maxIterations=1000]
- * @returns {Promise<{ iterations: number, completed: string[], stopped: "fixpoint"|"sentinel"|"cap" }>}
  */
-export async function runLoop({ client, cfg, logPath, actor = "quay-cli", maxIterations = 1000 }) {
-  const seen = new Set();
-  const completed = [];
+export async function runLoop({ client, cfg, logPath, actor = "quay-cli", maxIterations = 1000 }: RunLoopArgs): Promise<RunLoopResult> {
+  const seen = new Set<string>();
+  const completed: string[] = [];
   const stopFile = path.join(cfg.workspaceRoot, ".quay", ".stop");
   let iterations = 0;
   while (true) {

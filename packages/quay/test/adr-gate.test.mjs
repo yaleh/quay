@@ -22,7 +22,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { resolveGate, listGates } from "../src/gate/registry.js";
+import { resolveGate, listGates } from "../src/gate/registry.ts";
 import { createAdrStore } from "../src/adr-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -207,7 +207,7 @@ test("E3 A2: a violating load-bearing-scripts tree makes the gate FAIL (fixture-
   writeAdrFixture(adrDir, { status: "accepted", enforcement: command });
   const store = createAdrStore(adrDir);
   const adr = store.get("ADR-001");
-  const { runAcceptance } = await import("../src/gate/acceptance-runner.js");
+  const { runAcceptance } = await import("../src/gate/acceptance-runner.ts");
   const { ok } = runAcceptance({ command: adr.enforcement, cwd: process.cwd(), timeoutMs: 60000 });
   assert.equal(ok, false, "expected the violating fixture to FAIL the loadbearing-test-gate check");
 });
@@ -220,7 +220,7 @@ test("E3 A2: a conforming fixture tree makes the SAME mechanism PASS (fixture-pi
   writeAdrFixture(adrDir, { status: "accepted", enforcement: command });
   const store = createAdrStore(adrDir);
   const adr = store.get("ADR-001");
-  const { runAcceptance } = await import("../src/gate/acceptance-runner.js");
+  const { runAcceptance } = await import("../src/gate/acceptance-runner.ts");
   const { ok } = runAcceptance({ command: adr.enforcement, cwd: process.cwd(), timeoutMs: 60000 });
   assert.equal(ok, true, "expected the conforming fixture to PASS the loadbearing-test-gate check");
 });

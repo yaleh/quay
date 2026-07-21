@@ -25,8 +25,8 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { isActionable, scanActionable, runOnce, runLoop } from "../src/gate/driver.js";
-import { queryGateEvents } from "../src/gate/gate-event-store.js";
+import { isActionable, scanActionable, runOnce, runLoop } from "../src/gate/driver.ts";
+import { queryGateEvents } from "../src/gate/gate-event-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.js");

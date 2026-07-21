@@ -1,4 +1,3 @@
-// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // QENG-2 — pure acceptance-command runner (epicd ADR-019 "runnable meter",
 // harness runShellCommands adapted to Node).
 //
@@ -14,16 +13,27 @@
 
 import { spawnSync } from "node:child_process";
 
+export interface AcceptanceResult {
+  ok: boolean;
+  reason: string;
+  code: number | null;
+  signal: string | null;
+  timedOut: boolean;
+}
+
+export interface RunAcceptanceArgs {
+  /** shell command to run (shell:true, so `&&`/pipes work) */
+  command: string;
+  /** working directory the command runs in */
+  cwd: string;
+  /** kill deadline in ms (SIGKILL on expiry) */
+  timeoutMs?: number;
+}
+
 /**
  * Run `command` in `cwd` under a `timeoutMs` deadline.
- *
- * @param {Object} args
- * @param {string} args.command       shell command to run (shell:true, so `&&`/pipes work)
- * @param {string} args.cwd           working directory the command runs in
- * @param {number} [args.timeoutMs=60000]  kill deadline in ms (SIGKILL on expiry)
- * @returns {{ ok: boolean, reason: string, code: number|null, signal: string|null, timedOut: boolean }}
  */
-export function runAcceptance({ command, cwd, timeoutMs = 60000 }) {
+export function runAcceptance({ command, cwd, timeoutMs = 60000 }: RunAcceptanceArgs): AcceptanceResult {
   const r = spawnSync(command, {
     cwd,
     shell: true,
@@ -34,7 +44,7 @@ export function runAcceptance({ command, cwd, timeoutMs = 60000 }) {
   });
 
   // ETIMEDOUT first — the hanging-command branch, unambiguous.
-  if (r.error && r.error.code === "ETIMEDOUT") {
+  if (r.error && (r.error as NodeJS.ErrnoException).code === "ETIMEDOUT") {
     return {
       ok: false,
       code: null,

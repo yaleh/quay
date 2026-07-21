@@ -7,8 +7,29 @@
 // `taskCheck` returns.
 
 import { randomUUID } from "node:crypto";
-import { resolveGate } from "./registry.js";
-import { appendGateEvent } from "./gate-event-store.js";
+import { resolveGate } from "./registry.ts";
+import { appendGateEvent, type GateEvent } from "./gate-event-store.ts";
+import type { Task } from "../abi.ts";
+
+export interface RunGateArgs {
+  /** provider client (taskGet / taskCheck) */
+  client: {
+    taskGet: (id: string) => Promise<Task | null>;
+    taskCheck: (id: string) => Promise<{ ok: boolean; reason: string }>;
+  };
+  /** task id */
+  id: string;
+  gate?: string;
+  logPath: string;
+  actor?: string;
+  workspaceRoot?: string;
+}
+
+export interface RunGateResult {
+  ok: boolean;
+  reason: string;
+  event: GateEvent;
+}
 
 /**
  * Run gate `gate` against task `id` via `client`, append one GateEvent to
@@ -23,23 +44,14 @@ import { appendGateEvent } from "./gate-event-store.js";
  * workspace's own `.quay/gates.yml`-declared gates; omitted, it falls back to
  * auto-discovery from `process.cwd()` (unchanged behavior for existing
  * in-process callers/tests that never threaded a workspaceRoot through).
- *
- * @param {Object} args
- * @param {any} args.client   provider client (taskGet / taskCheck)
- * @param {string} args.id    task id
- * @param {string} [args.gate="dod"]
- * @param {string} args.logPath
- * @param {string} [args.actor="quay-cli"]
- * @param {string} [args.workspaceRoot]
- * @returns {Promise<{ ok: boolean, reason: string, event: import("./gate-event-store.js").GateEvent }>}
  */
-export async function runGate({ client, id, gate = "dod", logPath, actor = "quay-cli", workspaceRoot }) {
+export async function runGate({ client, id, gate = "dod", logPath, actor = "quay-cli", workspaceRoot }: RunGateArgs): Promise<RunGateResult> {
   const fn = resolveGate(gate, workspaceRoot);
   if (!fn) throw new Error(`unknown gate: ${gate}`);
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
   const { ok, reason } = await fn(task, client);
-  const event = {
+  const event: GateEvent = {
     id: randomUUID(),
     item_id: id,
     pipeline_id: id,
