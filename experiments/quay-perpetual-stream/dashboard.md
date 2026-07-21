@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 64** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M64 ABSORB header sync): body log's m64 ABSORB entry below sets milestone_counter → 64;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57/m58/m59/m60/m61/m62/m63).
-64 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m65). -->
+**milestone_counter: 65** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
+65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -6095,3 +6095,44 @@ info: prunable merged iteration branches=0; registered iteration worktrees=0.
 **Schema check:** `bash experiments/quay-perpetual-stream/scripts/task-schema-check.sh tasks/DIR-047.md` → PASS.
 
 **Milestone label:** `milestone:M65` added to `tasks/DIR-047.md`.
+
+## M65 — M65-dir047-default-status (DIR-047)
+
+**Task:** [[DIR-047]] (`tasks/DIR-047.md`) — configurable creation default status: per-provider `default_task_status` key in `.quay/config.yml`, replacing the hardcoded `?? "todo"` fallback across ALL creation paths (CLI `task create`, MCP `task_write`, migrate writers) via a single `resolveDefaultStatus()` helper. Surfaced by the M64 archguard dogfood (seeded tasks sat `todo`, invisible to the loop). **Merge commit:** `f09ec4e`, merge of `milestones/M65-dir047-default-status` (build `9648293`) into `master` at this ABSORB (base `369e4fa` M65 SELECT).
+
+**Independent audit verdict: CONCERNS → corrected → NO REFUTATION FOUND.** Fresh-context Explore subagent (`a6b8e2eb09342f01a`), distinct from orchestrator session `86fab6a3-da7c-4692-a726-6385314e709c`. Initial audit found CONCERNS on AC-5 and DoD-1 (TASK-29 artifact missing; archguard config uncommitted). Outer loop corrected: added `default_task_status: ready` to `/home/yale/work/archguard/.quay/config.yml`, created TASK-29 via the feature (`status: ready`, no `--status` flag), committed both at archguard `687d9ea`. Post-audit addendum appended to `milestones/M65/audits/iteration-0-acceptance-audit.md`. Final verdict: **NO REFUTATION FOUND** (all 6 AC + 5 DoD confirmed with real artifact).
+
+**Key delivered artifacts:**
+- `packages/quay-native/src/store.js` — `resolveDefaultStatus(value)` (validates, throws on illegal values) + `createStore(tasksDir, { defaultStatus })` option (single `?? "todo"` literal at line 69).
+- `packages/quay-native/bin/quay-native.js` — `loadDefaultStatus()` reads `.quay/config.yml`, validates via `resolveDefaultStatus()`. Both CLI `task create` and MCP paths pass `defaultStatus` to `createStore()`.
+- `packages/quay-native/src/mcp-server.js` — `startMcpServer({ defaultStatus })` passes it to `createStore()`.
+- `packages/quay-native/test/default-status.test.mjs` — 17 RED→GREEN tests: `resolveDefaultStatus` unit (6), `createStore` option (3), CLI e2e (5), MCP e2e (3). 17/17 PASS.
+- `/home/yale/work/archguard/.quay/config.yml` (external) — `default_task_status: ready` added (committed `687d9ea`).
+- `/home/yale/work/archguard/tasks/TASK-29.md` (external) — `status: ready`, created via feature with no `--status` (DIR-026 real object, committed `687d9ea`).
+
+**Mechanical gates (all PASS, required before `milestone_counter++`):**
+
+```
+$ cd milestones/M65/worktrees/iteration-0 && node .../quay.js gate DIR-047 --gate dod
+PASS
+
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 64 v-meta-ledger.md
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+
+$ bash it0-impl-row-check.sh DIR-047 backlog.md
+PASS: DIR-047 is not design-only — impl-row gate does not apply.
+
+$ bash tree-hygiene-check.sh
+tree-hygiene: clean
+
+$ bash worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean
+info: prunable merged iteration branches=0; registered iteration worktrees=0
+```
+
+**Checkpoint disposition: DUE this ABSORB** (`milestone_counter` = 65, 65 % 5 == 0). See `experiments/quay-perpetual-stream/checkpoints/cp-65.md` written below.
+
+**Worktree/branch hygiene close-out:** `milestones/M65/worktrees/iteration-0` already removed by iteration agent; `milestones/M65-dir047-default-status` branch deleted (`git branch -d`, merged at `f09ec4e`). Post-prune hygiene: clean.
+
+## Backlog row
+| DIR-047 | archguard loop-driver dogfood (M64) exposed that seeded quay-native tasks land `todo` and are invisible to the loop's `ready` predicate — manual promotion required every cycle. Closed via a per-provider `default_task_status` key in `.quay/config.yml` (writer-side knob, keeps the SELECT predicate a fixed universal `ready`): one `resolveDefaultStatus()` helper (fail-closed on illegal values) single-sourced across CLI `task create`, MCP `task_write`, and migrate writers; backward-compatible (absent/`todo` → today's behavior unchanged). Real e2e: archguard config set to `ready`, TASK-29 created with no `--status` → landed `ready`, immediately selectable by the loop driver (archguard commit `687d9ea`). | capability-growth (primary) | no new VT chart cell (config surface, not chart-1-scored axis) | directive, milestone-candidate, milestone:M65 |
