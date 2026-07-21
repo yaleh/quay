@@ -1,7 +1,7 @@
 ---
 id: exp5-M-TS-MIGRATION-P3-B-2
 title: "TS migration P3-B-2: port quay Core gate/ subdirectory to TypeScript"
-status: ready
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -30,7 +30,7 @@ Files in scope (7 files, ~1316 lines):
 **M83 archguard audit findings (grounding this milestone):**
 - No cycles in gate/ internal graph (clean DAG)
 - External imports per file: stdlib only (fs, path, crypto, child_process, url) + yaml npm + 4 already-migrated TS modules (in registry.js)
-- Risk: leaf files (acceptance-runner, gate-event-store, gate-log, driver) LOW; registry.js MEDIUM (696 lines, complex gate DSL)
+- Risk: leaf files LOW; registry.js MEDIUM (696 lines, complex gate DSL)
 - mcp-server.js (P3-B-3 scope) imports 3 gate/ files → P3-B-2 must land BEFORE P3-B-3
 
 ## Proposal
@@ -45,16 +45,26 @@ N/A — single-pass implementation (behavior-preserving TS port, like P3-B-1). W
 
 ## Acceptance Criteria
 
-- [ ] All 7 `gate/` `.js` files renamed to `.ts` with named types (no `any` on public-facing shapes)
-- [ ] `npx tsc --noEmit` exits 0 across the repo
-- [ ] Test suite baselines maintained (fail count ≤ pre-migration master baseline)
-- [ ] No runtime behavior change (golden-diff)
+- [x] All 7 `gate/` `.js` files renamed to `.ts` with named types (no `any` on public-facing shapes)
+- [x] `npx tsc --noEmit` exits 0 across the repo
+- [x] Test suite baselines maintained (388/379/9 ≤ master 388/377/11 — no regression)
+- [x] No runtime behavior change (golden-diff)
 
 ## Definition of Done
 
 Per standard inherited-core DoD clauses (see `experiments/quay-perpetual-stream/inherited-core.md`):
 
-- [ ] All 7 `gate/*.ts` files exist (replacing `.js` counterparts)
-- [ ] `tsc --noEmit` exits 0
-- [ ] Test baselines held (fail count ≤ master baseline)
-- [ ] Acceptance gate PASS
+- [x] All 7 `gate/*.ts` files exist (replacing `.js` counterparts)
+- [x] `tsc --noEmit` exits 0
+- [x] Test baselines held (worktree fail 9 ≤ master fail 11)
+- [x] Acceptance gate PASS
+
+## Execution record
+
+- Milestone: M84
+- Iteration: 0
+- Worktree branch: `exp5-m84-iteration-0`
+- Implementation commit: `13c1ee3`
+- Audit session id: `m84-iter0-ts-migration-p3b2-2026-07-21`
+- Audit verdict: NO REFUTATION FOUND
+- Merge: pending ABSORB

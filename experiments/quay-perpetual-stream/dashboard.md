@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 83** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 84** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -591,3 +591,5 @@ m83 · exp5-M-ARCH-AUDIT-POST-TS-P3 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUN
 
 **Task:** [[exp5-M-TS-MIGRATION-P3-B-2]] (`tasks/exp5-M-TS-MIGRATION-P3-B-2.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M84-ts-migration-p3b2.md`
+
+m84 · exp5-M-TS-MIGRATION-P3-B-2 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=3a4d029 · → milestones/M84/
