@@ -249,7 +249,7 @@ describe("runChecks — combined compliant state", () => {
 // ── selftest ─────────────────────────────────────────────────────────────────────────────────────
 
 describe("selftest", () => {
-  test("selftest() passes all three fixture cases", () => {
+  test("selftest() passes all five fixture cases", () => {
     const result = selftest();
     assert.equal(result, true);
   });
