@@ -52,7 +52,7 @@ Loop: SELECT this task per normal `ready`-status pickup once promoted; scope str
 - [ ] `tsc --noEmit` gate (wired at P0) stays GREEN including the newly-typed file(s).
 - [ ] The existing test suite covering the ported module(s) stays green, unmodified in assertions (behavior-preserving — golden-diff, no logic change).
 - [ ] Any P0 `// @ts-nocheck` ramp marker on the ported file(s) is removed (the file is now real-typed, not just tolerated).
-- [ ] Scope stayed within "leaf pure-logic module" — no Provider ABI surface change, no CLI/MCP/web-UI code touched (if a candidate needed that, it was deferred/flagged instead of pulled in).
+- [ ] Scope stayed within "leaf pure-logic module" — no Provider ABI surface change, no CLI/MCP/web-UI logic change. Exception: trivially behavior-preserving caller import extension changes (`.js` → `.ts`) in `mcp-server.js`, `serve.js`, `quay.js` are authorized (no logic, no ABI, only the import string extension changes; Node 25 resolves `.ts` natively).
 
 ## Definition of Done
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts:

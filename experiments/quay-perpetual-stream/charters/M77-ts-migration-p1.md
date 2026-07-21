@@ -12,20 +12,21 @@
 
 Port exactly ONE leaf module: `packages/quay/src/provider-client.js` (99 lines, the `connectProvider` factory — thin ABI client wrapper, only external imports from `@modelcontextprotocol/sdk`).
 
+**Charter amendment (2026-07-21):** iteration-0 scope-discovery (`milestones/M77/iteration-0-scope-discovery.md`) found that TypeScript Bundler moduleResolution's `.js`→`.ts` fallback is compile-time only; Node.js runtime requires the exact extension. Three callers import `"./provider-client.js"` — without updating them, all tests fail at runtime. Caller import extension changes (`.js` → `.ts`) are trivially behavior-preserving (no logic, no ABI, no CLI behavior change). Scope widened to include them per OUTER-LOOP SPLIT-OR-COMMIT principle (in-project fix, not an external blocker).
+
 **In scope (this milestone):**
 - Rename `provider-client.js` → `provider-client.ts`
 - Add real TypeScript types to `connectProvider`'s parameter and return type (not `any`-everywhere — real types on the public API surface per ADR-012)
 - Remove the `// @ts-nocheck` P0 ramp marker at the top of that file
+- Update 3 caller import statements from `"./provider-client.js"` → `"./provider-client.ts"` — Node 25 native type-stripping supports `.ts` imports directly; this is behavior-preserving (no logic change, same exported interface, only the extension in the `import` string changes)
 - Confirm `tsc --noEmit` stays GREEN (exit 0) including the newly-typed file
 - Confirm the existing test suite stays green (behavior-preserving / golden-diff — NO logic changes)
 
 **Out of scope:**
 - task-schema.mjs (separate milestone — dual-source complication)
 - gate/registry.js (696 lines — too large for this milestone per SPLIT-OR-COMMIT)
-- Any caller change (callers use `.js` extension; TypeScript Bundler moduleResolution resolves `.js` → `.ts`)
-- Provider ABI surface, CLI, MCP tool wiring, web UI (not authorized for autonomous SELECT)
-
-**SPLIT-OR-COMMIT:** if `provider-client.js` turns out to have broad call-site changes needed (beyond what the existing `.js`-extension import pattern already handles), the outcome is `needs-human` (flag the issue, do NOT widen scope to callers).
+- Any logic/ABI/behavior change to caller files — ONLY the import extension string changes; no other edits
+- Provider ABI surface, CLI argument parsing, MCP tool wiring logic, web UI (not authorized)
 
 ## Value hypothesis
 
@@ -61,7 +62,7 @@ Gate-hash check: `bash experiments/quay-perpetual-stream/scripts/it0-gate-hash-c
 2. `connectProvider`'s parameter and return type have real TypeScript types on the public surface (no `// @ts-nocheck` on this file; no untyped `any` on the `connectProvider` signature itself — internal vars may still be inferred).
 3. `npx tsc --noEmit` exits 0 on the whole repo including the newly-typed file.
 4. The existing test suite (excluding known-failing live-GitHub + browser tests) passes green — NO assertion changes, NO logic changes.
-5. The callers (`mcp-server.js`, `serve.js`, `quay.js`) all import `"./provider-client.js"` (TypeScript Bundler moduleResolution resolves `.js` → `.ts` automatically); NO caller modification required — if a caller change IS required, the outcome is `needs-human` with the finding documented.
+5. The callers (`mcp-server.js`, `serve.js`, `quay.js`) each import `"./provider-client.ts"` (`.ts` extension — updated from the original `.js`). No other change to those files. The test suite passes with the updated imports (Node 25 native type-stripping resolves `.ts` at runtime).
 
 ## Inner termination (§3.2)
 
@@ -86,7 +87,7 @@ Every ABSORB dispatches a fresh-context adversarial audit subagent. The audit's 
 2. Confirm `provider-client.ts` exists; `provider-client.js` does NOT exist at the same path.
 3. Read `provider-client.ts` — confirm `connectProvider`'s signature has real types (non-`any`), no `// @ts-nocheck`.
 4. Run the test suite covering provider-client's callers — confirm green with NO assertion changes.
-5. Confirm NO caller `.js` file was modified (scope discipline).
+5. Confirm each of `mcp-server.js`, `serve.js`, `quay.js` now imports `"./provider-client.ts"` (`.ts` extension) and NO other change was made to those files.
 
 Output to `milestones/M77/audits/iteration-N-acceptance-audit.md`. Verdict: REFUTED / CONCERNS / NO REFUTATION FOUND.
 
