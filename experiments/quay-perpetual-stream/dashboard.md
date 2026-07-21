@@ -6212,3 +6212,12 @@ Initial build had one-directional check only. Adversarial audit found Clauses 10
 | ID | Title | Type | VT Δ |
 |---|---|---|---|
 | exp5-M-CRYST-INV | INV enforcement-with-design gate (ADR-011 gate-half) | governance-integrity | 0 |
+
+---
+## M68 SELECT — exp5-M-CRYST-B5-PARSER-UNIFY
+
+**Selected:** exp5-M-CRYST-B5-PARSER-UNIFY — B5 [subtractive] Unify the parser fork: eliminate duplicate `extractSection` in `regenerate-backlog-view.mjs`
+
+**Rationale:** Subtractive crystallization. exp5-M-CRYST-D3 (only `ready`) is human-steered — excluded. After two governance-integrity gate picks (M66 C1, M67 INV), B5 is the tightest next crystallization task: concrete subtractive refactor (remove duplicate parser function, import canonical single-source), verifiable output (grep shows one definition + backlog view unchanged), small blast radius. LOOP-EXECUTABLE.
+
+**Deferred:** DIR-038, DIR-044 (D3 driver-rewrite class); exp5-M-CRYST-B4 (task migration sweep, larger scope).

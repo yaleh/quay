@@ -2,7 +2,7 @@
 id: exp5-M-CRYST-B5-PARSER-UNIFY
 title: "B5 [subtractive] Unify the parser fork: regenerate-backlog-view.mjs
   imports the canonical extractSection (review C2)"
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - crystallization
