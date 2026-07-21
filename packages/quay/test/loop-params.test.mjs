@@ -151,6 +151,49 @@ test("RED: a malformed routine throws FAIL-CLOSED (DIR-051)", () => {
   assert.throws(() => readLoopParams(ws3), /FAIL-CLOSED.*array/);
 });
 
+test("DIR-056 GREEN: routine with probe: (no dispatch) is valid", () => {
+  const ws = tmpWs("probe-routine");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\nroutines:\n  - name: self-validation\n    trigger: on(checkpoint)\n    probe: self-validation");
+  const r = readLoopParams(ws).routines;
+  assert.equal(r.length, 1);
+  assert.equal(r[0].probe, "self-validation");
+  assert.equal(r[0].dispatch, undefined);
+});
+
+test("DIR-056 GREEN: routine with both probe: and dispatch: is valid (probe takes priority at runtime)", () => {
+  const ws = tmpWs("probe-and-dispatch");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\nroutines:\n  - name: sv\n    trigger: on(checkpoint)\n    probe: self-validation\n    dispatch: legacy-action");
+  const r = readLoopParams(ws).routines;
+  assert.equal(r[0].probe, "self-validation");
+  assert.equal(r[0].dispatch, "legacy-action");
+});
+
+test("DIR-056 RED: routine with neither probe nor dispatch throws FAIL-CLOSED", () => {
+  const ws = tmpWs("no-action");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\nroutines:\n  - name: broken\n    trigger: on(checkpoint)");
+  assert.throws(() => readLoopParams(ws), /FAIL-CLOSED/);
+});
+
+test("DIR-056 back-compat: loop.yml with dispatch: adversarial-explore still parses cleanly", () => {
+  const ws = tmpWs("backcompat-dispatch");
+  writeLoopYml(ws, [
+    "board: native",
+    "gates: [it0-set]",
+    "stop: \"until(.halt)\"",
+    "routines:",
+    "  - name: self-validation",
+    "    trigger: on(checkpoint)",
+    "    dispatch: adversarial-explore",
+    "  - name: architecture-analysis",
+    "    trigger: on(checkpoint)",
+    "    dispatch: arch-analyze",
+  ].join("\n"));
+  const params = readLoopParams(ws);
+  assert.equal(params.routines.length, 2);
+  assert.equal(params.routines[0].dispatch, "adversarial-explore");
+  assert.equal(params.routines[1].dispatch, "arch-analyze");
+});
+
 test("GREEN: concurrency N opts into cross-milestone batching (DIR-049)", () => {
   const ws = tmpWs("concurrency-n");
   writeLoopYml(ws, "board: native\ngates: [vitest]\nconcurrency: 3");

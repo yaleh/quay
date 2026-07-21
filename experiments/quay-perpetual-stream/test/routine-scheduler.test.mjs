@@ -1,10 +1,11 @@
-// Tests for routine-scheduler.mjs — DIR-051 routine trigger logic. RED-first (ADR-001 / DIR-019).
+// Tests for routine-scheduler.mjs — DIR-051 routine trigger logic + DIR-056 probe support.
+// RED-first (ADR-001 / DIR-019).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parseTrigger, isDue, dueRoutines, main } from "../scripts/routine-scheduler.mjs";
+import { parseTrigger, isDue, dueRoutines, resolveRoutineAction, main } from "../scripts/routine-scheduler.mjs";
 
 test("parseTrigger: every(N) and on(event); malformed throws", () => {
   assert.deepEqual(parseTrigger("every(5)"), { kind: "every", n: 5 });
@@ -53,5 +54,74 @@ test("main: due routines → exit 0; none due → exit 3; missing file → exit 
   assert.equal(await main(["node", "s", "--iteration", "10", f]), 0);
   assert.equal(await main(["node", "s", "--iteration", "7", f]), 3);
   assert.equal(await main(["node", "s", "--iteration", "10", path.join(dir, "nope.json")]), 2);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ── DIR-056: resolveRoutineAction tests ──────────────────────────────────────────────────────────
+
+test("DIR-056 resolveRoutineAction: probe: → kind=probe with pluginRoot", () => {
+  const r = { name: "history-mining", trigger: "on(checkpoint)", probe: "history-mining" };
+  const result = resolveRoutineAction(r, "/some/plugin/root");
+  assert.equal(result.kind, "probe");
+  assert.equal(result.name, "history-mining");
+  assert.equal(result.pluginRoot, "/some/plugin/root");
+});
+
+test("DIR-056 resolveRoutineAction: probe: without pluginRoot → kind=skip", () => {
+  const r = { name: "sv", trigger: "on(checkpoint)", probe: "self-validation" };
+  const result = resolveRoutineAction(r, null);
+  assert.equal(result.kind, "skip");
+  assert.match(result.reason, /pluginRoot/);
+});
+
+test("DIR-056 resolveRoutineAction: dispatch: (legacy) → kind=dispatch (back-compat)", () => {
+  const r = { name: "sv", trigger: "every(5)", dispatch: "adversarial-explore" };
+  const result = resolveRoutineAction(r, null);
+  assert.equal(result.kind, "dispatch");
+  assert.equal(result.action, "adversarial-explore");
+});
+
+test("DIR-056 resolveRoutineAction: probe: takes priority over dispatch: when both present", () => {
+  const r = { name: "sv", trigger: "on(checkpoint)", probe: "self-validation", dispatch: "old-action" };
+  const result = resolveRoutineAction(r, "/root");
+  assert.equal(result.kind, "probe");
+  assert.equal(result.name, "self-validation");
+});
+
+test("DIR-056 resolveRoutineAction: neither probe nor dispatch → kind=skip", () => {
+  const r = { name: "broken", trigger: "on(checkpoint)" };
+  const result = resolveRoutineAction(r, "/root");
+  assert.equal(result.kind, "skip");
+  assert.match(result.reason, /neither.*probe.*dispatch/i);
+});
+
+test("DIR-056 back-compat: dispatch: adversarial-explore still routes as dispatch (no behavior change)", () => {
+  // This is the original exp5 loop.yml shape — must work exactly as before
+  const routines = [
+    { name: "self-validation", trigger: "on(checkpoint)", dispatch: "adversarial-explore" },
+    { name: "architecture-analysis", trigger: "on(checkpoint)", dispatch: "arch-analyze" },
+  ];
+  const due = dueRoutines(routines, { event: "checkpoint" });
+  assert.equal(due.length, 2);
+  for (const r of due) {
+    const action = resolveRoutineAction(r, null);
+    assert.equal(action.kind, "dispatch", `expected dispatch for ${r.name}`);
+  }
+  assert.equal(resolveRoutineAction(due[0], null).action, "adversarial-explore");
+  assert.equal(resolveRoutineAction(due[1], null).action, "arch-analyze");
+});
+
+test("DIR-056 main: probe routine with --plugin-root → outputs DUE ... → probe", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "routine-probe-"));
+  const f = path.join(dir, "routines.json");
+  fs.writeFileSync(f, JSON.stringify([{ name: "sv", trigger: "on(checkpoint)", probe: "self-validation" }]));
+  // Capture stdout
+  const origWrite = process.stdout.write.bind(process.stdout);
+  const lines = [];
+  process.stdout.write = (s) => { lines.push(s); return true; };
+  const code = await main(["node", "s", "--event", "checkpoint", "--plugin-root", dir, f]);
+  process.stdout.write = origWrite;
+  assert.equal(code, 0);
+  assert.ok(lines.some((l) => l.includes("→ probe self-validation")), `lines: ${JSON.stringify(lines)}`);
   fs.rmSync(dir, { recursive: true, force: true });
 });
