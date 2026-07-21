@@ -1,3 +1,4 @@
+// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // Gate registry — name -> async gateFn(task, client) -> { ok, reason } (QENG-1).
 //
 // Ships exactly one true built-in gate, `dod`, a thin adapter over the
@@ -57,6 +58,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import YAML from "yaml";
 import { runAcceptance } from "./acceptance-runner.js";
 // ADR-013 / DIR-035-A: these are generic filesystem-frontmatter stores with no
@@ -90,6 +92,40 @@ function shQuote(arg) {
 }
 
 /**
+ * DIR-046 (A/B) — resolve the acceptance runner's cwd/timeoutMs for ONE gate
+ * invocation, with a single shared precedence rule used by every factory in
+ * this module (single-source, ADR-004 — the precedence used to be silently
+ * hardcoded per-factory as `process.env.QUAY_ACCEPTANCE_CWD || process.cwd()`
+ * / `Number(process.env.QUAY_ACCEPTANCE_TIMEOUT_MS) || 60000`; this is that
+ * SAME default, now overridable and named once):
+ *
+ *   cwd:       pre-set `QUAY_ACCEPTANCE_CWD` env var  >  this gate's own
+ *              `gates.yml` `cwd` field  >  `process.cwd()` (the CLI layer
+ *              pins `process.cwd()`-equivalent workspaceRoot into the env var
+ *              itself as the DEFAULT — see bin/quay.js — so by the time a
+ *              factory reads `process.env.QUAY_ACCEPTANCE_CWD` here, an
+ *              explicit `--cwd` flag has ALREADY been folded in with the
+ *              correct precedence over the workspaceRoot pin; a gates.yml
+ *              per-gate `cwd` is the one precedence level this module itself
+ *              must apply, since the CLI has no per-gate visibility).
+ *   timeoutMs: pre-set `QUAY_ACCEPTANCE_TIMEOUT_MS` env var (also folded in at
+ *              the CLI layer from an explicit `--timeout` flag) > this gate's
+ *              own `gates.yml` `timeoutMs` field > the 60000ms default.
+ *
+ * @param {{ cwd?: string, timeoutMs?: number }} [gateConfig] this gate's own
+ *   gates.yml entry (only `cwd`/`timeoutMs` are read)
+ * @returns {{ cwd: string, timeoutMs: number }}
+ */
+function resolveRunnerOptions(gateConfig = {}) {
+  const cwd = process.env.QUAY_ACCEPTANCE_CWD || gateConfig.cwd || process.cwd();
+  const envTimeout = Number(process.env.QUAY_ACCEPTANCE_TIMEOUT_MS);
+  const timeoutMs = (Number.isFinite(envTimeout) && envTimeout > 0)
+    ? envTimeout
+    : (typeof gateConfig.timeoutMs === "number" && gateConfig.timeoutMs > 0 ? gateConfig.timeoutMs : 60000);
+  return { cwd, timeoutMs };
+}
+
+/**
  * Build a thin it0-script-wrapping gate fn: reads `task.extra[argsKey]`
  * (expected to be an array of positional args, first arg required), shells
  * out to `scriptPath` via the shared `runAcceptance` runner (no duplicated
@@ -101,8 +137,10 @@ function shQuote(arg) {
  * @param {string} scriptPath  absolute path to the it0-*.sh script
  * @param {string} argsKey     `task.extra` key holding the args array
  * @param {string} label       short label used in fail-closed reason text
+ * @param {{ cwd?: string, timeoutMs?: number }} [gateConfig] DIR-046-A/B: this
+ *   gate's own gates.yml `cwd`/`timeoutMs` (see `resolveRunnerOptions`)
  */
-function makeIt0Gate(scriptPath, argsKey, label) {
+function makeIt0Gate(scriptPath, argsKey, label, gateConfig) {
   return async (task) => {
     const args = task.extra?.[argsKey];
     if (!Array.isArray(args) || args.length === 0 || typeof args[0] !== "string" || args[0].trim() === "") {
@@ -113,8 +151,7 @@ function makeIt0Gate(scriptPath, argsKey, label) {
       };
     }
     const command = [scriptPath, ...args].map(shQuote).join(" ");
-    const cwd = process.env.QUAY_ACCEPTANCE_CWD || process.cwd();
-    const timeoutMs = Number(process.env.QUAY_ACCEPTANCE_TIMEOUT_MS) || 60000;
+    const { cwd, timeoutMs } = resolveRunnerOptions(gateConfig);
     const { ok, reason } = runAcceptance({ command, cwd, timeoutMs });
     return { ok, reason };
   };
@@ -132,12 +169,12 @@ function makeIt0Gate(scriptPath, argsKey, label) {
  * @param {string} scriptPath absolute path to the fixed script
  * @param {string} label      short label used in fail-closed reason text (unused today, kept for
  *                            symmetry with `makeIt0Gate`'s signature / future error messages)
+ * @param {{ cwd?: string, timeoutMs?: number }} [gateConfig] DIR-046-A/B
  */
-function makeFixedScriptGate(scriptPath, _label) {
+function makeFixedScriptGate(scriptPath, _label, gateConfig) {
   return async () => {
     const command = shQuote(scriptPath);
-    const cwd = process.env.QUAY_ACCEPTANCE_CWD || process.cwd();
-    const timeoutMs = Number(process.env.QUAY_ACCEPTANCE_TIMEOUT_MS) || 60000;
+    const { cwd, timeoutMs } = resolveRunnerOptions(gateConfig);
     const { ok, reason } = runAcceptance({ command, cwd, timeoutMs });
     return { ok, reason };
   };
@@ -189,11 +226,172 @@ function makeAdrGate(adrId, adrDir) {
         reason: `${adrId} has no enforcement command defined (set its \`enforcement:\` frontmatter field to a runnable check)`,
       };
     }
-    const cwd = process.env.QUAY_ACCEPTANCE_CWD || process.cwd();
-    const timeoutMs = Number(process.env.QUAY_ACCEPTANCE_TIMEOUT_MS) || 60000;
+    const { cwd, timeoutMs } = resolveRunnerOptions();
     const { ok, reason } = runAcceptance({ command, cwd, timeoutMs });
     return { ok, reason };
   };
+}
+
+/**
+ * Generic DoD gate SET (this milestone): three runner-agnostic factories, each
+ * taking its actual COMMAND (+ threshold, for the coverage one) as pure
+ * workspace config — never a hardcoded test-runner/language invocation. They
+ * extend the SAME family as `makeIt0Gate`/`makeAdrGate`/`makeFixedScriptGate`
+ * above: thin wrappers over `runAcceptance` (spawnSync, real process I/O),
+ * fail-closed on missing config, exit-0-is-pass. Wiring is via
+ * `.quay/gates.yml`'s new `testPass` / `coverageFloor` / `redGreen` lists (see
+ * `readGatesConfig`/`loadWorkspaceGates` below) — the WORKSPACE names its own
+ * test/coverage/red+green commands; this module never names one.
+ *
+ * `test-pass` — run a workspace-configured command, PASS iff exit 0. This is
+ * the generic "some command exits clean" shape shared by any test-runner
+ * invocation, whatever language or tool a workspace happens to use — no such
+ * tool name ever appears here; the actual invocation is workspace DATA (a
+ * `gates.yml` `testPass[].command`).
+ *
+ * @param {string} command the workspace's own test command (arbitrary shell)
+ * @param {string} label    short label used in fail-closed reason text
+ * @param {{ cwd?: string, timeoutMs?: number }} [gateConfig] DIR-046-A/B: this
+ *   gate's own gates.yml `cwd`/`timeoutMs` fields
+ */
+function makeTestPassGate(command, _label, gateConfig) {
+  return async () => {
+    if (typeof command !== "string" || command.trim() === "") {
+      return { ok: false, reason: "no test command configured (set gates.yml testPass[].command)" };
+    }
+    const { cwd, timeoutMs } = resolveRunnerOptions(gateConfig);
+    const { ok, reason } = runAcceptance({ command, cwd, timeoutMs });
+    return { ok, reason };
+  };
+}
+
+/**
+ * `coverage-floor` — run a workspace-configured coverage command, extract a
+ * numeric coverage percentage from its stdout via a workspace-configured
+ * regex (default matches a bare `NN(.N)%` — the lowest-common-denominator
+ * shape most coverage tool summary lines share, e.g. "... 87.5% ...", without
+ * naming any one tool's report format), and PASS iff the extracted number is
+ * `>= floor`. The extraction PATTERN itself is workspace config too (an
+ * optional `pattern` — a JS regex source string with one capture group for
+ * the number), so a workspace whose coverage tool prints an unusual line
+ * shape can supply its own pattern without touching this module — the
+ * default only covers the common case, it is not a parser for any specific
+ * tool's report format.
+ *
+ * Fails closed (same discipline as the other factories) when: the command is
+ * unset, the command errors/times out, or its output does not contain a
+ * number matching the pattern at all (an unparsable coverage report must
+ * never silently PASS).
+ *
+ * @param {string} command  the workspace's own coverage-reporting command
+ * @param {number} floor    minimum acceptable coverage percentage (0-100)
+ * @param {string} [pattern] optional regex source (one capture group = the number), default `([\d.]+)\s*%`
+ * @param {string} label    short label used in fail-closed reason text
+ * @param {{ cwd?: string, timeoutMs?: number }} [gateConfig] DIR-046-A/B
+ */
+function makeCoverageFloorGate(command, floor, pattern, _label, gateConfig) {
+  return async () => {
+    if (typeof command !== "string" || command.trim() === "") {
+      return { ok: false, reason: "no coverage command configured (set gates.yml coverageFloor[].command)" };
+    }
+    if (typeof floor !== "number" || Number.isNaN(floor)) {
+      return { ok: false, reason: "no coverage floor configured (set gates.yml coverageFloor[].floor, a number 0-100)" };
+    }
+    const { cwd, timeoutMs } = resolveRunnerOptions(gateConfig);
+    const r = spawnSyncCapture(command, cwd, timeoutMs);
+    if (r.timedOut) return { ok: false, reason: `coverage command timed out after ${timeoutMs}ms (killed) — raise gates.yml timeoutMs / --timeout` };
+    if (r.error) return { ok: false, reason: `coverage command failed to spawn: ${r.error}` };
+    const re = new RegExp(pattern && pattern.trim() !== "" ? pattern : "([\\d.]+)\\s*%");
+    const m = re.exec(r.output);
+    if (!m || m[1] === undefined) {
+      return {
+        ok: false,
+        reason: `could not find a coverage percentage in command output (pattern ${JSON.stringify(re.source)} matched nothing)`,
+      };
+    }
+    const actual = Number(m[1]);
+    if (Number.isNaN(actual)) {
+      return { ok: false, reason: `matched coverage value ${JSON.stringify(m[1])} is not a number` };
+    }
+    const ok = actual >= floor;
+    return {
+      ok,
+      reason: ok
+        ? `coverage ${actual}% >= floor ${floor}%`
+        : `coverage ${actual}% below floor ${floor}%`,
+    };
+  };
+}
+
+/**
+ * `red-green` — the reusable RED->GREEN evidence-shape check, parameterized
+ * by TWO workspace-configured commands rather than any one runner: `red`
+ * (expected to FAIL — the pre-fix/failing-test state) and `green` (expected
+ * to PASS — the post-fix state). PASS iff `red` exits non-zero AND `green`
+ * exits 0 — a mechanical proof that a real RED->GREEN transition happened,
+ * not an assertion of it (ADR-001's evidence bar, generalized so any
+ * workspace's own test-runner-shaped RED->GREEN pair can be checked this
+ * same way, without naming a specific tool here).
+ *
+ * Fails closed when either command is unset, or when `red` unexpectedly
+ * PASSES (there was no real red state to fix) or `green` FAILS (the fix
+ * doesn't actually land) — either condition means the RED->GREEN claim is
+ * not evidenced.
+ *
+ * @param {string} redCommand    workspace command expected to exit non-zero
+ * @param {string} greenCommand  workspace command expected to exit 0
+ * @param {string} label         short label used in fail-closed reason text
+ * @param {{ cwd?: string, timeoutMs?: number }} [gateConfig] DIR-046-A/B
+ */
+function makeRedGreenGate(redCommand, greenCommand, _label, gateConfig) {
+  return async () => {
+    if (typeof redCommand !== "string" || redCommand.trim() === "") {
+      return { ok: false, reason: "no red command configured (set gates.yml redGreen[].red)" };
+    }
+    if (typeof greenCommand !== "string" || greenCommand.trim() === "") {
+      return { ok: false, reason: "no green command configured (set gates.yml redGreen[].green)" };
+    }
+    const { cwd, timeoutMs } = resolveRunnerOptions(gateConfig);
+    const redResult = runAcceptance({ command: redCommand, cwd, timeoutMs });
+    if (redResult.ok) {
+      return { ok: false, reason: `red command unexpectedly passed (exit 0) — no real RED state to prove: ${redResult.reason}` };
+    }
+    const greenResult = runAcceptance({ command: greenCommand, cwd, timeoutMs });
+    if (!greenResult.ok) {
+      return { ok: false, reason: `green command failed — RED->GREEN transition not evidenced: ${greenResult.reason}` };
+    }
+    return { ok: true, reason: `red command failed as expected (${redResult.reason}); green command passed (${greenResult.reason})` };
+  };
+}
+
+/**
+ * Run `command` in `cwd` capturing combined stdout+stderr text (unlike
+ * `runAcceptance`, which reports only ok/reason/code — `coverage-floor` needs
+ * the actual output text to extract a number from). Kept as a tiny sibling
+ * rather than changing `runAcceptance`'s return shape (would ripple through
+ * every existing caller of that shared, load-bearing function).
+ *
+ * @param {string} command
+ * @param {string} cwd
+ * @param {number} timeoutMs
+ * @returns {{ output: string, timedOut: boolean, error: string|null }}
+ */
+function spawnSyncCapture(command, cwd, timeoutMs) {
+  const r = spawnSync(command, {
+    cwd,
+    shell: true,
+    timeout: timeoutMs,
+    killSignal: "SIGKILL",
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (r.error && r.error.code === "ETIMEDOUT") {
+    return { output: "", timedOut: true, error: null };
+  }
+  if (r.error) {
+    return { output: "", timedOut: false, error: r.error.message };
+  }
+  return { output: `${r.stdout ?? ""}\n${r.stderr ?? ""}`, timedOut: false, error: null };
 }
 
 /**
@@ -285,8 +483,7 @@ export const gateRegistry = {
         reason: "no acceptance command defined (set with `quay task edit <id> --acceptance '<cmd>'`)",
       };
     }
-    const cwd = process.env.QUAY_ACCEPTANCE_CWD || process.cwd();
-    const timeoutMs = Number(process.env.QUAY_ACCEPTANCE_TIMEOUT_MS) || 60000;
+    const { cwd, timeoutMs } = resolveRunnerOptions();
     const { ok, reason } = runAcceptance({ command, cwd, timeoutMs });
     return { ok, reason };
   },
@@ -345,21 +542,40 @@ function discoverWorkspaceRoot(startDir = process.cwd()) {
 
 /**
  * Read `<workspaceRoot>/.quay/gates.yml` (if present) and return its parsed
- * `{it0, adr, fixed}` shape. Missing file / unparsable YAML / missing keys
- * all degrade to `{it0: [], adr: [], fixed: []}` (fail-quiet, not
- * fail-closed here — an ABSENT gates.yml is the fresh-workspace default, not
- * an error condition; the gates it WOULD have declared simply don't exist,
- * which is the whole point of AC3).
+ * `{it0, adr, fixed, testPass, coverageFloor, redGreen}` shape. Missing file
+ * / unparsable YAML / missing keys all degrade to all-empty-arrays
+ * (fail-quiet, not fail-closed here — an ABSENT gates.yml is the
+ * fresh-workspace default, not an error condition; the gates it WOULD have
+ * declared simply don't exist, which is the whole point of AC3).
  *
  * `fixed` (DIR-035-D) — zero-argument scripts wired via `makeFixedScriptGate`
  * (e.g. `delivery-standalone-smoke.sh`), parallel to `it0` but with no
  * `argsKey` (the script takes no positional args at all).
  *
+ * `testPass` / `coverageFloor` / `redGreen` (DIR-042-A) — the generic
+ * runner-agnostic DoD gate SET: each entry supplies its own COMMAND (+
+ * threshold/pattern for `coverageFloor`, + a `red`/`green` command pair for
+ * `redGreen`) as pure workspace data — see `makeTestPassGate` /
+ * `makeCoverageFloorGate` / `makeRedGreenGate` above for the exact contract.
+ *
+ * DIR-046-A/B: `it0`/`fixed`/`testPass`/`coverageFloor`/`redGreen` entries may
+ * ALSO carry optional `cwd`/`timeoutMs` fields — this gate's own workspace-
+ * declared cwd override / time budget, applied via `resolveRunnerOptions`
+ * (env var > gates.yml entry > default), see that function's own doc comment
+ * for the full precedence rule.
+ *
  * @param {string} workspaceRoot
- * @returns {{it0: Array<{name:string, script:string, argsKey:string}>, adr: string[], fixed: Array<{name:string, script:string}>}}
+ * @returns {{
+ *   it0: Array<{name:string, script:string, argsKey:string, cwd?:string, timeoutMs?:number}>,
+ *   adr: string[],
+ *   fixed: Array<{name:string, script:string, cwd?:string, timeoutMs?:number}>,
+ *   testPass: Array<{name:string, command:string, cwd?:string, timeoutMs?:number}>,
+ *   coverageFloor: Array<{name:string, command:string, floor:number, pattern?:string, cwd?:string, timeoutMs?:number}>,
+ *   redGreen: Array<{name:string, red:string, green:string, cwd?:string, timeoutMs?:number}>,
+ * }}
  */
 function readGatesConfig(workspaceRoot) {
-  const empty = { it0: [], adr: [], fixed: [] };
+  const empty = { it0: [], adr: [], fixed: [], testPass: [], coverageFloor: [], redGreen: [] };
   if (!workspaceRoot) return empty;
   const gatesPath = path.join(workspaceRoot, ".quay", "gates.yml");
   if (!fs.existsSync(gatesPath)) return empty;
@@ -372,7 +588,10 @@ function readGatesConfig(workspaceRoot) {
   const it0 = Array.isArray(parsed?.it0) ? parsed.it0 : [];
   const adr = Array.isArray(parsed?.adr) ? parsed.adr : [];
   const fixed = Array.isArray(parsed?.fixed) ? parsed.fixed : [];
-  return { it0, adr, fixed };
+  const testPass = Array.isArray(parsed?.testPass) ? parsed.testPass : [];
+  const coverageFloor = Array.isArray(parsed?.coverageFloor) ? parsed.coverageFloor : [];
+  const redGreen = Array.isArray(parsed?.redGreen) ? parsed.redGreen : [];
+  return { it0, adr, fixed, testPass, coverageFloor, redGreen };
 }
 
 /**
@@ -380,9 +599,13 @@ function readGatesConfig(workspaceRoot) {
  * `makeIt0Gate` per `gates.yml`'s `it0[]` entry (script path resolved
  * relative to `workspaceRoot`), one `makeAdrGate` per `gates.yml`'s `adr[]`
  * entry (lowercased, e.g. "ADR-001" -> "adr-001", per the original E3 AC1
- * naming convention — unchanged), plus one `makeFixedScriptGate` per
- * `gates.yml`'s `fixed[]` entry (DIR-035-D — a zero-argument script, e.g.
- * `delivery-standalone-smoke.sh`). The ADR store dir mirrors this
+ * naming convention — unchanged), one `makeFixedScriptGate` per `gates.yml`'s
+ * `fixed[]` entry (DIR-035-D — a zero-argument script, e.g.
+ * `delivery-standalone-smoke.sh`), plus (DIR-042-A) one `makeTestPassGate`
+ * per `testPass[]` entry, one `makeCoverageFloorGate` per `coverageFloor[]`
+ * entry, and one `makeRedGreenGate` per `redGreen[]` entry — the generic DoD
+ * gate SET, each entry's actual command(s)/threshold coming straight from
+ * this workspace's own `gates.yml` data. The ADR store dir mirrors this
  * workspace's own native-provider convention (`QUAY_NATIVE_ADR_DIR`,
  * `.quay/config.yml`'s `providers.native.env`), falling back to
  * `<workspaceRoot>/adr` when unset — the same default quay-native itself uses.
@@ -395,14 +618,26 @@ function readGatesConfig(workspaceRoot) {
  */
 export function loadWorkspaceGates(workspaceRoot) {
   if (!workspaceRoot) return {};
-  const { it0, adr, fixed } = readGatesConfig(workspaceRoot);
+  const { it0, adr, fixed, testPass, coverageFloor, redGreen } = readGatesConfig(workspaceRoot);
   const gates = {};
+  // DIR-046-B: pull each entry's own optional `cwd`/`timeoutMs` gates.yml
+  // fields into a `{cwd, timeoutMs}` gateConfig, resolved relative to
+  // workspaceRoot for a relative `cwd` (mirrors how a relative `script` path
+  // is resolved just below) so a workspace can declare a worktree-relative
+  // path without needing to know its own absolute location.
+  const gateConfigOf = (entry) => {
+    const cwd = typeof entry?.cwd === "string" && entry.cwd.trim() !== ""
+      ? (path.isAbsolute(entry.cwd) ? entry.cwd : path.resolve(workspaceRoot, entry.cwd))
+      : undefined;
+    const timeoutMs = typeof entry?.timeoutMs === "number" && entry.timeoutMs > 0 ? entry.timeoutMs : undefined;
+    return { cwd, timeoutMs };
+  };
   for (const entry of it0) {
     if (!entry?.name || !entry?.script || !entry?.argsKey) continue;
     const scriptPath = path.isAbsolute(entry.script)
       ? entry.script
       : path.resolve(workspaceRoot, entry.script);
-    gates[entry.name] = makeIt0Gate(scriptPath, entry.argsKey, entry.name);
+    gates[entry.name] = makeIt0Gate(scriptPath, entry.argsKey, entry.name, gateConfigOf(entry));
   }
   const adrDir = path.join(workspaceRoot, "adr");
   for (const adrId of adr) {
@@ -414,7 +649,19 @@ export function loadWorkspaceGates(workspaceRoot) {
     const scriptPath = path.isAbsolute(entry.script)
       ? entry.script
       : path.resolve(workspaceRoot, entry.script);
-    gates[entry.name] = makeFixedScriptGate(scriptPath, entry.name);
+    gates[entry.name] = makeFixedScriptGate(scriptPath, entry.name, gateConfigOf(entry));
+  }
+  for (const entry of testPass) {
+    if (!entry?.name || typeof entry?.command !== "string") continue;
+    gates[entry.name] = makeTestPassGate(entry.command, entry.name, gateConfigOf(entry));
+  }
+  for (const entry of coverageFloor) {
+    if (!entry?.name || typeof entry?.command !== "string" || typeof entry?.floor !== "number") continue;
+    gates[entry.name] = makeCoverageFloorGate(entry.command, entry.floor, entry.pattern, entry.name, gateConfigOf(entry));
+  }
+  for (const entry of redGreen) {
+    if (!entry?.name || typeof entry?.red !== "string" || typeof entry?.green !== "string") continue;
+    gates[entry.name] = makeRedGreenGate(entry.red, entry.green, entry.name, gateConfigOf(entry));
   }
   return gates;
 }

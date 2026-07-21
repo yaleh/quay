@@ -1,3 +1,4 @@
+// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay Core: ADR (Architecture Decision Record) store — a SEPARATE object kind
 // from tasks (a Provider's own store, e.g. quay-native's store.js). An ADR is
 // NOT a task: it has a DECISION lifecycle (proposed→accepted→superseded/

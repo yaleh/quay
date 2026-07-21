@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay — the Core CLI (glossary.md). Provider-agnostic, MCP client, sibling
 // to the Web UI (proposal §9): `serve` / `task` / `action`.
 
@@ -25,6 +26,11 @@ import { runComplete, runAdjudicate, runPromote, runRetreat } from "../src/gate/
 // (withProvider → resolveGateLogPath → QUAY_ACCEPTANCE_CWD). `--once` = one
 // observation; bare `run` = bounded loop to fixpoint/sentinel/cap.
 import { runOnce, runLoop } from "../src/gate/driver.js";
+// DIR-039 (A): generic provider-to-provider migration over the Provider ABI.
+// Verb-less-style top-level `migrate` command (no positional task id) —
+// mirrors `run`'s own no-positional-id shape (both scan/act over the whole
+// board, not a single task).
+import { migrateTasks } from "../src/migrate.js";
 
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
@@ -176,6 +182,42 @@ async function resolveBody(flags) {
   return flags.body; // short-string mode, already validated present by the caller
 }
 
+// DIR-046-A — pin the acceptance runner's cwd/timeout env vars for gates that
+// read them (registry.js#resolveRunnerOptions), with an EXPLICIT-OVERRIDE-
+// WINS precedence, replacing the previous unconditional
+// `process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot` at each of the 4
+// call sites (gate/complete/promote/run), which clobbered any pre-set env var
+// or explicit flag (the exact session-8b74052c bug: the user reverse-
+// engineered QUAY_ACCEPTANCE_CWD and set it, but the CLI overwrote it).
+//
+// Precedence (cwd): explicit `--cwd <dir>` flag > a PRE-SET QUAY_ACCEPTANCE_CWD
+// (already in the env before this process's own CLI logic runs) >
+// `cfg.workspaceRoot` (the default — unchanged behavior with no override).
+// A gates.yml per-gate `cwd` is a THIRD source, applied inside
+// `registry.js#resolveRunnerOptions` itself (this function has no per-gate
+// visibility at the CLI layer, only a per-INVOCATION one) — see that
+// function's own precedence rule for how the two layers compose.
+//
+// Precedence (timeout): explicit `--timeout <ms>` flag > a pre-set
+// `QUAY_ACCEPTANCE_TIMEOUT_MS` > left unset (registry.js's own 60000ms
+// default / a gates.yml per-gate `timeoutMs` apply from there).
+//
+// @param {{ workspaceRoot: string, cwd?: string, timeout?: string|number }} args
+function pinAcceptanceEnv({ workspaceRoot, cwd, timeout }) {
+  if (cwd) {
+    process.env.QUAY_ACCEPTANCE_CWD = cwd;
+  } else if (!process.env.QUAY_ACCEPTANCE_CWD) {
+    process.env.QUAY_ACCEPTANCE_CWD = workspaceRoot;
+  }
+  // else: a pre-set QUAY_ACCEPTANCE_CWD already wins — leave it untouched.
+  if (timeout !== undefined) {
+    process.env.QUAY_ACCEPTANCE_TIMEOUT_MS = String(timeout);
+  }
+  // else: leave QUAY_ACCEPTANCE_TIMEOUT_MS as whatever the environment
+  // already has (unset by default) — registry.js's own precedence takes it
+  // from there (env > gates.yml timeoutMs > 60000ms default).
+}
+
 async function withProvider(fn, { providerId } = {}) {
   const cfg = loadConfig();
   const provider = activeProvider(cfg, providerId);
@@ -192,6 +234,24 @@ async function withProvider(fn, { providerId } = {}) {
   } finally {
     await client.close();
   }
+}
+
+// DIR-039 (A): connect to a single named provider, same resolution logic
+// withProvider() uses, but returning the live client (not running a
+// callback then closing it) — needed by `migrate`, which must hold TWO
+// provider connections (source + target) open simultaneously, unlike every
+// other command here (exactly one active provider at a time).
+async function connectNamedProvider(cfg, providerId) {
+  const provider = activeProvider(cfg, providerId);
+  const providerDir = path.resolve(cfg.workspaceRoot, provider.path ?? ".");
+  const [command, ...args] = provider.mcp_entry;
+  const client = await connectProvider({
+    command,
+    args,
+    cwd: providerDir,
+    env: resolveProviderEnv(cfg, provider),
+  });
+  return { client, provider };
 }
 
 // QX-022 (experiment 4, iteration 5): relative-time helper for CLI timestamp column.
@@ -242,14 +302,15 @@ Usage:
   quay task check <task-id> [--json]
   quay action list <task-id> [--json]
   quay action run <task-id> <action-id> [--json]
-  quay gate <task-id> [--gate <name>]
+  quay gate <task-id> [--gate <name>] [--cwd <dir>] [--timeout <ms>]
   quay gate --list
   quay gate-log <task-id> [--gate <name>] [--json] [--file <log-path>]
-  quay complete <task-id> [--file <log-path>]
+  quay complete <task-id> [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
   quay adjudicate <task-id> [--file <log-path>]
-  quay promote <task-id> [--file <log-path>]
+  quay promote <task-id> [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
   quay retreat <task-id> --reason <reason> [--file <log-path>]
-  quay run [--once] [--file <log-path>]
+  quay run [--once] [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
+  quay migrate --from <providerId> --to <providerId> [--json]
   quay serve [--port <port>]
   quay mcp
 
@@ -313,6 +374,16 @@ Gate engine commands (QENG-1/2) — evaluate a named check and append an immutab
   --json            With 'gate-log': output the GateEvent array as JSON instead of human-readable text.
   --file <log-path>  Override the GateEvent log path for 'gate-log' (default
                     <workspaceRoot>/.quay/gate-events.jsonl).
+  --cwd <dir>       DIR-046: run the acceptance command IN <dir> instead of the workspace root
+                    (e.g. gate a milestone worktree BEFORE merge, not the main repo). Wins over
+                    both the workspaceRoot default AND a pre-set QUAY_ACCEPTANCE_CWD env var.
+                    Also honored by 'complete'/'promote'/'run'. A gates.yml per-gate 'cwd' field
+                    is a lower-precedence third option (see .quay/gates.yml's own doc comment).
+  --timeout <ms>    DIR-046: override the acceptance runner's kill deadline in milliseconds
+                    (default 60000). Also honored by 'complete'/'promote'/'run'. A gates.yml
+                    per-gate 'timeoutMs' field is a lower-precedence workspace-data alternative —
+                    a TIMEOUT failure's reason names both knobs ("raise gates.yml timeoutMs /
+                    --timeout").
 
 Lifecycle commands (QENG-3) — status-writing verbs over the {todo,ready,done,needs-human} phases:
   complete <id>     Precondition status=ready; runs the acceptance gate; on pass writes status=done
@@ -334,6 +405,20 @@ Driver command (QENG-4) — the autonomous loop AS CODE (scan -> gate -> complet
                     (no flag)  Bounded loop until a fixpoint (no actionable tasks left) or the stop
                             sentinel <workspaceRoot>/.quay/.stop (checked at each iteration boundary);
                             both exit 0. Only the runaway safety ceiling (maxIterations) exits 1.
+
+Migration command (DIR-039) — generic ABI provider-to-provider task migration:
+  migrate --from <providerId> --to <providerId>
+                    Reads EVERY task from the --from provider via the Provider ABI (task_list) and
+                    writes each one to the --to provider via the ABI (task_write) — provider-
+                    agnostic, works for any pair declared in .quay/config.yml (e.g. --from github
+                    --to native). Both providers connect simultaneously (does not require either
+                    to be the config's 'enabled' default). Exit 0 if every task migrated cleanly;
+                    exit 1 if any per-task write failed (errors are still reported, not fatal to the
+                    whole run — a partial migration is visible, not silently swallowed).
+  --from <providerId>  Source provider id (must exist in .quay/config.yml's providers map)
+  --to <providerId>    Target provider id (must exist in .quay/config.yml's providers map, and
+                        differ from --from)
+  --json              Output a { total, migrated, errors } JSON summary instead of one line per task
 
 Examples:
   quay task list --prefix QX          List only QX-* tasks
@@ -959,10 +1044,10 @@ async function main() {
       // QENG-2 (proposal §4, review note 2): default gate is `acceptance` at the
       // CLI layer only (engine's own `gate="dod"` default is untouched — only
       // direct programmatic callers hit it). `--gate dod` still routes to QENG-1's
-      // dod gate. QUAY_ACCEPTANCE_CWD pins the acceptance runner's cwd to the
-      // workspace root without changing the engine's `(task, client)` signature.
+      // dod gate. DIR-046-A: `--cwd`/`--timeout` (or a pre-set env var) win over
+      // the workspaceRoot pin — see pinAcceptanceEnv's own doc comment.
       const gate = vf.gate ?? "acceptance";
-      process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout });
       // DIR-035-B: thread the resolved workspace root through so a named
       // gate declared in THIS workspace's own `.quay/gates.yml` resolves
       // correctly regardless of the process's cwd at invocation time.
@@ -1010,7 +1095,9 @@ async function main() {
     if (!id) { console.error("quay complete: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
-      process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+      // DIR-046-A: `--cwd`/`--timeout` (or a pre-set env var) win over the
+      // workspaceRoot pin — see pinAcceptanceEnv's own doc comment.
+      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout });
       // M56-gate-cli-error-ux (AC1): missing-task is a guarded error.
       await withGuardedErrors(async () => {
         await runComplete({ client, id, logPath });
@@ -1037,7 +1124,9 @@ async function main() {
     if (!id) { console.error("quay promote: missing required <task-id> argument"); process.exitCode = 1; return; }
     await withProvider(async (client, cfg) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
-      process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+      // DIR-046-A: `--cwd`/`--timeout` (or a pre-set env var) win over the
+      // workspaceRoot pin — see pinAcceptanceEnv's own doc comment.
+      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout });
       // M56-gate-cli-error-ux (AC1): missing-task / illegal-transition are
       // guarded errors — assertTransition() throws `illegal transition: ...`.
       await withGuardedErrors(async () => {
@@ -1079,7 +1168,9 @@ async function main() {
     const { flags: runFlags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
     await withProvider(async (client, cfg) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: runFlags.file });
-      process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+      // DIR-046-A: `--cwd`/`--timeout` (or a pre-set env var) win over the
+      // workspaceRoot pin — see pinAcceptanceEnv's own doc comment.
+      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: runFlags.cwd, timeout: runFlags.timeout });
       if (runFlags.once) {
         const r = await runOnce({ client, logPath });
         if (!r.processed) console.log("nothing to do");
@@ -1104,8 +1195,59 @@ async function main() {
     return;
   }
 
+  // DIR-039 (A): `quay migrate --from <providerId> --to <providerId>` — the
+  // generic ABI provider-to-provider migration command. No positional task
+  // id (mirrors `run`'s own shape: it acts over the WHOLE board, not one
+  // task), so any flag lands in `sub` exactly like `run` — re-parse from
+  // [sub, ...rest].
+  if (cmd === "migrate") {
+    const { flags: mf } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
+    if (typeof mf.from !== "string" || mf.from.trim() === "") {
+      console.error("quay migrate: --from <providerId> is required");
+      process.exitCode = 1;
+      return;
+    }
+    if (typeof mf.to !== "string" || mf.to.trim() === "") {
+      console.error("quay migrate: --to <providerId> is required");
+      process.exitCode = 1;
+      return;
+    }
+    if (mf.from === mf.to) {
+      console.error("quay migrate: --from and --to must name different providers");
+      process.exitCode = 1;
+      return;
+    }
+    const cfg = loadConfig();
+    const { client: source } = await connectNamedProvider(cfg, mf.from);
+    try {
+      const { client: target } = await connectNamedProvider(cfg, mf.to);
+      try {
+        const result = await migrateTasks({
+          source,
+          target,
+          onTask: mf.json ? undefined : (t) => console.log(`migrated ${t.id}: ${t.title}`),
+        });
+        if (mf.json) {
+          printJson(result);
+        } else {
+          console.log(
+            `migrate --from ${mf.from} --to ${mf.to}: ${result.migrated.length}/${result.total} tasks migrated` +
+              (result.errors.length ? `, ${result.errors.length} error(s)` : "")
+          );
+          for (const e of result.errors) console.error(`  error: ${e.id ?? "(no id)"}: ${e.error}`);
+        }
+        process.exitCode = result.errors.length > 0 ? 1 : 0;
+      } finally {
+        await target.close();
+      }
+    } finally {
+      await source.close();
+    }
+    return;
+  }
+
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|action list|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|action list|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
 }
 

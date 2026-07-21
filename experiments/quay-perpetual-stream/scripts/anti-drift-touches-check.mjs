@@ -34,6 +34,16 @@ export function fileWithinDeclared(file, declaredGlobs) {
 // kinds: "out-of-declared" (a build wrote a file matching none of its declared globs) and
 // "cross-build-overlap" (two builds actually touched the same file).
 export function checkAntiDrift(builds) {
+  // (a-1) FAIL-CLOSED on a malformed manifest — a NON-WAIVABLE guardrail must not silently pass on bad
+  // input (DIR-049 wiring-audit finding: `b.actualFiles || []` treated a wrong-field-name manifest as
+  // empty → ANTI-DRIFT OK). Match serial-fanin-absorb's strictness: every build needs a string id and
+  // array declaredGlobs/actualFiles, else throw (the CLI maps the throw to HARD FAIL, not OK).
+  if (!Array.isArray(builds)) throw new Error("checkAntiDrift: manifest must be a JSON array of builds");
+  for (const b of builds) {
+    if (!b || typeof b.id !== "string" || !b.id) throw new Error("checkAntiDrift: every build needs a string id");
+    if (!Array.isArray(b.declaredGlobs)) throw new Error(`checkAntiDrift: build "${b.id}" is missing an array declaredGlobs (fail-closed — a NON-WAIVABLE guardrail does not pass on a malformed manifest)`);
+    if (!Array.isArray(b.actualFiles)) throw new Error(`checkAntiDrift: build "${b.id}" is missing an array actualFiles (fail-closed)`);
+  }
   const violations = [];
   // (a0) overbroad declaration: a build may not validate its writes against a meaningless scope
   // (`**`, `packages/**`, …). Without this, an overbroad-but-legal glob absorbs any stray write and
@@ -81,7 +91,14 @@ export async function main(argv) {
     return 2;
   }
   if (!Array.isArray(builds)) { process.stderr.write("ERROR: manifest must be a JSON array of builds\n"); return 2; }
-  const r = checkAntiDrift(builds);
+  let r;
+  try {
+    r = checkAntiDrift(builds);
+  } catch (e) {
+    // malformed manifest → fail-closed HARD FAIL (never silently pass a NON-WAIVABLE guardrail)
+    process.stdout.write(`ANTI-DRIFT HARD FAIL: malformed manifest — ${e.message}\n`);
+    return 1;
+  }
   if (r.ok) {
     process.stdout.write(`ANTI-DRIFT OK: ${builds.length} builds, no out-of-declared writes, no cross-build overlap\n`);
     return 0;

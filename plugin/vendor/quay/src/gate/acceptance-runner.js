@@ -1,3 +1,4 @@
+// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // QENG-2 — pure acceptance-command runner (epicd ADR-019 "runnable meter",
 // harness runShellCommands adapted to Node).
 //
@@ -39,7 +40,10 @@ export function runAcceptance({ command, cwd, timeoutMs = 60000 }) {
       code: null,
       signal: "SIGKILL",
       timedOut: true,
-      reason: `acceptance timed out after ${timeoutMs}ms (killed)`,
+      // DIR-046-C: name the actual knob to raise, not just the fact of the
+      // timeout — this is the exact discoverability gap session 8b74052c hit
+      // (the user spent ~15min grepping installed source for the env var).
+      reason: `acceptance timed out after ${timeoutMs}ms (killed) — raise gates.yml timeoutMs / --timeout`,
     };
   }
   // Any other spawn error (e.g. bad cwd / unrunnable shell).

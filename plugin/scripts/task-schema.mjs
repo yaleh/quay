@@ -1,5 +1,4 @@
-// task-schema.mjs — the ONE canonical definition of a quay task's authoring schema (exp5 /
-// canonical-task-schema unit B1). The validator IS the schema: this module exports pure,
+// task-schema.mjs — the ONE canonical definition of a quay task's authoring schema (canonical-task-schema unit B1). The validator IS the schema: this module exports pure,
 // side-effect-free check functions consumed by BOTH the standalone CLI (task-schema-check.mjs)
 // and it0-dod-check.mjs (which imports extractSection from here so section-parsing is shared, not
 // forked). There is exactly ONE definition of "schema-conformant" — checkTask() below. This header
@@ -43,7 +42,7 @@
 //                               whole value is a status word. False-positive-safe: DIR-009/010's
 //                               mid-prose / line-wrapped mentions of "Source"/"Status mirror"/"dirFile"
 //                               do NOT fire (verified against tasks/DIR-009.md:231, DIR-010.md:121,
-//                               and the exp5-M-CRYST-B1/DIR-028 prose "dirFile" mentions).
+//                               and the DIR-028 prose "dirFile" mentions).
 //   A7 checkDirectiveSections — directive-kind ONLY: `## Finding` AND `## Requested action` MUST
 //                               both be present (required by the /quay-directive authoring template).
 //                               milestone-candidate/other: assertion is skipped (PASS vacuously).

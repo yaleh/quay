@@ -7,6 +7,7 @@
 // Run: node --test experiments/quay-perpetual-stream/test/anti-drift-touches-check.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -162,6 +163,20 @@ test("main: RED manifest (overbroad declaration) → exit 1 (guardrail bites —
 
 test("main: missing manifest → exit 2", async () => {
   assert.equal(await main(["node", "s", fx("nope.json")]), 2);
+});
+
+test("checkAntiDrift: malformed manifest (wrong field names) FAILS CLOSED — DIR-049 wiring audit", () => {
+  // a wrong-field-name manifest must NOT silently pass a NON-WAIVABLE guardrail
+  assert.throws(() => checkAntiDrift([{ id: "A", touches: ["x/a.js"] }]), /declaredGlobs|fail-closed/i);
+  assert.throws(() => checkAntiDrift([{ id: "A", declaredGlobs: ["x/**"], writtenFiles: ["x/a.js"] }]), /actualFiles|fail-closed/i);
+  assert.throws(() => checkAntiDrift([{ declaredGlobs: [], actualFiles: [] }]), /string id/i);
+});
+
+test("main: malformed manifest → exit 1 (HARD FAIL, not OK)", async () => {
+  const bad = fx("malformed.json");
+  fs.writeFileSync(bad, JSON.stringify([{ id: "A", touches: ["x/a.js"] }]));
+  assert.equal(await main(["node", "s", bad]), 1);
+  fs.rmSync(bad, { force: true });
 });
 
 test("main: no manifest arg → exit 2", async () => {
