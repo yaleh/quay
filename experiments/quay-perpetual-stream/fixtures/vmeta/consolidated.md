@@ -10,4 +10,4 @@ consolidation-lag alarm does NOT apply. Must PASS.
 
 | insight | origin milestone | confirmation count | status |
 |---|---|---|---|
-| CI-job≡audit-channel pattern | m1 (M01-dist) | 2 — confirmed@m3 | **consolidated** (m7 ABSORB, 2026-07-18) — folded into inherited-core.md |
+| CI-job≡audit-channel pattern | m1 (M01-dist) | 2 — confirmed@m3 | **[consolidated]** (m7 ABSORB, 2026-07-18) — folded into inherited-core.md |

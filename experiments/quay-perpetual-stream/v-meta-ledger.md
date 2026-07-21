@@ -17,12 +17,21 @@ Each row's confirmation count and status are a single evolving fact about ONE in
 snapshot frozen at origin — see the "one row per insight, not one row per confirmation event" note
 below.
 
+**Structured status field (M70/D4, ADR-004 hard-over-soft):** The `status` cell MUST begin with a
+machine-readable tag: `[consolidated]`, `[confirmed]`, or `[proposed]` (optionally **bold**-wrapped
+as `**[consolidated]**` etc.). Everything after the tag is narrative/history and is ignored by the
+parser. A row whose status cell does NOT start with one of these tags will cause the vmeta-lag gate
+to FAIL-closed (never silent PASS). Examples:
+- `[consolidated] (m7 ABSORB, 2026-07-18) — folded into inherited-core.md`
+- `[confirmed] — m3 ABSORB, 2026-07-18 — 2 cross-domain confirmations`
+- `[proposed] — noted, never applied`
+
 ## Rows
 
 | insight | origin milestone | confirmation count | status |
 |---|---|---|---|
-| domain-audit-channel≡CI-job pattern (+ per-subcommand audit exercise) | m1 (M01-dist) | 2 — m1 packaging (origin, 1st instance) + m3 (M03-abi-eval, cross-provider conformance suite, 2nd instance, different domain) — **past φ threshold (2 cross-domain confirmations)**, crossed at m3 | **consolidated** (m7 ABSORB, 2026-07-18) — folded into `inherited-core.md`'s "Domain-misfit audit-channel" section under a new "CONSOLIDATED — φ-confirmed pattern" subsection, recording the m3 confirming instance and retiring this as an established, twice-confirmed convention. This is the DIR-005 first-proof requirement (charter Done-when clause 4), resolved by consolidation (not a carry-forward deferral) at the very next ABSORB after the gate was built — demonstrating the gate fires on a real pre-existing case. |
-| repo-root isolation-leak lesson | m3 (M03-abi-eval) | 1 (m3 only — no second cross-domain confirmation yet) | proposed — noted, never applied |
+| domain-audit-channel≡CI-job pattern (+ per-subcommand audit exercise) | m1 (M01-dist) | 2 — m1 packaging (origin, 1st instance) + m3 (M03-abi-eval, cross-provider conformance suite, 2nd instance, different domain) — **past φ threshold (2 cross-domain confirmations)**, crossed at m3 | **[consolidated]** (m7 ABSORB, 2026-07-18) — folded into `inherited-core.md`'s "Domain-misfit audit-channel" section under a new "CONSOLIDATED — φ-confirmed pattern" subsection, recording the m3 confirming instance and retiring this as an established, twice-confirmed convention. This is the DIR-005 first-proof requirement (charter Done-when clause 4), resolved by consolidation (not a carry-forward deferral) at the very next ABSORB after the gate was built — demonstrating the gate fires on a real pre-existing case. |
+| repo-root isolation-leak lesson | m3 (M03-abi-eval) | 1 (m3 only — no second cross-domain confirmation yet) | [proposed] — noted, never applied |
 
 ## Note on row count (iteration-1 correction of iteration-0's draft)
 

@@ -1,11 +1,10 @@
-# V_meta Insight Ledger (fixture: overdue row phrased "not consolidated yet, still confirmed" → FAIL)
+# V_meta Insight Ledger (fixture: bare prose status "not consolidated yet, still confirmed" → FAIL)
 
 <!--
 milestone_counter: 40
-R5 review must-fix #1 (fail-open): the status cell names BOTH 'consolidated' (negated: "not
-consolidated") and 'confirmed'. It is a genuinely confirmed-not-consolidated OVERDUE row. rowStatus
-must read the first NON-NEGATED word = confirmed → the arithmetic runs (40 − 3 = 37 > K=2) → ALARM.
-It must NOT be silently read as consolidated by an unordered keyword scan.
+M70/D4 (ADR-004 structured field): the status cell does NOT start with a structured [tag] token.
+rowStatus → null → fail-closed ALARM → FAIL. Under the structured-field rule, any prose status
+(negated, ambiguous, or keyword-less) that omits the [tag] prefix is uniformly fail-closed.
 -->
 
 ## Rows

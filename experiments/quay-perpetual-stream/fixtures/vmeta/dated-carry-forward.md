@@ -10,4 +10,4 @@ cell carries an explicit DATED carry-forward reason (a YYYY-MM-DD date). No sile
 
 | insight | origin milestone | confirmation count | status |
 |---|---|---|---|
-| CI-job≡audit-channel pattern | m1 (M01-dist) | 2 — confirmed@m3 | confirmed — carry-forward 2026-07-19: inherited-core §4.2 rewrite blocked on D3 R7; re-evaluate next ABSORB |
+| CI-job≡audit-channel pattern | m1 (M01-dist) | 2 — confirmed@m3 | [confirmed] — carry-forward 2026-07-19: inherited-core §4.2 rewrite blocked on D3 R7; re-evaluate next ABSORB |

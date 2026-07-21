@@ -10,5 +10,5 @@ Within threshold, no carry-forward needed. Must PASS.
 
 | insight | origin milestone | confirmation count | status |
 |---|---|---|---|
-| CI-job≡audit-channel pattern | m1 (M01-dist) | 2 — confirmed@m3 | confirmed — past φ threshold, not yet consolidated |
-| repo-root isolation-leak lesson | m3 (M03-abi-eval) | 1 (m3 only) | proposed — noted, never applied |
+| CI-job≡audit-channel pattern | m1 (M01-dist) | 2 — confirmed@m3 | [confirmed] — past φ threshold, not yet consolidated |
+| repo-root isolation-leak lesson | m3 (M03-abi-eval) | 1 (m3 only) | [proposed] — noted, never applied |

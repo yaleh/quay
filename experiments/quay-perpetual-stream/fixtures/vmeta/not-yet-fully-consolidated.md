@@ -1,10 +1,11 @@
-# V_meta Insight Ledger (fixture: "not yet fully consolidated" — the re-review's most-damaging fail-open → FAIL)
+# V_meta Insight Ledger (fixture: "not yet fully consolidated" — bare prose, no [tag] prefix → FAIL)
 
 <!--
 milestone_counter: 40
-R5 re-review: "not yet fully consolidated, confirmed@m3" (TWO qualifier words "yet"+"fully") defeated
-the earlier negation heuristic and silently PASSed. The status cell does NOT lead with a clean
-lifecycle token (it leads with "not") → rowStatus returns null → fail-closed ALARM → FAIL.
+M70/D4 (ADR-004 structured field): the status cell does NOT start with a structured [tag] token.
+rowStatus → null → fail-closed ALARM → FAIL. Previously this "not yet fully consolidated" phrasing
+defeated the R5 leading-token heuristic; the structured [tag] rule uniformly rejects all non-[tag]
+prose regardless of content.
 -->
 
 ## Rows

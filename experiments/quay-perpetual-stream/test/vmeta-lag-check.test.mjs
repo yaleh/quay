@@ -1,6 +1,7 @@
 // Unit tests for vmeta-lag-check.mjs — the single-source V_meta consolidation-lag ARITHMETIC.
-// exp5-M-CRYST-D3 increment R5 (Axis-2′). Written RED-first (ADR-001 / DIR-019 discipline): the
-// fix for any failing case belongs in the MODULE, never in the fixtures.
+// exp5-M-CRYST-D3 increment R5 (Axis-2′); R5 prose-parsing residual resolved in M70/D4 (ADR-004
+// structured [tag] field). Written RED-first (ADR-001 / DIR-019 discipline): the fix for any
+// failing case belongs in the MODULE, never in the fixtures.
 // Run:
 //   node --test experiments/quay-perpetual-stream/test/vmeta-lag-check.test.mjs
 //   node --test --experimental-test-coverage experiments/quay-perpetual-stream/test/vmeta-lag-check.test.mjs
@@ -43,35 +44,34 @@ test("parseRows: no table → empty array", () => {
 });
 
 // ── rowStatus ───────────────────────────────────────────────────────────────────────────────────
-test("rowStatus: reads proposed|confirmed|consolidated from the status cell (bold tolerated)", () => {
-  assert.equal(rowStatus("confirmed — past φ threshold"), "confirmed");
-  assert.equal(rowStatus("**consolidated** (m7 ABSORB)"), "consolidated");
-  assert.equal(rowStatus("proposed — noted"), "proposed");
+// M70/D4 (ADR-004 structured [tag] field): rowStatus ONLY accepts cells starting with
+// [consolidated], [confirmed], or [proposed] (optionally **bold**-wrapped). All bare prose → null.
+test("rowStatus: reads [tag] structured status cells (bold-wrapped tolerated)", () => {
+  assert.equal(rowStatus("[confirmed] — past φ threshold"), "confirmed");
+  assert.equal(rowStatus("**[consolidated]** (m7 ABSORB)"), "consolidated");
+  assert.equal(rowStatus("[proposed] — noted"), "proposed");
   assert.equal(rowStatus("something else"), null);
 });
-// HARDENING (R5 review must-fix #1 — FAIL-CLOSED leading-token): the status is the LEADING clean
-// lifecycle token; trailing prose is ignored. A cell that leads with "confirmed" reads confirmed
-// (→ arithmetic → alarm if overdue); a cell that does NOT lead cleanly → null → fail-closed at
-// evaluateRow. This closes the fail-open the negation heuristic missed.
-test("rowStatus: leads with a clean lifecycle token → that status; trailing prose ignored", () => {
-  assert.equal(rowStatus("confirmed — not yet consolidated"), "confirmed");
-  assert.equal(rowStatus("proposed — noted, never applied"), "proposed");
-  assert.equal(rowStatus("confirmed — confirmed again (m3, m5)"), "confirmed");
+test("rowStatus: [tag] with trailing narrative → lifecycle word; prose is ignored", () => {
+  assert.equal(rowStatus("[confirmed] — not yet consolidated"), "confirmed");
+  assert.equal(rowStatus("[proposed] — noted, never applied"), "proposed");
+  assert.equal(rowStatus("[confirmed] — confirmed again (m3, m5)"), "confirmed");
 });
-// CRITICAL false-positive guard (the live consolidated row records its confirmation history):
-// "**consolidated** (m7…) … not a carry-forward … twice-confirmed" must read CONSOLIDATED (trailing
-// 'not'/'confirmed' are history, ignored) — a naive scan wrongly flagged it.
-test("rowStatus: a consolidated row recording its history reads consolidated (trailing not/confirmed ignored)", () => {
-  assert.equal(rowStatus("**consolidated** (m7 ABSORB) — recording the m3 confirming instance; resolved by consolidation, not a carry-forward; twice-confirmed convention"), "consolidated");
+// CRITICAL: bold-wrapped [tag] must still read correctly (live ledger uses **[consolidated]**)
+test("rowStatus: **[consolidated]** with history text reads consolidated", () => {
+  assert.equal(rowStatus("**[consolidated]** (m7 ABSORB) — recording the m3 confirming instance; resolved by consolidation, not a carry-forward; twice-confirmed convention"), "consolidated");
 });
-// FAIL-CLOSED against the 5 realistic overdue phrasings the re-review found still fail-open:
-test("rowStatus: overdue phrasings that must NOT read as consolidated → null (fail-closed)", () => {
-  assert.equal(rowStatus("not yet fully consolidated, confirmed@m3"), null);   // leads with "not"
-  assert.equal(rowStatus("not-yet-consolidated, confirmed@m3"), null);         // hyphenated leading negation
-  assert.equal(rowStatus("consolidated pending; confirmed@m3"), null);         // post-positive qualifier
-  assert.equal(rowStatus("consolidated? no — confirmed@m3"), null);            // post-positive negation
-  assert.equal(rowStatus("consolidated: FALSE; confirmed@m3"), null);          // post-positive false
-  assert.equal(rowStatus("not consolidated yet, still confirmed — pending fold"), null); // leads "not"
+// RED: bare prose (no [tag] prefix) → null (fail-closed), regardless of prose content
+// This is the M70/D4 canonical test: the OLD leading-token parser would have read these as the
+// lifecycle word; the NEW structured parser rejects them all.
+test("rowStatus: bare prose without [tag] prefix → null (fail-closed) — the hard fix for R5 residual", () => {
+  assert.equal(rowStatus("consolidated (m7)"), null);                          // old parser: "consolidated"
+  assert.equal(rowStatus("confirmed — past φ threshold"), null);               // old parser: "confirmed"
+  assert.equal(rowStatus("proposed — noted, never applied"), null);            // old parser: "proposed"
+  assert.equal(rowStatus("not yet fully consolidated, confirmed@m3"), null);   // was always null
+  assert.equal(rowStatus("not-yet-consolidated, confirmed@m3"), null);         // was always null
+  assert.equal(rowStatus("consolidated pending; confirmed@m3"), null);         // old parser: null (qualifier)
+  assert.equal(rowStatus("not consolidated yet, still confirmed — pending fold"), null); // was always null
 });
 
 // ── confirmingMilestone ─────────────────────────────────────────────────────────────────────────
@@ -97,32 +97,32 @@ test("hasDatedCarryForward: requires BOTH a carry-forward marker AND an ISO date
 
 // ── evaluateRow (the arithmetic + decision) ──────────────────────────────────────────────────────
 test("evaluateRow: confirmed, over K, no carry-forward → alarm", () => {
-  const r = evaluateRow({ status: "confirmed", confirming: 3, statusCell: "confirmed — pending" }, 6, 2);
+  const r = evaluateRow({ status: "confirmed", confirming: 3, statusCell: "[confirmed] — pending" }, 6, 2);
   assert.equal(r.lag, 3);
   assert.equal(r.alarm, true);
 });
 test("evaluateRow: within K → no alarm", () => {
-  const r = evaluateRow({ status: "confirmed", confirming: 3, statusCell: "confirmed" }, 4, 2);
+  const r = evaluateRow({ status: "confirmed", confirming: 3, statusCell: "[confirmed]" }, 4, 2);
   assert.equal(r.lag, 1);
   assert.equal(r.alarm, false);
 });
 test("evaluateRow: consolidated → never alarms regardless of lag", () => {
-  const r = evaluateRow({ status: "consolidated", confirming: 3, statusCell: "consolidated" }, 99, 2);
+  const r = evaluateRow({ status: "consolidated", confirming: 3, statusCell: "[consolidated]" }, 99, 2);
   assert.equal(r.alarm, false);
 });
 test("evaluateRow: proposed (not confirmed) → never alarms", () => {
-  const r = evaluateRow({ status: "proposed", confirming: null, statusCell: "proposed" }, 99, 2);
+  const r = evaluateRow({ status: "proposed", confirming: null, statusCell: "[proposed]" }, 99, 2);
   assert.equal(r.alarm, false);
 });
 test("evaluateRow: over K but dated carry-forward → no alarm", () => {
   const r = evaluateRow(
-    { status: "confirmed", confirming: 3, statusCell: "confirmed — carry-forward 2026-07-19: blocked" },
+    { status: "confirmed", confirming: 3, statusCell: "[confirmed] — carry-forward 2026-07-19: blocked" },
     6, 2,
   );
   assert.equal(r.alarm, false);
 });
 test("evaluateRow: confirmed but confirming-milestone unparseable → fail-closed alarm", () => {
-  const r = evaluateRow({ status: "confirmed", confirming: null, statusCell: "confirmed — pending" }, 6, 2);
+  const r = evaluateRow({ status: "confirmed", confirming: null, statusCell: "[confirmed] — pending" }, 6, 2);
   assert.equal(r.alarm, true);
   assert.match(r.reason, /confirming milestone/i);
 });
@@ -149,6 +149,10 @@ test("checkLedger: within-threshold → PASS", () => {
 test("checkLedger: dated-carry-forward → PASS", () => {
   assert.equal(checkLedger(read("dated-carry-forward.md")).verdict, "PASS");
 });
+// M70/D4 RED fixture: bare prose "consolidated (m7)" — old leading-token parser said PASS; [tag] says FAIL
+test("checkLedger: bare-prose-no-tag fixture → FAIL (D4 canonical RED case via fixture file)", () => {
+  assert.equal(checkLedger(read("bare-prose-no-tag.md")).verdict, "FAIL");
+});
 test("checkLedger: milestone_counter read from the ledger's own comment marker", () => {
   const rep = checkLedger(read("over-threshold-unconsolidated-no-carryforward.md"));
   assert.equal(rep.milestoneCounter, 6);
@@ -162,34 +166,38 @@ test("checkLedger: no table AND no counter → N/A (explicit, never silent-skip)
   const rep = checkLedger("# empty ledger\nno rows\n");
   assert.equal(rep.verdict, "N/A");
 });
-// HARDENING end-to-end (must-fix #1): an OVERDUE row phrased "not consolidated yet, still confirmed"
-// must FAIL — not silently PASS by being misread as consolidated.
-test("checkLedger: overdue row with ambiguous 'not consolidated, still confirmed' prose → FAIL (not silent PASS)", () => {
+// STRUCTURED FIELD end-to-end (M70/D4): bare prose status WITHOUT [tag] prefix → FAIL-closed.
+// The structured [tag] rule uniformly rejects ALL non-[tag] status cells, regardless of content.
+test("checkLedger: bare prose 'not consolidated yet, still confirmed' (no [tag]) → FAIL", () => {
   const text =
     "milestone_counter: 40\n\n| insight | origin | confirm | status |\n|---|---|---|---|\n" +
     "| CI≡audit | m1 | confirmed@m3 | not consolidated yet, still confirmed — pending fold |\n";
   const rep = checkLedger(text);
   assert.equal(rep.verdict, "FAIL", JSON.stringify(rep.evaluations));
 });
-// HARDENING end-to-end (re-review's most-damaging case): "not yet fully consolidated" (two qualifier
-// words) must FAIL — it defeated the earlier negation heuristic and silently PASSed.
-test("checkLedger: overdue 'not yet fully consolidated, confirmed@m3' → FAIL (not silent PASS)", () => {
+test("checkLedger: bare prose 'not yet fully consolidated' (no [tag]) → FAIL", () => {
   const text =
     "milestone_counter: 40\n\n| insight | origin | confirm | status |\n|---|---|---|---|\n" +
     "| CI≡audit | m1 | confirmed@m3 | not yet fully consolidated, confirmed@m3 — fold pending |\n";
   assert.equal(checkLedger(text).verdict, "FAIL");
 });
-// HARDENING end-to-end (must-fix #2): an overdue row whose status cell has NO lifecycle keyword must
-// FAIL-closed, not silently PASS via status=null.
-test("checkLedger: data row with a keyword-less status cell → FAIL-closed (not silent PASS)", () => {
+test("checkLedger: bare prose keyword-less status (no [tag]) → FAIL-closed", () => {
   const text =
     "milestone_counter: 40\n\n| insight | origin | confirm | status |\n|---|---|---|---|\n" +
     "| repo-root isolation | m3 | confirmed@m3 | folding into inherited-core still pending |\n";
   const rep = checkLedger(text);
   assert.equal(rep.verdict, "FAIL", JSON.stringify(rep.evaluations));
 });
+// RED (M70/D4 canonical): bare "consolidated (m7)" — old leading-token parser said PASS; [tag] says FAIL
+test("checkLedger: bare 'consolidated (m7)' without [tag] prefix → FAIL (the D4 canonical RED case)", () => {
+  const text =
+    "milestone_counter: 9\n\n| insight | origin | confirm | status |\n|---|---|---|---|\n" +
+    "| CI≡audit | m1 | confirmed@m3 | consolidated (m7) — folded into inherited-core.md |\n";
+  const rep = checkLedger(text);
+  assert.equal(rep.verdict, "FAIL", JSON.stringify(rep.evaluations));
+});
 test("checkLedger: rows present but no milestone_counter derivable → fail-closed", () => {
-  const text = "## Rows\n\n| a | b | c | status |\n|---|---|---|---|\n| x | m1 | confirmed@m3 | confirmed |\n";
+  const text = "## Rows\n\n| a | b | c | status |\n|---|---|---|---|\n| x | m1 | confirmed@m3 | [confirmed] |\n";
   const rep = checkLedger(text);
   assert.equal(rep.verdict, "FAIL");
   assert.match(rep.reason, /milestone_counter/i);

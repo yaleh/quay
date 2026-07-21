@@ -1,10 +1,10 @@
-# V_meta Insight Ledger (fixture: overdue row with a keyword-less status cell → FAIL-closed)
+# V_meta Insight Ledger (fixture: bare prose status, no [tag] prefix → FAIL-closed)
 
 <!--
 milestone_counter: 40
-R5 review must-fix #2 (fail-open): the status cell carries NO non-negated lifecycle word
-(proposed/confirmed/consolidated) at all. rowStatus → null; a data row that cannot be classified must
-FAIL-closed (never silent-skip to PASS), not drop to status=null and pass.
+M70/D4 (ADR-004 structured field): the status cell carries no structured [tag] prefix. rowStatus →
+null → fail-closed ALARM → FAIL. All prose status cells (keyword-less or otherwise) without a
+[consolidated]/[confirmed]/[proposed] leading tag are uniformly rejected.
 -->
 
 ## Rows

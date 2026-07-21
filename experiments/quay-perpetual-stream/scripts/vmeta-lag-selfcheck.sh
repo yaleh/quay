@@ -31,6 +31,10 @@ CASES=(
   "ambiguous-overdue-prose|$FIX/ambiguous-overdue-prose.md|1"
   "keywordless-status|$FIX/keywordless-status.md|1"
   "not-yet-fully-consolidated|$FIX/not-yet-fully-consolidated.md|1"
+  # M70/D4 (ADR-004 structured [tag] field): bare prose "consolidated (m7)" without [tag] → FAIL.
+  # The old leading-token parser would have read this as consolidated (→ PASS); the [tag] rule
+  # rejects it uniformly — the canonical RED fixture for the D4 hard fix.
+  "bare-prose-no-tag|$FIX/bare-prose-no-tag.md|1"
 )
 
 fail=0
