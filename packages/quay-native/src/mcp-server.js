@@ -14,8 +14,12 @@ import { createStore } from "./store.js";
 import { createAdrStore } from "quay/src/adr-store.js";
 import { readManifest } from "./manifest.js";
 
-export async function startMcpServer({ tasksDir, adrDir }) {
-  const store = createStore(tasksDir);
+export async function startMcpServer({ tasksDir, adrDir, defaultStatus }) {
+  // DIR-047: pass the per-provider default_task_status through to the store
+  // (already validated by the caller — see bin/quay-native.js loadDefaultStatus()).
+  // ADR-004 single-source: the store is the one place the creation default is
+  // resolved; the MCP server merely forwards the configured value.
+  const store = createStore(tasksDir, { defaultStatus });
   // ADRs are a SEPARATE kind (adr-store.js), stored in a sibling directory of
   // tasks/ — default to `<parent-of-tasksDir>/adr` when adrDir is not supplied.
   const resolvedAdrDir = adrDir ?? path.join(path.dirname(tasksDir), "adr");
