@@ -553,3 +553,15 @@ m80 · exp5-M-TS-MIGRATION-P3-A · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND ·
 **Charter:** `experiments/quay-perpetual-stream/charters/M81-ts-migration-p3c.md`
 
 m81 · exp5-M-TS-MIGRATION-P3-C · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=c648f11 · → milestones/M81/
+
+
+## SELECT M82 — exp5-M-TS-MIGRATION-P3-B-1
+
+**Selected:** exp5-M-TS-MIGRATION-P3-B-1 — TS migration P3-B-1: quay Core utility modules (10 small files)
+
+**Rationale:** Exploit pick. P3-B was split at SELECT per DIR-026 into 3 children: P3-B-1 (10 small utility files, ~965L), P3-B-2 (gate/ dir, ~1316L), P3-B-3 (serve+mcp, ~1872L). P3-B-1 selected first — all files <200 lines, lowest tsc error risk, clears the path for the larger files in P3-B-2/3. Maintains TS migration momentum through the Core package after P3-A/P3-C.
+
+**Deferred:** P3-B-2 (gate/), P3-B-3 (serve+mcp), P4 (method-infra scripts), DIR-056, DIR-050.
+
+**Task:** [[exp5-M-TS-MIGRATION-P3-B-1]] (`tasks/exp5-M-TS-MIGRATION-P3-B-1.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M82-ts-migration-p3b1.md`
