@@ -606,3 +606,14 @@ m84 · exp5-M-TS-MIGRATION-P3-B-2 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND 
 **Charter:** `experiments/quay-perpetual-stream/charters/M85-ts-migration-p3b3.md`
 
 m85 · exp5-M-TS-MIGRATION-P3-B-3 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=9a2c49e · → milestones/M85/
+
+## SELECT M86 — DIR-056
+
+**Selected:** DIR-056 — probe-spec formalization: replace `dispatch:` magic-string in routines with portable probe specs (`instrument`/`fallback`/`output_routing` + objective body), decoupling WHAT from HOW in the routine track.
+
+**Rationale:** Exploit pick. ADR-012 TS migration closed at M85 (all packages/*/src/ done). DIR-056 is the highest-value next exploit: unlocks the standing routine track by formalizing the probe-spec abstraction that DIR-052/053/055 require. Without it, adding a new routine requires a skill edit; with it, adding a probe = dropping a spec file + a loop.yml line. Bounded scope (routine-scheduler + routine-file-gate + loop-params + new probe specs + vendor sync), LOOP-EXECUTABLE.
+
+**Deferred:** P4 (TS migration method-infra scripts — 5235 lines, needs split at SELECT; deferred to post-M86 when split-or-commit creates children), DIR-050 (config consolidation), CRYST-D3 (human-steered).
+
+**Task:** [[DIR-056]] (`tasks/DIR-056.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M86-dir056-probe-spec.md`
