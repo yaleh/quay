@@ -1,13 +1,17 @@
 ---
 id: exp5-M-TS-MIGRATION-P3-C
 title: "TS migration P3-C: port quay-github package to TypeScript"
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - crystallization
 parent: exp5-M-TS-MIGRATION-P3
 children: []
-extra: {}
+extra:
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-TS-MIGRATION-P3-C
+    experiments/quay-perpetual-stream/charters/M81-ts-migration-p3c.md
+    /tmp/m81-absorb-entry.md
 ---
 ## Context
 
