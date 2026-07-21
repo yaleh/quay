@@ -34,6 +34,28 @@ test("classifyPath: packages/ and plugin/ are PRODUCT; everything else is GOVERN
   assert.equal(classifyPath("adr/ADR-012.md"), "governance");
 });
 
+test("classifyPath: PROSE (.md/.txt) is GOVERNANCE even under packages/ or plugin/ — closes the laundering hole", () => {
+  // DIR-038-B audit finding: parking prose docs under packages/ laundered governance into "product".
+  assert.equal(classifyPath("packages/quay/METHODOLOGY-NOTES.md"), "governance");
+  assert.equal(classifyPath("plugin/docs/RETRO.md"), "governance");
+  assert.equal(classifyPath("packages/quay/src/x.js"), "product"); // real code still product
+  assert.equal(classifyPath("packages/quay/notes.txt"), "governance");
+});
+
+test("anti-laundering: the auditor's attack (8000 prose lines under packages/plugin) still BREACHES", () => {
+  // 8000 lines of prose parked under packages/plugin + 20 code lines against 6249 governance.
+  // Old classifier: ratio 0.78:1 (green). Fixed classifier: prose → governance → still a runaway.
+  const t = sumByClass([
+    { path: "packages/quay/METHODOLOGY-NOTES.md", added: 6000 }, // prose → governance
+    { path: "plugin/docs/RETRO.md", added: 2000 },               // prose → governance
+    { path: "packages/quay/src/real.js", added: 20 },            // code → product
+    { path: "experiments/quay-perpetual-stream/dashboard.md", added: 6249 },
+  ]);
+  assert.equal(t.product, 20);
+  assert.equal(t.governance, 6000 + 2000 + 6249);
+  assert.equal(haltInput(t).halt, true); // laundering no longer dilutes the ratio green
+});
+
 // ── GOLDEN REPLAY — reproduce the recorded ≈8:1 ───────────────────────────────────────────────────
 test("golden: recorded restart window reproduces ≈8.27:1 (6249:756) and BREACHES the 5:1 threshold", () => {
   const t = load("recorded-window.json");

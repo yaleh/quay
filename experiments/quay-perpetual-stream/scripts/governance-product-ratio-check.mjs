@@ -22,10 +22,16 @@ import { fileURLToPath } from "node:url";
 export const DEFAULT_THRESHOLD = 5.0;
 
 // ── classifyPath ─────────────────────────────────────────────────────────────────────────────────
-// PRODUCT = the shippable product (packages/, plugin/). GOVERNANCE = everything else in the method/
-// eval layer (experiments/, docs/, tasks/, adr/, root markdown, …).
+// PRODUCT = shippable product CODE (a non-prose file under packages/ or plugin/). GOVERNANCE =
+// everything else — the method/eval layer AND all PROSE (.md/.txt/…) WHEREVER it lives, INCLUDING
+// under packages/ or plugin/. Classifying by directory alone let prose be laundered into "product" by
+// parking a .md under packages/ (DIR-038-B adversarial-audit finding: the recorded 8:1 runaway
+// collapsed to 0.78:1). So a prose extension is GOVERNANCE regardless of directory — this is a
+// code:prose ratio, not a directory ratio.
+const PROSE_EXT = /\.(md|markdown|txt|rst|adoc)$/i;
 export function classifyPath(p) {
   const s = String(p).replace(/^\.\//, "");
+  if (PROSE_EXT.test(s)) return "governance";                            // prose is governance wherever it lives
   if (s.startsWith("packages/") || s.startsWith("plugin/")) return "product";
   return "governance";
 }
