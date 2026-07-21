@@ -1,0 +1,4 @@
+[
+  { "id": "A", "declaredGlobs": ["pkg/a/**"], "actualFiles": ["pkg/a/x.js", "pkg/OTHER/stray.js"] },
+  { "id": "B", "declaredGlobs": ["pkg/b/**"], "actualFiles": ["pkg/b/z.js"] }
+]
