@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { findConfig, loadConfig, activeProvider } from "../src/config.js";
+import { findConfig, loadConfig, activeProvider } from "../src/config.ts";
 
 let failures = 0;
 function assert(cond, msg) {

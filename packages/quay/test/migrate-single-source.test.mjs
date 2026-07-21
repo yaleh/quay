@@ -19,7 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const migrateSrc = path.join(__dirname, "..", "src", "migrate.js");
+const migrateSrc = path.join(__dirname, "..", "src", "migrate.ts");
 
 test("src/migrate.js has exactly ONE taskWrite(...) call site (single-source native-write)", () => {
   const content = fs.readFileSync(migrateSrc, "utf8");
@@ -62,7 +62,7 @@ test("no OTHER src file in packages/quay/src re-implements a bulk taskList->task
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { walk(full); continue; }
-      if (!entry.name.endsWith(".js")) continue;
+      if (!entry.name.endsWith(".js") && !entry.name.endsWith(".ts")) continue;
       if (full === migrateSrc) continue;
       const content = fs.readFileSync(full, "utf8");
       if (LOOP_WRITE_RE.test(content)) {

@@ -5,11 +5,11 @@
 
 import path from "node:path";
 import fs from "node:fs/promises";
-import { loadConfig, activeProvider } from "../src/config.js";
+import { loadConfig, activeProvider } from "../src/config.ts";
 import { connectProvider } from "../src/provider-client.ts";
-import { composePayload, deliverTrigger } from "../src/action.js";
-import { resolveProviderEnv } from "../src/provider-env.js";
-import { QUAY_VERSION } from "../src/version.js";
+import { composePayload, deliverTrigger } from "../src/action.ts";
+import { resolveProviderEnv } from "../src/provider-env.ts";
+import { QUAY_VERSION } from "../src/version.ts";
 // QENG-1: gate engine + GateEvent log. `gate`/`gate-log` are verb-less
 // top-level commands (see the main() dispatch below and their arg-extraction
 // note). runGate appends one GateEvent per run; runGateLogQuery is read-only.
@@ -30,7 +30,7 @@ import { runOnce, runLoop } from "../src/gate/driver.js";
 // Verb-less-style top-level `migrate` command (no positional task id) —
 // mirrors `run`'s own no-positional-id shape (both scan/act over the whole
 // board, not a single task).
-import { migrateTasks } from "../src/migrate.js";
+import { migrateTasks } from "../src/migrate.ts";
 
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");

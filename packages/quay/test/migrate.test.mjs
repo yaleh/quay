@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { migrateTasks, writeOneTask } from "../src/migrate.js";
+import { migrateTasks, writeOneTask } from "../src/migrate.ts";
 
 function makeFakeSource(tasks) {
   return {

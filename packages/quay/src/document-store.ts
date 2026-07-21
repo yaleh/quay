@@ -1,4 +1,3 @@
-// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay Core: managed-document store ("quay DOCUMENT-MANAGEMENT capability").
 // A "document" is a SEPARATE object kind from both tasks (a Provider's own
 // store) and ADRs (adr-store.js): it is a managed METHOD ARTIFACT (a skill, a
@@ -26,7 +25,7 @@ import {
   fileNameForId,
   withFileLock,
   slugify,
-} from "./frontmatter-store-base.js";
+} from "./frontmatter-store-base.ts";
 
 export const VALID_DOCUMENT_STATUSES = ["draft", "active", "retired"];
 
@@ -36,20 +35,44 @@ const DOCUMENT_ID_RE = /^DOC-\d{3,}$/;
 // preserved verbatim (forward-compat, same discipline as adr-store.js).
 const OWNED_KEYS = new Set(["id", "title", "status", "kind", "contracts"]);
 
+interface DocFrontmatter {
+  [key: string]: unknown;
+  id?: string;
+  title?: string;
+  status?: string;
+  kind?: string;
+  contracts?: unknown[];
+}
+
+interface DocFilter {
+  status?: string;
+  kind?: string;
+}
+
+interface DocViewModel {
+  id: unknown;
+  title: unknown;
+  status: unknown;
+  kind: unknown;
+  contracts: unknown[];
+  body: string;
+  updatedAt?: number;
+}
+
 /**
  * @param {string} docDir absolute path to the managed-documents directory
  */
-export function createDocumentStore(docDir) {
+export function createDocumentStore(docDir: string) {
   fs.mkdirSync(docDir, { recursive: true });
 
-  function assertSafeId(id) {
+  function assertSafeId(id: string) {
     if (typeof id !== "string" || !DOCUMENT_ID_RE.test(id)) {
       throw new Error(`invalid document id ${JSON.stringify(id)}: must match DOC-NNN (>=3 digits)`);
     }
     return id;
   }
 
-  function assertSafeStatus(status) {
+  function assertSafeStatus(status: string | undefined) {
     if (status !== undefined && !VALID_DOCUMENT_STATUSES.includes(status)) {
       throw new Error(
         `invalid document status "${status}" — must be one of ${VALID_DOCUMENT_STATUSES.join(", ")}`
@@ -57,55 +80,61 @@ export function createDocumentStore(docDir) {
     }
   }
 
-  function toViewModel(frontmatter, body, updatedAt) {
-    const vm = {
+  function toViewModel(frontmatter: DocFrontmatter, body: string, updatedAt?: number): DocViewModel {
+    const vm: DocViewModel = {
       id: frontmatter.id,
       title: frontmatter.title,
       status: frontmatter.status,
       kind: frontmatter.kind,
-      contracts: frontmatter.contracts ?? [],
+      contracts: (frontmatter.contracts as unknown[]) ?? [],
       body,
     };
     if (updatedAt !== undefined) vm.updatedAt = updatedAt;
     return vm;
   }
 
-  function get(id) {
+  function get(id: string) {
     assertSafeId(id);
     const file = fileNameForId(docDir, id);
     if (!file) return null;
     const p = path.join(docDir, file);
     const { frontmatter, body } = parseFrontmatter(fs.readFileSync(p, "utf8"));
-    let updatedAt;
+    let updatedAt: number | undefined;
     try {
       updatedAt = fs.statSync(p).mtimeMs;
     } catch { /* omit */ }
-    return toViewModel(frontmatter, body, updatedAt);
+    return toViewModel(frontmatter as DocFrontmatter, body, updatedAt);
   }
 
-  function list(filter = {}) {
+  function list(filter: DocFilter = {}) {
     return fs
       .readdirSync(docDir)
       .filter((f) => f.endsWith(".md") && f.startsWith("DOC-"))
       .map((f) => {
         const { frontmatter, body } = parseFrontmatter(fs.readFileSync(path.join(docDir, f), "utf8"));
-        return toViewModel(frontmatter, body, fs.statSync(path.join(docDir, f)).mtimeMs);
+        return toViewModel(frontmatter as DocFrontmatter, body, fs.statSync(path.join(docDir, f)).mtimeMs);
       })
       .filter((d) => (filter.status ? d.status === filter.status : true))
       .filter((d) => (filter.kind ? d.kind === filter.kind : true))
       .sort((a, b) => String(a.id).localeCompare(String(b.id)));
   }
 
-  function write(id, { title, status, kind, contracts, body }) {
+  function write(id: string, { title, status, kind, contracts, body }: {
+    title?: string;
+    status?: string;
+    kind?: string;
+    contracts?: unknown[];
+    body?: string;
+  }) {
     assertSafeId(id);
     assertSafeStatus(status);
     return withFileLock(docDir, id, () => {
       const existingFile = fileNameForId(docDir, id);
-      let frontmatter = {};
+      let frontmatter: DocFrontmatter = {};
       let existingBody = "";
       if (existingFile) {
         const parsed = parseFrontmatter(fs.readFileSync(path.join(docDir, existingFile), "utf8"));
-        frontmatter = { ...parsed.frontmatter };
+        frontmatter = { ...parsed.frontmatter } as DocFrontmatter;
         existingBody = parsed.body;
       }
       frontmatter.id = id;
@@ -113,7 +142,7 @@ export function createDocumentStore(docDir) {
       frontmatter.status = status ?? frontmatter.status ?? "draft";
       if (kind !== undefined) frontmatter.kind = kind;
       if (contracts !== undefined) frontmatter.contracts = contracts;
-      const ordered = {};
+      const ordered: DocFrontmatter = {};
       for (const k of ["id", "title", "status", "kind", "contracts"]) {
         if (frontmatter[k] !== undefined) ordered[k] = frontmatter[k];
       }

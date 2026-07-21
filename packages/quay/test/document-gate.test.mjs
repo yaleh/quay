@@ -14,7 +14,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { gateRegistry, listGates } from "../src/gate/registry.js";
-import { createDocumentStore } from "../src/document-store.js";
+import { createDocumentStore } from "../src/document-store.ts";
 
 function tmpDocDir(tag) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `quay-doc-gate-${tag}-`));

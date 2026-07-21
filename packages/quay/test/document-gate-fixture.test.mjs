@@ -15,7 +15,7 @@ import fs from "node:fs";
 import os from "node:os";
 
 import { gateRegistry, registerDocumentGate } from "../src/gate/registry.js";
-import { createDocumentStore } from "../src/document-store.js";
+import { createDocumentStore } from "../src/document-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.js");

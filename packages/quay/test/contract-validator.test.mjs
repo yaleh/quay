@@ -4,7 +4,7 @@
 // them). RED-first per ADR-001 (TDD).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateContracts } from "../src/contract-validator.js";
+import { validateContracts } from "../src/contract-validator.ts";
 
 test("no contracts -> ok:true, empty results", () => {
   const doc = { body: "anything" };
