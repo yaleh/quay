@@ -3,7 +3,7 @@
 // exactly one write() call and reports its outcome (success or ConflictError)
 // on stdout as a single JSON line, so the parent test can assert on real
 // process exit codes / stdout, not on in-process simulation.
-import { createStore } from "../src/store.js";
+import { createStore } from "../src/store.ts";
 
 const [, , tasksDir, id, mode] = process.argv;
 const store = createStore(tasksDir);

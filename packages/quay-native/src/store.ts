@@ -1,7 +1,6 @@
-// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay-native core: task store logic (raw file ops).
 // One core implementation, consumed identically by the CLI (bin/quay-native.js)
-// and the MCP server (src/mcp-server.js) — design §6 CLI/MCP symmetry.
+// and the MCP server (src/mcp-server.ts) — design §6 CLI/MCP symmetry.
 //
 // Canonical task view-model (quay-native-design.md §2, quay-proposal.md §7.1):
 //   id, title, status, labels, parent, children  (+ body markdown)
@@ -10,6 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
+import type { Task } from '../../quay/src/abi.ts';
 
 export const VALID_STATUSES = ["todo", "ready", "done", "needs-human"];
 
@@ -23,7 +23,7 @@ export const VALID_STATUSES = ["todo", "ready", "done", "needs-human"];
  * @returns {string} the value, confirmed valid
  * @throws {Error} when value is not in VALID_STATUSES
  */
-export function resolveDefaultStatus(value) {
+export function resolveDefaultStatus(value: string): string {
   if (!VALID_STATUSES.includes(value)) {
     throw new Error(
       `invalid default_task_status "${value}" — must be one of ${VALID_STATUSES.join(", ")}`
@@ -41,7 +41,10 @@ export function resolveDefaultStatus(value) {
  * than parsing an error message string.
  */
 export class ConflictError extends Error {
-  constructor(id, expectedStatus, actualStatus) {
+  id: string;
+  expectedStatus: string | null | undefined;
+  actualStatus: string | null;
+  constructor(id: string, expectedStatus: string | null | undefined, actualStatus: string | null) {
     super(
       `CAS conflict on ${id}: expected status "${expectedStatus}" but ` +
         `actual current status is "${actualStatus}" — another writer changed ` +
@@ -65,7 +68,7 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
  *   Omit or pass undefined to preserve the original "todo" fallback (ADR-004:
  *   single-source — this is the ONE place the creation default is resolved).
  */
-export function createStore(tasksDir, opts) {
+export function createStore(tasksDir: string, opts?: { defaultStatus?: string }) {
   const storeDefaultStatus = opts?.defaultStatus ?? "todo";
   fs.mkdirSync(tasksDir, { recursive: true });
 
@@ -245,8 +248,8 @@ export function createStore(tasksDir, opts) {
   // (one fs.statSync on the already-located file) and consistent with list()'s
   // own mtime inclusion. Gate checks, childrenStatus, and other internal callers
   // already ignore unknown fields so no behavioral regression results.
-  /** @returns {object|null} the task view-model, or null if not found */
-  function get(id) {
+  /** @returns the task view-model, or null if not found */
+  function get(id: string): (Task & { updatedAt?: number }) | null {
     const raw = readRaw(id);
     if (raw === null) return null;
     const { frontmatter, body } = parse(raw);
@@ -261,18 +264,18 @@ export function createStore(tasksDir, opts) {
     return toViewModel(frontmatter, body, updatedAt);
   }
 
-  function toViewModel(frontmatter, body, updatedAt) {
-    const children = frontmatter.children ?? [];
-    const vm = {
-      id: frontmatter.id,
-      title: frontmatter.title,
-      status: frontmatter.status,
-      labels: frontmatter.labels ?? [],
-      parent: frontmatter.parent ?? null,
+  function toViewModel(frontmatter: Record<string, unknown>, body: string, updatedAt?: number): Task & { updatedAt?: number } {
+    const children = (frontmatter.children as string[] | undefined) ?? [];
+    const vm: Task & { updatedAt?: number } = {
+      id: frontmatter.id as string,
+      title: frontmatter.title as string,
+      status: frontmatter.status as Task['status'],
+      labels: (frontmatter.labels as string[] | undefined) ?? [],
+      parent: (frontmatter.parent as string | null | undefined) ?? null,
       children,
       // role is derived, never stored (design §2): children non-empty => compound
-      role: children.length > 0 ? "compound" : "primitive",
-      extra: frontmatter.extra ?? {},
+      role: (children.length > 0 ? "compound" : "primitive") as Task['role'],
+      extra: (frontmatter.extra as Record<string, unknown> | undefined) ?? {},
       body,
     };
     // QX-008 (experiment 4, iteration 2): include updatedAt (file mtime as ms
@@ -334,7 +337,7 @@ export function createStore(tasksDir, opts) {
     });
   }
 
-  function list(filter = {}) {
+  function list(filter: { status?: string; label?: string } = {}): (Task & { updatedAt?: number })[] {
     // QX-008 (experiment 4, iteration 2): include updatedAt (file mtime in ms)
     // on each task in list results. This lets CLI (--sort updated) and Web UI
     // (?sort=updated) sort by recency without needing a separate fs.stat call
@@ -457,7 +460,7 @@ export function createStore(tasksDir, opts) {
    * only ordinary last-writer-wins sequencing (identical to every other
    * field this store already handles).
    */
-  function write(id, { title, status, labels, parent, children, extra, body, expectedStatus }) {
+  function write(id: string, { title, status, labels, parent, children, extra, body, expectedStatus }: { title?: string; status?: string; labels?: string[]; parent?: string | null; children?: string[]; extra?: Record<string, unknown>; body?: string; expectedStatus?: string }): (Task & { updatedAt?: number }) | null {
     if (status && !VALID_STATUSES.includes(status)) {
       throw new Error(
         `invalid status "${status}" — must be one of ${VALID_STATUSES.join(", ")}`
@@ -476,7 +479,7 @@ export function createStore(tasksDir, opts) {
     // (the same store.js core, design §6) never interleave on the same file.
     return withLocks(lockIds, () => {
       const existingRaw = readRaw(id);
-      let frontmatter = { id, title, status, labels: labels ?? [], parent: parent ?? null, children: children ?? [] };
+      let frontmatter: Record<string, unknown> = { id, title, status, labels: labels ?? [], parent: parent ?? null, children: children ?? [] };
       let existingBody = "";
       if (existingRaw !== null) {
         const parsed = parse(existingRaw);
@@ -487,7 +490,7 @@ export function createStore(tasksDir, opts) {
         // status before acquiring the lock (or in a separate call) would
         // reopen exactly the TOCTOU race this option exists to close.
         if (expectedStatus !== undefined && frontmatter.status !== expectedStatus) {
-          throw new ConflictError(id, expectedStatus, frontmatter.status);
+          throw new ConflictError(id, expectedStatus, frontmatter.status as string | null);
         }
         if (title !== undefined) frontmatter.title = title;
         if (status !== undefined) frontmatter.status = status;
@@ -538,7 +541,7 @@ export function createStore(tasksDir, opts) {
     });
   }
 
-  function appendNote(id, note) {
+  function appendNote(id: string, note: string): (Task & { updatedAt?: number }) | null {
     // appendNote's own read-modify-write goes through write()'s lock too,
     // but the read of current body must ALSO be inside the lock to avoid a
     // lost-update race between the read here and write()'s internal read.
@@ -605,7 +608,7 @@ export function createStore(tasksDir, opts) {
    * (design §3). Returns a structured result; does not mutate status itself
    * (mutation is a separate `edit --status` call by the Skill/human).
    */
-  function check(id) {
+  function check(id: string): Record<string, unknown> {
     const t = get(id);
     if (!t) return { id, ok: false, reason: "not found" };
     const artifacts = artifactSections(t.body);
@@ -697,7 +700,7 @@ export function createStore(tasksDir, opts) {
       } else {
         reason = "all AC checkboxes checked; eligible to move to done";
       }
-      const result = {
+      const result: Record<string, unknown> = {
         id,
         gate: "execute->done",
         ok,
@@ -732,7 +735,7 @@ export function createStore(tasksDir, opts) {
           childrenStatus: kids,
         };
       }
-      const result = { id, gate: "none", ok: true, reason: "terminal" };
+      const result: Record<string, unknown> = { id, gate: "none", ok: true, reason: "terminal" };
       if (t.role === "compound") result.childrenStatus = kids;
       return result;
     }

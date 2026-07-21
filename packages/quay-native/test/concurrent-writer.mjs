@@ -1,7 +1,7 @@
 // Helper process spawned by test/lock.test.mjs — writes a patch to one task
 // id, `runs` times, with a small yield between iterations to encourage
 // interleaving with a concurrently-running sibling process (QN-006 AC#2).
-import { createStore } from "../src/store.js";
+import { createStore } from "../src/store.ts";
 
 const [, , tasksDir, id, label, runsArg] = process.argv;
 const runs = Number(runsArg ?? 5);

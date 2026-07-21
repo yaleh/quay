@@ -4,7 +4,7 @@
 // concurrent-reparent test exercises the actual multi-file lock path
 // (withLocks()) across real process boundaries, not an in-process
 // simulation.
-import { createStore } from "../src/store.js";
+import { createStore } from "../src/store.ts";
 
 const [, , tasksDir, childId, newParentId] = process.argv;
 const store = createStore(tasksDir);

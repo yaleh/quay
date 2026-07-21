@@ -19,7 +19,7 @@ import { execFileSync } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-import { createStore, resolveDefaultStatus } from "../src/store.js";
+import { createStore, resolveDefaultStatus } from "../src/store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const binPath = path.join(__dirname, "..", "bin", "quay-native.js");
