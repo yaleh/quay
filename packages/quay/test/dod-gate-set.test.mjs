@@ -16,7 +16,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { loadWorkspaceGates, listGates } from "../src/gate/registry.js";
+import { loadWorkspaceGates, listGates } from "../src/gate/registry.ts";
 
 function tmpWorkspace(tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-dodgateset-${tag}-`));

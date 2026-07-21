@@ -20,10 +20,10 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { appendGateEvent, queryGateEvents } from "../src/gate/gate-event-store.js";
-import { gateRegistry, listGates } from "../src/gate/registry.js";
-import { runGate } from "../src/gate/engine.js";
-import { resolveGateLogPath, runGateLogQuery, DEFAULT_GATE_LOG_RELATIVE_PATH } from "../src/gate/gate-log.js";
+import { appendGateEvent, queryGateEvents } from "../src/gate/gate-event-store.ts";
+import { gateRegistry, listGates } from "../src/gate/registry.ts";
+import { runGate } from "../src/gate/engine.ts";
+import { resolveGateLogPath, runGateLogQuery, DEFAULT_GATE_LOG_RELATIVE_PATH } from "../src/gate/gate-log.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.js");

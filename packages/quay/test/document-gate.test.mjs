@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { gateRegistry, listGates } from "../src/gate/registry.js";
+import { gateRegistry, listGates } from "../src/gate/registry.ts";
 import { createDocumentStore } from "../src/document-store.ts";
 
 function tmpDocDir(tag) {
@@ -34,7 +34,7 @@ test("D1: listGates() includes at least one real doc-<id> gate", () => {
 
 test("D1: doc-<id> gate fails-closed when the document does not exist", async () => {
   const dir = tmpDocDir("missing");
-  const { makeDocumentContractGate } = await import("../src/gate/registry.js");
+  const { makeDocumentContractGate } = await import("../src/gate/registry.ts");
   // makeDocumentContractGate isn't exported by name (mirrors makeAdrGate, which
   // is also unexported) — so this test instead proves the underlying store
   // behavior the factory depends on: a missing doc resolves to null.
@@ -70,7 +70,7 @@ test("D1: a registered doc-<id> gate PASSes for a conforming document (real fixt
   // "simulate the factory against a fixture dir" pattern for fail-closed cases;
   // here it is the SAME logic exercised via a dynamically-registered gate name
   // to prove the wiring, not just the store/validator in isolation).
-  const { registerDocumentGate } = await import("../src/gate/registry.js");
+  const { registerDocumentGate } = await import("../src/gate/registry.ts");
   registerDocumentGate("doc-fixture-pass", dir, "DOC-100");
   const r = await gateRegistry["doc-fixture-pass"]({ id: "T" });
   assert.equal(r.ok, true, `expected pass; got reason=${r.reason}`);
@@ -87,7 +87,7 @@ test("D1: a registered doc-<id> gate FAILs for a violating document (real fixtur
     contracts: [{ target: "self", type: "grep", pattern: "never overwrite", description: "d1" }],
   });
 
-  const { registerDocumentGate } = await import("../src/gate/registry.js");
+  const { registerDocumentGate } = await import("../src/gate/registry.ts");
   registerDocumentGate("doc-fixture-fail", dir, "DOC-101");
   const r = await gateRegistry["doc-fixture-fail"]({ id: "T" });
   assert.equal(r.ok, false);
@@ -105,7 +105,7 @@ test("D1: a doc-<id> gate fails-closed for a doc with malformed contracts", asyn
     contracts: [{ target: "self", type: "regex-magic", pattern: "x" }],
   });
 
-  const { registerDocumentGate } = await import("../src/gate/registry.js");
+  const { registerDocumentGate } = await import("../src/gate/registry.ts");
   registerDocumentGate("doc-fixture-malformed", dir, "DOC-102");
   const r = await gateRegistry["doc-fixture-malformed"]({ id: "T" });
   assert.equal(r.ok, false);

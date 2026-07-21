@@ -14,7 +14,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { gateRegistry, registerDocumentGate } from "../src/gate/registry.js";
+import { gateRegistry, registerDocumentGate } from "../src/gate/registry.ts";
 import { createDocumentStore } from "../src/document-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

@@ -17,39 +17,46 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-/**
- * @typedef {Object} GateEvent
- * @property {string} id          uuid/random per run
- * @property {string} item_id     task id
- * @property {string} pipeline_id task id (single-pipeline v0) — filter key
- * @property {string} gate        gate name, e.g. "dod"
- * @property {string} actor       who ran it (default "quay-cli")
- * @property {string} verdict     "pass" | "fail"
- * @property {string} timestamp   ISO 8601
- * @property {unknown} payload    opaque: { reason, ... }; engine never matches on it
- */
+export interface GateEvent {
+  /** uuid/random per run */
+  id: string;
+  /** task id */
+  item_id: string;
+  /** task id (single-pipeline v0) — filter key */
+  pipeline_id: string;
+  /** gate name, e.g. "dod" */
+  gate: string;
+  /** who ran it (default "quay-cli") */
+  actor: string;
+  /** "pass" | "fail" */
+  verdict: string;
+  /** ISO 8601 */
+  timestamp: string;
+  /** opaque: { reason, ... }; engine never matches on it */
+  payload: unknown;
+}
 
-/**
- * @typedef {Object} GateEventFilter
- * @property {string=} pipeline_id
- * @property {string=} gate
- * @property {string=} actor
- * @property {string=} since  inclusive lower bound on `timestamp` (ISO 8601 string compare)
- * @property {string=} until  inclusive upper bound on `timestamp` (ISO 8601 string compare)
- * @property {number=} limit  max events to return, applied after `offset`
- * @property {number=} offset number of matching events to skip, in log order
- */
+export interface GateEventFilter {
+  pipeline_id?: string;
+  gate?: string;
+  actor?: string;
+  /** inclusive lower bound on `timestamp` (ISO 8601 string compare) */
+  since?: string;
+  /** inclusive upper bound on `timestamp` (ISO 8601 string compare) */
+  until?: string;
+  /** max events to return, applied after `offset` */
+  limit?: number;
+  /** number of matching events to skip, in log order */
+  offset?: number;
+}
 
 /**
  * Append `event` to the log at `logPath`. Append-only: there is no exported
  * update/delete/rewrite. A repeated call (even with a reused `id`) only ever
  * adds a new line — it can never alter or remove a previously written line.
  * Parent directories are created as needed.
- *
- * @param {string} logPath
- * @param {GateEvent} event
  */
-export function appendGateEvent(logPath, event) {
+export function appendGateEvent(logPath: string, event: GateEvent): void {
   const dir = dirname(logPath);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -61,14 +68,10 @@ export function appendGateEvent(logPath, event) {
  * Read + filter + paginate events from the log at `logPath`. A missing file
  * yields `[]`. Filters are AND-combined. Pagination (`offset`/`limit`) applies
  * after filtering, in on-disk (append) order.
- *
- * @param {string} logPath
- * @param {GateEventFilter} [filter]
- * @returns {GateEvent[]}
  */
-export function queryGateEvents(logPath, filter = {}) {
+export function queryGateEvents(logPath: string, filter: GateEventFilter = {}): GateEvent[] {
   if (!existsSync(logPath)) return [];
-  const events = readFileSync(logPath, "utf8")
+  const events: GateEvent[] = readFileSync(logPath, "utf8")
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => JSON.parse(line));

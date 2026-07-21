@@ -5,25 +5,24 @@
 // log-path drift). Never appends.
 
 import path from "node:path";
-import { queryGateEvents } from "./gate-event-store.js";
+import { queryGateEvents, type GateEvent } from "./gate-event-store.ts";
 
 /** Default gate-event log location, relative to the workspace root. */
 export const DEFAULT_GATE_LOG_RELATIVE_PATH = path.join(".quay", "gate-events.jsonl");
 
-/**
- * @typedef {Object} GateLogQueryOptions
- * @property {string=} file  explicit log path; overrides the default
- * @property {string=} pipelineId
- * @property {string=} gate
- * @property {string=} actor
- * @property {string=} since
- * @property {string=} until
- * @property {string|number=} limit
- * @property {string|number=} offset
- */
+export interface GateLogQueryOptions {
+  /** explicit log path; overrides the default */
+  file?: string;
+  pipelineId?: string;
+  gate?: string;
+  actor?: string;
+  since?: string;
+  until?: string;
+  limit?: string | number;
+  offset?: string | number;
+}
 
-/** @param {string|number|undefined} value */
-function toInt(value) {
+function toInt(value: string | number | undefined): number | undefined {
   if (value === undefined) return undefined;
   const parsed = typeof value === "number" ? value : Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : undefined;
@@ -32,24 +31,16 @@ function toInt(value) {
 /**
  * Resolve the log path: `opts.file` if set, else
  * `<workspaceRoot>/.quay/gate-events.jsonl`.
- *
- * @param {string} workspaceRoot
- * @param {GateLogQueryOptions} [opts]
- * @returns {string}
  */
-export function resolveGateLogPath(workspaceRoot, opts = {}) {
+export function resolveGateLogPath(workspaceRoot: string, opts: GateLogQueryOptions = {}): string {
   if (opts.file) return opts.file;
   return path.join(workspaceRoot, DEFAULT_GATE_LOG_RELATIVE_PATH);
 }
 
 /**
  * Run a read-only gate-event query. Pure pass-through onto `queryGateEvents`.
- *
- * @param {string} workspaceRoot
- * @param {GateLogQueryOptions} [opts]
- * @returns {import("./gate-event-store.js").GateEvent[]}
  */
-export function runGateLogQuery(workspaceRoot, opts = {}) {
+export function runGateLogQuery(workspaceRoot: string, opts: GateLogQueryOptions = {}): GateEvent[] {
   return queryGateEvents(resolveGateLogPath(workspaceRoot, { file: opts.file }), {
     pipeline_id: opts.pipelineId,
     gate: opts.gate,
