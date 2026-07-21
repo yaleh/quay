@@ -6,7 +6,7 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import { loadConfig, activeProvider } from "../src/config.js";
-import { connectProvider } from "../src/provider-client.js";
+import { connectProvider } from "../src/provider-client.ts";
 import { composePayload, deliverTrigger } from "../src/action.js";
 import { resolveProviderEnv } from "../src/provider-env.js";
 import { QUAY_VERSION } from "../src/version.js";

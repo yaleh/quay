@@ -14,7 +14,7 @@
 import http from "node:http";
 import path from "node:path";
 import { loadConfig, activeProvider } from "./config.js";
-import { connectProvider } from "./provider-client.js";
+import { connectProvider } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.js";
 
 function html(strings, ...values) {
