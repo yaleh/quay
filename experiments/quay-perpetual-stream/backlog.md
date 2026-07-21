@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-CRYST-B4 | B4 Migrate existing tasks to the canonical schema (or forward-only + validator flags legacy) | DONE | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-E2 | E2 Extract ADRs from proposals + DIR tasks (single-source DIR-002→028, split-or-commit DIR-026, single-branch DIR-027, proposal→plan DIR-014, AC/DoD-in-task DIR-020, QENG, Provider ABI, ...) | DONE | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-B6-VALIDATOR-COVERAGE | B6 Validator coverage: assert directive Finding/Requested-action; document semantic-emptiness non-goal (review C1) | DONE | - | milestone-candidate, crystallization |
 | exp5-M-CRYST-B5-PARSER-UNIFY | B5 [subtractive] Unify the parser fork: regenerate-backlog-view.mjs imports the canonical extractSection (review C2) | DONE | - | milestone-candidate, crystallization |
@@ -72,7 +73,6 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| exp5-M-CRYST-B4 | B4 Migrate existing tasks to the canonical schema (or forward-only + validator flags legacy) | open | - | milestone-candidate, crystallization |
 | DIR-048 | Dispatched-execution + adversarial-audit BY DEFAULT for the portable loop-driver (LOOP-EXECUTABLE): make the two-layer model the default — each iterate build runs in a fresh background subagent and is verified by an independent fresh-context auditor before land — via `.quay/loop.yml` keys `execution: dispatched|inline` (default dispatched) and `audit: adversarial|none` (default adversarial); inline/none is an explicit opt-OUT escape hatch, not the default. The two-layer capability exp5 has in OUTER-LOOP.md, now the default for every consumer (surfaced by the archguard dogfood, where the whole iterate ran inline with no independent audit) | open | - | directive, milestone-candidate |
 | exp5-M-CRYST-D4-LEDGER-STRUCTURED-STATUS | D4 [hard-fix] Structured V_meta-ledger status field — retire the prose status parser (ADR-004; closes R5's prose-parsing residual) | open | - | milestone-candidate, crystallization |
 | exp5-M-TS-MIGRATION-P1 | TS migration P1 (leaf modules, ADR-012): port pure-logic leaf modules (task-schema, provider-client, gate registry — no wide product-code rewrite yet) to real .ts, behavior-preserving + golden-diff. Loop-executable, human-authorized slice of exp5-M-TS-MIGRATION, phase 2 of 5 (P0 done). | open | - | milestone-candidate, crystallization |
@@ -88,4 +88,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_81 milestone-candidate task(s) as of 2026-07-21T06:51:03.027Z._
+_81 milestone-candidate task(s) as of 2026-07-21T06:57:06.729Z._

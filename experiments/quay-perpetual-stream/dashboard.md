@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 72** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 73** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -6367,3 +6367,21 @@ Initial build missed updating `plugin/scripts/task-schema.mjs` — dual-source v
 **Rationale:** Only remaining non-human-steered milestone candidate. B4 is a close-out verification: the forward-only grandfather approach is already implemented (all tasks report PASS or EXPLICIT N/A-legacy; 0 FAILs; checkNoScaffolding passes on all schema-marked tasks). The milestone verifies the sweep output, formally documents the grandfather decision, and ticks the task closed. LOOP-EXECUTABLE.
 
 **Deferred:** D2, F1 (human-steered).
+
+---
+## M73 ABSORB — exp5-M-CRYST-B4
+
+**Milestone:** M73 · **Task:** exp5-M-CRYST-B4 · **Status:** done  
+**Commit:** (M73 MERGE) · **Type:** crystallization/administrative · **VT Δ:** 0
+
+### What landed
+- `tasks/exp5-M-CRYST-B4.md`: forward-only grandfather formally adopted; Resolution section documents decision + full 54-line PASS sweep output (each with "schema v1 conformant" verdict proving A1-A7 including A6 checkNoScaffolding); all 4 AC/DoD boxes ticked [x]
+- Sweep result: 291 total, 54 PASS (schema v1), 237 N/A-legacy-explicit, 0 FAIL — board schema-consistent; no retroactive migration of 200+ legacy done/archived tasks
+- B3 wiring ensures all future SELECTed tasks carry `schema: v1` at dispatch time (forward-only self-heals)
+
+### Audit: initial REFUTATION FOUND → outer-loop fix applied → NO REFUTATION FOUND
+Initial build: Resolution section contained only summary footer ("291 total, 54 pass, 237 N/A-legacy, 0 fail") without granular per-file PASS lines. Auditor: a forensic reviewer cannot independently verify A6 (checkNoScaffolding) from a summary alone — each PASS line must show "schema v1 conformant" to prove the 7-assertion chain ran per task. Fix: outer loop pasted full 54-line PASS output into Resolution section. Post-fix audit: NO REFUTATION FOUND.
+
+| ID | Title | Type | VT Δ |
+|---|---|---|---|
+| exp5-M-CRYST-B4 | B4 task schema forward-only grandfather close-out | crystallization/administrative | 0 |
