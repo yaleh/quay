@@ -23,9 +23,12 @@ set -u
 
 CAP=1200
 
-# Default: resolve relative to script location (repo root = two levels up from scripts/).
+# Default: resolve relative to script location. scripts/ sits three levels below the repo
+# root: <repo>/experiments/quay-perpetual-stream/scripts/ → ../../.. is <repo>.
+# (Was ../../../.. — one level too many, resolving to the repo's PARENT, so the default
+# dashboard path was never found and the gate errored (exit 2) instead of measuring. DIR-054 fix.)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 DEFAULT_DASHBOARD="$REPO_ROOT/experiments/quay-perpetual-stream/dashboard.md"
 
 DASHBOARD="${1:-$DEFAULT_DASHBOARD}"

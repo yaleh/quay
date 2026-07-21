@@ -3,9 +3,11 @@
 # line-budget gate (DIR-054 / M78).
 #
 # EXTERNAL acceptance predicate — does NOT trust the gate's self-report. Runs
-# it0-dashboard-line-budget-check.sh against two synthetic fixtures:
+# it0-dashboard-line-budget-check.sh against two synthetic fixtures + the real default path:
 #   - over-cap fixture (>1200 lines) → MUST exit non-zero (RED)
 #   - under-cap fixture (<1200 lines) → MUST exit 0 (GREEN)
+#   - no-arg invocation → MUST locate the real dashboard (NOT exit 2 file-not-found) — guards the
+#     REPO_ROOT off-by-one that made the gate error out instead of measuring (DIR-054 regression).
 #
 # DIR-019 discipline: if a fixture behaves wrong, the fix belongs in
 # it0-dashboard-line-budget-check.sh, NOT in the fixtures.
@@ -63,9 +65,21 @@ else
   fail=1
 fi
 
+# DEFAULT-PATH check: no-arg invocation MUST resolve to the real dashboard via the script's own
+# location (SCRIPT_DIR), NOT error out. exit 2 here = REPO_ROOT resolution is broken and the gate
+# never measures the real dashboard (the DIR-054 off-by-one this guards against).
+"$CHECK" > /dev/null 2>&1
+default_exit=$?
+if [ "$default_exit" -ne 2 ]; then
+  echo "PASS (DEFAULT-PATH): no-arg invocation located the real dashboard (exit $default_exit, not file-not-found)"
+else
+  echo "FAIL (DEFAULT-PATH): no-arg invocation could not find the dashboard (exit 2) — REPO_ROOT resolution is broken; the gate never measures the real dashboard, so the budget is unenforced"
+  fail=1
+fi
+
 echo
 if [ "$fail" = 0 ]; then
-  echo "PASS: both dashboard line-budget fixtures behaved as asserted (RED+GREEN)."
+  echo "PASS: dashboard line-budget fixtures + default-path all behaved as asserted (RED+GREEN+DEFAULT-PATH)."
   exit 0
 else
   echo "FAIL: at least one fixture did not behave as asserted (see above)."
