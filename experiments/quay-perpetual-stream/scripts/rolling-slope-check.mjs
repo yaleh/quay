@@ -9,9 +9,13 @@
 // qualifying-only artifact is 22.82/6 = 3.803. This module reproduces both from a recorded Δv
 // sequence and feeds the ROLLING one (not 3.80) to the halt evaluation.
 //
-// NON-WAIVABLE monotonicity guardrail (DIR-038 anti-gaming): the honest rolling slope must NEVER
-// exceed the qualifying-only slope — retiring an inflated denominator can only LOWER or hold the
-// number, never raise it. A re-based ruler that scores the loop BETTER is presumptively gaming.
+// NON-WAIVABLE monotonicity guardrail (DIR-038 anti-gaming): a re-based ruler that scores the loop
+// BETTER (a HIGHER slope, less likely to halt) than the retired qualifying-only figure is presumptively
+// gaming. The guard is `honestNotInflated` and it FAILS-LOUD (CLI exit 1) whenever the rolling slope
+// exceeds the qualifying-only slope. NOTE (per the DIR-038-A adversarial audit): this is NOT a
+// structural identity — rolling (last-K incl. zeros) and qualifying (all nonzero) average DIFFERENT
+// subsets, so `rolling > qualifying` is arithmetically possible for some sequences; the guard exists
+// precisely to CATCH those and flag them, not because the inequality holds by construction.
 //
 // Pure functions are exported and unit-tested; `main()` is a thin CLI over them.
 
