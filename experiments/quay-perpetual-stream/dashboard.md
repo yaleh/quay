@@ -1,10 +1,11 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 69** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 70** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
-65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below). -->
+65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
+70 % 5 == 0 — CHECKPOINT DUE (cp-66 written at M70 ABSORB). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -6278,3 +6279,23 @@ Initial build missed updating `plugin/scripts/task-schema.mjs` — dual-source v
 **Rationale:** `hard-fix` label — the V_meta-lag check currently parses status from free prose via a fail-closed leading-token parser (an INTERIM fix). The hard fix (ADR-004 Π_{S→E}: hard over soft) is a structured machine-readable status field in `v-meta-ledger.md`, read directly by `vmeta-lag-check.mjs`, fail-closed on any non-conforming row. Removes a class of prose-parsing fragility. LOOP-EXECUTABLE, no driver mutation.
 
 **Deferred:** exp5-M-CRYST-B4 (task migration sweep, no urgency signal); exp5-M-CRYST-E2 (ADR authoring, documentation work); DIR-038/DIR-044 (human-steered driver-rewrite class).
+
+---
+## M70 ABSORB — exp5-M-CRYST-D4-LEDGER-STRUCTURED-STATUS
+
+**Milestone:** M70 · **Task:** exp5-M-CRYST-D4-LEDGER-STRUCTURED-STATUS · **Status:** done  
+**Commit:** ea3b978 · **Type:** hard-fix/governance-integrity · **VT Δ:** 0
+
+### What landed
+- `v-meta-ledger.md`: structured status field added — each status cell MUST start with `[consolidated]`, `[confirmed]`, or `[proposed]` (optionally bold-wrapped); format documented in Schema section; both existing rows migrated
+- `vmeta-lag-check.mjs`: `rowStatus()` rewritten to parse ONLY the `[tag]` format (regex `^\*{0,2}\[(consolidated|confirmed|proposed)\]\*{0,2}`); old `QUALIFIER_AFTER`/`NOTE_DELIM` leading-token heuristic retired; fail-closed on non-conforming cells
+- New RED fixture `fixtures/vmeta/bare-prose-no-tag.md`: bare `consolidated (m7)` (old parser PASSed; new parser FAILs — canonical D4 proof case)
+- All 8 vmeta-lag fixtures green; 37/37 vmeta-lag tests pass; 40/40 DoD check tests pass
+- `dir022-remaining-gates.test.mjs`: updated fixture emitter to `**[confirmed]**`/`**[consolidated]**`; 18/18 pass
+- ADR-004 cited 3× in module header/comments; R5 prose-parsing residual explicitly closed
+
+### Audit: NO REFUTATION FOUND — clean pass
+
+| ID | Title | Type | VT Δ |
+|---|---|---|---|
+| exp5-M-CRYST-D4-LEDGER-STRUCTURED-STATUS | D4 structured [tag] ledger status field; retire prose parser | hard-fix/governance-integrity | 0 |
