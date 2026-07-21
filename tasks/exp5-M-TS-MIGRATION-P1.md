@@ -1,27 +1,32 @@
 ---
 id: exp5-M-TS-MIGRATION-P1
 title: "TS migration P1 (leaf modules, ADR-012): port pure-logic leaf modules
-  (task-schema, provider-client, gate registry — no wide product-code
-  rewrite yet) to real .ts, behavior-preserving + golden-diff. Loop-executable,
+  (task-schema, provider-client, gate registry — no wide product-code rewrite
+  yet) to real .ts, behavior-preserving + golden-diff. Loop-executable,
   human-authorized slice of exp5-M-TS-MIGRATION, phase 2 of 5 (P0 done)."
 status: todo
 labels:
   - milestone-candidate
   - crystallization
+  - milestone:M-77
 parent: exp5-M-TS-MIGRATION
 children: []
 extra:
   schema: v1
   authorized: "2026-07-21 (human): P1 approved for autonomous SELECT, per the
     parent's phased split-or-commit plan (DIR-026) — 'approve execution of
-    exp5-M-TS-MIGRATION' read as authorizing the next phase, matching the
-    P0 authorization pattern (each phase authorized separately after the
-    prior lands). Scope is LEAF PURE-LOGIC MODULES ONLY — see Proposal for
-    the exact file list. NOT authorized: any change to the Provider ABI
-    surface, CLI argument parsing, MCP tool wiring, or web UI code — those
-    stay human-steered pending separate authorization (P2+). Behavior-
-    preserving + golden-diff discipline (ADR-012) applies; the tsc --noEmit
-    gate (wired at P0) MUST stay GREEN throughout."
+    exp5-M-TS-MIGRATION' read as authorizing the next phase, matching the P0
+    authorization pattern (each phase authorized separately after the prior
+    lands). Scope is LEAF PURE-LOGIC MODULES ONLY — see Proposal for the exact
+    file list. NOT authorized: any change to the Provider ABI surface, CLI
+    argument parsing, MCP tool wiring, or web UI code — those stay human-steered
+    pending separate authorization (P2+). Behavior-preserving + golden-diff
+    discipline (ADR-012) applies; the tsc --noEmit gate (wired at P0) MUST stay
+    GREEN throughout."
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-TS-MIGRATION-P1
+    experiments/quay-perpetual-stream/charters/M77-ts-migration-p1.md
+    /tmp/m77-absorb-entry.md
 ---
 ## Proposal
 Phase 2 of [[exp5-M-TS-MIGRATION]] / ADR-012 — the second loop-executable slice, human-authorized 2026-07-21. P0 (`exp5-M-TS-MIGRATION-P0`, DONE at M63) established the tooling (tsconfig, `tsc --noEmit` gate, Node 25 native `.ts` run path, `.ts` under `node --test`) without touching product code. P1 spends that tooling on the **lowest-risk, most self-contained** files — pure-logic leaf modules with few/no internal importers, matching the parent's own P1 framing ("pure-logic first"):

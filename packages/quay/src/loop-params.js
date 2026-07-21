@@ -36,7 +36,7 @@ const VALID_AUDIT = new Set(["adversarial", "none"]);
  * Throws Error("FAIL-CLOSED: ...") on any validation failure.
  *
  * @param {string} workspaceRoot
- * @returns {{ board: string, gates: string[], stop: string, policy: string, coexist: string|null, execution: string, audit: string }}
+ * @returns {{ board: string, gates: string[], stop: string, policy: string, coexist: string|null, execution: string, audit: string, concurrency: number, routines: Array<object> }}
  */
 export function readLoopParams(workspaceRoot) {
   const loopYmlPath = path.join(workspaceRoot, ".quay", "loop.yml");
