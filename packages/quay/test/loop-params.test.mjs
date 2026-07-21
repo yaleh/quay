@@ -120,6 +120,9 @@ test("GREEN: minimal valid params (board + gates as array)", () => {
   assert.equal(params.stop, "once");
   assert.equal(params.policy, "ready-first");
   assert.equal(params.coexist, null);
+  // DIR-048 new defaults
+  assert.equal(params.execution, "dispatched");
+  assert.equal(params.audit, "adversarial");
 });
 
 test("GREEN: minimal valid params (board + gates as string)", () => {
@@ -191,4 +194,108 @@ test("GREEN: archguard params shape", () => {
   assert.equal(params.stop, "once");
   assert.equal(params.policy, "ready-first");
   assert.equal(params.coexist, "pause(backlog/.loop-stop)");
+  // DIR-048: new defaults present even when not specified
+  assert.equal(params.execution, "dispatched");
+  assert.equal(params.audit, "adversarial");
+});
+
+// ---------------------------------------------------------------------------
+// DIR-048: execution field tests
+// ---------------------------------------------------------------------------
+
+test("DIR-048 RED: illegal execution value throws FAIL-CLOSED", () => {
+  const ws = tmpWs("bad-execution");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\nexecution: sequential");
+  assert.throws(
+    () => readLoopParams(ws),
+    (err) => {
+      assert(err instanceof Error, "must be Error");
+      assert(err.message.includes("FAIL-CLOSED"), `got: ${err.message}`);
+      assert(err.message.includes("execution"), `field 'execution' not mentioned: ${err.message}`);
+      return true;
+    }
+  );
+});
+
+test("DIR-048 GREEN: absent execution defaults to dispatched (NOT inline)", () => {
+  const ws = tmpWs("execution-absent");
+  writeLoopYml(ws, "board: native\ngates: [vitest]");
+  const params = readLoopParams(ws);
+  assert.equal(params.execution, "dispatched", "default must be dispatched, not inline");
+  assert.notEqual(params.execution, "inline");
+});
+
+test("DIR-048 GREEN: explicit execution: dispatched passes", () => {
+  const ws = tmpWs("execution-dispatched");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\nexecution: dispatched");
+  const params = readLoopParams(ws);
+  assert.equal(params.execution, "dispatched");
+});
+
+test("DIR-048 GREEN: explicit execution: inline passes", () => {
+  const ws = tmpWs("execution-inline");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\nexecution: inline");
+  const params = readLoopParams(ws);
+  assert.equal(params.execution, "inline");
+});
+
+// ---------------------------------------------------------------------------
+// DIR-048: audit field tests
+// ---------------------------------------------------------------------------
+
+test("DIR-048 RED: illegal audit value throws FAIL-CLOSED", () => {
+  const ws = tmpWs("bad-audit");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\naudit: verify");
+  assert.throws(
+    () => readLoopParams(ws),
+    (err) => {
+      assert(err instanceof Error, "must be Error");
+      assert(err.message.includes("FAIL-CLOSED"), `got: ${err.message}`);
+      assert(err.message.includes("audit"), `field 'audit' not mentioned: ${err.message}`);
+      return true;
+    }
+  );
+});
+
+test("DIR-048 GREEN: absent audit defaults to adversarial (NOT none)", () => {
+  const ws = tmpWs("audit-absent");
+  writeLoopYml(ws, "board: native\ngates: [vitest]");
+  const params = readLoopParams(ws);
+  assert.equal(params.audit, "adversarial", "default must be adversarial, not none");
+  assert.notEqual(params.audit, "none");
+});
+
+test("DIR-048 GREEN: explicit audit: adversarial passes", () => {
+  const ws = tmpWs("audit-adversarial");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\naudit: adversarial");
+  const params = readLoopParams(ws);
+  assert.equal(params.audit, "adversarial");
+});
+
+test("DIR-048 GREEN: explicit audit: none passes", () => {
+  const ws = tmpWs("audit-none");
+  writeLoopYml(ws, "board: native\ngates: [vitest]\naudit: none");
+  const params = readLoopParams(ws);
+  assert.equal(params.audit, "none");
+});
+
+// ---------------------------------------------------------------------------
+// DIR-048: opt-out combo (backward-compatible escape hatch)
+// ---------------------------------------------------------------------------
+
+test("DIR-048 GREEN: opt-out combo inline+none returns inline/none", () => {
+  const ws = tmpWs("opt-out-combo");
+  writeLoopYml(ws, [
+    "board: native",
+    "gates: [vitest]",
+    "execution: inline",
+    "audit: none",
+  ].join("\n"));
+  const params = readLoopParams(ws);
+  assert.equal(params.execution, "inline", "explicit inline must be respected");
+  assert.equal(params.audit, "none", "explicit none must be respected");
+  // other fields unchanged
+  assert.equal(params.board, "native");
+  assert.deepEqual(params.gates, ["vitest"]);
+  assert.equal(params.stop, "once");
 });
