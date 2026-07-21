@@ -6358,3 +6358,12 @@ Initial build missed updating `plugin/scripts/task-schema.mjs` — dual-source v
 | ID | Title | Type | VT Δ |
 |---|---|---|---|
 | exp5-M-CRYST-E2 | E2 ADR-014 SPLIT-OR-COMMIT + ADR-015 SINGLE-BRANCH | crystallization/documentation | 0 |
+
+---
+## M73 SELECT — exp5-M-CRYST-B4
+
+**Selected:** exp5-M-CRYST-B4 — B4 Migrate existing tasks to canonical schema (or forward-only + validator flags legacy)
+
+**Rationale:** Only remaining non-human-steered milestone candidate. B4 is a close-out verification: the forward-only grandfather approach is already implemented (all tasks report PASS or EXPLICIT N/A-legacy; 0 FAILs; checkNoScaffolding passes on all schema-marked tasks). The milestone verifies the sweep output, formally documents the grandfather decision, and ticks the task closed. LOOP-EXECUTABLE.
+
+**Deferred:** D2, F1 (human-steered).

@@ -2,7 +2,7 @@
 id: exp5-M-CRYST-B4
 title: B4 Migrate existing tasks to the canonical schema (or forward-only +
   validator flags legacy)
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - crystallization
