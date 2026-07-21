@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 71** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 72** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -6339,3 +6339,22 @@ Initial build missed updating `plugin/scripts/task-schema.mjs` — dual-source v
 **Rationale:** Crystallization pick. The load-bearing design decisions in exp5's methodology (SPLIT-OR-COMMIT/DIR-026, single-branch/DIR-027, Provider ABI, QENG) are prose-scattered across DIR tasks and proposals — not yet single-sourced in the `adr/` store (the E1 kind already exists). E2 extracts ≥1 recurring decision into a schema-valid ADR with back-links and enforcement pointer. Primary target: SPLIT-OR-COMMIT (DIR-026) — fires at every milestone, most referenced by name, no dedicated ADR. LOOP-EXECUTABLE, bounded, no code changes needed.
 
 **Deferred:** exp5-M-CRYST-B4 (task migration sweep; AC1 already met by N/A-legacy-explicit behavior); DIR-038/DIR-044 (human-steered); DIR-048 (needs-human; live proof outstanding).
+
+---
+## M72 ABSORB — exp5-M-CRYST-E2
+
+**Milestone:** M72 · **Task:** exp5-M-CRYST-E2 · **Status:** done  
+**Commit:** (M72 MERGE) · **Type:** crystallization/documentation · **VT Δ:** 0
+
+### What landed
+- `adr/ADR-014-split-or-commit-*.md`: SPLIT-OR-COMMIT rule ADR (status: accepted) — two-outcome rule (done/needs-human), needs-human legitimacy constraint (external-only), mandatory-split-at-SELECT, parent-done-iff-children; enforcement: `node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.mjs .` (already running as `split-or-commit` gate)
+- `adr/ADR-015-single-branch-*.md`: SINGLE-BRANCH rule ADR (status: accepted) — loop on master, per-milestone iteration worktrees, `.halt`/private-worktree hygiene; enforcement: `N/A — human-steering discipline, not mechanically enforceable per-milestone`
+- `tasks/DIR-026.md`: back-link to [[ADR-014]] added
+- `tasks/DIR-027.md`: back-link to [[ADR-015]] added
+- Both ADRs verified schema-valid via `quay-native adr list`/`adr get`
+
+### Audit: NO REFUTATION FOUND — clean pass
+
+| ID | Title | Type | VT Δ |
+|---|---|---|---|
+| exp5-M-CRYST-E2 | E2 ADR-014 SPLIT-OR-COMMIT + ADR-015 SINGLE-BRANCH | crystallization/documentation | 0 |
