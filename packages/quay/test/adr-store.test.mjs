@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createAdrStore, VALID_ADR_STATUSES } from "../src/adr-store.js";
+import { createAdrStore, VALID_ADR_STATUSES } from "../src/adr-store.ts";
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "adr-store-"));

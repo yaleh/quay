@@ -44,11 +44,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import path from "node:path";
-import { loadConfig, activeProvider } from "./config.js";
+import { loadConfig, activeProvider } from "./config.ts";
 import { connectProvider } from "./provider-client.ts";
-import { composePayload, deliverTrigger } from "./action.js";
-import { resolveProviderEnv } from "./provider-env.js";
-import { QUAY_VERSION } from "./version.js";
+import { composePayload, deliverTrigger } from "./action.ts";
+import { resolveProviderEnv } from "./provider-env.ts";
+import { QUAY_VERSION } from "./version.ts";
 // DIR-007/QENG MCP parity: the QENG gate/lifecycle engine's MCP tools below
 // (gate_run/gate_log/lifecycle_*) delegate straight into these SAME
 // functions bin/quay.js's own gate/gate-log/complete/adjudicate/promote/

@@ -36,7 +36,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { composePayload, deliverTrigger, mandaAvailable } from "../src/action.js";
+import { composePayload, deliverTrigger, mandaAvailable } from "../src/action.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

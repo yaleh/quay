@@ -67,10 +67,10 @@ import { runAcceptance } from "./acceptance-runner.js";
 // (E1/E3/D1); Core needs them standalone for its own gate registry, so they
 // now live here as Core-owned modules (moved, not duplicated — quay-native's
 // own CLI/MCP-server imports them back from `quay` as a declared dependency).
-import { createAdrStore } from "../adr-store.js";
-import { createDocumentStore } from "../document-store.js";
-import { validateContracts } from "../contract-validator.js";
-import { findConfig } from "../config.js";
+import { createAdrStore } from "../adr-store.ts";
+import { createDocumentStore } from "../document-store.ts";
+import { validateContracts } from "../contract-validator.ts";
+import { findConfig } from "../config.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // packages/quay/src/gate -> repo root is 4 levels up. Used ONLY for the

@@ -22,7 +22,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
-import { readLoopParams } from "../src/loop-params.js";
+import { readLoopParams } from "../src/loop-params.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

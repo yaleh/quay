@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createDocumentStore, VALID_DOCUMENT_STATUSES } from "../src/document-store.js";
+import { createDocumentStore, VALID_DOCUMENT_STATUSES } from "../src/document-store.ts";
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "document-store-"));

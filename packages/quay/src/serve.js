@@ -13,9 +13,9 @@
 
 import http from "node:http";
 import path from "node:path";
-import { loadConfig, activeProvider } from "./config.js";
+import { loadConfig, activeProvider } from "./config.ts";
 import { connectProvider } from "./provider-client.ts";
-import { resolveProviderEnv } from "./provider-env.js";
+import { resolveProviderEnv } from "./provider-env.ts";
 
 function html(strings, ...values) {
   return strings.reduce((acc, s, i) => acc + s + (values[i] ?? ""), "");
@@ -982,7 +982,7 @@ export async function startServer({ port = 4173 } = {}) {
     const am = /^\/task\/([^/]+)\/action\/([^/]+)$/.exec(url.pathname);
     if (am && req.method === "POST") {
       const [, id, actionId] = am;
-      const { composePayload, deliverTrigger } = await import("./action.js");
+      const { composePayload, deliverTrigger } = await import("./action.ts");
       const decodedId = decodeURIComponent(id);
       const t = await client.taskGet(decodedId);
       // QX-009 (experiment 4, iteration 2): read ?from= param for list-context redirect.

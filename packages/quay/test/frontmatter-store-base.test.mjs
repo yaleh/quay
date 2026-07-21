@@ -13,7 +13,7 @@ import {
   fileNameForId,
   withFileLock,
   slugify,
-} from "../src/frontmatter-store-base.js";
+} from "../src/frontmatter-store-base.ts";
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "frontmatter-store-base-"));

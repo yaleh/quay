@@ -24,7 +24,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 
-import { resolveProviderEnv } from "../src/provider-env.js";
+import { resolveProviderEnv } from "../src/provider-env.ts";
 
 const cfg = { workspaceRoot: "/ws/root" };
 

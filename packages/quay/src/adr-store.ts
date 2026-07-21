@@ -1,4 +1,3 @@
-// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay Core: ADR (Architecture Decision Record) store — a SEPARATE object kind
 // from tasks (a Provider's own store, e.g. quay-native's store.js). An ADR is
 // NOT a task: it has a DECISION lifecycle (proposed→accepted→superseded/
@@ -29,7 +28,7 @@ import {
   fileNameForId as sharedFileNameForId,
   withFileLock,
   slugify,
-} from "./frontmatter-store-base.js";
+} from "./frontmatter-store-base.ts";
 
 export const VALID_ADR_STATUSES = ["proposed", "accepted", "superseded", "deprecated", "rejected"];
 
@@ -39,20 +38,53 @@ const ADR_ID_RE = /^ADR-\d{3,}$/;
 // frontmatter (applies-to, enforcement, any future field) is preserved verbatim.
 const OWNED_KEYS = new Set(["id", "title", "status", "date", "supersedes", "superseded-by", "tags"]);
 
+interface AdrFrontmatter {
+  [key: string]: unknown;
+  id?: string;
+  title?: string;
+  status?: string;
+  date?: string | null;
+  supersedes?: string[];
+  "superseded-by"?: string[];
+  tags?: string[];
+  "applies-to"?: string[];
+  enforcement?: unknown;
+}
+
+interface AdrFilter {
+  status?: string;
+  tag?: string;
+  appliesTo?: string;
+}
+
+interface AdrViewModel {
+  id: unknown;
+  title: unknown;
+  status: unknown;
+  date: unknown;
+  supersedes: unknown;
+  supersededBy: unknown;
+  tags: unknown[];
+  appliesTo: unknown;
+  enforcement: unknown;
+  body: string;
+  updatedAt?: number;
+}
+
 /**
  * @param {string} adrDir absolute path to the ADR directory (sibling of tasks/)
  */
-export function createAdrStore(adrDir) {
+export function createAdrStore(adrDir: string) {
   fs.mkdirSync(adrDir, { recursive: true });
 
-  function assertSafeId(id) {
+  function assertSafeId(id: string) {
     if (typeof id !== "string" || !ADR_ID_RE.test(id)) {
       throw new Error(`invalid ADR id ${JSON.stringify(id)}: must match ADR-NNN (>=3 digits)`);
     }
     return id;
   }
 
-  function assertSafeStatus(status) {
+  function assertSafeStatus(status: string | undefined) {
     if (status !== undefined && !VALID_ADR_STATUSES.includes(status)) {
       throw new Error(`invalid ADR status "${status}" — must be one of ${VALID_ADR_STATUSES.join(", ")}`);
     }
@@ -61,15 +93,15 @@ export function createAdrStore(adrDir) {
   // Files are `ADR-NNN-<slug>.md` but the logical id is `ADR-NNN`. Resolve the
   // on-disk filename for an id by exact or `<id>-` prefix match (the dash
   // delimiter prevents ADR-001 from matching ADR-0011) — shared helper.
-  function fileNameForId(id) {
+  function fileNameForId(id: string) {
     return sharedFileNameForId(adrDir, id);
   }
 
-  function withLock(id, fn) {
+  function withLock(id: string, fn: () => unknown) {
     return withFileLock(adrDir, id, fn);
   }
 
-  function parse(raw) {
+  function parse(raw: string) {
     try {
       return parseFrontmatter(raw);
     } catch {
@@ -77,12 +109,12 @@ export function createAdrStore(adrDir) {
     }
   }
 
-  function serialize(frontmatter, body) {
+  function serialize(frontmatter: AdrFrontmatter, body: string) {
     return serializeFrontmatter(frontmatter, body);
   }
 
-  function toViewModel(frontmatter, body, updatedAt) {
-    const vm = {
+  function toViewModel(frontmatter: AdrFrontmatter, body: string, updatedAt?: number): AdrViewModel {
+    const vm: AdrViewModel = {
       id: frontmatter.id,
       title: frontmatter.title,
       status: frontmatter.status,
@@ -105,37 +137,37 @@ export function createAdrStore(adrDir) {
   // E3: minimal glob matcher for the `applies-to` consult surface — reuses Node's
   // built-in path.matchesGlob (no new dependency). Match if ANY of the ADR's
   // applies-to globs matches the given path.
-  function appliesToMatches(appliesTo, targetPath) {
+  function appliesToMatches(appliesTo: unknown, targetPath: string) {
     if (!Array.isArray(appliesTo) || appliesTo.length === 0) return false;
     return appliesTo.some((glob) => {
       try {
-        return path.matchesGlob(targetPath, glob);
+        return (path as unknown as { matchesGlob(p: string, g: string): boolean }).matchesGlob(targetPath, glob);
       } catch {
         return false;
       }
     });
   }
 
-  function get(id) {
+  function get(id: string) {
     assertSafeId(id);
     const file = fileNameForId(id);
     if (!file) return null;
     const p = path.join(adrDir, file);
     const { frontmatter, body } = parse(fs.readFileSync(p, "utf8"));
-    let updatedAt;
+    let updatedAt: number | undefined;
     try {
       updatedAt = fs.statSync(p).mtimeMs;
     } catch { /* omit */ }
-    return toViewModel(frontmatter, body, updatedAt);
+    return toViewModel(frontmatter as AdrFrontmatter, body, updatedAt);
   }
 
-  function list(filter = {}) {
+  function list(filter: AdrFilter = {}) {
     return fs
       .readdirSync(adrDir)
       .filter((f) => f.endsWith(".md") && f.startsWith("ADR-"))
       .map((f) => {
         const { frontmatter, body } = parse(fs.readFileSync(path.join(adrDir, f), "utf8"));
-        return toViewModel(frontmatter, body, fs.statSync(path.join(adrDir, f)).mtimeMs);
+        return toViewModel(frontmatter as AdrFrontmatter, body, fs.statSync(path.join(adrDir, f)).mtimeMs);
       })
       .filter((a) => (filter.status ? a.status === filter.status : true))
       .filter((a) => (filter.tag ? (a.tags || []).includes(filter.tag) : true))
@@ -143,16 +175,24 @@ export function createAdrStore(adrDir) {
       .sort((a, b) => String(a.id).localeCompare(String(b.id)));
   }
 
-  function write(id, { title, status, date, supersedes, supersededBy, tags, body }) {
+  function write(id: string, { title, status, date, supersedes, supersededBy, tags, body }: {
+    title?: string;
+    status?: string;
+    date?: string;
+    supersedes?: string[];
+    supersededBy?: string[];
+    tags?: string[];
+    body?: string;
+  }) {
     assertSafeId(id);
     assertSafeStatus(status);
     return withLock(id, () => {
       const existingFile = fileNameForId(id);
-      let frontmatter = {};
+      let frontmatter: AdrFrontmatter = {};
       let existingBody = "";
       if (existingFile) {
         const parsed = parse(fs.readFileSync(path.join(adrDir, existingFile), "utf8"));
-        frontmatter = { ...parsed.frontmatter };
+        frontmatter = { ...parsed.frontmatter } as AdrFrontmatter;
         existingBody = parsed.body;
       }
       // Apply owned fields (preserving any reserved/unknown frontmatter keys).
@@ -164,7 +204,7 @@ export function createAdrStore(adrDir) {
       if (supersededBy !== undefined) frontmatter["superseded-by"] = supersededBy;
       if (tags !== undefined) frontmatter.tags = tags;
       // Order owned keys first for readable files; keep reserved keys after.
-      const ordered = {};
+      const ordered: AdrFrontmatter = {};
       for (const k of ["id", "title", "status", "date", "supersedes", "superseded-by", "tags"]) {
         if (frontmatter[k] !== undefined) ordered[k] = frontmatter[k];
       }
