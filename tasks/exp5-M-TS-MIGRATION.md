@@ -3,7 +3,7 @@ id: exp5-M-TS-MIGRATION
 title: "TS migration program (ADR-012): gradually port quay product code
   JS→TypeScript, phased + behavior-preserving, to unlock archguard +
   type-safety"
-status: ready
+status: todo
 labels:
   - milestone-candidate
   - crystallization
