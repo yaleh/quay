@@ -989,7 +989,7 @@ async function main() {
   }
 
   if (cmd === "serve") {
-    const { startServer } = await import("../src/serve.js");
+    const { startServer } = await import("../src/serve.ts");
     // `serve` has no subcommand token — reparse from argv[2] so `--port` etc.
     // is read correctly instead of being swallowed into `sub`.
     const { flags: serveFlags } = parseFlags(process.argv.slice(3));
@@ -1004,7 +1004,7 @@ async function main() {
     // an Agent (Claude Code) registers `quay mcp` once instead of each
     // Provider's own `<provider> mcp` separately. No subcommand token or
     // flags — mirrors quay-native/quay-github's own `mcp` subcommand shape.
-    const { startMcpServer } = await import("../src/mcp-server.js");
+    const { startMcpServer } = await import("../src/mcp-server.ts");
     await startMcpServer();
     return;
   }

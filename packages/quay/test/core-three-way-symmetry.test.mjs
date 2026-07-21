@@ -45,7 +45,7 @@ import os from "node:os";
 import http from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { startServer } from "../src/serve.js";
+import { startServer } from "../src/serve.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const coreBin = path.join(__dirname, "..", "bin", "quay.js");
