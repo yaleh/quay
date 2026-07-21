@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-TS-MIGRATION-P3-C | TS migration P3-C: port quay-github package to TypeScript | DONE | - | milestone-candidate, crystallization |
 | exp5-M-TS-MIGRATION-P3-A | TS migration P3-A: port quay-native package to TypeScript | DONE | - | milestone-candidate, crystallization |
 | exp5-M-TS-MIGRATION-P2 | TS migration P2 (ABI boundary, ADR-012): express the Provider ABI (task + ADR view-models) as TypeScript interfaces — the ABI contract becomes a type — behavior-preserving, autonomous under the golden-diff discipline. | DONE | - | milestone-candidate, crystallization |
 | DIR-054 | dashboard.md context-budget discipline (LOOP-EXECUTABLE): retire the unbounded append-only `## Log`. Make the ABSORB write a ONE-LINE summary row (id · Δv · audit verdict · merge SHA · pointer), keep only a ROLLING WINDOW of the last N milestones live (older → archive or drop; git history is the real provenance), and enforce it with a MECHANICAL dashboard line-budget gate that HARD-blocks milestone_counter++ over the cap. Same pathology exp5 already retired once as exp3's provenance.md. | DONE | - | directive, milestone-candidate |
@@ -85,7 +86,6 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
 | exp5-M-TS-MIGRATION-P3 | TS migration P3 (per-package, ADR-012): port the packages internally to TS — quay-native store → Core CLI/serve/mcp → quay-github — behavior-preserving, autonomous under the golden-diff discipline; split per-package at SELECT. | open | - | milestone-candidate, crystallization |
-| exp5-M-TS-MIGRATION-P3-C | TS migration P3-C: port quay-github package to TypeScript | open | - | milestone-candidate, crystallization |
 | exp5-M-TS-MIGRATION-P3-B | TS migration P3-B: port quay Core package internals to TypeScript | open | - | milestone-candidate, crystallization |
 | DIR-055 | meta-cc session-history mining ROUTINE (LOOP-EXECUTABLE): a standing loop-driver routine (via DIR-051/[[DIR-056]]) that periodically dispatches a fresh-context probe which mines the project's Claude Code session history with meta-cc — surfacing recurring design/implementation defects, ADR candidates, and reusable/crystallizable patterns — and FILES them as evidence-backed tasks ROUTED by finding-type behind the quality/dedup/rate gate. The third standing probe (process/provenance axis) alongside self-validation (DIR-052) + architecture-analysis (DIR-053). | open | - | directive, milestone-candidate |
 | DIR-056 | probe-spec formalization — DIR-051 v2 (LOOP-EXECUTABLE): decouple a routine's WHAT from the skill by replacing the `dispatch` magic-string with a portable PROBE SPEC (objective + required instrument + fallback + output-routing), shipped with the plugin. loop.yml names WHEN (trigger) + WHICH (probe); the spec carries HOW; the skill stays a generic scheduler. Makes DIR-052/053/055 config, not code — the loose-coupling enabler for standing probes across any project. | open | - | directive, milestone-candidate |
@@ -103,4 +103,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_96 milestone-candidate task(s) as of 2026-07-21T19:01:08.619Z._
+_96 milestone-candidate task(s) as of 2026-07-21T19:25:27.850Z._
