@@ -17,12 +17,12 @@ Extract the load-bearing decision invariants scattered across proposals + DIR ta
 ## Plan
 N/A — authoring ADRs into the existing `adr/` store (E1 done); no code, no staged docs/plans doc warranted.
 ## Acceptance Criteria
-- [ ] ≥1 real recurring decision is captured as an ADR (kind=adr, schema-valid) that a reader can act on WITHOUT re-reading the source proposal; task/proposal → ADR back-links resolve.
-- [ ] Each extracted ADR seeds an `enforcement` note (real gate id, or explicit N/A) so E3 can later wire it — no ADR that should be enforced left with a dangling stub.
+- [x] ≥1 real recurring decision is captured as an ADR (kind=adr, schema-valid) that a reader can act on WITHOUT re-reading the source proposal; task/proposal → ADR back-links resolve.
+- [x] Each extracted ADR seeds an `enforcement` note (real gate id, or explicit N/A) so E3 can later wire it — no ADR that should be enforced left with a dangling stub.
 ## Definition of Done
 References the standard inherited-core DoD clauses. Real landing:
-- [ ] The captured ADRs are the usable SINGLE source for their decisions (the source proposal/DIR points at the ADR, not vice-versa) — verified on ≥1 real recurring decision.
-- [ ] Mechanizable ADRs carry an enforcement pointer (feeds E3); non-mechanizable ones are marked N/A honestly.
+- [x] The captured ADRs are the usable SINGLE source for their decisions (the source proposal/DIR points at the ADR, not vice-versa) — verified on ≥1 real recurring decision.
+- [x] Mechanizable ADRs carry an enforcement pointer (feeds E3); non-mechanizable ones are marked N/A honestly.
 
 ## Not selected (M46)
 Considered alongside the crystallization epic's usual candidate set, compared against
