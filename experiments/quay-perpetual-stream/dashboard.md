@@ -1,10 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 62** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
-<!-- NOTE (M62 ABSORB header sync): body log's m62 ABSORB entry below sets milestone_counter → 62;
-kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57/m58/m59/m60/m61).
-62 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m65). -->
+**milestone_counter: 63** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- NOTE (M63 ABSORB header sync): body log's m63 ABSORB entry below sets milestone_counter → 63;
+kept in sync at each ABSORB going forward (same staleness class flagged before at m39/m43/m44/m45/m46/m47/m48/m49/m50/m51/m52/m53/m54/m55/m56/m57/m58/m59/m60/m61/m62).
+63 % 5 != 0 — no checkpoint due this milestone (next checkpoint at m65). -->
 **stop signals only: human `.halt` sentinel · internal exit (VT slope<threshold / hypothesis falsified)**
 
 ## VT — Value Trajectory (weighted surface-capability points; §4.1, §6.2)
@@ -5884,3 +5884,96 @@ the reverse direction both showing the expected result (2 commits ahead, 0 behin
 
 ## Backlog row
 | DIR-039 | archguard runs TWO task backends (GitHub issues + a local Backlog.md board) with NO path for quay to WRITE into a quay-native store or read Backlog.md at all — the prerequisite for archguard adopting quay. Closed via (A) a generic ABI provider-to-provider `quay migrate` command (single write chokepoint, real-run 56/56 against `yaleh/archguard`) and (B) a new read-only `quay-backlog` provider for Backlog.md (real-run 28/28 against archguard's actual board, including an honestly-documented genuine source-data id collision) — both sharing the same generic migration path, no duplicated write logic | capability-growth (primary), feeds DIR-038-C's outward-VT term | no new VT chart cell (migration/import capability surface, not a chart-1-scored axis) | directive, milestone-candidate, milestone:M62 |
+
+## M63 — M63-ts-migration-p0 (exp5-M-TS-MIGRATION-P0)
+
+**Task:** [[exp5-M-TS-MIGRATION-P0]] (`tasks/exp5-M-TS-MIGRATION-P0.md`) — TS migration P0:
+tooling-only first phase of ADR-012 (human-authorized 2026-07-20, P0 ONLY; P1–P4 remain
+`human-steered` in the parent `[[exp5-M-TS-MIGRATION]]`). Deliverables: (1) root `tsconfig.json`
+(`allowJs`+`checkJs`, `strict:false`, `noEmit:true`), (2) `ts-typecheck` gate in `.quay/gates.yml`
+running `npx tsc --noEmit` (data-driven per ADR-013/DIR-042-A), (3) `packages/quay/src/ts-demo/
+word-count.ts` demonstrator module + `ts-demo-word-count.test.ts` (3/3 pass, no build step), (4)
+`ts-typecheck-gate.test.mjs` (5/5 pass), (5) `// @ts-nocheck` ramp annotations on 16 JS files
+whose pre-existing untyped-JS structural diagnostics require P1+ JSDoc typing to fix. **BUILD
+commit:** `61f02e7`. **Merge commit:** `572c71d`, merge of `milestones/M63-ts-migration-p0` into
+`master` at this ABSORB (worktree `milestones/M63/worktrees/iteration-0`, base `master` `fd1850d`,
+the M63 SELECT commit). Master had 6 post-divergence human commits (985168b..ceff53b), all in
+`plugin/` only — zero file overlap with M63 changes; merge was clean (no conflicts).
+
+**Independent audit verdict: NO REFUTATION FOUND.** Fresh-context Explore subagent (agent id
+`a09cfe57ff1a62fe3`, session `86fab6a3-da7c-4692-a726-6385314e709c`, distinct from orchestrator),
+run in background. All 4 AC + 3 DoD items independently confirmed:
+- AC-1 (`tsconfig.json` + `node --test` on `.ts`): CONFIRMED — `tsconfig.json` exists at committed
+  state with `allowJs:true`/`checkJs:true`/`strict:false`; `node --test packages/quay/test/ts-demo-
+  word-count.test.ts` exits 0, 3/3 pass, no build step.
+- AC-2 (`tsc --noEmit` gate wired, data-driven, PASSES): CONFIRMED — `.quay/gates.yml` has
+  `ts-typecheck` under `testPass:` with `command: "npx tsc --noEmit"`; all 16 JS files have
+  `// @ts-nocheck` in committed state (spot-checked via `git show 61f02e7:<path>`); `npx tsc
+  --noEmit` exits 0 after stash-revealing committed state; `ts-typecheck-gate.test.mjs` 5/5 pass.
+- AC-3 (`.ts` module runs under Node 25 native type-stripping, no build step): CONFIRMED —
+  `packages/quay/src/ts-demo/word-count.ts` contains TypeScript syntax (`input: string`), imported
+  directly in test; no transpile invoked.
+- AC-4 (behavior-preserving, no product-code changes): CONFIRMED — all 16 modified files have only
+  `// @ts-nocheck` annotation added (no logic changes); pre-existing failures (M44 A2/C1, serve-
+  github, web-ui-browser) confirmed identical before/after; master test run confirms same 2 failures
+  exist pre-M63 (master b1rxwm9qy: 303 tests, 301 pass, 2 fail).
+
+**Critical audit finding:** M63 worktree had staged (uncommitted) changes removing `// @ts-nocheck`
+annotations — artifact of the BUILD iteration's cleanup pass. Audit correctly stashed these and
+assessed committed state (`61f02e7`), which has all annotations and passes `tsc`. This is proper
+ABSORB discipline: assess what lands on master, not the working-tree cleanup.
+
+Audit artifact: `milestones/M63/audits/iteration-0-acceptance-audit.md`
+
+**Mechanical ABSORB gates (this ABSORB's real runs, pasted verbatim):**
+```
+$ node packages/quay/bin/quay.js gate exp5-M-TS-MIGRATION-P0 --gate dod
+PASS
+
+$ node experiments/quay-perpetual-stream/scripts/vmeta-lag-check.mjs --counter 62 experiments/quay-perpetual-stream/v-meta-ledger.md
+V_meta consolidation-lag check — experiments/quay-perpetual-stream/v-meta-ledger.md
+milestone_counter=62 K=2
+  [ok] consolidated | lag=- | consolidated — lag gate does not apply | domain-audit-channel≡CI-job pattern (+ per-subcommand audit exercise)
+  [ok] proposed | lag=- | proposed — not past φ threshold, no lag gate | repo-root isolation-leak lesson
+
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+
+$ bash experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh exp5-M-TS-MIGRATION-P0 experiments/quay-perpetual-stream/backlog.md
+PASS: exp5-M-TS-MIGRATION-P0 is not design-only per its backlog row text (no 'design delivered' / 'design-doc only' / follow-up-checklist marker found) — impl-row gate does not apply.
+
+$ bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh
+tree-hygiene: clean — no un-gitignored scratch left in the main tree.
+
+$ bash experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+info: prunable merged iteration branches=0; registered iteration worktrees=0 (ABSORB should prune these).
+```
+
+**Audit-independence check:**
+```
+Artifact: milestones/M63/audits/iteration-0-acceptance-audit.md
+Orchestrator id: session 86fab6a3-da7c-4692-a726-6385314e709c
+Audit agent id: a09cfe57ff1a62fe3 (distinct from orchestrator)
+Dispatch: background Agent tool call from top-level loop session (run_in_background=true)
+Independence: PASS (agent id ≠ orchestrator session id; fresh context)
+```
+
+**Backlog housekeeping:** `tasks/exp5-M-TS-MIGRATION-P0.md` — all 4 AC + 3 DoD checkboxes ticked
+(outer loop, post-audit; audit ran read-only); `## Execution record` appended; `status: todo` →
+`done`. `backlog.md` regenerated via `node experiments/quay-perpetual-stream/scripts/
+it0-backlog-regen.mjs experiments/quay-perpetual-stream --write`.
+
+**Worktree/branch hygiene close-out:** `milestones/M63/worktrees/iteration-0` removed (`git
+worktree remove --force`), `milestones/M63-ts-migration-p0` branch deleted (`git branch -d`, fully
+merged into `master` at `572c71d`). Post-prune hygiene confirmed PASS (see gate evidence above).
+
+**Checkpoint disposition: NOT due this ABSORB** (`milestone_counter` = 63, not a multiple of 5;
+next checkpoint at m65).
+
+**Note on off-loop master activity since the M62 ABSORB:** 6 human plugin-only commits
+(985168b..ceff53b) — all in `plugin/` directory only. Zero overlap with M63 changes (`packages/`,
+`.quay/gates.yml`, `package.json/lock`, new `.ts` files). Confirmed via `git diff --name-only` on
+both sides before merge.
+
+## Backlog row
+| exp5-M-TS-MIGRATION-P0 | JS codebase has 0 `.ts` files and no `tsconfig` — the TS migration tooling foundation is missing entirely. Closed via (1) `tsconfig.json` (allowJs+checkJs, strict:false), (2) `ts-typecheck` quay gate running `npx tsc --noEmit`, (3) Node 25 native `.ts` module + test (no build step), (4) `// @ts-nocheck` ramp on 16 JS files (ADR-012 gradual-adoption discipline). P1–P4 (broad product-code migration) remain human-steered. | crystallization (TS tooling foundation), unblocks P1+ under ADR-012 | no new VT chart cell (tooling/crystallization surface, not a chart-1-scored axis) | milestone-candidate, crystallization, milestone:M63 |
