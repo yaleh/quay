@@ -81,15 +81,23 @@ proposal → architect-review → plan → architect-review → commit. Inspecti
 real review-loop commits shows the two review stages catch **two distinct classes
 of error**:
 
-- **Plan/proposal review catches verifiable, mechanical errors** (meta-cc
-  `8ad476a`, `3f851b0`): wrong function signatures (`[]types.Entry` →
-  `[]parser.SessionEntry`), wrong call-site line numbers, **wrong stage ordering**
-  (update manifests before deleting files), wrong TDD semantics ("expect BUILD
-  FAIL" for undefined Go functions), off-by-one counts (12→11 deletions; 17 not
-  ~20 tools), line-estimate corrections, missing schema-conformance items. quay's
-  own `a391032`: a wrong size figure (~42.7KB not ~31KB), a mis-located rationale.
+- **Plan/proposal review catches verifiable, mechanical errors.** The
+  *first* review round (meta-cc `8ad476a`) caught: wrong function signatures
+  (`[]types.Entry` → `[]parser.SessionEntry`), wrong call-site line numbers,
+  **wrong stage ordering** (update manifests *first*, delete files *second*),
+  wrong TDD semantics ("expect BUILD FAIL" for undefined Go functions), a wrong
+  tool count (17 not ~20), and line-estimate corrections. The *second* round
+  (meta-cc `3f851b0`) caught a distinct set the first missed: an off-by-one
+  (12→11 deleted capabilities) and missing schema-conformance items
+  (marketplace.json / outputSchema notes). quay's own `a391032`: a wrong size
+  figure (~42.7KB not ~31KB) and a mis-located rationale (the "wholesale reread"
+  mandate lives in the Lifecycle capability-reading section, not a separate rule).
+  *(All three commit messages verified 2026-07-18; the meta-cc project-split's
+  "~10,019 lines" is specifically the **removed**-line count — net change was
+  larger, ~10,019 removed + ~1,360 added.)*
 - These are all **checkable against the actual codebase** — not matters of
-  approach or judgment.
+  approach or judgment. That the second round caught errors the first missed is
+  itself evidence for the convergence-not-one-shot stopping rule in §7.
 
 Two operational facts from the same commits, load-bearing for the design below:
 
@@ -156,6 +164,15 @@ SELECT's grouping rule (DIR-009) thereby gains a concrete two-sided criterion:
 **group tasks by value coherence, cap by ~2000-line cost** — first bound to bind
 stops the group.
 
+The nested ≤500/≤200 budgets are not arbitrary: empirical AI-code-review studies
+find reviewers (human and agentic) degrade sharply on 1000+-line diffs and give
+genuinely useful, defect-catching feedback on ~200-line, single-scope changes; in
+one study of agentic pull requests "too large" was a top-three rejection reason and
+~40% of failing PRs had combined multiple tasks into one change (§12). The stage
+budget is therefore sized to the unit at which the grounded plan-check (§7) and the
+per-stage TDD gate (§8) can actually catch errors — decomposition is what keeps the
+2000-line milestone inside that effective review window, one stage at a time.
+
 ## 5. Two milestone classes, two diversity strategies
 
 Independence/diversity is a budget; spend it where errors are costly and cheap to
@@ -166,6 +183,11 @@ ledger exp5 already records:
 |---|---|---|---|
 | **methodology / design** (M10–M14 today) | the design/doc itself | **whole-milestone independent re-derivation** (cheap — the whole deliverable is a doc) — keep as-is | discovery / governance-integrity |
 | **development / test** (≤2000 lines of code) | product code | **independent re-derivation of the *proposal*** (approach is the expensive error); implement once; verify at the tail | capability-growth |
+
+This is the "review proportional to risk" principle current AI-code-review practice
+converges on (§12): a mechanical change and a design-bearing refactor should not go
+through the same pipeline. Here the axis is *where the expensive error lives*, and
+the diversity budget is spent there.
 
 The key insight for the dev class: **re-deriving 2000 lines of implementation is
 waste; re-deriving the approach is not.** The costly error in dev work is a wrong
@@ -209,7 +231,12 @@ Every generative/critical step is an **independent subagent** (as
 `proposal-to-plan` already does), but their **grounding differs by role**:
 
 - proposal re-derivation subagents: **blank-slate-leaning** — minimize shared
-  context so divergence is a real signal.
+  context so divergence is a real signal. This matches the documented condition for
+  ensemble diversity to actually cancel error: independent parallel sampling with
+  *no inter-agent communication* (agents cannot anchor to each other's output),
+  which preserves the statistical independence that makes divergence informative
+  (§12). Persona/prompt differentiation of the N proposal subagents is a cheap,
+  legitimate way to widen that divergence further.
 - plan-check subagent: **maximally codebase-grounded** — it must read the real
   signatures / call-sites / dependency graph to catch the mechanical errors §2
   documents; without grounding it cannot find them.
@@ -226,6 +253,16 @@ a re-derivation.** Grounding, from §2's evidence:
   the same code the same way** (the high-stakes errors) — whereas one grounded
   check catches them reliably. So at the plan stage, **check > re-derive**, and it
   is cheaper.
+- This is the empirically-documented failure mode of naive ensembling: multi-agent
+  ensembles only reduce error *when the members' errors are uncorrelated*; agents
+  reading the same code converge on the same "syntactically plausible but
+  semantically wrong" reading, and consensus selection then **amplifies** the
+  shared error rather than cancelling it (see best-practice notes, §12). Re-derivation
+  buys diversity where the error is *judgment* (the approach — hence its correct use
+  upstream at the proposal, §5), and buys almost nothing where the error is a
+  *shared misreading of ground truth* (the plan). Grounding the single checker in
+  the real signatures/call-sites is the mechanism that breaks the correlation, not
+  a second independent pass.
 
 **Stopping rule (borrowed from BAIME's own convergence discipline):** iterate the
 plan check until a round produces no material change (convergence), cap ~2–3
@@ -258,6 +295,16 @@ but quay-native. Differences from the existing skill:
 4. **TDD ≥80% per stage is a hard gate**, not advisory: single-implementation
    makes it the primary implementation-correctness net (§6). This is stricter than
    exp5's current "paste test output" evidence gate and must be enforced as such.
+   **Scope caveat (resolves a conflict with `docs/plans/2-…`'s explicit finding):**
+   the literal ≥80% line-coverage number applies **only to executable code** (JS,
+   shell, etc.). For prose/skill/template/manifest deliverables — which the skill's
+   *own* implementation is largely made of (a `SKILL.md` + subagent prompts) — the
+   gate degrades to the **mechanical-check** discipline plan 2 already established
+   (gate-hash / projection-check `it0-*.sh` runs, scaffold-lint, isolation test),
+   not a coverage percentage. The dev-class pipeline must therefore carry a
+   per-stage classifier: "is this stage code or prose?" and apply the matching net.
+   Pretending 80% coverage applies to prose is the failure plan 2 explicitly warns
+   against.
 5. **Provider-agnostic**: everything the skill writes to tasks respects the
    body-portable / extra-native-only rule; it must degrade correctly on GitHub
    (no `extra`, parent/children via checkbox body per M12).
@@ -289,10 +336,14 @@ but quay-native. Differences from the existing skill:
   consequence). **Non-goal:** deleting or forking `proposal-to-plan` for non-quay
   use — it stays as-is for free-markdown workflows; the new skill is additive.
 - **Open (non-blocking):** exact line-budget gate thresholds and how "lines" are
-  counted (follow `proposal-to-plan`'s files-touched + added/changed convention);
-  the precise convergence delta for the plan check's stop rule; whether the
+  counted (follow `proposal-to-plan`'s files-touched + added/changed convention;
+  the code-vs-prose split of §8.4 determines *which net* a stage gets, but the raw
+  ≤500/≤200 line count still applies to both for the size budget itself); the
+  precise convergence delta for the plan check's stop rule; whether the
   methodology class should *also* eventually adopt proposal-re-derivation or keep
-  whole-milestone re-derivation.
+  whole-milestone re-derivation; the value of `N` for proposal re-derivation
+  subagents (the prior art and exp5's M13 both used **2** independent passes —
+  adopt 2 as the default, raise only for genuinely high-stakes approach decisions).
 
 ---
 
