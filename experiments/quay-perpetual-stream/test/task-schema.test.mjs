@@ -100,6 +100,26 @@ test("checkTask: unmarked → N/A-legacy (never silently skipped)", () => {
   assert.equal(r.applicable, false);
 });
 test("checkTask: conformant directive → PASS", () => {
-  const body = "## Proposal\n" + "real approach text ".repeat(4) + "\n## Acceptance Criteria\n- [ ] a\n## Definition of Done\n- [ ] inherited-core clause";
+  // A conformant directive carries the A7-required sections too: `## Finding` and `## Requested
+  // action` (mandated by the /quay-directive template; added at M69/B6). Fixture updated to match —
+  // it was stale (Proposal/AC/DoD only) after A7 landed, making this test red.
+  const body =
+    "## Proposal\n" + "real approach text ".repeat(4) +
+    "\n## Finding\nthe concrete gap this directive addresses" +
+    "\n## Requested action\nwhat the loop should do about it" +
+    "\n## Acceptance Criteria\n- [ ] a\n## Definition of Done\n- [ ] inherited-core clause";
   assert.equal(checkTask(fm(["directive"]) + body).verdict, "PASS");
+});
+test("checkTask: directive MISSING ## Finding / ## Requested action → FAIL (A7)", () => {
+  // The negative half of A7, absent from this file when A7 landed at M69/B6. A directive with the
+  // schema marker but no Finding/Requested-action must FAIL, with the A7 code among its failures.
+  const body = "## Proposal\n" + "real approach text ".repeat(4) + "\n## Acceptance Criteria\n- [ ] a\n## Definition of Done\n- [ ] inherited-core clause";
+  const r = checkTask(fm(["directive"]) + body);
+  assert.equal(r.verdict, "FAIL");
+  assert.ok(r.failures.some((f) => f.code === "directive-sections-missing"), "expected the A7 directive-sections-missing failure");
+});
+test("checkTask: A7 does NOT apply to a milestone-candidate (directive-only rule)", () => {
+  // A7 is directive-kind only; a milestone-candidate without Finding/Requested-action still PASSes.
+  const body = "## Proposal\n" + "real approach text ".repeat(4) + "\n## Plan\nN/A — leaf\n## Acceptance Criteria\n- [ ] a\n## Definition of Done\n- [ ] inherited-core clause";
+  assert.equal(checkTask(fm(["milestone-candidate"]) + body).verdict, "PASS");
 });
