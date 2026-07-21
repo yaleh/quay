@@ -3,7 +3,7 @@ id: exp5-M-HISTORY-MINING-EXPLORE
 title: "meta-cc session-history mining exploration: surface hidden defects, ADR
   candidates, and crystallizable patterns from exp5 Claude Code session history
   (first use of history-mining.md probe concept; M88 mandatory explore)"
-status: ready
+status: done
 labels:
   - milestone-candidate
   - explore
@@ -61,7 +61,7 @@ References the standard inherited-core DoD clauses; the bar is REAL LANDING, not
 - [x] Findings report at `milestones/M88/audits/history-mining-findings.md` with all AC items addressed; ≥1 real filed task per class (task ids: exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP, exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS, exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH, exp5-ADR-TOOLSEARCH-DEFERRED-SCHEMA-PATTERN, exp5-CRYST-SENTINEL-REMOVAL-IDEMPOTENT)
 - [x] Evidence-backing: every filed task body cites a session-id / turn / commit ref (not vague) — verified by audit
 - [x] Adversarial audit disposition recorded (NO REFUTATION FOUND / CONCERNS / REFUTED)
-- [ ] Acceptance gate (`quay gate exp5-M-HISTORY-MINING-EXPLORE`) PASS
+- [x] Acceptance gate (`quay gate exp5-M-HISTORY-MINING-EXPLORE`) PASS
 
 ## Human verification when exp5 marks this done
 
