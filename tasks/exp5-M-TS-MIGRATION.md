@@ -3,7 +3,7 @@ id: exp5-M-TS-MIGRATION
 title: "TS migration program (ADR-012): gradually port quay product code
   JS→TypeScript, phased + behavior-preserving, to unlock archguard +
   type-safety"
-status: done
+status: needs-human
 labels:
   - milestone-candidate
   - crystallization
@@ -147,3 +147,33 @@ branch fully merged into `master`, then pruned (`git worktree remove` + `git bra
 The TS migration program (P0–P4) is behavior-preserving as claimed, with one caveat now closed at this
 ABSORB (the M109 import/fixture regression, self-fixed above) and 3 unrelated pre-existing gaps now
 tracked (`exp5-DEFECT-M114-TESTSUITE-DRIFT`). AC2/DoD#1 are ticked on this evidence, not asserted blind.
+
+### Correction: status is `needs-human`, not `done` (self-caught via `it0-split-or-commit-check.ts`)
+
+This task's own 4 AC + 3 DoD items are each independently verified true (see above and the M114
+adversarial audit, `milestones/M114/audits/iteration-0-acceptance-audit.md`, verdict NO REFUTATION
+FOUND). However, DIR-026's mechanical parent-done-iff-children invariant
+(`experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts`) is a STRUCTURAL rule
+independent of what this task's own AC/DoD text says: **a parent cannot be `done` while any child is
+not `done`.** `exp5-M-TS-MIGRATION-P4` is `needs-human` (its own AC3 — archguard consumer-workspace
+tmux remote-drive verification, ADR-016 — has no live archguard tmux session to drive; confirmed
+still true at this ABSORB via `tmux list-sessions`, same external blocker M111 recorded). This task
+was initially (incorrectly) set to `done` in an earlier draft of this same ABSORB pass; running
+`node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts .` caught the violation
+before the commit landed permanently as `done`:
+```
+FAIL: 1 split-or-commit violation(s) found:
+  - PARENT-DONE-IFF-CHILDREN: task "exp5-M-TS-MIGRATION" is done but has 1 non-done child(ren): exp5-M-TS-MIGRATION-P4 (status: needs-human) — a done parent requires ALL children done (DIR-026)
+```
+Corrected: status set to `needs-human`, propagated from P4's own terminal state, per DIR-026's
+two-outcomes model applied recursively.
+
+**OUTCOME: needs-human — external blocker (no live/idle archguard tmux session available to
+remote-drive per ADR-016; a third-party consumer tool/service outside this project's control).** This
+is NOT an in-project difficulty (DIR-026 Reading A) — it is the exact same external blocker M111
+already recorded for P4's own AC3, now correctly propagated to the parent by the structural
+parent-done-iff-children rule. All 4 AC + 3 DoD items this task itself owns remain independently
+verified TRUE; only the graph-structural completion condition (all 5 phases done) is unmet, pending
+P4's AC3 resolution by a human with archguard tmux access. `milestone_counter` is NOT advanced for
+this outcome (OUTER-LOOP.md: "A `needs-human` outcome does NOT advance `milestone_counter` as a
+completion") — corrected from 114 back to 113 on the dashboard.

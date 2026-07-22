@@ -6,9 +6,9 @@ item 2 / m13 design doc §13). The task store is canonical; this file is a value
 of it, with an explicit recency alternate available via `--sort=updated` (never the default order,
 per §13's own ordering decision — recency actively misorders SELECT candidates).
 
-Regenerated at: 2026-07-22T13:46:36.326Z
+Regenerated at: 2026-07-22T13:53:22.849Z
 Sort mode: **value** (default — value-ordered, not recency)
-Source: /tmp/mc-tasks.json
+Source: /tmp/mc-tasks2.json
 
 ## Open candidates (value-ordered — not yet DONE/STALE)
 
@@ -44,7 +44,11 @@ question, not a mechanical wiring task). Δv̂ small-to-moderate depending on wh
 methodology/governance, likely no VT chart cell (mirrors the DoD-program lineage's own no-VT-cell
 precedent), but real value in preventing the QENG-5 wiring from being cited as "done" when only 2
 static fixture tasks, never a real milestone, have actually exercised it. | superseded (milestone:M37-discover-post-qeng) | (no outcome/status-mirror text found) |
+| exp5-M-TS-MIGRATION | TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety | (unspecified) | (unspecified) | needs-human | (no outcome/status-mirror text found) |
 | exp5-M-TS-MIGRATION-P4 | TS migration P4 (exp5 method-infra scripts, ADR-012): migrate the load-bearing gates/scripts to TS under the golden-diff discipline (like the it0-dod-check restructure) — behavior-preserving, autonomous. | (unspecified) | (unspecified) | needs-human | (no outcome/status-mirror text found) | _Not-selected note: Not selected M91 — exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS selected (governance-integrity defect: silent healthcheck failure when QC-T1 fixture missing; bounded scope). This candidate deferred._
+| exp5-M-TS-MIGRATION-P5 | TS migration P5 (bin entrypoints + quay-backlog provider, DIR-058): full JS-elimination scope extension to ADR-012, 2 SEA shims exempted | (unspecified) | (unspecified) | todo | (no outcome/status-mirror text found) |
+| exp5-M-TS-MIGRATION-P5-A | TS migration P5-A (bin entrypoints, DIR-058): migrate 4 CLI bin/*.js launchers to .ts | (unspecified) | (unspecified) | todo | (no outcome/status-mirror text found) |
+| exp5-M-TS-MIGRATION-P5-B | TS migration P5-B (quay-backlog provider, DIR-058): migrate 3 src/*.js files to .ts | (unspecified) | (unspecified) | todo | (no outcome/status-mirror text found) |
 | PROBE-M98-001 | M97 AC gap: startMcpServer outDegree=7 in fresh M98 measurement, AC required ≤4 | (unspecified) | (unspecified) | todo (milestone:M-99) | (no outcome/status-mirror text found) |
 
 ## DONE / STALE (closed — backfilled + executed)
@@ -198,7 +202,6 @@ GAP-001/GAP-002/GAP-007/G-02. | exploit (fix known real defects/gaps found via t
 (secondary — CLI ergonomics), method infra, VT points TBD at charter-authoring (likely small
 positive Δv̂ on the CLI surface, given GAP-002 is a genuine correctness bug, not cosmetic polish). | done (milestone:M29-cli-create-ergonomics) | done (ABSORBed @M29, 2026-07-19 — GAP-002+GAP-001 fixed together in `packages/quay/bin/quay.js` (new `task create` verb + hardened `task edit` existence/empty-title guard, the latter tightened during the merge to catch an empty-string `--title` case iteration-1's skepticism pass found); G-02 fixed (--help text); GAP-007 re-measured 2.25x-3.13x, consistent with M27's ~2.6x, not fixed per charter's explicit judgment call. Realized Δv=+0.50, exact match to charter's Δv̂≈0.5. Adversarial-audit gate (REQUIRED, first real non-no-op firing recently): NO REFUTATION FOUND. DoD meta-enforcer: PASS (5th-ever real test, 1st against real product code). Full details: `dashboard.md`'s "ABSORB m29" entry.) |
 | exp5-M-TASK-BACKLOG-PROJECTION-IMPL | Implement M-TASK-BACKLOG-PROJECTION's design (this milestone itself, M24) | DIR-015 item 1 (satisfied by the row's own creation, at m21) + DIR-015 item 2 (this row's own SELECT work, executed here at M24) + the m13 design doc docs/proposals/exp5-task-backlog-primitive-projection.md §15 | explore, capability-growth (primary) + governance-integrity (secondary) | done (milestone:M24-task-backlog-projection-impl) | todo (self-referential open candidate — this milestone is its own SELECT+dispatch; status transitions to done at ABSORB, per Phase 3's own newly-built write-back mechanism) |
-| exp5-M-TS-MIGRATION | TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety | (unspecified) | (unspecified) | done | (no outcome/status-mirror text found) |
 | exp5-M-TS-MIGRATION-P0 | TS migration P0 (tooling only, ADR-012): tsconfig + `tsc --noEmit` type gate + Node 25 native type-stripping run path + `node --test` on a .ts file — NO product-code rewrite (P1–P4 stay human-steered in the parent). Loop-executable, human-authorized slice of exp5-M-TS-MIGRATION. | (unspecified) | (unspecified) | done (milestone:M63) | (no outcome/status-mirror text found) |
 | exp5-M-TS-MIGRATION-P1 | TS migration P1 (leaf modules, ADR-012): port pure-logic leaf modules (task-schema, provider-client, gate registry — no wide product-code rewrite yet) to real .ts, behavior-preserving + golden-diff. Loop-executable, human-authorized slice of exp5-M-TS-MIGRATION, phase 2 of 5 (P0 done). | (unspecified) | (unspecified) | done (milestone:M-77) | (no outcome/status-mirror text found) |
 | exp5-M-TS-MIGRATION-P2 | TS migration P2 (ABI boundary, ADR-012): express the Provider ABI (task + ADR view-models) as TypeScript interfaces — the ABI contract becomes a type — behavior-preserving, autonomous under the golden-diff discipline. | (unspecified) | (unspecified) | done | (no outcome/status-mirror text found) |
