@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 106** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 107** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -892,3 +892,5 @@ m106 · exp5-M-TS-MIGRATION-P4 (partial Batch 1) · Δv=0 (v̂=0) · outcome=DON
 
 **Task:** [[exp5-M-TS-MIGRATION-P4]] (`tasks/exp5-M-TS-MIGRATION-P4.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M107-ts-migration-p4-batch2.md`
+
+m107 · exp5-M-TS-MIGRATION-P4 (partial Batch 2) · Δv=0 (v̂=0) · outcome=DONE (7 non-vendor scripts .mjs→.ts; tsc exit 0; test-pins byte-identical; GATE-HASH-REF unchanged) · audit=NO REFUTATION FOUND · merge=3210f5e · → milestones/M107/
