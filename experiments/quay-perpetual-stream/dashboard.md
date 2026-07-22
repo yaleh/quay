@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 109** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 110** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -931,3 +931,18 @@ m109 · exp5-M-TS-MIGRATION-P4-BATCH3 · Δv=0 (v̂=0) · outcome=DONE (9 vendor
 
 **Task:** [[exp5-M-TS-MIGRATION-P4-BATCH4]] (`tasks/exp5-M-TS-MIGRATION-P4-BATCH4.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M110-ts-migration-p4-batch4.md`
+
+m110 · exp5-M-TS-MIGRATION-P4-BATCH4 · Δv=0 (v̂=0) · outcome=DONE (it0-dod-check.mjs→.ts; task-schema.mjs shim deleted; it0-dod-check.sh updated; NEW GATE-HASH-REF=22c64fc383d6fc03ba375f8b9ce463abce3459d318c8787e33d8bcb321d876e1; inherited-core.md + OUTER-LOOP.md refs updated; self-hosting test PASS) · audit=NO REFUTATION FOUND · merge=aa84c02 · → milestones/M110/
+
+## SELECT M111 — exp5-M-TS-MIGRATION-P4 (parent close)
+
+**Selected:** exp5-M-TS-MIGRATION-P4 — close the P4 parent task now that all 4 batches are done (M106/M107/M109/M110). Scope: run `dod-fixture-selfcheck.sh` to verify DoD meta-enforcer self-pinning still holds post-rename; attempt archguard remote-drive leg (AC3) or land `needs-human`; tick all parent AC/DoD boxes; commit.
+
+**Rationale:** Exploit pick (3rd post-M108 explore reset; M113 is the next mandatory explore if M109-M112 all exploits). The ADR-012 P4 program batches are complete; the parent task must be formally closed. AC3 (archguard consumer verification) may land `needs-human` per the existing escape hatch. Methodology-class closure — no quay-task-to-plan required.
+
+**NEW GATE-HASH-REF (post-M110):** `22c64fc383d6fc03ba375f8b9ce463abce3459d318c8787e33d8bcb321d876e1` — all future charters must pin this hash.
+
+**Deferred:** exp5-M-CRYST (crystallization program — M112+), DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED).
+
+**Task:** [[exp5-M-TS-MIGRATION-P4]] (`tasks/exp5-M-TS-MIGRATION-P4.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M111-ts-migration-p4-close.md`
