@@ -3,6 +3,7 @@
 **Milestone:** M92  
 **Task:** exp5-DEFECT-DIR056-PROBE-SPEC-UNWIRED  
 **Auditor:** Fresh-context adversarial review (inline, manda unavailable)  
+**Audit session id:** m92-audit-2026-07-22  
 **Date:** 2026-07-22  
 **Verdict:** NO REFUTATION FOUND
 
