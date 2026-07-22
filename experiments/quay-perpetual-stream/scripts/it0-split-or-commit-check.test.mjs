@@ -9,7 +9,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parseFrontmatter, runChecks, loadTasks, selftest } from "./it0-split-or-commit-check.mjs";
+import { parseFrontmatter, runChecks, loadTasks, selftest } from "./it0-split-or-commit-check.ts";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";

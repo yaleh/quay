@@ -11,6 +11,10 @@ parent: exp5-M-TS-MIGRATION
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-TS-MIGRATION-P4
+    experiments/quay-perpetual-stream/charters/M107-ts-migration-p4-batch2.md
+    /tmp/m107-absorb-entry.md
 ---
 ## Proposal
 Phase P4 (final) of [[exp5-M-TS-MIGRATION]] (ADR-012). With the product packages on TS (P3), migrate
@@ -84,3 +88,25 @@ Evidence:
 
 Remaining (future batches): `it0-dod-check.mjs` (GATE-HASH-REF rotation — separate milestone),
 plugin-vendor-copy scripts (requires plugin bump + sync), scripts without selfcheck fixtures.
+
+### M107 Batch 2 complete (2026-07-22)
+
+Migrated 7 remaining non-vendor scripts from `.mjs` to `.ts`:
+1. `it0-task-bulk-write.ts`
+2. `it0-backlog-regen.ts`
+3. `it0-backlog-projection-check.ts`
+4. `regenerate-backlog-view.ts`
+5. `it0-split-or-commit-check.ts`
+6. `it0-enforcement-with-design-check.ts`
+7. `golden-replay-dir044.ts`
+
+Evidence:
+- `npx tsc --noEmit -p scripts/tsconfig.json`: exit 0
+- Test-pinned scripts: `it0-enforcement-with-design-check.test.mjs` 13/13 PASS (byte-identical before/after); `it0-split-or-commit-check.test.mjs` 22/22 PASS (byte-identical before/after)
+- `golden-replay-dir044.ts` smoke test: exit 0 (PASS: orthogonality DISJOINT, 2-wide batch, fan-in +2, anti-drift OK)
+- `it0-dod-check.mjs` sha256: 33de7bbae2cda1eaea5e31cd9199da82c65b1a391042ce7638d81157fed92deb (untouched)
+- Full test suite (excluding serve-github/provider-abi-conformance): exit 0
+- All active reference locations updated: `.quay/gates.yml` (lines 107/113), `OUTER-LOOP.md` (3 refs), `it0-backlog-projection-check.sh`
+- Adversarial audit: NO REFUTATION FOUND (`milestones/M107/audits/iteration-0-acceptance-audit.md`, session `b2f94e31-7c18-4a92-8e6d-5f0d3a1c9e47`)
+
+Remaining (future batches): `it0-dod-check.mjs` (Batch 4 + GATE-HASH-REF rotation), plugin-vendor-copy scripts (Batch 3: requires plugin bump + sync).

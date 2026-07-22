@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// it0-enforcement-with-design-check.mjs — Enforcement-WITH-design invariant gate (ADR-011 / exp5-M-CRYST-INV)
+// it0-enforcement-with-design-check.ts — Enforcement-WITH-design invariant gate (ADR-011 / exp5-M-CRYST-INV)
 //
 // Checks that every DoD clause in `inherited-core.md`'s "## Definition of Done" section has a
 // matching mechanical enforcement in `scripts/it0-dod-check.mjs`. A clause present in
@@ -19,13 +19,13 @@
 //   checker fails as soon as a new unenforced clause appears), and validates the existing clauses
 //   are actually linked — all three properties the task's AC/DoD require.
 //
-// <!-- enforcement: scripts/it0-enforcement-with-design-check.mjs -->
+// <!-- enforcement: scripts/it0-enforcement-with-design-check.ts -->
 //   (this file IS its own enforcement pointer, self-referential but intentional — the check IS
 //   the gate; adding it here satisfies ADR-011's "fixture + enforcement in same milestone" bar)
 //
 // Usage:
-//   node it0-enforcement-with-design-check.mjs <workspace-root>
-//   node it0-enforcement-with-design-check.mjs --selftest
+//   node it0-enforcement-with-design-check.ts <workspace-root>
+//   node it0-enforcement-with-design-check.ts --selftest
 //
 // Exit codes:
 //   0 = PASS — all DoD clauses in inherited-core.md have a matching enforcement block in it0-dod-check.mjs
@@ -43,7 +43,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Scans the "## Definition of Done" section for lines matching "### Clause N" or "Clause N —"
 // headings (the canonical DoD clause format in inherited-core.md).
 // Returns a sorted array of unique clause numbers found (e.g. [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).
-export function parseInheritedCoreClauses(inheritedCoreText) {
+export function parseInheritedCoreClauses(inheritedCoreText: string): number[] {
   // Find the DoD section: starts at "## Definition of Done" heading, ends at the next top-level
   // "## " heading (a two-character sequence after a real newline). Use a non-greedy match that
   // stops at the next \n## boundary — NOTE: do NOT use the `m` flag with a `$` alternative in the
@@ -68,7 +68,7 @@ export function parseInheritedCoreClauses(inheritedCoreText) {
   // The canonical DoD clause headings use "### Clause N" where N is an integer.
   // "Clause 0's sibling" is documented as "Clause 8" separately, so we parse the
   // named clause headings and deduplicate.
-  const clauseNums = new Set();
+  const clauseNums = new Set<number>();
 
   // Primary: "### Clause N" headings — the authoritative clause declarations.
   for (const m of dodSection.matchAll(/^###\s+Clause\s+(\d+)\b/gm)) {
@@ -82,8 +82,8 @@ export function parseInheritedCoreClauses(inheritedCoreText) {
 // Scans for `// --- Clause N:` comment lines — the canonical "here is where Clause N is enforced"
 // marker in it0-dod-check.mjs.
 // Returns a Set of enforced clause numbers.
-export function parseDodCheckClauses(dodCheckText) {
-  const enforcedNums = new Set();
+export function parseDodCheckClauses(dodCheckText: string): Set<number> {
+  const enforcedNums = new Set<number>();
 
   // Match "// --- Clause N:" lines (the enforcement block headers in it0-dod-check.mjs).
   for (const m of dodCheckText.matchAll(/^\/\/\s*---\s*Clause\s+(\d+):/gm)) {
@@ -93,15 +93,22 @@ export function parseDodCheckClauses(dodCheckText) {
   return enforcedNums;
 }
 
+export interface ChecksResult {
+  failures: string[];
+  passes: string[];
+  coreClauses: number[];
+  enforcedClauses: Set<number>;
+}
+
 // ── runChecks — pure function: given the text of both files, returns {failures, passes} ────────────
 // Bidirectional check (both halves of ADR-011):
 //   1. ENFORCEMENT-MISSING: every clause in inherited-core.md must have an enforcement block in dod-check
 //   2. DESIGN-MISSING: every enforcement block in dod-check must have a clause heading in inherited-core.md
 // Both directions are required: enforcement-without-design violates ADR-011 just as much as
 // design-without-enforcement. The check is the current-state invariant: all clauses aligned in both files.
-export function runChecks(inheritedCoreText, dodCheckText) {
-  const failures = [];
-  const passes = [];
+export function runChecks(inheritedCoreText: string, dodCheckText: string): ChecksResult {
+  const failures: string[] = [];
+  const passes: string[] = [];
 
   const coreClauses = parseInheritedCoreClauses(inheritedCoreText);
   const enforcedClauses = parseDodCheckClauses(dodCheckText);
@@ -147,11 +154,11 @@ export function runChecks(inheritedCoreText, dodCheckText) {
 // ── selftest — RED+GREEN fixture cases using synthetic file content ────────────────────────────────
 // RED fixture: inherited-core has a "Clause 10" not in it0-dod-check → FAIL
 // GREEN fixture: all clauses in inherited-core are in it0-dod-check → PASS
-export function selftest() {
+export function selftest(): boolean {
   let allPassed = true;
 
   // Helper: run one fixture and report
-  function runFixture(name, inheritedCoreText, dodCheckText, expectFail) {
+  function runFixture(name: string, inheritedCoreText: string, dodCheckText: string, expectFail: boolean): void {
     const { failures, passes } = runChecks(inheritedCoreText, dodCheckText);
     const didFail = failures.length > 0;
     if (didFail === expectFail) {
@@ -282,9 +289,9 @@ function checkClause10() {}
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
-function usage() {
-  console.error("usage: node it0-enforcement-with-design-check.mjs <workspace-root>");
-  console.error("       node it0-enforcement-with-design-check.mjs --selftest");
+function usage(): never {
+  console.error("usage: node it0-enforcement-with-design-check.ts <workspace-root>");
+  console.error("       node it0-enforcement-with-design-check.ts --selftest");
   process.exit(2);
 }
 

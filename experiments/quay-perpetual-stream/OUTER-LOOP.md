@@ -11,7 +11,7 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
 - **Backlog (milestone candidates):** `experiments/quay-perpetual-stream/backlog.md` — **generated
   view** as of M24-task-backlog-projection-impl (DIR-015 item 2 / m13 design doc §1/§13): the task
   store (`label: milestone-candidate` tasks) is canonical; `backlog.md`/`dashboard.md` are regenerated
-  from it via `scripts/regenerate-backlog-views.mjs`, not hand-edited as the source of truth going
+  from it via `scripts/regenerate-backlog-views.ts`, not hand-edited as the source of truth going
   forward. SELECT (step 1 below) reads the task store directly.
 - **Inherited core (Tier-B methodology):** `experiments/quay-perpetual-stream/inherited-core.md`
 
@@ -138,7 +138,7 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    never a prose "later phase." A parent task is `done` iff ALL its children are `done`. This is the
    discipline that ends the "do a slice, leave the parent pending forever" failure — the exact
    pattern that let a core directive item be deferred across five milestones (see DIR-026 Finding).
-   <!-- enforcement: scripts/it0-split-or-commit-check.mjs (C1/exp5-M-CRYST-C1) — the
+   <!-- enforcement: scripts/it0-split-or-commit-check.ts (C1/exp5-M-CRYST-C1) — the
         parent-done-iff-children rule, the SELECT-split rule above, AND child-link-symmetry (a task
         declaring `parent: Y` must be listed in Y's `children`, else parent-done silently excludes it
         and a program reads as complete while a phase is still open — the exp5-M-TS-MIGRATION P1-P4
@@ -521,7 +521,7 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    design-only-milestone impl-row gate, AND the DoD meta-enforcer gate above ALL clear, AND the
    ABSORB `master` merge sub-step above has landed the milestone's work on `master`).
    **`backlog.md`/`dashboard.md` regeneration (M24-task-backlog-projection-impl, design doc §13,
-   applies forward from m24):** re-run `scripts/it0-backlog-regen.mjs` (generates the
+   applies forward from m24):** re-run `scripts/it0-backlog-regen.ts` (generates the
    `backlog.md`/backlog-section-of-`dashboard.md` view from the live `milestone-candidate`-labeled
    task set, value-ordered by default with a `--sort=updated` recency alternate) as part of this
    step, paired with the status-change writes above — the same "glue regeneration to the exact

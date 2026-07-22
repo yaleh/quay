@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// it0-split-or-commit-check.mjs — single-source enforcement for the split-or-commit rules
+// it0-split-or-commit-check.ts — single-source enforcement for the split-or-commit rules
 // from DIR-026 that were previously prose-only in OUTER-LOOP.md:
 //
 //   1. PARENT-DONE-IFF-CHILDREN: A milestone task marked `done` with `role:compound` (or
@@ -19,7 +19,7 @@
 //
 // D3·R7 enforcement pointer: OUTER-LOOP.md's prose description of parent-done-iff-children
 // at Step 1 / SPLIT-OR-COMMIT references THIS script as the mechanical enforcement.
-// <!-- enforcement: scripts/it0-split-or-commit-check.mjs -->
+// <!-- enforcement: scripts/it0-split-or-commit-check.ts -->
 //
 // Reconciliation with store.js: packages/quay-native/src/store.js's `childrenStatus()`
 // detects compound tasks with incomplete subtrees via a recursive view-model tree walk. This
@@ -30,8 +30,8 @@
 // No store.js import is required; the check runs on raw task files without a running quay instance.
 //
 // Usage:
-//   node it0-split-or-commit-check.mjs <workspace-root>
-//   node it0-split-or-commit-check.mjs --selftest
+//   node it0-split-or-commit-check.ts <workspace-root>
+//   node it0-split-or-commit-check.ts --selftest
 //
 // Exit codes:
 //   0 = all checks PASS
@@ -45,22 +45,31 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+export interface TaskFrontmatter {
+  id: string | null;
+  status: string | null;
+  role: string | null;
+  children: string[];
+  labels: string[];
+  parent: string | null;
+}
+
 // ── parseFrontmatter — extract id, status, role, children from YAML frontmatter. ─────────────────
 // Lenient parser matching the existing task-schema.mjs pattern: handles block list and flow list for
 // arrays (children/labels). Returns null if not a valid task file (no --- fences).
-export function parseFrontmatter(text) {
+export function parseFrontmatter(text: string): TaskFrontmatter | null {
   const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!fmMatch) return null;
   const fm = fmMatch[1];
 
   // Scalar field: `key: value`
-  function scalar(key) {
+  function scalar(key: string): string | null {
     const m = fm.match(new RegExp(`^${key}:\\s*(.+?)\\s*$`, "m"));
     return m ? m[1].replace(/^["']|["']$/g, "").trim() : null;
   }
 
   // Block list field: `key:\n  - val1\n  - val2` OR flow list: `key: [val1, val2]`
-  function list(key) {
+  function list(key: string): string[] {
     const flowM = fm.match(new RegExp(`^${key}:\\s*\\[([^\\]]*)\\]\\s*$`, "m"));
     if (flowM) {
       return flowM[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
@@ -68,7 +77,7 @@ export function parseFrontmatter(text) {
     const lines = fm.split(/\r?\n/);
     const idx = lines.findIndex((l) => new RegExp(`^${key}:\\s*$`).test(l));
     if (idx < 0) return [];
-    const items = [];
+    const items: string[] = [];
     for (let i = idx + 1; i < lines.length; i++) {
       const m = lines[i].match(/^\s+-\s+(.+?)\s*$/);
       if (m) items.push(m[1].replace(/^["']|["']$/g, ""));
@@ -88,8 +97,8 @@ export function parseFrontmatter(text) {
 }
 
 // ── loadTasks — read all tasks/*.md from tasksDir, return a Map<id, task>. ───────────────────────
-export function loadTasks(tasksDir) {
-  const taskMap = new Map();
+export function loadTasks(tasksDir: string): Map<string, TaskFrontmatter> {
+  const taskMap = new Map<string, TaskFrontmatter>();
   if (!fs.existsSync(tasksDir)) return taskMap;
   const files = fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md"));
   for (const file of files) {
@@ -103,8 +112,12 @@ export function loadTasks(tasksDir) {
 }
 
 // ── isCompound — a task is compound if role===compound OR it has a non-empty children array. ─────
-function isCompound(t) {
+function isCompound(t: TaskFrontmatter): boolean {
   return t.role === "compound" || (t.children && t.children.length > 0);
+}
+
+export interface CheckResult {
+  failures: string[];
 }
 
 // ── runChecks — pure function: given a Map<id, task>, returns {failures: string[]}. ──────────────
@@ -114,8 +127,8 @@ function isCompound(t) {
 // violations (e.g. grandparent→parent→grandchild) are caught at each level independently by the
 // same rule when the gate runs on the full task set. This avoids duplicating the recursive walk
 // and is the right shape for a gate: produce one clear error per violated boundary.
-export function runChecks(taskMap) {
-  const failures = [];
+export function runChecks(taskMap: Map<string, TaskFrontmatter>): CheckResult {
+  const failures: string[] = [];
 
   // CHECK 1: PARENT-DONE-IFF-CHILDREN
   // For every compound task with status `done`, verify all direct children also have status `done`.
@@ -126,7 +139,7 @@ export function runChecks(taskMap) {
     const children = t.children || [];
     if (children.length === 0) continue; // done compound with no children is fine (leaf-compound)
 
-    const nonDoneChildren = [];
+    const nonDoneChildren: string[] = [];
     for (const childId of children) {
       const child = taskMap.get(childId);
       const childStatus = child ? child.status : "missing";
@@ -190,11 +203,18 @@ export function runChecks(taskMap) {
 // RED case 3: child declares `parent` but the parent's `children` omits it (link asymmetry) → FAIL
 // RED case 4: child declares a `parent` that does not exist (dangling link) → FAIL
 // GREEN case: parent `done` with all children `done` + compound `todo` with children + symmetric links → PASS
-export function selftest() {
+export function selftest(): boolean {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "it0-split-or-commit-"));
   let allPassed = true;
 
-  function writeTask(dir, id, fields) {
+  interface TaskDef {
+    status: string;
+    role?: string;
+    children?: string[];
+    parent?: string;
+  }
+
+  function writeTask(dir: string, id: string, fields: TaskDef): void {
     const childrenBlock =
       fields.children && fields.children.length > 0
         ? `children:\n${fields.children.map((c) => `  - ${c}`).join("\n")}`
@@ -204,7 +224,7 @@ export function selftest() {
     fs.writeFileSync(path.join(dir, `${id}.md`), content);
   }
 
-  function runFixture(name, taskDefs, expectFail) {
+  function runFixture(name: string, taskDefs: Record<string, TaskDef>, expectFail: boolean): void {
     const dir = path.join(tmpDir, name);
     fs.mkdirSync(dir, { recursive: true });
     for (const [id, fields] of Object.entries(taskDefs)) {
@@ -273,9 +293,9 @@ export function selftest() {
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
-function usage() {
-  console.error("usage: node it0-split-or-commit-check.mjs <workspace-root>");
-  console.error("       node it0-split-or-commit-check.mjs --selftest");
+function usage(): never {
+  console.error("usage: node it0-split-or-commit-check.ts <workspace-root>");
+  console.error("       node it0-split-or-commit-check.ts --selftest");
   process.exit(2);
 }
 

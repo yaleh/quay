@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// it0-backlog-regen.mjs — regenerate backlog.md as a projection over label:milestone-candidate
+// it0-backlog-regen.ts — regenerate backlog.md as a projection over label:milestone-candidate
 // task-store tasks, per docs/proposals/exp5-task-backlog-primitive-projection.md §13.
 //
 // Usage:
-//   node it0-backlog-regen.mjs <experiment-dir> [--sort=value|updated] [--write]
+//   node it0-backlog-regen.ts <experiment-dir> [--sort=value|updated] [--write]
 //
 // Without --write, prints the generated markdown to stdout (dry run). With --write,
 // overwrites <experiment-dir>/backlog.md in place.
@@ -20,8 +20,17 @@ import { createStore } from "../../../packages/quay-native/src/store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function usage() {
-  console.error("usage: node it0-backlog-regen.mjs <experiment-dir> [--sort=value|updated] [--write]");
+interface Task {
+  id: string;
+  title: string;
+  status: string;
+  labels?: string[];
+  body?: string;
+  updatedAt?: number;
+}
+
+function usage(): never {
+  console.error("usage: node it0-backlog-regen.ts <experiment-dir> [--sort=value|updated] [--write]");
   process.exit(2);
 }
 
@@ -34,7 +43,7 @@ const sortArg = (args.find((a) => a.startsWith("--sort=")) || "--sort=value").sp
 const doWrite = args.includes("--write");
 
 // Repo root: walk up from experimentDir looking for tasks/ + .quay
-function findRepoRoot(startDir) {
+function findRepoRoot(startDir: string): string {
   let dir = startDir;
   for (let i = 0; i < 10; i++) {
     if (fs.existsSync(path.join(dir, "tasks")) || fs.existsSync(path.join(dir, ".quay"))) {
@@ -50,27 +59,27 @@ function findRepoRoot(startDir) {
 const repoRoot = findRepoRoot(process.cwd());
 const store = createStore(path.join(repoRoot, "tasks"));
 
-const candidates = store.list({ label: "milestone-candidate" });
+const candidates: Task[] = store.list({ label: "milestone-candidate" });
 
-function firstBodyLine(body, marker) {
+function firstBodyLine(body: string, marker: string): string {
   const m = body.match(new RegExp(`## ${marker}\\n([^\\n]*)`));
   return m ? m[1].trim() : "";
 }
 
-function extractDeltaV(body) {
+function extractDeltaV(body: string): string {
   // Look for "Value type / cadence" section text mentioning Δv̂ or method infra
   const section = body.match(/## Value type \/ cadence\n([^\n]*)/);
   return section ? section[1].trim() : "";
 }
 
-function isStale(t) {
+function isStale(t: Task): boolean {
   return (t.labels || []).includes("stale");
 }
-function isDone(t) {
+function isDone(t: Task): boolean {
   return t.status === "done";
 }
 
-function statusLabel(t) {
+function statusLabel(t: Task): string {
   if (isStale(t)) return "STALE";
   if (isDone(t)) return "DONE";
   const milestoneLabel = (t.labels || []).find((l) => l.startsWith("milestone:"));
@@ -78,7 +87,7 @@ function statusLabel(t) {
   return "open";
 }
 
-function roughValueScore(t) {
+function roughValueScore(t: Task): number {
   // Sort key: DONE first (by updatedAt desc as proxy for realized-value-recency-within-done),
   // then open (by updatedAt desc as proxy — real Δv̂ parsing would need a stricter body schema),
   // then STALE last.
@@ -87,23 +96,23 @@ function roughValueScore(t) {
   return 1;
 }
 
-let sorted;
+let sorted: Task[];
 if (sortArg === "updated") {
-  sorted = [...candidates].sort((a, b) => b.updatedAt - a.updatedAt);
+  sorted = [...candidates].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 } else {
   sorted = [...candidates].sort((a, b) => {
     const sv = roughValueScore(b) - roughValueScore(a);
     if (sv !== 0) return sv;
-    return b.updatedAt - a.updatedAt;
+    return (b.updatedAt || 0) - (a.updatedAt || 0);
   });
 }
 
-const lines = [];
+const lines: string[] = [];
 lines.push(`# Milestone / Opportunity Backlog — quay-perpetual-stream (Experiment 5)`);
 lines.push("");
 lines.push(
   `_Generated view over \`label:milestone-candidate\` tasks (design doc §13). Regenerate with ` +
-  `\`node scripts/it0-backlog-regen.mjs experiments/quay-perpetual-stream --write\`. Do not hand-edit._`
+  `\`node scripts/it0-backlog-regen.ts experiments/quay-perpetual-stream --write\`. Do not hand-edit._`
 );
 lines.push("");
 lines.push(`Sort: ${sortArg === "updated" ? "recency (updatedAt desc) — alternate view" : "value-view (DONE/open/STALE, default)"}`);

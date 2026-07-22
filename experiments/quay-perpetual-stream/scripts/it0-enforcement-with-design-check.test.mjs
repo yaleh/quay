@@ -15,7 +15,7 @@ import {
   parseInheritedCoreClauses,
   parseDodCheckClauses,
   runChecks,
-} from "./it0-enforcement-with-design-check.mjs";
+} from "./it0-enforcement-with-design-check.ts";
 
 // ── parseInheritedCoreClauses tests ──────────────────────────────────────────────────────────────
 

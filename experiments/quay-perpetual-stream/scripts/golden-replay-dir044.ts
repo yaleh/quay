@@ -1,4 +1,4 @@
-// golden-replay-dir044.mjs — the terminal golden-replay proof for the concurrent scheduler (DIR-044
+// golden-replay-dir044.ts — the terminal golden-replay proof for the concurrent scheduler (DIR-044
 // increment 5; charters/DIR-044-concurrent-scheduler-D3.md Step 3). It replays a REAL, recorded,
 // touches-disjoint milestone PAIR — DIR-039 (M62, merge 7ca6043) ∥ DIR-042-A (M59, merge 3e7556b) —
 // through the WHOLE pipeline (orthogonality → batch → fan-in → anti-drift) and asserts the end-state
@@ -22,24 +22,39 @@ import { checkAntiDrift } from "./anti-drift-touches-check.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GOLD = path.join(__dirname, "..", "fixtures", "golden");
 
+interface Oracle {
+  startCounter: number;
+  counterDelta: number;
+  buildCount: number;
+  disjoint: boolean;
+  antiDriftClean: boolean;
+}
+
 // The frozen SERIAL oracle (recorded fact, pinned at charter time):
 //   DIR-042-A ran at M59 (counter 58→59), DIR-039 ran at M62 (counter 61→62), each a clean gate-PASS
 //   ABSORB with NO REFUTATION FOUND. IF batched concurrently from a common start, the fan-in must
 //   advance the counter by exactly 2 and record both entries with zero conflict.
-const ORACLE = { startCounter: 58, counterDelta: 2, buildCount: 2, disjoint: true, antiDriftClean: true };
+const ORACLE: Oracle = { startCounter: 58, counterDelta: 2, buildCount: 2, disjoint: true, antiDriftClean: true };
 
 // Recorded touches are exact file paths — an identity expander faithfully replays the recorded
 // build file-sets (do NOT re-expand against the current tree, which may have moved files).
-function identityExpand(globs) {
-  const out = new Set();
+function identityExpand(globs: string[]): Set<string> {
+  const out = new Set<string>();
   for (const g of globs) if (!/[*?]/.test(g)) out.add(g); // exact paths only (recorded diffs)
   return out;
 }
 
-function fail(msg, checks) { return { ok: false, msg, checks }; }
+interface ReplayResult {
+  ok: boolean;
+  msg: string;
+  checks: [string, boolean][];
+  plan?: ReturnType<typeof computeFanIn>;
+}
 
-export function runGoldenReplay() {
-  const checks = [];
+function fail(msg: string, checks: [string, boolean][]): ReplayResult { return { ok: false, msg, checks }; }
+
+export function runGoldenReplay(): ReplayResult {
+  const checks: [string, boolean][] = [];
   const dir039Text = fs.readFileSync(path.join(GOLD, "dir039.charter.md"), "utf8");
   const dir042Text = fs.readFileSync(path.join(GOLD, "dir042a.charter.md"), "utf8");
   const t039 = parseTouches(dir039Text);
@@ -55,7 +70,7 @@ export function runGoldenReplay() {
   const batch = assembleBatch(cands, { expand: identityExpand });
   const twoWide = batch.batch.length === ORACLE.buildCount && batch.deferred.length === 0;
   checks.push([`scheduler ${ORACLE.buildCount}-wide batch`, twoWide]);
-  if (!twoWide) return fail(`scheduler: expected ${ORACLE.buildCount}-wide batch, got ${batch.batch.length} (deferred: ${batch.deferred.map((d) => d.id).join(",")})`, checks);
+  if (!twoWide) return fail(`scheduler: expected ${ORACLE.buildCount}-wide batch, got ${batch.batch.length} (deferred: ${batch.deferred.map((d: any) => d.id).join(",")})`, checks);
 
   // (3) fan-in: counter advances by exactly 2, both entries, contiguous.
   const builds = [
@@ -76,7 +91,7 @@ export function runGoldenReplay() {
   return { ok: true, msg: "concurrent path reproduces the serial oracle (counter +2, both entries, disjoint, no drift)", checks, plan };
 }
 
-export async function main() {
+export async function main(): Promise<number> {
   const r = runGoldenReplay();
   process.stdout.write("GOLDEN REPLAY — DIR-039 ∥ DIR-042-A (recorded pair) through the concurrent pipeline:\n");
   for (const [name, pass] of r.checks) process.stdout.write(`  ${pass ? "PASS" : "FAIL"}: ${name}\n`);
