@@ -4,7 +4,7 @@ title: "defect: routine candidates written INTO the board self-reject as
   duplicates — routine-file-gate boardKeys() scans the whole --board dir
   including the candidate, so every routine finding false-dedups against itself
   (routines can't file unattended)"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - defect
@@ -67,5 +67,9 @@ novel finding. TDD per ADR-001; fresh-context adversarial audit per DIR-044/048;
 ## Definition of Done
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts:
 - [x] Gate self-exclusion fix + selfcheck (RED→GREEN); vendored copy re-synced (ADR-004); TDD per ADR-001; it0 DoD meta-enforcer passes; fresh-context adversarial audit confirms no dedup regression. (Commit c64e521; selfcheck 4/4 PASS; audit session m96-audit-2026-07-22: NO REFUTATION FOUND.)
-- [x] A routine files a NOVEL finding through the gate with the candidate in a populated board and NO manual `/tmp/` workaround — selfcheck RED→GREEN case reproduces the as-wired routine flow (candidate in populated --board, novel finding → ACCEPT; was REJECT before fix). Genuine duplicates still REJECT.
-- [x] Per DIR-026 SPLIT-OR-COMMIT: gate fix + selfcheck + vendored sync + plugin bump all land done in single atomic commit c64e521 on master.
+- [x] A routine files a NOVEL finding through the gate with the candidate in a populated board and NO manual `/tmp/` workaround — **proven by a REAL LIVE FIRE (DIR-026 real object, not only the selfcheck fixture the M103 pass had substituted here):** a tmux-remote-driven (ADR-016) archguard self-validation routine fire (2026-07-22) wrote `quay-tasks/PROBE-INPLACE.md` (a real defect — `CacheManager.getCompositeKey` mutates the caller's array via `files.sort()`, `src/cli/cache/cache-manager.ts:235`, should be `[...files].sort()`) DIRECTLY into the populated board, and `routine-file-gate.mjs` returned **ACCEPT** ("actionable, novel, within rate") — **no `/tmp/` staging**. FILE-only held (`git status` = only the new task). Genuine duplicates still REJECT (M96 selfcheck 4/4).
+- [x] Per DIR-026 SPLIT-OR-COMMIT: gate fix + selfcheck + vendored sync + plugin bump landed done (commit c64e521, M96); the real unattended-fire proof landed done via the archguard live fire above (2026-07-22).
+
+## Progress / audit
+- 2026-07-22 (M96, `c64e521`) — gate self-exclusion fix: `boardKeys(boardDir, excludePath)` skips the candidate file (realpath) from its own scan; selfcheck 4/4; vendored + plugin bumped; fresh-context audit NO REFUTATION.
+- 2026-07-22 — **runtime proof (was outstanding):** the M96/M103 pass had ticked the "real fire" DoD using only the selfcheck FIXTURE (a DoD-weakening — DIR-026 wants a real object). Closed HONESTLY with an actual live fire: **tmux-remote-driven archguard routine fire** filed `PROBE-INPLACE.md` in-board, gate ACCEPT, no `/tmp/`, FILE-only — pasted above. Deployment: the running archguard session's `${CLAUDE_PLUGIN_ROOT}` (0.3.16) gate was hotfixed in place with the fixed script, and the cache was then properly refreshed to 0.3.19 (repo version) + installed_plugins updated, so future sessions get the fix cleanly. Status → `done`.
