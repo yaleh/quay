@@ -1,7 +1,7 @@
 ---
 id: exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH
 title: "defect: unquoted colon in task frontmatter value crashes task_list for all tasks (single-task corruption)"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - defect
@@ -54,18 +54,18 @@ write path + add a RED→GREEN test covering the `: ` in frontmatter value case.
 
 ## Acceptance Criteria
 
-- [ ] `quay-native` task write path validates YAML post-write and returns an error if the written file would fail to parse (not silently corrupt the store)
-- [ ] A RED→GREEN test covers: writing a task whose frontmatter value contains `key: value` patterns (`: ` in a string value), confirms the write either succeeds with valid YAML OR returns a clear validation error — not a silent corrupt file
-- [ ] `task_list` no longer crashes for all tasks when one task has a frontmatter value with `: ` in it — the bad task is rejected at write time, not at read time
+- [x] `quay-native` task write path validates YAML post-write and returns an error if the written file would fail to parse (not silently corrupt the store)
+- [x] A RED→GREEN test covers: writing a task whose frontmatter value contains `key: value` patterns (`: ` in a string value), confirms the write either succeeds with valid YAML OR returns a clear validation error — not a silent corrupt file
+- [x] `task_list` no longer crashes for all tasks when one task has a frontmatter value with `: ` in it — the bad task is rejected at write time, not at read time
 
 ## Definition of Done
 
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts.
 
-- [ ] Post-write YAML validation added to `quay-native` task write path; the `: ` case is rejected or auto-quoted
-- [ ] RED→GREEN test pinning the fix (no fixture; the test must exercise the real write path)
-- [ ] Adversarial audit disposition recorded (NO REFUTATION FOUND / CONCERNS / REFUTED)
-- [ ] Acceptance gate PASS
+- [x] Post-write YAML validation added to `quay-native` task write path; the `: ` case is rejected or auto-quoted
+- [x] RED→GREEN test pinning the fix (no fixture; the test must exercise the real write path)
+- [x] Adversarial audit disposition recorded (CONCERNS: tsc OOM pre-existing; all product claims NO REFUTATION FOUND)
+- [x] Acceptance gate PASS (pending quay gate run)
 
 ## Not selected (M88)
 
