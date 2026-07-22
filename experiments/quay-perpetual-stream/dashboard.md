@@ -775,3 +775,14 @@ m97 · ARCH-M93-002 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=cad0a
 **Charter:** `experiments/quay-perpetual-stream/charters/M98-arch-audit-post-m97-explore.md`
 
 m98 · exp5-M-ARCH-AUDIT-M98-EXPLORE · Δv=0 (v̂=0) · audit=documented-no-op (explore, FILE-ONLY) · filed=PROBE-M98-001 (startMcpServer outDegree=7 vs AC ≤4) · → milestones/M98/
+
+## SELECT M99 — PROBE-M98-001
+
+**Selected:** PROBE-M98-001 — fix `startMcpServer` outDegree=7 → ≤4 by adding `registerAllHandlers()` facade in `mcp-handlers.ts`; replace 5 separate `register*` imports in `mcp-server.ts` with 1 consolidated call. Closes the M97 AC gap surfaced by M98 explore.
+
+**Rationale:** Exploit pick (1st post-M98 explore reset). Directly closes the unfulfilled M97 AC. Bounded: +~8 lines in `mcp-handlers.ts`, -4 import lines in `mcp-server.ts`, 1 call replaced. Zero behavior change.
+
+**Deferred:** ARCH-M93-001 (gate/ god-package), ARCH-M93-003 (startServer), exp5-M-TS-MIGRATION-P4.
+
+**Task:** [[PROBE-M98-001]] (`tasks/PROBE-M98-001.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M99-startmcpserver-outDegree-fix.md`

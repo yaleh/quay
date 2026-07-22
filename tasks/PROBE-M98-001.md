@@ -1,11 +1,18 @@
 ---
 id: PROBE-M98-001
-title: "M97 AC gap: startMcpServer outDegree=7 in fresh M98 measurement, AC required ≤4"
+title: "M97 AC gap: startMcpServer outDegree=7 in fresh M98 measurement, AC
+  required ≤4"
 status: todo
 labels:
   - milestone-candidate
+  - defect
+  - milestone:M-99
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    PROBE-M98-001
+    experiments/quay-perpetual-stream/charters/M99-startmcpserver-outDegree-fix.md
+    /tmp/m99-absorb-entry.md
 ---
 
 ## Finding
