@@ -6,10 +6,13 @@ title: "defect: DIR-056 probe-spec form is UNWIRED — probe spec files ship but
 status: todo
 labels:
   - milestone-candidate
+  - defect
+  - milestone:M-92
 parent: null
 children: []
 extra:
   schema: v1
+  acceptance: "bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh exp5-DEFECT-DIR056-PROBE-SPEC-UNWIRED experiments/quay-perpetual-stream/charters/M92-dir056-probe-spec-wiring.md /tmp/m92-absorb-entry.md"
 ---
 ## Finding
 [[DIR-056]] ("probe-spec formalization — DIR-051 v2") is marked **done (M86)**, and its Proposal/DoD

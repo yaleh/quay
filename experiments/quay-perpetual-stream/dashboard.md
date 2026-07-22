@@ -684,3 +684,14 @@ m90 · exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP · Δv=0 (v̂=0) · audit=CONCERNS
 **Charter:** `experiments/quay-perpetual-stream/charters/M91-qc-t1-fixture-probe.md`
 
 m91 · exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=8418004 · → milestones/M91/
+
+## SELECT M92 — exp5-DEFECT-DIR056-PROBE-SPEC-UNWIRED
+
+**Selected:** exp5-DEFECT-DIR056-PROBE-SPEC-UNWIRED — wire loop-driver SKILL to consume probe specs (`routines[].probe:` → `readProbeSpec` → `output_routing`); DIR-056 marked done (M86) with core SKILL wiring absent; probe spec files inert (grep → 0).
+
+**Rationale:** Exploit pick (5th post-M88 explore reset; next mandatory explore M93). Development-class defect: probe-spec form is a no-op in production — the three shipped specs (self-validation, architecture-analysis, history-mining) have zero execution path. Wiring unlocks DIR-055 (meta-cc mining, blocked on output_routing) and DIR-052/053 (routine migration). Requires `quay-task-to-plan` pipeline before dispatch per OUTER-LOOP.md step 5a.
+
+**Deferred:** DIR-052/053/055 (all blocked on this wiring — resolved by M92), exp5-M-TS-MIGRATION-P4 (5235L — split-or-commit required).
+
+**Task:** [[exp5-DEFECT-DIR056-PROBE-SPEC-UNWIRED]] (`tasks/exp5-DEFECT-DIR056-PROBE-SPEC-UNWIRED.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M92-dir056-probe-spec-wiring.md`

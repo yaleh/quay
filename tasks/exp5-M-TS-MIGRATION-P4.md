@@ -55,3 +55,7 @@ References the standard inherited-core DoD clauses; the bar is REAL LANDING, not
 ## Not selected (M91)
 
 Not selected M91 — exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS selected (governance-integrity defect: silent healthcheck failure when QC-T1 fixture missing; bounded scope). This candidate deferred.
+
+## Not selected (M92)
+
+Not selected M92 — exp5-DEFECT-DIR056-PROBE-SPEC-UNWIRED selected (higher-leverage defect: SKILL wiring absent blocks 3 downstream milestones). exp5-M-TS-MIGRATION-P4 also exceeds 5235L scope — split-or-commit assessment required before next SELECT.
