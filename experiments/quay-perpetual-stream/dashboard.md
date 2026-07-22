@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 113** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 114** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -996,3 +996,22 @@ m113 · exp5-M-ARCH-AUDIT-POST-FULL-TS · Δv=0 (v̂=0) · explore=DONE (entitie
 **Charter:** `experiments/quay-perpetual-stream/charters/M114-ts-migration-overall-close.md`
 
 m114 · exp5-M-TS-MIGRATION · Δv=0 (v̂=0) · outcome=needs-human (external: no live archguard tmux session to resolve P4's own AC3 — parent-done-iff-children invariant, self-caught via `it0-split-or-commit-check.ts`, blocks program close until P4 clears; all 4 AC + 3 DoD ticked independently-confirmed true regardless; full suite re-verified 346/8 packages/quay + 118/118 experiments suite; self-fixed a real M109 regression — 8 broken `.js`→`.ts` import specifiers + 4 stale `.mjs` fixture refs that had silently broken `task-schema-check.ts` since M109; pruned 6 dangling iteration worktrees M80-M84/M92; filed exp5-DEFECT-M114-TESTSUITE-DRIFT + exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM for follow-up; DIR-058 drained → split into exp5-M-TS-MIGRATION-P5/-A/-B) · audit=NO REFUTATION FOUND · merge=(pending commit) · milestone_counter NOT advanced (needs-human) · → milestones/M114/
+
+## SELECT M115 — exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM
+
+**Selected:** exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM — fix the audit-independence dispatch
+mechanism gap found at M114 (a subagent dispatched via the `Agent` tool cannot reliably self-report
+a distinct session id in this harness; the orchestrator must record the tool's own dispatch id
+instead). Governance-integrity/instrument-correction: affects every future ABSORB's audit dispatch,
+not just one milestone.
+
+**Rationale:** Exploit pick, small and well-bounded (documentation-only fix to `inherited-core.md` +
+`OUTER-LOOP.md`), highest leverage of the open candidates (reduces friction for every subsequent
+milestone's mandatory audit). Methodology-class — no quay-task-to-plan required; dispatch directly.
+
+**Deferred:** PROBE-M98-001 (suspected stale — code has moved on significantly since M98), `exp5-M-ARCH-AUDIT-M98-EXPLORE` (bookkeeping-only, AC already ticked, just needs status flip), `exp5-DEFECT-M114-TESTSUITE-DRIFT`, `exp5-M-TS-MIGRATION-P5-A/-B` (DIR-058 follow-on), `exp5-M-CRYST` (epic), `exp5-M-CLI-UX`/`exp5-M-DIRTASK`/`exp5-M-DOCS` (stale backfill), DIR-057/`exp5-M-CRYST-D2`/`exp5-M-CRYST-F1`/`exp5-M-OUTERLOOP-ROUTINE-WIRING` (human-steered).
+
+**Task:** [[exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM]] (`tasks/exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM.md`)
+**Charter:** `experiments/quay-perpetual-stream/charters/M115-audit-session-id-mechanism-fix.md`
+
+m115 · exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM · Δv=0 (v̂=0) · outcome=DONE (`inherited-core.md` Adversarial-audit role item 5 added — orchestrator, not subagent, records the `Agent`-tool dispatch id; stale `baime:iteration-executor` audit-vehicle reference fixed to the DIR-032 generic subagent in both `inherited-core.md` and `OUTER-LOOP.md`'s dispatch-record procedure; `OUTER-LOOP.md` step 3.5 added; live-validated via M115's own audit dispatch — `audit-independence-check.ts` PASSed on the first real run against the completed artifact, no post-hoc correction of any wrong value needed; M105's actual dispatch mechanism confirmed genuinely unrecoverable via meta-cc, 2.5h session retention window; filed exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH as a follow-up finding) · audit=CONCERNS (task's own literal AC2 initially under-addressed by the charter's scope-narrowing; resolved same-ABSORB by actually performing the M105 investigation and re-ticking with evidence) · merge=(pending commit) · → milestones/M115/

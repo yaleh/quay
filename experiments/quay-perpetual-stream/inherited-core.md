@@ -554,15 +554,17 @@ independently re-derive them from scratch in the same shape:
 1. **Who dispatches it.** The outer loop (the session executing `OUTER-LOOP.md`), at ABSORB
    (step 6), for milestones meeting the cadence rule below — never the inner milestone's own
    iteration-0 or iteration-1, and never folded into either.
-2. **How it's dispatched.** A fresh-context `baime:iteration-executor` call (or equivalent
-   fresh-context subagent dispatch), `run_in_background=true`, reading ONLY: (a) the milestone's
-   charter (Tier-A), (b) the milestone's own iteration-0/iteration-1 reports (the claims under
-   audit), and (c) `inherited-core.md` (Tier-B) — explicitly NOT given "go re-verify this," but
-   given a distinctly-worded refutation-focused prompt: *"Your job is to find fault with this
-   milestone's Done-when claims and VT Δv. Do not simply re-run the same checks and confirm — look
-   for: (a) claims with no pasted evidence nearby (narrative-only), (b) evidence that doesn't
-   actually support the specific claim made (e.g. a curl check standing in for a browser claim —
-   see the Web UI verification rule above), (c) arithmetic that doesn't recompute cleanly, (d) VT
+2. **How it's dispatched.** A fresh-context **generic `Explore`/`general-purpose` subagent**
+   (whichever is available) — DIR-032: the previously-named `baime:iteration-executor` vehicle was
+   never what any working independent audit in this project's history actually used and is not
+   reliably registered in every runtime; use the generic vehicle instead — `run_in_background=true`,
+   reading ONLY: (a) the milestone's charter (Tier-A), (b) the milestone's own iteration-0/iteration-1
+   reports (the claims under audit), and (c) `inherited-core.md` (Tier-B) — explicitly NOT given "go
+   re-verify this," but given a distinctly-worded refutation-focused prompt: *"Your job is to find
+   fault with this milestone's Done-when claims and VT Δv. Do not simply re-run the same checks and
+   confirm — look for: (a) claims with no pasted evidence nearby (narrative-only), (b) evidence that
+   doesn't actually support the specific claim made (e.g. a curl check standing in for a browser claim
+   — see the Web UI verification rule above), (c) arithmetic that doesn't recompute cleanly, (d) VT
    deltas that don't match the charter's own pre-dispatch Δv̂ without a stated reason, (e) scope
    creep or scope-exemption the milestone granted itself without outer-loop sign-off. Render a
    verdict: REFUTED (name the specific claim and why), CONCERNS (weaker findings, non-blocking), or
@@ -576,6 +578,23 @@ independently re-derive them from scratch in the same shape:
    completion claim until the underlying milestone record is actually corrected (mirrors the
    existing `V_meta consolidation-lag gate`'s HARD BLOCK pattern in `OUTER-LOOP.md` step 6,
    applied here to a different failure class).
+5. **Session-id injection is the ORCHESTRATOR's job, never the subagent's self-report (DIR-034
+   corroboration, M115 fix — exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM).** Do NOT ask the
+   dispatched subagent to determine or write its own "distinct session id" (e.g. by reading
+   `CLAUDE_CODE_SESSION_ID` or any other env var from inside its own process) — in the harness this
+   project runs on, a subagent dispatched via the `Agent` tool inherits the PARENT session's env,
+   so that value reads back identical to the orchestrator's own id, not a fresh one (confirmed at
+   M114/M115: the audit-independence gate correctly FAILed on this). The only value that IS a
+   reliable, harness-assigned, non-forgeable-by-the-subagent distinct identifier is the dispatch
+   handle the orchestrator itself receives back at dispatch time (the `Agent` tool's own returned
+   `agentId` / task id). Procedure: (a) dispatch as above; (b) the orchestrator records the returned
+   dispatch id in the dispatch-record file (`OUTER-LOOP.md`'s existing "Dispatch-record file"
+   procedure, unchanged); (c) the orchestrator ALSO writes (or, if the artifact is edited after the
+   fact, corrects) a literal `Audit session id: <that same dispatch id>` line near the top of the
+   audit artifact itself — this is a fact the ORCHESTRATOR asserts about how the audit was
+   dispatched, not something the subagent verifies about itself. `audit-independence-check.ts`
+   parses this exact line out of the artifact and corroborates it against the dispatch-record file;
+   both must carry the SAME orchestrator-observed id for Clause 12 to PASS.
 
 **Explicitly distinct from iteration-1 (so it is not redundant with an existing mechanism):**
 

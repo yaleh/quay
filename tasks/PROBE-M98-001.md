@@ -74,3 +74,10 @@ Standard inherited-core DoD clauses apply. Task-specific criteria:
 - [x] Full test suite passes (`node --test packages/quay/test/mcp-server.test.mjs`): 33 PASS, 0 FAIL.
 - [x] Fresh-context adversarial audit (m99-audit-2026-07-22) confirms no handler behavior regression. Verdict: NO REFUTATION FOUND.
 - [x] Fix lands done per inherited-core split-or-commit: commit 7461215 on master.
+
+
+
+
+## Not selected (M115)
+
+Not selected M115 — exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM selected instead (governance-integrity/instrument-correction: fixes the audit-independence dispatch mechanism used by EVERY future milestone's ABSORB, higher leverage). This finding is also suspected STALE: current `packages/quay/src/mcp-server.ts.startMcpServer` has visibly fewer imports/a different shape (uses a consolidated `registerAllHandlers` instead of 5 separate register*Handlers calls) than the M98-era measurement describes — needs a fresh archguard re-measurement before any fix is attempted, likely a quick close-as-superseded rather than a real fix.

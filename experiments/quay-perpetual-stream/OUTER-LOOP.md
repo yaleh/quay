@@ -416,17 +416,27 @@ session start finds QC-T1 (creating it if missing) without side-effects.
          Clause 12 (audit-independence) HARD-FAILS if the dispatch-record file is absent or the audit
          session ID it records does not appear in the audit artifact. To avoid this recurring failure,
          follow these steps IN ORDER when dispatching the adversarial audit subagent at this ABSORB step:
-         1. **Dispatch the audit subagent** (a fresh-context `baime:iteration-executor` call,
-            `run_in_background=true`, refutation-focused prompt per `inherited-core.md`'s
-            "Adversarial-audit role" section).
-         2. **Record the session ID you receive back** from the dispatch (the `Agent tool` / task ID
-            / session identifier the harness assigns to the dispatched subagent's run).
+         1. **Dispatch the audit subagent** (a fresh-context generic `Explore`/`general-purpose`
+            subagent per DIR-032, `run_in_background=true`, refutation-focused prompt per
+            `inherited-core.md`'s "Adversarial-audit role" section). **Do NOT ask the subagent to
+            self-report its own session id** (see that section's item 5, M115 fix,
+            exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM) — in this harness a dispatched subagent's
+            own env introspection reads back identical to the orchestrator's, not a fresh value.
+         2. **Record the session ID you receive back** from the dispatch (the `Agent` tool's own
+            returned `agentId` / task id — the harness-assigned dispatch handle, NOT anything the
+            subagent reports about itself).
          3. **Immediately create the dispatch-record file** (before authoring the ABSORB entry):
             ```
             echo "<audit-session-id-received-in-step-2>" > /tmp/m<NN>-dispatch-record.txt
             ```
             One session ID per line, bare (no prose). If you dispatch multiple audit subagents,
             append each ID: `echo "<id2>" >> /tmp/m<NN>-dispatch-record.txt`.
+         3.5. **Write (or, once the subagent's artifact exists, correct) a literal
+            `Audit session id: <the SAME id from step 2>` line near the top of the audit artifact
+            itself** (`milestones/M<NN>/audits/iteration-N-acceptance-audit.md`) — this is the
+            ORCHESTRATOR asserting a fact about how the audit was dispatched, not the subagent
+            verifying itself; `audit-independence-check.ts` parses exactly this line out of the
+            artifact and corroborates it against the dispatch-record file from step 3.
          4. **Include `## Audit-independence check` in the ABSORB entry** with exactly these three
             lines (copy this block verbatim, substituting real values):
             ```

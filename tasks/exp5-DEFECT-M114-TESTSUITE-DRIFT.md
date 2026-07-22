@@ -77,3 +77,10 @@ impl-row N/A, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycl
 worktree-branch-hygiene, audit-independence).
 - [ ] All 3 AC items above verified true with pasted command output.
 - [ ] it0 DoD meta-enforcer passes all clauses.
+
+
+
+
+## Not selected (M115)
+
+Not selected M115 — exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM selected instead (higher leverage: affects every future ABSORB's audit-independence gate, not just test-suite cleanliness). Still a good small exploit pick for a near-future pass.

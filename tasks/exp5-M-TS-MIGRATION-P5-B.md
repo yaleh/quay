@@ -40,3 +40,10 @@ References the standard inherited-core DoD clauses; the bar is REAL LANDING, not
 - [ ] All 3 files are `.ts` on `master`, `git log --follow` shows the rename commit for each.
 - [ ] `tsc --noEmit` + relevant suite(s) pasted as evidence in the Resolution.
 - [ ] No behavior change (golden-diff: quay-backlog provider behaves identically before/after, pasted evidence).
+
+
+
+
+## Not selected (M115)
+
+Not selected M115 — exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM selected instead (smaller, higher-leverage governance fix this pass). Good next exploit pick.

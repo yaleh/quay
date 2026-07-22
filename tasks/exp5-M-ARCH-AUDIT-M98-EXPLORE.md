@@ -48,3 +48,10 @@ References the standard inherited-core DoD clauses (adversarial-audit, V_meta-la
 - [x] All new findings gated through `routine-file-gate.mjs` (ACCEPT or REJECT documented for each); no finding filed without reproduction evidence.
 - [x] FILE-ONLY confirmed: no commits to product/method code; only task files created.
 - [x] it0 DoD meta-enforcer passes all clauses.
+
+
+
+
+## Not selected (M115)
+
+Not selected M115 — exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM selected instead. Separately noted: this task's own AC checklist is already fully ticked [x] (the M98 explore genuinely ran) but `status` was never flipped to `done` — a bookkeeping oversight worth a trivial administrative fix in a future pass (verify findings still hold, flip status, no new work).

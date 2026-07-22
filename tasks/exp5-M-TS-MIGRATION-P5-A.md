@@ -42,3 +42,10 @@ References the standard inherited-core DoD clauses; the bar is REAL LANDING, not
 - [ ] All 4 files are `.ts` on `master`, `git log --follow` shows the rename commit for each.
 - [ ] `tsc --noEmit` + full suite pasted as evidence in the Resolution.
 - [ ] No behavior change (golden-diff: identical CLI output/exit codes before and after, pasted evidence).
+
+
+
+
+## Not selected (M115)
+
+Not selected M115 — exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM selected instead (smaller, higher-leverage governance fix this pass). Good next exploit pick.
