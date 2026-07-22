@@ -119,6 +119,18 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
   }
 });
 
+test('read-probe-spec.mjs is byte-identical to its exp5 canonical source', () => {
+  const canonical = path.join(repoRoot, 'experiments', 'quay-perpetual-stream', 'scripts', 'read-probe-spec.mjs');
+  const bundled = path.join(pluginDir, 'scripts', 'read-probe-spec.mjs');
+  assert.ok(existsSync(canonical), `canonical source missing: ${canonical}`);
+  assert.ok(existsSync(bundled), `bundled copy missing: ${bundled}`);
+  assert.equal(
+    readFileSync(bundled, 'utf8'),
+    readFileSync(canonical, 'utf8'),
+    'read-probe-spec.mjs must be byte-identical to its single canonical source (no drifting copy)'
+  );
+});
+
 test('loop-driver skill (DIR-042-B) has zero research-layer references (VT/value-ledger/checkpoints/experiments/**)', () => {
   const src = readFileSync(path.join(pluginDir, 'skills', 'loop-driver', 'SKILL.md'), 'utf8');
   const researchLeakPattern = /\bVT\b|value-ledger|checkpoints?|experiments\/|inherited-core|\bexp5\b/i;
