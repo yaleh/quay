@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 102** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 103** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -836,5 +836,18 @@ m102 · DIR-055 · Δv=0 (v̂=0) · outcome=needs-human (real-fire leg: archguar
 
 **Deferred:** exp5-M-TS-MIGRATION-P4 (GATE-HASH-REF risk), DIR-055 real-fire leg (needs-human: human triggers archguard checkpoint), DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED).
 
-**Task:** (new milestone-candidate task to be created at CHARTER)  
+**Task:** [[exp5-M-ARCH-AUDIT-M103-EXPLORE]] (`tasks/exp5-M-ARCH-AUDIT-M103-EXPLORE.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M103-arch-audit-post-m101-explore.md`
+
+m103 · exp5-M-ARCH-AUDIT-M103-EXPLORE · Δv=0 (v̂=0) · audit=documented-no-op (explore, FILE-ONLY) · filed=ARCH-M103-001 (loadWorkspaceGates outDegree=8), ARCH-M103-002 (startServer 6→7) · → milestones/M103/
+
+## SELECT M104 — ARCH-M103-002
+
+**Selected:** ARCH-M103-002 — investigate startServer outDegree 6→7 after M100 (handleAllRoutes dependency added). Root cause: document whether scope artefact or genuine regression; fix or close as WONTFIX. Same pattern as PROBE-M98-001 post-M97.
+
+**Rationale:** Exploit pick (1st post-M103 explore reset). Direct M100 AC gap: M100 stated outDegree=6 (no regression), M103 fresh measurement shows 7. handleAllRoutes edge is inherent to companion-file pattern. Task's own DoD allows WONTFIX if root cause documented. Quick investigation milestone.
+
+**Deferred:** ARCH-M103-001 (loadWorkspaceGates outDegree=8), exp5-M-TS-MIGRATION-P4 (GATE-HASH-REF risk), DIR-057, exp5-M-OUTERLOOP-ROUTINE-WIRING.
+
+**Task:** [[ARCH-M103-002]] (`tasks/ARCH-M103-002.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M104-startserver-outdegree-probe.md`
