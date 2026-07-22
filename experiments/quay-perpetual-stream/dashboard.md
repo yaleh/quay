@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 113** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 114** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -994,3 +994,5 @@ m113 · exp5-M-ARCH-AUDIT-POST-FULL-TS · Δv=0 (v̂=0) · explore=DONE (entitie
 
 **Task:** [[exp5-M-TS-MIGRATION]] (`tasks/exp5-M-TS-MIGRATION.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M114-ts-migration-overall-close.md`
+
+m114 · exp5-M-TS-MIGRATION · Δv=0 (v̂=0) · outcome=DONE (overall ADR-012 TS migration program closed; all 4 AC + 3 DoD boxes ticked with evidence; full suite re-verified 346/8 packages/quay + 118/118 experiments suite; self-fixed a real M109 regression — 8 broken `.js`→`.ts` import specifiers + 4 stale `.mjs` fixture refs that had silently broken `task-schema-check.ts` since M109; pruned 6 dangling iteration worktrees M80-M84/M92; filed exp5-DEFECT-M114-TESTSUITE-DRIFT + exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM for follow-up) · audit=NO REFUTATION FOUND · merge=(pending commit) · → milestones/M114/

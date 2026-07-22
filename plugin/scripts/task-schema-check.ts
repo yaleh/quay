@@ -19,7 +19,7 @@
 //   2 = usage/environment error (no args, unreadable file)
 
 import fs from "node:fs";
-import { checkTask } from "./task-schema.js";
+import { checkTask } from "./task-schema.ts";
 
 const files = process.argv.slice(2);
 if (files.length === 0) {

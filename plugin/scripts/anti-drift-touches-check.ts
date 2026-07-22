@@ -12,7 +12,7 @@
 
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { matchGlob, isOverbroadDeclaration, normalizePath } from "./touches-orthogonality-check.js";
+import { matchGlob, isOverbroadDeclaration, normalizePath } from "./touches-orthogonality-check.ts";
 
 // normalizePath (canonical: strips ./, collapses //, resolves ./.. segments, drops trailing /, case
 // preserved for the case-significant Linux repo) is single-source in touches-orthogonality-check.mjs
