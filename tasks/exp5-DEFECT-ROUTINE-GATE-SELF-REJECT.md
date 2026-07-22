@@ -1,15 +1,22 @@
 ---
 id: exp5-DEFECT-ROUTINE-GATE-SELF-REJECT
-title: "defect: routine candidates written INTO the board self-reject as duplicates —
-  routine-file-gate boardKeys() scans the whole --board dir including the candidate,
-  so every routine finding false-dedups against itself (routines can't file unattended)"
+title: "defect: routine candidates written INTO the board self-reject as
+  duplicates — routine-file-gate boardKeys() scans the whole --board dir
+  including the candidate, so every routine finding false-dedups against itself
+  (routines can't file unattended)"
 status: todo
 labels:
   - milestone-candidate
+  - defect
+  - milestone:M-96
 parent: null
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-DEFECT-ROUTINE-GATE-SELF-REJECT
+    experiments/quay-perpetual-stream/charters/M96-routine-gate-self-reject-fix.md
+    /tmp/m96-absorb-entry.md
 ---
 ## Finding
 Surfaced by the DIR-051 real routine-fire on archguard (2026-07-22). The loop-driver skill's routine flow

@@ -736,3 +736,14 @@ m94 · PROBE-SV-M92-001 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=a
 **Charter:** `experiments/quay-perpetual-stream/charters/M95-abi-boundary-violation-fix.md`
 
 m95 · ARCH-M93-004 · Δv=0 (v̂=0) · audit=documented-no-op (deterministic grep-gate) · merge=b3dac7b · → milestones/M95/
+
+## SELECT M96 — exp5-DEFECT-ROUTINE-GATE-SELF-REJECT
+
+**Selected:** exp5-DEFECT-ROUTINE-GATE-SELF-REJECT — fix `boardKeys()` in `routine-file-gate.mjs` to exclude the candidate file from its own scan (realpath-skip param); re-sync vendored plugin copy; bump plugin 0.3.17 → 0.3.18; add RED→GREEN selfcheck reproducing the as-wired candidate-in-board flow.
+
+**Rationale:** Exploit pick (3rd post-M93 explore reset; next mandatory explore by M98). Critical defect: without the fix, every routine finding self-rejects as a board-duplicate and routines can NEVER file unattended — silently defeats DIR-051/052/053/055. Confirmed by real archguard fire (2026-07-22). Bounded gate-side fix (≤20L), zero risk of dedup regression, selfcheck already exists to extend.
+
+**Deferred:** ARCH-M93-001 (gate/ god-package refactor — large, needs split), ARCH-M93-002 (startMcpServer god-function), ARCH-M93-003 (startServer god-function), DIR-052/053/055 (routine wiring exploits — blocked until gate self-reject is fixed).
+
+**Task:** [[exp5-DEFECT-ROUTINE-GATE-SELF-REJECT]] (`tasks/exp5-DEFECT-ROUTINE-GATE-SELF-REJECT.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M96-routine-gate-self-reject-fix.md`
