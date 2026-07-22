@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 110** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 111** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -946,3 +946,19 @@ m110 · exp5-M-TS-MIGRATION-P4-BATCH4 · Δv=0 (v̂=0) · outcome=DONE (it0-dod-
 
 **Task:** [[exp5-M-TS-MIGRATION-P4]] (`tasks/exp5-M-TS-MIGRATION-P4.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M111-ts-migration-p4-close.md`
+
+m111 · exp5-M-TS-MIGRATION-P4 (parent close) · Δv=0 (v̂=0) · outcome=DONE/needs-human (tsc exit 0, dod-fixture-selfcheck 17/17 PASS; AC3 needs-human — no archguard session; status: needs-human) · audit=NO REFUTATION FOUND · merge=5b6e7d5 · → milestones/M111/
+
+
+## SELECT M112 — exp5-M-TS-MIGRATION-P3 (parent close)
+
+**Selected:** exp5-M-TS-MIGRATION-P3 — close the P3 parent task: all 3 per-package children are done (P3-A/M80, P3-C/M81, P3-B/M82+M84+M85). Scope: verify AC1 (tsc --noEmit per package), confirm AC2 (behavior-preserving — full test suite green), confirm AC3 (split honored across children), tick all parent AC/DoD boxes, set status to `done`, commit.
+
+**Rationale:** Exploit pick (4th post-M108 explore reset; M113 is the next mandatory explore — M109–M112 all exploits triggers the ≥1/5 floor at M113). P3 children are all done; the parent must be formally closed before the overall TS migration parent can close. Methodology-class closure — no quay-task-to-plan required.
+
+**NEW GATE-HASH-REF:** `22c64fc383d6fc03ba375f8b9ce463abce3459d318c8787e33d8bcb321d876e1`
+
+**Deferred:** exp5-M-TS-MIGRATION overall parent close (needs P3+P4 both done + archguard observability leg satisfied — M113 mandatory explore is the natural archguard run; overall parent close M114+), exp5-M-CRYST, DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED).
+
+**Task:** [[exp5-M-TS-MIGRATION-P3]] (`tasks/exp5-M-TS-MIGRATION-P3.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M112-ts-migration-p3-close.md`
