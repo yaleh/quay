@@ -497,7 +497,7 @@ test("DIR-048 GREEN: opt-out combo inline+none returns inline/none", () => {
 // DIR-051 dual-source guard: readLoopParams' trigger validation must agree with routine-scheduler's
 // parseTrigger (the audit flagged the two regexes as a latent drift). Fuzz both, assert agreement.
 test("DIR-051: loop-params trigger validation agrees with routine-scheduler parseTrigger (no drift)", async () => {
-  const { parseTrigger } = await import("../../../experiments/quay-perpetual-stream/scripts/routine-scheduler.mjs");
+  const { parseTrigger } = await import("../../../experiments/quay-perpetual-stream/scripts/routine-scheduler.ts");
   const cases = ["every(5)", "every(1)", "every( 3 )", "on(checkpoint)", "on(idle)", "on(a-b)",
                  "every(0)", "every(-1)", "every()", "every(00)", "every(2.5)", "daily", "on()", "on(a b)", "EVERY(5)", "every(5)x"];
   for (const t of cases) {

@@ -25,7 +25,7 @@
 // writes the regenerated markdown file. It does not call task_write.
 
 import fs from "node:fs";
-import { extractSection } from "./task-schema.mjs";
+import { extractSection } from "./task-schema.js";
 
 // extractSection is imported from task-schema.mjs (the single canonical definition per ADR-004).
 // The canonical function returns null when the section is not found and untrimmed text when found.

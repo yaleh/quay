@@ -3,7 +3,7 @@
 // Run: node --test experiments/quay-perpetual-stream/test/golden-replay-dir044.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runGoldenReplay } from "../scripts/golden-replay-dir044.mjs";
+import { runGoldenReplay } from "../scripts/golden-replay-dir044.ts";
 
 test("golden replay: DIR-039 ∥ DIR-042-A reproduces the serial oracle end-to-end", () => {
   const r = runGoldenReplay();

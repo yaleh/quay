@@ -6,5 +6,5 @@
 set -u
 if [ "$#" -lt 3 ]; then echo "Usage: $0 --counter <N> <builds-manifest.json>" >&2; exit 2; fi
 if ! command -v node >/dev/null 2>&1; then echo "ERROR: node required" >&2; exit 2; fi
-node "$(dirname "$0")/serial-fanin-absorb.mjs" "$@"
+node "$(dirname "$0")/serial-fanin-absorb.ts" "$@"
 exit $?

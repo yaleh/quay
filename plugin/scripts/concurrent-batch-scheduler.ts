@@ -21,7 +21,7 @@ import {
   matchGlob,
   checkTouchesPair,
   findRepoRoot,
-} from "./touches-orthogonality-check.mjs";
+} from "./touches-orthogonality-check.js";
 
 // Shared exp5 state — concurrent writes here would conflict, so any candidate declaring it CANNOT be
 // batched (its writes must be serialized at fan-in ABSORB). Repo-relative concrete paths.

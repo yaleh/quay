@@ -6,5 +6,5 @@
 set -u
 if [ "$#" -lt 1 ]; then echo "Usage: $0 <ran-batch-manifest.json>" >&2; exit 2; fi
 if ! command -v node >/dev/null 2>&1; then echo "ERROR: node required" >&2; exit 2; fi
-node "$(dirname "$0")/anti-drift-touches-check.mjs" "$@"
+node "$(dirname "$0")/anti-drift-touches-check.ts" "$@"
 exit $?

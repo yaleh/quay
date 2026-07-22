@@ -35,7 +35,7 @@ export function parseTrigger(s) {
 // ── isDue ────────────────────────────────────────────────────────────────────────────────────────
 // state: { iteration: number (>=0), event?: string }. every(N) fires when iteration>0 and
 // iteration % N === 0. on(X) fires when state.event === X.
-export function isDue(trigger, state = {}) {
+export function isDue(trigger: any, state: { iteration?: number; event?: string } = {}) {
   const t = typeof trigger === "string" ? parseTrigger(trigger) : trigger;
   if (t.kind === "every") {
     const it = Number(state.iteration);
@@ -48,7 +48,7 @@ export function isDue(trigger, state = {}) {
 // routines: [{ name, trigger, dispatch?, probe? }]. Returns the subset whose trigger fires for
 // `state`, in order. Validates that each due routine has at least one of dispatch/probe; logs an
 // error and skips (never throws — the loop must never die from a bad routine entry).
-export function dueRoutines(routines, state = {}) {
+export function dueRoutines(routines: any[], state: { iteration?: number; event?: string } = {}) {
   if (!Array.isArray(routines)) throw new Error("routine-scheduler: routines must be an array");
   return routines.filter((r) => isDue(r.trigger, state));
 }
@@ -91,9 +91,9 @@ function usage() { process.stderr.write("Usage: routine-scheduler.mjs [--iterati
 
 export async function main(argv) {
   const args = argv.slice(2);
-  const state = {};
-  const files = [];
-  let pluginRoot = null;
+  const state: { iteration?: number; event?: string } = {};
+  const files: string[] = [];
+  let pluginRoot: string | null = null;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--iteration") { state.iteration = Number(args[++i]); continue; }
     if (args[i] === "--event") { state.event = args[++i]; continue; }

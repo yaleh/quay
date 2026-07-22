@@ -108,7 +108,7 @@ was discussed, stop and say so instead of inventing content.
 6. **Self-check the round-trip BEFORE landing (canonical-task-schema v1).** After create + read-back,
    run the SHIPPED schema-check bundled with this plugin (not a reference into any `experiments/**`
    path):
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-schema-check.mjs" <path-to-the-task-file>` (or the
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-schema-check.ts" <path-to-the-task-file>` (or the
    `.sh` wrapper at `"${CLAUDE_PLUGIN_ROOT}/scripts/task-schema-check.sh"`) and require **exit 0**
    before committing. A `FAIL` means fix the TASK body (not the script); an `N/A legacy` line means
    the `extra.schema:"v1"` marker was forgotten in step 4 — add it.

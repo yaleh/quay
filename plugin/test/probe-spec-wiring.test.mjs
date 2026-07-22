@@ -14,8 +14,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginRoot = path.resolve(__dirname, '..');
 
-import { readProbeSpec } from '../scripts/read-probe-spec.mjs';
-import { resolveRoutineAction } from '../scripts/routine-scheduler.mjs';
+import { readProbeSpec } from '../scripts/read-probe-spec.ts';
+import { resolveRoutineAction } from '../scripts/routine-scheduler.ts';
 
 // ── T1: malformed YAML frontmatter → PROBE-SPEC FAIL-CLOSED ──────────────────
 test('readProbeSpec: malformed YAML frontmatter → throws PROBE-SPEC FAIL-CLOSED', async () => {

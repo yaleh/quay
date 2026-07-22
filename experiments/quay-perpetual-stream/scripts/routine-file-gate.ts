@@ -38,7 +38,7 @@ export function isActionable(taskText) {
 // ── gateFinding ──────────────────────────────────────────────────────────────────────────────────
 // candidate: the new task text. opts: { existingKeys:Set|[], recentCount:number, K:number }.
 // Returns { accept, reason }.
-export function gateFinding(candidate, { existingKeys = [], recentCount = 0, K = DEFAULT_RATE } = {}) {
+export function gateFinding(candidate: string, { existingKeys = [] as string[], recentCount = 0, K = DEFAULT_RATE }: { existingKeys?: Set<string> | string[]; recentCount?: number; K?: number } = {}) {
   if (!isActionable(candidate)) return { accept: false, reason: "quality: no actionable `## Finding` with reproduction evidence" };
   const keys = existingKeys instanceof Set ? existingKeys : new Set(existingKeys);
   const key = findingKey(candidate);
@@ -51,8 +51,8 @@ export function gateFinding(candidate, { existingKeys = [], recentCount = 0, K =
 // Gather existing finding keys from a board dir (task .md files) for the dedup check.
 // excludePath: when provided, skip the file whose resolved/real path matches this path — so a
 // candidate physically IN the board dir is not counted as its own duplicate.
-export function boardKeys(boardDir, excludePath = null) {
-  const keys = new Set();
+export function boardKeys(boardDir: string, excludePath: string | null = null): Set<string> {
+  const keys = new Set<string>();
   let files;
   try { files = fs.readdirSync(boardDir).filter((f) => f.endsWith(".md")); } catch { return keys; }
   let skip = null;
@@ -87,7 +87,7 @@ export async function main(argv) {
   if (files.length !== 1 || !Number.isFinite(recent) || !Number.isFinite(K) || K < 1) { usage(); return 2; }
   if (!fs.existsSync(files[0])) { process.stderr.write(`ERROR: not found: ${files[0]}\n`); return 2; }
   const candidate = fs.readFileSync(files[0], "utf8");
-  const existingKeys = board ? boardKeys(board, files[0]) : new Set();
+  const existingKeys: Set<string> = board ? boardKeys(board, files[0]) : new Set<string>();
   const r = gateFinding(candidate, { existingKeys, recentCount: recent, K });
   process.stdout.write(`${r.accept ? "ACCEPT" : "REJECT"}: ${r.reason}\n`);
   return r.accept ? 0 : 1;

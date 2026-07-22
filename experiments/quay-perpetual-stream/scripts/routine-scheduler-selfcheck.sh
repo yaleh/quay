@@ -2,7 +2,7 @@
 # routine-scheduler-selfcheck.sh — external acceptance for the DIR-051 routine trigger logic.
 set -u
 cd "$(dirname "$0")/.." || { echo "ERROR: cannot cd" >&2; exit 2; }
-CHK="./scripts/routine-scheduler.mjs"
+CHK="./scripts/routine-scheduler.ts"
 [ -f "$CHK" ] || { echo "ERROR: $CHK not found" >&2; exit 2; }
 TMP="$(mktemp)"; echo '[{"name":"self-validation","trigger":"every(5)","dispatch":"adversarial-explore"},{"name":"arch","trigger":"on(checkpoint)","dispatch":"proxy"}]' > "$TMP"
 fail=0

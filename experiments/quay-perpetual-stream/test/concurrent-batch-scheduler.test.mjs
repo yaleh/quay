@@ -15,7 +15,7 @@ import {
   SHARED_STATE_PATHS,
   assembleBatch,
   main,
-} from "../scripts/concurrent-batch-scheduler.mjs";
+} from "../scripts/concurrent-batch-scheduler.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");

@@ -2,7 +2,7 @@
 # routine-file-gate-selfcheck.sh — external acceptance for the DIR-051 mechanical finding gate.
 set -u
 cd "$(dirname "$0")/.." || { echo "ERROR: cannot cd" >&2; exit 2; }
-CHK="./scripts/routine-file-gate.mjs"
+CHK="./scripts/routine-file-gate.ts"
 [ -f "$CHK" ] || { echo "ERROR: $CHK not found" >&2; exit 2; }
 T="$(mktemp -d)"; fail=0
 printf '## Finding\nrolling-slope-check.mjs returns NaN on []; repro `node scripts/rolling-slope-check.mjs x.json` exit 2.\n## Requested action\nfix\n' > "$T/good.md"

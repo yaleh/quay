@@ -22,7 +22,7 @@ import {
   findRepoRoot,
   isOverbroadDeclaration,
   main,
-} from "../scripts/touches-orthogonality-check.mjs";
+} from "../scripts/touches-orthogonality-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(__dirname, "..", "fixtures", "touches");

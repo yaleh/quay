@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parseTrigger, isDue, dueRoutines, resolveRoutineAction, main } from "../scripts/routine-scheduler.mjs";
+import { parseTrigger, isDue, dueRoutines, resolveRoutineAction, main } from "../scripts/routine-scheduler.ts";
 
 test("parseTrigger: every(N) and on(event); malformed throws", () => {
   assert.deepEqual(parseTrigger("every(5)"), { kind: "every", n: 5 });

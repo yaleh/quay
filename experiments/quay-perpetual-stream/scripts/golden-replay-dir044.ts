@@ -14,10 +14,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.mjs";
-import { parseCandidate, assembleBatch } from "./concurrent-batch-scheduler.mjs";
-import { computeFanIn, verifyMonotonic } from "./serial-fanin-absorb.mjs";
-import { checkAntiDrift } from "./anti-drift-touches-check.mjs";
+import { parseTouches, checkTouchesPair } from "./touches-orthogonality-check.js";
+import { parseCandidate, assembleBatch } from "./concurrent-batch-scheduler.js";
+import { computeFanIn, verifyMonotonic } from "./serial-fanin-absorb.js";
+import { checkAntiDrift } from "./anti-drift-touches-check.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GOLD = path.join(__dirname, "..", "fixtures", "golden");

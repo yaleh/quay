@@ -74,7 +74,7 @@ test('author/execute skills are single-sourced: byte-identical to packages/quay-
 });
 
 test('shipped schema-check modules are byte-identical to their exp5 canonical source, modulo attribution-only sanitization', () => {
-  for (const name of ['task-schema.mjs', 'task-schema-check.mjs', 'task-schema-check.sh']) {
+  for (const name of ['task-schema.ts', 'task-schema-check.ts', 'task-schema-check.sh']) {
     const canonical = path.join(repoRoot, 'experiments', 'quay-perpetual-stream', 'scripts', name);
     const bundled = path.join(pluginDir, 'scripts', name);
     assert.ok(existsSync(canonical), `canonical source missing: ${canonical}`);
@@ -101,8 +101,8 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
     path.join(repoRoot, '.claude-plugin', 'marketplace.json'),
     path.join(pluginDir, '.claude-plugin', 'plugin.json'),
     path.join(pluginDir, '.mcp.json'),
-    path.join(pluginDir, 'scripts', 'task-schema.mjs'),
-    path.join(pluginDir, 'scripts', 'task-schema-check.mjs'),
+    path.join(pluginDir, 'scripts', 'task-schema.ts'),
+    path.join(pluginDir, 'scripts', 'task-schema-check.ts'),
     path.join(pluginDir, 'scripts', 'task-schema-check.sh'),
     path.join(pluginDir, 'skills', 'author', 'SKILL.md'),
     path.join(pluginDir, 'skills', 'execute', 'SKILL.md'),
@@ -119,15 +119,15 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
   }
 });
 
-test('read-probe-spec.mjs is byte-identical to its exp5 canonical source', () => {
-  const canonical = path.join(repoRoot, 'experiments', 'quay-perpetual-stream', 'scripts', 'read-probe-spec.mjs');
-  const bundled = path.join(pluginDir, 'scripts', 'read-probe-spec.mjs');
+test('read-probe-spec.ts is byte-identical to its exp5 canonical source', () => {
+  const canonical = path.join(repoRoot, 'experiments', 'quay-perpetual-stream', 'scripts', 'read-probe-spec.ts');
+  const bundled = path.join(pluginDir, 'scripts', 'read-probe-spec.ts');
   assert.ok(existsSync(canonical), `canonical source missing: ${canonical}`);
   assert.ok(existsSync(bundled), `bundled copy missing: ${bundled}`);
   assert.equal(
     readFileSync(bundled, 'utf8'),
     readFileSync(canonical, 'utf8'),
-    'read-probe-spec.mjs must be byte-identical to its single canonical source (no drifting copy)'
+    'read-probe-spec.ts must be byte-identical to its single canonical source (no drifting copy)'
   );
 });
 

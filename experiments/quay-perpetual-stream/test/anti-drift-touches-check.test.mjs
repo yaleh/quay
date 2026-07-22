@@ -15,7 +15,7 @@ import {
   normalizePath,
   checkAntiDrift,
   main,
-} from "../scripts/anti-drift-touches-check.mjs";
+} from "../scripts/anti-drift-touches-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(__dirname, "..", "fixtures", "antidrift");

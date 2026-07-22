@@ -55,9 +55,9 @@ cp "${REPO_ROOT}/packages/quay-native/skills/execute/SKILL.md" "${PLUGIN_DIR}/sk
 # experiments/** at runtime (DIR-040 item 2) — exp5's own copies at
 # experiments/quay-perpetual-stream/scripts/ are untouched and remain the
 # source these are mirrored from.
-echo "[sync-vendor] mirroring the task-schema check -> plugin/scripts/{task-schema.mjs,task-schema-check.mjs,task-schema-check.sh} ..."
-cp "${REPO_ROOT}/experiments/quay-perpetual-stream/scripts/task-schema.mjs" "${PLUGIN_DIR}/scripts/task-schema.mjs"
-cp "${REPO_ROOT}/experiments/quay-perpetual-stream/scripts/task-schema-check.mjs" "${PLUGIN_DIR}/scripts/task-schema-check.mjs"
+echo "[sync-vendor] mirroring the task-schema check -> plugin/scripts/{task-schema.ts,task-schema-check.ts,task-schema-check.sh} ..."
+cp "${REPO_ROOT}/experiments/quay-perpetual-stream/scripts/task-schema.ts" "${PLUGIN_DIR}/scripts/task-schema.ts"
+cp "${REPO_ROOT}/experiments/quay-perpetual-stream/scripts/task-schema-check.ts" "${PLUGIN_DIR}/scripts/task-schema-check.ts"
 cp "${REPO_ROOT}/experiments/quay-perpetual-stream/scripts/task-schema-check.sh" "${PLUGIN_DIR}/scripts/task-schema-check.sh"
 chmod +x "${PLUGIN_DIR}/scripts/task-schema-check.sh"
 
@@ -68,7 +68,7 @@ chmod +x "${PLUGIN_DIR}/scripts/task-schema-check.sh"
 # referenced by the skill at dispatch time; also vendored so the plugin ships a complete runtime.
 echo "[sync-vendor] mirroring the DIR-044 concurrency scripts + DIR-056 probe loader -> plugin/scripts/ ..."
 for s in touches-orthogonality-check concurrent-batch-scheduler serial-fanin-absorb anti-drift-touches-check routine-scheduler routine-file-gate read-probe-spec; do
-  cp "${REPO_ROOT}/experiments/quay-perpetual-stream/scripts/${s}.mjs" "${PLUGIN_DIR}/scripts/${s}.mjs"
+  cp "${REPO_ROOT}/experiments/quay-perpetual-stream/scripts/${s}.ts" "${PLUGIN_DIR}/scripts/${s}.ts"
 done
 
 # Sanitize plugin-specific project-internal attribution: the source files'
@@ -79,7 +79,7 @@ done
 # Strip that project-internal attribution fragment from the SHIPPED copies so
 # a foreign install carries no reference to this repo's internal experiment
 # naming, per DIR-040's single-source + no-leaked-internal-labels bar.
-for f in "${PLUGIN_DIR}/scripts/task-schema.mjs" "${PLUGIN_DIR}/scripts/task-schema-check.mjs" "${PLUGIN_DIR}/scripts/task-schema-check.sh"; do
+for f in "${PLUGIN_DIR}/scripts/task-schema.ts" "${PLUGIN_DIR}/scripts/task-schema-check.ts" "${PLUGIN_DIR}/scripts/task-schema-check.sh"; do
   # perl -0pe for a cross-line match: "(exp5 /\n// canonical-task-schema" -> "(canonical-task-schema"
   perl -0pi -e 's/\(exp5 \/\s*\n(\/\/|#) canonical-task-schema/(canonical-task-schema/g; s/exp5-M-CRYST-B1\/DIR-028/DIR-028/g; s/\bexp5\b\s*\/\s*//g' "$f"
 done

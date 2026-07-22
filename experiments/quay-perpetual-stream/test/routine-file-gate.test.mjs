@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { findingKey, isActionable, gateFinding, boardKeys, DEFAULT_RATE, main } from "../scripts/routine-file-gate.mjs";
+import { findingKey, isActionable, gateFinding, boardKeys, DEFAULT_RATE, main } from "../scripts/routine-file-gate.ts";
 
 const actionable = "## Finding\nrolling-slope-check.mjs windowSlope returns NaN when deltas=[]; repro `node scripts/rolling-slope-check.mjs x.json` exit 2.\n## Requested action\nfix";
 const vague = "## Finding\nthe code could be cleaner\n## Requested action\nimprove";

@@ -10,7 +10,7 @@ import {
   checkProposal, checkPlan, checkAcceptanceChecklist, checkDodChecklist,
   checkResolution, checkNoScaffolding,
   checkTask,
-} from "../scripts/task-schema.mjs";
+} from "../scripts/task-schema.ts";
 
 const fm = (labels, extra = 'extra:\n  schema: "v1"') =>
   `---\nid: T\ntitle: t\nstatus: todo\nlabels:\n${labels.map((l) => `  - ${l}`).join("\n")}\n${extra}\n---\n`;

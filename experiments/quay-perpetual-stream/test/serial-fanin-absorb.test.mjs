@@ -14,7 +14,7 @@ import {
   verifyMonotonic,
   renderDashboardAppend,
   main,
-} from "../scripts/serial-fanin-absorb.mjs";
+} from "../scripts/serial-fanin-absorb.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(__dirname, "..", "fixtures", "fanin");
