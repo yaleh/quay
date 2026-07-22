@@ -61,6 +61,7 @@ Key cross-cutting facts (require reading several files to see):
 - **archguard** (MCP) — static architecture analysis: the `L_D`/`L_G` instrument (dependency structure/cycles, god-packages, duplicated/reinvented abstractions) per ADR-007. Consult it before calling a milestone done.
 - **meta-cc** (MCP) — search Claude Code session history (past errors, edit sequences, work patterns).
 - BOTH are maintained by the repo owner, so bugs get fixed fast — use them aggressively and report/fix issues rather than working around them.
+- **tmux remote-drive** (→ ADR-016) — to drive a FOREIGN workspace's Claude Code session (e.g. run archguard's `/loop` from here): `send-keys` to kick off (reliable = 3 separate calls `C-u` → text → `Enter`; combined drops the Enter), then read the RESULT from the filesystem/`git`/meta-cc — never parse the TUI. One driver per session (never race a human typing there; beware gray ghost-suggestions). This is how cross-workspace proofs (DIR-048/049/051) can run without a human round-trip.
 
 ## Process
 
