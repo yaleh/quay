@@ -1,7 +1,7 @@
-// vmeta-lag-check.mjs — the ONE canonical implementation of the V_meta consolidation-lag ARITHMETIC
+// vmeta-lag-check.ts — the ONE canonical implementation of the V_meta consolidation-lag ARITHMETIC
 // (exp5-M-CRYST-D3 increment R5, Axis-2′; R5 prose-parsing residual RESOLVED in M70/D4). This
 // module IS the rule: pure, side-effect-free check functions consumed by the standalone CLI
-// (vmeta-lag-check.mjs's own main below, invoked via vmeta-lag-check.sh) and wrappable, unchanged,
+// (vmeta-lag-check.ts's own main below, invoked via vmeta-lag-check.sh) and wrappable, unchanged,
 // by a future `quay gate --gate vmeta-lag` (M39 registry precedent — a named gate WRAPS this, never
 // reimplements the logic). If this header comment and the code ever disagree, THE CODE WINS.
 //
@@ -37,8 +37,40 @@
 
 const K_DEFAULT = 2;
 
+export interface LedgerRow {
+  status: string | null;
+  confirming: number | null;
+  statusCell: string;
+}
+
+export interface RowEvaluation {
+  lag: number | null;
+  alarm: boolean;
+  reason: string;
+}
+
+export interface LedgerEvaluation extends RowEvaluation {
+  insight: string;
+  status: string | null;
+  confirming: number | null;
+}
+
+export interface LedgerResult {
+  verdict: "PASS" | "FAIL" | "N/A";
+  milestoneCounter: number | null;
+  K: number;
+  evaluations: LedgerEvaluation[];
+  alarms: LedgerEvaluation[];
+  reason: string;
+}
+
+export interface CheckLedgerOpts {
+  milestoneCounter?: number;
+  K?: number;
+}
+
 // ── parseMilestoneNumber — pull an integer milestone number from an "m<N>"/"M<N>"/bare-<N> token. ─
-export function parseMilestoneNumber(text) {
+export function parseMilestoneNumber(text: string | null | undefined): number | null {
   if (text == null) return null;
   const m = String(text).match(/m\s*(\d+)/i) || String(text).match(/\b(\d+)\b/);
   return m ? parseInt(m[1], 10) : null;
@@ -46,8 +78,8 @@ export function parseMilestoneNumber(text) {
 
 // ── parseRows — extract data rows from the ledger's GFM pipe table (`| a | b | c | status |`). ────
 // Skips the header row and the `|---|---|` separator. Each returned row: { cells: string[], raw }.
-export function parseRows(fullText) {
-  const rows = [];
+export function parseRows(fullText: string): Array<{ cells: string[]; raw: string }> {
+  const rows: Array<{ cells: string[]; raw: string }> = [];
   for (const line of fullText.split(/\r?\n/)) {
     const t = line.trim();
     if (!t.startsWith("|") || !t.endsWith("|")) continue;
@@ -69,7 +101,7 @@ export function parseRows(fullText) {
 // token heuristic (an INTERIM); the structured field removes the entire class of prose-parsing
 // fragility (not just the specific instances R5 found). The ledger's Schema section documents the
 // format requirement. Closing the R5 prose-parsing residual — ADR-004 principle: hard over soft.
-export function rowStatus(statusCell) {
+export function rowStatus(statusCell: string | null | undefined): string | null {
   if (statusCell == null) return null;
   // Strip optional bold markers (** or *) and trim; then match the structured [tag]
   const s = String(statusCell).trim();
@@ -82,7 +114,7 @@ export function rowStatus(statusCell) {
 // ── confirmingMilestone — the milestone number at which the row crossed the φ threshold. ──────────
 // Prefers the explicit `confirmed@m<N>` marker; falls back to "crossed at m<N>" / "confirmed m<N>";
 // last resort, the first `m<N>` token in the cell.
-export function confirmingMilestone(cell) {
+export function confirmingMilestone(cell: string | null | undefined): number | null {
   if (cell == null) return null;
   const s = String(cell);
   const explicit = s.match(/confirmed@\s*m?\s*(\d+)/i)
@@ -93,7 +125,7 @@ export function confirmingMilestone(cell) {
 }
 
 // ── hasDatedCarryForward — a carry-forward marker AND an ISO date in the same cell. ───────────────
-export function hasDatedCarryForward(cell) {
+export function hasDatedCarryForward(cell: string | null | undefined): boolean {
   if (cell == null) return false;
   const s = String(cell);
   const hasMarker = /carry[\s-]?forward|carried forward|deferred until|defer to/i.test(s);
@@ -103,7 +135,7 @@ export function hasDatedCarryForward(cell) {
 
 // ── evaluateRow — the arithmetic + decision for one already-parsed row. ───────────────────────────
 // row: { status, confirming, statusCell }. Returns { lag, alarm, reason }.
-export function evaluateRow(row, milestoneCounter, K = K_DEFAULT) {
+export function evaluateRow(row: LedgerRow, milestoneCounter: number, K: number = K_DEFAULT): RowEvaluation {
   const status = row.status;
   if (status === "consolidated") {
     return { lag: null, alarm: false, reason: "consolidated — lag gate does not apply" };
@@ -132,7 +164,7 @@ export function evaluateRow(row, milestoneCounter, K = K_DEFAULT) {
 }
 
 // ── readMilestoneCounter — from the ledger's own `milestone_counter: <N>` marker (comment or text). ─
-export function readMilestoneCounter(fullText) {
+export function readMilestoneCounter(fullText: string): number | null {
   const m = fullText.match(/milestone_counter\s*[:=]\s*(\d+)/i);
   return m ? parseInt(m[1], 10) : null;
 }
@@ -140,7 +172,7 @@ export function readMilestoneCounter(fullText) {
 // ── checkLedger — the SINGLE entry point (CLI + any future quay gate both call this). ─────────────
 // opts.milestoneCounter overrides the in-file marker (the loop passes the live counter). opts.K
 // overrides the threshold (default 2).
-export function checkLedger(fullText, opts = {}) {
+export function checkLedger(fullText: string, opts: CheckLedgerOpts = {}): LedgerResult {
   const K = typeof opts.K === "number" ? opts.K : K_DEFAULT;
   const rows = parseRows(fullText).map((r) => ({
     insight: r.cells[0],
@@ -160,9 +192,9 @@ export function checkLedger(fullText, opts = {}) {
     return { verdict: "FAIL", milestoneCounter: null, K, evaluations: [], alarms: [], reason: "ledger has rows but no milestone_counter derivable (pass --counter <N> or add a `milestone_counter: <N>` marker) — fail-closed" };
   }
 
-  const evaluations = rows.map((r) => {
+  const evaluations: LedgerEvaluation[] = rows.map((r) => {
     const confirming = confirmingMilestone(`${r.confirmCell} ${r.statusCell}`);
-    const res = evaluateRow({ status: r.status, confirming, statusCell: r.statusCell }, milestoneCounter, K);
+    const res = evaluateRow({ status: r.status, confirming, statusCell: r.statusCell }, milestoneCounter!, K);
     return { insight: r.insight, status: r.status, confirming, ...res };
   });
   const alarms = evaluations.filter((e) => e.alarm);
@@ -177,24 +209,24 @@ export function checkLedger(fullText, opts = {}) {
 }
 
 // ── CLI main (only when run directly). Prints a per-row report + summary; exits 0/1/2. ────────────
-async function main(argv) {
+async function main(argv: string[]): Promise<number> {
   const fs = await import("node:fs");
   const args = argv.slice(2);
-  let counterOverride;
-  const files = [];
+  let counterOverride: number | undefined;
+  const files: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--counter") { counterOverride = parseInt(args[++i], 10); continue; }
     files.push(args[i]);
   }
   if (files.length !== 1) {
-    console.error("usage: node vmeta-lag-check.mjs [--counter <N>] <v-meta-ledger.md>");
+    console.error("usage: node vmeta-lag-check.ts [--counter <N>] <v-meta-ledger.md>");
     return 2;
   }
-  let text;
+  let text: string;
   try { text = fs.readFileSync(files[0], "utf8"); }
-  catch (e) { console.error(`ERROR: cannot read file: ${files[0]} (${e.message})`); return 2; }
+  catch (e: any) { console.error(`ERROR: cannot read file: ${files[0]} (${e.message})`); return 2; }
 
-  const opts = {};
+  const opts: CheckLedgerOpts = {};
   if (typeof counterOverride === "number" && !Number.isNaN(counterOverride)) opts.milestoneCounter = counterOverride;
   const rep = checkLedger(text, opts);
 

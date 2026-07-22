@@ -3,7 +3,7 @@
 # real archguard signals score non-zero + non-saturating. Rule defined SOLELY by outward-vt-check.mjs.
 set -u
 cd "$(dirname "$0")/.." || { echo "ERROR: cannot cd" >&2; exit 2; }
-CHK="./scripts/outward-vt-check.mjs"; FIX="fixtures/outward-vt"
+CHK="./scripts/outward-vt-check.ts"; FIX="fixtures/outward-vt"
 [ -f "$CHK" ] || { echo "ERROR: $CHK not found" >&2; exit 2; }
 fail=0
 out=$(node "$CHK" "$FIX/archguard-signals.json" 2>&1); ec=$?

@@ -20,7 +20,7 @@ import {
   hasSiblingTest,
   classifyScript,
   checkTree,
-} from "../scripts/loadbearing-test-gate.mjs";
+} from "../scripts/loadbearing-test-gate.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..", "fixtures", "loadbearing");
@@ -153,7 +153,7 @@ test("checkTree: the two FAILs are exactly the untested load-bearing fixtures", 
 });
 
 // ── CLI (main) end-to-end ─────────────────────────────────────────────────────────────────────
-const CLI = path.join(__dirname, "..", "scripts", "loadbearing-test-gate.mjs");
+const CLI = path.join(__dirname, "..", "scripts", "loadbearing-test-gate.ts");
 const runCli = (args) => spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8" });
 
 test("CLI: fixture tree → exit 1 (a load-bearing script lacks a test), prints FAIL", () => {

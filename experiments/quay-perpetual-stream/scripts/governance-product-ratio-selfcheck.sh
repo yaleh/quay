@@ -4,7 +4,7 @@
 # rule is defined SOLELY by governance-product-ratio-check.mjs. Fix belongs in the module (DIR-019).
 set -u
 cd "$(dirname "$0")/.." || { echo "ERROR: cannot cd" >&2; exit 2; }
-CHK="./scripts/governance-product-ratio-check.mjs"; FIX="fixtures/gov-product"
+CHK="./scripts/governance-product-ratio-check.ts"; FIX="fixtures/gov-product"
 [ -f "$CHK" ] || { echo "ERROR: $CHK not found" >&2; exit 2; }
 fail=0
 out=$(node "$CHK" "$FIX/recorded-window.json" 2>&1); ec=$?

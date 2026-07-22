@@ -24,7 +24,7 @@ LD_CASES=(
 )
 for c in "${LD_CASES[@]}"; do
   IFS='|' read -r id file want <<< "$c"
-  out=$(node scripts/git-lens-l-d-code-doc-ratio.mjs --numstat-file "$file" 2>&1)
+  out=$(node scripts/git-lens-l-d-code-doc-ratio.ts --numstat-file "$file" 2>&1)
   got=$?
   if [ "$got" = "$want" ]; then
     echo "PASS: l-d/$id — exit $got (expected $want)"
@@ -49,7 +49,7 @@ LG_CASES=(
 )
 for c in "${LG_CASES[@]}"; do
   IFS='|' read -r id dir want <<< "$c"
-  out=$(node scripts/git-lens-l-g-structural-drift.mjs "$dir" --min-lines 100 --min-fanin 5 2>&1)
+  out=$(node scripts/git-lens-l-g-structural-drift.ts "$dir" --min-lines 100 --min-fanin 5 2>&1)
   got=$?
   if [ "$got" = "$want" ]; then
     echo "PASS: l-g/$id — exit $got (expected $want)"
@@ -61,7 +61,7 @@ done
 # god-module heuristic is only exercised with a lowered fanin/lines threshold above (the fixture
 # repos are tiny, 2 files each) — default thresholds are calibrated for real packages/ scale.
 echo "(default-threshold real-repo smoke, no assertion — see milestone report for the live finding)"
-node scripts/git-lens-l-g-structural-drift.mjs ../../../../../../packages >/dev/null 2>&1 || true
+node scripts/git-lens-l-g-structural-drift.ts ../../../../../../packages >/dev/null 2>&1 || true
 
 echo
 echo "== L_S behavior-variance =="
@@ -71,7 +71,7 @@ LS_CASES=(
 )
 for c in "${LS_CASES[@]}"; do
   IFS='|' read -r id mod testf want <<< "$c"
-  out=$(node scripts/git-lens-l-s-behavior-variance.mjs "$mod" "$testf" 2>&1)
+  out=$(node scripts/git-lens-l-s-behavior-variance.ts "$mod" "$testf" 2>&1)
   got=$?
   if [ "$got" = "$want" ]; then
     echo "PASS: l-s/$id — exit $got (expected $want)"

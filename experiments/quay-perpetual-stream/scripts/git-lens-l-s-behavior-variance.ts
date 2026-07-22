@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// git-lens-l-s-behavior-variance.mjs — L_S (stability) convergence proxy, ADR-007/exp5-M-CRYST-G1.
+// git-lens-l-s-behavior-variance.ts — L_S (stability) convergence proxy, ADR-007/exp5-M-CRYST-G1.
 //
 // Reports BEHAVIOR VARIANCE for a touched module: a lightweight mutation-testing-style probe that
 // (a) runs the module's existing test file once (baseline), (b) applies a small set of MECHANICAL
@@ -17,7 +17,7 @@
 // no matching operators/literals in the file) reports verdict "N/A".
 //
 // Usage:
-//   git-lens-l-s-behavior-variance.mjs <module-file> <test-file> [--node-test-cmd "node --test <f>"]
+//   git-lens-l-s-behavior-variance.ts <module-file> <test-file> [--node-test-cmd "node --test <f>"]
 //
 // Exit codes: 0 = PASS (mutationScore >= threshold) or N/A; 1 = FLAGGED (low mutation score).
 
@@ -26,10 +26,34 @@ import { execSync } from 'node:child_process';
 
 export const FLAG_THRESHOLD = 0.5;
 
+export interface MutationOperator {
+  name: string;
+  re: RegExp;
+  to: string;
+}
+
+export interface Mutant {
+  name: string;
+  mutatedSource: string;
+  start: number;
+  end: number;
+}
+
+export interface ProbeResult {
+  totalMutants: number;
+  killed: number;
+  survived: number;
+  survivedNames?: string[];
+  mutationScore: number | null;
+  verdict: string;
+  flagged: boolean;
+  baselinePass: boolean;
+}
+
 // A small, deliberately conservative set of mechanical mutation operators — each is a regex
 // substitution applied ONCE per match, producing one mutant per match. Kept intentionally simple
 // (a real mutation-testing framework is out of scope; this is a cheap proxy, not a replacement).
-export const MUTATION_OPERATORS = [
+export const MUTATION_OPERATORS: MutationOperator[] = [
   { name: 'flip-strict-equal', re: /===/g, to: '!==' },
   { name: 'flip-strict-not-equal', re: /!==/g, to: '===' },
   { name: 'flip-and-or', re: /&&/g, to: '||' },
@@ -39,10 +63,10 @@ export const MUTATION_OPERATORS = [
 ];
 
 // ── generateMutants — pure function: source text -> [{name, mutatedSource, index}] ───────────────
-export function generateMutants(source) {
-  const mutants = [];
+export function generateMutants(source: string): Mutant[] {
+  const mutants: Mutant[] = [];
   for (const op of MUTATION_OPERATORS) {
-    let match;
+    let match: RegExpExecArray | null;
     const re = new RegExp(op.re.source, op.re.flags);
     let count = 0;
     while ((match = re.exec(source))) {
@@ -59,7 +83,7 @@ export function generateMutants(source) {
 }
 
 // ── runTest — run a test command, return true if it exits 0 (tests PASS) ─────────────────────────
-function runTest(cmd) {
+function runTest(cmd: string): boolean {
   try {
     execSync(cmd, { stdio: 'pipe' });
     return true;
@@ -69,7 +93,7 @@ function runTest(cmd) {
 }
 
 // ── probe — orchestrate: for each mutant, write it, run tests, restore original, classify ────────
-export function probe(moduleFile, testCmd) {
+export function probe(moduleFile: string, testCmd: string): ProbeResult {
   const original = readFileSync(moduleFile, 'utf8');
   const backup = `${moduleFile}.l-s-backup`;
   copyFileSync(moduleFile, backup);
@@ -83,7 +107,7 @@ export function probe(moduleFile, testCmd) {
   const mutants = generateMutants(original);
   let killed = 0;
   let survived = 0;
-  const survivedNames = [];
+  const survivedNames: string[] = [];
   try {
     for (const mutant of mutants) {
       writeFileSync(moduleFile, mutant.mutatedSource);
@@ -118,11 +142,11 @@ export function probe(moduleFile, testCmd) {
   };
 }
 
-function main() {
+function main(): void {
   const args = process.argv.slice(2);
   const [moduleFile, testFile] = args;
   if (!moduleFile || !testFile) {
-    console.error('Usage: git-lens-l-s-behavior-variance.mjs <module-file> <test-file>');
+    console.error('Usage: git-lens-l-s-behavior-variance.ts <module-file> <test-file>');
     process.exit(2);
   }
   if (!existsSync(moduleFile) || !existsSync(testFile)) {

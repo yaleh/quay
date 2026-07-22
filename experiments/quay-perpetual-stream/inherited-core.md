@@ -1071,7 +1071,7 @@ added DIR-020/M34-ac-dod-checklist-writeback, 2026-07-19)
   (past the φ 2-cross-domain-confirmation threshold, §4.2) but not yet `consolidated`.
 - **What it checks:** the lag arithmetic (each qualifying row's `milestones-since-confirmed` vs the
   **K=2** health-track threshold from `dashboard.md`) is computed by the SINGLE-SOURCE module
-  `scripts/vmeta-lag-check.mjs` (`checkLedger`, D3·R5) — **that module IS the definition** (fail-closed
+  `scripts/vmeta-lag-check.ts` (`checkLedger`, D3·R5) — **that module IS the definition** (fail-closed
   on ambiguous / keyword-less / unparseable rows; explicit `N/A` on an empty ledger). The formula is
   NOT restated here; read the module. The complementary `it0-dod-check.mjs` Clause 2 independently
   scans the ABSORB text for the disposition TOKEN (that a resolution was narrated), never the
@@ -1382,12 +1382,12 @@ clean (PASS); exit 1 = stale worktrees/branches found (FAIL).
 
 **Verifies that the per-milestone adversarial audit was dispatched by an INDEPENDENT agent** — not
 the orchestrating context that built the milestone. Implemented by
-`experiments/quay-perpetual-stream/scripts/audit-independence-check.mjs` (registered as named gate
+`experiments/quay-perpetual-stream/scripts/audit-independence-check.ts` (registered as named gate
 `audit-independence`). DIR-034 mechanized this: previously the audit-independence check was prose;
 Clause 12 requires the ABSORB entry to carry an `## Audit-independence check` section with the
 artifact path + orchestrator id, which the gate verifies. Conditionally dispositioned (like Clauses
 1/2/6/7): if the section is ABSENT, the clause N/A-passes with a recorded no-op.
-<!-- enforcement: scripts/it0-dod-check.mjs (Clause 12 block); source: audit-independence-check.mjs -->
+<!-- enforcement: scripts/it0-dod-check.mjs (Clause 12 block); source: audit-independence-check.ts -->
 
 ## Deviation-record schema (DIR-017 Step 3 / M36-dod-leakage-metrics)
 

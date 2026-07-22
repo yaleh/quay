@@ -1,10 +1,10 @@
-// audit-independence-check.mjs — the ONE canonical implementation of the
+// audit-independence-check.ts — the ONE canonical implementation of the
 // DIR-032 audit-independence rule, with the DIR-034 anti-forgery corroboration
 // requirement folded in. This module IS the rule: pure, side-effect-free check
 // functions consumed by the standalone CLI (this file's own `main` below) and
 // wrappable, unchanged, by the `audit-independence` named engine gate
 // (packages/quay/src/gate/registry.js), following the exact
-// `vmeta-lag-check.mjs` / `it0-dod-check.mjs` single-source template (module IS
+// vmeta-lag-check.ts / it0-dod-check.mjs single-source template (module IS
 // the definition; a thin `.sh`/gate wraps it, never reimplements it). If this
 // header comment and the code ever disagree, THE CODE WINS.
 //
@@ -63,11 +63,28 @@
 
 const ID_LINE_RE = /^\s*(?:\*\*)?audit session id(?:\*\*)?\s*:\s*(.+)$/im;
 
+export interface IndependenceOptions {
+  dispatchRecordIds?: Set<string> | string[] | null;
+  allowUncorroborated?: boolean;
+}
+
+export interface IndependenceResult {
+  verdict: "PASS" | "FAIL";
+  reason: string;
+}
+
+export interface ArtifactReport {
+  artifactId: string | null;
+  orchestratorId: string | null;
+  verdict: "PASS" | "FAIL";
+  reason: string;
+}
+
 // ── extractSessionId — pull the recorded "Audit session id: <id>" value out of
 //    an audit artifact's raw text. Returns null if no such line is present
 //    (or the value after the colon is empty/whitespace-only) — an ABSENT id,
 //    never coerced into an empty-string "match".
-export function extractSessionId(fullText) {
+export function extractSessionId(fullText: string): string | null {
   if (typeof fullText !== "string") return null;
   const m = fullText.match(ID_LINE_RE);
   if (!m) return null;
@@ -80,7 +97,7 @@ export function extractSessionId(fullText) {
 //    trimmed. Returns an empty Set for empty/whitespace-only text (a real but
 //    empty record — distinguish from "no record at all", which callers signal
 //    with `null`/`undefined`, never an empty Set from this function).
-export function parseDispatchRecord(fullText) {
+export function parseDispatchRecord(fullText: string): Set<string> {
   if (typeof fullText !== "string") return new Set();
   const ids = fullText
     .split("\n")
@@ -91,7 +108,7 @@ export function parseDispatchRecord(fullText) {
 
 // ── isCorroborated — is `artifactId` present in `dispatchRecordIds` (a Set or
 //    array of ids, or null/undefined meaning "no record supplied")?
-export function isCorroborated(artifactId, dispatchRecordIds) {
+export function isCorroborated(artifactId: string | null, dispatchRecordIds: Set<string> | string[] | null | undefined): boolean {
   if (artifactId == null || artifactId === "") return false;
   if (dispatchRecordIds == null) return false;
   const set = dispatchRecordIds instanceof Set ? dispatchRecordIds : new Set(dispatchRecordIds);
@@ -109,7 +126,7 @@ export function isCorroborated(artifactId, dispatchRecordIds) {
 //      - allowUncorroborated: boolean (default false) — pre-DIR-034 escape
 //        hatch; when true, skips the corroboration requirement entirely
 //        (distinct-string-only, DIR-032 behavior).
-export function evaluateIndependence(artifactId, orchestratorId, options = {}) {
+export function evaluateIndependence(artifactId: string | null, orchestratorId: string | null | undefined, options: IndependenceOptions = {}): IndependenceResult {
   const { dispatchRecordIds = null, allowUncorroborated = false } = options;
 
   if (artifactId == null || artifactId === "") {
@@ -176,20 +193,20 @@ export function evaluateIndependence(artifactId, orchestratorId, options = {}) {
 // ── checkArtifact — convenience wrapper: read the artifact's raw text +
 //    orchestrator id + DIR-034 corroboration options, run extraction +
 //    evaluation, return the full report.
-export function checkArtifact(fullText, orchestratorId, options = {}) {
+export function checkArtifact(fullText: string, orchestratorId: string | null | undefined, options: IndependenceOptions = {}): ArtifactReport {
   const artifactId = extractSessionId(fullText);
   const { verdict, reason } = evaluateIndependence(artifactId, orchestratorId, options);
   return { artifactId, orchestratorId: orchestratorId ?? null, verdict, reason };
 }
 
 // ── CLI main (only when run directly, or invoked by a test harness). Prints the report; exits 0/1/2.
-export async function main(argv) {
+export async function main(argv: string[]): Promise<number> {
   const fs = await import("node:fs");
   const args = argv.slice(2);
-  let orchestratorId = process.env.QUAY_ORCHESTRATOR_SESSION_ID;
-  let dispatchRecordPath = process.env.QUAY_DISPATCH_RECORD_FILE;
+  let orchestratorId: string | undefined = process.env.QUAY_ORCHESTRATOR_SESSION_ID;
+  let dispatchRecordPath: string | undefined = process.env.QUAY_DISPATCH_RECORD_FILE;
   let allowUncorroborated = false;
-  const files = [];
+  const files: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--orchestrator-id") { orchestratorId = args[++i]; continue; }
     if (args[i] === "--dispatch-record") { dispatchRecordPath = args[++i]; continue; }
@@ -198,20 +215,20 @@ export async function main(argv) {
   }
   if (files.length !== 1) {
     console.error(
-      "usage: node audit-independence-check.mjs [--orchestrator-id <id>] [--dispatch-record <file>] " +
+      "usage: node audit-independence-check.ts [--orchestrator-id <id>] [--dispatch-record <file>] " +
       "[--allow-uncorroborated] <audit-artifact.md>"
     );
     return 2;
   }
-  let text;
+  let text: string;
   try { text = fs.readFileSync(files[0], "utf8"); }
-  catch (e) { console.error(`ERROR: cannot read file: ${files[0]} (${e.message})`); return 2; }
+  catch (e: any) { console.error(`ERROR: cannot read file: ${files[0]} (${e.message})`); return 2; }
 
-  let dispatchRecordIds = null;
+  let dispatchRecordIds: Set<string> | null = null;
   if (dispatchRecordPath) {
-    let recordText;
+    let recordText: string;
     try { recordText = fs.readFileSync(dispatchRecordPath, "utf8"); }
-    catch (e) {
+    catch (e: any) {
       console.error(`ERROR: cannot read dispatch-record file: ${dispatchRecordPath} (${e.message})`);
       return 2;
     }
@@ -223,7 +240,7 @@ export async function main(argv) {
   console.log(`Audit-independence check — ${files[0]}`);
   console.log(`artifact session id: ${rep.artifactId ?? "(absent)"}`);
   console.log(`orchestrator session id: ${rep.orchestratorId ?? "(none supplied)"}`);
-  console.log(`dispatch-record: ${dispatchRecordPath ? `${dispatchRecordPath} (${dispatchRecordIds.size} id(s))` : "(none supplied)"}${allowUncorroborated ? " [--allow-uncorroborated escape hatch active]" : ""}`);
+  console.log(`dispatch-record: ${dispatchRecordPath ? `${dispatchRecordPath} (${dispatchRecordIds!.size} id(s))` : "(none supplied)"}${allowUncorroborated ? " [--allow-uncorroborated escape hatch active]" : ""}`);
   console.log("");
   console.log(`${rep.verdict}: ${rep.reason}`);
   return rep.verdict === "PASS" ? 0 : 1;

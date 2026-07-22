@@ -16,7 +16,7 @@ import {
   parseDispatchRecord,
   isCorroborated,
   main,
-} from "../scripts/audit-independence-check.mjs";
+} from "../scripts/audit-independence-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(__dirname, "..", "fixtures", "audit-independence");
@@ -186,18 +186,18 @@ function captureConsole(fn) {
 
 test("main: usage error when file count != 1 → exit 2", async () => {
   const { result } = captureConsole(() => null);
-  const code = await main(["node", "audit-independence-check.mjs"]);
+  const code = await main(["node", "audit-independence-check.ts"]);
   assert.equal(code, 2);
 });
 
 test("main: unreadable file → exit 2", async () => {
-  const code = await main(["node", "audit-independence-check.mjs", "/nonexistent/path/does-not-exist.md"]);
+  const code = await main(["node", "audit-independence-check.ts", "/nonexistent/path/does-not-exist.md"]);
   assert.equal(code, 2);
 });
 
 test("main: real absent-id fixture, --orchestrator-id flag → exit 1 (FAIL)", async () => {
   const file = path.join(FIX, "absent-id-m43-style.md");
-  const code = await main(["node", "audit-independence-check.mjs", "--orchestrator-id", "orch-x", file]);
+  const code = await main(["node", "audit-independence-check.ts", "--orchestrator-id", "orch-x", file]);
   assert.equal(code, 1);
 });
 
@@ -206,7 +206,7 @@ test("main: real independent fixture, orchestrator id via env var, NO dispatch-r
   const prev = process.env.QUAY_ORCHESTRATOR_SESSION_ID;
   process.env.QUAY_ORCHESTRATOR_SESSION_ID = "orchestrator-session-abc123";
   try {
-    const code = await main(["node", "audit-independence-check.mjs", file]);
+    const code = await main(["node", "audit-independence-check.ts", file]);
     assert.equal(code, 1);
   } finally {
     if (prev === undefined) delete process.env.QUAY_ORCHESTRATOR_SESSION_ID;
@@ -216,26 +216,26 @@ test("main: real independent fixture, orchestrator id via env var, NO dispatch-r
 
 test("main: real independent fixture, --allow-uncorroborated escape hatch → exit 0 (PASS, pre-DIR-034 behavior)", async () => {
   const file = path.join(FIX, "genuinely-independent.md");
-  const code = await main(["node", "audit-independence-check.mjs", "--orchestrator-id", "orchestrator-session-abc123", "--allow-uncorroborated", file]);
+  const code = await main(["node", "audit-independence-check.ts", "--orchestrator-id", "orchestrator-session-abc123", "--allow-uncorroborated", file]);
   assert.equal(code, 0);
 });
 
 test("main: corroborated-independent fixture + --dispatch-record pointing at the matching record → exit 0 (PASS)", async () => {
   const file = path.join(FIX, "corroborated-independent.md");
   const record = path.join(FIX, "dispatch-record.txt");
-  const code = await main(["node", "audit-independence-check.mjs", "--orchestrator-id", "orchestrator-session-abc123", "--dispatch-record", record, file]);
+  const code = await main(["node", "audit-independence-check.ts", "--orchestrator-id", "orchestrator-session-abc123", "--dispatch-record", record, file]);
   assert.equal(code, 0);
 });
 
 test("main: fabricated-distinct-id fixture + --dispatch-record NOT containing it → exit 1 (FAIL)", async () => {
   const file = path.join(FIX, "fabricated-distinct-id-no-corroboration.md");
   const record = path.join(FIX, "dispatch-record.txt");
-  const code = await main(["node", "audit-independence-check.mjs", "--orchestrator-id", "orchestrator-session-abc123", "--dispatch-record", record, file]);
+  const code = await main(["node", "audit-independence-check.ts", "--orchestrator-id", "orchestrator-session-abc123", "--dispatch-record", record, file]);
   assert.equal(code, 1);
 });
 
 test("main: --dispatch-record pointing at an unreadable file → exit 2 (usage/environment error)", async () => {
   const file = path.join(FIX, "genuinely-independent.md");
-  const code = await main(["node", "audit-independence-check.mjs", "--orchestrator-id", "orch-x", "--dispatch-record", "/nonexistent/dispatch-record.txt", file]);
+  const code = await main(["node", "audit-independence-check.ts", "--orchestrator-id", "orch-x", "--dispatch-record", "/nonexistent/dispatch-record.txt", file]);
   assert.equal(code, 2);
 });

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// git-lens-l-d-code-doc-ratio.mjs — L_D (description-length) convergence proxy, ADR-007/exp5-M-CRYST-G1.
+// git-lens-l-d-code-doc-ratio.ts — L_D (description-length) convergence proxy, ADR-007/exp5-M-CRYST-G1.
 //
 // Computes a code:doc line-delta ratio over a git commit range (or a synthetic fixture diffstat),
 // and FLAGs when the delta is overwhelmingly new prose (the "molten prose > executable" failure
@@ -10,7 +10,7 @@
 //
 // ── The rule ────────────────────────────────────────────────────────────────────────────────────
 // A file path is classified DOC if it matches /\.(md|txt)$/i, else CODE (this deliberately treats
-// non-.md/.txt as code — .mjs/.sh/.yml/.json all count as "code" for this ratio, matching the
+// non-.md/.txt as code — .ts/.mjs/.sh/.yml/.json all count as "code" for this ratio, matching the
 // spirit of "executable > prose"). Given per-file (added, deleted) line counts from a
 // `git diff --numstat`-shaped input:
 //   docLines  = sum(added+deleted) over DOC files
@@ -22,8 +22,8 @@
 // A milestone with NO changes at all (both zero) reports verdict "N/A" — never a silent PASS.
 //
 // Usage:
-//   git-lens-l-d-code-doc-ratio.mjs <base-sha> <head-sha> [--repo-root <path>]
-//   git-lens-l-d-code-doc-ratio.mjs --numstat-file <file>   (fixture/offline mode — reads a
+//   git-lens-l-d-code-doc-ratio.ts <base-sha> <head-sha> [--repo-root <path>]
+//   git-lens-l-d-code-doc-ratio.ts --numstat-file <file>   (fixture/offline mode — reads a
 //     `git diff --numstat`-formatted file directly, added\tdeleted\tpath per line, `-` = binary)
 //
 // Exit codes: 0 = PASS (not flagged) or N/A (no changes); 1 = FLAGGED (prose-heavy).
@@ -36,10 +36,24 @@ export const MIN_DOC_LINES = 20;
 
 const DOC_RE = /\.(md|txt)$/i;
 
+export interface NumstatRow {
+  added: number;
+  deleted: number;
+  path: string;
+}
+
+export interface RatioResult {
+  docLines: number;
+  codeLines: number;
+  ratio: number | null;
+  verdict: string;
+  flagged: boolean;
+}
+
 // ── parseNumstat — parse `git diff --numstat` text into [{added, deleted, path}] ─────────────────
 // Binary files report `-\t-\tpath`; treated as 0 lines (not classifiable as doc/code text delta).
-export function parseNumstat(text) {
-  const rows = [];
+export function parseNumstat(text: string): NumstatRow[] {
+  const rows: NumstatRow[] = [];
   for (const line of String(text).split('\n')) {
     if (!line.trim()) continue;
     const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
@@ -53,12 +67,12 @@ export function parseNumstat(text) {
 }
 
 // ── classify — DOC if path ends .md/.txt, else CODE ───────────────────────────────────────────────
-export function classify(path) {
-  return DOC_RE.test(path) ? 'doc' : 'code';
+export function classify(filePath: string): 'doc' | 'code' {
+  return DOC_RE.test(filePath) ? 'doc' : 'code';
 }
 
 // ── computeRatio — the pure arithmetic + verdict, given parsed numstat rows ──────────────────────
-export function computeRatio(rows, { flagThreshold = FLAG_THRESHOLD, minDocLines = MIN_DOC_LINES } = {}) {
+export function computeRatio(rows: NumstatRow[], { flagThreshold = FLAG_THRESHOLD, minDocLines = MIN_DOC_LINES }: { flagThreshold?: number; minDocLines?: number } = {}): RatioResult {
   let docLines = 0;
   let codeLines = 0;
   for (const r of rows) {
@@ -75,7 +89,7 @@ export function computeRatio(rows, { flagThreshold = FLAG_THRESHOLD, minDocLines
 }
 
 // ── gitNumstat — run `git diff --numstat base..head` for a real range ────────────────────────────
-export function gitNumstat(base, head, repoRoot) {
+export function gitNumstat(base: string, head: string, repoRoot?: string): NumstatRow[] {
   const out = execFileSync('git', ['diff', '--numstat', `${base}..${head}`], {
     cwd: repoRoot || process.cwd(),
     encoding: 'utf8',
@@ -83,19 +97,19 @@ export function gitNumstat(base, head, repoRoot) {
   return parseNumstat(out);
 }
 
-function main() {
+function main(): void {
   const args = process.argv.slice(2);
-  let rows;
+  let rows: NumstatRow[];
   if (args[0] === '--numstat-file') {
     rows = parseNumstat(readFileSync(args[1], 'utf8'));
   } else {
     const [base, head] = args;
-    let repoRoot;
+    let repoRoot: string | undefined;
     const idx = args.indexOf('--repo-root');
     if (idx !== -1) repoRoot = args[idx + 1];
     if (!base || !head) {
-      console.error('Usage: git-lens-l-d-code-doc-ratio.mjs <base-sha> <head-sha> [--repo-root <path>]');
-      console.error('   or: git-lens-l-d-code-doc-ratio.mjs --numstat-file <file>');
+      console.error('Usage: git-lens-l-d-code-doc-ratio.ts <base-sha> <head-sha> [--repo-root <path>]');
+      console.error('   or: git-lens-l-d-code-doc-ratio.ts --numstat-file <file>');
       process.exit(2);
     }
     rows = gitNumstat(base, head, repoRoot);

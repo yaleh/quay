@@ -1,4 +1,4 @@
-// loadbearing-test-gate.mjs — the ONE canonical implementation of the LOAD-BEARING-TEST gate: it
+// loadbearing-test-gate.ts — the ONE canonical implementation of the LOAD-BEARING-TEST gate: it
 // mechanically enforces ADR-001 Decision clause 2 (load-bearing method-infra must be fixture-first +
 // covered), which until now lived only as prose. This module IS the rule: pure, side-effect-free
 // check functions consumed by the standalone CLI (this file's own `main` below, invoked via
@@ -8,9 +8,9 @@
 // policy it enforces — it is itself load-bearing and ships with a sibling test/loadbearing-test-gate.test.mjs.
 //
 // ── The 'load-bearing' MECHANICAL criterion (concrete, this is the single source of the definition) ─
-//   A `scripts/*.mjs` is LOAD-BEARING iff AT LEAST ONE of:
-//     (a) IMPORTED by another module in the repo — some OTHER .mjs under an import-search-root has an
-//         `import ... from "<...>/<name>.mjs"` line naming it (a module importing ITSELF does not count).
+//   A `scripts/*.mjs` or `scripts/*.ts` is LOAD-BEARING iff AT LEAST ONE of:
+//     (a) IMPORTED by another module in the repo — some OTHER .mjs/.ts under an import-search-root has an
+//         `import ... from "<...>/<name>.mjs"` (or `.ts`) line naming it (a module importing ITSELF does not count).
 //     (b) WRAPPED / REGISTERED by the gate registry — its basename appears in
 //         packages/quay/src/gate/registry.js.
 //     (c) NAMED by OUTER-LOOP.md as a `milestone_counter++` gate — its basename appears on a line of
@@ -31,38 +31,62 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export interface ScriptCfg {
+  scriptsDir: string;
+  testDir: string | null;
+  importSearchRoots: string[];
+  registryFile: string | null;
+  outerLoopFile: string | null;
+}
+
+export interface ScriptResult {
+  file: string;
+  loadBearing: boolean;
+  reasons: string[];
+  hasTest: boolean;
+  verdict: "PASS" | "FAIL" | "N/A";
+}
+
+export interface TreeResult {
+  verdict: "PASS" | "FAIL";
+  results: ScriptResult[];
+  pass: number;
+  fail: number;
+  na: number;
+}
+
 // ── basenameOf — the file's basename (used everywhere a script is identified by name). ────────────
-export function basenameOf(file) {
+export function basenameOf(file: string): string {
   return path.basename(file);
 }
 
-// ── enumerateScripts — all `*.mjs` directly in scriptsDir (non-recursive), as ABSOLUTE paths. ─────
+// ── enumerateScripts — all `*.ts` and `*.mjs` directly in scriptsDir (non-recursive), as ABSOLUTE paths. ─────
 // Missing dir → [] (no throw): an absent scripts dir is "nothing to gate", not an error.
-export function enumerateScripts(scriptsDir) {
-  let entries;
+export function enumerateScripts(scriptsDir: string): string[] {
+  let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(scriptsDir, { withFileTypes: true });
   } catch {
     return [];
   }
   return entries
-    .filter((e) => e.isFile() && e.name.endsWith(".mjs") && !e.name.endsWith(".test.mjs"))
+    .filter((e) => e.isFile() && (e.name.endsWith(".ts") || e.name.endsWith(".mjs")) && !e.name.endsWith(".test.mjs") && !e.name.endsWith(".test.ts"))
     .map((e) => path.resolve(scriptsDir, e.name))
     .sort();
 }
 
-// ── readAllMjs — every `*.mjs` under the given roots (non-recursive per root), as {file, text}. ───
-function readAllMjs(roots) {
-  const out = [];
+// ── readAllMjs — every `*.mjs` and `*.ts` under the given roots (non-recursive per root), as {file, text}. ───
+function readAllMjs(roots: string[]): Array<{ file: string; text: string }> {
+  const out: Array<{ file: string; text: string }> = [];
   for (const root of roots) {
-    let entries;
+    let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(root, { withFileTypes: true });
     } catch {
       continue;
     }
     for (const e of entries) {
-      if (!e.isFile() || !e.name.endsWith(".mjs")) continue;
+      if (!e.isFile() || (!e.name.endsWith(".mjs") && !e.name.endsWith(".ts"))) continue;
       const file = path.resolve(root, e.name);
       let text = "";
       try { text = fs.readFileSync(file, "utf8"); } catch { text = ""; }
@@ -72,19 +96,23 @@ function readAllMjs(roots) {
   return out;
 }
 
-// ── detectImported (criterion a) — some OTHER .mjs under importSearchRoots imports this basename. ─
-// Matches `from "<...>/<name>.mjs"` or `from "<name>.mjs"` (single OR double quotes). A module that
-// imports itself (the same file carrying the import line) does NOT count as making itself load-bearing.
-export function detectImported(name, importSearchRoots) {
+// ── detectImported (criterion a) — some OTHER .mjs/.ts under importSearchRoots imports this basename. ─
+// Matches `from "<...>/<name>.mjs"` / `from "<...>/<name>.ts"` or bare `from "<name>.mjs"` / `from "<name>.ts"`.
+// A module that imports itself (the same file carrying the import line) does NOT count as making itself load-bearing.
+export function detectImported(name: string, importSearchRoots: string[]): boolean {
   // Match every `from "<spec>"` / `from '<spec>'` import specifier, then compare its basename to
   // `name` — so `from "./x/<name>.mjs"` and `from "<name>.mjs"` both count, but `from "other.mjs"`
   // does not, without brittle path-prefix regex escaping.
   const specRe = /from\s+["']([^"']*)["']/g;
+  // The caller's name may be a .ts file; also check for the same stem with .mjs extension (legacy imports).
+  const stem = name.replace(/\.(ts|mjs)$/, "");
   for (const { file, text } of readAllMjs(importSearchRoots)) {
-    if (basenameOf(file) === name) continue; // self-import does not count
-    let m;
+    const fileStem = basenameOf(file).replace(/\.(ts|mjs)$/, "");
+    if (fileStem === stem) continue; // self-import does not count
+    let m: RegExpExecArray | null;
     while ((m = specRe.exec(text)) !== null) {
-      if (basenameOf(m[1]) === name) return true;
+      const importedStem = basenameOf(m[1]).replace(/\.(ts|mjs)$/, "");
+      if (importedStem === stem) return true;
     }
     specRe.lastIndex = 0;
   }
@@ -93,10 +121,12 @@ export function detectImported(name, importSearchRoots) {
 
 // ── detectRegistered (criterion b) — basename appears in the gate registry file. ──────────────────
 // Missing registry file → false (no throw).
-export function detectRegistered(name, registryFile) {
-  let text;
+export function detectRegistered(name: string, registryFile: string): boolean {
+  let text: string;
   try { text = fs.readFileSync(registryFile, "utf8"); } catch { return false; }
-  return text.includes(name);
+  // Check for both the .ts and .mjs forms of the name (stem-based match for portability)
+  const stem = name.replace(/\.(ts|mjs)$/, "");
+  return text.includes(name) || text.includes(`${stem}.mjs`) || text.includes(`${stem}.ts`);
 }
 
 // ── detectCounterGate (criterion c) — basename appears in the SAME OUTER-LOOP BULLET BLOCK as a
@@ -105,11 +135,11 @@ export function detectRegistered(name, registryFile) {
 // token routinely wrap onto different physical lines; a per-line rule under-detects the real doc. A
 // block starts at a line matching `^\s*-\s` (a Markdown list item) and runs until the next such line
 // (or a blank-line-separated non-bullet paragraph). Missing outer-loop file → false (no throw).
-export function splitBulletBlocks(text) {
+export function splitBulletBlocks(text: string): string[] {
   const lines = text.split(/\r?\n/);
-  const blocks = [];
-  let cur = null;
-  const isBulletStart = (l) => /^\s*[-*]\s/.test(l);
+  const blocks: string[] = [];
+  let cur: string[] | null = null;
+  const isBulletStart = (l: string) => /^\s*[-*]\s/.test(l);
   for (const line of lines) {
     if (isBulletStart(line)) {
       if (cur !== null) blocks.push(cur.join("\n"));
@@ -125,33 +155,35 @@ export function splitBulletBlocks(text) {
   return blocks;
 }
 
-export function detectCounterGate(name, outerLoopFile) {
-  let text;
+export function detectCounterGate(name: string, outerLoopFile: string): boolean {
+  let text: string;
   try { text = fs.readFileSync(outerLoopFile, "utf8"); } catch { return false; }
+  // Check for both the .ts and .mjs forms of the stem
+  const stem = name.replace(/\.(ts|mjs)$/, "");
   for (const block of splitBulletBlocks(text)) {
-    if (block.includes(name) && /milestone_counter\s*\+\+/.test(block)) return true;
+    if ((block.includes(name) || block.includes(`${stem}.mjs`) || block.includes(`${stem}.ts`)) && /milestone_counter\s*\+\+/.test(block)) return true;
   }
   return false;
 }
 
-// ── hasSiblingTest — a `<name-without-.mjs>.test.mjs` exists in testDir. ──────────────────────────
-export function hasSiblingTest(name, testDir) {
-  const stem = name.replace(/\.mjs$/, "");
+// ── hasSiblingTest — a `<name-without-extension>.test.mjs` exists in testDir. ──────────────────────────
+export function hasSiblingTest(name: string, testDir: string): boolean {
+  const stem = name.replace(/\.(ts|mjs)$/, "");
   const sibling = path.join(testDir, `${stem}.test.mjs`);
   return fs.existsSync(sibling);
 }
 
 // ── classifyScript — the per-script disposition. cfg: { testDir, importSearchRoots, registryFile,
 //    outerLoopFile }. Returns { file, loadBearing, reasons, hasTest, verdict }. ────────────────────
-export function classifyScript(file, cfg) {
+export function classifyScript(file: string, cfg: ScriptCfg): ScriptResult {
   const name = basenameOf(file);
-  const reasons = [];
+  const reasons: string[] = [];
   if (detectImported(name, cfg.importSearchRoots || [])) reasons.push("imported");
   if (cfg.registryFile && detectRegistered(name, cfg.registryFile)) reasons.push("registered");
   if (cfg.outerLoopFile && detectCounterGate(name, cfg.outerLoopFile)) reasons.push("counter-gate");
   const loadBearing = reasons.length > 0;
-  const hasTest = hasSiblingTest(name, cfg.testDir);
-  let verdict;
+  const hasTest = hasSiblingTest(name, cfg.testDir!);
+  let verdict: "PASS" | "FAIL" | "N/A";
   if (!loadBearing) verdict = "N/A";
   else verdict = hasTest ? "PASS" : "FAIL";
   return { file, loadBearing, reasons, hasTest, verdict };
@@ -159,7 +191,7 @@ export function classifyScript(file, cfg) {
 
 // ── checkTree — the SINGLE entry point (CLI + any future quay gate both call this). ───────────────
 // cfg: { scriptsDir, testDir, importSearchRoots, registryFile, outerLoopFile }.
-export function checkTree(cfg) {
+export function checkTree(cfg: ScriptCfg): TreeResult {
   const scripts = enumerateScripts(cfg.scriptsDir);
   const results = scripts.map((f) => classifyScript(f, cfg));
   const pass = results.filter((r) => r.verdict === "PASS").length;
@@ -175,8 +207,8 @@ export function checkTree(cfg) {
 }
 
 // ── CLI arg parse. --scripts (required), --tests, --import-root (repeatable), --registry, --outer-loop. ─
-function parseArgs(argv) {
-  const cfg = { scriptsDir: null, testDir: null, importSearchRoots: [], registryFile: null, outerLoopFile: null };
+function parseArgs(argv: string[]): { cfg?: ScriptCfg; error?: string } {
+  const cfg: ScriptCfg = { scriptsDir: null as any, testDir: null, importSearchRoots: [], registryFile: null, outerLoopFile: null };
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -191,20 +223,20 @@ function parseArgs(argv) {
 }
 
 // ── CLI main (only when run directly). Prints a per-script report + summary; exits 0/1/2. ─────────
-function main(argv) {
+function main(argv: string[]): number {
   const { cfg, error } = parseArgs(argv);
   if (error) { console.error(`ERROR: ${error}`); return 2; }
-  if (!cfg.scriptsDir) {
-    console.error("usage: node loadbearing-test-gate.mjs --scripts <dir> [--tests <dir>] " +
+  if (!cfg!.scriptsDir) {
+    console.error("usage: node loadbearing-test-gate.ts --scripts <dir> [--tests <dir>] " +
       "[--import-root <dir> ...] [--registry <file>] [--outer-loop <file>]");
     return 2;
   }
   // Sensible defaults: tests dir sibling of scripts dir; import search = the scripts dir itself.
-  if (!cfg.testDir) cfg.testDir = path.resolve(cfg.scriptsDir, "..", "test");
-  if (cfg.importSearchRoots.length === 0) cfg.importSearchRoots = [cfg.scriptsDir];
+  if (!cfg!.testDir) cfg!.testDir = path.resolve(cfg!.scriptsDir, "..", "test");
+  if (cfg!.importSearchRoots.length === 0) cfg!.importSearchRoots = [cfg!.scriptsDir];
 
-  const rep = checkTree(cfg);
-  console.log(`load-bearing test-gate — scripts=${cfg.scriptsDir}`);
+  const rep = checkTree(cfg!);
+  console.log(`load-bearing test-gate — scripts=${cfg!.scriptsDir}`);
   for (const r of rep.results) {
     const name = basenameOf(r.file);
     if (r.verdict === "N/A") {
@@ -212,7 +244,7 @@ function main(argv) {
     } else if (r.verdict === "PASS") {
       console.log(`  [PASS] ${name} — load-bearing (${r.reasons.join(",")}) + sibling test present`);
     } else {
-      console.log(`  [FAIL] ${name} — load-bearing (${r.reasons.join(",")}) but NO sibling ${name.replace(/\.mjs$/, "")}.test.mjs`);
+      console.log(`  [FAIL] ${name} — load-bearing (${r.reasons.join(",")}) but NO sibling ${name.replace(/\.(ts|mjs)$/, "")}.test.mjs`);
     }
   }
   console.log("");

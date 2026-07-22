@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { outwardVT, nonSaturating, rescore, DEFAULT_WEIGHTS, main } from "../scripts/outward-vt-check.mjs";
+import { outwardVT, nonSaturating, rescore, DEFAULT_WEIGHTS, main } from "../scripts/outward-vt-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(__dirname, "..", "fixtures", "outward-vt");

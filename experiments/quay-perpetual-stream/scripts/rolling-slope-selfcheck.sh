@@ -5,7 +5,7 @@
 # only asserts observable exit codes + printed slope. Fix belongs in the module (DIR-019).
 set -u
 cd "$(dirname "$0")/.." || { echo "ERROR: cannot cd to experiment root" >&2; exit 2; }
-CHK="./scripts/rolling-slope-check.mjs"; FIX="fixtures/rolling-slope"
+CHK="./scripts/rolling-slope-check.ts"; FIX="fixtures/rolling-slope"
 [ -f "$CHK" ] || { echo "ERROR: $CHK not found" >&2; exit 2; }
 fail=0
 # recent window m29-m35 → honest ~0.64 per 5, HALT-RECOMMENDED, exit 0

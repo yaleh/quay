@@ -1,4 +1,4 @@
-// governance-product-ratio-check.mjs — DIR-038-B (eval-rebase fix #2): the governance:product ratio
+// governance-product-ratio-check.ts — DIR-038-B (eval-rebase fix #2): the governance:product ratio
 // as a first-class checkpoint health signal, wired to the HARD self-halt "degradation" clause. The
 // value-typed ledger counts governance-integrity / risk-option / discovery / instrument-correction as
 // value while "not touching VT", so a loop can spend thousands of lines building its OWN instruments
@@ -21,6 +21,22 @@ import { fileURLToPath } from "node:url";
 // (the recorded 8.27), not ordinary instrument work. Tunable via --threshold.
 export const DEFAULT_THRESHOLD = 5.0;
 
+export interface NumstatEntry {
+  path: string;
+  added: number;
+}
+
+export interface Totals {
+  governance: number;
+  product: number;
+}
+
+export interface HaltResult {
+  ratio: number;
+  threshold: number;
+  halt: boolean;
+}
+
 // ── classifyPath ─────────────────────────────────────────────────────────────────────────────────
 // PRODUCT = shippable product CODE (a non-prose file under packages/ or plugin/). GOVERNANCE =
 // everything else — the method/eval layer AND all PROSE (.md/.txt/…) WHEREVER it lives, INCLUDING
@@ -29,7 +45,7 @@ export const DEFAULT_THRESHOLD = 5.0;
 // collapsed to 0.78:1). So a prose extension is GOVERNANCE regardless of directory — this is a
 // code:prose ratio, not a directory ratio.
 const PROSE_EXT = /\.(md|markdown|txt|rst|adoc)$/i;
-export function classifyPath(p) {
+export function classifyPath(p: string): "governance" | "product" {
   const s = String(p).replace(/^\.\//, "");
   if (PROSE_EXT.test(s)) return "governance";                            // prose is governance wherever it lives
   if (s.startsWith("packages/") || s.startsWith("plugin/")) return "product";
@@ -38,9 +54,9 @@ export function classifyPath(p) {
 
 // ── sumByClass ───────────────────────────────────────────────────────────────────────────────────
 // entries: [{ path, added }]. Returns { governance, product } total added-line counts.
-export function sumByClass(entries) {
+export function sumByClass(entries: NumstatEntry[]): Totals {
   if (!Array.isArray(entries)) throw new Error("governance-product-ratio: entries must be an array of {path, added}");
-  const totals = { governance: 0, product: 0 };
+  const totals: Totals = { governance: 0, product: 0 };
   for (const e of entries) {
     const added = Number(e?.added);
     if (!Number.isFinite(added) || added < 0) throw new Error(`governance-product-ratio: bad 'added' for ${e?.path}`);
@@ -52,7 +68,7 @@ export function sumByClass(entries) {
 // ── ratio ────────────────────────────────────────────────────────────────────────────────────────
 // governance ÷ product. product === 0 with governance > 0 → Infinity (pure-governance window = maximal
 // degradation). both 0 → 0 (no activity).
-export function ratio({ governance, product }) {
+export function ratio({ governance, product }: Totals): number {
   if (typeof governance !== "number" || typeof product !== "number" || governance < 0 || product < 0) {
     throw new Error("governance-product-ratio: governance/product must be non-negative numbers");
   }
@@ -61,13 +77,13 @@ export function ratio({ governance, product }) {
 }
 
 // ── isBreach / haltInput ─────────────────────────────────────────────────────────────────────────
-export function isBreach(r, threshold = DEFAULT_THRESHOLD) {
+export function isBreach(r: number, threshold: number = DEFAULT_THRESHOLD): boolean {
   return r > threshold;
 }
 
 // The halt-evaluation input: a breach IS degradation → can trip HALT-RECOMMENDED (OUTER-LOOP self-halt
 // "hypothesis-falsified / degradation across tracks" clause).
-export function haltInput(totals, { threshold = DEFAULT_THRESHOLD } = {}) {
+export function haltInput(totals: Totals, { threshold = DEFAULT_THRESHOLD }: { threshold?: number } = {}): HaltResult {
   const r = ratio(totals);
   return { ratio: r, threshold, halt: isBreach(r, threshold) };
 }
@@ -76,25 +92,25 @@ export function haltInput(totals, { threshold = DEFAULT_THRESHOLD } = {}) {
 // Reads either a pre-totaled {governance, product} JSON or an array of {path, added} numstat entries
 // (the driver produces the latter from `git diff --numstat <range>`). Exit: 0 = within threshold;
 // 1 = BREACH (governance runaway → degradation, a halt input); 2 = usage/parse error.
-function usage() { process.stderr.write("Usage: governance-product-ratio-check.mjs [--threshold <N>] <window.json>\n"); }
+function usage(): void { process.stderr.write("Usage: governance-product-ratio-check.ts [--threshold <N>] <window.json>\n"); }
 
-export async function main(argv) {
+export async function main(argv: string[]): Promise<number> {
   const args = argv.slice(2);
   let threshold = DEFAULT_THRESHOLD;
-  const files = [];
+  const files: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--threshold") { threshold = Number(args[++i]); continue; }
     files.push(args[i]);
   }
   if (files.length !== 1 || !Number.isFinite(threshold) || threshold <= 0) { usage(); return 2; }
   if (!fs.existsSync(files[0])) { process.stderr.write(`ERROR: not found: ${files[0]}\n`); return 2; }
-  let data;
+  let data: unknown;
   try { data = JSON.parse(fs.readFileSync(files[0], "utf8")); }
-  catch (e) { process.stderr.write(`ERROR: not valid JSON: ${e.message}\n`); return 2; }
-  let totals;
-  try { totals = Array.isArray(data) ? sumByClass(data) : data; } catch (e) { process.stderr.write(`ERROR: ${e.message}\n`); return 2; }
-  let v;
-  try { v = haltInput(totals, { threshold }); } catch (e) { process.stderr.write(`ERROR: ${e.message}\n`); return 2; }
+  catch (e: any) { process.stderr.write(`ERROR: not valid JSON: ${e.message}\n`); return 2; }
+  let totals: Totals;
+  try { totals = Array.isArray(data) ? sumByClass(data as NumstatEntry[]) : data as Totals; } catch (e: any) { process.stderr.write(`ERROR: ${e.message}\n`); return 2; }
+  let v: HaltResult;
+  try { v = haltInput(totals, { threshold }); } catch (e: any) { process.stderr.write(`ERROR: ${e.message}\n`); return 2; }
   const rStr = v.ratio === Infinity ? "∞" : v.ratio.toFixed(2);
   process.stdout.write(`GOVERNANCE:PRODUCT = ${totals.governance}:${totals.product} = ${rStr}:1 (threshold ${threshold}:1)\n`);
   if (v.halt) {

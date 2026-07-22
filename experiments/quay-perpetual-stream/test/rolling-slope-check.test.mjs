@@ -16,7 +16,7 @@ import {
   haltVerdict,
   HALT_THRESHOLD,
   main,
-} from "../scripts/rolling-slope-check.mjs";
+} from "../scripts/rolling-slope-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(__dirname, "..", "fixtures", "rolling-slope");

@@ -18,7 +18,7 @@ import {
   hasDatedCarryForward,
   evaluateRow,
   checkLedger,
-} from "../scripts/vmeta-lag-check.mjs";
+} from "../scripts/vmeta-lag-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(__dirname, "..", "fixtures", "vmeta");
@@ -205,7 +205,7 @@ test("checkLedger: rows present but no milestone_counter derivable → fail-clos
 
 // ── CLI (main) end-to-end — exercises the runnable path + the --counter override + N/A print. ─────
 import { spawnSync } from "node:child_process";
-const CLI = path.join(__dirname, "..", "scripts", "vmeta-lag-check.mjs");
+const CLI = path.join(__dirname, "..", "scripts", "vmeta-lag-check.ts");
 const runCli = (args) => spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8" });
 
 test("CLI: FAIL fixture → exit 1, prints ALARM + FAIL verdict", () => {

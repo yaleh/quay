@@ -302,7 +302,7 @@ session start finds QC-T1 (creating it if missing) without side-effects.
      condition** — halt this ABSORB sub-step and hand back to the top-level session — **NEVER a
      license to fall back to a same-context self-audit while still reporting a pass** (the exact
      silent-degradation failure DIR-032 diagnosed at M41/M42/M43, DEV-06/07/08). Independence is
-     verified mechanically, not just asserted: `scripts/audit-independence-check.mjs` (wrapped by the
+     verified mechanically, not just asserted: `scripts/audit-independence-check.ts` (wrapped by the
      `audit-independence` named engine gate) HARD-FAILS `milestone_counter++` when the audit
      artifact's session/agent id is absent or equals the orchestrator's own, and PASSes only on a
      distinct independent id — run it against the real audit artifact as part of this sub-step, never
@@ -358,7 +358,7 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    - **V_meta consolidation-lag gate (DIR-005 / M07-vmeta-gate, HARD BLOCK on step 7's
      `milestone_counter++`):** the lag arithmetic (per row, vs the **K=2** threshold; ALARM for a
      `confirmed`-not-`consolidated` overdue row lacking a DATED carry-forward) is the SINGLE-SOURCE
-     check `scripts/vmeta-lag-check.mjs` — **that module IS the definition** (fail-closed on
+     check `scripts/vmeta-lag-check.ts` — **that module IS the definition** (fail-closed on
      ambiguous / keyword-less rows, explicit `N/A` on an empty ledger); the formula is NOT restated
      here, read the module. Wrapper `scripts/vmeta-lag-check.sh [--counter <N>] v-meta-ledger.md`,
      selfcheck `vmeta-lag-selfcheck.sh`; a future `quay gate --gate vmeta-lag` WRAPS it (M39
@@ -546,7 +546,7 @@ only two — stop signals:
    leaving it for async human review.
    **Two mechanical halt inputs (DIR-038-A + B) — a checkpoint MUST compute and report both:**
    - **VT slope** = the ROLLING per-milestone slope over the last K≥5 milestones INCLUDING zero-Δv ones,
-     from `scripts/rolling-slope-check.mjs` (`windowSlope`/`haltVerdict`) — that module IS the single
+     from `scripts/rolling-slope-check.ts` (`windowSlope`/`haltVerdict`) — that module IS the single
      definition (DIR-038-A). The old "qualifying-only" denominator (mean of ONLY the nonzero
      capability-growth milestones) is RETIRED: it froze at 3.80 and structurally could not see a stall —
      16 consecutive zero-VT milestones (M34–M49) never tripped `< +1.0`, while the honest rolling slope
@@ -554,7 +554,7 @@ only two — stop signals:
      artifact. Anti-gaming guard `honestNotInflated` FAILS-LOUD (exit 1) if the rolling slope exceeds
      the qualifying-only figure — a re-based ruler that scores the loop BETTER is presumptively gaming.
    - **governance:product ratio** = governance-lines : product-lines over the checkpoint window, from
-     `scripts/governance-product-ratio-check.mjs` (`sumByClass`/`haltInput`; PRODUCT = `packages/`,
+     `scripts/governance-product-ratio-check.ts` (`sumByClass`/`haltInput`; PRODUCT = `packages/`,
      `plugin/`; GOVERNANCE = the method/eval layer). A breach of the declared threshold (default 5:1) IS
      "degradation across tracks" and trips `HALT-RECOMMENDED` — a loop building its OWN instruments while
      the product freezes (recorded restart window ≈8:1) is a real degradation, not a value type to

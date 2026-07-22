@@ -15,7 +15,7 @@ import {
   haltInput,
   DEFAULT_THRESHOLD,
   main,
-} from "../scripts/governance-product-ratio-check.mjs";
+} from "../scripts/governance-product-ratio-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(__dirname, "..", "fixtures", "gov-product");

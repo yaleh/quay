@@ -145,7 +145,7 @@ test("list({ appliesTo }) filters to ADRs whose applies-to glob-matches the give
     const raw = fs.readFileSync(path.join(dir, file), "utf8");
     fs.writeFileSync(path.join(dir, file), raw.replace(/^---\n/, `---\napplies-to:\n  - '${glob}'\n`));
   }
-  const matched = s.list({ appliesTo: "experiments/quay-perpetual-stream/scripts/loadbearing-test-gate.mjs" });
+  const matched = s.list({ appliesTo: "experiments/quay-perpetual-stream/scripts/loadbearing-test-gate.ts" });
   assert.deepEqual(matched.map((a) => a.id), ["ADR-001"]);
   const matchedDocs = s.list({ appliesTo: "docs/proposals/x.md" });
   assert.deepEqual(matchedDocs.map((a) => a.id), ["ADR-002"]);

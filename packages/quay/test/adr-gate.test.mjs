@@ -278,7 +278,7 @@ test("E3 A4: 'quay-native adr list --applies-to <path>' surfaces ADR-001 for an 
   const out = execFileSync(
     "node",
     [nativeBin, "adr", "list", "--applies-to",
-      "experiments/quay-perpetual-stream/scripts/loadbearing-test-gate.mjs", "--json"],
+      "experiments/quay-perpetual-stream/scripts/loadbearing-test-gate.ts", "--json"],
     { encoding: "utf8", env: { ...process.env, QUAY_NATIVE_ADR_DIR: REAL_ADR_DIR } }
   );
   const adrs = JSON.parse(out);

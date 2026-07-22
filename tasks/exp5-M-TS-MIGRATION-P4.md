@@ -59,3 +59,28 @@ Not selected M91 — exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS selected (governance-i
 ## Not selected (M92)
 
 Not selected M92 — exp5-DEFECT-DIR056-PROBE-SPEC-UNWIRED selected (higher-leverage defect: SKILL wiring absent blocks 3 downstream milestones). exp5-M-TS-MIGRATION-P4 also exceeds 5235L scope — split-or-commit assessment required before next SELECT.
+
+## Progress
+
+### M106 Batch 1 complete (2026-07-22)
+
+Migrated 9 method-infra scripts (selfcheck-paired, no plugin-vendor copies) from `.mjs` to `.ts`:
+1. `audit-independence-check.ts`
+2. `governance-product-ratio-check.ts`
+3. `loadbearing-test-gate.ts`
+4. `outward-vt-check.ts`
+5. `rolling-slope-check.ts`
+6. `vmeta-lag-check.ts`
+7. `git-lens-l-d-code-doc-ratio.ts`
+8. `git-lens-l-g-structural-drift.ts`
+9. `git-lens-l-s-behavior-variance.ts`
+
+Evidence:
+- All 7 selfchecks: GOLDEN-DIFF PASS (byte-identical before/after)
+- `npx tsc --noEmit -p scripts/tsconfig.json`: exit 0
+- `node --test packages/quay/test/gate.test.mjs`: 25/25 PASS
+- `it0-dod-check.mjs` sha256: 33de7bbae2cda1eaea5e31cd9199da82c65b1a391042ce7638d81157fed92deb (untouched)
+- Shell wrappers, selfcheck scripts, OUTER-LOOP.md, inherited-core.md, test file imports all updated
+
+Remaining (future batches): `it0-dod-check.mjs` (GATE-HASH-REF rotation — separate milestone),
+plugin-vendor-copy scripts (requires plugin bump + sync), scripts without selfcheck fixtures.
