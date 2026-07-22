@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 104** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 105** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -864,3 +864,18 @@ m104 · ARCH-M103-002 · Δv=0 (v̂=0) · outcome=WONTFIX (outDegree=7 is correc
 
 **Task:** [[ARCH-M103-001]] (`tasks/ARCH-M103-001.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M105-loadworkspacegates-outdegree-fix.md`
+
+m105 · ARCH-M103-001 · Δv=0 (v̂=0) · outcome=DONE (loadWorkspaceGates outDegree 8→3, gateFactories dispatch map) · audit=NO REFUTATION FOUND · merge=5ae74a2 · → milestones/M105/
+
+## SELECT M106 — exp5-M-TS-MIGRATION-P4 (partial: non-GATE-HASH-REF scripts only)
+
+**Selected:** exp5-M-TS-MIGRATION-P4 — partial scope: migrate method-infra scripts in `experiments/quay-perpetual-stream/scripts/` to TypeScript, EXCLUDING `it0-dod-check.mjs` (handled separately due to GATE-HASH-REF implications).
+
+**Split-or-commit assessment (DIR-026):** P4 as written covers all method-infra scripts including `it0-dod-check.mjs`, which is pinned by `dod-fixture-selfcheck.sh` and whose sha256sum is the GATE-HASH-REF used in all charters. Migrating it to `.ts` changes the hash, requiring a GATE-HASH-REF update across inherited-core.md and the charter machinery. This makes it a distinct milestone boundary. M106 commits to all scripts EXCEPT `it0-dod-check.mjs`; M107 will handle `it0-dod-check.mjs` + GATE-HASH-REF rotation.
+
+**Rationale:** P3-A/B/C are all done (M80/M81/M84+). P4 is the remaining TS migration phase. The non-GATE-HASH-REF scripts are straightforward behavior-preserving ports (each with its selfcheck fixture for golden-diff). Development-class — quay-task-to-plan required. 3rd exploit post-M103 reset (mandatory explore by M108 if M104-M107 all exploits — M106 is the 3rd, so M108 explore is still valid).
+
+**Deferred:** `it0-dod-check.mjs` migration + GATE-HASH-REF rotation (M107), DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED), exp5-M-CRYST-D2/F1 (HUMAN-STEERED).
+
+**Task:** [[exp5-M-TS-MIGRATION-P4]] (`tasks/exp5-M-TS-MIGRATION-P4.md`)  
+**Charter:** (to be authored)
