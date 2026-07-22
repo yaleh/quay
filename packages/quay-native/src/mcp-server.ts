@@ -10,7 +10,7 @@ import { z } from "zod";
 import { createStore } from "./store.ts";
 // ADR store is a generic filesystem-frontmatter store, now owned by `quay`
 // (Core) — see bin/quay-native.js for the full rationale (ADR-013 / DIR-035-A).
-import { createAdrStore } from "quay/src/adr-store.ts";
+import { createAdrStore } from "quay/adr-store";
 import { readManifest } from "./manifest.ts";
 
 export async function startMcpServer({ tasksDir, adrDir, defaultStatus }: { tasksDir: string; adrDir?: string; defaultStatus?: string }): Promise<void> {

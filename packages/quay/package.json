@@ -8,6 +8,11 @@
   "bin": {
     "quay": "./bin/quay.js"
   },
+  "exports": {
+    "./adr-store": "./src/adr-store.ts",
+    "./document-store": "./src/document-store.ts",
+    "./contract-validator": "./src/contract-validator.ts"
+  },
   "files": [
     "README.md",
     "CHANGELOG.md",
