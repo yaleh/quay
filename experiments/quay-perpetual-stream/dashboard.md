@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 101** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 102** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -825,3 +825,16 @@ m101 · ARCH-M93-001 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=57d1
 
 **Task:** [[DIR-055]] (`tasks/DIR-055.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M102-dir055-meta-cc-routine.md`
+
+m102 · DIR-055 · Δv=0 (v̂=0) · outcome=needs-human (real-fire leg: archguard-1 occupied, ADR-016 hygiene) · audit=NO REFUTATION FOUND · merge=2ebf8c7 · plugin=0.3.19 · → milestones/M102/
+
+## SELECT M103 — exp5-M-ARCH-AUDIT-M103-EXPLORE
+
+**Selected:** exp5-M-ARCH-AUDIT-M103-EXPLORE — mandatory post-refactor archguard explore (4 consecutive exploits M99–M102 since M98 explore triggers ≥1/5 rule at M103). Fresh archguard audit on master HEAD post-M100/M101: re-measure entity/relation counts after serve.ts decomposition (M100: serve.ts 1085L→101L, serve-handlers.ts new 1068L) and gate/registry split (M101: registry.ts 736L→118L, gate/factories/ 10 new files). File any new confirmed findings as milestone-candidates. FILE-ONLY invariant.
+
+**Rationale:** Mandatory explore per ≥1/5 cadence rule. M100+M101 are the most structurally significant changes since M97/M99 (both add new files + substantially reorganize existing ones). A fresh archguard run will confirm whether the decompositions introduced new structural patterns or findings. FILE-ONLY (explore never fixes).
+
+**Deferred:** exp5-M-TS-MIGRATION-P4 (GATE-HASH-REF risk), DIR-055 real-fire leg (needs-human: human triggers archguard checkpoint), DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED).
+
+**Task:** (new milestone-candidate task to be created at CHARTER)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M103-arch-audit-post-m101-explore.md`
