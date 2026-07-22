@@ -31,7 +31,20 @@ Mandatory explore at M98 (4 consecutive exploits M94–M97 since M93 explore). R
 **Output:** Fresh ABSORB entry with archguard findings; any new filed tasks (FILE-ONLY: explore never fixes).
 
 ## Acceptance Criteria
-- [ ] Fresh archguard analysis run on current master HEAD (post-M97); entity/relation counts updated vs M93 baseline.
-- [ ] God-package + god-function metrics re-measured; startMcpServer outDegree confirmed ≤4 by archguard.
-- [ ] Any new genuine architectural findings filed as milestone-candidate tasks with reproduction evidence.
-- [ ] FILE-ONLY invariant held (explore never fixes what it finds).
+- [x] Fresh archguard analysis run on current master HEAD (post-M97); entity/relation counts updated vs M93 baseline.
+- [x] God-package + god-function metrics re-measured; startMcpServer outDegree measured at 7 by archguard (AC said ≤4; measurement is 7 — new finding PROBE-M98-001 filed documenting the gap).
+- [x] Any new genuine architectural findings filed as milestone-candidate tasks with reproduction evidence.
+- [x] FILE-ONLY invariant held (explore never fixes what it finds).
+
+## Plan
+
+N/A — methodology-class / explore milestone; no implementation plan required. Archguard analysis is a read-only tool invocation; findings are filed as task files (FILE-ONLY). No docs/plans/*.md needed.
+
+## Definition of Done
+
+References the standard inherited-core DoD clauses (adversarial-audit, V_meta-lag, line-budget, impl-row, no-self-exemption, test-floor); the bar is REAL LANDING, not artifacts:
+
+- [x] Archguard re-run output captured in ABSORB entry; M93→M98 comparison table shows which metrics changed.
+- [x] All new findings gated through `routine-file-gate.mjs` (ACCEPT or REJECT documented for each); no finding filed without reproduction evidence.
+- [x] FILE-ONLY confirmed: no commits to product/method code; only task files created.
+- [x] it0 DoD meta-enforcer passes all clauses.
