@@ -43,7 +43,7 @@ N/A — split-or-commit at SELECT (DIR-026): migrate in fixture-pinned batches (
 ## Acceptance Criteria
 - [ ] The load-bearing method-infra scripts are `.ts`, pass `tsc --noEmit`, and run under Node native type-stripping; their `-selfcheck.sh` fixtures produce byte-identical verdicts before/after (golden-diff).
 - [ ] The it0 DoD meta-enforcer (Clauses 0–9) still passes on all clauses post-migration; `dod-fixture-selfcheck.sh` still pins it; NO gate verdict logic changed (language port only).
-- [ ] Vendored plugin copies re-synced so shipped scripts match source; a consumer workspace (archguard) still runs the scripts unchanged.
+- [ ] Vendored plugin copies re-synced so shipped scripts match source; a consumer workspace (archguard) still runs the scripts unchanged — the archguard verification is driven AUTONOMOUSLY via **tmux remote-drive ([[ADR-016]])** (3-step `send-keys`; read the result from the filesystem/meta-cc, not the TUI; single-driver hygiene), NOT deferred to a human. Precondition: a live idle archguard tmux session (or launch one via `tmux new-window`). If no drivable session exists, that leg lands `needs-human`.
 
 ## Definition of Done
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts:
