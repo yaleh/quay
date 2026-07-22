@@ -46,3 +46,6 @@ routines:
   - name: architecture-analysis
     trigger: on(checkpoint)
     probe: architecture-analysis
+  - name: history-mining
+    trigger: on(checkpoint)
+    probe: history-mining
