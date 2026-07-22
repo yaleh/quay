@@ -3,9 +3,10 @@ id: exp5-M-ARCH-AUDIT-M108-EXPLORE
 title: "Post-M105 architecture audit (archguard, M108 mandatory explore):
   re-measure quay after loadWorkspaceGates refactor + gateFactories dispatch
   map"
-status: todo
+status: done
 labels:
   - milestone-candidate
+  - milestone:M-108
 parent: null
 children: []
 extra: {}
@@ -30,19 +31,19 @@ Mandatory explore at M108 (4 consecutive exploits M104–M107 since M103 explore
 
 ## Acceptance Criteria
 
-- [ ] Fresh archguard analysis run on current master HEAD (post-M107); entity/relation counts updated vs M103 baseline.
-- [ ] God-package + god-function metrics re-measured; `loadWorkspaceGates` and `startServer` outDegree confirmed.
-- [ ] Any new genuine architectural findings filed as milestone-candidate tasks with `## Finding` + reproduction evidence, gated through `routine-file-gate.ts`.
-- [ ] FILE-ONLY invariant held: `git status --porcelain` shows only new task files, no code changes.
+- [x] Fresh archguard analysis run on current master HEAD (post-M107); entity/relation counts updated vs M103 baseline.
+- [x] God-package + god-function metrics re-measured; `loadWorkspaceGates` and `startServer` outDegree confirmed.
+- [x] Any new genuine architectural findings filed as milestone-candidate tasks with `## Finding` + reproduction evidence, gated through `routine-file-gate.ts`.
+- [x] FILE-ONLY invariant held: `git status --porcelain` shows only new task files, no code changes.
 
 ## Definition of Done
 
 Standard inherited-core DoD clauses apply. Task-specific criteria:
 
-- [ ] Archguard re-run output pasted in ABSORB entry; M103→M108 comparison table shows which metrics changed.
-- [ ] All new findings gated through `routine-file-gate.ts` (ACCEPT or REJECT documented for each); no finding filed without reproduction evidence.
-- [ ] FILE-ONLY confirmed: no commits to product/method code; only task files created (if any).
-- [ ] it0 DoD meta-enforcer passes all clauses.
+- [x] Archguard re-run output pasted in ABSORB entry; M103→M108 comparison table shows which metrics changed.
+- [x] All new findings gated through `routine-file-gate.ts` (ACCEPT or REJECT documented for each); no finding filed without reproduction evidence.
+- [x] FILE-ONLY confirmed: no commits to product/method code; only task files created (if any).
+- [x] it0 DoD meta-enforcer passes all clauses.
 
 ## Proposal
 
