@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 107** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 108** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -905,3 +905,16 @@ m107 · exp5-M-TS-MIGRATION-P4 (partial Batch 2) · Δv=0 (v̂=0) · outcome=DON
 
 **Task:** [[exp5-M-ARCH-AUDIT-M108-EXPLORE]] (`tasks/exp5-M-ARCH-AUDIT-M108-EXPLORE.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M108-arch-audit-post-ts-p4-explore.md`
+
+m108 · exp5-M-ARCH-AUDIT-M108-EXPLORE · Δv=0 (v̂=0) · audit=documented-no-op (explore, FILE-ONLY) · filed=none (loadWorkspaceGates outDegree=3 CONFIRMED post-M105; startServer=7 WONTFIX confirmed; entities=121/relations=156, −5 vs M103; no new findings) · merge=086877c · → milestones/M108/
+
+## SELECT M109 — exp5-M-TS-MIGRATION-P4-BATCH3
+
+**Selected:** exp5-M-TS-MIGRATION-P4-BATCH3 — P4 Batch 3: migrate 9 vendor-copy scripts `.mjs`→`.ts`; update `sync-vendor.sh`; re-sync `plugin/scripts/`; update SKILL.md refs (loop-driver: 6 refs, quay-directive: 1 ref); bump plugin version 0.3.19→0.3.20.
+
+**Rationale:** Exploit pick (1st post-M108 explore reset). Continues the ADR-012 TS migration momentum. Batch 3 is the most reference-heavy batch (plugin coupling) but still mechanical and bounded. Proper per-batch child task `exp5-M-TS-MIGRATION-P4-BATCH3` created at SELECT to satisfy SPLIT-OR-COMMIT (DIR-026) — its ACs cover only Batch 3 scope, fully satisfiable in one milestone (fixes the Clause 0 issue from M106/M107).
+
+**Deferred:** Batch 4 (it0-dod-check.mjs + GATE-HASH-REF rotation — most sensitive, deserves its own focused milestone), DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED).
+
+**Task:** [[exp5-M-TS-MIGRATION-P4-BATCH3]] (`tasks/exp5-M-TS-MIGRATION-P4-BATCH3.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M109-ts-migration-p4-batch3.md`
