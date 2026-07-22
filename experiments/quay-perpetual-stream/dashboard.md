@@ -723,3 +723,14 @@ m93 · exp5-M-ARCH-AUDIT-M93-EXPLORE · Δv=0 (v̂=0) · audit=NO REFUTATION FOU
 **Charter:** `experiments/quay-perpetual-stream/charters/M94-acceptance-gate-cwd-fix.md`
 
 m94 · PROBE-SV-M92-001 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=a108ab8 · → milestones/M94/
+
+## SELECT M95 — ARCH-M93-004
+
+**Selected:** ARCH-M93-004 — remove `createAdrStore` cross-package implementation import from `packages/quay-native/src/mcp-server.ts:13`; quay-native should not depend on Core's internal implementation modules, only the Provider ABI (`quay/src/abi.ts`). Bounded: 1 import + 1 usage site, fanIn=1 confirmed by archguard.
+
+**Rationale:** Exploit pick (2nd post-M93 explore reset; next mandatory explore by M98). Bounded ABI enforcement defect: the cleanest of the ARCH-M93-* findings by scope — single import, single usage site, fanIn=1. Fixing it closes the only cross-package implementation import gap in the codebase. Development-class — quay-task-to-plan required before dispatch.
+
+**Deferred:** ARCH-M93-001 (gate/ god-package refactor — large, needs split), ARCH-M93-002 (startMcpServer god-function), ARCH-M93-003 (startServer god-function), DIR-052/053/055 (routine wiring exploits).
+
+**Task:** [[ARCH-M93-004]] (`tasks/ARCH-M93-004.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M95-abi-boundary-violation-fix.md`
