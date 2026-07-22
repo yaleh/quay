@@ -762,3 +762,14 @@ m96 · exp5-DEFECT-ROUTINE-GATE-SELF-REJECT · Δv=0 (v̂=0) · audit=NO REFUTAT
 **Charter:** `experiments/quay-perpetual-stream/charters/M97-startmcpserver-decompose.md`
 
 m97 · ARCH-M93-002 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=cad0a6a · → milestones/M97/
+
+## SELECT M98 — exp5-M-ARCH-AUDIT-M98-EXPLORE
+
+**Selected:** exp5-M-ARCH-AUDIT-M98-EXPLORE — mandatory explore (4 consecutive exploits M94–M97 since M93 explore triggers ≥1/5 floor at M98). Fresh archguard architecture audit on master HEAD post-M97: re-measure entity/relation counts, god-package/god-function metrics, cycle detection; file any new confirmed findings as milestone-candidates behind routine-file-gate.
+
+**Rationale:** Mandatory explore per ≥1/5 cadence rule. M97's `startMcpServer` decomposition added `mcp-handlers.ts` and fundamentally changed the entity dependency graph — a fresh archguard run is the natural structural verification and may reveal new findings or confirm closed ones. FILE-ONLY (explore never fixes).
+
+**Deferred:** ARCH-M93-001 (gate/ god-package — large refactor), ARCH-M93-003 (startServer god-function), exp5-M-TS-MIGRATION-P4, exp5-M-OUTERLOOP-ROUTINE-WIRING (human-steered).
+
+**Task:** [[exp5-M-ARCH-AUDIT-M98-EXPLORE]] (`tasks/exp5-M-ARCH-AUDIT-M98-EXPLORE.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M98-arch-audit-post-m97-explore.md`
