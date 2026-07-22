@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 112** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 113** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -974,5 +974,23 @@ m112 · exp5-M-TS-MIGRATION-P3 (parent close) · Δv=0 (v̂=0) · outcome=DONE (
 
 **Deferred:** exp5-M-TS-MIGRATION overall parent close (M114, after M113 archguard data satisfies AC4), exp5-M-CRYST, DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED).
 
-**Task:** [[exp5-M-ARCH-AUDIT-POST-FULL-TS]] (to be created at dispatch)  
+**Task:** [[exp5-M-ARCH-AUDIT-POST-FULL-TS]] (`tasks/exp5-M-ARCH-AUDIT-POST-FULL-TS.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M113-arch-audit-post-full-ts-explore.md`
+
+m113 · exp5-M-ARCH-AUDIT-POST-FULL-TS · Δv=0 (v̂=0) · explore=DONE (entities=121 UNCHANGED, relations=156 UNCHANGED, loadWorkspaceGates outDegree=3 CONFIRMED, startServer=7 CONFIRMED WONTFIX, no cycles, no new god-packages, no new findings filed; P3/P4 TS renames do not change packages/ import graph as expected) · audit=documented-no-op (explore/FILE-ONLY) · merge=4bb1eee · → milestones/M113/
+
+**M113 archguard data is the AC4 evidence artifact for exp5-M-TS-MIGRATION parent closure (next SELECT).**
+
+
+## SELECT M114 — exp5-M-TS-MIGRATION (overall parent close)
+
+**Selected:** exp5-M-TS-MIGRATION — close the overall TS migration program parent. All 5 phase children are done (P0/P1/M77/P2/M79/P3/M112/P4/M111). All 4 parent ACs satisfied: P0 tooling done, behavior-preserving across phases, Provider ABI typed (P2), archguard L_G/L_D reading recorded (M113: entities=121, relations=156). All 3 DoD boxes can be ticked. P4's `needs-human` AC3 (archguard plugin-workspace verification) is scoped to P4 and does not block the program-level DoD (which asks only that archguard produces an L_G/L_D reading on the product — now done). Scope: tick all parent AC/DoD boxes citing evidence, set status to `done`, commit.
+
+**Rationale:** Exploit pick (1st post-M113 explore reset). The ADR-012 TS migration program is complete; M113 supplied the final missing evidence (AC4/DoD#2 archguard observability). Methodology-class closure — no quay-task-to-plan required.
+
+**NEW GATE-HASH-REF:** `22c64fc383d6fc03ba375f8b9ce463abce3459d318c8787e33d8bcb321d876e1`
+
+**Deferred:** exp5-M-CRYST (crystallization program — highest-value remaining), DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED).
+
+**Task:** [[exp5-M-TS-MIGRATION]] (`tasks/exp5-M-TS-MIGRATION.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M114-ts-migration-overall-close.md`
