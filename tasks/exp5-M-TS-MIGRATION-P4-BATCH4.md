@@ -2,7 +2,7 @@
 id: exp5-M-TS-MIGRATION-P4-BATCH4
 title: "TS migration P4 Batch 4: it0-dod-check.mjs→.ts + GATE-HASH-REF rotation
   + task-schema shim cleanup"
-status: todo
+status: done
 labels:
   - milestone-candidate
 parent: exp5-M-TS-MIGRATION-P4
@@ -28,21 +28,21 @@ P4 Batch 4: the final and most sensitive migration — `it0-dod-check.mjs` (the 
 
 ## Acceptance Criteria
 
-- [ ] `it0-dod-check.mjs` renamed to `it0-dod-check.ts`; old `.mjs` deleted; `it0-dod-check.sh` wrapper updated to invoke `it0-dod-check.ts`.
-- [ ] Import in `it0-dod-check.ts` updated from `./task-schema.mjs` → `./task-schema.ts`; `task-schema.mjs` re-export shim deleted.
-- [ ] `npx tsc --noEmit -p experiments/quay-perpetual-stream/scripts/tsconfig.json` exits 0.
-- [ ] New GATE-HASH-REF computed and documented (`sha256sum it0-dod-check.ts`); all active prose references to `it0-dod-check.mjs` in inherited-core.md and OUTER-LOOP.md updated to `it0-dod-check.ts`.
-- [ ] DoD gate (`it0-dod-check.sh`) still passes — runs `it0-dod-check.ts` correctly under Node native type-stripping.
+- [x] `it0-dod-check.mjs` renamed to `it0-dod-check.ts`; old `.mjs` deleted; `it0-dod-check.sh` wrapper updated to invoke `it0-dod-check.ts`.
+- [x] Import in `it0-dod-check.ts` updated from `./task-schema.mjs` → `./task-schema.ts`; `task-schema.mjs` re-export shim deleted.
+- [x] `npx tsc --noEmit -p experiments/quay-perpetual-stream/scripts/tsconfig.json` exits 0.
+- [x] New GATE-HASH-REF computed and documented (`sha256sum it0-dod-check.ts`); all active prose references to `it0-dod-check.mjs` in inherited-core.md and OUTER-LOOP.md updated to `it0-dod-check.ts`.
+- [x] DoD gate (`it0-dod-check.sh`) still passes — runs `it0-dod-check.ts` correctly under Node native type-stripping.
 
 ## Definition of Done
 
 Standard inherited-core DoD clauses apply. Task-specific criteria:
 
-- [ ] `it0-dod-check.ts` runs correctly: `bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh <any-milestone-id> <charter> <absorb-entry>` exits 0 on a known-good test run.
-- [ ] Old `it0-dod-check.mjs` deleted, `task-schema.mjs` shim deleted; no orphaned imports.
-- [ ] New GATE-HASH-REF documented in charter's `GATE-HASH-REF:` line for this milestone AND stated in ABSORB entry for future orchestrators.
-- [ ] `inherited-core.md` updated to reference `it0-dod-check.ts`; OUTER-LOOP.md prose refs updated.
-- [ ] it0 DoD meta-enforcer (now `.ts`) passes all clauses on the Batch 4 milestone itself.
+- [x] `it0-dod-check.ts` runs correctly: `bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh <any-milestone-id> <charter> <absorb-entry>` exits 0 on a known-good test run.
+- [x] Old `it0-dod-check.mjs` deleted, `task-schema.mjs` shim deleted; no orphaned imports.
+- [x] New GATE-HASH-REF documented in charter's `GATE-HASH-REF:` line for this milestone AND stated in ABSORB entry for future orchestrators.
+- [x] `inherited-core.md` updated to reference `it0-dod-check.ts`; OUTER-LOOP.md prose refs updated.
+- [x] it0 DoD meta-enforcer (now `.ts`) passes all clauses on the Batch 4 milestone itself.
 
 ## Proposal
 
