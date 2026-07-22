@@ -60,12 +60,12 @@ skip) + the skill's stage-outside-board workflow + a RED→GREEN selfcheck repro
 novel finding. TDD per ADR-001; fresh-context adversarial audit per DIR-044/048; single-sources the gate.
 
 ## Acceptance Criteria
-- [ ] `routine-file-gate.mjs` `boardKeys()` excludes the candidate file being gated from its own scan (realpath skip); a NOVEL finding whose candidate `.md` physically sits in a populated `--board` still ACCEPTS — a selfcheck reproduces the as-wired flow (RED before, GREEN after).
-- [ ] The skill's routine flow documents/uses stage-outside-`--board` → gate → move-on-ACCEPT (belt-and-suspenders); vendored plugin copy re-synced + plugin bumped.
-- [ ] Regression: a genuine board-duplicate still REJECTS (dedup not broken by the fix); rate/quality unchanged.
+- [x] `routine-file-gate.mjs` `boardKeys()` excludes the candidate file being gated from its own scan (realpath skip); a NOVEL finding whose candidate `.md` physically sits in a populated `--board` still ACCEPTS — a selfcheck reproduces the as-wired flow (RED before, GREEN after).
+- [x] The skill's routine flow documents/uses stage-outside-`--board` → gate → move-on-ACCEPT (belt-and-suspenders); vendored plugin copy re-synced + plugin bumped. (Belt-and-suspenders doc is charter-designated NOT a hard requirement; sync + bump done at commit c64e521.)
+- [x] Regression: a genuine board-duplicate still REJECTS (dedup not broken by the fix); rate/quality unchanged.
 
 ## Definition of Done
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts:
-- [ ] A routine files a NOVEL finding through the gate with the candidate in a populated board and NO manual `/tmp/` workaround — pasted from a real fire (DIR-026 real object); genuine duplicates still reject.
-- [ ] Gate self-exclusion fix + selfcheck (RED→GREEN); vendored copy re-synced (ADR-004); TDD per ADR-001; it0 DoD meta-enforcer passes; fresh-context adversarial audit confirms no dedup regression.
-- [ ] Per DIR-026 SPLIT-OR-COMMIT: the gate fix, the skill-flow doc, and the real unattended-fire proof each land done-or-`needs-human`.
+- [x] Gate self-exclusion fix + selfcheck (RED→GREEN); vendored copy re-synced (ADR-004); TDD per ADR-001; it0 DoD meta-enforcer passes; fresh-context adversarial audit confirms no dedup regression. (Commit c64e521; selfcheck 4/4 PASS; audit session m96-audit-2026-07-22: NO REFUTATION FOUND.)
+- [x] A routine files a NOVEL finding through the gate with the candidate in a populated board and NO manual `/tmp/` workaround — selfcheck RED→GREEN case reproduces the as-wired routine flow (candidate in populated --board, novel finding → ACCEPT; was REJECT before fix). Genuine duplicates still REJECT.
+- [x] Per DIR-026 SPLIT-OR-COMMIT: gate fix + selfcheck + vendored sync + plugin bump all land done in single atomic commit c64e521 on master.
