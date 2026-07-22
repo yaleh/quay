@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 98** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 99** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -786,3 +786,5 @@ m98 · exp5-M-ARCH-AUDIT-M98-EXPLORE · Δv=0 (v̂=0) · audit=documented-no-op 
 
 **Task:** [[PROBE-M98-001]] (`tasks/PROBE-M98-001.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M99-startmcpserver-outDegree-fix.md`
+
+m99 · PROBE-M98-001 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=7461215 · → milestones/M99/
