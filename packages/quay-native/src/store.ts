@@ -60,6 +60,59 @@ export class ConflictError extends Error {
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 
 /**
+ * M89 (exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH): post-write YAML validation.
+ *
+ * After writing any task file, re-parse the YAML frontmatter block to confirm
+ * the serialized content is valid YAML. If parsing fails, throw a descriptive
+ * error so the caller knows immediately — before the corrupted file can crash
+ * task_list for every other task in the store.
+ *
+ * Root cause of the defect: a task file manually (or otherwise) written with
+ * an unquoted YAML value containing `: ` (colon-space) — e.g.
+ *   dirStatus: mechanism-landed; routines: run (...)
+ * — causes YAML.parse() to throw "Nested mappings are not allowed", which
+ * propagates from list()'s per-task get() call and crashes the ENTIRE list.
+ *
+ * Note: YAML.stringify() already quotes string values containing `: ` when
+ * called from serialize(), so correctly-routed writes produce valid YAML. This
+ * gate is a belt-and-suspenders catch for any path that might produce invalid
+ * YAML (e.g. direct fs.writeFileSync calls in helpers like removeChildRef /
+ * addChildRef that do NOT go through serialize(), or future code additions).
+ *
+ * @param {string} filePath - the path of the file just written
+ * @param {string} id - the task id (for the error message)
+ * @throws {Error} if the written file's YAML frontmatter fails to parse
+ */
+function validateWrittenYaml(filePath: string, id: string): void {
+  let written: string;
+  try {
+    written = fs.readFileSync(filePath, "utf8");
+  } catch (readErr) {
+    throw new Error(
+      `post-write YAML validation failed for task "${id}": ` +
+        `could not read back the written file — ${(readErr as Error).message}`
+    );
+  }
+  const m = FRONTMATTER_RE.exec(written);
+  if (!m) {
+    throw new Error(
+      `post-write YAML validation failed for task "${id}": ` +
+        `written file has no valid YAML frontmatter block`
+    );
+  }
+  try {
+    YAML.parse(m[1]);
+  } catch (yamlErr) {
+    throw new Error(
+      `post-write YAML validation failed for task "${id}": ` +
+        `the written frontmatter is not valid YAML — ${(yamlErr as Error).message}. ` +
+        `Hint: string values containing ": " must be quoted. ` +
+        `The file has NOT been left in a corrupted state — this write was rejected.`
+    );
+  }
+}
+
+/**
  * @param {string} tasksDir absolute path to the tasks directory
  * @param {{ defaultStatus?: string }} [opts] optional configuration
  *   opts.defaultStatus — the per-provider `default_task_status` from
@@ -521,7 +574,24 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       }
       const finalBody = body !== undefined ? body : existingBody;
       const raw = serialize(frontmatter, finalBody);
-      fs.writeFileSync(filePathFor(id), raw, "utf8");
+      const taskFilePath = filePathFor(id);
+      // M89 (exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH): post-write YAML
+      // validation — write, then immediately re-parse the frontmatter.
+      // On validation failure: restore the prior content (or remove the file if
+      // it was newly created) so the store is never left in a corrupted state
+      // that would crash task_list for all other tasks.
+      fs.writeFileSync(taskFilePath, raw, "utf8");
+      try {
+        validateWrittenYaml(taskFilePath, id);
+      } catch (validationErr) {
+        // Rollback: restore prior content if it existed, or remove the new file.
+        if (existingRaw !== null) {
+          fs.writeFileSync(taskFilePath, existingRaw, "utf8");
+        } else {
+          try { fs.rmSync(taskFilePath, { force: true }); } catch { /* ignore */ }
+        }
+        throw validationErr;
+      }
 
       // M35: bidirectional relation sync -- only runs when `parent` was
       // actually part of this write() call (parentWriteRequested), never
@@ -563,7 +633,17 @@ export function createStore(tasksDir: string, opts?: { defaultStatus?: string })
       const newBody = `${body.trimEnd()}\n\n---\n_${stamp}_: ${note}\n`;
       const updated = { ...frontmatter };
       const finalRaw = serialize(updated, newBody);
-      fs.writeFileSync(filePathFor(id), finalRaw, "utf8");
+      const noteFilePath = filePathFor(id);
+      fs.writeFileSync(noteFilePath, finalRaw, "utf8");
+      // M89: post-write YAML validation (same discipline as write() above).
+      try {
+        validateWrittenYaml(noteFilePath, id);
+      } catch (validationErr) {
+        // Rollback: restore prior content (appendNote() always modifies an
+        // existing file — existingRaw is never null here).
+        fs.writeFileSync(noteFilePath, raw, "utf8");
+        throw validationErr;
+      }
       return get(id);
     });
   }
