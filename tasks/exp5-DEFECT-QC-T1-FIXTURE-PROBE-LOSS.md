@@ -1,7 +1,7 @@
 ---
 id: exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS
 title: "defect: QC-T1 healthcheck fixture task lost between cycles — silent recovery masks broken healthcheck"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - defect
@@ -40,18 +40,26 @@ A separate gate should verify fixture presence before each healthcheck cycle, no
 
 ## Acceptance Criteria
 
-- [ ] `OUTER-LOOP.md` session-start section explicitly documents a QC-T1 healthcheck step that handles `no such task: QC-T1` by re-creating the fixture task (idempotent) rather than silently swallowing the error
-- [ ] `tasks/QC-T1.md` fixture task is (re-)created in the task store and verified present via `task_get QC-T1` returning a valid task (not "no such task")
-- [ ] The documented healthcheck procedure is idempotent: if QC-T1 is absent (deleted or never created), the next session that reads OUTER-LOOP.md will re-create it — the store is never left in a state where the probe silently fails
+- [x] `OUTER-LOOP.md` session-start section explicitly documents a QC-T1 healthcheck step that handles `no such task: QC-T1` by re-creating the fixture task (idempotent) rather than silently swallowing the error
+- [x] `tasks/QC-T1.md` fixture task is (re-)created in the task store and verified present via `task_get QC-T1` returning a valid task (not "no such task")
+- [x] The documented healthcheck procedure is idempotent: if QC-T1 is absent (deleted or never created), the next session that reads OUTER-LOOP.md will re-create it — the store is never left in a state where the probe silently fails
 
 ## Definition of Done
 
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts.
 
-- [ ] `OUTER-LOOP.md` session-start section updated with QC-T1 healthcheck step (idempotent probe + re-create on missing)
-- [ ] `tasks/QC-T1.md` fixture task exists in task store and `task_get QC-T1` returns a valid task
-- [ ] Adversarial audit disposition recorded
+- [x] `OUTER-LOOP.md` session-start section updated with QC-T1 healthcheck step (idempotent probe + re-create on missing)
+- [x] `tasks/QC-T1.md` fixture task exists in task store and `task_get QC-T1` returns a valid task
+- [x] Adversarial audit disposition recorded (NO REFUTATION FOUND — all three ACs confirmed)
 
+
+## Execution record
+
+**Milestone:** M91  
+**Iteration:** iteration-0  
+**Realized Δv:** 0 (governance-integrity / instrument-correction — no VT chart cell)  
+**Merge SHA:** 8418004  
+**Outcome:** done — OUTER-LOOP.md session-start QC-T1 healthcheck added (9 lines, idempotent re-create); tasks/QC-T1.md fixture re-created; audit NO REFUTATION FOUND.
 
 ## Not selected (M90)
 

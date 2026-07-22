@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 90** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 91** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -682,3 +682,5 @@ m90 · exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP · Δv=0 (v̂=0) · audit=CONCERNS
 
 **Task:** [[exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS]] (`tasks/exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M91-qc-t1-fixture-probe.md`
+
+m91 · exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=8418004 · → milestones/M91/
