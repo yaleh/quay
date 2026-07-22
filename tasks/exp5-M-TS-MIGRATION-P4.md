@@ -10,6 +10,7 @@ labels:
 parent: exp5-M-TS-MIGRATION
 children:
   - exp5-M-TS-MIGRATION-P4-BATCH3
+  - exp5-M-TS-MIGRATION-P4-BATCH4
 extra:
   schema: v1
   acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh

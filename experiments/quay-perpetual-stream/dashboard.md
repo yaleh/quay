@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 108** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 109** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -918,3 +918,16 @@ m108 · exp5-M-ARCH-AUDIT-M108-EXPLORE · Δv=0 (v̂=0) · audit=documented-no-o
 
 **Task:** [[exp5-M-TS-MIGRATION-P4-BATCH3]] (`tasks/exp5-M-TS-MIGRATION-P4-BATCH3.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M109-ts-migration-p4-batch3.md`
+
+m109 · exp5-M-TS-MIGRATION-P4-BATCH3 · Δv=0 (v̂=0) · outcome=DONE (9 vendor-copy scripts .mjs→.ts; sync-vendor.sh updated; plugin/skills SKILL.md refs updated; plugin v0.3.20; tsc exit 0; task-schema.mjs shim created for it0-dod-check.mjs compatibility) · audit=NO REFUTATION FOUND · merge=8b034eb · → milestones/M109/
+
+## SELECT M110 — exp5-M-TS-MIGRATION-P4-BATCH4
+
+**Selected:** exp5-M-TS-MIGRATION-P4-BATCH4 — P4 Batch 4: `it0-dod-check.mjs` → `it0-dod-check.ts`; update import to `./task-schema.ts`; delete `task-schema.mjs` shim; update `it0-dod-check.sh` wrapper; compute new GATE-HASH-REF (`sha256sum it0-dod-check.ts`); update prose refs in inherited-core.md + OUTER-LOOP.md.
+
+**Rationale:** Exploit pick (2nd post-M108 explore reset; next mandatory explore by M113 if M109-M112 all exploits). Closes the ADR-012 P4 TS migration program. Final batch — the DoD enforcer itself. Proper per-batch child task `exp5-M-TS-MIGRATION-P4-BATCH4` created at SELECT for SPLIT-OR-COMMIT (DIR-026) compliance. GATE-HASH-REF rotates: future charters pin `sha256sum it0-dod-check.ts`.
+
+**Deferred:** exp5-M-CRYST (crystallization program), exp5-M-CLI-UX (stale), DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED).
+
+**Task:** [[exp5-M-TS-MIGRATION-P4-BATCH4]] (`tasks/exp5-M-TS-MIGRATION-P4-BATCH4.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M110-ts-migration-p4-batch4.md`
