@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 96** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 97** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -760,3 +760,5 @@ m96 · exp5-DEFECT-ROUTINE-GATE-SELF-REJECT · Δv=0 (v̂=0) · audit=NO REFUTAT
 
 **Task:** [[ARCH-M93-002]] (`tasks/ARCH-M93-002.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M97-startmcpserver-decompose.md`
+
+m97 · ARCH-M93-002 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=cad0a6a · → milestones/M97/
