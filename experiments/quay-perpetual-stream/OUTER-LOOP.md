@@ -15,6 +15,15 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
   forward. SELECT (step 1 below) reads the task store directly.
 - **Inherited core (Tier-B methodology):** `experiments/quay-perpetual-stream/inherited-core.md`
 
+## Session-start healthcheck (QC-T1 native task store liveness probe)
+After reading the pinned references, call `task_get QC-T1` to verify the native task store is
+accessible. If the result is "no such task: QC-T1": call `task_write` to re-create the fixture
+with `{id: QC-T1, title: "healthcheck fixture — native task store liveness probe", status: todo,
+labels: [fixture, healthcheck], body: "Permanent liveness probe — never complete. Re-create if
+absent (idempotent)."}`, then retry `task_get QC-T1` to confirm. Never silently continue if the
+re-creation also fails — halt and raise `needs-human`. This probe is idempotent: re-running at any
+session start finds QC-T1 (creating it if missing) without side-effects.
+
 ## Invariants — never violate
 1. **Never point BAIME at the stream; only at a milestone.** (Every exp4 pathology = violating this.)
 2. **Never perturb an in-flight inner milestone** (its charter is frozen). Human async input is
