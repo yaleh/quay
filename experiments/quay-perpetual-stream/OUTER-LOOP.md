@@ -403,6 +403,32 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
        not re-derive them — so un-authored dispositions pass silently unless you write them in. The
        `extra.acceptance` command references this FILE PATH, never ABSORB text baked in at SELECT
        (chicken/egg: the narrative is drafted live, mid-milestone).
+       - **Dispatch-record file — concrete operator procedure (M90/exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP).**
+         Clause 12 (audit-independence) HARD-FAILS if the dispatch-record file is absent or the audit
+         session ID it records does not appear in the audit artifact. To avoid this recurring failure,
+         follow these steps IN ORDER when dispatching the adversarial audit subagent at this ABSORB step:
+         1. **Dispatch the audit subagent** (a fresh-context `baime:iteration-executor` call,
+            `run_in_background=true`, refutation-focused prompt per `inherited-core.md`'s
+            "Adversarial-audit role" section).
+         2. **Record the session ID you receive back** from the dispatch (the `Agent tool` / task ID
+            / session identifier the harness assigns to the dispatched subagent's run).
+         3. **Immediately create the dispatch-record file** (before authoring the ABSORB entry):
+            ```
+            echo "<audit-session-id-received-in-step-2>" > /tmp/m<NN>-dispatch-record.txt
+            ```
+            One session ID per line, bare (no prose). If you dispatch multiple audit subagents,
+            append each ID: `echo "<id2>" >> /tmp/m<NN>-dispatch-record.txt`.
+         4. **Include `## Audit-independence check` in the ABSORB entry** with exactly these three
+            lines (copy this block verbatim, substituting real values):
+            ```
+            ## Audit-independence check
+            Artifact: milestones/M<NN>/audits/iteration-0-acceptance-audit.md
+            Orchestrator id: <this session's own id>
+            Dispatch record: /tmp/m<NN>-dispatch-record.txt
+            ```
+         5. **Reminder:** `Dispatch record: N/A` invokes `--allow-uncorroborated` (pre-DIR-034
+            escape hatch) — only use it when no real independent audit was dispatched (unusual;
+            the acceptance audit should refute the N/A disposition if an audit actually ran).
      - **`extra.acceptance` convention:** `bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
        <task-id> <charter-file> <absorb-entry-file>` — task-id (NOT milestone-id, per M37),
        repo-root-relative paths (runner cwd = workspaceRoot = repo root). Normally seeded once at
