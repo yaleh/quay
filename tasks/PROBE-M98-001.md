@@ -64,4 +64,13 @@ for t in out: print(' ->', t)
 
 ## Acceptance Criteria
 
-- [ ] `startMcpServer` outDegree ≤ 4 confirmed by fresh archguard analysis (global scope, noCache:true). This likely requires either: (a) extracting `loadConfig` call into a separate `connectAll()` wrapper, or (b) passing an already-connected provider to `startMcpServer` rather than having it call `loadConfig` directly, or (c) bundling the 5 register* calls into a single `registerAllHandlers(server, getClient, cfg)` call in `mcp-handlers.ts` to reduce the outDegree count.
+- [x] `startMcpServer` outDegree ≤ 4 confirmed by fresh archguard analysis (global scope, noCache:true). This likely requires either: (a) extracting `loadConfig` call into a separate `connectAll()` wrapper, or (b) passing an already-connected provider to `startMcpServer` rather than having it call `loadConfig` directly, or (c) bundling the 5 register* calls into a single `registerAllHandlers(server, getClient, cfg)` call in `mcp-handlers.ts` to reduce the outDegree count.
+
+## Definition of Done
+
+Standard inherited-core DoD clauses apply. Task-specific criteria:
+
+- [x] Archguard outDegree ≤4 confirmed (global scope, noCache:true); outDegree=3 after fix (was 7). Pasted output shows dependencies: config.ts.loadConfig, mcp-handlers.ts.ConnectedProvider, mcp-handlers.ts.registerAllHandlers.
+- [x] Full test suite passes (`node --test packages/quay/test/mcp-server.test.mjs`): 33 PASS, 0 FAIL.
+- [x] Fresh-context adversarial audit (m99-audit-2026-07-22) confirms no handler behavior regression. Verdict: NO REFUTATION FOUND.
+- [x] Fix lands done per inherited-core split-or-commit: commit 7461215 on master.
