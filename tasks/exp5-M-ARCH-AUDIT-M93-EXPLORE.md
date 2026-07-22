@@ -2,7 +2,7 @@
 id: exp5-M-ARCH-AUDIT-M93-EXPLORE
 title: "explore: archguard architecture audit — post-TypeScript-migration
   structural analysis (M93)"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - explore
@@ -38,14 +38,32 @@ Methodology/design-class explore:
 4. Update the task store with the filed findings.
 
 ## Acceptance Criteria
-- [ ] Archguard analysis run against the current quay codebase packages (`packages/quay`, `packages/quay-native`, `packages/quay-github`).
-- [ ] At least 1 concrete finding filed as a `milestone-candidate` task with real archguard metric evidence (not a prose summary).
-- [ ] All findings are backed by concrete archguard output (package name, metric value, proposed remediation).
-- [ ] FILE-ONLY: this explore does not modify product or methodology code — only new task files.
+- [x] Archguard analysis run against the current quay codebase packages (`packages/quay`, `packages/quay-native`, `packages/quay-github`).
+- [x] At least 1 concrete finding filed as a `milestone-candidate` task with real archguard metric evidence (not a prose summary).
+- [x] All findings are backed by concrete archguard output (package name, metric value, proposed remediation).
+- [x] FILE-ONLY: this explore does not modify product or methodology code — only new task files.
 
 ## Definition of Done
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts:
-- [ ] Real archguard MCP analysis run (not a synthetic query); findings documented with tool output pasted.
-- [ ] At least 1 filed finding task with archguard evidence (DIR-026 real object) that independently reproduces (the archguard call can be re-run to confirm the metric).
-- [ ] Fresh-context adversarial audit confirms findings are real (not archguard tool noise or already-known issues).
-- [ ] FILE-ONLY invariant confirmed: git status shows only new task files, no product/method code changes.
+- [x] Real archguard MCP analysis run (not a synthetic query); findings documented with tool output pasted.
+- [x] At least 1 filed finding task with archguard evidence (DIR-026 real object) that independently reproduces (the archguard call can be re-run to confirm the metric).
+- [x] Fresh-context adversarial audit confirms findings are real (not archguard tool noise or already-known issues).
+- [x] FILE-ONLY invariant confirmed: git status shows only new task files, no product/method code changes.
+
+## Execution record
+
+**Milestone:** M93  
+**Iteration:** iteration-0  
+**Realized Δv:** 0 (v̂=0 — explore; findings filed as new milestone-candidates)  
+**Merge SHA:** 6096cc6  
+**Outcome:** done — archguard analysis completed; 4 findings filed (ARCH-M93-001..004); audit NO REFUTATION FOUND.
+
+**Archguard evidence summary:**
+
+- ARCH-M93-001: `gate/` sub-package god-package — fanOut=62, fanIn=7, entityCount=52 (59.8% of all 87 entities). `gate/registry.ts` (736 lines) holds 7 gate factory functions with no decomposition.
+- ARCH-M93-002: `startMcpServer` god-function — outDegree=10 (highest in codebase), 797-line file, 15 MCP tool handlers inlined in a single function body with no router abstraction.
+- ARCH-M93-003: `startServer` god-function — outDegree=6, 1085-line file, 675-line function body with 5 inline route handlers, all routing/rendering/security co-located.
+- ARCH-M93-004: ABI boundary violation — `quay-native/src/mcp-server.ts` imports `createAdrStore` from `quay/src/adr-store.ts` (concrete Core implementation, not ABI type). `adr-store.ts` fanIn=1 confirms the sole cross-boundary import.
+
+**Gate results:** All 4 findings passed `routine-file-gate.mjs --board tasks --k 5` (ACCEPT: actionable, novel, within rate).  
+**Adversarial audit:** `milestones/M93/audits/iteration-0-acceptance-audit.md` — NO REFUTATION FOUND.
