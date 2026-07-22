@@ -749,3 +749,14 @@ m95 · ARCH-M93-004 · Δv=0 (v̂=0) · audit=documented-no-op (deterministic gr
 **Charter:** `experiments/quay-perpetual-stream/charters/M96-routine-gate-self-reject-fix.md`
 
 m96 · exp5-DEFECT-ROUTINE-GATE-SELF-REJECT · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=c64e521 · → milestones/M96/
+
+## SELECT M97 — ARCH-M93-002
+
+**Selected:** ARCH-M93-002 — decompose `startMcpServer` (808 lines, outDegree=10, 15 inline handlers) into per-domain handler groups; `startMcpServer` becomes a thin registration wrapper (body ≤80 lines); archguard outDegree drops to ≤4.
+
+**Rationale:** Exploit pick (4th post-M93 explore reset; M98 is now the mandatory explore). ARCH-M93-002 is the most bounded of the remaining ARCH-M93-* findings: one file, purely mechanical handler extraction, behavior-preserving, confirmed by the existing test suite. Addresses the rank-1 outDegree smell in the codebase without touching external contracts. Development-class — quay-task-to-plan required.
+
+**Deferred:** ARCH-M93-001 (gate/ god-package refactor — large, needs split), ARCH-M93-003 (startServer god-function — larger scope), DIR-052/053/055 (routine wiring exploits — human-steered residual per re-scope notes), exp5-M-TS-MIGRATION-P4 (exp5 scripts migration).
+
+**Task:** [[ARCH-M93-002]] (`tasks/ARCH-M93-002.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M97-startmcpserver-decompose.md`
