@@ -710,3 +710,14 @@ m92 · exp5-DEFECT-DIR056-PROBE-SPEC-UNWIRED · Δv=0 (v̂=0) · audit=NO REFUTA
 **Charter:** `experiments/quay-perpetual-stream/charters/M93-arch-audit-explore.md`
 
 m93 · exp5-M-ARCH-AUDIT-M93-EXPLORE · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=6096cc6 · → milestones/M93/
+
+## SELECT M94 — PROBE-SV-M92-001
+
+**Selected:** PROBE-SV-M92-001 — fix acceptance gate cwd threading: `packages/quay/src/gate/registry.ts` calls `resolveRunnerOptions()` with no `gateConfig`, so `--cwd <worktree>` is silently ignored; gate always runs acceptance command in `process.cwd()`, not the worktree (DIR-046 regression, filed by self-validation probe at M92).
+
+**Rationale:** Exploit pick (1st post-M93 explore reset; next mandatory explore by M98). Bounded defect with direct impact on the loop's own acceptance gate correctness — every `quay gate <task> --cwd <worktree>` silently uses the wrong directory. PROBE-SV-M92-001 is already `milestone-candidate` + `defect`, backed by concrete archguard/code evidence, with real FILE-ONLY confirmation from M92. ARCH-M93-001..004 are also candidates; ARCH-M93-004 (ABI violation) is the next cleanest post-M94 pick (bounded: single `createAdrStore` cross-boundary import).
+
+**Deferred:** ARCH-M93-001 (gate/ god-package, fanOut=62 — large refactor, not M94), ARCH-M93-002 (startMcpServer god-function — scope/split needed), ARCH-M93-003 (startServer god-function — 675L scope), ARCH-M93-004 (ABI boundary violation — M95+ pick), DIR-055 (meta-cc mining standing routine).
+
+**Task:** [[PROBE-SV-M92-001]] (`tasks/PROBE-SV-M92-001.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M94-acceptance-gate-cwd-fix.md`
