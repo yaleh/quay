@@ -788,3 +788,14 @@ m98 · exp5-M-ARCH-AUDIT-M98-EXPLORE · Δv=0 (v̂=0) · audit=documented-no-op 
 **Charter:** `experiments/quay-perpetual-stream/charters/M99-startmcpserver-outDegree-fix.md`
 
 m99 · PROBE-M98-001 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=7461215 · → milestones/M99/
+
+## SELECT M100 — ARCH-M93-003
+
+**Selected:** ARCH-M93-003 — decompose `startServer` (serve.ts, 675-line body, outDegree=6) into named per-route handler functions; `startServer` becomes a thin dispatcher (≤80 lines); archguard outDegree ≤4. Same pattern as M97/M99 (startMcpServer decomposition). M100 is also a checkpoint milestone (cp-20 due).
+
+**Rationale:** Exploit pick (2nd post-M98 explore reset; next mandatory explore by M103). Last remaining ARCH-M93-* god-function finding. Bounded: 5 route handlers to extract, same same-file extraction pattern proven at M97. Development-class — quay-task-to-plan required.
+
+**Deferred:** ARCH-M93-001 (gate/ god-package — large refactor, separate milestone), exp5-M-TS-MIGRATION-P4, exp5-M-OUTERLOOP-ROUTINE-WIRING (human-steered).
+
+**Task:** [[ARCH-M93-003]] (`tasks/ARCH-M93-003.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M100-startserver-decompose.md`
