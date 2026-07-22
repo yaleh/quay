@@ -3,7 +3,7 @@ id: exp5-M-TS-MIGRATION-P4
 title: "TS migration P4 (exp5 method-infra scripts, ADR-012): migrate the
   load-bearing gates/scripts to TS under the golden-diff discipline (like the
   it0-dod-check restructure) — behavior-preserving, autonomous."
-status: todo
+status: needs-human
 labels:
   - milestone-candidate
   - crystallization
@@ -15,8 +15,8 @@ extra:
   schema: v1
   acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
     exp5-M-TS-MIGRATION-P4
-    experiments/quay-perpetual-stream/charters/M107-ts-migration-p4-batch2.md
-    /tmp/m107-absorb-entry.md
+    experiments/quay-perpetual-stream/charters/M111-ts-migration-p4-close.md
+    /tmp/m111-absorb-entry.md
 ---
 ## Proposal
 Phase P4 (final) of [[exp5-M-TS-MIGRATION]] (ADR-012). With the product packages on TS (P3), migrate
@@ -47,15 +47,15 @@ N/A — split-or-commit at SELECT (DIR-026): migrate in fixture-pinned batches (
   `dod-fixture-selfcheck.sh` still pinning it0-dod-check?
 
 ## Acceptance Criteria
-- [ ] The load-bearing method-infra scripts are `.ts`, pass `tsc --noEmit`, and run under Node native type-stripping; their `-selfcheck.sh` fixtures produce byte-identical verdicts before/after (golden-diff).
-- [ ] The it0 DoD meta-enforcer (Clauses 0–9) still passes on all clauses post-migration; `dod-fixture-selfcheck.sh` still pins it; NO gate verdict logic changed (language port only).
-- [ ] Vendored plugin copies re-synced so shipped scripts match source; a consumer workspace (archguard) still runs the scripts unchanged — the archguard verification is driven AUTONOMOUSLY via **tmux remote-drive ([[ADR-016]])** (3-step `send-keys`; read the result from the filesystem/meta-cc, not the TUI; single-driver hygiene), NOT deferred to a human. Precondition: a live idle archguard tmux session (or launch one via `tmux new-window`). If no drivable session exists, that leg lands `needs-human`.
+- [x] The load-bearing method-infra scripts are `.ts`, pass `tsc --noEmit`, and run under Node native type-stripping; their `-selfcheck.sh` fixtures produce byte-identical verdicts before/after (golden-diff). (AC1 CONFIRMED M111: tsc exit 0)
+- [x] The it0 DoD meta-enforcer (Clauses 0–9) still passes on all clauses post-migration; `dod-fixture-selfcheck.sh` still pins it; NO gate verdict logic changed (language port only). (AC2 CONFIRMED M111: all 17 fixtures PASS)
+- [ ] Vendored plugin copies re-synced so shipped scripts match source; a consumer workspace (archguard) still runs the scripts unchanged — the archguard verification is driven AUTONOMOUSLY via **tmux remote-drive ([[ADR-016]])** (3-step `send-keys`; read the result from the filesystem/meta-cc, not the TUI; single-driver hygiene), NOT deferred to a human. Precondition: a live idle archguard tmux session (or launch one via `tmux new-window`). If no drivable session exists, that leg lands `needs-human`. (AC3: needs-human — no archguard tmux session available M111)
 
 ## Definition of Done
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts:
-- [ ] The method-infra gates run on TypeScript with byte-identical golden-fixture verdicts (pasted before/after), the it0 meta-enforcer green, no verdict drift — on a real milestone.
-- [ ] Single-source held (ADR-004): the vendored copies are re-synced, not hand-edited; TDD per ADR-001; fresh-context adversarial audit confirms zero enforcement change (the loop's guardrails are byte-for-byte equivalent).
-- [ ] Per DIR-026 SPLIT-OR-COMMIT: each fixture-pinned batch lands done-or-`needs-human`; parent [[exp5-M-TS-MIGRATION]] is done only when ALL children (P0–P4) are done — this phase closes the program.
+- [x] The method-infra gates run on TypeScript with byte-identical golden-fixture verdicts (pasted before/after), the it0 meta-enforcer green, no verdict drift — on a real milestone. (M111: tsc PASS, all 17 selfcheck fixtures PASS)
+- [x] Single-source held (ADR-004): the vendored copies are re-synced, not hand-edited; TDD per ADR-001; fresh-context adversarial audit confirms zero enforcement change (the loop's guardrails are byte-for-byte equivalent). (M111: adversarial audit NO REFUTATION FOUND)
+- [ ] Per DIR-026 SPLIT-OR-COMMIT: each fixture-pinned batch lands done-or-`needs-human`; parent [[exp5-M-TS-MIGRATION]] is done only when ALL children (P0–P4) are done — this phase closes the program. (needs-human: AC3 archguard leg pending human)
 
 
 ## Not selected (M91)
