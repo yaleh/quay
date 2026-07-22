@@ -12,5 +12,9 @@ node "$CHK" "$T/vague.md" >/dev/null 2>&1; [ "$?" = 1 ] && echo "PASS: vague fin
 node "$CHK" --board "$T" --recent 0 --k 3 "$T/good.md" >/dev/null 2>&1
 cp "$T/good.md" "$T/existing.md"
 node "$CHK" --board "$T" "$T/good.md" >/dev/null 2>&1; [ "$?" = 1 ] && echo "PASS: duplicate on board → REJECT (dedup)" || { echo "FAIL: dedup"; fail=1; }
+# RED→GREEN: candidate physically IN --board with a NOVEL finding must ACCEPT (the as-wired routine flow).
+printf '## Finding\nroutine-file-gate boardKeys includes candidate itself when staged in board dir; repro `node scripts/routine-file-gate.mjs --board dir/ dir/PROBE.md` exit 1 instead of 0.\n## Requested action\nfix\n' > "$T/PROBE-novel-in-board.md"
+node "$CHK" --board "$T" "$T/PROBE-novel-in-board.md" >/dev/null 2>&1; [ "$?" = 0 ] && echo "PASS: novel candidate in --board → ACCEPT" || { echo "FAIL: novel-in-board self-reject"; fail=1; }
+rm -f "$T/PROBE-novel-in-board.md"
 rm -rf "$T"
 echo; if [ "$fail" = 0 ]; then echo "PASS: all routine-file-gate cases behaved as asserted."; exit 0; else echo "FAIL."; exit 1; fi

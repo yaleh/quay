@@ -608,13 +608,30 @@ interface GatesConfig {
 function readGatesConfig(workspaceRoot: string): GatesConfig {
   const empty: GatesConfig = { it0: [], adr: [], fixed: [], testPass: [], coverageFloor: [], redGreen: [] };
   if (!workspaceRoot) return empty;
-  const gatesPath = path.join(workspaceRoot, ".quay", "gates.yml");
-  if (!fs.existsSync(gatesPath)) return empty;
+
+  // DIR-050: try unified .quay/config.yml (gates: section) first, fall back to .quay/gates.yml
+  const unifiedConfigPath = path.join(workspaceRoot, ".quay", "config.yml");
+  const legacyGatesPath = path.join(workspaceRoot, ".quay", "gates.yml");
+
   let parsed: unknown;
-  try {
-    parsed = YAML.parse(fs.readFileSync(gatesPath, "utf8"));
-  } catch {
-    return empty; // malformed gates.yml -> no workspace gates, not a hard crash
+  if (fs.existsSync(unifiedConfigPath)) {
+    let unified: unknown;
+    try {
+      unified = YAML.parse(fs.readFileSync(unifiedConfigPath, "utf8"));
+    } catch {
+      // malformed unified config -> fall through to legacy
+    }
+    if (unified && typeof unified === "object" && "gates" in unified) {
+      parsed = (unified as Record<string, unknown>).gates;
+    }
+  }
+  if (parsed === undefined) {
+    if (!fs.existsSync(legacyGatesPath)) return empty;
+    try {
+      parsed = YAML.parse(fs.readFileSync(legacyGatesPath, "utf8"));
+    } catch {
+      return empty; // malformed gates.yml -> no workspace gates, not a hard crash
+    }
   }
   const it0 = Array.isArray((parsed as Record<string, unknown>)?.it0) ? (parsed as Record<string, unknown>).it0 as It0Entry[] : [];
   const adr = Array.isArray((parsed as Record<string, unknown>)?.adr) ? (parsed as Record<string, unknown>).adr as string[] : [];

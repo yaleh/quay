@@ -48,19 +48,19 @@ export function readLoopParams(workspaceRoot) {
   const legacyLoopPath = path.join(workspaceRoot, ".quay", "loop.yml");
 
   // 1. DIR-050: try unified .quay/config.yml with loop: section first
-  let parsed;
-  let sourceLabel;
+  let parsed: unknown;
+  let sourceLabel: string;
   if (fs.existsSync(unifiedConfigPath)) {
-    let unified;
+    let unified: unknown;
     try {
       unified = YAML.parse(fs.readFileSync(unifiedConfigPath, "utf8"));
-    } catch (e) {
+    } catch (e: unknown) {
       throw new Error(
-        `FAIL-CLOSED: .quay/config.yml is malformed YAML — ${e.message}`
+        `FAIL-CLOSED: .quay/config.yml is malformed YAML — ${(e as Error).message}`
       );
     }
     if (unified && typeof unified === "object" && "loop" in unified) {
-      parsed = unified.loop;
+      parsed = (unified as Record<string, unknown>).loop;
       sourceLabel = ".quay/config.yml (loop: section)";
     }
   }
@@ -74,36 +74,38 @@ export function readLoopParams(workspaceRoot) {
     }
     try {
       parsed = YAML.parse(fs.readFileSync(legacyLoopPath, "utf8"));
-    } catch (e) {
+    } catch (e: unknown) {
       throw new Error(
-        `FAIL-CLOSED: .quay/loop.yml is malformed YAML — ${e.message}`
+        `FAIL-CLOSED: .quay/loop.yml is malformed YAML — ${(e as Error).message}`
       );
     }
     sourceLabel = ".quay/loop.yml";
   }
 
-  const src = sourceLabel;
+  const src = sourceLabel!;
+
+  const p = parsed as Record<string, unknown>;
 
   // 3. Required: board
-  if (!parsed?.board || typeof parsed.board !== "string" || !parsed.board.trim()) {
+  if (!p?.board || typeof p.board !== "string" || !(p.board as string).trim()) {
     throw new Error(
       `FAIL-CLOSED: ${src} missing required field 'board' (provider name, e.g. "native")`
     );
   }
 
   // 4. Required: gates
-  if (parsed?.gates === undefined || parsed?.gates === null) {
+  if (p?.gates === undefined || p?.gates === null) {
     throw new Error(
       `FAIL-CLOSED: ${src} missing required field 'gates' (gate name or list, e.g. [vitest])`
     );
   }
 
   // 5. Normalize gates to array
-  let gates;
-  if (Array.isArray(parsed.gates)) {
-    gates = parsed.gates;
-  } else if (typeof parsed.gates === "string" && parsed.gates.trim()) {
-    gates = [parsed.gates.trim()];
+  let gates: string[];
+  if (Array.isArray(p.gates)) {
+    gates = p.gates as string[];
+  } else if (typeof p.gates === "string" && (p.gates as string).trim()) {
+    gates = [(p.gates as string).trim()];
   } else {
     throw new Error(
       `FAIL-CLOSED: ${src} field 'gates' must be a string or non-empty array`
@@ -111,7 +113,7 @@ export function readLoopParams(workspaceRoot) {
   }
 
   // 6. Optional: stop — validate if present
-  const stop = parsed?.stop ?? "once";
+  const stop = (p?.stop ?? "once") as string;
   if (typeof stop !== "string" || !VALID_STOP_RE.test(stop.trim())) {
     throw new Error(
       `FAIL-CLOSED: ${src} field 'stop' value "${stop}" is invalid — must be "once", "until(.halt)", "until(empty)", or "until(<condition>)"`
@@ -119,13 +121,13 @@ export function readLoopParams(workspaceRoot) {
   }
 
   // 7. Optional: policy (no constraint — workspace-defined ranking label)
-  const policy = typeof parsed?.policy === "string" ? parsed.policy.trim() : "ready-first";
+  const policy = typeof p?.policy === "string" ? (p.policy as string).trim() : "ready-first";
 
   // 8. coexist: RETIRED (DIR-050) — silently ignored if present in legacy YAML.
   //    Not returned in the result object.
 
   // 9. Optional: execution — "dispatched" (DEFAULT) | "inline"
-  const execution = parsed?.execution ?? "dispatched";
+  const execution = (p?.execution ?? "dispatched") as string;
   if (!VALID_EXECUTION.has(execution)) {
     throw new Error(
       `FAIL-CLOSED: ${src} field 'execution' value "${execution}" is invalid — must be "dispatched" or "inline"`
@@ -133,7 +135,7 @@ export function readLoopParams(workspaceRoot) {
   }
 
   // 10. Optional: audit — "adversarial" (DEFAULT) | "none"
-  const audit = parsed?.audit ?? "adversarial";
+  const audit = (p?.audit ?? "adversarial") as string;
   if (!VALID_AUDIT.has(audit)) {
     throw new Error(
       `FAIL-CLOSED: ${src} field 'audit' value "${audit}" is invalid — must be "adversarial" or "none"`
@@ -144,7 +146,7 @@ export function readLoopParams(workspaceRoot) {
   //     (serial — one dispatched build per iterate, i.e. DIR-048 behavior). N > 1 opts a workspace INTO
   //     cross-milestone concurrency (safe only where tasks are touches-disjoint + carry no SELECT←ABSORB
   //     learning dependency). Fail-closed on non-integer / < 1.
-  const concurrency = parsed?.concurrency ?? 1;
+  const concurrency = (p?.concurrency ?? 1) as number;
   if (!Number.isInteger(concurrency) || concurrency < 1) {
     throw new Error(
       `FAIL-CLOSED: ${src} field 'concurrency' value "${concurrency}" is invalid — must be an integer >= 1 (1 = serial, the default)`
@@ -158,31 +160,31 @@ export function readLoopParams(workspaceRoot) {
   //     and at least one of: dispatch (non-empty string, legacy) OR probe (non-empty string,
   //     DIR-056 probe-spec name). The scheduler logic lives in routine-scheduler.mjs
   //     (parseTrigger/isDue/resolveRoutineAction); this only validates shape.
-  const routines = parsed?.routines ?? [];
+  const routines = (p?.routines ?? []) as unknown[];
   if (!Array.isArray(routines)) {
     throw new Error(`FAIL-CLOSED: ${src} field 'routines' must be an array (got ${typeof routines})`);
   }
-  for (const [i, r] of routines.entries()) {
-    if (!r || typeof r.name !== "string" || !r.name.trim()) {
+  for (const [i, r] of (routines as Record<string, unknown>[]).entries()) {
+    if (!r || typeof r.name !== "string" || !(r.name as string).trim()) {
       throw new Error(`FAIL-CLOSED: ${src} routines[${i}] needs a non-empty string 'name'`);
     }
-    if (typeof r.trigger !== "string" || !/^(every\(\s*\d+\s*\)|on\(\s*[\w-]+\s*\))$/.test(r.trigger.trim())) {
+    if (typeof r.trigger !== "string" || !/^(every\(\s*\d+\s*\)|on\(\s*[\w-]+\s*\))$/.test((r.trigger as string).trim())) {
       throw new Error(`FAIL-CLOSED: ${src} routines[${i}] ('${r.name}') trigger "${r.trigger}" is invalid — must be "every(N)" (N>=1) or "on(<event>)"`);
     }
-    const m = r.trigger.trim().match(/^every\(\s*(\d+)\s*\)$/);
+    const m = (r.trigger as string).trim().match(/^every\(\s*(\d+)\s*\)$/);
     if (m && Number(m[1]) < 1) {
       throw new Error(`FAIL-CLOSED: ${src} routines[${i}] ('${r.name}') trigger "every(${m[1]})" invalid — N must be >= 1`);
     }
     // DIR-056: must have at least one of dispatch (legacy) or probe (new).
-    const hasDispatch = typeof r.dispatch === "string" && r.dispatch.trim();
-    const hasProbe = typeof r.probe === "string" && r.probe.trim();
+    const hasDispatch = typeof r.dispatch === "string" && (r.dispatch as string).trim();
+    const hasProbe = typeof r.probe === "string" && (r.probe as string).trim();
     if (!hasDispatch && !hasProbe) {
       throw new Error(`FAIL-CLOSED: ${src} routines[${i}] ('${r.name}') needs at least one of 'dispatch' (legacy) or 'probe' (DIR-056 probe-spec name)`);
     }
   }
 
   return {
-    board: parsed.board.trim(),
+    board: (p.board as string).trim(),
     gates,
     stop: stop.trim(),
     policy,

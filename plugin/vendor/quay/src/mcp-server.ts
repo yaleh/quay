@@ -429,14 +429,22 @@ export async function startMcpServer(): Promise<void> {
         gate: z.string().optional().describe("Gate name to run (default: 'acceptance', matching the CLI's own default). Use `--gate dod`'s equivalent, e.g. gate: 'dod', to run the author gate instead."),
         timeoutMs: z.number().int().positive().optional().describe("Kill deadline in ms for the acceptance runner (MCP parity with the CLI's --timeout; DIR-049 B1). Highest precedence: overrides the gate's gates.yml timeoutMs and the 60000 default. Needed for long suites (e.g. a ~137s `npx vitest run` via an acceptance gate would otherwise time out at the 60s default)."),
         file: z.string().optional().describe("Override the GateEvent log path (default <workspaceRoot>/.quay/gate-events.jsonl)."),
+        cwd: z.string().optional().describe("Override the acceptance runner's working directory (default: workspaceRoot). Mirrors `quay gate --cwd`. Highest precedence over workspaceRoot default."),
       },
     },
-    async ({ provider, id, gate, timeoutMs, file }) => {
+    async ({ provider, id, gate, timeoutMs, file, cwd }) => {
       const prevTimeout = process.env.QUAY_ACCEPTANCE_TIMEOUT_MS;
+      const prevCwd = process.env.QUAY_ACCEPTANCE_CWD;
       try {
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
-        process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+        // mirrors pinAcceptanceEnv in bin/quay.js -- see DIR-046
+        if (cwd) {
+          process.env.QUAY_ACCEPTANCE_CWD = cwd;
+        } else if (!process.env.QUAY_ACCEPTANCE_CWD) {
+          process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
+        }
+        // else: pre-set env var wins -- leave untouched (mirrors pinAcceptanceEnv in bin/quay.js:206)
         // DIR-049 B1: thread an explicit timeout into the acceptance runner (the MCP path previously
         // had NO way to raise it, so a long acceptance-gate command always hit the 60000 default —
         // the archguard DIR-048 friction). `resolveRunnerOptions` reads QUAY_ACCEPTANCE_TIMEOUT_MS at
@@ -453,6 +461,9 @@ export async function startMcpServer(): Promise<void> {
         // restore so one gate_run's explicit timeout never leaks into later env-driven resolutions
         if (prevTimeout === undefined) delete process.env.QUAY_ACCEPTANCE_TIMEOUT_MS;
         else process.env.QUAY_ACCEPTANCE_TIMEOUT_MS = prevTimeout;
+        // restore QUAY_ACCEPTANCE_CWD so one gate_run's cwd never leaks into subsequent calls
+        if (prevCwd === undefined) delete process.env.QUAY_ACCEPTANCE_CWD;
+        else process.env.QUAY_ACCEPTANCE_CWD = prevCwd;
       }
     }
   );

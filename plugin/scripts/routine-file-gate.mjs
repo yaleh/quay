@@ -49,12 +49,22 @@ export function gateFinding(candidate, { existingKeys = [], recentCount = 0, K =
 
 // ── boardKeys ────────────────────────────────────────────────────────────────────────────────────
 // Gather existing finding keys from a board dir (task .md files) for the dedup check.
-export function boardKeys(boardDir) {
+// excludePath: when provided, skip the file whose resolved/real path matches this path — so a
+// candidate physically IN the board dir is not counted as its own duplicate.
+export function boardKeys(boardDir, excludePath = null) {
   const keys = new Set();
   let files;
   try { files = fs.readdirSync(boardDir).filter((f) => f.endsWith(".md")); } catch { return keys; }
+  let skip = null;
+  if (excludePath) { try { skip = fs.realpathSync(path.resolve(excludePath)); } catch { skip = path.resolve(excludePath); } }
   for (const f of files) {
-    try { const k = findingKey(fs.readFileSync(path.join(boardDir, f), "utf8")); if (k) keys.add(k); } catch { /* skip */ }
+    try {
+      const abs = path.join(boardDir, f);
+      let absReal; try { absReal = fs.realpathSync(abs); } catch { absReal = path.resolve(abs); }
+      if (skip && absReal === skip) continue;
+      const k = findingKey(fs.readFileSync(abs, "utf8"));
+      if (k) keys.add(k);
+    } catch { /* skip */ }
   }
   return keys;
 }
@@ -77,7 +87,7 @@ export async function main(argv) {
   if (files.length !== 1 || !Number.isFinite(recent) || !Number.isFinite(K) || K < 1) { usage(); return 2; }
   if (!fs.existsSync(files[0])) { process.stderr.write(`ERROR: not found: ${files[0]}\n`); return 2; }
   const candidate = fs.readFileSync(files[0], "utf8");
-  const existingKeys = board ? boardKeys(board) : new Set();
+  const existingKeys = board ? boardKeys(board, files[0]) : new Set();
   const r = gateFinding(candidate, { existingKeys, recentCount: recent, K });
   process.stdout.write(`${r.accept ? "ACCEPT" : "REJECT"}: ${r.reason}\n`);
   return r.accept ? 0 : 1;
