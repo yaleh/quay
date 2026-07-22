@@ -9,14 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import type { GateFn } from "../registry.ts";
-import {
-  makeIt0Gate,
-  makeFixedScriptGate,
-  makeAdrGate,
-  makeTestPassGate,
-  makeCoverageFloorGate,
-  makeRedGreenGate,
-} from "./index.ts";
+import { gateFactories } from "./index.ts";
 import { type GateConfig, resolveRunnerOptions as _resolveRunnerOptions } from "./utils.ts";
 import { findConfig } from "../../config.ts";
 
@@ -172,31 +165,31 @@ export function loadWorkspaceGates(workspaceRoot: string | null): Record<string,
     const scriptPath = path.isAbsolute(entry.script)
       ? entry.script
       : path.resolve(workspaceRoot, entry.script);
-    gates[entry.name] = makeIt0Gate(scriptPath, entry.argsKey, entry.name, gateConfigOf(entry));
+    gates[entry.name] = gateFactories["it0"](scriptPath, entry.argsKey, entry.name, gateConfigOf(entry));
   }
   const adrDir = path.join(workspaceRoot, "adr");
   for (const adrId of adr) {
     if (typeof adrId !== "string" || adrId.trim() === "") continue;
-    gates[adrId.toLowerCase()] = makeAdrGate(adrId, adrDir);
+    gates[adrId.toLowerCase()] = gateFactories["adr"](adrId, adrDir);
   }
   for (const entry of fixed) {
     if (!entry?.name || !entry?.script) continue;
     const scriptPath = path.isAbsolute(entry.script)
       ? entry.script
       : path.resolve(workspaceRoot, entry.script);
-    gates[entry.name] = makeFixedScriptGate(scriptPath, entry.name, gateConfigOf(entry));
+    gates[entry.name] = gateFactories["fixed-script"](scriptPath, entry.name, gateConfigOf(entry));
   }
   for (const entry of testPass) {
     if (!entry?.name || typeof entry?.command !== "string") continue;
-    gates[entry.name] = makeTestPassGate(entry.command, entry.name, gateConfigOf(entry));
+    gates[entry.name] = gateFactories["test-pass"](entry.command, entry.name, gateConfigOf(entry));
   }
   for (const entry of coverageFloor) {
     if (!entry?.name || typeof entry?.command !== "string" || typeof entry?.floor !== "number") continue;
-    gates[entry.name] = makeCoverageFloorGate(entry.command, entry.floor, entry.pattern, entry.name, gateConfigOf(entry));
+    gates[entry.name] = gateFactories["coverage-floor"](entry.command, entry.floor, entry.pattern, entry.name, gateConfigOf(entry));
   }
   for (const entry of redGreen) {
     if (!entry?.name || typeof entry?.red !== "string" || typeof entry?.green !== "string") continue;
-    gates[entry.name] = makeRedGreenGate(entry.red, entry.green, entry.name, gateConfigOf(entry));
+    gates[entry.name] = gateFactories["red-green"](entry.red, entry.green, entry.name, gateConfigOf(entry));
   }
   return gates;
 }
