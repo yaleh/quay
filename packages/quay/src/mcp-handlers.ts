@@ -566,6 +566,18 @@ export function registerAdrHandlers(
   );
 }
 
+export function registerAllHandlers(
+  server: McpServer,
+  getClient: (providerId: string | undefined) => Promise<ConnectedProvider>,
+  cfg: ReturnType<typeof loadConfig>
+): void {
+  registerTaskHandlers(server, getClient);
+  registerGateHandlers(server, getClient, cfg);
+  registerLifecycleHandlers(server, getClient, cfg);
+  registerAdrHandlers(server, getClient);
+  registerActionHandlers(server, getClient, cfg);
+}
+
 export function registerActionHandlers(
   server: McpServer,
   getClient: (id: string | undefined) => Promise<ConnectedProvider>,

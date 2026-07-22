@@ -48,14 +48,7 @@ import path from "node:path";
 import { loadConfig, activeProvider } from "./config.ts";
 import { connectProvider } from "./provider-client.ts";
 import { resolveProviderEnv } from "./provider-env.ts";
-import {
-  type ConnectedProvider,
-  registerTaskHandlers,
-  registerGateHandlers,
-  registerLifecycleHandlers,
-  registerAdrHandlers,
-  registerActionHandlers,
-} from "./mcp-handlers.ts";
+import { type ConnectedProvider, registerAllHandlers } from "./mcp-handlers.ts";
 
 // QX-035 (experiment 4, iteration 10): read package version at startup for
 // Mitigation A (_version field in task_list response) and Mitigation B
@@ -159,11 +152,7 @@ export async function startMcpServer(): Promise<void> {
   }
 
   // Delegate tool registrations to domain handler groups (ARCH-M93-002).
-  registerTaskHandlers(server, getClient);
-  registerGateHandlers(server, getClient, cfg);
-  registerLifecycleHandlers(server, getClient, cfg);
-  registerAdrHandlers(server, getClient);
-  registerActionHandlers(server, getClient, cfg);
+  registerAllHandlers(server, getClient, cfg);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
