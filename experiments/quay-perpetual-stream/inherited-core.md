@@ -9,7 +9,7 @@ merge it here and retire its delta citation.
 
 **This file IS the one canonical "continuous-development-with-Claude-Code" methodology kit** — the
 BAIME outer/inner loop pattern (`OUTER-LOOP.md`'s operational steps), this Tier-B pinned-methodology
-substrate, the DoD meta-enforcer (`scripts/it0-dod-check.mjs` + the QENG gate engine wrapping it),
+substrate, the DoD meta-enforcer (`scripts/it0-dod-check.ts` + the QENG gate engine wrapping it),
 the general `scripts/it0-*`/`vmeta-lag`/`audit-independence`/`dogfood-evidence` gate scripts, and
 `adr/ADR-001..013`. There is exactly ONE copy of this kit in this repo, at this path.
 
@@ -915,7 +915,7 @@ adds a ninth clause — Clause 8 (task canonical-lifecycle-record) — same four
 documented in its own subsection immediately after Clause 0's (the two are closely related: Clause
 0 checks AC/DoD presence, Clause 8 checks Proposal/Plan presence).
 
-**Mechanical enforcement of this section:** `scripts/it0-dod-check.{sh,mjs}` (below) is the standing
+**Mechanical enforcement of this section:** `scripts/it0-dod-check.{sh,ts}` (below) is the standing
 check that a given milestone's task + charter + ABSORB-entry record actually satisfies all nine
 clauses below (clause 0 plus clauses 1-8) — wired into `OUTER-LOOP.md` step 6 as a HARD BLOCK on
 step 7's `milestone_counter++`, in the same gate sequence/position as the three narrative HARD
@@ -970,7 +970,7 @@ HARD-block semantics added DIR-020/M34-ac-dod-checklist-writeback, 2026-07-19)
   thereof) are reflected in the task file, it does not itself judge satisfaction.
 - **Pass/fail semantics:** exit 1 (FAIL, HARD-blocks `milestone_counter++`) if the task file is
   missing, or either section is absent / empty / placeholder-only / (for DoD) does not reference the
-  standard; exit 0 (PASS) otherwise. Mechanized in `scripts/it0-dod-check.mjs` (below).
+  standard; exit 0 (PASS) otherwise. Mechanized in `scripts/it0-dod-check.ts` (below).
 - **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), as clause 0 of the DoD meta-enforcer
   gate — the same HARD BLOCK as clauses 1-5.
 
@@ -1017,7 +1017,7 @@ M40-dir014-task-canonical-lifecycle-record)
   placeholder-only, OR `## Plan` is missing entirely, OR `## Plan` references a `docs/plans/*.md`
   path that does not resolve. exit 0 (PASS) if: the trigger does not fire (legacy/no-label task,
   N/A); OR the trigger fires and both sections are well-formed per the above. Mechanized in
-  `scripts/it0-dod-check.mjs` (Clause 8) and `scripts/it0-dod-check.sh` (thin wrapper, same as
+  `scripts/it0-dod-check.ts` (Clause 8) and `scripts/it0-dod-check.sh` (thin wrapper, same as
   Clause 0). Two regression fixtures pin this clause in isolation:
   `fixtures/dod/task-canonical-record-compliant-stub.md` (GREEN) and
   `fixtures/dod/task-canonical-record-violating-stub.md` (RED), both wired into
@@ -1073,7 +1073,7 @@ added DIR-020/M34-ac-dod-checklist-writeback, 2026-07-19)
   **K=2** health-track threshold from `dashboard.md`) is computed by the SINGLE-SOURCE module
   `scripts/vmeta-lag-check.ts` (`checkLedger`, D3·R5) — **that module IS the definition** (fail-closed
   on ambiguous / keyword-less / unparseable rows; explicit `N/A` on an empty ledger). The formula is
-  NOT restated here; read the module. The complementary `it0-dod-check.mjs` Clause 2 independently
+  NOT restated here; read the module. The complementary `it0-dod-check.ts` Clause 2 independently
   scans the ABSORB text for the disposition TOKEN (that a resolution was narrated), never the
   arithmetic — the two are additive, not a dual source.
 - **Pass/fail semantics:** if `milestones-since-confirmed` exceeds K=2 for any qualifying row, step
@@ -1142,7 +1142,7 @@ an explicit, human-visible **waiver line** logged in `dashboard.md`. Concretely:
   2026-07-18`. Absence of this line, when scope-exemption language is present for a clause whose
   trigger fired, is itself a DoD violation.
 - **Why this is mechanically detectable, not just prose:** for clauses 3 (line-budget) and 4
-  (impl-row), the charter/ABSORB text is directly inspectable — `it0-dod-check.mjs` (below) scans
+  (impl-row), the charter/ABSORB text is directly inspectable — `it0-dod-check.ts` (below) scans
   for exemption-adjacent language paired with an absent waiver line. For clauses 1 (adversarial-
   audit) and 2 (V_meta-lag), the existing "documented no-op" / row-update ABSORB-log discipline
   already required by those clauses' own sections above satisfies the same discipline BY
@@ -1185,7 +1185,7 @@ corresponding `-IMPL` row (mandated by Clause 4) itself ABSORBs.
   ABSORBed; that future ABSORB is responsible for updating the VT-curve total from
   provisional to confirmed, or reversing it if the `-IMPL` never lands as designed.
 - **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), the "DoD meta-enforcer gate"
-  sub-step (same invocation point as Clauses 0-5, run together by `scripts/it0-dod-check.mjs`) —
+  sub-step (same invocation point as Clauses 0-5, run together by `scripts/it0-dod-check.ts`) —
   immediately after Clause 4 (impl-row), since Clause 6's own trigger condition depends on Clause
   4's design-only determination.
 
@@ -1222,7 +1222,7 @@ silent gap.
   the milestone's surface is exclusively non-product-touching (N/A-pass); OR the trigger fires and
   a coverage disposition or waiver line is present.
 - **Current invocation point:** `OUTER-LOOP.md` step 6 (ABSORB), the "DoD meta-enforcer gate"
-  sub-step (same invocation point as Clauses 0-6, run together by `scripts/it0-dod-check.mjs`) —
+  sub-step (same invocation point as Clauses 0-6, run together by `scripts/it0-dod-check.ts`) —
   evaluated independently of Clause 6 (different trigger axis: design-only-ness vs. surface label),
   positioned last in the clause sequence.
 
@@ -1232,18 +1232,18 @@ silent gap.
 M32 ran two independent `baime:iteration-executor` iterations on separate branches
 (`exp5-m32-iteration-0`, `exp5-m32-iteration-1`); both delivered the same Clause 6/7 text and
 mechanization, but disagreed on one design point: should `escrow-delta-v`/`test-floor` be added to
-`it0-dod-check.mjs`'s `MECHANICALLY_UNCONDITIONAL_CLAUSES` set (the DIR-019 fix's carve-out list —
+`it0-dod-check.ts`'s `MECHANICALLY_UNCONDITIONAL_CLAUSES` set (the DIR-019 fix's carve-out list —
 see Clause 5 above)? Iteration-0 added them; iteration-1 deliberately did not, arguing Clause 6/7
 are documentation-discipline checks like Clauses 1/2, and that DIR-019's rationale for
 line-budget/impl-row (which "fire on literally every run regardless of content") doesn't transfer,
 because Clause 6/7's non-firing is conditioned on real backlog-row/task-label content.
 
 **Resolved in favor of iteration-0, on the merits — iteration-1's own code contradicts its
-report's central factual claim.** DIR-019's actual dispositive test (`it0-dod-check.mjs`'s own
+report's central factual claim.** DIR-019's actual dispositive test (`it0-dod-check.ts`'s own
 Clause-5 comment block, and the DIR-019 archived Finding) is not "is the clause's OUTCOME
 content-conditioned" — it is "does `dispositionedClauses.add(...)` get called on literally every
 code path, including the FAIL path, so that 'already dispositioned' becomes true unconditionally
-and the clause-5 carve-out becomes dead code." Reading iteration-1's own `it0-dod-check.mjs` diff
+and the clause-5 carve-out becomes dead code." Reading iteration-1's own `it0-dod-check.ts` diff
 line by line: its Clause 6 block calls `dispositionedClauses.add("escrow-deltav")` after the
 `if (unescrowed.length > 0) {...} else {...}` block — i.e. on the FAIL branch too, not only on
 N/A/PASS — and Clause 7's block does the same for `"test-floor"`. This is structurally IDENTICAL
@@ -1272,7 +1272,7 @@ carried over from iteration-0's branch — mirroring exactly how DIR-019 itself 
 `self-exempt-linebudget-stub.md`/`self-exempt-implrow-stub.md` as the external, human-authored red
 tests for Clauses 3/4's own version of this bug.
 
-**Disposition:** `it0-dod-check.mjs`'s `MECHANICALLY_UNCONDITIONAL_CLAUSES` set is
+**Disposition:** `it0-dod-check.ts`'s `MECHANICALLY_UNCONDITIONAL_CLAUSES` set is
 `["line-budget", "impl-row", "escrow-delta-v", "test-floor"]` (iteration-0's naming), confirmed
 correct by the live repro above. Iteration-1's engineering work (the Clause 6/7 prose, trigger
 logic, and fixture *shape*) was independently valuable and is reflected in this section's design —
@@ -1295,7 +1295,7 @@ strings post-fix (both now correctly FAIL), and pinned as a permanent regression
 `fixtures/dod/test-floor-negation-poison-stub.md` (`M91-fake-testfloor-negation`, asserted exit 1 in
 `dod-fixture-selfcheck.sh`) — full suite (11 fixtures) reconfirmed green after the fix.
 
-### `scripts/it0-dod-check.{sh,mjs}` — the standing mechanical check
+### `scripts/it0-dod-check.{sh,ts}` — the standing mechanical check
 Given a milestone id, its charter file path, and its dashboard/ABSORB-entry text (or a fixture file
 standing in for that text), runs all 7 clauses above (0-7, all named individually — there is no
 clause numbered "6-7 combined") and exits 0 (all PASS/legitimately N/A, no undeclared
@@ -1349,7 +1349,7 @@ architecture, an overly complex algorithm, a large change volume, refactor scope
 do NOT justify `needs-human` — they justify SPLITTING smaller and then completing. A `needs-human`
 whose stated reason is an in-project factor is itself a DoD violation.
 
-**What it checks (mechanical, `it0-dod-check.mjs` Clause 9 + Clause 0 waiver):** when the ABSORB text
+**What it checks (mechanical, `it0-dod-check.ts` Clause 9 + Clause 0 waiver):** when the ABSORB text
 declares a `needs-human` outcome (`OUTCOME: needs-human — <reason>`), Clause 0 waives its unchecked-AC
 block (a blocked milestone legitimately has incomplete AC) and Clause 9 validates the reason: an
 in-project-factor reason FAILs; a named external blocker PASSes; a bare/unspecified reason FAILs.
@@ -1367,7 +1367,7 @@ unconditionally at every ABSORB (same shape as Clauses 3/4 — always dispositio
 conditionally skippable). DIR-034 mechanized this: previously the prose ABSORB step required
 running the script manually; Clause 10 wires it into the DoD gate so a dirty tree is a HARD block.
 Exit 0 = clean (PASS); exit 1 = scratch found (FAIL).
-<!-- enforcement: scripts/it0-dod-check.mjs (Clause 10 block); source: tree-hygiene-check.sh -->
+<!-- enforcement: scripts/it0-dod-check.ts (Clause 10 block); source: tree-hygiene-check.sh -->
 
 ### Clause 11 — Worktree/branch-hygiene gate (DIR-033 / DIR-034 mechanization)
 
@@ -1376,7 +1376,7 @@ Implemented by `experiments/quay-perpetual-stream/scripts/worktree-branch-hygien
 invoked unconditionally. DIR-033 established the capture-then-prune discipline; DIR-034 mechanized
 it into this clause so a dangling worktree/branch is a HARD block (not a prose reminder). Exit 0 =
 clean (PASS); exit 1 = stale worktrees/branches found (FAIL).
-<!-- enforcement: scripts/it0-dod-check.mjs (Clause 11 block); source: worktree-branch-hygiene-check.sh -->
+<!-- enforcement: scripts/it0-dod-check.ts (Clause 11 block); source: worktree-branch-hygiene-check.sh -->
 
 ### Clause 12 — Audit-independence gate (DIR-032 / DIR-034 mechanization)
 
@@ -1387,7 +1387,7 @@ the orchestrating context that built the milestone. Implemented by
 Clause 12 requires the ABSORB entry to carry an `## Audit-independence check` section with the
 artifact path + orchestrator id, which the gate verifies. Conditionally dispositioned (like Clauses
 1/2/6/7): if the section is ABSENT, the clause N/A-passes with a recorded no-op.
-<!-- enforcement: scripts/it0-dod-check.mjs (Clause 12 block); source: audit-independence-check.ts -->
+<!-- enforcement: scripts/it0-dod-check.ts (Clause 12 block); source: audit-independence-check.ts -->
 
 ## Deviation-record schema (DIR-017 Step 3 / M36-dod-leakage-metrics)
 
@@ -1461,7 +1461,7 @@ candidate could extend this backfill; this milestone does not claim completeness
 |---|---|---|---|---|---|---|
 | DEV-01 | M11 charter conflated "VT-scoring" with the adversarial-audit gate's actual conjunctive test (capability-growth-typed AND nonzero Δv), narrating condition (a) as "applies" when it did not | m11 (M11-webui-reverify charter, Done-when 6 text) | m11 (same ABSORB — outer loop caught it during the "Adversarial-audit gate adjudication" sub-step, `dashboard.md` line ~983) | human (the outer-loop's own ABSORB-time adjudication reading the charter against the gate's precise wording — pre-dates DIR-017's Step-1 mechanical enforcer, M25, entirely; this is exactly the "designed-not-wired" class of gap DIR-017 was later authored to close mechanically) | verified-eliminated (corrected same-ABSORB; explicitly logged as "charter-authoring imprecision noted for future correction" — no re-occurrence of this exact conflation found in any later charter reviewed for this backfill) | 0 (found and resolved same milestone) |
 | DEV-02 | ADV-004: path-traversal arbitrary-file-write vulnerability in provider write paths | pre-m26 (latent in shipped code, exact introducing milestone not re-derived by this backfill — out of scope per the charter's best-effort framing) | m26 (M26-adversarial-eval, iteration-0's adversarial/security audit exercise, `dashboard.md` line ~2130) | machine (the DIR-001-item-4-mandated adversarial/security audit — a standing, out-of-band, mechanically-dispatched exercise per this schema's `caught-by` definition above, not an ad hoc human read) | verified-eliminated (fixed via `assertSafeId()` in the SAME ABSORB; full test suite re-verified 34/34 pass after the merge that included the fix — external re-test, not self-report) | 0 (found and resolved same milestone; latent age before m26 not computed, origin unknown) |
-| DEV-03 | `it0-dod-check.mjs` Clause 5 (no-self-exemption) carve-out was dead code for Clauses 3/4 (line-budget/impl-row) — a charter could write undeclared exemption language for those two clauses with no `WAIVER:` line and the enforcer would silently PASS | m25 (M25-dod-meta-enforcer, where Clause 5's carve-out logic was originally authored, commit `8432a67`-preceding) | ~m29→m30 boundary (DIR-019, human-authored off-loop, committed directly to `master`, synced at the m29→m30 DRAIN boundary; SELECTed as m30) | human (DIR-019, a human-authored directive — per this schema's `caught-by` definition, a directive is explicitly the human-side case) | verified-eliminated (fixed at M30, commit `5c4be91`; **externally re-tested per DIR-019 item 3's own mandate**, not self-report: `dod-fixture-selfcheck.sh` re-run confirms all 4 fixtures behave as asserted, plus a real-milestone regression check re-running `it0-dod-check.sh` against M29's actual charter+ABSORB pair still PASSes — `dashboard.md` line ~2608) | found-at − origin ≈ 5 ms (m25→m30); age-to-resolution = 0 (fixed and externally verified same milestone as found) |
+| DEV-03 | `it0-dod-check.ts` Clause 5 (no-self-exemption) carve-out was dead code for Clauses 3/4 (line-budget/impl-row) — a charter could write undeclared exemption language for those two clauses with no `WAIVER:` line and the enforcer would silently PASS | m25 (M25-dod-meta-enforcer, where Clause 5's carve-out logic was originally authored, commit `8432a67`-preceding) | ~m29→m30 boundary (DIR-019, human-authored off-loop, committed directly to `master`, synced at the m29→m30 DRAIN boundary; SELECTed as m30) | human (DIR-019, a human-authored directive — per this schema's `caught-by` definition, a directive is explicitly the human-side case) | verified-eliminated (fixed at M30, commit `5c4be91`; **externally re-tested per DIR-019 item 3's own mandate**, not self-report: `dod-fixture-selfcheck.sh` re-run confirms all 4 fixtures behave as asserted, plus a real-milestone regression check re-running `it0-dod-check.sh` against M29's actual charter+ABSORB pair still PASSes — `dashboard.md` line ~2608) | found-at − origin ≈ 5 ms (m25→m30); age-to-resolution = 0 (fixed and externally verified same milestone as found) |
 | DEV-04 | M30 was executed as a direct single-commit fix, not this stream's standing two-iteration dispatch pattern — a self-disclosed process departure, not a code defect | m30 (M30-dod-clause5-blind-spot-fix, the milestone's own execution choice) | m30 (self-disclosed in the SAME ABSORB entry — "Process deviation (self-disclosed)", `dashboard.md` line ~2601) | human — self-disclosed by the outer loop against its OWN process choice, then critically evaluated by the Clause-1 adversarial audit (a machine-class check per this schema) which flagged that the external red test "cannot substitute for the two-iteration pattern's actual value of surfacing unstated-assumption blind spots" — classified `human` because the ORIGINATING disclosure is the loop's own self-report, not a mechanical gate firing (the audit's critical review is a second, confirming layer, not the original catch) | fixed / **not verified-eliminated** — explicitly recorded as "acceptable for this specific narrow/mechanical/externally-red-tested case, but NOT to be codified as a standing exception without a future consolidation pass explicitly deciding so." No later milestone has since revisited this open question; status stays at `fixed` (the immediate instance was accepted, not reversed) rather than `verified-eliminated`, because "eliminated" would imply the underlying policy question (may single-commit fixes ever skip two-iteration dispatch) was settled, and the record explicitly says it was not | 0 (self-disclosed same milestone); this row is the schema's own worked example of a NON-terminal status, deliberately not force-fit into `verified-eliminated` |
 | DEV-05 | Clause 7's coverage-disposition regex was negation-blind — false-PASSed ABSORB-entry prose that admits inadequate coverage ("...decided it wasn't necessary...", "no 80% test coverage floor was met...") while still mentioning "80%"/"test coverage" nearby | m32 (M32-dod-escrow-testfloor, where Clause 7 was originally authored in the same milestone) | m32 (same ABSORB — the Clause-1 adversarial audit's own adversarial fixture construction caught it before the ABSORB closed, `dashboard.md` line ~2746 / `inherited-core.md` line ~1174) | machine (Clause-1 adversarial-audit CONCERNS-or-worse finding — the audit's own two adversarial strings both false-PASSed pre-fix, a direct machine-class catch per this schema) | verified-eliminated (fixed with a sentence-scoped negation window, commit `fa644a7`; pinned as a permanent regression fixture `fixtures/dod/test-floor-negation-poison-stub.md` (`M91-fake-testfloor-negation`) asserted in `dod-fixture-selfcheck.sh`; full suite reconfirmed 11/11 PASS post-fix — external, mechanized re-test, not self-report) | 0 (found and resolved same milestone) |
 | DEV-06 | M41's per-milestone acceptance audit silently degraded from an independent fresh-context subagent to a same-context self-audit — the orchestrator could not dispatch `baime:iteration-executor` (reached for `ToolSearch`/the `manda` broker instead, both failed), fell back to self-audit, and still reported "NO REFUTATION FOUND" with no disclosed independence gap in the gate's own verdict token | m41 (M41-cryst-g1-observability, ABSORB's acceptance-audit sub-step) | m41 self-disclosed in `milestones/M41-cryst-g1-observability/audit.md` prose; NOT caught by any gate at the time — retro-flagged here at m43 per DIR-032 item 3 (human-authored, `tasks/DIR-032.md`, discovered mid-m43 via an out-of-band commit) | human (DIR-032 names this as the fatal silent-degradation class; the original m41 disclosure was self-reported prose, not a mechanical gate firing — no independence check existed yet to catch it as `machine`) | found / **not fixed** — the underlying hole (no machine-checkable independence gate) is still open as of m43; DIR-032's requested `scripts/audit-independence-check.mjs` has not yet been built or wired (out of M43-dir022-remaining-gates' own charter scope) | found-at − origin = 0 (self-disclosed same milestone as origin); age-to-resolution not yet applicable (still `found`, not `fixed`) |

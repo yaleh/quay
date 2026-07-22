@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # it0-dod-check.sh — DoD meta-enforcer, charter M25-dod-meta-enforcer (DIR-017 Step 1). Thin
-# wrapper delegating to it0-dod-check.mjs — mirrors it0-backlog-projection-check.sh's exact
+# wrapper delegating to it0-dod-check.ts — mirrors it0-backlog-projection-check.sh's exact
 # wrapper shape (usage/arg check, node availability check, delegate, propagate exit code), the
-# same `it0-*-check.sh` wraps `it0-*-check.mjs` convention as every existing pair in `scripts/`.
+# same `it0-*-check.sh` wraps `it0-*-check.ts` convention as every existing pair in `scripts/`.
 #
 # Given a milestone id, a charter file path, and an ABSORB-entry text file, runs all DoD clauses
 # (0-9, including Clause 8 — task canonical-lifecycle-record, DIR-014 item 6 /
 # M40-dir014-task-canonical-lifecycle-record — and Clause 9 — needs-human split-or-commit, DIR-026)
-# defined in inherited-core.md's "Definition of Done" section. See it0-dod-check.mjs's own header
+# defined in inherited-core.md's "Definition of Done" section. See it0-dod-check.ts's own header
 # comment for the full per-clause implementation.
 #
 # Usage:
@@ -28,5 +28,5 @@ if ! command -v node >/dev/null 2>&1; then
   exit 2
 fi
 
-node "$(dirname "$0")/it0-dod-check.mjs" "$1" "$2" "$3"
+node "$(dirname "$0")/it0-dod-check.ts" "$1" "$2" "$3"
 exit $?

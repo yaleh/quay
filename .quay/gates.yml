@@ -106,8 +106,8 @@ testPass:
   - name: split-or-commit
     command: "node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts ."
   # INV / exp5-M-CRYST-INV / ADR-011: enforcement-with-design gate — checks that every DoD clause
-  # in inherited-core.md has a corresponding mechanical enforcement block in it0-dod-check.mjs.
-  # A clause present in inherited-core.md but NOT referenced in it0-dod-check.mjs is "design-only"
+  # in inherited-core.md has a corresponding mechanical enforcement block in it0-dod-check.ts.
+  # A clause present in inherited-core.md but NOT referenced in it0-dod-check.ts is "design-only"
   # — a direct violation of ADR-011's invariant. PASS iff all clauses are covered.
   - name: enforcement-with-design
     command: "node experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.ts ."

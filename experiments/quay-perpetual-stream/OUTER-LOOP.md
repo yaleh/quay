@@ -272,7 +272,7 @@ session start finds QC-T1 (creating it if missing) without side-effects.
      is legitimate **ONLY** for a factor OUTSIDE project control (external service/resource/credential/
      dataset/upstream); an IN-PROJECT reason (architecture mismatch, algorithm complexity, change
      volume, refactor scope, "too hard") is NOT valid and is a DoD violation — such work must be
-     SPLIT smaller (step 1) and completed. `it0-dod-check.mjs` Clause 9 mechanically enforces the
+     SPLIT smaller (step 1) and completed. `it0-dod-check.ts` Clause 9 mechanically enforces the
      `needs-human` reason (in-project → FAIL; external → PASS); Clause 0 waives its unchecked-AC block
      only for a declared `needs-human`. A `needs-human` outcome does NOT advance `milestone_counter`
      as a completion — it is a tracked terminal failure the human reviews.
@@ -371,7 +371,7 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    - **Design-only-milestone impl-row gate (DIR-016/M21; HARD-BLOCKS step 7's `milestone_counter++`,
      same shape/placement as the V_meta + adversarial-audit gates).** Check logic + the design-only
      definition + the "row created ever, even if later SELECTed & DONE" semantics all live in
-     `scripts/it0-impl-row-check.sh` (wrapped as `it0-dod-check.mjs` Clause 4): run
+     `scripts/it0-impl-row-check.sh` (wrapped as `it0-dod-check.ts` Clause 4): run
      `scripts/it0-impl-row-check.sh <milestone-id> backlog.md`; non-zero exit = the required selectable
      non-DONE `<M-NAME>-IMPL` row is missing → counter++ MUST NOT run until it exists and the re-run
      PASSes. **Rationale (uncoded):** prose-only deferral with no row is invalid — SELECT only sees
@@ -382,12 +382,12 @@ session start finds QC-T1 (creating it if missing) without side-effects.
      adversarial-audit, V_meta-lag, and impl-row gates individually clear and BEFORE the `master`
      merge + counter++. It does NOT replace them — it adds one standing check that the RECORD of all
      six DoD clauses + the Clause-5 no-self-exemption meta-clause is complete and undrifted. Check
-     logic = `scripts/it0-dod-check.mjs` (Clauses 0–9, incl. Clause 3 line-budget, 6 escrow-Δv,
+     logic = `scripts/it0-dod-check.ts` (Clauses 0–9, incl. Clause 3 line-budget, 6 escrow-Δv,
      7 product-work test-floor — see `inherited-core.md` for each clause's trigger); the QENG engine
      (`packages/quay/src/gate/`) is the operative wrapper. `quay gate` is the OPERATIVE invocation —
      NOT a bare `it0-dod-check.sh` call.
      - **Mechanical enforcement of the three ABSORB-close-out hygiene/independence checks
-       (DIR-034/M47-dir034-mechanize-enforcement, 2026-07-20).** `it0-dod-check.mjs` Clauses
+       (DIR-034/M47-dir034-mechanize-enforcement, 2026-07-20).** `it0-dod-check.ts` Clauses
        10 (tree-hygiene), 11 (worktree-branch-hygiene), and 12 (audit-independence) now WRAP
        `tree-hygiene-check.sh`, `worktree-branch-hygiene-check.sh`, and
        `audit-independence-check.sh` respectively (grep confirms one real invocation each, no
@@ -501,7 +501,7 @@ session start finds QC-T1 (creating it if missing) without side-effects.
         after this close-out). A FAIL here means step 1 above was skipped or done wrong — go back and
         capture the missing evidence before re-pruning, never delete a branch holding un-captured
         content. **Mechanically enforced (DIR-034/M47, since M47): this same check is also Clause 11 of
-        `it0-dod-check.mjs`, run as part of the DoD meta-enforcer gate above — this paste is evidence
+        `it0-dod-check.ts`, run as part of the DoD meta-enforcer gate above — this paste is evidence
         for the record, not the only thing standing between a skipped step and `milestone_counter++`.**
    - **ABSORB close-out: tree stays clean between atomic per-step commits (DIR-031/M46-dir033-
      worktree-hygiene, additive).** Since DIR-027 runs the outer loop directly on `master` in the main
@@ -512,7 +512,7 @@ session start finds QC-T1 (creating it if missing) without side-effects.
      `master` — either gitignore the pattern or generate it only inside a worktree. Run
      `scripts/tree-hygiene-check.sh` and paste its output (GREEN = no un-gitignored scratch) as part of
      this same close-out's evidence. **Mechanically enforced (DIR-034/M47, since M47): this same check
-     is also Clause 10 of `it0-dod-check.mjs`, run as part of the DoD meta-enforcer gate above — this
+     is also Clause 10 of `it0-dod-check.ts`, run as part of the DoD meta-enforcer gate above — this
      paste is evidence for the record, not the only thing standing between a skipped step and
      `milestone_counter++`.**
 7. **UPDATE DASHBOARD** — VT, slope (marginal Δv), ρ, charter-thickness, discovery-latency,

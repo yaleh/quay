@@ -90,10 +90,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import os from "node:os";
-// extractSection is now defined ONCE in task-schema.mjs (canonical-task-schema unit B1) and shared
+// extractSection is now defined ONCE in task-schema.ts (canonical-task-schema unit B1) and shared
 // here by import — the section-parsing logic is no longer forked between this enforcer and the
 // task-schema check. Behavior is identical (the function was moved verbatim, it is pure).
-import { extractSection } from "./task-schema.mjs";
+import { extractSection } from "./task-schema.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -103,7 +103,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // (console.error(message) then process.exit(2)). Behavior-preserving-by-construction: the message
 // strings below are byte-identical to the pre-restructure console.error(...) calls.
 class DodCheckEnvError extends Error {
-  constructor(message) {
+  exitCode: number;
+  constructor(message: string) {
     super(message);
     this.name = "DodCheckEnvError";
     this.exitCode = 2;
@@ -129,9 +130,9 @@ export function runDodCheck({ milestoneId, charterFile, charterFileText, absorbF
 //       section, not the whole combined file, otherwise the charter's self-exemption prose and
 //       the ABSORB-entry's disposition prose would contaminate each other's scan (a real fixture-
 //       construction hazard, not a hypothetical one — caught during this milestone's own build).
-// NOTE: extractSection is imported from ./task-schema.mjs (moved there verbatim, canonical-task-
+// NOTE: extractSection is imported from ./task-schema.ts (moved there verbatim, canonical-task-
 // schema unit B1) — the depth-aware section-parsing logic is now shared, not forked between this
-// enforcer and the task-schema check. See its definition + doc in task-schema.mjs.
+// enforcer and the task-schema check. See its definition + doc in task-schema.ts.
 
 const charterSection = extractSection(charterFileText, "Charter excerpt");
 const charterText = charterSection !== null ? charterSection : charterFileText;

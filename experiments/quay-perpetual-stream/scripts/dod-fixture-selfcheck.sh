@@ -11,7 +11,7 @@
 # CRITICAL (do not rewrite the fixtures to make this pass — that is Goodhart on the test): the two
 # `self-exempt-*-stub.md` fixtures are RED against the pre-DIR-019 enforcer. They currently FAIL this
 # script (the enforcer wrongly exits 0 where 1 is asserted). The fix belongs in
-# `it0-dod-check.mjs` clause 5, NOT in these fixtures. When the fix lands, this script must go green
+# `it0-dod-check.ts` clause 5, NOT in these fixtures. When the fix lands, this script must go green
 # with the fixtures UNCHANGED.
 #
 # M32 extension (DIR-017 Step 2): 5 new fixtures added below — 4 (2 clauses × violating/compliant

@@ -1,4 +1,4 @@
-// Unit tests for it0-dod-check.mjs — the DoD meta-enforcer (Clauses 0-9), charters
+// Unit tests for it0-dod-check.ts — the DoD meta-enforcer (Clauses 0-9), charters
 // M25-dod-meta-enforcer / M32-dod-escrow-testfloor / M40-dir014-task-canonical-lifecycle-record /
 // DIR-026. These import the EXPORTED pure `runDodCheck({ milestoneId, charterFile, charterFileText,
 // absorbFileText })` and exercise each clause with IN-MEMORY charter/absorb strings modelled on the
@@ -13,7 +13,7 @@
 //   node --test --experimental-test-coverage experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runDodCheck } from "../scripts/it0-dod-check.mjs";
+import { runDodCheck } from "../scripts/it0-dod-check.ts";
 
 // ── Reusable in-memory fixture builders (mirror fixtures/dod/*.md section shapes) ────────────────
 // A COMBINED fixture is a single text with `## Charter excerpt` / `## ABSORB-entry excerpt` /
