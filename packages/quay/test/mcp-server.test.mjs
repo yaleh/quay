@@ -1409,6 +1409,52 @@ async function main() {
       assert(r.isError === true, "gate_run with an unknown task id returns isError:true");
     }
 
+    // gate_run: cwd parameter threading (M94/DIR-046 regression guard).
+    // The CLI path (quay gate --cwd) is already fixed via pinAcceptanceEnv in bin/quay.js.
+    // These assertions target the MCP cwd parameter specifically.
+    const worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-gate-cwd-"));
+    // GATE-CWD-EXPLICIT: acceptance command checks that pwd equals worktreeDir (not gateWorkspaceRoot).
+    execFileSync("node", [nativeBin, "task", "create", "GATE-CWD-EXPLICIT", "--title", "Gate cwd explicit (MCP)",
+      "--status", "ready", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "edit", "GATE-CWD-EXPLICIT",
+      "--extra", JSON.stringify({ acceptance: `test "$(pwd)" = "${worktreeDir}"` })], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
+    });
+    // GATE-CWD-DEFAULT: acceptance command checks that pwd equals gateWorkspaceRoot (default).
+    execFileSync("node", [nativeBin, "task", "create", "GATE-CWD-DEFAULT", "--title", "Gate cwd default (MCP)",
+      "--status", "ready", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
+    });
+    execFileSync("node", [nativeBin, "task", "edit", "GATE-CWD-DEFAULT",
+      "--extra", JSON.stringify({ acceptance: `test "$(pwd)" = "${gateWorkspaceRoot}"` })], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: gateTasksDir },
+    });
+
+    // Assertion 1: explicit cwd wins (MCP path) -- gate runs in worktreeDir, not gateWorkspaceRoot.
+    {
+      const r = await coreGate.callTool({ name: "gate_run", arguments: { id: "GATE-CWD-EXPLICIT", cwd: worktreeDir } });
+      assert(r.isError !== true, "gate_run with explicit cwd returns no error");
+      assert(r.structuredContent?.ok === true, `gate_run with cwd:worktreeDir on GATE-CWD-EXPLICIT returns ok:true (ran in worktreeDir) (got: ${JSON.stringify(r.structuredContent)})`);
+    }
+    // Assertion 2: without cwd, gate runs in gateWorkspaceRoot (not worktreeDir) -> ok:false for GATE-CWD-EXPLICIT.
+    {
+      const r = await coreGate.callTool({ name: "gate_run", arguments: { id: "GATE-CWD-EXPLICIT" } });
+      assert(r.isError !== true, "gate_run without cwd (on GATE-CWD-EXPLICIT) returns no error");
+      assert(r.structuredContent?.ok === false, `gate_run without cwd on GATE-CWD-EXPLICIT returns ok:false (ran in gateWorkspaceRoot, not worktreeDir) (got: ${JSON.stringify(r.structuredContent)})`);
+    }
+    // Assertion 3: default -> workspaceRoot -- gate runs in gateWorkspaceRoot -> ok:true.
+    {
+      const r = await coreGate.callTool({ name: "gate_run", arguments: { id: "GATE-CWD-DEFAULT" } });
+      assert(r.isError !== true, "gate_run with no cwd (GATE-CWD-DEFAULT) returns no error");
+      assert(r.structuredContent?.ok === true, `gate_run with no cwd on GATE-CWD-DEFAULT returns ok:true (default is gateWorkspaceRoot) (got: ${JSON.stringify(r.structuredContent)})`);
+    }
+    // Note: the pre-set env case (QUAY_ACCEPTANCE_CWD already set in the outer process)
+    // is structurally covered by the conditional `else if (!process.env.QUAY_ACCEPTANCE_CWD)`
+    // branch and CLI-layer tests in gate-ergonomics.test.mjs -- not tested here to avoid
+    // env-var isolation complexity in the MCP subprocess test.
+
     // gate_log: read back the two gate_run calls above (no append -- pure read).
     {
       const r = await coreGate.callTool({ name: "gate_log", arguments: { id: "GATE-PASS" } });
@@ -1526,6 +1572,7 @@ async function main() {
     await coreGateTransport.close();
     fs.rmSync(gateTasksDir, { recursive: true, force: true });
     fs.rmSync(gateWorkspaceRoot, { recursive: true, force: true });
+    fs.rmSync(worktreeDir, { recursive: true, force: true });
   }
 
   // ---- Cleanup ----
