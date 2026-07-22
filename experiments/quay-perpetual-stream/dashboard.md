@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 111** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 112** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -962,3 +962,17 @@ m111 · exp5-M-TS-MIGRATION-P4 (parent close) · Δv=0 (v̂=0) · outcome=DONE/n
 
 **Task:** [[exp5-M-TS-MIGRATION-P3]] (`tasks/exp5-M-TS-MIGRATION-P3.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M112-ts-migration-p3-close.md`
+
+m112 · exp5-M-TS-MIGRATION-P3 (parent close) · Δv=0 (v̂=0) · outcome=DONE (AC1 escape-hatch: pre-existing TS2589 in quay-github/mcp-server.ts — not introduced by P3, documented; scripts/tsconfig exit 0; test suites green; AC2/AC3 confirmed; status: done) · audit=NO REFUTATION FOUND (pre-existing TS2589 per M107/M81 evidence, charter escape-hatch applies) · merge=d4c36db · → milestones/M112/
+
+
+## SELECT M113 — exp5-M-ARCH-AUDIT-POST-FULL-TS (mandatory explore)
+
+**Selected:** exp5-M-ARCH-AUDIT-POST-FULL-TS — mandatory explore. M109–M112 are all exploits (4 since M108 explore); the ≥1/5 rule fires at M113. Fresh archguard architecture audit on master HEAD post-full-TS-migration: all P3 (packages) + P4 (method-infra) children are now done. Record L_G/L_D reading (entity/relation counts, outDegree metrics, cycle detection, god-packages) — this also satisfies the overall `exp5-M-TS-MIGRATION` parent AC4 requirement ("archguard runs on the migrated product and yields an L_G/L_D reading recorded on the dashboard"). FILE-ONLY — file any new confirmed findings as milestone-candidates through `routine-file-gate.ts`; no fixes.
+
+**Rationale:** Mandatory explore per ≥1/5 cadence rule. M112 closes the last P3 child-set parent. The first post-full-migration archguard run is the natural structural verification and doubles as the AC4 evidence for closing the overall TS migration parent (M114+). Compare vs M108 baseline (entities=121, relations=156, loadWorkspaceGates outDegree=3 CONFIRMED, startServer=7 WONTFIX). Explore never fixes — FILE-ONLY invariant.
+
+**Deferred:** exp5-M-TS-MIGRATION overall parent close (M114, after M113 archguard data satisfies AC4), exp5-M-CRYST, DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED).
+
+**Task:** [[exp5-M-ARCH-AUDIT-POST-FULL-TS]] (to be created at dispatch)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M113-arch-audit-post-full-ts-explore.md`
