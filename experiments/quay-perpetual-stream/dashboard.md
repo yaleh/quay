@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 105** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 106** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -878,4 +878,17 @@ m105 · ARCH-M103-001 · Δv=0 (v̂=0) · outcome=DONE (loadWorkspaceGates outDe
 **Deferred:** `it0-dod-check.mjs` migration + GATE-HASH-REF rotation (M107), DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED), exp5-M-CRYST-D2/F1 (HUMAN-STEERED).
 
 **Task:** [[exp5-M-TS-MIGRATION-P4]] (`tasks/exp5-M-TS-MIGRATION-P4.md`)  
-**Charter:** (to be authored)
+**Charter:** `experiments/quay-perpetual-stream/charters/M106-ts-migration-p4-batch1.md`
+
+m106 · exp5-M-TS-MIGRATION-P4 (partial Batch 1) · Δv=0 (v̂=0) · outcome=DONE (9 scripts .mjs→.ts; golden-diff PASS all 7 selfchecks; tsc --noEmit exit 0; it0-dod-check.mjs untouched) · audit=NO REFUTATION FOUND · merge=c8b815a · → milestones/M106/
+
+## SELECT M107 — exp5-M-TS-MIGRATION-P4 (Batch 2: non-vendor remaining scripts)
+
+**Selected:** exp5-M-TS-MIGRATION-P4 Batch 2 — migrate 7 remaining non-vendor-copy scripts: `it0-enforcement-with-design-check.mjs` (pin: .test.mjs), `it0-split-or-commit-check.mjs` (pin: .test.mjs), `golden-replay-dir044.mjs`, `it0-backlog-projection-check.mjs`, `it0-backlog-regen.mjs`, `it0-task-bulk-write.mjs`, `regenerate-backlog-view.mjs`.
+
+**Rationale:** 4th exploit since M103 explore reset — M108 is mandatory explore. This batch clears the remaining non-vendor scripts (no plugin sync needed). The 2 test-pinned scripts (`it0-enforcement-with-design-check`, `it0-split-or-commit-check`) have their `.test.mjs` files as fixture pins; the 5 unpinned scripts are simpler utilities with no gate role — migrated together with the test suite as the regression guard. Leaving vendor-copy scripts (Batch 3) and it0-dod-check.mjs (Batch 4 + GATE-HASH-REF rotation) for post-M108-explore milestones.
+
+**Deferred:** Vendor-copy scripts (anti-drift-touches-check, concurrent-batch-scheduler, routine-file-gate, routine-scheduler, serial-fanin-absorb, task-schema, touches-orthogonality-check, read-probe-spec, task-schema-check) — require plugin.json bump + vendor sync. `it0-dod-check.mjs` (GATE-HASH-REF rotation milestone). DIR-057, exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED).
+
+**Task:** [[exp5-M-TS-MIGRATION-P4]] (`tasks/exp5-M-TS-MIGRATION-P4.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M107-ts-migration-p4-batch2.md`
