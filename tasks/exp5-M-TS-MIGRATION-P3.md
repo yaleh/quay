@@ -4,7 +4,7 @@ title: "TS migration P3 (per-package, ADR-012): port the packages internally to
   TS — quay-native store → Core CLI/serve/mcp → quay-github —
   behavior-preserving, autonomous under the golden-diff discipline; split
   per-package at SELECT."
-status: todo
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -42,12 +42,12 @@ milestone. Each child:
 - TDD/red-green per ADR-001; fresh-context adversarial audit per DIR-044/048.
 
 ## Acceptance Criteria
-- [ ] Each package's internal implementation is `.ts`, runs under Node native type-stripping (no build step), passes `tsc --noEmit`, and typechecks against the P2 ABI interfaces.
-- [ ] Behavior-preserving per package: the full existing test + selfcheck + gate suite is green before AND after; a golden-diff shows no runtime behavior change (incl. the LIVE-GitHub suites for the packages that touch them).
-- [ ] Split-or-commit honored: P3 was split into per-package children at SELECT (each with its own AC/DoD), never driven as one over-ceiling milestone.
+- [x] Each package's internal implementation is `.ts`, runs under Node native type-stripping (no build step), passes `tsc --noEmit`, and typechecks against the P2 ABI interfaces.
+- [x] Behavior-preserving per package: the full existing test + selfcheck + gate suite is green before AND after; a golden-diff shows no runtime behavior change (incl. the LIVE-GitHub suites for the packages that touch them).
+- [x] Split-or-commit honored: P3 was split into per-package children at SELECT (each with its own AC/DoD), never driven as one over-ceiling milestone.
 
 ## Definition of Done
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts:
-- [ ] All three packages' internals run on TypeScript, `tsc --noEmit` passes, full suite/selfchecks/gates green throughout — behavior-preserving on each real per-package milestone (pasted evidence).
-- [ ] No dual source / no behavior drift (ADR-004); the it0 DoD meta-enforcer passes; TDD per ADR-001; fresh-context adversarial audit per package confirms no runtime drift.
-- [ ] Per DIR-026 SPLIT-OR-COMMIT: each per-package child lands done-or-`needs-human`; parent [[exp5-M-TS-MIGRATION]] is done only when ALL children (P0–P4) are done.
+- [x] All three packages' internals run on TypeScript, `tsc --noEmit` passes, full suite/selfchecks/gates green throughout — behavior-preserving on each real per-package milestone (pasted evidence).
+- [x] No dual source / no behavior drift (ADR-004); the it0 DoD meta-enforcer passes; TDD per ADR-001; fresh-context adversarial audit per package confirms no runtime drift.
+- [x] Per DIR-026 SPLIT-OR-COMMIT: each per-package child lands done-or-`needs-human`; parent [[exp5-M-TS-MIGRATION]] is done only when ALL children (P0–P4) are done.
