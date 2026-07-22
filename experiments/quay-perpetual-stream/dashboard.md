@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 94** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 95** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -734,3 +734,5 @@ m94 · PROBE-SV-M92-001 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=a
 
 **Task:** [[ARCH-M93-004]] (`tasks/ARCH-M93-004.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M95-abi-boundary-violation-fix.md`
+
+m95 · ARCH-M93-004 · Δv=0 (v̂=0) · audit=documented-no-op (deterministic grep-gate) · merge=b3dac7b · → milestones/M95/
