@@ -894,3 +894,14 @@ m106 · exp5-M-TS-MIGRATION-P4 (partial Batch 1) · Δv=0 (v̂=0) · outcome=DON
 **Charter:** `experiments/quay-perpetual-stream/charters/M107-ts-migration-p4-batch2.md`
 
 m107 · exp5-M-TS-MIGRATION-P4 (partial Batch 2) · Δv=0 (v̂=0) · outcome=DONE (7 non-vendor scripts .mjs→.ts; tsc exit 0; test-pins byte-identical; GATE-HASH-REF unchanged) · audit=NO REFUTATION FOUND · merge=3210f5e · → milestones/M107/
+
+## SELECT M108 — exp5-M-ARCH-AUDIT-M108-EXPLORE
+
+**Selected:** exp5-M-ARCH-AUDIT-M108-EXPLORE — mandatory explore (4 consecutive exploits M104–M107 since M103 explore triggers ≥1/5 floor at M108). Fresh archguard architecture audit on master HEAD post-M107: re-measure entity/relation counts, god-package/god-function metrics, cycle detection; confirm `loadWorkspaceGates` outDegree ≤4 post-M105; file any new confirmed findings as milestone-candidates through `routine-file-gate.ts`.
+
+**Rationale:** Mandatory explore per ≥1/5 cadence rule. M105's `gateFactories` dispatch map restructured the `gate/factories/index.ts` barrel — a fresh archguard run is the natural structural verification. M106/M107 TS renames don't touch `packages/` so entity graph is unaffected by those. FILE-ONLY (explore never fixes). Methodology-class — no quay-task-to-plan required; dispatch directly.
+
+**Deferred:** exp5-M-TS-MIGRATION-P4 Batch 3 (vendor-copy scripts — plugin.json bump required), Batch 4 (it0-dod-check.mjs + GATE-HASH-REF rotation), DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED), exp5-M-CRYST-D2/F1 (HUMAN-STEERED).
+
+**Task:** [[exp5-M-ARCH-AUDIT-M108-EXPLORE]] (`tasks/exp5-M-ARCH-AUDIT-M108-EXPLORE.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M108-arch-audit-post-ts-p4-explore.md`
