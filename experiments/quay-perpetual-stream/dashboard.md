@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 99** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 100** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -799,3 +799,16 @@ m99 · PROBE-M98-001 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=7461
 
 **Task:** [[ARCH-M93-003]] (`tasks/ARCH-M93-003.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M100-startserver-decompose.md`
+
+m100 · ARCH-M93-003 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=78151fd · → milestones/M100/ · cp-100 written
+
+## SELECT M101 — ARCH-M93-001
+
+**Selected:** ARCH-M93-001 — decompose `gate/registry.ts` (736L, 7 inline factory functions) into per-factory files under `gate/factories/`; `gate/registry.ts` becomes a thin loader/resolver (≤100 lines); no file in gate/ exceeds 400 lines.
+
+**Rationale:** Exploit pick (3rd post-M98 explore reset; M103 is the next mandatory explore if M99–M102 are all exploits). Last remaining ARCH-M93-* finding (ARCH-M93-002 closed M99, ARCH-M93-003 closed M100). split-or-commit applied at SELECT: AC is already precise (per-factory files, thin loader), 7 factories × ~80L each = ~560L to migrate — bounded in one milestone. Development-class — quay-task-to-plan required.
+
+**Deferred:** exp5-M-TS-MIGRATION-P4, DIR-055, DIR-057, exp5-M-OUTERLOOP-ROUTINE-WIRING (human-steered).
+
+**Task:** [[ARCH-M93-001]] (`tasks/ARCH-M93-001.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M101-gate-registry-split.md`
