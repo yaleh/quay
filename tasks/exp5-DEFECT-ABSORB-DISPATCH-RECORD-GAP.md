@@ -1,7 +1,7 @@
 ---
 id: exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP
 title: "defect: ABSORB entries missing --dispatch-record arg for clause12-audit-independence (recurring 4x in M82)"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - defect
@@ -38,17 +38,25 @@ N/A — defect fix is a targeted edit to `OUTER-LOOP.md` step 6 ABSORB instructi
 
 ## Acceptance Criteria
 
-- [ ] `OUTER-LOOP.md` step 6 ABSORB section includes an explicit sample showing `--dispatch-record <file>` argument in the `it0-dod-check.sh` invocation
-- [ ] A test ABSORB-entry produced following the updated template passes `clause12-audit-independence` on first attempt (no re-try needed)
-- [ ] The existing `it0-dod-check.mjs` clause 12 logic is unchanged (template fix only, not gate logic)
+- [x] `OUTER-LOOP.md` step 6 ABSORB section includes explicit operational guidance for creating the dispatch-record file and a concrete sample `## Audit-independence check` section with `Dispatch record: /tmp/m<NN>-dispatch-record.txt` (AC wording corrected from SELECT — original said "in the `it0-dod-check.sh` invocation" but `it0-dod-check.sh` does not accept `--dispatch-record` as a CLI flag; the path goes in the ABSORB entry section, parsed by Clause 12 internally — audit CONCERNS recorded in `milestones/M90/audits/iteration-0-acceptance-audit.md`)
+- [x] A test ABSORB-entry produced following the updated template passes `clause12-audit-independence` on first attempt (no re-try needed)
+- [x] The existing `it0-dod-check.mjs` clause 12 logic is unchanged (template fix only, not gate logic)
 
 ## Definition of Done
 
 References the standard inherited-core DoD clauses.
 
-- [ ] `OUTER-LOOP.md` updated with dispatch-record sample
-- [ ] At least one real ABSORB entry (next milestone's ABSORB) passes clause12 on first attempt without manual intervention
-- [ ] Adversarial audit disposition recorded
+- [x] `OUTER-LOOP.md` updated with dispatch-record operator procedure and sample `## Audit-independence check` block
+- [ ] At least one real ABSORB entry (next milestone's ABSORB) passes clause12 on first attempt without manual intervention (deferred — verifiable at M91 ABSORB)
+- [x] Adversarial audit disposition recorded (CONCERNS: AC 1 wording error at SELECT; all product claims NO REFUTATION FOUND)
+
+## Execution record
+
+**Milestone:** M90  
+**Iteration:** iteration-0  
+**Realized Δv:** 0 (governance-integrity / instrument-correction — no VT chart cell)  
+**Merge SHA:** 5068913  
+**Outcome:** done — OUTER-LOOP.md step 6 updated with explicit 5-step dispatch-record operator procedure and concrete `## Audit-independence check` sample block; clause 12 synthetic test PASSes on first attempt; gate script unchanged; audit CONCERNS (AC wording error, implementation correct).
 
 ## Not selected (M89)
 
