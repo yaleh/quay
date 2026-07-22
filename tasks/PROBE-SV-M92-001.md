@@ -31,3 +31,7 @@ const { ok, reason } = runAcceptance({ command, cwd, timeoutMs });
 
 ## Acceptance Criteria
 - [ ] `quay gate <task> --gate acceptance --cwd <worktree>` runs the acceptance command with `cwd === <worktree>`, not `process.cwd()` — confirmed by a test that creates a worktree-only file and verifies the gate result.
+
+## Not selected (M93)
+
+Not selected M93 — exp5-M-ARCH-AUDIT-M93-EXPLORE selected (mandatory explore slot; this defect is an exploit candidate, deferred to M94+ post-explore reset).

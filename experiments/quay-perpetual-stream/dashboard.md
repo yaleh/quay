@@ -697,3 +697,14 @@ m91 · exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS · Δv=0 (v̂=0) · audit=NO REFUTAT
 **Charter:** `experiments/quay-perpetual-stream/charters/M92-dir056-probe-spec-wiring.md`
 
 m92 · exp5-DEFECT-DIR056-PROBE-SPEC-UNWIRED · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=73fbd44 · → milestones/M92/
+
+## SELECT M93 — exp5-M-ARCH-AUDIT-M93-EXPLORE
+
+**Selected:** exp5-M-ARCH-AUDIT-M93-EXPLORE — archguard architecture audit of post-TypeScript-migration codebase; last audit was M83; significant structural changes since then (M84-M92). Explore class: discovers unknown structural defects, does NOT fix them.
+
+**Rationale:** MANDATORY EXPLORE (5th exploit since M88 explore — M89/M90/M91/M92 were all exploits; M93 resets the explore counter). Archguard probe (`instrument: archguard`) now wired via M92 SKILL update; audit covers packages/quay, packages/quay-native, packages/quay-github post-TS-migration. Methodology-class — no quay-task-to-plan required; dispatch directly.
+
+**Deferred:** PROBE-SV-M92-001 (acceptance gate --cwd bug — exploit, M94+), DIR-055 (meta-cc mining — development-class exploit, M94+).
+
+**Task:** [[exp5-M-ARCH-AUDIT-M93-EXPLORE]] (`tasks/exp5-M-ARCH-AUDIT-M93-EXPLORE.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M93-arch-audit-explore.md`
