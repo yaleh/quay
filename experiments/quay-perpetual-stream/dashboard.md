@@ -722,4 +722,4 @@ m93 · exp5-M-ARCH-AUDIT-M93-EXPLORE · Δv=0 (v̂=0) · audit=NO REFUTATION FOU
 **Task:** [[PROBE-SV-M92-001]] (`tasks/PROBE-SV-M92-001.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M94-acceptance-gate-cwd-fix.md`
 
-m94 · PROBE-SV-M92-001 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=HEAD · → milestones/M94/
+m94 · PROBE-SV-M92-001 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=a108ab8 · → milestones/M94/
