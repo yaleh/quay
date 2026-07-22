@@ -1,5 +1,5 @@
 ---
-name: quay:execute
+name: execute
 description: Use when driving a task at status `ready` toward `done` — implements the plan, self-audits against AC/DoD, and asserts the `ready -> done` gate via `quay task check`. Takes the epic branch (drive children to done, then integration-accept) when the task's derived role is `compound`. Invoke with a task id and, optionally, a provider id (default `native`).
 ---
 
