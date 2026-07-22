@@ -5,6 +5,10 @@ status: todo
 labels:
   - milestone-candidate
   - defect
+  - milestone:M-91
+extra:
+  schema: "v1"
+  acceptance: "bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS experiments/quay-perpetual-stream/charters/M91-qc-t1-fixture-probe.md /tmp/m91-absorb-entry.md"
 ---
 ## Proposal
 
@@ -36,15 +40,16 @@ A separate gate should verify fixture presence before each healthcheck cycle, no
 
 ## Acceptance Criteria
 
-- [ ] Healthcheck step explicitly handles `no such task: QC-T1` with one of: (a) re-create the fixture and retry once, or (b) `needs-human` halt (not silent swallow)
-- [ ] The fixture probe is documented as idempotent — the healthcheck does not depend on state from a prior session
-- [ ] No instance of `no such task: QC-T1` appears as a swallowed error in subsequent sessions
+- [ ] `OUTER-LOOP.md` session-start section explicitly documents a QC-T1 healthcheck step that handles `no such task: QC-T1` by re-creating the fixture task (idempotent) rather than silently swallowing the error
+- [ ] `tasks/QC-T1.md` fixture task is (re-)created in the task store and verified present via `task_get QC-T1` returning a valid task (not "no such task")
+- [ ] The documented healthcheck procedure is idempotent: if QC-T1 is absent (deleted or never created), the next session that reads OUTER-LOOP.md will re-create it — the store is never left in a state where the probe silently fails
 
 ## Definition of Done
 
-References the standard inherited-core DoD clauses.
+References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts.
 
-- [ ] `OUTER-LOOP.md` healthcheck step updated with `no such task` error handling
+- [ ] `OUTER-LOOP.md` session-start section updated with QC-T1 healthcheck step (idempotent probe + re-create on missing)
+- [ ] `tasks/QC-T1.md` fixture task exists in task store and `task_get QC-T1` returns a valid task
 - [ ] Adversarial audit disposition recorded
 
 

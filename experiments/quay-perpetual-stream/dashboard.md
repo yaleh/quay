@@ -671,3 +671,14 @@ m89 · exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH · Δv=0 (v̂=0) · audit=CONCER
 **Charter:** `experiments/quay-perpetual-stream/charters/M90-absorb-dispatch-record-gap.md`
 
 m90 · exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP · Δv=0 (v̂=0) · audit=CONCERNS · merge=5068913 · → milestones/M90/
+
+## SELECT M91 — exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS
+
+**Selected:** exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS — fix QC-T1 healthcheck fixture: task absent from store + OUTER-LOOP.md has no explicit session-start healthcheck step; error silently swallowed 3× in session `e0fb1192` (2026-07-20).
+
+**Rationale:** Exploit pick (4th post-M88 explore reset; next mandatory explore M93). Governance-integrity defect: a broken native task store liveness probe is indistinguishable from a passing one when the error is swallowed. Fix: add QC-T1 healthcheck step to OUTER-LOOP.md session-start (idempotent re-create on missing) + re-create `tasks/QC-T1.md` fixture. Bounded scope (~25L), no external dependency.
+
+**Deferred:** DIR-052/053/055 (real routine-fire DoD blocked), exp5-M-TS-MIGRATION-P4 (5235L — split needed).
+
+**Task:** [[exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS]] (`tasks/exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M91-qc-t1-fixture-probe.md`

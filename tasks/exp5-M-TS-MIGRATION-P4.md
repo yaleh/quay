@@ -50,3 +50,8 @@ References the standard inherited-core DoD clauses; the bar is REAL LANDING, not
 - [ ] The method-infra gates run on TypeScript with byte-identical golden-fixture verdicts (pasted before/after), the it0 meta-enforcer green, no verdict drift — on a real milestone.
 - [ ] Single-source held (ADR-004): the vendored copies are re-synced, not hand-edited; TDD per ADR-001; fresh-context adversarial audit confirms zero enforcement change (the loop's guardrails are byte-for-byte equivalent).
 - [ ] Per DIR-026 SPLIT-OR-COMMIT: each fixture-pinned batch lands done-or-`needs-human`; parent [[exp5-M-TS-MIGRATION]] is done only when ALL children (P0–P4) are done — this phase closes the program.
+
+
+## Not selected (M91)
+
+Not selected M91 — exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS selected (governance-integrity defect: silent healthcheck failure when QC-T1 fixture missing; bounded scope). This candidate deferred.
