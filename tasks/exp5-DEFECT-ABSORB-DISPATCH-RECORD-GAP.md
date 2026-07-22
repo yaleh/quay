@@ -5,6 +5,10 @@ status: todo
 labels:
   - milestone-candidate
   - defect
+  - milestone:M-90
+extra:
+  schema: "v1"
+  acceptance: "bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP experiments/quay-perpetual-stream/charters/M90-absorb-dispatch-record-gap.md /tmp/m90-absorb-entry.md"
 ---
 ## Proposal
 
@@ -49,3 +53,4 @@ References the standard inherited-core DoD clauses.
 ## Not selected (M89)
 
 Not selected M89 — ranked below exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH this pass. YAML crash is production-safety (blocks task board at loop start); dispatch-record gap is a process fix (already manually worked-around in M88 ABSORB). YAML crash selected first.
+

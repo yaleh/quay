@@ -658,3 +658,14 @@ m88 · exp5-M-HISTORY-MINING-EXPLORE · Δv=0 (v̂=0) · audit=NO REFUTATION FOU
 **Charter:** `experiments/quay-perpetual-stream/charters/M89-yaml-frontmatter-crash.md`
 
 m89 · exp5-DEFECT-YAML-FRONTMATTER-COLON-CRASH · Δv=0 (v̂=0) · audit=CONCERNS · merge=a1759b3 · → milestones/M89/
+
+## SELECT M90 — exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP
+
+**Selected:** exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP — fix ABSORB dispatch-record documentation gap: `OUTER-LOOP.md` step 6 lacks explicit guidance for creating the dispatch-record file and populating `Dispatch record:` in the `## Audit-independence check` section, causing recurring clause12 failures (4× in M82, manually worked-around in M88/M89).
+
+**Rationale:** Exploit pick. Governance-integrity / instrument-correction defect with direct recurring operational impact. Fix is a targeted ~20-line text addition to OUTER-LOOP.md step 6 "Ordering + disposition authoring" — no gate logic changes. Bounded scope, no external dependency. M90 = 90 % 5 == 0 → CHECKPOINT due after ABSORB.
+
+**Deferred:** DIR-052/053/055 (real routine-fire DoD unmet), exp5-DEFECT-QC-T1-FIXTURE-PROBE-LOSS, P4 (TS migration method-infra, 5235L — split needed).
+
+**Task:** [[exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP]] (`tasks/exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M90-absorb-dispatch-record-gap.md`

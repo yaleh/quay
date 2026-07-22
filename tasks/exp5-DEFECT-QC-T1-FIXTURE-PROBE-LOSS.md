@@ -46,3 +46,8 @@ References the standard inherited-core DoD clauses.
 
 - [ ] `OUTER-LOOP.md` healthcheck step updated with `no such task` error handling
 - [ ] Adversarial audit disposition recorded
+
+
+## Not selected (M90)
+
+Not selected M90 — exp5-DEFECT-ABSORB-DISPATCH-RECORD-GAP ranked higher (governance-integrity defect with recurring impact, bounded scope). QC-T1 fixture loss deferred to M91+.
