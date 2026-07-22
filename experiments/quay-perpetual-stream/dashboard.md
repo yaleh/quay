@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 103** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 104** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -851,3 +851,16 @@ m103 · exp5-M-ARCH-AUDIT-M103-EXPLORE · Δv=0 (v̂=0) · audit=documented-no-o
 
 **Task:** [[ARCH-M103-002]] (`tasks/ARCH-M103-002.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M104-startserver-outdegree-probe.md`
+
+m104 · ARCH-M103-002 · Δv=0 (v̂=0) · outcome=WONTFIX (outDegree=7 is correct post-M100 baseline; handleAllRoutes edge inherent) · audit=NO REFUTATION FOUND · merge=f04152c · → milestones/M104/
+
+## SELECT M105 — ARCH-M103-001
+
+**Selected:** ARCH-M103-001 — reduce `loadWorkspaceGates` outDegree=8 → ≤4 by adding a `gateFactories` dispatch map to `gate/factories/index.ts`; `loadWorkspaceGates` imports 1 map object instead of 6 separate factory functions. Same facade pattern as M99 (registerAllHandlers).
+
+**Rationale:** Exploit pick (2nd post-M103 explore reset; next mandatory explore by M108 if M104-M107 are all exploits). Direct follow-up to M104. ARCH-M103-001 is the highest-outDegree function in the codebase post-M101 (8, above ≤4 threshold). Fix is bounded: add `gateFactories` map to barrel, update `loadWorkspaceGates` import. Development-class — quay-task-to-plan required.
+
+**Deferred:** exp5-M-TS-MIGRATION-P4, DIR-057, exp5-M-OUTERLOOP-ROUTINE-WIRING.
+
+**Task:** [[ARCH-M103-001]] (`tasks/ARCH-M103-001.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M105-loadworkspacegates-outdegree-fix.md`
