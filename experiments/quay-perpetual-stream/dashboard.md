@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 100** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 101** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -812,3 +812,16 @@ m100 · ARCH-M93-003 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=7815
 
 **Task:** [[ARCH-M93-001]] (`tasks/ARCH-M93-001.md`)  
 **Charter:** `experiments/quay-perpetual-stream/charters/M101-gate-registry-split.md`
+
+m101 · ARCH-M93-001 · Δv=0 (v̂=0) · audit=NO REFUTATION FOUND · merge=57d1359 · → milestones/M101/
+
+## SELECT M102 — DIR-055
+
+**Selected:** DIR-055 — meta-cc session-history mining ROUTINE (LOOP-EXECUTABLE): author a portable meta-cc probe spec (DIR-056 format), wire output-routing by finding-type (defect/adr/pattern), plugin-ship the probe, prove one real fire through the gate.
+
+**Rationale:** Exploit pick (4th and final post-M98 exploit before mandatory M103 explore). DIR-055 has been LOOP-EXECUTABLE since M92 (probe-spec wiring landed) and deferred for 9 consecutive milestones. The probe-spec/wiring/plugin-ship portion is bounded development-class work. The real-fire DoD has a `needs-human` escape hatch (tmux remote-drive if idle session available, else land needs-human for that leg). All-ARCH-M93-* findings closed at M101 — methodological backlog is now the priority axis.
+
+**Deferred:** exp5-M-TS-MIGRATION-P4 (GATE-HASH-REF implication on it0-dod-check.mjs migration — structural risk, needs separate analysis), DIR-057 (HUMAN-STEERED), exp5-M-OUTERLOOP-ROUTINE-WIRING (HUMAN-STEERED).
+
+**Task:** [[DIR-055]] (`tasks/DIR-055.md`)  
+**Charter:** `experiments/quay-perpetual-stream/charters/M102-dir055-meta-cc-routine.md`
