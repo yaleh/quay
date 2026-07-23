@@ -26,7 +26,7 @@ allowed-tools: Bash, Read, Write, Edit
 
 ## Steps
 
-1. **Detect experiment.** `grep -l 'Status:' experiments/*/README.md | while read f; do echo "$f: $(grep 'Status:' "$f")"; done` → identify active.
+1. **Detect experiment.** `grep -l '\*\*Status\*\*:' experiments/*/README.md | while read f; do echo "$f: $(grep '\*\*Status\*\*:' "$f")"; done` → identify active.
 2. **Compute ID.** `quay task list --label directive --json | jq -r '.tasks[] | select(.id | test("^DIR-\\\\d+$")) | .id' | sort -t- -k2 -n | tail -1` → +1.
 3. **Author in this conversation.** `## Proposal` (approach from conversation) + `## Plan` (`N/A — directive resolved via a milestone`) + `## Finding` + `## Requested action` + `## Acceptance Criteria` (checklist, each runnable) + `## Definition of Done` (real-landing, DIR-026 Reading A). All boxes `- [ ]` (DIR-020). Set `extra.schema:"v1"`.
 4. **Write via Provider ABI.** `task_write(id, title, labels:["directive"], body, extra:{dirStatus:"pending", schema:"v1"})` → `task_get(readback)` → verify.

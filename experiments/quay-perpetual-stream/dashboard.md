@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 129** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)** · **cp-125 written at M125 ABSORB — see checkpoints/cp-125.md (HALT-RECOMMENDED, governance:product breach; now informational only per DIR-066)**
+**milestone_counter: 130** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)** · **cp-125 written at M125 ABSORB — see checkpoints/cp-125.md (HALT-RECOMMENDED, governance:product breach; now informational only per DIR-066)**
 <!-- chart: 1→2 at M121/DIR-064 (2026-07-23) — chart-1 EXHAUSTED (frozen 110.65/120, flat 108 milestones m12→m120); chart-2 opened (S1 Distribution-reliability / S2 Delivery-completeness / S3 External-validation / S4 Methodology-executability-SOFT). See the "### Chart-2 transition" subsection in ## VT below. -->
 <!-- OLD chart: 1 header value retained in git history; transition is human-ratified (DIR-064) + human-wired this session. -->
 
@@ -1188,4 +1188,5 @@ m126 · exp5-M-PRODUCTIZED-DELIVERY-A · Δv=0 (v̂=0, instrument — version-co
 m127 · DIR-063-A · Δv=0 (v̂=0, governance-integrity — chart-saturation-check mechanism) · audit=CONCERNS · merge=5adabdf · → milestones/M127/
 m128 · exp5-M-ARCH-AUDIT-M128-EXPLORE · Δv=0 (v̂=0, explore — packages/ 144/201/0 cycles, IDENTICAL to M123) · audit=documented-no-op (explore/FILE-ONLY) · → milestones/M128/
 m129 · exp5-M-PRODUCTIZED-DELIVERY-B · Δv=0 (v̂=0, capability-growth — delivery-manifest + release.yml assertion) · audit=NO REFUTATION FOUND (initial REFUTED, fixed 221980b, re-audit cleared) · merge=221980b · → milestones/M129/
+m130 · exp5-M-CRYST-D2 · Δv=0 (v̂=0, discovery — skill rewrites λ-Spec+contracts, 922→468 lines) · audit=NO REFUTATION FOUND (initial REFUTED on path/grep, fixed ea6b025, re-audit cleared) · merge=ea6b025 · → milestones/M130/
  (DIR-062's halt-free mechanism: `drivable-workspace-check.ts` — a fail-closed gate over `drivable-workspaces.yml` — and `human-steered-classify.ts` — a pure classifier for the 3 DIR-062 clauses (driver-file edit / mission-redirection / unauthorized workspace), reusing the first script's coverage logic as a library import; registered as a new `it0[]` gate in `.quay/gates.yml`+`.quay/config.yml`; 49 new fixture tests, 97.86%/94.55% coverage; end-to-end `quay gate` PASS/FAIL verified against a real task) · audit=NO REFUTATION FOUND (the audit actively mutation-tested both scripts — reverted the path-matching guard, flipped a boolean operator — confirming the real test suite genuinely catches both regressions, the opposite of M124's tautology finding; one non-blocking cosmetic test-count correction) · merge=ecc7344 · → milestones/M125/

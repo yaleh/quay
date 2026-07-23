@@ -2,7 +2,7 @@
 id: exp5-M-CRYST-D2
 title: D2 Rewrite skills (/quay-directive, quay-task-to-plan) in baime
   formalized style (λ-Spec + contracts:)
-status: todo
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -27,15 +27,15 @@ Rewrite the loop's skills (/quay-directive, quay-task-to-plan) in the formalized
 N/A — methodology-class. Rewrite two skills to formalized baime style; validate end-to-end.
 
 ## Acceptance Criteria
-- [ ] Each rewritten skill has a ≤30-line Spec + ≥3 self-contracts
-- [ ] Rewritten skills produce correct objects end-to-end (validated against real tasks)
-- [ ] Net line count down vs pre-rewrite baseline
-- [ ] `it0-split-or-commit-check.ts .` + standard non-flaky suite stay green
+- [x] Each rewritten skill has a ≤30-line Spec + ≥3 self-contracts
+- [x] Rewritten skills produce correct objects end-to-end (validated against real tasks)
+- [x] Net line count down vs pre-rewrite baseline
+- [x] `it0-split-or-commit-check.ts .` + standard non-flaky suite stay green
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply.
-- [ ] Both skills rewritten and validated end-to-end
-- [ ] it0 DoD meta-enforcer passes all clauses
+- [x] Both skills rewritten and validated end-to-end
+- [x] it0 DoD meta-enforcer passes all clauses
 
 ## Not selected (M121)
 

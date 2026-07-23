@@ -20,7 +20,7 @@ allowed-tools: Bash, Read, Write
 ## contracts:
 
 1. **Provider ABI for all reads/writes.** Use `mcp__quay__task_get`/`task_list`/`task_write` exclusively — never read/write backlog.md or any generated view as data source. CLI fallback: `quay task get <id> --json`.
-2. **N independent blank-slate proposals.** Dispatch N agents (`Agent` tool, `subagent_type: "general-purpose"`), each receiving the task record + context but NO access to other agents' outputs. Feed the `proposal-subagent` prompt (see reference/). Collect all N proposals.
+2. **N independent blank-slate proposals.** Dispatch N agents (`Agent` tool, `subagent_type: "general-purpose"`), each receiving the task record + context but NO access to other agents' outputs. Feed the `proposal-subagent` prompt (see prompts/). Collect all N proposals.
 3. **M13-style adjudication.** Compare proposals on: approach divergence, scope overlap, risk coverage. Explicitly record where they agree (converge) vs disagree (diverge). Pick the best elements from each — never default to the first. Feed the `adjudicate-proposal` prompt.
 4. **Write-back + readback.** `task_write(body=<reconciled proposal>)` then `task_get(readback)` — assert the write landed. Write to the task's `## Proposal` body section.
 5. **Milestone plan authoring.** One subagent authors `docs/plans/<slug>.md` — kept OUT of the task tree. Plan references task ID(s) and reconciled proposal.
