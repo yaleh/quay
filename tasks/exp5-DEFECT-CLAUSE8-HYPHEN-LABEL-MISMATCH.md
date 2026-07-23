@@ -48,3 +48,7 @@ worktree-branch-hygiene, audit-independence).
 ## Not selected (M116)
 
 Not selected M116 — exp5-M-TS-MIGRATION-P5-A selected instead (capability-growth: real product TS migration work, diversifying value type from the last two governance-integrity/instrument-correction picks M114/M115). Good next pick.
+
+## Not selected (M118)
+
+Not selected M118 — exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE selected instead (mandatory explore per the ≥1/5 rule; this defect is a small exploit-shaped fix, wrong slot for this pass). Still confirmed live: M116/M117's own `quay gate` runs both showed clause8 returning N/A ("no 'milestone:M<N>' label found") despite both tasks carrying `milestone:M-116`/`milestone:M-117` labels — the bug described here is still unfixed. Good next exploit pick.
