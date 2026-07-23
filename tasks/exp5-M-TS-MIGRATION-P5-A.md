@@ -11,6 +11,10 @@ parent: exp5-M-TS-MIGRATION-P5
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-TS-MIGRATION-P5-A
+    experiments/quay-perpetual-stream/charters/M116-ts-migration-p5-a.md
+    /tmp/m116-absorb-entry.md
 ---
 ## Proposal
 
