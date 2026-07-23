@@ -12,11 +12,15 @@
 // It is the objective anti-gaming ruler: the cov is a count of green floor-smoke jobs over
 // the total shipped artifacts, NOT an asserted number. On the seeded v0.3.8 evidence
 // (npm-pack green; SEA×3 red — the exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH import.meta.url
-// CJS crash; plugin untested) it computes cov = 1/5 = 0.2, matching DIR-064's ~0.2 estimate.
+// CJS crash; plugin untested) it computed cov = 1/5 = 0.2, matching DIR-064's ~0.2 estimate.
 //
-// Δv wiring: closing exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH flips the 3 SEA rows to
-// floorSmokePass:true in the evidence file, moving cov 1/5 → 4/5 = 0.8 — the concrete
-// demonstration that the open backlog now scores on chart-2 (DIR-064 AC #5).
+// Δv realized (M121): closing exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH flipped sea-linux-x64 to
+// floorSmokePass:true (real evidence: sea-verify-node-free green on a Node-free container, run
+// 29995456654), moving cov 1/5 → 2/5 = 0.4 — the concrete demonstration that the open backlog now
+// scores on chart-2 (DIR-064 AC #5). sea-macos-arm64/sea-windows-x64 remain unflipped: their SEA
+// builds succeeded in the same run, but no runtime-smoke job covers those platforms yet
+// (sea-verify-node-free is linux-only) — honestly left at floorSmokePass:false pending
+// exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY, not asserted without evidence.
 //
 // Fail-closed discipline: an empty artifact list throws rather than returning a silent 0/0.
 // A cov ruler that reads 0 from "no artifacts" would be indistinguishable from "everything
@@ -157,10 +161,17 @@ export function selftest(): boolean {
   check("loadArtifacts-roundtrip", loaded.length === 2 && loaded[0].floorSmokePass === true && loaded[1].floorSmokePass === false, `loaded ${loaded.length} artifacts (ignored "//" + release keys)`);
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
-  // Seeded real file → cov 0.2 (integration of loadArtifacts + computeS1Cov on the checked-in evidence)
+  // Seeded real file → integration of loadArtifacts + computeS1Cov on the checked-in evidence.
+  // Only asserts the invariant a real evidence file must satisfy (cov derived correctly from
+  // passed/total, cov in [0,1]) — NOT a specific value, since the checked-in evidence legitimately
+  // changes as real Δv lands (M121: 0.2 → 0.4 after the SEA crash fix flipped sea-linux-x64).
   if (fs.existsSync(DEFAULT_ARTIFACTS_JSON)) {
     const seeded = computeS1Cov(loadArtifacts(DEFAULT_ARTIFACTS_JSON));
-    check("seeded-file-0.2", seeded.cov === 0.2, `real chart2-s1-artifacts.json → cov=${seeded.cov} (${seeded.passed}/${seeded.total})`);
+    check(
+      "seeded-file-consistent",
+      seeded.cov === seeded.passed / seeded.total && seeded.cov >= 0 && seeded.cov <= 1,
+      `real chart2-s1-artifacts.json → cov=${seeded.cov} (${seeded.passed}/${seeded.total})`,
+    );
   }
 
   if (allPassed) {
