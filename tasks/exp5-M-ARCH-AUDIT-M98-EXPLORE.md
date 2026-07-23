@@ -2,7 +2,7 @@
 id: exp5-M-ARCH-AUDIT-M98-EXPLORE
 title: "Post-M97 architecture audit (archguard, M98 mandatory explore):
   re-measure quay after startMcpServer decomposition + ABI boundary fix"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - milestone:M-98
@@ -65,3 +65,13 @@ Not selected M116 — exp5-M-TS-MIGRATION-P5-A selected instead (capability-grow
 ## Not selected (M117)
 
 Not selected M117 — exp5-M-TS-MIGRATION-P5-B selected instead (completes the DIR-058 sibling program). Same stale-status-flip bookkeeping issue noted at M115 still stands (AC/DoD all `[x]`, status still `todo`) — bundling a fix for this and PROBE-M98-001's identical issue into one small future administrative milestone would be efficient (verify both sets of findings still hold post-TS-migration, flip both statuses, no new investigation needed).
+
+## Administrative resolution (M118 ABSORB, 2026-07-23)
+
+Verified live at M118 (the follow-on, post-DIR-058 full-scope archguard explore): the M98 findings still
+hold — `startMcpServer`'s M97-era decomposition confirmed stable (see `PROBE-M98-001`'s own M118
+re-verification, outDegree=3 unchanged since the M99 fix), no new cycles introduced, entity/relation
+counts have since grown as expected from the TS-migration programs (M98: unrecorded exact baseline in
+this task's own body beyond the M93 87/125 reference; M118: 144/201 scope=packages, post-full-JS-
+elimination). `status` flipped `todo` → `done` as a pure administrative correction — the M98 explore's
+work was already genuinely complete, only the task's own bookkeeping was stale.

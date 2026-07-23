@@ -2,7 +2,7 @@
 id: PROBE-M98-001
 title: "M97 AC gap: startMcpServer outDegree=7 in fresh M98 measurement, AC
   required ≤4"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - defect
@@ -91,3 +91,14 @@ Not selected M116 — exp5-M-TS-MIGRATION-P5-A selected instead (capability-grow
 ## Not selected (M117)
 
 Not selected M117 — exp5-M-TS-MIGRATION-P5-B selected instead (direct sibling completion of the just-landed P5-A, same established pattern, closes the DIR-058 program). This task's own AC/DoD boxes are already all `[x]` with a `milestone:M-99` label yet `status: todo` — looks like a stale/incomplete status-flip from whenever M99 actually landed the fix (commit `7461215` per its own DoD). Worth a quick status-only fix in a future pass rather than a real re-investigation.
+
+## Administrative resolution (M118 ABSORB, 2026-07-23)
+
+Re-verified live at M118 (post-DIR-058, full-4-package archguard scope): `archguard_get_dependencies`
+on `startMcpServer` (edge-list, depth=1) shows `quay/src/mcp-server.ts.startMcpServer` has exactly 3
+outgoing edges — `quay/src/config.ts.loadConfig`, `quay/src/mcp-handlers.ts.ConnectedProvider`,
+`quay/src/mcp-handlers.ts.registerAllHandlers` — confirming outDegree=3, matching this task's own DoD
+claim exactly (both the count and the 3 named dependencies). The fix from commit `7461215` still
+holds; nothing regressed across M100-M117. `status` flipped `todo` → `done` as a pure administrative
+correction (no new investigation) — the finding was already genuinely resolved, only the task's own
+bookkeeping was stale.
