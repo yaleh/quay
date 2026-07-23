@@ -612,7 +612,7 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
   const srcLabel = taskPath ? `[${path.relative(process.cwd(), taskPath)}]` : "[fixture text — no real task file]";
 
   const CLAUSE8_CUTOVER_MILESTONE_NUM = 40;
-  const milestoneLabelMatch = taskText.match(/milestone:M(\d+)/i);
+  const milestoneLabelMatch = taskText.match(/milestone:M-?(\d+)/i);
   const taskMilestoneNum = milestoneLabelMatch ? parseInt(milestoneLabelMatch[1], 10) : null;
   const clause8Applies = taskMilestoneNum !== null && taskMilestoneNum >= CLAUSE8_CUTOVER_MILESTONE_NUM;
 
