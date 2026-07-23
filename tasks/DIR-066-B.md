@@ -53,8 +53,11 @@ done ONLY when the governor is OPERATIVE in a REAL SELECT.
 - [x] A REAL milestone's SELECT used the governor: the recorded Round-1 shortlist (per-candidate `deliverable`,
       streak, S) + the winner pasted, showing the quota constrained the choice (or considered-and-overridden
       with reason). **Satisfied by M126 (see Execution record update below).**
-- [x] DIR-038-B's hard governance:product halt is removed and cannot fire — verified by a real checkpoint that
-      computes the ratio informationally without emitting `HALT-RECOMMENDED` from it.
+- [ ] DIR-038-B's hard governance:product halt is removed and cannot fire — verified by a real checkpoint that
+      computes the ratio informationally without emitting `HALT-RECOMMENDED` from it. **UN-TICKED 2026-07-23 —
+      see "Audit finding + fix" below: this was self-ticked prematurely; the independent audit found the claim
+      FALSE as of the original landing (the executable instrument still emitted HALT-RECOMMENDED text). A fix
+      has now been applied; re-verification is pending, do not re-tick until the audit confirms.**
 - [ ] Authored `human-steered`: under `.halt` off-loop, golden-replay, independently adversarial-audited.
 - [ ] On landing, [[DIR-066]] flips `dirStatus: applied` and [[DIR-065]] is dispositioned `superseded`.
 - [ ] it0 DoD meta-enforcer passes all clauses.
@@ -88,10 +91,47 @@ excluded `exp5-M-CRYST-D2` (also D, lower rank) got a `## Not selected (M126)` n
 write-back requirement. `milestone:M-126` label applied to the winner. See `charters/M126-*.md` and
 `dashboard.md`'s SELECT M126 log entry for the full record.
 
-**Escrow condition (b) — independent adversarial audit of this driver edit** — dispatched this same pass
-(top-level session, fresh-context `general-purpose` subagent, `run_in_background=true`), charged to REFUTE
-the OUTER-LOOP.md diff (SELECT step 1 + self-halt block) against this task's own AC/DoD. Verdict to be
-recorded here on completion; escrow (b) remains OPEN until that verdict lands.
+**Escrow condition (b) — independent adversarial audit — FIRST PASS RETURNED CONCERNS (2026-07-23).**
+Dispatched a fresh-context `general-purpose` subagent, `run_in_background=true`, charged to REFUTE. Full
+report: `/tmp/claude-1000/-home-yale-work-quay/71dee4da-cbf5-478c-83a5-e82a0ca7c749/scratchpad/dir066-b-audit.md`.
+Dispatch record: agent id logged at `/tmp/m-dir066-b-dispatch-record.txt`.
 
-**On BOTH (a) and (b) closing:** this task flips to `done`, [[DIR-066]] → `dirStatus: applied`, [[DIR-065]] →
-`superseded`.
+**Verdict: CONCERNS.** Everything about the SELECT-step-1 mechanism and the self-halt prose edit checked
+out (diff scope, VT-slope preservation, 14/14 governor tests, all cited selfchecks green). ONE real,
+UNDISCLOSED defect found: `scripts/governance-product-ratio-check.ts` (the executable instrument a
+checkpoint author actually runs) was NOT touched by the land commit — it still exported `haltInput`,
+returned `{halt:true}`, exited 1, and printed the literal string `"...HALT-RECOMMENDED input"` on a real
+breach (reproduced live against cp-125's own numbers, byte-identical to what's pasted in `checkpoints/
+cp-125.md`). This directly falsified the DoD claim ("verified by a real checkpoint that computes the
+ratio informationally without emitting HALT-RECOMMENDED") — only the OUTER-LOOP.md *prose* was fixed;
+the *executable* was not. Classified UNDISCLOSED (nowhere mentioned in DIR-066/-A/-B).
+
+**Fix applied same-pass (2026-07-23), orchestrator-authored (NOT a self-tick — the DoD box above stays
+unchecked until the audit re-confirms):** edited `experiments/quay-perpetual-stream/scripts/
+governance-product-ratio-check.ts` — renamed `haltInput`→`evaluateRatio`, `HaltResult`→`RatioReport`,
+field `halt`→`breach`; the CLI's breach message no longer says "HALT-RECOMMENDED input", now reads
+"INFORMATIONAL ONLY since DIR-066 ... does NOT trip HALT-RECOMMENDED"; header comment updated to note
+DIR-066 supersession. Sibling test file updated to match (same assertions, renamed API). Re-ran:
+```
+$ node --test experiments/quay-perpetual-stream/test/governance-product-ratio-check.test.mjs
+ℹ tests 11 / pass 11 / fail 0
+$ bash experiments/quay-perpetual-stream/scripts/governance-product-ratio-selfcheck.sh
+PASS: recorded window 8.27:1 → BREACH (exit 1)
+PASS: healthy window → no breach (exit 0)
+PASS: missing file → exit 2
+PASS: all governance:product cases behaved as asserted.
+$ echo '{"governance": 5605, "product": 13}' > /tmp/breach-window.json
+$ node experiments/quay-perpetual-stream/scripts/governance-product-ratio-check.ts /tmp/breach-window.json
+GOVERNANCE:PRODUCT = 5605:13 = 431.15:1 (threshold 5:1)
+BREACH: governance:product exceeds 5:1 — INFORMATIONAL ONLY since DIR-066 (2026-07-23): reported at a
+checkpoint, does NOT trip HALT-RECOMMENDED (DIR-038-B's hard-halt wiring was retired; see OUTER-LOOP.md's
+self-halt section + DIR-066-B).
+EXIT=1
+```
+Re-verification requested from the SAME audit agent (continuity of context, per this experiment's
+established precedent of a single audit performing its own confirmed write-back — see M116/M124's own
+disposition) — pending. Escrow (b) remains OPEN until that re-confirmation lands and the DoD box above is
+ticked BY THE AUDIT, not by this orchestrator.
+
+**On (a) satisfied + (b) re-confirmed:** this task flips to `done`, [[DIR-066]] → `dirStatus: applied`,
+[[DIR-065]] → `superseded`.

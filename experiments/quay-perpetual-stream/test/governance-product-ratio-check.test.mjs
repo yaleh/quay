@@ -1,6 +1,7 @@
-// Golden-replay + unit tests for governance-product-ratio-check.mjs — DIR-038-B. The frozen oracle is
-// the recorded restart-window ratio (DIR-038 finding #2: governance:product ≈ 8:1, ≈6249:756). A
-// breach IS degradation → a HALT-RECOMMENDED input. RED-first (ADR-001 / DIR-019).
+// Golden-replay + unit tests for governance-product-ratio-check.mjs — originally DIR-038-B. The frozen
+// oracle is the recorded restart-window ratio (DIR-038 finding #2: governance:product ≈ 8:1, ≈6249:756).
+// A breach is now INFORMATIONAL ONLY since DIR-066 (2026-07-23) retired the hard-halt wiring — it no
+// longer trips HALT-RECOMMENDED. RED-first (ADR-001 / DIR-019).
 // Run: node --test experiments/quay-perpetual-stream/test/governance-product-ratio-check.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -12,7 +13,7 @@ import {
   sumByClass,
   ratio,
   isBreach,
-  haltInput,
+  evaluateRatio,
   DEFAULT_THRESHOLD,
   main,
 } from "../scripts/governance-product-ratio-check.ts";
@@ -53,7 +54,7 @@ test("anti-laundering: the auditor's attack (8000 prose lines under packages/plu
   ]);
   assert.equal(t.product, 20);
   assert.equal(t.governance, 6000 + 2000 + 6249);
-  assert.equal(haltInput(t).halt, true); // laundering no longer dilutes the ratio green
+  assert.equal(evaluateRatio(t).breach, true); // laundering no longer dilutes the ratio green
 });
 
 // ── GOLDEN REPLAY — reproduce the recorded ≈8:1 ───────────────────────────────────────────────────
@@ -71,9 +72,9 @@ test("golden: sumByClass classifies numstat entries correctly (product=packages+
 });
 
 // ── breach / halt input ───────────────────────────────────────────────────────────────────────────
-test("haltInput: a runaway ratio → halt=true (degradation); a healthy ratio → halt=false", () => {
-  assert.equal(haltInput(load("recorded-window.json")).halt, true);
-  assert.equal(haltInput(load("healthy-window.json")).halt, false);
+test("evaluateRatio: a runaway ratio → breach=true (informational only, DIR-066); a healthy ratio → breach=false", () => {
+  assert.equal(evaluateRatio(load("recorded-window.json")).breach, true);
+  assert.equal(evaluateRatio(load("healthy-window.json")).breach, false);
 });
 
 test("ratio: pure-governance window (product 0) → Infinity (maximal degradation); no activity → 0", () => {

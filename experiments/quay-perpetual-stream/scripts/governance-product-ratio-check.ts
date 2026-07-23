@@ -1,10 +1,10 @@
-// governance-product-ratio-check.ts — DIR-038-B (eval-rebase fix #2): the governance:product ratio
-// as a first-class checkpoint health signal, wired to the HARD self-halt "degradation" clause. The
-// value-typed ledger counts governance-integrity / risk-option / discovery / instrument-correction as
-// value while "not touching VT", so a loop can spend thousands of lines building its OWN instruments
-// while the product freezes and NOTHING trips the halt. This check makes that runaway a mechanical
-// degradation signal: governance-lines : product-lines over a window; a breach of the declared
-// threshold CAN trip HALT-RECOMMENDED (not just be narrated).
+// governance-product-ratio-check.ts — originally DIR-038-B (eval-rebase fix #2): the governance:product
+// ratio as a checkpoint health signal. DIR-038-B originally wired a breach to the HARD self-halt
+// "degradation" clause; **DIR-066 (2026-07-23) RETIRED that hard-halt wiring** — a breach is now
+// INFORMATIONAL ONLY (reported at a checkpoint, never trips HALT-RECOMMENDED; see OUTER-LOOP.md's
+// self-halt section and DIR-066-B). This module still computes and classifies the ratio (useful
+// observability — the value-typed ledger counts governance-integrity/risk-option/discovery/
+// instrument-correction as value while "not touching VT"), but no longer asserts a halt input.
 //
 // Golden oracle (recorded, DIR-038 finding #2): the restart window was governance:product ≈ 8:1
 // (≈6249 governance : 756 product lines). PRODUCT = the shippable quay itself (`packages/`, `plugin/`);
@@ -31,10 +31,10 @@ export interface Totals {
   product: number;
 }
 
-export interface HaltResult {
+export interface RatioReport {
   ratio: number;
   threshold: number;
-  halt: boolean;
+  breach: boolean; // informational only since DIR-066 — no longer a halt input
 }
 
 // ── classifyPath ─────────────────────────────────────────────────────────────────────────────────
@@ -76,22 +76,25 @@ export function ratio({ governance, product }: Totals): number {
   return governance / product;
 }
 
-// ── isBreach / haltInput ─────────────────────────────────────────────────────────────────────────
+// ── isBreach / evaluateRatio ─────────────────────────────────────────────────────────────────────
 export function isBreach(r: number, threshold: number = DEFAULT_THRESHOLD): boolean {
   return r > threshold;
 }
 
-// The halt-evaluation input: a breach IS degradation → can trip HALT-RECOMMENDED (OUTER-LOOP self-halt
-// "hypothesis-falsified / degradation across tracks" clause).
-export function haltInput(totals: Totals, { threshold = DEFAULT_THRESHOLD }: { threshold?: number } = {}): HaltResult {
+// Informational evaluation ONLY since DIR-066 (2026-07-23): a breach is reported at a checkpoint but
+// does NOT trip HALT-RECOMMENDED (DIR-038-B's hard self-halt wiring was retired — see OUTER-LOOP.md's
+// self-halt section + DIR-066-B). Kept as a distinct function from `ratio`/`isBreach` only to bundle
+// the threshold + verdict for the CLI's single call site.
+export function evaluateRatio(totals: Totals, { threshold = DEFAULT_THRESHOLD }: { threshold?: number } = {}): RatioReport {
   const r = ratio(totals);
-  return { ratio: r, threshold, halt: isBreach(r, threshold) };
+  return { ratio: r, threshold, breach: isBreach(r, threshold) };
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 // Reads either a pre-totaled {governance, product} JSON or an array of {path, added} numstat entries
 // (the driver produces the latter from `git diff --numstat <range>`). Exit: 0 = within threshold;
-// 1 = BREACH (governance runaway → degradation, a halt input); 2 = usage/parse error.
+// 1 = BREACH (informational signal only since DIR-066 — does NOT trip HALT-RECOMMENDED); 2 = usage/
+// parse error.
 function usage(): void { process.stderr.write("Usage: governance-product-ratio-check.ts [--threshold <N>] <window.json>\n"); }
 
 export async function main(argv: string[]): Promise<number> {
@@ -109,15 +112,15 @@ export async function main(argv: string[]): Promise<number> {
   catch (e: any) { process.stderr.write(`ERROR: not valid JSON: ${e.message}\n`); return 2; }
   let totals: Totals;
   try { totals = Array.isArray(data) ? sumByClass(data as NumstatEntry[]) : data as Totals; } catch (e: any) { process.stderr.write(`ERROR: ${e.message}\n`); return 2; }
-  let v: HaltResult;
-  try { v = haltInput(totals, { threshold }); } catch (e: any) { process.stderr.write(`ERROR: ${e.message}\n`); return 2; }
+  let v: RatioReport;
+  try { v = evaluateRatio(totals, { threshold }); } catch (e: any) { process.stderr.write(`ERROR: ${e.message}\n`); return 2; }
   const rStr = v.ratio === Infinity ? "∞" : v.ratio.toFixed(2);
   process.stdout.write(`GOVERNANCE:PRODUCT = ${totals.governance}:${totals.product} = ${rStr}:1 (threshold ${threshold}:1)\n`);
-  if (v.halt) {
-    process.stdout.write(`BREACH → DEGRADATION: governance:product exceeds ${threshold}:1 — a runaway instrument-vs-product ratio IS degradation → HALT-RECOMMENDED input\n`);
+  if (v.breach) {
+    process.stdout.write(`BREACH: governance:product exceeds ${threshold}:1 — INFORMATIONAL ONLY since DIR-066 (2026-07-23): reported at a checkpoint, does NOT trip HALT-RECOMMENDED (DIR-038-B's hard-halt wiring was retired; see OUTER-LOOP.md's self-halt section + DIR-066-B).\n`);
     return 1;
   }
-  process.stdout.write("within threshold — no degradation-halt input\n");
+  process.stdout.write("within threshold — no breach\n");
   return 0;
 }
 
