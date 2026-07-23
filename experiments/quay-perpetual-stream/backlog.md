@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH | defect: it0-dod-check.ts clause8 regex doesn't match the repo's actual milestone:M-NN (hyphenated) label convention | DONE | - | milestone-candidate, defect, milestone:M-119 |
 | exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE | Post-DIR-058 architecture audit (archguard, M118 mandatory explore): first-ever full 4-package structural analysis | DONE | - | milestone-candidate, milestone:M-118 |
 | exp5-M-ARCH-AUDIT-M98-EXPLORE | Post-M97 architecture audit (archguard, M98 mandatory explore): re-measure quay after startMcpServer decomposition + ABI boundary fix | DONE | - | milestone-candidate, milestone:M-98 |
 | PROBE-M98-001 | M97 AC gap: startMcpServer outDegree=7 in fresh M98 measurement, AC required ≤4 | DONE | - | milestone-candidate, defect, milestone:M-99 |
@@ -122,7 +123,7 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH | defect: it0-dod-check.ts clause8 regex doesn't match the repo's actual milestone:M-NN (hyphenated) label convention | open | - | milestone-candidate, defect |
+| exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH | defect: it0-dod-check.ts clause8 uses first-match-wins on multi-milestone-labeled tasks, misreports N/A on 3 real done tasks | open | - | milestone-candidate, defect |
 | exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH | defect: quay Core SEA binary crashes at startup (gate/registry.ts import.meta.url incompatible with CJS bundle) — DIR-004 Distribution urgent | open | - | milestone-candidate, defect |
 | exp5-M-TS-MIGRATION | TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety | open | - | milestone-candidate, crystallization |
 | exp5-M-TS-MIGRATION-P4 | TS migration P4 (exp5 method-infra scripts, ADR-012): migrate the load-bearing gates/scripts to TS under the golden-diff discipline (like the it0-dod-check restructure) — behavior-preserving, autonomous. | open | - | milestone-candidate, crystallization |
@@ -138,4 +139,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_131 milestone-candidate task(s) as of 2026-07-23T02:01:39.110Z._
+_132 milestone-candidate task(s) as of 2026-07-23T02:16:37.947Z._

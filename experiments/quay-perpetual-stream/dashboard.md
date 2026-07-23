@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 118** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 119** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -1090,3 +1090,19 @@ exp5-M-OUTERLOOP-ROUTINE-WIRING (human-steered).
 **Charter:** `experiments/quay-perpetual-stream/charters/M118-arch-audit-post-dir058-explore.md`
 
 m118 · exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE · Δv=0 (v̂=0) · explore=DONE (first-ever full 4-package archguard sweep: entities=144/relations=201, IDENTICAL to M117's preliminary reading — confirms DIR-058 introduced zero structural regression; 0 cycles; `startMcpServer` outDegree=3 unchanged since M99 fix; `startServer` outDegree=7 unchanged, already-tracked ARCH-M93-003 WONTFIX; no new findings filed; 2 stale-bookkeeping tasks (PROBE-M98-001, exp5-M-ARCH-AUDIT-M98-EXPLORE — AC/DoD ticked but status stuck at todo) administratively resolved to done, re-verified not rubber-stamped; FILE-ONLY confirmed via git diff --stat) · audit=NO REFUTATION FOUND (audit independently re-ran archguard itself, twice; found one non-blocking evidence-fidelity CONCERN — a silently-filtered tied topByOutDegree entry, doesn't change any conclusion) · merge=e98bde5+d9a8483 · → milestones/M118/
+
+## SELECT M119 — exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH
+
+**Selected:** exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH — one-line regex fix: `it0-dod-check.ts`'s
+clause8 never matched the repo's real `milestone:M-NN` (hyphenated) label convention, silently
+N/A-passing every real task since introduction. Confirmed still live via M116/M117/M118's own gate
+runs.
+
+**Rationale:** Exploit pick, small and cleanly bounded (no open design question), governance-
+integrity/instrument-correction. Deferred `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` (DIR-004-urgent
+but its own Plan admits it needs investigation/sizing first — not yet cleanly one-milestone-sized).
+
+**Task:** [[exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH]] (`tasks/exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH.md`)
+**Charter:** `experiments/quay-perpetual-stream/charters/M119-clause8-hyphen-label-fix.md`
+
+m119 · exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH · Δv=0 (v̂=0) · outcome=DONE (`/milestone:M(\d+)/i` → `/milestone:M-?(\d+)/i`, one line; clause8 now genuinely applies against real hyphenated-label tasks instead of silently N/A-passing — confirmed live against `exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE`/M118 and this task's own `milestone:M-119` label; `dod-fixture-selfcheck.sh` 17/17 golden-diff unchanged; 343/343 experiments suite + tsc clean across all 4 packages) · audit=CONCERNS (non-blocking — audit independently re-tested 13 additional edge cases beyond the report, found no new false positive from the fix itself, but discovered a SEPARATE pre-existing multi-milestone-label first-match-wins defect affecting 3 other real done tasks, unrelated to and not introduced/fixed by this milestone; filed as exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH) · merge=36d2a67 · → milestones/M119/
