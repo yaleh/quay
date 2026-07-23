@@ -3,7 +3,7 @@ id: DIR-062-A
 title: "DIR-062 child A [halt-free]: build the human-steered classifier +
   drivable-workspace fail-closed gate + fixtures + ≥80% test (no driver edit —
   loop-autonomous)"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -12,6 +12,10 @@ parent: DIR-062
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-062-A
+    experiments/quay-perpetual-stream/charters/M125-dir062-a-drivable-workspace-gate.md
+    /tmp/m125-absorb-entry.md
 ---
 ## Proposal
 Build the MECHANISM for [[DIR-062]] without touching the driver — so the loop can do it autonomously
@@ -35,17 +39,18 @@ fixture-first (RED + GREEN). SELECT-wiring + the inherited-core definition edit 
 N/A — resolved via a focused single milestone; shape well-defined by [[DIR-062]] + `drivable-workspaces.yml`, no staged design doc. (Two standalone scripts + fixtures + sibling tests + gate registration in `.quay/gates.yml`/`.quay/config.yml`; no driver edit.)
 
 ## Acceptance Criteria
-- [ ] `drivable-workspace-check` FAILs closed (non-zero) for a fixture task targeting a path NOT under `authorized_root` (e.g. `/tmp/x`), and PASSes (0) for one targeting `/home/yale/work/archguard` — both fixtures run, both verdicts pasted. — `node .../drivable-workspace-check.ts /tmp/x` → `FAIL: 1/1 workspace path(s) NOT covered ... /tmp/x`, exit 1. `node .../drivable-workspace-check.ts /home/yale/work/archguard` → `PASS: all 1 workspace path(s) covered ...`, exit 0. Also live-verified end-to-end via `quay gate QC-T1 --gate drivable-workspace` with both targets (PASS / FAIL — real GateEvents).
-- [ ] `human-steered-classify` returns `humanSteered:true` for a fixture that edits `OUTER-LOOP.md`, `true` for a mission-redirection-flagged fixture, `true` for one driving an unlisted workspace, and `false` for one driving only `/home/yale/work/*` with no driver edit — pasted. — all 4 cases verified via both the library `classify()` function and the CLI (`--touched OUTER-LOOP.md` → `humanSteered:true`; `--mission-redirection` → `true`; `--workspace /tmp/somewhere-not-registered` → `true`; clean-milestone fixture with only product files + authorized workspaces → `false`).
-- [ ] Both scripts have a sibling `*.test.mjs`; `node --test <the two tests>` exits 0; each ≥80% line coverage (figures pasted). — `node --test drivable-workspace-check.test.mjs human-steered-classify.test.mjs` → 49/49 pass. Coverage: `drivable-workspace-check.ts` 97.86% lines/93.02% branches; `human-steered-classify.ts` 94.55% lines/85.71% branches (both `--experimental-test-coverage`, both well above the 80% floor). `loadbearing-test-gate.sh` → `PASS: every load-bearing script has a sibling *.test.mjs` (31 total, 8 pass, 23 N/A, 0 fail).
-- [ ] The `drivable-workspace` gate is registered in BOTH `.quay/gates.yml` and `.quay/config.yml` (grep → present in both); `quay gate --list` includes it. — both files updated (new `it0[]` entry, mirroring the existing 5); `quay gate --list | grep drivable-workspace` → `drivable-workspace`.
-- [ ] `node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts .` + the standard non-flaky suite stay green. — split-or-commit: `PASS: 368 task(s) checked — no violations`. Full experiments suite: 525/525 pass (was 476/476 + 49 new tests, exact match).
+- [x] `drivable-workspace-check` FAILs closed (non-zero) for a fixture task targeting a path NOT under `authorized_root` (e.g. `/tmp/x`), and PASSes (0) for one targeting `/home/yale/work/archguard` — both fixtures run, both verdicts pasted. — `node .../drivable-workspace-check.ts /tmp/x` → `FAIL: 1/1 workspace path(s) NOT covered ... /tmp/x`, exit 1. `node .../drivable-workspace-check.ts /home/yale/work/archguard` → `PASS: all 1 workspace path(s) covered ...`, exit 0. Also live-verified end-to-end via `quay gate QC-T1 --gate drivable-workspace` with both targets (PASS / FAIL — real GateEvents).
+- [x] `human-steered-classify` returns `humanSteered:true` for a fixture that edits `OUTER-LOOP.md`, `true` for a mission-redirection-flagged fixture, `true` for one driving an unlisted workspace, and `false` for one driving only `/home/yale/work/*` with no driver edit — pasted. — all 4 cases verified via both the library `classify()` function and the CLI.
+- [x] Both scripts have a sibling `*.test.mjs`; `node --test <the two tests>` exits 0; each ≥80% line coverage (figures pasted). — 49/49 pass (26+23). Coverage: `drivable-workspace-check.ts` 97.86% lines; `human-steered-classify.ts` 94.55% lines. `loadbearing-test-gate.sh` PASS (31 total, 8 pass, 23 N/A, 0 fail).
+- [x] The `drivable-workspace` gate is registered in BOTH `.quay/gates.yml` and `.quay/config.yml` (grep → present in both); `quay gate --list` includes it. — confirmed.
+- [x] `node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts .` + the standard non-flaky suite stay green. — split-or-commit: PASS, 368 tasks, no violations. Full experiments suite: 525/525 pass.
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidation-lag, line-budget, impl-row N/A, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycle-record, tree-hygiene, worktree-branch-hygiene, audit-independence). Per DIR-026 Reading A: the scripts merely existing is necessary-not-sufficient. Done ONLY when:
-- [ ] Both scripts land as real load-bearing scripts with passing sibling tests (≥80%), verified by real `node --test` runs (pasted), and `loadbearing-test-gate.sh` PASSes (no load-bearing script without a test). — see AC evidence above.
-- [ ] The `drivable-workspace` gate produces a real GateEvent (PASS on a listed target, FAIL on an unlisted one) via `quay gate` — pasted. — see AC1 evidence above (both PASS and FAIL GateEvents produced against the QC-T1 fixture task, cleaned up afterward, `extra` restored to `{}`).
-- [ ] This child touches NO driver file — verifiable by `git show --stat` on its landing commit (no `OUTER-LOOP.md`/`inherited-core.md`/inner-iteration-prompt in the diff); if it does, it is misscoped and belongs in [[DIR-062-B]].
+- [x] Both scripts land as real load-bearing scripts with passing sibling tests (≥80%), verified by real `node --test` runs (pasted), and `loadbearing-test-gate.sh` PASSes (no load-bearing script without a test).
+- [x] The `drivable-workspace` gate produces a real GateEvent (PASS on a listed target, FAIL on an unlisted one) via `quay gate` — pasted.
+- [x] it0 DoD meta-enforcer passes all clauses. — CONFIRMED via 2 independent audit passes: `it0-dod-check.sh` → all 12 clauses PASS/N/A, exit 0; `quay gate DIR-062-A` → PASS, exit 0, two independent real GateEvents (`2026-07-23T11:38:09.598Z` orchestrator + a corroborating audit re-run).
+- [x] This child touches NO driver file — verifiable by `git show --stat` on its landing commit. — `git show --stat ecc7344` confirmed clean.
 
 ## Not selected (M121)
 
@@ -76,3 +81,23 @@ deferred 3 times. Good next halt-free exploit pick.
 Selected — direct exploit pick. Halt-free, chart-2 S3 relevant per DIR-064's own mapping
 ("DIR-062-A/B/C → S3 objective guard + S4"). See
 `experiments/quay-perpetual-stream/charters/M125-dir062-a-drivable-workspace-gate.md`.
+
+## Execution record (M125 ABSORB, 2026-07-23)
+
+**Milestone:** M125 · **Iterations:** 1 (single-pass development-class mechanism build) ·
+**Realized Δv:** 0 (halt-free mechanism build, chart-2 S3 relevant but not itself a cov-scoring
+event — the gate/classifier exist but are not yet wired into a scored surface). **Merge commit:**
+`ecc7344`. **Adversarial-audit verdict:** NO REFUTATION FOUND (see
+`milestones/M125/audits/iteration-0-adversarial-audit.md`) — the audit actively mutation-tested both
+new scripts (reverted the path-matching guard, flipped a boolean operator) and confirmed the real
+test suite genuinely catches both regressions, the opposite of M124's tautology finding. One
+non-blocking cosmetic correction (test-count breakdown). **DoD meta-enforcer:** PASS (two independent
+real GateEvents, confirmed across 2 audit passes). One-line outcome: DIR-062's halt-free mechanism
+(fail-closed workspace-drivability gate + pure human-steered classifier) lands with genuine,
+mutation-tested regression coverage — DIR-062-B (human-steered driver wiring) remains open.
+
+**Note (checkpoint-triggered, non-blocking to this task's own completion):** this milestone's ABSORB
+coincides with the scheduled cp-125 checkpoint (`milestone_counter % 5 == 0`), which found a real
+governance:product ratio breach (431:1 vs the 5:1 threshold) over the window since cp-120 — see
+`checkpoints/cp-125.md`. This does NOT affect DIR-062-A's own completion (independently audited,
+gated, done) but does affect the OUTER loop's own continuation decision at this boundary.

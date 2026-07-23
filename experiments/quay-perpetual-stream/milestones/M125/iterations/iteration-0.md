@@ -16,8 +16,11 @@
    (no subprocess, no duplicated coverage logic).
 3. Registered `drivable-workspace` as a new `it0[]` gate entry in both `.quay/gates.yml` and
    `.quay/config.yml`.
-4. Fixture-first sibling tests: `test/drivable-workspace-check.test.mjs` (28 tests),
-   `test/human-steered-classify.test.mjs` (21 tests).
+4. Fixture-first sibling tests: `test/drivable-workspace-check.test.mjs` (26 tests),
+   `test/human-steered-classify.test.mjs` (23 tests). **Correction (M125's own adversarial audit,
+   non-blocking cosmetic finding):** this section originally said "28 + 21" — the real per-file
+   counts, independently re-run by the audit, are 26 + 23 (combined 49/49 unchanged, and 49/49 is
+   the only figure any AC/DoD clause actually cites).
 
 ## Real evidence
 
