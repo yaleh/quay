@@ -10,6 +10,10 @@ labels:
 parent: exp5-M-CRYST
 children: []
 extra:
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-CRYST-D2
+    experiments/quay-perpetual-stream/charters/M130-cryst-d2-skills-rewrite.md
+    /tmp/m130-absorb-entry.md
   schema: v1
 ---
 ## Proposal
