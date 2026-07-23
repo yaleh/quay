@@ -10,6 +10,10 @@ labels:
 parent: exp5-M-PRODUCTIZED-DELIVERY
 children: []
 extra:
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-PRODUCTIZED-DELIVERY-B
+    experiments/quay-perpetual-stream/charters/M129-productized-delivery-b-manifest.md
+    /tmp/m129-absorb-entry.md
   schema: v1
 ---
 ## Proposal
