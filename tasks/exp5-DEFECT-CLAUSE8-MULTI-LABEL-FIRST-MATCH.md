@@ -2,7 +2,7 @@
 id: exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH
 title: "defect: it0-dod-check.ts clause8 uses first-match-wins on
   multi-milestone-labeled tasks, misreports N/A on 3 real done tasks"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - defect
@@ -11,6 +11,10 @@ parent: null
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH
+    experiments/quay-perpetual-stream/charters/M124-clause8-multi-label-fix.md
+    /tmp/m124-absorb-entry.md
 ---
 ## Proposal
 
@@ -41,15 +45,15 @@ after landing) rather than the first.
 ## Acceptance Criteria
 - [x] Clause8's label scan considers all `milestone:M<N>` labels present in a task's text, not just the first. — `experiments/quay-perpetual-stream/scripts/it0-dod-check.ts` line ~615: `taskText.match(...)` (single) replaced with `[...taskText.matchAll(/milestone:M-?(\d+)/gi)]` + `Math.max(...)`, scoped to the frontmatter block when real frontmatter is present (post-audit correction, see below).
 - [x] `exp5-M-GATE-CLI-ERROR-UX`, `exp5-M-GATE-HELP-SYNOPSIS-GAP`, `exp5-M-GATE-MCP-PARITY-GAP` each show clause8 genuinely APPLYING (not N/A) when re-run — pasted output for all 3. — labels found: CLI-ERROR-UX=[37,56]→max 56; HELP-SYNOPSIS-GAP=[37,51]→max 51; MCP-PARITY-GAP=[37,53]→max 53. All ≥40 cutover → clause8 now applies to all 3.
-- [ ] `dod-fixture-selfcheck.sh` still passes (golden-diff evidence); a new fixture pair (multi-label task, low-then-high vs high-then-low label order) added to cover this case going forward. — `dod-fixture-selfcheck.sh` → `PASS: all 17 DoD fixtures behaved as asserted` (unchanged golden-diff). **POST-AUDIT CORRECTION**: iteration-0's original 3 fixture tests were REFUTED by this milestone's own audit as tautological (asserted only a substring shared by both the "applies" and "N/A" pass messages, so they passed against the pre-fix buggy code too). Fixed: the 2 "applies" tests now assert the specific applies-path message text + absence of the N/A message; independently re-verified (mirroring the audit's own revert-and-rerun method) that the low-then-high test now genuinely FAILS against the true pre-M124 original code (`git show f2c08a7:.../it0-dod-check.ts`). Also added a 4th new test (a real temp task file with a frontmatter label below cutover + a decoy higher milestone-shaped string in body prose) covering the audit's 2nd finding (whole-text-scan pollution) — independently re-verified it fails against the pre-audit-fix code and passes against the final code. `node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs` → 44/44 pass (was 40/40 + 4 new, corrected from the audit's initial 43/43 count). Both findings logged as `DEV-14` in `inherited-core.md`.
-- [x] No other clause's verdict changes as a side effect. — full experiments suite: 476/476 pass (was 472/472 + 4 new fixture tests, exact match).
+- [x] `dod-fixture-selfcheck.sh` still passes (golden-diff evidence); a new fixture pair (multi-label task, low-then-high vs high-then-low label order) added to cover this case going forward. — `dod-fixture-selfcheck.sh` → `PASS: all 17 DoD fixtures behaved as asserted` (unchanged golden-diff). **POST-AUDIT CORRECTION, INDEPENDENTLY RE-VERIFIED BY THE SAME AUDIT (2nd pass)**: iteration-0's original 3 fixture tests were REFUTED as tautological (asserted only a substring shared by both the "applies" and "N/A" pass messages, passing against the pre-fix buggy code too — the audit proved this by reverting the source and re-running). Fixed same-ABSORB: the 2 "applies" tests now assert the specific applies-path message text + absence of the N/A message; a 4th test added with a real temp task file (frontmatter label below cutover + decoy higher milestone-shaped string in body prose). The audit independently re-verified BOTH boundaries: (a) the low-then-high test genuinely FAILS against the true pre-M124 original code and PASSES against the final code; (b) the new frontmatter-scope test FAILS against the initially-shipped-but-flawed fix and PASSES against the final frontmatter-scoped fix. Both findings logged as `DEV-14` in `inherited-core.md`.
+- [x] No other clause's verdict changes as a side effect. — full experiments suite: 476/476 pass (was 472/472 + 4 new fixture tests, exact match). Independently re-run and confirmed by the audit.
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidation-lag, line-budget,
 impl-row N/A, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycle-record, tree-hygiene,
 worktree-branch-hygiene, audit-independence).
-- [ ] All 4 AC items above verified true with pasted command output.
-- [ ] it0 DoD meta-enforcer passes all clauses.
+- [x] All 4 AC items above verified true with pasted command output. — all 4 AC boxes independently confirmed and ticked by the adversarial audit (multiple passes: initial REFUTED findings, then same-ABSORB fixes independently re-verified).
+- [x] it0 DoD meta-enforcer passes all clauses. — independently re-run from the shared checkout: `it0-dod-check.sh` → exit 0, all 12 clauses PASS/N/A. `quay gate exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH` → PASS, exit 0. Two independent real GateEvents recorded (`2026-07-23T11:15:03.229Z` orchestrator + `2026-07-23T11:15:35.225Z` audit re-run).
 
 ## Not selected (M121)
 
@@ -72,3 +76,18 @@ next exploit pick once M123 clears.
 Selected — direct exploit pick. Small, cleanly bounded (one-function fix with an established
 golden-diff verify pattern), and had already been deferred 3 times (M121/M122/M123). See
 `experiments/quay-perpetual-stream/charters/M124-clause8-multi-label-fix.md`.
+
+## Execution record (M124 ABSORB, 2026-07-23)
+
+**Milestone:** M124 · **Iterations:** 1 (single-pass development-class fix, then a same-ABSORB
+correction cycle triggered by the milestone's own audit) · **Realized Δv:** 0
+(governance-integrity/instrument-correction, no chart-2 surface touched). **Merge commits:**
+`ab8b6c8` (initial matchAll+max fix), `477ac81` (audit-driven correction: fixed 2 tautological
+tests + scoped the scan to frontmatter, added a 4th regression test). **Adversarial-audit verdict:**
+REFUTED on the initial delivery (first REFUTED verdict this restart window, m121-m124) — genuinely
+found 2 real defects (tautological test assertions; whole-text-scan body-prose pollution), both
+fixed same-ABSORB and independently re-verified across 3 audit passes; logged as `DEV-14` in
+`inherited-core.md`. **DoD meta-enforcer:** PASS (two independent real GateEvents). One-line
+outcome: fixes the multi-label first-match-wins defect (deferred 3 times, M121-M123) with genuine
+regression coverage this time — the milestone's own audit caught and forced a correction of its
+first, insufficiently-tested delivery before it could land.
