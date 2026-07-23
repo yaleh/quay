@@ -6,10 +6,15 @@ status: todo
 labels:
   - milestone-candidate
   - crystallization
+  - milestone:M-117
 parent: exp5-M-TS-MIGRATION-P5
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-TS-MIGRATION-P5-B
+    experiments/quay-perpetual-stream/charters/M117-ts-migration-p5-b.md
+    /tmp/m117-absorb-entry.md
 ---
 ## Proposal
 

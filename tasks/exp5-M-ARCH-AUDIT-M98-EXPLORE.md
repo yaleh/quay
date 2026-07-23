@@ -61,3 +61,7 @@ Not selected M115 — exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM selected inste
 ## Not selected (M116)
 
 Not selected M116 — exp5-M-TS-MIGRATION-P5-A selected instead (capability-growth: real product TS migration work, diversifying value type from the last two governance-integrity/instrument-correction picks M114/M115). Good next pick.
+
+## Not selected (M117)
+
+Not selected M117 — exp5-M-TS-MIGRATION-P5-B selected instead (completes the DIR-058 sibling program). Same stale-status-flip bookkeeping issue noted at M115 still stands (AC/DoD all `[x]`, status still `todo`) — bundling a fix for this and PROBE-M98-001's identical issue into one small future administrative milestone would be efficient (verify both sets of findings still hold post-TS-migration, flip both statuses, no new investigation needed).

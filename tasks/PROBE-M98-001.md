@@ -87,3 +87,7 @@ Not selected M115 — exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM selected inste
 ## Not selected (M116)
 
 Not selected M116 — exp5-M-TS-MIGRATION-P5-A selected instead (capability-growth: real product TS migration work, diversifying value type from the last two governance-integrity/instrument-correction picks M114/M115). Good next pick.
+
+## Not selected (M117)
+
+Not selected M117 — exp5-M-TS-MIGRATION-P5-B selected instead (direct sibling completion of the just-landed P5-A, same established pattern, closes the DIR-058 program). This task's own AC/DoD boxes are already all `[x]` with a `milestone:M-99` label yet `status: todo` — looks like a stale/incomplete status-flip from whenever M99 actually landed the fix (commit `7461215` per its own DoD). Worth a quick status-only fix in a future pass rather than a real re-investigation.
