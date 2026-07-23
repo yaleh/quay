@@ -2,7 +2,7 @@
 id: exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH
 title: "defect: quay Core SEA binary crashes at startup (gate/registry.ts
   import.meta.url incompatible with CJS bundle) — DIR-004 Distribution urgent"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - defect
@@ -11,6 +11,10 @@ parent: null
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH
+    experiments/quay-perpetual-stream/charters/M121-sea-build-crash-fix.md
+    /tmp/m121-absorb-entry.md
 ---
 ## Proposal
 
@@ -60,7 +64,7 @@ research/experiment gate scripts (those resolve via `.quay/gates.yml`'s own
 `discoverWorkspaceRoot`/`loadWorkspaceGates` path in `factories/loader.ts`, untouched by this bug).
 
 ## Plan
-Resolved at M121 (`experiments/quay-perpetual-stream/charters/M121-sea-build-crash-fix.md`) — a
+N/A — resolved directly (`experiments/quay-perpetual-stream/charters/M121-sea-build-crash-fix.md`), a
 mechanical, single-file fix once the structural question above was actually investigated (no design
 decision needed): make `registry.ts`'s `__dirname` computation dual-mode safe (prefer the real CJS
 `__dirname` binding present in the SEA/esbuild-CJS bundle context, fall back to
@@ -71,16 +75,16 @@ dependency degrades to a graceful FAIL (not a crash) when unavailable — real e
 exit 1, no crash. This is the AC2 resolution: documented graceful-degrade, not a silent gap.
 
 ## Acceptance Criteria
-- [ ] `./packages/quay/dist-sea/quay --version` (and other gate-touching commands) run without crashing.
-- [ ] The REPO_ROOT-relative gate-path SEA-compatibility question (structural note above) is explicitly resolved one way or another (embed / disable-in-SEA / other), not left as a silent gap.
-- [ ] `bash packages/quay/scripts/build-sea.sh && ./packages/quay/dist-sea/quay --version` (and a `task list`/`gate` smoke command) pasted as real evidence, not asserted.
+- [x] `./packages/quay/dist-sea/quay --version` (and other gate-touching commands) run without crashing. — Independently re-verified by the M121 adversarial audit (fresh build via `build-sea.sh`, then `./dist-sea/quay --version` → `0.3.9` exit 0, `task list` exit 0, `gate DIR-038` → clean FAIL exit 1, no crash). See `milestones/M121/audits/iteration-0-adversarial-audit.md`.
+- [x] The REPO_ROOT-relative gate-path SEA-compatibility question (structural note above) is explicitly resolved one way or another (embed / disable-in-SEA / other), not left as a silent gap. — Independently re-verified: `grep -n REPO_ROOT packages/quay/src/gate/registry.ts` shows exactly one use site (`DOCUMENTS_DIR` at line 75), no other file under `packages/quay/src/gate/` references `REPO_ROOT`; `./dist-sea/quay gate DIR-038 --gate doc-quay-directive-skill` → `FAIL — no such document: DOC-001`, exit 1 (graceful, not a crash). See audit report.
+- [x] `bash packages/quay/scripts/build-sea.sh && ./packages/quay/dist-sea/quay --version` (and a `task list`/`gate` smoke command) pasted as real evidence, not asserted. — Independently re-run by the audit from a fresh worktree checkout; matches the milestone's own pasted transcript. See audit report.
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidation-lag, line-budget,
 impl-row N/A, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycle-record, tree-hygiene,
 worktree-branch-hygiene, audit-independence).
-- [ ] All 3 AC items above verified true with pasted command output.
-- [ ] it0 DoD meta-enforcer passes all clauses.
+- [x] All 3 AC items above verified true with pasted command output. — see AC ticks above; independently re-confirmed with real command output by the M121 adversarial audit, not merely re-asserted.
+- [x] it0 DoD meta-enforcer passes all clauses. — Follow-up re-audit pass (same audit session, after the orchestrator wrote the real ABSORB entry to `/tmp/m121-absorb-entry.md`, corrected the charter's Done-when-3 wording, fixed this task's `## Plan` to the required `N/A — ` form, and logged `DEV-12` in `inherited-core.md`): the audit synced those orchestrator-side edits into its own isolated worktree and independently re-ran `it0-dod-check.sh` and `quay gate` itself — both PASS, exit 0, with a real distinct GateEvent (timestamp 2026-07-23T09:57:21.644Z, alongside the orchestrator's own 09:54:31.391Z run). See audit report for full detail.
 
 ## Not selected (M119)
 
@@ -103,3 +107,19 @@ the product-owned `docs-managed/` D1 doc-gate only, not the research gate script
 had feared) — no split needed, single-file mechanical fix. This is also the explicit next step DIR-064-B
 named for demonstrating a real chart-2 Δv (S1 Distribution-reliability cov flip 0.20→0.80 on the SEA
 rows). See `experiments/quay-perpetual-stream/charters/M121-sea-build-crash-fix.md`.
+
+## Execution record (M121 ABSORB, 2026-07-23)
+
+**Milestone:** M121 · **Iterations:** 1 (single-pass development-class fix) · **Realized chart-2 Δv:**
++6.0 (S1 cov 0.20→0.40, weight 30) — not the full +18.0/0.80 originally predicted; residual tracked by
+`exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY` (filed this milestone). **Merge commits:** `3bab1a4`
+(crash fix), `6216596` (chart-2 Δv registration). **Adversarial-audit verdict:** CONCERNS (non-blocking
+— see `milestones/M121/audits/iteration-0-adversarial-audit.md`; logged as `DEV-12` in
+`inherited-core.md`, status `verified-eliminated`, corrected same-ABSORB). **DoD meta-enforcer:** PASS
+(`quay gate exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH`, GateEvent `2026-07-23T09:54:31.391Z` orchestrator +
+`2026-07-23T09:57:21.644Z` independent audit re-run, both PASS). **Real release evidence:** v0.3.9,
+https://github.com/yaleh/quay/actions/runs/29995456654 — `sea-verify-node-free` green (was the failing
+job pre-fix on run 29981401108). One-line outcome: quay Core's SEA binary crash (DIR-004-urgent,
+silently broken ~30 milestones) is fixed and independently re-verified; the charter's own quantified
+chart-2 prediction was only 1/3 met, honestly caught by the mandatory audit and corrected same-ABSORB
+rather than silently accepted.

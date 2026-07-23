@@ -6,6 +6,8 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH | defect: quay Core SEA binary crashes at startup (gate/registry.ts import.meta.url incompatible with CJS bundle) — DIR-004 Distribution urgent | DONE | - | milestone-candidate, defect, milestone:M-121 |
+| DIR-064-A | DIR-064 child A [halt-free]: build S1/S2/S3 chart-2 cov-calculator scripts (Distribution-reliability / Delivery-completeness / External-validation-reach) + fixtures + ≥80% test (no driver edit — loop-autonomous) | DONE | - | milestone-candidate, crystallization |
 | exp5-M-NODE-FLOOR-DISTRIBUTION-FIX | Fix .ts-entrypoint × Node-floor distribution regression (DIR-060, release-blocking) | DONE | - | milestone-candidate, crystallization |
 | exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH | defect: it0-dod-check.ts clause8 regex doesn't match the repo's actual milestone:M-NN (hyphenated) label convention | DONE | - | milestone-candidate, defect, milestone:M-119 |
 | exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE | Post-DIR-058 architecture audit (archguard, M118 mandatory explore): first-ever full 4-package structural analysis | DONE | - | milestone-candidate, milestone:M-118 |
@@ -124,17 +126,16 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| DIR-064-B | DIR-064 child B [human-steered: halt + golden-replay]: freeze chart-1 at 110.65 (EXHAUSTED) and write chart-2 (S1/S2/S3/S4, weights, 1:1 conversion) into inherited-core.md's VT model | open | - | milestone-candidate, crystallization, human-steered |
-| DIR-064-A | DIR-064 child A [halt-free]: build S1/S2/S3 chart-2 cov-calculator scripts (Distribution-reliability / Delivery-completeness / External-validation-reach) + fixtures + ≥80% test (no driver edit — loop-autonomous) | open | - | milestone-candidate, crystallization |
-| DIR-063-B | DIR-063 child B [human-steered: halt + golden-replay]: wire chart-saturation-check as a self-halt PRE-STEP in OUTER-LOOP.md, gate subagent-drafting strictly behind TRANSITION-DUE | open | - | milestone-candidate, crystallization, human-steered |
+| exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY | defect: sea-verify-node-free only covers linux-x64 — macos-arm64/windows-x64 SEA builds have no runtime-smoke evidence | open | - | milestone-candidate, defect |
+| exp5-M-PRODUCTIZED-DELIVERY | Complete productized delivery: all 4 packages + Claude Code plugin as one version-consistent unit (DIR-061) | open | - | milestone-candidate, epic |
+| exp5-M-CRYST-D2 | D2 Rewrite skills (/quay-directive, quay-task-to-plan) in baime formalized style (λ-Spec + contracts:) | open | - | milestone-candidate, crystallization |
+| exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH | defect: it0-dod-check.ts clause8 uses first-match-wins on multi-milestone-labeled tasks, misreports N/A on 3 real done tasks | open | - | milestone-candidate, defect |
 | DIR-063-A | DIR-063 child A [halt-free]: chart-saturation-check detector + milestones-since-last-transition counter + anti-gaming guard scripts + fixtures + ≥80% test (no driver edit — loop-autonomous) | open | - | milestone-candidate, crystallization |
 | DIR-062-A | DIR-062 child A [halt-free]: build the human-steered classifier + drivable-workspace fail-closed gate + fixtures + ≥80% test (no driver edit — loop-autonomous) | open | - | milestone-candidate, crystallization |
+| DIR-064-B | DIR-064 child B [human-steered: halt + golden-replay]: freeze chart-1 at 110.65 (EXHAUSTED) and write chart-2 (S1/S2/S3/S4, weights, 1:1 conversion) into inherited-core.md's VT model | open | - | milestone-candidate, crystallization, human-steered |
+| DIR-063-B | DIR-063 child B [human-steered: halt + golden-replay]: wire chart-saturation-check as a self-halt PRE-STEP in OUTER-LOOP.md, gate subagent-drafting strictly behind TRANSITION-DUE | open | - | milestone-candidate, crystallization, human-steered |
 | DIR-062-C | DIR-062 child C [proof, depends on B]: a REAL task's human-steered verdict produced by the wired SELECT logic (not hand-assigned), GateEvent-evidenced | open | - | milestone-candidate, crystallization |
 | DIR-062-B | DIR-062 child B [human-steered: halt + golden-replay]: write the 3-clause definition into inherited-core.md + wire OUTER-LOOP SELECT to call the classifier | open | - | milestone-candidate, crystallization, human-steered |
-| exp5-M-CRYST-D2 | D2 Rewrite skills (/quay-directive, quay-task-to-plan) in baime formalized style (λ-Spec + contracts:) | open | - | milestone-candidate, crystallization |
-| exp5-M-PRODUCTIZED-DELIVERY | Complete productized delivery: all 4 packages + Claude Code plugin as one version-consistent unit (DIR-061) | open | - | milestone-candidate, epic |
-| exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH | defect: it0-dod-check.ts clause8 uses first-match-wins on multi-milestone-labeled tasks, misreports N/A on 3 real done tasks | open | - | milestone-candidate, defect |
-| exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH | defect: quay Core SEA binary crashes at startup (gate/registry.ts import.meta.url incompatible with CJS bundle) — DIR-004 Distribution urgent | open | - | milestone-candidate, defect |
 | exp5-M-TS-MIGRATION | TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety | open | - | milestone-candidate, crystallization |
 | exp5-M-TS-MIGRATION-P4 | TS migration P4 (exp5 method-infra scripts, ADR-012): migrate the load-bearing gates/scripts to TS under the golden-diff discipline (like the it0-dod-check restructure) — behavior-preserving, autonomous. | open | - | milestone-candidate, crystallization |
 | DIR-055 | meta-cc session-history mining ROUTINE (LOOP-EXECUTABLE): a standing loop-driver routine (via DIR-051/[[DIR-056]]) that periodically dispatches a fresh-context probe which mines the project's Claude Code session history with meta-cc — surfacing recurring design/implementation defects, ADR candidates, and reusable/crystallizable patterns — and FILES them as evidence-backed tasks ROUTED by finding-type behind the quality/dedup/rate gate. The third standing probe (process/provenance axis) alongside self-validation (DIR-052) + architecture-analysis (DIR-053). | SELECTED | - | directive, milestone-candidate, milestone:M-102 |
@@ -148,4 +149,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_141 milestone-candidate task(s) as of 2026-07-23T08:40:58.266Z._
+_142 milestone-candidate task(s) as of 2026-07-23T10:01:51.208Z._

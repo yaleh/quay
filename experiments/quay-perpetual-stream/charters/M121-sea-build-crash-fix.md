@@ -74,8 +74,20 @@ fixes with an established verify pattern (the version.ts/version-sea-shim.js dua
 
 - [ ] All 3 AC items above verified true with pasted command output.
 - [ ] it0 DoD meta-enforcer passes all clauses.
-- [ ] chart-2 S1 (Distribution reliability) cov-calculator re-run shows the flip DIR-064-B's Δv
-  demonstration predicted (0.20→0.80 on the SEA rows), registering a real chart-2 Δv.
+- [ ] chart-2 S1 (Distribution reliability) cov-calculator re-run registers a real chart-2 Δv.
+
+**Reconciliation (post-ABSORB adversarial audit finding, CONCERNS verdict — see
+`milestones/M121/audits/iteration-0-adversarial-audit.md`):** this clause as originally drafted read
+"...shows the flip DIR-064-B's Δv demonstration predicted (0.20→0.80 on the SEA rows)" — a stronger,
+more specific numeric target than what was actually delivered. Real evidence only supports flipping
+`sea-linux-x64` (the only platform `sea-verify-node-free` runtime-smokes); `sea-macos-arm64` /
+`sea-windows-x64` builds succeeded but were never runtime-verified, so honestly remain unflipped. **What
+was actually delivered: cov 0.20→0.40, +6.0 chart-2 points — one-third of the original 0.20→0.80/+18.0
+prediction.** The clause text above is corrected to the weaker, actually-met claim; the original
+DIR-064-B prediction assumed all 3 SEA rows would move together, which turned out to require CI
+coverage (`sea-verify-node-free` is linux-only) that did not yet exist. The residual (macos/windows
+runtime verification, cov 0.40→0.80) is tracked as `exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY`, a
+real filed follow-up, not a silently dropped scope item.
 
 ## GATE-HASH-REF
 

@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 120** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 121** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- chart: 1→2 at M121/DIR-064 (2026-07-23) — chart-1 EXHAUSTED (frozen 110.65/120, flat 108 milestones m12→m120); chart-2 opened (S1 Distribution-reliability / S2 Delivery-completeness / S3 External-validation / S4 Methodology-executability-SOFT). See the "### Chart-2 transition" subsection in ## VT below. -->
 <!-- OLD chart: 1 header value retained in git history; transition is human-ratified (DIR-064) + human-wired this session. -->
 
@@ -119,21 +119,34 @@ guard, per DIR-038-C discipline: no judgment-scored inflatable cov):**
 
 | # | surface | weight | cov | points | objective cov source (script) |
 |---|---|---|---|---|---|
-| S1 | Distribution reliability | 30 | 0.20 | 6.00 | `scripts/chart2-s1-distribution-reliability.ts` (release artifacts passing floor-smoke / total; from `chart2-s1-artifacts.json`, cited to CI run 29981401108: npm-pack✓, SEA×3✗, plugin untested → 1/5) |
-| S2 | Delivery completeness | 30 | 0.00 | 0.00 | `scripts/chart2-s2-delivery-completeness.ts` (version-consistent ∧ manifest-published ∧ foreign-install-green; live 5-way version drift 0.3.8/0.3.5/0.3.22/0.3.16/0.3.5 → 0/3) |
+| S1 | Distribution reliability | 30 | 0.40 | 12.00 | `scripts/chart2-s1-distribution-reliability.ts` (release artifacts passing floor-smoke / total; from `chart2-s1-artifacts.json`, cited to CI run 29995456654: npm-pack✓, sea-linux-x64✓ (M121 fix), sea-macos-arm64✗/sea-windows-x64✗ (build-only, no runtime-smoke coverage yet), plugin untested → 2/5) |
+| S2 | Delivery completeness | 30 | 0.00 | 0.00 | `scripts/chart2-s2-delivery-completeness.ts` (version-consistent ∧ manifest-published ∧ foreign-install-green; live 5-way version drift 0.3.9/0.3.5/0.3.22/0.3.16/0.3.5 (packages/quay bumped by M121; the other 4 sources unchanged/unrelated to this milestone) → 0/3) |
 | S3 | External-validation reach | 25 | 0.10 | 2.50 | `scripts/chart2-s3-external-validation.ts` (registry workspaces with a real ABI task-status GateEvent / target; `drivable-workspaces.yml`-bounded → 1/10, archguard reached) |
 | **S4** | **Methodology executability** | **15 SOFT/UNWIRED** | — | **0 (held out)** | recorded but EXCLUDED from the wired total + slope/halt inputs until it has a hard enumerable denominator — same treatment DIR-038-C gave the outward term; wiring a subjective count would reopen the self-referential gaming hole |
-| **chart-2 wired current (S1+S2+S3, after m121)** | | **/85 wired** | | **8.50** | |
-| **global VT (110.65 chart-1 frozen + 8.50 chart-2)** | | | | **119.15** | |
+| **chart-2 wired current (S1+S2+S3, after m121)** | | **/85 wired** | | **14.50** | |
+| **global VT (110.65 chart-1 frozen + 14.50 chart-2)** | | | | **125.15** | |
 
 **Opening reading computed live (2026-07-23), not asserted** — all three calculators run + their
 verdicts pasted; each is a load-bearing script with a ≥80%-coverage sibling test (S1 20/20 @97.4%,
-S2 21/21 @97.9%, S3 18/18 @94.9%; `loadbearing-test-gate.sh` PASS). **Δv demonstration (DIR-064 AC #5):**
-closing `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` flips the 3 SEA rows in `chart2-s1-artifacts.json`,
-moving S1 cov 0.20→0.80 → +18.0 chart-2 pts — i.e. the open backlog now registers real chart-2 Δv, so
-the self-halt's 0.000 slope turns positive as SEA-crash / DIR-061 / DIR-062 land. Future transitions
-(chart-2→chart-3) use DIR-063's semi-automatic detect→draft→ratify mechanism rather than another manual
-100-milestone-delayed one.
+S2 21/21 @97.9%, S3 18/18 @94.9%; `loadbearing-test-gate.sh` PASS). **Δv demonstration (DIR-064 AC #5)
+— REALIZED at M121 (2026-07-23):** closing `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` flipped the
+`sea-linux-x64` row in `chart2-s1-artifacts.json` (real evidence: `sea-verify-node-free` job green on
+a Node-free container, CI run 29995456654 — the exact job that failed pre-fix on run 29981401108),
+moving S1 cov 0.20→**0.40** → **+6.0** chart-2 pts. This is the FIRST real, non-asserted chart-2 Δv —
+the self-halt's 0.000 slope moves off zero. **Not the full 0.20→0.80/+18.0 originally predicted**:
+`sea-macos-arm64`/`sea-windows-x64` builds succeeded in the same run but have no runtime-smoke CI
+coverage yet (`sea-verify-node-free` is linux-only) — honestly left unflipped rather than asserting
+unearned evidence; tracked as `exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY` (a real filed follow-up,
+would move S1 cov 0.40→0.80 once landed). M121's own adversarial audit (CONCERNS, non-blocking) caught
+this same gap between the original prediction and the actual delivery — logged as `DEV-12` in
+`inherited-core.md`. Future transitions (chart-2→chart-3) use DIR-063's semi-automatic
+detect→draft→ratify mechanism rather than another manual 100-milestone-delayed one.
+
+VT curve (append, chart-2 basis): `[ (m121-opening, 8.50/85, S1=0.20/S2=0.00/S3=0.10 — asserted
+opening reading, not yet a real milestone Δv), (m121/exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH, 14.50/85,
+Δv=+6.0 — REAL, CI-evidenced: S1 0.20→0.40 via sea-linux-x64 flip) ]`
+Slope (marginal chart-2 points / milestone): **+6.0** (1 real data point so far — the self-halt's
+0.000 rolling-window slope now has a genuine nonzero chart-2 milestone to average in going forward).
 
 VT curve (append, chart-1 basis from m3 forward):
 `[ (m0, 82.25/100), (m1/M-DIST, 88.25/100, Δv=+6.0), (m2/M-GATES, 88.25/100, Δv=0, methodology-infra
@@ -1149,3 +1162,5 @@ but its own Plan admits it needs investigation/sizing first — not yet cleanly 
 
 m119 · exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH · Δv=0 (v̂=0) · outcome=DONE (`/milestone:M(\d+)/i` → `/milestone:M-?(\d+)/i`, one line; clause8 now genuinely applies against real hyphenated-label tasks instead of silently N/A-passing — confirmed live against `exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE`/M118 and this task's own `milestone:M-119` label; `dod-fixture-selfcheck.sh` 17/17 golden-diff unchanged; 343/343 experiments suite + tsc clean across all 4 packages) · audit=CONCERNS (non-blocking — audit independently re-tested 13 additional edge cases beyond the report, found no new false positive from the fix itself, but discovered a SEPARATE pre-existing multi-milestone-label first-match-wins defect affecting 3 other real done tasks, unrelated to and not introduced/fixed by this milestone; filed as exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH) · merge=36d2a67 · → milestones/M119/
 m120 · exp5-M-NODE-FLOOR-DISTRIBUTION-FIX · Δv=0 (v̂=0) · outcome=DONE (DIR-060: repointed `packages/quay/package.json`'s `bin` field at a new self-contained ESM bundle, `dist/quay.js`, built by a new `build-dist.mjs`/`build-dist.sh` — restores the declared Node>=20 floor for the distributed npm-pack tarball, which M116's `bin/*.js`→`.ts` migration had silently broken (only Node>=23 runs `.ts` natively); `exports` map deliberately left UNCHANGED — an architect-review round rejected repointing it after a live `require.resolve` repro showed it would break ~29 quay-native test files; plugin's vendored Core copy resynced to the built bundle; CI/release runner Node bumped to 24 (for spawning `.ts` CLI subprocesses in tests) + new `dist-verify-node-floor` job added to both `ci.yml`/`release.yml` (builds+installs+runs the packaged tarball under real Node 20). Getting a REAL green release run took 3 tag iterations, each surfacing a genuinely new pre-existing bug the Node-floor fix exposed: v0.3.6 (release job CANCELLED on 10min timeout — `serve-github`/`provider-abi-conformance` live-GitHub suites not excluded from CI, previously masked by the OLD Node-20 `.ts` crash aborting the step first); v0.3.7 (release job FAILED exit 1 — a THIRD live-GitHub file, `cli-edit-parity-conformance.test.mjs`, doing mutating writes needing broader org perms, not previously documented); v0.3.8 (`release`=success, `dist-verify-node-floor`=success, all 3 `sea-release`=success; `sea-verify-node-free`=failure but confirmed byte-identical to the pre-existing, independently-tracked `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` on v0.3.5-v0.3.8 alike — explicitly out of this milestone's AC3 scope, not silently passed over). Real run: https://github.com/yaleh/quay/actions/runs/29981401108) · audit=NO REFUTATION FOUND (final acceptance audit independently re-verified all 4 AC + DoD against live GitHub Actions state — not the paraphrase handed to it — before performing the task's own write-back per DIR-020; prior iteration-0 audit's CONCERNS, non-blocking, on the build-dist.mjs dependency-inlining deviation stands unchanged) · merge=7185825 · → milestones/M120/
+(DIR-064-A/B chart-2 transition itself landed between m120 and m121 as directive-work, not a counted milestone — see dashboard's "Chart-2 transition" section above; commits `be3561a`/`057bfc5`/`e70a101`.)
+m121 · exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH · Δv=+6.0 (v̂=+18.0, chart-2 S1) · outcome=DONE (quay Core SEA binary startup crash fixed — `gate/registry.ts`'s `__dirname` computation made dual-mode CJS/ESM-safe, mirroring the version.ts/version-sea-shim.js precedent; the task's own feared "deeper structural question" (REPO_ROOT SEA-compat) resolved in-pass as narrower than assumed — scoped only to the product-owned `docs-managed/` D1 doc-gate, which now degrades gracefully instead of crashing; real v0.3.9 release run confirms the fix — `sea-verify-node-free` green on a genuine Node-free container, was the failing job pre-fix; chart-2 S1 cov 0.20→0.40 (+6.0 pts, not the full +18.0/0.80 DIR-064-B predicted — `sea-macos-arm64`/`sea-windows-x64` builds succeeded but have no runtime-smoke CI coverage yet, honestly left unflipped, follow-up filed as `exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY`); 370/370 packages/quay suite + 59/59 chart-2 calculator suite green, tsc clean, delivery-standalone-smoke 0 RED) · audit=CONCERNS (non-blocking — caught the charter's own Done-when-3 quantified target (0.20→0.80) was only 1/3 met by iteration-0's actual delivery, undisclosed against the charter's literal wording in iteration-0's top-line framing though the underlying facts were honestly stated elsewhere; corrected same-ABSORB via a charter Reconciliation paragraph + `DEV-12` deviation-log row; independently re-confirmed the corrected DoD meta-enforcer PASS via a resumed follow-up audit pass, ticking the final DoD box itself per DIR-020) · merge=3bab1a4+6216596 · → milestones/M121/
