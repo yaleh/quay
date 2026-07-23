@@ -69,3 +69,17 @@ jobs:
           npm install -g "${TGZ}"
           quay --help
           quay --version
+
+  # M132 (exp5-M-VERSION-CHECK-CI): fail-closed version consistency gate.
+  # Runs version-consistency-check.ts on every push; fails the build if any
+  # of the 8 version-bearing artifacts has drifted from the unified version.
+  version-consistency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check version consistency across all artifacts
+        run: node --experimental-strip-types scripts/version-consistency-check.ts
