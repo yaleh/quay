@@ -66,3 +66,8 @@ necessary-not-sufficient. Done ONLY when:
 Not selected — `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` selected instead: higher priority (DIR-004
 URGENT, explicitly named by DIR-064-B as the next chart-2 S1 Δv mover), and cleanly investigation-
 resolved this pass. Good next halt-free exploit pick — no blocking issue, just lower priority.
+
+## Not selected (M122)
+
+Not selected — `exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY` selected instead: direct continuation of
+M121's own chart-2 S1 work, higher immediate value this pass. Still a good next halt-free exploit pick.

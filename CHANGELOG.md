@@ -2,6 +2,20 @@
 
 ## v0.3.x — M08-merge-recover (dated per-item below; see git log for exact commit dates)
 
+### v0.3.10 (2026-07-23) — cross-platform SEA runtime-smoke CI coverage (M122)
+
+`release.yml`'s `sea-verify-node-free` job (the only runtime-smoke verification of the SEA binaries)
+covered Linux only — `sea-release`'s macOS/Windows matrix legs proved those SEA builds succeed, but
+never that they *run* without crashing. No functional code change; CI-only.
+
+#### Added
+
+- New `sea-verify-node-free-cross-platform` job (macos-latest/windows-latest matrix): downloads the
+  same-run `sea-release` archive for each platform, strips every PATH directory containing a
+  `node`/`node.exe` binary (GitHub's macOS/Windows runners can't use the Linux job's `container:`
+  isolation), confirms `command -v node` genuinely fails under the stripped PATH, then runs
+  `--help`/`serve` — the same coverage the Linux job already has.
+
 ### v0.3.9 (2026-07-23) — SEA binary startup crash fix (M121, DIR-004)
 
 The quay Core SEA (Single Executable Application) binary crashed at startup for any gate-touching

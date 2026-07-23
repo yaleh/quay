@@ -54,3 +54,8 @@ worktree-branch-hygiene, audit-independence).
 Not selected — `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` selected instead: higher DIR-004-urgency
 priority and an explicit chart-2 Δv mover named by DIR-064-B. This candidate is small, cleanly bounded,
 and a good next exploit pick.
+
+## Not selected (M122)
+
+Not selected — `exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY` selected instead: direct continuation of
+M121's own chart-2 S1 work, higher immediate value this pass. Still a good next exploit pick.

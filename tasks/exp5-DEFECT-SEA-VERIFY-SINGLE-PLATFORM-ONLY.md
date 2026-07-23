@@ -6,6 +6,7 @@ status: todo
 labels:
   - milestone-candidate
   - defect
+  - milestone:M-122
 parent: null
 children: []
 extra:

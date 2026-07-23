@@ -52,3 +52,9 @@ Not selected — `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` selected instead: highe
 URGENT, explicitly named by DIR-064-B as the next chart-2 S1 Δv mover), and this milestone's own
 in-pass investigation resolved its sizing concern cleanly. This candidate remains a good next
 halt-free exploit pick — no blocking issue, just lower priority this pass.
+
+## Not selected (M122)
+
+Not selected — `exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY` selected instead: direct continuation of
+M121's own chart-2 S1 work (completes the 0.20→0.80 flip DIR-064-B originally predicted), higher
+immediate value than this candidate. Still a good next halt-free exploit pick.

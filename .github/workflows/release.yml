@@ -268,6 +268,95 @@ jobs:
           curl -sf -o /dev/null -w "http_code:%{http_code}\n" http://localhost:18080/
           kill "$SERVE_PID"
 
+  # M122 (exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY): the macOS/Windows counterpart to
+  # sea-verify-node-free above. GitHub Actions `container:` (the Linux job's Node-free technique)
+  # only supports Linux runners — macos-latest/windows-latest images ship Node.js preinstalled with
+  # no container isolation available. Proves Node-freeness instead by explicitly stripping every
+  # PATH directory containing a `node`/`node.exe` binary before running the SEA binary, then
+  # confirming `command -v node` genuinely fails under that stripped PATH (same standard of evidence
+  # as the Linux job's "no node on PATH" check, achieved by a different mechanism appropriate to
+  # runners that can't be containerized).
+  sea-verify-node-free-cross-platform:
+    needs: sea-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            asset_suffix: macos-arm64
+            archive_ext: tar.gz
+          - os: windows-latest
+            asset_suffix: windows-x64
+            archive_ext: zip
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Download the SEA archive published by sea-release (this run)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Same private-repo assets-API fetch technique as sea-verify-node-free above (the public
+          # browser_download_url 404s on a private repo even with a valid token).
+          VERSION="$(echo "${{ github.ref_name }}" | sed 's/^v//')"
+          ASSET_NAME="quay-sea-${VERSION}-${{ matrix.asset_suffix }}.${{ matrix.archive_ext }}"
+          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}"
+          ASSET_ID="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${API}" \
+            | grep -B2 "\"name\": *\"${ASSET_NAME}\"" \
+            | grep '"id":' | head -1 | grep -o '[0-9]\+')"
+          if [ -z "${ASSET_ID}" ]; then
+            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ github.ref_name }}" >&2
+            exit 1
+          fi
+          curl -sfL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
+            -o "${ASSET_NAME}" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${ASSET_ID}"
+          mkdir -p extracted
+          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
+            7z x "${ASSET_NAME}" -oextracted >/dev/null
+          else
+            tar -xzf "${ASSET_NAME}" -C extracted
+          fi
+      - name: Strip Node.js from PATH and confirm it is genuinely gone
+        shell: bash
+        run: |
+          set -euo pipefail
+          STRIPPED_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r d; do
+            if [ -x "$d/node" ] || [ -x "$d/node.exe" ]; then
+              continue
+            fi
+            printf '%s\n' "$d"
+          done | paste -sd: -)"
+          echo "STRIPPED_PATH=${STRIPPED_PATH}" >> "$GITHUB_ENV"
+          if PATH="${STRIPPED_PATH}" command -v node >/dev/null 2>&1; then
+            echo "ERROR: node is still present under the stripped PATH — this job does not prove Node-free operation." >&2
+            exit 1
+          fi
+          echo "Confirmed: no node on the stripped PATH."
+      - name: Run quay --help (no Node on stripped PATH)
+        shell: bash
+        run: |
+          cd extracted
+          chmod +x ./quay ./quay-native 2>/dev/null || true
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            PATH="${STRIPPED_PATH}" ./quay.exe --help
+          else
+            PATH="${STRIPPED_PATH}" ./quay --help
+          fi
+      - name: Run quay serve and curl it (no Node on stripped PATH)
+        shell: bash
+        run: |
+          cd extracted
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            PATH="${STRIPPED_PATH}" ./quay.exe serve --port 18081 &
+          else
+            PATH="${STRIPPED_PATH}" ./quay serve --port 18081 &
+          fi
+          SERVE_PID=$!
+          sleep 2
+          curl -sf -o /dev/null -w "http_code:%{http_code}\n" http://localhost:18081/
+          kill "$SERVE_PID"
+
   # M120 (DIR-060): floor-verification for the npm-pack tarball. Mirrors
   # sea-verify-node-free's asset-fetch shape (download the asset THIS run just
   # published, private-repo assets API), but keeps Node PRESENT and PINNED to
