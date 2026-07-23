@@ -41,9 +41,21 @@ jobs:
         # against yaleh/quay. Without GH_TOKEN the gh CLI subprocess returns 403.
         # github.token has read access to this repo's issues by default.
         # quay-github package tests are excluded (they require broader org perms).
+        #
+        # M120 (DIR-060) follow-up fix: this bare glob also silently pulled in
+        # test/serve-github.test.mjs and test/provider-abi-conformance.test.mjs,
+        # 2 suites CLAUDE.md documents as requiring exclusion for a clean run
+        # (they hit LIVE GitHub and FAIL/hang when github.token lacks write
+        # perms or repo state drifts). This was previously masked: the OLD
+        # Node-20 `.ts`-extension crash always aborted this step before
+        # reaching these files. Fixing the Node-floor regression exposed this
+        # separate, pre-existing gap — a real v0.3.6 release run hit exactly
+        # this (provider-abi-conformance crashed on a 403, then the job hung
+        # past the 10-minute timeout). Apply the same exclusion CLAUDE.md's
+        # own local-run instructions already document.
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs
+        run: node --test $(ls packages/quay/test/*.mjs | grep -vE 'serve-github|provider-abi-conformance') packages/quay-native/test/*.test.mjs
 
       - name: Build release artifact (npm pack)
         id: pack

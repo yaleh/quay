@@ -25,7 +25,16 @@ jobs:
           # separately by the dist-verify-node-floor job below.
           node-version: '24'
       - run: npm install
-      - run: node --test packages/*/test/*.test.mjs
+      - name: Run tests
+        # M120 (DIR-060) follow-up fix: exclude the 2 live-GitHub-hitting
+        # suites CLAUDE.md documents as required exclusions for a clean run
+        # (test/serve-github.test.mjs, test/provider-abi-conformance.test.mjs)
+        # — they FAIL/hang when github.token lacks write perms or repo state
+        # drifts. Previously masked here too: the OLD Node-20 `.ts`-extension
+        # crash always aborted this step first. A real v0.3.6 release run
+        # exposed the hang (provider-abi-conformance crashed on a 403, job
+        # ran past its 10-minute timeout) once that crash was fixed.
+        run: node --test $(ls packages/*/test/*.test.mjs | grep -vE 'serve-github|provider-abi-conformance')
         env:
           GH_TOKEN: ${{ github.token }}
 
