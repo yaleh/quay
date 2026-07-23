@@ -1,0 +1,11 @@
+{
+  "//": "S1 Distribution-reliability evidence — each artifact's runtime-smoke pass/fail on the declared Node floor, cited to a real CI run. Updated from release-workflow evidence. Read by chart2-s1-distribution-reliability.ts.",
+  "release": "v0.3.8",
+  "artifacts": [
+    {"name": "npm-pack (quay-*.tgz)", "floorSmokePass": true,  "evidence": "dist-verify-node-floor job green, run 29981401108"},
+    {"name": "sea-linux-x64",         "floorSmokePass": false, "evidence": "sea-verify-node-free red (import.meta.url CJS crash), run 29981401108"},
+    {"name": "sea-macos-arm64",       "floorSmokePass": false, "evidence": "same crash class, run 29981401108"},
+    {"name": "sea-windows-x64",       "floorSmokePass": false, "evidence": "same crash class, run 29981401108"},
+    {"name": "plugin-bundle",         "floorSmokePass": false, "evidence": "untested — no plugin runtime-smoke job exists yet"}
+  ]
+}

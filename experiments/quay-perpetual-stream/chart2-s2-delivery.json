@@ -1,0 +1,7 @@
+{
+  "//": "S2 Delivery-completeness evidence for sub-checks (2) full-manifest-published and (3) foreign-install-e2e-green. Version-consistency (1) is computed LIVE from the 5 package.json/marketplace.json version fields, not stored here. Read by chart2-s2-delivery-completeness.ts.",
+  "fullManifestPublished": false,
+  "fullManifestEvidence": "no delivery manifest exists yet (DIR-061 scope); release publishes Core-only",
+  "foreignInstallE2eGreen": false,
+  "foreignInstallEvidence": "no foreign-workspace install e2e exists yet"
+}
