@@ -6,16 +6,32 @@ status: todo
 labels:
   - milestone-candidate
   - crystallization
+  - milestone:M-130
 parent: exp5-M-CRYST
 children: []
-extra: {}
+extra:
+  schema: v1
 ---
 ## Proposal
-Rewrite the skills in the formalized style (§9): ## Spec λ-block + self-verifying contracts: + reference/ offload. Apply code-over-prompt (Axis 2′) — deterministic steps become code, prompt shrinks to judgment.
+
+Rewrite the loop's skills (/quay-directive, quay-task-to-plan) in the formalized style (§9):
+## Spec λ-block + self-verifying contracts: + reference/ offload. Apply code-over-prompt
+(Axis 2′) — deterministic steps become code, prompt shrinks to judgment.
+
+## Plan
+
+N/A — methodology-class. Rewrite two skills to formalized baime style; validate end-to-end.
+
 ## Acceptance Criteria
-- [ ] Each rewritten skill has a ≤30-line Spec + ≥3 self-contracts that quay (D1) validates; net line count down.
+- [ ] Each rewritten skill has a ≤30-line Spec + ≥3 self-contracts
+- [ ] Rewritten skills produce correct objects end-to-end (validated against real tasks)
+- [ ] Net line count down vs pre-rewrite baseline
+- [ ] `it0-split-or-commit-check.ts .` + standard non-flaky suite stay green
+
 ## Definition of Done
-Real: the rewritten skills are validated and produce correct objects end-to-end.
+Standard inherited-core DoD clauses apply.
+- [ ] Both skills rewritten and validated end-to-end
+- [ ] it0 DoD meta-enforcer passes all clauses
 
 ## Not selected (M121)
 
