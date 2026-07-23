@@ -6,7 +6,6 @@ status: todo
 labels:
   - milestone-candidate
   - crystallization
-  - human-steered
 parent: exp5-M-CRYST
 children: []
 extra: {}
