@@ -10,7 +10,7 @@ allowed-tools: Bash, Read, Write, Edit
 
     λ(conversation, opts?) → CanonicalTask
 
-    detect  :: Context → ActiveExperiment                           -- bash: grep 'Status:' experiments/*/README.md
+    detect  :: Context → ActiveExperiment                           -- bash: grep '\\*\\*Status\\*\\*:' experiments/*/README.md
     next_id :: ActiveExperiment → DIR-NNN                           -- bash: quay task list --label directive --json | sort | +1
     author  :: ConversationContext × ActiveExperiment → Directive   -- from conversation, not invented
     create  :: Directive → task_write(label:directive, body, schema:v1) → task_get(readback)

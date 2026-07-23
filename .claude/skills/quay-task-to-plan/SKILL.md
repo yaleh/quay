@@ -31,8 +31,8 @@ allowed-tools: Bash, Read, Write
 ### Phase 6 — Proposal
 
 1. **Read.** `task_get <id>` via Provider ABI. Extract `body`, `labels`, `title`, `parent`/`children`.
-2. **Dispatch N proposals.** N=3 independent agents with `subagent_type: "general-purpose"`, each fed the task + charter context. Prompt: `reference/proposal-subagent.md`.
-3. **Adjudicate.** One agent compares all N proposals. Prompt: `reference/adjudicate-proposal.md`. Output: reconciled proposal with explicit convergence/divergence notes.
+2. **Dispatch N proposals.** N=3 independent agents with `subagent_type: "general-purpose"`, each fed the task + charter context. Prompt: `prompts/proposal-subagent.md`.
+3. **Adjudicate.** One agent compares all N proposals. Prompt: `prompts/adjudicate-proposal.md`. Output: reconciled proposal with explicit convergence/divergence notes.
 4. **Write back.** `task_write(id, body=<reconciled>)` → `task_get(readback)` → verify. Pasted evidence.
 
 ### Phase 7 — Plan
@@ -41,4 +41,4 @@ allowed-tools: Bash, Read, Write
 6. **Convergent check.** One agent checks the plan. Repeat until Phase-5 stopping rule (≤2 rounds with no new substantive issues).
 7. **Commit.** `git add docs/plans/<slug>.md tasks/<id>.md && git commit -m "... "`.
 
-**Reference:** `reference/proposal-subagent.md` (agent prompt template for step 2); `reference/adjudicate-proposal.md` (adjudication prompt for step 3); `reference/plan-check-subagent.md` (plan-check prompt for step 6); `docs/plans/3-7-quay-task-to-plan-skill.md` (full Phase-6/7 design); `tasks/DIR-011.md` (portable proposal write-back).
+**Reference:** `prompts/proposal-subagent.md` (agent prompt template for step 2); `prompts/adjudicate-proposal.md` (adjudication prompt for step 3); `prompts/plan-check-subagent.md` (plan-check prompt for step 6); `docs/plans/3-7-quay-task-to-plan-skill.md` (full Phase-6/7 design); `tasks/DIR-011.md` (portable proposal write-back).
