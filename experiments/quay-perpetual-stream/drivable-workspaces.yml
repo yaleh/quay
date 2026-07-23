@@ -1,0 +1,47 @@
+# drivable-workspaces.yml — human-authorized registry of workspaces the quay
+# autonomous loop MAY use as validation / experimentation targets and (where a
+# Claude Code / tmux session exists) remote-drive per ADR-016.
+#
+# Governed by DIR-062 (tightened `human-steered` semantics). This file is the
+# SINGLE SOURCE of the cross-workspace-drive authorization; the DIR-062
+# fail-closed gate reads it and REFUSES any task that would drive a workspace
+# not covered here. Editing THIS file is the mechanical form of the human's
+# "I declare workspace X drivable" — not a sentence in a chat the loop can't read.
+#
+# Semantics (DIR-062):
+#   - A task is NOT `human-steered` on cross-workspace grounds if every workspace
+#     it drives is covered here. (It is still `human-steered` if it edits the
+#     driver — OUTER-LOOP.md / inherited-core.md / inner-iteration prompts — or if
+#     it REDIRECTS the loop's value source to build a foreign product; those are
+#     independent of this registry.)
+#   - Single-driver hygiene: for a covered workspace, the loop is the SOLE
+#     authorized driver of its Claude Code / tmux session while it operates it. A
+#     human must not concurrently type in that session (declaring it drivable
+#     cedes it to the loop for the duration).
+#   - scope: validation — the loop USES these workspaces to experiment/validate
+#     quay's own product + methodology. It does NOT adopt any of them as its
+#     value source / mission (that redirection is rejected — see DIR-036).
+#
+# Authorized by: Yale Huang, 2026-07-23.
+# Declaration: "The current server is entirely quay's experimental substrate;
+#   ALL projects under /home/yale/work are drivable validation targets."
+
+authorized_root: /home/yale/work   # any workspace under this path is authorized
+scope: validation                  # not mission-redirection
+
+# Currently-known workspaces under authorized_root (documentation + session map).
+# New projects added under authorized_root are covered automatically by the
+# authorized_root rule; list here for auditability + tmux session mapping.
+workspaces:
+  - path: /home/yale/work/quay              # the home repo (the loop's own value source)
+  - path: /home/yale/work/archguard
+    session: archguard-5                    # live Claude Code session (ADR-016 remote-drive)
+  - path: /home/yale/work/manda
+  - path: /home/yale/work/meta-cc
+  - path: /home/yale/work/baime
+  - path: /home/yale/work/freeboard-sk
+  - path: /home/yale/work/lumina-solar-unified
+  - path: /home/yale/work/signalk-server
+  - path: /home/yale/work/slash-voice
+  - path: /home/yale/work/esp-blink
+  - path: /home/yale/work/esp-motty
