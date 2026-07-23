@@ -3,7 +3,7 @@ id: DIR-063-A
 title: "DIR-063 child A [halt-free]: chart-saturation-check detector +
   milestones-since-last-transition counter + anti-gaming guard scripts +
   fixtures + ≥80% test (no driver edit — loop-autonomous)"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -42,17 +42,17 @@ N/A — resolved via a focused single milestone; shape well-defined by [[DIR-063
 items 1/2/4 (the halt-free half). Three standalone scripts + fixtures + sibling tests; no driver edit.
 
 ## Acceptance Criteria
-- [ ] `chart-saturation-check` returns NOT-DUE for a fixture with non-zero slope / headroom above ε,
+- [x] `chart-saturation-check` returns NOT-DUE for a fixture with non-zero slope / headroom above ε,
   and `TRANSITION-DUE` for a fixture matching the real cp-120 state (slope 0, headroom small, counter
   108 >> 10) — both fixtures run, both verdicts pasted.
-- [ ] The `milestones-since-last-transition` counter computes 108 against the real dashboard history
+- [x] The `milestones-since-last-transition` counter computes 108 against the real dashboard history
   (chart-1 opened m3, no transition since) — pasted, not asserted.
-- [ ] The anti-gaming guard REJECTs a candidate surface with a non-machine-verifiable/uncapped cov
+- [x] The anti-gaming guard REJECTs a candidate surface with a non-machine-verifiable/uncapped cov
   source (RED fixture) and REJECTs a candidate lacking a residual-headroom adjudication, and PASSes one
   with a registry/CI-bounded cov AND an explicit adjudication (GREEN fixture) — both pasted.
-- [ ] All three scripts are load-bearing with sibling `*.test.mjs` at ≥80% coverage (`node --test` exit
+- [x] All three scripts are load-bearing with sibling `*.test.mjs` at ≥80% coverage (`node --test` exit
   0; figures pasted); `loadbearing-test-gate.sh` PASSes.
-- [ ] `node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts .` + the standard
+- [x] `node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts .` + the standard
   non-flaky suite stay green.
 
 ## Definition of Done
@@ -60,9 +60,9 @@ Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidati
 impl-row N/A, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycle-record, tree-hygiene,
 worktree-branch-hygiene, audit-independence). Per DIR-026 Reading A: the scripts merely existing is
 necessary-not-sufficient. Done ONLY when:
-- [ ] All three scripts land as real load-bearing scripts with passing sibling tests (≥80%), verified
+- [x] All three scripts land as real load-bearing scripts with passing sibling tests (≥80%), verified
   by real `node --test` runs (pasted).
-- [ ] This child touches NO driver file — verifiable by `git show --stat` on its landing commit (no
+- [x] This child touches NO driver file — verifiable by `git show --stat` on its landing commit (no
   `OUTER-LOOP.md`/`inherited-core.md`/inner-iteration-prompt in the diff); if it does, it is misscoped
   and belongs in [[DIR-063-B]].
 
