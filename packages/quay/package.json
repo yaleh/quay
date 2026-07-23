@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "quay": "./bin/quay.ts"
+    "quay": "./dist/quay.js"
   },
   "exports": {
     "./adr-store": "./src/adr-store.ts",
@@ -18,7 +18,8 @@
     "CHANGELOG.md",
     "LICENSE.md",
     "bin",
-    "src"
+    "src",
+    "dist"
   ],
   "engines": {
     "node": ">=20.0.0"

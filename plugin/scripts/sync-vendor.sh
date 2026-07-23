@@ -32,11 +32,19 @@ if [ ! -d "$SRC" ]; then
   exit 2
 fi
 
-echo "[sync-vendor] mirroring packages/quay -> plugin/vendor/quay ..."
+# M120 (DIR-060): mirror the BUNDLED ESM dist/quay.js, not the raw bin/src
+# copies. The M116 .ts entrypoint only runs on Node >=23; the plugin must run on
+# the declared Node-20 floor, so the vendored Core is the transpiled, fully
+# self-contained bundle produced by build-dist.sh (zero external runtime deps —
+# which is also why the vendor package.json no longer needs `dependencies` nor a
+# package-lock.json / `npm install` step). plugin/.mcp.json points node at
+# vendor/quay/dist/quay.js.
+echo "[sync-vendor] building + mirroring packages/quay dist bundle -> plugin/vendor/quay/dist ..."
 mkdir -p "$DEST"
-rm -rf "${DEST}/bin" "${DEST}/src"
-cp -r "${SRC}/bin" "${DEST}/bin"
-cp -r "${SRC}/src" "${DEST}/src"
+rm -rf "${DEST}/bin" "${DEST}/src" "${DEST}/dist"
+bash "${SRC}/scripts/build-dist.sh"
+mkdir -p "${DEST}/dist"
+cp "${SRC}/dist/quay.js" "${DEST}/dist/quay.js"
 
 # Author/execute skills: mirror quay-native's npm-package-shipped skills
 # (packages/quay-native/skills/{author,execute}/SKILL.md — the SAME files
@@ -84,10 +92,11 @@ for f in "${PLUGIN_DIR}/scripts/task-schema.ts" "${PLUGIN_DIR}/scripts/task-sche
   perl -0pi -e 's/\(exp5 \/\s*\n(\/\/|#) canonical-task-schema/(canonical-task-schema/g; s/exp5-M-CRYST-B1\/DIR-028/DIR-028/g; s/\bexp5\b\s*\/\s*//g' "$f"
 done
 
-# package.json: same runtime dependencies as packages/quay, minus devDependencies
-# (the vendored copy is a run-only mirror, never built/tested in place) and
-# renamed so `npm ls` inside the plugin cache doesn't collide with the
-# workspace package of the same name.
+# package.json: slimmed to name/version/type only (DIR-061 keeps the version).
+# The vendored Core is a fully-bundled dist/quay.js with NO external runtime
+# dependency to resolve, so it carries no `dependencies` and needs no
+# package-lock.json / `npm install --omit=dev` step. Renamed so `npm ls` inside
+# the plugin cache doesn't collide with the workspace package of the same name.
 node -e '
 const fs = require("fs");
 const path = require("path");
@@ -97,10 +106,12 @@ const out = {
   version: src.version,
   private: true,
   type: src.type,
-  dependencies: src.dependencies,
 };
 fs.writeFileSync(path.join(process.argv[2], "package.json"), JSON.stringify(out, null, 2) + "\n");
 ' "$SRC" "$DEST"
+# A fully-bundled vendor copy never resolves node_modules — drop any stale
+# package-lock.json a previous raw-source sync may have left behind.
+rm -f "${DEST}/package-lock.json"
 
 echo "[sync-vendor] wrote ${DEST}/package.json (version $(node -p "require('${DEST}/package.json').version"))"
-echo "[sync-vendor] done. Run 'npm install --omit=dev' in ${DEST} to (re)populate its node_modules before use/testing."
+echo "[sync-vendor] done. The vendored dist/quay.js is fully self-contained (no npm install needed)."

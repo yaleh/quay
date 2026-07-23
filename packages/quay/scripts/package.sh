@@ -28,6 +28,13 @@ echo "Building quay release artifact from ${PACKAGE_DIR}..."
 # npm pack must be run from the package root (where package.json lives).
 cd "${PACKAGE_DIR}"
 
+# M120 (DIR-060): build the bundled ESM dist/quay.js BEFORE npm pack. The `bin`
+# field points at ./dist/quay.js (Node-20-runnable) — native .ts needs Node
+# >=23, so the raw bin/quay.ts entrypoint fails on the declared floor. dist/ is
+# gitignored (generated, like dist-sea/), so it MUST be built here every pack.
+echo "Building the ESM dist bundle (dist/quay.js) before packing..."
+bash "${SCRIPT_DIR}/build-dist.sh"
+
 # Pack the package. This produces quay-<version>.tgz in the current directory.
 # The --pack-destination flag (npm >=7) puts the .tgz in the caller's original
 # directory instead; omitting it puts it in PACKAGE_DIR, which is fine for CI.

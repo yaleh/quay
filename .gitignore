@@ -2,6 +2,11 @@ docs/proposals/quay-bootstrap-experiment.md
 node_modules/
 **/node_modules
 dist/
+# M120 (DIR-060): the plugin's vendored Core copy IS a committed dist bundle
+# (plugin/vendor/quay/dist/quay.js) — negate the bare `dist/` pattern above for
+# this one path so `git add` tracks it. Directory first, then its contents.
+!plugin/vendor/quay/dist/
+!plugin/vendor/quay/dist/**
 *.log
 .DS_Store
 experiment/timing/*.log
