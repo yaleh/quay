@@ -328,6 +328,40 @@ See docs/plans/this-plan-does-not-exist-on-disk-xyz.md for the phased plan.
   assert.ok(hasFail(r, "do NOT resolve on disk"), JSON.stringify(r.failures));
 });
 
+// exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH (M124): a task carrying multiple `milestone:M<N>`
+// labels must be judged by the MAXIMUM number, not the first one in file order — mirrors the real
+// repo pattern (an early low-numbered discovery label added before the task was scoped, plus the
+// real, later, higher-numbered landing label added when actually selected/completed).
+const GOOD_PROPOSAL_PLAN = `## Proposal
+
+This milestone introduces a concrete, well-described approach with more than forty characters of
+genuine explanatory content describing what is built and why.
+
+## Plan
+
+N/A — this is a small single-increment change; no separate docs/plans record is warranted.
+`;
+
+test("clause8: multi-label low-then-high order (early discovery label below cutover, real landing label above) → applies, using the MAX", () => {
+  const charter = CLEAN_CHARTER_EXCERPT + `\nlabel: milestone:M5-discover milestone:M41-fake\n`;
+  const r = run({ milestoneId: "M-FAKE-MULTILOW", charter, dod: GOOD_DOD + "\n" + GOOD_PROPOSAL_PLAN });
+  assert.ok(hasPass(r, "clause8-task-canonical-lifecycle-record"), JSON.stringify(r.passes));
+  assert.ok(!hasFail(r, "clause8"), JSON.stringify(r.failures));
+});
+
+test("clause8: multi-label high-then-low order (real landing label first, an older low-numbered label after) → still applies, using the MAX", () => {
+  const charter = CLEAN_CHARTER_EXCERPT + `\nlabel: milestone:M41-fake milestone:M5-discover\n`;
+  const r = run({ milestoneId: "M-FAKE-MULTIHIGH", charter, dod: GOOD_DOD + "\n" + GOOD_PROPOSAL_PLAN });
+  assert.ok(hasPass(r, "clause8-task-canonical-lifecycle-record"), JSON.stringify(r.passes));
+  assert.ok(!hasFail(r, "clause8"), JSON.stringify(r.failures));
+});
+
+test("clause8: multi-label, ALL below cutover → N/A grandfathered pass (max still < 40)", () => {
+  const charter = CLEAN_CHARTER_EXCERPT + `\nlabel: milestone:M5-discover milestone:M12-old\n`;
+  const r = run({ milestoneId: "M-FAKE-MULTIOLD", charter });
+  assert.ok(hasPass(r, "clause8-task-canonical-lifecycle-record: N/A"), JSON.stringify(r.passes));
+});
+
 // ── Clause 9: SPLIT-OR-COMMIT / needs-human ──────────────────────────────────────────────────────
 test("clause9: no needs-human declared → N/A nop", () => {
   const r = run({ milestoneId: "M-FAKE-NONH" });

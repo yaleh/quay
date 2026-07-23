@@ -6,6 +6,7 @@ status: todo
 labels:
   - milestone-candidate
   - defect
+  - milestone:M-124
 parent: null
 children: []
 extra:
@@ -31,16 +32,17 @@ identically — these 3 tasks were N/A both before and after M119's hyphen fix. 
 separate defect (multi-label ambiguity), not a regression from M119.
 
 ## Plan
-N/A — small, bounded fix: change the label scan to consider ALL `milestone:M<N>` matches in the task
-text (use the `/g` flag or `matchAll`) and take the MAXIMUM matched number (the real/final landing
-label, since a task only ever gains higher-numbered milestone labels over time as it's re-selected/
-re-scoped, never a lower one after landing) rather than the first.
+N/A — small, bounded fix (`experiments/quay-perpetual-stream/charters/M124-clause8-multi-label-fix.md`):
+change the label scan to consider ALL `milestone:M<N>` matches in the task text (`matchAll` with the
+`/g` flag) and take the MAXIMUM matched number (the real/final landing label, since a task only ever
+gains higher-numbered milestone labels over time as it's re-selected/re-scoped, never a lower one
+after landing) rather than the first.
 
 ## Acceptance Criteria
-- [ ] Clause8's label scan considers all `milestone:M<N>` labels present in a task's text, not just the first.
-- [ ] `exp5-M-GATE-CLI-ERROR-UX`, `exp5-M-GATE-HELP-SYNOPSIS-GAP`, `exp5-M-GATE-MCP-PARITY-GAP` each show clause8 genuinely APPLYING (not N/A) when re-run — pasted output for all 3.
-- [ ] `dod-fixture-selfcheck.sh` still passes (golden-diff evidence); a new fixture pair (multi-label task, low-then-high vs high-then-low label order) added to cover this case going forward.
-- [ ] No other clause's verdict changes as a side effect.
+- [ ] Clause8's label scan considers all `milestone:M<N>` labels present in a task's text, not just the first. — `experiments/quay-perpetual-stream/scripts/it0-dod-check.ts` line ~615: `taskText.match(...)` (single) replaced with `[...taskText.matchAll(/milestone:M-?(\d+)/gi)]` + `Math.max(...)`.
+- [ ] `exp5-M-GATE-CLI-ERROR-UX`, `exp5-M-GATE-HELP-SYNOPSIS-GAP`, `exp5-M-GATE-MCP-PARITY-GAP` each show clause8 genuinely APPLYING (not N/A) when re-run — pasted output for all 3. — labels found: CLI-ERROR-UX=[37,56]→max 56; HELP-SYNOPSIS-GAP=[37,51]→max 51; MCP-PARITY-GAP=[37,53]→max 53. All ≥40 cutover → clause8 now applies to all 3.
+- [ ] `dod-fixture-selfcheck.sh` still passes (golden-diff evidence); a new fixture pair (multi-label task, low-then-high vs high-then-low label order) added to cover this case going forward. — `dod-fixture-selfcheck.sh` → `PASS: all 17 DoD fixtures behaved as asserted` (unchanged golden-diff). Added 3 new fixture tests to `it0-dod-check.test.mjs` (low-then-high, high-then-low, all-below-cutover) — `node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs` → 43/43 pass (was 40/40 before + 3 new).
+- [ ] No other clause's verdict changes as a side effect. — full experiments suite: 475/475 pass (was 472/472 before + 3 new fixture tests, exact match).
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidation-lag, line-budget,
@@ -64,3 +66,9 @@ M121's own chart-2 S1 work, higher immediate value this pass. Still a good next 
 
 Not selected — M123 is a mandatory explore pick, not a slot this exploit candidate competed for. Good
 next exploit pick once M123 clears.
+
+## Selected (M124)
+
+Selected — direct exploit pick. Small, cleanly bounded (one-function fix with an established
+golden-diff verify pattern), and had already been deferred 3 times (M121/M122/M123). See
+`experiments/quay-perpetual-stream/charters/M124-clause8-multi-label-fix.md`.

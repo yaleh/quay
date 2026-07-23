@@ -612,8 +612,16 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
   const srcLabel = taskPath ? `[${path.relative(process.cwd(), taskPath)}]` : "[fixture text — no real task file]";
 
   const CLAUSE8_CUTOVER_MILESTONE_NUM = 40;
-  const milestoneLabelMatch = taskText.match(/milestone:M-?(\d+)/i);
-  const taskMilestoneNum = milestoneLabelMatch ? parseInt(milestoneLabelMatch[1], 10) : null;
+  // exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH (M124): a task can carry MULTIPLE `milestone:M<N>`
+  // labels over its lifetime (e.g. an early discovery label plus the real landing label added later,
+  // when re-selected/re-scoped) — a task only ever GAINS higher-numbered labels after landing, never
+  // a lower one, so the MAXIMUM matched number is the real/final landing milestone. A single `.match`
+  // here returned only the FIRST label in file order, which could be a stale low-numbered discovery
+  // label below the cutover even when the task's real landing milestone was well past it.
+  const milestoneLabelMatches = [...taskText.matchAll(/milestone:M-?(\d+)/gi)];
+  const taskMilestoneNum = milestoneLabelMatches.length > 0
+    ? Math.max(...milestoneLabelMatches.map((m) => parseInt(m[1], 10)))
+    : null;
   const clause8Applies = taskMilestoneNum !== null && taskMilestoneNum >= CLAUSE8_CUTOVER_MILESTONE_NUM;
 
   if (!clause8Applies) {

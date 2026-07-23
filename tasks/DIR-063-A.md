@@ -76,3 +76,8 @@ M121's own chart-2 S1 work, higher immediate value this pass. Still a good next 
 
 Not selected — M123 is a mandatory explore pick, not a slot this exploit candidate competed for. Good
 next exploit pick once M123 clears.
+
+## Not selected (M124)
+
+Not selected — `exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH` selected instead: smaller, cleanly
+bounded, had already been deferred 3 times. Good next halt-free exploit pick.
