@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-NODE-FLOOR-DISTRIBUTION-FIX | Fix .ts-entrypoint × Node-floor distribution regression (DIR-060, release-blocking) | DONE | - | milestone-candidate, crystallization |
 | exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH | defect: it0-dod-check.ts clause8 regex doesn't match the repo's actual milestone:M-NN (hyphenated) label convention | DONE | - | milestone-candidate, defect, milestone:M-119 |
 | exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE | Post-DIR-058 architecture audit (archguard, M118 mandatory explore): first-ever full 4-package structural analysis | DONE | - | milestone-candidate, milestone:M-118 |
 | exp5-M-ARCH-AUDIT-M98-EXPLORE | Post-M97 architecture audit (archguard, M98 mandatory explore): re-measure quay after startMcpServer decomposition + ABI boundary fix | DONE | - | milestone-candidate, milestone:M-98 |
@@ -123,6 +124,11 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
+| DIR-062-A | DIR-062 child A [halt-free]: build the human-steered classifier + drivable-workspace fail-closed gate + fixtures + ≥80% test (no driver edit — loop-autonomous) | open | - | milestone-candidate, crystallization |
+| DIR-062-C | DIR-062 child C [proof, depends on B]: a REAL task's human-steered verdict produced by the wired SELECT logic (not hand-assigned), GateEvent-evidenced | open | - | milestone-candidate, crystallization |
+| DIR-062-B | DIR-062 child B [human-steered: halt + golden-replay]: write the 3-clause definition into inherited-core.md + wire OUTER-LOOP SELECT to call the classifier | open | - | milestone-candidate, crystallization, human-steered |
+| exp5-M-CRYST-D2 | D2 Rewrite skills (/quay-directive, quay-task-to-plan) in baime formalized style (λ-Spec + contracts:) | open | - | milestone-candidate, crystallization |
+| exp5-M-PRODUCTIZED-DELIVERY | Complete productized delivery: all 4 packages + Claude Code plugin as one version-consistent unit (DIR-061) | open | - | milestone-candidate, epic |
 | exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH | defect: it0-dod-check.ts clause8 uses first-match-wins on multi-milestone-labeled tasks, misreports N/A on 3 real done tasks | open | - | milestone-candidate, defect |
 | exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH | defect: quay Core SEA binary crashes at startup (gate/registry.ts import.meta.url incompatible with CJS bundle) — DIR-004 Distribution urgent | open | - | milestone-candidate, defect |
 | exp5-M-TS-MIGRATION | TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety | open | - | milestone-candidate, crystallization |
@@ -131,7 +137,6 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-OUTERLOOP-ROUTINE-WIRING | Wire exp5 OUTER-LOOP to fire the DIR-051 routine track (HUMAN-STEERED, halt + golden-replay): teach OUTER-LOOP's checkpoint step to consume .quay/loop.yml routines: (routine-scheduler → dispatch probe → routine-file-gate), so self-validation (DIR-052) + architecture-analysis (DIR-053) + meta-cc mining (DIR-055) fire as STANDING routines on quay's own board — not just as ad-hoc explore milestones. The single shared wiring that makes all three routines real. | open | - | milestone-candidate, human-steered |
 | DIR-057 | mechanical batch lane for exp5 OUTER-LOOP (HUMAN-STEERED, golden-replay): wire cross-milestone concurrency into exp5's bespoke driver for the SAFE subset ONLY — build-concurrent / fan-in-ABSORB-serial (reusing the DIR-044 scheduler), gated by an EXECUTABLE batch-eligibility predicate (capability-growth + declared ## Touches + touches no method file) so methodology milestones stay strictly serial and the SELECT←ABSORB learning loop is never broken. Opt-in, narrow. | open | - | directive, milestone-candidate, human-steered |
 | exp5-M-CRYST-F1 | F1 [subtractive] Shrink iteration reports / ABSORB dispositions to GateEvent pointers (advances DIR-021/022/024) | open | - | milestone-candidate, crystallization, human-steered |
-| exp5-M-CRYST-D2 | D2 Rewrite skills (/quay-directive, quay-task-to-plan) in baime formalized style (λ-Spec + contracts:) | open | - | milestone-candidate, crystallization, human-steered |
 | exp5-M-CRYST-D3 | D3 [subtractive] Rewrite OUTER-LOOP + inherited-core + inner-iteration prompts in formalized style; replace deterministic prompt steps with code (Axis 2′) | SELECTED | - | milestone-candidate, crystallization, milestone:first-wave, human-steered |
 | exp5-M-CRYST | Crystallization program — molten prose → executable single-source (geometric-info-theory) | open | - | milestone-candidate, crystallization, epic |
 | exp5-M-QENG-DOD-DEMO-ONLY | The QENG-5 'exp5 DoD via quay gate' wiring is demo-only (2 fixture tasks, QENG-5-DEMO-PASS/FAIL) — the REAL per-milestone DoD meta-enforcer gate at OUTER-LOOP.md step 6/7 still runs it0-dod-check.sh as a bare prose shell call, not through quay gate; decide whether/how to close that gap | SELECTED | governance-integrity (closes a self-disclosed "shelfware risk" the QENG-0 epic itself named as | milestone-candidate, surface:method-infra, milestone:M37-discover-post-qeng |
@@ -139,4 +144,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_132 milestone-candidate task(s) as of 2026-07-23T02:16:37.947Z._
+_137 milestone-candidate task(s) as of 2026-07-23T05:32:42.021Z._
