@@ -57,14 +57,40 @@ export function readManifest(root: string): DeliveryManifest | null {
   return JSON.parse(readFileSync(p, 'utf-8'));
 }
 
+/** Parse release.yml to extract the set of artifact-producing npm pack packages */
+export function parseReleaseYmlNpmTarballs(yml: string): Set<string> {
+  const pkgs = new Set<string>();
+  // Match `bash packages/<name>/scripts/package.sh` (the wrapper that calls npm pack)
+  const re = /bash\s+packages\/([\w-]+)\/scripts\/package\.sh/g;
+  let m;
+  while ((m = re.exec(yml)) !== null) {
+    pkgs.add(m[1]);
+  }
+  return pkgs;
+}
+
+/** Parse release.yml to extract SEA build packages */
+export function parseReleaseYmlSeaBinaries(yml: string): Set<string> {
+  const pkgs = new Set<string>();
+  // Match `bash packages/<name>/scripts/build-sea.sh`
+  const re = /bash\s+packages\/([\w-]+)\/scripts\/build-sea\.sh/g;
+  let m;
+  while ((m = re.exec(yml)) !== null) {
+    pkgs.add(m[1]);
+  }
+  return pkgs;
+}
+
 export function check(root: string): ManifestCheckResult {
   const issues: string[] = [];
   const manifest = readManifest(root);
+  const releaseYmlPath = resolve(root, RELEASE_YML);
+  const releaseYmlFound = existsSync(releaseYmlPath);
 
   if (!manifest) {
     return {
       ok: false, manifestFound: false, manifestValid: false, manifestVersion: '',
-      releaseYmlFound: existsSync(resolve(root, RELEASE_YML)),
+      releaseYmlFound,
       npmTarballsDeclared: 0, seaPackagesDeclared: 0, issues: ['delivery-manifest.json not found'],
     };
   }
@@ -111,14 +137,50 @@ export function check(root: string): ManifestCheckResult {
     issues.push('plugin entry missing in manifest');
   }
 
-  // Check release.yml exists
-  const releaseYmlFound = existsSync(resolve(root, RELEASE_YML));
+  // ── release.yml artifact-set comparison ──────────────────────────
+  let releaseNpmTarballs: Set<string> = new Set();
+  let releaseSeaBinaries: Set<string> = new Set();
+
   if (!releaseYmlFound) {
     issues.push(`${RELEASE_YML} not found`);
+  } else {
+    const yml = readFileSync(releaseYmlPath, 'utf-8');
+    releaseNpmTarballs = parseReleaseYmlNpmTarballs(yml);
+    releaseSeaBinaries = parseReleaseYmlSeaBinaries(yml);
+
+    // Compare npm tarballs: manifest-declared vs release.yml-produced
+    const manifestNpmSet = new Set(npmTarballs.map((t: any) => t.package));
+    for (const pkg of manifestNpmSet) {
+      if (!releaseNpmTarballs.has(pkg)) {
+        issues.push(`manifest declares npm tarball '${pkg}' but release.yml does NOT produce it (missing npm pack packages/${pkg})`);
+      }
+    }
+    for (const pkg of releaseNpmTarballs) {
+      if (!manifestNpmSet.has(pkg)) {
+        issues.push(`release.yml produces npm tarball '${pkg}' but manifest does NOT declare it`);
+      }
+    }
+
+    // Compare SEA binaries: manifest-declared vs release.yml-produced
+    const manifestSeaSet = new Set(seaBinaries.map((s: any) => s.package));
+    for (const pkg of manifestSeaSet) {
+      if (!releaseSeaBinaries.has(pkg)) {
+        issues.push(`manifest declares SEA binary '${pkg}' but release.yml does NOT produce it (missing bash packages/${pkg}/scripts/build-sea.sh)`);
+      }
+    }
+    for (const pkg of releaseSeaBinaries) {
+      if (!manifestSeaSet.has(pkg)) {
+        issues.push(`release.yml produces SEA binary '${pkg}' but manifest does NOT declare it`);
+      }
+    }
   }
 
+  // ── Result ────────────────────────────────────────────────────────
+  const structureOk = manifestValid && npmTarballs.length > 0 && seaBinaries.length > 0 && !!plugin?.id;
+  const alignmentOk = issues.length === 0;
+
   return {
-    ok: manifestValid && issues.length === 0,
+    ok: structureOk && alignmentOk,
     manifestFound: true,
     manifestValid,
     manifestVersion: manifest.version,

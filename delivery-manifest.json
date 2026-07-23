@@ -4,10 +4,7 @@
   "version": "0.3.11",
   "artifacts": {
     "npm-tarballs": [
-      { "package": "quay", "path": "packages/quay", "artifactPattern": "quay-{version}.tgz" },
-      { "package": "quay-native", "path": "packages/quay-native", "artifactPattern": "quay-native-{version}.tgz" },
-      { "package": "quay-github", "path": "packages/quay-github", "artifactPattern": "quay-github-{version}.tgz" },
-      { "package": "quay-backlog", "path": "packages/quay-backlog", "artifactPattern": "quay-backlog-{version}.tgz" }
+      { "package": "quay", "path": "packages/quay", "artifactPattern": "quay-{version}.tgz" }
     ],
     "sea-binaries": [
       { "package": "quay", "platforms": ["linux-x64", "macos-arm64", "windows-x64"] },
