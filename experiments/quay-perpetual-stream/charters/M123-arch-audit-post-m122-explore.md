@@ -19,7 +19,7 @@ confirms neither introduced a structural regression before the loop continues ex
 Read-only archguard sweep, FILE-ONLY (explore never fixes):
 1. Fresh `archguard_analyze` + `archguard_summary` (scope=`packages`, `noCache:true`).
 2. Cycle detection across the same scope.
-3. Compare against the M113/M117/M118 baseline (entities=144/relations=201, 0 cycles).
+3. Compare against the M117/M118 full-4-package baseline (entities=144/relations=201, 0 cycles).
 4. File any NEW confirmed findings behind `routine-file-gate.ts`.
 
 **Out of scope:** any fix to a finding (explore never fixes).
@@ -32,7 +32,7 @@ pipeline required (matches M93/M98/M108/M113/M118 precedent).
 ## Acceptance Criteria (from task)
 
 - [ ] Fresh `archguard_analyze` (scope=packages, noCache:true) + `archguard_summary` run on current
-  master HEAD; entity/relation counts recorded and compared against the M113/M117/M118 baseline.
+  master HEAD; entity/relation counts recorded and compared against the M117/M118 full-4-package baseline.
 - [ ] Cycle detection run across the same scope; result recorded.
 - [ ] Any new genuine findings filed as milestone-candidate tasks, gated through `routine-file-gate.ts`.
 - [ ] FILE-ONLY invariant held (no product code touched).

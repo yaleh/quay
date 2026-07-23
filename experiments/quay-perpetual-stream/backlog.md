@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-ARCH-AUDIT-POST-M122-EXPLORE | Post-M121/M122 architecture audit (mandatory explore) — confirm no structural regression from the SEA crash fix + CI extension | DONE | - | milestone-candidate, explore, milestone:M-123 |
 | exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY | defect: sea-verify-node-free only covers linux-x64 — macos-arm64/windows-x64 SEA builds have no runtime-smoke evidence | DONE | - | milestone-candidate, defect, milestone:M-122 |
 | exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH | defect: quay Core SEA binary crashes at startup (gate/registry.ts import.meta.url incompatible with CJS bundle) — DIR-004 Distribution urgent | DONE | - | milestone-candidate, defect, milestone:M-121 |
 | DIR-064-A | DIR-064 child A [halt-free]: build S1/S2/S3 chart-2 cov-calculator scripts (Distribution-reliability / Delivery-completeness / External-validation-reach) + fixtures + ≥80% test (no driver edit — loop-autonomous) | DONE | - | milestone-candidate, crystallization |
@@ -130,7 +131,6 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH | defect: it0-dod-check.ts clause8 uses first-match-wins on multi-milestone-labeled tasks, misreports N/A on 3 real done tasks | open | - | milestone-candidate, defect |
 | DIR-063-A | DIR-063 child A [halt-free]: chart-saturation-check detector + milestones-since-last-transition counter + anti-gaming guard scripts + fixtures + ≥80% test (no driver edit — loop-autonomous) | open | - | milestone-candidate, crystallization |
 | DIR-062-A | DIR-062 child A [halt-free]: build the human-steered classifier + drivable-workspace fail-closed gate + fixtures + ≥80% test (no driver edit — loop-autonomous) | open | - | milestone-candidate, crystallization |
-| exp5-M-ARCH-AUDIT-POST-M122-EXPLORE | Post-M121/M122 architecture audit (mandatory explore) — confirm no structural regression from the SEA crash fix + CI extension | SELECTED | - | milestone-candidate, explore, milestone:M-123 |
 | exp5-M-PRODUCTIZED-DELIVERY | Complete productized delivery: all 4 packages + Claude Code plugin as one version-consistent unit (DIR-061) | open | - | milestone-candidate, epic |
 | exp5-M-CRYST-D2 | D2 Rewrite skills (/quay-directive, quay-task-to-plan) in baime formalized style (λ-Spec + contracts:) | open | - | milestone-candidate, crystallization |
 | DIR-064-B | DIR-064 child B [human-steered: halt + golden-replay]: freeze chart-1 at 110.65 (EXHAUSTED) and write chart-2 (S1/S2/S3/S4, weights, 1:1 conversion) into inherited-core.md's VT model | open | - | milestone-candidate, crystallization, human-steered |
@@ -150,4 +150,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_143 milestone-candidate task(s) as of 2026-07-23T10:39:28.686Z._
+_143 milestone-candidate task(s) as of 2026-07-23T10:50:58.261Z._

@@ -27,10 +27,16 @@ archguard_detect_cycles(scope=packages, outputScope=package)
 → []  (0 cycles)
 ```
 
-**Comparison against the M113/M117/M118 baseline (entities=144, relations=201, 0 cycles):**
-IDENTICAL. No structural regression — expected, since M121 touched exactly one function inside an
-already-existing file (no new imports/exports/dependencies) and M122 touched only CI-workflow YAML
-+ a JSON evidence file + test assertions (no `packages/**` source at all).
+**Comparison against the M117/M118 full-4-package baseline (entities=144, relations=201, 0 cycles):**
+IDENTICAL. **Correction (M123's own adversarial audit, CONCERNS, non-blocking):** this section
+originally cited "the M113/M117/M118 baseline" as if all three shared the same 144/201 number —
+`dashboard.md`'s own M113 log line (`m113 · exp5-M-ARCH-AUDIT-POST-FULL-TS`) actually records
+entities=121/relations=156, a DIFFERENT (smaller-scope) reading from before DIR-058 completed the
+full 4-package TS migration. Only M117/M118 (post-DIR-058) share the 144/201 number this milestone's
+own sweep reproduces; M113 is cited elsewhere in this repo's history as its own, separate, pre-DIR-058
+baseline. No structural regression either way — expected, since M121 touched exactly one function
+inside an already-existing file (no new imports/exports/dependencies) and M122 touched only
+CI-workflow YAML + a JSON evidence file + test assertions (no `packages/**` source at all).
 
 ## New findings
 
@@ -38,13 +44,21 @@ None. The sweep confirms the baseline is unchanged; nothing new to file via `rou
 
 ## FILE-ONLY confirmation
 
+**Correction (M123's own adversarial audit, CONCERNS, non-blocking):** this section originally pasted
+an aspirational/template `git status --short` transcript (written before the actual SELECT+impl
+commit landed) that incorrectly listed `dashboard.md` as modified. The REAL commit
+(`cbfd047`, verified via `git show --stat cbfd047`) does NOT touch `dashboard.md` at all — the
+dashboard's ABSORB-time Log-line append happens later, at ABSORB, as its own separate commit, not as
+part of this SELECT+impl commit. Real transcript:
 ```
-$ git status --short
- M experiments/quay-perpetual-stream/backlog.md        (regenerated view)
- M experiments/quay-perpetual-stream/dashboard.md       (ABSORB entry)
-?? experiments/quay-perpetual-stream/charters/M123-...  (this charter)
-?? experiments/quay-perpetual-stream/milestones/M123/   (this report + audit dir)
- M tasks/DIR-062-A.md, tasks/DIR-063-A.md, ...           (not-selected notes)
- M tasks/exp5-M-ARCH-AUDIT-POST-M122-EXPLORE.md          (AC evidence)
+$ git show --stat cbfd047
+ experiments/quay-perpetual-stream/backlog.md                              |  3 +-
+ experiments/quay-perpetual-stream/charters/M123-arch-audit-post-m122-...  | 50 +++++
+ experiments/quay-perpetual-stream/milestones/M123/iterations/iteration-0.md | 50 +++++
+ tasks/DIR-062-A.md                                                         |  7 ++-
+ tasks/DIR-063-A.md                                                         |  7 ++-
+ tasks/exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH.md                       |  7 ++-
+ tasks/exp5-M-ARCH-AUDIT-POST-M122-EXPLORE.md                               | 49 +++++
 ```
-Zero `packages/**` source files touched — FILE-ONLY held.
+Zero `packages/**` source files touched — FILE-ONLY held (the underlying claim was correct; only the
+supporting transcript was inaccurate, now fixed to the real one).
