@@ -12,8 +12,8 @@
 #   loadbearing-test-gate.sh --scripts <dir> [--tests <dir>] [--import-root <dir> ...] \
 #                            [--registry <file>] [--outer-loop <file>]
 #
-# Exit codes: 0 = PASS (every load-bearing script has a sibling *.test.mjs); 1 = FAIL (>=1 load-bearing
-# script lacks a sibling test); 2 = usage/environment error.
+# Exit codes: 0 = PASS (every load-bearing script has a sibling *.test.mjs or *.test.ts); 1 = FAIL (>=1
+# load-bearing script lacks a sibling test); 2 = usage/environment error.
 
 set -u
 

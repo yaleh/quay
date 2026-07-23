@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 133** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)** · **cp-125 written at M125 ABSORB — see checkpoints/cp-125.md (HALT-RECOMMENDED, governance:product breach; now informational only per DIR-066)**
+**milestone_counter: 134** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)** · **cp-125 written at M125 ABSORB — see checkpoints/cp-125.md (HALT-RECOMMENDED, governance:product breach; now informational only per DIR-066)**
 <!-- chart: 1→2 at M121/DIR-064 (2026-07-23) — chart-1 EXHAUSTED (frozen 110.65/120, flat 108 milestones m12→m120); chart-2 opened (S1 Distribution-reliability / S2 Delivery-completeness / S3 External-validation / S4 Methodology-executability-SOFT). See the "### Chart-2 transition" subsection in ## VT below. -->
 <!-- OLD chart: 1 header value retained in git history; transition is human-ratified (DIR-064) + human-wired this session. -->
 
@@ -458,3 +458,4 @@ m130 · exp5-M-CRYST-D2 · Δv=0 (v̂=0, discovery — skill rewrites λ-Spec+co
 m131 · exp5-M-DASHBOARD-ROLLING-CUT · Δv=0 (v̂=0, governance-integrity — dashboard 1191→457 lines) · → milestones/M131/
 m132 · exp5-M-VERSION-CHECK-CI · Δv=0 (v̂=0, capability-growth — version-consistency CI job added to ci.yml) · → milestones/M132/
 m133 · exp5-M-ARCH-AUDIT-M133-EXPLORE · Δv=0 (v̂=0, mandatory explore — 144/201/0, IDENTICAL to M128) · audit=documented-no-op (explore/FILE-ONLY) · → milestones/M133/
+m134 · exp5-M-LOADBEARING-TEST-GATE-TS · Δv=0 (v̂=0, instrument-correction — loadbearing-test-gate now recognizes .test.ts) · → milestones/M134/

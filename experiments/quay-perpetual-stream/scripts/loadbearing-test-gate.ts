@@ -166,11 +166,15 @@ export function detectCounterGate(name: string, outerLoopFile: string): boolean 
   return false;
 }
 
-// ── hasSiblingTest — a `<name-without-extension>.test.mjs` exists in testDir. ──────────────────────────
-export function hasSiblingTest(name: string, testDir: string): boolean {
+// ── hasSiblingTest — a `<name-without-extension>.test.mjs` or `.test.ts` exists in testDir
+//    OR in the same directory as the script. ──────────────────────────────────────────────────────
+export function hasSiblingTest(name: string, testDir: string, scriptsDir?: string): boolean {
   const stem = name.replace(/\.(ts|mjs)$/, "");
-  const sibling = path.join(testDir, `${stem}.test.mjs`);
-  return fs.existsSync(sibling);
+  const candidates = [path.join(testDir, `${stem}.test.mjs`), path.join(testDir, `${stem}.test.ts`)];
+  if (scriptsDir) {
+    candidates.push(path.join(scriptsDir, `${stem}.test.mjs`), path.join(scriptsDir, `${stem}.test.ts`));
+  }
+  return candidates.some((p) => fs.existsSync(p));
 }
 
 // ── classifyScript — the per-script disposition. cfg: { testDir, importSearchRoots, registryFile,
@@ -182,7 +186,7 @@ export function classifyScript(file: string, cfg: ScriptCfg): ScriptResult {
   if (cfg.registryFile && detectRegistered(name, cfg.registryFile)) reasons.push("registered");
   if (cfg.outerLoopFile && detectCounterGate(name, cfg.outerLoopFile)) reasons.push("counter-gate");
   const loadBearing = reasons.length > 0;
-  const hasTest = hasSiblingTest(name, cfg.testDir!);
+  const hasTest = hasSiblingTest(name, cfg.testDir!, cfg.scriptsDir);
   let verdict: "PASS" | "FAIL" | "N/A";
   if (!loadBearing) verdict = "N/A";
   else verdict = hasTest ? "PASS" : "FAIL";
