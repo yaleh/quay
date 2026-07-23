@@ -124,6 +124,10 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
+| DIR-064-B | DIR-064 child B [human-steered: halt + golden-replay]: freeze chart-1 at 110.65 (EXHAUSTED) and write chart-2 (S1/S2/S3/S4, weights, 1:1 conversion) into inherited-core.md's VT model | open | - | milestone-candidate, crystallization, human-steered |
+| DIR-064-A | DIR-064 child A [halt-free]: build S1/S2/S3 chart-2 cov-calculator scripts (Distribution-reliability / Delivery-completeness / External-validation-reach) + fixtures + ≥80% test (no driver edit — loop-autonomous) | open | - | milestone-candidate, crystallization |
+| DIR-063-B | DIR-063 child B [human-steered: halt + golden-replay]: wire chart-saturation-check as a self-halt PRE-STEP in OUTER-LOOP.md, gate subagent-drafting strictly behind TRANSITION-DUE | open | - | milestone-candidate, crystallization, human-steered |
+| DIR-063-A | DIR-063 child A [halt-free]: chart-saturation-check detector + milestones-since-last-transition counter + anti-gaming guard scripts + fixtures + ≥80% test (no driver edit — loop-autonomous) | open | - | milestone-candidate, crystallization |
 | DIR-062-A | DIR-062 child A [halt-free]: build the human-steered classifier + drivable-workspace fail-closed gate + fixtures + ≥80% test (no driver edit — loop-autonomous) | open | - | milestone-candidate, crystallization |
 | DIR-062-C | DIR-062 child C [proof, depends on B]: a REAL task's human-steered verdict produced by the wired SELECT logic (not hand-assigned), GateEvent-evidenced | open | - | milestone-candidate, crystallization |
 | DIR-062-B | DIR-062 child B [human-steered: halt + golden-replay]: write the 3-clause definition into inherited-core.md + wire OUTER-LOOP SELECT to call the classifier | open | - | milestone-candidate, crystallization, human-steered |
@@ -144,4 +148,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_137 milestone-candidate task(s) as of 2026-07-23T05:32:42.021Z._
+_141 milestone-candidate task(s) as of 2026-07-23T08:40:58.266Z._
