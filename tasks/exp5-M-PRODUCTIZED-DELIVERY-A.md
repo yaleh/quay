@@ -3,17 +3,13 @@ id: exp5-M-PRODUCTIZED-DELIVERY-A
 title: "Productized delivery child A: version single-source + fail-closed drift
   gate (all 4 packages + plugin.json + both marketplace.json + vendored Core
   carry ONE version) — RED+GREEN on the real tree"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - milestone:M-126
 parent: exp5-M-PRODUCTIZED-DELIVERY
 children: []
 extra:
-  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
-    exp5-M-PRODUCTIZED-DELIVERY-A
-    experiments/quay-perpetual-stream/charters/M126-productized-delivery-a-version-consistency.md
-    /tmp/m126-absorb-entry.md
   schema: v1
 ---
 ## Proposal
@@ -47,5 +43,5 @@ necessary-not-sufficient — done ONLY when a real drift was actually CAUGHT (RE
 actually PASSED (GREEN) on this repo's real tree, both pasted.
 - [x] RED+GREEN demonstrated on the real tree (not fixture-only).
 - [x] The check is a load-bearing script with a passing sibling test (≥80%).
-- [ ] it0 DoD meta-enforcer passes all clauses.
+- [x] it0 DoD meta-enforcer passes all clauses.
 - [x] No driver file touched (`git show --stat` confined to `packages/`/`plugin/`/`scripts/` + tests).
