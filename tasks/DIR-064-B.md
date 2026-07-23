@@ -64,3 +64,17 @@ necessary-not-sufficient. Done ONLY when:
   enumerable governing-rules denominator does NOT satisfy this — it must stay observation-only).
 - [ ] Escrow: stays open until a real chart-2 Δv has been registered by a real milestone. On landing,
   [[DIR-064]] itself flips `dirStatus: applied`.
+
+## Status note (autonomous loop, DRAIN step, 2026-07-23 — informational, not a human-steered closure)
+
+The escrow's Δv sub-condition ("a REAL post-transition milestone registers a real chart-2 Δv... proving
+the DIR-038 rolling slope moved off 0.000") is now satisfied, twice over, by real evidence: M121
+registered +6.0 (S1 cov 0.20→0.40, real CI evidence) and M122 registered +12.0 (S1 cov 0.40→0.80, real
+CI evidence, completing the full 0.20→0.80 flip this directive's own Proposal named as the concrete
+demonstration). Chart-2 wired total is now 26.50/85, global VT 137.15, rolling slope +9.0 over 2 real
+data points — the self-halt's 0.000 has genuinely moved. This note is a factual bookkeeping observation
+only (autonomous DRAIN step 0) — it does NOT close this task: the AC's own literal wording still asks
+for the edit to land in `inherited-core.md` (it landed in `dashboard.md`'s own VT section instead,
+which is where every other chart transition — chart-0, chart-1 — has always been recorded; whether that
+location satisfies this AC's literal text, or the AC itself has a stale reference, is a human-steered
+judgment call this note does not make). Left `status: todo` for a human-steered pass to formally close.
