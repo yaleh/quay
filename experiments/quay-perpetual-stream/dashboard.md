@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 116** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 117** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -1055,3 +1055,18 @@ ABSORB steps (charter, audit, gates, dashboard, task write-back) ran. See
 same audit performed that write-back with fresh independently-re-executed evidence).
 
 m116 · exp5-M-TS-MIGRATION-P5-A · Δv=0 (v̂=0) · outcome=DONE (4 CLI `bin/*.js`→`.ts` entrypoints across all 4 packages, golden-diff behavior-preserving — byte-identical for `quay`/`quay-native`, single `@ts-nocheck` comment-line diff for `quay-github`/`quay-backlog`; `tsc --noEmit` clean across all 4 new per-package tsconfigs (DIR-059); 354/354 `packages/quay` + 343/343 experiments suites green; 2 SEA shims correctly named out-of-scope; adjacent DIR-059 disposed `applied` same-ABSORB with real peak-RSS evidence (~85-118MB vs ~4-4.5GB OOM baseline); 2 related defects (`exp5-DEFECT-M114-TESTSUITE-DRIFT`, `exp5-DEFECT-CONFIG-YML-STALE-MJS-REFS`) closed as side effects of DIR-059's fix; 1 new defect filed (`exp5-DEFECT-GATE-HASH-CHECK-STALE-PINNED-SOURCE` — it0-gate-hash-check.sh --by-reference has failed against every charter since M111, a pre-existing 6-milestone instrument drift, not new here) · audit=NO REFUTATION FOUND (corrected from an initial REFUTED on missing task-Resolution write-back — same audit performed the write-back itself, per DIR-020, backed by a second independent re-execution) · merge=3667b02+6f183ef · → milestones/M116/
+
+## SELECT M117 — exp5-M-TS-MIGRATION-P5-B
+
+**Selected:** exp5-M-TS-MIGRATION-P5-B — sibling completion of the DIR-058 program: migrate
+`packages/quay-backlog/src/*.js` (3 files) to `.ts`, same golden-diff discipline as P5-A/M116. Closes
+DIR-058 in full once done (both children complete).
+
+**Rationale:** Exploit pick, direct continuation of the just-landed M116 (same established pattern,
+same program). Dispatched implementation to a worktree-isolated background agent (mutates files);
+orchestrator handled charter authoring, gate checks, and ABSORB.
+
+**Task:** [[exp5-M-TS-MIGRATION-P5-B]] (`tasks/exp5-M-TS-MIGRATION-P5-B.md`)
+**Charter:** `experiments/quay-perpetual-stream/charters/M117-ts-migration-p5-b.md`
+
+m117 · exp5-M-TS-MIGRATION-P5-B · Δv=0 (v̂=0) · outcome=DONE (3 `quay-backlog/src/*.js`→`.ts` files, golden-diff behavior-preserving — independently re-derived for all 3 files by the adversarial audit, type-annotation/import-suffix/`@ts-nocheck`-removal only; `tsc --noEmit` 0 errors across all 4 packages; 12/12 `quay-backlog` + 354/354 `packages/quay` suites green; full JS-elimination confirmed — only the 2 permanently-exempted SEA shims remain; post-migration archguard re-run recorded: entities=144/relations=201 (scope=packages, vs M113 baseline 121/156), quay-backlog/src + all 4 bin/ dirs now visible to the instrument, 0 cycles; DIR-058 dispositioned `applied` in full (both P5-A/P5-B children done); parent `exp5-M-TS-MIGRATION-P5` closed parent-done-iff-children) · audit=CONCERNS (non-blocking — same task-bookkeeping-gap class as M116, corrected same-pass by the same audit per DIR-020; before/after test-run asymmetry disclosed, golden-diff substituted as stronger evidence) · merge=8c4bc9e+ad49578 · → milestones/M117/
