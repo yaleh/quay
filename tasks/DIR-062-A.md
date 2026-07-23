@@ -58,3 +58,8 @@ halt-free exploit pick — no blocking issue, just lower priority this pass.
 Not selected — `exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY` selected instead: direct continuation of
 M121's own chart-2 S1 work (completes the 0.20→0.80 flip DIR-064-B originally predicted), higher
 immediate value than this candidate. Still a good next halt-free exploit pick.
+
+## Not selected (M123)
+
+Not selected — M123 is a mandatory explore pick (M119-M122 were 4 consecutive exploits), not a slot
+this exploit candidate competed for. Good next exploit pick once M123 clears.

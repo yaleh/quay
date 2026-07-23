@@ -59,3 +59,8 @@ and a good next exploit pick.
 
 Not selected — `exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY` selected instead: direct continuation of
 M121's own chart-2 S1 work, higher immediate value this pass. Still a good next exploit pick.
+
+## Not selected (M123)
+
+Not selected — M123 is a mandatory explore pick, not a slot this exploit candidate competed for. Good
+next exploit pick once M123 clears.

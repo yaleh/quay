@@ -130,6 +130,7 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH | defect: it0-dod-check.ts clause8 uses first-match-wins on multi-milestone-labeled tasks, misreports N/A on 3 real done tasks | open | - | milestone-candidate, defect |
 | DIR-063-A | DIR-063 child A [halt-free]: chart-saturation-check detector + milestones-since-last-transition counter + anti-gaming guard scripts + fixtures + ≥80% test (no driver edit — loop-autonomous) | open | - | milestone-candidate, crystallization |
 | DIR-062-A | DIR-062 child A [halt-free]: build the human-steered classifier + drivable-workspace fail-closed gate + fixtures + ≥80% test (no driver edit — loop-autonomous) | open | - | milestone-candidate, crystallization |
+| exp5-M-ARCH-AUDIT-POST-M122-EXPLORE | Post-M121/M122 architecture audit (mandatory explore) — confirm no structural regression from the SEA crash fix + CI extension | SELECTED | - | milestone-candidate, explore, milestone:M-123 |
 | exp5-M-PRODUCTIZED-DELIVERY | Complete productized delivery: all 4 packages + Claude Code plugin as one version-consistent unit (DIR-061) | open | - | milestone-candidate, epic |
 | exp5-M-CRYST-D2 | D2 Rewrite skills (/quay-directive, quay-task-to-plan) in baime formalized style (λ-Spec + contracts:) | open | - | milestone-candidate, crystallization |
 | DIR-064-B | DIR-064 child B [human-steered: halt + golden-replay]: freeze chart-1 at 110.65 (EXHAUSTED) and write chart-2 (S1/S2/S3/S4, weights, 1:1 conversion) into inherited-core.md's VT model | open | - | milestone-candidate, crystallization, human-steered |
@@ -149,4 +150,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_142 milestone-candidate task(s) as of 2026-07-23T10:35:21.627Z._
+_143 milestone-candidate task(s) as of 2026-07-23T10:39:28.686Z._
