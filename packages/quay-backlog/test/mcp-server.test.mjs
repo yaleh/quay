@@ -1,5 +1,5 @@
 // DIR-039 (B): regression test for quay-backlog's own MCP stdio transport
-// (src/mcp-server.js, wired into bin/quay-backlog.js's `mcp` subcommand).
+// (src/mcp-server.js, wired into bin/quay-backlog.ts's `mcp` subcommand).
 // Mirrors quay-github's own mcp-server.test.mjs shape/header convention.
 // Uses a small synthetic fixture board (isolated tmp dir) — the REAL
 // archguard board round-trip is exercised by the milestone's captured
@@ -20,7 +20,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const bin = path.join(__dirname, "..", "bin", "quay-backlog.js");
+const bin = path.join(__dirname, "..", "bin", "quay-backlog.ts");
 
 function makeFixtureBoard() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-backlog-mcp-fixture-"));

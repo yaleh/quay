@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay-backlog — the Backlog.md Provider's binary (glossary.md pattern:
 // quay-<providerId>). `mcp` is the formal ABI transport; `task` subcommands
 // below are a convenience CLI mirroring quay-native's/quay-github's own

@@ -51,7 +51,7 @@ run_check "loadbearing-test-gate"  bash "$SCR/loadbearing-test-gate.sh" \
   --registry packages/quay/src/gate/registry.js --outer-loop experiments/quay-perpetual-stream/OUTER-LOOP.md
 
 # INFORMATIONAL: pending directives the loop's first DRAIN will process (not a hard blocker).
-pend="$(node packages/quay/bin/quay.js task list --label directive --json 2>/dev/null \
+pend="$(node packages/quay/bin/quay.ts task list --label directive --json 2>/dev/null \
   | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const p=JSON.parse(s).filter(x=>x.extra&&x.extra.dirStatus==='pending');console.log(p.length+' '+p.map(x=>x.id).join(','))}catch(e){console.log('?')}})" 2>/dev/null)"
 echo "  [info] pending directives (loop DRAINs these): ${pend:-unknown}"
 

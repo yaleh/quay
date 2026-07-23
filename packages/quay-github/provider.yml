@@ -101,7 +101,7 @@ action_buttons:
 repo:
   owner: "yaleh"
   name: "quay"
-  # QUAY_GITHUB_REPO env var overrides this at runtime (see bin/quay-github.js).
+  # QUAY_GITHUB_REPO env var overrides this at runtime (see bin/quay-github.ts).
 
 # skills_path (QN-052, iteration 41): fixes a real, previously-undiscovered
 # manifest asymmetry with native's own provider.yml, which declares
@@ -122,5 +122,5 @@ repo:
 # per-Provider physical copy.
 skills_path: "../quay-native/skills"
 
-bin_entry: ["node", "./bin/quay-github.js"]
-mcp_entry: ["node", "./bin/quay-github.js", "mcp"]
+bin_entry: ["node", "./bin/quay-github.ts"]
+mcp_entry: ["node", "./bin/quay-github.ts", "mcp"]

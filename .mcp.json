@@ -4,7 +4,7 @@
       "type": "stdio",
       "command": "node",
       "args": [
-        "packages/quay/bin/quay.js",
+        "packages/quay/bin/quay.ts",
         "mcp"
       ],
       "env": {}

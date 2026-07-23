@@ -12,7 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "bin", "quay-native.js");
+const nativeBin = path.join(__dirname, "..", "bin", "quay-native.ts");
 
 function tmpDocsDir(tag) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `quay-doc-cli-${tag}-`));

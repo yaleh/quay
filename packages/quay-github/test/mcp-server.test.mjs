@@ -1,7 +1,7 @@
 // QN-048 (iteration 37): regression test for quay-github's own MCP stdio
 // transport (packages/quay-github/src/mcp-server.js, wired into
-// bin/quay-github.js's `mcp` subcommand). Sibling gap to QN-034 (iteration
-// 24), which closed the identical class of gap for quay-github.js's CLI
+// bin/quay-github.ts's `mcp` subcommand). Sibling gap to QN-034 (iteration
+// 24), which closed the identical class of gap for quay-github.ts's CLI
 // dispatch layer but explicitly named "the `mcp` subcommand (starting the
 // stdio MCP transport)" as out of scope for that task -- this file closes
 // exactly that named residual. Also the GitHub-Provider-side sibling of
@@ -11,7 +11,7 @@
 // write.test.mjs/cli.test.mjs header comments: the real yaleh/quay issue
 // backlog is too small/precious to target with destructive live writes in
 // an automated, repeatable test file. This file spawns the real
-// `bin/quay-github.js mcp` subprocess via a real MCP client
+// `bin/quay-github.ts mcp` subprocess via a real MCP client
 // (StdioClientTransport) and exercises only:
 //   1. provider://manifest resource enumeration (correct `name` field).
 //   2. task_list (json array, includes real issues #3/#4).
@@ -47,7 +47,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const bin = path.join(__dirname, "..", "bin", "quay-github.js");
+const bin = path.join(__dirname, "..", "bin", "quay-github.ts");
 const repoEnv = { ...process.env, QUAY_GITHUB_REPO: "yaleh/quay" };
 
 let failures = 0;

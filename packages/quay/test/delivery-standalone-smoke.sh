@@ -43,7 +43,7 @@ else grn "no cross-package relative imports"; fi
 echo
 echo "=== 3) RUNTIME: the CLI must load standalone (fresh workspace, no experiments/, no sibling pkgs) ==="
 WS="$S/ws"; mkdir -p "$WS/.quay" "$WS/tasks"
-Q="node $S/deliver/quay/bin/quay.js"
+Q="node $S/deliver/quay/bin/quay.ts"
 if ( cd "$WS" && timeout 25 $Q --help ) >"$S/help.txt" 2>&1; then grn "CLI --help loads standalone"; else
   red "CLI fails to load standalone:"; sed 's/^/       /' "$S/help.txt" | grep -iE 'error|cannot find|ERR_' | head -3; fi
 

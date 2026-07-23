@@ -55,3 +55,9 @@ References the standard inherited-core DoD clauses (adversarial-audit, V_meta-la
 ## Not selected (M115)
 
 Not selected M115 — exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM selected instead. Separately noted: this task's own AC checklist is already fully ticked [x] (the M98 explore genuinely ran) but `status` was never flipped to `done` — a bookkeeping oversight worth a trivial administrative fix in a future pass (verify findings still hold, flip status, no new work).
+
+
+
+## Not selected (M116)
+
+Not selected M116 — exp5-M-TS-MIGRATION-P5-A selected instead (capability-growth: real product TS migration work, diversifying value type from the last two governance-integrity/instrument-correction picks M114/M115). Good next pick.

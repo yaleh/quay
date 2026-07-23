@@ -9,13 +9,13 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
-const versionReal = path.resolve(pkgDir, "src/version.js");
+const versionReal = path.resolve(pkgDir, "src/version.ts");
 const versionShim = path.resolve(pkgDir, "scripts/version-sea-shim.js");
 
 const redirectVersionPlugin = {
   name: "redirect-version-to-sea-shim",
   setup(build) {
-    build.onResolve({ filter: /version\.js$/ }, (args) => {
+    build.onResolve({ filter: /version\.(js|ts)$/ }, (args) => {
       const resolved = path.resolve(args.resolveDir, args.path);
       if (resolved === versionReal) {
         return { path: versionShim };
@@ -29,7 +29,7 @@ const outfile = path.resolve(pkgDir, "dist-sea/quay-bundle.cjs");
 
 try {
   const result = await esbuild.build({
-    entryPoints: [path.resolve(pkgDir, "bin/quay.js")],
+    entryPoints: [path.resolve(pkgDir, "bin/quay.ts")],
     bundle: true,
     platform: "node",
     format: "cjs",

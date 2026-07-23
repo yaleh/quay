@@ -84,3 +84,9 @@ worktree-branch-hygiene, audit-independence).
 ## Not selected (M115)
 
 Not selected M115 — exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM selected instead (higher leverage: affects every future ABSORB's audit-independence gate, not just test-suite cleanliness). Still a good small exploit pick for a near-future pass.
+
+
+
+## Not selected (M116)
+
+Not selected M116 — exp5-M-TS-MIGRATION-P5-A selected instead (capability-growth: real product TS migration work, diversifying value type from the last two governance-integrity/instrument-correction picks M114/M115). Good next pick.

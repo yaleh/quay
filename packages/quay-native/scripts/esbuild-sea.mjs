@@ -9,13 +9,13 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgDir = path.resolve(__dirname, "..");
-const manifestReal = path.resolve(pkgDir, "src/manifest.js");
+const manifestReal = path.resolve(pkgDir, "src/manifest.ts");
 const manifestShim = path.resolve(pkgDir, "scripts/manifest.sea-shim.js");
 
 const redirectManifestPlugin = {
   name: "redirect-manifest-to-sea-shim",
   setup(build) {
-    build.onResolve({ filter: /manifest\.js$/ }, (args) => {
+    build.onResolve({ filter: /manifest\.(js|ts)$/ }, (args) => {
       const resolved = path.resolve(args.resolveDir, args.path);
       if (resolved === manifestReal) {
         return { path: manifestShim };
@@ -29,7 +29,7 @@ const outfile = path.resolve(pkgDir, "dist-sea/quay-native-bundle.cjs");
 
 try {
   const result = await esbuild.build({
-    entryPoints: [path.resolve(pkgDir, "bin/quay-native.js")],
+    entryPoints: [path.resolve(pkgDir, "bin/quay-native.ts")],
     bundle: true,
     platform: "node",
     format: "cjs",

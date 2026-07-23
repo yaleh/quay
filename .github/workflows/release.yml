@@ -67,7 +67,7 @@ jobs:
             ```
 
             The `.tgz` artifact attached to this release is produced by `npm pack` from `packages/quay/`.
-            It includes all runtime dependencies (`@modelcontextprotocol/sdk`, `yaml`) and the CLI entrypoint (`bin/quay.js`).
+            It includes all runtime dependencies (`@modelcontextprotocol/sdk`, `yaml`) and the CLI entrypoint (`bin/quay.ts`).
             Note: the artifact filename uses the package version (e.g. `quay-0.1.0.tgz`), not the git tag (e.g. `v0.1.0`).
 
   # M01-dist (exp5, iteration 0): DIR-004 remaining scope — single-file

@@ -5,7 +5,7 @@
 // coverage anywhere in the repo: grepping every `*.test.mjs` file under
 // packages/quay-native/test/, packages/quay/test/, and packages/quay-github/
 // test/ for any reference to bin/quay.js or a spawn of it returned zero
-// hits. Its sibling, packages/quay-native/bin/quay-native.js, IS exercised
+// hits. Its sibling, packages/quay-native/bin/quay-native.ts, IS exercised
 // extensively via execFileSync/execFileAsync subprocess spawns (abi-
 // symmetry.mjs, create-validation.test.mjs, serve.test.mjs,
 // task-check.test.mjs) — but every one of those tests that touches Core's
@@ -68,13 +68,13 @@
 // STARTUP-FAILURE propagation through Core's CLI, i.e. what happens when an
 // enabled Provider's own mcp_entry process crashes immediately on launch
 // (e.g. a malformed QUAY_GITHUB_REPO env value causing
-// bin/quay-github.js's own resolveRepo() to throw before the MCP transport
+// bin/quay-github.ts's own resolveRepo() to throw before the MCP transport
 // is ever established), NOT what happens when a live, correctly-configured
 // Provider returns ordinary application-level data (the shape every prior
 // cross-Provider test closed). Grepping every *.test.mjs file in the repo
 // for "QUAY_GITHUB_REPO must be" confirmed this exact failure mode was
 // previously tested only once, directly against packages/quay-github/
-// bin/quay-github.js's own CLI (packages/quay-github/test/cli.test.mjs) —
+// bin/quay-github.ts's own CLI (packages/quay-github/test/cli.test.mjs) —
 // never through any Core-level binding (CLI, MCP, or Web UI), where the
 // error must additionally survive an MCP stdio-transport connection
 // attempt before reaching the caller. This test requires no live GitHub
@@ -96,10 +96,10 @@ import fs from "node:fs";
 import os from "node:os";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const coreBin = path.join(__dirname, "..", "bin", "quay.js");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
+const coreBin = path.join(__dirname, "..", "bin", "quay.ts");
+const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
 const nativeProviderDir = path.dirname(nativeBin);
-const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.js");
+const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 
 let failures = 0;
@@ -409,7 +409,7 @@ async function main() {
   //    resolveProviderEnv() ever mis-resolved this (e.g. tried to
   //    path.resolve() it, corrupting "yaleh/quay" into an absolute
   //    filesystem path), the spawned `quay-github mcp` child process would
-  //    receive a broken QUAY_GITHUB_REPO and bin/quay-github.js's own
+  //    receive a broken QUAY_GITHUB_REPO and bin/quay-github.ts's own
   //    resolveRepo() would throw ("QUAY_GITHUB_REPO must be owner/repo") —
   //    so a genuinely successful, non-empty `task list` result is itself
   //    live proof the passthrough branch works, not an assumption. This
@@ -783,7 +783,7 @@ async function main() {
 
   // 12. QN-062 (iteration 58): Provider-subprocess STARTUP-FAILURE
   //     propagation through Core's CLI, local-only (no live network) — a
-  //     malformed QUAY_GITHUB_REPO env value causes bin/quay-github.js's
+  //     malformed QUAY_GITHUB_REPO env value causes bin/quay-github.ts's
   //     own resolveRepo() to throw synchronously, before the MCP stdio
   //     transport handshake ever completes, so `withProvider()`'s
   //     `connectProvider()` call rejects. This test proves Core's own

@@ -61,4 +61,4 @@ action_buttons:
     whenStatus: ["todo", "ready"]
 
 skills_path: "./skills"
-mcp_entry: ["node", "./bin/quay-native.js", "mcp"]
+mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]

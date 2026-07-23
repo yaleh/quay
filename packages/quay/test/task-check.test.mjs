@@ -25,7 +25,7 @@ import os from "node:os";
 import { connectProvider } from "../src/provider-client.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
+const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
 
 let failures = 0;
 function assert(cond, msg) {

@@ -26,10 +26,10 @@ import fs from "node:fs";
 import os from "node:os";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.js");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
+const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
+const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
 const nativeProviderDir = path.dirname(nativeBin);
-const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.js");
+const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 
 let failures = 0;

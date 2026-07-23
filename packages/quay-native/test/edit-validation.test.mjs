@@ -15,7 +15,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const binPath = path.join(__dirname, "..", "bin", "quay-native.js");
+const binPath = path.join(__dirname, "..", "bin", "quay-native.ts");
 const tasksDir = path.join(__dirname, ".tmp-edit-validation-test");
 
 let failures = 0;

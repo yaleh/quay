@@ -60,8 +60,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const coreBin = path.join(__dirname, "..", "..", "quay", "bin", "quay.js");
-const githubBin = path.join(__dirname, "..", "bin", "quay-github.js");
+const coreBin = path.join(__dirname, "..", "..", "quay", "bin", "quay.ts");
+const githubBin = path.join(__dirname, "..", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 const fakeGhScript = path.join(__dirname, "fixtures", "fake-gh.mjs");
 

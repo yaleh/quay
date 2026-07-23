@@ -33,8 +33,8 @@ import {
 import { queryGateEvents } from "../src/gate/gate-event-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.js");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
+const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
+const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
 const nativeProviderDir = path.dirname(nativeBin);
 
 // ---------------------------------------------------------------------------

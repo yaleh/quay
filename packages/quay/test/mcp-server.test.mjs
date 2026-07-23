@@ -92,10 +92,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const coreBin = path.join(__dirname, "..", "bin", "quay.js");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
+const coreBin = path.join(__dirname, "..", "bin", "quay.ts");
+const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
 const nativeProviderDir = path.dirname(nativeBin);
-const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.js");
+const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 
 let failures = 0;
@@ -474,7 +474,7 @@ async function main() {
   //      hang or an uncaught-exception crash of the `quay mcp` process
   //      itself -- but ALSO documents, honestly, that the resulting error
   //      text is opaque ("MCP error -32000: Connection closed") and does
-  //      NOT surface bin/quay-github.js's own actual diagnostic
+  //      NOT surface bin/quay-github.ts's own actual diagnostic
   //      ("QUAY_GITHUB_REPO must be \"owner/repo\""), which is only ever
   //      visible on the crashed child's own stderr (verified by hand this
   //      iteration, not asserted here since a torn-down child process's

@@ -30,7 +30,7 @@ import { startServer } from "../src/serve.ts";
 import { composePayload } from "../src/action.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
+const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
 const nativeProviderDir = path.dirname(nativeBin);
 
 let failures = 0;
@@ -1224,7 +1224,7 @@ async function main() {
   // Fixture: a workspace with tasks carrying multiple labels, so the label
   // nav renders with counts and the "N more labels" overflow.
   {
-    const nativeBin = path.resolve(__dirname, "../../quay-native/bin/quay-native.js");
+    const nativeBin = path.resolve(__dirname, "../../quay-native/bin/quay-native.ts");
     const nativeProviderDir = path.resolve(__dirname, "../../quay-native");
 
     const qx34TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-serve-test-qx34-tasks-"));

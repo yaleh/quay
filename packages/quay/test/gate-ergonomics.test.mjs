@@ -27,8 +27,8 @@ import { runAcceptance } from "../src/gate/acceptance-runner.ts";
 import { loadWorkspaceGates } from "../src/gate/registry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.js");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
+const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
+const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
 const nativeProviderDir = path.dirname(nativeBin);
 
 // mirrors gate.test.mjs makeWorkspace()

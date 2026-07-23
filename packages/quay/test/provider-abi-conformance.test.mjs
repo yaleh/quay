@@ -1,7 +1,7 @@
 // M03-abi-eval (exp5, DIR-001 items 1-2): differential conformance suite —
 // runs the SAME scenario set (task_list / task_get / task_write(status) /
 // task_check) against both the native and github Providers' own MCP
-// servers directly (bin/quay-native.js mcp, bin/quay-github.js mcp) and
+// servers directly (bin/quay-native.ts mcp, bin/quay-github.ts mcp) and
 // flags behavioral divergence between them. Minimum scope per the charter:
 // a primitive task and a compound (parent/children) task, both providers —
 // 8 cells minimum (4 ops x 2 shapes).
@@ -64,8 +64,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
-const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.js");
+const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
+const githubBin = path.join(__dirname, "..", "..", "quay-github", "bin", "quay-github.ts");
 
 let failures = 0;
 const results = []; // { provider, shape, op, ok, detail }
@@ -114,7 +114,7 @@ async function main() {
     { env: { ...process.env, ...nativeEnv } }
   );
   // `task create` has no --children flag (native's CLI dispatch table,
-  // bin/quay-native.js); children are set via a follow-up `task edit`.
+  // bin/quay-native.ts); children are set via a follow-up `task edit`.
   execFileSync(
     "node",
     [nativeBin, "task", "edit", "ABI-C1", "--children", "ABI-C1-CHILD"],

@@ -18,7 +18,7 @@ import { gateRegistry, registerDocumentGate } from "../src/gate/registry.ts";
 import { createDocumentStore } from "../src/document-store.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.js");
+const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
 // repo root: packages/quay/test -> repo root is 3 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const VIOLATING_FIXTURE = path.join(

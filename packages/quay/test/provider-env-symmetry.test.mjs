@@ -30,7 +30,7 @@ import http from "node:http";
 import { startServer } from "../src/serve.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
+const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
 const nativeProviderDir = path.dirname(nativeBin);
 
 let failures = 0;
@@ -102,7 +102,7 @@ async function main() {
 
     // Cross-check: the CLI leg (bin/quay.js, via withProvider()/resolveProviderEnv())
     // must resolve to the SAME directory -- proving all three bindings are now symmetric.
-    const cliOut = execFileSync("node", [path.join(__dirname, "..", "bin", "quay.js"), "task", "list", "--json"], {
+    const cliOut = execFileSync("node", [path.join(__dirname, "..", "bin", "quay.ts"), "task", "list", "--json"], {
       cwd: workspaceRoot,
       encoding: "utf8",
     });

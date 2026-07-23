@@ -21,6 +21,6 @@ providers:
                                               # (this .quay/config.yml's directory) and becomes the
                                               # spawned provider process's cwd
     tasks_dir: "./tasks"                     # this sample-workspace's own tasks/ dir
-    mcp_entry: ["node", "./bin/quay-native.js", "mcp"]   # resolved relative to provider.path (cwd), NOT workspaceRoot
+    mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]   # resolved relative to provider.path (cwd), NOT workspaceRoot
     env:
       QUAY_NATIVE_TASKS_DIR: "./tasks"       # resolved relative to workspaceRoot at launch time

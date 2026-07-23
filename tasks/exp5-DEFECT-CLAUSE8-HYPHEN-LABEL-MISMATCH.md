@@ -41,3 +41,10 @@ impl-row N/A, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycl
 worktree-branch-hygiene, audit-independence).
 - [ ] All 3 AC items above verified true with pasted command output.
 - [ ] it0 DoD meta-enforcer passes all clauses.
+
+
+
+
+## Not selected (M116)
+
+Not selected M116 — exp5-M-TS-MIGRATION-P5-A selected instead (capability-growth: real product TS migration work, diversifying value type from the last two governance-integrity/instrument-correction picks M114/M115). Good next pick.

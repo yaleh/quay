@@ -1,17 +1,17 @@
-// QN-034 (iteration 24): regression test for `bin/quay-github.js` itself —
+// QN-034 (iteration 24): regression test for `bin/quay-github.ts` itself —
 // the GitHub Provider's own CLI dispatch layer (resolveRepo(), parseFlags(),
 // the cmd/sub branch table for mcp/manifest/task list|get|edit|check, and
 // the top-level main().catch(...) handler). Prior to this task, this file
 // had ZERO automated test coverage anywhere in the repo: grepping every
 // *.test.mjs file in all three packages for any reference to
-// "quay-github.js" or a subprocess spawn of it returned zero hits. This is
+// "quay-github.ts" or a subprocess spawn of it returned zero hits. This is
 // the sibling gap to QN-033 (iteration 23), which closed the identical
 // class of gap for packages/quay/bin/quay.js.
 //
 // Materially different shape than QN-030/031/032/033: every prior
 // CLI-dispatch test spun up a fully isolated, disposable LOCAL fixture (a
 // temp .quay/config.yml + temp tasks dir) with no external dependency.
-// quay-github.js's CLI has no local-fixture equivalent — createGithubClient()
+// quay-github.ts's CLI has no local-fixture equivalent — createGithubClient()
 // shells out to the real `gh api` for every operation; there is no
 // dependency-injection seam in the CLI binary itself. Closing this gap at
 // the CLI-subprocess level therefore requires live calls against the real
@@ -64,7 +64,7 @@ import path from "node:path";
 import fs from "node:fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const bin = path.join(__dirname, "..", "bin", "quay-github.js");
+const bin = path.join(__dirname, "..", "bin", "quay-github.ts");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -167,7 +167,7 @@ function main() {
 
   // 5. `task edit <id>` with NO write flag at all — the required-flag error
   //    path. This returns BEFORE any client.setStatus/writeFields/
-  //    writeRelations call is ever made (see bin/quay-github.js: the
+  //    writeRelations call is ever made (see bin/quay-github.ts: the
   //    `hasAnyWriteFlag` guard precedes every write call) — confirmed by
   //    reading the source before writing this assertion. No live write
   //    occurs. (DIR-041/M57: `edit` was extended from status-only to the
@@ -229,7 +229,7 @@ function main() {
     );
   }
 
-  console.log(failures === 0 ? "\nAll QN-034 bin/quay-github.js CLI dispatch tests passed." : `\n${failures} test(s) FAILED`);
+  console.log(failures === 0 ? "\nAll QN-034 bin/quay-github.ts CLI dispatch tests passed." : `\n${failures} test(s) FAILED`);
   process.exitCode = failures === 0 ? 0 : 1;
 }
 

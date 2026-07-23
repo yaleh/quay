@@ -10,7 +10,7 @@ providers:
     enabled: true
     path: "./packages/quay-native"       # where the Provider's provider.yml + code live
     tasks_dir: "./tasks"                 # storage path for this workspace
-    mcp_entry: ["node", "./bin/quay-native.js", "mcp"]
+    mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]
     env:
       QUAY_NATIVE_TASKS_DIR: "./tasks"   # resolved relative to workspaceRoot at launch time
       QUAY_NATIVE_ADR_DIR: "./adr"        # ADRs are a SEPARATE kind, stored in a sibling dir of tasks/
@@ -18,7 +18,7 @@ providers:
   github:
     enabled: false                       # not the DEFAULT provider (native is); select explicitly via `quay --provider github ...`
     path: "./packages/quay-github"       # where the Provider's provider.yml + code live
-    mcp_entry: ["node", "./bin/quay-github.js", "mcp"]
+    mcp_entry: ["node", "./bin/quay-github.ts", "mcp"]
     env:
       QUAY_GITHUB_REPO: "yaleh/quay"     # owner/repo this Provider reads issues from
 

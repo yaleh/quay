@@ -9,7 +9,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const bin = path.join(__dirname, "..", "bin", "quay-github.js");
+const bin = path.join(__dirname, "..", "bin", "quay-github.ts");
 
 let client;
 before(async () => {

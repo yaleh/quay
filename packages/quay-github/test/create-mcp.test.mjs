@@ -2,7 +2,7 @@
 // routing -- confirms `task_write` with `id: CREATE_SENTINEL_ID` ("gh-new")
 // actually reaches client.create() (not client.setStatus/writeFields, which
 // would 404 against a nonexistent issue) through the REAL quay-github mcp
-// stdio subprocess (bin/quay-github.js mcp), against a STUBBED `gh` (same
+// stdio subprocess (bin/quay-github.ts mcp), against a STUBBED `gh` (same
 // fake-gh-on-PATH technique as create.test.mjs / gh-api-buffer.test.mjs --
 // no live network call, no destructive write against the real, precious
 // yaleh/quay issue backlog).
@@ -18,7 +18,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const bin = join(__dirname, "..", "bin", "quay-github.js");
+const bin = join(__dirname, "..", "bin", "quay-github.ts");
 
 /** Same fake-gh shape as create.test.mjs, trimmed to only what the MCP
  * create/edit round-trip in this file needs: POST (create), single-issue

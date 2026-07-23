@@ -40,4 +40,4 @@ statuses:
 env:
   QUAY_BACKLOG_TASKS_DIR: null   # documentary — actual value supplied via .quay/config.yml's provider.env
 
-mcp_entry: ["node", "./bin/quay-backlog.js", "mcp"]
+mcp_entry: ["node", "./bin/quay-backlog.ts", "mcp"]

@@ -81,3 +81,9 @@ Standard inherited-core DoD clauses apply. Task-specific criteria:
 ## Not selected (M115)
 
 Not selected M115 — exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM selected instead (governance-integrity/instrument-correction: fixes the audit-independence dispatch mechanism used by EVERY future milestone's ABSORB, higher leverage). This finding is also suspected STALE: current `packages/quay/src/mcp-server.ts.startMcpServer` has visibly fewer imports/a different shape (uses a consolidated `registerAllHandlers` instead of 5 separate register*Handlers calls) than the M98-era measurement describes — needs a fresh archguard re-measurement before any fix is attempted, likely a quick close-as-superseded rather than a real fix.
+
+
+
+## Not selected (M116)
+
+Not selected M116 — exp5-M-TS-MIGRATION-P5-A selected instead (capability-growth: real product TS migration work, diversifying value type from the last two governance-integrity/instrument-correction picks M114/M115). Good next pick.

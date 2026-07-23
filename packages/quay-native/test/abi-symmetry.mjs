@@ -18,7 +18,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const binPath = path.join(__dirname, "..", "bin", "quay-native.js");
+const binPath = path.join(__dirname, "..", "bin", "quay-native.ts");
 
 function cliJson(tasksDir, args) {
   const out = execFileSync("node", [binPath, ...args, "--json"], {

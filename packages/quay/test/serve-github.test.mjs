@@ -46,9 +46,9 @@ import { startServer } from "../src/serve.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
-const nativeBin = path.join(repoRoot, "packages", "quay-native", "bin", "quay-native.js");
+const nativeBin = path.join(repoRoot, "packages", "quay-native", "bin", "quay-native.ts");
 const nativeProviderDir = path.dirname(nativeBin);
-const githubBin = path.join(repoRoot, "packages", "quay-github", "bin", "quay-github.js");
+const githubBin = path.join(repoRoot, "packages", "quay-github", "bin", "quay-github.ts");
 const githubProviderDir = path.dirname(githubBin);
 
 let failures = 0;
