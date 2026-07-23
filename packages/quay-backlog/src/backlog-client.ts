@@ -1,4 +1,3 @@
-// @ts-nocheck — TS gradual-adoption ramp list (ADR-012): tsc --noEmit real-checked this file and found pre-existing untyped-JS structural diagnostics; fixing them means real JSDoc typing / a product-code touch, out of the tooling-only phase that introduced this gate. Remove this line once this file is migrated/annotated.
 // quay-backlog — a READ-ONLY Provider ABI client over a Backlog.md board
 // (https://github.com/MrLesk/Backlog.md-style local task store: markdown
 // files with YAML frontmatter under `<board>/backlog/tasks/*.md`). Built
@@ -39,6 +38,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
+import type { Task } from "../../quay/src/abi.ts";
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 
@@ -54,17 +54,17 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
  * mapped to `todo` can still be advanced through quay's normal lifecycle;
  * a wrongly-terminal mapping would silently hide real remaining work).
  */
-export function mapStatus(rawStatus) {
+export function mapStatus(rawStatus: unknown): "todo" | "done" {
   if (typeof rawStatus !== "string") return "todo";
   return /done/i.test(rawStatus) ? "done" : "todo";
 }
 
-function parseTaskFile(raw, sourcePath) {
+function parseTaskFile(raw: string, sourcePath: string): Task {
   const m = FRONTMATTER_RE.exec(raw);
   if (!m) {
     throw new Error(`malformed Backlog.md task file (missing YAML frontmatter): ${sourcePath}`);
   }
-  const frontmatter = YAML.parse(m[1]) ?? {};
+  const frontmatter = (YAML.parse(m[1]) ?? {}) as Record<string, unknown>;
   const body = m[2] ?? "";
   if (!frontmatter.id) {
     throw new Error(`Backlog.md task file has no frontmatter id: ${sourcePath}`);
@@ -73,7 +73,7 @@ function parseTaskFile(raw, sourcePath) {
     id: String(frontmatter.id),
     title: typeof frontmatter.title === "string" ? frontmatter.title : String(frontmatter.title ?? ""),
     status: mapStatus(frontmatter.status),
-    labels: Array.isArray(frontmatter.labels) ? frontmatter.labels : [],
+    labels: Array.isArray(frontmatter.labels) ? (frontmatter.labels as string[]) : [],
     parent: null, // Backlog.md has no parent/child containment concept (see header note)
     children: [],
     role: "primitive",
@@ -91,8 +91,8 @@ function parseTaskFile(raw, sourcePath) {
  * @param {string} boardDir absolute path to the Backlog.md board's tasks
  *   directory (e.g. archguard's `backlog/tasks`)
  */
-export function createBacklogClient(boardDir) {
-  function listFiles() {
+export function createBacklogClient(boardDir: string) {
+  function listFiles(): string[] {
     if (!fs.existsSync(boardDir)) return [];
     return fs
       .readdirSync(boardDir)
@@ -106,14 +106,14 @@ export function createBacklogClient(boardDir) {
    * returned, so a caller (e.g. the migrate importer) can see and decide
    * how to handle the collision, rather than this read layer quietly
    * discarding one. */
-  function readAll() {
+  function readAll(): Task[] {
     return listFiles().map((filePath) => {
       const raw = fs.readFileSync(filePath, "utf8");
       return parseTaskFile(raw, filePath);
     });
   }
 
-  function list({ status, label } = {}) {
+  function list({ status, label }: { status?: string; label?: string } = {}): Task[] {
     return readAll()
       .filter((t) => (status ? t.status === status : true))
       .filter((t) => (label ? t.labels.includes(label) : true));
@@ -124,11 +124,11 @@ export function createBacklogClient(boardDir) {
    * listing order — a deterministic, documented (not silently arbitrary)
    * choice; `list()` above is the one that surfaces every file, including
    * a collision's other member(s). */
-  function get(id) {
+  function get(id: string): Task | null {
     return readAll().find((t) => t.id === id) ?? null;
   }
 
-  function check(id) {
+  function check(id: string): Record<string, unknown> {
     const t = get(id);
     if (!t) return { id, ok: false, reason: "not found" };
     // Read-only provider: there is no gate to run against a Backlog.md

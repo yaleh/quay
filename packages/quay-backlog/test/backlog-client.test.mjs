@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createBacklogClient, mapStatus } from "../src/backlog-client.js";
+import { createBacklogClient, mapStatus } from "../src/backlog-client.ts";
 
 function makeFixtureBoard(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-backlog-fixture-"));

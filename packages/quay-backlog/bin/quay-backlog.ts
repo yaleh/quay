@@ -6,7 +6,7 @@
 // (design §6 symmetry), read-only (list/get/check only — no create/edit,
 // this Provider does not implement data.write).
 
-import { createBacklogClient } from "../src/backlog-client.js";
+import { createBacklogClient } from "../src/backlog-client.ts";
 
 function resolveTasksDir() {
   const dir = process.env.QUAY_BACKLOG_TASKS_DIR;
@@ -46,13 +46,13 @@ async function main() {
   const tasksDir = resolveTasksDir();
 
   if (cmd === "mcp") {
-    const { startMcpServer } = await import("../src/mcp-server.js");
+    const { startMcpServer } = await import("../src/mcp-server.ts");
     await startMcpServer({ tasksDir });
     return;
   }
 
   if (cmd === "manifest") {
-    const { readManifest } = await import("../src/manifest.js");
+    const { readManifest } = await import("../src/manifest.ts");
     printJson(readManifest());
     return;
   }
