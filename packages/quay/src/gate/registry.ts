@@ -18,11 +18,21 @@ import { resolveRunnerOptions } from "./factories/utils.ts";
 import { discoverWorkspaceRoot, loadWorkspaceGates } from "./factories/loader.ts";
 import type { Task } from "../abi.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// esbuild bundles this module to CJS for the SEA build (Node SEA does not
+// support ESM main modules), where `import.meta.url` is unavailable and
+// evaluates to `undefined` (esbuild warns, does not error) — crashing
+// `fileURLToPath(undefined)` at module-init for every gate-touching command.
+// Node's CJS module wrapper provides a real `__dirname` binding in that
+// context, so prefer it when present (mirrors the src/version.ts /
+// scripts/version-sea-shim.js dual-mode precedent) and fall back to the
+// ESM-only computation otherwise.
+declare const __dirname: string | undefined;
+const moduleDir =
+  typeof __dirname === "string" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 // packages/quay/src/gate -> repo root is 4 levels up. Used ONLY for the
 // product's OWN built-in doc-gate data (DOCUMENT_GATE_IDS/DOCUMENTS_DIR
 // below), which is genuinely product-owned, not research-specific.
-const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
+const REPO_ROOT = path.resolve(moduleDir, "..", "..", "..", "..");
 
 /** The verdict shape every gate function returns. */
 export interface GateVerdict {

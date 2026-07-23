@@ -62,3 +62,9 @@ manifest artifact set AND the foreign-workspace proof is a real observed object 
 Not selected M120 — deliberately deferred: this directive's own text sequences it AFTER
 `exp5-M-NODE-FLOOR-DISTRIBUTION-FIX` (DIR-060), and its own scope explicitly requires SPLIT-OR-COMMIT
 into children before any single child can be selected (not yet decomposed). Blocked, not abandoned.
+
+## Not selected (M121)
+
+Still not decomposed into children (SPLIT-OR-COMMIT not yet applied) — not selectable as-is.
+`exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` selected instead, itself a real prerequisite of good standing
+for a future productized-delivery push (a working Core SEA binary).

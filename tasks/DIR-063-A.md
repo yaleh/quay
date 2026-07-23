@@ -60,3 +60,9 @@ necessary-not-sufficient. Done ONLY when:
 - [ ] This child touches NO driver file — verifiable by `git show --stat` on its landing commit (no
   `OUTER-LOOP.md`/`inherited-core.md`/inner-iteration-prompt in the diff); if it does, it is misscoped
   and belongs in [[DIR-063-B]].
+
+## Not selected (M121)
+
+Not selected — `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` selected instead: higher priority (DIR-004
+URGENT, explicitly named by DIR-064-B as the next chart-2 S1 Δv mover), and cleanly investigation-
+resolved this pass. Good next halt-free exploit pick — no blocking issue, just lower priority.

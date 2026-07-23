@@ -45,3 +45,10 @@ Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidati
 - [ ] Both scripts land as real load-bearing scripts with passing sibling tests (≥80%), verified by real `node --test` runs (pasted), and `loadbearing-test-gate.sh` PASSes (no load-bearing script without a test).
 - [ ] The `drivable-workspace` gate produces a real GateEvent (PASS on a listed target, FAIL on an unlisted one) via `quay gate` — pasted.
 - [ ] This child touches NO driver file — verifiable by `git show --stat` on its landing commit (no `OUTER-LOOP.md`/`inherited-core.md`/inner-iteration-prompt in the diff); if it does, it is misscoped and belongs in [[DIR-062-B]].
+
+## Not selected (M121)
+
+Not selected — `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` selected instead: higher priority (DIR-004
+URGENT, explicitly named by DIR-064-B as the next chart-2 S1 Δv mover), and this milestone's own
+in-pass investigation resolved its sizing concern cleanly. This candidate remains a good next
+halt-free exploit pick — no blocking issue, just lower priority this pass.

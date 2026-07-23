@@ -6,6 +6,7 @@ status: todo
 labels:
   - milestone-candidate
   - defect
+  - milestone:M-121
 parent: null
 children: []
 extra:
@@ -51,20 +52,23 @@ DIR-004 Distribution as URGENT. A broken Core SEA binary is a real gap in that g
 cannot run past module-init for any gate-touching command (i.e., almost the entire CLI surface, since
 `registry.ts` is a load-bearing import for most `quay` subcommands).
 
-**Deeper structural note (uncoded, worth scoping into any fix):** even once the `import.meta.url` crash
-itself is patched (e.g. swap to a build-time-injected constant, or `process.execPath`-relative logic,
-or drop the ESM-only construct for a CJS-safe equivalent), `REPO_ROOT`-relative gate-script path
-resolution is likely STILL fundamentally incompatible with a true single-file SEA distribution — the
-gates under `experiments/quay-perpetual-stream/scripts/` won't exist inside/near the bundled binary at
-runtime on an end-user machine. Whether the SEA build's gate subsystem should (a) embed gate scripts at
-build time (like the manifest/version shims already do), (b) disable gate functionality entirely in the
-distributed binary, or (c) something else, is a real design decision for whoever picks this up — not
-resolved here.
+**Deeper structural note — RESOLVED at M121 (see Plan below):** the fear that `REPO_ROOT`-relative
+gate-script path resolution is fundamentally SEA-incompatible turned out to be based on an incorrect
+assumption. `grep -n REPO_ROOT packages/quay/src/gate/registry.ts` shows `REPO_ROOT` is used ONLY to
+compute `DOCUMENTS_DIR = REPO_ROOT/docs-managed` for the product-owned D1 `doc-*` gates — NOT for the
+research/experiment gate scripts (those resolve via `.quay/gates.yml`'s own
+`discoverWorkspaceRoot`/`loadWorkspaceGates` path in `factories/loader.ts`, untouched by this bug).
 
 ## Plan
-N/A — needs investigation into (a) a CJS-safe replacement for the `import.meta.url`/`__dirname`
-pattern in `registry.ts`, and (b) the deeper REPO_ROOT-relative-gate-path SEA-compatibility question
-above. Likely its own small milestone once scoped; not a one-line fix given the structural note.
+Resolved at M121 (`experiments/quay-perpetual-stream/charters/M121-sea-build-crash-fix.md`) — a
+mechanical, single-file fix once the structural question above was actually investigated (no design
+decision needed): make `registry.ts`'s `__dirname` computation dual-mode safe (prefer the real CJS
+`__dirname` binding present in the SEA/esbuild-CJS bundle context, fall back to
+`fileURLToPath(import.meta.url)` otherwise) — mirrors the existing `src/version.ts` /
+`scripts/version-sea-shim.js` dual-mode precedent (M01-dist). The D1 doc-gate's `docs-managed/`
+dependency degrades to a graceful FAIL (not a crash) when unavailable — real evidence:
+`./dist-sea/quay gate DIR-038 --gate doc-quay-directive-skill` → `FAIL — no such document: DOC-001`,
+exit 1, no crash. This is the AC2 resolution: documented graceful-degrade, not a silent gap.
 
 ## Acceptance Criteria
 - [ ] `./packages/quay/dist-sea/quay --version` (and other gate-touching commands) run without crashing.
@@ -90,3 +94,12 @@ structural question and re-scope the AC/DoD accordingly, or (b) apply DIR-026 sp
 separate "fix the import.meta.url crash" (mechanical, bounded) from "resolve gate-path SEA-compat"
 (design decision, may itself need its own milestone) before dispatch. Good next high-priority pick
 once sized.
+
+## Selected (M121)
+
+Selected — direct exploit pick. M119's own recommendation option (a) applied: a short investigation
+(this milestone's own iteration-0) resolved the structural question in-pass (REPO_ROOT is scoped to
+the product-owned `docs-managed/` D1 doc-gate only, not the research gate scripts the task's authoring
+had feared) — no split needed, single-file mechanical fix. This is also the explicit next step DIR-064-B
+named for demonstrating a real chart-2 Δv (S1 Distribution-reliability cov flip 0.20→0.80 on the SEA
+rows). See `experiments/quay-perpetual-stream/charters/M121-sea-build-crash-fix.md`.

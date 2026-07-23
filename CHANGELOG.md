@@ -2,6 +2,26 @@
 
 ## v0.3.x — M08-merge-recover (dated per-item below; see git log for exact commit dates)
 
+### v0.3.9 (2026-07-23) — SEA binary startup crash fix (M121, DIR-004)
+
+The quay Core SEA (Single Executable Application) binary crashed at startup for any gate-touching
+command — `packages/quay/src/gate/registry.ts` computed `__dirname` via
+`fileURLToPath(import.meta.url)`, which is `undefined` when esbuild bundles the module to CJS for the
+SEA build (Node SEA does not support ESM main modules). Pre-existing since the M84 TS migration,
+silently unexercised for ~30 milestones until the M116 due-diligence SEA smoke test caught it.
+
+#### Fixed
+
+- **`registry.ts`'s `__dirname` computation is now dual-mode safe**: prefers the real CJS `__dirname`
+  binding present in the SEA/esbuild-CJS bundle context, falls back to
+  `fileURLToPath(import.meta.url)` in the normal ESM (`node bin/quay.ts`) path — mirrors the existing
+  `src/version.ts` / `scripts/version-sea-shim.js` dual-mode precedent (M01-dist). `--version`,
+  `task list`, `gate`, and every other gate-touching command now run without crashing on the SEA
+  binary.
+- Confirmed the SEA build's D1 `doc-*` gate (`docs-managed/`-dependent) degrades gracefully (a clear
+  `FAIL — no such document` reason) rather than crashing, when that repo-relative directory is
+  unavailable in the distributed single-file binary — documented, not a silent gap.
+
 ### v0.3.8 (2026-07-23) — Node-floor distribution regression fix (M120, DIR-060)
 
 The M116 `bin/*.js`→`bin/*.ts` migration made every CLI entrypoint a `.ts` file run directly via

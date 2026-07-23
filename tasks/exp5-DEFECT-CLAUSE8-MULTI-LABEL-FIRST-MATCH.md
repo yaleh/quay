@@ -48,3 +48,9 @@ impl-row N/A, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycl
 worktree-branch-hygiene, audit-independence).
 - [ ] All 4 AC items above verified true with pasted command output.
 - [ ] it0 DoD meta-enforcer passes all clauses.
+
+## Not selected (M121)
+
+Not selected — `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` selected instead: higher DIR-004-urgency
+priority and an explicit chart-2 Δv mover named by DIR-064-B. This candidate is small, cleanly bounded,
+and a good next exploit pick.

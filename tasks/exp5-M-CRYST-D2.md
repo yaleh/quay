@@ -16,3 +16,10 @@ Rewrite the skills in the formalized style (§9): ## Spec λ-block + self-verify
 - [ ] Each rewritten skill has a ≤30-line Spec + ≥3 self-contracts that quay (D1) validates; net line count down.
 ## Definition of Done
 Real: the rewritten skills are validated and produce correct objects end-to-end.
+
+## Not selected (M121)
+
+Not selected — `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` selected instead: higher DIR-004-urgency
+priority and an explicit chart-2 Δv mover. This candidate also lacks a stamped `## Plan`/AC-checklist
+schema (`extra.schema` unset) — would need re-authoring to pass `task-schema-check.sh` before dispatch
+regardless; deferred, not blocked.
