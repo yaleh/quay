@@ -7,7 +7,11 @@ labels:
   - milestone-candidate
   - epic
 parent: null
-children: []
+children:
+  - exp5-M-PRODUCTIZED-DELIVERY-A
+  - exp5-M-PRODUCTIZED-DELIVERY-B
+  - exp5-M-PRODUCTIZED-DELIVERY-C
+  - exp5-M-PRODUCTIZED-DELIVERY-D
 extra:
   schema: v1
 ---
@@ -68,3 +72,27 @@ into children before any single child can be selected (not yet decomposed). Bloc
 Still not decomposed into children (SPLIT-OR-COMMIT not yet applied) — not selectable as-is.
 `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` selected instead, itself a real prerequisite of good standing
 for a future productized-delivery push (a working Core SEA binary).
+
+## Split (SPLIT-OR-COMMIT applied, 2026-07-23 — human-steered, post-cp-125)
+
+Human-steering decision after cp-125's HALT-RECOMMENDED (governance:product 431:1): the governance-heavy
+window (chart-2 stand-up + distribution hardening + DoD-checker defect clearance, M121–M125) is confirmed a
+legitimate but **completed** phase; SELECT is redirected to this epic — the darkest product surfaces are
+chart-2 **S2 Delivery-completeness = 0.00** and **S3 External-validation-reach = 0.10**. DIR-060 is applied,
+so this epic is now decomposed into 4 independently-completable children (DIR-026 SPLIT-OR-COMMIT satisfied):
+
+| child | attacks | selectable | steering | Δv it moves |
+|---|---|---|---|---|
+| [[exp5-M-PRODUCTIZED-DELIVERY-A]] version single-source + fail-closed drift gate | S2 conjunct *version-consistent* | **now** (no dep) | loop-autonomous | ratio (adds real product-pipeline code); S2 cov only at C |
+| [[exp5-M-PRODUCTIZED-DELIVERY-B]] delivery-manifest single-source + release.yml coverage assertion | S2 conjunct *manifest-items* | after A | loop-autonomous | ratio; also the single source [[DIR-065]] anchors "product" to |
+| [[exp5-M-PRODUCTIZED-DELIVERY-C]] REAL full-manifest release | S2 conjunct *published* → **realizes S2** | after A+B | **human-steered** (real outward publish) | real S2 chart-2 Δv |
+| [[exp5-M-PRODUCTIZED-DELIVERY-D]] foreign-workspace install + archguard E2E | S3 external-validation | after C | **human-steered** (touches foreign workspace) | real S3 chart-2 Δv |
+
+Honest note on the ratio vs. VT split: A/B are real product-pipeline work and are the loop-autonomous entry
+point, but S2 **cov** (and thus chart-2 Δv) only realizes at C's real publish and D's real foreign install —
+you cannot fake a real npm publish or a real foreign GateEvent. So A/B build confidence + gates now; C/D are
+the human-steered outward acts that actually move S2/S3. Whether A/B's pipeline scripts COUNT as "product"
+in the governance:product ratio depends on [[DIR-065]] (product = manifest-declared shipped files + the
+pipeline producing them) — that is an instrument fix, tracked separately, NOT a way to clear this HALT.
+
+This parent stays `todo` (epic umbrella) until the 4 children collectively satisfy all 5 AC.
