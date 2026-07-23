@@ -81,3 +81,8 @@ next exploit pick once M123 clears.
 
 Not selected — `exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH` selected instead: smaller, cleanly
 bounded, had already been deferred 3 times. Good next halt-free exploit pick.
+
+## Not selected (M125)
+
+Not selected — `DIR-062-A` selected instead: same halt-free class, chosen for direct chart-2 S3
+relevance this pass. Good next halt-free exploit pick.

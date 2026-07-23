@@ -73,6 +73,9 @@ it0:
   - name: dogfood-evidence
     script: "./experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh"
     argsKey: dogfoodEvidenceArgs
+  - name: drivable-workspace
+    script: "./experiments/quay-perpetual-stream/scripts/drivable-workspace-check.sh"
+    argsKey: drivableWorkspaceArgs
 
 adr:
   - "ADR-001"
