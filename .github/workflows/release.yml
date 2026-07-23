@@ -53,9 +53,16 @@ jobs:
         # this (provider-abi-conformance crashed on a 403, then the job hung
         # past the 10-minute timeout). Apply the same exclusion CLAUDE.md's
         # own local-run instructions already document.
+        #
+        # A real v0.3.7 release run then found a THIRD file needing the same
+        # treatment: cli-edit-parity-conformance.test.mjs has its own live
+        # "GitHub leg" doing MUTATING writes (title/labels/parent edits to
+        # real yaleh/quay issues gh-11/gh-3), which needs broader org perms
+        # than the default read-only github.token — not previously
+        # documented in CLAUDE.md.
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node --test $(ls packages/quay/test/*.mjs | grep -vE 'serve-github|provider-abi-conformance') packages/quay-native/test/*.test.mjs
+        run: node --test $(ls packages/quay/test/*.mjs | grep -vE 'serve-github|provider-abi-conformance|cli-edit-parity-conformance') packages/quay-native/test/*.test.mjs
 
       - name: Build release artifact (npm pack)
         id: pack

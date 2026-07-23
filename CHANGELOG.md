@@ -2,15 +2,19 @@
 
 ## v0.3.x — M08-merge-recover (dated per-item below; see git log for exact commit dates)
 
-### v0.3.7 (2026-07-23) — Node-floor distribution regression fix (M120, DIR-060)
+### v0.3.8 (2026-07-23) — Node-floor distribution regression fix (M120, DIR-060)
 
 The M116 `bin/*.js`→`bin/*.ts` migration made every CLI entrypoint a `.ts` file run directly via
 shebang, which only Node's native type-stripping (>=23) can execute — but this project declares and
 CI/release pin a Node >=20 floor. A real v0.3.5 release attempt failed on exactly this
 (`ERR_UNKNOWN_FILE_EXTENSION ".ts"` on Node 20). The v0.3.6 tag's release run then exposed a second,
 separate pre-existing bug (the "Run tests" step included 2 live-GitHub-hitting suites that hung past
-the job timeout) — v0.3.6's SEA assets published successfully but its npm-pack artifact did not; this
-release (v0.3.7) completes the fix with both issues resolved.
+the job timeout) — v0.3.6's SEA assets published successfully but its npm-pack artifact did not. The
+v0.3.7 tag fixed that but exposed a THIRD live-GitHub-hitting file
+(`cli-edit-parity-conformance.test.mjs`, which does live mutating writes needing broader org perms
+than CI's default token) that failed the release job for real (exit 1, not a timeout) — v0.3.7's SEA
+assets published successfully but its npm-pack artifact again did not. This release (v0.3.8) completes
+the fix with all three issues resolved.
 
 #### Fixed
 
