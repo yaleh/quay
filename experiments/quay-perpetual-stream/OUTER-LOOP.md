@@ -90,6 +90,23 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    completed human-steered off-loop, OR only under the D3 behavior-preserving + golden-replay
    discipline; a human removes the `human-steered` label when a candidate is cleared for autonomous
    selection. Filter them out here before ranking.
+   **Round-1 deliverable governor (DIR-066 — SOFT, replaces DIR-038-B's hard governance:product halt).**
+   Over the autonomous-selectable candidates (human-steered already excluded), the pass runs in TWO rounds.
+   **Round 1 composes the "candidates considered this pass" set** (the shortlist ranked in Round 2 below):
+   classify each candidate `deliverable:yes|no` by criterion (丙) — YES iff its landed output is consumed
+   OUTSIDE this loop (shipped `packages/`/`plugin/` code, the release pipeline, a skill/ADR/transferable
+   methodology, or a fix observed in a real downstream); NO for the loop's own gate/DoD/VT/dashboard/
+   directive/SELECT machinery or bookkeeping; **ambiguous → NO**. Maintain a **streak** = consecutive
+   SELECTed `deliverable:no` milestones (a `yes` resets to 0; the §4.5 mandatory explore/arch-audit slot is
+   EXEMPT/streak-neutral). Compose the shortlist via `scripts/deliverable-governor.ts` `composeShortlist`
+   with `floor = min(1, streak/6)`, `N_seats = round((1−floor)·S_max)`, `S_max = 4` — so as the streak
+   rises the shortlist's D-fraction rises to 1 (size `S ∈ [1,4]`; a single forced D → `S=1`). Record each
+   candidate's `deliverable` + the streak + S in the SELECT rationale. **This never halts.** When
+   `streak ≥ 6` AND no autonomous D is available (deliverable-starved backlog), emit a prominent, greppable
+   `DELIVERABLE-STARVATION` line (SELECT log + a dashboard flag) so a watching human sees it, then run the
+   best N and **auto-continue** — set no `.halt`, emit no `HALT-RECOMMENDED`. Continuing N when no D exists
+   is correct. **Round 2 (below) is unchanged** — the VT Δv̂ + value-typed ledger + governance/infra
+   hard-floor ranker picks the winner from this ≤4 shortlist.
    **Write the selection back onto the task store as part of this step:** the chosen candidate task
    gets `milestone:M-NN` appended to its `labels` (via `task_write`) at dispatch time, and every OTHER
    candidate task actually considered this pass (i.e. compared against the winner, not the full
@@ -552,9 +569,9 @@ only two — stop signals:
    the loop *waiting*.
 2. **Internal exit signal (self-halt):** at a checkpoint, if VT slope < the pre-declared threshold with
    no worthwhile explore chart, OR the standing hypothesis is falsified (a milestone failed to
-   converge / degradation across tracks) → write the checkpoint flagged `HALT-RECOMMENDED` and stop,
-   leaving it for async human review.
-   **Two mechanical halt inputs (DIR-038-A + B) — a checkpoint MUST compute and report both:**
+   converge) → write the checkpoint flagged `HALT-RECOMMENDED` and stop, leaving it for async human
+   review.
+   **One mechanical HARD-halt input (DIR-038-A) — a checkpoint MUST compute and report it:**
    - **VT slope** = the ROLLING per-milestone slope over the last K≥5 milestones INCLUDING zero-Δv ones,
      from `scripts/rolling-slope-check.ts` (`windowSlope`/`haltVerdict`) — that module IS the single
      definition (DIR-038-A). The old "qualifying-only" denominator (mean of ONLY the nonzero
@@ -563,12 +580,16 @@ only two — stop signals:
      over that region is ≈0. Report the rolling number (e.g. m29–m35 ≈ 0.64 per 5), never the 3.80
      artifact. Anti-gaming guard `honestNotInflated` FAILS-LOUD (exit 1) if the rolling slope exceeds
      the qualifying-only figure — a re-based ruler that scores the loop BETTER is presumptively gaming.
-   - **governance:product ratio** = governance-lines : product-lines over the checkpoint window, from
-     `scripts/governance-product-ratio-check.ts` (`sumByClass`/`haltInput`; PRODUCT = `packages/`,
-     `plugin/`; GOVERNANCE = the method/eval layer). A breach of the declared threshold (default 5:1) IS
-     "degradation across tracks" and trips `HALT-RECOMMENDED` — a loop building its OWN instruments while
-     the product freezes (recorded restart window ≈8:1) is a real degradation, not a value type to
-     narrate away. This wires the previously-prose "degradation" halt condition to a runnable check (DIR-038-B).
+   **governance:product is NO LONGER a hard-halt input (DIR-066 supersedes DIR-038-B).** The
+   `scripts/governance-product-ratio-check.ts` line ratio (`sumByClass`/`haltInput`) MAY still be computed
+   and reported at a checkpoint as an **informational** metric, but a breach **does NOT trip
+   `HALT-RECOMMENDED`** — the "loop building its own instruments while the product freezes" concern is now
+   handled continuously and softly at SELECT (step 1, the Round-1 deliverable governor), not by a discrete
+   checkpoint halt. Rationale (DIR-066): the line ratio has a fixed ~700-line/milestone process-prose tax
+   that makes even a pristine product milestone read ≈55:1, so as a hard gate it is structurally
+   unsatisfiable and fired at cp-120/cp-125 where the per-task deliverable signal reads healthy. The
+   pure-soft `DELIVERABLE-STARVATION` signal (SELECT step 1) is the replacement surfacing — visible, never
+   halting.
 
 ## Human async control surface (never blocks the loop — §4.7)
 - **Steer:** `/quay-directive` (creates a `label:directive` task — task-canonical, DIR-028) or a `backlog.md` edit, any

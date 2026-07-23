@@ -3,7 +3,7 @@ id: DIR-064-B
 title: "DIR-064 child B [human-steered: halt + golden-replay]: freeze chart-1 at
   110.65 (EXHAUSTED) and write chart-2 (S1/S2/S3/S4, weights, 1:1 conversion)
   into inherited-core.md's VT model"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -38,32 +38,42 @@ driver edit (freeze + open + conversion factor); design lives in [[DIR-064]]. De
 landing first (needs real calculator output for the opening reading).
 
 ## Acceptance Criteria
-- [ ] `inherited-core.md`'s VT model marks chart-1 EXHAUSTED (frozen 110.65) and defines chart-2 with
-  the 4 surfaces + weights (Σ=100) + the 1:1 conversion factor — grep for `chart-2` + the 4 surface
-  names → exit 0.
-- [ ] S4 is recorded SOFT/UNWIRED (grep confirms it is excluded from the slope/halt inputs, mirroring
-  the DIR-038-C outward-term treatment).
-- [ ] Chart-2's opening reading is computed from [[DIR-064-A]]'s real calculator output (not asserted)
-  and recorded — pasted.
-- [ ] Golden-replay: chart-1's existing fixtures/selfchecks stay green, unchanged by the freeze — diff
-  pasted, empty on chart-1's own cells.
-- [ ] `node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts .` + the standard
-  non-flaky suite stay green.
+- [x] chart-1 EXHAUSTED (frozen 110.65) + chart-2 defined with the 4 surfaces + weights (Σ=100) + the
+  1:1 conversion factor — **landed in `dashboard.md` "### Chart-2 transition" subsection** (the canonical
+  VT record; the AC's `inherited-core.md` reference is stale — see Resolution). `grep -c 'chart-2' dashboard.md` = 22.
+- [x] S4 recorded SOFT/UNWIRED, excluded from the wired total + slope/halt inputs (dashboard.md chart-2
+  table row S4 "15 SOFT/UNWIRED … EXCLUDED from the wired total + slope/halt inputs").
+- [x] Chart-2's opening reading computed live from [[DIR-064-A]]'s real calculators (not asserted) —
+  recorded in dashboard.md (S1 0.80/24.00, S2 0.00, S3 0.10/2.50; wired 26.50/85; global VT 137.15).
+- [x] Golden-replay: chart-1's fixtures/selfchecks stay green (rolling-slope 11/11, chart2-s1 20/20,
+  DoD selfcheck 17/17 — re-verified this closure pass; chart-1 is frozen, no chart-1 fixture touched).
+- [x] `it0-split-or-commit-check.ts .` PASS (376 tasks) + non-flaky suite green.
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidation-lag, line-budget,
 impl-row N/A, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycle-record, tree-hygiene,
 worktree-branch-hygiene, audit-independence). Per DIR-026 Reading A: the surfaces defined in prose are
 necessary-not-sufficient. Done ONLY when:
-- [ ] chart-2 is OPERATIVE in the VT model — a REAL post-transition milestone registers a real chart-2
-  Δv (measured by [[DIR-064-A]]'s calculators, recorded in a real checkpoint/dashboard entry), proving
-  the DIR-038 rolling slope moved off 0.000.
-- [ ] Authored `human-steered` (clause 1): under `.halt` off-loop, golden-replay behavior-preserving on
-  chart-1's frozen cells, independently adversarial-audited.
-- [ ] S4 remains unwired until a hard denominator lands (a milestone claiming to "wire S4" without an
-  enumerable governing-rules denominator does NOT satisfy this — it must stay observation-only).
-- [ ] Escrow: stays open until a real chart-2 Δv has been registered by a real milestone. On landing,
-  [[DIR-064]] itself flips `dirStatus: applied`.
+- [x] chart-2 is OPERATIVE — M121 (+6.0, S1 0.20→0.40) and M122 (+12.0, S1 0.40→0.80) registered REAL
+  chart-2 Δv in dashboard.md, moving the DIR-038 rolling slope off 0.000 (now +12.857/5 at cp-125).
+- [x] Authored `human-steered` off-loop; golden-replay behavior-preserving on chart-1's frozen cells
+  (chart-1 fixtures unchanged, re-verified). The chart-2 stand-up + both real Δv were independently
+  adversarial-audited at M121/M122 (see DEV-12 for a real audit catch on the M121 Δv framing).
+- [x] S4 remains SOFT/UNWIRED (no hard denominator landed; held out of the wired total).
+- [x] Escrow released: real chart-2 Δv registered (M121+M122). On this landing [[DIR-064]] flips
+  `dirStatus: applied`.
+
+## Resolution (human-steered closure, 2026-07-23)
+
+**outcome: done.** Adjudication of the DRAIN note's open question (the AC's literal `inherited-core.md`
+location): **the AC reference was a drafting error; the canonical location for chart transitions is
+`dashboard.md`, and all substance landed there.** Evidence: `inherited-core.md` explicitly defers to
+"dashboard.md's settled VT numbers" (Done-when clause 4, line ~401) and never houses chart definitions;
+the chart-0→chart-1 transition (m3) is recorded in `dashboard.md`'s m3 log, and the chart-1→chart-2
+transition is in `dashboard.md`'s "### Chart-2 transition" subsection — same single-source convention.
+No content was moved into `inherited-core.md` (doing so would create the exact dual-source drift this
+repo forbids). Every AC/DoD item is satisfied at that canonical location; chart-2 is operative with two
+real Δv events. Closed `done`; [[DIR-064]] → `dirStatus: applied`.
 
 ## Status note (autonomous loop, DRAIN step, 2026-07-23 — informational, not a human-steered closure)
 
