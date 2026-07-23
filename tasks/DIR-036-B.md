@@ -4,14 +4,14 @@ title: "DIR-036 child B (Level 3 — application): the single-sourced methodolog
   kit drives ONE real OUTER-LOOP milestone DEVELOPING archguard, DoD-audited by
   it0-dod-check keyed to that real foreign-repo milestone (the V_meta transfer
   test) — depends on DIR-036-A"
-status: todo
+status: done
 labels:
   - directive
   - human-steered
 parent: DIR-036
 children: []
 extra:
-  dirStatus: deferred
+  dirStatus: superseded
 ---
 ## Proposal
 Level 3 of ADR-013's Validation Ladder — the methodology KIT (single-sourced at [[DIR-035-D]]) drives ONE real OUTER-LOOP milestone DEVELOPING archguard, DoD-audited by the it0 meta-enforcer. This is the **V_meta transfer test**: the loop's methodology, moved off quay's own repo, produces a real code milestone on a foreign product. The loop's `V_meta` has never had an external gradient — every prior milestone developed quay itself; this is the first time the methodology is measured against a repo it did not grow up in. Depends on [[DIR-036-A]] (product deployed on archguard first). Child of [[DIR-036]].
@@ -21,7 +21,18 @@ N/A — resolved via an archguard-development milestone.
 
 ## Resolution
 
-**dirStatus: deferred — ABSORBED by [[DIR-061]]** (updated 2026-07-23; supersedes the 2026-07-21 note below).
+**dirStatus: superseded — closed, work owned by [[DIR-061]]** (updated 2026-07-23; supersedes the notes below).
+
+Terminally closed (status: done / dirStatus: superseded) so DIR-036's tree can resolve — NOT a claim
+that the archguard e2e validation was performed here (it was not). The V_meta transfer-test substance
+moved to [[DIR-061]] (its archguard e2e child), where it is now **autonomous-eligible** under the
+tightened `human-steered` semantics ([[DIR-062]]): archguard is in the drivable-workspaces registry
+(`/home/yale/work/*`, scope: validation), so this is instrument-use (clause 3, registry-gated), not
+mission redirection. Its parent [[DIR-036]] was rejected (clause 2); this child is superseded, not
+rejected — its value is real and relocated, not void.
+
+_Earlier note (2026-07-23, absorbed→now formalized as superseded):_ DIR-036-B's blockers DIR-045 +
+DIR-046 are both done; it was absorbed by DIR-061.
 
 Two updates reconcile this task with reality:
 
