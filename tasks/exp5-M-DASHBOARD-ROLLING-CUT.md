@@ -2,7 +2,7 @@
 id: exp5-M-DASHBOARD-ROLLING-CUT
 title: "Dashboard rolling-cut archive: trim live dashboard to ≤1200 lines,
   archive m25..m125 to dashboard-archive/"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - governance-integrity
@@ -10,6 +10,10 @@ labels:
 parent: null
 children: []
 extra:
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-M-DASHBOARD-ROLLING-CUT
+    experiments/quay-perpetual-stream/charters/M131-dashboard-rolling-cut.md
+    /tmp/m131-absorb-entry.md
   schema: v1
 ---
 ## Proposal
@@ -27,14 +31,14 @@ N/A — operational housekeeping. Archive old log entries to dashboard-archive/,
 dashboard stays under 1200 lines.
 
 ## Acceptance Criteria
-- [ ] m25..m125 log entries archived to `dashboard-archive/` following DIR-054 rolling-window format
-- [ ] Dashboard stays under 1200 lines after archival
-- [ ] `it0-dashboard-line-budget-check.sh` exits 0 after archival
-- [ ] `it0-backlog-regen.ts` exits 0
-- [ ] Standard non-flaky suite stays green
+- [x] m25..m125 log entries archived to `dashboard-archive/` following DIR-054 rolling-window format
+- [x] Dashboard stays under 1200 lines after archival
+- [x] `it0-dashboard-line-budget-check.sh` exits 0 after archival
+- [x] `it0-backlog-regen.ts` exits 0
+- [x] Standard non-flaky suite stays green
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply.
-- [ ] Dashboard operational debt cleared (≤1200 lines confirmed)
-- [ ] Archive preserves all historical milestone entries
-- [ ] it0 DoD meta-enforcer passes
+- [x] Dashboard operational debt cleared (≤1200 lines confirmed)
+- [x] Archive preserves all historical milestone entries
+- [x] it0 DoD meta-enforcer passes

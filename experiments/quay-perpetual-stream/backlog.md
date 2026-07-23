@@ -6,6 +6,13 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-CRYST-D2 | D2 Rewrite skills (/quay-directive, quay-task-to-plan) in baime formalized style (λ-Spec + contracts:) | DONE | - | milestone-candidate, crystallization, milestone:M-130 |
+| exp5-M-PRODUCTIZED-DELIVERY-B | Productized delivery child B: checked-in delivery-manifest (single source of the shipped artifact set: 4 package tarballs + plugin bundle) + a test that asserts release.yml produces EXACTLY that set | DONE | - | milestone-candidate, milestone:M-129 |
+| exp5-M-ARCH-AUDIT-M128-EXPLORE | M128 mandatory explore: post-M127 architecture audit (archguard L_D/L_G sweep, FILE-ONLY) | DONE | - | milestone-candidate, explore, milestone:M-128 |
+| DIR-063-A | DIR-063 child A [halt-free]: chart-saturation-check detector + milestones-since-last-transition counter + anti-gaming guard scripts + fixtures + ≥80% test (no driver edit — loop-autonomous) | DONE | - | milestone-candidate, crystallization, milestone:M-127 |
+| exp5-M-PRODUCTIZED-DELIVERY-A | Productized delivery child A: version single-source + fail-closed drift gate (all 4 packages + plugin.json + both marketplace.json + vendored Core carry ONE version) — RED+GREEN on the real tree | DONE | - | milestone-candidate, milestone:M-126 |
+| DIR-066-A | DIR-066 child A [halt-free]: build the deliverable-governor mechanism — (丙) streak + rising D-quota f=min(1,streak/6) Round-1 shortlist composition (S∈[1,4]) + independently-derived M63–M125 golden-oracle replay + ≥80% test (no driver edit — loop-autonomous) | DONE | - | milestone-candidate |
+| DIR-064-B | DIR-064 child B [human-steered: halt + golden-replay]: freeze chart-1 at 110.65 (EXHAUSTED) and write chart-2 (S1/S2/S3/S4, weights, 1:1 conversion) into inherited-core.md's VT model | DONE | - | milestone-candidate, crystallization, human-steered |
 | DIR-062-A | DIR-062 child A [halt-free]: build the human-steered classifier + drivable-workspace fail-closed gate + fixtures + ≥80% test (no driver edit — loop-autonomous) | DONE | - | milestone-candidate, crystallization, milestone:M-125 |
 | exp5-DEFECT-CLAUSE8-MULTI-LABEL-FIRST-MATCH | defect: it0-dod-check.ts clause8 uses first-match-wins on multi-milestone-labeled tasks, misreports N/A on 3 real done tasks | DONE | - | milestone-candidate, defect, milestone:M-124 |
 | exp5-M-ARCH-AUDIT-POST-M122-EXPLORE | Post-M121/M122 architecture audit (mandatory explore) — confirm no structural regression from the SEA crash fix + CI extension | DONE | - | milestone-candidate, explore, milestone:M-123 |
@@ -130,10 +137,11 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| DIR-063-A | DIR-063 child A [halt-free]: chart-saturation-check detector + milestones-since-last-transition counter + anti-gaming guard scripts + fixtures + ≥80% test (no driver edit — loop-autonomous) | open | - | milestone-candidate, crystallization |
-| DIR-064-B | DIR-064 child B [human-steered: halt + golden-replay]: freeze chart-1 at 110.65 (EXHAUSTED) and write chart-2 (S1/S2/S3/S4, weights, 1:1 conversion) into inherited-core.md's VT model | open | - | milestone-candidate, crystallization, human-steered |
+| exp5-M-DASHBOARD-ROLLING-CUT | Dashboard rolling-cut archive: trim live dashboard to ≤1200 lines, archive m25..m125 to dashboard-archive/ | SELECTED | - | milestone-candidate, governance-integrity, milestone:M-131 |
+| DIR-066-B | DIR-066 child B [human-steered: halt + golden-replay]: wire the Round-1 D-quota into OUTER-LOOP step 1 (candidates-considered-this-pass) + REMOVE DIR-038-B's governance:product→HALT-RECOMMENDED clause from the self-halt block | open | - | milestone-candidate, human-steered |
 | exp5-M-PRODUCTIZED-DELIVERY | Complete productized delivery: all 4 packages + Claude Code plugin as one version-consistent unit (DIR-061) | open | - | milestone-candidate, epic |
-| exp5-M-CRYST-D2 | D2 Rewrite skills (/quay-directive, quay-task-to-plan) in baime formalized style (λ-Spec + contracts:) | open | - | milestone-candidate, crystallization |
+| exp5-M-PRODUCTIZED-DELIVERY-D | Productized delivery child D [human-steered: touches foreign workspace]: foreign-workspace Provider-install mechanism + real archguard E2E — an observed real Provider-ABI task-status GateEvent flips S3 External-validation-reach | open | - | milestone-candidate, human-steered |
+| exp5-M-PRODUCTIZED-DELIVERY-C | Productized delivery child C [human-steered: real outward publish]: cut a REAL release publishing all 4 package tarballs + the plugin bundle, version- consistent, runtime-smoke-green on the Node floor — flips S2 cov with real evidence | open | - | milestone-candidate, human-steered |
 | DIR-063-B | DIR-063 child B [human-steered: halt + golden-replay]: wire chart-saturation-check as a self-halt PRE-STEP in OUTER-LOOP.md, gate subagent-drafting strictly behind TRANSITION-DUE | open | - | milestone-candidate, crystallization, human-steered |
 | DIR-062-C | DIR-062 child C [proof, depends on B]: a REAL task's human-steered verdict produced by the wired SELECT logic (not hand-assigned), GateEvent-evidenced | open | - | milestone-candidate, crystallization |
 | DIR-062-B | DIR-062 child B [human-steered: halt + golden-replay]: write the 3-clause definition into inherited-core.md + wire OUTER-LOOP SELECT to call the classifier | open | - | milestone-candidate, crystallization, human-steered |
@@ -150,4 +158,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_143 milestone-candidate task(s) as of 2026-07-23T11:42:07.987Z._
+_151 milestone-candidate task(s) as of 2026-07-23T18:57:48.206Z._
