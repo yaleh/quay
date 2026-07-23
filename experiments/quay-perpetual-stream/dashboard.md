@@ -1,7 +1,10 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 120** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 120** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)**
+<!-- chart: 1→2 at M121/DIR-064 (2026-07-23) — chart-1 EXHAUSTED (frozen 110.65/120, flat 108 milestones m12→m120); chart-2 opened (S1 Distribution-reliability / S2 Delivery-completeness / S3 External-validation / S4 Methodology-executability-SOFT). See the "### Chart-2 transition" subsection in ## VT below. -->
+<!-- OLD chart: 1 header value retained in git history; transition is human-ratified (DIR-064) + human-wired this session. -->
+
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -92,6 +95,45 @@ term it contributes as **1 new capability = 5 points → non-zero** (`rescore(0,
 ruler now READS the external `L_T` signal DIR-036 produces, so capability-adding and external use register
 value without a pre-enumerated cov cell. (Integrating the outward term into the per-milestone Δv that
 feeds the rolling-slope halt — A — is the terminal DIR-038 step once the outward cadence is a standing input.)
+
+### Chart-2 transition (M121 / DIR-064) — chart-1 EXHAUSTED, reliability/delivery/external ruler opened
+
+**Chart-1 is EXHAUSTED, frozen at 110.65/120** (≈0.922 normalized; the plateau since m12, flat for 108
+milestones m12→m120 — cp-15…cp-120 all identical; the DIR-038 self-halt at cp-120 is what forced this
+transition). The loop's real work since m12 (TS migration, arch fixes, the M120 Node-floor distribution
+fix) lands in value classes chart-1's 6 product-capability surfaces structurally cannot score. Per
+OUTER-LOOP §6.2 + DIR-063 (semi-automatic transition mechanism) + DIR-064 (human-ratified surfaces),
+chart-2 opens with surfaces that DO score that class.
+
+**Residual-headroom adjudication (DIR-063 Finding #5):** chart-1 is 92%, not 100% — 9.35 pts of real
+product-capability headroom on the 6 surfaces were never pursued. Adjudicated: **FOLD into chart-2, not
+pursue on chart-1.** chart-1 is FROZEN, not deleted — a future genuine product-capability milestone can
+still score its chart-1 cell — but the loop's forward value gradient is chart-2.
+
+**Conversion factor (§6.2):** chart-1 frozen at 110.65 pts; chart-2 is a fresh [0,100] pts scale;
+**1 chart-2 pt ≡ 1 chart-1 pt**; global VT = 110.65 + (chart-2 current). Keeps VT globally unbounded and
+monotone (chart-1 82.25→…→110.65; chart-2 continues from there).
+
+**chart-2 surfaces (Σ weight = 100; cov is MACHINE-COMPUTED from objective sources — the anti-gaming
+guard, per DIR-038-C discipline: no judgment-scored inflatable cov):**
+
+| # | surface | weight | cov | points | objective cov source (script) |
+|---|---|---|---|---|---|
+| S1 | Distribution reliability | 30 | 0.20 | 6.00 | `scripts/chart2-s1-distribution-reliability.ts` (release artifacts passing floor-smoke / total; from `chart2-s1-artifacts.json`, cited to CI run 29981401108: npm-pack✓, SEA×3✗, plugin untested → 1/5) |
+| S2 | Delivery completeness | 30 | 0.00 | 0.00 | `scripts/chart2-s2-delivery-completeness.ts` (version-consistent ∧ manifest-published ∧ foreign-install-green; live 5-way version drift 0.3.8/0.3.5/0.3.22/0.3.16/0.3.5 → 0/3) |
+| S3 | External-validation reach | 25 | 0.10 | 2.50 | `scripts/chart2-s3-external-validation.ts` (registry workspaces with a real ABI task-status GateEvent / target; `drivable-workspaces.yml`-bounded → 1/10, archguard reached) |
+| **S4** | **Methodology executability** | **15 SOFT/UNWIRED** | — | **0 (held out)** | recorded but EXCLUDED from the wired total + slope/halt inputs until it has a hard enumerable denominator — same treatment DIR-038-C gave the outward term; wiring a subjective count would reopen the self-referential gaming hole |
+| **chart-2 wired current (S1+S2+S3, after m121)** | | **/85 wired** | | **8.50** | |
+| **global VT (110.65 chart-1 frozen + 8.50 chart-2)** | | | | **119.15** | |
+
+**Opening reading computed live (2026-07-23), not asserted** — all three calculators run + their
+verdicts pasted; each is a load-bearing script with a ≥80%-coverage sibling test (S1 20/20 @97.4%,
+S2 21/21 @97.9%, S3 18/18 @94.9%; `loadbearing-test-gate.sh` PASS). **Δv demonstration (DIR-064 AC #5):**
+closing `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` flips the 3 SEA rows in `chart2-s1-artifacts.json`,
+moving S1 cov 0.20→0.80 → +18.0 chart-2 pts — i.e. the open backlog now registers real chart-2 Δv, so
+the self-halt's 0.000 slope turns positive as SEA-crash / DIR-061 / DIR-062 land. Future transitions
+(chart-2→chart-3) use DIR-063's semi-automatic detect→draft→ratify mechanism rather than another manual
+100-milestone-delayed one.
 
 VT curve (append, chart-1 basis from m3 forward):
 `[ (m0, 82.25/100), (m1/M-DIST, 88.25/100, Δv=+6.0), (m2/M-GATES, 88.25/100, Δv=0, methodology-infra
