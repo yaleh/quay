@@ -2,6 +2,22 @@
 
 ## v0.3.x — M08-merge-recover (dated per-item below; see git log for exact commit dates)
 
+### v0.3.11 (2026-07-23) — Windows SEA archive was missing `.quay/config.yml` (M122)
+
+Caught by the v0.3.10 release run of the new `sea-verify-node-free-cross-platform` job (see below):
+the Windows SEA archive's `.quay/config.yml` (and the whole `.quay/` directory) was silently missing
+from every past Windows release — `release.yml`'s archiving step used a bare bash `*` glob
+(`./dist-sea-release/*`), which does not match dotfiles/dotdirs, while the Linux/macOS archiving path
+(`tar -C dist-sea-release .`) does. The archive looked complete (`quay.exe`/`quay-native.exe` present)
+but `quay serve` (and most commands) crashed at runtime with "no .quay/config.yml found" — a real,
+previously-undetected latent bug, never caught because no job ever runtime-smoked the Windows archive
+before this milestone.
+
+#### Fixed
+
+- `shopt -s dotglob` before the `7z a` archive step, so the Windows zip includes `.quay/` like the
+  tar-based Linux/macOS archives already did.
+
 ### v0.3.10 (2026-07-23) — cross-platform SEA runtime-smoke CI coverage (M122)
 
 `release.yml`'s `sea-verify-node-free` job (the only runtime-smoke verification of the SEA binaries)

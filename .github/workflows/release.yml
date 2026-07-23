@@ -172,6 +172,14 @@ jobs:
           VERSION="$(node -p "require('./packages/quay/package.json').version")"
           ARCHIVE_NAME="quay-sea-${VERSION}-${{ matrix.asset_suffix }}"
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            # M122 fix (exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY): bash's bare `*` glob does NOT
+            # match dotfiles/dotdirs, so `./dist-sea-release/*` silently excluded `.quay/config.yml`
+            # (and `.quay/` itself) from every Windows SEA archive — the archived bundle looked
+            # complete (quay.exe/quay-native.exe present) but `quay serve`/most commands crashed at
+            # runtime with "no .quay/config.yml found", a real latent bug never caught because no
+            # runtime-smoke job ever ran the Windows archive before this milestone. `shopt -s dotglob`
+            # makes `*` match dotfiles too, matching tar's `-C dist-sea-release .` behavior below.
+            shopt -s dotglob
             7z a "${ARCHIVE_NAME}.zip" ./dist-sea-release/*
             echo "ARCHIVE_PATH=${ARCHIVE_NAME}.zip" >> "$GITHUB_ENV"
           else
