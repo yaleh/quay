@@ -23,8 +23,8 @@ import os from "node:os";
 import { resolveGate, listGates } from "../src/gate/registry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const quayBin = path.join(__dirname, "..", "bin", "quay.js");
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
+const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
+const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
 const nativeProviderDir = path.dirname(nativeBin);
 // repo root: packages/quay/test -> repo root is 3 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -35,6 +35,11 @@ const FIXTURES_DIR = path.join(
 const ABSENT_ID_FIXTURE = path.join(FIXTURES_DIR, "absent-id-m43-style.md");
 const SELF_AUDIT_FIXTURE = path.join(FIXTURES_DIR, "self-audit-matching-id.md");
 const INDEPENDENT_FIXTURE = path.join(FIXTURES_DIR, "genuinely-independent.md");
+// DIR-034 anti-forgery corroboration: a distinct session id alone no longer PASSes (fail-closed
+// per audit-independence-check.ts) — it must also be corroborated by a dispatch-record. This
+// fixture's id ("explore-subagent-9f3e7a21-distinct") is one of the two ids dispatch-record.txt
+// already lists for exactly this purpose.
+const DISPATCH_RECORD_FIXTURE = path.join(FIXTURES_DIR, "dispatch-record.txt");
 const ORCH_ID = "orchestrator-session-abc123"; // matches self-audit-matching-id.md's recorded id
 // DIR-035-B: `audit-independence` is no longer a module-level `gateRegistry`
 // entry — it is THIS repo's own `.quay/gates.yml`-declared workspace gate.
@@ -154,7 +159,13 @@ test("M44 A2: audit-independence gate PASSes for a genuinely distinct session id
   assert.ok(fs.existsSync(INDEPENDENT_FIXTURE), "genuinely-independent.md fixture must exist");
   const r = await gate("audit-independence")({
     id: "T",
-    extra: { auditIndependenceArgs: ["--orchestrator-id", ORCH_ID, INDEPENDENT_FIXTURE] },
+    extra: {
+      auditIndependenceArgs: [
+        "--orchestrator-id", ORCH_ID,
+        "--dispatch-record", DISPATCH_RECORD_FIXTURE,
+        INDEPENDENT_FIXTURE,
+      ],
+    },
   });
   assert.equal(r.ok, true, `expected pass; got reason=${r.reason}`);
 });
@@ -199,7 +210,13 @@ test("M44 C1: `quay gate <task> --gate audit-independence` PASSes for real (inde
       "edit",
       "T-AUDIT-PASS",
       "--extra",
-      JSON.stringify({ auditIndependenceArgs: ["--orchestrator-id", ORCH_ID, INDEPENDENT_FIXTURE] }),
+      JSON.stringify({
+        auditIndependenceArgs: [
+          "--orchestrator-id", ORCH_ID,
+          "--dispatch-record", DISPATCH_RECORD_FIXTURE,
+          INDEPENDENT_FIXTURE,
+        ],
+      }),
     ],
     tasksDir
   );

@@ -102,7 +102,7 @@ import http from "node:http";
 import { startServer } from "../src/serve.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.js");
+const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
 const nativeProviderDir = path.dirname(nativeBin);
 
 let failures = 0;
@@ -478,8 +478,12 @@ async function main() {
     assert(detail1.body.includes("<h3>Plan</h3>"),
       "GET /task/WUI-1 body: ## Plan rendered as <h3>Plan</h3> (QW-002: rendered markdown)");
 
-    // List items from "- [x] ..." appear as <li> elements
-    assert(detail1.body.includes("<li>"),
+    // List items from "- [x] ..." appear as <li> elements. Matches the "<li" tag-open prefix
+    // (not the exact "<li>" substring): DIR-025/M41 added task-list-checkbox rendering, so a
+    // checkbox item is `<li class="task-list-item">`, not a bare `<li>` — and VALID_SECTIONS'
+    // AC/DoD lines are all "- [x] ..." checkbox items, so the exact "<li>" substring never
+    // actually appears here even though list rendering is working correctly.
+    assert(detail1.body.includes("<li"),
       "GET /task/WUI-1 body: list items rendered as <li> elements (QW-002: rendered markdown)");
 
     // No bare top-level <pre> wrapping the entire body text

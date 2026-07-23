@@ -11,5 +11,14 @@
   "devDependencies": {
     "@types/node": "20.19.43",
     "typescript": "7.0.2"
+  },
+  "overrides": {
+    "zod": "3.25.76",
+    "@modelcontextprotocol/sdk": {
+      "zod": "3.25.76"
+    },
+    "zod-to-json-schema": {
+      "zod": "3.25.76"
+    }
   }
 }

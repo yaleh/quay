@@ -1,0 +1,5 @@
+{
+  "//": "DIR-059: per-package tsconfig — extends the root config's compilerOptions (single source stays the root file) and scopes `include` to just this package's own src/bin, so `tsc --noEmit -p .` doesn't re-parse the other 3 packages (and their copies of @modelcontextprotocol/sdk's types) on every invocation.",
+  "extends": "../../tsconfig.json",
+  "include": ["src/**/*.js", "src/**/*.ts", "bin/**/*.js", "bin/**/*.ts"]
+}

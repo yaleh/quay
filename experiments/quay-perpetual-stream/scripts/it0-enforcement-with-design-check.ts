@@ -313,7 +313,7 @@ if (isDirect) {
   );
   const dodCheckPath = path.join(
     resolvedRoot,
-    "experiments/quay-perpetual-stream/scripts/it0-dod-check.mjs"
+    "experiments/quay-perpetual-stream/scripts/it0-dod-check.ts"
   );
 
   if (!fs.existsSync(inheritedCorePath)) {
@@ -321,7 +321,7 @@ if (isDirect) {
     process.exit(2);
   }
   if (!fs.existsSync(dodCheckPath)) {
-    console.error(`ERROR: it0-dod-check.mjs not found: ${dodCheckPath}`);
+    console.error(`ERROR: it0-dod-check.ts not found: ${dodCheckPath}`);
     process.exit(2);
   }
 

@@ -55,10 +55,16 @@ gates:
     - name: it0-dod-check-tests
       command: "node --test experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs"
     - name: ts-typecheck
-      command: "npx tsc --noEmit"
+      # DIR-059: per-package loop (not root `npx tsc --noEmit`) — bounds peak RSS per invocation
+      # to one package's own dependency graph instead of all 4 packages' at once (was routinely
+      # peaking at 4-5GB on the host and OOM-killing it; per-package peaks ~2.6GB at worst).
+      # `cwd: "."` (-> workspaceRoot, DIR-046-B) makes the `packages/*/` glob resolve the same way
+      # regardless of the caller's own process.cwd() (in-process gate() calls vs the `quay gate` CLI).
+      command: "for d in packages/*/; do npx tsc --noEmit -p \"$d\" || exit 1; done"
+      cwd: "."
     # C1 / exp5-M-CRYST-C1 / DIR-026: split-or-commit gate
     - name: split-or-commit
-      command: "node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.mjs ."
+      command: "node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts ."
     # INV / exp5-M-CRYST-INV / ADR-011: enforcement-with-design gate
     - name: enforcement-with-design
-      command: "node experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.mjs ."
+      command: "node experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.ts ."

@@ -4,6 +4,7 @@
 // `adr-<id>` gate. Fails closed when the ADR is missing, not accepted, or
 // has no non-empty `enforcement` string.
 
+import path from "node:path";
 import type { GateFn } from "../registry.ts";
 import { runAcceptance } from "../acceptance-runner.ts";
 import { resolveRunnerOptions } from "./utils.ts";
@@ -40,7 +41,11 @@ export function makeAdrGate(adrId: string, adrDir: string): GateFn {
         reason: `${adrId} has no enforcement command defined (set its \`enforcement:\` frontmatter field to a runnable check)`,
       };
     }
-    const { cwd, timeoutMs } = resolveRunnerOptions();
+    // `enforcement:` commands are workspace data written as repo-relative paths (e.g. "bash
+    // experiments/.../foo.sh"), so they must run with cwd = workspaceRoot (adrDir's parent), not
+    // whatever process.cwd() happens to be for the caller (an in-process gate() call vs the `quay
+    // gate` CLI, which sets its own cwd, otherwise resolve to it by coincidence only).
+    const { cwd, timeoutMs } = resolveRunnerOptions({ cwd: path.dirname(adrDir) });
     const { ok, reason } = runAcceptance({ command, cwd, timeoutMs });
     return { ok, reason };
   };
