@@ -1,11 +1,12 @@
 ---
 id: exp5-M-PRODUCTIZED-DELIVERY-A
 title: "Productized delivery child A: version single-source + fail-closed drift
-  gate (all 4 packages + plugin.json + both marketplace.json + vendored Core carry
-  ONE version) — RED+GREEN on the real tree"
+  gate (all 4 packages + plugin.json + both marketplace.json + vendored Core
+  carry ONE version) — RED+GREEN on the real tree"
 status: todo
 labels:
   - milestone-candidate
+  - milestone:M-126
 parent: exp5-M-PRODUCTIZED-DELIVERY
 children: []
 extra:

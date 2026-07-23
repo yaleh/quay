@@ -23,3 +23,12 @@ Not selected — `exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH` selected instead: highe
 priority and an explicit chart-2 Δv mover. This candidate also lacks a stamped `## Plan`/AC-checklist
 schema (`extra.schema` unset) — would need re-authoring to pass `task-schema-check.sh` before dispatch
 regardless; deferred, not blocked.
+
+## Not selected (M126)
+
+Not selected — `exp5-M-PRODUCTIZED-DELIVERY-A` selected instead via the DIR-066 Round-1 deliverable
+governor's first real exercise: streak=2 (carried from M125), floor=0.333, dSeats=1/nSeats=3 (S_max=4).
+Both this task and PRODUCTIZED-DELIVERY-A classified `deliverable:yes`; PRODUCTIZED-DELIVERY-A ranked
+higher in Round 2 — it is a direct chart-2 S2 (Delivery-completeness, weight 30, cov=0.00) mover,
+DIR-004-urgent-adjacent, and unblocks two dependent children (-B, -C). This candidate remains a good
+next D pick; still lacks a stamped `## Plan`/AC-checklist schema (`extra.schema` unset).

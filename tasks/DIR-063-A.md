@@ -86,3 +86,11 @@ bounded, had already been deferred 3 times. Good next halt-free exploit pick.
 
 Not selected — `DIR-062-A` selected instead: same halt-free class, chosen for direct chart-2 S3
 relevance this pass. Good next halt-free exploit pick.
+
+## Not selected (M126)
+
+Not selected — `exp5-M-PRODUCTIZED-DELIVERY-A` selected instead. Both this task and PRODUCTIZED-
+DELIVERY-A made the Round-1 shortlist under the DIR-066 governor's first real exercise (streak=2,
+floor=0.333, dSeats=1/nSeats=3, S=2: {PRODUCTIZED-DELIVERY-A, DIR-063-A}); Round 2 picked
+PRODUCTIZED-DELIVERY-A as the direct chart-2 S2 mover (weight 30, cov=0.00) and DIR-004-urgent-adjacent
+pick. This candidate is the N-seat occupant this pass and a strong next exploit pick.
