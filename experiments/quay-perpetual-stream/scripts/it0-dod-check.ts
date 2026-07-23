@@ -618,7 +618,18 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
   // a lower one, so the MAXIMUM matched number is the real/final landing milestone. A single `.match`
   // here returned only the FIRST label in file order, which could be a stale low-numbered discovery
   // label below the cutover even when the task's real landing milestone was well past it.
-  const milestoneLabelMatches = [...taskText.matchAll(/milestone:M-?(\d+)/gi)];
+  //
+  // Scope the scan to the frontmatter block ONLY when real frontmatter is present (a real task file),
+  // not the whole document text — the M124 adversarial audit found that scanning the whole text lets
+  // an unrelated `milestone:M<N>`-shaped string incidentally quoted in the task's OWN prose body (e.g.
+  // discussing a different task's label, or this exact defect's own writeup) spuriously inflate the
+  // max and misfire the cutover. Real labels live in the frontmatter `labels:` block; scanning just
+  // that substring is both correct and sufficient. Fixture/charter text (the no-real-task-file
+  // fallback below) has no `---`-delimited frontmatter — falls back to scanning the whole fixture
+  // text, unchanged, preserving every existing fixture's `label: milestone:M<N>` convention.
+  const frontmatterMatch = taskText.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  const labelScanText = frontmatterMatch ? frontmatterMatch[1] : taskText;
+  const milestoneLabelMatches = [...labelScanText.matchAll(/milestone:M-?(\d+)/gi)];
   const taskMilestoneNum = milestoneLabelMatches.length > 0
     ? Math.max(...milestoneLabelMatches.map((m) => parseInt(m[1], 10)))
     : null;

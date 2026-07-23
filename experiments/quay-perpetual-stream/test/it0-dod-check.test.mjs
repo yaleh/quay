@@ -13,6 +13,8 @@
 //   node --test --experimental-test-coverage experiments/quay-perpetual-stream/test/it0-dod-check.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { runDodCheck } from "../scripts/it0-dod-check.ts";
 
 // ── Reusable in-memory fixture builders (mirror fixtures/dod/*.md section shapes) ────────────────
@@ -342,17 +344,26 @@ genuine explanatory content describing what is built and why.
 N/A — this is a small single-increment change; no separate docs/plans record is warranted.
 `;
 
+// M124 adversarial audit finding (REFUTED, fixed): the original versions of these two tests asserted
+// only `hasPass(r, "clause8-task-canonical-lifecycle-record")`, a substring shared by BOTH the
+// "applies and passed" message AND the "N/A, grandfathered" message — so they passed identically
+// against the OLD buggy first-match code (which would have wrongly resolved these low-then-high /
+// high-then-low fixtures to N/A via the first-seen label). Fixed to assert the SPECIFIC applies-path
+// message text (proving clause8 actually evaluated Proposal/Plan, not just N/A-skipped) AND the
+// ABSENCE of the N/A message — genuinely distinguishing the two outcomes this defect is about.
 test("clause8: multi-label low-then-high order (early discovery label below cutover, real landing label above) → applies, using the MAX", () => {
   const charter = CLEAN_CHARTER_EXCERPT + `\nlabel: milestone:M5-discover milestone:M41-fake\n`;
   const r = run({ milestoneId: "M-FAKE-MULTILOW", charter, dod: GOOD_DOD + "\n" + GOOD_PROPOSAL_PLAN });
-  assert.ok(hasPass(r, "clause8-task-canonical-lifecycle-record"), JSON.stringify(r.passes));
+  assert.ok(hasPass(r, "task carries a real '## Proposal'"), JSON.stringify(r.passes));
+  assert.ok(!hasPass(r, "clause8-task-canonical-lifecycle-record: N/A"), JSON.stringify(r.passes));
   assert.ok(!hasFail(r, "clause8"), JSON.stringify(r.failures));
 });
 
 test("clause8: multi-label high-then-low order (real landing label first, an older low-numbered label after) → still applies, using the MAX", () => {
   const charter = CLEAN_CHARTER_EXCERPT + `\nlabel: milestone:M41-fake milestone:M5-discover\n`;
   const r = run({ milestoneId: "M-FAKE-MULTIHIGH", charter, dod: GOOD_DOD + "\n" + GOOD_PROPOSAL_PLAN });
-  assert.ok(hasPass(r, "clause8-task-canonical-lifecycle-record"), JSON.stringify(r.passes));
+  assert.ok(hasPass(r, "task carries a real '## Proposal'"), JSON.stringify(r.passes));
+  assert.ok(!hasPass(r, "clause8-task-canonical-lifecycle-record: N/A"), JSON.stringify(r.passes));
   assert.ok(!hasFail(r, "clause8"), JSON.stringify(r.failures));
 });
 
@@ -360,6 +371,45 @@ test("clause8: multi-label, ALL below cutover → N/A grandfathered pass (max st
   const charter = CLEAN_CHARTER_EXCERPT + `\nlabel: milestone:M5-discover milestone:M12-old\n`;
   const r = run({ milestoneId: "M-FAKE-MULTIOLD", charter });
   assert.ok(hasPass(r, "clause8-task-canonical-lifecycle-record: N/A"), JSON.stringify(r.passes));
+});
+
+// M124 adversarial audit finding (CONCERNS, addressed): scanning the WHOLE task text (not just the
+// frontmatter `labels:` block) lets an unrelated `milestone:M<N>`-shaped string incidentally quoted
+// in the task's own PROSE BODY spuriously inflate the max and misfire the cutover. This test creates
+// a REAL task file on disk (the only way to exercise the real-frontmatter code path — the fixture
+// fallback above has no `---` frontmatter at all) whose real frontmatter label is genuinely below
+// cutover (`milestone:M5-real`), but whose body prose incidentally mentions a much higher number in
+// an unrelated sentence (`milestone:M99-elsewhere`, discussing a different task). Clause8 must judge
+// this task by its REAL frontmatter label only and N/A-pass it — a REFUTED-by-the-old-whole-text-scan
+// case, now fixed by scoping the scan to the frontmatter block.
+test("clause8: a real frontmatter label below cutover is NOT polluted by a higher milestone-shaped string in the task's own body prose", () => {
+  const taskId = "M-FAKE-FRONTMATTER-SCOPE-M124";
+  const taskPath = path.join(process.cwd(), "tasks", `${taskId}.md`);
+  const taskText = `---
+id: ${taskId}
+title: "fixture — frontmatter-scoping regression test"
+status: todo
+labels:
+  - milestone-candidate
+  - milestone:M5-real
+---
+## Proposal
+
+This body prose incidentally discusses an unrelated task landed at milestone:M99-elsewhere, which
+must NOT be read as THIS task's own milestone label.
+
+## Plan
+
+N/A — fixture only, no real plan needed.
+`;
+  fs.writeFileSync(taskPath, taskText);
+  try {
+    const r = run({ milestoneId: taskId });
+    assert.ok(hasPass(r, "clause8-task-canonical-lifecycle-record: N/A"), JSON.stringify(r.passes));
+    assert.ok(!hasFail(r, "clause8"), JSON.stringify(r.failures));
+  } finally {
+    fs.rmSync(taskPath, { force: true });
+  }
 });
 
 // ── Clause 9: SPLIT-OR-COMMIT / needs-human ──────────────────────────────────────────────────────
