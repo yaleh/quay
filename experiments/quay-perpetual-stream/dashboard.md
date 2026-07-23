@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 114** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 116** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -1014,4 +1014,44 @@ milestone's mandatory audit). Methodology-class — no quay-task-to-plan require
 **Task:** [[exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM]] (`tasks/exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM.md`)
 **Charter:** `experiments/quay-perpetual-stream/charters/M115-audit-session-id-mechanism-fix.md`
 
-m115 · exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM · Δv=0 (v̂=0) · outcome=DONE (`inherited-core.md` Adversarial-audit role item 5 added — orchestrator, not subagent, records the `Agent`-tool dispatch id; stale `baime:iteration-executor` audit-vehicle reference fixed to the DIR-032 generic subagent in both `inherited-core.md` and `OUTER-LOOP.md`'s dispatch-record procedure; `OUTER-LOOP.md` step 3.5 added; live-validated via M115's own audit dispatch — `audit-independence-check.ts` PASSed on the first real run against the completed artifact, no post-hoc correction of any wrong value needed; M105's actual dispatch mechanism confirmed genuinely unrecoverable via meta-cc, 2.5h session retention window; filed exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH as a follow-up finding) · audit=CONCERNS (task's own literal AC2 initially under-addressed by the charter's scope-narrowing; resolved same-ABSORB by actually performing the M105 investigation and re-ticking with evidence) · merge=(pending commit) · → milestones/M115/
+m115 · exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM · Δv=0 (v̂=0) · outcome=DONE (`inherited-core.md` Adversarial-audit role item 5 added — orchestrator, not subagent, records the `Agent`-tool dispatch id; stale `baime:iteration-executor` audit-vehicle reference fixed to the DIR-032 generic subagent in both `inherited-core.md` and `OUTER-LOOP.md`'s dispatch-record procedure; `OUTER-LOOP.md` step 3.5 added; live-validated via M115's own audit dispatch — `audit-independence-check.ts` PASSed on the first real run against the completed artifact, no post-hoc correction of any wrong value needed; M105's actual dispatch mechanism confirmed genuinely unrecoverable via meta-cc, 2.5h session retention window; filed exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH as a follow-up finding) · audit=CONCERNS (task's own literal AC2 initially under-addressed by the charter's scope-narrowing; resolved same-ABSORB by actually performing the M105 investigation and re-ticking with evidence) · merge=a64d0b0 · → milestones/M115/
+
+**Bookkeeping note (M116 ABSORB, 2026-07-23):** M115's `merge=` sha was left as "(pending commit)" and
+`milestone_counter`/dashboard header were never advanced from 114 when M115's own turn ended — its
+gate (`quay gate-log exp5-DEFECT-M114-AUDIT-SESSION-ID-MECHANISM` shows a real PASS event,
+2026-07-22T14:35:54Z) and task (`status: done`) confirm M115 itself was fully and correctly closed;
+only the dashboard sync step was missed. Backfilled here: `merge=a64d0b0` (the real M115 commit),
+counter advanced 114→115→116 (folding in M116 below). `cp-115.md` (due at counter=115, `%5==0`) was
+also never written — checkpoints are explicitly non-blocking (OUTER-LOOP.md §8) and this backlog
+(cp-105/cp-110/cp-115 all missing) is noted here for a future increment-of-5 pass to catch up, not
+retroactively reconstructed now.
+
+## SELECT M116 — exp5-M-TS-MIGRATION-P5-A
+
+**Selected:** exp5-M-TS-MIGRATION-P5-A — P5-A of the DIR-058 full-JS-elimination follow-on to
+ADR-012 (drained/split at M115's boundary): migrate the 4 CLI `bin/*.js` entrypoints (one per
+package) to `.ts`, behavior-preserving, same golden-diff discipline as P1-P4.
+
+**Rationale:** Exploit pick, diversifying value type (capability-growth: real product TS migration
+work) after two consecutive governance-integrity/instrument-correction picks (M114/M115). Small,
+well-bounded, mechanical per-file port with an established pattern (P1/P3/P4 precedent) — no
+`quay-task-to-plan` pipeline needed per that same precedent.
+
+**Deferred:** PROBE-M98-001, `exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH`, `exp5-DEFECT-M114-TESTSUITE-DRIFT`,
+`exp5-M-ARCH-AUDIT-M98-EXPLORE`, `exp5-M-TS-MIGRATION-P5-B` (this program's own sibling child — not this
+milestone's scope), `exp5-M-CRYST` (epic), `exp5-M-CLI-UX`/`exp5-M-DIRTASK`/`exp5-M-DOCS` (stale
+backfill), DIR-057/`exp5-M-CRYST-D2`/`exp5-M-CRYST-F1`/`exp5-M-OUTERLOOP-ROUTINE-WIRING` (human-steered).
+
+**Task:** [[exp5-M-TS-MIGRATION-P5-A]] (`tasks/exp5-M-TS-MIGRATION-P5-A.md`)
+**Charter:** `experiments/quay-perpetual-stream/charters/M116-ts-migration-p5-a.md`
+
+**Process note:** this charter and the ABSORB bookkeeping below were authored RETROACTIVELY
+(2026-07-23) — the milestone's actual implementation (commit `3667b02`, plus the adjacent DIR-059 fix
+`6f183ef` landed the same session) was completed in a prior turn that ended before the outer loop's
+ABSORB steps (charter, audit, gates, dashboard, task write-back) ran. See
+`milestones/M116/iterations/iteration-0.md` for the full evidence re-derivation and
+`milestones/M116/audits/iteration-0-adversarial-audit.md` for the dispatched adversarial audit
+(initial REFUTED verdict on the missing task write-back, corrected to NO REFUTATION FOUND after the
+same audit performed that write-back with fresh independently-re-executed evidence).
+
+m116 · exp5-M-TS-MIGRATION-P5-A · Δv=0 (v̂=0) · outcome=DONE (4 CLI `bin/*.js`→`.ts` entrypoints across all 4 packages, golden-diff behavior-preserving — byte-identical for `quay`/`quay-native`, single `@ts-nocheck` comment-line diff for `quay-github`/`quay-backlog`; `tsc --noEmit` clean across all 4 new per-package tsconfigs (DIR-059); 354/354 `packages/quay` + 343/343 experiments suites green; 2 SEA shims correctly named out-of-scope; adjacent DIR-059 disposed `applied` same-ABSORB with real peak-RSS evidence (~85-118MB vs ~4-4.5GB OOM baseline); 2 related defects (`exp5-DEFECT-M114-TESTSUITE-DRIFT`, `exp5-DEFECT-CONFIG-YML-STALE-MJS-REFS`) closed as side effects of DIR-059's fix; 1 new defect filed (`exp5-DEFECT-GATE-HASH-CHECK-STALE-PINNED-SOURCE` — it0-gate-hash-check.sh --by-reference has failed against every charter since M111, a pre-existing 6-milestone instrument drift, not new here) · audit=NO REFUTATION FOUND (corrected from an initial REFUTED on missing task-Resolution write-back — same audit performed the write-back itself, per DIR-020, backed by a second independent re-execution) · merge=3667b02+6f183ef · → milestones/M116/
