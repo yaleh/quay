@@ -1,11 +1,12 @@
 ---
 id: exp5-M-PRODUCTIZED-DELIVERY-B
-title: "Productized delivery child B: checked-in delivery-manifest (single source
-  of the shipped artifact set: 4 package tarballs + plugin bundle) + a test that
-  asserts release.yml produces EXACTLY that set"
+title: "Productized delivery child B: checked-in delivery-manifest (single
+  source of the shipped artifact set: 4 package tarballs + plugin bundle) + a
+  test that asserts release.yml produces EXACTLY that set"
 status: todo
 labels:
   - milestone-candidate
+  - milestone:M-129
 parent: exp5-M-PRODUCTIZED-DELIVERY
 children: []
 extra:
