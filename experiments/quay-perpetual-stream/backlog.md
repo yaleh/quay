@@ -6,6 +6,9 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE | Post-DIR-058 architecture audit (archguard, M118 mandatory explore): first-ever full 4-package structural analysis | DONE | - | milestone-candidate, milestone:M-118 |
+| exp5-M-ARCH-AUDIT-M98-EXPLORE | Post-M97 architecture audit (archguard, M98 mandatory explore): re-measure quay after startMcpServer decomposition + ABI boundary fix | DONE | - | milestone-candidate, milestone:M-98 |
+| PROBE-M98-001 | M97 AC gap: startMcpServer outDegree=7 in fresh M98 measurement, AC required ≤4 | DONE | - | milestone-candidate, defect, milestone:M-99 |
 | exp5-M-TS-MIGRATION-P5 | TS migration P5 (bin entrypoints + quay-backlog provider, DIR-058): full JS-elimination scope extension to ADR-012, 2 SEA shims exempted | DONE | - | milestone-candidate, crystallization |
 | exp5-M-TS-MIGRATION-P5-B | TS migration P5-B (quay-backlog provider, DIR-058): migrate 3 src/*.js files to .ts | DONE | - | milestone-candidate, crystallization, milestone:M-117 |
 | exp5-M-TS-MIGRATION-P5-A | TS migration P5-A (bin entrypoints, DIR-058): migrate 4 CLI bin/*.js launchers to .ts | DONE | - | milestone-candidate, crystallization, milestone:M-116 |
@@ -119,10 +122,8 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| exp5-M-ARCH-AUDIT-M98-EXPLORE | Post-M97 architecture audit (archguard, M98 mandatory explore): re-measure quay after startMcpServer decomposition + ABI boundary fix | SELECTED | - | milestone-candidate, milestone:M-98 |
-| PROBE-M98-001 | M97 AC gap: startMcpServer outDegree=7 in fresh M98 measurement, AC required ≤4 | SELECTED | - | milestone-candidate, defect, milestone:M-99 |
-| exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH | defect: quay Core SEA binary crashes at startup (gate/registry.ts import.meta.url incompatible with CJS bundle) — DIR-004 Distribution urgent | open | - | milestone-candidate, defect |
 | exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH | defect: it0-dod-check.ts clause8 regex doesn't match the repo's actual milestone:M-NN (hyphenated) label convention | open | - | milestone-candidate, defect |
+| exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH | defect: quay Core SEA binary crashes at startup (gate/registry.ts import.meta.url incompatible with CJS bundle) — DIR-004 Distribution urgent | open | - | milestone-candidate, defect |
 | exp5-M-TS-MIGRATION | TS migration program (ADR-012): gradually port quay product code JS→TypeScript, phased + behavior-preserving, to unlock archguard + type-safety | open | - | milestone-candidate, crystallization |
 | exp5-M-TS-MIGRATION-P4 | TS migration P4 (exp5 method-infra scripts, ADR-012): migrate the load-bearing gates/scripts to TS under the golden-diff discipline (like the it0-dod-check restructure) — behavior-preserving, autonomous. | open | - | milestone-candidate, crystallization |
 | DIR-055 | meta-cc session-history mining ROUTINE (LOOP-EXECUTABLE): a standing loop-driver routine (via DIR-051/[[DIR-056]]) that periodically dispatches a fresh-context probe which mines the project's Claude Code session history with meta-cc — surfacing recurring design/implementation defects, ADR candidates, and reusable/crystallizable patterns — and FILES them as evidence-backed tasks ROUTED by finding-type behind the quality/dedup/rate gate. The third standing probe (process/provenance axis) alongside self-validation (DIR-052) + architecture-analysis (DIR-053). | SELECTED | - | directive, milestone-candidate, milestone:M-102 |
@@ -137,4 +138,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_130 milestone-candidate task(s) as of 2026-07-23T01:38:03.282Z._
+_131 milestone-candidate task(s) as of 2026-07-23T02:01:39.110Z._

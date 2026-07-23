@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 117** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
+**milestone_counter: 118** · **chart: 1** · **checkpoint cadence: every 5 milestones (non-blocking)**
 <!-- NOTE (M65 ABSORB header sync): body log's m65 ABSORB entry below sets milestone_counter → 65;
 kept in sync at each ABSORB going forward (same staleness class flagged before at m39..m64).
 65 % 5 == 0 — CHECKPOINT DUE this milestone (cp-65 written below).
@@ -1070,3 +1070,23 @@ orchestrator handled charter authoring, gate checks, and ABSORB.
 **Charter:** `experiments/quay-perpetual-stream/charters/M117-ts-migration-p5-b.md`
 
 m117 · exp5-M-TS-MIGRATION-P5-B · Δv=0 (v̂=0) · outcome=DONE (3 `quay-backlog/src/*.js`→`.ts` files, golden-diff behavior-preserving — independently re-derived for all 3 files by the adversarial audit, type-annotation/import-suffix/`@ts-nocheck`-removal only; `tsc --noEmit` 0 errors across all 4 packages; 12/12 `quay-backlog` + 354/354 `packages/quay` suites green; full JS-elimination confirmed — only the 2 permanently-exempted SEA shims remain; post-migration archguard re-run recorded: entities=144/relations=201 (scope=packages, vs M113 baseline 121/156), quay-backlog/src + all 4 bin/ dirs now visible to the instrument, 0 cycles; DIR-058 dispositioned `applied` in full (both P5-A/P5-B children done); parent `exp5-M-TS-MIGRATION-P5` closed parent-done-iff-children) · audit=CONCERNS (non-blocking — same task-bookkeeping-gap class as M116, corrected same-pass by the same audit per DIR-020; before/after test-run asymmetry disclosed, golden-diff substituted as stronger evidence) · merge=8c4bc9e+ad49578 · → milestones/M117/
+
+## SELECT M118 — exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE (mandatory explore)
+
+**Selected:** exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE — mandatory explore. M114–M117 are 4 consecutive
+exploits since the M113 explore reset; the ≥1/5 rule fires at M118. DIR-058 (closed M117) unlocked
+full 4-package TS coverage for the first time — this is the first archguard run that can see the
+entire product (no dark `.js` files anywhere). FILE-ONLY — file any new confirmed findings; no fixes.
+
+**Rationale:** Mandatory explore per cadence rule. Genuinely new observability (grows the reusable
+structural-analysis core), not a repeat of an old surface — the correct shape for an explore pick.
+
+**Deferred:** exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH (confirmed still live via M116/M117's own gate
+runs — good next exploit pick), exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH, exp5-M-CRYST (epic),
+exp5-M-CLI-UX/exp5-M-DIRTASK/exp5-M-DOCS (stale backfill), DIR-057/exp5-M-CRYST-D2/exp5-M-CRYST-F1/
+exp5-M-OUTERLOOP-ROUTINE-WIRING (human-steered).
+
+**Task:** [[exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE]] (`tasks/exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE.md`)
+**Charter:** `experiments/quay-perpetual-stream/charters/M118-arch-audit-post-dir058-explore.md`
+
+m118 · exp5-M-ARCH-AUDIT-POST-DIR058-EXPLORE · Δv=0 (v̂=0) · explore=DONE (first-ever full 4-package archguard sweep: entities=144/relations=201, IDENTICAL to M117's preliminary reading — confirms DIR-058 introduced zero structural regression; 0 cycles; `startMcpServer` outDegree=3 unchanged since M99 fix; `startServer` outDegree=7 unchanged, already-tracked ARCH-M93-003 WONTFIX; no new findings filed; 2 stale-bookkeeping tasks (PROBE-M98-001, exp5-M-ARCH-AUDIT-M98-EXPLORE — AC/DoD ticked but status stuck at todo) administratively resolved to done, re-verified not rubber-stamped; FILE-ONLY confirmed via git diff --stat) · audit=NO REFUTATION FOUND (audit independently re-ran archguard itself, twice; found one non-blocking evidence-fidelity CONCERN — a silently-filtered tied topByOutDegree entry, doesn't change any conclusion) · merge=e98bde5+d9a8483 · → milestones/M118/
