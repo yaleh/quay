@@ -12,6 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -138,4 +139,51 @@ test('loop-driver skill (DIR-042-B) has zero research-layer references (VT/value
     !researchLeakPattern.test(src),
     'loop-driver SKILL.md must contain zero VT/value-ledger/checkpoints/experiments/**/exp5 references'
   );
+});
+
+// ---------------------------------------------------------------------------
+// M120 (DIR-060) — the vendored Core copy is a bundled ESM dist/quay.js that
+// runs on the declared Node-20 floor, NOT the M116 .ts entrypoint (Node >=23).
+// The vendor tree is git-trackable (the bare `dist/` .gitignore pattern is
+// negated for this path), the raw bin/src copies and package-lock.json are
+// gone, and package.json is slimmed (the bundle has no external runtime deps).
+// ---------------------------------------------------------------------------
+
+const vendorDir = path.join(pluginDir, 'vendor', 'quay');
+
+test('M120: .mcp.json invokes the bundled vendor/quay/dist/quay.js, never a .ts entrypoint', () => {
+  const mcp = readJson(path.join(pluginDir, '.mcp.json'));
+  assert.equal(mcp.quay.args[0], '${CLAUDE_PLUGIN_ROOT}/vendor/quay/dist/quay.js');
+  assert.doesNotMatch(mcp.quay.args[0], /\.ts$/, 'the vendor entrypoint must not be a native .ts file');
+});
+
+test('M120: the vendored dist bundle exists, is git-trackable, and carries the createRequire banner', () => {
+  const distBundle = path.join(vendorDir, 'dist', 'quay.js');
+  assert.ok(existsSync(distBundle), `vendored bundle missing: ${distBundle}`);
+  // git-trackable: the bare `dist/` ignore pattern must be negated for this
+  // path. `git check-ignore` exits 0 (prints the path) when IGNORED, exits 1
+  // (throws here) when NOT ignored — the state we require after the fix.
+  let ignored = '';
+  try {
+    ignored = execFileSync('git', ['check-ignore', distBundle], { cwd: repoRoot, encoding: 'utf8' }).trim();
+  } catch {
+    ignored = '';
+  }
+  assert.equal(ignored, '', 'vendor/quay/dist/quay.js must NOT be gitignored');
+  const src = readFileSync(distBundle, 'utf8');
+  assert.match(src, /createRequire/, 'the vendored bundle must be the ESM build (createRequire banner present)');
+});
+
+test('M120: the stale raw bin/ + src/ vendor copies are gone (replaced by the bundle)', () => {
+  assert.ok(!existsSync(path.join(vendorDir, 'bin')), 'vendor/quay/bin must be removed');
+  assert.ok(!existsSync(path.join(vendorDir, 'src')), 'vendor/quay/src must be removed');
+});
+
+test('M120: package-lock.json is gone and package.json is slimmed (no runtime dependencies)', () => {
+  assert.ok(!existsSync(path.join(vendorDir, 'package-lock.json')), 'vendor package-lock.json must be removed');
+  const vpkg = readJson(path.join(vendorDir, 'package.json'));
+  assert.equal(vpkg.name, 'quay-plugin-vendor');
+  assert.equal(vpkg.type, 'module');
+  assert.ok(vpkg.version, 'vendor package.json must still carry a version (DIR-061)');
+  assert.ok(!('dependencies' in vpkg), 'a fully-bundled vendor copy must declare no dependencies');
 });
