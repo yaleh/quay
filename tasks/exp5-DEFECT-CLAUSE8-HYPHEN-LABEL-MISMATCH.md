@@ -6,10 +6,15 @@ status: todo
 labels:
   - milestone-candidate
   - defect
+  - milestone:M-119
 parent: null
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH
+    experiments/quay-perpetual-stream/charters/M119-clause8-hyphen-label-fix.md
+    /tmp/m119-absorb-entry.md
 ---
 ## Proposal
 

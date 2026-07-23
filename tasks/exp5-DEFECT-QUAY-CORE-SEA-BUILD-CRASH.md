@@ -77,3 +77,16 @@ impl-row N/A, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycl
 worktree-branch-hygiene, audit-independence).
 - [ ] All 3 AC items above verified true with pasted command output.
 - [ ] it0 DoD meta-enforcer passes all clauses.
+
+## Not selected (M119)
+
+Not selected M119 — exp5-DEFECT-CLAUSE8-HYPHEN-LABEL-MISMATCH selected instead: smaller, cleanly
+bounded (one-line regex fix), no open design question. This task is real and DIR-004-urgent, but its
+own Plan explicitly admits it "needs investigation" into an unresolved structural question (SEA
+gate-path compatibility) — per the sizing gauge (inherited-core.md, "does the proposed scope let
+iteration-0 land ALL Done-when in one pass"), this is NOT yet cleanly sized for one milestone.
+Recommend a future SELECT either (a) time-box a short investigation-only pass first to resolve the
+structural question and re-scope the AC/DoD accordingly, or (b) apply DIR-026 split-or-commit to
+separate "fix the import.meta.url crash" (mechanical, bounded) from "resolve gate-path SEA-compat"
+(design decision, may itself need its own milestone) before dispatch. Good next high-priority pick
+once sized.
