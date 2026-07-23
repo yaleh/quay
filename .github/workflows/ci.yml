@@ -17,8 +17,44 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # M120 (DIR-060): this step SPAWNS the `.ts` CLI bins as subprocesses
+          # (cli.test.mjs et al.), which only Node >=23 runs natively. Bumped
+          # 20 -> 24 (one version inside the unflagged strip-types range, with
+          # headroom). This is the CI RUNNER version only — `engines` stays
+          # >=20.0.0, and the distributed tarball's Node-20 floor is proven
+          # separately by the dist-verify-node-floor job below.
+          node-version: '24'
       - run: npm install
       - run: node --test packages/*/test/*.test.mjs
         env:
           GH_TOKEN: ${{ github.token }}
+
+  # M120 (DIR-060): floor-verification. The distributed npm-pack tarball's `bin`
+  # is dist/quay.js and MUST run on the DECLARED floor (Node 20) — native `.ts`
+  # needs Node >=23, which is exactly the regression the real v0.3.5 release hit.
+  # This mirrors release.yml's dist-verify-node-floor, but self-builds the
+  # tarball (no GitHub Release exists on a push/PR). A hard, runnable check.
+  dist-verify-node-floor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Confirm the runner is really on the declared floor (Node 20)
+        run: node --version | grep -E '^v20\.'
+      - name: Build the npm-pack tarball (build-dist.sh runs fine under Node 20)
+        run: |
+          npm install
+          bash packages/quay/scripts/package.sh
+      - name: Install the tarball on Node 20 and run its packaged bin
+        run: |
+          set -euo pipefail
+          TGZ="$(ls -1t packages/quay/quay-*.tgz | head -1)"
+          echo "Installing ${TGZ} on $(node --version)"
+          npm install -g "${TGZ}"
+          quay --help
+          quay --version

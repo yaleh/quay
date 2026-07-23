@@ -24,7 +24,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # M120 (DIR-060): the "Run tests" step below spawns the `.ts` CLI bins
+          # as subprocesses, which only Node >=23 runs natively — bumped 20 -> 24.
+          # RUNNER version only; `engines` stays >=20.0.0. The distributed
+          # tarball's actual Node-20 floor is proven by dist-verify-node-floor.
+          # (sea-release stays on '20' — its own separate build path.)
+          node-version: '24'
 
       - name: Install dependencies
         run: npm install
@@ -67,7 +72,7 @@ jobs:
             ```
 
             The `.tgz` artifact attached to this release is produced by `npm pack` from `packages/quay/`.
-            It includes all runtime dependencies (`@modelcontextprotocol/sdk`, `yaml`) and the CLI entrypoint (`bin/quay.ts`).
+            It includes all runtime dependencies (`@modelcontextprotocol/sdk`, `yaml`) and the CLI entrypoint (built as `dist/quay.js`).
             Note: the artifact filename uses the package version (e.g. `quay-0.1.0.tgz`), not the git tag (e.g. `v0.1.0`).
 
   # M01-dist (exp5, iteration 0): DIR-004 remaining scope — single-file
@@ -243,3 +248,52 @@ jobs:
           sleep 2
           curl -sf -o /dev/null -w "http_code:%{http_code}\n" http://localhost:18080/
           kill "$SERVE_PID"
+
+  # M120 (DIR-060): floor-verification for the npm-pack tarball. Mirrors
+  # sea-verify-node-free's asset-fetch shape (download the asset THIS run just
+  # published, private-repo assets API), but keeps Node PRESENT and PINNED to
+  # the declared floor (Node 20) — the point is proving the distributed `bin`
+  # (dist/quay.js) runs on Node 20, the exact regression the real v0.3.5 release
+  # hit (native `.ts` needs Node >=23). The hard, runnable guard that would have
+  # caught it before a release attempt did.
+  dist-verify-node-floor:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Confirm the runner is really on the declared floor (Node 20)
+        run: node --version | grep -E '^v20\.'
+      - name: Download the npm-pack tarball published by release (this run)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Same private-repo asset-fetch path as sea-verify-node-free: the
+          # public browser_download_url 404s on a private repo, so resolve the
+          # asset id from the release-by-tag API and GET the assets endpoint
+          # with an octet-stream Accept header.
+          VERSION="$(echo "${{ github.ref_name }}" | sed 's/^v//')"
+          ASSET_NAME="quay-${VERSION}.tgz"
+          API="https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}"
+          ASSET_ID="$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${API}" \
+            | grep -B2 "\"name\": *\"${ASSET_NAME}\"" \
+            | grep '"id":' | head -1 | grep -o '[0-9]\+')"
+          if [ -z "${ASSET_ID}" ]; then
+            echo "ERROR: could not find asset id for ${ASSET_NAME} in release ${{ github.ref_name }}" >&2
+            exit 1
+          fi
+          curl -sfL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
+            -o "${ASSET_NAME}" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${ASSET_ID}"
+      - name: Install the published tarball on Node 20 and run its packaged bin
+        run: |
+          set -euo pipefail
+          VERSION="$(echo "${{ github.ref_name }}" | sed 's/^v//')"
+          echo "Installing quay-${VERSION}.tgz on $(node --version)"
+          npm install -g "quay-${VERSION}.tgz"
+          quay --help
+          quay --version
