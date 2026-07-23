@@ -2,6 +2,28 @@
 
 ## v0.3.x — M08-merge-recover (dated per-item below; see git log for exact commit dates)
 
+### v0.3.6 (2026-07-23) — Node-floor distribution regression fix (M120, DIR-060)
+
+The M116 `bin/*.js`→`bin/*.ts` migration made every CLI entrypoint a `.ts` file run directly via
+shebang, which only Node's native type-stripping (>=23) can execute — but this project declares and
+CI/release pin a Node >=20 floor. A real v0.3.5 release attempt failed on exactly this
+(`ERR_UNKNOWN_FILE_EXTENSION ".ts"` on Node 20).
+
+#### Fixed
+
+- **The published npm-pack tarball's `bin` field now points at a bundled, self-contained ESM
+  `dist/quay.js`** (built by a new `scripts/build-dist.mjs`/`build-dist.sh`, the sibling of the
+  existing SEA build's `esbuild-sea.mjs`), which runs on Node >=20 unmodified — restoring the
+  declared floor for the actual distributed artifact. `engines` stays `>=20.0.0` (unchanged);
+  `package.json`'s `exports` map is unchanged (still points at source `.ts`, consumed only by the
+  in-workspace `quay-native` package, never by an end user of the distributed CLI).
+- **The Claude Code plugin's vendored Core copy** (`plugin/vendor/quay/`) now vendors the same
+  built `dist/quay.js` (self-contained, zero `node_modules` needed at runtime) instead of a stale,
+  broken raw-source copy that predated the M116 rename.
+- **CI now has a dedicated Node-20 floor-verification job** (`release.yml` and `ci.yml`) that
+  actually builds, installs, and runs the packaged CLI under Node 20 — the mechanical guard that
+  would have caught this regression before a real release attempt did.
+
 ### v0.3.5 (2026-07-18) — CLI/Docs/Packaging capability recovery (M08-merge-recover)
 
 M04-discover (MD-001) found that the CLI/Web-UI/packaging capabilities
