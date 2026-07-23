@@ -2,7 +2,7 @@
 id: exp5-M-VERSION-CHECK-CI
 title: "Wire version-consistency-check into CI: new ci.yml job that fails build
   on version drift"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - capability-growth
