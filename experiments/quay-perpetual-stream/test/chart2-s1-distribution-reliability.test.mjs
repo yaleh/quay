@@ -137,11 +137,11 @@ test("loadArtifacts: object without an artifacts array → throws", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// ── integration: the real seeded evidence file → cov 0.4 (M121: sea-linux-x64 flipped) ─────────
-test("real chart2-s1-artifacts.json → cov 0.4 (npm-pack + sea-linux-x64 green, SEA macos/windows + plugin untested)", () => {
+// ── integration: the real seeded evidence file → cov 0.8 (M122: sea-macos/windows flipped) ─────
+test("real chart2-s1-artifacts.json → cov 0.8 (npm-pack + all 3 SEA platforms green, plugin untested)", () => {
   const r = computeS1Cov(loadArtifacts(REAL_JSON));
-  assert.equal(r.cov, 0.4);
-  assert.equal(r.passed, 2);
+  assert.equal(r.cov, 0.8);
+  assert.equal(r.passed, 4);
   assert.equal(r.total, 5);
 });
 
@@ -170,16 +170,16 @@ test("CLI: --selftest → exit 0", () => {
   assert.equal(r.status, 0, r.stderr);
 });
 
-test("CLI: default (no path) runs against the real seeded json → cov 0.4, exit 0", () => {
+test("CLI: default (no path) runs against the real seeded json → cov 0.8, exit 0", () => {
   const r = spawnCli([]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /S1 Distribution-reliability cov = 0\.4 \(2\/5 artifacts pass floor-smoke\)/);
+  assert.match(r.stdout, /S1 Distribution-reliability cov = 0\.8 \(4\/5 artifacts pass floor-smoke\)/);
 });
 
-test("CLI: explicit path to the real seeded json → cov 0.4, exit 0", () => {
+test("CLI: explicit path to the real seeded json → cov 0.8, exit 0", () => {
   const r = spawnCli([REAL_JSON]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /cov = 0\.4 \(2\/5/);
+  assert.match(r.stdout, /cov = 0\.8 \(4\/5/);
 });
 
 test("CLI: missing evidence file → exit 2", () => {

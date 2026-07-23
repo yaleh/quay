@@ -1,11 +1,11 @@
 {
   "//": "S1 Distribution-reliability evidence — each artifact's runtime-smoke pass/fail on the declared Node floor, cited to a real CI run. Updated from release-workflow evidence. Read by chart2-s1-distribution-reliability.ts.",
-  "release": "v0.3.9",
+  "release": "v0.3.11",
   "artifacts": [
-    {"name": "npm-pack (quay-*.tgz)", "floorSmokePass": true,  "evidence": "dist-verify-node-floor job green, run 29995456654"},
-    {"name": "sea-linux-x64",         "floorSmokePass": true,  "evidence": "M121 fix (exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH): sea-verify-node-free job green (real Node-free debian:stable-slim container, quay --help + quay serve both run), run 29995456654 — https://github.com/yaleh/quay/actions/runs/29995456654/job/89168264672. Corroborated by independent local build+run evidence (build-sea.sh, ./dist-sea/quay --version/task-list/gate, this milestone's own report)."},
-    {"name": "sea-macos-arm64",       "floorSmokePass": false, "evidence": "M121: sea-release (macos-latest, macos-arm64) build succeeded, run 29995456654 — but sea-verify-node-free only exercises the linux-x64 artifact (release.yml:206, runs-on ubuntu-latest); build success alone does not prove the runtime crash is fixed here (the original bug was a RUNTIME crash, not a build failure). NOT flipped — honest gap, not asserted. Follow-up: exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY (extend sea-verify-node-free to a 3-platform matrix)."},
-    {"name": "sea-windows-x64",       "floorSmokePass": false, "evidence": "M121: sea-release (windows-latest, windows-x64) build succeeded, run 29995456654 — same gap as macos-arm64 above: no runtime smoke coverage. NOT flipped. Follow-up: exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY."},
+    {"name": "npm-pack (quay-*.tgz)", "floorSmokePass": true,  "evidence": "dist-verify-node-floor job green, run 29998600334"},
+    {"name": "sea-linux-x64",         "floorSmokePass": true,  "evidence": "M121 fix (exp5-DEFECT-QUAY-CORE-SEA-BUILD-CRASH): sea-verify-node-free job green (real Node-free debian:stable-slim container), run 29998600334 (originally confirmed at run 29995456654)."},
+    {"name": "sea-macos-arm64",       "floorSmokePass": true,  "evidence": "M122 (exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY): new sea-verify-node-free-cross-platform job green — PATH-stripped (no node/node.exe on PATH, confirmed), quay --help + quay serve both run, run 29998600334 — https://github.com/yaleh/quay/actions/runs/29998600334/job/89178460070."},
+    {"name": "sea-windows-x64",       "floorSmokePass": true,  "evidence": "M122 (exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY): same new job, windows-latest leg, green on the SECOND attempt — the first (run 29997991782) caught a REAL latent bug (Windows archive's `.quay/config.yml` silently missing due to a non-dotglob bash `*` pattern in the archiving step, fixed same-milestone with `shopt -s dotglob`); re-run confirms the fix — https://github.com/yaleh/quay/actions/runs/29998600334/job/89178460044."},
     {"name": "plugin-bundle",         "floorSmokePass": false, "evidence": "untested — no plugin runtime-smoke job exists yet"}
   ]
 }
