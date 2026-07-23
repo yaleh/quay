@@ -1,21 +1,27 @@
 {
-	"$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-	"name": "quay",
-	"description": "quay: a provider-agnostic task board (Core CLI/MCP client + pluggable Provider ABI). This plugin bundles the quay MCP server, the quay-native author/execute authoring skills, and a workspace-portable quay-directive skill so any project can install quay's task tools + authoring methodology in one step.",
-	"owner": {
-		"name": "Yale Huang",
-		"url": "https://github.com/yaleh"
-	},
-	"plugins": [
-		{
-			"name": "quay",
-			"source": "./plugin",
-			"version": "0.3.5",
-			"description": "quay MCP server (task_list/task_get/task_write/task_check/action_list/action_run over whichever Provider the target workspace's .quay/config.yml enables) + quay-native author/execute authoring skills + a workspace-portable quay-directive skill (ships its own schema-check, no experiments/ dir required).",
-			"license": "MIT",
-			"homepage": "https://github.com/yaleh/quay",
-			"category": "task-management",
-			"tags": ["quay", "tasks", "mcp", "skills", "directive"]
-		}
-	]
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "quay",
+  "description": "quay: a provider-agnostic task board (Core CLI/MCP client + pluggable Provider ABI). This plugin bundles the quay MCP server, the quay-native author/execute authoring skills, and a workspace-portable quay-directive skill so any project can install quay's task tools + authoring methodology in one step.",
+  "owner": {
+    "name": "Yale Huang",
+    "url": "https://github.com/yaleh"
+  },
+  "plugins": [
+    {
+      "name": "quay",
+      "source": "./plugin",
+      "version": "0.3.11",
+      "description": "quay MCP server (task_list/task_get/task_write/task_check/action_list/action_run over whichever Provider the target workspace's .quay/config.yml enables) + quay-native author/execute authoring skills + a workspace-portable quay-directive skill (ships its own schema-check, no experiments/ dir required).",
+      "license": "MIT",
+      "homepage": "https://github.com/yaleh/quay",
+      "category": "task-management",
+      "tags": [
+        "quay",
+        "tasks",
+        "mcp",
+        "skills",
+        "directive"
+      ]
+    }
+  ]
 }
