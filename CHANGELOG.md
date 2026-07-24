@@ -2,6 +2,25 @@
 
 ## v0.3.x — M08-merge-recover (dated per-item below; see git log for exact commit dates)
 
+### v0.3.12 (2026-07-24) — distribution discipline: version-consistency gate + delivery-manifest assertion + plugin concurrent-batch scripts
+
+No user-facing CLI/MCP/Web-UI behavior changes versus v0.3.11; this release ships the
+distribution/release-pipeline hardening landed since v0.3.11 (M126–M134 + DIR-049).
+
+#### Added
+- **version-consistency gate** (M126/M132): a fail-closed `version-consistency-check` now runs in CI;
+  all 8 version sources (4 `package.json` + `plugin.json` + 2 `marketplace.json` + the vendored copy)
+  must agree — prevents the silent multi-way version drift that had accumulated through v0.3.11.
+- **delivery-manifest** (M129): `delivery-manifest.json` is now the single source of truth for the
+  release artifact-set; `release.yml` asserts its output matches it exactly (no more, no less).
+- **plugin concurrent-batch scripts vendored** (DIR-049, `29f9eea`): the DIR-044 concurrent-batch
+  scheduler scripts now ship inside the plugin (`plugin/scripts/`), so a consumer workspace can run a
+  genuine 2-wide concurrent batch instead of silently falling back to serial.
+
+#### Fixed
+- `loadbearing-test-gate` now recognizes `.test.ts` files (M134) — it previously ignored the migrated
+  TypeScript tests, understating load-bearing coverage.
+
 ### v0.3.11 (2026-07-23) — Windows SEA archive was missing `.quay/config.yml` (M122)
 
 Caught by the v0.3.10 release run of the new `sea-verify-node-free-cross-platform` job (see below):
