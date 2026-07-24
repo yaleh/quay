@@ -4,7 +4,7 @@ title: "DIR-066 child B [human-steered: halt + golden-replay]: wire the Round-1
   D-quota into OUTER-LOOP step 1 (candidates-considered-this-pass) + REMOVE
   DIR-038-B's governance:product→HALT-RECOMMENDED clause from the self-halt
   block"
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - human-steered
@@ -44,7 +44,7 @@ N/A — resolved via a `human-steered` (halt + golden-replay) milestone editing 
 - [x] The VT-slope (DIR-038-A) hard-halt input is still present and unchanged — diff shows no edit to that bullet.
 - [x] Golden-replay: chart-1's existing fixtures/selfchecks stay green, unchanged — diff pasted, empty on
       chart-1's own cells.
-- [ ] `node scripts/it0-split-or-commit-check.ts .` + the standard non-flaky suite stay green.
+- [x] `node scripts/it0-split-or-commit-check.ts .` + the standard non-flaky suite stay green. (PASS — 383 tasks, no split-or-commit violations, 2026-07-24)
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply. Per DIR-026 Reading A: the prose edit is necessary-not-sufficient —
