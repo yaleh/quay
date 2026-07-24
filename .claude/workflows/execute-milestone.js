@@ -29,9 +29,14 @@ const verify = await parallel([
     `Run it0-ceiling-line-budget-check.sh ${args.charterFile}. FLAG (exit 1) = scope exceeds ~2000-line ceiling with no phase/stage plan reference. Return {ok, detail}.`,
     { label: 'line-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
   ),
+  () => agent(
+    `Run experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh against each inner iteration report as produced. FAIL = a claimed-met Done-when clause has no nearby pasted-output evidence. Return {ok, detail}. FAIL is a HARD BLOCK — send back to the inner iteration before ABSORB, not silently accepted.`,
+    { label: 'dogfood-evidence', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+  ),
 ])
 
-const verifyFailed = verify.filter(Boolean).some(c => !c.ok)
+// A null return means the agent crashed — treat as failure (fail-closed).
+const verifyFailed = verify.filter(Boolean).some(c => c === null || !c?.ok)
 if (verifyFailed) {
   log('Verify phase FAILED — it0 checks did not all pass. Aborting milestone.')
   return { outcome: 'needs-human', reason: 'it0-checks-failed', phase: 'Verify' }
@@ -45,6 +50,10 @@ const buildResult = await agent(
 
 Charter file: ${args.charterFile}
 Absorb entry path: ${args.absorbEntryFile}
+
+BEFORE BUILD: ensure extra.acceptance is set on the task (task_write extra.acceptance to
+"bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${args.taskId} ${args.charterFile} ${args.absorbEntryFile}").
+The Gate phase's quay gate call depends on this field — fail-closed if absent.
 
 CLASS-ROUTE per inherited-core.md's two-class diversity policy:
 - DEVELOPMENT-class (capability-growth typed): run the proposal→plan pipeline FIRST
@@ -62,7 +71,20 @@ consecutive (checked by experiments/quay-perpetual-stream/scripts/termination-de
 past budget≈10 & nothing climbing | external HALT.
 
 Record under milestones/M<NN>/. The build agent MUST work in an isolated git worktree
-off master HEAD. Return {taskId, outcome, iterationCount, mergeCommit, worktreePath}.`,
+off master HEAD.
+
+WAITING ON A LONG INNER ITERATION (background) — poll, don't conclude:
+- The completion notification is the PRIMARY wake — dispatch as a harness-tracked
+  background task so the loop is auto-re-invoked when the iteration finishes.
+- Any ScheduleWakeup fallback (~1200–1800s) is a HANG-DETECTION HEARTBEAT, NOT a deadline.
+- On a fallback wake: POLL the background task. Still running → re-arm the fallback and
+  keep waiting; do NOT absorb, do NOT advance to the next phase. Only proceed when the
+  iteration has GENUINELY completed.
+- If the iteration waits on EXTERNAL STATE the harness can't track (e.g. a GitHub Actions
+  run), poll that system's status explicitly and match the fallback to its cadence — never
+  conclude from the timer alone.
+
+Return {taskId, outcome, iterationCount, mergeCommit, worktreePath}.`,
   { phase: 'Build', isolation: 'worktree',
     schema: { type: 'object', required: ['outcome'], properties: {
       taskId: { type: 'string' }, outcome: { type: 'string' },
@@ -86,9 +108,16 @@ CHARGE (refute-first stance):
 2. DoD SATISFACTION: confirm the task's ## Definition of Done is satisfied.
 3. MECHANICAL GATE: run experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${args.taskId} ${args.charterFile}
    ${args.absorbEntryFile}. Non-zero exit = REFUTED by construction.
+4. DEVIATION-LOG WRITE-BACK (DIR-017 Step 3 / M36): if you find a REFUTED or CONCERNS,
+   write a deviation row to dashboard.md's "Homeostatic variables (DIR-017 Step 3)" table:
+   (i) caught-by: machine — your OWN finding this same pass; (ii) caught-by: human — an
+   ABSORB entry disclosure the outer loop already drafted (the audit transcribes it, does
+   not originate it). Each row must carry level / caught-by / caught-at / description /
+   status (open) / age (0). This is the SAME audit agent performing the write-back — no
+   separate writer, no split timing.
 
 Output to milestones/M<NN>/audits/iteration-0-acceptance-audit.md.
-Return {verdict: 'NO REFUTATION FOUND'|'CONCERNS'|'REFUTED', detail}.`,
+Return {verdict: 'NO REFUTATION FOUND'|'CONCERNS'|'REFUTED', detail, concernsDetail}.`,
   { phase: 'Audit',
     schema: { type: 'object', required: ['verdict'], properties: {
       verdict: { type: 'string' }, detail: { type: 'string' },
@@ -113,6 +142,8 @@ const gates = await parallel([
     { label: 'worktree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run audit-independence-check.sh against the audit artifact at milestones/M<NN>/audits/iteration-0-acceptance-audit.md and the dispatch-record at ${args.absorbEntryFile}. Return {ok, detail}. Non-zero = audit not independent → HARD BLOCK.`,
     { label: 'audit-indep', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
+  () => agent(`Run quay gate --gate split-or-commit ${args.taskId}. Return {ok, detail}. Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK.`,
+    { label: 'split-or-commit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
 ])
 
 const gatesFailed = gates.filter(Boolean).some(g => !g.ok)
@@ -128,10 +159,15 @@ log(`Gate phase PASSED — all ${gates.filter(Boolean).length} mechanical gates 
 
 // ── Phase: Land (step 6 merge + step 7 dashboard) ────────────────────────────────────
 phase('Land')
+// CONCERNS verdict: recorded, non-blocking. Log it and proceed.
+if (auditResult?.verdict === 'CONCERNS') {
+  log(`Audit CONCERNS (non-blocking): ${auditResult?.concernsDetail || auditResult?.detail || 'see audit artifact'}`)
+}
+
 if (auditResult?.verdict === 'REFUTED') {
   log('Audit REFUTED — cannot land. Marking needs-human.')
   await agent(
-    `Mark task ${args.taskId} needs-human with reason: audit REFUTED — ${auditResult?.detail}. Record in ABSORB entry.`,
+    `Mark task ${args.taskId} needs-human with reason: audit REFUTED — ${auditResult?.detail}. VERIFY the needs-human reason is EXTERNAL (outside project control: external service/resource/credential/dataset/upstream) — if it is an IN-PROJECT reason (architecture mismatch, complexity, scope, "too hard"), that is a SPLIT-OR-COMMIT violation (DIR-026/Clause 9). Record needs-human with the audited reason in the ABSORB entry.`,
     { label: 'mark-needs-human-refuted' }
   )
   return { outcome: 'needs-human', reason: 'audit-refuted', phase: 'Land' }
@@ -154,6 +190,12 @@ await agent(
 5. REGENERATE backlog.md/dashboard.md views via experiments/quay-perpetual-stream/scripts/it0-backlog-regen.ts.
 6. RUN tree-hygiene-check.sh and worktree-branch-hygiene-check.sh one final time
    to confirm the close-out is clean. Paste results.
+7. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${args.taskId}.md
+   appending a ## Execution record section (milestone id, iteration count, realized Δv,
+   merge commit SHA, one-line outcome summary) and setting status: done.
+8. PHI CONSOLIDATION CHECK: if a prior adaptation was REUSED UNCHANGED by THIS
+   (different-domain) milestone, consolidate it into inherited-core.md and retire
+   its citation (§4.2).
 
 Charter: ${args.charterFile}
 Absorb entry: ${args.absorbEntryFile}
