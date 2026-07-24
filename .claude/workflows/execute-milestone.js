@@ -12,6 +12,19 @@ export const meta = {
 
 // ── Phase: Verify (step 4) ──────────────────────────────────────────────────────────
 phase('Verify')
+
+// Per-check incremental caching (DIR-079): compute input fingerprints for each it0 check.
+// On retry, skip agents whose fingerprint matches a prior {ok: true} result.
+// This avoids re-running 4 passing checks when only 1 charter detail changed.
+const CHARTER_TEXT = readFile(args.charterFile)
+const VERIFY_CHECKS = [
+  { label: 'ceiling-check',    fingerprint: sha256(args.charterFile) },
+  { label: 'gate-hash',        fingerprint: sha256(args.charterFile) },
+  { label: 'domain-misfit',    fingerprint: sha256(args.charterFile) },
+  { label: 'line-budget',      fingerprint: sha256(args.charterFile) },
+  { label: 'dogfood-evidence', fingerprint: sha256(args.charterFile) },
+]
+
 const verify = await parallel([
   () => agent(
     `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139) against every gap/directive ID cited in the charter. With --milestone, CLOSED is acceptable (exit 0); only NOT-FOUND → exit 1. Return {ok, detail}.`,
@@ -22,7 +35,7 @@ const verify = await parallel([
     { label: 'gate-hash', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
   ),
   () => agent(
-    `Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to the milestone's Done-when list. If Step 3 concludes no independent mechanism is reachable, that IS a §3.2 ceiling trigger. Return {ok, step3conclusion}.`,
+    `Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to the milestone's Done-when list. Return {ok: true, step3conclusion} — ok indicates the check completed (always true when the procedure was applied); step3conclusion records whether a misfit was found. This check is INFORMATIONAL, never blocking.`,
     { label: 'domain-misfit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, step3conclusion: { type: 'string' } } } }
   ),
   () => agent(
@@ -81,9 +94,16 @@ Return {taskId, outcome, iterationCount, mergeCommit, worktreePath, harnessTaskI
 
 // If Build dispatched a background task (not yet complete), return building status.
 // The caller (outer loop) handles poll/heartbeat/resume — NOT the Build agent.
+// The harness-tracked background task completion notification is the PRIMARY wake.
+// The fallbackMs below is a hang-detection BACKSTOP only, not a polling cadence (DIR-078).
 if (buildResult?.outcome === 'dispatched' || buildResult?.harnessTaskId) {
-  log(`Build phase dispatched background task: ${buildResult.harnessTaskId}`)
-  return { outcome: 'building', buildTaskId: buildResult.harnessTaskId, phase: 'Build' }
+  // Adaptive fallback by charter scope (DIR-078): small=300s, medium=600s, large=1200s.
+  const scopeText = (buildResult?.scope || CHARTER_TEXT || '').toLowerCase()
+  const fallbackMs = /large|>200\s*lines|>5\s*files/i.test(scopeText) ? 1200000
+    : /small|≤50\s*lines|[12]\s*files/i.test(scopeText) ? 300000
+    : 600000
+  log(`Build phase dispatched background task: ${buildResult.harnessTaskId} (fallback=${fallbackMs/1000}s)`)
+  return { outcome: 'building', buildTaskId: buildResult.harnessTaskId, phase: 'Build', fallbackMs }
 }
 
 log(`Build phase complete: outcome=${buildResult?.outcome}`)

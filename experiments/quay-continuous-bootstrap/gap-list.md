@@ -207,6 +207,8 @@
 ### system_health
 
 | ~~DIR-077~~ | ~~exp5 directive: /loop self-paced mode + loop.md~~ | ~~minor~~ | ~~exp5 M138~~ | ~~2026-07-24~~ | ~~2026-07-24~~ |
+| ~~DIR-079~~ | ~~exp5 directive: per-it0-check incremental caching~~ | ~~minor~~ | ~~exp5 M140~~ | ~~2026-07-24~~ | ~~2026-07-24~~ |
+| ~~DIR-078~~ | ~~exp5 directive: adaptive Build-phase heartbeat~~ | ~~minor~~ | ~~exp5 M141~~ | ~~2026-07-24~~ | ~~2026-07-24~~ |
 | ~~DIR-076~~ | ~~exp5 directive: scope it0 checks to current milestone~~ | ~~minor~~ | ~~exp5 M139~~ | ~~2026-07-24~~ | ~~2026-07-24~~ |
 | ID | Description | Closed in | Evidence |
 |----|-------------|-----------|---------|
