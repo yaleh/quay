@@ -1,0 +1,7 @@
+board: native
+gates: [vitest]
+stop: until(.halt)
+policy: value-typed-ledger
+execution: dispatched
+audit: adversarial
+concurrency: 4
