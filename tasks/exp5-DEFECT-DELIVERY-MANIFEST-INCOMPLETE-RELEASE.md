@@ -1,6 +1,9 @@
 ---
 id: exp5-DEFECT-DELIVERY-MANIFEST-INCOMPLETE-RELEASE
-title: "defect: release.yml publishes an INCOMPLETE artifact-set vs delivery-manifest.json (4/7), and delivery-manifest-check passes anyway"
+title: Tighten delivery-manifest-check to verify real release assets (not just
+  release.yml build-step existence) — the manifest and release.yml ARE currently
+  aligned (all 7 entries covered by 4 published assets via bundling), but the
+  check is doc-vs-doc, not doc-vs-reality
 status: todo
 labels:
   - milestone-candidate
@@ -8,58 +11,77 @@ labels:
 parent: null
 children: []
 extra:
-  schema: "v1"
+  schema: v1
 ---
 ## Proposal
 
-Found at the v0.3.12 release (2026-07-24, GitHub Actions run 30059096816 — all 8 jobs green):
-`delivery-manifest.json` (M129 — the single source of truth for the release artifact-set; "release.yml
-must produce exactly this set — no more, no less") declares **7 artifacts**, but the actual GitHub
-Release `v0.3.12` published only **4**:
+Investigation (2026-07-24, SELECT pass M135): the original claim that release.yml publishes 4/7
+manifest entries is **overstated**. Live inspection reveals:
+- release.yml DOES build quay-native SEA (`bash packages/quay-native/scripts/build-sea.sh` on
+  the `sea-release` job — confirmed via `grep`)
+- The manifest correctly documents bundling: quay-native SEA is assembled together with quay SEA
+  in one archive per platform; the plugin is inside the npm-pack tarball
+- 4 published assets cover all 7 entries via bundling; `delivery-manifest-check` PASSES because
+  both manifest and release.yml ARE aligned
 
-| delivery-manifest.json declares | v0.3.12 actually published |
-|---|---|
-| npm tarball `quay-{v}.tgz` | ✅ |
-| SEA `quay` × {linux-x64, macos-arm64, windows-x64} | ✅ (3) |
-| SEA `quay-native` × {linux-x64, macos-arm64, windows-x64} | ❌ not built by release.yml |
-| plugin `quay` marketplace bundle | ❌ not uploaded as a Release asset |
-
-Two coupled gaps:
-
-1. **release.yml does not construct the full declared set** — there is no `quay-native` SEA build leg
-   and no plugin-bundle upload step, so the manifest's `sea-binaries[quay-native]` and `plugin` entries
-   are aspirational, not actually produced.
-2. **`delivery-manifest-check` (M129) PASSED on this 4/7 release** — i.e. the assertion does NOT
-   compare the manifest's declared set against the concrete artifacts actually produced/uploaded. It
-   appears to validate release.yml's *self-described* output against the manifest, which is circular
-   when release.yml and the manifest disagree on scope. The single-source guarantee M129 intended
-   ("no more, no less") is therefore not enforced.
-
-Consequence: chart-2 S2's `manifest-published` conjunct
-(`chart2-s2-delivery-completeness.ts` → `fullManifestPublished` evidence flag in `chart2-s2-delivery.json`)
-correctly stays `false` — the release is genuinely incomplete, not merely un-flagged. This is the
-remaining work for `exp5-M-PRODUCTIZED-DELIVERY-C` (the human-steered real outward publish that flips
-S2): make release.yml construct + publish the full manifest set, tighten the check to compare declared
-vs actually-produced, then flip `fullManifestPublished: true` on real evidence.
+The REAL gap is narrower: `delivery-manifest-check.ts` validates doc-vs-doc (manifest ↔
+release.yml build-step existence), not doc-vs-reality (manifest ↔ actual published GitHub Release
+assets). The single-source guarantee M129 intended has no runtime verification leg.
 
 ## Plan
-N/A — needs a sizing decision before SELECT: either (a) extend release.yml to build
-`quay-native` SEA (×3 platforms) + upload the plugin marketplace bundle, and tighten the check to
-compare declared vs produced; or (b) if those artifacts are intentionally out of the public release,
-shrink `delivery-manifest.json` to match reality and make the check enforce that smaller set. Either
-way the manifest and release.yml must converge on one truth and the check must fail on divergence.
+
+1. Add `--ci` mode to `delivery-manifest-check.ts`: when `GITHUB_TOKEN` is available (CI
+   environment on a tagged release), fetch actual GitHub Release assets via REST API and verify
+   every manifest entry has a corresponding published artifact (accounting for bundling:
+   quay-native inside quay SEA archive, plugin inside npm tarball). Non-CI mode unchanged.
+2. RED fixture: a deliberately missing entry in manifest → `--ci` mode exits non-zero (mocked
+   API response). GREEN: on real release, `--ci` exits zero.
+3. Extend sibling test (`delivery-manifest-check.test.ts`) with `--ci` mode test cases, ≥80%
+   coverage.
+4. Keep manifest structure and release.yml unchanged — they are already aligned.
 
 ## Acceptance Criteria
-- [ ] `delivery-manifest.json`'s declared artifact-set and release.yml's actually-produced set agree
-      (a documented decision: extend release.yml OR shrink the manifest).
-- [ ] `delivery-manifest-check` fails (non-zero) when the actually-produced set ≠ the declared set —
-      proven by a RED fixture (drop/withhold a declared artifact → check fails before the fix holds).
-- [ ] A real tagged release publishes exactly the declared set, after which S2's `manifest-published`
-      conjunct can be honestly flipped with recorded evidence.
+- [ ] `delivery-manifest-check.ts` `--ci` mode: when `GITHUB_TOKEN` is set on a tagged run,
+      fetches actual GitHub Release assets and verifies manifest entries are covered by published
+      assets (accounting for documented bundling). When `GITHUB_TOKEN` is unset, behavior
+      unchanged (manifest ↔ release.yml).
+- [ ] RED: with a manifest entry that has no matching published asset, `--ci` mode exits non-zero
+      (mocked API response in test) — pasted.
+- [ ] GREEN: on a real tagged release CI run, `--ci` mode exits zero — pasted from CI log, or
+      cross-checked via `gh release view` on the most recent release.
+- [ ] `delivery-manifest-check.test.ts` extended for `--ci` mode; ≥80% coverage;
+      `loadbearing-test-gate.sh` PASS.
+- [ ] `node --test $(ls packages/quay/test/*.mjs | grep -vE 'serve-github|provider-abi-conformance')`
+      stays green.
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidation-lag, line-budget,
-impl-row N/A, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycle-record, tree-hygiene,
+impl-row, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycle-record, tree-hygiene,
 worktree-branch-hygiene, audit-independence).
-- [ ] All AC items above verified true with pasted command output / real release-run URLs (not asserted).
+- [ ] All AC items above verified true with pasted evidence (not asserted).
 - [ ] it0 DoD meta-enforcer passes all clauses at ABSORB.
+
+## Not selected (M135 SELECT)
+
+SELECT deliberation (2026-07-24, M134→M135 boundary):
+
+**Candidate pool:** 8 milestone-candidates with status=todo. After filtering:
+- 3 STALE (exp5-M-CLI-UX, exp5-M-DIRTASK, exp5-M-DOCS) — scope exhausted
+- 2 human-steered (DIR-057, exp5-M-OUTERLOOP-ROUTINE-WIRING) — excluded
+- 2 compound epics with all children done (exp5-M-CRYST, exp5-M-PRODUCTIZED-DELIVERY)
+- 1 selectable: exp5-DEFECT-DELIVERY-MANIFEST-INCOMPLETE-RELEASE
+
+**Explore/exploit cadence:** streak=2, threshold=4 — NOT due (exploit mode).
+
+**Deliverable governor (DIR-066):** deliverable=yes (shipped CI check code, consumed by the
+release pipeline). Streak=1 (M134=no, M133=exempt, M132=yes). Single-candidate shortlist.
+
+**SPLIT-OR-COMMIT:** fully completable within one milestone (~200 lines of TypeScript +
+test extension). No split needed.
+
+**Value-typed ledger:** instrument-correction — tightens an existing check's honesty without
+changing S2 cov (already 1.00). Δv̂=0. The check currently passes because manifest and
+release.yml agree — but neither is verified against reality. This adds the reality leg.
+
+**SELECTED** — sole autonomous candidate. Scope narrowed from the original defect's overstated
+"missing artifacts" claim to the real gap: doc-vs-doc check needs a doc-vs-reality mode.
