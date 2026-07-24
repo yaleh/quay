@@ -253,6 +253,12 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    workflow exits immediately). The workflow script IS the single source for the routine-track
    logic (ADR-004) — OUTER-LOOP references it, never re-derives the steps.
 
+After completing one outer cycle (steps 0–5a):
+
+- If `.halt` exists: call ScheduleWakeup with `stop: true` and return. The loop ends cleanly.
+- Otherwise: the iteration is complete. `/loop` self-paced mode handles the next wakeup —
+  short interval when work was done, longer interval when the board was empty.
+
 ## The loop runs autonomously — it NEVER blocks waiting for a human
 Human input is asynchronous (below). At **each milestone boundary** the loop checks the two — and
 only two — stop signals:
