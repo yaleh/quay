@@ -31,9 +31,11 @@ export {
 
 export interface StartServerOptions {
   port?: number;
+  /** Host to bind to. Defaults to "0.0.0.0" (all interfaces). */
+  host?: string;
 }
 
-export async function startServer({ port = 4173 }: StartServerOptions = {}): Promise<Server & { client: ProviderClient }> {
+export async function startServer({ port = 4173, host = "0.0.0.0" }: StartServerOptions = {}): Promise<Server & { client: ProviderClient }> {
   const cfg = loadConfig();
   const provider = activeProvider(cfg, undefined);
   const providerDir = path.resolve(cfg.workspaceRoot, provider.path ?? ".");
@@ -87,8 +89,8 @@ export async function startServer({ port = 4173 }: StartServerOptions = {}): Pro
   // bound all interfaces (0.0.0.0) by default, but the log line claimed `localhost`,
   // misleading the G7 precondition check ("reachable on 0.0.0.0, not localhost-only")
   // into reading it as a localhost-only binding when it was not.
-  server.listen(port, "0.0.0.0", () => {
-    console.log(`quay serve: listening on http://0.0.0.0:${port} (all interfaces)`);
+  server.listen(port, host, () => {
+    console.log(`quay serve: listening on http://${host}:${port}`);
   });
 
   // QN-031 (iteration 21): expose the underlying provider client so a caller

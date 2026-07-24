@@ -311,7 +311,7 @@ Usage:
   quay retreat <task-id> --reason <reason> [--file <log-path>]
   quay run [--once] [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
   quay migrate --from <providerId> --to <providerId> [--json]
-  quay serve [--port <port>]
+  quay serve [--port <port>] [--host <host>]
   quay mcp
 
 Options for task list:
@@ -993,7 +993,10 @@ async function main() {
     // `serve` has no subcommand token — reparse from argv[2] so `--port` etc.
     // is read correctly instead of being swallowed into `sub`.
     const { flags: serveFlags } = parseFlags(process.argv.slice(3));
-    await startServer({ port: serveFlags.port ? Number(serveFlags.port) : undefined });
+    await startServer({
+      port: serveFlags.port ? Number(serveFlags.port) : undefined,
+      host: serveFlags.host || undefined,
+    });
     return;
   }
 
