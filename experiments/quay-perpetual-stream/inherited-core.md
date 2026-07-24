@@ -767,6 +767,43 @@ consolidated answer; no future milestone should need to re-open the archived DIR
 unless this section itself is found insufficient (in which case, expand THIS section, don't leave
 the gap for the next drafter to re-discover).
 
+## Human-steered task definition (DIR-062, 2026-07-23)
+
+A task is `human-steered` — excluded from autonomous SELECT — iff ANY of three clauses fires (OR
+composition; the executable classifier is `scripts/human-steered-classify.ts` (DIR-062-A, M125),
+single-source — the definition below is the human-readable companion, never a re-implementation):
+
+1. **Driver-self-rewrite (file-based, automatically detectable).** The task touches a DRIVER FILE:
+   `OUTER-LOOP.md`, `inherited-core.md` (anywhere under `experiments/quay-perpetual-stream/`,
+   matched by basename), or any file under `.claude/skills/` (the loop's own skills — inner-iteration
+   prompts, ABSORB-format templates). A milestone that edits the loop's own driver is a bootstrap
+   hazard: it must be authored under `.halt` + golden-replay + independent adversarial audit
+   (DIR-027 human-steering hygiene), never run autonomously mid-loop.
+
+2. **Mission-redirection (declared, not inferred).** The task carries an explicit
+   `extra.missionRedirection: true` marker — a human judgment that this milestone changes the
+   experiment's direction (redefines VT surfaces, opens a new chart, retires a standing hypothesis,
+   or redirects the value-typed ledger's priorities). This is NOT inferable from files; a human
+   sets the marker on the task.
+
+3. **Unauthorized cross-workspace drive (registry-checked, automatically detectable).** The task
+   drives a workspace NOT covered by `drivable-workspaces.yml` (DIR-062-A's
+   `drivable-workspace-check.ts` — fail-closed gate over the human-authorized registry of workspaces
+   the autonomous loop may use as validation/experimentation targets). A workspace path not covered
+   by the registry implies human sign-off is required before the loop drives it.
+
+`label:human-steered` is retained as a manual override/escape hatch: a human may hand-label a task
+that the classifier would otherwise pass as autonomous (e.g. a risk not captured by the three
+clauses). The SELECT step invokes the classifier FIRST; the hand-label is a backstop, not the
+primary mechanism.
+
+The classifier script `experiments/quay-perpetual-stream/scripts/human-steered-classify.ts`
+(DIR-062-A, landed M125) is the SINGLE executable source — it encodes the three clauses as a pure
+function `classify({touchedFiles, missionRedirection, drivenWorkspaces, registry})` returning
+`{humanSteered, clauses: {driverFileEdit, missionRedirection, unauthorizedWorkspace},
+unauthorizedWorkspaces}`. The prose above MUST NOT drift from the script; the script IS the
+definition when they disagree (ADR-004: hard over soft).
+
 ## Human-review cadence — standing rule (M15-human-review-cadence, DIR-001 item 6)
 
 DIR-001 item 6 backlogged this as "worth a recurring-cadence design once ≥2 more DIR-* instances

@@ -84,12 +84,17 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    explore milestone per 5**. Exploit = high-value, high-ρ, method handles it; explore = new
    surface/domain that grows the reusable core. Prefer aged high-value items (DIR-004 Distribution is
    URGENT).
-   **EXCLUDE `label:human-steered` candidates from autonomous SELECT.** These are driver-self-rewrite
-   milestones (e.g. rewriting THIS file / inherited-core / the loop's own skills / its ABSORB format —
-   currently D3, D2, F1) that are unsafe to run autonomously mid-loop (the bootstrap hazard). They are
-   completed human-steered off-loop, OR only under the D3 behavior-preserving + golden-replay
-   discipline; a human removes the `human-steered` label when a candidate is cleared for autonomous
-   selection. Filter them out here before ranking.
+   **EXCLUDE `human-steered` candidates from autonomous SELECT.** A candidate is `human-steered` per
+   the 3-clause definition in `inherited-core.md` ("Human-steered task definition (DIR-062)"): (1)
+   driver-self-rewrite — touches `OUTER-LOOP.md` / `inherited-core.md` / `.claude/skills/`; (2)
+   mission-redirection — `extra.missionRedirection: true`; (3) unauthorized cross-workspace drive —
+   drives a workspace NOT covered by `drivable-workspaces.yml`. The executable classifier is
+   `scripts/human-steered-classify.ts` (DIR-062-A, M125) — invoke it per candidate with `--touched`
+   (the task's declared touched files from `## Touches` or the charter scope), `--workspace` (any
+   foreign workspace the task drives), and `--mission-redirection` (if `extra.missionRedirection` is
+   set). `label:human-steered` is retained as a manual override/escape hatch: a task carrying the
+   label is excluded regardless of the classifier's verdict (a human judges its risk is not captured
+   by the three clauses). Filter them out here before ranking.
    **Round-1 deliverable governor (DIR-066 — SOFT, replaces DIR-038-B's hard governance:product halt).**
    Over the autonomous-selectable candidates (human-steered already excluded), the pass runs in TWO rounds.
    **Round 1 composes the "candidates considered this pass" set** (the shortlist ranked in Round 2 below):
