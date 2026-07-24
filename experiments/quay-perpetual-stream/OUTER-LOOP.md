@@ -141,8 +141,9 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    - `## Definition of Done` — a REFERENCE to the standard five clauses (never an inlined copy) + any
      task-specific extras, as checklist items.
    **Never self-tick (DIR-020 — uncoded who/when invariant):** author every AC/DoD box UNCHECKED
-   `- [ ]`. Boxes go to `- [x]` ONLY at step 6, by the acceptance audit as it independently confirms
-   each item — never here, never by the loop itself. Clause 0 HARD-blocks step 7's `milestone_counter++`
+   `- [ ]`. Boxes go to `- [x]` ONLY in the workflow's Audit phase, by the acceptance audit as
+   it independently confirms each item — never here, never by SELECT. Clause 0 HARD-blocks the
+   workflow Land phase's `milestone_counter++`
    on any missing/empty section OR any box left unchecked past the audit, but it CANNOT detect an
    improperly self-ticked box — so the who/when rule is discipline, not code. Checklist form is
    forward-only; pre-existing prose-form tasks are grandfathered.
@@ -212,7 +213,10 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    - a pinned pointer (path + git SHA) to `inherited-core.md` (Tier-B, not inlined).
 4. **RUN EXECUTION PIPELINE** — invoke the saved workflow `/execute-milestone`
    (`.claude/workflows/execute-milestone.js`, DIR-067, 2026-07-24). Pass `{taskId, charterFile,
-   absorbEntryFile, valueHypothesis}` from steps 1-3. The workflow runs the full execution pipeline
+   absorbEntryFile}` from steps 1-3. Before invoking, create the absorb-entry file:
+   `touch /tmp/m<NN>-absorb-entry.md` and populate it with the ABSORB narrative header (milestone
+   id, charter path, value hypothesis Δv̂ from step 2). The dispatch-record file
+   `/tmp/m<NN>-dispatch-record.txt` is created by the workflow's Audit phase per the M90 procedure. The workflow runs the full execution pipeline
    deterministically: Verify (5 it0 systematic-explore checks in parallel) → Build (class-route +
    inner iteration in isolated worktree) → Audit (adversarial fresh-context acceptance audit,
    write-back AC/DoD ticks per DIR-020) → Gate (7 mechanical absorb gates in parallel: vmeta-lag,

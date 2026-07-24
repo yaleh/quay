@@ -14,7 +14,7 @@ export const meta = {
 phase('Verify')
 const verify = await parallel([
   () => agent(
-    `Run it0-ceiling-check.sh against every gap/directive ID cited in the charter file ${args.charterFile}. Non-zero exit or CLOSED/NOT-FOUND = charter scope stale — return {ok, detail}. FAIL is a HARD BLOCK.`,
+    `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh against every gap/directive ID cited in the charter file ${args.charterFile}. Non-zero exit or CLOSED/NOT-FOUND = charter scope stale — return {ok, detail}. FAIL is a HARD BLOCK.`,
     { label: 'ceiling-check', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
   ),
   () => agent(
@@ -58,7 +58,7 @@ Per iteration: use baime:iteration-executor fed the charter (Tier-A) only. For
 development-class, also feed the checked plan from 5a.
 
 TERMINATE on the first of (§3.2): Done-when complete | ΔV<0.02 both-layers K=2
-consecutive (checked by scripts/termination-delta-v-check.ts) | ceiling→redesign |
+consecutive (checked by experiments/quay-perpetual-stream/scripts/termination-delta-v-check.ts) | ceiling→redesign |
 past budget≈10 & nothing climbing | external HALT.
 
 Record under milestones/M<NN>/. The build agent MUST work in an isolated git worktree
@@ -84,7 +84,7 @@ CHARGE (refute-first stance):
 1a. CHECKLIST WRITE-BACK (DIR-020): for each confirmed AC/DoD item, WRITE BACK to the
     task file ticking - [x] with evidence citation. Leave - [ ] for unconfirmed items.
 2. DoD SATISFACTION: confirm the task's ## Definition of Done is satisfied.
-3. MECHANICAL GATE: run scripts/it0-dod-check.sh ${args.taskId} ${args.charterFile}
+3. MECHANICAL GATE: run experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${args.taskId} ${args.charterFile}
    ${args.absorbEntryFile}. Non-zero exit = REFUTED by construction.
 
 Output to milestones/M<NN>/audits/iteration-0-acceptance-audit.md.
@@ -151,7 +151,7 @@ await agent(
 4. UPDATE DASHBOARD (step 7): VT (sum weight·cov), slope (marginal Δv), ρ, charter-thickness,
    discovery-latency, calibration-error, V_meta consolidation lag, milestone_counter++
    (ONLY after all gates above cleared and master merge landed).
-5. REGENERATE backlog.md/dashboard.md views via scripts/it0-backlog-regen.ts.
+5. REGENERATE backlog.md/dashboard.md views via experiments/quay-perpetual-stream/scripts/it0-backlog-regen.ts.
 6. RUN tree-hygiene-check.sh and worktree-branch-hygiene-check.sh one final time
    to confirm the close-out is clean. Paste results.
 
