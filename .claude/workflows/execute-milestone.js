@@ -1,6 +1,6 @@
 export const meta = {
   name: 'execute-milestone',
-  description: 'Given a SELECTed milestone task, run the full execution pipeline: it0 checks → inner iteration build → adversarial audit → absorb gates → land. Replaces OUTER-LOOP.md steps 4–7 (DIR-067, 2026-07-24).',
+  description: 'Given a SELECTed milestone task, run the full execution pipeline: it0 checks → inner iteration build → adversarial audit → absorb gates → land. Replaces OUTER-LOOP.md steps 4–7 (DIR-067, 2026-07-24). Returns {outcome: "done"|"needs-human"|"building"} — "building" means a background task was dispatched; the caller polls and resumes.',
   phases: [
     { title: 'Verify', detail: 'Step 4 — run all 5 it0 systematic-explore checks' },
     { title: 'Build',  detail: 'Step 5 — class-route + dispatch inner iteration agent' },
@@ -56,41 +56,36 @@ BEFORE BUILD: ensure extra.acceptance is set on the task (task_write extra.accep
 The Gate phase's quay gate call depends on this field — fail-closed if absent.
 
 CLASS-ROUTE per inherited-core.md's two-class diversity policy:
-- DEVELOPMENT-class (capability-growth typed): run the proposal→plan pipeline FIRST
-  (invoke the quay-task-to-plan skill on the milestone task), then implement against
-  the checked plan with TDD ≥80% hard gate.
+- DEVELOPMENT-class (capability-growth typed): run proposal→plan pipeline FIRST
+  (invoke quay-task-to-plan skill), then implement with TDD ≥80% hard gate.
 - METHODOLOGY/DESIGN-class (discovery/governance-integrity typed): whole-milestone
-  independent dual-iteration (iteration-0 builds, iteration-1 re-derives from a
-  fresh worktree).
+  independent dual-iteration (iteration-0 builds, iteration-1 re-derives from fresh worktree).
 
 Per iteration: use baime:iteration-executor fed the charter (Tier-A) only. For
-development-class, also feed the checked plan from 5a.
+development-class, also feed the checked plan.
 
-TERMINATE on the first of (§3.2): Done-when complete | ΔV<0.02 both-layers K=2
-consecutive (checked by experiments/quay-perpetual-stream/scripts/termination-delta-v-check.ts) | ceiling→redesign |
-past budget≈10 & nothing climbing | external HALT.
+Dispatch the inner iteration as a harness-tracked background agent in an isolated git
+worktree off master HEAD. Return the dispatch result — do NOT wait for completion.
 
-Record under milestones/M<NN>/. The build agent MUST work in an isolated git worktree
-off master HEAD.
+TERMINATE on first of (§3.2): Done-when complete | ΔV<0.02 K=2 consecutive |
+ceiling→redesign | past budget≈10 & nothing climbing | external HALT.
 
-WAITING ON A LONG INNER ITERATION (background) — poll, don't conclude:
-- The completion notification is the PRIMARY wake — dispatch as a harness-tracked
-  background task so the loop is auto-re-invoked when the iteration finishes.
-- Any ScheduleWakeup fallback (~1200–1800s) is a HANG-DETECTION HEARTBEAT, NOT a deadline.
-- On a fallback wake: POLL the background task. Still running → re-arm the fallback and
-  keep waiting; do NOT absorb, do NOT advance to the next phase. Only proceed when the
-  iteration has GENUINELY completed.
-- If the iteration waits on EXTERNAL STATE the harness can't track (e.g. a GitHub Actions
-  run), poll that system's status explicitly and match the fallback to its cadence — never
-  conclude from the timer alone.
-
-Return {taskId, outcome, iterationCount, mergeCommit, worktreePath}.`,
+Return {taskId, outcome, iterationCount, mergeCommit, worktreePath, harnessTaskId}.`,
   { phase: 'Build', isolation: 'worktree',
     schema: { type: 'object', required: ['outcome'], properties: {
       taskId: { type: 'string' }, outcome: { type: 'string' },
       iterationCount: { type: 'number' }, mergeCommit: { type: 'string' },
+      harnessTaskId: { type: 'string' },
     } } }
 )
+
+// If Build dispatched a background task (not yet complete), return building status.
+// The caller (outer loop) handles poll/heartbeat/resume — NOT the Build agent.
+if (buildResult?.outcome === 'dispatched' || buildResult?.harnessTaskId) {
+  log(`Build phase dispatched background task: ${buildResult.harnessTaskId}`)
+  return { outcome: 'building', buildTaskId: buildResult.harnessTaskId, phase: 'Build' }
+}
+
 log(`Build phase complete: outcome=${buildResult?.outcome}`)
 
 // ── Phase: Audit (step 6 acceptance audit) ──────────────────────────────────────────
