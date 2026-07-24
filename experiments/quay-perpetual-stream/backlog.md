@@ -6,6 +6,10 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| exp5-M-LOADBEARING-TEST-GATE-TS | Fix loadbearing-test-gate.sh: recognize .test.ts sibling tests (ADR-012 TS migration gap) | DONE | - | milestone-candidate, instrument-correction, milestone:M-134 |
+| exp5-M-ARCH-AUDIT-M133-EXPLORE | M133 mandatory explore: post-M132 architecture audit (archguard sweep, FILE-ONLY) | DONE | - | milestone-candidate, explore, milestone:M-133 |
+| exp5-M-VERSION-CHECK-CI | Wire version-consistency-check into CI: new ci.yml job that fails build on version drift | DONE | - | milestone-candidate, capability-growth, milestone:M-132 |
+| exp5-M-DASHBOARD-ROLLING-CUT | Dashboard rolling-cut archive: trim live dashboard to ≤1200 lines, archive m25..m125 to dashboard-archive/ | DONE | - | milestone-candidate, governance-integrity, milestone:M-131 |
 | exp5-M-CRYST-D2 | D2 Rewrite skills (/quay-directive, quay-task-to-plan) in baime formalized style (λ-Spec + contracts:) | DONE | - | milestone-candidate, crystallization, milestone:M-130 |
 | exp5-M-PRODUCTIZED-DELIVERY-B | Productized delivery child B: checked-in delivery-manifest (single source of the shipped artifact set: 4 package tarballs + plugin bundle) + a test that asserts release.yml produces EXACTLY that set | DONE | - | milestone-candidate, milestone:M-129 |
 | exp5-M-ARCH-AUDIT-M128-EXPLORE | M128 mandatory explore: post-M127 architecture audit (archguard L_D/L_G sweep, FILE-ONLY) | DONE | - | milestone-candidate, explore, milestone:M-128 |
@@ -137,7 +141,7 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| exp5-M-DASHBOARD-ROLLING-CUT | Dashboard rolling-cut archive: trim live dashboard to ≤1200 lines, archive m25..m125 to dashboard-archive/ | SELECTED | - | milestone-candidate, governance-integrity, milestone:M-131 |
+| exp5-DEFECT-DELIVERY-MANIFEST-INCOMPLETE-RELEASE | defect: release.yml publishes an INCOMPLETE artifact-set vs delivery-manifest.json (4/7), and delivery-manifest-check passes anyway | open | - | milestone-candidate, defect |
 | DIR-066-B | DIR-066 child B [human-steered: halt + golden-replay]: wire the Round-1 D-quota into OUTER-LOOP step 1 (candidates-considered-this-pass) + REMOVE DIR-038-B's governance:product→HALT-RECOMMENDED clause from the self-halt block | open | - | milestone-candidate, human-steered |
 | exp5-M-PRODUCTIZED-DELIVERY | Complete productized delivery: all 4 packages + Claude Code plugin as one version-consistent unit (DIR-061) | open | - | milestone-candidate, epic |
 | exp5-M-PRODUCTIZED-DELIVERY-D | Productized delivery child D [human-steered: touches foreign workspace]: foreign-workspace Provider-install mechanism + real archguard E2E — an observed real Provider-ABI task-status GateEvent flips S3 External-validation-reach | open | - | milestone-candidate, human-steered |
@@ -158,4 +162,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_151 milestone-candidate task(s) as of 2026-07-23T18:57:48.206Z._
+_155 milestone-candidate task(s) as of 2026-07-24T01:54:07.797Z._
