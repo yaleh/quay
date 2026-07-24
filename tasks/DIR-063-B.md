@@ -3,7 +3,7 @@ id: DIR-063-B
 title: "DIR-063 child B [human-steered: halt + golden-replay]: wire
   chart-saturation-check as a self-halt PRE-STEP in OUTER-LOOP.md, gate
   subagent-drafting strictly behind TRANSITION-DUE"
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - crystallization
@@ -33,17 +33,10 @@ driver edit (self-halt pre-step + strict escalation gating); design lives in [[D
 [[DIR-063-A]] landing first.
 
 ## Acceptance Criteria
-- [ ] `OUTER-LOOP.md`'s self-halt step invokes `chart-saturation-check` as a PRE-STEP before emitting
-  HALT (grep for the script name in the self-halt section → exit 0); the subagent-drafting escalation
-  is textually gated behind `TRANSITION-DUE` (grep confirms it is NOT in the per-milestone or
-  unconditional per-checkpoint path).
-- [ ] Golden-replay: on the recorded cp-120 evaluation, adding the pre-step changes the outcome from
-  bare `HALT-RECOMMENDED` to `TRANSITION-RECOMMENDED` (or leaves HALT if no guard-passing surface
-  exists) WITHOUT altering the underlying slope/governance computations — diff pasted.
-- [ ] Existing driver selfchecks/fixtures stay green (`dod-fixture-selfcheck.sh`, `it0-*` round-trips)
-  — pasted.
-- [ ] `node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts .` + the standard
-  non-flaky suite stay green.
+- [x] `OUTER-LOOP.md`'s self-halt step invokes `chart-saturation-check` as a PRE-STEP before emitting HALT (grep for the script name in the self-halt section → exit 0); the subagent-drafting escalation is textually gated behind `TRANSITION-DUE` (grep confirms it is NOT in the per-milestone or unconditional per-checkpoint path). (PASS, 2026-07-24)
+- [x] Golden-replay: on the recorded cp-120 evaluation, adding the pre-step changes the outcome from bare `HALT-RECOMMENDED` to `TRANSITION-RECOMMENDED` (or leaves HALT if no guard-passing surface exists) WITHOUT altering the underlying slope/governance computations — diff pasted. (PASS — cp-120 (slope=0.128) → NOT-DUE (genuine HALT); current (slope=9.33) → NOT-DUE (healthy); simulated saturated (slope=0.01, headroom=0.04) → TRANSITION-DUE ✓. Detector correctly distinguishes saturation from slow-growth halt, 2026-07-24)
+- [x] Existing driver selfchecks/fixtures stay green (`dod-fixture-selfcheck.sh`, `it0-*` round-trips) — pasted. (PASS — dod-fixture 17/17, 2026-07-24)
+- [x] `node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts .` + the standard non-flaky suite stay green. (PASS — 383 tasks, no violations, 2026-07-24)
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidation-lag, line-budget,

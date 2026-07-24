@@ -574,8 +574,21 @@ only two — stop signals:
    the loop *waiting*.
 2. **Internal exit signal (self-halt):** at a checkpoint, if VT slope < the pre-declared threshold with
    no worthwhile explore chart, OR the standing hypothesis is falsified (a milestone failed to
-   converge) → write the checkpoint flagged `HALT-RECOMMENDED` and stop, leaving it for async human
-   review.
+   converge):
+   **2a. Chart-saturation pre-step (DIR-063, 2026-07-23).** Before emitting `HALT-RECOMMENDED` on a
+   slope-only trigger, run `scripts/chart-saturation-check.ts` (DIR-063-A, M127) — the single-source
+   saturation detector — with `--slope <rolling> --headroom <remaining> --counter <milestone_counter>`.
+   If the detector emits `TRANSITION-DUE` (hysteresis-guarded: slope≈0 for K≥2 consecutive, headroom
+   <10%, counter >growth-phase): replace the bare `HALT-RECOMMENDED` with `TRANSITION-RECOMMENDED`.
+   Then escalate to a ONE-TIME subagent that drafts candidate value surfaces for the next chart (each
+   must pass `scripts/chart-saturation-check.ts`'s anti-gaming guard — `headroom` computed from the
+   proposed surface, not a hand-picked number). The human still ratifies. If the detector does NOT
+   emit `TRANSITION-DUE`, emit the normal `HALT-RECOMMENDED` (the slope halt is genuine, not
+   saturation). SUBAGENT-DRAFTING IS STRICTLY GATED BEHIND `TRANSITION-DUE` — never per-milestone,
+   never unconditional per-checkpoint. This is the load-bearing anti-cost-explosion constraint.
+   The standing hypothesis falsification path (milestone failed to converge) is unchanged — it still
+   produces `HALT-RECOMMENDED` directly, no transition pre-step (saturation is a slope-only heuristic;
+   a failed milestone is not saturation).
    **One mechanical HARD-halt input (DIR-038-A) — a checkpoint MUST compute and report it:**
    - **VT slope** = the ROLLING per-milestone slope over the last K≥5 milestones INCLUDING zero-Δv ones,
      from `scripts/rolling-slope-check.ts` (`windowSlope`/`haltVerdict`) — that module IS the single
