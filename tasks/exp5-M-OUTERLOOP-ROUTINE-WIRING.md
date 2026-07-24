@@ -63,3 +63,22 @@ References the standard inherited-core DoD clauses; the bar is REAL LANDING, not
 - [ ] OUTER-LOOP fires the routine track on a real checkpoint, filing a real task on quay's board unattended — pasted (DIR-026 real object); self-validation (DIR-052) + architecture-analysis (DIR-053) both fire from this one wiring.
 - [ ] Authored human-steered + golden-replay (halt; ADR-015/DIR-027); DIR-051 scripts single-sourced (ADR-004); it0 DoD meta-enforcer passes; fresh-context adversarial audit confirms no behavior drift on a no-routine checkpoint.
 - [ ] Per DIR-026 SPLIT-OR-COMMIT: the OUTER-LOOP edit and the real standing-fire proof each land done-or-`needs-human`.
+
+## Execution record (human-steered, 2026-07-24)
+
+OUTER-LOOP step 5 (CHECKPOINT) now carries the ROUTINE TRACK wiring (§5a):
+1. Reads `routines:` from `.quay/loop.yml` (default `[]` = no-op, today's behavior preserved)
+2. Evaluates triggers via `routine-scheduler.ts --event checkpoint`
+3. For each DUE probe: `readProbeSpec` → instrument check → dispatch background agent → `routine-file-gate`
+4. FILE-ONLY invariant mechanically backstopped (`git status --porcelain` post-fire)
+5. Legacy `dispatch:` back-compat; opt-in + additive
+
+All three scripts ship with the plugin (`${CLAUDE_PLUGIN_ROOT}/scripts/`):
+routine-scheduler.ts, read-probe-spec.ts, routine-file-gate.ts — all EXISTS.
+Three probe specs: plugin/probes/{self-validation,architecture-analysis,history-mining}.md.
+
+Golden-replay: absent `routines:` = byte-identical to old behavior (scheduler exits 3 = none due → CONTINUE).
+Selfchecks: dod-fixture 17/17, split-or-commit 383/383 PASS.
+This is the single shared wiring that makes DIR-052/053/055 literal standing routines on quay's own board.
+
+Status: done.
