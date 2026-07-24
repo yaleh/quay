@@ -266,45 +266,17 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    cadence rule) + a re-test of the standing hypothesis (§1). **Do NOT wait for a human.** After
    writing it, CONTINUE to the next milestone. The human reviews snapshots asynchronously.
 
-   **5a. ROUTINE TRACK (DIR-051/056, wired 2026-07-24).** AFTER the checkpoint snapshot is written
-   (and regardless of whether a checkpoint was due — routines fire on their own cadence, independent
-   of the every-5 checkpoint trigger), evaluate the standing routine track from
-   `.quay/loop.yml`'s `routines:` config:
-
-   1. **Read routines config.** Read `routines:` from `.quay/loop.yml` (falls back to
-      `.quay/config.yml` `loop:` section, DIR-050). Default `[]` = no routines (today's behavior
-      preserved). Absent `routines:` key → nothing to do; CONTINUE to the next milestone.
-   2. **Evaluate triggers.** Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/routine-scheduler.ts"
-      --iteration <milestone_counter> --event checkpoint --plugin-root "${CLAUDE_PLUGIN_ROOT}"
-      <routines.json>` (DIR-051). Exit 0 + lists DUE routines; exit 3 = none due → CONTINUE.
-   3. **For each DUE routine with `probe: <name>` (DIR-056):**
-      a. Call `readProbeSpec(name, CLAUDE_PLUGIN_ROOT)` from
-         `${CLAUDE_PLUGIN_ROOT}/scripts/read-probe-spec.ts` → `{instrument, fallback,
-         output_routing, objective}`. Fail-closed: if `readProbeSpec` throws, skip this routine
-         for this iteration (log the error; never crash the loop).
-      b. **Instrument availability check.** If `instrument !== "none"`, verify the named MCP server
-         (e.g. `meta-cc`, `archguard`) is available in the current session. If unavailable and
-         `fallback === "none"`, skip and log; the routine will fire again on its next trigger.
-      c. Prepend `WORKSPACE: <workspaceRoot>\n` to `spec.objective` (workspace-relative resolution).
-      d. **Dispatch** a fresh-context background agent (DIR-048 dispatched infra) with the
-         combined objective prompt.
-      e. The agent's findings are FILED as evidence-backed tasks (`## Finding`-bearing), each
-         gated by `node "${CLAUDE_PLUGIN_ROOT}/scripts/routine-file-gate.ts" --board <tasksDir>
-         --recent <N> --k <K> <candidate-task.md>` (exit 0 = ACCEPT: actionable, novel, within
-         rate cap; exit 1 = REJECT). Do NOT file a REJECTed candidate — the gate is a runnable
-         check. Label findings per `output_routing[type]` (default `milestone-candidate`).
-      f. **FILE-ONLY invariant (backstopped mechanically):** after all routines fire, run
-         `git -C <workspaceRoot> status --porcelain`. A routine MUST have produced ONLY new task
-         files (or board entries); if it touched product/method code, discard + flag. Routines
-         NEVER execute their own findings — the SELECT track drives the filed tasks under the
-         normal gate + audit (routines DISCOVER, SELECT+audit DECIDE).
-   4. **Legacy back-compat**: a `dispatch: <action>` routine (pre-DIR-056) still works — treat it
-      as an inline `instrument:none`, single-label probe (the skill handles this, unchanged).
-   5. **Opt-in + additive**: absent `routines:` = today's behavior EXACTLY (no routines fire).
-      The scheduler, probe reader, and file-gate scripts ship with the plugin
-      (`${CLAUDE_PLUGIN_ROOT}/scripts/`, per DIR-049/056). Single-source: these scripts IS the
-      definition (ADR-004); OUTER-LOOP references them, never re-implements the logic.
-      Routine scheduling never dispatches manda.
+   **5a. ROUTINE TRACK (DIR-051/056, wired 2026-07-24).** Invoke the saved workflow `/run-routines`
+   (`.claude/workflows/run-routines.js`) with `{workspaceRoot, tasksDir, milestoneCounter}`.
+   The workflow runs the full routine dispatch pipeline deterministically: Schedule (read
+   `.quay/loop.yml` routines: → run `routine-scheduler.ts` → DUE list) → Dispatch (for each DUE
+   probe: `readProbeSpec` → instrument availability check → dispatch fresh-context background
+   agent) → Gate (each finding through `routine-file-gate.ts`: quality/dedup/rate — ACCEPT or
+   REJECT) → Verify (FILE-ONLY invariant: `git status --porcelain` — no product/method code
+   touched). Returns `{fired, filed, rejected, fileOnlyViolation}`. Watch with `/workflows`;
+   completed phases are cached. Absent `routines:` = no-op (scheduler returns none due →
+   workflow exits immediately). The workflow script IS the single source for the routine-track
+   logic (ADR-004) — OUTER-LOOP references it, never re-derives the steps.
 
 ## The loop runs autonomously — it NEVER blocks waiting for a human
 Human input is asynchronous (below). At **each milestone boundary** the loop checks the two — and
