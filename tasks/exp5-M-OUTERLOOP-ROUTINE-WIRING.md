@@ -1,12 +1,13 @@
 ---
 id: exp5-M-OUTERLOOP-ROUTINE-WIRING
-title: "Wire exp5 OUTER-LOOP to fire the DIR-051 routine track (HUMAN-STEERED, halt +
-  golden-replay): teach OUTER-LOOP's checkpoint step to consume .quay/loop.yml
-  routines: (routine-scheduler → dispatch probe → routine-file-gate), so
-  self-validation (DIR-052) + architecture-analysis (DIR-053) + meta-cc mining
-  (DIR-055) fire as STANDING routines on quay's own board — not just as ad-hoc
-  explore milestones. The single shared wiring that makes all three routines real."
-status: todo
+title: "Wire exp5 OUTER-LOOP to fire the DIR-051 routine track (HUMAN-STEERED,
+  halt + golden-replay): teach OUTER-LOOP's checkpoint step to consume
+  .quay/loop.yml routines: (routine-scheduler → dispatch probe →
+  routine-file-gate), so self-validation (DIR-052) + architecture-analysis
+  (DIR-053) + meta-cc mining (DIR-055) fire as STANDING routines on quay's own
+  board — not just as ad-hoc explore milestones. The single shared wiring that
+  makes all three routines real."
+status: done
 labels:
   - milestone-candidate
   - human-steered
