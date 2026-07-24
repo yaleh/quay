@@ -41,13 +41,16 @@ WINDOW="${2:-40}"
 
 # When --milestone is provided, scan all iteration reports under that milestone directory.
 if [ -n "$MILESTONE" ]; then
-  MILESTONE_DIR="experiments/quay-perpetual-stream/milestones/${MILESTONE}/iterations"
-  if [ ! -d "$MILESTONE_DIR" ]; then
-    echo "No iteration reports found for milestone ${MILESTONE} (directory not found: ${MILESTONE_DIR})."
-    echo "Nothing to check — vacuously PASS."
+  # Probe for the milestone directory in both locations (repo-root for M130+, experiments/ for legacy).
+  MILESTONE_ROOT=""
+  for candidate in "milestones/${MILESTONE}" "experiments/quay-perpetual-stream/milestones/${MILESTONE}"; do
+    if [ -d "$candidate" ]; then MILESTONE_ROOT="$candidate"; break; fi
+  done
+  if [ -z "$MILESTONE_ROOT" ]; then
+    echo "Milestone directory not found for ${MILESTONE} — vacuously PASS."
     exit 0
   fi
-  REPORTS=$(find "$MILESTONE_DIR" -name 'iteration-*.md' 2>/dev/null | sort)
+  REPORTS=$(find "$MILESTONE_ROOT" -name 'iteration-*.md' 2>/dev/null | sort)
   if [ -z "$REPORTS" ]; then
     echo "No iteration reports found for milestone ${MILESTONE}."
     echo "Nothing to check — vacuously PASS."

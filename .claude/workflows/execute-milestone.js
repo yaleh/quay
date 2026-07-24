@@ -13,17 +13,12 @@ export const meta = {
 // ── Phase: Verify (step 4) ──────────────────────────────────────────────────────────
 phase('Verify')
 
-// Per-check incremental caching (DIR-079): compute input fingerprints for each it0 check.
-// On retry, skip agents whose fingerprint matches a prior {ok: true} result.
-// This avoids re-running 4 passing checks when only 1 charter detail changed.
-const CHARTER_TEXT = readFile(args.charterFile)
-const VERIFY_CHECKS = [
-  { label: 'ceiling-check',    fingerprint: sha256(args.charterFile) },
-  { label: 'gate-hash',        fingerprint: sha256(args.charterFile) },
-  { label: 'domain-misfit',    fingerprint: sha256(args.charterFile) },
-  { label: 'line-budget',      fingerprint: sha256(args.charterFile) },
-  { label: 'dogfood-evidence', fingerprint: sha256(args.charterFile) },
-]
+// Per-check incremental caching (DIR-079): the Workflow resume mechanism caches at the
+// phase level. Per-agent caching within a phase is not yet supported by the harness.
+// When the runtime supports per-agent fingerprint-cached resume, add VERIFY_CHECKS with
+// input fingerprints (charter hash per check) and skip agents whose fingerprint matches
+// a prior {ok: true} result. Until then, all 5 checks re-run on every retry — the
+// domain-misfit check below is informational-only so at most 4 can block.
 
 const verify = await parallel([
   () => agent(
