@@ -1,9 +1,10 @@
 ---
 id: exp5-M-PRODUCTIZED-DELIVERY-C
-title: "Productized delivery child C [human-steered: real outward publish]: cut a
-  REAL release publishing all 4 package tarballs + the plugin bundle, version-
-  consistent, runtime-smoke-green on the Node floor — flips S2 cov with real evidence"
-status: todo
+title: "Productized delivery child C [human-steered: real outward publish]: cut
+  a REAL release publishing all 4 package tarballs + the plugin bundle, version-
+  consistent, runtime-smoke-green on the Node floor — flips S2 cov with real
+  evidence"
+status: done
 labels:
   - milestone-candidate
   - human-steered

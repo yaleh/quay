@@ -1,9 +1,10 @@
 ---
 id: exp5-M-PRODUCTIZED-DELIVERY-D
 title: "Productized delivery child D [human-steered: touches foreign workspace]:
-  foreign-workspace Provider-install mechanism + real archguard E2E — an observed
-  real Provider-ABI task-status GateEvent flips S3 External-validation-reach"
-status: todo
+  foreign-workspace Provider-install mechanism + real archguard E2E — an
+  observed real Provider-ABI task-status GateEvent flips S3
+  External-validation-reach"
+status: done
 labels:
   - milestone-candidate
   - human-steered

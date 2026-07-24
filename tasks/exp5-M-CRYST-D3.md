@@ -3,7 +3,7 @@ id: exp5-M-CRYST-D3
 title: D3 [subtractive] Rewrite OUTER-LOOP + inherited-core + inner-iteration
   prompts in formalized style; replace deterministic prompt steps with code
   (Axis 2′)
-status: ready
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -12,7 +12,7 @@ labels:
 parent: exp5-M-CRYST
 children: []
 extra:
-  schema: "v1"
+  schema: v1
 ---
 ## Proposal
 Rewrite ALL repeatable method text (OUTER-LOOP, inherited-core, inner-iteration prompts) as compact self-verifying specs + reference offload, moving every DETERMINISTIC step into code (Axis 2′) while the JUDGMENT core shrinks to a §9 Spec. This is the biggest molten mass. Multi-increment; each increment is subtractive + behavior-preserving-by-construction (never mix a prose deletion with a semantic change), verified by the existing selfcheck/fixture round-trips WITHOUT un-halting the live loop.

@@ -2,7 +2,7 @@
 id: exp5-M-CRYST-F1
 title: F1 [subtractive] Shrink iteration reports / ABSORB dispositions to
   GateEvent pointers (advances DIR-021/022/024)
-status: todo
+status: done
 labels:
   - milestone-candidate
   - crystallization
