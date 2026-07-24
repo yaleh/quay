@@ -1,8 +1,9 @@
 ---
 id: ADR-004
 title: Hard over soft — load-bearing rules become executable checks (Π_{S→E}); prose is rationale, not source
-status: proposed
+status: accepted
 date: 2026-07-19
+accepted-date: 2026-07-24
 supersedes: []
 superseded-by: []
 tags:
@@ -22,3 +23,7 @@ A **load-bearing** rule (one whose violation is a real defect) MUST become an ex
 - **Forbids:** landing a load-bearing invariant that exists only as re-narratable prose; treating an ADR/CLAUDE.md paragraph as the enforcement of a rule.
 - **Enables:** the E3 "adr-as-contract" direction — an accepted, mechanizable ADR later attaches a named `adr-<id>` gate; the crystallization program (ADR-006/007/008) is the systematic application of this decision.
 - **Scope / relations:** generalizes ADR-003 (which named the failure family) into a positive construction rule; ADR-005 justifies WHY the check is cheap-verification-first; ADR-006 adopts Π_{S→E} as a first-class analytical tool. The continuous-math half of the geometry framework is explicitly NOT invoked here (see ADR-006) — only 硬形变 is load-bearing.
+- **Implemented by:** [[DIR-080]] (2026-07-24) — refactors executed documents to agent-spec style:
+  every load-bearing rule becomes a formal constraint with a pointer to its executable check
+  (it0-dod-check.ts, human-steered-classify.ts, task-schema-check.sh, etc.); prose moves to
+  rationale + provenance.md. Promoted proposed→accepted on this implementation.

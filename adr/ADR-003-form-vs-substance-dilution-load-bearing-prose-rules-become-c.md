@@ -18,3 +18,7 @@ Load-bearing rules become **CODE** (a coded step cannot be paraphrased) **OR sel
 - **Forbids:** a load-bearing invariant existing only as re-narratable prose in a pinned doc; a generated prompt paraphrasing (rather than transcluding/verifying) such a rule.
 - **Enables:** this ADR is the cited rationale for the code-over-prompt work (D3 / Axis-2′) and the self-verifying-contracts work (D1/D2) — they are the fix, not incidental refactors.
 - **Landing test:** a real generated prompt transcludes/verifies a load-bearing rule rather than re-narrating it.
+- **Implemented by:** [[DIR-080]] (2026-07-24) — refactors all four groups of executed documents
+  (inherited-core.md, OUTER-LOOP.md, .claude/skills/, plugin/skills/) toward agent-spec style:
+  formal λ-notation with constraints as predicates, iteration histories extracted to provenance.md,
+  executable checks as single source per ADR-004.
