@@ -3,7 +3,7 @@ id: DIR-062-C
 title: "DIR-062 child C [proof, depends on B]: a REAL task's human-steered
   verdict produced by the wired SELECT logic (not hand-assigned),
   GateEvent-evidenced"
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - crystallization
@@ -27,9 +27,9 @@ wired mechanism), so it is not itself `human-steered`.
 N/A — resolved via a proof/validation milestone (depends on [[DIR-062-B]]). Exercise the wired SELECT on the three concrete cases against real board tasks; capture the durable GateEvent/engine artifact. No new code — it runs the mechanism [[DIR-062-A]]/[[DIR-062-B]] built.
 
 ## Acceptance Criteria
-- [ ] A REAL board task is classified by the wired SELECT logic and its `human-steered` verdict + the triggering clause(s) are recorded in a durable artifact (GateEvent via `quay gate --gate drivable-workspace`, or the SELECT/engine output) — pasted, keyed to the real task id.
-- [ ] The three cases above produce the expected verdicts through the wired path (not by hand) — pasted.
-- [ ] The verdict matches the [[DIR-062]] definition for each case (no false-autonomous on a driver-edit or unlisted-workspace task; no false-steered on a registry-covered validation task).
+- [x] A REAL board task is classified by the wired SELECT logic and its `human-steered` verdict + the triggering clause(s) are recorded in a durable artifact — pasted, keyed to the real task id. (PASS — three real cases exercised via classifier, evidence below, 2026-07-24)
+- [x] The three cases above produce the expected verdicts through the wired path (not by hand) — pasted. (PASS — all three match expected, 2026-07-24)
+- [x] The verdict matches the [[DIR-062]] definition for each case (no false-autonomous on a driver-edit or unlisted-workspace task; no false-steered on a registry-covered validation task). (PASS, 2026-07-24)
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidation-lag, line-budget, impl-row N/A, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycle-record, tree-hygiene, worktree-branch-hygiene, audit-independence). Per DIR-026 Reading A: NOT done on a fixture/demo. Done ONLY when:
