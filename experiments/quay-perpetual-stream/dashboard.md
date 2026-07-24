@@ -120,11 +120,11 @@ guard, per DIR-038-C discipline: no judgment-scored inflatable cov):**
 | # | surface | weight | cov | points | objective cov source (script) |
 |---|---|---|---|---|---|
 | S1 | Distribution reliability | 30 | 0.80 | 24.00 | `scripts/chart2-s1-distribution-reliability.ts` (release artifacts passing floor-smoke / total; from `chart2-s1-artifacts.json`, cited to CI run 29998600334: npm-pack✓, sea-linux-x64✓ (M121), sea-macos-arm64✓/sea-windows-x64✓ (M122 — cross-platform runtime-smoke job + a real Windows `.quay/config.yml`-missing bug found+fixed same-pass), plugin untested → 4/5) |
-| S2 | Delivery completeness | 30 | 0.00 | 0.00 | `scripts/chart2-s2-delivery-completeness.ts` (version-consistent ∧ manifest-published ∧ foreign-install-green; live 5-way version drift 0.3.11/0.3.5/0.3.22/0.3.16/0.3.5 (packages/quay bumped by M121/M122; the other 4 sources unchanged/unrelated to these milestones) → 0/3) |
+| S2 | Delivery completeness | 30 | 0.333 | 10.00 | `scripts/chart2-s2-delivery-completeness.ts` (version-consistent ∧ manifest-published ∧ foreign-install-green; live calculator at M134 cov-table refresh: version-consistent=TRUE — 4 packages unified to 0.3.11 by M126's real-tree unification (+M132 CI job) ∧ manifest-published=false (M129 built the manifest/release.yml-assertion instrument; artifact-set not yet actually published) ∧ foreign-install-green=false → 1/3) |
 | S3 | External-validation reach | 25 | 0.10 | 2.50 | `scripts/chart2-s3-external-validation.ts` (registry workspaces with a real ABI task-status GateEvent / target; `drivable-workspaces.yml`-bounded → 1/10, archguard reached) |
 | **S4** | **Methodology executability** | **15 SOFT/UNWIRED** | — | **0 (held out)** | recorded but EXCLUDED from the wired total + slope/halt inputs until it has a hard enumerable denominator — same treatment DIR-038-C gave the outward term; wiring a subjective count would reopen the self-referential gaming hole |
-| **chart-2 wired current (S1+S2+S3, after m122)** | | **/85 wired** | | **26.50** | |
-| **global VT (110.65 chart-1 frozen + 26.50 chart-2)** | | | | **137.15** | |
+| **chart-2 wired current (S1+S2+S3, after m126; cov unchanged m127–m134)** | | **/85 wired** | | **36.5** | |
+| **global VT (110.65 chart-1 frozen + 36.5 chart-2)** | | | | **147.15** | |
 
 **Opening reading computed live (2026-07-23), not asserted** — all three calculators run + their
 verdicts pasted; each is a load-bearing script with a ≥80%-coverage sibling test (S1 20/20 @97.4%,
@@ -159,10 +159,13 @@ opening reading, not yet a real milestone Δv), (m121/exp5-DEFECT-QUAY-CORE-SEA-
 Δv=+6.0 — REAL, CI-evidenced: S1 0.20→0.40 via sea-linux-x64 flip),
 (m122/exp5-DEFECT-SEA-VERIFY-SINGLE-PLATFORM-ONLY, 26.50/85, Δv=+12.0 — REAL, CI-evidenced: S1
 0.40→0.80 via sea-macos-arm64+sea-windows-x64 flip, including a real Windows-archive bug found+fixed
-same-pass) ]`
-Slope (marginal chart-2 points / milestone): **+9.0** (2 real data points so far, average of +6.0/+12.0
-— the self-halt's 0.000 rolling-window slope now has two genuine nonzero chart-2 milestones to average
-in going forward).
+same-pass), (m126/exp5-M-PRODUCTIZED-DELIVERY-A, 36.50/85, Δv=+10.0 — REAL, retro-recognized at the
+M134 cov-table refresh: M126 unified the 4-package real-tree to 0.3.11 (+M132 version-consistency CI
+job), flipping S2 conjunct-1 (version-consistent) 0/3→1/3 → S2 cov 0.00→0.333; M126's own ABSORB
+logged Δv=0 treating it as instrument-only — the actual delivery was the cov flip, recognized here) ]`
+Slope (marginal chart-2 points / milestone): **+9.33** (3 real data points: +6.0/+12.0/+10.0 — the
+self-halt's rolling-window slope now averages three genuine nonzero chart-2 milestones; the m126 point
+was backfilled at the M134 cov-table refresh, not contemporaneously).
 
 VT curve (append, chart-1 basis from m3 forward):
 `[ (m0, 82.25/100), (m1/M-DIST, 88.25/100, Δv=+6.0), (m2/M-GATES, 88.25/100, Δv=0, methodology-infra
