@@ -90,11 +90,16 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    mission-redirection — `extra.missionRedirection: true`; (3) unauthorized cross-workspace drive —
    drives a workspace NOT covered by `drivable-workspaces.yml`. The executable classifier is
    `scripts/human-steered-classify.ts` (DIR-062-A, M125) — invoke it per candidate with `--touched`
-   (the task's declared touched files from `## Touches` or the charter scope), `--workspace` (any
-   foreign workspace the task drives), and `--mission-redirection` (if `extra.missionRedirection` is
-   set). `label:human-steered` is retained as a manual override/escape hatch: a task carrying the
-   label is excluded regardless of the classifier's verdict (a human judges its risk is not captured
-   by the three clauses). Filter them out here before ranking.
+   (the task's declared touched files: read the `## Touches` section from the task body — if absent,
+   pass no `--touched` flags; clause 1 will not fire, which is correct for tasks that don't touch
+   driver files. A task that DOES touch driver files but lacks `## Touches` MUST carry
+   `label:human-steered` — the label is the safety net for the un-declared case), `--workspace` (any
+   foreign workspace the task drives, from `## Touches` or the charter scope), and
+   `--mission-redirection` (only if `extra.missionRedirection: true` is set on the task — this is a
+   human-set marker, never inferred). `label:human-steered` is retained as a manual override/escape
+   hatch: a task carrying the label is excluded regardless of the classifier's verdict (covers the
+   case where a task touches driver files but lacks `## Touches`, or any risk not captured by the
+   three clauses). Filter them out here before ranking.
    **Round-1 deliverable governor (DIR-066 — SOFT, replaces DIR-038-B's hard governance:product halt).**
    Over the autonomous-selectable candidates (human-steered already excluded), the pass runs in TWO rounds.
    **Round 1 composes the "candidates considered this pass" set** (the shortlist ranked in Round 2 below):
@@ -577,7 +582,9 @@ only two — stop signals:
    converge):
    **2a. Chart-saturation pre-step (DIR-063, 2026-07-23).** Before emitting `HALT-RECOMMENDED` on a
    slope-only trigger, run `scripts/chart-saturation-check.ts` (DIR-063-A, M127) — the single-source
-   saturation detector — with `--slope <rolling> --headroom <remaining> --counter <milestone_counter>`.
+   saturation detector — with `--slope <rolling> --headroom $(node scripts/chart-headroom.ts) --counter <milestone_counter>`
+   (headroom is mechanically extracted from dashboard by `scripts/chart-headroom.ts` (DIR-063 gap fix, 2026-07-24)
+   — the single source for the `(chart-max − wired) / chart-max` formula; never re-derived in prose).
    If the detector emits `TRANSITION-DUE` (hysteresis-guarded: slope≈0 for K≥2 consecutive, headroom
    <10%, counter >growth-phase): replace the bare `HALT-RECOMMENDED` with `TRANSITION-RECOMMENDED`.
    Then escalate to a ONE-TIME subagent that drafts candidate value surfaces for the next chart (each

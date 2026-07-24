@@ -49,3 +49,12 @@ script is necessary-not-sufficient. Done ONLY when:
   (diff pasted, no change to slope/governance math), independently adversarial-audited.
 - [ ] Escrow: stays open until the real-checkpoint detector output + golden-replay-clean wiring both
   exist on `master`. On landing, [[DIR-063]] itself flips `dirStatus: applied`.
+## Gap fix (2026-07-24)
+
+Post-wiring review found one mechanical gap: the `--headroom` parameter for `chart-saturation-check.ts`
+lacked a mechanical extraction source — the loop would need to parse dashboard prose to compute
+`(chart-max − wired) / chart-max`. Fixed by writing `scripts/chart-headroom.ts` (4/4 selftests PASS):
+a fail-closed mechanical extractor that reads the `chart-2 wired current` line from dashboard.md and
+outputs headroom as a float. OUTER-LOOP self-halt step updated to reference `$(node scripts/chart-headroom.ts)`
+as the single source for the headroom value (ADR-004). This closes the gap between "prose says compute
+headroom" and "the loop can mechanically do it."

@@ -42,3 +42,13 @@ Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidati
 - [ ] Authored `human-steered` (clause 1): under `.halt` off-loop, behavior-preserving proven by a golden-replay diff (no SELECT verdict change on existing tasks), independently adversarial-audited (fresh context confirms no behavior drift).
 - [ ] The wired SELECT is OPERATIVE — evidenced together with [[DIR-062-C]] (a real task classified by the wired logic, GateEvent/engine output).
 - [ ] Escrow: stays open until the golden-replay-clean landing on `master` is real (readable in the committed `OUTER-LOOP.md`/`inherited-core.md`), not a worktree draft.
+## Gap fix (2026-07-24)
+
+Post-wiring review found one mechanical gap: the classifier's `--touched` flag requires the task's
+`## Touches` section, but most milestone-candidate tasks lack this section. For tasks that don't touch
+driver files, this is correct behavior (classifier returns `humanSteered:false`). For tasks that DO
+touch driver files but lack `## Touches`, the `label:human-steered` override is the explicit safety
+net. OUTER-LOOP SELECT prose tightened to: (a) explicitly state the "if absent, pass no --touched flags"
+behavior, (b) document that driver-editing tasks without `## Touches` MUST carry the label as safety net,
+and (c) clarify that `--mission-redirection` is a human-set marker, never inferred. No new script needed —
+the gap is closed by making the override semantics explicit rather than implicit.
