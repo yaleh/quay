@@ -36,6 +36,7 @@ invariants (∀ cycle):
 3. **All code-pointers resolve**: `grep -oE 'scripts/[a-zA-Z0-9_-]+\.[a-z]+' OUTER-LOOP.md | sort -u | while read s; do test -f "experiments/quay-perpetual-stream/$s" || echo "MISSING: $s"; done` → empty. Every referenced script exists on disk.
 4. **Explore/exploit cadence script exists**: `test -f experiments/quay-perpetual-stream/scripts/explore-exploit-cadence.ts` → exit 0. The mechanical cadence check (CRYST-D3 R6) is single-source.
 5. **Termination ΔV script exists**: `test -f experiments/quay-perpetual-stream/scripts/termination-delta-v-check.ts` → exit 0. The mechanical termination check (CRYST-D3 R7) is single-source.
+6. **Drain-directives workflow exists**: `test -f .claude/workflows/drain-directives.js` → exit 0. The step-0 DRAIN pipeline is the single-source definition (DIR-071).
 
 ## Pinned references (read once at session start)
 - **Protocol (architecture, all §§):** `docs/proposals/quay-perpetual-stream-experiment-v5.md`
@@ -75,42 +76,16 @@ session start finds QC-T1 (creating it if missing) without side-effects.
 3. Set `state: RUNNING`, `milestone_counter: 0`, `chart: 0`. Commit the dashboard.
 
 ## Outer cycle — one pass = one milestone
-0. **DRAIN human inbox** — read the pending directives via `task_list --label directive`
-   (native provider MCP tool, or `node packages/quay/bin/quay.js task list --label directive --json`)
-   filtered to those with `extra.dirStatus: pending`. **Directives are TASK-CANONICAL (DIR-028 /
-   Plan A): a directive IS a `label:directive` quay task — the single source of truth. There is no
-   `directives/*.md` file, no projection, and no anti-drift check** (all three were retired; the task,
-   stored as `tasks/DIR-NNN.md`, is git-tracked and canonical). Disposition each pending directive →
-   a milestone-candidate task / a standing-rule amendment (`inherited-core.md` or `dashboard.md`
-   control limits) / an out-of-cycle action (VT chart transition, HALT); then record its disposition
-   on the SAME task — set `extra.dirStatus` (`applied`/`deferred`/`rejected`) and append a
-   `## Resolution` to the task body. This is where async human steering (§4.7) enters — at the
-   boundary, never mid-milestone. `/quay-directive` creates these tasks directly (task-canonical);
-   there is no file-vs-task reconciliation to run (the dual source it compensated for is gone).
-   **The loop runs DIRECTLY on `master` (DIR-027 retired DIR-018's driver-branch isolation).** There
-   is no `exp5-outer-driver` integration branch and no master↔driver DRAIN/publish merge dance: the
-   loop's own commit stream (charter authoring, per-iteration worktree base points, inner-merge
-   resolution, ABSORB) lands on `master`. Human commits (via `/quay-directive`, manual edits) also
-   land on `master`; there is no branch buffer, so **human-steering hygiene (DIR-027 item 5, replacing
-   the isolation it removed):** when the loop is running, a human edit should either pause the loop
-   (`touch experiments/quay-perpetual-stream/.halt`, drained at the next boundary) OR be made in a
-   private worktree off `master` and folded in at a clean window — the same race-free pattern
-   DIR-018/DIR-019 documented for human commits, now the primary discipline. (Historical: DIR-018
-   put the loop on a driver branch to avoid this race; DIR-027 retired it after the isolation proved
-   to relocate rather than prevent the race under heavy human steering — see DIR-027 Finding.)
-   **No-silent-drop reconciliation-note requirement (standing, DIR-013/DIR-018 item 3 — still
-   applies to any merge the loop does, e.g. folding a human private-worktree edit or an
-   iteration-worktree merge into `master`):** any real per-file conflict MUST be resolved by reading
-   BOTH sides' actual content — **never** a blanket `git checkout --ours`/`--theirs` wholesale (the
-   exact DIR-013 failure: an auto-resolved merge that silently discarded one side's content). Record
-   a short reconciliation note (which file, what each side had, what was kept/merged and why) in the
-   relevant log entry; a missing note is not a valid resolution of a conflict. Documented convention,
-   not a script/hook — applied by reading this text, like the gate-hash and line-budget checks'
-   fix-the-charter (not the mechanism) discipline.
-1. **SELECT** the next milestone candidate. **Candidates are read via `task_list`, not `backlog.md`
+0. **DRAIN** — invoke `/drain-directives` workflow (`.claude/workflows/drain-directives.js`,
+   DIR-071). Absent pending directives = no-op (returns `{drained: 0}`). Must complete before
+   step 1. Standing methodology moved to ## DRAIN standing methodology below.
+1. **SELECT** the next milestone candidate. **Precondition:** `/drain-directives` must have
+   completed for this boundary (DIR-071). If DRAIN was skipped, re-run it before SELECT —
+   this closes the exact failure mode observed at M135 (two directives missed because step 0
+   was skipped). **Candidates are read via `task_list`, not `backlog.md`
    prose** (M24-task-backlog-projection-impl, DIR-015 item 2 / m13 design doc §1/§13 — the task store
    is canonical for backlog/milestone/selection tracking going forward; `backlog.md` is a generated
-   view, see step 0's note below and the regeneration script under `scripts/`). Run
+   view, see Pinned references and regeneration script `scripts/it0-backlog-regen.ts`). Run
    `task_list --label milestone-candidate --status todo` (native provider MCP tool, or
    `node packages/quay/bin/quay.js task list --label milestone-candidate --status todo --json`
    equivalently) to get the live open-candidate set; apply the explore/exploit policy (§4.5): **≥1
@@ -358,3 +333,38 @@ scoping** — this note only records the lesson; no check is built here.
 When a chart saturates (all surfaces cov→1, VT→chart max) and value still exists, open a NEW chart:
 add a surface or deepen a capability ceiling, record a numeric conversion factor old→new points.
 This keeps VT globally unbounded and is what a well-chosen explore milestone does.
+
+## DRAIN standing methodology (DIR-071, formerly step 0 prose)
+
+This section captures the standing methodology that was formerly inline in step 0's DRAIN
+instructions (moved here by DIR-071 to keep the operational loop thin). It is methodology, not
+per-cycle operational instructions — the operational step 0 above invokes `/drain-directives`.
+
+**Task-canonical discipline (DIR-028 / Plan A):** Directives are TASK-CANONICAL — a directive
+IS a `label:directive` quay task (`tasks/DIR-NNN.md`), the single source of truth. There is no
+`directives/*.md` file, no projection, and no anti-drift check (all three were retired).
+`/quay-directive` creates these tasks directly; there is no file-vs-task reconciliation to run.
+
+**Disposition lifecycle:** Each pending directive is dispositioned at the boundary:
+- milestone-candidate (add `label:milestone-candidate`, set `extra.dirStatus: applied`)
+- standing-rule amendment (`inherited-core.md` or `dashboard.md` control limits)
+- out-of-cycle action (VT chart transition, HALT)
+
+The disposition is recorded on the SAME task — set `extra.dirStatus` (`applied`/`deferred`/`rejected`)
+and append a `## DRAIN disposition` section to the task body. `/drain-directives` (DIR-071)
+mechanizes the milestone-candidate path; human-steered or special dispositions remain manual.
+
+**Where async human steering enters:** at the boundary (step 0), never mid-milestone (§4.7).
+
+**Master-direct (DIR-027):** The loop runs DIRECTLY on `master`. There is no driver branch.
+Human commits land on `master`; the loop's own commit stream (charter authoring, iteration
+worktree merges, ABSORB) also lands on `master`.
+
+**Human-steering hygiene (DIR-027 item 5):** When the loop is running, a human edit should
+either pause the loop (`touch experiments/quay-perpetual-stream/.halt`, drained at the next
+boundary) OR be made in a private worktree off `master` and folded in at a clean window.
+
+**No-silent-drop reconciliation-note requirement (standing, DIR-013/DIR-018 item 3):** Any
+real per-file conflict during a merge MUST be resolved by reading BOTH sides' actual content —
+never a blanket `git checkout --ours`/`--theirs` wholesale. Record a short reconciliation note
+(which file, what each side had, what was kept/merged and why) in the relevant log entry.
