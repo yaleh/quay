@@ -2,6 +2,6 @@
   "//": "S2 Delivery-completeness evidence for sub-checks (2) full-manifest-published and (3) foreign-install-e2e-green. Version-consistency (1) is computed LIVE from the 5 package.json/marketplace.json version fields, not stored here. Read by chart2-s2-delivery-completeness.ts.",
   "fullManifestPublished": true,
   "fullManifestEvidence": "v0.3.13 release (2026-07-24, run 30069186560): delivery-manifest.json aligned to release.yml actual output. quay.tgz + quay SEA\u00d73 (quay-native bundled inside). Plugin marketplace-distributed. Version-consistent (8 sources, 0.3.13). delivery-manifest-check PASS on v0.3.13. No more, no less.",
-  "foreignInstallE2eGreen": false,
-  "foreignInstallEvidence": "no foreign-workspace install e2e exists yet"
+  "foreignInstallE2eGreen": true,
+  "foreignInstallEvidence": "DELIVERY-D (2026-07-24): quay-native installed in meta-cc workspace (/home/yale/work/meta-cc). Task MCTEST created (ready) and transitioned (done). GateEvent written to meta-cc/.quay/gate-events.jsonl (verdict: pass). Provider-ABI proven end-to-end: task CRUD + status transition in a clean foreign workspace. Also verified in archguard (/home/yale/work/archguard): TASK-29 ready\u2192done, GATETEST created."
 }

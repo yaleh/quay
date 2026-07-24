@@ -120,11 +120,11 @@ guard, per DIR-038-C discipline: no judgment-scored inflatable cov):**
 | # | surface | weight | cov | points | objective cov source (script) |
 |---|---|---|---|---|---|
 | S1 | Distribution reliability | 30 | 0.80 | 24.00 | `scripts/chart2-s1-distribution-reliability.ts` (release artifacts passing floor-smoke / total; from `chart2-s1-artifacts.json`, cited to CI run 29998600334: npm-pack✓, sea-linux-x64✓ (M121), sea-macos-arm64✓/sea-windows-x64✓ (M122 — cross-platform runtime-smoke job + a real Windows `.quay/config.yml`-missing bug found+fixed same-pass), plugin untested → 4/5) |
-| S2 | Delivery completeness | 30 | 0.667 | 20.00 | `scripts/chart2-s2-delivery-completeness.ts` (version-consistent ∧ manifest-published ∧ foreign-install-green; v0.3.13 release (run 30069186560, 2026-07-24): version-consistent=TRUE — 8 sources 0.3.13; manifest-published=TRUE — delivery-manifest.json aligned to release.yml actual output, delivery-manifest-check PASS, quay.tgz + quay SEA×3 produced, quay-native bundled inside quay SEA, plugin marketplace-distributed; foreign-install-green=false → 2/3) |
-| S3 | External-validation reach | 25 | 0.10 | 2.50 | `scripts/chart2-s3-external-validation.ts` (registry workspaces with a real ABI task-status GateEvent / target; `drivable-workspaces.yml`-bounded → 1/10, archguard reached) |
+| S2 | Delivery completeness | 30 | 1.00 | 30.00 | `scripts/chart2-s2-delivery-completeness.ts` (version-consistent ∧ manifest-published ∧ foreign-install-green; v0.3.13 release + DELIVERY-D (2026-07-24): all 3 conjuncts true — 8 version sources 0.3.13, manifest aligned to release.yml output + delivery-manifest-check PASS, foreign-install proven in meta-cc workspace (quay-native installed, MCTEST created + transitioned ready→done, GateEvent written) → 3/3) |
+| S3 | External-validation reach | 25 | 0.20 | 5.00 | `scripts/chart2-s3-external-validation.ts` (registry workspaces with a real ABI task-status GateEvent / target; `drivable-workspaces.yml`-bounded → 2/10, archguard + meta-cc reached) |
 | **S4** | **Methodology executability** | **15 SOFT/UNWIRED** | — | **0 (held out)** | recorded but EXCLUDED from the wired total + slope/halt inputs until it has a hard enumerable denominator — same treatment DIR-038-C gave the outward term; wiring a subjective count would reopen the self-referential gaming hole |
-| **chart-2 wired current (S1+S2+S3, after v0.3.13/DELIVERY-C)** | | **/85 wired** | | **46.5** | |
-| **global VT (110.65 chart-1 frozen + 46.5 chart-2)** | | | | **157.15** | |
+| **chart-2 wired current (S1+S2+S3, after DELIVERY-C+D)** | | **/85 wired** | | **59.0** | |
+| **global VT (110.65 chart-1 frozen + 59.0 chart-2)** | | | | **169.65** | |
 
 **Opening reading computed live (2026-07-23), not asserted** — all three calculators run + their
 verdicts pasted; each is a load-bearing script with a ≥80%-coverage sibling test (S1 20/20 @97.4%,
