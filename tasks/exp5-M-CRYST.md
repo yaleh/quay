@@ -2,9 +2,8 @@
 id: exp5-M-CRYST
 title: Crystallization program — molten prose → executable single-source
   (geometric-info-theory)
-status: todo
+status: done
 labels:
-  - milestone-candidate
   - crystallization
   - epic
 parent: null

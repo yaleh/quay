@@ -2,9 +2,8 @@
 id: exp5-M-PRODUCTIZED-DELIVERY
 title: "Complete productized delivery: all 4 packages + Claude Code plugin as
   one version-consistent unit (DIR-061)"
-status: todo
+status: done
 labels:
-  - milestone-candidate
   - epic
 parent: null
 children:
