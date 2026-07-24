@@ -3,7 +3,7 @@ id: DIR-062-B
 title: "DIR-062 child B [human-steered: halt + golden-replay]: write the
   3-clause definition into inherited-core.md + wire OUTER-LOOP SELECT to call
   the classifier"
-status: todo
+status: ready
 labels:
   - milestone-candidate
   - crystallization
