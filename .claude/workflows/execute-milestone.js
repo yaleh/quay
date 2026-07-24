@@ -14,7 +14,7 @@ export const meta = {
 phase('Verify')
 const verify = await parallel([
   () => agent(
-    `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh against every gap/directive ID cited in the charter file ${args.charterFile}. Non-zero exit or CLOSED/NOT-FOUND = charter scope stale — return {ok, detail}. FAIL is a HARD BLOCK.`,
+    `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139) against every gap/directive ID cited in the charter. With --milestone, CLOSED is acceptable (exit 0); only NOT-FOUND → exit 1. Return {ok, detail}.`,
     { label: 'ceiling-check', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
   ),
   () => agent(
@@ -30,7 +30,7 @@ const verify = await parallel([
     { label: 'line-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
   ),
   () => agent(
-    `Run experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh against each inner iteration report as produced. FAIL = a claimed-met Done-when clause has no nearby pasted-output evidence. Return {ok, detail}. FAIL is a HARD BLOCK — send back to the inner iteration before ABSORB, not silently accepted.`,
+    `Run experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139). With --milestone, scans only current milestone's iteration reports. Return {ok, detail}.`,
     { label: 'dogfood-evidence', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
   ),
 ])

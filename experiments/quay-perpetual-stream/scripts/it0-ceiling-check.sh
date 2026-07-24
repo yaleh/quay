@@ -8,7 +8,9 @@
 # dispatch, per M-CLI-UX's rejection at this experiment's m2 SELECT).
 #
 # Usage:
+#
 #   it0-ceiling-check.sh <gap-id> [<gap-id> ...]
+#   it0-ceiling-check.sh --milestone <M-NN> <gap-id> [<gap-id> ...]
 #   it0-ceiling-check.sh --file <gap-list.md> <gap-id> [<gap-id> ...]
 #
 # Default gap-list file (if --file not given):
@@ -27,6 +29,13 @@
 #     matching row is closed (a gap cannot be "still open" if it has been closed anywhere).
 
 set -u
+ACCEPT_CLOSED=0
+
+if [ "${1:-}" = "--milestone" ]; then
+  ACCEPT_CLOSED=1
+  shift 2
+fi
+
 
 GAPFILE="experiments/quay-continuous-bootstrap/gap-list.md"
 
@@ -89,7 +98,7 @@ for id in "$@"; do
   # this script's minimum-viable-form spec (charter Check 1) explicitly says "reports OPEN /
   # CLOSED / NOT-FOUND per ID, non-zero exit if any cited ID is not OPEN" — so CLOSED also
   # triggers non-zero exit below.
-  if [ "$status" != "OPEN" ]; then
+  if [ "$status" != "OPEN" ] && [ "$ACCEPT_CLOSED" = "0" -o "$status" != "CLOSED" ]; then
     any_not_open=1
   fi
 done

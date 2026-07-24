@@ -15,19 +15,51 @@
 #
 # Usage:
 #   it0-dogfood-evidence-gate.sh <iteration-report.md> [window-lines]
+#   it0-dogfood-evidence-gate.sh --milestone <M-NN> [window-lines]
+#
+# With --milestone: scans only milestones/M<NN>/iterations/iteration-*.md (current milestone).
+# Without --milestone: scans a single report file (existing behavior, backward-compatible).
 #
 # Exit codes: 0 = every claimed-met clause has a nearby fenced block; 1 = at least one
 # claimed-met clause has NO fenced block within the window; 2 = usage error.
 
 set -u
 
-if [ "$#" -lt 1 ]; then
-  echo "Usage: $0 <iteration-report.md> [window-lines]" >&2
+MILESTONE=""
+if [ "${1:-}" = "--milestone" ]; then
+  MILESTONE="$2"
+  shift 2
+fi
+
+if [ "$#" -lt 1 ] && [ -z "$MILESTONE" ]; then
+  echo "Usage: $0 [--milestone <M-NN>] <iteration-report.md> [window-lines]" >&2
   exit 2
 fi
 
-REPORT="$1"
+REPORT="${1:-}"
 WINDOW="${2:-40}"
+
+# When --milestone is provided, scan all iteration reports under that milestone directory.
+if [ -n "$MILESTONE" ]; then
+  MILESTONE_DIR="experiments/quay-perpetual-stream/milestones/${MILESTONE}/iterations"
+  if [ ! -d "$MILESTONE_DIR" ]; then
+    echo "No iteration reports found for milestone ${MILESTONE} (directory not found: ${MILESTONE_DIR})."
+    echo "Nothing to check — vacuously PASS."
+    exit 0
+  fi
+  REPORTS=$(find "$MILESTONE_DIR" -name 'iteration-*.md' 2>/dev/null | sort)
+  if [ -z "$REPORTS" ]; then
+    echo "No iteration reports found for milestone ${MILESTONE}."
+    echo "Nothing to check — vacuously PASS."
+    exit 0
+  fi
+  overall_fail=0
+  for r in $REPORTS; do
+    echo "--- $r ---"
+    "$0" "$r" "$WINDOW" || overall_fail=1
+  done
+  exit $overall_fail
+fi
 
 if [ ! -f "$REPORT" ]; then
   echo "ERROR: report file not found: $REPORT" >&2

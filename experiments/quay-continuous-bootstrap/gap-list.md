@@ -206,6 +206,8 @@
 
 ### system_health
 
+| ~~DIR-077~~ | ~~exp5 directive: /loop self-paced mode + loop.md~~ | ~~minor~~ | ~~exp5 M138~~ | ~~2026-07-24~~ | ~~2026-07-24~~ |
+| ~~DIR-076~~ | ~~exp5 directive: scope it0 checks to current milestone~~ | ~~minor~~ | ~~exp5 M139~~ | ~~2026-07-24~~ | ~~2026-07-24~~ |
 | ID | Description | Closed in | Evidence |
 |----|-------------|-----------|---------|
 | SH-001 | `quay task list --prefix` (no value) crashes with `TypeError: prefix.toUpperCase is not a function` — regression from QX-002 | iteration 1 | QX-006 (done); guard added in `packages/quay/bin/quay.js`; test 15 in cli.test.mjs asserts exit 1 + usage error, no TypeError; all 30 test suites pass |
