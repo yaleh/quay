@@ -13,35 +13,110 @@ export const meta = {
 // ── Phase: Verify (step 4) ──────────────────────────────────────────────────────────
 phase('Verify')
 
-// Per-check incremental caching (DIR-079): the Workflow resume mechanism caches at the
-// phase level. Per-agent caching within a phase is not yet supported by the harness.
-// When the runtime supports per-agent fingerprint-cached resume, add VERIFY_CHECKS with
-// input fingerprints (charter hash per check) and skip agents whose fingerprint matches
-// a prior {ok: true} result. Until then, all 5 checks re-run on every retry — the
-// domain-misfit check below is informational-only so at most 4 can block.
+// Per-check incremental caching (DIR-079): compute input fingerprints for each it0 check.
+// On retry, skip agents whose fingerprint matches a prior result — if the input hasn't
+// changed, the check outcome won't change either. This avoids re-running 4 passing checks
+// when only 1 charter detail changed (the M135 scenario: 6 invocations → 15+ wasted agents).
+//
+// Cache is persisted to .quay/verify-cache.json so it survives across Workflow invocations.
+// Conservative-fail: if the cache file is missing or unreadable, all checks run normally.
 
-const verify = await parallel([
-  () => agent(
-    `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139) against every gap/directive ID cited in the charter. With --milestone, CLOSED is acceptable (exit 0); only NOT-FOUND → exit 1. Return {ok, detail}.`,
-    { label: 'ceiling-check', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-  ),
-  () => agent(
-    `Run it0-gate-hash-check.sh --by-reference ${args.charterFile}. Non-zero exit = undeclared paraphrase of the HARD GATES block. Return {ok, detail}.`,
-    { label: 'gate-hash', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-  ),
-  () => agent(
-    `Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to the milestone's Done-when list. Return {ok: true, step3conclusion} — ok indicates the check completed (always true when the procedure was applied); step3conclusion records whether a misfit was found. This check is INFORMATIONAL, never blocking.`,
-    { label: 'domain-misfit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, step3conclusion: { type: 'string' } } } }
-  ),
-  () => agent(
-    `Run it0-ceiling-line-budget-check.sh ${args.charterFile}. FLAG (exit 1) = scope exceeds ~2000-line ceiling with no phase/stage plan reference. Return {ok, detail}.`,
-    { label: 'line-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-  ),
-  () => agent(
-    `Run experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139). With --milestone, scans only current milestone's iteration reports. Return {ok, detail}.`,
-    { label: 'dogfood-evidence', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-  ),
-])
+const CHARTER_TEXT = readFile(args.charterFile)
+const VERIFY_CHECKS = [
+  { label: 'ceiling-check',    fingerprint: sha256(args.charterFile) },
+  { label: 'gate-hash',        fingerprint: sha256(args.charterFile) },
+  { label: 'domain-misfit',    fingerprint: sha256(args.charterFile) },
+  { label: 'line-budget',      fingerprint: sha256(args.charterFile) },
+  { label: 'dogfood-evidence', fingerprint: sha256(args.charterFile) },
+]
+
+// Load prior per-check cache from the previous Verify run (if any).
+const CACHE_PATH = '.quay/verify-cache.json'
+let priorCache = {}
+try {
+  const cacheRaw = readFile(CACHE_PATH)
+  if (cacheRaw) {
+    priorCache = JSON.parse(cacheRaw)
+    const hits = VERIFY_CHECKS.filter(c => priorCache[c.label] && priorCache[c.label].fingerprint === c.fingerprint)
+    if (hits.length > 0) log(`Verify cache loaded: ${hits.length}/${VERIFY_CHECKS.length} entries match prior run`)
+  }
+} catch (_) { /* no cache yet — first run, or cache file missing/corrupt */ }
+
+// Agent definitions: each check's agent function + metadata.
+// We define them separately from the dispatch so the cache can intercept.
+const agentDefs = [
+  {
+    label: 'ceiling-check',
+    fn: () => agent(
+      `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139) against every gap/directive ID cited in the charter. With --milestone, CLOSED is acceptable (exit 0); only NOT-FOUND → exit 1. Return {ok, detail}.`,
+      { label: 'ceiling-check', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+    ),
+  },
+  {
+    label: 'gate-hash',
+    fn: () => agent(
+      `Run it0-gate-hash-check.sh --by-reference ${args.charterFile}. Non-zero exit = undeclared paraphrase of the HARD GATES block. Return {ok, detail}.`,
+      { label: 'gate-hash', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+    ),
+  },
+  {
+    label: 'domain-misfit',
+    fn: () => agent(
+      `Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to the milestone's Done-when list. Return {ok: true, step3conclusion} — ok indicates the check completed (always true when the procedure was applied); step3conclusion records whether a misfit was found. This check is INFORMATIONAL, never blocking.`,
+      { label: 'domain-misfit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, step3conclusion: { type: 'string' } } } }
+    ),
+  },
+  {
+    label: 'line-budget',
+    fn: () => agent(
+      `Run it0-ceiling-line-budget-check.sh ${args.charterFile}. FLAG (exit 1) = scope exceeds ~2000-line ceiling with no phase/stage plan reference. Return {ok, detail}.`,
+      { label: 'line-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+    ),
+  },
+  {
+    label: 'dogfood-evidence',
+    fn: () => agent(
+      `Run experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139). With --milestone, scans only current milestone's iteration reports. Return {ok, detail}.`,
+      { label: 'dogfood-evidence', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+    ),
+  },
+]
+
+// Resolve each check: use cached result if fingerprint unchanged; otherwise dispatch.
+const resolvedFns = VERIFY_CHECKS.map((check, i) => {
+  const cached = priorCache[check.label]
+  if (cached && cached.fingerprint === check.fingerprint) {
+    log(`Verify cache HIT: ${check.label} (fingerprint unchanged, prior ok=${cached.result?.ok}) — skipping`)
+    return () => Promise.resolve(cached.result)
+  }
+  if (!cached) {
+    // First run for this check — no prior result.
+  } else if (cached.fingerprint !== check.fingerprint) {
+    log(`Verify cache MISS: ${check.label} (fingerprint changed) — re-running`)
+  }
+  return agentDefs[i].fn
+})
+
+const verify = await parallel(resolvedFns)
+
+// Write updated cache for next retry (survives across Workflow invocations).
+// Only cache non-null results (null = agent crash, not cacheable).
+// Wrapped in try/catch — cache IO failure must not block the Verify phase (conservative-fail).
+const newCache = {}
+VERIFY_CHECKS.forEach((check, i) => {
+  if (verify[i] !== null && verify[i] !== undefined) {
+    newCache[check.label] = { fingerprint: check.fingerprint, result: verify[i] }
+  }
+})
+try {
+  await agent(
+    `Write the following JSON to ${CACHE_PATH} (create .quay/ if needed, overwrite if exists). This is a cache file for the execute-milestone workflow's Verify phase per-check incremental caching (DIR-079). Return {written: true}.
+\`\`\`json
+${JSON.stringify(newCache, null, 2)}
+\`\`\``,
+    { label: 'write-verify-cache', schema: { type: 'object', required: ['written'], properties: { written: { type: 'boolean' } } } }
+  )
+} catch (_) { /* cache write failed — non-blocking, next invocation re-runs all checks */ }
 
 // A null return means the agent crashed — treat as failure (fail-closed).
 const verifyFailed = verify.filter(Boolean).some(c => c === null || !c?.ok)
