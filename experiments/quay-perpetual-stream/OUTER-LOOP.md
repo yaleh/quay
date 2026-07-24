@@ -81,8 +81,10 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    `task_list --label milestone-candidate --status todo` (native provider MCP tool, or
    `node packages/quay/bin/quay.js task list --label milestone-candidate --status todo --json`
    equivalently) to get the live open-candidate set; apply the explore/exploit policy (§4.5): **≥1
-   explore milestone per 5**. Exploit = high-value, high-ρ, method handles it; explore = new
-   surface/domain that grows the reusable core. Prefer aged high-value items (DIR-004 Distribution is
+   explore milestone per 5**. Run `node scripts/explore-exploit-cadence.ts --json` (CRYST-D3 R6,
+   2026-07-24) to mechanically determine whether an explore is DUE (≥4 consecutive non-explore
+   milestones since the last explore — the script IS the single-source definition). Exploit =
+   high-value, high-ρ, method handles it; explore = new surface/domain that grows the reusable core. Prefer aged high-value items (DIR-004 Distribution is
    URGENT).
    **EXCLUDE `human-steered` candidates from autonomous SELECT.** A candidate is `human-steered` per
    the 3-clause definition in `inherited-core.md` ("Human-steered task definition (DIR-062)"): (1)
@@ -263,8 +265,10 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    Per iteration use `baime:iteration-executor` fed the charter (Tier-A) only (development-class:
    fed the charter AND the checked plan from 5a).
    Terminate on the first of (§3.2):
-   Done-when complete | ΔV<0.02 both-layers K=2 consecutive | ceiling→redesign-OR-stop | past
-   budget≈10 & nothing climbing | external HALT. Record under `milestones/M<NN>/`.
+   Done-when complete | ΔV<0.02 both-layers K=2 consecutive (mechanically checked by
+   `scripts/termination-delta-v-check.ts` (CRYST-D3 R7, 2026-07-24) — the single-source
+   definition; exit 1 = TERMINATION-DUE) | ceiling→redesign-OR-stop | past budget≈10 &
+   nothing climbing | external HALT. Record under `milestones/M<NN>/`.
    **Waiting on a long inner iteration (background) — poll, don't conclude:**
    - The **completion notification is the primary wake** — dispatch as a harness-tracked background
      task so the loop is auto-re-invoked when the iteration finishes, at ANY duration. The build may
