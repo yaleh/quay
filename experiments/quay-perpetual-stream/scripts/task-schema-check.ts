@@ -50,6 +50,10 @@ for (const file of files) {
     }
     fail++;
   }
+  // Emit INFO warnings (non-blocking): ## Touches absent on execution-type tasks.
+  for (const w of (report.warnings || [])) {
+    console.log(`INFO: ${file} — ${w.code}: ${w.message}`);
+  }
 }
 
 console.log("");
