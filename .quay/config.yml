@@ -71,3 +71,19 @@ gates:
     # INV / exp5-M-CRYST-INV / ADR-011: enforcement-with-design gate
     - name: enforcement-with-design
       command: "node experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.ts ."
+
+loop:
+  board: native
+  gates: [it0-set]
+  stop: until(.halt)
+  policy: value-typed-ledger
+  routines:
+    - name: self-validation
+      trigger: every(5)
+      probe: self-validation
+    - name: architecture-analysis
+      trigger: every(10)
+      probe: architecture-analysis
+    - name: history-mining
+      trigger: every(10)
+      probe: history-mining
