@@ -23,8 +23,8 @@ artifacts are present.
 
 ### Investigation finding (pre-build)
 
-The original defect (`exp5-DEFECT-DELIVERY-MANIFEST-INCOMPLETE-RELEASE`) claimed release.yml
-publishes 4/7 manifest entries. Live inspection (2026-07-24) reveals:
+The original defect task claimed release.yml publishes 4/7 manifest entries. Live inspection
+(2026-07-24) reveals:
 
 - **release.yml DOES build quay-native SEA** (`bash packages/quay-native/scripts/build-sea.sh`
   confirmed present on the `sea-release` job, line-matched via `grep`).
@@ -84,6 +84,10 @@ less") has no runtime verification leg.
 
 ## it0 systematic-explore checks
 
+**In-scope gap subset:** none — this is a newly-discovered defect (2026-07-24), not tracked in
+the inherited exp4 gap-list (`experiments/quay-continuous-bootstrap/gap-list.md`). The task
+is a native task-store entry, not a gap-list row. No gap-list IDs or directive IDs cited.
+
 ### a. Ceiling arithmetic
 
 Scope is ~200 lines of TypeScript (the `--ci` mode addition to `delivery-manifest-check.ts` +
@@ -91,7 +95,7 @@ test extension). Well within ≤2000-line ceiling. No phase/stage plan needed.
 
 ### b. Gate-hash (invariant 3)
 
-GATE-HASH-REF: 82796aaf3801be6908e0605ce89a2c1c2787d84dd8c898ca9ef8b8a8a0d19e7e (experiments/quay-continuous-bootstrap/ITERATION-PROMPTS.md lines 100-131, the HARD GATES block)
+GATE-HASH-REF: 5023da8232f12579e9a8db0ce26c5a5d1aadd5a7d095380016636330c63d2c93 (experiments/quay-continuous-bootstrap/ITERATION-PROMPTS.md lines 100-131, the HARD GATES block)
 
 ### c. Dogfooding evidence-gate
 

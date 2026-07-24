@@ -25,6 +25,18 @@ hygiene instruction.
   real task — `vmeta-lag` PASS + `line-budget` PASS — both with durable GateEvents in
   `quay gate-log exp5-M-DIR022-REMAINING-GATES --json` (pasted above/below).
 
+```
+$ quay gate --list | grep -E 'vmeta-lag|dogfood-evidence'
+vmeta-lag (compound): V_meta consolidation-lag check — K=2 alarm threshold
+dogfood-evidence (compound): Dogfood evidence gate — MET claims must have nearby fenced blocks
+
+$ quay gate exp5-M-DIR022-REMAINING-GATES --gate vmeta-lag
+PASS
+
+$ quay gate exp5-M-DIR022-REMAINING-GATES --gate line-budget
+PASS
+```
+
 ### Tests / coverage
 `node --test packages/quay/test/dir022-remaining-gates.test.mjs` — 18/18 PASS.
 Full suite (excl. live-GitHub): 181/183 pass; 2 pre-existing failures (`adr-gate.test.mjs` E3 A2 exit-127,

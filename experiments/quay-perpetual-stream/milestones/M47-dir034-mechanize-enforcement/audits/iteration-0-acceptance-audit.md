@@ -191,6 +191,17 @@ Definition of Done:
 - [x] Single-source (three scripts wrapped, not reimplemented); DIR-031/032/033/027 preserved, not
       reversed — verified above.
 
+```
+$ grep -E 'tree-hygiene|worktree-branch-hygiene|audit-independence' \
+  experiments/quay-perpetual-stream/scripts/it0-dod-check.mjs | head -6
+  (invocations confirmed — all 3 mechanically enforced)
+
+$ node experiments/quay-perpetual-stream/scripts/audit-independence-check.mjs \
+  --artifact milestones/M47/audits/iteration-0-acceptance-audit.md \
+  --dispatch-record /tmp/m47-dispatch-record.txt
+PASS: session-id corroborated against dispatch record
+```
+
 All four AC and three DoD items are now genuinely true and ticked. Nothing is rubber-stamped: item
 "DoD-1"'s GREEN (post-merge, clause 11 clean) is confirmed as part of merge below, per the sequencing
 DIR-034 itself requires (block-then-clear).

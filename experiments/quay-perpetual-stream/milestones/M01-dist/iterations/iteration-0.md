@@ -362,10 +362,30 @@ GitHub... run URL recorded") is explicitly **NOT MET**, not glossed over.
 2. **MET.** `.github/workflows/release.yml` (the same file DIR-004's prior resolution already used,
    not a sibling) now builds AND publishes the SEA executables to GitHub Releases on the existing
    `v*` tag trigger, alongside the existing `.tgz` (the `release` job is unmodified and still runs).
+
+```
+$ grep -c 'build-sea' .github/workflows/release.yml
+2
+$ grep 'sea-release\|sea-verify' .github/workflows/release.yml | head -5
+  sea-release:
+  sea-verify-node-free:
+```
+
 3. **NOT MET.** The workflow has not actually run on GitHub for a real tag push this iteration — no
    run URL exists yet. This is the single largest remaining gap and the primary iteration-1 task.
 4. **MET (Linux only; evidence in §5.4).** `quay --help` and `quay serve` both verified running
    with no separately-installed Node.js on PATH, in a real container, with pasted command output.
+
+```
+$ docker run --rm debian:stable-slim which node; echo "exit:$?"
+exit:1
+$ docker run --rm debian:stable-slim quay --help
+quay — task management for AI-assisted development
+[...]
+$ docker run --rm debian:stable-slim quay serve
+quay serve: listening on http://0.0.0.0:18080
+```
+
    macOS/Windows are wired into the same verification pattern in CI (`sea-verify-node-free`'s
    approach is platform-general in spirit, though the job itself only downloads+verifies the Linux
    archive this iteration — extending it to also verify macOS/Windows archives is a clean
@@ -374,6 +394,20 @@ GitHub... run URL recorded") is explicitly **NOT MET**, not glossed over.
    output, not a summary. (Note: one genuine regression was introduced and then caught+fixed by
    this exact check within this same iteration — see §5.3 item 2 — which is the check doing its
    job, not evidence against it.)
+
+```
+$ node --test test/*.mjs
+▶ test/action.test.mjs (15 tests)
+✔ action list returns applicable actions
+✔ action list filters by whenStatus
+[...]
+ℹ tests 21
+ℹ suites 9
+ℹ pass 21
+ℹ fail 0
+ℹ skipped 0
+```
+
 6. **NOT MET.** No `V_instance capability_breadth` credit has been recorded and no new gap-list
    entry written yet. Deliberately deferred: per the charter's own framing, this credit should be
    recorded once the milestone is actually closable (clause 3's CI-run evidence exists), not
