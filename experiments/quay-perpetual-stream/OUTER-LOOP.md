@@ -4,6 +4,39 @@ You are the **OUTER orchestrator** of a perpetual two-layer BAIME experiment. Ex
 It is intentionally thin: detail lives in the protocol; this is the operational loop. It **generates
 per-milestone charters** — it is not itself a big per-iteration prompt.
 
+## Spec
+
+```
+λ(workspaceRoot: Path) → Milestone*
+
+outer_cycle :: Workspace → Done | Halt
+  drain      :: Directive[] ⇀ Disposition[]     -- 0; ⊨ task-canonical (DIR-028)
+  select     :: Candidate[] ⇀ Task              -- 1; ⊨ exclude human-steered (human-steered-classify.ts); ⊨ D-quota (DIR-066, deliverable-governor.ts); ⊨ cadence (explore-exploit-cadence.ts)
+  hypothesize :: Task → Δv̂                       -- 2; ⊨ numeric, pre-dispatch
+  charter    :: Task → Charter                   -- 3; ⊨ gate-hash transclusion; ⊨ line-budget (it0-ceiling-line-budget-check.sh)
+  execute    :: Params → {done, needs-human}     -- 4; ⊨ /execute-milestone workflow (DIR-067, .claude/workflows/execute-milestone.js)
+  checkpoint :: Counter → Checkpoint?            -- 5; ⊨ every 5; ⊨ non-blocking
+
+invariants (∀ cycle):
+  · ¬point-baime-at-stream (invariant 1) · ¬perturb-inflight (invariant 2)
+  · gate-text-transclusion-or-hash (invariant 3) · drain-before-select (step 0→1)
+  · master-direct (DIR-027; no driver branch) · halt-sentinel (.halt → clean exit)
+  · self-halt: rolling-slope<threshold (DIR-038-A, rolling-slope-check.ts)
+    → chart-saturation-check (DIR-063, chart-saturation-check.ts)
+    → HALT-RECOMMENDED | TRANSITION-RECOMMENDED (subagent DRAFTING gated behind TRANSITION-DUE)
+  · governance:product → INFORMATIONAL ONLY (DIR-066; NO LONGER hard-halt)
+  · explore/exploit: ≥1 per 5; mechanical cadence check by explore-exploit-cadence.ts (CRYST-D3 R6)
+  · termination: ΔV<0.02 K=2 consecutive → TERMINATION-DUE (termination-delta-v-check.ts, CRYST-D3 R7)
+```
+
+## contracts:
+
+1. **Workflow exists**: `test -f .claude/workflows/execute-milestone.js` → exit 0. The step-4 pipeline is the single-source definition (ADR-004).
+2. **No stale governance:product HALT**: `grep -c 'governance:product.*HALT-RECOMMENDED' OUTER-LOOP.md | grep -v 'NO LONGER\|supersedes\|informational'` → 0. DIR-066 retired the hard halt; only the informational note remains.
+3. **All code-pointers resolve**: `grep -oE 'scripts/[a-zA-Z0-9_-]+\.[a-z]+' OUTER-LOOP.md | sort -u | while read s; do test -f "experiments/quay-perpetual-stream/$s" || echo "MISSING: $s"; done` → empty. Every referenced script exists on disk.
+4. **Explore/exploit cadence script exists**: `test -f experiments/quay-perpetual-stream/scripts/explore-exploit-cadence.ts` → exit 0. The mechanical cadence check (CRYST-D3 R6) is single-source.
+5. **Termination ΔV script exists**: `test -f experiments/quay-perpetual-stream/scripts/termination-delta-v-check.ts` → exit 0. The mechanical termination check (CRYST-D3 R7) is single-source.
+
 ## Pinned references (read once at session start)
 - **Protocol (architecture, all §§):** `docs/proposals/quay-perpetual-stream-experiment-v5.md`
 - **Offline calibration/evidence:** `experiments/offline-replay/RESULTS.md`
@@ -11,7 +44,7 @@ per-milestone charters** — it is not itself a big per-iteration prompt.
 - **Backlog (milestone candidates):** `experiments/quay-perpetual-stream/backlog.md` — **generated
   view** as of M24-task-backlog-projection-impl (DIR-015 item 2 / m13 design doc §1/§13): the task
   store (`label: milestone-candidate` tasks) is canonical; `backlog.md`/`dashboard.md` are regenerated
-  from it via `scripts/regenerate-backlog-views.ts`, not hand-edited as the source of truth going
+  from it via `scripts/it0-backlog-regen.ts`, not hand-edited as the source of truth going
   forward. SELECT (step 1 below) reads the task store directly.
 - **Inherited core (Tier-B methodology):** `experiments/quay-perpetual-stream/inherited-core.md`
 

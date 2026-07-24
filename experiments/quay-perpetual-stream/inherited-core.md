@@ -5,6 +5,45 @@ path + git SHA to this file; it is NOT inlined per iteration). Consolidation (§
 when a milestone adaptation is reused unchanged by a later different-domain milestone (φ confirmed),
 merge it here and retire its delta citation.
 
+## Spec (CRYST-D3 §9, 2026-07-24)
+
+```
+HumanSteered :: Task → Bool                               -- 3-clause classifier (DIR-062)
+  = driverFileEdit ∨ missionRedirection ∨ unauthorizedWorkspace
+  ⊨ executable: human-steered-classify.ts (DIR-062-A); label:human-steered = override
+
+Deliverable :: Task → yes|no                               -- (丙) classification (DIR-066)
+  ⊨ YES iff output consumed OUTSIDE loop; ambiguous → NO
+  ⊨ composeShortlist :: Candidate[] × streak → Shortlist (deliverable-governor.ts)
+
+Select :: Board → Task                                     -- OUTER-LOOP step 1
+  ⊨ exclude HumanSteered; ⊨ D-quota (DIR-066); ⊨ ≥1 explore/5 (explore-exploit-cadence.ts)
+  ⊨ value-typed ledger ranking (capability-growth > governance-integrity > instrument-correction > ...)
+  ⊨ SPLIT-OR-COMMIT (DIR-026): completable-in-one → select; else split first
+  ⊨ schema stamp: extra.schema:"v1" + Proposal + Plan + AC + DoD (task-schema-check.sh)
+
+DoD :: Task × Charter × Evidence → {PASS, FAIL}            -- 13 clauses (0-12)
+  ⊨ Clause 0: AC+DoD present, checklist-form, boxes unchecked at SELECT → ticked ONLY by Audit
+  ⊨ Clause 1: adversarial acceptance audit (REFUTE-first, UNCONDITIONAL per milestone)
+  ⊨ Clause 2: V_meta consolidation-lag (vmeta-lag-check.ts, K=2 ALARM)
+  ⊨ Clause 3: line-budget ≤2000 (it0-ceiling-line-budget-check.sh)
+  ⊨ Clause 4: design-only → mandatory -IMPL row (it0-impl-row-check.sh)
+  ⊨ Clause 5: no-self-exemption
+  ⊨ Clause 6: escrow-Δv; Clause 7: product-work test-floor
+  ⊨ Clause 8: task canonical-lifecycle-record
+  ⊨ Clause 9: SPLIT-OR-COMMIT / needs-human legitimacy (external only)
+  ⊨ Clause 10: tree-hygiene; Clause 11: worktree-branch-hygiene; Clause 12: audit-independence
+  ⊨ MECHANICAL: it0-dod-check.ts + quay gate (QENG engine) — the SINGLE executable source
+
+Class-Route :: Task → development | methodology            -- DIR-014 two-class policy
+  ⊨ development-class → proposal→plan pipeline (quay-task-to-plan) before build
+  ⊨ methodology-class → dual-iteration (iteration-0 builds, iteration-1 re-derives)
+
+Terminate :: Milestone[] → {CONTINUE, TERMINATION-DUE}     -- §3.2
+  ⊨ Done-when-complete ∨ ΔV<0.02 K=2 (termination-delta-v-check.ts)
+    ∨ ceiling→redesign ∨ budget≈10∧¬climbing ∨ external-HALT
+```
+
 ## Kit version + single-source convention (DIR-035-D, ADR-013 Decision item 3 / Consequences)
 
 **This file IS the one canonical "continuous-development-with-Claude-Code" methodology kit** — the
