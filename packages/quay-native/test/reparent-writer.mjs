@@ -6,6 +6,16 @@
 // simulation.
 import { createStore } from "../src/store.ts";
 
+// Early-exit guard: when discovered directly by node --test (process.argv has
+// only node + script path; no subprocess args), exit 0 silently so the test
+// runner treats this as 0 tests / 0 failures instead of a crash (M159).
+if (process.argv.length < 5) {
+  process.stderr.write(
+    "reparent-writer: spawned by relation-sync.test.mjs; not meant to be run directly\n"
+  );
+  process.exit(0);
+}
+
 const [, , tasksDir, childId, newParentId] = process.argv;
 const store = createStore(tasksDir);
 
