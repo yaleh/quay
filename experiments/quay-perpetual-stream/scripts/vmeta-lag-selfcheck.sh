@@ -1,61 +1,25 @@
 #!/usr/bin/env bash
 # vmeta-lag-selfcheck.sh — regression acceptance test for the V_meta consolidation-lag check
-# (exp5-M-CRYST-D3 increment R5, Axis-2′). EXTERNAL acceptance predicate: it does NOT trust the
-# check's self-report — it runs `vmeta-lag-check.sh` against a fixed set of fixtures and asserts the
-# EXPECTED exit code for each. "The lag check is correct" means: this script exits 0.
-#
-# CRITICAL (DIR-019 discipline): each fixture isolates ONE arithmetic outcome and is RED-then-GREEN
-# against the module. If a fixture behaves wrong, the fix belongs in `scripts/vmeta-lag-check.mjs`,
-# NOT in the fixture.
-#
-# The rule is defined SOLELY by vmeta-lag-check.mjs (checkLedger); this selfcheck only asserts the
-# exit code per fixture — see the module's header for the arithmetic (do not restate it here).
-#
-# Usage:  vmeta-lag-selfcheck.sh
-# Exit:   0 = all fixtures behaved as asserted; 1 = at least one mismatch; 2 = environment error.
+# (exp5-M-CRYST-D3 increment R5, Axis-2'). EXTERNAL acceptance predicate: it does NOT trust the
+# check's self-report — runs `vmeta-lag-check.sh` against fixed fixtures and asserts expected
+# exit codes. The rule is defined SOLELY by vmeta-lag-check.ts; this only asserts exit codes.
+# DIR-019 discipline: fix belongs in the module, NOT in the fixtures.
+# Exit: 0 = all fixtures behaved as asserted; 1 = >=1 mismatch; 2 = environment error.
 
-set -u
-cd "$(dirname "$0")/.." || { echo "ERROR: cannot cd to experiment root" >&2; exit 2; }
+source "$(dirname "$0")/gate-script-lib.sh"
 
 CHECK="./scripts/vmeta-lag-check.sh"
-FIX="fixtures/vmeta"
-[ -x "$CHECK" ] || { echo "ERROR: $CHECK not found/executable" >&2; exit 2; }
 
 # id | fixture file | expected exit code (0 = PASS/N-A; 1 = ALARM/FAIL)
 CASES=(
-  "over-threshold-unconsolidated-no-carryforward|$FIX/over-threshold-unconsolidated-no-carryforward.md|1"
-  "consolidated|$FIX/consolidated.md|0"
-  "within-threshold|$FIX/within-threshold.md|0"
-  "dated-carry-forward|$FIX/dated-carry-forward.md|0"
-  # HARDENING (R5 review must-fix #1/#2 — fail-open cases that previously silently PASSed):
-  "ambiguous-overdue-prose|$FIX/ambiguous-overdue-prose.md|1"
-  "keywordless-status|$FIX/keywordless-status.md|1"
-  "not-yet-fully-consolidated|$FIX/not-yet-fully-consolidated.md|1"
-  # M70/D4 (ADR-004 structured [tag] field): bare prose "consolidated (m7)" without [tag] → FAIL.
-  # The old leading-token parser would have read this as consolidated (→ PASS); the [tag] rule
-  # rejects it uniformly — the canonical RED fixture for the D4 hard fix.
-  "bare-prose-no-tag|$FIX/bare-prose-no-tag.md|1"
+  "over-threshold-unconsolidated-no-carryforward|fixtures/vmeta/over-threshold-unconsolidated-no-carryforward.md|1"
+  "consolidated|fixtures/vmeta/consolidated.md|0"
+  "within-threshold|fixtures/vmeta/within-threshold.md|0"
+  "dated-carry-forward|fixtures/vmeta/dated-carry-forward.md|0"
+  "ambiguous-overdue-prose|fixtures/vmeta/ambiguous-overdue-prose.md|1"
+  "keywordless-status|fixtures/vmeta/keywordless-status.md|1"
+  "not-yet-fully-consolidated|fixtures/vmeta/not-yet-fully-consolidated.md|1"
+  "bare-prose-no-tag|fixtures/vmeta/bare-prose-no-tag.md|1"
 )
 
-fail=0
-for c in "${CASES[@]}"; do
-  IFS='|' read -r id file want <<< "$c"
-  "$CHECK" "$file" >/dev/null 2>&1
-  got=$?
-  if [ "$got" = "$want" ]; then
-    echo "PASS: $id — exit $got (expected $want) [$file]"
-  else
-    echo "FAIL: $id — exit $got but EXPECTED $want [$file]"
-    fail=1
-  fi
-done
-
-echo
-if [ "$fail" = 0 ]; then
-  echo "PASS: all ${#CASES[@]} vmeta-lag fixtures behaved as asserted."
-  exit 0
-else
-  echo "FAIL: at least one vmeta-lag fixture did not behave as asserted (see above)."
-  echo "      The fix belongs in scripts/vmeta-lag-check.mjs, NOT in the fixtures (DIR-019 discipline)."
-  exit 1
-fi
+gate_run_selfcheck "$CHECK"
