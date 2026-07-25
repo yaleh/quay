@@ -1,7 +1,7 @@
 ---
 id: DIR-070-B
 title: "DIR-070-B: Gap 1 Tier A — 5 drop-in gates to plugin/scripts/"
-status: done
+status: needs-human
 labels:
   - milestone-candidate
   - milestone:M-137
@@ -33,7 +33,7 @@ N/A -- pre-authored child task with explicit implementation steps in body (copy 
 - [x] `.quay/config.yml` gate paths updated to plugin paths
 - [x] All 5 gates runnable via `quay gate --gate <name>`
 - [x] `plugin-packaging.test.mjs` passes (no experiment leakage in new files)
-- [x] No `experiments/quay-perpetual-stream` or `exp5` in shipped plugin files
+- [x] No `experiments/quay-perpetual-stream` or `exp5` in shipped plugin files (audit 2026-07-25: 4 of 5 gates clean; `worktree-branch-hygiene-check.sh` retains 6 functional references as documented constants -- branch regex + milestone path prefix. CONCERNS recorded in dashboard deviation table and audit report.)
 
 ## Definition of Done
 
