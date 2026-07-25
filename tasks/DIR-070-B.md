@@ -1,19 +1,19 @@
 ---
 id: DIR-070-B
 title: "DIR-070-B: Gap 1 Tier A — 5 drop-in gates to plugin/scripts/"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - milestone:M-137
 parent: DIR-070
 children: []
 extra:
-  dirStatus: pending
-  schema: v1
-  deliverable: yes
   acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
     DIR-070-B experiments/quay-perpetual-stream/charters/M137-tier-a-gates.md
     /tmp/m137-absorb-entry.md
+  dirStatus: pending
+  schema: v1
+  deliverable: yes
 ---
 ## Proposal
 
@@ -25,25 +25,25 @@ N/A -- pre-authored child task with explicit implementation steps in body (copy 
 
 ## Acceptance Criteria
 
-- [ ] `anti-gaming-guard.ts` + `.sh` wrapper in `plugin/scripts/`
-- [ ] `loadbearing-test-gate.ts` + `.sh` wrapper in `plugin/scripts/`
-- [ ] `tree-hygiene-check.sh` in `plugin/scripts/`
-- [ ] `worktree-branch-hygiene-check.sh` in `plugin/scripts/`
-- [ ] `drivable-workspace-check.ts` + `.sh` wrapper in `plugin/scripts/`
-- [ ] `.quay/config.yml` gate paths updated to plugin paths
-- [ ] All 5 gates runnable via `quay gate --gate <name>`
-- [ ] `plugin-packaging.test.mjs` passes (no experiment leakage in new files)
-- [ ] No `experiments/quay-perpetual-stream` or `exp5` in shipped plugin files
+- [x] `anti-gaming-guard.ts` + `.sh` wrapper in `plugin/scripts/`
+- [x] `loadbearing-test-gate.ts` + `.sh` wrapper in `plugin/scripts/`
+- [x] `tree-hygiene-check.sh` in `plugin/scripts/`
+- [x] `worktree-branch-hygiene-check.sh` in `plugin/scripts/`
+- [x] `drivable-workspace-check.ts` + `.sh` wrapper in `plugin/scripts/`
+- [x] `.quay/config.yml` gate paths updated to plugin paths
+- [x] All 5 gates runnable via `quay gate --gate <name>`
+- [x] `plugin-packaging.test.mjs` passes (no experiment leakage in new files)
+- [x] No `experiments/quay-perpetual-stream` or `exp5` in shipped plugin files
 
 ## Definition of Done
 
 References `inherited-core.md` standard DoD clauses (ADR-001 TDD + fixture-pin, SPLIT-OR-COMMIT, adversarial audit where applicable). Specific to this task:
 
-- [ ] Reference to `docs/proposals/exp5-deliverable-improvements.md` Gap 1 Tier A
-- [ ] 5 gate scripts + 3 `.sh` wrappers in `plugin/scripts/`
-- [ ] `.quay/config.yml` updated
-- [ ] Plugin packaging test updated and passing
-- [ ] Depends on DIR-070-A (symlinks must be in place first)
+- [x] Reference to `docs/proposals/exp5-deliverable-improvements.md` Gap 1 Tier A
+- [x] 5 gate scripts + 3 `.sh` wrappers in `plugin/scripts/`
+- [x] `.quay/config.yml` updated
+- [x] Plugin packaging test updated and passing
+- [x] Depends on DIR-070-A (symlinks must be in place first) — DIR-070-A status `done`, merged to master (commit b310adb), 7 symlinks in `experiments/scripts/` confirmed 2026-07-25 audit
 
 ## Touches
 
