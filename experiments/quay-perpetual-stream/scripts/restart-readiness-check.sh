@@ -43,6 +43,7 @@ run_check() {
   if "$@" >/dev/null 2>&1; then ok "$name green"; else bad "$name FAILED (run it to see why)"; fi
 }
 SCR="experiments/quay-perpetual-stream/scripts"
+source "$SCR/safe-json-parse.sh"
 run_check "task-schema-selfcheck"  bash "$SCR/task-schema-selfcheck.sh"
 run_check "dod-fixture-selfcheck"  bash "$SCR/dod-fixture-selfcheck.sh"
 run_check "vmeta-lag-selfcheck"    bash "$SCR/vmeta-lag-selfcheck.sh"
@@ -52,7 +53,8 @@ run_check "loadbearing-test-gate"  bash "$SCR/loadbearing-test-gate.sh" \
 
 # INFORMATIONAL: pending directives the loop's first DRAIN will process (not a hard blocker).
 pend="$(node packages/quay/bin/quay.ts task list --label directive --json 2>/dev/null \
-  | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const p=JSON.parse(s).filter(x=>x.extra&&x.extra.dirStatus==='pending');console.log(p.length+' '+p.map(x=>x.id).join(','))}catch(e){console.log('?')}})" 2>/dev/null)"
+  | safe_json_parse_from_stdin 2>/dev/null \
+  | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{if(!s.trim()){console.log('?');return;}const p=JSON.parse(s).filter(x=>x.extra&&x.extra.dirStatus==='pending');console.log(p.length+' '+p.map(x=>x.id).join(','))})" 2>/dev/null)"
 echo "  [info] pending directives (loop DRAINs these): ${pend:-unknown}"
 
 echo ""
