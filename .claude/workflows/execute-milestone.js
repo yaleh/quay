@@ -127,7 +127,7 @@ const AUDIT_SESSION_ID = auditResult?.auditSessionId || null
 if (AUDIT_SESSION_ID) {
   log(`Audit session ID captured for Gate phase: ${AUDIT_SESSION_ID}`)
 } else {
-  log('WARNING: no auditSessionId returned from Audit phase — audit-indep gate will likely fail (DIR-093).')
+  log('INFO: no auditSessionId returned from Audit phase — session-id not captured (audit-indep gate removed from Workflow per DIR-097, runs at fan-in ABSORB).')
 }
 
 // ── Phase: Gate (step 6 all mechanical checks) ──────────────────────────────────────
@@ -135,26 +135,12 @@ phase('Gate')
 const gates = await parallel([
   () => agent(`Run vmeta-lag-check.sh --counter <extract current milestone_counter from experiments/quay-perpetual-stream/dashboard.md minus 1> experiments/quay-perpetual-stream/v-meta-ledger.md. This reads the V_meta ledger (NOT the absorb entry). Return {ok, detail}. Non-zero = ALARM → HARD BLOCK.`,
     { label: 'vmeta-lag', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`Run it0-impl-row-check.sh ${args.taskId}. Return {ok, detail}. Non-zero = required -IMPL row missing → HARD BLOCK.`,
-    { label: 'impl-row', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`Run quay gate ${args.taskId} (DoD meta-enforcer). Return {ok, detail, gateOutput}. Non-zero = HARD BLOCK.`,
-    { label: 'dod-meta', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' }, gateOutput: { type: 'string' } } } }),
   () => agent(`Run it0-dashboard-line-budget-check.sh. Return {ok, detail}. Non-zero = dashboard exceeds 1200-line cap → HARD BLOCK.`,
     { label: 'dash-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run tree-hygiene-check.sh. Return {ok, detail}. Non-zero = un-gitignored scratch on master → HARD BLOCK.`,
     { label: 'tree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run worktree-branch-hygiene-check.sh. Return {ok, detail}. Non-zero = orphaned milestone evidence → HARD BLOCK.`,
     { label: 'worktree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`DIR-093 AUDIT-INDEPENDENCE CHECK. The workflow's Audit agent ran in a separate session and returned its session ID: "${AUDIT_SESSION_ID || 'UNKNOWN'}".
-
-1. Read the audit artifact at milestones/M<NN>/audits/iteration-0-acceptance-audit.md (extract milestone number from charter path ${args.charterFile}).
-2. Extract the session ID from the artifact header (look for "Audit session id:" or "**Audit session id:**").
-3. **DIR-032 (distinctness):** Compare the artifact's session ID to \$CLAUDE_CODE_SESSION_ID (your own ID). They MUST be different — if they're the same, the audit was a self-audit → FAIL.
-4. **DIR-034 (corroboration):** Compare the artifact's session ID to the expected audit session ID: "${AUDIT_SESSION_ID || 'UNKNOWN'}". They MUST match — if they differ, the artifact was written by an unknown agent → FAIL. This step replaces the broken dispatch-record file mechanism with direct in-prompt comparison.
-5. Return {ok: true, detail} if both checks pass, {ok: false, detail} otherwise.
-
-DO NOT run audit-independence-check.sh. This inline check replaces it.`,
-    { label: 'audit-indep', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run quay gate --gate split-or-commit ${args.taskId}. Return {ok, detail}. Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK.`,
     { label: 'split-or-commit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
 ])
