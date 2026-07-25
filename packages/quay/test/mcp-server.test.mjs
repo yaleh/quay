@@ -1569,6 +1569,106 @@ async function main() {
       );
     }
 
+    // DIR-084: env-var-unchanged after lifecycle_complete and lifecycle_promote.
+    // Pre-set QUAY_ACCEPTANCE_CWD to a distinct temp dir, call lifecycle handlers,
+    // then verify the env var was restored by running a gate on a task whose
+    // acceptance command checks that pwd matches the pre-set temp dir.
+    // If QUAY_ACCEPTANCE_CWD was NOT restored (old bug), the gate would see
+    // cfg.workspaceRoot instead and the pwd check would fail.
+    {
+      const presetCwdDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-env-preset-cwd-"));
+      const envPresetTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-env-preset-tasks-"));
+      const envPresetWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-mcp-env-preset-workspace-"));
+      fs.mkdirSync(path.join(envPresetWorkspaceRoot, ".quay"), { recursive: true });
+      fs.writeFileSync(
+        path.join(envPresetWorkspaceRoot, ".quay", "config.yml"),
+        [
+          "providers:",
+          "  native:",
+          "    enabled: true",
+          `    path: "${nativeProviderDir}"`,
+          `    mcp_entry: ["node", "${nativeBin}", "mcp"]`,
+          "    env:",
+          `      QUAY_NATIVE_TASKS_DIR: "${envPresetTasksDir}"`,
+          "",
+        ].join("\n")
+      );
+
+      // ENV-LC: ready, acceptance=true -- for lifecycle_complete.
+      execFileSync("node", [nativeBin, "task", "create", "ENV-LC",
+        "--title", "Env LC test (DIR-084)",
+        "--status", "ready", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envPresetTasksDir },
+      });
+      execFileSync("node", [nativeBin, "task", "edit", "ENV-LC",
+        "--extra", JSON.stringify({ acceptance: "true" })], {
+        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envPresetTasksDir },
+      });
+
+      // ENV-LP: todo, AC/DoD checked -- for lifecycle_promote (todo->ready via dod gate).
+      execFileSync("node", [nativeBin, "task", "create", "ENV-LP",
+        "--title", "Env LP test (DIR-084)",
+        "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envPresetTasksDir },
+      });
+
+      // ENV-CWD: ready, acceptance checks that pwd == presetCwdDir.
+      // This verifies that QUAY_ACCEPTANCE_CWD was properly restored after lifecycle calls.
+      execFileSync("node", [nativeBin, "task", "create", "ENV-CWD",
+        "--title", "Env CWD check (DIR-084)",
+        "--status", "ready", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envPresetTasksDir },
+      });
+      execFileSync("node", [nativeBin, "task", "edit", "ENV-CWD",
+        "--extra", JSON.stringify({ acceptance: `test "$(pwd)" = "${presetCwdDir}"` })], {
+        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envPresetTasksDir },
+      });
+
+      // Start quay mcp with QUAY_ACCEPTANCE_CWD pre-set to presetCwdDir.
+      const { client: coreEnv, transport: coreEnvTransport } = await connectStdio(
+        "node", [coreBin, "mcp"], envPresetWorkspaceRoot,
+        { QUAY_ACCEPTANCE_CWD: presetCwdDir }
+      );
+
+      // (a) lifecycle_complete: call on ENV-LC (ready, acceptance=true) -> should complete.
+      {
+        const r = await coreEnv.callTool({ name: "lifecycle_complete", arguments: { id: "ENV-LC" } });
+        assert(r.isError !== true, "DIR-084 lifecycle_complete on ENV-LC returns no error");
+        assert(r.structuredContent?.ok === true, `DIR-084 lifecycle_complete on ENV-LC (acceptance=true) returns ok:true (got: ${JSON.stringify(r.structuredContent)})`);
+      }
+
+      // (b) After lifecycle_complete, verify QUAY_ACCEPTANCE_CWD was restored.
+      // gate_run on ENV-CWD (no explicit cwd): if env was restored, pwd==presetCwdDir -> ok.
+      {
+        const r = await coreEnv.callTool({ name: "gate_run", arguments: { id: "ENV-CWD" } });
+        assert(r.isError !== true, "DIR-084 gate_run on ENV-CWD after lifecycle_complete returns no error");
+        assert(r.structuredContent?.ok === true, `DIR-084 after lifecycle_complete, QUAY_ACCEPTANCE_CWD was restored: gate_run sees presetCwdDir (got: ${JSON.stringify(r.structuredContent)})`);
+      }
+
+      // Reset ENV-CWD: the gate_run above saved/restored its own env var (gate_run also does
+      // save/restore), so ENV-CWD can be reused for the lifecycle_promote test below.
+      // But the task's status is still "ready" after the gate_run (gate_run doesn't change status).
+
+      // (c) lifecycle_promote: call on ENV-LP (todo, AC/DoD checked) -> should promote to ready.
+      {
+        const r = await coreEnv.callTool({ name: "lifecycle_promote", arguments: { id: "ENV-LP" } });
+        assert(r.isError !== true, "DIR-084 lifecycle_promote on ENV-LP returns no error");
+        assert(r.structuredContent?.ok === true && r.structuredContent?.to === "ready", `DIR-084 lifecycle_promote on ENV-LP (todo, AC/DoD checked) advances to ready (got: ${JSON.stringify(r.structuredContent)})`);
+      }
+
+      // (d) After lifecycle_promote, verify QUAY_ACCEPTANCE_CWD was restored again.
+      {
+        const r = await coreEnv.callTool({ name: "gate_run", arguments: { id: "ENV-CWD" } });
+        assert(r.isError !== true, "DIR-084 gate_run on ENV-CWD after lifecycle_promote returns no error");
+        assert(r.structuredContent?.ok === true, `DIR-084 after lifecycle_promote, QUAY_ACCEPTANCE_CWD was restored: gate_run sees presetCwdDir (got: ${JSON.stringify(r.structuredContent)})`);
+      }
+
+      await coreEnvTransport.close();
+      fs.rmSync(presetCwdDir, { recursive: true, force: true });
+      fs.rmSync(envPresetTasksDir, { recursive: true, force: true });
+      fs.rmSync(envPresetWorkspaceRoot, { recursive: true, force: true });
+    }
+
     await coreGateTransport.close();
     fs.rmSync(gateTasksDir, { recursive: true, force: true });
     fs.rmSync(gateWorkspaceRoot, { recursive: true, force: true });

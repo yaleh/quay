@@ -389,6 +389,7 @@ export function registerLifecycleHandlers(
       },
     },
     async ({ provider, id, file }) => {
+      const prevCwd = process.env.QUAY_ACCEPTANCE_CWD;
       try {
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
@@ -400,6 +401,9 @@ export function registerLifecycleHandlers(
         };
       } catch (err) {
         return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
+      } finally {
+        if (prevCwd === undefined) delete process.env.QUAY_ACCEPTANCE_CWD;
+        else process.env.QUAY_ACCEPTANCE_CWD = prevCwd;
       }
     }
   );
@@ -451,6 +455,7 @@ export function registerLifecycleHandlers(
       },
     },
     async ({ provider, id, file }) => {
+      const prevCwd = process.env.QUAY_ACCEPTANCE_CWD;
       try {
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
@@ -462,6 +467,9 @@ export function registerLifecycleHandlers(
         };
       } catch (err) {
         return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
+      } finally {
+        if (prevCwd === undefined) delete process.env.QUAY_ACCEPTANCE_CWD;
+        else process.env.QUAY_ACCEPTANCE_CWD = prevCwd;
       }
     }
   );
