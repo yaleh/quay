@@ -78,14 +78,13 @@ session start finds QC-T1 (creating it if missing) without side-effects.
 ## Outer cycle — one pass = one milestone
 0. **DRAIN** — invoke `/drain-directives` workflow (`.claude/workflows/drain-directives.js`,
    DIR-071). Absent pending directives = no-op (returns `{drained: 0}`). Must complete before
-   step 1. Standing methodology moved to ## DRAIN standing methodology below.
-1. **SELECT** the next milestone candidate. **Precondition:** `/drain-directives` must have
-   completed for this boundary (DIR-071). If DRAIN was skipped, re-run it before SELECT —
-   this closes the exact failure mode observed at M135 (two directives missed because step 0
-   was skipped). **Candidates are read via `task_list`, not `backlog.md`
+   step 1. **Task-canonical discipline (DIR-028 / Plan A):** directives are `label:directive`
+   quay tasks (`tasks/DIR-NNN.md`) only — no `directives/*.md` file, no projection, no
+   anti-drift check (all retired). Standing methodology → provenance.md.
+1. **SELECT** the next milestone candidate. **Candidates are read via `task_list`, not `backlog.md`
    prose** (M24-task-backlog-projection-impl, DIR-015 item 2 / m13 design doc §1/§13 — the task store
    is canonical for backlog/milestone/selection tracking going forward; `backlog.md` is a generated
-   view, see Pinned references and regeneration script `scripts/it0-backlog-regen.ts`). Run
+   view, see step 0's note below and the regeneration script under `scripts/`). Run
    `task_list --label milestone-candidate --status todo` (native provider MCP tool, or
    `node packages/quay/bin/quay.js task list --label milestone-candidate --status todo --json`
    equivalently) to get the live open-candidate set; apply the explore/exploit policy (§4.5): **≥1
@@ -127,34 +126,15 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    best N and **auto-continue** — set no `.halt`, emit no `HALT-RECOMMENDED`. Continuing N when no D exists
    is correct. **Round 2 (below) is unchanged** — the VT Δv̂ + value-typed ledger + governance/infra
    hard-floor ranker picks the winner from this ≤4 shortlist.
-   **Batch assembly (DIR-075, M142 — concurrent execution):** after the ranked shortlist is composed,
-   assemble a concurrent batch via `concurrent-batch-scheduler.ts` (the single-source batch scheduler,
-   ADR-004). This step replaces the old single-winner SELECT with a batch-wide dispatch:
-   a. **Charter readiness.** For each candidate in the shortlist, ensure its charter has been authored
-      (step 3 charter-authoring) AND carries `type:` (one of `execution`/`learning`/`methodology`/etc.
-      per `inherited-core.md`'s value-type ledger) AND `## Touches` (repo-relative path globs, ≥2
-      concrete leading segments before any wildcard). If a candidate's charter lacks these, author them
-      now — without them, `concurrent-batch-scheduler.ts` defers the candidate to serial (fail-closed).
-   b. **Run the scheduler.** `node experiments/quay-perpetual-stream/scripts/concurrent-batch-scheduler.ts
-      --root . <charter1.md> <charter2.md> ...` over the ranked shortlist's charter files. The script
-      outputs `BATCH (N-wide, concurrent): <ids>` + `deferred: <id> — <reason>` lines. Parse them.
-   c. **Dispatch semantics.** BATCH set → step 4 concurrent dispatch (multiple `/execute-milestone`
-      workflows dispatched as background tasks). Deferred candidates → remain in the candidate pool for
-      the next cycle (record the deferral reason in a `## Not selected` note on the task). A 1-wide
-      batch = fall back to serial (the existing single-milestone path, preserved unchanged).
-   d. **Learning-type milestones are always serial** (scheduler defers them — `isLearning()` guard
-      matches any type containing `/learning/i`). When a learning-type milestone is SELECTed as the
-      sole candidate or the batch is 1-wide learning, the loop runs exactly one serial milestone —
-      the SELECT←ABSORB feedback path, preserved unchanged.
-   **Write the selection back onto the task store as part of this step:** each candidate in the BATCH
+   **Write the selection back onto the task store as part of this step:** the chosen candidate task
    gets `milestone:M-NN` appended to its `labels` (via `task_write`) at dispatch time, and every OTHER
-   candidate task actually considered this pass (i.e. shortlisted but deferred by the batch scheduler,
-   not the full unconsidered backlog) gets a short **not-selected note** appended to its body — e.g. a
-   `## Not selected (M-NN)` section stating the pass number and one-line reason (deferred by batch
-   scheduler: learning-type / touches-overlap / ill-declared touches). This makes the SELECT reasoning
+   candidate task actually considered this pass (i.e. compared against the winner, not the full
+   unconsidered backlog) gets a short **not-selected note** appended to its body — e.g. a `## Not
+   selected (M-NN)` section stating the pass number and one-line reason (aged-out, smaller Δv̂, wrong
+   value type for this pass's explore/exploit slot, etc.). This makes the SELECT reasoning
    inspectable per-task instead of only living in a dashboard/checkpoint narrative.
-   **For each candidate in the batch, stamp `extra.schema:"v1"` + author `## Proposal` + `## Plan` at THIS step:** when writing the
-   batch candidate via `task_write`, set `extra.schema:"v1"` (without it the task reports N/A-legacy —
+   **Stamp `extra.schema:"v1"` + author `## Proposal` + `## Plan` at THIS step:** when writing the
+   SELECTed task via `task_write`, set `extra.schema:"v1"` (without it the task reports N/A-legacy —
    the pre-dispatch self-check below catches a forgotten marker). Author a real `## Proposal` (the
    chosen approach, per the proposal-to-plan / quay-task-to-plan pipeline) and a `## Plan` — a
    milestone-candidate MUST carry one: a resolving `docs/plans/*.md` ref if staged, else
@@ -174,14 +154,12 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    on any missing/empty section OR any box left unchecked past the audit, but it CANNOT detect an
    improperly self-ticked box — so the who/when rule is discipline, not code. Checklist form is
    forward-only; pre-existing prose-form tasks are grandfathered.
-   **Before dispatch, run `scripts/task-schema-check.sh tasks/<id>.md` against EACH batch candidate; a
-   FAIL on any candidate blocks dispatch for that candidate** (fix the task body, not the script —
-   same discipline as the gate-hash / line-budget checks). This proves the schema was emitted by
-   construction: `## Proposal` present, `## Plan` well-formed, AC/DoD as checklists, no
-   empty/status-mirror `## Resolution`, no projection scaffolding, the `extra.schema:"v1"` marker
-   present (an `N/A legacy` line means the marker was forgotten above — add it and re-run), and
-   `## Touches` well-formed if the task has `type: execution` (INFO if absent, HARD FAIL if
-   overbroad or empty).
+   **Before dispatch, run `scripts/task-schema-check.sh tasks/<id>.md` against the SELECTed task; a
+   FAIL blocks dispatch** (fix the task body, not the script — same discipline as the gate-hash /
+   line-budget checks). This proves the schema was emitted by construction: `## Proposal` present,
+   `## Plan` well-formed, AC/DoD as checklists, no empty/status-mirror `## Resolution`, no projection
+   scaffolding, and the `extra.schema:"v1"` marker present (an `N/A legacy` line means the marker was
+   forgotten above — add it and re-run).
    **Size the candidate BEFORE dispatch** using `inherited-core.md`'s "Milestone size definition +
    verify-iteration size gauge" section: does the proposed scope let iteration-0 land ALL Done-when
    in one pass, with iteration-1 having real material to independently re-derive (not empty
@@ -240,58 +218,21 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    - the **inner termination five conditions** (§3.2);
    - the **it0 systematic-explore checks** (next step);
    - a pinned pointer (path + git SHA) to `inherited-core.md` (Tier-B, not inlined).
-4. **RUN EXECUTION PIPELINE** — for the batch assembled in step 1. The batch may be 1-wide (serial,
-   existing behavior) or N-wide (concurrent, DIR-075/M142). The `/execute-milestone` workflow
-   (`.claude/workflows/execute-milestone.js`, DIR-067, 2026-07-24) runs the full execution pipeline:
-   Verify (5 it0 systematic-explore checks in parallel) → Build (class-route + inner iteration in
-   isolated worktree) → Audit (adversarial fresh-context acceptance audit, write-back AC/DoD ticks
-   per DIR-020) → Gate (7 mechanical absorb gates in parallel) → Land (merge into master).
+4. **RUN EXECUTION PIPELINE** — invoke the saved workflow `/execute-milestone`
+   (`.claude/workflows/execute-milestone.js`, DIR-067, 2026-07-24). Pass `{taskId, charterFile,
+   absorbEntryFile}` from steps 1-3. Before invoking, create the absorb-entry file:
+   `touch /tmp/m<NN>-absorb-entry.md` and populate it with the ABSORB narrative header (milestone
+   id, charter path, value hypothesis Δv̂ from step 2). The dispatch-record file
+   `/tmp/m<NN>-dispatch-record.txt` is created by the workflow's Audit phase per the M90 procedure. The workflow runs the full execution pipeline
+   deterministically: Verify (5 it0 systematic-explore checks in parallel) → Build (class-route +
+   inner iteration in isolated worktree) → Audit (adversarial fresh-context acceptance audit,
+   write-back AC/DoD ticks per DIR-020) → Gate (7 mechanical absorb gates in parallel: vmeta-lag,
+   impl-row, DoD meta-enforcer, dashboard-budget, tree-hygiene, worktree-branch-hygiene,
+   audit-independence) → Land (merge into master + capture-prune + dashboard update +
+   milestone_counter++). Watch with `/workflows`; completed phases are cached (resumable within the
+   same session). On completion, the workflow returns `{outcome: 'done'|'needs-human', taskId}`.
    The workflow script IS the single source for the execution pipeline logic (ADR-004) — OUTER-LOOP
    references it, never re-derives the steps.
-
-   **4a. Serial path (1-wide batch, or `mode` absent — backward-compatible default).** When the batch
-   from step 1 has exactly one candidate, the existing serial path is preserved unchanged:
-   a. Create the absorb-entry file: `touch /tmp/m<NN>-absorb-entry.md` and populate it with the
-      ABSORB narrative header (milestone id, charter path, value hypothesis Δv̂ from step 2).
-   b. Invoke `/execute-milestone` with `{taskId, charterFile, absorbEntryFile}`.
-   c. On completion, the workflow returns `{outcome: 'done'|'needs-human', taskId}` and the Land
-      phase handles dashboard update + milestone_counter++ inline (existing behavior).
-   d. Watch with `/workflows`; completed phases are cached (resumable within the same session).
-
-   **4b. Concurrent path (N-wide batch, N ≥ 2 — DIR-075/M142).** When the batch from step 1 has
-   two or more candidates, concurrent dispatch + serial fan-in:
-   a. **Dispatch.** For each candidate in the batch:
-      - Create absorb-entry file `/tmp/m<NN>-absorb-entry.md` with ABSORB narrative header.
-      - Dispatch `/execute-milestone` with `{taskId, charterFile, absorbEntryFile, mode: "concurrent"}`
-        as a harness-tracked background task (`run_in_background: true`).
-   b. **Wait for completion.** All N workflows run concurrently. The driver polls all N for
-      completion — harness notifications are the primary wake; ScheduleWakeup fallback is
-      hang-detection only, not a polling cadence (DIR-078).
-   c. **Collect survivors.** When all N complete, collect those returning `{outcome: "done"}`
-      (gate PASS + audit NO-REFUTATION). Gate-fail / REFUTED candidates → `needs-human`
-      (existing path, unchanged — those worktrees are NOT merged).
-   d. **Anti-drift guardrail (NON-WAIVABLE).** Run `node experiments/quay-perpetual-stream/scripts/
-      anti-drift-touches-check.ts <ran-batch-manifest.json>` on the REAL `git diff --numstat`
-      output from each survivor's build — actual files touched, not declared intent. A HARD FAIL
-      aborts the ENTIRE batch (do not merge any survivor — a mis-declared overlap means the
-      pre-flight orthogonality check has a bug or a charter was dishonest).
-   e. **Fan-in plan.** Run `node experiments/quay-perpetual-stream/scripts/serial-fanin-absorb.ts
-      --counter <current milestone_counter> <survivors-manifest.json>` for the deterministic
-      merge plan (stable-sort by milestone id → reproducible). The plan assigns each survivor a
-      sequential milestone number starting at `milestone_counter + 1`.
-   f. **Merge.** Merge each survivor's worktree into `master` one at a time, in the plan order.
-      Any conflict → per-file resolution, both sides read, reconciliation note recorded (DIR-013).
-   g. **Dashboard + counter.** Append N dashboard entries via `renderDashboardAppend(plan)` from
-      the fan-in plan. `milestone_counter += survivors.length`.
-   h. **Regenerate views.** Run `experiments/quay-perpetual-stream/scripts/it0-backlog-regen.ts`
-      to regenerate `backlog.md`/`dashboard.md` views.
-   i. **Close-out hygiene.** Run `tree-hygiene-check.sh` + `worktree-branch-hygiene-check.sh`
-      one final time to confirm the close-out is clean.
-   j. **Execution provenance.** For each survivor, `task_write` to append `## Execution record`
-      (milestone id, iteration count, realized Δv, merge commit SHA, one-line outcome summary)
-      and set `status: done` on the task.
-   The dispatch-record file `/tmp/m<NN>-dispatch-record.txt` is created by the workflow's
-   Audit phase per the M90 procedure.
 
 5. **CHECKPOINT (non-blocking)** if `milestone_counter % 5 == 0`: write `checkpoints/cp-<NN>.md` — a
    health snapshot across all tracks (including `dashboard.md`'s "Human-review cadence" track's
@@ -310,12 +251,6 @@ session start finds QC-T1 (creating it if missing) without side-effects.
    completed phases are cached. Absent `routines:` = no-op (scheduler returns none due →
    workflow exits immediately). The workflow script IS the single source for the routine-track
    logic (ADR-004) — OUTER-LOOP references it, never re-derives the steps.
-
-After completing one outer cycle (steps 0–5a):
-
-- If `.halt` exists: call ScheduleWakeup with `stop: true` and return. The loop ends cleanly.
-- Otherwise: the iteration is complete. `/loop` self-paced mode handles the next wakeup —
-  short interval when work was done, longer interval when the board was empty.
 
 ## The loop runs autonomously — it NEVER blocks waiting for a human
 Human input is asynchronous (below). At **each milestone boundary** the loop checks the two — and
@@ -369,45 +304,31 @@ only two — stop signals:
 - **Stop:** `touch experiments/quay-perpetual-stream/.halt` → clean exit at next boundary.
 - **Review:** read `checkpoints/` and `dashboard.md` any time — no interaction required.
 
-⊨ no-blanket-ours-theirs merge (DIR-013); ⊨ post-merge cross-reference sweep.
-→ provenance: experiments/quay-perpetual-stream/provenance.md#lesson-recorded-dir-013--m19
+**Lesson recorded (DIR-013 / M19-task-to-plan-docs-reconcile, 2026-07-18) —
+concurrent human/loop edits to the same file.** A human-directed `proposal-to-plan`
+design run and the autonomous M17 milestone independently edited the same doc
+(`docs/proposals/exp5-quay-task-proposal-plan-skill.md`) at the same time on
+`master`; the auto-resolved merge (`989e0cd`) took one side's body wholesale,
+leaving dangling internal cross-references and a self-contradictory section
+count that a "clean" (no textual conflict) merge did not catch. Two lessons,
+recorded here (not enforced — no mechanism is built by this note):
+1. **Prefer pausing the loop or working on a branch when a human is live-editing
+   a file the loop will also touch.** A human steering the stream mid-session on
+   a file the loop is concurrently authoring into should either `touch .halt`
+   first, or the loop-side work should happen on a branch, rather than relying on
+   git's auto-merge to reconcile independently-authored content in the same file.
+2. **A merge must not claim "dispatch-ready" / "singular and unambiguous" without
+   a post-merge cross-reference sweep.** If an appended section cites other
+   section numbers (`§N`), the merge step (or the milestone that authored the
+   appended section) must verify every such reference still resolves before
+   declaring the result dispatch-ready — a textually-clean auto-merge is not
+   evidence of a semantically-consistent one.
+
+Whether to build a mechanical enforcement for lesson 2 (a proposal-internal
+`§N`-reference-resolves check) is explicitly **left to a future milestone's
+scoping** — this note only records the lesson; no check is built here.
 
 ## Chart transitions (§6.2)
 When a chart saturates (all surfaces cov→1, VT→chart max) and value still exists, open a NEW chart:
 add a surface or deepen a capability ceiling, record a numeric conversion factor old→new points.
 This keeps VT globally unbounded and is what a well-chosen explore milestone does.
-
-## DRAIN standing methodology (DIR-071, formerly step 0 prose)
-
-This section captures the standing methodology that was formerly inline in step 0's DRAIN
-instructions (moved here by DIR-071 to keep the operational loop thin). It is methodology, not
-per-cycle operational instructions — the operational step 0 above invokes `/drain-directives`.
-
-**Task-canonical discipline (DIR-028 / Plan A):** Directives are TASK-CANONICAL — a directive
-IS a `label:directive` quay task (`tasks/DIR-NNN.md`), the single source of truth. There is no
-`directives/*.md` file, no projection, and no anti-drift check (all three were retired).
-`/quay-directive` creates these tasks directly; there is no file-vs-task reconciliation to run.
-
-**Disposition lifecycle:** Each pending directive is dispositioned at the boundary:
-- milestone-candidate (add `label:milestone-candidate`, set `extra.dirStatus: applied`)
-- standing-rule amendment (`inherited-core.md` or `dashboard.md` control limits)
-- out-of-cycle action (VT chart transition, HALT)
-
-The disposition is recorded on the SAME task — set `extra.dirStatus` (`applied`/`deferred`/`rejected`)
-and append a `## DRAIN disposition` section to the task body. `/drain-directives` (DIR-071)
-mechanizes the milestone-candidate path; human-steered or special dispositions remain manual.
-
-**Where async human steering enters:** at the boundary (step 0), never mid-milestone (§4.7).
-
-**Master-direct (DIR-027):** The loop runs DIRECTLY on `master`. There is no driver branch.
-Human commits land on `master`; the loop's own commit stream (charter authoring, iteration
-worktree merges, ABSORB) also lands on `master`.
-
-**Human-steering hygiene (DIR-027 item 5):** When the loop is running, a human edit should
-either pause the loop (`touch experiments/quay-perpetual-stream/.halt`, drained at the next
-boundary) OR be made in a private worktree off `master` and folded in at a clean window.
-
-**No-silent-drop reconciliation-note requirement (standing, DIR-013/DIR-018 item 3):** Any
-real per-file conflict during a merge MUST be resolved by reading BOTH sides' actual content —
-never a blanket `git checkout --ours`/`--theirs` wholesale. Record a short reconciliation note
-(which file, what each side had, what was kept/merged and why) in the relevant log entry.

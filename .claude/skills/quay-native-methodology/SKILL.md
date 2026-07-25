@@ -1,30 +1,23 @@
 ---
 name: quay-native-methodology
-description: Use when inheriting or extending quay's task-authoring/execution methodology (Layer-2 quay:author/quay:execute Skills, task check gate, directive lifecycle, G3 out-of-band audit discipline) into a new scope — e.g. quay Core development, a follow-on BAIME experiment, or a new Provider. Extracted HALTED-NOT-CONVERGED from experiments/quay-native-bootstrap/ (quay-native bootstrap) at iteration 88: V_instance=0.6016, V_meta=0.0973, sigma_strict=0.8493. Do not present this as a converged methodology; it is an inheritance snapshot.
+description: Use when inheriting or extending quay's task-authoring/execution methodology (Layer-2 quay:author/quay:execute Skills, task check gate, directive lifecycle, G3 out-of-band audit discipline) into a new scope — e.g. quay Core development, a follow-on BAIME experiment, or a new Provider. Extracted HALTED-NOT-CONVERGED from experiments/quay-native-bootstrap/ (quay-native bootstrap) at iteration 88. Do not present this as a converged methodology; it is an inheritance snapshot.
+status: halted
+V_instance: 0.6016
+V_meta: 0.0973
+σ: 0.8493
 ---
 
 # quay-native-methodology
 
 λ(scope, task) → GatedOutcome | inherit({skills, gate, directives, audit}) ∧ apply(scope, task)
 
-## Status (read first)
+## Status (see provenance.md)
 
-Source experiment `experiments/quay-native-bootstrap/` (protocol: `docs/proposals/quay-bootstrap-experiment.md`)
-was **halted by its human owner at iteration 88, NOT converged**. None of
-protocol §7's 5 convergence criteria are met. This extraction is a
-deliberate pre-stop deviation from normal post-convergence extraction
-(see `docs/proposals/quay-core-bootstrap-experiment-v2.md` §2.1), producing
-an honest "what the methodology actually contained as of iteration 88"
-snapshot — not a polished retrospective, not a claim of success.
-
-Final metrics (iteration 88, unchanged since — see `reference/patterns.md`
-§Final State):
-```
-V_instance = 0.85 × 0.97 × 0.76 × 0.96 = 0.6016
-V_meta     = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (flat since iteration 66,
-                                                    22+ consecutive iterations)
-σ_strict   = 62/73 = 0.8493
-```
+Extracted from `experiments/quay-native-bootstrap/` at iteration 88 — halted by
+human owner, NOT converged. V_instance=0.6016, V_meta=0.0973 (flat since
+iteration 66, 22+ consecutive iterations), σ_strict=62/73=0.8493. Full
+convergence-criteria accounting and iteration narrative in `provenance.md`
+§Skill extraction — methodology.
 
 ## What this Skill packages (inherited, stage 0 — per v2 proposal §2.2)
 
