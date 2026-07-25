@@ -76,3 +76,9 @@ Key cross-cutting facts (require reading several files to see):
 When a workflow Verify phase fails and the fix is to **external state** (gap-list.md, charter file, script on disk), do NOT resume with `resumeFromRunId`. The resume cache keys on (prompt, opts) only — it cannot see that external files changed. The cached failure returns instantly (~60ms, 0 tokens) and the Verify phase fails again with the same stale result.
 
 **Rule:** if the fix touches anything OTHER than the workflow script's own agent prompt strings, re-run the workflow from scratch (`Workflow({script: ...})` without `resumeFromRunId`). Resume is safe ONLY when the fix is a prompt-text edit within the workflow script itself.
+
+## Glob tool unavailable in subagent sessions (M148, 2026-07-25)
+
+The `Glob` tool is **not available in subagent sessions**. Calling `Glob` from a subagent produces "Error: No such tool available: Glob". This has been observed in meta-cc session history as a recurring error pattern.
+
+**Rule:** when you need file-pattern matching in a subagent, use `find` via Bash instead of `Glob`. Example: `find . -name '*.js' -not -path '*/node_modules/*'` instead of `Glob({pattern: '**/*.js'})`. All Bash tools (including `find`, `grep`, `ls`) work normally in subagent sessions.
