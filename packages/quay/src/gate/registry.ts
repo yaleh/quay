@@ -14,8 +14,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAcceptance } from "./acceptance-runner.ts";
 import { makeDocumentContractGate } from "./factories/document-contract.ts";
-import { resolveRunnerOptions } from "./factories/utils.ts";
-import { discoverWorkspaceRoot, loadWorkspaceGates } from "./factories/loader.ts";
+import { resolveRunnerOptions } from "./config/utils.ts";
+import { discoverWorkspaceRoot, loadWorkspaceGates } from "./config/loader.ts";
 import type { Task } from "../abi.ts";
 
 // esbuild bundles this module to CJS for the SEA build (Node SEA does not
@@ -60,8 +60,8 @@ export {
   loadWorkspaceGates,
   readGatesConfig,
   discoverWorkspaceRoot,
-} from "./factories/loader.ts";
-export type { GatesConfig } from "./factories/loader.ts";
+} from "./config/loader.ts";
+export type { GatesConfig } from "./config/types.ts";
 
 /**
  * Register a `doc-<name>` gate for a given document id + directory. Exported
