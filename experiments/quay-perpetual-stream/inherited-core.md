@@ -989,8 +989,13 @@ Source: DIR-016 (filed together with DIR-015, its first concrete instance), reso
 M21-impl-row-enforcement. See `directives/archive/DIR-016-*.md`'s `## Resolution` section for the
 full evidence trail.
 
-## Definition of Done (M25-dod-meta-enforcer / DIR-017 Step 1, extended by M32-dod-escrow-testfloor
-/ DIR-017 Step 2, extended by M40-dir014-task-canonical-lifecycle-record / DIR-014 item 6)
+## Definition of Done
+
+```
+DoD :: Task × Charter × Evidence → {PASS, FAIL} — 13 clauses
+  ⊨ executable: it0-dod-check.ts (SINGLE source, ADR-004)
+  ⊨ provenance: experiments/quay-perpetual-stream/provenance.md#dod-clause-discovery-log
+```
 
 DIR-017's Finding names a real risk: four ABSORB-time gates (adversarial-audit, V_meta
 consolidation-lag, line-budget, design-only-milestone impl-row) had each been added incrementally,
