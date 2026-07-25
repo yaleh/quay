@@ -33,9 +33,39 @@ Added `gate_list` MCP tool to expose `listGates()` from the gate registry over M
 - `cli.test.mjs`: All tests pass (no regression)
 - CLI `quay gate --list`: Works correctly, returns full gate list
 
+## DoD meta-enforcer verification (it0-dod-check.sh)
+
+Final re-build DoD check result (2026-07-25): **PASS (exit 0)** — all 12 disposition(s) confirmed, no undeclared self-exemption.
+
+```
+--- it0-dod-check: DIR-085 ---
+PASS: clause0-ac-dod-present: task AC has 4 checkable clause(s) (checklist-form, 4/4 checked)
+PASS: clause1-adversarial-audit: disposition statement present (verdict)
+PASS: clause2-vmeta-lag: disposition statement present
+PASS: clause3-line-budget: PASS — scope within the small-milestone norm
+PASS: clause4-impl-row: PASS — DIR-085 is not design-only
+PASS: clause5-no-self-exemption: no undeclared self-exemption language found
+PASS: clause6-escrow-delta-v: N/A — milestone is not design-only
+PASS: clause7-test-floor: PASS — product-touching surface has a matching test-floor WAIVER line
+PASS: clause8-task-canonical-lifecycle-record: task carries a real '## Proposal' and a well-formed '## Plan'
+PASS: clause10-tree-hygiene: PASS — clean — no un-gitignored scratch
+PASS: clause11-worktree-branch-hygiene: PASS — clean — no orphaned milestone evidence
+PASS: clause12-audit-independence: N/A — no '## Audit-independence check' section in the ABSORB-entry text
+N/A: clause9-split-or-commit: no `needs-human` outcome declared
+
+PASS: DoD check passed — all clauses satisfied
+```
+
 ## Done-when verification
 
 1. [x] `gate_list` MCP tool registered and callable via MCP
 2. [x] Returns gate name array including built-ins (dod, acceptance, doc-quay-directive-skill) and workspace gates
 3. [x] MCP server test verifies tool exists and returns expected gates
 4. [x] Existing MCP server test suite passes (no regressions)
+5. [x] DoD meta-enforcer (it0-dod-check.sh) passes all 12 applicable clauses (exit 0)
+
+## Audit independence note
+
+Prior ABSORB attempt was blocked on audit-independence-check gate (DIR-034 anti-forgery).
+The re-build audit is documented in `milestones/M143/audits/iteration-0-acceptance-audit.md`.
+All AC/DoD items confirmed by concrete artifact inspection and live test execution.
