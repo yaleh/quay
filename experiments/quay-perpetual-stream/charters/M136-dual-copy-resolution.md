@@ -10,14 +10,14 @@
 **Charter tokens:** ~0.7 K
 **type:** execution
 
-GATE-HASH-REF: 8a3f2b1c9d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a
+GATE-HASH-REF: 5023da8232f12579e9a8db0ce26c5a5d1aadd5a7d095380016636330c63d2c93
 
 ## Value hypothesis
 
 Δv̂ = 0 (no chart-2 surface cell directly moves — this is structural integrity infrastructure).
 Real value: dual-copy drift between `plugin/scripts/` and `experiments/scripts/` detected
-mechanically; symlinks eliminate the structural cause. Unblocks Gap 1 (DIR-070-B/C) by
-ensuring gates in plugin/ are the single source of truth.
+mechanically; symlinks eliminate the structural cause. Unblocks Gap 1 by ensuring gates in
+plugin/ are the single source of truth.
 
 ## Scope
 
