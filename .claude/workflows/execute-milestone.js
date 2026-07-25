@@ -120,21 +120,12 @@ Output to milestones/M<NN>/audits/iteration-0-acceptance-audit.md.
 )
 log(`Audit phase complete: verdict=${auditResult?.verdict}, sessionId=${auditResult?.auditSessionId}`)
 
-// ── Session-ID write-back (DIR-093): append to absorb entry dispatch record ─────────
-// Anti-forgery: the orchestrator appends the Audit agent's returned session ID —
-// the Audit agent discovered it from $CLAUDE_CODE_SESSION_ID (harness-set, unforgeable).
-// The orchestrator never self-generates an ID.
-if (auditResult?.auditSessionId) {
-  await agent(
-    `DIR-093 session-ID write-back. Read ${args.absorbEntryFile}. In its ## Dispatch record section, APPEND the audit agent's session ID as a PLAIN LINE (just the raw ID string, no "- " bullet, no markdown prefix, no formatting). Write the file back with ONLY this change — preserve all other content exactly.
-
-Audit session ID to append: ${auditResult.auditSessionId}
-
-This is an anti-forgery step: the orchestrator appends the ID the Audit agent returned (which the agent discovered from $CLAUDE_CODE_SESSION_ID). The orchestrator itself never fabricates an ID. Return {ok: true}.`,
-    { label: 'session-id-writeback',
-      schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' } } } }
-  )
-  log(`Audit session ID ${auditResult.auditSessionId} appended to absorb entry dispatch record.`)
+// ── Session-ID pass-through (DIR-093 fix v2): pass audit session ID directly ─────────
+// to Gate agents rather than relying on file write-back (which breaks because workflow
+// agents don't share a writable /tmp/ with the outer loop).
+const AUDIT_SESSION_ID = auditResult?.auditSessionId || null
+if (AUDIT_SESSION_ID) {
+  log(`Audit session ID captured for Gate phase: ${AUDIT_SESSION_ID}`)
 } else {
   log('WARNING: no auditSessionId returned from Audit phase — audit-indep gate will likely fail (DIR-093).')
 }
@@ -154,7 +145,9 @@ const gates = await parallel([
     { label: 'tree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run worktree-branch-hygiene-check.sh. Return {ok, detail}. Non-zero = orphaned milestone evidence → HARD BLOCK.`,
     { label: 'worktree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`Run audit-independence-check.sh against the audit artifact at milestones/M<NN>/audits/iteration-0-acceptance-audit.md and the dispatch-record at ${args.absorbEntryFile}. Set QUAY_ORCHESTRATOR_SESSION_ID=\$CLAUDE_CODE_SESSION_ID before running the script (use your own session ID as the orchestrator proxy — it will be distinct from the Audit agent's ID in the artifact, satisfying DIR-032 distinctness; the DIR-034 corroboration comes from the dispatch record). Return {ok, detail}. Non-zero = audit not independent → HARD BLOCK.`,
+  () => agent(`Run audit-independence-check.sh against the audit artifact at milestones/M<NN>/audits/iteration-0-acceptance-audit.md and the dispatch-record at ${args.absorbEntryFile}. Set QUAY_ORCHESTRATOR_SESSION_ID=\$CLAUDE_CODE_SESSION_ID before running the script.
+
+CRITICAL DIR-093: The audit agent's session ID is "${AUDIT_SESSION_ID || 'UNKNOWN'}". BEFORE running the script, FIRST ensure this exact ID appears in the dispatch record file (${args.absorbEntryFile}) — open the file, and in the ## Dispatch record section, append this ID on its own line: "${AUDIT_SESSION_ID || 'UNKNOWN'}". THEN run audit-independence-check.sh. The script will look for this ID in the dispatch record to corroborate against the artifact. Return {ok, detail}. Non-zero = audit not independent → HARD BLOCK.`,
     { label: 'audit-indep', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run quay gate --gate split-or-commit ${args.taskId}. Return {ok, detail}. Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK.`,
     { label: 'split-or-commit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
