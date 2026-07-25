@@ -1,0 +1,432 @@
+// Unit tests for gate-script-base.ts — shared framework primitives for TypeScript gate scripts.
+// Written RED-first per ADR-001 fixture-first discipline: this test file covers all exported
+// functions from the load-bearing gate-script-base.ts utility module (created M151/M152).
+// Run:
+//   node --test experiments/quay-perpetual-stream/test/gate-script-base.test.mjs
+//   node --test --experimental-test-coverage experiments/quay-perpetual-stream/test/gate-script-base.test.mjs
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  parseArgs,
+  readFrontmatter,
+  emitPass,
+  emitFail,
+  requireArg,
+  isDirectEntry,
+} from "../scripts/gate-script-base.ts";
+
+// ── helpers ─────────────────────────────────────────────────────────────────────────────────────
+
+function tmpDir(label) {
+  return fs.mkdtempSync(path.join(os.tmpdir(), `gate-script-base-${label}-`));
+}
+
+function captureStdout(fn) {
+  const orig = process.stdout.write;
+  const chunks = [];
+  process.stdout.write = (chunk) => { chunks.push(chunk); return true; };
+  try {
+    fn();
+  } finally {
+    process.stdout.write = orig;
+  }
+  return chunks.join("");
+}
+
+function captureStderr(fn) {
+  const orig = process.stderr.write;
+  const chunks = [];
+  process.stderr.write = (chunk) => { chunks.push(chunk); return true; };
+  try {
+    fn();
+  } finally {
+    process.stderr.write = orig;
+  }
+  return chunks.join("");
+}
+
+// ── parseArgs ────────────────────────────────────────────────────────────────────────────────────
+
+test("parseArgs: basic positional args with no flags", () => {
+  const r = parseArgs(["node", "script", "file1.md", "file2.md"], { usage: "<files>" });
+  assert.deepEqual(r.args, ["file1.md", "file2.md"]);
+  assert.deepEqual(r.flags, {});
+});
+
+test("parseArgs: single positional arg (default minArgs=1)", () => {
+  const r = parseArgs(["node", "script", "single.md"], { usage: "<file>" });
+  assert.deepEqual(r.args, ["single.md"]);
+  assert.deepEqual(r.flags, {});
+});
+
+test("parseArgs: string flag with space-separated value", () => {
+  const r = parseArgs(["node", "script", "--name", "myvalue", "file.md"], {
+    usage: "<file>",
+    flags: { name: { type: "string" } },
+  });
+  assert.equal(r.flags.name, "myvalue");
+  assert.deepEqual(r.args, ["file.md"]);
+});
+
+test("parseArgs: string flag with = syntax", () => {
+  const r = parseArgs(["node", "script", "--name=myvalue", "file.md"], {
+    usage: "<file>",
+    flags: { name: { type: "string" } },
+  });
+  assert.equal(r.flags.name, "myvalue");
+  assert.deepEqual(r.args, ["file.md"]);
+});
+
+test("parseArgs: boolean flag is true when present", () => {
+  const r = parseArgs(["node", "script", "--verbose", "file.md"], {
+    usage: "<file>",
+    flags: { verbose: { type: "boolean" } },
+  });
+  assert.equal(r.flags.verbose, true);
+  assert.deepEqual(r.args, ["file.md"]);
+});
+
+test("parseArgs: multiple flags of mixed types", () => {
+  const r = parseArgs(
+    ["node", "script", "--name", "x", "--verbose", "--dir=/tmp", "file.md"],
+    {
+      usage: "<file>",
+      flags: {
+        name: { type: "string" },
+        verbose: { type: "boolean" },
+        dir: { type: "string" },
+      },
+    },
+  );
+  assert.equal(r.flags.name, "x");
+  assert.equal(r.flags.verbose, true);
+  assert.equal(r.flags.dir, "/tmp");
+  assert.deepEqual(r.args, ["file.md"]);
+});
+
+test("parseArgs: flag value defaults to empty string when no value follows", () => {
+  const r = parseArgs(["node", "script", "file.md", "--name"], {
+    usage: "<file>",
+    flags: { name: { type: "string" } },
+  });
+  assert.equal(r.flags.name, ""); // --name is last, no value after it
+  assert.deepEqual(r.args, ["file.md"]);
+});
+
+test("parseArgs: unrecognized flag with no def still stored as string", () => {
+  const r = parseArgs(["node", "script", "--unknown=stuff", "file.md"], {
+    usage: "<file>",
+    flags: {},
+  });
+  assert.equal(r.flags.unknown, "stuff");
+  assert.deepEqual(r.args, ["file.md"]);
+});
+
+test("parseArgs: repeated flag — last one wins", () => {
+  const r = parseArgs(["node", "script", "--name", "a", "--name=b", "file.md"], {
+    usage: "<file>",
+    flags: { name: { type: "string" } },
+  });
+  assert.equal(r.flags.name, "b");
+});
+
+test("parseArgs: missing boolean flag defaults to undefined (not in flags object)", () => {
+  const r = parseArgs(["node", "script", "file.md"], {
+    usage: "<file>",
+    flags: { verbose: { type: "boolean" } },
+  });
+  assert.ok(!("verbose" in r.flags));
+  assert.deepEqual(r.args, ["file.md"]);
+});
+
+test("parseArgs: insufficient positional args exits with code 2 (default minArgs=1)", () => {
+  const origExit = process.exit;
+  let exitCode = null;
+  const origStderr = process.stderr.write;
+  process.stderr.write = () => true;
+  process.exit = (c) => { exitCode = c; throw new Error("exit"); };
+  try {
+    parseArgs(["node", "script"], { usage: "<file>" });
+    assert.fail("should have thrown from exit mock");
+  } catch (e) {
+    if (e.message !== "exit") throw e;
+  } finally {
+    process.exit = origExit;
+    process.stderr.write = origStderr;
+  }
+  assert.equal(exitCode, 2);
+});
+
+test("parseArgs: custom minArgs: 0 positional args allowed", () => {
+  const r = parseArgs(["node", "script"], { usage: "[files]", minArgs: 0 });
+  assert.deepEqual(r.args, []);
+  assert.deepEqual(r.flags, {});
+});
+
+test("parseArgs: custom minArgs > 1 with enough args passes", () => {
+  const r = parseArgs(["node", "script", "a", "b", "c"], { usage: "<files>", minArgs: 3 });
+  assert.deepEqual(r.args, ["a", "b", "c"]);
+});
+
+test("parseArgs: custom minArgs > 1 with insufficient args exits 2", () => {
+  const origExit = process.exit;
+  let exitCode = null;
+  const origStderr = process.stderr.write;
+  process.stderr.write = () => true;
+  process.exit = (c) => { exitCode = c; throw new Error("exit"); };
+  try {
+    parseArgs(["node", "script", "a"], { usage: "<a> <b>", minArgs: 2 });
+    assert.fail("should have thrown");
+  } catch (e) {
+    if (e.message !== "exit") throw e;
+  } finally {
+    process.exit = origExit;
+    process.stderr.write = origStderr;
+  }
+  assert.equal(exitCode, 2);
+});
+
+// ── readFrontmatter ─────────────────────────────────────────────────────────────────────────────
+
+test("readFrontmatter: parses scalar frontmatter fields", () => {
+  const d = tmpDir("fm-scalar");
+  const file = path.join(d, "task.md");
+  fs.writeFileSync(file, "---\nid: T1\ntitle: My Title\nstatus: todo\n---\nbody text");
+  const fm = readFrontmatter(file);
+  assert.equal(fm.id, "T1");
+  assert.equal(fm.title, "My Title");
+  assert.equal(fm.status, "todo");
+  fs.rmSync(d, { recursive: true });
+});
+
+test("readFrontmatter: parses list values (bracket style)", () => {
+  const d = tmpDir("fm-list");
+  const file = path.join(d, "task.md");
+  fs.writeFileSync(file, "---\nlabels: [bug, ux, priority]\n---\nbody");
+  const fm = readFrontmatter(file);
+  assert.deepEqual(fm.labels, ["bug", "ux", "priority"]);
+  fs.rmSync(d, { recursive: true });
+});
+
+test("readFrontmatter: parses empty list [] as empty array", () => {
+  const d = tmpDir("fm-empty-list");
+  const file = path.join(d, "task.md");
+  fs.writeFileSync(file, "---\nlabels: []\n---\nbody");
+  const fm = readFrontmatter(file);
+  assert.deepEqual(fm.labels, []);
+  fs.rmSync(d, { recursive: true });
+});
+
+test("readFrontmatter: parses null value as null", () => {
+  const d = tmpDir("fm-null");
+  const file = path.join(d, "task.md");
+  fs.writeFileSync(file, "---\nparent: null\n---\nbody");
+  const fm = readFrontmatter(file);
+  assert.equal(fm.parent, null);
+  fs.rmSync(d, { recursive: true });
+});
+
+test("readFrontmatter: parses empty value as empty string", () => {
+  const d = tmpDir("fm-empty");
+  const file = path.join(d, "task.md");
+  fs.writeFileSync(file, "---\ntitle:\n---\nbody");
+  const fm = readFrontmatter(file);
+  assert.equal(fm.title, "");
+  fs.rmSync(d, { recursive: true });
+});
+
+test("readFrontmatter: returns null for file with no frontmatter", () => {
+  const d = tmpDir("fm-none");
+  const file = path.join(d, "note.md");
+  fs.writeFileSync(file, "# Just a heading\n\nbody text here");
+  const fm = readFrontmatter(file);
+  assert.equal(fm, null);
+  fs.rmSync(d, { recursive: true });
+});
+
+test("readFrontmatter: skips comment lines (starting with #)", () => {
+  const d = tmpDir("fm-comment");
+  const file = path.join(d, "task.md");
+  fs.writeFileSync(file, "---\n# this is a comment\nid: T1\n# another comment\nstatus: todo\n---\nbody");
+  const fm = readFrontmatter(file);
+  assert.equal(fm.id, "T1");
+  assert.equal(fm.status, "todo");
+  assert.ok(!("this is a comment" in fm));
+  assert.ok(!("#" in fm));
+  fs.rmSync(d, { recursive: true });
+});
+
+test("readFrontmatter: skips blank lines in frontmatter", () => {
+  const d = tmpDir("fm-blank");
+  const file = path.join(d, "task.md");
+  fs.writeFileSync(file, "---\n\nid: T1\n\nstatus: todo\n---\nbody");
+  const fm = readFrontmatter(file);
+  assert.equal(fm.id, "T1");
+  assert.equal(fm.status, "todo");
+  fs.rmSync(d, { recursive: true });
+});
+
+test("readFrontmatter: handles CRLF line endings", () => {
+  const d = tmpDir("fm-crlf");
+  const file = path.join(d, "task.md");
+  fs.writeFileSync(file, "---\r\nid: T1\r\nstatus: todo\r\n---\r\nbody");
+  const fm = readFrontmatter(file);
+  assert.equal(fm.id, "T1");
+  assert.equal(fm.status, "todo");
+  fs.rmSync(d, { recursive: true });
+});
+
+test("readFrontmatter: missing file throws", () => {
+  assert.throws(
+    () => readFrontmatter("/nonexistent/path/task.md"),
+  );
+});
+
+test("readFrontmatter: list values strip surrounding quotes", () => {
+  const d = tmpDir("fm-quotes");
+  const file = path.join(d, "task.md");
+  fs.writeFileSync(file, "---\nlabels: ['dir', \"milestone\"]\n---\nbody");
+  const fm = readFrontmatter(file);
+  assert.deepEqual(fm.labels, ["dir", "milestone"]);
+  fs.rmSync(d, { recursive: true });
+});
+
+// ── emitPass ─────────────────────────────────────────────────────────────────────────────────────
+
+test("emitPass: outputs 'PASS: <message>' to stdout", () => {
+  const out = captureStdout(() => emitPass("all checks green"));
+  assert.equal(out.trim(), "PASS: all checks green");
+});
+
+test("emitPass: handles empty message", () => {
+  const out = captureStdout(() => emitPass(""));
+  assert.match(out, /^PASS:\s*$/m);
+});
+
+// ── emitFail ─────────────────────────────────────────────────────────────────────────────────────
+
+test("emitFail: outputs 'FAIL: <message>' to stdout", () => {
+  const out = captureStdout(() => emitFail("test failed"));
+  assert.equal(out.trim(), "FAIL: test failed");
+});
+
+test("emitFail: handles empty message", () => {
+  const out = captureStdout(() => emitFail(""));
+  assert.match(out, /^FAIL:\s*$/m);
+});
+
+// ── requireArg ───────────────────────────────────────────────────────────────────────────────────
+
+test("requireArg: does not exit for non-empty string", () => {
+  // should not throw or exit
+  requireArg("hello", "name");
+  assert.ok(true);
+});
+
+test("requireArg: does not exit for number value", () => {
+  requireArg(42, "count");
+  assert.ok(true);
+});
+
+test("requireArg: does not exit for object value", () => {
+  requireArg({ key: "val" }, "config");
+  assert.ok(true);
+});
+
+test("requireArg: exits 2 for undefined value", () => {
+  const origExit = process.exit;
+  let exitCode = null;
+  const origStderr = process.stderr.write;
+  process.stderr.write = () => true;
+  process.exit = (c) => { exitCode = c; throw new Error("exit"); };
+  try {
+    requireArg(undefined, "filename");
+    assert.fail("should have thrown");
+  } catch (e) {
+    if (e.message !== "exit") throw e;
+  } finally {
+    process.exit = origExit;
+    process.stderr.write = origStderr;
+  }
+  assert.equal(exitCode, 2);
+});
+
+test("requireArg: exits 2 for null value", () => {
+  const origExit = process.exit;
+  let exitCode = null;
+  const origStderr = process.stderr.write;
+  process.stderr.write = () => true;
+  process.exit = (c) => { exitCode = c; throw new Error("exit"); };
+  try {
+    requireArg(null, "config");
+    assert.fail("should have thrown");
+  } catch (e) {
+    if (e.message !== "exit") throw e;
+  } finally {
+    process.exit = origExit;
+    process.stderr.write = origStderr;
+  }
+  assert.equal(exitCode, 2);
+});
+
+test("requireArg: exits 2 for empty string", () => {
+  const origExit = process.exit;
+  let exitCode = null;
+  const origStderr = process.stderr.write;
+  process.stderr.write = () => true;
+  process.exit = (c) => { exitCode = c; throw new Error("exit"); };
+  try {
+    requireArg("", "filename");
+    assert.fail("should have thrown");
+  } catch (e) {
+    if (e.message !== "exit") throw e;
+  } finally {
+    process.exit = origExit;
+    process.stderr.write = origStderr;
+  }
+  assert.equal(exitCode, 2);
+});
+
+test("requireArg: exits 2 for 0 (falsy number)", () => {
+  // 0 is NOT undefined/null/empty — should NOT exit
+  requireArg(0, "count");
+  assert.ok(true);
+});
+
+test("requireArg: exits 2 for false (falsy boolean)", () => {
+  // false is NOT undefined/null/empty — should NOT exit
+  requireArg(false, "flag");
+  assert.ok(true);
+});
+
+// ── isDirectEntry ────────────────────────────────────────────────────────────────────────────────
+
+test("isDirectEntry: returns true when importMeta.url matches process.argv[1]", () => {
+  // When running as test, this file is process.argv[1], so calling isDirectEntry
+  // with THIS module's importMeta should return true.
+  const entry = isDirectEntry(import.meta);
+  assert.equal(entry, true, `expected isDirectEntry to return true for the test file; got ${entry}`);
+});
+
+test("isDirectEntry: returns false when importMeta.url does not match argv1", () => {
+  const fakeImportMeta = { url: "file:///some/other/script.ts" };
+  const entry = isDirectEntry(fakeImportMeta, "/actual/entry/point.mjs");
+  assert.equal(entry, false);
+});
+
+test("isDirectEntry: returns false when argv1 is empty", () => {
+  const fakeImportMeta = { url: "file:///some/script.ts" };
+  const entry = isDirectEntry(fakeImportMeta, "");
+  assert.equal(entry, false);
+});
+
+test("isDirectEntry: resolves relative paths", () => {
+  const fakeImportMeta = { url: "file:///abs/path/script.ts" };
+  // path.resolve should make ./abs/path/script.ts → /abs/path/script.ts (depends on cwd)
+  const entry = isDirectEntry(fakeImportMeta, "/abs/path/script.ts");
+  assert.equal(entry, true);
+});
