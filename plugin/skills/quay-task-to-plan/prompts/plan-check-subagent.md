@@ -7,10 +7,9 @@ subagent (a separate, unparametrized Task-agent authoring pass — see
 `SKILL.md`'s plan-step section, step 1) has produced a draft milestone-level
 plan record. This check subagent never authors the plan from scratch; it
 iterates the SAME draft to convergence per the Phase-5 stopping rule
-(`docs/plans/3-7-quay-task-to-plan-skill.md` Stage 5.3, citing
-`docs/proposals/exp5-quay-task-proposal-plan-skill.md` §7 — this
-mechanism-level detail was deliberately not duplicated into
-`inherited-core.md` by M18, see `SKILL.md`'s plan-step section for the
+(`docs/plans/3-7-quay-task-to-plan-skill.md` Stage 5.3 — the
+mechanism-level detail is deliberately not duplicated into
+`inherited-core.md`; see `SKILL.md`'s plan-step section for the
 citation note) — **check, not re-derive**.
 
 ## Parameters
@@ -28,12 +27,12 @@ citation note) — **check, not re-derive**.
 - `{{round_number}}` — 1, 2, or 3 (the Phase-5 stopping rule caps at
   ~2-3 rounds; the orchestrator refuses to dispatch a 4th round — see
   "Stopping rule" below).
-- `{{budget_gate_result}}` — the raw output of
-  `experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh`
-  run against the draft plan's declared phase/stage line estimates, computed
-  by the orchestrator BEFORE this dispatch and handed in as ground truth (this
-  subagent does not re-run the gate itself; it consumes the gate's PASS/FAIL
-  verdict as one of its checks — see item 4 below).
+- `{{budget_gate_result}}` — the raw output of the workspace's
+  line-budget gate script run against the draft plan's declared
+  phase/stage line estimates, computed by the orchestrator BEFORE this
+  dispatch and handed in as ground truth (this subagent does not re-run
+  the gate itself; it consumes the gate's PASS/FAIL verdict as one of
+  its checks — see item 4 below).
 
 ## Prompt body (dispatch verbatim with parameters substituted)
 
@@ -54,10 +53,9 @@ Perform these checks, in order:
    cites, verify against the actual current codebase (Read/Grep/Glob — do not
    trust the draft's claims). Flag any reference to a signature, path, or
    tool that does not exist, or that exists but differs from how the draft
-   describes it (the exact class of error
-   `docs/proposals/exp5-quay-task-proposal-plan-skill.md` §7 names as
-   plan-class errors — "both misread the same code the same way" is why a
-   grounded CHECK, not a second blind re-derivation, is the right tool here).
+   describes it (plan-class errors — "both misread the same code the same
+   way" is why a grounded CHECK, not a second blind re-derivation, is the
+   right tool here).
 
 2. STAGE ORDERING AND DEPENDENCY CHECK. Confirm the draft's phase/stage
    dependency order is actually satisfiable (no stage depends on a file or

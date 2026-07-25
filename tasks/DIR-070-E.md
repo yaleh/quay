@@ -26,19 +26,19 @@ Extract the reusable proposal→plan pipeline rules from `.claude/skills/quay-ta
 
 ## Acceptance Criteria
 
-- [ ] `/quay-task-to-plan` skill works in any quay workspace (not just this repo)
-- [ ] Skill content passes leak test (no `experiments/quay-perpetual-stream` or `exp5`)
-- [ ] Original `.claude/skills/quay-task-to-plan/` still works for exp5 loop
-- [ ] `plugin.json` commands[] includes new skill
-- [ ] `plugin-packaging.test.mjs` passes
+- [x] `/quay-task-to-plan` skill works in any quay workspace (not just this repo)
+- [x] Skill content passes leak test (no `experiments/quay-perpetual-stream` or `exp5`)
+- [x] Original `.claude/skills/quay-task-to-plan/` still works for exp5 loop
+- [x] `plugin.json` commands[] includes new skill
+- [x] `plugin-packaging.test.mjs` passes
 
 ## Definition of Done
 
-- [ ] Reference to `docs/proposals/exp5-deliverable-improvements.md` Gap 3
-- [ ] `plugin/skills/quay-task-to-plan/SKILL.md` authored
-- [ ] `plugin.json` updated
-- [ ] Plugin packaging test passes
-- [ ] Human-steered: touches `.claude/skills/` (driver-self-rewrite per DIR-062 clause 1)
+- [x] Reference to `docs/proposals/exp5-deliverable-improvements.md` Gap 3
+- [x] `plugin/skills/quay-task-to-plan/SKILL.md` authored
+- [x] `plugin.json` updated
+- [x] Plugin packaging test passes
+- [x] Human-steered: touches `.claude/skills/` (driver-self-rewrite per DIR-062 clause 1)
 
 ## Touches
 
@@ -46,3 +46,12 @@ Extract the reusable proposal→plan pipeline rules from `.claude/skills/quay-ta
 - `plugin/skills/quay-task-to-plan/SKILL.md` (new)
 - `plugin/.claude-plugin/plugin.json`
 - `plugin/test/plugin-packaging.test.mjs`
+
+## Resolution
+
+2026-07-25: **Landed.** Fixed the 3 leak violations in `plan-check-subagent.md`:
+1. Line 11: removed `docs/proposals/exp5-quay-task-proposal-plan-skill.md` reference
+2. Line 32: genericized `experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh`
+   to "workspace's line-budget gate script"
+3. Line 58: removed duplicate exp5 doc reference
+Leak test now clean (0 `exp5`/`experiments/quay-perpetual-stream` matches). All AC/DoD met.
