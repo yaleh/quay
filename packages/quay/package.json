@@ -5,6 +5,9 @@
   "description": "Quay Core: provider-agnostic web + CLI + MCP client over the Provider ABI (v0 walking skeleton).",
   "license": "MIT",
   "type": "module",
+  "scripts": {
+    "build": "node scripts/build-dist.mjs"
+  },
   "bin": {
     "quay": "./dist/quay.js"
   },

@@ -4,13 +4,17 @@
   "private": true,
   "description": "The native Provider for Quay: markdown+frontmatter task store, CLI, and MCP ABI transport (v0 walking skeleton).",
   "type": "module",
+  "scripts": {
+    "build": "bash scripts/build-dist.sh"
+  },
   "bin": {
-    "quay-native": "./bin/quay-native.ts"
+    "quay-native": "./dist/quay-native.js"
   },
   "files": [
     "README.md",
     "bin",
     "src",
+    "dist",
     "provider.yml",
     "skills",
     "examples"

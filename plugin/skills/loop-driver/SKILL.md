@@ -1,7 +1,7 @@
 ---
 name: quay-loop-driver
 description: "Drive a workspace's quay task board through a single `iterate` cycle (or iterate* until Stop): select a ready task, isolate it in a dependency-ready worktree, build+test it, gate it, record evidence, and land. Parameterised by `.quay/loop.yml` — the same skill, different params, for any workspace. Runner-agnostic and workspace-portable."
-allowed-tools: Bash, Read
+allowed-tools: Bash, Read, mcp__quay__task_list, mcp__quay__task_get, mcp__quay__task_write, mcp__quay__gate_run, mcp__quay__gate_log, mcp__quay__lifecycle_complete, mcp__quay__lifecycle_promote, mcp__quay__lifecycle_retreat, mcp__quay__lifecycle_adjudicate, mcp__quay__action_list, mcp__quay__action_run, mcp__quay__task_check
 ---
 
 # quay-loop-driver
@@ -89,7 +89,7 @@ If `params.stop = until(.halt)`: `test -f .halt` (workspaceRoot-relative). If pr
 ```
 select :: Board ⇀ Task        ⊨ exclude label:human-steered
 ```
-`quay task list --status ready --provider <params.board>` (or MCP `task_list`). Apply `params.policy` ranking. Take first result that lacks `label:human-steered`. If empty → idle (ScheduleWakeup or return if `stop=once`).
+MCP `task_list` with `{ status: "ready", provider: <params.board> }`. Apply `params.policy` ranking. Take first result that lacks `label:human-steered`. If empty → idle (ScheduleWakeup or return if `stop=once`).
 
 ### 3. Isolate
 ```
@@ -120,7 +120,7 @@ Implement the task in the worktree directly in the driver's own context (today's
 ```
 gate :: Task → {PASS, FAIL}    ⊨ fail-closed ; ⊨ cwd = worktree ; ⊨ runner ∉ driver
 ```
-`quay gate <task.id> --gate <params.gates[0]> --cwd <worktree> --provider <params.board>` (or iterate over `params.gates`). Exit 0 = PASS; nonzero = FAIL. The runner (`vitest`, `node --test`, etc.) lives in `.quay/gates.yml` — not in this skill. The `--cwd` flag (DIR-046) ensures the gate runs against the BUILT worktree, not workspaceRoot.
+MCP `gate_run` with `{ id: <task.id>, gate: <params.gates[0]>, cwd: <worktree>, provider: <params.board> }` (or iterate over `params.gates`). Returns `{ ok, reason }` — `ok: true` = PASS; `ok: false` = FAIL. The runner (`vitest`, `node --test`, etc.) lives in `.quay/gates.yml` — not in this skill. The `cwd` parameter (DIR-046) ensures the gate runs against the BUILT worktree, not workspaceRoot.
 
 ### 6. Record
 ```
@@ -148,8 +148,8 @@ Skip adversarial audit. Gate output only is the record. For throwaway/experiment
 ```
 land :: Diff → Commit ⊕ needs-human    ⊨ done ∨ needs-human (SPLIT-OR-COMMIT)
 ```
-- PASS: commit the diff in the worktree, `quay task edit <id> --status done --provider <params.board>`, remove the worktree.
-- FAIL: capture gate output, `quay task edit <id> --status needs-human --provider <params.board>`, leave worktree for inspection. First FAIL goes straight to `needs-human` — no retry loop.
+- PASS: commit the diff in the worktree, MCP `task_write` with `{ id: <id>, status: "done", provider: <params.board> }`, remove the worktree.
+- FAIL: capture gate output, MCP `task_write` with `{ id: <id>, status: "needs-human", provider: <params.board> }`, leave worktree for inspection. First FAIL goes straight to `needs-human` — no retry loop.
 
 ### 8. Continue / stop
 If `params.stop = once`: return.
