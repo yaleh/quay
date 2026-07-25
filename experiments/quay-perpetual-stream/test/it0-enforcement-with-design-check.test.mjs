@@ -30,12 +30,12 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", ".."); // experiments/quay
 
 // ── parseInheritedCoreClauses ────────────────────────────────────────────────────────────────────
 test("parseInheritedCoreClauses: extracts '### Clause N' headings from the DoD section", () => {
-  const text = "## Definition of Done\n\n### Clause 0 — foo\nbody\n\n### Clause 1 — bar\nbody\n\n## Next section\n### Clause 2 — outside DoD, must NOT be counted\n";
+  const text = "## Definition of DoD\n\n### Clause 0 — foo\nbody\n\n### Clause 1 — bar\nbody\n\n## Next section\n### Clause 2 — outside DoD, must NOT be counted\n";
   assert.deepEqual(parseInheritedCoreClauses(text), [0, 1]);
 });
 
 test("parseInheritedCoreClauses: dedupes and sorts numerically (not lexically)", () => {
-  const text = "## Definition of Done\n### Clause 10 — x\n### Clause 2 — y\n### Clause 2 — y again\n";
+  const text = "## Definition of DoD\n### Clause 10 — x\n### Clause 2 — y\n### Clause 2 — y again\n";
   assert.deepEqual(parseInheritedCoreClauses(text), [2, 10]);
 });
 
@@ -44,7 +44,7 @@ test("parseInheritedCoreClauses: no DoD section at all → empty array", () => {
 });
 
 test("parseInheritedCoreClauses: DoD section is the LAST section (no trailing ## boundary)", () => {
-  const text = "## Intro\ntext\n## Definition of Done\n### Clause 0 — foo\n### Clause 1 — bar\n";
+  const text = "## Intro\ntext\n## Definition of DoD\n### Clause 0 — foo\n### Clause 1 — bar\n";
   assert.deepEqual(parseInheritedCoreClauses(text), [0, 1]);
 });
 
@@ -65,7 +65,7 @@ test("parseDodCheckClauses: ignores prose mentions of 'Clause N' that aren't the
 
 // ── runChecks — bidirectional (design→enforcement AND enforcement→design) ──────────────────────────
 test("runChecks: all clauses aligned in both directions → PASS, no failures", () => {
-  const core = "## Definition of Done\n### Clause 0 — a\n### Clause 1 — b\n";
+  const core = "## Definition of DoD\n### Clause 0 — a\n### Clause 1 — b\n";
   const dod = "// --- Clause 0: a ---\n// --- Clause 1: b ---\n";
   const r = runChecks(core, dod);
   assert.deepEqual(r.failures, []);
@@ -74,7 +74,7 @@ test("runChecks: all clauses aligned in both directions → PASS, no failures", 
 });
 
 test("runChecks: clause documented but NOT enforced → ENFORCEMENT-MISSING failure", () => {
-  const core = "## Definition of Done\n### Clause 0 — a\n### Clause 1 — b\n";
+  const core = "## Definition of DoD\n### Clause 0 — a\n### Clause 1 — b\n";
   const dod = "// --- Clause 0: a ---\n";
   const r = runChecks(core, dod);
   assert.equal(r.failures.length, 1);
@@ -83,7 +83,7 @@ test("runChecks: clause documented but NOT enforced → ENFORCEMENT-MISSING fail
 });
 
 test("runChecks: clause enforced but NOT documented → DESIGN-MISSING failure", () => {
-  const core = "## Definition of Done\n### Clause 0 — a\n";
+  const core = "## Definition of DoD\n### Clause 0 — a\n";
   const dod = "// --- Clause 0: a ---\n// --- Clause 7: undocumented ---\n";
   const r = runChecks(core, dod);
   assert.equal(r.failures.length, 1);
@@ -92,7 +92,7 @@ test("runChecks: clause enforced but NOT documented → DESIGN-MISSING failure",
 });
 
 test("runChecks: both directions can fail simultaneously, both reported", () => {
-  const core = "## Definition of Done\n### Clause 0 — a\n### Clause 1 — unenforced\n";
+  const core = "## Definition of DoD\n### Clause 0 — a\n### Clause 1 — unenforced\n";
   const dod = "// --- Clause 0: a ---\n// --- Clause 9: undocumented ---\n";
   const r = runChecks(core, dod);
   assert.equal(r.failures.length, 2);
@@ -101,7 +101,7 @@ test("runChecks: both directions can fail simultaneously, both reported", () => 
 });
 
 test("runChecks: no DoD clause headings found at all → PARSE-ERROR failure", () => {
-  const r = runChecks("## Definition of Done\nno clause headings here\n", "// --- Clause 0: a ---\n");
+  const r = runChecks("## Definition of DoD\nno clause headings here\n", "// --- Clause 0: a ---\n");
   assert.equal(r.failures.length, 1);
   assert.match(r.failures[0], /PARSE-ERROR/);
   assert.deepEqual(r.coreClauses, []);
@@ -143,7 +143,7 @@ test("CLI: workspace root has inherited-core.md but missing it0-dod-check.ts →
   fs.mkdirSync(path.join(dir, "experiments/quay-perpetual-stream/scripts"), { recursive: true });
   fs.writeFileSync(
     path.join(dir, "experiments/quay-perpetual-stream/inherited-core.md"),
-    "## Definition of Done\n### Clause 0 — a\n"
+    "## Definition of DoD\n### Clause 0 — a\n"
   );
   const r = spawnCli([dir]);
   assert.equal(r.status, 2);
@@ -156,7 +156,7 @@ test("CLI: real workspace, aligned clauses → PASS, exit 0", () => {
   fs.mkdirSync(path.join(dir, "experiments/quay-perpetual-stream/scripts"), { recursive: true });
   fs.writeFileSync(
     path.join(dir, "experiments/quay-perpetual-stream/inherited-core.md"),
-    "## Definition of Done\n### Clause 0 — a\n"
+    "## Definition of DoD\n### Clause 0 — a\n"
   );
   fs.writeFileSync(
     path.join(dir, "experiments/quay-perpetual-stream/scripts/it0-dod-check.ts"),
@@ -173,7 +173,7 @@ test("CLI: real workspace, unenforced clause → FAIL, exit 1", () => {
   fs.mkdirSync(path.join(dir, "experiments/quay-perpetual-stream/scripts"), { recursive: true });
   fs.writeFileSync(
     path.join(dir, "experiments/quay-perpetual-stream/inherited-core.md"),
-    "## Definition of Done\n### Clause 0 — a\n### Clause 1 — unenforced\n"
+    "## Definition of DoD\n### Clause 0 — a\n### Clause 1 — unenforced\n"
   );
   fs.writeFileSync(
     path.join(dir, "experiments/quay-perpetual-stream/scripts/it0-dod-check.ts"),

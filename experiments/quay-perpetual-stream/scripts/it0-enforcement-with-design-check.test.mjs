@@ -31,7 +31,7 @@ test("parseInheritedCoreClauses: returns empty array when no DoD section present
 
 test("parseInheritedCoreClauses: extracts clause numbers from canonical ### Clause N headings", () => {
   const text = `
-## Definition of Done
+## Definition of DoD
 
 ### Clause 0 — AC + DoD present
 ### Clause 1 — Per-milestone acceptance audit
@@ -45,7 +45,7 @@ test("parseInheritedCoreClauses: extracts clause numbers from canonical ### Clau
 
 test("parseInheritedCoreClauses: handles multi-line heading (real inherited-core.md style)", () => {
   const text = `
-## Definition of Done (M25-dod-meta-enforcer / DIR-017 Step 1, extended by M32
+## Definition of DoD (M25-dod-meta-enforcer / DIR-017 Step 1, extended by M32
 / DIR-017 Step 2)
 
 ### Clause 0 — AC + DoD present
@@ -59,7 +59,7 @@ test("parseInheritedCoreClauses: handles multi-line heading (real inherited-core
 
 test("parseInheritedCoreClauses: ignores '### Clause 0's sibling' headings (not a main clause)", () => {
   const text = `
-## Definition of Done
+## Definition of DoD
 
 ### Clause 0 — AC + DoD present
 ### Clause 0's sibling — something related
@@ -84,7 +84,7 @@ test("parseInheritedCoreClauses: ignores '### Clause 0's sibling' headings (not 
 
 test("parseInheritedCoreClauses: returns sorted, deduplicated clause numbers", () => {
   const text = `
-## Definition of Done
+## Definition of DoD
 
 ### Clause 5 — No-self-exemption
 ### Clause 3 — Line-budget gate
@@ -139,7 +139,7 @@ test("parseDodCheckClauses: ignores prose clause mentions (not enforcement block
 
 test("RED: runChecks FAILs when inherited-core has a Clause 10 not in dod-check", () => {
   const inheritedCore = `
-## Definition of Done
+## Definition of DoD
 
 ### Clause 0 — AC + DoD present
 ### Clause 1 — Per-milestone acceptance audit
@@ -163,7 +163,7 @@ test("RED: runChecks FAILs when inherited-core has a Clause 10 not in dod-check"
 
 test("GREEN: runChecks PASSes when all inherited-core clauses are in dod-check", () => {
   const inheritedCore = `
-## Definition of Done
+## Definition of DoD
 
 ### Clause 0 — AC + DoD present
 ### Clause 1 — Per-milestone acceptance audit
@@ -208,7 +208,7 @@ No DoD heading here.
 
 test("RED: runChecks FAILs for multiple missing enforcement clauses (lists all)", () => {
   const inheritedCore = `
-## Definition of Done
+## Definition of DoD
 
 ### Clause 0 — AC + DoD present
 ### Clause 5 — No-self-exemption
@@ -231,7 +231,7 @@ test("RED: runChecks FAILs for multiple missing enforcement clauses (lists all)"
 test("RED: runChecks FAILs when dod-check enforces a clause with no design doc in inherited-core (reverse direction)", () => {
   // Bidirectional check: enforcement without design documentation also violates ADR-011.
   const inheritedCore = `
-## Definition of Done
+## Definition of DoD
 
 ### Clause 0 — AC + DoD present
 
@@ -252,7 +252,7 @@ test("RED: runChecks FAILs when dod-check enforces a clause with no design doc i
 test("GREEN: runChecks PASSes when all clauses are documented in inherited-core AND enforced in dod-check (bidirectional PASS)", () => {
   // Bidirectional: every documented clause is enforced, AND every enforced clause is documented.
   const inheritedCore = `
-## Definition of Done
+## Definition of DoD
 
 ### Clause 0 — AC + DoD present
 ### Clause 1 — Per-milestone acceptance audit
