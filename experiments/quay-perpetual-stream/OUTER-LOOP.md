@@ -13,19 +13,20 @@ drain(D) = invoke(".claude/workflows/drain-directives.js", {workspaceRoot})
   ⊨ task-canonical (DIR-028): label:directive tasks only; no directives/*.md
   ⊨ absent → {drained: 0}; must complete before select (I₄)
 
-select :: Candidate[] ⇀ Task
+select :: Candidate[] ⇀ Candidate[]   -- batch (1..N); 1-wide = serial path, N≥2 = concurrent dispatch
 select = task_list(label=milestone-candidate, status=todo)  -- canonical source, not backlog.md
   → filter(human_steered_classify)                           -- scripts/human-steered-classify.ts (DIR-062-A)
   → compose_shortlist                                        -- scripts/deliverable-governor.ts (DIR-066)
   → rank(pick, explore_due)                                  -- scripts/explore-exploit-cadence.ts (CRYST-D3 R6)
-  → writeback(winner, considered \ {winner})
-  → author_ac_dod(winner)   -- ¬self-tick (DIR-020): all - [ ] UNCHECKED; - [x] ONLY by Audit phase
-  → set_schema_v1(winner)   -- extra.schema:"v1"; absent → N/A-legacy
-  → author_proposal_plan(winner)  -- ## Proposal + ## Plan; MUST carry docs/plans/*.md ref or N/A—<reason>
-  → schema_check(winner)    -- scripts/task-schema-check.sh; FAIL → fix task, block dispatch
-  → size_check(winner)      -- inherited_core."Milestone size definition"
-  → split_or_commit(winner) -- DIR-026 MANDATORY; scripts/it0-split-or-commit-check.ts
-  → line_budget_check(charter_file)  -- scripts/it0-ceiling-line-budget-check.sh; FAIL → fix charter, never script
+  → batch_assemble(charters)                                 -- scripts/concurrent-batch-scheduler.ts (DIR-075/M142); ⊨ charter readiness: type: + ## Touches
+  → writeback(batch, deferred, considered \ {batch ∪ deferred})
+  → ∀c∈batch: author_ac_dod(c)   -- ¬self-tick (DIR-020): all - [ ] UNCHECKED; - [x] ONLY by Audit phase
+  → ∀c∈batch: set_schema_v1(c)   -- extra.schema:"v1"; absent → N/A-legacy
+  → ∀c∈batch: author_proposal_plan(c)  -- ## Proposal + ## Plan; MUST carry docs/plans/*.md ref or N/A—<reason>
+  → ∀c∈batch: schema_check(c)    -- scripts/task-schema-check.sh; FAIL → fix task, block dispatch
+  → ∀c∈batch: size_check(c)      -- inherited_core."Milestone size definition"
+  → ∀c∈batch: split_or_commit(c) -- DIR-026 MANDATORY; scripts/it0-split-or-commit-check.ts
+  → ∀c∈batch: line_budget_check(charter_file)  -- scripts/it0-ceiling-line-budget-check.sh; FAIL → fix charter, never script
   ⊨ human-steered EXCLUDE (label:human-steered ≡ manual override regardless of classifier verdict)
   ⊨ ∀c: record(value_type(c), Δv̂(c))  -- inherited_core."Value-typed SELECT ledger"
      (capability-growth|discovery|instrument-correction|risk-option|governance-integrity)
@@ -36,7 +37,7 @@ select = task_list(label=milestone-candidate, status=todo)  -- canonical source,
   ⊨ floor = min(1, streak/6); S = round((1−floor)·4); S_max = 4
   ⊨ streak = consecutive deliverable:no SELECTs; yes resets; explore/arch-audit exempt
   ⊨ streak≥6 ∧ no autonomous D → DELIVERABLE-STARVATION (prominent, greppable; auto-continue; ¬halt)
-  ⊨ writeback: task_write(winner, labels ++ milestone:M-NN); ∀others: append("## Not selected (M-NN)", reason)
+  ⊨ writeback: ∀c∈batch: task_write(c, labels ++ milestone:M-NN); ∀deferred: append("## Not selected (M-NN)", reason)
 
 hypothesize :: Task → Δv̂
 hypothesize(t) = Σ weight_s·Δĉov_s ∧ commit(dashboard, {predicted: Δv̂, metric: Y})
@@ -54,8 +55,19 @@ charter(t) = write("charters/M<NN>-<slug>.md", {gate, scope, done_when, inner_te
   ⊨ pointer: path ⊕ git_sha → inherited_core (Tier-B, not inlined)
   ⊨ inner termination: five conditions (§3.2); it0 systematic-explore checks enumerated
 
+batch_assemble :: Candidate[] → {batch: Candidate[], deferred: Deferred[]}
+batch_assemble(ranked) =
+  a. charter_readiness(c): ensure type: + ## Touches on each candidate (fail-closed: missing → deferred)
+  b. run("node experiments/quay-perpetual-stream/scripts/concurrent-batch-scheduler.ts --root . <charters>")
+     — single-source batch scheduler (ADR-004); imports disjointness from touches-orthogonality-check.ts
+  c. BATCH set (concurrent dispatch via step 4b) || deferred candidates → remain in pool
+  ⊨ learning-type → always serial (scheduler defers via isLearning() guard)
+  ⊨ 1-wide → fallback to serial path (execute, unchanged — existing single-milestone pipeline)
+  ⊨ touches-shared-state → deferred (writes must serialize at fan-in ABSORB)
+  ⊨ ill-declared Touches → deferred (conservative gating: parseTouches + checkTouchesPair)
+
 execute :: Params → {done, needs-human}
-execute(params) = invoke(".claude/workflows/execute-milestone.js", {taskId, charterFile, absorbEntryFile})
+execute(params) where |batch|=1 = invoke(".claude/workflows/execute-milestone.js", {taskId, charterFile, absorbEntryFile})
   ⊨ absorb-entry pre-created: /tmp/m<NN>-absorb-entry.md (milestone id, charter path, Δv̂ from step 2)
   ⊨ dispatch-record at /tmp/m<NN>-dispatch-record.txt (created by Audit phase per M90)
   ⊨ IS single-source (ADR-004, DIR-067): Verify(Build(5 it0 checks parallel)) → Build(class-route +
@@ -64,6 +76,28 @@ execute(params) = invoke(".claude/workflows/execute-milestone.js", {taskId, char
      tree-hygiene, worktree-branch-hygiene, audit-independence) → Land(merge→master + capture-prune
      + dashboard update + milestone_counter++)
   ⊨ phases cached; resumable within session
+  ⊨ serial path (1-wide) — preserved unchanged; counter++ + dashboard inline
+
+concurrent_execute :: Batch → {done[], needs-human[]}
+concurrent_execute(B) where |B| ≥ 2:
+  a. ∀c∈B: dispatch Workflow({name: "execute-milestone",
+     args: {taskId: c.id, charterFile: c.charter, absorbEntryFile: c.absorb, mode: "concurrent"}},
+     run_in_background: true) from MAIN session
+     — NOT from within a workflow (DIR-092 architectural fix; Workflow-internal dispatch is broken)
+  b. wait ∀ N complete (monitor background task completion)
+  c. survivors = {c | outcome: "done"}
+  d. scripts/anti-drift-touches-check.ts on git diff --numstat for each survivor's touched files
+     (NON-WAIVABLE — DRY structural enforcement; any overlap → hard error, diagnose before merge)
+  e. scripts/serial-fanin-absorb.ts for deterministic merge plan from survivor results
+     (touchedFiles ∪ dashboardEntry → ordered merge sequence)
+  f. merge each survivor one at a time in plan order (¬parallel merge — single git worktree)
+  g. milestone_counter += |survivors|; dashboard.md append each survivor's dashboardEntry
+  h. regenerate backlog.md/dashboard.md views via scripts/it0-backlog-regen.ts; close-out hygiene
+     (tree-hygiene-check.sh + worktree-branch-hygiene-check.sh final pass)
+  ⊨ Build phase stays INLINE per workflow (loop's fix preserved — Workflow-internal dispatch is broken)
+  ⊨ anti-drift-touches-check NON-WAIVABLE (concurrent builds MUST be touch-orthogonal)
+  ⊨ fan-in merge is deterministic (serial-fanin-absorb.ts plan order, not heuristic)
+  ⊨ survivors < N is legal (failed milestones → needs-human; survivors merge, failed recorded in ABSORB)
 
 checkpoint :: Counter → Checkpoint?
 checkpoint(n) = n%5=0 → write("checkpoints/cp-<NN>.md", health_snapshot) | ∅
