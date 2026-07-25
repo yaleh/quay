@@ -43,7 +43,7 @@ gates:
       script: "./experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh"
       argsKey: dogfoodEvidenceArgs
     - name: drivable-workspace
-      script: "./experiments/quay-perpetual-stream/scripts/drivable-workspace-check.sh"
+      script: "./plugin/scripts/drivable-workspace-check.sh"
       argsKey: drivableWorkspaceArgs
 
   adr:
@@ -53,6 +53,14 @@ gates:
   fixed:
     - name: delivery-standalone-smoke
       script: "./packages/quay/test/delivery-standalone-smoke.sh"   # ADR-013 / DIR-035-D, wired 2026-07-20
+    - name: anti-gaming
+      script: "./plugin/scripts/anti-gaming-guard.sh"
+    - name: loadbearing-test
+      script: "./plugin/scripts/loadbearing-test-gate.sh"
+    - name: tree-hygiene
+      script: "./plugin/scripts/tree-hygiene-check.sh"
+    - name: worktree-branch-hygiene
+      script: "./plugin/scripts/worktree-branch-hygiene-check.sh"
 
   testPass:
     - name: it0-dod-check-tests

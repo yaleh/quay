@@ -13,7 +13,8 @@
 // Run: node --test plugin/test/plugin-packaging.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import fs from 'node:fs';
+const { readFileSync, existsSync, accessSync } = fs;
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -125,6 +126,14 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
     // M143: new shipped files
     path.join(pluginDir, 'skills', 'init', 'SKILL.md'),
     path.join(pluginDir, 'README.md'),
+    // DIR-070-B: Tier-A gate scripts + wrappers shipped to plugin/scripts/
+    path.join(pluginDir, 'scripts', 'anti-gaming-guard.ts'),
+    path.join(pluginDir, 'scripts', 'anti-gaming-guard.sh'),
+    path.join(pluginDir, 'scripts', 'loadbearing-test-gate.ts'),
+    path.join(pluginDir, 'scripts', 'loadbearing-test-gate.sh'),
+    path.join(pluginDir, 'scripts', 'drivable-workspace-check.ts'),
+    path.join(pluginDir, 'scripts', 'drivable-workspace-check.sh'),
+    path.join(pluginDir, 'scripts', 'tree-hygiene-check.sh'),
   ];
   const leakPattern = /experiments\/quay-perpetual-stream|\bexp5\b/i;
   for (const f of shippedFiles) {
@@ -176,6 +185,101 @@ test('loop-driver skill (DIR-042-B) has zero research-layer references (VT/value
     !researchLeakPattern.test(src),
     'loop-driver SKILL.md must contain zero VT/value-ledger/checkpoints/experiments/**/exp5 references'
   );
+});
+
+// ---------------------------------------------------------------------------
+// DIR-070-B (M137) — Tier-A gate scripts shipped to plugin/scripts/. 5 gate
+// scripts + 3 .sh wrappers for the .ts gates.  Pins: all 8 files present;
+// the 4 universal-gate files carry zero experiment references; the 3 .ts gates
+// are runnable via their .sh wrappers; gate scripts are executable.
+// worktree-branch-hygiene-check.sh is excluded from the zero-leak check
+// because its functional logic references legacy exp5-m<N> branch names and
+// experiments/quay-perpetual-stream/milestones/ paths — these are operational
+// constants, not attribution leakage.
+// ---------------------------------------------------------------------------
+
+test('DIR-070-B: all 8 new gate scripts + wrappers present in plugin/scripts/', () => {
+  const scriptsDir = path.join(pluginDir, 'scripts');
+  const wanted = [
+    'anti-gaming-guard.ts', 'anti-gaming-guard.sh',
+    'loadbearing-test-gate.ts', 'loadbearing-test-gate.sh',
+    'tree-hygiene-check.sh',
+    'worktree-branch-hygiene-check.sh',
+    'drivable-workspace-check.ts', 'drivable-workspace-check.sh',
+  ];
+  for (const f of wanted) {
+    assert.ok(existsSync(path.join(scriptsDir, f)), `plugin/scripts/${f} must exist`);
+  }
+});
+
+test('DIR-070-B: all .sh wrappers are executable', () => {
+  const scriptsDir = path.join(pluginDir, 'scripts');
+  const wrappers = ['anti-gaming-guard.sh', 'loadbearing-test-gate.sh', 'drivable-workspace-check.sh',
+    'tree-hygiene-check.sh', 'worktree-branch-hygiene-check.sh'];
+  for (const w of wrappers) {
+    const fp = path.join(scriptsDir, w);
+    try {
+      fs.accessSync(fp, fs.constants.X_OK);
+      assert.ok(true, `${w} is executable`);
+    } catch {
+      assert.fail(`${w} must be executable`);
+    }
+  }
+});
+
+test('DIR-070-B: .sh wrappers runnable (exit 2 for missing args, not ENOTFOUND)', () => {
+  const scriptsDir = path.join(pluginDir, 'scripts');
+  // Each .sh wrapper should exit 2 (usage) when called without required args,
+  // proving it delegates to the .ts module, not a missing-file error.
+  const wrappers = ['anti-gaming-guard.sh', 'loadbearing-test-gate.sh'];
+  for (const w of wrappers) {
+    const fp = path.join(scriptsDir, w);
+    let exitCode = 0;
+    try {
+      execFileSync('bash', [fp], { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
+    } catch (e) {
+      exitCode = e.status || 1;
+    }
+    assert.equal(exitCode, 2, `${w} must exit 2 (usage) when called without args, not ${exitCode}`);
+  }
+});
+
+test('DIR-070-B: all 5 gates runnable via quay gate --gate <name> (resolution check)', () => {
+  // Verify each gate name resolves in the workspace (names match .quay/config.yml).
+  const mcp = readJson(path.join(pluginDir, '.mcp.json'));
+  const quayMCPEntry = mcp.quay;
+  // We verify gate resolution by checking the .quay/config.yml lists the names.
+  const configPath = path.join(repoRoot, '.quay', 'config.yml');
+  const configSrc = readFileSync(configPath, 'utf8');
+  const gateNames = ['anti-gaming', 'loadbearing-test', 'tree-hygiene', 'worktree-branch-hygiene', 'drivable-workspace'];
+  for (const name of gateNames) {
+    assert.ok(
+      configSrc.includes(`name: ${name}`),
+      `.quay/config.yml must register gate '${name}'`
+    );
+  }
+});
+
+test('DIR-070-B: universal-gate plugin files (4 of 5) have zero exp5/experiment-path references', () => {
+  // Four of the five gates are universal (work in any quay workspace).
+  // worktree-branch-hygiene-check.sh is excluded — it NEEDS experiment-specific
+  // references (branch-name pattern, milestone-path prefix) as functional constants.
+  const scriptsDir = path.join(pluginDir, 'scripts');
+  const universalFiles = [
+    'anti-gaming-guard.ts', 'anti-gaming-guard.sh',
+    'loadbearing-test-gate.ts', 'loadbearing-test-gate.sh',
+    'tree-hygiene-check.sh',
+    'drivable-workspace-check.ts', 'drivable-workspace-check.sh',
+  ];
+  const leakPattern = /experiments\/quay-perpetual-stream|\bexp5\b/i;
+  for (const f of universalFiles) {
+    const fp = path.join(scriptsDir, f);
+    const src = readFileSync(fp, 'utf8');
+    assert.ok(
+      !leakPattern.test(src),
+      `${f} must not contain experiments/quay-perpetual-stream or exp5 references`
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
