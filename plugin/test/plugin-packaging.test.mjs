@@ -33,19 +33,30 @@ test('marketplace.json is valid JSON and lists the quay plugin pointing at ./plu
   assert.equal(entry.source, './plugin');
 });
 
-test('plugin.json is valid JSON and declares the 4 bundled skills', () => {
+test('plugin.json is valid JSON and declares the 5 bundled skills (M143: +init)', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');
+  assert.equal(manifest.version, '0.4.0', 'M143: version bumped to 0.4.0');
   assert.ok(Array.isArray(manifest.commands));
   const wanted = [
     './skills/author/SKILL.md',
     './skills/execute/SKILL.md',
     './skills/quay-directive/SKILL.md',
     './skills/loop-driver/SKILL.md',
+    './skills/init/SKILL.md',
   ];
   for (const w of wanted) {
     assert.ok(manifest.commands.includes(w), `plugin.json commands[] must include ${w}`);
   }
+});
+
+test('M143: plugin.json declares agents[] with baime-iteration-executor', () => {
+  const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
+  assert.ok(Array.isArray(manifest.agents), 'plugin.json must have agents[]');
+  assert.ok(
+    manifest.agents.includes('./agents/baime-iteration-executor.md'),
+    'plugin.json agents[] must include baime-iteration-executor'
+  );
 });
 
 test('.mcp.json declares the quay MCP server via ${CLAUDE_PLUGIN_ROOT}-relative args', () => {
@@ -109,9 +120,13 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
     path.join(pluginDir, 'skills', 'execute', 'SKILL.md'),
     path.join(pluginDir, 'skills', 'quay-directive', 'SKILL.md'),
     path.join(pluginDir, 'skills', 'loop-driver', 'SKILL.md'),
+    // M143: new shipped files
+    path.join(pluginDir, 'skills', 'init', 'SKILL.md'),
+    path.join(pluginDir, 'README.md'),
   ];
   const leakPattern = /experiments\/quay-perpetual-stream|\bexp5\b/i;
   for (const f of shippedFiles) {
+    assert.ok(existsSync(f), `shipped file must exist: ${f}`);
     const src = readFileSync(f, 'utf8');
     assert.ok(
       !leakPattern.test(src),
@@ -139,6 +154,84 @@ test('loop-driver skill (DIR-042-B) has zero research-layer references (VT/value
     !researchLeakPattern.test(src),
     'loop-driver SKILL.md must contain zero VT/value-ledger/checkpoints/experiments/**/exp5 references'
   );
+});
+
+// ---------------------------------------------------------------------------
+// M143 (DIR-081) — plugin distribution: workflows, gate scripts, agents, sync,
+// and quay:init skill.  These tests pin the structural invariants: the
+// directories exist with the expected file counts, sync.sh is executable,
+// the init skill carries no research-layer references, and the vendored agent
+// file is present.
+// ---------------------------------------------------------------------------
+
+test('M143: plugin/workflows/ exists with 3 JS workflow files', () => {
+  const workflowsDir = path.join(pluginDir, 'workflows');
+  assert.ok(existsSync(workflowsDir), 'plugin/workflows/ must exist');
+  const wanted = ['drain-directives.js', 'execute-milestone.js', 'run-routines.js'];
+  for (const f of wanted) {
+    const fp = path.join(workflowsDir, f);
+    assert.ok(existsSync(fp), `plugin/workflows/${f} must exist`);
+  }
+});
+
+test('M143: plugin/gate-scripts/ exists with 13 gate scripts', () => {
+  const gateDir = path.join(pluginDir, 'gate-scripts');
+  assert.ok(existsSync(gateDir), 'plugin/gate-scripts/ must exist');
+  const wanted = [
+    'it0-backlog-projection-check.sh', 'it0-ceiling-check.sh',
+    'it0-ceiling-line-budget-check.sh', 'it0-dashboard-line-budget-check.sh',
+    'it0-dod-check.sh', 'it0-dogfood-evidence-gate.sh',
+    'it0-gate-hash-check.sh', 'it0-impl-row-check.sh',
+    'vmeta-lag-check.sh', 'tree-hygiene-check.sh',
+    'worktree-branch-hygiene-check.sh', 'audit-independence-check.sh',
+    'drain-scheduler.ts',
+  ];
+  for (const f of wanted) {
+    assert.ok(existsSync(path.join(gateDir, f)), `plugin/gate-scripts/${f} must exist`);
+  }
+});
+
+test('M143: plugin/agents/baime-iteration-executor.md exists', () => {
+  const agentPath = path.join(pluginDir, 'agents', 'baime-iteration-executor.md');
+  assert.ok(existsSync(agentPath), 'plugin/agents/baime-iteration-executor.md must exist');
+  const src = readFileSync(agentPath, 'utf8');
+  assert.ok(src.length > 500, 'vendored agent file must have substantive content');
+});
+
+test('M143: plugin/sync.sh exists and is executable', () => {
+  const syncPath = path.join(pluginDir, 'sync.sh');
+  assert.ok(existsSync(syncPath), 'plugin/sync.sh must exist');
+  const src = readFileSync(syncPath, 'utf8');
+  assert.match(src, /drain-directives\.js/, 'sync.sh must sync drain-directives.js');
+  assert.match(src, /execute-milestone\.js/, 'sync.sh must sync execute-milestone.js');
+  assert.match(src, /run-routines\.js/, 'sync.sh must sync run-routines.js');
+  assert.match(src, /drain-scheduler\.ts/, 'sync.sh must sync drain-scheduler.ts');
+  assert.match(src, /vmeta-lag-check\.sh/, 'sync.sh must sync vmeta-lag-check.sh');
+});
+
+test('M143: init skill has zero research-layer references (VT/value-ledger/checkpoints/experiments/**)', () => {
+  const src = readFileSync(path.join(pluginDir, 'skills', 'init', 'SKILL.md'), 'utf8');
+  const researchLeakPattern = /\bVT\b|value-ledger|checkpoints?|experiments\/|inherited-core|\bexp5\b/i;
+  assert.ok(
+    !researchLeakPattern.test(src),
+    'quay:init SKILL.md must contain zero VT/value-ledger/checkpoints/experiments/**/exp5 references'
+  );
+});
+
+test('M143: git-tracked workflows in plugin/workflows/ are byte-identical to .claude/workflows/ canonical sources', () => {
+  // Only test git-tracked source files (drain-directives.js may not be tracked).
+  const trackedWorkflows = ['execute-milestone.js', 'run-routines.js'];
+  for (const name of trackedWorkflows) {
+    const canonical = path.join(repoRoot, '.claude', 'workflows', name);
+    const bundled = path.join(pluginDir, 'workflows', name);
+    assert.ok(existsSync(canonical), `canonical source missing: ${canonical}`);
+    assert.ok(existsSync(bundled), `bundled copy missing: ${bundled}`);
+    assert.equal(
+      readFileSync(bundled, 'utf8'),
+      readFileSync(canonical, 'utf8'),
+      `${name}: plugin/workflows/ copy must be byte-identical to .claude/workflows/ source`
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
