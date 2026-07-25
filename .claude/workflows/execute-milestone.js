@@ -71,7 +71,7 @@ Absorb entry path: ${args.absorbEntryFile}
 5. COMMIT all changes with a descriptive message.
 
 Return {taskId, outcome: "done", iterationCount, mergeCommit: "<short-sha>"} on success, or {outcome: "needs-human", reason} on failure.`,
-    { phase: 'Build', isolation: 'worktree',
+    { phase: 'Build',
       schema: { type: 'object', required: ['outcome'], properties: {
         taskId: { type: 'string' }, outcome: { type: 'string' },
         iterationCount: { type: 'number' }, mergeCommit: { type: 'string' },
