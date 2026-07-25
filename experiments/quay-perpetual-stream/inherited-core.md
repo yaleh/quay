@@ -1,9 +1,8 @@
 # Inherited Core (Tier-B pinned methodology) -- quay-perpetual-stream (Experiment 5)
 
-The reusable inner methodology every milestone charter inherits by reference (charter Tier-A pins a
-path + git SHA to this file; it is NOT inlined per iteration). Consolidation (S4.2) grows this file:
-when a milestone adaptation is reused unchanged by a later different-domain milestone (phi confirmed),
-merge it here and retire its delta citation.
+Reusable inner methodology every milestone charter inherits by reference. Charter Tier-A pins a
+path + git SHA to this file; NOT inlined per iteration. Consolidation (S4.2) grows this file:
+cross-domain-confirmed adaptations merged here; delta citations retired at phi-confirmed reuse.
 
 ## Spec (CRYST-D3 S9, 2026-07-24)
 
@@ -44,388 +43,459 @@ Terminate :: Milestone[] -> {CONTINUE, TERMINATION-DUE}     -- S3.2
     OR ceiling->redesign OR budget~10 AND NOT climbing OR external-HALT
 ```
 
-## Kit version + single-source convention (DIR-035-D, ADR-013 Decision item 3)
+## Kit version + single-source convention :: KitIdentity
 
-**This file IS the one canonical "continuous-development-with-Claude-Code" methodology kit.**
-Kit version: `v1`. Last consolidated at git SHA `b17caab` (DIR-035-D/M52 audit: zero live duplication).
+```
+kitCanonical :: = this file                          -- DIR-035-D, ADR-013 Decision item 3
+kitVersion   :: = "v1"
+kitSha       :: = "b17caab"                          -- DIR-035-D/M52: zero live duplication
 
-**Single-source rule:** a new experiment MUST NOT copy this file's content. It must:
-1. Reference this kit BY PATH (`../quay-perpetual-stream/inherited-core.md`).
-2. Record the **kit version + git SHA it is pinned to** in its own instance-state doc.
-3. Carry ONLY its own mutable instance state -- never a forked/edited copy of this file.
+singleSource :: Experiment -> Bool
+singleSource(e) = reference(e, this, BY_PATH)        -- "../quay-perpetual-stream/inherited-core.md"
+                ∧ record(e.instanceStateDoc, kitVersion, kitSha)
+                ∧ ¬fork(this) ∧ ¬editCopy(this)
+-- new experiment MUST: (1) reference this kit BY PATH, (2) record version+pinned SHA
+-- in its instance-state doc, (3) carry only its own mutable instance state
+```
 
-## Standing invariants (govern EVERY milestone)
+## Standing invariants :: Gate -> Bool
 
-**Enforcement lands WITH design (ADR-011).** A new rule / DoD-clause / method-step is NOT "done"
-unless its executable enforcement (a gate/check/code) AND a fixture proving it land in the SAME
-milestone. Phased "design now, wire the enforcement later" is prohibited. Partially enforced today by
-Clause 5 (no-self-exemption), the DoD real-landing bar, and the B7 load-bearing-test-gate.
+```
+enforcementWithDesign :: Rule -> Bool                 -- ADR-011
+enforcementWithDesign(r) = land(gate(r) ∨ check(r), SAME_MILESTONE(r))
+                         ∧ fixtureProves(r) ∧ ¬phased(r)
+exec: Clause 5 (no-self-exemption), DoD real-landing bar, B7 load-bearing-test-gate
+```
 
-## Extracted skills (delta chain -- read in order)
+## Extracted skills :: [SkillPath]
 
-1. `.claude/skills/quay-native-methodology/` -- gate mechanics, directive lifecycle, G3 audit, provenance/sigma ledger.
-2. `.claude/skills/quay-core-bootstrap-methodology/` -- delta: manda dispatch, G3-dispatch, sigma-inherited-floor trap, V_meta ceiling.
-3. `.claude/skills/quay-webui-bootstrap-methodology/` -- delta: S0c visual review, sigma floor-RESET, dual-viewport, domain-misfit.
+```
+skills :: [SkillPath] = [
+  ".claude/skills/quay-native-methodology/"           -- gate mechanics, directive lifecycle, G3 audit
+  ".claude/skills/quay-core-bootstrap-methodology/"   -- delta: manda dispatch, sigma-floor trap, V_meta ceiling
+  ".claude/skills/quay-webui-bootstrap-methodology/"  -- delta: S0c visual review, sigma floor-RESET, dual-viewport
+]
+-- All three phi edges now operational sections below (M10). For any topic, cite sections below, not skills.
+```
 
-All three phi edges are now operational sections below (M10, m10). Delta chain is NOT retired.
+## exp4 artifacts (inherited) + pinned gate source :: InheritedAssets
 
-## exp4 artifacts (inherited) + exp5-native additions + pinned gate source
+Pinned gate source (`experiments/quay-continuous-bootstrap/ITERATION-PROMPTS.md` HARD GATES block):
+charter MUST copy this byte-for-byte; hash check asserts no paraphrase (DIR-009). Gate transclusion
++ hash check per invariant 3 -- the hash IS the enforcement; the byte-for-byte copy is invariant
+across all charters.
 
-- `experiments/quay-continuous-bootstrap/ITERATION-PROMPTS.md` -- HARD GATES block (verbatim charter transclusion source); S0c continuous simulated-user; non-blocking dispatch.
-- `experiments/quay-continuous-bootstrap/VMETAFORMULA.md` -- DIR-008 V_meta redesign.
-- `experiments/quay-continuous-bootstrap/directives/archive/DIR-009-*.md` -- gate-dilution failure + mechanically-self-proving-gate fix.
-- Charter three-tier contract (S3.1) + gate transclusion + hash check. Inner termination five conditions (S3.2). Systematic-explore it0 checks (S4.4). Binary Done-when (S3.4).
-- Pinned gate source: charter must copy ITERATION-PROMPTS.md HARD GATES block byte-for-byte; hash check asserts no paraphrase (DIR-009).
+```
+inheritedAssets :: [Asset] = [
+  "experiments/quay-continuous-bootstrap/ITERATION-PROMPTS.md"   -- HARD GATES block (verbatim transclusion source)
+  "experiments/quay-continuous-bootstrap/VMETAFORMULA.md"        -- DIR-008 V_meta redesign
+  "experiments/quay-continuous-bootstrap/directives/archive/DIR-009-*.md"
+]
+```
 
 ---
 
-## domainMisfit :: DoneWhen[] x Mechanism[] -> {ok, ceilingTrigger}
+## domainMisfit :: Mechanism[] x DoneWhen[] -> Result
 
-Decision procedure applied at it0, BEFORE dispatch.
+```
+data Result = ok(carry: Mechanism) | ceilingTrigger
 
-**Step 1 -- Name the domain's existing verification mechanism(s).** List every mechanism this
-milestone's own Done-when clauses already require to demonstrate correctness. If empty, STOP -- fix
-the Done-when evidence plan first.
+domainMisfit(mechanisms, doneWhen) =
+  let existing = enumerate(doneWhen.verificationMechanisms) in
+  if existing = ∅ then error("fix Done-when evidence plan first")
+  else let independent = filter(¬selfReferential, existing) in
+    if independent ≠ ∅ then ok(head(independent))
+    else match constructIndependent(mechanisms) with
+      | Some(m') -> ok(m') | None -> ceilingTrigger
 
-**Step 2 -- Self-referential check.** Is any listed mechanism SELF-REFERENTIAL (the same
-process/actor that produces the work also verifies it, with no independent second observer or
-environment)? A local `node --test` run by the same iteration that wrote the code is NOT independent.
-A CI job invoked by a real external trigger (tag push, PR event) in a separately-provisioned
-environment IS independent, even if it runs "the same" test suite.
+selfReferential :: Mechanism -> Bool
+selfReferential(m) = sameProcess(m.producer, m.verifier)
+                   ∧ ¬secondObserver(m) ∧ ¬separateEnvironment(m)
+-- local node --test by same iteration -> selfReferential; CI triggered externally -> ¬selfReferential
 
-**Step 3 -- If no independent mechanism exists, the domain has a misfit and MUST add one, preferring:**
-  a. **Reuse** an existing out-of-band mechanism from a DIFFERENT actor/environment.
-  b. **Construct** a minimal new one that can FAIL independently.
-  c. If neither is reachable, this IS a genuine ceiling (S3.2 condition 3) -- redesign scope.
+constructIndependent(ms) = reuseExisting(ms, differentActorOrEnv) <|> buildMinimalIndependent(ms)
+-- prefer: (a) reuse out-of-band from DIFFERENT actor/env; (b) construct minimal new one that can FAIL independently
+```
 
-**Step 4 -- Same mechanism serves BOTH it0 declaration AND iteration-time verification.** Divergence
-must be logged as an adaptation-log finding.
-
+Same mechanism serves BOTH it0 declaration AND iteration-time verification. Divergence -> adaptation-log finding.
 `exec:` `OUTER-LOOP.md` S4.4d systematic-explore it0 checks (domain-misfit audit-channel).
 
 ---
 
-## milestoneSize :: Charter -> {UNDER_SIZED, CORRECTLY_SIZED, OVER_SIZED}
-
-**Size definition.** A correctly-sized milestone is: *the smallest scope that carries a coherent value
-step AND fits the build+verify cost band* -- i.e. iteration-0 can land ALL of the charter's
-Done-when clauses in one pass, and iteration-1 exists purely to independently re-derive/re-verify
-iteration-0's own claims (fresh worktree, fresh checks, no new Done-when work required).
-
-**Verify-iteration size gauge** (apply AFTER iteration-1, or prospectively at SELECT/charter-authoring
-as a sanity check):
+## milestoneSize :: Charter -> SizeVerdict
 
 ```
-UNDER_SIZED:  Iteration-1 has nothing real to re-derive (re-runs same checks on same artifacts,
-              finds nothing new).
-              -> Should have been bundled or merged with a neighboring milestone.
+data SizeVerdict = UNDER_SIZED | CORRECTLY_SIZED | OVER_SIZED
 
-OVER_SIZED:   Iteration-1 is forced into new build work, or mid-milestone re-scope happens.
-              -> Should have been split at charter-authoring time along a completable seam.
+-- CORRECTLY_SIZED: smallest scope carrying coherent value step AND fitting build+verify cost.
+-- iteration-0 lands ALL Done-when in one pass; iteration-1 purely re-derives/re-verifies.
 
-CORRECTLY_SIZED: Iteration-1 does REAL independent work (fresh checkout, re-running checks from
-              scratch, hand-recomputing arithmetic, spot-checking citations) and genuinely
-              CATCHES something often enough to be worth the cost.
+milestoneSize(c) = case applyGauge(c.iteration1) of
+  | NoRealWork          -> UNDER_SIZED     -- re-runs same checks on same artifacts, nothing new
+  | NewBuildForced      -> OVER_SIZED      -- forced into new build work or mid-milestone re-scope
+  | IndependentRederive -> CORRECTLY_SIZED -- real independent re-derivation, catches things
+
+applyGauge(i1) = freshCheckout(i1) ∧ rerunFromScratch(i1) ∧ handRecompute(i1) ∧ spotCheckCitations(i1)
 ```
 
-**Milestone ceiling expansion (M18, DIR-012 item 2 -- amends, does not replace, the above):**
-
+Ceiling expansion (M18, DIR-012 item 2 -- amends, does not replace):
 ```
-milestone <= ~2000 lines   =  one whole plan (multiple phases)
-   phase  <= ~500  lines
-   stage  <= ~200  lines
+ceiling(s) = s.milestone.lines ≤ 2000 ∧ s.phase.lines ≤ 500 ∧ s.stage.lines ≤ 200 ∧ s.hasPhasePlan
+-- ceiling safe ONLY when decomposed; ceiling and phase/stage plan ship TOGETHER
+-- verify-iteration size gauge applies per-phase/stage under ceiling regime
 ```
 
-The <=2000-line ceiling and the phase/stage plan requirement ship together -- a charter may not claim
-the larger ceiling while skipping the decomposition. The verify-iteration size gauge above still
-applies UNCHANGED, but per-phase/stage rather than per-milestone under this regime. The ceiling
-expansion is safe ONLY when decomposed: the plan is what CONTAINS the risk.
-
-`exec:` `scripts/it0-ceiling-line-budget-check.sh` (OUTER-LOOP step 1, plan-time gate).
-Source: `docs/proposals/exp5-quay-task-proposal-plan-skill.md` S4.
+`exec:` `scripts/it0-ceiling-line-budget-check.sh` (OUTER-LOOP step 1 plan-time gate).
 
 ---
 
-## valueType :: Candidate -> {capabilityGrowth, discovery, instrumentCorrection, riskOption, governanceIntegrity}
+## valueType :: Candidate -> ValueType
 
-VT (capability-growth score) prices only ONE kind of milestone value. Five types:
+```
+data ValueType = capabilityGrowth | discovery | instrumentCorrection | riskOption | governanceIntegrity
 
-1. **capabilityGrowth** -- closes a real capability gap on an existing VT chart surface; the only type VT Delta-v_hat prices directly.
-2. **discovery** -- finds previously-unknown gaps/errors via an independent audit channel; value is in NEW information.
-3. **instrumentCorrection** -- fixes a standing error in the measurement/method itself; often VT-negative on paper while being high real value.
-4. **riskOption** -- reduces a forward-looking risk or preserves future optionality without delivering present capability.
-5. **governanceIntegrity** -- ensures the experiment's own control/decision mechanisms actually do what they claim, independent of any single milestone's product content.
+valueType(c) = match c.primaryCharacteristic with
+  | ClosesRealCapabilityGap(existingVTChart)  -> capabilityGrowth    -- only type VT Delta-v_hat prices directly
+  | FindsUnknownGap(viaIndependentAudit)       -> discovery           -- value is NEW information
+  | FixesStandingMeasurementError              -> instrumentCorrection -- often VT-negative, high real value
+  | ReducesForwardRisk ∨ PreservesOptionality  -> riskOption          -- preserves future optionality
+  | EnsuresControlMechanismIntegrity           -> governanceIntegrity -- ensures control mechanisms actually work
 
-**Governance/infra hard floor (SELECT-time check, mandatory):** a governance/infra candidate whose
-proposed scope excludes its own enabling/enforcement half must be **rejected or resized at SELECT
-time -- never dispatched partial.** (The DIR-002/DIR-006 lesson, generalized.)
+governanceHardFloor(c) = if c.valueType ∈ {governanceIntegrity, instrumentCorrection}
+                           ∧ ¬completeScope(c) then REJECT_OR_RESIZE   -- never dispatch partial
+                         else ACCEPT                                   -- (DIR-002/DIR-006 lesson)
 
-**Ranking discipline:** VT Delta-v_hat is one input among several at SELECT, never the sole ranker.
-A candidate with zero or negative VT Delta-v_hat but a governance-integrity or instrument-correction
-value type can and should outrank a positive-VT capability-growth candidate when the non-VT risk is higher.
+rankCandidates(cs) = sortBy(cs, priority ∘ valueType)
+  where priority(governanceIntegrity)=5; priority(instrumentCorrection)=4
+        priority(capabilityGrowth)=3; priority(discovery)=2; priority(riskOption)=1
+-- VT Delta-v_hat is ONE input among several; never the sole ranker
+```
 
-`exec:` composeShortlist (deliverable-governor.ts); value-typed ranking rules encoded in SELECT logic.
-
----
-
-## classRoute :: Task -> development | methodology (DIR-014 two-class diversity policy)
-
-Source: `docs/proposals/exp5-quay-task-proposal-plan-skill.md` S5.
-
-| class | deliverable | diversity strategy |
-|---|---|---|
-| **methodology/design** | a design/doc artifact | **whole-milestone independent re-derivation, UNCHANGED** -- iteration-1 independently re-derives from a fresh worktree. |
-| **development** | working code, <=~2000 lines | **MUST (DEFAULT, DIR-014 items 2/3 -- no longer discretionary)** run the proposal->plan pipeline: N-independent proposals + adjudication upstream -> single implementation -> light tail self-check (existing adversarial-audit gate downstream). |
-
-`exec:` `OUTER-LOOP.md` step 5a (mandatory dispatch route for development-class milestones via
-`quay-task-to-plan` skill). A development-class milestone that runs old whole-milestone dual-iteration
-instead of the pipeline is a policy/DoD violation.
+`exec:` `composeShortlist` (deliverable-governor.ts); value-typed ranking in SELECT logic.
 
 ---
 
-## webUiEvidence :: DoneWhenClause x IterationReport -> {PASS, FAIL}
+## classRoute :: Task -> Class
 
-Any Done-when clause claiming Web UI rendering/interaction/visual verification MUST be backed by literal `mcp__playwright__*` or `mcp__chrome-devtools__*` tool-call trace:
+```
+data Class = development | methodology           -- DIR-014 two-class diversity policy
 
-1. A **navigation** call to the actual page under test.
-2. At least one **screenshot or DOM/accessibility snapshot** artifact per claimed viewport.
-3. This trace must be present at **both configured viewports** (desktop + mobile) when dual-viewport coverage is claimed.
+classRoute(t) = match t.deliverableType with
+  | WorkingCode   -> development  | DocArtifact -> methodology
 
-**`curl` is demoted, not banned.** `curl -s <url> -o /dev/null -w "%{http_code}"` remains valid for
-**liveness/reachability HARD GATES only** -- never for rendering or interaction verification.
+developmentDispatch(t) = proposalPlanPipeline(t)  -- proposal->plan (quay-task-to-plan) BEFORE build
+                                                  -- MUST: N-independent proposals + adjudication upstream
+                                                  -- -> single implementation -> light tail self-check
+                                                  -- NOT optional per DIR-014 items 2/3
 
-**Dual-viewport requirement:** desktop 1280x800/900 and mobile 390x844 (DPR x3, emulated touch). A
-page/flow is not credited until both are covered.
+methodologyDispatch(t) = dualIteration(t)         -- iteration-0 builds, iteration-1 re-derives
+                                                  -- whole-milestone independent re-derivation, UNCHANGED
+```
 
-`exec:` Scripted grep for `mcp__playwright__browser_*` / `mcp__chrome-devtools__*` tool-call strings
-in iteration reports. Charter-authoring checklist: `OUTER-LOOP.md` step 3 requires this evidence rule
-in the charter's own Done-when clause text.
+`exec:` `OUTER-LOOP.md` step 5a (mandatory dispatch for development-class via quay-task-to-plan).
+A development-class milestone running old dual-iteration instead -> policy/DoD violation.
 
 ---
 
-## adversarialAudit :: Milestone x AuditAgent -> {REFUTED, CONCERNS, NO_REFUTATION_FOUND}
+## webUiEvidence :: EvidenceClaim x IterationReport -> Verdict
 
-Out-of-band step the OUTER LOOP dispatches at ABSORB (step 6), charged to REFUTE a milestone's
-Done-when claims and VT delta. UNCONDITIONAL per milestone (original cadence-rule conditions retained
-only as escalation hints, not gate on whether audit runs).
+```
+data Verdict = PASS | FAIL
 
-**Dispatch procedure:**
+webUiEvidence(claim, report) = ∀vp ∈ claim.viewports:
+  hasNavigationCall(report, claim.pageUrl, vp)                       -- (1) navigation to page
+  ∧ hasArtifact(report, vp, screenshot ∨ snapshot)                   -- (2) screenshot/snapshot per vp
+  ∧ toolFamily ∈ {mcp__playwright__browser_*, mcp__chrome-devtools__*}  -- literal tool-call trace
 
-1. **Who:** The outer loop (the session executing `OUTER-LOOP.md`), at ABSORB (step 6) -- never the inner milestone's own iterations.
-2. **How:** A fresh-context generic `Explore`/`general-purpose` subagent, `run_in_background=true`, reading ONLY: (a) the milestone's charter (Tier-A), (b) iteration-0/iteration-1 reports (claims under audit), (c) this file (Tier-B) -- with a refutation-focused prompt:
-   *"Find fault with this milestone's Done-when claims and VT Delta-v: (a) claims with no pasted evidence, (b) evidence that doesn't support the claim, (c) arithmetic that doesn't recompute, (d) VT deltas mismatched without stated reason, (e) scope creep or self-exemption without outer-loop sign-off. Verdict: REFUTED (name the claim), CONCERNS, or NO REFUTATION FOUND."*
-3. **Output:** `milestones/M<NN>/audits/iteration-N-adversarial-audit.md` (`N` = milestone's own iteration count at ABSORB time).
-4. **REFUTED blocks:** ABSORB VT-curve append / Done-when completion claim until the milestone record is corrected.
-5. **Session-id injection:** The orchestrator records the returned dispatch `agentId` / task id in the dispatch-record file AND writes `Audit session id: <that id>` near the top of the audit artifact. `audit-independence-check.ts` parses this line and corroborates against the dispatch-record file (Clause 12).
+dualViewport = [{w:1280,h:800,type:desktop}, {w:390,h:844,dpr:3,touch:true,type:mobile}]
+-- page/flow NOT credited until BOTH viewports covered
+
+curlValidity(e) = match e with
+  | HttpStatusCheck -> VALID      -- liveness/reachability HARD GATES only
+  | RenderingClaim  -> INVALID    -- never for rendering/interaction verification
+```
+
+`exec:` Scripted grep for `mcp__playwright__browser_*` / `mcp__chrome-devtools__*` in iteration reports.
+`OUTER-LOOP.md` step 3 requires this evidence rule in charter Done-when clause text.
+
+---
+
+## adversarialAudit :: Milestone x AuditAgent -> AuditVerdict
+
+```
+data AuditVerdict = REFUTED(claim: ClaimId) | CONCERNS | NO_REFUTATION_FOUND
+
+adversarialAudit(m, agent) =                            -- UNCONDITIONAL per milestone
+  let ctx = {m.charter, m.iteration[0..1].reports, this} in
+  let verdict = dispatch(agent, ctx, refutePrompt, background) in
+  record(verdict, "milestones/M{m.id}/audits/iteration-{n}-adversarial-audit.md")
+
+refutePrompt :: = "Find fault with this milestone's Done-when claims and VT Delta-v:
+  (a) claims with no pasted evidence, (b) evidence not supporting claim,
+  (c) arithmetic not recomputing, (d) VT deltas mismatched without stated reason,
+  (e) scope creep or self-exemption without outer-loop sign-off.
+  Verdict: REFUTED (name claim), CONCERNS, or NO REFUTATION FOUND."
+
+-- Who: OUTER LOOP (ABSORB step 6), never inner iterations
+-- How: fresh-context generic subagent, run_in_background=true, reading ONLY charter+reports+this file
+-- REFUTED blocks: VT-curve append / Done-when completion until corrected
+
+sessionIdInject(d) = orchestratorRecords(d.agentId)
+                   ∧ writeArtifactTop("Audit session id: {d.agentId}")
+-- orchestrator asserts session id NOT subagent self-report (DIR-034/M115 fix)
+-- audit-independence-check.ts parses this; corroborates against dispatch-record (Clause 12)
+```
 
 `exec:` `OUTER-LOOP.md` step 6 (adversarial-audit gate); `scripts/audit-independence-check.ts` (Clause 12).
 
 ---
 
-## sigmaFloor :: Baseline[] x Decision[] -> {RESET, CARRY_FORWARD}
+## sigmaFloor :: Baseline[] -> Disposition
 
-Apply at design time (chart origin, or any chart transition):
+```
+data Disposition = RESET | CARRY_FORWARD(confidence: Confidence)
 
-1. **Name the inherited number(s) explicitly** -- every baseline/floor a new chart or experiment carries forward.
-2. **For each, choose ONE, explicitly:**
-   - **RESET to 0** -- the new scope's own ledger stands alone.
-   - **CARRY FORWARD, with a stated confidence basis** -- state WHY the inherited number is trusted; if later found wrong, the correction is instrument-correction value, not a regression.
-3. **Do the arithmetic before committing** -- do not discover infeasibility only after committing.
+sigmaFloor(bs) = ∀b ∈ bs: {nameExplicitly(b); precompute(b); match choose(b) with
+  | RESET         -> RESET                                -- new scope's ledger stands alone
+  | CARRY_FORWARD -> CARRY_FORWARD(confidenceBasis(b))}    -- state WHY trusted; if wrong -> instrument-correction
+-- Design-time check (chart origin/transition). Do arithmetic before committing.
 
-**Posture going forward:** any number carried forward from a DIFFERENT experiment or a prior chart is
-presumptively CARRY-FORWARD-WITH-LOW-CONFIDENCE until independently re-verified by this experiment's
-own live evidence.
+carryForwardPosture(n) = if n.origin.experiment ≠ this.experiment ∨ n.origin.chart ≠ this.chart
+  then LOW_CONFIDENCE else n.statedConfidence
+-- presumptively LOW until independently re-verified by this experiment's own live evidence
+```
 
-`exec:` Design-time check (not a runtime script; M04/M08/M09 re-scoring passes provide de facto
-re-verification). The VT audit in `dashboard.md`'s Log section records the disposition.
-
----
-
-## mandaDispatch :: Context x CallType -> {BLOCKING, SAFE}
-
-Source: DIR-020; extended by DIR-015/016/024.
-
-1. **DIR-020 self-deadlock (structural rule):** the depth-1 `mcp__plugin_manda_manda__Agent`/`Dispatch` caller must NEVER be issued synchronously from the same session that owns the bound broker monitor for the target channel. A synchronous call blocks that session's own turn processing by construction.
-2. **DIR-015/016/024 background-dispatch requirement:** EVERY point on a manda nested-dispatch path -- depth-1 caller, iteration dispatch, audit dispatch, broker-side spawn -- must be background (`run_in_background=true`). A synchronously-blocked session cannot service its own concurrent notifications.
-3. **NOT a blanket ban.** Fire-and-forget dispatch (`manda-dispatch submit ... --async`, never waits on a result) is structurally OUTSIDE this rule's scope entirely and remains legitimate. The rule applies specifically to result-dependent/nested paths.
-
-`exec:` Structural invariant (no runtime check); standing practice decision: grep this section before
-re-deriving manda/G3/dispatch rules in a new charter or proposal.
+`exec:` Design-time check (not runtime script). `dashboard.md` Log records disposition.
 
 ---
 
-## humanSteered :: Task -> Bool  (DIR-062, 2026-07-23)
+## mandaDispatch :: Context x CallType -> Safety
 
-A task is `human-steered` -- excluded from autonomous SELECT -- iff ANY of three clauses fires:
+```
+data Safety = BLOCKING | SAFE
 
-1. **Driver-self-rewrite (file-based).** Touches a DRIVER FILE: `OUTER-LOOP.md`,
-   `inherited-core.md` (anywhere under `experiments/quay-perpetual-stream/`, matched by basename),
-   or any file under `.claude/skills/`. A milestone editing the loop's own driver must be authored
-   under `.halt` + golden-replay + independent adversarial audit (DIR-027 human-steering hygiene).
+mandaDispatch(ctx, call) =
+  -- (1) DIR-020 self-deadlock: synchronous call MUST NOT share session with broker monitor owner
+  ¬sameSession(ctx.caller, ctx.brokerMonitorOwner)
 
-2. **Mission-redirection (declared).** Carries `extra.missionRedirection: true` -- a human judgment
-   that this milestone changes the experiment's direction (redefines VT surfaces, opens a new chart,
-   retires a standing hypothesis, or redirects value-typed ledger priorities).
+  ∧ -- (2) DIR-015/016/024 background-dispatch: every point on nested-dispatch path -> background
+  ∀p ∈ call.nestedDispatchPath: p.mode = background
 
-3. **Unauthorized cross-workspace drive (registry-checked).** Drives a workspace NOT covered by
-   `drivable-workspaces.yml` (`drivable-workspace-check.ts` -- fail-closed gate).
+  ∧ -- (3) Scope: synchronous, result-dependent/nested paths ONLY.
+  --     Fire-and-forget (manda-dispatch submit ... --async) is OUTSIDE scope entirely.
+  isSynchronousNested(call)
+```
 
-`label:human-steered` is a manual override/escape hatch (backstop, not primary mechanism).
+`exec:` Structural invariant (no runtime check). Grep this section before re-deriving
+manda/G3/dispatch rules in a new charter or proposal.
+
+---
+
+## humanSteered :: Task -> Bool
+
+```
+-- DIR-062, 2026-07-23. Excluded from autonomous SELECT iff ANY clause fires.
+
+humanSteered(t) = driverFileEdit(t) ∨ missionRedirection(t) ∨ unauthorizedWorkspace(t)
+
+driverFileEdit(t) = ∃f ∈ t.touchedFiles: basename(f) ∈ {"OUTER-LOOP.md", "inherited-core.md"}
+                  ∨ isUnder(f, ".claude/skills/")
+-- must be authored under .halt + golden-replay + independent adversarial audit (DIR-027)
+
+missionRedirection(t) = t.extra.missionRedirection = true
+-- human judgment: redefines VT surfaces, opens new chart, retires standing hypothesis,
+-- or redirects value-typed ledger priorities
+
+unauthorizedWorkspace(t) = ∃w ∈ t.drivenWorkspaces:
+  ¬isCovered(w, drivableWorkspacesYml)            -- drivable-workspace-check.ts (fail-closed)
+
+-- label:human-steered = manual override/escape hatch (backstop, not primary)
+```
 
 `exec:` `scripts/human-steered-classify.ts` (DIR-062-A, M125) -- SINGLE executable source:
-`classify({touchedFiles, missionRedirection, drivenWorkspaces, registry})` returns
-`{humanSteered, clauses: {driverFileEdit, missionRedirection, unauthorizedWorkspace}, unauthorizedWorkspaces}`.
+```
+classify({touchedFiles, missionRedirection, drivenWorkspaces, registry}) =
+  { humanSteered, clauses: {driverFileEdit, missionRedirection, unauthorizedWorkspace},
+    unauthorizedWorkspaces }
+```
 The script IS the definition when prose and script disagree (ADR-004: hard over soft).
 
 ---
 
-## humanReviewCadence :: State -> {OK, ALARM(K=5)}
-
-Standing rule (DIR-001 item 6, designed M15 from 11-directive sample):
-
-1. **Compute `milestones-since-last-human-directive`** at every ABSORB as
-   `milestone_counter(current, post-increment) - (milestone number at which the LAST human-initiated
-   directive burst was drained from the async `/quay-directive` channel, pre-dispatch)`.
-   DIR-003 (self-raised) does NOT reset this counter.
-
-2. **Soft-alarm threshold: K=5.** Reuses the existing checkpoint cadence
-   (`milestone_counter % 5 == 0`, `OUTER-LOOP.md` step 8).
-
-3. **Explicitly non-blocking.** Crossing K=5 does NOT block ABSORB or `milestone_counter++` --
-   a human directive is asynchronous and human-paced; the loop cannot manufacture one and must not
-   wait for one (`OUTER-LOOP.md` header invariant).
-
-4. **Checkpoint visibility:** at every checkpoint (`milestone_counter % 5 == 0`), the snapshot must
-   include this track's current value.
-
-`exec:` `OUTER-LOOP.md` step 8 (checkpoint snapshot includes this track); `dashboard.md` "Human-review
-cadence" health track.
-
----
-
-## portableMetadata :: Fact -> {bodyPrimary, extraMirror}
-
-Source: `docs/proposals/exp5-cli-edit-parity.md` S3.2.
-
-A quay task's `body` (markdown) and `labels` are **portable** across all Provider ABI implementations.
-A task's `extra{}` map is **native-only convenience** -- it MUST NOT be relied upon as the sole copy
-of any fact that needs to survive a Provider switch.
-
-**Rule:** the authoritative, portable copy of provider-portable metadata MUST live in a structured
-markdown section of the task `body`. `extra{}` MAY additionally carry the same fact as a
-machine-readable, native-only mirror -- but if a Provider hard-errors on writing `extra`, the body
-copy alone must remain sufficient.
-
-**Corollary:** a design that needs `extra{}` as the ONLY place a fact is recorded has mis-designed a
-provider-portability requirement.
-
-`exec:` Design-time convention (no runtime check); enforced by code review / adversarial audit
-inspection of task body vs extra{} for portability-required facts.
-
----
-
-## designOnlyImplRow :: Milestone -> {IMPL_ROW_REQUIRED, N/A}
-
-Source: DIR-016, resolved by M21-impl-row-enforcement.
-
-**Definition -- "design-only milestone":** A milestone is design-only if EITHER: (a) its `backlog.md`
-row states "design delivered"/"design-doc only" (or equivalent), OR (b) its deliverable includes a
-"Done-when clauses a future implementing milestone would need" section.
-
-**Mandatory action:** At ABSORB (`OUTER-LOOP.md` step 6), before Done-when clauses recorded as
-complete or `milestone_counter++`, a design-only milestone's ABSORB **MUST** create a corresponding
-selectable, non-DONE `<M-NAME>-IMPL` candidate row in `backlog.md`.
-
-**HARD BLOCK, not advisory.** Same shape/placement as existing V_meta consolidation-lag gate and
-adversarial-audit gate. Applies going forward from M21; retroactive sweep performed once at M21's
-own ABSORB, not re-run automatically.
-
-`exec:` `scripts/it0-impl-row-check.sh <milestone-id> [backlog-file]` -- exit 0=PASS, 1=FLAG/FAIL, 2=usage error.
-
----
-
-## Definition of Done (M25-dod-meta-enforcer, extended M32/M40/M44/M47)
-
-`exec:` `scripts/it0-dod-check.ts` (SINGLE executable source -- all 13 clauses), wired into
-`OUTER-LOOP.md` step 6 as HARD BLOCK on step 7's `milestone_counter++`. Fixture-pinned by
-`scripts/dod-fixture-selfcheck.sh`. QENG gate engine wraps it; the script IS the definition.
-
-**AC/DoD live in the TASK, not the charter** (DIR-020/M34, 2026-07-19). AC and DoD are authored in
-the milestone-candidate **task** body (`tasks/<task-id>.md`) as `## Acceptance Criteria` and
-`## Definition of Done` -- the SINGLE canonical source. They are NEVER forked into the charter.
-Checklist form (`- [ ]` / `- [x]`) MANDATED going forward; pre-existing prose-form tasks NOT
-retroactively rewritten.
-
-### Clause 0 -- AC + DoD present and well-formed in the task
-`clause0 :: Task -> {PASS, FAIL}` UNCONDITIONAL. Task body has non-empty `## Acceptance Criteria` with >=1 concrete checkable item AND `## Definition of Done` referencing standard DoD. Checklist-form: NO unchecked boxes remain (each `- [ ]` is REFUTED-equivalent). FAIL: exit 1, HARD-blocks `milestone_counter++`.
-
-### Clause 1 -- Per-milestone acceptance audit
-`clause1 :: Task x AuditReport -> {PASS(cleared), FAIL(REFUTED)}` UNCONDITIONAL (original cadence conditions retained ONLY as escalation hints). Fresh-context out-of-band subagent confirms each AC item met (citing concrete artifact, not self-report), DoD satisfied, `it0-dod-check.sh` exited 0. Checklist write-back: audit ticks `- [x]` for confirmed items. FAIL: REFUTED -- names specific claim and why, HARD-blocks until corrected and re-audited.
-
-### Clause 2 -- V_meta consolidation-lag gate
-`clause2 :: LedgerState -> {PASS, FAIL}` Fires for every row in `v-meta-ledger.md` where `status=confirmed` AND NOT `consolidated`. `vmeta-lag-check.ts` computes `milestones-since-confirmed` vs K=2 threshold (that module IS the definition -- fail-closed). FAIL: any qualifying row exceeds K=2 without resolution.
-
-### Clause 3 -- Line-budget gate
-`clause3 :: Charter -> {PASS, FAIL}` Trigger: charter-authoring/plan time (OUTER-LOOP step 1, SELECT -- NOT at ABSORB). Charter scope within small-milestone norm OR over norm WITH phase/stage plan. FAIL: exit 1 (over norm, no plan). `exec:` `scripts/it0-ceiling-line-budget-check.sh`.
-
-### Clause 4 -- Design-only-milestone impl-row gate
-`clause4 :: Milestone -> {PASS, FAIL, N/A}` Trigger: milestone is design-only (per designOnlyImplRow above). Corresponding `-IMPL` candidate row exists in `backlog.md`. `exec:` `scripts/it0-impl-row-check.sh`.
-
-### Clause 5 -- No-self-exemption meta-clause
-`clause5 :: Charter x ABSORBEntry -> {PASS, FAIL}` UNCONDITIONAL (in `MECHANICALLY_UNCONDITIONAL_CLAUSES`). No charter/ABSORB self-exempts from a DoD clause without a WAIVER line (`WAIVER: <milestone-id> | <clause-name> | <reason> | <date>`) in `dashboard.md` Log. Distinguishing test: was the gate EVALUATED and DISPOSITIONED (legitimate non-firing) or was its applicability argued away in prose (undeclared self-exemption)?
-
-### Clause 6 -- Escrow-Delta-v gate
-`clause6 :: Milestone x ABSORBEntry -> {PASS, FAIL, N/A}` Trigger: milestone is design-only AND ABSORB claims nonzero VT Delta-v. Delta-v claim uses explicit escrow/provisional wording adjacent to the claim. FAIL: design-only, claims Delta-v, no qualifier. De-escrow: `-IMPL` row's future ABSORB.
-
-### Clause 7 -- Product-work test-floor gate
-`clause7 :: Milestone x ABSORBEntry -> {PASS, FAIL, N/A}` Trigger: `surface:` label is product-touching (cli, web-ui, provider-abi, mcp) OR no `surface:` label (fail-closed). ABSORB entry records coverage disposition: (a) coverage >=80%/"full"/"complete" with cited test-run, OR (b) WAIVER line (same shape as Clause 5). FAIL: trigger fires AND neither present.
-
-### Clause 8 -- Task canonical-lifecycle-record gate
-`clause8 :: Task -> {PASS, FAIL, N/A}` Trigger: FORWARD-ONLY -- `milestone:M<N>` label with N >= 40. Task has `## Proposal` (non-empty, non-placeholder, inline) AND `## Plan` (EITHER "N/A -- <reason>" OR resolvable `docs/plans/*.md` path). FAIL: trigger fires AND missing/empty/broken. Fixtures: `dod-fixture-selfcheck.sh`.
-
-### Clause 9 -- Split-or-commit / needs-human legitimacy
-`clause9 :: ABSORBEntry -> {PASS, FAIL, N/A}` If `OUTCOME: needs-human`, reason must be external (service outage, missing credential, upstream not released). In-project factors (architecture, complexity, "this is hard") FAIL. If `OUTCOME: done`, Clause 0 governs. Fixtures: `needs-human-external-stub.md`, `needs-human-internal-stub.md`.
-
-### Clause 10 -- Tree-hygiene gate
-`clause10 :: WorktreeState -> {PASS, FAIL}` UNCONDITIONAL. Working tree clean -- no scratch/temp/untracked artifacts. `exec:` `scripts/tree-hygiene-check.sh`.
-
-### Clause 11 -- Worktree/branch-hygiene gate
-`clause11 :: WorktreeState -> {PASS, FAIL}` UNCONDITIONAL. No orphaned milestone worktrees or stale branches after ABSORB. `exec:` `scripts/worktree-branch-hygiene-check.sh`.
-
-### Clause 12 -- Audit-independence gate
-`clause12 :: ABSORBEntry -> {PASS, FAIL, N/A}` Conditional. ABSORB entry carries `## Audit-independence check` section with artifact path + orchestrator id, verified by `audit-independence-check.ts`. N/A: section absent -> documented no-op. `exec:` `scripts/audit-independence-check.ts`.
-
-`MECHANICALLY_UNCONDITIONAL_CLAUSES` = `["line-budget", "impl-row", "escrow-delta-v", "test-floor"]` (Clause 5's `dispositionedClauses.add()` called on every code path incl. FAIL -- the DIR-019 fix). All 13 clauses run via `scripts/it0-dod-check.ts` (exits 0/1/2), wired as HARD BLOCK on step 7's `milestone_counter++`, fixture-pinned by `dod-fixture-selfcheck.sh`.
-
----
-
-## DeviationRecord :: Schema (DIR-017 Step 3 / M36-dod-leakage-metrics)
-
-**What qualifies:** a concrete, cite-able instance where a milestone's actual delivered state departed
-from what its charter/task claimed or from what a DoD clause requires. Excluded: ordinary CONCERNS-level
-audit findings fixed in the same ABSORB; honestly-recorded non-findings.
-
-**Record fields:**
+## humanReviewCadence :: State -> CadenceVerdict
 
 ```
-type DeviationRecord = {
-  id:              "DEV-<NN>"                     // short slug, chronological by discovery date
-  title:           string                         // one-line description
-  originMilestone: string                         // milestone whose work the deviation is found IN
-  foundAt:         string                         // milestone/date actually discovered
-  caughtBy:        "machine" | "human"            // machine = it0-* check or adversarial-audit verdict;
-                                                  // human = directive authored/asserted by human
-  status:          "found" | "fixed" | "verified-eliminated"
-                                                  // verified-eliminated = fix confirmed by evidence
-                                                  // EXTERNAL to the fixing milestone's own self-report
-  age:             number                         // age in milestone-count spans (not calendar dates)
+data CadenceVerdict = OK | ALARM(gap: int, threshold: int)
+
+humanReviewCadence(s) =
+  let gap = s.milestoneCounter - s.lastHumanDirectiveMilestone in  -- DIR-003 does NOT reset
+  if gap ≥ 5 then ALARM(gap, 5) else OK                            -- K=5 soft-alarm
+-- NON-BLOCKING: does NOT block ABSORB or milestone_counter++; human directive is async
+
+checkpointVisibility(s) = if s.milestoneCounter % 5 = 0 then include(s.cadence, snapshot) else skip
+```
+
+`exec:` `OUTER-LOOP.md` step 8 (checkpoint snapshot); `dashboard.md` Human-review cadence health track.
+
+---
+
+## portableMetadata :: Fact -> LocationRule
+
+```
+data LocationRule = BODY_PRIMARY | EXTRA_MIRROR
+-- body (markdown) and labels are PORTABLE across all Provider ABI; extra{} is native-only convenience
+
+portableMetadata(f) = {authoritative: f.body.structuredMarkdownSection,   -- MUST live in body
+                       mirror: f.extra if writable(f.extra) else null}    -- MAY mirror in extra{}
+
+portabilityConstraint(f) = ¬soleSource(f, extraOnly)   -- extra{} MUST NOT be sole copy
+-- If Provider hard-errors on writing extra{}, body copy alone must remain sufficient.
+```
+
+`exec:` Design-time convention (no runtime check); adversarial audit inspects body vs extra{}.
+
+---
+
+## designOnlyImplRow :: Milestone -> ImplVerdict
+
+```
+data ImplVerdict = IMPL_ROW_REQUIRED | N_A
+
+designOnlyMilestone(m) = m.deliverableType = "design"                      -- (a) explicit
+                       ∨ hasSection(m.task, /future implementing milestone/) -- (b) deferred impl
+
+designOnlyImplRow(m) = if designOnlyMilestone(m) then
+    let rowId = "{m.name}-IMPL" in
+    if exists(rowId, backlog) ∧ status(rowId) ≠ DONE then IMPL_ROW_REQUIRED
+    else if ¬exists(rowId, backlog) then error("HARD BLOCK: no -IMPL row in backlog")
+    else IMPL_ROW_REQUIRED
+  else N_A
+-- HARD BLOCK, not advisory. Applied at ABSORB (step 6), before milestone_counter++.
+-- Same placement as V_meta consolidation-lag and adversarial-audit gates.
+```
+
+`exec:` `scripts/it0-impl-row-check.sh <milestone-id> [backlog-file]` (exit 0=PASS, 1=FAIL, 2=error).
+
+---
+
+## Definition of DoD :: DoD
+
+```
+-- SINGLE executable source: scripts/it0-dod-check.ts (all 13 clauses).
+-- Wired into OUTER-LOOP.md step 6 as HARD BLOCK on step 7's milestone_counter++.
+-- Fixture-pinned: scripts/dod-fixture-selfcheck.sh. QENG gate engine wraps it.
+-- AC/DoD live in the TASK, not the charter (DIR-020/M34). Checklist form (- [ ] / - [x]) MANDATED.
+
+MECHANICALLY_UNCONDITIONAL_CLAUSES = ["line-budget","impl-row","escrow-delta-v","test-floor"]
+
+clause0 :: Task -> {PASS, FAIL}
+clause0(t) = hasSection(t.body, "## Acceptance Criteria", nonEmpty)
+           ∧ hasSection(t.body, "## Definition of Done", nonEmpty)
+           ∧ count(t.body.acChecklist, unchecked) = 0                    -- no - [ ] remains; UNCONDITIONAL
+
+clause1 :: Task x AuditReport -> {PASS, FAIL}                            -- UNCONDITIONAL
+clause1(t, report) = confirmedAllAC(t, report)                           -- each AC: concrete artifact cited
+                   ∧ satisfiedDoD(t, report) ∧ report.scriptExit = 0     -- it0-dod-check.sh exited 0
+                   ∧ auditTickedChecklist(t, report)                     -- - [x] written
+-- FAIL: REFUTED -- names specific claim, HARD-blocks until corrected and re-audited
+
+clause2 :: LedgerState -> {PASS, FAIL}
+clause2(state) = ∀r ∈ state.rows where r.status = confirmed ∧ ¬r.consolidated:
+  r.milestonesSinceConfirmed ≤ 2                                         -- K=2; vmeta-lag-check.ts IS definition
+
+clause3 :: Charter -> {PASS, FAIL}                                       -- Trigger: SELECT, NOT ABSORB
+clause3(c) = c.scope.lines ≤ smallMilestoneNorm
+           ∨ (c.scope.lines > smallMilestoneNorm ∧ c.hasPhaseStagePlan)
+exec: scripts/it0-ceiling-line-budget-check.sh
+
+clause4 :: Milestone -> {PASS, FAIL, N_A}
+clause4(m) = if designOnlyMilestone(m) then (if implRowExists(m, backlog) then PASS else FAIL) else N_A
+exec: scripts/it0-impl-row-check.sh
+
+clause5 :: Charter x ABSORBEntry -> {PASS, FAIL}                         -- UNCONDITIONAL
+clause5(c, entry) = ∀gate ∈ allDoDGates:
+  wasEvaluatedDispositioned(gate, entry)                                 -- gate EVALUATED, outcome recorded
+  ∨ hasWaiver(entry, gate, "WAIVER: <ms> | <clause> | <reason> | <date>")
+-- distinguishing test: gate dispositioned (legitimate non-firing) vs applicability argued away in prose -> FAIL
+
+clause6 :: Milestone x ABSORBEntry -> {PASS, FAIL, N_A}
+clause6(m, entry) = if designOnlyMilestone(m) ∧ entry.claimedDeltaV ≠ 0
+  then (if hasEscrowQualifier(entry.deltaVClaim) then PASS else FAIL)    -- explicit escrow wording required
+  else N_A                                                               -- de-escrow: -IMPL row's future ABSORB
+
+clause7 :: Milestone x ABSORBEntry -> {PASS, FAIL, N_A}
+clause7(m, entry) = if m.surfaceLabel ∈ productTouching ∨ m.surfaceLabel = null  -- null -> fail-closed
+  then ( hasCoverageEvidence(entry, ≥80pct, citedTestRun)                -- (a)
+       ∨ hasWaiver(entry, "test-floor") )                                -- (b)
+  else N_A                                                               -- sentence-scoped negation (M32 fix)
+
+clause8 :: Task -> {PASS, FAIL, N_A}                                     -- FORWARD-ONLY: N >= 40
+clause8(t) = if hasMilestoneLabel(t, N) ∧ N ≥ 40
+  then hasProposal(t, nonEmpty, ¬placeholder, INLINE)
+       ∧ hasPlan(t, resolvablePath ∨ "N/A -- <reason>")                  -- ## Proposal + ## Plan
+  else N_A
+exec: fixtures in dod-fixture-selfcheck.sh
+
+clause9 :: ABSORBEntry -> {PASS, FAIL, N_A}
+clause9(entry) = match entry.outcome with
+  | NEEDS_HUMAN -> isExternal(entry.reason)                              -- external only (outage,credential,upstream)
+                                                                         -- in-project factors (architecture,complexity) -> FAIL
+  | DONE        -> clause0 governs
+  | _           -> N_A
+exec: fixtures/{needs-human-external-stub, needs-human-internal-stub}.md
+
+clause10 :: WorktreeState -> {PASS, FAIL}                                -- UNCONDITIONAL
+clause10(state) = cleanWorkingTree(state) ∧ ¬hasUntrackedArtifacts(state)
+exec: scripts/tree-hygiene-check.sh
+
+clause11 :: WorktreeState -> {PASS, FAIL}                                -- UNCONDITIONAL
+clause11(state) = ¬hasOrphanWorktrees(state) ∧ ¬hasStaleBranches(state)
+exec: scripts/worktree-branch-hygiene-check.sh
+
+clause12 :: ABSORBEntry -> {PASS, FAIL, N_A}
+clause12(entry) = if hasSection(entry, "## Audit-independence check")
+  then verified(entry.artifactPath, entry.orchestratorId, audit-independence-check.ts)
+  else N_A                                                               -- section absent -> documented no-op
+```
+
+---
+
+## DeviationRecord :: type DeviationRecord
+
+```
+data DeviationRecord = {
+  id              :: String           -- "DEV-{NN}", chronological by discovery date
+  title           :: String           -- one-line description
+  originMilestone :: MilestoneId      -- milestone where deviation is found IN
+  foundAt         :: MilestoneId      -- milestone/date actually discovered
+  caughtBy        :: "machine" | "human"
+    -- machine = it0-* check or adversarial-audit verdict
+    -- human   = directive authored/asserted by human
+  status          :: "found" | "fixed" | "verified-eliminated"
+    -- verified-eliminated = fix confirmed by EXTERNAL evidence
+  age             :: Int              -- milestone-count spans (not calendar dates)
 }
+
+-- Qualifying: concrete, cite-able instance where delivered state departed from charter/task
+-- claims or DoD clause requirement. Excluded: CONCERNS-level findings fixed in same ABSORB.
+
+forwardUpdate(records, agent) = -- Clause-1 audit subagent is SOLE standing writer
+                                -- Dispatch: OUTER-LOOP.md step 6, after checklist write-back
+
+statusPromotion(r) = if r.status = fixed ∧ externalEvidence(r.id)
+  then r{status = verified-eliminated} else r
+-- Promotion checked at EVERY subsequent ABSORB.
 ```
 
-**Forward-update responsibility:** the Clause-1 per-milestone acceptance-audit subagent is the SOLE
-standing writer of this log, at the SAME dispatch point it already runs (step 6, after checklist
-write-back). Promotion from `fixed` to `verified-eliminated` checked at EVERY subsequent ABSORB.
+`exec:` Clause 1 audit subagent write-back; data in `dashboard.md` homeostatic-variables section.
+Same update cadence as DoD-clause evaluation -- NOT a distinct cadence.
 
-`exec:` Clause 1 audit subagent write-back; data in `dashboard.md` homeostatic-variables section;
-definitions in this section. Cross-reference: `v-meta-ledger.md` (separate artifact, different update
-cadence -- deviation-log has same cadence as DoD-clause evaluation, not a distinct one).
+---
+
+## Provenance
+
+Historical narratives (discovery stories, worked examples, validation passes, iteration accounts,
+directive-finding histories, full DoD clause evolution record) live in
+`experiments/quay-perpetual-stream/provenance.md`. This file carries only formal constraints and
+operational declarations. For the discovery and refinement history of any constraint herein, see
+the corresponding section in provenance.md.

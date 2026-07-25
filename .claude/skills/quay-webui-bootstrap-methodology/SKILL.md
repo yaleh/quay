@@ -1,23 +1,39 @@
 ---
 name: quay-webui-bootstrap-methodology
-description: Use when inheriting or extending methodology into a frontend/visual/UX-shaped BAIME experiment, or when evaluating V_meta ceiling behavior across multiple experiments, the §0c independent holistic visual review mechanism, the G3+visual-review ENV gap, or the σ_QW floor-reset pattern. Extracted HALT-with-practical-convergence-accepted from experiments/quay-webui-bootstrap/ (experiment 3, a frontend/visual/UX transfer test) at iteration 5. This is a delta skill to both quay-native-methodology and quay-core-bootstrap-methodology — read those skills first; this one packages only what experiment 3 discovered that they did not already contain.
-status: halted
-V_instance: 1.0
-V_meta: 0.123
-σ: 0.778
+description: Use when inheriting or extending methodology into a frontend/visual/UX-shaped BAIME experiment, or when evaluating V_meta ceiling behavior across multiple experiments, the §0c independent holistic visual review mechanism, the G3+visual-review ENV gap, or the σ_QW floor-reset pattern. Extracted HALT-with-practical-convergence-accepted from experiments/quay-webui-bootstrap/ (experiment 3, a frontend/visual/UX transfer test) at iteration 5: V_instance=1.0 (all 4 Done-when clauses met), V_meta=0.123 (mathematically ceilinged at 0.26 by frozen effectiveness). This is a delta skill to both quay-native-methodology and quay-core-bootstrap-methodology — read those skills first; this one packages only what experiment 3 discovered that they did not already contain.
 ---
 
 # quay-webui-bootstrap-methodology
 
 λ(scope, task) → GatedOutcome | inherit(quay-native-methodology) ∧ inherit(quay-core-bootstrap-methodology) ∧ apply_delta(scope, task)
 
-## Status (see provenance.md)
+## Status (read first)
 
-Extracted from `experiments/quay-webui-bootstrap/` at iteration 5 — HALT with
-practical convergence accepted, NOT formally converged. V_instance=1.0,
-V_meta=0.123 (ceiling 0.26), σ_QW=7/9=0.778 (floor reset to 0 at iteration
-0). Full convergence-criteria accounting and iteration narrative in
-`provenance.md` §Skill extraction — methodology.
+Source experiment `experiments/quay-webui-bootstrap/` (experiment 3 in this
+project's BAIME history) **halted at iteration 5 with practical convergence
+accepted — NOT formally CONVERGED**. Authoritative closing report:
+`experiments/quay-webui-bootstrap/HALT-RECOMMENDATION.md` and
+`experiments/quay-webui-bootstrap/iterations/iteration-5.md` §11.
+
+```
+V_instance = ui_read_capability × visual_design_quality × verified_by_construction × backlog_health
+           = 1.0 × 1.0 × 1.0 × 1.0 = 1.0   (reached at iteration 4)
+
+V_meta     = completeness × effectiveness × reusability × validation
+           = 0.77 × 0.26 × 0.79 × 0.778 = 0.123   (mathematical ceiling = 0.26;
+             criterion V_meta≥0.80 arithmetically unreachable)
+
+σ_QW       = 7/9 = 0.778   (floor RESET to 0 at iteration 0 — explicit design decision)
+```
+
+Criteria MET: 2 (all 4 Done-when clauses), 4 (G3 audit green), 5 (visual
+review green), 6 (parallel-advancement stall guard). Criteria UNMET
+(structural): 1 (V_meta ceiling blocks dual threshold), 3 (only 1 of ≥2
+required V_meta factors moved numerically). Criterion 7 technically unmet
+by 1 iteration; underlying condition (no productive work remaining) confirmed.
+
+Inheritance chain: experiment 1 (quay-native-methodology) → experiment 2
+(quay-core-bootstrap-methodology) → experiment 3 (this skill).
 
 ## Relationship to prior methodology skills (read those first)
 
@@ -74,6 +90,38 @@ did not already contain.
    itself structurally enforces advancement when a factor is at 0.0 (a
    collapsed factor creates immediate pressure). Explicit guard triggering
    is less likely when the formula is chosen correctly.
+
+## Spec :: formal constraints
+
+:: delta_not_duplicate : Knowledge → CanonicalSource
+| ∀ k ∈ skill.knowledge . source(k) ∈ {quay-native-methodology, quay-core-bootstrap-methodology} ∨ new_experiment_3(k)
+| exec: cite prior methodology skills for shared findings; this skill documents only Δ
+
+:: honest_inheritance : Claim → EvidencePath
+| ∀ claim ∈ skill.knowledge . claim.evidence ∈ {iterations/, HALT-RECOMMENDATION.md}
+| exec: cite iteration file or HALT-RECOMMENDATION.md
+
+:: not_converged : Status → AssertionConstraint
+| status = halted ∧ V_meta = 0.123 ∧ (V_meta < V_meta_ceiling = 0.26)
+| exec: "HALT with practical convergence accepted" — a distinct, weaker status
+
+:: visual_review_requires_both : VisualQualityClaim → DualEvidence
+| credit(visual_design_quality_movement) ⇒ holistic_review(§0c) ∧ lighthouse_pass
+| exec: reference/visual-review-mechanism.md — neither substitutes for the other
+
+:: dispatcher_discipline : AuditDispatch → OrchestratorConstraint
+| dispatch(G3) ∨ dispatch(§0c_visual) ⇒ orchestrator_dispatched(¬inline, ¬self)
+| exec: reference/g3-visual-review-env-gap.md — shared root cause for both gaps
+
+:: ceiling_diagnostic_before_iterating : V_meta_Goal → FeasibilityCheck
+| before(iterate(V_meta)) . require(ceiling_computation(factors))
+| 0.26 ceiling is two-experiment confirmed (exp2 × absence, exp3 × positive measurement)
+| exec: quay-core-bootstrap-methodology/reference/v-meta-ceiling-diagnostic.md
+
+:: floor_reset_explicit : NewExperiment → DesignDecision
+| iteration_0 . require(record(σ_floor_reset_decision, provenance.md))
+| default(σ_floor_reset = 0) for task population distinct from predecessor
+| exec: reference/sigma-inherited-floor-trap.md (in quay-core-bootstrap-methodology)
 
 ## Constraints
 

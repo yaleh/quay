@@ -1,23 +1,39 @@
 ---
 name: quay-core-bootstrap-methodology
-description: Use when inheriting or extending the quay-native methodology into a THIRD scope, or when deciding whether to trust manda nested-subagent dispatch, the G3 audit dispatch channel, or a multiplicative V_meta configuration in a new BAIME experiment. Extracted HALT-with-practical-convergence-accepted from experiments/quay-core-bootstrap/ (experiment 2, a transfer test of experiment 1's methodology) at iteration 10. This is a companion/delta skill to quay-native-methodology — read that skill first; this one packages only what experiment 2 discovered that experiment 1 did not already have.
-status: halted
-V_instance: 1.0
-V_meta: 0.1012
-σ: 0.40
+description: Use when inheriting or extending the quay-native methodology into a THIRD scope, or when deciding whether to trust manda nested-subagent dispatch, the G3 audit dispatch channel, or a multiplicative V_meta configuration in a new BAIME experiment. Extracted HALT-with-practical-convergence-accepted from experiments/quay-core-bootstrap/ (experiment 2, a transfer test of experiment 1's methodology) at iteration 10: V_instance=1.0 (all 4 Done-when clauses met), V_meta=0.1012 (mathematically ceilinged at 0.26 by a frozen effectiveness factor). This is a companion/delta skill to quay-native-methodology — read that skill first; this one packages only what experiment 2 discovered that experiment 1 did not already have.
 ---
 
 # quay-core-bootstrap-methodology
 
 λ(scope, task) → GatedOutcome | inherit(quay-native-methodology) ∧ apply_delta(scope, task)
 
-## Status (see provenance.md)
+## Status (read first)
 
-Extracted from `experiments/quay-core-bootstrap/` at iteration 10 — HALT with
-practical convergence accepted, NOT formally converged. V_instance=1.0,
-V_meta=0.1012 (ceiling 0.26), σ_QC=4/10=0.40. Full convergence-criteria
-accounting and iteration narrative in `provenance.md` §Skill extraction —
-methodology.
+Source experiment `experiments/quay-core-bootstrap/` (experiment 2 in this
+project's BAIME history; protocol source cited in its own directives/
+provenance.md) **halted at iteration 10 with practical convergence
+accepted — NOT formally CONVERGED**. Authoritative closing report:
+`experiments/quay-core-bootstrap/iterations/iteration-10.md` §11.
+
+```
+V_instance = core_abi_symmetry × web_ui_verification × action_delivery_mode × native_backlog_health
+           = 1.0 × 1.0 × 1.0 × 1.0 = 1.0   (stable since iteration 3)
+
+V_meta     = completeness × effectiveness × reusability × validation
+           = 0.77 × 0.26 × 0.79 × 0.64 = 0.1012   (flat since iteration 6,
+             5 consecutive iterations; mathematical ceiling = 0.26,
+             criterion V_meta≥0.80 arithmetically unreachable)
+
+σ_QC       = 4/10 = 0.40   (own-experiment ledger; dominated by an
+             inherited floor σ_strict=0.8493 from experiment 1 — see
+             reference/sigma-inherited-floor-trap.md)
+```
+
+Formal convergence criteria met: 2 (all 4 Done-when clauses), 4 (G3 green,
+vacuously), 5 (diminishing returns). NOT met: 1 (V_meta≥0.80, structurally
+impossible), 3 (≥2 V_meta factors genuinely moved — only 1 did). This is
+the same HALT-not-CONVERGED shape as experiment 1, for structurally
+related reasons — see `reference/transfer-test-outcome.md`.
 
 ## Relationship to quay-native-methodology (read that skill first)
 
@@ -69,6 +85,34 @@ for the original.
    "native" provenance can mean without true independent subagent
    dispatch. Documented within `reference/manda-reliability-envelope.md`
    (same evidentiary source) rather than as a separate file.
+
+## Spec :: formal constraints
+
+:: delta_not_duplicate : Knowledge → CanonicalSource
+| ∀ k ∈ skill.knowledge . source(k) = quay-native-methodology ∨ new_experiment_2(k)
+| exec: cite quay-native-methodology for shared findings; this skill documents only Δ
+
+:: honest_inheritance : Claim → EvidencePath
+| ∀ claim ∈ skill.knowledge . claim.evidence ∈ {iteration-10.md, iterations/}
+| exec: iteration-10.md (authoritative closing report) + specific iteration file
+
+:: ¬imply_convergence : Status → AssertionConstraint
+| status = halted ∧ V_meta = 0.1012 ∧ (V_meta < V_meta_ceiling = 0.26)
+| exec: "HALT with practical convergence accepted" — a distinct, weaker status
+
+:: reliability_envelope_precision : MandaCall → CapabilitySpec
+| tier ∈ {trivial, medium, complex} ∧ timeout ∈ {90s, 150s}
+| trivial@90s = success ∧ medium@150s = success ∧ complex@90s = timeout ∧ complex@150s = success
+| exec: reference/manda-reliability-envelope.md — state exact tuple, never compress
+
+:: ceiling_diagnostic_before_iterating : V_meta_Goal → FeasibilityCheck
+| before(iterate(V_meta)) . require(ceiling_computation(factors))
+| ceiling < threshold ⇒ ¬reachable(criterion_1) without unfreeze(factor)
+| exec: reference/v-meta-ceiling-diagnostic.md
+
+:: floor_reset_or_throughput_decision : NewExperiment → DesignDecision
+| inherit(σ_strict_floor) ⇒ decide(reset(0) ∨ throughput(sufficient_to_exceed_floor))
+| exec: reference/sigma-inherited-floor-trap.md — never let this default silently
 
 ## Constraints
 

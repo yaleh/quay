@@ -2,7 +2,7 @@
 name: author
 description: Use when driving a task at status `todo` toward `ready` — writes/reviews the four mandatory artifacts (Proposal, Plan, AC, DoD) and asserts the `todo -> ready` gate via `quay task check`. Does not execute the task (see quay:execute for `ready -> done`). Invoke with a task id and, optionally, a provider id (default `native`).
 status: exercised
-σ: 0.40
+σ: 0.55
 last_exercise: iteration-27
 ---
 
@@ -42,43 +42,57 @@ authorTask(id, provider) = {
 }
 ```
 
-## Method — four named Layer-1 steps, each with a stated environment-capability requirement and a degraded fallback (design §5: "A Skill declares the environment capability it needs and defines a degraded fallback for environments without it")
+## Method — formal signatures + constraint predicates (Layer-1 steps, design §5)
 
-1. **`write-proposal`** — `quay task view <id> --provider <provider> --json`;
-   if `## Proposal` is missing, write one: what/why, the approach, grounded
-   in a real, specific gap (read the actual code/design, not a generic
-   filler).
-   - *Dispatch-capable target:* run in its own fresh-context subagent.
-   - *Degraded fallback (currently active — no dispatch primitive found in
-     this environment):* write it directly in the current session.
-2. **`review-proposal`** — check the Proposal for internal consistency
-   before proceeding.
-   - *Dispatch-capable target:* an independent subagent, reading only the
-     artifact (not the writer's reasoning), issues a verdict.
-   - *Degraded fallback (currently active):* a same-session re-read pass
-     against a concrete checklist: (a) heading present, (b) content exceeds
-     a trivial-length floor (not a one-word placeholder), (c) the approach
-     names a specific, real gap rather than generic language. This is
-     weaker than true independence and is named as such — see Gaps.
-3. **`write-plan`** — if `## Plan` is missing, write one: phases/stages that
-   concretely implement the Proposal's approach. This is also where the
-   **decompose test** (design §4) applies: declare an epic (create `children`
-   tasks) only if ≥2 independently mergeable deliverables are named;
-   otherwise keep it a single-leaf plan.
-   - *Dispatch-capable target:* own fresh-context subagent.
-   - *Degraded fallback (currently active):* written directly in-session.
-4. **`review-plan`** — check the Plan for internal consistency and correct
-   decompose-test application; write `## AC` (machine-checkable checkboxes)
-   and `## DoD` (defaults ∪ task-specific) if missing, since these are
-   plan-derived artifacts.
-   - *Dispatch-capable target:* independent subagent verdict.
-   - *Degraded fallback (currently active):* same-session checklist: (a)
-     Plan phases map onto AC items, (b) AC section contains ≥1 real
-     checkbox line, (c) DoD is a real checklist, not restated AC.
-5. `quay task check <id> --provider <provider> --json` — if `ok: true`, run
-   `quay task edit <id> --status ready --provider <provider>`. If `ok:
-   false`, do not force it; leave at `todo` (or move to `needs-human` if a
-   human blocker exists) and report the gate's `reason`.
+1. **`write-proposal`**
+   ```
+   writeProposal :: (Task, ProviderId) → Proposal
+   writeProposal(task, provider) =
+     quay task view <id> --provider <provider> --json
+     ∃? ## Proposal → skip
+     ¬∃? ## Proposal → write(what ∧ why ∧ approach ∧ grounded(readActualCode, notGenericFiller))
+   ```
+   -- Degraded: same-session direct write (no subagent-dispatch primitive found)
+
+2. **`review-proposal`**
+   ```
+   reviewProposal :: (Proposal) → Verdict
+   reviewProposal(p) =
+     check(headingPresent(p) ∧ |p| > trivialFloor ∧ approachNamesSpecificGap(p) ∧ ¬genericLanguage(p))
+   constraint ¬selfReview ∧ ¬sharedBlindSpot
+   ```
+   -- Degraded: same-session checklist re-read (no independent subagent available)
+
+3. **`write-plan`**
+   ```
+   writePlan :: (Task, Proposal, ProviderId) → Plan
+   writePlan(task, proposal, provider) =
+     ∃? ## Plan → skip
+     ¬∃? ## Plan → write(phasesConcretelyImplement(proposal.approach))
+     decomposeTest: (|independentlyMergeableDeliverables| ≥ 2) ? createChildren : keepLeaf
+   ```
+   -- Degraded: same-session direct write (no subagent-dispatch primitive found)
+
+4. **`review-plan`**
+   ```
+   reviewPlan :: (Plan, Task) → ReviewOutcome
+   reviewPlan(plan, task) =
+     check(planPhasesMapOntoAc(task) ∧ |acCheckboxes| ≥ 1 ∧ dodIsRealChecklist(task) ∧ ¬dodRestatesAc(task))
+     ∃? ## AC → skip else writeAC(task)
+     ∃? ## DoD → skip else writeDoD(defaults ∪ taskSpecific)
+   constraint ¬selfReview ∧ ¬sharedBlindSpot
+   ```
+   -- Degraded: same-session checklist re-read (no independent subagent available)
+
+5. **`gate-check`**
+   ```
+   gateCheck :: (TaskId, ProviderId) → GateOutcome
+   gateCheck(id, provider) =
+     quay task check <id> --provider <provider> --json
+     case ok of
+       True  → quay task edit <id> --status ready --provider <provider>
+       False → ¬force ∧ (isHumanBlocker ? NeedsHuman : stayTodo)
+   ```
 
 ## Gaps (honestly declared)
 
@@ -102,3 +116,5 @@ authorTask(id, provider) = {
   itself.** Dispatch binding is currently the host's job (`quay action
   run`); this Skill is invoked directly inside whatever session receives
   that trigger.
+
+- Resolved history: `author->ready` gate tightened to require checked-state not mere presence (QN-019); conditional manda Agent three-tier reliability envelope confirmed (experiment 2 iterations 4-6); decompose test exercised (iteration 27). See provenance.md for full per-iteration accounts.

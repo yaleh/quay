@@ -1,23 +1,30 @@
 ---
 name: quay-native-methodology
-description: Use when inheriting or extending quay's task-authoring/execution methodology (Layer-2 quay:author/quay:execute Skills, task check gate, directive lifecycle, G3 out-of-band audit discipline) into a new scope — e.g. quay Core development, a follow-on BAIME experiment, or a new Provider. Extracted HALTED-NOT-CONVERGED from experiments/quay-native-bootstrap/ (quay-native bootstrap) at iteration 88. Do not present this as a converged methodology; it is an inheritance snapshot.
-status: halted
-V_instance: 0.6016
-V_meta: 0.0973
-σ: 0.8493
+description: Use when inheriting or extending quay's task-authoring/execution methodology (Layer-2 quay:author/quay:execute Skills, task check gate, directive lifecycle, G3 out-of-band audit discipline) into a new scope — e.g. quay Core development, a follow-on BAIME experiment, or a new Provider. Extracted HALTED-NOT-CONVERGED from experiments/quay-native-bootstrap/ (quay-native bootstrap) at iteration 88: V_instance=0.6016, V_meta=0.0973, sigma_strict=0.8493. Do not present this as a converged methodology; it is an inheritance snapshot.
 ---
 
 # quay-native-methodology
 
 λ(scope, task) → GatedOutcome | inherit({skills, gate, directives, audit}) ∧ apply(scope, task)
 
-## Status (see provenance.md)
+## Status (read first)
 
-Extracted from `experiments/quay-native-bootstrap/` at iteration 88 — halted by
-human owner, NOT converged. V_instance=0.6016, V_meta=0.0973 (flat since
-iteration 66, 22+ consecutive iterations), σ_strict=62/73=0.8493. Full
-convergence-criteria accounting and iteration narrative in `provenance.md`
-§Skill extraction — methodology.
+Source experiment `experiments/quay-native-bootstrap/` (protocol: `docs/proposals/quay-bootstrap-experiment.md`)
+was **halted by its human owner at iteration 88, NOT converged**. None of
+protocol §7's 5 convergence criteria are met. This extraction is a
+deliberate pre-stop deviation from normal post-convergence extraction
+(see `docs/proposals/quay-core-bootstrap-experiment-v2.md` §2.1), producing
+an honest "what the methodology actually contained as of iteration 88"
+snapshot — not a polished retrospective, not a claim of success.
+
+Final metrics (iteration 88, unchanged since — see `reference/patterns.md`
+§Final State):
+```
+V_instance = 0.85 × 0.97 × 0.76 × 0.96 = 0.6016
+V_meta     = 0.74 × 0.26 × 0.79 × 0.64 = 0.0973  (flat since iteration 66,
+                                                    22+ consecutive iterations)
+σ_strict   = 62/73 = 0.8493
+```
 
 ## What this Skill packages (inherited, stage 0 — per v2 proposal §2.2)
 
@@ -40,6 +47,32 @@ convergence-criteria accounting and iteration narrative in `provenance.md`
 4. The out-of-band audit (G3) discipline: every σ lift is co-signed by an
    independently-dispatched adjudicate check, never self-performed by the
    iteration that did the work. See `reference/g3-audit-discipline.md`.
+
+## Spec :: formal constraints
+
+:: honest_inheritance : Claim → EvidencePath
+| ∀ claim ∈ skill.knowledge . claim.evidence ∈ {provenance.md, iterations/}
+| exec: cite iteration file or provenance.md section — never assert from skill prose alone
+
+:: ¬imply_convergence : Status → AssertionConstraint
+| status = halted ∧ V_meta = 0.0973 ∧ V_meta ≪ 0.80
+| exec: never emit "converged" — always "halted, not converged"
+
+:: σ_boundary : NewScope → LedgerInit
+| prefix(newScope) ∩ prefix(source) = ∅
+| exec: new scope resets provenance ledger and task-ID prefix per v2 proposal §6
+
+:: stalled_factors_are_starting_hypotheses : MetaFactor → ActionRequirement
+| ∀ f ∈ stalled_factors . require(movement(f) ∨ new_stall_reason(f))
+| exec: reference/v-meta-stall-analysis.md — concrete re-trigger conditions, not vibes
+
+:: gate_before_status_advance : Task × StatusTransition → GateResult
+| transition ∈ {todo→ready, ready→done} ⇒ gate_check(task) = pass
+| exec: quay task check <id> before any status write — never force-edit past a false gate
+
+:: g3_before_credit : ProvenanceClaim → AuditRequirement
+| ∀ credit ∈ {σ_lift, convergence_claim, stall_reopen} . require(dispatch(G3_audit, ¬self))
+| exec: separately-dispatched adjudicate, never self-performed
 
 ## Constraints
 
