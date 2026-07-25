@@ -7,6 +7,8 @@
 //      experiment-layout path (experiments/quay-perpetual-stream/**) or "exp5" attribution
 //   5. the loop-driver skill (DIR-042-B) carries no research-layer references (VT/value-ledger/
 //      checkpoints/experiments/**)
+//   6. M136 (DIR-070-A): sync-vendor.sh --check dynamic scanning verifies ALL sync-vendor-managed
+//      files without hardcoded static lists
 //
 // Run: node --test plugin/test/plugin-packaging.test.mjs
 import { test } from 'node:test';
@@ -135,16 +137,36 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
   }
 });
 
-test('read-probe-spec.ts is byte-identical to its exp5 canonical source', () => {
-  const canonical = path.join(repoRoot, 'experiments', 'quay-perpetual-stream', 'scripts', 'read-probe-spec.ts');
-  const bundled = path.join(pluginDir, 'scripts', 'read-probe-spec.ts');
-  assert.ok(existsSync(canonical), `canonical source missing: ${canonical}`);
-  assert.ok(existsSync(bundled), `bundled copy missing: ${bundled}`);
-  assert.equal(
-    readFileSync(bundled, 'utf8'),
-    readFileSync(canonical, 'utf8'),
-    'read-probe-spec.ts must be byte-identical to its single canonical source (no drifting copy)'
+test('M136 (DIR-070-A): sync-vendor.sh --check dynamic scanning verifies all managed files with no hardcoded lists', () => {
+  const syncScript = path.join(pluginDir, 'scripts', 'sync-vendor.sh');
+  assert.ok(existsSync(syncScript), 'sync-vendor.sh must exist');
+  let result = '';
+  let exitOk = false;
+  try {
+    result = execFileSync('bash', [syncScript, '--check'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    exitOk = true;
+  } catch (e) {
+    // execFileSync throws on non-zero exit — capture stdout for diagnostics
+    result = e.stdout || e.stderr || '';
+  }
+  // --check exit 0 = all in sync (dynamic, not hardcoded)
+  assert.ok(exitOk, `sync-vendor.sh --check must exit 0. Output:\n${result}`);
+  assert.ok(
+    result.includes('CLEAN'),
+    `sync-vendor.sh --check must report CLEAN (dynamic scanning). Output:\n${result}`
   );
+  // Verify the output contains the expected categories (but NOT hardcoded file lists)
+  assert.ok(
+    result.includes('verifying concurrency/routine scripts'),
+    '--check must scan concurrency/routine scripts dynamically'
+  );
+  // Verify symlink awareness: output should report 7 OK (identical) entries for concurrency scripts
+  const okCount = (result.match(/OK \(identical\): scripts\//g) || []).length;
+  assert.equal(okCount, 7, '--check must report exactly 7 identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array)');
 });
 
 test('loop-driver skill (DIR-042-B) has zero research-layer references (VT/value-ledger/checkpoints/experiments/**)', () => {

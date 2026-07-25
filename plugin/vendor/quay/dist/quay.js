@@ -29135,12 +29135,12 @@ var init_provider_env = __esm({
 import path4 from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-var __dirname, QUAY_VERSION;
+var __dirname2, QUAY_VERSION;
 var init_version = __esm({
   "src/version.ts"() {
-    __dirname = path4.dirname(fileURLToPath(import.meta.url));
+    __dirname2 = path4.dirname(fileURLToPath(import.meta.url));
     ({ version: QUAY_VERSION } = JSON.parse(
-      readFileSync(path4.resolve(__dirname, "../package.json"), "utf8")
+      readFileSync(path4.resolve(__dirname2, "../package.json"), "utf8")
     ));
   }
 });
@@ -29842,7 +29842,7 @@ function resolveGate(name, workspaceRoot = discoverWorkspaceRoot()) {
 function listGates(workspaceRoot = discoverWorkspaceRoot()) {
   return [...Object.keys(gateRegistry), ...Object.keys(loadWorkspaceGates(workspaceRoot))];
 }
-var __dirname2, REPO_ROOT, DOCUMENTS_DIR, DOCUMENT_GATE_IDS, gateRegistry;
+var moduleDir, REPO_ROOT, DOCUMENTS_DIR, DOCUMENT_GATE_IDS, gateRegistry;
 var init_registry = __esm({
   "src/gate/registry.ts"() {
     init_acceptance_runner();
@@ -29850,8 +29850,8 @@ var init_registry = __esm({
     init_utils();
     init_loader();
     init_loader();
-    __dirname2 = path10.dirname(fileURLToPath2(import.meta.url));
-    REPO_ROOT = path10.resolve(__dirname2, "..", "..", "..", "..");
+    moduleDir = typeof __dirname === "string" ? __dirname : path10.dirname(fileURLToPath2(import.meta.url));
+    REPO_ROOT = path10.resolve(moduleDir, "..", "..", "..", "..");
     DOCUMENTS_DIR = path10.join(REPO_ROOT, "docs-managed");
     DOCUMENT_GATE_IDS = [
       { gateName: "doc-quay-directive-skill", docId: "DOC-001" }

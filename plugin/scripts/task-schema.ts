@@ -306,13 +306,59 @@ export function checkDirectiveSections(task, kind) {
   return { ok: true, code: "directive-sections-present", message: "'## Finding' and '## Requested action' both present" };
 }
 
+// ── Assertion A8: Touches declaration — must be present & well-formed on execution-type tasks. ──────
+// Import isOverbroadDeclaration from the single-source module (ADR-004).
+import { isOverbroadDeclaration } from "./touches-orthogonality-check.ts";
+
+// TYPE_EXEC_RE matches a `type: execution` line in the charter body (same regex as
+// concurrent-batch-scheduler.ts's parseCandidate, for determinism).
+const TYPE_EXEC_RE = /^\s*\*{0,2}type\*{0,2}\s*:\s*\*{0,2}\s*`?execution`?/im;
+
+export function checkTouches(task) {
+  // Read type from body text (charter convention: `type: execution`).
+  const isExec = TYPE_EXEC_RE.test(task.body);
+  if (!isExec) {
+    // Non-execution types (learning, methodology, discovery, etc.): skip vacuously.
+    return { ok: true, code: "touches-na", message: "type is not execution — ## Touches check not applicable" };
+  }
+  const sec = extractSection(task.body, "Touches");
+  if (sec === null) {
+    // INFO only — execution-type task without ## Touches can still run serial.
+    return { ok: true, code: "touches-absent-info", message: "INFO: type:execution but no '## Touches' section — task can run serial but CANNOT be batched concurrently" };
+  }
+  // Parse glob lines from the ## Touches section (bullet list: `- <glob>` or `* <glob>`).
+  const globs = [];
+  for (const line of sec.split(/\r?\n/)) {
+    const m = line.match(/^\s*[-*]\s+(.+?)\s*$/);
+    if (!m) continue;
+    let g = m[1].trim();
+    if (g.startsWith("`") && g.endsWith("`")) g = g.slice(1, -1);
+    g = g.trim();
+    if (g) globs.push(g);
+  }
+  if (globs.length === 0) {
+    return { ok: false, code: "touches-empty", message: "## Touches section is present but has zero non-empty glob lines — ill-formed (add concrete paths or remove the section)" };
+  }
+  // Validate each glob: no overbroad declarations.
+  const overbroad = globs.filter((g) => isOverbroadDeclaration(g));
+  if (overbroad.length > 0) {
+    return { ok: false, code: "touches-overbroad", message: `## Touches has overbroad glob(s): ${overbroad.map((g) => `"${g}"`).join(", ")} — need >=2 concrete leading path segments before any wildcard, or an exact path` };
+  }
+  // Validate no empty-expansion globs (globs ending in `/` with no wildcard resolve to nothing).
+  const dubious = globs.filter((g) => g.endsWith("/") && !/[?*]/.test(g));
+  if (dubious.length > 0) {
+    return { ok: false, code: "touches-dubious", message: `## Touches has dubious glob(s): ${dubious.map((g) => `"${g}"`).join(", ")} — trailing-slash without wildcard may expand to nothing (likely a typo)` };
+  }
+  return { ok: true, code: "touches-wellformed", message: `## Touches well-formed with ${globs.length} glob(s)` };
+}
+
 // ── checkTask — the SINGLE entry point both callers use. ──────────────────────────────────────────
 export function checkTask(fullText) {
   const task = parseTask(fullText);
   const marker = hasSchemaMarker(task);
   const kind = classifyKind(task);
   if (!marker) {
-    return { marker: false, kind, applicable: false, results: [], verdict: "N/A-legacy", failures: [] };
+    return { marker: false, kind, applicable: false, results: [], verdict: "N/A-legacy", failures: [], warnings: [] };
   }
   const results = [
         checkProposal(task),
@@ -322,14 +368,17 @@ export function checkTask(fullText) {
         checkResolution(task),
         checkNoScaffolding(task),
         checkDirectiveSections(task, kind),
+        checkTouches(task),
       ];
   const failures = results.filter((r) => !r.ok);
+  const warnings = results.filter((r) => r.code === "touches-absent-info");
   return {
     marker: true,
     kind,
     applicable: true,
     results,
     failures,
+    warnings,
     verdict: failures.length === 0 ? "PASS" : "FAIL",
   };
 }
