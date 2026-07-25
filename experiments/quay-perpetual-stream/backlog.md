@@ -6,17 +6,23 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| DIR-091 | DIR-091: Extract shared gate-script framework — 50 scripts sharing boilerplate | DONE | - | milestone:M152, milestone-candidate, crystallization |
+| DIR-090 | DIR-090: Audit Bash timeouts — 6 occurrences of 2m default timeout | DONE | - | milestone-candidate, defect, human-steered, milestone:M151 |
+| DIR-070-E | DIR-070-E: Gap 3 — extract quay-task-to-plan as plugin skill | DONE | - | milestone-candidate, human-steered |
+| DIR-097 | DIR-097: Fix systemic Gate phase failures — acceptance/impl-row/audit-indep gates not Workflow-safe | DONE | - | directive, milestone-candidate, milestone:M145 |
+| DIR-092 | DIR-092: Restore concurrent execution at correct layer — main session dispatches N workflows | DONE | - | directive, human-steered, milestone-candidate |
+| DIR-094 | DIR-094: Ship distributable quay CLI + switch loop-driver to MCP tools | DONE | - | directive, milestone-candidate, milestone:M149 |
 | DIR-095 | DIR-095: Fix version consistency drift across 8 package files | DONE | - | directive, milestone-candidate, milestone:M147 |
 | DIR-096 | DIR-096: Document Glob unavailability in subagent sessions | DONE | - | directive, milestone-candidate, milestone:M148 |
-| DIR-097 | DIR-097: Fix systemic Gate phase failures — acceptance/impl-row/audit-indep gates not Workflow-safe | DONE | - | directive, milestone-candidate, milestone:M145 |
+| DIR-080 | DIR-080: Refactor executed documents to agent-spec style — collapse prose, extract history | DONE | - | directive, human-steered, milestone-candidate |
 | DIR-086 | DIR-086: process.exitCode coupling in lifecycle.ts — library functions mutate global process state, forcing every caller to manually reset | DONE | - | milestone-candidate, milestone:M144, defect |
 | DIR-087 | DIR-087: Extract gate factory config — fanOut=29 → ≤24 | DONE | - | milestone-candidate, milestone:M146 |
+| DIR-076 | DIR-076: Scope it0 systematic-explore checks to current milestone only | DONE | - | directive, human-steered, milestone-candidate |
 | DIR-093 | DIR-093: Fix audit-indep gate session-ID matching — Audit agent writes session ID to absorb entry before gate runs | DONE | - | directive, milestone-candidate, milestone:M142 |
 | DIR-084 | DIR-084: QUAY_ACCEPTANCE_CWD env pollution in MCP lifecycle handlers | DONE | - | milestone-candidate, milestone:M141, defect |
 | DIR-070-D | DIR-070-D: Gap 2 — package run-routines as plugin skill | DONE | - | milestone-candidate, milestone:M140 |
 | DIR-070-C | DIR-070-C: Gap 1 Tier B — 5 parameterized gates to plugin/scripts/ | DONE | - | milestone-candidate, milestone:M139 |
 | DIR-085 | DIR-085: Missing gate_list MCP tool — agents cannot discover registered gates over MCP | DONE | - | milestone-candidate, milestone:M143, defect |
-| DIR-092 | DIR-092: Restore concurrent execution at correct layer — main session dispatches N workflows | DONE | - | directive, human-steered, milestone-candidate |
 | DIR-069 | DIR-069: Browser-explorer routine probe — chrome-devtools/playwright-driven Web UI deliverable exploration | DONE | - | directive, milestone-candidate, milestone:M-138 |
 | DIR-070-B | DIR-070-B: Gap 1 Tier A — 5 drop-in gates to plugin/scripts/ | DONE | - | milestone-candidate, milestone:M-137 |
 | DIR-081 | DIR-081: Bundle quay workflows, agents, and gate scripts into the plugin for cross-workspace distribution | DONE | - | directive, milestone-candidate |
@@ -25,13 +31,7 @@ Sort: value-view (DONE/open/STALE, default)
 | DIR-064-A | DIR-064 child A [halt-free]: build S1/S2/S3 chart-2 cov-calculator scripts (Distribution-reliability / Delivery-completeness / External-validation-reach) + fixtures + ≥80% test (no driver edit — loop-autonomous) | DONE | - | milestone-candidate, crystallization |
 | DIR-063-A | DIR-063 child A [halt-free]: chart-saturation-check detector + milestones-since-last-transition counter + anti-gaming guard scripts + fixtures + ≥80% test (no driver edit — loop-autonomous) | DONE | - | milestone-candidate, crystallization, milestone:M-127 |
 | DIR-062-A | DIR-062 child A [halt-free]: build the human-steered classifier + drivable-workspace fail-closed gate + fixtures + ≥80% test (no driver edit — loop-autonomous) | DONE | - | milestone-candidate, crystallization, milestone:M-125 |
-| DIR-070-E | DIR-070-E: Gap 3 — extract quay-task-to-plan as plugin skill | DONE | - | milestone-candidate, human-steered |
-| DIR-080 | DIR-080: Refactor executed documents to agent-spec style — collapse prose, extract history | DONE | - | directive, human-steered, milestone-candidate |
-| DIR-075 | DIR-075: Wire concurrent multi-milestone execution into exp5 OUTER-LOOP | DONE | - | directive, human-steered, milestone-candidate |
-| DIR-079 | DIR-079: Per-it0-check incremental caching in Verify phase | DONE | - | directive, human-steered, milestone-candidate |
-| DIR-076 | DIR-076: Scope it0 systematic-explore checks to current milestone only | DONE | - | directive, human-steered, milestone-candidate |
 | DIR-077 | DIR-077: Eliminate mid-session loop disengagement — use /loop self-paced mode | DONE | - | directive, human-steered, milestone-candidate |
-| DIR-078 | DIR-078: Adaptive Build-phase heartbeat — harness notification as primary wake | DONE | - | directive, human-steered, milestone-candidate |
 | exp5-M-OUTERLOOP-ROUTINE-WIRING | Wire exp5 OUTER-LOOP to fire the DIR-051 routine track (HUMAN-STEERED, halt + golden-replay): teach OUTER-LOOP's checkpoint step to consume .quay/loop.yml routines: (routine-scheduler → dispatch probe → routine-file-gate), so self-validation (DIR-052) + architecture-analysis (DIR-053) + meta-cc mining (DIR-055) fire as STANDING routines on quay's own board — not just as ad-hoc explore milestones. The single shared wiring that makes all three routines real. | DONE | - | milestone-candidate, human-steered |
 | exp5-M-PRODUCTIZED-DELIVERY-D | Productized delivery child D [human-steered: touches foreign workspace]: foreign-workspace Provider-install mechanism + real archguard E2E — an observed real Provider-ABI task-status GateEvent flips S3 External-validation-reach | DONE | - | milestone-candidate, human-steered |
 | exp5-M-PRODUCTIZED-DELIVERY-C | Productized delivery child C [human-steered: real outward publish]: cut a REAL release publishing all 4 package tarballs + the plugin bundle, version- consistent, runtime-smoke-green on the Node floor — flips S2 cov with real evidence | DONE | - | milestone-candidate, human-steered |
@@ -168,15 +168,16 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| DIR-094 | DIR-094: Ship distributable quay CLI + switch loop-driver to MCP tools | SELECTED | - | directive, milestone-candidate, milestone:M149 |
 | DIR-072 | DIR-072: SELECT preflight — scripts/select-preflight.ts + thin classify-deliverable workflow | open | - | directive, milestone-candidate |
+| DIR-089 | DIR-089: Safe JSON parse guard — 4 identical JSONDecodeError traces | open | - | milestone-candidate, defect, human-steered |
+| DIR-079 | DIR-079: Per-it0-check incremental caching in Verify phase | open | - | directive, human-steered, milestone-candidate |
+| DIR-078 | DIR-078: Adaptive Build-phase heartbeat — harness notification as primary wake | open | - | directive, human-steered, milestone-candidate |
+| DIR-075 | DIR-075: Wire concurrent multi-milestone execution into exp5 OUTER-LOOP | open | - | directive, human-steered, milestone-candidate |
+| DIR-074 | DIR-074: Refactor execute-milestone.js — move Build coordination protocol from agent prompt to script body | open | - | directive, milestone-candidate |
+| DIR-088 | DIR-088: Pre-Edit freshness check — 78% of Edit errors are stale matches | SELECTED | - | milestone-candidate, milestone:M150, defect |
 | DIR-071 | DIR-071: Mechanize DRAIN step — drain-scheduler.ts + /drain-directives workflow | open | - | directive, milestone-candidate |
 | DIR-070 | DIR-070: exp5 deliverable improvements — systematic gap closure | open | - | directive, milestone-candidate, epic |
 | DIR-073 | DIR-073: Verify failure diagnostic — scripts/diagnose-verify-failure.ts + thin diagnose-complex workflow | open | - | directive, milestone-candidate |
-| DIR-091 | DIR-091: Extract shared gate-script framework — 50 scripts sharing boilerplate | open | - | milestone-candidate, crystallization |
-| DIR-090 | DIR-090: Audit Bash timeouts — 6 occurrences of 2m default timeout | open | - | milestone-candidate, defect |
-| DIR-089 | DIR-089: Safe JSON parse guard — 4 identical JSONDecodeError traces | open | - | milestone-candidate, defect |
-| DIR-088 | DIR-088: Pre-Edit freshness check — 78% of Edit errors are stale matches | open | - | milestone-candidate, defect |
 | DIR-062-B | DIR-062 child B [human-steered: halt + golden-replay]: write the 3-clause definition into inherited-core.md + wire OUTER-LOOP SELECT to call the classifier | open | - | milestone-candidate, crystallization, human-steered |
 | DIR-070-F | DIR-070-F: Gap 3 — extract methodology skills (lower priority) | open | - | milestone-candidate, human-steered |
 | DIR-063-B | DIR-063 child B [human-steered: halt + golden-replay]: wire chart-saturation-check as a self-halt PRE-STEP in OUTER-LOOP.md, gate subagent-drafting strictly behind TRANSITION-DUE | open | - | milestone-candidate, crystallization, human-steered |
@@ -191,4 +192,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_184 milestone-candidate task(s) as of 2026-07-25T12:00:35.444Z._
+_185 milestone-candidate task(s) as of 2026-07-25T16:51:13.324Z._
