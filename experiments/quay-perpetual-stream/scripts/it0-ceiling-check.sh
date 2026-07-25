@@ -35,12 +35,6 @@ if [ "${1:-}" = "--milestone" ]; then
   shift 2
 fi
 set -u
-ACCEPT_CLOSED=0
-
-if [ "${1:-}" = "--milestone" ]; then
-  ACCEPT_CLOSED=1
-  shift 2
-fi
 
 
 GAPFILE="experiments/quay-continuous-bootstrap/gap-list.md"

@@ -208,6 +208,7 @@
 
 | ~~DIR-077~~ | ~~exp5 directive: /loop self-paced mode + loop.md~~ | ~~minor~~ | ~~exp5 M138~~ | ~~2026-07-24~~ | ~~2026-07-24~~ |
 | ~~DIR-079~~ | ~~exp5 directive: per-it0-check incremental caching~~ | ~~minor~~ | ~~exp5 M140~~ | ~~2026-07-24~~ | ~~2026-07-24~~ |
+| ~~DIR-080~~ | ~~exp5 directive: refactor executed documents to agent-spec style~~ | ~~minor~~ | ~~exp5 M144~~ | ~~2026-07-25~~ | ~~2026-07-25~~ |
 | ~~DIR-081~~ | ~~exp5 directive: bundle workflows/agents/gate-scripts into plugin~~ | ~~minor~~ | ~~exp5 M143~~ | ~~2026-07-25~~ | ~~2026-07-25~~ |
 | ~~DIR-075~~ | ~~exp5 directive: wire concurrent multi-milestone execution~~ | ~~minor~~ | ~~exp5 M142~~ | ~~2026-07-24~~ | ~~2026-07-24~~ |
 | ~~DIR-078~~ | ~~exp5 directive: adaptive Build-phase heartbeat~~ | ~~minor~~ | ~~exp5 M141~~ | ~~2026-07-24~~ | ~~2026-07-24~~ |
