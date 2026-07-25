@@ -155,6 +155,8 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
+| DIR-073 | DIR-073: Verify failure diagnostic — scripts/diagnose-verify-failure.ts + thin diagnose-complex workflow | open | - | directive, milestone-candidate |
+| DIR-070 | DIR-070: exp5 deliverable improvements — systematic gap closure | open | - | directive, milestone-candidate, epic |
 | DIR-091 | DIR-091: Extract shared gate-script framework — 50 scripts sharing boilerplate | open | - | milestone-candidate, crystallization |
 | DIR-090 | DIR-090: Audit Bash timeouts — 6 occurrences of 2m default timeout | open | - | milestone-candidate, defect |
 | DIR-089 | DIR-089: Safe JSON parse guard — 4 identical JSONDecodeError traces | open | - | milestone-candidate, defect |
@@ -171,7 +173,6 @@ Sort: value-view (DONE/open/STALE, default)
 | DIR-062-B | DIR-062 child B [human-steered: halt + golden-replay]: write the 3-clause definition into inherited-core.md + wire OUTER-LOOP SELECT to call the classifier | open | - | milestone-candidate, crystallization, human-steered |
 | DIR-070-F | DIR-070-F: Gap 3 — extract methodology skills (lower priority) | open | - | milestone-candidate, human-steered |
 | DIR-071 | DIR-071: Mechanize DRAIN step — drain-scheduler.ts + /drain-directives workflow | SELECTED | - | directive, milestone-candidate, milestone:M-137 |
-| DIR-070 | DIR-070: exp5 deliverable improvements — systematic gap closure | open | - | directive, milestone-candidate, epic |
 | DIR-063-B | DIR-063 child B [human-steered: halt + golden-replay]: wire chart-saturation-check as a self-halt PRE-STEP in OUTER-LOOP.md, gate subagent-drafting strictly behind TRANSITION-DUE | open | - | milestone-candidate, crystallization, human-steered |
 | DIR-062-C | DIR-062 child C [proof, depends on B]: a REAL task's human-steered verdict produced by the wired SELECT logic (not hand-assigned), GateEvent-evidenced | open | - | milestone-candidate, crystallization |
 | DIR-066-B | DIR-066 child B [human-steered: halt + golden-replay]: wire the Round-1 D-quota into OUTER-LOOP step 1 (candidates-considered-this-pass) + REMOVE DIR-038-B's governance:product→HALT-RECOMMENDED clause from the self-halt block | open | - | milestone-candidate, human-steered |
@@ -184,4 +185,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_177 milestone-candidate task(s) as of 2026-07-25T05:38:32.846Z._
+_178 milestone-candidate task(s) as of 2026-07-25T05:44:24.081Z._
