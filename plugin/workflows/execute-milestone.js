@@ -13,40 +13,66 @@ export const meta = {
 // ── Phase: Verify (step 4) ──────────────────────────────────────────────────────────
 phase('Verify')
 
-// NOTE (M136 fix): DIR-079 per-check incremental caching (readFile+sha256) removed from
-// this workflow script — the workflow JS runtime has no filesystem API. Until the runtime
-// grows fs support or cache is passed via args, all 5 it0 checks run unconditionally.
+// DIR-073 (M154): Refactored from 5 agents (3 were script-runner wrappers) to 2 agents.
+// The 4 mechanical checks (ceiling, gate-hash, line-budget, dogfood-evidence) are run as
+// direct shell commands by a single agent; only domain-misfit genuinely needs LLM judgment.
+// All check results are recorded in unified {check, ok, detail, source} shape for journal
+// parsing by diagnose-verify-failure.ts.
 
-const verify = await parallel([
+const verifyResults = await parallel([
   () => agent(
-    `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}) against gap/directive IDs cited in the charter. Only extract IDs from the Scope and Done-when sections — skip the **Task:** header and parenthetical references like "(DIR-xxx)". With --milestone, CLOSED is acceptable (exit 0); only NOT-FOUND → exit 1. If no extractable scope IDs found, exit 0 vacuously. Return {ok, detail}.`,
-    { label: 'ceiling-check', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-  ),
-  () => agent(
-    `Run it0-gate-hash-check.sh --by-reference ${args.charterFile}. Non-zero exit = undeclared paraphrase of the HARD GATES block. Return {ok, detail}.`,
-    { label: 'gate-hash', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+    `Run the 4 mechanical it0 checks as direct shell commands. Extract the milestone number from the charter path (e.g., experiments/quay-perpetual-stream/charters/M154-dir073-verify-diagnostic.md → M154).
+
+Script base: experiments/quay-perpetual-stream/scripts
+
+Run in sequence, capturing exit code + stdout for each:
+
+1. bash experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone <extracted-milestone> ${args.charterFile}
+   Non-zero = NOT-FOUND scope IDs; zero = all IDs found or CLOSED (with --milestone) or vacuously none.
+
+2. bash experiments/quay-perpetual-stream/scripts/it0-gate-hash-check.sh --by-reference ${args.charterFile}
+   Non-zero = GATE-HASH-REF mismatch; zero = hash matches.
+
+3. bash experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh ${args.charterFile}
+   Non-zero = charter exceeds line budget; zero = within budget.
+
+4. bash experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone <extracted-milestone> ${args.charterFile}
+   Non-zero = evidence-gap in iteration reports; zero = all claimed clauses have nearby fenced evidence.
+
+Return {checks: [
+  {check: "ceiling-check", ok: <exit===0>, detail: "<stdout truncated to last 2000 chars>", source: "script"},
+  {check: "gate-hash", ok: <exit===0>, detail: "<stdout>", source: "script"},
+  {check: "line-budget", ok: <exit===0>, detail: "<stdout>", source: "script"},
+  {check: "dogfood-evidence", ok: <exit===0>, detail: "<stdout>", source: "script"}
+]}. If a script cannot be run (missing file, usage error exit 2), return ok: false with the error.`,
+    { label: 'mechanical-checks', schema: { type: 'object', required: ['checks'], properties: {
+      checks: { type: 'array', items: { type: 'object', required: ['check', 'ok'], properties: {
+        check: { type: 'string' }, ok: { type: 'boolean' }, detail: { type: 'string' }, source: { type: 'string' },
+      } } }
+    } } }
   ),
   () => agent(
     `Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to the milestone's Done-when list. Return {ok: true, step3conclusion} — ok indicates the check completed (always true when the procedure was applied); step3conclusion records whether a misfit was found. This check is INFORMATIONAL, never blocking.`,
     { label: 'domain-misfit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, step3conclusion: { type: 'string' } } } }
   ),
-  () => agent(
-    `Run it0-ceiling-line-budget-check.sh ${args.charterFile}. FLAG (exit 1) = scope exceeds ~2000-line ceiling with no phase/stage plan reference. Return {ok, detail}.`,
-    { label: 'line-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-  ),
-  () => agent(
-    `Run experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139). With --milestone, scans only current milestone's iteration reports. Return {ok, detail}.`,
-    { label: 'dogfood-evidence', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-  ),
 ])
 
-// A null return means the agent crashed — treat as failure (fail-closed).
-const verifyFailed = verify.filter(Boolean).some(c => c === null || !c?.ok)
+// --- Unify results into a single journal shape ---
+const mechanicalChecks = (verifyResults[0]?.checks || []).map(c => ({...c, source: c.source || 'script'}))
+const domainMisfitResult = verifyResults[1]
+const domainMisfitEntry = domainMisfitResult ? {
+  check: 'domain-misfit', ok: domainMisfitResult.ok !== false, detail: domainMisfitResult.step3conclusion || '', source: 'agent'
+} : null
+
+const allVerifyResults = [...mechanicalChecks, domainMisfitEntry].filter(Boolean)
+
+// A null return from either agent means the agent crashed — treat as failure (fail-closed).
+const verifyFailed = allVerifyResults.length === 0 || !verifyResults[0] || !verifyResults[1] || allVerifyResults.some(c => !c.ok)
 if (verifyFailed) {
-  log('Verify phase FAILED — it0 checks did not all pass. Aborting milestone.')
-  return { outcome: 'needs-human', reason: 'it0-checks-failed', phase: 'Verify' }
+  log(`Verify phase FAILED — ${allVerifyResults.filter(c => !c.ok).map(c => c.check).join(', ')} did not pass. Journal: ${JSON.stringify(allVerifyResults)}`)
+  return { outcome: 'needs-human', reason: 'it0-checks-failed', phase: 'Verify', verifyJournal: allVerifyResults }
 }
-log(`Verify phase PASSED — all ${verify.filter(Boolean).length} it0 checks green.`)
+log(`Verify phase PASSED — all ${allVerifyResults.length} it0 checks green (${mechanicalChecks.length} script + ${domainMisfitEntry ? 1 : 0} agent).`)
 
 // ── Phase: Build (step 5) ───────────────────────────────────────────────────────────
 phase('Build')
@@ -109,31 +135,38 @@ CHARGE (refute-first stance):
    separate writer, no split timing.
 
 Output to milestones/M<NN>/audits/iteration-0-acceptance-audit.md.
-Return {verdict: 'NO REFUTATION FOUND'|'CONCERNS'|'REFUTED', detail, concernsDetail}.`,
+	5. SESSION-ID (DIR-093): BEFORE writing the audit artifact, run \`echo \$CLAUDE_CODE_SESSION_ID\` to discover your REAL session ID (this is set by the harness and cannot be forged). Write \`**Audit session id:** <that-id>\` as the FIRST content line of the audit artifact (after the title). Return the discovered session ID as \`auditSessionId\` in your structured output.
+
+	Return {verdict: 'NO REFUTATION FOUND'|'CONCERNS'|'REFUTED', detail, concernsDetail, auditSessionId}.`,
   { phase: 'Audit',
-    schema: { type: 'object', required: ['verdict'], properties: {
+    schema: { type: 'object', required: ['verdict', 'auditSessionId'], properties: {
       verdict: { type: 'string' }, detail: { type: 'string' },
+      auditSessionId: { type: 'string' },
     } } }
 )
-log(`Audit phase complete: verdict=${auditResult?.verdict}`)
+log(`Audit phase complete: verdict=${auditResult?.verdict}, sessionId=${auditResult?.auditSessionId}`)
+
+// ── Session-ID pass-through (DIR-093 fix v2): pass audit session ID directly ─────────
+// to Gate agents rather than relying on file write-back (which breaks because workflow
+// agents don't share a writable /tmp/ with the outer loop).
+const AUDIT_SESSION_ID = auditResult?.auditSessionId || null
+if (AUDIT_SESSION_ID) {
+  log(`Audit session ID captured for Gate phase: ${AUDIT_SESSION_ID}`)
+} else {
+  log('INFO: no auditSessionId returned from Audit phase — session-id not captured (audit-indep gate removed from Workflow per DIR-097, runs at fan-in ABSORB).')
+}
 
 // ── Phase: Gate (step 6 all mechanical checks) ──────────────────────────────────────
 phase('Gate')
 const gates = await parallel([
   () => agent(`Run vmeta-lag-check.sh --counter <extract current milestone_counter from experiments/quay-perpetual-stream/dashboard.md minus 1> experiments/quay-perpetual-stream/v-meta-ledger.md. This reads the V_meta ledger (NOT the absorb entry). Return {ok, detail}. Non-zero = ALARM → HARD BLOCK.`,
     { label: 'vmeta-lag', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`Run it0-impl-row-check.sh ${args.taskId}. Return {ok, detail}. Non-zero = required -IMPL row missing → HARD BLOCK.`,
-    { label: 'impl-row', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`Run quay gate ${args.taskId} (DoD meta-enforcer). Return {ok, detail, gateOutput}. Non-zero = HARD BLOCK.`,
-    { label: 'dod-meta', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' }, gateOutput: { type: 'string' } } } }),
   () => agent(`Run it0-dashboard-line-budget-check.sh. Return {ok, detail}. Non-zero = dashboard exceeds 1200-line cap → HARD BLOCK.`,
     { label: 'dash-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run tree-hygiene-check.sh. Return {ok, detail}. Non-zero = un-gitignored scratch on master → HARD BLOCK.`,
     { label: 'tree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run worktree-branch-hygiene-check.sh. Return {ok, detail}. Non-zero = orphaned milestone evidence → HARD BLOCK.`,
     { label: 'worktree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`Run audit-independence-check.sh against the audit artifact at milestones/M<NN>/audits/iteration-0-acceptance-audit.md and the dispatch-record at ${args.absorbEntryFile}. Return {ok, detail}. Non-zero = audit not independent → HARD BLOCK.`,
-    { label: 'audit-indep', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run quay gate --gate split-or-commit ${args.taskId}. Return {ok, detail}. Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK.`,
     { label: 'split-or-commit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
 ])
