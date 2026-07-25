@@ -1,7 +1,7 @@
 {
 	"name": "quay",
-	"version": "0.3.13",
-	"description": "quay: a provider-agnostic task board. Bundles the quay MCP server (Core `quay mcp`, aggregating whichever Provider is enabled in the target workspace's .quay/config.yml), the quay-native author/execute authoring skills, a workspace-portable quay-directive skill (auto-detects this workspace's task store — no experiments/ dir required), and a persistent runner-agnostic loop-driver skill (select-execute-gate-done/needs-human-repeat; stops on .quay/.loop-stop sentinel).",
+	"version": "0.4.0",
+	"description": "quay: a provider-agnostic task board. Bundles the quay MCP server, five skills (author, execute, quay-directive, loop-driver, init), vendored agent types, and distributable workflows and gate scripts for Tier-3 full-methodology workspace adoption.",
 	"author": {
 		"name": "Yale Huang",
 		"url": "https://github.com/yaleh"
@@ -13,6 +13,10 @@
 		"./skills/author/SKILL.md",
 		"./skills/execute/SKILL.md",
 		"./skills/quay-directive/SKILL.md",
-		"./skills/loop-driver/SKILL.md"
+		"./skills/loop-driver/SKILL.md",
+		"./skills/init/SKILL.md"
+	],
+	"agents": [
+		"./agents/baime-iteration-executor.md"
 	]
 }
