@@ -70,3 +70,9 @@ Key cross-cutting facts (require reading several files to see):
 ## GIT review checklist
 
 - Before calling a milestone done, ask **which of `L_T`/`L_C`/`L_D`/`L_G`/`L_S` is still dark** (ADR-006/007) and prefer **hard checks over prose** (ADR-004 — prose gets paraphrased away). See `docs/references/` for the framework and its limits (the continuous math is not rigor).
+
+## Workflow resume anti-pattern (M144, 2026-07-25)
+
+When a workflow Verify phase fails and the fix is to **external state** (gap-list.md, charter file, script on disk), do NOT resume with `resumeFromRunId`. The resume cache keys on (prompt, opts) only — it cannot see that external files changed. The cached failure returns instantly (~60ms, 0 tokens) and the Verify phase fails again with the same stale result.
+
+**Rule:** if the fix touches anything OTHER than the workflow script's own agent prompt strings, re-run the workflow from scratch (`Workflow({script: ...})` without `resumeFromRunId`). Resume is safe ONLY when the fix is a prompt-text edit within the workflow script itself.
