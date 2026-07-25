@@ -13,7 +13,7 @@ extra:
 ---
 ## Proposal
 
-Parameterize 5 Tier B gate scripts (minor experiment coupling, fixable with CLI flags) and move to `plugin/scripts/`. Each gate already has pure logic — the coupling is only in default paths or env var names.
+Parameterize 5 Tier B gate scripts (minor experiment coupling, fixable with CLI flags) and move to `plugin/scripts/`. Each gate already has pure logic -- the coupling is only in default paths or env var names.
 
 ## Plan
 
@@ -60,7 +60,11 @@ For each gate: copy the parameterized `.ts` file + `.sh` wrapper to `plugin/scri
 
 ## Touches
 
-- `experiments/scripts/` (5 gate .ts files — parameterization)
+- `experiments/scripts/` (5 gate .ts files -- parameterization)
 - `plugin/scripts/` (5 gates + wrappers)
 - `.quay/config.yml`
 - `plugin/test/plugin-packaging.test.mjs`
+
+## Not selected (M-136)
+
+Capability-growth and deliverable:yes, but depends on DIR-070-A (symlinks) and DIR-070-B (Tier A gates) completing first. Will be eligible after those land.

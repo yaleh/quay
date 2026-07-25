@@ -13,18 +13,18 @@ extra:
 ---
 ## Proposal
 
-Package `run-routines.js` (currently in `.claude/workflows/`) as a plugin skill at `plugin/skills/routines/SKILL.md`. Claude Code plugins support `commands[]` → skills; there is no `workflows/` directory in the plugin manifest. The workflow is already fully portable — it uses `${CLAUDE_PLUGIN_ROOT}/scripts/` for all script references and contains zero experiment-local paths.
+Package `run-routines.js` (currently in `.claude/workflows/`) as a plugin skill at `plugin/skills/routines/SKILL.md`. Claude Code plugins support `commands[]` -> skills; there is no `workflows/` directory in the plugin manifest. The workflow is already fully portable -- it uses `${CLAUDE_PLUGIN_ROOT}/scripts/` for all script references and contains zero experiment-local paths.
 
 ## Plan
 
-1. Create `plugin/skills/routines/SKILL.md` with the routine track pipeline (Schedule → Dispatch → Gate → Verify), adapted from `.claude/workflows/run-routines.js`
+1. Create `plugin/skills/routines/SKILL.md` with the routine track pipeline (Schedule -> Dispatch -> Gate -> Verify), adapted from `.claude/workflows/run-routines.js`
 2. Add `./skills/routines/SKILL.md` to `plugin.json` `commands[]` array
 3. Update `plugin/test/plugin-packaging.test.mjs` to include the new skill in byte-identity and leak checks
 4. Keep `.claude/workflows/run-routines.js` as a thin wrapper that invokes the skill (backward compat)
 
 ## Acceptance Criteria
 
-- [ ] `/routines` skill dispatches `routine-scheduler.ts` → probe agents → `routine-file-gate.ts` → verify
+- [ ] `/routines` skill dispatches `routine-scheduler.ts` -> probe agents -> `routine-file-gate.ts` -> verify
 - [ ] Skill works with chrome-devtools/playwright MCP available (DIR-069 browser-explorer probe)
 - [ ] Skill works when no MCP instruments are available (skips with `filed: 0`)
 - [ ] `plugin.json` commands[] includes `./skills/routines/SKILL.md`
@@ -45,3 +45,7 @@ Package `run-routines.js` (currently in `.claude/workflows/`) as a plugin skill 
 - `plugin/skills/routines/SKILL.md` (new)
 - `plugin/.claude-plugin/plugin.json`
 - `plugin/test/plugin-packaging.test.mjs`
+
+## Not selected (M-136)
+
+Capability-growth and deliverable:yes, but depends on DIR-070-A (symlinks) and DIR-070-B (Tier A gates in plugin/) completing first. Will be eligible after those land.
