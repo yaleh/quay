@@ -55,6 +55,24 @@ export interface GateEventFilter {
  * update/delete/rewrite. A repeated call (even with a reused `id`) only ever
  * adds a new line — it can never alter or remove a previously written line.
  * Parent directories are created as needed.
+ *
+ * **Single-writer constraint (M161):** this function uses `appendFileSync`
+ * without advisory file locking or an atomic-write guard. Concurrent writes to
+ * the same `logPath` from separate processes (e.g. parallel `quay gate`
+ * invocations, or concurrent HTTP handlers in `quay serve`) can interleave
+ * output lines, producing corrupted JSONL. The current callers (gate engine,
+ * gate-log resolver) are all single-writer by construction — there is no
+ * multi-process write path to the same `.quay/gate-events.jsonl` in normal
+ * operation — so this is a documented constraint, not a live bug.
+ *
+ * If concurrent writes ever become a real risk, the proven advisory-lock
+ * pattern from the native task store (`packages/quay-native/src/store.ts`,
+ * `acquireLock`/`releaseLock`/`withLock`, lines 191-238) can be ported here:
+ * `acquireLock` uses `fs.openSync(lockPath, "wx")` (exclusive-create) as the
+ * atomic primitive, with stale-lock reclamation after 5s and a configurable
+ * retry timeout. The gate-event-store's `appendGateEvent` is a simpler
+ * operation (no read-modify-write), so a single `acquireLock`/`releaseLock`
+ * pair around the `appendFileSync` call would suffice.
  */
 export function appendGateEvent(logPath: string, event: GateEvent): void {
   const dir = dirname(logPath);
