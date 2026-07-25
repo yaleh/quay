@@ -5,3 +5,10 @@ policy: value-typed-ledger
 execution: dispatched
 audit: adversarial
 concurrency: 4
+routines:
+  - probe: self-validation
+    trigger: every(3)
+  - probe: architecture-analysis
+    trigger: every(5)
+  - probe: history-mining
+    trigger: every(10)
