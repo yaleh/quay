@@ -6,9 +6,11 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
-| DIR-087 | DIR-087: Extract gate factory config — fanOut=29 → ≤24 | DONE | - | milestone-candidate, milestone:M146 |
-| DIR-086 | DIR-086: process.exitCode coupling in lifecycle.ts — library functions mutate global process state, forcing every caller to manually reset | DONE | - | milestone-candidate, milestone:M144, defect |
+| DIR-095 | DIR-095: Fix version consistency drift across 8 package files | DONE | - | directive, milestone-candidate, milestone:M147 |
+| DIR-096 | DIR-096: Document Glob unavailability in subagent sessions | DONE | - | directive, milestone-candidate, milestone:M148 |
 | DIR-097 | DIR-097: Fix systemic Gate phase failures — acceptance/impl-row/audit-indep gates not Workflow-safe | DONE | - | directive, milestone-candidate, milestone:M145 |
+| DIR-086 | DIR-086: process.exitCode coupling in lifecycle.ts — library functions mutate global process state, forcing every caller to manually reset | DONE | - | milestone-candidate, milestone:M144, defect |
+| DIR-087 | DIR-087: Extract gate factory config — fanOut=29 → ≤24 | DONE | - | milestone-candidate, milestone:M146 |
 | DIR-093 | DIR-093: Fix audit-indep gate session-ID matching — Audit agent writes session ID to absorb entry before gate runs | DONE | - | directive, milestone-candidate, milestone:M142 |
 | DIR-084 | DIR-084: QUAY_ACCEPTANCE_CWD env pollution in MCP lifecycle handlers | DONE | - | milestone-candidate, milestone:M141, defect |
 | DIR-070-D | DIR-070-D: Gap 2 — package run-routines as plugin skill | DONE | - | milestone-candidate, milestone:M140 |
@@ -166,9 +168,7 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| DIR-095 | DIR-095: Fix version consistency drift across 8 package files | SELECTED | - | directive, milestone-candidate, milestone:M147 |
-| DIR-096 | DIR-096: Document Glob unavailability in subagent sessions | open | - | directive, milestone-candidate |
-| DIR-094 | DIR-094: Ship distributable quay CLI + switch loop-driver to MCP tools | open | - | directive, milestone-candidate |
+| DIR-094 | DIR-094: Ship distributable quay CLI + switch loop-driver to MCP tools | SELECTED | - | directive, milestone-candidate, milestone:M149 |
 | DIR-072 | DIR-072: SELECT preflight — scripts/select-preflight.ts + thin classify-deliverable workflow | open | - | directive, milestone-candidate |
 | DIR-071 | DIR-071: Mechanize DRAIN step — drain-scheduler.ts + /drain-directives workflow | open | - | directive, milestone-candidate |
 | DIR-070 | DIR-070: exp5 deliverable improvements — systematic gap closure | open | - | directive, milestone-candidate, epic |
@@ -191,4 +191,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_184 milestone-candidate task(s) as of 2026-07-25T11:17:57.108Z._
+_184 milestone-candidate task(s) as of 2026-07-25T12:00:35.444Z._
