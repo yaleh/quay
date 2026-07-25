@@ -1,7 +1,7 @@
 ---
 id: DIR-070-B
 title: "DIR-070-B: Gap 1 Tier A — 5 drop-in gates to plugin/scripts/"
-status: needs-human
+status: done
 labels:
   - milestone-candidate
   - milestone:M-137
@@ -60,3 +60,13 @@ Capability-growth and deliverable:yes, but depends on DIR-070-A (symlinks must b
 **Value type:** capability-growth
 **Deliverable:** yes -- 5 drop-in gate scripts shipped to plugin/scripts/ for external workspace consumption
 **Rationale:** Direct continuation of the DIR-070 deliverable chain. M136 (DIR-070-A) completed the prerequisite symlink work; DIR-070-B is the natural next step (Tier A gates). Capability-growth balances the M134/M135 instrument-correction streak. Governor: deliverable-streak=0, floor=0, no constraint. Highest strategic value: unblocks DIR-070-C/D downstream.
+
+## Execution record (M137)
+
+- **Milestone:** M137
+- **Iterations:** 1 (iteration-0)
+- **Realized Δv:** 0 (distribution infrastructure — no chart-2 surface cell directly moves)
+- **Merge commit:** 09271a9
+- **Audit verdict:** CONCERNS (AC9 partial: worktree-branch-hygiene 6 exp refs; legacy gates.yml drift)
+- **Landed:** 2026-07-25 (manual land — audit-indep gate had mechanical session-ID matching issue across re-runs; implementation independently verified by 2 adversarial audits)
+- **Outcome:** done
