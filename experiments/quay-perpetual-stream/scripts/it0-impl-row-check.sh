@@ -38,25 +38,33 @@
 
 set -u
 
-# Parse named flags + positional args
+# Parse named flags + positional args.
+# Supports both legacy positional form and new named-flag form:
+#   it0-impl-row-check.sh <milestone-id> [backlog-file]          (original, backward compat)
+#   it0-impl-row-check.sh [--backlog <file>] <milestone-id>      (parameterized)
 BACKLOG_FILE="backlog.md"
 MILESTONE_ID=""
+POSITIONAL=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --backlog) BACKLOG_FILE="$2"; shift 2 ;;
     --backlog=*) BACKLOG_FILE="${1#*=}"; shift 1 ;;
     --*) echo "ERROR: unknown flag: $1" >&2; exit 2 ;;
-    -*)
-      # If it starts with a single dash and is not --, treat as positional (for ids like M-FOO-BAR)
-      # But first check if it could be a flag pattern
-      MILESTONE_ID="$1"; shift
-      ;;
-    *) MILESTONE_ID="$1"; shift ;;
+    *) POSITIONAL+=("$1"); shift ;;
   esac
 done
 
+# First positional arg → MILESTONE_ID; second positional arg (if present) → BACKLOG_FILE override
+if [ "${#POSITIONAL[@]}" -ge 1 ]; then
+  MILESTONE_ID="${POSITIONAL[0]}"
+fi
+if [ "${#POSITIONAL[@]}" -ge 2 ] && [ -z "${BACKLOG_FILE_SET_VIA_FLAG:-}" ]; then
+  BACKLOG_FILE="${POSITIONAL[1]}"
+fi
+
 if [ -z "$MILESTONE_ID" ]; then
   echo "Usage: $0 [--backlog <file>] <milestone-id>" >&2
+  echo "       $0 <milestone-id> [backlog-file]" >&2
   exit 2
 fi
 
