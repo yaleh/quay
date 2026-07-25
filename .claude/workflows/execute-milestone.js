@@ -139,6 +139,13 @@ Absorb entry path: ${args.absorbEntryFile}
    - Run tests to verify
    - Record what was done
 
+   TIMEOUT DISCIPLINE (DIR-090): when using the Bash tool to run long-running commands:
+   npm install, npm test, npm ci, node --test, npx, git clone, git fetch
+   — you MUST pass timeout: 300000 (5 minutes) or higher. The Bash tool's default
+   is 120s which is insufficient. If a test suite or install takes longer than 5m,
+   raise the timeout further. Never run these commands with the Bash tool's implicit
+   default timeout.
+
 4. EVIDENCE: Write iteration report to milestones/M<NN>/iterations/iteration-0.md (extract milestone number from charter path).
 
 5. COMMIT all changes with a descriptive message.
