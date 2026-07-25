@@ -54,7 +54,7 @@ const MECH_SCHEMA = { type: 'object', required: ['check', 'ok'], properties: {
 // Cache-hit entries are null and filtered out before parallel dispatch.
 const _dispatchList = [
   !_cachedCeiling      ? () => agent(
-    `Run: bash experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone ${_milestone} ${args.charterFile}. Non-zero=NOT-FOUND scope IDs; zero=all IDs found/CLOSED/vacuously none. Return {check:"ceiling-check",ok:<exit===0>,detail:"<stdout last 2000 chars>",source:"script"}.`,
+    `FIRST extract directive/gap IDs from the charter's ## Scope and ## Done-when sections (patterns like DIR-NNN, gap-XXX). Skip IDs in the **Task:** header. If NO IDs found: return {check:"ceiling-check",ok:true,detail:"vacuous — no directive/gap IDs in charter Scope/Done-when",source:"script"}. If IDs found: run bash experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone ${_milestone} <id1> <id2> ... and return {check:"ceiling-check",ok:<exit===0>,detail:"<stdout last 2000 chars>",source:"script"}.`,
     { label: 'ceiling-check', schema: MECH_SCHEMA }
   ) : null,
   !_cachedGateHash      ? () => agent(
