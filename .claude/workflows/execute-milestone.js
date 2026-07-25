@@ -19,7 +19,7 @@ phase('Verify')
 
 const verify = await parallel([
   () => agent(
-    `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139) against every gap/directive ID cited in the charter. With --milestone, CLOSED is acceptable (exit 0); only NOT-FOUND → exit 1. Return {ok, detail}.`,
+    `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}) against gap/directive IDs cited in the charter. Only extract IDs from the Scope and Done-when sections — skip the **Task:** header and parenthetical references like "(DIR-xxx)". With --milestone, CLOSED is acceptable (exit 0); only NOT-FOUND → exit 1. If no extractable scope IDs found, exit 0 vacuously. Return {ok, detail}.`,
     { label: 'ceiling-check', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
   ),
   () => agent(

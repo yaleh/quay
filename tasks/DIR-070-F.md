@@ -8,9 +8,8 @@ labels:
 parent: DIR-070
 children: []
 extra:
+  dirStatus: deferred
   schema: v1
-  deliverable: yes
-  missionRedirection: true
 ---
 ## Proposal
 

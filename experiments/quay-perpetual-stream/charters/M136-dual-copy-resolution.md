@@ -21,7 +21,7 @@ plugin/ are the single source of truth.
 
 ## Scope
 
-Two phases per the proposal (`docs/proposals/exp5-deliverable-improvements.md` Gap 4):
+Per `docs/proposals/exp5-deliverable-improvements.md` (section "Gap 4: dual-copy structural problem"):
 
 1. Drift detection: `sync-vendor.sh --check` mode + dynamic plugin-packaging test
 2. Symlink elimination: 7 identical-copy files → symlinks; `sync-vendor.sh test -L` guard

@@ -1,16 +1,15 @@
 ---
 id: DIR-070-E
 title: "DIR-070-E: Gap 3 — extract quay-task-to-plan as plugin skill"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - human-steered
 parent: DIR-070
 children: []
 extra:
+  dirStatus: applied
   schema: v1
-  deliverable: yes
-  missionRedirection: true
 ---
 ## Proposal
 
