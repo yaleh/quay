@@ -96,6 +96,10 @@ export interface RetreatArgs extends LifecycleArgs {
 export interface LifecycleResult {
   ok: boolean;
   reason: string;
+  /** exitCode mirrors what process.exitCode is/was set to (1 on error, 0 on success).
+   *  Callers in long-running processes (MCP server) should reset process.exitCode
+   *  after a lifecycle call and rely on this field for the logical result. */
+  exitCode: number;
 }
 
 export interface PromoteResult extends LifecycleResult {
@@ -105,6 +109,8 @@ export interface PromoteResult extends LifecycleResult {
 export interface RetreatResult {
   ok: boolean;
   to: string | null;
+  /** exitCode mirrors what process.exitCode is/was set to (1 on error, 0 on success). */
+  exitCode: number;
 }
 
 /**
@@ -119,15 +125,19 @@ export async function runComplete({ client, id, logPath, actor = "quay-cli" }: L
   if (task.status !== "ready") {
     const reason = `illegal transition: ${task.status} cannot complete (must be ready)`;
     console.log(reason);
+    // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should
+    // read the returned exitCode field and reset process.exitCode after the call.
     process.exitCode = 1;
-    return { ok: false, reason };
+    return { ok: false, reason, exitCode: 1 };
   }
 
   const { ok, reason } = await runGate({ client, id, gate: "acceptance", logPath, actor });
   if (!ok) {
     console.log(`FAIL — ${reason}`);
+    // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should
+    // read the returned exitCode field and reset process.exitCode after the call.
     process.exitCode = 1;
-    return { ok: false, reason };
+    return { ok: false, reason, exitCode: 1 };
   }
 
   await client.taskWrite({ id, status: "done", expectedStatus: "ready" });
@@ -136,7 +146,7 @@ export async function runComplete({ client, id, logPath, actor = "quay-cli" }: L
     mkLifecycleEvent({ id, gate: "complete", actor, verdict: "pass", payload: { from: "ready", to: "done" } })
   );
   console.log("PASS — status=done");
-  return { ok: true, reason };
+  return { ok: true, reason, exitCode: 0 };
 }
 
 /**
@@ -160,7 +170,7 @@ export async function runAdjudicate({ client, id, logPath, actor = "quay-cli" }:
     })
   );
   console.log(`AUDIT ${r.ok ? "pass" : "fail"} — ${r.reason}`);
-  return { ok: r.ok, reason: r.reason };
+  return { ok: r.ok, reason: r.reason, exitCode: 0 };
 }
 
 /**
@@ -183,8 +193,10 @@ export async function runPromote({ client, id, logPath, actor = "quay-cli" }: Li
   const { ok, reason } = await runGate({ client, id, gate: "dod", logPath, actor });
   if (!ok) {
     console.log(`FAIL — ${reason}`);
+    // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should
+    // read the returned exitCode field and reset process.exitCode after the call.
     process.exitCode = 1;
-    return { ok: false, reason, to: null };
+    return { ok: false, reason, to: null, exitCode: 1 };
   }
   await client.taskWrite({ id, status: next!, expectedStatus: task.status });
   appendGateEvent(
@@ -192,7 +204,7 @@ export async function runPromote({ client, id, logPath, actor = "quay-cli" }: Li
     mkLifecycleEvent({ id, gate: "promote", actor, verdict: "pass", payload: { from: task.status, to: next } })
   );
   console.log(`PROMOTE ${task.status} → ${next}`);
-  return { ok: true, reason, to: next };
+  return { ok: true, reason, to: next, exitCode: 0 };
 }
 
 /**
@@ -204,8 +216,10 @@ export async function runPromote({ client, id, logPath, actor = "quay-cli" }: Li
 export async function runRetreat({ client, id, reason, logPath, actor = "quay-cli" }: RetreatArgs): Promise<RetreatResult> {
   if (typeof reason !== "string" || reason.trim() === "") {
     console.error("quay retreat: --reason <r> is required (the reason is the deliverable of a retreat)");
+    // @deprecated — process.exitCode set for CLI backward-compat; MCP callers should
+    // read the returned exitCode field and reset process.exitCode after the call.
     process.exitCode = 1;
-    return { ok: false, to: null };
+    return { ok: false, to: null, exitCode: 1 };
   }
   const task = await client.taskGet(id);
   if (!task) throw new Error(`no such task: ${id}`);
@@ -218,5 +232,5 @@ export async function runRetreat({ client, id, reason, logPath, actor = "quay-cl
     mkLifecycleEvent({ id, gate: "retreat", actor, verdict: "pass", payload: { from: task.status, to: prev, reason } })
   );
   console.log(`RETREAT ${task.status} → ${prev} (${reason})`);
-  return { ok: true, to: prev };
+  return { ok: true, to: prev, exitCode: 0 };
 }

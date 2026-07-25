@@ -424,6 +424,7 @@ export function registerLifecycleHandlers(
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
         process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
         const result = await runComplete({ client: client as unknown as Parameters<typeof runComplete>[0]['client'], id, logPath });
+        process.exitCode = 0; // DIR-086: reset stale exitCode from lifecycle function (MCP is long-running)
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
           structuredContent: result as unknown as Record<string, unknown>,
@@ -490,6 +491,7 @@ export function registerLifecycleHandlers(
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
         process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot;
         const result = await runPromote({ client: client as unknown as Parameters<typeof runPromote>[0]['client'], id, logPath });
+        process.exitCode = 0; // DIR-086: reset stale exitCode from lifecycle function (MCP is long-running)
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
           structuredContent: result as unknown as Record<string, unknown>,
@@ -526,6 +528,7 @@ export function registerLifecycleHandlers(
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
         const result = await runRetreat({ client: client as unknown as Parameters<typeof runRetreat>[0]['client'], id, reason, logPath });
+        process.exitCode = 0; // DIR-086: reset stale exitCode from lifecycle function (MCP is long-running)
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
           structuredContent: result as unknown as Record<string, unknown>,

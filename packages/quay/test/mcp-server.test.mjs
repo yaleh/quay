@@ -1569,6 +1569,26 @@ async function main() {
       );
     }
 
+    // DIR-086: verify lifecycle functions return exitCode in structuredContent
+    // and that MCP handlers reset process.exitCode (long-running server context).
+    // After a lifecycle_complete on a failing task, exitCode should be 1 in the
+    // structuredContent (mirroring what process.exitCode was set to), and the
+    // server should still be alive + responsive for the next call.
+    {
+      // (a) lifecycle_complete on GATE-FAIL (acceptance=false) -> ok:false, exitCode:1
+      const r = await coreGate.callTool({ name: "lifecycle_complete", arguments: { id: "GATE-FAIL" } });
+      assert(r.isError !== true, "DIR-086 lifecycle_complete on GATE-FAIL returns no error");
+      assert(r.structuredContent?.ok === false, `DIR-086 lifecycle_complete on GATE-FAIL returns ok:false (got: ${JSON.stringify(r.structuredContent)})`);
+      assert(r.structuredContent?.exitCode === 1, `DIR-086 lifecycle_complete on GATE-FAIL returns exitCode:1 in structuredContent (got: ${JSON.stringify(r.structuredContent)})`);
+
+      // (b) After a failing lifecycle_complete, the server is still alive and responsive —
+      // proof that the MCP handler reset process.exitCode (otherwise Node would have
+      // a stale exit code and the process would eventually exit with that code).
+      const r2 = await coreGate.callTool({ name: "gate_log", arguments: { id: "GATE-FAIL" } });
+      assert(r2.isError !== true, "DIR-086 gate_log after failing lifecycle_complete succeeds — MCP server is still alive (exitCode was reset)");
+      assert(Array.isArray(r2.structuredContent?.events), "DIR-086 gate_log after failing lifecycle_complete returns events array as expected");
+    }
+
     // DIR-084: env-var-unchanged after lifecycle_complete and lifecycle_promote.
     // Pre-set QUAY_ACCEPTANCE_CWD to a distinct temp dir, call lifecycle handlers,
     // then verify the env var was restored by running a gate on a task whose
