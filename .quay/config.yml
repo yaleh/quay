@@ -28,16 +28,16 @@ providers:
 gates:
   it0:
     - name: impl-row
-      script: "./experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh"
+      script: "./plugin/scripts/it0-impl-row-check.sh"
       argsKey: implRowArgs
     - name: line-budget
       script: "./experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh"
       argsKey: lineBudgetArgs
     - name: vmeta-lag
-      script: "./experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh"
+      script: "./plugin/scripts/vmeta-lag-check.sh"
       argsKey: vmetaLagArgs
     - name: audit-independence
-      script: "./experiments/quay-perpetual-stream/scripts/audit-independence-check.sh"
+      script: "./plugin/scripts/audit-independence-check.sh"
       argsKey: auditIndependenceArgs
     - name: dogfood-evidence
       script: "./experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh"
@@ -75,10 +75,10 @@ gates:
       cwd: "."
     # C1 / exp5-M-CRYST-C1 / DIR-026: split-or-commit gate
     - name: split-or-commit
-      command: "node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts ."
+      command: "node plugin/scripts/it0-split-or-commit-check.ts ."
     # INV / exp5-M-CRYST-INV / ADR-011: enforcement-with-design gate
     - name: enforcement-with-design
-      command: "node experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.ts ."
+      command: "node plugin/scripts/it0-enforcement-with-design-check.ts ."
 
 loop:
   board: native

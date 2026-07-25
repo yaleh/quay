@@ -1,5 +1,5 @@
 // vmeta-lag-check.ts — the ONE canonical implementation of the V_meta consolidation-lag ARITHMETIC
-// (exp5-M-CRYST-D3 increment R5, Axis-2′; R5 prose-parsing residual RESOLVED in M70/D4). This
+// (M-CRYST-D3 increment R5, Axis-2′; R5 prose-parsing residual RESOLVED in M70/D4). This
 // module IS the rule: pure, side-effect-free check functions consumed by the standalone CLI
 // (vmeta-lag-check.ts's own main below, invoked via vmeta-lag-check.sh) and wrappable, unchanged,
 // by a future `quay gate --gate vmeta-lag` (M39 registry precedent — a named gate WRAPS this, never

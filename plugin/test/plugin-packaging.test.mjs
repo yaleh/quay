@@ -134,6 +134,16 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
     path.join(pluginDir, 'scripts', 'drivable-workspace-check.ts'),
     path.join(pluginDir, 'scripts', 'drivable-workspace-check.sh'),
     path.join(pluginDir, 'scripts', 'tree-hygiene-check.sh'),
+    // DIR-070-C: Tier-B gate scripts + wrappers shipped to plugin/scripts/
+    path.join(pluginDir, 'scripts', 'audit-independence-check.ts'),
+    path.join(pluginDir, 'scripts', 'audit-independence-check.sh'),
+    path.join(pluginDir, 'scripts', 'vmeta-lag-check.ts'),
+    path.join(pluginDir, 'scripts', 'vmeta-lag-check.sh'),
+    path.join(pluginDir, 'scripts', 'it0-split-or-commit-check.ts'),
+    path.join(pluginDir, 'scripts', 'it0-split-or-commit-check.sh'),
+    path.join(pluginDir, 'scripts', 'it0-enforcement-with-design-check.ts'),
+    path.join(pluginDir, 'scripts', 'it0-enforcement-with-design-check.sh'),
+    path.join(pluginDir, 'scripts', 'it0-impl-row-check.sh'),
   ];
   const leakPattern = /experiments\/quay-perpetual-stream|\bexp5\b/i;
   for (const f of shippedFiles) {
@@ -273,6 +283,101 @@ test('DIR-070-B: universal-gate plugin files (4 of 5) have zero exp5/experiment-
   ];
   const leakPattern = /experiments\/quay-perpetual-stream|\bexp5\b/i;
   for (const f of universalFiles) {
+    const fp = path.join(scriptsDir, f);
+    const src = readFileSync(fp, 'utf8');
+    assert.ok(
+      !leakPattern.test(src),
+      `${f} must not contain experiments/quay-perpetual-stream or exp5 references`
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DIR-070-C (M139) — Tier-B parameterized gate scripts shipped to plugin/scripts/.
+// 5 gate scripts + 4 .sh wrappers (impl-row-check.sh is a standalone .sh script).
+// Pins: all 9 files present; .sh wrappers are executable; .sh wrappers runnable
+// (exit 2 for missing args); gates registered in .quay/config.yml; zero experiment
+// leakage in plugin copies.
+// ---------------------------------------------------------------------------
+
+test('DIR-070-C: all 9 new gate scripts + wrappers present in plugin/scripts/', () => {
+  const scriptsDir = path.join(pluginDir, 'scripts');
+  const wanted = [
+    'audit-independence-check.ts', 'audit-independence-check.sh',
+    'vmeta-lag-check.ts', 'vmeta-lag-check.sh',
+    'it0-split-or-commit-check.ts', 'it0-split-or-commit-check.sh',
+    'it0-enforcement-with-design-check.ts', 'it0-enforcement-with-design-check.sh',
+    'it0-impl-row-check.sh',
+  ];
+  for (const f of wanted) {
+    assert.ok(existsSync(path.join(scriptsDir, f)), `plugin/scripts/${f} must exist`);
+  }
+});
+
+test('DIR-070-C: all .sh wrappers are executable', () => {
+  const scriptsDir = path.join(pluginDir, 'scripts');
+  const wrappers = ['audit-independence-check.sh', 'vmeta-lag-check.sh',
+    'it0-split-or-commit-check.sh', 'it0-enforcement-with-design-check.sh',
+    'it0-impl-row-check.sh'];
+  for (const w of wrappers) {
+    const fp = path.join(scriptsDir, w);
+    try {
+      fs.accessSync(fp, fs.constants.X_OK);
+      assert.ok(true, `${w} is executable`);
+    } catch {
+      assert.fail(`${w} must be executable`);
+    }
+  }
+});
+
+test('DIR-070-C: .sh wrappers runnable (exit 2 for missing args, not ENOTFOUND)', () => {
+  const scriptsDir = path.join(pluginDir, 'scripts');
+  const wrappers = ['audit-independence-check.sh', 'vmeta-lag-check.sh',
+    'it0-split-or-commit-check.sh', 'it0-enforcement-with-design-check.sh'];
+  for (const w of wrappers) {
+    const fp = path.join(scriptsDir, w);
+    let exitCode = 0;
+    try {
+      execFileSync('bash', [fp], { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
+    } catch (e) {
+      exitCode = e.status || 1;
+    }
+    assert.equal(exitCode, 2, `${w} must exit 2 (usage) when called without args, not ${exitCode}`);
+  }
+});
+
+test('DIR-070-C: Tier-B gates registered in .quay/config.yml', () => {
+  const configPath = path.join(repoRoot, '.quay', 'config.yml');
+  const configSrc = readFileSync(configPath, 'utf8');
+  // it0 gates with updated plugin/scripts/ paths
+  const it0GateNames = ['audit-independence', 'vmeta-lag', 'impl-row'];
+  for (const name of it0GateNames) {
+    assert.ok(
+      configSrc.includes(`name: ${name}`) && configSrc.includes(`plugin/scripts/`),
+      `.quay/config.yml must register gate '${name}' with plugin/scripts/ path`
+    );
+  }
+  // testPass gates with updated plugin/scripts/ paths
+  const testPassNames = ['split-or-commit', 'enforcement-with-design'];
+  for (const name of testPassNames) {
+    assert.ok(
+      configSrc.includes(`name: ${name}`) && configSrc.includes(`plugin/scripts/`),
+      `.quay/config.yml testPass must register '${name}' with plugin/scripts/ path`
+    );
+  }
+});
+
+test('DIR-070-C: Tier-B plugin copies have zero exp5/experiment-path references', () => {
+  const scriptsDir = path.join(pluginDir, 'scripts');
+  const tierBFiles = [
+    'audit-independence-check.ts', 'audit-independence-check.sh',
+    'vmeta-lag-check.ts', 'vmeta-lag-check.sh',
+    'it0-split-or-commit-check.ts', 'it0-split-or-commit-check.sh',
+    'it0-enforcement-with-design-check.ts', 'it0-enforcement-with-design-check.sh',
+    'it0-impl-row-check.sh',
+  ];
+  const leakPattern = /experiments\/quay-perpetual-stream|\bexp5\b/i;
+  for (const f of tierBFiles) {
     const fp = path.join(scriptsDir, f);
     const src = readFileSync(fp, 'utf8');
     assert.ok(

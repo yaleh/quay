@@ -4,18 +4,25 @@ title: "DIR-070-C: Gap 1 Tier B — 5 parameterized gates to plugin/scripts/"
 status: todo
 labels:
   - milestone-candidate
+  - milestone:M139
 parent: DIR-070
 children: []
 extra:
   dirStatus: pending
   schema: v1
   deliverable: yes
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-070-C
+    experiments/quay-perpetual-stream/charters/M139-dir070c-tierb-gates.md
+    /tmp/m139-absorb-entry.md
 ---
 ## Proposal
 
 Parameterize 5 Tier B gate scripts (minor experiment coupling, fixable with CLI flags) and move to `plugin/scripts/`. Each gate already has pure logic -- the coupling is only in default paths or env var names.
 
 ## Plan
+
+N/A — plan is fully detailed inline below (5 gates each with specific coupling analysis and fix). Reference: `docs/proposals/exp5-deliverable-improvements.md` Gap 1 Tier B.
 
 ### audit-independence-check.ts
 - Coupling: `QUAY_ORCHESTRATOR_SESSION_ID` env var name
@@ -50,6 +57,8 @@ For each gate: copy the parameterized `.ts` file + `.sh` wrapper to `plugin/scri
 - [ ] External workspace can run `quay gate --gate <name>` with custom paths
 
 ## Definition of Done
+
+References the standard DoD clauses from `inherited-core.md` (13 clauses, single executable source: `scripts/it0-dod-check.ts`). Specific to this milestone:
 
 - [ ] Reference to `docs/proposals/exp5-deliverable-improvements.md` Gap 1 Tier B
 - [ ] 5 gates parameterized with CLI flags

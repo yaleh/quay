@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// it0-enforcement-with-design-check.ts — Enforcement-WITH-design invariant gate (ADR-011 / exp5-M-CRYST-INV)
+// it0-enforcement-with-design-check.ts — Enforcement-WITH-design invariant gate (ADR-011 / M-CRYST-INV)
 //
 // Checks that every DoD clause in `inherited-core.md`'s "## Definition of Done" section has a
 // matching mechanical enforcement in `scripts/it0-dod-check.mjs`. A clause present in
@@ -325,10 +325,10 @@ if (isDirect) {
 
   const inheritedCorePath = inheritedCoreOverride
     ? path.resolve(process.cwd(), inheritedCoreOverride)
-    : path.join(resolved, "experiments/quay-perpetual-stream/inherited-core.md");
+    : path.join(resolved, "inherited-core.md");
   const dodCheckPath = dodCheckOverride
     ? path.resolve(process.cwd(), dodCheckOverride)
-    : path.join(resolved, "experiments/quay-perpetual-stream/scripts/it0-dod-check.ts");
+    : path.join(resolved, "scripts/it0-dod-check.ts");
 
   if (!fs.existsSync(inheritedCorePath)) {
     console.error(`ERROR: inherited-core.md not found: ${inheritedCorePath}`);

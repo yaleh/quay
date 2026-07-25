@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vmeta-lag-check.sh — V_meta consolidation-lag check (exp5-M-CRYST-D3 increment R5, Axis-2′). Thin
+# vmeta-lag-check.sh — V_meta consolidation-lag check (M-CRYST-D3 increment R5, Axis-2′). Thin
 # wrapper delegating to vmeta-lag-check.mjs — mirrors task-schema-check.sh's exact wrapper shape
 # (usage/arg check, node availability check, delegate, propagate exit code), the same `*-check.sh`
 # wraps `*-check.mjs` convention as every existing pair in `scripts/`. A future
