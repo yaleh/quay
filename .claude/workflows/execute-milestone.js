@@ -51,54 +51,39 @@ log(`Verify phase PASSED — all ${verify.filter(Boolean).length} it0 checks gre
 // ── Phase: Build (step 5) ───────────────────────────────────────────────────────────
 phase('Build')
 const buildResult = await agent(
-  `Execute the inner iteration for milestone task ${args.taskId}.
+    `BUILD the inner iteration for milestone task ${args.taskId}. DO THE ACTUAL WORK — you are the build executor, not a dispatcher.
 
 Charter file: ${args.charterFile}
 Absorb entry path: ${args.absorbEntryFile}
 
-BEFORE BUILD: ensure extra.acceptance is set on the task (task_write extra.acceptance to
-"bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${args.taskId} ${args.charterFile} ${args.absorbEntryFile}").
-The Gate phase's quay gate call depends on this field — fail-closed if absent.
+1. PRE-FLIGHT: ensure extra.acceptance is set on the task via task_write:
+   extra.acceptance = "bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${args.taskId} ${args.charterFile} ${args.absorbEntryFile}"
 
-CLASS-ROUTE per inherited-core.md's two-class diversity policy:
-- DEVELOPMENT-class (capability-growth typed): run proposal→plan pipeline FIRST
-  (invoke quay-task-to-plan skill), then implement with TDD ≥80% hard gate.
-- METHODOLOGY/DESIGN-class (discovery/governance-integrity typed): whole-milestone
-  independent dual-iteration (iteration-0 builds, iteration-1 re-derives from fresh worktree).
+2. CLASS-ROUTE: This is a development-class task (capability-growth). Read the task body and charter, then implement each item in the Done-when list.
 
-Per iteration: use baime:iteration-executor fed the charter (Tier-A) only. For
-development-class, also feed the checked plan.
+3. IMPLEMENT: Make the actual code changes needed to satisfy all AC and Done-when clauses. For each:
+   - Edit/create files as needed
+   - Run tests to verify
+   - Record what was done
 
-Dispatch the inner iteration as a harness-tracked background agent in an isolated git
-worktree off master HEAD. Return the dispatch result — do NOT wait for completion.
+4. EVIDENCE: Write iteration report to milestones/M<NN>/iterations/iteration-0.md (extract milestone number from charter path).
 
-TERMINATE on first of (§3.2): Done-when complete | ΔV<0.02 K=2 consecutive |
-ceiling→redesign | past budget≈10 & nothing climbing | external HALT.
+5. COMMIT all changes with a descriptive message.
 
-Return {taskId, outcome, iterationCount, mergeCommit, worktreePath, harnessTaskId}.`,
-  { phase: 'Build', isolation: 'worktree',
-    schema: { type: 'object', required: ['outcome'], properties: {
-      taskId: { type: 'string' }, outcome: { type: 'string' },
-      iterationCount: { type: 'number' }, mergeCommit: { type: 'string' },
-      harnessTaskId: { type: 'string' },
-    } } }
-)
+Return {taskId, outcome: "done", iterationCount, mergeCommit: "<short-sha>"} on success, or {outcome: "needs-human", reason} on failure.`,
+    { phase: 'Build', isolation: 'worktree',
+      schema: { type: 'object', required: ['outcome'], properties: {
+        taskId: { type: 'string' }, outcome: { type: 'string' },
+        iterationCount: { type: 'number' }, mergeCommit: { type: 'string' },
+      } } }
+  )
 
-// If Build dispatched a background task (not yet complete), return building status.
-// The caller (outer loop) handles poll/heartbeat/resume — NOT the Build agent.
-// The harness-tracked background task completion notification is the PRIMARY wake.
-// The fallbackMs below is a hang-detection BACKSTOP only, not a polling cadence (DIR-078).
-if (buildResult?.outcome === 'dispatched' || buildResult?.harnessTaskId) {
-  // Adaptive fallback by charter scope (DIR-078): small=300s, medium=600s, large=1200s.
-  const scopeText = (buildResult?.scope || '').toLowerCase()
-  const fallbackMs = /large|>200\s*lines|>5\s*files/i.test(scopeText) ? 1200000
-    : /small|≤50\s*lines|[12]\s*files/i.test(scopeText) ? 300000
-    : 600000
-  log(`Build phase dispatched background task: ${buildResult.harnessTaskId} (fallback=${fallbackMs/1000}s)`)
-  return { outcome: 'building', buildTaskId: buildResult.harnessTaskId, phase: 'Build', fallbackMs }
-}
+  // Build agent does the work directly — no background dispatch.
+  log(`Build phase complete: outcome=${buildResult?.outcome}`)
 
-log(`Build phase complete: outcome=${buildResult?.outcome}`)
+  if (buildResult?.outcome === 'needs-human') {
+    return { outcome: 'needs-human', reason: buildResult?.reason || 'build-failed', phase: 'Build' }
+  }
 
 // ── Phase: Audit (step 6 acceptance audit) ──────────────────────────────────────────
 phase('Audit')
