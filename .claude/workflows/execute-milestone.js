@@ -13,66 +13,113 @@ export const meta = {
 // ── Phase: Verify (step 4) ──────────────────────────────────────────────────────────
 phase('Verify')
 
-// DIR-073 (M154): Refactored from 5 agents (3 were script-runner wrappers) to 2 agents.
-// The 4 mechanical checks (ceiling, gate-hash, line-budget, dogfood-evidence) are run as
-// direct shell commands by a single agent; only domain-misfit genuinely needs LLM judgment.
-// All check results are recorded in unified {check, ok, detail, source} shape for journal
-// parsing by diagnose-verify-failure.ts.
+// DIR-079 (M156): Per-check incremental caching.
+// Input fingerprints are pre-computed by the caller (workflow runtime lacks readFile/sha256)
+// and passed via args. Prior results are passed via args for cache comparison.
+// The 4 mechanical checks are split into per-check agents so each can be independently
+// cached. When a check's fingerprint matches a prior cached result, the agent is skipped.
+// No fingerprints → fall back to full dispatch (conservative).
+// Cache updates are returned in verifyCacheUpdates for the caller to persist across
+// invocations.
 
-const verifyResults = await parallel([
-  () => agent(
-    `Run the 4 mechanical it0 checks as direct shell commands. Extract the milestone number from the charter path (e.g., experiments/quay-perpetual-stream/charters/M154-dir073-verify-diagnostic.md → M154).
+const cacheFingerprints = args.cacheFingerprints || {}
+const priorVerifyCache = args.priorVerifyCache || {}
 
-Script base: experiments/quay-perpetual-stream/scripts
+// Extract milestone number for script invocations
+const _milestone = (args.charterFile.match(/M(\d+)/) || [])[1] || '<extracted-from-charter>'
 
-Run in sequence, capturing exit code + stdout for each:
+// ── Per-check cache lookup ──
+function _cached(label) {
+  const fp = cacheFingerprints[label]
+  if (!fp) return null
+  const prior = priorVerifyCache[label]
+  if (!prior || prior.fingerprint !== fp) return null
+  log(`Verify cache HIT: ${label} (prior=${prior.result.ok ? 'PASS' : 'FAIL'})`)
+  return prior.result
+}
 
-1. bash experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone <extracted-milestone> ${args.charterFile}
-   Non-zero = NOT-FOUND scope IDs; zero = all IDs found or CLOSED (with --milestone) or vacuously none.
+const _cachedCeiling      = _cached('ceiling-check')
+const _cachedGateHash      = _cached('gate-hash')
+const _cachedLineBudget    = _cached('line-budget')
+const _cachedDogfood       = _cached('dogfood-evidence')
+const _cachedDomainMisfit  = _cached('domain-misfit')
 
-2. bash experiments/quay-perpetual-stream/scripts/it0-gate-hash-check.sh --by-reference ${args.charterFile}
-   Non-zero = GATE-HASH-REF mismatch; zero = hash matches.
+// Schema for mechanical check results
+const MECH_SCHEMA = { type: 'object', required: ['check', 'ok'], properties: {
+  check: { type: 'string' }, ok: { type: 'boolean' }, detail: { type: 'string' }, source: { type: 'string' },
+} }
 
-3. bash experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh ${args.charterFile}
-   Non-zero = charter exceeds line budget; zero = within budget.
-
-4. bash experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone <extracted-milestone> ${args.charterFile}
-   Non-zero = evidence-gap in iteration reports; zero = all claimed clauses have nearby fenced evidence.
-
-Return {checks: [
-  {check: "ceiling-check", ok: <exit===0>, detail: "<stdout truncated to last 2000 chars>", source: "script"},
-  {check: "gate-hash", ok: <exit===0>, detail: "<stdout>", source: "script"},
-  {check: "line-budget", ok: <exit===0>, detail: "<stdout>", source: "script"},
-  {check: "dogfood-evidence", ok: <exit===0>, detail: "<stdout>", source: "script"}
-]}. If a script cannot be run (missing file, usage error exit 2), return ok: false with the error.`,
-    { label: 'mechanical-checks', schema: { type: 'object', required: ['checks'], properties: {
-      checks: { type: 'array', items: { type: 'object', required: ['check', 'ok'], properties: {
-        check: { type: 'string' }, ok: { type: 'boolean' }, detail: { type: 'string' }, source: { type: 'string' },
-      } } }
-    } } }
-  ),
-  () => agent(
+// ── Dispatch only checks that need fresh execution ──
+// Each mechanical check is a separate agent so caching can skip individual checks.
+// Cache-hit entries are null and filtered out before parallel dispatch.
+const _dispatchList = [
+  !_cachedCeiling      ? () => agent(
+    `Run: bash experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone ${_milestone} ${args.charterFile}. Non-zero=NOT-FOUND scope IDs; zero=all IDs found/CLOSED/vacuously none. Return {check:"ceiling-check",ok:<exit===0>,detail:"<stdout last 2000 chars>",source:"script"}.`,
+    { label: 'ceiling-check', schema: MECH_SCHEMA }
+  ) : null,
+  !_cachedGateHash      ? () => agent(
+    `Run: bash experiments/quay-perpetual-stream/scripts/it0-gate-hash-check.sh --by-reference ${args.charterFile}. Non-zero=GATE-HASH-REF mismatch; zero=hash matches. Return {check:"gate-hash",ok:<exit===0>,detail:"<stdout>",source:"script"}.`,
+    { label: 'gate-hash', schema: MECH_SCHEMA }
+  ) : null,
+  !_cachedLineBudget    ? () => agent(
+    `Run: bash experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh ${args.charterFile}. Non-zero=exceeds line budget; zero=within budget. Return {check:"line-budget",ok:<exit===0>,detail:"<stdout>",source:"script"}.`,
+    { label: 'line-budget', schema: MECH_SCHEMA }
+  ) : null,
+  !_cachedDogfood       ? () => agent(
+    `Run: bash experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone ${_milestone} ${args.charterFile}. Non-zero=evidence-gap; zero=all claimed clauses have nearby fenced evidence. Return {check:"dogfood-evidence",ok:<exit===0>,detail:"<stdout>",source:"script"}.`,
+    { label: 'dogfood-evidence', schema: MECH_SCHEMA }
+  ) : null,
+  !_cachedDomainMisfit  ? () => agent(
     `Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to the milestone's Done-when list. Return {ok: true, step3conclusion} — ok indicates the check completed (always true when the procedure was applied); step3conclusion records whether a misfit was found. This check is INFORMATIONAL, never blocking.`,
     { label: 'domain-misfit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, step3conclusion: { type: 'string' } } } }
-  ),
-])
+  ) : null,
+].filter(Boolean)
 
-// --- Unify results into a single journal shape ---
-const mechanicalChecks = (verifyResults[0]?.checks || []).map(c => ({...c, source: c.source || 'script'}))
-const domainMisfitResult = verifyResults[1]
-const domainMisfitEntry = domainMisfitResult ? {
-  check: 'domain-misfit', ok: domainMisfitResult.ok !== false, detail: domainMisfitResult.step3conclusion || '', source: 'agent'
-} : null
+// ── Dispatch fresh agents in parallel (skip if all cached) ──
+const _freshResults = _dispatchList.length > 0 ? await parallel(_dispatchList) : []
 
-const allVerifyResults = [...mechanicalChecks, domainMisfitEntry].filter(Boolean)
+// Index fresh results by label
+const _fresh = {}
+for (const r of _freshResults) {
+  if (!r) continue
+  if (r.check) {
+    _fresh[r.check] = r           // mechanical checks include 'check' field
+  } else {
+    _fresh['domain-misfit'] = r   // domain-misfit returns {ok, step3conclusion}
+  }
+}
 
-// A null return from either agent means the agent crashed — treat as failure (fail-closed).
-const verifyFailed = allVerifyResults.length === 0 || !verifyResults[0] || !verifyResults[1] || allVerifyResults.some(c => !c.ok)
+// ── Unify result from any source (cached or fresh) ──
+const _ceiling   = _cachedCeiling   || _fresh['ceiling-check']
+const _gateHash  = _cachedGateHash  || _fresh['gate-hash']
+const _lineBgt   = _cachedLineBudget|| _fresh['line-budget']
+const _dogfood   = _cachedDogfood   || _fresh['dogfood-evidence']
+
+// Domain-misfit: transform raw agent result to unified shape (handles both cached and fresh)
+function _unifyDm(raw) {
+  if (!raw) return null
+  if (raw.check) return raw  // Already in unified shape (from cache)
+  return { check: 'domain-misfit', ok: raw.ok !== false, detail: raw.step3conclusion || '', source: 'agent' }
+}
+const _dmEntry = _unifyDm(_cachedDomainMisfit) || _unifyDm(_fresh['domain-misfit'])
+
+const allVerifyResults = [_ceiling, _gateHash, _lineBgt, _dogfood, _dmEntry].filter(Boolean)
+
+// ── Build cache updates for caller to persist across invocations ──
+let verifyCacheUpdates = {}
+for (const r of allVerifyResults) {
+  const fp = cacheFingerprints[r.check]
+  if (fp) verifyCacheUpdates[r.check] = { fingerprint: fp, result: r }
+}
+
+// A null/missing result for an uncached check means the agent crashed — treat as failure (fail-closed).
+const scriptCount = [_ceiling, _gateHash, _lineBgt, _dogfood].filter(Boolean).length
+const verifyFailed = allVerifyResults.length < 5 || allVerifyResults.some(c => !c.ok)
 if (verifyFailed) {
   log(`Verify phase FAILED — ${allVerifyResults.filter(c => !c.ok).map(c => c.check).join(', ')} did not pass. Journal: ${JSON.stringify(allVerifyResults)}`)
-  return { outcome: 'needs-human', reason: 'it0-checks-failed', phase: 'Verify', verifyJournal: allVerifyResults }
+  return { outcome: 'needs-human', reason: 'it0-checks-failed', phase: 'Verify', verifyJournal: allVerifyResults, verifyCacheUpdates }
 }
-log(`Verify phase PASSED — all ${allVerifyResults.length} it0 checks green (${mechanicalChecks.length} script + ${domainMisfitEntry ? 1 : 0} agent).`)
+log(`Verify phase PASSED — all ${allVerifyResults.length} it0 checks green (${scriptCount} script + ${_dmEntry ? 1 : 0} agent).`)
 
 // ── Phase: Build (step 5) ───────────────────────────────────────────────────────────
 phase('Build')
@@ -92,13 +139,6 @@ Absorb entry path: ${args.absorbEntryFile}
    - Run tests to verify
    - Record what was done
 
-   TIMEOUT DISCIPLINE (DIR-090): when using the Bash tool to run long-running commands:
-   npm install, npm test, npm ci, node --test, npx, git clone, git fetch
-   — you MUST pass timeout: 300000 (5 minutes) or higher. The Bash tool's default
-   is 120s which is insufficient. If a test suite or install takes longer than 5m,
-   raise the timeout further. Never run these commands with the Bash tool's implicit
-   default timeout.
-
 4. EVIDENCE: Write iteration report to milestones/M<NN>/iterations/iteration-0.md (extract milestone number from charter path).
 
 5. COMMIT all changes with a descriptive message.
@@ -115,7 +155,7 @@ Return {taskId, outcome: "done", iterationCount, mergeCommit: "<short-sha>"} on 
   log(`Build phase complete: outcome=${buildResult?.outcome}`)
 
   if (buildResult?.outcome === 'needs-human') {
-    return { outcome: 'needs-human', reason: buildResult?.reason || 'build-failed', phase: 'Build' }
+    return { outcome: 'needs-human', reason: buildResult?.reason || 'build-failed', phase: 'Build', verifyCacheUpdates }
   }
 
 // ── Phase: Audit (step 6 acceptance audit) ──────────────────────────────────────────
@@ -185,7 +225,7 @@ if (gatesFailed) {
     `Mark task ${args.taskId} needs-human. Record which gates failed and why in the ABSORB entry at ${args.absorbEntryFile}. Gates: ${JSON.stringify(gates.filter(Boolean))}`,
     { label: 'mark-needs-human', phase: 'Land' }
   )
-  return { outcome: 'needs-human', reason: 'gate-failed', phase: 'Gate' }
+  return { outcome: 'needs-human', reason: 'gate-failed', phase: 'Gate', verifyCacheUpdates }
 }
 log(`Gate phase PASSED — all ${gates.filter(Boolean).length} mechanical gates green.`)
 
@@ -202,7 +242,7 @@ if (auditResult?.verdict === 'REFUTED') {
     `Mark task ${args.taskId} needs-human with reason: audit REFUTED — ${auditResult?.detail}. VERIFY the needs-human reason is EXTERNAL (outside project control: external service/resource/credential/dataset/upstream) — if it is an IN-PROJECT reason (architecture mismatch, complexity, scope, "too hard"), that is a SPLIT-OR-COMMIT violation (DIR-026/Clause 9). Record needs-human with the audited reason in the ABSORB entry.`,
     { label: 'mark-needs-human-refuted' }
   )
-  return { outcome: 'needs-human', reason: 'audit-refuted', phase: 'Land' }
+  return { outcome: 'needs-human', reason: 'audit-refuted', phase: 'Land', verifyCacheUpdates }
 }
 
 const IS_CONCURRENT = args.mode === 'concurrent'
@@ -248,7 +288,7 @@ Return {taskId: "${args.taskId}", outcome: "done", mergeCommit: "<40-char SHA>",
   )
   log(`Land phase complete (concurrent) — milestone ${args.taskId} done, touched ${(concurrentResult?.touchedFiles || []).length} files.`)
   return { outcome: 'done', taskId: args.taskId, mergeCommit: concurrentResult?.mergeCommit,
-    touchedFiles: concurrentResult?.touchedFiles, dashboardEntry: concurrentResult?.dashboardEntry }
+    touchedFiles: concurrentResult?.touchedFiles, dashboardEntry: concurrentResult?.dashboardEntry, verifyCacheUpdates }
 }
 
 // ── Serial path (default): existing behavior unchanged — inline counter++ and dashboard ─
@@ -290,4 +330,4 @@ Return {taskId, outcome: 'done', mergeCommit, milestoneCounter}.`,
 )
 
 log(`Land phase complete — milestone ${args.taskId} done.`)
-return { outcome: 'done', taskId: args.taskId }
+return { outcome: 'done', taskId: args.taskId, verifyCacheUpdates }
