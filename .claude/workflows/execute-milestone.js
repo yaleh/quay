@@ -120,7 +120,7 @@ log(`Audit phase complete: verdict=${auditResult?.verdict}`)
 // ── Phase: Gate (step 6 all mechanical checks) ──────────────────────────────────────
 phase('Gate')
 const gates = await parallel([
-  () => agent(`Run vmeta-lag-check.sh --counter <current pre-increment milestone_counter> ${args.absorbEntryFile}. Return {ok, detail}. Non-zero = ALARM → HARD BLOCK.`,
+  () => agent(`Run vmeta-lag-check.sh --counter <extract current milestone_counter from experiments/quay-perpetual-stream/dashboard.md minus 1> experiments/quay-perpetual-stream/v-meta-ledger.md. This reads the V_meta ledger (NOT the absorb entry). Return {ok, detail}. Non-zero = ALARM → HARD BLOCK.`,
     { label: 'vmeta-lag', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run it0-impl-row-check.sh ${args.taskId}. Return {ok, detail}. Non-zero = required -IMPL row missing → HARD BLOCK.`,
     { label: 'impl-row', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
