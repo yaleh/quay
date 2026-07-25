@@ -1,7 +1,7 @@
 ---
 id: DIR-070-A
 title: "DIR-070-A: Gap 4 — dual-copy resolution (sync-vendor --check + symlinks)"
-status: todo
+status: done
 labels:
   - milestone-candidate
   - milestone:M-136
@@ -12,7 +12,7 @@ extra:
     DIR-070-A
     experiments/quay-perpetual-stream/charters/M136-dual-copy-resolution.md
     /tmp/m136-absorb-entry.md
-  dirStatus: pending
+  dirStatus: done
   schema: v1
   deliverable: yes
 ---
@@ -72,3 +72,11 @@ References `inherited-core.md` standard DoD clauses (ADR-001 TDD + fixture-pin, 
 **Value type:** capability-growth
 **Deliverable:** yes -- sync-vendor --check mode ships in plugin/; symlinks resolve the dual-copy structural problem
 **Rationale:** Closes Gap 4 (dual-copy resolution), the first and enabling step in the DIR-070 deliverable chain. M134/M135 were instrument-correction milestones; capability-growth balances the ledger. Governor: D_seats=1, N_seats=3 (streak=2, floor=0.333). Highest value-type priority in the shortlist. Unblocks DIR-070-B/C/D.
+
+## Execution record
+
+- **Milestone:** M136
+- **Iteration count:** 0 (build-phase direct commit; no separate iteration worktree)
+- **Realized Δv:** 0 (capability-growth structural infrastructure — no chart-2 surface cell directly moves)
+- **Merge commit:** b310adb
+- **Outcome:** Done. sync-vendor.sh --check mode implemented with DRIFT/CLEAN reporting; 7 experiments/scripts/ files converted to symlinks pointing to ../../../plugin/scripts/; sync-vendor.sh test -L guard skips symlinks; plugin-packaging.test.mjs updated with dynamic scanning; all existing selfcheck fixtures pass. Audit verdict: CONCERNS (stale plugin copies in original commit corrected post-cherry-pick via sync-vendor.sh run; implementation not merged to master at audit time — now merged).

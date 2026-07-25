@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 135** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)** · **cp-135 written at M135 ABSORB — see checkpoints/cp-135.md** · cp-125 was M125 (HALT-RECOMMENDED, governance:product breach; now informational only per DIR-066)
+**milestone_counter: 136** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)** · **cp-135 written at M135 ABSORB — see checkpoints/cp-135.md** · cp-125 was M125 (HALT-RECOMMENDED, governance:product breach; now informational only per DIR-066)
 <!-- chart: 1→2 at M121/DIR-064 (2026-07-23) — chart-1 EXHAUSTED (frozen 110.65/120, flat 108 milestones m12→m120); chart-2 opened (S1 Distribution-reliability / S2 Delivery-completeness / S3 External-validation / S4 Methodology-executability-SOFT). See the "### Chart-2 transition" subsection in ## VT below. -->
 <!-- OLD chart: 1 header value retained in git history; transition is human-ratified (DIR-064) + human-wired this session. -->
 
@@ -471,3 +471,4 @@ m132 · exp5-M-VERSION-CHECK-CI · Δv=0 (v̂=0, capability-growth — version-c
 m133 · exp5-M-ARCH-AUDIT-M133-EXPLORE · Δv=0 (v̂=0, mandatory explore — 144/201/0, IDENTICAL to M128) · audit=documented-no-op (explore/FILE-ONLY) · → milestones/M133/
 m134 · exp5-M-LOADBEARING-TEST-GATE-TS · Δv=0 (v̂=0, instrument-correction — loadbearing-test-gate now recognizes .test.ts) · → milestones/M134/
 m135 · exp5-DEFECT-DELIVERY-MANIFEST-INCOMPLETE-RELEASE · Δv=0 (v̂=0, instrument-correction — delivery-manifest-check --ci mode: doc-vs-doc → doc-vs-reality) · audit=CONCERNS · merge=057bcd5 · → milestones/M135/
+m136 · DIR-070-A · Δv=0 (v̂=0, capability-growth — sync-vendor --check + 7 symlinks + dynamic packaging test; structural integrity infrastructure, no chart-2 surface cell directly moves) · audit=CONCERNS · merge=b310adb · → milestones/M136/
