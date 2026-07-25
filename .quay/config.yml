@@ -95,3 +95,6 @@ loop:
     - name: history-mining
       trigger: every(10)
       probe: history-mining
+    - name: browser-explorer
+      trigger: every(10)
+      probe: browser-explorer
