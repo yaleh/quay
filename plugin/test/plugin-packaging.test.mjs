@@ -36,10 +36,10 @@ test('marketplace.json is valid JSON and lists the quay plugin pointing at ./plu
   assert.equal(entry.source, './plugin');
 });
 
-test('plugin.json is valid JSON and declares the 5 bundled skills (M143: +init)', () => {
+test('plugin.json is valid JSON and declares the 7 bundled skills (M140: +routines)', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');
-  assert.equal(manifest.version, '0.4.0', 'M143: version bumped to 0.4.0');
+  assert.equal(manifest.version, '0.4.0', 'version');
   assert.ok(Array.isArray(manifest.commands));
   const wanted = [
     './skills/author/SKILL.md',
@@ -47,6 +47,8 @@ test('plugin.json is valid JSON and declares the 5 bundled skills (M143: +init)'
     './skills/quay-directive/SKILL.md',
     './skills/loop-driver/SKILL.md',
     './skills/init/SKILL.md',
+    './skills/quay-task-to-plan/SKILL.md',
+    './skills/routines/SKILL.md',
   ];
   for (const w of wanted) {
     assert.ok(manifest.commands.includes(w), `plugin.json commands[] must include ${w}`);
@@ -125,6 +127,7 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
     path.join(pluginDir, 'skills', 'loop-driver', 'SKILL.md'),
     // M143: new shipped files
     path.join(pluginDir, 'skills', 'init', 'SKILL.md'),
+    path.join(pluginDir, 'skills', 'routines', 'SKILL.md'),
     path.join(pluginDir, 'README.md'),
     // DIR-070-B: Tier-A gate scripts + wrappers shipped to plugin/scripts/
     path.join(pluginDir, 'scripts', 'anti-gaming-guard.ts'),
@@ -186,6 +189,29 @@ test('M136 (DIR-070-A): sync-vendor.sh --check dynamic scanning verifies all man
   // Verify symlink awareness: output should report 7 OK (identical) entries for concurrency scripts
   const okCount = (result.match(/OK \(identical\): scripts\//g) || []).length;
   assert.equal(okCount, 7, '--check must report exactly 7 identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array)');
+});
+
+test('routines skill (M140) has zero experiment-layer references', () => {
+  const src = readFileSync(path.join(pluginDir, 'skills', 'routines', 'SKILL.md'), 'utf8');
+  // Only check for experiment-layout and attribution leaks (charter Done-when clause 6).
+  // "checkpoint" is a legitimate scheduler trigger name, not a research-layer reference.
+  const leakPattern = /experiments\/quay-perpetual-stream|\bexp5\b/i;
+  assert.ok(
+    !leakPattern.test(src),
+    'routines SKILL.md must contain no experiments/quay-perpetual-stream or exp5 references'
+  );
+  // Must reference plugin scripts (not workspace scripts)
+  assert.ok(
+    src.includes('${CLAUDE_PLUGIN_ROOT}/scripts/'),
+    'routines SKILL.md must reference CLAUDE_PLUGIN_ROOT scripts'
+  );
+  // Must describe all four pipeline phases
+  for (const phase of ['Schedule', 'Dispatch', 'Gate', 'Verify']) {
+    assert.ok(
+      src.includes(phase),
+      `routines SKILL.md must document the ${phase} phase`
+    );
+  }
 });
 
 test('loop-driver skill (DIR-042-B) has zero research-layer references (VT/value-ledger/checkpoints/experiments/**)', () => {

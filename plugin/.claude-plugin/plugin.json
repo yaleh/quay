@@ -15,7 +15,8 @@
 		"./skills/quay-directive/SKILL.md",
 		"./skills/loop-driver/SKILL.md",
 		"./skills/init/SKILL.md",
-		"./skills/quay-task-to-plan/SKILL.md"
+		"./skills/quay-task-to-plan/SKILL.md",
+		"./skills/routines/SKILL.md"
 	],
 	"agents": [
 		"./agents/baime-iteration-executor.md"
