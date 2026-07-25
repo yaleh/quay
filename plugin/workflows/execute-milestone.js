@@ -23,11 +23,11 @@ phase('Verify')
 
 const CHARTER_TEXT = readFile(args.charterFile)
 const VERIFY_CHECKS = [
-  { label: 'ceiling-check',    fingerprint: sha256(args.charterFile) },
-  { label: 'gate-hash',        fingerprint: sha256(args.charterFile) },
-  { label: 'domain-misfit',    fingerprint: sha256(args.charterFile) },
-  { label: 'line-budget',      fingerprint: sha256(args.charterFile) },
-  { label: 'dogfood-evidence', fingerprint: sha256(args.charterFile) },
+  { label: 'ceiling-check',    fingerprint: sha256(CHARTER_TEXT) },
+  { label: 'gate-hash',        fingerprint: sha256(CHARTER_TEXT) },
+  { label: 'domain-misfit',    fingerprint: sha256(CHARTER_TEXT) },
+  { label: 'line-budget',      fingerprint: sha256(CHARTER_TEXT) },
+  { label: 'dogfood-evidence', fingerprint: sha256(CHARTER_TEXT) },
 ]
 
 // Load prior per-check cache from the previous Verify run (if any).
