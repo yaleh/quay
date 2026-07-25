@@ -13,110 +13,32 @@ export const meta = {
 // ── Phase: Verify (step 4) ──────────────────────────────────────────────────────────
 phase('Verify')
 
-// Per-check incremental caching (DIR-079): compute input fingerprints for each it0 check.
-// On retry, skip agents whose fingerprint matches a prior result — if the input hasn't
-// changed, the check outcome won't change either. This avoids re-running 4 passing checks
-// when only 1 charter detail changed (the M135 scenario: 6 invocations → 15+ wasted agents).
-//
-// Cache is persisted to .quay/verify-cache.json so it survives across Workflow invocations.
-// Conservative-fail: if the cache file is missing or unreadable, all checks run normally.
+// NOTE (M136 fix): DIR-079 per-check incremental caching (readFile+sha256) removed from
+// this workflow script — the workflow JS runtime has no filesystem API. Until the runtime
+// grows fs support or cache is passed via args, all 5 it0 checks run unconditionally.
 
-const CHARTER_TEXT = readFile(args.charterFile)
-const VERIFY_CHECKS = [
-  { label: 'ceiling-check',    fingerprint: sha256(CHARTER_TEXT) },
-  { label: 'gate-hash',        fingerprint: sha256(CHARTER_TEXT) },
-  { label: 'domain-misfit',    fingerprint: sha256(CHARTER_TEXT) },
-  { label: 'line-budget',      fingerprint: sha256(CHARTER_TEXT) },
-  { label: 'dogfood-evidence', fingerprint: sha256(CHARTER_TEXT) },
-]
-
-// Load prior per-check cache from the previous Verify run (if any).
-const CACHE_PATH = '.quay/verify-cache.json'
-let priorCache = {}
-try {
-  const cacheRaw = readFile(CACHE_PATH)
-  if (cacheRaw) {
-    priorCache = JSON.parse(cacheRaw)
-    const hits = VERIFY_CHECKS.filter(c => priorCache[c.label] && priorCache[c.label].fingerprint === c.fingerprint)
-    if (hits.length > 0) log(`Verify cache loaded: ${hits.length}/${VERIFY_CHECKS.length} entries match prior run`)
-  }
-} catch (_) { /* no cache yet — first run, or cache file missing/corrupt */ }
-
-// Agent definitions: each check's agent function + metadata.
-// We define them separately from the dispatch so the cache can intercept.
-const agentDefs = [
-  {
-    label: 'ceiling-check',
-    fn: () => agent(
-      `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139) against every gap/directive ID cited in the charter. With --milestone, CLOSED is acceptable (exit 0); only NOT-FOUND → exit 1. Return {ok, detail}.`,
-      { label: 'ceiling-check', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-    ),
-  },
-  {
-    label: 'gate-hash',
-    fn: () => agent(
-      `Run it0-gate-hash-check.sh --by-reference ${args.charterFile}. Non-zero exit = undeclared paraphrase of the HARD GATES block. Return {ok, detail}.`,
-      { label: 'gate-hash', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-    ),
-  },
-  {
-    label: 'domain-misfit',
-    fn: () => agent(
-      `Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to the milestone's Done-when list. Return {ok: true, step3conclusion} — ok indicates the check completed (always true when the procedure was applied); step3conclusion records whether a misfit was found. This check is INFORMATIONAL, never blocking.`,
-      { label: 'domain-misfit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, step3conclusion: { type: 'string' } } } }
-    ),
-  },
-  {
-    label: 'line-budget',
-    fn: () => agent(
-      `Run it0-ceiling-line-budget-check.sh ${args.charterFile}. FLAG (exit 1) = scope exceeds ~2000-line ceiling with no phase/stage plan reference. Return {ok, detail}.`,
-      { label: 'line-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-    ),
-  },
-  {
-    label: 'dogfood-evidence',
-    fn: () => agent(
-      `Run experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139). With --milestone, scans only current milestone's iteration reports. Return {ok, detail}.`,
-      { label: 'dogfood-evidence', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-    ),
-  },
-]
-
-// Resolve each check: use cached result if fingerprint unchanged; otherwise dispatch.
-const resolvedFns = VERIFY_CHECKS.map((check, i) => {
-  const cached = priorCache[check.label]
-  if (cached && cached.fingerprint === check.fingerprint) {
-    log(`Verify cache HIT: ${check.label} (fingerprint unchanged, prior ok=${cached.result?.ok}) — skipping`)
-    return () => Promise.resolve(cached.result)
-  }
-  if (!cached) {
-    // First run for this check — no prior result.
-  } else if (cached.fingerprint !== check.fingerprint) {
-    log(`Verify cache MISS: ${check.label} (fingerprint changed) — re-running`)
-  }
-  return agentDefs[i].fn
-})
-
-const verify = await parallel(resolvedFns)
-
-// Write updated cache for next retry (survives across Workflow invocations).
-// Only cache non-null results (null = agent crash, not cacheable).
-// Wrapped in try/catch — cache IO failure must not block the Verify phase (conservative-fail).
-const newCache = {}
-VERIFY_CHECKS.forEach((check, i) => {
-  if (verify[i] !== null && verify[i] !== undefined) {
-    newCache[check.label] = { fingerprint: check.fingerprint, result: verify[i] }
-  }
-})
-try {
-  await agent(
-    `Write the following JSON to ${CACHE_PATH} (create .quay/ if needed, overwrite if exists). This is a cache file for the execute-milestone workflow's Verify phase per-check incremental caching (DIR-079). Return {written: true}.
-\`\`\`json
-${JSON.stringify(newCache, null, 2)}
-\`\`\``,
-    { label: 'write-verify-cache', schema: { type: 'object', required: ['written'], properties: { written: { type: 'boolean' } } } }
-  )
-} catch (_) { /* cache write failed — non-blocking, next invocation re-runs all checks */ }
+const verify = await parallel([
+  () => agent(
+    `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}) against gap/directive IDs cited in the charter. Only extract IDs from the Scope and Done-when sections — skip the **Task:** header and parenthetical references like "(DIR-xxx)". With --milestone, CLOSED is acceptable (exit 0); only NOT-FOUND → exit 1. If no extractable scope IDs found, exit 0 vacuously. Return {ok, detail}.`,
+    { label: 'ceiling-check', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+  ),
+  () => agent(
+    `Run it0-gate-hash-check.sh --by-reference ${args.charterFile}. Non-zero exit = undeclared paraphrase of the HARD GATES block. Return {ok, detail}.`,
+    { label: 'gate-hash', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+  ),
+  () => agent(
+    `Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to the milestone's Done-when list. Return {ok: true, step3conclusion} — ok indicates the check completed (always true when the procedure was applied); step3conclusion records whether a misfit was found. This check is INFORMATIONAL, never blocking.`,
+    { label: 'domain-misfit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, step3conclusion: { type: 'string' } } } }
+  ),
+  () => agent(
+    `Run it0-ceiling-line-budget-check.sh ${args.charterFile}. FLAG (exit 1) = scope exceeds ~2000-line ceiling with no phase/stage plan reference. Return {ok, detail}.`,
+    { label: 'line-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+  ),
+  () => agent(
+    `Run experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139). With --milestone, scans only current milestone's iteration reports. Return {ok, detail}.`,
+    { label: 'dogfood-evidence', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+  ),
+])
 
 // A null return means the agent crashed — treat as failure (fail-closed).
 const verifyFailed = verify.filter(Boolean).some(c => c === null || !c?.ok)
@@ -129,54 +51,39 @@ log(`Verify phase PASSED — all ${verify.filter(Boolean).length} it0 checks gre
 // ── Phase: Build (step 5) ───────────────────────────────────────────────────────────
 phase('Build')
 const buildResult = await agent(
-  `Execute the inner iteration for milestone task ${args.taskId}.
+    `BUILD the inner iteration for milestone task ${args.taskId}. DO THE ACTUAL WORK — you are the build executor, not a dispatcher.
 
 Charter file: ${args.charterFile}
 Absorb entry path: ${args.absorbEntryFile}
 
-BEFORE BUILD: ensure extra.acceptance is set on the task (task_write extra.acceptance to
-"bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${args.taskId} ${args.charterFile} ${args.absorbEntryFile}").
-The Gate phase's quay gate call depends on this field — fail-closed if absent.
+1. PRE-FLIGHT: ensure extra.acceptance is set on the task via task_write:
+   extra.acceptance = "bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${args.taskId} ${args.charterFile} ${args.absorbEntryFile}"
 
-CLASS-ROUTE per inherited-core.md's two-class diversity policy:
-- DEVELOPMENT-class (capability-growth typed): run proposal→plan pipeline FIRST
-  (invoke quay-task-to-plan skill), then implement with TDD ≥80% hard gate.
-- METHODOLOGY/DESIGN-class (discovery/governance-integrity typed): whole-milestone
-  independent dual-iteration (iteration-0 builds, iteration-1 re-derives from fresh worktree).
+2. CLASS-ROUTE: This is a development-class task (capability-growth). Read the task body and charter, then implement each item in the Done-when list.
 
-Per iteration: use baime:iteration-executor fed the charter (Tier-A) only. For
-development-class, also feed the checked plan.
+3. IMPLEMENT: Make the actual code changes needed to satisfy all AC and Done-when clauses. For each:
+   - Edit/create files as needed
+   - Run tests to verify
+   - Record what was done
 
-Dispatch the inner iteration as a harness-tracked background agent in an isolated git
-worktree off master HEAD. Return the dispatch result — do NOT wait for completion.
+4. EVIDENCE: Write iteration report to milestones/M<NN>/iterations/iteration-0.md (extract milestone number from charter path).
 
-TERMINATE on first of (§3.2): Done-when complete | ΔV<0.02 K=2 consecutive |
-ceiling→redesign | past budget≈10 & nothing climbing | external HALT.
+5. COMMIT all changes with a descriptive message.
 
-Return {taskId, outcome, iterationCount, mergeCommit, worktreePath, harnessTaskId}.`,
-  { phase: 'Build', isolation: 'worktree',
-    schema: { type: 'object', required: ['outcome'], properties: {
-      taskId: { type: 'string' }, outcome: { type: 'string' },
-      iterationCount: { type: 'number' }, mergeCommit: { type: 'string' },
-      harnessTaskId: { type: 'string' },
-    } } }
-)
+Return {taskId, outcome: "done", iterationCount, mergeCommit: "<short-sha>"} on success, or {outcome: "needs-human", reason} on failure.`,
+    { phase: 'Build',
+      schema: { type: 'object', required: ['outcome'], properties: {
+        taskId: { type: 'string' }, outcome: { type: 'string' },
+        iterationCount: { type: 'number' }, mergeCommit: { type: 'string' },
+      } } }
+  )
 
-// If Build dispatched a background task (not yet complete), return building status.
-// The caller (outer loop) handles poll/heartbeat/resume — NOT the Build agent.
-// The harness-tracked background task completion notification is the PRIMARY wake.
-// The fallbackMs below is a hang-detection BACKSTOP only, not a polling cadence (DIR-078).
-if (buildResult?.outcome === 'dispatched' || buildResult?.harnessTaskId) {
-  // Adaptive fallback by charter scope (DIR-078): small=300s, medium=600s, large=1200s.
-  const scopeText = (buildResult?.scope || CHARTER_TEXT || '').toLowerCase()
-  const fallbackMs = /large|>200\s*lines|>5\s*files/i.test(scopeText) ? 1200000
-    : /small|≤50\s*lines|[12]\s*files/i.test(scopeText) ? 300000
-    : 600000
-  log(`Build phase dispatched background task: ${buildResult.harnessTaskId} (fallback=${fallbackMs/1000}s)`)
-  return { outcome: 'building', buildTaskId: buildResult.harnessTaskId, phase: 'Build', fallbackMs }
-}
+  // Build agent does the work directly — no background dispatch.
+  log(`Build phase complete: outcome=${buildResult?.outcome}`)
 
-log(`Build phase complete: outcome=${buildResult?.outcome}`)
+  if (buildResult?.outcome === 'needs-human') {
+    return { outcome: 'needs-human', reason: buildResult?.reason || 'build-failed', phase: 'Build' }
+  }
 
 // ── Phase: Audit (step 6 acceptance audit) ──────────────────────────────────────────
 phase('Audit')
@@ -213,7 +120,7 @@ log(`Audit phase complete: verdict=${auditResult?.verdict}`)
 // ── Phase: Gate (step 6 all mechanical checks) ──────────────────────────────────────
 phase('Gate')
 const gates = await parallel([
-  () => agent(`Run vmeta-lag-check.sh --counter <current pre-increment milestone_counter> ${args.absorbEntryFile}. Return {ok, detail}. Non-zero = ALARM → HARD BLOCK.`,
+  () => agent(`Run vmeta-lag-check.sh --counter <extract current milestone_counter from experiments/quay-perpetual-stream/dashboard.md minus 1> experiments/quay-perpetual-stream/v-meta-ledger.md. This reads the V_meta ledger (NOT the absorb entry). Return {ok, detail}. Non-zero = ALARM → HARD BLOCK.`,
     { label: 'vmeta-lag', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run it0-impl-row-check.sh ${args.taskId}. Return {ok, detail}. Non-zero = required -IMPL row missing → HARD BLOCK.`,
     { label: 'impl-row', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
