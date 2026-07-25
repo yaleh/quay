@@ -11,6 +11,7 @@ labels:
 parent: DIR-063
 children: []
 extra:
+  dirStatus: resolved
   acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
     DIR-063-A
     experiments/quay-perpetual-stream/charters/M127-dir063a-chart-saturation-check.md

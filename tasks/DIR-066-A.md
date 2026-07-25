@@ -10,6 +10,7 @@ labels:
 parent: DIR-066
 children: []
 extra:
+  dirStatus: resolved
   schema: v1
 ---
 ## Proposal

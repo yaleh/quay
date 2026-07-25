@@ -7,6 +7,7 @@ labels:
 parent: DIR-070
 children: []
 extra:
+  dirStatus: pending
   schema: v1
   deliverable: yes
 ---

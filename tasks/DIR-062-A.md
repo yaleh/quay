@@ -11,6 +11,7 @@ labels:
 parent: DIR-062
 children: []
 extra:
+  dirStatus: resolved
   schema: v1
   acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
     DIR-062-A
