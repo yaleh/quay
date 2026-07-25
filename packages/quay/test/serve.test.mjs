@@ -145,6 +145,14 @@ async function main() {
     const notFound = await get(port, "/task/NOPE-999");
     assert(notFound.status === 404, `GET /task/NOPE-999 returns 404 (got ${notFound.status})`);
 
+    // --- POST /task/<nonexistent>/action/<actionId> -> 404 ---
+    // M160: handleTaskAction must return 404 for nonexistent tasks (was crashing with
+    // null dereference). Tests fix for gap-handleTaskAction-null-crash.
+    const actionNotFound = await post(port, "/task/NOPE-999/action/advance");
+    assert(actionNotFound.status === 404, `POST /task/NOPE-999/action/advance returns 404 (got ${actionNotFound.status})`);
+    assert(actionNotFound.body === "not found" || actionNotFound.body.includes("not found"),
+      `POST /task/NOPE-999/action/advance body contains "not found" (got "${actionNotFound.body}")`);
+
     // --- POST /task/<id>/action/<actionId> -> 302 redirect ---
     // QX-013 (iteration 3): gate passes (VALID_SECTIONS has all ACs checked) so
     // redirect now includes ?success= param. Check the redirect starts with /task/SRV-1.

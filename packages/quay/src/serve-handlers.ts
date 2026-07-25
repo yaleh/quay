@@ -952,6 +952,11 @@ export async function handleTaskAction(
   const { composePayload, deliverTrigger } = await import("./action.ts");
   const decodedId = decodeURIComponent(taskId);
   const t = await client.taskGet(decodedId);
+  if (!t) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("not found");
+    return;
+  }
   // QX-009 (experiment 4, iteration 2): read ?from= param for list-context redirect.
   // M26-adversarial-eval finding ADV-003/M26-F3 (both iterations independently found
   // this): this guard previously checked ONLY fromParam.startsWith("/") -- missing the
@@ -972,7 +977,7 @@ export async function handleTaskAction(
   // directly, via backHref, rendered straight into an href attribute) -- not a
   // confirmed live open-redirect on the POST route itself.
   const fromParam = url.searchParams.get("from");
-  const baseRedirect = isSafeRelativeRedirect(fromParam) ? fromParam as string : `/task/${t!.id}`;
+  const baseRedirect = isSafeRelativeRedirect(fromParam) ? fromParam as string : `/task/${decodedId}`;
   // QX-013 (experiment 4, iteration 3): gate-check BEFORE delivering the trigger.
   // If gate is blocked (ok: false), redirect back with ?error= instead of silently
   // delivering. Closes UQ-013 (silent gate-fail feedback). The gate check uses the
@@ -988,14 +993,14 @@ export async function handleTaskAction(
     console.log(`[quay serve] action ${actionId} on ${decodedId}: gate blocked — ${errorMsg}`);
     return;
   }
-  const payloadObj = composePayload({ providerManifest: manifest, task: t!, actionId: decodeURIComponent(actionId) });
+  const payloadObj = composePayload({ providerManifest: manifest, task: t, actionId: decodeURIComponent(actionId) });
   // QN-042 (DIR-009): QUAY_ACTION_MOCK_LOG opts into the deterministic
   // mock/file-log delivery mode instead of manda/print — see
   // src/action.ts#deliverTrigger's own doc comment.
   const mockLogPath = process.env.QUAY_ACTION_MOCK_LOG || undefined;
   const result = await deliverTrigger({
     root: cfg.workspaceRoot,
-    channel: `task-${t!.id}`,
+    channel: `task-${t.id}`,
     payloadObj,
     mockLogPath,
   }) as { delivered: string };
@@ -1011,10 +1016,10 @@ export async function handleTaskAction(
   // flavored language per AC 2; "mock" gets its own honest, non-"advanced"
   // label since it is a test-only recording mode, not a production claim.
   const successMsg = ({
-    print: `Task ${t!.id}: advance requested (no live dispatcher configured — run the printed command to complete it)`,
-    manda: `Task ${t!.id}: advance requested (dispatched to manda, delivery not confirmed)`,
-    mock: `Task ${t!.id}: advance recorded (mock delivery mode)`,
-  } as Record<string, string>)[result.delivered] || `Task ${t!.id}: advance requested`;
+    print: `Task ${t.id}: advance requested (no live dispatcher configured — run the printed command to complete it)`,
+    manda: `Task ${t.id}: advance requested (dispatched to manda, delivery not confirmed)`,
+    mock: `Task ${t.id}: advance recorded (mock delivery mode)`,
+  } as Record<string, string>)[result.delivered] || `Task ${t.id}: advance requested`;
   const successRedirect = addParam(baseRedirect, "success", successMsg);
   res.writeHead(302, { Location: successRedirect });
   res.end();
