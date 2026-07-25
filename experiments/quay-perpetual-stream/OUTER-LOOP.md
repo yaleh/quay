@@ -14,11 +14,14 @@ drain(D) = invoke(".claude/workflows/drain-directives.js", {workspaceRoot})
   ⊨ absent → {drained: 0}; must complete before select (I₄)
 
 select :: Candidate[] ⇀ Candidate[]   -- batch (1..N); 1-wide = serial path, N≥2 = concurrent dispatch
-select = task_list(label=milestone-candidate, status=todo)  -- canonical source, not backlog.md
-  → filter(human_steered_classify)                           -- scripts/human-steered-classify.ts (DIR-062-A)
-  → compose_shortlist                                        -- scripts/deliverable-governor.ts (DIR-066)
-  → rank(pick, explore_due)                                  -- scripts/explore-exploit-cadence.ts (CRYST-D3 R6)
-  → batch_assemble(charters)                                 -- scripts/concurrent-batch-scheduler.ts (DIR-075/M142); ⊨ charter readiness: type: + ## Touches
+select =
+  -- Step 1: SELECT preflight (DIR-072/M153) — encapsulated single invocation replacing ~15 manual turns
+  preflight = invoke(".claude/workflows/select-preflight.js", {workspaceRoot})
+    ⊨ halt → return at boundary (clean exit per I₆); ¬block
+    ⊨ pendingDirectives > 0 → /drain-directives first (DIR-071, I₄)
+    ⊨ preflight yields {shortlist, cadence, deliverableStreak, starvation, candidates with schema/touches status}
+  → shortlist = preflight.shortlist  -- composed by deliverable-governor (DIR-066); deliverable classification baked in
+  → batch_assemble(charters)         -- scripts/concurrent-batch-scheduler.ts (DIR-075/M142); ⊨ charter readiness: type: + ## Touches
   → writeback(batch, deferred, considered \ {batch ∪ deferred})
   → ∀c∈batch: author_ac_dod(c)   -- ¬self-tick (DIR-020): all - [ ] UNCHECKED; - [x] ONLY by Audit phase
   → ∀c∈batch: set_schema_v1(c)   -- extra.schema:"v1"; absent → N/A-legacy
@@ -139,6 +142,8 @@ routines() = invoke(".claude/workflows/run-routines.js", {workspaceRoot, tasksDi
   C₅: test -f scripts/termination-delta-v-check.ts → exit 0
   C₆: ¬∃ "governance:product.*HALT" in OUTER-LOOP.md beyond informational (DIR-066 supersedes hard halt)
   C₇: ∀s ∈ extract_scripts(OUTER-LOOP.md): test -f experiments/quay-perpetual-stream/$s → exit 0
+  C₈: test -f .claude/workflows/select-preflight.js → exit 0 (DIR-072/M153: SELECT preflight workflow)
+  C₉: test -f experiments/quay-perpetual-stream/scripts/select-preflight.ts → exit 0 (DIR-072/M153)
 
 -- HALT CONDITIONS (evaluated at milestone boundary only; loop NEVER blocks waiting for human)
 

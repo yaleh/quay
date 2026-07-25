@@ -94,8 +94,32 @@ export function replayFloors(fixture: FixtureEntry[]): ReplayResult {
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 // `deliverable-governor.ts <fixture.json>` → prints the replay trajectory. Emits NO HALT-RECOMMENDED and
 // touches no `.halt` — the whole point is that this mechanism never halts.
+// `deliverable-governor.ts --shortlist` → reads {candidates, streak, sMax?} from stdin, calls
+// composeShortlist, and outputs ShortlistResult as JSON. Used by the /select-preflight workflow
+// after deliverable classification (DIR-072/M153).
 export async function main(argv: string[]): Promise<number> {
-  const file = argv[2];
+  const args = argv.slice(2);
+
+  // ── --shortlist mode ──
+  if (args.includes("--shortlist")) {
+    try {
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+      const raw = Buffer.concat(chunks).toString("utf8");
+      const input = JSON.parse(raw);
+      const { candidates, streak, sMax } = input;
+      if (!Array.isArray(candidates)) throw new Error("candidates must be an array");
+      if (!Number.isFinite(streak)) throw new Error("streak must be a number");
+      const result = composeShortlist({ candidates, streak, sMax });
+      process.stdout.write(JSON.stringify(result) + "\n");
+      return 0;
+    } catch (e: any) {
+      process.stderr.write(`ERROR: ${e.message}\n`);
+      return 2;
+    }
+  }
+
+  const file = args[0];
   if (!file || !fs.existsSync(file)) { process.stderr.write("Usage: deliverable-governor.ts <fixture.json>\n"); return 2; }
   let fixture: FixtureEntry[];
   try { fixture = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e: any) { process.stderr.write(`ERROR: ${e.message}\n`); return 2; }
