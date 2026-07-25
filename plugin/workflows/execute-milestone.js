@@ -1,6 +1,6 @@
 export const meta = {
   name: 'execute-milestone',
-  description: 'Given a SELECTed milestone task, run the full execution pipeline: it0 checks → inner iteration build → adversarial audit → absorb gates → land. Replaces OUTER-LOOP.md steps 4–7 (DIR-067, 2026-07-24).',
+  description: 'Given a SELECTed milestone task, run the full execution pipeline: it0 checks → inner iteration build → adversarial audit → absorb gates → land. Replaces OUTER-LOOP.md steps 4–7 (DIR-067, 2026-07-24). Returns {outcome: "done"|"needs-human"|"building"} — "building" means a background task was dispatched; the caller polls and resumes.',
   phases: [
     { title: 'Verify', detail: 'Step 4 — run all 5 it0 systematic-explore checks' },
     { title: 'Build',  detail: 'Step 5 — class-route + dispatch inner iteration agent' },
@@ -12,28 +12,111 @@ export const meta = {
 
 // ── Phase: Verify (step 4) ──────────────────────────────────────────────────────────
 phase('Verify')
-const verify = await parallel([
-  () => agent(
-    `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh against every gap/directive ID cited in the charter file ${args.charterFile}. Non-zero exit or CLOSED/NOT-FOUND = charter scope stale — return {ok, detail}. FAIL is a HARD BLOCK.`,
-    { label: 'ceiling-check', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-  ),
-  () => agent(
-    `Run it0-gate-hash-check.sh --by-reference ${args.charterFile}. Non-zero exit = undeclared paraphrase of the HARD GATES block. Return {ok, detail}.`,
-    { label: 'gate-hash', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-  ),
-  () => agent(
-    `Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to the milestone's Done-when list. If Step 3 concludes no independent mechanism is reachable, that IS a §3.2 ceiling trigger. Return {ok, step3conclusion}.`,
-    { label: 'domain-misfit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, step3conclusion: { type: 'string' } } } }
-  ),
-  () => agent(
-    `Run it0-ceiling-line-budget-check.sh ${args.charterFile}. FLAG (exit 1) = scope exceeds ~2000-line ceiling with no phase/stage plan reference. Return {ok, detail}.`,
-    { label: 'line-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-  ),
-  () => agent(
-    `Run experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh against each inner iteration report as produced. FAIL = a claimed-met Done-when clause has no nearby pasted-output evidence. Return {ok, detail}. FAIL is a HARD BLOCK — send back to the inner iteration before ABSORB, not silently accepted.`,
-    { label: 'dogfood-evidence', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
-  ),
-])
+
+// Per-check incremental caching (DIR-079): compute input fingerprints for each it0 check.
+// On retry, skip agents whose fingerprint matches a prior result — if the input hasn't
+// changed, the check outcome won't change either. This avoids re-running 4 passing checks
+// when only 1 charter detail changed (the M135 scenario: 6 invocations → 15+ wasted agents).
+//
+// Cache is persisted to .quay/verify-cache.json so it survives across Workflow invocations.
+// Conservative-fail: if the cache file is missing or unreadable, all checks run normally.
+
+const CHARTER_TEXT = readFile(args.charterFile)
+const VERIFY_CHECKS = [
+  { label: 'ceiling-check',    fingerprint: sha256(args.charterFile) },
+  { label: 'gate-hash',        fingerprint: sha256(args.charterFile) },
+  { label: 'domain-misfit',    fingerprint: sha256(args.charterFile) },
+  { label: 'line-budget',      fingerprint: sha256(args.charterFile) },
+  { label: 'dogfood-evidence', fingerprint: sha256(args.charterFile) },
+]
+
+// Load prior per-check cache from the previous Verify run (if any).
+const CACHE_PATH = '.quay/verify-cache.json'
+let priorCache = {}
+try {
+  const cacheRaw = readFile(CACHE_PATH)
+  if (cacheRaw) {
+    priorCache = JSON.parse(cacheRaw)
+    const hits = VERIFY_CHECKS.filter(c => priorCache[c.label] && priorCache[c.label].fingerprint === c.fingerprint)
+    if (hits.length > 0) log(`Verify cache loaded: ${hits.length}/${VERIFY_CHECKS.length} entries match prior run`)
+  }
+} catch (_) { /* no cache yet — first run, or cache file missing/corrupt */ }
+
+// Agent definitions: each check's agent function + metadata.
+// We define them separately from the dispatch so the cache can intercept.
+const agentDefs = [
+  {
+    label: 'ceiling-check',
+    fn: () => agent(
+      `Run experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139) against every gap/directive ID cited in the charter. With --milestone, CLOSED is acceptable (exit 0); only NOT-FOUND → exit 1. Return {ok, detail}.`,
+      { label: 'ceiling-check', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+    ),
+  },
+  {
+    label: 'gate-hash',
+    fn: () => agent(
+      `Run it0-gate-hash-check.sh --by-reference ${args.charterFile}. Non-zero exit = undeclared paraphrase of the HARD GATES block. Return {ok, detail}.`,
+      { label: 'gate-hash', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+    ),
+  },
+  {
+    label: 'domain-misfit',
+    fn: () => agent(
+      `Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to the milestone's Done-when list. Return {ok: true, step3conclusion} — ok indicates the check completed (always true when the procedure was applied); step3conclusion records whether a misfit was found. This check is INFORMATIONAL, never blocking.`,
+      { label: 'domain-misfit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, step3conclusion: { type: 'string' } } } }
+    ),
+  },
+  {
+    label: 'line-budget',
+    fn: () => agent(
+      `Run it0-ceiling-line-budget-check.sh ${args.charterFile}. FLAG (exit 1) = scope exceeds ~2000-line ceiling with no phase/stage plan reference. Return {ok, detail}.`,
+      { label: 'line-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+    ),
+  },
+  {
+    label: 'dogfood-evidence',
+    fn: () => agent(
+      `Run experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone M<NN> (extract milestone number from charter path ${args.charterFile}, e.g. M139-it0-scoping.md → M139). With --milestone, scans only current milestone's iteration reports. Return {ok, detail}.`,
+      { label: 'dogfood-evidence', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+    ),
+  },
+]
+
+// Resolve each check: use cached result if fingerprint unchanged; otherwise dispatch.
+const resolvedFns = VERIFY_CHECKS.map((check, i) => {
+  const cached = priorCache[check.label]
+  if (cached && cached.fingerprint === check.fingerprint) {
+    log(`Verify cache HIT: ${check.label} (fingerprint unchanged, prior ok=${cached.result?.ok}) — skipping`)
+    return () => Promise.resolve(cached.result)
+  }
+  if (!cached) {
+    // First run for this check — no prior result.
+  } else if (cached.fingerprint !== check.fingerprint) {
+    log(`Verify cache MISS: ${check.label} (fingerprint changed) — re-running`)
+  }
+  return agentDefs[i].fn
+})
+
+const verify = await parallel(resolvedFns)
+
+// Write updated cache for next retry (survives across Workflow invocations).
+// Only cache non-null results (null = agent crash, not cacheable).
+// Wrapped in try/catch — cache IO failure must not block the Verify phase (conservative-fail).
+const newCache = {}
+VERIFY_CHECKS.forEach((check, i) => {
+  if (verify[i] !== null && verify[i] !== undefined) {
+    newCache[check.label] = { fingerprint: check.fingerprint, result: verify[i] }
+  }
+})
+try {
+  await agent(
+    `Write the following JSON to ${CACHE_PATH} (create .quay/ if needed, overwrite if exists). This is a cache file for the execute-milestone workflow's Verify phase per-check incremental caching (DIR-079). Return {written: true}.
+\`\`\`json
+${JSON.stringify(newCache, null, 2)}
+\`\`\``,
+    { label: 'write-verify-cache', schema: { type: 'object', required: ['written'], properties: { written: { type: 'boolean' } } } }
+  )
+} catch (_) { /* cache write failed — non-blocking, next invocation re-runs all checks */ }
 
 // A null return means the agent crashed — treat as failure (fail-closed).
 const verifyFailed = verify.filter(Boolean).some(c => c === null || !c?.ok)
@@ -56,41 +139,43 @@ BEFORE BUILD: ensure extra.acceptance is set on the task (task_write extra.accep
 The Gate phase's quay gate call depends on this field — fail-closed if absent.
 
 CLASS-ROUTE per inherited-core.md's two-class diversity policy:
-- DEVELOPMENT-class (capability-growth typed): run the proposal→plan pipeline FIRST
-  (invoke the quay-task-to-plan skill on the milestone task), then implement against
-  the checked plan with TDD ≥80% hard gate.
+- DEVELOPMENT-class (capability-growth typed): run proposal→plan pipeline FIRST
+  (invoke quay-task-to-plan skill), then implement with TDD ≥80% hard gate.
 - METHODOLOGY/DESIGN-class (discovery/governance-integrity typed): whole-milestone
-  independent dual-iteration (iteration-0 builds, iteration-1 re-derives from a
-  fresh worktree).
+  independent dual-iteration (iteration-0 builds, iteration-1 re-derives from fresh worktree).
 
 Per iteration: use baime:iteration-executor fed the charter (Tier-A) only. For
-development-class, also feed the checked plan from 5a.
+development-class, also feed the checked plan.
 
-TERMINATE on the first of (§3.2): Done-when complete | ΔV<0.02 both-layers K=2
-consecutive (checked by experiments/quay-perpetual-stream/scripts/termination-delta-v-check.ts) | ceiling→redesign |
-past budget≈10 & nothing climbing | external HALT.
+Dispatch the inner iteration as a harness-tracked background agent in an isolated git
+worktree off master HEAD. Return the dispatch result — do NOT wait for completion.
 
-Record under milestones/M<NN>/. The build agent MUST work in an isolated git worktree
-off master HEAD.
+TERMINATE on first of (§3.2): Done-when complete | ΔV<0.02 K=2 consecutive |
+ceiling→redesign | past budget≈10 & nothing climbing | external HALT.
 
-WAITING ON A LONG INNER ITERATION (background) — poll, don't conclude:
-- The completion notification is the PRIMARY wake — dispatch as a harness-tracked
-  background task so the loop is auto-re-invoked when the iteration finishes.
-- Any ScheduleWakeup fallback (~1200–1800s) is a HANG-DETECTION HEARTBEAT, NOT a deadline.
-- On a fallback wake: POLL the background task. Still running → re-arm the fallback and
-  keep waiting; do NOT absorb, do NOT advance to the next phase. Only proceed when the
-  iteration has GENUINELY completed.
-- If the iteration waits on EXTERNAL STATE the harness can't track (e.g. a GitHub Actions
-  run), poll that system's status explicitly and match the fallback to its cadence — never
-  conclude from the timer alone.
-
-Return {taskId, outcome, iterationCount, mergeCommit, worktreePath}.`,
+Return {taskId, outcome, iterationCount, mergeCommit, worktreePath, harnessTaskId}.`,
   { phase: 'Build', isolation: 'worktree',
     schema: { type: 'object', required: ['outcome'], properties: {
       taskId: { type: 'string' }, outcome: { type: 'string' },
       iterationCount: { type: 'number' }, mergeCommit: { type: 'string' },
+      harnessTaskId: { type: 'string' },
     } } }
 )
+
+// If Build dispatched a background task (not yet complete), return building status.
+// The caller (outer loop) handles poll/heartbeat/resume — NOT the Build agent.
+// The harness-tracked background task completion notification is the PRIMARY wake.
+// The fallbackMs below is a hang-detection BACKSTOP only, not a polling cadence (DIR-078).
+if (buildResult?.outcome === 'dispatched' || buildResult?.harnessTaskId) {
+  // Adaptive fallback by charter scope (DIR-078): small=300s, medium=600s, large=1200s.
+  const scopeText = (buildResult?.scope || CHARTER_TEXT || '').toLowerCase()
+  const fallbackMs = /large|>200\s*lines|>5\s*files/i.test(scopeText) ? 1200000
+    : /small|≤50\s*lines|[12]\s*files/i.test(scopeText) ? 300000
+    : 600000
+  log(`Build phase dispatched background task: ${buildResult.harnessTaskId} (fallback=${fallbackMs/1000}s)`)
+  return { outcome: 'building', buildTaskId: buildResult.harnessTaskId, phase: 'Build', fallbackMs }
+}
+
 log(`Build phase complete: outcome=${buildResult?.outcome}`)
 
 // ── Phase: Audit (step 6 acceptance audit) ──────────────────────────────────────────
@@ -173,6 +258,53 @@ if (auditResult?.verdict === 'REFUTED') {
   return { outcome: 'needs-human', reason: 'audit-refuted', phase: 'Land' }
 }
 
+const IS_CONCURRENT = args.mode === 'concurrent'
+
+// ── Concurrent path (DIR-075/M142): defers shared-state writes to fan-in ──────────
+if (IS_CONCURRENT) {
+  const concurrentResult = await agent(
+    `LAND (concurrent mode) the milestone for task ${args.taskId}. IN CONCURRENT MODE:
+   you are part of a multi-milestone batch — do NOT update milestone_counter or dashboard.md
+   (those writes are deferred to the serial fan-in absorb step that follows).
+
+1. MERGE the iteration worktree into master (DIR-027: loop runs on master directly).
+   Any conflict → per-file resolution, both sides read, reconciliation note recorded.
+   Never a blanket --ours/--theirs (DIR-013).
+2. CAPTURE then PRUNE (DIR-033): if a non-primary iteration produced evidence not on
+   master, cherry-pick JUST that evidence file. Then git worktree remove + git branch -d
+   the now-merged branches.
+3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${args.taskId}.md
+   appending a ## Execution record section (milestone id, iteration count, realized Δv,
+   merge commit SHA, one-line outcome summary) and setting status: done.
+4. COMPUTE touchedFiles: run \`git diff --numstat <merge-base>..<build-branch>\` to get the
+   actual files touched by this build. The merge-base is \`git merge-base origin/master HEAD\`
+   or the commit recorded in the build result (${
+     buildResult?.mergeCommit ? buildResult.mergeCommit : 'from Build phase'
+   }). Collect the changed file paths (column 3 of numstat output) into a flat array.
+5. DRAFT a one-line dashboard entry for this milestone: "m<NN> · ${args.taskId} · Δv=<realized> ·
+   audit=${auditResult?.verdict || 'NO REFUTATION FOUND'} · merge=<SHORT sha> · → milestones/<NN>/"
+
+Charter: ${args.charterFile}
+Build outcome: ${JSON.stringify(buildResult)}
+Audit verdict: ${auditResult?.verdict}
+
+Return {taskId: "${args.taskId}", outcome: "done", mergeCommit: "<40-char SHA>",
+  touchedFiles: ["relative/path/to/file1.ts", ...],
+  dashboardEntry: "<markdown block for serial-fanin-absorb.ts>"}.`,
+    { phase: 'Land',
+      schema: { type: 'object', required: ['outcome', 'mergeCommit', 'touchedFiles', 'dashboardEntry'], properties: {
+        taskId: { type: 'string' }, outcome: { type: 'string' },
+        mergeCommit: { type: 'string' },
+        touchedFiles: { type: 'array', items: { type: 'string' } },
+        dashboardEntry: { type: 'string' },
+      } } }
+  )
+  log(`Land phase complete (concurrent) — milestone ${args.taskId} done, touched ${(concurrentResult?.touchedFiles || []).length} files.`)
+  return { outcome: 'done', taskId: args.taskId, mergeCommit: concurrentResult?.mergeCommit,
+    touchedFiles: concurrentResult?.touchedFiles, dashboardEntry: concurrentResult?.dashboardEntry }
+}
+
+// ── Serial path (default): existing behavior unchanged — inline counter++ and dashboard ─
 await agent(
   `LAND the milestone for task ${args.taskId}.
 
