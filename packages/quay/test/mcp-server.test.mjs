@@ -1669,6 +1669,61 @@ async function main() {
       fs.rmSync(envPresetWorkspaceRoot, { recursive: true, force: true });
     }
 
+    // ---- gate_list (DIR-085): list registered gate names via MCP ----
+    // Tests the new gate_list MCP tool added by DIR-085 (M143), which exposes
+    // listGates() from the gate registry. Agents need this to discover available
+    // gates without hardcoding names or inspecting files directly.
+    {
+      // (a) listTools() includes gate_list
+      {
+        const toolsResult = await coreGate.listTools();
+        const toolNames = (toolsResult.tools ?? []).map((t) => t.name);
+        assert(
+          toolNames.includes("gate_list"),
+          `listTools() includes 'gate_list' tool (DIR-085). Tools: [${toolNames.join(", ")}]`
+        );
+        const gateListTool = (toolsResult.tools ?? []).find((t) => t.name === "gate_list");
+        assert(!!gateListTool, "gate_list tool definition is present in listTools()");
+        if (gateListTool) {
+          const props = gateListTool.inputSchema?.properties ?? {};
+          assert("provider" in props, "gate_list inputSchema.properties includes 'provider' (DIR-085)");
+        }
+      }
+
+      // (b) gate_list returns built-in gates (dod, acceptance) via default provider
+      {
+        const r = await coreGate.callTool({ name: "gate_list", arguments: {} });
+        assert(r.isError !== true, "gate_list (default provider) returns no error (DIR-085)");
+        const gates = r.structuredContent?.gates ?? [];
+        assert(Array.isArray(gates), `gate_list returns gates array (got: ${JSON.stringify(r.structuredContent)})`);
+        assert(
+          gates.includes("dod"),
+          `gate_list includes built-in 'dod' gate (got: [${gates.join(", ")}])`
+        );
+        assert(
+          gates.includes("acceptance"),
+          `gate_list includes built-in 'acceptance' gate (got: [${gates.join(", ")}])`
+        );
+      }
+
+      // (c) gate_list works with explicit provider argument
+      {
+        const r = await coreGate.callTool({ name: "gate_list", arguments: { provider: "native" } });
+        assert(r.isError !== true, "gate_list with provider='native' returns no error (DIR-085)");
+        const gates = r.structuredContent?.gates ?? [];
+        assert(
+          gates.includes("dod") && gates.includes("acceptance"),
+          `gate_list provider='native' includes dod and acceptance (got: [${gates.join(", ")}])`
+        );
+      }
+
+      // (d) gate_list with unknown provider -> isError
+      {
+        const r = await coreGate.callTool({ name: "gate_list", arguments: { provider: "does-not-exist" } });
+        assert(r.isError === true, "gate_list with unknown provider returns isError:true (DIR-085)");
+      }
+    }
+
     await coreGateTransport.close();
     fs.rmSync(gateTasksDir, { recursive: true, force: true });
     fs.rmSync(gateWorkspaceRoot, { recursive: true, force: true });

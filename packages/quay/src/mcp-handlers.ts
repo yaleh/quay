@@ -15,6 +15,7 @@ import { composePayload, deliverTrigger } from "./action.ts";
 import { QUAY_VERSION } from "./version.ts";
 import { runGate } from "./gate/engine.ts";
 import { resolveGateLogPath, runGateLogQuery } from "./gate/gate-log.ts";
+import { listGates } from "./gate/registry.ts";
 import { runComplete, runAdjudicate, runPromote, runRetreat } from "./gate/lifecycle.ts";
 
 export interface ConnectedProvider {
@@ -362,6 +363,34 @@ export function registerGateHandlers(
         return {
           content: [{ type: "text" as const, text: JSON.stringify(events, null, 2) }],
           structuredContent: { events },
+        };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
+      }
+    }
+  );
+
+  // gate_list — mirrors `quay gate --list`. Exposes the registered gate names
+  // (built-ins + workspace gates) over MCP so agents can discover available
+  // gates without hardcoding names or inspecting files directly.
+  server.registerTool(
+    "gate_list",
+    {
+      description:
+        "List registered gate names (built-ins + workspace gates). " +
+        "Returns { gates: string[] } including dod, acceptance, and any workspace gates declared in .quay/gates.yml. " +
+        "Mirrors `quay gate --list`.",
+      inputSchema: {
+        provider: z.string().optional().describe("Provider id (only affects workspaceRoot resolution; gates are workspace-wide, not per-Provider)."),
+      },
+    },
+    async ({ provider }) => {
+      try {
+        await getClient(provider); // validates provider id / resolves workspaceRoot use
+        const gates = listGates(cfg.workspaceRoot);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ gates }, null, 2) }],
+          structuredContent: { gates },
         };
       } catch (err) {
         return { isError: true, content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }] };
