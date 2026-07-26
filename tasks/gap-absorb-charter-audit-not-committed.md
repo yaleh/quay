@@ -1,11 +1,16 @@
 ---
-title: "ABSORB pipeline never commits charter or Audit-phase evidence files — accumulates as untracked cruft"
+title: ABSORB pipeline never commits charter or Audit-phase evidence files —
+  accumulates as untracked cruft
 status: todo
 labels:
   - gap
   - human-steered
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    gap-absorb-charter-audit-not-committed
+    experiments/quay-perpetual-stream/charters/M176-gap-absorb-charter-audit-commit.md
+    /tmp/m176-absorb-entry.md
 ---
 
 ## Finding

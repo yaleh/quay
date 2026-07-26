@@ -24,6 +24,25 @@ scratch=$(git status --porcelain 2>/dev/null \
   | grep -iE '\.(bak|orig|tmp|swp|swo|rej)$|\.l-[a-z]-backup$|[-.]backup$|~$|(^|/)\.mutation-backup(/|$)' \
   || true)
 
+# ── Non-blocking WARN (gap-absorb-charter-audit-not-committed / M176) ──────────────────────────
+# The ABSORB pipeline itself creates two kinds of evidence file (charters + Audit-phase reports)
+# that no pipeline step used to stage — they accumulated as untracked cruft for months (16 charters
+# + 19 audit files backlogged M144-M166, swept once by hand in bfc5289) before this check existed.
+# WARN only, never blocks: a fresh milestone's OWN evidence is legitimately untracked until its own
+# Land step commits it (see OUTER-LOOP.md charter step + execute-milestone.js Land-phase CAPTURE).
+evidence_untracked=$(git status --porcelain 2>/dev/null \
+  | awk '/^\?\?/ {print $2}' \
+  | grep -E '(^|/)charters/M[0-9]+-[^/]+\.md$|(^|/)milestones/M[0-9]+/(audits|iterations)/[^/]+\.md$' \
+  || true)
+
+if [ -n "$evidence_untracked" ]; then
+  echo "tree-hygiene: WARN — untracked ABSORB-pipeline evidence file(s) (charter/audit/iteration)."
+  echo "              Stage these as part of their milestone's own commit sequence (OUTER-LOOP.md"
+  echo "              charter step / execute-milestone.js Land-phase CAPTURE) — non-blocking, but"
+  echo "              left unaddressed these accumulate silently:"
+  echo "$evidence_untracked" | sed 's/^/  /'
+fi
+
 if [ -z "$scratch" ]; then
   echo "tree-hygiene: clean — no un-gitignored scratch left in the main tree."
   exit 0

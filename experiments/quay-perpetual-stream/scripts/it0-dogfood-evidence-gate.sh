@@ -41,13 +41,24 @@ WINDOW="${2:-40}"
 
 # When --milestone is provided, scan all iteration reports under that milestone directory.
 if [ -n "$MILESTONE" ]; then
-  # Probe for the milestone directory in both locations (repo-root for M130+, experiments/ for legacy).
-  MILESTONE_ROOT=""
-  for candidate in "milestones/${MILESTONE}" "experiments/quay-perpetual-stream/milestones/${MILESTONE}"; do
-    if [ -d "$candidate" ]; then MILESTONE_ROOT="$candidate"; break; fi
-  done
-  if [ -z "$MILESTONE_ROOT" ]; then
-    echo "Milestone directory not found for ${MILESTONE} — vacuously PASS."
+  # Single-sourced path-prefix rule (ADR-004; gap-absorb-charter-audit-not-committed / M176,
+  # root cause 3): gate_resolve_milestone_root() in gate-script-lib.sh is the ONE place that
+  # decides whether a milestone number resolves to the top-level milestones/ tree or the legacy
+  # experiments/quay-perpetual-stream/milestones/ tree. execute-milestone.js's Audit-phase write
+  # instruction references the SAME function name — they can never disagree (grep confirms no
+  # duplicated ">= 130" boundary logic anywhere else).
+  # shellcheck source=./gate-script-lib.sh
+  source "$(cd "$(dirname "$0")" && pwd)/gate-script-lib.sh"
+  MILESTONE_ROOT="$(gate_resolve_milestone_root "$MILESTONE")"
+  if [ ! -d "$MILESTONE_ROOT" ]; then
+    # Legacy milestones (< 130) may be stored under a slugged directory name
+    # (e.g. M45-cryst-d1-doc-management), not the bare "M45" the rule computes — probe for it.
+    _num="${MILESTONE#M}"; _num="${_num%%-*}"
+    _legacy_match=$(find experiments/quay-perpetual-stream/milestones -maxdepth 1 -type d -name "M${_num}-*" 2>/dev/null | sort | head -1)
+    [ -n "$_legacy_match" ] && MILESTONE_ROOT="$_legacy_match"
+  fi
+  if [ -z "$MILESTONE_ROOT" ] || [ ! -d "$MILESTONE_ROOT" ]; then
+    echo "Milestone directory not found for ${MILESTONE} (resolved: ${MILESTONE_ROOT:-<none>}) — vacuously PASS."
     exit 0
   fi
   REPORTS=$(find "$MILESTONE_ROOT" -name 'iteration-*.md' 2>/dev/null | sort)

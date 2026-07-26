@@ -193,7 +193,14 @@ CHARGE (refute-first stance):
    status (open) / age (0). This is the SAME audit agent performing the write-back — no
    separate writer, no split timing.
 
-Output to milestones/M<NN>/audits/iteration-0-acceptance-audit.md.
+Output to <MILESTONE_ROOT>/audits/iteration-0-acceptance-audit.md, where MILESTONE_ROOT is
+resolved via the ONE authoritative path-prefix rule (gap-absorb-charter-audit-not-committed / M176,
+root cause 3 — single-sourced, ADR-004): run \`source experiments/quay-perpetual-stream/scripts/gate-script-lib.sh && gate_resolve_milestone_root ${_milestone}\`
+to get MILESTONE_ROOT. Never re-derive the milestones/ vs experiments/.../milestones/ boundary by
+hand — that function is the only place the ">= 130" rule is allowed to live.
+	4a. STAGE THE AUDIT FILE (DIR-M176): immediately after writing it, \`git add\` this audit file —
+	    it must never be left untracked for Land to discover (that is exactly the gap M176 closes;
+	    Land's own CAPTURE step is a mechanical backstop, not a substitute for staging it here).
 	5. SESSION-ID (DIR-093): BEFORE writing the audit artifact, run \`echo \$CLAUDE_CODE_SESSION_ID\` to discover your REAL session ID (this is set by the harness and cannot be forged). Write \`**Audit session id:** <that-id>\` as the FIRST content line of the audit artifact (after the title). Return the discovered session ID as \`auditSessionId\` in your structured output.
 
 	Return {verdict: 'NO REFUTATION FOUND'|'CONCERNS'|'REFUTED', detail, concernsDetail, auditSessionId}.`,
@@ -269,9 +276,19 @@ if (IS_CONCURRENT) {
 1. MERGE the iteration worktree into master (DIR-027: loop runs on master directly).
    Any conflict → per-file resolution, both sides read, reconciliation note recorded.
    Never a blanket --ours/--theirs (DIR-013).
-2. CAPTURE then PRUNE (DIR-033): if a non-primary iteration produced evidence not on
-   master, cherry-pick JUST that evidence file. Then git worktree remove + git branch -d
-   the now-merged branches.
+2. CAPTURE, mechanical + unconditional (gap-absorb-charter-audit-not-committed / M176 —
+   NOT prose-conditional "if a non-primary iteration produced evidence"): resolve MILESTONE_ROOT
+   via \`source experiments/quay-perpetual-stream/scripts/gate-script-lib.sh &&
+   gate_resolve_milestone_root ${_milestone}\` (the SAME single-sourced rule the Audit phase and
+   it0-dogfood-evidence-gate.sh use — never re-derive the milestones/ path boundary by hand), THEN
+   \`git add\` every currently-untracked file under \`$MILESTONE_ROOT/audits/\` and
+   \`$MILESTONE_ROOT/iterations/\` regardless of which iteration/phase produced it. ALSO
+   \`git add ${$a.charterFile}\` if it is still untracked (defense-in-depth: OUTER-LOOP.md's charter
+   step should already have staged it at authoring time — this is the backstop, not the primary
+   mechanism). Together this milestone's own charter+audit+iteration evidence lands in THIS commit
+   series — no manual sweep needed afterward. THEN PRUNE (DIR-033): if a non-primary iteration ALSO
+   produced evidence not on master, cherry-pick JUST that evidence file. Then git worktree remove +
+   git branch -d the now-merged branches.
 3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${$a.taskId}.md
    appending a ## Execution record section (milestone id, iteration count, realized Δv,
    merge commit SHA, one-line outcome summary) and setting status: done.
@@ -310,9 +327,19 @@ await agent(
 1. MERGE the iteration worktree into master (DIR-027: loop runs on master directly).
    Any conflict → per-file resolution, both sides read, reconciliation note recorded.
    Never a blanket --ours/--theirs (DIR-013).
-2. CAPTURE then PRUNE (DIR-033): if a non-primary iteration produced evidence not on
-   master, cherry-pick JUST that evidence file. Then git worktree remove + git branch -d
-   the now-merged branches.
+2. CAPTURE, mechanical + unconditional (gap-absorb-charter-audit-not-committed / M176 —
+   NOT prose-conditional "if a non-primary iteration produced evidence"): resolve MILESTONE_ROOT
+   via \`source experiments/quay-perpetual-stream/scripts/gate-script-lib.sh &&
+   gate_resolve_milestone_root ${_milestone}\` (the SAME single-sourced rule the Audit phase and
+   it0-dogfood-evidence-gate.sh use — never re-derive the milestones/ path boundary by hand), THEN
+   \`git add\` every currently-untracked file under \`$MILESTONE_ROOT/audits/\` and
+   \`$MILESTONE_ROOT/iterations/\` regardless of which iteration/phase produced it. ALSO
+   \`git add ${$a.charterFile}\` if it is still untracked (defense-in-depth: OUTER-LOOP.md's charter
+   step should already have staged it at authoring time — this is the backstop, not the primary
+   mechanism). Together this milestone's own charter+audit+iteration evidence lands in THIS commit
+   series — no manual sweep needed afterward. THEN PRUNE (DIR-033): if a non-primary iteration ALSO
+   produced evidence not on master, cherry-pick JUST that evidence file. Then git worktree remove +
+   git branch -d the now-merged branches.
 3. WRITE ABSORB log entry into dashboard.md's ## Log section (DIR-054 rolling-window
    format): m<NN> · <task-id> · Δv=<realized> · audit=<verdict> · merge=<sha> · → milestones/M<NN>/
 4. UPDATE DASHBOARD (step 7): VT (sum weight·cov), slope (marginal Δv), ρ, charter-thickness,

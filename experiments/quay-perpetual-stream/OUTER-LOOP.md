@@ -57,6 +57,10 @@ hypothesize(t) = Σ weight_s·Δĉov_s ∧ commit(dashboard, {predicted: Δv̂, 
 
 charter :: Task → Charter
 charter(t) = write("charters/M<NN>-<slug>.md", {gate, scope, done_when, inner_term, it0_checks, ptr})
+  ⊨ commit: git add experiments/quay-perpetual-stream/charters/M<NN>-*.md as part of THIS milestone's
+     own commit sequence, immediately after writing it — never left for Land to discover as untracked
+     (gap-absorb-charter-audit-not-committed / M176: 16 charters + 19 audit files backlogged M144-M166
+     from this exact gap, swept once by hand in bfc5289 — closed at the source, not re-swept)
   ⊨ gate: transclusion_byte_for_byte ⊕ by_reference(scripts/it0-gate-hash-check.sh --by-reference)
   ⊨ I₃: dispatched agent prompt MUST contain literal gate text (never hash-only; DIR-009 defense)
   ⊨ Web UI scope: Done-when clause MUST embed inherited_core."Web UI verification requirement" (DIR-006)

@@ -15,6 +15,9 @@
 #       with pipe-delimited entries: "id|fixture-file|expected-exit-code".
 #   gate_read_yaml_field <file> <field>
 #       Read a YAML frontmatter field value from a markdown file.
+#   gate_resolve_milestone_root <M-NN or NN>
+#       Single-sourced milestones/ path-prefix rule (ADR-004; gap-absorb-charter-audit-not-committed
+#       / M176). Echoes the repo-root-relative directory a given milestone number resolves to.
 #   gate_emit_pass <msg>   /   gate_emit_fail <msg>
 #       Standardized PASS / FAIL lines.
 
@@ -129,6 +132,33 @@ for line in front.split('\n'):
         print(val, end='')
         break
 " "$_file"
+}
+
+# ── gate_resolve_milestone_root ─────────────────────────────────────────────────────────────────────
+# THE single authoritative rule for which `milestones/` tree a given milestone number lives under
+# (gap-absorb-charter-audit-not-committed / M176, root cause 3). Every other script or prompt that
+# needs to resolve a milestone's evidence directory MUST call this function rather than re-deriving
+# the boundary itself (grep for "130" outside this function is a single-source violation).
+#
+# Rule: milestone number >= 130 → top-level `milestones/M<NN>` (current, M130+);
+#       milestone number <  130 → legacy `experiments/quay-perpetual-stream/milestones/M<NN>`.
+# Accepts either a bare number ("176") or an "M"-prefixed id ("M176", "M176-some-slug") — the
+# leading "M" and any trailing "-slug" are stripped before comparison. Does NOT check the
+# directory exists on disk; callers that need existence should test the echoed path themselves
+# (legacy milestones before this rule was pinned may use a slugged directory name, e.g.
+# `M45-cryst-d1-doc-management`, not a bare `M45` — callers needing those must probe separately).
+#
+# Usage: root=$(gate_resolve_milestone_root "$MILESTONE")
+gate_resolve_milestone_root() {
+  local _ms="${1:?milestone id required (e.g. \"176\" or \"M176\")}"
+  _ms="${_ms#M}"        # strip optional leading "M"
+  _ms="${_ms%%-*}"      # strip optional trailing "-slug"
+  local _num=$((10#$_ms))  # force base-10 (avoid octal misparse on zero-padded ids)
+  if [ "$_num" -ge 130 ]; then
+    echo "milestones/M${_num}"
+  else
+    echo "experiments/quay-perpetual-stream/milestones/M${_num}"
+  fi
 }
 
 # ── gate_emit_pass / gate_emit_fail ─────────────────────────────────────────────────────────────────
