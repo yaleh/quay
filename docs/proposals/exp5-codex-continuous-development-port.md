@@ -4,12 +4,14 @@
   control-plane runtime, supervisor, project configuration, Skill, agent, hook,
   MCP registration, or scheduled task is implemented by this document.
   Adoption must enter the normal exp5 directive and milestone process.
-- **Date:** 2026-07-18; architecture update 2026-07-26
+- **Date:** 2026-07-18; architecture and staged-adoption update 2026-07-26
 - **Context:** captured from a live human-directed review of the recent exp5
   history and a capability check against the locally installed Codex CLI
-  (`codex-cli 0.144.6`) and the current Codex manual. The question is whether
-  Codex can drive quay continuously in the same two-layer shape as exp5, not
-  merely whether Codex can implement one milestone.
+  (`codex-cli 0.145.0`) and the current Codex manual. The question has two
+  deliberately separate parts: first, whether Codex can replace a Claude Code
+  terminal session as the human-facing quay operator and session-evidence
+  reviewer; second, whether Codex can drive a bounded milestone and eventually
+  the continuous two-layer exp5 loop.
 - **Related:**
   [`exp5-driver-deliverability-packaging.md`](./exp5-driver-deliverability-packaging.md)
   defines the generic-engine / quay-instance / runtime-state split and identifies
@@ -30,6 +32,11 @@
 The exp5 method is portable to Codex, but the current harness is not a drop-in
 Codex workload.
 
+- Adoption should proceed in two product roles and four gated stages:
+  **interactive operator** (task administration), **session-evidence bridge**
+  (Claude/Codex history via meta-cc), **bounded milestone worker / one-cycle
+  adapter**, then **restart-safe perpetual supervisor**. Passing an earlier stage
+  does not imply the next stage is safe.
 - The repository-state machine, bounded-charter discipline, gates, value
   ledger, directives, HALT sentinel, checkpoints, worktree isolation, tests,
   and evidence requirements are runtime-neutral and should be retained.
@@ -49,9 +56,13 @@ Codex workload.
   those responsibilities belong to Quay's control plane rather than to a
   Codex-specific harness.
 
-A single interactive Codex Goal is suitable for proving the port and for
-multi-hour supervised runs. It is not the production reliability boundary for
-an intentionally perpetual autonomous developer.
+An interactive Codex session is immediately useful as a client of Quay's human
+control surface: it can discuss findings with a human, inspect session evidence,
+and create/edit/check tasks. That role does not need a supervisor or ownership
+of the outer loop. A single interactive Codex Goal is also suitable for proving
+the execution port and for multi-hour supervised runs, but it is not the
+production reliability boundary for an intentionally perpetual autonomous
+developer.
 
 ## 2. Ground truth: what Codex can supply
 
@@ -60,6 +71,8 @@ surfaces:
 
 | Required exp5 capability | Codex surface | Portability finding |
 |---|---|---|
+| Human-facing task operation | interactive Codex CLI + quay MCP/CLI | Direct mapping after registration and Skill packaging |
+| Claude/Codex session evidence | meta-cc MCP with provider-qualified queries | Direct mapping after registration; evidence-only |
 | Durable outer instructions | repo Skill + `AGENTS.md` | Direct mapping |
 | Long multi-step foreground run | Goal mode / automatic continuation | Direct mapping for a bounded live run |
 | Independent workers and reviewers | subagents + project custom agents | Direct mapping, subject to worktree isolation |
@@ -83,6 +96,14 @@ Codex documentation used for these findings:
   <https://learn.chatgpt.com/docs/automations>
 - Skills and repository discovery under `.agents/skills`:
   <https://learn.chatgpt.com/docs/build-skills>
+- Project guidance through `AGENTS.md`:
+  <https://learn.chatgpt.com/docs/agent-configuration/agents-md>
+- MCP configuration:
+  <https://learn.chatgpt.com/docs/extend/mcp>
+- Interactive and non-interactive CLI:
+  <https://learn.chatgpt.com/docs/developer-commands.md?surface=cli>
+- Non-interactive automation and structured output:
+  <https://learn.chatgpt.com/docs/non-interactive-mode>
 - Git worktree behavior:
   <https://learn.chatgpt.com/docs/environments/git-worktrees>
 
@@ -115,7 +136,41 @@ The MCP path is preferred because it exercises the same provider-neutral tool
 surface that exp5 is meant to dogfood. The CLI fallback remains required for
 bootstrap and MCP failure recovery.
 
-### 3.3 The inner executor is vendor-specific
+The current local baseline makes this gap concrete: the repository has neither
+`.agents/` nor project `.codex/` configuration; `codex mcp list` reports no
+configured server even though `.mcp.json` registers quay for Claude Code. A
+meta-cc Codex bundle is locally available, and current meta-cc supports
+provider-qualified `claude`, `codex`, and `all` session queries, but it is not
+registered in the current Codex environment. The first milestone is therefore
+mostly configuration, Skill packaging, and safe task-mutation discipline—not a
+new transcript parser or a new task store.
+
+### 3.3 Session-history inspection needs an evidence bridge, not direct authority
+
+The human-facing Codex role must be able to inspect Claude Code history because
+important findings, corrections, and unfinished decisions live there today.
+That access should go through meta-cc's normalized MCP surface rather than a
+Quay-owned parser for `~/.claude/projects/` or direct dependence on host-private
+schemas.
+
+The bridge emits a minimal evidence record:
+
+```yaml
+provider: claude | codex
+session_ref: session:<provider>/<opaque-id>
+turn_ref: <opaque-turn-or-timestamp>
+commit_ref: <sha-if-known>
+finding: <redaction-safe summary>
+suggested_task_action: create | edit | append-note | no-action
+```
+
+The record may support a human-authorized `task_write`; it may not by itself
+close a task, tick AC/DoD, acquire ownership, or determine the next recovery
+transition. Query failure degrades to “session evidence unavailable” while task
+management remains usable. Session excerpts are minimized because transcripts
+may contain secrets.
+
+### 3.4 The inner executor is vendor-specific
 
 `OUTER-LOOP.md` dispatches `baime:iteration-executor` with
 `run_in_background=true`. Codex has neither that named agent nor the baime
@@ -134,7 +189,7 @@ An adversarial reviewer should be a second custom-agent definition, not a mode
 flag on the worker, so that the audit prompt can explicitly distrust the claims
 under review and receive only the permitted evidence bundle.
 
-### 3.4 Manda rules are not portable implementation rules
+### 3.5 Manda rules are not portable implementation rules
 
 `inherited-core.md` contains Manda-specific self-deadlock and broker
 responsiveness rules. Their general lesson -- do not let a result-dependent
@@ -150,7 +205,7 @@ The Codex port should replace those sections at the adapter boundary with:
 It must not claim that reproducing Manda's background flags reproduces Codex
 reliability.
 
-### 3.5 A perpetual goal is intentionally never "done"
+### 3.6 A perpetual goal is intentionally never "done"
 
 Goal mode expects an outcome and completion criteria. The exp5 outer loop is
 homeostatic and deliberately does not complete except on HALT or falsification.
@@ -166,7 +221,7 @@ The control-plane runtime repeats this bounded goal through the adapter. This
 preserves exp5's infinite outer horizon without requiring any individual model
 run to be infinite.
 
-### 3.6 There is no runtime-neutral Host Adapter contract yet
+### 3.7 There is no runtime-neutral Host Adapter contract yet
 
 The original version of this proposal placed a Codex-specific supervisor
 directly between repository state and `codex exec`. That is sufficient for a
@@ -192,7 +247,37 @@ Quay runtime protocol.
 
 ## 4. Proposed architecture
 
-### 4.1 Three-system boundary
+### 4.1 Two Codex roles must remain separate
+
+The staged port introduces two Codex-facing roles with different authority:
+
+| Role | Purpose | May write | Must not own |
+|---|---|---|---|
+| **Interactive Codex operator** | converse with a human; inspect task/repository/session evidence; propose and perform explicit task administration | task fields/body and scoped task commits authorized in the conversation | scheduling, leases, autonomous lifecycle completion, integration |
+| **Codex execution adapter** | perform one frozen, bounded run in an isolated worktree and return a normalized result | its assigned worktree, scoped deliverable, iteration report, result commit | canonical task lifecycle, main experiment state, merge/ABSORB authority |
+
+The first role is a human-control-surface client and can land before a runtime
+Host Adapter exists. The second role is a Host Adapter implementation and
+requires run/attempt identity, isolation, result schemas, and recovery. Sharing
+Skills or MCP servers between them does not merge their authority.
+
+The interactive operator follows:
+
+```text
+human request
+  -> read task revision and relevant repository/session evidence
+  -> prepare semantic task mutation and show its effect
+  -> human authorizes the consequential write
+  -> task_write with conflict protection
+  -> task_get readback
+  -> task-schema check
+  -> commit only the intended task artifact
+```
+
+Transcript-derived findings use the evidence bridge in §3.3. Replaying the same
+finding must deduplicate rather than create a second task.
+
+### 4.2 Three-system boundary
 
 | System | Codex-port responsibility | Authority |
 |---|---|---|
@@ -213,7 +298,7 @@ runtime must determine the next legal action from Git, task and GateEvent
 state, run records, process metadata, and explicit leases without reconstructing
 intent from a conversation.
 
-### 4.2 Control flow
+### 4.3 Execution control flow
 
 ```text
 control-plane wake
@@ -221,6 +306,7 @@ control-plane wake
   -> inspect Git/index/worktrees and recover interrupted state
   -> check .halt
   -> ask Codex Host Adapter to start bounded outer run: DRAIN/SELECT/AUTHOR/gates
+  -> require checked task Proposal + checked milestone Plan (DIR-117 preparation gate)
   -> create iteration worktree(s) from the recorded base SHA
   -> ask adapter to start Codex iteration worker(s) with frozen inputs
   -> consume lifecycle acknowledgements; heartbeat only detects hangs
@@ -232,12 +318,17 @@ control-plane wake
   -> immediately schedule the next cycle unless HALTed
 ```
 
+The preparation boundary is non-bypassable: the task Proposal, charter, checked
+Plan, and relevant source fingerprints must match a valid preparation receipt
+before a worker starts. The worker consumes the checked Plan; it does not author
+or repair Proposal/Plan during Build.
+
 The default should preserve exp5's current whole-milestone independent
 re-derivation for methodology/design milestones. Development milestones may use
 the M18-approved proposal-diversity / single-implementation / light-tail-check
 shape only after its required proposal-adjudication Skill exists.
 
-### 4.3 Inner invocation contract
+### 4.4 Inner invocation contract
 
 A Codex Host Adapter may implement a worker invocation with the following
 shape:
@@ -364,9 +455,11 @@ A future implementation should produce, at minimum:
 
 ```text
 AGENTS.md
+.agents/skills/quay-task-operator/SKILL.md
+.agents/skills/quay-session-review/SKILL.md
+.agents/skills/quay-directive/SKILL.md
 .agents/skills/exp5-outer-loop/SKILL.md
 .agents/skills/exp5-iteration-executor/SKILL.md
-.agents/skills/quay-directive/SKILL.md
 .codex/config.toml
 .codex/agents/iteration-worker.toml
 .codex/agents/adversarial-reviewer.toml
@@ -378,80 +471,137 @@ schemas/exp5-iteration-result.schema.json
 experiments/quay-perpetual-stream/codex-adapter/README.md
 ```
 
-The adapter should not duplicate the live protocol, control-plane state
-machine, or Tier-B substrate into its Skills. It should cite stable repository
-paths, resolve the pinned HARD GATES into the actual worker prompt, and fail if
-the expected hashes or files drift.
+The task/operator/directive Skills and their Claude equivalents must not become
+independent copies of the same policy. Runtime-neutral workflow content should
+have one canonical plugin/skill source; the `.claude` and `.agents` surfaces are
+host packaging or thin adapters. The execution adapter likewise must not
+duplicate the live protocol, control-plane state machine, or Tier-B substrate
+into its Skills. It should cite stable repository paths, resolve the pinned HARD
+GATES into the actual worker prompt, and fail if expected hashes or files drift.
 
 The project Codex MCP configuration should register the equivalent of:
 
 ```toml
 [mcp_servers.quay]
 command = "node"
-args = ["packages/quay/bin/quay.js", "mcp"]
+args = ["packages/quay/bin/quay.ts", "mcp"]
+
+[mcp_servers.meta-cc]
+command = "<installed-meta-cc-mcp>"
+args = []
 ```
 
 Exact project-config syntax and trust behavior must be verified against the
-Codex version used by the implementing milestone rather than copied blindly
-from this proposal.
+Codex and meta-cc versions used by the implementing milestone rather than copied
+blindly from this proposal. Quay MCP is the preferred task path; the native/Core
+CLI fallback must be proven separately. Meta-cc is read-only evidence access and
+its absence must not disable Quay task operations.
 
 ## 9. Adoption sequence
 
-This is a risk-reduction sequence, not an implementation plan with estimated
-line counts.
+This is a sequence of separately useful, separately gated products—not one large
+“support Codex” milestone.
 
-1. **Freeze the neutral contract:** define the Host Adapter operations, run
-   envelope, lifecycle acknowledgements, and lease/idempotency rules without
-   Codex-only fields.
-2. **Read-only replay:** have a Codex outer Skill reconstruct SELECT and expected
-   gates for a completed milestone without writing anything; compare its result
-   to the historical record.
-3. **One bounded worker:** port the iteration executor and run it on a disposable
-   fixture milestone in one explicit worktree with no autonomous continuation.
-4. **Dual iteration + adjudication:** prove two same-base worktrees, structured
-   results, canonical selection, semantic post-merge sweep, and cleanup.
-5. **One complete outer cycle:** let Codex drain through committed ABSORB for a
-   deliberately small real milestone under human observation.
-6. **Crash recovery drills:** terminate the control-plane runtime and adapter in
-   every transition state and verify they resume without duplicate workers,
-   duplicate commits, skipped gates, or a second SELECT.
-7. **Scheduled continuation:** enable same-chat heartbeat or system service only
-   after the bounded cycle and recovery tests pass.
-8. **Perpetual pilot:** run with conservative milestone, concurrency, network,
-   cost, and checkpoint limits; expand only from recorded evidence.
+### Stage 1 — interactive Quay operator
+
+1. Add concise repo `AGENTS.md` guidance for task authority, Provider ABI use,
+   write/readback/schema-check, concurrent-work protection, and transcript
+   evidence limits.
+2. Package `quay-task-operator` and `quay-directive` as Codex repo Skills,
+   reusing runtime-neutral canonical content rather than copying Claude policy.
+3. Register quay MCP in project Codex configuration and prove list/get/check/
+   write. Prove the CLI fallback independently.
+4. Exercise one human-authorized real task create and one edit, including
+   semantic diff, conflict protection, readback, schema check, and scoped commit.
+
+This stage grants no outer-loop or autonomous completion authority.
+
+### Stage 2 — session-evidence bridge
+
+5. Register meta-cc for Codex and add `quay-session-review`.
+6. Query one real Claude session and one Codex session through provider-qualified
+   meta-cc calls; produce the normalized evidence record from §3.3.
+7. Convert one evidence-backed finding into a human-approved task create/edit;
+   replay it to prove deduplication. Deny transcript access and prove normal task
+   operation still works.
+
+Stages 1–2 together replace a Claude Code terminal session for human-facing
+Quay operation. They do not prove autonomous execution.
+
+### Stage 3 — bounded milestone execution
+
+8. Land or reproduce DIR-117's checked-Proposal/checked-Plan preparation gate.
+9. Freeze the runtime-neutral Host Adapter operations, result envelope,
+   acknowledgements, lease, and idempotency rules without Codex-only fields.
+10. Have a Codex outer Skill perform a read-only replay of SELECT and gates for a
+    completed historical milestone.
+11. Port one bounded iteration worker; run a disposable fixture milestone in one
+    explicit worktree with frozen input and structured output.
+12. Prove independent worker/reviewer roles and, where policy requires it, two
+    same-base worktrees, canonical adjudication, semantic sweep, and cleanup.
+13. Run exactly one deliberately small real outer cycle through committed ABSORB
+    under human observation, with Claude's integration writer paused.
+
+### Stage 4 — restart-safe continuous operation
+
+14. Terminate the control plane and adapter in every transition state and prove
+    idempotent recovery without duplicate SELECT, worker, commit, merge, or
+    skipped ABSORB.
+15. Enable scheduled continuation or an OS/service supervisor only after the
+    bounded cycle and recovery drills pass.
+16. Run a conservative perpetual pilot with explicit concurrency, network,
+    retry, wall-time, token/cost, and retained-worktree limits; expand only from
+    recorded evidence.
 
 ## 10. Acceptance criteria for a future implementing milestone
 
-1. `[ ]` A runtime-neutral Host Adapter contract exists and contains no Codex
+1. `[ ]` A fresh interactive Codex session loads repo `AGENTS.md`, discovers the
+   task-operator/directive Skills, and can explain their authority boundary.
+2. `[ ]` Codex can list/get/check/write quay tasks through the registered MCP
+   server, with conflict protection, readback, schema check, and CLI fallback
+   demonstrated separately.
+3. `[ ]` A human-authorized real directive/task create and edit land as scoped
+   commits without modifying unrelated concurrent work.
+4. `[ ]` Codex queries real Claude and Codex history through meta-cc using
+   provider-qualified calls and produces redaction-safe session/turn/commit
+   evidence references.
+5. `[ ]` A transcript finding becomes a human-approved, deduplicated task
+   mutation; replay creates no duplicate, and transcript denial does not break
+   ordinary Quay task operation.
+6. `[ ]` Runtime-neutral Skill content has one canonical source; `.claude` and
+   `.agents` packages cannot silently drift in task lifecycle rules.
+7. `[ ]` A runtime-neutral Host Adapter contract exists and contains no Codex
    transcript, Goal, UI, or internal database assumptions.
-2. `[ ]` Codex discovers and explicitly invokes the repo-scoped outer,
-   iteration, and directive Skills from `.agents/skills/`.
-3. `[ ]` Codex can list/get/check/write quay tasks through the registered MCP
-   server, with the CLI fallback demonstrated separately.
-4. `[ ]` Two workers start from the same commit in different worktrees and
+8. `[ ]` Codex discovers and explicitly invokes the repo-scoped outer and
+   iteration Skills from `.agents/skills/`.
+9. `[ ]` Before any real worker starts, the task has a checked Proposal, the
+   milestone has a checked executable Plan, and the DIR-117 preparation gate
+   verifies their freshness.
+10. `[ ]` Two workers start from the same commit in different worktrees and
    cannot modify the main experiment state.
-5. `[ ]` Worker results validate against the checked-in JSON schema; malformed,
+11. `[ ]` Worker results validate against the checked-in JSON schema; malformed,
    incomplete, and claim-only results fail closed.
-6. `[ ]` All current it0 gates run before dispatch and their evidence is
+12. `[ ]` All current it0 gates run before dispatch and their evidence is
    retained in the milestone record.
-7. `[ ]` The canonical merge runs the full required test set plus a semantic
+13. `[ ]` The canonical merge runs the full required test set plus a semantic
    cross-reference sweep, including a fixture that Git merges cleanly but that
    is internally inconsistent.
-8. `[ ]` Adversarial-audit cadence is reproduced with a fresh-context reviewer
+14. `[ ]` Adversarial-audit cadence is reproduced with a fresh-context reviewer
    that has not read the worker's hidden conversation.
-9. `[ ]` HALT, pending directives, checkpoint cadence, VT/V_meta ledgers, and
+15. `[ ]` HALT, pending directives, checkpoint cadence, VT/V_meta ledgers, and
    milestone-boundary-only steering retain their existing semantics.
-10. `[ ]` Forced termination at each control-plane/adapter state resumes
+16. `[ ]` Forced termination at each control-plane/adapter state resumes
     idempotently, with no duplicate SELECT, duplicate worker, lost commit, or
     skipped ABSORB.
-11. `[ ]` Recovery succeeds with the referenced Codex conversation unavailable,
-    proving session history is diagnostic rather than authoritative state.
-12. `[ ]` A complete real milestone reaches committed ABSORB without manual
+17. `[ ]` Recovery succeeds even when the referenced Claude/Codex conversations
+    are unavailable, proving session history is diagnostic rather than
+    authoritative state.
+18. `[ ]` A complete real milestone reaches committed ABSORB without manual
     process intervention; any human content decision remains explicitly
     recorded as such.
-13. `[ ]` Permission, network, secret-redaction, concurrency, retry, cost, and
+19. `[ ]` Permission, network, secret-redaction, concurrency, retry, cost, and
     worktree-retention limits are configured and tested.
-14. `[ ]` The adapter can be disabled without changing or corrupting the
+20. `[ ]` The adapter can be disabled without changing or corrupting the
     existing Claude/exp5 runtime artifacts.
 
 ## 11. Risks and open decisions
@@ -502,11 +652,24 @@ single-owner cutover or pause sentinel. DIR-013's concurrent human/loop design
 collision is the standing example of why two orchestrators may not write the
 same canonical artifact concurrently.
 
+### 11.7 Operator convenience can be mistaken for execution authority
+
+After Stage 1, Codex will be able to inspect rich evidence and mutate tasks with
+a human. That convenience can create the false impression that the same session
+may infer task completion, schedule work, or recover an interrupted run. Keep
+the operator's task-write authority explicit and conversational; outer-run
+authority still requires a lease and Host Adapter contract. A transcript-derived
+claim never ticks AC/DoD without the normal independent audit.
+
 ## 12. Non-goals
 
 - Replacing quay's Provider ABI, task store, gate semantics, or directive
   projection design.
 - Rewriting the exp5 protocol around Codex product terminology.
+- Treating successful interactive task administration or session-history review
+  as evidence that autonomous milestone execution is ready.
+- Reimplementing Claude/Codex transcript parsing inside Quay when meta-cc already
+  provides the evidence interface.
 - Claiming Goal mode alone provides daemon-grade perpetual execution.
 - Depending on undocumented Codex internals or database files under
   `$CODEX_HOME` as the experiment state store.
@@ -517,12 +680,29 @@ same canonical artifact concurrently.
 
 ## 13. Recommendation
 
-Proceed with the port as a dedicated, bounded implementation milestone after
-the current documentation consistency issue and active exp5 boundary state are
-resolved. Freeze the Host Adapter/run-envelope contract first, then build the
-repo-scoped Skills and one-cycle Codex adapter. Introduce the deterministic
-control-plane runtime only after the worker contract is demonstrated; enable
-scheduled or service-driven continuation only after crash-recovery drills pass.
+Realize the four adoption stages as five SPLIT-OR-COMMIT-sized
+directives/milestones—not one Codex port. Stage 3 is intentionally split between
+the bounded worker and the one-cycle adapter because they prove different
+authority boundaries:
+
+1. **Codex interactive Quay operator** — `AGENTS.md`, task/directive Skills,
+   quay MCP, CLI fallback, safe real task round-trip.
+2. **Codex session-evidence bridge** — meta-cc registration, provider-qualified
+   Claude/Codex queries, evidence normalization, deduplication, privacy, and
+   human-approved task mutation.
+3. **Codex bounded milestone worker** — DIR-117-prepared inputs, worktree,
+   `codex exec` structured result, no merge or canonical lifecycle writes.
+4. **Codex one-cycle Host Adapter** — neutral contract, run/attempt/lease/event
+   state, fresh audit, merge, and one real committed ABSORB.
+5. **Perpetual supervisor** — idempotent crash recovery, scheduling, budgets,
+   exceptions, and explicit Claude-to-Codex integration-writer cutover.
+
+Stages 1 and 2 should land first because they provide immediate human-facing
+value and exercise Quay/meta-cc interfaces without increasing autonomous risk.
+Freeze the Host Adapter/run-envelope contract before Stage 3 is allowed to own
+an execution process. Introduce deterministic continuous control only after the
+worker contract and one-cycle recovery are demonstrated; enable scheduled or
+service-driven continuation only after crash-recovery drills pass.
 
 This preserves the part of exp5 that matters -- bounded independent experiments
 inside an open-ended value loop -- while assigning reliability to deterministic
