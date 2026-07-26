@@ -1,10 +1,10 @@
 # Porting the exp5 perpetual development loop to Codex
 
-- **Status:** proposal / portability analysis, drafted only. No Codex adapter,
-  supervisor, project configuration, Skill, agent, hook, MCP registration, or
-  scheduled task is implemented by this document. Adoption must enter the
-  normal exp5 directive and milestone process.
-- **Date:** 2026-07-18
+- **Status:** proposal / portability analysis, updated only. No Codex adapter,
+  control-plane runtime, supervisor, project configuration, Skill, agent, hook,
+  MCP registration, or scheduled task is implemented by this document.
+  Adoption must enter the normal exp5 directive and milestone process.
+- **Date:** 2026-07-18; architecture update 2026-07-26
 - **Context:** captured from a live human-directed review of the recent exp5
   history and a capability check against the locally installed Codex CLI
   (`codex-cli 0.144.6`) and the current Codex manual. The question is whether
@@ -20,7 +20,10 @@
   records the isolation and concurrency constraints. ·
   `experiments/quay-perpetual-stream/OUTER-LOOP.md` is the live driver. ·
   `experiments/quay-perpetual-stream/inherited-core.md` is the live Tier-B
-  method substrate.
+  method substrate. ·
+  [`quay-control-plane-host-adapters-human-control-surface.md`](./quay-control-plane-host-adapters-human-control-surface.md)
+  defines the runtime-neutral three-system boundary this Codex adapter must
+  implement rather than bypass.
 
 ## 1. Decision summary
 
@@ -39,9 +42,12 @@ Codex workload.
   contract. Goal continuation and scheduled in-chat follow-ups cover parts of
   that contract, but process death, machine sleep, permission failures, and
   cross-session recovery still need a deterministic owner.
-- Therefore the recommended design is **Codex as the milestone reasoning and
-  execution engine, supervised by a small deterministic process that owns
-  scheduling, locking, child completion, recovery, and state transitions**.
+- Therefore the recommended design is **Codex as one replaceable Host Adapter
+  and milestone execution engine, supervised through Quay's runtime-neutral
+  control-plane contract**. A small deterministic runtime still owns
+  scheduling, leases, child completion, recovery, and state transitions, but
+  those responsibilities belong to Quay's control plane rather than to a
+  Codex-specific harness.
 
 A single interactive Codex Goal is suitable for proving the port and for
 multi-hour supervised runs. It is not the production reliability boundary for
@@ -156,40 +162,73 @@ The Codex Goal should instead be bounded to a recoverable unit, preferably:
 > Complete exactly one exp5 outer cycle from boundary drain through committed
 > ABSORB, or stop earlier on a declared HALT/block condition.
 
-The supervisor repeats this bounded goal. This preserves exp5's infinite outer
-horizon without requiring any individual model run to be infinite.
+The control-plane runtime repeats this bounded goal through the adapter. This
+preserves exp5's infinite outer horizon without requiring any individual model
+run to be infinite.
+
+### 3.6 There is no runtime-neutral Host Adapter contract yet
+
+The original version of this proposal placed a Codex-specific supervisor
+directly between repository state and `codex exec`. That is sufficient for a
+one-host proof, but it would make the next Claude, CI, remote-executor, or
+multi-machine integration reimplement scheduling and recovery again.
+
+The missing boundary is a small host-neutral contract. At minimum it must
+support:
+
+- capability discovery;
+- start, poll, message, cancel, collect, and resume operations for a bounded
+  run;
+- stable workspace, task, run, attempt, and session-reference identifiers;
+- idempotency keys and accepted/delivered/started/completed acknowledgements;
+- structured results containing base/result commits, evidence, blockers, and
+  termination reason;
+- no requirement that a control-plane consumer understand Codex transcript or
+  UI internals.
+
+Codex Goals, subagents, scheduled follow-ups, `codex exec`, and App worktrees
+are implementation choices behind this boundary. They are not themselves the
+Quay runtime protocol.
 
 ## 4. Proposed architecture
 
-### 4.1 Four layers
+### 4.1 Three-system boundary
 
-| Layer | Responsibility | Must be deterministic? |
+| System | Codex-port responsibility | Authority |
 |---|---|---|
-| **Supervisor** | repository lock, wakeups, child lifecycle, retries, timeout heartbeat, crash recovery, HALT check | Yes |
-| **Outer Codex agent** | DRAIN, SELECT, value hypothesis, charter authoring, gate interpretation, merge/adjudication, ABSORB | No; constrained by checked state and schemas |
-| **Inner Codex agents** | isolated implementation/re-derivation and adversarial audit | No; bounded by frozen charter/worktree |
-| **Repository substrate** | dashboard, backlog, directives, charters, reports, scripts, commits, task store | Yes as the system of record |
+| **Quay control plane** | task/dependency state, workspace registry, run records, leases, GateEvents, scheduling, retry/recovery state, budgets, cross-project status | Authoritative for orchestration state |
+| **Codex Host Adapter** | translate the neutral run contract into Goal/subagent/`codex exec`/worktree operations; normalize results and session references | Authoritative only for the lifecycle of its host processes |
+| **Human control surface** | goals, policy, approvals, exceptions, risk/cost review, mission redirection, cross-project portfolio decisions | Authoritative for explicitly human-owned decisions |
 
-The chat transcript is diagnostic context, not authoritative state. A restarted
-supervisor must be able to determine the next legal action entirely from Git,
-the experiment files, running-process metadata, and explicit lock/state files.
+Within the Codex Host Adapter, the **outer Codex agent** still performs DRAIN,
+SELECT, value hypothesis, charter authoring, gate interpretation,
+merge/adjudication, and ABSORB; **inner Codex agents** still perform isolated
+implementation/re-derivation and adversarial audit. These are execution roles,
+not additional control-plane layers.
+
+The repository substrate remains the durable project record. The control plane
+projects that record into explicit run/lease/event state. The chat transcript
+is diagnostic context, not authoritative state. A restarted control-plane
+runtime must determine the next legal action from Git, task and GateEvent
+state, run records, process metadata, and explicit leases without reconstructing
+intent from a conversation.
 
 ### 4.2 Control flow
 
 ```text
-supervisor wake
-  -> acquire single-writer outer lock
+control-plane wake
+  -> acquire single-writer workspace lease
   -> inspect Git/index/worktrees and recover interrupted state
   -> check .halt
-  -> invoke bounded outer Codex run: DRAIN/SELECT/AUTHOR/gates
+  -> ask Codex Host Adapter to start bounded outer run: DRAIN/SELECT/AUTHOR/gates
   -> create iteration worktree(s) from the recorded base SHA
-  -> invoke Codex iteration worker(s) with frozen inputs
-  -> wait for real completion; heartbeat only detects hangs
-  -> validate result schema, commit, report, and gate evidence
-  -> invoke fresh-context reviewer/adjudicator when required
+  -> ask adapter to start Codex iteration worker(s) with frozen inputs
+  -> consume lifecycle acknowledgements; heartbeat only detects hangs
+  -> validate normalized result envelope, commit, report, and gate evidence
+  -> ask adapter for a fresh-context reviewer/adjudicator when required
   -> merge one canonical result; run post-merge semantic sweep and tests
-  -> invoke bounded outer Codex run: ABSORB/checkpoint/commit
-  -> release lock
+  -> ask adapter for bounded outer run: ABSORB/checkpoint/commit
+  -> append terminal run events and release lease
   -> immediately schedule the next cycle unless HALTed
 ```
 
@@ -200,7 +239,8 @@ shape only after its required proposal-adjudication Skill exists.
 
 ### 4.3 Inner invocation contract
 
-A supervisor-managed worker invocation should have the following shape:
+A Codex Host Adapter may implement a worker invocation with the following
+shape:
 
 ```sh
 codex exec \
@@ -210,8 +250,10 @@ codex exec \
   '$exp5-iteration-executor <charter-path>'
 ```
 
-The structured result must include at least:
+The adapter must normalize the invocation into a host-neutral run envelope. Its
+structured result must include at least:
 
+- workspace, task, run, attempt, and adapter identifiers;
 - milestone and iteration ids;
 - exact base and result commit SHAs;
 - per-Done-when verdict with evidence pointer;
@@ -220,6 +262,8 @@ The structured result must include at least:
 - discoveries and unresolved blockers;
 - termination condition;
 - whether iteration-1 or an out-of-band audit is recommended;
+- an opaque session reference suitable for diagnostics but unnecessary for
+  recovery;
 - a final clean-worktree assertion.
 
 The schema validates the report envelope, not the truth of the claims. Existing
@@ -249,8 +293,9 @@ The adapter must enforce:
 
 ## 6. Recovery and idempotency
 
-The supervisor needs an explicit, small state machine rather than inferring all
-states from prose. Suggested states are:
+The control-plane runtime needs an explicit, small state machine rather than
+inferring all states from prose or Codex conversation history. Suggested
+states are:
 
 ```text
 BOUNDARY
@@ -265,10 +310,12 @@ HALTED
 BLOCKED
 ```
 
-Every transition records the milestone id, base SHA, process/session id,
-worktree paths, branch/commit ids, timestamps, and the command that establishes
-the next-state predicate. State may be stored in a small generated file under
-the experiment directory or derived from a structured append-only event log.
+Every transition records the workspace/task/run/attempt ids, adapter id,
+milestone id, base SHA, process id, opaque session reference, worktree paths,
+branch/commit ids, timestamps, acknowledgements, and the command that
+establishes the next-state predicate. State may be stored in a small generated
+file under the experiment directory or derived from a structured append-only
+event log.
 
 On restart:
 
@@ -306,8 +353,10 @@ the narrowest environment that can complete the selected milestone:
 
 A scheduled Codex task running with full access is not an acceptable substitute
 for these controls. Scheduled same-chat heartbeats are useful as a wake and
-human-visible inbox, but the supervisor remains responsible for policy and
-recovery.
+human-visible inbox, but the control plane remains responsible for policy
+enforcement and recovery. Decisions that cannot be resolved mechanically must
+be emitted as structured exceptions to the human control surface rather than
+left as unanswered prompts in a Codex session.
 
 ## 8. Proposed repository deliverables
 
@@ -322,14 +371,17 @@ AGENTS.md
 .codex/agents/iteration-worker.toml
 .codex/agents/adversarial-reviewer.toml
 .codex/hooks/...
+schemas/quay-host-adapter.schema.json
+schemas/quay-run-envelope.schema.json
 scripts/exp5-codex-supervisor.mjs
 schemas/exp5-iteration-result.schema.json
 experiments/quay-perpetual-stream/codex-adapter/README.md
 ```
 
-The adapter should not duplicate the live protocol or Tier-B substrate into its
-Skills. It should cite stable repository paths, resolve the pinned HARD GATES
-into the actual worker prompt, and fail if the expected hashes or files drift.
+The adapter should not duplicate the live protocol, control-plane state
+machine, or Tier-B substrate into its Skills. It should cite stable repository
+paths, resolve the pinned HARD GATES into the actual worker prompt, and fail if
+the expected hashes or files drift.
 
 The project Codex MCP configuration should register the equivalent of:
 
@@ -348,50 +400,58 @@ from this proposal.
 This is a risk-reduction sequence, not an implementation plan with estimated
 line counts.
 
-1. **Read-only replay:** have a Codex outer Skill reconstruct SELECT and expected
+1. **Freeze the neutral contract:** define the Host Adapter operations, run
+   envelope, lifecycle acknowledgements, and lease/idempotency rules without
+   Codex-only fields.
+2. **Read-only replay:** have a Codex outer Skill reconstruct SELECT and expected
    gates for a completed milestone without writing anything; compare its result
    to the historical record.
-2. **One bounded worker:** port the iteration executor and run it on a disposable
+3. **One bounded worker:** port the iteration executor and run it on a disposable
    fixture milestone in one explicit worktree with no autonomous continuation.
-3. **Dual iteration + adjudication:** prove two same-base worktrees, structured
+4. **Dual iteration + adjudication:** prove two same-base worktrees, structured
    results, canonical selection, semantic post-merge sweep, and cleanup.
-4. **One complete outer cycle:** let Codex drain through committed ABSORB for a
+5. **One complete outer cycle:** let Codex drain through committed ABSORB for a
    deliberately small real milestone under human observation.
-5. **Crash recovery drills:** terminate the supervisor in every transition state
-   and verify it resumes without duplicate workers, duplicate commits, skipped
-   gates, or a second SELECT.
-6. **Scheduled continuation:** enable same-chat heartbeat or system service only
+6. **Crash recovery drills:** terminate the control-plane runtime and adapter in
+   every transition state and verify they resume without duplicate workers,
+   duplicate commits, skipped gates, or a second SELECT.
+7. **Scheduled continuation:** enable same-chat heartbeat or system service only
    after the bounded cycle and recovery tests pass.
-7. **Perpetual pilot:** run with conservative milestone, concurrency, network,
+8. **Perpetual pilot:** run with conservative milestone, concurrency, network,
    cost, and checkpoint limits; expand only from recorded evidence.
 
 ## 10. Acceptance criteria for a future implementing milestone
 
-1. `[ ]` Codex discovers and explicitly invokes the repo-scoped outer,
+1. `[ ]` A runtime-neutral Host Adapter contract exists and contains no Codex
+   transcript, Goal, UI, or internal database assumptions.
+2. `[ ]` Codex discovers and explicitly invokes the repo-scoped outer,
    iteration, and directive Skills from `.agents/skills/`.
-2. `[ ]` Codex can list/get/check/write quay tasks through the registered MCP
+3. `[ ]` Codex can list/get/check/write quay tasks through the registered MCP
    server, with the CLI fallback demonstrated separately.
-3. `[ ]` Two workers start from the same commit in different worktrees and
+4. `[ ]` Two workers start from the same commit in different worktrees and
    cannot modify the main experiment state.
-4. `[ ]` Worker results validate against the checked-in JSON schema; malformed,
+5. `[ ]` Worker results validate against the checked-in JSON schema; malformed,
    incomplete, and claim-only results fail closed.
-5. `[ ]` All current it0 gates run before dispatch and their evidence is
+6. `[ ]` All current it0 gates run before dispatch and their evidence is
    retained in the milestone record.
-6. `[ ]` The canonical merge runs the full required test set plus a semantic
+7. `[ ]` The canonical merge runs the full required test set plus a semantic
    cross-reference sweep, including a fixture that Git merges cleanly but that
    is internally inconsistent.
-7. `[ ]` Adversarial-audit cadence is reproduced with a fresh-context reviewer
+8. `[ ]` Adversarial-audit cadence is reproduced with a fresh-context reviewer
    that has not read the worker's hidden conversation.
-8. `[ ]` HALT, pending directives, checkpoint cadence, VT/V_meta ledgers, and
+9. `[ ]` HALT, pending directives, checkpoint cadence, VT/V_meta ledgers, and
    milestone-boundary-only steering retain their existing semantics.
-9. `[ ]` Forced termination at each supervisor state resumes idempotently, with
-   no duplicate SELECT, duplicate worker, lost commit, or skipped ABSORB.
-10. `[ ]` A complete real milestone reaches committed ABSORB without manual
+10. `[ ]` Forced termination at each control-plane/adapter state resumes
+    idempotently, with no duplicate SELECT, duplicate worker, lost commit, or
+    skipped ABSORB.
+11. `[ ]` Recovery succeeds with the referenced Codex conversation unavailable,
+    proving session history is diagnostic rather than authoritative state.
+12. `[ ]` A complete real milestone reaches committed ABSORB without manual
     process intervention; any human content decision remains explicitly
     recorded as such.
-11. `[ ]` Permission, network, secret-redaction, concurrency, retry, cost, and
+13. `[ ]` Permission, network, secret-redaction, concurrency, retry, cost, and
     worktree-retention limits are configured and tested.
-12. `[ ]` The adapter can be disabled without changing or corrupting the
+14. `[ ]` The adapter can be disabled without changing or corrupting the
     existing Claude/exp5 runtime artifacts.
 
 ## 11. Risks and open decisions
@@ -423,7 +483,9 @@ Token or time exhaustion must never be interpreted as Done-when completion.
 Long-running chats compact and accumulate irrelevant history. The port should
 prefer fresh bounded runs with explicit Tier-A/Tier-B inputs over one immortal
 conversation. Scheduled continuation in the same chat is a convenience for
-steering, not a substitute for repository-grounded recovery.
+steering, not a substitute for control-plane recovery. Session references may
+be retained for meta-cc inspection, but no legal state transition may require
+the transcript to remain available.
 
 ### 11.5 Parallel write hazards
 
@@ -457,10 +519,12 @@ same canonical artifact concurrently.
 
 Proceed with the port as a dedicated, bounded implementation milestone after
 the current documentation consistency issue and active exp5 boundary state are
-resolved. Build the repo-scoped Skills and one-cycle executor first; introduce
-the supervisor only after the worker contract is demonstrated; enable scheduled
-or service-driven continuation only after crash-recovery drills pass.
+resolved. Freeze the Host Adapter/run-envelope contract first, then build the
+repo-scoped Skills and one-cycle Codex adapter. Introduce the deterministic
+control-plane runtime only after the worker contract is demonstrated; enable
+scheduled or service-driven continuation only after crash-recovery drills pass.
 
 This preserves the part of exp5 that matters -- bounded independent experiments
 inside an open-ended value loop -- while assigning reliability to deterministic
-software rather than asking an individual Codex conversation to be immortal.
+software, policy, and explicit human exceptions rather than asking an
+individual Codex conversation to be immortal.
