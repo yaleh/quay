@@ -28,14 +28,16 @@ interface ProviderClient {
 /**
  * The legal-transition adjacency map. `forward` = promote target, `back` =
  * retreat target. Each forward edge is a gate `check()` already models; back
- * edges are single-step rework rollbacks. `needs-human` has NO automated edge
- * in or out — clearing it is a deliberate `quay task edit --status` write.
+ * edges are single-step rework rollbacks. `needs-human` has no forward edge
+ * (clearing it forward requires a human `quay task edit --status`), but
+ * retreat to `todo` is allowed — a human-resolved task can be rolled back
+ * for a fresh attempt.
  */
 export const TRANSITIONS: Record<string, { forward: string | null; back: string | null }> = {
   todo: { forward: "ready", back: null },
   ready: { forward: "done", back: "todo" },
   done: { forward: null, back: "ready" },
-  "needs-human": { forward: null, back: null },
+  "needs-human": { forward: null, back: "todo" },
 };
 
 /** next status, or null if terminal/unknown */

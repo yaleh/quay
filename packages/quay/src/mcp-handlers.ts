@@ -513,8 +513,8 @@ export function registerLifecycleHandlers(
     "lifecycle_retreat",
     {
       description:
-        "Roll one task back by exactly one legal backward lifecycle step (done->ready, ready->todo). `reason` is REQUIRED -- it is the deliverable of a retreat and is recorded in the GateEvent payload. " +
-        "No gate runs (retreat always succeeds for a legal edge, regardless of gate state). An ILLEGAL backward edge (e.g. task is 'todo' or 'needs-human') returns isError:true. " +
+        "Roll one task back by exactly one legal backward lifecycle step (done->ready, ready->todo, needs-human->todo). `reason` is REQUIRED -- it is the deliverable of a retreat and is recorded in the GateEvent payload. " +
+        "No gate runs (retreat always succeeds for a legal edge, regardless of gate state). An ILLEGAL backward edge (e.g. task is 'todo') returns isError:true. " +
         "Returns { ok, to }. Mirrors `quay retreat <task-id> --reason <r>`.",
       inputSchema: {
         provider: z.string().optional().describe("Provider id to write to (defaults to the first-enabled Provider in .quay/config.yml)."),

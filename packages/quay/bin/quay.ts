@@ -394,8 +394,9 @@ Lifecycle commands (QENG-3) — status-writing verbs over the {todo,ready,done,n
   adjudicate <id>   Independent read-only audit pass; records an audit GateEvent (see gate-log);
                     never writes status; exit 0 always.
   promote <id>      One legal forward step (todo->ready via the dod gate; ready->done via complete).
-  retreat <id> --reason <r>   One legal backward step (done->ready, ready->todo); --reason is required
-                    and recorded in the GateEvent. An illegal transition exits nonzero with a message.
+  retreat <id> --reason <r>   One legal backward step (done->ready, ready->todo, needs-human->todo);
+                    --reason is required and recorded in the GateEvent. An illegal transition
+                    exits nonzero with a message.
   --file <log-path>  Override the GateEvent log path (default <workspaceRoot>/.quay/gate-events.jsonl)
 
 Driver command (QENG-4) — the autonomous loop AS CODE (scan -> gate -> complete):

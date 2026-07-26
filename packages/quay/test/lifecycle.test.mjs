@@ -74,7 +74,7 @@ function resetExit() {
 // Phase A / Stage A1 — transition table + pure helpers
 // ===========================================================================
 
-test("A1: TRANSITIONS models todo→ready, ready↔todo/done, done→ready, needs-human isolated", () => {
+test("A1: TRANSITIONS models todo→ready, ready↔todo/done, done→ready, needs-human→todo retreat", () => {
   assert.equal(TRANSITIONS.todo.forward, "ready");
   assert.equal(TRANSITIONS.todo.back, null);
   assert.equal(TRANSITIONS.ready.forward, "done");
@@ -82,7 +82,7 @@ test("A1: TRANSITIONS models todo→ready, ready↔todo/done, done→ready, need
   assert.equal(TRANSITIONS.done.forward, null);
   assert.equal(TRANSITIONS.done.back, "ready");
   assert.equal(TRANSITIONS["needs-human"].forward, null);
-  assert.equal(TRANSITIONS["needs-human"].back, null);
+  assert.equal(TRANSITIONS["needs-human"].back, "todo");
 });
 
 test("A1: legalForward / legalBack return the edge or null (incl. unknown status)", () => {
@@ -90,6 +90,7 @@ test("A1: legalForward / legalBack return the edge or null (incl. unknown status
   assert.equal(legalForward("done"), null);
   assert.equal(legalBack("ready"), "todo");
   assert.equal(legalBack("todo"), null);
+  assert.equal(legalBack("needs-human"), "todo");
   assert.equal(legalForward("bogus"), null);
   assert.equal(legalBack("bogus"), null);
 });
@@ -100,11 +101,11 @@ test("A1: assertTransition throws on every null edge and is silent on legal edge
   assert.doesNotThrow(() => assertTransition("ready", "forward"));
   assert.doesNotThrow(() => assertTransition("ready", "back"));
   assert.doesNotThrow(() => assertTransition("done", "back"));
+  assert.doesNotThrow(() => assertTransition("needs-human", "back"), "needs-human→todo retreat is legal");
   // null edges: throw with the exact message shape
   assert.throws(() => assertTransition("todo", "back"), /illegal transition: todo cannot back/);
   assert.throws(() => assertTransition("done", "forward"), /illegal transition: done cannot forward/);
   assert.throws(() => assertTransition("needs-human", "forward"), /illegal transition: needs-human cannot forward/);
-  assert.throws(() => assertTransition("needs-human", "back"), /illegal transition: needs-human cannot back/);
 });
 
 // ===========================================================================
@@ -300,6 +301,88 @@ test("A3: runRetreat throws on a missing task", async () => {
 });
 
 // ===========================================================================
+// Phase A / Stage A4 — runRetreat needs-human→todo (AC1-AC5, new transition)
+// ===========================================================================
+
+test("A4 [AC1-AC2]: runRetreat needs-human→todo writes todo + logs retreat event carrying the reason", async () => {
+  resetExit();
+  const logPath = tmpLog("retreat-nh");
+  const client = stubClient({ id: "T-NH1", status: "needs-human", extra: {} });
+  const r = await runRetreat({ client, id: "T-NH1", reason: "dependency installed; re-evaluate", logPath });
+  assert.equal(r.ok, true);
+  assert.equal(r.to, "todo");
+  assert.equal(client._state.status, "todo");
+  const events = queryGateEvents(logPath, { pipeline_id: "T-NH1" });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].gate, "retreat");
+  assert.equal(events[0].verdict, "pass");
+  assert.deepEqual(events[0].payload, { from: "needs-human", to: "todo", reason: "dependency installed; re-evaluate" });
+  resetExit();
+});
+
+test("A4 [AC3]: runRetreat needs-human without reason → exit 1, no write, no event", async () => {
+  resetExit();
+  const logPath = tmpLog("retreat-nh-noreason");
+  const client = stubClient({ id: "T-NH2", status: "needs-human", extra: {} });
+  const r = await runRetreat({ client, id: "T-NH2", reason: "", logPath });
+  assert.equal(r.ok, false);
+  assert.equal(process.exitCode, 1);
+  assert.equal(client._state.status, "needs-human", "status unchanged");
+  assert.equal(queryGateEvents(logPath, { pipeline_id: "T-NH2" }).length, 0, "no event written");
+  resetExit();
+});
+
+test("A4 [AC4]: runPromote on a needs-human task → illegal transition (needs-human cannot forward)", async () => {
+  const logPath = tmpLog("promote-nh");
+  const client = stubClient({ id: "T-NH3", status: "needs-human", extra: {} });
+  await assert.rejects(
+    () => runPromote({ client, id: "T-NH3", logPath }),
+    /illegal transition: needs-human cannot forward/
+  );
+});
+
+test("A4 [AC5]: runComplete on a needs-human task → precondition reject (must be ready)", async () => {
+  resetExit();
+  const logPath = tmpLog("complete-nh");
+  const client = stubClient({ id: "T-NH4", status: "needs-human", extra: {} });
+  const r = await runComplete({ client, id: "T-NH4", logPath });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /illegal transition: needs-human cannot complete \(must be ready\)/);
+  assert.equal(process.exitCode, 1);
+  assert.equal(client._state.status, "needs-human", "status unchanged");
+  assert.equal(queryGateEvents(logPath, { pipeline_id: "T-NH4" }).length, 0, "no event written");
+  resetExit();
+});
+
+test("A4 [AC6]: runRetreat done→ready still works (no regression on existing retreat paths)", async () => {
+  resetExit();
+  const logPath = tmpLog("retreat-regression-done");
+  const client = stubClient({ id: "T-NH5", status: "done", extra: {} });
+  const r = await runRetreat({ client, id: "T-NH5", reason: "rework", logPath });
+  assert.equal(r.ok, true);
+  assert.equal(r.to, "ready");
+  assert.equal(client._state.status, "ready");
+  const events = queryGateEvents(logPath, { pipeline_id: "T-NH5" });
+  assert.equal(events[0].gate, "retreat");
+  assert.deepEqual(events[0].payload, { from: "done", to: "ready", reason: "rework" });
+  resetExit();
+});
+
+test("A4 [AC6]: runRetreat ready→todo still works (no regression on existing retreat paths)", async () => {
+  resetExit();
+  const logPath = tmpLog("retreat-regression-ready");
+  const client = stubClient({ id: "T-NH6", status: "ready", extra: {} });
+  const r = await runRetreat({ client, id: "T-NH6", reason: "re-triage", logPath });
+  assert.equal(r.ok, true);
+  assert.equal(r.to, "todo");
+  assert.equal(client._state.status, "todo");
+  const events = queryGateEvents(logPath, { pipeline_id: "T-NH6" });
+  assert.equal(events[0].gate, "retreat");
+  assert.deepEqual(events[0].payload, { from: "ready", to: "todo", reason: "re-triage" });
+  resetExit();
+});
+
+// ===========================================================================
 // Phase C — real CLI against a native-provider workspace (AC1-AC3)
 // Provider MAP form WITH mcp_entry — mirrors gap-cli-gate-enforcement.test.mjs.
 // ===========================================================================
@@ -457,4 +540,81 @@ test("C [ARG-ORDER]: `quay complete --file <log> <id>` (flag before id) == id-fi
   assert.equal(r.status, 0, `flag-first complete should exit 0; got ${r.status}, stderr=${r.stderr}, stdout=${r.stdout}`);
   const after = JSON.parse(runQuay(["task", "view", "LC-PASS", "--json"], workspaceRoot).stdout);
   assert.equal(after.status, "done");
+});
+
+// --- AC1-AC6: needs-human→todo retreat (DIR-102) ---------------------------
+
+test("C [DIR-102 AC1]: `quay retreat <needs-human> --reason x` → exit 0, status=todo", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("dir102-ac1");
+  const logFile = path.join(workspaceRoot, "g.jsonl");
+  runNative(["task", "create", "NH-RET", "--title", "needs-human retreat", "--status", "needs-human",
+    "--body", validSections + acDodChecked], tasksDir);
+
+  const r = runQuay(["retreat", "NH-RET", "--reason", "dependency installed", "--file", logFile], workspaceRoot);
+  assert.equal(r.status, 0, `expected exit 0; got ${r.status}, stdout=${r.stdout}, stderr=${r.stderr}`);
+  assert.match(r.stdout, /RETREAT needs-human → todo/);
+
+  const after = JSON.parse(runQuay(["task", "view", "NH-RET", "--json"], workspaceRoot).stdout);
+  assert.equal(after.status, "todo", "status must be todo after retreat");
+
+  // AC2: verify GateEvent recorded
+  const log = runQuay(["gate-log", "NH-RET", "--gate", "retreat", "--json", "--file", logFile], workspaceRoot);
+  assert.equal(log.status, 0);
+  const events = JSON.parse(log.stdout);
+  assert.ok(events.length >= 1, `expected >=1 retreat event; got ${log.stdout}`);
+  assert.equal(events[0].gate, "retreat");
+  assert.equal(events[0].verdict, "pass");
+  assert.equal(events[0].payload.reason, "dependency installed");
+});
+
+test("C [DIR-102 AC3]: `quay retreat <needs-human>` (no --reason) → nonzero, status unchanged", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("dir102-ac3");
+  runNative(["task", "create", "NH-NOREASON", "--title", "needs-human no reason", "--status", "needs-human",
+    "--body", validSections + acDodChecked], tasksDir);
+
+  const r = runQuay(["retreat", "NH-NOREASON"], workspaceRoot);
+  assert.notEqual(r.status, 0, `expected nonzero; got ${r.status}, stdout=${r.stdout}`);
+
+  const after = JSON.parse(runQuay(["task", "view", "NH-NOREASON", "--json"], workspaceRoot).stdout);
+  assert.equal(after.status, "needs-human", "status unchanged without --reason");
+});
+
+test("C [DIR-102 AC4]: `quay promote <needs-human>` → nonzero (promote from needs-human illegal)", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("dir102-ac4");
+  runNative(["task", "create", "NH-PROMOTE", "--title", "needs-human promote", "--status", "needs-human",
+    "--body", validSections + acDodChecked], tasksDir);
+
+  const r = runQuay(["promote", "NH-PROMOTE"], workspaceRoot);
+  assert.notEqual(r.status, 0, `expected nonzero; got ${r.status}, stdout=${r.stdout}`);
+  assert.match(r.stderr, /illegal transition: needs-human cannot forward/);
+  assert.ok(!STACK_FRAME_PATTERN.test(r.stderr), "no stack trace");
+
+  const after = JSON.parse(runQuay(["task", "view", "NH-PROMOTE", "--json"], workspaceRoot).stdout);
+  assert.equal(after.status, "needs-human", "status unchanged");
+});
+
+test("C [DIR-102 AC5]: `quay complete <needs-human>` → nonzero (complete from needs-human illegal)", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("dir102-ac5");
+  runNative(["task", "create", "NH-COMPLETE", "--title", "needs-human complete", "--status", "needs-human",
+    "--body", validSections + acDodChecked], tasksDir);
+
+  const r = runQuay(["complete", "NH-COMPLETE"], workspaceRoot);
+  assert.notEqual(r.status, 0, `expected nonzero; got ${r.status}, stdout=${r.stdout}`);
+  assert.match(r.stdout, /illegal transition: needs-human cannot complete \(must be ready\)/);
+
+  const after = JSON.parse(runQuay(["task", "view", "NH-COMPLETE", "--json"], workspaceRoot).stdout);
+  assert.equal(after.status, "needs-human", "status unchanged");
+});
+
+test("C [DIR-102 AC6]: `quay retreat <done> --reason x` still works (no regression)", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("dir102-ac6");
+  runNative(["task", "create", "DONE-RET", "--title", "done retreat regression", "--status", "done",
+    "--body", validSections + acDodChecked], tasksDir);
+
+  const r = runQuay(["retreat", "DONE-RET", "--reason", "rework needed"], workspaceRoot);
+  assert.equal(r.status, 0, `expected exit 0; got ${r.status}, stdout=${r.stdout}, stderr=${r.stderr}`);
+  assert.match(r.stdout, /RETREAT done → ready/);
+
+  const after = JSON.parse(runQuay(["task", "view", "DONE-RET", "--json"], workspaceRoot).stdout);
+  assert.equal(after.status, "ready", "done→ready still works");
 });
