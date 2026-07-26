@@ -11,6 +11,10 @@ parent: DIR-062
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-062-C
+    experiments/quay-perpetual-stream/charters/M171-dir062-c-classifier-operative.md
+    /tmp/m171-absorb-entry.md
 ---
 ## Proposal
 The real-landing proof for [[DIR-062]] (DIR-026 Reading A: the mechanism existing + wired is
