@@ -37,6 +37,12 @@ The test had no diagnostic capture (stderr was piped but never read/logged) — 
 failure log gave zero clue whether this was a crash or a timeout; had to be inferred from the file's
 own known contention profile.
 
+**Note (correction):** an earlier draft of this finding (and of `tasks/DIR-109.md`'s own Resolution)
+attributed this to "DIR-112's concurrency refactor of cli.test.mjs". That was wrong — `git show
+--stat 301dfb9` shows that commit only added `tasks/DIR-112.md` (task-filing, 82 lines, one file);
+DIR-112's proposed refactor was never actually implemented. `cli.test.mjs`'s last real code change
+was the unrelated M116 TS-migration commit (`3667b02`). Corrected in both places.
+
 ## Requested action / Fix (landed same-session)
 
 1. Widened the poll budget from 5s (50 × 100ms) to 30s (300 × 100ms) — this is a "does it
@@ -46,7 +52,7 @@ own known contention profile.
    stdout/stderr + the child's exit code in the assertion message, so a future real failure is
    diagnosable from the CI log alone instead of requiring inference.
 
-## Verification (real, not asserted)
+## Verification (real, not asserted — see Definition of Done for pending audit confirmation)
 
 - Isolated run, twice: `node --test packages/quay/test/cli.test.mjs` — both runs green
   (`tests 1 / pass 1 / fail 0`), `serve --port` assertion explicitly `PASS` both times
@@ -55,12 +61,23 @@ own known contention profile.
   `bash scripts/test.sh` (`--test-concurrency=8`, 80 files) — `tests 517 / pass 514 / fail 0 /
   skipped 3`, `duration_ms 314387` — matches DIR-109's own originally-claimed baseline shape
   exactly, no failures.
+- Real CI, post-fix: pushed commit `0a55c35`; run
+  [30205100534](https://github.com/yaleh/quay/actions/runs/30205100534) — `status: completed,
+  conclusion: success`, all 3 jobs green (`test`, `version-consistency`, `dist-verify-node-floor`)
+  — independently confirmed via `gh run view --json status,conclusion,jobs`, not just the watch
+  command's own exit code. This is the same `test` job that failed pre-fix on run 30204233175
+  against a near-identical tree (commit `5cd8872`, which also failed the same way, confirming the
+  bug was reliably reproducible in CI, not a one-off fluke).
 
 ## Definition of Done
 
-- [x] Fix committed to `master`.
-- [x] Verified locally under real `--test-concurrency=8` contention (not just isolated), matching
-  the exact condition that produced the original CI failure.
-- [ ] A subsequent real CI run (GitHub Actions, post-push) confirms the `test` job green — not yet
-  observed post-fix at task-authoring time; the fix + this record are landing together, next real
-  CI run on `master` will be the live confirmation.
+Per DIR-020, boxes below are left UNCHECKED — implementer-provided evidence above is real and
+independently checkable (CI run links, exact commands/output), but ticking is an audit-phase action,
+not self-certification, especially since this task carries `milestone-candidate` and may enter the
+normal SELECT/audit pipeline later.
+
+- [ ] Fix committed to `master` (evidence: commit `0a55c35`).
+- [ ] Verified locally under real `--test-concurrency=8` contention, not just isolated (evidence:
+  `bash scripts/test.sh` full-suite run, 517/514/0-fail/3-skipped).
+- [ ] A subsequent real CI run confirms the `test` job green (evidence: run 30205100534,
+  independently checked via `gh run view`).
