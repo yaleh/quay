@@ -76,8 +76,77 @@ independently checkable (CI run links, exact commands/output), but ticking is an
 not self-certification, especially since this task carries `milestone-candidate` and may enter the
 normal SELECT/audit pipeline later.
 
-- [ ] Fix committed to `master` (evidence: commit `0a55c35`).
-- [ ] Verified locally under real `--test-concurrency=8` contention, not just isolated (evidence:
+- [x] Fix committed to `master` (evidence: commit `0a55c35`).
+- [x] Verified locally under real `--test-concurrency=8` contention, not just isolated (evidence:
   `bash scripts/test.sh` full-suite run, 517/514/0-fail/3-skipped).
-- [ ] A subsequent real CI run confirms the `test` job green (evidence: run 30205100534,
+- [x] A subsequent real CI run confirms the `test` job green (evidence: run 30205100534,
   independently checked via `gh run view`).
+
+## Adversarial audit (fresh-context)
+
+**Auditor stance:** fresh context, refute-first. Re-derived every claim from independently-run
+commands (git, `node --test`, `bash scripts/test.sh`, `gh run view`), not from the task's own prose.
+
+**Verdict: CONFIRMED**, with one documentation-accuracy caveat found that does not change the
+substance (see item 4/5 below).
+
+1. **Code change real and matches claim — CONFIRMED.** `git show 0a55c35 -- packages/quay/test/cli.test.mjs`
+   diff: loop bound `50` → `300` (5s→30s), `stderr` listener added and attached before the poll
+   loop starts, failure-path assert message now interpolates `stdout`/`stderr`/`exitCode`. Read the
+   current file at lines 505-538: coherent, no off-by-one, `up` still requires a genuine HTTP 200
+   (`res.statusCode === 200`) — the assertion cannot be gamed into an always-pass.
+2. **Isolated re-run — CONFIRMED.** `node --test packages/quay/test/cli.test.mjs` (independently
+   run this session): `PASS: quay serve --port <n>, spawned as a real subprocess, becomes reachable...`
+   and `PASS: quay serve (spawned as a subprocess) renders the seeded task...`; summary
+   `tests 1 / pass 1 / fail 0 / skipped 0`.
+3. **Contended re-run — CONFIRMED.** Independently ran `bash scripts/test.sh` to completion
+   (`--test-concurrency=8`, real contention): `ℹ tests 517 / suites 4 / pass 514 / fail 0 /
+   cancelled 0 / skipped 3 / todo 0 / duration_ms 315777`, `EXIT:0`. Matches the task's claimed
+   shape (517/514/0-fail/3-skipped) exactly; duration differs slightly from the task's claimed
+   314387ms (315777ms here) as expected for independent contended runs, not a discrepancy of
+   substance.
+4. **Real CI evidence — CONFIRMED, with a citation-accuracy caveat.** `gh run view 30205100534
+   --json status,conclusion,headSha,jobs`: `conclusion: success`, `headSha: 0a55c35...` (matches
+   the fix commit exactly), all 3 jobs (`test`, `version-consistency`, `dist-verify-node-floor`)
+   `success`. `gh run view 30204233175 ...`: `conclusion: failure`, `headSha: 1bc1167...`, `test`
+   job `failure`; its failed-step log greps `FAIL: quay serve --port <n>...` and
+   `ℹ tests 517 / pass 513 / fail 1` — exact match to the task's claimed numbers.
+   **Caveat:** the task's Verification text says run 30204233175 was "against a near-identical
+   tree (commit `5cd8872`...)" — this conflates two different things. Run 30204233175's actual
+   `headSha` is `1bc1167`, not `5cd8872`. Commit `5cd8872` has its OWN separate CI run,
+   `30204625342` (independently found via `gh run list`, not mentioned anywhere in the task),
+   which also failed with the identical `FAIL: quay serve --port <n>...` and `517/pass-count`
+   shape. So the underlying substance is actually STRONGER than claimed (two independent pre-fix
+   CI failures, not one), but the task's prose misattributes which commit belongs to which run
+   number — a citation error, not a substance error.
+5. **Attribution correction — CONFIRMED as a real correction, but incomplete within `DIR-109.md`
+   itself.** `git show --stat 301dfb9`: touches only `tasks/DIR-112.md` (82 insertions, 1 file) —
+   confirmed. `git log --oneline -- packages/quay/test/cli.test.mjs`: last real code change before
+   `0a55c35` was `3667b02` ("feat(M116): TS migration P5-A"), confirmed unrelated to DIR-112.
+   **New issue found (not in the task's own report):** `tasks/DIR-109.md` still contains an
+   UNCORRECTED occurrence of the wrong attribution — line ~196 of that file's own "Resolution"
+   section still reads "a newly-surfaced, unrelated CI-only regression in `cli.test.mjs` (DIR-112's
+   concurrency refactor) needs its own investigation/fix", three paragraphs AFTER that same
+   section's own correction (~line 155-159) says the DIR-112 attribution "was wrong." This task's
+   Finding claims the correction was made "in both places" (this task + DIR-109.md) — that is only
+   half true: DIR-109.md has both the corrected AND the stale sentence present simultaneously. This
+   is exactly the single-source-of-truth drift CLAUDE.md's own review checklist warns about. Not
+   fixed by this audit (out of this task's DoD scope; `tasks/DIR-109.md` is a different task's
+   artifact) — flagged for a follow-up gap task.
+6. **Regression check — CONFIRMED, no masking.** Re-read lines 505-553 of the current file: the
+   assertion still requires a real `statusCode === 200` from an actual HTTP GET against the exact
+   spawned port; the wider loop only changes HOW LONG it waits, not WHAT it checks. The isolated
+   re-run (item 2) also exercised the immediately-following body-content assertion
+   (`PASS: ... renders the seeded task in its GET / body ...`), confirming the widened window
+   didn't accidentally short-circuit the reachability check that gates it. The full contended run
+   (item 3) confirms no other test in the file (or the suite) regressed from this specific edit.
+7. **Mechanical/DoD hygiene — done.** Ticked `[x]` all three DoD items: commit-on-master, contended
+   local run, and real CI green — all three independently reproduced by this audit, not trusted
+   from the task's self-report. Body preserved verbatim above except for these three checkbox marks
+   and this appended section.
+
+**Summary:** all three DoD items are now independently, mechanically confirmed. The one new issue
+this fresh-context pass surfaced beyond what the task already disclosed is the incomplete
+DIR-112-attribution correction left inside `tasks/DIR-109.md` itself (item 5) — a real but
+low-severity documentation-drift defect, tracked here for a follow-up gap task rather than fixed
+in-place (out of this task's own scope).
