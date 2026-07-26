@@ -106,6 +106,19 @@ node packages/quay-native/bin/quay-native.js <command>
 node packages/quay-github/bin/quay-github.js <command>
 ```
 
+### Option C — as a Claude Code plugin
+
+```
+/plugin marketplace add yaleh/quay
+/plugin install quay
+```
+
+This installs the quay MCP server + skills as a Claude Code plugin — no
+separate `npm install` needed. The installed bytes come from the `dist-plugin`
+branch (a CI-built, self-contained bundle), not `master`; see
+[`plugin/README.md`](plugin/README.md#installation) for how that build/publish
+pipeline works (DIR-108/M172).
+
 ## Updating quay
 
 If you update quay (by installing a new release artifact or pulling from source)

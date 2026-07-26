@@ -2,11 +2,16 @@ docs/proposals/quay-bootstrap-experiment.md
 node_modules/
 **/node_modules
 dist/
-# M120 (DIR-060): the plugin's vendored Core copy IS a committed dist bundle
-# (plugin/vendor/quay/dist/quay.js) — negate the bare `dist/` pattern above for
-# this one path so `git add` tracks it. Directory first, then its contents.
-!plugin/vendor/quay/dist/
-!plugin/vendor/quay/dist/**
+# M172 (DIR-108): plugin/vendor/quay/dist/quay.js used to be a NEGATED (tracked)
+# exception to the bare `dist/` rule above (see git history at M120/DIR-060 for
+# the old negation). It is now a genuinely generated artifact like every other
+# dist/ — built by plugin/scripts/sync-vendor.sh (wired into the root
+# `postinstall` script, so a fresh clone + `npm install` regenerates it with no
+# manual step) for local dev, and published by
+# .github/workflows/publish-plugin-dist.yml to the `dist-plugin` orphan branch
+# for external `/plugin install` (marketplace.json's plugin source points
+# there, not at `./plugin`). No negation needed anymore; the bare `dist/` rule
+# above covers it like every other build output in this repo.
 *.log
 .DS_Store
 experiment/timing/*.log

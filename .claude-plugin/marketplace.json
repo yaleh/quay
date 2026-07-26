@@ -9,7 +9,11 @@
   "plugins": [
     {
       "name": "quay",
-      "source": "./plugin",
+      "source": {
+        "source": "github",
+        "repo": "yaleh/quay",
+        "ref": "dist-plugin"
+      },
       "version": "0.3.13",
       "description": "quay MCP server (task_list/task_get/task_write/task_check/action_list/action_run over whichever Provider the target workspace's .quay/config.yml enables) + quay-native author/execute authoring skills + a workspace-portable quay-directive skill (ships its own schema-check, no experiments/ dir required).",
       "license": "MIT",

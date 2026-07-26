@@ -2,6 +2,33 @@
 
 quay plugin v0.4.0 — distributes the quay MCP server, skills, vendored agent types, and distributable workflows and gate scripts.
 
+## Installation
+
+```
+/plugin marketplace add yaleh/quay
+/plugin install quay
+```
+
+**Where the installed bytes come from (DIR-108/M172):** `.claude-plugin/marketplace.json`'s
+`quay` plugin entry sources from the `dist-plugin` branch of this repo
+(`{"source":"github","repo":"yaleh/quay","ref":"dist-plugin"}`), **not** the `master`
+branch's `./plugin` directory. `dist-plugin` is a force-pushed orphan branch
+containing a fully-built `plugin/` subtree — including the esbuild bundle
+`vendor/quay/dist/quay.js`, which runs on the plugin's declared Node ≥20 floor
+with no separate `npm install` (all runtime deps, e.g.
+`@modelcontextprotocol/sdk`, are inlined). `.github/workflows/publish-plugin-dist.yml`
+rebuilds and force-publishes that branch on every version-tag release (and on
+demand via `workflow_dispatch`) by running `plugin/scripts/sync-vendor.sh` then
+`plugin/scripts/publish-dist-branch.sh --push`. `master` never carries the built
+bundle — only its source, `packages/quay/{bin,src}`.
+
+**Developing quay itself** (this repo IS its own MCP runtime via `.mcp.json` →
+`${CLAUDE_PLUGIN_ROOT}/vendor/quay/dist/quay.js`): the root `npm install`
+`postinstall` script runs `sync-vendor.sh` automatically, so a fresh clone +
+`npm install` regenerates the gitignored `plugin/vendor/quay/dist/quay.js`
+locally with no manual step. Re-run `bash plugin/scripts/sync-vendor.sh` by hand
+any time `packages/quay/{bin,src}` changes without a full reinstall.
+
 ## Adoption tiers
 
 | Tier | Description | Needs from quay plugin | Setup required |
