@@ -11,6 +11,10 @@ labels:
 parent: DIR-063
 children: []
 extra:
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-063-B
+    experiments/quay-perpetual-stream/charters/M169-dir063-b-chart-saturation-wiring.md
+    /tmp/m169-absorb-entry.md
   schema: v1
 ---
 ## Proposal
