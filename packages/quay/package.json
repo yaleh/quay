@@ -14,7 +14,8 @@
   "exports": {
     "./adr-store": "./src/adr-store.ts",
     "./document-store": "./src/document-store.ts",
-    "./contract-validator": "./src/contract-validator.ts"
+    "./contract-validator": "./src/contract-validator.ts",
+    "./init": "./src/init.ts"
   },
   "files": [
     "README.md",

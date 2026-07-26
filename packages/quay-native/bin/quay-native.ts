@@ -21,6 +21,8 @@ import { createAdrStore } from "quay/adr-store";
 import { createDocumentStore } from "quay/document-store";
 import { validateContracts } from "quay/contract-validator";
 import { readManifest } from "../src/manifest.ts";
+// DIR-098: quay init — workspace scaffolding (shared with Core CLI)
+import { runInit, printNextSteps } from "quay/init";
 
 function findRepoRoot(startDir) {
   // Walk upward looking for the workspace marker (.quay/config.yml) so the
@@ -246,6 +248,67 @@ async function main() {
     return;
   }
 
+  // DIR-098: quay init — scaffold a new workspace (.quay/config.yml + tasks/ dir).
+  // No existing config required (that is the whole point of `init`).
+  if (cmd === "init") {
+    const { flags: initFlags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
+
+    // --help / -h for init subcommand
+    if (sub === "--help" || sub === "-h" || initFlags.help) {
+      console.log(`quay-native init — scaffold a new quay workspace
+
+Usage:
+  quay-native init [--force] [--dry-run] [--root <path>]
+
+Flags:
+  --force      Overwrite existing .quay/config.yml if present.
+  --dry-run    Print the generated config to stdout without writing to disk.
+  --root <path>  Scaffold at <path> instead of the current working directory.
+
+Description:
+  Creates .quay/config.yml (with all 3 sections: providers, gates, loop) and
+  a tasks/ directory at the project root. Auto-detects project type (Node.js /
+  Go) to suggest appropriate gate defaults.
+
+  If .quay/config.yml already exists, refuses to overwrite unless --force.
+`);
+      return;
+    }
+
+    const targetRoot = typeof initFlags.root === "string" ? initFlags.root : process.cwd();
+    const force = initFlags.force === true;
+    const dryRun = initFlags["dry-run"] === true;
+
+    try {
+      const result = runInit({ root: targetRoot, force, dryRun });
+
+      if (result.outcome === "skipped") {
+        console.error(
+          `.quay/config.yml already exists at ${result.configPath}. ` +
+          "Use --force to overwrite, or --dry-run to preview."
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      if (result.outcome === "dry-run") {
+        console.log(result.content);
+        console.log(`\n# Dry run — nothing written to disk.`);
+        console.log(`# Would create: ${result.configPath}`);
+        console.log(`# Would create: ${result.tasksDir}/`);
+        return;
+      }
+
+      console.log(`Created ${result.configPath}`);
+      console.log(`Created ${result.tasksDir}/ (or already existed)`);
+      printNextSteps("native", result.tasksDir);
+    } catch (err) {
+      console.error(`quay-native init: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   if (cmd === "task") {
     // DIR-047: load the per-provider default_task_status from .quay/config.yml
     // (validated; throws a clear error on illegal values) and pass it to the
@@ -368,7 +431,7 @@ async function main() {
     return;
   }
 
-  console.error(`usage: quay-native <task|mcp|manifest> ...`);
+  console.error(`usage: quay-native <init|task|mcp|manifest> ...`);
   process.exitCode = 1;
 }
 

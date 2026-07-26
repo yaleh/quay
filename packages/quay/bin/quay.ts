@@ -31,6 +31,8 @@ import { runOnce, runLoop } from "../src/gate/driver.ts";
 // mirrors `run`'s own no-positional-id shape (both scan/act over the whole
 // board, not a single task).
 import { migrateTasks } from "../src/migrate.ts";
+// DIR-098: quay init — workspace scaffolding
+import { runInit, printNextSteps } from "../src/init.ts";
 
 function printJson(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
@@ -295,6 +297,7 @@ function printHelp(sub) {
 
 Usage:
   quay --version | -V
+  quay init [--force] [--dry-run] [--root <path>]
   quay task list [--status <status>] [--label <label>] [--prefix <prefix>] [--sort id|status|updated] [--search <query>] [--page-size <n>] [--json|--format json]
   quay task view <task-id> [--json]
   quay task create <task-id> --title <title> [--body <text>|--body-file <path>] [--status <status>] [--labels <a,b>] [--parent <id>] [--children <a,b>] [--extra <json>] [--json]
@@ -427,6 +430,24 @@ Examples:
   quay task view QX-001               View task details
   quay task create QX-002 --title "New task"  Create a new task (--title required, non-empty)
   quay task edit QX-001 --status done Mark task done
+`);
+  } else if (sub === "init") {
+    process.stdout.write(`quay init — scaffold a new quay workspace
+
+Usage:
+  quay init [--force] [--dry-run] [--root <path>]
+
+Flags:
+  --force      Overwrite existing .quay/config.yml if present.
+  --dry-run    Print the generated config to stdout without writing to disk.
+  --root <path>  Scaffold at <path> instead of the current working directory.
+
+Description:
+  Creates .quay/config.yml (with all 3 sections: providers, gates, loop) and
+  a tasks/ directory at the project root. Auto-detects project type (Node.js /
+  Go) to suggest appropriate gate defaults.
+
+  If .quay/config.yml already exists, refuses to overwrite unless --force.
 `);
   } else {
     // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
@@ -1012,6 +1033,70 @@ async function main() {
     return;
   }
 
+  // DIR-098: quay init — scaffold a new workspace (.quay/config.yml + tasks/ dir).
+  // Does NOT require an existing config (loadConfig() throws without one — that
+  // is the whole point of `init`). No provider connection needed.
+  if (cmd === "init") {
+    // Re-parse flags from [sub, ...rest] so --force, --dry-run, --root are seen
+    // regardless of whether they land in sub or rest.
+    const { flags: initFlags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
+
+    // --help / -h for init subcommand
+    if (sub === "--help" || sub === "-h" || initFlags.help) {
+      process.stdout.write(`quay init — scaffold a new quay workspace
+
+Usage:
+  quay init [--force] [--dry-run] [--root <path>]
+
+Flags:
+  --force      Overwrite existing .quay/config.yml if present.
+  --dry-run    Print the generated config to stdout without writing to disk.
+  --root <path>  Scaffold at <path> instead of the current working directory.
+
+Description:
+  Creates .quay/config.yml (with all 3 sections: providers, gates, loop) and
+  a tasks/ directory at the project root. Auto-detects project type (Node.js /
+  Go) to suggest appropriate gate defaults.
+
+  If .quay/config.yml already exists, refuses to overwrite unless --force.
+`);
+      return;
+    }
+
+    const targetRoot = typeof initFlags.root === "string" ? initFlags.root : process.cwd();
+    const force = initFlags.force === true;
+    const dryRun = initFlags["dry-run"] === true;
+
+    try {
+      const result = runInit({ root: targetRoot, force, dryRun });
+
+      if (result.outcome === "skipped") {
+        console.error(
+          `.quay/config.yml already exists at ${result.configPath}. ` +
+          "Use --force to overwrite, or --dry-run to preview."
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      if (result.outcome === "dry-run") {
+        console.log(result.content);
+        console.log(`\n# Dry run — nothing written to disk.`);
+        console.log(`# Would create: ${result.configPath}`);
+        console.log(`# Would create: ${result.tasksDir}/`);
+        return;
+      }
+
+      console.log(`Created ${result.configPath}`);
+      console.log(`Created ${result.tasksDir}/ (or already existed)`);
+      printNextSteps("native", result.tasksDir);
+    } catch (err) {
+      console.error(`quay init: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   // QENG-1: gate engine. `gate`/`gate-log` are verb-less top-level commands, so
   // the task id lands in `sub` (not positional[0]), and `--list` is detected as
   // `sub === "--list"` — parseFlags never runs on it, so `flags.list` is never
@@ -1250,7 +1335,7 @@ async function main() {
   }
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|action list|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|action list|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
 }
 

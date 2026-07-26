@@ -3,6 +3,11 @@
 A minimal, documented example task store — 5 illustrative tasks
 demonstrating the `quay` task view-model shape (DIR-035-C):
 
+> **Prefer `quay init`** to scaffold a fresh workspace instead of copying
+> this directory. `quay init` generates a complete `.quay/config.yml` with
+> all three sections (providers, gates, loop) and inline documentation.
+> See the root `README.md` "Creating a workspace" section.
+
 | Task | Role (derived) | Status | Notes |
 |---|---|---|---|
 | `SAMPLE-1` | compound (has children) | ready | Epic grouping SAMPLE-1A/1B; `task check` reports `ok:false` until SAMPLE-1B is done |

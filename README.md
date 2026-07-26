@@ -139,6 +139,38 @@ providers:
       QUAY_GITHUB_REPO: "yaleh/quay"     # owner/repo this Provider reads issues from
 ```
 
+## Creating a workspace
+
+`quay init` scaffolds a new quay workspace in any directory. It generates a
+`.quay/config.yml` with all three sections (providers, gates, loop) and
+inline documentation for every supported field, plus a `tasks/` directory.
+
+```sh
+# Scaffold a new workspace in the current directory:
+quay init
+
+# Preview the generated config without writing to disk:
+quay init --dry-run
+
+# Scaffold at a specific path:
+quay init --root /path/to/project
+
+# Overwrite an existing .quay/config.yml:
+quay init --force
+```
+
+The generated config is valid immediately — `quay task list` works right after
+`init` with no manual edits needed. Auto-detected project type (Node.js via
+`package.json`, Go via `go.mod`) tailors the gate suggestions in the commented-
+out examples.
+
+`quay-native init` works identically when the native provider is the sole
+installed package:
+
+```sh
+quay-native init --dry-run
+```
+
 ## Usage
 
 All commands below are real, live-run invocations against this
