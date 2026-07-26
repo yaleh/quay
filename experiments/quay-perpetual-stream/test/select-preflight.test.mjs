@@ -89,7 +89,7 @@ test("getPendingDirectives: directive without extra → skipped", () => {
 });
 
 // ── getCandidates ─────────────────────────────────────────────────────────────────────────────────
-test("getCandidates: filters todo milestone-candidates, excludes human-steered", () => {
+test("getCandidates: filters todo milestone-candidates, does NOT pre-filter human-steered (classifier handles it later, DIR-062-C)", () => {
   const tasks = [
     { id: "DIR-089", title: "Test 1", status: "todo", labels: ["milestone-candidate"], extra: { rank: 5 } },
     { id: "DIR-090", title: "HS", status: "todo", labels: ["milestone-candidate", "human-steered"], extra: {} },
@@ -98,11 +98,13 @@ test("getCandidates: filters todo milestone-candidates, excludes human-steered",
     { id: "NOT-CAND", title: "Not", status: "todo", labels: ["directive"], extra: {} },
   ];
   const r = getCandidates(tasks);
-  assert.equal(r.length, 2);
+  // DIR-062-C: getCandidates no longer pre-filters by label:human-steered — classifier handles it
+  assert.equal(r.length, 3);
   assert.equal(r[0].id, "DIR-089");
   assert.equal(r[0].rank, 5);
-  assert.equal(r[1].id, "DIR-092");
-  assert.equal(r[1].rank, 999); // default rank
+  assert.equal(r[1].id, "DIR-090"); // human-steered still returned by getCandidates
+  assert.equal(r[2].id, "DIR-092");
+  assert.equal(r[2].rank, 999); // default rank
   assert.equal(r[0].schemaPass, false); // not yet filled
   assert.equal(r[0].hasTouches, false);
 });
@@ -115,12 +117,14 @@ test("getCandidates: null → []", () => {
   assert.deepEqual(getCandidates(null), []);
 });
 
-test("getCandidates: human-steered label case-insensitive", () => {
+test("getCandidates: human-steered label still returned (classifier gate is post-filter, DIR-062-C)", () => {
   const tasks = [
     { id: "DIR-HS", title: "HS", status: "todo", labels: ["milestone-candidate", "Human-Steered"], extra: {} },
   ];
+  // DIR-062-C: getCandidates no longer filters on label:human-steered — the classifier handles it
   const r = getCandidates(tasks);
-  assert.equal(r.length, 0);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].id, "DIR-HS");
 });
 
 // ── checkCandidateTouches ─────────────────────────────────────────────────────────────────────────

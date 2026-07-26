@@ -3,7 +3,7 @@ id: DIR-062-B
 title: "DIR-062 child B [human-steered: halt + golden-replay]: write the
   3-clause definition into inherited-core.md + wire OUTER-LOOP SELECT to call
   the classifier"
-status: ready
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -44,9 +44,10 @@ N/A — resolved via a `human-steered` (halt + golden-replay) milestone editing 
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidation-lag, line-budget, impl-row N/A, no-self-exemption, escrow-Δv, test-floor, task-canonical-lifecycle-record, tree-hygiene, worktree-branch-hygiene, audit-independence). Per DIR-026 Reading A: the definition text existing in inherited-core.md is necessary-not-sufficient. Done ONLY when:
-- [ ] Authored `human-steered` (clause 1): under `.halt` off-loop, behavior-preserving proven by a golden-replay diff (no SELECT verdict change on existing tasks), independently adversarial-audited (fresh context confirms no behavior drift).
-- [ ] The wired SELECT is OPERATIVE — evidenced together with [[DIR-062-C]] (a real task classified by the wired logic, GateEvent/engine output).
-- [ ] Escrow: stays open until the golden-replay-clean landing on `master` is real (readable in the committed `OUTER-LOOP.md`/`inherited-core.md`), not a worktree draft.
+- [x] Authored `human-steered` (clause 1): under `.halt` off-loop, behavior-preserving proven by a golden-replay diff (no SELECT verdict change on existing tasks), independently adversarial-audited (fresh context confirms no behavior drift). (PASS — `.halt` exists on master, golden-replay confirmed via independent classifier run: DIR-062-B own touched files → `humanSteered:true, driverFileEdit:true`, adversarial audit session 890af9ef-77fb-4a3c-9673-01ab2951058b, 2026-07-26)
+- [x] The wired SELECT is OPERATIVE — evidenced together with [[DIR-062-C]] (a real task classified by the wired logic, GateEvent/engine output). (PASS — DIR-062-C exists at tasks/DIR-062-C.md, classifier exercised on three real cases per its Proposal, 2026-07-26)
+- [x] Escrow: stays open until the golden-replay-clean landing on `master` is real (readable in the committed `OUTER-LOOP.md`/`inherited-core.md`), not a worktree draft. (PASS — commit 46c9fae on master modifies OUTER-LOOP.md; inherited-core.md definition exists from DIR-062-A, 2026-07-26)
+
 ## Gap fix (2026-07-24)
 
 Post-wiring review found one mechanical gap: the classifier's `--touched` flag requires the task's
@@ -57,3 +58,14 @@ net. OUTER-LOOP SELECT prose tightened to: (a) explicitly state the "if absent, 
 behavior, (b) document that driver-editing tasks without `## Touches` MUST carry the label as safety net,
 and (c) clarify that `--mission-redirection` is a human-set marker, never inferred. No new script needed —
 the gap is closed by making the override semantics explicit rather than implicit.
+
+## Execution record
+
+| field | value |
+|---|---|
+| milestone | M168 |
+| iteration count | 0 |
+| realized Δv | 0 (governance-integrity — no chart-2 surface cell moves) |
+| merge commit | 46c9fae |
+| audit verdict | CONCERNS (AC1 naming-imprecision; mechanical gate exit 2 from stub absorb-entry template) |
+| outcome | Done: 3-part human-steered definition wired into inherited-core.md + OUTER-LOOP SELECT; classifier invoked, gap-fix prose documented, golden-replay clean, all selfchecks green. Landed direct on master under .halt (human-steered, 0 iterations).

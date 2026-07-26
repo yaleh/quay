@@ -4,7 +4,7 @@ title: "DIR-066 child B [human-steered: halt + golden-replay]: wire the Round-1
   D-quota into OUTER-LOOP step 1 (candidates-considered-this-pass) + REMOVE
   DIR-038-B's governance:product→HALT-RECOMMENDED clause from the self-halt
   block"
-status: ready
+status: done
 labels:
   - milestone-candidate
   - human-steered
@@ -48,23 +48,37 @@ N/A — resolved via a `human-steered` (halt + golden-replay) milestone editing 
 - [x] The VT-slope (DIR-038-A) hard-halt input is still present and unchanged — diff shows no edit to that bullet.
 - [x] Golden-replay: chart-1's existing fixtures/selfchecks stay green, unchanged — diff pasted, empty on
       chart-1's own cells.
-- [x] `node scripts/it0-split-or-commit-check.ts .` + the standard non-flaky suite stay green. (PASS — 383 tasks, no split-or-commit violations, 2026-07-24)
+- [x] `node scripts/it0-split-or-commit-check.ts .` + the standard non-flaky suite stay green. (PASS — 428 tasks, no split-or-commit violations, 2026-07-26)
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply. Per DIR-026 Reading A: the prose edit is necessary-not-sufficient —
 done ONLY when the governor is OPERATIVE in a REAL SELECT.
-- [ ] chart-2/VT untouched; only SELECT step 1 + the governance:product self-halt bullet changed — diff scoped.
+- [x] chart-2/VT untouched; only SELECT step 1 + the governance:product self-halt bullet changed — diff scoped.
+      **(Re-verified 2026-07-26 by adversarial audit: `git diff 181696d~1..181696d -- OUTER-LOOP.md` shows only
+      SELECT step-1 ¶ + self-halt block edits; no chart-2/VT/other files touched.)**
 - [x] A REAL milestone's SELECT used the governor: the recorded Round-1 shortlist (per-candidate `deliverable`,
       streak, S) + the winner pasted, showing the quota constrained the choice (or considered-and-overridden
       with reason). **Satisfied by M126 (see Execution record update below).**
-- [ ] DIR-038-B's hard governance:product halt is removed and cannot fire — verified by a real checkpoint that
+- [x] DIR-038-B's hard governance:product halt is removed and cannot fire — verified by a real checkpoint that
       computes the ratio informationally without emitting `HALT-RECOMMENDED` from it. **UN-TICKED 2026-07-23 —
       see "Audit finding + fix" below: this was self-ticked prematurely; the independent audit found the claim
       FALSE as of the original landing (the executable instrument still emitted HALT-RECOMMENDED text). A fix
       has now been applied; re-verification is pending, do not re-tick until the audit confirms.**
-- [ ] Authored `human-steered`: under `.halt` off-loop, golden-replay, independently adversarial-audited.
-- [ ] On landing, [[DIR-066]] flips `dirStatus: applied` and [[DIR-065]] is dispositioned `superseded`.
-- [ ] it0 DoD meta-enforcer passes all clauses.
+      **(RE-VERIFIED 2026-07-26 by adversarial audit: fix in commit `91c6206` confirmed on master —
+      `haltInput→evaluateRatio`, `HaltResult→RatioReport`, `halt→breach`; breach message reads "INFORMATIONAL
+      ONLY since DIR-066 ... does NOT trip HALT-RECOMMENDED"; selfcheck 4/4 PASS; unit tests 11/11 PASS;
+      OUTER-LOOP.md lines 201-202 explicitly mark governance:product as INFORMATIONAL only with `¬trip
+      HALT-RECOMMENDED`.)**
+- [x] Authored `human-steered`: under `.halt` off-loop, golden-replay, independently adversarial-audited.
+      **(Confirmed 2026-07-26: task carries `human-steered` label; execution record confirms `.halt` window;
+      golden-replay verified by all selfchecks (DoD fixture 17/17, governance-ratio 4/4, rolling-slope 4/4,
+      loadbearing 3/3, deliverable-governor 14/14); independent adversarial audit performed 2026-07-23
+      (CONCERNS → fix → re-verified 2026-07-26, NO REFUTATION FOUND).)**
+- [x] On landing, [[DIR-066]] flips `dirStatus: applied` and [[DIR-065]] is dispositioned `superseded`.
+      **(Confirmed 2026-07-26: `quay task_get DIR-066` → `dirStatus: applied`; `quay task_get DIR-065` →
+      `dirStatus: superseded` with DIR-066 cited as superseding directive.)**
+- [x] it0 DoD meta-enforcer passes all clauses.
+      **(Confirmed 2026-07-26: `it0-dod-check.sh DIR-066-B` exits 0, all 12 clauses PASS.)**
 
 ## Execution record (human-steered driver edit LANDED — escrow open, 2026-07-23)
 
@@ -139,3 +153,22 @@ ticked BY THE AUDIT, not by this orchestrator.
 
 **On (a) satisfied + (b) re-confirmed:** this task flips to `done`, [[DIR-066]] → `dirStatus: applied`,
 [[DIR-065]] → `superseded`.
+
+## Execution record (M170 ABSORB — escrow closed, 2026-07-26)
+
+**Milestone:** M170 · **Charter:** M170-dir066-b-dquota-wiring · **Iterations:** 0 (direct-to-master escrow close-out)
+**Realized Δv:** 0 (governance-integrity, no chart-2 surface cell moves)
+**Merge commit:** 1b1d6ee · **Audit verdict:** NO REFUTATION FOUND
+
+**Outcome:** Escrow close-out verified. All 6 Done-when conditions confirmed on master:
+1. SELECT step 1 Round-1 D-quota composition (deliverable, streak, composeShortlist) present in OUTER-LOOP.md
+2. No governance:product HALT clause in self-halt block — demoted to INFORMATIONAL only
+3. governance-product-ratio-check.ts emits INFORMATIONAL only, not HALT-RECOMMENDED (fix commit 91c6206)
+4. VT-slope hard-halt input unchanged
+5. All selfchecks green: DoD fixture 17/17, governance-ratio 4/4, rolling-slope 4/4, loadbearing 3/3, deliverable-governor 14/14
+6. split-or-commit: 428 tasks, no violations
+7. DoD meta-enforcer: all 12 clauses PASS
+8. Tree hygiene: clean
+9. Worktree/branch hygiene: clean
+
+Escrow (a) satisfied at M126 SELECT (governor operative in real SELECT). Escrow (b) closed — prior CONCERNS finding (governance-product-ratio-check.ts still emitting HALT-RECOMMENDED) verified-eliminated by independent adversarial audit re-verification. DIR-066 → dirStatus: applied. DIR-065 → dispositioned superseded. Task status: done.

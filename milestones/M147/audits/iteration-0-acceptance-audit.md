@@ -6,22 +6,13 @@
 **Milestone:** M147
 **Task:** DIR-095
 **Charter:** experiments/quay-perpetual-stream/charters/M147-dir095-version-consistency.md
-**Audit type:** adversarial acceptance audit (refute-first)
+**Audit type:** adversarial acceptance audit (refute-first, fresh context)
 
-## Verdict: REFUTED
+## Verdict: NO REFUTATION FOUND
 
-The technical deliverable (syncing all 8 version-bearing files to v0.3.13) is complete and
-independently confirmed. Both AC items and all 3 DoD items are verified. However, the mechanical
-gate (`it0-dod-check.sh`) exits 2 (non-zero) -- REFUTED by construction per the audit charge.
+All AC items, DoD items, and mechanical gate checks independently confirmed. The prior REFUTED finding (2026-07-25 11:21 audit) was caused by a malformed absorb entry (`## Audit-independence check` section in prose format without structured `Artifact:`/`Orchestrator id:`/`Dispatch record:` fields). The absorb entry has since been corrected and the mechanical gate now exits 0 (all 12 clauses PASS). The prior deviation row at dashboard.md line 471 has been updated to `verified-eliminated`.
 
-Root cause this pass: the absorb entry `/tmp/m147-absorb-entry.md` contains a prose-only
-`## Audit-independence check` section describing a prior audit attempt's failure but lacks the
-required structured fields (`Artifact:`, `Orchestrator id:`, `Dispatch record:`) that clause 12
-of the DoD meta-enforcer requires. This is a DIFFERENT failure mode from the prior audit pass
-(2026-07-25 11:10, which reported a backlog-row first-column mismatch: `| M147 | DIR-095 |`
-vs expected `^| DIR-095 |`). The absorb entry was partially updated between passes -- the
-backlog row now resolves correctly, but the audit-independence section was left as descriptive
-prose rather than structured format.
+DIR-095's sole code change is a 1-line version bump in `plugin/.claude-plugin/plugin.json` (`0.4.0` -> `0.3.13`). The deliverable is mechanically verified and consistent.
 
 ## AC Satisfaction
 
@@ -29,18 +20,19 @@ prose rather than structured format.
 
 **VERDICT: CONFIRMED**
 
-Independent evidence:
-- `node --experimental-strip-types --test scripts/version-consistency-check.test.ts` result: **tests 9, pass 9, fail 0, exit 0**
-- All 9 test cases pass: readVersions returns 8 entries for the real tree; readVersions returns errors for missing files; check returns all-equal on the real tree post-unification (GREEN); check returns all-equal for a unified fixture; check detects single-entry drift; check handles marketplace.json wrapper; CLI --json exits 0 with JSON output; CLI exits 0 on the real tree; CLI exits 0 on a unified fixture
+Independent evidence (fresh run, 2026-07-25):
+- `node --experimental-strip-types --test scripts/version-consistency-check.test.ts` -> **tests 9, pass 9, fail 0, exit 0**
+- All 9 test cases pass: readVersions returns 8 entries for the real tree; readVersions returns errors for missing files; check returns all-equal on the real tree post-unification (GREEN); check returns all-equal for a unified fixture (GREEN); check detects single-entry drift (RED after one drift); check handles marketplace.json with `{ plugins: [...] }` wrapper; CLI --json exits 0 with JSON output even on drift; CLI exits 0 on the real tree (post-unification GREEN); CLI exits 0 on a unified fixture
 
 ### AC2: Session-start healthcheck no longer warns about version inconsistency
 
 **VERDICT: CONFIRMED**
 
-Independent evidence:
-- `node --experimental-strip-types scripts/version-consistency-check.ts` exits **0**, stderr: `VERSION-CONSISTENCY: OK`
+Independent evidence (fresh run, 2026-07-25):
+- `node --experimental-strip-types scripts/version-consistency-check.ts` exits **0**, stdout: `VERSION-CONSISTENCY: OK`
 - All 8 files listed at version `0.3.13`
 - `node --experimental-strip-types scripts/version-consistency-check.ts --json` outputs: `{"ok":true,"mode":"all-equal","uniqueVersions":["0.3.13"]}`
+- The prior drift in `plugin/.claude-plugin/plugin.json` (`0.4.0` -> `0.3.13`) is resolved
 
 ## DoD Satisfaction
 
@@ -48,7 +40,7 @@ Independent evidence:
 
 **VERDICT: CONFIRMED**
 
-8/8 files confirmed at v0.3.13 by `scripts/version-consistency-check.ts --json`:
+8/8 files confirmed at v0.3.13 by `scripts/version-consistency-check.ts --json` (mode: all-equal):
 
 | # | Path | Version |
 |---|---|---|
@@ -71,37 +63,41 @@ Same evidence as AC1: 9/9 tests pass, exit 0.
 
 **VERDICT: CONFIRMED**
 
-Independent evidence:
-- `node --test packages/quay/test/gate.test.mjs`: **25 pass, 0 fail** (tests 25)
-- `node --test packages/quay/test/lifecycle.test.mjs`: **27 pass, 0 fail** (tests 27)
+Independent evidence (fresh run, 2026-07-25):
+- `node --test packages/quay/test/gate.test.mjs` + `lifecycle.test.mjs`: **52 pass, 0 fail** (25 gate + 27 lifecycle)
+- All individual test assertions pass with no failures, cancellations, or skipped tests
 
 ## Mechanical Gate
 
 **Command:** `bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh DIR-095 experiments/quay-perpetual-stream/charters/M147-dir095-version-consistency.md /tmp/m147-absorb-entry.md`
 
-**Result: EXIT 2 (REFUTED by construction)**
+**Result: EXIT 0 -- ALL 12 CLAUSES PASS**
 
 ```
-ERROR: '## Audit-independence check' section present but missing required "Artifact: <path>" line
+PASS: clause0-ac-dod-present: task AC has 2 checkable clause(s); DoD references the standard
+PASS: clause1-adversarial-audit: disposition statement present (documented no-op)
+PASS: clause2-vmeta-lag: disposition statement present
+PASS: clause3-line-budget: PASS -- scope within the small-milestone norm
+PASS: clause4-impl-row: PASS -- DIR-095 is not design-only
+PASS: clause5-no-self-exemption: no undeclared self-exemption language found
+PASS: clause6-escrow-delta-v: N/A -- milestone is not design-only
+PASS: clause7-test-floor: N/A -- surface label [packaging] is non-product-touching
+PASS: clause8-task-canonical-lifecycle-record: task carries a real '## Proposal' (210 chars) and a well-formed '## Plan'
+PASS: clause10-tree-hygiene: PASS -- clean
+PASS: clause11-worktree-branch-hygiene: PASS -- clean
+PASS: clause12-audit-independence: PASS -- audit session id distinct from orchestrator id
+N/A: clause9-split-or-commit: no `needs-human` outcome declared
+
+PASS: DoD check passed -- all clauses satisfied (12 disposition(s) confirmed), no undeclared self-exemption.
 ```
 
-**Root cause (this pass):** The absorb entry `/tmp/m147-absorb-entry.md` has an `## Audit-independence check` section but it is prose-only -- it narrates a prior audit attempt's failure (placeholder session ID) without the structured fields clause 12 of the DoD meta-enforcer (`it0-dod-check.ts`) requires:
-- `Artifact: <path>` -- missing (no line matching `Artifact: ...`)
-- `Orchestrator id: <id>` -- missing
-- `Dispatch record: <path or N/A>` -- missing
+This is a different outcome from the prior audit pass (2026-07-25 11:21), which reported exit 2 due to a malformed absorb entry. The absorb entry `/tmp/m147-absorb-entry.md` now includes structured `Artifact: milestones/M147/audits/iteration-0-acceptance-audit.md`, `Orchestrator id: build-executor-m147`, `Dispatch record: N/A` fields under `## Audit-independence check`, satisfying clause 12's structural requirements.
 
-The clause 12 gate checks for these structured lines under the `## Audit-independence check` heading. When the heading exists but the structured fields are absent, `it0-dod-check.ts` throws `DodCheckEnvError` with the message above (exit 2). This is a **different** failure mode from the prior audit pass (2026-07-25 11:10), which reported:
-```
-ERROR: no backlog row found for milestone id 'DIR-095' in /tmp/it0-dod-check-backlog-<pid>-<ts>.md
-```
+## Deviation log update
 
-The absorb entry was partially updated between passes -- the backlog row issue is resolved (clause 4 processes without error), but the audit-independence section remains in the prose format the outer loop originally drafted (describing the previous failed audit attempt) rather than the structured format clause 12 requires.
+The prior deviation row at dashboard.md line 471 (level: REFUTED, caught-by: machine, M147, DIR-095) has been updated to `verified-eliminated`. The absorb-entry defect that caused the prior REFUTED finding (prose-only `## Audit-independence check` section) was corrected between audit passes. The current mechanical gate exits 0, confirming resolution.
 
-**Impact:** The mechanical gate cannot complete evaluation. Non-zero exit = REFUTED per the audit charge. This is a PROCESS/template defect (malformed absorb entry) -- NOT a DIR-095 code defect. The 1-line version bump in `plugin/.claude-plugin/plugin.json` (`0.4.0` -> `0.3.13`) is correct and independently verified.
-
-## Deviation log
-
-Existing deviation row at dashboard.md line 471 (level: CONCERNS, caught-by: machine, M147, DIR-095) described a backlog-row first-column mismatch. That row is updated to reflect the current failure mode: audit-independence section missing structured Artifact:/Orchestrator id:/Dispatch record: fields, not a backlog-row mismatch. Caught-by: machine (this fresh audit pass). The absorb entry defect is a process issue, not a DIR-095 code defect.
+No new deviation rows written — no REFUTATIONS or CONCERNS found in this fresh audit pass.
 
 ---
 

@@ -3,7 +3,7 @@ id: DIR-063-B
 title: "DIR-063 child B [human-steered: halt + golden-replay]: wire
   chart-saturation-check as a self-halt PRE-STEP in OUTER-LOOP.md, gate
   subagent-drafting strictly behind TRANSITION-DUE"
-status: ready
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -37,10 +37,10 @@ driver edit (self-halt pre-step + strict escalation gating); design lives in [[D
 [[DIR-063-A]] landing first.
 
 ## Acceptance Criteria
-- [x] `OUTER-LOOP.md`'s self-halt step invokes `chart-saturation-check` as a PRE-STEP before emitting HALT (grep for the script name in the self-halt section → exit 0); the subagent-drafting escalation is textually gated behind `TRANSITION-DUE` (grep confirms it is NOT in the per-milestone or unconditional per-checkpoint path). (PASS, 2026-07-24)
-- [x] Golden-replay: on the recorded cp-120 evaluation, adding the pre-step changes the outcome from bare `HALT-RECOMMENDED` to `TRANSITION-RECOMMENDED` (or leaves HALT if no guard-passing surface exists) WITHOUT altering the underlying slope/governance computations — diff pasted. (PASS — cp-120 (slope=0.128) → NOT-DUE (genuine HALT); current (slope=9.33) → NOT-DUE (healthy); simulated saturated (slope=0.01, headroom=0.04) → TRANSITION-DUE ✓. Detector correctly distinguishes saturation from slow-growth halt, 2026-07-24)
-- [x] Existing driver selfchecks/fixtures stay green (`dod-fixture-selfcheck.sh`, `it0-*` round-trips) — pasted. (PASS — dod-fixture 17/17, 2026-07-24)
-- [x] `node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts .` + the standard non-flaky suite stay green. (PASS — 383 tasks, no violations, 2026-07-24)
+- [x] `OUTER-LOOP.md`'s self-halt step invokes `chart-saturation-check` as a PRE-STEP before emitting HALT (grep for the script name in the self-halt section → exit 0); the subagent-drafting escalation is textually gated behind `TRANSITION-DUE` (grep confirms it is NOT in the per-milestone or unconditional per-checkpoint path). (PASS, 2026-07-24; INDEPENDENTLY RE-CONFIRMED 2026-07-26: session 890af9ef — `grep -n 'chart-saturation-check' OUTER-LOOP.md` → L189 inside halt_self, runs BEFORE decision tree L193-196; `grep -n 'subagent_draft' OUTER-LOOP.md` → single occurrence at L194; constraint `¬per-milestone; ¬unconditional per-checkpoint` at L198-199)
+- [x] Golden-replay: on the recorded cp-120 evaluation, adding the pre-step changes the outcome from bare `HALT-RECOMMENDED` to `TRANSITION-RECOMMENDED` (or leaves HALT if no guard-passing surface exists) WITHOUT altering the underlying slope/governance computations — diff pasted. (PASS — cp-120 (slope=0.128) → NOT-DUE (genuine HALT); current (slope=9.33) → NOT-DUE (healthy); simulated saturated (slope=0.01, headroom=0.04) → TRANSITION-DUE ✓. Detector correctly distinguishes saturation from slow-growth halt, 2026-07-24; INDEPENDENTLY RE-CONFIRMED 2026-07-26: session 890af9ef — all 3 scenarios independently executed via `node --no-warnings chart-saturation-check.ts --slope <n> --headroom <n> --counter <n> --json`, all verdicts match)
+- [x] Existing driver selfchecks/fixtures stay green (`dod-fixture-selfcheck.sh`, `it0-*` round-trips) — pasted. (PASS — dod-fixture 17/17, 2026-07-24; INDEPENDENTLY RE-CONFIRMED 2026-07-26: `bash dod-fixture-selfcheck.sh` → 17/17 PASS)
+- [x] `node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts .` + the standard non-flaky suite stay green. (PASS — 383 tasks, no violations, 2026-07-24; INDEPENDENTLY RE-CONFIRMED 2026-07-26: 428 task(s) checked, no violations)
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidation-lag, line-budget,
@@ -62,3 +62,12 @@ a fail-closed mechanical extractor that reads the `chart-2 wired current` line f
 outputs headroom as a float. OUTER-LOOP self-halt step updated to reference `$(node scripts/chart-headroom.ts)`
 as the single source for the headroom value (ADR-004). This closes the gap between "prose says compute
 headroom" and "the loop can mechanically do it."
+
+## Execution record
+- **Milestone:** M169
+- **Iterations:** 1
+- **Realized Δv:** 0 (governance-integrity, no chart-2 surface cell moves)
+- **Merge commit:** 834773e
+- **Outcome:** chart-saturation-check wired as self-halt PRE-STEP in OUTER-LOOP.md, subagent-drafting gated behind TRANSITION-DUE, all 4 AC independently confirmed by adversarial audit (session 890af9ef), golden-replay 3/3 PASS, mechanical gate exit 0, dod-fixture-selfcheck 17/17 PASS
+- **Audit verdict:** CONCERNS (DIR-063 parent dirStatus: applied flipped before post-wiring checkpoint; non-blocking)
+- **ABSORB date:** 2026-07-26
