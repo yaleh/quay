@@ -59,3 +59,7 @@ Per review of stale-todo backlog: the ToolSearch pre-fetch pattern remains load-
 (required before every deferred MCP tool call). Rather than a full ADR, document it in
 CLAUDE.md following the M148 precedent (Glob unavailability documented at lines 80-84).
 Scope: one paragraph in CLAUDE.md documenting the ToolSearch→deferred-tool dependency.
+
+## Touches
+
+- `CLAUDE.md`

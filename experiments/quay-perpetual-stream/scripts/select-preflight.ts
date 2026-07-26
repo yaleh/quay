@@ -9,6 +9,12 @@
 //   4. Extract autonomous-selectable milestone-candidates
 //   5. Schema check per candidate (task-schema.ts)
 //   6. Touches check per candidate (## Touches section presence)
+//   6b. Pre-charter orthogonality scan (DIR-113 item 3): pairwise checkTouchesPair over the
+//       shortlist's TASK-LEVEL Touches (manual first, auto-derived fallback via
+//       derive-touches-heuristic.ts) — BEFORE any charter-authoring fork is dispatched. Always
+//       logged, either "orthogonal pair found" or "no orthogonal pair found in top-N" — never
+//       silent (this is a scheduling-time HINT; anti-drift-touches-check.ts's PRE-MERGE gate is
+//       the untouched authority, per DIR-113 item 5).
 //   7. Output PreflightResult JSON
 //
 // Does NOT classify deliverable:yes|no — that is the ONE judgment step left to the workflow.
@@ -26,6 +32,8 @@ import { isDirectEntry } from "./gate-script-base.ts";
 import { checkTask } from "./task-schema.ts";
 import { classify, type ClassifyResult } from "./human-steered-classify.ts";
 import { loadRegistry, type Registry, DEFAULT_REGISTRY_PATH } from "./drivable-workspace-check.ts";
+import { parseTouches, checkTouchesPair, expandGlobs } from "./touches-orthogonality-check.ts";
+import { deriveTouches } from "./derive-touches-heuristic.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -49,12 +57,31 @@ export interface CadenceResult {
   lastExploreAt: number | null;
 }
 
+// DIR-113 item 3: one disjoint pair found by the pre-charter orthogonality scan.
+export interface OrthogonalPair {
+  a: string;
+  b: string;
+  reason: string;
+}
+
+// DIR-113 item 3: result of the pairwise pre-charter orthogonality scan over the shortlist.
+export interface OrthogonalScanResult {
+  checkedCount: number;
+  pairs: OrthogonalPair[];
+  // Human-readable log lines — ALWAYS non-empty (an explicit "no orthogonal pair found" line is
+  // emitted when pairs.length === 0, never silence). Printed by the CLI before/alongside the JSON
+  // payload so the record exists before any charter-authoring fork would be dispatched by a
+  // caller consuming this script's output.
+  log: string[];
+}
+
 export interface PreflightResult {
   halt: boolean;
   haltReason: string;
   pendingDirectives: string[];
   cadence: CadenceResult | null;
   candidates: CandidateEntry[];
+  orthogonalScan: OrthogonalScanResult;
   milestoneCounter: number;
   workspaceRoot: string;
 }
@@ -179,6 +206,86 @@ export function extractTouchedFiles(workspaceRoot: string, taskId: string): stri
   }
 }
 
+// ── getCandidateParsedTouches (DIR-113 item 3) ──────────────────────────────────────────────────
+// Task-level Touches for the pre-charter orthogonality scan: a DECLARED `## Touches` section wins
+// (manual, or a previously-backfilled auto-derived one — both render the same heading); absent
+// that, fall back to an EPHEMERAL auto-derivation via derive-touches-heuristic.ts (never written
+// back to the task file — a scheduling-time hint only). Absent both, conservative "none".
+export interface CandidateTouches {
+  hasSection: boolean;
+  globs: string[];
+  source: "declared" | "auto-derived" | "none";
+}
+
+export function getCandidateParsedTouches(workspaceRoot: string, taskId: string): CandidateTouches {
+  const taskFile = path.join(workspaceRoot, "tasks", `${taskId}.md`);
+  let text = "";
+  try {
+    text = fs.readFileSync(taskFile, "utf8");
+  } catch {
+    return { hasSection: false, globs: [], source: "none" };
+  }
+  const declared = parseTouches(text);
+  if (declared.hasSection && declared.globs.length > 0) {
+    return { hasSection: true, globs: declared.globs, source: "declared" };
+  }
+  try {
+    const { globs } = deriveTouches(text, workspaceRoot);
+    if (globs.length > 0) return { hasSection: true, globs, source: "auto-derived" };
+  } catch {
+    // Fall through to conservative "none" — an extraction error must never crash the scan.
+  }
+  return { hasSection: false, globs: [], source: "none" };
+}
+
+// ── scanOrthogonalPairs (DIR-113 item 3) ────────────────────────────────────────────────────────
+// Pairwise checkTouchesPair (single-source, ADR-004, imported from touches-orthogonality-check.ts)
+// over the top-N ranked candidates' task-level Touches — run BEFORE any charter-authoring fork is
+// dispatched (this function's caller, select-preflight's CLI/buildPreflightResult, always runs
+// ahead of charter authoring in the OUTER-LOOP pipeline). Always returns a non-empty `log`: either
+// >=1 "ORTHOGONAL PAIR FOUND" line, or one explicit "NO ORTHOGONAL PAIR" line — never silent.
+export function scanOrthogonalPairs(
+  workspaceRoot: string,
+  candidates: CandidateEntry[],
+  opts?: { topN?: number },
+): OrthogonalScanResult {
+  const topN = opts?.topN ?? 5;
+  const sorted = [...candidates].sort((a, b) => a.rank - b.rank).slice(0, topN);
+  const touchesById = new Map<string, CandidateTouches>();
+  for (const c of sorted) touchesById.set(c.id, getCandidateParsedTouches(workspaceRoot, c.id));
+
+  const expand = (globs: string[]) => expandGlobs(globs, workspaceRoot);
+  const pairs: OrthogonalPair[] = [];
+  const log: string[] = [];
+
+  for (let i = 0; i < sorted.length; i++) {
+    for (let j = i + 1; j < sorted.length; j++) {
+      const a = sorted[i];
+      const b = sorted[j];
+      const ta = touchesById.get(a.id)!;
+      const tb = touchesById.get(b.id)!;
+      const r = checkTouchesPair(
+        { hasSection: ta.hasSection, globs: ta.globs },
+        { hasSection: tb.hasSection, globs: tb.globs },
+        expand,
+      );
+      if (r.disjoint) {
+        pairs.push({ a: a.id, b: b.id, reason: r.reason });
+        log.push(`ORTHOGONAL PAIR FOUND: ${a.id} (${ta.source}) ∥ ${b.id} (${tb.source}) — ${r.reason}`);
+      }
+    }
+  }
+
+  if (pairs.length === 0) {
+    const detail = sorted.map((c) => `${c.id}:${touchesById.get(c.id)!.source}`).join(", ") || "no candidates";
+    log.push(
+      `NO ORTHOGONAL PAIR: checked ${sorted.length} candidate(s) in top-${topN} (${detail}) — no touches-disjoint pair found; batching deferred, candidates remain serial for this cycle`,
+    );
+  }
+
+  return { checkedCount: sorted.length, pairs, log };
+}
+
 // ── classifyCandidate ────────────────────────────────────────────────────────────────────────────
 // Run human-steered-classify on a candidate task using its Touches section and extra fields.
 // Returns ClassifyResult with additional detail for reporting.
@@ -262,6 +369,7 @@ export function buildPreflightResult(workspaceRoot: string, milestoneCounter: nu
       pendingDirectives: [],
       cadence: null,
       candidates: [],
+      orthogonalScan: { checkedCount: 0, pairs: [], log: ["SKIPPED: could not read task store — no candidates to scan"] },
       milestoneCounter,
       workspaceRoot,
     };
@@ -309,12 +417,16 @@ export function buildPreflightResult(workspaceRoot: string, milestoneCounter: nu
   // Filter out human-steered candidates (they must not be selected autonomously)
   const autonomousCandidates = candidates.filter((c) => !c.humanSteered);
 
+  // 9. Pre-charter orthogonality scan (DIR-113 item 3) — BEFORE any charter-authoring fork.
+  const orthogonalScan = scanOrthogonalPairs(workspaceRoot, autonomousCandidates);
+
   return {
     halt: haltCheck.halt,
     haltReason: haltCheck.reason,
     pendingDirectives,
     cadence,
     candidates: autonomousCandidates,
+    orthogonalScan,
     milestoneCounter,
     workspaceRoot,
   };
@@ -444,6 +556,105 @@ export function selftest(): boolean {
     fs.rmSync(tmpDir3, { recursive: true, force: true });
   }
 
+  // ── getCandidateParsedTouches / scanOrthogonalPairs (DIR-113 item 3) ──
+  const tmpDir4 = fs.mkdtempSync("select-preflight-selftest-orthoscan-");
+  try {
+    const tasksDir3 = path.join(tmpDir4, "tasks");
+    fs.mkdirSync(tasksDir3, { recursive: true });
+
+    // DECLARED Touches wins over auto-derivation.
+    fs.writeFileSync(
+      path.join(tasksDir3, "DECLARED.md"),
+      "## Requested action\nUpdate `some/other/mentioned.ts`.\n\n## Touches\n\n- `packages/quay/src/a.ts`\n",
+      "utf8",
+    );
+    const declared = getCandidateParsedTouches(tmpDir4, "DECLARED");
+    check(
+      "parsed-touches-declared-wins",
+      declared.source === "declared" && declared.hasSection === true && declared.globs.includes("packages/quay/src/a.ts") && !declared.globs.includes("some/other/mentioned.ts"),
+      JSON.stringify(declared),
+    );
+
+    // NO Touches section, but the body names a resolvable file in the SAME scratch tree (both the
+    // task file and the target live under tmpDir4, matching how getCandidateParsedTouches always
+    // resolves bare filenames against `workspaceRoot`) → auto-derived fallback fires.
+    fs.mkdirSync(path.join(tmpDir4, "src"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir4, "src", "widget.ts"), "x");
+    fs.writeFileSync(
+      path.join(tasksDir3, "NO-DECLARED.md"),
+      "## Requested action\nUpdate `widget.ts`.\n",
+      "utf8",
+    );
+    const autoDerived = getCandidateParsedTouches(tmpDir4, "NO-DECLARED");
+    check(
+      "parsed-touches-auto-derived-fallback",
+      autoDerived.source === "auto-derived" && autoDerived.hasSection === true && autoDerived.globs.includes("src/widget.ts"),
+      JSON.stringify(autoDerived),
+    );
+
+    // NO Touches, and nothing in the body resolves → conservative "none".
+    fs.writeFileSync(path.join(tasksDir3, "NEITHER.md"), "## Requested action\nDo the thing (no file mentions).\n", "utf8");
+    const neither = getCandidateParsedTouches(tmpDir4, "NEITHER");
+    check("parsed-touches-none-when-nothing-resolves", neither.source === "none" && neither.hasSection === false, JSON.stringify(neither));
+
+    // Missing task file → conservative "none", never throws.
+    const missing = getCandidateParsedTouches(tmpDir4, "DOES-NOT-EXIST");
+    check("parsed-touches-missing-file-is-none", missing.source === "none" && missing.globs.length === 0, JSON.stringify(missing));
+
+    // ── scanOrthogonalPairs ──
+    fs.writeFileSync(
+      path.join(tasksDir3, "ORTHO-A.md"),
+      "## Touches\n\n- `packages/quay/src/gate/a.ts`\n",
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(tasksDir3, "ORTHO-B.md"),
+      "## Touches\n\n- `packages/quay-native/src/b.ts`\n",
+      "utf8",
+    );
+    fs.mkdirSync(path.join(tmpDir4, "packages", "quay", "src", "gate"), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir4, "packages", "quay-native", "src"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir4, "packages", "quay", "src", "gate", "a.ts"), "x");
+    fs.writeFileSync(path.join(tmpDir4, "packages", "quay-native", "src", "b.ts"), "x");
+
+    const orthoCandidates: CandidateEntry[] = [
+      { id: "ORTHO-A", title: "A", rank: 1, labels: [], extra: {}, schemaPass: true, schemaDetail: "", hasTouches: true, humanSteered: false, classifyDetail: "" },
+      { id: "ORTHO-B", title: "B", rank: 2, labels: [], extra: {}, schemaPass: true, schemaDetail: "", hasTouches: true, humanSteered: false, classifyDetail: "" },
+    ];
+    const scanFound = scanOrthogonalPairs(tmpDir4, orthoCandidates);
+    check(
+      "scan-finds-orthogonal-pair",
+      scanFound.pairs.length === 1 && scanFound.pairs[0].a === "ORTHO-A" && scanFound.pairs[0].b === "ORTHO-B",
+      JSON.stringify(scanFound),
+    );
+    check("scan-log-non-empty-on-found", scanFound.log.length >= 1 && /ORTHOGONAL PAIR FOUND/.test(scanFound.log[0]), scanFound.log.join(" | "));
+
+    // Overlapping candidates → NO orthogonal pair, but log is still non-empty and explicit.
+    fs.writeFileSync(
+      path.join(tasksDir3, "OVERLAP-A.md"),
+      "## Touches\n\n- `packages/quay/src/gate/a.ts`\n",
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(tasksDir3, "OVERLAP-B.md"),
+      "## Touches\n\n- `packages/quay/src/gate/a.ts`\n",
+      "utf8",
+    );
+    const overlapCandidates: CandidateEntry[] = [
+      { id: "OVERLAP-A", title: "A", rank: 1, labels: [], extra: {}, schemaPass: true, schemaDetail: "", hasTouches: true, humanSteered: false, classifyDetail: "" },
+      { id: "OVERLAP-B", title: "B", rank: 2, labels: [], extra: {}, schemaPass: true, schemaDetail: "", hasTouches: true, humanSteered: false, classifyDetail: "" },
+    ];
+    const scanNone = scanOrthogonalPairs(tmpDir4, overlapCandidates);
+    check("scan-no-pair-when-overlapping", scanNone.pairs.length === 0, JSON.stringify(scanNone));
+    check("scan-log-explicit-on-none-found", scanNone.log.length >= 1 && /NO ORTHOGONAL PAIR/.test(scanNone.log[0]), scanNone.log.join(" | "));
+
+    // Empty candidate list → still produces an explicit non-silent log line.
+    const scanEmpty = scanOrthogonalPairs(tmpDir4, []);
+    check("scan-log-explicit-on-empty-candidates", scanEmpty.log.length >= 1 && /NO ORTHOGONAL PAIR/.test(scanEmpty.log[0]), scanEmpty.log.join(" | "));
+  } finally {
+    fs.rmSync(tmpDir4, { recursive: true, force: true });
+  }
+
   // ── buildPreflightResult integration (without quay CLI) ──
   // We test component functions individually since integration needs a real workspace.
 
@@ -490,6 +701,13 @@ function main(argv: string[]): number {
   if (!jsonOut) usage();
 
   const result = buildPreflightResult(workspaceRoot, milestoneCounter);
+  // DIR-113 item 3: emit the pre-charter orthogonality scan's log to stderr EXPLICITLY, in
+  // addition to it being part of the JSON payload below — this is the record that must exist
+  // before any charter-authoring fork gets dispatched, so it must not depend on a caller
+  // remembering to parse the JSON for it.
+  for (const line of result.orthogonalScan.log) {
+    console.error(`[select-preflight] ${line}`);
+  }
   console.log(JSON.stringify(result, null, 2));
   return 0;
 }
