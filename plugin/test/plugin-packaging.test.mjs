@@ -27,19 +27,29 @@ function readJson(p) {
   return JSON.parse(readFileSync(p, 'utf8'));
 }
 
-test('marketplace.json is valid JSON and lists the quay plugin pointing at ./plugin', () => {
+test('M172 (DIR-108): marketplace.json is valid JSON and lists the quay plugin pointing at the built dist-plugin branch', () => {
   const mp = readJson(path.join(repoRoot, '.claude-plugin', 'marketplace.json'));
   assert.equal(mp.name, 'quay');
   assert.ok(Array.isArray(mp.plugins) && mp.plugins.length >= 1);
   const entry = mp.plugins.find((p) => p.name === 'quay');
   assert.ok(entry, 'marketplace.json must list a plugin named "quay"');
-  assert.equal(entry.source, './plugin');
+  // DIR-108: source is no longer the in-repo './plugin' path (which has no build step) —
+  // it's a structured github source pinned to the CI-built orphan branch, so external
+  // installs always get a fresh, self-contained, Node-20-runnable bundle.
+  assert.equal(typeof entry.source, 'object', 'source must be a structured object, not a local path string');
+  assert.equal(entry.source.source, 'github');
+  assert.equal(entry.source.repo, 'yaleh/quay');
+  assert.equal(entry.source.ref, 'dist-plugin', 'source must pin the CI-published orphan branch');
 });
 
 test('plugin.json is valid JSON and declares the 7 bundled skills (M140: +routines)', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');
-  assert.equal(manifest.version, '0.4.0', 'version');
+  // Cross-check against packages/quay's version rather than a hardcoded literal (which is
+  // exactly what went stale here — DIR-108 wiring-audit finding): the actual source of truth
+  // is cross-artifact consistency, enforced repo-wide by scripts/version-consistency-check.ts.
+  const coreVersion = readJson(path.join(repoRoot, 'packages', 'quay', 'package.json')).version;
+  assert.equal(manifest.version, coreVersion, 'plugin.json version must match packages/quay/package.json (version-consistency-check.ts)');
   assert.ok(Array.isArray(manifest.commands));
   const wanted = [
     './skills/author/SKILL.md',
@@ -494,9 +504,15 @@ test('M143: git-tracked workflows in plugin/workflows/ are byte-identical to .cl
 // ---------------------------------------------------------------------------
 // M120 (DIR-060) — the vendored Core copy is a bundled ESM dist/quay.js that
 // runs on the declared Node-20 floor, NOT the M116 .ts entrypoint (Node >=23).
-// The vendor tree is git-trackable (the bare `dist/` .gitignore pattern is
-// negated for this path), the raw bin/src copies and package-lock.json are
-// gone, and package.json is slimmed (the bundle has no external runtime deps).
+// The raw bin/src copies and package-lock.json are gone, and package.json is
+// slimmed (the bundle has no external runtime deps).
+// UPDATED at M172 (DIR-108): the bundle is NO LONGER git-trackable. It used to
+// be a negated exception to the bare `dist/` .gitignore rule (a committed
+// artifact that silently went stale); DIR-108 removed that exception. The
+// bundle is now built by `sync-vendor.sh` (wired into root `postinstall` and
+// CI's `publish-plugin-dist.yml` → the `dist-plugin` orphan branch) and is
+// gitignored locally — present as an untracked build artifact, not a
+// committed file. See M172 charter / tasks/DIR-108.md.
 // ---------------------------------------------------------------------------
 
 const vendorDir = path.join(pluginDir, 'vendor', 'quay');
@@ -507,19 +523,30 @@ test('M120: .mcp.json invokes the bundled vendor/quay/dist/quay.js, never a .ts 
   assert.doesNotMatch(mcp.quay.args[0], /\.ts$/, 'the vendor entrypoint must not be a native .ts file');
 });
 
-test('M120: the vendored dist bundle exists, is git-trackable, and carries the createRequire banner', () => {
+test('M172 (DIR-108): the vendored dist bundle is a gitignored local build artifact (not git-tracked), and carries the createRequire banner', () => {
   const distBundle = path.join(vendorDir, 'dist', 'quay.js');
-  assert.ok(existsSync(distBundle), `vendored bundle missing: ${distBundle}`);
-  // git-trackable: the bare `dist/` ignore pattern must be negated for this
-  // path. `git check-ignore` exits 0 (prints the path) when IGNORED, exits 1
-  // (throws here) when NOT ignored — the state we require after the fix.
+  // Regenerate via the same mechanism postinstall/CI use, in case this file is
+  // run standalone before any install step has produced the local artifact.
+  if (!existsSync(distBundle)) {
+    execFileSync('bash', [path.join(pluginDir, 'scripts', 'sync-vendor.sh')], { cwd: repoRoot, stdio: 'pipe' });
+  }
+  assert.ok(existsSync(distBundle), `vendored bundle missing and sync-vendor.sh did not produce it: ${distBundle}`);
+  // DIR-108: the bare `dist/` ignore pattern is no longer negated for this path —
+  // `git check-ignore` must exit 0 (IGNORED). It threw NOT-ignored before the fix.
   let ignored = '';
   try {
     ignored = execFileSync('git', ['check-ignore', distBundle], { cwd: repoRoot, encoding: 'utf8' }).trim();
   } catch {
     ignored = '';
   }
-  assert.equal(ignored, '', 'vendor/quay/dist/quay.js must NOT be gitignored');
+  assert.equal(ignored, distBundle, 'vendor/quay/dist/quay.js must be gitignored (DIR-108: no longer a committed exception)');
+  let tracked = true;
+  try {
+    execFileSync('git', ['ls-files', '--error-unmatch', distBundle], { cwd: repoRoot, stdio: 'pipe' });
+  } catch {
+    tracked = false;
+  }
+  assert.equal(tracked, false, 'vendor/quay/dist/quay.js must NOT be git-tracked');
   const src = readFileSync(distBundle, 'utf8');
   assert.match(src, /createRequire/, 'the vendored bundle must be the ESM build (createRequire banner present)');
 });

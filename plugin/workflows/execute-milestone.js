@@ -54,7 +54,7 @@ const MECH_SCHEMA = { type: 'object', required: ['check', 'ok'], properties: {
 // Cache-hit entries are null and filtered out before parallel dispatch.
 const _dispatchList = [
   !_cachedCeiling      ? () => agent(
-    `Run: bash experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone ${_milestone} ${args.charterFile}. Non-zero=NOT-FOUND scope IDs; zero=all IDs found/CLOSED/vacuously none. Return {check:"ceiling-check",ok:<exit===0>,detail:"<stdout last 2000 chars>",source:"script"}.`,
+    `FIRST extract gap-XXX-style IDs from the charter's ## Scope and ## Done-when sections (e.g. UQ-042). Skip IDs in the **Task:** header. Skip DIR-NNN IDs entirely — directives are TASK-CANONICAL (DIR-028: the single source of truth is tasks/DIR-NNN.md's own status/dirStatus field, already verified when the charter was authored), not tracked in experiments/quay-continuous-bootstrap/gap-list.md, so it0-ceiling-check.sh (which only greps that legacy gap-list) cannot resolve them and a DIR-NNN citation must never be passed to it. If NO gap-XXX IDs found (directive-only or gap-list-irrelevant charter): return {check:"ceiling-check",ok:true,detail:"vacuous — no gap-list IDs in charter Scope/Done-when (DIR-NNN citations, if any, are TASK-CANONICAL and out of this check's scope)",source:"script"}. If gap-XXX IDs found: run bash experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone ${_milestone} <id1> <id2> ... and return {check:"ceiling-check",ok:<exit===0>,detail:"<stdout last 2000 chars>",source:"script"}.`,
     { label: 'ceiling-check', schema: MECH_SCHEMA }
   ) : null,
   !_cachedGateHash      ? () => agent(
@@ -138,6 +138,13 @@ Absorb entry path: ${args.absorbEntryFile}
    - Edit/create files as needed
    - Run tests to verify
    - Record what was done
+
+   TIMEOUT DISCIPLINE (DIR-090): when using the Bash tool to run long-running commands:
+   npm install, npm test, npm ci, node --test, npx, git clone, git fetch
+   — you MUST pass timeout: 300000 (5 minutes) or higher. The Bash tool's default
+   is 120s which is insufficient. If a test suite or install takes longer than 5m,
+   raise the timeout further. Never run these commands with the Bash tool's implicit
+   default timeout.
 
 4. EVIDENCE: Write iteration report to milestones/M<NN>/iterations/iteration-0.md (extract milestone number from charter path).
 
@@ -251,41 +258,43 @@ const IS_CONCURRENT = args.mode === 'concurrent'
 if (IS_CONCURRENT) {
   const concurrentResult = await agent(
     `LAND (concurrent mode) the milestone for task ${args.taskId}. IN CONCURRENT MODE:
-   you are part of a multi-milestone batch — do NOT merge to master, do NOT update
-   milestone_counter or dashboard.md (those writes are deferred to the serial fan-in
-   absorb step that follows).
+   you are part of a multi-milestone batch — do NOT update milestone_counter or dashboard.md
+   (those writes are deferred to the serial fan-in absorb step that follows).
 
-1. COMMIT the build in its OWN worktree branch. Do NOT merge to master — the fan-in step
-   is the sole merge owner (DIR-107 Fix 1). Do NOT prune the branch — pruning happens at
-   fan-in after a successful serial merge.
-2. CAPTURE the worktree branch name: run \`git branch --show-current\` and save it as
-   buildBranch. This is the branch the fan-in will merge.
-3. COMPUTE touchedFiles: run \`git diff --numstat origin/master..HEAD\` to get the actual
-   files touched by this build (diff against origin/master, not the build's own base).
-   Collect the changed file paths (column 3 of numstat output) into a flat array.
-4. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${args.taskId}.md
+1. MERGE the iteration worktree into master (DIR-027: loop runs on master directly).
+   Any conflict → per-file resolution, both sides read, reconciliation note recorded.
+   Never a blanket --ours/--theirs (DIR-013).
+2. CAPTURE then PRUNE (DIR-033): if a non-primary iteration produced evidence not on
+   master, cherry-pick JUST that evidence file. Then git worktree remove + git branch -d
+   the now-merged branches.
+3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${args.taskId}.md
    appending a ## Execution record section (milestone id, iteration count, realized Δv,
-   commit SHA, one-line outcome summary) and setting status: done.
+   merge commit SHA, one-line outcome summary) and setting status: done.
+4. COMPUTE touchedFiles: run \`git diff --numstat <merge-base>..<build-branch>\` to get the
+   actual files touched by this build. The merge-base is \`git merge-base origin/master HEAD\`
+   or the commit recorded in the build result (${
+     buildResult?.mergeCommit ? buildResult.mergeCommit : 'from Build phase'
+   }). Collect the changed file paths (column 3 of numstat output) into a flat array.
 5. DRAFT a one-line dashboard entry for this milestone: "m<NN> · ${args.taskId} · Δv=<realized> ·
-   audit=${auditResult?.verdict || 'NO REFUTATION FOUND'} · → milestones/<NN>/"
+   audit=${auditResult?.verdict || 'NO REFUTATION FOUND'} · merge=<SHORT sha> · → milestones/<NN>/"
 
 Charter: ${args.charterFile}
 Build outcome: ${JSON.stringify(buildResult)}
 Audit verdict: ${auditResult?.verdict}
 
-Return {taskId: "${args.taskId}", outcome: "done", buildBranch: "<git branch name>",
+Return {taskId: "${args.taskId}", outcome: "done", mergeCommit: "<40-char SHA>",
   touchedFiles: ["relative/path/to/file1.ts", ...],
   dashboardEntry: "<markdown block for serial-fanin-absorb.ts>"}.`,
     { phase: 'Land',
-      schema: { type: 'object', required: ['outcome', 'buildBranch', 'touchedFiles', 'dashboardEntry'], properties: {
+      schema: { type: 'object', required: ['outcome', 'mergeCommit', 'touchedFiles', 'dashboardEntry'], properties: {
         taskId: { type: 'string' }, outcome: { type: 'string' },
-        buildBranch: { type: 'string' },
+        mergeCommit: { type: 'string' },
         touchedFiles: { type: 'array', items: { type: 'string' } },
         dashboardEntry: { type: 'string' },
       } } }
   )
-  log(`Land phase complete (concurrent) — milestone ${args.taskId} done, branch ${concurrentResult?.buildBranch}, touched ${(concurrentResult?.touchedFiles || []).length} files.`)
-  return { outcome: 'done', taskId: args.taskId, buildBranch: concurrentResult?.buildBranch,
+  log(`Land phase complete (concurrent) — milestone ${args.taskId} done, touched ${(concurrentResult?.touchedFiles || []).length} files.`)
+  return { outcome: 'done', taskId: args.taskId, mergeCommit: concurrentResult?.mergeCommit,
     touchedFiles: concurrentResult?.touchedFiles, dashboardEntry: concurrentResult?.dashboardEntry, verifyCacheUpdates }
 }
 

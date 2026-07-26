@@ -36,7 +36,7 @@ jobs:
         # MUTATING writes (title/labels/parent edits to real yaleh/quay
         # issues gh-11/gh-3) that need broader org perms than the default
         # read-only github.token — not previously documented in CLAUDE.md.
-        run: node --test $(ls packages/*/test/*.test.mjs | grep -vE 'serve-github|provider-abi-conformance|cli-edit-parity-conformance')
+        run: node --test $(ls packages/*/test/*.test.mjs plugin/test/*.test.mjs | grep -vE 'serve-github|provider-abi-conformance|cli-edit-parity-conformance')
         env:
           GH_TOKEN: ${{ github.token }}
 
