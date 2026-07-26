@@ -1,13 +1,14 @@
 ---
 id: gap-composePayload-null-payload
 title: action.ts composePayload crashes on action_button with undefined payload
-status: todo
+status: done
 role: primitive
 labels:
   - gap
   - routine-filed
   - milestone-candidate
   - self-validation
+  - milestone:M163
 extra:
   schema: v1
   acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh gap-composePayload-null-payload experiments/quay-perpetual-stream/charters/M163-gap-compose-payload.md /tmp/m163-absorb-entry.md
@@ -53,17 +54,25 @@ This matches the existing defensive pattern already used in the `acceptance` gat
 
 ## Acceptance Criteria
 
-- [x] `composePayload` throws a clear error when `button.payload` is missing/undefined/empty
-- [x] Existing tests (`action-mock-delivery.test.mjs`, `serve-action-delivery.test.mjs`) continue to pass
-- [x] Test added for the missing-payload edge case
+- [x] `composePayload` throws a clear error when `button.payload` is missing/undefined/empty -- CONFIRMED: guard at action.ts:36-38 (`typeof !== 'string' || trim() === ''`), 4 edge-case tests pass (undefined/null/empty/whitespace), error message names button id and says "no payload" (audit sxn 28186b2d)
+- [x] Existing tests (`action-mock-delivery.test.mjs`, `serve-action-delivery.test.mjs`) continue to pass -- CONFIRMED: action-mock-delivery exit 0 (27 assertions PASS), serve-action-delivery exit 0 (21 assertions PASS, 1 expected skip) (audit sxn 28186b2d)
+- [x] Test added for the missing-payload edge case -- CONFIRMED: action-mock-delivery.test.mjs L159-265 adds 5 tests (undefined/null/empty/whitespace + valid regression guard), all pass (audit sxn 28186b2d)
 
 ## Definition of Done
 
-- [x] Guard added at `action.ts:37`
-- [x] Test added in `action-mock-delivery.test.mjs`
-- [x] Full test suite passes: `node --test packages/quay/test/action-mock-delivery.test.mjs`
-- [x] Standard DoD per inherited-core.md: AC-implementation-test-coverage (three clauses met — guard implemented, tests added, existing tests verified green)
+- [x] Guard added at `action.ts:37` -- CONFIRMED: action.ts:36-38, matches Plan (audit sxn 28186b2d)
+- [x] Test added in `action-mock-delivery.test.mjs` -- CONFIRMED: L159-265, 5 edge-case tests covering all code paths (audit sxn 28186b2d)
+- [x] Full test suite passes: `node --test packages/quay/test/action-mock-delivery.test.mjs` -- CONFIRMED: exit 0, 27/27 PASS (audit sxn 28186b2d)
+- [x] Standard DoD per inherited-core.md: AC-implementation-test-coverage (three clauses met — guard implemented, tests added, existing tests verified green) -- CONFIRMED: all three clauses independently verified, both test suites exit 0 (audit sxn 28186b2d)
 
 
 ## Touches
 - packages/quay/src/action.ts
+
+## Execution record
+
+- **Milestone:** M163
+- **Iteration count:** 0 (direct commit)
+- **Realized Δv:** 0
+- **Merge commit:** 94ed926
+- **Outcome:** done — null/empty guard in composePayload prevents crash on undefined/null/empty/whitespace payload; 5 edge-case tests added; both test suites pass; mechanical gate exit 0
