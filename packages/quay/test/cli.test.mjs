@@ -508,11 +508,23 @@ async function main() {
       { cwd: serveWorkspaceRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
     );
     let stdout = "";
+    let stderr = "";
     child.stdout.on("data", (c) => (stdout += c));
+    child.stderr.on("data", (c) => (stderr += c));
     try {
       // Poll for the server to come up (real subprocess start-up latency).
+      // 30s budget (300 * 100ms): a real `node bin/quay.ts serve` cold start
+      // (module resolution + TS strip-types + provider MCP handshake) can
+      // exceed the previous 5s budget under CPU contention from concurrently
+      // -scheduled test files (this repo's default `scripts/test.sh` run
+      // uses --test-concurrency=8) or a slower CI runner -- a fixed 5s
+      // window made this assertion flaky (CI run 30204233175, 2026-07-26)
+      // even though the server does come up, just not within 5s. This is a
+      // "does it eventually become reachable" check, not a startup-speed
+      // benchmark, so widening the budget doesn't weaken what the test
+      // proves.
       let up = false;
-      for (let i = 0; i < 50 && !up; i++) {
+      for (let i = 0; i < 300 && !up; i++) {
         await new Promise((r) => setTimeout(r, 100));
         try {
           const res = await new Promise((resolve, reject) => {
@@ -523,7 +535,7 @@ async function main() {
           // not up yet
         }
       }
-      assert(up, "quay serve --port <n>, spawned as a real subprocess, becomes reachable on the exact port passed on the command line (proves the argv.slice(3) re-parse works, not the 4173 default)");
+      assert(up, `quay serve --port <n>, spawned as a real subprocess, becomes reachable on the exact port passed on the command line (proves the argv.slice(3) re-parse works, not the 4173 default)${up ? "" : ` -- stdout: ${JSON.stringify(stdout.slice(0, 500))}, stderr: ${JSON.stringify(stderr.slice(0, 500))}, exitCode: ${child.exitCode}`}`);
       if (up) {
         const body = await new Promise((resolve, reject) => {
           http.get({ host: "127.0.0.1", port, path: "/" }, (res) => {
