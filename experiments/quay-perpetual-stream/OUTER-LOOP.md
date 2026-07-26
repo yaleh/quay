@@ -66,7 +66,10 @@ charter(t) = write("charters/M<NN>-<slug>.md", {gate, scope, done_when, inner_te
 batch_assemble :: Candidate[] → {batch: Candidate[], deferred: Deferred[]}
 batch_assemble(ranked) =
   a. charter_readiness(c): ensure type: + ## Touches on each candidate (fail-closed: missing → deferred)
-  b. run("node experiments/quay-perpetual-stream/scripts/concurrent-batch-scheduler.ts --root . <charters>")
+  b. run("node plugin/scripts/concurrent-batch-scheduler.ts --root . <charters>")
+     — use plugin/ path (NOT experiments/ symlink): the isDirect guard in these scripts compares
+     process.argv[1] against fileURLToPath(import.meta.url); symlink paths never match, causing
+     silent no-op (DIR-106 audit finding — pre-existing, now fixed)
      — single-source batch scheduler (ADR-004); imports disjointness from touches-orthogonality-check.ts
   c. BATCH set (concurrent dispatch via step 4b) || deferred candidates → remain in pool
   ⊨ learning-type → always serial (scheduler defers via isLearning() guard)
