@@ -47,6 +47,7 @@ test("REGRESSION GUARD: exports is unchanged — still ./src/*.ts, never repoint
     "./adr-store": "./src/adr-store.ts",
     "./document-store": "./src/document-store.ts",
     "./contract-validator": "./src/contract-validator.ts",
+    "./init": "./src/init.ts", // DIR-098: quay init command, added as a ./src/*.ts export (guard below unaffected)
   });
   for (const target of Object.values(pkg.exports)) {
     assert.match(target, /^\.\/src\/.*\.ts$/, `exports target ${target} must stay a ./src/*.ts path`);
