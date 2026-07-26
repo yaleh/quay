@@ -87,6 +87,23 @@ When a workflow Verify phase fails and the fix is to **external state** (gap-lis
 
 **Rule:** if the fix touches anything OTHER than the workflow script's own agent prompt strings, re-run the workflow from scratch (`Workflow({script: ...})` without `resumeFromRunId`). Resume is safe ONLY when the fix is a prompt-text edit within the workflow script itself.
 
+**Extension (M176, 2026-07-26, gap-workflow-name-dispatch-stale-script-cache):** the same staleness
+class also hits plain `Workflow({name: "<saved-workflow>"})` calls, with NO `resumeFromRunId`
+involved at all. Within one long-running session, a `name:`-based dispatch made AFTER the first
+`name:`-based dispatch of that same workflow can still materialize the **old** script body, even
+minutes after the underlying checked-in file (e.g. `.claude/workflows/execute-milestone.js`) was
+edited and committed to `master` in between — confirmed via `diff` against the materialized script
+under `~/.claude/projects/.../workflows/scripts/`. This is undocumented behavior (confirmed via
+Claude Code's own docs/changelog — no mention of `name:`-resolution caching), not a repo bug.
+
+**Rule:** in a session where a checked-in workflow script may have changed since the session
+started (e.g. this session is itself implementing/patching that very script), always dispatch it
+via `Workflow({scriptPath: "<absolute path to the real checked-in file>", ...})`, never
+`Workflow({name: ...})` — `scriptPath` reliably re-reads the current on-disk content;
+`name` may not. If the staleness is suspected but unconfirmed, diff the materialized script
+(printed in the tool result / notification) against the real checked-in file before trusting a run's
+outcome.
+
 ## Glob tool unavailable in subagent sessions (M148, 2026-07-25)
 
 The `Glob` tool is **not available in subagent sessions**. Calling `Glob` from a subagent produces "Error: No such tool available: Glob". This has been observed in meta-cc session history as a recurring error pattern.

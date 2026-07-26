@@ -49,28 +49,58 @@ simply never re-reads the fixed source. It's a distinct, separately-observed rel
 machinery has rough edges" theme surfaced this session), though both surfaced from the same
 DIR-114 verification effort.
 
+## Root-cause research (2026-07-26)
+
+Two independent research passes, both real (not speculation):
+
+1. **WebSearch** for public Claude Code documentation/changelog mentions of this behavior — found
+   nothing specific (only generic prompt-caching articles about the unrelated Anthropic API
+   prompt-cache TTL, not this tool's `name:`-resolution behavior).
+2. **`claude-code-guide` agent** (a subagent specifically resourced to answer Claude-Code-tooling
+   questions) independently checked Claude Code's own docs (`workflows.md`, `tools-reference.md`)
+   and changelog — confirmed: **zero documented mention of `name:`-based caching, memoization, or
+   mid-session script freshness** anywhere in official materials. The tools-reference page doesn't
+   even give `Workflow` the detailed behavior section it gives other tools.
+
+**Conclusion: this is undocumented behavior** — either an unadvertised caching optimization or an
+actual bug, but not something this repo can distinguish from the outside, and not something a
+repo-side code change can fix (the cache — if that's what it is — lives in the Workflow tool's own
+runtime, not in anything checked into this repo). The `claude-code-guide` agent's own recommendation:
+report via `/feedback` with repro steps; treat `scriptPath:` as the confirmed-sound workaround in
+the meantime.
+
+**Precedent found, per the user's own instruction to check**: this is NOT the first time this
+class of problem has been hit. `CLAUDE.md` already carried a "Workflow resume anti-pattern (M144,
+2026-07-25)" section describing a related-but-distinct issue: `resumeFromRunId`'s cache keys on
+each individual `agent()` call's `(prompt, opts)`, and can't see EXTERNAL file-state changes (a
+gap-list.md/charter/script edit) — so resuming after such a fix replays the stale cached failure.
+This directive's finding is different in trigger (a fresh `name:` call, zero `resumeFromRunId`
+involved) but same in shape (stale content served across a script edit within one session) — folded
+into the SAME CLAUDE.md section as an explicit extension, rather than a duplicate separate rule.
+
 ## Requested action
 
-1. Root-cause whether this is deterministic (any repeat `name:` dispatch within a session after the
-   first always reuses the first materialization) or intermittent — test with a few more same-
-   session `name:` dispatches of a script edited mid-session.
-2. If deterministic and a platform limitation: document it as a standing operational rule for this
-   repo's own directive-authoring/execution practice — **always use `scriptPath:` pointing at the
-   real checked-in file for a workflow script that may have changed since session start, never
-   `name:`, when dispatching from a long-running orchestrating session** (matching what already
-   worked here). Consider whether the `quay:execute-milestone`/other skills that wrap `Workflow()`
-   calls should be updated to always pass `scriptPath:` rather than `name:`.
-3. If this is genuinely a Claude Code platform bug (not something this repo can work around
-   completely), it may be worth reporting upstream separately from this repo's own task-tracking
-   (this repo's `gap-*` tasks track repo-side issues; a platform bug report is a different channel)
-   — flagged here for a human decision on whether/how to escalate.
+1. ~~Root-cause whether this is deterministic or intermittent~~ — superseded by the research above:
+   the exact trigger conditions for the underlying caching mechanism aren't independently
+   verifiable from outside the tool's implementation; what IS established is that `scriptPath:`
+   reliably avoids it (tested 2x this session, both succeeded) while `name:` failed 1x for real —
+   sufficient to act on without needing to fully characterize the tool-internal mechanism.
+2. **DONE**: documented the standing operational rule directly in `CLAUDE.md` (extending the
+   existing M144 section) — always `scriptPath:` to the real checked-in file when a workflow
+   script may have changed mid-session, never `name:`.
+3. Escalation to Claude Code support (`/feedback`) is a human decision, not something this session
+   can do on its own authority — flagged, not actioned.
 
 ## Definition of Done
 
-- [ ] Root cause characterized (deterministic vs intermittent, and why) from direct experimentation,
-  not speculation.
-- [ ] A documented, followed operational rule (or an actual skill/workflow-dispatch-wrapper change)
-  ensures this repo's own directive-execution practice never hits this again — e.g. always
-  `scriptPath:` for same-session repeat dispatches of a possibly-changed script.
-- [ ] If reported upstream, a reference/link recorded here; if not, an explicit decision recorded
-  for why not.
+- [ ] Root cause characterized as far as externally possible: **undocumented tool behavior,
+  confirmed via two independent research passes (WebSearch + claude-code-guide agent) that it is
+  not documented anywhere in Claude Code's own materials.** Full internal mechanism unknowable from
+  outside the tool — this is the ceiling of what "root cause" means for a closed-source dependency.
+- [x] A documented, followed operational rule ensures this repo's own directive-execution practice
+  never hits this again — landed directly in `CLAUDE.md`'s "Workflow resume anti-pattern" section
+  (extended, not duplicated), 2026-07-26. Already followed successfully 3x since (M176's real
+  dispatch, plus two deliberate string-args probes on `drain-directives.js` and
+  `execute-milestone.js`, all via `scriptPath:`, all crash-free).
+- [ ] Escalation to Claude Code support: NOT YET DONE — this is a human decision (whether/how to
+  file `/feedback`), left open for the user, not self-closed.
