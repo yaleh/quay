@@ -19,6 +19,9 @@
   [`quay-codex-self-observation-tool-supply-chain.md`](./quay-codex-self-observation-tool-supply-chain.md)
   defines the evidence-adapter and tool-governance layer without moving
   transcript or telemetry authority into the control plane. ·
+  [`local-multi-project-coevolution-pilot.md`](./local-multi-project-coevolution-pilot.md)
+  applies delegated autonomy to the near-term single-machine collaboration
+  among Quay, meta-cc, and archguard. ·
   [`baime-lite-driving-external-projects.md`](./baime-lite-driving-external-projects.md)
   discusses continuous development of external projects. ·
   [`quay-workflow-agent-distribution.md`](./quay-workflow-agent-distribution.md)
@@ -631,6 +634,24 @@ exception dispositions, and portfolio priorities.
    proven.
 9. **Portfolio view:** add dependency impact and policy management after the
    underlying events are trustworthy.
+
+The near-term Quay/meta-cc/archguard pilot is specified separately in
+[`local-multi-project-coevolution-pilot.md`](./local-multi-project-coevolution-pilot.md).
+It refines steps 2 and 6 above into an incremental local sequence:
+
+1. distinguish durable authorization from transient adapter/session presence,
+   task preparedness, leases, runs, delivery, and project acceptance;
+2. add a read-only projection before adding cross-project scheduling;
+3. prove one Quay → meta-cc capability request whose owner delivery and
+   requester compatibility verdict remain separate;
+4. require owner-local checked Proposal/Plan preparation before findings may
+   become executable;
+5. add archguard only as the second bounded evidence contract, after the first
+   relationship is replay-safe and idempotent.
+
+The existing exp5 drivable-workspace registry has `scope: validation`. It must
+not be reinterpreted as portfolio-wide development authorization; that wider
+scope requires a new explicit human policy record.
 
 ## 14. Acceptance criteria for a future implementation
 
