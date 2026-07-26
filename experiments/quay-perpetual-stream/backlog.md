@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| undefined | serve: handleTaskAction crashes on nonexistent task (null dereference) | DONE | - | defect, milestone-candidate |
 | exp5-M-ROUTINE-F-156-3 | ADR-001 gate fails: gate-script-base.ts is load-bearing but missing sibling test file | DONE | - | defect, routine-finding, milestone-candidate, milestone:M158 |
 | exp5-M-ROUTINE-F-156-2 | enforcement-with-design gate: heading mismatch — inherited-core.md uses 'DoD' but check searches for 'Done' | DONE | - | defect, routine-finding, milestone-candidate |
 | DIR-094 | DIR-094: Ship distributable quay CLI + switch loop-driver to MCP tools | DONE | - | directive, milestone-candidate, milestone:M149 |
@@ -174,7 +175,7 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| exp5-M-ROUTINE-F-156-1 | quay-native: 3 test helper subprocess scripts crash when discovered directly by test runner | open | - | defect, routine-finding, milestone-candidate |
+| exp5-M-STALE-DEVIATION-CLEANUP-162 | Update stale deviation row — DIR-070-C fix confirmed, row status still open | open | - | milestone-candidate |
 | DIR-089 | DIR-089: Safe JSON parse guard — 4 identical JSONDecodeError traces | open | - | milestone-candidate, defect, human-steered |
 | DIR-078 | DIR-078: Adaptive Build-phase heartbeat — harness notification as primary wake | open | - | directive, human-steered, milestone-candidate |
 | DIR-073 | DIR-073: Verify failure diagnostic — scripts/diagnose-verify-failure.ts + thin diagnose-complex workflow | open | - | directive, milestone-candidate |
@@ -196,4 +197,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_189 milestone-candidate task(s) as of 2026-07-25T19:27:16.413Z._
+_190 milestone-candidate task(s) as of 2026-07-26T01:09:27.669Z._
