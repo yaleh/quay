@@ -124,12 +124,21 @@ if $CHECK_MODE; then
       "${PLUGIN_DIR}/scripts/${name}" \
       "expected-diff"
   done
+  echo "[sync-vendor --check] verifying gate-script-lib.sh (task-schema-check.sh's shared dependency) ..."
+  cmp_or_report "task-schema/gate-script-lib.sh" \
+    "${EXPERIMENT_SCRIPTS}/gate-script-lib.sh" \
+    "${PLUGIN_DIR}/scripts/gate-script-lib.sh"
 else
   echo "[sync-vendor] mirroring the task-schema check -> plugin/scripts/{task-schema.ts,task-schema-check.ts,task-schema-check.sh} ..."
   cp "${EXPERIMENT_SCRIPTS}/task-schema.ts" "${PLUGIN_DIR}/scripts/task-schema.ts"
   cp "${EXPERIMENT_SCRIPTS}/task-schema-check.ts" "${PLUGIN_DIR}/scripts/task-schema-check.ts"
   cp "${EXPERIMENT_SCRIPTS}/task-schema-check.sh" "${PLUGIN_DIR}/scripts/task-schema-check.sh"
   chmod +x "${PLUGIN_DIR}/scripts/task-schema-check.sh"
+  # M152 (DIR-091) refactored task-schema-check.sh (and 6 sibling gate scripts) to depend
+  # on this shared lib. No exp5 attribution to sanitize (byte-identical copy, not group-2).
+  echo "[sync-vendor] mirroring gate-script-lib.sh (task-schema-check.sh's shared dependency) ..."
+  cp "${EXPERIMENT_SCRIPTS}/gate-script-lib.sh" "${PLUGIN_DIR}/scripts/gate-script-lib.sh"
+  chmod +x "${PLUGIN_DIR}/scripts/gate-script-lib.sh"
 fi
 
 # ---------------------------------------------------------------------------
