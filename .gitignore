@@ -33,3 +33,6 @@ experiment/timing/*.log
 *.swo
 *.rej
 .mutation-backup/
+
+# Claude Code personal/local overrides — never shared config, never commit
+.claude/settings.local.json
