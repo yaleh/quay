@@ -10,23 +10,28 @@ export const meta = {
   ],
 }
 
+// DIR-114 (M175): Workflow tool sometimes delivers the `args` global as a JSON-encoded
+// string rather than the parsed object its contract promises "verbatim" — normalize once,
+// up front, and read everything through `$a` below (no bare `args` field access past this point).
+const $a = (typeof args === 'string') ? JSON.parse(args) : args
+
 // ── Phase: Verify (step 4) ──────────────────────────────────────────────────────────
 phase('Verify')
 
 // DIR-079 (M156): Per-check incremental caching.
 // Input fingerprints are pre-computed by the caller (workflow runtime lacks readFile/sha256)
-// and passed via args. Prior results are passed via args for cache comparison.
+// and passed via the args global. Prior results are passed the same way for cache comparison.
 // The 4 mechanical checks are split into per-check agents so each can be independently
 // cached. When a check's fingerprint matches a prior cached result, the agent is skipped.
 // No fingerprints → fall back to full dispatch (conservative).
 // Cache updates are returned in verifyCacheUpdates for the caller to persist across
 // invocations.
 
-const cacheFingerprints = args.cacheFingerprints || {}
-const priorVerifyCache = args.priorVerifyCache || {}
+const cacheFingerprints = $a.cacheFingerprints || {}
+const priorVerifyCache = $a.priorVerifyCache || {}
 
 // Extract milestone number for script invocations
-const _milestone = (args.charterFile.match(/M(\d+)/) || [])[1] || '<extracted-from-charter>'
+const _milestone = ($a.charterFile.match(/M(\d+)/) || [])[1] || '<extracted-from-charter>'
 
 // ── Per-check cache lookup ──
 function _cached(label) {
@@ -58,15 +63,15 @@ const _dispatchList = [
     { label: 'ceiling-check', schema: MECH_SCHEMA }
   ) : null,
   !_cachedGateHash      ? () => agent(
-    `Run: bash experiments/quay-perpetual-stream/scripts/it0-gate-hash-check.sh --by-reference ${args.charterFile}. Non-zero=GATE-HASH-REF mismatch; zero=hash matches. Return {check:"gate-hash",ok:<exit===0>,detail:"<stdout>",source:"script"}.`,
+    `Run: bash experiments/quay-perpetual-stream/scripts/it0-gate-hash-check.sh --by-reference ${$a.charterFile}. Non-zero=GATE-HASH-REF mismatch; zero=hash matches. Return {check:"gate-hash",ok:<exit===0>,detail:"<stdout>",source:"script"}.`,
     { label: 'gate-hash', schema: MECH_SCHEMA }
   ) : null,
   !_cachedLineBudget    ? () => agent(
-    `Run: bash experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh ${args.charterFile}. Non-zero=exceeds line budget; zero=within budget. Return {check:"line-budget",ok:<exit===0>,detail:"<stdout>",source:"script"}.`,
+    `Run: bash experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh ${$a.charterFile}. Non-zero=exceeds line budget; zero=within budget. Return {check:"line-budget",ok:<exit===0>,detail:"<stdout>",source:"script"}.`,
     { label: 'line-budget', schema: MECH_SCHEMA }
   ) : null,
   !_cachedDogfood       ? () => agent(
-    `Run: bash experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone ${_milestone} ${args.charterFile}. Non-zero=evidence-gap; zero=all claimed clauses have nearby fenced evidence. Return {check:"dogfood-evidence",ok:<exit===0>,detail:"<stdout>",source:"script"}.`,
+    `Run: bash experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone ${_milestone} ${$a.charterFile}. Non-zero=evidence-gap; zero=all claimed clauses have nearby fenced evidence. Return {check:"dogfood-evidence",ok:<exit===0>,detail:"<stdout>",source:"script"}.`,
     { label: 'dogfood-evidence', schema: MECH_SCHEMA }
   ) : null,
   !_cachedDomainMisfit  ? () => agent(
@@ -124,13 +129,13 @@ log(`Verify phase PASSED — all ${allVerifyResults.length} it0 checks green (${
 // ── Phase: Build (step 5) ───────────────────────────────────────────────────────────
 phase('Build')
 const buildResult = await agent(
-    `BUILD the inner iteration for milestone task ${args.taskId}. DO THE ACTUAL WORK — you are the build executor, not a dispatcher.
+    `BUILD the inner iteration for milestone task ${$a.taskId}. DO THE ACTUAL WORK — you are the build executor, not a dispatcher.
 
-Charter file: ${args.charterFile}
-Absorb entry path: ${args.absorbEntryFile}
+Charter file: ${$a.charterFile}
+Absorb entry path: ${$a.absorbEntryFile}
 
 1. PRE-FLIGHT: ensure extra.acceptance is set on the task via task_write:
-   extra.acceptance = "bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${args.taskId} ${args.charterFile} ${args.absorbEntryFile}"
+   extra.acceptance = "bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${$a.taskId} ${$a.charterFile} ${$a.absorbEntryFile}"
 
 2. CLASS-ROUTE: This is a development-class task (capability-growth). Read the task body and charter, then implement each item in the Done-when list.
 
@@ -168,18 +173,18 @@ Return {taskId, outcome: "done", iterationCount, mergeCommit: "<short-sha>"} on 
 // ── Phase: Audit (step 6 acceptance audit) ──────────────────────────────────────────
 phase('Audit')
 const auditResult = await agent(
-  `ADVERSARIAL ACCEPTANCE AUDIT for milestone task ${args.taskId}. FRESH CONTEXT — you have NOT seen the build.
+  `ADVERSARIAL ACCEPTANCE AUDIT for milestone task ${$a.taskId}. FRESH CONTEXT — you have NOT seen the build.
 
 CHARGE (refute-first stance):
-1. AC SATISFACTION: read the task file tasks/${args.taskId}.md's ## Acceptance Criteria.
+1. AC SATISFACTION: read the task file tasks/${$a.taskId}.md's ## Acceptance Criteria.
    For EACH criterion, try to REFUTE that it is actually met — citing the concrete
    artifact/test output/diff, NOT the implementer's self-report. Any AC you cannot
    confirm → REFUTED.
 1a. CHECKLIST WRITE-BACK (DIR-020): for each confirmed AC/DoD item, WRITE BACK to the
     task file ticking - [x] with evidence citation. Leave - [ ] for unconfirmed items.
 2. DoD SATISFACTION: confirm the task's ## Definition of Done is satisfied.
-3. MECHANICAL GATE: run experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${args.taskId} ${args.charterFile}
-   ${args.absorbEntryFile}. Non-zero exit = REFUTED by construction.
+3. MECHANICAL GATE: run experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${$a.taskId} ${$a.charterFile}
+   ${$a.absorbEntryFile}. Non-zero exit = REFUTED by construction.
 4. DEVIATION-LOG WRITE-BACK (DIR-017 Step 3 / M36): if you find a REFUTED or CONCERNS,
    write a deviation row to dashboard.md's "Homeostatic variables (DIR-017 Step 3)" table:
    (i) caught-by: machine — your OWN finding this same pass; (ii) caught-by: human — an
@@ -221,7 +226,7 @@ const gates = await parallel([
     { label: 'tree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run worktree-branch-hygiene-check.sh. Return {ok, detail}. Non-zero = orphaned milestone evidence → HARD BLOCK.`,
     { label: 'worktree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`Run quay gate --gate split-or-commit ${args.taskId}. Return {ok, detail}. Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK.`,
+  () => agent(`Run quay gate --gate split-or-commit ${$a.taskId}. Return {ok, detail}. Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK.`,
     { label: 'split-or-commit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
 ])
 
@@ -229,7 +234,7 @@ const gatesFailed = gates.filter(Boolean).some(g => !g.ok)
 if (gatesFailed) {
   log('Gate phase FAILED — one or more mechanical gates did not pass. Marking needs-human.')
   await agent(
-    `Mark task ${args.taskId} needs-human. Record which gates failed and why in the ABSORB entry at ${args.absorbEntryFile}. Gates: ${JSON.stringify(gates.filter(Boolean))}`,
+    `Mark task ${$a.taskId} needs-human. Record which gates failed and why in the ABSORB entry at ${$a.absorbEntryFile}. Gates: ${JSON.stringify(gates.filter(Boolean))}`,
     { label: 'mark-needs-human', phase: 'Land' }
   )
   return { outcome: 'needs-human', reason: 'gate-failed', phase: 'Gate', verifyCacheUpdates }
@@ -246,18 +251,18 @@ if (auditResult?.verdict === 'CONCERNS') {
 if (auditResult?.verdict === 'REFUTED') {
   log('Audit REFUTED — cannot land. Marking needs-human.')
   await agent(
-    `Mark task ${args.taskId} needs-human with reason: audit REFUTED — ${auditResult?.detail}. VERIFY the needs-human reason is EXTERNAL (outside project control: external service/resource/credential/dataset/upstream) — if it is an IN-PROJECT reason (architecture mismatch, complexity, scope, "too hard"), that is a SPLIT-OR-COMMIT violation (DIR-026/Clause 9). Record needs-human with the audited reason in the ABSORB entry.`,
+    `Mark task ${$a.taskId} needs-human with reason: audit REFUTED — ${auditResult?.detail}. VERIFY the needs-human reason is EXTERNAL (outside project control: external service/resource/credential/dataset/upstream) — if it is an IN-PROJECT reason (architecture mismatch, complexity, scope, "too hard"), that is a SPLIT-OR-COMMIT violation (DIR-026/Clause 9). Record needs-human with the audited reason in the ABSORB entry.`,
     { label: 'mark-needs-human-refuted' }
   )
   return { outcome: 'needs-human', reason: 'audit-refuted', phase: 'Land', verifyCacheUpdates }
 }
 
-const IS_CONCURRENT = args.mode === 'concurrent'
+const IS_CONCURRENT = $a.mode === 'concurrent'
 
 // ── Concurrent path (DIR-075/M142): defers shared-state writes to fan-in ──────────
 if (IS_CONCURRENT) {
   const concurrentResult = await agent(
-    `LAND (concurrent mode) the milestone for task ${args.taskId}. IN CONCURRENT MODE:
+    `LAND (concurrent mode) the milestone for task ${$a.taskId}. IN CONCURRENT MODE:
    you are part of a multi-milestone batch — do NOT update milestone_counter or dashboard.md
    (those writes are deferred to the serial fan-in absorb step that follows).
 
@@ -267,7 +272,7 @@ if (IS_CONCURRENT) {
 2. CAPTURE then PRUNE (DIR-033): if a non-primary iteration produced evidence not on
    master, cherry-pick JUST that evidence file. Then git worktree remove + git branch -d
    the now-merged branches.
-3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${args.taskId}.md
+3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${$a.taskId}.md
    appending a ## Execution record section (milestone id, iteration count, realized Δv,
    merge commit SHA, one-line outcome summary) and setting status: done.
 4. COMPUTE touchedFiles: run \`git diff --numstat <merge-base>..<build-branch>\` to get the
@@ -275,14 +280,14 @@ if (IS_CONCURRENT) {
    or the commit recorded in the build result (${
      buildResult?.mergeCommit ? buildResult.mergeCommit : 'from Build phase'
    }). Collect the changed file paths (column 3 of numstat output) into a flat array.
-5. DRAFT a one-line dashboard entry for this milestone: "m<NN> · ${args.taskId} · Δv=<realized> ·
+5. DRAFT a one-line dashboard entry for this milestone: "m<NN> · ${$a.taskId} · Δv=<realized> ·
    audit=${auditResult?.verdict || 'NO REFUTATION FOUND'} · merge=<SHORT sha> · → milestones/<NN>/"
 
-Charter: ${args.charterFile}
+Charter: ${$a.charterFile}
 Build outcome: ${JSON.stringify(buildResult)}
 Audit verdict: ${auditResult?.verdict}
 
-Return {taskId: "${args.taskId}", outcome: "done", mergeCommit: "<40-char SHA>",
+Return {taskId: "${$a.taskId}", outcome: "done", mergeCommit: "<40-char SHA>",
   touchedFiles: ["relative/path/to/file1.ts", ...],
   dashboardEntry: "<markdown block for serial-fanin-absorb.ts>"}.`,
     { phase: 'Land',
@@ -293,14 +298,14 @@ Return {taskId: "${args.taskId}", outcome: "done", mergeCommit: "<40-char SHA>",
         dashboardEntry: { type: 'string' },
       } } }
   )
-  log(`Land phase complete (concurrent) — milestone ${args.taskId} done, touched ${(concurrentResult?.touchedFiles || []).length} files.`)
-  return { outcome: 'done', taskId: args.taskId, mergeCommit: concurrentResult?.mergeCommit,
+  log(`Land phase complete (concurrent) — milestone ${$a.taskId} done, touched ${(concurrentResult?.touchedFiles || []).length} files.`)
+  return { outcome: 'done', taskId: $a.taskId, mergeCommit: concurrentResult?.mergeCommit,
     touchedFiles: concurrentResult?.touchedFiles, dashboardEntry: concurrentResult?.dashboardEntry, verifyCacheUpdates }
 }
 
 // ── Serial path (default): existing behavior unchanged — inline counter++ and dashboard ─
 await agent(
-  `LAND the milestone for task ${args.taskId}.
+  `LAND the milestone for task ${$a.taskId}.
 
 1. MERGE the iteration worktree into master (DIR-027: loop runs on master directly).
    Any conflict → per-file resolution, both sides read, reconciliation note recorded.
@@ -316,15 +321,15 @@ await agent(
 5. REGENERATE backlog.md/dashboard.md views via experiments/quay-perpetual-stream/scripts/it0-backlog-regen.ts.
 6. RUN tree-hygiene-check.sh and worktree-branch-hygiene-check.sh one final time
    to confirm the close-out is clean. Paste results.
-7. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${args.taskId}.md
+7. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${$a.taskId}.md
    appending a ## Execution record section (milestone id, iteration count, realized Δv,
    merge commit SHA, one-line outcome summary) and setting status: done.
 8. PHI CONSOLIDATION CHECK: if a prior adaptation was REUSED UNCHANGED by THIS
    (different-domain) milestone, consolidate it into inherited-core.md and retire
    its citation (§4.2).
 
-Charter: ${args.charterFile}
-Absorb entry: ${args.absorbEntryFile}
+Charter: ${$a.charterFile}
+Absorb entry: ${$a.absorbEntryFile}
 Build outcome: ${JSON.stringify(buildResult)}
 Audit verdict: ${auditResult?.verdict}
 
@@ -336,5 +341,5 @@ Return {taskId, outcome: 'done', mergeCommit, milestoneCounter}.`,
     } } }
 )
 
-log(`Land phase complete — milestone ${args.taskId} done.`)
-return { outcome: 'done', taskId: args.taskId, verifyCacheUpdates }
+log(`Land phase complete — milestone ${$a.taskId} done.`)
+return { outcome: 'done', taskId: $a.taskId, verifyCacheUpdates }

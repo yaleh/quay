@@ -6,6 +6,11 @@ export const meta = {
   ],
 }
 
+// DIR-114 (M175): Workflow tool sometimes delivers the `args` global as a JSON-encoded
+// string rather than the parsed object its contract promises "verbatim" — normalize once,
+// up front, and read everything through `$a` below (no bare `args` field access past this point).
+const $a = (typeof args === 'string') ? JSON.parse(args) : args
+
 // ── Phase: Routines ──────────────────────────────────────────────────────────────────────
 phase('Routines')
 
@@ -14,7 +19,7 @@ phase('Routines')
 // routine track pipeline from plugin/skills/routines/SKILL.md directly.
 
 const result = await agent(
-  `Evaluate the standing routine track for workspace ${args.workspaceRoot}, tasks dir ${args.tasksDir || args.workspaceRoot + '/tasks'}, milestone counter ${args.milestoneCounter || 0}.
+  `Evaluate the standing routine track for workspace ${$a.workspaceRoot}, tasks dir ${$a.tasksDir || $a.workspaceRoot + '/tasks'}, milestone counter ${$a.milestoneCounter || 0}.
 
 Pipeline (from plugin/skills/routines/SKILL.md):
 

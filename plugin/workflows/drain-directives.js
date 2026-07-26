@@ -8,11 +8,16 @@ export const meta = {
   ],
 }
 
+// DIR-114 (M175): Workflow tool sometimes delivers the `args` global as a JSON-encoded
+// string rather than the parsed object its contract promises "verbatim" — normalize once,
+// up front, and read everything through `$a` below (no bare `args` field access past this point).
+const $a = (typeof args === "string") ? JSON.parse(args) : args
+
 // ── Phase: Schedule ──────────────────────────────────────────────────────────────────
 phase("Schedule")
 
 const scheduleResult = await agent(
-  `Read the pending directives for workspace ${args.workspaceRoot} and evaluate DRAIN.
+  `Read the pending directives for workspace ${$a.workspaceRoot} and evaluate DRAIN.
 
 1. Fetch ALL tasks with label "directive" via \`task_list --label directive\`.
    Filter to those with \`extra.dirStatus: pending\` (already applied/deferred directives are excluded).
@@ -26,7 +31,7 @@ const scheduleResult = await agent(
 4. Parse the stdout JSON. Return {due: [{id, title, classification, ...}], count: <N>}.
    If exit 3 or empty JSON, return {due: [], count: 0} — the rest of this workflow is a no-op.
 
-Workspace root: ${args.workspaceRoot}`,
+Workspace root: ${$a.workspaceRoot}`,
   { phase: "Schedule",
     schema: { type: "object", required: ["due", "count"], properties: {
       due: { type: "array", items: { type: "object", properties: { id: {type:"string"}, title: {type:"string"}, classification: {type:"string"} } } },
@@ -81,7 +86,7 @@ if (failed.length > 0) {
 phase("Verify")
 
 const verifyResult = await agent(
-  `Verify DRAIN dispositions for directives [${ok.map(d => d.id).join(", ")}] in workspace ${args.workspaceRoot}.
+  `Verify DRAIN dispositions for directives [${ok.map(d => d.id).join(", ")}] in workspace ${$a.workspaceRoot}.
 
 For EACH disposed directive, read the task via \`task_get <id>\` and confirm:
 1. \`extra.dirStatus\` is exactly "applied" (not "pending", not missing)

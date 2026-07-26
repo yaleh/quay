@@ -6,6 +6,11 @@ export const meta = {
   ],
 }
 
+// DIR-114 (M175): Workflow tool sometimes delivers the `args` global as a JSON-encoded
+// string rather than the parsed object its contract promises "verbatim" — normalize once,
+// up front, and read everything through `$a` below (no bare `args` field access past this point).
+const $a = (typeof args === 'string') ? JSON.parse(args) : args
+
 // ── Phase: SelectPreflight ──────────────────────────────────────────────────────────────
 // SINGLE agent call that:
 //   1. Runs select-preflight.ts (shell command, no LLM judgment)
@@ -20,7 +25,7 @@ const result = await agent(
 ## TASK 1: Run preflight script (shell command — no LLM judgment needed); DIR-062-C: human-steered classification is now MECHANICAL — select-preflight.ts calls human-steered-classify.ts internally and filters autonomous-ineligible candidates before returning
 
 1. Extract milestone_counter from experiments/quay-perpetual-stream/dashboard.md: grep for \`**milestone_counter: <N>**\`.
-2. Run: \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/select-preflight.ts --json --workspace-root ${args.workspaceRoot || '.'} --milestone-counter <counter>\`
+2. Run: \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/select-preflight.ts --json --workspace-root ${$a.workspaceRoot || '.'} --milestone-counter <counter>\`
 3. Parse the JSON output as PreflightResult.
 4. If \`halt: true\` → return \`{outcome: "halted", reason: haltReason}\` immediately.
 5. If \`pendingDirectives\` non-empty → record as WARNING (informational, not blocking — the caller should /drain-directives first per DIR-071).

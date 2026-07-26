@@ -7,6 +7,11 @@ export const meta = {
   ],
 }
 
+// DIR-114 (M175): Workflow tool sometimes delivers the `args` global as a JSON-encoded
+// string rather than the parsed object its contract promises "verbatim" — normalize once,
+// up front, and read everything through `$a` below (no bare `args` field access past this point).
+const $a = (typeof args === 'string') ? JSON.parse(args) : args
+
 // ── Phase: RunDiagnostic ───────────────────────────────────────────────────────────────
 // Runs the TypeScript diagnostic script in a single agent call (shell invocation).
 // The agent extracts Verify check results from the execute-milestone workflow journal,
@@ -15,7 +20,7 @@ export const meta = {
 phase('RunDiagnostic')
 
 const runResult = await agent(
-  `Run the verify failure diagnostic for the charter at ${args.charterFile || '<missing charter>'}.
+  `Run the verify failure diagnostic for the charter at ${$a.charterFile || '<missing charter>'}.
 
 You have ONE job: extract Verify check results from the most recent execute-milestone workflow run, then run the diagnostic script.
 
@@ -34,7 +39,7 @@ The execute-milestone workflow logs Verify results as a JSON array in its return
 Write the extracted check results as a JSON array to a temp file: /tmp/diagnose-verify-results-<timestamp>.json
 
 ## Step 3: Run the diagnostic script
-Run: \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/diagnose-verify-failure.ts --results /tmp/diagnose-verify-results-<timestamp>.json --charter ${args.charterFile || ''} --workspace-root ${args.workspaceRoot || '.'} --json\`
+Run: \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/diagnose-verify-failure.ts --results /tmp/diagnose-verify-results-<timestamp>.json --charter ${$a.charterFile || ''} --workspace-root ${$a.workspaceRoot || '.'} --json\`
 
 Parse the stdout JSON as DiagnosticResult.
 
@@ -101,7 +106,7 @@ if (unfixable.length > 0) {
 Unfixable failures:
 ${JSON.stringify(unfixable, null, 2)}
 
-Charter file: ${args.charterFile || '<not provided>'}
+Charter file: ${$a.charterFile || '<not provided>'}
 
 For EACH unfixable failure, produce a structured diagnosis:
 - **check**: which check failed
