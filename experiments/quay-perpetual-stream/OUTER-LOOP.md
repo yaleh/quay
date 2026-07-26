@@ -35,7 +35,11 @@ select =
   → ∀c∈batch: size_check(c)      -- inherited_core."Milestone size definition"
   → ∀c∈batch: split_or_commit(c) -- DIR-026 MANDATORY; scripts/it0-split-or-commit-check.ts
   → ∀c∈batch: line_budget_check(charter_file)  -- scripts/it0-ceiling-line-budget-check.sh; FAIL → fix charter, never script
-  ⊨ human-steered EXCLUDE (label:human-steered ≡ manual override regardless of classifier verdict)
+  ⊨ human-steered EXCLUDE — scripts/human-steered-classify.ts (DIR-062-A); label:human-steered ≡ manual override
+     -- classify: --touched from task ## Touches; absent → no --touched flags
+     -- classify: --mission-redirection — human-set marker, NEVER inferred
+     -- classify: --workspace → drivable-workspace-check.ts against drivable-workspaces.yml
+     -- safety: driver-file-editing tasks WITHOUT ## Touches MUST carry label:human-steered
   ⊨ ∀c: record(value_type(c), Δv̂(c))  -- inherited_core."Value-typed SELECT ledger"
      (capability-growth|discovery|instrument-correction|risk-option|governance-integrity)
   ⊨ governance/infra hard floor: scope ⊇ enforcement half → reject|resize if partial

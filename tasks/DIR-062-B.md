@@ -11,6 +11,10 @@ labels:
 parent: DIR-062
 children: []
 extra:
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-062-B
+    experiments/quay-perpetual-stream/charters/M168-dir062-b-human-steered-definition.md
+    /tmp/m168-absorb-entry.md
   dirStatus: resolved
   schema: v1
 ---
