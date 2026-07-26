@@ -10,6 +10,10 @@ children: []
 extra:
   dirStatus: deferred
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-070-F
+    experiments/quay-perpetual-stream/charters/M179-dir070f-methodology-skills.md
+    /tmp/m179-absorb-entry.md
 ---
 ## Proposal
 
@@ -33,18 +37,18 @@ Add extracted skills to `plugin.json` commands[] and `plugin-packaging.test.mjs`
 
 ## Acceptance Criteria
 
-- [ ] Extracted skills pass leak test (no `experiments/quay-perpetual-stream` or `exp5`)
-- [ ] Original `.claude/skills/` still contain experiment-specific context
-- [ ] `plugin.json` commands[] updated
-- [ ] `plugin-packaging.test.mjs` passes
+- [x] Extracted skills pass leak test (no `experiments/quay-perpetual-stream` or `exp5`)
+- [x] Original `.claude/skills/` still contain experiment-specific context
+- [x] `plugin.json` commands[] updated
+- [x] `plugin-packaging.test.mjs` passes
 
 ## Definition of Done
 
-- [ ] Reference to `docs/proposals/exp5-deliverable-improvements.md` Gap 3
-- [ ] Extracted methodology skills in `plugin/skills/`
-- [ ] `plugin.json` updated
-- [ ] Plugin packaging test passes
-- [ ] Human-steered: touches `.claude/skills/` (driver-self-rewrite per DIR-062 clause 1)
+- [x] Reference to `docs/proposals/exp5-deliverable-improvements.md` Gap 3
+- [x] Extracted methodology skills in `plugin/skills/`
+- [x] `plugin.json` updated
+- [x] Plugin packaging test passes
+- [x] Human-steered: touches `.claude/skills/` (driver-self-rewrite per DIR-062 clause 1) — read-only touch: confirmed by dedicated regression test that originals are unmodified
 
 ## Touches
 

@@ -42,7 +42,7 @@ test('M172 (DIR-108): marketplace.json is valid JSON and lists the quay plugin p
   assert.equal(entry.source.ref, 'dist-plugin', 'source must pin the CI-published orphan branch');
 });
 
-test('plugin.json is valid JSON and declares the 7 bundled skills (M140: +routines)', () => {
+test('plugin.json is valid JSON and declares the 9 bundled skills (M179/DIR-070-F: +quay-native-methodology, +quay-webui-bootstrap-methodology)', () => {
   const manifest = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json'));
   assert.equal(manifest.name, 'quay');
   // Cross-check against packages/quay's version rather than a hardcoded literal (which is
@@ -59,6 +59,8 @@ test('plugin.json is valid JSON and declares the 7 bundled skills (M140: +routin
     './skills/init/SKILL.md',
     './skills/quay-task-to-plan/SKILL.md',
     './skills/routines/SKILL.md',
+    './skills/quay-native-methodology/SKILL.md',
+    './skills/quay-webui-bootstrap-methodology/SKILL.md',
   ];
   for (const w of wanted) {
     assert.ok(manifest.commands.includes(w), `plugin.json commands[] must include ${w}`);
@@ -157,6 +159,15 @@ test('no shipped/foreign-workspace-facing file leaks this repo\'s own experiment
     path.join(pluginDir, 'scripts', 'it0-enforcement-with-design-check.ts'),
     path.join(pluginDir, 'scripts', 'it0-enforcement-with-design-check.sh'),
     path.join(pluginDir, 'scripts', 'it0-impl-row-check.sh'),
+    // M179 (DIR-070-F): extracted methodology reference skills
+    path.join(pluginDir, 'skills', 'quay-native-methodology', 'SKILL.md'),
+    path.join(pluginDir, 'skills', 'quay-native-methodology', 'reference', 'gate-mechanics.md'),
+    path.join(pluginDir, 'skills', 'quay-native-methodology', 'reference', 'directive-lifecycle.md'),
+    path.join(pluginDir, 'skills', 'quay-native-methodology', 'reference', 'patterns.md'),
+    path.join(pluginDir, 'skills', 'quay-native-methodology', 'reference', 'g3-audit-discipline.md'),
+    path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'SKILL.md'),
+    path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'reference', 'visual-review-mechanism.md'),
+    path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'reference', 'effectiveness-timing-corpus.md'),
   ];
   const leakPattern = /experiments\/quay-perpetual-stream|\bexp5\b/i;
   for (const f of shippedFiles) {
@@ -499,6 +510,87 @@ test('M143: git-tracked workflows in plugin/workflows/ are byte-identical to .cl
       `${name}: plugin/workflows/ copy must be byte-identical to .claude/workflows/ source`
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// M179 (DIR-070-F, Gap 3) — reusable methodology reference material extracted
+// from two experiment-local .claude/skills/ into plugin/skills/. Pins: the
+// extracted skills exist with their reference/ files, are traced back to a
+// real byte-identical source for the 4-file quay-native-methodology set (the
+// task's own Plan specifies these 4 files verbatim), and the ORIGINAL
+// .claude/skills/ sources are left unmodified (extraction, not a move).
+// ---------------------------------------------------------------------------
+
+test('M179 (DIR-070-F): quay-native-methodology plugin skill exists with its 4 named reference files, byte-identical to their .claude/skills/ source', () => {
+  const pluginSkillDir = path.join(pluginDir, 'skills', 'quay-native-methodology');
+  assert.ok(existsSync(path.join(pluginSkillDir, 'SKILL.md')), 'plugin/skills/quay-native-methodology/SKILL.md must exist');
+  const refFiles = ['gate-mechanics.md', 'directive-lifecycle.md', 'patterns.md', 'g3-audit-discipline.md'];
+  for (const f of refFiles) {
+    const bundled = path.join(pluginSkillDir, 'reference', f);
+    const canonical = path.join(repoRoot, '.claude', 'skills', 'quay-native-methodology', 'reference', f);
+    assert.ok(existsSync(canonical), `canonical source missing: ${canonical}`);
+    assert.ok(existsSync(bundled), `plugin/skills/quay-native-methodology/reference/${f} must exist`);
+    assert.equal(
+      readFileSync(bundled, 'utf8'),
+      readFileSync(canonical, 'utf8'),
+      `${f}: plugin copy must be byte-identical to its .claude/skills/ source (extraction, not a rewrite)`
+    );
+  }
+});
+
+test('M179 (DIR-070-F): quay-webui-bootstrap-methodology plugin skill exists with its 2 named reference files, byte-identical to their .claude/skills/ source', () => {
+  const pluginSkillDir = path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology');
+  assert.ok(existsSync(path.join(pluginSkillDir, 'SKILL.md')), 'plugin/skills/quay-webui-bootstrap-methodology/SKILL.md must exist');
+  const refFiles = ['visual-review-mechanism.md', 'effectiveness-timing-corpus.md'];
+  for (const f of refFiles) {
+    const bundled = path.join(pluginSkillDir, 'reference', f);
+    const canonical = path.join(repoRoot, '.claude', 'skills', 'quay-webui-bootstrap-methodology', 'reference', f);
+    assert.ok(existsSync(canonical), `canonical source missing: ${canonical}`);
+    assert.ok(existsSync(bundled), `plugin/skills/quay-webui-bootstrap-methodology/reference/${f} must exist`);
+    assert.equal(
+      readFileSync(bundled, 'utf8'),
+      readFileSync(canonical, 'utf8'),
+      `${f}: plugin copy must be byte-identical to its .claude/skills/ source (extraction, not a rewrite)`
+    );
+  }
+});
+
+test('M179 (DIR-070-F): original .claude/skills/ sources are unmodified and still contain experiment-specific content (extraction, not a move)', () => {
+  // quay-native-methodology: case-studies/, inventory/, and v-meta-stall-analysis.md are
+  // experiment-specific content that must remain ONLY in .claude/skills/, never mirrored to plugin/.
+  const nativeSrcDir = path.join(repoRoot, '.claude', 'skills', 'quay-native-methodology');
+  assert.ok(existsSync(path.join(nativeSrcDir, 'reference', 'v-meta-stall-analysis.md')), 'original v-meta-stall-analysis.md must still exist (not deleted)');
+  assert.ok(existsSync(path.join(nativeSrcDir, 'reference', 'case-studies', 'iteration-88-abi-symmetry-walkthrough.md')), 'original case-studies/ must still exist (not deleted)');
+  assert.ok(existsSync(path.join(nativeSrcDir, 'inventory', 'inventory.json')), 'original inventory/ must still exist (not deleted)');
+  assert.ok(
+    !existsSync(path.join(pluginDir, 'skills', 'quay-native-methodology', 'reference', 'v-meta-stall-analysis.md')),
+    'v-meta-stall-analysis.md must NOT be mirrored into plugin/ — it is explicitly excluded experiment-specific content'
+  );
+  assert.ok(
+    !existsSync(path.join(pluginDir, 'skills', 'quay-native-methodology', 'inventory')),
+    'inventory/ must NOT be mirrored into plugin/ — it is explicitly excluded experiment-specific content'
+  );
+
+  // quay-webui-bootstrap-methodology: V-meta ceiling analysis and G3 env-gap case study are
+  // experiment-specific content that must remain ONLY in .claude/skills/.
+  const webuiSrcDir = path.join(repoRoot, '.claude', 'skills', 'quay-webui-bootstrap-methodology');
+  assert.ok(existsSync(path.join(webuiSrcDir, 'reference', 'v-meta-ceiling-two-experiment.md')), 'original v-meta-ceiling-two-experiment.md must still exist (not deleted)');
+  assert.ok(existsSync(path.join(webuiSrcDir, 'reference', 'g3-visual-review-env-gap.md')), 'original g3-visual-review-env-gap.md must still exist (not deleted)');
+  assert.ok(
+    !existsSync(path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'reference', 'v-meta-ceiling-two-experiment.md')),
+    'v-meta-ceiling-two-experiment.md must NOT be mirrored into plugin/ — it is explicitly excluded experiment-specific content'
+  );
+  assert.ok(
+    !existsSync(path.join(pluginDir, 'skills', 'quay-webui-bootstrap-methodology', 'reference', 'g3-visual-review-env-gap.md')),
+    'g3-visual-review-env-gap.md must NOT be mirrored into plugin/ — it is explicitly excluded experiment-specific content'
+  );
+});
+
+test('M179 (DIR-070-F): quay-core-bootstrap-methodology is explicitly out of scope — no plugin/skills/ mirror exists', () => {
+  assert.ok(
+    !existsSync(path.join(pluginDir, 'skills', 'quay-core-bootstrap-methodology')),
+    'quay-core-bootstrap-methodology is lowest priority / explicitly out of scope per DIR-070-F Plan — must not be extracted'
+  );
 });
 
 // ---------------------------------------------------------------------------
