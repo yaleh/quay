@@ -12,6 +12,10 @@ parent: DIR-066
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-066-B
+    experiments/quay-perpetual-stream/charters/M170-dir066-b-dquota-wiring.md
+    /tmp/m170-absorb-entry.md
 ---
 ## Proposal
 
