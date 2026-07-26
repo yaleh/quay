@@ -80,6 +80,14 @@ export function parseTouches(text) {
     // allow inline code backticks around the path
     g = g.replace(/^`+|`+$/g, "").trim();
     g = g.replace(/^\.\//, "");
+    // DIR-106 Fix 1: strip trailing parenthetical annotations — charter authors naturally
+    // write "file.ts (new)" or "file.js (rewrite ...)" but the annotation is not part of the
+    // file path and breaks glob expansion.
+    g = g.replace(/\s*\([^)]*\)\s*$/, "").trim();
+    // DIR-106 Fix 3: normalize trailing-slash directory globs — "milestones/M155/" matches
+    // the literal directory string, not files within it. Append ** so the glob expands to
+    // all files under that directory. Guard: only when no wildcard is already present.
+    if (g && g.endsWith("/") && !/[*?]/.test(g)) g += "**";
     if (g) globs.push(g);
   }
   return { hasSection, globs };

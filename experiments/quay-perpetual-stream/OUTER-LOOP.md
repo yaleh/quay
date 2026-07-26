@@ -21,7 +21,12 @@ select =
     ⊨ pendingDirectives > 0 → /drain-directives first (DIR-071, I₄)
     ⊨ preflight yields {shortlist, cadence, deliverableStreak, starvation, candidates with schema/touches status}
   → shortlist = preflight.shortlist  -- composed by deliverable-governor (DIR-066); deliverable classification baked in
-  → batch_assemble(charters)         -- scripts/concurrent-batch-scheduler.ts (DIR-075/M142); ⊨ charter readiness: type: + ## Touches
+  → N = min(|shortlist|, .quay/loop.yml.concurrency)  -- DIR-106 Fix 2: SELECT up to concurrency candidates (not just top-1);
+     default concurrency=1 preserves backward-compat serial behavior
+  → candidates = shortlist[0..N]     -- ranked top-N; remaining candidates stay in pool for next cycle
+  → batch_assemble(charters(candidates))  -- scripts/concurrent-batch-scheduler.ts (DIR-075/M142); ⊨ charter readiness: type: + ## Touches
+  → log("BATCH (${|batch|}-wide, concurrent): ${batch}")         -- DIR-106 Fix 4: surface batch diagnostics
+  → log("  deferred: ${deferred.map(d => d.id + ' — ' + d.reason).join('\n')}")
   → writeback(batch, deferred, considered \ {batch ∪ deferred})
   → ∀c∈batch: author_ac_dod(c)   -- ¬self-tick (DIR-020): all - [ ] UNCHECKED; - [x] ONLY by Audit phase
   → ∀c∈batch: set_schema_v1(c)   -- extra.schema:"v1"; absent → N/A-legacy
