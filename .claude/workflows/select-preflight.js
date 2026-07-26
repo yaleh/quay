@@ -1,8 +1,8 @@
 export const meta = {
   name: 'select-preflight',
-  description: 'Encapsulate OUTER-LOOP SELECT preflight (steps 1-3) into a thin workflow with exactly ONE agent call for deliverable classification. Replaces ~15 manual turns per /loop wake-up. Other steps (script run, composeShortlist) are shell commands within the same agent invocation. (DIR-072/M153, 2026-07-25)',
+  description: 'Encapsulate OUTER-LOOP SELECT preflight (steps 1-3) into a thin workflow with exactly ONE agent call for deliverable classification. Replaces ~15 manual turns per /loop wake-up. Other steps (script run, composeShortlist) are shell commands within the same agent invocation. (DIR-072/M153, 2026-07-25). DIR-062-C (2026-07-26): select-preflight.ts now invokes human-steered-classify.ts internally — the human-steered label check in getCandidates() is replaced by the classifier; human-steered candidates are filtered mechanically (no LLM judgment).',
   phases: [
-    { title: 'SelectPreflight', detail: 'Run select-preflight.ts → classify deliverable (LLM judgment) → compose shortlist → return. Exactly ONE agent call.' },
+    { title: 'SelectPreflight', detail: 'Run select-preflight.ts (now includes human-steered classifier) → classify deliverable (LLM judgment) → compose shortlist → return. Exactly ONE agent call.' },
   ],
 }
 
@@ -17,7 +17,7 @@ phase('SelectPreflight')
 const result = await agent(
   `Encapsulate OUTER-LOOP SELECT preflight (steps 1-3) into a single structured invocation. You have three sequential tasks:
 
-## TASK 1: Run preflight script (shell command — no LLM judgment needed)
+## TASK 1: Run preflight script (shell command — no LLM judgment needed); DIR-062-C: human-steered classification is now MECHANICAL — select-preflight.ts calls human-steered-classify.ts internally and filters autonomous-ineligible candidates before returning
 
 1. Extract milestone_counter from experiments/quay-perpetual-stream/dashboard.md: grep for \`**milestone_counter: <N>**\`.
 2. Run: \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/select-preflight.ts --json --workspace-root ${args.workspaceRoot || '.'} --milestone-counter <counter>\`

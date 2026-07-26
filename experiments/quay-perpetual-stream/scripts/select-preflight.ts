@@ -24,6 +24,8 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { checkTask } from "./task-schema.ts";
+import { classify, type ClassifyResult } from "./human-steered-classify.ts";
+import { loadRegistry, type Registry, DEFAULT_REGISTRY_PATH } from "./drivable-workspace-check.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -36,6 +38,8 @@ export interface CandidateEntry {
   schemaPass: boolean;
   schemaDetail: string;
   hasTouches: boolean;
+  humanSteered: boolean;
+  classifyDetail: string;
 }
 
 export interface CadenceResult {
@@ -87,9 +91,10 @@ export function getPendingDirectives(tasks: any[]): string[] {
 }
 
 // ── getCandidates ─────────────────────────────────────────────────────────────────────────────────
-// Given a task list JSON array, extract autonomous-selectable milestone-candidates.
-// Filters: label:milestone-candidate, status:todo, NOT label:human-steered.
-// Returns CandidateEntry array with schema/touches set to false (filled in later).
+// Given a task list JSON array, extract milestone-candidates.
+// Filters: label:milestone-candidate, status:todo.
+// human-steered classification is deferred to buildPreflightResult via the classifier.
+// Returns CandidateEntry array with schema/touches/humanSteered set to false (filled in later).
 export function getCandidates(tasks: any[]): CandidateEntry[] {
   if (!Array.isArray(tasks)) return [];
   return tasks
@@ -98,10 +103,6 @@ export function getCandidates(tasks: any[]): CandidateEntry[] {
       return labels.some((l) => String(l).toLowerCase() === "milestone-candidate");
     })
     .filter((t) => t.status === "todo")
-    .filter((t) => {
-      const labels: string[] = Array.isArray(t.labels) ? t.labels : [];
-      return !labels.some((l) => String(l).toLowerCase() === "human-steered");
-    })
     .map((t) => {
       const extra = t.extra || {};
       const labels: string[] = Array.isArray(t.labels) ? t.labels : [];
@@ -116,6 +117,8 @@ export function getCandidates(tasks: any[]): CandidateEntry[] {
         schemaPass: false,
         schemaDetail: "",
         hasTouches: false,
+        humanSteered: false,
+        classifyDetail: "",
       };
     });
 }
@@ -151,6 +154,60 @@ export function checkCandidateTouches(workspaceRoot: string, taskId: string): bo
   } catch {
     return false;
   }
+}
+
+// ── extractTouchedFiles ──────────────────────────────────────────────────────────────────────────
+// Parse the `## Touches` section from a task body and extract file paths.
+// Lines look like: - `path/to/file.ts` (comment)
+// Returns an array of file paths (backticks stripped, comments removed).
+export function extractTouchedFiles(workspaceRoot: string, taskId: string): string[] {
+  const taskFile = path.join(workspaceRoot, "tasks", `${taskId}.md`);
+  try {
+    const text = fs.readFileSync(taskFile, "utf8");
+    const touchesMatch = text.match(/^## Touches\s*$\n+((?:[-*]\s.*\n?)+)/m);
+    if (!touchesMatch) return [];
+    const lines = touchesMatch[1].split("\n");
+    const files: string[] = [];
+    for (const line of lines) {
+      // Match backtick-quoted paths: `some/path/file.ts`
+      const fileMatch = line.match(/`([^`]+)`/);
+      if (fileMatch) files.push(fileMatch[1].trim());
+    }
+    return files;
+  } catch {
+    return [];
+  }
+}
+
+// ── classifyCandidate ────────────────────────────────────────────────────────────────────────────
+// Run human-steered-classify on a candidate task using its Touches section and extra fields.
+// Returns ClassifyResult with additional detail for reporting.
+export function classifyCandidate(
+  workspaceRoot: string,
+  taskId: string,
+  extra: Record<string, any>,
+  registry: Registry,
+): ClassifyResult & { detail: string } {
+  const touchedFiles = extractTouchedFiles(workspaceRoot, taskId);
+  const missionRedirection = extra?.missionRedirection === true;
+  const drivenWorkspaces: string[] = Array.isArray(extra?.drivenWorkspaces)
+    ? extra.drivenWorkspaces
+    : [];
+
+  const result = classify({ touchedFiles, missionRedirection, drivenWorkspaces, registry });
+
+  // Build human-readable detail for audit trail
+  const parts: string[] = [];
+  if (result.clauses.driverFileEdit) {
+    parts.push(`driver-file-edit: ${touchedFiles.filter((f) => /OUTER-LOOP|inherited-core|\.claude[/\\]skills[/\\]/.test(f.replace(/\//g, path.sep))).join(", ") || "yes"}`);
+  }
+  if (result.clauses.missionRedirection) parts.push("mission-redirection: true");
+  if (result.clauses.unauthorizedWorkspace) {
+    parts.push(`unauthorized-workspaces: ${result.unauthorizedWorkspaces.join(", ")}`);
+  }
+  const detail = parts.length > 0 ? parts.join("; ") : "autonomous-eligible (all clauses clear)";
+
+  return { ...result, detail };
 }
 
 // ── getCadence ────────────────────────────────────────────────────────────────────────────────────
@@ -191,6 +248,7 @@ export function getTaskList(workspaceRoot: string): any[] | null {
 
 // ── buildPreflightResult ──────────────────────────────────────────────────────────────────────────
 // Core function: assemble the complete PreflightResult.
+// DIR-062-C: classifies each candidate via human-steered-classify.ts, filtering out human-steered ones.
 export function buildPreflightResult(workspaceRoot: string, milestoneCounter: number): PreflightResult {
   // 1. Check .halt
   const haltCheck = checkHalt(workspaceRoot);
@@ -215,7 +273,7 @@ export function buildPreflightResult(workspaceRoot: string, milestoneCounter: nu
   // 4. Cadence
   const cadence = getCadence(workspaceRoot);
 
-  // 5. Extract candidates
+  // 5. Extract candidates (all todo + milestone-candidate, no human-steered pre-filter)
   const candidates = getCandidates(tasks);
 
   // 6. Schema check per candidate
@@ -230,12 +288,33 @@ export function buildPreflightResult(workspaceRoot: string, milestoneCounter: nu
     c.hasTouches = checkCandidateTouches(workspaceRoot, c.id);
   }
 
+  // 8. Classify human-steered per candidate (DIR-062-C: classifier replaces label:human-steered filter)
+  let registry: Registry = { authorizedRoot: null, workspacePaths: [] };
+  try {
+    const registryPath = path.join(workspaceRoot, "experiments", "quay-perpetual-stream", "drivable-workspaces.yml");
+    if (fs.existsSync(registryPath)) {
+      registry = loadRegistry(registryPath);
+    }
+  } catch {
+    // Fail-closed: empty registry means every driven workspace is unauthorized.
+    // In practice, tasks lacking extra.drivenWorkspaces will still pass.
+  }
+
+  for (const c of candidates) {
+    const cr = classifyCandidate(workspaceRoot, c.id, c.extra, registry);
+    c.humanSteered = cr.humanSteered;
+    c.classifyDetail = cr.detail;
+  }
+
+  // Filter out human-steered candidates (they must not be selected autonomously)
+  const autonomousCandidates = candidates.filter((c) => !c.humanSteered);
+
   return {
     halt: haltCheck.halt,
     haltReason: haltCheck.reason,
     pendingDirectives,
     cadence,
-    candidates,
+    candidates: autonomousCandidates,
     milestoneCounter,
     workspaceRoot,
   };
@@ -290,6 +369,8 @@ export function selftest(): boolean {
   check("null-directives", getPendingDirectives(null as any).length === 0, "null");
 
   // ── getCandidates ──
+  // DIR-062-C: getCandidates no longer pre-filters by label:human-steered.
+  // Classification is done in buildPreflightResult via the classifier.
   const candidateTasks = [
     { id: "DIR-089", title: "Test task", status: "todo", labels: ["milestone-candidate"], extra: { rank: 5 } },
     { id: "DIR-090", title: "Human steered", status: "todo", labels: ["milestone-candidate", "human-steered"], extra: {} },
@@ -297,23 +378,70 @@ export function selftest(): boolean {
     { id: "DIR-092", title: "No rank", status: "todo", labels: ["milestone-candidate"], extra: {} },
   ];
   const cands = getCandidates(candidateTasks);
-  check("candidate-count", cands.length === 2, `got ${cands.length} (expected 2 — filtered human-steered + done)`);
+  check("candidate-count", cands.length === 3, `got ${cands.length} (expected 3 — only done filtered; human-steered now classified not label-filtered)`);
   check("candidate-rank", cands[0].id === "DIR-089" && cands[0].rank === 5, `rank=${cands[0].rank}`);
-  check("candidate-default-rank", cands[1].id === "DIR-092" && cands[1].rank === 999, `default rank=${cands[1].rank}`);
-  check("candidates-not-human-steered", !cands.some((c) => c.id === "DIR-090"), "human-steered excluded");
+  check("candidate-default-rank", cands[1].id === "DIR-090" && cands[1].rank === 999, `default rank=${cands[1].rank}`);
+  check("candidate-schema-defaults", cands[0].schemaPass === false && cands[0].hasTouches === false && cands[0].humanSteered === false, "defaults set");
+  // DIR-062-C: human-steered label tasks ARE still returned (classifier runs later in buildPreflightResult)
+  check("human-steered-still-returned", cands.some((c) => c.id === "DIR-090"), "human-steered label task still returned by getCandidates");
 
   // ── checkCandidateTouches ──
   const tmpDir2 = fs.mkdtempSync("select-preflight-selftest-touches-");
   try {
     const tasksDir = path.join(tmpDir2, "tasks");
     fs.mkdirSync(tasksDir, { recursive: true });
-    fs.writeFileSync(path.join(tasksDir, "WITH-TOUCHES.md"), "## Proposal\nsome text\n\n## Touches\n\n- file1.ts\n", "utf8");
+    fs.writeFileSync(path.join(tasksDir, "WITH-TOUCHES.md"), "## Proposal\nsome text\n\n## Touches\n\n- `file1.ts` (comment)\n- `.claude/skills/some-skill/SKILL.md`\n", "utf8");
     fs.writeFileSync(path.join(tasksDir, "NO-TOUCHES.md"), "## Proposal\nsome text\n\n## Acceptance Criteria\n\n- [ ] item\n", "utf8");
     check("has-touches", checkCandidateTouches(tmpDir2, "WITH-TOUCHES") === true, "found ## Touches");
     check("no-touches", checkCandidateTouches(tmpDir2, "NO-TOUCHES") === false, "no ## Touches");
     check("missing-file", checkCandidateTouches(tmpDir2, "NONEXISTENT") === false, "missing → false");
+
+    // ── extractTouchedFiles (DIR-062-C) ──
+    const touchedFiles = extractTouchedFiles(tmpDir2, "WITH-TOUCHES");
+    check("extract-touched-count", touchedFiles.length === 2, `got ${touchedFiles.length} files: ${JSON.stringify(touchedFiles)}`);
+    check("extract-touched-path1", touchedFiles[0] === "file1.ts", `file1=${touchedFiles[0]}`);
+    check("extract-touched-path2", touchedFiles[1] === ".claude/skills/some-skill/SKILL.md", `skill=${touchedFiles[1]}`);
+    check("extract-empty-task", extractTouchedFiles(tmpDir2, "NO-TOUCHES").length === 0, "no Touches → empty");
+    check("extract-nonexistent", extractTouchedFiles(tmpDir2, "NONEXISTENT").length === 0, "missing file → empty");
   } finally {
     fs.rmSync(tmpDir2, { recursive: true, force: true });
+  }
+
+  // ── classifyCandidate (DIR-062-C) ──
+  // Test classifyCandidate through the classifier function with real file structures.
+  const tmpDir3 = fs.mkdtempSync("select-preflight-selftest-classify-");
+  try {
+    const tasksDir2 = path.join(tmpDir3, "tasks");
+    fs.mkdirSync(tasksDir2, { recursive: true });
+
+    // Case 1: task touching OUTER-LOOP.md → humanSteered: true (driverFileEdit)
+    fs.writeFileSync(path.join(tasksDir2, "DRIVER-EDIT.md"), "## Proposal\ntest\n\n## Touches\n\n- `experiments/quay-perpetual-stream/OUTER-LOOP.md`\n", "utf8");
+    const r1 = classifyCandidate(tmpDir3, "DRIVER-EDIT", {}, { authorizedRoot: "/home/yale/work", workspacePaths: [] });
+    check("classify-driver-edit", r1.humanSteered === true && r1.clauses.driverFileEdit === true, `driverFileEdit: ${r1.detail}`);
+
+    // Case 2: task touching only packages/ → humanSteered: false
+    fs.writeFileSync(path.join(tasksDir2, "NON-DRIVER.md"), "## Proposal\ntest\n\n## Touches\n\n- `packages/quay/src/gate/engine.ts`\n- `packages/quay-native/src/provider.ts`\n", "utf8");
+    const r2 = classifyCandidate(tmpDir3, "NON-DRIVER", {}, { authorizedRoot: "/home/yale/work", workspacePaths: [] });
+    check("classify-non-driver", r2.humanSteered === false, `autonomous-eligible: ${r2.detail}`);
+
+    // Case 3: task with missionRedirection extra → humanSteered: true
+    const r3 = classifyCandidate(tmpDir3, "NON-DRIVER", { missionRedirection: true }, { authorizedRoot: "/home/yale/work", workspacePaths: [] });
+    check("classify-mission-redirection", r3.humanSteered === true && r3.clauses.missionRedirection === true, `missionRedirection: ${r3.detail}`);
+
+    // Case 4: task with unauthorized workspace → humanSteered: true
+    const r4 = classifyCandidate(tmpDir3, "NON-DRIVER", { drivenWorkspaces: ["/opt/outside"] }, { authorizedRoot: "/home/yale/work", workspacePaths: [] });
+    check("classify-unauthorized-workspace", r4.humanSteered === true && r4.clauses.unauthorizedWorkspace === true, `unauthorizedWorkspace: ${r4.detail}`);
+
+    // Case 5: task with driven workspaces ALL covered → humanSteered: false
+    const r5 = classifyCandidate(tmpDir3, "NON-DRIVER", { drivenWorkspaces: ["/home/yale/work/quay", "/home/yale/work/archguard"] }, { authorizedRoot: "/home/yale/work", workspacePaths: [] });
+    check("classify-covered-workspaces", r5.humanSteered === false, `covered: ${r5.detail}`);
+
+    // Case 6: task touching .claude/skills/ file → humanSteered: true (driverFileEdit)
+    fs.writeFileSync(path.join(tasksDir2, "SKILL-EDIT.md"), "## Proposal\ntest\n\n## Touches\n\n- `.claude/skills/quay-directive/SKILL.md`\n", "utf8");
+    const r6 = classifyCandidate(tmpDir3, "SKILL-EDIT", {}, { authorizedRoot: "/home/yale/work", workspacePaths: [] });
+    check("classify-skill-edit", r6.humanSteered === true && r6.clauses.driverFileEdit === true, `skill-edit: ${r6.detail}`);
+  } finally {
+    fs.rmSync(tmpDir3, { recursive: true, force: true });
   }
 
   // ── buildPreflightResult integration (without quay CLI) ──
