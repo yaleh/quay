@@ -251,43 +251,41 @@ const IS_CONCURRENT = args.mode === 'concurrent'
 if (IS_CONCURRENT) {
   const concurrentResult = await agent(
     `LAND (concurrent mode) the milestone for task ${args.taskId}. IN CONCURRENT MODE:
-   you are part of a multi-milestone batch — do NOT update milestone_counter or dashboard.md
-   (those writes are deferred to the serial fan-in absorb step that follows).
+   you are part of a multi-milestone batch — do NOT merge to master, do NOT update
+   milestone_counter or dashboard.md (those writes are deferred to the serial fan-in
+   absorb step that follows).
 
-1. MERGE the iteration worktree into master (DIR-027: loop runs on master directly).
-   Any conflict → per-file resolution, both sides read, reconciliation note recorded.
-   Never a blanket --ours/--theirs (DIR-013).
-2. CAPTURE then PRUNE (DIR-033): if a non-primary iteration produced evidence not on
-   master, cherry-pick JUST that evidence file. Then git worktree remove + git branch -d
-   the now-merged branches.
-3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${args.taskId}.md
+1. COMMIT the build in its OWN worktree branch. Do NOT merge to master — the fan-in step
+   is the sole merge owner (DIR-107 Fix 1). Do NOT prune the branch — pruning happens at
+   fan-in after a successful serial merge.
+2. CAPTURE the worktree branch name: run \`git branch --show-current\` and save it as
+   buildBranch. This is the branch the fan-in will merge.
+3. COMPUTE touchedFiles: run \`git diff --numstat origin/master..HEAD\` to get the actual
+   files touched by this build (diff against origin/master, not the build's own base).
+   Collect the changed file paths (column 3 of numstat output) into a flat array.
+4. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${args.taskId}.md
    appending a ## Execution record section (milestone id, iteration count, realized Δv,
-   merge commit SHA, one-line outcome summary) and setting status: done.
-4. COMPUTE touchedFiles: run \`git diff --numstat <merge-base>..<build-branch>\` to get the
-   actual files touched by this build. The merge-base is \`git merge-base origin/master HEAD\`
-   or the commit recorded in the build result (${
-     buildResult?.mergeCommit ? buildResult.mergeCommit : 'from Build phase'
-   }). Collect the changed file paths (column 3 of numstat output) into a flat array.
+   commit SHA, one-line outcome summary) and setting status: done.
 5. DRAFT a one-line dashboard entry for this milestone: "m<NN> · ${args.taskId} · Δv=<realized> ·
-   audit=${auditResult?.verdict || 'NO REFUTATION FOUND'} · merge=<SHORT sha> · → milestones/<NN>/"
+   audit=${auditResult?.verdict || 'NO REFUTATION FOUND'} · → milestones/<NN>/"
 
 Charter: ${args.charterFile}
 Build outcome: ${JSON.stringify(buildResult)}
 Audit verdict: ${auditResult?.verdict}
 
-Return {taskId: "${args.taskId}", outcome: "done", mergeCommit: "<40-char SHA>",
+Return {taskId: "${args.taskId}", outcome: "done", buildBranch: "<git branch name>",
   touchedFiles: ["relative/path/to/file1.ts", ...],
   dashboardEntry: "<markdown block for serial-fanin-absorb.ts>"}.`,
     { phase: 'Land',
-      schema: { type: 'object', required: ['outcome', 'mergeCommit', 'touchedFiles', 'dashboardEntry'], properties: {
+      schema: { type: 'object', required: ['outcome', 'buildBranch', 'touchedFiles', 'dashboardEntry'], properties: {
         taskId: { type: 'string' }, outcome: { type: 'string' },
-        mergeCommit: { type: 'string' },
+        buildBranch: { type: 'string' },
         touchedFiles: { type: 'array', items: { type: 'string' } },
         dashboardEntry: { type: 'string' },
       } } }
   )
-  log(`Land phase complete (concurrent) — milestone ${args.taskId} done, touched ${(concurrentResult?.touchedFiles || []).length} files.`)
-  return { outcome: 'done', taskId: args.taskId, mergeCommit: concurrentResult?.mergeCommit,
+  log(`Land phase complete (concurrent) — milestone ${args.taskId} done, branch ${concurrentResult?.buildBranch}, touched ${(concurrentResult?.touchedFiles || []).length} files.`)
+  return { outcome: 'done', taskId: args.taskId, buildBranch: concurrentResult?.buildBranch,
     touchedFiles: concurrentResult?.touchedFiles, dashboardEntry: concurrentResult?.dashboardEntry, verifyCacheUpdates }
 }
 

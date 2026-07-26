@@ -89,6 +89,13 @@ execute(params) where |batch|=1 = invoke(".claude/workflows/execute-milestone.js
   ⊨ phases cached; resumable within session
   ⊨ serial path (1-wide) — preserved unchanged; counter++ + dashboard inline
 
+dispatch :: Batch → Action
+dispatch(batch) =
+  |batch| = 0 → log("no batchable candidates; N deferred → next pool") → routines()
+  |batch| = 1 → execute(serial)
+  |batch| ≥ 2 → concurrent_execute
+  ⊨ explicit empty-batch branch (DIR-107 Fix 4): "nothing selected" is logged and observable
+
 concurrent_execute :: Batch → {done[], needs-human[]}
 concurrent_execute(B) where |B| ≥ 2:
   a. ∀c∈B: dispatch Workflow({name: "execute-milestone",
@@ -97,18 +104,28 @@ concurrent_execute(B) where |B| ≥ 2:
      — NOT from within a workflow (DIR-092 architectural fix; Workflow-internal dispatch is broken)
   b. wait ∀ N complete (monitor background task completion)
   c. survivors = {c | outcome: "done"}
-  d. scripts/anti-drift-touches-check.ts on git diff --numstat for each survivor's touched files
-     (NON-WAIVABLE — DRY structural enforcement; any overlap → hard error, diagnose before merge)
-  e. scripts/serial-fanin-absorb.ts for deterministic merge plan from survivor results
-     (touchedFiles ∪ dashboardEntry → ordered merge sequence)
-  f. merge each survivor one at a time in plan order (¬parallel merge — single git worktree)
-  g. milestone_counter += |survivors|; dashboard.md append each survivor's dashboardEntry
-  h. regenerate backlog.md/dashboard.md views via scripts/it0-backlog-regen.ts; close-out hygiene
+  d. PRE-MERGE GATE — audit-independence per survivor (DIR-107 Fix 3): verify each survivor's
+     audit session ID ≠ its build session ID (DIR-032/034 anti-forgery; inline verification per
+     DIR-093). Any survivor failing → route to needs-human, EXCLUDE from fan-in (partial-batch:
+     independent survivors still land). audit-indep gate removed from Workflow per DIR-097, runs
+     HERE at fan-in ABSORB.
+  e. PRE-MERGE GATE — anti-drift: scripts/anti-drift-touches-check.ts on git diff --numstat
+     for each survivor's touched files (NON-WAIVABLE — DRY structural enforcement; any overlap →
+     hard error, diagnose before merge). Runs BEFORE any merge step g — master stays clean on
+     HARD FAIL.
+  f. scripts/serial-fanin-absorb.ts for deterministic merge plan from survivor results
+     (buildBranch ∪ touchedFiles ∪ dashboardEntry → ordered merge sequence)
+  g. MERGE each survivor one at a time in plan order consuming buildBranch (SOLE merge owner;
+     ¬parallel merge — single git worktree). Prune each branch after its merge.
+  h. milestone_counter += |survivors|; dashboard.md append each survivor's dashboardEntry
+  i. regenerate backlog.md/dashboard.md views via scripts/it0-backlog-regen.ts; close-out hygiene
      (tree-hygiene-check.sh + worktree-branch-hygiene-check.sh final pass)
   ⊨ Build phase stays INLINE per workflow (loop's fix preserved — Workflow-internal dispatch is broken)
+  ⊨ audit-independence + anti-drift-touches-check are PRE-MERGE gates (steps d,e before step g)
   ⊨ anti-drift-touches-check NON-WAIVABLE (concurrent builds MUST be touch-orthogonal)
   ⊨ fan-in merge is deterministic (serial-fanin-absorb.ts plan order, not heuristic)
   ⊨ survivors < N is legal (failed milestones → needs-human; survivors merge, failed recorded in ABSORB)
+  ⊨ step g is SOLE merge owner — workflows produce committed branches; fan-in owns all merges
 
 checkpoint :: Counter → Checkpoint?
 checkpoint(n) = n%5=0 → write("checkpoints/cp-<NN>.md", health_snapshot) | ∅
