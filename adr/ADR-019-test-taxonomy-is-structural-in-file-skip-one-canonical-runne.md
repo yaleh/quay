@@ -4,6 +4,7 @@ title: Test taxonomy is structural (in-file skip + one canonical runner), never
   an external exclusion list
 status: proposed
 date: 2026-07-26
+enforcement: "bash scripts/test.sh"
 tags:
   - testing
   - methodology
@@ -89,10 +90,15 @@ an executable, single-sourced form.
 - **Enables:** a new test file is safe-by-default (included, and skips itself if it can't run
   offline) instead of unsafe-by-default (silently excluded until someone remembers to add it to a
   list) — directly closes the failure class the DIR-108 audit found.
-- **Does not yet enable:** none of items 1-4 are implemented as of this ADR (`status: proposed`,
-  no `enforcement` field set) — this records the decision the follow-up implementation work is
-  accountable to, per ADR-011 (enforcement lands WITH design, not as a promise to do it later).
-  Tracked for implementation via a `directive` task (see quay-directive skill / DIR series).
+- **Landed (M173/DIR-109):** items 1-3 are implemented — `scripts/test.sh` is the canonical
+  invocation script (`enforcement` field above), the 3 live/conformance files
+  (`serve-github.test.mjs`, `provider-abi-conformance.test.mjs`,
+  `cli-edit-parity-conformance.test.mjs`) each declare their own in-file `node:test` skip
+  condition (opt-in via `QUAY_TEST_LIVE_GITHUB=1`), and both `CLAUDE.md` and
+  `.github/workflows/ci.yml` reference the script instead of restating the glob/exclusion.
+- **Does not yet enable:** item 4 (the mechanical taxonomy self-check that fails closed on a new,
+  unmatched test directory) is tracked separately as DIR-110/M174 — depends on `scripts/test.sh`
+  existing, per this ADR's own Decision #4 and the directive's own scope note.
 - **Scope / relations:** concretizes ADR-004 (hard over soft) and ADR-003 (form-vs-substance) for
   the specific domain of test infrastructure; the taxonomy self-check (item 4) is a direct
   instance of ADR-018's selfcheck-fixture pattern applied one level up (checking that gates/tests

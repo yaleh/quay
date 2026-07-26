@@ -54,7 +54,19 @@
 // as a standing audit channel going forward, not just a one-off report.
 //
 // Run: node packages/quay/test/provider-abi-conformance.test.mjs
+//
+// ADR-019 (M173/DIR-109): in-file skip declaration. The github leg above
+// hits the real live yaleh/quay repo (gh-3/4/5/7/11/12/13/14) — unsafe-by-
+// default for an offline / credential-less run, and the native+github legs
+// are not currently split, so the whole file (native leg included) skips
+// together, matching this file's prior external-exclusion behavior exactly
+// (see the old `.github/workflows/ci.yml` grep -vE comment history).
+// Classification lives HERE, not in an external grep/glob exclusion list.
+// Opt in with QUAY_TEST_LIVE_GITHUB=1 (requires GH_TOKEN / `gh auth login`
+// with read+write access to yaleh/quay — the M12-abi-parent-write block
+// genuinely mutates real issue bodies on gh-12/gh-13/gh-14).
 
+import { test } from "node:test";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -62,6 +74,9 @@ import fs from "node:fs";
 import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+const LIVE_GITHUB_ENV = "QUAY_TEST_LIVE_GITHUB";
+const liveGithubEnabled = process.env[LIVE_GITHUB_ENV] === "1";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nativeBin = path.join(__dirname, "..", "..", "quay-native", "bin", "quay-native.ts");
@@ -453,13 +468,18 @@ async function main() {
 
   if (failures > 0) {
     console.error(`\n${failures} provider-abi-conformance test failure(s).`);
-    process.exitCode = 1;
+    throw new Error(`${failures} provider-abi-conformance test failure(s)`);
   } else {
     console.log("\nAll provider-abi-conformance scenario cells passed (this is a CONFORMANCE report, not a claim of feature-parity — see the unsupported-field probe above and dashboard.md/gap-list.md for divergence findings logged separately, not failed as test assertions since they are documented, expected-per-scope divergences, not regressions).");
   }
 }
 
-main().catch((err) => {
-  console.error("provider-abi-conformance.test.mjs crashed:", err);
-  process.exitCode = 1;
-});
+test(
+  "provider-abi-conformance: native+github differential conformance suite (task_list/task_get/task_write/task_check)",
+  {
+    skip:
+      !liveGithubEnabled &&
+      `live-GitHub test skipped by default — opt in with ${LIVE_GITHUB_ENV}=1 (requires GH_TOKEN / gh auth with read+write access to yaleh/quay)`,
+  },
+  main
+);

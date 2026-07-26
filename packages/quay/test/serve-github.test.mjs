@@ -36,13 +36,25 @@
 // each named for their own gh-3-dependent assertions.
 //
 // Run: node test/serve-github.test.mjs
+//
+// ADR-019 (M173/DIR-109): in-file skip declaration. This file hits the real
+// live yaleh/quay GitHub repo (gh-3) — unsafe-by-default for an offline /
+// credential-less run. Classification lives HERE, not in an external
+// grep/glob exclusion list (scripts/test.sh's default glob always includes
+// this file; this in-file guard is what keeps it safe). Opt in with
+// QUAY_TEST_LIVE_GITHUB=1 (requires GH_TOKEN / `gh auth login` with read
+// access to yaleh/quay).
 
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import http from "node:http";
 import { startServer } from "../src/serve.ts";
+
+const LIVE_GITHUB_ENV = "QUAY_TEST_LIVE_GITHUB";
+const liveGithubEnabled = process.env[LIVE_GITHUB_ENV] === "1";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
@@ -148,10 +160,17 @@ async function main() {
       ? "\nAll QN-061 live cross-Provider (GitHub) Web UI regression tests passed."
       : `\n${failures} test(s) FAILED`
   );
-  process.exitCode = failures === 0 ? 0 : 1;
+  if (failures > 0) {
+    throw new Error(`${failures} QN-061 live cross-Provider (GitHub) test(s) FAILED`);
+  }
 }
 
-main().catch((err) => {
-  console.error(err.stack || String(err));
-  process.exitCode = 1;
-});
+test(
+  "QN-061 live cross-Provider (GitHub) Web UI regression (serve.js against real yaleh/quay issue gh-3)",
+  {
+    skip:
+      !liveGithubEnabled &&
+      `live-GitHub test skipped by default — opt in with ${LIVE_GITHUB_ENV}=1 (requires GH_TOKEN / gh auth with read access to yaleh/quay)`,
+  },
+  main
+);

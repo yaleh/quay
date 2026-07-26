@@ -26,17 +26,13 @@ jobs:
           node-version: '24'
       - run: npm install
       - name: Run tests
-        # M120 (DIR-060) follow-up fix: exclude live-GitHub-hitting suites.
-        # serve-github.test.mjs / provider-abi-conformance.test.mjs are the 2
-        # CLAUDE.md-documented exclusions (FAIL/hang when github.token lacks
-        # write perms or repo state drifts; previously masked here too — the
-        # OLD Node-20 `.ts`-extension crash always aborted this step first).
-        # cli-edit-parity-conformance.test.mjs is a THIRD file discovered via
-        # a real v0.3.7 release run: it has its own live "GitHub leg" doing
-        # MUTATING writes (title/labels/parent edits to real yaleh/quay
-        # issues gh-11/gh-3) that need broader org perms than the default
-        # read-only github.token — not previously documented in CLAUDE.md.
-        run: node --test $(ls packages/*/test/*.test.mjs plugin/test/*.test.mjs | grep -vE 'serve-github|provider-abi-conformance|cli-edit-parity-conformance')
+        # ADR-019/DIR-109 (M173): canonical entrypoint — scripts/test.sh owns the test-file glob
+        # and the concurrency default; this step no longer hand-writes its own copy of either.
+        # The 3 live/conformance files (serve-github.test.mjs, provider-abi-conformance.test.mjs,
+        # cli-edit-parity-conformance.test.mjs) now declare their own in-file skip condition
+        # (opt-in via QUAY_TEST_LIVE_GITHUB=1, not set here) instead of being excluded by a
+        # hand-written grep/glob pattern — this job reports them `skipped`, not silently absent.
+        run: bash scripts/test.sh
         env:
           GH_TOKEN: ${{ github.token }}
 

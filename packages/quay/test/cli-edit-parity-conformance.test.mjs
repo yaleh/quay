@@ -18,12 +18,25 @@
 // convention's own scope discipline.
 //
 // Run: node packages/quay/test/cli-edit-parity-conformance.test.mjs
+//
+// ADR-019 (M173/DIR-109): in-file skip declaration. The GitHub leg above
+// performs real, mutating writes against the live yaleh/quay repo (gh-11
+// title/body/labels; gh-3 idempotent-status/hard-error probes) — unsafe-by-
+// default for an offline / credential-less run, and (matching this file's
+// prior external-exclusion behavior) the native leg is not currently split
+// out, so the whole file skips together. Classification lives HERE, not in
+// an external grep/glob exclusion list. Opt in with QUAY_TEST_LIVE_GITHUB=1
+// (requires GH_TOKEN / `gh auth login` with write access to yaleh/quay).
 
+import { test } from "node:test";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+
+const LIVE_GITHUB_ENV = "QUAY_TEST_LIVE_GITHUB";
+const liveGithubEnabled = process.env[LIVE_GITHUB_ENV] === "1";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const quayBin = path.join(__dirname, "..", "bin", "quay.ts");
@@ -284,13 +297,18 @@ async function main() {
   console.log(`\n--- cli-edit-parity-conformance: ${failures === 0 ? "all probes passed" : failures + " probe(s) FAILED"} ---`);
   if (failures > 0) {
     console.error(`\n${failures} cli-edit-parity-conformance test failure(s).`);
-    process.exitCode = 1;
+    throw new Error(`${failures} cli-edit-parity-conformance test failure(s)`);
   } else {
     console.log("\nAll cli-edit-parity-conformance scenario cells passed.");
   }
 }
 
-main().catch((err) => {
-  console.error("cli-edit-parity-conformance.test.mjs crashed:", err);
-  process.exitCode = 1;
-});
+test(
+  "cli-edit-parity-conformance: native+github CLI-level `quay task edit` flag-surface probes",
+  {
+    skip:
+      !liveGithubEnabled &&
+      `live-GitHub test skipped by default — opt in with ${LIVE_GITHUB_ENV}=1 (requires GH_TOKEN / gh auth with write access to yaleh/quay)`,
+  },
+  main
+);

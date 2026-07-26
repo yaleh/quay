@@ -16,11 +16,21 @@ No `package.json` scripts and no build step (plain ESM Node ≥20; repo develope
 
 - **Run the CLI:** `node packages/quay/bin/quay.js <cmd>` (Core), `node packages/quay-native/bin/quay-native.js <cmd>` (native provider directly).
 - **Tests** (Node's built-in runner, `.mjs` under each package's `test/`):
-  - Full package: `cd packages/quay && node --test test/*.mjs`
-  - Single file: `node --test packages/quay/test/gate.test.mjs`
-  - Single test by name: `node --test --test-name-pattern="flag before id" packages/quay/test/gate.test.mjs`
-  - Coverage: `node --test --experimental-test-coverage test/*.mjs`
-  - **Two suites hit LIVE GitHub (`test/serve-github.test.mjs`, `test/provider-abi-conformance.test.mjs`)** — they FAIL offline / when github.com/yaleh/quay state drifts. Exclude them for a clean local run: `node --test $(ls test/*.mjs | grep -vE 'serve-github|provider-abi-conformance')`.
+  - **Canonical entrypoint: `scripts/test.sh`** (ADR-019/DIR-109) — the single script both this
+    file and `.github/workflows/ci.yml` invoke; it owns the test-file glob
+    (`packages/*/test/*.test.mjs plugin/test/*.test.mjs`) and defaults to `--test-concurrency=8`.
+    Do not hand-write a new copy of the glob or an exclusion list elsewhere — edit the script.
+  - Full safe-by-default suite: `scripts/test.sh` (no args)
+  - Single file: `scripts/test.sh packages/quay/test/gate.test.mjs`
+  - Single test by name: `scripts/test.sh --test-name-pattern="flag before id" packages/quay/test/gate.test.mjs`
+  - Coverage: `scripts/test.sh --experimental-test-coverage packages/quay/test/*.mjs`
+  - **3 files hit LIVE GitHub** (`packages/quay/test/serve-github.test.mjs`,
+    `provider-abi-conformance.test.mjs`, `cli-edit-parity-conformance.test.mjs`) — each declares
+    its OWN in-file `node:test` skip condition (ADR-019 decision #1), so `scripts/test.sh`'s
+    default glob always includes them and a credential-less run reports them `skipped`, not
+    silently excluded. Opt in with `QUAY_TEST_LIVE_GITHUB=1 scripts/test.sh` (requires
+    `GH_TOKEN`/`gh auth login` with access to `yaleh/quay`; they FAIL if that repo's state drifts
+    from what the fixture assumes).
   - Tests build a temp workspace with a real `.quay/config.yml` (see `makeWorkspace()` in a test file) — a bare tasks dir is NOT a valid workspace; the config is a **provider map** with `mcp_entry`/`path`/`env`, not a flat tasks path.
 - **Web UI:** `node packages/quay/bin/quay.js serve --port <p>` (renders task bodies as markdown; reads the task store live per request).
 

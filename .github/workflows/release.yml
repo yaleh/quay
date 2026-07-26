@@ -40,29 +40,20 @@ jobs:
         # tests that spawn `quay --provider github` making live GitHub API calls
         # against yaleh/quay. Without GH_TOKEN the gh CLI subprocess returns 403.
         # github.token has read access to this repo's issues by default.
-        # quay-github package tests are excluded (they require broader org perms).
+        # quay-github package tests are excluded (they require broader org perms) —
+        # this job intentionally scopes to packages/quay + packages/quay-native only,
+        # narrower than scripts/test.sh's default glob, so it does NOT delegate to
+        # scripts/test.sh here.
         #
-        # M120 (DIR-060) follow-up fix: this bare glob also silently pulled in
-        # test/serve-github.test.mjs and test/provider-abi-conformance.test.mjs,
-        # 2 suites CLAUDE.md documents as requiring exclusion for a clean run
-        # (they hit LIVE GitHub and FAIL/hang when github.token lacks write
-        # perms or repo state drifts). This was previously masked: the OLD
-        # Node-20 `.ts`-extension crash always aborted this step before
-        # reaching these files. Fixing the Node-floor regression exposed this
-        # separate, pre-existing gap — a real v0.3.6 release run hit exactly
-        # this (provider-abi-conformance crashed on a 403, then the job hung
-        # past the 10-minute timeout). Apply the same exclusion CLAUDE.md's
-        # own local-run instructions already document.
-        #
-        # A real v0.3.7 release run then found a THIRD file needing the same
-        # treatment: cli-edit-parity-conformance.test.mjs has its own live
-        # "GitHub leg" doing MUTATING writes (title/labels/parent edits to
-        # real yaleh/quay issues gh-11/gh-3), which needs broader org perms
-        # than the default read-only github.token — not previously
-        # documented in CLAUDE.md.
+        # ADR-019/DIR-109 (M173): the hand-written `grep -vE 'serve-github|
+        # provider-abi-conformance|cli-edit-parity-conformance'` exclusion this step
+        # used to need (a 3rd duplicate of the same pattern CLAUDE.md/ci.yml hand-wrote)
+        # is GONE — those 3 files now each declare their own in-file `node:test` skip
+        # condition (opt-in via QUAY_TEST_LIVE_GITHUB=1, not set here), so they safely
+        # self-skip without github.token needing the broader perms they used to require.
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node --test $(ls packages/quay/test/*.mjs | grep -vE 'serve-github|provider-abi-conformance|cli-edit-parity-conformance') packages/quay-native/test/*.test.mjs
+        run: node --test packages/quay/test/*.mjs packages/quay-native/test/*.test.mjs
 
       - name: Build release artifact (npm pack)
         id: pack
