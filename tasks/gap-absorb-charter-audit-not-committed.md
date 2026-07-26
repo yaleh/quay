@@ -173,7 +173,41 @@ N/A — resolved via a milestone. Implementation touches:
   confirmed, see AC row above.
 - [~] All it0 selfchecks + gate hashes green on the merged result — see AC row above (4
   pre-existing, non-regression failures remain).
-- [ ] No new backlog accumulates over the next 5 milestones (spot-check `git status` clean
+- [~] No new backlog accumulates over the next 5 milestones (spot-check `git status` clean
   on charters/ and audits/ after each) — cannot be confirmed yet; 0 milestones have landed
   since M176 as of this audit (2026-07-26). Forward-looking criterion, unverifiable at audit
   time.
+
+## Independent audit, round 2 (2026-07-26, fresh-context, dispatched after M177/M178/M179 landed)
+
+Per this repo's convention that a separately-dispatched independent audit (not just the workflow's
+own internal one) is required, and now that 3 REAL subsequent milestones exist as evidence — the
+kind of cold, unbiased test the original REFUTED verdict said was missing:
+
+**Per-milestone commit-timing table** (all real, `git log` — verified independently, not
+self-report):
+
+| Milestone | Charter+iteration commit | Audit-file commit | Same commit? |
+|---|---|---|---|
+| M177 | `a14f7ea` (16:52Z) | `0b9255a` (17:00Z) | No — separate, +8 min |
+| M178 | `3f28b4e` (17:22Z) | `b2e1e1e` (17:33Z) | No — separate, +11 min |
+| M179 | `6983aa6` (17:49Z) | `5eed42a` (18:05Z) | No — separate, +16 min |
+
+**Verdict: PARTIALLY CONFIRMED, the actual defect is fixed even though the literal AC wording is
+not.** None of the 3 land charter+audit in a single commit (Audit is structurally a separate,
+later pipeline phase from Build/Land — that's expected sequencing, not a defect). But critically:
+**no backlog accumulated** — each milestone's charter/iteration/audit landed promptly,
+individually, minutes apart, immediately after being produced. This is categorically different
+from the M144-M166 pattern this task was filed to fix (16 charters + 19 audit files silently
+piling up across MANY milestones, discovered and swept once by hand) and different from M176's own
+bootstrap failure (where the audit was never committed at all until an external audit forced it).
+The path-prefix single-sourcing (`gate_resolve_milestone_root`, `gate-script-lib.sh:152`) is
+confirmed genuinely single-sourced across both mirrors — one M179 build did file its own evidence
+under the wrong legacy path (an isolated Build-agent deviation, not a defect in the function
+itself; tracked separately). AC4/DoD2's literal "same commit as merge, no manual sweep" is
+REFUTED-as-worded and left unticked, but the underlying operational claim this task exists to
+prove — no more silent, unbounded backlog accumulation — is now genuinely supported by 3
+consecutive real data points (3 of the AC's requested 5; trend positive, not yet complete).
+Mechanical gate still exits 1, driven entirely by the separately-tracked
+`gap-absorb-entry-clause-disposition-sequencing` finding (clause1/2/7), not by anything specific
+to this task's own product code.
