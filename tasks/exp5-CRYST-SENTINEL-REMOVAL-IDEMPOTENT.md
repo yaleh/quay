@@ -2,7 +2,7 @@
 id: exp5-CRYST-SENTINEL-REMOVAL-IDEMPOTENT
 title: "crystallization: rm -f for sentinel-file removal — idempotent sentinel
   ops as a standing rule"
-status: todo
+status: done
 labels:
   - milestone-candidate
 extra:
@@ -49,17 +49,17 @@ that all sentinel removals MUST use `rm -f`.
 
 ## Acceptance Criteria
 
-- [ ] All occurrences of `rm experiments/quay-perpetual-stream/.halt` (or equivalent) in `OUTER-LOOP.md` and scripts replaced with `rm -f`
-- [ ] A standing note in `inherited-core.md` (or `OUTER-LOOP.md`) states the sentinel-removal rule: "use `rm -f`, never bare `rm`, for any optional sentinel file"
-- [ ] Zero spurious `rm: cannot remove ... No such file or directory` errors appear in subsequent sessions' error signals
+- [x] All occurrences of `rm experiments/quay-perpetual-stream/.halt` (or equivalent) in `OUTER-LOOP.md` and scripts replaced with `rm -f` *(audit: CONFIRMED — no bare `rm` for sentinels found in committed code; scripts already use `rm -f`/`rm -rf`; invariant I₁₆ at OUTER-LOOP.md:135 mandates `rm -f`; commit d2d3621)*
+- [x] A standing note in `inherited-core.md` (or `OUTER-LOOP.md`) states the sentinel-removal rule: "use `rm -f`, never bare `rm`, for any optional sentinel file" *(audit: CONFIRMED — OUTER-LOOP.md line 135: `I₁₆: sentinel-removal-idempotent (rm -f, ¬bare rm for any optional sentinel file; M166 crystallization)`)*
+- [ ] Zero spurious `rm: cannot remove ... No such file or directory` errors appear in subsequent sessions' error signals *(audit: REFUTED — forward-looking behavioral guarantee; unverifiable at audit time; same pattern as M148/DIR-096 AC-2, M151/DIR-089 AC-3, M152/DIR-091 AC-3)*
 
 ## Definition of Done
 
 References the standard inherited-core DoD clauses.
 
-- [ ] `OUTER-LOOP.md` and all affected scripts updated
-- [ ] Rule documented in inherited-core or OUTER-LOOP.md
-- [ ] Adversarial audit disposition recorded
+- [x] `OUTER-LOOP.md` and all affected scripts updated *(audit: CONFIRMED — I₁₆ invariant added to OUTER-LOOP.md:135-136; no script changes needed (all already use `rm -f`/`rm -rf`); commit d2d3621)*
+- [x] Rule documented in inherited-core or OUTER-LOOP.md *(audit: CONFIRMED — OUTER-LOOP.md lines 135-136)*
+- [x] Adversarial audit disposition recorded *(audit: CONFIRMED — this audit artifact at milestones/M166/audits/iteration-0-acceptance-audit.md)*
 
 
 ## Scope narrowed (2026-07-26)
@@ -75,3 +75,11 @@ N/A — docs change. Replace rm with rm -f for sentinel removal.
 
 ## Touches
 - experiments/quay-perpetual-stream/OUTER-LOOP.md
+
+## Execution record
+
+- **Milestone:** M166
+- **Iteration count:** 0 (direct commit, crystallization)
+- **Realized Δv:** 0 (crystallization — no chart-2 surface cell moves)
+- **Merge commit:** d2d3621
+- **Outcome:** Done — rm -f sentinel-removal invariant I₁₆ added to OUTER-LOOP.md; no code changes needed (all scripts already used rm -f/rm -rf); adversarial audit returned CONCERNS (AC3 forward-looking unverifiable; 4 sequential pre-write-back template gaps self-resolved); milestone counter advanced 165→166.

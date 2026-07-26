@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| DIR-102 | DIR-102: Allow lifecycle_retreat from needs-human to todo | DONE | - | directive, milestone-candidate |
 | DIR-098 | DIR-098: Add quay init command — scaffold .quay/config.yml for new workspaces | DONE | - | directive, milestone-candidate, milestone:M164 |
 | gap-composePayload-null-payload | action.ts composePayload crashes on action_button with undefined payload | DONE | - | gap, routine-filed, milestone-candidate, self-validation, milestone:M163 |
 | undefined | serve: handleTaskAction crashes on nonexistent task (null dereference) | DONE | - | defect, milestone-candidate |
@@ -177,7 +178,9 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| DIR-102 | DIR-102: Allow lifecycle_retreat from needs-human to todo | open | - | directive, milestone-candidate |
+| exp5-CRYST-SENTINEL-REMOVAL-IDEMPOTENT | crystallization: rm -f for sentinel-file removal — idempotent sentinel ops as a standing rule | open | - | milestone-candidate |
+| DIR-105 | DIR-105: Change hardcoded default_task_status fallback from todo to ready | open | - | directive, milestone-candidate |
+| exp5-ADR-TOOLSEARCH-DEFERRED-SCHEMA-PATTERN | adr-draft: ToolSearch pre-fetch as mandatory first step for deferred tools — load-bearing but undocumented decision | open | - | milestone-candidate |
 | DIR-104 | DIR-104: gate --list --verbose — show gate provenance, type, and diagnostics | open | - | directive, milestone-candidate |
 | DIR-103 | DIR-103: Acceptance runner — dry-run mode, env file, and environment documentation | open | - | directive, milestone-candidate |
 | DIR-101 | DIR-101: Add default_task_schema config key | open | - | directive, milestone-candidate |
@@ -200,8 +203,5 @@ Sort: value-view (DONE/open/STALE, default)
 | DIR-055 | meta-cc session-history mining ROUTINE (LOOP-EXECUTABLE): a standing loop-driver routine (via DIR-051/[[DIR-056]]) that periodically dispatches a fresh-context probe which mines the project's Claude Code session history with meta-cc — surfacing recurring design/implementation defects, ADR candidates, and reusable/crystallizable patterns — and FILES them as evidence-backed tasks ROUTED by finding-type behind the quality/dedup/rate gate. The third standing probe (process/provenance axis) alongside self-validation (DIR-052) + architecture-analysis (DIR-053). | SELECTED | - | directive, milestone-candidate, milestone:M-102 |
 | DIR-057 | mechanical batch lane for exp5 OUTER-LOOP (HUMAN-STEERED, golden-replay): wire cross-milestone concurrency into exp5's bespoke driver for the SAFE subset ONLY — build-concurrent / fan-in-ABSORB-serial (reusing the DIR-044 scheduler), gated by an EXECUTABLE batch-eligibility predicate (capability-growth + declared ## Touches + touches no method file) so methodology milestones stay strictly serial and the SELECT←ABSORB learning loop is never broken. Opt-in, narrow. | open | - | directive, milestone-candidate, human-steered |
 | exp5-M-QENG-DOD-DEMO-ONLY | The QENG-5 'exp5 DoD via quay gate' wiring is demo-only (2 fixture tasks, QENG-5-DEMO-PASS/FAIL) — the REAL per-milestone DoD meta-enforcer gate at OUTER-LOOP.md step 6/7 still runs it0-dod-check.sh as a bare prose shell call, not through quay gate; decide whether/how to close that gap | SELECTED | governance-integrity (closes a self-disclosed "shelfware risk" the QENG-0 epic itself named as | milestone-candidate, surface:method-infra, milestone:M37-discover-post-qeng |
-| exp5-M-CLI-UX | CLI usability closeout (UQ-042..046) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:cli |
-| exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
-| exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_197 milestone-candidate task(s) as of 2026-07-26T02:45:15.417Z._
+_197 milestone-candidate task(s) as of 2026-07-26T03:25:39.987Z._
