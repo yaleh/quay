@@ -102,25 +102,78 @@ N/A — resolved via a milestone. Implementation touches:
 
 ## Acceptance Criteria
 
-- [ ] OUTER-LOOP.md charter-authoring step explicitly `git add`s the new charter file
-- [ ] `execute-milestone.js` Audit phase either commits its own output file, or Land phase
-  step 2 mechanically stages `milestones/M<NN>/audits/*` (not just prose "if...")
-- [ ] A single authoritative rule decides the `milestones/` path prefix for a given
-  milestone number; both the Audit-phase write and the dogfood-evidence-gate lookup use it
+- [x] OUTER-LOOP.md charter-authoring step explicitly `git add`s the new charter file —
+  confirmed: `git show c3ae6dd -- experiments/quay-perpetual-stream/OUTER-LOOP.md` adds
+  `⊨ commit: git add experiments/quay-perpetual-stream/charters/M<NN>-*.md as part of THIS
+  milestone's own commit sequence...` to the `charter ::` step, consistent with the file's
+  existing `⊨`-clause idiom for procedural instructions.
+- [x] `execute-milestone.js` Audit phase either commits its own output file, or Land phase
+  step 2 mechanically stages `milestones/M<NN>/audits/*` (not just prose "if...") —
+  confirmed both: Audit-phase prompt diff adds step "4a. STAGE THE AUDIT FILE...git add this
+  audit file"; Land phase CAPTURE step (serial + concurrent, both `.claude/workflows/` and
+  `plugin/workflows/` mirrors, verified byte-identical via `diff`) changed from prose
+  "if a non-primary iteration produced evidence" to unconditional `git add` of everything
+  under `$MILESTONE_ROOT/{audits,iterations}/`.
+- [x] A single authoritative rule decides the `milestones/` path prefix for a given
+  milestone number; both the Audit-phase write and the dogfood-evidence-gate lookup use it —
+  confirmed: `gate_resolve_milestone_root()` added to `gate-script-lib.sh` (both copies
+  identical); `it0-dogfood-evidence-gate.sh` calls it directly (verified by running
+  `it0-dogfood-evidence-gate.sh --milestone M176` → resolves `milestones/M176` correctly);
+  `execute-milestone.js` prompts reference the same function name in both phases.
+  `grep -rn "gate_resolve_milestone_root\|-ge 130"` across scripts/workflows shows the
+  numeric `130` boundary exists ONLY inside that one function; every other hit is a comment
+  referencing it by name.
 - [ ] A fresh milestone run (serial path) lands with its charter AND audit file already
-  committed as part of the ABSORB commit — no manual sweep needed afterward
-- [ ] `tree-hygiene-check.sh` (or a new check) surfaces an untracked charter/audit file at
-  Gate time as at least a WARNING, so future drift is visible before it accumulates
-- [ ] Existing it0 selfchecks + gate hashes stay green
-- [ ] No regression to the serial or concurrent execution paths
+  committed as part of the ABSORB commit — no manual sweep needed afterward — **REFUTED**:
+  the M176 landing commit `c3ae6dd` (`git show --stat`) includes the charter file but
+  contains NO `milestones/M176/audits/` path at all, and no such file exists anywhere in git
+  history or on disk as of this audit (`find milestones/M176 -type f` → only
+  `iterations/iteration-0.md`). The commit message's own claim ("This milestone's own
+  charter + audit-report path are committed here as live proof") is false for the audit half
+  — no adversarial audit had run before the Land/merge commit landed on master, so the very
+  claim this AC is meant to prove (fix works end-to-end on a real run) was never actually
+  exercised. This audit is the first Audit-phase pass for M176 and necessarily lands in a
+  LATER, separate commit — which is itself the "manual sweep" pattern the task set out to
+  eliminate, not proof it's eliminated.
+- [x] `tree-hygiene-check.sh` (or a new check) surfaces an untracked charter/audit file at
+  Gate time as at least a WARNING, so future drift is visible before it accumulates —
+  confirmed: ran `bash experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh` live
+  (this milestone's own audit file is untracked at the moment of writing) and observed
+  `tree-hygiene: WARN — untracked ABSORB-pipeline evidence file(s)...` with exit 0
+  (non-blocking, as designed).
+- [~] Existing it0 selfchecks + gate hashes stay green — PARTIALLY: `dod-fixture-selfcheck.sh`
+  (17/17), `audit-independence-selfcheck.sh` (7/7), `vmeta-lag-selfcheck.sh` (8/8),
+  `task-schema-selfcheck.sh` (14/14), `loadbearing-test-gate-selfcheck.sh`, and
+  `it0-gate-hash-check.sh --by-reference` all PASS. However `touches-orthogonality-selfcheck.sh`,
+  `routine-scheduler-selfcheck.sh`, `serial-fanin-absorb-selfcheck.sh`, and
+  `concurrent-batch-scheduler-selfcheck.sh` all FAIL — confirmed via a throwaway worktree at
+  the pre-M176 commit (`3054ca7`) that these 4 fail identically there too, so they are
+  **pre-existing breakage, not a regression introduced by this milestone**. Left unticked
+  because the literal AC text ("Existing it0 selfchecks... stay green") is not met in
+  absolute terms, even though this milestone caused none of the 4 failures.
+- [x] No regression to the serial or concurrent execution paths — confirmed for the parts
+  this milestone touches: `node --check` passes on both `.claude/workflows/execute-milestone.js`
+  and `plugin/workflows/execute-milestone.js`; both serial and concurrent Land-phase CAPTURE
+  edits are structurally parallel (same diff shape applied to both code paths); the two
+  workflow-mirror files remain byte-identical (`diff` exit 0); `plugin/test/plugin-packaging.test.mjs`
+  passes 30/30 (the packaging-regression the implementer caught and fixed mid-build).
 
 ## Definition of Done
 
-- [ ] `OUTER-LOOP.md` charter step change landed and verified (a real charter's `git add`
-  is part of that milestone's own commit history, not swept later)
+- [x] `OUTER-LOOP.md` charter step change landed and verified (a real charter's `git add`
+  is part of that milestone's own commit history, not swept later) — confirmed: charter
+  `experiments/quay-perpetual-stream/charters/M176-gap-absorb-charter-audit-commit.md` is
+  present in commit `c3ae6dd`'s file list (66 insertions), not left untracked.
 - [ ] `execute-milestone.js` Audit-phase/Land-phase change landed; a real milestone's audit
-  file lands in the SAME commit series that merges the milestone (not left untracked)
-- [ ] Path-prefix rule is single-sourced (grep confirms no duplicated boundary logic)
-- [ ] All it0 selfchecks + gate hashes green on the merged result
+  file lands in the SAME commit series that merges the milestone (not left untracked) —
+  **REFUTED**, same evidence as the AC row above: no audit file exists in `c3ae6dd` or
+  anywhere else in the repo prior to this audit pass. The code change (the instruction text)
+  landed; the behavioral claim it makes about itself has not been demonstrated by a real run.
+- [x] Path-prefix rule is single-sourced (grep confirms no duplicated boundary logic) —
+  confirmed, see AC row above.
+- [~] All it0 selfchecks + gate hashes green on the merged result — see AC row above (4
+  pre-existing, non-regression failures remain).
 - [ ] No new backlog accumulates over the next 5 milestones (spot-check `git status` clean
-  on charters/ and audits/ after each)
+  on charters/ and audits/ after each) — cannot be confirmed yet; 0 milestones have landed
+  since M176 as of this audit (2026-07-26). Forward-looking criterion, unverifiable at audit
+  time.
