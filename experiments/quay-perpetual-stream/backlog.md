@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| DIR-098 | DIR-098: Add quay init command — scaffold .quay/config.yml for new workspaces | DONE | - | directive, milestone-candidate, milestone:M164 |
 | gap-composePayload-null-payload | action.ts composePayload crashes on action_button with undefined payload | DONE | - | gap, routine-filed, milestone-candidate, self-validation, milestone:M163 |
 | undefined | serve: handleTaskAction crashes on nonexistent task (null dereference) | DONE | - | defect, milestone-candidate |
 | exp5-M-ROUTINE-F-156-3 | ADR-001 gate fails: gate-script-base.ts is load-bearing but missing sibling test file | DONE | - | defect, routine-finding, milestone-candidate, milestone:M158 |
@@ -176,7 +177,12 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| DIR-098 | DIR-098: Add quay init command — scaffold .quay/config.yml for new workspaces | open | - | directive, milestone-candidate |
+| DIR-102 | DIR-102: Allow lifecycle_retreat from needs-human to todo | open | - | directive, milestone-candidate |
+| DIR-104 | DIR-104: gate --list --verbose — show gate provenance, type, and diagnostics | open | - | directive, milestone-candidate |
+| DIR-103 | DIR-103: Acceptance runner — dry-run mode, env file, and environment documentation | open | - | directive, milestone-candidate |
+| DIR-101 | DIR-101: Add default_task_schema config key | open | - | directive, milestone-candidate |
+| DIR-100 | DIR-100: Gate loader diagnostics | open | - | directive, milestone-candidate |
+| DIR-099 | DIR-099: Add quay config validate command | open | - | directive, milestone-candidate |
 | DIR-089 | DIR-089: Safe JSON parse guard — 4 identical JSONDecodeError traces | open | - | milestone-candidate, defect, human-steered |
 | DIR-078 | DIR-078: Adaptive Build-phase heartbeat — harness notification as primary wake | open | - | directive, human-steered, milestone-candidate |
 | DIR-073 | DIR-073: Verify failure diagnostic — scripts/diagnose-verify-failure.ts + thin diagnose-complex workflow | open | - | directive, milestone-candidate |
@@ -198,4 +204,4 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M-DIRTASK | Directives-as-quay-tasks single-source-of-truth cutover — STALE, not selected | STALE | explore | milestone-candidate, backfill, stale, surface:method-infra |
 | exp5-M-DOCS | Docs surface hardening (docs_quality sub-dimension) — STALE, not selected | STALE | exploit | milestone-candidate, backfill, stale, surface:docs |
 
-_191 milestone-candidate task(s) as of 2026-07-26T02:08:03.151Z._
+_197 milestone-candidate task(s) as of 2026-07-26T02:45:15.417Z._
