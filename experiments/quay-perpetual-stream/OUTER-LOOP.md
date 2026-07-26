@@ -132,6 +132,8 @@ routines() = invoke(".claude/workflows/run-routines.js", {workspaceRoot, tasksDi
   I₁₃: FILE-ONLY routines output                            (run-routines Verify phase)
   I₁₄: task-canonical directives                            (DIR-028; label:directive tasks only)
   I₁₅: parent-done iff children-done                        (scripts/it0-split-or-commit-check.ts; child-link-symmetry)
+  I₁₆: sentinel-removal-idempotent                          (rm -f, ¬bare rm for any optional sentinel
+                                                              file; M166 crystallization)
 
 -- CONTRACTS (executable at session start; any FAIL → halt ∧ report)
 

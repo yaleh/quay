@@ -5,6 +5,12 @@ title: "crystallization: rm -f for sentinel-file removal — idempotent sentinel
 status: todo
 labels:
   - milestone-candidate
+extra:
+  schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-CRYST-SENTINEL-REMOVAL-IDEMPOTENT
+    experiments/quay-perpetual-stream/charters/M166-cryst-sentinel.md
+    /tmp/m166-absorb-entry.md
 ---
 ## Proposal
 
@@ -62,3 +68,10 @@ Per review of stale-todo backlog: the `rm` without `-f` pattern is a one-line fi
 Some scripts already use `rm -f` (routine-scheduler-selfcheck.sh, routine-file-gate-selfcheck.sh).
 Scope: audit all scripts/ for bare `rm` calls against sentinel/optional files, change to `rm -f`.
 Estimate: ~5 lines changed across 2-3 scripts.
+
+## Plan
+
+N/A — docs change. Replace rm with rm -f for sentinel removal.
+
+## Touches
+- experiments/quay-perpetual-stream/OUTER-LOOP.md
