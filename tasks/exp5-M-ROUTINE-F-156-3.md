@@ -2,12 +2,13 @@
 id: exp5-M-ROUTINE-F-156-3
 title: "ADR-001 gate fails: gate-script-base.ts is load-bearing but missing
   sibling test file"
-status: todo
+status: done
 role: primitive
 labels:
   - defect
   - routine-finding
   - milestone-candidate
+  - milestone:M158
 extra:
   schema: v1
   acceptance: "bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh exp5-M-ROUTINE-F-156-3 experiments/quay-perpetual-stream/charters/M158-routine-f-156-3-gate-test.md /tmp/m158-absorb-entry.md"
@@ -45,18 +46,18 @@ The ADR-001 gate permanently fails, which means:
 
 ## Acceptance Criteria
 
-- [ ] Create `experiments/quay-perpetual-stream/test/gate-script-base.test.mjs` with >=80% line coverage for `gate-script-base.ts`'s exported functions
-- [ ] The test follows ADR-001 fixture-first discipline (red fail-case per assertion before green)
-- [ ] Running ADR-001 enforcement exits 0 against the real repo
+- [x] Create `experiments/quay-perpetual-stream/test/gate-script-base.test.mjs` with >=80% line coverage for `gate-script-base.ts`'s exported functions (audit: exists at experiments/quay-perpetual-stream/test/gate-script-base.test.mjs, 100% line / 95.83% branch / 100% funcs coverage, 41 tests all pass)
+- [x] The test follows ADR-001 fixture-first discipline (red fail-case per assertion before green) (audit: header declares RED-first discipline; requireArg tests exercise exit-2 fail cases before non-exit success cases; all 6 exported functions have coverage)
+- [x] Running ADR-001 enforcement exits 0 against the real repo (audit: loadbearing-test-gate.sh exit 0, 35 total, 9 pass, 0 fail; quay gate --gate adr-001 exit 0/PASS)
 
 ## Definition of Done
 
 Per inherited-core.md standard DoD clauses (0-12). This milestone's applicable clauses: 0 (AC+DoD checklist present), 1 (adversarial acceptance audit), 3 (line budget), 5 (no-self-exemption), 7 (test floor — unit tests), 8 (canonical-lifecycle-record), 10 (tree-hygiene), 11 (worktree-branch-hygiene), 12 (audit-independence). Clauses 2 (V_meta consolidation), 4 (impl-row), 6 (escrow Δv), 9 (needs-human legitimacy) are N/A.
 
 
-- [ ] `bash experiments/quay-perpetual-stream/scripts/loadbearing-test-gate.sh --scripts experiments/quay-perpetual-stream/scripts --tests experiments/quay-perpetual-stream/test` exits 0
-- [ ] `quay gate <task> --gate adr-001` exits 0 on the real repo
-- [ ] `node --test --experimental-test-coverage experiments/quay-perpetual-stream/test/gate-script-base.test.mjs` reports >=80% line coverage
+- [x] `bash experiments/quay-perpetual-stream/scripts/loadbearing-test-gate.sh --scripts experiments/quay-perpetual-stream/scripts --tests experiments/quay-perpetual-stream/test` exits 0 (audit: exit 0, "PASS: every load-bearing script has a sibling *.test.mjs", 35 total, 9 pass, 26 N/A, 0 fail)
+- [x] `quay gate <task> --gate adr-001` exits 0 on the real repo (audit: node packages/quay/bin/quay.ts gate exp5-M-ROUTINE-F-156-3 --gate adr-001 → PASS, exit 0)
+- [x] `node --test --experimental-test-coverage experiments/quay-perpetual-stream/test/gate-script-base.test.mjs` reports >=80% line coverage (audit: 100% line / 95.83% branch / 100% funcs coverage, 41 tests all pass)
 
 
 ## Plan
@@ -70,19 +71,27 @@ N/A — no docs/plans/*.md reference (instrument-correction; create a test file 
 
 ## Acceptance Criteria
 
-- [ ] gate-script-base.test.mjs exists with tests for all exported functions
-- [ ] loadbearing-test-gate.sh exits 0 (no FAIL)
-- [ ] adr-gate.test.mjs "E3 A2: the REAL ADR-001 gate PASSes" assertion passes
+- [x] gate-script-base.test.mjs exists with tests for all exported functions (audit: 41 tests covering parseArgs(14), readFrontmatter(11), emitPass(2), emitFail(2), requireArg(8), isDirectEntry(4) — all 6 exports)
+- [x] loadbearing-test-gate.sh exits 0 (no FAIL) (audit: exit 0, gate-script-base.ts [PASS], "PASS: every load-bearing script has a sibling *.test.mjs")
+- [x] adr-gate.test.mjs "E3 A2: the REAL ADR-001 gate PASSes" assertion passes (audit: all 3 E3 A2 tests pass, exit 0)
 
 ## Definition of Done
 
 Per inherited-core.md standard DoD clauses (0-12). Applicable: 0, 1, 3, 5, 7, 8, 10, 11, 12. Clauses 2/4/6/9 N/A.
 
-- [ ] gate-script-base.test.mjs created with unit tests
-- [ ] ADR-001 gate passes (loadbearing-test-gate.sh exit 0)
-- [ ] adr-gate.test.mjs E3 A2 assertion passes
-- [ ] All existing tests stay green
+- [x] gate-script-base.test.mjs created with unit tests (audit: experiments/quay-perpetual-stream/test/gate-script-base.test.mjs, 41 tests, 100% line coverage)
+- [x] ADR-001 gate passes (loadbearing-test-gate.sh exit 0) (audit: exit 0, 0 fail)
+- [x] adr-gate.test.mjs E3 A2 assertion passes (audit: 3/3 pass, exit 0)
+- [x] All existing tests stay green (audit: gate.test.mjs 25/25 pass; adr-gate.test.mjs E3 A2 3/3 pass; chart2-s2 3 failures are pre-existing at parent commit — not caused by M158)
 
 ## Touches
 
 - experiments/quay-perpetual-stream/test/gate-script-base.test.mjs (new)
+
+## Execution record
+
+- **Milestone:** M158
+- **Iteration count:** 1
+- **Realized Δv:** 0
+- **Merge commit:** 6a32e37
+- **Outcome:** ADR-001 gate fix: created gate-script-base.test.mjs (41 tests, 100% line coverage) closing the test-coverage gap; loadbearing-test-gate.sh exits 0, adr-gate.test.mjs E3 A2 passes. Audit CONCERNS — mechanical gate sequential-dependency pattern self-resolves with audit write-back (same pattern as M157).

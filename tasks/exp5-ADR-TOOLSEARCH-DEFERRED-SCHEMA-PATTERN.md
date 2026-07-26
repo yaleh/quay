@@ -1,9 +1,10 @@
 ---
 id: exp5-ADR-TOOLSEARCH-DEFERRED-SCHEMA-PATTERN
-title: "adr-draft: ToolSearch pre-fetch as mandatory first step for deferred tools — load-bearing but undocumented decision"
+title: "adr-draft: ToolSearch pre-fetch as mandatory first step for deferred
+  tools — load-bearing but undocumented decision"
 status: todo
 labels:
-  - adr-draft
+  - milestone-candidate
 ---
 ## Proposal
 
@@ -50,3 +51,11 @@ References the standard inherited-core DoD clauses.
 
 - [ ] ADR file written and linked from `adr/` index
 - [ ] Adversarial audit disposition recorded
+
+
+## Scope narrowed (2026-07-26)
+
+Per review of stale-todo backlog: the ToolSearch pre-fetch pattern remains load-bearing
+(required before every deferred MCP tool call). Rather than a full ADR, document it in
+CLAUDE.md following the M148 precedent (Glob unavailability documented at lines 80-84).
+Scope: one paragraph in CLAUDE.md documenting the ToolSearch→deferred-tool dependency.

@@ -1,9 +1,10 @@
 ---
 id: exp5-CRYST-SENTINEL-REMOVAL-IDEMPOTENT
-title: "crystallization: rm -f for sentinel-file removal — idempotent sentinel ops as a standing rule"
+title: "crystallization: rm -f for sentinel-file removal — idempotent sentinel
+  ops as a standing rule"
 status: todo
 labels:
-  - crystallization
+  - milestone-candidate
 ---
 ## Proposal
 
@@ -53,3 +54,11 @@ References the standard inherited-core DoD clauses.
 - [ ] `OUTER-LOOP.md` and all affected scripts updated
 - [ ] Rule documented in inherited-core or OUTER-LOOP.md
 - [ ] Adversarial audit disposition recorded
+
+
+## Scope narrowed (2026-07-26)
+
+Per review of stale-todo backlog: the `rm` without `-f` pattern is a one-line fix.
+Some scripts already use `rm -f` (routine-scheduler-selfcheck.sh, routine-file-gate-selfcheck.sh).
+Scope: audit all scripts/ for bare `rm` calls against sentinel/optional files, change to `rm -f`.
+Estimate: ~5 lines changed across 2-3 scripts.

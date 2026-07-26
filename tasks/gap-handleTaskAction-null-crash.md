@@ -1,6 +1,6 @@
 ---
 title: "serve: handleTaskAction crashes on nonexistent task (null dereference)"
-status: todo
+status: done
 labels:
   - defect
   - milestone-candidate
@@ -31,16 +31,25 @@ Add a null check after `const t = await client.taskGet(decodedId);` in `handleTa
 
 ## Acceptance Criteria
 
-- [ ] POST to `/task/nonexistent-id/action/advance` returns HTTP 404
-- [ ] `node --test packages/quay/test/serve.test.mjs` passes
-- [ ] No TypeError unhandled crash
+- [x] POST to `/task/nonexistent-id/action/advance` returns HTTP 404 (verified: serve-handlers.ts L955-959 null check; serve.test.mjs L148-154 404 assertion)
+- [x] `node --test packages/quay/test/serve.test.mjs` passes (verified: full suite pass, 0 failures, serve-handlers.ts coverage 89.93%)
+- [x] No TypeError unhandled crash (verified: null guard before any `t` property access; code path returns 404 before reaching `t!.id`)
 
 ## Definition of Done
 
-- [ ] Null check added to handleTaskAction after line 955
-- [ ] Tests pass
-- [ ] New test exercises 404 path for nonexistent task POST
+- [x] Null check added to handleTaskAction after line 955 (verified: serve-handlers.ts L955-959)
+- [x] Tests pass (verified: full serve test suite exit 0)
+- [x] New test exercises 404 path for nonexistent task POST (verified: serve.test.mjs L148-154)
 
 
 ## Touches
 - packages/quay/src/serve-handlers.ts
+
+## Execution record
+
+- **Milestone:** M160
+- **Iterations:** 0 (direct commit, no worktree branch)
+- **Realized Δv:** 0 (corrective fix, no chart-2 cell moves)
+- **Merge commit:** 84f1ed394e4160b76cea74168ef2525451927d06
+- **Audit verdict:** CONCERNS (non-blocking — DoD format non-standard, no reference to inherited-core 5-clause DoD; all 3 AC + 3 DoD items confirmed satisfied)
+- **Outcome:** done — null check added to handleTaskAction matching handleTaskDetail pattern; serve test suite passes (89.93% coverage); 404 test for nonexistent task POST path added

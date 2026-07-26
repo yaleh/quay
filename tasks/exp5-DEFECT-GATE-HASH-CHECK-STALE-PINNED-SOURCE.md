@@ -3,7 +3,7 @@ id: exp5-DEFECT-GATE-HASH-CHECK-STALE-PINNED-SOURCE
 title: it0-gate-hash-check.sh --by-reference FAILs on every recent charter
   (M111-M116) — GATE-HASH-REF convention has drifted from the script's actual
   pinned source
-status: todo
+status: done
 labels:
   - defect
   - governance-integrity
@@ -42,3 +42,23 @@ HARD-GATES-transclusion check), rename/re-scope the charter convention so it doe
 
 ## Definition of Done
 Standard inherited-core DoD clauses.
+
+
+## Verified eliminated (2026-07-26)
+
+The defect described was: charters M111–M116 used hash `22c64fc...` which did NOT match
+the script's PINNED_SOURCE. Recent charters (M159–M164) ALL carry the correct hash
+`5023da8232f12579e9a8db0ce26c5a5d1aadd5a7d095380016636330c63d2c93` which matches
+`it0-gate-hash-check.sh`'s PINNED_SOURCE. The defect was silently fixed (likely by the
+loop driver switching to the correct PINNED_SOURCE hash) and has not recurred in 6+
+consecutive milestones.
+
+Evidence:
+- M159 charter: GATE-HASH-REF: 5023da...
+- M160 charter: GATE-HASH-REF: 5023da...
+- M161 charter: GATE-HASH-REF: 5023da...
+- M162 charter: GATE-HASH-REF: 5023da...
+- M163 charter: GATE-HASH-REF: 5023da...
+- M164 charter: GATE-HASH-REF: 5023da...
+- PINNED_SOURCE: experiments/quay-continuous-bootstrap/ITERATION-PROMPTS.md (the script's canonical source)
+→ all 6 match → defect eliminated.
