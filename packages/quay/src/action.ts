@@ -33,6 +33,9 @@ export function composePayload({ providerManifest, task, actionId }) {
   if (!button) {
     throw new Error(`no such action button: ${actionId}`);
   }
+  if (typeof button.payload !== 'string' || button.payload.trim() === '') {
+    throw new Error(`action button '${actionId}' has no payload defined in provider manifest`);
+  }
   const skill = providerManifest.status_skill_map?.[task.status];
   const payload = button.payload.replaceAll("{{id}}", task.id);
   return { label: button.label, payload, skill, taskId: task.id, status: task.status };

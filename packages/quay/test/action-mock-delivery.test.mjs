@@ -155,6 +155,115 @@ async function main() {
   // and only checks that mock mode is never wrongly selected) is the correct,
   // deterministic-in-outcome replacement.
 
+  // --- 6. composePayload edge cases: missing/undefined/empty payload ---
+  { // Test: payload field omitted entirely
+    let threw = false;
+    let errMsg = "";
+    try {
+      composePayload({
+        providerManifest: {
+          action_buttons: [{ id: "no-payload", label: "No Payload" }],
+        },
+        task: { id: "TEST-1", status: "todo" },
+        actionId: "no-payload",
+      });
+    } catch (e) {
+      threw = true;
+      errMsg = e.message;
+    }
+    assert(threw, "composePayload throws when button.payload is undefined (field omitted)");
+    assert(
+      errMsg.includes("no-payload") && errMsg.includes("no payload"),
+      `composePayload undefined-payload error names the button and mentions 'no payload' (got: ${errMsg})`,
+    );
+  }
+
+  { // Test: payload is explicitly null
+    let threw = false;
+    let errMsg = "";
+    try {
+      composePayload({
+        providerManifest: {
+          action_buttons: [{ id: "null-payload", label: "Null", payload: null }],
+        },
+        task: { id: "TEST-2", status: "todo" },
+        actionId: "null-payload",
+      });
+    } catch (e) {
+      threw = true;
+      errMsg = e.message;
+    }
+    assert(threw, "composePayload throws when button.payload is null");
+    assert(
+      errMsg.includes("null-payload") && errMsg.includes("no payload"),
+      `composePayload null-payload error names the button and mentions 'no payload' (got: ${errMsg})`,
+    );
+  }
+
+  { // Test: payload is an empty string
+    let threw = false;
+    let errMsg = "";
+    try {
+      composePayload({
+        providerManifest: {
+          action_buttons: [{ id: "empty-payload", label: "Empty", payload: "" }],
+        },
+        task: { id: "TEST-3", status: "todo" },
+        actionId: "empty-payload",
+      });
+    } catch (e) {
+      threw = true;
+      errMsg = e.message;
+    }
+    assert(threw, "composePayload throws when button.payload is an empty string");
+    assert(
+      errMsg.includes("empty-payload") && errMsg.includes("no payload"),
+      `composePayload empty-payload error names the button and mentions 'no payload' (got: ${errMsg})`,
+    );
+  }
+
+  { // Test: payload is whitespace-only string
+    let threw = false;
+    let errMsg = "";
+    try {
+      composePayload({
+        providerManifest: {
+          action_buttons: [{ id: "ws-payload", label: "WS", payload: "   " }],
+        },
+        task: { id: "TEST-4", status: "todo" },
+        actionId: "ws-payload",
+      });
+    } catch (e) {
+      threw = true;
+      errMsg = e.message;
+    }
+    assert(threw, "composePayload throws when button.payload is a whitespace-only string");
+    assert(
+      errMsg.includes("ws-payload") && errMsg.includes("no payload"),
+      `composePayload whitespace-payload error names the button and mentions 'no payload' (got: ${errMsg})`,
+    );
+  }
+
+  { // Test: valid payload still works (regression guard)
+    let threw = false;
+    let result;
+    try {
+      result = composePayload({
+        providerManifest: {
+          action_buttons: [{ id: "good", label: "Good", payload: "Drive {{id}}." }],
+          status_skill_map: { todo: "quay:author" },
+        },
+        task: { id: "REGRESS-1", status: "todo" },
+        actionId: "good",
+      });
+    } catch (e) {
+      threw = true;
+    }
+    assert(!threw, "composePayload does NOT throw when payload is a valid string (regression guard)");
+    assert(result.payload === "Drive REGRESS-1.", `payload substitution works (got: ${result.payload})`);
+    assert(result.label === "Good", `label is correct (got: ${result.label})`);
+  }
+
   fs.rmSync(workDir, { recursive: true, force: true });
 
   console.log(failures === 0
