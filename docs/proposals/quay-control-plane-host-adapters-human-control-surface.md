@@ -16,6 +16,9 @@
   host-owned action edge. ·
   [`exp5-codex-continuous-development-port.md`](./exp5-codex-continuous-development-port.md)
   applies this proposal's Host Adapter boundary to Codex. ·
+  [`quay-codex-self-observation-tool-supply-chain.md`](./quay-codex-self-observation-tool-supply-chain.md)
+  defines the evidence-adapter and tool-governance layer without moving
+  transcript or telemetry authority into the control plane. ·
   [`baime-lite-driving-external-projects.md`](./baime-lite-driving-external-projects.md)
   discusses continuous development of external projects. ·
   [`quay-workflow-agent-distribution.md`](./quay-workflow-agent-distribution.md)

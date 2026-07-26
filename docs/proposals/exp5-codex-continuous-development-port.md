@@ -25,7 +25,10 @@
   method substrate. ·
   [`quay-control-plane-host-adapters-human-control-surface.md`](./quay-control-plane-host-adapters-human-control-surface.md)
   defines the runtime-neutral three-system boundary this Codex adapter must
-  implement rather than bypass.
+  implement rather than bypass. ·
+  [`quay-codex-self-observation-tool-supply-chain.md`](./quay-codex-self-observation-tool-supply-chain.md)
+  defines how Codex observation tools are discovered, evaluated, packaged, and
+  kept outside authoritative Quay state.
 
 ## 1. Decision summary
 
@@ -37,6 +40,9 @@ Codex workload.
   (Claude/Codex history via meta-cc), **bounded milestone worker / one-cycle
   adapter**, then **restart-safe perpetual supervisor**. Passing an earlier stage
   does not imply the next stage is safe.
+- Observation tooling follows a separate evidence-only supply chain. The Codex
+  port may consume approved tools and normalized findings; it must not discover,
+  install, or promote tools as part of milestone execution.
 - The repository-state machine, bounded-charter discipline, gates, value
   ledger, directives, HALT sentinel, checkpoints, worktree isolation, tests,
   and evidence requirements are runtime-neutral and should be retained.
@@ -457,6 +463,7 @@ A future implementation should produce, at minimum:
 AGENTS.md
 .agents/skills/quay-task-operator/SKILL.md
 .agents/skills/quay-session-review/SKILL.md
+.agents/skills/quay-tool-radar/SKILL.md
 .agents/skills/quay-directive/SKILL.md
 .agents/skills/exp5-outer-loop/SKILL.md
 .agents/skills/exp5-iteration-executor/SKILL.md
@@ -466,6 +473,8 @@ AGENTS.md
 .codex/hooks/...
 schemas/quay-host-adapter.schema.json
 schemas/quay-run-envelope.schema.json
+schemas/quay-observation.schema.json
+schemas/quay-tool-evaluation.schema.json
 scripts/exp5-codex-supervisor.mjs
 schemas/exp5-iteration-result.schema.json
 experiments/quay-perpetual-stream/codex-adapter/README.md
@@ -524,32 +533,34 @@ This stage grants no outer-loop or autonomous completion authority.
 7. Convert one evidence-backed finding into a human-approved task create/edit;
    replay it to prove deduplication. Deny transcript access and prove normal task
    operation still works.
+8. Record meta-cc through the tool-evaluation contract and prove that candidate
+   discovery cannot install, authenticate, enable, or upgrade a tool.
 
 Stages 1–2 together replace a Claude Code terminal session for human-facing
 Quay operation. They do not prove autonomous execution.
 
 ### Stage 3 — bounded milestone execution
 
-8. Land or reproduce DIR-117's checked-Proposal/checked-Plan preparation gate.
-9. Freeze the runtime-neutral Host Adapter operations, result envelope,
+9. Land or reproduce DIR-117's checked-Proposal/checked-Plan preparation gate.
+10. Freeze the runtime-neutral Host Adapter operations, result envelope,
    acknowledgements, lease, and idempotency rules without Codex-only fields.
-10. Have a Codex outer Skill perform a read-only replay of SELECT and gates for a
+11. Have a Codex outer Skill perform a read-only replay of SELECT and gates for a
     completed historical milestone.
-11. Port one bounded iteration worker; run a disposable fixture milestone in one
+12. Port one bounded iteration worker; run a disposable fixture milestone in one
     explicit worktree with frozen input and structured output.
-12. Prove independent worker/reviewer roles and, where policy requires it, two
+13. Prove independent worker/reviewer roles and, where policy requires it, two
     same-base worktrees, canonical adjudication, semantic sweep, and cleanup.
-13. Run exactly one deliberately small real outer cycle through committed ABSORB
+14. Run exactly one deliberately small real outer cycle through committed ABSORB
     under human observation, with Claude's integration writer paused.
 
 ### Stage 4 — restart-safe continuous operation
 
-14. Terminate the control plane and adapter in every transition state and prove
+15. Terminate the control plane and adapter in every transition state and prove
     idempotent recovery without duplicate SELECT, worker, commit, merge, or
     skipped ABSORB.
-15. Enable scheduled continuation or an OS/service supervisor only after the
+16. Enable scheduled continuation or an OS/service supervisor only after the
     bounded cycle and recovery drills pass.
-16. Run a conservative perpetual pilot with explicit concurrency, network,
+17. Run a conservative perpetual pilot with explicit concurrency, network,
     retry, wall-time, token/cost, and retained-worktree limits; expand only from
     recorded evidence.
 
@@ -568,40 +579,42 @@ Quay operation. They do not prove autonomous execution.
 5. `[ ]` A transcript finding becomes a human-approved, deduplicated task
    mutation; replay creates no duplicate, and transcript denial does not break
    ordinary Quay task operation.
-6. `[ ]` Runtime-neutral Skill content has one canonical source; `.claude` and
+6. `[ ]` meta-cc has a provenance-qualified tool-evaluation record, and the
+   discovery workflow cannot mutate plugin, MCP, hook, or authentication state.
+7. `[ ]` Runtime-neutral Skill content has one canonical source; `.claude` and
    `.agents` packages cannot silently drift in task lifecycle rules.
-7. `[ ]` A runtime-neutral Host Adapter contract exists and contains no Codex
+8. `[ ]` A runtime-neutral Host Adapter contract exists and contains no Codex
    transcript, Goal, UI, or internal database assumptions.
-8. `[ ]` Codex discovers and explicitly invokes the repo-scoped outer and
+9. `[ ]` Codex discovers and explicitly invokes the repo-scoped outer and
    iteration Skills from `.agents/skills/`.
-9. `[ ]` Before any real worker starts, the task has a checked Proposal, the
+10. `[ ]` Before any real worker starts, the task has a checked Proposal, the
    milestone has a checked executable Plan, and the DIR-117 preparation gate
    verifies their freshness.
-10. `[ ]` Two workers start from the same commit in different worktrees and
+11. `[ ]` Two workers start from the same commit in different worktrees and
    cannot modify the main experiment state.
-11. `[ ]` Worker results validate against the checked-in JSON schema; malformed,
+12. `[ ]` Worker results validate against the checked-in JSON schema; malformed,
    incomplete, and claim-only results fail closed.
-12. `[ ]` All current it0 gates run before dispatch and their evidence is
+13. `[ ]` All current it0 gates run before dispatch and their evidence is
    retained in the milestone record.
-13. `[ ]` The canonical merge runs the full required test set plus a semantic
+14. `[ ]` The canonical merge runs the full required test set plus a semantic
    cross-reference sweep, including a fixture that Git merges cleanly but that
    is internally inconsistent.
-14. `[ ]` Adversarial-audit cadence is reproduced with a fresh-context reviewer
+15. `[ ]` Adversarial-audit cadence is reproduced with a fresh-context reviewer
    that has not read the worker's hidden conversation.
-15. `[ ]` HALT, pending directives, checkpoint cadence, VT/V_meta ledgers, and
+16. `[ ]` HALT, pending directives, checkpoint cadence, VT/V_meta ledgers, and
    milestone-boundary-only steering retain their existing semantics.
-16. `[ ]` Forced termination at each control-plane/adapter state resumes
+17. `[ ]` Forced termination at each control-plane/adapter state resumes
     idempotently, with no duplicate SELECT, duplicate worker, lost commit, or
     skipped ABSORB.
-17. `[ ]` Recovery succeeds even when the referenced Claude/Codex conversations
+18. `[ ]` Recovery succeeds even when the referenced Claude/Codex conversations
     are unavailable, proving session history is diagnostic rather than
     authoritative state.
-18. `[ ]` A complete real milestone reaches committed ABSORB without manual
+19. `[ ]` A complete real milestone reaches committed ABSORB without manual
     process intervention; any human content decision remains explicitly
     recorded as such.
-19. `[ ]` Permission, network, secret-redaction, concurrency, retry, cost, and
+20. `[ ]` Permission, network, secret-redaction, concurrency, retry, cost, and
     worktree-retention limits are configured and tested.
-20. `[ ]` The adapter can be disabled without changing or corrupting the
+21. `[ ]` The adapter can be disabled without changing or corrupting the
     existing Claude/exp5 runtime artifacts.
 
 ## 11. Risks and open decisions
@@ -689,7 +702,8 @@ authority boundaries:
    quay MCP, CLI fallback, safe real task round-trip.
 2. **Codex session-evidence bridge** — meta-cc registration, provider-qualified
    Claude/Codex queries, evidence normalization, deduplication, privacy, and
-   human-approved task mutation.
+   human-approved task mutation. It also bootstraps the separate tool-evaluation
+   contract; broader tool discovery and promotion remain outside the executor.
 3. **Codex bounded milestone worker** — DIR-117-prepared inputs, worktree,
    `codex exec` structured result, no merge or canonical lifecycle writes.
 4. **Codex one-cycle Host Adapter** — neutral contract, run/attempt/lease/event
