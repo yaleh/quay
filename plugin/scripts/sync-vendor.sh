@@ -152,6 +152,11 @@ SYNC_SCRIPTS=(
   routine-scheduler
   routine-file-gate
   read-probe-spec
+  candidate-contracts
+  coupling-graph
+  candidate-synthesis
+  portfolio-choice
+  preparation-feedback
 )
 
 if $CHECK_MODE; then

@@ -345,6 +345,12 @@ test("CLI: --json --workspace-root . --milestone-counter 0 → exit 0, outputs v
     assert.ok(Array.isArray(parsed.pendingDirectives));
     assert.ok(Array.isArray(parsed.candidates));
     assert.ok(typeof parsed.milestoneCounter === "number");
+    // M188/DIR-119-A Stage 1.6: the synthesized portfolio decision record is wired through this same
+    // CLI output — additive, never replacing `candidates` above.
+    assert.ok(parsed.portfolio && typeof parsed.portfolio === "object", "portfolio field must be present");
+    assert.equal(parsed.portfolio.version, 1);
+    assert.ok(Array.isArray(parsed.portfolio.selected));
+    assert.ok(Array.isArray(parsed.portfolio.rejected));
   } catch {
     // If quay CLI isn't available in test env, this is fine — the selftest covers pure functions
   }

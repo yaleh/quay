@@ -11,6 +11,10 @@ children: []
 extra:
   dirStatus: applied
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-119-A
+    experiments/quay-perpetual-stream/charters/M188-dir119a-select-candidate-synthesis.md
+    /tmp/m188-absorb-entry.md
 ---
 
 **type:** execution

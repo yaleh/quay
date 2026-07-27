@@ -209,7 +209,9 @@ test('M136 (DIR-070-A): sync-vendor.sh --check dynamic scanning verifies all man
   );
   // Verify symlink awareness: output should report 7 OK (identical) entries for concurrency scripts
   const okCount = (result.match(/OK \(identical\): scripts\//g) || []).length;
-  assert.equal(okCount, 7, '--check must report exactly 7 identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array)');
+  // M188/DIR-119-A: +5 (candidate-contracts, coupling-graph, candidate-synthesis, portfolio-choice,
+  // preparation-feedback) added to sync-vendor.sh's SYNC_SCRIPTS array, 7 -> 12.
+  assert.equal(okCount, 12, '--check must report exactly 12 identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array)');
 });
 
 test('routines skill (M140) has zero experiment-layer references', () => {

@@ -314,14 +314,29 @@ import { isOverbroadDeclaration } from "./touches-orthogonality-check.ts";
 // concurrent-batch-scheduler.ts's parseCandidate, for determinism).
 const TYPE_EXEC_RE = /^\s*\*{0,2}type\*{0,2}\s*:\s*\*{0,2}\s*`?execution`?/im;
 
-export function checkTouches(task) {
+export function checkTouches(task, kind) {
   // Read type from body text (charter convention: `type: execution`).
   const isExec = TYPE_EXEC_RE.test(task.body);
+  const sec = extractSection(task.body, "Touches");
   if (!isExec) {
+    // DIR-113 item 2: a milestone-candidate task (not a charter — charters use `isExec` above)
+    // with NEITHER a manually-declared NOR an auto-derived `## Touches` section gets a SOFT
+    // (warn, non-blocking) note — select-preflight.ts's pre-charter orthogonality pass (DIR-113
+    // item 3) has nothing to work with for this candidate until one exists. Both manual and
+    // auto-derived declarations render the same `## Touches` heading (auto-derived is
+    // distinguished only by an "(auto-derived, unverified…)" annotation in the body, per
+    // derive-touches-heuristic.ts's renderTouchesSection) — so "heading absent" correctly covers
+    // "neither kind present" without needing to parse the annotation.
+    if (kind === "milestone-candidate" && sec === null) {
+      return {
+        ok: true,
+        code: "touches-absent-milestone-candidate",
+        message: "INFO: milestone-candidate task has no '## Touches' (manual or auto-derived) — the pre-charter orthogonality scheduler has no hint for this candidate and will treat it conservatively",
+      };
+    }
     // Non-execution types (learning, methodology, discovery, etc.): skip vacuously.
     return { ok: true, code: "touches-na", message: "type is not execution — ## Touches check not applicable" };
   }
-  const sec = extractSection(task.body, "Touches");
   if (sec === null) {
     // INFO only — execution-type task without ## Touches can still run serial.
     return { ok: true, code: "touches-absent-info", message: "INFO: type:execution but no '## Touches' section — task can run serial but CANNOT be batched concurrently" };
@@ -368,10 +383,10 @@ export function checkTask(fullText) {
         checkResolution(task),
         checkNoScaffolding(task),
         checkDirectiveSections(task, kind),
-        checkTouches(task),
+        checkTouches(task, kind),
       ];
   const failures = results.filter((r) => !r.ok);
-  const warnings = results.filter((r) => r.code === "touches-absent-info");
+  const warnings = results.filter((r) => r.code === "touches-absent-info" || r.code === "touches-absent-milestone-candidate");
   return {
     marker: true,
     kind,

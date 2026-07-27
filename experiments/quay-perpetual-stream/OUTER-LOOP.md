@@ -19,7 +19,10 @@ select =
   preflight = invoke(".claude/workflows/select-preflight.js", {workspaceRoot})
     ⊨ halt → return at boundary (clean exit per I₆); ¬block
     ⊨ pendingDirectives > 0 → /drain-directives first (DIR-071, I₄)
-    ⊨ preflight yields {shortlist, cadence, deliverableStreak, starvation, candidates with schema/touches status}
+    ⊨ preflight yields {shortlist, cadence, deliverableStreak, starvation, candidates with schema/touches status, portfolio}
+    ⊨ portfolio = synthesized singleton/composite MilestoneCandidate decision record (DIR-119-A Phase 1;
+      scripts/candidate-synthesis.ts + scripts/portfolio-choice.ts) — advisory in this milestone (DIR-119-A's own
+      Proposal defers operational wiring/self-certification to DIR-119-C); the legacy shortlist below is UNCHANGED
   → shortlist = preflight.shortlist  -- composed by deliverable-governor (DIR-066); deliverable classification baked in
   → N = min(|shortlist|, .quay/loop.yml.concurrency)  -- DIR-106 Fix 2: SELECT up to concurrency candidates (not just top-1);
      default concurrency=1 preserves backward-compat serial behavior

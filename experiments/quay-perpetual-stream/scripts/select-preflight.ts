@@ -34,6 +34,18 @@ import { classify, type ClassifyResult } from "./human-steered-classify.ts";
 import { loadRegistry, type Registry, DEFAULT_REGISTRY_PATH } from "./drivable-workspace-check.ts";
 import { parseTouches, checkTouchesPair, expandGlobs } from "./touches-orthogonality-check.ts";
 import { deriveTouches } from "./derive-touches-heuristic.ts";
+// M188/DIR-119-A Stage 1.6: wire SELECT-integrated composite candidate synthesis through the ONE
+// place OUTER-LOOP's `select` step already invokes (this script's `buildPreflightResult`). Additive
+// only — `PreflightResult.candidates` (the legacy per-task shortlist) is completely unchanged; a NEW
+// `portfolio` field carries the synthesized singleton/composite `MilestoneCandidate` decision record
+// alongside it. `.quay/loop.yml` concurrency is NOT read here (candidate_horizon independence,
+// DIR-119-A Done-when #4) — `portfolio` reports every eligible candidate shape unconstrained; the
+// workflow wrapper (OUTER-LOOP step "N = min(|shortlist|, concurrency)") remains the ONE place that
+// budget is applied, exactly as it does today for the legacy singleton list.
+import type { TaskCandidate as SynthesisTaskCandidate, MilestonePortfolio } from "./candidate-contracts.ts";
+import { synthesizeCandidates } from "./candidate-synthesis.ts";
+import { choosePortfolio } from "./portfolio-choice.ts";
+import { createHash } from "node:crypto";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -90,6 +102,10 @@ export interface PreflightResult {
   orthogonalScan: OrthogonalScanResult;
   milestoneCounter: number;
   workspaceRoot: string;
+  // M188/DIR-119-A: synthesized singleton + composite MilestoneCandidate portfolio decision record,
+  // computed from the SAME `candidates` list above (never a second, divergent read of the task
+  // store). Additive — nothing above this field's addition changed shape or meaning.
+  portfolio: MilestonePortfolio;
 }
 
 // ── checkHalt ─────────────────────────────────────────────────────────────────────────────────────
@@ -424,6 +440,52 @@ export function getTaskList(workspaceRoot: string): any[] | null {
   }
 }
 
+// ── buildTaskCandidateFacts (M188/DIR-119-A Stage 1.6 wiring) ───────────────────────────────────────
+// Convert this script's own already-computed CandidateEntry list into TaskCandidate facts —
+// REUSES the Touches parsing already done by getCandidateParsedTouches (Stage 1.2's own requirement
+// to reuse, never fork, touches logic) rather than re-reading task files a second time.
+// `estimatedValue` is derived from `rank` (lower rank = higher preference = higher value) since this
+// wiring layer has no separate numeric value-ledger read; a real Stage-1.2 task-fact extractor could
+// substitute a richer value source later without changing this function's shape.
+// `eligible` is true for every entry here — this list already passed getCandidates' status:todo
+// filter; the plan doc's "fail-closed for ambiguous SAFETY facts" nuance belongs to a stricter future
+// live-task-store extractor, not this preflight-layer adapter.
+export function buildTaskCandidateFacts(workspaceRoot: string, entries: CandidateEntry[]): SynthesisTaskCandidate[] {
+  return entries.map((c) => {
+    const touches = getCandidateParsedTouches(workspaceRoot, c.id);
+    const sourceHash = createHash("sha1").update(JSON.stringify({ id: c.id, rank: c.rank, labels: c.labels })).digest("hex").slice(0, 12);
+    return {
+      version: 1,
+      id: c.id,
+      status: "todo",
+      labels: c.labels,
+      valueType: typeof c.extra?.valueType === "string" ? c.extra.valueType : "capabilityGrowth",
+      eligible: true,
+      estimatedValue: Math.max(1, 1000 - c.rank),
+      deliverySurface: Array.isArray(c.extra?.deliverySurface) ? c.extra.deliverySurface : [],
+      touches: touches.globs,
+      semanticResources: [],
+      dependsOn: Array.isArray(c.extra?.dependsOn) ? c.extra.dependsOn : [],
+      verificationBoundary: typeof c.extra?.acceptance === "string" ? c.extra.acceptance : "scripts/test.sh",
+      acCount: 0,
+      lineEstimate: 50,
+      sourceHash,
+    };
+  });
+}
+
+// ── synthesizeCandidatePortfolio (M188/DIR-119-A Stage 1.6 wiring) ──────────────────────────────────
+// Runs the real coupling-graph -> candidate-synthesis -> portfolio-choice pipeline over the
+// autonomous-eligible candidate list. Never reads `.quay/loop.yml` (candidate_horizon independence,
+// Done-when #4) — `constraints` here are always `{}` (unconstrained); a caller wanting a concurrency
+// budget applies it via `choosePortfolio`'s own `maxSelected` downstream of THIS call, exactly the
+// same separation candidate-synthesis.test.mjs pins.
+export function synthesizeCandidatePortfolio(workspaceRoot: string, entries: CandidateEntry[]): MilestonePortfolio {
+  const facts = buildTaskCandidateFacts(workspaceRoot, entries);
+  const candidates = synthesizeCandidates(facts, { workspaceRoot });
+  return choosePortfolio(candidates, {}, { generatedAt: new Date(0).toISOString() });
+}
+
 // ── buildPreflightResult ──────────────────────────────────────────────────────────────────────────
 // Core function: assemble the complete PreflightResult.
 // DIR-062-C: classifies each candidate via human-steered-classify.ts, filtering out human-steered ones.
@@ -443,6 +505,7 @@ export function buildPreflightResult(workspaceRoot: string, milestoneCounter: nu
       orthogonalScan: { checkedCount: 0, pairs: [], log: ["SKIPPED: could not read task store — no candidates to scan"] },
       milestoneCounter,
       workspaceRoot,
+      portfolio: { version: 1, selected: [], rejected: [], generatedAt: new Date(0).toISOString(), round: 0 },
     };
   }
 
@@ -507,6 +570,11 @@ export function buildPreflightResult(workspaceRoot: string, milestoneCounter: nu
   // 9. Pre-charter orthogonality scan (DIR-113 item 3) — BEFORE any charter-authoring fork.
   const orthogonalScan = scanOrthogonalPairs(workspaceRoot, autonomousCandidates);
 
+  // 10. M188/DIR-119-A Stage 1.6: synthesize singleton + composite MilestoneCandidate shapes and
+  // choose a portfolio — BEFORE final (legacy) candidate truncation happens downstream in the
+  // OUTER-LOOP workflow wrapper. Additive: `candidates` above is completely unchanged.
+  const portfolio = synthesizeCandidatePortfolio(workspaceRoot, autonomousCandidates);
+
   return {
     halt: haltCheck.halt,
     haltReason: haltCheck.reason,
@@ -516,6 +584,7 @@ export function buildPreflightResult(workspaceRoot: string, milestoneCounter: nu
     orthogonalScan,
     milestoneCounter,
     workspaceRoot,
+    portfolio,
   };
 }
 
