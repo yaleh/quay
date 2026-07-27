@@ -4,7 +4,7 @@ title: CLAUDE.md/restart-readiness-check.sh incorrectly documented .halt at
   experiments/quay-perpetual-stream/ — the real, product-wide convention
   (select-preflight.ts + plugin/skills/loop-driver/SKILL.md) is
   repo-root-relative
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -105,17 +105,34 @@ the previous documentation as wrong.
 
 ## Acceptance Criteria
 - [x] `restart-readiness-check.sh` checks the same repo-root path `select-preflight.ts` does.
+  (Audit evidence, session 13efe277-45ff-4563-bcfe-fd2c3db3e2a5, 2026-07-27: `HALT=".halt"` at
+  line 17 of `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh` as of commit
+  `615d4c0` on `master`; matches `select-preflight.ts`'s `checkHalt()` `path.join(workspaceRoot,
+  ".halt")`.)
 - [x] `CLAUDE.md` documents the real, current code's convention — DONE 2026-07-27.
+  (Audit evidence: `CLAUDE.md` line 57 states the repo-root `.halt` convention and flags the
+  prior `experiments/quay-perpetual-stream/.halt` documentation as wrong — confirmed by `grep`.)
 - [x] New selftest fixture: `.halt` at the experiments-scoped path alone → `halt: false` (explicit
   regression guard, not just fixed silently).
+  (Audit evidence: `experiments/quay-perpetual-stream/test/select-preflight.test.mjs` line 65,
+  "checkHalt: .halt at experiments/quay-perpetual-stream/ path only → {halt: false}
+  (wrong-path regression guard)" — re-ran the full file via `scripts/test.sh`, 31/31 pass
+  including this case.)
 
 ## Definition of Done
 Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidation-lag, line-budget,
 impl-row N/A, no-self-exemption, escrow-Δv N/A, test-floor N/A (method-infra surface),
 task-canonical-lifecycle-record, tree-hygiene, worktree-branch-hygiene, audit-independence).
 - [x] Landed on `master`, verified via a real `select-preflight.ts` dry run, not asserted.
+  (Audit evidence: `git merge-base --is-ancestor 615d4c0 HEAD` confirms landed on `master`;
+  real dry run `node --experimental-strip-types select-preflight.ts --json --workspace-root .
+  --milestone-counter 0` against the actual repo-root `.halt` sentinel present on disk returned
+  `halt: true, haltReason: ".halt sentinel present (empty)"` — i.e. the repo-root path is the one
+  actually consulted, as claimed.)
 - [x] Because this touches `experiments/quay-perpetual-stream/scripts/*` (driver execution-chain
   files), resolving it must run under human-steered discipline — labeled `human-steered`.
+  (Audit evidence: task frontmatter `labels:` includes `human-steered`, confirmed by direct read
+  of `tasks/gap-halt-sentinel-path-mismatch.md`.)
 
 ## Human verification when exp5 marks this task done
 1. Does `restart-readiness-check.sh` now agree with `select-preflight.ts` on where `.halt` lives?
@@ -126,3 +143,22 @@ task-canonical-lifecycle-record, tree-hygiene, worktree-branch-hygiene, audit-in
 - experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh
 - experiments/quay-perpetual-stream/test/select-preflight.test.mjs (or wherever checkHalt's fixtures live)
 - CLAUDE.md (already landed, 2026-07-27)
+
+## Execution record
+
+- **Milestone:** M187
+- **Iteration count:** 1 (direct commit on `master`, no separate worktree/branch — small
+  single-inner-iteration instrument-correction, self-verified: RED/GREEN test run +
+  `restart-readiness-check.sh` re-run against the real repo state + full `scripts/test.sh` suite
+  green)
+- **Realized Δv:** 0 (VT-neutral — instrument-correction, no chart-2 surface cell moves; the real
+  value is the halt-path consistency fix + regression guard, not a chart-2-scored capability)
+- **Merge commit:** `615d4c0` (already on `master` at ABSORB time — built directly on `master`, no
+  merge conflict to resolve)
+- **Audit verdict:** NO REFUTATION FOUND (adversarial acceptance audit, session
+  `13efe277-45ff-4563-bcfe-fd2c3db3e2a5`, 2026-07-27)
+- **Outcome:** `restart-readiness-check.sh` now checks the same repo-root `.halt` path
+  `select-preflight.ts`'s `checkHalt()` does (both the `HALT` variable and the previously
+  independently-hardcoded git-status exclusion regex), with a regression-guard test pinning the
+  wrong-path case to `halt: false` — closes the mismatch `CLAUDE.md` had already documented
+  in-place earlier the same day.
