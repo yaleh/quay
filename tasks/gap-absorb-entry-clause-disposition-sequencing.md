@@ -101,31 +101,48 @@ phases compute them).
   clauses, functionally correct) is present; the phase-location deviation is noted, not blocking.
 - [ ] A real (non-fixture) milestone dispatch after this fix shows `it0-dod-check.sh` exiting 0 (or
   failing only on genuinely unmet clauses, never on "NO disposition statement found") without any
-  manual post-hoc edit to the absorb-entry file. **REFUTED** by fresh-context audit 2026-07-27: no
-  real dispatch happened. `milestones/M180/iterations/iteration-0.md` ("Verification" section, its
-  own self-report) explicitly discloses the implementer could NOT run a real re-dispatch — this
-  milestone's own build is the in-flight session, and per CLAUDE.md's documented
-  workflow-script-staleness anti-pattern a live run can't pick up a script edit made mid-run — so it
-  instead hand-appended the 2 disposition lines to a scratch copy of `/tmp/m180-absorb-entry.md`,
-  re-ran the checker to see clause1/2/7 flip to PASS, then explicitly "restored
-  `/tmp/m180-absorb-entry.md` to its original pre-test content". Live re-verification by this audit
-  (`bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
-  gap-absorb-entry-clause-disposition-sequencing
-  experiments/quay-perpetual-stream/charters/M180-gap-absorb-disposition-sequencing.md
-  /tmp/m180-absorb-entry.md`, run 2026-07-27) confirms the file as it stands right now still FAILs
-  clause1 and clause2 ("NO disposition statement found in ABSORB-entry text") — exactly the failure
-  mode this AC requires be gone. The only verification performed was a manual edit-then-revert
-  self-test, which is the opposite of "without any manual post-hoc edit".
+  manual post-hoc edit to the absorb-entry file. **STILL REFUTED** by SECOND fresh-context audit
+  2026-07-27 (post iteration-1 rebuild), with a materially changed picture from the first pass:
+  1. `milestones/M180/iterations/iteration-1.md` added a durable regression test
+     (`plugin/test/execute-milestone-disposition-conformance.test.mjs`, 16/16 passing, independently
+     re-run by this audit) but explicitly declined to touch `/tmp/m180-absorb-entry.md`, disclosing
+     honestly that closing AC2 "requires a live orchestrated run... outside this subagent's own tool
+     surface" — landed as commit `46e92e4`.
+  2. This audit itself IS such a live Audit-phase dispatch (its own charge contains the exact step-2a
+     instructions from the landed fix, verbatim). Per that charge, this audit determined its verdict,
+     then for-real (not reverted) appended `adversarial-audit disposition: REFUTED` and
+     `V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated
+     carry-forward` (verbatim `vmeta-lag-check.sh --counter 171` output) to
+     `/tmp/m180-absorb-entry.md`, then re-ran the checker: **clause1 and clause2 now PASS live**
+     ("disposition statement present"), and clause7 was already PASS via the Build-phase
+     `surface:method-infra` tag — the first time in this session's history any of the 3 clauses have
+     passed on a real (non-reverted) file. Only `clause0-ac-dod-present` still fails, on this exact
+     AC's own unticked checkbox — a 3-clause-failure → 1-clause-failure narrowing, and the 1
+     remaining failure is this checkbox's own state, not a mechanism defect.
+  3. This audit deliberately declines to tick this box on that evidence alone: the proof is
+     self-referential (this milestone's own fix, exercised by this milestone's own audit, on this
+     milestone's own file, within the turn that grades it) rather than an independent dispatch on a
+     *different* milestone. Ticking it now would let any milestone's Audit phase trivially
+     self-certify its own gating AC merely by running its own mandatory step 2a — exactly the kind of
+     self-serving loop behavior this repo's methodology (DIR-093 anti-forgery, the "manual
+     edit-then-revert" rejection above) exists to prevent. Left `[ ]` pending a non-self-referential
+     confirmation: either a future milestone's real Audit-phase dispatch exercising step 2a on its
+     *own*, different, absorb-entry file, or explicit human sign-off that self-referential proof is
+     acceptable here.
 - [x] Both `.claude/workflows/` and `plugin/workflows/` mirrors stay byte-identical. CONFIRMED:
   `diff .claude/workflows/execute-milestone.js plugin/workflows/execute-milestone.js` (run
   2026-07-27) produces no output.
 
 ## Definition of Done
-- [ ] Landed on `master`, verified via a real dispatch, not asserted. **REFUTED** — landed on
-  `master` (commit `c201b4c`), but "verified via a real dispatch" is false; see AC2 above — only a
-  manual self-test (append-then-revert) was performed, and a live re-run of the task's own
-  `extra.acceptance` command against the real `/tmp/m180-absorb-entry.md` right now still exits 1
-  with clause1/clause2 FAIL (plus clause0 FAIL for this task's own then-unchecked boxes).
+- [ ] Landed on `master`, verified via a real dispatch, not asserted. **STILL REFUTED** — landed on
+  `master` (commits `c201b4c`, `46e92e4`), and the mechanism is now demonstrably live-verified
+  (clause1/clause2/clause7 all PASS this pass, real not reverted — see AC2 above), but the DoD's
+  literal "verified" bar isn't cleared because the only pass so far is the self-referential one this
+  audit itself just performed. `bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+  gap-absorb-entry-clause-disposition-sequencing
+  experiments/quay-perpetual-stream/charters/M180-gap-absorb-disposition-sequencing.md
+  /tmp/m180-absorb-entry.md` (run 2026-07-27, post-append) now exits 1 on `clause0` ONLY (AC2's own
+  unticked box) — clause1/clause2/clause7 all PASS.
 - [x] Since this touches `.claude/workflows/execute-milestone.js` (driver execution-chain script),
   the milestone resolving it must run under human-steered discipline. CONFIRMED: task carries
   `label: human-steered`; `experiments/quay-perpetual-stream/.halt` sentinel exists on disk with
