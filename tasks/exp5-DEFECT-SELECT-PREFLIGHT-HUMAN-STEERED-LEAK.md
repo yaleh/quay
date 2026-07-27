@@ -8,7 +8,11 @@ labels:
   - milestone-candidate
 parent: null
 children: []
-extra: {}
+extra:
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    exp5-DEFECT-SELECT-PREFLIGHT-HUMAN-STEERED-LEAK
+    experiments/quay-perpetual-stream/charters/M181-select-preflight-human-steered-leak.md
+    /tmp/m181-absorb-entry.md
 ---
 ## Finding
 

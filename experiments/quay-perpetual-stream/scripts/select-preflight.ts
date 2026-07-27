@@ -48,6 +48,12 @@ export interface CandidateEntry {
   hasTouches: boolean;
   humanSteered: boolean;
   classifyDetail: string;
+  // role/children (DIR-113-derived M181 fix): carried through from the raw task view-model so
+  // buildPreflightResult can walk an epic's open children without a second task-store read.
+  // Absent on fixtures/tests that construct CandidateEntry literals directly — treated as
+  // "not an epic" (role !== "compound" or children.length === 0) when undefined.
+  role?: string;
+  children?: string[];
 }
 
 export interface CadenceResult {
@@ -135,6 +141,8 @@ export function getCandidates(tasks: any[]): CandidateEntry[] {
       const labels: string[] = Array.isArray(t.labels) ? t.labels : [];
       // Rank: use extra.rank if present, else default to 999 (low priority)
       const rank = typeof extra.rank === "number" ? extra.rank : 999;
+      const role = typeof t.role === "string" ? t.role : undefined;
+      const children: string[] | undefined = Array.isArray(t.children) ? t.children : undefined;
       return {
         id: t.id,
         title: t.title || "",
@@ -146,6 +154,8 @@ export function getCandidates(tasks: any[]): CandidateEntry[] {
         hasTouches: false,
         humanSteered: false,
         classifyDetail: "",
+        role,
+        children,
       };
     });
 }
@@ -317,6 +327,56 @@ export function classifyCandidate(
   return { ...result, detail };
 }
 
+// ── hasHumanSteeredLabel (M181 fix, case 1) ─────────────────────────────────────────────────────
+// A direct `label:human-steered` on the task is an ADDITIONAL, independent exclusion signal — it
+// must never be overridden by whatever human-steered-classify.ts's heuristic classifier concludes
+// (DIR-062-C's classifier deliberately never reads this label itself; select-preflight.ts is the
+// consumer responsible for ORing it in). Case-insensitive, matching getCandidates' own convention.
+export function hasHumanSteeredLabel(labels: string[] | undefined | null): boolean {
+  if (!Array.isArray(labels)) return false;
+  return labels.some((l) => String(l).toLowerCase() === "human-steered");
+}
+
+// ── computeHumanSteered (M181 fix) ──────────────────────────────────────────────────────────────
+// Shared decision point used for BOTH top-level candidates and an epic's children: classifier
+// result OR direct label — case 1's OR, applied uniformly wherever a task's human-steered
+// disposition is needed.
+export function computeHumanSteered(
+  workspaceRoot: string,
+  taskId: string,
+  labels: string[],
+  extra: Record<string, any>,
+  registry: Registry,
+): { humanSteered: boolean; detail: string } {
+  const cr = classifyCandidate(workspaceRoot, taskId, extra, registry);
+  const labelHumanSteered = hasHumanSteeredLabel(labels);
+  const detail = labelHumanSteered ? `${cr.detail}; label:human-steered (direct)` : cr.detail;
+  return { humanSteered: cr.humanSteered || labelHumanSteered, detail };
+}
+
+// ── isEpicBlockedByHumanSteeredChildren (M181 fix, case 2) ─────────────────────────────────────
+// A compound/epic candidate (role:compound, non-empty children) has NO autonomous-executable path
+// forward when ALL of its currently-open (non-done) children are human-steered (label OR
+// classifier, via computeHumanSteered above). Vacuous case: an epic with zero open children (all
+// children done, or no children left to check) is NOT blocked by this rule — nothing to test, so
+// it falls through to whatever the epic's own classification already decided.
+export function isEpicBlockedByHumanSteeredChildren(
+  workspaceRoot: string,
+  childIds: string[],
+  tasksById: Map<string, any>,
+  registry: Registry,
+): boolean {
+  const openChildren = childIds
+    .map((id) => tasksById.get(id))
+    .filter((t): t is any => t != null && t.status !== "done");
+  if (openChildren.length === 0) return false;
+  return openChildren.every((t) => {
+    const labels: string[] = Array.isArray(t.labels) ? t.labels : [];
+    const extra = t.extra || {};
+    return computeHumanSteered(workspaceRoot, t.id, labels, extra, registry).humanSteered;
+  });
+}
+
 // ── getCadence ────────────────────────────────────────────────────────────────────────────────────
 // Run explore-exploit-cadence.ts --json and parse its output.
 // Returns CadenceResult or null if the script fails.
@@ -396,7 +456,8 @@ export function buildPreflightResult(workspaceRoot: string, milestoneCounter: nu
     c.hasTouches = checkCandidateTouches(workspaceRoot, c.id);
   }
 
-  // 8. Classify human-steered per candidate (DIR-062-C: classifier replaces label:human-steered filter)
+  // 8. Classify human-steered per candidate (DIR-062-C classifier) OR'd with a direct
+  // label:human-steered (M181 fix, case 1) — the label is an additional, never-overridden signal.
   let registry: Registry = { authorizedRoot: null, workspacePaths: [] };
   try {
     const registryPath = path.join(workspaceRoot, "experiments", "quay-perpetual-stream", "drivable-workspaces.yml");
@@ -409,9 +470,24 @@ export function buildPreflightResult(workspaceRoot: string, milestoneCounter: nu
   }
 
   for (const c of candidates) {
-    const cr = classifyCandidate(workspaceRoot, c.id, c.extra, registry);
-    c.humanSteered = cr.humanSteered;
-    c.classifyDetail = cr.detail;
+    const hs = computeHumanSteered(workspaceRoot, c.id, c.labels, c.extra, registry);
+    c.humanSteered = hs.humanSteered;
+    c.classifyDetail = hs.detail;
+  }
+
+  // 8b. Epic-with-human-steered-only-child (M181 fix, case 2): a compound candidate whose every
+  // currently-open child is human-steered has no autonomous-executable path forward — exclude it
+  // too, even though the epic's OWN label/classifier came back clean.
+  const tasksById = new Map<string, any>((tasks as any[]).map((t) => [t.id, t]));
+  for (const c of candidates) {
+    if (c.humanSteered) continue;
+    if (c.role !== "compound") continue;
+    const children = Array.isArray(c.children) ? c.children : [];
+    if (children.length === 0) continue;
+    if (isEpicBlockedByHumanSteeredChildren(workspaceRoot, children, tasksById, registry)) {
+      c.humanSteered = true;
+      c.classifyDetail = `${c.classifyDetail}; epic-blocked: all open children human-steered`;
+    }
   }
 
   // Filter out human-steered candidates (they must not be selected autonomously)
@@ -554,6 +630,109 @@ export function selftest(): boolean {
     check("classify-skill-edit", r6.humanSteered === true && r6.clauses.driverFileEdit === true, `skill-edit: ${r6.detail}`);
   } finally {
     fs.rmSync(tmpDir3, { recursive: true, force: true });
+  }
+
+  // ── M181 fix: computeHumanSteered / isEpicBlockedByHumanSteeredChildren (RED/GREEN pairs) ──
+  const tmpDir5 = fs.mkdtempSync("select-preflight-selftest-m181-");
+  try {
+    const tasksDir4 = path.join(tmpDir5, "tasks");
+    fs.mkdirSync(tasksDir4, { recursive: true });
+    const registry: Registry = { authorizedRoot: "/home/yale/work", workspacePaths: [] };
+
+    // ── Case 1 (direct label): a task carrying label:human-steered but touching only clean,
+    // non-driver files → the classifier ALONE (pre-fix behavior) says false; computeHumanSteered
+    // (post-fix) ORs in the label and says true.
+    fs.writeFileSync(
+      path.join(tasksDir4, "LABELED-HS.md"),
+      "## Proposal\ntest\n\n## Touches\n\n- `packages/quay/src/gate/engine.ts`\n",
+      "utf8",
+    );
+    // RED: documents the pre-fix leak — classifyCandidate alone never sees the label.
+    const redLabel = classifyCandidate(tmpDir5, "LABELED-HS", {}, registry);
+    check(
+      "m181-case1-RED-classifier-alone-misses-label",
+      redLabel.humanSteered === false,
+      `pre-fix leak reproduced: classifier-only verdict=${redLabel.humanSteered} (should be false, proving the label was ignored)`,
+    );
+    // GREEN: computeHumanSteered ORs the direct label in → true.
+    const greenLabel = computeHumanSteered(tmpDir5, "LABELED-HS", ["human-steered"], {}, registry);
+    check(
+      "m181-case1-GREEN-computeHumanSteered-catches-label",
+      greenLabel.humanSteered === true && /label:human-steered \(direct\)/.test(greenLabel.detail),
+      `fixed verdict=${greenLabel.humanSteered}, detail=${greenLabel.detail}`,
+    );
+
+    // ── Case 2 (epic-with-human-steered-only-child): an epic with one done child and one open
+    // child that carries label:human-steered (touching clean files, so the classifier alone would
+    // say the CHILD is false too — this isolates the label-OR fix as the thing that closes case 2).
+    fs.writeFileSync(
+      path.join(tasksDir4, "CHILD-DONE.md"),
+      "## Proposal\ntest\n\n## Touches\n\n- `packages/quay/src/a.ts`\n",
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(tasksDir4, "CHILD-HS.md"),
+      "## Proposal\ntest\n\n## Touches\n\n- `packages/quay/src/b.ts`\n",
+      "utf8",
+    );
+    const tasksById = new Map<string, any>([
+      ["CHILD-DONE", { id: "CHILD-DONE", status: "done", labels: [], extra: {} }],
+      ["CHILD-HS", { id: "CHILD-HS", status: "todo", labels: ["human-steered"], extra: {} }],
+    ]);
+    // RED: documents the pre-fix leak — the epic's OWN label/classifier is clean, so a check that
+    // only looks at the epic itself (not its children) would say false (eligible), even though its
+    // one open child is human-steered.
+    const redEpic = computeHumanSteered(tmpDir5, "EPIC", [], {}, registry);
+    check(
+      "m181-case2-RED-epic-own-classification-misses-blocked-child",
+      redEpic.humanSteered === false,
+      `pre-fix leak reproduced: epic's own verdict=${redEpic.humanSteered} (should be false — the epic itself has no driver-file/label signal; only walking children reveals the block)`,
+    );
+    // GREEN: isEpicBlockedByHumanSteeredChildren walks the open children and finds them ALL
+    // human-steered → epic correctly excluded.
+    const greenEpic = isEpicBlockedByHumanSteeredChildren(tmpDir5, ["CHILD-DONE", "CHILD-HS"], tasksById, registry);
+    check(
+      "m181-case2-GREEN-epic-blocked-by-open-human-steered-child",
+      greenEpic === true,
+      `epicBlocked=${greenEpic} (expected true — CHILD-DONE is done/ignored, CHILD-HS is the sole open child and is human-steered)`,
+    );
+
+    // ── Regression (Done-when #5): a genuinely autonomous-eligible epic (no label, classifier
+    // clean on every open child) is NOT blocked.
+    const tasksByIdClean = new Map<string, any>([
+      ["CHILD-DONE", { id: "CHILD-DONE", status: "done", labels: [], extra: {} }],
+      ["CHILD-CLEAN", { id: "CHILD-HS", status: "todo", labels: [], extra: {} }],
+    ]);
+    fs.writeFileSync(
+      path.join(tasksDir4, "CHILD-HS.md"),
+      "## Proposal\ntest\n\n## Touches\n\n- `packages/quay/src/b.ts`\n",
+      "utf8",
+    );
+    const cleanEpicBlocked = isEpicBlockedByHumanSteeredChildren(tmpDir5, ["CHILD-DONE", "CHILD-HS"], tasksByIdClean, registry);
+    check(
+      "m181-regression-clean-epic-not-blocked",
+      cleanEpicBlocked === false,
+      `epicBlocked=${cleanEpicBlocked} (expected false — CHILD-HS here carries no label and touches only clean files)`,
+    );
+
+    // Vacuous case: an epic with zero currently-open children (all done) is NOT blocked by this
+    // rule — nothing to test, falls through to the epic's own classification.
+    const tasksByIdAllDone = new Map<string, any>([
+      ["CHILD-DONE", { id: "CHILD-DONE", status: "done", labels: [], extra: {} }],
+    ]);
+    const allDoneBlocked = isEpicBlockedByHumanSteeredChildren(tmpDir5, ["CHILD-DONE"], tasksByIdAllDone, registry);
+    check(
+      "m181-vacuous-all-children-done-not-blocked",
+      allDoneBlocked === false,
+      `epicBlocked=${allDoneBlocked} (expected false — no open children to block on)`,
+    );
+
+    // hasHumanSteeredLabel: case-insensitive, absent/non-array-safe.
+    check("m181-hasHumanSteeredLabel-true", hasHumanSteeredLabel(["Human-Steered"]) === true, "case-insensitive match");
+    check("m181-hasHumanSteeredLabel-false", hasHumanSteeredLabel(["defect"]) === false, "no match");
+    check("m181-hasHumanSteeredLabel-null-safe", hasHumanSteeredLabel(null) === false, "null-safe");
+  } finally {
+    fs.rmSync(tmpDir5, { recursive: true, force: true });
   }
 
   // ── getCandidateParsedTouches / scanOrthogonalPairs (DIR-113 item 3) ──

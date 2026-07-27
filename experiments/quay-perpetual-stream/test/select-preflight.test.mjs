@@ -13,6 +13,10 @@ import {
   getCandidates,
   checkCandidateTouches,
   selftest,
+  hasHumanSteeredLabel,
+  computeHumanSteered,
+  isEpicBlockedByHumanSteeredChildren,
+  classifyCandidate,
 } from "../scripts/select-preflight.ts";
 
 const SCRIPT = fileURLToPath(new URL("../scripts/select-preflight.ts", import.meta.url));
@@ -164,6 +168,128 @@ test("checkCandidateTouches: missing file → false", () => {
 // ── selftest() ────────────────────────────────────────────────────────────────────────────────────
 test("selftest(): all embedded fixture cases pass", () => {
   assert.equal(selftest(), true);
+});
+
+// ── hasHumanSteeredLabel (M181 fix, case 1) ──────────────────────────────────────────────────────
+test("hasHumanSteeredLabel: case-insensitive match", () => {
+  assert.equal(hasHumanSteeredLabel(["Human-Steered"]), true);
+  assert.equal(hasHumanSteeredLabel(["human-steered"]), true);
+});
+
+test("hasHumanSteeredLabel: no match → false", () => {
+  assert.equal(hasHumanSteeredLabel(["defect"]), false);
+});
+
+test("hasHumanSteeredLabel: null/undefined/non-array → false", () => {
+  assert.equal(hasHumanSteeredLabel(null), false);
+  assert.equal(hasHumanSteeredLabel(undefined), false);
+  assert.equal(hasHumanSteeredLabel("not-an-array"), false);
+});
+
+// ── computeHumanSteered / isEpicBlockedByHumanSteeredChildren — M181 RED/GREEN fixture pairs ──────
+// M181: a direct label:human-steered on a task must be an ADDITIONAL, never-overridden exclusion
+// signal — DIR-062-C's classifier alone never reads the label (by design), so select-preflight.ts
+// must OR it in itself. These fixtures reproduce the pre-fix leak (RED) and the fixed behavior
+// (GREEN) side by side.
+test("M181 case 1 (direct label) RED: classifier alone ignores label:human-steered → false", () => {
+  const tmpDir = fs.mkdtempSync("select-preflight-test-m181-");
+  try {
+    const tasksDir = path.join(tmpDir, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tasksDir, "LABELED-HS.md"),
+      "## Proposal\ntest\n\n## Touches\n\n- `packages/quay/src/gate/engine.ts`\n",
+      "utf8",
+    );
+    const registry = { authorizedRoot: "/home/yale/work", workspacePaths: [] };
+    // The raw classifier (pre-fix consumption path) never sees the label — reproduces the leak.
+    const r = classifyCandidate(tmpDir, "LABELED-HS", {}, registry);
+    assert.equal(r.humanSteered, false, "classifier-only verdict must reproduce the pre-fix leak (false)");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("M181 case 1 (direct label) GREEN: computeHumanSteered ORs in the label → true", () => {
+  const tmpDir = fs.mkdtempSync("select-preflight-test-m181-");
+  try {
+    const tasksDir = path.join(tmpDir, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tasksDir, "LABELED-HS.md"),
+      "## Proposal\ntest\n\n## Touches\n\n- `packages/quay/src/gate/engine.ts`\n",
+      "utf8",
+    );
+    const registry = { authorizedRoot: "/home/yale/work", workspacePaths: [] };
+    const r = computeHumanSteered(tmpDir, "LABELED-HS", ["human-steered"], {}, registry);
+    assert.equal(r.humanSteered, true, "direct label must be OR'd in regardless of classifier verdict");
+    assert.match(r.detail, /label:human-steered \(direct\)/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("M181 case 2 (epic-with-human-steered-only-child) RED: epic's own classification misses a blocked child", () => {
+  const tmpDir = fs.mkdtempSync("select-preflight-test-m181-");
+  try {
+    const registry = { authorizedRoot: "/home/yale/work", workspacePaths: [] };
+    // The epic itself carries no label and touches nothing — its own classification is clean,
+    // reproducing the pre-fix leak where only the epic's own labels/classifier were consulted.
+    const r = computeHumanSteered(tmpDir, "EPIC", [], {}, registry);
+    assert.equal(r.humanSteered, false, "epic's own verdict alone must not see the blocked child");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("M181 case 2 (epic-with-human-steered-only-child) GREEN: isEpicBlockedByHumanSteeredChildren excludes it", () => {
+  const tmpDir = fs.mkdtempSync("select-preflight-test-m181-");
+  try {
+    const tasksDir = path.join(tmpDir, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.writeFileSync(path.join(tasksDir, "CHILD-DONE.md"), "## Proposal\ntest\n\n## Touches\n\n- `packages/quay/src/a.ts`\n", "utf8");
+    fs.writeFileSync(path.join(tasksDir, "CHILD-HS.md"), "## Proposal\ntest\n\n## Touches\n\n- `packages/quay/src/b.ts`\n", "utf8");
+    const registry = { authorizedRoot: "/home/yale/work", workspacePaths: [] };
+    const tasksById = new Map([
+      ["CHILD-DONE", { id: "CHILD-DONE", status: "done", labels: [], extra: {} }],
+      ["CHILD-HS", { id: "CHILD-HS", status: "todo", labels: ["human-steered"], extra: {} }],
+    ]);
+    const blocked = isEpicBlockedByHumanSteeredChildren(tmpDir, ["CHILD-DONE", "CHILD-HS"], tasksById, registry);
+    assert.equal(blocked, true, "epic must be excluded: its sole open child is human-steered");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("M181 regression: a genuinely autonomous-eligible epic (no label, classifier clean) is not blocked", () => {
+  const tmpDir = fs.mkdtempSync("select-preflight-test-m181-");
+  try {
+    const tasksDir = path.join(tmpDir, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.writeFileSync(path.join(tasksDir, "CHILD-DONE.md"), "## Proposal\ntest\n\n## Touches\n\n- `packages/quay/src/a.ts`\n", "utf8");
+    fs.writeFileSync(path.join(tasksDir, "CHILD-CLEAN.md"), "## Proposal\ntest\n\n## Touches\n\n- `packages/quay/src/b.ts`\n", "utf8");
+    const registry = { authorizedRoot: "/home/yale/work", workspacePaths: [] };
+    const tasksById = new Map([
+      ["CHILD-DONE", { id: "CHILD-DONE", status: "done", labels: [], extra: {} }],
+      ["CHILD-CLEAN", { id: "CHILD-CLEAN", status: "todo", labels: [], extra: {} }],
+    ]);
+    const blocked = isEpicBlockedByHumanSteeredChildren(tmpDir, ["CHILD-DONE", "CHILD-CLEAN"], tasksById, registry);
+    assert.equal(blocked, false, "no label, no driver-file touch on the open child → not blocked");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("M181 vacuous case: epic with zero currently-open children (all done) is not blocked", () => {
+  const tmpDir = fs.mkdtempSync("select-preflight-test-m181-");
+  try {
+    const registry = { authorizedRoot: "/home/yale/work", workspacePaths: [] };
+    const tasksById = new Map([["CHILD-DONE", { id: "CHILD-DONE", status: "done", labels: [], extra: {} }]]);
+    const blocked = isEpicBlockedByHumanSteeredChildren(tmpDir, ["CHILD-DONE"], tasksById, registry);
+    assert.equal(blocked, false, "nothing open to block on");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────────────
