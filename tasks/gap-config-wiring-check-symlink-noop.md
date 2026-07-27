@@ -88,3 +88,10 @@ fix it in one script and leave the other silently fragile.
 ## Human verification when exp5 marks this task done
 1. Do both invocation paths of `config-wiring-check.ts` now produce identical, real output?
 2. Was `concurrent-batch-scheduler.ts` checked for the same bug class?
+
+## Touches
+
+- plugin/scripts/config-wiring-check.ts
+- experiments/quay-perpetual-stream/scripts/config-wiring-check.ts
+- plugin/scripts/concurrent-batch-scheduler.ts
+- experiments/quay-perpetual-stream/test/config-wiring-check.test.mjs (or sibling test path)

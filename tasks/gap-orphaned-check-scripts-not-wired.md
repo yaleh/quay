@@ -75,3 +75,12 @@ file's gate paths or asserting they match via a drift check.
 ## Human verification when exp5 marks this task done
 1. Does a deliberately-broken `delivery-manifest.json` now actually fail a real CI run?
 2. Does `loop.yml`'s comment accurately describe what's live vs. inert today?
+
+## Touches
+
+- scripts/delivery-manifest-check.ts
+- .github/workflows/release.yml
+- experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh
+- experiments/quay-perpetual-stream/.quay/loop.yml
+- .quay/gates.yml
+- .quay/config.yml
