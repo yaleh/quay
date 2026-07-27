@@ -14,7 +14,8 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"   # scripts/ -> quay-perpetual-stream/ -> experiments/ -> repo root
 cd "$ROOT" || { echo "ERROR: cannot cd to repo root ($ROOT)" >&2; exit 1; }
-HALT="experiments/quay-perpetual-stream/.halt"
+HALT=".halt"   # repo-root-relative — matches select-preflight.ts's checkHalt() and
+               # plugin/skills/loop-driver/SKILL.md's documented convention (gap-halt-sentinel-path-mismatch, M187).
 fail=0
 ok()   { echo "  [ok]   $1"; }
 bad()  { echo "  [FAIL] $1"; fail=1; }
@@ -22,7 +23,7 @@ bad()  { echo "  [FAIL] $1"; fail=1; }
 echo "restart-readiness-check — repo: $ROOT"
 
 # 1. Working tree clean (ignoring the .halt sentinel itself, which is expected to be present).
-dirty="$(git status --short 2>/dev/null | grep -vE "(^\?\? )?experiments/quay-perpetual-stream/\.halt$")"
+dirty="$(git status --short 2>/dev/null | grep -vE "(^\?\? )?${HALT//./\\.}\$")"
 [ -z "$dirty" ] && ok "working tree clean (ignoring .halt)" || { bad "working tree NOT clean:"; echo "$dirty" | sed 's/^/         /'; }
 
 # 2. No merge in progress.

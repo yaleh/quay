@@ -12,7 +12,11 @@ labels:
   - milestone-candidate
 parent: null
 children: []
-extra: {}
+extra:
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    gap-halt-sentinel-path-mismatch
+    experiments/quay-perpetual-stream/charters/M187-gap-halt-restart-readiness-fix.md
+    /tmp/m187-absorb-entry.md
 ---
 ## Finding
 
@@ -64,35 +68,54 @@ confirmed-correct sentinel location, alongside the pre-existing (now known-ineff
 sentinel line corrected in place (2026-07-27) to document the real repo-root convention and flag
 the previous documentation as wrong.
 
+## Round 3 (2026-07-27, M187) — code fix + regression guard landed
+
+1. `restart-readiness-check.sh`'s `HALT` variable changed from
+   `"experiments/quay-perpetual-stream/.halt"` to `".halt"` (repo-root-relative), matching
+   `select-preflight.ts`'s `checkHalt()`. Also fixed the script's git-status dirty-check exclusion
+   regex (line ~26), which had hardcoded the same wrong `experiments/quay-perpetual-stream/\.halt$`
+   pattern independent of the `$HALT` variable — now derived from `$HALT` so it can't drift again.
+2. New regression-guard test added to `select-preflight.test.mjs`: a `.halt` placed ONLY at
+   `experiments/quay-perpetual-stream/.halt` (workspace root's `.halt` absent) asserts
+   `checkHalt(tmpDir).halt === false`. Verified RED against a temporarily-reintroduced old-style
+   wrong-path `checkHalt()` implementation, and GREEN against the real (already-correct) code —
+   both states confirmed by actually running the test both ways, not asserted.
+
 ## Requested action
 
 1. Fix `restart-readiness-check.sh`'s `HALT="experiments/quay-perpetual-stream/.halt"` → repo-root
-   `.halt`, matching the real, live convention.
+   `.halt`, matching the real, live convention. — DONE (M187, see Round 3 above).
 2. `CLAUDE.md` — DONE (corrected 2026-07-27, see above).
 3. Add a selftest fixture to `select-preflight.test.mjs` confirming a `.halt` at the
    `experiments/quay-perpetual-stream/` path does NOT satisfy the check (documents the footgun
-   explicitly, guards against future regression/re-confusion).
+   explicitly, guards against future regression/re-confusion). — DONE (M187, see Round 3 above).
 4. Consider wiring `restart-readiness-check.sh` into `OUTER-LOOP.md`'s actual resume path (it is
    currently a real, correct, but never-invoked script) — same shape as the `delivery-manifest-
    check.ts` orphan found in the same survey; may be worth folding into the broader "audit orphaned
    `*-check.{ts,sh}` scripts" cleanup this survey recommended (see
-   `gap-orphaned-check-scripts-not-wired`, filed separately).
+   `gap-orphaned-check-scripts-not-wired`, filed separately). — OUT OF SCOPE for M187 (explicitly,
+   per the M187 charter's Scope section); tracked in `gap-orphaned-check-scripts-not-wired`.
 5. **Safety hardening, independent of the path question**: `checkHalt()`'s `catch { return {
    halt: false } }` fail-open behavior should be reconsidered — any read failure (permissions,
    transient FS error, wrong path due to a FUTURE version of this same class of bug) currently
    defaults to "not halted, proceed" rather than the safer "cannot confirm safety, treat as
-   halted."
+   halted." — OUT OF SCOPE for M187 (explicitly, per the M187 charter's Scope section — this is
+   DIR-120's scope, a different concurrent milestone touching the same file's `checkHalt()`
+   catch-block body).
 
 ## Acceptance Criteria
-- [ ] `restart-readiness-check.sh` checks the same repo-root path `select-preflight.ts` does.
+- [x] `restart-readiness-check.sh` checks the same repo-root path `select-preflight.ts` does.
 - [x] `CLAUDE.md` documents the real, current code's convention — DONE 2026-07-27.
-- [ ] New selftest fixture: `.halt` at the experiments-scoped path alone → `halt: false` (explicit
+- [x] New selftest fixture: `.halt` at the experiments-scoped path alone → `halt: false` (explicit
   regression guard, not just fixed silently).
 
 ## Definition of Done
-- [ ] Landed on `master`, verified via a real `select-preflight.ts` dry run, not asserted.
-- [ ] Because this touches `experiments/quay-perpetual-stream/scripts/*` (driver execution-chain
-  files), resolving it must run under human-steered discipline.
+Standard inherited-core DoD clauses apply (adversarial-audit, V_meta consolidation-lag, line-budget,
+impl-row N/A, no-self-exemption, escrow-Δv N/A, test-floor N/A (method-infra surface),
+task-canonical-lifecycle-record, tree-hygiene, worktree-branch-hygiene, audit-independence).
+- [x] Landed on `master`, verified via a real `select-preflight.ts` dry run, not asserted.
+- [x] Because this touches `experiments/quay-perpetual-stream/scripts/*` (driver execution-chain
+  files), resolving it must run under human-steered discipline — labeled `human-steered`.
 
 ## Human verification when exp5 marks this task done
 1. Does `restart-readiness-check.sh` now agree with `select-preflight.ts` on where `.halt` lives?

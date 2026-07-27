@@ -57,6 +57,25 @@ test("checkHalt: empty .halt → {halt: true} with sentinel message", () => {
   }
 });
 
+// Regression guard (gap-halt-sentinel-path-mismatch, M187): a .halt placed ONLY at the
+// experiments/quay-perpetual-stream/ path (the wrong, formerly-documented location) must NOT
+// satisfy the check — checkHalt() is workspaceRoot-relative, not experiments-scoped. This is the
+// exact confusion that led restart-readiness-check.sh and CLAUDE.md to disagree with the real,
+// live convention; this test pins the correct (repo-root) behavior so it cannot silently regress.
+test("checkHalt: .halt at experiments/quay-perpetual-stream/ path only → {halt: false} (wrong-path regression guard)", () => {
+  const tmpDir = fs.mkdtempSync("select-preflight-test-");
+  try {
+    const wrongDir = path.join(tmpDir, "experiments", "quay-perpetual-stream");
+    fs.mkdirSync(wrongDir, { recursive: true });
+    fs.writeFileSync(path.join(wrongDir, ".halt"), "manual stop", "utf8");
+    // No .halt at the workspace root (tmpDir) itself.
+    const r = checkHalt(tmpDir);
+    assert.equal(r.halt, false, `expected halt:false with .halt only at the experiments-scoped path, got reason=${r.reason}`);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 // ── getPendingDirectives ──────────────────────────────────────────────────────────────────────────
 test("getPendingDirectives: filters to label:directive + extra.dirStatus:pending", () => {
   const tasks = [
