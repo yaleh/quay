@@ -84,18 +84,54 @@ phases compute them).
    but doesn't name the actual mechanism) — optional, low priority, informational only.
 
 ## Acceptance Criteria
-- [ ] `execute-milestone.js`'s Audit/Gate phases append real disposition text (not just return
+- [x] `execute-milestone.js`'s Audit/Gate phases append real disposition text (not just return
   structured output) for clause1/clause2/clause7 into the absorb-entry file as each value is
-  computed — grep confirms the write instruction exists in the prompt text.
+  computed — grep confirms the write instruction exists in the prompt text. CONFIRMED by
+  fresh-context audit 2026-07-27: `git show c201b4c -- .claude/workflows/execute-milestone.js`
+  shows new Audit-phase step 2a (between DoD-satisfaction and the mechanical-gate invocation)
+  instructing append of `adversarial-audit disposition: <VERDICT>` (clause1) and
+  `V_meta consolidation-lag: <verbatim vmeta-lag-check.sh output>` (clause2) into
+  `${$a.absorbEntryFile}`; independently confirmed both phrasings match `it0-dod-check.ts`'s actual
+  regexes at lines 236-237/250-251 (read directly, not guessed). Clause7 is instead handled by a
+  new Build-phase step 1a (`surface:<label>` tag on the `## Backlog row`) rather than literally in
+  Audit/Gate — a phase-placement deviation from this AC's literal wording, but independently
+  verified correct against `it0-dod-check.ts` lines 513/527/544 (a recognized non-product
+  `surface:` token auto-resolves clause7 N/A-PASS) and disclosed/justified in the M180 charter as
+  "the cheapest fix". Ticked because the substance (grep-confirmable write instructions for all 3
+  clauses, functionally correct) is present; the phase-location deviation is noted, not blocking.
 - [ ] A real (non-fixture) milestone dispatch after this fix shows `it0-dod-check.sh` exiting 0 (or
   failing only on genuinely unmet clauses, never on "NO disposition statement found") without any
-  manual post-hoc edit to the absorb-entry file.
-- [ ] Both `.claude/workflows/` and `plugin/workflows/` mirrors stay byte-identical.
+  manual post-hoc edit to the absorb-entry file. **REFUTED** by fresh-context audit 2026-07-27: no
+  real dispatch happened. `milestones/M180/iterations/iteration-0.md` ("Verification" section, its
+  own self-report) explicitly discloses the implementer could NOT run a real re-dispatch — this
+  milestone's own build is the in-flight session, and per CLAUDE.md's documented
+  workflow-script-staleness anti-pattern a live run can't pick up a script edit made mid-run — so it
+  instead hand-appended the 2 disposition lines to a scratch copy of `/tmp/m180-absorb-entry.md`,
+  re-ran the checker to see clause1/2/7 flip to PASS, then explicitly "restored
+  `/tmp/m180-absorb-entry.md` to its original pre-test content". Live re-verification by this audit
+  (`bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+  gap-absorb-entry-clause-disposition-sequencing
+  experiments/quay-perpetual-stream/charters/M180-gap-absorb-disposition-sequencing.md
+  /tmp/m180-absorb-entry.md`, run 2026-07-27) confirms the file as it stands right now still FAILs
+  clause1 and clause2 ("NO disposition statement found in ABSORB-entry text") — exactly the failure
+  mode this AC requires be gone. The only verification performed was a manual edit-then-revert
+  self-test, which is the opposite of "without any manual post-hoc edit".
+- [x] Both `.claude/workflows/` and `plugin/workflows/` mirrors stay byte-identical. CONFIRMED:
+  `diff .claude/workflows/execute-milestone.js plugin/workflows/execute-milestone.js` (run
+  2026-07-27) produces no output.
 
 ## Definition of Done
-- [ ] Landed on `master`, verified via a real dispatch, not asserted.
-- [ ] Since this touches `.claude/workflows/execute-milestone.js` (driver execution-chain script),
-  the milestone resolving it must run under human-steered discipline.
+- [ ] Landed on `master`, verified via a real dispatch, not asserted. **REFUTED** — landed on
+  `master` (commit `c201b4c`), but "verified via a real dispatch" is false; see AC2 above — only a
+  manual self-test (append-then-revert) was performed, and a live re-run of the task's own
+  `extra.acceptance` command against the real `/tmp/m180-absorb-entry.md` right now still exits 1
+  with clause1/clause2 FAIL (plus clause0 FAIL for this task's own then-unchecked boxes).
+- [x] Since this touches `.claude/workflows/execute-milestone.js` (driver execution-chain script),
+  the milestone resolving it must run under human-steered discipline. CONFIRMED: task carries
+  `label: human-steered`; `experiments/quay-perpetual-stream/.halt` sentinel exists on disk with
+  mtime 2026-07-26 12:42 (before the `c201b4c` commit at 2026-07-27 00:29), and `c201b4c` is a
+  single-parent commit made directly on `master` by the human git user (`Yale Huang`), not a
+  loop-driven merge — consistent with the DIR-027 "pause via `.halt`" steering-hygiene path.
 
 ## Human verification when exp5 marks this task done
 1. Does a real, unmodified-by-hand absorb-entry file actually pass clause1/2/7 after this fix?
