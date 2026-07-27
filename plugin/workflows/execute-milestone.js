@@ -137,6 +137,14 @@ Absorb entry path: ${$a.absorbEntryFile}
 1. PRE-FLIGHT: ensure extra.acceptance is set on the task via task_write:
    extra.acceptance = "bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${$a.taskId} ${$a.charterFile} ${$a.absorbEntryFile}"
 
+1a. BACKLOG-ROW SURFACE TAG (gap-absorb-entry-clause-disposition-sequencing / M180, it0-dod-check.ts
+    clause7): read \`${$a.absorbEntryFile}\`'s \`## Backlog row\` pipe-delimited line. If it has NO
+    \`surface:<label>\` token at all, add one now, chosen accurately from this milestone's real
+    \`## Touches\` list: \`method-infra\`/\`docs\`/\`cross-cutting\`/\`packaging\` for a non-product-
+    touching milestone, or \`cli\`/\`web-ui\`/\`provider-abi\`/\`mcp\` for a milestone that touches
+    \`packages/quay*\` product code. Never fabricate — pick the label(s) that actually match the
+    Touches list. If the row already carries an accurate \`surface:\` token, leave it as-is.
+
 2. CLASS-ROUTE: This is a development-class task (capability-growth). Read the task body and charter, then implement each item in the Done-when list.
 
 3. IMPLEMENT: Make the actual code changes needed to satisfy all AC and Done-when clauses. For each:
@@ -183,6 +191,21 @@ CHARGE (refute-first stance):
 1a. CHECKLIST WRITE-BACK (DIR-020): for each confirmed AC/DoD item, WRITE BACK to the
     task file ticking - [x] with evidence citation. Leave - [ ] for unconfirmed items.
 2. DoD SATISFACTION: confirm the task's ## Definition of Done is satisfied.
+2a. DISPOSITION APPEND (gap-absorb-entry-clause-disposition-sequencing / M180): BEFORE running the
+    mechanical gate in step 3, append the following REAL (never fabricated) disposition lines to
+    \`${$a.absorbEntryFile}\` — e.g. via \`cat >> ${$a.absorbEntryFile} <<'EOF' ... EOF\` — so
+    clause1/clause2 of the mechanical gate find them already written instead of failing on "NO
+    disposition statement found":
+    (i) a line containing the phrase \`adversarial-audit disposition: <VERDICT>\` where <VERDICT> is
+        the verdict you just determined from step 1 (NO REFUTATION FOUND / CONCERNS / REFUTED) —
+        write it only AFTER you have actually reached that verdict, never before.
+    (ii) run the SAME command the later Gate phase runs — \`bash
+        experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh --counter <current
+        milestone_counter from experiments/quay-perpetual-stream/dashboard.md minus 1>
+        experiments/quay-perpetual-stream/v-meta-ledger.md\` (read-only, cheap, safe to duplicate)
+        — then append a line containing \`V_meta consolidation-lag: <verbatim reason/verdict text
+        from that command's own output>\`. Copy the script's actual reason text; do not paraphrase
+        or invent a "clear" result if the script did not say so.
 3. MECHANICAL GATE: run experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${$a.taskId} ${$a.charterFile}
    ${$a.absorbEntryFile}. Non-zero exit = REFUTED by construction.
 4. DEVIATION-LOG WRITE-BACK (DIR-017 Step 3 / M36): if you find a REFUTED or CONCERNS,

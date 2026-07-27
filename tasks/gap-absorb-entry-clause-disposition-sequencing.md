@@ -9,7 +9,11 @@ labels:
   - human-steered
 parent: null
 children: []
-extra: {}
+extra:
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    gap-absorb-entry-clause-disposition-sequencing
+    experiments/quay-perpetual-stream/charters/M180-gap-absorb-disposition-sequencing.md
+    /tmp/m180-absorb-entry.md
 ---
 ## Finding
 
