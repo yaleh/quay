@@ -44,17 +44,27 @@ Quay should evolve from a binary scheduler—
 | Weakly overlapping tasks with bounded integration cost | Separate milestones, planned-overlap concurrency |
 | Same semantic core, control plane, runtime generation, or shared mutable state | Serial or canary-first |
 
-The scheduler should first construct a **task coupling graph**, then choose
-milestone boundaries and concurrency. It must not treat the task documents as
-preordained execution units.
+The scheduler should first construct a **task coupling graph**, synthesize both
+singleton and composite milestone candidates, and then jointly choose milestone
+boundaries and concurrency. It must not treat task documents as preordained
+execution units.
 
-The initial rollout should support at most:
+Composite formation is part of SELECT—not a pre-SELECT grouping pass and not a
+post-SELECT repair. SELECT therefore changes from `Task[] → Task[]` into:
 
-- two tasks in a composite milestone;
-- two concurrent milestones in a planned-overlap batch;
-- overlap class O1 only (same file, different owned symbols or regions);
-- one active integration owner and one serial fan-in owner;
-- one canary milestone per new runtime generation before wider dispatch.
+```text
+select(TaskPool, state, budgets) → MilestonePortfolio
+```
+
+A `MilestoneCandidate` contains one or more tasks. A singleton is the
+one-task degenerate form; a composite is not a separate exception path.
+
+The rollout places no cardinality limit on a composite. Admission is bounded by
+cohesion, phase-DAG validity, milestone capacity, verification boundaries,
+expected marginal value, atomic failure cost, and resource budgets. Initial
+planned-overlap concurrency remains O1-only, with one active integration owner,
+one serial fan-in owner, and one canary milestone per new runtime generation
+before wider dispatch.
 
 Concurrency remains an optimization, never a relaxation of acceptance,
 independent audit, generation identity, or landing proof.
@@ -67,12 +77,12 @@ The current `execute-milestone` contract takes one `taskId`. Verify, Build,
 Audit, Gate, provenance write-back, dashboard update, and Land all assume a
 one-task milestone.
 
-That boundary is appropriate for independent work, but inefficient when two
-tasks:
+That boundary is appropriate for independent work, but inefficient when a
+group of tasks:
 
 - change the same implementation skeleton;
 - require the same repository exploration and test setup;
-- expose two aspects of one user-visible capability;
+- expose multiple aspects of one user-visible capability;
 - cannot be meaningfully integrated or audited in isolation; or
 - would create a temporary compatibility layer if landed separately.
 
@@ -122,6 +132,16 @@ opportunities are therefore:
 Recent M176–M180 work repeatedly encountered related ABSORB, audit, and wiring
 gaps. Parallel execution could have exposed the common failure sooner, but it
 could also have produced several branches requiring the same repair.
+
+Session-history review also showed why a fixed two-task bundle is the wrong
+abstraction. DIR-114, the M176 charter/audit-capture gap, and DIR-115 formed a
+three-task `execute-milestone.js` hardening cluster with shared context and one
+natural generation boundary. ADR-019 produced the four related DIR-109–DIR-112
+test-management tasks. A separate lifecycle reconciliation operation advanced
+ten stale tasks through the same evidence/status procedure. Conversely,
+DIR-062-B→DIR-062-C had a next-generation proof dependency and must remain
+separate despite thematic cohesion. Cardinality is therefore neither a safe
+upper bound nor a sufficient admission rule.
 
 The throughput design must distinguish:
 
@@ -177,6 +197,41 @@ The latter remains canary-first.
 | **Fan-in owner** | The only actor allowed to merge integrated results and mutate global milestone state |
 | **Integration tax** | Merge resolution, combined testing, audit expansion, contention, and expected rework caused by concurrency |
 
+SELECT operates on two levels:
+
+```ts
+interface TaskCandidate {
+  taskId: string
+  valueType: string
+  estimatedValue: number
+  touches: string[]
+  semanticResources: string[]
+  dependencies: Dependency[]
+  acceptanceCount: number
+  estimatedLines: number
+  verificationClass: string
+}
+
+interface MilestoneCandidate {
+  candidateId: string
+  taskIds: string[]
+  deliveryHypothesis: string
+  phaseGraph: Phase[]
+  semanticResources: string[]
+  unionValue: number
+  estimatedCriticalPath: number
+  estimatedFixedCostSaving: number
+  estimatedCoordinationCost: number
+  estimatedFailureCost: number
+  verificationBoundary: "same-generation" | "next-generation"
+  landPolicy: "atomic"
+}
+```
+
+The selected output is a `MilestonePortfolio`: a non-overlapping set of
+milestone candidates that respects dependency, cadence, concurrency, and
+resource constraints.
+
 ### 4.1 Overlap classes
 
 | Class | Definition | Default policy |
@@ -207,19 +262,28 @@ Tasks should be packed into one milestone when all of the following hold:
 7. packing has positive expected value after accounting for expanded failure
    scope.
 
-Initial mechanical limits:
+There is no maximum task count. A composite is mechanically admissible only
+when:
 
-- maximum two tasks;
-- maximum one shared semantic core;
-- no O4 work;
-- no task already marked learning-type;
-- no unresolved AC or dependency contradiction;
-- no combined touch/line/complexity budget above the normal
-  SPLIT-OR-COMMIT ceiling.
+- its positive-coupling subgraph is connected;
+- every added task has positive marginal contribution after coordination and
+  failure costs;
+- its phase graph is acyclic;
+- all ACs map to phases and audit shards;
+- it contains no internal `proof-after-land`, next-generation,
+  result-dependent-selection, or learning-feedback edge;
+- its checked phase/stage plan satisfies the normal milestone ceiling rules;
+- its critical path, context package, audit plan, and resource demand fit the
+  configured milestone capacity;
+- atomic rollback remains credible.
+
+This permits a wide composite of small homogeneous tasks while rejecting even
+a two-task group whose temporal proof dependency crosses a Land or runtime
+generation boundary.
 
 ### 5.2 Composite charter and Plan
 
-The charter must retain each task as a first-class unit and declare the shared
+The charter must retain every task as a first-class unit and declare the shared
 delivery contract. The checked Plan should have a machine-readable projection
 equivalent to:
 
@@ -249,6 +313,11 @@ The preparation gate must prove:
 - the computed touch set is no smaller than the union of all task touch sets;
 - task dependency order contains no cycle;
 - the Plan and inspected source hashes match the preparation receipt.
+
+Task count does not determine agent count. The checked Plan partitions work
+into execution phases and audit shards. One shared phase may satisfy several
+tasks; one audit shard may cover several homogeneous tasks while still
+returning a verdict for every task and AC.
 
 ### 5.3 Phase DAG
 
@@ -389,13 +458,43 @@ authorize Land because it did not observe the final integrated state.
 
 ## 7. Scheduling algorithm
 
-### 7.1 Construct the coupling graph
+### 7.1 SELECT owns composite synthesis
+
+Composite formation must not run as a separate pass before or after SELECT.
+
+- Pre-SELECT grouping would silently make the most important selection
+  decisions—membership, excluded alternatives, value aggregation, and failure
+  scope—before SELECT.
+- Post-SELECT grouping would only see the already-truncated task list. A
+  six-task composite could never be discovered if `concurrency=4` caused the
+  old selector to retain only four tasks.
+
+SELECT becomes a staged, feedback-bearing operation:
+
+```text
+S0 eligible task pool
+  → S1 task-fact enrichment
+  → S2 coupling graph
+  → S3 singleton + composite candidate synthesis
+  → S4 milestone-portfolio scoring and provisional choice
+  → S5 prepare chosen milestone candidates
+  → S6 recompute facts and reselect on preparation drift
+  → S7 commit final selection and dispatch
+```
+
+`candidate_horizon` and execution `concurrency` are independent. Concurrency
+limits simultaneously executing milestones; it must not truncate the task
+facts available to composite synthesis. The candidate horizon starts from
+ranked seeds and expands through strong-coupling and dependency neighbors, even
+when those neighbors fall below the initial rank window.
+
+### 7.2 Construct the coupling graph
 
 For every prepared candidate pair, compute an edge with:
 
 ```text
 dependency:
-  none | A-before-B | B-before-A | cyclic/unknown
+  none | internal-order | proof-after-land | result-dependent | cyclic/unknown
 
 path overlap:
   files, globs, generated outputs
@@ -410,22 +509,73 @@ estimated integration:
   minutes, tests, reviewer/auditor expansion
 ```
 
-### 7.2 Choose execution shape
+Edges also record positive coupling (`same-deliverable`,
+`shared-implementation`, `shared-semantic-resource`) and prohibitive temporal
+coupling (`proof-after-land`, next-generation proof, or a learning result that
+changes whether another task should be selected).
+
+### 7.3 Synthesize milestone candidates
+
+The candidate set always contains every eligible singleton plus a bounded set
+of connected composite candidates. Do not enumerate the power set. Use
+seeded/agglomerative or beam-search expansion:
+
+1. start with high-ranked singleton seeds;
+2. expand along positive coupling edges;
+3. include required dependency closure;
+4. prune prohibitive temporal edges, cycles, disconnected additions, and
+   negative marginal contribution;
+5. retain the best K distinct shapes per seed;
+6. preserve singletons as the no-packing control.
+
+For group `G` and prospective task `t`, admit the expansion only when:
+
+```text
+marginal_value(t | G)
+  + fixed_cost_saved(t | G)
+  + shared_context_saved(t | G)
+>
+coordination_cost(t | G)
+  + expanded_failure_cost(t | G)
+  + critical_path_penalty(t | G)
+```
+
+The value term is a union value, not a naïve sum; two tasks claiming the same
+delivery improvement must not double-count it.
+
+### 7.4 Choose a milestone portfolio
 
 In rank order:
 
 1. Extract O4 and learning/dependency-chain work into the serial canary lane.
-2. Cluster strongly cohesive O2/O3 nodes into bounded composite candidates.
-3. Admit O0 nodes to ordinary disjoint batches.
-4. Consider O1 edges for planned-overlap batches if their expected net benefit
+2. Score singleton and synthesized composite milestone candidates together.
+3. Choose a non-overlapping set: one task may occur in at most one selected
+   milestone candidate.
+4. Admit O0 milestone candidates to ordinary disjoint batches.
+5. Consider O1 edges between milestone candidates for planned-overlap batches
+   if their expected net benefit
    is positive and the resource budget permits.
-5. Defer remaining nodes rather than weakening admission.
+6. Defer remaining candidates rather than weakening admission.
 
-The first implementation may use deterministic rules rather than an optimizer.
-The decision and all rejected alternatives must be recorded so the policy can
-be calibrated from real outcomes.
+The portfolio objective accounts for union delivery value, wall-clock critical
+path, cadence, resource demand, integration tax, and atomic failure cost. The
+first implementation may use deterministic beam search plus weighted set
+packing rather than a general optimizer. It must record selected and rejected
+candidate shapes so policy can be calibrated from real outcomes.
 
-### 7.3 Economic admission
+### 7.5 Preparation feedback
+
+Task-level facts are intentionally cheap and conservative. Checked preparation
+may discover new touched paths, semantic resources, dependencies, or scope.
+Preparation therefore validates a provisional selection rather than merely
+decorating it.
+
+If checked facts change candidate membership or portfolio compatibility, return
+to candidate synthesis and reselect. Permit at most three preparation/reselect
+rounds. A group that does not stabilize is split or routed to human review; it
+is never dispatched using stale pre-preparation facts.
+
+### 7.6 Economic admission
 
 For candidate tasks \(i\):
 
@@ -537,15 +687,21 @@ Initial resource envelope:
 
 ```yaml
 max_concurrent_milestones: 2
-max_composite_tasks: 2
 max_overlap_class: O1
 max_shared_files_per_overlap_batch: 2
 max_unexpected_shared_symbols: 0
 max_agent_fanout: 8
 test_concurrency_per_milestone: 4
+candidate_seed_horizon: 12
+candidate_shapes_per_seed: 4
+max_prepare_reselect_rounds: 3
 ```
 
-The effective width may be lower than the configured maximum.
+There is deliberately no `max_composite_tasks`. A capacity check instead
+validates phase-DAG structure, estimated critical path, line/context budget,
+audit-shard budget, resource demand, temporal proof boundaries, and atomic
+rollback. The effective task count and concurrent width may both be lower or
+higher than historical examples.
 
 ## 10. Metrics and observability
 
@@ -580,7 +736,7 @@ refutations, or generation ambiguity is a failed experiment.
 
 ## 11. Candidate pilot mappings
 
-### 11.1 Composite pilot
+### 11.1 Composite fixtures and historical replay
 
 `DIR-101` and `DIR-105` are a plausible composite:
 
@@ -590,9 +746,22 @@ refutations, or generation ambiguity is a failed experiment.
 - their combined integration semantics are more important than their textual
   merge.
 
-The pilot hypothesis is that one “task creation defaults” milestone can share
+This two-task case remains a useful compatibility fixture: one “task creation
+defaults” milestone can share
 source exploration, RED setup, default-resolution implementation, regression
 testing, audit, and Land while retaining two task verdicts.
+
+It is not sufficient as the real proof. Historical replay must additionally
+cover:
+
+- `DIR-114` + `gap-absorb-charter-audit-not-committed` + `DIR-115`, which should
+  form a three-task workflow-hardening candidate;
+- `DIR-109`–`DIR-112`, for which SELECT should generate and compare several
+  singleton and composite shapes rather than force one grouping;
+- `DIR-062-B`→`DIR-062-C`, which must remain separated by its
+  next-generation/proof boundary;
+- a wide homogeneous lifecycle-reconciliation fixture, proving that task count
+  alone does not reject a valid composite.
 
 ### 11.2 O1 overlap pilot
 
@@ -637,43 +806,47 @@ prepare-milestone generation
 Exit condition: deterministic classification fixtures cover O0–O4 and reject
 missing/ambiguous ownership.
 
-### Stage 1 — two-task composite canary
+### Stage 1 — SELECT candidate synthesis
 
-- Extend preparation and execution contracts to support `taskIds[]`.
-- Run one two-task composite under halt/human steering.
-- Require per-task and bundle audit verdicts, atomic Land, and full provenance.
-- Replay the same tasks serially or compare against a credible serial baseline.
+- Change SELECT's output from tasks to a milestone portfolio.
+- Add task facts, coupling edges, singleton/composite candidate synthesis,
+  group scoring, non-overlapping portfolio choice, and preparation feedback.
+- Golden-replay the historical cases in §11.1.
 
-Exit condition: both tasks land with no lost AC/status/evidence, and measured
-time is lower than the serial baseline without extra refutation.
+Exit condition: deterministic replay produces the expected grouping and
+separation decisions, including a composite wider than two tasks.
 
-### Stage 2 — O1 overlap canary
+### Stage 2 — arbitrary-width composite execution
+
+- Extend preparation and execution contracts to support arbitrary non-empty
+  `taskIds[]`.
+- Execute a checked phase DAG and audit-shard plan; task count must not map
+  one-for-one to agent count.
+- Require per-task and bundle verdicts, deterministic reconcile, atomic Land,
+  full provenance, and backward-compatible singleton execution.
+
+Exit condition: fixtures with 1, 3, 5, and 10 tasks behave correctly; invalid
+capacity and temporal-dependency cases fail closed.
+
+### Stage 3 — real SELECT→composite canary
+
+- Cold-start a new runtime generation.
+- Let real SELECT synthesize and choose a composite of at least three real
+  tasks; do not hand-inject the membership after selection.
+- Run preparation, execution, audit, reconcile, atomic Land, and wiring audit.
+
+Exit condition: one real ≥3-task composite lands with correct task provenance,
+one milestone counter increment, durable selection alternatives, and
+next-generation wiring evidence. If no admissible real group exists, remain
+awaiting proof rather than force an incoherent bundle.
+
+### Stage 4 — planned-overlap concurrency
 
 - Add checked MergePlan and integration-owner mechanics.
 - Run one two-milestone O1 batch in isolated worktrees.
 - Stop on any undeclared shared symbol.
 - Audit only the final integrated candidate for Land.
-
-Exit condition: integration stays within budget, serial replay is equivalent,
-and anti-drift/generation/wiring proof passes.
-
-### Stage 3 — adaptive two-wide operation
-
-- Let the scheduler choose O0, composite, O1, or serial.
-- Keep maximum width two and composite size two.
-- Require human approval for O2.
-- Recalibrate estimates from observed outcomes.
-
-Exit condition: at least two clean composite batches and two clean O1 batches,
-with positive realized saving and no increase in escaped defects.
-
-### Stage 4 — bounded expansion
-
-- Consider three-wide ordinary batches.
-- Consider three-task composites only when task coupling and audit complexity
-  remain bounded.
-- Consider autonomous O1 admission.
-- Keep O3/O4 composite/serial and generation-canary-first.
+- Recalibrate estimates from observed outcomes before autonomous O1 admission.
 
 No stage transition is justified solely by elapsed time or demand for higher
 throughput.
@@ -684,8 +857,9 @@ Any directive adopting this proposal should require at least:
 
 1. A checked composite Plan maps every task AC to a phase and every shared
    phase to an integration invariant.
-2. `execute-milestone` accepts multiple task IDs without losing compatibility
-   with one-task milestones.
+2. `execute-milestone` accepts arbitrary non-empty task-ID arrays without
+   losing compatibility with one-task milestones and without a cardinality
+   hard cap.
 3. Audit returns mechanically validated per-task and bundle verdicts.
 4. Atomic Land writes correct provenance and lifecycle status for every task.
 5. Partial Land fails closed unless the reduced bundle is re-prepared and
@@ -698,30 +872,34 @@ Any directive adopting this proposal should require at least:
 9. All shared lifecycle writes remain fan-in-only.
 10. The final audit observes the integrated candidate.
 11. Resource budgets bound milestone, agent, and test concurrency.
-12. One real composite canary and one real O1 overlap canary land with durable
-    evidence and serial-equivalence checks.
-13. Metrics report expected and realized savings, integration tax, rework, and
+12. Historical replay proves a three-task cluster is formed, a temporal-proof
+    pair is split, and a wide homogeneous group is not rejected for cardinality.
+13. One real composite of at least three tasks is synthesized by SELECT—not
+    manually injected after SELECT—and lands with durable evidence and
+    serial-equivalence checks.
+14. Metrics report expected and realized savings, integration tax, rework, and
     defect outcomes.
-14. A next-generation run proves the installed workflow is actually wired;
+15. A next-generation run proves the installed workflow is actually wired;
     source-only tests are insufficient.
 
 ## 14. Open questions
 
-1. Should composite packing be proposed by SELECT and independently approved by
-   preparation, or should preparation alone own the packing decision?
+1. What deterministic beam width and candidate seed horizon balance decision
+   quality against authoring cost?
 2. Should task commits be mandatory savepoints, or is a machine-readable
    task-to-diff manifest sufficient?
 3. Which parser or language service should provide symbol overlap without
    making admission language-specific?
 4. Should O2 ever become autonomous, or remain an explicit human optimization?
 5. What historical window should estimate conflict and rework probabilities?
-6. How should value ranking compare one high-value composite with several
-   individually ranked tasks?
+6. How should union value and cadence be normalized when one composite contains
+   several value types?
 7. Should partial Land allocate a new milestone identity, or retain the
    original identity with a formally reduced task set?
 8. How should test concurrency be allocated dynamically when suites have very
    different resource profiles?
 
 Until these are resolved, the conservative defaults in this proposal apply:
-two tasks, two concurrent milestones, O1 maximum, atomic Land, and
-generation-canary-first.
+SELECT-owned candidate synthesis, capacity-bounded rather than
+cardinality-bounded composites, two concurrent milestones, O1 maximum, atomic
+Land, and generation-canary-first.
