@@ -65,3 +65,8 @@ wasn't audited at the time.
 ## Human verification when exp5 marks this task done
 1. Does a real milestone's Build phase now file its own evidence at the correct path on the first
    try, without a follow-up `git mv`?
+
+## Touches
+
+- .claude/workflows/execute-milestone.js
+- plugin/workflows/execute-milestone.js
