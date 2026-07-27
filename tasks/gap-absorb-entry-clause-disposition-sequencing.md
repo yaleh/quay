@@ -3,7 +3,7 @@ id: gap-absorb-entry-clause-disposition-sequencing
 title: it0-dod-check.sh clause1/clause2/clause7 fail on every milestone this
   session because disposition text is never appended to the pre-created
   absorb-entry stub before the gate check runs
-status: todo
+status: done
 labels:
   - gap
   - human-steered
@@ -15,6 +15,21 @@ extra:
     experiments/quay-perpetual-stream/charters/M180-gap-absorb-disposition-sequencing.md
     /tmp/m180-absorb-entry.md
 ---
+## Proposal
+
+Make `.claude/workflows/execute-milestone.js`'s Audit and Build phases write the disposition text
+`it0-dod-check.sh`'s clause1/clause2/clause7 actually grep for into the ABSORB-entry file, as each
+value becomes known, instead of leaving the pre-created stub permanently incomplete. Landed as M180
+(commits `c201b4c`/`46e92e4`), independently proven by a genuinely unrelated later milestone (M181)
+whose own Audit phase exercised the same append logic on its own absorb-entry file and passed
+clause1/clause2/clause7 for real — closing the non-self-referential-proof gap two prior audits left
+open.
+
+## Plan
+
+N/A — small, targeted fix to `execute-milestone.js`'s Audit/Build phase prompts; the `## Requested
+action` section below is the plan. No separate design doc needed.
+
 ## Finding
 
 Across M175/M176/M177/M178 (this session, 2026-07-26), the mechanical gate
@@ -99,7 +114,7 @@ phases compute them).
   `surface:` token auto-resolves clause7 N/A-PASS) and disclosed/justified in the M180 charter as
   "the cheapest fix". Ticked because the substance (grep-confirmable write instructions for all 3
   clauses, functionally correct) is present; the phase-location deviation is noted, not blocking.
-- [ ] A real (non-fixture) milestone dispatch after this fix shows `it0-dod-check.sh` exiting 0 (or
+- [x] A real (non-fixture) milestone dispatch after this fix shows `it0-dod-check.sh` exiting 0 (or
   failing only on genuinely unmet clauses, never on "NO disposition statement found") without any
   manual post-hoc edit to the absorb-entry file. **STILL REFUTED** by SECOND fresh-context audit
   2026-07-27 (post iteration-1 rebuild), with a materially changed picture from the first pass:
@@ -129,12 +144,37 @@ phases compute them).
      confirmation: either a future milestone's real Audit-phase dispatch exercising step 2a on its
      *own*, different, absorb-entry file, or explicit human sign-off that self-referential proof is
      acceptable here.
+  4. **RESOLVED by THIRD independent audit (fresh-context, 2026-07-27), exactly the non-self-referential
+     confirmation item 3 called for**: M181 (`exp5-DEFECT-SELECT-PREFLIGHT-HUMAN-STEERED-LEAK`,
+     commits `a8b3c0f`/`e5c19b5`) is a completely unrelated milestone (fixes
+     `select-preflight.ts`'s human-steered-label filter — no relation to the absorb-entry
+     disposition-append mechanism). Independently confirmed via `git log`: M180's fix commits
+     (`c201b4c` 00:29:37, `46e92e4` 00:52:17, `09e5c24` 01:03:36, all 2026-07-27) predate the M181
+     charter file's mtime (02:05) and its build commit `a8b3c0f` (02:21:03) — M181 was built and
+     audited against a codebase that already contained M180's fix from the start, not a
+     hand-patched or resumed run. M181's own Audit phase (`milestones/M181/audits/iteration-0-acceptance-audit.md`,
+     section "2a. Disposition append") appended `adversarial-audit disposition: NO REFUTATION FOUND`
+     and a verbatim `vmeta-lag-check.sh --counter 171` PASS line to **`/tmp/m181-absorb-entry.md`**
+     (M181's own, different absorb-entry file — not M180's), following the exact step-2a append
+     instructions independently re-confirmed still present in the live
+     `.claude/workflows/execute-milestone.js` (lines ~196-210). Independently re-ran
+     `bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+     exp5-DEFECT-SELECT-PREFLIGHT-HUMAN-STEERED-LEAK
+     experiments/quay-perpetual-stream/charters/M181-select-preflight-human-steered-leak.md
+     /tmp/m181-absorb-entry.md` myself: exit 0, `clause1-adversarial-audit` PASS, `clause2-vmeta-lag`
+     PASS, `clause7-test-floor` N/A-PASS via the Build-phase `surface:method-infra` tag — all three
+     clauses this AC concerns pass for real, on a genuinely different milestone's own file, graded
+     by that milestone's own unrelated substance (select-preflight regression tests, 30/30, and a
+     live shortlist-exclusion check independently re-run and confirmed by this same audit pass).
+     This breaks the self-referential loop the second audit correctly refused to accept: the
+     disposition-append mechanism (M180's deliverable) is here exercised as pure infrastructure by
+     a milestone that has nothing to do with grading M180 itself. Ticking this box on that evidence.
 - [x] Both `.claude/workflows/` and `plugin/workflows/` mirrors stay byte-identical. CONFIRMED:
   `diff .claude/workflows/execute-milestone.js plugin/workflows/execute-milestone.js` (run
   2026-07-27) produces no output.
 
 ## Definition of Done
-- [ ] Landed on `master`, verified via a real dispatch, not asserted. **STILL REFUTED** — landed on
+- [x] Landed on `master`, verified via a real dispatch, not asserted. **STILL REFUTED** — landed on
   `master` (commits `c201b4c`, `46e92e4`), and the mechanism is now demonstrably live-verified
   (clause1/clause2/clause7 all PASS this pass, real not reverted — see AC2 above), but the DoD's
   literal "verified" bar isn't cleared because the only pass so far is the self-referential one this
@@ -143,6 +183,12 @@ phases compute them).
   experiments/quay-perpetual-stream/charters/M180-gap-absorb-disposition-sequencing.md
   /tmp/m180-absorb-entry.md` (run 2026-07-27, post-append) now exits 1 on `clause0` ONLY (AC2's own
   unticked box) — clause1/clause2/clause7 all PASS.
+  **RESOLVED by fourth, fresh-context audit (2026-07-27)**: the "real dispatch" bar this item
+  requires is exactly what AC2's M181 evidence (above) supplies — see that entry for the full
+  citation (M181 commits `a8b3c0f`/`e5c19b5`, independently re-run `it0-dod-check.sh` against
+  `/tmp/m181-absorb-entry.md`, exit 0, clause1/clause2/clause7 all PASS on a genuinely different,
+  unrelated milestone's own file). `clause0` here refers to THIS task's own AC/DoD checkbox state,
+  which is now closed by this same edit — not a residual mechanism defect. Ticking this box.
 - [x] Since this touches `.claude/workflows/execute-milestone.js` (driver execution-chain script),
   the milestone resolving it must run under human-steered discipline. CONFIRMED: task carries
   `label: human-steered`; `experiments/quay-perpetual-stream/.halt` sentinel exists on disk with
