@@ -3,7 +3,7 @@ id: gap-workflow-name-dispatch-stale-script-cache
 title: Workflow({name:...}) can dispatch a stale, pre-fix script body within an
   already-running session — even 22+ minutes after the checked-in source changed
   on master
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -105,6 +105,23 @@ into the SAME CLAUDE.md section as an explicit extension, rather than a duplicat
   never hits this again — landed directly in `CLAUDE.md`'s "Workflow resume anti-pattern" section
   (extended, not duplicated), 2026-07-26. Already followed successfully 3x since (M176's real
   dispatch, plus two deliberate string-args probes on `drain-directives.js` and
-  `execute-milestone.js`, all via `scriptPath:`, all crash-free).
+  `execute-milestone.js`, all via `scriptPath:`, all crash-free). -- [audit M-DIR119-C-CANARY:
+  independently re-confirmed — `grep -n "Extension (M176" CLAUDE.md` hits at line 111; the
+  extension paragraph is present in the "Workflow resume anti-pattern" section exactly as claimed.
+  NOTE: this task carries NO `## Acceptance Criteria` section at all (DoD-only), unlike the other 6
+  member tasks in this composite — flagged as an authoring-convention gap for this task, not a
+  functional defect.]
 - [ ] Escalation to Claude Code support: NOT YET DONE — this is a human decision (whether/how to
   file `/feedback`), left open for the user, not self-closed.
+
+## Execution record
+
+- **Milestone:** M-DIR119-C-CANARY (composite, 7 member tasks; DIR-119-C proof)
+- **Iteration count:** 1 (direct-to-master build, no separate worktree — precedent: M187/M188/M189)
+- **Realized Δv:** 2 of 3 DoD items confirmed (root-cause characterization + landed operational
+  rule, independently re-confirmed via grep); item 3 (human escalation decision) correctly remains
+  open, not self-closed. No `## Acceptance Criteria` section on this task at all — an authoring
+  gap flagged, not a functional defect.
+- **Merge commit:** 23f43d5 (Build, direct on master) + this Land's Reconcile/write-back commit
+- **Outcome:** DONE — this milestone's real remaining scope (item-1 citation reconciliation) is
+  complete; escalation-to-support stays an open human decision by design, not a blocker to closure.

@@ -2,7 +2,7 @@
 id: gap-orphaned-check-scripts-not-wired
 title: Multiple real, correct check scripts/config sections exist but are never
   invoked by CI or the loop — a recurring "designed but never wired" pattern
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -58,19 +58,41 @@ Resolve the `gates.yml`/`config.yml` `it0.*` path divergence by either deleting 
 file's gate paths or asserting they match via a drift check.
 
 ## Acceptance Criteria
-- [ ] `delivery-manifest-check.ts` is either wired into `.github/workflows/*.yml` (real CI
-  invocation) or its header explicitly says "manual-only, not CI-enforced" with a citation of why.
-- [ ] `restart-readiness-check.sh` — same treatment (tracked jointly with
-  `gap-halt-sentinel-path-mismatch` item 4).
-- [ ] `experiments/quay-perpetual-stream/.quay/loop.yml`'s stale "INERT" comment on `routines:` is
+- [x] `delivery-manifest-check.ts` is either wired into `.github/workflows/*.yml` (real CI
+  invocation) or its header explicitly says "manual-only, not CI-enforced" with a citation of why. -- [audit M-DIR119-C-CANARY: wired, not manual-only. `.github/workflows/ci.yml` line ~102 runs
+  its static mode on every push (`node --experimental-strip-types scripts/delivery-manifest-check.ts`); `.github/workflows/release.yml`'s new `delivery-manifest-verify` job runs `--ci` mode
+  post-publish. Ran the static-mode command locally: `DELIVERY-MANIFEST-CHECK: OK`, exit 0.]
+- [x] `restart-readiness-check.sh` — same treatment (tracked jointly with
+  `gap-halt-sentinel-path-mismatch` item 4). -- [audit: chose the "manual-only, explicit" branch —
+  script header now reads "MANUAL-ONLY, NOT CI/LOOP-WIRED (gap-orphaned-check-scripts-not-wired,
+  M-DIR119-C-CANARY, 2026-07-27, explicit decision..."; `CLAUDE.md`'s `.halt sentinel` bullet
+  (lines 73-77) cites the script by name and states the same "manual, human-invoked check, not
+  CI/loop-wired" framing — a fresh reader finds the pointer where CLAUDE.md's own instructions
+  say to look for it.]
+- [x] `experiments/quay-perpetual-stream/.quay/loop.yml`'s stale "INERT" comment on `routines:` is
   corrected to reflect it's now live; `concurrency`/`stop`/`gates`/`policy` either get wired or the
-  comment is left accurate (already is, for those fields).
-- [ ] `gates.yml`/`config.yml` `it0.*` path divergence resolved or explicitly asserted as
-  intentional with a drift check.
+  comment is left accurate (already is, for those fields). -- [audit: `loop.yml` lines 33-45 replace
+  the stale wording with a "CORRECTED STATUS" paragraph explaining routines is now live via
+  `.claude/workflows/run-routines.js`, and explicitly reaffirms `concurrency`/`stop`/`gates`/`policy`
+  remain genuinely INERT for the bespoke driver. CAVEAT (not blocking this AC, but noted): the
+  file's OWN header comment 10 lines above ("stop: until(.halt) sentinel... at
+  experiments/quay-perpetual-stream/.halt") was left unedited and is itself stale per
+  `gap-halt-sentinel-path-mismatch`/M187 — a residual drift this task's scope didn't reach.]
+- [x] `gates.yml`/`config.yml` `it0.*` path divergence resolved or explicitly asserted as
+  intentional with a drift check. -- [audit: resolved (not just asserted) — diffed `.quay/gates.yml`'s and `.quay/config.yml`'s `it0:` blocks directly, all 6 entries' `script`/`argsKey` pairs
+  are now byte-for-byte identical between the two files.]
 
 ## Definition of Done
 - [ ] Each item above lands with real, verified evidence (a real CI run that exercises the
-  newly-wired check, or a real doc diff), not asserted.
+  newly-wired check, or a real doc diff), not asserted. -- [audit: 3 of 4 items verified with real
+  doc diffs / real local command output (see AC citations above: restart-readiness-check.sh header,
+  loop.yml comment, gates.yml/config.yml sync). The `delivery-manifest-check.ts` CI-wiring item is
+  NOT yet backed by "a real CI run that exercises the newly-wired check" — same unpushed-commit
+  caveat as DIR-110/DIR-111: `git log --oneline --all -- .github/workflows/release.yml` shows the
+  `delivery-manifest-verify` job was added in this milestone's own Build commit (`23f43d5`), local
+  `master` is 55 commits ahead of `origin/master`, and `gh run list` shows no CI run postdating this
+  change. Local static-mode execution passes but is not the CI-run evidence this DoD item names —
+  left unticked overall pending that.]
 
 ## Human verification when exp5 marks this task done
 1. Does a deliberately-broken `delivery-manifest.json` now actually fail a real CI run?
@@ -84,3 +106,14 @@ file's gate paths or asserting they match via a drift check.
 - experiments/quay-perpetual-stream/.quay/loop.yml
 - .quay/gates.yml
 - .quay/config.yml
+
+## Execution record
+
+- **Milestone:** M-DIR119-C-CANARY (composite, 7 member tasks; DIR-119-C proof)
+- **Iteration count:** 1 (direct-to-master build, no separate worktree — precedent: M187/M188/M189)
+- **Realized Δv:** deliverable=yes — 4 of 4 AC items independently confirmed with live diffs/
+  command output; the DoD's "real CI run" clause for `delivery-manifest-check.ts` remains open
+  pending a push to `origin/master` (same shared caveat as DIR-110).
+- **Merge commit:** 23f43d5 (Build, direct on master) + this Land's Reconcile/write-back commit
+- **Outcome:** DONE with disclosed CONCERNS — all wiring/doc work confirmed; CI-run confirmation
+  deferred until this commit series is actually pushed (tracked, not blocking).
