@@ -97,3 +97,9 @@ the previous documentation as wrong.
 ## Human verification when exp5 marks this task done
 1. Does `restart-readiness-check.sh` now agree with `select-preflight.ts` on where `.halt` lives?
 2. Is there a regression-guard test for the wrong-path case?
+
+## Touches
+
+- experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh
+- experiments/quay-perpetual-stream/test/select-preflight.test.mjs (or wherever checkHalt's fixtures live)
+- CLAUDE.md (already landed, 2026-07-27)
