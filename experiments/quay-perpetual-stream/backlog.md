@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| DIR-113 | Pre-screen task-level `## Touches` orthogonality before charter-authoring — concurrent-batch-scheduler currently discovers conflicts only after paying the LLM charter cost | DONE | - | directive, human-steered, milestone-candidate |
 | DIR-115 | Interpolate ${args.charterFile} into the domain-misfit Verify-check prompt — it is the only one of 5 it0 checks that dispatches with zero milestone context, forcing every call to burn its whole runtime rediscovering which milestone it is checking | DONE | - | directive, human-steered, milestone-candidate |
 | exp5-DEFECT-SELECT-PREFLIGHT-HUMAN-STEERED-LEAK | select-preflight shortlist leaks human-steered-excluded candidates (direct label + epic-with-human-steered-only-child) | DONE | - | defect, milestone-candidate |
 | DIR-107 | DIR-107: Fix concurrent fan-in safety — move merge ownership to fan-in, add audit-independence gate, document empty-batch branch | DONE | - | directive, human-steered, milestone-candidate |
@@ -189,8 +190,8 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
+| DIR-114 | Add args-normalization defense to all checked-in dynamic workflow scripts — Workflow tool sometimes delivers `args` as a JSON string, not a parsed object, crashing raw `args.field` access | open | - | directive, human-steered, milestone-candidate |
 | DIR-070-F | DIR-070-F: Gap 3 — extract methodology skills (lower priority) | open | - | milestone-candidate, human-steered |
-| DIR-113 | Pre-screen task-level `## Touches` orthogonality before charter-authoring — concurrent-batch-scheduler currently discovers conflicts only after paying the LLM charter cost | open | - | directive, human-steered, milestone-candidate |
 | exp5-ADR-TOOLSEARCH-DEFERRED-SCHEMA-PATTERN | adr-draft: ToolSearch pre-fetch as mandatory first step for deferred tools — load-bearing but undocumented decision | open | - | milestone-candidate |
 | DIR-112 | DIR-112: Parallelize packages/quay/test/cli.test.mjs's 10 independent scenario blocks (async execFile + Promise.all) | open | - | directive, milestone-candidate |
 | DIR-111 | DIR-111: ADR-019 step 3 — explicitly label packaging e2e and browser/agent e2e as NOT covered by the canonical test command | open | - | directive, milestone-candidate |
@@ -202,7 +203,6 @@ Sort: value-view (DONE/open/STALE, default)
 | DIR-101 | DIR-101: Add default_task_schema config key | open | - | directive, milestone-candidate |
 | DIR-100 | DIR-100: Gate loader diagnostics | open | - | directive, milestone-candidate |
 | DIR-099 | DIR-099: Add quay config validate command | open | - | directive, milestone-candidate |
-| DIR-114 | Add args-normalization defense to all checked-in dynamic workflow scripts — Workflow tool sometimes delivers `args` as a JSON string, not a parsed object, crashing raw `args.field` access | open | - | directive, human-steered, milestone-candidate |
 | gap-workflow-name-dispatch-stale-script-cache | Workflow({name:...}) can dispatch a stale, pre-fix script body within an already-running session — even 22+ minutes after the checked-in source changed on master | open | - | gap, defect, milestone-candidate |
 | gap-drain-dispose-body-corruption | drain-directives.js Dispose-phase subagent can corrupt a task's body — real newlines collapsed into literal \n escape sequences | open | - | gap, defect, milestone-candidate |
 | DIR-116 | Tighten concurrent-batch eligibility to require value-type=capability-growth — the one real residual gap from DIR-057 not covered by DIR-066/106/107 | open | - | directive, human-steered, milestone-candidate |
@@ -219,4 +219,4 @@ Sort: value-view (DONE/open/STALE, default)
 | DIR-055 | meta-cc session-history mining ROUTINE (LOOP-EXECUTABLE): a standing loop-driver routine (via DIR-051/[[DIR-056]]) that periodically dispatches a fresh-context probe which mines the project's Claude Code session history with meta-cc — surfacing recurring design/implementation defects, ADR candidates, and reusable/crystallizable patterns — and FILES them as evidence-backed tasks ROUTED by finding-type behind the quality/dedup/rate gate. The third standing probe (process/provenance axis) alongside self-validation (DIR-052) + architecture-analysis (DIR-053). | SELECTED | - | directive, milestone-candidate, milestone:M-102 |
 | exp5-M-QENG-DOD-DEMO-ONLY | The QENG-5 'exp5 DoD via quay gate' wiring is demo-only (2 fixture tasks, QENG-5-DEMO-PASS/FAIL) — the REAL per-milestone DoD meta-enforcer gate at OUTER-LOOP.md step 6/7 still runs it0-dod-check.sh as a bare prose shell call, not through quay gate; decide whether/how to close that gap | SELECTED | governance-integrity (closes a self-disclosed "shelfware risk" the QENG-0 epic itself named as | milestone-candidate, surface:method-infra, milestone:M37-discover-post-qeng |
 
-_212 milestone-candidate task(s) as of 2026-07-27T03:26:02.599Z._
+_212 milestone-candidate task(s) as of 2026-07-27T04:36:37.240Z._

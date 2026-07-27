@@ -166,12 +166,25 @@ N/A — resolved via a milestone. Implementation touches:
   **pre-existing breakage, not a regression introduced by this milestone**. Left unticked
   because the literal AC text ("Existing it0 selfchecks... stay green") is not met in
   absolute terms, even though this milestone caused none of the 4 failures.
-- [x] No regression to the serial or concurrent execution paths — confirmed for the parts
+- [~] No regression to the serial or concurrent execution paths — confirmed for the parts
   this milestone touches: `node --check` passes on both `.claude/workflows/execute-milestone.js`
   and `plugin/workflows/execute-milestone.js`; both serial and concurrent Land-phase CAPTURE
   edits are structurally parallel (same diff shape applied to both code paths); the two
-  workflow-mirror files remain byte-identical (`diff` exit 0); `plugin/test/plugin-packaging.test.mjs`
-  passes 30/30 (the packaging-regression the implementer caught and fixed mid-build).
+  workflow-mirror files remain byte-identical (`diff` exit 0). **CORRECTED 2026-07-27
+  (independent adversarial audit, round 4)** — the "`plugin/test/plugin-packaging.test.mjs`
+  passes 30/30" clause is FALSE as currently written and was already false at the moment the
+  round-3 landing commit (`6a822a6`) was made: live re-run (`node --test
+  plugin/test/plugin-packaging.test.mjs`) shows 34 tests, 33 pass, **1 fail** — "shipped
+  schema-check modules are byte-identical to their exp5 canonical source" — because
+  `experiments/quay-perpetual-stream/scripts/task-schema.ts` was edited at M178 (`3f28b4e`,
+  2026-07-26 17:22:53Z) without syncing `plugin/scripts/task-schema.ts` (last touched at
+  `b310adb`, M136) — a real, currently-live packaging-drift regression. This is NOT caused by
+  this milestone's own Touches (confirmed: M176 never touches `task-schema.ts`; `git log -1`
+  on both copies attributes the drift entirely to M178) — downgraded to `[~]` rather than
+  refuted outright, since the actual claim this bullet exists to support (this milestone's own
+  edits introduce no regression) still holds. The M178-introduced drift is a separate,
+  previously-undisclosed defect that should be filed/fixed on its own, not silently left behind
+  a stale "30/30" citation.
 
 ## Definition of Done
 
@@ -203,6 +216,70 @@ rule):
   cruft. `git status --short` on this working tree (2026-07-27) shows zero untracked
   charter/audit/iteration files anywhere (the only untracked entry repo-wide is the unrelated
   `.halt` sentinel). See the per-milestone evidence table below.
+
+## Independent adversarial acceptance audit, round 4 (2026-07-27, fresh-context, dispatched separately)
+
+Per-clause re-verification (git commands only, no self-report trusted):
+
+- Charter `git add` instruction: `git show c3ae6dd -- ...OUTER-LOOP.md` and a live `grep` of
+  `OUTER-LOOP.md:60` both confirm the `⊨ commit: git add
+  experiments/quay-perpetual-stream/charters/M<NN>-*.md` clause is present. CONFIRMED.
+- Audit-phase staging instruction: live `grep` of both `.claude/workflows/execute-milestone.js`
+  and `plugin/workflows/execute-milestone.js` confirms "4a. STAGE THE AUDIT FILE" (Audit phase)
+  and the CAPTURE-step `git add` of `$MILESTONE_ROOT/{audits,iterations}/*` (Land phase, both
+  serial and concurrent instances) in both mirrors; `diff` of the two mirror files exits 0
+  (byte-identical). CONFIRMED.
+- `gate_resolve_milestone_root()` single-source: present, identical, in both
+  `experiments/quay-perpetual-stream/scripts/gate-script-lib.sh` and
+  `plugin/scripts/gate-script-lib.sh` (`diff` exit 0); `it0-dogfood-evidence-gate.sh` calls it
+  directly; `>= 130` boundary literal appears nowhere else. Live run:
+  `gate_resolve_milestone_root 176` → `milestones/M176`. CONFIRMED.
+- `tree-hygiene-check.sh` WARN path: live `grep` confirms the non-blocking WARN block matching
+  `charters/M[0-9]+-.*\.md` / `milestones/M[0-9]+/(audits|iterations)/.*\.md`. CONFIRMED.
+- 5-milestone evidence table (M177-M181): every commit hash in the table (`a14f7ea`, `0b9255a`,
+  `3f28b4e`, `b2e1e1e`, `6983aa6`, `5eed42a`, `c201b4c`, `3b90ef5`, `a8b3c0f`, `e5c19b5`)
+  independently re-verified via `git log -1 --format="%ci %s" <hash>` — all real, all dated as
+  claimed. `git status --short` on the live working tree at audit time shows zero untracked
+  charter/audit/iteration files (only the unrelated `.halt` sentinel). CONFIRMED.
+- Mechanical gate: `it0-dod-check.sh gap-absorb-charter-audit-not-committed
+  charters/M176-...md /tmp/m176-absorb-entry.md` → live re-run exits **0**, 12/12
+  clauses PASS/N/A. CONFIRMED.
+- 4 pre-existing selfcheck failures (`touches-orthogonality-selfcheck.sh`,
+  `routine-scheduler-selfcheck.sh`, `serial-fanin-absorb-selfcheck.sh`,
+  `concurrent-batch-scheduler-selfcheck.sh`): independently reproduced FAIL on live `master`,
+  AND independently reproduced the identical FAIL in a disposable worktree pinned at the
+  pre-M176 commit `3054ca7` — confirms these are genuinely pre-existing, not caused by this
+  milestone. CONFIRMED as pre-existing (task's own framing accurate).
+- **FINDING (not previously disclosed within THIS task's own audit trail — though the underlying
+  fact is independently recorded elsewhere: `dashboard.md`'s M179 CONCERNS row, line 524,
+  already notes "33/34 tests pass... verified pre-existing... unrelated to this task" for
+  DIR-070-F's own AC4/DoD4. This audit's contribution is catching that the identical drift also
+  sits, uncaught, behind THIS task's own now-corrected "30/30" AC line)**: the "No regression" AC
+  bullet's specific "`plugin/test/plugin-packaging.test.mjs` passes 30/30" evidence is false —
+  live run shows 34 tests, 33 pass, 1 fail (`task-schema.ts` bundled-vs-canonical drift). This
+  failure was **already present** at the exact commit (`6a822a6`) where the "30/30" claim was
+  written (independently re-verified in a disposable worktree pinned at that commit). Root
+  cause: M178 (`3f28b4e`) edited the canonical `experiments/.../task-schema.ts` without syncing
+  `plugin/scripts/task-schema.ts` — unrelated to this milestone's own Touches, and already a
+  known live drift (per the M179 dashboard row above), but never corrected in THIS task's own
+  AC text until now. Corrected in-place above (AC line downgraded `[x]` → `[~]`) rather than
+  silently left as a false claim.
+- V_meta consolidation-lag: live re-run, `vmeta-lag-check.sh --counter 182
+  v-meta-ledger.md` → `PASS: no confirmed-unconsolidated row past K without a dated
+  carry-forward` (both ledger rows `[ok]`). CONFIRMED clear.
+
+**Verdict: CONCERNS.** The gap this task exists to fix (silent, unbounded ABSORB-pipeline
+evidence-file backlog) is genuinely and durably closed — every structural claim about the fix
+itself (charter git-add, Audit-phase staging, single-sourced path resolution, tree-hygiene WARN,
+zero backlog across 5 real subsequent milestones, mechanical gate green) independently
+re-verified true via git/live command output, not self-report. The CONCERNS (not clean PASS)
+rests on one specific, previously-uncaught inaccuracy: the "packaging test passes 30/30" evidence
+line was false even at authoring time (a real, still-live drift regression introduced by a later,
+unrelated milestone M178, sitting undetected through 3 prior audit rounds) — now corrected in the
+AC text above. This does not undermine the task's core claim (no regression FROM this milestone's
+own edits, confirmed via `node --check` + mirror-diff) but is a genuine defect in the audit
+trail's rigor that a "hard checks over prose" standard (ADR-004) should not let slide silently.
+Recommend filing the `task-schema.ts` sync drift as its own separate gap task.
 
 ## Independent audit, round 2 (2026-07-26, fresh-context, dispatched after M177/M178/M179 landed)
 
@@ -280,3 +357,28 @@ since M176's own fix landed has left a charter, iteration, or audit file uncommi
 "identical commit" reading of the original AC4/DoD-item-2 wording remains, and will permanently
 remain, unmet by design (Audit is intentionally a separate, later pipeline phase) — this is now
 treated as a wording imprecision in the original task authoring, corrected above, not a live defect.
+
+## Execution record
+
+- **Milestone:** M176 (`milestone_counter` 183 → 184 at this ABSORB)
+- **Iteration count:** 1 (round-3 Build re-dispatch found the product-level fix already fully
+  landed on master via `c3ae6dd`/`7d4e4ed`/`9a8f58d`; no re-implementation performed; round-3/4
+  work was completing the absorb-entry disposition sections and independently re-verifying the
+  5-milestone zero-backlog evidence set)
+- **Realized Δv:** 0 (VT-neutral, instrument-correction — closes a recurring ABSORB-pipeline
+  evidence-file backlog gap; does not move any chart-2 VT surface cell)
+- **Merge commit:** `6a822a6` (product-level fix + round-3 disposition-sequencing work; the
+  charter `git add`/Audit-phase staging/`gate_resolve_milestone_root()` code itself landed
+  earlier at `c3ae6dd`, confirmed ancestor of `6a822a6` via `git merge-base --is-ancestor`)
+- **Audit verdict:** CONCERNS (round-4, independent, fresh-context, 2026-07-27) — core structural
+  fix (charter `git add`, Audit-phase mechanical staging, single-sourced
+  `gate_resolve_milestone_root()`, tree-hygiene WARN path, zero backlog across 5 real subsequent
+  milestones M177-M181, mechanical gate exit 0) independently re-verified true via live
+  git/command output. CONCERNS, not clean PASS, because the "No regression" AC's
+  "`plugin-packaging.test.mjs` passes 30/30" evidence line was found false (live: 34 tests, 33
+  pass, 1 fail — pre-existing `task-schema.ts` drift introduced by unrelated milestone M178, not
+  by this milestone's own edits) and corrected in-place in this task's own AC text.
+- **Outcome:** ABSORBed. The gap this task was filed to fix (silent, unbounded backlog of
+  ABSORB-pipeline evidence files) is genuinely and durably closed; the one open thread
+  (`task-schema.ts` bundled-vs-canonical drift) is a separate, pre-existing defect recommended
+  for its own follow-up gap task, not a defect in this milestone's own work.
