@@ -1,0 +1,1 @@
+../../../plugin/scripts/config-wiring-check.ts

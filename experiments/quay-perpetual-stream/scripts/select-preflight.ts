@@ -101,8 +101,19 @@ export function checkHalt(workspaceRoot: string): { halt: boolean; reason: strin
     const content = fs.readFileSync(haltPath, "utf8").trim();
     if (content) return { halt: true, reason: content };
     return { halt: true, reason: ".halt sentinel present (empty)" };
-  } catch {
-    return { halt: false, reason: "" };
+  } catch (e: unknown) {
+    // DIR-120 item 7: "config read failure = fail CLOSED, no exceptions." ENOENT (no .halt file at
+    // all) is the expected, common non-halted state — NOT a read failure — so it alone still
+    // yields {halt:false}. Any OTHER failure (permission denied, path is a directory, I/O error,
+    // etc.) is a genuine read failure and must fail CLOSED (halt:true), never silently fall through
+    // to "not halted" — that fail-open shape is exactly what already caused a real, safety-relevant
+    // miss (gap-halt-sentinel-path-mismatch).
+    const code = (e as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT") return { halt: false, reason: "" };
+    return {
+      halt: true,
+      reason: `FAIL-CLOSED: could not read .halt sentinel at ${haltPath}: ${(e as Error)?.message || String(e)}`,
+    };
   }
 }
 
