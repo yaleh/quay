@@ -239,3 +239,56 @@ out of scope for a future milestone if wanted.
 ## Gap filed this iteration
 
 `gap-touches-orthogonality-symlink-isdirect-mismatch` — see AC5 above.
+
+## Build re-dispatch session note (post gap-absorb-entry-clause-disposition-sequencing fix)
+
+A later Build-phase dispatch (session `006748f4-b16e-4522-a7a6-68b595240e42`) re-entered this
+milestone after the M180 fix (`gap-absorb-entry-clause-disposition-sequencing`) landed
+`select-preflight.ts`/`task-schema.ts`/`derive-touches-heuristic.ts` were unchanged by that fix,
+but the earlier `milestones/M178/audits/iteration-0-acceptance-audit.md` pass had verdict REFUTED
+purely because `/tmp/m178-absorb-entry.md` did not exist yet at that time (no ABSORB step had run)
+— confirmed by that audit's own text ("driven entirely by the ABSORB-entry gap, not by any defect
+in the product change under audit").
+
+This session found `3f28b4e`/`b2e1e1e` already merged to `master` (ancestors of HEAD) — the actual
+DIR-113 implementation was already landed and unchanged. Re-verified with fresh, independent
+command re-execution (not trusting the prior report):
+
+```
+$ bash experiments/quay-perpetual-stream/scripts/derive-touches-heuristic-selfcheck.sh   # 24/24 pass
+$ node --experimental-strip-types --test experiments/quay-perpetual-stream/test/select-preflight.test.mjs  # 30/30 pass (incl. M181's later human-steered-leak additions — no regression)
+$ bash experiments/quay-perpetual-stream/scripts/task-schema-selfcheck.sh   # 14/14 pass
+$ node --experimental-strip-types experiments/quay-perpetual-stream/scripts/select-preflight.ts --json --workspace-root .  # 7 fresh ORTHOGONAL PAIR FOUND lines on stderr before the JSON payload
+```
+
+Performed this dispatch's own declared Build-phase preflight step 1a (backlog-row surface tag):
+`/tmp/m178-absorb-entry.md`'s `## Backlog row` line had no `surface:` token. Added
+`surface:method-infra` — accurate per the charter's own `## Touches` list (all entries are
+`experiments/quay-perpetual-stream/scripts/*` outer-loop tooling + `tasks/*.md` directive files;
+zero `packages/quay*` product-surface touches). Re-ran the mechanical gate to confirm the fix took:
+
+```
+$ bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh DIR-113 \
+    experiments/quay-perpetual-stream/charters/M178-dir113-touches-preflight.md \
+    /tmp/m178-absorb-entry.md
+...
+PASS: clause7-test-floor: N/A — surface label(s) [method-infra] are exclusively non-product-touching
+...
+FAIL: clause1-adversarial-audit / FAIL: clause2-vmeta-lag  (both: NO disposition statement found)
+```
+
+clause7 now PASSes (was FAIL before this session). clause1/clause2 still FAIL — those disposition
+lines (`adversarial-audit disposition: <VERDICT>` and `V_meta consolidation-lag: <result>`) are the
+Audit phase's own responsibility (execute-milestone.js step 2a), not Build's — intentionally left
+for the next phase in the pipeline rather than fabricated here without re-running the actual
+adversarial audit and vmeta-lag-check.sh.
+
+`extra.acceptance` on `tasks/DIR-113.md` was independently confirmed (via `task_get`) to already
+read exactly `bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh DIR-113
+experiments/quay-perpetual-stream/charters/M178-dir113-touches-preflight.md
+/tmp/m178-absorb-entry.md` — no write needed.
+
+No repo source files required changes this session (implementation, tests, and task-body Touches
+backfill were all already correct and unchanged on `master`); the only new artifact this session
+produced is this note plus the `/tmp/m178-absorb-entry.md` surface-tag fix (ephemeral build
+artifact, not git-tracked, consumed by the next Audit/Gate/Land phase).
