@@ -40,40 +40,88 @@ policy, so it is human-steered under halt with golden replay and independent aud
 
 ## Acceptance Criteria
 
-- [ ] Versioned `TaskCandidate`, coupling-edge, `MilestoneCandidate`, and `MilestonePortfolio`
-  contracts exist; singleton is represented as a one-task milestone candidate.
-- [ ] SELECT synthesizes composites before final portfolio selection and records selected plus
-  rejected shapes with reasons.
-- [ ] Candidate horizon is independent of `.quay/loop.yml` milestone concurrency; strong-coupling
-  neighbors outside the initial seed rank can join a candidate.
-- [ ] Candidate generation uses bounded seed/beam expansion, retains singleton alternatives, and
-  contains no maximum task-count check.
+- [x] Versioned `TaskCandidate`, coupling-edge, `MilestoneCandidate`, and `MilestonePortfolio`
+  contracts exist; singleton is represented as a one-task milestone candidate. (Confirmed:
+  `experiments/quay-perpetual-stream/scripts/candidate-contracts.ts` — `CONTRACT_VERSION`,
+  `TaskCandidate`/`CouplingEdge`/`MilestoneCandidate`/`MilestonePortfolio` interfaces,
+  `makeSingletonCandidate`; fresh `candidate-contracts.test.mjs` re-run PASS.)
+- [x] SELECT synthesizes composites before final portfolio selection and records selected plus
+  rejected shapes with reasons. (Confirmed live: `node --experimental-strip-types
+  select-preflight.ts --json --workspace-root . --milestone-counter 188` against the real task
+  store → `portfolio.selected.length=7`, `portfolio.rejected.length=19`, each rejected entry
+  carries a concrete `reason` string — independently re-run by this audit, not the implementer's
+  paste.)
+- [x] Candidate horizon is independent of `.quay/loop.yml` milestone concurrency; strong-coupling
+  neighbors outside the initial seed rank can join a candidate. (Confirmed: `grep -rn "loop.yml"`
+  across all 6 new/modified pipeline scripts finds zero file-read call sites — only comments;
+  `synthesizeCandidatePortfolio` passes `constraints: {}`; fresh test re-run of the two
+  `candidate_horizon is independent...` tests in `candidate-synthesis.test.mjs` PASS.)
+- [x] Candidate generation uses bounded seed/beam expansion, retains singleton alternatives, and
+  contains no maximum task-count check. (Confirmed: `expandFromSeed`/`DEFAULT_CANDIDATE_HORIZON=3`
+  in `candidate-synthesis.ts`; fresh re-run of "no power-set enumeration" and "no taskIds.length
+  cap: a 25-task fully-coupled pool synthesizes without truncation" tests PASS.)
 - [ ] Portfolio choice prevents duplicate task membership and respects dependency, cadence, resource,
-  and milestone-concurrency constraints.
-- [ ] Preparation changes to touches, semantic resources, dependency, or capacity trigger candidate
-  regeneration/reselection; the process stops after three rounds.
-- [ ] Historical replay groups DIR-114 + `gap-absorb-charter-audit-not-committed` + DIR-115 as a
-  three-task candidate.
-- [ ] Historical replay generates multiple comparable shapes for DIR-109–DIR-112 rather than forcing
-  one bundle.
-- [ ] Historical replay keeps DIR-062-B and DIR-062-C in separate milestones because of their
-  next-generation proof edge.
-- [ ] A ten-task homogeneous reconciliation fixture remains eligible while a disconnected
-  value-inflating addition is rejected.
-- [ ] Existing SELECT/preflight tests and legacy singleton selection remain green; load-bearing new
-  modules have sibling coverage at or above the project threshold.
-- [ ] Plugin, `.claude`, and experiment projections/package checks agree byte-for-contract.
+  and milestone-concurrency constraints. **UNCONFIRMED (partial):** duplicate-membership
+  (`assertPortfolioDisjoint`/overlap rejection), resource (`maxTotalResourceUse` budget), and
+  milestone-concurrency (`maxSelected` budget) are real and tested in
+  `portfolio-choice.ts`/`portfolio-choice.test.mjs`. `cadence` is NOT implemented anywhere:
+  `grep -rn cadence` across `candidate-contracts.ts`, `candidate-synthesis.ts` (incl.
+  `scoreCandidate`), `portfolio-choice.ts` (incl. `choosePortfolio`/`PortfolioConstraints`), and
+  their test files returns zero hits, even though the Plan doc's own Stage 1.4 text this charter
+  cites verbatim requires "Score candidates using ... cadence, ...". `select-preflight.ts` computes
+  a `cadence` value via `getCadence`/`explore-exploit-cadence.ts` but wires it only into the
+  pre-existing, separate `PreflightResult.cadence` field — never into
+  `buildTaskCandidateFacts`/`synthesizeCandidatePortfolio`. See adversarial-audit disposition in
+  `/tmp/m188-absorb-entry.md` and `milestones/M188/audits/iteration-0-acceptance-audit.md`.
+- [x] Preparation changes to touches, semantic resources, dependency, or capacity trigger candidate
+  regeneration/reselection; the process stops after three rounds. (Confirmed:
+  `preparation-feedback.ts`'s `MAX_PREPARATION_ROUNDS = 3`; fresh
+  `preparation-feedback.test.mjs` re-run PASS incl. "never-regenerates-a-4th-time" and
+  "routes-to-human-review-after-max-rounds".)
+- [x] Historical replay groups DIR-114 + `gap-absorb-charter-audit-not-committed` + DIR-115 as a
+  three-task candidate. (Confirmed via documented-synthetic Stage 1.1 fixture (a) in
+  `candidate-synthesis-fixtures.ts` — honestly disclosed as a stand-in per the plan doc's own Stage
+  1.1/1.2 split, not a live-store claim; fresh test re-run "GREEN (a)" PASS.)
+- [x] Historical replay generates multiple comparable shapes for DIR-109–DIR-112 rather than forcing
+  one bundle. (Confirmed via fixture (b); fresh test re-run "GREEN (b)" PASS.)
+- [x] Historical replay keeps DIR-062-B and DIR-062-C in separate milestones because of their
+  next-generation proof edge. (Confirmed via fixture (c)'s explicit `next-generation` edge; fresh
+  test re-run "GREEN (c)" PASS.)
+- [x] A ten-task homogeneous reconciliation fixture remains eligible while a disconnected
+  value-inflating addition is rejected. (Confirmed via fixtures (d)/(e); fresh test re-run
+  "GREEN (d)"/"GREEN (e)" PASS.)
+- [x] Existing SELECT/preflight tests and legacy singleton selection remain green; load-bearing new
+  modules have sibling coverage at or above the project threshold. (Confirmed: fresh
+  `select-preflight.test.mjs` re-run 60/60 PASS incl. legacy `getCandidates`/`selftest`;
+  `loadbearing-test-gate.sh` re-run 42 total/15 pass/27 N/A/0 fail — every load-bearing new module
+  has its own sibling `*.test.mjs`; `--experimental-test-coverage` re-run on the 5 new modules:
+  97.07% line / 82.48% branch / 96.33% funcs, above the project's ≥80% line-coverage norm.)
+- [x] Plugin, `.claude`, and experiment projections/package checks agree byte-for-contract.
+  (Confirmed: fresh `bash plugin/scripts/sync-vendor.sh --check` → CLEAN, all 5 new mirrors
+  byte-identical; fresh `node --test plugin/test/plugin-packaging.test.mjs` → 34/34 PASS.)
 
 ## Definition of Done
 
 Standard inherited-core DoD clauses apply.
 
-- [ ] Code and decision contracts are committed on master under halt discipline.
-- [ ] All four historical replay families and negative controls pass deterministically.
-- [ ] No task duplication, task-count cap, or concurrency-as-candidate-horizon behavior remains.
-- [ ] Bounded preparation/reselection, plugin/runtime mirror parity, and full focused tests pass.
+- [x] Code and decision contracts are committed on master under halt discipline. (Confirmed:
+  commit `3185f51` on `master`; repo-root `.halt` present with mtime 2026-07-27 05:51, predating
+  the commit's 10:36 timestamp.)
+- [x] All four historical replay families and negative controls pass deterministically. (Confirmed
+  via fresh re-run of all 6 Stage 1.1 fixture tests, RED-then-GREEN, in
+  `candidate-synthesis.test.mjs`.)
+- [x] No task duplication, task-count cap, or concurrency-as-candidate-horizon behavior remains.
+  (Confirmed via source grep + fresh test re-run, see AC3/AC4 evidence above.)
+- [x] Bounded preparation/reselection, plugin/runtime mirror parity, and full focused tests pass.
+  (Confirmed: 118 tests across the 7 named files fresh re-run, 0 failures; sync-vendor --check
+  CLEAN.)
 - [ ] A fresh independent audit finds no refutation; operational wiring remains assigned to
-  DIR-119-C rather than self-certified here.
+  DIR-119-C rather than self-certified here. **NOT MET as stated:** this fresh independent audit
+  (session id in `milestones/M188/audits/iteration-0-acceptance-audit.md`) finds one concrete,
+  code-verifiable partial refutation (the AC5 `cadence` gap above) — disposition: CONCERNS, not
+  clean PASS. The "operational wiring deferred to DIR-119-C" half of this clause IS confirmed: no
+  code in this diff makes `select-preflight.ts`'s output act on `portfolio` in place of the legacy
+  `candidates`/`shortlist` path.
 
 ## Touches
 
