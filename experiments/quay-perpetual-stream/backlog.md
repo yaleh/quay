@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| DIR-115 | Interpolate ${args.charterFile} into the domain-misfit Verify-check prompt — it is the only one of 5 it0 checks that dispatches with zero milestone context, forcing every call to burn its whole runtime rediscovering which milestone it is checking | DONE | - | directive, human-steered, milestone-candidate |
 | exp5-DEFECT-SELECT-PREFLIGHT-HUMAN-STEERED-LEAK | select-preflight shortlist leaks human-steered-excluded candidates (direct label + epic-with-human-steered-only-child) | DONE | - | defect, milestone-candidate |
 | DIR-107 | DIR-107: Fix concurrent fan-in safety — move merge ownership to fan-in, add audit-independence gate, document empty-batch branch | DONE | - | directive, human-steered, milestone-candidate |
 | DIR-106 | DIR-106: Fix concurrent milestone execution — annotation-broken Touches globs, single-candidate SELECT, and directory-glob normalization | DONE | - | directive, human-steered, milestone-candidate |
@@ -201,7 +202,6 @@ Sort: value-view (DONE/open/STALE, default)
 | DIR-101 | DIR-101: Add default_task_schema config key | open | - | directive, milestone-candidate |
 | DIR-100 | DIR-100: Gate loader diagnostics | open | - | directive, milestone-candidate |
 | DIR-099 | DIR-099: Add quay config validate command | open | - | directive, milestone-candidate |
-| DIR-115 | Interpolate ${args.charterFile} into the domain-misfit Verify-check prompt — it is the only one of 5 it0 checks that dispatches with zero milestone context, forcing every call to burn its whole runtime rediscovering which milestone it is checking | open | - | directive, human-steered, milestone-candidate |
 | DIR-114 | Add args-normalization defense to all checked-in dynamic workflow scripts — Workflow tool sometimes delivers `args` as a JSON string, not a parsed object, crashing raw `args.field` access | open | - | directive, human-steered, milestone-candidate |
 | gap-workflow-name-dispatch-stale-script-cache | Workflow({name:...}) can dispatch a stale, pre-fix script body within an already-running session — even 22+ minutes after the checked-in source changed on master | open | - | gap, defect, milestone-candidate |
 | gap-drain-dispose-body-corruption | drain-directives.js Dispose-phase subagent can corrupt a task's body — real newlines collapsed into literal \n escape sequences | open | - | gap, defect, milestone-candidate |
@@ -219,4 +219,4 @@ Sort: value-view (DONE/open/STALE, default)
 | DIR-055 | meta-cc session-history mining ROUTINE (LOOP-EXECUTABLE): a standing loop-driver routine (via DIR-051/[[DIR-056]]) that periodically dispatches a fresh-context probe which mines the project's Claude Code session history with meta-cc — surfacing recurring design/implementation defects, ADR candidates, and reusable/crystallizable patterns — and FILES them as evidence-backed tasks ROUTED by finding-type behind the quality/dedup/rate gate. The third standing probe (process/provenance axis) alongside self-validation (DIR-052) + architecture-analysis (DIR-053). | SELECTED | - | directive, milestone-candidate, milestone:M-102 |
 | exp5-M-QENG-DOD-DEMO-ONLY | The QENG-5 'exp5 DoD via quay gate' wiring is demo-only (2 fixture tasks, QENG-5-DEMO-PASS/FAIL) — the REAL per-milestone DoD meta-enforcer gate at OUTER-LOOP.md step 6/7 still runs it0-dod-check.sh as a bare prose shell call, not through quay gate; decide whether/how to close that gap | SELECTED | governance-integrity (closes a self-disclosed "shelfware risk" the QENG-0 epic itself named as | milestone-candidate, surface:method-infra, milestone:M37-discover-post-qeng |
 
-_212 milestone-candidate task(s) as of 2026-07-27T02:31:02.110Z._
+_212 milestone-candidate task(s) as of 2026-07-27T03:08:27.822Z._
