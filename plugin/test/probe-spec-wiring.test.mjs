@@ -74,9 +74,20 @@ test('readProbeSpec: file not found → throws PROBE-SPEC FAIL-CLOSED', async ()
   }
 });
 
-// ── T4: all 3 shipped probe specs parse successfully ─────────────────────────
-test('all 3 shipped probe specs parse → valid { instrument, output_routing.default, objective }', () => {
-  const names = ['self-validation', 'architecture-analysis', 'history-mining'];
+// ── T4: all 4 shipped probe specs parse successfully ─────────────────────────
+// DIR-070 (M-DIR119-C-CANARY, 2026-07-27) AC8 re-verification: this list previously named only 3
+// probes, silently excluding `browser-explorer` (DIR-069/M138) from the "all shipped probe specs
+// parse" check ever since it shipped — a real, found gap (not asserted), fixed here so the 4th
+// probe is exercised by the SAME end-to-end wiring test as the other 3, not merely present on
+// disk. `plugin/probes/` is re-globbed (not hand-listed) so a future 5th probe can't repeat this.
+test('all shipped probe specs parse → valid { instrument, output_routing.default, objective }', () => {
+  const probesDir = path.join(pluginRoot, 'probes');
+  const names = fs.readdirSync(probesDir)
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => f.slice(0, -3))
+    .sort();
+  assert.ok(names.includes('browser-explorer'), 'browser-explorer.md (DIR-069) must be discovered');
+  assert.ok(names.length >= 4, `expected >=4 shipped probes, found: ${JSON.stringify(names)}`);
   for (const name of names) {
     const spec = readProbeSpec(name, pluginRoot);
     assert.ok(typeof spec.instrument === 'string' && spec.instrument.length > 0,

@@ -4,7 +4,7 @@ title: Test taxonomy is structural (in-file skip + one canonical runner), never
   an external exclusion list
 status: proposed
 date: 2026-07-26
-enforcement: "bash scripts/test.sh"
+enforcement: "bash scripts/test.sh; node --experimental-strip-types scripts/test-coverage-check.ts"
 tags:
   - testing
   - methodology

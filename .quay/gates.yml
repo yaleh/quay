@@ -1,5 +1,16 @@
 # .quay/gates.yml — WORKSPACE-OWNED gate data (DIR-035-B / ADR-013 Decision item 2).
 #
+# DEAD FOR THIS WORKSPACE (gap-orphaned-check-scripts-not-wired, M-DIR119-C-CANARY, 2026-07-27):
+# `packages/quay/src/gate/config/loader.ts`'s `readGatesConfig()` tries the unified
+# `.quay/config.yml`'s own `gates:` section FIRST (DIR-050) and only falls back to THIS file if
+# that key is absent — this repo's `.quay/config.yml` always has a `gates:` section, so this file
+# is NEVER actually read here. It is kept only as documentation of the pre-DIR-050 shape / for a
+# workspace that hasn't migrated. Its `it0`/`testPass` script paths below are kept IN SYNC with
+# `.quay/config.yml`'s own `gates:` section by hand (no automated drift check exists yet — a real,
+# found divergence between the two files' `it0.*` paths, harmless only because this file is dead
+# weight, was discovered and fixed here); if you edit one, edit the other, or this note goes stale
+# exactly the way `gap-halt-sentinel-path-mismatch` found for `.halt`.
+#
 # The product (packages/quay/src/gate/registry.js) ships the gate ENGINE + two
 # generic factories (`makeIt0Gate`, wrapping one fixed script + a task.extra
 # args array; `makeAdrGate`, deriving a gate from an ADR's own `enforcement:`
@@ -59,22 +70,22 @@
 
 it0:
   - name: impl-row
-    script: "./experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh"
+    script: "./plugin/scripts/it0-impl-row-check.sh"
     argsKey: implRowArgs
   - name: line-budget
     script: "./experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh"
     argsKey: lineBudgetArgs
   - name: vmeta-lag
-    script: "./experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh"
+    script: "./plugin/scripts/vmeta-lag-check.sh"
     argsKey: vmetaLagArgs
   - name: audit-independence
-    script: "./experiments/quay-perpetual-stream/scripts/audit-independence-check.sh"
+    script: "./plugin/scripts/audit-independence-check.sh"
     argsKey: auditIndependenceArgs
   - name: dogfood-evidence
     script: "./experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh"
     argsKey: dogfoodEvidenceArgs
   - name: drivable-workspace
-    script: "./experiments/quay-perpetual-stream/scripts/drivable-workspace-check.sh"
+    script: "./plugin/scripts/drivable-workspace-check.sh"
     argsKey: drivableWorkspaceArgs
 
 adr:
@@ -116,10 +127,10 @@ testPass:
   # reads as done while an unlisted phase is open) rules against the task store. PASS iff no violations.
   # Single-source: logic lives exclusively in it0-split-or-commit-check.ts (no re-implementation).
   - name: split-or-commit
-    command: "node experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts ."
+    command: "node plugin/scripts/it0-split-or-commit-check.ts ."
   # INV / exp5-M-CRYST-INV / ADR-011: enforcement-with-design gate — checks that every DoD clause
   # in inherited-core.md has a corresponding mechanical enforcement block in it0-dod-check.ts.
   # A clause present in inherited-core.md but NOT referenced in it0-dod-check.ts is "design-only"
   # — a direct violation of ADR-011's invariant. PASS iff all clauses are covered.
   - name: enforcement-with-design
-    command: "node experiments/quay-perpetual-stream/scripts/it0-enforcement-with-design-check.ts ."
+    command: "node plugin/scripts/it0-enforcement-with-design-check.ts ."

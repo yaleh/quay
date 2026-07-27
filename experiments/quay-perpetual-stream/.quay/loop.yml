@@ -31,14 +31,20 @@ concurrency: 2
 # adversarial audit that found a real defect at EVERY recent milestone (DIR-052);
 # architecture-analysis lights the L_G/L_D dark axes on quay's own code (DIR-053).
 #
-# HONEST STATUS (do not over-read this config): exp5 is driven by the BESPOKE
-# experiments/quay-perpetual-stream/OUTER-LOOP.md, which does NOT yet read this file's
-# routines: key (it predates DIR-045's loop.yml and consumes none of these params).
-# So these entries are DECLARATIVE INTENT + the schema-valid config that DIR-052/053
-# will consume once they teach OUTER-LOOP's checkpoint step to run routine-scheduler.mjs
-# + dispatch the probe + file behind routine-file-gate.mjs. They are schema-validated by
-# readLoopParams (so not malformed) but INERT under OUTER-LOOP until that wiring lands.
-# The LIVE fire path today is archguard's loop.yml (portable skill already reads routines).
+# CORRECTED STATUS (gap-orphaned-check-scripts-not-wired, M-DIR119-C-CANARY, 2026-07-27): this
+# key is now LIVE for exp5's bespoke driver — `.claude/workflows/run-routines.js` reads
+# `routines:` straight out of this file and dispatches `routine-scheduler.ts` against it, invoked
+# at OUTER-LOOP.md's checkpoint step (DIR-051/056). The previous "DECLARATIVE INTENT... INERT
+# until OUTER-LOOP consumes it" wording above was accurate when written but went stale once that
+# wiring landed — left uncorrected here, it is exactly the "looks authoritative but isn't"
+# failure shape `gap-halt-sentinel-path-mismatch` found for `.halt`. This canonical root
+# `.quay/config.yml`'s own `loop.routines` list is the one actually consulted in practice (per
+# DIR-050 unification, a legacy `.quay/loop.yml` like this one is a back-compat fallback only
+# consulted if the unified file's `loop:` section is absent — it is not here) and has since grown
+# a 4th probe (`browser-explorer`, DIR-069) not mirrored below; treat this file as historical
+# record of the original 3, not the current live list.
+# NOTE: `concurrency`/`stop`/`gates`/`policy` above remain genuinely INERT for the bespoke driver
+# (OUTER-LOOP.md never calls `readLoopParams`) — that part of the original comment is still true.
 routines:
   - name: self-validation
     trigger: on(checkpoint)

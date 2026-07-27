@@ -32,6 +32,21 @@ No `package.json` scripts and no build step (plain ESM Node ≥20; repo develope
     `GH_TOKEN`/`gh auth login` with access to `yaleh/quay`; they FAIL if that repo's state drifts
     from what the fixture assumes).
   - Tests build a temp workspace with a real `.quay/config.yml` (see `makeWorkspace()` in a test file) — a bare tasks dir is NOT a valid workspace; the config is a **provider map** with `mcp_entry`/`path`/`env`, not a flat tasks path.
+  - **NOT covered by `scripts/test.sh`** (DIR-111/ADR-019 decision #5 — named explicitly, not
+    silently absent): **packaging e2e** — the `dist-verify-node-floor` CI job builds the real
+    npm-pack tarball, installs it, and runs it on the declared Node floor, no `*.test.mjs` file
+    involved; and **browser/agent-driven e2e** — a milestone-cadence, MCP-tool-driven manual/agent
+    process (Playwright/chrome-devtools), `status: proposed` in `adr/ADR-010-scheduled-milestone-
+    e2e-incl-browser-tests.md`. A green `scripts/test.sh` run is evidence for neither category.
+  - **`ToolSearch` is a mandatory pre-fetch step for deferred MCP tools** (exp5-ADR-TOOLSEARCH-
+    DEFERRED-SCHEMA-PATTERN, M148 precedent style): the harness defers most MCP tool schemas —
+    they are NOT loaded at session start, and calling a deferred tool before fetching its schema
+    fails with `InputValidationError`. Before the FIRST call to any tool listed as deferred in a
+    `<system-reminder>`, call `ToolSearch` with a `select:<name>[,<name>...]` (exact) or keyword
+    query, confirm the result actually returned the tool's schema, and only then call it — this
+    applies to every quay/meta-cc/archguard/playwright MCP tool used across this repo's workflows
+    and skills. If `ToolSearch` returns zero results for a name you expect to exist, that is a
+    real failure signal (a renamed/removed tool, a stale skill reference) — do not retry blindly.
 - **Web UI:** `node packages/quay/bin/quay.js serve --port <p>` (renders task bodies as markdown; reads the task store live per request).
 
 ## Architecture — the product (`packages/`)
@@ -54,7 +69,13 @@ Key cross-cutting facts (require reading several files to see):
 
 - **`experiments/quay-perpetual-stream/`** is the active BAIME experiment (exp5): an autonomous outer loop that builds quay one milestone at a time. **`OUTER-LOOP.md` is the driver document** (the operational loop); `inherited-core.md` is the pinned methodology; `dashboard.md` is mutable outer state; `scripts/it0-*.{sh,mjs}` are the mechanical gates (notably `it0-dod-check.mjs` — the **DoD meta-enforcer**, Clauses 0-9, fixture-pinned by `dod-fixture-selfcheck.sh`).
 - **The loop runs directly on `master`** (there is no driver branch — DIR-027 retired it). Per-milestone work happens in `milestones/M<NN>/worktrees/iteration-{0,1}` worktrees merged into `master` at ABSORB.
-- **`.halt` sentinel** — pauses the loop at the next milestone boundary. **Correction (2026-07-27, `gap-halt-sentinel-path-mismatch`):** the real, mechanically-checked location is the **repo root** (`<repo-root>/.halt`, workspace-root-relative — matches `plugin/skills/loop-driver/SKILL.md`'s documented convention and `select-preflight.ts`'s actual `checkHalt()` implementation). A previous version of this file incorrectly documented `experiments/quay-perpetual-stream/.halt` — that path is NOT read by any live code path (only the orphaned, never-invoked `restart-readiness-check.sh` checks it) and does **not** actually halt anything. **When editing while the loop may run, follow DIR-027 human-steering hygiene: pause via a root-level `.halt`, OR work in a private git worktree off `master` and fast-forward at a clean window** — never race the loop on `master`.
+- **`.halt` sentinel** — pauses the loop at the next milestone boundary. **Correction (2026-07-27, `gap-halt-sentinel-path-mismatch`):** the real, mechanically-checked location is the **repo root** (`<repo-root>/.halt`, workspace-root-relative — matches `plugin/skills/loop-driver/SKILL.md`'s documented convention and `select-preflight.ts`'s actual `checkHalt()` implementation). A previous version of this file incorrectly documented `experiments/quay-perpetual-stream/.halt`; that path is NOT read by any live code path. **When editing while the loop may run, follow DIR-027 human-steering hygiene: pause via a root-level `.halt`, OR work in a private git worktree off `master` and fast-forward at a clean window** — never race the loop on `master`. Before REMOVING `.halt` to un-pause, run
+  `experiments/quay-perpetual-stream/scripts/restart-readiness-check.sh` (fixed to check this same
+  repo-root path at M187) — the mechanical go/no-go for whether `master` is safe to hand back to
+  the loop (clean tree, no mid-flight merge, `master` not checked out in a stray worktree, etc.).
+  **This is a manual, human-invoked check, not CI/loop-wired** (`gap-orphaned-check-scripts-not-
+  wired`, M-DIR119-C-CANARY, 2026-07-27, explicit decision) — nothing runs it for you automatically
+  before an un-halt; run it yourself.
 - **Directives are TASK-CANONICAL** (DIR-028 / "Plan A", the single-source-of-truth principle): a directive is a `label:directive` quay task (`tasks/DIR-NNN.md`) and nothing else — there is no `directives/*.md` file, no projection, no anti-drift check (all retired). Create/steer via the `quay-directive` skill. Milestone candidates are `label:milestone-candidate` tasks; `backlog.md`/`dashboard.md` are **generated views** of the task store, not hand-edited sources.
 - Recurring design principle enforced across this repo (see `docs/proposals/exp5-crystallization-strategy.md`): **single source of truth + executable invariants over prose.** When you find content living in two places (a file + a task copy; a charter copying a task's AC/DoD; a status in a field AND a body line), that is drift — fix the SOURCE (usually a doc/skill/template that generated it), not just the artifact.
 

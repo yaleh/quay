@@ -359,7 +359,27 @@ async function runSelftest(): Promise<number> {
   return fail === 0 ? 0 : 1;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+// gap-config-wiring-check-symlink-noop: raw string equality between `process.argv[1]` (NEVER
+// resolved through a symlink — stays exactly as typed on the command line) and
+// `fileURLToPath(import.meta.url)` (ALWAYS resolved through symlinks to the real file's absolute
+// path by Node's ESM loader) can never be true when this script is invoked via the
+// `experiments/quay-perpetual-stream/scripts/` mirror symlink — `main()` would silently never run,
+// falling through to a clean exit 0 indistinguishable from "ran and found zero issues." Resolving
+// BOTH sides through `fs.realpathSync` (after `path.resolve` to handle a relative argv[1]) makes
+// the two invocation paths compare equal, so the mirror path now behaves identically to the real
+// path instead of silently no-opping.
+function isDirectInvocation(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    const invokedReal = fs.realpathSync(path.resolve(process.argv[1]));
+    const moduleReal = fileURLToPath(import.meta.url);
+    return invokedReal === moduleReal;
+  } catch {
+    return false;
+  }
+}
+
+const isDirect = isDirectInvocation();
 if (isDirect) {
   main(process.argv).then((code) => process.exit(code));
 }

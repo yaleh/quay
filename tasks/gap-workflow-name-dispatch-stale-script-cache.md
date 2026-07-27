@@ -93,10 +93,14 @@ into the SAME CLAUDE.md section as an explicit extension, rather than a duplicat
 
 ## Definition of Done
 
-- [ ] Root cause characterized as far as externally possible: **undocumented tool behavior,
+- [x] Root cause characterized as far as externally possible: **undocumented tool behavior,
   confirmed via two independent research passes (WebSearch + claude-code-guide agent) that it is
   not documented anywhere in Claude Code's own materials.** Full internal mechanism unknowable from
   outside the tool — this is the ceiling of what "root cause" means for a closed-source dependency.
+  Ticked M-DIR119-C-CANARY (2026-07-27): the "Root-cause research (2026-07-26)" section above IS
+  this evidence (two independent research passes, both real, both already landed in this task file
+  before this milestone) — no new research performed here, only the checkbox reconciled with the
+  prose that already described it as done.
 - [x] A documented, followed operational rule ensures this repo's own directive-execution practice
   never hits this again — landed directly in `CLAUDE.md`'s "Workflow resume anti-pattern" section
   (extended, not duplicated), 2026-07-26. Already followed successfully 3x since (M176's real

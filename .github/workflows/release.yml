@@ -404,3 +404,24 @@ jobs:
           npm install -g "quay-${VERSION}.tgz"
           quay --help
           quay --version
+
+  # gap-orphaned-check-scripts-not-wired (M-DIR119-C-CANARY, 2026-07-27): delivery-manifest-check.ts
+  # was real, correct, and never invoked anywhere. `ci.yml` now runs its STATIC mode (no network) on
+  # every push; this job runs its `--ci` mode — the one that needs a real published GitHub Release
+  # tag + token to cross-check delivery-manifest.json's declared artifacts against what THIS release
+  # run actually published — the genuine end-to-end verification the static mode cannot do.
+  delivery-manifest-verify:
+    needs: [release, sea-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify delivery-manifest.json against this release's real published assets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node --experimental-strip-types scripts/delivery-manifest-check.ts --ci

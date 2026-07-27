@@ -177,7 +177,25 @@ export async function main(argv) {
   return 0;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+// gap-config-wiring-check-symlink-noop: same root cause as config-wiring-check.ts's fix (confirmed,
+// not assumed — see that file's comment). Raw string equality between `process.argv[1]` (never
+// resolved through a symlink) and `fileURLToPath(import.meta.url)` (always resolved through
+// symlinks by Node's ESM loader) can never hold when this script is invoked via the
+// `experiments/quay-perpetual-stream/scripts/` mirror symlink, so `main()` silently never runs.
+// Resolving both sides through `fs.realpathSync` fixes the mirror path to behave identically to
+// the real path instead of silently no-opping.
+function isDirectInvocation() {
+  if (!process.argv[1]) return false;
+  try {
+    const invokedReal = fs.realpathSync(path.resolve(process.argv[1]));
+    const moduleReal = fileURLToPath(import.meta.url);
+    return invokedReal === moduleReal;
+  } catch {
+    return false;
+  }
+}
+
+const isDirect = isDirectInvocation();
 if (isDirect) {
   main(process.argv).then((code) => process.exit(code));
 }

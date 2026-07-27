@@ -4,6 +4,12 @@
 # the loop?" from a judgment call into a runnable check (ADR-004 / Π_{S→E}). Operational script (not
 # load-bearing method-infra imported by other code), so it is a .sh, not a covered *.mjs.
 #
+# MANUAL-ONLY, NOT CI/LOOP-WIRED (gap-orphaned-check-scripts-not-wired, M-DIR119-C-CANARY,
+# 2026-07-27, explicit decision — named loudly here per that gap's own Requested action, not a
+# silent omission): nothing invokes this automatically before an un-halt. A human (or an agent
+# acting on human instruction) runs this BY HAND before deleting the repo-root `.halt` file. See
+# CLAUDE.md's `.halt sentinel` bullet for the pointer a fresh reader would actually find.
+#
 # Exit 0 = READY (all hard checks pass). Exit 1 = NOT READY (a hard check failed; do NOT un-halt).
 # The pending-directive count is INFORMATIONAL (the loop DRAINs pending directives — a non-zero count
 # is not a blocker, but is reported so you know what the loop's first act will process).

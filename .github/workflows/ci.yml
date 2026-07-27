@@ -25,6 +25,14 @@ jobs:
           # separately by the dist-verify-node-floor job below.
           node-version: '24'
       - run: npm install
+      - name: Test-coverage self-check (DIR-110/ADR-019 decision #4)
+        # Early, cheap, fail-fast: catches the DIR-108 failure class (a real test file sitting on
+        # `master`, invisible to scripts/test.sh's glob) BEFORE paying for the full suite below.
+        # --selftest first (ADR-018 selfcheck-fixture pattern: proves the check itself still
+        # actually detects an orphan, RED+GREEN), then the real run against this repo's own tree.
+        run: |
+          node --experimental-strip-types scripts/test-coverage-check.ts --selftest
+          node --experimental-strip-types scripts/test-coverage-check.ts
       - name: Run tests
         # ADR-019/DIR-109 (M173): canonical entrypoint — scripts/test.sh owns the test-file glob
         # and the concurrency default; this step no longer hand-writes its own copy of either.
@@ -41,6 +49,11 @@ jobs:
   # needs Node >=23, which is exactly the regression the real v0.3.5 release hit.
   # This mirrors release.yml's dist-verify-node-floor, but self-builds the
   # tarball (no GitHub Release exists on a push/PR). A hard, runnable check.
+  #
+  # DIR-111/ADR-019 decision #5: this job IS this repo's "packaging e2e" category — it builds the
+  # real distributable artifact, installs it, and runs it on the declared Node floor. It is
+  # explicitly NOT a `node --test *.test.mjs` suite and is NOT covered by `scripts/test.sh`/the
+  # `test` job above; a green `test` job run says nothing about whether packaging itself works.
   dist-verify-node-floor:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -79,3 +92,11 @@ jobs:
           node-version: '24'
       - name: Check version consistency across all artifacts
         run: node --experimental-strip-types scripts/version-consistency-check.ts
+      - name: Check delivery-manifest.json matches release.yml (gap-orphaned-check-scripts-not-wired)
+        # This checker existed, was correct, and was never invoked anywhere — a real "designed but
+        # never wired" gap (M-DIR119-C-CANARY, 2026-07-27). Static mode: validates manifest
+        # well-formedness against release.yml's own declared artifacts — no network/token needed,
+        # so it runs on every push/PR here. The `--ci` mode (real published-asset verification
+        # against a live GitHub Release) needs a real release tag + GITHUB_TOKEN and is wired
+        # separately into release.yml's post-publish jobs.
+        run: node --experimental-strip-types scripts/delivery-manifest-check.ts
