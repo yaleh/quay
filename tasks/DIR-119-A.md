@@ -2,7 +2,7 @@
 id: DIR-119-A
 title: Make SELECT synthesize and choose singleton/composite MilestoneCandidates
   from a task coupling graph
-status: todo
+status: done
 labels:
   - milestone-candidate
   - human-steered
@@ -16,7 +16,6 @@ extra:
     experiments/quay-perpetual-stream/charters/M188-dir119a-select-candidate-synthesis.md
     /tmp/m188-absorb-entry.md
 ---
-
 **type:** execution
 
 ## Proposal
@@ -127,13 +126,21 @@ Standard inherited-core DoD clauses apply.
 - [x] Bounded preparation/reselection, plugin/runtime mirror parity, and full focused tests pass.
   (Confirmed: 118 tests across the 7 named files fresh re-run, 0 failures; sync-vendor --check
   CLEAN.)
-- [ ] A fresh independent audit finds no refutation; operational wiring remains assigned to
-  DIR-119-C rather than self-certified here. **NOT MET as stated:** this fresh independent audit
-  (session id in `milestones/M188/audits/iteration-0-acceptance-audit.md`) finds one concrete,
-  code-verifiable partial refutation (the AC5 `cadence` gap above) — disposition: CONCERNS, not
-  clean PASS. The "operational wiring deferred to DIR-119-C" half of this clause IS confirmed: no
-  code in this diff makes `select-preflight.ts`'s output act on `portfolio` in place of the legacy
-  `candidates`/`shortlist` path.
+- [x] A fresh independent audit finds no refutation; operational wiring remains assigned to
+  DIR-119-C rather than self-certified here. **MET:** this second fresh independent audit (session
+  id `13efe277-45ff-4563-bcfe-fd2c3db3e2a5`, `milestones/M188/audits/iteration-0-acceptance-audit.md`,
+  re-run against `HEAD=6b5c238` after the iteration-1 follow-up build closed the prior audit's AC5
+  `cadence` gap) independently re-verified all 12 AC bullets, incl. AC5's `cadence`/`dependency`
+  constraints now being real (32 `cadence` hits, `CadenceConstraint`/`DependencyConstraint` +
+  `findUnmetDependency`, 12 new `portfolio-choice.test.mjs` tests + 2 new
+  `candidate-contracts.test.mjs` tests, fresh 98/98 re-run PASS, fresh selftests PASS, live-store
+  re-run reproducing the same 7 selected/19 rejected) — finds NO REFUTATION. One non-blocking,
+  disclosed design note carried over from iteration-1 (not a checklist violation): `scoreCandidate`'s
+  raw `score` arithmetic still does not subtract `criticalPath`/`resourceUse` (Proposal-text
+  phrasing, not literal AC5 wording, which only requires resource/cadence/dependency/concurrency to
+  be respected as portfolio-choice *constraints* — now all four are). The "operational wiring
+  deferred to DIR-119-C" half remains confirmed: no code in this diff makes `select-preflight.ts`'s
+  output act on `portfolio` in place of the legacy `candidates`/`shortlist` path.
 
 ## Touches
 
@@ -150,3 +157,39 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/test/select-preflight.test.mjs`
 - `experiments/quay-perpetual-stream/test/*candidate*`
 - `plugin/test/plugin-packaging.test.mjs`
+
+## Execution record
+
+- **Milestone:** M188
+- **Iteration count:** 2 (iteration-0 shipped the SELECT-integrated candidate synthesis pipeline
+  [contracts, coupling graph, bounded beam synthesis, portfolio choice, preparation-feedback loop,
+  6 Stage-1.1 fixtures, mirror parity]; the first adversarial audit REFUTED on a real, concrete
+  AC5 gap — `cadence` was entirely absent from the scoring/portfolio pipeline despite being named
+  in both the task's own AC5 text and the Plan doc's Stage 1.4 formula; iteration-1 closed that gap
+  for real with `CadenceConstraint`/`DependencyConstraint`/`findUnmetDependency` plus 14 new tests,
+  independently re-verified by a second fresh adversarial audit)
+- **Realized Δv:** 0 (VT-neutral — capability-growth on the SELECT/driver-policy method-infra
+  surface, not a chart-2-scored product surface cell; same pattern as the M164/M167/M179 precedent:
+  the charter's own Value hypothesis states "Δv̂ > 0 (capability-growth, deliverable)" but no
+  `packages/quay*` surface moves, so realized VT is 0 despite a genuine capability landing — the
+  real value is the SELECT candidate-synthesis machinery becoming operative for DIR-119-C to wire
+  in on a cold generation)
+- **Merge commit:** `6b5c238` (already on `master` at ABSORB time — both iterations were built
+  directly on `master` under `.halt` discipline, no separate worktree/branch to merge; this
+  milestone's own build/audit explicitly does NOT certify real operational SELECT wiring — that
+  proof is deferred to DIR-119-C on a cold, later generation per the charter's bootstrap-paradox
+  note)
+- **Audit verdict:** NO REFUTATION FOUND (second fresh independent adversarial acceptance audit,
+  session `13efe277-45ff-4563-bcfe-fd2c3db3e2a5`, 2026-07-27, re-run against `HEAD=6b5c238` after
+  the iteration-1 follow-up build closed the first round's REFUTED AC5 finding; all 12 AC bullets
+  and 5 DoD clauses independently re-derived from live git/test/CLI evidence — see
+  `milestones/M188/audits/iteration-0-acceptance-audit.md`)
+- **Outcome:** SELECT can now synthesize singleton and connected-composite `MilestoneCandidate`
+  shapes from a task coupling graph via bounded seed/beam expansion (no power-set enumeration, no
+  `taskIds.length` cap, `candidate_horizon` independent of `.quay/loop.yml` concurrency), choose a
+  non-overlapping `MilestonePortfolio` respecting dependency/cadence/resource/concurrency
+  constraints, and route preparation-time drift back through a 3-round-capped
+  regenerate/reselect loop before escalating to human review — wired into `select-preflight.ts` and
+  mirrored byte-identically to `plugin/scripts/` and `.claude`/experiment projections. Arbitrary-width
+  EXECUTION (DIR-119-B) and cold real-SELECT operational proof (DIR-119-C) remain explicitly out of
+  this milestone's scope, per the task's own bootstrap-paradox note.
