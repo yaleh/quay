@@ -165,3 +165,109 @@ self-report. Nothing in this task's own product code or extracted skill content 
 refutation is entirely process/governance-layer (missing ABSORB-entry disposition statements,
 un-promoted lifecycle, misplaced milestone evidence directory) — the same class of finding this
 dashboard has now logged for 11 consecutive prior milestones (M138 onward).
+
+---
+
+## Round 2 (re-audit, post Build-iteration-1 fix, 2026-07-27)
+
+**Same audit session id (`006748f4-b16e-4522-a7a6-68b595240e42`), fresh pass** — dispatched with no
+prior memory of this transcript; every claim below was independently re-derived this round, not
+copied from Round 1's text (Round 1's numbers are cited only where this round's own re-run reproduced
+them identically).
+
+**Trigger:** intervening commit `7bed8c2` ("M179/DIR-070-F: Build iteration 1") tagged
+`/tmp/m179-absorb-entry.md`'s `## Backlog row` with `surface:packaging`, flipping
+`clause7-test-floor` FAIL→N/A. clause1/clause2 remained FAIL by design — their disposition text is
+this Audit phase's own responsibility (`gap-absorb-entry-clause-disposition-sequencing`, M180/M181),
+not fabricable by Build.
+
+### Round-2 independent re-verification of AC1–AC4 / DoD1–DoD5
+
+All 9 items re-derived fresh against live artifacts (not Round 1's text, not the task file's own
+citations):
+
+- **AC1** (leak test): `grep -rl "experiments/quay-perpetual-stream\|exp5" plugin/skills/quay-native-methodology/ plugin/skills/quay-webui-bootstrap-methodology/` → exit 1, zero matches. **CONFIRMED.**
+- **AC2** (originals untouched): `git status --porcelain .claude/skills/quay-native-methodology/ .claude/skills/quay-webui-bootstrap-methodology/` → empty; `ls` on both shows `examples/`, `inventory/`, `scripts/`, `templates/`, `experiment-config.json` still present (native) and the extra `g3-visual-review-env-gap.md`/`v-meta-ceiling-two-experiment.md` reference files still present (webui-bootstrap) alongside the mirrored ones. **CONFIRMED.**
+- **AC3** (`plugin.json` commands[]): `git show 6983aa6 -- plugin/.claude-plugin/plugin.json` — diff independently re-read, `commands[]` 7→9, both new SKILL.md paths added, description string updated. **CONFIRMED.**
+- **AC4** (`plugin-packaging.test.mjs` passes): `node --test plugin/test/plugin-packaging.test.mjs` re-run live this round → **33 pass / 1 fail** (34 total), same single failure (`task-schema.ts` attribution-stripping). Independently confirmed `6983aa6`'s own `--stat` diff touches **zero** `task-schema.ts`/`task-schema.mjs` files anywhere in the repo (`git show 6983aa6 --stat`: 13 files, all under `plugin/skills/`, `plugin/.claude-plugin/`, `plugin/test/`, `tasks/`, milestone evidence — no schema-check module). `git log -- plugin/gate-scripts/task-schema.ts` shows its last two touches are `b310adb`/`8d1ded4`, both from before this task existed. **CONFIRMED with the same caveat as Round 1** — genuinely pre-existing and orthogonal, re-verified by lineage this round rather than by a throwaway worktree diff.
+- **DoD1** (Gap-3 doc reference): `tasks/DIR-070-F.md:47` cites `docs/proposals/exp5-deliverable-improvements.md`; `grep -n "差距 3" docs/proposals/exp5-deliverable-improvements.md` → §"差距 3：方法论文本技能留在 `.claude/skills/` 中", row 6 of its table names "打包剩余的方法论文本技能" (package the remaining methodology-text skills) as the Gap-3 candidate. **CONFIRMED.**
+- **DoD2** (extracted skills byte-identical): `diff -q` re-run this round on all 6 reference files (`gate-mechanics.md`, `directive-lifecycle.md`, `patterns.md`, `g3-audit-discipline.md`, `visual-review-mechanism.md`, `effectiveness-timing-corpus.md`) between `.claude/skills/.../reference/` and `plugin/skills/.../reference/` → zero output (identical) on all 6. **CONFIRMED.**
+- **DoD3**: same evidence as AC3. **CONFIRMED.**
+- **DoD4**: same evidence/caveat as AC4. **CONFIRMED with caveat.**
+- **DoD5** (read-only touch, regression-tested): `node --test --test-name-pattern="original .claude/skills/ sources are unmodified" plugin/test/plugin-packaging.test.mjs` → 1/1 pass, re-run live this round. **CONFIRMED.**
+
+No AC/DoD item was refuted this round. §1a checklist write-back: all 9 boxes were already `[x]` with
+evidence citations (committed at `5eed42a`, the same commit Round 1 itself made) — this round's
+independent re-derivation matches every citation; no un-ticking required.
+
+### Disposition statements appended this round (charge step 2a)
+
+Verdict reached from the re-verification above (NO REFUTATION FOUND) was written to
+`/tmp/m179-absorb-entry.md` as `adversarial-audit disposition: NO REFUTATION FOUND ...` — written
+only after the verdict above was actually reached, per the charge's own sequencing requirement.
+`vmeta-lag-check.sh --counter 183 experiments/quay-perpetual-stream/v-meta-ledger.md` was then run
+live (milestone_counter=184 at time of this audit per `dashboard.md` line 4, so counter=184-1=183 per
+the charge's own arithmetic) and its **verbatim** output —
+
+```
+milestone_counter=183 K=2
+  [ok] consolidated | lag=- | consolidated — lag gate does not apply | domain-audit-channel≡CI-job pattern (+ per-subcommand audit exercise)
+  [ok] proposed | lag=- | proposed — not past φ threshold, no lag gate | repo-root isolation-leak lesson
+
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+```
+
+— was copied (not paraphrased) into a `V_meta consolidation-lag: ...` line in the same file.
+
+### Round-2 mechanical gate re-run
+
+```
+$ bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh DIR-070-F \
+    experiments/quay-perpetual-stream/charters/M179-dir070f-methodology-skills.md \
+    /tmp/m179-absorb-entry.md
+PASS: clause0-ac-dod-present
+PASS: clause1-adversarial-audit: disposition statement present (verdict)
+PASS: clause2-vmeta-lag: disposition statement present
+PASS: clause3-line-budget
+PASS: clause4-impl-row
+PASS: clause5-no-self-exemption
+PASS: clause6-escrow-delta-v (N/A)
+PASS: clause7-test-floor: N/A — surface label(s) [packaging] are exclusively non-product-touching
+PASS: clause8-task-canonical-lifecycle-record (N/A)
+PASS: clause10-tree-hygiene
+PASS: clause11-worktree-branch-hygiene
+PASS: clause12-audit-independence (N/A — no '## Audit-independence check' section)
+N/A:  clause9-split-or-commit
+
+PASS: DoD check passed — all clauses satisfied (12 disposition(s) confirmed), no undeclared
+self-exemption.
+EXIT=0
+```
+
+**Zero exit.** Per the charge, this is no longer REFUTED-by-construction.
+
+Note on clause12: same documented no-op as M177/M178/M181's own audits — no `## Audit-independence
+check` section exists in `/tmp/m179-absorb-entry.md`, and this audit is not itself the kind of
+orchestrated multi-agent dispatch that section is designed to corroborate (a single subagent
+adversarial-audit invocation, not a `Workflow`-tool-dispatched pipeline stage), so the no-op reading
+is accurate, not a gap this pass is refuting.
+
+### Still-open, unresolved-by-this-round findings (not new; already logged in `dashboard.md`)
+
+- **Lifecycle non-promotion** (dashboard.md line 525): re-checked live — `grep '^status:' tasks/DIR-070-F.md` still returns `todo`; `grep 'DIR-070-F' .quay/gate-events.jsonl` now returns **one** event (`split-or-commit`, verdict `pass`, timestamp `2026-07-26T18:04:26Z`) but **no** lifecycle-promotion (`todo→ready→done`) event exists — Round 1's stronger claim of "no gate event exists at all" is now imprecise (one exists, just not a promotion event); the underlying substance of the CONCERNS row (task never promoted, parent DIR-070 epic still open) remains true and unresolved. Not this audit's authority to fix (downstream of Build/Audit, an ABSORB/Land-phase action) — left as-is in dashboard.md.
+- **Pre-existing unrelated test failure** (D1/dashboard.md line 524): still present, re-confirmed this round with an independent lineage check (git history of `task-schema.ts`), not just a parent-commit worktree diff. Non-blocking.
+- **Milestone evidence path split** (D4/dashboard.md line 527): `experiments/quay-perpetual-stream/milestones/M179/iterations/iteration-0.md` (legacy path) still coexists with the top-level `milestones/M179/{audits/,iterations/iteration-1.md}` (current path) — unresolved by Build iteration 1, which added its own report at the correct top-level path without moving the legacy one. Cosmetic/process, not substance.
+
+### Round-2 overall verdict
+
+**NO REFUTATION FOUND.** All 4 AC + 5 DoD items independently re-confirmed fresh this round against
+live artifacts/diffs/test output (AC4/DoD4 carry the same non-blocking, independently-verified
+pre-existing-and-orthogonal caveat as Round 1). The mechanical gate — the sole reason Round 1
+returned REFUTED — now exits 0 (12/12 clauses PASS/N/A) following the Build-phase surface-tag fix
+(`7bed8c2`) and this round's own Audit-phase disposition write-back to `/tmp/m179-absorb-entry.md`,
+per the now-established `gap-absorb-entry-clause-disposition-sequencing` mechanism. Remaining items
+(lifecycle promotion, the pre-existing unrelated test-suite failure, the legacy-path milestone
+evidence split) are unresolved but were already logged as CONCERNS in `dashboard.md` by Round 1 and
+are downstream-of-this-audit process items, not AC/DoD/mechanical-gate defects — `dashboard.md`'s
+Round-1 REFUTED row for M179 has been updated to `verified-eliminated` with this round's resolution
+evidence; the CONCERNS rows are left open as still-accurate.
