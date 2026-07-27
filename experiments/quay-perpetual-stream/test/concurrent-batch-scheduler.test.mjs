@@ -7,6 +7,7 @@
 //   node --test experiments/quay-perpetual-stream/test/concurrent-batch-scheduler.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -14,8 +15,10 @@ import {
   touchesSharedState,
   SHARED_STATE_PATHS,
   assembleBatch,
+  isCapabilityGrowth,
   main,
 } from "../scripts/concurrent-batch-scheduler.ts";
+import { expandGlobs as expandGlobsForTest } from "../scripts/touches-orthogonality-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
@@ -41,6 +44,42 @@ test("parseCandidate: type defaults to 'execution' when unstated; learning detec
   assert.equal(parseCandidate("c", "## Touches\n- a.js").type, "execution");
   assert.equal(parseCandidate("c", "**type:** learning\n## Touches\n- a.js").type, "learning");
   assert.equal(parseCandidate("c", "type: learning-experiment\n## Touches\n- a.js").type, "learning-experiment");
+});
+
+// ── DIR-116: value-type extraction ──────────────────────────────────────────────────────────────
+test("parseCandidate: value-type defaults to capability-growth when unstated (backward-compat)", () => {
+  const c = parseCandidate("c", "**type:** execution\n## Touches\n- a.js");
+  assert.equal(c.valueType, "capability-growth");
+  assert.equal(isCapabilityGrowth(c.valueType), true);
+});
+
+test("parseCandidate: value-type reads '**Value type:**' (kebab, camelCase) and the older prose form", () => {
+  assert.equal(
+    parseCandidate("kebab", "**Value type:** capability-growth\n## Touches\n- a.js").valueType,
+    "capability-growth",
+  );
+  // camelCase mid-line, as seen in DIR-109/M185's own charter: "**Class:** development · **Value type:** instrumentCorrection"
+  assert.equal(
+    parseCandidate("camel", "**Class:** development · **Value type:** instrumentCorrection\n## Touches\n- a.js").valueType,
+    "instrumentcorrection",
+  );
+  assert.equal(
+    parseCandidate(
+      "prose",
+      "- Value type (per `inherited-core.md`'s value-typed SELECT ledger): **governance-integrity** (primary)\n## Touches\n- a.js",
+    ).valueType,
+    "governance-integrity",
+  );
+});
+
+test("isCapabilityGrowth: normalizes hyphen/case so kebab and camelCase spellings compare equal", () => {
+  assert.equal(isCapabilityGrowth("capability-growth"), true);
+  assert.equal(isCapabilityGrowth("capabilityGrowth"), true);
+  assert.equal(isCapabilityGrowth("instrument-correction"), false);
+  assert.equal(isCapabilityGrowth("instrumentCorrection"), false);
+  assert.equal(isCapabilityGrowth("governance-integrity"), false);
+  assert.equal(isCapabilityGrowth("discovery"), false);
+  assert.equal(isCapabilityGrowth("risk-option"), false);
 });
 
 // ── touchesSharedState ───────────────────────────────────────────────────────────────────────────
@@ -105,6 +144,38 @@ test("assembleBatch: learning-type is NEVER batched (always serial), even if dis
   assert.match(r.deferred[0].reason, /learning/i);
 });
 
+// ── DIR-116 GREEN: non-capability-growth value-type is deferred, with a reason distinguishable from
+// the touches-overlap / shared-state / learning-type deferral reasons ─────────────────────────────
+test("assembleBatch: a governance-integrity value-type candidate is deferred even with clean, disjoint touches (DIR-116 GREEN)", () => {
+  const cands = [
+    parseCandidate("cap-growth", "**Value type:** capability-growth\n## Touches\n- x/a.js"),
+    parseCandidate("gov-integrity", "**Value type:** governance-integrity\n## Touches\n- y/b.js"),
+  ];
+  // Prior to DIR-116, this exact pair (disjoint touches, no shared-state, no learning type) would
+  // have batched 2-wide — that was the real, undetected gap DIR-116 closes (see DIR-109/M173
+  // evidence cited in the directive). Confirmed via replay against the pre-change scheduler: BOTH
+  // candidates batched (see M185 iteration report for the captured RED output).
+  const r = assembleBatch(cands, { expand: fakeExpand({ "x/a.js": ["x/a.js"], "y/b.js": ["y/b.js"] }) });
+  assert.deepEqual(r.batch, ["cap-growth"]);
+  assert.equal(r.deferred.length, 1);
+  assert.equal(r.deferred[0].id, "gov-integrity");
+  // Distinguishable from the other deferral reasons (learning-type / shared-state / touches-overlap).
+  assert.match(r.deferred[0].reason, /value-type/i);
+  assert.doesNotMatch(r.deferred[0].reason, /shared exp5 state/i);
+  assert.doesNotMatch(r.deferred[0].reason, /learning-type/i);
+  assert.doesNotMatch(r.deferred[0].reason, /not disjoint from/i);
+});
+
+test("assembleBatch: a real capability-growth candidate (clean touches) is unaffected by the value-type check (DIR-116, no false-positive exclusion)", () => {
+  const cands = [
+    parseCandidate("A", "**Value type:** capability-growth\n## Touches\n- x/a.js"),
+    parseCandidate("B", "## Touches\n- y/b.js"), // value-type unstated → defaults capability-growth too
+  ];
+  const r = assembleBatch(cands, { expand: fakeExpand({ "x/a.js": ["x/a.js"], "y/b.js": ["y/b.js"] }) });
+  assert.deepEqual(r.batch, ["A", "B"]);
+  assert.deepEqual(r.deferred, []);
+});
+
 test("assembleBatch: a candidate touching SHARED STATE cannot be batched (serialize)", () => {
   const cands = [
     parseCandidate("A", "**type:** execution\n## Touches\n- x/a.js"),
@@ -163,4 +234,24 @@ test("main: missing charter file → exit 2", async () => {
 
 test("main: no --root falls back to findRepoRoot", async () => {
   assert.equal(await main(["node", "s", sfx("exec-a.md"), sfx("exec-b.md")]), 0);
+});
+
+// ── DIR-116: end-to-end over real fixture charters (mirrors the RED/GREEN evidence in the M185
+// iteration report, captured by replaying this exact fixture pair against the scheduler before and
+// after the value-type check landed) ───────────────────────────────────────────────────────────
+test("main: real governance-integrity clean candidate is excluded; real capability-growth candidate still batches (DIR-116 GREEN, real fs)", async () => {
+  const code = await main([
+    "node", "s", "--root", REPO_ROOT,
+    sfx("cap-growth-explicit.md"), sfx("governance-integrity-clean.md"),
+  ]);
+  assert.equal(code, 0);
+  // Re-derive via the pure function too, so the assertion is on real content, not just exit code.
+  const capGrowth = parseCandidate("cap-growth-explicit", fs.readFileSync(sfx("cap-growth-explicit.md"), "utf8"));
+  const govIntegrity = parseCandidate("governance-integrity-clean", fs.readFileSync(sfx("governance-integrity-clean.md"), "utf8"));
+  assert.equal(capGrowth.valueType, "capability-growth");
+  assert.equal(govIntegrity.valueType, "governance-integrity");
+  const r = assembleBatch([capGrowth, govIntegrity], { expand: (globs) => expandGlobsForTest(globs, REPO_ROOT) });
+  assert.deepEqual(r.batch, ["cap-growth-explicit"]);
+  assert.equal(r.deferred[0].id, "governance-integrity-clean");
+  assert.match(r.deferred[0].reason, /value-type/i);
 });

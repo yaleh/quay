@@ -33,15 +33,40 @@ export const SHARED_STATE_PATHS = [
 ];
 
 // ── parseCandidate ───────────────────────────────────────────────────────────────────────────────
-// A candidate = its id + declared `## Touches` + its milestone type (execution | learning | …).
+// A candidate = its id + declared `## Touches` + its milestone type (execution | learning | …) + its
+// value-type (capability-growth | discovery | instrument-correction | risk-option |
+// governance-integrity, per inherited-core.md's value-typed ledger).
 // Type is read from a `**type:** <t>` or `type: <t>` line; defaults to "execution".
+// Value-type is read from a `**Value type:** <vt>` line (also tolerates the older
+// `Value type (per ...): **<vt>**` prose form and camelCase spellings like `instrumentCorrection`,
+// DIR-116). Unstated → defaults to "capability-growth" — conservative-PERMISSIVE for backward compat
+// with the many pre-DIR-116 charters/fixtures that never declared this field (mirrors the `type`
+// field's own unstated-default policy above); the field is only ever used to DEFER, never to admit
+// something the touches/type checks would otherwise reject.
 export function parseCandidate(id, charterText) {
   const touches = parseTouches(charterText);
   let type = "execution";
   // Tolerates `type: x`, `**type:** x` (colon inside bold), and `**type**: x`.
   const m = String(charterText).match(/^\s*\*{0,2}type\*{0,2}\s*:\s*\*{0,2}\s*`?([a-z][\w-]*)/im);
   if (m) type = m[1].toLowerCase();
-  return { id, touches, type };
+  let valueType = "capability-growth";
+  // "value type" / "value-type", not "value-typed" (word-boundary after "type" excludes that word);
+  // no `^` anchor — real charters put this field mid-line (e.g. "**Class:** development ·
+  // **Value type:** ...") and/or with parenthetical prose between the label and the colon.
+  const vm = String(charterText).match(/value[\s-]?type\b[^:\n]*:\s*\*{0,2}\s*`?([a-zA-Z][\w-]*)/i);
+  if (vm) valueType = vm[1].toLowerCase();
+  return { id, touches, type, valueType };
+}
+
+// ── isCapabilityGrowth ───────────────────────────────────────────────────────────────────────────
+// Normalizes away hyphens/case so both spellings actually seen in the wild — "instrument-correction"
+// (kebab, most charters) and "instrumentCorrection" (camelCase, e.g. DIR-109/M185's own charter) —
+// compare equal.
+function normalizeValueType(v) {
+  return String(v || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+export function isCapabilityGrowth(valueType) {
+  return normalizeValueType(valueType) === "capabilitygrowth";
 }
 
 // ── touchesSharedState ───────────────────────────────────────────────────────────────────────────
@@ -58,6 +83,10 @@ export function touchesSharedState(globs) {
 // ── assembleBatch ────────────────────────────────────────────────────────────────────────────────
 // Greedy maximal disjoint batch over rank-ordered candidates. A candidate JOINS iff:
 //   - type is a batchable execution type (NOT learning — learning is always serial), AND
+//   - value-type is capability-growth (DIR-116 — the one real residual gap from DIR-057 not covered
+//     by DIR-066/106/107: a governance-integrity/instrument-correction/discovery/risk-option-typed
+//     candidate is exactly the class of work DIR-057's safety argument meant to exclude, even when it
+//     avoids the narrower learning-type/shared-state checks below), AND
 //   - it does not touch shared state, AND
 //   - its `## Touches` is well-declared (checkTouchesPair's conservative rules pass against the batch),
 //     AND it is touches-disjoint from EVERY candidate already in the batch.
@@ -69,6 +98,13 @@ export function assembleBatch(candidates, { expand }) {
   for (const c of candidates) {
     if (isLearning(c.type)) {
       deferred.push({ id: c.id, reason: `learning-type ("${c.type}") is never batched — always serial` });
+      continue;
+    }
+    if (!isCapabilityGrowth(c.valueType)) {
+      deferred.push({
+        id: c.id,
+        reason: `value-type ("${c.valueType}") is not capability-growth — non-capability-growth work must serialize (deferred to fan-in ABSORB)`,
+      });
       continue;
     }
     if (c.touches.hasSection && touchesSharedState(c.touches.globs)) {
