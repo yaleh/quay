@@ -60,19 +60,31 @@ policy, so it is human-steered under halt with golden replay and independent aud
   contains no maximum task-count check. (Confirmed: `expandFromSeed`/`DEFAULT_CANDIDATE_HORIZON=3`
   in `candidate-synthesis.ts`; fresh re-run of "no power-set enumeration" and "no taskIds.length
   cap: a 25-task fully-coupled pool synthesizes without truncation" tests PASS.)
-- [ ] Portfolio choice prevents duplicate task membership and respects dependency, cadence, resource,
-  and milestone-concurrency constraints. **UNCONFIRMED (partial):** duplicate-membership
+- [x] Portfolio choice prevents duplicate task membership and respects dependency, cadence, resource,
+  and milestone-concurrency constraints. (Fixed in the M188 follow-up build pass, closing the
+  REFUTED gap from `milestones/M188/audits/iteration-0-acceptance-audit.md`. Duplicate-membership
   (`assertPortfolioDisjoint`/overlap rejection), resource (`maxTotalResourceUse` budget), and
-  milestone-concurrency (`maxSelected` budget) are real and tested in
-  `portfolio-choice.ts`/`portfolio-choice.test.mjs`. `cadence` is NOT implemented anywhere:
-  `grep -rn cadence` across `candidate-contracts.ts`, `candidate-synthesis.ts` (incl.
-  `scoreCandidate`), `portfolio-choice.ts` (incl. `choosePortfolio`/`PortfolioConstraints`), and
-  their test files returns zero hits, even though the Plan doc's own Stage 1.4 text this charter
-  cites verbatim requires "Score candidates using ... cadence, ...". `select-preflight.ts` computes
-  a `cadence` value via `getCadence`/`explore-exploit-cadence.ts` but wires it only into the
-  pre-existing, separate `PreflightResult.cadence` field — never into
-  `buildTaskCandidateFacts`/`synthesizeCandidatePortfolio`. See adversarial-audit disposition in
-  `/tmp/m188-absorb-entry.md` and `milestones/M188/audits/iteration-0-acceptance-audit.md`.
+  milestone-concurrency (`maxSelected` budget) remain real and tested, as before. `cadence` is now
+  real: `candidate-contracts.ts`'s `isExploreTask` recognizes the explore slot (id/label heuristic
+  matching `explore-exploit-cadence.ts`'s own definition); `portfolio-choice.ts`'s new
+  `CadenceConstraint`/`PortfolioConstraints.cadence` forces the best-fitting explore-carrying shape
+  into the selected set when the verdict is EXPLORE-DUE, falling back to a smaller shape if the top
+  one exceeds budget, and is a no-op on verdict OK or when nothing carries the slot —
+  `select-preflight.ts`'s `synthesizeCandidatePortfolio` now wires the already-computed
+  `CadenceResult` through into `choosePortfolio` (previously it only fed the separate, unrelated
+  `PreflightResult.cadence` field). `dependency` is now real too (plan doc §3.4's "inter-candidate
+  dependency order"): `portfolio-choice.ts`'s new `DependencyConstraint`/`findUnmetDependency`
+  demotes a selected candidate to rejected when one of its tasks' external `dependsOn` targets is
+  open, unresolved, and not selected in the same portfolio round — satisfied by the target being
+  already `done`, selected in another candidate this round, or falling open when the target is
+  outside this SELECT cycle's known fact set entirely (never fabricates a block on missing data).
+  `grep -rn cadence` across `candidate-contracts.ts`/`candidate-synthesis.ts`/`portfolio-choice.ts`
+  now returns 32 hits (was 0); `portfolio-choice.test.mjs` gained 12 new tests (7→19) covering both
+  constraints plus `findUnmetDependency` directly; `candidate-contracts.test.mjs` gained 2
+  (`isExploreTask`, 7→9). Fresh re-run: `node --test
+  experiments/quay-perpetual-stream/test/{candidate-contracts,candidate-synthesis,coupling-graph,
+  portfolio-choice,preparation-feedback,select-preflight}.test.mjs` → 98/98 PASS, 0 fail.
+  `sync-vendor.sh --check` CLEAN; `plugin-packaging.test.mjs` 34/34 PASS.)
 - [x] Preparation changes to touches, semantic resources, dependency, or capacity trigger candidate
   regeneration/reselection; the process stops after three rounds. (Confirmed:
   `preparation-feedback.ts`'s `MAX_PREPARATION_ROUNDS = 3`; fresh

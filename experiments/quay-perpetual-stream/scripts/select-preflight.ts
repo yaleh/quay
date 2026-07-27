@@ -43,8 +43,9 @@ import { deriveTouches } from "./derive-touches-heuristic.ts";
 // workflow wrapper (OUTER-LOOP step "N = min(|shortlist|, concurrency)") remains the ONE place that
 // budget is applied, exactly as it does today for the legacy singleton list.
 import type { TaskCandidate as SynthesisTaskCandidate, MilestonePortfolio } from "./candidate-contracts.ts";
+import { isExploreTask } from "./candidate-contracts.ts";
 import { synthesizeCandidates } from "./candidate-synthesis.ts";
-import { choosePortfolio } from "./portfolio-choice.ts";
+import { choosePortfolio, type PortfolioConstraints } from "./portfolio-choice.ts";
 import { createHash } from "node:crypto";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
@@ -474,16 +475,49 @@ export function buildTaskCandidateFacts(workspaceRoot: string, entries: Candidat
   });
 }
 
-// ── synthesizeCandidatePortfolio (M188/DIR-119-A Stage 1.6 wiring) ──────────────────────────────────
+// ── synthesizeCandidatePortfolio (M188/DIR-119-A Stage 1.6 wiring; AC5 follow-up: cadence + inter-
+// candidate dependency constraints) ─────────────────────────────────────────────────────────────────
 // Runs the real coupling-graph -> candidate-synthesis -> portfolio-choice pipeline over the
 // autonomous-eligible candidate list. Never reads `.quay/loop.yml` (candidate_horizon independence,
-// Done-when #4) — `constraints` here are always `{}` (unconstrained); a caller wanting a concurrency
-// budget applies it via `choosePortfolio`'s own `maxSelected` downstream of THIS call, exactly the
-// same separation candidate-synthesis.test.mjs pins.
-export function synthesizeCandidatePortfolio(workspaceRoot: string, entries: CandidateEntry[]): MilestonePortfolio {
+// Done-when #4) — `maxSelected`/`maxTotalResourceUse` are never set here; a caller wanting a
+// concurrency budget applies it via `choosePortfolio`'s own `maxSelected` downstream of THIS call,
+// exactly the same separation candidate-synthesis.test.mjs pins. `cadence` (the already-computed
+// explore-exploit-cadence.ts verdict) and `allTasks` (the FULL task list, for real `status` lookups
+// beyond this preflight layer's own "todo"-only eligible pool) are optional so existing call sites
+// that only care about the legacy behavior keep working unchanged.
+export function synthesizeCandidatePortfolio(
+  workspaceRoot: string,
+  entries: CandidateEntry[],
+  cadence: CadenceResult | null = null,
+  allTasks: any[] | null = null,
+): MilestonePortfolio {
   const facts = buildTaskCandidateFacts(workspaceRoot, entries);
   const candidates = synthesizeCandidates(facts, { workspaceRoot });
-  return choosePortfolio(candidates, {}, { generatedAt: new Date(0).toISOString() });
+
+  const constraints: PortfolioConstraints = {};
+
+  // Cadence: identify which, if any, of THIS round's eligible facts count as the explore slot. When
+  // cadence is EXPLORE-DUE and at least one exists, portfolio choice must not let bundling silently
+  // starve it (see portfolio-choice.ts's CadenceConstraint).
+  const exploreTaskIds = facts.filter(isExploreTask).map((f) => f.id);
+  if (cadence && exploreTaskIds.length > 0) {
+    constraints.cadence = { verdict: cadence.verdict, exploreTaskIds };
+  }
+
+  // Dependency: cross-candidate `dependsOn` targets are checked against real task status (from the
+  // full task list when given) so a dependency already `done` is correctly treated as resolved even
+  // though `entries`/`facts` only ever carry "todo" eligible candidates.
+  const dependsOnById = new Map(facts.map((f) => [f.id, f.dependsOn]));
+  const statusById = new Map<string, string>();
+  if (Array.isArray(allTasks)) {
+    for (const t of allTasks) {
+      if (t && typeof t.id === "string" && typeof t.status === "string") statusById.set(t.id, t.status);
+    }
+  }
+  for (const f of facts) if (!statusById.has(f.id)) statusById.set(f.id, f.status);
+  constraints.dependency = { dependsOnById, statusById };
+
+  return choosePortfolio(candidates, constraints, { generatedAt: new Date(0).toISOString() });
 }
 
 // ── buildPreflightResult ──────────────────────────────────────────────────────────────────────────
@@ -572,8 +606,10 @@ export function buildPreflightResult(workspaceRoot: string, milestoneCounter: nu
 
   // 10. M188/DIR-119-A Stage 1.6: synthesize singleton + composite MilestoneCandidate shapes and
   // choose a portfolio — BEFORE final (legacy) candidate truncation happens downstream in the
-  // OUTER-LOOP workflow wrapper. Additive: `candidates` above is completely unchanged.
-  const portfolio = synthesizeCandidatePortfolio(workspaceRoot, autonomousCandidates);
+  // OUTER-LOOP workflow wrapper. Additive: `candidates` above is completely unchanged. Passes the
+  // already-computed `cadence` verdict and the FULL task list (for real status-aware dependency
+  // resolution) — AC5 follow-up (cadence + inter-candidate dependency constraints).
+  const portfolio = synthesizeCandidatePortfolio(workspaceRoot, autonomousCandidates, cadence, tasks);
 
   return {
     halt: haltCheck.halt,

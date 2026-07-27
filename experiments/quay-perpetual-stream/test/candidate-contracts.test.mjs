@@ -12,6 +12,7 @@ import {
   SUPPORTING_KINDS,
   isProhibiting,
   isSupporting,
+  isExploreTask,
   makeSingletonCandidate,
   normalizeLegacyCall,
   selftest,
@@ -79,4 +80,15 @@ test("normalizeLegacyCall: compatibility invariant #2 — legacy {taskId,...} no
 test("normalizeLegacyCall: an empty/missing taskId throws rather than silently producing an empty array", () => {
   assert.throws(() => normalizeLegacyCall({ taskId: "" }));
   assert.throws(() => normalizeLegacyCall({}));
+});
+
+// ── isExploreTask (M188/DIR-119-A AC5 follow-up: cadence input) ────────────────────────────────────
+test("isExploreTask: matches an id containing 'explore', the arch-audit-explore pattern, or label:explore", () => {
+  assert.equal(isExploreTask({ id: "exp5-M-EXPLORE-FOO", labels: [] }), true);
+  assert.equal(isExploreTask({ id: "exp5-M-ARCH-AUDIT-M133-EXPLORE", labels: [] }), true);
+  assert.equal(isExploreTask({ id: "DIR-999", labels: ["explore"] }), true);
+});
+
+test("isExploreTask: false for an ordinary task with no explore signal", () => {
+  assert.equal(isExploreTask({ id: "DIR-119-A", labels: ["milestone-candidate"] }), false);
 });

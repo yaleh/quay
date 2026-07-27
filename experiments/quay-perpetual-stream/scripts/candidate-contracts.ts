@@ -77,6 +77,18 @@ export function isEligibleFact(tc: Pick<TaskCandidate, "eligible">): boolean {
   return tc.eligible === true;
 }
 
+// ── isExploreTask (M188/DIR-119-A AC5 follow-up: cadence input) ───────────────────────────────────
+// Single-source recognizer for "this task counts as an explore slot for cadence purposes" — matches
+// explore-exploit-cadence.ts's OWN heuristic (task-id contains "explore", or the mandatory
+// architecture-audit-explore pattern) plus an explicit `label:explore`, so candidate-synthesis.ts /
+// portfolio-choice.ts and their tests share ONE definition rather than re-deriving the pattern.
+export function isExploreTask(tc: Pick<TaskCandidate, "id" | "labels">): boolean {
+  const id = tc.id ?? "";
+  if (id.toLowerCase().includes("explore")) return true;
+  if (/arch.*audit.*explore/i.test(id)) return true;
+  return Array.isArray(tc.labels) && tc.labels.some((l) => typeof l === "string" && l.toLowerCase() === "explore");
+}
+
 // ── CouplingEdge (plan doc §3.2) ───────────────────────────────────────────────────────────────────
 export interface CouplingEdge {
   a: string;
@@ -241,6 +253,11 @@ export function selftest(): boolean {
     threw = true;
   }
   check("normalize-legacy-call-empty-taskid-throws", threw, "empty taskId must throw, never silently produce []");
+
+  check("isExploreTask-matches-explore-in-id", isExploreTask({ id: "exp5-M-EXPLORE-FOO", labels: [] }), "id contains 'explore'");
+  check("isExploreTask-matches-arch-audit-explore-id", isExploreTask({ id: "exp5-M-ARCH-AUDIT-M133-EXPLORE", labels: [] }), "arch-audit-explore id pattern");
+  check("isExploreTask-matches-explore-label", isExploreTask({ id: "DIR-999", labels: ["explore"] }), "label:explore");
+  check("isExploreTask-false-on-ordinary-task", isExploreTask({ id: "DIR-119-A", labels: ["milestone-candidate"] }) === false, "ordinary task is not an explore task");
 
   console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
   return allPassed;
