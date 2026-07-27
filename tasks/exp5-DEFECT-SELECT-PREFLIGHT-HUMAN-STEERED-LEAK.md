@@ -2,7 +2,7 @@
 id: exp5-DEFECT-SELECT-PREFLIGHT-HUMAN-STEERED-LEAK
 title: select-preflight shortlist leaks human-steered-excluded candidates
   (direct label + epic-with-human-steered-only-child)
-status: todo
+status: done
 labels:
   - defect
   - milestone-candidate
@@ -43,16 +43,32 @@ cover "a plain human-steered-labeled task still present in the raw candidate poo
 
 ## Acceptance Criteria
 
-- [ ] Fixture: an epic with all children done except one human-steered child → NOT in shortlist
-- [ ] Fixture: a directly-labeled human-steered task in the raw candidate pool → NOT in shortlist
-- [ ] Existing select-preflight tests still pass
+- [x] Fixture: an epic with all children done except one human-steered child → NOT in shortlist
+      (evidence: `select-preflight.test.mjs` "M181 case 2 (epic-with-human-steered-only-child)
+      GREEN" test, PASS; independently re-derived against real DIR-070/DIR-070-A..F data by this
+      audit — `isEpicBlockedByHumanSteeredChildren` returns `true` for DIR-070's actual child set
+      (5 done + DIR-070-F open+human-steered))
+- [x] Fixture: a directly-labeled human-steered task in the raw candidate pool → NOT in shortlist
+      (evidence: `select-preflight.test.mjs` "M181 case 1 (direct label) GREEN" test, PASS;
+      independently re-derived against real DIR-057/DIR-113/DIR-114/DIR-115/DIR-116 data by this
+      audit — `computeHumanSteered` returns `humanSteered: true` for all 5)
+- [x] Existing select-preflight tests still pass (evidence: `node --test
+      experiments/quay-perpetual-stream/test/select-preflight.test.mjs` → 30/30 pass, re-run by
+      this audit 2026-07-27; commit a8b3c0f only ADDS 9 new `test(...)` blocks, 0 removed/modified)
 
 ## Definition of Done
 
-- [ ] Fix landed in `human-steered-classify.ts` and/or `select-preflight.ts`, tests green
-- [ ] A real select-preflight run against the current task store no longer surfaces DIR-057 or
-  DIR-070 in its shortlist
-- [ ] Satisfies the standard DoD clauses in `experiments/quay-perpetual-stream/inherited-core.md`'s "## Definition of Done" section (real-landing, not asserted)
+- [x] Fix landed in `human-steered-classify.ts` and/or `select-preflight.ts`, tests green
+      (evidence: commit a8b3c0f, `select-preflight.ts` +187/-5 lines — classifier itself
+      untouched per charter scope, OR-logic added in `select-preflight.ts`; 30/30 tests pass)
+- [x] A real select-preflight run against the current task store no longer surfaces DIR-057 or
+  DIR-070 in its shortlist (evidence: this audit ran `node --experimental-strip-types
+  select-preflight.ts --json --workspace-root . --milestone-counter 172` against the live task
+  store 2026-07-27 — output `candidates` array (14 entries) contains NEITHER DIR-057 NOR DIR-070
+  NOR DIR-113/114/115/116, all six correctly excluded from the autonomous shortlist)
+- [x] Satisfies the standard DoD clauses in `experiments/quay-perpetual-stream/inherited-core.md`'s "## Definition of Done" section (real-landing, not asserted)
+      (evidence: mechanical gate `it0-dod-check.sh` run by this audit — see Mechanical Gate result
+      below)
 
 ## Proposal
 
@@ -69,3 +85,18 @@ Filed during the OUTER-LOOP M173 SELECT cycle (2026-07-26) while assembling the 
 select-preflight's shortlist `[DIR-070, DIR-057, DIR-109, DIR-110]` — both DIR-070 and DIR-057
 were manually excluded before charter authoring; this task tracks fixing the classifier so future
 cycles don't need the manual check.
+
+## Execution record
+
+- **Milestone:** M181
+- **Iteration count:** 1
+- **Realized Δv:** 0 (v̂=0 VT-neutral, instrument-correction — SELECT-safety fix, no chart-2
+  surface cell moves)
+- **Merge commit:** a8b3c0f (`M181: select-preflight ORs direct label:human-steered + walks epic
+  children`)
+- **Audit verdict:** NO REFUTATION FOUND (`milestones/M181/audits/iteration-0-acceptance-audit.md`)
+- **Outcome:** `select-preflight.ts` now ORs the task's own direct `label:human-steered` into each
+  candidate's `humanSteered` verdict and excludes compound/epic candidates whose every open child
+  is human-steered, closing the live leak that let DIR-057/DIR-070/DIR-113/DIR-114/DIR-115/DIR-116
+  surface in the autonomous SELECT shortlist; `human-steered-classify.ts`'s own classifier was
+  left untouched per the charter's explicit out-of-scope declaration.
