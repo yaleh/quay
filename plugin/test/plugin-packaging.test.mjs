@@ -211,7 +211,9 @@ test('M136 (DIR-070-A): sync-vendor.sh --check dynamic scanning verifies all man
   const okCount = (result.match(/OK \(identical\): scripts\//g) || []).length;
   // M188/DIR-119-A: +5 (candidate-contracts, coupling-graph, candidate-synthesis, portfolio-choice,
   // preparation-feedback) added to sync-vendor.sh's SYNC_SCRIPTS array, 7 -> 12.
-  assert.equal(okCount, 12, '--check must report exactly 12 identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array)');
+  // M189/DIR-119-B: +7 (composite-args, composite-contracts, composite-build, composite-audit,
+  // composite-reconcile, composite-land, composite-preflight) added, 12 -> 19.
+  assert.equal(okCount, 19, '--check must report exactly 19 identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array)');
 });
 
 test('routines skill (M140) has zero experiment-layer references', () => {

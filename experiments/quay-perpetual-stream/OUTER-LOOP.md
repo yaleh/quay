@@ -99,6 +99,17 @@ execute(params) where |batch|=1 = invoke(".claude/workflows/execute-milestone.js
      + dashboard update + milestone_counter++)
   ⊨ phases cached; resumable within session
   ⊨ serial path (1-wide) — preserved unchanged; counter++ + dashboard inline
+  ⊨ DIR-119-B (M189, Phase 2 of O4): execute-milestone.js ALSO accepts an arbitrary-width
+     {milestoneCandidate:{taskIds,...}, compositeManifestFile, charterFile, absorbEntryFile} shape
+     (a synthesized DIR-119-A MilestoneCandidate) — normalized to the SAME internal taskIds array
+     legacy {taskId,...} calls produce (composite-args.ts's normalizeExecuteArgs; NEVER rejected on
+     array length). Verify gains a 6th mechanical check, composite-preflight.ts, that re-validates
+     normalization plus (only when compositeManifestFile is given) the phase-DAG/audit-shard/
+     capacity/atomic-Land composite contract (composite-contracts.ts). Build/Audit/Gate/Land stay
+     conservatively single-lead-oriented for THIS first implementation (task-scoped gates run per
+     member; Land marks every member task but performs exactly ONE counter increment + ONE
+     dashboard entry regardless of width — composite-build/audit/reconcile/land.ts). A real cold
+     multi-task exercise of this path is explicitly DIR-119-C's job, not self-certified here.
 
 dispatch :: Batch → Action
 dispatch(batch) =

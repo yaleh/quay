@@ -1,8 +1,8 @@
 export const meta = {
   name: 'execute-milestone',
-  description: 'Given a SELECTed milestone task, run the full execution pipeline: it0 checks → inner iteration build → adversarial audit → absorb gates → land. Replaces OUTER-LOOP.md steps 4–7 (DIR-067, 2026-07-24). Returns {outcome: "done"|"needs-human"|"building"} — "building" means a background task was dispatched; the caller polls and resumes.',
+  description: 'Given a SELECTed milestone task, run the full execution pipeline: it0 checks → inner iteration build → adversarial audit → absorb gates → land. Replaces OUTER-LOOP.md steps 4–7 (DIR-067, 2026-07-24). Accepts both legacy {taskId,...} and DIR-119-B (M189) arbitrary-width {milestoneCandidate:{taskIds,...}, compositeManifestFile,...} argument shapes, normalized to one internal task array (never rejected on array length) — see composite-args.ts/composite-contracts.ts. Returns {outcome: "done"|"needs-human"|"building"} — "building" means a background task was dispatched; the caller polls and resumes.',
   phases: [
-    { title: 'Verify', detail: 'Step 4 — run all 5 it0 systematic-explore checks' },
+    { title: 'Verify', detail: 'Step 4 — run all 5 it0 systematic-explore checks + composite-preflight (DIR-119-B)' },
     { title: 'Build',  detail: 'Step 5 — class-route + dispatch inner iteration agent' },
     { title: 'Audit',  detail: 'Step 6 — adversarial fresh-context acceptance audit' },
     { title: 'Gate',   detail: 'Step 6 — all absorb-phase mechanical gate checks' },
@@ -14,6 +14,51 @@ export const meta = {
 // string rather than the parsed object its contract promises "verbatim" — normalize once,
 // up front, and read everything through `$a` below (no bare `args` field access past this point).
 const $a = (typeof args === 'string') ? JSON.parse(args) : args
+
+// DIR-119-B (M189) Stage 2.1: accept BOTH the legacy `{taskId, charterFile, absorbEntryFile}`
+// shape AND the new `{milestoneCandidate:{taskIds,...}, compositeManifestFile,...}` shape,
+// normalized to one non-empty internal task array. This inline mirror exists because workflow
+// DSL scripts have no `import` capability (only phase/agent/parallel/log/args globals) — the
+// CANONICAL, unit-tested logic lives in composite-args.ts; the Verify-phase 'composite-preflight'
+// check below re-runs that SAME canonical logic server-side as the authoritative check. This
+// inline copy exists only to compute `_taskIds`/`_primaryTaskId` for prompt interpolation and to
+// fail fast before any agent dispatch. NEVER reject on array length — 1, 3, 5, 10, or wider are
+// all equally valid (Done-when clause 1).
+function _normalizeExecuteArgsInline(raw) {
+  const hasLegacy = typeof raw.taskId === 'string' && raw.taskId.length > 0
+  const hasNew = raw.milestoneCandidate != null && typeof raw.milestoneCandidate === 'object'
+  if (!hasLegacy && !hasNew) return { error: 'missing-task-identity' }
+  if (hasLegacy && hasNew) {
+    const candIds = Array.isArray(raw.milestoneCandidate.taskIds) ? raw.milestoneCandidate.taskIds : []
+    const agrees = candIds.length === 1 && candIds[0] === raw.taskId
+    if (!agrees) return { error: 'conflicting-legacy-and-new-args' }
+  }
+  if (hasNew) {
+    const taskIds = raw.milestoneCandidate.taskIds
+    if (!Array.isArray(taskIds) || taskIds.length === 0) return { error: 'empty-task-array' }
+    for (const id of taskIds) if (typeof id !== 'string' || id.length === 0) return { error: 'invalid-task-id' }
+    if (new Set(taskIds).size !== taskIds.length) return { error: 'duplicate-task-id' }
+    return { taskIds, isComposite: true }
+  }
+  return { taskIds: [raw.taskId], isComposite: false }
+}
+const _normResult = _normalizeExecuteArgsInline($a)
+if (_normResult.error) {
+  return { outcome: 'needs-human', reason: `arg-normalization-failed: ${_normResult.error}`, phase: 'Verify' }
+}
+const _taskIds = _normResult.taskIds
+const _isComposite = _normResult.isComposite
+// `_primaryTaskId` is IDENTICAL to the legacy `$a.taskId` for every pre-existing single-task
+// call (golden replay preserved); for a genuine composite call it is the first member — the
+// rest of this first implementation's Build/Audit/Gate/Land prompts stay conservatively
+// single-lead-oriented per the milestone's own scope note ("first implementation MAY serialize
+// all phases through one Build lead"), while the composite-preflight check + composite-*.ts
+// modules already carry the arbitrary-width CONTRACT. Real multi-task operational proof is
+// DIR-119-C's job, not self-certified here.
+const _primaryTaskId = _taskIds[0]
+if (_isComposite) {
+  log(`Composite call: ${_taskIds.length} member tasks [${_taskIds.join(', ')}] — this first implementation drives Build/Audit/Gate/Land through the primary task ${_primaryTaskId}; full membership is threaded through for evidence/Land marking.`)
+}
 
 // ── Phase: Verify (step 4) ──────────────────────────────────────────────────────────
 phase('Verify')
@@ -48,6 +93,11 @@ const _cachedGateHash      = _cached('gate-hash')
 const _cachedLineBudget    = _cached('line-budget')
 const _cachedDogfood       = _cached('dogfood-evidence')
 const _cachedDomainMisfit  = _cached('domain-misfit')
+const _cachedComposite     = _cached('composite-preflight')
+
+// DIR-119-B (M189): JSON-encode $a once for the composite-preflight check's --args-json,
+// shell-escaped for single-quote embedding.
+const _argsJsonEscaped = JSON.stringify($a).replace(/'/g, `'\\''`)
 
 // Schema for mechanical check results
 const MECH_SCHEMA = { type: 'object', required: ['check', 'ok'], properties: {
@@ -75,8 +125,12 @@ const _dispatchList = [
     { label: 'dogfood-evidence', schema: MECH_SCHEMA }
   ) : null,
   !_cachedDomainMisfit  ? () => agent(
-    `Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to milestone task ${$a.taskId}'s Done-when list (charter: ${$a.charterFile}). Return {ok: true, step3conclusion} — ok indicates the check completed (always true when the procedure was applied); step3conclusion records whether a misfit was found. This check is INFORMATIONAL, never blocking.`,
+    `Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to milestone task ${_primaryTaskId}'s Done-when list (charter: ${$a.charterFile}). Return {ok: true, step3conclusion} — ok indicates the check completed (always true when the procedure was applied); step3conclusion records whether a misfit was found. This check is INFORMATIONAL, never blocking.`,
     { label: 'domain-misfit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, step3conclusion: { type: 'string' } } } }
+  ) : null,
+  !_cachedComposite     ? () => agent(
+    `Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/composite-preflight.ts --args-json '${_argsJsonEscaped}'. This is DIR-119-B's (M189) Stage 2.1/2.2 mechanical check: it re-validates argument normalization (legacy {taskId,...} OR new {milestoneCandidate:{taskIds,...}, compositeManifestFile,...} — NEVER rejected on task-array length) and, ONLY when a compositeManifestFile is present, the composite contract (membership/AC-phase-audit coverage/acyclic phase DAG/union touches+semantic-resources/forbidden-temporal-edge exclusion/capacity/atomic Land). A legacy single-task call or a new-shape call with no manifest file is a VACUOUS PASS (golden replay for the pre-existing path is unaffected). Non-zero exit = normalization or contract failure — paste the JSON stdout. Return {check:"composite-preflight",ok:<exit===0>,detail:"<stdout>",source:"script"}.`,
+    { label: 'composite-preflight', schema: MECH_SCHEMA }
   ) : null,
 ].filter(Boolean)
 
@@ -99,6 +153,7 @@ const _ceiling   = _cachedCeiling   || _fresh['ceiling-check']
 const _gateHash  = _cachedGateHash  || _fresh['gate-hash']
 const _lineBgt   = _cachedLineBudget|| _fresh['line-budget']
 const _dogfood   = _cachedDogfood   || _fresh['dogfood-evidence']
+const _composite = _cachedComposite || _fresh['composite-preflight']
 
 // Domain-misfit: transform raw agent result to unified shape (handles both cached and fresh)
 function _unifyDm(raw) {
@@ -108,7 +163,7 @@ function _unifyDm(raw) {
 }
 const _dmEntry = _unifyDm(_cachedDomainMisfit) || _unifyDm(_fresh['domain-misfit'])
 
-const allVerifyResults = [_ceiling, _gateHash, _lineBgt, _dogfood, _dmEntry].filter(Boolean)
+const allVerifyResults = [_ceiling, _gateHash, _lineBgt, _dogfood, _dmEntry, _composite].filter(Boolean)
 
 // ── Build cache updates for caller to persist across invocations ──
 let verifyCacheUpdates = {}
@@ -118,8 +173,8 @@ for (const r of allVerifyResults) {
 }
 
 // A null/missing result for an uncached check means the agent crashed — treat as failure (fail-closed).
-const scriptCount = [_ceiling, _gateHash, _lineBgt, _dogfood].filter(Boolean).length
-const verifyFailed = allVerifyResults.length < 5 || allVerifyResults.some(c => !c.ok)
+const scriptCount = [_ceiling, _gateHash, _lineBgt, _dogfood, _composite].filter(Boolean).length
+const verifyFailed = allVerifyResults.length < 6 || allVerifyResults.some(c => !c.ok)
 if (verifyFailed) {
   log(`Verify phase FAILED — ${allVerifyResults.filter(c => !c.ok).map(c => c.check).join(', ')} did not pass. Journal: ${JSON.stringify(allVerifyResults)}`)
   return { outcome: 'needs-human', reason: 'it0-checks-failed', phase: 'Verify', verifyJournal: allVerifyResults, verifyCacheUpdates }
@@ -129,13 +184,13 @@ log(`Verify phase PASSED — all ${allVerifyResults.length} it0 checks green (${
 // ── Phase: Build (step 5) ───────────────────────────────────────────────────────────
 phase('Build')
 const buildResult = await agent(
-    `BUILD the inner iteration for milestone task ${$a.taskId}. DO THE ACTUAL WORK — you are the build executor, not a dispatcher.
+    `BUILD the inner iteration for milestone task ${_primaryTaskId}. DO THE ACTUAL WORK — you are the build executor, not a dispatcher.
 
 Charter file: ${$a.charterFile}
 Absorb entry path: ${$a.absorbEntryFile}
 
 1. PRE-FLIGHT: ensure extra.acceptance is set on the task via task_write:
-   extra.acceptance = "bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${$a.taskId} ${$a.charterFile} ${$a.absorbEntryFile}"
+   extra.acceptance = "bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${_primaryTaskId} ${$a.charterFile} ${$a.absorbEntryFile}"
 
 1a. BACKLOG-ROW SURFACE TAG (gap-absorb-entry-clause-disposition-sequencing / M180, it0-dod-check.ts
     clause7): read \`${$a.absorbEntryFile}\`'s \`## Backlog row\` pipe-delimited line. If it has NO
@@ -145,7 +200,7 @@ Absorb entry path: ${$a.absorbEntryFile}
     \`packages/quay*\` product code. Never fabricate — pick the label(s) that actually match the
     Touches list. If the row already carries an accurate \`surface:\` token, leave it as-is.
 
-2. CLASS-ROUTE: This is a development-class task (capability-growth). Read the task body and charter, then implement each item in the Done-when list.
+2. CLASS-ROUTE: This is a development-class task (capability-growth). Read the task body and charter, then implement each item in the Done-when list.${_isComposite ? `\n\n2a. COMPOSITE BUILD (DIR-119-B/M189, ${_taskIds.length} member tasks: ${_taskIds.join(', ')}): consume the checked phase DAG (composite-contracts.ts) rather than treating this as ${_taskIds.length} independent single-task builds — a shared/overlapping phase has exactly ONE owner (composite-build.ts's planPhaseExecution), and the first implementation MAY serialize all phases through you as the one Build lead if parallel dispatch is unavailable. Whatever you do, map files/commits/tests/evidence back to BOTH tasks AND phases in the iteration report (composite-build.ts's mapEvidenceToTasks shape) — task count must never be reported as 1:1 with agent count.` : ''}
 
 3. IMPLEMENT: Make the actual code changes needed to satisfy all AC and Done-when clauses. For each:
    - Edit/create files as needed
@@ -181,10 +236,10 @@ Return {taskId, outcome: "done", iterationCount, mergeCommit: "<short-sha>"} on 
 // ── Phase: Audit (step 6 acceptance audit) ──────────────────────────────────────────
 phase('Audit')
 const auditResult = await agent(
-  `ADVERSARIAL ACCEPTANCE AUDIT for milestone task ${$a.taskId}. FRESH CONTEXT — you have NOT seen the build.
+  `ADVERSARIAL ACCEPTANCE AUDIT for milestone task ${_primaryTaskId}. FRESH CONTEXT — you have NOT seen the build.${_isComposite ? ` COMPOSITE CALL (DIR-119-B/M189): ${_taskIds.length} member tasks [${_taskIds.join(', ')}] — apply the same refute-first AC/DoD audit to EVERY member task's own file, not just ${_primaryTaskId} (step 1/1a below applies per-task). Beyond the per-task AC/DoD checklist write-back this shared audit agent already performs (unchanged, legacy behavior), it must never write absorb dispositions, dashboard entries, the milestone counter, or any lifecycle STATUS field for any member task — that mutation is Land's job below (composite-audit.ts's stricter shard-level read-only boundary is the target architecture once DIR-119-C wires a real per-shard dispatcher).` : ''}
 
 CHARGE (refute-first stance):
-1. AC SATISFACTION: read the task file tasks/${$a.taskId}.md's ## Acceptance Criteria.
+1. AC SATISFACTION: read the task file tasks/${_primaryTaskId}.md's ## Acceptance Criteria.
    For EACH criterion, try to REFUTE that it is actually met — citing the concrete
    artifact/test output/diff, NOT the implementer's self-report. Any AC you cannot
    confirm → REFUTED.
@@ -206,7 +261,7 @@ CHARGE (refute-first stance):
         — then append a line containing \`V_meta consolidation-lag: <verbatim reason/verdict text
         from that command's own output>\`. Copy the script's actual reason text; do not paraphrase
         or invent a "clear" result if the script did not say so.
-3. MECHANICAL GATE: run experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${$a.taskId} ${$a.charterFile}
+3. MECHANICAL GATE: run experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${_primaryTaskId} ${$a.charterFile}
    ${$a.absorbEntryFile}. Non-zero exit = REFUTED by construction.
 4. DEVIATION-LOG WRITE-BACK (DIR-017 Step 3 / M36): if you find a REFUTED or CONCERNS,
    write a deviation row to dashboard.md's "Homeostatic variables (DIR-017 Step 3)" table:
@@ -247,6 +302,13 @@ if (AUDIT_SESSION_ID) {
 
 // ── Phase: Gate (step 6 all mechanical checks) ──────────────────────────────────────
 phase('Gate')
+// DIR-119-B (M189) Stage 2.5: the task-scoped split-or-commit gate runs for EVERY member task
+// (not just the primary) — for a legacy single-task call (_taskIds.length===1) this is
+// byte-for-behavior identical to the pre-existing single gate call (same label, same command).
+const _splitOrCommitGates = _taskIds.map((tid) => () => agent(
+  `Run quay gate --gate split-or-commit ${tid}. Return {ok, detail}. Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK.`,
+  { label: _isComposite ? `split-or-commit-${tid}` : 'split-or-commit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } },
+))
 const gates = await parallel([
   () => agent(`Run vmeta-lag-check.sh --counter <extract current milestone_counter from experiments/quay-perpetual-stream/dashboard.md minus 1> experiments/quay-perpetual-stream/v-meta-ledger.md. This reads the V_meta ledger (NOT the absorb entry). Return {ok, detail}. Non-zero = ALARM → HARD BLOCK.`,
     { label: 'vmeta-lag', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
@@ -256,15 +318,14 @@ const gates = await parallel([
     { label: 'tree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   () => agent(`Run worktree-branch-hygiene-check.sh. Return {ok, detail}. Non-zero = orphaned milestone evidence → HARD BLOCK.`,
     { label: 'worktree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`Run quay gate --gate split-or-commit ${$a.taskId}. Return {ok, detail}. Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK.`,
-    { label: 'split-or-commit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
+  ..._splitOrCommitGates,
 ])
 
 const gatesFailed = gates.filter(Boolean).some(g => !g.ok)
 if (gatesFailed) {
   log('Gate phase FAILED — one or more mechanical gates did not pass. Marking needs-human.')
   await agent(
-    `Mark task ${$a.taskId} needs-human. Record which gates failed and why in the ABSORB entry at ${$a.absorbEntryFile}. Gates: ${JSON.stringify(gates.filter(Boolean))}`,
+    `Mark task ${_primaryTaskId} needs-human. Record which gates failed and why in the ABSORB entry at ${$a.absorbEntryFile}. Gates: ${JSON.stringify(gates.filter(Boolean))}`,
     { label: 'mark-needs-human', phase: 'Land' }
   )
   return { outcome: 'needs-human', reason: 'gate-failed', phase: 'Gate', verifyCacheUpdates }
@@ -281,18 +342,28 @@ if (auditResult?.verdict === 'CONCERNS') {
 if (auditResult?.verdict === 'REFUTED') {
   log('Audit REFUTED — cannot land. Marking needs-human.')
   await agent(
-    `Mark task ${$a.taskId} needs-human with reason: audit REFUTED — ${auditResult?.detail}. VERIFY the needs-human reason is EXTERNAL (outside project control: external service/resource/credential/dataset/upstream) — if it is an IN-PROJECT reason (architecture mismatch, complexity, scope, "too hard"), that is a SPLIT-OR-COMMIT violation (DIR-026/Clause 9). Record needs-human with the audited reason in the ABSORB entry.`,
+    `Mark task ${_primaryTaskId} needs-human with reason: audit REFUTED — ${auditResult?.detail}. VERIFY the needs-human reason is EXTERNAL (outside project control: external service/resource/credential/dataset/upstream) — if it is an IN-PROJECT reason (architecture mismatch, complexity, scope, "too hard"), that is a SPLIT-OR-COMMIT violation (DIR-026/Clause 9). Record needs-human with the audited reason in the ABSORB entry.`,
     { label: 'mark-needs-human-refuted' }
   )
   return { outcome: 'needs-human', reason: 'audit-refuted', phase: 'Land', verifyCacheUpdates }
 }
+
+// DIR-119-B (M189) Stage 2.6: atomic-Land note threaded into both Land prompts below. For a
+// legacy single-task call (_isComposite===false) this is empty — behavior is byte-for-behavior
+// unchanged (golden replay). For a genuine composite call, instruct the agent to apply
+// composite-land.ts's invariant: mark EVERY member task consistently, but still exactly ONE
+// milestone_counter increment and ONE dashboard entry regardless of task count (never one
+// increment/entry per task) — task-completion count is recorded separately from the counter.
+const _compositeLandNote = _isComposite
+  ? `\n\nCOMPOSITE LAND (DIR-119-B/M189, ${_taskIds.length} member tasks: ${_taskIds.join(', ')}): mark ALL of [${_taskIds.join(', ')}] status:done with their own Execution record write-back — NOT just ${_primaryTaskId}. Regardless of member count, this Land step still performs EXACTLY ONE milestone_counter increment and writes EXACTLY ONE dashboard log entry (composite-land.ts's atomic-Land invariant) — record task-completion count (${_taskIds.length}) separately in that one entry, never as N separate entries or N separate counter bumps.`
+  : ''
 
 const IS_CONCURRENT = $a.mode === 'concurrent'
 
 // ── Concurrent path (DIR-075/M142): defers shared-state writes to fan-in ──────────
 if (IS_CONCURRENT) {
   const concurrentResult = await agent(
-    `LAND (concurrent mode) the milestone for task ${$a.taskId}. IN CONCURRENT MODE:
+    `LAND (concurrent mode) the milestone for task ${_primaryTaskId}. IN CONCURRENT MODE:
    you are part of a multi-milestone batch — do NOT update milestone_counter or dashboard.md
    (those writes are deferred to the serial fan-in absorb step that follows).
 
@@ -312,7 +383,7 @@ if (IS_CONCURRENT) {
    series — no manual sweep needed afterward. THEN PRUNE (DIR-033): if a non-primary iteration ALSO
    produced evidence not on master, cherry-pick JUST that evidence file. Then git worktree remove +
    git branch -d the now-merged branches.
-3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${$a.taskId}.md
+3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${_primaryTaskId}.md
    appending a ## Execution record section (milestone id, iteration count, realized Δv,
    merge commit SHA, one-line outcome summary) and setting status: done.
 4. COMPUTE touchedFiles: run \`git diff --numstat <merge-base>..<build-branch>\` to get the
@@ -320,14 +391,14 @@ if (IS_CONCURRENT) {
    or the commit recorded in the build result (${
      buildResult?.mergeCommit ? buildResult.mergeCommit : 'from Build phase'
    }). Collect the changed file paths (column 3 of numstat output) into a flat array.
-5. DRAFT a one-line dashboard entry for this milestone: "m<NN> · ${$a.taskId} · Δv=<realized> ·
-   audit=${auditResult?.verdict || 'NO REFUTATION FOUND'} · merge=<SHORT sha> · → milestones/<NN>/"
+5. DRAFT a one-line dashboard entry for this milestone: "m<NN> · ${_primaryTaskId} · Δv=<realized> ·
+   audit=${auditResult?.verdict || 'NO REFUTATION FOUND'} · merge=<SHORT sha> · → milestones/<NN>/"${_compositeLandNote}
 
 Charter: ${$a.charterFile}
 Build outcome: ${JSON.stringify(buildResult)}
 Audit verdict: ${auditResult?.verdict}
 
-Return {taskId: "${$a.taskId}", outcome: "done", mergeCommit: "<40-char SHA>",
+Return {taskId: "${_primaryTaskId}", outcome: "done", mergeCommit: "<40-char SHA>",
   touchedFiles: ["relative/path/to/file1.ts", ...],
   dashboardEntry: "<markdown block for serial-fanin-absorb.ts>"}.`,
     { phase: 'Land',
@@ -338,14 +409,14 @@ Return {taskId: "${$a.taskId}", outcome: "done", mergeCommit: "<40-char SHA>",
         dashboardEntry: { type: 'string' },
       } } }
   )
-  log(`Land phase complete (concurrent) — milestone ${$a.taskId} done, touched ${(concurrentResult?.touchedFiles || []).length} files.`)
-  return { outcome: 'done', taskId: $a.taskId, mergeCommit: concurrentResult?.mergeCommit,
+  log(`Land phase complete (concurrent) — milestone ${_primaryTaskId} done, touched ${(concurrentResult?.touchedFiles || []).length} files.`)
+  return { outcome: 'done', taskId: _primaryTaskId, taskIds: _taskIds, mergeCommit: concurrentResult?.mergeCommit,
     touchedFiles: concurrentResult?.touchedFiles, dashboardEntry: concurrentResult?.dashboardEntry, verifyCacheUpdates }
 }
 
 // ── Serial path (default): existing behavior unchanged — inline counter++ and dashboard ─
 await agent(
-  `LAND the milestone for task ${$a.taskId}.
+  `LAND the milestone for task ${_primaryTaskId}.
 
 1. MERGE the iteration worktree into master (DIR-027: loop runs on master directly).
    Any conflict → per-file resolution, both sides read, reconciliation note recorded.
@@ -371,12 +442,12 @@ await agent(
 5. REGENERATE backlog.md/dashboard.md views via experiments/quay-perpetual-stream/scripts/it0-backlog-regen.ts.
 6. RUN tree-hygiene-check.sh and worktree-branch-hygiene-check.sh one final time
    to confirm the close-out is clean. Paste results.
-7. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${$a.taskId}.md
+7. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${_primaryTaskId}.md
    appending a ## Execution record section (milestone id, iteration count, realized Δv,
    merge commit SHA, one-line outcome summary) and setting status: done.
 8. PHI CONSOLIDATION CHECK: if a prior adaptation was REUSED UNCHANGED by THIS
    (different-domain) milestone, consolidate it into inherited-core.md and retire
-   its citation (§4.2).
+   its citation (§4.2).${_compositeLandNote}
 
 Charter: ${$a.charterFile}
 Absorb entry: ${$a.absorbEntryFile}
@@ -391,5 +462,5 @@ Return {taskId, outcome: 'done', mergeCommit, milestoneCounter}.`,
     } } }
 )
 
-log(`Land phase complete — milestone ${$a.taskId} done.`)
-return { outcome: 'done', taskId: $a.taskId, verifyCacheUpdates }
+log(`Land phase complete — milestone ${_primaryTaskId} done.`)
+return { outcome: 'done', taskId: _primaryTaskId, taskIds: _taskIds, verifyCacheUpdates }

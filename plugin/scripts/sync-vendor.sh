@@ -157,6 +157,13 @@ SYNC_SCRIPTS=(
   candidate-synthesis
   portfolio-choice
   preparation-feedback
+  composite-args
+  composite-contracts
+  composite-build
+  composite-audit
+  composite-reconcile
+  composite-land
+  composite-preflight
 )
 
 if $CHECK_MODE; then
