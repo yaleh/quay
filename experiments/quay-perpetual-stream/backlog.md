@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| DIR-119-B | Execute arbitrary-width composite milestones through phase DAGs, read-only audit shards, deterministic reconcile, and atomic Land | DONE | - | milestone-candidate, human-steered |
 | DIR-119-A | Make SELECT synthesize and choose singleton/composite MilestoneCandidates from a task coupling graph | DONE | - | milestone-candidate, human-steered |
 | gap-halt-sentinel-path-mismatch | CLAUDE.md/restart-readiness-check.sh incorrectly documented .halt at experiments/quay-perpetual-stream/ — the real, product-wide convention (select-preflight.ts + plugin/skills/loop-driver/SKILL.md) is repo-root-relative | DONE | - | gap, defect, human-steered, milestone-candidate |
 | DIR-116 | Tighten concurrent-batch eligibility to require value-type=capability-growth — the one real residual gap from DIR-057 not covered by DIR-066/106/107 | DONE | - | directive, human-steered, milestone-candidate |
@@ -203,7 +204,6 @@ Sort: value-view (DONE/open/STALE, default)
 | DIR-074 | DIR-074: Refactor execute-milestone.js — move Build coordination protocol from agent prompt to script body | open | - | directive, milestone-candidate |
 | gap-orphaned-check-scripts-not-wired | Multiple real, correct check scripts/config sections exist but are never invoked by CI or the loop — a recurring "designed but never wired" pattern | open | - | gap, milestone-candidate |
 | DIR-119-C | Prove SELECT-integrated arbitrary-width composite execution with a cold real generation and a SELECT-synthesized three-or-more-task milestone | open | - | milestone-candidate, human-steered |
-| DIR-119-B | Execute arbitrary-width composite milestones through phase DAGs, read-only audit shards, deterministic reconcile, and atomic Land | open | - | milestone-candidate, human-steered |
 | exp5-ADR-TOOLSEARCH-DEFERRED-SCHEMA-PATTERN | adr-draft: ToolSearch pre-fetch as mandatory first step for deferred tools — load-bearing but undocumented decision | open | - | milestone-candidate |
 | DIR-112 | DIR-112: Parallelize packages/quay/test/cli.test.mjs's 10 independent scenario blocks (async execFile + Promise.all) | open | - | directive, milestone-candidate |
 | DIR-111 | DIR-111: ADR-019 step 3 — explicitly label packaging e2e and browser/agent e2e as NOT covered by the canonical test command | open | - | directive, milestone-candidate |
@@ -227,4 +227,4 @@ Sort: value-view (DONE/open/STALE, default)
 | DIR-055 | meta-cc session-history mining ROUTINE (LOOP-EXECUTABLE): a standing loop-driver routine (via DIR-051/[[DIR-056]]) that periodically dispatches a fresh-context probe which mines the project's Claude Code session history with meta-cc — surfacing recurring design/implementation defects, ADR candidates, and reusable/crystallizable patterns — and FILES them as evidence-backed tasks ROUTED by finding-type behind the quality/dedup/rate gate. The third standing probe (process/provenance axis) alongside self-validation (DIR-052) + architecture-analysis (DIR-053). | SELECTED | - | directive, milestone-candidate, milestone:M-102 |
 | exp5-M-QENG-DOD-DEMO-ONLY | The QENG-5 'exp5 DoD via quay gate' wiring is demo-only (2 fixture tasks, QENG-5-DEMO-PASS/FAIL) — the REAL per-milestone DoD meta-enforcer gate at OUTER-LOOP.md step 6/7 still runs it0-dod-check.sh as a bare prose shell call, not through quay gate; decide whether/how to close that gap | SELECTED | governance-integrity (closes a self-disclosed "shelfware risk" the QENG-0 epic itself named as | milestone-candidate, surface:method-infra, milestone:M37-discover-post-qeng |
 
-_220 milestone-candidate task(s) as of 2026-07-27T11:31:25.559Z._
+_220 milestone-candidate task(s) as of 2026-07-27T13:04:31.087Z._
