@@ -2,7 +2,7 @@
 id: DIR-117-B
 title: Prove the Prepared-gate preparation pipeline via one real subsequent
   milestone (DIR-117 AC#11/DoD real-landing)
-status: todo
+status: done
 labels:
   - directive
   - human-steered
@@ -103,24 +103,57 @@ DIR-117 itself could not self-certify.
 
 ## Acceptance Criteria
 
-- [ ] Real production evidence (workflow journal + `preparation.json` + `docs/plans/*.md`) confirms
+- [x] Real production evidence (workflow journal + `preparation.json` + `docs/plans/*.md`) confirms
   `prepare-milestone.js` actually dispatches `milestone-preparation-check.ts` for a real (non-
   fixture) task and produces a receipt that a real subsequent `execute-milestone.js` call consumes.
-- [ ] Real production evidence confirms `execute-milestone.js`'s `Prepared` phase enforces the
+  **AUDIT (2026-07-28, iteration-0, session ef014e6f): CONFIRMED** — real prepare-run journal
+  `wf_c265f7ee-f08` (2 ProposalAuthors → Adjudicate → ProposalReview → PlanAuthor → 3 PlanCheck
+  rounds 1→3→0 → Receipt phase builds `milestones/M195/preparation.json`); receipt re-verified PASS
+  (verify mode) during THIS audit (exit 0); real execute-run journal `wf_977c3bab-c59` consumes it
+  (Prepared `code:"PASS: prepared"`) and reaches Build (`outcome:"done", mergeCommit:"c9ef805"`, an
+  ancestor of `master`); `docs/plans/M195-dir-117-b.md` present (343 lines).
+- [x] Real production evidence confirms `execute-milestone.js`'s `Prepared` phase enforces the
   receipt supplied via `preparationReceiptFile` — a real run with a stale/missing receipt returns
   `{outcome:"revision-needed", phase:"Prepared"}` before Build; a real run with a valid receipt
   reaches Build.
-- [ ] `execute-milestone.js`'s `Prepared` phase default is flipped from opt-in-skip to enforced-by-
+  **AUDIT (2026-07-28, iteration-0, session ef014e6f): CONFIRMED** — negative-control #1 journal
+  `wf_d9cf4f54-0f5` (doctored-stale receipt, proposal hash `f931…`→`0931…`): 6 Verify checks PASS,
+  then Prepared `FAIL: proposal-stale`, ZERO Build/Audit/Gate/Land entries. Negative-control #2
+  (`milestones/M195/negative-control/post-flip-omitted-receipt-journal.jsonl`): BOTH mirrors,
+  receipt OMITTED → `{outcome:"revision-needed", reason:"preparation-receipt-missing",
+  phase:"Prepared"}`, `buildReached:false`, `phasesDispatched:["Verify","Prepared"]`. Positive run
+  `wf_977c3bab-c59` reaches Build. Conformance suite `execute-milestone-preparation-gate.test.mjs`
+  14/14 (both mirrors, incl. stale-hash + omitted-receipt FAIL-CLOSED + valid-receipt-reaches-Build).
+- [x] `execute-milestone.js`'s `Prepared` phase default is flipped from opt-in-skip to enforced-by-
   default (both `.claude/workflows/` and `plugin/workflows/` mirrors, byte-identical), and
   `OUTER-LOOP.md`'s M191 disclosure note is updated to reflect the real-landing proof instead of
   "not yet proven."
-- [ ] `prepare-milestone.js`'s `ProposalReview` phase calls `wiring-coverage-check.ts`'s real
+  **AUDIT (2026-07-28, iteration-0, session ef014e6f): CONFIRMED** — `diff -q` byte-identical for
+  both `execute-milestone.js` mirrors; `phase('Prepared')` unconditional (line 196) with no live
+  else-skip; missing receipt → `{outcome:"revision-needed", reason:"preparation-receipt-missing",
+  phase:"Prepared"}` before Build (lines 197-199); header phase-table (line 6) updated to
+  ENFORCED-BY-DEFAULT; `sync-vendor.sh --check` CLEAN. `OUTER-LOOP.md` both disclosure notes updated
+  (lines ~57-65 prepare(c) STATUS, ~124-131 execute() signature): "not yet proven / omitting
+  accepted" → enforced contract with M195 evidence pointer.
+- [x] `prepare-milestone.js`'s `ProposalReview` phase calls `wiring-coverage-check.ts`'s real
   `checkWiringCoverage()` function directly — grep-confirmable real import/call site in both
   `.claude/workflows/` and `plugin/workflows/` mirrors, not prompt-only LLM guidance — with a real
   fixture Proposal (claimed mechanism, no matching AC item) showing the phase's own finding count
   increments from the function's real return value, not an LLM's independent judgment.
-- [ ] `node experiments/quay-perpetual-stream/scripts/task-schema-check.ts tasks/DIR-117-B.md` exits
+  **AUDIT (2026-07-28, iteration-0, session ef014e6f): CONFIRMED** — both `prepare-milestone.js`
+  mirrors (byte-identical) dispatch `agent({label:'wiring-coverage-check', phase:'ProposalReview'})`
+  running the CLI (line ~238) and the SCRIPT merges `verdict.findings` via `_upsertFindings(..., 0)`
+  (line 248); the CLI's main calls the single exported `checkWiringCoverage()` (defined once,
+  `wiring-coverage-check.ts:105`, called at `:224`) — no reimplemented extraction. Fixture
+  `fixtures/preparation/wiring-uncovered-claim-task.md` (2 claimed mechanisms, no matching AC) →
+  CLI emits exactly 2 BLOCKING findings from the function's real return. Convergence suite 20/20
+  (both mirrors) incl. "AC#4: finding count increments from checkWiringCoverage()'s real return
+  value (not LLM judgment)" — LLM full-review stubbed to ZERO, asserts `ledger.length ===
+  functionReturn.length`; wiring CLI suite 13/13.
+- [x] `node experiments/quay-perpetual-stream/scripts/task-schema-check.ts tasks/DIR-117-B.md` exits
   0.
+  **AUDIT (2026-07-28, iteration-0, session ef014e6f): CONFIRMED** — re-run during this audit:
+  `PASS: tasks/DIR-117-B.md — schema v1 conformant (kind=directive)`, exit 0.
 
 ## Definition of Done
 
@@ -129,14 +162,29 @@ adversarial acceptance audit, V_meta consolidation-lag, line budget, test floor,
 hygiene, and audit independence. Per DIR-026 Reading A, a synthetic fixture alone is necessary but
 insufficient — done only when:
 
-- [ ] One REAL milestone (not a scratch task) shows checked Proposal, checked Plan, matching
+- [x] One REAL milestone (not a scratch task) shows checked Proposal, checked Plan, matching
   preparation receipt, and workflow evidence that Build started only after the Prepared gate
   passed — landed on `master`.
-- [ ] `execute-milestone.js`'s `Prepared` phase is the enforced default (not opt-in) in both
+  **AUDIT (2026-07-28, iteration-0, session ef014e6f): CONFIRMED** — M195/DIR-117-B is real (not
+  scratch): checked Proposal (review.findings 0), checked Plan (3 PlanCheck rounds → 0 findings),
+  matching receipt (`milestones/M195/preparation.json`, re-verified PASS this audit), and journal
+  `wf_977c3bab-c59` shows Prepared `PASS: prepared` BEFORE Build (`mergeCommit c9ef805`, on `master`).
+- [x] `execute-milestone.js`'s `Prepared` phase is the enforced default (not opt-in) in both
   mirrors, with a real negative-control run proving fail-closed behavior.
-- [ ] Parent `tasks/DIR-117.md`'s own DoD item ("task remains dirStatus: pending until that real
+  **AUDIT (2026-07-28, iteration-0, session ef014e6f): CONFIRMED** — enforced default in both
+  byte-identical mirrors (unconditional `phase('Prepared')`, missing-receipt fail-closed); real
+  negative controls prove fail-closed: #1 stale receipt (`wf_d9cf4f54-0f5`, `proposal-stale`, no
+  Build), #2 omitted receipt (post-flip journal, both mirrors `preparation-receipt-missing`,
+  `buildReached:false`).
+- [x] Parent `tasks/DIR-117.md`'s own DoD item ("task remains dirStatus: pending until that real
   milestone lands") is satisfied by THIS child's landing, and DIR-117's own `dirStatus`/Resolution
   is updated to point at this child's real evidence.
+  **LAND (2026-07-28): DONE at this land — `tasks/DIR-117.md` gained a `## Resolution (M195 land)`
+  section pointing at this milestone's real evidence (journals `wf_c265f7ee-f08` /
+  `wf_977c3bab-c59` / `wf_d9cf4f54-0f5`, receipt `milestones/M195/preparation.json`, flip commit
+  `c9ef805`), and its AC #11 + DoD items 1-4 were ticked with LAND-transcription annotations citing
+  this child's fresh-context adversarial audit; `dirStatus` was already `applied` (DRAIN-time) and
+  stays. This closes the sole CONCERN of `milestones/M195/audits/iteration-0-acceptance-audit.md`.**
 
 ## Touches
 
@@ -155,3 +203,15 @@ insufficient — done only when:
 - experiments/quay-perpetual-stream/OUTER-LOOP.md
 - docs/plans/M195-dir-117-b.md
 - milestones/M195/**
+
+## Execution record (M195, Land phase, 2026-07-28)
+
+**Milestone id:** M195 · **Iterations:** 1 · **Realized Δv:** 0 (v̂>0 capabilityGrowth, method-
+infra surface — no chart-2 product-surface cell moves) · **Merge commit:** `c9ef805` (direct-to-
+master Build; no separate iteration worktree/branch) · **Audit verdict:** CONCERNS (all 5 AC +
+DoD clauses 1-2 CONFIRMED with no refutation; sole concern = parent bookkeeping, closed at Land).
+
+One-line outcome: the Prepared gate is proven on one real milestone — M195 prepared itself via the
+real `prepare-milestone.js` route and executed through the real `Prepared` phase — and is now the
+enforced-by-default contract in both mirrors, with `ProposalReview` wired to the real
+`checkWiringCoverage()` call site; full evidence in `milestones/M195/`.

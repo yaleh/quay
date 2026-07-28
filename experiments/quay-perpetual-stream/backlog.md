@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| DIR-117-B | Prove the Prepared-gate preparation pipeline via one real subsequent milestone (DIR-117 AC#11/DoD real-landing) | DONE | - | directive, human-steered, milestone-candidate |
 | DIR-120-B | DIR-120 Phase 3b: fix drivable-workspace-check.ts's layering inversion — remove DEFAULT_REGISTRY_PATH, require explicit --registry, symlink the experiments mirror, fix selftest's silent-skip risk | DONE | - | directive, human-steered, milestone-candidate |
 | DIR-125 | Bound prepare-milestone Proposal convergence with one synthesis, incremental review, typed finding disposition, and an explicit stop budget | DONE | - | directive, human-steered, milestone-candidate |
 | DIR-119-B | Execute arbitrary-width composite milestones through phase DAGs, read-only audit shards, deterministic reconcile, and atomic Land | DONE | - | milestone-candidate, human-steered |
@@ -205,10 +206,10 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M09B | Fix quay-github's task_get/task_list parent-resolution asymmetry (PR-ABI-002) | DONE | exploit | milestone-candidate, milestone:M09-gh-write, backfill, surface:provider-abi |
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
-| gap-build-phase-null-result-not-gated | execute-milestone.js's Build-phase check only rejects outcome==='needs-human' — a terminally-errored agent() call (null result) silently passes through to Audit/Gate/Land as if Build succeeded | open | - | gap, defect, milestone-candidate, human-steered |
 | DIR-117 | Make checked Proposal and checked milestone Plan a non-bypassable pre-Build preparation gate | open | - | directive, human-steered, milestone-candidate |
+| gap-split-or-commit-not-continuously-checked | it0-split-or-commit-check.ts only runs opportunistically inside a milestone's own Gate phase, scoped to whichever task that milestone is landing — a parent-done/child-open violation introduced by ONE milestone's Land can sit undetected indefinitely until some later, unrelated milestone's Gate phase happens to catch it | open | - | gap, milestone-candidate, human-steered |
+| gap-build-phase-null-result-not-gated | execute-milestone.js's Build-phase check only rejects outcome==='needs-human' — a terminally-errored agent() call (null result) silently passes through to Audit/Gate/Land as if Build succeeded | open | - | gap, defect, milestone-candidate, human-steered |
 | DIR-122 | Add a lightweight kind=gap schema tier with mechanism-claim wiring coverage, and reconcile the current gap-* task schema drift | open | - | directive, human-steered, milestone-candidate |
-| DIR-117-B | Prove the Prepared-gate preparation pipeline via one real subsequent milestone (DIR-117 AC#11/DoD real-landing) | open | - | directive, human-steered, milestone-candidate |
 | DIR-123 | Build real per-milestone worktree isolation for execute-milestone.js so disjoint milestones can run genuinely concurrently | open | - | directive, human-steered, milestone-candidate |
 | gap-execute-milestone-no-worktree-isolation | gap: execute-milestone.js's Build phase has no worktree isolation — CLAUDE.md's documented per-milestone worktree claim is stale, and two milestones can never safely run concurrently regardless of task Touches | open | - | gap, milestone-candidate |
 | gap-touches-orthogonality-symlink-isdirect-mismatch | gap: 5 experiments/-mirrored scripts are dead code via their symlink invocation path (isDirect realpath mismatch) — touches-orthogonality-check.ts, anti-drift-touches-check.ts, routine-file-gate.ts, routine-scheduler.ts, serial-fanin-absorb.ts | open | - | gap, defect, milestone-candidate |
@@ -236,4 +237,4 @@ Sort: value-view (DONE/open/STALE, default)
 | DIR-055 | meta-cc session-history mining ROUTINE (LOOP-EXECUTABLE): a standing loop-driver routine (via DIR-051/[[DIR-056]]) that periodically dispatches a fresh-context probe which mines the project's Claude Code session history with meta-cc — surfacing recurring design/implementation defects, ADR candidates, and reusable/crystallizable patterns — and FILES them as evidence-backed tasks ROUTED by finding-type behind the quality/dedup/rate gate. The third standing probe (process/provenance axis) alongside self-validation (DIR-052) + architecture-analysis (DIR-053). | SELECTED | - | directive, milestone-candidate, milestone:M-102 |
 | exp5-M-QENG-DOD-DEMO-ONLY | The QENG-5 'exp5 DoD via quay gate' wiring is demo-only (2 fixture tasks, QENG-5-DEMO-PASS/FAIL) — the REAL per-milestone DoD meta-enforcer gate at OUTER-LOOP.md step 6/7 still runs it0-dod-check.sh as a bare prose shell call, not through quay gate; decide whether/how to close that gap | SELECTED | governance-integrity (closes a self-disclosed "shelfware risk" the QENG-0 epic itself named as | milestone-candidate, surface:method-infra, milestone:M37-discover-post-qeng |
 
-_229 milestone-candidate task(s) as of 2026-07-28T14:57:41.266Z._
+_230 milestone-candidate task(s) as of 2026-07-28T19:14:12.190Z._
