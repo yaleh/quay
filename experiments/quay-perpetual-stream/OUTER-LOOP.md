@@ -158,9 +158,13 @@ dispatch(batch) =
 concurrent_execute :: Batch → {done[], needs-human[]}
 concurrent_execute(B) where |B| ≥ 2:
   a. ∀c∈B: dispatch Workflow({name: "execute-milestone",
-     args: {taskId: c.id, charterFile: c.charter, absorbEntryFile: c.absorb, mode: "concurrent"}},
+     args: {taskId: c.id, charterFile: c.charter, absorbEntryFile: c.absorb,
+     preparationReceiptFile: c.receipt, mode: "concurrent"}},
      run_in_background: true) from MAIN session
      — NOT from within a workflow (DIR-092 architectural fix; Workflow-internal dispatch is broken)
+     — `preparationReceiptFile` is REQUIRED post-M195/DIR-117-B flip (enforced-by-default Prepared
+     gate): every candidate's receipt is produced by `prepare(c)` in the SELECT cycle; a dispatch
+     omitting it fails closed with `preparation-receipt-missing` before Build
   b. wait ∀ N complete (monitor background task completion)
   c. survivors = {c | outcome: "done"}
   d. PRE-MERGE GATE — audit-independence per survivor (DIR-107 Fix 3): verify each survivor's
