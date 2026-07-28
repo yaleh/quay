@@ -1,0 +1,58 @@
+[
+  {
+    "id": "5d3b184e",
+    "subsystem": "AC-coverage/gates-silent-loss",
+    "summary": "The most dangerous behavior change identified in the Proposal (readGatesConfig silently returning the empty shape instead of legacy gate content when config.yml lacks a gates: key) has a matching, specifically-named, falsifiable AC item requiring a real node --test run of that exact scenario",
+    "severity": "nit",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "plan",
+    "evidence": "AC item 'NEW (round-10 ... wf_a21f2004-757)' demands a test asserting readGatesConfig returns the empty six-key shape (not legacy content) when config.yml exists without gates: plus a sibling gates.yml with real content — this is a positive finding, not a defect; recorded because it is exactly the kind of DIR-117 wiring proof reviewers must check for and it is present and correctly falsifiable.",
+    "claimRef": "Mechanism-claim wiring coverage summary (d); AC item round-10 wf_a21f2004-757",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "ac1a597b",
+    "subsystem": "AC-coverage/cross-check",
+    "summary": "The config-wiring-check.ts <-> real-reader agreement claim (mechanism-claim c) is backed by a distinct AC item demanding a real side-by-side, code-asserted comparison rather than two separately-pasted transcripts",
+    "severity": "nit",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "plan",
+    "evidence": "AC item 'NEW (round-7 ... wf_e2e72ee1-a69)' explicitly forbids 'just paste two separate runs' and requires an explicit code-level agreement assertion; matches Chosen mechanism's --verify-readers design and control/data-flow item 4.",
+    "claimRef": "Mechanism-claim wiring coverage summary (c); AC item round-7 wf_e2e72ee1-a69",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "9d933eee",
+    "subsystem": "scope-size",
+    "summary": "Even after the Phase-3b split into DIR-120-B, this task still bundles four independently-landable mechanisms (branch-A deletion+structural-grep proof, gates-side silent-loss test, Phase 3a profile-fragment FAIL-CLOSED, and a new --verify-readers CLI mode) plus a doc-comment cleanup pass, all gated behind one task-level `todo->ready->done` transition",
+    "severity": "minor",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "accepted-risk",
+    "evidence": "AC/DoD coverage mapping items 1-9 each name a functionally separate mechanism (deletion, new gates test, providers FAIL-CLOSED, --verify-readers mode, doc cleanup, regression re-runs); none individually looks large, but a single acceptance-gate run must still succeed on all of them atomically, which is consistent with the Requested action's own point 2 rationale for the DIR-120-B split, just not carried one step further for this remaining bundle.",
+    "claimRef": "AC/DoD coverage mapping items 1-9",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "195bb986",
+    "subsystem": "compatibility/hypothetical-third-party",
+    "summary": "Compatibility section's 'hypothetical mid-migration third-party workspace' scenario is explicitly caveated as having no live victim in this repo or its two checked siblings, so it is an accepted forward-looking risk rather than a gap in current coverage",
+    "severity": "nit",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "accepted-risk",
+    "evidence": "Compatibility section: 'No live victim exists in this repo or its two checked siblings today for either — all three real config.ymls carry both sections non-empty.' Confirmed directly: root/archguard/meta-cc .quay/ dirs each show a fully-populated config.yml with both gates: and loop: sections.",
+    "claimRef": "Compatibility section, final bullet",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  }
+]

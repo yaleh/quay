@@ -1,0 +1,100 @@
+{
+  "taskId": "DIR-120",
+  "milestoneId": "M192",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M192-dir120-config-crystallization-phase2-3.md",
+  "planFile": "docs/plans/M192-dir-120.md",
+  "ledgerFile": "milestones/M192/proposal-ledger.json",
+  "hashes": {
+    "proposal": "3fb813408f6cea08bfcbbfb5d38fd5881b9de5ca563f1fef93808391f9672354",
+    "charter": "be74610d42a95e27701720fad76c59100acda61df3f3cf7383b8906be8c485be",
+    "plan": "0af535a052ca5ca52fc8fac356c2ebf54efd1181f65819662a5a5364ab76f0c6",
+    "sources": {
+      "packages/quay/src/gate/config/loader.ts": "18f999a6b4f77065ce3572cc17532e1d3a5798499ad30052e8c58835e8890ded",
+      "packages/quay/src/loop-params.ts": "803226702a2cd284a6c4face44fc5637017e29024dcd0e508da7aae6048a84dc",
+      "plugin/scripts/config-wiring-check.ts": "c22d447be76176c95338bc95f23636bc029a2a7ed93dc81ec6b8b61a99035536",
+      "experiments/quay-perpetual-stream/scripts/config-wiring-check.ts": "c22d447be76176c95338bc95f23636bc029a2a7ed93dc81ec6b8b61a99035536",
+      "packages/quay/bin/quay.ts": "0c7a777eddfc87b6423d2c85d97e6c894c4e9b8f8062968dcf48e2c1f1f0bb5c",
+      ".quay/gates.yml": "94618bd36dd25882c95b56e5402f086221b537d91f304af52ed95b101eec533c",
+      ".quay/loop.yml": "c2a05c59cd86299d9e1d9d52fc1e9bc9a17a610e3c362be22d042c49db8526a0",
+      ".quay/config.yml": "32aacb688c909be4822f6f0a10448956f414ae5d84e37850127632f7a2dade7a",
+      "experiments/quay-perpetual-stream/.quay/loop.yml": "89ce1fa9935d970e501a67c6461934a082f95f05808658671dca0523203a995e",
+      "packages/quay/test/loop-params.test.mjs": "28cae323557db141ab82e0bd3ee18b317b14bccaf1d7d0379ef7198a21bc8222",
+      "packages/quay/test/gate-ergonomics.test.mjs": "6492661024aa803ddf6b16ad5994ba119e217969d8d3cc6248a3bdeb0950be2e",
+      "packages/quay/test/dod-gate-set.test.mjs": "2c68c49988529f73659e97cda56d6aa4fbe72363ef08e5e1932f2062d39557ef",
+      "experiments/quay-perpetual-stream/scripts/config-wiring-selfcheck.sh": "1cb2fd913387618e198900ae4b0903ba551ee4c18b1cc1023fa72feb467324c0"
+    },
+    "ledger": "eb4ce70f9eabca2535f182e1f34079876031252c432433bd78be88fe5995b0f1"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 2,
+    "findings": 0
+  },
+  "touches": [
+    "packages/quay/src/gate/config/loader.ts",
+    "packages/quay/src/loop-params.ts",
+    "plugin/scripts/config-wiring-check.ts",
+    "experiments/quay-perpetual-stream/scripts/config-wiring-check.ts",
+    "packages/quay/bin/quay.ts",
+    ".quay/gates.yml",
+    ".quay/loop.yml",
+    ".quay/config.yml",
+    "experiments/quay-perpetual-stream/.quay/loop.yml",
+    "packages/quay/test/loop-params.test.mjs",
+    "packages/quay/test/gate-config-loader.test.mjs",
+    "packages/quay/test/gate-ergonomics.test.mjs",
+    "packages/quay/test/dod-gate-set.test.mjs",
+    "experiments/quay-perpetual-stream/scripts/config-wiring-selfcheck.sh",
+    "milestones/M192/**",
+    "docs/plans/M192-dir-120.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "13efe277-45ff-4563-bcfe-fd2c3db3e2a5"
+      },
+      {
+        "authorIdx": 2,
+        "sessionId": "13efe277-45ff-4563-bcfe-fd2c3db3e2a5"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "13efe277-45ff-4563-bcfe-fd2c3db3e2a5"
+    },
+    "proposalReviewer": {
+      "sessionId": "13efe277-45ff-4563-bcfe-fd2c3db3e2a5"
+    },
+    "planAuthor": {
+      "sessionId": "13efe277-45ff-4563-bcfe-fd2c3db3e2a5"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "13efe277-45ff-4563-bcfe-fd2c3db3e2a5"
+      },
+      {
+        "round": 2,
+        "sessionId": "13efe277-45ff-4563-bcfe-fd2c3db3e2a5"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 1,
+    "deltaRounds": 0,
+    "proposalReviewRounds": 1,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785238767187,
+    "endedAtMs": 1785238767187,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "sha256-approx:DIR120-phase2-3a-adjudicated-2026-07-28-branchA-terminal-gates-silent-loss-verify-readers-9d3f2a"
+      }
+    ]
+  }
+}
