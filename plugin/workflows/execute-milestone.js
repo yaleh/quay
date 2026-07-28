@@ -3,6 +3,7 @@ export const meta = {
   description: 'Given a SELECTed milestone task, run the full execution pipeline: it0 checks → inner iteration build → adversarial audit → absorb gates → land. Replaces OUTER-LOOP.md steps 4–7 (DIR-067, 2026-07-24). Accepts both legacy {taskId,...} and DIR-119-B (M189) arbitrary-width {milestoneCandidate:{taskIds,...}, compositeManifestFile,...} argument shapes, normalized to one internal task array (never rejected on array length) — see composite-args.ts/composite-contracts.ts. Returns {outcome: "done"|"needs-human"|"building"} — "building" means a background task was dispatched; the caller polls and resumes.',
   phases: [
     { title: 'Verify', detail: 'Step 4 — run all 5 it0 systematic-explore checks + composite-preflight (DIR-119-B)' },
+    { title: 'Prepared', detail: 'DIR-117/M191 — opt-in (args.preparationReceiptFile) fail-closed Proposal/Plan preparation-receipt check before Build; omitted param = skipped (pre-DIR-117-B back-compat)' },
     { title: 'Build',  detail: 'Step 5 — class-route + dispatch inner iteration agent' },
     { title: 'Audit',  detail: 'Step 6 — adversarial fresh-context acceptance audit' },
     { title: 'Gate',   detail: 'Step 6 — all absorb-phase mechanical gate checks' },
@@ -180,6 +181,30 @@ if (verifyFailed) {
   return { outcome: 'needs-human', reason: 'it0-checks-failed', phase: 'Verify', verifyJournal: allVerifyResults, verifyCacheUpdates }
 }
 log(`Verify phase PASSED — all ${allVerifyResults.length} it0 checks green (${scriptCount} script + ${_dmEntry ? 1 : 0} agent).`)
+
+// ── Phase: Prepared (DIR-117/M191) ──────────────────────────────────────────────────
+// Fail-closed pre-Build gate on the Proposal→Plan preparation receipt (milestone-preparation-
+// check.ts). OPT-IN via `$a.preparationReceiptFile`: a caller (OUTER-LOOP's `prepare(c)` step, once
+// wired into a live SELECT cycle — DIR-117-B's own scope) that supplies a receipt path gets the
+// real fail-closed check; a caller that omits it (every pre-DIR-117 dispatch, and this bootstrap
+// milestone's own dispatch per DIR-117's documented self-exemption note) is UNCHANGED — this phase
+// never retroactively blocks a dispatch shape that predates the preparation pipeline's live wiring.
+if ($a.preparationReceiptFile) {
+  phase('Prepared')
+  const preparedResult = await agent(
+    `Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task tasks/${_primaryTaskId}.md --charter ${$a.charterFile} --receipt ${$a.preparationReceiptFile}
+Return {ok: <exit code === 0>, code: <the PASS:/FAIL: code printed>, detail: <the full line printed>}.`,
+    { label: 'preparation-check', phase: 'Prepared',
+      schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, code: { type: 'string' }, detail: { type: 'string' } } } }
+  )
+  if (!preparedResult || preparedResult.ok !== true) {
+    log(`Prepared phase FAILED — ${preparedResult?.code || 'no-result'}: ${preparedResult?.detail || '(agent returned nothing)'}`)
+    return { outcome: 'revision-needed', reason: preparedResult?.code || 'preparation-check-failed', phase: 'Prepared', verifyCacheUpdates }
+  }
+  log(`Prepared phase PASSED — ${preparedResult.code}: ${preparedResult.detail}`)
+} else {
+  log(`Prepared phase SKIPPED — no preparationReceiptFile supplied (pre-DIR-117-B dispatch shape; not yet the enforced default).`)
+}
 
 // ── Phase: Build (step 5) ───────────────────────────────────────────────────────────
 phase('Build')

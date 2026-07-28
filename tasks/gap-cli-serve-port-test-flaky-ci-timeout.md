@@ -60,7 +60,9 @@ below, which was already real, audited, and landed.
 N/A — same-session point fix (one test file, ~2-line change), no separate milestone Plan
 authored or needed.
 
-## Requested action / Fix (landed same-session)
+## Requested action
+
+Fix landed same-session.
 
 1. Widened the poll budget from 5s (50 × 100ms) to 30s (300 × 100ms) — this is a "does it
    eventually become reachable" check, not a startup-speed benchmark, so a wider budget doesn't

@@ -164,6 +164,8 @@ SYNC_SCRIPTS=(
   composite-reconcile
   composite-land
   composite-preflight
+  wiring-coverage-check
+  milestone-preparation-check
 )
 
 if $CHECK_MODE; then

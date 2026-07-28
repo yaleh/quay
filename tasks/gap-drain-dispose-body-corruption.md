@@ -105,6 +105,9 @@ rendering is corrupted for human/mechanical-tool readability). A human skimming 
 - [ ] Root cause identified from a real transcript (the Dispose-phase agent's own `agent-*.jsonl` in
   `subagents/workflows/wf_bb989746-4a0/`) — not speculation about which tool call round-tripped the
   body through JSON-escaping.
+- [ ] Real production evidence confirms the rewritten Dispose-phase `agent()` prompt uses the
+  Provider ABI's `body` field value directly and never reconstructs it from a `--json`-piped copy —
+  shown via a fresh run's own tool-call trace, not asserted.
 - [ ] Dispose-phase prompt (or its underlying mechanism) changed to prevent this class of
   corruption, landed on `master` in both `.claude/workflows/drain-directives.js` and
   `plugin/workflows/drain-directives.js`, byte-identical.

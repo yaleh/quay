@@ -33,7 +33,21 @@ select =
   → writeback(batch, deferred, considered \ {batch ∪ deferred})
   → ∀c∈batch: author_ac_dod(c)   -- ¬self-tick (DIR-020): all - [ ] UNCHECKED; - [x] ONLY by Audit phase
   → ∀c∈batch: set_schema_v1(c)   -- extra.schema:"v1"; absent → N/A-legacy
-  → ∀c∈batch: author_proposal_plan(c)  -- ## Proposal + ## Plan; MUST carry docs/plans/*.md ref or N/A—<reason>
+  → ∀c∈batch: prepare(c)  -- DIR-117: invoke(".claude/workflows/prepare-milestone.js", {taskId, milestoneId,
+     charterFile, class}) BEFORE final dispatch — orchestrates quay-task-to-plan's proposal authors →
+     adjudication/write-back → grounded proposal review (incl. mechanism-claim wiring coverage, DIR-117 unit
+     B) → Plan author → grounded Plan-check, then writes milestones/M<NN>/preparation.json (a derived
+     verification RECEIPT only — task ## Proposal + docs/plans/*.md remain the content sources of truth, never
+     copied into the receipt). Replaces the old inert `author_proposal_plan(c)` prose instruction with a real
+     invocation. A Plan whose checked touch set exceeds c's `## Touches` declaration → update the declaration
+     and re-run batch_assemble (line above) before dispatch (DIR-117 Requested-action item 5/9).
+     ⊨ STATUS (M191/DIR-117, disclosed not hidden): the workflow + milestone-preparation-check.ts + fixtures
+     are landed and unit-tested; this OUTER-LOOP wiring point and execute-milestone's own `Prepared` phase
+     (see execute()) are landed; a real end-to-end SELECT→prepare→execute run proving this route operationally
+     has NOT yet happened — that is DIR-117-B's own scope (split per DIR-026 SPLIT-OR-COMMIT, same pattern as
+     DIR-119-A/B/C). Until DIR-117-B lands, execute-milestone's Prepared phase only enforces when the dispatch
+     explicitly supplies a `preparationReceiptFile` — omitting it is still accepted (bootstrap/back-compat), so
+     this landing does not itself block the live loop.
   → ∀c∈batch: schema_check(c)    -- scripts/task-schema-check.sh; FAIL → fix task, block dispatch
   → ∀c∈batch: size_check(c)      -- inherited_core."Milestone size definition"
   → ∀c∈batch: split_or_commit(c) -- DIR-026 MANDATORY; scripts/it0-split-or-commit-check.ts
@@ -89,11 +103,16 @@ batch_assemble(ranked) =
   ⊨ ill-declared Touches → deferred (conservative gating: parseTouches + checkTouchesPair)
 
 execute :: Params → {done, needs-human}
-execute(params) where |batch|=1 = invoke(".claude/workflows/execute-milestone.js", {taskId, charterFile, absorbEntryFile})
+execute(params) where |batch|=1 = invoke(".claude/workflows/execute-milestone.js", {taskId, charterFile, absorbEntryFile, preparationReceiptFile?})
   ⊨ absorb-entry pre-created: /tmp/m<NN>-absorb-entry.md (milestone id, charter path, Δv̂ from step 2)
   ⊨ dispatch-record at /tmp/m<NN>-dispatch-record.txt (created by Audit phase per M90)
-  ⊨ IS single-source (ADR-004, DIR-067): Verify(Build(5 it0 checks parallel)) → Build(class-route +
-     inner iteration in isolated worktree) → Audit(adversarial fresh-context; write-back AC/DoD ticks)
+  ⊨ IS single-source (ADR-004, DIR-067): Verify(Build(5 it0 checks parallel)) → Prepared(DIR-117:
+     milestone-preparation-check.ts against `preparationReceiptFile` when the caller supplies one —
+     fail-closed with {phase:"Prepared", outcome:"revision-needed"} on missing/failed/stale receipt,
+     N/A Plan, or touch-set expansion; OMITTING the param is still accepted pending DIR-117-B's real
+     end-to-end proof, so this phase does not retroactively block dispatches that predate `prepare(c)`
+     being wired into a live SELECT cycle) → Build(class-route + inner iteration in isolated worktree)
+     → Audit(adversarial fresh-context; write-back AC/DoD ticks)
      → Gate(7 absorb gates parallel: vmeta-lag, impl-row, DoD meta-enforcer, dashboard-budget,
      tree-hygiene, worktree-branch-hygiene, audit-independence) → Land(merge→master + capture-prune
      + dashboard update + milestone_counter++)

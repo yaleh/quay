@@ -147,9 +147,14 @@ export function hasSchemaMarker(task) {
 }
 
 // ── Kind classification (label-aware). ────────────────────────────────────────────────────────────
+// DIR-122: `gap` is checked BEFORE `milestone-candidate` because a well-formed gap/defect task
+// commonly carries BOTH labels (e.g. `labels: [gap, defect, milestone-candidate]`) once it's
+// SELECTed for a milestone — the lighter, gap-proportionate assertion set must still apply to it,
+// not the heavier milestone-candidate one (which would wrongly demand a full `## Proposal`).
 export function classifyKind(task) {
   const labels = task.labels || [];
   if (labels.includes("directive")) return "directive";
+  if (labels.includes("gap")) return "gap";
   if (labels.includes("milestone-candidate")) return "milestone-candidate";
   return "other";
 }
@@ -180,8 +185,8 @@ export function checkProposal(task) {
 export function checkPlan(task, kind) {
   const sec = extractSection(task.body, "Plan");
   if (sec === null) {
-    if (kind === "directive") {
-      return { ok: true, code: "plan-absent-directive-ok", message: "'## Plan' absent — allowed for a directive" };
+    if (kind === "directive" || kind === "gap") {
+      return { ok: true, code: "plan-absent-ok", message: `'## Plan' absent — allowed for kind=${kind}` };
     }
     return { ok: false, code: "plan-required-for-milestone", message: `'## Plan' required for kind=${kind} but not found` };
   }
@@ -307,6 +312,48 @@ export function checkDirectiveSections(task, kind) {
   return { ok: true, code: "directive-sections-present", message: "'## Finding' and '## Requested action' both present" };
 }
 
+// ── Assertion set B (kind=gap only, DIR-122): a lightweight tier proportionate to a gap task's
+// typical size. `## Finding` plays the role `## Proposal` plays for directives (problem framing +
+// root cause — already the de facto convention every well-formed gap task follows); `## Requested
+// action` plays the role a Proposal's "chosen mechanism" plays. No dual-author/adjudication/
+// multi-round Plan-check machinery — that stays DIR-117's directive-class domain.
+import { checkWiringCoverage } from "./wiring-coverage-check.ts";
+
+export function checkGapFinding(task) {
+  const sec = extractSection(task.body, "Finding");
+  if (sec === null) {
+    return { ok: false, code: "gap-finding-missing", message: "no '## Finding' section found (plays the role '## Proposal' plays for directives — problem framing + root cause)" };
+  }
+  const trimmed = sec.trim();
+  if (trimmed.length < 40) {
+    return { ok: false, code: "gap-finding-placeholder", message: "'## Finding' is empty/placeholder-only (needs real problem framing + root cause, not a stub)" };
+  }
+  return { ok: true, code: "gap-finding-present", message: `'## Finding' present (${trimmed.length} chars)` };
+}
+
+export function checkGapRequestedAction(task) {
+  const sec = extractSection(task.body, "Requested action");
+  if (sec === null) {
+    return { ok: false, code: "gap-requested-action-missing", message: "no '## Requested action' section found (plays the role a Proposal's chosen mechanism plays)" };
+  }
+  const trimmed = sec.trim();
+  if (trimmed.length < 40) {
+    return { ok: false, code: "gap-requested-action-placeholder", message: "'## Requested action' is empty/placeholder-only (needs a real chosen mechanism, not a stub)" };
+  }
+  return { ok: true, code: "gap-requested-action-present", message: `'## Requested action' present (${trimmed.length} chars)` };
+}
+
+// Mechanism-claim wiring coverage, applied to `## Requested action` (the gap-task analogue of
+// DIR-117's `## Proposal`-side check) — SAME underlying implementation
+// (wiring-coverage-check.ts), different source section, per DIR-122's own AC ("does not weaken or
+// duplicate DIR-117's check — the two share the same underlying concept/implementation applied to
+// different sections").
+export function checkGapWiringCoverage(task) {
+  const requestedAction = extractSection(task.body, "Requested action") || "";
+  const ac = extractSection(task.body, "Acceptance Criteria") || "";
+  return checkWiringCoverage(requestedAction, ac);
+}
+
 // ── Assertion A8: Touches declaration — must be present & well-formed on execution-type tasks. ──────
 // Import isOverbroadDeclaration from the single-source module (ADR-004).
 import { isOverbroadDeclaration } from "./touches-orthogonality-check.ts";
@@ -328,11 +375,11 @@ export function checkTouches(task, kind) {
     // distinguished only by an "(auto-derived, unverified…)" annotation in the body, per
     // derive-touches-heuristic.ts's renderTouchesSection) — so "heading absent" correctly covers
     // "neither kind present" without needing to parse the annotation.
-    if (kind === "milestone-candidate" && sec === null) {
+    if ((kind === "milestone-candidate" || kind === "gap") && sec === null) {
       return {
         ok: true,
         code: "touches-absent-milestone-candidate",
-        message: "INFO: milestone-candidate task has no '## Touches' (manual or auto-derived) — the pre-charter orthogonality scheduler has no hint for this candidate and will treat it conservatively",
+        message: `INFO: ${kind} task has no '## Touches' (manual or auto-derived) — the pre-charter orthogonality scheduler has no hint for this candidate and will treat it conservatively`,
       };
     }
     // Non-execution types (learning, methodology, discovery, etc.): skip vacuously.
@@ -376,7 +423,22 @@ export function checkTask(fullText) {
   if (!marker) {
     return { marker: false, kind, applicable: false, results: [], verdict: "N/A-legacy", failures: [], warnings: [] };
   }
-  const results = [
+  // DIR-122: kind=gap runs the lightweight tier (checkGapFinding/checkGapRequestedAction/
+  // checkGapWiringCoverage in place of checkProposal/checkDirectiveSections) — a proportionately
+  // smaller assertion set than directive/milestone-candidate/other, not the SAME set relaxed.
+  const results = kind === "gap"
+    ? [
+        checkGapFinding(task),
+        checkPlan(task, kind),
+        checkAcceptanceChecklist(task),
+        checkDodChecklist(task),
+        checkResolution(task),
+        checkNoScaffolding(task),
+        checkGapRequestedAction(task),
+        checkGapWiringCoverage(task),
+        checkTouches(task, kind),
+      ]
+    : [
         checkProposal(task),
         checkPlan(task, kind),
         checkAcceptanceChecklist(task),

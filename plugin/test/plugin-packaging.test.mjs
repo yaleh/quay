@@ -213,7 +213,10 @@ test('M136 (DIR-070-A): sync-vendor.sh --check dynamic scanning verifies all man
   // preparation-feedback) added to sync-vendor.sh's SYNC_SCRIPTS array, 7 -> 12.
   // M189/DIR-119-B: +7 (composite-args, composite-contracts, composite-build, composite-audit,
   // composite-reconcile, composite-land, composite-preflight) added, 12 -> 19.
-  assert.equal(okCount, 19, '--check must report exactly 19 identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array)');
+  // M191/DIR-117+DIR-122: +2 (wiring-coverage-check — the shared mechanism-claim wiring coverage
+  // check both directives require; milestone-preparation-check — DIR-117's receipt checker) added,
+  // 19 -> 21.
+  assert.equal(okCount, 21, '--check must report exactly 21 identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array)');
 });
 
 test('routines skill (M140) has zero experiment-layer references', () => {
@@ -446,10 +449,11 @@ test('DIR-070-C: Tier-B plugin copies have zero exp5/experiment-path references'
 // file is present.
 // ---------------------------------------------------------------------------
 
-test('M143: plugin/workflows/ exists with 3 JS workflow files', () => {
+test('M143: plugin/workflows/ exists with 4 JS workflow files', () => {
+  // M191/DIR-117: +prepare-milestone.js.
   const workflowsDir = path.join(pluginDir, 'workflows');
   assert.ok(existsSync(workflowsDir), 'plugin/workflows/ must exist');
-  const wanted = ['drain-directives.js', 'execute-milestone.js', 'run-routines.js'];
+  const wanted = ['drain-directives.js', 'execute-milestone.js', 'run-routines.js', 'prepare-milestone.js'];
   for (const f of wanted) {
     const fp = path.join(workflowsDir, f);
     assert.ok(existsSync(fp), `plugin/workflows/${f} must exist`);
@@ -502,7 +506,7 @@ test('M143: init skill has zero research-layer references (VT/value-ledger/check
 
 test('M143: git-tracked workflows in plugin/workflows/ are byte-identical to .claude/workflows/ canonical sources', () => {
   // Only test git-tracked source files (drain-directives.js may not be tracked).
-  const trackedWorkflows = ['execute-milestone.js', 'run-routines.js'];
+  const trackedWorkflows = ['execute-milestone.js', 'run-routines.js', 'prepare-milestone.js'];
   for (const name of trackedWorkflows) {
     const canonical = path.join(repoRoot, '.claude', 'workflows', name);
     const bundled = path.join(pluginDir, 'workflows', name);

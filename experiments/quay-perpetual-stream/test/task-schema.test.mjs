@@ -9,6 +9,7 @@ import {
   extractSection, parseTask, hasSchemaMarker, classifyKind,
   checkProposal, checkPlan, checkAcceptanceChecklist, checkDodChecklist,
   checkResolution, checkNoScaffolding,
+  checkGapFinding, checkGapRequestedAction, checkGapWiringCoverage,
   checkTask,
 } from "../scripts/task-schema.ts";
 
@@ -50,10 +51,14 @@ test("hasSchemaMarker: only true for extra.schema === v1", () => {
   assert.equal(hasSchemaMarker({ extra: { schema: "v2" } }), false);
   assert.equal(hasSchemaMarker({ extra: {} }), false);
 });
-test("classifyKind: directive / milestone-candidate / other (ADRs are NOT a task kind)", () => {
+test("classifyKind: directive / gap / milestone-candidate / other (ADRs are NOT a task kind)", () => {
   assert.equal(classifyKind({ labels: ["directive"] }), "directive");
   assert.equal(classifyKind({ labels: ["milestone-candidate"] }), "milestone-candidate");
   assert.equal(classifyKind({ labels: ["random"] }), "other");
+  assert.equal(classifyKind({ labels: ["gap", "defect"] }), "gap");
+  // DIR-122: gap takes priority over milestone-candidate when a task carries both (the common
+  // real shape once a gap task is SELECTed for a milestone) — the lighter tier must still apply.
+  assert.equal(classifyKind({ labels: ["gap", "defect", "milestone-candidate"] }), "gap");
   // ADRs are a first-class quay kind (adr-store.js), never validated here.
 });
 
@@ -122,4 +127,66 @@ test("checkTask: A7 does NOT apply to a milestone-candidate (directive-only rule
   // A7 is directive-kind only; a milestone-candidate without Finding/Requested-action still PASSes.
   const body = "## Proposal\n" + "real approach text ".repeat(4) + "\n## Plan\nN/A — leaf\n## Acceptance Criteria\n- [ ] a\n## Definition of Done\n- [ ] inherited-core clause";
   assert.equal(checkTask(fm(["milestone-candidate"]) + body).verdict, "PASS");
+});
+
+// ── kind=gap (DIR-122): a lightweight tier — Finding+Requested-action play Proposal's role. ──────
+test("checkGapFinding / checkGapRequestedAction: present-and-substantive vs missing vs placeholder", () => {
+  assert.equal(checkGapFinding({ body: "## Finding\n" + "real root cause text ".repeat(3) }).ok, true);
+  assert.equal(checkGapFinding({ body: "## Other\nx" }).ok, false);
+  assert.equal(checkGapFinding({ body: "## Finding\nTBD" }).ok, false);
+  assert.equal(checkGapRequestedAction({ body: "## Requested action\n" + "real chosen mechanism ".repeat(3) }).ok, true);
+  assert.equal(checkGapRequestedAction({ body: "## Other\nx" }).ok, false);
+});
+
+test("checkGapWiringCoverage: uncovered mechanism claim in Requested action fails; matching AC item passes", () => {
+  const uncovered = {
+    body: "## Requested action\nThe new `foo.ts` module invokes `bar.ts` to enforce coverage.\n" +
+      "## Acceptance Criteria\n- [ ] unrelated item with no identifiers",
+  };
+  assert.equal(checkGapWiringCoverage(uncovered).ok, false);
+  const covered = {
+    body: "## Requested action\nThe new `foo.ts` module invokes `bar.ts` to enforce coverage.\n" +
+      "## Acceptance Criteria\n- [ ] Real production callsite evidence confirms `foo.ts` invokes `bar.ts`.",
+  };
+  assert.equal(checkGapWiringCoverage(covered).ok, true);
+});
+
+test("checkTask: conformant kind=gap task -> PASS (no ## Proposal/## Plan required)", () => {
+  const body =
+    "## Finding\n" + "real root cause text ".repeat(4) +
+    "\n## Requested action\n" + "a real, non-wiring-claiming fix ".repeat(4) +
+    "\n## Acceptance Criteria\n- [ ] a\n## Definition of Done\n- [ ] inherited-core clause";
+  const r = checkTask(fm(["gap", "defect"]) + body);
+  assert.equal(r.verdict, "PASS");
+  assert.equal(r.kind, "gap");
+});
+
+test("checkTask: kind=gap MISSING ## Finding/## Requested action -> FAIL with gap-specific codes", () => {
+  const body = "## Acceptance Criteria\n- [ ] a\n## Definition of Done\n- [ ] inherited-core clause";
+  const r = checkTask(fm(["gap", "defect"]) + body);
+  assert.equal(r.verdict, "FAIL");
+  assert.ok(r.failures.some((f) => f.code === "gap-finding-missing"));
+  assert.ok(r.failures.some((f) => f.code === "gap-requested-action-missing"));
+});
+
+test("checkTask: kind=gap with an uncovered mechanism claim in ## Requested action -> FAIL (wiring coverage)", () => {
+  const body =
+    "## Finding\n" + "real root cause text ".repeat(4) +
+    "\n## Requested action\nThe new `foo.ts` module invokes `bar.ts` to enforce coverage.\n" +
+    "## Acceptance Criteria\n- [ ] unrelated item with no identifiers\n## Definition of Done\n- [ ] inherited-core clause";
+  const r = checkTask(fm(["gap", "defect"]) + body);
+  assert.equal(r.verdict, "FAIL");
+  assert.ok(r.failures.some((f) => f.code === "wiring-coverage-uncovered"));
+});
+
+test("checkTask: kind=gap with a milestone-candidate co-label still uses the gap tier, not the heavier one", () => {
+  // Real shape: a gap task SELECTed for a milestone carries BOTH labels — must still classify as
+  // gap and NOT demand a full ## Proposal/## Plan.
+  const body =
+    "## Finding\n" + "real root cause text ".repeat(4) +
+    "\n## Requested action\n" + "a real, non-wiring-claiming fix ".repeat(4) +
+    "\n## Acceptance Criteria\n- [ ] a\n## Definition of Done\n- [ ] inherited-core clause";
+  const r = checkTask(fm(["gap", "defect", "milestone-candidate"]) + body);
+  assert.equal(r.kind, "gap");
+  assert.equal(r.verdict, "PASS");
 });

@@ -118,6 +118,10 @@ the identical defect shape, discovered by pattern sweep rather than by an observ
   target and asserts mirror-path invocation is non-silent for all of them — RED against at least one
   of the 5 real scripts before the fix, GREEN after; written so a script added later with the same
   vulnerable guard shape is caught automatically (enumerates symlinks, does not hardcode names).
+- [ ] Real code inspection confirms all 5 fixed scripts reuse the SAME `fs.realpathSync`-based
+  `isDirectInvocation()` helper (comparing `fs.realpathSync(process.argv[1])` against the module's
+  own real path) already landed for `config-wiring-check.ts`/`concurrent-batch-scheduler.ts`, rather
+  than a second reinvented implementation — shown via a diff/grep, not asserted.
 
 ## Definition of Done
 

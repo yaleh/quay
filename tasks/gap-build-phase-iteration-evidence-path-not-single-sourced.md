@@ -70,8 +70,9 @@ wasn't audited at the time.
 ## Acceptance Criteria
 - [ ] Build-phase EVIDENCE prompt text explicitly references `gate_resolve_milestone_root`, matching
   Audit/Land's own phrasing — grep-confirmable.
-- [ ] A real (non-fixture) milestone dispatch after this fix shows the Build phase's own iteration
-  report filed at the correct top-level `milestones/M<NN>/` path with no subsequent `git mv` needed.
+- [ ] A real (non-fixture) milestone dispatch after this fix shows the Build phase's own
+  `iteration-0.md`/`iteration-N.md` filed at the correct top-level `milestones/M<NN>/` path with no
+  subsequent `git mv` needed — shown via that real milestone's git history, not asserted.
 
 ## Definition of Done
 
