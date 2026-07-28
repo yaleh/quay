@@ -3,14 +3,18 @@
 # the definition; mirrors the it0-dod-check.sh/.ts wrapper shape).
 #
 # Usage:
-#   drivable-workspace-check.sh <path> [<path> ...] [--registry <file>]
+#   drivable-workspace-check.sh <path> [<path> ...] --registry <file>
+#
+# --registry is REQUIRED (DIR-120-B, 2026-07-28) — the underlying .ts module removed its
+# directory-relative-guess default; an omitted --registry is enforced (and reported) by the .ts
+# module itself, not duplicated here.
 #
 # Exit codes: 0 = all paths covered; 1 = at least one path NOT covered; 2 = usage/environment error.
 
 set -u
 
 if [ "$#" -lt 1 ]; then
-  echo "Usage: $0 <path> [<path> ...] [--registry <file>]" >&2
+  echo "Usage: $0 <path> [<path> ...] --registry <file>" >&2
   exit 2
 fi
 

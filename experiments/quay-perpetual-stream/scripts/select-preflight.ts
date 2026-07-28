@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 import { isDirectEntry } from "./gate-script-base.ts";
 import { checkTask } from "./task-schema.ts";
 import { classify, type ClassifyResult } from "./human-steered-classify.ts";
-import { loadRegistry, type Registry, DEFAULT_REGISTRY_PATH } from "./drivable-workspace-check.ts";
+import { loadRegistry, type Registry } from "./drivable-workspace-check.ts";
 import { parseTouches, checkTouchesPair, expandGlobs } from "./touches-orthogonality-check.ts";
 import { deriveTouches } from "./derive-touches-heuristic.ts";
 // M188/DIR-119-A Stage 1.6: wire SELECT-integrated composite candidate synthesis through the ONE

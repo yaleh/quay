@@ -1,4 +1,9 @@
 // Unit tests for drivable-workspace-check.ts — DIR-062 child A (M125).
+// DIR-120-B (2026-07-28): DEFAULT_REGISTRY_PATH was removed from the module (a
+// directory-relative guess correct from only one of the module's two live locations);
+// every assertion here now passes an explicit registry path/object, matching the module's
+// new required-`--registry` contract. This file is NOT covered by scripts/test.sh's glob
+// (packages/*/test/*.test.mjs plugin/test/*.test.mjs) — run it directly:
 // Run: node --test experiments/quay-perpetual-stream/test/drivable-workspace-check.test.mjs
 //      node --test --experimental-test-coverage experiments/quay-perpetual-stream/test/drivable-workspace-check.test.mjs
 import { test } from "node:test";
@@ -14,12 +19,14 @@ import {
   isCovered,
   checkPaths,
   selftest,
-  DEFAULT_REGISTRY_PATH,
   DrivableCheckEnvError,
 } from "../scripts/drivable-workspace-check.ts";
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 const SCRIPT = fileURLToPath(new URL("../scripts/drivable-workspace-check.ts", import.meta.url));
+// The real checked-in registry, resolved relative to THIS test file's own on-disk location
+// (one directory up from test/) — an explicit path injected by the test, never a module default.
+const REAL_REGISTRY_PATH = fileURLToPath(new URL("../drivable-workspaces.yml", import.meta.url));
 
 // ── parseRegistry ────────────────────────────────────────────────────────────────────────────────
 test("parseRegistry: authorized_root + workspaces[] block list", () => {
@@ -58,8 +65,9 @@ test("loadRegistry: missing file throws DrivableCheckEnvError, exit code 2", () 
   assert.throws(() => loadRegistry(missing), (e) => e instanceof DrivableCheckEnvError && e.exitCode === 2);
 });
 
-test("loadRegistry: real checked-in registry parses with the real authorized_root", () => {
-  const r = loadRegistry(DEFAULT_REGISTRY_PATH);
+test("loadRegistry: real checked-in registry (explicit path) parses with the real authorized_root", () => {
+  assert.ok(fs.existsSync(REAL_REGISTRY_PATH), `real registry must exist at ${REAL_REGISTRY_PATH}`);
+  const r = loadRegistry(REAL_REGISTRY_PATH);
   assert.equal(r.authorizedRoot, "/home/yale/work");
   assert.ok(r.workspacePaths.length > 0);
 });
@@ -111,12 +119,14 @@ test("checkPaths: empty input -> ok:false (fail-closed, never a vacuous pass)", 
   assert.equal(r.ok, false);
 });
 
-// ── selftest() — the module's own embedded RED+GREEN fixture suite ─────────────────────────────────
+// ── selftest() — the module's own embedded RED+GREEN fixture suite (includes its own
+// unconditional real-registry-* checks against a selftest-internal path, DIR-120-B). ───────────────
 test("selftest(): all embedded RED+GREEN fixture cases pass", () => {
   assert.equal(selftest(), true);
 });
 
-// ── CLI (isDirect block) — real subprocess invocation ───────────────────────────────────────────
+// ── CLI (isDirect block) — real subprocess invocation, always with an explicit --registry
+// (DIR-120-B: the module no longer has a default to fall back on). ─────────────────────────────────
 function spawnCli(args) {
   try {
     const stdout = execFileSync("node", [SCRIPT, ...args], { encoding: "utf8" });
@@ -131,20 +141,20 @@ test("CLI: --selftest -> exit 0", () => {
   assert.equal(r.status, 0, r.stderr);
 });
 
-test("CLI: /tmp/x against the real registry -> exit 1, FAIL printed", () => {
-  const r = spawnCli(["/tmp/x"]);
+test("CLI: /tmp/x against the real registry (explicit --registry) -> exit 1, FAIL printed", () => {
+  const r = spawnCli(["/tmp/x", "--registry", REAL_REGISTRY_PATH]);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /FAIL: 1\/1 workspace path\(s\) NOT covered/);
 });
 
-test("CLI: /home/yale/work/archguard against the real registry -> exit 0, PASS printed", () => {
-  const r = spawnCli(["/home/yale/work/archguard"]);
+test("CLI: /home/yale/work/archguard against the real registry (explicit --registry) -> exit 0, PASS printed", () => {
+  const r = spawnCli(["/home/yale/work/archguard", "--registry", REAL_REGISTRY_PATH]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /PASS: all 1 workspace path\(s\) covered/);
 });
 
-test("CLI: multiple paths, mixed coverage -> exit 1", () => {
-  const r = spawnCli(["/home/yale/work/archguard", "/tmp/x"]);
+test("CLI: multiple paths, mixed coverage (explicit --registry) -> exit 1", () => {
+  const r = spawnCli(["/home/yale/work/archguard", "/tmp/x", "--registry", REAL_REGISTRY_PATH]);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /FAIL: 1\/2/);
 });
@@ -154,7 +164,12 @@ test("CLI: no args -> usage error exit 2", () => {
   assert.equal(r.status, 2);
 });
 
-test("CLI: --registry pointing at a fixture file overrides the default", () => {
+test("CLI: paths given but --registry omitted -> usage error exit 2 (DIR-120-B: no more guessed default)", () => {
+  const r = spawnCli(["/home/yale/work/quay"]);
+  assert.equal(r.status, 2);
+});
+
+test("CLI: --registry pointing at a fixture file overrides the real registry", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "drivable-registry-"));
   const registryFile = path.join(tmpDir, "custom.yml");
   fs.writeFileSync(registryFile, "authorized_root: /opt/custom-root\n");

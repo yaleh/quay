@@ -25,7 +25,7 @@
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadRegistry, isCovered, DEFAULT_REGISTRY_PATH, DrivableCheckEnvError, type Registry } from "./drivable-workspace-check.ts";
+import { loadRegistry, isCovered, DrivableCheckEnvError, type Registry } from "./drivable-workspace-check.ts";
 
 // Driver files: OUTER-LOOP.md, inherited-core.md (anywhere under experiments/quay-perpetual-stream/,
 // matched by basename so both root-relative and absolute paths work), and the loop's own skills
@@ -59,7 +59,8 @@ export interface ClassifyResult {
 }
 
 // ── classify — the pure decision function. `registry` is injected (not loaded internally) so
-// callers/tests control it explicitly; the CLI below loads the real DEFAULT_REGISTRY_PATH. ────────
+// callers/tests control it explicitly; the CLI below requires an explicit --registry when a
+// --workspace is given (DIR-120-B: no more guessed default). ──────────────────────────────────────
 export function classify(input: ClassifyInput): ClassifyResult {
   const touchedFiles = input.touchedFiles ?? [];
   const missionRedirection = input.missionRedirection === true;
@@ -141,9 +142,12 @@ export function selftest(): boolean {
 function usage(): never {
   console.error(
     "usage: node human-steered-classify.ts --touched <file> [--touched <file> ...] " +
-      "--workspace <path> [--workspace <path> ...] [--mission-redirection] [--registry <file>]",
+      "--workspace <path> [--workspace <path> ...] [--mission-redirection] --registry <file>",
   );
   console.error("       node human-steered-classify.ts --selftest");
+  console.error(
+    "ERROR: --registry is required when --workspace is given (DIR-120-B removed the guessed default path).",
+  );
   process.exit(2);
 }
 
@@ -156,7 +160,7 @@ async function main(argv: string[]): Promise<number> {
   const touchedFiles: string[] = [];
   const drivenWorkspaces: string[] = [];
   let missionRedirection = false;
-  let registryPath = DEFAULT_REGISTRY_PATH;
+  let registryPath: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -180,6 +184,7 @@ async function main(argv: string[]): Promise<number> {
 
   let registry: Registry = { authorizedRoot: null, workspacePaths: [] };
   if (drivenWorkspaces.length > 0) {
+    if (!registryPath) usage();
     try {
       registry = loadRegistry(registryPath);
     } catch (e) {

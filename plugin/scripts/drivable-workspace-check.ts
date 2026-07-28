@@ -15,8 +15,14 @@
 // drivable-workspace`.
 //
 // Usage:
-//   node drivable-workspace-check.ts <path> [<path> ...] [--registry <file>]
+//   node drivable-workspace-check.ts <path> [<path> ...] --registry <file>
 //   node drivable-workspace-check.ts --selftest
+//
+// --registry is REQUIRED (DIR-120-B, 2026-07-28): a prior DEFAULT_REGISTRY_PATH module-level
+// constant guessed a directory-relative path correct from only one of this module's two live
+// on-disk locations (plugin/scripts/ vs the experiments-tree symlink) — removed rather than
+// relocated, since relocating just re-encodes the same one-fixed-path assumption at the
+// currently-correct answer instead of the currently-wrong one.
 //
 // Exit codes:
 //   0 = every path covered (or selftest passed)
@@ -30,8 +36,11 @@ import { parse as parseYaml } from "yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Default registry: the checked-in file one directory up from scripts/.
-export const DEFAULT_REGISTRY_PATH = path.join(__dirname, "..", "drivable-workspaces.yml");
+// selftest()-internal only: the real checked-in registry, resolved relative to THIS file's own
+// on-disk location (never re-exported — DIR-120-B removed the module-level DEFAULT_REGISTRY_PATH
+// because it was a directory-relative guess correct from only one of this module's two live
+// locations; callers now MUST pass --registry explicitly, fail-closed on omission).
+const SELFTEST_REGISTRY_PATH = path.join(__dirname, "..", "..", "experiments", "quay-perpetual-stream", "drivable-workspaces.yml");
 
 export interface Registry {
   authorizedRoot: string | null;
@@ -167,13 +176,19 @@ export function selftest(): boolean {
   const emptyInputResult = checkPaths([], registry);
   check("checkPaths-empty-input-fails-closed", emptyInputResult.ok === false, "no targets given -> not a vacuous pass");
 
-  // parseRegistry round-trip against the REAL checked-in file.
-  if (fs.existsSync(DEFAULT_REGISTRY_PATH)) {
-    const real = parseRegistry(fs.readFileSync(DEFAULT_REGISTRY_PATH, "utf8"));
-    check("real-registry-has-authorized-root", real.authorizedRoot === "/home/yale/work", `authorizedRoot=${real.authorizedRoot}`);
-    check("real-registry-covers-archguard", isCovered("/home/yale/work/archguard", real) === true, "real archguard entry covered");
-    check("real-registry-rejects-tmp", isCovered("/tmp/x", real) === false, "real registry correctly rejects /tmp/x");
-  }
+  // parseRegistry round-trip against the REAL checked-in file — run UNCONDITIONALLY (no
+  // existsSync guard around the three real-registry-* checks themselves) so a missing/moved
+  // registry surfaces as a visible check FAILURE, never a silent skip folded invisibly into the
+  // aggregate "all fixture cases PASS" line (DIR-120-B: the prior fs.existsSync(...) guard could
+  // mask strictly-less real coverage while still reporting overall success).
+  const realRegistryFileExists = fs.existsSync(SELFTEST_REGISTRY_PATH);
+  check("real-registry-file-exists", realRegistryFileExists, `path=${SELFTEST_REGISTRY_PATH}`);
+  const real = realRegistryFileExists
+    ? parseRegistry(fs.readFileSync(SELFTEST_REGISTRY_PATH, "utf8"))
+    : { authorizedRoot: null, workspacePaths: [] };
+  check("real-registry-has-authorized-root", real.authorizedRoot === "/home/yale/work", `authorizedRoot=${real.authorizedRoot}`);
+  check("real-registry-covers-archguard", isCovered("/home/yale/work/archguard", real) === true, "real archguard entry covered");
+  check("real-registry-rejects-tmp", isCovered("/tmp/x", real) === false, "real registry correctly rejects /tmp/x");
 
   if (allPassed) {
     console.log("SELFTEST: all fixture cases PASS.");
@@ -185,8 +200,9 @@ export function selftest(): boolean {
 
 // ── Thin CLI ─────────────────────────────────────────────────────────────────────────────────────
 function usage(): never {
-  console.error("usage: node drivable-workspace-check.ts <path> [<path> ...] [--registry <file>]");
+  console.error("usage: node drivable-workspace-check.ts <path> [<path> ...] --registry <file>");
   console.error("       node drivable-workspace-check.ts --selftest");
+  console.error("ERROR: --registry is required (DIR-120-B removed the guessed default path).");
   process.exit(2);
 }
 
@@ -196,7 +212,7 @@ async function main(argv: string[]): Promise<number> {
     return selftest() ? 0 : 1;
   }
 
-  let registryPath = DEFAULT_REGISTRY_PATH;
+  let registryPath: string | undefined;
   const targets: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--registry") {
@@ -206,7 +222,7 @@ async function main(argv: string[]): Promise<number> {
       targets.push(args[i]);
     }
   }
-  if (targets.length === 0) usage();
+  if (targets.length === 0 || !registryPath) usage();
 
   let registry: Registry;
   try {
@@ -228,7 +244,27 @@ async function main(argv: string[]): Promise<number> {
   return 1;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+// gap-config-wiring-check-symlink-noop (DIR-120-B, same fix as config-wiring-check.ts): raw string
+// equality between `process.argv[1]` (NEVER resolved through a symlink — stays exactly as typed on
+// the command line) and `fileURLToPath(import.meta.url)` (ALWAYS resolved through symlinks to the
+// real file's absolute path by Node's ESM loader) can never be true when this script is invoked
+// via a real symlink pointing at it from elsewhere on disk (a workspace-portable concern, not tied
+// to any one caller's layout) — `main()` would silently never run, falling through to a clean exit
+// 0 indistinguishable from "ran and found zero issues" / "PASS." Resolving BOTH sides through
+// `fs.realpathSync` (after `path.resolve` to handle a relative argv[1]) makes the two invocation
+// paths compare equal.
+function isDirectInvocation(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    const invokedReal = fs.realpathSync(path.resolve(process.argv[1]));
+    const moduleReal = fileURLToPath(import.meta.url);
+    return invokedReal === moduleReal;
+  } catch {
+    return false;
+  }
+}
+
+const isDirect = isDirectInvocation();
 if (isDirect) {
   main(process.argv).then((code) => process.exit(code));
 }

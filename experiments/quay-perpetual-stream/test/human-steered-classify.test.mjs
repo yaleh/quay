@@ -8,6 +8,9 @@ import { fileURLToPath } from "node:url";
 import { touchesDriverFile, classify, selftest } from "../scripts/human-steered-classify.ts";
 
 const SCRIPT = fileURLToPath(new URL("../scripts/human-steered-classify.ts", import.meta.url));
+// DIR-120-B: the CLI's runtime DEFAULT_REGISTRY_PATH fallback was removed — --workspace now
+// requires an explicit --registry, so any test exercising that path passes one explicitly.
+const REAL_REGISTRY_PATH = fileURLToPath(new URL("../drivable-workspaces.yml", import.meta.url));
 
 // ── touchesDriverFile ────────────────────────────────────────────────────────────────────────────
 test("touchesDriverFile: OUTER-LOOP.md (nested path) -> true", () => {
@@ -127,19 +130,24 @@ test("CLI: --mission-redirection -> prints humanSteered:true JSON", () => {
   assert.equal(parsed.clauses.missionRedirection, true);
 });
 
-test("CLI: --workspace against the real registry (authorized) -> humanSteered:false", () => {
-  const r = spawnCli(["--workspace", "/home/yale/work/quay"]);
+test("CLI: --workspace against the real registry (authorized, explicit --registry) -> humanSteered:false", () => {
+  const r = spawnCli(["--workspace", "/home/yale/work/quay", "--registry", REAL_REGISTRY_PATH]);
   assert.equal(r.status, 0, r.stderr);
   const parsed = JSON.parse(r.stdout);
   assert.equal(parsed.humanSteered, false);
 });
 
-test("CLI: --workspace against the real registry (unauthorized) -> humanSteered:true", () => {
-  const r = spawnCli(["--workspace", "/tmp/somewhere-not-registered"]);
+test("CLI: --workspace against the real registry (unauthorized, explicit --registry) -> humanSteered:true", () => {
+  const r = spawnCli(["--workspace", "/tmp/somewhere-not-registered", "--registry", REAL_REGISTRY_PATH]);
   assert.equal(r.status, 0, r.stderr);
   const parsed = JSON.parse(r.stdout);
   assert.equal(parsed.humanSteered, true);
   assert.equal(parsed.clauses.unauthorizedWorkspace, true);
+});
+
+test("CLI: --workspace given but --registry omitted -> usage error exit 2 (DIR-120-B: no more guessed default)", () => {
+  const r = spawnCli(["--workspace", "/home/yale/work/quay"]);
+  assert.equal(r.status, 2);
 });
 
 test("CLI: multiple --touched flags accumulate", () => {

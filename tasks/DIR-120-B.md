@@ -13,6 +13,10 @@ children: []
 extra:
   dirStatus: applied
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-120-B
+    experiments/quay-perpetual-stream/charters/M194-dir120b-drivable-workspace-check-fix.md
+    milestones/M194/absorb-entry.md
 ---
 
 **type:** execution
