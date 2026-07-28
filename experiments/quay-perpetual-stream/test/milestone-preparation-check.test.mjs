@@ -10,6 +10,7 @@ import path from "node:path";
 import {
   buildReceipt, checkPreparation, sha256,
   computeTouchesExpansion, parsePlanStages, validatePlanStructure, checkProvenanceDistinctness,
+  computeMetricsForReceipt,
 } from "../scripts/milestone-preparation-check.ts";
 
 const FIXTURES = path.join(import.meta.dirname, "..", "fixtures", "preparation");
@@ -351,4 +352,175 @@ test("computeTouchesExpansion: receipt touches fully covered by declared → no 
 
 test("computeTouchesExpansion: receipt touches a path NOT in the declared set → expansion reported", () => {
   assert.deepEqual(computeTouchesExpansion(["a.ts", "c.ts"], ["a.ts"]), { expanded: ["c.ts"] });
+});
+
+// ── DIR-125: finding-ledger hash-binding + mechanical convergence-cap re-check ─────────────────────
+function makeLedgerFile(dir, ledger, name = "proposal-ledger.json") {
+  const f = path.join(dir, name);
+  fs.writeFileSync(f, JSON.stringify(ledger, null, 2));
+  return f;
+}
+
+test("buildReceipt + checkPreparation: PASS — a zero-blocking ledger hash-binds cleanly", () => {
+  const dir = freshTmpDir();
+  const ledgerFile = makeLedgerFile(dir, [
+    { id: "abc123", subsystem: "s", summary: "x", severity: "minor", blocking: false, everBlocking: false, disposition: "backlog", status: "open" },
+  ]);
+  const receipt = buildReceipt({
+    taskId: "FIXTURE-PREP-1", milestoneId: "M-FIXTURE", charterFile: CHARTER, taskFile: TASK, planFile: PLAN,
+    sourceFiles: [SOURCE], review: { findings: 0 }, planCheck: { rounds: 1, findings: 0 }, touches: [SOURCE],
+    provenance: makeDistinctProvenance(), ledgerFile,
+    convergence: { highRisk: false, fullSynthesisCount: 1, deltaRounds: 0 },
+  });
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
+  const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.code, "prepared");
+});
+
+test("checkPreparation: FAIL — ledger file no longer exists (ledger-missing)", () => {
+  const dir = freshTmpDir();
+  const ledgerFile = makeLedgerFile(dir, []);
+  const receipt = buildReceipt({
+    taskId: "FIXTURE-PREP-1", milestoneId: "M-FIXTURE", charterFile: CHARTER, taskFile: TASK, planFile: PLAN,
+    sourceFiles: [SOURCE], review: { findings: 0 }, planCheck: { rounds: 1, findings: 0 }, touches: [SOURCE],
+    provenance: makeDistinctProvenance(), ledgerFile,
+  });
+  fs.unlinkSync(ledgerFile);
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
+  const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "ledger-missing");
+});
+
+test("checkPreparation: FAIL — ledger tampered/swapped after preparation (ledger-stale)", () => {
+  const dir = freshTmpDir();
+  const ledgerFile = makeLedgerFile(dir, [
+    { id: "abc123", subsystem: "s", summary: "x", severity: "minor", blocking: false, everBlocking: false, disposition: "backlog", status: "open" },
+  ]);
+  const receipt = buildReceipt({
+    taskId: "FIXTURE-PREP-1", milestoneId: "M-FIXTURE", charterFile: CHARTER, taskFile: TASK, planFile: PLAN,
+    sourceFiles: [SOURCE], review: { findings: 0 }, planCheck: { rounds: 1, findings: 0 }, touches: [SOURCE],
+    provenance: makeDistinctProvenance(), ledgerFile,
+  });
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
+  // Tamper: swap in a DIFFERENT ledger content at the same path after the receipt was built —
+  // exactly the "pairing a stale ledger with a newer Proposal" failure mode DIR-125 names.
+  fs.writeFileSync(ledgerFile, JSON.stringify([{ id: "xyz999", subsystem: "s", summary: "different", blocking: false, disposition: "backlog", status: "open" }]));
+  const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "ledger-stale");
+});
+
+test("checkPreparation: FAIL — ledger still has an open blocking finding (ledger-blocking-findings-open)", () => {
+  const dir = freshTmpDir();
+  const ledgerFile = makeLedgerFile(dir, [
+    { id: "abc123", subsystem: "s", summary: "still open", severity: "blocker", blocking: true, everBlocking: true, disposition: "unresolved", status: "open" },
+  ]);
+  const receipt = buildReceipt({
+    taskId: "FIXTURE-PREP-1", milestoneId: "M-FIXTURE", charterFile: CHARTER, taskFile: TASK, planFile: PLAN,
+    sourceFiles: [SOURCE], review: { findings: 0 }, planCheck: { rounds: 1, findings: 0 }, touches: [SOURCE],
+    provenance: makeDistinctProvenance(), ledgerFile,
+  });
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
+  const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "ledger-blocking-findings-open");
+});
+
+test("checkPreparation: FAIL — convergence counters exceed the ordinary policy cap (convergence-delta-rounds-exceeded)", () => {
+  const dir = freshTmpDir();
+  const receipt = makeFreshReceipt();
+  receipt.convergence = { highRisk: false, fullSynthesisCount: 1, deltaRounds: 3 };
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
+  const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "convergence-delta-rounds-exceeded");
+});
+
+test("checkPreparation: FAIL — convergence counters record more than one full synthesis (convergence-full-synthesis-exceeded)", () => {
+  const dir = freshTmpDir();
+  const receipt = makeFreshReceipt();
+  receipt.convergence = { highRisk: true, fullSynthesisCount: 2, deltaRounds: 0 };
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
+  const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "convergence-full-synthesis-exceeded");
+});
+
+test("checkPreparation: PASS — highRisk convergence counters at the widened cap (3 delta rounds) are accepted", () => {
+  const dir = freshTmpDir();
+  const ledgerFile = makeLedgerFile(dir, []);
+  const receipt = buildReceipt({
+    taskId: "FIXTURE-PREP-1", milestoneId: "M-FIXTURE", charterFile: CHARTER, taskFile: TASK, planFile: PLAN,
+    sourceFiles: [SOURCE], review: { findings: 0 }, planCheck: { rounds: 1, findings: 0 }, touches: [SOURCE],
+    provenance: makeDistinctProvenance(), ledgerFile,
+    convergence: { highRisk: true, fullSynthesisCount: 1, deltaRounds: 3 },
+  });
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
+  const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+  assert.equal(result.ok, true, result.message);
+});
+
+test("checkPreparation: backward-compatible — a receipt with NO ledgerFile/convergence at all (pre-DIR-125 shape) still passes on the scalar checks alone", () => {
+  const dir = freshTmpDir();
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(makeFreshReceipt(), null, 2));
+  const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.code, "prepared");
+});
+
+// ── DIR-125: computeMetricsForReceipt — the ONE mechanically-queryable metrics surface ────────────
+test("computeMetricsForReceipt: FAIL — no receipt at all (receipt-missing)", () => {
+  const dir = freshTmpDir();
+  const r = computeMetricsForReceipt({ receiptFile: path.join(dir, "nope.json") });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "receipt-missing");
+});
+
+test("computeMetricsForReceipt: FAIL — a pre-DIR-125 receipt with no 'convergence' block (convergence-not-recorded)", () => {
+  const dir = freshTmpDir();
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(makeFreshReceipt(), null, 2));
+  const r = computeMetricsForReceipt({ receiptFile });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "convergence-not-recorded");
+});
+
+test("computeMetricsForReceipt: PASS — derives all named metrics from a real receipt + ledger", () => {
+  const dir = freshTmpDir();
+  const ledgerFile = makeLedgerFile(dir, [
+    { id: "a", subsystem: "s", summary: "x", severity: "blocker", blocking: false, everBlocking: true, disposition: "backlog", status: "resolved" },
+    { id: "b", subsystem: "s", summary: "y", severity: "minor", blocking: false, everBlocking: false, disposition: "plan", status: "open" },
+  ]);
+  const receipt = buildReceipt({
+    taskId: "FIXTURE-PREP-1", milestoneId: "M-FIXTURE", charterFile: CHARTER, taskFile: TASK, planFile: PLAN,
+    sourceFiles: [SOURCE], review: { findings: 0 }, planCheck: { rounds: 1, findings: 0 }, touches: [SOURCE],
+    provenance: makeDistinctProvenance(), ledgerFile,
+    convergence: {
+      highRisk: false, fullSynthesisCount: 1, deltaRounds: 1, proposalReviewRounds: 2,
+      terminalReason: "zero-finding", reachedPlanAuthor: true,
+      startedAtMs: 1000, endedAtMs: 1000 + 20 * 60 * 1000,
+      proposalHashes: [{ round: 0, hash: "h0" }, { round: 1, hash: "h1" }],
+    },
+  });
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
+  const r = computeMetricsForReceipt({ receiptFile });
+  assert.equal(r.ok, true, r.message);
+  assert.equal(r.taskId, "FIXTURE-PREP-1");
+  assert.equal(r.metrics.fullSynthesisCount, 1);
+  assert.equal(r.metrics.proposalReviewRounds, 2);
+  assert.equal(r.metrics.reachedPlanAuthor, true);
+  assert.equal(r.metrics.prepareWallTimeMs, 20 * 60 * 1000);
+  assert.equal(typeof r.metrics.blockingFindingYield, "number");
+  assert.equal(typeof r.metrics.proposalChurnRatio, "number");
 });

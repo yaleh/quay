@@ -166,6 +166,7 @@ SYNC_SCRIPTS=(
   composite-preflight
   wiring-coverage-check
   milestone-preparation-check
+  proposal-convergence
 )
 
 if $CHECK_MODE; then

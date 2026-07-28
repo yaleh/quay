@@ -34,13 +34,26 @@ select =
   → ∀c∈batch: author_ac_dod(c)   -- ¬self-tick (DIR-020): all - [ ] UNCHECKED; - [x] ONLY by Audit phase
   → ∀c∈batch: set_schema_v1(c)   -- extra.schema:"v1"; absent → N/A-legacy
   → ∀c∈batch: prepare(c)  -- DIR-117: invoke(".claude/workflows/prepare-milestone.js", {taskId, milestoneId,
-     charterFile, class}) BEFORE final dispatch — orchestrates quay-task-to-plan's proposal authors →
-     adjudication/write-back → grounded proposal review (incl. mechanism-claim wiring coverage, DIR-117 unit
-     B) → Plan author → grounded Plan-check, then writes milestones/M<NN>/preparation.json (a derived
-     verification RECEIPT only — task ## Proposal + docs/plans/*.md remain the content sources of truth, never
-     copied into the receipt). Replaces the old inert `author_proposal_plan(c)` prose instruction with a real
-     invocation. A Plan whose checked touch set exceeds c's `## Touches` declaration → update the declaration
-     and re-run batch_assemble (line above) before dispatch (DIR-117 Requested-action item 5/9).
+     charterFile, class, highRisk?}) BEFORE final dispatch — orchestrates quay-task-to-plan's proposal authors →
+     adjudication/write-back → BOUNDED grounded proposal review (incl. mechanism-claim wiring coverage, DIR-117
+     unit B) → Plan author → grounded Plan-check, then writes milestones/M<NN>/preparation.json + proposal-
+     ledger.json (a derived verification RECEIPT + typed finding ledger only — task ## Proposal +
+     docs/plans/*.md remain the content sources of truth, never copied into either). Replaces the old inert
+     `author_proposal_plan(c)` prose instruction with a real invocation. A Plan whose checked touch set exceeds
+     c's `## Touches` declaration → update the declaration and re-run batch_assemble (line above) before
+     dispatch (DIR-117 Requested-action item 5/9).
+     ⊨ DIR-125 (M193) STOPPING RULE — ProposalReview is bounded EXACTLY like PlanCheck's existing <=3-round/
+     F_i=0 rule, never an externally-restarted full regeneration: ONE full independent review per generation
+     (authors + adjudicator run ONCE), then — only for unresolved BLOCKING findings — up to 2 focused-revise +
+     independent-delta-review rounds (3 for explicit `highRisk`), gated by a 45m/75m soft wall-clock budget
+     checked BEFORE admitting the next round (never killing an in-flight one) and a split checkpoint (>=3
+     independent blocking findings in one subsystem, >2 independently landable mechanisms, or an oversized
+     touch set). Non-blocking findings are NEVER silently dropped — each carries an explicit disposition
+     (`plan`/`split`/`accepted-risk`/`backlog`/`duplicate`/`superseded`) and stays queryable in the ledger. A
+     caller MUST NOT restart the whole prepare(c) invocation just because ProposalReview found something —
+     that IS the DIR-120/M192 defect this closes (10 consecutive full-regeneration rounds, ~3h15m, ~1.13M
+     output tokens, never reaching PlanAuthor). Exhausting the cap/budget, or a split recommendation, returns
+     `needs-human` with the ledger — a human decides next steps, never a silent auto-retry or auto-split.
      ⊨ STATUS (M191/DIR-117, disclosed not hidden): the workflow + milestone-preparation-check.ts + fixtures
      are landed and unit-tested; this OUTER-LOOP wiring point and execute-milestone's own `Prepared` phase
      (see execute()) are landed; a real end-to-end SELECT→prepare→execute run proving this route operationally

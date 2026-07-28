@@ -1,0 +1,55 @@
+{
+  "_comment": "DIR-125 replay fixture: the high-value finding classes actually observed across the 10 real DIR-120/M192 prepare-milestone attempts (8→2→1→1→1→2→2→1→2→1), reshaped into ONE typed full-review round. Two are genuinely blocking (missing production-behavior AC coverage; stale acceptance wiring); the other four are valuable but non-blocking and must survive with an explicit disposition rather than being discarded or re-triggering a full Proposal regeneration.",
+  "findings": [
+    {
+      "subsystem": "scope",
+      "summary": "Phase 3b is a second, independently landable mechanism and should be split into its own task (the real DIR-026 split that produced DIR-120-B).",
+      "severity": "major",
+      "blocking": false,
+      "disposition": "split",
+      "claimRef": "AC#3",
+      "evidence": "Phase 3b touches an unrelated subsystem and has its own AC/DoD shape."
+    },
+    {
+      "subsystem": "production-behavior",
+      "summary": "A new production behavior change has no falsifiable Acceptance Criteria item covering it.",
+      "severity": "blocker",
+      "blocking": true,
+      "claimRef": "AC#5",
+      "evidence": "Proposal claims a new fail-closed default but no AC item asserts it mechanically."
+    },
+    {
+      "subsystem": "acceptance-wiring",
+      "summary": "The task's extra.acceptance command still points at an earlier milestone (M186) instead of the current one.",
+      "severity": "blocker",
+      "blocking": true,
+      "claimRef": "extra.acceptance",
+      "evidence": "extra.acceptance references M186-*.md; the current milestone is M192."
+    },
+    {
+      "subsystem": "test-coverage",
+      "summary": "Missing a named regression test for the touch-set change.",
+      "severity": "minor",
+      "blocking": false,
+      "disposition": "plan",
+      "claimRef": "AC#7",
+      "evidence": "No test file named for the new touch path in the Plan."
+    },
+    {
+      "subsystem": "docs",
+      "summary": "An operator-facing pointer in OUTER-LOOP.md still names the old script path.",
+      "severity": "nit",
+      "blocking": false,
+      "disposition": "backlog",
+      "evidence": "OUTER-LOOP.md references a since-renamed script."
+    },
+    {
+      "subsystem": "risk",
+      "summary": "A rarely-hit fallback branch is not exercised by any test; accepted as a known, low-probability risk rather than blocking preparation.",
+      "severity": "minor",
+      "blocking": false,
+      "disposition": "accepted-risk",
+      "evidence": "Fallback branch guards an already-validated invariant; adding a dedicated test is disproportionate for this milestone's scope."
+    }
+  ]
+}

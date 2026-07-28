@@ -216,7 +216,9 @@ test('M136 (DIR-070-A): sync-vendor.sh --check dynamic scanning verifies all man
   // M191/DIR-117+DIR-122: +2 (wiring-coverage-check — the shared mechanism-claim wiring coverage
   // check both directives require; milestone-preparation-check — DIR-117's receipt checker) added,
   // 19 -> 21.
-  assert.equal(okCount, 21, '--check must report exactly 21 identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array)');
+  // M193/DIR-125: +1 (proposal-convergence — the bounded ProposalReview convergence engine) added,
+  // 21 -> 22.
+  assert.equal(okCount, 22, '--check must report exactly 22 identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array)');
 });
 
 test('routines skill (M140) has zero experiment-layer references', () => {

@@ -1,13 +1,13 @@
 export const meta = {
   name: 'prepare-milestone',
-  description: 'DIR-117: orchestrates the existing quay-task-to-plan pipeline (proposal authors -> adjudication/write-back -> grounded proposal review incl. mechanism-claim wiring coverage -> Plan author -> grounded Plan-check) as a real, resumable lifecycle stage between SELECT/charter-authoring and execute-milestone. Writes a verification RECEIPT (milestones/M<NN>/preparation.json) — never a second content source; the task ## Proposal and docs/plans/*.md stay authoritative. STATUS (M191): landed + unit-tested (milestone-preparation-check.ts), NOT yet operationally proven end-to-end on a real OUTER-LOOP cycle — that real-landing proof is DIR-117-B\'s own scope (DIR-026 SPLIT-OR-COMMIT, DIR-119-A/B/C precedent).',
+  description: 'DIR-117: orchestrates the existing quay-task-to-plan pipeline (proposal authors -> adjudication/write-back -> BOUNDED grounded proposal review incl. mechanism-claim wiring coverage -> Plan author -> grounded Plan-check) as a real, resumable lifecycle stage between SELECT/charter-authoring and execute-milestone. Writes a verification RECEIPT (milestones/M<NN>/preparation.json) — never a second content source; the task ## Proposal and docs/plans/*.md stay authoritative. STATUS (M193/DIR-125): ProposalReview is now a bounded convergence loop (1 full synthesis + <=2 delta rounds ordinary / <=3 highRisk, 45m/75m soft budget, typed disposition-tracked finding ledger hash-bound into the receipt) — closes the DIR-120/M192 unbounded-restart defect (10 consecutive full-regeneration rounds, ~3h15m, ~1.13M output tokens, never reaching PlanAuthor). STATUS (M191/DIR-117): landed + unit-tested (milestone-preparation-check.ts), NOT yet operationally proven end-to-end on a real OUTER-LOOP cycle — that real-landing proof is DIR-117-B\'s own scope (DIR-026 SPLIT-OR-COMMIT, DIR-119-A/B/C precedent).',
   phases: [
     { title: 'ProposalAuthors', detail: 'N=2 (N=3 if highRisk) independent agents each draft a reconciled Proposal' },
     { title: 'Adjudicate', detail: 'One agent reconciles the N proposals into ONE Proposal, writes it back to the task' },
-    { title: 'ProposalReview', detail: 'Independent (non-author) agent reviews the reconciled Proposal against the real repo, incl. mechanism-claim wiring coverage' },
+    { title: 'ProposalReview', detail: 'DIR-125 bounded convergence: ONE full independent review, then (only if blocking findings remain) up to 2 (3 highRisk) focused-revise + delta-review rounds against a typed finding ledger, gated by a 45m/75m soft budget and a subsystem/mechanism/touch-set split checkpoint' },
     { title: 'PlanAuthor', detail: 'Authors docs/plans/M<NN>-<slug>.md mapping every AC to phases/stages' },
     { title: 'PlanCheck', detail: 'Up to 3 rounds; independent (non-author) agent grounds-checks the Plan; success only at F_i=0' },
-    { title: 'Receipt', detail: 'Writes milestones/M<NN>/preparation.json (derived verification receipt only)' },
+    { title: 'Receipt', detail: 'Writes milestones/M<NN>/preparation.json + proposal-ledger.json (derived verification receipt + finding ledger only)' },
   ],
 }
 
@@ -87,26 +87,197 @@ if (!adjudicateResult || adjudicateResult.ok !== true) {
   return { outcome: 'revision-needed', reason: adjudicateResult?.error || 'adjudicate-failed', phase: 'Adjudicate' }
 }
 
-// ── Phase: ProposalReview (independent of the adjudicator — fresh context) ───────────
+// ── Phase: ProposalReview — DIR-125 BOUNDED convergence loop ─────────────────────────
+// Closes the DIR-120/M192 defect: a nonzero review used to immediately return
+// 'revision-needed', the CALLER restarted the whole workflow, and two new authors + a new
+// adjudicator rewrote the complete Proposal before every review (10 consecutive full-regeneration
+// rounds, ~3h15m, ~1.13M output tokens, never reaching PlanAuthor). Now: exactly ONE full
+// independent review per generation; only unresolved BLOCKING findings trigger further work, via a
+// focused reviser + independent delta reviewer (never the original authors/adjudicator again).
+//
+// The caps/budget literals below MUST match proposal-convergence.ts's `capsFor()` — this file has
+// no import statements (established convention: see MAX_PLANCHECK_ROUNDS below), so the numbers
+// are inlined here and cross-checked by proposal-convergence.test.mjs's own dedicated test.
 phase('ProposalReview')
 
-const reviewResult = await agent(
+// DIR-125: deterministic injected clock for tests. Production args are ALWAYS JSON-serialized
+// (functions do not survive JSON.stringify/parse — see the `$a` normalization above), so `$a.now`
+// can only be a function when a test harness passes a plain JS object directly; production always
+// falls back to the real wall clock.
+const _now = (typeof $a.now === 'function') ? $a.now : () => Date.now()
+const _startedAtMs = _now()
+
+// DIR-125 Requested-action item 3: fail-closed maxima. A caller MAY lower `$a.maxDeltaRounds`,
+// never raise it above the policy ceiling.
+const _policyCaps = { maxFullSynthesis: 1, maxDeltaRounds: _highRisk ? 3 : 2, softBudgetMs: (_highRisk ? 75 : 45) * 60 * 1000 }
+const _requestedMaxDelta = Number.isFinite($a.maxDeltaRounds) ? $a.maxDeltaRounds : undefined
+const _maxDeltaRounds = (_requestedMaxDelta !== undefined && _requestedMaxDelta < _policyCaps.maxDeltaRounds) ? _requestedMaxDelta : _policyCaps.maxDeltaRounds
+
+const _VALID_DISPOSITIONS = ['plan', 'split', 'accepted-risk', 'backlog', 'duplicate', 'superseded']
+
+// djb2-ish stable, non-cryptographic fingerprint — identity is anchored on (subsystem, claimRef)
+// so a finding's id survives wording-only revisions to its summary/evidence (DIR-125 AC: "stable
+// IDs across wording-only revisions"). The real cryptographic hash-BINDING of the ledger's full
+// CONTENTS happens separately, in milestone-preparation-check.ts's sha256-based --ledger flag.
+function _fingerprint(subsystem, claimRef, summary) {
+  const key = claimRef ? `${subsystem}::claim::${claimRef}` : `${subsystem}::summary::${summary}`
+  const norm = String(key).trim().toLowerCase().replace(/\s+/g, ' ')
+  let h = 5381
+  for (let i = 0; i < norm.length; i++) h = ((h * 33) ^ norm.charCodeAt(i)) >>> 0
+  return h.toString(16).padStart(8, '0')
+}
+
+let _ledger = []
+function _upsertFindings(rawFindings, round) {
+  const byId = new Map(_ledger.map((f) => [f.id, { ...f }]))
+  for (const raw of (rawFindings || [])) {
+    const blocking = raw.blocking === true
+    const id = (raw.id && byId.has(raw.id)) ? raw.id : _fingerprint(raw.subsystem || 'unspecified', raw.claimRef, raw.summary)
+    const existing = byId.get(id)
+    const disposition = blocking ? 'unresolved' : (_VALID_DISPOSITIONS.includes(raw.disposition) ? raw.disposition : 'backlog')
+    byId.set(id, {
+      id,
+      subsystem: raw.subsystem || existing?.subsystem || 'unspecified',
+      summary: raw.summary || existing?.summary || '',
+      severity: raw.severity || existing?.severity || 'major',
+      blocking,
+      everBlocking: blocking || existing?.everBlocking || false,
+      disposition,
+      evidence: raw.evidence || existing?.evidence || '',
+      claimRef: raw.claimRef || existing?.claimRef || null,
+      status: 'open',
+      firstSeenRound: existing?.firstSeenRound ?? round,
+      lastSeenRound: round,
+    })
+  }
+  _ledger = [...byId.values()]
+}
+function _applyResolutions(resolvedIds, round) {
+  const idSet = new Set(resolvedIds || [])
+  _ledger = _ledger.map((f) => (idSet.has(f.id) ? { ...f, status: 'resolved', blocking: false, disposition: (f.disposition === 'unresolved' ? 'backlog' : f.disposition), lastSeenRound: round } : f))
+}
+function _blockingOpen() { return _ledger.filter((f) => f.blocking && f.status === 'open') }
+function _splitCheck(mechanismCount) {
+  const bySubsystem = {}
+  for (const f of _blockingOpen()) bySubsystem[f.subsystem] = (bySubsystem[f.subsystem] || 0) + 1
+  for (const [subsystem, count] of Object.entries(bySubsystem)) {
+    if (count >= 3) return { recommend: true, code: 'split-subsystem-blocking-cluster', reason: `subsystem "${subsystem}" has ${count} independent blocking findings (>= 3)` }
+  }
+  if (Number.isFinite(mechanismCount) && mechanismCount > 2) {
+    return { recommend: true, code: 'split-multi-mechanism', reason: `candidate contains ${mechanismCount} independently landable mechanisms (> 2)` }
+  }
+  return { recommend: false }
+}
+
+const _findingSchema = {
+  type: 'object',
+  properties: {
+    subsystem: { type: 'string' }, summary: { type: 'string' }, severity: { type: 'string' },
+    blocking: { type: 'boolean' }, evidence: { type: 'string' }, claimRef: { type: 'string' },
+    disposition: { type: 'string' },
+  },
+}
+
+const _proposalHashes = []
+
+// ── Round 0: ONE full grounded review of the just-adjudicated Proposal. ──────────────
+const _fullReviewResult = await agent(
   `INDEPENDENT review of task ${_taskId}'s just-reconciled \`## Proposal\` — you did NOT author it. Read the CURRENT task via \`task_get ${_taskId}\` (fresh, do not trust anything from a prior phase) against the real repository.
 
 1. Verify the Proposal makes the implementation approach reviewable without re-designing it: problem framing grounded in current code, chosen mechanism, concrete control/data flow, key decisions, defaults/failure behavior, compatibility, risks, non-goals, AC coverage, explicit alternatives.
-2. Mechanism-claim wiring coverage (DIR-117): run \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/task-schema-check.ts ${_taskFile}\` is NOT sufficient by itself for this — instead extract every new call/dispatch/ownership/enforcement relationship the Proposal claims and confirm the task's own \`## Acceptance Criteria\` has a matching, falsifiable item demanding real production-callsite or cross-generation reachability evidence for THAT relationship (not descriptive prose restating the claim). A claimed mechanism with no matching AC item is a nonzero-finding failure.
-3. ${_sessionIdInstruction}
-4. Return {findings: <integer count of unresolved issues, 0 if none>, findingsDetail: <list each finding with enough detail to fix it>, sessionId: <your real session id>}.`,
+2. Mechanism-claim wiring coverage (DIR-117): extract every new call/dispatch/ownership/enforcement relationship the Proposal claims and confirm the task's own \`## Acceptance Criteria\` has a matching, falsifiable item demanding real production-callsite or cross-generation reachability evidence for THAT relationship (not descriptive prose restating the claim).
+3. DIR-125 typed findings — report EVERY finding as a typed object, never a bare count. A finding is BLOCKING (\`blocking:true\`) ONLY if it is one of: factual contradiction, unresolved safety/fail-closed behavior, missing production callsite/ownership enforcement, a new behavior with no falsifiable AC or accepted-risk decision, stale acceptance wiring, or a scope cluster requiring split. Every other valuable finding is non-blocking and MUST carry exactly one disposition: plan, split, accepted-risk, backlog, duplicate, or superseded — never silently drop a real finding.
+4. ${_sessionIdInstruction}
+5. Return {findings: [{subsystem, summary, severity: "blocker"|"major"|"minor"|"nit", blocking: <boolean>, evidence, claimRef, disposition}], mechanismCount: <integer count of independently landable mechanisms this Proposal contains>, proposalHash: <a short hash/fingerprint you compute over the reviewed Proposal text, any stable digest is fine>, sessionId: <your real session id>}. Use findings: [] if there are none.`,
   { label: 'proposal-review', phase: 'ProposalReview',
-    schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'number' }, findingsDetail: { type: 'string' }, sessionId: { type: 'string' } } } }
+    schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'array', items: _findingSchema }, mechanismCount: { type: 'number' }, proposalHash: { type: 'string' }, sessionId: { type: 'string' } } } }
 )
 
-const _reviewFindings = reviewResult?.findings ?? 1
-if (_reviewFindings !== 0) {
-  log(`ProposalReview phase: ${_reviewFindings} unresolved finding(s) — ${reviewResult?.findingsDetail || ''}`)
-  return { outcome: 'revision-needed', reason: 'proposal-review-nonzero-findings', phase: 'ProposalReview', findingsDetail: reviewResult?.findingsDetail }
+const _reviewSessions = []
+const _reviserSessions = []
+if (_fullReviewResult?.sessionId) _reviewSessions.push(_fullReviewResult.sessionId)
+if (_fullReviewResult?.proposalHash) _proposalHashes.push({ round: 0, hash: _fullReviewResult.proposalHash })
+
+// Backward compat (DIR-125 AC: "zero-finding first-review fixture remains backward-compatible"):
+// a legacy reviewer/mock may still return a bare `findings: <number>` — 0 is a zero-finding pass;
+// nonzero is filed as ONE untyped blocking finding so the SAME bounded loop still applies rather
+// than silently trusting a shape this phase no longer natively emits.
+let _rawFindings = _fullReviewResult?.findings
+if (typeof _rawFindings === 'number') {
+  _rawFindings = _rawFindings === 0 ? [] : [{ subsystem: 'unspecified', summary: _fullReviewResult?.findingsDetail || 'legacy-scalar-finding', severity: 'major', blocking: true }]
 }
-log('ProposalReview phase PASSED — zero unresolved findings.')
+_upsertFindings(Array.isArray(_rawFindings) ? _rawFindings : [], 0)
+
+const _mechanismCount = Number.isFinite(_fullReviewResult?.mechanismCount) ? _fullReviewResult.mechanismCount : undefined
+let _deltaRound = 0
+let _terminalReason = null
+let _splitRecommendation = null
+
+while (true) {
+  const openBlocking = _blockingOpen()
+  if (openBlocking.length === 0) { _terminalReason = 'zero-finding'; break }
+
+  const split = _splitCheck(_mechanismCount)
+  if (split.recommend) { _splitRecommendation = split; _terminalReason = 'split-recommended'; break }
+
+  const _elapsedMs = _now() - _startedAtMs
+  if (_elapsedMs >= _policyCaps.softBudgetMs) { _terminalReason = 'soft-budget-exceeded'; break }
+
+  if (_deltaRound >= _maxDeltaRounds) { _terminalReason = 'delta-cap-exhausted'; break }
+
+  _deltaRound += 1
+  log(`ProposalReview: ${openBlocking.length} blocking finding(s) open — dispatching focused revision + delta review round ${_deltaRound}/${_maxDeltaRounds}.`)
+
+  const _reviseResult = await agent(
+    `Focused Proposal reviser for task ${_taskId}, delta round ${_deltaRound}/${_maxDeltaRounds}. Do NOT re-derive the Proposal from scratch and do NOT act as an independent author — resolve ONLY these recorded blocking findings against the CURRENT task ${_taskId} \`## Proposal\`, preserving every other section/sentence unchanged:
+
+${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}${f.evidence ? ` — evidence: ${f.evidence}` : ''}`).join('\n')}
+
+1. Read the current Proposal via \`task_get ${_taskId}\`.
+2. Edit ONLY what is needed to resolve the findings above; write the revised Proposal back via \`task_write\` (splice into \`## Proposal\`, preserve every other section).
+3. ${_sessionIdInstruction}
+4. Return {ok: true, proposalHash: <a short hash/fingerprint over the revised Proposal text>, sessionId: <your real session id>}. If task_write fails, return {ok: false, error: <reason>}. Do NOT self-report which findings are resolved — the INDEPENDENT delta reviewer (next step) makes that determination, not you.`,
+    { label: `proposal-revise-round-${_deltaRound}`, phase: 'ProposalReview',
+      schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, proposalHash: { type: 'string' }, error: { type: 'string' }, sessionId: { type: 'string' } } } }
+  )
+  if (_reviseResult?.sessionId) _reviserSessions.push(_reviseResult.sessionId)
+  if (_reviseResult?.proposalHash) _proposalHashes.push({ round: _deltaRound, hash: _reviseResult.proposalHash })
+  if (!_reviseResult || _reviseResult.ok !== true) {
+    log(`ProposalReview focused revision round ${_deltaRound} FAILED: ${_reviseResult?.error || '(agent returned nothing)'}`)
+    return { outcome: 'needs-human', reason: _reviseResult?.error || 'proposal-revise-failed', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+  }
+
+  const _deltaReviewResult = await agent(
+    `INDEPENDENT delta review, round ${_deltaRound}/${_maxDeltaRounds}, of task ${_taskId}'s just-revised \`## Proposal\` — you did NOT author or revise it. Read the CURRENT task via \`task_get ${_taskId}\`.
+
+Previously recorded open blocking findings:
+${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n')}
+
+1. For each finding id above, confirm whether it is now resolved.
+2. Report ONLY currently-open findings (blocking or non-blocking) as the \`findings\` array — a finding you already reported before and consider unchanged should be reported again with the SAME subsystem/claimRef so it keeps its identity. Do NOT re-run a full independent Proposal re-derivation.
+3. ${_sessionIdInstruction}
+4. Return {resolvedIds: [<ids from the list above now resolved>], findings: [<any still-open findings, typed the same way as the full review>], sessionId: <your real session id>}.`,
+    { label: `proposal-delta-review-round-${_deltaRound}`, phase: 'ProposalReview',
+      schema: { type: 'object', properties: { resolvedIds: { type: 'array', items: { type: 'string' } }, findings: { type: 'array', items: _findingSchema }, sessionId: { type: 'string' } } } }
+  )
+  if (_deltaReviewResult?.sessionId) _reviewSessions.push(_deltaReviewResult.sessionId)
+  _applyResolutions(_deltaReviewResult?.resolvedIds, _deltaRound)
+  _upsertFindings(_deltaReviewResult?.findings, _deltaRound)
+}
+
+if (_terminalReason === 'split-recommended') {
+  log(`ProposalReview: split recommended — ${_splitRecommendation.reason}`)
+  return { outcome: 'needs-human', reason: 'split-recommended', splitRecommendation: _splitRecommendation, phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+}
+if (_terminalReason === 'soft-budget-exceeded') {
+  log(`ProposalReview: soft budget (${_policyCaps.softBudgetMs / 60000}m) exceeded with ${_blockingOpen().length} blocking finding(s) still open.`)
+  return { outcome: 'needs-human', reason: 'soft-budget-exceeded', phase: 'ProposalReview', ledger: _ledger, elapsedMs: _now() - _startedAtMs, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+}
+if (_terminalReason === 'delta-cap-exhausted') {
+  log(`ProposalReview: delta-review cap (${_maxDeltaRounds}) exhausted with ${_blockingOpen().length} blocking finding(s) still open.`)
+  return { outcome: 'needs-human', reason: 'delta-cap-exhausted', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+}
+log(`ProposalReview PASSED — zero open blocking findings after 1 full synthesis + ${_deltaRound} delta round(s); ${_ledger.length} total finding(s) recorded.`)
 
 // ── Phase: PlanAuthor ─────────────────────────────────────────────────────────────────
 phase('PlanAuthor')
@@ -193,18 +364,46 @@ phase('Receipt')
 // into the receipt's --build command, so buildReceipt() records real provenance — never a
 // caller-asserted "trust me, independent" value. `_planCheckSessions` already accumulates one
 // entry per round (>=1 by construction, since the loop only exits after a real dispatch).
-const _provenanceFlags = ` --proposal-author-sessions ${_proposals.map((p) => p.sessionId || 'unknown').join(',')} --adjudicator-session ${adjudicateResult.sessionId || 'unknown'} --review-session ${reviewResult.sessionId || 'unknown'} --plan-author-session ${planAuthorResult.sessionId || 'unknown'} --plancheck-sessions ${_planCheckSessions.join(',') || 'unknown'}`
+const _provenanceFlags = ` --proposal-author-sessions ${_proposals.map((p) => p.sessionId || 'unknown').join(',')} --adjudicator-session ${adjudicateResult.sessionId || 'unknown'} --review-session ${_reviewSessions[0] || 'unknown'} --plan-author-session ${planAuthorResult.sessionId || 'unknown'} --plancheck-sessions ${_planCheckSessions.join(',') || 'unknown'}`
+
+// DIR-125: the derived finding ledger + convergence metrics live BESIDE the receipt (never a
+// second copy of the Proposal/Plan themselves — see the ledger entries above, which hold only
+// subsystem/summary/severity/blocking/disposition/evidence/claimRef/status, not prose duplicates).
+// The receipt's --ledger flag hash-binds this file's CURRENT content (sha256) so a later swap for
+// a newer/different ledger — or pairing this receipt with a Proposal edited after the fact — fails
+// the existing preparation check (ledger-stale / proposal-stale) rather than silently passing.
+const _ledgerFile = `milestones/${_milestoneId}/proposal-ledger.json`
+const _ledgerJson = JSON.stringify(_ledger, null, 2)
+const _endedAtMs = _now()
+const _convergence = {
+  highRisk: _highRisk,
+  fullSynthesisCount: 1,
+  deltaRounds: _deltaRound,
+  proposalReviewRounds: 1 + _deltaRound,
+  terminalReason: 'zero-finding',
+  reachedPlanAuthor: true,
+  startedAtMs: _startedAtMs,
+  endedAtMs: _endedAtMs,
+  proposalHashes: _proposalHashes,
+}
+const _convergenceJson = JSON.stringify(_convergence)
 
 const receiptResult = await agent(
-  `Write the preparation receipt for task ${_taskId} / milestone ${_milestoneId}.
+  `Write the preparation receipt + finding ledger for task ${_taskId} / milestone ${_milestoneId}.
 
-Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --build --task-id ${_taskId} --milestone-id ${_milestoneId} --task ${_taskFile} --charter ${_charterFile} --plan ${_planFile} --review-findings 0 --plancheck-rounds ${_planCheckRound} --plancheck-findings 0 --out ${_receiptFile}${_provenanceFlags}
+1. Write the file ${_ledgerFile} with EXACTLY this content (create parent directories as needed):
+
+\`\`\`json
+${_ledgerJson}
+\`\`\`
+
+2. Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --build --task-id ${_taskId} --milestone-id ${_milestoneId} --task ${_taskFile} --charter ${_charterFile} --plan ${_planFile} --review-findings 0 --plancheck-rounds ${_planCheckRound} --plancheck-findings 0 --ledger ${_ledgerFile} --convergence-json '${_convergenceJson}' --out ${_receiptFile}${_provenanceFlags}
 
 (Add --sources <comma-separated list> naming every source file the Plan-check actually inspected, and --touches <comma-separated list> matching the checked Plan's declared touch set, if either is non-empty — read them from the Plan file at ${_planFile}.)
 
-Then run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task ${_taskFile} --charter ${_charterFile} --receipt ${_receiptFile}
+3. Then run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task ${_taskFile} --charter ${_charterFile} --receipt ${_receiptFile}
 
-Return {ok: <second command exit === 0>, receiptFile: "${_receiptFile}", detail: <second command's printed line>}.`,
+Return {ok: <step-3 command exit === 0>, receiptFile: "${_receiptFile}", detail: <step-3 command's printed line>}.`,
   { label: 'receipt', phase: 'Receipt',
     schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, receiptFile: { type: 'string' }, detail: { type: 'string' } } } }
 )
@@ -214,7 +413,7 @@ if (!receiptResult || receiptResult.ok !== true) {
   return { outcome: 'revision-needed', reason: 'receipt-selfcheck-failed', phase: 'Receipt' }
 }
 
-log(`Prepared: ${_taskId} — receipt at ${_receiptFile}, Plan at ${_planFile}, ${_planCheckRound} Plan-check round(s), zero-finding review.`)
+log(`Prepared: ${_taskId} — receipt at ${_receiptFile}, ledger at ${_ledgerFile}, Plan at ${_planFile}, ${_planCheckRound} Plan-check round(s), 1 full synthesis + ${_deltaRound} delta round(s), zero open blocking findings.`)
 
 return {
   outcome: 'prepared',
@@ -222,5 +421,11 @@ return {
   milestoneId: _milestoneId,
   planFile: _planFile,
   receiptFile: _receiptFile,
+  ledgerFile: _ledgerFile,
   planCheckRounds: _planCheckRound,
+  fullSynthesisCount: 1,
+  deltaRounds: _deltaRound,
+  ledger: _ledger,
+  reviewSessions: _reviewSessions,
+  reviserSessions: _reviserSessions,
 }

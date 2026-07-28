@@ -107,6 +107,17 @@ function planFileFromPrompt(prompt) {
   return m[1];
 }
 
+// DIR-125: the Receipt phase's real prompt now ALSO instructs writing the derived finding ledger
+// (`milestones/<id>/proposal-ledger.json`) before running the --build command. Extract the target
+// path + exact JSON content, mirroring what a real agent's Write-tool call would do.
+function ledgerFromPrompt(prompt) {
+  const pathMatch = prompt.match(/Write the file (\S+) with EXACTLY this content/);
+  assert.ok(pathMatch, `could not find the ledger file path in the Receipt prompt:\n${prompt}`);
+  const jsonMatch = prompt.match(/```json\n([\s\S]*?)\n```/);
+  assert.ok(jsonMatch, `could not find the fenced ledger JSON in the Receipt prompt:\n${prompt}`);
+  return { ledgerFile: pathMatch[1], ledgerJson: jsonMatch[1] };
+}
+
 function extractNodeCommands(prompt) {
   return [...prompt.matchAll(/node --experimental-strip-types [^\n]+/g)].map((m) => m[0]);
 }
@@ -144,7 +155,9 @@ function makeAgentMock(taskFileOnDisk) {
 
     if (label === 'proposal-review') {
       sessions.reviewer = 'sess-reviewer';
-      return { findings: 0, sessionId: sessions.reviewer };
+      // DIR-125 typed contract: zero findings as an empty array — the exact "zero-finding
+      // first-review fixture remains backward-compatible" shape (no revision agent dispatched).
+      return { findings: [], mechanismCount: 1, proposalHash: 'hash-round-0', sessionId: sessions.reviewer };
     }
 
     if (label === 'plan-author') {
@@ -177,8 +190,12 @@ function makeAgentMock(taskFileOnDisk) {
     }
 
     if (label === 'receipt') {
-      // Actually EXECUTE the two REAL node commands the Receipt phase's real prompt names — a
-      // true integration exercise of milestone-preparation-check.ts's real CLI, not a re-implementation.
+      // DIR-125: first write the derived finding ledger the prompt names (exactly what a real
+      // agent's Write-tool call would do), THEN execute the two REAL node commands — a true
+      // integration exercise of milestone-preparation-check.ts's real CLI, not a re-implementation.
+      const { ledgerFile, ledgerJson } = ledgerFromPrompt(prompt);
+      fs.mkdirSync(path.dirname(ledgerFile), { recursive: true });
+      fs.writeFileSync(ledgerFile, ledgerJson);
       const cmds = extractNodeCommands(prompt);
       assert.equal(cmds.length, 2, `expected exactly 2 node commands in the Receipt prompt, got ${cmds.length}:\n${prompt}`);
       const build = runShell(cmds[0]);

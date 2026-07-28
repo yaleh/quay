@@ -23,6 +23,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { extractSection, countBoxes } from "./task-schema.ts";
+import { blockingOpen, validateConvergenceCounters, computeConvergenceMetrics } from "./proposal-convergence.ts";
 
 export function sha256(text) {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
@@ -60,29 +61,71 @@ export function computeCurrentHashes({ taskFile, charterFile, receipt }) {
 // author/reviewer role — never a caller-asserted "trust me, this was independent" string.
 // checkPreparation() below mechanically verifies DISTINCTNESS (reviewer != author, plan-checker !=
 // plan-author), not merely presence.
-export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planFile, sourceFiles = [], review, planCheck, touches = [], provenance }) {
+// `ledgerFile` (DIR-125): the derived typed finding ledger written BESIDE the receipt (never a
+// second copy of the Proposal/Plan — see proposal-convergence.ts's ledger entry shape). When
+// given, its CURRENT on-disk content is sha256-hashed and bound into `hashes.ledger` so a later
+// swap for a different ledger — or pairing this receipt with a Proposal edited after the fact —
+// is caught by checkPreparation()'s `ledger-stale`/`ledger-missing` checks.
+// `convergence` (DIR-125): the raw counters/metrics prepare-milestone.js's bounded loop recorded
+// (fullSynthesisCount, deltaRounds, highRisk, terminalReason, timestamps, proposalHashes) —
+// mechanically re-verified against policy caps by checkPreparation() via
+// proposal-convergence.ts's validateConvergenceCounters(), never trusted as self-reported.
+export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planFile, sourceFiles = [], review, planCheck, touches = [], provenance, ledgerFile, convergence }) {
   const taskText = fs.readFileSync(taskFile, "utf8");
   const proposalSection = extractSection(taskText, "Proposal") || "";
   const charterText = fs.readFileSync(charterFile, "utf8");
   const planText = fs.readFileSync(planFile, "utf8");
   const sources = {};
   for (const f of sourceFiles) sources[f] = sha256(fs.readFileSync(f, "utf8"));
+  const ledgerHash = ledgerFile ? sha256(fs.readFileSync(ledgerFile, "utf8")) : undefined;
   return {
     taskId,
     milestoneId,
     charterFile,
     planFile,
+    ledgerFile: ledgerFile ?? null,
     hashes: {
       proposal: sha256(proposalSection.trim()),
       charter: sha256(charterText),
       plan: sha256(planText),
       sources,
+      ...(ledgerHash !== undefined ? { ledger: ledgerHash } : {}),
     },
     review: review ?? { findings: 0 },
     planCheck: planCheck ?? { rounds: 1, findings: 0 },
     touches,
     provenance: provenance ?? null,
+    convergence: convergence ?? null,
   };
+}
+
+// ── computeMetricsForReceipt — DIR-125 Requested-action item 10 / DoD instrumentation: the ONE
+// mechanically-queryable surface for prepareWallTime/fullSynthesisCount/proposalReviewRounds/
+// blockingFindingYield/proposalChurnRatio/reachedPlanAuthor "per candidate" — never left as
+// "inferred from session prose". Reads a receipt (+ its bound ledger, if any) from disk and
+// derives the metrics via proposal-convergence.ts's computeConvergenceMetrics (single-sourced, not
+// reimplemented). Receipts built before DIR-125 (no `convergence` block) return `null` — there is
+// nothing to derive metrics from, and this is reported as an explicit `code`, not a crash.
+export function computeMetricsForReceipt({ receiptFile }) {
+  if (!fs.existsSync(receiptFile)) {
+    return { ok: false, code: "receipt-missing", message: `no preparation receipt found at ${receiptFile}` };
+  }
+  const receipt = JSON.parse(fs.readFileSync(receiptFile, "utf8"));
+  if (!receipt.convergence) {
+    return { ok: false, code: "convergence-not-recorded", message: "this receipt predates DIR-125 and has no 'convergence' block to derive metrics from" };
+  }
+  const ledger = receipt.ledgerFile && fs.existsSync(receipt.ledgerFile) ? JSON.parse(fs.readFileSync(receipt.ledgerFile, "utf8")) : [];
+  const metrics = computeConvergenceMetrics({
+    fullSynthesisCount: receipt.convergence.fullSynthesisCount,
+    deltaRounds: receipt.convergence.deltaRounds,
+    ledger,
+    proposalHashes: receipt.convergence.proposalHashes,
+    startedAtMs: receipt.convergence.startedAtMs,
+    endedAtMs: receipt.convergence.endedAtMs,
+    reachedPlanAuthor: receipt.convergence.reachedPlanAuthor,
+    terminalReason: receipt.convergence.terminalReason,
+  });
+  return { ok: true, code: "metrics-ok", taskId: receipt.taskId, milestoneId: receipt.milestoneId, metrics };
 }
 
 // ── computeTouchesExpansion — single-sourced (DIR-117 iteration-2 item 4): the SAME expansion
@@ -257,6 +300,39 @@ export function checkPreparation({ taskFile, charterFile, receiptFile, declaredT
     return { ok: false, code: "plancheck-nonzero-findings", message: `grounded Plan check has ${receipt.planCheck.findings} unresolved finding(s) — preparation cannot pass until F_i=0` };
   }
 
+  // DIR-125 ledger hash-binding + mechanical convergence-cap re-check. Fully backward-compatible:
+  // a receipt built before DIR-125 (no `ledgerFile`/`convergence`) skips this block entirely and
+  // relies solely on the scalar `review.findings`/`planCheck.findings` checks above.
+  if (receipt.ledgerFile) {
+    if (!fs.existsSync(receipt.ledgerFile)) {
+      return { ok: false, code: "ledger-missing", message: `preparation receipt names a finding ledger that no longer exists: ${receipt.ledgerFile}` };
+    }
+    const currentLedgerHash = sha256(fs.readFileSync(receipt.ledgerFile, "utf8"));
+    if (currentLedgerHash !== receipt.hashes?.ledger) {
+      return { ok: false, code: "ledger-stale", message: `finding ledger (${receipt.ledgerFile}) has changed since preparation, or this receipt has been paired with a ledger it did not build — rerun preparation` };
+    }
+    let ledger;
+    try {
+      ledger = JSON.parse(fs.readFileSync(receipt.ledgerFile, "utf8"));
+    } catch (e) {
+      return { ok: false, code: "ledger-malformed", message: `finding ledger is not valid JSON: ${e.message}` };
+    }
+    const openBlocking = blockingOpen(ledger);
+    if (openBlocking.length > 0) {
+      return { ok: false, code: "ledger-blocking-findings-open", message: `finding ledger still has ${openBlocking.length} open blocking finding(s) — preparation cannot pass until they are resolved or the ledger is superseded by a fresh receipt` };
+    }
+  }
+  if (receipt.convergence) {
+    const convergenceResult = validateConvergenceCounters({
+      highRisk: receipt.convergence.highRisk,
+      fullSynthesisCount: receipt.convergence.fullSynthesisCount,
+      deltaRounds: receipt.convergence.deltaRounds,
+    });
+    if (!convergenceResult.ok) {
+      return { ok: false, code: convergenceResult.code, message: convergenceResult.message };
+    }
+  }
+
   // Provenance distinctness (DIR-117 iteration-2 item 2): the receipt must record REAL,
   // mechanically-distinct author/reviewer run identities — not merely assert "distinct contexts"
   // in prose. See checkProvenanceDistinctness()'s own doc comment.
@@ -320,6 +396,11 @@ function parseArgs(argv) {
     else if (a === "--review-session") out.reviewSession = argv[++i];
     else if (a === "--plan-author-session") out.planAuthorSession = argv[++i];
     else if (a === "--plancheck-sessions") out.planCheckSessions = argv[++i].split(",").map((s) => s.trim()).filter(Boolean);
+    // DIR-125 — the derived typed finding ledger (hash-bound into the receipt) and its convergence
+    // counters/metrics (mechanically re-verified against policy caps, never trusted as-is).
+    else if (a === "--ledger") out.ledgerFile = argv[++i];
+    else if (a === "--convergence-json") out.convergenceJson = argv[++i];
+    else if (a === "--metrics") out.metrics = true;
   }
   return out;
 }
@@ -349,10 +430,24 @@ if (isDirectInvocation()) {
       taskFile, charterFile, planFile, outFile, taskId, milestoneId, sourceFiles,
       reviewFindings, planCheckRounds, planCheckFindings, touches,
       proposalAuthorSessions, adjudicatorSession, reviewSession, planAuthorSession, planCheckSessions,
+      ledgerFile, convergenceJson,
     } = parsed;
     if (!taskFile || !charterFile || !planFile || !outFile || !taskId) {
-      console.error("usage: node milestone-preparation-check.ts --build --task-id <id> --task <task.md> --charter <charter.md> --plan <plan.md> --out <receipt.json> [--milestone-id <M-id>] [--sources a,b,c] [--review-findings N] [--plancheck-rounds N] [--plancheck-findings N] [--touches a,b,c] [--proposal-author-sessions a,b] [--adjudicator-session id] [--review-session id] [--plan-author-session id] [--plancheck-sessions r1,r2]");
+      console.error("usage: node milestone-preparation-check.ts --build --task-id <id> --task <task.md> --charter <charter.md> --plan <plan.md> --out <receipt.json> [--milestone-id <M-id>] [--sources a,b,c] [--review-findings N] [--plancheck-rounds N] [--plancheck-findings N] [--touches a,b,c] [--proposal-author-sessions a,b] [--adjudicator-session id] [--review-session id] [--plan-author-session id] [--plancheck-sessions r1,r2] [--ledger ledger.json] [--convergence-json '{...}']");
       process.exit(2);
+    }
+    if (ledgerFile && !fs.existsSync(ledgerFile)) {
+      console.error(`ERROR: --ledger file does not exist: ${ledgerFile}`);
+      process.exit(2);
+    }
+    let convergence = null;
+    if (convergenceJson) {
+      try {
+        convergence = JSON.parse(convergenceJson);
+      } catch (e) {
+        console.error(`ERROR: --convergence-json is not valid JSON: ${e.message}`);
+        process.exit(2);
+      }
     }
     const provenance = (reviewSession || planAuthorSession || (planCheckSessions && planCheckSessions.length))
       ? {
@@ -370,11 +465,24 @@ if (isDirectInvocation()) {
       planCheck: { rounds: Number.isFinite(planCheckRounds) ? planCheckRounds : 1, findings: Number.isFinite(planCheckFindings) ? planCheckFindings : 0 },
       touches: touches || [],
       provenance,
+      ledgerFile: ledgerFile || undefined,
+      convergence,
     });
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, JSON.stringify(receipt, null, 2) + "\n");
     console.log(`WROTE: ${outFile}`);
     process.exit(0);
+  }
+
+  if (parsed.metrics) {
+    // ── --metrics mode: DIR-125 mechanically-queryable convergence metrics for one candidate. ────
+    if (!parsed.receiptFile) {
+      console.error("usage: node milestone-preparation-check.ts --metrics --receipt <receipt.json>");
+      process.exit(2);
+    }
+    const result = computeMetricsForReceipt({ receiptFile: parsed.receiptFile });
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(result.ok ? 0 : 1);
   }
 
   const { taskFile, charterFile, receiptFile, declaredTouchesFile } = parsed;
