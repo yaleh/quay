@@ -72,8 +72,17 @@ assertion output).
 - [ ] Full suite (`bash scripts/test.sh`) passes with zero failures attributable to this drift.
 
 ## Definition of Done
+
+Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
+
 - [ ] Fix landed on `master` via a real commit touching `plugin/scripts/task-schema.ts`, verified by
   re-running the previously-failing test directly (not asserted from self-report).
 - [ ] No behavior change to the canonical `experiments/quay-perpetual-stream/scripts/task-schema.ts`
   source — this is a one-directional re-sync (canonical → vendored mirror), matching this repo's
   documented single-source-of-truth direction (vendor copy follows canonical, never the reverse).
+
+## Touches
+
+- experiments/quay-perpetual-stream/scripts/task-schema.ts
+- plugin/scripts/task-schema.ts
+- plugin/test/plugin-packaging.test.mjs

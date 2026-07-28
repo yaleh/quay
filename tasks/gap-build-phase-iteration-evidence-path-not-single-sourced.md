@@ -11,8 +11,24 @@ labels:
   - human-steered
 parent: null
 children: []
-extra: {}
+extra:
+  schema: v1
 ---
+## Proposal
+
+Change the Build-phase EVIDENCE instruction in `execute-milestone.js` (both mirrors) to explicitly
+call `gate_resolve_milestone_root`, the same single-sourced resolver Audit/Land already use, instead
+of bare prose that leaves the Build agent to re-derive the `milestones/` path itself — the exact
+class of bug `gap-absorb-charter-audit-not-committed` was filed to eliminate. See `## Finding`/
+`## Requested action` below for the full root cause and fix.
+
+## Plan
+
+N/A — directive resolved via a human-steered milestone (this touches
+`.claude/workflows/execute-milestone.js`, a driver execution-chain script — quay-directive skill
+step-4 override applies). Small, surgical change (one instruction line, both mirrors); no separate
+`docs/plans/*.md` needed.
+
 ## Finding
 
 Real, root-caused recurrence, not a one-off: the Build-phase's own `iteration-0.md` report has been
@@ -58,6 +74,9 @@ wasn't audited at the time.
   report filed at the correct top-level `milestones/M<NN>/` path with no subsequent `git mv` needed.
 
 ## Definition of Done
+
+Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
+
 - [ ] Landed on `master`, verified via a real dispatch, not asserted.
 - [ ] Because this touches `.claude/workflows/execute-milestone.js` (driver execution-chain
   script), resolving it must run under human-steered discipline.

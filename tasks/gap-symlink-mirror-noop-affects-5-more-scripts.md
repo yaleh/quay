@@ -2,15 +2,26 @@
 id: gap-symlink-mirror-noop-affects-5-more-scripts
 title: The fixed config-wiring-check.ts/concurrent-batch-scheduler.ts mirror-symlink
   silent-no-op bug affects 5 more scripts that were never checked
-status: todo
+status: needs-human
 labels:
   - gap
   - defect
-  - milestone-candidate
 parent: null
 children: []
 extra: {}
 ---
+## Resolution, closed (2026-07-28)
+
+Duplicate of the pre-existing `gap-touches-orthogonality-symlink-isdirect-mismatch`, found the same
+day this task was filed. That task already had real `git stash`-based reproduction evidence for
+`touches-orthogonality-check.ts`/`anti-drift-touches-check.ts` and predates this one; its stale
+`concurrent-batch-scheduler.ts` scope item has been corrected (already fixed elsewhere) and the 3
+additional scripts this task found (`routine-file-gate.ts`, `routine-scheduler.ts`,
+`serial-fanin-absorb.ts`) plus its "enumerate symlinks, don't hardcode" regression-test design have
+been merged into it. Superseded by, and closed in favor of, `gap-touches-orthogonality-symlink-
+isdirect-mismatch` — no further work should land against this file. AC/DoD checkboxes below are left
+unticked (DIR-020: they were never executed under this task's own identity).
+
 ## Finding
 
 `gap-config-wiring-check-symlink-noop` (closed `done` via M-DIR119-C-CANARY, 2026-07-27) fixed the

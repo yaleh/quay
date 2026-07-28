@@ -7,11 +7,32 @@ labels:
   - gap
   - defect
   - milestone-candidate
+  - human-steered
 parent: null
 children: []
 extra:
   schema: v1
 ---
+## Proposal
+
+Rewrite the DRAIN Dispose-phase `agent()` prompt so it can no longer reconstruct a task body from a
+JSON-escaped intermediate representation — either by instructing it to use the Provider ABI's own
+`body` field value directly (never a shell-printed/`--json`-piped copy), or by moving the actual
+append operation out of the agent's freeform text handling into a small deterministic script step
+the agent only invokes with arguments (id, section text). Add a mechanical post-write verification
+in the Dispose/Verify phase that catches this exact corruption shape (implausible line-count
+shrinkage, or literal `\n`/`\t` two-character sequences where real whitespace is expected) and fails
+closed rather than trusting the workflow's own `{"failed":[]}` summary, which did not catch this the
+first time. Retrofitted with a `## Proposal`/`## Plan`/`## Acceptance Criteria` structure
+(2026-07-28) to bring this task into schema conformance; no change to the Finding/Requested
+action substance below, which was already real and root-caused.
+
+## Plan
+
+N/A — directive resolved via a human-steered milestone (this touches
+`.claude/workflows/drain-directives.js`, a driver execution-chain script — quay-directive skill
+step-4 override applies).
+
 ## Finding
 
 A real `Workflow({name:"drain-directives", args:{workspaceRoot:"/home/yale/work/quay"}})` call
@@ -79,18 +100,37 @@ rendering is corrupted for human/mechanical-tool readability). A human skimming 
    followed by non-whitespace in a position that would only appear from bad escaping — fail-closed,
    flag for human review rather than silently accepting a corrupted write.
 
-## Definition of Done
+## Acceptance Criteria
 
-- [ ] Root cause identified from a real transcript (not speculation).
+- [ ] Root cause identified from a real transcript (the Dispose-phase agent's own `agent-*.jsonl` in
+  `subagents/workflows/wf_bb989746-4a0/`) — not speculation about which tool call round-tripped the
+  body through JSON-escaping.
 - [ ] Dispose-phase prompt (or its underlying mechanism) changed to prevent this class of
-  corruption, landed on `master`.
+  corruption, landed on `master` in both `.claude/workflows/drain-directives.js` and
+  `plugin/workflows/drain-directives.js`, byte-identical.
+- [ ] The Verify/Dispose phase gains a mechanical post-write check — re-`task_get` each disposed
+  directive and fail closed on implausible line-count shrinkage or literal `\n`/`\t` escape
+  sequences where real whitespace is expected — since the original run's own `{"failed":[]}`
+  summary and `## DRAIN disposition` presence check both silently passed on all 3 corrupted files.
 - [ ] A real subsequent DRAIN run disposing ≥3 directives with non-trivial bodies (100+ lines each)
   produces zero corrupted bodies — verified by real line-count/content inspection post-run, not
-  trusted from the workflow's own `{"failed":[]}` summary (which did NOT catch this corruption —
-  a real, disclosed gap in the workflow's own Verify phase too, worth folding into this same fix:
-  the Verify phase's own `## DRAIN disposition` presence check passed on all 3 corrupted files,
-  since the section technically existed — just unreadable — so Verify's own check needs to also
-  sanity-check body structure, not just section presence).
+  trusted from the workflow's own summary.
+
+## Definition of Done
+
+Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply. Per DIR-026
+Reading A, a code change alone is insufficient — the real subsequent DRAIN run above is required
+evidence, not asserted.
+
+- [ ] Landed on `master` under human-steered discipline (drain-directives.js is a driver
+  execution-chain script).
+- [ ] The mechanical post-write corruption check is real and independently re-run, not just
+  described.
+
+## Touches
+
+- .claude/workflows/drain-directives.js
+- plugin/workflows/drain-directives.js
 
 ## DRAIN disposition
 
