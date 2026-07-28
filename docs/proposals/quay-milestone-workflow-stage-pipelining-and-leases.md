@@ -1,5 +1,14 @@
 # Milestone workflow stage pipelining and lease-scoped concurrency for Quay
 
+- **2026-07-28 correction:** this proposal's original context assumed that the
+  then-current `execute-milestone.js` Build phase already used a per-milestone
+  worktree. That premise was false for the live implementation: commit `4191a31`
+  removed `isolation: 'worktree'`, and M187–M191 built directly in the shared
+  primary checkout. Treat every statement below that says “current workflow already
+  uses worktrees” as a target/precondition, not a description of current behavior.
+  `DIR-123` now owns restoring real per-milestone worktree isolation. See
+  [`milestone-workflow-performance-and-capability-regression-analysis.md`](../milestone-workflow-performance-and-capability-regression-analysis.md)
+  for the implementation/history/session evidence and updated sequencing.
 - **Status:** proposal / architecture discussion only. This document does not
   change the active loop, enable new concurrency, create an implementation
   directive, or authorize a runtime-generation upgrade.
@@ -8,9 +17,10 @@
   concurrency (M186 and M187), but also exposed the limits of the current
   batch-and-barrier model: conservative milestone-wide touch exclusion, shared
   Git index hazards, a long Build-to-Audit tail, and full-suite resource
-  contention. This proposal preserves the current one-workflow/one-worktree
-  milestone unit and increases throughput by pipelining workflow stages across
-  milestones, applying leases only to conflicting effects and resources.
+  contention. This proposal preserves the one-workflow-per-milestone unit,
+  restores the missing one-worktree-per-milestone isolation boundary, and
+  increases throughput by pipelining workflow stages across milestones,
+  applying leases only to conflicting effects and resources.
 - **Related:**
   [`quay-adaptive-task-packing-and-overlap-concurrency.md`](./quay-adaptive-task-packing-and-overlap-concurrency.md)
   changes SELECT and milestone boundaries. ·
@@ -26,7 +36,8 @@
 
 ## 1. Decision summary
 
-Quay should retain the existing milestone execution unit:
+Quay should retain the existing workflow-level milestone unit while restoring
+the worktree boundary the live implementation lost:
 
 ```text
 one selected milestone
@@ -87,11 +98,11 @@ This is safe in principle but leaves throughput on the table:
 - a fixed `concurrency` number ignores the very different cost of source edits,
   focused tests, full-suite tests, audits, and Land.
 
-### 2.2 Worktrees isolate files, not all effects
+### 2.2 Worktrees must be restored, but will not isolate all effects
 
-The current milestone workflow already uses worktrees, which is the correct
-foundation. Worktrees isolate checkout state and ordinary edits, but do not by
-themselves isolate:
+The live milestone workflow does not currently use worktrees; `DIR-123` owns
+restoring that necessary foundation. Once restored, worktrees will isolate
+checkout state and ordinary edits, but will not by themselves isolate:
 
 - the repository's shared index when a worker accidentally operates on the
   primary worktree;
@@ -126,9 +137,10 @@ have overlapped more of that interval under a rolling stage scheduler.
 
 M188 showed the opposite failure mode: multiple concurrent workers and a full
 repository suite caused existing typecheck integration tests to hit 60-second
-timeouts. The same tests passed in isolation. Worktree isolation prevented
-source collision but did not prevent resource contention. Increasing an
-undifferentiated concurrency integer can therefore reduce throughput.
+timeouts. The same tests passed in isolation. Worktree isolation would prevent
+source collision but would not prevent this resource contention. Increasing
+an undifferentiated concurrency integer can therefore reduce throughput even
+after `DIR-123` lands.
 
 ## 3. Scope and relationship to DIR-119
 
@@ -619,4 +631,3 @@ A future Plan should require at least:
    completion order is no longer dispatch order.
 7. What measured stale-work and refutation thresholds disable O4/O5
    automatically and return the workspace to batch or serial mode.
-
