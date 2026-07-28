@@ -74,3 +74,47 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/backlog.md`
 - `tasks/DIR-119-C.md`
 - runtime-generation and wiring-audit receipts selected by the checked Plan
+
+## Audit disposition (2026-07-27/28, real run + independent wiring audit, session
+`13efe277-45ff-4563-bcfe-fd2c3db3e2a5`) — AC/DoD boxes intentionally left unticked
+
+The real M-DIR119-C-CANARY milestone ran (commits `23f43d5` Build, `044a807` Land) and was given a
+fresh independent wiring audit. Recorded here for traceability; per DIR-020 the checkboxes above stay
+`- [ ]` because the audit did NOT confirm the full AC set — ticking a subset would misrepresent this
+task as partially adjudicated when what actually happened is a mixed verdict on genuinely different
+claims bundled into this one directive.
+
+**Confirmed real (durable primary evidence, not asserted):**
+- A real `select-preflight.ts --json` invocation genuinely synthesized this exact 7-task composite
+  as its top-scored candidate over 19 rejected alternatives and a recorded runner-up
+  (`composite:DIR-099+DIR-103+DIR-104`, score 2.38) — not hand-typed. (Durability caveat: the only
+  surviving trace is the session transcript plus a `/tmp` file that could be garbage-collected; the
+  charter's claim that this JSON was "pasted in full in the committed iteration report" is false —
+  `milestones/M-DIR119-C-CANARY/iterations/iteration-0.md` contains no such content.)
+- Atomic Land: all 7 member tasks landed `status: done` with consistent accounting
+  (`milestone_counter` 189→190 exactly once, one dashboard entry, matching backlog rows).
+- Spot-checked substance of 2 of 7 member tasks (DIR-070, gap-config-wiring-check-symlink-noop) was
+  real and independently reproduced, not rubber-stamped.
+
+**NOT confirmed — this task's own AC #5 and #10 are unmet by the current implementation:**
+- No phase-DAG Build: Build ran as one monolithic agent covering all 7 tasks, not per-manifest-phase
+  dispatch.
+- No read-only audit shards: exactly one Audit agent ran (not per the manifest's 4 declared
+  `auditShardIds`), and it directly wrote task files/`dashboard.md`/the absorb entry — not read-only.
+- No deterministic Reconcile: `execute-milestone.js` has no `Reconcile` phase; `composite-reconcile.ts`
+  is real and tested but has zero production callsites.
+
+**Found afterward by direct code reading (NOT caught by the dispatched independent audit itself —
+its own checklist verified journal call-counts and AC-citation evidence but did not trace production
+import graphs or exercise the Gate-phase failure branch):**
+- No automated process converts a SELECT-produced `MilestoneCandidate.taskIds` into the manifest's
+  `phases[]`/`auditShards[]` structure; the manifest used here was hand-authored. The only
+  phase/shard-producing code (`makeValidCompositeFixture`) is explicitly test-fixture-only.
+- Gate-phase failure handling mis-attributes any member's gate failure to `_primaryTaskId` only
+  (did not trigger this run — all 7 gates passed).
+
+**Disposition:** this task's SELECT-integration claim is genuinely proven; its execution-architecture
+claim (phase-DAG/read-only-shard/Reconcile) is not. Closing the gap — plus the two independently
+found defects and a fix to the audit's own blind spot — is now **[[DIR-119-D]]**. This task should be
+re-adjudicated (checkboxes ticked where warranted, by a fresh independent audit, not self-service)
+only after DIR-119-D lands with real evidence.

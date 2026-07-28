@@ -170,6 +170,17 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/OUTER-LOOP.md`
 - `plugin/test/plugin-packaging.test.mjs`
 
+## Follow-up (2026-07-28)
+
+DIR-119-C's real cold-generation run (M-DIR119-C-CANARY) confirmed this task's own repeated
+"operational wiring remains DIR-119-C's job" carve-out was accurate: the checked, tested
+`composite-build/audit/reconcile/land.ts` modules delivered here still had zero-to-selftest-only
+production callsites after DIR-119-C ran. Literally wiring them into `execute-milestone.js`
+(plus fixing an independently-discovered Gate-phase failure-attribution defect and adding a real
+manifest phase/shard synthesis step, which also does not exist yet) is now [[DIR-119-D]]'s scope.
+This task's own AC/DoD are not reopened — they accurately described what was delivered here and
+what was explicitly deferred.
+
 ## Execution record
 
 - **Milestone:** M189
