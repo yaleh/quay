@@ -219,6 +219,35 @@ if (typeof _rawFindings === 'number') {
 }
 _upsertFindings(Array.isArray(_rawFindings) ? _rawFindings : [], 0)
 
+// ── DIR-117-B/M195 (AC #4): MECHANICAL mechanism-claim wiring coverage ──────────────
+// ProposalReview now calls wiring-coverage-check.ts's REAL checkWiringCoverage() function directly
+// — NOT prompt-only LLM guidance (the exact "prompt-guidance mistaken for production wiring" defect
+// M191's independent audit §3 found and DIR-122's corrected AC6 forbids). Workflow scripts cannot
+// `import` (sandboxed/resumable), so we dispatch an agent to run the module's CLI — the SAME
+// dispatch pattern the Receipt and Prepared phases already use for milestone-preparation-check.ts,
+// no new mechanism class. The SCRIPT (not the LLM) then merges the returned BLOCKING findings into
+// the typed ledger via the existing `_upsertFindings(..., 0)` path above, so this phase's
+// open-blocking count increments by the function's REAL return value (`findings.length`), and the
+// ledger is hash-bound into the receipt via the Receipt phase's `--ledger` flag. The LLM reviewer's
+// prompt-level wiring step (review item 2) is RETAINED as a complementary heuristic — no longer the
+// only check. A non-parseable verdict (agent crash / CLI exit 2) fails the phase CLOSED, mirroring
+// the revise-failed `needs-human` path, rather than silently skipping coverage.
+const _wiringCheckScript = 'experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts'
+const _wiringVerdict = await agent(
+  `Run exactly this command and return its parsed stdout JSON:
+node --experimental-strip-types ${_wiringCheckScript} --task tasks/${_taskId}.md
+This is the DIR-117-B/M195 mechanism-claim wiring coverage check — it calls the real checkWiringCoverage() function on the task's '## Proposal' vs '## Acceptance Criteria' and prints a JSON verdict on stdout shaped {ok, code, message, claims, findings}. Return that JSON verbatim: {ok: <boolean>, code: <one of wiring-coverage-complete | wiring-coverage-none-claimed | wiring-coverage-uncovered>, findings: <the findings array EXACTLY as printed, each {subsystem, summary, severity, blocking, evidence, claimRef, disposition}>}. If the command exits non-zero or prints no parseable JSON, return {ok: false, code: "wiring-cli-failed", findings: []}.`,
+  { label: 'wiring-coverage-check', phase: 'ProposalReview',
+    schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, code: { type: 'string' }, findings: { type: 'array', items: _findingSchema } } } }
+)
+const _wiringVerdictCodes = ['wiring-coverage-complete', 'wiring-coverage-none-claimed', 'wiring-coverage-uncovered']
+if (!_wiringVerdict || !_wiringVerdictCodes.includes(_wiringVerdict.code)) {
+  log(`ProposalReview wiring-coverage sub-step FAILED — no parseable verdict (${_wiringVerdict?.code || 'no-result'}); failing the phase closed rather than skipping coverage.`)
+  return { outcome: 'needs-human', reason: 'wiring-coverage-check-failed', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+}
+_upsertFindings(Array.isArray(_wiringVerdict.findings) ? _wiringVerdict.findings : [], 0)
+log(`ProposalReview wiring coverage: ${_wiringVerdict.code} — merged ${Array.isArray(_wiringVerdict.findings) ? _wiringVerdict.findings.length : 0} blocking wiring finding(s) from checkWiringCoverage()'s real return value.`)
+
 const _mechanismCount = Number.isFinite(_fullReviewResult?.mechanismCount) ? _fullReviewResult.mechanismCount : undefined
 let _deltaRound = 0
 let _terminalReason = null

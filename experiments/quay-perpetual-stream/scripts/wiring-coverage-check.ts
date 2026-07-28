@@ -28,6 +28,9 @@
 // backticks. This is an explicit, accepted limitation of a mechanical gate, not an oversight (same
 // posture as task-schema.ts's own documented NON-GOAL for semantic emptiness).
 
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
 const WIRING_VERB_RE = /\b(invokes?|calls?|dispatches?|enforces?|wires?|owns?|routes?|delegates?)\b/i;
 const EVIDENCE_RE = /\b(real|production|callsite|call site|reachability|reachable|evidence|wired|confirm(?:ed|s|ation)?|reproduc\w*|verifi(?:ed|es|cation)?|proven?|proves?)\b/i;
 
@@ -132,4 +135,100 @@ export function checkWiringCoverage(sourceSectionText, acSectionText) {
     claims,
     uncovered: [],
   };
+}
+
+// ── CLI main (DIR-117-B/M195) — the grep-confirmable PRODUCTION call site ────────────
+// Workflow scripts (prepare-milestone.js) cannot `import` (sandboxed/resumable — the file's own
+// no-import convention), so the ProposalReview phase dispatches an agent to run THIS CLI and
+// returns the parsed verdict. That is the SAME dispatch pattern the Receipt and Prepared phases
+// already use for milestone-preparation-check.ts — no new mechanism class is introduced, and the
+// call site stays grep-confirmable in a plain-text workflow file. `checkWiringCoverage()` above
+// remains the ONE assertion; this block only adapts its return value to the typed finding-ledger
+// shape the workflow already consumes — it does NOT re-implement any claim extraction (DIR-122's
+// AC forbids a second implementation).
+//
+// Usage: node --experimental-strip-types <this-file> --task <path/to/task.md>
+// Prints a JSON verdict on stdout:
+//   { ok, code, message, claims: [...], findings: [ <one BLOCKING typed ledger finding per uncovered claim> ] }
+// The `findings` array is in the exact shape prepare-milestone.js's `_upsertFindings(..., 0)`
+// already consumes ({subsystem, summary, severity:"blocker", blocking:true, evidence, claimRef,
+// disposition}), so the workflow merges them mechanically: the ProposalReview phase's open-blocking
+// count increments by `findings.length` from THIS function's real return value, not an LLM's
+// independent judgment. Exit codes: 0 = verdict produced (even when uncovered findings exist — the
+// verdict IS the signal); 2 = usage/IO error (no --task, unreadable file) — the workflow fails the
+// ProposalReview phase CLOSED on a non-parseable result rather than silently skipping coverage.
+
+// Extract the raw text of one `## <heading>` section (everything up to the next `## ` heading or
+// EOF), mirroring the section semantics task-schema.ts's extractSection relies on — kept local and
+// minimal here so this module stays dependency-free (the one source both callers share).
+function extractSectionForCli(body, heading) {
+  const lines = body.split(/\r?\n/);
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const headRe = new RegExp(`^##\\s+${escaped}\\s*$`);
+  const out = [];
+  let inSection = false;
+  for (const line of lines) {
+    if (headRe.test(line)) {
+      inSection = true;
+      continue;
+    }
+    if (inSection && /^##\s+/.test(line)) break;
+    if (inSection) out.push(line);
+  }
+  return out.join("\n").trim();
+}
+
+// Map each uncovered claim to a BLOCKING typed finding in the ledger shape ProposalReview consumes.
+function wiringFindingsFromUncovered(uncovered) {
+  return (uncovered || []).map((claim, i) => ({
+    subsystem: "wiring-coverage",
+    summary: `Mechanism claim has no matching, evidence-requiring AC item: "${claim.sentence.slice(0, 120)}${claim.sentence.length > 120 ? "…" : ""}"`,
+    severity: "blocker",
+    blocking: true,
+    evidence: `checkWiringCoverage() returned uncovered claim #${i + 1}; identifiers: ${claim.identifiers.map((id) => "`" + id + "`").join(", ")}`,
+    claimRef: claim.identifiers.join("+"),
+    disposition: "unresolved",
+  }));
+}
+
+const _runAsCli = (() => {
+  try {
+    return (
+      typeof process !== "undefined" &&
+      Array.isArray(process.argv) &&
+      typeof process.argv[1] === "string" &&
+      import.meta.url === pathToFileURL(process.argv[1]).href
+    );
+  } catch {
+    return false;
+  }
+})();
+
+if (_runAsCli) {
+  const argv = process.argv.slice(2);
+  const taskIdx = argv.indexOf("--task");
+  const taskPath = taskIdx >= 0 ? argv[taskIdx + 1] : undefined;
+  if (!taskPath) {
+    console.error("usage: wiring-coverage-check.ts --task <path/to/task.md>");
+    process.exit(2);
+  }
+  let body;
+  try {
+    body = readFileSync(taskPath, "utf8");
+  } catch (e) {
+    console.error(`wiring-coverage-check: cannot read task file ${taskPath}: ${e.message}`);
+    process.exit(2);
+  }
+  const proposalText = extractSectionForCli(body, "Proposal");
+  const acText = extractSectionForCli(body, "Acceptance Criteria");
+  const verdict = checkWiringCoverage(proposalText, acText);
+  const findings = wiringFindingsFromUncovered(verdict.uncovered);
+  console.log(
+    JSON.stringify(
+      { ok: verdict.ok, code: verdict.code, message: verdict.message, claims: verdict.claims, findings },
+      null,
+      2
+    )
+  );
+  process.exit(0);
 }

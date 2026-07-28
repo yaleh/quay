@@ -1,0 +1,2 @@
+{"mirror":".claude/workflows/execute-milestone.js","argsPreparationReceiptFile":null,"outcome":"revision-needed","reason":"preparation-receipt-missing","phase":"Prepared","buildReached":false,"phasesDispatched":["Verify","Prepared"]}
+{"mirror":"plugin/workflows/execute-milestone.js","argsPreparationReceiptFile":null,"outcome":"revision-needed","reason":"preparation-receipt-missing","phase":"Prepared","buildReached":false,"phasesDispatched":["Verify","Prepared"]}

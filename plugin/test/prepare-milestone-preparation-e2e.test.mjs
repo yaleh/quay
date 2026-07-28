@@ -160,6 +160,18 @@ function makeAgentMock(taskFileOnDisk) {
       return { findings: [], mechanismCount: 1, proposalHash: 'hash-round-0', sessionId: sessions.reviewer };
     }
 
+    if (label === 'wiring-coverage-check') {
+      // DIR-117-B/M195 (AC #4): ProposalReview now dispatches the REAL checkWiringCoverage() CLI.
+      // Run it on the actual task file under review — the e2e fixture's RECONCILED_PROPOSAL has no
+      // wiring-verb+>=2-backtick claims, so this yields 0 findings and the flow still reaches
+      // `prepared`. The workflow script merges the (empty) findings via its own _upsertFindings path.
+      sessions.wiringCheck = 'sess-wiring-check';
+      const res = runShell(`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts --task ${JSON.stringify(taskFileOnDisk)}`);
+      if (res.status !== 0) return { ok: false, code: 'wiring-cli-failed', findings: [] };
+      const verdict = JSON.parse(res.stdout);
+      return { ok: verdict.ok, code: verdict.code, findings: verdict.findings };
+    }
+
     if (label === 'plan-author') {
       sessions.planAuthor = 'sess-plan-author';
       planFile = planFileFromPrompt(prompt);

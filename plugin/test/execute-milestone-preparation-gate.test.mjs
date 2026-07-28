@@ -6,8 +6,10 @@
 // yet drives this through execute-milestone.js itself end-to-end (only the standalone checker is
 // unit-tested)". milestone-preparation-check.test.mjs proves checkPreparation() itself is correct
 // in isolation; it does NOT prove execute-milestone.js's own `Prepared` phase branching (the
-// `if ($a.preparationReceiptFile) { ... return {outcome:'revision-needed', phase:'Prepared'} ... }`
-// control flow) actually calls it and actually returns before Build on failure.
+// enforced-by-default control flow since DIR-117-B/M195: `phase('Prepared')` is unconditional; a
+// MISSING `preparationReceiptFile` returns `{outcome:'revision-needed', reason:'preparation-receipt-
+// missing', phase:'Prepared'}` before Build, and a supplied-but-broken receipt returns the same
+// shape via the real checker) actually calls it and actually returns before Build on failure.
 //
 // METHOD (mirrors execute-milestone-disposition-conformance.test.mjs's documented scope
 // discipline — a real LLM agent turn cannot be driven by a static test): load the REAL,
@@ -270,14 +272,20 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     }
   });
 
-  test(`[${mirrorName}] Prepared phase is SKIPPED (back-compat) when preparationReceiptFile is omitted — reaches Build unconditionally`, async () => {
+  test(`[${mirrorName}] Prepared phase FAILS CLOSED (enforced default since DIR-117-B/M195) when preparationReceiptFile is omitted — revision-needed before Build, Build never dispatched`, async () => {
+    // RED-then-GREEN honest flip of the former "SKIPPED (back-compat) — reaches Build" case: the
+    // pre-DIR-117-B opt-in skip is retired. A MISSING receipt is now a caller-fixable shape error
+    // that fails closed with a distinct `preparation-receipt-missing` reason BEFORE Build — so the
+    // Build short-circuit sentinel must NOT appear (proving Build was never dispatched).
     const scratchDir = freshScratchDir();
     try {
       const args = scratchArgs(scratchDir, { receiptFile: undefined });
       writeScratchTaskCharter(scratchDir, args);
       const result = await runExecuteMilestone(workflowFile, args);
-      assert.equal(result.outcome, 'needs-human');
-      assert.equal(result.reason, 'test-short-circuit-after-build');
+      assert.equal(result.outcome, 'revision-needed', JSON.stringify(result));
+      assert.equal(result.reason, 'preparation-receipt-missing');
+      assert.equal(result.phase, 'Prepared');
+      assert.notEqual(result.reason, 'test-short-circuit-after-build', 'Build must NOT be reached when the receipt is omitted');
     } finally {
       fs.rmSync(scratchDir, { recursive: true, force: true });
     }

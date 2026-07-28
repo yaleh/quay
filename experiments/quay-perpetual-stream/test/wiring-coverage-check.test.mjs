@@ -3,7 +3,26 @@
 // same claim with a matching, evidence-requiring AC item PASSES.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
+import { readFileSync, writeFileSync, rmSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { extractMechanismClaims, bulletsOf, checkWiringCoverage } from "../scripts/wiring-coverage-check.ts";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CLI = path.join(__dirname, "..", "scripts", "wiring-coverage-check.ts");
+const FIXTURES = path.join(__dirname, "..", "fixtures", "preparation");
+const RED_FIXTURE = path.join(FIXTURES, "wiring-uncovered-claim-task.md");
+
+// Run the CLI exactly the way prepare-milestone.js's ProposalReview dispatch does.
+function runCli(taskPath) {
+  const cmd = `node --experimental-strip-types ${JSON.stringify(CLI)} --task ${JSON.stringify(taskPath)}`;
+  try {
+    return { status: 0, stdout: execSync(cmd, { encoding: "utf8" }) };
+  } catch (e) {
+    return { status: typeof e.status === "number" ? e.status : 1, stdout: e.stdout ? e.stdout.toString() : "" };
+  }
+}
 
 test("extractMechanismClaims: wiring-verb sentence with >=2 backtick identifiers is a claim", () => {
   const text = "The new `foo.ts` module invokes `bar.ts` to enforce read-only access on the shard.";
@@ -68,4 +87,80 @@ test("checkWiringCoverage: identifiers matched but no evidence keyword in the bu
   const ac = "- [ ] `a.ts` and `b.ts` are both mentioned here as new files";
   const result = checkWiringCoverage(source, ac);
   assert.equal(result.ok, false);
+});
+
+// ── DIR-117-B/M195 AC#4: the CLI is the grep-confirmable PRODUCTION call site the ProposalReview
+// phase dispatches. It must emit one BLOCKING typed ledger finding per uncovered claim, straight
+// from checkWiringCoverage()'s real return value — this is the module boundary the workflow consumes. ──
+test("CLI: RED fixture -> verdict with >=1 BLOCKING finding from the function's real return value", () => {
+  const { status, stdout } = runCli(RED_FIXTURE);
+  assert.equal(status, 0, `CLI must exit 0 (the verdict is the signal):\n${stdout}`);
+  const verdict = JSON.parse(stdout);
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.code, "wiring-coverage-uncovered");
+  assert.ok(Array.isArray(verdict.findings) && verdict.findings.length >= 1, "must emit >=1 blocking finding");
+
+  // Every emitted finding is a BLOCKING ledger entry in the exact shape _upsertFindings consumes —
+  // the increment path at the boundary prepare-milestone.js dispatches to (see the dedicated
+  // "finding count equals checkWiringCoverage()'s uncovered count" test below for the equality).
+  for (const f of verdict.findings) {
+    assert.equal(f.subsystem, "wiring-coverage");
+    assert.equal(f.severity, "blocker");
+    assert.equal(f.blocking, true);
+    assert.equal(f.disposition, "unresolved");
+    assert.ok(f.summary && f.evidence && f.claimRef, "finding carries the ledger shape _upsertFindings consumes");
+  }
+});
+
+test("CLI: finding count equals checkWiringCoverage()'s uncovered count (same source of truth)", () => {
+  // Independently recompute via the exported function on the fixture's sections and compare to the
+  // CLI's emitted findings — they must be the same number (no LLM, no second implementation).
+  const body = readFileSync(RED_FIXTURE, "utf8");
+  const section = (heading) => {
+    const re = new RegExp(`^##\\s+${heading}\\s*$`, "m");
+    const start = body.search(re);
+    if (start < 0) return "";
+    const rest = body.slice(start).replace(re, "");
+    const next = rest.search(/^##\s+/m);
+    return (next < 0 ? rest : rest.slice(0, next)).trim();
+  };
+  const direct = checkWiringCoverage(section("Proposal"), section("Acceptance Criteria"));
+  const verdict = JSON.parse(runCli(RED_FIXTURE).stdout);
+  assert.equal(verdict.findings.length, direct.uncovered.length);
+  assert.ok(verdict.findings.length >= 1);
+});
+
+test("CLI: no --task -> usage error exits 2 (workflow fails the phase closed)", () => {
+  const cmd = `node --experimental-strip-types ${JSON.stringify(CLI)}`;
+  let status = 0;
+  try {
+    execSync(cmd, { encoding: "utf8" });
+  } catch (e) {
+    status = typeof e.status === "number" ? e.status : 1;
+  }
+  assert.equal(status, 2);
+});
+
+test("CLI: a Proposal whose claims are all AC-covered -> 0 findings, ok:true", () => {
+  // A covered variant: write a tiny temp task whose single claim has a matching evidence AC item.
+  const tmp = path.join(FIXTURES, `wiring-covered-${process.pid}.md`);
+  try {
+    writeFileSync(
+      tmp,
+      [
+        "---", "id: FIXTURE-WIRING-COVERED", "title: covered", "status: todo",
+        "labels:", "  - fixture", "extra:", "  schema: v1", "---",
+        "## Proposal", "",
+        "The new `alpha.ts` module invokes `beta.ts` to enforce ordering.", "",
+        "## Acceptance Criteria", "",
+        "- [ ] Real production callsite evidence confirms `alpha.ts` invokes `beta.ts`.", "",
+      ].join("\n")
+    );
+    const verdict = JSON.parse(runCli(tmp).stdout);
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.code, "wiring-coverage-complete");
+    assert.equal(verdict.findings.length, 0);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
 });

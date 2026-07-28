@@ -3,7 +3,7 @@ export const meta = {
   description: 'Given a SELECTed milestone task, run the full execution pipeline: it0 checks → inner iteration build → adversarial audit → absorb gates → land. Replaces OUTER-LOOP.md steps 4–7 (DIR-067, 2026-07-24). Accepts both legacy {taskId,...} and DIR-119-B (M189) arbitrary-width {milestoneCandidate:{taskIds,...}, compositeManifestFile,...} argument shapes, normalized to one internal task array (never rejected on array length) — see composite-args.ts/composite-contracts.ts. Returns {outcome: "done"|"needs-human"|"building"} — "building" means a background task was dispatched; the caller polls and resumes.',
   phases: [
     { title: 'Verify', detail: 'Step 4 — run all 5 it0 systematic-explore checks + composite-preflight (DIR-119-B)' },
-    { title: 'Prepared', detail: 'DIR-117/M191 — opt-in (args.preparationReceiptFile) fail-closed Proposal/Plan preparation-receipt check before Build; omitted param = skipped (pre-DIR-117-B back-compat)' },
+    { title: 'Prepared', detail: 'DIR-117-B/M195 — ENFORCED-BY-DEFAULT fail-closed Proposal/Plan preparation-receipt check before Build; a missing args.preparationReceiptFile returns {outcome:"revision-needed", reason:"preparation-receipt-missing", phase:"Prepared"} before Build (opt-in skip retired)' },
     { title: 'Build',  detail: 'Step 5 — class-route + dispatch inner iteration agent' },
     { title: 'Audit',  detail: 'Step 6 — adversarial fresh-context acceptance audit' },
     { title: 'Gate',   detail: 'Step 6 — all absorb-phase mechanical gate checks' },
@@ -182,43 +182,47 @@ if (verifyFailed) {
 }
 log(`Verify phase PASSED — all ${allVerifyResults.length} it0 checks green (${scriptCount} script + ${_dmEntry ? 1 : 0} agent).`)
 
-// ── Phase: Prepared (DIR-117/M191) ──────────────────────────────────────────────────
+// ── Phase: Prepared (DIR-117/M191; ENFORCED-BY-DEFAULT since DIR-117-B/M195) ─────────
 // Fail-closed pre-Build gate on the Proposal→Plan preparation receipt (milestone-preparation-
-// check.ts). OPT-IN via `$a.preparationReceiptFile`: a caller (OUTER-LOOP's `prepare(c)` step, once
-// wired into a live SELECT cycle — DIR-117-B's own scope) that supplies a receipt path gets the
-// real fail-closed check; a caller that omits it (every pre-DIR-117 dispatch, and this bootstrap
-// milestone's own dispatch per DIR-117's documented self-exemption note) is UNCHANGED — this phase
-// never retroactively blocks a dispatch shape that predates the preparation pipeline's live wiring.
-if ($a.preparationReceiptFile) {
-  phase('Prepared')
-  // DIR-117 iteration-2 item 5 / AC8's own 5th named condition ("a Plan whose touch set exceeds
-  // the declaration"): OPTIONAL `$a.declaredTouches` (an array of paths) makes the `touches-
-  // expanded` trigger reachable through a DIRECT execute-milestone invocation, not only via the
-  // batch scheduler's own re-assembly loop. Omitted (every pre-existing dispatch) → the exact
-  // original single-line prompt, byte-for-behavior unchanged (golden replay).
-  const _hasDeclaredTouches = Array.isArray($a.declaredTouches) && $a.declaredTouches.length > 0
-  const _declaredTouchesPath = `/tmp/prepared-declared-touches-${_milestone}-${_primaryTaskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.txt`
-  const preparedPrompt = _hasDeclaredTouches
-    ? `First write the task/charter's currently-declared '## Touches' set (one path per line, exactly as declared) to ${_declaredTouchesPath}:
+// check.ts). ENFORCED: every dispatch must supply `$a.preparationReceiptFile`. A MISSING receipt
+// fails closed before Build with `{outcome:"revision-needed", reason:"preparation-receipt-missing",
+// phase:"Prepared"}` — the same return shape a stale/failed receipt produces, with a distinct
+// reason code (a caller-fixable shape error, NOT a human-decision terminal; `needs-human` is
+// reserved for split/budget exhaustion). The pre-DIR-117-B opt-in skip (else-branch logging
+// "Prepared phase SKIPPED") is RETIRED — proven on M195's own real run (milestones/M195/
+// preparation.json + docs/plans/M195-dir-117-b.md) and its post-flip negative control
+// (milestones/M195/negative-control/). OUTER-LOOP's `prepare(c)` step produces a receipt for every
+// legitimate dispatch; a receipt-less dispatch is now always a caller bug, never a supported shape.
+phase('Prepared')
+if (!$a.preparationReceiptFile) {
+  log(`Prepared phase FAILED — preparation-receipt-missing: no preparationReceiptFile supplied (enforced-by-default since DIR-117-B/M195; the pre-DIR-117-B opt-in skip is retired).`)
+  return { outcome: 'revision-needed', reason: 'preparation-receipt-missing', phase: 'Prepared', verifyCacheUpdates }
+}
+// DIR-117 iteration-2 item 5 / AC8's own 5th named condition ("a Plan whose touch set exceeds
+// the declaration"): OPTIONAL `$a.declaredTouches` (an array of paths) makes the `touches-
+// expanded` trigger reachable through a DIRECT execute-milestone invocation, not only via the
+// batch scheduler's own re-assembly loop. Omitted (every pre-existing dispatch) → the exact
+// original single-line prompt, byte-for-behavior unchanged (golden replay).
+const _hasDeclaredTouches = Array.isArray($a.declaredTouches) && $a.declaredTouches.length > 0
+const _declaredTouchesPath = `/tmp/prepared-declared-touches-${_milestone}-${_primaryTaskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.txt`
+const preparedPrompt = _hasDeclaredTouches
+  ? `First write the task/charter's currently-declared '## Touches' set (one path per line, exactly as declared) to ${_declaredTouchesPath}:
 ${$a.declaredTouches.join('\n')}
 
 Then run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task tasks/${_primaryTaskId}.md --charter ${$a.charterFile} --receipt ${$a.preparationReceiptFile} --declared-touches ${_declaredTouchesPath}
 Return {ok: <exit code === 0>, code: <the PASS:/FAIL: code printed>, detail: <the full line printed>}.`
-    : `Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task tasks/${_primaryTaskId}.md --charter ${$a.charterFile} --receipt ${$a.preparationReceiptFile}
+  : `Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task tasks/${_primaryTaskId}.md --charter ${$a.charterFile} --receipt ${$a.preparationReceiptFile}
 Return {ok: <exit code === 0>, code: <the PASS:/FAIL: code printed>, detail: <the full line printed>}.`
-  const preparedResult = await agent(
-    preparedPrompt,
-    { label: 'preparation-check', phase: 'Prepared',
-      schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, code: { type: 'string' }, detail: { type: 'string' } } } }
-  )
-  if (!preparedResult || preparedResult.ok !== true) {
-    log(`Prepared phase FAILED — ${preparedResult?.code || 'no-result'}: ${preparedResult?.detail || '(agent returned nothing)'}`)
-    return { outcome: 'revision-needed', reason: preparedResult?.code || 'preparation-check-failed', phase: 'Prepared', verifyCacheUpdates }
-  }
-  log(`Prepared phase PASSED — ${preparedResult.code}: ${preparedResult.detail}`)
-} else {
-  log(`Prepared phase SKIPPED — no preparationReceiptFile supplied (pre-DIR-117-B dispatch shape; not yet the enforced default).`)
+const preparedResult = await agent(
+  preparedPrompt,
+  { label: 'preparation-check', phase: 'Prepared',
+    schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, code: { type: 'string' }, detail: { type: 'string' } } } }
+)
+if (!preparedResult || preparedResult.ok !== true) {
+  log(`Prepared phase FAILED — ${preparedResult?.code || 'no-result'}: ${preparedResult?.detail || '(agent returned nothing)'}`)
+  return { outcome: 'revision-needed', reason: preparedResult?.code || 'preparation-check-failed', phase: 'Prepared', verifyCacheUpdates }
 }
+log(`Prepared phase PASSED — ${preparedResult.code}: ${preparedResult.detail}`)
 
 // ── Phase: Build (step 5) ───────────────────────────────────────────────────────────
 phase('Build')

@@ -12,6 +12,10 @@ children: []
 extra:
   schema: v1
   dirStatus: applied
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-117-B
+    experiments/quay-perpetual-stream/charters/M195-dir117b-prepared-gate-real-proof.md
+    milestones/M195/absorb-entry.md
 ---
 **type:** execution
 

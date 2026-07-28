@@ -54,13 +54,18 @@ select =
      that IS the DIR-120/M192 defect this closes (10 consecutive full-regeneration rounds, ~3h15m, ~1.13M
      output tokens, never reaching PlanAuthor). Exhausting the cap/budget, or a split recommendation, returns
      `needs-human` with the ledger — a human decides next steps, never a silent auto-retry or auto-split.
-     ⊨ STATUS (M191/DIR-117, disclosed not hidden): the workflow + milestone-preparation-check.ts + fixtures
-     are landed and unit-tested; this OUTER-LOOP wiring point and execute-milestone's own `Prepared` phase
-     (see execute()) are landed; a real end-to-end SELECT→prepare→execute run proving this route operationally
-     has NOT yet happened — that is DIR-117-B's own scope (split per DIR-026 SPLIT-OR-COMMIT, same pattern as
-     DIR-119-A/B/C). Until DIR-117-B lands, execute-milestone's Prepared phase only enforces when the dispatch
-     explicitly supplies a `preparationReceiptFile` — omitting it is still accepted (bootstrap/back-compat), so
-     this landing does not itself block the live loop.
+     ⊨ STATUS (M195/DIR-117-B, ENFORCED — proven on a real milestone): the workflow + milestone-preparation-
+     check.ts + fixtures are landed, unit-tested, AND operationally proven — M195 ran the real
+     SELECT→prepare→execute route on DIR-117-B itself (milestones/M195/preparation.json + proposal-ledger.json
+     + docs/plans/M195-dir-117-b.md), with a real negative-control run (stale + missing receipt) returning
+     {outcome:"revision-needed", phase:"Prepared"} before Build (milestones/M195/negative-control/). The
+     pre-DIR-117-B opt-in skip is RETIRED: execute-milestone's `Prepared` phase is now ENFORCED-BY-DEFAULT —
+     every dispatch MUST supply a `preparationReceiptFile`; omitting it fails closed with
+     {outcome:"revision-needed", reason:"preparation-receipt-missing", phase:"Prepared"} before Build. The
+     `prepare(c)` step above produces that receipt for every legitimate dispatch, so the enforced contract does
+     not block the live loop. KNOWN EXPOSURE: any pending ad-hoc dispatch that predates a receipt (e.g. a queued
+     composite/DIR-119-B or DIR-124-series dispatch) MUST route its primary task through `prepare-milestone.js`
+     first — receipt-less dispatches are now always a caller bug, never a supported shape.
   → ∀c∈batch: schema_check(c)    -- scripts/task-schema-check.sh; FAIL → fix task, block dispatch
   → ∀c∈batch: size_check(c)      -- inherited_core."Milestone size definition"
   → ∀c∈batch: split_or_commit(c) -- DIR-026 MANDATORY; scripts/it0-split-or-commit-check.ts
@@ -116,15 +121,15 @@ batch_assemble(ranked) =
   ⊨ ill-declared Touches → deferred (conservative gating: parseTouches + checkTouchesPair)
 
 execute :: Params → {done, needs-human}
-execute(params) where |batch|=1 = invoke(".claude/workflows/execute-milestone.js", {taskId, charterFile, absorbEntryFile, preparationReceiptFile?})
+execute(params) where |batch|=1 = invoke(".claude/workflows/execute-milestone.js", {taskId, charterFile, absorbEntryFile, preparationReceiptFile})
   ⊨ absorb-entry pre-created: /tmp/m<NN>-absorb-entry.md (milestone id, charter path, Δv̂ from step 2)
   ⊨ dispatch-record at /tmp/m<NN>-dispatch-record.txt (created by Audit phase per M90)
-  ⊨ IS single-source (ADR-004, DIR-067): Verify(Build(5 it0 checks parallel)) → Prepared(DIR-117:
-     milestone-preparation-check.ts against `preparationReceiptFile` when the caller supplies one —
-     fail-closed with {phase:"Prepared", outcome:"revision-needed"} on missing/failed/stale receipt,
-     N/A Plan, or touch-set expansion; OMITTING the param is still accepted pending DIR-117-B's real
-     end-to-end proof, so this phase does not retroactively block dispatches that predate `prepare(c)`
-     being wired into a live SELECT cycle) → Build(class-route + inner iteration in isolated worktree)
+  ⊨ IS single-source (ADR-004, DIR-067): Verify(Build(5 it0 checks parallel)) → Prepared(DIR-117-B/M195,
+     ENFORCED-BY-DEFAULT: `preparationReceiptFile` is REQUIRED — milestone-preparation-check.ts runs against
+     it and the phase fails closed with {phase:"Prepared", outcome:"revision-needed"} on a MISSING param
+     (reason:"preparation-receipt-missing"), a missing/failed/stale receipt, N/A Plan, or touch-set expansion.
+     The pre-DIR-117-B opt-in skip is retired — proven on M195's real run + negative control; the `prepare(c)`
+     step above supplies the receipt for every legitimate dispatch) → Build(class-route + inner iteration in isolated worktree)
      → Audit(adversarial fresh-context; write-back AC/DoD ticks)
      → Gate(7 absorb gates parallel: vmeta-lag, impl-row, DoD meta-enforcer, dashboard-budget,
      tree-hygiene, worktree-branch-hygiene, audit-independence) → Land(merge→master + capture-prune

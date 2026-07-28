@@ -124,7 +124,7 @@ function freshScratchDir() {
 // makeMock — the shared "outer phase" mock (authors/adjudicate/plan-author/plan-check/receipt),
 // parameterized by `reviewHandlers` for the ProposalReview phase under test.
 function makeMock(taskFileOnDisk, reviewHandlers) {
-  const calls = { authors: [], adjudicator: 0, reviews: [], revises: [], planAuthor: 0, planCheckers: [] };
+  const calls = { authors: [], adjudicator: 0, reviews: [], revises: [], wiringChecks: 0, planAuthor: 0, planCheckers: [] };
   let planFile = null;
   let ledger = null;
 
@@ -145,6 +145,20 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
     if (label === 'proposal-review') {
       calls.reviews.push('full');
       return reviewHandlers.onFullReview(prompt);
+    }
+    if (label === 'wiring-coverage-check') {
+      // DIR-117-B/M195 (AC #4): the ProposalReview phase now calls the REAL checkWiringCoverage()
+      // via its CLI. A test may stub the verdict via reviewHandlers.onWiringCheck; the DEFAULT runs
+      // the real CLI on the actual task file under review (the generic convergence fixture's
+      // RECONCILED_PROPOSAL has no wiring-verb+>=2-backtick claims, so this yields 0 findings and
+      // leaves every pre-DIR-117-B assertion unchanged). The workflow script — not this mock —
+      // merges the returned findings into the ledger via its own _upsertFindings path.
+      calls.wiringChecks += 1;
+      if (typeof reviewHandlers.onWiringCheck === 'function') return reviewHandlers.onWiringCheck(prompt);
+      const res = runShell(`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts --task ${JSON.stringify(taskFileOnDisk)}`);
+      if (res.status !== 0) return { ok: false, code: 'wiring-cli-failed', findings: [] };
+      const verdict = JSON.parse(res.stdout);
+      return { ok: verdict.ok, code: verdict.code, findings: verdict.findings };
     }
     const reviseMatch = label.match(/^proposal-revise-round-(\d+)$/);
     if (reviseMatch) {
@@ -488,6 +502,57 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       assert.equal(bySubsystem.risk.disposition, 'accepted-risk');
     } finally {
       cleanup(scratchDir, planFile, args.milestoneId);
+    }
+  });
+
+  // ── AC#4 (DIR-117-B/M195): the ProposalReview phase calls wiring-coverage-check.ts's REAL
+  // checkWiringCoverage() and the phase's own open-blocking finding count increments by the
+  // function's real return value — NOT an LLM's independent judgment. The full LLM review reports
+  // ZERO findings here, so every blocking finding in the returned ledger can only have come from the
+  // mechanical wiring-coverage-check dispatch (the real CLI run on a fixture Proposal carrying 2
+  // uncovered mechanism claims). With maxDeltaRounds:0 the phase returns needs-human
+  // (delta-cap-exhausted) with a ledger whose wiring-finding count EQUALS the function's return. ────
+  test(`[${mirrorName}] DIR-117-B/M195 AC#4: ProposalReview finding count increments from checkWiringCoverage()'s real return value (not LLM judgment)`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel, { maxDeltaRounds: 0 });
+    const wiringFixture = path.join(FIXTURES, 'wiring-uncovered-claim-task.md');
+    const runWiringCli = () => {
+      const res = runShell(`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts --task ${JSON.stringify(wiringFixture)}`);
+      assert.equal(res.status, 0, `wiring CLI failed:\n${res.stdout}`);
+      return JSON.parse(res.stdout);
+    };
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        // LLM full review reports ZERO findings — any blocking finding below is the function's.
+        onFullReview: () => ({ findings: [], mechanismCount: 1, sessionId: 'sess-reviewer-0' }),
+        // Run the REAL checkWiringCoverage() CLI on the wiring fixture (uncovered claims).
+        onWiringCheck: () => {
+          const verdict = runWiringCli();
+          return { ok: verdict.ok, code: verdict.code, findings: verdict.findings };
+        },
+      });
+
+      assert.equal(calls.wiringChecks, 1, 'exactly one wiring-coverage-check dispatch in ProposalReview');
+      assert.equal(result.outcome, 'needs-human', JSON.stringify(result));
+      assert.equal(result.reason, 'delta-cap-exhausted');
+
+      // The function's real return value is the source of truth for the expected increment.
+      const expectedN = runWiringCli().findings.length;
+      assert.ok(expectedN >= 1, 'fixture must yield >=1 blocking wiring finding from the real function');
+
+      // The phase's ledger open-blocking count incremented by EXACTLY the function's return value,
+      // and the LLM review added nothing — every finding is the function's, BLOCKING/blocker.
+      const wiringFindings = result.ledger.filter((f) => f.subsystem === 'wiring-coverage');
+      assert.equal(wiringFindings.length, expectedN, 'ledger wiring-finding count === checkWiringCoverage() return value');
+      assert.equal(result.ledger.length, expectedN, 'LLM review added nothing — all findings are the function\'s');
+      for (const f of wiringFindings) {
+        assert.equal(f.blocking, true);
+        assert.equal(f.severity, 'blocker');
+        assert.equal(f.disposition, 'unresolved');
+        assert.equal(f.status, 'open');
+      }
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
     }
   });
 }
