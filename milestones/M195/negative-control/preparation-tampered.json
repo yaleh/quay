@@ -1,0 +1,95 @@
+{
+  "taskId": "DIR-117-B",
+  "milestoneId": "M195",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M195-dir117b-prepared-gate-real-proof.md",
+  "planFile": "docs/plans/M195-dir-117-b.md",
+  "ledgerFile": "milestones/M195/proposal-ledger.json",
+  "hashes": {
+    "proposal": "0931ba1f1c104b31bba621980ffaf5a6400b93bf9b32f6e97199f1b66d07bb8d",
+    "charter": "2cc7d4a9c5f160fc3fe0d4dbbcff6626ded100a611b226dc3a42d4d51a820aa5",
+    "plan": "21cc0566adb759a444b86d7b4ca18550c6f589a579ba5307706b729d36803a4a",
+    "sources": {
+      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "311e46da6c76b90e03e9ba1348764e3fbb48db756b1dc82ba38a60e9996c9329",
+      "experiments/quay-perpetual-stream/scripts/task-schema-check.ts": "ee5fec1b9f913257273b942a5826889c780cbf91df329726abbb00e24d47714d",
+      "plugin/scripts/sync-vendor.sh": "eeab416f656f146194e8228e353b52720a9851246a83c8535aca283784a0816c",
+      "plugin/test/plugin-packaging.test.mjs": "ec889ba797c4e312ad83a159d0ffe778b2ae05f50e7b9a873e062f434140553e",
+      "plugin/test/execute-milestone-disposition-conformance.test.mjs": "8c622cec10ad357ac21ef46849e1d4676e507dcc3ad3ed7e27b8ddfe799a50fe"
+    },
+    "ledger": "fa818992e11481f7b06f6e9d923a26338fd22e4b4398d71f64038f6fa4fa0df5"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 3,
+    "findings": 0
+  },
+  "touches": [
+    "tasks/DIR-117-B.md",
+    "docs/plans/M195-dir-117-b.md",
+    "experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts",
+    "plugin/scripts/wiring-coverage-check.ts",
+    "experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs",
+    "experiments/quay-perpetual-stream/fixtures/preparation/wiring-uncovered-claim-task.md",
+    ".claude/workflows/prepare-milestone.js",
+    "plugin/workflows/prepare-milestone.js",
+    "plugin/test/prepare-milestone-convergence.test.mjs",
+    "plugin/test/prepare-milestone-preparation-e2e.test.mjs",
+    ".claude/workflows/execute-milestone.js",
+    "plugin/workflows/execute-milestone.js",
+    "plugin/test/execute-milestone-preparation-gate.test.mjs",
+    "experiments/quay-perpetual-stream/OUTER-LOOP.md",
+    "milestones/M195/**"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+      },
+      {
+        "authorIdx": 2,
+        "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+    },
+    "proposalReviewer": {
+      "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+    },
+    "planAuthor": {
+      "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+      },
+      {
+        "round": 2,
+        "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+      },
+      {
+        "round": 3,
+        "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 1,
+    "deltaRounds": 0,
+    "proposalReviewRounds": 1,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785256169477,
+    "endedAtMs": 1785256169477,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "45197d88b076aa69"
+      }
+    ]
+  }
+}
