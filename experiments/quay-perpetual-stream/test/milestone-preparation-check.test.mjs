@@ -207,7 +207,11 @@ test("checkProvenanceDistinctness: FAIL — incomplete (missing plan-checker)", 
   assert.equal(r.code, "provenance-incomplete");
 });
 
-test("checkProvenanceDistinctness: FAIL — reviewer session equals an author's session (not a distinct context)", () => {
+// gap-provenance-sessionid-not-independence-signal (2026-07-28): a shared session id across roles
+// is EXPECTED for real prepare-milestone.js dispatches (every agent() sub-dispatch in one Workflow
+// run shares the parent session id by construction) and is no longer treated as a failure — the
+// check only verifies each role's run identity was recorded, not that ids differ across roles.
+test("checkProvenanceDistinctness: PASS — reviewer session equals an author's session (real agent()-in-Workflow shape; presence is what matters, not distinctness)", () => {
   const r = checkProvenanceDistinctness({
     proposalAuthors: [{ authorIdx: 1, sessionId: "same-session" }],
     adjudicator: { sessionId: "adj" },
@@ -215,11 +219,11 @@ test("checkProvenanceDistinctness: FAIL — reviewer session equals an author's 
     planAuthor: { sessionId: "pa" },
     planCheckers: [{ round: 1, sessionId: "pc" }],
   });
-  assert.equal(r.ok, false);
-  assert.equal(r.code, "provenance-not-distinct");
+  assert.equal(r.ok, true, r.message);
+  assert.equal(r.code, "provenance-recorded");
 });
 
-test("checkProvenanceDistinctness: FAIL — plan-checker session equals plan-author's session", () => {
+test("checkProvenanceDistinctness: PASS — plan-checker session equals plan-author's session (real agent()-in-Workflow shape; presence is what matters, not distinctness)", () => {
   const r = checkProvenanceDistinctness({
     proposalAuthors: [{ authorIdx: 1, sessionId: "a1" }],
     adjudicator: { sessionId: "adj" },
@@ -227,11 +231,11 @@ test("checkProvenanceDistinctness: FAIL — plan-checker session equals plan-aut
     planAuthor: { sessionId: "same-session" },
     planCheckers: [{ round: 1, sessionId: "same-session" }],
   });
-  assert.equal(r.ok, false);
-  assert.equal(r.code, "provenance-not-distinct");
+  assert.equal(r.ok, true, r.message);
+  assert.equal(r.code, "provenance-recorded");
 });
 
-test("checkProvenanceDistinctness: PASS — every role has its own distinct session id", () => {
+test("checkProvenanceDistinctness: PASS — every role has its own distinct session id (distinct ids are a valid, just non-required, shape)", () => {
   const r = checkProvenanceDistinctness({
     proposalAuthors: [{ authorIdx: 1, sessionId: "a1" }, { authorIdx: 2, sessionId: "a2" }],
     adjudicator: { sessionId: "adj" },
@@ -240,7 +244,7 @@ test("checkProvenanceDistinctness: PASS — every role has its own distinct sess
     planCheckers: [{ round: 1, sessionId: "pc1" }],
   });
   assert.equal(r.ok, true, r.message);
-  assert.equal(r.code, "provenance-distinct");
+  assert.equal(r.code, "provenance-recorded");
 });
 
 test("checkPreparation: FAIL — receipt has no provenance recorded at all", () => {
@@ -257,15 +261,14 @@ test("checkPreparation: FAIL — receipt has no provenance recorded at all", () 
   assert.equal(result.code, "provenance-missing");
 });
 
-test("checkPreparation: FAIL — receipt's proposal reviewer session matches an author's (not a distinct context)", () => {
+test("checkPreparation: PASS — receipt's proposal reviewer session matches an author's (real agent()-in-Workflow shape; no longer a failure)", () => {
   const dir = freshTmpDir();
   const receipt = makeFreshReceipt();
   receipt.provenance.proposalReviewer.sessionId = receipt.provenance.proposalAuthors[0].sessionId;
   const receiptFile = path.join(dir, "preparation.json");
   fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
   const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
-  assert.equal(result.ok, false);
-  assert.equal(result.code, "provenance-not-distinct");
+  assert.equal(result.ok, true, result.message);
 });
 
 test("checkPreparation: PASS — fresh receipt with distinct provenance still passes (no false positive)", () => {

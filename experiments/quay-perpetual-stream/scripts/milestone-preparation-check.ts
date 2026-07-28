@@ -208,19 +208,32 @@ export function validatePlanStructure(planText, acCount) {
   return { ok: true, code: "plan-structure-ok", message: `Plan has ${stages.length} stage(s), all ${acCount} task AC item(s) mapped` };
 }
 
-// ── checkProvenanceDistinctness — DIR-117 iteration-2 item 2: mechanically verifies the receipt's
-// author/reviewer run identities are actually DISTINCT contexts, not merely present. A receipt
-// with NO provenance at all is a real, actionable gap (the exact iteration-0 REFUTED finding —
-// "no field recording author/reviewer run identity at all") and fails closed rather than being
-// silently treated as N/A.
+// ── checkProvenanceDistinctness — DIR-117 iteration-2 item 2: mechanically verifies the receipt
+// records WHO ran each role (author/reviewer/plan-checker run identity present and identified).
+// A receipt with NO provenance at all is a real, actionable gap (the exact iteration-0 REFUTED
+// finding — "no field recording author/reviewer run identity at all") and fails closed rather
+// than being silently treated as N/A.
+//
+// NOTE (2026-07-28, gap-provenance-sessionid-not-independence-signal): this function used to also
+// assert the recorded session IDs were pairwise DISTINCT (reviewer's sessionId != any author's,
+// plan-checker's != plan-author's), treating `$CLAUDE_CODE_SESSION_ID` as an independence signal.
+// That check was a category error, copied without re-verifying its assumption from
+// `audit-independence-check.ts`'s standalone-`Agent`-tool-dispatch use case (where distinct
+// session IDs genuinely do indicate distinct contexts). It does not transfer to `prepare-
+// milestone.js`'s `agent()` sub-dispatches: every `agent()` call inside one Workflow script run
+// shares the SAME parent session ID by construction — confirmed empirically against a real M192
+// receipt, where proposalAuthors/adjudicator/proposalReviewer/planAuthor/planCheckers all reported
+// the identical session ID. That made the distinctness check 100%-reproducibly impossible to pass
+// for ANY real dispatch — it was never testing independence, only re-deriving the (constant) fact
+// that all sub-agents in one workflow run share a workflow-run id. The real independence guarantee
+// for `agent()` sub-dispatches is `agent()`'s own structural fresh-context isolation (each call is
+// a new agent instance with zero visibility into sibling agents' internal reasoning/tool-calls,
+// only what gets written to shared state) — already guaranteed by the platform, needing no runtime
+// re-verification here. Presence/identification of each role's run is still checked below.
 export function checkProvenanceDistinctness(provenance) {
   if (!provenance || typeof provenance !== "object") {
     return { ok: false, code: "provenance-missing", message: "preparation receipt has no 'provenance' field — author/reviewer run identity was never recorded" };
   }
-  const authorSessions = Array.isArray(provenance.proposalAuthors)
-    ? provenance.proposalAuthors.map((a) => a?.sessionId).filter(Boolean)
-    : [];
-  const adjudicatorSession = provenance.adjudicator?.sessionId;
   const reviewerSession = provenance.proposalReviewer?.sessionId;
   const planAuthorSession = provenance.planAuthor?.sessionId;
   const planCheckerSessions = Array.isArray(provenance.planCheckers)
@@ -230,14 +243,7 @@ export function checkProvenanceDistinctness(provenance) {
   if (!reviewerSession || !planAuthorSession || planCheckerSessions.length === 0) {
     return { ok: false, code: "provenance-incomplete", message: "preparation receipt's 'provenance' is missing a reviewer, plan-author, or plan-checker run identity" };
   }
-  const authorLikeSessions = [...authorSessions, adjudicatorSession].filter(Boolean);
-  if (authorLikeSessions.includes(reviewerSession)) {
-    return { ok: false, code: "provenance-not-distinct", message: "the proposal reviewer's run identity matches an author's/adjudicator's — review was not performed by a distinct context" };
-  }
-  if (planCheckerSessions.includes(planAuthorSession)) {
-    return { ok: false, code: "provenance-not-distinct", message: "a plan-checker's run identity matches the plan-author's — Plan check was not performed by a distinct context" };
-  }
-  return { ok: true, code: "provenance-distinct", message: "reviewer/plan-checker run identities are recorded and distinct from their authors" };
+  return { ok: true, code: "provenance-recorded", message: "reviewer/plan-author/plan-checker run identities are recorded" };
 }
 
 const NA_PLAN_RE = /^\s*N\/A\b/i;
@@ -333,9 +339,10 @@ export function checkPreparation({ taskFile, charterFile, receiptFile, declaredT
     }
   }
 
-  // Provenance distinctness (DIR-117 iteration-2 item 2): the receipt must record REAL,
-  // mechanically-distinct author/reviewer run identities — not merely assert "distinct contexts"
-  // in prose. See checkProvenanceDistinctness()'s own doc comment.
+  // Provenance recorded (DIR-117 iteration-2 item 2): the receipt must record REAL
+  // author/reviewer/plan-checker run identities — not merely assert it in prose. See
+  // checkProvenanceDistinctness()'s own doc comment for why this no longer also asserts
+  // session-ID distinctness.
   const provenanceResult = checkProvenanceDistinctness(receipt.provenance);
   if (!provenanceResult.ok) {
     return { ok: false, code: provenanceResult.code, message: provenanceResult.message };
