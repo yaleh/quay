@@ -3,7 +3,7 @@ id: DIR-120-B
 title: "DIR-120 Phase 3b: fix drivable-workspace-check.ts's layering inversion —
   remove DEFAULT_REGISTRY_PATH, require explicit --registry, symlink the
   experiments mirror, fix selftest's silent-skip risk"
-status: todo
+status: done
 labels:
   - directive
   - human-steered
@@ -118,31 +118,60 @@ review rounds, not speculation).
 
 ## Acceptance Criteria
 
-- [ ] `drivable-workspaces.yml` stays at `experiments/quay-perpetual-stream/drivable-workspaces.yml`
+- [x] `drivable-workspaces.yml` stays at `experiments/quay-perpetual-stream/drivable-workspaces.yml`
   (`ls` proof, unmoved); `DEFAULT_REGISTRY_PATH` removed from `drivable-workspace-check.ts`;
   omitting `--registry` gives a clean usage error, exit 2 — real command output pasted, not
   asserted.
-- [ ] `experiments/quay-perpetual-stream/scripts/drivable-workspace-check.{ts,sh}` are real
+  **Audit evidence (M194 adversarial audit, 2026-07-28):** `ls -la
+  experiments/quay-perpetual-stream/drivable-workspaces.yml` shows a regular file, unmoved (dated
+  Jul 23, predates this milestone). `grep -rn DEFAULT_REGISTRY_PATH` across `.ts`/`.mjs`/`.sh`
+  files finds zero live bindings (only prose comments referencing the removed name).
+  `node plugin/scripts/drivable-workspace-check.ts /tmp` (no `--registry`) printed `usage: ...` +
+  `ERROR: --registry is required...` and exited 2.
+- [x] `experiments/quay-perpetual-stream/scripts/drivable-workspace-check.{ts,sh}` are real
   symlinks to the `plugin/scripts/` originals — `ls -la` proof pasted.
-- [ ] `selftest()`'s three "real-registry-*" checks are shown to individually execute and pass
+  **Audit evidence:** `ls -la experiments/quay-perpetual-stream/scripts/drivable-workspace-check.{ts,sh}`
+  shows both as `lrwxrwxrwx ... -> ../../../plugin/scripts/drivable-workspace-check.{ts,sh}`.
+- [x] `selftest()`'s three "real-registry-*" checks are shown to individually execute and pass
   post-change (each check ID visible in output), not just an aggregate "all fixture cases PASS"
   line that could mask a silently-skipped check.
-- [ ] `select-preflight.ts`'s dead `DEFAULT_REGISTRY_PATH` import is removed — its own existing
+  **Audit evidence:** `node plugin/scripts/drivable-workspace-check.ts --selftest` printed
+  `SELFTEST PASS: real-registry-file-exists`, `real-registry-has-authorized-root`,
+  `real-registry-covers-archguard`, `real-registry-rejects-tmp` individually, plus the aggregate
+  line and exit 0.
+- [x] `select-preflight.ts`'s dead `DEFAULT_REGISTRY_PATH` import is removed — its own existing
   tests re-run green, real output pasted, independent of the next item.
-- [ ] `human-steered-classify.ts`'s CLI default-registry logic requires an explicit `--registry` —
+  **Audit evidence:** `grep -n DEFAULT_REGISTRY_PATH experiments/quay-perpetual-stream/scripts/select-preflight.ts`
+  returns nothing. `node --test experiments/quay-perpetual-stream/test/select-preflight.test.mjs`
+  → `tests 31 / pass 31 / fail 0`.
+- [x] `human-steered-classify.ts`'s CLI default-registry logic requires an explicit `--registry` —
   its own existing tests re-run green, real output pasted, independent of the item above (a
   structurally different, runtime-class defect from the compile-time import fix — do not combine
   into one checkbox).
-- [ ] `experiments/quay-perpetual-stream/test/drivable-workspace-check.test.mjs` (not covered by
+  **Audit evidence:** source shows `usage()` called (exit 2) when `--workspace` given but
+  `registryPath` unset, before any `loadRegistry` call. `node --test
+  experiments/quay-perpetual-stream/test/human-steered-classify.test.mjs` → `tests 24 / pass 24 /
+  fail 0`, including `CLI: --workspace given but --registry omitted -> usage error exit 2`.
+- [x] `experiments/quay-perpetual-stream/test/drivable-workspace-check.test.mjs` (not covered by
   `scripts/test.sh`'s glob) passes an explicit `--registry` in every assertion and has been run
   directly (`node --test experiments/quay-perpetual-stream/test/drivable-workspace-check.test.mjs`)
   with real, pasted GREEN output.
-- [ ] `.quay/config.yml`'s `gates.it0` `drivable-workspace` entry's continued end-to-end
+  **Audit evidence:** direct run → `tests 27 / pass 27 / fail 0`, including
+  `CLI: paths given but --registry omitted -> usage error exit 2`; grep confirms every
+  `loadRegistry`/CLI-spawn call in the file passes an explicit registry path/object.
+- [x] `.quay/config.yml`'s `gates.it0` `drivable-workspace` entry's continued end-to-end
   non-exercise is explicitly signed off (reason: no real task sets `drivableWorkspaceArgs`;
   manufacturing one to poke this path is rejected) — not a silent omission.
-- [ ] `plugin/test/plugin-packaging.test.mjs`'s exp5-label-leak test (which names
+  **Audit evidence:** `.quay/config.yml` line 58-60 still registers `name: drivable-workspace`,
+  `argsKey: drivableWorkspaceArgs`; `grep -rn drivableWorkspaceArgs tasks/` matches only this
+  task's own prose (no real task sets the key) — sign-off is explicit in the Proposal/Requested
+  action above, not a silent gap.
+- [x] `plugin/test/plugin-packaging.test.mjs`'s exp5-label-leak test (which names
   `drivable-workspace-check.ts`/`.sh` as shipped files) is re-run and confirmed unaffected by the
   symlink conversion.
+  **Audit evidence:** `node --test plugin/test/plugin-packaging.test.mjs` → `tests 34 / pass 34 /
+  fail 0`, including `DIR-070-B: universal-gate plugin files (4 of 5) have zero exp5/experiment-path
+  references`.
 
 ## Definition of Done
 
@@ -150,10 +179,16 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 Reading A, source code and prose claims alone are necessary but insufficient — real command output
 is required for every item above.
 
-- [ ] All items above landed on `master` under human-steered discipline, with real evidence, not
+- [x] All items above landed on `master` under human-steered discipline, with real evidence, not
   asserted.
-- [ ] A fresh independent audit confirms each real symlink, each independent consumer fix, the
+  **Audit evidence:** commit `1ca3a6d` on `master` (`git log --oneline` confirms it is HEAD's
+  immediate predecessor-of-charter-only-commits chain); working tree clean (`git status` — only
+  unrelated untracked `.halt` sentinels).
+- [x] A fresh independent audit confirms each real symlink, each independent consumer fix, the
   selftest's per-check visibility, and the out-of-glob test's direct real re-run.
+  **Audit evidence:** this M194 adversarial audit (fresh context, session
+  13efe277-45ff-4563-bcfe-fd2c3db3e2a5) independently re-ran all of the above real commands itself
+  rather than trusting the build's self-report.
 
 ## Human verification when exp5 marks this DIR done
 
@@ -165,6 +200,47 @@ is required for every item above.
    each other?
 4. Is `experiments/quay-perpetual-stream/test/drivable-workspace-check.test.mjs` actually run
    directly (not just assumed covered by `scripts/test.sh`)?
+
+## Execution record
+
+- **Milestone:** M194 (DIR-120 Phase 3b — drivable-workspace-check.ts layering-inversion fix)
+- **Iteration count:** 1 (direct commit on `master`, no separate worktree/branch — the Build phase
+  edited the shared working tree in place per the current `execute-milestone.js` convention,
+  confirmed current for M187 through M194)
+- **Realized Δv:** 0 (v̂>0, capabilityGrowth, deliverable, method-infra surface — no chart-2
+  `packages/quay*` surface cell moves; a gate script's own registry-resolution correctness is
+  method-infra capability, not a product surface — same VT-ruler-cannot-score-it class as
+  M164/M167/M179/M188/M189/M192/M193)
+- **Merge commit:** `1ca3a6d` (Build: remove `DEFAULT_REGISTRY_PATH`, require `--registry`,
+  convert experiments-tree copies to real symlinks + fix the resulting symlink-invocation noop,
+  re-derive `selftest()`'s per-check visibility, fix both downstream consumers, rewrite the
+  out-of-glob test)
+- **Audit verdict:** NO REFUTATION FOUND (fresh independent adversarial acceptance audit, session
+  `13efe277-45ff-4563-bcfe-fd2c3db3e2a5`, 2026-07-28) — all 8 AC + both DoD items independently
+  re-confirmed true against live re-run test/diff/CLI-call evidence, not the implementer's
+  self-report (see the `**Audit evidence:**` annotations under each AC/DoD checkbox above).
+- **Outcome:** `DEFAULT_REGISTRY_PATH` removed from `drivable-workspace-check.ts`; `--registry` is
+  now a required flag with a clean exit-2 usage error on omission; both experiments-tree copies are
+  real symlinks to the `plugin/scripts/` originals; `selftest()`'s three `real-registry-*` checks
+  each individually visible in output; `select-preflight.ts`'s dead import removed,
+  `human-steered-classify.ts`'s runtime default replaced with a required-flag check, each verified
+  independently (31/31 and 24/24 tests); the out-of-`scripts/test.sh`-glob
+  `drivable-workspace-check.test.mjs` rewritten and re-run directly (27/27); `plugin-packaging.test.mjs`
+  unaffected (34/34); `.quay/config.yml`'s `gates.it0` `drivable-workspace` entry's continued
+  non-exercise explicitly signed off, not a silent omission.
+  **Split-or-commit resolution (real cross-milestone process gap, closed at this Land, not
+  smoothed over):** this milestone's own Gate phase HARD BLOCKED on first pass —
+  `tasks/DIR-120.md` (parent) carries `status: done` from M192's own Land while this task (child)
+  was still `status: todo`, a real ADR-014/DIR-026 PARENT-DONE-IFF-CHILDREN violation introduced at
+  M192 (undetected there because M192's own Gate phase ran BEFORE M192's own Land, when `DIR-120`
+  was not yet `done` — `split-or-commit` is a whole-task-store check, not scoped to the task being
+  landed). The workflow's automatic `needs-human` disposition was reconsidered per ADR-014 decision
+  2 (`needs-human` is legitimate ONLY for external blockers; this was purely in-project
+  bookkeeping) and resolved by actually completing this task's real, independently-verified-complete
+  implementation rather than by loosening the check or leaving it at `needs-human`. Re-run at Land:
+  `it0-split-or-commit-check.ts .` → `PASS: 472 task(s) checked — no split-or-commit violations`;
+  `quay gate DIR-120-B --gate split-or-commit` → `PASS`. `it0-dod-check.sh DIR-120-B <charter>
+  <absorb-entry>` re-run at Land: exit 0.
 
 ## Touches
 
