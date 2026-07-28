@@ -1,0 +1,30 @@
+[
+  {
+    "id": "76b91baf",
+    "subsystem": "prepare-milestone/receipt-touch-set",
+    "summary": "Fixture path diverges between the Proposal/task ## Touches and the checked Plan's declared touch set, which the Proposal itself says must be literally string-identical before the receipt is built",
+    "severity": "major",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "plan",
+    "evidence": "Task ## Touches lists 'experiments/quay-perpetual-stream/fixtures/preparation/wiring-uncovered-claim-task.md' and 'milestones/M195/**'; /home/yale/work/quay/docs/plans/M195-dir-117-b.md '## Complete touch set' lists 'experiments/quay-perpetual-stream/test/fixtures/wiring-uncovered-claim-task.md' and 'milestones/M195/'. The Proposal's wiring-fixture paragraph also says 'fixtures/preparation/ (the canonical preparation-fixtures root)'. Both directories exist (/experiments/quay-perpetual-stream/fixtures/preparation/ and .../test/fixtures/preparation/), so either location is viable, but exactly one must win before the Receipt phase hashes the task/Plan.",
+    "claimRef": "Sequencing inside M195 item (1) / Build work item 'Wiring fixture (AC #4)' / task ## Touches",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "1440d5f8",
+    "subsystem": "OUTER-LOOP.md disclosure citations",
+    "summary": "Minor line-citation drift for the OUTER-LOOP.md execute() disclosure note (Proposal says ~122–127, Plan says ~123–127, actual signature at ~119)",
+    "severity": "nit",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "plan",
+    "evidence": "OUTER-LOOP.md execute() signature line is at ~line 119 ('execute :: Params → ... preparationReceiptFile?') with the disclosure note through ~127; the prepare(c) STATUS note spans ~57–63 as cited. The cited regions do contain exactly the disclosed opt-in text the Proposal quotes, so the substance is correct — only the line citation is off by a few lines.",
+    "claimRef": "Problem framing item 1 / Build work item B (OUTER-LOOP.md update)",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  }
+]
