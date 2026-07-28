@@ -32,7 +32,10 @@
   [`ADR-017`](../../adr/ADR-017-concurrent-multi-milestone-execution-touches-disjoint.md)
   establishes the current touches-disjoint batch rule and serial fan-in. ·
   [`quay-immutable-runtime-generations-and-atomic-activation.md`](./quay-immutable-runtime-generations-and-atomic-activation.md)
-  defines the generation fence required for workflow self-development.
+  defines the generation fence required for workflow self-development. ·
+  [`quay-milestone-workflow-throughput-capacity-model.md`](./quay-milestone-workflow-throughput-capacity-model.md)
+  separates candidate, leaf-task, and attempt rates and records rollout and
+  mature-state capacity hypotheses for this pipeline.
 
 ## 1. Decision summary
 
@@ -537,6 +540,14 @@ Minimum dashboard metrics:
 
 The optimization succeeds only if wall time and throughput improve without
 raising refutation, stale-work, partial-mutation, or flaky-test rates.
+
+Specific values such as two active worktrees, one full-suite slot, or 1.5–2.0
+effective concurrent agents are conservative single-machine rollout settings,
+not architectural invariants. Pure Reconcile work may run concurrently; only
+the authoritative Land transition must remain linearizable. The detailed
+baseline, bottleneck model, configurable limits, and rollout/mature throughput
+targets are maintained in
+[`quay-milestone-workflow-throughput-capacity-model.md`](./quay-milestone-workflow-throughput-capacity-model.md).
 
 ## 12. Rollout plan
 
