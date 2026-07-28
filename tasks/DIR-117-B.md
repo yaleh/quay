@@ -70,6 +70,13 @@ DIR-117 itself could not self-certify.
 3. Flip `execute-milestone.js`'s `Prepared` phase from opt-in to the enforced default (a MISSING
    `preparationReceiptFile` becomes fail-closed, not skip-with-INFO) once (1)/(2) are proven; update
    `OUTER-LOOP.md`'s disclosure note.
+4. **Added 2026-07-28, per M191's independent audit finding (`milestones/M191/audits/
+   iteration-0-acceptance-audit.md` §3) and DIR-122's corrected AC6:** `prepare-milestone.js`'s
+   `ProposalReview` phase must call `wiring-coverage-check.ts`'s real `checkWiringCoverage()`
+   function directly (the same function DIR-122's `checkGapWiringCoverage` already calls in
+   production) rather than only prompting an LLM reviewer, in prose, to approximate the equivalent
+   check. This closes the exact "prompt-guidance mistaken for production wiring" pattern DIR-117's
+   own Proposal names as its motivating case — which recurred inside DIR-117's own M191 delivery.
 
 ## Acceptance Criteria
 
@@ -84,6 +91,11 @@ DIR-117 itself could not self-certify.
   default (both `.claude/workflows/` and `plugin/workflows/` mirrors, byte-identical), and
   `OUTER-LOOP.md`'s M191 disclosure note is updated to reflect the real-landing proof instead of
   "not yet proven."
+- [ ] `prepare-milestone.js`'s `ProposalReview` phase calls `wiring-coverage-check.ts`'s real
+  `checkWiringCoverage()` function directly — grep-confirmable real import/call site in both
+  `.claude/workflows/` and `plugin/workflows/` mirrors, not prompt-only LLM guidance — with a real
+  fixture Proposal (claimed mechanism, no matching AC item) showing the phase's own finding count
+  increments from the function's real return value, not an LLM's independent judgment.
 - [ ] `node experiments/quay-perpetual-stream/scripts/task-schema-check.ts tasks/DIR-117-B.md` exits
   0.
 
