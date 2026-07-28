@@ -22,6 +22,10 @@ import {
   checkTouchesPair,
   findRepoRoot,
 } from "./touches-orthogonality-check.ts";
+// DIR-117 iteration-2 item 4: reuse (never reinvent) the SAME touch-set-expansion arithmetic
+// milestone-preparation-check.ts's own `Prepared` gate uses to detect a checked Plan outgrowing
+// its declared '## Touches' — single-sourced per this repo's own discipline.
+import { computeTouchesExpansion } from "./milestone-preparation-check.ts";
 
 // Shared exp5 state — concurrent writes here would conflict, so any candidate declaring it CANNOT be
 // batched (its writes must be serialized at fan-in ABSORB). Repo-relative concrete paths.
@@ -135,6 +139,41 @@ export function assembleBatch(candidates, { expand }) {
   return { batch: batch.map((c) => c.id), deferred };
 }
 
+// ── applyPreparationExpansion ────────────────────────────────────────────────────────────────────
+// DIR-117 iteration-2 item 4: a candidate's declared '## Touches' can go stale once its checked
+// Plan (a real milestone-preparation-check.ts receipt's `.touches`) covers MORE than what the
+// charter/task originally declared. Detecting this in isolation (milestone-preparation-check.ts's
+// own `touches-expanded` code, run against ONE candidate at a time) is necessary but not
+// sufficient — a real batch candidate must be RE-EVALUATED against the WHOLE batch using the
+// EXPANDED set, not silently admitted/blocked using the stale narrower declaration. `receiptsById`
+// is an optional `{candidateId: receiptFile}` map; a candidate with no entry (or an unreadable/
+// missing receipt) is returned UNCHANGED — this never invents an expansion the caller didn't ask
+// to check for, matching the Prepared gate's own opt-in posture (DIR-117's back-compat rule).
+export function loadReceiptTouches(receiptFile) {
+  if (!receiptFile || !fs.existsSync(receiptFile)) return null;
+  try {
+    const receipt = JSON.parse(fs.readFileSync(receiptFile, "utf8"));
+    return Array.isArray(receipt.touches) ? receipt.touches : null;
+  } catch {
+    return null;
+  }
+}
+
+export function applyPreparationExpansion(candidates, receiptsById) {
+  if (!receiptsById) return { candidates, expansions: [] };
+  const expansions = [];
+  const expanded = candidates.map((c) => {
+    const receiptFile = receiptsById[c.id];
+    const receiptTouches = loadReceiptTouches(receiptFile);
+    if (!receiptTouches) return c;
+    const { expanded: newPaths } = computeTouchesExpansion(receiptTouches, c.touches.globs);
+    if (newPaths.length === 0) return c;
+    expansions.push({ id: c.id, addedGlobs: newPaths });
+    return { ...c, touches: { ...c.touches, globs: [...c.touches.globs, ...newPaths] } };
+  });
+  return { candidates: expanded, expansions };
+}
+
 function isLearning(type) {
   // Conservative: any type MENTIONING "learning" (not only a leading token) is treated as learning
   // and never batched — hardening from the DIR-044 increment-4 audit (a "…-learning" type must not
@@ -157,9 +196,21 @@ function usage() {
 export async function main(argv) {
   const args = argv.slice(2);
   let root = null;
+  // DIR-117 iteration-2 item 4: `--receipts id1=file1.json,id2=file2.json` — optional, maps a
+  // candidate id (charter basename, no .md) to a real milestone-preparation-check.ts receipt file.
+  // Omitted entirely → byte-for-behavior unchanged (golden replay for every pre-existing call).
+  let receiptsById = null;
   const files = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--root") { root = args[++i]; continue; }
+    if (args[i] === "--receipts") {
+      receiptsById = {};
+      for (const pair of args[++i].split(",")) {
+        const eq = pair.indexOf("=");
+        if (eq > 0) receiptsById[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+      }
+      continue;
+    }
     files.push(args[i]);
   }
   if (files.length < 1) { usage(); return 2; }
@@ -168,7 +219,11 @@ export async function main(argv) {
   }
   const expandRoot = root ? path.resolve(root) : findRepoRoot(path.resolve(path.dirname(files[0])));
   const expand = (globs) => expandGlobs(globs, expandRoot);
-  const candidates = files.map((f) => parseCandidate(path.basename(f, ".md"), fs.readFileSync(f, "utf8")));
+  const parsedCandidates = files.map((f) => parseCandidate(path.basename(f, ".md"), fs.readFileSync(f, "utf8")));
+  const { candidates, expansions } = applyPreparationExpansion(parsedCandidates, receiptsById);
+  for (const e of expansions) {
+    process.stdout.write(`  re-evaluated (checked Plan expanded '## Touches'): ${e.id} — +${e.addedGlobs.length} path(s): ${e.addedGlobs.join(", ")}\n`);
+  }
   const r = assembleBatch(candidates, { expand });
   process.stdout.write(`BATCH (${r.batch.length}-wide, concurrent): ${r.batch.join(", ") || "(none)"}\n`);
   for (const d of r.deferred) process.stdout.write(`  deferred: ${d.id} — ${d.reason}\n`);

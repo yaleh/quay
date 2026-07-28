@@ -78,3 +78,52 @@ Per DIR-020, this Build did not self-tick any AC/DoD checkbox on DIR-117, DIR-12
 and did not change `status`/`dirStatus` fields (only appended `## Execution record` sections to
 DIR-117/DIR-122 documenting real evidence for the Audit phase to independently verify). `DIR-117-B`
 was created `status: todo` as a new child task.
+
+## Iteration 2 (2026-07-28) — close 5 real gaps found by iteration-0's REFUTED audit
+
+Iteration 0 was REFUTED (`milestones/M191/audits/iteration-0-acceptance-audit.md`); the mechanical
+gate (`it0-dod-check.sh DIR-117 ...`) found 6 unchecked AC items, 1 of which is properly
+DIR-117-B's own scope (real subsequent-milestone landing). This iteration closes the other 5, per
+the charter's own "Iteration 2" scope note. Composite discipline unchanged from iteration-0: one
+Build lead serializing both phases; DIR-122 required NO further Build work this iteration (its two
+outstanding issues were already corrected by direct task-file edit before this charter, per the
+charter's own note) — all 5 items below are DIR-117/phase-DIR-117 scope.
+
+### Evidence map (item × files × tests × real evidence)
+
+| Item | Files touched | Tests | Real evidence |
+|---|---|---|---|
+| 1. Real `prepare-milestone.js` end-to-end fixture | `plugin/test/prepare-milestone-preparation-e2e.test.mjs` (new) | 2/2 (both mirrors) | A thin/stale-Proposal + `Plan: N/A` fixture task is driven through EVERY real phase (ProposalAuthors→Adjudicate→ProposalReview→PlanAuthor→PlanCheck→Receipt) of the REAL, unmodified `prepare-milestone.js` source (loaded as a real `AsyncFunction`, only the ES `export` keyword stripped). Reaches `{outcome:'prepared'}`; the real fixture task file on disk ends up with a reconciled Proposal containing "Problem framing"/"Approach"/"Key design decisions"/"Alternatives considered and rejected", and `## Plan` references a real, existing `docs/plans/*.md` file (independently re-verified via a direct `checkPreparation()` call, not trusting the mock's self-report) |
+| 2. Provenance distinctness (author/reviewer run identity) | `experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts` (+`checkProvenanceDistinctness`, `buildReceipt`'s `provenance` param, CLI `--proposal-author-sessions`/`--adjudicator-session`/`--review-session`/`--plan-author-session`/`--plancheck-sessions` flags), mirrored to `plugin/scripts/milestone-preparation-check.ts` via `sync-vendor.sh`; `.claude/workflows/prepare-milestone.js` + `plugin/workflows/prepare-milestone.js` (every phase now captures its own real `$CLAUDE_CODE_SESSION_ID`, DIR-093 pattern, and threads them into the Receipt phase's `--build` command) | `milestone-preparation-check.test.mjs` (+9 provenance tests); `prepare-milestone-preparation-e2e.test.mjs` asserts all captured session ids are mutually distinct | `checkPreparation` now FAILs closed with `provenance-missing` (no provenance recorded at all) or `provenance-not-distinct` (reviewer's session matches an author's/adjudicator's, or a plan-checker's matches the plan-author's) — real, mechanical, not a caller-asserted "trust me" claim |
+| 3. Real structural Plan validation | `experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts` (+`parsePlanStages`/`validatePlanStructure`, wired into `checkPreparation`), `experiments/quay-perpetual-stream/scripts/task-schema.ts` (+exported `countBoxes`, reused for AC-count derivation), both mirrored to `plugin/scripts/`; `.claude/workflows/prepare-milestone.js` + mirror (PlanAuthor prompt now instructs the exact `### Stage N:`/`- AC:`/`- Files:`/`- Command:` convention the checker parses); `experiments/quay-perpetual-stream/fixtures/preparation/fixture-plan.md` (restructured to the new convention), `fixture-plan-malformed.md` (new RED fixture — Stage 2 entirely missing) | `milestone-preparation-check.test.mjs` (+13 structural-validation tests) | `validatePlanStructure` rejects a Plan with no stages (`plan-no-stages`), a stage missing `- AC:`/`- Files:`/`- Command:` (3 distinct codes), and a Plan where a task AC item maps to no stage at all (`plan-ac-not-mapped`, proven against the real malformed fixture) — mechanical, not delegated entirely to the (separately still-required) LLM PlanCheck phase |
+| 4. Touch-set-expansion re-evaluation wired into the batch scheduler | `experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts` (+exported `computeTouchesExpansion`, single-sourced, also used by `checkPreparation`'s own `touches-expanded` check), `plugin/scripts/concurrent-batch-scheduler.ts` (canonical — `experiments/.../scripts/concurrent-batch-scheduler.ts` is a symlink to it; +`loadReceiptTouches`/`applyPreparationExpansion`, `main()`'s new `--receipts id=file,...` flag) | `concurrent-batch-scheduler.test.mjs` (+8 tests) | A real test proves a candidate declared-disjoint under its STALE narrower `## Touches` (batches cleanly) is DEFERRED once its checked-Plan receipt's real touch set is applied (`applyPreparationExpansion` merges the expansion into the candidate's effective globs BEFORE `assembleBatch` runs) — "re-evaluated," not merely "detectable in isolation," per the item's own wording |
+| 5. Real `execute-milestone.js` Prepared-phase integration test | `plugin/test/execute-milestone-preparation-gate.test.mjs` (new); `.claude/workflows/execute-milestone.js` + `plugin/workflows/execute-milestone.js` (Prepared phase gains optional `$a.declaredTouches` wiring — writes the declared set to a temp file and passes `--declared-touches`, making the `touches-expanded` trigger reachable through a DIRECT invocation, not only the batch scheduler) | 14/14 (7 scenarios × 2 mirrors) | The REAL, unmodified `execute-milestone.js` (loaded as a real `AsyncFunction`) is driven through Verify (stubbed PASS) → Prepared with a real receipt for each of AC8's 5 named conditions (failed review, `F_i>0`, a stale hash, a missing Plan, touch-set expansion) — each real run returns `{outcome:'revision-needed', phase:'Prepared', reason:<real code>}` BEFORE Build's `agent()` is ever called (would throw in the mock if reached); a real, fully-valid receipt reaches Build (asserted via a short-circuit sentinel only the Build-phase branch returns); the no-receipt back-compat skip path is also verified unaffected |
+
+### Full test suite
+
+`bash scripts/test.sh` (full canonical glob): **553 tests, 548 pass, 2 fail, 3 skipped.** The 2
+failures (`build-dist-smoke.test.mjs` "(b) serve --port + HTTP GET returns 200",
+`delivery-standalone-smoke-gate.test.mjs` "M52 C1 [AC2/AC3]") are the SAME pre-existing, already-
+disclosed `gap-cli-serve-port-test-flaky-ci-timeout` CI-timing-sensitive flake iteration-0's own
+report names (HTTP-readiness/acceptance-timeout races under full-suite CPU load) — confirmed by
+re-running both files in isolation immediately after: `11/11 pass`. Neither touches, nor is
+touched by, any file this iteration's own Touches list declares. `bash plugin/scripts/sync-vendor.sh
+--check` → `CLEAN: all files verified, no drift detected.`
+
+### Mechanical gate
+
+Re-running `bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh DIR-117
+experiments/quay-perpetual-stream/charters/M191-dir117-dir122-composite.md
+/home/yale/.claude/jobs/13efe277/tmp/m191-absorb-entry.md` is the Audit phase's job (per DIR-020,
+this Build does not self-tick AC/DoD boxes) — left for that phase to run and record. The 5 items
+above target exactly the 5 unchecked AC items (of the 6 the gate reported) that are this
+milestone's own scope, per the charter's own item-by-item mapping; the 6th (real subsequent-
+milestone landing) remains, by design, DIR-117-B's own scope.
+
+### Task-status disposition (left to Audit, per DIR-020)
+
+This iteration did not self-tick any AC/DoD checkbox on DIR-117 and did not change
+`status`/`dirStatus`. `tasks/DIR-117.md`'s `## Touches` section was extended (not silently) to
+name the 2 files this iteration's real scope newly touches that iteration-0's own Touches list did
+not yet declare (`concurrent-batch-scheduler.ts` for item 4, `task-schema.ts`'s `countBoxes` export
+for item 3) — both real, disclosed expansions, not silent drift.

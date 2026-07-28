@@ -8,6 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -16,6 +17,8 @@ import {
   SHARED_STATE_PATHS,
   assembleBatch,
   isCapabilityGrowth,
+  applyPreparationExpansion,
+  loadReceiptTouches,
   main,
 } from "../scripts/concurrent-batch-scheduler.ts";
 import { expandGlobs as expandGlobsForTest } from "../scripts/touches-orthogonality-check.ts";
@@ -234,6 +237,80 @@ test("main: missing charter file → exit 2", async () => {
 
 test("main: no --root falls back to findRepoRoot", async () => {
   assert.equal(await main(["node", "s", sfx("exec-a.md"), sfx("exec-b.md")]), 0);
+});
+
+// ── DIR-117 iteration-2 item 4: touches-expansion re-evaluation (single-sourced via
+// milestone-preparation-check.ts's computeTouchesExpansion, never reinvented) ──────────────────────
+test("loadReceiptTouches: null for a missing/absent receipt file", () => {
+  assert.equal(loadReceiptTouches(null), null);
+  assert.equal(loadReceiptTouches(path.join(SFX, "no-such-receipt.json")), null);
+});
+
+test("loadReceiptTouches: reads a real receipt's '.touches' array", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cbs-receipt-"));
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify({ touches: ["a.ts", "b.ts"] }));
+  assert.deepEqual(loadReceiptTouches(receiptFile), ["a.ts", "b.ts"]);
+});
+
+test("applyPreparationExpansion: no receiptsById map → candidates unchanged, no expansions (golden replay)", () => {
+  const cands = [parseCandidate("A", "## Touches\n- x/a.js")];
+  const r = applyPreparationExpansion(cands, null);
+  assert.deepEqual(r.candidates, cands);
+  assert.deepEqual(r.expansions, []);
+});
+
+test("applyPreparationExpansion: a candidate with no matching receipt entry is unaffected", () => {
+  const cands = [parseCandidate("A", "## Touches\n- x/a.js")];
+  const r = applyPreparationExpansion(cands, { OTHER: "/nope.json" });
+  assert.deepEqual(r.candidates, cands);
+  assert.deepEqual(r.expansions, []);
+});
+
+test("applyPreparationExpansion: a candidate's checked-Plan receipt expands its effective touches", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cbs-receipt-"));
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify({ touches: ["y/b.js", "x/a.js"] }));
+  const cands = [
+    parseCandidate("A", "**type:** execution\n## Touches\n- x/a.js"),
+    parseCandidate("B", "**type:** execution\n## Touches\n- y/b.js"),
+  ];
+  const r = applyPreparationExpansion(cands, { B: receiptFile });
+  assert.equal(r.expansions.length, 1);
+  assert.equal(r.expansions[0].id, "B");
+  assert.deepEqual(r.expansions[0].addedGlobs, ["x/a.js"]);
+  const bCand = r.candidates.find((c) => c.id === "B");
+  assert.deepEqual(bCand.touches.globs, ["y/b.js", "x/a.js"]);
+  const aCand = r.candidates.find((c) => c.id === "A");
+  assert.deepEqual(aCand.touches.globs, ["x/a.js"]); // unaffected — no receipt entry for A
+});
+
+test("assembleBatch: a candidate re-evaluated with its EXPANDED touches is deferred for a real overlap the stale declaration hid (DIR-117 iteration-2 item 4, the exact 'not just detectable in isolation' proof)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cbs-receipt-"));
+  const receiptFile = path.join(dir, "preparation.json");
+  // B's checked Plan actually touches x/a.js too, even though B's declared '## Touches' only
+  // ever said y/b.js — the exact staleness this item closes.
+  fs.writeFileSync(receiptFile, JSON.stringify({ touches: ["y/b.js", "x/a.js"] }));
+  const cands = [
+    parseCandidate("A", "**type:** execution\n## Touches\n- x/a.js"),
+    parseCandidate("B", "**type:** execution\n## Touches\n- y/b.js"),
+  ];
+  const expand = fakeExpand({ "x/a.js": ["x/a.js"], "y/b.js": ["y/b.js"] });
+  // WITHOUT the receipt applied: A/B look declared-disjoint → both batch (the stale outcome).
+  const stale = assembleBatch(cands, { expand });
+  assert.deepEqual(stale.batch, ["A", "B"]);
+  // WITH the receipt's expansion applied first: B's EFFECTIVE touches now overlap A's → re-evaluated, deferred.
+  const { candidates: expandedCands } = applyPreparationExpansion(cands, { B: receiptFile });
+  const fresh = assembleBatch(expandedCands, { expand });
+  assert.deepEqual(fresh.batch, ["A"]);
+  assert.equal(fresh.deferred.length, 1);
+  assert.equal(fresh.deferred[0].id, "B");
+  assert.match(fresh.deferred[0].reason, /not disjoint from A/);
+});
+
+test("main: --receipts flag is accepted and does not change behavior when no candidate id matches (backward compat)", async () => {
+  const code = await main(["node", "s", "--root", REPO_ROOT, "--receipts", "nonexistent-id=/tmp/nope.json", sfx("exec-a.md"), sfx("exec-b.md")]);
+  assert.equal(code, 0);
 });
 
 // ── DIR-116: end-to-end over real fixture charters (mirrors the RED/GREEN evidence in the M185

@@ -191,9 +191,23 @@ log(`Verify phase PASSED — all ${allVerifyResults.length} it0 checks green (${
 // never retroactively blocks a dispatch shape that predates the preparation pipeline's live wiring.
 if ($a.preparationReceiptFile) {
   phase('Prepared')
+  // DIR-117 iteration-2 item 5 / AC8's own 5th named condition ("a Plan whose touch set exceeds
+  // the declaration"): OPTIONAL `$a.declaredTouches` (an array of paths) makes the `touches-
+  // expanded` trigger reachable through a DIRECT execute-milestone invocation, not only via the
+  // batch scheduler's own re-assembly loop. Omitted (every pre-existing dispatch) → the exact
+  // original single-line prompt, byte-for-behavior unchanged (golden replay).
+  const _hasDeclaredTouches = Array.isArray($a.declaredTouches) && $a.declaredTouches.length > 0
+  const _declaredTouchesPath = `/tmp/prepared-declared-touches-${_milestone}-${_primaryTaskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.txt`
+  const preparedPrompt = _hasDeclaredTouches
+    ? `First write the task/charter's currently-declared '## Touches' set (one path per line, exactly as declared) to ${_declaredTouchesPath}:
+${$a.declaredTouches.join('\n')}
+
+Then run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task tasks/${_primaryTaskId}.md --charter ${$a.charterFile} --receipt ${$a.preparationReceiptFile} --declared-touches ${_declaredTouchesPath}
+Return {ok: <exit code === 0>, code: <the PASS:/FAIL: code printed>, detail: <the full line printed>}.`
+    : `Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task tasks/${_primaryTaskId}.md --charter ${$a.charterFile} --receipt ${$a.preparationReceiptFile}
+Return {ok: <exit code === 0>, code: <the PASS:/FAIL: code printed>, detail: <the full line printed>}.`
   const preparedResult = await agent(
-    `Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task tasks/${_primaryTaskId}.md --charter ${$a.charterFile} --receipt ${$a.preparationReceiptFile}
-Return {ok: <exit code === 0>, code: <the PASS:/FAIL: code printed>, detail: <the full line printed>}.`,
+    preparedPrompt,
     { label: 'preparation-check', phase: 'Prepared',
       schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, code: { type: 'string' }, detail: { type: 'string' } } } }
   )

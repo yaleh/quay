@@ -204,7 +204,10 @@ export function checkPlan(task, kind) {
 const UNCHECKED_BOX_RE = /^\s*[-*]\s+\[\s\]\s+(\S.*)$/;
 const CHECKED_BOX_RE = /^\s*[-*]\s+\[[xX]\]\s+(\S.*)$/;
 
-function countBoxes(sectionBody) {
+// Exported (DIR-117 iteration-2 item 3): milestone-preparation-check.ts's structural Plan
+// validation reuses this SAME box-counting logic to derive a task's real AC-item count — never a
+// second, drift-prone reimplementation of the checklist-box regexes.
+export function countBoxes(sectionBody) {
   const lines = sectionBody.split(/\r?\n/);
   const unchecked = lines.filter((l) => UNCHECKED_BOX_RE.test(l)).length;
   const checked = lines.filter((l) => CHECKED_BOX_RE.test(l)).length;

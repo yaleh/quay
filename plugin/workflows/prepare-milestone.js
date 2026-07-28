@@ -34,6 +34,12 @@ const _n = _highRisk ? 3 : 2
 // ── Phase: ProposalAuthors ───────────────────────────────────────────────────────────
 phase('ProposalAuthors')
 
+// DIR-117 iteration-2 item 2: every phase captures its OWN real `$CLAUDE_CODE_SESSION_ID` (the
+// same DIR-093 pattern `execute-milestone.js`'s Audit phase already uses for `auditSessionId`) so
+// the Receipt phase can populate a receipt `provenance` block that milestone-preparation-check.ts
+// mechanically verifies for DISTINCTNESS — never a caller-asserted "trust me, independent" claim.
+const _sessionIdInstruction = 'BEFORE returning, run `echo $CLAUDE_CODE_SESSION_ID` to discover your REAL session id (set by the harness, cannot be forged) and include it as `sessionId` in your structured output.'
+
 const _proposalPrompt = (authorIdx) => `Independent Proposal author ${authorIdx} of ${_n} for task ${_taskId} (class: ${_class}), milestone charter ${_charterFile}.
 
 Read the CURRENT task (\`task_get ${_taskId}\`) and the charter file (${_charterFile}) — ground your Proposal in the actual current repository state, not in the existing task body's possibly-thin Proposal. Do NOT read the other author(s)' output — this must be an independently re-derived proposal, not a copy.
@@ -42,12 +48,14 @@ Draft a reconciled Proposal covering: problem framing (grounded in current code)
 
 Mechanism-claim wiring coverage (DIR-117): for every new call/dispatch/ownership/enforcement relationship you claim (e.g. "component X invokes Y"), note it explicitly so the review phase can check for a matching Acceptance Criteria item — do not just assert the relationship in prose without flagging it as a claim needing AC-level proof.
 
-Return {authorIdx: ${authorIdx}, proposalText: <the full Proposal markdown text, no ## heading>}.`
+${_sessionIdInstruction}
+
+Return {authorIdx: ${authorIdx}, proposalText: <the full Proposal markdown text, no ## heading>, sessionId: <your real session id>}.`
 
 const _proposalResults = await parallel(
   Array.from({ length: _n }, (_, i) => () => agent(_proposalPrompt(i + 1), {
     label: `proposal-author-${i + 1}`, phase: 'ProposalAuthors',
-    schema: { type: 'object', required: ['authorIdx', 'proposalText'], properties: { authorIdx: { type: 'number' }, proposalText: { type: 'string' } } },
+    schema: { type: 'object', required: ['authorIdx', 'proposalText'], properties: { authorIdx: { type: 'number' }, proposalText: { type: 'string' }, sessionId: { type: 'string' } } },
   }))
 )
 
@@ -68,9 +76,10 @@ ${_proposals.map((p) => `--- Author ${p.authorIdx} ---\n${p.proposalText}`).join
 
 1. Reconcile into ONE Proposal that is at least as strong as the best individual draft — merge genuinely distinct insights, resolve contradictions by picking the more concrete/grounded option, and keep the required elements (problem framing, mechanism, control/data flow, key decisions, defaults/failure behavior, compatibility, risks, non-goals, AC coverage, alternatives considered and rejected).
 2. WRITE the reconciled Proposal back to task ${_taskId}'s \`## Proposal\` section via \`task_write\` (replace the body's \`## Proposal\` section content; preserve every OTHER section of the body unchanged — read the full current body first, splice in the new Proposal text, then write the WHOLE body back).
-3. Return {proposalText: <the final reconciled Proposal text>, ok: true}. If task_write fails, return {ok: false, error: <reason>}.`,
+3. ${_sessionIdInstruction}
+4. Return {proposalText: <the final reconciled Proposal text>, ok: true, sessionId: <your real session id>}. If task_write fails, return {ok: false, error: <reason>}.`,
   { label: 'adjudicate', phase: 'Adjudicate',
-    schema: { type: 'object', required: ['ok'], properties: { proposalText: { type: 'string' }, ok: { type: 'boolean' }, error: { type: 'string' } } } }
+    schema: { type: 'object', required: ['ok'], properties: { proposalText: { type: 'string' }, ok: { type: 'boolean' }, error: { type: 'string' }, sessionId: { type: 'string' } } } }
 )
 
 if (!adjudicateResult || adjudicateResult.ok !== true) {
@@ -86,9 +95,10 @@ const reviewResult = await agent(
 
 1. Verify the Proposal makes the implementation approach reviewable without re-designing it: problem framing grounded in current code, chosen mechanism, concrete control/data flow, key decisions, defaults/failure behavior, compatibility, risks, non-goals, AC coverage, explicit alternatives.
 2. Mechanism-claim wiring coverage (DIR-117): run \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/task-schema-check.ts ${_taskFile}\` is NOT sufficient by itself for this — instead extract every new call/dispatch/ownership/enforcement relationship the Proposal claims and confirm the task's own \`## Acceptance Criteria\` has a matching, falsifiable item demanding real production-callsite or cross-generation reachability evidence for THAT relationship (not descriptive prose restating the claim). A claimed mechanism with no matching AC item is a nonzero-finding failure.
-3. Return {findings: <integer count of unresolved issues, 0 if none>, findingsDetail: <list each finding with enough detail to fix it>}.`,
+3. ${_sessionIdInstruction}
+4. Return {findings: <integer count of unresolved issues, 0 if none>, findingsDetail: <list each finding with enough detail to fix it>, sessionId: <your real session id>}.`,
   { label: 'proposal-review', phase: 'ProposalReview',
-    schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'number' }, findingsDetail: { type: 'string' } } } }
+    schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'number' }, findingsDetail: { type: 'string' }, sessionId: { type: 'string' } } } }
 )
 
 const _reviewFindings = reviewResult?.findings ?? 1
@@ -111,11 +121,22 @@ Read the task's current (just-adjudicated) \`## Proposal\` and \`## Acceptance C
 
 The Plan must: name the milestone/task/charter and base revision (current HEAD short-sha), declare the complete touch set, map EVERY task AC item to at least one ordered phase/stage, name real files and symbols, specify RED/implementation/GREEN (or equivalent mechanical checks) with expected exit behavior, classify each stage as code or prose, record line budgets and dependencies, and state guardrails/rollback/real-landing verification. Use the standardized stopping rule: at most 3 Plan-check rounds, success only at F_i=0.
 
+MECHANICAL STAGE FORMAT (DIR-117 iteration-2 item 3 — milestone-preparation-check.ts's real, non-LLM structural check parses this EXACT shape; a Plan that omits it fails the Prepared gate even if the prose elsewhere is fine): for EACH stage, emit a block of the form
+
+  ### Stage <N>: <title>
+  - AC: <comma-separated 1-based indices into the task's own '## Acceptance Criteria' checklist that this stage covers>
+  - Files: <comma-separated real file paths this stage touches>
+  - Command: <the RED/implementation/GREEN mechanical check to run, e.g. a test/build command — "Check:" is an accepted synonym>
+
+Every task AC item's index must appear in at least one stage's \`- AC:\` list, or the checked Plan will be rejected mechanically.
+
 Write the file at ${_planFile}. Then update task ${_taskId}'s \`## Plan\` section (via \`task_write\`, splicing into the current body, preserving all other sections) to reference ${_planFile} (replacing any prior N/A/stale reference).
 
-Return {planFile: "${_planFile}", ok: true}. If either write fails, return {ok: false, error: <reason>}.`,
+${_sessionIdInstruction}
+
+Return {planFile: "${_planFile}", ok: true, sessionId: <your real session id>}. If either write fails, return {ok: false, error: <reason>}.`,
   { label: 'plan-author', phase: 'PlanAuthor',
-    schema: { type: 'object', required: ['ok'], properties: { planFile: { type: 'string' }, ok: { type: 'boolean' }, error: { type: 'string' } } } }
+    schema: { type: 'object', required: ['ok'], properties: { planFile: { type: 'string' }, ok: { type: 'boolean' }, error: { type: 'string' }, sessionId: { type: 'string' } } } }
 )
 
 if (!planAuthorResult || planAuthorResult.ok !== true) {
@@ -129,6 +150,7 @@ phase('PlanCheck')
 let _planCheckFindings = 1
 let _planCheckRound = 0
 const MAX_PLANCHECK_ROUNDS = 3
+const _planCheckSessions = []
 
 while (_planCheckRound < MAX_PLANCHECK_ROUNDS) {
   _planCheckRound += 1
@@ -137,11 +159,14 @@ while (_planCheckRound < MAX_PLANCHECK_ROUNDS) {
 
 Verify against the CURRENT repository: signatures, call sites, dependency order, commands, line budgets, stage classification (code vs prose), AC coverage (every task AC maps to >=1 stage), and touch-set completeness against the task/charter '## Touches' declaration.
 
-Return {findings: <integer count, 0 if none>, findingsDetail: <list each finding>}.`,
+${_sessionIdInstruction}
+
+Return {findings: <integer count, 0 if none>, findingsDetail: <list each finding>, sessionId: <your real session id>}.`,
     { label: `plan-check-round-${_planCheckRound}`, phase: 'PlanCheck',
-      schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'number' }, findingsDetail: { type: 'string' } } } }
+      schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'number' }, findingsDetail: { type: 'string' }, sessionId: { type: 'string' } } } }
   )
   _planCheckFindings = checkResult?.findings ?? 1
+  if (checkResult?.sessionId) _planCheckSessions.push(checkResult.sessionId)
   if (_planCheckFindings === 0) {
     log(`PlanCheck round ${_planCheckRound} PASSED — F_i=0.`)
     break
@@ -164,10 +189,16 @@ if (_planCheckFindings !== 0) {
 // ── Phase: Receipt ────────────────────────────────────────────────────────────────────
 phase('Receipt')
 
+// DIR-117 iteration-2 item 2: thread the REAL, distinct session ids captured by each phase above
+// into the receipt's --build command, so buildReceipt() records real provenance — never a
+// caller-asserted "trust me, independent" value. `_planCheckSessions` already accumulates one
+// entry per round (>=1 by construction, since the loop only exits after a real dispatch).
+const _provenanceFlags = ` --proposal-author-sessions ${_proposals.map((p) => p.sessionId || 'unknown').join(',')} --adjudicator-session ${adjudicateResult.sessionId || 'unknown'} --review-session ${reviewResult.sessionId || 'unknown'} --plan-author-session ${planAuthorResult.sessionId || 'unknown'} --plancheck-sessions ${_planCheckSessions.join(',') || 'unknown'}`
+
 const receiptResult = await agent(
   `Write the preparation receipt for task ${_taskId} / milestone ${_milestoneId}.
 
-Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --build --task-id ${_taskId} --milestone-id ${_milestoneId} --task ${_taskFile} --charter ${_charterFile} --plan ${_planFile} --review-findings 0 --plancheck-rounds ${_planCheckRound} --plancheck-findings 0 --out ${_receiptFile}
+Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --build --task-id ${_taskId} --milestone-id ${_milestoneId} --task ${_taskFile} --charter ${_charterFile} --plan ${_planFile} --review-findings 0 --plancheck-rounds ${_planCheckRound} --plancheck-findings 0 --out ${_receiptFile}${_provenanceFlags}
 
 (Add --sources <comma-separated list> naming every source file the Plan-check actually inspected, and --touches <comma-separated list> matching the checked Plan's declared touch set, if either is non-empty — read them from the Plan file at ${_planFile}.)
 
