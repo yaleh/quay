@@ -195,14 +195,18 @@ async function resolveBody(flags) {
 // Precedence (cwd): explicit `--cwd <dir>` flag > a PRE-SET QUAY_ACCEPTANCE_CWD
 // (already in the env before this process's own CLI logic runs) >
 // `cfg.workspaceRoot` (the default — unchanged behavior with no override).
-// A gates.yml per-gate `cwd` is a THIRD source, applied inside
-// `registry.js#resolveRunnerOptions` itself (this function has no per-gate
-// visibility at the CLI layer, only a per-INVOCATION one) — see that
-// function's own precedence rule for how the two layers compose.
+// A per-gate `cwd` entry in the workspace's gates config (DIR-120: `.quay/
+// config.yml`'s own `gates:` section for a migrated workspace; a legacy
+// `.quay/gates.yml` only for a workspace with no `config.yml` at all) is a
+// THIRD source, applied inside `registry.js#resolveRunnerOptions` itself
+// (this function has no per-gate visibility at the CLI layer, only a
+// per-INVOCATION one) — see that function's own precedence rule for how the
+// two layers compose.
 //
 // Precedence (timeout): explicit `--timeout <ms>` flag > a pre-set
 // `QUAY_ACCEPTANCE_TIMEOUT_MS` > left unset (registry.js's own 60000ms
-// default / a gates.yml per-gate `timeoutMs` apply from there).
+// default / a per-gate `timeoutMs` entry in the workspace's gates config,
+// per the same DIR-120 source note above, apply from there).
 //
 // @param {{ workspaceRoot: string, cwd?: string, timeout?: string|number }} args
 function pinAcceptanceEnv({ workspaceRoot, cwd, timeout }) {
@@ -217,7 +221,8 @@ function pinAcceptanceEnv({ workspaceRoot, cwd, timeout }) {
   }
   // else: leave QUAY_ACCEPTANCE_TIMEOUT_MS as whatever the environment
   // already has (unset by default) — registry.js's own precedence takes it
-  // from there (env > gates.yml timeoutMs > 60000ms default).
+  // from there (env > per-gate timeoutMs entry in the workspace's gates
+  // config > 60000ms default).
 }
 
 async function withProvider(fn, { providerId } = {}) {
@@ -380,13 +385,16 @@ Gate engine commands (QENG-1/2) — evaluate a named check and append an immutab
   --cwd <dir>       DIR-046: run the acceptance command IN <dir> instead of the workspace root
                     (e.g. gate a milestone worktree BEFORE merge, not the main repo). Wins over
                     both the workspaceRoot default AND a pre-set QUAY_ACCEPTANCE_CWD env var.
-                    Also honored by 'complete'/'promote'/'run'. A gates.yml per-gate 'cwd' field
-                    is a lower-precedence third option (see .quay/gates.yml's own doc comment).
+                    Also honored by 'complete'/'promote'/'run'. A per-gate 'cwd' field in the
+                    workspace's gates config (DIR-120: .quay/config.yml's own 'gates:' section
+                    for a migrated workspace, or a legacy .quay/gates.yml — see
+                    packages/quay/src/gate/config/loader.ts's own doc comment) is a
+                    lower-precedence third option.
   --timeout <ms>    DIR-046: override the acceptance runner's kill deadline in milliseconds
-                    (default 60000). Also honored by 'complete'/'promote'/'run'. A gates.yml
-                    per-gate 'timeoutMs' field is a lower-precedence workspace-data alternative —
-                    a TIMEOUT failure's reason names both knobs ("raise gates.yml timeoutMs /
-                    --timeout").
+                    (default 60000). Also honored by 'complete'/'promote'/'run'. A per-gate
+                    'timeoutMs' field in that same workspace gates config is a lower-precedence
+                    workspace-data alternative — a TIMEOUT failure's reason names both knobs
+                    ("raise the gates config's timeoutMs / --timeout").
 
 Lifecycle commands (QENG-3) — status-writing verbs over the {todo,ready,done,needs-human} phases:
   complete <id>     Precondition status=ready; runs the acceptance gate; on pass writes status=done
@@ -1107,10 +1115,13 @@ Description:
     // AC1: list registered gates, one per line, exit 0. No provider connection
     // (loadConfig() only reads .quay/config.yml — no MCP process spawned).
     // DIR-035-B: pass this workspace's own root explicitly so `--list` reflects
-    // ITS `.quay/gates.yml`-declared gates + the product's built-ins, not
-    // whatever workspace happens to be discoverable from cwd. A workspace with
-    // no `.quay/config.yml` at all (loadConfig throws) falls back to cwd-based
-    // auto-discovery (listGates()'s own default), same as before this change.
+    // ITS declared gates (DIR-120: `.quay/config.yml`'s own `gates:` section
+    // for a migrated workspace, or a legacy `.quay/gates.yml` only for a
+    // workspace with no `config.yml` — see loader.ts's own doc comment) +
+    // the product's built-ins, not whatever workspace happens to be
+    // discoverable from cwd. A workspace with no `.quay/config.yml` at all
+    // (loadConfig throws) falls back to cwd-based auto-discovery
+    // (listGates()'s own default), same as before this change.
     let workspaceRoot;
     try {
       workspaceRoot = loadConfig().workspaceRoot;
@@ -1138,8 +1149,11 @@ Description:
       const gate = vf.gate ?? "acceptance";
       pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout });
       // DIR-035-B: thread the resolved workspace root through so a named
-      // gate declared in THIS workspace's own `.quay/gates.yml` resolves
-      // correctly regardless of the process's cwd at invocation time.
+      // gate declared in THIS workspace's own gates config (DIR-120:
+      // `.quay/config.yml`'s own `gates:` section for a migrated workspace,
+      // or a legacy `.quay/gates.yml` only for a workspace with no
+      // `config.yml`) resolves correctly regardless of the process's cwd at
+      // invocation time.
       // M56-gate-cli-error-ux (AC1): unknown-gate / missing-task are
       // guarded (expected) errors — see withGuardedErrors' own comment.
       await withGuardedErrors(async () => {

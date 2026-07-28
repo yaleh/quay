@@ -61,29 +61,44 @@ export function discoverWorkspaceRoot(startDir: string = process.cwd()): string 
  * (fail-quiet — an ABSENT gates.yml is the fresh-workspace default, not an
  * error condition).
  *
- * DIR-050: tries unified .quay/config.yml (gates: section) first, falls back
- * to .quay/gates.yml.
+ * DIR-050/DIR-120 Phase 2: branch A (unified `.quay/config.yml` exists) is
+ * TERMINAL — it resolves to the config-derived `gates:` value or the empty
+ * six-key shape and NEVER falls through to a legacy `.quay/gates.yml`, even
+ * if one is present with real content (a deliberate, tested behavior change
+ * — see gate-config-loader.test.mjs's silent-data-loss case). Branch B (no
+ * `.quay/config.yml`) is untouched pre-DIR-050 back-compat behavior, kept
+ * reachable ONLY when branch A does not apply — the legacy root files
+ * `.quay/gates.yml`/`.quay/loop.yml` were deleted as part of this same
+ * change (DIR-120), since branch A is unconditionally true for THIS
+ * workspace; branch B remains live for any workspace (e.g. one sharing a
+ * task store with a sibling experiment layer) with no
+ * `.quay/config.yml` of their own.
  */
 export function readGatesConfig(workspaceRoot: string): GatesConfig {
   const empty: GatesConfig = { it0: [], adr: [], fixed: [], testPass: [], coverageFloor: [], redGreen: [] };
   if (!workspaceRoot) return empty;
 
   const unifiedConfigPath = path.join(workspaceRoot, ".quay", "config.yml");
-  const legacyGatesPath = path.join(workspaceRoot, ".quay", "gates.yml");
 
   let parsed: unknown;
   if (fs.existsSync(unifiedConfigPath)) {
+    // Branch A — terminal. Resolve entirely from config.yml and return/exit
+    // this branch WITHOUT ever constructing/checking a legacy gates.yml path.
     let unified: unknown;
     try {
       unified = YAML.parse(fs.readFileSync(unifiedConfigPath, "utf8"));
     } catch {
-      // malformed unified config -> fall through to legacy
+      // malformed unified config -> fail-quiet empty shape (no fallback to legacy)
+      return empty;
     }
     if (unified && typeof unified === "object" && "gates" in unified) {
       parsed = (unified as Record<string, unknown>).gates;
     }
-  }
-  if (parsed === undefined) {
+    if (parsed === undefined) return empty;
+  } else {
+    // Branch B — no config.yml at all. Untouched pre-DIR-050 legacy path,
+    // reachable ONLY here.
+    const legacyGatesPath = path.join(workspaceRoot, ".quay", "gates.yml");
     if (!fs.existsSync(legacyGatesPath)) return empty;
     try {
       parsed = YAML.parse(fs.readFileSync(legacyGatesPath, "utf8"));

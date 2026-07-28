@@ -1,12 +1,14 @@
 // ts-typecheck-gate.test.mjs — ADR-012 P0 (exp5-M-TS-MIGRATION-P0): the
-// `tsc --noEmit` type gate, wired as a `.quay/gates.yml` `testPass` entry
-// (DIR-042-A's `makeTestPassGate` factory — REUSED, not a new factory, per
-// ADR-013 data-driven-gates discipline: the actual `npx tsc --noEmit`
-// invocation is workspace data in gates.yml, never hardcoded in
+// `tsc --noEmit` type gate, wired as a `testPass` entry in the workspace's
+// gates config (DIR-120: `.quay/config.yml`'s own `gates:` section for THIS
+// repo; a legacy `.quay/gates.yml` only for a workspace with no
+// `config.yml`) — DIR-042-A's `makeTestPassGate` factory (REUSED, not a new
+// factory, per ADR-013 data-driven-gates discipline: the actual
+// `npx tsc --noEmit` invocation is workspace data, never hardcoded in
 // packages/quay/src/**). Mirrors delivery-standalone-smoke-gate.test.mjs's
 // shape (real script/command invocation via resolveGate, real CLI path via
 // `quay gate <task> --gate ...`, and a D1-style check against THIS repo's
-// own real .quay/gates.yml).
+// own real gates wiring).
 //
 // Run: node --test packages/quay/test/*.mjs
 
@@ -84,15 +86,22 @@ test("M63 C1: `quay gate <task> --gate ts-typecheck` PASSes for real against thi
 }, { timeout: 120000 });
 
 // ===========================================================================
-// D1 — real-world demonstration against THIS repo's own real .quay/gates.yml
-// (the exact same file the real OUTER-LOOP ABSORB gates against), not a fixture copy.
+// D1 — real-world demonstration against THIS repo's own real gates wiring
+// (the exact same source the real OUTER-LOOP ABSORB gates against), not a fixture copy.
+//
+// DIR-120 Phase 2 (2026-07-28): root `.quay/gates.yml` has been physically
+// deleted and its reader fallback removed — `.quay/config.yml`'s own
+// `gates:` section is now the ONLY source THIS workspace's readers can
+// resolve gates from (see loader.ts's own doc comment). This test's ground
+// truth moves with it: the "real wiring" this test demonstrates against is
+// now config.yml, not a legacy gates.yml that no longer exists here.
 // ===========================================================================
 
-test("M63 D1: ts-typecheck gate PASSes against THIS repo's own real .quay/gates.yml wiring", async () => {
-  const realGatesYml = path.join(REPO_ROOT, ".quay", "gates.yml");
-  assert.ok(fs.existsSync(realGatesYml), "real .quay/gates.yml must exist in this worktree");
-  const content = fs.readFileSync(realGatesYml, "utf8");
-  assert.match(content, /ts-typecheck/, "real gates.yml must declare the ts-typecheck testPass gate");
+test("M63 D1: ts-typecheck gate PASSes against THIS repo's own real .quay/config.yml gates: wiring", async () => {
+  const realConfigYml = path.join(REPO_ROOT, ".quay", "config.yml");
+  assert.ok(fs.existsSync(realConfigYml), "real .quay/config.yml must exist in this worktree");
+  const content = fs.readFileSync(realConfigYml, "utf8");
+  assert.match(content, /ts-typecheck/, "real config.yml's gates: section must declare the ts-typecheck testPass gate");
   const r = await gate("ts-typecheck")({ id: "exp5-M-TS-MIGRATION-P0" });
   assert.equal(r.ok, true, `expected pass against this repo's real workspace; got reason=${r.reason}`);
 }, { timeout: 120000 });

@@ -7,9 +7,14 @@
 // the required fields (board, gates). Optional fields (stop, policy, execution,
 // audit) have safe defaults.
 //
-// DIR-050: unified config format. Reader tries in order:
-//   1. `.quay/config.yml` with a `loop:` section (unified format, preferred)
-//   2. `.quay/loop.yml` (legacy format, back-compat fallback)
+// DIR-050/DIR-120 Phase 2: unified config format, branch-A-only-terminal.
+//   Branch A: `.quay/config.yml` exists — TERMINAL. Must have a `loop:` section
+//     (else FAIL-CLOSED); never falls through to a legacy `.quay/loop.yml`.
+//   Branch B: no `.quay/config.yml` — reads `.quay/loop.yml` (legacy format,
+//     back-compat fallback for workspaces with no unified config).
+//     DIR-120 Phase 3a: a branch-B `.quay/loop.yml` may not declare
+//     `providers:` (FAIL-CLOSED) — a loop-only profile fragment, not a second
+//     provider map.
 //
 // Schema (loop section / .quay/loop.yml):
 //   board:     string   REQUIRED — provider name (e.g. "native")
@@ -45,9 +50,14 @@ const VALID_AUDIT = new Set(["adversarial", "none"]);
  */
 export function readLoopParams(workspaceRoot) {
   const unifiedConfigPath = path.join(workspaceRoot, ".quay", "config.yml");
-  const legacyLoopPath = path.join(workspaceRoot, ".quay", "loop.yml");
 
-  // 1. DIR-050: try unified .quay/config.yml with loop: section first
+  // DIR-120 Phase 2: branch A (unified config.yml exists) is TERMINAL — it
+  // returns/throws before ever constructing a legacy .quay/loop.yml path.
+  // Branch B (no config.yml) is untouched pre-DIR-050 legacy behavior,
+  // reachable ONLY when branch A does not apply. The legacy root
+  // `.quay/loop.yml` was deleted as part of this same change — branch A is
+  // unconditionally true for THIS workspace, so branch B is dead weight
+  // here but stays live for any workspace with no config.yml of its own.
   let parsed: unknown;
   let sourceLabel: string;
   if (fs.existsSync(unifiedConfigPath)) {
@@ -62,23 +72,41 @@ export function readLoopParams(workspaceRoot) {
     if (unified && typeof unified === "object" && "loop" in unified) {
       parsed = (unified as Record<string, unknown>).loop;
       sourceLabel = ".quay/config.yml (loop: section)";
+    } else {
+      // DIR-120 Phase 2: config.yml exists but has no loop: key — NEW
+      // FAIL-CLOSED (previously silently fell through to a co-located
+      // .quay/loop.yml). Unreachable for any workspace checked today, since
+      // all three real .quay/config.yml's have a loop: section.
+      throw new Error(
+        `FAIL-CLOSED: .quay/config.yml exists but has no 'loop:' section, and legacy .quay/loop.yml fallback has been removed (DIR-120 Phase 2) — add a loop: section to .quay/config.yml`
+      );
     }
-  }
-
-  // 2. Fall back to .quay/loop.yml
-  if (parsed === undefined) {
+  } else {
+    // Branch B — no config.yml at all. Untouched pre-DIR-050 legacy path.
+    const legacyLoopPath = path.join(workspaceRoot, ".quay", "loop.yml");
     if (!fs.existsSync(legacyLoopPath)) {
       throw new Error(
         `FAIL-CLOSED: no loop config found — neither .quay/config.yml (with loop: section) nor .quay/loop.yml exists in ${workspaceRoot}`
       );
     }
+    let legacyParsed: unknown;
     try {
-      parsed = YAML.parse(fs.readFileSync(legacyLoopPath, "utf8"));
+      legacyParsed = YAML.parse(fs.readFileSync(legacyLoopPath, "utf8"));
     } catch (e: unknown) {
       throw new Error(
         `FAIL-CLOSED: .quay/loop.yml is malformed YAML — ${(e as Error).message}`
       );
     }
+    // DIR-120 Phase 3a: a loop-only profile fragment (no config.yml) may not
+    // declare `providers:` — that belongs exclusively in a unified
+    // .quay/config.yml. Scoped to branch B ONLY — branch-A workspaces
+    // legitimately have `providers:` at config.yml's own top level.
+    if (legacyParsed && typeof legacyParsed === "object" && "providers" in legacyParsed) {
+      throw new Error(
+        `FAIL-CLOSED: .quay/loop.yml declares 'providers:' — a loop-only profile fragment may not declare 'providers:', that belongs exclusively in a unified .quay/config.yml (DIR-120 Phase 3a)`
+      );
+    }
+    parsed = legacyParsed;
     sourceLabel = ".quay/loop.yml";
   }
 

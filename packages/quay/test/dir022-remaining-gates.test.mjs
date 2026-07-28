@@ -29,9 +29,11 @@ const nativeProviderDir = path.dirname(nativeBin);
 // repo root: packages/quay/test -> repo root is 3 levels up.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 // DIR-035-B: `vmeta-lag`/`dogfood-evidence` are no longer module-level
-// `gateRegistry` entries — they are THIS repo's own `.quay/gates.yml`-declared
-// workspace gates. `resolveGate(name, REPO_ROOT)` resolves them exactly as
-// `quay gate` would when run from this repo's own workspace root.
+// `gateRegistry` entries — they are THIS repo's own workspace gates, declared
+// in `.quay/config.yml`'s own `gates:` section (DIR-120: the only source THIS
+// workspace's readers resolve gates from). `resolveGate(name, REPO_ROOT)`
+// resolves them exactly as `quay gate` would when run from this repo's own
+// workspace root.
 const gate = (name) => resolveGate(name, REPO_ROOT);
 
 // ---------------------------------------------------------------------------
@@ -63,8 +65,14 @@ function runNative(args, tasksDir) {
 }
 
 // mirrors it0-gates.test.mjs / gate.test.mjs makeWorkspace(), PLUS (DIR-035-B)
-// a `.quay/gates.yml` declaring `vmeta-lag`/`dogfood-evidence` as THIS test
-// workspace's own data, pointed at the REAL repo scripts (REPO_ROOT).
+// a `vmeta-lag`/`dogfood-evidence` it0 declaration as THIS test workspace's own
+// data, pointed at the REAL repo scripts (REPO_ROOT).
+//
+// DIR-120 Phase 2: this workspace's `.quay/config.yml` already exists (it carries
+// `providers:`), so branch A is TERMINAL for `readGatesConfig` — the it0 gates
+// MUST live in config.yml's own `gates:` section now. A separate `.quay/gates.yml`
+// sibling would be silently ignored (branch A never falls through once config.yml
+// exists), not a real branch-B fixture.
 function makeWorkspace(tag) {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m43-${tag}-tasks-`));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m43-${tag}-ws-`));
@@ -81,18 +89,14 @@ function makeWorkspace(tag) {
       "    env:",
       `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
       "",
-    ].join("\n")
-  );
-  fs.writeFileSync(
-    path.join(workspaceRoot, ".quay", "gates.yml"),
-    [
-      "it0:",
-      "  - name: vmeta-lag",
-      `    script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh").replaceAll("\\", "\\\\")}"`,
-      "    argsKey: vmetaLagArgs",
-      "  - name: dogfood-evidence",
-      `    script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh").replaceAll("\\", "\\\\")}"`,
-      "    argsKey: dogfoodEvidenceArgs",
+      "gates:",
+      "  it0:",
+      "    - name: vmeta-lag",
+      `      script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh").replaceAll("\\", "\\\\")}"`,
+      "      argsKey: vmetaLagArgs",
+      "    - name: dogfood-evidence",
+      `      script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh").replaceAll("\\", "\\\\")}"`,
+      "      argsKey: dogfoodEvidenceArgs",
       "",
     ].join("\n")
   );

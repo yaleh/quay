@@ -194,16 +194,89 @@ test("DIR-050 GREEN: unified config.yml loop: section — all fields parsed corr
   assert.equal(params.concurrency, 4);
 });
 
-test("DIR-050 GREEN: legacy loop.yml fallback when config.yml has no loop: section", () => {
+test("DIR-120 Phase 2 RED: config.yml with no loop: section now FAIL-CLOSED even with sibling loop.yml present (branch-A terminal, no more fallthrough)", () => {
   const ws = tmpWs("legacy-fallback");
   // config.yml without loop: section
   fs.writeFileSync(path.join(ws, ".quay", "config.yml"), "providers:\n  native:\n    enabled: true\n");
   writeLoopYml(ws, "board: native\ngates: [vitest]\nstop: once");
+  assert.throws(
+    () => readLoopParams(ws),
+    (err) => {
+      assert(err instanceof Error, "must be Error");
+      assert(err.message.includes("FAIL-CLOSED"), `got: ${err.message}`);
+      return true;
+    },
+    "DIR-120 Phase 2: branch A is now terminal — a config.yml missing loop: must FAIL-CLOSED, never fall through to a sibling loop.yml"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// DIR-120 Phase 3a: exp5 profile-fragment restriction (branch B only —
+// no config.yml in the workspace).
+// ---------------------------------------------------------------------------
+
+test("DIR-120 Phase 3a RED: a `providers:` key in branch-B loop.yml (no config.yml) throws FAIL-CLOSED", () => {
+  const ws = tmpWs("providers-key-rejected");
+  writeLoopYml(ws, "board: native\ngates: [acceptance]\nproviders: {}\n");
+  assert.throws(
+    () => readLoopParams(ws),
+    (err) => {
+      assert(err instanceof Error, "must be Error");
+      assert(err.message.includes("FAIL-CLOSED"), `got: ${err.message}`);
+      assert(err.message.includes("providers"), `field 'providers' not named in message: ${err.message}`);
+      return true;
+    }
+  );
+});
+
+test("DIR-120 Phase 3a RED: a `providers: null` key in branch-B loop.yml still throws FAIL-CLOSED (any value, including null, counts as present)", () => {
+  const ws = tmpWs("providers-null-rejected");
+  writeLoopYml(ws, "board: native\ngates: [acceptance]\nproviders: null\n");
+  assert.throws(
+    () => readLoopParams(ws),
+    (err) => {
+      assert(err instanceof Error, "must be Error");
+      assert(err.message.includes("FAIL-CLOSED"), `got: ${err.message}`);
+      assert(err.message.includes("providers"), `field 'providers' not named in message: ${err.message}`);
+      return true;
+    }
+  );
+});
+
+test("DIR-120 Phase 3a GREEN: exp5's real, unmodified loop.yml shape (no providers:, array gates:) still validates", () => {
+  const ws = tmpWs("exp5-real-shape-green");
+  writeLoopYml(ws, [
+    "board: native",
+    "gates: [it0-set]",
+    "stop: \"until(.halt)\"",
+    "policy: value-typed-ledger",
+    "concurrency: 2",
+  ].join("\n"));
   const params = readLoopParams(ws);
   assert.equal(params.board, "native");
-  assert.deepEqual(params.gates, ["vitest"]);
-  assert.equal(params.stop, "once");
+  assert.deepEqual(params.gates, ["it0-set"]);
 });
+
+test("DIR-120 Phase 3a RED: object-shaped `gates:` in branch-B loop.yml throws FAIL-CLOSED (pre-existing invariant, now explicitly named)", () => {
+  const ws = tmpWs("gates-object-shape-rejected");
+  writeLoopYml(ws, "board: native\ngates:\n  it0:\n    - name: foo\n");
+  assert.throws(
+    () => readLoopParams(ws),
+    (err) => {
+      assert(err instanceof Error, "must be Error");
+      assert(err.message.includes("FAIL-CLOSED"), `got: ${err.message}`);
+      assert(err.message.includes("gates"), `field 'gates' not named in message: ${err.message}`);
+      return true;
+    },
+    "an object-shaped gates: (the unified-config gates: shape) must never be silently accepted as a loop-only profile fragment field"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// DIR-120 Phase 2: gate-side branch-A-only behavior lives in
+// gate-config-loader.test.mjs (readGatesConfig is a distinct function from
+// readLoopParams, tested in its own dedicated file per the task's own AC).
+// ---------------------------------------------------------------------------
 
 test("DIR-050 GREEN: legacy loop.yml fallback when no config.yml at all", () => {
   const ws = tmpWs("no-config-legacy");

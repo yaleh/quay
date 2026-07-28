@@ -1,9 +1,11 @@
-// DIR-035-D (M52) — `delivery-standalone-smoke` wired as a named `.quay/gates.yml`-declared gate.
+// DIR-035-D (M52) — `delivery-standalone-smoke` wired as a named gate declared in the
+// workspace's gates config (DIR-120: `.quay/config.yml`'s own `gates:` section for THIS repo;
+// a legacy `.quay/gates.yml` only for a workspace with no `config.yml`).
 //
 // Mirrors `it0-gates.test.mjs`'s own shape (real script invocation via `resolveGate`, real CLI
 // path via `quay gate <task> --gate ...`), adapted for the ONE difference this gate has from an
 // `it0`-style gate: `delivery-standalone-smoke.sh` takes ZERO arguments (no `task.extra[argsKey]`
-// required) — exercised via the new `makeFixedScriptGate` factory + `gates.yml`'s `fixed:` list.
+// required) — exercised via the new `makeFixedScriptGate` factory + the gates config's `fixed:` list.
 //
 // Run: node --test packages/quay/test/*.mjs
 
@@ -49,6 +51,12 @@ function runNative(args, tasksDir) {
 
 // mirrors it0-gates.test.mjs makeWorkspace(), PLUS a `fixed:` entry pointing at the real
 // delivery-standalone-smoke.sh (real process I/O, not a synthetic fixture script).
+//
+// DIR-120 Phase 2: this workspace's `.quay/config.yml` already exists (it carries
+// `providers:`), so branch A is TERMINAL for `readGatesConfig` — the fixed gate
+// MUST live in config.yml's own `gates:` section now. A separate `.quay/gates.yml`
+// sibling would be silently ignored (branch A never falls through once config.yml
+// exists), not a real branch-B fixture.
 function makeWorkspace(tag) {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m52-${tag}-tasks-`));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m52-${tag}-ws-`));
@@ -65,14 +73,10 @@ function makeWorkspace(tag) {
       "    env:",
       `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
       "",
-    ].join("\n")
-  );
-  fs.writeFileSync(
-    path.join(workspaceRoot, ".quay", "gates.yml"),
-    [
-      "fixed:",
-      "  - name: delivery-standalone-smoke",
-      `    script: "${SMOKE_SCRIPT.replaceAll("\\", "\\\\")}"`,
+      "gates:",
+      "  fixed:",
+      "    - name: delivery-standalone-smoke",
+      `      script: "${SMOKE_SCRIPT.replaceAll("\\", "\\\\")}"`,
       "",
     ].join("\n")
   );
@@ -146,15 +150,20 @@ test("M52 C1 [AC2/AC3]: `quay gate <task> --gate delivery-standalone-smoke` PASS
 }, { timeout: 60000 });
 
 // ===========================================================================
-// D1 — real-world demonstration against THIS repo's own real workspace gates.yml
-// (the exact same file the real OUTER-LOOP ABSORB gates against), not a fixture copy.
+// D1 — real-world demonstration against THIS repo's own real workspace gates
+// wiring (the exact same source the real OUTER-LOOP ABSORB gates against),
+// not a fixture copy.
+//
+// DIR-120 Phase 2 (2026-07-28): root `.quay/gates.yml` has been physically
+// deleted and its reader fallback removed — `.quay/config.yml`'s own
+// `gates:` section is the ONLY source THIS workspace's readers resolve from.
 // ===========================================================================
 
-test("M52 D1: delivery-standalone-smoke gate PASSes against THIS repo's own real .quay/gates.yml wiring", async () => {
-  const realGatesYml = path.join(REPO_ROOT, ".quay", "gates.yml");
-  assert.ok(fs.existsSync(realGatesYml), "real .quay/gates.yml must exist in this worktree");
-  const content = fs.readFileSync(realGatesYml, "utf8");
-  assert.match(content, /delivery-standalone-smoke/, "real gates.yml must declare the fixed gate");
+test("M52 D1: delivery-standalone-smoke gate PASSes against THIS repo's own real .quay/config.yml gates: wiring", async () => {
+  const realConfigYml = path.join(REPO_ROOT, ".quay", "config.yml");
+  assert.ok(fs.existsSync(realConfigYml), "real .quay/config.yml must exist in this worktree");
+  const content = fs.readFileSync(realConfigYml, "utf8");
+  assert.match(content, /delivery-standalone-smoke/, "real config.yml's gates: section must declare the fixed gate");
   const r = await gate("delivery-standalone-smoke")({ id: "DIR-035-D" });
   assert.equal(r.ok, true, `expected pass against this repo's real workspace; got reason=${r.reason}`);
 }, { timeout: 60000 });

@@ -42,9 +42,10 @@ const INDEPENDENT_FIXTURE = path.join(FIXTURES_DIR, "genuinely-independent.md");
 const DISPATCH_RECORD_FIXTURE = path.join(FIXTURES_DIR, "dispatch-record.txt");
 const ORCH_ID = "orchestrator-session-abc123"; // matches self-audit-matching-id.md's recorded id
 // DIR-035-B: `audit-independence` is no longer a module-level `gateRegistry`
-// entry — it is THIS repo's own `.quay/gates.yml`-declared workspace gate.
-// `resolveGate(name, REPO_ROOT)` resolves it exactly as `quay gate` would
-// when run from this repo's own workspace root.
+// entry — it is THIS repo's own workspace gate, declared in `.quay/config.yml`'s
+// own `gates:` section (DIR-120: the only source THIS workspace's readers
+// resolve gates from). `resolveGate(name, REPO_ROOT)` resolves it exactly as
+// `quay gate` would when run from this repo's own workspace root.
 const gate = (name) => resolveGate(name, REPO_ROOT);
 
 // ---------------------------------------------------------------------------
@@ -72,8 +73,14 @@ function runNative(args, tasksDir) {
 }
 
 // mirrors dir022-remaining-gates.test.mjs / it0-gates.test.mjs makeWorkspace(),
-// PLUS (DIR-035-B) a `.quay/gates.yml` declaring `audit-independence` as THIS
-// test workspace's own data, pointed at the REAL repo script (REPO_ROOT).
+// PLUS (DIR-035-B) an `audit-independence` it0 declaration as THIS test
+// workspace's own data, pointed at the REAL repo script (REPO_ROOT).
+//
+// DIR-120 Phase 2: this workspace's `.quay/config.yml` already exists (it carries
+// `providers:`), so branch A is TERMINAL for `readGatesConfig` — the it0 gate
+// MUST live in config.yml's own `gates:` section now. A separate `.quay/gates.yml`
+// sibling would be silently ignored (branch A never falls through once config.yml
+// exists), not a real branch-B fixture.
 function makeWorkspace(tag) {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m44-${tag}-tasks-`));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m44-${tag}-ws-`));
@@ -90,15 +97,11 @@ function makeWorkspace(tag) {
       "    env:",
       `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
       "",
-    ].join("\n")
-  );
-  fs.writeFileSync(
-    path.join(workspaceRoot, ".quay", "gates.yml"),
-    [
-      "it0:",
-      "  - name: audit-independence",
-      `    script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/audit-independence-check.sh").replaceAll("\\", "\\\\")}"`,
-      "    argsKey: auditIndependenceArgs",
+      "gates:",
+      "  it0:",
+      "    - name: audit-independence",
+      `      script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/audit-independence-check.sh").replaceAll("\\", "\\\\")}"`,
+      "      argsKey: auditIndependenceArgs",
       "",
     ].join("\n")
   );

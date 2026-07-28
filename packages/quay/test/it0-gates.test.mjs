@@ -65,10 +65,17 @@ function runNative(args, tasksDir) {
 }
 
 // mirrors gate.test.mjs / acceptance.test.mjs makeWorkspace(), PLUS (DIR-035-B)
-// a `.quay/gates.yml` declaring `impl-row`/`line-budget` as THIS test
+// an `it0`-gate declaration for `impl-row`/`line-budget` as THIS test
 // workspace's own data — the exact shape a real exp5-style workspace uses,
 // pointed at the REAL repo scripts (REPO_ROOT) so the CLI path still exercises
 // real process I/O, not a synthetic fixture script.
+//
+// DIR-120 Phase 2: this workspace's `.quay/config.yml` already exists (it
+// carries `providers:`), so branch A is TERMINAL for `readGatesConfig` —
+// the it0 gates MUST live in config.yml's own `gates:` section now. A
+// separate `.quay/gates.yml` sibling would be silently ignored (the exact
+// silent-data-loss scenario this milestone's own gate-config-loader.test.mjs
+// names), not a real branch-B fixture, since a `config.yml` is present.
 function makeWorkspace(tag) {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m39-${tag}-tasks-`));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-m39-${tag}-ws-`));
@@ -85,18 +92,14 @@ function makeWorkspace(tag) {
       "    env:",
       `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
       "",
-    ].join("\n")
-  );
-  fs.writeFileSync(
-    path.join(workspaceRoot, ".quay", "gates.yml"),
-    [
-      "it0:",
-      "  - name: impl-row",
-      `    script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh").replaceAll("\\", "\\\\")}"`,
-      "    argsKey: implRowArgs",
-      "  - name: line-budget",
-      `    script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh").replaceAll("\\", "\\\\")}"`,
-      "    argsKey: lineBudgetArgs",
+      "gates:",
+      "  it0:",
+      "    - name: impl-row",
+      `      script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/it0-impl-row-check.sh").replaceAll("\\", "\\\\")}"`,
+      "      argsKey: implRowArgs",
+      "    - name: line-budget",
+      `      script: "${path.join(REPO_ROOT, "experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh").replaceAll("\\", "\\\\")}"`,
+      "      argsKey: lineBudgetArgs",
       "",
     ].join("\n")
   );

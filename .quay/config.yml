@@ -2,8 +2,16 @@
 # user's project; distinct from provider.yml, which travels with the Provider code.
 #
 # Unified format (DIR-050): providers: / gates: / loop: sections in ONE file.
-# Legacy separate-file workspaces (.quay/gates.yml, .quay/loop.yml) continue to
-# work — readers try the unified section first, fall back to the legacy file.
+# DIR-120 Phase 2: once THIS file exists (as it does here), it is TERMINAL —
+# readGatesConfig()/readLoopParams() resolve exclusively from its own
+# `gates:`/`loop:` sections and never fall through to a legacy
+# `.quay/gates.yml`/`.quay/loop.yml` (this workspace's own root copies of
+# those two files have been deleted; the branch-A fallback code path that
+# would have read them is gone too). A workspace with NO `.quay/config.yml`
+# at all (e.g. exp5's own `experiments/quay-perpetual-stream/.quay/`) still
+# reads a bare `.quay/loop.yml`/`.quay/gates.yml` via the readers' unchanged
+# branch-B path — see packages/quay/src/gate/config/loader.ts and
+# packages/quay/src/loop-params.ts's own doc comments.
 
 providers:
   native:
@@ -22,9 +30,14 @@ providers:
     env:
       QUAY_GITHUB_REPO: "yaleh/quay"     # owner/repo this Provider reads issues from
 
-# DIR-050: gates section (previously .quay/gates.yml). The legacy gates.yml
-# remains as a back-compat fallback for workspaces that haven't migrated, but
-# this section is now the SINGLE SOURCE OF TRUTH for this workspace.
+# DIR-050: gates section (previously .quay/gates.yml). DIR-120 Phase 2: this
+# workspace's own root `.quay/gates.yml` has been physically deleted, and
+# readGatesConfig()'s branch-A fallback code path that would have read it is
+# gone too — this section is now the ONLY source THIS workspace's readers
+# can resolve gates from (not merely "single source of truth" by convention;
+# the legacy fallback no longer exists as code, not just as a file). A
+# legacy `.quay/gates.yml` remains a valid, unrelated concept only for a
+# DIFFERENT workspace that has no `.quay/config.yml` of its own at all.
 gates:
   it0:
     - name: impl-row

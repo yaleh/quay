@@ -32,10 +32,29 @@
 //
 // Usage:
 //   node config-wiring-check.ts [--workspace <path>] [--driver bespoke|generic|both] [--json]
+//   node config-wiring-check.ts --verify-readers [--workspace <path>]
 //   node config-wiring-check.ts --selftest
 //
 // Exit: 0 = every checked field OK for the requested driver(s); 1 = >=1 field has >=1 issue;
 //       2 = usage/environment error (bad args, workspace config unreadable).
+//
+// --verify-readers (DIR-120): a real, in-code cross-check that this checker's OWN verdicts for
+// `gates`/`loop` fields actually agree with `readGatesConfig`/`readLoopParams`'s real,
+// post-Phase-2 return/throw behavior — closing the gap named in DIR-120's problem framing point 6
+// ("the checker agrees with the reader for gates: is real today but implicit and never asserted
+// anywhere in code"). Does two things no other mode does:
+//   1. Set-containment: every gate name `readGatesConfig` actually returns (it0/fixed/testPass/
+//      coverageFloor/redGreen names, lower-cased adr ids) must appear in `listGates()`'s output —
+//      proving `checkGatesValueResolvable`'s "known gates" notion really traces back to
+//      `readGatesConfig`'s real return for THIS workspace, not assumed.
+//   2. Verdict agreement: `checkField("gates", loopParams.gates, ...)`'s UNRESOLVABLE_VALUE
+//      presence is asserted (not assumed) to equal a direct `checkGatesValueResolvable` call on
+//      the exact same value — and `readLoopParams`'s real returned value for every LOOP_FIELD is
+//      asserted equal to what `checkField` was actually passed, closing the loop-side of the gap
+//      too (real today, but previously only implicit via a shared local variable, never asserted).
+// Exit: 0 = readers reachable AND both assertions hold; 1 = readers reachable but an assertion
+// failed (cross-check disagreement — the real regression this mode exists to catch); 2 = usage/
+// environment error (matches main()'s existing convention, e.g. readLoopParams itself throws).
 
 import fs from "node:fs";
 import os from "node:os";
@@ -218,6 +237,92 @@ async function checkField(field: LoopField, value: unknown, drivers: string[], r
   return { field, value, issues };
 }
 
+// ── --verify-readers: cross-check the checker's own verdict against the real readers ────────────
+// Every gate name readGatesConfig(workspaceRoot) actually returns, flattened to the same
+// lower-cased-adr / bare-name shape loadWorkspaceGates uses to build its gate map (see loader.ts).
+function gateNamesFromGatesConfig(cfg: {
+  it0: Array<{ name?: string }>;
+  adr: string[];
+  fixed: Array<{ name?: string }>;
+  testPass: Array<{ name?: string }>;
+  coverageFloor: Array<{ name?: string }>;
+  redGreen: Array<{ name?: string }>;
+}): string[] {
+  const names: string[] = [];
+  for (const e of cfg.it0 ?? []) if (e?.name) names.push(e.name);
+  for (const id of cfg.adr ?? []) if (typeof id === "string" && id.trim()) names.push(id.toLowerCase());
+  for (const e of cfg.fixed ?? []) if (e?.name) names.push(e.name);
+  for (const e of cfg.testPass ?? []) if (e?.name) names.push(e.name);
+  for (const e of cfg.coverageFloor ?? []) if (e?.name) names.push(e.name);
+  for (const e of cfg.redGreen ?? []) if (e?.name) names.push(e.name);
+  return names;
+}
+
+interface VerifyReadersResult {
+  ok: boolean;
+  workspaceRoot: string;
+  gatesConfig: unknown;
+  loopParams: unknown;
+  setContainment: { ok: boolean; missing: string[]; checked: string[] };
+  verdictAgreement: { ok: boolean; details: string[] };
+}
+
+async function verifyReaders(workspaceRoot: string, repoRoot: string): Promise<VerifyReadersResult> {
+  const { readGatesConfig } = await import(pathToFileUrl(path.join(repoRoot, "packages/quay/src/gate/config/loader.ts")));
+  const { readLoopParams } = await import(pathToFileUrl(path.join(repoRoot, "packages/quay/src/loop-params.ts")));
+  const registryPath = path.join(repoRoot, "packages/quay/src/gate/registry.ts");
+  const registryMod = await import(pathToFileUrl(registryPath));
+
+  // 1. Direct real reader calls — the exact functions loadWorkspaceGates/main() use, no
+  //    reimplementation.
+  const gatesConfig = readGatesConfig(workspaceRoot);
+  const loopParams = readLoopParams(workspaceRoot); // may throw FAIL-CLOSED — caller handles
+
+  // 2. Set-containment: every gate name readGatesConfig really returns must resolve via the SAME
+  //    listGates() checkGatesValueResolvable already uses.
+  const known = new Set<string>(registryMod.listGates(repoRoot));
+  const checked = gateNamesFromGatesConfig(gatesConfig);
+  const missing = checked.filter((n) => !known.has(n));
+  const setContainment = { ok: missing.length === 0, missing, checked };
+
+  // 3a. Verdict agreement (gates side): checkField("gates", loopParams.gates, ...)'s
+  //     UNRESOLVABLE_VALUE presence must equal a direct checkGatesValueResolvable call on the
+  //     SAME value — asserted in code, not assumed from "checkField calls it internally."
+  const details: string[] = [];
+  let verdictOk = true;
+  const gatesReport = await checkField("gates", loopParams.gates, ["bespoke"], repoRoot);
+  const directGatesCheck = await checkGatesValueResolvable(loopParams.gates as string[], repoRoot);
+  const reportHasUnresolvable = gatesReport.issues.some((i) => i.code === "UNRESOLVABLE_VALUE");
+  const agree = reportHasUnresolvable === !directGatesCheck.ok;
+  if (!agree) verdictOk = false;
+  details.push(
+    `gates: checkField reports UNRESOLVABLE_VALUE=${reportHasUnresolvable}, direct checkGatesValueResolvable ok=${directGatesCheck.ok} -> ${agree ? "AGREE" : "DISAGREE"}`
+  );
+
+  // 3b. Verdict agreement (loop side): every LOOP_FIELDS value readLoopParams really returns must
+  //     equal exactly what a fresh checkField() call for that field is passed — real today only
+  //     because main() happens to reuse the same local variable; asserted explicitly here.
+  for (const field of LOOP_FIELDS) {
+    const real = (loopParams as Record<string, unknown>)[field];
+    const report = await checkField(field, real, ["bespoke"], repoRoot);
+    const fieldAgrees = JSON.stringify(report.value) === JSON.stringify(real);
+    if (!fieldAgrees) {
+      verdictOk = false;
+      details.push(`loop.${field}: checkField was given value=${JSON.stringify(report.value)}, readLoopParams real value=${JSON.stringify(real)} -> DISAGREE`);
+    }
+  }
+  if (verdictOk) details.push(`loop.*: all ${LOOP_FIELDS.length} fields' checkField input == readLoopParams real return -> AGREE`);
+
+  return {
+    ok: setContainment.ok && verdictOk,
+    workspaceRoot,
+    gatesConfig,
+    loopParams,
+    setContainment,
+    verdictAgreement: { ok: verdictOk, details },
+  };
+}
+
 export {
   checkGeneralReader,
   checkGenericDriverConsumes,
@@ -226,6 +331,7 @@ export {
   checkBespokeDriverConsumes,
   checkGatesValueResolvable,
   checkField,
+  verifyReaders,
   LOOP_FIELDS,
 };
 
@@ -233,6 +339,38 @@ export {
 async function main(argv: string[]): Promise<number> {
   const args = argv.slice(2);
   if (args.includes("--selftest")) return runSelftest();
+
+  if (args.includes("--verify-readers")) {
+    let vrWorkspaceRoot = REPO_ROOT;
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--workspace") vrWorkspaceRoot = path.resolve(args[++i] ?? "");
+      else if (args[i] === "--verify-readers") continue;
+      else {
+        console.error(`Usage: config-wiring-check.ts --verify-readers [--workspace <path>]`);
+        return 2;
+      }
+    }
+    let result: VerifyReadersResult;
+    try {
+      result = await verifyReaders(vrWorkspaceRoot, REPO_ROOT);
+    } catch (e: unknown) {
+      console.error(`ERROR: cannot verify readers for ${vrWorkspaceRoot}: ${(e as Error).message}`);
+      return 2;
+    }
+    console.log(`config-wiring-check --verify-readers — workspace=${result.workspaceRoot}`);
+    console.log(`\nreadGatesConfig(${JSON.stringify(result.workspaceRoot)}) =`, JSON.stringify(result.gatesConfig));
+    console.log(`\nreadLoopParams(${JSON.stringify(result.workspaceRoot)}) =`, JSON.stringify(result.loopParams));
+    console.log(`\n[set-containment] gate names referenced by readGatesConfig: [${result.setContainment.checked.join(", ")}]`);
+    console.log(
+      result.setContainment.ok
+        ? `  -> all present in listGates() — AGREE`
+        : `  -> MISSING from listGates(): [${result.setContainment.missing.join(", ")}] — DISAGREE`
+    );
+    console.log(`\n[verdict-agreement]`);
+    for (const line of result.verdictAgreement.details) console.log(`  - ${line}`);
+    console.log(`\n${result.ok ? "PASS" : "FAIL"}: verify-readers ${result.ok ? "agreement holds" : "cross-check assertion failed"}`);
+    return result.ok ? 0 : 1;
+  }
 
   let workspaceRoot = REPO_ROOT;
   let drivers = ["bespoke", "generic"];
@@ -244,7 +382,7 @@ async function main(argv: string[]): Promise<number> {
       drivers = v === "both" || v === "" ? ["bespoke", "generic"] : [v];
     } else if (args[i] === "--json") asJson = true;
     else {
-      console.error(`Usage: config-wiring-check.ts [--workspace <path>] [--driver bespoke|generic|both] [--json] | --selftest`);
+      console.error(`Usage: config-wiring-check.ts [--workspace <path>] [--driver bespoke|generic|both] [--json] | --verify-readers [--workspace <path>] | --selftest`);
       return 2;
     }
   }
@@ -353,6 +491,55 @@ async function runSelftest(): Promise<number> {
     check("cli-green-workspace-generic-driver-exit-0", code === 0, `exit=${code}`);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  // ── DIR-120 --verify-readers: agreement on a real GREEN workspace ──
+  const vrGreenDir = fs.mkdtempSync(path.join(os.tmpdir(), "config-wiring-verify-green-"));
+  try {
+    fs.mkdirSync(path.join(vrGreenDir, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(vrGreenDir, ".quay", "config.yml"),
+      "gates:\n  adr: [\"ADR-001\"]\nloop:\n  board: native\n  gates: [acceptance]\n"
+    );
+    const result = await verifyReaders(vrGreenDir, REPO_ROOT);
+    check("verify-readers-green-set-containment-ok", result.setContainment.ok === true, JSON.stringify(result.setContainment));
+    check("verify-readers-green-verdict-agreement-ok", result.verdictAgreement.ok === true, JSON.stringify(result.verdictAgreement));
+    check("verify-readers-green-overall-ok", result.ok === true);
+    const code = await main(["node", "config-wiring-check.ts", "--verify-readers", "--workspace", vrGreenDir]);
+    check("verify-readers-cli-green-exit-0", code === 0, `exit=${code}`);
+  } finally {
+    fs.rmSync(vrGreenDir, { recursive: true, force: true });
+  }
+
+  // ── DIR-120 --verify-readers: a deliberately-mismatched synthetic case must be caught, proving
+  //    the set-containment assertion actually distinguishes agreement from disagreement, not a
+  //    vacuously-true check that always passes.
+  const vrRedDir = fs.mkdtempSync(path.join(os.tmpdir(), "config-wiring-verify-red-"));
+  try {
+    fs.mkdirSync(path.join(vrRedDir, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(vrRedDir, ".quay", "config.yml"),
+      [
+        "gates:",
+        "  fixed:",
+        "    - name: totally-bogus-gate-xyz",
+        "      script: \"./nonexistent.sh\"",
+        "loop:",
+        "  board: native",
+        "  gates: [acceptance]",
+      ].join("\n")
+    );
+    const result = await verifyReaders(vrRedDir, REPO_ROOT);
+    check(
+      "verify-readers-red-set-containment-catches-dangling-gate-name",
+      result.setContainment.ok === false && result.setContainment.missing.includes("totally-bogus-gate-xyz"),
+      JSON.stringify(result.setContainment)
+    );
+    check("verify-readers-red-overall-not-ok", result.ok === false);
+    const code = await main(["node", "config-wiring-check.ts", "--verify-readers", "--workspace", vrRedDir]);
+    check("verify-readers-cli-red-exit-1", code === 1, `exit=${code}`);
+  } finally {
+    fs.rmSync(vrRedDir, { recursive: true, force: true });
   }
 
   console.log(`\nconfig-wiring-check --selftest: ${pass} passed, ${fail} failed`);

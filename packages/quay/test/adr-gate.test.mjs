@@ -63,7 +63,13 @@ function runNative(args, tasksDir, extraEnv = {}) {
   });
 }
 
-// mirrors it0-gates.test.mjs makeWorkspace()
+// mirrors it0-gates.test.mjs makeWorkspace().
+//
+// DIR-120 Phase 2: this workspace's `.quay/config.yml` already exists (it carries
+// `providers:`), so branch A is TERMINAL for `readGatesConfig` — the `adr:` entry
+// MUST live in config.yml's own `gates:` section now. A separate `.quay/gates.yml`
+// sibling would be silently ignored (branch A never falls through once config.yml
+// exists), not a real branch-B fixture.
 function makeWorkspace(tag) {
   const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-e3-${tag}-tasks-`));
   const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-e3-${tag}-ws-`));
@@ -80,11 +86,11 @@ function makeWorkspace(tag) {
       "    env:",
       `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
       "",
+      "gates:",
+      "  adr:",
+      '    - "ADR-001"',
+      "",
     ].join("\n")
-  );
-  fs.writeFileSync(
-    path.join(workspaceRoot, ".quay", "gates.yml"),
-    ["adr:", '  - "ADR-001"', ""].join("\n")
   );
   return { workspaceRoot, tasksDir };
 }
