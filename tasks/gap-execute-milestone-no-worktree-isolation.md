@@ -3,7 +3,7 @@ id: gap-execute-milestone-no-worktree-isolation
 title: "gap: execute-milestone.js's Build phase has no worktree isolation —
   CLAUDE.md's documented per-milestone worktree claim is stale, and two
   milestones can never safely run concurrently regardless of task Touches"
-status: todo
+status: needs-human
 labels:
   - gap
   - milestone-candidate
@@ -12,6 +12,19 @@ children: []
 extra:
   schema: v1
 ---
+## Resolution, closed (2026-07-28)
+
+The open decision this task recorded ("(a) serialize forever, or (b) build real worktree
+isolation") has been made explicitly by the user: option (b), and treated as high priority — to
+execute as soon as possible after the current DIR-117/DIR-122/DIR-119-D/DIR-119 batch lands.
+Building real worktree isolation is a substantive architecture change to `execute-milestone.js`'s
+Build/Land control plane — the same weight class as DIR-119-B's arbitrary-width execution work, not
+a proportionate gap-task point-fix. Promoted to **[[DIR-123]]**, authored with the full
+Proposal/Plan/AC rigor that scope warrants. This task is not executed under its own identity;
+AC/DoD checkboxes below are left as they were (DIR-020: never self-ticked, and this was closed by
+promotion, not completion). The real Finding evidence below remains accurate and is the basis
+DIR-123's own Finding cites verbatim rather than re-deriving.
+
 ## Proposal
 
 Either (a) explicitly document and accept that `execute-milestone` dispatches must always be
