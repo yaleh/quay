@@ -100,12 +100,20 @@ if (!adjudicateResult || adjudicateResult.ok !== true) {
 // are inlined here and cross-checked by proposal-convergence.test.mjs's own dedicated test.
 phase('ProposalReview')
 
-// DIR-125: deterministic injected clock for tests. Production args are ALWAYS JSON-serialized
-// (functions do not survive JSON.stringify/parse — see the `$a` normalization above), so `$a.now`
-// can only be a function when a test harness passes a plain JS object directly; production always
-// falls back to the real wall clock.
-const _now = (typeof $a.now === 'function') ? $a.now : () => Date.now()
-const _startedAtMs = _now()
+// FIX (2026-07-28, real-dispatch crash found post-DIR-125): workflow scripts cannot call
+// Date.now()/new Date() — the sandbox throws (it would break resume). `$a.now` as a FUNCTION is a
+// test-only hook: the unit-test harness constructs `args` as a real JS object, bypassing JSON
+// serialization; a genuine Workflow() dispatch always JSON-serializes `args`, so `$a.now` can
+// never be a function in production — the OLD `() => Date.now()` fallback therefore crashed on
+// EVERY real dispatch (100% reproducible, confirmed live). Real time now comes ONLY from agents'
+// own execution environment: each review agent runs a real `date +%s%3N` shell call and reports
+// the result as a plain number (`nowMs`) in its structured output. `_latestKnownNowMs` is seeded
+// by the round-0 full review agent below and advanced by each subsequent delta-review agent — a
+// legitimate, monotonically-advancing proxy for elapsed time, since real wall-clock time genuinely
+// passes between agent dispatches.
+let _latestKnownNowMs = null
+const _now = (typeof $a.now === 'function') ? $a.now : () => _latestKnownNowMs
+let _startedAtMs = null
 
 // DIR-125 Requested-action item 3: fail-closed maxima. A caller MAY lower `$a.maxDeltaRounds`,
 // never raise it above the policy ceiling.
@@ -188,15 +196,18 @@ const _fullReviewResult = await agent(
 2. Mechanism-claim wiring coverage (DIR-117): extract every new call/dispatch/ownership/enforcement relationship the Proposal claims and confirm the task's own \`## Acceptance Criteria\` has a matching, falsifiable item demanding real production-callsite or cross-generation reachability evidence for THAT relationship (not descriptive prose restating the claim).
 3. DIR-125 typed findings — report EVERY finding as a typed object, never a bare count. A finding is BLOCKING (\`blocking:true\`) ONLY if it is one of: factual contradiction, unresolved safety/fail-closed behavior, missing production callsite/ownership enforcement, a new behavior with no falsifiable AC or accepted-risk decision, stale acceptance wiring, or a scope cluster requiring split. Every other valuable finding is non-blocking and MUST carry exactly one disposition: plan, split, accepted-risk, backlog, duplicate, or superseded — never silently drop a real finding.
 4. ${_sessionIdInstruction}
-5. Return {findings: [{subsystem, summary, severity: "blocker"|"major"|"minor"|"nit", blocking: <boolean>, evidence, claimRef, disposition}], mechanismCount: <integer count of independently landable mechanisms this Proposal contains>, proposalHash: <a short hash/fingerprint you compute over the reviewed Proposal text, any stable digest is fine>, sessionId: <your real session id>}. Use findings: [] if there are none.`,
+5. BEFORE returning, run \`date +%s%3N\` (real epoch milliseconds) and include the result as \`nowMs\` (a number) — the orchestrating workflow script cannot read the clock itself.
+6. Return {findings: [{subsystem, summary, severity: "blocker"|"major"|"minor"|"nit", blocking: <boolean>, evidence, claimRef, disposition}], mechanismCount: <integer count of independently landable mechanisms this Proposal contains>, proposalHash: <a short hash/fingerprint you compute over the reviewed Proposal text, any stable digest is fine>, nowMs: <the real epoch-ms number from step 5>, sessionId: <your real session id>}. Use findings: [] if there are none.`,
   { label: 'proposal-review', phase: 'ProposalReview',
-    schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'array', items: _findingSchema }, mechanismCount: { type: 'number' }, proposalHash: { type: 'string' }, sessionId: { type: 'string' } } } }
+    schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'array', items: _findingSchema }, mechanismCount: { type: 'number' }, proposalHash: { type: 'string' }, nowMs: { type: 'number' }, sessionId: { type: 'string' } } } }
 )
 
 const _reviewSessions = []
 const _reviserSessions = []
 if (_fullReviewResult?.sessionId) _reviewSessions.push(_fullReviewResult.sessionId)
 if (_fullReviewResult?.proposalHash) _proposalHashes.push({ round: 0, hash: _fullReviewResult.proposalHash })
+if (Number.isFinite(_fullReviewResult?.nowMs)) _latestKnownNowMs = _fullReviewResult.nowMs
+_startedAtMs = _now()
 
 // Backward compat (DIR-125 AC: "zero-finding first-review fixture remains backward-compatible"):
 // a legacy reviewer/mock may still return a bare `findings: <number>` — 0 is a zero-finding pass;
@@ -256,13 +267,15 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n'
 1. For each finding id above, confirm whether it is now resolved.
 2. Report ONLY currently-open findings (blocking or non-blocking) as the \`findings\` array — a finding you already reported before and consider unchanged should be reported again with the SAME subsystem/claimRef so it keeps its identity. Do NOT re-run a full independent Proposal re-derivation.
 3. ${_sessionIdInstruction}
-4. Return {resolvedIds: [<ids from the list above now resolved>], findings: [<any still-open findings, typed the same way as the full review>], sessionId: <your real session id>}.`,
+4. BEFORE returning, run \`date +%s%3N\` (real epoch milliseconds) and include the result as \`nowMs\` (a number) — the orchestrating workflow script cannot read the clock itself.
+5. Return {resolvedIds: [<ids from the list above now resolved>], findings: [<any still-open findings, typed the same way as the full review>], nowMs: <the real epoch-ms number from step 4>, sessionId: <your real session id>}.`,
     { label: `proposal-delta-review-round-${_deltaRound}`, phase: 'ProposalReview',
-      schema: { type: 'object', properties: { resolvedIds: { type: 'array', items: { type: 'string' } }, findings: { type: 'array', items: _findingSchema }, sessionId: { type: 'string' } } } }
+      schema: { type: 'object', properties: { resolvedIds: { type: 'array', items: { type: 'string' } }, findings: { type: 'array', items: _findingSchema }, nowMs: { type: 'number' }, sessionId: { type: 'string' } } } }
   )
   if (_deltaReviewResult?.sessionId) _reviewSessions.push(_deltaReviewResult.sessionId)
   _applyResolutions(_deltaReviewResult?.resolvedIds, _deltaRound)
   _upsertFindings(_deltaReviewResult?.findings, _deltaRound)
+  if (Number.isFinite(_deltaReviewResult?.nowMs)) _latestKnownNowMs = _deltaReviewResult.nowMs
 }
 
 if (_terminalReason === 'split-recommended') {
