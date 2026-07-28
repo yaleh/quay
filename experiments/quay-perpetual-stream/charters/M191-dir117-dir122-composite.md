@@ -91,6 +91,44 @@ one per real `touches-orthogonality-check.ts` OVERLAP findings (both later tasks
    own AC (real before/after `task-schema-check.ts tasks/gap-*.md` counts) are satisfied with real
    evidence, not asserted.
 
+## Iteration 2 (2026-07-28) — close 5 real gaps found by iteration-0's REFUTED audit
+
+Iteration 0 (commit `ea63c05`) landed substantial real work but was REFUTED by independent audit
+(`milestones/M191/audits/iteration-0-acceptance-audit.md`) and the mechanical gate
+(`it0-dod-check.sh DIR-117`) still exits 1. Two items were already corrected by direct task-file
+edit (not requiring a new Build): DIR-122's false "two call sites" claim (corrected), and DIR-117's
+AC8 wording (revised to match its own disclosed opt-in split with [[DIR-117-B]]). Re-running the
+gate after those fixes still shows 6 unchecked AC items on `tasks/DIR-117.md`; only 1 is properly
+DIR-117-B's scope (the real end-to-end landing proof). **This iteration's real, remaining scope is
+the other 5** — do NOT re-do already-landed work (`prepare-milestone.js`'s phase structure,
+`milestone-preparation-check.ts`'s hash/negative-fixture logic, `wiring-coverage-check.ts`, the
+`kind=gap` tier, `OUTER-LOOP.md`/SKILL.md wiring — all already real and tested, confirmed by the
+iteration-0 audit):
+
+1. Add real fixture/unit tests that actually exercise `prepare-milestone.js`'s `agent()`-dispatch
+   phases end-to-end against a fixture task with a thin/stale Proposal and `Plan: N/A`, confirming
+   the reconciled output contains problem framing/approach/key decisions/rejected alternatives and
+   `## Plan` points to a real `docs/plans/*.md`.
+2. Add an author/reviewer run-identity field to `milestone-preparation-check.ts`'s receipt schema
+   (`buildReceipt`/`checkPreparation`), populated for real by `prepare-milestone.js`'s distinct
+   `agent()` calls, not trusted from an unvalidated caller-supplied value.
+3. Add real structural Plan validation to `milestone-preparation-check.ts` (or a sibling module it
+   calls): map every task AC to at least one named Plan stage, and reject a malformed-Plan fixture
+   (missing stage mapping, missing files/commands) mechanically — not delegated entirely to a
+   never-yet-run LLM `PlanCheck` phase.
+4. Wire `milestone-preparation-check.ts`'s `touches-expanded` result into
+   `concurrent-batch-scheduler.ts`'s real batch re-assembly loop, so a real batch candidate whose
+   checked Plan expands `## Touches` is actually re-evaluated, not just detectable in isolation.
+5. Add a real `execute-milestone.js` integration test (not only `milestone-preparation-check.ts`'s
+   own standalone unit tests) proving the `Prepared` phase, when a `preparationReceiptFile` IS
+   supplied, actually fails closed on each of the 5 with-receipt trigger conditions and reaches
+   Build only on a valid receipt.
+
+After (1)-(5) land with real evidence, re-run `it0-dod-check.sh DIR-117 <this charter> <absorb
+entry>` and confirm it passes before Land. If any of the 5 turns out to be larger than a
+same-milestone fit, DIR-026 SPLIT-OR-COMMIT into a named child rather than silently deferring in
+prose — do not repeat iteration-0's pattern of listing an item as an unticked AC with no owner.
+
 ## Inner termination
 Done-when-complete OR external HALT.
 
