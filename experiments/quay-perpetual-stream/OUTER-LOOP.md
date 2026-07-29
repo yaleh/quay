@@ -66,6 +66,25 @@ select =
      not block the live loop. KNOWN EXPOSURE: any pending ad-hoc dispatch that predates a receipt (e.g. a queued
      composite/DIR-119-B or DIR-124-series dispatch) MUST route its primary task through `prepare-milestone.js`
      first — receipt-less dispatches are now always a caller bug, never a supported shape.
+     ⊨ RESUME CONTRACT (M197/gap-prepare-milestone-cross-generation-no-incremental-reuse): DIR-125's bounded
+     convergence loop above only bounds rounds WITHIN one `prepare(c)` generation — it makes NO claim about a
+     FRESH `prepare(c)` dispatch after a prior generation ended `needs-human`/crashed. Before this milestone,
+     every redispatch (cold or otherwise) always re-ran ProposalAuthors + Adjudicate from scratch, discarding
+     ANY manual fix already applied to the task's on-disk `## Proposal` — confirmed real recurrence: 3
+     consecutive DIR-119-D/M196 dispatches each hit the identical class of wiring-coverage defect because each
+     fresh dispatch threw away the previous round's hand-repaired Proposal. This is the SAME staleness class
+     CLAUDE.md's M144 rule names for `Workflow`'s own `resumeFromRunId` cache (external state — here, the task
+     body — changed between rounds, so a cache/re-derivation keyed only on prompt+args cannot see the fix), but
+     at `prepare-milestone`'s own domain-semantic level rather than the underlying `Workflow` engine's cache:
+     `resumeFromRunId` would incorrectly replay the STALE cached run; `resumeFromAdjudicatedProposal` instead
+     tells `prepare-milestone.js` to skip re-deriving a Proposal a human/agent already fixed. CALLER RULE: when
+     a `prepare(c)` dispatch returns `needs-human` (or crashes) and a human (or an agent under human-steered
+     discipline, DIR-027) manually repairs the on-disk `## Proposal` to resolve the findings, the NEXT `prepare(c)`
+     dispatch for that same task MUST pass `{..., resumeFromAdjudicatedProposal: true}` rather than a bare fresh
+     call — this skips `ProposalAuthors`/`Adjudicate` entirely and enters directly at `ProposalReview` using the
+     CURRENT (repaired) `## Proposal` as-is. `fullSynthesisCount` on the resulting receipt records `0` (skipped)
+     instead of `1` (cold); `validateConvergenceCounters`'s existing `fullSynthesisCount > 1` fail-closed check
+     is unweakened by either value. A cold dispatch (flag omitted) is completely unaffected — unchanged behavior.
   → ∀c∈batch: schema_check(c)    -- scripts/task-schema-check.sh; FAIL → fix task, block dispatch
   → ∀c∈batch: size_check(c)      -- inherited_core."Milestone size definition"
   → ∀c∈batch: split_or_commit(c) -- DIR-026 MANDATORY; scripts/it0-split-or-commit-check.ts

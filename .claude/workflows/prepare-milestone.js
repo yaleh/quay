@@ -31,8 +31,19 @@ if (!_taskId || !_milestoneId || !_charterFile) {
 // records used incompatible convergence rules).
 const _n = _highRisk ? 3 : 2
 
-// ── Phase: ProposalAuthors ───────────────────────────────────────────────────────────
-phase('ProposalAuthors')
+// M197 (gap-prepare-milestone-cross-generation-no-incremental-reuse): DIR-125's bounded-convergence
+// guarantee only covers rounds WITHIN one generation — a FRESH dispatch after a prior generation
+// ended needs-human/crashed always re-derived a brand-new Proposal from scratch via ProposalAuthors
+// + Adjudicate, discarding any manual fix already applied to the on-disk Proposal (confirmed real
+// recurrence: DIR-119-D/M196 hit the identical class of wiring-coverage defect on 3 consecutive
+// fresh dispatches). `$a.resumeFromAdjudicatedProposal === true` is an explicit caller opt-in — set
+// AFTER a human/agent has manually repaired the task's on-disk `## Proposal` following a prior
+// generation's needs-human/crash — that skips ProposalAuthors/Adjudicate entirely and enters
+// directly at ProposalReview using the task's CURRENT `## Proposal` as-is (the ProposalReview
+// phase's own agents already `task_get` the task fresh, so no extra plumbing is needed to feed them
+// the resumed text). When false/absent (the default), behavior is byte-for-byte unchanged from
+// before this change.
+const _resumeFromAdjudicatedProposal = $a.resumeFromAdjudicatedProposal === true
 
 // DIR-117 iteration-2 item 2: every phase captures its OWN real `$CLAUDE_CODE_SESSION_ID` (the
 // same DIR-093 pattern `execute-milestone.js`'s Audit phase already uses for `auditSessionId`) so
@@ -40,7 +51,20 @@ phase('ProposalAuthors')
 // mechanically verifies for DISTINCTNESS — never a caller-asserted "trust me, independent" claim.
 const _sessionIdInstruction = 'BEFORE returning, run `echo $CLAUDE_CODE_SESSION_ID` to discover your REAL session id (set by the harness, cannot be forged) and include it as `sessionId` in your structured output.'
 
-const _proposalPrompt = (authorIdx) => `Independent Proposal author ${authorIdx} of ${_n} for task ${_taskId} (class: ${_class}), milestone charter ${_charterFile}.
+let _proposals = []
+let adjudicateResult = null
+
+if (_resumeFromAdjudicatedProposal) {
+  // ── Phases: ProposalAuthors / Adjudicate — SKIPPED under resume mode ────────────────
+  phase('ProposalAuthors')
+  log(`resumeFromAdjudicatedProposal=true — skipping ProposalAuthors (would have dispatched ${_n} independent author(s)). Trusting task ${_taskId}'s CURRENT on-disk '## Proposal' as already-adjudicated (and possibly manually repaired) from a prior generation.`)
+  phase('Adjudicate')
+  log('resumeFromAdjudicatedProposal=true — skipping Adjudicate. No task_write to \'## Proposal\' is performed; ProposalReview reads the task\'s CURRENT Proposal as-is, byte-identical to what was on disk before this dispatch.')
+} else {
+  // ── Phase: ProposalAuthors ───────────────────────────────────────────────────────────
+  phase('ProposalAuthors')
+
+  const _proposalPrompt = (authorIdx) => `Independent Proposal author ${authorIdx} of ${_n} for task ${_taskId} (class: ${_class}), milestone charter ${_charterFile}.
 
 Read the CURRENT task (\`task_get ${_taskId}\`) and the charter file (${_charterFile}) — ground your Proposal in the actual current repository state, not in the existing task body's possibly-thin Proposal. Do NOT read the other author(s)' output — this must be an independently re-derived proposal, not a copy.
 
@@ -52,24 +76,24 @@ ${_sessionIdInstruction}
 
 Return {authorIdx: ${authorIdx}, proposalText: <the full Proposal markdown text, no ## heading>, sessionId: <your real session id>}.`
 
-const _proposalResults = await parallel(
-  Array.from({ length: _n }, (_, i) => () => agent(_proposalPrompt(i + 1), {
-    label: `proposal-author-${i + 1}`, phase: 'ProposalAuthors',
-    schema: { type: 'object', required: ['authorIdx', 'proposalText'], properties: { authorIdx: { type: 'number' }, proposalText: { type: 'string' }, sessionId: { type: 'string' } } },
-  }))
-)
+  const _proposalResults = await parallel(
+    Array.from({ length: _n }, (_, i) => () => agent(_proposalPrompt(i + 1), {
+      label: `proposal-author-${i + 1}`, phase: 'ProposalAuthors',
+      schema: { type: 'object', required: ['authorIdx', 'proposalText'], properties: { authorIdx: { type: 'number' }, proposalText: { type: 'string' }, sessionId: { type: 'string' } } },
+    }))
+  )
 
-const _proposals = _proposalResults.filter(Boolean)
-if (_proposals.length < _n) {
-  log(`ProposalAuthors phase: only ${_proposals.length}/${_n} authors returned a result.`)
-  return { outcome: 'revision-needed', reason: 'proposal-author-incomplete', phase: 'ProposalAuthors' }
-}
+  _proposals = _proposalResults.filter(Boolean)
+  if (_proposals.length < _n) {
+    log(`ProposalAuthors phase: only ${_proposals.length}/${_n} authors returned a result.`)
+    return { outcome: 'revision-needed', reason: 'proposal-author-incomplete', phase: 'ProposalAuthors' }
+  }
 
-// ── Phase: Adjudicate ─────────────────────────────────────────────────────────────────
-phase('Adjudicate')
+  // ── Phase: Adjudicate ─────────────────────────────────────────────────────────────────
+  phase('Adjudicate')
 
-const adjudicateResult = await agent(
-  `Adjudicate ${_proposals.length} independent Proposal drafts for task ${_taskId} into ONE reconciled Proposal, then write it back.
+  adjudicateResult = await agent(
+    `Adjudicate ${_proposals.length} independent Proposal drafts for task ${_taskId} into ONE reconciled Proposal, then write it back.
 
 Drafts:
 ${_proposals.map((p) => `--- Author ${p.authorIdx} ---\n${p.proposalText}`).join('\n\n')}
@@ -78,13 +102,14 @@ ${_proposals.map((p) => `--- Author ${p.authorIdx} ---\n${p.proposalText}`).join
 2. WRITE the reconciled Proposal back to task ${_taskId}'s \`## Proposal\` section via \`task_write\` (replace the body's \`## Proposal\` section content; preserve every OTHER section of the body unchanged — read the full current body first, splice in the new Proposal text, then write the WHOLE body back).
 3. ${_sessionIdInstruction}
 4. Return {proposalText: <the final reconciled Proposal text>, ok: true, sessionId: <your real session id>}. If task_write fails, return {ok: false, error: <reason>}.`,
-  { label: 'adjudicate', phase: 'Adjudicate',
-    schema: { type: 'object', required: ['ok'], properties: { proposalText: { type: 'string' }, ok: { type: 'boolean' }, error: { type: 'string' }, sessionId: { type: 'string' } } } }
-)
+    { label: 'adjudicate', phase: 'Adjudicate',
+      schema: { type: 'object', required: ['ok'], properties: { proposalText: { type: 'string' }, ok: { type: 'boolean' }, error: { type: 'string' }, sessionId: { type: 'string' } } } }
+  )
 
-if (!adjudicateResult || adjudicateResult.ok !== true) {
-  log(`Adjudicate phase FAILED: ${adjudicateResult?.error || '(agent returned nothing)'}`)
-  return { outcome: 'revision-needed', reason: adjudicateResult?.error || 'adjudicate-failed', phase: 'Adjudicate' }
+  if (!adjudicateResult || adjudicateResult.ok !== true) {
+    log(`Adjudicate phase FAILED: ${adjudicateResult?.error || '(agent returned nothing)'}`)
+    return { outcome: 'revision-needed', reason: adjudicateResult?.error || 'adjudicate-failed', phase: 'Adjudicate' }
+  }
 }
 
 // ── Phase: ProposalReview — DIR-125 BOUNDED convergence loop ─────────────────────────
@@ -406,7 +431,13 @@ phase('Receipt')
 // into the receipt's --build command, so buildReceipt() records real provenance — never a
 // caller-asserted "trust me, independent" value. `_planCheckSessions` already accumulates one
 // entry per round (>=1 by construction, since the loop only exits after a real dispatch).
-const _provenanceFlags = ` --proposal-author-sessions ${_proposals.map((p) => p.sessionId || 'unknown').join(',')} --adjudicator-session ${adjudicateResult.sessionId || 'unknown'} --review-session ${_reviewSessions[0] || 'unknown'} --plan-author-session ${planAuthorResult.sessionId || 'unknown'} --plancheck-sessions ${_planCheckSessions.join(',') || 'unknown'}`
+// M197: under resumeFromAdjudicatedProposal, `_proposals` is `[]` and `adjudicateResult` is `null`
+// (those phases never ran) — record 'resumed-skipped' rather than 'unknown', which is reserved for
+// a genuine failure-to-capture on a phase that DID run. checkProvenanceDistinctness() (DIR-117
+// iteration-2 item 2 / gap-provenance-sessionid-not-independence-signal) does not require
+// proposalAuthors/adjudicator presence — only reviewer/planAuthor/planCheckers — so this never
+// blocks the Prepared gate.
+const _provenanceFlags = ` --proposal-author-sessions ${_proposals.length ? _proposals.map((p) => p.sessionId || 'unknown').join(',') : 'resumed-skipped'} --adjudicator-session ${adjudicateResult ? (adjudicateResult.sessionId || 'unknown') : 'resumed-skipped'} --review-session ${_reviewSessions[0] || 'unknown'} --plan-author-session ${planAuthorResult.sessionId || 'unknown'} --plancheck-sessions ${_planCheckSessions.join(',') || 'unknown'}`
 
 // DIR-125: the derived finding ledger + convergence metrics live BESIDE the receipt (never a
 // second copy of the Proposal/Plan themselves — see the ledger entries above, which hold only
@@ -417,9 +448,15 @@ const _provenanceFlags = ` --proposal-author-sessions ${_proposals.map((p) => p.
 const _ledgerFile = `milestones/${_milestoneId}/proposal-ledger.json`
 const _ledgerJson = JSON.stringify(_ledger, null, 2)
 const _endedAtMs = _now()
+// M197: fullSynthesisCount records whether ProposalAuthors+Adjudicate actually ran THIS dispatch —
+// 0 under resumeFromAdjudicatedProposal (skipped), 1 on the cold/default path (unchanged). This is
+// the value validateConvergenceCounters()'s existing `fullSynthesisCount > 1` fail-closed check
+// re-verifies on the receipt side; 0 and 1 both pass, >1 still fails regardless of which path
+// produced the receipt (no new exemption introduced — see proposal-convergence.ts).
+const _fullSynthesisCount = _resumeFromAdjudicatedProposal ? 0 : 1
 const _convergence = {
   highRisk: _highRisk,
-  fullSynthesisCount: 1,
+  fullSynthesisCount: _fullSynthesisCount,
   deltaRounds: _deltaRound,
   proposalReviewRounds: 1 + _deltaRound,
   terminalReason: 'zero-finding',
@@ -455,7 +492,7 @@ if (!receiptResult || receiptResult.ok !== true) {
   return { outcome: 'revision-needed', reason: 'receipt-selfcheck-failed', phase: 'Receipt' }
 }
 
-log(`Prepared: ${_taskId} — receipt at ${_receiptFile}, ledger at ${_ledgerFile}, Plan at ${_planFile}, ${_planCheckRound} Plan-check round(s), 1 full synthesis + ${_deltaRound} delta round(s), zero open blocking findings.`)
+log(`Prepared: ${_taskId} — receipt at ${_receiptFile}, ledger at ${_ledgerFile}, Plan at ${_planFile}, ${_planCheckRound} Plan-check round(s), ${_fullSynthesisCount} full synthesis${_resumeFromAdjudicatedProposal ? ' (resumed — ProposalAuthors/Adjudicate skipped)' : ''} + ${_deltaRound} delta round(s), zero open blocking findings.`)
 
 return {
   outcome: 'prepared',
@@ -465,7 +502,8 @@ return {
   receiptFile: _receiptFile,
   ledgerFile: _ledgerFile,
   planCheckRounds: _planCheckRound,
-  fullSynthesisCount: 1,
+  fullSynthesisCount: _fullSynthesisCount,
+  resumed: _resumeFromAdjudicatedProposal,
   deltaRounds: _deltaRound,
   ledger: _ledger,
   reviewSessions: _reviewSessions,

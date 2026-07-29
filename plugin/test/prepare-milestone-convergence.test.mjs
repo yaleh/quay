@@ -82,6 +82,15 @@ function splice(body, heading, replacement) {
   return body.replace(re, `$1\n${replacement}\n`);
 }
 
+// M197: extracts one '## <heading>' section's own content (trimmed) — used to assert the resumed
+// path leaves '## Proposal' byte-identical while '## Plan' legitimately still changes (PlanAuthor
+// always runs; only ProposalAuthors/Adjudicate are skipped under resume).
+function extractSection(body, heading) {
+  const re = new RegExp(`^##\\s*${heading}\\s*\\n([\\s\\S]*?)(?=\\n##\\s|$)`, 'm');
+  const m = body.match(re);
+  return m ? m[1].trim() : null;
+}
+
 function planFileFromPrompt(prompt) {
   const m = prompt.match(/at (docs\/plans\/\S+\.md)\./);
   assert.ok(m, `could not find the Plan file path in the PlanAuthor prompt:\n${prompt}`);
@@ -551,6 +560,101 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
         assert.equal(f.disposition, 'unresolved');
         assert.equal(f.status, 'open');
       }
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  // ── M197 (gap-prepare-milestone-cross-generation-no-incremental-reuse) ──────────────────────
+  // RED/GREEN fixture for the resumeFromAdjudicatedProposal cross-generation resume path.
+  //
+  // RED (documents today's/prior behavior, unchanged by this milestone): a cold dispatch — the
+  // flag omitted — against a task whose Proposal already has zero wiring-coverage findings STILL
+  // re-derives the Proposal from scratch via ProposalAuthors + Adjudicate. Wasteful, but not wrong;
+  // this is the exact behavior the task's Finding section describes as the root cause of the
+  // DIR-119-D/M196 recurrence (a manually-fixed Proposal being silently discarded and re-derived).
+  test(`[${mirrorName}] M197 RED: cold dispatch (resumeFromAdjudicatedProposal omitted) always re-derives — full N-author + adjudicator dispatch, fullSynthesisCount=1`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk, charterFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel); // no resumeFromAdjudicatedProposal — cold path
+    let planFile = null;
+    const proposalBefore = fs.readFileSync(taskFileOnDisk, 'utf8');
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onFullReview: () => ({ findings: [], mechanismCount: 1, sessionId: 'sess-reviewer-0' }),
+      });
+      planFile = result.planFile;
+
+      assert.equal(result.outcome, 'prepared', JSON.stringify(result));
+      assert.equal(calls.authors.length, 2, 'RED: cold dispatch still runs the full N-author synthesis');
+      assert.equal(calls.adjudicator, 1, 'RED: cold dispatch still runs Adjudicate');
+      assert.equal(result.fullSynthesisCount, 1, 'cold dispatch records fullSynthesisCount=1');
+      assert.equal(result.resumed, false);
+      // The Adjudicate mock DOES overwrite the Proposal on the cold path — confirming this IS the
+      // re-derivation the resume path exists to avoid.
+      const proposalAfter = fs.readFileSync(taskFileOnDisk, 'utf8');
+      assert.notEqual(proposalAfter, proposalBefore, 'RED: cold dispatch overwrites the on-disk Proposal (the defect this milestone adds an opt-out for)');
+    } finally {
+      cleanup(scratchDir, planFile, args.milestoneId);
+    }
+  });
+
+  // GREEN (new behavior): the SAME task, dispatched with resumeFromAdjudicatedProposal:true, skips
+  // ProposalAuthors/Adjudicate entirely (zero dispatches of either), reaches ProposalReview using
+  // the task's CURRENT on-disk Proposal untouched, and records fullSynthesisCount=0.
+  test(`[${mirrorName}] M197 GREEN: resumeFromAdjudicatedProposal:true skips ProposalAuthors/Adjudicate, reaches prepared with fullSynthesisCount=0, Proposal left byte-identical`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk, charterFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel, { resumeFromAdjudicatedProposal: true });
+    let planFile = null;
+    const proposalBefore = fs.readFileSync(taskFileOnDisk, 'utf8');
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        // Zero-finding review — models a Proposal already adjudicated/manually-fixed in a prior
+        // generation (e.g. DIR-119-D/M196's manually repaired wiring-coverage-complete Proposal).
+        onFullReview: () => ({ findings: [], mechanismCount: 1, sessionId: 'sess-reviewer-0' }),
+      });
+      planFile = result.planFile;
+
+      assert.equal(result.outcome, 'prepared', JSON.stringify(result));
+      assert.equal(calls.authors.length, 0, 'GREEN: zero ProposalAuthors dispatches under resume');
+      assert.equal(calls.adjudicator, 0, 'GREEN: zero Adjudicate dispatches under resume');
+      assert.equal(calls.reviews.filter((r) => r === 'full').length, 1, 'ProposalReview itself still runs exactly once');
+      assert.equal(result.fullSynthesisCount, 0, 'resumed dispatch records fullSynthesisCount=0');
+      assert.equal(result.resumed, true);
+
+      // The task's on-disk '## Proposal' section was never touched by this dispatch (no Adjudicate
+      // task_write occurred) — byte-identical to what was on disk before the run. (The '## Plan'
+      // section DOES legitimately change — PlanAuthor still runs under resume; only ProposalAuthors/
+      // Adjudicate are skipped, so we compare the Proposal section specifically, not the whole body.)
+      const proposalAfter = fs.readFileSync(taskFileOnDisk, 'utf8');
+      assert.equal(extractSection(proposalAfter, 'Proposal'), extractSection(proposalBefore, 'Proposal'), 'GREEN: resumed dispatch never re-derives/overwrites the pre-existing Proposal');
+
+      // Independent re-verification of the real receipt, including the mechanical
+      // fullSynthesisCount<=1 re-check (validateConvergenceCounters) — 0 passes just like 1 does.
+      const independentCheck = checkPreparation({ taskFile: taskFileOnDisk, charterFile: charterFileOnDisk, receiptFile: result.receiptFile });
+      assert.equal(independentCheck.ok, true, independentCheck.message);
+    } finally {
+      cleanup(scratchDir, planFile, args.milestoneId);
+    }
+  });
+
+  // A resumed dispatch that STILL has open blocking findings behaves exactly like the cold path's
+  // ProposalReview loop (delta rounds, split, budget) — resume only ever affects the ProposalAuthors/
+  // Adjudicate phases, never weakens or bypasses DIR-125's own bounded-convergence loop.
+  test(`[${mirrorName}] M197: resumeFromAdjudicatedProposal:true with open blocking findings still runs the ordinary bounded delta-review loop (no bypass)`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel, { resumeFromAdjudicatedProposal: true });
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onFullReview: () => ({ findings: [{ subsystem: 's1', claimRef: 'AC#1', summary: 'persistent blocker', severity: 'blocker', blocking: true }], mechanismCount: 1, sessionId: 'sess-reviewer-0' }),
+        onRevise: (round) => ({ ok: true, sessionId: `sess-revise-${round}` }),
+        onDeltaReview: (round) => ({ resolvedIds: [], findings: [{ subsystem: 's1', claimRef: 'AC#1', summary: 'persistent blocker', severity: 'blocker', blocking: true }], sessionId: `sess-delta-${round}` }),
+      });
+
+      assert.equal(result.outcome, 'needs-human', JSON.stringify(result));
+      assert.equal(result.reason, 'delta-cap-exhausted');
+      assert.equal(calls.authors.length, 0, 'resume still skips ProposalAuthors even when the loop later needs-humans');
+      assert.equal(calls.adjudicator, 0, 'resume still skips Adjudicate even when the loop later needs-humans');
+      assert.equal(calls.revises.length, 2, 'the ordinary delta-round cap (2) is unaffected by resume');
     } finally {
       cleanup(scratchDir, null, args.milestoneId);
     }

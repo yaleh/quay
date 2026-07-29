@@ -1,10 +1,10 @@
 ---
 id: gap-prepare-milestone-cross-generation-no-incremental-reuse
-title: "prepare-milestone.js's ProposalAuthors phase always independently
-  re-derives a Proposal from scratch on every fresh Workflow dispatch — DIR-125's
-  bounded-convergence guarantee only covers rounds WITHIN one generation, not a
-  redispatch after a prior generation's needs-human/crash, so the same format
-  defect can recur across generations without limit"
+title: prepare-milestone.js's ProposalAuthors phase always independently
+  re-derives a Proposal from scratch on every fresh Workflow dispatch —
+  DIR-125's bounded-convergence guarantee only covers rounds WITHIN one
+  generation, not a redispatch after a prior generation's needs-human/crash, so
+  the same format defect can recur across generations without limit
 status: todo
 labels:
   - gap
@@ -14,6 +14,10 @@ parent: null
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    gap-prepare-milestone-cross-generation-no-incremental-reuse
+    experiments/quay-perpetual-stream/charters/M197-gap-prepare-milestone-resume.md
+    milestones/M197/absorb-entry.md
 ---
 ## Proposal
 

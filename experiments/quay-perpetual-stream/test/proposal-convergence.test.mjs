@@ -228,6 +228,30 @@ test("validateConvergenceCounters: deltaRounds==3 is only valid when highRisk is
   assert.equal(validateConvergenceCounters({ highRisk: false, fullSynthesisCount: 1, deltaRounds: 3 }).ok, false);
 });
 
+// ── M197 (gap-prepare-milestone-cross-generation-no-incremental-reuse): resumeFromAdjudicatedProposal
+// records fullSynthesisCount:0 (ProposalAuthors/Adjudicate skipped) rather than 1 (cold path). This
+// module's own cap logic needed NO code change to support that — `capsFor().maxFullSynthesis` is 1
+// regardless of highRisk, and the existing `(fullSynthesisCount ?? 0) > caps.maxFullSynthesis` check
+// already accepts any value <= 1, including 0. These tests pin that generalization explicitly so a
+// future edit to this function cannot silently special-case 0 away or reject it. ─────────────────
+test("validateConvergenceCounters: fullSynthesisCount=0 (a resumed dispatch that skipped ProposalAuthors/Adjudicate) is within caps -> ok, same as fullSynthesisCount=1", () => {
+  const resumed = validateConvergenceCounters({ highRisk: false, fullSynthesisCount: 0, deltaRounds: 1 });
+  assert.equal(resumed.ok, true);
+  const cold = validateConvergenceCounters({ highRisk: false, fullSynthesisCount: 1, deltaRounds: 1 });
+  assert.equal(cold.ok, true);
+});
+
+test("validateConvergenceCounters: fullSynthesisCount > 1 fails closed regardless of which path (cold or resumed) produced the receipt — resume introduces no new exemption", () => {
+  // A receipt cannot legitimately claim fullSynthesisCount > 1 via EITHER path: cold always
+  // records exactly 1, resumed always records exactly 0. A value of 2 is only reachable by a
+  // forged/tampered receipt attempting to abuse the resume mechanism to claim extra synthesis
+  // rounds beyond DIR-125's own per-generation cap — this must still fail exactly like the
+  // pre-existing (non-resume) case does.
+  const abuseAttempt = validateConvergenceCounters({ highRisk: true, fullSynthesisCount: 2, deltaRounds: 0 });
+  assert.equal(abuseAttempt.ok, false);
+  assert.equal(abuseAttempt.code, "convergence-full-synthesis-exceeded");
+});
+
 // ── computeConvergenceMetrics — DIR-125 instrumentation surface ────────────────────────────────
 test("computeConvergenceMetrics: exposes all six named metrics", () => {
   const ledger = upsertFindings([], [
