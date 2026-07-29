@@ -8,9 +8,12 @@
   This document does not itself modify either workflow, create a directive, or
   authorize a runtime-generation upgrade.
 - **Evidence base:** Git changes and Claude Code workflow/session journals in
-  the 24-hour window ending 2026-07-29, including M192, M194–M200; the live
-  `.claude/workflows/{prepare,execute}-milestone.js` sources; and the findings
-  recorded by `DIR-126`.
+  the 24-hour window ending 2026-07-29, including M192, M194–M201; a follow-up
+  stage-level reconstruction covering 350 recent Prepare-agent journals; the
+  live `.claude/workflows/{prepare,execute}-milestone.js` sources; findings
+  recorded by `DIR-126`; and historical Git samples from the earlier
+  Proposal/Plan-driven development periods in the local `archguard` and
+  `meta-cc` projects.
 - **Related:**
   [`quay-milestone-workflow-git-crystallization.md`](./quay-milestone-workflow-git-crystallization.md)
   defines the executable-kernel and receipt boundaries. ·
@@ -76,6 +79,19 @@ The system may continue to tolerate local errors. It must not tolerate a
 non-contractive process in which the same error is rediscovered without
 preserving information or reducing the expected remaining distance to a
 deliverable state.
+
+The two *information dimensions* currently represented by Proposal and Plan
+remain necessary. Two full, independently rewritten prose documents do not.
+The target is:
+
+- a canonical Proposal for problem semantics, mechanisms, invariants, failure
+  modes, and acceptance boundaries;
+- a compact execution projection for ordering, touch sets, RED/GREEN
+  commands, evidence, and rollback;
+- a standalone Plan only when task risk and dependency structure justify its
+  marginal cost; and
+- an independent Execute audit against the materialized candidate regardless
+  of how much preparation was performed.
 
 ## 2. Recent measured baseline
 
@@ -182,6 +198,103 @@ by deleting duplicate configuration behavior; line count alone would
 undervalue it. Process artifacts are valuable only when they preserve
 constraints, make evidence replayable, or reduce future uncertainty.
 
+### 2.6 Follow-up task-level reconstruction
+
+A second reconstruction used raw Claude agent journals modified since
+2026-07-28. Its wider denominator differs from the 24-hour workflow-call
+sample above, so the totals should not be combined. It found about 2.68M
+output tokens across identifiable Prepare agents:
+
+| Prepare stage family | Agent-minutes | Output tokens | Share of identified agent time |
+|---|---:|---:|---:|
+| Proposal authors | about 269m | 797,593 | 31% |
+| Proposal adjudication | about 256m | 932,840 | 29% |
+| Proposal review/revision/delta | about 190m | 523,655 | 22% |
+| Plan authoring | about 50m | 106,285 | 6% |
+| Plan checking/revision | about 99m | 310,321 | 11% |
+| Receipt | about 5m | 13,114 | under 1% |
+
+Proposal work therefore consumed about 82% of identified Prepare agent time
+and 84% of output tokens. This does not prove Proposal is unimportant. It
+shows that author competition, adjudication, review, and full-document
+revision are the dominant optimization surface.
+
+End-to-end elapsed time from preparation start/charter to prepared receipt,
+including retries and persisted repair commits, was:
+
+| Milestone/task | Prepare elapsed | Prepare-related commits | Code churn | First Execute audit |
+|---|---:|---:|---:|---|
+| M192 / DIR-120 | 7h16m | 13 | 883 | `CONCERNS` |
+| M195 / DIR-117-B | 2h14m | 3 | 580 | `CONCERNS` |
+| M198 / DIR-119-D1 | 3h43m | 10 | 1,956 | `REFUTED`, then repaired |
+| M200 / DIR-126-A | 1h18m | 3 | 1,395 | `REFUTED`, then repaired |
+
+The median Prepare elapsed time was about 2h57m. The comparable observable
+execution windows had a median near 55m, although some are Build-agent windows
+and others include audit repair, so the ratio is directional rather than a
+benchmark. Preparation was commonly two to three times the execution
+critical path and was much worse for M192.
+
+The findings justify part of this cost. Proposal work caught missing direct
+deletion proof, an out-of-glob test, an incomplete terminal-state contract, a
+necessary phase split, touch-set mismatches, an untested force-release path,
+and an admission-error fail-closed gap. PlanCheck repaired ordering, command,
+evidence, and touch-set defects. But M198 still reached Build with a real
+`sync-vendor.sh` regression, and M200's first Audit refuted 10 of 15 ACs and
+two of four DoD items. Among five recent comparable executions, one was clean,
+two had concerns, and two were refuted. Textual convergence did not imply
+empirical convergence.
+
+M201 / DIR-126-B had already consumed about 33 Proposal agent-minutes, 21 Plan
+agent-minutes, and 210K output tokens at the observation cutoff without a
+terminal prepared receipt. Its useful discoveries included real table-row
+parsing and citation/stale-count defects; those findings do not require the
+surrounding full-document regeneration cost to remain valuable.
+
+### 2.7 Cross-project granularity
+
+The early Claude Code journals for `archguard` are no longer locally
+available, and the old `meta-cc` journals are incomplete. Their historical
+durations below are therefore Git timestamp windows from the last relevant
+Proposal/Plan commit to the implementation commit, not active coding time.
+Very short windows can mean code was already staged. Code and document sizes
+are exact Git/file measurements; duration is only a proxy.
+
+| Historical sample | Proposal + Plan lines | Net code additions | Code churn | Timestamp window |
+|---|---:|---:|---:|---:|
+| archguard Plan 27 | 1,780 | 895 | 982 | 148m |
+| archguard Plan 03 | 675 | 1,284 | 1,795 | 102m |
+| archguard Plan 38 | 729 | 1,127 | 1,184 | 21m |
+| meta-cc phases 29–30 | about 568 | 1,200 | 1,351 | 77m |
+| meta-cc phases 52–55 | 911 | 1,721 | 1,743 | 31m |
+| meta-cc core-type decoupling | 305 | 679 | 1,001 | 9m |
+| meta-cc streaming reader | 936 | 1,078 | 1,236 | 37m |
+
+For bounded single-task samples, the resulting project-level medians are:
+
+| Project period | Specification lines | Net code additions | Code churn | Specification/code-add ratio |
+|---|---:|---:|---:|---:|
+| recent Quay | about 854 | about 560–610 | 883 | about 1.4–1.5 |
+| early archguard | 729 | 1,127 | 1,184 | about 0.65 |
+| early meta-cc | about 580–740 | 1,078 | 1,236 | about 0.55–0.69 |
+
+The historical impression is directionally correct: an `archguard` or
+`meta-cc` task commonly changed about twice as much code as a recent Quay task,
+and several 1,000-line tasks landed inside an approximately one-hour commit
+window. Quay now writes roughly twice as many Proposal/Plan lines per added
+code line. Quay can still exceed 1,000 lines of code churn per hour on larger
+tasks; the main difference is description density, not an absolute inability
+to produce large changes.
+
+Quality does not reduce to test volume. Tests accounted for roughly 50–73% of
+code churn in the sampled older projects. In `archguard`, however, Plan 38's
+surface was touched by five fix-labelled commits within 24 hours, and the
+shared Plans 33–37 surface by about ten corrective commits. That supports a
+large-batch rework cost. The analogous immediate-fix proxy is weaker for
+`meta-cc`; its cost appears more as later architectural cleanup and decoupling,
+so the claim that its early changes were lower quality remains plausible but
+is not proven by immediate fix density alone.
+
 ## 3. Geometric-information-theory model
 
 Represent the effective project state as:
@@ -248,6 +361,68 @@ A new, grounded finding can have high value even when the attempt returns
 input has near-zero information gain. Concurrent duplicate generations are
 worse: they pay twice before either trajectory can consume the other's
 feedback.
+
+Proposal and Plan should therefore behave like distinct projections, not
+parallel paraphrases:
+
+```text
+Proposal projection:
+  what / why / mechanism / invariant / failure boundary
+
+Execution projection:
+  order / dependency / changed surface / command / evidence / rollback
+```
+
+Redundancy corrects errors only when the observations are sufficiently
+independent. Multiple agents reading the same task and repository through the
+same parent context, then rewriting the same Markdown artifact, create
+correlated redundancy. The extra tokens are not proportional to extra
+information. Full regeneration can even move a previously settled coordinate
+and make the process non-contractive, as M192 demonstrated.
+
+The desired loop intentionally tolerates early error:
+
+```text
+semantic constraint
+  → small reversible implementation slice
+  → empirical observation
+  → focused correction with retained evidence
+```
+
+Convergence, rather than zero pre-Build error, is the governing property.
+Preparation should minimize the expected cost of the next useful observation,
+not maximize textual certainty before reality is sampled.
+
+### 3.1 Are separate Proposal and Plan stages necessary?
+
+The decision is risk-sensitive:
+
+| Task shape | Proposal treatment | Execution treatment |
+|---|---|---|
+| Existing, bounded defect or one mechanism | canonical task Proposal plus one independent semantic review | generated execution manifest; no standalone prose Plan |
+| Medium uncertainty or several dependent stages | focused Proposal revision, preserving resolved findings | thin Plan plus one check and at most one focused revision |
+| Ambiguous architecture, security/concurrency/migration, irreversible or broad wiring change | competing alternatives/adjudication only when justified | standalone Plan with explicit dependencies, evidence, and rollback |
+
+A default fast-lane candidate has one mechanism, no more than about five
+production/test files, predicted code churn below about 800, and no migration,
+concurrency, security-boundary, irreversible-state, or broad runtime-wiring
+change. These are calibration seeds, not permanent hard-coded policy.
+
+The generated execution manifest should normally be 30–100 lines or a
+structured receipt containing only:
+
+- ordered stages and dependencies;
+- AC-to-stage and AC-to-evidence mappings;
+- bounded touch set;
+- RED/GREEN and final verification commands; and
+- rollback/recovery requirements.
+
+For full-lane work, a standalone Plan should be a delta over Proposal,
+typically 120–200 lines. It references AC and mechanism identifiers rather
+than restating their prose. Default review is one adversarial semantic
+reviewer, not two or three Proposal authors plus adjudication. Multiple
+authors remain available when there are genuinely competing architectural
+directions.
 
 ## 4. Feedback quality: Prepare versus Execute
 
@@ -621,6 +796,20 @@ possible, not by creating a second shadow roadmap.
 - Replace deterministic script-runner agents with direct kernel calls where
   existing task ownership permits.
 
+### Stage 1.5 — risk-sensitive Proposal and execution projection
+
+- Add a measured risk/granularity classifier after deterministic preflight.
+- Fast lane: preserve the canonical Proposal, run one independent semantic
+  review, and derive a compact execution manifest without a prose Plan.
+- Full lane: use competing Proposal authors only for genuine alternatives;
+  produce a Plan that contains execution deltas rather than duplicated design
+  prose.
+- Cap default full-lane checking at one PlanCheck and one focused revision.
+  Further rounds require a new blocking finding, changed input hash, or human
+  authorization.
+- Never restart a full Proposal generation merely to resolve a non-blocking
+  wording or citation defect.
+
 ### Stage 2 — receipts and evidence transfer
 
 - DIR-126-D and DIR-124-B: versioned run identity, findings, stage telemetry,
@@ -686,7 +875,10 @@ state when a later cold runtime generation is required.
 
 ## 12. Non-goals
 
-- Removing ProposalReview, PlanCheck, Acceptance Audit, or fail-closed Gates.
+- Removing the semantic dimensions currently checked by ProposalReview and
+  PlanCheck. Their implementation may become a fast-lane review and a derived
+  execution-manifest check instead of two mandatory long-document stages.
+- Removing Acceptance Audit or fail-closed Gates.
 - Treating `prepared` as equivalent to implementation completion.
 - Treating `done` as operational wiring proof when the task requires a later
   runtime generation.
@@ -725,6 +917,15 @@ shows:
    reading private Claude session JSONL.
 10. Independent audits confirm that efficiency improved without reducing
     acceptance coverage, runtime reachability evidence, or failure closure.
+11. Fast-lane tasks keep Prepare critical-path time below 30% of Execute time
+    in the calibrated median; full-lane tasks keep it below 60%.
+12. Proposal-plus-Plan/manifest lines per net code addition fall below 0.5 for
+    fast-lane work and below 0.8 for full-lane work without increasing the
+    prepared-to-Audit refutation rate.
+13. Telemetry reports unique blocking findings per 10K output tokens,
+    duplicate/false-positive findings, escaped downstream defects, and
+    post-Land repair churn, so reduced cost cannot be mistaken for improved
+    quality.
 
 ## 14. Open decisions
 
@@ -741,3 +942,8 @@ shows:
    forms for different invariants?
 6. What minimum real sample size is required before changing author count,
    review-round caps, or stage capacity?
+7. Which classifier inputs can be deterministic, and which risk labels require
+   human confirmation before choosing the fast lane?
+8. Should the fast-lane execution manifest be committed Markdown, a
+   hash-bound structured receipt, or a generated view over one canonical
+   machine-readable artifact?
