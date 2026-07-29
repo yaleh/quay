@@ -49,6 +49,24 @@ test("extractMechanismClaims: multiple independent claims in one section", () =>
   assert.equal(claims.length, 2);
 });
 
+// ── gap-wiring-coverage-check-owns-false-positive (M198/DIR-119-D1): possessive "own" is not an
+// ownership-verb claim. This repo's own authoring convention uses "X's own Y" constantly for
+// cross-referencing (CLAUDE.md and every task body); the `owns?` alternative must not fire on it. ──
+test("extractMechanismClaims: possessive \"X's own Y\" / \"its own Y\" is NOT a wiring claim", () => {
+  const text =
+    "This Proposal's own scope covers `foo.ts` and `bar.ts`. " +
+    "The Chosen mechanism's own wiring-claim paragraphs describe `alpha.ts` and `beta.ts`. " +
+    "On its own merits, `gamma.ts` and `delta.ts` differ.";
+  assert.equal(extractMechanismClaims(text).length, 0);
+});
+
+test("extractMechanismClaims: real ownership-verb claim (\"X owns Y\", no possessive marker) still fires", () => {
+  const text = "`composite-land.ts` owns `dashboard.md` writes during Land.";
+  const claims = extractMechanismClaims(text);
+  assert.equal(claims.length, 1);
+  assert.deepEqual(claims[0].identifiers.sort(), ["composite-land.ts", "dashboard.md"]);
+});
+
 test("bulletsOf: joins wrapped continuation lines into one bullet", () => {
   const ac = "## Acceptance Criteria\n- [ ] `foo.ts` invoking `bar.ts` is proven by real\n  production callsite evidence.\n- [ ] second item\n";
   const bullets = bulletsOf(ac);

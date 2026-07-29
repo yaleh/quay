@@ -31,7 +31,15 @@
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const WIRING_VERB_RE = /\b(invokes?|calls?|dispatches?|enforces?|wires?|owns?|routes?|delegates?)\b/i;
+// `owns?` intentionally excludes the ubiquitous possessive-determiner usage ("the task's own AC
+// section", "its own merits") via a negative lookbehind on `'s `/`s' `/a possessive pronoun
+// immediately before the word — this repo's own authoring convention (CLAUDE.md and every task
+// body) uses "X's own Y" constantly for cross-referencing, which is NOT an ownership-verb claim
+// ("component X owns Y") and must not be treated as one. Confirmed real recurring false-positive
+// source (gap-wiring-coverage-check-owns-false-positive, M198/DIR-119-D1): every one of 5
+// mechanically-flagged "uncovered claims" against DIR-119-D1's Proposal traced to this single word.
+const WIRING_VERB_RE =
+  /\b(invokes?|calls?|dispatches?|enforces?|wires?|routes?|delegates?)\b|(?<!(?:'s|s'|its|their|my|our|your|his|her)\s)\bowns?\b/i;
 const EVIDENCE_RE = /\b(real|production|callsite|call site|reachability|reachable|evidence|wired|confirm(?:ed|s|ation)?|reproduc\w*|verifi(?:ed|es|cation)?|proven?|proves?)\b/i;
 
 // Split into sentence-ish chunks: paragraph boundaries first, then sentence-ending punctuation
