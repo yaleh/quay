@@ -394,7 +394,14 @@ two-insertion-point split) — not a preemptive fragmentation based on the count
 
 ## Plan
 
-N/A — directive-class child resolved via a human-steered milestone. Depends on [[DIR-126-A]].
+`docs/plans/M201-dir-126-b.md` — authored 2026-07-29 against this task's just-adjudicated Proposal
+and Acceptance Criteria (base revision `c5e0954`). Nine ordered stages (RED test scaffolding;
+export-reuse from `wiring-coverage-check.ts`; the five detector functions +
+`runPreflightChecks`/CLI flags; the content-`Preflight` phase insertion before `ProposalAuthors`;
+the `--preflight-plan` insertion before `PlanCheck` round 1; fixture corpora + calibrate-then-
+enforce staging; `wiring-coverage-check.ts` merged-list regression verification; mirror byte-
+identity sync; real non-fixture end-to-end dispatch proof) map every one of this task's 24
+Acceptance Criteria items to at least one stage. Supersedes the prior N/A placeholder.
 
 ## Finding
 
