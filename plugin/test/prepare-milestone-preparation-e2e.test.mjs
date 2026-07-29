@@ -137,6 +137,24 @@ function makeAgentMock(taskFileOnDisk) {
   const agentMock = async (prompt, opts = {}) => {
     const label = opts.label || '';
 
+    // M200/DIR-126-A: the new Admission phase's agent()-dispatched CLI calls. Mocked directly
+    // (never touching real .quay/prepare-leases/ state — this file's job is proving the
+    // ProposalAuthors -> ... -> Receipt phase wiring, not re-testing prepare-admission-check.ts,
+    // which has its own dedicated experiments/quay-perpetual-stream/test/
+    // prepare-admission-check.test.mjs). This fixture always wins admission.
+    if (label === 'admission-acquire') {
+      sessions.admissionAcquires = (sessions.admissionAcquires || 0) + 1;
+      return { raw: JSON.stringify({ outcome: 'acquired', lease: { fencingToken: 0 }, reclaimed: false }) };
+    }
+    if (/^admission-renew-/.test(label)) {
+      sessions.admissionRenews = (sessions.admissionRenews || 0) + 1;
+      return { raw: JSON.stringify({ ok: true }) };
+    }
+    if (/^admission-release-/.test(label)) {
+      sessions.admissionReleases = (sessions.admissionReleases || 0) + 1;
+      return { raw: JSON.stringify({ ok: true }) };
+    }
+
     if (/^proposal-author-\d+$/.test(label)) {
       const idx = Number(label.match(/\d+$/)[0]);
       const sessionId = `sess-author-${idx}`;

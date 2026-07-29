@@ -2,6 +2,7 @@ export const meta = {
   name: 'prepare-milestone',
   description: 'DIR-117: orchestrates the existing quay-task-to-plan pipeline (proposal authors -> adjudication/write-back -> BOUNDED grounded proposal review incl. mechanism-claim wiring coverage -> Plan author -> grounded Plan-check) as a real, resumable lifecycle stage between SELECT/charter-authoring and execute-milestone. Writes a verification RECEIPT (milestones/M<NN>/preparation.json) — never a second content source; the task ## Proposal and docs/plans/*.md stay authoritative. STATUS (M193/DIR-125): ProposalReview is now a bounded convergence loop (1 full synthesis + <=2 delta rounds ordinary / <=3 highRisk, 45m/75m soft budget, typed disposition-tracked finding ledger hash-bound into the receipt) — closes the DIR-120/M192 unbounded-restart defect (10 consecutive full-regeneration rounds, ~3h15m, ~1.13M output tokens, never reaching PlanAuthor). STATUS (M191/DIR-117): landed + unit-tested (milestone-preparation-check.ts), NOT yet operationally proven end-to-end on a real OUTER-LOOP cycle — that real-landing proof is DIR-117-B\'s own scope (DIR-026 SPLIT-OR-COMMIT, DIR-119-A/B/C precedent).',
   phases: [
+    { title: 'Admission', detail: 'DIR-126-A/M200: single-flight admission — acquires an atomic filesystem lease for (workspace, taskId) via prepare-admission-check.ts before any ProposalAuthors agent is dispatched; a losing concurrent dispatch returns prepare-already-running here, spending zero agent turns' },
     { title: 'ProposalAuthors', detail: 'N=2 (N=3 if highRisk) independent agents each draft a reconciled Proposal' },
     { title: 'Adjudicate', detail: 'One agent reconciles the N proposals into ONE Proposal, writes it back to the task' },
     { title: 'ProposalReview', detail: 'DIR-125 bounded convergence: ONE full independent review, then (only if blocking findings remain) up to 2 (3 highRisk) focused-revise + delta-review rounds against a typed finding ledger, gated by a 45m/75m soft budget and a subsystem/mechanism/touch-set split checkpoint' },
@@ -51,6 +52,65 @@ const _resumeFromAdjudicatedProposal = $a.resumeFromAdjudicatedProposal === true
 // mechanically verifies for DISTINCTNESS — never a caller-asserted "trust me, independent" claim.
 const _sessionIdInstruction = 'BEFORE returning, run `echo $CLAUDE_CODE_SESSION_ID` to discover your REAL session id (set by the harness, cannot be forged) and include it as `sessionId` in your structured output.'
 
+// ── Phase: Admission — DIR-126-A/M200 single-flight admission ───────────────────────────────
+// Runs UNCONDITIONALLY, first, strictly ahead of BOTH the resume branch's log-only
+// phase('ProposalAuthors') AND the cold path's real phase('ProposalAuthors') below. A resumed
+// dispatch still performs real task_writes downstream (ProposalReview's revision step) and is
+// exactly as vulnerable to a racing second owner as the cold path — skipping Admission on the
+// resume branch would reopen the exact cross-generation race M197's
+// gap-prepare-milestone-cross-generation-no-incremental-reuse already fixed once. Acquires an
+// atomic, filesystem-backed lease (prepare-admission-check.ts's --acquire, fs.writeFileSync 'wx')
+// for (workspace, taskId) BEFORE any ProposalAuthors agent is dispatched — the concrete mechanism
+// that prevents the ~54-duplicate-workflow-minute cost DIR-126's own Finding measured, since the
+// expensive resource (LLM agent turns) is never spent by the losing dispatch.
+phase('Admission')
+
+const _admissionScript = 'experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts'
+
+async function _admissionAgentCall(flagsText, label) {
+  return agent(
+    `Run exactly this shell command and report its stdout verbatim:
+node --experimental-strip-types ${_admissionScript} ${flagsText}
+Do not paraphrase or reformat the command's stdout — copy it exactly as printed. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
+    { label, phase: 'Admission', schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } } }
+  )
+}
+
+// Renewal at every phase boundary (WIRING-CLAIM 3) — six distinct call sites across this file
+// (Adjudicate entry, ProposalReview entry, each ProposalReview delta round, PlanAuthor entry, each
+// PlanCheck round, Receipt entry). The workflow DSL has confirmed zero try/finally semantics, so
+// this is dispatched explicitly at each boundary rather than inherited from exception unwinding.
+async function _renewLease(stageLabel) {
+  return _admissionAgentCall(`--renew --taskId ${_taskId} --workspace . --stage ${JSON.stringify(stageLabel)}`, `admission-renew-${stageLabel}`)
+}
+
+// Release on every terminal return (WIRING-CLAIM 2) — called immediately before each of the 11
+// post-Admission terminal `return` statements below. The line-26 missing-args guard above fires
+// BEFORE Admission ever runs, so it needs no matching release call.
+async function _releaseLease(stageLabel) {
+  return _admissionAgentCall(`--release --taskId ${_taskId} --workspace .`, `admission-release-${stageLabel}`)
+}
+
+const _admissionResult = await _admissionAgentCall(`--acquire --taskId ${_taskId} --workspace . ${_highRisk ? '--highRisk' : ''}`.trim(), 'admission-acquire')
+
+let _admissionVerdict = null
+try { _admissionVerdict = _admissionResult?.raw ? JSON.parse(_admissionResult.raw) : null } catch { _admissionVerdict = null }
+
+if (!_admissionVerdict || (_admissionVerdict.outcome !== 'acquired' && _admissionVerdict.outcome !== 'prepare-already-running')) {
+  // AC2 fail-closed path: bad CLI invocation / unexpected exception / unparseable output — NEVER
+  // silently falls through to ProposalAuthors as if admission had succeeded. Distinct reason code
+  // (admission-check-failed) from an ordinary lease-contention verdict (prepare-already-running).
+  log(`Admission phase FAILED — no parseable acquire/contention verdict (raw: ${_admissionResult?.raw ?? '(none)'}). Failing closed, never dispatching ProposalAuthors.`)
+  return { outcome: 'needs-human', reason: 'admission-check-failed', phase: 'Admission', detail: _admissionResult?.raw ?? '(agent returned no output)' }
+}
+
+if (_admissionVerdict.outcome === 'prepare-already-running') {
+  log(`Admission: prepare-already-running — an active lease is held by ${_admissionVerdict.owner?.ownerExecutionId} (stage=${_admissionVerdict.owner?.stage}, leaseUntil=${_admissionVerdict.owner?.leaseUntil}). Returning before any ProposalAuthors agent is dispatched — zero author agent turns spent.`)
+  return { outcome: 'needs-human', reason: 'prepare-already-running', phase: 'Admission', owner: _admissionVerdict.owner }
+}
+
+log(`Admission: acquired lease for ${_taskId} (fencingToken=${_admissionVerdict.lease?.fencingToken}, reclaimed=${_admissionVerdict.reclaimed === true}).`)
+
 let _proposals = []
 let adjudicateResult = null
 
@@ -86,11 +146,13 @@ Return {authorIdx: ${authorIdx}, proposalText: <the full Proposal markdown text,
   _proposals = _proposalResults.filter(Boolean)
   if (_proposals.length < _n) {
     log(`ProposalAuthors phase: only ${_proposals.length}/${_n} authors returned a result.`)
+    await _releaseLease('proposal-author-incomplete')
     return { outcome: 'revision-needed', reason: 'proposal-author-incomplete', phase: 'ProposalAuthors' }
   }
 
   // ── Phase: Adjudicate ─────────────────────────────────────────────────────────────────
   phase('Adjudicate')
+  await _renewLease('Adjudicate')
 
   adjudicateResult = await agent(
     `Adjudicate ${_proposals.length} independent Proposal drafts for task ${_taskId} into ONE reconciled Proposal, then write it back.
@@ -108,6 +170,7 @@ ${_proposals.map((p) => `--- Author ${p.authorIdx} ---\n${p.proposalText}`).join
 
   if (!adjudicateResult || adjudicateResult.ok !== true) {
     log(`Adjudicate phase FAILED: ${adjudicateResult?.error || '(agent returned nothing)'}`)
+    await _releaseLease('adjudicate-failed')
     return { outcome: 'revision-needed', reason: adjudicateResult?.error || 'adjudicate-failed', phase: 'Adjudicate' }
   }
 }
@@ -124,6 +187,7 @@ ${_proposals.map((p) => `--- Author ${p.authorIdx} ---\n${p.proposalText}`).join
 // no import statements (established convention: see MAX_PLANCHECK_ROUNDS below), so the numbers
 // are inlined here and cross-checked by proposal-convergence.test.mjs's own dedicated test.
 phase('ProposalReview')
+await _renewLease('ProposalReview')
 
 // FIX (2026-07-28, real-dispatch crash found post-DIR-125): workflow scripts cannot call
 // Date.now()/new Date() — the sandbox throws (it would break resume). `$a.now` as a FUNCTION is a
@@ -268,6 +332,7 @@ This is the DIR-117-B/M195 mechanism-claim wiring coverage check — it calls th
 const _wiringVerdictCodes = ['wiring-coverage-complete', 'wiring-coverage-none-claimed', 'wiring-coverage-uncovered']
 if (!_wiringVerdict || !_wiringVerdictCodes.includes(_wiringVerdict.code)) {
   log(`ProposalReview wiring-coverage sub-step FAILED — no parseable verdict (${_wiringVerdict?.code || 'no-result'}); failing the phase closed rather than skipping coverage.`)
+  await _releaseLease('wiring-coverage-check-failed')
   return { outcome: 'needs-human', reason: 'wiring-coverage-check-failed', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
 }
 _upsertFindings(Array.isArray(_wiringVerdict.findings) ? _wiringVerdict.findings : [], 0)
@@ -292,6 +357,7 @@ while (true) {
 
   _deltaRound += 1
   log(`ProposalReview: ${openBlocking.length} blocking finding(s) open — dispatching focused revision + delta review round ${_deltaRound}/${_maxDeltaRounds}.`)
+  await _renewLease(`ProposalReview-delta-round-${_deltaRound}`)
 
   const _reviseResult = await agent(
     `Focused Proposal reviser for task ${_taskId}, delta round ${_deltaRound}/${_maxDeltaRounds}. Do NOT re-derive the Proposal from scratch and do NOT act as an independent author — resolve ONLY these recorded blocking findings against the CURRENT task ${_taskId} \`## Proposal\`, preserving every other section/sentence unchanged:
@@ -309,6 +375,7 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}${f.evidence
   if (_reviseResult?.proposalHash) _proposalHashes.push({ round: _deltaRound, hash: _reviseResult.proposalHash })
   if (!_reviseResult || _reviseResult.ok !== true) {
     log(`ProposalReview focused revision round ${_deltaRound} FAILED: ${_reviseResult?.error || '(agent returned nothing)'}`)
+    await _releaseLease('proposal-revise-failed')
     return { outcome: 'needs-human', reason: _reviseResult?.error || 'proposal-revise-failed', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
   }
 
@@ -334,20 +401,24 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n'
 
 if (_terminalReason === 'split-recommended') {
   log(`ProposalReview: split recommended — ${_splitRecommendation.reason}`)
+  await _releaseLease('split-recommended')
   return { outcome: 'needs-human', reason: 'split-recommended', splitRecommendation: _splitRecommendation, phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
 }
 if (_terminalReason === 'soft-budget-exceeded') {
   log(`ProposalReview: soft budget (${_policyCaps.softBudgetMs / 60000}m) exceeded with ${_blockingOpen().length} blocking finding(s) still open.`)
+  await _releaseLease('soft-budget-exceeded')
   return { outcome: 'needs-human', reason: 'soft-budget-exceeded', phase: 'ProposalReview', ledger: _ledger, elapsedMs: _now() - _startedAtMs, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
 }
 if (_terminalReason === 'delta-cap-exhausted') {
   log(`ProposalReview: delta-review cap (${_maxDeltaRounds}) exhausted with ${_blockingOpen().length} blocking finding(s) still open.`)
+  await _releaseLease('delta-cap-exhausted')
   return { outcome: 'needs-human', reason: 'delta-cap-exhausted', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
 }
 log(`ProposalReview PASSED — zero open blocking findings after 1 full synthesis + ${_deltaRound} delta round(s); ${_ledger.length} total finding(s) recorded.`)
 
 // ── Phase: PlanAuthor ─────────────────────────────────────────────────────────────────
 phase('PlanAuthor')
+await _renewLease('PlanAuthor')
 
 const _slug = _taskId.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 const _planFile = `docs/plans/${_milestoneId}-${_slug}.md`
@@ -379,6 +450,7 @@ Return {planFile: "${_planFile}", ok: true, sessionId: <your real session id>}. 
 
 if (!planAuthorResult || planAuthorResult.ok !== true) {
   log(`PlanAuthor phase FAILED: ${planAuthorResult?.error || '(agent returned nothing)'}`)
+  await _releaseLease('plan-author-failed')
   return { outcome: 'revision-needed', reason: planAuthorResult?.error || 'plan-author-failed', phase: 'PlanAuthor' }
 }
 
@@ -392,6 +464,7 @@ const _planCheckSessions = []
 
 while (_planCheckRound < MAX_PLANCHECK_ROUNDS) {
   _planCheckRound += 1
+  await _renewLease(`PlanCheck-round-${_planCheckRound}`)
   const checkResult = await agent(
     `INDEPENDENT grounded Plan check, round ${_planCheckRound}/${MAX_PLANCHECK_ROUNDS}, for ${_planFile} (task ${_taskId}) — you did NOT author this Plan.
 
@@ -421,11 +494,13 @@ Return {findings: <integer count, 0 if none>, findingsDetail: <list each finding
 
 if (_planCheckFindings !== 0) {
   log(`PlanCheck exhausted ${MAX_PLANCHECK_ROUNDS} rounds without reaching F_i=0.`)
+  await _releaseLease('plancheck-rounds-exceeded')
   return { outcome: 'revision-needed', reason: 'plancheck-rounds-exceeded', phase: 'PlanCheck' }
 }
 
 // ── Phase: Receipt ────────────────────────────────────────────────────────────────────
 phase('Receipt')
+await _renewLease('Receipt')
 
 // DIR-117 iteration-2 item 2: thread the REAL, distinct session ids captured by each phase above
 // into the receipt's --build command, so buildReceipt() records real provenance — never a
@@ -489,10 +564,16 @@ Return {ok: <step-3 command exit === 0>, receiptFile: "${_receiptFile}", detail:
 
 if (!receiptResult || receiptResult.ok !== true) {
   log(`Receipt phase FAILED self-check: ${receiptResult?.detail || '(agent returned nothing)'}`)
+  await _releaseLease('receipt-selfcheck-failed')
   return { outcome: 'revision-needed', reason: 'receipt-selfcheck-failed', phase: 'Receipt' }
 }
 
 log(`Prepared: ${_taskId} — receipt at ${_receiptFile}, ledger at ${_ledgerFile}, Plan at ${_planFile}, ${_planCheckRound} Plan-check round(s), ${_fullSynthesisCount} full synthesis${_resumeFromAdjudicatedProposal ? ' (resumed — ProposalAuthors/Adjudicate skipped)' : ''} + ${_deltaRound} delta round(s), zero open blocking findings.`)
+
+// Final release (WIRING-CLAIM 2, line-497-class success return): the single most safety-critical
+// site — a verifier who stops at "11 named outcome sites" would never check this one, since it is
+// the file's own final success return, additional to and not folded into the other 11.
+await _releaseLease('prepared')
 
 return {
   outcome: 'prepared',

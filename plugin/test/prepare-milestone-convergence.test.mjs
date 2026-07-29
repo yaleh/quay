@@ -133,12 +133,30 @@ function freshScratchDir() {
 // makeMock — the shared "outer phase" mock (authors/adjudicate/plan-author/plan-check/receipt),
 // parameterized by `reviewHandlers` for the ProposalReview phase under test.
 function makeMock(taskFileOnDisk, reviewHandlers) {
-  const calls = { authors: [], adjudicator: 0, reviews: [], revises: [], wiringChecks: 0, planAuthor: 0, planCheckers: [] };
+  const calls = { authors: [], adjudicator: 0, reviews: [], revises: [], wiringChecks: 0, planAuthor: 0, planCheckers: [], admissionAcquires: 0, admissionRenews: 0, admissionReleases: 0 };
   let planFile = null;
   let ledger = null;
 
   const agentMock = async (prompt, opts = {}) => {
     const label = opts.label || '';
+
+    // M200/DIR-126-A: the new Admission phase's agent()-dispatched CLI calls. Mocked directly
+    // (never touching real .quay/prepare-leases/ state) — this file's job is proving the
+    // ProposalReview convergence loop's OWN wiring, not re-testing prepare-admission-check.ts
+    // (that has its own dedicated experiments/quay-perpetual-stream/test/
+    // prepare-admission-check.test.mjs). Every generation in this file always wins admission.
+    if (label === 'admission-acquire') {
+      calls.admissionAcquires += 1;
+      return { raw: JSON.stringify({ outcome: 'acquired', lease: { fencingToken: 0 }, reclaimed: false }) };
+    }
+    if (/^admission-renew-/.test(label)) {
+      calls.admissionRenews += 1;
+      return { raw: JSON.stringify({ ok: true }) };
+    }
+    if (/^admission-release-/.test(label)) {
+      calls.admissionReleases += 1;
+      return { raw: JSON.stringify({ ok: true }) };
+    }
 
     if (/^proposal-author-\d+$/.test(label)) {
       const idx = Number(label.match(/\d+$/)[0]);
@@ -634,6 +652,65 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       assert.equal(independentCheck.ok, true, independentCheck.message);
     } finally {
       cleanup(scratchDir, planFile, args.milestoneId);
+    }
+  });
+
+  // M200/DIR-126-A audit finding (renewal-at-every-phase-boundary AC item): the admissionRenews
+  // counter was already collected by this file's own mock but never asserted against an expected
+  // count anywhere — a static-wiring-only claim, not a proven one. For a resumed (0 findings, 0
+  // delta rounds) generation, WIRING-CLAIM 3's real call sites are ProposalReview-entry (line 190)
+  // + PlanAuthor-entry (line 421) + PlanCheck-round-1 (line 467) + Receipt-entry (line 503) = 4 —
+  // Adjudicate-entry's renewal (line 155) is correctly skipped under resume, since Adjudicate
+  // itself is skipped.
+  test(`[${mirrorName}] M200/DIR-126-A: renewal fires at every real phase boundary taken, not a static-only claim (resumed, 0 delta rounds -> 4 renewals)`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk, charterFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel, { resumeFromAdjudicatedProposal: true });
+    let planFile = null;
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onFullReview: () => ({ findings: [], mechanismCount: 1, sessionId: 'sess-reviewer-0' }),
+      });
+      planFile = result.planFile;
+      assert.equal(result.outcome, 'prepared', JSON.stringify(result));
+      assert.equal(calls.admissionAcquires, 1, 'admission acquired exactly once');
+      assert.equal(
+        calls.admissionRenews,
+        4,
+        'ProposalReview-entry + PlanAuthor-entry + PlanCheck-round-1 + Receipt-entry (Adjudicate-entry correctly skipped under resume)'
+      );
+      assert.equal(calls.admissionReleases, 1, 'released exactly once on the successful terminal return');
+    } finally {
+      cleanup(scratchDir, planFile, args.milestoneId);
+    }
+  });
+
+  // M200/DIR-126-A audit finding (AC2, admission-error fail-closed): the branch exists in the real
+  // source (confirmed via source read), but no test previously drove prepare-milestone.js itself
+  // into it. Malformed/unparseable admission-acquire output must fail closed to
+  // {outcome:'needs-human', reason:'admission-check-failed'} BEFORE any ProposalAuthors dispatch —
+  // never silently falling through as if admission had succeeded.
+  test(`[${mirrorName}] M200/DIR-126-A: Admission-phase error (malformed CLI output) fails closed to admission-check-failed, zero ProposalAuthors dispatches`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    const fn = loadWorkflow(workflowFile);
+    const calls = { authors: [] };
+    const agentMock = async (prompt, opts = {}) => {
+      const label = opts.label || '';
+      if (label === 'admission-acquire') return { raw: 'not valid json {{{' };
+      if (/^proposal-author-\d+$/.test(label)) {
+        calls.authors.push(label);
+        return { authorIdx: 1, proposalText: 'unreachable', sessionId: 'sess' };
+      }
+      throw new Error(`unexpected agent() call with label ${JSON.stringify(label)} after a failed Admission phase`);
+    };
+    try {
+      const result = await fn(args, () => {}, () => {}, (fns) => Promise.all(fns.map((f) => f())), agentMock);
+      assert.equal(result.outcome, 'needs-human');
+      assert.equal(result.reason, 'admission-check-failed');
+      assert.equal(result.phase, 'Admission');
+      assert.equal(calls.authors.length, 0, 'zero ProposalAuthors dispatches after a failed Admission phase');
+    } finally {
+      fs.rmSync(scratchDir, { recursive: true, force: true });
     }
   });
 

@@ -169,6 +169,7 @@ SYNC_SCRIPTS=(
   wiring-coverage-check
   milestone-preparation-check
   proposal-convergence
+  prepare-admission-check
 )
 
 if $CHECK_MODE; then

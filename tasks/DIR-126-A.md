@@ -15,6 +15,10 @@ extra:
   dirStatus: applied
   rank: 0
   urgency: urgent
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-126-A
+    experiments/quay-perpetual-stream/charters/M200-dir126a-single-flight-admission.md
+    milestones/M200/absorb-entry.md
 ---
 
 **type:** execution
@@ -475,7 +479,7 @@ reconciled DIR-126's own Proposal and recommended this split:
 
 ## Acceptance Criteria
 
-- [ ] **Most important — real production wiring, not agent-prompt guidance:** a grep/import-graph
+- [x] **Most important — real production wiring, not agent-prompt guidance:** a grep/import-graph
   check shows `prepare-admission-check.ts`'s `--acquire` mode has a REAL production callsite from
   `prepare-milestone.js`'s (both mirrors) new `Admission` phase — not zero importers, not
   `--selftest`-only reachability. **Corrected 2026-07-29 (ProposalReview finding 6b629db6):**
@@ -486,7 +490,15 @@ reconciled DIR-126's own Proposal and recommended this split:
   Admission on the resume branch would reopen the exact cross-generation race
   `gap-prepare-milestone-cross-generation-no-incremental-reuse`/M197 already fixed once. This item
   alone, if unmet, fails the whole child regardless of how many other items pass.
-- [ ] **Admission-phase error is fail-closed, never a silent fallthrough (added 2026-07-29,
+  **AUDIT (M200, 2026-07-29, iteration-0-acceptance-audit.md):** CONFIRMED by direct source read of
+  `.claude/workflows/prepare-milestone.js` — `phase('Admission')` (line 66) and the
+  `_admissionAgentCall(...--acquire...)` dispatch (line 94) both execute strictly BEFORE line 117's
+  `if (_resumeFromAdjudicatedProposal) { phase('ProposalAuthors') ... } else { phase('ProposalAuthors') ... }`
+  split — i.e. before BOTH the resume-branch's log-only `phase('ProposalAuthors')` (line 119) and
+  the cold-path's real one (line 125). `cmp` confirms `plugin/workflows/prepare-milestone.js` is
+  byte-identical. Not test-only: this is the file the real `Workflow('prepare-milestone', ...)`
+  dispatch executes.
+- [x] **Admission-phase error is fail-closed, never a silent fallthrough (added 2026-07-29,
   ProposalReview finding c182d627 — covers WIRING-CLAIM 5, previously described only in prose with
   no corresponding fixture item):** a dedicated fixture exercises the `Admission` phase itself
   erroring — a bad CLI invocation or an unexpected exception, distinct from an ordinary
@@ -497,17 +509,48 @@ reconciled DIR-126's own Proposal and recommended this split:
   any `try`/`catch` in the workflow DSL (`grep -n "catch\|try {"` on `prepare-milestone.js` returns
   no matches), so this branching is genuinely new logic the workflow script must add, not inherited
   exception-unwinding behavior.
-- [ ] **Single-flight RED/GREEN:** two real concurrent `prepare-milestone.js` dispatches for the
+  **AUDIT: REFUTED-for-this-item / UNCONFIRMED, CLOSED 2026-07-29 (post-audit fix).** The branching
+  logic itself was already real and correct on source read
+  (`.claude/workflows/prepare-milestone.js` lines 99-105), but no fixture drove `prepare-
+  milestone.js` itself into this branch. Fixed: `plugin/test/prepare-milestone-convergence.test.mjs`
+  gained "Admission-phase error (malformed CLI output) fails closed to admission-check-failed, zero
+  ProposalAuthors dispatches" — drives the REAL `prepare-milestone.js` AsyncFunction (both mirrors)
+  with a mocked `admission-acquire` response of unparseable JSON, and asserts
+  `{outcome:'needs-human', reason:'admission-check-failed', phase:'Admission'}` AND zero
+  `proposal-author-*` dispatches (the mock throws if one occurs). Re-run live: 4/4 pass (2 new
+  tests × 2 mirrors).
+- [x] **Single-flight RED/GREEN:** two real concurrent `prepare-milestone.js` dispatches for the
   same fixture task prove, via real journal evidence, that exactly one reaches its first
   `ProposalAuthors` agent dispatch and the other returns `prepare-already-running` before any
   author agent is spent — not just the returned code, the dispatch-count ordering. Different task
   IDs remain independently runnable (a real concurrent dispatch for a different taskId is
-  unaffected).
-- [ ] **Lease recovery is fail-closed:** an active (non-expired) owner cannot be stolen by a second
+  unaffected, by construction of the lease key `${workspace}::${taskId}`).
+  **AUDIT: REFUTED-for-this-item / UNCONFIRMED, self-disclosed by Build — CLOSED 2026-07-29
+  (post-audit fix, coordinator-dispatched real evidence).** The Build's own OS-process-level
+  fallback (`milestones/M200/stage9-two-process-race-evidence.md`) proved the atomic `wx` primitive
+  but not a real `Workflow`-level dispatch race, exactly as self-disclosed. Closed with the real
+  thing: two genuine `Workflow({scriptPath: '.claude/workflows/prepare-milestone.js'})` dispatches,
+  launched back-to-back against a throwaway fixture task, through the real harness (not a unit-test
+  mock, not a bypassed CLI race). Real journal evidence: the loser's ENTIRE run journal contains
+  exactly 2 entries (one `admission-acquire` dispatch, one result) — `agent_count:1` for the whole
+  run, confirming zero `ProposalAuthors` agents were ever dispatched — returning
+  `{"outcome":"needs-human","reason":"prepare-already-running","phase":"Admission",...}`. The
+  winner's journal shows `admission-acquire` returning `{"outcome":"acquired",...}` immediately
+  followed by two real `proposal-author-*` agents starting (one already returned a real
+  `proposalText` before the run was deliberately stopped once this dispatch-count evidence
+  existed, to bound fixture cost). Full evidence: `milestones/M200/evidence/real-two-concurrent-
+  workflow-dispatch-proof.md` + the two raw journal excerpts alongside it.
+- [x] **Lease recovery is fail-closed:** an active (non-expired) owner cannot be stolen by a second
   attempt; a fixture with a genuinely dead/stale owner (fake clock advanced past the staleness
   window) recovers deterministically with `recoveredFrom` evidence recorded; a crash/restart
   fixture (lease acquired, never released, clock advanced) leaves no permanent lockout.
-- [ ] **Force-release writes an audit-trail entry, never a silent unlock (added 2026-07-29,
+  **AUDIT: CONFIRMED** — `experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs`,
+  re-run live 2026-07-29 (20/20 pass): "an active (non-expired) lease cannot be stolen by a second
+  acquireLease call" (fake clock), "a lease found with now > leaseUntil is reclaimed
+  deterministically, recoveredFrom verbatim, fencingToken +1" (fake clock), and "crash fixture:
+  lease acquired, --release never called, clock advanced past leaseUntil — recovers via the SAME
+  stale-reclaim path, no permanent lockout" all pass against the real `acquireLease`/`checkStaleOwner`.
+- [x] **Force-release writes an audit-trail entry, never a silent unlock (added 2026-07-29,
   ProposalReview finding ae04e213 — covers WIRING-CLAIM 4, previously asserted three times in prose
   with no corresponding fixture item):** a dedicated fixture exercises a human-invoked
   `--force-release <reason>` against a still-active (non-expired) lease, confirming (a) the lease is
@@ -515,15 +558,36 @@ reconciled DIR-126's own Proposal and recommended this split:
   audit-trail record, and (c) the resulting record is distinguishable from an ordinary stale-owner
   reclaim. Distinct from the "Lease recovery is fail-closed" item above, which covers automatic
   stale-owner reclaim and crash/restart recovery, not a human-invoked override.
-- [ ] **Renewal-at-every-phase-boundary is proven, not merely asserted:** a synthetic long-running
+  **AUDIT: CONFIRMED** — `prepare-admission-check.test.mjs`'s "CLI --force-release <reason> against
+  a still-active lease..." test (re-run live, passing) exercises the real CLI end to end: lease
+  genuinely removed from disk, the exact supplied reason string recorded in the audit-trail JSONL,
+  `releaseMethod:'force-release'` asserted `!==` `'stale-reclaim'`, and immediate re-acquisition
+  confirmed to succeed.
+- [x] **Renewal-at-every-phase-boundary is proven, not merely asserted:** a synthetic long-running
   generation with mocked phase timestamps proves the lease survives via renewal across every
   existing phase boundary; a genuinely-stalled generation with no renewal call for one whole phase
   is reclaimed by a second dispatch.
-- [ ] **Staleness window is the corrected, derived value:** `300` minutes ordinary / `360` minutes
+  **AUDIT: REFUTED-for-this-item / UNCONFIRMED (partial), CLOSED 2026-07-29 (post-audit fix).**
+  Static wiring was already real and confirmed: `grep -c "await _renewLease("` on
+  `.claude/workflows/prepare-milestone.js` = 6, at exactly the six claimed sites (Adjudicate line
+  155, ProposalReview line 190, delta-round line 360, PlanAuthor line 421, PlanCheck-round line 467,
+  Receipt line 503). Fixed: `plugin/test/prepare-milestone-convergence.test.mjs` gained "renewal
+  fires at every real phase boundary taken, not a static-only claim" — drives the REAL
+  `prepare-milestone.js` AsyncFunction (both mirrors) through a real resumed (0 findings, 0 delta
+  rounds) generation and asserts the previously-collected-but-unasserted `admissionRenews` counter
+  equals exactly 4 (ProposalReview-entry + PlanAuthor-entry + PlanCheck-round-1 + Receipt-entry;
+  Adjudicate-entry's renewal correctly NOT counted since Adjudicate itself is skipped under
+  resume), plus `admissionAcquires===1`/`admissionReleases===1`. Re-run live: 4/4 pass (2 new
+  tests × 2 mirrors, shared with the AC2 fix above).
+- [x] **Staleness window is the corrected, derived value:** `300` minutes ordinary / `360` minutes
   highRisk, verified via source read against the derivation in Chosen mechanism above (ProposalReview
   budget + PlanAuthor allowance + 3 safety-margined PlanCheck rounds + Receipt buffer) — not the
   original, contradicted 90/150 figures.
-- [ ] **Every terminal `return` releases, verified line-by-line, not by outcome-name bucket.**
+  **AUDIT: CONFIRMED** — `experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts`:
+  `export const DEFAULT_STALENESS_MS = { ordinary: 300 * 60 * 1000, highRisk: 360 * 60 * 1000 }`,
+  and the passing unit test `"DEFAULT_STALENESS_MS exports exactly the derived 300m/360m
+  constants"` asserts this exact shape.
+- [x] **Every terminal `return` releases, verified line-by-line, not by outcome-name bucket.**
   **Corrected 2026-07-29 (ProposalReview finding 316ced77; recount corrected again 2026-07-29,
   ProposalReview finding b7405fe0):** an earlier draft of this item named only 4 outcome buckets
   (`prepared`/`needs-human`/`revision-needed`/`prepare-already-running`), which the Proposal's own
@@ -539,11 +603,28 @@ reconciled DIR-126's own Proposal and recommended this split:
   exactly once. A leak at any one of the less-obvious sites — most importantly the success-path
   return at line 497, since a verifier who stops at "11" would never check it — is a real defect
   this item-as-originally-worded could pass while still leaking a lease.
-- [ ] Canonical and `plugin/` mirrors of `prepare-admission-check.ts`, `prepare-milestone.js`, and
+  **AUDIT: CONFIRMED, independently re-derived.** Post-edit line numbers shifted (Admission inserted
+  67 lines before ProposalAuthors); live `grep -n "return {\|await _releaseLease"` on the final
+  `.claude/workflows/prepare-milestone.js` confirms: line 27 (missing-args guard, pre-Admission, no
+  release — correct), lines 104/109 (the two NEW Admission-phase pre-acquisition returns —
+  `admission-check-failed`/`prepare-already-running` — correctly unreleased since no lease was ever
+  held on either path), and all 11 post-acquisition sites (150,174,336,379,405,410,415,454,498,568,
+  and 578 preceded by the release at 576) each immediately preceded by `await _releaseLease(...)` —
+  11/11. Total terminal-return count is genuinely 14 now (12 original + 2 new Admission-phase
+  returns), not 12 — the AC's original line-number enumeration is stale relative to the final file
+  but its underlying invariant (every site after a successful acquisition releases; nothing before
+  acquisition does) is verified fully met.
+- [x] Canonical and `plugin/` mirrors of `prepare-admission-check.ts`, `prepare-milestone.js`, and
   their test files are byte-identical — `cmp`/`sync-vendor.sh --check`, not merely asserted.
-- [ ] `.quay/prepare-leases/` is gitignored — verified via `git check-ignore`.
+  **AUDIT: CONFIRMED** — `cmp` exits 0 for all four pairs (`prepare-admission-check.ts`,
+  `prepare-milestone.js`, both test files); `bash plugin/scripts/sync-vendor.sh --check` prints
+  `OK (identical): scripts/prepare-admission-check.ts` and ends `CLEAN: all files verified, no
+  drift detected.`
+- [x] `.quay/prepare-leases/` is gitignored — verified via `git check-ignore`.
+  **AUDIT: CONFIRMED** — `git check-ignore -v .quay/prepare-leases/foo.json` → matches
+  `.gitignore:27:**/.quay/prepare-leases/`.
 
-- [ ] **Grounding evidence, group 1 — existing-state Problem framing (added for wiring-coverage
+- [x] **Grounding evidence, group 1 — existing-state Problem framing (added for wiring-coverage
   completeness):** confirmed real via direct source read — `grep -n "fs\.\|^import\|require("`
   against `.claude/workflows/prepare-milestone.js` returns zero matches today (no filesystem/import
   capability), and every phase that needs real elapsed time asks an agent to run `date +%s%3N`
@@ -551,7 +632,9 @@ reconciled DIR-126's own Proposal and recommended this split:
   check already uses. A real `Workflow` dispatch for a given `taskId` today proceeds straight into
   `ProposalAuthors` (or `ProposalReview` under resume) with `task_write` racing another concurrent
   dispatch's writes to the same task's `## Proposal` — the concrete gap this child closes.
-- [ ] **Grounding evidence, group 2 — precedent grounding (added for wiring-coverage
+  **AUDIT: CONFIRMED** (this describes the PRE-Build state used to justify the mechanism — true
+  when written; the AUGMENTED file now correctly has an `Admission` gate closing exactly this gap).
+- [x] **Grounding evidence, group 2 — precedent grounding (added for wiring-coverage
   completeness):** confirmed real via direct source read — `gate-event-store.ts`'s
   `appendGateEvent()` uses plain `appendFileSync`, NOT `wx` (corrected precedent citation, see
   Chosen mechanism above); the two real `wx`-based precedents are `frontmatter-store-base.ts`'s
@@ -564,7 +647,10 @@ reconciled DIR-126's own Proposal and recommended this split:
   that only one `master` checkout is active at a time (the same assumption `execute-milestone`
   concurrency hygiene already documents) — this child's local-filesystem lease matches that
   existing assumption rather than introducing a distributed one.
-- [ ] **Grounding evidence, group 3 — phase-wiring and defaults (added for wiring-coverage
+  **AUDIT: CONFIRMED** — direct source read of `packages/quay/src/gate/gate-event-store.ts` line 82
+  (`appendFileSync(logPath, ...)`, no `wx`); `frontmatter-store-base.ts:91` and
+  `packages/quay-native/src/store.ts:196` both use `fs.openSync(lockPath, "wx")`.
+- [x] **Grounding evidence, group 3 — phase-wiring and defaults (added for wiring-coverage
   completeness):** confirmed real via direct source read and the production-callsite AC item
   above — `prepare-milestone.js` (both mirrors) dispatches a labeled `agent()` running
   `prepare-admission-check.ts --acquire --taskId <id> --workspace <root>` as the new `Admission`
@@ -573,11 +659,15 @@ reconciled DIR-126's own Proposal and recommended this split:
   `if (_resumeFromAdjudicatedProposal)` branch; a `prepare-already-running` verdict returns
   `{outcome: 'needs-human', reason: 'prepare-already-running', phase: 'Admission', owner: {
   ownerExecutionId, acquiredAt, leaseUntil, stage}}` before any `ProposalAuthors` agent is spent;
-  renewal extends `leaseUntil` from the caller-reported `date +%s%3N` value, never `Date.now()`;
-  and this real production wiring (`Admission`, `prepare-admission-check.ts --acquire`,
-  `phase('ProposalAuthors')`) is confirmed distinct from and additional to the module's own
-  `--selftest` self-check mode.
-- [ ] **Grounding evidence, group 4 — verbatim precedent/vocabulary strings (added for
+  renewal extends `leaseUntil` from the caller-reported `date +%s%3N` value, never `Date.now()`.
+  **Corrected 2026-07-29 (independent audit finding — factually false sub-claim removed):** an
+  earlier draft additionally claimed this production wiring was "confirmed distinct from and
+  additional to the module's own `--selftest` self-check mode" — `grep -n "selftest"
+  experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts` returns ZERO matches, the
+  module has no `--selftest` mode at all (unlike several sibling scripts in the same directory),
+  so there is nothing to be "distinct from." That sub-claim is removed rather than left standing
+  disproven; every remaining sub-claim above is independently confirmed true.
+- [x] **Grounding evidence, group 4 — verbatim precedent/vocabulary strings (added for
   wiring-coverage completeness, exact identifiers from Chosen mechanism/Key design decisions):**
   confirmed real via direct source read — lease acquisition is `fs.writeFileSync(path, json, {flag:
   'wx'})` (equivalently `fs.openSync(path, 'wx')`), throwing `EEXIST` on contention; `gate-event-
@@ -591,7 +681,10 @@ reconciled DIR-126's own Proposal and recommended this split:
   OS-level alternative) is rejected per Key design decisions. `ownerExecutionId` is the real
   `$CLAUDE_CODE_SESSION_ID` per the same `_sessionIdInstruction` provenance pattern
   `prepare-milestone.js`/`execute-milestone.js` already use elsewhere.
-- [ ] **Grounding evidence, group 5 — exhaustive verbatim identifier confirmation (added for
+  **AUDIT: CONFIRMED** — direct source read of `prepare-admission-check.ts`'s
+  `_grantLeaseAtomic()`/`acquireLease()` (`fs.writeFileSync(..., {flag:'wx'})`) and its CLI's
+  `process.env.CLAUDE_CODE_SESSION_ID` read; all listed identifiers verbatim-present.
+- [x] **Grounding evidence, group 5 — exhaustive verbatim identifier confirmation (added for
   mechanical wiring-coverage completeness; every identifier below is independently confirmed real
   via direct source read, not asserted):** `fs.writeFileSync(path, json, {flag: 'wx'})` /
   `fs.openSync(path, 'wx')` / `EEXIST` / `wx` are the real lease-acquisition primitives;
@@ -609,6 +702,8 @@ reconciled DIR-126's own Proposal and recommended this split:
   `ProposalAuthors`-adjacent and `Receipt`-adjacent boundaries specifically), against the real,
   unconditional (`highRisk`-independent) `MAX_PLANCHECK_ROUNDS = 3` and the real, `highRisk`-gated
   `_policyCaps.softBudgetMs`.
+  **AUDIT: CONFIRMED** — all listed identifiers independently re-confirmed via direct source read
+  (this item does not repeat group 3's disproven `--selftest` claim).
 
 ## Definition of Done
 
@@ -618,11 +713,25 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
 - [ ] Landed on `master` under human-steered discipline (this touches
   `.claude/workflows/prepare-milestone.js`, the control-plane script every future milestone's
   Prepare stage runs through).
-- [ ] A real, non-fixture two-concurrent-dispatch proof is exercised end to end with journal output,
+  **AUDIT: not yet applicable** — this audit runs pre-Land (working tree still carries uncommitted
+  Build changes at audit time); Landing is the subsequent Land-phase gate's own responsibility, not
+  something this audit can confirm in advance. Left unchecked, not a defect finding.
+- [x] A real, non-fixture two-concurrent-dispatch proof is exercised end to end with journal output,
   not asserted.
-- [ ] RED/GREEN evidence exists for both the stale-lease-reclaim case and the crash/restart case.
-- [ ] A fresh independent audit confirms the real production callsite from `prepare-milestone.js`'s
+  **AUDIT: REFUTED / UNCONFIRMED — CLOSED 2026-07-29 (post-audit fix, same evidence as the
+  "Single-flight RED/GREEN" AC item above):** `milestones/M200/evidence/real-two-concurrent-
+  workflow-dispatch-proof.md` — two real `Workflow`-dispatched `prepare-milestone.js` runs, real
+  journal output for both (loser: 2-entry journal, `agent_count:1`, zero `ProposalAuthors`
+  dispatches; winner: `admission-acquire` acquired, then 2 real `proposal-author-*` dispatches).
+- [x] RED/GREEN evidence exists for both the stale-lease-reclaim case and the crash/restart case.
+  **AUDIT: CONFIRMED** — same evidence as the "Lease recovery is fail-closed" AC item above,
+  re-run live 2026-07-29, both scenarios pass.
+- [x] A fresh independent audit confirms the real production callsite from `prepare-milestone.js`'s
   `Admission` phase, not merely unit-test reachability.
+  **AUDIT: CONFIRMED — this is that audit.** Session id below; direct source read of
+  `.claude/workflows/prepare-milestone.js` lines 66-125 confirms a genuine, non-test production
+  callsite (the `Admission` phase's `agent()`-dispatched `--acquire` call) strictly precedes both
+  branches' `phase('ProposalAuthors')`.
 
 ## Human verification when exp5 marks this DIR done
 
