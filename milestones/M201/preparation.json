@@ -1,0 +1,79 @@
+{
+  "taskId": "DIR-126-B",
+  "milestoneId": "M201",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M201-dir126b-deterministic-preflight.md",
+  "planFile": "docs/plans/M201-dir-126-b.md",
+  "ledgerFile": null,
+  "hashes": {
+    "proposal": "71e58144eb7f0d3b88568216bbe2716c5dcd34c44534f2ade7a87311bc4ad1ea",
+    "charter": "c516849ff8bd2ef306a830290789ff12079bd67912a908a58ce3b832af7b878a",
+    "plan": "991dae00521108697079ff26347a20f76f745e51c6dea31fa0cfa8dc3fdd57dd",
+    "sources": {
+      ".claude/workflows/prepare-milestone.js": "85fd9f15e427807ddd5e5b66d94097823a3d6a61164d08f543cef90fc9a59bea",
+      "plugin/workflows/prepare-milestone.js": "85fd9f15e427807ddd5e5b66d94097823a3d6a61164d08f543cef90fc9a59bea",
+      "experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts": "34368f33593a64d9cc287bd23385a1687932b8321a2c5508e5a3e4be9b2199be",
+      "plugin/scripts/prepare-admission-check.ts": "34368f33593a64d9cc287bd23385a1687932b8321a2c5508e5a3e4be9b2199be",
+      "experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts": "aea406f9273ee73ef2f35f3e01461b37ae7040da65361257635461c639a0f16e",
+      "plugin/scripts/wiring-coverage-check.ts": "aea406f9273ee73ef2f35f3e01461b37ae7040da65361257635461c639a0f16e",
+      "experiments/quay-perpetual-stream/scripts/task-schema.ts": "aae695004405fffb3cb9c2cbaf28ea5ffe4504d46f82ad3e2663b925fa754486",
+      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "311e46da6c76b90e03e9ba1348764e3fbb48db756b1dc82ba38a60e9996c9329",
+      "experiments/quay-perpetual-stream/scripts/gate-script-base.ts": "f22c7643accc60b7beba50c181b92ce7ff75344dc25d238e1a154e1b544729a3",
+      "plugin/scripts/sync-vendor.sh": "00fd766342fe9230165aa483346ea4b3d20c905d425c9978022acc68af17cb05"
+    }
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 3,
+    "findings": 0
+  },
+  "touches": [
+    ".claude/workflows/prepare-milestone.js",
+    "plugin/workflows/prepare-milestone.js",
+    "experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts",
+    "plugin/scripts/prepare-admission-check.ts",
+    "experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts",
+    "plugin/scripts/wiring-coverage-check.ts",
+    "experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs",
+    "plugin/test/prepare-admission-check.test.mjs",
+    "experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs",
+    "plugin/test/prepare-milestone-convergence.test.mjs",
+    "plugin/test/prepare-milestone-preparation-e2e.test.mjs",
+    "experiments/quay-perpetual-stream/test/fixtures/preflight",
+    "plugin/test/fixtures/preflight",
+    "docs/plans/M201-dir-126-b.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planAuthor": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "round": 2,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "round": 3,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      }
+    ]
+  },
+  "convergence": null
+}
