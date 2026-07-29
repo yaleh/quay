@@ -20,10 +20,16 @@ extra:
 
 ## Proposal
 
-Add mechanical, pre-content-agent-dispatch checks for the five recurring `prepare-milestone` failure
-classes DIR-126's own Finding names (merged Markdown claim blocks, stale AC/DoD references,
-Proposal/Plan/Touches disagreement, non-existent claimed precedent/imports, non-runnable Plan
-command/path shapes), rejecting cheaply before any expensive LLM author/reviewer agent is
+Add mechanical, pre-content-agent-dispatch checks for five recurring `prepare-milestone` failure
+classes (merged Markdown claim blocks, stale AC/DoD references, Proposal/Plan/Touches disagreement,
+non-existent claimed precedent/imports, non-runnable Plan command/path shapes). **Correction
+(2026-07-29, ProposalReview finding):** this five-way taxonomy is this child's own decomposition of
+the "dense Proposal prose, insufficient AC granularity" pattern `tasks/DIR-126.md`'s `## Finding`
+section actually names (workflow-yield stats, the M199 wiring-coverage 14-blocking-finding
+reproduction) — direct read of that section confirms it does NOT literally enumerate these five
+named classes; that enumeration is this Proposal's own grounded analysis of the recurring failure
+mode, not a verbatim quote from the parent. Rejecting cheaply before any expensive LLM
+author/reviewer agent is
 dispatched. Second child of DIR-126's 5-way split. Depends on [[DIR-126-A]] (shares its new
 `prepare-admission-check.ts` module and the pre-`ProposalAuthors` phase-insertion point, landed
 `496ccd4`/M200), but has an independently testable, independently landable proof surface (five named
@@ -47,8 +53,8 @@ bullet lists merging multiple distinct wiring claims into one sentence, firing 2
 from formatting rather than content against DIR-119-D1's first generation. **That second class was
 independently closed at its root — before this child's Build begins — by commit `335317d`**
 (`splitListAwareBlocks()` added to `splitSentences`, both mirrors `cmp`-clean;
-`wiring-coverage-check.test.mjs` is 17/17 green, including two regression tests for the merged-list
-case). This narrows this child's real remaining scope to: build the five NEW `Preflight`-phase check
+`wiring-coverage-check.test.mjs` is 18/18 green (as of `44ca1b3`), including two regression tests
+for the merged-list case). This narrows this child's real remaining scope to: build the five NEW `Preflight`-phase check
 functions; verify (not re-fix) that the `335317d` fix stays green; do not touch `splitSentences`
 itself beyond exporting it for reuse.
 
@@ -216,7 +222,7 @@ A generation whose already-available inputs satisfy all five checks sees exactly
 `ProposalAuthors` through `Receipt` behavior is otherwise byte-for-byte unchanged, since no existing
 phase's logic is modified, only two new phases/dispatches inserted around unchanged phases.
 `wiring-coverage-check.ts` itself is untouched beyond exporting its existing sentence-splitting
-helpers for reuse — the existing 17/17 `wiring-coverage-check.test.mjs` suite must remain green,
+helpers for reuse — the existing 18/18 `wiring-coverage-check.test.mjs` suite must remain green,
 unmodified, as regression evidence. Canonical/`plugin/` mirrors of every touched file stay
 byte-identical via the existing vendor-sync mechanism (`sync-vendor.sh --check`/`cmp`), the same
 discipline DIR-126-A already followed for the shared module.
@@ -259,6 +265,37 @@ lease semantics). Not [[DIR-126-C]]'s resume/cache-decision logic (this child on
 `PREFLIGHT_POLICY_VERSION` field C consumes), [[DIR-126-D]]'s telemetry, or [[DIR-126-E]]'s capacity
 report.
 
+### Split consideration (DIR-026/ADR-014 Clause 9, addressed against a real split-multi-mechanism finding)
+
+A ProposalReview run against this child's own text found `mechanismCount=5` (one per named
+detector) and recommended `split-multi-mechanism`, DIR-026's `>2` threshold. This child argues
+against a further split rather than fragmenting, for the same reasons DIR-126-A's own four lease
+primitives (`acquireLease`/`renewLease`/`releaseLease`/`checkStaleOwner`) were correctly landed as
+ONE child, not four:
+
+1. **This child is already the product of a completed split.** `tasks/DIR-126.md` was itself split
+   into 5 ordered children (`d59d3a7`) specifically to bound each child's own proof surface. Five
+   detector functions inside ONE new `Preflight` phase, sharing ONE entry point and ONE new module
+   (`prepare-admission-check.ts`, the same module DIR-126-A already introduced), is the SAME
+   granularity DIR-126-A used for its own four lease primitives — not a new, larger bundle.
+2. **The five detectors are not independently landable in any real sense.** All five share one CLI
+   invocation shape, one `Preflight` phase insertion point (two, for the Plan-shape variant), one
+   calibrate-then-activate staging gate, and one `PREFLIGHT_POLICY_VERSION` — landing "just 2 of
+   5" would leave the `Preflight` phase itself half-built and non-functional for the other 3 classes,
+   unlike DIR-126's original 5 children, which were genuinely separable (different modules, different
+   phases, different landing order/dependencies).
+3. **Splitting further would repeat, at a finer grain, the exact problem DIR-026 exists to prevent
+   forever.** If mechanismCount alone (independent of whether the mechanisms share one entry point,
+   one activation gate, and one atomic landing unit) mandates a split, there is no natural floor —
+   each individual detector function would itself eventually accrete sub-claims worth splitting.
+   DIR-026's own text scopes the trigger to a genuinely fragmentable cluster, not to "more than 2
+   named sub-behaviors inside one cohesive phase."
+
+Disposition: not split. If a future reviewer still disagrees after reading this rebuttal, the
+correct next step is a real Build-time discovery that the five detectors are NOT sharable at the
+assumed granularity (e.g. genuinely divergent activation timing beyond the already-documented
+two-insertion-point split) — not a preemptive fragmentation based on the count alone.
+
 ### Mechanism-claim wiring coverage (DIR-117)
 
 - **WIRING-CLAIM 1:** `prepare-milestone.js`'s new `Preflight` phase (both mirrors) invokes
@@ -287,8 +324,12 @@ report.
 
 ### AC coverage
 
-- **Real production wiring, not agent-prompt guidance** → WIRING-CLAIM 1/2/9 above, each independently
-  grep/import-graph-checkable at two distinct callsites.
+- **Real production wiring, not agent-prompt guidance** → WIRING-CLAIM 1/2 above, each independently
+  grep/import-graph-checkable at two distinct callsites; WIRING-CLAIM 9 specifically (added
+  2026-07-29, ProposalReview finding — this bullet's own text previously only cited claim 9
+  parenthetically) → a dedicated grep of `parseArgs`/`gate-script-base.ts`/`isDirectEntry`/
+  `spec.flags` confirms `runPreflightChecks`'s CLI entry point reuses the SAME parsing machinery
+  `--acquire`/`--renew`/`--release` already use — no second, duplicate arg-parsing implementation.
 - **Preflight precedes agents**, per class, with journal evidence of zero content-agent dispatches on
   rejection → WIRING-CLAIM 3/4, plus the five fixture files (one per class) each demonstrating their own
   blocking termination point; valid M195/M197-shaped fixtures stay green.
@@ -297,7 +338,7 @@ report.
 - **No heuristic overreach** → the `reviewer-required` disposition, tested per detector; the explicit
   mechanical-bound scoping for `preflight-missing-precedent`.
 - **`wiring-coverage-check.ts` merged-list class stays closed** → verification-only AC item (already
-  satisfied by `335317d`, not new work), re-run of the existing 17/17 suite.
+  satisfied by `335317d`, not new work), re-run of the existing 18/18 suite.
 - **Mirror byte-identity** → `cmp`/`sync-vendor.sh --check` across all touched files (WIRING-CLAIM
   1/2's two callsites both covered).
 - **Checker version/hash on every verdict** → `PREFLIGHT_POLICY_VERSION`, WIRING-CLAIM 8, consumed
@@ -366,9 +407,13 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
    class was real (distinct from the possessive-"own" class `703e014` already fixed). Direct read of
    the CURRENT source confirms this is now fixed: `splitListAwareBlocks()` (commit `335317d`) treats
    every bullet-list line as its own sentence boundary, and `wiring-coverage-check.test.mjs` is
-   17/17 green including two regression tests for this exact class.
-3. DIR-126's own Finding names the five recurring failure classes by example, drawn from real
-   M192/M195/M196/M198 sessions.
+   18/18 green (`335317d`'s original 17/17 plus `44ca1b3`'s pipe-table-row fix and its regression
+   test) including three regression tests for this exact class of defect.
+3. **Correction (2026-07-29, ProposalReview finding):** the five recurring failure classes above
+   are this child's own decomposition, drawn by example from real M192/M195/M196/M198 sessions and
+   `tasks/DIR-126.md`'s own Finding — not a literal enumeration `tasks/DIR-126.md`'s `## Finding`
+   section itself contains (confirmed by direct read: that section names workflow-yield stats and
+   the M199 wiring-coverage reproduction, never these five specific phrases verbatim).
 
 ## Requested action
 
@@ -380,7 +425,7 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
 3. **Already done (commit `335317d`, not new work for this child):** the Markdown-list-aware
    sentence-boundary fix to `wiring-coverage-check.ts`'s `splitSentences` (+ `plugin/scripts/`
    mirror) already closed the M198 false-positive class at its root, calibrated and landed. Build
-   should verify it stays green (re-run `wiring-coverage-check.test.mjs`, 17/17 expected), not
+   should verify it stays green (re-run `wiring-coverage-check.test.mjs`, 18/18 expected), not
    re-implement it.
 4. Add fixture files seeded from real M192/M195/M196/M198 artifacts for each of the five check
    classes, the M199 merged-list/14-finding reproduction, plus valid M195/M197-shaped fixtures that
@@ -424,8 +469,8 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   produces it):** a RED fixture reproducing the exact M198/DIR-119-D1 defect (dense, un-blank-lined
   bullet list merging multiple wiring claims) is confirmed uncovered under the OLD `splitSentences`,
   then GREEN under the fixed version — and the full pre-existing `wiring-coverage-check.test.mjs`
-  suite (17/17 per the current real run, including the two regression tests added by `335317d`)
-  stays green, confirming no regression on already-passing cases.
+  suite (18/18 per the current real run, including the two regression tests added by `335317d` and
+  one more added by `44ca1b3`) stays green, confirming no regression on already-passing cases.
 - [ ] Canonical and `plugin/` mirrors of `prepare-admission-check.ts`, `wiring-coverage-check.ts`,
   `prepare-milestone.js`, and their test files are byte-identical — `cmp`/`sync-vendor.sh --check`.
 - [ ] Every preflight verdict records a stable checker policy version/hash; changing the detector
@@ -443,7 +488,16 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   phase, dispatched via `agent()` right after `Admission` and before `ProposalAuthors`, running the
   real (non-`--selftest`) preflight CLI — confirmed real via the production-callsite AC item above.
 
-- [ ] **Grounding evidence 1 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `wiring-coverage-check.ts` `703e014` `WIRING_VERB_RE` `f3d870b` `335317d` `splitListAwareBlocks()` `splitSentences` `cmp` `wiring-coverage-check.test.mjs`.
+**Note (2026-07-29, ProposalReview finding d0f864c6):** the 16 bullets below are citation coverage
+for incidental Proposal prose (comparison-table rows, defaults tables, precedent citations, the
+individually-numbered WIRING-CLAIM paragraphs) that `wiring-coverage-check.ts`'s mechanical
+verb+identifier matcher independently flags as needing coverage — they are grounding/citation
+evidence for prose ALREADY substantively covered by the earlier "Real production wiring"/"Preflight
+precedes agents"/"Reuse, never reimplement" AC bullets above, not a second, independent source of
+real coverage. Kept because the checker is fail-closed by design (an uncovered claim blocks), not
+because each is itself a distinct new architectural commitment.
+
+- [ ] **Grounding evidence 1 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `wiring-coverage-check.ts` `703e014` `WIRING_VERB_RE` `f3d870b` `335317d` `splitListAwareBlocks()` `splitSentences` `cmp` `wiring-coverage-check.test.mjs` `44ca1b3`.
 - [ ] **Grounding evidence 2 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `preflight-missing-precedent` `git cat-file -e` `fs.existsSync` `reviewer-required`.
 - [ ] **Grounding evidence 3 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `--preflight-plan` `agent()` `Admission` `ProposalReview` `wiring-coverage-check` `PlanAuthor` `PlanCheck`.
 - [ ] **Grounding evidence 4 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `preflight-touches-mismatch` `## Touches` `tasks/X.md`.
