@@ -1,0 +1,97 @@
+{
+  "taskId": "DIR-119-D1",
+  "milestoneId": "M198",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M198-dir119d1-manifest-synthesis.md",
+  "planFile": "docs/plans/M198-dir-119-d1.md",
+  "ledgerFile": "milestones/M198/proposal-ledger.json",
+  "hashes": {
+    "proposal": "1f1613ee2a36a0cc2fcaf5853aec4084f42b7bf72229343a975810396fca9e87",
+    "charter": "247fb810eef5005a4a2997b4d718000cc4faf8a8cb8354fab7b303e5e659cd94",
+    "plan": "57507095780b19fe79133bf25ffb403b616a1b0efc48eaeb15b50d73b668b608",
+    "sources": {
+      "experiments/quay-perpetual-stream/scripts/touches-orthogonality-check.ts": "6ce152e69201b47e83537dc8fb3741bd865823d1e1f07eecd3a369b03a9e40b5",
+      "experiments/quay-perpetual-stream/scripts/coupling-graph.ts": "63a0738b09940ae0e31d21b20454d07b07a6c5a56350e06c7f9209d716a4bddd",
+      "experiments/quay-perpetual-stream/scripts/composite-contracts.ts": "6d837784734f339559111197bc595c81906beaec2c1da7818fb22cb5ad9d9d2b",
+      "experiments/quay-perpetual-stream/scripts/composite-preflight.ts": "5437169799853f043c7f9e77ec7275b321e91cbf280f061d62aca1379d49c1a2",
+      "experiments/quay-perpetual-stream/scripts/composite-args.ts": "46d4736929c254e72400f12828e58048b62ae229526b656ef4e17be52035a695",
+      "experiments/quay-perpetual-stream/scripts/candidate-synthesis.ts": "64b187495d151bb426e143a8670d76cc05d40a9a9f7ed120dd587e8c206429cc",
+      "experiments/quay-perpetual-stream/scripts/select-preflight.ts": "1813fa683faba38d50d1da09144475d8b4f37fd4912ea4be4f91af97786f6379",
+      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "311e46da6c76b90e03e9ba1348764e3fbb48db756b1dc82ba38a60e9996c9329",
+      ".claude/workflows/execute-milestone.js": "1afa25bb42340ccf7d65eac91ad4383f999a20dc53158ad11194821f2dd98813",
+      "plugin/scripts/sync-vendor.sh": "eeab416f656f146194e8228e353b52720a9851246a83c8535aca283784a0816c",
+      "scripts/test.sh": "481e23e7b5fd7f5afe95b0a27aaca8e6ebb35b75d5c8c4decf11c247f1f96653"
+    },
+    "ledger": "621627d5ed64a7a3ef98c1a466920614397e8f6b95cdcd5d631d62dcd8eae08d"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 3,
+    "findings": 0
+  },
+  "touches": [
+    ".claude/workflows/select-preflight.js",
+    "experiments/quay-perpetual-stream/OUTER-LOOP.md",
+    "experiments/quay-perpetual-stream/scripts/composite-manifest-synthesis.ts",
+    "plugin/scripts/composite-manifest-synthesis.ts",
+    "experiments/quay-perpetual-stream/test/composite-manifest-synthesis.test.mjs",
+    "plugin/test/composite-manifest-synthesis.test.mjs",
+    "docs/plans/M198-dir-119-d1.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "a5e17add23767583d"
+    },
+    "planAuthor": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "a70aded086d134fbc"
+      },
+      {
+        "round": 2,
+        "sessionId": "a2cd62aa85f632ea6"
+      },
+      {
+        "round": 3,
+        "sessionId": "a902b7c226e431b6f"
+      },
+      {
+        "round": 4,
+        "sessionId": "aafda7e54aaeaf8b1"
+      },
+      {
+        "round": 5,
+        "sessionId": "a4ba0c48195696842"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": true,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 0,
+    "proposalReviewRounds": 1,
+    "terminalReason": "human-steered-fix-and-reconfirm: 3 automated resumeFromAdjudicatedProposal dispatches each hit split-recommended/blocking-findings at round 0 (no delta rounds ran); findings fixed via human-steered edits across generations; final content state independently reconfirmed 0 findings via a dedicated post-fix ProposalReview check (agent a5e17add23767583d)",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785301300000,
+    "endedAtMs": 1785314458203,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "1f1613ee2a36a0cc2fcaf5853aec4084f42b7bf72229343a975810396fca9e87"
+      }
+    ]
+  }
+}
