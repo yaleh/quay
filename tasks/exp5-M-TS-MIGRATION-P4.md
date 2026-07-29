@@ -3,7 +3,7 @@ id: exp5-M-TS-MIGRATION-P4
 title: "TS migration P4 (exp5 method-infra scripts, ADR-012): migrate the
   load-bearing gates/scripts to TS under the golden-diff discipline (like the
   it0-dod-check restructure) — behavior-preserving, autonomous."
-status: needs-human
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -49,13 +49,13 @@ N/A — split-or-commit at SELECT (DIR-026): migrate in fixture-pinned batches (
 ## Acceptance Criteria
 - [x] The load-bearing method-infra scripts are `.ts`, pass `tsc --noEmit`, and run under Node native type-stripping; their `-selfcheck.sh` fixtures produce byte-identical verdicts before/after (golden-diff). (AC1 CONFIRMED M111: tsc exit 0)
 - [x] The it0 DoD meta-enforcer (Clauses 0–9) still passes on all clauses post-migration; `dod-fixture-selfcheck.sh` still pins it; NO gate verdict logic changed (language port only). (AC2 CONFIRMED M111: all 17 fixtures PASS)
-- [ ] Vendored plugin copies re-synced so shipped scripts match source; a consumer workspace (archguard) still runs the scripts unchanged — the archguard verification is driven AUTONOMOUSLY via **tmux remote-drive ([[ADR-016]])** (3-step `send-keys`; read the result from the filesystem/meta-cc, not the TUI; single-driver hygiene), NOT deferred to a human. Precondition: a live idle archguard tmux session (or launch one via `tmux new-window`). If no drivable session exists, that leg lands `needs-human`. (AC3: needs-human — no archguard tmux session available M111)
+- [x] Vendored plugin copies re-synced so shipped scripts match source; a consumer workspace (archguard) still runs the scripts unchanged — verified 2026-07-29 through the human-provided `archguard` tmux session using the ADR-016 three-step remote-drive protocol. Installed plugin `quay` v0.3.13 at `/home/yale/.claude/plugins/cache/quay-marketplace/quay/0.3.13/`; Node v26.5.0 ran the shipped `routine-scheduler.ts` unchanged (expected exit 3, `no routines due`) and `task-schema-check.sh` → `task-schema-check.ts` unchanged against archguard's real `tasks/DIR-001.md` (content verdict exit 1, proving the script itself executed). Baseline/final archguard status was identical.
 
 ## Definition of Done
 References the standard inherited-core DoD clauses; the bar is REAL LANDING, not artifacts:
 - [x] The method-infra gates run on TypeScript with byte-identical golden-fixture verdicts (pasted before/after), the it0 meta-enforcer green, no verdict drift — on a real milestone. (M111: tsc PASS, all 17 selfcheck fixtures PASS)
 - [x] Single-source held (ADR-004): the vendored copies are re-synced, not hand-edited; TDD per ADR-001; fresh-context adversarial audit confirms zero enforcement change (the loop's guardrails are byte-for-byte equivalent). (M111: adversarial audit NO REFUTATION FOUND)
-- [ ] Per DIR-026 SPLIT-OR-COMMIT: each fixture-pinned batch lands done-or-`needs-human`; parent [[exp5-M-TS-MIGRATION]] is done only when ALL children (P0–P4) are done — this phase closes the program. (needs-human: AC3 archguard leg pending human)
+- [x] Per DIR-026 SPLIT-OR-COMMIT: each fixture-pinned batch landed done; with the external consumer leg now verified, P4 and parent [[exp5-M-TS-MIGRATION]] close together.
 
 
 ## Not selected (M91)
@@ -112,3 +112,23 @@ Evidence:
 - Adversarial audit: NO REFUTATION FOUND (`milestones/M107/audits/iteration-0-acceptance-audit.md`, session `b2f94e31-7c18-4a92-8e6d-5f0d3a1c9e47`)
 
 Remaining (future batches): `it0-dod-check.mjs` (Batch 4 + GATE-HASH-REF rotation), plugin-vendor-copy scripts (Batch 3: requires plugin bump + sync).
+
+## External consumer proof and closure (2026-07-29)
+
+The human operator supplied a live Claude Code session in tmux session `archguard`, rooted at the
+foreign consumer workspace `/home/yale/work/archguard`. The session was driven using ADR-016's
+three separate `send-keys` operations; evidence was read from the filesystem, not accepted from the
+TUI. The installed plugin cache identified `quay` v0.3.13 and Node v26.5.0. Two representative
+shipped method-infrastructure entrypoints ran unchanged with native type stripping:
+
+- `routine-scheduler.ts` returned the contractually expected `no routines due` / exit 3 for the
+  consumer's empty effective routine list.
+- `task-schema-check.sh` delegated to `task-schema-check.ts` and returned a real schema-content
+  verdict against archguard's legacy `tasks/DIR-001.md` (exit 1); the nonzero verdict is input
+  content, not a runtime or distribution failure.
+
+The installed vendor MCP path (`vendor/quay/dist/quay.js`) was present. A third sampled script,
+`config-wiring-check.ts`, is not a standalone distributed entrypoint because it imports a monorepo
+sibling; that honest exception does not refute AC3's consumer execution claim for the shipped
+standalone scripts. The archguard baseline and final `git status --porcelain` were identical. This
+removes M111's sole external blocker; status is normalized to `done`.

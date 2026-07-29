@@ -58,11 +58,20 @@ observed-but-undesired, or an explicitly open defect.
    classifies other occurrences as generated view, compatibility adapter, or duplicate to remove.
 5. Record the baseline metrics required by DIR-124: stage wall/queue time, prompt bytes, agent-call
    count, full-suite count, shared writer count, observed write sets, Land wait/fence time, and
-   replay variance.
+   replay variance. Split mechanical-runner work from content-agent work and retain agent-minutes,
+   token use, finding novelty/recurrence, and artifact bytes/line classes as explanatory
+   diagnostics.
 6. Add a conformance check comparing workflow metadata and the executable driver contract so stale
    `building`, worktree, gate-count, cache/resume, or phase claims become visible failures.
 7. Keep the event schema intentionally minimal and forward-migratable; DIR-124-B owns durable
    RunIdentity/receipt validation and may extend it without preserving accidental diagnostic fields.
+8. Add two measured known-defect replay shapes without normalizing them into desired behavior:
+   M192's null Build result advancing to Audit/Land is `observed-but-undesired`, and the stale
+   M195 Prepared control paying Verify cost before receipt rejection is a compatibility baseline
+   for DIR-124-C's later behavior-preserving reorder.
+9. Emit a reproducible baseline from first Prepare admission through Execute Land for the available
+   real samples, preserving per-stage wall/agent/token cost and terminal outcome. This child records
+   the before-state only; it does not infer delivered value or change pass/fail policy.
 
 ## Acceptance Criteria
 
@@ -72,9 +81,14 @@ observed-but-undesired, or an explicitly open defect.
   scheduling decision in golden replay.
 - [ ] Replay fixtures cover all eight named success/failure/composite/concurrent/cache cases and
   label each assertion as normative, compatibility-only, or known-defect observation.
+- [ ] Golden replay includes the M192 null-Build continuation and stale-Prepared-after-Verify
+  shapes, classifies both explicitly, and does not make either defect a normative invariant.
 - [ ] The invariant-ownership manifest rejects two authoritative executable owners for the same
   rule and identifies every known workflow/OUTER-LOOP/composite duplicate scheduled for deletion.
 - [ ] Baseline measurements are emitted mechanically rather than estimated from prose reports.
+- [ ] The baseline separates mechanical/content agent calls and reports stage wall/queue time,
+  agent-minutes, tokens, finding novelty/recurrence, and artifact-class output from Prepare
+  admission through Land where real evidence exists; missing fields are explicit unknowns.
 - [ ] A deliberately stale workflow metadata/driver claim fails the conformance check; the corrected
   claim passes.
 - [ ] No post-Land Wiring Audit, lifecycle-promotion policy, worktree redesign, stage scheduler, or

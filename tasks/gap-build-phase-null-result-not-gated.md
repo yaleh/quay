@@ -99,13 +99,32 @@ as `"done"`.
 3. Keep the composite/concurrent Build path (if it has an equivalent check) consistent — grep for
    any other `buildResult?.outcome === 'needs-human'`-shaped check in the same file and apply the
    same fix if found.
+4. Validate the successful result shape, not only its outcome string. `null`, `undefined`, an
+   unknown outcome, or `outcome:'done'` with missing/invalid required fields must fail closed with a
+   stable typed reason. This task does not introduce the later Build evidence manifest; until that
+   schema lands, "required fields" means the currently documented Build result contract.
+5. Add the M192 null-result shape to DIR-124-A's golden-replay corpus as
+   `observed-but-undesired`; the surgical positive-success fix remains independently landable and
+   must not wait for DIR-124.
 
 ## Acceptance Criteria
+- [ ] Both `.claude/workflows/execute-milestone.js` and
+  `plugin/workflows/execute-milestone.js` contain the positive gate
+  `buildResult?.outcome === 'done'` (or equivalent positive predicate); RED/GREEN workflow
+  fixtures prove `null`/`undefined` from `agent()` returns
+  `{ outcome: 'needs-human', reason: 'build-agent-no-result' }` instead of advancing.
 - [ ] The Build-phase gate rejects any `buildResult?.outcome !== 'done'` (not just the literal
   string `'needs-human'`), grep-confirmable in both mirrors.
-- [ ] A new unit test simulates a `null` Build result and asserts the workflow halts with
-  `outcome: 'needs-human'` before any Audit/Gate/Land agent is dispatched — real test output
-  pasted, not asserted.
+- [ ] A new `execute-milestone-preparation-gate.test.mjs`-style regression test simulates the
+  Build-phase `agent()` returning `null` and asserts the workflow halts with
+  `{ outcome: 'needs-human', reason: 'build-agent-no-result' }` before any Audit/Gate/Land agent
+  is dispatched — real test output pasted, not asserted.
+- [ ] Separate fixtures cover `undefined`, an unknown outcome, and a schema-invalid nominal
+  `outcome:'done'`; each returns a typed Build failure and dispatches zero Audit, Gate, Reconcile,
+  or Land work.
+- [ ] Static call-path inspection covers singleton and every currently reachable
+  composite/concurrent Build result gate. Any equivalent negative-only gate is converted to the
+  same positive-success rule; an absent equivalent is recorded explicitly rather than assumed.
 - [ ] Existing `execute-milestone-preparation-gate.test.mjs` / `prepare-milestone-preparation-e2e.test.mjs`
   (and any other test exercising the Build phase) still pass unchanged.
 

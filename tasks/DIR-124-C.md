@@ -62,12 +62,34 @@ an executable kernel that owns transitions and rejects adapters that exceed thei
 7. Preserve legacy singleton behavior and DIR-119 composite behavior through DIR-124-A replay.
 8. Add invalid-transition, adapter-overwrite, wrong-cwd/worktree, duplicate-Land, and partial-stage
    negative controls.
+9. After minimal argument/charter normalization, order the front of Execute as Prepared
+   receipt/hash validation, deterministic Verify, then semantic Verify. Prove the reorder against
+   DIR-124-A golden replay: valid candidates retain their verdict, while stale/missing receipts
+   spend zero Verify agents.
+10. Invoke deterministic exit-code/bounded-output checks directly through the kernel adapter rather
+    than generic content-agent prompts. Keep semantic/domain judgment in agents and record the two
+    classes separately.
+11. Apply positive-success transitions to every content-agent stage. Null, undefined, unknown,
+    schema-invalid, or missing-required-field results cannot select a successor.
+12. Require the Build adapter to return the canonical Build evidence manifest owned by
+    [[gap-build-evidence-manifest-missing]] and bind it into the DIR-124-B Build receipt. Audit
+    remains independent and verifies the referenced raw artifacts.
 
 ## Acceptance Criteria
 
 - [ ] One production kernel owns every milestone transition and has a real call path from both
   checked-in workflow mirrors.
 - [ ] Every stage executes through the same typed adapter ABI and emits a DIR-124-B receipt.
+- [ ] A stale, missing, or hash-invalid preparation receipt returns before deterministic or
+  semantic Verify dispatch; valid singleton and composite replays retain their prior verdicts
+  after Prepared is moved.
+- [ ] Deterministic checks have direct kernel/adapter callsites with structured output and no
+  generic content-agent dispatch; semantic checks remain visibly separate.
+- [ ] Every content-agent transition requires a schema-valid accepted success. Null, undefined,
+  unknown, and nominal `done` results missing required fields all fail closed before downstream
+  dispatch.
+- [ ] Build emits a validated, hash-bound Build evidence manifest; Audit consumes it only as an
+  evidence index and independently checks raw evidence.
 - [ ] Production call-graph evidence shows DIR-119-D composite modules and DIR-123 worktree service
   are invoked through adapters, not duplicated or merely named in prompts.
 - [ ] Audit/Gate mutation attempts and Build writes outside the candidate worktree fail

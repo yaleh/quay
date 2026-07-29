@@ -3,7 +3,7 @@ id: exp5-M-TS-MIGRATION
 title: "TS migration program (ADR-012): gradually port quay product code
   JS→TypeScript, phased + behavior-preserving, to unlock archguard +
   type-safety"
-status: needs-human
+status: done
 labels:
   - milestone-candidate
   - crystallization
@@ -177,3 +177,13 @@ verified TRUE; only the graph-structural completion condition (all 5 phases done
 P4's AC3 resolution by a human with archguard tmux access. `milestone_counter` is NOT advanced for
 this outcome (OUTER-LOOP.md: "A `needs-human` outcome does NOT advance `milestone_counter` as a
 completion") — corrected from 114 back to 113 on the dashboard.
+
+### External blocker cleared (2026-07-29)
+
+The human operator supplied a live `archguard` tmux session. P4's consumer-workspace leg was then
+driven through ADR-016's three-step protocol and verified from filesystem evidence: installed quay
+v0.3.13 under Node v26.5.0 ran representative shipped TypeScript method-infrastructure scripts
+unchanged, while archguard's baseline/final git status remained identical. P4 is now `done`; all
+five children are `done`, so DIR-026's parent-done-iff-children invariant permits this parent to
+return to `done`. This section supersedes only the external-blocker outcome immediately above; the
+historical M114 reasoning and evidence remain intact.

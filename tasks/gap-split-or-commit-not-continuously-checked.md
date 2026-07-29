@@ -71,24 +71,38 @@ landed (session `13efe277-45ff-4563-bcfe-fd2c3db3e2a5`). Real sequence of events
      its own explicit step alongside the test-file glob.
    - Alternative/additional: wire it as a `.github/workflows/ci.yml` job step, independent of
      `scripts/test.sh`.
-2. Decide and document whether this should ALSO be added to Land's own end-of-phase steps (a
-   self-check immediately after Land's own edits, before the milestone reports `done`) as
-   defense-in-depth — the M194 dashboard Log entry itself raised this as a candidate fix; evaluate
-   and either implement or explicitly reject with a stated reason.
+2. Add the whole-store check to Land's own post-mutation steps. It must run after Land has applied
+   authoritative task/parent/child lifecycle writes and before the workflow may report `done`.
+   A failure returns a typed non-success terminal and records the check result in the current
+   stage receipt when DIR-124-B receipts are available. Pre-Land Gate coverage remains
+   defense-in-depth; it cannot substitute for observing the state after mutation.
 3. Confirm the fix actually closes the gap: reproduce the exact M192/M194 scenario as a fixture (a
    parent marked `done` with a still-`todo` child, injected into a temp/fixture task store) and show
    the new continuous check catches it — RED before the fix is wired in this scope, GREEN after.
 
 ## Acceptance Criteria
+- [ ] RED/GREEN integration evidence proves the whole-store
+  `it0-split-or-commit-check.ts .`—not `quay gate --gate split-or-commit <id>`—is wired through
+  `scripts/test.sh`, CI, or the registered `.quay/loop.yml`/`OUTER-LOOP.md` periodic surface and
+  catches `PARENT-DONE-IFF-CHILDREN` within that surface's next check cycle.
+- [ ] If the canonical-suite route is selected, real integration evidence proves
+  `scripts/test.sh` invokes the plain check outside the `node --test` file glob and therefore does
+  not silently omit it.
+- [ ] If the CI route is selected, real integration evidence proves
+  `.github/workflows/ci.yml` invokes the check independently of `scripts/test.sh`; if not selected,
+  the task records that CI inherits the canonical-suite call instead.
 - [ ] `it0-split-or-commit-check.ts .` (or equivalent whole-store invocation) runs on a surface that
   fires on every relevant change (canonical test suite and/or CI), not only inside a milestone's own
   Gate phase — grep/CI-config-confirmable.
 - [ ] A fixture reproduces the exact M192/M194 shape (parent `done`, child `todo`, formal
   `parent`/`children` link) and demonstrates the new continuous surface catches it — real RED
   (before this fix's wiring) and GREEN (after) output pasted, not asserted.
-- [ ] Explicit decision recorded (implemented or rejected with reason) on whether Land itself
-  should also self-check `split-or-commit` immediately after its own edits, before reporting
-  `outcome: done`.
+- [ ] Land itself runs the whole-store split-or-commit check after its authoritative lifecycle
+  edits and before reporting `outcome: done`; the M192/M194-shaped violation produces a typed
+  non-success and cannot advance.
+- [ ] When DIR-124-B stage receipts are installed, the post-Land check's command identity,
+  input/task-store hash, outcome, and reason are included in or referenced by the Land receipt;
+  before that dependency lands, the same facts remain visible in deterministic workflow output.
 - [ ] Existing `scripts/test.sh`/CI runs remain green with the new check wired in (no regression,
   no flakiness introduced by scanning the full task store on every run).
 
@@ -106,8 +120,8 @@ is required for every item above.
 ## Human verification when exp5 marks this task done
 1. Does a split-or-commit violation introduced by one milestone's Land now get caught before the
    next milestone dispatch, rather than waiting on an unrelated future Gate phase?
-2. Was the Land-self-check option explicitly decided (implemented or rejected with a stated
-   reason), not silently skipped?
+2. Does Land itself check the state it just mutated, rather than relying only on a pre-mutation
+   Gate or a later unrelated CI run?
 
 ## Touches
 
@@ -115,3 +129,5 @@ is required for every item above.
 - .github/workflows/ci.yml
 - plugin/scripts/it0-split-or-commit-check.ts
 - experiments/quay-perpetual-stream/scripts/it0-split-or-commit-check.ts
+- .claude/workflows/execute-milestone.js
+- plugin/workflows/execute-milestone.js

@@ -46,8 +46,13 @@ known `Workflow({name})` stale-materialization defect cannot be rejected by a st
 
 ## Requested action
 
-1. Define canonical typed `RunIdentity`, `StageEvent`, `StageReceiptEnvelope`, and
-   `ReceiptValidationResult` contracts shared by singleton and composite execution.
+1. Define canonical typed `RunIdentity`, `FindingEnvelope`, `StageEvent`,
+   `StageReceiptEnvelope`, and `ReceiptValidationResult` contracts shared by singleton and
+   composite execution.
+   `FindingEnvelope` includes occurrence identity, stable `recurrenceKey`, observer/earliest
+   detectable stage, subsystem/claim reference, severity/blocking, evidence references, material
+   input hashes, first/last generation, disposition/resolution, and
+   `task-specific|profile|global` generalization.
 2. Bind identity/receipts to run ID, candidate ID, task IDs, attempt, base commit, candidate commit,
    workflow source path/hash/commit, runtime generation, and task/charter/Plan/material input hashes.
 3. Store stage events and receipts append-only under the canonical milestone root, with atomic write
@@ -63,10 +68,18 @@ known `Workflow({name})` stale-materialization defect cannot be rejected by a st
    authoritative journal schemas.
 8. Expose extension fields needed later by DIR-118, but do not add `landed-awaiting-wiring`,
    post-Land audit dispatch, or `done`-promotion enforcement.
+9. Add a one-way compatibility adapter for DIR-126-D Prepare telemetry and the existing Prepare
+   finding ledger. Preserve their hashes and provenance while making this task's envelopes the
+   sole cross-workflow receipt/finding contract.
+10. Allow a receipt to hash-reference a Build evidence manifest or other bounded evidence index.
+    Receipts must not copy authoritative task, Proposal, charter, or Plan content.
 
 ## Acceptance Criteria
 
 - [ ] Singleton and composite calls use the same canonical RunIdentity and receipt envelope.
+- [ ] Prepare review, PlanCheck, Acceptance Audit, Gate, and later Wiring Audit findings validate
+  against one versioned FindingEnvelope; recurrence does not permit reuse when material input
+  hashes differ.
 - [ ] Every receipt is mechanically bound to base/candidate commits, workflow source hash/commit,
   runtime generation, and material input hashes.
 - [ ] Stage journal and receipts survive process/session restart and reject partial/torn writes.
@@ -79,6 +92,10 @@ known `Workflow({name})` stale-materialization defect cannot be rejected by a st
   because prompt/label strings match.
 - [ ] DIR-124-A events have one migration path into the durable journal; no dual authoritative
   event format remains.
+- [ ] DIR-126-D telemetry and existing Prepare-ledger fixtures migrate one way into the canonical
+  contracts with preserved source hashes and no dual-write or reverse dependency.
+- [ ] A receipt can validate a hash-bound Build evidence-manifest reference, while a fixture that
+  embeds copied task/Plan requirements in the receipt is rejected as a duplicate authority.
 - [ ] No DIR-118 lifecycle state or post-Land Wiring Audit behavior is introduced.
 
 ## Definition of Done

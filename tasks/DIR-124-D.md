@@ -58,6 +58,15 @@ changes deform orchestration code, preventing the kernel from remaining stable.
    propagation radius.
 8. Reserve an extension mechanism for DIR-118 wiring-required policy, but do not implement its
    post-Land audit or lifecycle semantics.
+9. For each check/profile, record its required/optional status, earliest stage with complete
+   inputs, blocking-policy calibration state, and false-positive evidence. A required invariant
+   remains mandatory even when its recent blocking yield is zero.
+10. Define the authorization path for a confirmed FindingEnvelope to move from task-specific to
+    profile/global scope. The registry may carry an explicitly approved detector candidate and
+    policy hash; it must not auto-enable global fail-closed behavior from one Audit finding.
+11. Expose measured cost, blocking-yield, and false-positive-cost inputs for DIR-124-E ordering.
+    Policy determines what must run; the scheduler may optimize when it runs, never whether a
+    required invariant runs.
 
 ## Acceptance Criteria
 
@@ -71,6 +80,13 @@ changes deform orchestration code, preventing the kernel from remaining stable.
 - [ ] OUTER-LOOP and workflow metadata accurately point to the executable registry and no longer
   claim removed `building`, worktree, gate-count, or cache/resume behavior.
 - [ ] Canonical test and gate logic is reused, not copied into policy data.
+- [ ] Every registered check declares required/optional status, earliest complete-input stage, and
+  calibration state; mutation tests prove a required zero-recent-hit check cannot be skipped.
+- [ ] Finding promotion is versioned and authorized: one finding cannot silently activate a
+  profile/global fail-closed detector, and an approved activation changes the policy hash and
+  invalidates affected receipts.
+- [ ] Cost/yield inputs are observable but cannot override safety ownership or required-check
+  semantics.
 - [ ] Before/after measurements show lower prompt bytes and duplicate-rule count; no migrated rule
   gains a second authoritative owner.
 - [ ] DIR-118 remains an unimplemented policy extension, not a hidden branch in the registry.

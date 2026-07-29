@@ -68,6 +68,14 @@ crash-sensitive rolling Land.
     - create a later DIR-124-F for rolling Ready-to-Land, effect leases, fencing-token durability,
       and Land crash recovery; or
     - reject/defer it because measured fan-in wait is not material.
+11. Within dependency-safe candidates, use the measured descriptive priority
+    `p_block / (execution cost + false-positive cost)` to order eligible checks/stages. This is an
+    ordering hint only: required invariants, lifecycle barriers, and independent review remain
+    non-skippable.
+12. Calibrate any adaptive order/capacity change from at least three real post-change terminal
+    shapes. Report verified-capability coverage, agent-minutes, tokens, finding recurrence,
+    resource wait, and process-artifact output alongside wall-time throughput; do not count reduced
+    acceptance coverage as efficiency.
 
 ## Acceptance Criteria
 
@@ -86,6 +94,13 @@ crash-sensitive rolling Land.
 - [ ] Reconcile/Land remains a single fenced, deterministic shared-state writer.
 - [ ] A real serial-versus-pipeline report quantifies throughput, critical path, queue/resource wait,
   utilization, test count, timeout rate, and Land wait.
+- [ ] Cost-aware ordering is reproducible from receipt/telemetry inputs and changes only order among
+  dependency-safe eligible work; a required invariant with zero recent findings still runs.
+- [ ] Adaptive scheduling/capacity changes cite at least three real terminal shapes and report
+  agent-minutes, tokens, finding recurrence, verified-capability coverage, and process-artifact
+  output in addition to wall time.
+- [ ] A control that reduces or removes independent Audit coverage is rejected as an efficiency
+  improvement even if its wall time is lower.
 - [ ] The task records an evidence-backed create-or-defer decision for DIR-124-F; it does not silently
   assume fine-grained effect leases or rolling Land are necessary.
 

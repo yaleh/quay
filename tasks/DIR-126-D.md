@@ -248,6 +248,16 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   least one real multi-round generation (a `ProposalReview` delta round and a `PlanCheck` round).
 - [ ] Every emitted record's fields are confirmed present-and-typed (`null`/`"unknown"` where
   genuinely uncapturable, never omitted) — verified via schema check against a real record.
+- [ ] **Forward-compatible feedback identity:** every record carries an explicit telemetry schema
+  version, Prepare attempt/generation identity, workflow and checker-policy hashes, material-input
+  hashes, mechanical/content-agent counts, terminal outcome/reason, and stable finding codes.
+  Findings that recur across generations additionally carry a stable `recurrenceKey`,
+  `firstSeenGeneration`, and `lastSeenGeneration`; absence of a recurrence is explicit rather than
+  synthesized.
+- [ ] **One-way receipt migration:** DIR-124-B can deterministically adapt these Prepare records
+  into its canonical `RunIdentity`/`StageReceiptEnvelope` without parsing prose or Claude session
+  JSONL. DIR-126-D remains the Prepare telemetry producer, not a second cross-workflow receipt
+  authority, and a fixture proves there is no reverse/dual-write dependency.
 - [ ] Canonical and `plugin/` mirrors of `prepare-milestone.js` and `milestone-preparation-check.ts`
   (+ their test files) are byte-identical — `cmp`/`sync-vendor.sh --check`.
 
@@ -297,3 +307,4 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
 - `plugin/scripts/milestone-preparation-check.ts`
 - `experiments/quay-perpetual-stream/test/milestone-preparation-check.test.mjs`
 - `plugin/test/prepare-milestone-preparation-e2e.test.mjs`
+- `docs/proposals/quay-prepare-execute-feedback-convergence.md`

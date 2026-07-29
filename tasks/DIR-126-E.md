@@ -194,6 +194,14 @@ generations existing.
   recomputed increments `unchangedTerminalRecomputations` and observed wasted content-agent work;
   a correct `reuse-terminal` increments the hit count and records zero content agents. Estimated
   avoided minutes are either reproducibly labeled/model-derived or `unknown`.
+- [ ] **Feedback-efficiency inputs are exported, Prepare-scoped:** the report includes
+  cold/resume/reuse-terminal agent-minute and token distributions, finding novelty/recurrence,
+  recurrence waste, and the raw numerator/denominator fields needed to compute Prepare escape rate
+  later. It does not claim end-to-end verified value or an Execute escape rate from Prepare-only
+  evidence.
+- [ ] The machine-readable report preserves raw sample IDs, stage/terminal strata, exclusions, and
+  unknowns so a later Prepare-to-post-Land evaluation can consume it without scraping the
+  regenerated prose document.
 - [ ] **Insufficient-sample honesty:** a fixture with fewer than 3 samples produces the explicit
   `insufficient-samples` result, not a misleadingly precise distribution.
 - [ ] Canonical and `plugin/` mirrors of `milestone-preparation-check.ts` and its test file are
@@ -225,6 +233,8 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
    real checked-in artifacts?
 3. Are concurrent overlap and unchanged-terminal recomputation both zero after A/C enforcement
    (or every exception explicitly identified), without misclassifying valid sequential retries?
+4. Does the report expose reusable cost/recurrence inputs without pretending Prepare-only
+   telemetry measures complete delivered value?
 
 ## Touches
 
@@ -232,3 +242,4 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
 - `plugin/scripts/milestone-preparation-check.ts`
 - `experiments/quay-perpetual-stream/test/milestone-preparation-check.test.mjs`
 - `docs/proposals/quay-milestone-workflow-throughput-capacity-model.md`
+- `docs/proposals/quay-prepare-execute-feedback-convergence.md`
