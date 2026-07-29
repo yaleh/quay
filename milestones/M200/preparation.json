@@ -1,0 +1,93 @@
+{
+  "taskId": "DIR-126-A",
+  "milestoneId": "M200",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M200-dir126a-single-flight-admission.md",
+  "planFile": "docs/plans/M200-dir-126-a.md",
+  "ledgerFile": "milestones/M200/proposal-ledger.json",
+  "hashes": {
+    "proposal": "78a68df880917545c94702169d0097f7ab10c5f3dc6699bc1cf2bb4e0da0a9fe",
+    "charter": "f6bd17ad0bd00607dfe409b73d4e43aaa28f97dc500bb6c8c8b3976a29654459",
+    "plan": "fc582f1faa0f54efbb4d4397acc87337168b7f05a3d9785772bf126e8c8a82d8",
+    "sources": {
+      ".claude/workflows/prepare-milestone.js": "c7be3ae7eae067af91b074cd0fa9c707fe8527b360ed292c2b7d45a9b04f040f",
+      "plugin/workflows/prepare-milestone.js": "c7be3ae7eae067af91b074cd0fa9c707fe8527b360ed292c2b7d45a9b04f040f",
+      "packages/quay/src/frontmatter-store-base.ts": "91e1f2e2b8ce55fa3c00cef65191853c41f39b376c7decf0ad8a6938fa54bb7c",
+      "packages/quay-native/src/store.ts": "ad7384a7cdf2de184e63b67bf286fd81e0b4ea5a6b5aaa18f5770720f320e2f2",
+      "packages/quay/src/gate/gate-event-store.ts": "bbd27f24c89e8c1e7ad61161f60c0f733039ce8fd002f4bb5bdfe2006253d662",
+      "docs/proposals/quay-milestone-workflow-stage-pipelining-and-leases.md": "5e5f750ff17f89a5900d2cfae32398dadaeb5124613e9816735158243300c982",
+      "experiments/quay-perpetual-stream/scripts/gate-script-base.ts": "f22c7643accc60b7beba50c181b92ce7ff75344dc25d238e1a154e1b544729a3",
+      ".gitignore": "d71f5f24d6a719226afacf9a44eba7d1cf910b596fbb7d4b1edd0e1548e55c8b",
+      "plugin/scripts/sync-vendor.sh": "45979101099cd9a8075206c9e60acc9a1a165407186512c1a314a902e5e78e0e"
+    },
+    "ledger": "f560be9a032516b0ffa0a8440287f1b234fe834a8f9b9ad89f8fe28e90951cc6"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 2,
+    "findings": 0
+  },
+  "touches": [
+    ".claude/workflows/prepare-milestone.js",
+    "plugin/workflows/prepare-milestone.js",
+    "experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts",
+    "plugin/scripts/prepare-admission-check.ts",
+    "experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs",
+    "plugin/test/prepare-admission-check.test.mjs",
+    ".gitignore",
+    "plugin/scripts/sync-vendor.sh",
+    "docs/plans/M200-dir-126-a.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planAuthor": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "round": 2,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": true,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 2,
+    "proposalReviewRounds": 3,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785329024996,
+    "endedAtMs": 1785330281481,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "0efb7e2e0a7c60e8"
+      },
+      {
+        "round": 1,
+        "hash": "345ed6864704d6d8"
+      },
+      {
+        "round": 2,
+        "hash": "89c4dc74bde8377e"
+      }
+    ]
+  }
+}

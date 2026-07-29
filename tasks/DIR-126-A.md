@@ -47,12 +47,14 @@ kind. Two concurrent `Workflow` dispatches for the same `taskId` today both free
 `ProposalAuthors` (or `ProposalReview` under resume) and both call `task_write` against the same
 task's `## Proposal` field, racing each other — exactly DIR-126's measured M196 overlap.
 
-A second grounding fact worth calling out explicitly: this child counts **11 distinct terminal
+A second grounding fact worth calling out explicitly: this child counts **12 distinct terminal
 `return { outcome: ... }` statements** in the current file (lines 26, 89, 111, 271, 312, 337, 341,
-345, 382, 424, 492, plus the final success return at 497) — not just the handful of outcome *names*
-(`prepared`/`needs-human`/`revision-needed`, plus the new `prepare-already-running`). Any admission
-mechanism's "every terminal return releases the lease" requirement has to be checked against all 11
-call sites, not against a few conceptual outcome buckets — several of those sites (e.g. the
+345, 382, 424, 492, and 497 — the last being the file's own final success return, `outcome:
+'prepared'`, and additional to, not folded into, the other 11 numbers already named) — not just the
+handful of outcome *names* (`prepared`/`needs-human`/`revision-needed`, plus the new
+`prepare-already-running`). Any admission mechanism's "every terminal return releases the lease"
+requirement has to be checked against all 12 call sites, not against a few conceptual outcome
+buckets — several of those sites (e.g. the
 missing-args guard at line 26, which fires before any lease would even be acquired) need explicit
 ordering care: a return that fires before `Admission` runs must not attempt to release a lease that
 was never acquired.
@@ -146,18 +148,29 @@ already-fixed-adjacent gap). On a `prepare-already-running` verdict the script r
 ownerExecutionId, acquiredAt, leaseUntil, stage}}` — before any `agent()` call for `ProposalAuthors`
 is dispatched. This ordering (Admission strictly precedes the first author-agent dispatch) is the
 concrete mechanism that prevents the ~54-duplicate-workflow-minute cost DIR-126's Finding measured,
-since the expensive resource (LLM agent turns) is never spent by the losing dispatch. If the
-`Admission` phase itself errors (bad CLI invocation, unexpected exception, not a lease-contention
-verdict) it must fail closed to `needs-human` with a distinct reason code (e.g.
-`admission-check-failed`) — never silently fall through to `ProposalAuthors` as if admission had
-succeeded.
+since the expensive resource (LLM agent turns) is never spent by the losing dispatch.
 
-**WIRING-CLAIM 2 — release on every terminal return.** All 11 of the file's terminal `return`
+**WIRING-CLAIM 5 — Admission-phase error is fail-closed, never a silent fallthrough.** If the
+`Admission` phase itself errors (bad CLI invocation, unexpected exception — distinct from an
+ordinary lease-contention verdict) it must fail closed to `needs-human` with a distinct reason code
+(e.g. `admission-check-failed`) — never silently fall through to `ProposalAuthors` as if admission
+had succeeded. This is a fifth, separately-checkable claim: the workflow DSL has confirmed zero
+`try`/`catch` semantics (`grep -n "catch\|try {"` on `prepare-milestone.js` returns no matches), so
+this fail-closed behavior is genuinely new branching logic the workflow script must add around the
+`Admission` agent-call's result — not something inherited for free from exception unwinding — and
+needs its own dedicated AC item/fixture (see AC coverage below), distinct from the "real production
+wiring" item above, which only checks that `Admission` is dispatched, not what happens when it
+errors.
+
+**WIRING-CLAIM 2 — release on every terminal return.** All 12 of the file's terminal `return`
 statements enumerated above must invoke `--release` before returning, with the single exception of
 the line-26 missing-args guard (which fires before any lease is ever acquired, so nothing needs
 releasing there). This is a distinct claim from WIRING-CLAIM 1 and needs its own AC coverage, since
 a reviewer checking only "does `Admission` call `--acquire`" would miss a leak on, say, the
-soft-budget-exceeded return (line 341) or the plancheck-rounds-exceeded return (line 424). A hard
+soft-budget-exceeded return (line 341), the plancheck-rounds-exceeded return (line 424), or the
+file's own final success return (line 497) — a reviewer who literally follows a stated "11 sites"
+count would never even attempt to check that last, single-most-safety-critical site, since it isn't
+one of the 11. A hard
 crash (process killed, sandbox torn down) between acquire and any `return` is the case
 staleness-window reclaim exists for, not something a `finally` block inside the workflow DSL can
 catch — the DSL has no `try/finally` semantics available to workflow scripts, consistent with them
@@ -176,11 +189,20 @@ and needs its own AC/fixture.
 
 On acquire, if an existing lease file is found with `now > leaseUntil`, `checkStaleOwner` reclaims
 it deterministically: the new lease's own `recoveredFrom` field copies the prior lease's full
-contents verbatim (never silently discarded — this is the audit trail a `--force-release` or a
-crash recovery leaves behind) and `fencingToken` increments. A human `--force-release <reason>` CLI
-path exists to unblock a legitimately stuck lease before the staleness window elapses; the reason is
-written into the released lease's own audit trail (and, once DIR-126-D's later telemetry child
-lands, into that record too) — never a silent unlock.
+contents verbatim (never silently discarded) and `fencingToken` increments — this reclaim path is
+covered by the "Lease recovery is fail-closed" AC item below.
+
+**WIRING-CLAIM 4 — `--force-release` writes an audit-trail entry, never a silent unlock.** A human
+`--force-release <reason>` CLI path exists to unblock a legitimately stuck lease before the
+staleness window elapses; the reason is written into the released lease's own audit trail (the same
+`recoveredFrom`-style record a stale-owner reclaim leaves behind, so a `--force-release` remains
+distinguishable after the fact from an ordinary automatic reclaim) and, once DIR-126-D's later
+telemetry child lands, into that record too. This is a fourth, separately-checkable claim distinct
+from the acquire/reclaim path above: an active lease existing and a human explicitly overriding it
+via `--force-release` are two different code paths, and neither the "Single-flight RED/GREEN" nor
+the "Lease recovery is fail-closed" AC items exercise a human-invoked override — so it needs its own
+dedicated AC item and fixture (see AC coverage below), not incidental coverage by association with
+stale-owner reclaim.
 
 ### Staleness-window default (derived, not asserted)
 
@@ -284,12 +306,15 @@ argument.
   stale: the task's current `## Touches` section already lists `.gitignore` as its 7th entry) is
   already declared; this note is retained only to flag that the Plan phase's own real diff must
   actually touch it, matching what is already declared, not silently drift from it.
-- **Eleven terminal-return surface, not four outcome names.** A "release on every return" claim is
-  easy to under-verify against a handful of named outcome buckets when the real call-graph has 11
+- **Twelve terminal-return surface, not four outcome names.** A "release on every return" claim is
+  easy to under-verify against a handful of named outcome buckets when the real call-graph has 12
   return statements across multiple phases; the AC/test coverage must enumerate actual line-level
   return sites, or a leak at one of the less-obvious sites (e.g. `plancheck-rounds-exceeded` at line
-  424, or the `receipt-selfcheck-failed` return at line 492) could pass review while still leaking a
-  lease.
+  424, the `receipt-selfcheck-failed` return at line 492, or the final success return at line 497)
+  could pass review while still leaking a lease.
+- **Force-release and Admission-phase-error paths are asserted in prose but need their own
+  fixtures**, not incidental coverage by association with the acquire/reclaim or production-wiring
+  AC items above (WIRING-CLAIM 4 and WIRING-CLAIM 5 respectively) — see AC coverage below.
 - **Fencing-token field exists in the record but nothing in this child's scope reads it to reject a
   stale writer's `task_write`** — the token is threaded through and incremented for forward
   compatibility with a future durable-lease consumer, but this child does not add fencing
@@ -324,6 +349,13 @@ report — those remain later children's scope even though DIR-126-B shares this
   `phase('ProposalAuthors')` on both the cold and resume paths, distinct from any
   `--selftest`/unit-only reachability check — single most important item, since a prompt-text-only
   wiring would satisfy no real invariant.
+- **Admission-phase error is fail-closed** — covers WIRING-CLAIM 5: a dedicated AC item/fixture
+  distinct from the production-wiring item above, exercising the `Admission` phase itself erroring
+  (bad CLI invocation / unexpected exception, not an ordinary lease-contention verdict) and
+  confirming the workflow returns `needs-human` with the distinct `admission-check-failed` reason
+  code rather than silently falling through to dispatch `ProposalAuthors` — grounded in the
+  confirmed absence of any `try`/`catch` in the workflow DSL, so this branching is real new logic,
+  not inherited exception-unwinding behavior.
 - **Single-flight RED/GREEN** — two real concurrent `prepare-milestone.js` dispatches for the same
   fixture task, with journal evidence that exactly one reaches its first `ProposalAuthors` agent
   dispatch and the other returns `prepare-already-running` with zero author agents spent — not just
@@ -333,13 +365,19 @@ report — those remain later children's scope even though DIR-126-B shares this
   non-expired lease cannot be stolen; a fake-clock-advanced stale owner reclaims deterministically
   with `recoveredFrom` evidence; a crash/no-release fixture leaves no permanent lockout — fixture-
   driven (fake/advanced clock), not prose assertion.
+- **Force-release writes an audit-trail entry** — covers WIRING-CLAIM 4: a dedicated AC item/
+  fixture distinct from stale-owner reclaim, exercising a human-invoked `--force-release <reason>`
+  against a still-active (non-expired) lease — confirming the lease is genuinely released, the
+  supplied `<reason>` is recorded in the released lease's audit-trail record, and the resulting
+  record is distinguishable from an ordinary stale-owner reclaim (i.e. never a silent, unaudited
+  unlock).
 - **Renewal-at-every-phase-boundary** — covers WIRING-CLAIM 3: a synthetic long-running generation
   with mocked phase timestamps surviving via renewal across all six boundaries
   (Admission/Adjudicate/ProposalReview-round/PlanAuthor/PlanCheck-round/Receipt), and a genuinely-
   stalled generation (no renewal for one whole phase) reclaimed by a second dispatch — its own
   dedicated fixture, not folded into the stale-owner AC item.
 - **Release on every terminal return** — covers the other half of WIRING-CLAIM 2: source-read AC
-  item enumerating all 11 actual `return {` sites (not just outcome-name buckets), confirming each
+  item enumerating all 12 actual `return {` sites (not just outcome-name buckets), confirming each
   post-Admission site calls `--release` (the pre-Admission missing-args guard needs no release).
 - **Staleness window is the corrected 300m/360m value** — source-read AC item citing the exact
   constants in `prepare-admission-check.ts`, checked against the derivation table above, not the
@@ -396,8 +434,12 @@ report — those remain later children's scope even though DIR-126-B shares this
 
 ## Plan
 
-N/A — directive-class child resolved via a human-steered milestone (matching the DIR-119-D1
-sibling pattern's own convention for the first child in an ordered split).
+docs/plans/M200-dir-126-a.md — checked Plan authored for M200 (base revision 20d4dc7), mapping
+all 15 task Acceptance Criteria items to 9 ordered stages (core lease module, CLI wrapper +
+force-release audit trail, plugin/scripts + sync-vendor.sh mirror, .gitignore, Admission-phase
+insertion with fail-closed error handling, renew/release wiring at all 6/11 sites, plugin/workflows
+mirror, full test coverage, real two-process concurrent-dispatch regression proof + final grounding
+audit).
 
 ## Finding
 
@@ -444,6 +486,17 @@ reconciled DIR-126's own Proposal and recommended this split:
   Admission on the resume branch would reopen the exact cross-generation race
   `gap-prepare-milestone-cross-generation-no-incremental-reuse`/M197 already fixed once. This item
   alone, if unmet, fails the whole child regardless of how many other items pass.
+- [ ] **Admission-phase error is fail-closed, never a silent fallthrough (added 2026-07-29,
+  ProposalReview finding c182d627 — covers WIRING-CLAIM 5, previously described only in prose with
+  no corresponding fixture item):** a dedicated fixture exercises the `Admission` phase itself
+  erroring — a bad CLI invocation or an unexpected exception, distinct from an ordinary
+  lease-contention verdict — and confirms the workflow returns `{outcome: 'needs-human', reason:
+  'admission-check-failed'}` rather than silently falling through to dispatch `ProposalAuthors` as
+  if admission had succeeded. Distinct from the production-wiring item above, which only confirms
+  `Admission` is dispatched, not what happens when it errors; grounded in the confirmed absence of
+  any `try`/`catch` in the workflow DSL (`grep -n "catch\|try {"` on `prepare-milestone.js` returns
+  no matches), so this branching is genuinely new logic the workflow script must add, not inherited
+  exception-unwinding behavior.
 - [ ] **Single-flight RED/GREEN:** two real concurrent `prepare-milestone.js` dispatches for the
   same fixture task prove, via real journal evidence, that exactly one reaches its first
   `ProposalAuthors` agent dispatch and the other returns `prepare-already-running` before any
@@ -454,6 +507,14 @@ reconciled DIR-126's own Proposal and recommended this split:
   attempt; a fixture with a genuinely dead/stale owner (fake clock advanced past the staleness
   window) recovers deterministically with `recoveredFrom` evidence recorded; a crash/restart
   fixture (lease acquired, never released, clock advanced) leaves no permanent lockout.
+- [ ] **Force-release writes an audit-trail entry, never a silent unlock (added 2026-07-29,
+  ProposalReview finding ae04e213 — covers WIRING-CLAIM 4, previously asserted three times in prose
+  with no corresponding fixture item):** a dedicated fixture exercises a human-invoked
+  `--force-release <reason>` against a still-active (non-expired) lease, confirming (a) the lease is
+  genuinely released, (b) the supplied `<reason>` is recorded in the released lease's own
+  audit-trail record, and (c) the resulting record is distinguishable from an ordinary stale-owner
+  reclaim. Distinct from the "Lease recovery is fail-closed" item above, which covers automatic
+  stale-owner reclaim and crash/restart recovery, not a human-invoked override.
 - [ ] **Renewal-at-every-phase-boundary is proven, not merely asserted:** a synthetic long-running
   generation with mocked phase timestamps proves the lease survives via renewal across every
   existing phase boundary; a genuinely-stalled generation with no renewal call for one whole phase
@@ -463,16 +524,21 @@ reconciled DIR-126's own Proposal and recommended this split:
   budget + PlanAuthor allowance + 3 safety-margined PlanCheck rounds + Receipt buffer) — not the
   original, contradicted 90/150 figures.
 - [ ] **Every terminal `return` releases, verified line-by-line, not by outcome-name bucket.**
-  **Corrected 2026-07-29 (ProposalReview finding 316ced77):** an earlier draft of this item named
-  only 4 outcome buckets (`prepared`/`needs-human`/`revision-needed`/`prepare-already-running`),
-  which the Proposal's own Risks section warns is easy to under-verify against, since the real
-  call-graph has **11 distinct terminal `return {` sites** across multiple phases (confirmed via
-  live grep of `.claude/workflows/prepare-milestone.js`, matching the enumeration in Problem
-  framing above). Evidence must enumerate and confirm each of the 11 real line-level sites
-  individually — a return that fires BEFORE `Admission` ever runs (e.g. the missing-args guard)
-  must NOT attempt `--release` on a lease never acquired; every other site, after `Admission`
-  succeeds, must invoke `--release` exactly once. A leak at any one of the less-obvious sites is a
-  real defect this item-as-originally-worded could pass while still leaking a lease.
+  **Corrected 2026-07-29 (ProposalReview finding 316ced77; recount corrected again 2026-07-29,
+  ProposalReview finding b7405fe0):** an earlier draft of this item named only 4 outcome buckets
+  (`prepared`/`needs-human`/`revision-needed`/`prepare-already-running`), which the Proposal's own
+  Risks section warns is easy to under-verify against, since the real call-graph has **12 distinct
+  terminal `return {` sites** across multiple phases (confirmed via live grep of
+  `.claude/workflows/prepare-milestone.js`, matching the enumeration in Problem framing above —
+  lines 26, 89, 111, 271, 312, 337, 341, 345, 382, 424, 492, and 497, the last being the file's own
+  final success return, `outcome: 'prepared'`, additional to and not folded into the other 11
+  numbers named before it). Evidence must enumerate and confirm each of the 12 real line-level
+  sites individually — a return that fires BEFORE `Admission` ever runs (e.g. the missing-args
+  guard at line 26) must NOT attempt `--release` on a lease never acquired; every other site,
+  including the line-497 final success return, after `Admission` succeeds, must invoke `--release`
+  exactly once. A leak at any one of the less-obvious sites — most importantly the success-path
+  return at line 497, since a verifier who stops at "11" would never check it — is a real defect
+  this item-as-originally-worded could pass while still leaking a lease.
 - [ ] Canonical and `plugin/` mirrors of `prepare-admission-check.ts`, `prepare-milestone.js`, and
   their test files are byte-identical — `cmp`/`sync-vendor.sh --check`, not merely asserted.
 - [ ] `.quay/prepare-leases/` is gitignored — verified via `git check-ignore`.
