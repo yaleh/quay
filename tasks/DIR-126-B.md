@@ -49,6 +49,19 @@ one giant sentence, firing 26 blocking findings from formatting, not content, on
 class at its root (the sentence-splitting logic itself), not by papering over individual
 occurrences after the fact.
 
+**Correction (2026-07-29, coordinator note, re-verified live against the current tree):** that
+class was independently closed — before this child's own Build begins — by commit `335317d`
+(`gap-wiring-coverage-check-merged-markdown-list`), which added `splitListAwareBlocks()` to
+`wiring-coverage-check.ts`'s `splitSentences` (both the canonical script and the `plugin/scripts/`
+mirror, `cmp`-clean). `experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs` is
+now 17/17 green, including two new regression tests for exactly this class. **This child's own
+scope narrows accordingly:** it no longer needs to fix `splitSentences` itself (already fixed,
+tested, and landed on `master`) — only to build the five NEW `Preflight`-phase check functions
+below, a distinct, earlier-in-the-pipeline mechanism (pre-`ProposalAuthors`/pre-`PlanCheck`
+rejection) than `wiring-coverage-check.ts`'s existing ProposalReview-time coverage check. Every
+subsequent reference below to "closing" or "repairing" `splitSentences` should be read as "already
+closed by `335317d`; this child verifies it stays green and reuses it," not as new work.
+
 ### Chosen mechanism
 
 Same module as [[DIR-126-A]] (`experiments/quay-perpetual-stream/scripts/prepare-admission-
@@ -79,26 +92,31 @@ touches-mismatch, missing-precedent) gate `ProposalAuthors`; the Plan-shape chec
 `PlanAuthor` produces the Plan file and before the first `plan-check-round-1` agent.
 
 **Reuse, not reimplementation.** The module reuses (imports, never duplicates)
-`task-schema.ts`'s existing section/AC-count extraction and adds a Markdown-list-aware sentence
-boundary to `wiring-coverage-check.ts`'s `splitSentences` (a `- `/`* ` bullet line becomes its own
-sentence boundary, so a dense, un-blank-lined bullet list no longer merges multiple wiring claims
-into one giant sentence) — closing the still-open M198 false-positive class at its root, shared by
-both this child's own preflight checks and the pre-existing `wiring-coverage-check.ts` module both
-callers (DIR-117 and DIR-122) already depend on.
+`task-schema.ts`'s existing section/AC-count extraction and reuses (already landed, commit
+`335317d`, not new work for this child) the Markdown-list-aware sentence boundary already added to
+`wiring-coverage-check.ts`'s `splitSentences` (a `- `/`* ` bullet line becomes its own sentence
+boundary, so a dense, un-blank-lined bullet list no longer merges multiple wiring claims into one
+giant sentence) — that fix already closed the M198 false-positive class at its root, shared by both
+this child's own preflight checks and the pre-existing `wiring-coverage-check.ts` module both
+callers (DIR-117 and DIR-122) already depend on. This child's own five preflight checks are new
+code following the same discipline, not a re-fix of that already-closed class.
 
 **No heuristic overreach.** Any check that cannot mechanically distinguish malformed from
 ambiguous-but-valid emits a distinct `preflight-ambiguous-<check>` non-blocking code marked
 `reviewer-required` — mirroring the existing non-blocking `wiring-coverage-none-claimed` code
 already in `wiring-coverage-check.ts`'s verdict codes — never silently auto-rejected by regex.
 
-**Calibrate before enforcing.** The merged-list/regex detector fix and its regression corpus land
-and pass before any new verdict from that detector is allowed to become fail-closed in the
-production `Preflight` phase. Implementation therefore has an explicit two-step activation gate:
-(1) repair `splitSentences`, replay the real M195/M197 known-good tasks plus the M198 false-positive
-and M199 merged-list reproductions, and demonstrate the corrected typed verdicts; then (2) enable
-`blocking: true` only for failure classes whose real-negative and ambiguous-valid fixtures both
-pass. A checker version/hash is emitted with every verdict so [[DIR-126-C]] can invalidate a
-cached terminal decision whenever B's detection policy changes.
+**Calibrate before enforcing.** Each of the five NEW preflight detectors' regression corpus lands
+and passes before its own verdict is allowed to become fail-closed in the production `Preflight`
+phase. Implementation therefore has an explicit two-step activation gate per detector: (1) replay
+the real M195/M197 known-good tasks plus a known-bad reproduction for that specific class, and
+demonstrate the corrected typed verdicts; then (2) enable `blocking: true` only for failure classes
+whose real-negative and ambiguous-valid fixtures both pass. (The `splitSentences` merged-list
+detector already went through this exact gate independently, via commit `335317d` — replayed against
+the real M198/M199 reproductions, landed GREEN, 17/17 suite — so it is a reused precedent for this
+child's five NEW detectors to follow, not itself part of this child's remaining work.) A checker
+version/hash is emitted with every verdict so [[DIR-126-C]] can invalidate a cached terminal
+decision whenever B's detection policy changes.
 
 ### Key design decisions
 
@@ -177,10 +195,13 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
 1. `grep -n "await parallel"` on `.claude/workflows/prepare-milestone.js` confirms the cold path's
    first action is dispatching real Proposal-author agents, with no preceding mechanical content
    check.
-2. `wiring-coverage-check.ts`'s own `splitSentences` function (confirmed by direct read) splits
-   only on `\n{2,}` or sentence-ending-punctuation-plus-capital/backtick — never on a bare bullet
-   list `- `/`* ` line — confirming the M198 merged-list false-positive class is real and still
-   open (distinct from the possessive-"own" class `703e014` already fixed).
+2. **Superseded (2026-07-29):** `wiring-coverage-check.ts`'s `splitSentences` function, as of the
+   pre-`335317d` source, split only on `\n{2,}` or sentence-ending-punctuation-plus-capital/backtick
+   — never on a bare bullet list `- `/`* ` line — confirming the M198 merged-list false-positive
+   class was real (distinct from the possessive-"own" class `703e014` already fixed). Direct read of
+   the CURRENT source confirms this is now fixed: `splitListAwareBlocks()` (commit `335317d`) treats
+   every bullet-list line as its own sentence boundary, and `wiring-coverage-check.test.mjs` is
+   17/17 green including two regression tests for this exact class.
 3. DIR-126's own Finding names the five recurring failure classes by example, drawn from real
    M192/M195/M196/M198 sessions.
 
@@ -191,9 +212,11 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
    and stable codes per the Chosen mechanism above.
 2. Add the new `Preflight` phase to `prepare-milestone.js` (both mirrors): the four content checks
    gate `ProposalAuthors`; the Plan-shape check gates `PlanCheck`'s first round.
-3. Add the Markdown-list-aware sentence-boundary fix to `wiring-coverage-check.ts`'s
-   `splitSentences` (+ `plugin/scripts/` mirror), closing the M198 false-positive class at its root;
-   land and calibrate this detector behavior before enabling its fail-closed production verdict.
+3. **Already done (commit `335317d`, not new work for this child):** the Markdown-list-aware
+   sentence-boundary fix to `wiring-coverage-check.ts`'s `splitSentences` (+ `plugin/scripts/`
+   mirror) already closed the M198 false-positive class at its root, calibrated and landed. Build
+   should verify it stays green (re-run `wiring-coverage-check.test.mjs`, 17/17 expected), not
+   re-implement it.
 4. Add fixture files seeded from real M192/M195/M196/M198 artifacts for each of the five check
    classes, the M199 merged-list/14-finding reproduction, plus valid M195/M197-shaped fixtures that
    must stay GREEN.
@@ -217,21 +240,27 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   before the first agent dispatch that can act on their already-available input
   (`ProposalAuthors` for the first four, `PlanCheck` round 1 for the Plan-shape check) — real
   journal evidence, not asserted. A rejected content preflight shows at most one bounded
-  mechanical runner and zero content-generation/review agents. Valid M195/M197-shaped fixtures
-  remain GREEN.
-- [ ] **Repair/calibrate before fail-closed activation:** the M198 false-positive and M199
-  merged-list reproductions are corrected first; real known-bad, known-good, and
-  ambiguous-valid corpora then prove the detector's blocking boundary before the production
-  `Preflight` callsite is allowed to enforce it. A deliberately restored old splitter turns this
-  activation-gate test RED.
+  mechanical runner and zero content-generation/review agents: real journal evidence confirms zero
+  `proposal-author-*`, `adjudicate`, `proposal-review`, or `plan-check-*` dispatches on a
+  content-preflight rejection. Valid M195/M197-shaped fixtures remain GREEN.
+- [ ] **Repair/calibrate before fail-closed activation:** for each of the five NEW preflight
+  detectors, real known-bad, known-good, and ambiguous-valid corpora prove the detector's blocking
+  boundary before the production `Preflight` callsite is allowed to enforce it. (The M198/M199
+  `splitSentences` merged-list class is a separate, already-closed precedent — commit `335317d`,
+  landed and calibrated before this child's Build — cited here only as the pattern to follow, not
+  as remaining work; a deliberately restored old splitter turning that specific regression test RED
+  is evidence the EXISTING fix is real, not evidence this child built something new.)
 - [ ] **No heuristic overreach:** an ambiguous-but-valid fixture for each of the five checks is
   confirmed to emit its `preflight-ambiguous-<check>` code, `reviewer-required`, non-blocking — not
   silently rejected and not silently passed.
-- [ ] **`wiring-coverage-check.ts`'s merged-list false-positive class is closed at its root:** a RED
-  fixture reproducing the exact M198/DIR-119-D1 defect (dense, un-blank-lined bullet list merging
-  multiple wiring claims) is confirmed uncovered under the OLD `splitSentences`, then GREEN under
-  the fixed version — and the full pre-existing `wiring-coverage-check.test.mjs` suite (15/15 per
-  the last real run) stays green, confirming no regression on already-passing cases.
+- [ ] **`wiring-coverage-check.ts`'s merged-list false-positive class is closed at its root
+  (ALREADY SATISFIED — commit `335317d`, `gap-wiring-coverage-check-merged-markdown-list`, `status:
+  done`, landed before this child's Build; this item verifies it stays true, not that Build
+  produces it):** a RED fixture reproducing the exact M198/DIR-119-D1 defect (dense, un-blank-lined
+  bullet list merging multiple wiring claims) is confirmed uncovered under the OLD `splitSentences`,
+  then GREEN under the fixed version — and the full pre-existing `wiring-coverage-check.test.mjs`
+  suite (17/17 per the current real run, including the two regression tests added by `335317d`)
+  stays green, confirming no regression on already-passing cases.
 - [ ] Canonical and `plugin/` mirrors of `prepare-admission-check.ts`, `wiring-coverage-check.ts`,
   `prepare-milestone.js`, and their test files are byte-identical — `cmp`/`sync-vendor.sh --check`.
 - [ ] Every preflight verdict records a stable checker policy version/hash; changing the detector
@@ -242,11 +271,12 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   wiring-coverage completeness):** confirmed via direct source read — commit `703e014`
   (`gap-wiring-coverage-check-owns-false-positive`) already fixed `WIRING_VERB_RE`'s possessive-
   "own" false-positive class; commit `f3d870b` (M198, this same overall `prepare-milestone`
-  session) independently hit a different, still-open merged-Markdown-list class from the identical
-  `wiring-coverage-check.ts` checker. This child's real, production-wired fix: `prepare-milestone.js`
-  gains a new `Preflight` phase, dispatched via `agent()` right after `Admission` and before
-  `ProposalAuthors`, running the real (non-`--selftest`) preflight CLI — confirmed real via the
-  production-callsite AC item above.
+  session) independently hit a different merged-Markdown-list class from the identical
+  `wiring-coverage-check.ts` checker, which was itself independently closed by commit `335317d`
+  (`gap-wiring-coverage-check-merged-markdown-list`) before this child's Build — no longer "still
+  open." This child's real, production-wired fix: `prepare-milestone.js` gains a new `Preflight`
+  phase, dispatched via `agent()` right after `Admission` and before `ProposalAuthors`, running the
+  real (non-`--selftest`) preflight CLI — confirmed real via the production-callsite AC item above.
 
 ## Definition of Done
 
