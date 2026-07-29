@@ -42,14 +42,46 @@ const WIRING_VERB_RE =
   /\b(invokes?|calls?|dispatches?|enforces?|wires?|routes?|delegates?)\b|(?<!(?:'s|s'|its|their|my|our|your|his|her)\s)\bowns?\b/i;
 const EVIDENCE_RE = /\b(real|production|callsite|call site|reachability|reachable|evidence|wired|confirm(?:ed|s|ation)?|reproduc\w*|verifi(?:ed|es|cation)?|proven?|proves?)\b/i;
 
-// Split into sentence-ish chunks: paragraph boundaries first, then sentence-ending punctuation
-// followed by whitespace + an uppercase letter or backtick/quote (avoids splitting on "e.g." or
-// "Fig. 2" style abbreviations enough for this heuristic's purpose — it does not need to be exact,
-// only good enough to keep two co-occurring identifiers in the same claim).
+// Split a paragraph into Markdown-list-aware blocks: a new block starts at every bullet-list line
+// (`- `/`* `/`1. ` at the start of a line, allowing leading indentation), so a dense,
+// un-blank-lined bullet list (this repo's own authoring convention frequently produces these —
+// confirmed real recurrence: M198/DIR-119-D1 and M199/DIR-126-A both hit 13-26 blocking findings
+// from exactly this merging, not content, on their first real ProposalReview generation) no longer
+// merges multiple distinct wiring claims — one per bullet — into a single giant sentence the
+// original punctuation-only splitter treated as one claim. A continuation line under a bullet
+// (indented, non-bullet-starting) stays part of that bullet's own block. Text before the first
+// bullet in a paragraph is its own block, split further by the existing punctuation rule below —
+// this is strictly additive (only ever creates MORE split points, never fewer), so a claim that
+// already qualified (>=2 backtick identifiers + a wiring verb) before this fix still qualifies
+// after it; it can only ever surface previously-hidden claims a merged sentence obscured, never
+// hide one that was already visible.
+function splitListAwareBlocks(paragraph) {
+  const lines = paragraph.split(/\n/);
+  const bulletStart = /^\s*(?:[-*]\s+|\d+\.\s+)/;
+  const blocks = [];
+  let current = [];
+  for (const line of lines) {
+    if (bulletStart.test(line) && current.length > 0) {
+      blocks.push(current.join("\n"));
+      current = [line];
+    } else {
+      current.push(line);
+    }
+  }
+  if (current.length > 0) blocks.push(current.join("\n"));
+  return blocks;
+}
+
+// Split into sentence-ish chunks: paragraph boundaries first, then Markdown-list-aware blocks
+// (above), then sentence-ending punctuation followed by whitespace + an uppercase letter or
+// backtick/quote (avoids splitting on "e.g." or "Fig. 2" style abbreviations enough for this
+// heuristic's purpose — it does not need to be exact, only good enough to keep two co-occurring
+// identifiers in the same claim).
 function splitSentences(text) {
   return text
     .split(/\n{2,}/)
-    .flatMap((para) => para.split(/(?<=[.!?])\s+(?=[A-Z`"])/))
+    .flatMap((para) => splitListAwareBlocks(para))
+    .flatMap((block) => block.split(/(?<=[.!?])\s+(?=[A-Z`"])/))
     .map((s) => s.replace(/\s+/g, " ").trim())
     .filter(Boolean);
 }

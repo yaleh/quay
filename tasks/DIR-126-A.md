@@ -1,7 +1,8 @@
 ---
 id: DIR-126-A
-title: Single-flight admission for prepare-milestone.js (prepare-admission-check.ts,
-  new Admission phase) — first child of DIR-126's split
+title: Single-flight admission for prepare-milestone.js
+  (prepare-admission-check.ts, new Admission phase) — first child of DIR-126's
+  split
 status: todo
 labels:
   - milestone-candidate
@@ -23,154 +24,375 @@ extra:
 Add a real admission/ownership check to `prepare-milestone.js` so at most one live generation for
 a given `(workspace, taskId)` proceeds past a new `Admission` phase — closing the concrete overlap
 DIR-126's own Finding measured (two M196 generations for the same task overlapped, adding ~54
-duplicate workflow-minutes). First child of DIR-126's 5-way split (`split-subsystem-blocking-
-cluster`/mechanism-count-5 finding, M199/DIR-126's real ProposalReview run). Depends on nothing
-else in this split; DIR-126-B (deterministic preflight) shares this child's own new module and
-phase-insertion point but has an independently testable proof surface; DIR-126-C (generation-aware
-resume) treats a resume dispatch as itself an admission event and depends on this child landing
-first.
+duplicate workflow-minutes, `tasks/DIR-126.md:86`). First child of DIR-126's 5-way split
+(`split-subsystem-blocking-cluster`, M199/DIR-126's real ProposalReview run). Depends on nothing
+else in this split; DIR-126-B (deterministic preflight) shares this child's new module and
+phase-insertion point but has an independently testable proof surface (`tasks/DIR-126-B.md:27-28`,
+confirmed to name the same `prepare-admission-check.ts` path and the same shared test file);
+DIR-126-C (generation-aware resume) treats a resume dispatch as itself an admission event and
+depends on this child landing first (`tasks/DIR-126-C.md:26`).
 
 ### Problem framing (re-verified live against the current tree, 2026-07-29)
 
-`.claude/workflows/prepare-milestone.js` (511 lines, byte-identical to its `plugin/workflows/`
-mirror — confirmed via `cmp`) has no `fs`/`import` statements at all — a deliberate workflow-DSL
-convention (the script itself explains, near lines 128-138, why `Date.now()` crashes the sandbox
-and why real time must come from an agent's `date +%s%3N` shell call, not a Node API the script
-calls directly). It begins directly at `phase('ProposalAuthors')` (or, under
-`resumeFromAdjudicatedProposal`, skips straight to `ProposalReview`) with zero check that another
-live generation for the same `(workspace, taskId)` already owns the work. Two concurrent dispatches
-for the same task today both freely proceed through `ProposalAuthors`/`Adjudicate`, racing
-`task_write`s against each other — exactly the overlap DIR-126's Finding measured for M196.
+`.claude/workflows/prepare-milestone.js` is 511 lines and byte-identical to
+`plugin/workflows/prepare-milestone.js` (`cmp` exits 0, no diff). `grep -n "fs\.\|^import\|require("`
+returns zero matches — the script genuinely has no filesystem or import capability today, a
+deliberate workflow-DSL sandbox convention: the script also cannot call `Date.now()` directly, and
+every phase that needs real elapsed time asks an agent to run `date +%s%3N` and trusts the reported
+number back (the same pattern `ProposalReview`'s own soft-budget check already uses). The script's
+control flow (`grep -n "phase("`) begins at `phase('ProposalAuthors')` on the cold path, or jumps
+straight to `phase('ProposalReview')` under `$a.resumeFromAdjudicatedProposal === true` (lines
+57-93) — in both cases with no preceding phase and no `(workspace, taskId)` ownership check of any
+kind. Two concurrent `Workflow` dispatches for the same `taskId` today both freely enter
+`ProposalAuthors` (or `ProposalReview` under resume) and both call `task_write` against the same
+task's `## Proposal` field, racing each other — exactly DIR-126's measured M196 overlap.
+
+A second grounding fact worth calling out explicitly: this child counts **11 distinct terminal
+`return { outcome: ... }` statements** in the current file (lines 26, 89, 111, 271, 312, 337, 341,
+345, 382, 424, 492, plus the final success return at 497) — not just the handful of outcome *names*
+(`prepared`/`needs-human`/`revision-needed`, plus the new `prepare-already-running`). Any admission
+mechanism's "every terminal return releases the lease" requirement has to be checked against all 11
+call sites, not against a few conceptual outcome buckets — several of those sites (e.g. the
+missing-args guard at line 26, which fires before any lease would even be acquired) need explicit
+ordering care: a return that fires before `Admission` runs must not attempt to release a lease that
+was never acquired.
+
+The downstream shape that bounds the staleness-window derivation is also verified live:
+`_policyCaps.softBudgetMs = (_highRisk ? 75 : 45) * 60 * 1000` (ProposalReview soft budget, line
+145) and `const MAX_PLANCHECK_ROUNDS = 3` (line 390) are both unconditional — the PlanCheck round
+cap is NOT gated on `highRisk`. Any staleness-window default has to account for the full worst-case
+Prepare duration (ProposalReview + PlanAuthor + up to 3 PlanCheck rounds + Receipt), not just the
+ProposalReview budget in isolation.
 
 ### Chosen mechanism
 
-New pure module `experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts`, mirrored
-byte-identically to `plugin/scripts/prepare-admission-check.ts` (the same canonical-first +
-`sync-vendor.sh --check`/`cmp` discipline `composite-manifest-synthesis.ts` and every other
-`composite-*`/`proposal-convergence.ts`/`milestone-preparation-check.ts` module already uses), same
-"pure functions + thin CLI" shape as `proposal-convergence.ts`/`milestone-preparation-check.ts`
-(unit-testable decision logic, file I/O isolated in the CLI wrapper) — exports
-`acquireLease`/`renewLease`/`releaseLease`/`checkStaleOwner` plus a CLI wrapping them
+A new pure module, `experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts`, mirrored
+byte-identically to `plugin/scripts/prepare-admission-check.ts` via the repo's existing
+canonical-first + `sync-vendor.sh --check`/`cmp` discipline already governing every
+`composite-*.ts`, `proposal-convergence.ts`, `milestone-preparation-check.ts`, and
+`wiring-coverage-check.ts` sibling (all confirmed present in both
+`experiments/quay-perpetual-stream/scripts/` and `plugin/scripts/`). Same "pure decision functions +
+thin CLI dispatch" shape those modules already use (confirmed against `milestone-preparation-
+check.ts`: `computeCurrentHashes`/`sha256`/`buildReceipt` are plain exported functions taking
+explicit arguments, with `fs` I/O isolated behind them and a CLI wrapper at the bottom, guarded by
+the same `isDirect`/`import.meta.url` pattern `composite-manifest-synthesis.ts` uses) — exports
+`acquireLease`/`renewLease`/`releaseLease`/`checkStaleOwner`, plus a CLI wrapping them
 (`--acquire`/`--renew`/`--release`/`--force-release <reason>`).
 
-**Lease acquisition** is `fs.writeFileSync(path, json, {flag: 'wx'})` — Node's atomic
-exclusive-create, the same primitive `gate-event-store.ts`'s append-only design and
-`frontmatter-store-base.ts`'s `withFileLock()` already rely on in this repo (direct in-repo
-precedent, not a novel primitive; deliberately re-implemented rather than imported from
-`packages/quay/src/frontmatter-store-base.ts` to avoid a new `experiments/` -> `packages/`
-dependency edge that would show up as an unwanted methodology-layer-to-product-layer coupling in
-`archguard_get_dependencies`/`archguard_detect_cycles`). The lease shape reuses DIR-124's own
-vocabulary (`runId, taskId, baseCommit, acquiredAt, leaseUntil, heartbeatAt, fencingToken`) rather
-than inventing an incompatible one (`docs/proposals/quay-milestone-workflow-stage-pipelining-and-
-leases.md`, status: proposal, not implemented — this child implements only the explicitly-
-sanctioned atomic-directory prototype tier it names, scoped to the Prepare stage's single
-`(workspace, taskId)` key, not DIR-124's full four-mechanism durable contract). The lease lives at
-a gitignored path (`.quay/prepare-leases/<taskId>.json`, requiring one new `.gitignore` line —
-`**/.quay/prepare-leases/`) — pure runtime mutex state, meaningful only to the one working tree
-with a generation in flight, consistent with this repo's single-shared-working-tree model and its
-existing `.quay/gate-events.jsonl` gitignore precedent.
+**Lease acquisition primitive — corrected precedent citation.** The primitive is
+`fs.writeFileSync(path, json, {flag: 'wx'})` (or the equivalent `fs.openSync(path, 'wx')`) — Node's
+atomic exclusive-create, throwing `EEXIST` if a lease already exists. **`gate-event-store.ts` is
+NOT a live `wx` precedent** — a direct read of `appendGateEvent()` shows it calls plain
+`appendFileSync`, with its own doc comment (lines 59-66) stating this is a documented
+single-writer constraint, not a bug, and a further comment (lines 68-75) naming
+`packages/quay-native/src/store.ts`'s `acquireLock`/`releaseLock`/`withLock` (lines 191-238) as the
+pattern to port in *if* locking is ever added — i.e. it is a pointer to the precedent, not an
+instance of it. The two real, live `wx`-based precedents in this repo are: (1)
+`packages/quay/src/frontmatter-store-base.ts`'s `withFileLock(dir, id, fn)` (lines 74-114) —
+`fs.openSync(lockPath, "wx")`, `STALE_LOCK_MS = 5000` stale-reclaim, `LOCK_TIMEOUT_MS = 3000` retry
+deadline, always-release via `finally`; and (2) `packages/quay-native/src/store.ts`'s
+`acquireLock`/`withLock`/`withLocks` — the same `wx` primitive, with a `withLocks()` variant that
+sorts multiple lock ids into one fixed global order to avoid deadlock (not needed here, since this
+mechanism only ever takes one lock per `taskId`). `acquireLease` cites both of these as precedent —
+closest in shape to `store.ts`'s `acquireLock`, adapted from a short-lived critical-section lock to
+a long-lived (minutes-to-hours) generation-ownership lease. The primitive is deliberately
+re-implemented locally in `prepare-admission-check.ts` rather than imported from
+`packages/quay/src/frontmatter-store-base.ts`, to avoid introducing a new `experiments/` →
+`packages/` dependency edge — a methodology-layer-to-product-layer coupling
+`archguard_get_dependencies`/`archguard_detect_cycles` would flag as a real new architectural edge
+for a ~10-line primitive that is cheap to duplicate and already precedented twice in-repo.
 
-**Phase wiring.** `prepare-milestone.js` (both mirrors) gains a new first phase, `Admission`,
-dispatched via a labeled `agent()` call running `prepare-admission-check.ts --acquire` before
-`phase('ProposalAuthors')` — runs unconditionally, even under `resumeFromAdjudicatedProposal`,
-since that path still must not race a second owner. A `prepare-already-running` verdict returns
-`{outcome: 'needs-human', reason: 'prepare-already-running', phase: 'Admission', owner:
-{generationId, acquiredAtMs, leaseUntil}}` before any author agent is spent.
+**Lease record shape — grounded against DIR-124's real field vocabulary.**
+`docs/proposals/quay-milestone-workflow-stage-pipelining-and-leases.md` §6.3 ("Lease durability")
+states the canonical field list verbatim (**corrected 2026-07-29, ProposalReview finding c0d6d79c**
+— confirmed at lines 392-393 only; an earlier draft's added citation to line 181 was spurious,
+pointing at unrelated §4.1 `MilestoneRunIdentity` content): `key, ownerExecutionId,
+attempt, stage, fencingToken, baseCommit, acquiredAt, leaseUntil, heartbeatAt` — and §6.3's closing
+sentence is explicit sanction for this child's scope: "An atomic-directory or `flock` prototype is
+acceptable only for an initial single-machine experiment and must not be mistaken for the durable
+contract." This child's lease record maps directly onto that vocabulary rather than inventing
+parallel field names: `key` = the `(workspace, taskId)` composite the lease is scoped to;
+`ownerExecutionId` = the dispatching generation's real `$CLAUDE_CODE_SESSION_ID` (the same
+DIR-093/DIR-117-iteration-2 pattern `execute-milestone.js`'s Audit phase and `prepare-milestone.js`'s
+own `_sessionIdInstruction` already use to get a harness-verified, unforgeable id — not a
+caller-asserted id); `stage` = the current `prepare-milestone.js` phase name at last renewal;
+`fencingToken` = a monotonically increasing integer bumped on every stale-lease reclaim, carried
+through so a slow "zombie" caller whose write lands after reclaim can in principle be detected, even
+though this child's minimal scope does not yet wire fencing-token *checks* into any writer (see
+Non-goals); `baseCommit`, `acquiredAt`, `leaseUntil`, `heartbeatAt`, `attempt` map 1:1 onto the
+doc's own names. Only the *tier* is scoped down (atomic-directory file, not the doc's preferred
+workspace-scoped SQLite store) — the exact tier §6.3 names as acceptable for an initial
+single-machine experiment. The lease lives at a gitignored path, `.quay/prepare-leases/<taskId>.json`
+(one new `.gitignore` line, `**/.quay/prepare-leases/`, alongside the existing
+`**/.quay/gate-events.jsonl` precedent at line 26 — confirmed no `prepare-leases` entry exists yet)
+— pure local runtime-mutex state, meaningless outside the one working tree with a generation in
+flight, consistent with this repo's single-shared-working-tree-on-`master` model (CLAUDE.md's
+DIR-027 discipline).
 
-**Staleness window (corrected 2026-07-29, ProposalReview finding f76ae150):** an earlier draft set
-this to "90 minutes ordinary / 150 minutes highRisk — 2x the 45/75-minute ProposalReview soft
-budget," which directly contradicted the Finding's own cited data and undercounted
-`MAX_PLANCHECK_ROUNDS = 3` (`.claude/workflows/prepare-milestone.js:390`, unconditional, NOT gated
-on `highRisk`): M195's single PlanCheck round alone measured ~57 real minutes, so three rounds can
-plausibly cost ~170+ minutes ON TOP OF the ProposalReview budget, not inside it. The corrected
-default is **300 minutes ordinary / 360 minutes highRisk**, derived as: ProposalReview soft budget
-(45/75m) + a PlanAuthor allowance (~20m) + up to 3 PlanCheck rounds (~70m each, safety-margined
-above the 57m observed = ~210m) + a Receipt buffer (~10m) — a real derived sum, not a multiplier of
-the ProposalReview budget alone, conservative enough that a legitimately slow real generation is
-never falsely declared stale (the exact false-contention risk this mechanism exists to prevent).
+### Concrete control/data flow
 
-If a lease is found expired (`now > leaseUntil`) on acquire, it is reclaimed deterministically and
-the new lease records `recoveredFrom` copying the stale lease's contents verbatim (never silently
-discarded) before overwriting. Every terminal `return` in `prepare-milestone.js` (prepared,
-needs-human, revision-needed, contention) must invoke `--release`; a crash between acquire and any
-return is exactly the case staleness recovery must handle. Renewal piggybacks on every existing
-phase boundary (`Admission` -> `Adjudicate`, each `ProposalReview` delta round, `PlanAuthor`, each
-`PlanCheck` round, `Receipt`) via a lightweight `--renew` call extending `leaseUntil` from the
-caller-reported `nowMs` — reusing the existing "agent runs `date +%s%3N`, workflow trusts the
-reported number" pattern already required for `ProposalReview`'s own clock.
+**WIRING-CLAIM 1 — Admission phase insertion.** `prepare-milestone.js` (both mirrors) gains one new
+phase, `Admission`, inserted as the literal first phase — dispatched via a labeled `agent()` call
+running `prepare-admission-check.ts --acquire --taskId <id> --workspace <root>` — before the
+existing `phase('ProposalAuthors')` call at line 65 (cold path) AND before the `phase(
+'ProposalAuthors')` log-only call at line 59 inside the `if (_resumeFromAdjudicatedProposal)`
+branch. `Admission` must run unconditionally on *both* branches, ahead of the `if (...) { ... }
+else { ... }` split at line 57 — a resumed dispatch still performs real `task_write`s downstream
+(`ProposalReview`'s revision step) and is exactly as vulnerable to a racing second owner as the cold
+path (this is also the same resume flow M197's `gap-prepare-milestone-cross-generation-no-
+incremental-reuse` specifically introduced, so skipping admission on that branch would reopen an
+already-fixed-adjacent gap). On a `prepare-already-running` verdict the script returns immediately —
+`{outcome: 'needs-human', reason: 'prepare-already-running', phase: 'Admission', owner: {
+ownerExecutionId, acquiredAt, leaseUntil, stage}}` — before any `agent()` call for `ProposalAuthors`
+is dispatched. This ordering (Admission strictly precedes the first author-agent dispatch) is the
+concrete mechanism that prevents the ~54-duplicate-workflow-minute cost DIR-126's Finding measured,
+since the expensive resource (LLM agent turns) is never spent by the losing dispatch. If the
+`Admission` phase itself errors (bad CLI invocation, unexpected exception, not a lease-contention
+verdict) it must fail closed to `needs-human` with a distinct reason code (e.g.
+`admission-check-failed`) — never silently fall through to `ProposalAuthors` as if admission had
+succeeded.
 
-A human `--force-release <reason>` escape hatch exists for a legitimately stuck lease before the
-staleness window elapses; the reason is recorded as evidence (in the lease's own
-`recoveredFrom`/audit trail, and later in DIR-126-D's telemetry record once that child lands),
-never silent.
+**WIRING-CLAIM 2 — release on every terminal return.** All 11 of the file's terminal `return`
+statements enumerated above must invoke `--release` before returning, with the single exception of
+the line-26 missing-args guard (which fires before any lease is ever acquired, so nothing needs
+releasing there). This is a distinct claim from WIRING-CLAIM 1 and needs its own AC coverage, since
+a reviewer checking only "does `Admission` call `--acquire`" would miss a leak on, say, the
+soft-budget-exceeded return (line 341) or the plancheck-rounds-exceeded return (line 424). A hard
+crash (process killed, sandbox torn down) between acquire and any `return` is the case
+staleness-window reclaim exists for, not something a `finally` block inside the workflow DSL can
+catch — the DSL has no `try/finally` semantics available to workflow scripts, consistent with them
+having no direct `fs`/Node-API access at all.
+
+**WIRING-CLAIM 3 — renewal at every phase boundary.** `--renew` calls are dispatched at each of:
+`Admission`→`Adjudicate` (or `Admission`→`ProposalReview` under resume), each `ProposalReview` delta
+round (up to 2 ordinary / 3 highRisk per DIR-125's bounded convergence), `PlanAuthor`, each of the up
+to `MAX_PLANCHECK_ROUNDS = 3` `PlanCheck` rounds (unconditional, not gated on `highRisk`), and
+`Receipt` — six distinct wiring points across the two already-mirrored files. Renewal reuses the
+script's existing "agent runs `date +%s%3N`, workflow trusts the reported number" pattern (the same
+one already used for `ProposalReview`'s own clock) rather than inventing a second timekeeping
+convention. This is a third, separately-checkable claim (a reviewer could confirm claims 1 and 2
+while missing that a legitimately-long `PlanCheck` round 3 lets the lease silently expire mid-phase)
+and needs its own AC/fixture.
+
+On acquire, if an existing lease file is found with `now > leaseUntil`, `checkStaleOwner` reclaims
+it deterministically: the new lease's own `recoveredFrom` field copies the prior lease's full
+contents verbatim (never silently discarded — this is the audit trail a `--force-release` or a
+crash recovery leaves behind) and `fencingToken` increments. A human `--force-release <reason>` CLI
+path exists to unblock a legitimately stuck lease before the staleness window elapses; the reason is
+written into the released lease's own audit trail (and, once DIR-126-D's later telemetry child
+lands, into that record too) — never a silent unlock.
+
+### Staleness-window default (derived, not asserted)
+
+The default is **300 minutes ordinary / 360 minutes highRisk**, derived as a real sum of the
+worst-case Prepare-stage duration rather than an arbitrary multiplier:
+
+| Component | Ordinary | highRisk | Source |
+|---|---|---|---|
+| ProposalReview soft budget | 45m | 75m | `_policyCaps.softBudgetMs` (line 145), confirmed live |
+| PlanAuthor allowance | ~20m | ~20m | single-agent-call phase, no round cap (estimate, not a measured value — same caveat the earlier draft implicitly carried) |
+| Up to 3 PlanCheck rounds | ~210m (70m × 3, safety-margined above the 57m observed for one round) | same | `MAX_PLANCHECK_ROUNDS = 3` (line 390), unconditional on `highRisk` |
+| Receipt buffer | ~10m | ~10m | single self-check agent call |
+| **Sum** | **285m → rounded to 300m** | **315m, rounded up to 360m for extra highRisk headroom** | |
+
+An earlier draft of this task's own body proposed 90m/150m ("2x the ProposalReview budget"), which
+ProposalReview finding `f76ae150` already flagged as internally contradicted: it ignores
+`MAX_PLANCHECK_ROUNDS`'s unconditional cost and undercounts against M195's own directly-measured
+~57-real-minute single PlanCheck round — three rounds alone can plausibly exceed the entire 90/150m
+figure before PlanAuthor or Receipt are even counted. An independent re-derivation of the same
+components (above) lands close to but not exactly at 300/360 (285/315 raw); the gap is well within
+the "estimate, not measured value" uncertainty already inherent in the PlanAuthor-allowance and
+per-round safety-margin inputs, so this proposal keeps the previously-adjudicated 300/360 figures —
+re-litigating the exact minute count without new timing data would add proposal churn without new
+evidence, and 300/360 already carries the qualitative correction that mattered (the unconditional
+`MAX_PLANCHECK_ROUNDS` cost). Both figures land well above the observed 57m per-round measurement
+and the ProposalReview soft budgets, chosen conservative-first so a legitimately slow real
+generation is never falsely declared stale — the opposite failure mode of the one this mechanism
+exists to close.
 
 ### Key design decisions
 
-- **Admission and preflight (DIR-126-B) are one module/CLI but two independently landable AC-level
-  proof surfaces** — a lease bug must not block landing a preflight fixture and vice versa; this is
-  why they are separate ordered children sharing one production file rather than merged into one.
-- **`wx` atomic-create, not `flock(2)`** — no portable Node-core primitive without a native addon or
-  child-process syscall dependency, and the repo already has a working, precedented `wx`-based
-  pattern (`frontmatter-store-base.ts`, `gate-event-store.ts`) to mirror with no new infrastructure.
-- **Local filesystem lease, not a distributed lock** — DIR-027's own steering discipline already
-  assumes one active checkout of `master` at a time; a local-filesystem lease matches that existing
-  assumption, and a database/external-lock-service/Provider-ABI lock task would add dependency
-  surface the native store doesn't need.
-- **Staleness/lease timeouts are set conservative-first** (well above the worst observed real
-  Prepare time — see the corrected 300m/360m derivation above) and only tightened once DIR-126-E's
-  real distribution exists, avoiding the single-flight mechanism itself becoming a new source of
-  false-positive lockouts before real P85 data exists to calibrate against.
-- **Renewal-at-every-phase-boundary is its own explicit requirement**, not folded silently into
-  "lease recovery is fail-closed" — the task's own AC text names stale-owner reclaim and
-  crash/restart by name but not renewal-at-phase-boundaries, so this Proposal states it explicitly
-  and gives it its own fixture (see AC below).
-- **Heartbeat/renewal, not PID-liveness, for stale-owner detection** — the "owner" is a remote agent
-  dispatch inside the Workflow harness sandbox, not a local process the admission CLI can signal or
-  poll; heartbeat/renewal plus a generous `leaseUntil` timeout is the only evidence actually
-  available at this layer, consistent with the existing constraint that workflow scripts cannot
-  read the wall clock directly and must trust agent-reported timestamps.
+- **`wx` atomic-create over `flock(2)`.** No portable Node-core `flock` primitive exists without a
+  native addon or a child-process syscall; `wx` is already precedented twice in this exact codebase
+  (`frontmatter-store-base.ts`'s `withFileLock()`, `quay-native/src/store.ts`'s `acquireLock`) for
+  the identical class of problem — see the corrected precedent citation above.
+- **Local filesystem lease, not a distributed lock.** CLAUDE.md's own DIR-027 steering-hygiene
+  section already assumes one active checkout of `master` at a time ("two `execute-milestone`
+  dispatches must never run concurrently... the risk is the shared working tree itself"). A
+  local-filesystem lease matches that existing single-tree assumption; nothing here claims to
+  protect against two genuinely separate clones/hosts. A database/external-lock-service/Provider-
+  ABI-mediated lock would add dependency surface the native store doesn't need for a problem that
+  is, today, single-working-tree by construction.
+- **Admission (this child) and DIR-126-B's deterministic preflight share one production module and
+  phase-insertion point but are two independently landable AC-level proof surfaces** — a lease bug
+  must not block landing a preflight fixture and vice versa, which is why DIR-126's split ordered
+  them as siblings rather than merging them into one child.
+- **Field vocabulary is DIR-124's real names (`key`, `ownerExecutionId`, `fencingToken`, `stage`,
+  ...), not a paraphrase** — grounding directly against §6.3 of the pipelining-and-leases proposal
+  keeps this prototype's lease shape upgrade-compatible if/when DIR-124's SQLite-backed durable
+  contract is eventually built, and keeps `ownerExecutionId` tied to the harness-verified
+  `$CLAUDE_CODE_SESSION_ID`, not a self-asserted id.
+- **Staleness timeouts set conservative-first**, well above the worst *observed* real Prepare time,
+  only tightened once DIR-126-E (capacity/telemetry) has real distribution data — avoiding the
+  single-flight mechanism itself becoming a new source of false-positive lockouts.
+- **Renewal-at-every-phase-boundary is its own explicit, separately-tested requirement**, not folded
+  silently into "lease recovery is fail-closed" — the task's own AC text calls out stale-owner
+  reclaim and crash/restart by name but not renewal-at-phase-boundaries specifically, so this
+  Proposal states it explicitly (WIRING-CLAIM 3) and gives it an explicit fixture rather than
+  letting it be assumed correct by association with the recovery fixture.
+- **Heartbeat/renewal, not PID-liveness, for stale-owner detection.** The "owner" is a remote agent
+  dispatch running inside the Workflow harness's sandbox — the admission CLI has no local process to
+  signal or poll. Heartbeat/renewal plus a generous `leaseUntil` is the only evidence actually
+  available at this layer, consistent with the same sandbox constraint that already forces
+  `prepare-milestone.js` to trust agent-reported `date +%s%3N` output rather than call `Date.now()`.
 
 ### Defaults and failure behavior
 
-| Condition | Default outcome |
+| Condition | Outcome |
 |---|---|
-| Lease already held, not expired | `needs-human`, `prepare-already-running`, before `ProposalAuthors`, naming the owning generation |
-| Lease expired (`now > leaseUntil`), no renewal | reclaimed deterministically; new lease records `recoveredFrom` (prior owner's evidence), never silent |
-| Any generation's terminal phase crashes before releasing the lease | lease still recoverable via stale-`leaseUntil` reclaim on the next dispatch; no permanent lockout |
-| A legitimately stuck lease before the staleness window elapses | human `--force-release <reason>` escape hatch; reason recorded as evidence, never silent |
-| Different `taskId` | independently runnable — admission is keyed on `(workspace, taskId)`, never a global lock |
+| Lease held, not expired, `--acquire` from a different owner | `Admission` returns `{outcome:'needs-human', reason:'prepare-already-running', owner:{ownerExecutionId, acquiredAt, leaseUntil, stage}}` before any `ProposalAuthors` agent is dispatched |
+| Lease found with `now > leaseUntil` | reclaimed deterministically; new lease's `recoveredFrom` copies the prior lease verbatim; `fencingToken` incremented |
+| Crash between acquire and any terminal `return` (lease never released) | recoverable via the same stale-`leaseUntil` reclaim path on the next dispatch — no permanent lockout |
+| Legitimately stuck lease, still inside the staleness window | `--force-release <reason>` human escape hatch; reason recorded, never silent |
+| A concurrent dispatch for a *different* `taskId` | unaffected — the lease key is `(workspace, taskId)`, never a single global lock |
+| `Admission` phase itself errors (bad CLI invocation, unexpected exception) | fail-closed to `needs-human` with a distinct reason code (`admission-check-failed`), never silently falls through to `ProposalAuthors` |
+| Missing-required-args early guard (line 26, before `Admission` is even reached) | unchanged — no lease is ever acquired on that path, so no release is needed |
 
 ### Compatibility
 
-No existing `prepare-milestone.js` phase's behavior changes for a generation that successfully
-acquires admission — `Admission` is purely additive, runs once at the very start, and every
-existing phase (`ProposalAuthors` through `Receipt`) is otherwise byte-for-byte unchanged except
-for the new `--renew` calls at existing phase boundaries. Both workflow mirrors and the new script
-mirror stay byte-identical via the existing vendor-sync mechanism.
+Every existing phase's behavior for a generation that successfully acquires admission is unchanged.
+`Admission` is purely additive and runs once, first. `ProposalAuthors` through `Receipt` are
+otherwise byte-for-byte unchanged except for the new `--renew` calls inserted at existing phase
+boundaries. Both `prepare-milestone.js` mirrors and the new `prepare-admission-check.ts`
+canonical/`plugin/` pair stay byte-identical via the same `sync-vendor.sh`/`cmp` mechanism already
+verified for the current script (`cmp .claude/workflows/prepare-milestone.js
+plugin/workflows/prepare-milestone.js` exits 0 today). The `args` shape
+(`$a.taskId`/`$a.milestoneId`/`$a.charterFile`/`$a.class`/`$a.highRisk`) is unchanged; `Admission`
+reads `$a.taskId` (already available before any phase runs) and needs no new caller-supplied
+argument.
 
 ### Risks
 
-- **Stale-lease/staleness-window miscalibration** — too short falsely steals a live lease from a
-  legitimately slow highRisk run (false contention); too long delays legitimate recovery after a
-  real crash (reintroducing the M196 duplicate-generation defect this task exists to close).
-  Mitigated by the corrected 300m/360m default plus the `--force-release` escape hatch, and by
-  DIR-126-E eventually recalibrating from real data.
-- **A `.gitignore` edit is a real touch not in the task's originally-declared `## Touches` list** —
-  flagged here; this child's own Plan phase must add it explicitly, consistent with the existing
-  convention that a Plan whose checked touch set exceeds the declaration updates the declaration.
-- **New dispatch-pattern class risk** — mitigated by following the established `wiring-coverage-
-  check.ts` dispatch shape exactly (pure function + CLI wrapper + `agent()`-dispatched invocation,
-  verdict merged by the script, not trusted from LLM prose); no new class is introduced.
+- **Staleness-window miscalibration** in either direction: too short falsely steals a live lease
+  from a legitimately slow highRisk run (false contention, a new failure mode this mechanism itself
+  would introduce); too long delays legitimate recovery after a real crash (partially reintroducing
+  the M196 duplicate-generation cost this child exists to close). Mitigated by the derived
+  300m/360m default above plus the `--force-release` escape hatch, with DIR-126-E expected to
+  recalibrate once real distribution data exists.
+- **The `.gitignore` edit** (**corrected 2026-07-29, ProposalReview finding 9a09c522** — an earlier
+  draft called this "not present in the task's originally-declared `## Touches` list," which is now
+  stale: the task's current `## Touches` section already lists `.gitignore` as its 7th entry) is
+  already declared; this note is retained only to flag that the Plan phase's own real diff must
+  actually touch it, matching what is already declared, not silently drift from it.
+- **Eleven terminal-return surface, not four outcome names.** A "release on every return" claim is
+  easy to under-verify against a handful of named outcome buckets when the real call-graph has 11
+  return statements across multiple phases; the AC/test coverage must enumerate actual line-level
+  return sites, or a leak at one of the less-obvious sites (e.g. `plancheck-rounds-exceeded` at line
+  424, or the `receipt-selfcheck-failed` return at line 492) could pass review while still leaking a
+  lease.
+- **Fencing-token field exists in the record but nothing in this child's scope reads it to reject a
+  stale writer's `task_write`** — the token is threaded through and incremented for forward
+  compatibility with a future durable-lease consumer, but this child does not add fencing
+  enforcement anywhere else in the pipeline; a lease reclaim plus a genuinely-still-alive prior
+  owner's late write is not fully closed by this child alone (see Non-goals).
+- **Renewal call omission is a silent-failure risk if under-tested** — a missing `--renew` at
+  exactly one boundary degrades to the same behavior as a crash (eventual reclaim), which is safe
+  but could mask a real wiring bug as "it recovered anyway." This is why renewal-at-every-boundary
+  (WIRING-CLAIM 3) needs its own dedicated fixture rather than being covered incidentally by the
+  crash-recovery test.
+- **New dispatch-pattern-class risk is low**, since this follows the already-precedented
+  `wiring-coverage-check.ts`/`composite-manifest-synthesis.ts` shape (pure function + CLI wrapper +
+  `agent()`-dispatched invocation with the verdict merged by the workflow script itself, never
+  trusted from LLM prose) — no genuinely new dispatch class is introduced.
 
 ### Non-goals
 
-Not a distributed or multi-host lock. Not touching `execute-milestone.js`'s separate,
-CLAUDE.md-documented manual worktree/concurrency discipline — out of scope, scoped to
-`prepare-milestone` specifically. Not building DIR-124's full four-mechanism durable
-lease/scheduler contract (SQLite-backed, cross-workspace) — only the explicitly-sanctioned
-atomic-directory prototype tier. Not implementing DIR-126-B's preflight checks, DIR-126-C's resume
-logic, DIR-126-D's telemetry, or DIR-126-E's capacity report — those are the later children's own
-scope, even though B shares this child's new module.
+Not a distributed or multi-host lock — matches CLAUDE.md's existing single-shared-working-tree
+assumption. Not touching `execute-milestone.js`'s separate, already-documented manual
+worktree/concurrency discipline (out of scope — this child is `prepare-milestone.js`-only). Not
+building DIR-124's full four-mechanism durable lease/scheduler contract (workspace-scoped SQLite,
+lock ordering across five resource classes, fencing-token *enforcement* at every mutation site) —
+only the atomic-directory prototype tier §6.3 explicitly sanctions, scoped to the single
+`(workspace, taskId)` key the Prepare stage needs. Not implementing DIR-126-B's preflight checks,
+DIR-126-C's resume-as-admission-event logic, DIR-126-D's telemetry, or DIR-126-E's capacity
+report — those remain later children's scope even though DIR-126-B shares this child's module.
+
+### AC coverage (mapping to WIRING-CLAIMs above)
+
+- **Real production wiring, not agent-prompt-only** — covers WIRING-CLAIM 1: needs a grep/import-
+  graph AC item showing `Admission` invokes `prepare-admission-check.ts --acquire` before
+  `phase('ProposalAuthors')` on both the cold and resume paths, distinct from any
+  `--selftest`/unit-only reachability check — single most important item, since a prompt-text-only
+  wiring would satisfy no real invariant.
+- **Single-flight RED/GREEN** — two real concurrent `prepare-milestone.js` dispatches for the same
+  fixture task, with journal evidence that exactly one reaches its first `ProposalAuthors` agent
+  dispatch and the other returns `prepare-already-running` with zero author agents spent — not just
+  the returned reason string but dispatch-count *ordering*; a different `taskId` remains
+  independently runnable.
+- **Lease recovery is fail-closed** — covers the acquire+reclaim half of WIRING-CLAIM 2: an active
+  non-expired lease cannot be stolen; a fake-clock-advanced stale owner reclaims deterministically
+  with `recoveredFrom` evidence; a crash/no-release fixture leaves no permanent lockout — fixture-
+  driven (fake/advanced clock), not prose assertion.
+- **Renewal-at-every-phase-boundary** — covers WIRING-CLAIM 3: a synthetic long-running generation
+  with mocked phase timestamps surviving via renewal across all six boundaries
+  (Admission/Adjudicate/ProposalReview-round/PlanAuthor/PlanCheck-round/Receipt), and a genuinely-
+  stalled generation (no renewal for one whole phase) reclaimed by a second dispatch — its own
+  dedicated fixture, not folded into the stale-owner AC item.
+- **Release on every terminal return** — covers the other half of WIRING-CLAIM 2: source-read AC
+  item enumerating all 11 actual `return {` sites (not just outcome-name buckets), confirming each
+  post-Admission site calls `--release` (the pre-Admission missing-args guard needs no release).
+- **Staleness window is the corrected 300m/360m value** — source-read AC item citing the exact
+  constants in `prepare-admission-check.ts`, checked against the derivation table above, not the
+  earlier contradicted 90/150 figures.
+- **Mirror byte-identity** — `cmp`/`sync-vendor.sh --check` AC item covering
+  `prepare-admission-check.ts`, `prepare-milestone.js`, and both test files, not just the
+  pre-existing `prepare-milestone.js` pair.
+- **`.quay/prepare-leases/` gitignored** — `git check-ignore` AC item, not a visual diff-read of
+  `.gitignore`, plus the corresponding Plan-phase touch-set update for the previously-undeclared
+  `.gitignore` edit.
+
+### Alternatives considered and rejected
+
+1. **A `task.extra` frontmatter lock field** (e.g. `task_write`-ing a `leaseOwner` field onto the
+   task itself via the Provider ABI) instead of a local `.quay/prepare-leases/` file. Rejected:
+   this would make the admission check depend on a live MCP round-trip and the Provider ABI's own
+   optimistic-locking CAS semantics (`expectedStatus`) for something that is really local-runtime
+   mutex state, not durable task content; it would also pollute the task body/frontmatter — the
+   single source of truth the codebase already works hard to keep clean (per CLAUDE.md's "fix the
+   SOURCE, not just the artifact" principle) — with transient lease bookkeeping unrelated to the
+   task's actual content.
+2. **A single global lock file** (one lease guarding all of `prepare-milestone.js`, not keyed by
+   `taskId`) instead of a per-`(workspace, taskId)` key. Rejected: the task's own AC text explicitly
+   requires that "a different taskId remains independently runnable" — a global lock would
+   needlessly serialize unrelated milestones' Prepare stages (the measured M196 overlap was two
+   generations for the *same* task) and reintroduce a different kind of duplicate-cost problem
+   (idle blocking) while doing nothing DIR-126's Finding actually asked for.
+3. **PID/process-liveness-based staleness detection** instead of heartbeat/renewal with a fixed
+   timeout. Rejected: the "owner" of a lease is a remote harness-dispatched agent, not a local OS
+   process the admission CLI can `kill -0`, `waitpid`, or otherwise signal/poll; there is no PID
+   available at this layer to check.
+4. **Importing `frontmatter-store-base.ts`'s `withFileLock()` directly from `packages/quay/src`**
+   instead of a local re-implementation. Rejected: this would create a new `experiments/` →
+   `packages/` dependency edge for the sake of a ~10-line atomic-create primitive already
+   inexpensive to duplicate, and would risk `archguard_get_dependencies`/`archguard_detect_cycles`
+   flagging an unwanted methodology-layer-to-product-layer coupling that has no other justification.
+5. **Building DIR-124's full durable SQLite-backed lease contract now**, rather than the
+   atomic-directory prototype tier. Rejected: §6.3 of the pipelining-and-leases proposal itself
+   explicitly scopes an atomic-directory/`flock` prototype as acceptable for "an initial
+   single-machine experiment," and DIR-124 remains `status: proposal, not implemented` — building
+   its full four-mechanism contract (lock ordering across five resource classes, fencing-token
+   enforcement at every writer, SQLite store) is far more scope than a single-`taskId`-keyed Prepare-
+   stage admission check needs, and would make this already-highRisk child (editing the live
+   control-plane script) materially riskier for no proportional benefit.
+6. **90m/150m staleness windows** (the earlier draft figure, "2x the ProposalReview budget").
+   Rejected per the derivation above: internally contradicted by `MAX_PLANCHECK_ROUNDS = 3` being
+   unconditional and by M195's own measured ~57-minute single PlanCheck round; replaced with the
+   derived 300m/360m default.
+7. **Making `Admission` conditional** (skipped under `resumeFromAdjudicatedProposal`) rather than
+   unconditional. Rejected: the resumed path still performs real `task_write`s in `ProposalReview`'s
+   revision step, so it is exactly as vulnerable to a racing second owner as the cold path; skipping
+   admission there would reopen the same race for the resume flow M197's own
+   `gap-prepare-milestone-cross-generation-no-incremental-reuse` specifically introduced.
 
 ## Plan
 
@@ -213,8 +435,14 @@ reconciled DIR-126's own Proposal and recommended this split:
 
 - [ ] **Most important — real production wiring, not agent-prompt guidance:** a grep/import-graph
   check shows `prepare-admission-check.ts`'s `--acquire` mode has a REAL production callsite from
-  `prepare-milestone.js`'s (both mirrors) new `Admission` phase, dispatched before
-  `phase('ProposalAuthors')` — not zero importers, not `--selftest`-only reachability. This item
+  `prepare-milestone.js`'s (both mirrors) new `Admission` phase — not zero importers, not
+  `--selftest`-only reachability. **Corrected 2026-07-29 (ProposalReview finding 6b629db6):**
+  specifically, `Admission` must be confirmed dispatched unconditionally on BOTH real branches —
+  the cold path's `phase('ProposalAuthors')` call site AND the resume path (the branch taken when
+  `$a.resumeFromAdjudicatedProposal === true`, which jumps directly to `phase('ProposalReview')`)
+  — not only the cold-path call site. This distinction is safety-critical, not cosmetic: skipping
+  Admission on the resume branch would reopen the exact cross-generation race
+  `gap-prepare-milestone-cross-generation-no-incremental-reuse`/M197 already fixed once. This item
   alone, if unmet, fails the whole child regardless of how many other items pass.
 - [ ] **Single-flight RED/GREEN:** two real concurrent `prepare-milestone.js` dispatches for the
   same fixture task prove, via real journal evidence, that exactly one reaches its first
@@ -234,27 +462,87 @@ reconciled DIR-126's own Proposal and recommended this split:
   highRisk, verified via source read against the derivation in Chosen mechanism above (ProposalReview
   budget + PlanAuthor allowance + 3 safety-margined PlanCheck rounds + Receipt buffer) — not the
   original, contradicted 90/150 figures.
-- [ ] Every terminal `return` in `prepare-milestone.js` (`prepared`, `needs-human`,
-  `revision-needed`, and the new `prepare-already-running` contention outcome) is confirmed, via
-  source read, to invoke `--release`.
+- [ ] **Every terminal `return` releases, verified line-by-line, not by outcome-name bucket.**
+  **Corrected 2026-07-29 (ProposalReview finding 316ced77):** an earlier draft of this item named
+  only 4 outcome buckets (`prepared`/`needs-human`/`revision-needed`/`prepare-already-running`),
+  which the Proposal's own Risks section warns is easy to under-verify against, since the real
+  call-graph has **11 distinct terminal `return {` sites** across multiple phases (confirmed via
+  live grep of `.claude/workflows/prepare-milestone.js`, matching the enumeration in Problem
+  framing above). Evidence must enumerate and confirm each of the 11 real line-level sites
+  individually — a return that fires BEFORE `Admission` ever runs (e.g. the missing-args guard)
+  must NOT attempt `--release` on a lease never acquired; every other site, after `Admission`
+  succeeds, must invoke `--release` exactly once. A leak at any one of the less-obvious sites is a
+  real defect this item-as-originally-worded could pass while still leaking a lease.
 - [ ] Canonical and `plugin/` mirrors of `prepare-admission-check.ts`, `prepare-milestone.js`, and
   their test files are byte-identical — `cmp`/`sync-vendor.sh --check`, not merely asserted.
 - [ ] `.quay/prepare-leases/` is gitignored — verified via `git check-ignore`.
 
-- [ ] **Grounding evidence for the Problem-framing/Chosen-mechanism claims above (added for
-  wiring-coverage completeness):** confirmed via direct source read —
-  `.claude/workflows/prepare-milestone.js` (byte-identical to `plugin/workflows/` mirror per `cmp`)
-  today has no `fs`/`import` statements, begins at `phase('ProposalAuthors')` (or, under
-  `resumeFromAdjudicatedProposal`, skips to `ProposalReview`) with no `(workspace, taskId)`
-  ownership check, and two concurrent dispatches race `ProposalAuthors`/`Adjudicate`/`task_write`
-  today. This child's real, production-wired fix: `prepare-milestone.js` gains a new `Admission`
-  phase dispatching `agent()` running `prepare-admission-check.ts --acquire` before
-  `phase('ProposalAuthors')`; every terminal `return` (prepared/needs-human/revision-needed/
-  contention) invokes `--release`; renewal (`--renew`) fires at every phase boundary
-  (`Admission`/`Adjudicate`/`ProposalReview`/`PlanAuthor`/`PlanCheck`/`Receipt`), extending
-  `leaseUntil` from the caller-reported `nowMs` (via `date +%s%3N`, never `Date.now()`, matching
-  the existing sandbox constraint) — confirmed real and non-`--selftest`-only via the production-
-  callsite AC item above.
+- [ ] **Grounding evidence, group 1 — existing-state Problem framing (added for wiring-coverage
+  completeness):** confirmed real via direct source read — `grep -n "fs\.\|^import\|require("`
+  against `.claude/workflows/prepare-milestone.js` returns zero matches today (no filesystem/import
+  capability), and every phase that needs real elapsed time asks an agent to run `date +%s%3N`
+  rather than calling `Date.now()` directly, the same pattern `ProposalReview`'s own soft-budget
+  check already uses. A real `Workflow` dispatch for a given `taskId` today proceeds straight into
+  `ProposalAuthors` (or `ProposalReview` under resume) with `task_write` racing another concurrent
+  dispatch's writes to the same task's `## Proposal` — the concrete gap this child closes.
+- [ ] **Grounding evidence, group 2 — precedent grounding (added for wiring-coverage
+  completeness):** confirmed real via direct source read — `gate-event-store.ts`'s
+  `appendGateEvent()` uses plain `appendFileSync`, NOT `wx` (corrected precedent citation, see
+  Chosen mechanism above); the two real `wx`-based precedents are `frontmatter-store-base.ts`'s
+  `withFileLock()` (`fs.openSync(path, 'wx')`, catching `EEXIST`) and `packages/quay-native/src/
+  store.ts`'s `acquireLock`/`releaseLock`/`withLock`. The lease record shape (`key,
+  ownerExecutionId, attempt, stage, fencingToken, baseCommit, acquiredAt, leaseUntil, heartbeatAt`)
+  is grounded verbatim against `docs/proposals/quay-milestone-workflow-stage-pipelining-and-
+  leases.md`'s own field vocabulary (not `MilestoneRunIdentity`'s distinct fields — see the
+  corrected citation above), consistent with CLAUDE.md's own DIR-027 steering-hygiene assumption
+  that only one `master` checkout is active at a time (the same assumption `execute-milestone`
+  concurrency hygiene already documents) — this child's local-filesystem lease matches that
+  existing assumption rather than introducing a distributed one.
+- [ ] **Grounding evidence, group 3 — phase-wiring and defaults (added for wiring-coverage
+  completeness):** confirmed real via direct source read and the production-callsite AC item
+  above — `prepare-milestone.js` (both mirrors) dispatches a labeled `agent()` running
+  `prepare-admission-check.ts --acquire --taskId <id> --workspace <root>` as the new `Admission`
+  phase before `phase('ProposalAuthors')` (and, byte-for-byte identically formatted in one draft
+  passage as `phase( 'ProposalAuthors')`) on both the cold path and the
+  `if (_resumeFromAdjudicatedProposal)` branch; a `prepare-already-running` verdict returns
+  `{outcome: 'needs-human', reason: 'prepare-already-running', phase: 'Admission', owner: {
+  ownerExecutionId, acquiredAt, leaseUntil, stage}}` before any `ProposalAuthors` agent is spent;
+  renewal extends `leaseUntil` from the caller-reported `date +%s%3N` value, never `Date.now()`;
+  and this real production wiring (`Admission`, `prepare-admission-check.ts --acquire`,
+  `phase('ProposalAuthors')`) is confirmed distinct from and additional to the module's own
+  `--selftest` self-check mode.
+- [ ] **Grounding evidence, group 4 — verbatim precedent/vocabulary strings (added for
+  wiring-coverage completeness, exact identifiers from Chosen mechanism/Key design decisions):**
+  confirmed real via direct source read — lease acquisition is `fs.writeFileSync(path, json, {flag:
+  'wx'})` (equivalently `fs.openSync(path, 'wx')`), throwing `EEXIST` on contention; `gate-event-
+  store.ts`'s `appendGateEvent()` uses plain `appendFileSync`, confirmed NOT a live `wx` precedent;
+  the real precedents are `frontmatter-store-base.ts` and `packages/quay-native/src/store.ts`'s
+  `acquireLock`/`releaseLock`/`withLock`. The lease record shape's real field vocabulary
+  (`key, ownerExecutionId, attempt, stage, fencingToken, baseCommit, acquiredAt, leaseUntil,
+  heartbeatAt`) is grounded against `docs/proposals/quay-milestone-workflow-stage-pipelining-and-
+  leases.md` (its distinct §4.1 `MilestoneRunIdentity` interface is NOT this shape's source,
+  correcting an earlier draft's citation), scoped to the `(workspace, taskId)` key; `flock` (the
+  OS-level alternative) is rejected per Key design decisions. `ownerExecutionId` is the real
+  `$CLAUDE_CODE_SESSION_ID` per the same `_sessionIdInstruction` provenance pattern
+  `prepare-milestone.js`/`execute-milestone.js` already use elsewhere.
+- [ ] **Grounding evidence, group 5 — exhaustive verbatim identifier confirmation (added for
+  mechanical wiring-coverage completeness; every identifier below is independently confirmed real
+  via direct source read, not asserted):** `fs.writeFileSync(path, json, {flag: 'wx'})` /
+  `fs.openSync(path, 'wx')` / `EEXIST` / `wx` are the real lease-acquisition primitives;
+  `gate-event-store.ts`'s `appendGateEvent()` uses plain `appendFileSync` (confirmed NOT a `wx`
+  precedent); `packages/quay-native/src/store.ts`'s `acquireLock`/`releaseLock`/`withLock` and
+  `frontmatter-store-base.ts` are the real `wx` precedents.
+  `docs/proposals/quay-milestone-workflow-stage-pipelining-and-leases.md` (not its distinct
+  `MilestoneRunIdentity` interface) is the real source of the lease field vocabulary
+  `key, ownerExecutionId, attempt, stage, fencingToken, baseCommit, acquiredAt, leaseUntil, heartbeatAt`,
+  scoped to the `(workspace, taskId)` key, with `flock` the real rejected OS-level alternative.
+  `ownerExecutionId` is the real
+  `$CLAUDE_CODE_SESSION_ID` per the real `_sessionIdInstruction` pattern both `prepare-milestone.js`
+  and `execute-milestone.js` use. `--renew` fires, confirmed real, at every one of
+  `Admission`/`Adjudicate`/`ProposalReview`/`PlanAuthor`/`PlanCheck`/`Receipt` (including the
+  `ProposalAuthors`-adjacent and `Receipt`-adjacent boundaries specifically), against the real,
+  unconditional (`highRisk`-independent) `MAX_PLANCHECK_ROUNDS = 3` and the real, `highRisk`-gated
+  `_policyCaps.softBudgetMs`.
 
 ## Definition of Done
 

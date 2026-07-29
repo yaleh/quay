@@ -49,6 +49,37 @@ test("extractMechanismClaims: multiple independent claims in one section", () =>
   assert.equal(claims.length, 2);
 });
 
+// ── M199/DIR-126-A finding 8ab695df / DIR-126-B scope: a dense, un-blank-lined Markdown bullet
+// list merges multiple distinct wiring claims into one giant sentence under the old punctuation-
+// only splitter, hiding real per-bullet claims from independent AC coverage. Confirmed real
+// recurrence: M198/DIR-119-D1 (26 blocking findings) and M199/DIR-126-A (13 blocking findings),
+// same root cause, neither content. ──
+test("extractMechanismClaims: a dense, un-blank-lined bullet list splits into one claim PER bullet, not one merged claim", () => {
+  const text =
+    "Every terminal return releases the lease:\n" +
+    "- `ProposalAuthors` invokes `--release` on exit.\n" +
+    "- `Adjudicate` invokes `--release` on exit.\n" +
+    "- `PlanCheck` invokes `--release` on exit.\n";
+  const claims = extractMechanismClaims(text);
+  assert.equal(claims.length, 3, "each bullet is its own claim, not one 3-identifier merged claim");
+  assert.deepEqual(claims[0].identifiers.sort(), ["--release", "ProposalAuthors"]);
+  assert.deepEqual(claims[1].identifiers.sort(), ["--release", "Adjudicate"]);
+  assert.deepEqual(claims[2].identifiers.sort(), ["--release", "PlanCheck"]);
+});
+
+test("extractMechanismClaims: a continuation line under a bullet stays part of that bullet's own claim", () => {
+  const text =
+    "- `Admission` invokes `prepare-admission-check.ts`\n" +
+    "  before `ProposalAuthors` runs.\n" +
+    "- `Preflight` invokes `wiring-coverage-check.ts` before `PlanCheck`.\n";
+  const claims = extractMechanismClaims(text);
+  assert.equal(claims.length, 2);
+  assert.deepEqual(
+    claims[0].identifiers.sort(),
+    ["Admission", "ProposalAuthors", "prepare-admission-check.ts"]
+  );
+});
+
 // ── gap-wiring-coverage-check-owns-false-positive (M198/DIR-119-D1): possessive "own" is not an
 // ownership-verb claim. This repo's own authoring convention uses "X's own Y" constantly for
 // cross-referencing (CLAUDE.md and every task body); the `owns?` alternative must not fire on it. ──
