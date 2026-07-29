@@ -108,8 +108,8 @@ not on a not-yet-written Proposal draft:
   backtick-quoted tokens.
 - `preflight-touches-mismatch` compares the task's `## Touches` glob list against the charter's own
   Touches reference (many DIR-126-family charters, including this task's own, delegate via "Per
-  `tasks/X.md`'s own Touches list — not duplicated here"; a charter that instead declares a genuinely
-  distinct list is the mismatch case). The **same** function is invoked a second time, with different
+  `tasks/<taskId>.md`'s own Touches list — not duplicated here"; a charter that instead declares a
+  genuinely distinct list is the mismatch case). The **same** function is invoked a second time, with different
   inputs, at Plan-shape time — the just-authored Plan's aggregate `- Files:` lines (unioned across all
   `### Stage N` blocks) vs. the task's `## Touches` globs — one implementation, two call sites.
 - `preflight-missing-precedent` scans every commit-hash-shaped and file-path-shaped backtick token in
@@ -450,31 +450,51 @@ Acceptance Criteria items to at least one stage. Supersedes the prior N/A placeh
 
 ## Acceptance Criteria
 
-- [ ] **Most important — real production wiring, not agent-prompt guidance:** a grep/import-graph
+- [x] **Most important — real production wiring, not agent-prompt guidance:** a grep/import-graph
   check shows `prepare-admission-check.ts`'s `--preflight`/`--preflight-plan` modes have REAL
   production callsites from `prepare-milestone.js`'s (both mirrors) new `Preflight` phase — not
   zero importers, not `--selftest`-only reachability. This item alone, if unmet, fails the whole
-  child regardless of how many other items pass.
-- [ ] **Preflight precedes agents:** fixtures for all five named classes (merged Markdown claim
-  blocks, stale AC/DoD references, Proposal/Plan/Touches disagreement, non-existent claimed
-  precedent/imports, invalid Plan command/path shapes) each terminate with their own stable code
-  before the first agent dispatch that can act on their already-available input
-  (`ProposalAuthors` for the first four, `PlanCheck` round 1 for the Plan-shape check) — real
-  journal evidence, not asserted. A rejected content preflight shows at most one bounded
-  mechanical runner and zero content-generation/review agents: real journal evidence confirms zero
-  `proposal-author-*`, `adjudicate`, `proposal-review`, or `plan-check-*` dispatches on a
-  content-preflight rejection. Valid M195/M197-shaped fixtures remain GREEN.
-- [ ] **Repair/calibrate before fail-closed activation:** for each of the five NEW preflight
-  detectors, real known-bad, known-good, and ambiguous-valid corpora prove the detector's blocking
-  boundary before the production `Preflight` callsite is allowed to enforce it. (The M198/M199
-  `splitSentences` merged-list class is a separate, already-closed precedent — commit `335317d`,
-  landed and calibrated before this child's Build — cited here only as the pattern to follow, not
-  as remaining work; a deliberately restored old splitter turning that specific regression test RED
-  is evidence the EXISTING fix is real, not evidence this child built something new.)
-- [ ] **No heuristic overreach:** an ambiguous-but-valid fixture for each of the five checks is
-  confirmed to emit its `preflight-ambiguous-<check>` code, `reviewer-required`, non-blocking — not
-  silently rejected and not silently passed.
-- [ ] **`wiring-coverage-check.ts`'s merged-list false-positive class is closed at its root
+  child regardless of how many other items pass. **Confirmed (2026-07-29 adversarial audit,
+  `milestones/M201/audits/iteration-0-acceptance-audit.md` §1.1):** `git show 3552787 --
+  .claude/workflows/prepare-milestone.js` shows real `phase('Preflight')` callsites strictly
+  bracketing `ProposalAuthors`/`PlanCheck`; `grep -rn selftest prepare-admission-check.ts` = zero
+  hits; independently reproduced via a live-`AsyncFunction` scratch harness.
+- [x] **Preflight precedes agents:** fixtures for
+  all five named classes (merged Markdown claim blocks, stale AC/DoD references, Proposal/Plan/Touches
+  disagreement, non-existent claimed precedent/imports, invalid Plan command/path shapes) each
+  terminate with their own stable code before the first agent dispatch that can act on their
+  already-available input (`ProposalAuthors` for the first four, `PlanCheck` round 1 for the
+  Plan-shape check) — real journal evidence, not asserted. A rejected content preflight shows at
+  most one bounded mechanical runner and zero content-generation/review agents: real journal
+  evidence confirms zero `proposal-author-*`, `adjudicate`, `proposal-review`, or `plan-check-*`
+  dispatches on a content-preflight rejection (confirmed, reproduced independently).
+  **Fixed (2026-07-29, `gap-preflight-bare-filename-false-positive`):** the audit's §1.2 finding —
+  `preflight-stale-ac-refs`/`preflight-missing-precedent` hard-blocking on this repo's dominant
+  bare-filename authoring convention — was a real defect in `_scanStaleReferences()`'s literal
+  repo-root-relative path join, fixed with a repo-wide basename fallback (`git ls-files`, computed
+  once per scan). Re-dogfooding the exact production CLI invocation against DIR-126-B's own real
+  task+charter now returns `{ok:true, findings:[]}` (was 2 blocking findings). Valid M195/M197-shaped
+  fixtures remain GREEN, confirmed via 57/57 real test run plus the live dogfood re-run.
+- [x] **Repair/calibrate before fail-closed
+  activation:** for each of the five NEW preflight detectors, real known-bad, known-good, and
+  ambiguous-valid corpora prove the detector's blocking boundary before the production `Preflight`
+  callsite is allowed to enforce it. (The M198/M199 `splitSentences` merged-list class is a
+  separate, already-closed precedent — commit `335317d`, landed and calibrated before this child's
+  Build — cited here only as the pattern to follow, not as remaining work; a deliberately restored
+  old splitter turning that specific regression test RED is evidence the EXISTING fix is real, not
+  evidence this child built something new.) **Fixed (2026-07-29):** the audit §1.3 finding — the
+  synthetic fixture corpus never exercised this repo's own dominant bare-filename convention, so the
+  calibration boundary it "proved" was wrong against real content — is closed by the same
+  `_scanStaleReferences()` basename-fallback fix as the AC item above, plus two new regression tests
+  exercising exactly the real-content shape the synthetic corpus missed.
+- [x] **No heuristic overreach:** an
+  ambiguous-but-valid fixture for each of the five checks is confirmed to emit its
+  `preflight-ambiguous-<check>` code, `reviewer-required`, non-blocking — not silently rejected and
+  not silently passed. Per-fixture ambiguous routing works (5/5 tests pass). **Fixed (2026-07-29):**
+  the audit §1.4 finding — real valid content (DIR-126-A/DIR-126-B's own task+charter) was
+  hard-blocked instead of correctly passing — is closed by the same fix; DIR-126-B's own real
+  content now dogfoods clean rather than needing a `reviewer-required` fallback at all.
+- [x] **`wiring-coverage-check.ts`'s merged-list false-positive class is closed at its root
   (ALREADY SATISFIED — commit `335317d`, `gap-wiring-coverage-check-merged-markdown-list`, `status:
   done`, landed before this child's Build; this item verifies it stays true, not that Build
   produces it):** a RED fixture reproducing the exact M198/DIR-119-D1 defect (dense, un-blank-lined
@@ -482,13 +502,16 @@ Acceptance Criteria items to at least one stage. Supersedes the prior N/A placeh
   then GREEN under the fixed version — and the full pre-existing `wiring-coverage-check.test.mjs`
   suite (18/18 per the current real run, including the two regression tests added by `335317d` and
   one more added by `44ca1b3`) stays green, confirming no regression on already-passing cases.
-- [ ] Canonical and `plugin/` mirrors of `prepare-admission-check.ts`, `wiring-coverage-check.ts`,
+  **Confirmed (audit §1.5):** `bash scripts/test.sh experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs` → 18/18 pass, independently re-run.
+- [x] Canonical and `plugin/` mirrors of `prepare-admission-check.ts`, `wiring-coverage-check.ts`,
   `prepare-milestone.js`, and their test files are byte-identical — `cmp`/`sync-vendor.sh --check`.
-- [ ] Every preflight verdict records a stable checker policy version/hash; changing the detector
+  **Confirmed (audit §1.6):** `cmp` on all four touched pairs identical; `bash plugin/scripts/sync-vendor.sh --check` → CLEAN.
+- [x] Every preflight verdict records a stable checker policy version/hash; changing the detector
   or its blocking policy changes that value and makes an older [[DIR-126-C]] cached terminal
-  ineligible for reuse.
+  ineligible for reuse. **Confirmed (audit §1.7):** `PREFLIGHT_POLICY_VERSION = "preflight-v1"`
+  present on every finding in both the test suite and this audit's own dogfooding runs.
 
-- [ ] **Grounding evidence for the Problem-framing/Chosen-mechanism claims above (added for
+- [x] **Grounding evidence for the Problem-framing/Chosen-mechanism claims above (added for
   wiring-coverage completeness):** confirmed via direct source read — commit `703e014`
   (`gap-wiring-coverage-check-owns-false-positive`) already fixed `WIRING_VERB_RE`'s possessive-
   "own" false-positive class; commit `f3d870b` (M198, this same overall `prepare-milestone`
@@ -508,22 +531,22 @@ precedes agents"/"Reuse, never reimplement" AC bullets above, not a second, inde
 real coverage. Kept because the checker is fail-closed by design (an uncovered claim blocks), not
 because each is itself a distinct new architectural commitment.
 
-- [ ] **Grounding evidence 1 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `wiring-coverage-check.ts` `703e014` `WIRING_VERB_RE` `f3d870b` `335317d` `splitListAwareBlocks()` `splitSentences` `cmp` `wiring-coverage-check.test.mjs` `44ca1b3`.
-- [ ] **Grounding evidence 2 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `preflight-missing-precedent` `git cat-file -e` `fs.existsSync` `reviewer-required`.
-- [ ] **Grounding evidence 3 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `--preflight-plan` `agent()` `Admission` `ProposalReview` `wiring-coverage-check` `PlanAuthor` `PlanCheck`.
-- [ ] **Grounding evidence 4 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `preflight-touches-mismatch` `## Touches` `tasks/X.md`.
-- [ ] **Grounding evidence 5 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `- Files:` `### Stage N` `## Touches`.
-- [ ] **Grounding evidence 6 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `preflight-merged-markdown-claims` `wiring-coverage-check.ts` `splitListAwareBlocks` `splitSentences`.
-- [ ] **Grounding evidence 7 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `preflight-touches-mismatch` `task-schema.ts` `checkTouches()` `checkTouches`.
-- [ ] **Grounding evidence 8 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `blocking: true` `Preflight`.
-- [ ] **Grounding evidence 9 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `revision-needed` `preflight-rejected` `Preflight` `ProposalAuthors` `proposal-author-*` `adjudicate` `proposal-review` `plan-check-*`.
-- [ ] **Grounding evidence 10 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `revision-needed` `preflight-rejected` `Preflight` `PlanCheck` `plan-check-round-*`.
-- [ ] **Grounding evidence 11 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `Preflight` `--preflight-plan` `ProposalAuthors` `Receipt`.
-- [ ] **Grounding evidence 12 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `prepare-milestone.js` `Preflight` `prepare-admission-check.ts --preflight` `agent()` `Admission` `ProposalAuthors` `parallel(...)`.
-- [ ] **Grounding evidence 13 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `prepare-milestone.js` `PlanAuthor` `PlanCheck` `prepare-admission-check.ts --preflight-plan` `agent()` `plan-check-round-1`.
-- [ ] **Grounding evidence 14 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `revision-needed` `preflight-rejected` `proposal-author-*` `adjudicate` `proposal-review` `plan-check-*`.
-- [ ] **Grounding evidence 15 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `revision-needed` `preflight-rejected` `plan-check-round-*`.
-- [ ] **Grounding evidence 16 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `preflight-touches-mismatch` `checkTouches()` `task-schema.ts` `ProposalAuthors` `PlanCheck`.
+- [x] **Grounding evidence 1 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `wiring-coverage-check.ts` `703e014` `WIRING_VERB_RE` `f3d870b` `335317d` `splitListAwareBlocks()` `splitSentences` `cmp` `wiring-coverage-check.test.mjs` `44ca1b3`.
+- [x] **Grounding evidence 2 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `preflight-missing-precedent` `git cat-file -e` `fs.existsSync` `reviewer-required`.
+- [x] **Grounding evidence 3 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `--preflight-plan` `agent()` `Admission` `ProposalReview` `wiring-coverage-check` `PlanAuthor` `PlanCheck`.
+- [x] **Grounding evidence 4 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `preflight-touches-mismatch` `## Touches` `tasks/<taskId>.md`.
+- [x] **Grounding evidence 5 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `- Files:` `### Stage N` `## Touches`.
+- [x] **Grounding evidence 6 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `preflight-merged-markdown-claims` `wiring-coverage-check.ts` `splitListAwareBlocks` `splitSentences`.
+- [x] **Grounding evidence 7 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `preflight-touches-mismatch` `task-schema.ts` `checkTouches()` `checkTouches`.
+- [x] **Grounding evidence 8 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `blocking: true` `Preflight`.
+- [x] **Grounding evidence 9 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `revision-needed` `preflight-rejected` `Preflight` `ProposalAuthors` `proposal-author-*` `adjudicate` `proposal-review` `plan-check-*`.
+- [x] **Grounding evidence 10 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `revision-needed` `preflight-rejected` `Preflight` `PlanCheck` `plan-check-round-*`.
+- [x] **Grounding evidence 11 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `Preflight` `--preflight-plan` `ProposalAuthors` `Receipt`.
+- [x] **Grounding evidence 12 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `prepare-milestone.js` `Preflight` `prepare-admission-check.ts --preflight` `agent()` `Admission` `ProposalAuthors` `parallel(...)`.
+- [x] **Grounding evidence 13 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `prepare-milestone.js` `PlanAuthor` `PlanCheck` `prepare-admission-check.ts --preflight-plan` `agent()` `plan-check-round-1`.
+- [x] **Grounding evidence 14 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `revision-needed` `preflight-rejected` `proposal-author-*` `adjudicate` `proposal-review` `plan-check-*`.
+- [x] **Grounding evidence 15 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `revision-needed` `preflight-rejected` `plan-check-round-*`.
+- [x] **Grounding evidence 16 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read and/or CLI dispatch — `preflight-touches-mismatch` `checkTouches()` `task-schema.ts` `ProposalAuthors` `PlanCheck`.
 
 ## Definition of Done
 
@@ -532,16 +555,26 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
 
 - [ ] Landed on `master` under human-steered discipline (this touches
   `.claude/workflows/prepare-milestone.js` and the shared `wiring-coverage-check.ts` module both
-  DIR-117 and DIR-122 depend on).
-- [ ] A real, non-fixture `prepare-milestone` dispatch against a task with a deliberately-seeded
+  DIR-117 and DIR-122 depend on). **§1.2's false-positive defect is now fixed
+  (`gap-preflight-bare-filename-false-positive`) — this item correctly remains open pending Land
+  itself completing.**
+- [x] A real, non-fixture `prepare-milestone` dispatch against a task with a deliberately-seeded
   known-bad Proposal is exercised end to end, showing `preflight-rejected` before any author agent
   is spent, with journal output showing the bounded mechanical runner separately, not asserted.
-- [ ] RED/GREEN evidence exists for all five preflight classes plus the `splitSentences` fix.
-- [ ] Fail-closed activation evidence proves detector calibration completed before enforcement;
-  no uncalibrated regex verdict is blocking in production.
-- [ ] A fresh independent audit confirms the real production callsite from `prepare-milestone.js`'s
+  **Confirmed (audit §2.2), independently reproduced via a fresh scratch harness driving the real
+  workflow source against a freshly-authored known-bad task (not the Build's own harness).**
+- [x] RED/GREEN evidence exists for all five preflight classes plus the `splitSentences` fix.
+  **Confirmed (audit §2.3):** 55/55 + 18/18 test runs, re-executed independently.
+- [x] Fail-closed activation evidence proves detector calibration
+  completed before enforcement; no uncalibrated regex verdict is blocking in production. **Fixed
+  (2026-07-29):** audit §2.4's finding — the calibration boundary was wrong against real content —
+  is closed by the same `_scanStaleReferences()` fix; see AC "Repair/calibrate before fail-closed
+  activation" above.
+- [x] A fresh independent audit confirms the real production callsite from `prepare-milestone.js`'s
   `Preflight` phase, not merely unit-test reachability, and confirms the Plan-shape-timing reading
-  either matches the reviewer's own intent or was corrected per their feedback.
+  either matches the reviewer's own intent or was corrected per their feedback. **This item itself
+  is satisfied by `milestones/M201/audits/iteration-0-acceptance-audit.md` §1.1/§2.5 — but the
+  audit's OVERALL verdict is REFUTED on other grounds (§1.2), so the child as a whole is not done.**
 
 ## Human verification when exp5 marks this DIR done
 

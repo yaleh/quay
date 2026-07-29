@@ -1,0 +1,93 @@
+---
+id: gap-preflight-bare-filename-false-positive
+title: M201/DIR-126-B's new preflight-stale-ac-refs/preflight-missing-precedent
+  detectors hard-blocked on this repo's own dominant bare-filename authoring
+  convention -- fixed with a repo-wide basename fallback before declaring a
+  file-shaped token stale
+status: done
+labels:
+  - gap
+  - milestone-candidate
+extra:
+  schema: v1
+  acceptance: node --experimental-strip-types --test experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs
+---
+## Proposal
+
+Make `prepare-admission-check.ts`'s shared `_scanStaleReferences()` helper (used by both
+`preflightStaleAcRefs` and `preflightMissingPrecedent`) fall back to a repo-wide basename search
+(via `git ls-files`, computed once per scan) before declaring a file-shaped backtick token stale —
+a token whose basename resolves anywhere in the tracked tree is real, regardless of which directory
+it actually lives in.
+
+## Finding
+
+Discovered 2026-07-29 by the M201/DIR-126-B iteration-0 adversarial acceptance audit
+(`milestones/M201/audits/iteration-0-acceptance-audit.md`, verdict REFUTED): dogfooding the real
+production `--preflight` CLI invocation against DIR-126-B's own real task+charter file (and
+DIR-126-A's) rejected BOTH — `` `prepare-admission-check.ts` ``, `` `prepare-milestone.js` ``,
+`` `wiring-coverage-check.ts` ``, `` `task-schema.ts` ``, etc. are this repo's dominant authoring
+convention for naming a file in prose (bare filename, no directory component), but the pre-fix
+`_scanStaleReferences()` only checked `fs.existsSync(path.join(workspace, tok))` — a literal
+repo-root-relative join — so any bare filename whose real location is NOT the repo root (i.e.
+almost every file in this repo, which lives under `experiments/quay-perpetual-stream/scripts/`,
+`packages/*/src/`, etc.) was wrongly flagged as a dangling reference. Landed as-is, the new
+`Preflight` phase would have rejected essentially any ordinarily-written task before any author
+agent ever ran — the opposite of the feature's purpose.
+
+## Requested action
+
+1. Add `_repoBasenames(workspace)` to `prepare-admission-check.ts` (+ `plugin/scripts/` mirror):
+   `git ls-files` once per scan, indexed by `path.basename()`.
+2. In `_scanStaleReferences()`, before declaring a file-shaped token stale, check the basename index
+   as a fallback when the literal join fails.
+3. Add regression tests: a bare filename that resolves elsewhere in the real repo tree (not at the
+   literal joined path) is NOT stale, for both `preflightStaleAcRefs` and `preflightMissingPrecedent`.
+4. Re-verify no regression: full `scripts/test.sh` stays green; DIR-126-B's own real task now
+   dogfoods clean (`--preflight` against `tasks/DIR-126-B.md` returns `{ok:true, findings:[]}`).
+
+## Acceptance Criteria
+
+- [x] `_repoBasenames()`/the basename-fallback check are real, wired into `_scanStaleReferences()` in
+  both the canonical `experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts` and the
+  byte-identical `plugin/scripts/prepare-admission-check.ts` mirror (`cmp`, zero output).
+- [x] Two new regression tests confirm the fix (one per detector sharing the helper): a bare
+  filename that exists elsewhere in the repo tree is not flagged stale/missing. Full suite: 57/57
+  pass (`node --experimental-strip-types --test experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs`).
+- [x] Real, non-fixture evidence: dogfooding `--preflight --taskId DIR-126-B --charterFile
+  experiments/quay-perpetual-stream/charters/M201-dir126b-deterministic-preflight.md --workspace .`
+  against the real task/charter files goes from `{ok:false, ...2 blocking findings...}` (pre-fix) to
+  `{ok:true, findings:[]}` (post-fix, after also correcting one placeholder-shaped token in the task
+  body itself — see `tasks/DIR-126-B.md`'s `tasks/<taskId>.md` correction, a separate content fix).
+- [x] No regression: `wiring-coverage-check.test.mjs` (18/18) and the full `scripts/test.sh` suite
+  stay green.
+
+## Definition of Done
+
+Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
+
+- [x] Landed on `master` under human-steered discipline (this touches the shared
+  `prepare-admission-check.ts` module DIR-126-A/DIR-126-B/DIR-126-C both depend on).
+- [x] Real, non-fixture evidence: M201/DIR-126-B's own real task+charter dogfood run went from
+  REFUTED-causing (2 blocking false positives) to clean, confirmed via direct before/after re-run of
+  the real CLI against the real task file.
+
+## Known follow-up (not fixed here, filed for completeness)
+
+Dogfooding DIR-126-A's own (already-landed, already-audited) task text surfaced a second, narrower
+false positive: `preflight-missing-precedent` flagged an internal ProposalReview finding-id
+(`f76ae150`, an 8-hex-char ledger identifier) as a stale commit citation, because finding-ids and
+abbreviated commit SHAs are visually indistinguishable by the `_COMMIT_HASH_RE` regex. This is NOT
+fixed here: DIR-126-A is already `status: done` and will never be re-run through `Preflight` (the
+phase only gates an in-progress `prepare-milestone` dispatch), so there is no operational risk
+today — but a FUTURE task citing a finding-id in prose could hit the same collision. Left as a
+known, narrower precision limitation for a future child (likely [[DIR-126-C]] or a dedicated gap)
+to address, rather than blocking this fix on a fully general commit-hash-vs-finding-id
+disambiguation heuristic.
+
+## Touches
+
+- experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts
+- plugin/scripts/prepare-admission-check.ts
+- experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs
+- plugin/test/prepare-admission-check.test.mjs

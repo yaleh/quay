@@ -374,6 +374,20 @@ describe("preflightStaleAcRefs", () => {
     assert.equal(verdict.blocking, false);
     assert.equal(verdict.disposition, "reviewer-required");
   });
+
+  // ── M201/iteration-0 adversarial audit REFUTED finding: dogfooding this exact CLI against
+  // DIR-126-B's/DIR-126-A's own real, valid task files rejected BOTH — a bare filename reference
+  // (this repo's dominant authoring convention, no directory component) is not at the repo root, so
+  // the pre-fix literal-join check false-positived on essentially every ordinarily-written task. ──
+  test("known-good (real defect regression): a bare filename that exists elsewhere in the repo tree (not at the literal joined path) is NOT stale", () => {
+    const taskBody = [
+      "## Acceptance Criteria",
+      "",
+      "- [ ] Real production wiring confirmed: `prepare-admission-check.ts` implements the detector.",
+      "",
+    ].join("\n");
+    assert.equal(preflightStaleAcRefs({ taskBody, workspace: REPO_ROOT }), null);
+  });
 });
 
 describe("preflightMissingPrecedent", () => {
@@ -400,6 +414,18 @@ describe("preflightMissingPrecedent", () => {
     assert.equal(verdict.code, "preflight-ambiguous-missing-precedent");
     assert.equal(verdict.blocking, false);
     assert.equal(verdict.disposition, "reviewer-required");
+  });
+
+  // ── Same real-defect regression as preflightStaleAcRefs above — the two detectors share
+  // _scanStaleReferences(), so both needed the fix and both need the regression test. ──
+  test("known-good (real defect regression): a bare filename that exists elsewhere in the repo tree is NOT a missing precedent", () => {
+    const taskBody = [
+      "## Finding",
+      "",
+      "`wiring-coverage-check.ts` already exports the reused splitting helpers.",
+      "",
+    ].join("\n");
+    assert.equal(preflightMissingPrecedent({ taskBody, workspace: REPO_ROOT }), null);
   });
 
   test("preflight-missing-precedent and preflight-stale-ac-refs share the SAME resolution primitive on different sections (no second implementation)", () => {

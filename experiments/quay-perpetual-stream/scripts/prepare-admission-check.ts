@@ -273,6 +273,28 @@ function _gitCommitExists(workspace, sha) {
   }
 }
 
+// Real, reproducible defect found by the M201/iteration-0 adversarial audit dogfooding this CLI
+// against DIR-126-B's/DIR-126-A's own real task+charter files (both rejected): a bare filename
+// reference (e.g. `` `prepare-admission-check.ts` ``, no directory component) is this repo's
+// DOMINANT authoring convention for naming a file in prose — but the file it names almost never
+// lives at the repo root, so a literal `fs.existsSync(join(workspace, tok))` check on the bare
+// token alone false-positives on essentially every ordinarily-written task. Fixed by falling back
+// to a repo-wide basename search (via `git ls-files`, computed once per scan, not once per token)
+// before declaring a file-shaped token stale — a token whose basename resolves ANYWHERE in the
+// tracked tree is real, not dangling, regardless of which directory it lives in.
+function _repoBasenames(workspace) {
+  try {
+    const out = execFileSync("git", ["-C", workspace, "ls-files"], { stdio: ["ignore", "pipe", "ignore"] }).toString();
+    const set = new Set();
+    for (const f of out.split("\n")) {
+      if (f) set.add(path.basename(f));
+    }
+    return set;
+  } catch {
+    return null;
+  }
+}
+
 // Scans `text`'s backtick-quoted tokens for commit-hash-shaped / file-path-shaped references and
 // resolves each against `workspace`. Returns { stale: [{token,kind}], ambiguous: boolean } —
 // `ambiguous` is true iff a commit-hash-shaped token was found but `workspace` is not a git repo
@@ -282,12 +304,15 @@ function _scanStaleReferences(text, workspace) {
   const stale = [];
   let sawCommitShaped = false;
   const gitRepo = _isGitRepo(workspace);
+  const basenames = gitRepo ? _repoBasenames(workspace) : null;
   for (const tok of new Set(tokens)) {
     if (_COMMIT_HASH_RE.test(tok)) {
       sawCommitShaped = true;
       if (gitRepo && !_gitCommitExists(workspace, tok)) stale.push({ token: tok, kind: "commit" });
     } else if (_FILE_PATH_RE.test(tok)) {
-      if (!fs.existsSync(path.join(workspace, tok))) stale.push({ token: tok, kind: "file" });
+      if (fs.existsSync(path.join(workspace, tok))) continue;
+      if (basenames && basenames.has(path.basename(tok))) continue;
+      stale.push({ token: tok, kind: "file" });
     }
   }
   return { stale, ambiguous: sawCommitShaped && !gitRepo };
