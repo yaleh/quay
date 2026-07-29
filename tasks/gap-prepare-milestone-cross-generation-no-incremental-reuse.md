@@ -1,0 +1,175 @@
+---
+id: gap-prepare-milestone-cross-generation-no-incremental-reuse
+title: "prepare-milestone.js's ProposalAuthors phase always independently
+  re-derives a Proposal from scratch on every fresh Workflow dispatch — DIR-125's
+  bounded-convergence guarantee only covers rounds WITHIN one generation, not a
+  redispatch after a prior generation's needs-human/crash, so the same format
+  defect can recur across generations without limit"
+status: todo
+labels:
+  - gap
+  - milestone-candidate
+  - human-steered
+parent: null
+children: []
+extra:
+  schema: v1
+---
+## Proposal
+
+Give `prepare-milestone.js` (or its caller) a way to redispatch against a task whose Proposal was
+already adjudicated in a prior generation — one that ended in `needs-human`/`split-recommended` or
+crashed mid-run — without re-running `ProposalAuthors`/`Adjudicate` from a blank slate. The new
+dispatch should start from the already-adjudicated Proposal (plus any fixes already applied to it)
+and re-enter at `ProposalReview`, not re-derive the Proposal independently again.
+
+## Finding
+
+Discovered 2026-07-28/29 during three consecutive real `prepare-milestone.js` dispatches for
+`DIR-119-D` (M196), each launched via a fresh `Workflow({scriptPath: ...})` call (never `resume`,
+per this repo's own M144 rule — external state, i.e. the task body, had changed between rounds):
+
+1. **Round 1** crashed mid-run (agent stalled 6× on all attempts, an infrastructure fault, not a
+   content failure). Its `Adjudicate` phase's `task_write` side effect had already landed before
+   the crash, leaving a freshly re-derived Proposal on disk. That Proposal's `## Acceptance
+   Criteria` list block had no blank lines between the `- **W1** ... - **W13**` bullets, so
+   `wiring-coverage-check.ts`'s sentence splitter (which only splits on `\n{2,}` or
+   period-plus-whitespace-plus-capital, never on a bare bullet-list newline) merged 10 of 11
+   claims into ones with no matching AC item.
+2. **Round 2** was manually repaired (paragraph-split the merged list, added matching AC items,
+   `wiring-coverage-complete`), committed, then redispatched fresh (round 1's crash meant no valid
+   run existed to resume from). Round 2's own `ProposalAuthors`/`Adjudicate` — three fresh authors,
+   re-deriving independently per `prepare-milestone.js` line 45's explicit instruction ("ground
+   your Proposal in the actual current repository state, **not in the existing task body's
+   possibly-thin Proposal**") — overwrote the manually repaired Proposal with a brand-new one that
+   had the SAME class of defect (un-blank-lined `## Mechanism-claim wiring ledger` bullets, 10 of
+   11 claims uncovered) plus a NEW factual error ("both `select-preflight.js` wrappers", when only
+   one such file exists in the repo).
+3. **Round 3** was manually repaired again (same fix pattern), committed, then redispatched fresh
+   for the same reason. Round 3's fresh re-derivation again produced `split-recommended` with 26
+   blocking findings — again the same root cause (un-blank-lined `Key design decisions`/`Risks and
+   mitigations`/`Acceptance-criteria coverage`/`Alternatives considered`/`Mechanism-claim wiring
+   ledger` list blocks), plus one new factual line-number citation error and a static-check gap in
+   the Reconcile-sole-writer claim.
+4. **`tasks/DIR-125.md`'s own text is explicit that this is a within-generation guarantee only**:
+   "Proposal authors and adjudicator run once **per generation**; subsequent rounds use a focused
+   reviser and independent delta reviewer" (Requested action item 1) and "the production workflow
+   cannot perform more than one full Proposal synthesis per generation without an explicit
+   scope/generation reset" (DoD clause, `fullSynthesisCount > 1` fails closed **within one
+   receipt**). DIR-125 never claims a NEW generation (a fresh `Workflow` dispatch, especially after
+   a crash or `needs-human` from a prior generation) reuses or incrementally revises a prior
+   generation's adjudicated Proposal — and the code matches this reading:
+   `.claude/workflows/prepare-milestone.js`'s `ProposalAuthors` phase has no parameter or code path
+   that accepts a "start from this existing Proposal" input; every dispatch — cold or warm — always
+   runs N independent authors against `task_get` and the charter file only.
+5. This is real, generalizable, and cheap to reproduce: `git log`'s three DIR-119-D-adjudication
+   commits (round 2's `9f4a80f`, round 3's `836fe9e`, plus the pre-round-1 charter/task commits) are
+   durable evidence that the exact same class of mechanical defect recurred three times in the same
+   session against the same task, purely because each fresh dispatch discarded the previous round's
+   manually-verified fix.
+6. Consequence for cost/throughput: DIR-125's own recorded M192/DIR-120 baseline was ~3h15m /
+   ~1.13M output tokens for 10 *within-generation* full-regeneration rounds — the defect DIR-125 was
+   built to close. This gap's three *cross-generation* redispatches for DIR-119-D consumed a
+   comparable order of magnitude (three full `ProposalAuthors`+`Adjudicate`+`ProposalReview` runs,
+   ~1.6M+ subagent tokens combined) for a structurally identical reason: no mechanism exists to
+   avoid re-deriving a Proposal a prior generation already fixed.
+
+## Requested action
+
+1. Add an explicit "resume from adjudicated Proposal" input to `prepare-milestone.js` (both
+   mirrors) — e.g. an optional `$a.resumeFromAdjudicatedProposal: true` flag, or detect that the
+   task's `## Proposal` already carries a `wiring-coverage-complete` verdict against its own `##
+   Acceptance Criteria` and the caller explicitly opts in — that skips `ProposalAuthors`/
+   `Adjudicate` entirely and enters directly at `ProposalReview` using the task's CURRENT `##
+   Proposal` as-is.
+2. Document the caller contract in `OUTER-LOOP.md` and this skill's own guidance: after a
+   `prepare-milestone` dispatch ends in `needs-human`/crash and a human (or an agent under
+   human-steered discipline) manually fixes the on-disk Proposal to resolve the findings, the NEXT
+   dispatch should pass the new resume flag rather than a bare fresh call — mirroring the existing
+   `resumeFromRunId` guidance for `Workflow` itself (CLAUDE.md's M144 rule), but at the
+   `prepare-milestone` domain-semantic level, not the underlying `Workflow` engine's cache level.
+3. Keep `fullSynthesisCount`'s existing meaning (count of times `ProposalAuthors`+`Adjudicate` ran)
+   accurate under the new path: a resumed dispatch that skips those phases must record
+   `fullSynthesisCount: 0` for its own run, distinct from a cold dispatch's `fullSynthesisCount: 1`,
+   so `validateConvergenceCounters`'s existing `fullSynthesisCount > 1` fail-closed check is not
+   silently defeated or misapplied across the resume boundary.
+4. Add a RED/GREEN fixture: RED — a fresh cold dispatch against a task whose Proposal already has
+   zero wiring-coverage findings still re-derives from scratch (today's behavior, wasteful but not
+   wrong); GREEN — the same task dispatched with the new resume flag reaches `ProposalReview`
+   without any `ProposalAuthors`/`Adjudicate` agent call in its journal.
+5. Do NOT weaken DIR-125's own within-generation guarantee (`fullSynthesisCount <= 1` per receipt)
+   to achieve this — the fix is a caller-facing skip path for genuinely re-derived-and-fixed
+   content, not a loosening of the bounded-convergence loop itself.
+
+## Acceptance Criteria
+- [ ] `prepare-milestone.js` (both `.claude/workflows/` and `plugin/workflows/` mirrors,
+  byte-identical) accepts an explicit resume-from-adjudicated-Proposal input and, when supplied,
+  its journal shows ZERO `proposal-author-*`/`adjudicate` agent dispatches — verified from a real
+  run's journal, not asserted.
+- [ ] A cold (non-resumed) dispatch's behavior is completely unchanged — verified by a real journal
+  still showing the existing N author + 1 adjudicator dispatch shape.
+- [ ] `fullSynthesisCount` is `0` for a resumed run and `1` for a cold run, and
+  `validateConvergenceCounters`'s existing fail-closed check is confirmed to still reject
+  `fullSynthesisCount > 1` regardless of which path produced the receipt.
+- [ ] RED/GREEN fixture evidence for both the cold-dispatch-always-rederives (RED, current/prior
+  behavior) and resume-flag-skips-rederivation (GREEN, new behavior) cases.
+- [ ] `OUTER-LOOP.md` and the `quay-task-to-plan`/preparation-related skill docs are updated to
+  instruct: after a `needs-human`/crashed `prepare-milestone` dispatch is manually repaired on
+  disk, the next dispatch should use the resume flag, not a bare fresh call.
+- [ ] A real reproduction: redispatch `prepare-milestone` for a task with a manually-fixed,
+  zero-finding Proposal using the new flag, and confirm it reaches `PlanAuthor`/`PlanCheck` without
+  discarding the fix.
+- [ ] **Resume-flag callsite is real, non-selftest (wiring):** verified via source read + real
+  journal — `prepare-milestone.js` (both mirrors) checks `$a.resumeFromAdjudicatedProposal: true`
+  before dispatching any `ProposalAuthors`/`Adjudicate` agent; when true and the task's current
+  `## Proposal` already carries a `wiring-coverage-complete` verdict against its own `##
+  Acceptance Criteria`, the workflow skips straight to `ProposalReview` — confirmed by a real
+  dispatch's journal containing zero `ProposalAuthors`/`Adjudicate` agent-call entries.
+- [ ] **OUTER-LOOP caller-contract update is real (wiring):** verified via grep of
+  `OUTER-LOOP.md` — its `prepare(c)` step text names the `resumeFromRunId`/`Workflow`-level
+  distinction from CLAUDE.md's M144 rule and explicitly instructs that after a
+  `prepare-milestone` dispatch ends `needs-human` (or crashes) and a human/agent manually repairs
+  the on-disk Proposal, the NEXT dispatch passes `resumeFromAdjudicatedProposal` rather than a
+  bare fresh call.
+- [ ] **`fullSynthesisCount` semantics hold across the resume boundary (wiring):** verified via
+  unit test — a resumed dispatch's receipt records `fullSynthesisCount: 0` (no
+  `ProposalAuthors`/`Adjudicate` ran), a cold dispatch's receipt records `fullSynthesisCount: 1`,
+  and `validateConvergenceCounters`'s existing `fullSynthesisCount > 1` fail-closed check is
+  confirmed, by a real fixture, to still reject a receipt claiming more than one full synthesis
+  regardless of which path (cold or resumed) produced it.
+- [ ] **Resume path never re-derives (wiring):** verified from a real journal — a resumed
+  dispatch's `ProposalReview` phase runs against the task's PRE-EXISTING `## Proposal` text
+  (byte-identical to what was on disk before dispatch), with no `ProposalAuthors`/`Adjudicate`
+  agent call appearing anywhere in the journal.
+
+## Definition of Done
+
+Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply. Per DIR-026
+Reading A, source code and prose claims alone are necessary but insufficient — real command output
+is required for every item above.
+
+- [ ] Landed on `master` under human-steered discipline (touches
+  `.claude/workflows/prepare-milestone.js`, a driver execution-chain script).
+- [ ] Real journal evidence (not asserted) for both the cold and resumed dispatch paths.
+- [ ] DIR-125's own `fullSynthesisCount <= 1`-per-receipt guarantee is confirmed unweakened by a
+  real fixture attempting to abuse the resume path to bypass it.
+
+## Human verification when exp5 marks this task done
+1. Can a human-repaired Proposal survive a redispatch of `prepare-milestone` without being
+   silently discarded and re-derived from scratch?
+2. Does the existing within-generation `fullSynthesisCount <= 1` guarantee still hold under the
+   new resume path?
+3. Is the caller contract (when to use the resume flag) documented somewhere an operator would
+   actually see it, not only in this task's own body?
+
+## Touches
+
+- .claude/workflows/prepare-milestone.js
+- plugin/workflows/prepare-milestone.js
+- experiments/quay-perpetual-stream/scripts/proposal-convergence.ts
+- plugin/scripts/proposal-convergence.ts
+- experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts
+- plugin/scripts/milestone-preparation-check.ts
+- experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs
+- plugin/test/prepare-milestone-convergence.test.mjs
+- experiments/quay-perpetual-stream/OUTER-LOOP.md
