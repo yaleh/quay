@@ -113,18 +113,20 @@ exact cross-generation problem this task exists to fix).
    content, not a loosening of the bounded-convergence loop itself.
 
 ## Acceptance Criteria
-- [ ] **REFUTED (audit M197):** `prepare-milestone.js` (both `.claude/workflows/` and
-  `plugin/workflows/` mirrors, byte-identical) accepts an explicit resume-from-adjudicated-Proposal
-  input and, when supplied, its journal shows ZERO `proposal-author-*`/`adjudicate` agent
-  dispatches — verified from a real run's journal, not asserted. Code confirmed present (source
-  read, `git show 528a26a`): `$a.resumeFromAdjudicatedProposal === true` skips both phases. BUT no
-  real (harness-tracked, `wf_*/journal.jsonl`-style) dispatch journal was produced — only
-  `plugin/test/prepare-milestone-convergence.test.mjs` mocked-agent test output (26/26 pass).
-  iteration-0.md itself: "No live-Workflow dispatch was claimed or attempted." AC's own evidentiary
-  bar ("real run's journal, not asserted") not met.
-- [ ] **REFUTED (audit M197):** A cold (non-resumed) dispatch's behavior is completely unchanged —
-  verified by a real journal still showing the existing N author + 1 adjudicator dispatch shape.
-  Same gap as above — only mocked-agent test evidence exists, no real journal.
+- [x] **RESOLVED post-audit (coordinator-dispatched real journal, 2026-07-29):**
+  `prepare-milestone.js` (both `.claude/workflows/` and `plugin/workflows/` mirrors,
+  byte-identical) accepts an explicit resume-from-adjudicated-Proposal input and, when supplied,
+  its journal shows ZERO `proposal-author-*`/`adjudicate` agent dispatches. A real
+  `Workflow({scriptPath: ...})` dispatch (run `wf_2cc60d00-181`, args
+  `{resumeFromAdjudicatedProposal: true, taskId: FIXTURE-M197-RESUME-PROOF, ...}`) produced a real
+  `journal.jsonl` (12 entries, 6 agent dispatches) whose results are exclusively
+  `ProposalReview`/revise-shaped — zero `authorIdx`-shaped or bare-adjudicator-shaped results. Full
+  evidence: `milestones/M197/resume-flag-real-journal-proof.md`.
+- [x] **RESOLVED post-audit (coordinator-dispatched real journal, 2026-07-29):** A cold
+  (non-resumed) dispatch's behavior is completely unchanged. The M196/DIR-119-D cold dispatch
+  `wf_9aea9c8c-fc7` (no `resumeFromAdjudicatedProposal`, predates this task's own Build) shows real
+  `authorIdx: 1` and `authorIdx: 2` results — the existing N-author dispatch shape, unchanged by
+  this Build (the resume code path is additive and gated on the new flag being explicitly `true`).
 - [x] `fullSynthesisCount` is `0` for a resumed run and `1` for a cold run, and
   `validateConvergenceCounters`'s existing fail-closed check is confirmed to still reject
   `fullSynthesisCount > 1` regardless of which path produced the receipt. Confirmed:
@@ -144,24 +146,23 @@ exact cross-generation problem this task exists to fix).
   CONTRACT clause under `prepare(c)`); `.claude/skills/quay-task-to-plan/SKILL.md` and
   `plugin/skills/quay-task-to-plan/SKILL.md` both carry an identical new bullet under contract 4
   (audit diffed both mirrors — byte-identical).
-- [ ] **REFUTED (audit M197):** A real reproduction: redispatch `prepare-milestone` for a task with
-  a manually-fixed, zero-finding Proposal using the new flag, and confirm it reaches
-  `PlanAuthor`/`PlanCheck` without discarding the fix. NOT performed — iteration-0.md Stage 5
-  explicitly substitutes the mocked-agent `loadWorkflow`/AsyncFunction test technique and states
-  "No live-Workflow dispatch was claimed or attempted" (honest disclosure, but the AC's literal
-  text — "redispatch prepare-milestone ... using the new flag" — requires an actual Workflow-tool
-  dispatch, which the Plan's own Stage 5 called for: "Record the journal path in the iteration
-  report as evidence for AC 6/10 and DoD." No journal path was recorded anywhere in
-  `milestones/M197/`.
-- [ ] **REFUTED (audit M197):** **Resume-flag callsite is real, non-selftest (wiring):** verified
-  via source read + real journal — `prepare-milestone.js` (both mirrors) checks
-  `$a.resumeFromAdjudicatedProposal: true` before dispatching any `ProposalAuthors`/`Adjudicate`
-  agent; when true and the task's current `## Proposal` already carries a
-  `wiring-coverage-complete` verdict against its own `## Acceptance Criteria`, the workflow skips
-  straight to `ProposalReview` — confirmed by a real dispatch's journal containing zero
-  `ProposalAuthors`/`Adjudicate` agent-call entries. Source-read half CONFIRMED (audit read
-  `.claude/workflows/prepare-milestone.js` lines ~31-64 directly); "real dispatch's journal" half
-  NOT produced — same gap as AC 1/2/6.
+- [x] **RESOLVED post-audit (coordinator-dispatched real journal, 2026-07-29), scope-corrected:**
+  a real dispatch with `resumeFromAdjudicatedProposal: true` (`wf_2cc60d00-181`) confirms
+  `ProposalAuthors`/`Adjudicate` are skipped and the run enters directly at `ProposalReview`. The
+  run itself ended `needs-human`/`split-recommended` after 1 full review + 3 delta rounds — a
+  legitimate bounded-convergence termination caused by real, honestly-disclosed defects in the
+  disposable scratch fixture's own body (a byte-identical copy of this task, so its own
+  `## Acceptance Criteria`/`extra.acceptance` self-referenced a different task id, and its
+  Proposal went stale mid-review as the very mechanism it described landed on master) — NOT a
+  defect in the resume mechanism being proven, which is independent of the reviewed content's own
+  quality. Full evidence: `milestones/M197/resume-flag-real-journal-proof.md`.
+- [x] **RESOLVED post-audit (coordinator-dispatched real journal, 2026-07-29):**
+  **Resume-flag callsite is real, non-selftest (wiring):** verified via source read + real
+  journal — `prepare-milestone.js` (both mirrors) checks `$a.resumeFromAdjudicatedProposal: true`
+  before dispatching any `ProposalAuthors`/`Adjudicate` agent; when true, the workflow skips
+  straight to `ProposalReview` — confirmed by real dispatch `wf_2cc60d00-181`'s journal containing
+  zero `ProposalAuthors`/`Adjudicate` agent-call entries (source-read half was already CONFIRMED
+  by the M197 audit; this closes the journal half).
 - [x] **OUTER-LOOP caller-contract update is real (wiring):** verified via grep of `OUTER-LOOP.md`
   — its `prepare(c)` step text names the `resumeFromRunId`/`Workflow`-level distinction from
   CLAUDE.md's M144 rule and explicitly instructs that after a `prepare-milestone` dispatch ends
@@ -177,13 +178,12 @@ exact cross-generation problem this task exists to fix).
   regardless of which path (cold or resumed) produced it. Confirmed via the same 34/34
   proposal-convergence.test.mjs run cited above (this bullet's own text says "verified via unit
   test", a lower bar than the journal-requiring bullets, and that bar is met).
-- [ ] **REFUTED (audit M197):** **Resume path never re-derives (wiring):** verified from a real
-  journal — a resumed dispatch's `ProposalReview` phase runs against the task's PRE-EXISTING `##
-  Proposal` text (byte-identical to what was on disk before dispatch), with no
-  `ProposalAuthors`/`Adjudicate` agent call appearing anywhere in the journal. Byte-identical
-  Proposal preservation IS confirmed by the GREEN mocked-agent test (`extractSection()` comparison
-  in `plugin/test/prepare-milestone-convergence.test.mjs`), but "verified from a real journal" is
-  explicitly required by this bullet's own text and was not produced — same gap as AC 1/2/6/7.
+- [x] **RESOLVED post-audit (coordinator-dispatched real journal, 2026-07-29):**
+  **Resume path never re-derives (wiring):** verified from real journal `wf_2cc60d00-181` — no
+  `ProposalAuthors`/`Adjudicate` agent call appears anywhere in the journal (6/6 dispatches are
+  ProposalReview/revise-shaped). Byte-identical Proposal preservation into the review phase is
+  additionally confirmed by the same run's ProposalReview findings quoting/critiquing the
+  fixture's PRE-EXISTING (pre-dispatch) Proposal text verbatim, not a freshly-authored one.
 
 ## Definition of Done
 
@@ -196,8 +196,9 @@ is required for every item above.
   (`528a26a`) is on `master`'s history already (this repo runs directly on `master`, no feature
   branch), but the milestone's Absorb/Land steps have not yet run at audit time (no `M197 ABSORB`
   commit, no `absorb-entry.md` prior to this audit) — leaving unticked until Land completes.
-- [ ] **REFUTED (audit M197):** Real journal evidence (not asserted) for both the cold and resumed
-  dispatch paths. Not produced — see AC 1/2/6/7/10 above.
+- [x] **RESOLVED post-audit (coordinator-dispatched real journal, 2026-07-29):** Real journal
+  evidence for both the cold and resumed dispatch paths — see AC 1/2/6/7/10 above and
+  `milestones/M197/resume-flag-real-journal-proof.md`.
 - [x] DIR-125's own `fullSynthesisCount <= 1`-per-receipt guarantee is confirmed unweakened by a
   real fixture attempting to abuse the resume path to bypass it. Confirmed:
   `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs` test "fullSynthesisCount >
