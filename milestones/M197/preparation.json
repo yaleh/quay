@@ -1,0 +1,58 @@
+{
+  "taskId": "gap-prepare-milestone-cross-generation-no-incremental-reuse",
+  "milestoneId": "M197",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M197-gap-prepare-milestone-resume.md",
+  "planFile": "docs/plans/M197-gap-prepare-milestone-resume.md",
+  "ledgerFile": null,
+  "hashes": {
+    "proposal": "894283bbac60ac47e7d5ba103bbda0eea50a013339c1f935bb4331a53f35fd86",
+    "charter": "bb425d86cdc86e495736b122de37a860ed4466b0bd2844887bdde98f6cebf732",
+    "plan": "f24877b433819ed71dd5ec29a0e94b6926ca0d881a3b5bcc676d6c7af5275c10",
+    "sources": {}
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [
+    ".claude/workflows/prepare-milestone.js",
+    "plugin/workflows/prepare-milestone.js",
+    "experiments/quay-perpetual-stream/scripts/proposal-convergence.ts",
+    "plugin/scripts/proposal-convergence.ts",
+    "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts",
+    "plugin/scripts/milestone-preparation-check.ts",
+    "experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs",
+    "plugin/test/prepare-milestone-convergence.test.mjs",
+    "experiments/quay-perpetual-stream/OUTER-LOOP.md",
+    "docs/plans/M197-gap-prepare-milestone-resume.md",
+    "milestones/M197/**"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+    },
+    "proposalReviewer": {
+      "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+    },
+    "planAuthor": {
+      "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78"
+      }
+    ],
+    "note": "hand-authored under direct human-steered instruction, not independent multi-agent review — same real session id for every role, honestly recorded (see charter Provenance honesty note)"
+  },
+  "convergence": null
+}

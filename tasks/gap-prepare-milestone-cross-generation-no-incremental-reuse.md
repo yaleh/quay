@@ -74,6 +74,13 @@ per this repo's own M144 rule — external state, i.e. the task body, had change
    ~1.6M+ subagent tokens combined) for a structurally identical reason: no mechanism exists to
    avoid re-deriving a Proposal a prior generation already fixed.
 
+## Plan
+
+`docs/plans/M197-gap-prepare-milestone-resume.md` (this milestone's own hand-authored Plan — per
+human-steered decision, dispatched directly via `execute-milestone.js` without a
+`prepare-milestone.js` run; ordinary `prepare-milestone` dispatch would ironically retrigger the
+exact cross-generation problem this task exists to fix).
+
 ## Requested action
 
 1. Add an explicit "resume from adjudicated Proposal" input to `prepare-milestone.js` (both
