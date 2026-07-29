@@ -1,0 +1,2 @@
+(empty diff above = zero changes to either execute-milestone.js file across this entire milestone's commit range, b663700..eaed20a)
+AC18 legacy golden-replay: this task's own execute-milestone.js dispatch for DIR-119-D1 itself (legacy {taskId,...} shape, no compositeManifestFile) ran through Verify/Prepared/Build/Audit/Gate/Land phases normally on the unmodified code path -- real, non-fixture confirmation the legacy single-task dispatch shape works exactly as before this milestone.

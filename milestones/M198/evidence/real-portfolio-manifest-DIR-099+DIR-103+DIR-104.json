@@ -1,0 +1,131 @@
+{
+  "manifest": {
+    "version": 1,
+    "candidateId": "composite:DIR-099+DIR-103+DIR-104",
+    "taskIds": [
+      "DIR-099",
+      "DIR-103",
+      "DIR-104"
+    ],
+    "phases": [
+      {
+        "id": "phase-DIR-099+DIR-103+DIR-104",
+        "taskIds": [
+          "DIR-099",
+          "DIR-103",
+          "DIR-104"
+        ],
+        "requires": [],
+        "auditShardIds": [
+          "shard-DIR-099+DIR-103+DIR-104-integration",
+          "shard-DIR-099-ac",
+          "shard-DIR-103-ac",
+          "shard-DIR-104-ac"
+        ],
+        "integrationInvariant": "fused members: DIR-099, DIR-103, DIR-104 | reason(s): overlapping Touches: README.md, packages/quay/bin/quay.ts; overlapping Touches: packages/quay/bin/quay.ts; overlapping Touches: packages/quay/bin/quay.ts"
+      }
+    ],
+    "auditShards": [
+      {
+        "id": "shard-DIR-099+DIR-103+DIR-104-integration",
+        "kind": "semantic-integration",
+        "taskIds": [
+          "DIR-099",
+          "DIR-103",
+          "DIR-104"
+        ]
+      },
+      {
+        "id": "shard-DIR-099-ac",
+        "kind": "task-ac",
+        "taskIds": [
+          "DIR-099"
+        ]
+      },
+      {
+        "id": "shard-DIR-103-ac",
+        "kind": "task-ac",
+        "taskIds": [
+          "DIR-103"
+        ]
+      },
+      {
+        "id": "shard-DIR-104-ac",
+        "kind": "task-ac",
+        "taskIds": [
+          "DIR-104"
+        ]
+      }
+    ],
+    "touches": [
+      "README.md",
+      "packages/quay/bin/quay.ts",
+      "packages/quay/src/gate/acceptance-runner.ts",
+      "packages/quay/src/gate/registry.ts",
+      "packages/quay/src/mcp-server.ts",
+      "packages/quay/test/acceptance.test.mjs"
+    ],
+    "semanticResources": [],
+    "landPolicy": "atomic"
+  },
+  "context": {
+    "candidateTaskIds": [
+      "DIR-099",
+      "DIR-103",
+      "DIR-104"
+    ],
+    "charterTaskIds": [
+      "DIR-099",
+      "DIR-103",
+      "DIR-104"
+    ],
+    "taskAcCounts": {
+      "DIR-099": 10,
+      "DIR-103": 8,
+      "DIR-104": 8
+    },
+    "taskTouches": {
+      "DIR-099": [
+        "README.md",
+        "packages/quay/bin/quay.ts"
+      ],
+      "DIR-103": [
+        "README.md",
+        "packages/quay/bin/quay.ts",
+        "packages/quay/src/gate/acceptance-runner.ts",
+        "packages/quay/src/mcp-server.ts",
+        "packages/quay/test/acceptance.test.mjs"
+      ],
+      "DIR-104": [
+        "packages/quay/bin/quay.ts",
+        "packages/quay/src/gate/registry.ts"
+      ]
+    },
+    "taskSemanticResources": {
+      "DIR-099": [],
+      "DIR-103": [],
+      "DIR-104": []
+    },
+    "forbiddenEdges": [
+      {
+        "a": "DIR-099",
+        "b": "DIR-103",
+        "kind": "shared-implementation"
+      },
+      {
+        "a": "DIR-099",
+        "b": "DIR-104",
+        "kind": "shared-implementation"
+      },
+      {
+        "a": "DIR-103",
+        "b": "DIR-104",
+        "kind": "shared-implementation"
+      }
+    ],
+    "capacity": {
+      "maxPhases": 32,
+      "maxAuditShards": 64
+    }
+  }
+}

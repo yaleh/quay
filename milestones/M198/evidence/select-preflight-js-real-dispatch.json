@@ -1,0 +1,31 @@
+{
+  "_evidence_note": "Real Workflow({scriptPath: '.claude/workflows/select-preflight.js', args:{workspaceRoot:'.'}}) dispatch, run wf_0e8f7297-a67, 2026-07-29. .halt was briefly removed (with restart-readiness-check.sh confirming preconditions, human-authorized) to let this real dispatch reach its normal (non-halted) return path -- captures AC14's live-run evidence: select-preflight.js's OWN returned JSON threads a real, non-empty 'portfolio' field, not a hand-shaped stub or source-read inference.",
+  "outcome": "done",
+  "halt": false,
+  "pendingDirectives": ["DIR-118", "DIR-121", "DIR-126"],
+  "cadence": {"verdict": "OK", "streak": 2, "threshold": 4, "lastExploreAt": 128},
+  "s": 3,
+  "deliverableStreak": 2,
+  "starvation": false,
+  "floor": 0.3333333333333333,
+  "milestoneCounter": 195,
+  "portfolio": {
+    "version": 1,
+    "selected": [
+      {"version": 1, "candidateId": "composite:DIR-099+DIR-103+DIR-104", "taskIds": ["DIR-099", "DIR-103", "DIR-104"], "deliveryHypothesis": "composite delivery of DIR-099, DIR-103, DIR-104", "unionValue": 3, "fixedCostSaving": 1.5, "criticalPath": 50, "coordinationCost": 2, "resourceUse": 150, "atomicFailureCost": 0.12, "score": 2.38, "sourceHashes": {"DIR-099": "085083932a5d", "DIR-103": "e3cd092fcdcb", "DIR-104": "37a58fdc2300"}},
+      {"version": 1, "candidateId": "composite:DIR-101+DIR-105", "taskIds": ["DIR-101", "DIR-105"], "deliveryHypothesis": "composite delivery of DIR-101, DIR-105", "unionValue": 2, "fixedCostSaving": 0.5, "criticalPath": 50, "coordinationCost": 1, "resourceUse": 100, "atomicFailureCost": 0.04, "score": 1.46, "sourceHashes": {"DIR-101": "5e3d5059f0e2", "DIR-105": "56cc04250e6f"}},
+      {"version": 1, "candidateId": "singleton:DIR-100", "taskIds": ["DIR-100"], "deliveryHypothesis": "single-task delivery of DIR-100", "unionValue": 1, "fixedCostSaving": 0, "criticalPath": 50, "coordinationCost": 0, "resourceUse": 50, "atomicFailureCost": 0, "score": 1, "sourceHashes": {"DIR-100": "6726b045d0f8"}},
+      {"version": 1, "candidateId": "singleton:DIR-112", "taskIds": ["DIR-112"], "deliveryHypothesis": "single-task delivery of DIR-112", "unionValue": 1, "fixedCostSaving": 0, "criticalPath": 50, "coordinationCost": 0, "resourceUse": 50, "atomicFailureCost": 0, "score": 1, "sourceHashes": {"DIR-112": "77a797e4a44f"}},
+      {"version": 1, "candidateId": "singleton:gap-touches-orthogonality-symlink-isdirect-mismatch", "taskIds": ["gap-touches-orthogonality-symlink-isdirect-mismatch"], "deliveryHypothesis": "single-task delivery of gap-touches-orthogonality-symlink-isdirect-mismatch", "unionValue": 1, "fixedCostSaving": 0, "criticalPath": 50, "coordinationCost": 0, "resourceUse": 50, "atomicFailureCost": 0, "score": 1, "sourceHashes": {"gap-touches-orthogonality-symlink-isdirect-mismatch": "75a710e44611"}}
+    ],
+    "rejected": [
+      {"taskIds": ["DIR-099", "DIR-103"], "reason": "overlaps already-selected candidate(s): composite:DIR-099+DIR-103+DIR-104"},
+      {"taskIds": ["DIR-099", "DIR-104"], "reason": "overlaps already-selected candidate(s): composite:DIR-099+DIR-103+DIR-104"},
+      {"taskIds": ["DIR-099"], "reason": "overlaps already-selected candidate(s): composite:DIR-099+DIR-103+DIR-104"},
+      {"taskIds": ["DIR-101"], "reason": "overlaps already-selected candidate(s): composite:DIR-101+DIR-105"},
+      {"taskIds": ["DIR-103"], "reason": "overlaps already-selected candidate(s): composite:DIR-099+DIR-103+DIR-104"},
+      {"taskIds": ["DIR-104"], "reason": "overlaps already-selected candidate(s): composite:DIR-099+DIR-103+DIR-104"},
+      {"taskIds": ["DIR-105"], "reason": "overlaps already-selected candidate(s): composite:DIR-101+DIR-105"}
+    ]
+  }
+}
