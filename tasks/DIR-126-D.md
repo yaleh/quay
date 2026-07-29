@@ -20,13 +20,16 @@ extra:
 
 ## Proposal
 
-Emit one committed, structured JSON telemetry record per `prepare-milestone` generation — every
-phase transition, every terminal outcome (`prepared`, `needs-human`, `revision-needed`, or the new
-`prepare-already-running` contention outcome from [[DIR-126-A]]), not only the success path —
-hash-bound into the receipt so tampering is mechanically detectable. Fourth child of DIR-126's
-5-way split. Depends on [[DIR-126-A]] (admission is a real event to record), [[DIR-126-B]]
-(preflight rejections are a real terminal shape to record), and [[DIR-126-C]] (this child finalizes
-the generation-record shape C's `decideResumeGeneration` consumes in interim/frozen form).
+Emit one committed, structured JSON telemetry record per `prepare-milestone` dispatch attempt
+(including every admitted content generation) — every phase transition, every terminal outcome
+(`prepared`, `needs-human`, `revision-needed`, or the new
+`prepare-already-running` contention outcome from [[DIR-126-A]], or [[DIR-126-C]]'s
+`reuse-terminal` decision), not only the success path. Every record is committed; a successful
+generation's record is additionally hash-bound into its receipt so tampering is mechanically
+detectable. Fourth child of DIR-126's 5-way split. Depends on [[DIR-126-A]] (admission
+identity/release are real events to record), [[DIR-126-B]] (preflight verdict policy is a real
+input and rejection shape), and [[DIR-126-C]] (this child finalizes the generation-record shape C's
+`decideResumeGeneration` consumes in interim/frozen form).
 
 ### Problem framing (re-verified live against the current tree, 2026-07-29)
 
@@ -41,19 +44,39 @@ queryable artifact (16 of 17 sampled real calls were non-success).
 
 ### Chosen mechanism
 
-One committed JSON record per generation at
-`milestones/prepare-telemetry/<taskId>/<generationId>.json`, where `generationId` is the
-`Admission` phase's own real `$CLAUDE_CODE_SESSION_ID` — the same real, harness-set, unforgeable
-provenance pattern DIR-117 iteration-2 already established for author/reviewer distinctness,
-applied here to generation identity (a genuinely new use of an existing, proven pattern, not a new
-mechanism class).
+One committed JSON record per dispatch attempt at
+`milestones/prepare-telemetry/<taskId>/<recordId>.json`. Every record has an `attemptId`;
+successfully admitted attempts additionally have a `generationId` derived deterministically from
+[[DIR-126-A]]'s successful Admission identity
+`{key, ownerExecutionId, fencingToken}` (canonical encoding/hash of all three), not from bare
+`$CLAUDE_CODE_SESSION_ID`: a top-level Claude session can host multiple Workflow runs, while A's
+monotonic fencing token distinguishes successive owners even when `ownerExecutionId` is reused.
+Contention attempts that do not acquire a lease get their own attempt record keyed by the observed
+lease key plus the contender identity/attempt-start timestamp, with `generationId:null`; they cannot
+masquerade as the active owner's generation. For an admitted attempt, `recordId = generationId`;
+for contention, `recordId = attemptId`. A `reuse-terminal` attempt has a real
+Admission/generation identity for ownership and release accounting but records
+`createsContentGeneration:false`, matching [[DIR-126-C]]'s rule that it does not execute a new
+content/review generation.
 
 Written by whichever phase produces the terminal outcome — `Admission` (on `prepare-already-
 running`), `Preflight` (on `preflight-rejected`), `ProposalAuthors`/`Adjudicate`/`PlanAuthor`/
-`PlanCheck` (on `revision-needed`), or `Receipt` (on `prepared`) — any exit, not just success, and
-containing one entry per phase transition:
-`{generationId, phase, round, startedAtMs, endedAtMs, dispatchCount, retryCount, terminalReason,
-sessionId}`.
+`PlanCheck` (on `revision-needed`), [[DIR-126-C]]'s decision point (on `reuse-terminal`), or
+`Receipt` (on `prepared`) — any exit, not just success. The frozen record contains:
+
+`{schemaVersion, recordId, attemptId, generationId,
+admission:{key,ownerExecutionId,fencingToken}, workspace, taskId, milestoneId,
+class, highRisk, hashes:{charter,taskContract,proposal,reviewPolicy},
+decision:{kind,reason,priorGenerationId,priorReason,createsContentGeneration},
+phases:[{phase,round,startedAtMs,endedAtMs,
+mechanicalRunnerCount,mechanicalRunnerMs,contentAgentDispatchCount,contentAgentMs,retryCount}],
+terminal:{outcome,reason,phase,cacheable}, leaseRelease:{attempted,ok,reason}, sessionId}`.
+
+For admitted attempts, `decision.kind` is exactly `cold|resume|reuse-terminal`; a contention or
+other pre-decision exit records `kind:"not-evaluated"` with a typed reason rather than omitting the
+field. `reviewPolicy` includes [[DIR-126-B]]'s checker policy version/hash. `reuse-terminal`
+records zero content-agent dispatches/minutes, the prior generation it reused,
+`createsContentGeneration:false`, and [[DIR-126-A]]'s release result before return.
 
 **Committed, not gitignored** (unlike DIR-126-A's lease) — telemetry must survive across
 sessions/days, be inspectable by a later auditor (the DoD's own "reproduces from checked-in
@@ -64,7 +87,9 @@ Finding measured (16 of 17 sampled calls were non-success).
 **Pervasive call-site relationship, explicitly counted.** Every phase boundary in
 `prepare-milestone.js` (both mirrors) gains a telemetry-emit call — a genuinely new, pervasive
 relationship needing an AC that counts real emitted records against real phase dispatches from a
-live journal, not a sampled subset.
+live journal, not a sampled subset. Mechanical CLI runners and content-generation/review agents are
+separate counters; combining them would hide whether [[DIR-126-B]]/[[DIR-126-C]] actually prevented
+expensive content work.
 
 **Tamper detection via existing mechanism.** The telemetry file's own hash is bound into the
 receipt via a new `--telemetry` flag on `milestone-preparation-check.ts --build`, the same way
@@ -89,9 +114,20 @@ the DoD's own "without parsing session internals" bar, satisfied directly.
   resume-decision has nothing to compare against, and 16 of 17 sampled real calls in the Finding
   were non-success. (Rejected alternative: writing telemetry only on success, today's behavior —
   this is the literal cause of the gap being closed.)
-- **`generationId` = the real harness-set `$CLAUDE_CODE_SESSION_ID`, not a self-generated ID** —
-  reuses DIR-117 iteration-2's own unforgeable-provenance pattern rather than inventing a second,
-  weaker identity scheme.
+- **Generation identity inherits A's lease identity, not bare session identity** —
+  `{key,ownerExecutionId,fencingToken}` is already the ownership authority; deriving the telemetry
+  ID from that tuple prevents collisions when one Claude session hosts multiple Workflow runs and
+  keeps telemetry aligned with the exact owner/release being measured.
+- **C's decision inputs/outputs are first-class fields, not free-text terminal details** —
+  `charter/taskContract/proposal/reviewPolicy` hashes, `cold|resume|reuse-terminal`,
+  `priorGenerationId`, and the terminal cacheability/reason are required so C and E never have to
+  infer control decisions from prose.
+- **Mechanical runners and content agents are counted separately** — a preflight rejection or
+  terminal reuse is efficient only if the record proves zero content-agent dispatches; total
+  dispatch count alone cannot prove that. Their summed execution milliseconds are also separate
+  from phase wall time so parallel authors do not disappear from the capacity calculation.
+- **Lease release is telemetry, not an assumed side effect** — every acquired generation records
+  whether release was attempted/succeeded, including C's new `reuse-terminal` edge.
 - **Tamper detection reuses the existing `--ledger` hash-binding mechanism**, not a new integrity
   scheme — `checkPreparation()`'s existing `ledger-stale`/`ledger-missing` codes are the precedent
   this child's `--telemetry` flag follows exactly.
@@ -108,14 +144,18 @@ the DoD's own "without parsing session internals" bar, satisfied directly.
 | Condition | Default outcome |
 |---|---|
 | Telemetry write fails on an otherwise-passing generation | terminal `needs-human`, never silently certified `prepared` |
-| A phase transition's timestamp/dispatch-count cannot be captured | recorded as explicit `null`/`"unknown"`, never omitted or fabricated |
+| A phase transition's timestamp/dispatch-count/agent-duration cannot be captured | recorded as explicit `null`/`"unknown"`, never omitted or fabricated |
+| Admission identity lacks key/owner/fencing token | fail closed; no collision-prone bare-session `generationId` is emitted |
+| `reuse-terminal` record has a content-agent dispatch or lacks a prior generation/policy hash | schema/telemetry validation fails closed |
+| An acquired generation terminates without a successful/typed lease-release result | terminal remains visibly failed/needs-human; telemetry cannot report a clean release |
 | Receipt references a telemetry file that no longer exists or has changed hash | `telemetry-missing`/`telemetry-stale` (mirroring `ledger-missing`/`ledger-stale`) — fails closed |
 | `--telemetry-report` finds no records for a milestoneId | explicit `no-records` result, not a crash or an empty-looking success |
 
 ### Compatibility
 
-Receipt (`preparation.json`) schema gains only optional new fields (`generationId`, a telemetry
-hash pointer); no existing `milestone-preparation-check.ts` check changes shape or becomes stricter
+Receipt (`preparation.json`) schema gains only optional new fields (`generationId`, decision,
+review-policy hash, and a telemetry hash pointer); no existing `milestone-preparation-check.ts`
+check changes shape or becomes stricter
 for old receipts — the exact precedent `computeMetricsForReceipt` already sets for pre-DIR-125
 receipts (`convergence-not-recorded`, a non-crash explicit code). M195/M197-shaped fixtures must
 remain GREEN. Both workflow mirrors and the `milestone-preparation-check.ts` mirror stay
@@ -128,6 +168,9 @@ pre-DIR-126 receipts.
   generation-record shape DIR-126-C already shipped against as a compatibility contract, not
   silently redesign it — DIR-126-C's own interim/frozen shape is the starting point here, extended
   (never breaking-changed) to the full telemetry record.
+- **Admission implementation may expose the lease identity with different serialization details**
+  — mitigated by consuming A's actual `key/ownerExecutionId/fencingToken` fields and defining one
+  canonical generation-ID encoder here, never parsing a human-formatted owner string.
 - **New committed-artifact volume could itself add to the 2.09:1 process-artifact-to-code ratio**
   the Finding flags as a problem — mitigated by keeping each record small structured JSON, no prose
   duplication, explicitly excluded from LOC "productivity" framing.
@@ -151,26 +194,28 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
    only place `convergence` telemetry is written, and it only runs after `PlanCheck` passes.
 2. DIR-126's own Finding: "16 of 17 sampled real calls were non-success" — the concrete, measured
    cost of telemetry only existing on the success path.
-3. DIR-117 iteration-2's own `$CLAUDE_CODE_SESSION_ID` provenance pattern (confirmed real and
-   already in production use for author/reviewer distinctness in the receipt's `provenance` block)
-   is a direct, reusable precedent for unforgeable generation identity.
+3. Existing real receipts record the same parent `$CLAUDE_CODE_SESSION_ID` across multiple
+   sub-dispatch roles, and a top-level session can host multiple Workflow runs; session identity is
+   provenance, not a unique generation key. [[DIR-126-A]]'s `key/ownerExecutionId/fencingToken`
+   tuple is the actual ownership identity and the correct generation-key source.
 4. `milestone-preparation-check.ts`'s existing `--ledger` flag + `checkPreparation()`'s
    `ledger-stale`/`ledger-missing` checks (confirmed by direct read) are a direct, reusable
    precedent for hash-binding an auxiliary artifact into the receipt.
 
 ## Requested action
 
-1. Add telemetry-emit calls at every phase boundary in `prepare-milestone.js` (both mirrors),
-   writing to `milestones/prepare-telemetry/<taskId>/<generationId>.json` per the Chosen mechanism.
+1. Add telemetry-emit calls at every phase boundary and decision/terminal/release edge in
+   `prepare-milestone.js` (both mirrors), writing to
+   `milestones/prepare-telemetry/<taskId>/<recordId>.json` per the frozen schema above.
 2. Add a new `--telemetry` flag to `milestone-preparation-check.ts --build` (+ `plugin/scripts/`
    mirror) hash-binding the telemetry file into the receipt, and a `telemetry-stale`/`telemetry-
    missing` check to `checkPreparation()`, mirroring the existing `--ledger` pattern.
 3. Add a new `--telemetry-report <milestoneId>` read-only CLI mode to `milestone-preparation-
    check.ts` answering phase-timing queries without JSONL parsing.
-4. Add real test fixtures: one cold run's full record, one resumed run's full record, one
-   contention-rejection ([[DIR-126-A]]) record, one preflight-rejection ([[DIR-126-B]]) record —
-   each confirmed queryable via `--telemetry-report` — plus a tamper-detection fixture (hand-edit a
-   telemetry file post-receipt, confirm `telemetry-stale`).
+4. Add real test fixtures: one cold run, one resumed run, one contention rejection
+   ([[DIR-126-A]]), one preflight rejection ([[DIR-126-B]]), and one `reuse-terminal`
+   ([[DIR-126-C]]) record — each confirmed queryable via `--telemetry-report` — plus generation-ID
+   collision, policy-hash invalidation, lease-release, and tamper-detection fixtures.
 5. Real regression proof: one real cold `prepare-milestone` dispatch and one real dispatch that
    hits a non-success terminal outcome, both producing real, inspectable telemetry files.
 
@@ -181,10 +226,19 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   emit callsite — not zero importers, not `--selftest`-only reachability. This item alone, if
   unmet, fails the whole child regardless of how many other items pass.
 - [ ] **Telemetry is directly queryable:** one real cold run, one real resumed run, one real
-  contention rejection ([[DIR-126-A]]), and one real preflight rejection ([[DIR-126-B]]) each
-  produce a real telemetry record exposing phase start/end/duration, dispatch/retry counts,
-  terminal reason, and generation ID — retrieved via `--telemetry-report`, without parsing
-  `~/.claude/projects/**.jsonl`.
+  contention rejection ([[DIR-126-A]]), one real preflight rejection ([[DIR-126-B]]), and one real
+  `reuse-terminal` ([[DIR-126-C]]) each produce a record exposing hashes, decision/prior
+  generation, phase wall timing, separate mechanical/content dispatch counts and summed execution
+  milliseconds, terminal/cacheability, lease-release result, and generation ID — retrieved via
+  `--telemetry-report`, without parsing `~/.claude/projects/**.jsonl`.
+- [ ] **Generation identity cannot collide across runs in one Claude session:** two successive
+  Admission owners with the same `ownerExecutionId` but different fencing tokens produce distinct
+  generation IDs; the ID is mechanically traceable back to A's exact lease tuple.
+- [ ] **C's terminal reuse is measurable:** a real `reuse-terminal` record has matching
+  task/Proposal/charter/review-policy hashes, a real `priorGenerationId`, zero
+  `contentAgentDispatchCount`/`contentAgentMs`, `createsContentGeneration:false`, and a
+  successful/typed A-release result. A checker-policy mutation produces a cold decision instead of
+  reusing the old terminal.
 - [ ] **Telemetry integrity:** a tamper fixture (hand-edited telemetry file post-receipt) is
   confirmed to produce `telemetry-stale` via `checkPreparation()`, and a fixture attempting to
   certify a generation `prepared` with a missing/mismatched telemetry record is confirmed to fail
@@ -201,8 +255,10 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   wiring-coverage completeness):** confirmed via direct source read — a `needs-human`/
   `revision-needed` return from `ProposalAuthors`/`Adjudicate`/`PlanAuthor`/`PlanCheck` today never
   reaches the `Receipt` phase, so no telemetry survives a failed generation. This child's real,
-  production-wired fix: every phase emits a real telemetry record keyed by `generationId`
-  (the real `$CLAUDE_CODE_SESSION_ID`, confirmed via the production-callsite AC item above), and
+  production-wired fix: every dispatch/phase emits a real telemetry record keyed by `recordId`;
+  admitted records carry `generationId` derived from [[DIR-126-A]]'s
+  `key/ownerExecutionId/fencingToken`, while contention attempts carry `generationId:null`
+  (confirmed via the production-callsite AC item above), and
   `milestone-preparation-check.ts` gains a `--telemetry` flag hash-binding that record into the
   receipt via `checkPreparation()`'s existing `ledger-stale`/`ledger-missing`-shaped check
   (confirmed real, mirroring the pre-existing `--ledger` flag exactly) — all queryable without
@@ -218,6 +274,8 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
   `milestone-preparation-check.ts`).
 - [ ] A real, non-fixture cold run AND a real, non-fixture non-success generation both produce real,
   inspectable telemetry records with command output, not asserted.
+- [ ] A real `reuse-terminal` record proves zero content agents and successful/typed lease release;
+  two generations sharing a parent session remain uniquely keyed.
 - [ ] RED/GREEN evidence exists for the tamper-detection case and the missing-telemetry-fails-closed
   case.
 - [ ] A fresh independent audit confirms the real production callsite for telemetry emission at
