@@ -85,6 +85,52 @@ known, narrower precision limitation for a future child (likely [[DIR-126-C]] or
 to address, rather than blocking this fix on a fully general commit-hash-vs-finding-id
 disambiguation heuristic.
 
+## Round 2 (2026-07-29, independent re-audit of the round-1 fix)
+
+A second independent audit of DIR-126-B, dispatched specifically to check whether the round-1
+basename-fallback fix generalized correctly, found it introduced its own new defect plus a
+separate, pre-existing false-positive class the round-1 fix never touched:
+
+- **Finding A (round-1 fix too permissive):** the basename fallback was originally unconditional —
+  a directory-qualified but entirely FABRICATED path (`` `packages/nonexistent-fabricated-package/
+  package.json` ``) silently passed whenever some unrelated real file shared its basename
+  (`package.json` exists dozens of times in this repo) — a silent false pass, not
+  `reviewer-required`. **Fixed:** the basename fallback now applies ONLY to bare tokens (no `/` at
+  all) — the actual shape of the original bug; a directory-qualified token that fails its literal
+  join no longer gets a basename-anywhere escape hatch.
+- **Finding B (pre-existing, untouched by round 1):** neither detector could distinguish "citing a
+  file that already exists" from "naming a file this task's own `## Touches` proposes to create" —
+  an extremely common authoring pattern (`` `foo.ts (new)` `` in Touches, then `` `foo.ts` `` cited
+  in AC/DoD text). A scan of this repo's real open `status:todo` tasks found 6/39 (~15%) hard-blocked
+  this way (DIR-099, DIR-100, DIR-101, DIR-104, DIR-121, this repo's own
+  `gap-build-phase-iteration-evidence-path-not-single-sourced`). **Fixed:** `_scanStaleReferences()`
+  now accepts an optional `touchesGlobs` list (the calling task's own `## Touches`, reusing the
+  already-existing `_extractGlobsFromSection`/`_globCoversPath` helpers `preflightTouchesMismatch`
+  already defines — no new parser); a file-shaped token covered by the task's own declared Touches
+  is future work the task itself brings into existence, never a stale/missing precedent. Also
+  strips a trailing parenthetical annotation (`` `foo.ts (new)` ``) before matching, since that's
+  this repo's real, confirmed authoring convention (`tasks/DIR-099.md` through `DIR-121.md`).
+- **Bonus fix, found while re-sweeping the real task corpus for residual false positives after
+  fixing A/B:** `.quay/`-prefixed tokens (e.g. `` `.quay/gates.yml` ``) are this repo's own
+  established per-workspace RUNTIME state prefix (CLAUDE.md documents `.quay/config.yml` as
+  per-workspace, never repo-tracked) — illustrative in prose, never a claimed repo-tracked
+  precedent. Now skipped entirely in the existence check, closing the remaining false positive on
+  DIR-099/DIR-100/DIR-104 (all three cite `.quay/gates.yml` this way).
+
+**Result:** of the 6 originally-flagged real open tasks, 5 now dogfood clean
+(DIR-099/DIR-100/DIR-101/DIR-104/DIR-121); the 6th
+(`gap-build-phase-iteration-evidence-path-not-single-sourced`) still cites a literal
+placeholder-shaped token (`` `iteration-N.md` ``, same class as `tasks/X.md` fixed in DIR-126-B's
+own text) — left as-is since fixing it means editing that OTHER task's content, out of this gap's
+scope. DIR-126-A's own already-landed text also now shows a THIRD known, non-blocking residual
+(a partial-path abbreviation, `` `quay-native/src/store.ts` `` missing its real `packages/` prefix,
+previously covered by the now-restricted basename-anywhere fallback) — same disposition as the
+`f76ae150` finding-id case above: DIR-126-A won't be re-preflighted, so no operational risk.
+
+Real evidence for round 2: 3 new regression tests (fabricated-path-still-stale,
+Touches-membership, `.quay/`-prefix carve-out) — full suite 60/60 pass. DIR-126-B's own dogfood
+re-confirmed clean after all round-2 changes: `{ok:true, findings:[]}`.
+
 ## Touches
 
 - experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts

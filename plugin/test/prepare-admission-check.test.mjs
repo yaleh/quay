@@ -388,6 +388,54 @@ describe("preflightStaleAcRefs", () => {
     ].join("\n");
     assert.equal(preflightStaleAcRefs({ taskBody, workspace: REPO_ROOT }), null);
   });
+
+  // ── Independent-audit round 2 finding (2026-07-29): the basename fallback above was ORIGINALLY
+  // unconditional, silently accepting a directory-QUALIFIED but entirely fabricated path whenever
+  // some unrelated file happened to share its basename ("package.json" is real everywhere) — a
+  // silent false pass. Fixed by restricting the fallback to BARE tokens only. ──
+  test("known-good (real defect regression): a directory-qualified but fabricated path is STILL stale, even when its basename matches a real file elsewhere", () => {
+    const taskBody = [
+      "## Acceptance Criteria",
+      "",
+      "- [ ] See `packages/nonexistent-fabricated-package/package.json` for the real shape.",
+      "",
+    ].join("\n");
+    const verdict = preflightStaleAcRefs({ taskBody, workspace: REPO_ROOT });
+    assert.ok(verdict, "a fabricated directory-qualified path must still be flagged");
+    assert.equal(verdict.blocking, true);
+    assert.match(verdict.evidence, /nonexistent-fabricated-package/);
+  });
+
+  // ── Independent-audit round 2 finding: a file this task's own '## Touches' declares as in-scope
+  // (commonly annotated "(new)" in this repo's authoring convention) is future work the task itself
+  // brings into existence, not a claimed pre-existing precedent — never stale. ──
+  test("known-good (real defect regression): a file the task's own Touches declares in-scope (with a trailing '(new)' annotation) is NOT stale", () => {
+    const taskBody = [
+      "## Touches",
+      "",
+      "- `packages/quay/src/config-validate.ts (new)`",
+      "",
+      "## Acceptance Criteria",
+      "",
+      "- [ ] Validation logic lives in `packages/quay/src/config-validate.ts`.",
+      "",
+    ].join("\n");
+    assert.equal(preflightStaleAcRefs({ taskBody, workspace: REPO_ROOT }), null);
+  });
+
+  // ── Independent-audit round 2 finding: '.quay/' is this repo's own established per-workspace
+  // RUNTIME state prefix (CLAUDE.md documents '.quay/config.yml' as per-workspace, never
+  // repo-tracked) — a '.quay/'-prefixed token in prose illustrates a runtime location, never a
+  // claimed repo-tracked precedent. ──
+  test("known-good (real defect regression): a '.quay/'-prefixed illustrative runtime path is NOT stale", () => {
+    const taskBody = [
+      "## Acceptance Criteria",
+      "",
+      "- [ ] The gate config lives at `.quay/gates.yml` for this workspace.",
+      "",
+    ].join("\n");
+    assert.equal(preflightStaleAcRefs({ taskBody, workspace: REPO_ROOT }), null);
+  });
 });
 
 describe("preflightMissingPrecedent", () => {

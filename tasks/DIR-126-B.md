@@ -475,6 +475,16 @@ Acceptance Criteria items to at least one stage. Supersedes the prior N/A placeh
   once per scan). Re-dogfooding the exact production CLI invocation against DIR-126-B's own real
   task+charter now returns `{ok:true, findings:[]}` (was 2 blocking findings). Valid M195/M197-shaped
   fixtures remain GREEN, confirmed via 57/57 real test run plus the live dogfood re-run.
+  **Round 2 (2026-07-29, second independent audit):** the round-1 fix itself had two more real
+  defects — (a) its basename fallback was unconditional, silently passing a directory-qualified but
+  fabricated path whenever an unrelated file shared its basename; (b) neither detector recognized a
+  file the task's own `## Touches` declares as future work (`` `foo.ts (new)` ``) as anything other
+  than a stale precedent, hard-blocking 6/39 (~15%) of this repo's real open tasks. Both fixed: the
+  basename fallback now applies only to bare (no-`/`) tokens; a new Touches-membership check (reusing
+  `preflightTouchesMismatch`'s own `_extractGlobsFromSection`/`_globCoversPath` helpers, no new
+  parser) exempts declared-future files. A `.quay/`-prefix carve-out (illustrative per-workspace
+  runtime paths, never repo-tracked) closed 3 more real false positives found while re-sweeping.
+  5 of the original 6 flagged real tasks now dogfood clean; 3 new regression tests, 60/60 suite pass.
 - [x] **Repair/calibrate before fail-closed
   activation:** for each of the five NEW preflight detectors, real known-bad, known-good, and
   ambiguous-valid corpora prove the detector's blocking boundary before the production `Preflight`

@@ -299,19 +299,50 @@ function _repoBasenames(workspace) {
 // resolves each against `workspace`. Returns { stale: [{token,kind}], ambiguous: boolean } —
 // `ambiguous` is true iff a commit-hash-shaped token was found but `workspace` is not a git repo
 // (mechanically cannot verify — routes to reviewer-required, never a false claim of resolution).
-function _scanStaleReferences(text, workspace) {
+// `touchesGlobs` (optional, a Set/array of the CALLING task's own `## Touches` glob strings): a
+// file-shaped token this task's own Touches declares in-scope is future work the task itself
+// brings into existence, not a claimed pre-existing precedent — never stale.
+//
+// Independent PlanCheck-round-4-equivalent audit finding (M201/DIR-126-B, second adversarial audit
+// round, 2026-07-29): the basename fallback below was ORIGINALLY unconditional (any file-shaped
+// token whose basename matched anywhere in the repo was accepted), which silently passed a
+// directory-QUALIFIED but entirely fabricated path whenever some unrelated file happened to share
+// its basename (e.g. `` `packages/nonexistent-fabricated-package/package.json` `` — a fabricated
+// directory, but `package.json` is a real basename shared by dozens of real files) — a silent false
+// pass, the exact failure mode "no heuristic overreach" forbids. Fixed by restricting the basename
+// fallback to BARE tokens only (no `/` at all) — the actual shape of the original bug
+// (`` `prepare-admission-check.ts` ``, `` `wiring-coverage-check.test.mjs` ``, always bare); a
+// directory-qualified token that fails its literal join now only escapes "stale" via the
+// touchesGlobs check below, never via basename-anywhere.
+function _scanStaleReferences(text, workspace, touchesGlobs) {
   const tokens = [...(text || "").matchAll(/`([^`]+)`/g)].map((m) => m[1].trim());
   const stale = [];
   let sawCommitShaped = false;
   const gitRepo = _isGitRepo(workspace);
   const basenames = gitRepo ? _repoBasenames(workspace) : null;
+  const globs = touchesGlobs ? [...touchesGlobs] : [];
   for (const tok of new Set(tokens)) {
     if (_COMMIT_HASH_RE.test(tok)) {
       sawCommitShaped = true;
       if (gitRepo && !_gitCommitExists(workspace, tok)) stale.push({ token: tok, kind: "commit" });
     } else if (_FILE_PATH_RE.test(tok)) {
+      // `.quay/` is this repo's own established per-workspace RUNTIME state prefix (CLAUDE.md:
+      // ".quay/config.yml" is per-workspace, never repo-tracked; .gitignore already excludes
+      // "**/.quay/prepare-leases/") — a `.quay/`-prefixed token in prose illustrates a runtime
+      // location, never a claimed repo-tracked precedent, so it is never file-existence-checked at
+      // all (independent-audit-round-2 finding: DIR-099/DIR-100/DIR-104 all cite `.quay/gates.yml`
+      // this way and were false-positived pre-fix).
+      if (tok.startsWith(".quay/")) continue;
       if (fs.existsSync(path.join(workspace, tok))) continue;
-      if (basenames && basenames.has(path.basename(tok))) continue;
+      if (!tok.includes("/") && basenames && basenames.has(path.basename(tok))) continue;
+      // This repo's own Touches-list convention commonly appends a trailing parenthetical
+      // annotation INSIDE the same backtick span ("`foo.ts (new)`", "`bar.ts (or sibling path)`" —
+      // confirmed real via direct read of tasks/DIR-099.md, DIR-100.md, DIR-101.md, DIR-104.md,
+      // DIR-121.md), which the actual AC/Finding citation never repeats — strip it before matching,
+      // local to this membership check only (never mutates the shared `_extractGlobsFromSection`
+      // output `preflightTouchesMismatch` also consumes, to avoid widening that detector's own,
+      // separately-calibrated boundary).
+      if (globs.some((g) => _globCoversPath(g.replace(/\s*\([^)]*\)\s*$/, "").trim(), tok))) continue;
       stale.push({ token: tok, kind: "file" });
     }
   }
@@ -364,7 +395,8 @@ export function preflightStaleAcRefs({ taskBody, workspace }) {
   const code = "preflight-stale-ac-refs";
   const ac = extractSection(taskBody, "Acceptance Criteria") || "";
   const dod = extractSection(taskBody, "Definition of Done") || "";
-  const { stale, ambiguous } = _scanStaleReferences(`${ac}\n${dod}`, workspace);
+  const touchesGlobs = _extractGlobsFromSection(extractSection(taskBody, "Touches"));
+  const { stale, ambiguous } = _scanStaleReferences(`${ac}\n${dod}`, workspace, touchesGlobs);
   if (stale.length > 0) {
     return _mkFinding(code, true,
       `'## Acceptance Criteria'/'## Definition of Done' cite ${stale.length} reference(s) that do not resolve against the current repository: ${stale.map((s) => `${s.kind}:${s.token}`).join(", ")}`,
@@ -382,7 +414,8 @@ export function preflightStaleAcRefs({ taskBody, workspace }) {
 export function preflightMissingPrecedent({ taskBody, workspace }) {
   const code = "preflight-missing-precedent";
   const sections = ["Finding", "Requested action", "Proposal"].map((h) => extractSection(taskBody, h) || "").join("\n");
-  const { stale, ambiguous } = _scanStaleReferences(sections, workspace);
+  const touchesGlobs = _extractGlobsFromSection(extractSection(taskBody, "Touches"));
+  const { stale, ambiguous } = _scanStaleReferences(sections, workspace, touchesGlobs);
   if (stale.length > 0) {
     return _mkFinding(code, true,
       `'## Finding'/'## Requested action'/'## Proposal' cite ${stale.length} claimed precedent(s) (commit-hash-shaped or file-path-shaped) that do not resolve against the current repository: ${stale.map((s) => `${s.kind}:${s.token}`).join(", ")}`,
