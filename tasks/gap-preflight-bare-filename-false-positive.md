@@ -131,6 +131,40 @@ Real evidence for round 2: 3 new regression tests (fabricated-path-still-stale,
 Touches-membership, `.quay/`-prefix carve-out) — full suite 60/60 pass. DIR-126-B's own dogfood
 re-confirmed clean after all round-2 changes: `{ok:true, findings:[]}`.
 
+## Round 3 (2026-07-29, third independent audit — the calibration downgrade)
+
+A third independent audit, specifically trying to construct new counter-examples against the
+round-2 fix, found: (1) a LIVE, currently-blocking false positive on a different real open task
+(`gap-build-phase-iteration-evidence-path-not-single-sourced.md`'s own `` `iteration-N.md` ``
+placeholder — the exact same generic-placeholder class DIR-126-B's own text already had to work
+around once); (2) a real regression introduced by round 2's own bare-only basename restriction
+(a directory-qualified-but-SHORTENED real path, e.g. `` `scripts/foo.sh` `` for the real
+`` `experiments/quay-perpetual-stream/scripts/foo.sh` ``, no longer resolves); (3) a still-open gap
+in the Touches-membership check (trailing free-form prose after a backtick path defeats the glob
+match). None of these three were currently live-blocking a real task except (1).
+
+Given THREE independent audit rounds each found a genuinely NEW real false-positive class
+specifically in `preflight-stale-ac-refs`/`preflight-missing-precedent` (never in the other three
+detectors) against this repo's real, organically-varied, ever-growing task-prose corpus,
+per-shape regex patching does not converge — natural-language disambiguation of "claimed existing
+precedent" vs. "placeholder/future-file/abbreviated-path prose" is not fully solvable by exact
+mechanical matching. **Resolution:** flip `PREFLIGHT_CALIBRATED["preflight-stale-ac-refs"]` and
+`PREFLIGHT_CALIBRATED["preflight-missing-precedent"]` to `false` — not a scope-narrowing
+workaround, but the literal mechanism this task's own AC ("Repair/calibrate before fail-closed
+activation") and DoD (`Defaults and failure behavior` table: "A detector's calibration corpus is
+not green → that detector stays non-blocking in production") already specify for exactly this
+situation. A non-calibrated detector still runs and still reports every finding
+(`disposition:"reviewer-required"`, confirmed by a new regression test — never silently dropped),
+it simply cannot hard-block. The other three detectors held up with zero real false positives
+across all three independent audit rounds and remain calibrated/blocking.
+
+Real evidence for round 3: a full sweep of all 39 of this repo's real, currently-open
+(`status:todo`) tasks — not a sample — now dogfoods 0/39 blocked (was 1/39 live-blocked pre-fix,
+plus the round-2-introduced regression and the Touches-gap were both real but not yet live-blocking
+any of the 39). 1 new regression test confirms the downgrade behavior at the real
+`runPreflightChecks`/CLI entry point (not just the raw detector function, which stays
+calibration-unaware by design). Full suite: 61/61 pass.
+
 ## Touches
 
 - experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts

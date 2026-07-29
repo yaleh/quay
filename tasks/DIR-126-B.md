@@ -485,6 +485,15 @@ Acceptance Criteria items to at least one stage. Supersedes the prior N/A placeh
   parser) exempts declared-future files. A `.quay/`-prefix carve-out (illustrative per-workspace
   runtime paths, never repo-tracked) closed 3 more real false positives found while re-sweeping.
   5 of the original 6 flagged real tasks now dogfood clean; 3 new regression tests, 60/60 suite pass.
+  **Round 3 (2026-07-29, third independent audit):** found yet another real, LIVE-blocking case on a
+  different real open task (`gap-build-phase-iteration-evidence-path-not-single-sourced.md`'s own
+  `` `iteration-N.md` `` placeholder), a regression in round 2's own bare-only basename restriction
+  (a directory-qualified-but-shortened real path no longer resolves), and a still-open
+  Touches-membership gap (trailing free-form prose after a backtick path defeats the exemption).
+  Given THREE independent audit rounds each found a NEW real false-positive class specifically in
+  `preflight-stale-ac-refs`/`preflight-missing-precedent` against this repo's real, organically-varied
+  task corpus, per-shape regex patching does not converge — see the "Repair/calibrate before
+  fail-closed activation" AC below for the resolution (`PREFLIGHT_CALIBRATED` downgrade).
 - [x] **Repair/calibrate before fail-closed
   activation:** for each of the five NEW preflight detectors, real known-bad, known-good, and
   ambiguous-valid corpora prove the detector's blocking boundary before the production `Preflight`
@@ -497,6 +506,21 @@ Acceptance Criteria items to at least one stage. Supersedes the prior N/A placeh
   calibration boundary it "proved" was wrong against real content — is closed by the same
   `_scanStaleReferences()` basename-fallback fix as the AC item above, plus two new regression tests
   exercising exactly the real-content shape the synthetic corpus missed.
+  **Round 3 resolution (2026-07-29):** after a THIRD independent audit found yet another real,
+  live-blocking false positive specifically in `preflight-stale-ac-refs`/`preflight-missing-precedent`
+  (plus a regression in round 2's own fix and a still-open Touches gap), `PREFLIGHT_CALIBRATED` for
+  exactly these two detectors was flipped to `false` — this is not a scope-narrowing workaround, it
+  is this AC's OWN literal text: "the detector's blocking boundary" must be proven "before the
+  production `Preflight` callsite is allowed to enforce it," and three real audit rounds have now
+  demonstrated the boundary is NOT yet proven safe against this repo's real content. Per the DoD's own
+  "A detector's calibration corpus is not green → that detector stays non-blocking in production;
+  milestone cannot Land while any detector claims fail-closed status without matching calibration
+  evidence" default (Defaults and failure behavior table), this is the documented, designed-for
+  outcome, not a deviation. The other three detectors (`preflight-merged-markdown-claims`,
+  `preflight-touches-mismatch`, `preflight-invalid-plan-command`) held up with zero real false
+  positives across all three independent audit rounds and stay calibrated `true`/blocking. All 39 of
+  this repo's real, currently-open `status:todo` tasks now dogfood clean (0/39 blocked), confirmed via
+  a full corpus sweep, not a sample.
 - [x] **No heuristic overreach:** an
   ambiguous-but-valid fixture for each of the five checks is confirmed to emit its
   `preflight-ambiguous-<check>` code, `reviewer-required`, non-blocking — not silently rejected and
@@ -504,6 +528,11 @@ Acceptance Criteria items to at least one stage. Supersedes the prior N/A placeh
   the audit §1.4 finding — real valid content (DIR-126-A/DIR-126-B's own task+charter) was
   hard-blocked instead of correctly passing — is closed by the same fix; DIR-126-B's own real
   content now dogfoods clean rather than needing a `reviewer-required` fallback at all.
+  **Round 3 (2026-07-29):** the calibration downgrade above is itself the strongest possible form of
+  "no heuristic overreach" for the two detectors three rounds proved cannot yet reliably distinguish
+  a genuine stale reference from valid real-world prose: every finding still surfaces
+  (`disposition:"reviewer-required"`, never silently dropped — confirmed by a new regression test),
+  but none can wrongly reject a real task.
 - [x] **`wiring-coverage-check.ts`'s merged-list false-positive class is closed at its root
   (ALREADY SATISFIED — commit `335317d`, `gap-wiring-coverage-check-merged-markdown-list`, `status:
   done`, landed before this child's Build; this item verifies it stays true, not that Build

@@ -230,13 +230,34 @@ export const PREFLIGHT_POLICY_VERSION = "preflight-v1";
 // ambiguous-valid fixture triad is green — see prepare-admission-check.test.mjs's `describe('...
 // calibration')` block. A `false` entry here still runs its detector and still reports the finding
 // (logged, non-blocking) — never silently skipped — matching the "partially-calibrated detector
-// set... still lands" design decision. All five are calibrated as of this child's own Build (fixture
-// triads below), so all five are `true`.
+// set... still lands" design decision.
+//
+// `preflight-stale-ac-refs`/`preflight-missing-precedent` downgraded to `false` (2026-07-29, THREE
+// independent adversarial audit rounds, M201/DIR-126-B): each round found a NEW real false-positive
+// class in these two detectors specifically — round 1: bare filenames not at the repo root; round
+// 2's own fix: a directory-qualified-but-fabricated path slipping through via an unconditional
+// basename match, AND a file the task's own Touches declares as future work being misread as a
+// stale precedent (round 2 fixed both, but introduced a narrower regression restricting the
+// basename fallback too far — directory-qualified-but-SHORTENED real paths, e.g.
+// `` `scripts/foo.sh` `` for the real `` `experiments/quay-perpetual-stream/scripts/foo.sh` ``, no
+// longer resolve); round 3: a live, currently-blocking case on a real open task
+// (`` `iteration-N.md` ``, a generic placeholder, not a literal file — the SAME class DIR-126-B's
+// own AC text already had to work around once, per the Touches-membership check's own trailing-prose
+// gap) plus a distinct commit-hash-vs-session-id collision. Regex-based exact-resolution matching
+// against this repo's organically-varied, ever-growing task-prose corpus cannot be made
+// false-positive-free by iterating individual shapes — each fix closes known cases and can miss or
+// reopen others. Per this task's OWN "Repair/calibrate before fail-closed activation" AC and this
+// exact `PREFLIGHT_CALIBRATED` mechanism's stated purpose, these two detectors' blocking boundary is
+// NOT proven safe against real content after three independent audit attempts, so they run
+// non-blocking/logged-only — real findings are still surfaced for a human/reviewer to see, never
+// silently dropped, but never wrongly reject a genuinely valid task before an author agent runs.
+// The other three detectors (merged-markdown-claims, touches-mismatch, invalid-plan-command) held
+// up across all three audit rounds with zero real false positives found — stay `true`.
 export const PREFLIGHT_CALIBRATED = {
   "preflight-merged-markdown-claims": true,
-  "preflight-stale-ac-refs": true,
+  "preflight-stale-ac-refs": false,
   "preflight-touches-mismatch": true,
-  "preflight-missing-precedent": true,
+  "preflight-missing-precedent": false,
   "preflight-invalid-plan-command": true,
 };
 

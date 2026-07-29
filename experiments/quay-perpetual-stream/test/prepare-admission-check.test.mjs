@@ -313,7 +313,14 @@ test("PREFLIGHT_POLICY_VERSION is a stable, exported literal — every finding c
   assert.ok(PREFLIGHT_POLICY_VERSION.length > 0);
 });
 
-test("PREFLIGHT_CALIBRATED names exactly the five detector codes, all calibrated true as of this child's own Build", () => {
+// ── Three independent adversarial audit rounds (M201/DIR-126-B, 2026-07-29) each found a NEW real
+// false-positive class specifically in preflight-stale-ac-refs/preflight-missing-precedent against
+// this repo's real, organically-varied task corpus — regex-exact-resolution matching cannot be made
+// false-positive-free by iterating individual shapes. Per this task's own "Repair/calibrate before
+// fail-closed activation" AC and PREFLIGHT_CALIBRATED's own stated purpose, these two stay
+// non-blocking/logged-only until genuinely proven safe; the other three held up across all three
+// rounds with zero real false positives and stay calibrated. ──
+test("PREFLIGHT_CALIBRATED names exactly the five detector codes; three are calibrated true, two (stale-ac-refs/missing-precedent) are false pending real-content proof", () => {
   assert.deepEqual(Object.keys(PREFLIGHT_CALIBRATED).sort(), [
     "preflight-invalid-plan-command",
     "preflight-merged-markdown-claims",
@@ -321,9 +328,33 @@ test("PREFLIGHT_CALIBRATED names exactly the five detector codes, all calibrated
     "preflight-stale-ac-refs",
     "preflight-touches-mismatch",
   ]);
-  for (const [code, calibrated] of Object.entries(PREFLIGHT_CALIBRATED)) {
-    assert.equal(calibrated, true, `${code} expected calibrated:true`);
-  }
+  assert.equal(PREFLIGHT_CALIBRATED["preflight-merged-markdown-claims"], true);
+  assert.equal(PREFLIGHT_CALIBRATED["preflight-touches-mismatch"], true);
+  assert.equal(PREFLIGHT_CALIBRATED["preflight-invalid-plan-command"], true);
+  assert.equal(PREFLIGHT_CALIBRATED["preflight-stale-ac-refs"], false);
+  assert.equal(PREFLIGHT_CALIBRATED["preflight-missing-precedent"], false);
+});
+
+test("a real, currently-open task's placeholder-shaped filename (`iteration-N.md`) no longer hard-blocks at the runPreflightChecks/CLI layer now that preflight-stale-ac-refs is non-blocking, but the finding still surfaces (never silently dropped)", () => {
+  // The raw detector function is calibration-unaware by design (calibration is applied once, at
+  // runPreflightChecks's record() wrapper — the single point every CLI/production callsite goes
+  // through) — so it correctly still reports blocking:true/unresolved on its own.
+  const taskBody = [
+    "## Acceptance Criteria",
+    "",
+    "- [ ] the Build phase's own `iteration-N.md` is filed at the correct path.",
+    "",
+  ].join("\n");
+  const rawVerdict = preflightStaleAcRefs({ taskBody, workspace: REPO_ROOT });
+  assert.ok(rawVerdict, "the raw detector still finds it");
+  assert.equal(rawVerdict.blocking, true);
+
+  const result = runPreflightChecks({ mode: "content", taskBody, charterBody: "", planBody: "", workspace: REPO_ROOT });
+  assert.equal(result.ok, true, "non-blocking at the real production entry point");
+  const finding = result.findings.find((f) => f.code === "preflight-stale-ac-refs");
+  assert.ok(finding, "the finding still surfaces, never silently dropped");
+  assert.equal(finding.blocking, false);
+  assert.equal(finding.calibrated, false);
 });
 
 describe("preflightMergedMarkdownClaims", () => {
