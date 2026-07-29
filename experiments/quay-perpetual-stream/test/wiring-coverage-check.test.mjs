@@ -98,6 +98,24 @@ test("extractMechanismClaims: real ownership-verb claim (\"X owns Y\", no posses
   assert.deepEqual(claims[0].identifiers.sort(), ["composite-land.ts", "dashboard.md"]);
 });
 
+// ── gap-wiring-coverage-check-reuse-verbs-and-tables (M201/DIR-126-B): a dense Markdown pipe
+// table (one mechanism claim per row) merged all rows into one giant claim under the pre-fix
+// splitter — same root-cause class 335317d fixed for bullet lists, now reproduced against a
+// table. ──
+test("extractMechanismClaims: a Markdown pipe table splits into one claim PER row, not one merged claim", () => {
+  const text =
+    "| Code | Reuses |\n" +
+    "|---|---|\n" +
+    "| `check-a` | calls `helper-a.ts` from `lib-a.ts` |\n" +
+    "| `check-b` | calls `helper-b.ts` from `lib-b.ts` |\n" +
+    "| `check-c` | calls `helper-c.ts` from `lib-c.ts` |\n";
+  const claims = extractMechanismClaims(text);
+  assert.equal(claims.length, 3, "each table row is its own claim, not one merged claim");
+  assert.deepEqual(claims[0].identifiers.sort(), ["check-a", "helper-a.ts", "lib-a.ts"]);
+  assert.deepEqual(claims[1].identifiers.sort(), ["check-b", "helper-b.ts", "lib-b.ts"]);
+  assert.deepEqual(claims[2].identifiers.sort(), ["check-c", "helper-c.ts", "lib-c.ts"]);
+});
+
 test("bulletsOf: joins wrapped continuation lines into one bullet", () => {
   const ac = "## Acceptance Criteria\n- [ ] `foo.ts` invoking `bar.ts` is proven by real\n  production callsite evidence.\n- [ ] second item\n";
   const bullets = bulletsOf(ac);

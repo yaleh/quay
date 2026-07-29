@@ -38,6 +38,14 @@ import { pathToFileURL } from "node:url";
 // ("component X owns Y") and must not be treated as one. Confirmed real recurring false-positive
 // source (gap-wiring-coverage-check-owns-false-positive, M198/DIR-119-D1): every one of 5
 // mechanically-flagged "uncovered claims" against DIR-119-D1's Proposal traced to this single word.
+// Considered adding `imports?|reuses?|reused|parses?|parsed` (M201/DIR-126-B, real "X imports Y
+// from Z" claims currently go unextracted, neither passing nor failing coverage) but REJECTED: a
+// live re-run against DIR-126-A's and DIR-119-D1's already-landed, already-audited `## Proposal`
+// text showed the wider verb set surfaces multiple NEW uncovered claims on those tasks (sentences
+// using "exports"/"maps 1:1 onto" that were never checked against AC coverage when those tasks
+// were authored/audited) — reopening DONE, landed work is a worse cost than the narrow gap it
+// would close. Left as a known, narrower limitation; the DIR-126-B content gap this would have
+// caught is instead closed directly in that task's own AC text.
 const WIRING_VERB_RE =
   /\b(invokes?|calls?|dispatches?|enforces?|wires?|routes?|delegates?)\b|(?<!(?:'s|s'|its|their|my|our|your|his|her)\s)\bowns?\b/i;
 const EVIDENCE_RE = /\b(real|production|callsite|call site|reachability|reachable|evidence|wired|confirm(?:ed|s|ation)?|reproduc\w*|verifi(?:ed|es|cation)?|proven?|proves?)\b/i;
@@ -57,7 +65,13 @@ const EVIDENCE_RE = /\b(real|production|callsite|call site|reachability|reachabl
 // hide one that was already visible.
 function splitListAwareBlocks(paragraph) {
   const lines = paragraph.split(/\n/);
-  const bulletStart = /^\s*(?:[-*]\s+|\d+\.\s+)/;
+  // A GFM table row line ("| cell | cell |") is a bullet-start-equivalent boundary for the same
+  // reason a `- `/`* `/`1. ` bullet is (gap-wiring-coverage-check-reuse-verbs-and-tables,
+  // M201/DIR-126-B): a real Proposal's own comparison table ("| Code | Class | Reuses |" style,
+  // one row per mechanism) merged all its rows into a single giant claim under the pre-fix
+  // splitter, hiding per-row wiring claims from independent AC coverage the same way an
+  // un-blank-lined bullet list did before 335317d.
+  const bulletStart = /^\s*(?:[-*]\s+|\d+\.\s+|\|.*\|\s*$)/;
   const blocks = [];
   let current = [];
   for (const line of lines) {
