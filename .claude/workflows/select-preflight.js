@@ -26,7 +26,7 @@ const result = await agent(
 
 1. Extract milestone_counter from experiments/quay-perpetual-stream/dashboard.md: grep for \`**milestone_counter: <N>**\`.
 2. Run: \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/select-preflight.ts --json --workspace-root ${$a.workspaceRoot || '.'} --milestone-counter <counter>\`
-3. Parse the JSON output as PreflightResult.
+3. Parse the JSON output as PreflightResult. It has a real \`portfolio\` field (a MilestonePortfolio: {version, selected: MilestoneCandidate[], rejected, generatedAt, round}) already computed by select-preflight.ts's own synthesizeCandidatePortfolio() — carry this REAL parsed value through verbatim into TASK 4's return object below (never a hand-shaped stub or literal reconstruction; if the field is absent or fails to parse, pass through \`null\` rather than fabricating one).
 4. If \`halt: true\` → return \`{outcome: "halted", reason: haltReason}\` immediately.
 5. If \`pendingDirectives\` non-empty → record as WARNING (informational, not blocking — the caller should /drain-directives first per DIR-071).
 6. If 0 candidates → return \`{outcome: "done", shortlist: [], s: 0, ...}\`.
@@ -66,7 +66,8 @@ Return the complete structured result:
   deliverableStreak: <cadence.streak>,
   starvation: <true|false>,
   floor: <shortlist floor>,
-  milestoneCounter: <N>
+  milestoneCounter: <N>,
+  portfolio: <the REAL PreflightResult.portfolio field from TASK 1's parsed JSON, verbatim — M198/DIR-119-D1: synthesized singleton/composite MilestoneCandidate decision record, threaded through so a genuinely multi-task selected candidate is visible to this workflow's own caller instead of being read internally and discarded>
 }
 \`\`\``,
   {
@@ -87,6 +88,7 @@ Return the complete structured result:
         starvation: { type: 'boolean' },
         floor: { type: 'number' },
         milestoneCounter: { type: 'number' },
+        portfolio: { type: 'object' },
       },
     },
   },

@@ -166,6 +166,24 @@ execute(params) where |batch|=1 = invoke(".claude/workflows/execute-milestone.js
      member; Land marks every member task but performs exactly ONE counter increment + ONE
      dashboard entry regardless of width — composite-build/audit/reconcile/land.ts). A real cold
      multi-task exercise of this path is explicitly DIR-119-C's job, not self-certified here.
+  ⊨ DIR-119-D1 (M198): when the chosen candidate/batch is genuinely multi-task
+     (`taskIds.length > 1`), a new sub-step runs BEFORE the execute-milestone.js dispatch above:
+     `node --experimental-strip-types experiments/quay-perpetual-stream/scripts/composite-manifest-synthesis.ts --candidate-json <portfolio-selected-entry> --charter <charterFile> --workspace-root . --out <path>`
+     — synthesizes the real `CompositeManifest{phases[], auditShards[]}` this
+     candidate's own DIR-119-B composite dispatch above consumes (`<portfolio-selected-entry>` is
+     the real synthesized `MilestoneCandidate` JSON select-preflight.js's own `portfolio.selected[]`
+     now threads through, per its own SelectPreflight phase edit — never a hand-shaped stub). On a
+     non-zero exit (contract violation, prohibiting-edge conflict, or missing task facts) this is a
+     HARD STOP before Build is ever reached — fail-closed, the composite dispatch below never fires
+     with a bad/absent manifest. On success, the written path is threaded into the
+     execute-milestone.js dispatch above as `compositeManifestFile`, alongside the pre-existing
+     `taskId`/`milestoneCandidate`/`charterFile`/`absorbEntryFile`/`preparationReceiptFile` names.
+     For `taskIds.length === 1` this sub-step is skipped entirely — the legacy singleton dispatch
+     is byte-for-byte unaffected (compatibility invariant; no `compositeManifestFile`, no synthesis-
+     CLI invocation logged for that path). This is a doc-text-only mechanism, matching how the
+     existing `execute-milestone.js`'s own Verify phase already shells out to the sibling
+     `composite-preflight.ts` checker as a labeled step (the workflow DSL's five globals —
+     phase/agent/parallel/log/args — expose no import/filesystem/shell primitive of their own).
 
 dispatch :: Batch → Action
 dispatch(batch) =

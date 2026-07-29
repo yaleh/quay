@@ -164,6 +164,8 @@ SYNC_SCRIPTS=(
   composite-reconcile
   composite-land
   composite-preflight
+  composite-manifest-synthesis
+  gate-script-base
   wiring-coverage-check
   milestone-preparation-check
   proposal-convergence

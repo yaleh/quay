@@ -1,0 +1,89 @@
+{
+  "manifest": {
+    "version": 1,
+    "candidateId": "m198-proof-DIR-100+DIR-101",
+    "taskIds": [
+      "DIR-100",
+      "DIR-101"
+    ],
+    "phases": [
+      {
+        "id": "phase-DIR-100",
+        "taskIds": [
+          "DIR-100"
+        ],
+        "requires": [],
+        "auditShardIds": [
+          "shard-DIR-100-ac"
+        ]
+      },
+      {
+        "id": "phase-DIR-101",
+        "taskIds": [
+          "DIR-101"
+        ],
+        "requires": [],
+        "auditShardIds": [
+          "shard-DIR-101-ac"
+        ]
+      }
+    ],
+    "auditShards": [
+      {
+        "id": "shard-DIR-100-ac",
+        "kind": "task-ac",
+        "taskIds": [
+          "DIR-100"
+        ]
+      },
+      {
+        "id": "shard-DIR-101-ac",
+        "kind": "task-ac",
+        "taskIds": [
+          "DIR-101"
+        ]
+      }
+    ],
+    "touches": [
+      "packages/quay-native/bin/quay-native.ts",
+      "packages/quay-native/src/mcp-server.ts",
+      "packages/quay-native/src/store.ts",
+      "packages/quay/src/gate/config/loader.ts"
+    ],
+    "semanticResources": [],
+    "landPolicy": "atomic"
+  },
+  "context": {
+    "candidateTaskIds": [
+      "DIR-100",
+      "DIR-101"
+    ],
+    "charterTaskIds": [
+      "DIR-100",
+      "DIR-101"
+    ],
+    "taskAcCounts": {
+      "DIR-100": 8,
+      "DIR-101": 8
+    },
+    "taskTouches": {
+      "DIR-100": [
+        "packages/quay/src/gate/config/loader.ts"
+      ],
+      "DIR-101": [
+        "packages/quay-native/bin/quay-native.ts",
+        "packages/quay-native/src/mcp-server.ts",
+        "packages/quay-native/src/store.ts"
+      ]
+    },
+    "taskSemanticResources": {
+      "DIR-100": [],
+      "DIR-101": []
+    },
+    "forbiddenEdges": [],
+    "capacity": {
+      "maxPhases": 32,
+      "maxAuditShards": 64
+    }
+  }
+}

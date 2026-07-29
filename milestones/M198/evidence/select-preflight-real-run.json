@@ -1,0 +1,23 @@
+{
+  "halt": true,
+  "haltReason": "FAIL-CLOSED: could not read task store (quay task list --json failed)",
+  "pendingDirectives": [],
+  "cadence": null,
+  "candidates": [],
+  "orthogonalScan": {
+    "checkedCount": 0,
+    "pairs": [],
+    "log": [
+      "SKIPPED: could not read task store — no candidates to scan"
+    ]
+  },
+  "milestoneCounter": 195,
+  "workspaceRoot": "/home/yale/work/quay",
+  "portfolio": {
+    "version": 1,
+    "selected": [],
+    "rejected": [],
+    "generatedAt": "1970-01-01T00:00:00.000Z",
+    "round": 0
+  }
+}
