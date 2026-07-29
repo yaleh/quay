@@ -538,8 +538,9 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   task-contract/charter/review-policy hashes still match resumes with zero
   `ProposalAuthors`/`Adjudicate` calls when the flag is omitted — confirmed via real journal
   evidence (not a fixture-only claim for this specific scenario).
-  Proposal, task-contract, charter, review-policy/source mutation, or a missing prior record starts
-  a new generation — confirmed via fixtures for each distinct cause.
+  **Any mismatch forces a fresh generation:** Proposal, task-contract, charter, review-policy/source
+  mutation, or a missing prior record starts a new generation — confirmed via fixtures for each
+  distinct cause.
 - [ ] **Unchanged stable terminal is not recomputed:** a dedicated fixture and a real journal prove
   that identical task/Proposal/charter/review-policy hashes plus a cacheable
   `split-recommended`/`preflight-rejected` terminal return `reuse-terminal` before any content
@@ -558,8 +559,25 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   `reuse-terminal` is additionally proved unable to advance to PlanAuthor/Receipt.
 - [ ] `$a.resumeFromAdjudicatedProposal`'s explicit `true`/`false` behavior is confirmed unchanged
   (golden-replay comparison against the pre-this-child baseline for both explicit values).
-- [ ] Canonical and `plugin/` mirrors of `proposal-convergence.ts`, `prepare-milestone.js`, and
-  their test files are byte-identical — `cmp`/`sync-vendor.sh --check`.
+- [ ] **Corrected 2026-07-29, ProposalReview finding 7ef01082:** canonical and `plugin/` mirrors of
+  `proposal-convergence.ts` and `prepare-milestone.js` — the two real, byte-identical file pairs
+  this child touches — are confirmed identical via `cmp` and `sync-vendor.sh --check` (the latter
+  covers `proposal-convergence.ts`, already in `SYNC_SCRIPTS`; `prepare-milestone.js` is checked via
+  the existing manual `cmp` convention `plugin-packaging.test.mjs` already exercises). This task's
+  own two test files (`experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs`,
+  `plugin/test/prepare-milestone-convergence.test.mjs`) are each real, own-purpose test files, NOT a
+  mirror pair of each other (different basenames, different content — pure-function unit tests vs.
+  workflow-integration tests) and are not byte-identity-checked by any existing mechanism; this item
+  requires only that each independently passes its own real test run, correcting the prior draft's
+  factually-wrong claim that they are compared for byte-identity.
+- [ ] **WIRING-CLAIM R3 — embedded lease release closes the two-dispatch race window, not just "the
+  release eventually happens":** a real journal check confirms exactly ONE admission-related CLI
+  dispatch occurs on the `reuse-terminal` path beyond Admission's own `--acquire` (the
+  `--decide-resume` call itself, with `releaseLease` embedded inside it) — a naive two-call
+  implementation (decide, then separately dispatch `--release`) would satisfy "No lease is stranded
+  by terminal reuse" identically without closing the actual race window this design's own Key
+  design decisions section says the embedding exists to fix, so this item requires the
+  dispatch-count evidence specifically, distinct from that end-state bullet.
 - [ ] **WIRING-CLAIM R9 — real Touches-scope containment, not a prose promise:** `git diff --stat`
   against `experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts` and `.gitignore`
   is empty for every commit landing this child — a real, post-Build `git diff` check, not merely a
