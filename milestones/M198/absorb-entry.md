@@ -33,3 +33,16 @@ TBD — completed by the Audit phase.
 ## ABSORB gate run (M198, post-audit)
 
 TBD — completed at Land.
+
+## Adversarial-audit disposition write-back (iteration-0, this audit)
+
+adversarial-audit disposition: REFUTED — 14/18 AC + 2/4 DoD items independently re-confirmed with
+real evidence (test 15/15 green, import greps, byte-identical mirrors, real proof-run artifacts),
+but a genuine, previously-undisclosed regression was found live on master: this milestone's own
+edit to plugin/scripts/sync-vendor.sh (adding composite-manifest-synthesis/gate-script-base to
+SYNC_SCRIPTS, both outside this task's declared ## Touches) breaks
+plugin/test/plugin-packaging.test.mjs's M136 hardcoded-count test (24 !== 22, reproduced live,
+confirmed not pre-existing via git show eaed20a~1). Full report:
+milestones/M198/audits/iteration-0-acceptance-audit.md.
+
+V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated carry-forward (milestone_counter=194 K=2, both ledger rows [ok] — consolidated / proposed — verbatim from `vmeta-lag-check.sh --counter 194 experiments/quay-perpetual-stream/v-meta-ledger.md`, re-run this pass).

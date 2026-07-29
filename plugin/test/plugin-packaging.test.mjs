@@ -207,18 +207,25 @@ test('M136 (DIR-070-A): sync-vendor.sh --check dynamic scanning verifies all man
     result.includes('verifying concurrency/routine scripts'),
     '--check must scan concurrency/routine scripts dynamically'
   );
-  // Verify symlink awareness: output should report 7 OK (identical) entries for concurrency scripts
+  // Verify symlink awareness: output should report one OK (identical) entry per SYNC_SCRIPTS
+  // member. M198/DIR-119-D1 (audit finding): this used to be a hardcoded literal bumped by hand
+  // at every milestone that touched SYNC_SCRIPTS (M188 +5, M189 +7, M191 +2, M193 +1) — and this
+  // milestone's own +2 (composite-manifest-synthesis, gate-script-base) was the one time that
+  // bump was missed, leaving a real, live-failing assertion on master. Deriving the expected count
+  // directly from sync-vendor.sh's own SYNC_SCRIPTS array closes this whole class of drift.
   const okCount = (result.match(/OK \(identical\): scripts\//g) || []).length;
-  // M188/DIR-119-A: +5 (candidate-contracts, coupling-graph, candidate-synthesis, portfolio-choice,
-  // preparation-feedback) added to sync-vendor.sh's SYNC_SCRIPTS array, 7 -> 12.
-  // M189/DIR-119-B: +7 (composite-args, composite-contracts, composite-build, composite-audit,
-  // composite-reconcile, composite-land, composite-preflight) added, 12 -> 19.
-  // M191/DIR-117+DIR-122: +2 (wiring-coverage-check — the shared mechanism-claim wiring coverage
-  // check both directives require; milestone-preparation-check — DIR-117's receipt checker) added,
-  // 19 -> 21.
-  // M193/DIR-125: +1 (proposal-convergence — the bounded ProposalReview convergence engine) added,
-  // 21 -> 22.
-  assert.equal(okCount, 22, '--check must report exactly 22 identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array)');
+  const syncScriptText = readFileSync(syncScript, 'utf8');
+  const syncScriptsBlock = syncScriptText.match(/SYNC_SCRIPTS=\(([\s\S]*?)\)/);
+  assert.ok(syncScriptsBlock, 'sync-vendor.sh must declare a SYNC_SCRIPTS=(...) array');
+  const expectedCount = syncScriptsBlock[1]
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#')).length;
+  assert.equal(
+    okCount,
+    expectedCount,
+    `--check must report exactly ${expectedCount} identical concurrency scripts (dynamically scanned from SYNC_SCRIPTS array, ${expectedCount} entries)`
+  );
 });
 
 test('routines skill (M140) has zero experiment-layer references', () => {
