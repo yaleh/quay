@@ -3,7 +3,7 @@ id: DIR-126-A
 title: Single-flight admission for prepare-milestone.js
   (prepare-admission-check.ts, new Admission phase) — first child of DIR-126's
   split
-status: todo
+status: done
 labels:
   - milestone-candidate
   - human-steered
@@ -710,12 +710,17 @@ reconciled DIR-126's own Proposal and recommended this split:
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply. Per DIR-026
 Reading A, source code, prompt text, or a same-generation self-test are necessary but insufficient.
 
-- [ ] Landed on `master` under human-steered discipline (this touches
+- [x] Landed on `master` under human-steered discipline (this touches
   `.claude/workflows/prepare-milestone.js`, the control-plane script every future milestone's
   Prepare stage runs through).
-  **AUDIT: not yet applicable** — this audit runs pre-Land (working tree still carries uncommitted
-  Build changes at audit time); Landing is the subsequent Land-phase gate's own responsibility, not
-  something this audit can confirm in advance. Left unchecked, not a defect finding.
+  **AUDIT: not yet applicable at audit time** — the audit ran pre-Land (working tree still carried
+  uncommitted Build changes at audit time). **CLOSED AT LAND (2026-07-29):** Build's work landed
+  directly on `master` at commit `496ccd4` (no separate worktree/branch — the shared-working-tree
+  convention this repo's CLAUDE.md documents); this Land phase re-confirmed the tree clean
+  (`git status --short` empty) and all four ABSORB gates (`it0-dod-check.sh`,
+  `task-schema-check.sh`, `tree-hygiene-check.sh`, `worktree-branch-hygiene-check.sh`) PASS at Land
+  time — see `## Execution record` below and `milestones/M200/absorb-entry.md`'s "ABSORB gate run
+  (M200, post-audit)" section.
 - [x] A real, non-fixture two-concurrent-dispatch proof is exercised end to end with journal output,
   not asserted.
   **AUDIT: REFUTED / UNCONFIRMED — CLOSED 2026-07-29 (post-audit fix, same evidence as the
@@ -732,6 +737,28 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
   `.claude/workflows/prepare-milestone.js` lines 66-125 confirms a genuine, non-test production
   callsite (the `Admission` phase's `agent()`-dispatched `--acquire` call) strictly precedes both
   branches' `phase('ProposalAuthors')`.
+
+## Execution record
+
+- **Milestone:** M200
+- **Iteration count:** 1 (single Build pass covering the full lease module + `Admission` phase +
+  renew/release wiring, followed by 1 iteration-0 adversarial acceptance audit round that verdicted
+  REFUTED on 4 AC items + 1 DoD item, closed within the same Build/fix pass and the same commit,
+  then 1 independent, fully fresh-context re-audit round that verdicted CONFIRMED). No mid-milestone
+  re-scope — same charter, same AC/DoD list throughout.
+- **Realized Δv:** 0 (v̂>0 per the charter's own Value hypothesis — capabilityGrowth, deliverable,
+  method-infra surface; no chart-2 `packages/quay*` product-surface cell moves, since the surface
+  improved is the `prepare-milestone` control-plane's own admission mechanism, not a product
+  surface — structurally identical to the M164/M167/M179/M188/M189/M192/M193/M194/M195/M197/M198
+  precedent the VT ruler cannot score for the same reason).
+- **Merge commit SHA:** `496ccd4`
+- **Outcome:** Single-flight admission for `prepare-milestone.js` landed on `master` — a new
+  `prepare-admission-check.ts` lease module (+ byte-identical `plugin/scripts/` mirror) and an
+  unconditional `Admission` phase inserted strictly before `ProposalAuthors` on both the cold and
+  resume branches close the concrete ~54-duplicate-workflow-minute M196 overlap this task's own
+  Finding measured, with a real two-concurrent-`Workflow`-dispatch proof, all 15 AC items and the
+  applicable DoD items independently CONFIRMED by a second, fully independent fresh-context
+  re-audit.
 
 ## Human verification when exp5 marks this DIR done
 

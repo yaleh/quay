@@ -28,11 +28,109 @@ The audit-disposition / ABSORB-gate-run sections below are completed during the 
 
 ## Adversarial audit disposition (M200)
 
-TBD — completed by the Audit phase.
+**Two audit rounds, final disposition CONFIRMED — cleared to land.**
+
+**Round 1 — iteration-0 adversarial acceptance audit** (`milestones/M200/audits/iteration-0-
+acceptance-audit.md`, 2026-07-29): verdict **REFUTED** on 4 AC items + 1 DoD item, all genuine,
+independently-confirmed gaps (see "Audit disposition write-back" section below for the full
+Clause-9 legitimacy analysis of why this was NOT eligible for `needs-human`):
+
+1. AC2 (Admission-phase error is fail-closed) — the branching logic was real and correct on source
+   read but no fixture drove `prepare-milestone.js` itself into the `admission-check-failed`
+   branch.
+2. AC3 (Single-flight RED/GREEN) + the parallel DoD item — the only real-concurrency evidence
+   raced `prepare-admission-check.ts` directly via two OS processes
+   (`milestones/M200/stage9-two-process-race-evidence.md`), bypassing the `Workflow` harness and
+   `prepare-milestone.js` entirely — no real `ProposalAuthors` agent-dispatch-count journal
+   evidence existed.
+3. AC6 (renewal-at-every-phase-boundary) — the 6/6 `--renew` call sites were confirmed by static
+   grep only; renewal counters were collected in the mock-based convergence tests but never
+   asserted against an expected count.
+4. AC13 (Grounding evidence group 3) — a factually false sub-claim that production wiring was
+   "confirmed distinct from... the module's own `--selftest` self-check mode" —
+   `prepare-admission-check.ts` has no `--selftest` mode at all.
+
+All four gaps were fixed and committed in `496ccd4`: (1) a real-`AsyncFunction`-plus-mocked-agent
+workflow test drives `prepare-milestone.js` into the `admission-check-failed` branch and asserts
+zero `ProposalAuthors` dispatches; (2) two real concurrent
+`Workflow({scriptPath: '.claude/workflows/prepare-milestone.js'})` dispatches against a disposable
+fixture task produced real journal evidence — the loser's entire journal is 2 entries
+(`agent_count:1`, zero `ProposalAuthors` dispatches), the winner acquired the lease and dispatched
+2 real proposal-author agents (`milestones/M200/evidence/real-two-concurrent-workflow-dispatch-
+proof.md` + the two raw journal excerpts alongside it); (3) a test asserting
+`admissionRenews === 4` for a resumed 0-delta-round generation, plus `admissionAcquires===1`/
+`admissionReleases===1`; (4) the disproven `--selftest` sub-claim was removed from the task text
+rather than left standing.
+
+**Round 2 — independent fresh-context re-audit** (dispatched separately from both the Build and
+Round 1, no shared context, re-derived every claim from scratch via live source reads and command
+execution): verdict **CONFIRMED**. All 15 AC items hold; 3 of 4 DoD items hold (the 4th, "Landed
+on master", was correctly left open pre-Land — that is what this Land phase closes). Independently
+re-confirmed: `it0-dod-check.sh` PASS (12/12 dispositions); `wiring-coverage-check.ts` 0 findings;
+`cmp`/`sync-vendor.sh --check` CLEAN across all four canonical/`plugin/` mirror pairs; the 14
+real terminal-return sites in the final `prepare-milestone.js` (12 original + 2 new Admission-phase
+pre-acquisition returns) individually verified — pre-Admission sites (line 27 missing-args guard,
+lines 104/109 Admission's own pre-acquisition returns) correctly release nothing, all 11
+post-acquisition sites each immediately preceded by `await _releaseLease(...)`; `Admission`
+(`.claude/workflows/prepare-milestone.js` line 66 / `_admissionAgentCall` dispatch line 94)
+confirmed to run strictly before BOTH branches of the `_resumeFromAdjudicatedProposal` split (line
+117); `DEFAULT_STALENESS_MS` confirmed exactly `{ordinary: 300 * 60 * 1000, highRisk: 360 * 60 *
+1000}`; `.quay/prepare-leases/` confirmed gitignored via `git check-ignore -v`.
+
+**Final disposition: CONFIRMED, cleared to land.** No open AC or applicable-at-this-stage DoD item
+remains unresolved; the only DoD item left unchecked going into Land ("Landed on master") is closed
+by this Land phase itself (see task file `## Execution record`).
 
 ## ABSORB gate run (M200, post-audit)
 
-TBD — completed at Land.
+All four gates re-run live at Land time (2026-07-29), against the already-landed `master` tree
+(commit `496ccd4`, working tree clean — nothing new to capture):
+
+**1. `it0-dod-check.sh DIR-126-A experiments/quay-perpetual-stream/charters/M200-dir126a-single-flight-admission.md milestones/M200/absorb-entry.md`** — PASS
+
+```
+PASS: clause0-ac-dod-present: task AC has 15 checkable clause(s) (checklist-form, 15/15 checked); DoD references the standard [tasks/DIR-126-A.md]
+PASS: clause1-adversarial-audit: disposition statement present (verdict)
+PASS: clause2-vmeta-lag: disposition statement present
+PASS: clause3-line-budget: PASS — scope within the small-milestone norm (no declared line budget > 2000, in-scope item count at or under threshold 8). No phase/stage plan required.
+PASS: clause4-impl-row: PASS — DIR-126-A is not design-only per its backlog row text; impl-row gate does not apply.
+PASS: clause5-no-self-exemption: no undeclared self-exemption language found (or all found exemptions have a matching WAIVER line)
+PASS: clause6-escrow-delta-v: N/A — milestone is not design-only (rule does not apply)
+PASS: clause7-test-floor: N/A — surface label(s) [method-infra] are exclusively non-product-touching (method-infra/docs/cross-cutting/packaging)
+PASS: clause8-task-canonical-lifecycle-record: N/A — no 'milestone:M<N>' label found — legacy/unlabeled task, predates the DIR-014 item 6 cutover
+PASS: clause10-tree-hygiene: PASS — tree-hygiene: clean — no un-gitignored scratch left in the main tree.
+PASS: clause11-worktree-branch-hygiene: PASS — worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+PASS: clause12-audit-independence: N/A — no '## Audit-independence check' section in the ABSORB-entry text (documented no-op)
+N/A: clause9-split-or-commit: no `needs-human` outcome declared — N/A
+
+PASS: DoD check passed — all clauses satisfied (12 disposition(s) confirmed), no undeclared self-exemption.
+```
+Exit code: 0.
+
+**2. `task-schema-check.sh tasks/DIR-126-A.md`** — PASS
+
+```
+PASS: tasks/DIR-126-A.md — schema v1 conformant (kind=milestone-candidate)
+1 total, 1 pass, 0 N/A-legacy, 0 fail
+```
+Exit code: 0.
+
+**3. `tree-hygiene-check.sh`** — PASS
+
+```
+tree-hygiene: clean — no un-gitignored scratch left in the main tree.
+```
+Exit code: 0.
+
+**4. `worktree-branch-hygiene-check.sh`** — PASS
+
+```
+worktree-branch-hygiene: clean — no orphaned milestone evidence in un-merged iteration branches.
+info: prunable merged iteration branches=0; registered iteration worktrees=0 (ABSORB should prune these).
+```
+Exit code: 0.
+
+**All four gates: PASS. Cleared for Land.**
 
 ## Audit disposition write-back (M200, 2026-07-29, iteration-0-acceptance-audit.md)
 
