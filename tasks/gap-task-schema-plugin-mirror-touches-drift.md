@@ -1,6 +1,6 @@
 ---
 id: gap-task-schema-plugin-mirror-touches-drift
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -9,6 +9,17 @@ children: []
 extra:
   schema: v1
 ---
+## Resolution, closed (2026-07-29)
+
+Resolved by the later M191 vendor synchronization rather than by a separate milestone under this
+task's identity. DIR-122's M191 Execution record identifies the earlier full-file sync that removed
+the functional drift and independently re-verifies the canonical/plugin pair modulo the two
+intentional attribution-only substitutions. A fresh
+`bash plugin/scripts/sync-vendor.sh --check` run on 2026-07-29 reports
+`CLEAN: all files verified, no drift detected`, including
+`OK (expected-diff): task-schema/task-schema.ts`. No further synchronization or code change is
+required.
+
 ## Proposal
 
 Re-sync `plugin/scripts/task-schema.ts` (the vendored mirror) with

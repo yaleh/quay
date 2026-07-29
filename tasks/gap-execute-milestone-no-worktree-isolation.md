@@ -3,7 +3,7 @@ id: gap-execute-milestone-no-worktree-isolation
 title: "gap: execute-milestone.js's Build phase has no worktree isolation —
   CLAUDE.md's documented per-milestone worktree claim is stale, and two
   milestones can never safely run concurrently regardless of task Touches"
-status: needs-human
+status: done
 labels:
   - gap
   - milestone-candidate

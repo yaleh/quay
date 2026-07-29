@@ -3,7 +3,7 @@ id: gap-cli-serve-port-test-flaky-ci-timeout
 title: cli.test.mjs's "quay serve --port" reachability test fails under real CI
   resource contention — fixed 5s poll budget too tight under
   --test-concurrency=8
-status: ready
+status: done
 labels:
   - gap
   - defect
@@ -15,6 +15,13 @@ extra:
   acceptance: node --test --test-name-pattern='becomes reachable'
     packages/quay/test/cli.test.mjs
 ---
+## Resolution, closed (2026-07-29)
+
+Lifecycle status reconciled from `ready` to `done`. The implementation, independent local
+verification, adversarial audit, and real post-fix CI evidence were already complete: commit
+`0a55c35`, contended canonical-suite result `517/514/0-fail/3-skipped`, and successful GitHub
+Actions run `30205100534`. No further implementation is required under this task.
+
 ## Finding
 
 Real CI run [30204233175](https://github.com/yaleh/quay/actions/runs/30204233175) (triggered

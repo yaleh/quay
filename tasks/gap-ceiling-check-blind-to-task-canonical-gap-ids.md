@@ -3,7 +3,7 @@ id: gap-ceiling-check-blind-to-task-canonical-gap-ids
 title: "gap: execute-milestone.js's Verify-phase ceiling-check instruction only
   excludes DIR-NNN from the legacy gap-list.md lookup, not task-canonical
   gap-<slug> tasks — real false-positive block on M191"
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -13,6 +13,22 @@ children: []
 extra:
   schema: v1
 ---
+## Resolution, closed (2026-07-29)
+
+Implemented by commit `38158d6` in both `execute-milestone.js` mirrors, then exercised by real M191
+workflow runs against the charter that names
+`gap-task-schema-plugin-mirror-touches-drift`,
+`gap-symlink-mirror-noop-affects-5-more-scripts`, and
+`gap-touches-orthogonality-symlink-isdirect-mismatch`.
+
+The pre-fix M191 journal (`wf_ffad2538-f29`) first recorded the real failure: all three IDs were
+passed to the legacy checker and returned `NOT-FOUND`. After the fix, the same workflow journal
+recorded `ceiling-check`, `ok:true`, with the explicit vacuous-pass detail that all three IDs had
+real `tasks/<id>.md` files and were therefore task-canonical. The later M191 iteration-2 journal
+(`wf_b3cb3744-dad`) independently recorded the same `ok:true` result before returning Build
+`outcome:"done"` at commit `a0a1d20`. This supplies the previously-missing real subsequent-Verify
+evidence; no further implementation is required.
+
 ## Proposal
 
 Extend `execute-milestone.js`'s Verify-phase `ceiling-check` instruction (line ~112, both mirrors)
@@ -71,9 +87,10 @@ speculative.
 - [x] Both `execute-milestone.js` mirrors' `ceiling-check` instruction text explicitly skip IDs
   matching an existing `tasks/<id>.md` file, not just `DIR-NNN` — grep-confirmable. -- [fixed
   2026-07-28: both mirrors edited identically, confirmed byte-identical via `diff`.]
-- [ ] A real subsequent Verify-phase run (the same or a later milestone whose charter names a
+- [x] A real subsequent Verify-phase run (the same or a later milestone whose charter names a
   task-canonical `gap-<slug>` ID in Scope/Done-when) shows `ceiling-check` returning
-  `ok:true` with the vacuous-pass detail, not a `NOT-FOUND` false block — real journal evidence.
+  `ok:true` with the vacuous-pass detail, not a `NOT-FOUND` false block — confirmed by real M191
+  journals `wf_ffad2538-f29` and `wf_b3cb3744-dad`.
 
 ## Definition of Done
 
@@ -81,9 +98,9 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 Reading A, the prompt-string edit alone is necessary but insufficient — a real subsequent Verify
 run demonstrating the fix is required.
 
-- [ ] Landed on `master` under human-steered discipline.
-- [ ] A real milestone's Verify phase, re-run after this fix, confirms the false-positive no
-  longer occurs.
+- [x] Landed on `master` under human-steered discipline (commit `38158d6`).
+- [x] A real milestone's Verify phase, re-run after this fix, confirms the false-positive no
+  longer occurs (M191 journals `wf_ffad2538-f29` and `wf_b3cb3744-dad`).
 
 ## Human verification when exp5 marks this task done
 

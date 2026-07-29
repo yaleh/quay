@@ -2,7 +2,7 @@
 id: gap-symlink-mirror-noop-affects-5-more-scripts
 title: The fixed config-wiring-check.ts/concurrent-batch-scheduler.ts mirror-symlink
   silent-no-op bug affects 5 more scripts that were never checked
-status: needs-human
+status: done
 labels:
   - gap
   - defect
