@@ -149,7 +149,9 @@ exact cross-generation problem this task exists to fix).
 - [x] **RESOLVED post-audit (coordinator-dispatched real journal, 2026-07-29), scope-corrected:**
   a real dispatch with `resumeFromAdjudicatedProposal: true` (`wf_2cc60d00-181`) confirms
   `ProposalAuthors`/`Adjudicate` are skipped and the run enters directly at `ProposalReview`. The
-  run itself ended `needs-human`/`split-recommended` after 1 full review + 3 delta rounds — a
+  run itself ended `needs-human`/`split-recommended` after 1 full review + 2 delta rounds (the
+  split checkpoint fired at the top of what would have been round 3, before any round-3 agent was
+  dispatched — independently re-counted from the raw journal by the M197 re-audit) — a
   legitimate bounded-convergence termination caused by real, honestly-disclosed defects in the
   disposable scratch fixture's own body (a byte-identical copy of this task, so its own
   `## Acceptance Criteria`/`extra.acceptance` self-referenced a different task id, and its
