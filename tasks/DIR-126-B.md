@@ -20,7 +20,7 @@ extra:
 
 ## Proposal
 
-Add mechanical, pre-agent-dispatch checks for the five recurring `prepare-milestone` failure
+Add mechanical, pre-content-agent-dispatch checks for the five recurring `prepare-milestone` failure
 classes DIR-126's own Finding names (merged Markdown claim blocks, stale AC/DoD references,
 Proposal/Plan/Touches disagreement, non-existent claimed precedent/imports, non-runnable Plan
 command/path shapes), rejecting cheaply before any expensive LLM author/reviewer agent is
@@ -63,6 +63,12 @@ already is (labeled `agent()` running the real CLI, verdict merged by the script
 `blocking: true` returns `{outcome: 'revision-needed', reason: 'preflight-rejected', phase:
 'Preflight', findings: [...]}` before `ProposalAuthors`.
 
+The mechanical CLI runner is accounted separately from content-generation/review agents: the
+production journal must show at most one bounded preflight runner and zero `proposal-author-*`,
+`adjudicate`, `proposal-review`, or `plan-check-*` dispatches on a content-preflight rejection.
+This avoids describing an agent-hosted CLI invocation as literally "pre-agent" while preserving
+the real requirement: no expensive content agent is spent on an objectively malformed input.
+
 **Plan-shape-timing reading (flagged for reviewer confirmation):** the task's AC groups "invalid
 Plan command/path shapes" with the other four under one "before ProposalAuthors/ProposalReview"
 timing claim, but a Plan file cannot exist before `PlanAuthor` runs. This Proposal reads the AC's
@@ -85,6 +91,15 @@ ambiguous-but-valid emits a distinct `preflight-ambiguous-<check>` non-blocking 
 `reviewer-required` — mirroring the existing non-blocking `wiring-coverage-none-claimed` code
 already in `wiring-coverage-check.ts`'s verdict codes — never silently auto-rejected by regex.
 
+**Calibrate before enforcing.** The merged-list/regex detector fix and its regression corpus land
+and pass before any new verdict from that detector is allowed to become fail-closed in the
+production `Preflight` phase. Implementation therefore has an explicit two-step activation gate:
+(1) repair `splitSentences`, replay the real M195/M197 known-good tasks plus the M198 false-positive
+and M199 merged-list reproductions, and demonstrate the corrected typed verdicts; then (2) enable
+`blocking: true` only for failure classes whose real-negative and ambiguous-valid fixtures both
+pass. A checker version/hash is emitted with every verdict so [[DIR-126-C]] can invalidate a
+cached terminal decision whenever B's detection policy changes.
+
 ### Key design decisions
 
 - **Preflight is a distinct entry point in the same module A introduces, not a separate module** —
@@ -100,6 +115,11 @@ already in `wiring-coverage-check.ts`'s verdict codes — never silently auto-re
 - **Ambiguous-but-valid stays `reviewer-required`, never silently rejected or silently passed** —
   the exact discipline "No heuristic overreach" requires; mirrors the existing
   `wiring-coverage-none-claimed` non-blocking-code precedent rather than inventing a new posture.
+- **Detector repair and calibration precede fail-closed activation** — the production callsite
+  cannot mark the merged-list class blocking until the old false-positive reproduction is GREEN,
+  the real bad fixture is still RED, and the known-good/ambiguous corpus stays non-blocking.
+- **Every verdict carries a checker policy version/hash** — a later detector change is a cache
+  invalidation event for [[DIR-126-C]], never silently paired with an older terminal decision.
 - **Fixture suite seeded from real M192/M195/M196/M198 artifacts already checked into this repo**,
   not synthetic-only fixtures — grounds the five check functions against the actual failure shapes
   DIR-126's own Finding measured, reducing the risk of a preflight false positive recreating the
@@ -112,6 +132,8 @@ already in `wiring-coverage-check.ts`'s verdict codes — never silently auto-re
 | Content preflight (4 classes) finds a blocking defect | `revision-needed`, `preflight-rejected`, before `ProposalAuthors` |
 | Plan-shape preflight finds a blocking defect | `revision-needed`, `preflight-rejected`, before `PlanCheck`'s first round |
 | Content preflight finding is ambiguous/uncertain | non-blocking, `preflight-ambiguous-<check>`, `reviewer-required`; flows into normal `ProposalReview`, never silently rejected or silently passed |
+| Detector regression/calibration corpus is not GREEN | detector stays non-blocking/not activated; milestone cannot Land |
+| Checker policy version/hash differs from a prior generation | old cached terminal is ineligible for reuse by [[DIR-126-C]] |
 | Valid M195/M197-shaped fixture | GREEN — all five checks pass, no regression on known-good real Prepare generations |
 
 ### Compatibility
@@ -170,13 +192,17 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
 2. Add the new `Preflight` phase to `prepare-milestone.js` (both mirrors): the four content checks
    gate `ProposalAuthors`; the Plan-shape check gates `PlanCheck`'s first round.
 3. Add the Markdown-list-aware sentence-boundary fix to `wiring-coverage-check.ts`'s
-   `splitSentences` (+ `plugin/scripts/` mirror), closing the M198 false-positive class at its root.
+   `splitSentences` (+ `plugin/scripts/` mirror), closing the M198 false-positive class at its root;
+   land and calibrate this detector behavior before enabling its fail-closed production verdict.
 4. Add fixture files seeded from real M192/M195/M196/M198 artifacts for each of the five check
-   classes, plus valid M195/M197-shaped fixtures that must stay GREEN.
+   classes, the M199 merged-list/14-finding reproduction, plus valid M195/M197-shaped fixtures that
+   must stay GREEN.
 5. Add a real test file (`experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs`,
    shared with DIR-126-A's own tests, + `plugin/test/` mirror) covering all five preflight classes
    RED/GREEN, the ambiguous/`reviewer-required` disposition, and the `splitSentences` fix's
    regression-safety against the existing `wiring-coverage-check.test.mjs` suite.
+6. Emit a stable checker policy version/hash in every preflight verdict and cover version changes
+   as terminal-cache invalidations for [[DIR-126-C]].
 
 ## Acceptance Criteria
 
@@ -190,7 +216,14 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   precedent/imports, invalid Plan command/path shapes) each terminate with their own stable code
   before the first agent dispatch that can act on their already-available input
   (`ProposalAuthors` for the first four, `PlanCheck` round 1 for the Plan-shape check) — real
-  journal evidence, not asserted. Valid M195/M197-shaped fixtures remain GREEN.
+  journal evidence, not asserted. A rejected content preflight shows at most one bounded
+  mechanical runner and zero content-generation/review agents. Valid M195/M197-shaped fixtures
+  remain GREEN.
+- [ ] **Repair/calibrate before fail-closed activation:** the M198 false-positive and M199
+  merged-list reproductions are corrected first; real known-bad, known-good, and
+  ambiguous-valid corpora then prove the detector's blocking boundary before the production
+  `Preflight` callsite is allowed to enforce it. A deliberately restored old splitter turns this
+  activation-gate test RED.
 - [ ] **No heuristic overreach:** an ambiguous-but-valid fixture for each of the five checks is
   confirmed to emit its `preflight-ambiguous-<check>` code, `reviewer-required`, non-blocking — not
   silently rejected and not silently passed.
@@ -201,6 +234,9 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   the last real run) stays green, confirming no regression on already-passing cases.
 - [ ] Canonical and `plugin/` mirrors of `prepare-admission-check.ts`, `wiring-coverage-check.ts`,
   `prepare-milestone.js`, and their test files are byte-identical — `cmp`/`sync-vendor.sh --check`.
+- [ ] Every preflight verdict records a stable checker policy version/hash; changing the detector
+  or its blocking policy changes that value and makes an older [[DIR-126-C]] cached terminal
+  ineligible for reuse.
 
 - [ ] **Grounding evidence for the Problem-framing/Chosen-mechanism claims above (added for
   wiring-coverage completeness):** confirmed via direct source read — commit `703e014`
@@ -222,8 +258,10 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
   DIR-117 and DIR-122 depend on).
 - [ ] A real, non-fixture `prepare-milestone` dispatch against a task with a deliberately-seeded
   known-bad Proposal is exercised end to end, showing `preflight-rejected` before any author agent
-  is spent, with journal output, not asserted.
+  is spent, with journal output showing the bounded mechanical runner separately, not asserted.
 - [ ] RED/GREEN evidence exists for all five preflight classes plus the `splitSentences` fix.
+- [ ] Fail-closed activation evidence proves detector calibration completed before enforcement;
+  no uncalibrated regex verdict is blocking in production.
 - [ ] A fresh independent audit confirms the real production callsite from `prepare-milestone.js`'s
   `Preflight` phase, not merely unit-test reachability, and confirms the Plan-shape-timing reading
   either matches the reviewer's own intent or was corrected per their feedback.
