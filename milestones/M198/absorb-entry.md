@@ -45,4 +45,57 @@ plugin/test/plugin-packaging.test.mjs's M136 hardcoded-count test (24 !== 22, re
 confirmed not pre-existing via git show eaed20a~1). Full report:
 milestones/M198/audits/iteration-0-acceptance-audit.md.
 
-V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated carry-forward (milestone_counter=194 K=2, both ledger rows [ok] — consolidated / proposed — verbatim from `vmeta-lag-check.sh --counter 194 experiments/quay-perpetual-stream/v-meta-ledger.md`, re-run this pass).
+## Adversarial-audit disposition write-back — follow-up (2026-07-29, same-day coordinator-dispatched
+fix pass, resolved at this Land)
+
+adversarial-audit disposition: **NOT-REFUTED** (superseding the iteration-0 REFUTED verdict above,
+not deleting it — the REFUTED finding was real and is preserved as history; this entry records how
+it was resolved). Two independent agent dispatches, both fresh-context, no memory of each other or
+of the original iteration-0 audit:
+
+1. **Regression fix (closes the iteration-0 REFUTED finding).** `plugin/test/plugin-
+   packaging.test.mjs`'s hardcoded `okCount===22` assertion replaced with a dynamic derivation from
+   `sync-vendor.sh`'s own `SYNC_SCRIPTS` array length — closes the whole recurring-drift class (this
+   literal had been manually bumped at M188/M189/M191/M193 and missed once, here). Verified: 34/34
+   pass on that file; full canonical `scripts/test.sh` — 605 tests, 602 pass, 0 fail, 3 skipped
+   (expected live-GitHub tests). Commit `ac8f4b4`.
+2. **Remaining AC closure.** With human authorization, `restart-readiness-check.sh` confirmed
+   preconditions and the repo-root `.halt` sentinel was briefly removed to dispatch a real
+   `Workflow({scriptPath: '.claude/workflows/select-preflight.js'})` run — its own returned JSON
+   carries a real, non-empty `portfolio` (run `wf_0e8f7297-a67`), closing WIRING CLAIM 3/AC14. Its
+   literal top-ranked candidate (`composite:DIR-099+DIR-103+DIR-104`, real, `status:todo`) was run
+   through the exact synthesis→preflight chain `OUTER-LOOP.md` documents, closing AC1/WIRING CLAIM
+   4/AC15 and fully resolving the AC8 CONCERN. AC18 (legacy golden-replay) closed via a stronger
+   proof than originally planned: `execute-milestone.js` (both mirrors) has zero diff across this
+   milestone's entire commit range, so the legacy single-task path is unaffected by construction.
+   Commit `3baf61c`.
+
+An independent re-audit (fresh context, no memory of either the original audit or the fix work)
+verified BOTH of the above from first principles rather than trusting checked-in artifacts or
+task-body annotations: live-ran the regression test, live-re-ran `composite-preflight.ts` against
+the checked-in evidence, and — going further than instructed — independently regenerated the entire
+`composite:DIR-099+DIR-103+DIR-104` manifest from scratch from the raw portfolio entry and confirmed
+it was byte-identical to the checked-in evidence file. Also independently confirmed:
+`it0-dod-check.sh` PASS (12/12 dispositions), `wiring-coverage-check.ts` still
+`wiring-coverage-complete`, the gap-task is schema-valid, and the AC bullets' newly-added evidence
+citations genuinely say what they claim. 18/18 AC checked, all independently verified genuine across
+the two audit passes. Full follow-up report: `tasks/DIR-119-D1.md`'s own "Audit disposition —
+follow-up" section (same content, task-canonical copy).
+
+## V_meta consolidation-lag (re-run at this Land)
+
+PASS: no confirmed-unconsolidated row past K without a dated carry-forward (milestone_counter=195
+K=2, both ledger rows [ok] — consolidated / proposed — verbatim from `vmeta-lag-check.sh --counter
+195 experiments/quay-perpetual-stream/v-meta-ledger.md`, re-run this pass). **PHI CONSOLIDATION
+CHECK (M198):** neither ledger row was reused unchanged by this milestone — the manifest
+phase/shard synthesis mechanism (`composite-manifest-synthesis.ts`) is a genuinely new module built
+on top of, not a reuse of, either ledger row (the `domain-audit-channel≡CI-job` row is already
+`consolidated`, nothing to re-consolidate; the `repo-root isolation-leak lesson` row concerns
+`.halt`-path/workspace-root scoping, an unrelated failure mode to manifest-synthesis fusion logic);
+no citation crosses the φ threshold, nothing consolidates into `inherited-core.md` this pass.
+
+## Mechanical gates re-run at this Land
+
+`vmeta-lag-check.sh --counter 195` PASS · `tree-hygiene-check.sh` clean · `worktree-branch-hygiene-
+check.sh` clean · `composite-manifest-synthesis.test.mjs` 15/15 pass · `sync-vendor.sh --check`
+CLEAN for `scripts/composite-manifest-synthesis.ts`.
