@@ -2,7 +2,7 @@
 id: DIR-126-B
 title: Deterministic mechanical preflight for prepare-milestone.js (new
   Preflight phase) — second child of DIR-126's split
-status: todo
+status: done
 labels:
   - milestone-candidate
   - human-steered
@@ -592,11 +592,17 @@ because each is itself a distinct new architectural commitment.
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply. Per DIR-026
 Reading A, source code, prompt text, or a same-generation self-test are necessary but insufficient.
 
-- [ ] Landed on `master` under human-steered discipline (this touches
+- [x] Landed on `master` under human-steered discipline (this touches
   `.claude/workflows/prepare-milestone.js` and the shared `wiring-coverage-check.ts` module both
   DIR-117 and DIR-122 depend on). **§1.2's false-positive defect is now fixed
   (`gap-preflight-bare-filename-false-positive`) — this item correctly remains open pending Land
-  itself completing.**
+  itself completing.** **Closed at this Land (M201, 2026-07-29):** after §1.2's bare-filename fix
+  (`5d3f3fe`), two further independent audit rounds each found a NEW real false-positive class in
+  the same two detectors (round 2: `8ab3f84`; round 3: `2fdde50`, resolved via the AC-sanctioned
+  `PREFLIGHT_CALIBRATED` downgrade rather than a fourth patch attempt), and a fourth independent
+  audit round verdicted CONFIRMED. See `## Execution record` below and
+  `milestones/M201/absorb-entry.md`'s "Adversarial audit disposition (M201)" / "ABSORB gate run
+  (M201, post-audit)" sections for the full record.
 - [x] A real, non-fixture `prepare-milestone` dispatch against a task with a deliberately-seeded
   known-bad Proposal is exercised end to end, showing `preflight-rejected` before any author agent
   is spent, with journal output showing the bounded mechanical runner separately, not asserted.
@@ -614,6 +620,43 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
   either matches the reviewer's own intent or was corrected per their feedback. **This item itself
   is satisfied by `milestones/M201/audits/iteration-0-acceptance-audit.md` §1.1/§2.5 — but the
   audit's OVERALL verdict is REFUTED on other grounds (§1.2), so the child as a whole is not done.**
+  **UPDATE (M201 Land, 2026-07-29):** the child's overall verdict progressed REFUTED (round 0, this
+  item) → REFUTED (round 2) → REFUTED (round 3) → **CONFIRMED (round 4, final)** — see
+  `## Execution record` below.
+
+## Execution record
+
+- **Milestone:** M201
+- **Iteration count:** 1 (single Build pass covering the five detector functions +
+  `runPreflightChecks`/CLI flags + the two `Preflight`-phase insertion points, followed by FOUR
+  real, independent adversarial-audit rounds — round 0 [Build's own iteration-0 audit] REFUTED on a
+  bare-filename false-positive bug, fixed same commit-day (`5d3f3fe`); round 2 [independent
+  re-audit] REFUTED on a basename-fallback overcorrection + a missing `## Touches`-declared-future-
+  file exemption, fixed same day (`8ab3f84`); round 3 [independent re-audit] REFUTED on a NEW real
+  false positive plus a round-2 regression, resolved same day not by a fourth patch but by
+  downgrading `preflight-stale-ac-refs`/`preflight-missing-precedent` to non-blocking via the
+  milestone's own pre-designed, AC-sanctioned `PREFLIGHT_CALIBRATED` escape hatch (`2fdde50`);
+  round 4 [independent re-audit, final] **CONFIRMED** the calibration downgrade is genuinely sound
+  and independently re-derived the DoD's real non-fixture dispatch evidence via a fresh scratch
+  harness). No mid-milestone re-scope — same charter, same AC/DoD list throughout; the round-3
+  calibration downgrade is the AC's own literal, pre-designed resolution path, not an
+  out-of-band scope change.
+- **Realized Δv:** 0 (v̂>0 per the charter's own Value hypothesis — capabilityGrowth, deliverable,
+  method-infra surface; no chart-2 `packages/quay*` product-surface cell moves, since the surface
+  improved is the `prepare-milestone` control-plane's own preflight mechanism, not a product
+  surface — structurally identical to the M164/M167/M179/M188/M189/M192/M193/M194/M195/M197/M198/
+  M200 precedent the VT ruler cannot score for the same reason).
+- **Merge commit SHA:** `2fdde50` (final substantive commit — round-3's `PREFLIGHT_CALIBRATED`
+  resolution; Build itself landed at `3552787`, round-1 fix at `5d3f3fe`, round-2 fix at `8ab3f84`).
+- **Outcome:** Deterministic mechanical preflight for `prepare-milestone.js` landed on `master` — a
+  new `Preflight` phase (both mirrors) gates `ProposalAuthors` (four content checks) and `PlanCheck`
+  round 1 (Plan-shape check) with five named detector functions in the shared
+  `prepare-admission-check.ts` module; 3 of 5 detectors are calibrated/blocking with zero real false
+  positives across three independent audit rounds, the other 2 are non-blocking/`reviewer-required`
+  per the milestone's own designed calibrate-then-enforce discipline, confirmed sound by a fourth,
+  fully independent fresh-context re-audit (CONFIRMED). One follow-up dormant gap
+  (`gap-preflight-merged-markdown-ascii-dash-false-positive`, zero real-world incidence) filed
+  separately, not blocking this Land.
 
 ## Human verification when exp5 marks this DIR done
 
