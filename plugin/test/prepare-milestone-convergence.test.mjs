@@ -133,7 +133,7 @@ function freshScratchDir() {
 // makeMock — the shared "outer phase" mock (authors/adjudicate/plan-author/plan-check/receipt),
 // parameterized by `reviewHandlers` for the ProposalReview phase under test.
 function makeMock(taskFileOnDisk, reviewHandlers) {
-  const calls = { authors: [], adjudicator: 0, reviews: [], revises: [], wiringChecks: 0, planAuthor: 0, planCheckers: [], admissionAcquires: 0, admissionRenews: 0, admissionReleases: 0 };
+  const calls = { authors: [], adjudicator: 0, reviews: [], revises: [], wiringChecks: 0, planAuthor: 0, planCheckers: [], admissionAcquires: 0, admissionRenews: 0, admissionReleases: 0, preflightContent: 0, preflightPlan: 0 };
   let planFile = null;
   let ledger = null;
 
@@ -156,6 +156,20 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
     if (/^admission-release-/.test(label)) {
       calls.admissionReleases += 1;
       return { raw: JSON.stringify({ ok: true }) };
+    }
+
+    // M201/DIR-126-B: the new Preflight phase's agent()-dispatched CLI calls (content, then
+    // plan-shape). Mocked with a default non-blocking verdict so every existing scenario in this
+    // file that doesn't care about Preflight still passes unchanged — mirroring exactly how the
+    // Admission mocks above are handled. Preflight's OWN detector logic has its own dedicated
+    // experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs coverage.
+    if (label === 'preflight-content') {
+      calls.preflightContent = (calls.preflightContent || 0) + 1;
+      return { raw: JSON.stringify({ ok: true, policyVersion: 'preflight-v1', findings: [] }) };
+    }
+    if (label === 'preflight-plan') {
+      calls.preflightPlan = (calls.preflightPlan || 0) + 1;
+      return { raw: JSON.stringify({ ok: true, policyVersion: 'preflight-v1', findings: [] }) };
     }
 
     if (/^proposal-author-\d+$/.test(label)) {

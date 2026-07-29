@@ -155,6 +155,18 @@ function makeAgentMock(taskFileOnDisk) {
       return { raw: JSON.stringify({ ok: true }) };
     }
 
+    // M201/DIR-126-B: the new Preflight phase's agent()-dispatched CLI calls — mocked with a
+    // default non-blocking verdict so this fixture still reaches 'prepared' unchanged. Preflight's
+    // own detector logic has its own dedicated prepare-admission-check.test.mjs coverage.
+    if (label === 'preflight-content') {
+      sessions.preflightContent = (sessions.preflightContent || 0) + 1;
+      return { raw: JSON.stringify({ ok: true, policyVersion: 'preflight-v1', findings: [] }) };
+    }
+    if (label === 'preflight-plan') {
+      sessions.preflightPlan = (sessions.preflightPlan || 0) + 1;
+      return { raw: JSON.stringify({ ok: true, policyVersion: 'preflight-v1', findings: [] }) };
+    }
+
     if (/^proposal-author-\d+$/.test(label)) {
       const idx = Number(label.match(/\d+$/)[0]);
       const sessionId = `sess-author-${idx}`;

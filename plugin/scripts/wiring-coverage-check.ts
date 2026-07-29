@@ -63,7 +63,10 @@ const EVIDENCE_RE = /\b(real|production|callsite|call site|reachability|reachabl
 // already qualified (>=2 backtick identifiers + a wiring verb) before this fix still qualifies
 // after it; it can only ever surface previously-hidden claims a merged sentence obscured, never
 // hide one that was already visible.
-function splitListAwareBlocks(paragraph) {
+// Exported (M201/DIR-126-B): `prepare-admission-check.ts`'s new `preflightMergedMarkdownClaims`
+// detector reuses this SAME list-aware splitter — never a second, independently-buggy
+// implementation of the boundary logic `335317d` already fixed here.
+export function splitListAwareBlocks(paragraph) {
   const lines = paragraph.split(/\n/);
   // A GFM table row line ("| cell | cell |") is a bullet-start-equivalent boundary for the same
   // reason a `- `/`* `/`1. ` bullet is (gap-wiring-coverage-check-reuse-verbs-and-tables,
@@ -91,7 +94,8 @@ function splitListAwareBlocks(paragraph) {
 // backtick/quote (avoids splitting on "e.g." or "Fig. 2" style abbreviations enough for this
 // heuristic's purpose — it does not need to be exact, only good enough to keep two co-occurring
 // identifiers in the same claim).
-function splitSentences(text) {
+// Exported (M201/DIR-126-B): same reuse rationale as `splitListAwareBlocks` above.
+export function splitSentences(text) {
   return text
     .split(/\n{2,}/)
     .flatMap((para) => splitListAwareBlocks(para))

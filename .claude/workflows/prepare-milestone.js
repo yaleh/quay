@@ -3,6 +3,7 @@ export const meta = {
   description: 'DIR-117: orchestrates the existing quay-task-to-plan pipeline (proposal authors -> adjudication/write-back -> BOUNDED grounded proposal review incl. mechanism-claim wiring coverage -> Plan author -> grounded Plan-check) as a real, resumable lifecycle stage between SELECT/charter-authoring and execute-milestone. Writes a verification RECEIPT (milestones/M<NN>/preparation.json) — never a second content source; the task ## Proposal and docs/plans/*.md stay authoritative. STATUS (M193/DIR-125): ProposalReview is now a bounded convergence loop (1 full synthesis + <=2 delta rounds ordinary / <=3 highRisk, 45m/75m soft budget, typed disposition-tracked finding ledger hash-bound into the receipt) — closes the DIR-120/M192 unbounded-restart defect (10 consecutive full-regeneration rounds, ~3h15m, ~1.13M output tokens, never reaching PlanAuthor). STATUS (M191/DIR-117): landed + unit-tested (milestone-preparation-check.ts), NOT yet operationally proven end-to-end on a real OUTER-LOOP cycle — that real-landing proof is DIR-117-B\'s own scope (DIR-026 SPLIT-OR-COMMIT, DIR-119-A/B/C precedent).',
   phases: [
     { title: 'Admission', detail: 'DIR-126-A/M200: single-flight admission — acquires an atomic filesystem lease for (workspace, taskId) via prepare-admission-check.ts before any ProposalAuthors agent is dispatched; a losing concurrent dispatch returns prepare-already-running here, spending zero agent turns' },
+    { title: 'Preflight', detail: 'M201/DIR-126-B: deterministic mechanical rejection of five failure classes via prepare-admission-check.ts --preflight/--preflight-plan, dispatched BEFORE any content-generation/review agent — content checks gate ProposalAuthors, the Plan-shape check gates PlanCheck round 1; a blocking finding returns revision-needed/preflight-rejected, spending zero proposal-author/adjudicate/proposal-review/plan-check agent turns' },
     { title: 'ProposalAuthors', detail: 'N=2 (N=3 if highRisk) independent agents each draft a reconciled Proposal' },
     { title: 'Adjudicate', detail: 'One agent reconciles the N proposals into ONE Proposal, writes it back to the task' },
     { title: 'ProposalReview', detail: 'DIR-125 bounded convergence: ONE full independent review, then (only if blocking findings remain) up to 2 (3 highRisk) focused-revise + delta-review rounds against a typed finding ledger, gated by a 45m/75m soft budget and a subsystem/mechanism/touch-set split checkpoint' },
@@ -91,6 +92,18 @@ async function _releaseLease(stageLabel) {
   return _admissionAgentCall(`--release --taskId ${_taskId} --workspace .`, `admission-release-${stageLabel}`)
 }
 
+// M201/DIR-126-B: sibling helper to _admissionAgentCall, dispatching the SAME
+// agent()-wraps-a-real-CLI shape against prepare-admission-check.ts's new --preflight/
+// --preflight-plan modes — not a new dispatch mechanism.
+async function _preflightAgentCall(flagsText, label) {
+  return agent(
+    `Run exactly this shell command and report its stdout verbatim:
+node --experimental-strip-types ${_admissionScript} ${flagsText}
+Do not paraphrase or reformat the command's stdout — copy it exactly as printed. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
+    { label, phase: 'Preflight', schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } } }
+  )
+}
+
 const _admissionResult = await _admissionAgentCall(`--acquire --taskId ${_taskId} --workspace . ${_highRisk ? '--highRisk' : ''}`.trim(), 'admission-acquire')
 
 let _admissionVerdict = null
@@ -110,6 +123,41 @@ if (_admissionVerdict.outcome === 'prepare-already-running') {
 }
 
 log(`Admission: acquired lease for ${_taskId} (fencingToken=${_admissionVerdict.lease?.fencingToken}, reclaimed=${_admissionVerdict.reclaimed === true}).`)
+
+// ── Phase: Preflight (content) — M201/DIR-126-B ──────────────────────────────────────
+// Deterministic mechanical rejection of the four content failure classes (merged Markdown claims,
+// stale AC/DoD refs, task-vs-charter Touches mismatch, missing precedent) BEFORE any
+// ProposalAuthors agent is dispatched. Runs UNCONDITIONALLY here, strictly before the
+// resume-vs-cold branch below — both a resumed dispatch and a cold dispatch see the SAME
+// already-available task/charter content at this point (same unconditional-placement precedent
+// Admission itself already established), so both are equally protected.
+phase('Preflight')
+
+const _preflightContentResult = await _preflightAgentCall(`--preflight --taskId ${_taskId} --charterFile ${_charterFile} --workspace .`, 'preflight-content')
+let _preflightContentVerdict = null
+try { _preflightContentVerdict = _preflightContentResult?.raw ? JSON.parse(_preflightContentResult.raw) : null } catch { _preflightContentVerdict = null }
+
+if (!_preflightContentVerdict || typeof _preflightContentVerdict.ok !== 'boolean') {
+  // Fail-closed (AC: "Preflight CLI exits non-zero / unparseable JSON") — mirrors Admission's own
+  // admission-check-failed branch, never silently treated as "no findings".
+  log(`Preflight (content) phase FAILED — no parseable verdict (raw: ${_preflightContentResult?.raw ?? '(none)'}). Failing closed, never dispatching ProposalAuthors.`)
+  await _releaseLease('preflight-check-failed')
+  return { outcome: 'needs-human', reason: 'preflight-check-failed', phase: 'Preflight', detail: _preflightContentResult?.raw ?? '(agent returned no output)' }
+}
+
+const _preflightContentBlocking = (_preflightContentVerdict.findings || []).filter((f) => f.blocking === true)
+if (_preflightContentBlocking.length > 0) {
+  // WIRING-CLAIM 3: this `return` precedes every proposal-author-*/adjudicate/proposal-review/
+  // plan-check-* agent() call in file order — zero of those dispatches happen on this path,
+  // structurally, not merely asserted.
+  log(`Preflight (content) REJECTED — ${_preflightContentBlocking.length} blocking finding(s): ${_preflightContentBlocking.map((f) => f.code).join(', ')}. Zero proposal-author-*/adjudicate/proposal-review/plan-check-* dispatches on this path.`)
+  await _releaseLease('preflight-rejected')
+  return { outcome: 'revision-needed', reason: 'preflight-rejected', phase: 'Preflight', findings: _preflightContentVerdict.findings }
+}
+for (const f of (_preflightContentVerdict.findings || [])) {
+  log(`Preflight (content) non-blocking finding: ${f.code} — ${f.message} (disposition: ${f.disposition}). Logged only — never merged into the DIR-125 _ledger.`)
+}
+log(`Preflight (content) PASSED — ${_taskId} may proceed to ProposalAuthors.`)
 
 let _proposals = []
 let adjudicateResult = null
@@ -453,6 +501,36 @@ if (!planAuthorResult || planAuthorResult.ok !== true) {
   await _releaseLease('plan-author-failed')
   return { outcome: 'revision-needed', reason: planAuthorResult?.error || 'plan-author-failed', phase: 'PlanAuthor' }
 }
+
+// ── Phase: Preflight (plan-shape) — M201/DIR-126-B ───────────────────────────────────
+// Gates PlanCheck round 1 — a logically distinct insertion point from the content checks above
+// (the Plan file structurally cannot exist before PlanAuthor runs, so it cannot be preflighted at
+// the same point), still logically part of the SAME 'Preflight' phase label (re-entered here, the
+// same way PlanCheck itself is re-entered across rounds).
+phase('Preflight')
+
+const _preflightPlanResult = await _preflightAgentCall(`--preflight-plan --taskId ${_taskId} --workspace . --planFile ${_planFile}`, 'preflight-plan')
+let _preflightPlanVerdict = null
+try { _preflightPlanVerdict = _preflightPlanResult?.raw ? JSON.parse(_preflightPlanResult.raw) : null } catch { _preflightPlanVerdict = null }
+
+if (!_preflightPlanVerdict || typeof _preflightPlanVerdict.ok !== 'boolean') {
+  log(`Preflight (plan-shape) phase FAILED — no parseable verdict (raw: ${_preflightPlanResult?.raw ?? '(none)'}). Failing closed, never dispatching PlanCheck.`)
+  await _releaseLease('preflight-check-failed')
+  return { outcome: 'needs-human', reason: 'preflight-check-failed', phase: 'Preflight', detail: _preflightPlanResult?.raw ?? '(agent returned no output)' }
+}
+
+const _preflightPlanBlocking = (_preflightPlanVerdict.findings || []).filter((f) => f.blocking === true)
+if (_preflightPlanBlocking.length > 0) {
+  // WIRING-CLAIM 4: this `return` precedes MAX_PLANCHECK_ROUNDS's loop entirely — zero
+  // plan-check-round-* dispatches happen on this path, structurally.
+  log(`Preflight (plan-shape) REJECTED — ${_preflightPlanBlocking.length} blocking finding(s): ${_preflightPlanBlocking.map((f) => f.code).join(', ')}. Zero plan-check-round-* dispatches on this path.`)
+  await _releaseLease('preflight-rejected')
+  return { outcome: 'revision-needed', reason: 'preflight-rejected', phase: 'Preflight', findings: _preflightPlanVerdict.findings }
+}
+for (const f of (_preflightPlanVerdict.findings || [])) {
+  log(`Preflight (plan-shape) non-blocking finding: ${f.code} — ${f.message} (disposition: ${f.disposition}). Logged only.`)
+}
+log(`Preflight (plan-shape) PASSED — ${_taskId} may proceed to PlanCheck.`)
 
 // ── Phase: PlanCheck (up to 3 rounds; F_i=0 required) ────────────────────────────────
 phase('PlanCheck')

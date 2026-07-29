@@ -1,9 +1,12 @@
-// Unit + CLI tests for prepare-admission-check.ts — M200/DIR-126-A single-flight admission for
-// prepare-milestone.js. RED/GREEN coverage per the checked Plan (docs/plans/M200-dir-126-a.md):
+// Unit + CLI tests for prepare-admission-check.ts — M200/DIR-126-A single-flight admission +
+// M201/DIR-126-B deterministic mechanical Preflight for prepare-milestone.js. RED/GREEN coverage
+// per the checked Plan (docs/plans/M200-dir-126-a.md, docs/plans/M201-dir-126-b.md):
 // Stage 1 (5 scenarios: acquire/steal-rejection, stale reclaim, crash recovery, renew, staleness
 // constant), Stage 2 (CLI --acquire/--force-release/--release/--renew), Stage 8 (module-level
-// single-flight race simulation, renewal-vs-stall distinction, Admission-phase-error CLI shape).
-import { test } from "node:test";
+// single-flight race simulation, renewal-vs-stall distinction, Admission-phase-error CLI shape),
+// M201 Stages 1/3/6 (five preflight detectors RED/GREEN/ambiguous, runPreflightChecks content/plan
+// modes, --preflight/--preflight-plan CLI, calibration).
+import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -17,13 +20,43 @@ import {
   checkStaleOwner,
   DEFAULT_STALENESS_MS,
   _internal,
+  PREFLIGHT_POLICY_VERSION,
+  PREFLIGHT_CALIBRATED,
+  preflightMergedMarkdownClaims,
+  preflightStaleAcRefs,
+  preflightTouchesMismatch,
+  preflightMissingPrecedent,
+  preflightInvalidPlanCommand,
+  runPreflightChecks,
 } from "../scripts/prepare-admission-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(__dirname, "..", "scripts", "prepare-admission-check.ts");
+// Repo-root discovery by walking up to the nearest '.git' ancestor — NOT a fixed '../../..'
+// literal. This file is byte-identical-mirrored to plugin/test/ (2 levels below repo root)
+// while its canonical home is 3 levels below repo root (experiments/quay-perpetual-stream/test/)
+// — a depth-specific literal would resolve to the WRONG directory in one of the two locations
+// (confirmed real: a fixed 3-up literal silently walked OUTSIDE the repo entirely when this file
+// ran from the plugin/test/ mirror under scripts/test.sh, turning every workspace:REPO_ROOT
+// detector test non-deterministic/wrong rather than a clean failure).
+function _findRepoRoot(startDir) {
+  let dir = startDir;
+  for (;;) {
+    if (fs.existsSync(path.join(dir, ".git"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) throw new Error(`prepare-admission-check.test.mjs: no '.git' ancestor found starting from ${startDir}`);
+    dir = parent;
+  }
+}
+const REPO_ROOT = _findRepoRoot(__dirname);
+const FIXTURES = path.join(__dirname, "fixtures", "preflight");
 
 function makeWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "prepare-admission-"));
+}
+
+function readFixture(...segments) {
+  return fs.readFileSync(path.join(FIXTURES, ...segments), "utf8");
 }
 
 function runCli(args, env = {}) {
@@ -269,4 +302,315 @@ test("Admission-phase-error CLI shape: an unset CLAUDE_CODE_SESSION_ID during --
   assert.ok(res.json);
   assert.equal(res.json.code, "missing-session-id");
   assert.notEqual(res.json.outcome, "prepare-already-running");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// M201/DIR-126-B Preflight — five detectors, runPreflightChecks, CLI --preflight/--preflight-plan.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+test("PREFLIGHT_POLICY_VERSION is a stable, exported literal — every finding carries it", () => {
+  assert.equal(typeof PREFLIGHT_POLICY_VERSION, "string");
+  assert.ok(PREFLIGHT_POLICY_VERSION.length > 0);
+});
+
+test("PREFLIGHT_CALIBRATED names exactly the five detector codes, all calibrated true as of this child's own Build", () => {
+  assert.deepEqual(Object.keys(PREFLIGHT_CALIBRATED).sort(), [
+    "preflight-invalid-plan-command",
+    "preflight-merged-markdown-claims",
+    "preflight-missing-precedent",
+    "preflight-stale-ac-refs",
+    "preflight-touches-mismatch",
+  ]);
+  for (const [code, calibrated] of Object.entries(PREFLIGHT_CALIBRATED)) {
+    assert.equal(calibrated, true, `${code} expected calibrated:true`);
+  }
+});
+
+describe("preflightMergedMarkdownClaims", () => {
+  test("RED/known-bad: a dense, un-blank-lined claim crams >=4 identifiers onto one mid-line-bulleted block -> blocking", () => {
+    const taskBody = readFixture("merged-markdown-claims", "bad.md");
+    const verdict = preflightMergedMarkdownClaims({ taskBody });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-merged-markdown-claims");
+    assert.equal(verdict.blocking, true);
+    assert.equal(verdict.policyVersion, PREFLIGHT_POLICY_VERSION);
+  });
+
+  test("known-good: properly separated one-claim-per-bullet fixture returns zero findings", () => {
+    const taskBody = readFixture("merged-markdown-claims", "good.md");
+    assert.equal(preflightMergedMarkdownClaims({ taskBody }), null);
+  });
+
+  test("ambiguous-valid: a mid-line dash with only 2 identifiers is NOT confidently merged -> non-blocking, reviewer-required", () => {
+    const taskBody = readFixture("merged-markdown-claims", "ambiguous.md");
+    const verdict = preflightMergedMarkdownClaims({ taskBody });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-ambiguous-merged-markdown-claims");
+    assert.equal(verdict.blocking, false);
+    assert.equal(verdict.disposition, "reviewer-required");
+  });
+});
+
+describe("preflightStaleAcRefs", () => {
+  test("RED/known-bad: AC cites a commit hash that does not resolve in a real git workspace -> blocking", () => {
+    const taskBody = readFixture("stale-ac-refs", "bad.md");
+    const verdict = preflightStaleAcRefs({ taskBody, workspace: REPO_ROOT });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-stale-ac-refs");
+    assert.equal(verdict.blocking, true);
+  });
+
+  test("known-good: AC cites a real, resolvable commit -> zero findings", () => {
+    const taskBody = readFixture("stale-ac-refs", "good.md");
+    assert.equal(preflightStaleAcRefs({ taskBody, workspace: REPO_ROOT }), null);
+  });
+
+  test("ambiguous-valid: a commit-hash-shaped AC citation against a NON-git workspace cannot be mechanically verified -> reviewer-required, never a false pass/fail", () => {
+    const taskBody = readFixture("stale-ac-refs", "ambiguous.md");
+    const nonGitWorkspace = makeWorkspace();
+    const verdict = preflightStaleAcRefs({ taskBody, workspace: nonGitWorkspace });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-ambiguous-stale-ac-refs");
+    assert.equal(verdict.blocking, false);
+    assert.equal(verdict.disposition, "reviewer-required");
+  });
+});
+
+describe("preflightMissingPrecedent", () => {
+  test("RED/known-bad: Finding cites a nonexistent commit AND a nonexistent file path -> blocking", () => {
+    const taskBody = readFixture("missing-precedent", "bad.md");
+    const verdict = preflightMissingPrecedent({ taskBody, workspace: REPO_ROOT });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-missing-precedent");
+    assert.equal(verdict.blocking, true);
+    assert.match(verdict.message, /deadbeef1/);
+    assert.match(verdict.message, /does\/not\/exist\.ts/);
+  });
+
+  test("known-good: Finding cites a real commit and a real file path -> zero findings", () => {
+    const taskBody = readFixture("missing-precedent", "good.md");
+    assert.equal(preflightMissingPrecedent({ taskBody, workspace: REPO_ROOT }), null);
+  });
+
+  test("ambiguous-valid: commit-hash-shaped citation against a NON-git workspace -> reviewer-required", () => {
+    const taskBody = readFixture("missing-precedent", "ambiguous.md");
+    const nonGitWorkspace = makeWorkspace();
+    const verdict = preflightMissingPrecedent({ taskBody, workspace: nonGitWorkspace });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-ambiguous-missing-precedent");
+    assert.equal(verdict.blocking, false);
+    assert.equal(verdict.disposition, "reviewer-required");
+  });
+
+  test("preflight-missing-precedent and preflight-stale-ac-refs share the SAME resolution primitive on different sections (no second implementation)", () => {
+    const src = fs.readFileSync(CLI, "utf8");
+    // Both detector functions call the shared _scanStaleReferences() helper — a real, grep-checkable
+    // reuse, not merely descriptive prose.
+    const staleRefsBody = src.slice(src.indexOf("export function preflightStaleAcRefs"), src.indexOf("export function preflightMissingPrecedent"));
+    const missingPrecedentBody = src.slice(src.indexOf("export function preflightMissingPrecedent"), src.indexOf("// ── preflight-touches-mismatch"));
+    assert.match(staleRefsBody, /_scanStaleReferences\(/);
+    assert.match(missingPrecedentBody, /_scanStaleReferences\(/);
+  });
+});
+
+describe("preflightTouchesMismatch — WIRING-CLAIM 6: one implementation, two call sites (charter, plan-files)", () => {
+  const taskBody = readFixture("touches-mismatch", "task.md");
+
+  test("RED/known-bad ('charter' call site): charter declares its OWN distinct Touches list -> blocking", () => {
+    const charterBody = readFixture("touches-mismatch", "charter-bad.md");
+    const verdict = preflightTouchesMismatch({ taskBody, secondaryBody: charterBody, secondaryLabel: "charter" });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-touches-mismatch");
+    assert.equal(verdict.blocking, true);
+  });
+
+  test("known-good ('charter' call site): a delegating charter ('own Touches list — not duplicated here') is never a mismatch", () => {
+    const charterBody = readFixture("touches-mismatch", "charter-good.md");
+    assert.equal(preflightTouchesMismatch({ taskBody, secondaryBody: charterBody, secondaryLabel: "charter" }), null);
+  });
+
+  test("RED/known-bad ('plan-files' call site): a checked Plan's aggregate '- Files:' reference a real path outside the task's '## Touches' -> blocking", () => {
+    const planBody = readFixture("touches-mismatch", "plan-bad.md");
+    const verdict = preflightTouchesMismatch({ taskBody, secondaryBody: planBody, secondaryLabel: "plan-files" });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-touches-mismatch");
+    assert.equal(verdict.blocking, true);
+  });
+
+  test("known-good ('plan-files' call site): Plan Files fully covered by the task's own Touches globs -> zero findings", () => {
+    const planBody = readFixture("touches-mismatch", "plan-good.md");
+    assert.equal(preflightTouchesMismatch({ taskBody, secondaryBody: planBody, secondaryLabel: "plan-files" }), null);
+  });
+
+  test("ambiguous-valid ('plan-files' call site): a Plan referencing ONLY a test/fixtures/ path (the documented touch-set-expansion case) -> reviewer-required, not blocking", () => {
+    const planBody = readFixture("touches-mismatch", "plan-ambiguous.md");
+    const verdict = preflightTouchesMismatch({ taskBody, secondaryBody: planBody, secondaryLabel: "plan-files" });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-ambiguous-touches-mismatch");
+    assert.equal(verdict.blocking, false);
+    assert.equal(verdict.disposition, "reviewer-required");
+  });
+
+  test("fail-closed: a task with an ill-formed '## Touches' section is itself a blocking finding (well-formedness precondition)", () => {
+    const illFormedTask = "**type:** execution\n\n## Touches\n\n(prose, not a glob bullet list)\n";
+    const verdict = preflightTouchesMismatch({ taskBody: illFormedTask, secondaryBody: readFixture("touches-mismatch", "charter-good.md"), secondaryLabel: "charter" });
+    assert.ok(verdict);
+    assert.equal(verdict.blocking, true);
+  });
+
+  test("preflightTouchesMismatch imports checkTouches() from task-schema.ts as its well-formedness precondition (grep-checkable reuse)", () => {
+    const src = fs.readFileSync(CLI, "utf8");
+    assert.match(src, /import\s*\{[^}]*checkTouches[^}]*\}\s*from\s*"\.\/task-schema\.ts"/);
+    assert.match(src, /checkTouches\(\{\s*body:\s*taskBody\s*\}/);
+  });
+});
+
+describe("preflightInvalidPlanCommand", () => {
+  test("RED/known-bad: a Stage with no '- Command:'/'- Check:' entry -> blocking (reuses milestone-preparation-check.ts's validatePlanStructure)", () => {
+    const planBody = readFixture("invalid-plan-command", "bad.md");
+    const verdict = preflightInvalidPlanCommand({ planBody, acCount: 1 });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-invalid-plan-command");
+    assert.equal(verdict.blocking, true);
+  });
+
+  test("known-good: a structurally-valid Stage with a real runnable Command -> zero findings", () => {
+    const planBody = readFixture("invalid-plan-command", "good.md");
+    assert.equal(preflightInvalidPlanCommand({ planBody, acCount: 1 }), null);
+  });
+
+  test("ambiguous-valid: structurally valid but the Command reads as prose, not a recognizable interpreter -> reviewer-required", () => {
+    const planBody = readFixture("invalid-plan-command", "ambiguous.md");
+    const verdict = preflightInvalidPlanCommand({ planBody, acCount: 1 });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-ambiguous-invalid-plan-command");
+    assert.equal(verdict.blocking, false);
+    assert.equal(verdict.disposition, "reviewer-required");
+  });
+
+  test("preflightInvalidPlanCommand reuses milestone-preparation-check.ts's parsePlanStages/validatePlanStructure verbatim (WIRING-CLAIM 7, grep-checkable)", () => {
+    const src = fs.readFileSync(CLI, "utf8");
+    assert.match(src, /import\s*\{[^}]*parsePlanStages[^}]*validatePlanStructure[^}]*\}\s*from\s*"\.\/milestone-preparation-check\.ts"/);
+  });
+});
+
+describe("runPreflightChecks — content/plan mode dispatch", () => {
+  test("mode:'content' returns ok:true, empty findings for a clean task+charter pair (all four content detectors pass simultaneously)", () => {
+    const taskBody = readFixture("clean-content-pair", "task.md");
+    const result = runPreflightChecks({ mode: "content", taskBody, charterBody: readFixture("clean-content-pair", "charter.md"), workspace: REPO_ROOT });
+    assert.equal(result.ok, true);
+    assert.equal(result.policyVersion, PREFLIGHT_POLICY_VERSION);
+    assert.deepEqual(result.findings, []);
+  });
+
+  test("mode:'content' returns ok:false with a blocking finding when the merged-markdown-claims detector fires", () => {
+    const taskBody = readFixture("merged-markdown-claims", "bad.md");
+    const result = runPreflightChecks({ mode: "content", taskBody, charterBody: "", workspace: REPO_ROOT });
+    assert.equal(result.ok, false);
+    assert.ok(result.findings.some((f) => f.code === "preflight-merged-markdown-claims" && f.blocking === true));
+  });
+
+  test("mode:'plan' returns ok:false when the Plan-shape detector fires", () => {
+    const taskBody = readFixture("touches-mismatch", "task.md");
+    const planBody = readFixture("invalid-plan-command", "bad.md");
+    const result = runPreflightChecks({ mode: "plan", taskBody, planBody, workspace: REPO_ROOT });
+    assert.equal(result.ok, false);
+    assert.ok(result.findings.some((f) => f.code === "preflight-invalid-plan-command" && f.blocking === true));
+  });
+
+  test("an unknown mode throws rather than silently returning a false pass", () => {
+    assert.throws(() => runPreflightChecks({ mode: "bogus", taskBody: "x" }));
+  });
+
+  test("calibration: an uncalibrated detector's blocking verdict is downgraded to non-blocking/logged, never silently dropped", () => {
+    const taskBody = readFixture("merged-markdown-claims", "bad.md");
+    const savedCalibration = PREFLIGHT_CALIBRATED["preflight-merged-markdown-claims"];
+    PREFLIGHT_CALIBRATED["preflight-merged-markdown-claims"] = false;
+    try {
+      const result = runPreflightChecks({ mode: "content", taskBody, charterBody: "", workspace: REPO_ROOT });
+      const finding = result.findings.find((f) => f.code === "preflight-merged-markdown-claims");
+      assert.ok(finding, "the finding must still be reported, only downgraded");
+      assert.equal(finding.blocking, false);
+      assert.equal(result.ok, true, "an uncalibrated detector never blocks production");
+    } finally {
+      PREFLIGHT_CALIBRATED["preflight-merged-markdown-claims"] = savedCalibration;
+    }
+  });
+});
+
+describe("CLI --preflight / --preflight-plan", () => {
+  function writeTask(workspace, taskId, body) {
+    fs.mkdirSync(path.join(workspace, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(workspace, "tasks", `${taskId}.md`), body);
+  }
+
+  test("CLI --preflight on a clean task exits 0 with {ok:true}", () => {
+    const workspace = makeWorkspace();
+    writeTask(workspace, "T-PF-GOOD", readFixture("merged-markdown-claims", "good.md"));
+    const res = runCli(["--preflight", "--taskId", "T-PF-GOOD", "--workspace", workspace]);
+    assert.equal(res.status, 0);
+    assert.equal(res.json.ok, true);
+  });
+
+  test("CLI --preflight on a known-bad task exits non-zero with {ok:false, findings:[...blocking...]}", () => {
+    const workspace = makeWorkspace();
+    writeTask(workspace, "T-PF-BAD", readFixture("merged-markdown-claims", "bad.md"));
+    const res = runCli(["--preflight", "--taskId", "T-PF-BAD", "--workspace", workspace]);
+    assert.equal(res.status, 1);
+    assert.equal(res.json.ok, false);
+    assert.ok(res.json.findings.some((f) => f.blocking === true));
+  });
+
+  test("CLI --preflight with a --charterFile reads real charter content into the 'charter' touches-mismatch leg", () => {
+    const workspace = makeWorkspace();
+    writeTask(workspace, "T-PF-CHARTER", readFixture("touches-mismatch", "task.md"));
+    const charterPath = path.join(workspace, "charter.md");
+    fs.writeFileSync(charterPath, readFixture("touches-mismatch", "charter-bad.md"));
+    const res = runCli(["--preflight", "--taskId", "T-PF-CHARTER", "--workspace", workspace, "--charterFile", charterPath]);
+    assert.equal(res.status, 1);
+    assert.ok(res.json.findings.some((f) => f.code === "preflight-touches-mismatch" && f.blocking === true));
+  });
+
+  test("CLI --preflight-plan reads --planFile content into 'plan' mode", () => {
+    const workspace = makeWorkspace();
+    writeTask(workspace, "T-PF-PLAN", readFixture("touches-mismatch", "task.md"));
+    const planPath = path.join(workspace, "plan.md");
+    fs.writeFileSync(planPath, readFixture("invalid-plan-command", "bad.md"));
+    const res = runCli(["--preflight-plan", "--taskId", "T-PF-PLAN", "--workspace", workspace, "--planFile", planPath]);
+    assert.equal(res.status, 1);
+    assert.ok(res.json.findings.some((f) => f.code === "preflight-invalid-plan-command" && f.blocking === true));
+  });
+
+  test("CLI --preflight fail-closed: a missing task file produces a distinguishable preflight-check-failed error, never a false ok:true", () => {
+    const workspace = makeWorkspace();
+    const res = runCli(["--preflight", "--taskId", "T-NO-SUCH-TASK", "--workspace", workspace]);
+    assert.notEqual(res.status, 0);
+    assert.ok(res.json);
+    assert.equal(res.json.code, "preflight-check-failed");
+    assert.notEqual(res.json.ok, true);
+  });
+
+  test("CLI --preflight-plan fail-closed: a missing/absent --planFile produces preflight-check-failed, never a false pass", () => {
+    const workspace = makeWorkspace();
+    writeTask(workspace, "T-PF-NOPLAN", readFixture("touches-mismatch", "task.md"));
+    const res = runCli(["--preflight-plan", "--taskId", "T-PF-NOPLAN", "--workspace", workspace, "--planFile", path.join(workspace, "does-not-exist.md")]);
+    assert.notEqual(res.status, 0);
+    assert.ok(res.json);
+    assert.equal(res.json.code, "preflight-check-failed");
+  });
+});
+
+// ── Real production wiring: --preflight/--preflight-plan use the SAME parseArgs/spec.flags
+// machinery --acquire/--renew/--release already use — WIRING-CLAIM 9. ──────────────────────────────
+test("WIRING-CLAIM 9: --preflight/--preflight-plan/planFile/charterFile are added to the SAME spec.flags object parseArgs already consumes for acquire/renew/release", () => {
+  const src = fs.readFileSync(CLI, "utf8");
+  const mainBody = src.slice(src.indexOf("async function main"));
+  assert.match(mainBody, /preflight:\s*\{\s*type:\s*"boolean"\s*\}/);
+  assert.match(mainBody, /"preflight-plan":\s*\{\s*type:\s*"boolean"\s*\}/);
+  assert.match(mainBody, /planFile:\s*\{\s*type:\s*"string"\s*\}/);
+  assert.match(mainBody, /charterFile:\s*\{\s*type:\s*"string"\s*\}/);
+  // Exactly ONE parseArgs(argv, spec) call in this file — the preflight flags share it, not a
+  // second parser.
+  const parseArgsCalls = [...src.matchAll(/parseArgs\(/g)];
+  assert.equal(parseArgsCalls.length, 1, "expected exactly one parseArgs() call site in the whole module");
 });
