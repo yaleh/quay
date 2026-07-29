@@ -16,6 +16,46 @@ export const meta = {
 // DIR-114 (M175) / drain-directives.js precedent: normalize the `args` global once, up front.
 const $a = (typeof args === 'string') ? JSON.parse(args) : args
 
+// gap-prepare-milestone-noisy-agent-raw-json-parse (M202/DIR-126-C, first real Workflow-dispatched
+// exercise of the Preflight phase — Build's own DoD evidence used a mocked-agent harness that
+// never reproduced this): an `agent()` dispatch instructed to "report stdout verbatim" can still
+// include stderr noise it saw alongside stdout (confirmed real: a Node
+// MODULE_TYPELESS_PACKAGE_JSON warning line prepended before the real JSON in one real dispatch's
+// reported `raw`, even though the SAME CLI invocation's stdout was clean JSON) — a naive
+// `JSON.parse(result.raw)` then throws and the workflow fails closed on a call that actually
+// succeeded. Every `{raw: ...}`-shaped agent result in this file's every verdict is always a JSON
+// OBJECT (never a top-level array) — this helper tries every `{` occurrence in order (not just the
+// first) and returns the first balanced, valid-JSON object span, so noise containing its OWN
+// bracket-shaped text (confirmed real: the Node warning's own
+// "[MODULE_TYPELESS_PACKAGE_JSON]" text is itself a bracket pair that a naive first-bracket search
+// would wrongly anchor on) cannot derail parsing of the real object that follows.
+function _parseAgentJson(raw) {
+  if (typeof raw !== 'string') return null
+  for (let start = raw.indexOf('{'); start >= 0; start = raw.indexOf('{', start + 1)) {
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (let i = start; i < raw.length; i++) {
+      const ch = raw[i]
+      if (inString) {
+        if (escaped) escaped = false
+        else if (ch === '\\') escaped = true
+        else if (ch === '"') inString = false
+        continue
+      }
+      if (ch === '"') { inString = true; continue }
+      if (ch === '{') depth++
+      else if (ch === '}') {
+        depth--
+        if (depth === 0) {
+          try { return JSON.parse(raw.slice(start, i + 1)) } catch { break }
+        }
+      }
+    }
+  }
+  return null
+}
+
 const _taskId = $a.taskId
 const _milestoneId = $a.milestoneId
 const _charterFile = $a.charterFile
@@ -106,8 +146,7 @@ Do not paraphrase or reformat the command's stdout — copy it exactly as printe
 
 const _admissionResult = await _admissionAgentCall(`--acquire --taskId ${_taskId} --workspace . ${_highRisk ? '--highRisk' : ''}`.trim(), 'admission-acquire')
 
-let _admissionVerdict = null
-try { _admissionVerdict = _admissionResult?.raw ? JSON.parse(_admissionResult.raw) : null } catch { _admissionVerdict = null }
+let _admissionVerdict = _admissionResult?.raw ? _parseAgentJson(_admissionResult.raw) : null
 
 if (!_admissionVerdict || (_admissionVerdict.outcome !== 'acquired' && _admissionVerdict.outcome !== 'prepare-already-running')) {
   // AC2 fail-closed path: bad CLI invocation / unexpected exception / unparseable output — NEVER
@@ -134,8 +173,7 @@ log(`Admission: acquired lease for ${_taskId} (fencingToken=${_admissionVerdict.
 phase('Preflight')
 
 const _preflightContentResult = await _preflightAgentCall(`--preflight --taskId ${_taskId} --charterFile ${_charterFile} --workspace .`, 'preflight-content')
-let _preflightContentVerdict = null
-try { _preflightContentVerdict = _preflightContentResult?.raw ? JSON.parse(_preflightContentResult.raw) : null } catch { _preflightContentVerdict = null }
+let _preflightContentVerdict = _preflightContentResult?.raw ? _parseAgentJson(_preflightContentResult.raw) : null
 
 if (!_preflightContentVerdict || typeof _preflightContentVerdict.ok !== 'boolean') {
   // Fail-closed (AC: "Preflight CLI exits non-zero / unparseable JSON") — mirrors Admission's own
@@ -510,8 +548,7 @@ if (!planAuthorResult || planAuthorResult.ok !== true) {
 phase('Preflight')
 
 const _preflightPlanResult = await _preflightAgentCall(`--preflight-plan --taskId ${_taskId} --workspace . --planFile ${_planFile}`, 'preflight-plan')
-let _preflightPlanVerdict = null
-try { _preflightPlanVerdict = _preflightPlanResult?.raw ? JSON.parse(_preflightPlanResult.raw) : null } catch { _preflightPlanVerdict = null }
+let _preflightPlanVerdict = _preflightPlanResult?.raw ? _parseAgentJson(_preflightPlanResult.raw) : null
 
 if (!_preflightPlanVerdict || typeof _preflightPlanVerdict.ok !== 'boolean') {
   log(`Preflight (plan-shape) phase FAILED — no parseable verdict (raw: ${_preflightPlanResult?.raw ?? '(none)'}). Failing closed, never dispatching PlanCheck.`)

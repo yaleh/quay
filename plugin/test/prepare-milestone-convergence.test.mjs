@@ -728,6 +728,58 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     }
   });
 
+  // M202/DIR-126-C real-world finding: the FIRST genuine Workflow-dispatched exercise of the
+  // Preflight phase (not a mocked-agent test) hit a real bug — an agent() dispatch instructed to
+  // "report stdout verbatim" nonetheless included a Node MODULE_TYPELESS_PACKAGE_JSON stderr
+  // warning line prepended before the real JSON, and the pre-fix bare `JSON.parse(result.raw)`
+  // threw, wrongly failing the phase closed even though the underlying CLI call had succeeded.
+  // Fixed with `_parseAgentJson()`, which extracts the first top-level JSON span rather than
+  // assuming the whole string is JSON. Confirmed here for BOTH the Admission and Preflight
+  // call sites sharing this exposure.
+  test(`[${mirrorName}] M202/DIR-126-C: a noisy agent raw (stderr warning prepended to real JSON) still parses correctly at Admission and Preflight, never fails closed on a call that actually succeeded`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    const fn = loadWorkflow(workflowFile);
+    const noisyPrefix = '(node:12345) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///fake/path.ts is not specified and it doesn\'t parse as CommonJS.\nReparsing as ES module because module syntax was detected.\n';
+    const calls = { authors: [], preflightContent: 0 };
+    const agentMock = async (prompt, opts = {}) => {
+      const label = opts.label || '';
+      if (label === 'admission-acquire') {
+        return { raw: noisyPrefix + JSON.stringify({ outcome: 'acquired', lease: { fencingToken: 0 }, reclaimed: false }) };
+      }
+      if (label === 'preflight-content') {
+        calls.preflightContent += 1;
+        return { raw: noisyPrefix + JSON.stringify({ ok: true, policyVersion: 'preflight-v1', findings: [] }) };
+      }
+      if (/^proposal-author-\d+$/.test(label)) {
+        const idx = Number(label.match(/\d+$/)[0]);
+        calls.authors.push(idx);
+        return { authorIdx: idx, proposalText: 'unreachable — this test stops right after this point', sessionId: `sess-author-${idx}` };
+      }
+      // Reaching here (e.g. 'adjudicate') already PROVES Admission and Preflight both parsed
+      // successfully and ProposalAuthors ran — this test's own scope stops at that checkpoint,
+      // deliberately not mocking the full pipeline.
+      throw new Error(`__TEST_CHECKPOINT_REACHED__ label=${JSON.stringify(label)}`);
+    };
+    try {
+      let result;
+      try {
+        result = await fn(args, () => {}, () => {}, (fns) => Promise.all(fns.map((f) => f())), agentMock);
+      } catch (err) {
+        if (!/__TEST_CHECKPOINT_REACHED__/.test(err.message)) throw err;
+        result = null;
+      }
+      if (result) {
+        assert.notEqual(result.reason, 'admission-check-failed');
+        assert.notEqual(result.reason, 'preflight-check-failed');
+      }
+      assert.equal(calls.preflightContent, 1, 'preflight-content was actually dispatched and parsed, not short-circuited by a parse failure');
+      assert.ok(calls.authors.length > 0, 'ProposalAuthors ran — Admission/Preflight were correctly parsed as successful, not fail-closed');
+    } finally {
+      fs.rmSync(scratchDir, { recursive: true, force: true });
+    }
+  });
+
   // A resumed dispatch that STILL has open blocking findings behaves exactly like the cold path's
   // ProposalReview loop (delta rounds, split, budget) — resume only ever affects the ProposalAuthors/
   // Adjudicate phases, never weakens or bypasses DIR-125's own bounded-convergence loop.
