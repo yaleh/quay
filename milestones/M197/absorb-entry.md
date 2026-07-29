@@ -56,3 +56,28 @@ and 2 of 3 DoD items are ticked; the 3rd DoD item ("Landed on master under human
 discipline") remains correctly unticked until this Land completes.
 
 V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+
+## Second independent re-audit (fresh-context, 2026-07-29, session ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78)
+
+Performed a THIRD independent pass (fresh context, no prior chat history), refusing to trust either
+the Build's self-report or the prior two audit rounds' own narrative. Re-derived every claim
+directly from raw artifacts: opened both `wf_2cc60d00-181` and `wf_9aea9c8c-fc7`'s real
+`journal.jsonl` files and their top-level `wf_2cc60d00-181.json` result record on disk and parsed
+result-object keys programmatically (not read the summary doc) — confirmed 6/6 dispatches in the
+resumed run carry zero `authorIdx` fields and are exclusively `findings`/`ok+proposalHash`/
+`resolvedIds`-shaped (ProposalReview/revise shapes), confirmed the cold-path run's dispatches 2-3
+carry real `authorIdx: 1`/`authorIdx: 2`; confirmed the run's actual terminal outcome
+(`needs-human`/`split-recommended`, `mechanism-claim wiring coverage (DIR-117)` subsystem, 3
+blocking findings) directly from the stored result object; confirmed `FIXTURE-M197-RESUME-PROOF`
+task file is deleted with no git history trace; re-ran both convergence test files directly
+(34/34 and 26/26, both green, matching); re-ran the mechanical `it0-dod-check.sh` (exit 0, 12/12
+disposition clauses) and `vmeta-lag-check.sh --counter 193` (exit 0, output byte-matches the line
+already on file); diffed `.claude/workflows/prepare-milestone.js` vs its `plugin/` mirror
+(byte-identical) and both `quay-task-to-plan/SKILL.md` mirrors (byte-identical); grepped
+`OUTER-LOOP.md` for the RESUME CONTRACT clause (present, lines 69-84). No refutation found on any
+AC or DoD item. DoD item 1 (Landed on master) correctly remains unticked — task `status:` field is
+still `todo`, no Land/ABSORB-merge commit exists yet in `git log`.
+
+adversarial-audit disposition: NO REFUTATION FOUND
+
+V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated carry-forward

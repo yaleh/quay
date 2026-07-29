@@ -5,7 +5,7 @@ title: prepare-milestone.js's ProposalAuthors phase always independently
   DIR-125's bounded-convergence guarantee only covers rounds WITHIN one
   generation, not a redispatch after a prior generation's needs-human/crash, so
   the same format defect can recur across generations without limit
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -193,11 +193,13 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 Reading A, source code and prose claims alone are necessary but insufficient — real command output
 is required for every item above.
 
-- [ ] **Not yet (audit M197):** Landed on `master` under human-steered discipline (touches
+- [x] **Landed on `master` under human-steered discipline** (touches
   `.claude/workflows/prepare-milestone.js`, a driver execution-chain script). Build commit
-  (`528a26a`) is on `master`'s history already (this repo runs directly on `master`, no feature
-  branch), but the milestone's Absorb/Land steps have not yet run at audit time (no `M197 ABSORB`
-  commit, no `absorb-entry.md` prior to this audit) — leaving unticked until Land completes.
+  (`528a26a`) landed directly on `master` (this repo runs directly on `master`, no feature
+  branch); the Land/ABSORB commit series (`milestone_counter 194→195`) completes this milestone's
+  close-out — mechanical gate `it0-dod-check.sh` exit 0 (12/12 clauses), `vmeta-lag-check.sh
+  --counter 193` PASS, `tree-hygiene-check.sh`/`worktree-branch-hygiene-check.sh` both clean,
+  `it0-split-or-commit-check.sh .` PASS (474 tasks) — all independently re-run at Land.
 - [x] **RESOLVED post-audit (coordinator-dispatched real journal, 2026-07-29):** Real journal
   evidence for both the cold and resumed dispatch paths — see AC 1/2/6/7/10 above and
   `milestones/M197/resume-flag-real-journal-proof.md`.
@@ -226,3 +228,25 @@ is required for every item above.
 - experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs
 - plugin/test/prepare-milestone-convergence.test.mjs
 - experiments/quay-perpetual-stream/OUTER-LOOP.md
+
+## Execution record
+
+- **Milestone:** M197
+- **Iteration count:** 1 (direct-to-master, no separate worktree/branch)
+- **Realized Δv:** 0 (v̂>0, capabilityGrowth, deliverable, method-infra surface — no chart-2
+  `packages/quay*` surface cell moves; the VT ruler cannot score `prepare-milestone` pipeline
+  capability, structurally identical to the M164/M167/M179/M188/M189/M192/M193/M194/M195
+  precedent)
+- **Merge commit SHA:** bb9458b
+- **Audit disposition:** NO REFUTATION FOUND (three successive independent adversarial acceptance
+  audit passes, all session `ef014e6f-7f2a-4c7a-a7ce-a2c6f5e5ab78` — pass 1 REFUTED on the
+  "real journal" evidentiary bar for 5 AC + 1 DoD item, closed by a real
+  `resumeFromAdjudicatedProposal:true` `Workflow` dispatch producing journal `wf_2cc60d00-181`
+  plus cold-path contrast `wf_9aea9c8c-fc7`; pass 2 independently re-derived and confirmed the fix
+  genuine; pass 3, a fresh-context re-audit with no prior chat history, re-opened the raw journal
+  files directly and found no refutation on any item)
+- **One-line outcome summary:** `prepare-milestone.js` gained a `resumeFromAdjudicatedProposal`
+  input (both mirrors) that skips `ProposalAuthors`/`Adjudicate` on redispatch and re-enters at
+  `ProposalReview` using the already-adjudicated Proposal, closing the real cross-generation
+  non-reuse defect discovered during DIR-119-D/M196; landed on `master`, all 10 AC + 3 DoD items
+  independently confirmed true.
