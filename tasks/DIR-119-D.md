@@ -13,463 +13,133 @@ extra:
   dirStatus: applied
   schema: v1
 ---
-
 **type:** execution
 
 ## Proposal
 
-Close, as literal callable production code, the execution-side gaps that DIR-119-B deliberately
-left as tested-but-uninvoked contract modules and that DIR-119-C's real canary run neither delivered
-nor (in its independent audit) checked for: (1) phase-DAG Build / read-only audit shards / a
-deterministic Reconcile owner of all state mutation, (2) manifest phase/shard synthesis from a flat
-SELECT-produced `MilestoneCandidate`, and (3) per-member Gate-failure attribution. This milestone
-edits the active execution-chain control plane (both `execute-milestone.js` mirrors, byte-identical
-today) under human-steered halt discipline, and is the first dispatch under the M195/DIR-117-B
-enforced-by-default Prepared gate (it carries a real `prepare-milestone.js` receipt).
+Close the execution-side gaps left by DIR-119-B and exposed by the DIR-119-C canary: make composite execution a literal, journal-visible production path; synthesize a checked manifest from the real SELECT candidate; keep Audit filesystem-read-only; give Reconcile sole composite write authority; and attribute member gate failures precisely. This is a high-risk control-plane change to both workflow mirrors and all vendored script mirrors, performed while the repository-root `.halt` is present and never concurrently with another milestone workflow. It is the first dispatch under the enforced-by-default Prepared receipt gate.
 
-### Problem framing (verified against current code, 2026-07-28)
+### Problem framing
 
-All evidence below was re-derived this session against live HEAD, not copied from the task body:
+The current system has contracts but not callers. `execute-milestone.js` has Verify → Prepared → Build → Audit → Gate → Land, one unlabeled Build agent and one Audit agent at every composite width, and no Reconcile phase. The composite modules are selftest-only (or only type-imported): `composite-build.ts` does not plan live phases or map live evidence; `composite-audit.ts` only deep-clones/freezes in-process objects, which cannot constrain a filesystem-writing agent; `composite-reconcile.ts` is not invoked; and `composite-land.ts` does not enforce the live transaction. Audit currently writes checklist ticks, absorb/disposition and deviation state. Gate labels identify member tasks, but its failure branch discards identity and marks only `_primaryTaskId` needs-human. The real SELECT pipeline emits a flat `MilestoneCandidate`; phase and shard arrays have only been fixture- or hand-authored, so the prior canary did not prove SELECT-to-manifest wiring. The independent audit that found this gap checked journals and atomicity but did not trace production call graphs or exercise a failing member gate.
 
-- **The four execution modules are an uncalled island.** Import-graph grep (excluding `test/`):
-  `composite-build.ts` — zero importers anywhere; `composite-audit.ts` — imported only by
-  `composite-reconcile.ts:11` (a *type-only* import); `composite-reconcile.ts` — imported only by
-  `composite-land.ts:10` (type-only); `composite-land.ts` — zero importers. Every reference inside
-  `.claude/workflows/execute-milestone.js` is *prose inside agent prompts*: Build's "2a. COMPOSITE
-  BUILD … MAY serialize all phases through you as the one Build lead" (~line 246), Audit's
-  "composite-audit.ts's stricter shard-level read-only boundary is the target architecture pending
-  a real per-shard dispatcher" (~line 282), Land's `_compositeLandNote`
-  (~lines 400–402); `composite-reconcile.ts` is not referenced at all and is reachable only through
-  a `--selftest` guard. The single genuinely-wired composite callsite is Verify's
-  `composite-preflight.ts` shell-out (~lines 132–135).
-
-- **Build is one monolithic agent regardless of manifest width** — a single unlabeled `agent()` call
-  (~line 229). `meta.phases` (~lines 4–11) is Verify/Prepared/Build/Audit/Gate/Land: **there is no
-  Reconcile phase**.
-
-- **Audit is one agent that writes.** The Audit prompt instructs checklist write-back (step 1a,
-  ~line 289), absorb-disposition append (step 2a, ~line 292), and deviation-log write-back (step 4,
-  ~line 309) — the exact mutations the architecture assigns to Reconcile. `composite-audit.ts`'s
-  `runReadOnlyAuditShard` deep-freeze boundary is never on any production path, and in any case
-  binds in-process JS mutation only, not a dispatched agent's filesystem.
-
-- **Gate failure attribution is primary-task-only.** ~Lines 367–375:
-  `gatesFailed = gates.filter(Boolean).some(g => !g.ok)` → `Mark task ${_primaryTaskId} needs-human`.
-  The per-member gates already carry identifying labels — `split-or-commit-${tid}` (~lines 351–353)
-  — but the failure branch discards that information; no passing-subset record exists.
-  M-DIR119-C-CANARY's 7 gates all passed, so this branch has never executed in production.
-
-- **No production manifest synthesis exists.** The only `CompositePhase[]` producers are
-  `makeValidCompositeFixture`/`makeSharedPhaseCompositeFixture` (`composite-contracts.ts:208`…),
-  commented test-fixture-only. SELECT's real pipeline (`select-preflight.ts`
-  `synthesizeCandidatePortfolio()` → `coupling-graph.ts` → `candidate-synthesis.ts` →
-  `portfolio-choice.ts`) emits a flat `MilestoneCandidate{candidateId, taskIds, score, sourceHashes}`
-  (`candidate-contracts.ts:111–136`) — no phases/shards. No composite-manifest artifact is committed
-  anywhere in the repo; M-DIR119-C-CANARY's manifest was a hand-authored ephemeral `/tmp` file.
-
-This directive exists because the independent wiring audit dispatched for DIR-119-C's Stage 3.4
-(session `13efe277-45ff-4563-bcfe-fd2c3db3e2a5`) verified journal call-counts, commit atomicity, and
-AC-citation evidence, but did NOT trace production import graphs or exercise the Gate-phase failure
-branch — those two defects were found afterward by direct code reading. This is itself evidence for
-DIR-118's premise; DIR-118, if executed, should treat this originating incident as an additional
-Finding item.
-
-### The hard constraint that shapes the mechanism
-
-Workflow DSL scripts have NO `import` capability — only `phase`/`agent`/`parallel`/`log`/`args`
-globals (stated at `execute-milestone.js` ~lines 21–24 and `composite-preflight.ts`'s header, lines
-1–5); there are no `readFile`/bash globals either. "Literal wiring of X into execute-milestone.js"
-therefore cannot mean an ES-import edge or a workflow that reads the manifest file itself; the ONLY
-viable production invocation edge is the established `composite-preflight.ts` pattern — a canonical
-TS module with a JSON-in/JSON-out/exit-code CLI (built on `gate-script-base.ts`'s
-`parseArgs`/`isDirectEntry`/JSON-emit conventions), run by a labeled agent, with the DSL owning all
-fan-out, sequencing, and mechanical comparison. Every wiring
-change below is that pattern, and every workflow-to-module claim is provable as (a) a literal
-command string in the workflow source and (b) a labeled journal entry in a real dispatch.
+The workflow DSL exposes `phase`, `agent`, `parallel`, `log`, and `args`, but no module import, file read, or shell primitive. Literal wiring therefore means a labeled workflow agent invoking a deterministic JSON CLI, with the workflow owning sequencing/fan-out and deciding only on structured results. The repository executes directly in a shared working tree: even disjoint Touches do not make concurrent Git index, HEAD, generated-file, or broad-tool effects safe. A phase meter must therefore not be achieved by concurrent commits or by reusing one owner for several phases.
 
 ### Chosen mechanism
 
-Five increments, each canonical-first in `experiments/quay-perpetual-stream/scripts/` then
-byte-copied to the `plugin/` mirror (existing mirror discipline; `plugin-packaging.test.mjs` already
-asserts mirror sync, and an AC-level `diff` equality check is added). All new workflow paths are
-conditional on `_isComposite && $a.compositeManifestFile` so the legacy width-1 path is byte-for-byte
-untouched (golden replay, matching the composite-preflight vacuous-pass precedent).
+Implement a composite-only branch for effective width greater than one. Preserve the legacy scalar and singleton branch as the compatibility oracle. Add canonical modules first, byte-copy them to `plugin/`, and keep every pair byte-identical with `sync-vendor.sh --check`, direct `cmp`, and packaging tests.
 
-1. **New canonical module `composite-manifest-synthesis.ts`** — a pure, deterministic
-   `synthesizeManifest(candidate, taskFacts, couplingGraph) → {manifest, context}` producer with a
-   CLI (`--candidate-json <f> --tasks-dir tasks/ --out <f>`), reusing existing single-sources
-   (reused, not reinvented): `touches-orthogonality-check.ts`'s exported
-   `parseTouches`/`expandGlobs`/`filesDisjoint` (lines 63/152/162) for per-task touch sets and
-   overlap; `coupling-graph.ts`'s `deriveInternalOrderEdges`/`buildCouplingGraph` (lines 100/142)
-   plus `candidate-contracts.ts`'s `isProhibiting` for `requires` edges and forbidden-edge context;
-   and task-file `## Acceptance Criteria` parsing for `taskAcCounts`. `context` (taskAcCounts,
-   taskTouches via `parseTouches`, forbiddenEdges from prohibiting coupling edges, documented
-   capacity defaults) is emitted in the SAME file, so the existing `composite-preflight.ts` check
-   consumes `{manifest, context}` unchanged (defense in depth: the Verify-phase check re-validates
-   what synthesis produced). The CLI runs `checkCompositeContract` on its own output BEFORE writing
-   and exits non-zero on any violation — **synthesis can never emit a contract-breaking manifest
-   (fail-closed)**; sorted inputs and no timestamps/random ids in the manifest body make the output
-   byte-deterministic (same inputs ⇒ identical bytes).
+1. **Synthesis at the SELECT boundary.** Add `composite-manifest-synthesis.ts` and its mirror. Its pure API accepts the exact SELECT `MilestoneCandidate`, authoritative current task facts, and coupling graph and returns `{manifest, context}`. Its CLI accepts candidate/charter/workspace/task-store inputs and an output path, validates source hashes and charter membership, calls `checkCompositeContract()` before writing, and writes by temporary file plus rename. It must fail closed without leaving a partial artifact. Update both `select-preflight.js` wrappers to pass through the real `portfolio`/selected candidate; `OUTER-LOOP.md` invokes synthesis for `taskIds.length > 1` between SELECT and execute dispatch and passes `compositeManifestFile`. No hand-authored manifest satisfies the real proof.
 
-2. **Build becomes phase-DAG dispatch** via a new non-selftest CLI mode on `composite-build.ts`
-   (`--plan-json`) that runs `planPhaseExecution(manifest.phases, {mode:"parallel",
-   maxParallelAgents: <cap>})` and prints `{batches, owners, agentCount}` JSON. The workflow
-   dispatches one planner agent for that CLI, then loops over the batches: `await parallel(...)` of
-   one labeled `agent()` per phase within a batch (label `build-phase-${phaseId}`, prompt scoped to
-   that phase's `taskIds` + manifest excerpt + evidence contract), batches run serially — which is
-   exactly what "respect `requires` edges" means mechanically. A final `--map-evidence-json` CLI
-   call (`mapEvidenceToTasks`) folds each phase agent's `PhaseEvidence{phaseId, files, commits,
-   tests}` into the iteration report.
+   Fact extraction is canonical and shared rather than duplicated: actual Acceptance Criteria checkbox counts, `parseTouches`, `expandGlobs`, `filesDisjoint`/the existing Touches orthogonality checks, `buildCouplingGraph`, `deriveInternalOrderEdges`, and `isProhibiting` are reused. Unknown, missing, empty, overbroad, or zero-match Touches overlap everything, never create optimistic parallelism. Sort task IDs and all serialized collections. Stable IDs derive only from sorted membership and fixed prefixes; no timestamp, random value, filesystem enumeration order, or current commit enters the manifest. Emit sorted unions of Touches/resources, `landPolicy:"atomic"`, one `task-ac` shard per task, and one `semantic-integration` shard for each multi-task phase. Strengthen contract validation for duplicate/dangling phases, dependencies, shards, membership, and empty records as needed. Use explicit exported defaults (`maxPhases:32`, `maxAuditShards:64`, `maxParallelAgents:4`), preserve SELECT resource/line budgets when supplied, and report capacity violations specifically.
 
-3. **Audit becomes per-shard dispatch with a mechanical read-only check.** One labeled `agent()` per
-   `auditShards[]` entry (label `audit-shard-${shardId}`), each prompt scoped to that shard's
-   `taskIds` ONLY and stripped of ALL write-back instructions (ticks/dispositions/deviation rows
-   move to Reconcile). Each shard agent runs `git status --short` before and after its work and
-   returns `{before, verdicts: AuditShardResult, after}`; the before/after comparison is performed
-   in workflow JS via a trivial inline copy of a new exported pure `checkShardReadOnly(before,
-   after)` from `composite-audit.ts` — the *verdict* (shard REFUTED on non-empty diff) is computed
-   by the workflow, not self-reported by the agent, matching this workflow's existing trust model
-   (agents transport script output; the decision is mechanical). Keeping the snapshots inside the
-   shard agent's single call (rather than separate pre/post snapshot agents) is deliberate: it keeps
-   the Audit-phase labeled dispatch count EXACTLY equal to `auditShards.length`, which AC#3 greps.
-   Shard results are combined by one `--combine-json` CLI call on `composite-audit.ts` invoking
-   `combineShardVerdicts`, producing the `BundleAuditResult`.
+   Build an undirected overlap graph. Union-find every pair not proved Touches-disjoint into one shared implementation phase with one owner and a deterministic integration invariant naming members and overlap reason. Translate cross-component internal-order edges into `requires`; retain intra-component order as ordered instructions. Do not silently weaken prohibiting edges or cycles. A valid candidate with precise disjoint Touches must produce more than one phase for the real proof; uncertainty may safely collapse to one.
 
-4. **A literal `Reconcile` phase** inserted into `meta.phases` after Gate and before Land (see
-   decision 5) — the only phase whose agents write task AC/DoD ticks, lifecycle status, dashboard
-   log row, absorb dispositions, and the consolidated audit artifact (written from the returned
-   verdict JSON). Its agent runs a new non-selftest CLI mode on `composite-reconcile.ts`
-   (`--reconcile-json`) invoking the real `reconcile()`, then a second CLI on `composite-land.ts`
-   (`--land-json`) invoking `buildLandTransaction`; the apply-agent performs exactly the mutations
-   the CLI output lists, and Land's composite prompt is stripped to merge/counter/execute-record.
+2. **Build as a real phase DAG.** Add non-selftest JSON `plan`, `verify-batch`/phase-evidence validation, and `map-evidence` modes to `composite-build.ts`. Planning gives each phase a unique `build-phase-<id>` owner and chunks dependency-ready levels into bounded sub-batches; `maxParallelAgents` limits simultaneous calls, never phase ownership or call count. Unknown dependencies, cycles, duplicate/missing evidence, out-of-scope files, unexpected commits, or integrated-generation mismatch fail closed.
 
-5. **Gate-failure attribution fix.** New exported pure `attributeGateFailures(gates, taskIds)` in
-   `composite-reconcile.ts`: partition failures into `failedTaskIds` (parsed from the
-   `split-or-commit-${tid}` labels the gates already carry) vs milestone-scoped failures; the
-   needs-human agent marks *each failed member* needs-human with its own gate detail (`_primaryTaskId`
-   included only if it is among them), and the record lists the `passingTaskIds` ("would otherwise
-   have passed"). Land policy stays `atomic` — no partial Land; the fix is attribution fidelity and
-   recoverability, not semantics.
+   A labeled `build-plan` helper invokes the plan CLI. Batches run serially; within a proved-independent, proved-disjoint batch the workflow calls `parallel()` with exactly one labeled `build-phase-<id>` agent per manifest phase. Prompts contain only that phase's task IDs, predecessors, invariant, allowed Touches, and evidence schema. Workers do not stage or commit. A serial `build-integrate`/finalize helper validates changed files, integrates in deterministic topological order, runs integration tests, creates the one candidate-generation commit, and invokes evidence mapping. If runtime isolation cannot be supplied, serialize rather than parallelize; never commit concurrently in the shared checkout. Helpers use distinct labels and cannot satisfy the phase-owner count.
 
-### Control/data flow (composite path)
+3. **Audit as per-shard read-only dispatch.** Remove all composite checklist, absorb, deviation, artifact, staging, dashboard, lifecycle, and status instructions from Audit. Dispatch exactly one `audit-shard-<id>` agent for each manifest shard, with fixed shard identity and only its declared task IDs, AC indexes, invariant, and integrated generation. Each worker obtains exact before/after `git status --porcelain=v1 --untracked-files=all` snapshots around its inspection and returns raw snapshots plus typed verdicts. Add production snapshot/guard and combine modes to `composite-audit.ts`; export the pure exact comparison used by the workflow. The workflow, not auditor prose, converts any delta (including a planted untracked or tracked write) into `REFUTED` with `audit-shard-write-violation:<id>`. A distinct `audit-combine` helper invokes `combineShardVerdicts()` and binds the bundle to the integrated generation ID. Snapshot transport remains within the platform trust boundary: this is mechanical adjudication of command output, not cryptographic proof that an agent cannot forge output. Audit writes no tracked state or artifact.
 
-- **SELECT → synthesis:** SELECT produces a `MilestoneCandidate`; OUTER-LOOP.md's `execute()` step
-  shells out when `taskIds.length > 1` to the **synthesis CLI** (caller-side, between SELECT output
-  and dispatch), writing `/tmp/m<NN>-manifest.json` (`{manifest, context}`).
+4. **Typed Gate results and literal Reconcile.** Change task gate closures to return `{scope:"task", taskId, gate, ok, detail}` and milestone gates to return `{scope:"milestone", gate, ok, detail}`; labels remain observability metadata, never the identity source. Gate must collect the complete vector and route failures onward rather than marking `_primaryTaskId` directly. Insert literal `Reconcile` after Gate and before Land because the existing reconcile contract requires complete task and milestone gate evidence.
 
-- **Dispatch:** the caller threads `compositeManifestFile` (OUTER-LOOP `execute()` shape,
-  updated).
+   Add non-selftest `reconcile` and `attribute-gates` commands to `composite-reconcile.ts`. Reconcile checks generation, complete shard verdicts, all task gates, all milestone gates, and exact membership, then returns either the complete success mutation plan or zero success mutations plus a deterministic failure disposition. Attribution names exact `failedTaskIds`, `passingTaskIds`, failed gate details, and separately reports milestone-scoped failures; `_primaryTaskId` is not special. On any gate/audit/generation/contract failure the bundle remains atomic and no member is completed. A task-scoped failure may record needs-human for the actual failed members only; a milestone-scoped failure records the whole bundle and all blocked members without false member attribution.
 
-- **Verify:** `composite-preflight.ts`, unchanged code path — now validating a machine-synthesized
-  manifest instead of a hand-authored one.
+   A single `reconcile-apply` agent is the only composite writer. On success it applies the returned complete set of AC/DoD ticks, lifecycle/status changes, absorb dispositions, deviation/write-back rows, and consolidated audit artifact. It uses pre-images/rollback or equivalent all-or-nothing staging and performs final checks. On failure it writes only the deterministic recovery record permitted by policy and never partial success state.
 
-- **Prepared:** unchanged; its `touches-expanded` trigger per `milestone-preparation-check.ts`
-  mechanically enforces `## Touches` declaration accuracy.
+5. **Atomic Land transaction.** Add production `land`/`plan` mode to `composite-land.ts` invoking `buildLandTransaction()`. Before any mutation, require `ok:true`, `counterDelta===1`, `dashboardEntryCount===1`, `taskCompletionCount===taskIds.length`, atomic policy, and set-equal membership. Land rechecks the exact pending transaction, integrates/captures it, increments the counter once, writes one dashboard row with completion count, and commits once; it does not recompute verdicts or independently derive task/absorb/dashboard state. A mismatch yields `needs-human` with zero counter, dashboard, or done-status writes.
 
-- **Build:** plan CLI → per-batch `parallel()` of `build-phase-<id>` agents, each reporting
-  `PhaseEvidence`; `--map-evidence-json` folds evidence into the iteration report.
+### Control and data flow
 
-- **Audit:** per-shard agents (inline git snapshots + verdict JSON) → workflow-side
-  `checkShardReadOnly` comparison → combine CLI → `BundleAuditResult{generationId = build HEAD
-  short-sha}`.
+1. SELECT returns the real portfolio/candidate; the caller invokes synthesis only for a multi-member candidate and threads the unchanged candidate, manifest path, charter, and mandatory preparation receipt into `execute-milestone.js`.
+2. Verify rejects wide calls without a manifest as `revision-needed/composite-manifest-missing`, rejects composite plus `mode:"concurrent"` as `revision-needed/composite-concurrent-unsupported`, and validates the generated `{manifest,context}` and source hashes before Build. The width-one vacuous/legacy path remains allowed.
+3. Prepared remains mandatory and proves Proposal/Plan freshness plus expanded Touches, including every new caller, mirror, test, sync, and workflow path declared by this task.
+4. Build plan → serial dependency batches → per-phase labeled workers → serial integration/generation commit → evidence verification and mapping. Audit starts only from clean integrated Build state.
+5. Audit shard workers return fixed-scope verdicts and raw snapshots; workflow comparison adjudicates read-only; combine produces generation-bound bundle audit. Gate emits typed task/milestone vectors without mutation.
+6. Reconcile consumes the bundle and complete gate vectors, attributes failures, and either returns/applies the complete mutation set or a zero-success failure record. Land validates and captures the one atomic transaction.
 
-- **Gate:** unchanged per-member `split-or-commit-<tid>` + 4 milestone gates, results carrying
-  labels.
-
-- **Reconcile:** `--reconcile-json` with `{bundleAudit, requiredGenerationId,
-  taskGates (from split-or-commit results), milestoneGates (from the 4), taskIds}` → on `ok`,
-  apply-agent writes the listed mutations.
-
-- **Land:** `--land-json` asserts `counterDelta:1 / dashboardEntryCount:1 / taskCompletionCount:N`
-  (the atomicity meter, now machine-checked rather than prompt-asserted), agent merges + bumps
-  counter exactly once.
-
-Failure anywhere before Land → needs-human carrying the reconcile/land `reason`, zero state writes
-applied.
+Real-run evidence must include literal command callsites and matching journal entries in both installed mirrors. Filtered journal counts must show exactly one `build-phase-*` call per phase and one `audit-shard-*` call per shard; helper labels (`build-plan`, `build-integrate`, `audit-combine`, evidence mapper, `reconcile-apply`) are reported separately. Journal ordering must be last shard → Gate → Reconcile → Land, with the tree clean through Build/Audit and first canonical write-back in Reconcile.
 
 ### Key design decisions
 
-1. **Grouping rule (deterministic, documented, conservative).** Sort member `taskIds`; union-find-
-   fuse tasks whose *expanded* touch sets are not provably disjoint (missing/over-broad Touches →
-   overlap-with-everything, per `touches-orthogonality-check.ts`'s fail-closed semantics) — each
-   connected component becomes one `CompositePhase` (multi-task components carry a derived
-   `integrationInvariant`, required by `checkCompositeContract` rule 3); cross-component
-   `internal-order` coupling edges become `requires`. Prohibiting-kind coupling edges internal to
-   the membership (per `isProhibiting`) REFUSE synthesis fail-closed — that bundle should not have
-   been SELECTed. Audit shards: one `task-ac` shard per task, plus one `semantic-integration` shard
-   per multi-task phase; `touches`/`semanticResources` = sorted unions; `landPolicy:"atomic"`.
-   Consequence worth stating plainly: poorly-declared Touches collapse to ONE phase (still
-   contract-valid; Build dispatch count 1 == phase count 1), so a genuinely multi-phase journal
-   proof requires well-declared Touches — the real proof dispatch's tasks must have them. This
-   fusion rule was chosen over "one phase per task plus a shared phase on overlap" because fusing
-   overlapping tasks into one phase with exactly one owner is strictly stronger than dispatching
-   overlapping phases that would then conflict in the shared working tree and at merge.
+- **Conservative fusion:** overlap-connected Touches components have one owner; disjoint components may batch in parallel only when dependencies and write sets are proven safe. A cap chunks batches, never collapses owners. Shared-working-tree phase workers never commit concurrently; worktree isolation is not assumed or a substitute for grouping, and serial execution is the safe fallback.
+- **Reconcile follows Gate:** its existing contract needs task and milestone gates. It is the sole composite state writer; Land is a transaction validator/commit owner, not a second policy engine.
+- **Typed identity:** gate results carry task identity structurally; do not parse labels or positional result order. Passing-member disclosure is recovery information, never authorization for partial atomic Land.
+- **Read-only means zero tracked/untracked delta:** no audit artifact or “allowed” write exception. Deep-freeze remains an in-process unit test, not filesystem enforcement. Transported snapshots are honestly bounded by the agent/tool trust model.
+- **CLI boundaries are explicit:** JSON stdin/files, JSON stdout, stable reason codes, non-selftest modes, deterministic artifacts, and atomic writes. Comments/prompts naming a module do not count as wiring.
+- **Legacy boundary is hard:** width-one avoids synthesis, per-phase/per-shard fan-out, Reconcile, and composite Land CLI and is tested by a journal golden replay, not only a singleton helper.
 
-2. **Parallelism safety is grouping-first; worktree isolation is a defensive path only.** Because
-   grouping already fuses overlapping tasks, distinct phases are disjoint *by construction*; the
-   plan CLI additionally re-checks via the reused `expandGlobs`/`filesDisjoint` and demotes any
-   same-batch pair it cannot prove disjoint into successive batches (fail-closed to serialize) —
-   serialize is the guaranteed fallback since the DSL gives no evidence of an `isolation` option.
-   Where the DSL does honor `isolation:'worktree'`, planner-flagged intersecting phases dispatch
-   with it (the task's requested defensive path); the rare inter-phase intersection case is absorbed
-   either way. Default `maxParallelAgents` cap is modest (4) for this first real wiring; journal
-   Build-dispatch count equals manifest phase count regardless of cap. This does NOT change the
-   standing CLAUDE.md rule forbidding concurrent milestone-workflow execution against this repo
-   (shared working tree).
+### Defaults and failure behavior
 
-3. **Journal-countable labels resolve the mechanical-agent overhead question.** The journal-count
-   ACs grep DISPATCH labels: `build-phase-<id>`, `audit-shard-<id>`, `reconcile`, plus
-   `split-or-commit-<tid>` (existing) — these are the exact strings AC#2/#3/#4 count, declared
-   stable in-module. Mechanical helper agents (planner `build-plan`, combiner `audit-combine`,
-   evidence-mapper) carry distinct labels and are excluded by those greps — this is why per-shard
-   snapshots are returned inline by the shard agent rather than dispatched as separate pre/post
-   snapshot agents (which would triple the Audit-phase call count and break AC#3's
-   `count == auditShards.length`). Verify-phase caching does not touch Build/Audit/Reconcile (no
-   cache there), so counts are stable.
+Defaults are `maxParallelAgents:4`, `maxPhases:32`, `maxAuditShards:64`, `landPolicy:"atomic"`; all are serialized in context and overrideable only through validated options. Synthesis refuses stale source hashes, unreadable or mismatched task/charter inputs, invalid Touches, prohibiting edges, cycles, missing/dangling phase or shard records, contract violations, and capacity overflow. It leaves no partial output.
 
-4. **Composite-without-manifest fails closed.** New default: `_isComposite && !compositeManifestFile`
-   → `{outcome:"revision-needed", reason:"composite-manifest-missing", phase:"Verify"}` — mirroring
-   the DIR-117-B Prepared flip (a receipt-less composite dispatch is a caller bug; executable
-   invariant over prose). The preflight's vacuous-pass-without-manifest behavior is retained only
-   for legacy width-1 calls (golden replay). The loop simply never dispatches width>1 without
-   synthesizing first (OUTER-LOOP.md gains that one step).
-
-5. **Reconcile sits after Gate, not immediately after Audit.** `reconcile()`'s own contract
-   (`composite-reconcile.ts` checks 4–5, lines 77–87) consumes `taskGates` and `milestoneGates` and
-   fails closed without them — placing Reconcile before Gate would force feeding it fabricated gate
-   results. Order Audit → Gate → Reconcile → Land still satisfies "between the last Audit-shard call
-   and Land" (AC#4). Reconcile is guard-skipped at width 1.
-
-6. **Generation identity.** `generationId` = build commit short-sha, threaded into
-   `combineShardVerdicts` and checked by `reconcile()`'s existing check 1 — stale/forged audit
-   receipts fail closed.
-
-7. **Synthesis callsite is caller-side (OUTER-LOOP `execute()`), not inside SELECT and not inside
-   Build.** Placing it in the workflow's Build phase would make the Verify-phase contract check
-   (which must validate the manifest BEFORE Build) impossible, and the DSL cannot read task files
-   directly; placing it inside `select-preflight.ts` would conflate candidate selection with
-   execution planning. Caller-side synthesis between SELECT output and dispatch matches the task's
-   requested callsite and lets the loop/human review the manifest pre-dispatch.
-
-### Defaults and failure behavior (fail-closed throughout)
-
-- Width-1 legacy / `{taskId,...}` golden replay: **byte-for-behavior unchanged** — single Build
-  agent, single Audit agent *with* its existing write-back steps, no Reconcile dispatch (phase body
-  short-circuits with one log line; no new agent calls, no new failure surface), Gate failure branch
-  reduces to `failedTaskIds=[_primaryTaskId]` (identical to today), and `legacySingletonLandShape()`
-  is machine-asserted at width 1 as the golden-replay comparison target.
-
-- Composite-shape call missing `compositeManifestFile` → Verify fails closed
-  (`composite-manifest-missing`).
-
-- Any composite-CLI agent returning null/crash → phase hard-fail (existing Verify convention).
-
-- Manifest-synthesis contract violation → non-zero exit, no file written, caller must not dispatch;
-  if surfaced inside the workflow, `{outcome:"revision-needed",
-  reason:"manifest-synthesis-failed:<code>"}` (caller-fixable, matching the Prepared phase's
-  reason-code precedent).
-
-- Read-only violation (non-empty porcelain diff) → that shard REFUTED → bundle REFUTED →
-  `needs-human, audit-shard-write-violation:<shardId>` → reconcile `ok:false` → working tree
-  untouched by Audit (mechanically evidenced).
-
-- Reconcile `ok:false` (any of its 5 reasons) → `needs-human, reconcile-failed:<reason>`; zero
-  mutations applied.
-
-- `buildLandTransaction` `ok:false` → no counter increment, no dashboard entry, no task marks.
-
-- Gate failure → `needs-human, gate-failed:<failed-task-ids>`, naming the specific failing member(s)
-  and recording the passing subset; whole bundle still does not land (atomic).
+Any null/crash/malformed CLI result, unknown phase/shard, duplicate evidence, missing phase/member verdict, dependency violation, out-of-scope file, unexpected HEAD change, generation mismatch, failed audit verdict, or incomplete transaction fails closed before mutation with a stable reason code. Build failure prevents Audit. Audit delta refutes the affected shard and bundle. Any task or milestone gate failure blocks atomic Land; records failed and passing subsets, with milestone failures bundle-scoped. Reconcile failure yields zero success mutations. Land mismatch yields zero counter/dashboard/done writes.
 
 ### Compatibility
 
-Legacy `{taskId,...}` golden replay preserved on every branch (inline normalization, vacuous
-preflight at width 1, single-call Build/Audit, legacy Land shape). The M-DIR119-C-CANARY dispatch
-shape (`compositeManifestFile` in `/tmp`) remains valid. `concurrent_execute` dispatches
-per-candidate width-1 singletons and is untouched; composite-AND-concurrent is rejected fail-closed
-(`revision-needed, composite-concurrent-unsupported`) — fan-in ABSORB's deferred shared-state writes
-conflict with Reconcile-owned writes; this combination is a non-goal. Both mirror pairs
-(`.claude/workflows/` + `plugin/workflows/`, `experiments/.../scripts/` + `plugin/scripts/`) stay
-byte-identical (AC-checked `diff`; `plugin-packaging.test.mjs` mirror assertion). The OUTER-LOOP.md
-`execute()` shape gains `compositeManifestFile` passthrough, and the Plan must re-declare
-`## Touches` to include the new synthesis module, its mirror, its test file, and the SELECT-side
-callsite file; the Prepared gate's `touches-expanded` trigger mechanically enforces declaration
-accuracy. No ABI/product-package (`packages/`) surface is touched.
+Legacy `{taskId,…}` and effective width-one candidates retain the current single Build, single mutating Audit, Gate, and Land behavior, with no Reconcile call or new composite failure surface; `legacySingletonLandShape()` and a real journal replay are the oracle. Existing valid hand-authored manifests remain accepted, but genuine wide dispatch now requires a synthesized manifest. `concurrent_execute()` remains independent singleton fan-in; wide composite plus concurrent mode is rejected. No product package or Provider ABI changes. Canonical/plugin workflow and script mirrors remain byte-identical, with sync and packaging checks. The `OUTER-LOOP.md` execute shape and this task's `## Touches` are expanded to cover SELECT passthrough, synthesis, both mirrors, sync tooling, and tests, then Prepared is rerun. Existing composite contract version remains unless a breaking serialized field is unavoidable.
 
-### Risks
+### Risks and mitigations
 
-(a) The DSL no-import constraint forces inline workflow copies of small pure logic (precedent:
-`_normalizeExecuteArgsInline`, `_compositeLandNote`) — mitigated by keeping inline copies trivial
-(`checkShardReadOnly` is a string-equality check) and canonical modules authoritative, re-verified
-by composite-preflight.
-
-(b) Per-phase Build agents each need enough context — prompts carry the
-phase's `taskIds`, the manifest excerpt, and the evidence-mapping contract; shared phases have
-exactly one owner by construction.
-
-(c) Touches-collapse-to-one-phase masks width (decision 1) —
-mitigated by requiring the real proof dispatch's tasks to have disjoint, precise Touches (Prepared
-gate enforces declaration), and by RED/GREEN synthesis fixtures showing both the collapsed and the
-multi-phase shapes.
-
-(d) Mirror drift — byte-copy + `diff` AC + `plugin-packaging.test.mjs`.
-
-(e) This
-edits the control plane through which every future milestone runs — mitigated by width-1 golden
-replay, conditioning all new paths on the composite shape, root-level `.halt` +
-`restart-readiness-check.sh` discipline per CLAUDE.md/DIR-027, and never overlapping this
-milestone's Land with any other live milestone (shared working tree).
-
-(f) Shard agents could in principle
-lie about their returned git snapshots — mitigated because the snapshot prompt is a single
-schema-constrained bash command under journal replay, the RED fixture plants a write through the
-filesystem (visible to any honest snapshot), and the fresh independent audit re-derives state from
-journal replay.
-
-(g) Porcelain diff could false-positive on unrelated concurrent writers — mitigated
-by the existing single-driver rule and by recording the full delta in the failure evidence.
+- **Control-plane regression/shared tree:** retain root `.halt`, never overlap milestone execution, use width-one golden replay, bounded/fail-closed batches, one integration commit, focused tests, full `scripts/test.sh`, and restart-readiness check before unhalting.
+- **False safety from prompts or clone/freeze:** require literal non-selftest CLI calls, raw journal/import-graph audit, exact snapshots, hostile-write RED/GREEN fixtures, and explicitly do not claim cryptographic attestation.
+- **Unsafe or vague Touches:** reuse canonical parsers and Prepared expansion; uncertainty fuses/serializes rather than opens concurrency. The real proof must use a SELECT candidate whose declarations yield multiple phases.
+- **State-owner drift:** remove composite write instructions from Build/Audit/Land, make Reconcile's complete mutation plan sole authority, and audit git-diff timing.
+- **Mirror drift and helper-count confusion:** vendor sync, `cmp`, packaging test, stable semantic labels, and explicit journal inclusion/exclusion rules.
+- **Rollback failure:** capture pre-images, validate transaction before edits, stage as one unit, and leave an inspectable needs-human state if final checks or commit fail.
+- **Snapshot forgery or unrelated writers:** retain full raw command output, enforce single-driver discipline, independently inspect generation and working-tree history, and state the residual trust limitation.
 
 ### Non-goals
 
-Repeating width-7 (2–3 real tasks suffice); changing SELECT-side candidate synthesis/scoring
-(`candidate-synthesis.ts`/`portfolio-choice.ts` — the DIR-119-A surface); partial/non-atomic Land of
-the passing subset (violates `landPolicy:"atomic"`, contract-enforced by `checkCompositeContract`
-rule 8 — the fix is attribution, not atomicity); composite dispatch under `concurrent_execute`;
-reworking the 4 milestone gates or it0 checks; product-package (`packages/`) changes; adding
-`import`/`readFile` capability to the workflow DSL (harness-internal); git-worktree-per-phase as a
-PRIMARY isolation mechanism (grouping + fail-closed serialize deliver the safety property now;
-worktree remains a defensive path only); NLP-level mechanism-claim detection; executing DIR-118
-(though this incident is handed to it as a Finding).
+No candidate scoring/cadence/portfolio redesign; no width-seven canary repetition; no partial Land; no composite use of `concurrent_execute`; no new workflow import/filesystem primitives; no NLP inference of prohibiting edges; no worktree-per-phase as primary architecture; no product package changes; no rework of the four milestone gates or it0 checks; no closure of DIR-118, though this incident remains a Finding; and no promotion of DIR-119-C/DIR-119 until the fresh audit re-confirms their named ACs.
 
-### AC coverage
+### Acceptance-criteria coverage
 
-- **AC#1 (import-graph, the self-declared gate):** increments 1–5 each add a non-selftest CLI +
-  literal invocation line in both mirrors; proven by grep/import-graph in the fresh audit
-  (Requested-action 9) — the check finds invocation edges, not prose.
-- **AC#2/#3 (Build dispatch count == phase count; Audit dispatch count == shard count, scoped):**
-  decisions 2–3; per-phase/per-shard dispatch loops make the labeled counts structurally equal to
-  phase/shard counts; shard scope proven by the prompt's `taskIds` + the porcelain check.
-- **AC#4 (Reconcile entry between last Audit and Land; clean tree through Audit, dirty only at
-  Reconcile):** increment 4 + decision 5 + per-shard git snapshots + journal ordering.
-- **AC#5/#6 (RED/GREEN for hostile-shard-write catch; failing-member attribution):**
-  `checkShardReadOnly` workflow-side comparison (hostile planted write caught vs clean shard passes,
-  both states shown); `attributeGateFailures` + synthetic ≥2-task fixture proving the needs-human
-  record names the failing member, not `_primaryTaskId`.
-- **AC#7 (synthesis on a REAL SELECT-produced candidate, satisfying composite-preflight):**
-  increment 1 + the real dispatch uses the synthesized manifest, not a hand-authored one.
-- **AC#8 (legacy width-1 identical):** Compatibility/Defaults sections; golden-replay assertions
-  incl. `legacySingletonLandShape()`; Reconcile guard-skipped at width 1.
-- **AC#9/#10 (fresh audit briefed on import graphs + Gate-failure branch; DIR-119-C AC#5/#10
-  re-confirmed):** DoD items, using the M195 independent-wiring-audit posture as template.
+- **Production wiring:** synthesis, Build plan/evidence, Audit snapshot/combine, Reconcile/attribution, and Land transaction each have non-selftest CLI modes and literal callsites on the operational chain in both mirrors; import/call-graph audit excludes prose and selftests.
+- **Real synthesis:** exact SELECT-produced candidate yields deterministic `{manifest,context}` with multiple phases where Touches permit, passes unchanged preflight, source-hash checks, and byte-identity rerun; invalid/hostile inputs produce no output.
+- **Build:** real journal `build-phase-*` set equals manifest phases, count exceeds one for the proof, dependency batches are ordered, scope/evidence are phase-specific, and only integration creates the Build commit.
+- **Audit:** journal `audit-shard-*` set equals shards, scopes are set-equal, raw snapshots are retained, clean RED/GREEN comparison catches a planted write, and combine binds to generation.
+- **Reconcile ownership/order:** Audit and Build remain clean, typed gates flow through Gate, journal order is last shard → Gate → `reconcile-apply` → Land, and only Reconcile creates canonical task/dashboard/absorb/audit diff.
+- **Attribution:** a two-member non-primary failing task fixture yields exact `failedTaskIds` and `passingTaskIds`, milestone failure is bundle-scoped, and no atomic Land transaction exists on failure.
+- **Atomic Land:** valid transaction reports one counter, one dashboard row, and N completions; incomplete membership or any failure reports zero success writes.
+- **Legacy and mirrors:** width-one golden journal matches prior shape with no new helpers/phases; canonical/plugin files are byte-identical and packaging/sync checks pass.
+- **Independent audit:** a fresh auditor traces all five production chains, checks raw journal counts and git-diff timing, exercises both RED/GREEN fixtures and Gate failure, and explicitly re-evaluates DIR-119-C AC #5/#10 before promotion.
 
-### Mechanism-claim wiring coverage (DIR-117) — each claim flagged for AC-level proof
+### Mechanism-claim wiring ledger
 
-Every sentence below asserts a new call/dispatch/ownership/enforcement relationship between
-backtick-named components, paired with the AC that must prove it with evidence:
+Each claimed relationship requires AC-level proof, not prose or an import that is type-only:
 
-- **W1**: the caller (OUTER-LOOP `execute()`) invokes `composite-manifest-synthesis.ts` between
-  SELECT output and dispatch → AC#7 (real SELECT-produced candidate exercises it; callsite is
-  grep-confirmable) + AC#1.
+- **W1 SELECT ownership/synthesis:** SELECT wrapper returns the real portfolio; OUTER-LOOP invokes synthesis between candidate and dispatch; output is passed to Verify.
 
-- **W2**: `composite-manifest-synthesis.ts` invokes `checkCompositeContract` as self-validation and
-  reuses `touches-orthogonality-check.ts` (`parseTouches`/`expandGlobs`/`filesDisjoint`) +
-  `coupling-graph.ts` exports → AC#7 (output satisfies composite-preflight's contract check) +
-  unit tests.
+- **W2 synthesis enforcement:** shared fact extraction reuses Touches/coupling helpers and calls `checkCompositeContract()` before atomic write.
 
-- **W3**: `execute-milestone.js`'s Build phase dispatches an agent that invokes `composite-build.ts`
-  (`--plan-json` / `--map-evidence-json`) → AC#1 (real production callsite).
+- **W3/W4 Build:** labeled planner invokes `composite-build.ts plan`; one `build-phase-*` owner per phase executes in dependency/capacity batches; integration invokes evidence verification/map.
 
-- **W4**: `execute-milestone.js` dispatches one Build agent per manifest phase via `parallel(...)`
-  within batches / serial across batches → AC#2 (journal `build-phase-<id>` count == phase count).
+- **W5/W6/W7 Audit:** one fixed-scope `audit-shard-*` owner per shard returns guard snapshots; workflow comparison refutes deltas; combiner invokes `combineShardVerdicts()`.
 
-- **W5**: `execute-milestone.js`'s Audit phase dispatches one agent per `auditShards[]` entry →
-  AC#3 (`audit-shard-<id>` count == shard count, per-shard scope in prompts).
+- **W8 Gate identity:** typed task/milestone gate envelopes preserve identity and complete vectors reach Reconcile.
 
-- **W6**: `execute-milestone.js` enforces the shard read-only boundary via mechanical
-  `checkShardReadOnly` comparison of agent-returned `git status --short` snapshots in DSL code,
-  hard-failing on non-empty diff → AC#5 (RED/GREEN hostile-write catch).
+- **W9/W10 Reconcile:** literal Reconcile follows Gate, invokes real `reconcile()` and `attribute-gates`, and is sole composite control-state writer.
 
-- **W7**: `execute-milestone.js` dispatches an agent that invokes `composite-audit.ts`'s
-  `--combine-json` (`combineShardVerdicts`) → AC#1.
+- **W11 Land:** Reconcile/ Land invokes `buildLandTransaction()` and validates complete atomic membership before one commit/counter/dashboard transaction.
 
-- **W8**: the Gate failure branch routes attribution from per-task gate labels via
-  `attributeGateFailures` into the needs-human record naming the specific failing member(s) →
-  AC#6 (RED/GREEN failing-member fixture).
+- **W12 compatibility:** width-one bypasses every new composite planner, shard, Reconcile, and Land transaction call; golden journal proves it.
 
-- **W9**: `execute-milestone.js` owns a literal Reconcile phase between Audit and Land that is the
-  ONLY phase permitted to write task/dashboard/absorb state → AC#4 (journal entry + git-diff
-  timing: tree clean through Audit, dirty only at Reconcile).
-
-- **W10**: the Reconcile phase dispatches an agent that invokes `composite-reconcile.ts`'s real
-  `reconcile()` (not `--selftest`) → AC#1 + AC#4.
-
-- **W11**: the composite Land path invokes `composite-land.ts`'s `buildLandTransaction`
-  (`--land-json`) and remains atomic, the transaction meter machine-checked → AC#1 + DoD
-  atomic-Land evidence.
-
-- **W12**: width-1 dispatch routes through NO new phase (Reconcile guard-skipped; Build/Audit single
-  calls retained) → AC#8 (behavior-identical golden replay).
-
-- **W13**: the `plugin/` mirrors are byte-synced from canonical → AC#1's import-graph check runs
-  against BOTH mirrors + `diff` equality; and the fresh independent wiring audit traces production
-  import graphs for all four modules + the synthesis step AND exercises the Gate-failure branch →
-  AC#9 + AC#10 (DIR-119-C AC#5/#10 re-confirmation before DIR-119-C/DIR-119 promotion).
+- **W13 mirrors/evidence:** canonical and plugin paths are byte-identical; fresh independent audit checks both installed paths and re-verifies DIR-119-C AC #5/#10.
 
 ### Alternatives considered and rejected
 
-1. **`import`-based wiring** — impossible: the DSL exposes no `import` (`composite-preflight.ts`
-   header, lines 1–5); CLI shell-out is the only literal-wiring mechanism this control plane
-   supports (working precedent: composite-preflight). Rejected by construction; adding DSL import
-   capability is harness-internal and out of scope.
-
-2. **Sharper agent-prompt guidance referencing the tested modules (the status quo)** — this IS the
-   defect; DIR-119-B's own DoD admits guidance is not invocation, and it is unverifiable by
-   import-graph. Rejected.
-
-3. **One TS orchestrator the workflow calls once per phase-group** — collapses back to a monolith
-   (journal would show one Build/one Audit call, violating AC#2/#3) and re-centralizes write
-   authority in the agent. Rejected.
-
-4. **`planPhaseExecution` default `mode:"serialize"` for the composite path** — yields
-   `agentCount:1` at any width, directly falsifying AC#2; serialize remains the module default for
-   other callers, but the workflow passes `parallel`.
-
-5. **Synthesis inside Verify or inside Build** — violates "production callsite between SELECT
-   output and dispatch", would re-order the preflight's manifest check after dispatch began, and
-   makes the pre-Build contract check impossible; rejected.
-
-6. **Separate pre/post snapshot agents around each shard** — triples the Audit-phase journal call
-   count, breaking AC#3's `count == auditShards.length`; agent-returned snapshots + workflow-side
-   mechanical comparison keeps the count exact while keeping the *decision* mechanical.
-
-7. **Enforce audit read-only via `composite-audit.ts`'s `deepFreeze`/`structuredClone` alone** —
-   binds in-process JS mutation only; a dispatched agent writes through the filesystem, which only
-   the git-porcelain comparison can catch. The in-process isolation remains the unit-level proof
-   surface.
-
-8. **Allow-listed artifact writes for audit shards** — weakens "read-only = zero diff" to
-   "read-only except..."; moving artifact authorship to Reconcile keeps the boundary absolute and
-   mechanically checkable.
-
-9. **Reconcile before Gate** — `reconcile()` fails closed on missing/unpassed gate inputs
-   (checks 4–5); would require fabricating gate results; rejected.
-
-10. **Always-on Reconcile at width 1** — adds an agent call and failure surface to the legacy path,
-    breaking AC#8; short-circuit/guard-skip when width 1 instead.
-
-11. **Partial Land of the passing subset on member-gate failure** — contradicts
-    `landPolicy:"atomic"` (contract-enforced) and the task's explicit statement;
-    attribution-plus-record of passing members gives the human the same recovery information without
-    breaking the invariant.
-
-12. **Git-worktree-per-phase as the primary Build isolation** — grouping-fusion absorbs overlap
-    (strictly stronger than isolating phases that would conflict at merge) and the DSL gives no
-    evidence of an isolation option; serialize-on-unprovable-overlap with worktree as a defensive
-    path delivers the safety property now.
-
-13. **Keep composite-preflight's vacuous-pass for composite-shape calls missing a manifest** —
-    silently dispatches a receipt-less composite; fail-closed `composite-manifest-missing` is the
-    executable-invariant fix (decision 4).
+1. Prompt-only references to tested modules: rejected because they are the existing defect and cannot satisfy production call-graph or journal evidence.
+2. Direct TypeScript imports or new workflow shell/filesystem primitives: rejected because the DSL does not provide them and changing the runtime is out of scope; use established JSON CLI agent boundaries.
+3. Synthesis inside SELECT, Verify, or Build: rejected because execution planning must be downstream of selection but upstream of Verify/Build contract enforcement.
+4. One composite Build/Audit agent or hidden orchestrator: rejected because it falsifies per-phase/per-shard ownership and countable journal evidence.
+5. One phase per task despite overlap, or worktree-per-phase as the primary fix: rejected because overlapping writers still conflict; fuse overlap, serialize uncertainty, and keep worktrees defensive only.
+6. Reuse owner names under a cap or let phases commit in parallel: rejected because it violates one-call-per-phase or corrupts shared Git state; chunk bounded batches and use one serial integration commit.
+7. Separate pre/post snapshot agents or trust `deepFreeze`/self-reported clean flags: rejected because they inflate shard counts or protect only in-memory objects; one shard transports exact snapshots and workflow adjudicates.
+8. Allow Audit artifact/checklist writes: rejected because read-only becomes unprovable; Reconcile owns all composite write-back.
+9. Reconcile before Gate, direct primary attribution, or label/position inference: rejected because reconcile requires gate vectors and identity must be typed; actual failed members and passing subset are recorded.
+10. Partial Land or always-on singleton Reconcile: rejected by atomic policy and compatibility; passing IDs are recovery evidence, and width-one remains the existing path.
+11. Keep wide no-manifest vacuous pass or combine composite with concurrent fan-in: rejected because both bypass required boundaries; fail closed with stable reason codes.
 
 ## Plan
 
@@ -602,15 +272,18 @@ M-DIR119-C-CANARY:
   closed with `composite-manifest-missing` before Build (RED fixture confirms; width-1 retains the
   vacuous pass).
 - [ ] **Build dispatch is per-phase, proven from the real journal (W3/W4):** verified —
-  `execute-milestone.js` dispatches one planner agent on `composite-build.ts`'s `--plan-json`, then
+  `execute-milestone.js` dispatches one planner agent on `composite-build.ts plan`
+  (also invoked as `--plan-json`) producing one `build-phase-*` owner per phase (equivalently
+  labeled `build-phase-<id>`), then
   `await parallel(...)` of one labeled `agent()` per phase (label `build-phase-${phaseId}` ≡
   `build-phase-<id>`) scoped to that phase's `taskIds` and respecting `requires`, and a final
   `--map-evidence-json` call (`mapEvidenceToTasks`) folding each phase agent's
   `PhaseEvidence{phaseId, files, commits, tests}`; `build-phase-<id>` count == manifest phase count
   confirmed in the real journal, mechanical helpers excluded.
 - [ ] **Audit dispatch is per-shard with mechanical read-only proof (W5/W6/W7):** verified from the
-  real journal — `execute-milestone.js` dispatches one `agent()` per `auditShards[]` entry (label
-  `audit-shard-<id>`), enforces the read-only boundary via workflow-side `checkShardReadOnly`
+  real journal — `execute-milestone.js` dispatches one `audit-shard-*` owner (equivalently labeled
+  `audit-shard-<id>`) per `auditShards[]` entry, enforces the read-only boundary via workflow-side
+  `checkShardReadOnly`
   comparison of agent-returned `git status --short` snapshots (NOT agent self-report, and NOT
   `composite-audit.ts`'s in-process `deepFreeze`/`structuredClone` alone — those bind JS mutation
   only, proven insufficient for a dispatched agent's filesystem), and combines shard results via
@@ -634,6 +307,53 @@ M-DIR119-C-CANARY:
 - [ ] **Composite-AND-concurrent rejected fail-closed:** verified by fixture — `concurrent_execute`
   remains width-1 singletons only; any composite+concurrent dispatch returns
   `revision-needed, composite-concurrent-unsupported` before Build.
+- [ ] **SELECT-side passthrough is real, proven in the M196 journal (W1'):** verified — both
+  `select-preflight.js` wrappers pass through the real synthesized `portfolio`/candidate (not a
+  hand-shaped stub); `OUTER-LOOP.md`'s `execute()` step invokes synthesis exactly when
+  `taskIds.length > 1` and threads the resulting `compositeManifestFile` into the real dispatch.
+- [ ] **Phase planning respects the parallelism cap (W3''):** verified via unit test + real journal
+  — `composite-build.ts`'s plan CLI gives each phase a unique `build-phase-<id>` owner and never
+  exceeds `maxParallelAgents` simultaneous phase dispatches in one batch, confirmed by counting
+  concurrent `build-phase-<id>` calls in the real journal against the configured cap.
+- [ ] **Batch dispatch is real per-phase `parallel()` (W4''):** verified from the real journal —
+  within one proved-independent batch the workflow calls `parallel()` with exactly one labeled
+  `build-phase-<id>` agent per manifest phase in that batch; batches themselves run serially.
+- [ ] **Audit combine callsite is real (W7''):** verified via import grep + real journal — after
+  every `audit-shard-*` owner returns, the `audit-combine` helper agent invokes
+  `composite-audit.ts`'s real `combineShardVerdicts()` function (not a re-derivation), binding the
+  returned bundle to the integrated build generation.
+- [ ] **Verify-phase fail-closed reason codes are real (W2''):** verified by RED fixture — a wide
+  dispatch missing a manifest returns exactly `revision-needed/composite-manifest-missing`; a
+  composite dispatch combined with `mode:"concurrent"` returns exactly
+  `revision-needed/composite-concurrent-unsupported`; both checked before any `{manifest,context}`
+  is accepted into Build.
+- [ ] **Journal label taxonomy is exhaustive and exact (W-count'):** verified from the real journal
+  — filtered counts show exactly one `build-phase-*` label per manifest phase and one
+  `audit-shard-*` label per manifest shard; the mechanical helper labels `build-plan`,
+  `build-integrate`, `audit-combine`, and `reconcile-apply` are each present exactly once per
+  composite dispatch and are excluded from the phase/shard counts above.
+- [ ] **Legacy Land-shape oracle is real, not narrative (W12'):** verified by golden-replay test —
+  a legacy `{taskId,…}` dispatch's real Land transaction is byte-for-shape identical to
+  `legacySingletonLandShape()`'s asserted output, confirmed by a real test comparison, not by
+  prose claiming equivalence.
+- [ ] **Shared-tree discipline is mechanically checked, not only documented (Risk-control'):**
+  verified — the real M196 dispatch runs under a present root `.halt` sentinel and `scripts/test.sh`
+  is run in full (not a subset) as part of this milestone's own Gate/DoD evidence, with its pass/
+  fail tally pasted into the iteration report.
+- [ ] **End-to-end production-wiring set is real on both mirrors (W-summary'):** verified via
+  import grep on BOTH `.claude/workflows/`+`plugin/workflows/` and BOTH
+  `experiments/quay-perpetual-stream/scripts/`+`plugin/scripts/` — the real dispatch's journal
+  shows, in order, `{manifest,context}` synthesis → `build-phase-*` calls → `audit-shard-*` calls →
+  `reconcile-apply` → Land, and the `reconcile-apply` agent's own returned mutation set is the one
+  that names `failedTaskIds`/`passingTaskIds` on any gate failure fixture.
+- [ ] **All five composite CLI entrypoints are real, non-selftest production callsites
+  (W-CLI-set'):** verified via grep of literal command strings in both workflow mirrors —
+  `composite-manifest-synthesis.ts` is invoked with `checkCompositeContract()` self-validation
+  before write; `composite-build.ts`'s `plan` mode is invoked to produce the phase DAG; each
+  `build-phase-<id>`/`audit-shard-<id>` agent is dispatched per the plan; `combineShardVerdicts()`
+  is invoked by `audit-combine`; `composite-reconcile.ts`'s real `reconcile()` (paired with
+  `attribute-gates`) is invoked by `reconcile-apply`; and `composite-land.ts`'s
+  `buildLandTransaction()` is invoked by Land — none reachable only via `--selftest`.
 
 ## Definition of Done
 
