@@ -561,7 +561,7 @@ phase('Receipt') (:754)
    still trusts a bare integer — fails the typed-inventory AC outright, and N>1 full reviews per round
    burn the exact token budget the bounded loop exists to cap.
 2. **Purely mechanical grouping from naming-prefix/WIRING-CLAIM conventions.** Brittle to
-   validly-different Proposal formatting; silently substitutes one ungrounded convention for another;
+   validy-different Proposal formatting; silently substitutes one ungrounded convention for another;
    RA2 explicitly preserves the semantic "unless a strict subset can ship independently" judgment.
    (Folding `wiring-coverage-check.ts` `claimIds` into `proofSurface` is DEFERRED, not rejected
    forever — it needs a Proposal-format dependency not required by the AC wording; a future task may
@@ -676,9 +676,16 @@ fixture, grep, or diff evidence — never descriptive prose restating the claim.
 
 ## Plan
 
-N/A -- execute as a human-steered control-plane milestone. This changes the semantics of a
-preparation stop decision and therefore requires golden replay of both legitimate split cases and
-the observed DIR-126-D oscillation before production cutover.
+See docs/plans/M206-gap-prepare-milestone-split-decision-no-finality.md (authored 2026-07-30, base
+revision fe3898e). Nine ordered stages (typed inventory M1 → root-cause clustering M2 → repairable
+bypass M3 → decision record + admission adjudication M4 → instability ring M5 → policy version X2 →
+workflow mirrors → Receipt binding X1 → lockstep/golden-replay verification) each carry the
+mechanical `- AC:`/`- Files:`/`- Command:` block, RED/implementation/GREEN checks with expected exit
+behavior, code/prose classification, line budgets, and strict dependencies; every 1-based AC index
+(1-18) appears in at least one stage's `- AC:` list. Standardized stopping rule: at most 3
+Plan-check rounds, success only at F_i=0 (live `prepare-admission-check.ts --preflight-plan` returns
+`ok:true`). Golden replay of DIR-126-D's real 8→4→≤2→6 sequence plus a legitimate split case and a
+COMMIT-rerun case gates production cutover (charter Done-when).
 
 ## Finding
 
@@ -879,6 +886,7 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 
 ## Touches
 
+- tasks/gap-prepare-milestone-split-decision-no-finality.md
 - .claude/workflows/prepare-milestone.js
 - plugin/workflows/prepare-milestone.js
 - experiments/quay-perpetual-stream/scripts/proposal-convergence.ts
@@ -887,3 +895,4 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 - plugin/scripts/milestone-preparation-check.ts
 - experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs
 - plugin/test/prepare-milestone-convergence.test.mjs
+- docs/plans/M206-gap-prepare-milestone-split-decision-no-finality.md
