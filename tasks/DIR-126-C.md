@@ -103,7 +103,10 @@ responsibility, exactly like every other input this module already consumes.
 **`proposal-convergence.ts` also gains its own thin CLI tail**, guarded by the SAME
 `isDirectEntry(import.meta)` idiom `prepare-admission-check.ts`'s CLI already uses (imported
 read-only from `gate-script-base.ts`, never duplicated) — so `milestone-preparation-check.ts`'s
-existing `import { capsFor, ... } from "./proposal-convergence.ts"` stays a side-effect-free module
+existing `import { blockingOpen, validateConvergenceCounters, computeConvergenceMetrics } from "./proposal-convergence.ts"`
+(the real import — a repo-wide grep confirms `capsFor` is imported only by this module's own unit-test
+file `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs`, never by
+`milestone-preparation-check.ts`) stays a side-effect-free module
 load; no argv parsing or `fs` call fires on import, only when the file is invoked directly. This is
 the load-bearing scope decision this design makes differently from two earlier drafts of this same
 proposal, which instead added `--decide-resume`/`--record-generation` CLI modes to
@@ -282,7 +285,7 @@ step 10 only):
   cross-mirror-synced test file.
 - **The new CLI tail is guarded by `isDirectEntry(import.meta)`** (imported read-only from
   `gate-script-base.ts`, the same helper `prepare-admission-check.ts`'s own CLI already uses) so
-  `milestone-preparation-check.ts`'s existing `import { capsFor, ... }` stays a side-effect-free
+  `milestone-preparation-check.ts`'s existing `import { blockingOpen, validateConvergenceCounters, computeConvergenceMetrics }` stays a side-effect-free
   module load — no `fs`/argv parsing fires on import, only on direct invocation.
 - **`(terminalPhase, reason)` PAIRS gate `reuse-terminal` eligibility, not `reason` alone** — the
   live code returns the identical `'preflight-rejected'` string from two genuinely different points
@@ -416,13 +419,27 @@ job. Not adding any new export or CLI mode to `prepare-admission-check.ts`, and 
 - **WIRING-CLAIM R5:** `prepare-milestone.js` pairs `_releaseLeaseAndRecord` at all **15** real
   post-Admission terminal-return sites (the live-verified count, not an assumed 11 or 12), except the
   two pre-acquisition returns and the `reuse-terminal` short-circuit — a coverage-count fixture
-  (real terminal-return sites vs. real record-write callsites).
+  (real terminal-return sites vs. real record-write callsites). **And the `--terminalPhase` ARGUMENT
+  VALUE is itself constrained at the production callsites, not merely the call count:** a
+  production-callsite grep confirms the two content-preflight sites (lines 182/192) pass the literal
+  `--terminalPhase PreflightContent` while the two plan-shape sites (lines 555/564) pass the literal
+  `--terminalPhase PreflightPlan` — so an implementation that wired all 15 sites yet passed a coarse
+  `'Preflight'` at both preflight callsites would FAIL this claim, because that coarse value would
+  render the post-`PlanAuthor` plan-shape rejection indistinguishable from the content rejection and
+  thus unsoundly cacheable in production.
 - **WIRING-CLAIM R6:** `reuse-terminal` does NOT overwrite `.generation.json` — a fixture proving the
   file's hash/mtime is unchanged after a real `reuse-terminal` dispatch.
 - **WIRING-CLAIM R7:** the `(terminalPhase,reason)`-pair cacheable allowlist correctly distinguishes
   `PreflightContent`/`preflight-rejected` (cacheable) from `PreflightPlan`/`preflight-rejected` (NOT
   cacheable, falls through to `resume`-or-`cold`) — a dedicated fixture, since both currently return
-  the literal identical `reason` string.
+  the literal identical `reason` string. **This claim has two halves, and the pure-function fixture
+  alone satisfies neither end-to-end:** (a) the fixture proves `decideResumeGeneration` distinguishes
+  the two hand-authored records, AND (b) a production-callsite check (the same grep as WIRING-CLAIM
+  R5) proves the plan-shape `_releaseLeaseAndRecord` sites (lines 555/564) actually record
+  `terminalPhase:'PreflightPlan'` in a real run — so a real plan-shape `preflight-rejected` terminal
+  writes a NON-cacheable record and the next omitted-flag dispatch resolves `resume`-or-`cold`, never
+  `reuse-terminal`. Without half (b) an implementation could pass the fixture while passing a coarse
+  `'Preflight'` in production and unsoundly cache the plan-shape rejection end-to-end.
 - **WIRING-CLAIM R8:** `proposal-convergence.ts`'s new CLI tail is guarded by `isDirectEntry`, so
   `milestone-preparation-check.ts`'s existing static import triggers zero argv parsing / `fs` access
   — an import-time side-effect check, not merely "the file still exports `capsFor`."
@@ -492,7 +509,15 @@ job. Not adding any new export or CLI mode to `prepare-admission-check.ts`, and 
 
 ## Plan
 
-N/A — directive-class child resolved via a human-steered milestone. Depends on [[DIR-126-A]].
+Checked — see docs/plans/M202-dir-126-c.md (milestone M202, charter
+experiments/quay-perpetual-stream/charters/M202-dir126c-generation-aware-resume.md, base revision
+480cb58). Seven ordered stages (RED pure-function fixtures → implement decideResumeGeneration →
+thin --decide-resume/--record-generation CLI tail → prepare-milestone.js decision wiring →
+_releaseLeaseAndRecord at all 15 terminal sites → mirror sync → real non-fixture dispatch proof +
+independent audit) mechanically cover all 27 AC items — verified via milestone-preparation-check.ts
+validatePlanStructure ("plan-structure-ok, 7 stage(s), all 27 task AC item(s) mapped"), with every
+stage - Files: path inside this task's own ## Touches. Depends on [[DIR-126-A]] (landed
+a0aba1f/M200) and [[DIR-126-B]] (landed 528897c/M201), both consumed read-only (zero diff — AC9/R9).
 
 ## Finding
 
@@ -548,7 +573,10 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   item: `reuse-terminal` returns strictly before `phase('Preflight')` itself, not merely before
   `ProposalAuthors`/`Adjudicate`, since the mechanical content check is itself skipped on a cache
   hit. The same fixture with an agent-failure, budget, PlanCheck, or unknown terminal reason forces
-  cold.
+  cold — and, end-to-end (not fixture-only), a `PreflightPlan`/`preflight-rejected` terminal ALSO
+  forces `resume`-or-`cold`, never `reuse-terminal`, because that terminal depends on Plan-file
+  content this mechanism's hashes never cover and a real `PlanAuthor` has already run by the time it
+  fires.
 - [ ] **No lease is stranded by terminal reuse:** the real `reuse-terminal` journal shows
   [[DIR-126-A]]'s production release call before return, and an immediate subsequent same-task
   dispatch acquires Admission rather than receiving `prepare-already-running`; an injected release
@@ -589,6 +617,12 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   record IS `reuse-terminal`-eligible while a prior `{terminalPhase:'PreflightPlan',
   reason:'preflight-rejected'}` record (the identical `reason` string, different `terminalPhase`) is
   NOT — confirming the allowlist keys on the pair, not the bare string two real call sites both emit.
+  **Plus the production-callsite half (not fixture-only):** the same production grep as WIRING-CLAIM
+  R5 confirms the plan-shape `_releaseLeaseAndRecord` sites (lines 555/564) record
+  `terminalPhase:'PreflightPlan'` in a real run, so a real plan-shape `preflight-rejected` terminal
+  writes a NON-cacheable record and a subsequent omitted-flag dispatch resolves `resume`-or-`cold`,
+  never `reuse-terminal` — closing the gap where a coarse production `--terminalPhase` value would
+  pass the pure-function fixture yet unsoundly cache the plan-shape rejection end-to-end.
 - [ ] **WIRING-CLAIM R2 — explicit flags dispatch zero `--decide-resume` calls:** a real journal
   check confirms both `$a.resumeFromAdjudicatedProposal === true` and `=== false` dispatches contain
   no `--decide-resume`-labeled `agent()` call at all — a stronger claim than "same returned
@@ -598,6 +632,12 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   fixture independently re-derives the live `_releaseLease(`-call-site count via `grep -n
   "_releaseLease("` (expected: 15) and confirms every one of them, except the two pre-acquisition
   returns and the `reuse-terminal` short-circuit, now calls `_releaseLeaseAndRecord` instead.
+  **Separately, a production-callsite grep confirms the `--terminalPhase` ARGUMENT VALUE at the two
+  preflight record-write sites — NOT merely the call count:** the content-preflight sites (lines
+  182/192) pass literal `--terminalPhase PreflightContent` and the plan-shape sites (lines 555/564)
+  pass literal `--terminalPhase PreflightPlan`. An implementation that wired all 15 sites yet passed
+  a coarse `'Preflight'` at both would satisfy the count while failing this item, since that coarse
+  value would make the plan-shape rejection unsoundly cacheable in production. This is `prepare-milestone.js`'s own real production wiring, confirmed distinct from the coarse `phase('Preflight')`/`phase('PlanAuthor')` labels both call sites otherwise share.
 - [ ] **WIRING-CLAIM R6 — `reuse-terminal` never overwrites `.generation.json`:** a fixture captures
   `.quay/prepare-leases/<taskId>.generation.json`'s hash/mtime before a real `reuse-terminal`
   dispatch and confirms both are byte-for-byte unchanged after.
@@ -618,7 +658,7 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   while `reuse-terminal` is confirmed unable to advance to PlanAuthor/Receipt.
 
 - [ ] **Grounding evidence 1 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `Preflight` `Adjudicate` `PlanAuthor` `reason: 'preflight-rejected'` `grep -n "_releaseLease('preflight-rejected')"`.
-- [ ] **Grounding evidence 2 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `proposal-convergence.ts` `isDirectEntry(import.meta)` `prepare-admission-check.ts` `gate-script-base.ts` `milestone-preparation-check.ts` `import { capsFor, ... } from "./proposal-convergence.ts"` `fs`.
+- [ ] **Grounding evidence 2 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `proposal-convergence.ts` `isDirectEntry(import.meta)` `prepare-admission-check.ts` `gate-script-base.ts` `milestone-preparation-check.ts` `import { blockingOpen, validateConvergenceCounters, computeConvergenceMetrics } from "./proposal-convergence.ts"` (the real import — repo-wide grep confirms `capsFor` is imported only by `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs`, NOT by `milestone-preparation-check.ts`) `fs`.
 - [ ] **Grounding evidence 3 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `--decide-resume --taskId <id> --workspace . --charterFile <charterFile> [--callerOverride true|false]` `tasks/<taskId>.md` `## Acceptance Criteria` `## Definition of Done` `## Touches` `extractSection` `task-schema.ts` `currentTaskContractHash` `## Proposal` `currentTaskProposalHash` `currentReviewPolicyHash` `PREFLIGHT_POLICY_VERSION` `prepare-admission-check.ts` `RESUME_POLICY_VERSION` `"resume-v1"` `.quay/prepare-leases/<taskId>.json` `--acquire` `{ownerExecutionId, fencingToken, acquiredAt}` `generationId = sha256(` `).slice(0, 12)` `sha256(identity).slice(0,12)` `fingerprintFinding` `.quay/prepare-leases/ <taskId>.generation.json` `null` `decideResumeGeneration` `reuse-terminal` `releaseLease` `prepare-already-running`.
 - [ ] **Grounding evidence 4 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `--record-generation --taskId <id> --workspace . --terminalPhase <phase> --outcome <o> --reason <r> --cacheable <bool>` `--decide-resume` `ProposalReview` `generationId` `.quay/prepare-leases/<taskId>.generation.json` `agent()` `releaseLease` `--release` `prepare-milestone.js`.
 - [ ] **Grounding evidence 5 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `terminalPhase` `phase()` `'Preflight'` `preflight-rejected`.
