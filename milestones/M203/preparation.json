@@ -1,0 +1,86 @@
+{
+  "taskId": "DIR-126-D",
+  "milestoneId": "M203",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M203-dir126d-prepare-telemetry.md",
+  "planFile": "docs/plans/M203-dir-126-d.md",
+  "ledgerFile": null,
+  "hashes": {
+    "proposal": "7b8b2baceec7803422bbef9285f79cc5f6b7066f21e557f33b8b4afb511e78f2",
+    "charter": "b18094135375b93da2885a9d1d0da88c0083323656339ebcf13c17218bfa3b9d",
+    "plan": "b98264cf4ee74dc2fc6f9a540e527137527e1f1bbf2693c3f1e7fe26e445264a",
+    "sources": {
+      ".claude/workflows/prepare-milestone.js": "dc970537689fb438f2f72d12be939c8247551ce5a93425625555f63c1ef0ef52",
+      "plugin/workflows/prepare-milestone.js": "dc970537689fb438f2f72d12be939c8247551ce5a93425625555f63c1ef0ef52",
+      "experiments/quay-perpetual-stream/scripts/proposal-convergence.ts": "0dedf6da0b3b6eae6092201e5ebf1f09fb67474f8e2d0c0bc65337ceea1459ef",
+      "plugin/scripts/proposal-convergence.ts": "0dedf6da0b3b6eae6092201e5ebf1f09fb67474f8e2d0c0bc65337ceea1459ef",
+      "experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts": "0f8096ec76403c0ec826407651ec156e97cfca973f626799788cf772ea03d175",
+      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "311e46da6c76b90e03e9ba1348764e3fbb48db756b1dc82ba38a60e9996c9329",
+      "experiments/quay-perpetual-stream/scripts/task-schema.ts": "aae695004405fffb3cb9c2cbaf28ea5ffe4504d46f82ad3e2663b925fa754486",
+      "experiments/quay-perpetual-stream/scripts/gate-script-base.ts": "f22c7643accc60b7beba50c181b92ce7ff75344dc25d238e1a154e1b544729a3",
+      "plugin/scripts/sync-vendor.sh": "00fd766342fe9230165aa483346ea4b3d20c905d425c9978022acc68af17cb05",
+      ".gitignore": "6f9c454ee4ec27ae628531c76537933571cf6bcc36e8a56e5278b2b5884ee090"
+    }
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 3,
+    "findings": 0
+  },
+  "touches": [
+    ".claude/workflows/prepare-milestone.js",
+    "plugin/workflows/prepare-milestone.js",
+    "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts",
+    "plugin/scripts/milestone-preparation-check.ts",
+    "experiments/quay-perpetual-stream/scripts/proposal-convergence.ts",
+    "plugin/scripts/proposal-convergence.ts",
+    "experiments/quay-perpetual-stream/test/milestone-preparation-check.test.mjs",
+    "experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs",
+    "plugin/test/prepare-milestone-preparation-e2e.test.mjs",
+    "plugin/test/prepare-milestone-convergence.test.mjs",
+    "docs/proposals/quay-prepare-execute-feedback-convergence.md",
+    "tasks/gap-dir126d-deferred-phase-timing-recurrence-tracking.md",
+    "docs/plans/M203-dir-126-d.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "authorIdx": 2,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "authorIdx": 3,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "proposalReviewer": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planAuthor": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "round": 2,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "round": 3,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      }
+    ]
+  },
+  "convergence": null
+}
