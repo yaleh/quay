@@ -165,10 +165,11 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
     }
 
     // M202/DIR-126-C: the new resume-decision dispatch (proposal-convergence.ts --decide-resume),
-    // fired ONLY when $a.resumeFromAdjudicatedProposal is omitted AND a prior generation record
-    // exists on disk (the Stage-4 pre-check). A test may stub the verdict via
-    // reviewHandlers.onResumeDecision; the DEFAULT returns a cold/missing-prior-record verdict so
-    // any test that doesn't care about this phase still behaves like today's cold path.
+    // fired whenever $a.resumeFromAdjudicatedProposal is omitted (unconditionally — see
+    // gap-prepare-milestone-workflow-dynamic-import/M203, which removed an unreachable local
+    // existsSync-based pre-check). A test may stub the verdict via reviewHandlers.onResumeDecision;
+    // the DEFAULT returns a cold/missing-prior-record verdict so any test that doesn't care about
+    // this phase still behaves like today's cold path.
     if (label === 'resume-decision') {
       calls.resumeDecisions += 1;
       if (typeof reviewHandlers.onResumeDecision === 'function') return reviewHandlers.onResumeDecision(prompt);
@@ -296,14 +297,14 @@ function baseArgs(scratchRel, extra = {}) {
   };
 }
 
-// M202/DIR-126-C: prepare-milestone.js's Stage-4 pre-check reads
-// `.quay/prepare-leases/${_taskId}.generation.json` via a bare relative-string existsSync (its
-// ONE new real fs primitive) — node's fs resolves that relative to process.cwd() (REPO_ROOT when
-// running this test file) with standard '..' normalization. `path.join` performs the SAME
-// normalization here, so this helper resolves to the identical on-disk path the real workflow
-// checks, even though this file's own taskId-as-relative-path convention makes that path land
-// outside .quay/prepare-leases/ proper (a harmless test-harness-only quirk — real production
-// taskIds are plain ids with no '/' at all).
+// M202/DIR-126-C: `.quay/prepare-leases/${_taskId}.generation.json` is where a real
+// `--decide-resume`/`--record-generation` dispatch reads/writes the generation record.
+// gap-prepare-milestone-workflow-dynamic-import (M203/DIR-126-D): the workflow itself no longer
+// gates the --decide-resume dispatch on this file's existence (that pre-check used an unreachable
+// `import('node:fs')`, removed) — these helpers now only seed/clean up realistic on-disk state for
+// tests, they do not control whether prepare-milestone.js dispatches --decide-resume (it always
+// does, when the flag is omitted); the mocked `onResumeDecision` handler's returned verdict is
+// what actually drives each test's scenario.
 function generationRecordPathFor(taskId) {
   return path.join(REPO_ROOT, '.quay', 'prepare-leases', `${taskId}.generation.json`);
 }
@@ -785,6 +786,12 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       if (label === 'admission-acquire') {
         return { raw: noisyPrefix + JSON.stringify({ outcome: 'acquired', lease: { fencingToken: 0 }, reclaimed: false }) };
       }
+      if (label === 'resume-decision') {
+        // M203/DIR-126-D: --decide-resume is now dispatched unconditionally when the flag is
+        // omitted (no more unreachable existsSync pre-check) — a cold verdict here keeps this
+        // test's own scope (Admission/Preflight noisy-JSON parsing) unaffected.
+        return { raw: noisyPrefix + JSON.stringify({ decision: 'cold', reason: 'missing-prior-record' }) };
+      }
       if (label === 'preflight-content') {
         calls.preflightContent += 1;
         return { raw: noisyPrefix + JSON.stringify({ ok: true, policyVersion: 'preflight-v1', findings: [] }) };
@@ -843,12 +850,19 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
 
   // ═══════════════════════════════════════════════════════════════════════════════════════════
   // ── M202/DIR-126-C: generation-aware resume — third child of DIR-126's split. Stage 4/7
-  // scenarios: the resume-decision dispatch itself, gated by the Stage-4 pre-check (a prior
-  // generation record must exist), and its three decision outcomes (resume/reuse-terminal/
-  // cold-via-unparseable-failure), plus AC11/R2's explicit-flag zero-dispatch guarantee. ────────
+  // scenarios: the resume-decision dispatch and its three decision outcomes (resume/reuse-terminal/
+  // cold-via-unparseable-failure), plus AC11/R2's explicit-flag zero-dispatch guarantee.
+  //
+  // gap-prepare-milestone-workflow-dynamic-import (M203/DIR-126-D): a prior draft's local
+  // "Stage-4 pre-check" (skip the --decide-resume dispatch entirely when no prior generation
+  // record file exists on disk, via `existsSync`) was never actually reachable — the workflow DSL
+  // has zero fs/import capability, and a real Workflow dispatch confirmed this live ("import() is
+  // not available in workflow scripts"). Fixed by dropping the pre-check: --decide-resume is now
+  // dispatched unconditionally whenever the flag is omitted, relying on decideResumeGeneration's
+  // own evaluation step 4 to correctly resolve a missing prior record to `cold`. ─────────────────
   // ═══════════════════════════════════════════════════════════════════════════════════════════
 
-  test(`[${mirrorName}] M202/DIR-126-C AC1/pre-check: omitted flag + NO prior generation record makes ZERO resume-decision dispatches — unchanged cold behavior`, async () => {
+  test(`[${mirrorName}] M202/DIR-126-C AC1: omitted flag + NO prior generation record still dispatches --decide-resume exactly once, which itself correctly resolves to cold — unchanged cold behavior downstream`, async () => {
     const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
     const args = baseArgs(scratchRel); // no resumeFromAdjudicatedProposal, no prior record
     let planFile = null;
@@ -858,7 +872,7 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       });
       planFile = result.planFile;
       assert.equal(result.outcome, 'prepared', JSON.stringify(result));
-      assert.equal(calls.resumeDecisions, 0, 'no prior record for this taskId — the Stage-4 pre-check skips the dispatch entirely, identical to today\'s implicit default');
+      assert.equal(calls.resumeDecisions, 1, 'no prior record for this taskId — --decide-resume is still dispatched (no local pre-check), and its own default mock verdict correctly resolves to cold/missing-prior-record');
       assert.equal(calls.authors.length, 2, 'still the full cold N-author synthesis');
     } finally {
       cleanup(scratchDir, planFile, args.milestoneId);

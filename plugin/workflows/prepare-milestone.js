@@ -198,14 +198,20 @@ log(`Admission: acquired lease for ${_taskId} (fencingToken=${_admissionVerdict.
 // (phase('ProposalReview') below) and PlanAuthor/Receipt in file order — it cannot advance to
 // either (AC5's structural half).
 if ($a.resumeFromAdjudicatedProposal === undefined) {
-  const { existsSync } = await import('node:fs')
-  const _generationRecordPath = `.quay/prepare-leases/${_taskId}.generation.json`
-  if (existsSync(_generationRecordPath)) {
-    // A prior generation record exists for this task — only THEN is the resume-decision worth a
-    // real dispatch (no decision other than 'cold' is reachable without a record, per
-    // decideResumeGeneration's own evaluation step 4), so a first-attempt run for a never-before-
-    // seen task makes zero resume-decision dispatches, identical in effect to today's implicit
-    // hard-coded false.
+  // gap-prepare-milestone-workflow-dynamic-import (M203/DIR-126-D): the workflow DSL has
+  // confirmed zero fs/import capability (the same constraint every other file-touching operation
+  // in this script already respects via the agent()-wraps-CLI dispatch pattern) — a prior draft's
+  // local `existsSync(...)` pre-check via `await import('node:fs')` is not actually reachable at
+  // runtime and fails the phase outright ("import() is not available in workflow scripts",
+  // confirmed real via a live Workflow dispatch, M203/DIR-126-D's own first attempt). The intended
+  // optimization (skip the --decide-resume dispatch entirely when no prior generation record could
+  // possibly exist) is not achievable without an agent-dispatched file check, which would itself
+  // cost the very dispatch the optimization exists to avoid — so it is dropped: --decide-resume is
+  // now dispatched unconditionally whenever the flag is omitted, relying on
+  // decideResumeGeneration's own evaluation step 4 (missing/null priorGenerationRecord -> cold) to
+  // correctly and safely handle a never-before-seen task, at the cost of one extra real CLI
+  // dispatch (not an agent-content dispatch) on that task's very first attempt.
+  {
     const _decideResult = await _convergenceAgentCall(`--decide-resume --taskId ${_taskId} --workspace . --charterFile ${_charterFile}`, 'resume-decision')
     const _decideVerdict = _decideResult?.raw ? _parseAgentJson(_decideResult.raw) : null
     if (!_decideVerdict || typeof _decideVerdict.decision !== 'string') {
@@ -235,8 +241,6 @@ if ($a.resumeFromAdjudicatedProposal === undefined) {
     // true); decision === 'cold' -> false (same branch as explicit false).
     _resumeFromAdjudicatedProposal = _decideVerdict.decision === 'resume'
     log(`Resume-decision: ${_decideVerdict.decision} (${_decideVerdict.reason}).`)
-  } else {
-    log(`Resume-decision: no prior generation record for ${_taskId} — cold (zero --decide-resume dispatch, identical to today's implicit default).`)
   }
 }
 

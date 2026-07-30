@@ -155,6 +155,15 @@ function makeAgentMock(taskFileOnDisk) {
       return { raw: JSON.stringify({ ok: true }) };
     }
 
+    // M202/DIR-126-C: the resume-decision dispatch, fired whenever resumeFromAdjudicatedProposal
+    // is omitted (unconditionally — gap-prepare-milestone-workflow-dynamic-import/M203 removed an
+    // unreachable existsSync pre-check). Mocked cold so this fixture's own cold-path assertions
+    // stay unaffected.
+    if (label === 'resume-decision') {
+      sessions.resumeDecisions = (sessions.resumeDecisions || 0) + 1;
+      return { raw: JSON.stringify({ decision: 'cold', reason: 'missing-prior-record' }) };
+    }
+
     // M201/DIR-126-B: the new Preflight phase's agent()-dispatched CLI calls — mocked with a
     // default non-blocking verdict so this fixture still reaches 'prepared' unchanged. Preflight's
     // own detector logic has its own dedicated prepare-admission-check.test.mjs coverage.
