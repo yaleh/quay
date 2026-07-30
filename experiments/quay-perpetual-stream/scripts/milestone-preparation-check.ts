@@ -352,7 +352,7 @@ export function computeCapacityReport({ workspace, telemetryRoot, exclusions = [
   };
 
   const sortedExclusions = exclusionsOut.sort((a, b) =>
-    [a.population, a.id, a.reason].join(" ").localeCompare([b.population, b.id, b.reason].join(" ")));
+    [a.population, a.id, a.reason].join("\x00").localeCompare([b.population, b.id, b.reason].join("\x00")));
 
   // ── Sample-count gate: below --min-samples (default 3), combined OR per-population, no P50/P85.
   // Per-population counts are ALWAYS reported separately, never blended into one combined total
@@ -494,12 +494,12 @@ export function computeCapacityReport({ workspace, telemetryRoot, exclusions = [
 
   // ── Best-effort join on embedded (taskId, milestoneId) — unpaired samples on either side still
   // contribute fully to their OWN population's stats (never dropped for lacking a pair).
-  const telemetryKeys = new Set(telemetrySamples.map(({ record }) => `${record.taskId} ${record.milestoneId}`));
-  const receiptKeys = new Set(receiptSamples.map((r) => `${r.taskId} ${r.milestoneId}`));
+  const telemetryKeys = new Set(telemetrySamples.map(({ record }) => `${record.taskId}\x00${record.milestoneId}`));
+  const receiptKeys = new Set(receiptSamples.map((r) => `${r.taskId}\x00${r.milestoneId}`));
   const join = {
-    paired: sortIds([...telemetryKeys].filter((k) => receiptKeys.has(k))).map((k) => k.replace(" ", "/")),
-    telemetryOnly: sortIds([...telemetryKeys].filter((k) => !receiptKeys.has(k))).map((k) => k.replace(" ", "/")),
-    receiptOnly: sortIds([...receiptKeys].filter((k) => !telemetryKeys.has(k))).map((k) => k.replace(" ", "/")),
+    paired: sortIds([...telemetryKeys].filter((k) => receiptKeys.has(k))).map((k) => k.replace("\x00", "/")),
+    telemetryOnly: sortIds([...telemetryKeys].filter((k) => !receiptKeys.has(k))).map((k) => k.replace("\x00", "/")),
+    receiptOnly: sortIds([...receiptKeys].filter((k) => !telemetryKeys.has(k))).map((k) => k.replace("\x00", "/")),
   };
 
   // ── absorbed-task/prepare-hour: numerator = distinct milestone dirs with BOTH preparation.json
@@ -579,7 +579,7 @@ export function computeCapacityReport({ workspace, telemetryRoot, exclusions = [
   for (const { record } of telemetrySamples) {
     const h = record.hashes || {};
     if (!h.charter || !h.taskContract || !h.proposal || !h.reviewPolicy) continue;
-    const gk = [record.taskId ?? "unknown", h.charter, h.taskContract, h.proposal, h.reviewPolicy].join(" ");
+    const gk = [record.taskId ?? "unknown", h.charter, h.taskContract, h.proposal, h.reviewPolicy].join("\x00");
     (recomputeGroups.get(gk) ?? recomputeGroups.set(gk, []).get(gk)).push({
       recordId: record.recordId, recordedAtMs: Number.isFinite(record.recordedAtMs) ? record.recordedAtMs : Number.MAX_SAFE_INTEGER,
       kind: record.decision?.kind, cacheable: isCacheableTerminalShape(record.terminal), contentAgentMs: record.contentAgentMs,
@@ -611,7 +611,7 @@ export function computeCapacityReport({ workspace, telemetryRoot, exclusions = [
       }
     }
     if (recomputationRecordIds.length > 0) {
-      const [taskId, charter, taskContract, proposal, reviewPolicy] = gk.split(" ");
+      const [taskId, charter, taskContract, proposal, reviewPolicy] = gk.split("\x00");
       recomputationGroupEntries.push({
         taskId, hashes: { charter, taskContract, proposal, reviewPolicy },
         groupRecordIds: sortIds(entries.map((e) => e.recordId)),
@@ -660,7 +660,7 @@ export function computeCapacityReport({ workspace, telemetryRoot, exclusions = [
     if (estimable) estimatedAvoidedAgentMinutes = Number((estimatedMs / 60000).toFixed(3));
   }
 
-  exclusionsOut.sort((a, b) => [a.population, a.id, a.reason].join(" ").localeCompare([b.population, b.id, b.reason].join(" ")));
+  exclusionsOut.sort((a, b) => [a.population, a.id, a.reason].join("\x00").localeCompare([b.population, b.id, b.reason].join("\x00")));
 
   return {
     code: "ok",
