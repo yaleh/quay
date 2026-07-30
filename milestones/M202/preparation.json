@@ -1,0 +1,76 @@
+{
+  "taskId": "DIR-126-C",
+  "milestoneId": "M202",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M202-dir126c-generation-aware-resume.md",
+  "planFile": "docs/plans/M202-dir-126-c.md",
+  "ledgerFile": null,
+  "hashes": {
+    "proposal": "04f1396e71f20d606cbb16f0b0db80012d9b8a5cef93c3d9d8a02a36992fad52",
+    "charter": "32f7fe575878ea56cee0b63b2de9ea7e4dc9da5cc062fd6955f573fc3255f591",
+    "plan": "cfca6244eb74132c86181505f33daf23d37ada750077270ec65e563800e5dc4c",
+    "sources": {
+      ".claude/workflows/prepare-milestone.js": "29b91920476ea9f8f90be521e4370c3b008a87a6915da29bba28418e19561b9f",
+      "plugin/workflows/prepare-milestone.js": "29b91920476ea9f8f90be521e4370c3b008a87a6915da29bba28418e19561b9f",
+      "experiments/quay-perpetual-stream/scripts/proposal-convergence.ts": "01d50f8206a5231c4784e80c5aa392e29f3aabc5c0f4c8253d8aa5c71957e77c",
+      "plugin/scripts/proposal-convergence.ts": "01d50f8206a5231c4784e80c5aa392e29f3aabc5c0f4c8253d8aa5c71957e77c",
+      "experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts": "0f8096ec76403c0ec826407651ec156e97cfca973f626799788cf772ea03d175",
+      "experiments/quay-perpetual-stream/scripts/task-schema.ts": "aae695004405fffb3cb9c2cbaf28ea5ffe4504d46f82ad3e2663b925fa754486",
+      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "311e46da6c76b90e03e9ba1348764e3fbb48db756b1dc82ba38a60e9996c9329",
+      "experiments/quay-perpetual-stream/scripts/gate-script-base.ts": "f22c7643accc60b7beba50c181b92ce7ff75344dc25d238e1a154e1b544729a3",
+      "plugin/scripts/sync-vendor.sh": "00fd766342fe9230165aa483346ea4b3d20c905d425c9978022acc68af17cb05",
+      ".gitignore": "6f9c454ee4ec27ae628531c76537933571cf6bcc36e8a56e5278b2b5884ee090"
+    }
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 2,
+    "findings": 0
+  },
+  "touches": [
+    ".claude/workflows/prepare-milestone.js",
+    "plugin/workflows/prepare-milestone.js",
+    "experiments/quay-perpetual-stream/scripts/proposal-convergence.ts",
+    "plugin/scripts/proposal-convergence.ts",
+    "experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs",
+    "plugin/test/prepare-milestone-convergence.test.mjs",
+    "docs/plans/M202-dir-126-c.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "authorIdx": 2,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "authorIdx": 3,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "proposalReviewer": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planAuthor": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "round": 2,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      }
+    ]
+  },
+  "convergence": null
+}
