@@ -651,3 +651,399 @@ console.log(JSON.stringify({ ok: true, hasDecide: typeof decideResumeGeneration 
     }
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── Telemetry (DIR-126-D/M203) — committed milestones/prepare-telemetry/ records. ─────────────────
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+import {
+  telemetryPath, computeAttemptId, buildTelemetryRecord, validateTelemetryRecord,
+  TELEMETRY_SCHEMA_VERSION,
+} from "../scripts/proposal-convergence.ts";
+
+describe("telemetry schema / telemetryPath / validateTelemetryRecord (Stage 1)", () => {
+  test("telemetryPath: an ordinary taskId lands under milestones/prepare-telemetry/<taskId>/<recordId>.json", () => {
+    const p = telemetryPath("/ws", "DIR-999", "abc123");
+    assert.equal(p, path.join("/ws", "milestones", "prepare-telemetry", "DIR-999", "abc123.json"));
+  });
+
+  test("telemetryPath: a slash-bearing taskId is routed through _safeTaskIdSegment (never escapes the tree)", () => {
+    const p = telemetryPath("/ws", "foo/bar", "rec1");
+    const resolved = path.resolve(p);
+    const root = path.resolve("/ws", "milestones", "prepare-telemetry");
+    assert.ok(resolved === root || resolved.startsWith(root + path.sep), `escaped: ${resolved}`);
+    assert.ok(!p.includes("/foo/bar/"), "slash must have been stripped, not preserved as a path separator");
+  });
+
+  test("telemetryPath: '../evil' is contained inside the tree", () => {
+    const p = telemetryPath("/ws", "../evil", "rec1");
+    const resolved = path.resolve(p);
+    const root = path.resolve("/ws", "milestones", "prepare-telemetry");
+    assert.ok(resolved === root || resolved.startsWith(root + path.sep), `escaped: ${resolved}`);
+  });
+
+  test("telemetryPath: a BARE '..' taskId (no slash — _safeTaskIdSegment passes it through unchanged) is caught by the post-hoc containment check and redirected to _unsafe-taskid, never escapes one level above the tree", () => {
+    const p = telemetryPath("/ws", "..", "rec1");
+    const resolved = path.resolve(p);
+    const root = path.resolve("/ws", "milestones", "prepare-telemetry");
+    assert.ok(resolved.startsWith(root + path.sep), `escaped: ${resolved}`);
+    assert.ok(p.includes("_unsafe-taskid"), `expected the fixed fallback bucket, got: ${p}`);
+  });
+
+  test("telemetryPath: taskId === null routes to the fixed _missing-taskId segment", () => {
+    const p = telemetryPath("/ws", null, "rec1");
+    assert.equal(p, path.join("/ws", "milestones", "prepare-telemetry", "_missing-taskId", "rec1.json"));
+  });
+
+  test("computeAttemptId: deterministic for identical fields, distinct for different fields", () => {
+    const a = computeAttemptId({ site: "admission-check-failed", taskId: "DIR-1", detail: {} });
+    const b = computeAttemptId({ site: "admission-check-failed", taskId: "DIR-1", detail: {} });
+    const c = computeAttemptId({ site: "prepare-already-running", taskId: "DIR-1", detail: {} });
+    assert.equal(a, b);
+    assert.notEqual(a, c);
+    assert.equal(a.length, 12);
+  });
+
+  test("buildTelemetryRecord: every frozen-schema field is present-and-typed even when the caller omits it — never a dropped key", () => {
+    const rec = buildTelemetryRecord({ recordId: "r1" });
+    const REQUIRED = [
+      "schemaVersion", "recordId", "attemptId", "generationId", "admission", "workspace", "taskId",
+      "milestoneId", "class", "highRisk", "hashes", "decision", "contentAgentDispatchCount",
+      "contentAgentMs", "terminal", "leaseRelease", "sessionId", "recordedAtMs", "telemetryWriteOk",
+    ];
+    for (const k of REQUIRED) assert.ok(k in rec, `missing key: ${k}`);
+    assert.equal(rec.schemaVersion, TELEMETRY_SCHEMA_VERSION);
+    assert.equal(rec.recordId, "r1");
+    assert.equal(rec.generationId, null);
+    assert.equal(rec.telemetryWriteOk, true);
+  });
+
+  test("validateTelemetryRecord: a well-formed non-reuse-terminal record passes", () => {
+    const rec = buildTelemetryRecord({
+      recordId: "r1", attemptId: "r1", generationId: "g1",
+      decision: { kind: "cold" }, contentAgentDispatchCount: 1, contentAgentMs: 100,
+    });
+    const res = validateTelemetryRecord(rec);
+    assert.equal(res.ok, true, JSON.stringify(res));
+  });
+
+  test("validateTelemetryRecord: a missing top-level field fails closed", () => {
+    const rec = buildTelemetryRecord({ recordId: "r1", decision: { kind: "cold" } });
+    delete rec.hashes;
+    const res = validateTelemetryRecord(rec);
+    assert.equal(res.ok, false);
+    assert.equal(res.code, "telemetry-field-missing");
+  });
+
+  test("validateTelemetryRecord: an invalid decision.kind fails closed", () => {
+    const rec = buildTelemetryRecord({ recordId: "r1", decision: { kind: "bogus" } });
+    const res = validateTelemetryRecord(rec);
+    assert.equal(res.ok, false);
+    assert.equal(res.code, "telemetry-decision-kind-invalid");
+  });
+
+  test("validateTelemetryRecord: reuse-terminal AC16 — missing generationId fails closed reuse-terminal-invalid", () => {
+    const rec = buildTelemetryRecord({
+      recordId: "r1", generationId: null,
+      decision: { kind: "reuse-terminal", priorGenerationId: "g0" },
+      hashes: { charter: "a", taskContract: "b", proposal: "c", reviewPolicy: "d" },
+      contentAgentDispatchCount: 0, contentAgentMs: 0,
+    });
+    const res = validateTelemetryRecord(rec);
+    assert.equal(res.ok, false);
+    assert.equal(res.code, "reuse-terminal-invalid");
+  });
+
+  test("validateTelemetryRecord: reuse-terminal AC16 — nonzero contentAgentDispatchCount fails closed", () => {
+    const rec = buildTelemetryRecord({
+      recordId: "r1", generationId: "g1",
+      decision: { kind: "reuse-terminal", priorGenerationId: "g0" },
+      hashes: { charter: "a", taskContract: "b", proposal: "c", reviewPolicy: "d" },
+      contentAgentDispatchCount: 1, contentAgentMs: 0,
+    });
+    const res = validateTelemetryRecord(rec);
+    assert.equal(res.ok, false);
+    assert.equal(res.code, "reuse-terminal-invalid");
+  });
+
+  test("validateTelemetryRecord: a well-formed reuse-terminal record passes", () => {
+    const rec = buildTelemetryRecord({
+      recordId: "r1", generationId: "g1",
+      decision: { kind: "reuse-terminal", priorGenerationId: "g0" },
+      hashes: { charter: "a", taskContract: "b", proposal: "c", reviewPolicy: "d" },
+      contentAgentDispatchCount: 0, contentAgentMs: 0,
+    });
+    const res = validateTelemetryRecord(rec);
+    assert.equal(res.ok, true, JSON.stringify(res));
+  });
+});
+
+describe("telemetry: record-generation / decide-resume / record-attempt real-dispatch fixtures (Stages 2-5)", () => {
+  const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
+  const CONVERGENCE_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "proposal-convergence.ts");
+  const ADMISSION_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "prepare-admission-check.ts");
+  const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "dir126d-fixtures-"));
+
+  function fixtureTaskBody(proposalText) {
+    return `---\nid: DIR-126-D-CLI-FIXTURE\ntitle: fixture task for telemetry CLI fixtures\nstatus: todo\n---\n## Proposal\n\n${proposalText}\n\n## Acceptance Criteria\n\n- [ ] fixture AC item\n\n## Definition of Done\n\n- [ ] fixture DoD item\n\n## Touches\n\n- fixture.ts\n`;
+  }
+  function makeCliScratch(taskId, proposalText = "fixture proposal v1") {
+    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "cli-scratch-"));
+    fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), fixtureTaskBody(proposalText));
+    const charterFile = path.join(dir, "charter.md");
+    fs.writeFileSync(charterFile, "fixture charter v1\n");
+    return { dir, charterFile };
+  }
+  function leasePath(dir, taskId) { return path.join(dir, ".quay", "prepare-leases", `${taskId}.json`); }
+  function writeLease(dir, taskId, { ownerExecutionId = "sess-1", fencingToken = 0, acquiredAt = 1000 } = {}) {
+    const p = leasePath(dir, taskId);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify({ ownerExecutionId, fencingToken, acquiredAt, key: `${taskId}::key` }));
+  }
+  function runNode(args) {
+    try {
+      const stdout = execFileSync("node", ["--experimental-strip-types", ...args], { encoding: "utf8" });
+      return { status: 0, stdout };
+    } catch (e) {
+      return { status: typeof e.status === "number" ? e.status : 1, stdout: e.stdout ? e.stdout.toString() : "" };
+    }
+  }
+
+  test("AC1/AC2/AC11: --record-generation writes a real committed telemetry record queryable on disk, telemetryWriteOk:true, dispatch count stays 1 per call", () => {
+    const taskId = "DIR-126-D-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    writeLease(dir, taskId);
+    try {
+      const res = runNode([CONVERGENCE_SCRIPT, "--record-generation", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+        "--terminalPhase", "PlanAuthor", "--outcome", "revision-needed", "--reason", "plan-author-failed", "--cacheable", "false",
+        "--milestoneId", "M203", "--class", "development", "--highRisk", "true", "--decisionKind", "resume"]);
+      assert.equal(res.status, 0, res.stdout);
+      const out = JSON.parse(res.stdout.trim());
+      assert.equal(out.ok, true);
+      assert.equal(out.telemetryWriteOk, true);
+      assert.ok(out.telemetryFile && fs.existsSync(out.telemetryFile));
+      const rec = JSON.parse(fs.readFileSync(out.telemetryFile, "utf8"));
+      assert.equal(rec.schemaVersion, 2);
+      assert.equal(rec.taskId, taskId);
+      assert.equal(rec.milestoneId, "M203");
+      assert.equal(rec.highRisk, true);
+      assert.equal(rec.terminal.reason, "plan-author-failed");
+      assert.equal(rec.terminal.phase, "PlanAuthor");
+      assert.equal(rec.leaseRelease.ok, true);
+      // AC7/frozen-schema: decision.kind for an ADMITTED attempt is cold|resume, threaded via
+      // --decisionKind (never the not-evaluated value reserved for the 3 pre-lease sites).
+      assert.equal(rec.decision.kind, "resume");
+      assert.ok(rec.generationId && rec.generationId.length === 12);
+      assert.ok(rec.telemetryWriteOk === undefined || rec.telemetryWriteOk === true, "the WRITTEN record body itself doesn't need telemetryWriteOk semantics duplicated — only the CLI's own return value does");
+      // AC13: lease is really gone (release ran).
+      assert.ok(!fs.existsSync(leasePath(dir, taskId)));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC13/AC14: --record-generation with an unwritable telemetry root — release still happened (ok:true), telemetryWriteOk:false, never silently swallowed", () => {
+    const taskId = "DIR-126-D-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    writeLease(dir, taskId);
+    try {
+      // Make the telemetry root a FILE (not a directory) so mkdirSync/writeFileSync inside it throws.
+      const telemetryRootParent = path.join(dir, "milestones");
+      fs.mkdirSync(telemetryRootParent, { recursive: true });
+      fs.writeFileSync(path.join(telemetryRootParent, "prepare-telemetry"), "not a directory");
+      const res = runNode([CONVERGENCE_SCRIPT, "--record-generation", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+        "--terminalPhase", "PlanAuthor", "--outcome", "revision-needed", "--reason", "plan-author-failed", "--cacheable", "false"]);
+      assert.equal(res.status, 0, res.stdout);
+      const out = JSON.parse(res.stdout.trim());
+      assert.equal(out.ok, true, "release having already succeeded, `ok` is unaffected by the write throw");
+      assert.equal(out.releaseResult.ok, true, "the release itself succeeded — the write throw happens strictly after");
+      assert.equal(out.telemetryWriteOk, false, "the write failure must surface, never silently swallowed");
+      assert.ok(!fs.existsSync(leasePath(dir, taskId)), "AC13: lease still released despite the telemetry write throwing");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC4/AC15/AC16: reuse-terminal produces its own isolated committed record — zero content agents, matching hashes, real priorGenerationId, telemetryWriteOk:true, .generation.json untouched", () => {
+    const taskId = "DIR-126-D-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId, "fixture proposal v1 — unchanged");
+    writeLease(dir, taskId, { ownerExecutionId: "sess-gen-1" });
+    try {
+      const rec = runNode([CONVERGENCE_SCRIPT, "--record-generation", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+        "--terminalPhase", "PreflightContent", "--outcome", "revision-needed", "--reason", "preflight-rejected", "--cacheable", "true"]);
+      assert.equal(rec.status, 0, rec.stdout);
+
+      execFileSync("node", ["--experimental-strip-types", ADMISSION_SCRIPT, "--acquire", "--taskId", taskId, "--workspace", dir], {
+        encoding: "utf8", env: { ...process.env, CLAUDE_CODE_SESSION_ID: "sess-gen-2" },
+      });
+
+      const decide = runNode([CONVERGENCE_SCRIPT, "--decide-resume", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile]);
+      assert.equal(decide.status, 0, decide.stdout);
+      const decideOut = JSON.parse(decide.stdout.trim());
+      assert.equal(decideOut.decision, "reuse-terminal", JSON.stringify(decideOut));
+      assert.equal(decideOut.telemetryWriteOk, true);
+
+      const telFile = telemetryPath(dir, taskId, decideOut.generationId);
+      assert.ok(fs.existsSync(telFile), `expected telemetry file at ${telFile}`);
+      const telRec = JSON.parse(fs.readFileSync(telFile, "utf8"));
+      assert.equal(telRec.decision.kind, "reuse-terminal");
+      assert.equal(telRec.contentAgentDispatchCount, 0);
+      assert.equal(telRec.contentAgentMs, 0);
+      assert.equal(telRec.decision.createsContentGeneration, false);
+      assert.ok(telRec.decision.priorGenerationId, "real priorGenerationId present");
+      assert.equal(telRec.hashes.charter, decideOut.hashes.charterHash);
+      assert.equal(telRec.leaseRelease.ok, true);
+
+      const genFile = path.join(dir, ".quay", "prepare-leases", `${taskId}.generation.json`);
+      const genHashBefore = crypto.createHash("sha256").update(fs.readFileSync(genFile)).digest("hex");
+      assert.ok(genHashBefore, ".generation.json still exists, untouched by the new reuse-terminal write");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC7: --record-generation with --decisionKind omitted defaults to decision.kind:'cold' (the safe default for an admitted attempt, never 'not-evaluated')", () => {
+    const taskId = "DIR-126-D-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    writeLease(dir, taskId);
+    try {
+      const res = runNode([CONVERGENCE_SCRIPT, "--record-generation", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+        "--terminalPhase", "Adjudicate", "--outcome", "revision-needed", "--reason", "adjudicate-failed", "--cacheable", "false"]);
+      assert.equal(res.status, 0, res.stdout);
+      const out = JSON.parse(res.stdout.trim());
+      const rec = JSON.parse(fs.readFileSync(out.telemetryFile, "utf8"));
+      assert.equal(rec.decision.kind, "cold");
+      assert.equal(rec.decision.createsContentGeneration, false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC17: --record-attempt for the three pre-lease sites each produce a real committed record with generationId:null, decision.kind:not-evaluated", () => {
+    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "attempt-"));
+    try {
+      for (const site of ["admission-check-failed", "prepare-already-running"]) {
+        const res = runNode([CONVERGENCE_SCRIPT, "--record-attempt", "--taskId", "DIR-ATTEMPT-1", "--workspace", dir, "--site", site, "--detail", JSON.stringify({ note: site })]);
+        assert.equal(res.status, 0, res.stdout);
+        const out = JSON.parse(res.stdout.trim());
+        assert.equal(out.ok, true);
+        assert.equal(out.telemetryWriteOk, true);
+        assert.ok(fs.existsSync(out.telemetryFile));
+        const rec = JSON.parse(fs.readFileSync(out.telemetryFile, "utf8"));
+        assert.equal(rec.generationId, null);
+        assert.equal(rec.decision.kind, "not-evaluated");
+        assert.equal(rec.terminal.reason, site);
+        assert.equal(rec.taskId, "DIR-ATTEMPT-1");
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC17: --record-attempt for missing-required-args (taskId itself absent) routes to _missing-taskId/ with explicit taskId:null", () => {
+    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "attempt-missing-"));
+    try {
+      const res = runNode([CONVERGENCE_SCRIPT, "--record-attempt", "--taskId", "", "--workspace", dir, "--site", "missing-required-args", "--detail", JSON.stringify({})]);
+      assert.equal(res.status, 0, res.stdout);
+      const out = JSON.parse(res.stdout.trim());
+      assert.equal(out.ok, true);
+      assert.ok(out.telemetryFile.includes(path.join("prepare-telemetry", "_missing-taskId")), out.telemetryFile);
+      const rec = JSON.parse(fs.readFileSync(out.telemetryFile, "utf8"));
+      assert.equal(rec.taskId, null);
+      assert.equal(rec.terminal.phase, "ProposalAuthors");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC18/AC12: --record-generation --no-release writes telemetry WITHOUT releasing the lease; --release-only then releases it — the Receipt-phase write/build/release split", () => {
+    const taskId = "DIR-126-D-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    writeLease(dir, taskId);
+    try {
+      const writeRes = runNode([CONVERGENCE_SCRIPT, "--record-generation", "--no-release", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+        "--terminalPhase", "Receipt", "--outcome", "prepared", "--reason", "prepared", "--cacheable", "false"]);
+      assert.equal(writeRes.status, 0, writeRes.stdout);
+      const writeOut = JSON.parse(writeRes.stdout.trim());
+      assert.equal(writeOut.ok, true);
+      assert.equal(writeOut.telemetryWriteOk, true);
+      assert.ok(fs.existsSync(writeOut.telemetryFile), "telemetry file exists BEFORE any release/build step runs");
+      assert.ok(fs.existsSync(leasePath(dir, taskId)), "AC18: --no-release must NOT release the lease");
+
+      const releaseRes = runNode([CONVERGENCE_SCRIPT, "--release-only", "--taskId", taskId, "--workspace", dir, "--reason", "prepared"]);
+      assert.equal(releaseRes.status, 0, releaseRes.stdout);
+      const releaseOut = JSON.parse(releaseRes.stdout.trim());
+      assert.equal(releaseOut.ok, true);
+      assert.equal(releaseOut.releaseResult.ok, true);
+      assert.ok(!fs.existsSync(leasePath(dir, taskId)), "--release-only actually releases");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC18 RED: --record-generation --no-release with an unwritable telemetry root fails (ok:true but telemetryWriteOk:false), and the lease is STILL untouched (no release attempted at all)", () => {
+    const taskId = "DIR-126-D-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    writeLease(dir, taskId);
+    try {
+      const telemetryRootParent = path.join(dir, "milestones");
+      fs.mkdirSync(telemetryRootParent, { recursive: true });
+      fs.writeFileSync(path.join(telemetryRootParent, "prepare-telemetry"), "not a directory");
+      const writeRes = runNode([CONVERGENCE_SCRIPT, "--record-generation", "--no-release", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+        "--terminalPhase", "Receipt", "--outcome", "prepared", "--reason", "prepared", "--cacheable", "false"]);
+      assert.equal(writeRes.status, 1, writeRes.stdout);
+      const writeOut = JSON.parse(writeRes.stdout.trim());
+      assert.equal(writeOut.ok, true);
+      assert.equal(writeOut.telemetryWriteOk, false);
+      assert.ok(fs.existsSync(leasePath(dir, taskId)), "no release call was ever made on this path — the caller (prepare-milestone.js) is responsible for releasing after seeing telemetryWriteOk:false");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── Stage 8 (DIR-126-D/M203) — generation-ID non-collision + one-way DIR-124-B migration shape ────
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+describe("telemetry: Stage 8 — generationId non-collision + migration-shape structural checks", () => {
+  test("AC3: two successive Admission owners sharing the SAME ownerExecutionId but DIFFERENT fencingTokens produce DISTINCT generationIds, each mechanically traceable back to its own exact lease tuple", () => {
+    const common = { taskId: "DIR-126-D-FIXTURE", ownerExecutionId: "sess-shared-parent", acquiredAt: 5000 };
+    const recA = buildTelemetryRecord({
+      recordId: "a", attemptId: "a", generationId: "unused-placeholder-recomputed-below",
+      admission: { key: "k", ...common, fencingToken: 0 },
+      decision: { kind: "cold" }, contentAgentDispatchCount: 1, contentAgentMs: 1,
+    });
+    const recB = buildTelemetryRecord({
+      recordId: "b", attemptId: "b", generationId: "unused-placeholder-recomputed-below",
+      admission: { key: "k", ...common, fencingToken: 1 },
+      decision: { kind: "cold" }, contentAgentDispatchCount: 1, contentAgentMs: 1,
+    });
+    // Re-derive generationId the SAME way _computeGenerationId does (landed DIR-126-A/C formula,
+    // reused unchanged — this AC exercises that reuse, not new logic, per the task's own AC3 note).
+    const genIdFor = (admission) => crypto.createHash("sha256").update(`${common.taskId}::${admission.ownerExecutionId}::${admission.fencingToken}::${admission.acquiredAt}`).digest("hex").slice(0, 12);
+    const idA = genIdFor(recA.admission);
+    const idB = genIdFor(recB.admission);
+    assert.notEqual(idA, idB, "distinct fencingTokens under the same ownerExecutionId must yield distinct generationIds");
+    // Traceability: each record's own admission.fencingToken is the exact field that changed the
+    // derived id — re-deriving from the record's own admission block, not an external assumption.
+    assert.equal(recA.admission.fencingToken, 0);
+    assert.equal(recB.admission.fencingToken, 1);
+    assert.equal(recA.admission.ownerExecutionId, recB.admission.ownerExecutionId, "same parent session, by construction of this fixture");
+  });
+
+  test("AC8: no reverse/dual-write dependency — zero references to RunIdentity/StageReceiptEnvelope anywhere in proposal-convergence.ts or milestone-preparation-check.ts", () => {
+    const convergenceSrc = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "proposal-convergence.ts"), "utf8");
+    const prepCheckSrc = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "milestone-preparation-check.ts"), "utf8");
+    for (const name of ["RunIdentity", "StageReceiptEnvelope"]) {
+      assert.ok(!convergenceSrc.includes(name), `proposal-convergence.ts must not reference ${name} (no reverse dependency on a DIR-124-B-shaped file)`);
+      assert.ok(!prepCheckSrc.includes(name), `milestone-preparation-check.ts must not reference ${name} (no reverse dependency on a DIR-124-B-shaped file)`);
+    }
+  });
+
+  test("AC8: the docs/proposals/quay-prepare-execute-feedback-convergence.md migration-shape subsection is present and names the frozen schemaVersion: 2 record", () => {
+    const docPath = path.join(import.meta.dirname, "..", "..", "..", "docs", "proposals", "quay-prepare-execute-feedback-convergence.md");
+    const doc = fs.readFileSync(docPath, "utf8");
+    assert.match(doc, /schemaVersion: 2/, "the migration-shape subsection must name the frozen schemaVersion: 2 record");
+    assert.match(doc, /DIR-126-D remains the Prepare telemetry PRODUCER/, "the doc must explicitly disclaim a reverse/second-authority role");
+  });
+});

@@ -546,6 +546,49 @@ Audit remains independent and must verify raw artifacts. The manifest supplies
 a bounded index and makes omissions mechanically visible; it does not allow
 Audit to trust the producer's conclusion.
 
+### 5.4 DIR-126-D's landed Prepare-telemetry record — the real, frozen producer shape this section's `StageReceiptEnvelope` will eventually consume
+
+DIR-126-D/M203 landed the first REAL, committed producer of per-generation
+Prepare telemetry — `proposal-convergence.ts`'s `buildTelemetryRecord()`,
+written to `milestones/prepare-telemetry/<taskId>/<recordId>.json`
+(`schemaVersion: 2`, a superset of DIR-126-C's own gitignored
+`.generation.json` `schemaVersion: 1`):
+
+```text
+TelemetryRecord (schemaVersion: 2) {
+  recordId, attemptId, generationId
+  admission: {key, ownerExecutionId, fencingToken, acquiredAt}
+  workspace, taskId, milestoneId, class, highRisk
+  hashes: {charter, taskContract, proposal, reviewPolicy}
+  decision: {kind, reason, priorGenerationId, priorReason, createsContentGeneration}
+  contentAgentDispatchCount, contentAgentMs
+  terminal: {outcome, reason, phase, cacheable}
+  leaseRelease: {attempted, ok, reason}
+  sessionId, recordedAtMs, telemetryWriteOk
+}
+```
+
+This is a deterministic, direct precursor to §5.2's `StageReceiptEnvelope`
+above — a future DIR-124-B adapter can map `TelemetryRecord` fields onto
+`StageReceiptEnvelope` fields one-for-one (`generationId` -> a component of
+`runIdentity`; `terminal.{outcome,reason}` -> `outcome`/`reason`;
+`contentAgentDispatchCount`/`contentAgentMs` -> `contentAgentCount`/
+`agentMinutes`; `hashes.*` -> `inputHashes`) without parsing prose or Claude
+Code session JSONL. **DIR-126-D remains the Prepare telemetry PRODUCER, never
+a second cross-workflow receipt authority** — nothing in
+`proposal-convergence.ts`/`milestone-preparation-check.ts` reads FROM a
+`RunIdentity`/`StageReceiptEnvelope`-shaped file (no reverse or dual-write
+dependency; verified by grep over this child's own diff, zero matches).
+`milestone-preparation-check.ts`'s new `--telemetry-report <milestoneId>` CLI
+mode (§5.2's read path precedent) answers per-generation telemetry queries
+today, without waiting on this section's own eventual `StageReceiptEnvelope`
+rollout. Per-phase intra-generation timing (`{phase, round, startedAtMs,
+endedAtMs}` breakdowns) and `findingCodes[]`/`recurrenceKey` recurrence
+tracking are explicitly OUT of this record's scope — filed separately as
+`tasks/gap-dir126d-deferred-phase-timing-recurrence-tracking.md` (real,
+separable follow-up work), cross-referenced here rather than silently
+dropped.
+
 ## 6. Proposed stage order and ownership
 
 ### 6.1 Admission and validation before expensive observation

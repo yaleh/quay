@@ -7,10 +7,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import {
   buildReceipt, checkPreparation, sha256,
   computeTouchesExpansion, parsePlanStages, validatePlanStructure, checkProvenanceDistinctness,
-  computeMetricsForReceipt,
+  computeMetricsForReceipt, queryTelemetryReport,
 } from "../scripts/milestone-preparation-check.ts";
 
 const FIXTURES = path.join(import.meta.dirname, "..", "fixtures", "preparation");
@@ -526,4 +527,162 @@ test("computeMetricsForReceipt: PASS — derives all named metrics from a real r
   assert.equal(r.metrics.prepareWallTimeMs, 20 * 60 * 1000);
   assert.equal(typeof r.metrics.blockingFindingYield, "number");
   assert.equal(typeof r.metrics.proposalChurnRatio, "number");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── DIR-126-D/M203 Claim A.5 — --telemetry / telemetry-stale / telemetry-missing (mirrors the
+// existing ledger tests above verbatim, structurally). ──────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+function makeTelemetryFile(dir, record, name = "telemetry-record.json") {
+  const f = path.join(dir, name);
+  fs.writeFileSync(f, JSON.stringify(record, null, 2));
+  return f;
+}
+function fixtureTelemetryRecord(overrides = {}) {
+  return {
+    schemaVersion: 2, recordId: "r1", attemptId: "r1", generationId: "g1",
+    admission: { key: "k", ownerExecutionId: "o", fencingToken: 0, acquiredAt: 1000 },
+    workspace: ".", taskId: "FIXTURE-PREP-1", milestoneId: "M-FIXTURE", class: "development", highRisk: false,
+    hashes: { charter: "c", taskContract: "t", proposal: "p", reviewPolicy: "r" },
+    decision: { kind: "not-evaluated" },
+    contentAgentDispatchCount: 0, contentAgentMs: 0,
+    terminal: { outcome: "prepared", reason: "prepared", phase: "Receipt", cacheable: false },
+    leaseRelease: { attempted: true, ok: true, reason: "prepared" },
+    sessionId: null, recordedAtMs: 1000, telemetryWriteOk: true,
+    ...overrides,
+  };
+}
+
+test("buildReceipt + checkPreparation: PASS — a telemetry record hash-binds cleanly (Claim A.5)", () => {
+  const dir = freshTmpDir();
+  const telemetryFile = makeTelemetryFile(dir, fixtureTelemetryRecord());
+  const receipt = buildReceipt({
+    taskId: "FIXTURE-PREP-1", milestoneId: "M-FIXTURE", charterFile: CHARTER, taskFile: TASK, planFile: PLAN,
+    sourceFiles: [SOURCE], review: { findings: 0 }, planCheck: { rounds: 1, findings: 0 }, touches: [SOURCE],
+    provenance: makeDistinctProvenance(), telemetryFile,
+  });
+  assert.ok(receipt.hashes.telemetry);
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
+  const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.code, "prepared");
+});
+
+test("checkPreparation: FAIL — telemetry file no longer exists (telemetry-missing)", () => {
+  const dir = freshTmpDir();
+  const telemetryFile = makeTelemetryFile(dir, fixtureTelemetryRecord());
+  const receipt = buildReceipt({
+    taskId: "FIXTURE-PREP-1", milestoneId: "M-FIXTURE", charterFile: CHARTER, taskFile: TASK, planFile: PLAN,
+    sourceFiles: [SOURCE], review: { findings: 0 }, planCheck: { rounds: 1, findings: 0 }, touches: [SOURCE],
+    provenance: makeDistinctProvenance(), telemetryFile,
+  });
+  fs.unlinkSync(telemetryFile);
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
+  const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "telemetry-missing");
+});
+
+test("checkPreparation: FAIL — telemetry record hand-tampered post-receipt (telemetry-stale) — instrumentation can never turn a failed preparation into a falsely-certified prepared", () => {
+  const dir = freshTmpDir();
+  const telemetryFile = makeTelemetryFile(dir, fixtureTelemetryRecord());
+  const receipt = buildReceipt({
+    taskId: "FIXTURE-PREP-1", milestoneId: "M-FIXTURE", charterFile: CHARTER, taskFile: TASK, planFile: PLAN,
+    sourceFiles: [SOURCE], review: { findings: 0 }, planCheck: { rounds: 1, findings: 0 }, touches: [SOURCE],
+    provenance: makeDistinctProvenance(), telemetryFile,
+  });
+  const receiptFile = path.join(dir, "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
+  fs.writeFileSync(telemetryFile, JSON.stringify(fixtureTelemetryRecord({ terminal: { outcome: "needs-human", reason: "TAMPERED", phase: "Receipt", cacheable: false } })));
+  const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "telemetry-stale");
+});
+
+test("checkPreparation: backward-compatible — a receipt naming NO telemetryFile (pre-DIR-126-D shape) skips the telemetry block entirely and still passes (AC23)", () => {
+  const receiptFile = path.join(freshTmpDir(), "preparation.json");
+  fs.writeFileSync(receiptFile, JSON.stringify(makeFreshReceipt(), null, 2));
+  const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.code, "prepared");
+});
+
+// ── Claim B.1 — queryTelemetryReport / --telemetry-report <milestoneId> ────────────────────────
+test("queryTelemetryReport: zero matching records -> {ok:true, code:'no-records'}, never a crash (AC22)", () => {
+  const dir = freshTmpDir();
+  const result = queryTelemetryReport({ workspace: dir, milestoneId: "M-NOTHING-HERE" });
+  assert.equal(result.ok, true);
+  assert.equal(result.code, "no-records");
+  assert.equal(result.milestoneId, "M-NOTHING-HERE");
+});
+
+test("queryTelemetryReport: filters by the record's OWN embedded milestoneId, not directory layout — a re-charter'd taskId under the same dir with a different milestoneId is excluded", () => {
+  const dir = freshTmpDir();
+  const taskDir = path.join(dir, "milestones", "prepare-telemetry", "DIR-X");
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, "rec-m203.json"), JSON.stringify(fixtureTelemetryRecord({ recordId: "rec-m203", milestoneId: "M203" })));
+  fs.writeFileSync(path.join(taskDir, "rec-m204.json"), JSON.stringify(fixtureTelemetryRecord({ recordId: "rec-m204", milestoneId: "M204" })));
+  const result = queryTelemetryReport({ workspace: dir, milestoneId: "M203" });
+  assert.equal(result.ok, true);
+  assert.equal(result.code, "records-found");
+  assert.equal(result.records.length, 1);
+  assert.equal(result.records[0].recordId, "rec-m203");
+});
+
+test("queryTelemetryReport: malformed JSON files under the tree are skipped, never crash the scan", () => {
+  const dir = freshTmpDir();
+  const taskDir = path.join(dir, "milestones", "prepare-telemetry", "DIR-X");
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, "good.json"), JSON.stringify(fixtureTelemetryRecord({ recordId: "good", milestoneId: "M203" })));
+  fs.writeFileSync(path.join(taskDir, "bad.json"), "{ not valid json");
+  const result = queryTelemetryReport({ workspace: dir, milestoneId: "M203" });
+  assert.equal(result.ok, true);
+  assert.equal(result.records.length, 1);
+  assert.equal(result.records[0].recordId, "good");
+});
+
+// ── AC21: end-to-end via the REAL write path (proposal-convergence.ts's --record-generation CLI)
+// then read back via THIS module's --telemetry-report CLI — not a mocked reader on either side.
+test("AC21: --telemetry-report end-to-end — write via the real proposal-convergence.ts CLI, read back via THIS module's --telemetry-report CLI, byte-for-byte match", () => {
+  const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
+  const CONVERGENCE_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "proposal-convergence.ts");
+  const PREP_CHECK_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "milestone-preparation-check.ts");
+  const dir = freshTmpDir();
+  const taskId = "DIR-126-D-E2E-FIXTURE";
+  fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), `---\nid: ${taskId}\ntitle: e2e fixture\nstatus: todo\n---\n## Proposal\n\nfixture\n\n## Acceptance Criteria\n\n- [ ] x\n\n## Definition of Done\n\n- [ ] x\n\n## Touches\n\n- x\n`);
+  const charterFile = path.join(dir, "charter.md");
+  fs.writeFileSync(charterFile, "fixture charter\n");
+  const leaseFile = path.join(dir, ".quay", "prepare-leases", `${taskId}.json`);
+  fs.mkdirSync(path.dirname(leaseFile), { recursive: true });
+  fs.writeFileSync(leaseFile, JSON.stringify({ ownerExecutionId: "sess-e2e", fencingToken: 0, acquiredAt: 1000, key: "e2e-key" }));
+
+  const writeOut = JSON.parse(execFileSync("node", ["--experimental-strip-types", CONVERGENCE_SCRIPT,
+    "--record-generation", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+    "--terminalPhase", "PlanAuthor", "--outcome", "revision-needed", "--reason", "plan-author-failed", "--cacheable", "false",
+    "--milestoneId", "M-E2E-REPORT",
+  ], { encoding: "utf8" }).trim());
+  assert.equal(writeOut.ok, true);
+  assert.equal(writeOut.telemetryWriteOk, true);
+  const writtenRecord = JSON.parse(fs.readFileSync(writeOut.telemetryFile, "utf8"));
+
+  const reportOut = JSON.parse(execFileSync("node", ["--experimental-strip-types", PREP_CHECK_SCRIPT,
+    "--telemetry-report", "M-E2E-REPORT", "--workspace", dir,
+  ], { encoding: "utf8" }));
+  assert.equal(reportOut.ok, true);
+  assert.equal(reportOut.code, "records-found");
+  assert.equal(reportOut.records.length, 1);
+  assert.deepEqual(reportOut.records[0], writtenRecord);
+});
+
+test("AC22 (CLI): --telemetry-report <milestoneId> with zero matches returns {ok:true, code:'no-records'} via the real CLI, exit 0", () => {
+  const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
+  const PREP_CHECK_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "milestone-preparation-check.ts");
+  const dir = freshTmpDir();
+  const out = execFileSync("node", ["--experimental-strip-types", PREP_CHECK_SCRIPT, "--telemetry-report", "M-NOTHING", "--workspace", dir], { encoding: "utf8" });
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.code, "no-records");
 });

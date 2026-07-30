@@ -348,6 +348,131 @@ function _generationPath(workspace, taskId) {
   return path.join(workspace, ".quay", "prepare-leases", `${_safeTaskIdSegment(taskId)}.generation.json`);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── Telemetry (DIR-126-D/M203) — committed, per-attempt records at
+// milestones/prepare-telemetry/<taskId>/<recordId>.json. Extends (never redesigns) DIR-126-A/B/C's
+// landed lease/generation-identity machinery: this archive is purely additive, read by nothing
+// upstream of it — `.generation.json`'s own shape/path/write-semantics (including no-write-on-
+// reuse-terminal) stay byte-for-byte untouched. schemaVersion: 2 (superset of `.generation.json`'s
+// own schemaVersion: 1 — no renames, no removals). ═══════════════════════════════════════════════
+
+const TELEMETRY_ROOT_SEGS = ["milestones", "prepare-telemetry"];
+export const TELEMETRY_SCHEMA_VERSION = 2;
+
+// telemetryPath — Claim A.0: reuses _safeTaskIdSegment() VERBATIM (never reimplemented) for
+// slash-stripping, then layers a post-hoc containment check on top, specific to this new
+// PERMANENTLY GIT-COMMITTED tree (a stricter bar than .generation.json's gitignored/ephemeral
+// sibling): a bare taskId of exactly ".." passes _safeTaskIdSegment completely unchanged (it only
+// strips '/'/'\\') and would otherwise resolve ONE LEVEL ABOVE the intended
+// milestones/prepare-telemetry/ tree. Any resolved candidate landing outside that root is
+// redirected to a fixed `_unsafe-taskid` bucket instead. `taskId === null` (the three pre-lease
+// sites' "taskId itself is the missing field" case) routes to a fixed `_missing-taskId` segment.
+export function telemetryPath(workspace, taskId, recordId) {
+  const seg = taskId === null || taskId === undefined ? "_missing-taskId" : _safeTaskIdSegment(taskId);
+  const root = path.resolve(workspace, ...TELEMETRY_ROOT_SEGS);
+  const candidate = path.join(workspace, ...TELEMETRY_ROOT_SEGS, seg, `${recordId}.json`);
+  const resolvedCandidate = path.resolve(candidate);
+  if (resolvedCandidate === root || resolvedCandidate.startsWith(root + path.sep)) {
+    return candidate;
+  }
+  return path.join(workspace, ...TELEMETRY_ROOT_SEGS, "_unsafe-taskid", `${recordId}.json`);
+}
+
+// computeAttemptId — same sha256(...).slice(0,12) idiom _computeGenerationId/fingerprintFinding
+// already use, for the three pre-lease sites' attempt-scoped identity (they cannot derive a real
+// generationId — no lease is ever held).
+export function computeAttemptId(fields) {
+  return sha256(JSON.stringify(fields ?? {})).slice(0, 12);
+}
+
+// buildTelemetryRecord — the frozen schemaVersion:2 record shape (task's own "Frozen record
+// schema"). Fills every field explicitly, even when the caller omits it — an omitted-but-required
+// field becomes an explicit `null`, never a dropped key (no-fabrication discipline: JSON.stringify
+// never silently skips a present-but-undefined key here because every key below is materialized).
+export function buildTelemetryRecord({
+  recordId, attemptId, generationId,
+  admission, workspace, taskId, milestoneId,
+  class: klass, highRisk,
+  hashes, decision,
+  contentAgentDispatchCount, contentAgentMs,
+  terminal, leaseRelease,
+  sessionId, recordedAtMs, telemetryWriteOk,
+} = {}) {
+  return {
+    schemaVersion: TELEMETRY_SCHEMA_VERSION,
+    recordId: recordId ?? null,
+    attemptId: attemptId ?? null,
+    generationId: generationId ?? null,
+    admission: admission ?? null,
+    workspace: workspace ?? null,
+    taskId: taskId ?? null,
+    milestoneId: milestoneId ?? null,
+    class: klass ?? null,
+    highRisk: highRisk === undefined ? null : highRisk,
+    hashes: hashes ?? null,
+    decision: decision ?? null,
+    contentAgentDispatchCount: contentAgentDispatchCount === undefined ? null : contentAgentDispatchCount,
+    contentAgentMs: contentAgentMs === undefined ? null : contentAgentMs,
+    terminal: terminal ?? null,
+    leaseRelease: leaseRelease ?? null,
+    sessionId: sessionId ?? null,
+    recordedAtMs: recordedAtMs ?? null,
+    telemetryWriteOk: telemetryWriteOk === undefined ? true : telemetryWriteOk,
+  };
+}
+
+const TELEMETRY_DECISION_KINDS = ["cold", "resume", "reuse-terminal", "not-evaluated"];
+
+// validateTelemetryRecord — pure fail-closed validator. AC16's rule lives here: a `reuse-terminal`
+// record MUST have a non-null generationId, a non-null decision.priorGenerationId, all four
+// hashes.* non-null, and contentAgentDispatchCount===0 && contentAgentMs===0 — any violation is
+// `{ok:false, code:"reuse-terminal-invalid"}`.
+export function validateTelemetryRecord(record) {
+  if (!record || typeof record !== "object") {
+    return { ok: false, code: "telemetry-record-malformed", message: "telemetry record is not an object" };
+  }
+  if (record.schemaVersion !== TELEMETRY_SCHEMA_VERSION) {
+    return { ok: false, code: "telemetry-schema-version-mismatch", message: `expected schemaVersion ${TELEMETRY_SCHEMA_VERSION}, got ${record.schemaVersion}` };
+  }
+  const REQUIRED_TOP = [
+    "recordId", "attemptId", "generationId", "admission", "workspace", "taskId", "milestoneId",
+    "class", "highRisk", "hashes", "decision", "contentAgentDispatchCount", "contentAgentMs",
+    "terminal", "leaseRelease", "sessionId", "recordedAtMs", "telemetryWriteOk",
+  ];
+  for (const k of REQUIRED_TOP) {
+    if (!(k in record)) {
+      return { ok: false, code: "telemetry-field-missing", message: `telemetry record is missing required field '${k}' (must be present — null/"unknown" is fine, omission is not)` };
+    }
+  }
+  const kind = record.decision?.kind;
+  if (!TELEMETRY_DECISION_KINDS.includes(kind)) {
+    return { ok: false, code: "telemetry-decision-kind-invalid", message: `decision.kind must be one of ${TELEMETRY_DECISION_KINDS.join("|")}, got ${JSON.stringify(kind)}` };
+  }
+  if (kind === "reuse-terminal") {
+    if (!record.generationId) {
+      return { ok: false, code: "reuse-terminal-invalid", message: "reuse-terminal record must have a non-null generationId" };
+    }
+    if (!record.decision?.priorGenerationId) {
+      return { ok: false, code: "reuse-terminal-invalid", message: "reuse-terminal record must have a non-null decision.priorGenerationId" };
+    }
+    const h = record.hashes;
+    if (!h || !h.charter || !h.taskContract || !h.proposal || !h.reviewPolicy) {
+      return { ok: false, code: "reuse-terminal-invalid", message: "reuse-terminal record must have all four hashes.* fields non-null" };
+    }
+    if (!(record.contentAgentDispatchCount === 0 && record.contentAgentMs === 0)) {
+      return { ok: false, code: "reuse-terminal-invalid", message: "reuse-terminal record must have contentAgentDispatchCount === 0 && contentAgentMs === 0" };
+    }
+  }
+  return { ok: true, code: "telemetry-record-ok", message: "telemetry record is well-formed" };
+}
+
+function _writeTelemetryRecord(workspace, taskId, recordId, record) {
+  const p = telemetryPath(workspace, taskId, recordId);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(record, null, 2));
+  return p;
+}
+
 // Same sha256(identity).slice(0, 12) idiom fingerprintFinding already uses above — not a new ID
 // convention.
 function _computeGenerationId({ taskId, ownerExecutionId, fencingToken, acquiredAt }) {
@@ -422,6 +547,51 @@ export function _decideResumeCli({ taskId, workspace, charterFile, callerOverrid
       } catch (err) {
         releaseResult = { ok: false, error: err.message };
       }
+
+      // DIR-126-D/M203 Claim A.2 — reuse-terminal's own isolated committed-telemetry write, in the
+      // SAME call that already computes generationId and releases the lease inline. Runs in its
+      // OWN try/catch, separate from BOTH the inline release try/catch above AND this function's
+      // outer catch-all below (AC15): a write throw here must never surface as the outer
+      // catch-all's swallowed-exception `{decision:'cold', reason:'decision-exception'}` shape,
+      // which lacks `releaseResult` entirely and would bypass prepare-milestone.js's
+      // stranded-lease guard. Validated BEFORE writing (AC16): a record that fails
+      // validateTelemetryRecord is never written as reuse-terminal telemetry — the call instead
+      // falls back to `decision:'cold'`/`reuse-terminal-schema-invalid'`, never a false
+      // reuse-terminal pass. Does NOT touch `.generation.json` — DIR-126-C deliberately leaves it
+      // unwritten on this branch, unchanged by this addition.
+      let telemetryWriteOk = true;
+      let schemaInvalid = false;
+      try {
+        const telRecord = buildTelemetryRecord({
+          recordId: generationId,
+          attemptId: generationId,
+          generationId,
+          admission: { key: lease.key ?? null, ownerExecutionId: lease.ownerExecutionId ?? null, fencingToken: lease.fencingToken ?? null, acquiredAt: lease.acquiredAt ?? null },
+          workspace, taskId, milestoneId: null, class: null, highRisk: null,
+          hashes: { charter: hashes.charterHash, taskContract: hashes.taskContractHash, proposal: hashes.proposalHash, reviewPolicy: hashes.reviewPolicyHash },
+          decision: {
+            kind: "reuse-terminal", reason: decision.reason,
+            priorGenerationId: decision.priorGenerationId ?? null, priorReason: decision.priorReason ?? null,
+            createsContentGeneration: false,
+          },
+          contentAgentDispatchCount: 0, contentAgentMs: 0,
+          terminal: { outcome: decision.priorOutcome ?? null, reason: decision.priorReason ?? null, phase: null, cacheable: true },
+          leaseRelease: releaseResult ? { attempted: true, ok: releaseResult.ok, reason: releaseResult.reason ?? null } : { attempted: false, ok: null, reason: null },
+          sessionId: null, recordedAtMs: Date.now(),
+        });
+        const validation = validateTelemetryRecord(telRecord);
+        if (!validation.ok) {
+          schemaInvalid = true;
+        } else {
+          _writeTelemetryRecord(workspace, taskId, generationId, telRecord);
+        }
+      } catch {
+        telemetryWriteOk = false;
+      }
+      if (schemaInvalid) {
+        return { decision: "cold", reason: "reuse-terminal-schema-invalid", hashes, generationId, ...(releaseResult ? { releaseResult } : {}) };
+      }
+      return { ...decision, hashes, generationId, telemetryWriteOk, ...(releaseResult ? { releaseResult } : {}) };
     }
     return { ...decision, hashes, generationId, ...(releaseResult ? { releaseResult } : {}) };
   } catch (err) {
@@ -439,44 +609,170 @@ export function _decideResumeCli({ taskId, workspace, charterFile, callerOverrid
 // .quay/prepare-leases/<taskId>.generation.json, and piggybacks releaseLease in the SAME
 // invocation (replacing the bare `--release` call prepare-milestone.js makes today — per-terminal
 // dispatch count unchanged).
-export function _recordGenerationCli({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable }) {
+// Shared by _recordGenerationCli and _writeGenerationTelemetryCli — derives generationId/hashes
+// from the still-held lease and writes/overwrites .quay/prepare-leases/<taskId>.generation.json
+// (DIR-126-C's byte-for-byte-untouched v1 shape). Deliberately does NOT touch the new committed
+// telemetry file — callers add that write themselves, at whatever point in their own sequence
+// (before or after release) their own Claim requires, isolated in their OWN try/catch.
+function _writeLegacyGenerationRecord({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable }) {
+  const leaseRaw = fs.readFileSync(_leasePath(workspace, taskId), "utf8");
+  const lease = JSON.parse(leaseRaw);
+  const generationId = _computeGenerationId({
+    taskId, ownerExecutionId: lease.ownerExecutionId, fencingToken: lease.fencingToken, acquiredAt: lease.acquiredAt,
+  });
+  const hashes = _readCurrentHashes({ workspace, taskId, charterFile });
+  const record = {
+    schemaVersion: 1,
+    taskId,
+    generationId,
+    charterHash: hashes.charterHash,
+    taskContractHash: hashes.taskContractHash,
+    proposalHash: hashes.proposalHash,
+    reviewPolicyHash: hashes.reviewPolicyHash,
+    terminalPhase,
+    outcome,
+    reason,
+    cacheable: cacheable === "true" || cacheable === true,
+    recordedAtMs: Date.now(),
+  };
+  fs.mkdirSync(path.dirname(_generationPath(workspace, taskId)), { recursive: true });
+  fs.writeFileSync(_generationPath(workspace, taskId), JSON.stringify(record, null, 2));
+  return { lease, generationId, hashes, record };
+}
+
+// Shared committed-telemetry-write body for Claims A.1/A.4 — its OWN try/catch, isolated from
+// whatever release logic the caller performs around it, so a write throw here can never prevent or
+// retroactively invalidate a release that already happened (or is about to happen).
+// `decisionKind` ('cold'|'resume') threads through the workflow's OWN
+// `_resumeFromAdjudicatedProposal`/`--decide-resume` verdict for THIS generation — per the frozen
+// schema, `decision.kind` is `cold|resume|reuse-terminal` for admitted attempts (never the
+// `not-evaluated` value reserved for the three pre-lease `--record-attempt` sites); defaults to
+// `cold` when the caller omits it (the safe, conservative default — every real call site now
+// threads this explicitly, see prepare-milestone.js's `_releaseLeaseAndRecord`/
+// `_writeGenerationTelemetry`).
+function _writeCommittedTelemetry({ taskId, workspace, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId, lease, hashes, generationId, releaseResult, decisionKind }) {
+  let telemetryWriteOk = true;
+  let telemetryFile = null;
   try {
-    const leaseRaw = fs.readFileSync(_leasePath(workspace, taskId), "utf8");
-    const lease = JSON.parse(leaseRaw);
-    const generationId = _computeGenerationId({
-      taskId, ownerExecutionId: lease.ownerExecutionId, fencingToken: lease.fencingToken, acquiredAt: lease.acquiredAt,
+    const kind = decisionKind === "resume" ? "resume" : "cold";
+    const telRecord = buildTelemetryRecord({
+      recordId: generationId, attemptId: generationId, generationId,
+      admission: { key: lease.key ?? null, ownerExecutionId: lease.ownerExecutionId ?? null, fencingToken: lease.fencingToken ?? null, acquiredAt: lease.acquiredAt ?? null },
+      workspace, taskId, milestoneId: milestoneId ?? null, class: klass ?? null,
+      highRisk: highRisk === "true" || highRisk === true,
+      hashes: { charter: hashes.charterHash, taskContract: hashes.taskContractHash, proposal: hashes.proposalHash, reviewPolicy: hashes.reviewPolicyHash },
+      decision: { kind, reason: null, priorGenerationId: null, priorReason: null, createsContentGeneration: kind === "resume" },
+      contentAgentDispatchCount: null, contentAgentMs: null,
+      terminal: { outcome, reason, phase: terminalPhase, cacheable: cacheable === "true" || cacheable === true },
+      leaseRelease: releaseResult ? { attempted: true, ok: releaseResult.ok, reason: releaseResult.reason ?? null } : { attempted: false, ok: null, reason: null },
+      sessionId: sessionId ?? null, recordedAtMs: Date.now(),
     });
-    const hashes = _readCurrentHashes({ workspace, taskId, charterFile });
-    const record = {
-      schemaVersion: 1,
-      taskId,
-      generationId,
-      charterHash: hashes.charterHash,
-      taskContractHash: hashes.taskContractHash,
-      proposalHash: hashes.proposalHash,
-      reviewPolicyHash: hashes.reviewPolicyHash,
-      terminalPhase,
-      outcome,
-      reason,
-      cacheable: cacheable === "true" || cacheable === true,
-      recordedAtMs: Date.now(),
-    };
-    fs.mkdirSync(path.dirname(_generationPath(workspace, taskId)), { recursive: true });
-    fs.writeFileSync(_generationPath(workspace, taskId), JSON.stringify(record, null, 2));
+    telemetryFile = _writeTelemetryRecord(workspace, taskId, generationId, telRecord);
+  } catch {
+    telemetryWriteOk = false;
+  }
+  return { telemetryWriteOk, telemetryFile };
+}
+
+// DIR-126-D/M203 Claim A.1 — extends the existing 13-pre-Receipt-site write with a SEPARATE
+// committed-telemetry write, ordered AFTER releaseLease(...) succeeds — UNCHANGED from before this
+// child for the .generation.json write + release themselves (same order, same shared try block, so
+// a .generation.json write failure still yields the pre-existing {ok:false} no-release-guarantee
+// behavior byte-for-byte). The NEW telemetry write's own try/catch runs only once release has
+// already been attempted, and is never the block releaseLease(...) runs inside, so a write throw
+// there can never prevent or retroactively invalidate a release that already happened (AC13); it
+// is surfaced via the returned `telemetryWriteOk` field, distinct from `ok` (which continues to
+// reflect only whether this call completed without throwing — AC14).
+export function _recordGenerationCli({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId, decisionKind }) {
+  try {
+    const { lease, generationId, hashes, record } = _writeLegacyGenerationRecord({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable });
     const releaseResult = releaseLease({ workspace, taskId, method: "normal", reason: reason || null, now: Date.now() });
-    return { ok: true, record, releaseResult };
+    const { telemetryWriteOk, telemetryFile } = _writeCommittedTelemetry({
+      taskId, workspace, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId,
+      lease, hashes, generationId, releaseResult, decisionKind,
+    });
+    return { ok: true, record, releaseResult, telemetryWriteOk, telemetryFile };
   } catch (err) {
     return { ok: false, error: err.message };
   }
 }
 
+// DIR-126-D/M203 Claim A.4 — Receipt-phase split, write half: extends --record-generation with a
+// --no-release variant that writes .generation.json AND the new committed telemetry file but does
+// NOT call releaseLease at all — backs prepare-milestone.js's restructured Receipt sequence (write
+// first, then --build, then release), so a silent write failure is visible BEFORE the receipt-build
+// agent call ever runs, never absorbed into a false 'prepared' certification.
+export function _writeGenerationTelemetryCli({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId, decisionKind }) {
+  try {
+    const { lease, generationId, hashes, record } = _writeLegacyGenerationRecord({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable });
+    const { telemetryWriteOk, telemetryFile } = _writeCommittedTelemetry({
+      taskId, workspace, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId,
+      lease, hashes, generationId, releaseResult: null, decisionKind,
+    });
+    return { ok: true, record, generationId, telemetryWriteOk, telemetryFile };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// DIR-126-D/M203 Claim A.4 — Receipt-phase split, release half: release ONLY, no write — a thin
+// wrapper around the already-imported releaseLease, backing the restructured Receipt sequence's
+// final step (and its telemetry-write-failure early-exit step).
+export function _releaseLeaseOnlyCli({ taskId, workspace, reason }) {
+  try {
+    const releaseResult = releaseLease({ workspace, taskId, method: "normal", reason: reason || null, now: Date.now() });
+    return { ok: true, releaseResult };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// DIR-126-D/M203 Claim A.3 — --record-attempt: the 3 pre-lease exit sites (missing-required-args,
+// admission-check-failed, prepare-already-running) hold no Admission lease and cannot derive a
+// real generationId (the contention/pre-lease `owner` shape structurally lacks `fencingToken` —
+// point 6 of the task's own Problem framing), so this submode writes ONLY the new committed
+// telemetry file (never touches .quay/prepare-leases/ at all), keyed by an attempt-scoped
+// `computeAttemptId` hash of the fields the caller's own verdict already exposes.
+// `taskId === null` (the missing-required-args case where taskId itself is the missing field)
+// routes to telemetryPath's fixed `_missing-taskId` segment.
+export function _recordAttemptCli({ taskId, workspace, site, detail }) {
+  const effectiveTaskId = taskId ? taskId : null;
+  let detailObj = {};
+  if (detail) {
+    try { detailObj = JSON.parse(detail); } catch { detailObj = { raw: detail }; }
+  }
+  const attemptId = computeAttemptId({ site, taskId: effectiveTaskId, detail: detailObj });
+  const phase = site === "missing-required-args" ? "ProposalAuthors" : "Admission";
+  const record = buildTelemetryRecord({
+    recordId: attemptId, attemptId, generationId: null,
+    admission: null, workspace, taskId: effectiveTaskId, milestoneId: null, class: null, highRisk: null,
+    hashes: null,
+    decision: { kind: "not-evaluated", reason: null, priorGenerationId: null, priorReason: null, createsContentGeneration: false },
+    contentAgentDispatchCount: 0, contentAgentMs: 0,
+    terminal: { outcome: "needs-human", reason: site, phase, cacheable: false },
+    leaseRelease: { attempted: false, ok: null, reason: null },
+    sessionId: null, recordedAtMs: Date.now(),
+  });
+  let telemetryWriteOk = true;
+  let telemetryFile = null;
+  try {
+    telemetryFile = _writeTelemetryRecord(workspace, effectiveTaskId, attemptId, record);
+  } catch {
+    telemetryWriteOk = false;
+  }
+  return { ok: true, attemptId, record, telemetryWriteOk, telemetryFile };
+}
+
 async function _cliMain(argv) {
   const spec = {
-    usage: "(--decide-resume|--record-generation) --taskId <id> --workspace <dir> [--charterFile <path>] [--callerOverride true|false] [--terminalPhase <phase>] [--outcome <o>] [--reason <r>] [--cacheable <bool>]",
+    usage: "(--decide-resume|--record-generation [--no-release]|--release-only|--record-attempt) --taskId <id> --workspace <dir> [--charterFile <path>] [--callerOverride true|false] [--terminalPhase <phase>] [--outcome <o>] [--reason <r>] [--cacheable <bool>] [--milestoneId <id>] [--class <c>] [--highRisk <bool>] [--sessionId <id>] [--site <site>] [--detail <json>]",
     minArgs: 0,
     flags: {
       "decide-resume": { type: "boolean" },
       "record-generation": { type: "boolean" },
+      "no-release": { type: "boolean" },
+      "release-only": { type: "boolean" },
+      "record-attempt": { type: "boolean" },
       taskId: { type: "string" },
       workspace: { type: "string" },
       charterFile: { type: "string" },
@@ -485,11 +781,31 @@ async function _cliMain(argv) {
       outcome: { type: "string" },
       reason: { type: "string" },
       cacheable: { type: "string" },
+      milestoneId: { type: "string" },
+      class: { type: "string" },
+      highRisk: { type: "string" },
+      sessionId: { type: "string" },
+      site: { type: "string" },
+      detail: { type: "string" },
+      decisionKind: { type: "string" },
     },
   };
   const parsed = parseArgs(argv, spec);
   const taskId = parsed.flags.taskId;
   const workspace = parsed.flags.workspace;
+
+  // DIR-126-D/M203 Claim A.3 — the one submode taskId is allowed to be absent for: the
+  // missing-required-args site's whole point is that taskId itself may be the missing field.
+  if (parsed.flags["record-attempt"]) {
+    if (!workspace) {
+      console.error(`usage: node proposal-convergence.ts ${spec.usage}`);
+      return 2;
+    }
+    const out = _recordAttemptCli({ taskId: taskId || null, workspace, site: parsed.flags.site, detail: parsed.flags.detail });
+    console.log(JSON.stringify(out));
+    return out.ok && out.telemetryWriteOk !== false ? 0 : 1;
+  }
+
   if (!taskId || !workspace) {
     console.error(`usage: node proposal-convergence.ts ${spec.usage}`);
     return 2;
@@ -499,11 +815,29 @@ async function _cliMain(argv) {
     console.log(JSON.stringify(out));
     return 0;
   }
+  if (parsed.flags["release-only"]) {
+    const out = _releaseLeaseOnlyCli({ taskId, workspace, reason: parsed.flags.reason });
+    console.log(JSON.stringify(out));
+    return out.ok && out.releaseResult?.ok ? 0 : 1;
+  }
+  if (parsed.flags["record-generation"] && parsed.flags["no-release"]) {
+    const out = _writeGenerationTelemetryCli({
+      taskId, workspace, charterFile: parsed.flags.charterFile,
+      terminalPhase: parsed.flags.terminalPhase, outcome: parsed.flags.outcome,
+      reason: parsed.flags.reason, cacheable: parsed.flags.cacheable,
+      milestoneId: parsed.flags.milestoneId, class: parsed.flags.class, highRisk: parsed.flags.highRisk,
+      sessionId: parsed.flags.sessionId, decisionKind: parsed.flags.decisionKind,
+    });
+    console.log(JSON.stringify(out));
+    return out.ok && out.telemetryWriteOk !== false ? 0 : 1;
+  }
   if (parsed.flags["record-generation"]) {
     const out = _recordGenerationCli({
       taskId, workspace, charterFile: parsed.flags.charterFile,
       terminalPhase: parsed.flags.terminalPhase, outcome: parsed.flags.outcome,
       reason: parsed.flags.reason, cacheable: parsed.flags.cacheable,
+      milestoneId: parsed.flags.milestoneId, class: parsed.flags.class, highRisk: parsed.flags.highRisk,
+      sessionId: parsed.flags.sessionId, decisionKind: parsed.flags.decisionKind,
     });
     console.log(JSON.stringify(out));
     return out.ok && out.releaseResult?.ok ? 0 : 1;

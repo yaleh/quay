@@ -70,7 +70,13 @@ export function computeCurrentHashes({ taskFile, charterFile, receipt }) {
 // (fullSynthesisCount, deltaRounds, highRisk, terminalReason, timestamps, proposalHashes) —
 // mechanically re-verified against policy caps by checkPreparation() via
 // proposal-convergence.ts's validateConvergenceCounters(), never trusted as self-reported.
-export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planFile, sourceFiles = [], review, planCheck, touches = [], provenance, ledgerFile, convergence }) {
+// `telemetryFile` (DIR-126-D/M203): mirrors `ledgerFile` verbatim — the committed
+// milestones/prepare-telemetry/<taskId>/<recordId>.json record the Receipt phase's
+// `_writeGenerationTelemetry` call already wrote BEFORE this `--build` dispatch runs. Hash-bound
+// into `hashes.telemetry` the exact same way `ledgerFile` is hash-bound into `hashes.ledger`, so a
+// later swap for a different/edited telemetry record is caught by checkPreparation()'s
+// `telemetry-stale`/`telemetry-missing` checks (Claim A.5) rather than silently passing.
+export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planFile, sourceFiles = [], review, planCheck, touches = [], provenance, ledgerFile, convergence, telemetryFile }) {
   const taskText = fs.readFileSync(taskFile, "utf8");
   const proposalSection = extractSection(taskText, "Proposal") || "";
   const charterText = fs.readFileSync(charterFile, "utf8");
@@ -78,18 +84,21 @@ export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planF
   const sources = {};
   for (const f of sourceFiles) sources[f] = sha256(fs.readFileSync(f, "utf8"));
   const ledgerHash = ledgerFile ? sha256(fs.readFileSync(ledgerFile, "utf8")) : undefined;
+  const telemetryHash = telemetryFile ? sha256(fs.readFileSync(telemetryFile, "utf8")) : undefined;
   return {
     taskId,
     milestoneId,
     charterFile,
     planFile,
     ledgerFile: ledgerFile ?? null,
+    telemetryFile: telemetryFile ?? null,
     hashes: {
       proposal: sha256(proposalSection.trim()),
       charter: sha256(charterText),
       plan: sha256(planText),
       sources,
       ...(ledgerHash !== undefined ? { ledger: ledgerHash } : {}),
+      ...(telemetryHash !== undefined ? { telemetry: telemetryHash } : {}),
     },
     review: review ?? { findings: 0 },
     planCheck: planCheck ?? { rounds: 1, findings: 0 },
@@ -139,6 +148,38 @@ export function computeTouchesExpansion(receiptTouches, declaredTouches) {
   }
   const expanded = receiptTouches.filter((t) => !declaredTouches.includes(t));
   return { expanded };
+}
+
+// ── queryTelemetryReport — DIR-126-D/M203 Claim B.1: the ONE read-only query mode over the
+// committed milestones/prepare-telemetry/**/*.json tree. Filters by each record's own EMBEDDED
+// `milestoneId` field, never by directory layout alone — layout is `taskId`-primary and a
+// re-charter'd task can carry a different `milestoneId` across generations under the same
+// directory. Zero matches is an explicit, typed result, never a crash and never an ambiguous
+// empty-looking silent success (AC22).
+export function queryTelemetryReport({ workspace, milestoneId }) {
+  const root = path.join(workspace, "milestones", "prepare-telemetry");
+  const records = [];
+  function walk(dir) {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(p);
+      } else if (entry.isFile() && entry.name.endsWith(".json")) {
+        try {
+          const rec = JSON.parse(fs.readFileSync(p, "utf8"));
+          if (rec && rec.milestoneId === milestoneId) records.push(rec);
+        } catch {
+          // Malformed telemetry file — skipped, never crashes the report query.
+        }
+      }
+    }
+  }
+  walk(root);
+  if (records.length === 0) {
+    return { ok: true, code: "no-records", milestoneId };
+  }
+  return { ok: true, code: "records-found", milestoneId, records };
 }
 
 // ── parsePlanStages / validatePlanStructure — DIR-117 iteration-2 item 3: real structural Plan
@@ -328,6 +369,21 @@ export function checkPreparation({ taskFile, charterFile, receiptFile, declaredT
       return { ok: false, code: "ledger-blocking-findings-open", message: `finding ledger still has ${openBlocking.length} open blocking finding(s) — preparation cannot pass until they are resolved or the ledger is superseded by a fresh receipt` };
     }
   }
+  // DIR-126-D/M203 Claim A.5 — telemetry hash-binding, structurally identical to the receipt.ledgerFile
+  // block above. Fully backward-compatible: a receipt built before DIR-126-D (no `telemetryFile`)
+  // skips this block entirely — no existing M195/M197/M200/M201/M202-shaped fixture becomes
+  // stricter. Instrumentation can never turn a failed preparation into a falsely-certified
+  // `prepared`: a receipt naming a missing/mismatched telemetry record fails closed here, before
+  // the final `{ok:true, code:"prepared"}` return below is ever reached.
+  if (receipt.telemetryFile) {
+    if (!fs.existsSync(receipt.telemetryFile)) {
+      return { ok: false, code: "telemetry-missing", message: `preparation receipt names a telemetry record that no longer exists: ${receipt.telemetryFile}` };
+    }
+    const currentTelemetryHash = sha256(fs.readFileSync(receipt.telemetryFile, "utf8"));
+    if (currentTelemetryHash !== receipt.hashes?.telemetry) {
+      return { ok: false, code: "telemetry-stale", message: `telemetry record (${receipt.telemetryFile}) has changed since preparation, or this receipt has been paired with a telemetry record it did not build — rerun preparation` };
+    }
+  }
   if (receipt.convergence) {
     const convergenceResult = validateConvergenceCounters({
       highRisk: receipt.convergence.highRisk,
@@ -408,6 +464,13 @@ function parseArgs(argv) {
     else if (a === "--ledger") out.ledgerFile = argv[++i];
     else if (a === "--convergence-json") out.convergenceJson = argv[++i];
     else if (a === "--metrics") out.metrics = true;
+    // DIR-126-D/M203 Claim A.5/B.1 — telemetry hash-binding (--telemetry, mirrors --ledger) and the
+    // read-only query mode (--telemetry-report <milestoneId>). --workspace is the root
+    // queryTelemetryReport scans milestones/prepare-telemetry/ under (defaults to "." — the SAME
+    // default proposal-convergence.ts's own CLI implicitly relies on via its own --workspace flag).
+    else if (a === "--telemetry") out.telemetryFile = argv[++i];
+    else if (a === "--workspace") out.workspace = argv[++i];
+    else if (a === "--telemetry-report") out.telemetryReportMilestoneId = argv[++i];
   }
   return out;
 }
@@ -437,14 +500,18 @@ if (isDirectInvocation()) {
       taskFile, charterFile, planFile, outFile, taskId, milestoneId, sourceFiles,
       reviewFindings, planCheckRounds, planCheckFindings, touches,
       proposalAuthorSessions, adjudicatorSession, reviewSession, planAuthorSession, planCheckSessions,
-      ledgerFile, convergenceJson,
+      ledgerFile, convergenceJson, telemetryFile,
     } = parsed;
     if (!taskFile || !charterFile || !planFile || !outFile || !taskId) {
-      console.error("usage: node milestone-preparation-check.ts --build --task-id <id> --task <task.md> --charter <charter.md> --plan <plan.md> --out <receipt.json> [--milestone-id <M-id>] [--sources a,b,c] [--review-findings N] [--plancheck-rounds N] [--plancheck-findings N] [--touches a,b,c] [--proposal-author-sessions a,b] [--adjudicator-session id] [--review-session id] [--plan-author-session id] [--plancheck-sessions r1,r2] [--ledger ledger.json] [--convergence-json '{...}']");
+      console.error("usage: node milestone-preparation-check.ts --build --task-id <id> --task <task.md> --charter <charter.md> --plan <plan.md> --out <receipt.json> [--milestone-id <M-id>] [--sources a,b,c] [--review-findings N] [--plancheck-rounds N] [--plancheck-findings N] [--touches a,b,c] [--proposal-author-sessions a,b] [--adjudicator-session id] [--review-session id] [--plan-author-session id] [--plancheck-sessions r1,r2] [--ledger ledger.json] [--convergence-json '{...}'] [--telemetry telemetry.json]");
       process.exit(2);
     }
     if (ledgerFile && !fs.existsSync(ledgerFile)) {
       console.error(`ERROR: --ledger file does not exist: ${ledgerFile}`);
+      process.exit(2);
+    }
+    if (telemetryFile && !fs.existsSync(telemetryFile)) {
+      console.error(`ERROR: --telemetry file does not exist: ${telemetryFile}`);
       process.exit(2);
     }
     let convergence = null;
@@ -474,6 +541,7 @@ if (isDirectInvocation()) {
       provenance,
       ledgerFile: ledgerFile || undefined,
       convergence,
+      telemetryFile: telemetryFile || undefined,
     });
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, JSON.stringify(receipt, null, 2) + "\n");
@@ -488,6 +556,13 @@ if (isDirectInvocation()) {
       process.exit(2);
     }
     const result = computeMetricsForReceipt({ receiptFile: parsed.receiptFile });
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(result.ok ? 0 : 1);
+  }
+
+  if (parsed.telemetryReportMilestoneId) {
+    // ── --telemetry-report <milestoneId> mode: DIR-126-D/M203 Claim B.1 read-only query. ─────────
+    const result = queryTelemetryReport({ workspace: parsed.workspace || ".", milestoneId: parsed.telemetryReportMilestoneId });
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.ok ? 0 : 1);
   }

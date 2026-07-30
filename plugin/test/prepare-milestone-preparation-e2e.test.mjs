@@ -211,6 +211,20 @@ function makeAgentMock(taskFileOnDisk) {
       return { ok: verdict.ok, code: verdict.code, findings: verdict.findings };
     }
 
+    // M203/DIR-126-D Claim A.4 — the Receipt phase's new write-first dispatch (--record-generation
+    // --no-release), fired before the 'receipt' agent below. Writes a REAL file on disk (mirrors
+    // prepare-milestone-convergence.test.mjs's own makeMock() handling of this same new label) so
+    // the subsequent real `--build --telemetry <file>` shell dispatch below can genuinely hash it.
+    if (label === 'write-telemetry-Receipt') {
+      const milestoneIdMatch = prompt.match(/--milestoneId (\S+)/);
+      const milestoneId = milestoneIdMatch ? milestoneIdMatch[1] : 'UNKNOWN-MILESTONE';
+      const telemetryFile = path.join('milestones', milestoneId, 'prepare-telemetry-mock.json');
+      const abs = path.join(REPO_ROOT, telemetryFile);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, JSON.stringify({ schemaVersion: 2, recordId: 'mock', mock: true }, null, 2));
+      return { raw: JSON.stringify({ ok: true, telemetryWriteOk: true, telemetryFile }) };
+    }
+
     if (label === 'plan-author') {
       sessions.planAuthor = 'sess-plan-author';
       planFile = planFileFromPrompt(prompt);

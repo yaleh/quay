@@ -64,7 +64,30 @@ const _highRisk = $a.highRisk === true
 const _taskFile = `tasks/${_taskId}.md`
 const _receiptFile = `milestones/${_milestoneId}/preparation.json`
 
+// M203/DIR-126-D Claim A.3: proposal-convergence.ts's new --record-attempt CLI submode, dispatched
+// at the 3 pre-lease exit sites (missing-required-args, admission-check-failed,
+// prepare-already-running) — none of which holds an Admission lease or can derive a real
+// generationId. Defined here, BEFORE _taskId's own missing-required-args check, so that check can
+// dispatch it too — the ONE new call this file gains before any lease exists. Fire-and-forget:
+// telemetry is additive, its own result is never inspected/branched on, and the caller's existing
+// return value/shape is byte-identical either way.
+const _convergenceScript = 'experiments/quay-perpetual-stream/scripts/proposal-convergence.ts'
+
+async function _recordAttemptAgentCall(site, detailObj) {
+  // _taskId may be genuinely absent (the missing-required-args site's whole point) — omit the
+  // --taskId flag entirely rather than pass an empty value, so the shell command the agent
+  // constructs never has an ambiguous/empty flag argument.
+  const _taskIdFlag = _taskId ? `--taskId ${JSON.stringify(_taskId)} ` : ''
+  return agent(
+    `Run exactly this shell command and report its stdout verbatim:
+node --experimental-strip-types ${_convergenceScript} --record-attempt ${_taskIdFlag}--workspace . --site ${JSON.stringify(site)} --detail ${JSON.stringify(JSON.stringify(detailObj || {}))}
+Do not paraphrase or reformat the command's stdout — copy it exactly as printed. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
+    { label: `record-attempt-${site}`, phase: 'Admission', schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } } }
+  )
+}
+
 if (!_taskId || !_milestoneId || !_charterFile) {
+  await _recordAttemptAgentCall('missing-required-args', { taskId: _taskId || null, milestoneId: _milestoneId || null, charterFile: _charterFile || null })
   return { outcome: 'needs-human', reason: 'missing-required-args (taskId/milestoneId/charterFile)', phase: 'ProposalAuthors' }
 }
 
@@ -128,9 +151,9 @@ async function _renewLease(stageLabel) {
 // M202/DIR-126-C: proposal-convergence.ts's new thin CLI tail — the SAME agent()-wraps-a-real-CLI
 // shape every dispatch in this file already uses, just pointed at a different, in-Touches script
 // (proposal-convergence.ts, never prepare-admission-check.ts — see the task's own Problem framing
-// for why that boundary is load-bearing).
-const _convergenceScript = 'experiments/quay-perpetual-stream/scripts/proposal-convergence.ts'
-
+// for why that boundary is load-bearing). `_convergenceScript` itself is defined earlier (before
+// _taskId's own missing-required-args check, M203/DIR-126-D) so _recordAttemptAgentCall can also
+// use it.
 async function _convergenceAgentCall(flagsText, label) {
   return agent(
     `Run exactly this shell command and report its stdout verbatim:
@@ -150,8 +173,33 @@ Do not paraphrase or reformat the command's stdout — copy it exactly as printe
 // CACHEABLE_TERMINALS-allowlisted {terminalPhase, reason} pairs (PreflightContent/
 // preflight-rejected, ProposalReview/split-recommended); `false` everywhere else.
 async function _releaseLeaseAndRecord(stageLabel, { terminalPhase, outcome, reason, cacheable }) {
+  // M203/DIR-126-D: `--decisionKind` threads this GENERATION's own cold/resume verdict
+  // (`_resumeFromAdjudicatedProposal`, set by the resume-decision block above) into the committed
+  // telemetry record's `decision.kind` — per the frozen schema, `cold|resume` for admitted
+  // attempts, never the `not-evaluated` value reserved for the three pre-lease sites.
   return _convergenceAgentCall(
-    `--record-generation --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --terminalPhase ${terminalPhase} --outcome ${outcome} --reason ${JSON.stringify(reason)} --cacheable ${cacheable}`,
+    `--record-generation --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --terminalPhase ${terminalPhase} --outcome ${outcome} --reason ${JSON.stringify(reason)} --cacheable ${cacheable} --milestoneId ${_milestoneId} --class ${_class} --highRisk ${_highRisk} --decisionKind ${_resumeFromAdjudicatedProposal ? 'resume' : 'cold'}`,
+    `admission-release-${stageLabel}`
+  )
+}
+
+// M203/DIR-126-D Claim A.4 — Receipt-phase split, backing the restructured write-first/build/
+// release sequence: _writeGenerationTelemetry dispatches --record-generation --no-release (writes
+// .generation.json AND the new committed telemetry file, no release); _releaseLease dispatches
+// --release-only (release only, no write). Both reuse _convergenceAgentCall's SAME
+// agent()-wraps-a-real-CLI shape — no new dispatch mechanism. _releaseLease keeps the SAME
+// `admission-release-${stageLabel}` label _releaseLeaseAndRecord already uses (label continuity
+// with the out-of-Touches e2e mock's `/^admission-release-/` fail-closed dispatch chain).
+async function _writeGenerationTelemetry(stageLabel, { terminalPhase, outcome, reason, cacheable }) {
+  return _convergenceAgentCall(
+    `--record-generation --no-release --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --terminalPhase ${terminalPhase} --outcome ${outcome} --reason ${JSON.stringify(reason)} --cacheable ${cacheable} --milestoneId ${_milestoneId} --class ${_class} --highRisk ${_highRisk} --decisionKind ${_resumeFromAdjudicatedProposal ? 'resume' : 'cold'}`,
+    `write-telemetry-${stageLabel}`
+  )
+}
+
+async function _releaseLease(stageLabel, { reason }) {
+  return _convergenceAgentCall(
+    `--release-only --taskId ${_taskId} --workspace . --reason ${JSON.stringify(reason)}`,
     `admission-release-${stageLabel}`
   )
 }
@@ -177,11 +225,13 @@ if (!_admissionVerdict || (_admissionVerdict.outcome !== 'acquired' && _admissio
   // silently falls through to ProposalAuthors as if admission had succeeded. Distinct reason code
   // (admission-check-failed) from an ordinary lease-contention verdict (prepare-already-running).
   log(`Admission phase FAILED — no parseable acquire/contention verdict (raw: ${_admissionResult?.raw ?? '(none)'}). Failing closed, never dispatching ProposalAuthors.`)
+  await _recordAttemptAgentCall('admission-check-failed', { detail: _admissionResult?.raw ?? null })
   return { outcome: 'needs-human', reason: 'admission-check-failed', phase: 'Admission', detail: _admissionResult?.raw ?? '(agent returned no output)' }
 }
 
 if (_admissionVerdict.outcome === 'prepare-already-running') {
   log(`Admission: prepare-already-running — an active lease is held by ${_admissionVerdict.owner?.ownerExecutionId} (stage=${_admissionVerdict.owner?.stage}, leaseUntil=${_admissionVerdict.owner?.leaseUntil}). Returning before any ProposalAuthors agent is dispatched — zero author agent turns spent.`)
+  await _recordAttemptAgentCall('prepare-already-running', { owner: _admissionVerdict.owner ?? null })
   return { outcome: 'needs-human', reason: 'prepare-already-running', phase: 'Admission', owner: _admissionVerdict.owner }
 }
 
@@ -744,6 +794,24 @@ const _convergence = {
 }
 const _convergenceJson = JSON.stringify(_convergence)
 
+// M203/DIR-126-D Claim A.4 — Receipt-phase split, dispatch count 2 -> 3 (scoped to Receipt only;
+// the 13 pre-Receipt sites and reuse-terminal stay at exactly 1, unchanged): write the generation
+// telemetry record FIRST, before the receipt-build agent ever runs — closes a real gap where
+// today's flow lets the receipt-build agent call run (and even the receipt file get written) before
+// any generation-identity record exists, so a silent generation-record write failure would be
+// invisible, absorbed into a false 'prepared' certification. A write failure here returns
+// needs-human/telemetry-write-failed and releases the lease WITHOUT ever dispatching --build.
+const _writeTelResult = await _writeGenerationTelemetry('Receipt', { terminalPhase: 'Receipt', outcome: 'prepared', reason: 'prepared', cacheable: false })
+const _writeTelVerdict = _writeTelResult?.raw ? _parseAgentJson(_writeTelResult.raw) : null
+
+if (!_writeTelVerdict || _writeTelVerdict.ok !== true || _writeTelVerdict.telemetryWriteOk === false) {
+  log(`Receipt phase: generation-telemetry write FAILED (verdict: ${JSON.stringify(_writeTelVerdict)}) — releasing the lease, never dispatching --build off an unwritten telemetry record.`)
+  await _releaseLease('Receipt', { reason: 'telemetry-write-failed' })
+  return { outcome: 'needs-human', reason: 'telemetry-write-failed', phase: 'Receipt' }
+}
+const _telemetryFile = _writeTelVerdict.telemetryFile
+log(`Receipt phase: generation-telemetry written to ${_telemetryFile} — proceeding to --build --telemetry against a file that already exists on disk.`)
+
 const receiptResult = await agent(
   `Write the preparation receipt + finding ledger for task ${_taskId} / milestone ${_milestoneId}.
 
@@ -753,7 +821,7 @@ const receiptResult = await agent(
 ${_ledgerJson}
 \`\`\`
 
-2. Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --build --task-id ${_taskId} --milestone-id ${_milestoneId} --task ${_taskFile} --charter ${_charterFile} --plan ${_planFile} --review-findings 0 --plancheck-rounds ${_planCheckRound} --plancheck-findings 0 --ledger ${_ledgerFile} --convergence-json '${_convergenceJson}' --out ${_receiptFile}${_provenanceFlags}
+2. Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --build --task-id ${_taskId} --milestone-id ${_milestoneId} --task ${_taskFile} --charter ${_charterFile} --plan ${_planFile} --review-findings 0 --plancheck-rounds ${_planCheckRound} --plancheck-findings 0 --ledger ${_ledgerFile} --telemetry ${_telemetryFile} --convergence-json '${_convergenceJson}' --out ${_receiptFile}${_provenanceFlags}
 
 (Add --sources <comma-separated list> naming every source file the Plan-check actually inspected, and --touches <comma-separated list> matching the checked Plan's declared touch set, if either is non-empty — read them from the Plan file at ${_planFile}.)
 
@@ -766,16 +834,17 @@ Return {ok: <step-3 command exit === 0>, receiptFile: "${_receiptFile}", detail:
 
 if (!receiptResult || receiptResult.ok !== true) {
   log(`Receipt phase FAILED self-check: ${receiptResult?.detail || '(agent returned nothing)'}`)
-  await _releaseLeaseAndRecord('receipt-selfcheck-failed', { terminalPhase: 'Receipt', outcome: 'revision-needed', reason: 'receipt-selfcheck-failed', cacheable: false })
+  await _releaseLease('Receipt', { reason: 'receipt-selfcheck-failed' })
   return { outcome: 'revision-needed', reason: 'receipt-selfcheck-failed', phase: 'Receipt' }
 }
 
-log(`Prepared: ${_taskId} — receipt at ${_receiptFile}, ledger at ${_ledgerFile}, Plan at ${_planFile}, ${_planCheckRound} Plan-check round(s), ${_fullSynthesisCount} full synthesis${_resumeFromAdjudicatedProposal ? ' (resumed — ProposalAuthors/Adjudicate skipped)' : ''} + ${_deltaRound} delta round(s), zero open blocking findings.`)
+log(`Prepared: ${_taskId} — receipt at ${_receiptFile}, ledger at ${_ledgerFile}, telemetry at ${_telemetryFile}, Plan at ${_planFile}, ${_planCheckRound} Plan-check round(s), ${_fullSynthesisCount} full synthesis${_resumeFromAdjudicatedProposal ? ' (resumed — ProposalAuthors/Adjudicate skipped)' : ''} + ${_deltaRound} delta round(s), zero open blocking findings.`)
 
 // Final release (WIRING-CLAIM 2, line-497-class success return): the single most safety-critical
 // site — a verifier who stops at "11 named outcome sites" would never check this one, since it is
-// the file's own final success return, additional to and not folded into the other 11.
-await _releaseLeaseAndRecord('prepared', { terminalPhase: 'Receipt', outcome: 'prepared', reason: 'prepared', cacheable: false })
+// the file's own final success return, additional to and not folded into the other 11. Release
+// ONLY (no write — the generation-telemetry write already happened above, before --build ran).
+await _releaseLease('Receipt', { reason: 'prepared' })
 
 return {
   outcome: 'prepared',

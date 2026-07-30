@@ -245,6 +245,33 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
       calls.planCheckers.push(round);
       return { findings: 0, sessionId: `sess-plan-checker-${round}` };
     }
+    // M203/DIR-126-D Claim A.4 — the Receipt phase's new write-first dispatch (--record-generation
+    // --no-release), fired before the 'receipt' agent below. Writes a REAL file on disk (never a
+    // pure in-memory fake) so the subsequent real `--build --telemetry <file>` shell dispatch below
+    // can genuinely hash it — mirrors the ledger mock's own real-file-write pattern. Filed under
+    // milestones/<milestoneId>/ (not the production milestones/prepare-telemetry/<taskId>/ path) so
+    // this file's own existing per-test `cleanup(scratchDir, planFile, milestoneId)` convention
+    // removes it automatically — the exact production path convention is proven separately by
+    // proposal-convergence.test.mjs's real CLI-dispatch fixtures, this mock only needs a real,
+    // hashable file at SOME path.
+    if (label === 'write-telemetry-Receipt') {
+      calls.writeTelemetry = (calls.writeTelemetry || 0) + 1;
+      const milestoneIdMatch = prompt.match(/--milestoneId (\S+)/);
+      const milestoneId = milestoneIdMatch ? milestoneIdMatch[1] : 'UNKNOWN-MILESTONE';
+      const telemetryFile = path.join('milestones', milestoneId, 'prepare-telemetry-mock.json');
+      const abs = path.join(REPO_ROOT, telemetryFile);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, JSON.stringify({ schemaVersion: 2, recordId: 'mock', mock: true }, null, 2));
+      return { raw: JSON.stringify({ ok: true, telemetryWriteOk: true, telemetryFile }) };
+    }
+    // M203/DIR-126-D Claim A.3 — the 3 pre-lease sites' new fire-and-forget dispatch. Never
+    // exercised by THIS shared mock's own scenarios (admission-acquire above always succeeds), but
+    // handled here defensively so any future scenario reusing makeMock() that DOES reach one of
+    // these sites doesn't spuriously fail with "unexpected agent() call".
+    if (/^record-attempt-/.test(label)) {
+      calls.recordAttempts = (calls.recordAttempts || 0) + 1;
+      return { raw: JSON.stringify({ ok: true, telemetryWriteOk: true, attemptId: 'mock-attempt' }) };
+    }
     if (label === 'receipt') {
       const { ledgerFile, ledgerJson } = ledgerFromPrompt(prompt);
       fs.mkdirSync(path.dirname(ledgerFile), { recursive: true });
@@ -252,6 +279,7 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
       ledger = JSON.parse(ledgerJson);
       const cmds = extractNodeCommands(prompt);
       assert.equal(cmds.length, 2, `expected exactly 2 node commands in the Receipt prompt, got ${cmds.length}:\n${prompt}`);
+      assert.match(cmds[0], /--telemetry \S+/, 'the --build dispatch must hash-bind the telemetry file written just above (Claim A.4/A.5)');
       const build = runShell(cmds[0]);
       assert.equal(build.status, 0, `--build command failed:\n${build.stdout}`);
       const check = runShell(cmds[1]);
@@ -746,10 +774,17 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
     const args = baseArgs(scratchRel);
     const fn = loadWorkflow(workflowFile);
-    const calls = { authors: [] };
+    const calls = { authors: [], recordAttempts: 0 };
     const agentMock = async (prompt, opts = {}) => {
       const label = opts.label || '';
       if (label === 'admission-acquire') return { raw: 'not valid json {{{' };
+      // M203/DIR-126-D Claim A.3 — the new fire-and-forget --record-attempt dispatch this exact
+      // site (admission-check-failed) now makes, additive and never inspected/branched on by the
+      // caller.
+      if (label === 'record-attempt-admission-check-failed') {
+        calls.recordAttempts += 1;
+        return { raw: JSON.stringify({ ok: true, telemetryWriteOk: true, attemptId: 'mock-attempt' }) };
+      }
       if (/^proposal-author-\d+$/.test(label)) {
         calls.authors.push(label);
         return { authorIdx: 1, proposalText: 'unreachable', sessionId: 'sess' };
@@ -762,6 +797,7 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       assert.equal(result.reason, 'admission-check-failed');
       assert.equal(result.phase, 'Admission');
       assert.equal(calls.authors.length, 0, 'zero ProposalAuthors dispatches after a failed Admission phase');
+      assert.equal(calls.recordAttempts, 1, 'AC17: exactly one --record-attempt dispatch at this pre-lease site');
     } finally {
       fs.rmSync(scratchDir, { recursive: true, force: true });
     }
@@ -1005,7 +1041,7 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
 for (const [mirrorName, workflowFile] of MIRRORS) {
   const src = () => fs.readFileSync(workflowFile, 'utf8');
 
-  test(`[${mirrorName}] WIRING-CLAIM R5: exactly 15 real _releaseLeaseAndRecord( call sites, zero remaining bare _releaseLease( calls`, () => {
+  test(`[${mirrorName}] WIRING-CLAIM R5: exactly 13 real _releaseLeaseAndRecord( call sites (M203/DIR-126-D: Receipt's own 2 moved to the new _releaseLease split)`, () => {
     const text = src();
     // The baseline live count this Plan re-derives from git history (480cb58): 15 real
     // post-Admission _releaseLease( terminal-return call sites, not an assumed 11 or 12. Anchor on
@@ -1014,14 +1050,21 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     const baseline = execSync(`git show 480cb58:${mirrorName} | grep -c "await _releaseLease("`, { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
     assert.equal(baseline, '15', 'the historical baseline this child replaces is 15 real call sites');
 
-    // The landed file: zero bare `_releaseLease(` identifier occurrences (the helper itself was
-    // removed, not just its call sites renamed) ...
-    assert.doesNotMatch(text, /(?<!AndRecord)\b_releaseLease\(/, 'zero remaining bare _releaseLease( calls — the now-callerless helper was removed');
-    // ... and exactly 15 real `await _releaseLeaseAndRecord(` call sites (the function's OWN
-    // definition line also contains the substring `_releaseLeaseAndRecord(`, so anchor on the
-    // `await` prefix every real call site — and only a call site — carries).
+    // M203/DIR-126-D Claim A.4 (this child): Receipt's own 2 sites
+    // (receipt-selfcheck-failed/prepared) moved OFF the combined _releaseLeaseAndRecord helper onto
+    // the new write-first/build/release-only split (_writeGenerationTelemetry + _releaseLease) — the
+    // 13 pre-Receipt terminals (including reuse-terminal, which never called this helper at all) are
+    // UNCHANGED, still dispatching _releaseLeaseAndRecord exactly once each.
     const callSites = [...text.matchAll(/await _releaseLeaseAndRecord\(/g)];
-    assert.equal(callSites.length, 15, `expected exactly 15 await _releaseLeaseAndRecord( call sites, found ${callSites.length}`);
+    assert.equal(callSites.length, 13, `expected exactly 13 await _releaseLeaseAndRecord( call sites (15 minus Receipt's own 2), found ${callSites.length}`);
+
+    // The NEW _releaseLease(stageLabel, {reason}) helper (M203/DIR-126-D — a DIFFERENT function
+    // from the pre-M202 helper this same name historically referred to, which WAS fully removed at
+    // 480cb58) has exactly 3 real call sites, all scoped to the Receipt phase (Claim A.4's
+    // write/build/release-only restructuring): the telemetry-write-failure early exit, the
+    // receipt-selfcheck-failed terminal, and the final 'prepared' success release.
+    const newReleaseLeaseCallSites = [...text.matchAll(/await _releaseLease\('Receipt',/g)];
+    assert.equal(newReleaseLeaseCallSites.length, 3, `expected exactly 3 await _releaseLease('Receipt', ...) call sites, found ${newReleaseLeaseCallSites.length}`);
   });
 
   test(`[${mirrorName}] WIRING-CLAIM R5/R7 production-callsite half: the two content-preflight sites record terminalPhase:'PreflightContent', the two plan-shape sites record terminalPhase:'PreflightPlan' — NOT a coarse shared 'Preflight' value`, () => {
@@ -1050,5 +1093,25 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       { cwd: REPO_ROOT, encoding: 'utf8' }
     ).trim();
     assert.equal(out, '', `expected an empty diff against prepare-admission-check.ts/.gitignore since base 480cb58, got:\n${out}`);
+  });
+
+  // M203/DIR-126-D Stage 9 — AC19: zero new Date.now()/new Date()/import()/await import( regression
+  // guard, run over the FINISHED diff (this child's own new call sites already landed by the time
+  // this runs). Comment-stripping is load-bearing: this exact file already carries all four literal
+  // patterns inside `//` comments (the very ones commits f6db2a8/7357a91 added to document the
+  // production-crash class), so a naive whole-file regex would falsely fail RED against a clean file.
+  test(`[${mirrorName}] AC19: zero LIVE (non-comment) Date.now()/new Date(/await import(/bare import( call sites — the exact sandbox production-crash regression class (f6db2a8/7357a91)`, () => {
+    const text = src();
+    const stripped = text.split('\n').map((line) => line.replace(/\/\/.*$/, '')).join('\n');
+    const patterns = [
+      { name: 'Date.now()', re: /\bDate\.now\(\)/ },
+      { name: 'new Date(', re: /\bnew Date\(/ },
+      { name: 'await import(', re: /\bawait\s+import\(/ },
+      { name: 'bare import(', re: /\bimport\(/ },
+    ];
+    for (const { name, re } of patterns) {
+      const m = stripped.match(re);
+      assert.equal(m, null, `found a live (non-comment) '${name}' call site in ${mirrorName}: ${m ? JSON.stringify(m[0]) : ''}`);
+    }
   });
 }
