@@ -609,6 +609,40 @@ test("checkPreparation: backward-compatible — a receipt naming NO telemetryFil
   assert.equal(result.code, "prepared");
 });
 
+// AC23: existing M195/M197/M200/M201/M202-shaped fixtures (predating this child, none passing
+// --telemetry) are re-run and stay GREEN unmodified. The 5 real, already-landed receipts on disk
+// (milestones/{M195,M197,M200,M201,M202}/preparation.json) can't literally be re-checked against
+// their own historical hashes — the tasks/charters/plans they were computed against have since
+// evolved (landed, edited) — so "re-run" here means: reconstruct the REAL field-shape each of
+// those 5 receipts actually has (confirmed via direct read of the real files on disk), as a fresh
+// fixture hashed against CURRENT fixture files, and confirm checkPreparation still accepts each
+// shape unmodified. Two real, distinct historical shapes exist: M195/M200 (ledgerFile + hashes.ledger
+// present) and M197/M201/M202 (no ledger at all) — both always predate telemetryFile, confirmed via
+// `python3 -c "import json; ..."` reading all 5 real files: zero have a telemetryFile key.
+for (const m of ["M195", "M197", "M200", "M201", "M202"]) {
+  const hasLedger = m === "M195" || m === "M200";
+  test(`checkPreparation: backward-compat regression — ${m}-shaped receipt (${hasLedger ? "with" : "without"} ledger, no telemetryFile, real historical shape) stays GREEN unmodified (AC23)`, () => {
+    const real = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "..", "..", "..", "milestones", m, "preparation.json"), "utf8"));
+    assert.equal("telemetryFile" in real, false, `${m}'s real receipt must predate telemetryFile for this regression fixture to be honest`);
+    assert.equal(("ledger" in (real.hashes || {})), hasLedger, `${m}'s real hashes.ledger presence must match the historical shape being tested`);
+
+    const dir = freshTmpDir();
+    const ledgerFile = hasLedger ? makeLedgerFile(dir, [{ id: "hist1", subsystem: "s", summary: "historical finding", blocking: false, disposition: "backlog", status: "open" }]) : undefined;
+    const receipt = buildReceipt({
+      taskId: `FIXTURE-${m}-SHAPE`, milestoneId: m, charterFile: CHARTER, taskFile: TASK, planFile: PLAN,
+      sourceFiles: [SOURCE], review: real.review, planCheck: real.planCheck, touches: [SOURCE],
+      provenance: makeDistinctProvenance(), ledgerFile,
+    });
+    assert.equal("telemetryFile" in receipt ? receipt.telemetryFile : null, null, "reconstructed fixture must also have no telemetryFile — matching the real historical shape");
+    assert.equal(("ledger" in receipt.hashes), hasLedger);
+    const receiptFile = path.join(dir, "preparation.json");
+    fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2));
+    const result = checkPreparation({ taskFile: TASK, charterFile: CHARTER, receiptFile });
+    assert.equal(result.ok, true, result.message);
+    assert.equal(result.code, "prepared");
+  });
+}
+
 // ── Claim B.1 — queryTelemetryReport / --telemetry-report <milestoneId> ────────────────────────
 test("queryTelemetryReport: zero matching records -> {ok:true, code:'no-records'}, never a crash (AC22)", () => {
   const dir = freshTmpDir();

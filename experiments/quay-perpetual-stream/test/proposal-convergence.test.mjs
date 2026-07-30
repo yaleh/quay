@@ -902,6 +902,65 @@ describe("telemetry: record-generation / decide-resume / record-attempt real-dis
     }
   });
 
+  test("AC15: reuse-terminal telemetry-write failure AFTER release never downgrades to 'cold' — decision:'reuse-terminal' + accurate releaseResult + telemetryWriteOk:false, RED/GREEN", () => {
+    const taskId = "DIR-126-D-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId, "fixture proposal v1 — unchanged");
+    writeLease(dir, taskId, { ownerExecutionId: "sess-gen-1" });
+    try {
+      const rec = runNode([CONVERGENCE_SCRIPT, "--record-generation", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+        "--terminalPhase", "PreflightContent", "--outcome", "revision-needed", "--reason", "preflight-rejected", "--cacheable", "true"]);
+      assert.equal(rec.status, 0, rec.stdout);
+
+      execFileSync("node", ["--experimental-strip-types", ADMISSION_SCRIPT, "--acquire", "--taskId", taskId, "--workspace", dir], {
+        encoding: "utf8", env: { ...process.env, CLAUDE_CODE_SESSION_ID: "sess-gen-2" },
+      });
+
+      // GREEN precondition (RED without the isolation fix): confirm this WOULD be a real
+      // reuse-terminal decision before sabotaging the write — same setup as the AC4/AC15/AC16
+      // happy-path test above, just with the telemetry root made unwritable next.
+      const leaseBeforeDecide = leasePath(dir, taskId);
+      assert.ok(fs.existsSync(leaseBeforeDecide), "lease held prior to --decide-resume");
+
+      // The prior --record-generation call (A.1's own write path) already created
+      // milestones/prepare-telemetry/<taskId>/ as a real directory — chmod it read-only so the
+      // reuse-terminal (A.2) write's NEW record file inside that same directory fails with EACCES.
+      // (Can't reuse AC13/AC14's "make the root a FILE" trick here: that root already exists as a
+      // real directory by this point, so writeFileSync over it would EISDIR instead.)
+      const taskTelemetryDir = path.join(dir, "milestones", "prepare-telemetry", taskId);
+      assert.ok(fs.existsSync(taskTelemetryDir), "A.1's earlier write already created this directory");
+      fs.chmodSync(taskTelemetryDir, 0o500);
+
+      let decideOut;
+      try {
+        const decide = runNode([CONVERGENCE_SCRIPT, "--decide-resume", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile]);
+        assert.equal(decide.status, 0, decide.stdout);
+        decideOut = JSON.parse(decide.stdout.trim());
+      } finally {
+        fs.chmodSync(taskTelemetryDir, 0o700);
+      }
+
+      // The core AC15 assertions: the write throw must NOT collapse to the outer catch-all's
+      // {decision:'cold', reason:'decision-exception'} shape (which lacks releaseResult entirely
+      // and bypasses prepare-milestone.js's stranded-lease guard).
+      assert.equal(decideOut.decision, "reuse-terminal", `write failure must not downgrade to 'cold' or 'decision-exception' — got ${JSON.stringify(decideOut)}`);
+      assert.notEqual(decideOut.reason, "decision-exception");
+      assert.ok(decideOut.releaseResult, "releaseResult must be present (the outer catch-all omits it entirely)");
+      assert.equal(decideOut.releaseResult.ok, true, "the lease release itself succeeded before the write throw");
+      assert.equal(decideOut.telemetryWriteOk, false, "the write failure must surface, never silently swallowed as a false success");
+
+      // AC13-style corollary: the lease is genuinely gone despite the write throw — release
+      // happened strictly before the sabotaged write, and the write failure never re-orphans it.
+      assert.ok(!fs.existsSync(leaseBeforeDecide), "lease still released despite the reuse-terminal telemetry write throwing");
+
+      // No stray telemetry file exists at the intended path (the write genuinely failed, this
+      // isn't accidentally passing because the file landed somewhere else).
+      const telFile = telemetryPath(dir, taskId, decideOut.generationId);
+      assert.ok(!fs.existsSync(telFile), "no telemetry file should exist at the intended path — the write really failed");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("AC7: --record-generation with --decisionKind omitted defaults to decision.kind:'cold' (the safe default for an admitted attempt, never 'not-evaluated')", () => {
     const taskId = "DIR-126-D-CLI-FIXTURE";
     const { dir, charterFile } = makeCliScratch(taskId);

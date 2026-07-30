@@ -546,6 +546,15 @@ backward-compat run → deferral task → real-landing verification); mechanical
   `reuse-terminal` ([[DIR-126-C]]) each produce a record exposing hashes, decision/prior
   generation, mechanical/content dispatch counts, terminal/cacheability, lease-release result, and
   generation ID — retrieved via `--telemetry-report`, without parsing `~/.claude/projects/**.jsonl`.
+  **Post-audit, 4/5 real (coordinator-dispatched, disposable-fixture) evidence, left unticked —
+  "resumed" not reached:** cold + preflight-rejected (same record, `dfcc9bb3d6f8`), reuse-terminal
+  (`aebc3ac4629e`), and `prepare-already-running` contention (`8d83a6535dd5`) all confirmed real via
+  genuine `Workflow()` dispatches and `--telemetry-report` queries — full evidence at
+  `milestones/M203/telemetry-real-journal-proof.md`. A real `resume` decision requires a prior
+  record at a `RESUMABLE_PHASES` phase (strictly after `Adjudicate`), which requires running the
+  expensive `ProposalAuthors`/`Adjudicate` stages first — judged impractical for this
+  evidence-gathering pass; genuinely not reached, left honestly unticked at the "all 5" bar this
+  item's own text sets.
 - [x] **Generation identity cannot collide across runs in one Claude session:** two successive
   Admission owners with the same `ownerExecutionId` but different fencing tokens produce distinct
   generation IDs; the ID is mechanically traceable back to A's exact lease tuple.
@@ -597,11 +606,21 @@ backward-compat run → deferral task → real-landing verification); mechanical
 - [ ] **Pre-Receipt dispatch count never doubles:** a real multi-round generation's journal shows
   each of the 13 pre-Receipt `_releaseLeaseAndRecord` terminal call sites still dispatches exactly
   once per terminal (never silently doubled to 2) after the extended `--record-generation` change.
+  **Post-audit, partial real evidence, left unticked — 1/13 sites, not "each":** two independent
+  real `Workflow()` dispatches against the SAME `PreflightContent`/`preflight-rejected` site (one
+  of the 13) each produced exactly one telemetry write per terminal, never doubled — real journal +
+  telemetry-file evidence at `milestones/M203/telemetry-real-journal-proof.md`. The other 12 sites
+  remain confirmed only by the pre-existing static call-site grep, not a real per-site dispatch
+  journal — reaching all 13 with real dispatches was judged impractical for this pass.
 - [ ] **Receipt's real-dispatch count is exactly 3, not silently 2 or 4:** a real `prepared`
   generation's journal shows exactly 3 real dispatches for the Receipt terminal specifically
   (`_writeGenerationTelemetry('Receipt', ...)`, `milestone-preparation-check.ts --build --telemetry`,
   `_releaseLease('Receipt', ...)`) — distinct from the ordering-only RED/GREEN item below, and from
   the pre-Receipt-sites-stay-1 item above, which explicitly excludes Receipt from its own scope.
+  **Post-audit: genuinely NOT reached.** Requires a real `prepared` terminal — the full pipeline
+  (Admission→Preflight→ProposalAuthors→Adjudicate→ProposalReview→PlanAuthor→PlanCheck→Receipt),
+  the same cost class as this task's own real 11-round ProposalReview saga. Judged impractical for
+  a disposable-fixture evidence pass; left honestly unticked, no evidence gathered.
 - [x] **Pre-Receipt write-before-release ordering never orphans a lease:** a fixture that forces the
   new telemetry `fs.writeFileSync` inside `_recordGenerationCli` to throw confirms `releaseLease(...)`
   still ran and the Admission lease is not left held — the write is ordered after release, not
@@ -617,7 +636,7 @@ backward-compat run → deferral task → real-landing verification); mechanical
   `telemetryWriteOk:false` field, never silently swallowed and never flipping `ok` to `false` for an
   already-successful release — unlike today's landed `_recordGenerationCli` catch, which returns
   `{ok:false}` for ANY throw inside its shared try block, confirmed by direct source read.
-- [ ] **`reuse-terminal` telemetry-write failure never downgrades a released decision to `cold`,
+- [x] **`reuse-terminal` telemetry-write failure never downgrades a released decision to `cold`,
   RED/GREEN:** a fixture that forces A.2's new committed-telemetry write inside `_decideResumeCli`
   to throw AFTER `releaseLease(...)` has already succeeded confirms the function still returns
   `decision:'reuse-terminal'` with an accurate `releaseResult`, plus `telemetryWriteOk:false` —
@@ -625,7 +644,12 @@ backward-compat run → deferral task → real-landing verification); mechanical
   today would omit `releaseResult` entirely and bypass `prepare-milestone.js`'s stranded-lease guard
   (confirmed by direct source read of both files) — because A.2's write runs in its own try/catch,
   isolated from both the inner `releaseLease(...)` try/catch and the outer catch-all, mirroring A.1's
-  isolation guarantee above.
+  isolation guarantee above. **Post-audit RED/GREEN fixture added:**
+  `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs` ("AC15: reuse-terminal
+  telemetry-write failure AFTER release never downgrades to 'cold'...") — real subprocess CLI
+  dispatch, chmods the real `milestones/prepare-telemetry/<taskId>/` directory read-only to force a
+  genuine `EACCES` write throw, confirms `decision:'reuse-terminal'`, `releaseResult.ok:true`,
+  `telemetryWriteOk:false`, lease genuinely released, no stray telemetry file at the intended path.
 - [x] **`reuse-terminal` schema validation rejects malformed records:** a hand-corrupted
   `reuse-terminal` telemetry record (missing `generationId`, or carrying nonzero
   `contentAgentDispatchCount`/`contentAgentMs`, or lacking a prior generation/policy hash) is
@@ -661,9 +685,15 @@ backward-compat run → deferral task → real-landing verification); mechanical
   records confirms `--telemetry-report <milestoneId>` returns `{ok:true, code:"no-records"}`, not a
   crash and not an empty-looking silent success — a companion fixture to the read-after-write case
   above, exercising the Defaults table's zero-match commitment directly.
-- [ ] **Backward-compat regression run:** existing M195/M197/M200/M201/M202-shaped fixtures
+- [x] **Backward-compat regression run:** existing M195/M197/M200/M201/M202-shaped fixtures
   (predating this child, none passing `--telemetry`) are re-run and stay GREEN unmodified — an
-  explicit regression-run item, not an assumption.
+  explicit regression-run item, not an assumption. **Post-audit fixtures added:**
+  `experiments/quay-perpetual-stream/test/milestone-preparation-check.test.mjs` gains 5 real
+  fixtures, one per milestone, each verified against that milestone's OWN real
+  `milestones/<M>/preparation.json` field shape on disk (M195/M200: `ledgerFile` + `hashes.ledger`
+  present; M197/M201/M202: no ledger — all 5 confirmed to predate `telemetryFile`), reconstructed
+  fresh (current fixture hashes) and confirmed `checkPreparation()` still returns `{ok:true}` for
+  each.
 
 - [x] **Grounding evidence for the Problem-framing/Chosen-mechanism claims above (added for
   wiring-coverage completeness):** confirmed via direct source read — a `needs-human`/
@@ -869,10 +899,19 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
 - [ ] Landed on `master` under human-steered discipline (this touches
   `.claude/workflows/prepare-milestone.js` and the receipt integrity engine,
   `milestone-preparation-check.ts`).
-- [ ] A real, non-fixture cold run AND a real, non-fixture non-success generation both produce real,
-  inspectable telemetry records with command output, not asserted.
-- [ ] A real `reuse-terminal` record proves zero content agents and successful/typed lease release;
-  two generations sharing a parent session remain uniquely keyed.
+- [x] A real, non-fixture cold run AND a real, non-fixture non-success generation both produce real,
+  inspectable telemetry records with command output, not asserted. **Closed post-audit:** real
+  `Workflow()` dispatch (run `wf_5e205503-f45`) against a disposable fixture produced record
+  `dfcc9bb3d6f8` — simultaneously `decision.kind:"cold"` AND `terminal.outcome:"revision-needed"`
+  (non-success) — genuinely queryable via `--telemetry-report`. Full evidence:
+  `milestones/M203/telemetry-real-journal-proof.md`.
+- [x] A real `reuse-terminal` record proves zero content agents and successful/typed lease release;
+  two generations sharing a parent session remain uniquely keyed. **Closed post-audit:** real
+  dispatch (run `wf_28a637aa-626`) produced record `aebc3ac4629e` —
+  `contentAgentDispatchCount:0`/`contentAgentMs:0`/`createsContentGeneration:false`,
+  `leaseRelease.ok:true` — distinct `recordId` from the prior cold generation (`dfcc9bb3d6f8`),
+  uniquely keyed under the same parent session (`ownerExecutionId`). Full evidence: same proof
+  document.
 - [x] RED/GREEN evidence exists for the tamper-detection case and the missing-telemetry-fails-closed
   case.
 - [x] A fresh independent audit confirms the real production callsite for telemetry emission at
