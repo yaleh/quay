@@ -72,7 +72,7 @@ generations existing (this task's own DoD requirement).
   genuine near-instant Prepare run. M198 and M200 have real, distinct intervals
   (`1785301300000→1785314458203`, `1785329024996→1785330281481`). This matters acutely because
   **M195 is the exact receipt DIR-126's own parent Finding measured at ~80 real minutes (57 of them
-  PlanCheck)** — naively trusting `endedAtMs - startedAtMs` for M195 would report `0ms` for the
+  PlanCheck)** — naively trusting `endedAtMs` minus `startedAtMs` for M195 would report `0ms` for the
   slowest documented real generation on record, directly contradicting the reason this child exists.
 - `decision.createsContentGeneration` is written as `kind === "resume"` (`proposal-convergence.ts:664`,
   and directly visible in both live DIR-126-E records: `kind: "cold"` pairs with
@@ -144,8 +144,8 @@ Design, in order of load-bearing importance:
      directly follows from the confirmed fact that 0/8 committed receipts pair with any telemetry
      record today — a hard-pairing design would be vacuous against all existing real history.
 2. **Percentiles** via one small shared pure `percentile(sortedNumbers, p)` helper, applied to
-   receipt-side wall time, telemetry-side wall time (`recordedAtMs - admission.acquiredAt`, both
-   fields confirmed present on the live records), and — where measurable — agent-minutes; broken
+   receipt-side wall time, telemetry-side wall time (`recordedAtMs` minus `admission.acquiredAt`,
+   both fields confirmed present on the live records), and — where measurable — agent-minutes; broken
    down by `class` / `highRisk` / terminal `{phase,reason}` / `decision.kind` (`not-evaluated` its
    own bucket, never folded into `cold`).
 3. **Content-generation discriminator is `decision.kind ∈ {cold, resume}`**, never
