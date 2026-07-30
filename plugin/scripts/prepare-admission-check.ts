@@ -457,14 +457,25 @@ export function preflightMissingPrecedent({ taskBody, workspace }) {
 // distinct sites with different `secondaryLabel`s (WIRING-CLAIM 6): 'charter' (task Touches vs the
 // charter's own, pre-ProposalAuthors) and 'plan-files' (task Touches vs the checked Plan's aggregate
 // '- Files:' lines, pre-PlanCheck round 1) — ONE implementation, two call sites.
+// _stripWrappingBacktick — shared by both sides of preflightTouchesMismatch's comparison
+// (gap-prepare-admission-check-plan-files-backtick-asymmetry / found during real-dispatch
+// evidence-gathering for DIR-126-D's REFUTED audit AC12): a Touches bullet's backticks were
+// stripped here, but a Plan Stage's own '- Files:' line (parsed by milestone-preparation-check.ts's
+// parsePlanStages, reused not reinvented) was compared VERBATIM with no stripping at all — a
+// PlanAuthor that (stylistically, non-deterministically) backtick-wraps its Files: entries
+// produced a permanent, unfixable-by-redispatch false mismatch, since the wrapped/unwrapped forms
+// never string-equal or regex-match each other.
+function _stripWrappingBacktick(g) {
+  g = g.trim();
+  if (g.startsWith("`") && g.endsWith("`") && g.length >= 2) g = g.slice(1, -1).trim();
+  return g;
+}
 function _extractGlobsFromSection(sectionText) {
   const globs = [];
   for (const line of (sectionText || "").split(/\r?\n/)) {
     const m = line.match(/^\s*[-*]\s+(.+?)\s*$/);
     if (!m) continue;
-    let g = m[1].trim();
-    if (g.startsWith("`") && g.endsWith("`")) g = g.slice(1, -1);
-    g = g.trim();
+    const g = _stripWrappingBacktick(m[1]);
     if (g) globs.push(g);
   }
   return globs;
@@ -506,7 +517,7 @@ export function preflightTouchesMismatch({ taskBody, secondaryBody, secondaryLab
     // 'plan-files': aggregate every Stage's '- Files:' line (comma-separated real paths) — reuses
     // milestone-preparation-check.ts's own stage-block parser, never a second Markdown parser.
     const stages = parsePlanStages(secondaryBody || "");
-    secondaryGlobs = new Set(stages.flatMap((s) => (s.files || "").split(",").map((f) => f.trim()).filter(Boolean)));
+    secondaryGlobs = new Set(stages.flatMap((s) => (s.files || "").split(",").map((f) => _stripWrappingBacktick(f)).filter(Boolean)));
   }
   if (secondaryGlobs.size === 0) return null;
 

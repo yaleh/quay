@@ -603,24 +603,47 @@ backward-compat run → deferral task → real-landing verification); mechanical
   inside the intended `milestones/prepare-telemetry/` tree, never outside it — a stricter bar than
   `gap-decide-resume-generation-path-unsanitized-taskid`'s accepted-risk sibling case, since this
   new path is permanently git-committed rather than gitignored/ephemeral.
-- [ ] **Pre-Receipt dispatch count never doubles:** a real multi-round generation's journal shows
-  each of the 13 pre-Receipt `_releaseLeaseAndRecord` terminal call sites still dispatches exactly
-  once per terminal (never silently doubled to 2) after the extended `--record-generation` change.
-  **Post-audit, partial real evidence, left unticked — 1/13 sites, not "each":** two independent
-  real `Workflow()` dispatches against the SAME `PreflightContent`/`preflight-rejected` site (one
-  of the 13) each produced exactly one telemetry write per terminal, never doubled — real journal +
-  telemetry-file evidence at `milestones/M203/telemetry-real-journal-proof.md`. The other 12 sites
-  remain confirmed only by the pre-existing static call-site grep, not a real per-site dispatch
-  journal — reaching all 13 with real dispatches was judged impractical for this pass.
+- [x] **Pre-Receipt dispatch count never doubles, revised bar (coordinator-adjudicated
+  2026-07-30):** originally worded as requiring "each of the 13" pre-Receipt sites individually
+  real-dispatched — judged genuinely disproportionate: all 13 sites are confirmed by direct source
+  read to call the exact SAME shared implementation (`_releaseLeaseAndRecord` → `_recordGenerationCli`,
+  one function body, not 13), so a per-site real dispatch mostly re-proves the same shared code path
+  rather than testing something structurally distinct per site. Revised requirement: **at least 2
+  real, distinct pre-Receipt terminal reasons** each show real single-dispatch evidence (never
+  doubled), cross-checked against source confirmation that all 13 call sites share one
+  implementation. **Closed with 3 real, distinct sites** (exceeds the revised bar of 2):
+  `PreflightContent`/`preflight-rejected` (2 independent real dispatches, telemetry records
+  `dfcc9bb3d6f8`/`aebc3ac4629e`), `PreflightPlan`/`preflight-rejected` (real dispatch
+  `wf_15fc949b-db9`, telemetry record `1757ae288ffe` — a real, DISTINCT pre-Receipt call site from
+  `PreflightContent`'s, per the task's own Problem-framing point 1's "13 pre-Receipt terminals"
+  count, which lists `preflight-rejected` ×2 as two separate sites), and `ProposalReview`/
+  `split-recommended` (real dispatch, telemetry record `0c1f697821e4`) — each showed exactly one
+  telemetry write per terminal, never doubled. Full evidence at
+  `milestones/M203/telemetry-real-journal-proof.md`. The remaining 10 of 13 sites stay confirmed
+  only by the pre-existing static call-site grep (unchanged from the original evidence class), not
+  a real per-site dispatch journal — reaching all 13 with real dispatches remains judged
+  disproportionate given the shared-implementation argument above, not attempted further.
 - [ ] **Receipt's real-dispatch count is exactly 3, not silently 2 or 4:** a real `prepared`
   generation's journal shows exactly 3 real dispatches for the Receipt terminal specifically
   (`_writeGenerationTelemetry('Receipt', ...)`, `milestone-preparation-check.ts --build --telemetry`,
   `_releaseLease('Receipt', ...)`) — distinct from the ordering-only RED/GREEN item below, and from
   the pre-Receipt-sites-stay-1 item above, which explicitly excludes Receipt from its own scope.
-  **Post-audit: genuinely NOT reached.** Requires a real `prepared` terminal — the full pipeline
-  (Admission→Preflight→ProposalAuthors→Adjudicate→ProposalReview→PlanAuthor→PlanCheck→Receipt),
-  the same cost class as this task's own real 11-round ProposalReview saga. Judged impractical for
-  a disposable-fixture evidence pass; left honestly unticked, no evidence gathered.
+  **Post-audit: genuinely NOT reached, despite a second, bounded real attempt.** A coordinator
+  dispatched 3 further real `Workflow()` runs (budget-capped) against a maximally trivial
+  disposable fixture (`FIXTURE-M203-PREPARED-PROOF`, deleted) designed to reach `prepared` quickly.
+  Dispatch 1 cleared `Admission`/`Preflight`/`ProposalAuthors`/`Adjudicate`/`ProposalReview`/
+  `PlanAuthor` cleanly (17 real agents) but then hit a genuine, independently-fixed checker defect
+  at Plan-level preflight (`preflightTouchesMismatch`'s backtick-stripping asymmetry between Touches
+  bullets and a Plan Stage's `- Files:` line — filed and closed as
+  `gap-prepare-admission-check-plan-files-backtick-asymmetry`, landed alongside this fix). Dispatches
+  2 and 3 (post-fix, same unchanged fixture) each hit a FRESH `split-recommended`/wiring-coverage
+  rejection from a non-deterministic ProposalAuthors regeneration — not the same defect twice,
+  ordinary content-review noise. Budget exhausted at 3 dispatches without reaching `prepared`; the
+  full pipeline remains the same cost class as this task's own real 11-round ProposalReview saga.
+  Left honestly unticked. (A real, recurring `ENOENT` reading `.quay/prepare-leases/<taskId>.json`
+  moments after Admission's own successful write was also observed across 2 of these 3 dispatches —
+  not reproducible via direct manual CLI sequencing, filed separately as
+  `gap-prepare-milestone-lease-read-race`, not fixed here.)
 - [x] **Pre-Receipt write-before-release ordering never orphans a lease:** a fixture that forces the
   new telemetry `fs.writeFileSync` inside `_recordGenerationCli` to throw confirms `releaseLease(...)`
   still ran and the Admission lease is not left held — the write is ordered after release, not

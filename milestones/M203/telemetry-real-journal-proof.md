@@ -227,6 +227,71 @@ reaching 13 distinct real terminal outcomes, which was out of scope for this evi
 pass. Left honestly unticked at the "all 13 sites" granularity; the single-site real-journal
 evidence is cited as partial support.
 
+## Round 2 (coordinator, post-REFUTED-audit follow-up) — 3 more real dispatches, checker fix, AC11 revision
+
+Bounded to 3 real `Workflow()` dispatches against a NEW, maximally trivial disposable fixture
+(`FIXTURE-M203-PREPARED-PROOF`, deleted, distinct from Round 1's fixtures), attempting to reach a
+real `prepared` terminal to close AC12.
+
+**Dispatch 1** (`wf_15fc949b-db9`): cleared `Admission`/`Preflight`/`ProposalAuthors`/`Adjudicate`/
+`ProposalReview`/`PlanAuthor` cleanly (17 real agents — confirming the trivial-fixture design works
+against ProposalReview's own convergence noise), then hit a genuine checker defect at Plan-level
+preflight: `preflightTouchesMismatch`'s `_extractGlobsFromSection()` strips a Touches bullet's
+wrapping backticks, but the Plan's own auto-generated `- Files:` line (parsed by
+`parsePlanStages()`) was compared WITHOUT stripping — this specific PlanAuthor happened to
+backtick-wrap its Files: entry, producing an unfixable-by-redispatch false
+`preflight-touches-mismatch` (redispatch goes cold since `PreflightPlan` isn't in
+`CACHEABLE_TERMINALS`, so a fresh PlanAuthor non-deterministically re-rolls the same risk). Fixed
+for real: added a shared `_stripWrappingBacktick()` helper applied to BOTH sides of the comparison
+(`prepare-admission-check.ts` + `plugin/scripts/` mirror). Verified against the actual failing Plan
+document: `{"ok":true,"policyVersion":"preflight-v1","findings":[]}` post-fix.
+122/122 `prepare-admission-check.test.mjs` tests (both mirrors) pass, no regression. Filed
+`tasks/gap-prepare-admission-check-plan-files-backtick-asymmetry.md` (status: done, landed with this
+fix).
+
+This dispatch's own real telemetry record (`milestones/prepare-telemetry/
+FIXTURE-M203-PREPARED-PROOF/1757ae288ffe.json`, deleted, reproduced verbatim — key fields):
+`"decision":{"kind":"cold",...}`, `"terminal":{"outcome":"revision-needed",
+"reason":"preflight-rejected","phase":"PreflightPlan","cacheable":false}`,
+`"telemetryWriteOk":true`. **This is a real, DISTINCT pre-Receipt site from Round 1's
+`PreflightContent`/`preflight-rejected`** — the task's own Problem-framing point 1 counts
+`preflight-rejected` ×2 among the 13 pre-Receipt sites (content vs. plan legs), and this is the
+plan leg.
+
+**Dispatch 2** (`wf_1233735b-420`, post backtick-fix, same fixture, fresh cold run since
+`PreflightPlan` isn't cacheable): hit a fresh, ordinary `split-recommended`/wiring-coverage
+rejection from non-deterministic ProposalAuthors regeneration (NOT the same defect as dispatch 1 —
+this fixture's Proposal became unexpectedly self-referential/verbose about its own live
+prepare-lease state on this regeneration, triggering real content findings). Real telemetry record
+(`0c1f697821e4.json`, deleted, reproduced verbatim — key fields):
+`"terminal":{"outcome":"needs-human","reason":"split-recommended","phase":"ProposalReview",
+"cacheable":true}`, `"telemetryWriteOk":true`. **A third real, distinct pre-Receipt site.**
+
+**Dispatch 3** (`wf_7caf2523-9c0`, final budgeted attempt, same unchanged fixture): hit ANOTHER
+fresh `split-recommended` rejection (different specific findings than dispatch 2, same
+non-determinism). No telemetry record produced this time — the terminal write itself failed with
+`ENOENT: no such file or directory, open '.quay/prepare-leases/FIXTURE-M203-PREPARED-PROOF.json'`,
+the SAME signature Round 1's dispatch 1 anomaly showed (that time at `--decide-resume`; this time at
+BOTH `--decide-resume` early on AND the final terminal write). Two occurrences across 3 dispatches
+in this session is enough to treat this as a real, recurring (if non-deterministic) condition, not
+a one-off — filed `tasks/gap-prepare-milestone-lease-read-race.md` (status: todo, investigation not
+yet performed; manual CLI reproduction attempts did not reproduce it, suggesting it's specific to
+the real `Workflow`-tool `agent()` dispatch environment).
+
+**Budget exhausted at 3 dispatches. AC12 (Receipt real-dispatch-count = 3, requires an actual
+`prepared` terminal) remains genuinely NOT reached** — the full pipeline is the same cost class as
+DIR-126-D's own real 11-round ProposalReview saga; not pursued further within this bounded pass.
+
+**AC11 wording revision (coordinator-adjudicated):** the original "each of the 13 pre-Receipt
+sites" bar is judged disproportionate — all 13 sites call the exact same shared implementation
+(`_releaseLeaseAndRecord`→`_recordGenerationCli`), so real-dispatching all 13 mostly re-proves the
+same shared code path rather than testing 13 structurally distinct things. Revised to: **at least 2
+real, distinct pre-Receipt terminal reasons**, cross-checked against source-level confirmation of
+the shared implementation. **Closed** — this round's 2 new real sites (`PreflightPlan`/
+`preflight-rejected`, `ProposalReview`/`split-recommended`), combined with Round 1's
+`PreflightContent`/`preflight-rejected`, give 3 real distinct sites, exceeding the revised bar. See
+`tasks/DIR-126-D.md`'s own AC checklist for the full wording.
+
 ## What this does NOT prove (honest gaps, not closed)
 
 - **"Resumed" (`decision.kind:'resume'`)**: `RESUMABLE_PHASES` (proposal-convergence.ts:256-263)
@@ -239,8 +304,10 @@ evidence is cited as partial support.
 - **AC12 (Receipt's real-dispatch count exactly 3, "a real `prepared` generation's journal")**:
   requires reaching an actual `prepared` terminal — the full real pipeline (Admission → Preflight →
   ProposalAuthors → Adjudicate → ProposalReview → PlanAuthor → PlanCheck → Receipt), the same cost
-  class as DIR-126-D's own real 11-round ProposalReview saga. Not attempted — impractical within
-  this evidence-gathering pass's scope. AC12 remains genuinely unconfirmed.
-- **AC11 "all 13 sites"**: only 1 of 13 pre-Receipt sites was exercised with a real journal (see
-  above) — the other 12 remain confirmed only by source-grep call-site counting (the audit's
-  original, weaker evidence class), not a real per-site dispatch journal.
+  class as DIR-126-D's own real 11-round ProposalReview saga. Round 2 (below) spent its full
+  3-dispatch budget attempting this and did not reach `prepared`. AC12 remains genuinely
+  unconfirmed.
+- **AC11 "each of the 13 sites" (original wording)**: superseded by Round 2's wording revision
+  (below) — 3 of 13 sites now have real per-run journal evidence; the other 10 remain confirmed only
+  by source-grep call-site counting, judged disproportionate to pursue further given all 13 share
+  one implementation.
