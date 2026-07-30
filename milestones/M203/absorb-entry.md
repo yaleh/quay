@@ -46,3 +46,9 @@ TBD — completed by the Audit phase.
 ## ABSORB gate run (M203, post-audit)
 
 TBD — completed at Land.
+
+## Audit disposition (appended by adversarial acceptance audit, 2026-07-30)
+
+adversarial-audit disposition: REFUTED
+
+V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated carry-forward (from `vmeta-lag-check.sh --counter 198 experiments/quay-perpetual-stream/v-meta-ledger.md`, milestone_counter=198 K=2; both ledger rows [ok] — "consolidated | lag=- | consolidated — lag gate does not apply | domain-audit-channel≡CI-job pattern (+ per-subcommand audit exercise)" and "proposed | lag=- | proposed — not past φ threshold, no lag gate | repo-root isolation-leak lesson")
