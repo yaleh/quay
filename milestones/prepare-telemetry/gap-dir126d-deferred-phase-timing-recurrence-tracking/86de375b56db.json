@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "recordId": "86de375b56db",
+  "attemptId": "86de375b56db",
+  "generationId": "86de375b56db",
+  "admission": {
+    "key": ".::gap-dir126d-deferred-phase-timing-recurrence-tracking",
+    "ownerExecutionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1",
+    "fencingToken": 0,
+    "acquiredAt": 1785413522525
+  },
+  "workspace": ".",
+  "taskId": "gap-dir126d-deferred-phase-timing-recurrence-tracking",
+  "milestoneId": "M207",
+  "class": "development",
+  "highRisk": true,
+  "hashes": {
+    "charter": "c0e74a51ef40cbdd9225cc2f3febbad1c0b45b3cce10ab10b7ae4a2210c86c2b",
+    "taskContract": "b5e2fcc944dceb9e0f7044a3cc1c3e140c688f2e459c9818fa5c4bbf43124178",
+    "proposal": "621e4f23a3334bc81e60d173ccce6fcdb6368c1afb1defded143e344c104d9f7",
+    "reviewPolicy": "46ec3ada793407d283218a285d9697e8c6d2c69297ac15a86977b5bea8c37189"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "wiring-coverage-check-failed",
+    "phase": "ProposalReview",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785415267353,
+  "telemetryWriteOk": true
+}
