@@ -1,0 +1,72 @@
+[
+  {
+    "id": "b2c46242",
+    "subsystem": "grounding-evidence",
+    "summary": "W2 line citation is wrong: Proposal says preflightMergedMarkdownClaims 'is recorded into the admission preflight at line 580' of prepare-admission-check.ts; the actual record() call site is line 613",
+    "severity": "minor",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "plan",
+    "evidence": "grep -n on experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts shows line 44 import, line 379 function def, line 386 splitSentences call (all as claimed), but 'record(preflightMergedMarkdownClaims({ taskBody }));' is at line 613, not 580. The relationship itself is real and AC-anchored (AC-6, verified 63/63 both copies), so only the descriptive line citation is stale — no AC item cites line 580.",
+    "claimRef": "W2 (Problem framing, third consumer bullet; Concrete control/data flow item 5)",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "d8ac55d4",
+    "subsystem": "grounding-evidence",
+    "summary": "[W3] note claims task-schema.test.mjs 'references checkWiringCoverage', but the file references checkGapWiringCoverage (the wrapper), never the literal identifier checkWiringCoverage",
+    "severity": "nit",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "plan",
+    "evidence": "grep -n checkWiringCoverage experiments/quay-perpetual-stream/test/task-schema.test.mjs → zero hits; grep -n wiring → lines 12/141/146/151/172/179 all referencing checkGapWiringCoverage (which calls checkWiringCoverage at task-schema.ts:357). The optional reinforcement run still exercises the shared import transitively, so the [W3] argument (signature/return-shape invariance by construction + grounding bullet) holds regardless — verified both regex edits are internal (module-local WIRING_VERB_RE const; splitSentences body-only change), no export signature changes.",
+    "claimRef": "W3 note (Chosen mechanism → DIR-117 mechanism-claim wiring note; AC coverage [W3] note)",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "c302fca3",
+    "subsystem": "acceptance-criteria",
+    "summary": "The claim-layer half of the two-layer Fix-2 fixture design (RED/GREEN pair using a real wiring verb, e.g. '**A calls `x1.ts` from `y1.ts`.** **B calls `x2.ts` from `y2.ts`.**') is mapped to AC-2 in the Proposal's AC-coverage prose but no AC bullet actually demands it — AC-2's text asserts only the split-layer three-chunk result",
+    "severity": "minor",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "plan",
+    "evidence": "Proposal Fixture design: '(b) a claim-layer RED/GREEN pair using a REAL wiring verb... satisfying the charter's done-when requirement of real fail-before/pass-after'; AC coverage says 'AC 2 ← Fix 2, asserted at the splitSentences layer... PLUS a claim-layer pair using a real wiring verb'. The real ## Acceptance Criteria bullet 2 demands only 'produces three chunks after the fix — two identifier-carrying sentences with disjoint backtick-identifier sets {id1,id2} / {id3,id4}, plus one leading zero-identifier Done. sentence'. Non-blocking because the split-layer fixture directly falsifies the changed regex (RED-before reproduced live: unpatched → 1 merged 4-identifier chunk) and AC-4 provides the end-to-end verdict guard (DIR-126-D.md ok:true, reproduced 22 claims / 0 findings).",
+    "claimRef": "AC-2 vs Proposal Fixture design (b) / AC coverage AC 2 mapping",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "1d4e9cc9",
+    "subsystem": "risk-disclosure",
+    "summary": "Risks bullet 'finer splitting can surface a previously-hidden claim as newly uncovered' overstates the failure direction: by coverage monotonicity (splitting only shrinks per-claim identifier sets; any AC bullet covering a merged claim's superset covers every sub-claim under the same EVIDENCE_RE bullet test, and Fix 1 strictly removes claims) an ok:true document provably cannot newly fail — exactly the invariant the Defaults section correctly asserts, so the two passages are mildly in tension",
+    "severity": "nit",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "accepted-risk",
+    "evidence": "Defaults section: 'A document that was ok:true before cannot newly FAIL from these two edits alone' (verified: coverage test is claim.identifiers.every(id => b.includes(id)) && EVIDENCE_RE.test(b) at wiring-coverage-check.ts:176; subsets preserve it). Risks: 'Finer splitting can surface a previously-hidden claim as newly uncovered somewhere not examined here'. The over-disclosure is conservative and harmless — AC-4 (post-fix ok:true re-run against tasks/DIR-126-D.md) guards the verdict regardless; baseline reproduced live this review (ok:true, claims:22, findings:0). Claim-count drift without verdict change is the real, correctly-described residual.",
+    "claimRef": "Risks bullet 4 vs Defaults and failure behavior paragraph 1",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "eeb8e941",
+    "subsystem": "acceptance-wiring",
+    "summary": "AC-6's canonical-copy run (experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs) is outside scripts/test.sh's glob (packages/*/test/*.test.mjs plugin/test/*.test.mjs) and outside extra.acceptance, so the canonical half of 'both copies' is verified only by the Plan stage's manual command, not by any automated gate",
+    "severity": "nit",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "plan",
+    "evidence": "scripts/test.sh line 37: files=(packages/*/test/*.test.mjs plugin/test/*.test.mjs) — experiments/ is not covered; extra.acceptance = the wiring-coverage-check.test.mjs file only. The plugin copy IS gated (plugin/test/*.test.mjs glob) and both copies pass 63/63×7 (reproduced live this review). Pre-existing repo property, not introduced by this Proposal; the AC item is falsifiable as written and the Plan dedicates a stage with the explicit command, so wiring exists at the Plan layer. Informational: broadening extra.acceptance is out of this task's declared scope.",
+    "claimRef": "AC-6 (prepare-admission-check.test.mjs both copies)",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  }
+]

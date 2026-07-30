@@ -475,34 +475,33 @@ to both-sides), plus items closing every flagged wiring claim above:
 ## Plan
 
 `docs/plans/M205-gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md` — 9-stage Plan
-re-authored 2026-07-30 at base revision `b850542` (current HEAD short-sha, full
-`b8505422e549faff72ae32bee4bfdaa3b2f50862`; supersedes the stale `b28cfdb` and `c82efac` Plans —
-`git diff --stat b28cfdb..b850542` over every touch-set source file is empty, and all baselines
-were re-verified live at `b850542`) for milestone M205 (charter
+authored 2026-07-30 at base revision `3d1ce2c` (full `3d1ce2c763ed41f0c93ae1f05dfede713c55793f`;
+supersedes the stale `b850542`/`b28cfdb`/`c82efac` Plans — `git diff --stat b850542..3d1ce2c`
+touches only this task's own file, and all baselines were re-verified live at `3d1ce2c`: canonical
+suite 18/18, `prepare-admission-check.test.mjs` both copies 126/126, `tasks/DIR-126-D.md` CLI
+`ok:true` / 22 claims / `findings: []`) for milestone M205 (charter
 `experiments/quay-perpetual-stream/charters/M205-gap-wiring-coverage-checker-fixes.md`), mapping
-all 7 task AC items to ordered RED/implementation/GREEN stages: grounding + baseline capture
-(re-verified live at `b850542`: 18/18 canonical suite, 63/63-across-7-suites
-`prepare-admission-check.test.mjs`, `tasks/DIR-126-D.md` CLI `ok:true` / 22 claims / 0 findings) →
+all 7 task AC items to ordered RED/implementation/GREEN stages: grounding + baseline capture →
 RED Fix-1 fixture (`whose` exclusion, canonical test file only) → RED Fix-2 two-layer fixture
 (split-layer via `splitSentences` added to the line-10 import, plus a claim-layer pair with a real
-wiring verb, since "does" is not a wiring verb and a claim-level assertion on the literal AC-2 text
-would be RED-forever) → the two in-place regex-literal edits in
-`experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts` (`WIRING_VERB_RE` line 50: add
-`whose` to the `owns?` exclusion lookbehind; `splitSentences()` line 102: widen BOTH sides of the
-split boundary to `` (?<=[.!?]|\*\*)\s+(?=[A-Z`"]|\*\*) ``) → GREEN canonical suite (the
-`extra.acceptance` command) → mechanical `sync-vendor.sh` mirror regeneration (`--check` → `CLEAN`,
-never a hand-edit) → `tasks/DIR-126-D.md` CLI non-regression (`ok:true` / 0 findings — verdict
-invariance, not claim-count invariance) → `prepare-admission-check.test.mjs` both-copies
-non-regression (63/63, 7 suites) → grounding-evidence + landing verification (`scripts/test.sh`,
-single commit to `master`, lifecycle gate). The complete touch set (canonical module/test EDIT,
-mirror REGENERATE, all consumer/mirror/suite files declared READ ONLY / RUN ONLY), per-stage line
-budgets, the stage dependency graph `1 → 2 → 3 → 4 → 5 → 6 → {7, 8} → 9`, guardrails, rollback,
-and real-landing verification are in the Plan file. Stage blocks emit the DIR-117 iteration-2
-item-3 mechanical format (`### Stage N` + `- AC:` + `- Files:` + `- Command:`) parsed by
-`milestone-preparation-check.ts` (`parsePlanStages` → `validatePlanStructure` →
-`plan-structure-ok`) — verified for this revision: "Plan has 9 stage(s), all 7 task AC item(s)
-mapped." Standardized stopping rule: at most 3 Plan-check rounds, success only at F_i=0.
-
+wiring verb "calls", since "does" is not a wiring verb and a claim-level assertion on the literal
+AC-2 text would be RED-forever) → the two in-place regex-literal edits in
+`experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts` (`WIRING_VERB_RE` line 50:
+add `whose` to the `owns?` exclusion lookbehind; `splitSentences()` line 102: widen BOTH sides of
+the split boundary to `` (?<=[.!?]|\*\*)\s+(?=[A-Z`"]|\*\*) ``) → GREEN canonical suite (the
+`extra.acceptance` command) → mechanical `sync-vendor.sh` mirror regeneration (`--check` →
+`CLEAN`, never a hand-edit) → `tasks/DIR-126-D.md` CLI non-regression (`ok:true` / `findings: []`
+— verdict invariance, not claim-count invariance) → `prepare-admission-check.test.mjs`
+both-copies non-regression (126/126, 7 suites each) → grounding-evidence + real-landing
+verification (`scripts/test.sh`, single commit to `master` scoped to the touch set only,
+lifecycle gate). The complete touch set (canonical module/test EDIT, mirror REGENERATE, all
+consumer/mirror/suite files READ ONLY / RUN ONLY), per-stage line budgets, the stage dependency
+graph `1 → 2 → 3 → 4 → 5 → 6 → {7, 8} → 9`, guardrails, rollback, and real-landing verification
+are in the Plan file. Stage blocks emit the DIR-117 iteration-2 item-3 mechanical format
+(`### Stage N` + `- AC:` + `- Files:` + `- Command:`) parsed by
+`milestone-preparation-check.ts`'s `parsePlanStages` → `validatePlanStructure` — self-verified at
+authoring time for this revision: `plan-structure-ok` — "Plan has 9 stage(s), all 7 task AC
+item(s) mapped." Standardized stopping rule: at most 3 Plan-check rounds, success only at F_i=0.
 ## Finding
 
 Discovered 2026-07-30 during DIR-126-D's (M203) real `prepare-milestone` ProposalReview convergence

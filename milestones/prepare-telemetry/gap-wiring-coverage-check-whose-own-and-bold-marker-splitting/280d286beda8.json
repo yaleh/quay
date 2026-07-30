@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "recordId": "280d286beda8",
+  "attemptId": "280d286beda8",
+  "generationId": "280d286beda8",
+  "admission": {
+    "key": ".::gap-wiring-coverage-check-whose-own-and-bold-marker-splitting",
+    "ownerExecutionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1",
+    "fencingToken": 0,
+    "acquiredAt": 1785441977181
+  },
+  "workspace": ".",
+  "taskId": "gap-wiring-coverage-check-whose-own-and-bold-marker-splitting",
+  "milestoneId": "M205",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "d94e9ff5d21f0790e27ce5b3dc57b9945356a054ba84d608790acdc5138b5191",
+    "taskContract": "447de8ae12dd1b019eb70844f8508f9ee247f4fd8733057c9d4bed760e6b9527",
+    "proposal": "5f5fb6a9cf64760bb022c1c98ac687f4de4b780c7f319e54e1387c1cb73e6b95",
+    "reviewPolicy": "46ec3ada793407d283218a285d9697e8c6d2c69297ac15a86977b5bea8c37189"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "preflight-rejected",
+    "phase": "PreflightPlan",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785443637348,
+  "telemetryWriteOk": true
+}
