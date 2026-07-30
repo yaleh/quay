@@ -100,6 +100,30 @@ single write behavior — not separate mechanisms in their own right — broken 
 only because each is a structurally distinct call site (or reused dependency) requiring its own
 falsifiable evidence, never because any is independently shippable on its own.
 
+**SPLIT-OR-COMMIT: FINAL RULING (human-adjudicated, 2026-07-30, frozen at this commit — not to be
+re-litigated by any future automated `mechanismCount` self-report).** Across 11 real
+`prepare-milestone` dispatches, `mechanismCount` — an LLM reviewer's own subjective per-round
+self-report, not a mechanical count — oscillated non-monotonically (8→4→≤2→6→[this round: not yet
+observed]) purely from cold-regeneration noise, never converging to a stable value under repeated
+automated re-review. The wiring-coverage-check.ts mechanical checker, by contrast, is deterministic
+and has been GREEN (`ok:true`, 0 uncovered claims) across every round since round 9. A human
+coordinator therefore makes the definitive count determination once, here, rather than continuing
+to chase a noisy per-round LLM judgment: **Mechanism A is ONE complete terminal-telemetry-write
+contract** — A.0-A.5 are necessary call-site variants of that single contract (13 pre-Receipt
+sites, the `reuse-terminal` site, 3 pre-lease sites, and Receipt's own restructured ordering — each
+individually required for the contract's own "every terminal outcome, not only success" AC, none
+independently shippable in isolation). **Mechanism B is a second, genuinely independently-landable
+report mechanism** (the read-only `--telemetry-report` query CLI — it could ship later without
+blocking A, and vice versa). **Total mechanism count: 2.** This ruling is the final SPLIT-OR-COMMIT
+disposition for M203/DIR-126-D: COMMIT, proceed directly with the current Proposal + the current
+`docs/plans/M203-dir-126-d.md` Plan (already PlanCheck-converged: 2 auto-revised rounds + 1
+human-verified round closing Stage 9's comment-blind regression-guard defect) into Build, rather
+than dispatching a 12th cold `prepare-milestone` re-run that would re-invoke the same noisy
+`mechanismCount` self-report against a freshly regenerated (and therefore non-identical) Proposal
+text for no informational gain. Should any FUTURE independent process re-raise `split-multi-
+mechanism` against this exact Mechanism A/B structure, that finding is to be treated as ALREADY
+ADJUDICATED by this ruling — cite this paragraph, do not re-open the count question from scratch.
+
 All new logic lives in `proposal-convergence.ts` and `milestone-preparation-check.ts` — the two
 files that already run as real OS subprocesses outside the sandbox. `prepare-milestone.js` only
 gains new call sites into CLI submodes these binaries already dispatch — never new
@@ -751,6 +775,11 @@ backward-compat run → deferral task → real-landing verification); mechanical
   `_releaseLease(stageLabel, {...})` (distinct, as literal text, from the bare `_writeGenerationTelemetry`/
   `_releaseLease` and the `'Receipt', {outcome:'prepared', ...}`-argument forms already covered
   above) — all four confirmed real by the same direct-source-read standard as every round above.
+  The human-adjudicated "SPLIT-OR-COMMIT: FINAL RULING" paragraph above cites `mechanismCount`,
+  `prepare-milestone`, `reuse-terminal`, `--telemetry-report`, and `docs/plans/M203-dir-126-d.md` —
+  all already-confirmed-real names from this same document's own Chosen mechanism and the real
+  `prepare-milestone` dispatch history recorded in this task's commit log, not new invention;
+  co-located here for wiring-coverage completeness on this meta-commentary paragraph.
 
 ## Definition of Done
 
