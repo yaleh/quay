@@ -1,11 +1,11 @@
 ---
 id: gap-prepare-admission-check-plan-files-backtick-asymmetry
-title: prepare-admission-check.ts's preflightTouchesMismatch compared a task's
+title: "prepare-admission-check.ts's preflightTouchesMismatch compared a task's
   '## Touches' bullets (backticks stripped) against a Plan Stage's '- Files:'
   entries (backticks NEVER stripped) -- a PlanAuthor that stylistically
   backtick-wraps its Files: line produces a permanent, redispatch-proof
   false preflight-touches-mismatch, found live during real-dispatch
-  evidence-gathering for DIR-126-D's REFUTED audit
+  evidence-gathering for DIR-126-D's REFUTED audit"
 status: done
 labels:
   - gap

@@ -2,7 +2,7 @@
 id: DIR-126-D
 title: Per-generation phase telemetry for prepare-milestone.js (committed
   milestones/prepare-telemetry/ records) — fourth child of DIR-126's split
-status: todo
+status: done
 labels:
   - milestone-candidate
   - human-steered
@@ -932,9 +932,12 @@ Build landed at commit `1be6c21` (M203/DIR-126-D Build). Audit findings per AC i
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply. Per DIR-026
 Reading A, source code, prompt text, or a same-generation self-test are necessary but insufficient.
 
-- [ ] Landed on `master` under human-steered discipline (this touches
+- [x] Landed on `master` under human-steered discipline (this touches
   `.claude/workflows/prepare-milestone.js` and the receipt integrity engine,
-  `milestone-preparation-check.ts`).
+  `milestone-preparation-check.ts`). **Closed at Land (M203, 2026-07-30):** merge commit is this
+  same Land commit series, layered directly on top of Build's `1be6c21` and the three same-day
+  follow-up commits (`46d0461`/`68eb5eb`/`4570c3c`) plus the independent re-audit commit
+  (`e30199a`) — no separate worktree/branch, direct commits on `master` throughout.
 - [x] A real, non-fixture cold run AND a real, non-fixture non-success generation both produce real,
   inspectable telemetry records with command output, not asserted. **Closed post-audit:** real
   `Workflow()` dispatch (run `wf_5e205503-f45`) against a disposable fixture produced record
@@ -953,6 +956,58 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
 - [x] A fresh independent audit confirms the real production callsite for telemetry emission at
   every phase boundary, not merely unit-test reachability.
 
+## Audit disposition — follow-up (2026-07-30, coordinator-dispatched fix pass + independent re-audit)
+
+**Verdict: NOT-REFUTED** (supersedes the iteration-0 REFUTED verdict above — that finding was real
+and is preserved as history, not deleted; this section records how it was resolved). Three
+same-day follow-up commits closed all 5 gaps the iteration-0 audit left unconfirmed:
+
+1. **`46d0461`** — closed AC15 (RED/GREEN reuse-terminal write-failure-after-release fixture),
+   AC23 (5 named milestone-shaped backward-compat regression fixtures, one per
+   M195/M197/M200/M201/M202), and 4 of the 5 real-outcome dispatches for AC2 (real `Workflow()`
+   runs producing telemetry records `dfcc9bb3d6f8` cold+preflight-rejected, `aebc3ac4629e`
+   reuse-terminal, `8d83a6535dd5` prepare-already-running contention).
+2. **`68eb5eb`** — closed AC11 (revised bar: >=2 real distinct pre-Receipt sites instead of "each
+   of the 13," on the source-confirmed grounds all 13 share one `_releaseLeaseAndRecord`
+   implementation) with 3 real distinct sites; found and fixed a real, independent
+   `preflightTouchesMismatch` backtick-stripping asymmetry between the Touches-bullet and
+   Plan-Stage-`- Files:` sides (`_stripWrappingBacktick`, filed/closed as
+   `gap-prepare-admission-check-plan-files-backtick-asymmetry`); AC2/AC12 remained honestly open at
+   this point.
+3. **`4570c3c`** — closed AC12 (Receipt real-dispatch-count-exactly-3) with a real `prepared`
+   terminal from a maximally trivial fixture (run `wf_54772ab3-2c5`, telemetry record
+   `abf30d6ed7e7`); adjudicated AC2's "resumed" outcome via a coordinator-approved narrower
+   argument (the `resume`/`cold` telemetry WRITE is the literal same `_writeCommittedTelemetry`
+   code path, differing only by a `decisionKind` string, plus real subprocess CLI coverage of the
+   `resume` value specifically) rather than a further real-dispatch hunt — closing all 24 AC items.
+
+A second, fully independent, fresh-context re-audit (`milestones/M203/audits/iteration-0-acceptance
+-audit.md`'s "## Second-pass adversarial audit" section, commit `e30199a`) distrusted the
+coordinator's own follow-up commits and re-derived every claim from scratch: independently re-ran
+every mechanical gate live, independently re-read the real production source rather than trusting
+citations, and — going further than the proof document itself — located and read the raw
+`journal.jsonl`/`agent-*.jsonl` files under `~/.claude/projects/.../subagents/workflows/wf_*` for
+the four run IDs the proof document cites, confirming byte-for-byte the cited telemetry records are
+genuine, not fabricated or embellished transcriptions. It independently re-derived and endorsed
+both coordinator-adjudicated AC-wording revisions (AC11, AC2) as genuinely defensible rather than
+disguised weakenings, and found AC2's revision to rest on firmer ground than even the proof
+document itself argued (the `resume` and `cold` telemetry writes are the literal same code, not
+merely analogous). **Verdict: NOT-REFUTED** — all 24 AC items and DoD items 2-5 independently
+confirmed against real, primary evidence; DoD item 1 ("Landed on master") correctly left open for
+Land itself.
+
+Mechanical gate `it0-dod-check.sh DIR-126-D <charter> <absorb-entry>` — re-run live at this Land —
+exits 0, all 12 clauses PASS, 24/24 AC checked. `sync-vendor.sh --check` CLEAN (17 files);
+`plugin/sync.sh` zero diff on `prepare-milestone.js` itself (6 unrelated pre-existing-drift
+`plugin/gate-scripts/*.sh` files reverted via `git checkout`, not part of this child's diff); `cmp`
+byte-identical on all 4 touched mirror pairs. Real test suites re-run live at this Land:
+`proposal-convergence.test.mjs` 88/88, `milestone-preparation-check.test.mjs` 56/56,
+`prepare-admission-check.test.mjs` 61/61 — 205/205 combined, 0 failures, matching the second-pass
+audit's own combined total. Zero new `Date.now()`/`new Date()`/`import(` regression re-confirmed
+live (`git diff 5b19f7d..4570c3c -- .claude/workflows/prepare-milestone.js
+plugin/workflows/prepare-milestone.js | grep '^+' | grep -E 'Date\.now\(\)|new Date\(|import\('` →
+zero matches).
+
 ## Human verification when exp5 marks this DIR done
 
 1. Can capacity and bottleneck conclusions now be reproduced without inspecting private Claude
@@ -960,6 +1015,37 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
 2. Does telemetry survive a FAILED generation, not only a successful one?
 3. Can instrumentation ever turn a failed preparation into a falsely-certified `prepared`? (Must be
    no.)
+
+## Execution record
+
+- **Milestone:** M203 (per-generation phase telemetry for `prepare-milestone.js` — committed
+  `milestones/prepare-telemetry/` records — fourth child of DIR-126's 5-way split)
+- **Iteration count:** 1 (single Build pass at `1be6c21` covering Mechanism A's committed-write
+  contract across all 19 real call shapes + Mechanism B's `--telemetry-report` query, followed by 1
+  iteration-0 adversarial acceptance audit round that verdicted REFUTED on 5 AC items + 2 DoD
+  items, closed by a same-day, 3-commit coordinator-dispatched fix pass [`46d0461`/`68eb5eb`/
+  `4570c3c`], then 1 independent, fully fresh-context re-audit round [`e30199a`] that verdicted
+  NOT-REFUTED). No mid-milestone re-scope — same charter, same AC/DoD list throughout (2
+  coordinator-adjudicated AC-wording narrowings on AC2/AC11, both independently re-derived and
+  endorsed by the second-pass audit as genuinely defensible, not silent weakenings).
+- **Realized Δv:** 0 (v̂>0 per the charter's own Value hypothesis — capabilityGrowth, deliverable,
+  method-infra surface; no chart-2 `packages/quay*` product-surface cell moves, since the surface
+  improved is the `prepare-milestone` control-plane's own telemetry mechanism, not a product
+  surface — structurally identical to the M164/M167/M179/M188/M189/M192/M193/M194/M195/M197/M198/
+  M200/M201/M202 precedent the VT ruler cannot score for the same reason).
+- **Merge commit SHA:** this Land commit (layered on top of Build's `1be6c21`, the fix-pass commits
+  `46d0461`/`68eb5eb`/`4570c3c`, and the independent re-audit commit `e30199a`; no separate
+  worktree/branch throughout).
+- **Outcome:** Per-generation phase telemetry for `prepare-milestone.js` landed on `master` — every
+  one of the 19 real dispatch/terminal shapes (15 `_releaseLeaseAndRecord` sites, `reuse-terminal`,
+  3 pre-lease exits) now writes a committed, structured JSON record to
+  `milestones/prepare-telemetry/<taskId>/<recordId>.json`, hash-bound into the receipt on success
+  via a new `--telemetry` flag mirroring the existing `--ledger` pattern, queryable via a new
+  `--telemetry-report <milestoneId>` read-only CLI mode — closing the concrete gap DIR-126's own
+  Finding measured (16 of 17 sampled real `prepare-milestone` calls were non-success, with no
+  durable record surviving any of them before this milestone). All 24 AC items and applicable DoD
+  items independently CONFIRMED by a second, fully independent fresh-context re-audit after a
+  same-day fix pass closed the iteration-0 REFUTED gaps.
 
 ## Touches
 
