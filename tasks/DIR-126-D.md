@@ -23,178 +23,164 @@ extra:
 Emit one committed, structured JSON telemetry record per `prepare-milestone` dispatch attempt —
 every phase transition and every terminal outcome, not only the successful `prepared` path — and
 hash-bind a successful generation's record into its receipt so tampering is mechanically
-detectable. Fourth child of DIR-126's 5-way split; builds on [[DIR-126-A]] (Admission lease
-identity/release), [[DIR-126-B]] (Preflight verdict shape), and [[DIR-126-C]] (the gitignored
-`.generation.json` generation-record shape and `decideResumeGeneration`, which this child extends
-and never redesigns).
+detectable. Fourth child of DIR-126's 5-way split; builds on landed [[DIR-126-A]] (Admission lease
+identity — `key`/`ownerExecutionId`/`fencingToken`), [[DIR-126-B]] (Preflight verdict shape), and
+[[DIR-126-C]] (the gitignored `.generation.json` record and `decideResumeGeneration`, which this
+child extends, never redesigns).
 
-### Problem framing (grounded by direct read of the current tree, 2026-07-30)
+### Problem framing (verified against the current tree, 2026-07-30)
 
 Direct read of `.claude/workflows/prepare-milestone.js` (794 lines, `cmp`-confirmed byte-identical
 to `plugin/workflows/prepare-milestone.js`) and `experiments/quay-perpetual-stream/scripts/
-proposal-convergence.ts` (517 lines, `cmp`-identical to its `plugin/scripts/` mirror) confirms:
+proposal-convergence.ts` (517 lines, `cmp`-identical to its `plugin/scripts/` mirror), plus grep
+verification, confirms:
 
-1. There are exactly 15 `_releaseLeaseAndRecord(stageLabel, {terminalPhase, outcome, reason,
-   cacheable})` call sites (grep-confirmed at lines 263, 273, 316, 340, 502, 545, 571, 576, 581,
-   620, 636, 651, 699, 769, 778): 13 pre-`Receipt` terminals plus 2 that belong to `Receipt` itself
-   (`receipt-selfcheck-failed` at 769, `prepared` at 778). Three real return sites emit **no**
-   telemetry today, because none holds an Admission lease and none ever reaches
-   `_releaseLeaseAndRecord`: `missing-required-args` (line 68, before Admission even starts),
-   `admission-check-failed` (line 180), and `prepare-already-running` (line 185, lease
-   contention).
-2. `_releaseLeaseAndRecord` (line 152) wraps one subprocess dispatch into `_recordGenerationCli`
-   (`proposal-convergence.ts` lines 442-471). That function computes `generationId =
+1. `_releaseLeaseAndRecord(stageLabel, {terminalPhase, outcome, reason, cacheable})` (defined line
+   152) has exactly 15 call sites (grep-confirmed at lines 263, 273, 316, 340, 502, 545, 571, 576,
+   581, 620, 636, 651, 699, 769, 778): 13 pre-`Receipt` terminals plus `Receipt`'s own two
+   (`receipt-selfcheck-failed` at 769, `prepared` at 778). Three real return sites carry no
+   telemetry at all today because none of them ever holds an Admission lease and none reaches
+   `_releaseLeaseAndRecord`: `missing-required-args` (line 68, fires before Admission even starts),
+   `admission-check-failed` (line 180), and `prepare-already-running` (line 185, lease contention).
+2. `_releaseLeaseAndRecord` wraps a single subprocess dispatch into `_recordGenerationCli`
+   (`proposal-convergence.ts`, lines 442-471). That function computes `generationId =
    sha256(taskId::ownerExecutionId::fencingToken::acquiredAt).slice(0,12)` via
-   `_computeGenerationId` (line 353), writes a JSON record to `_generationPath(workspace, taskId)`
-   = `.quay/prepare-leases/<taskId>.generation.json` (line 465), **then** releases the Admission
-   lease (line 466). `.gitignore:27` (`**/.quay/prepare-leases/`) confirms this directory is
-   gitignored. The write happens before the release, and the surrounding `try`/`catch` (lines
-   443/468) returns `{ok:false}` on any throw **without** releasing the lease — an existing,
-   pre-this-milestone hazard any new write added here must not worsen. This is a single mutable,
-   per-`taskId` file: a second attempt for the same task clobbers the first attempt's record
-   before anyone can read it historically.
-3. `--decide-resume` (`_decideResumeCli`, line 387) is a separate CLI submode from
+   `_computeGenerationId` (line 353), writes JSON to `_generationPath(workspace, taskId)` =
+   `.quay/prepare-leases/<taskId>.generation.json` (line 465, via `_safeTaskIdSegment` at line
+   341), then releases the lease (line 466) — inside one shared try/catch (443/468) whose catch
+   returns `{ok:false}` on any throw **without** releasing the lease, a pre-existing hazard this
+   proposal must not worsen. `.gitignore:27` (`**/.quay/prepare-leases/`) confirms this directory
+   is gitignored. This is a single mutable, per-`taskId` file: a second attempt for the same task
+   overwrites the first before anyone can inspect it historically.
+3. `--decide-resume` (`_decideResumeCli`, line 387) is a structurally separate CLI submode from
    `--record-generation`, gated by the exported `CACHEABLE_TERMINALS` allowlist (confirmed exactly
-   `PreflightContent/preflight-rejected` and `ProposalReview/split-recommended`). On its
-   `reuse-terminal` branch (line 415-421) it recomputes the same `generationId`, reads the prior
-   generation record, and releases the lease inline via a bare `releaseLease(...)` call — but
-   deliberately does **not** rewrite `.generation.json` (DIR-126-C's own landed behavior).
-   `_recordGenerationCli` never runs on this path, so any telemetry hook added only to
-   `_recordGenerationCli` structurally misses `reuse-terminal`.
-4. Net, confirmed by source read: the raw decision/identity material this milestone needs already
-   exists at 15 of 18 real terminal call sites, plus a 16th (`reuse-terminal`) computed at a
-   separate call site — but the only place any of it is ever recorded is a single mutable,
-   gitignored, per-`taskId`-overwritten file. Combined with DIR-126's own measured finding (16 of
-   17 sampled real `prepare-milestone` calls were non-success), a strict majority of Prepare's
-   real dispatch history is unrecoverable except by re-reading Claude session JSONL prose — the
-   exact gap this milestone exists to close.
-5. `milestone-preparation-check.ts` already solves the structurally identical "hash-bind an
-   auxiliary artifact into the receipt, fail closed if it drifts" problem for a sibling artifact:
-   `buildReceipt`'s `ledgerFile` parameter (line 73) sha256-hashes a ledger's content into
-   `receipt.hashes.ledger` (line 80); `checkPreparation()`'s `if (receipt.ledgerFile) {...}` block
-   (lines 312-322) fails closed with `ledger-missing`/`ledger-stale` if the bound file is absent or
-   its hash no longer matches. `git check-ignore -v` on a path under `milestones/prepare-telemetry/`
-   returns exit 1 (not ignored) — `milestones/` is git-tracked today (e.g.
-   `milestones/M202/preparation.json`) — so the proposed new tree is committable by construction,
-   with a directly reusable precedent already landed for its integrity mechanism.
-6. Two confirmed, 100%-reproducible production crashes are directly load-bearing on what this
-   milestone may add inside the sandboxed workflow script: `Date.now()`/`new Date()` inside
-   `prepare-milestone.js` crashed on every real dispatch, fixed at `f6db2a8`; dynamic `import()`
-   likewise crashed in production, fixed at `7357a91` (an in-file comment documents this,
-   discovered on this very milestone's own first live attempt). Nothing this proposal adds to
-   `prepare-milestone.js` may call the real clock or dynamically import a module — every timestamp
-   and every durable write must ride an already-real `agent()`-wrapped subprocess.
-7. Every phase already sits adjacent to a real dispatch: `_renewLease` (wrapping
-   `_admissionAgentCall('--renew ...')`) fires at Adjudicate, ProposalReview entry, each
-   ProposalReview delta round, PlanAuthor, each PlanCheck round, and Receipt entry;
-   `_admissionAgentCall`/`_preflightAgentCall`/`_convergenceAgentCall` are the file's other real
-   CLI-wrapping dispatch families. Grep for `_phaseTelemetry`/`telemetry` in both
-   `prepare-milestone.js` and `milestone-preparation-check.ts` today returns zero hits — this is
-   genuinely new capability, not an extension of existing telemetry code.
-8. `checkStaleOwner`'s externally-visible `owner` object (`prepare-admission-check.ts`, lines
-   137-149) exposes `{ownerExecutionId, acquiredAt, leaseUntil, stage}` — no `fencingToken`. A
-   contention verdict is therefore structurally unable to derive a real, collision-safe
-   `generationId` without a separate, out-of-scope change to that file's own output contract.
+   `PreflightContent/preflight-rejected` and `ProposalReview/split-recommended`, line 247). Its
+   `reuse-terminal` branch (lines 415-421) recomputes the same `generationId`, reads the prior
+   generation record, and releases the lease **inline**, in that same call — the `reuse-terminal`
+   release at line 421 is a 16th, structurally distinct call shape: `_recordGenerationCli` never
+   runs on this path, so any hook added only there structurally cannot cover it. Per DIR-126-C's
+   own landed and confirmed-unchanged behavior, `.generation.json` is deliberately **not**
+   rewritten on this branch.
+4. `milestone-preparation-check.ts` already solves the structurally identical "hash-bind an
+   auxiliary artifact into the receipt, fail closed on drift" problem for a sibling artifact:
+   `buildReceipt`'s `ledgerFile` parameter (line 73) sha256-hashes ledger content into
+   `receipt.hashes.ledger` (line 80, `ledgerHash`); `checkPreparation()`'s `if (receipt.ledgerFile)
+   {...}` block (lines 312-322) returns `ledger-missing`/`ledger-stale` if the file is absent or
+   its hash no longer matches. `git check-ignore -v` against a path under
+   `milestones/prepare-telemetry/` exits 1 (not ignored) — `milestones/` is git-tracked today with
+   real per-milestone JSON already present (e.g. `milestones/M202/preparation.json`) — so a new
+   tree there is committable by construction, with a directly reusable integrity precedent already
+   landed, not new design.
+5. Two confirmed, 100%-reproducible production crashes constrain what can be added inside the
+   sandboxed `prepare-milestone.js`: `git log` confirms `f6db2a8` ("Date.now() fallback is
+   forbidden in the Workflow sandbox") and `7357a91` ("remove illegal import() from
+   prepare-milestone.js") are both real, landed commits (in-file comments around lines 360-363 and
+   204-205 document each incident respectively). Nothing this proposal adds inside
+   `prepare-milestone.js` may call the real clock or dynamically `import()` a module — every
+   timestamp and every durable write must ride an already-real subprocess dispatch. Grep of the
+   current file confirms zero live `Date.now()`/dynamic-`import()` call sites remain today; any new
+   logic this milestone adds must preserve that. The existing `nowMs` self-report convention
+   (subprocess computes `date +%s%3N`, returns it as `nowMs`, the workflow reads it back — lines
+   366, 455-458, 465, 558-566) is already live for `ProposalReview`'s full/delta rounds — this is
+   the pattern to extend, not invent.
+6. `checkStaleOwner`'s externally-visible contention verdict (`prepare-admission-check.ts`, lines
+   137-149) exposes `{ownerExecutionId, acquiredAt, leaseUntil, stage}` — no `fencingToken`,
+   confirmed by direct read. A contention/pre-lease verdict is therefore structurally unable to
+   derive a real, collision-safe `generationId`; any telemetry added for the three pre-lease exits
+   must use a different, weaker identity key.
+
+Net: DIR-126's own measured finding — 16 of 17 sampled real `prepare-milestone` calls were
+non-success — combined with the above means the raw decision/identity material this milestone needs
+already exists at every one of these 15+3+1 real call shapes, but the only durable record of any of
+it is a single mutable, gitignored, per-`taskId`-overwritten file, and three real terminals (plus
+`reuse-terminal`) leave nothing durable behind at all. A strict majority of Prepare's real dispatch
+history is today reconstructable only by re-reading Claude session JSONL prose — the exact gap this
+milestone must close.
 
 ### Chosen mechanism
 
-Add one new durable, git-tracked artifact — one JSON record per dispatch attempt at
-`milestones/prepare-telemetry/<taskId>/<recordId>.json`, with the `<taskId>` path segment routed
-through the SAME `_safeTaskIdSegment()` helper `_leasePath`/`_generationPath` already use
-(`proposal-convergence.ts` line 341), reused verbatim rather than reinvented. This is a stricter
-bar than the sibling `.generation.json` path, which is gitignored/ephemeral and accepted an
-unsanitized-`taskId` risk (`gap-decide-resume-generation-path-unsanitized-taskid`); because this
-new path is *permanently committed*, an unsanitized `taskId` containing `/` or `..` could write
-outside the intended tree in a way that persists in git history, so reusing the sanitizer here is
-load-bearing, not cosmetic. All new logic lives in `proposal-convergence.ts` (both mirrors) and
-`milestone-preparation-check.ts` (both mirrors) — the two files that already run as real
-subprocesses outside the sandbox. `prepare-milestone.js` itself stays sandboxed: it gains only new
-call sites, never new primitive logic (no fs, no real clock, no dynamic import); it only reads
-back additional JSON fields from calls it already makes. [[DIR-126-C]]'s `.generation.json` shape
-and `decideResumeGeneration`'s evaluation order stay byte-for-byte frozen; this milestone only
-records what they already decided.
+Add one new durable, git-tracked artifact — one JSON record per dispatch attempt, at
+`milestones/prepare-telemetry/<taskId>/<recordId>.json` — written by whichever call actually
+produces a terminal outcome, not only the success path. The `<taskId>` path segment routes through
+the same `_safeTaskIdSegment()` helper `_leasePath`/`_generationPath` already use (line 341), reused
+verbatim, never reimplemented: because this new path is *permanently committed* (unlike the
+gitignored `.generation.json` sibling, which accepted an unsanitized-`taskId` risk under
+`gap-decide-resume-generation-path-unsanitized-taskid`), reusing the sanitizer here is load-bearing,
+not cosmetic — an unsanitized `taskId` containing `/` or `..` could otherwise write outside the
+intended tree in a way that persists in git history.
 
-**Mechanism A — committed telemetry write at every terminal outcome.** The five sub-points below
-(A.1-A.5) are not five separable products — they are the SAME "write one committed record per
-terminal outcome" behavior, differing only by which structurally distinct call shape a terminal
-falls into. Landing any strict subset would leave at least one real terminal class silently
-uncovered, reproducing the exact gap this milestone exists to close (DIR-126's measured finding:
-16 of 17 real `prepare-milestone` calls are non-success).
+All new logic lives in `proposal-convergence.ts` and `milestone-preparation-check.ts` (both
+mirrors) — the two files that already run as real OS subprocesses outside the sandbox.
+`prepare-milestone.js` itself stays sandboxed: it gains only new call sites into calls it already
+makes (or thin new submodes of the same CLI binaries), never new fs/clock/import logic of its own —
+it only reads back additional JSON fields from calls it already makes. DIR-126-C's
+`.generation.json` shape and `decideResumeGeneration`'s evaluation order stay byte-for-byte frozen —
+this milestone only durably records what they already decided, it does not redesign them.
 
-**A.1 — extend `--record-generation` in place for the 13 pre-Receipt sites; call count
-stays exactly 1 each.** `_recordGenerationCli` gains a second `fs.writeFileSync`, to the new
-committed path, issued AFTER the existing `releaseLease(...)` succeeds — deliberately reversed
-from today's `.generation.json` ordering for this NEW write only, so a failure in it can never
-prevent the release that already happens today. The new write is wrapped in its **own**, separate
-try/catch — NOT the same try block `releaseLease(...)` already runs inside (`_recordGenerationCli`'s
-existing catch returns `{ok:false}` without releasing the lease if anything in that shared block
-throws, confirmed by direct source read) — so a throw from the new write can never flip an
-already-successful release's own reported `ok` to `false`; a caught write failure sets a separate
-`telemetryWriteOk:false` field on the CLI's return value and is logged, while `ok` continues to
-reflect the release result alone. AC coverage needed: a fixture forcing the new write to throw AFTER
-a successful release, confirming `releaseLease(...)` still ran, the lease is not left held, and the
-CLI's own `ok` stays `true` for the release (with `telemetryWriteOk:false` surfacing the write
-failure separately); a fixture confirming per-terminal real-dispatch count at these 13 sites stays
-exactly 1.
+**Mechanism A — a committed write at every terminal outcome (five wiring claims, A.1-A.5).** These
+are one behavior — "no terminal outcome is telemetry-silent" — realized across five structurally
+distinct call shapes, not five separable products; landing a strict subset would leave a real
+terminal class uncovered, reproducing exactly the gap being fixed.
 
-**A.2 — `reuse-terminal` gets its own write inside `_decideResumeCli`, not folded into
-A.1.** Per point 3 above, this is the only call site DIR-126-C's `reuse-terminal` decision
-actually returns from (line 415-421); `_recordGenerationCli` never runs for it, so an implementer
-extending only A.1 would structurally miss this path. Add the committed-telemetry write there
-(`recordId = generationId`, `decision.kind: 'reuse-terminal'`, `createsContentGeneration: false`,
-`contentAgentDispatchCount: 0`), written from the same call that already computes `generationId`
-and releases the lease inline. This write must **not** touch `.generation.json` — DIR-126-C
-deliberately leaves that file unwritten on `reuse-terminal`, and this milestone must not
-reintroduce a write C explicitly removed. AC coverage needed: its own dedicated fixture, distinct
-from A.1's, since an implementer who only extends `_recordGenerationCli` would structurally
-miss this path.
+- **[WIRING CLAIM A.1] `_recordGenerationCli` gains a second write, to the new committed path,
+  issued AFTER the existing `releaseLease(...)` call succeeds** — reversed from `.generation.json`'s
+  own ordering, and only for this new write, so a write failure can never prevent a release that
+  already happens today. The new write runs in its own try/catch, separate from the block
+  `releaseLease(...)` already runs inside (today's shared catch returns `{ok:false}` on any throw,
+  confirmed by direct read, without releasing the lease) — so a write throw can never flip an
+  already-successful release's reported `ok` to `false`; a caught failure instead sets a distinct
+  `telemetryWriteOk:false` field, surfaced separately and logged. Covers the 13 pre-Receipt sites;
+  per-terminal real-dispatch count stays exactly 1. **AC needed:** a fixture forcing the new write
+  to throw after a successful release, proving the lease still released and `ok` stays `true` for
+  the release specifically; a real-journal-count fixture proving no site doubles its dispatch.
+- **[WIRING CLAIM A.2] `reuse-terminal` gets its own write inside `_decideResumeCli`, not folded
+  into A.1.** This is the only call site DIR-126-C's `reuse-terminal` branch actually returns from;
+  `_recordGenerationCli` never executes for it. New write: `recordId = generationId`,
+  `decision.kind: 'reuse-terminal'`, `createsContentGeneration: false`,
+  `contentAgentDispatchCount: 0`, written from the same call that already computes `generationId`
+  and releases the lease inline — and must **not** touch `.generation.json` (DIR-126-C deliberately
+  leaves that file unwritten here; reintroducing a write there would be a regression). **AC
+  needed:** its own dedicated fixture, distinct from A.1's — an implementer extending only
+  `_recordGenerationCli` would structurally miss this path.
+- **[WIRING CLAIM A.3] the three pre-lease exits get a new, minimal CLI submode,
+  `--record-attempt`, on `proposal-convergence.ts`.** `missing-required-args`,
+  `admission-check-failed`, `prepare-already-running` hold no lease and (per point 6 above) cannot
+  derive a real `generationId`. `--record-attempt` writes **only** the committed telemetry file
+  (never `.generation.json`), keyed `recordId = attemptId = sha256(<fields the site's own verdict
+  exposes>).slice(0,12)` — structurally unable to collide with a real `generationId`;
+  `generationId: null`, `decision.kind: "not-evaluated"` for all three — this is the single
+  highest-value new wiring here, since these three sites had zero telemetry before.
+  `missing-required-args` special case: it can fire *because* `taskId` itself is the missing field,
+  so there is no valid directory key; that case routes to the fixed literal directory
+  `milestones/prepare-telemetry/_missing-taskId/<recordId>.json` with an explicit `taskId: null`
+  field — never fabricated, never silently dropped. The other two sites always have a real `taskId`
+  by the time they can fire. **AC needed:** a real-dispatch fixture per site at the same
+  evidentiary bar `prepare-already-running` already implies, plus a dedicated fixture for the
+  `_missing-taskId/` case.
+- **[WIRING CLAIM A.4] Receipt is restructured to write-then-build-then-release; its real-dispatch
+  count grows 2→3, scoped there only.** Today Receipt makes 2 real dispatches per terminal: the
+  `--build` self-check `agent()` call (which runs BEFORE any telemetry record for the attempt
+  exists) and the combined release+record call — meaning Receipt could already certify `prepared`
+  before any generation record exists, exactly the gap the tamper-detection AC targets. Split into
+  `_writeGenerationTelemetry(stageLabel, {...})` (an extended `--record-generation` that writes
+  `.generation.json` AND the new committed file, no release) and `_releaseLease(stageLabel, {...})`
+  (release only, no write). New Receipt flow: (1) write first; (2) write failure → terminal
+  `needs-human`/`telemetry-write-failed`, `_releaseLease` still runs (no orphaned lease), `--build`
+  never runs; (3) write success → `--build --telemetry <file>` runs against a file that provably
+  already exists; (4) existing `receiptResult.ok` check selects `receipt-selfcheck-failed` or
+  `prepared`, `_releaseLease` runs once. **AC needed:** a dedicated RED/GREEN pair — forced write
+  failure → `needs-human`, `--build` never invoked; forced write success → `--build --telemetry`
+  runs against an already-existing file.
+- **[WIRING CLAIM A.5] `milestone-preparation-check.ts --build` gains `--telemetry <file>`,
+  sha256-hashing it into `receipt.hashes.telemetry`, mirroring `buildReceipt`'s existing
+  `ledgerHash` computation verbatim; `checkPreparation()` gains a `receipt.telemetryFile` block
+  mirroring the existing `if (receipt.ledgerFile) {...}` block** — missing file →
+  `telemetry-missing`; hash mismatch → `telemetry-stale`. Direct reuse of an existing code shape,
+  not new design. **AC needed:** a dedicated RED/GREEN pair mirroring the existing
+  `ledger-stale`/`ledger-missing` tests, not code-shape similarity alone.
 
-**A.3 — the three pre-lease exits get one genuinely new, minimal dispatch.**
-`missing-required-args`, `admission-check-failed`, and `prepare-already-running` hold no lease and
-(per point 8 above) cannot derive a real `generationId`. Add a new, narrow CLI submode on
-`proposal-convergence.ts`, `--record-attempt`, writing **only** the committed telemetry file
-(never `.generation.json`), keyed by `recordId = attemptId = sha256(<fields the site's own verdict
-exposes>).slice(0,12)` — structurally incapable of colliding with a real `generationId`.
-`generationId: null`, `decision.kind: "not-evaluated"` for all three — this is the single
-highest-value new wiring here, since these three sites had zero telemetry before.
-`missing-required-args` special case: the committed path is `taskId`-primary, but this exact
-terminal can fire *because* `taskId` itself is the missing field, so there is no valid directory
-key. `--record-attempt` special-cases it: when `taskId` is absent, the record lands at the fixed
-literal directory `milestones/prepare-telemetry/_missing-taskId/<recordId>.json`, with an explicit
-`taskId: null` field. The other two sites always have a real `taskId` (the guard that would fire
-`missing-required-args` already passed before either can be reached). AC coverage needed: a
-real-dispatch fixture per site, at the same evidentiary bar `prepare-already-running` already gets,
-plus a dedicated fixture proving the `missing-required-args` case lands under `_missing-taskId/`
-with `taskId: null`.
-
-**A.4 — Receipt is restructured to write-then-build-then-release; Receipt's own real
-dispatch count grows 2→3, scoped there only.** Today Receipt makes 2 real dispatches per terminal:
-the `--build` self-check `agent()` call (which runs BEFORE any telemetry record exists) and the
-combined `_releaseLeaseAndRecord` call. That ordering means Receipt could already certify
-`prepared` before any generation record for the attempt exists — the exact gap the tamper-detection
-AC targets. Split into `_writeGenerationTelemetry(stageLabel, {...})` (an extended
-`--record-generation` that writes `.generation.json` AND the new committed telemetry file, no
-release) and a release-only submode, `_releaseLease(stageLabel, {...})` (no write). Reorder
-Receipt's flow: (1) `_writeGenerationTelemetry` first; (2) write failure → terminal
-`needs-human`/`telemetry-write-failed`, `_releaseLease` still runs (no orphaned lease), and the
-Receipt `--build` agent call never runs; (3) write success → `--build` runs, passed `--telemetry
-<file>` naming a file that provably already exists; (4) the existing `receiptResult.ok` check
-selects `receipt-selfcheck-failed` or `prepared`, `_releaseLease` runs once. AC coverage needed: a
-dedicated RED/GREEN fixture pair — forced write failure → `needs-human`/`telemetry-write-failed`,
-`--build` never invoked; forced write success → `--build --telemetry` provably runs against a file
-that already exists at call time.
-
-**A.5 — tamper detection reuses `--ledger`'s exact mechanism, not a new integrity
-scheme.** `milestone-preparation-check.ts --build` gains `--telemetry <file>`, sha256-hashing its
-content into `receipt.hashes.telemetry`, mirroring `buildReceipt`'s existing `ledgerHash`
-computation (line 80) verbatim. `checkPreparation()` gains a `receipt.telemetryFile` block
-mirroring the existing `if (receipt.ledgerFile) {...}` block (lines 312-322): missing file →
-`telemetry-missing`; hash mismatch → `telemetry-stale`. Near-free — direct reuse of an existing
-code shape, not new design, essentially part of A.1-A.4's own write mechanism rather than a
-separable claim. AC coverage needed: a dedicated RED/GREEN fixture pair mirroring the existing
-`ledger-stale`/`ledger-missing` tests, not code-shape similarity alone.
-
-**Frozen record schema** (superset of DIR-126-C's fields — no renames, no removals):
+**Frozen record schema** (superset of DIR-126-C's fields — no renames, no removals; `.generation.json`
+itself stays `schemaVersion: 1` unmodified, this new archive is `schemaVersion: 2`):
 
 ```
 {schemaVersion: 2, recordId, attemptId, generationId,
@@ -202,279 +188,280 @@ separable claim. AC coverage needed: a dedicated RED/GREEN fixture pair mirrorin
  workspace, taskId, milestoneId, class, highRisk,
  hashes: {charter, taskContract, proposal, reviewPolicy},
  decision: {kind, reason, priorGenerationId, priorReason, createsContentGeneration},
- phases: [{phase, round, startedAtMs, endedAtMs,
-           mechanicalRunnerCount, mechanicalRunnerMs,
-           contentAgentDispatchCount, contentAgentMs, retryCount}],
+ contentAgentDispatchCount, contentAgentMs,
  terminal: {outcome, reason, phase, cacheable},
- findingCodes: [{code, recurrenceKey, firstSeenGeneration, lastSeenGeneration}],
  leaseRelease: {attempted, ok, reason},
  sessionId, recordedAtMs}
 ```
 
-`decision.kind` is `cold|resume|reuse-terminal` for admitted attempts, `not-evaluated` (typed,
-never omitted) for the three `--record-attempt` sites. DIR-126-C's `.generation.json` keeps
-`schemaVersion: 1` unmodified; `schemaVersion: 2` applies only to this milestone's new committed
-archive. Used by both Mechanism A (every A.1-A.5 write follows this shape) and Mechanism B below
-(B.1 populates `phases[]`, B.3 populates `findingCodes[]`).
+`contentAgentDispatchCount`/`contentAgentMs` are flat per-generation totals (not the per-phase
+breakdown array a deferred future child could add) — required by A.2's own `reuse-terminal` proof
+(`contentAgentDispatchCount: 0` by construction, since that path never dispatches a content agent);
+`null`/`"unknown"` for terminals this milestone doesn't derive them for, never fabricated.
 
-**Mechanism B — telemetry enrichment (phase timing, read-only query, recurrence tracking).** The
-three sub-points below (B.1-B.3) are each individually deferrable — additive to records that
-already exist without them — but all three are explicitly named in the already-committed M203
-charter (itself the product of DIR-126's own real 5-way `mechanismCount=5` ProposalReview split);
-deferring any of them now would silently re-open a scoping decision that parent split already made
-deliberately, not respond to new information.
+`decision.kind` is `cold|resume|reuse-terminal` for admitted attempts, `not-evaluated` (typed, never
+omitted) for the three `--record-attempt` sites.
 
-**B.1 — phase timing rides already-real dispatches, never a new clock call or dynamic
-import inside the sandbox.** `prepare-admission-check.ts` (invoked via `_renewLease` at every phase
-boundary) and the extended `--record-generation`/`--decide-resume`/`--record-attempt` calls each
-gain one additive JSON field: `nowMs: Date.now()`, computed inside the real OS subprocess, never
-the sandbox. `prepare-milestone.js` accumulates `{phase, round, startedAtMs, endedAtMs}` entries
-into a plain in-memory array by reading `nowMs` back off already-parsed results — zero new agent
-dispatches, zero new forbidden calls inside `prepare-milestone.js`. This extends the existing
-`nowMs` self-report convention already used by `ProposalReview` to the other four content phases
-(`ProposalAuthors`, `Adjudicate`, `PlanAuthor`, `PlanCheck`). AC coverage needed: given the two
-confirmed production crashes (point 6 above), a hard grep-based regression-guard AC item — zero new
-`Date.now()`/`new Date()`/`await import(`/bare `import(` sites added to `prepare-milestone.js`
-(either mirror) by this milestone's diff.
+**Mechanism B — a new read-only query mode (one wiring claim, B.2; charter-mandated verbatim —
+`--telemetry-report <milestoneId>` is named explicitly in the M203 charter's own Scope section,
+unlike the two enrichment ideas deferred below).**
 
-Mechanical vs. content dispatch counters stay separate: `mechanicalRunnerCount`/
-`mechanicalRunnerMs` vs. `contentAgentDispatchCount`/`contentAgentMs`, matching the file's existing
-taxonomy. This is what makes [[DIR-126-B]]/[[DIR-126-C]]'s savings provable — a
-`preflight-rejected` or `reuse-terminal` record with `contentAgentDispatchCount: 0` is direct
-structural proof, not an inference from wall time.
+- **[WIRING CLAIM B.2] a new read-only `--telemetry-report <milestoneId>` CLI mode on
+  `milestone-preparation-check.ts`**, scanning `milestones/prepare-telemetry/**/*.json` and
+  filtering by each record's own `milestoneId` field (never by directory layout alone, since layout
+  is `taskId`-primary and a re-charter'd task can carry a different `milestoneId` across generations
+  under the same directory). Zero matches → `{ok: true, code: "no-records", milestoneId}`, never a
+  crash. **AC needed:** an end-to-end fixture — write a real record via the extended write path,
+  read it back via this exact CLI mode (not a mocked reader) — plus a dedicated zero-match fixture.
 
-**B.2 — `--telemetry-report <milestoneId>`, a new read-only CLI mode on
-`milestone-preparation-check.ts`.** Scans `milestones/prepare-telemetry/**/*.json`, filtering by
-each record's own `milestoneId` field — never by directory structure alone, since layout is
-`taskId`-primary and a re-charter'd task could carry a different `milestoneId` across generations
-under the same `taskId` directory. Returns `{ok: true, code: "no-records", milestoneId}` on zero
-matches, never a crash. AC coverage needed: an end-to-end fixture — write a real record via the
-extended write path, then read it back via this exact CLI mode (not a mocked reader), plus a
-zero-match fixture.
+**Deferred out of DIR-126-D's scope (re-verified against the real M203 charter text, not assumed):**
+a prior ProposalReview round's "Why one milestone, not eight" argument asserted these two
+enrichment ideas were "named explicitly in the already-committed M203 charter" alongside B.2 — a
+later round directly grepped the charter and found that claim false for both. Deferred, not
+abandoned — each is real, well-specified work for a future child, just not charter-mandated for
+this one:
+- **Phase-boundary timing** (the idea of `prepare-admission-check.ts` and every phase-boundary call
+  gaining an additive `nowMs: Date.now()` field, accumulated into a per-round `{phase, round,
+  startedAtMs, endedAtMs}` breakdown). The charter's "every phase boundary" language (Done-when)
+  refers to every phase that can PRODUCE A TERMINAL OUTCOME gaining a telemetry-emit callsite —
+  Mechanism A's job — not to granular intra-generation timing; only the charter's title phrase
+  "phase telemetry" weakly implied the latter, and title phrasing isn't a scope commitment.
+- **`findingCodes[]` recurrence tracking** (`recurrenceKey`/`firstSeenGeneration`/
+  `lastSeenGeneration`, answering a "Forward-compatible feedback identity" AC bullet an earlier
+  ProposalReview round itself added). Zero mentions of "finding" or "recurrence" anywhere in the
+  real charter text — this was reviewer-added AC scope-creep, not a charter requirement.
 
-**B.3 — `findingCodes[]` recurrence tracking.** One entry per stable code the terminal
-carries (at minimum `terminal.reason`, plus each ProposalReview ledger finding's own `code`).
-`recurrenceKey = sha256(taskId::code).slice(0,12)`; `firstSeenGeneration`/`lastSeenGeneration`
-populated by scanning already-committed `milestones/prepare-telemetry/<taskId>/*.json` for a prior
-entry with the same `recurrenceKey` — a plain glob+JSON-parse read inside the already-real
-`proposal-convergence.ts` process, no new dispatch. AC coverage needed: a dedicated fixture — a
-repeated finding code across two real generations advances `lastSeenGeneration` while
-`firstSeenGeneration` stays pinned to the first.
+Both remain real, valuable follow-up work — a dedicated deferral task is filed alongside this fix
+(see `## Touches`-adjacent cross-reference in the follow-up gap task) rather than silently dropped.
 
 ### Concrete control and data flow
 
 ```
-missing-required-args (pre-Admission, line 68)   → NEW --record-attempt (generationId:null,
-                                                     decision.kind:"not-evaluated",
-                                                     taskId:null under _missing-taskId/)
-Admission (_admissionAgentCall gains nowMs; guard at line 175)
-  ├─ admission-check-failed (line 180)            → same NEW --record-attempt dispatch
-  ├─ prepare-already-running (line 185, contention)→ same, recordId=attemptId (no fencingToken input)
-  └─ acquired lease → _phaseTelemetry=[{phase:'Admission', startedAtMs, endedAtMs}]
-       $a.resumeFromAdjudicatedProposal explicit true|false → skips --decide-resume entirely
-       $a.resumeFromAdjudicatedProposal omitted →
-         --decide-resume (computes generationId, reads priorGenerationRecord)
-           ├─ reuse-terminal → SAME call: releases lease inline (unchanged, line 421)
-           │     + NEW committed telemetry write (Claim A.2: decision.kind:'reuse-terminal',
-           │     contentAgentDispatchCount:0); .generation.json deliberately NOT rewritten → return
+missing-required-args (pre-Admission, line 68)     → [A.3] --record-attempt
+                                                       (generationId:null, decision.kind:"not-evaluated",
+                                                        taskId:null, under _missing-taskId/)
+Admission (guard at line 175)
+  ├─ admission-check-failed (line 180)              → [A.3] same --record-attempt dispatch
+  ├─ prepare-already-running (line 185, contention)  → [A.3] same, recordId=attemptId (no fencingToken input)
+  └─ lease acquired
+       resumeFromAdjudicatedProposal explicit true|false → skips --decide-resume entirely
+       resumeFromAdjudicatedProposal omitted →
+         --decide-resume (_decideResumeCli: recomputes generationId, reads prior generation record)
+           ├─ reuse-terminal → same call releases lease inline (unchanged, line 421)
+           │     + [A.2] new committed telemetry write (decision.kind:'reuse-terminal',
+           │       contentAgentDispatchCount:0); .generation.json deliberately NOT rewritten → return
            └─ cold|resume → continue
-              Preflight ×2 (gains nowMs; _renewLease fires)
+              Preflight ×2 (_renewLease fires)
                 ├─ preflight-check-failed / preflight-rejected
-                │     → extended --record-generation: writes UNCHANGED .generation.json PLUS
-                │       new committed telemetry record (new write ordered AFTER release) [Claim A.1]
-                └─ passed → ProposalAuthors → Adjudicate → ProposalReview(+delta rounds, gains
-                     nowMs) → PlanAuthor → PlanCheck(+rounds) → Receipt
+                │     → [A.1] extended --record-generation: .generation.json unchanged PLUS new
+                │       committed record, write ordered AFTER release
+                └─ passed → ProposalAuthors → Adjudicate → ProposalReview(+delta rounds) →
+                     PlanAuthor → PlanCheck(+rounds) → Receipt
                      (all 13 pre-Receipt terminals: unchanged _releaseLeaseAndRecord wrapper, one
-                      dispatch, flushing _phaseTelemetry + counters into the extended
-                      --record-generation write)
-                     Receipt (dispatch count 2 → 3, scoped here only) [Claim A.4]:
+                      dispatch each, flushing accumulated phase timing + counters into the
+                      extended --record-generation write) [A.1]
+                     Receipt (real-dispatch count 2 → 3, scoped here only) [A.4]:
                        _writeGenerationTelemetry('Receipt', {...}) FIRST [NEW]
                          ├─ write fails → _releaseLease('Receipt', {reason:'telemetry-write-failed'})
-                         │     → needs-human, --build never runs, never 'prepared'
-                         └─ write ok → milestone-preparation-check.ts --build --telemetry <file>
-                               [existing dispatch, now hash-binds a file that already exists]
+                         │     → needs-human; --build never runs; never 'prepared'
+                         └─ write ok  → milestone-preparation-check.ts --build --telemetry <file>
+                               [existing dispatch, now hash-binds a file that already exists] [A.5]
                              ├─ receiptResult.ok:false → _releaseLease(..., 'receipt-selfcheck-failed')
                              └─ receiptResult.ok:true  → _releaseLease(..., outcome:'prepared')
+
+Read path (any time, no lease):
+  --telemetry-report <milestoneId> on milestone-preparation-check.ts scans
+  milestones/prepare-telemetry/**/*.json, filters by embedded milestoneId [B.2]
 ```
 
 ### Key design decisions
 
-- Two artifacts, two lifecycles, one unchanged interface: DIR-126-C's gitignored single-record file
-  stays the exact `decideResumeGeneration` input; this milestone's committed archive is additive,
-  read by nothing upstream of it. Neither `_generationPath`'s shape nor `decideResumeGeneration`'s
-  evaluation order changes.
-- Dispatch count grows only where it must: the 13 pre-Receipt sites and `reuse-terminal` keep their
-  current count (1 each); the 3 pre-lease sites go 0→1 (they had zero telemetry before); only
-  Receipt goes 2→3, because that is the one place a silent write failure could otherwise be
-  absorbed into a false `prepared` certification.
-- All phase timing sourced from already-real subprocess self-reports, never a new `Date.now()` call
-  or dynamic `import()` inside the sandboxed script — treated as a hard grep-based gate given the
-  two confirmed production incidents (`f6db2a8`, `7357a91`), not an assumption.
+- Two artifacts, two lifecycles, one unchanged upstream interface: DIR-126-C's gitignored
+  single-record `.generation.json` stays the exact input `decideResumeGeneration` already consumes;
+  this milestone's committed archive is purely additive and read by nothing upstream of it. Neither
+  `_generationPath`'s shape nor `decideResumeGeneration`'s evaluation order changes.
+- Dispatch count grows only where correctness demands it: the 13 pre-Receipt sites and
+  `reuse-terminal` keep count 1; the 3 pre-lease sites go 0→1 (previously uncovered, pure gain, not
+  a doubling); only Receipt goes 2→3, because Receipt is the one place a silent write failure could
+  otherwise be absorbed into a false `prepared` certification without any generation record to back
+  it.
+- Every new timestamp is sourced from an already-real subprocess self-report — never a new
+  `Date.now()` call or dynamic `import()` inside `prepare-milestone.js` — treated as a hard,
+  grep-checked gate given the two confirmed production incidents, not a design preference.
+- `--decide-resume` and `--record-generation` are extended separately, deliberately not conflated:
+  the `reuse-terminal` write belongs inside `_decideResumeCli` and must not resurrect the
+  `.generation.json` write DIR-126-C intentionally removed.
 - `proposal-convergence.ts` and `milestone-preparation-check.ts` are the only files gaining new
-  logic — `prepare-milestone.js` stays sandboxed (no fs, no real clock, no dynamic import),
-  `prepare-admission-check.ts` stays read-only (gains only an additive `nowMs` field; its
-  contention `owner` shape stays unchanged and still lacks `fencingToken`).
-- `--decide-resume` and `--record-generation` are extended separately, not conflated — the
-  `reuse-terminal` write must live in `_decideResumeCli` and must not resurrect the
-  `.generation.json` write DIR-126-C deliberately removed.
-- Attempt/generation ID scheme matches what each caller can actually prove: admitted attempts
-  (including `reuse-terminal`) reuse C's `_computeGenerationId` formula unchanged; pre-lease/
-  contention attempts hash only fields their own verdict exposes, structurally unable to collide
+  logic; `prepare-admission-check.ts` is untouched by this child — its
+  contention `owner` shape (confirmed lacking `fencingToken`) stays unchanged.
+- ID scheme matches what each caller can actually prove: admitted attempts (including
+  `reuse-terminal`) reuse DIR-126-C's `_computeGenerationId` formula unchanged; pre-lease/contention
+  attempts hash only fields their own verdict already exposes, structurally incapable of colliding
   with a real `generationId`.
-- No fabrication: an uncapturable field is recorded as explicit `null`/`"unknown"`, never omitted,
-  matching the file's existing provenance-flag discipline.
+- No fabrication: any uncapturable field is recorded as an explicit `null`/`"unknown"`, never
+  omitted — matching the codebase's existing provenance-flag discipline (e.g. `ledgerFile: null`).
 
 ### Defaults and failure behavior
 
 | Condition | Default outcome |
 |---|---|
 | Receipt-path `_writeGenerationTelemetry` write fails | terminal `needs-human`, reason `telemetry-write-failed`; `--build` never runs, never `prepared` off an unwritten record |
-| A pre-Receipt terminal's (13 sites, or `reuse-terminal`) telemetry write fails | terminal outcome unaffected (already non-`prepared`); degrades observability only |
-| A pre-lease `--record-attempt` dispatch fails to write | logged, but the original terminal outcome is returned regardless — telemetry is additive, never gating on already-terminal paths |
-| A phase-timing/dispatch-count field cannot be captured | explicit `null`/`"unknown"`, never omitted, never a synthesized `Date.now()` |
+| A pre-Receipt terminal's telemetry write fails (13 sites, or `reuse-terminal`) | terminal outcome unaffected (already non-`prepared`); degrades observability only, surfaced via `telemetryWriteOk:false` |
+| A pre-lease `--record-attempt` dispatch fails to write | logged; original terminal outcome returned regardless — telemetry is additive, never gating on an already-terminal path |
+| A phase-timing/dispatch-count field cannot be captured | explicit `null`/`"unknown"`, never omitted, never a synthesized clock value |
 | Admission identity lacks `key`/`ownerExecutionId`/`fencingToken` | fail closed; no bare-session/collision-prone `generationId` ever emitted |
 | Contention/pre-lease attempt (no lease held) | `generationId: null`, `recordId = attemptId`, `createsContentGeneration: false`, `decision.kind: "not-evaluated"` |
-| `missing-required-args` specifically (`taskId` itself absent) | record lands at `milestones/prepare-telemetry/_missing-taskId/<recordId>.json`, `taskId: null` — never fabricated, never dropped |
-| `reuse-terminal` record has any content-agent dispatch, or lacks a prior generation/policy hash | schema validation fails closed — `needs-human` |
+| `missing-required-args` (taskId itself absent) | record under `milestones/prepare-telemetry/_missing-taskId/<recordId>.json`, `taskId: null` |
+| `reuse-terminal` record lacks a prior generation/policy hash, or has nonzero content-agent counts | schema validation fails closed → `needs-human` |
 | Acquired generation terminates without a typed lease-release result | terminal stays visibly non-`prepared`; `leaseRelease.ok` never fabricated `true` |
 | Receipt names a telemetry file that's missing or hash-mismatched | `telemetry-missing`/`telemetry-stale`, fails closed |
 | `--telemetry-report <milestoneId>` finds zero matching records | explicit `{ok: true, code: "no-records"}`, never a crash |
 
 ### Compatibility
 
-`preparation.json` gains only optional fields — old receipts stay valid, matching the precedent
-already set by `ledgerFile`'s own tolerant growth (the `convergence-not-recorded` non-crash case).
-No existing `checkPreparation()` path becomes stricter for a receipt that never named a telemetry
-file (same `if (receipt.ledgerFile)`-shaped gate the `--ledger` block already uses). Existing
-M195/M197/M200/M201/M202-shaped fixtures (predating this milestone, no `--telemetry`) must stay
-GREEN unmodified — an explicit regression-run AC item, not an assumption. DIR-126-C's
-`.generation.json` shape, write path, and `decideResumeGeneration`'s clauses stay untouched
-byte-for-byte, including the `reuse-terminal`-never-rewrites behavior. Both workflow mirrors, the
-`milestone-preparation-check.ts` mirror, and `proposal-convergence.ts` (both mirrors) must stay
-byte-identical (`cmp`/`sync-vendor.sh --check`, currently confirmed identical). No retroactive
-backfill into pre-DIR-126 receipts.
+`preparation.json` gains only optional fields; existing receipts stay valid under the same tolerant
+pattern `ledgerFile` already established (no existing `checkPreparation()` path becomes stricter for
+a receipt that never named a telemetry file — the new `if (receipt.telemetryFile)` gate is
+structurally identical to the existing `if (receipt.ledgerFile)` gate). Existing
+M195/M197/M200/M201/M202-shaped fixtures — none of which pass `--telemetry` — must stay GREEN
+unmodified; this is an explicit AC item, not an assumption. DIR-126-C's `.generation.json` shape,
+write path, and `decideResumeGeneration`'s evaluation clauses, including the no-write-on-
+`reuse-terminal` behavior, stay byte-for-byte untouched. Both workflow mirrors, both
+`milestone-preparation-check.ts` mirrors, and both `proposal-convergence.ts` mirrors must remain
+byte-identical (`cmp`/`sync-vendor.sh --check`; confirmed identical today). `prepare-admission-
+check.ts` is untouched by this child (its earlier `nowMs` field was Mechanism B.1's own scope,
+deferred — see above), so its mirrors' byte-identity is out of this child's own AC, though it stays
+true incidentally. No retroactive backfill of pre-DIR-126 receipts.
 
 ### Risks
 
-- Receipt dispatch-count increase (2→3) is the single largest behavior change here — mitigated by
-  scoping it to Receipt only, reusing existing `proposal-convergence.ts` code paths for both new
-  sub-dispatches (no new subprocess binary).
-- Sandbox `Date.now()`/dynamic-`import()` trap recurring — this file has crashed in production
-  twice on exactly this class of mistake (`f6db2a8` for the clock; `7357a91` for `import()`,
-  discovered on this very milestone's own first live attempt); mitigated by routing every
-  timestamp through an already-real subprocess self-report and a grep-based regression fixture
-  covering both `Date.now()`/`new Date()` and `await import(`/bare `import(`.
-- `reuse-terminal`/`.generation.json` conflation risk — an implementer extending
+- Receipt's real-dispatch-count increase (2→3) is the single largest control-flow change here —
+  mitigated by scoping it to Receipt only and reusing existing `proposal-convergence.ts` code paths
+  for both new sub-dispatches (no new subprocess binary introduced).
+- Sandbox `Date.now()`/dynamic-`import()` recurrence risk is concrete, not theoretical — this exact
+  file has crashed in production twice on this mistake class (`f6db2a8`, `7357a91`, the latter
+  discovered on this milestone's own first live attempt); mitigated by routing every new timestamp
+  through an already-real subprocess self-report plus a grep-based regression fixture covering both
+  `Date.now()`/`new Date()` and `await import(`/bare `import(`.
+- `reuse-terminal`/`.generation.json` conflation risk: an implementer extending
   `_recordGenerationCli` alone (the more obvious single extension point) could miss that
-  `reuse-terminal` needs its write inside `_decideResumeCli` instead, and could accidentally
-  reintroduce a `.generation.json` write DIR-126-C removed; mitigated by naming this as its own
-  wiring claim (Claim A.2), not folded into Claim A.1.
-- CLI report-format drift: adding `nowMs` to `prepare-admission-check.ts`'s and
-  `proposal-convergence.ts`'s JSON output must not break the existing noise-tolerant JSON parser
-  (per the `gap-prepare-milestone-noisy-agent-raw-json-parse` precedent) or any field the workflow
-  script already reads; mitigated by additive-only field changes verified against existing
-  fixtures.
-- `--telemetry-report` correctness depends on scanning by embedded `milestoneId`, not directory
-  structure — mitigated by filtering on the record's own field.
-- New committed-artifact volume: small structured JSON only, explicitly excluded from any LOC
-  "productivity" framing.
-- The contention `owner` shape lacking `fencingToken` (point 8 above) means the contention/
-  `admission-check-failed`/`missing-required-args` records are structurally weaker (attempt-keyed,
-  not generation-keyed) than admitted-attempt records — an accepted, disclosed asymmetry, not a
-  defect to silently paper over.
+  `reuse-terminal` needs its own write inside `_decideResumeCli`, and could accidentally resurrect a
+  `.generation.json` write DIR-126-C removed — mitigated by naming this its own claim (A.2), not
+  folded into A.1.
+- Additive JSON fields (`nowMs`, etc.) on subprocess CLI output could in principle collide with the
+  workflow's noise-tolerant JSON parser (per the `gap-prepare-milestone-noisy-agent-raw-json-parse`
+  precedent) or a field the workflow already reads — mitigated by additive-only field changes
+  verified against existing fixtures.
+- `--telemetry-report` correctness depends on filtering by each record's own embedded `milestoneId`
+  field, not directory layout — mitigated by filtering on that field explicitly, never inferring it
+  from the `taskId`-primary directory structure.
+- New committed-artifact volume is small, structured JSON only; explicitly excluded from any
+  code-volume "productivity" framing.
+- The contention/pre-lease `owner` shape structurally lacks `fencingToken` (confirmed:
+  `checkStaleOwner`'s output exposes only `{ownerExecutionId, acquiredAt, leaseUntil, stage}`), so
+  contention/`admission-check-failed`/`missing-required-args` records are attempt-keyed rather than
+  generation-keyed — an accepted, disclosed asymmetry versus admitted-attempt records, not a defect
+  to silently paper over.
 
 ### Non-goals
 
-Not re-implementing [[DIR-126-A]]'s lease acquisition, [[DIR-126-B]]'s preflight checks, or
-[[DIR-126-C]]'s `decideResumeGeneration`/resume logic — only recording what they already decided.
-Not building DIR-126-E's capacity-report aggregation — this milestone makes individual records
-exist and be queryable per-attempt; cross-record aggregation is out of scope. Not fabricating
-token-usage fields the harness doesn't expose. Not deriving telemetry from Claude Code session
-JSONL. Not touching `prepare-admission-check.ts`'s write surface (read-only + one additive `nowMs`
-field only). Not changing [[DIR-126-C]]'s `.generation.json` shape, path, or per-`taskId`-overwrite
-semantics, including its no-write-on-`reuse-terminal` behavior. Not implementing DIR-124-B's own
-receipt-migration adapter — only shaping records to be deterministically adaptable.
+Not re-implementing DIR-126-A's lease acquisition, DIR-126-B's preflight checks, or DIR-126-C's
+`decideResumeGeneration`/resume logic — only recording what they already decided. Not building
+DIR-126-E's capacity-report aggregation — this milestone makes individual records exist and be
+queryable per-attempt; cross-record aggregation is explicitly out of scope. Not fabricating
+token-usage fields the harness doesn't expose. Not deriving telemetry from Claude Code session JSONL
+under any circumstance. Not touching `prepare-admission-check.ts` at all (its earlier `nowMs`
+field was Mechanism B.1's own scope, deferred out of this child — see Chosen mechanism above). Not
+changing DIR-126-C's `.generation.json`
+shape, path, or per-`taskId`-overwrite semantics, including its no-write-on-`reuse-terminal`
+behavior. Not implementing DIR-124-B's own receipt-migration adapter — only shaping this milestone's
+own record to be deterministically adaptable by a future consumer.
 
 ### Acceptance Criteria coverage
 
-- Real production wiring at every phase boundary and pre-lease exit → Claims A.1/A.2/A.3, each
-  independently checkable by direct source read (not `--selftest`-only reachability).
-- Directly queryable telemetry (cold/resumed/contention/preflight-rejected/reuse-terminal) via
-  `--telemetry-report` → Claim B.2, fed by Claims A.1/A.2/A.3.
-- Generation-ID non-collision across successive owners → reuses C's landed formula unchanged; the
-  AC exercises that reuse, not new logic.
-- `reuse-terminal` measurability → Claim A.2 plus the mechanical/content counter split.
+- Real production wiring at every phase boundary and pre-lease exit, confirmed by direct source
+  read (not `--selftest`-only reachability) → Claims A.1/A.2/A.3.
+- Directly queryable telemetry across cold/resumed/contention/preflight-rejected/reuse-terminal →
+  Claim B.2, fed by Claims A.1/A.2/A.3.
+- Generation-ID non-collision across successive owners in one session → reuses DIR-126-A/C's landed
+  formula unchanged; the AC exercises that reuse, not new logic.
+- `reuse-terminal` measurability (hashes, prior generation ID, zero content-agent counters) → Claim
+  A.2's own flat `contentAgentDispatchCount: 0` field, true by construction on that path.
 - Telemetry integrity (tamper → `telemetry-stale`; missing → fail-closed) → Claim A.5, direct reuse
   of `--ledger`'s code shape.
 - Receipt write-before-build ordering (the one place a silent failure could produce a false
   `prepared`) → Claim A.4, RED/GREEN fixture.
-- Phase-transition count parity against a real multi-round journal → Claim B.1's `_phaseTelemetry`
-  accumulation, including delta-round and PlanCheck-round loops.
 - Per-terminal real-dispatch count stays exactly 1 for the 13 pre-Receipt sites and
-  `reuse-terminal`, exactly 3 for Receipt → Claims A.1/A.2 (unchanged count) and Claim A.4 (disclosed
-  increase), each needing its own journal-count fixture.
-- All fields present-and-typed → the Defaults table plus schema validation fail-closed behavior.
-- Zero new `Date.now()`/`new Date()`/`await import(`/`import(` regression → Claim B.1's grep-based
-  guard, given two confirmed prior production incidents.
-- Forward-compatible feedback identity / recurrence tracking → Claim B.3's `findingCodes[]`, its own
-  dedicated fixture.
+  `reuse-terminal`, exactly 3 for Receipt → Claims A.1/A.2 (unchanged) and Claim A.4 (disclosed
+  increase), each with its own journal-count fixture.
+- All fields present-and-typed, schema-validated fail-closed → the Defaults table plus a dedicated
+  schema-validation AC.
+- Zero new `Date.now()`/`new Date()`/`await import(`/`import(` regression → a dedicated grep-based
+  guard over this child's own diff, given two confirmed prior production incidents (this milestone
+  adds no new timestamp source of its own — `recordedAtMs` reuses DIR-126-C's already-landed
+  subprocess self-report, per Key design decisions above).
 - One-way DIR-124-B migration compatibility → this milestone proves its own record shape is
-  deterministically adaptable; it cannot prove DIR-124-B's adapter exists (that's DIR-124-B's own
+  deterministically adaptable; it cannot prove DIR-124-B's adapter exists (that is DIR-124-B's own
   scope).
-- Byte-identical mirrors → existing `sync-vendor.sh --check`, unchanged mechanism.
+- Byte-identical mirrors → existing `sync-vendor.sh --check`/`cmp`, unchanged mechanism.
 - Backward-compat regression run → explicit AC item re-running M195/M197/M200/M201/M202-shaped
   fixtures GREEN unmodified.
-- New committed telemetry path sanitizes `taskId` → reuses `_safeTaskIdSegment()`, RED/GREEN
-  fixture with a path-separator taskId.
+- New committed telemetry path sanitizes `taskId` → reuses `_safeTaskIdSegment()`, dedicated
+  RED/GREEN fixture with a path-separator `taskId`.
+- `--telemetry-report` end-to-end and zero-match behavior → Claim B.2, two fixtures (read-after-
+  write, and zero-match).
 
 ### Alternatives considered and rejected
 
-- A second, parallel CLI dispatch (`--emit-telemetry`) alongside the unchanged `--record-generation`
-  call, for the 13 pre-Receipt sites. Rejected: doubles per-terminal real-dispatch count for no
-  correctness benefit, since one already-real process can trivially perform two `fs.write` calls.
-- Splitting write/release into two dispatches at ALL 15+3 sites uniformly, instead of scoping the
-  split to Receipt only. Rejected: the 13 pre-Receipt/`reuse-terminal` terminals are already
-  non-`prepared` regardless of telemetry write outcome, so a second dispatch there buys zero
-  correctness and only adds cost; the split is worth its cost exactly once, at the site where a
-  silent write failure could otherwise slip into a false certification.
-- Extending DIR-126-C's existing gitignored single-record file into the durable archive (add a
-  history array to `.generation.json`). Rejected: that path is gitignored specifically because it's
-  ephemeral and meant to vanish on release, and is deliberately left unwritten on `reuse-terminal` —
-  a durable, cross-session record cannot live somewhere designed to sometimes not be written at all.
-- Hosting the new per-phase CLI logic on `prepare-admission-check.ts`. Rejected for the same reason
-  DIR-126-C rejected it: its contention-verdict `owner` shape lacks `fencingToken`, confirmed by
-  direct read, so it structurally cannot host generation-identity logic without a separate,
-  out-of-scope change to that file's own output contract.
-- A workflow-script-local `Date.now()`/injected-clock source for phase timing, or a dynamic
-  `import()`-based pre-check. Rejected: both are confirmed 100%-reproducible production crashes
-  (`f6db2a8`, `7357a91`); a test-only injected clock hook can never be present in a real
-  JSON-serialized dispatch, so timing built on it would be test-fixture-only, not production-real.
-- Deriving phase timing/telemetry from Claude Code session JSONL. Rejected: session logs aren't
-  checked in, aren't reproducible by a later auditor, and conflict with the "checked-in workflow
-  artifacts, not session prose" bar this same defect is trying to fix.
-- A single combined mechanical+content dispatch counter. Rejected: cannot prove
-  [[DIR-126-B]]/[[DIR-126-C]]'s savings — a `reuse-terminal` record with a nonzero combined counter
-  (from mechanical calls that always run) would look indistinguishable from one that also ran an
-  expensive content agent.
-- Overwriting a single per-task committed telemetry file (mirroring `.generation.json`'s per-taskId
-  overwrite). Rejected: this is the literal defect being fixed — it would silently destroy history
-  on every re-run.
+- A second, parallel CLI dispatch (e.g. `--emit-telemetry`) alongside the unchanged
+  `--record-generation` call at the 13 pre-Receipt sites. Rejected: doubles per-terminal
+  real-dispatch count for no correctness benefit, since the already-dispatched process can trivially
+  perform a second `fs.write` in the same call.
+- Splitting write/release into two dispatches uniformly at all 15+3 sites, not just Receipt.
+  Rejected: the 13 pre-Receipt/`reuse-terminal` terminals are already non-`prepared` regardless of
+  telemetry write outcome, so a second dispatch there buys no correctness and only adds cost; the
+  split is worth paying for exactly once, at the one site where a silent write failure could
+  otherwise slip into a false certification.
+- Extending DIR-126-C's existing gitignored `.generation.json` into the durable archive (e.g. adding
+  a history array to it). Rejected: that file is gitignored specifically because it's ephemeral, and
+  is deliberately left unwritten on `reuse-terminal` — a durable, cross-session record cannot live
+  somewhere designed to sometimes not be written at all.
+- Hosting the new telemetry logic on `prepare-admission-check.ts`. Rejected for the same reason
+  DIR-126-C rejected it there: its contention-verdict `owner` shape structurally lacks
+  `fencingToken` (confirmed by direct read), so it cannot host generation-identity logic without a
+  separate, out-of-scope change to that file's own output contract.
+- A workflow-script-local `Date.now()`/injected-clock source, or a dynamic `import()`-based helper,
+  anywhere in this milestone's own new code. Rejected: both are confirmed, 100%-reproducible
+  production crash classes (`f6db2a8`, `7357a91`); a test-only injected clock can never appear in a
+  real JSON-serialized dispatch, so timing built on it would be test-fixture-only, never
+  production-real.
+- Deriving telemetry from Claude Code session JSONL. Rejected: session logs aren't checked in,
+  aren't reproducible by a later auditor, and directly contradict the "checked-in workflow
+  artifact, not session prose" bar this milestone exists to establish.
+- A single combined mechanical+content dispatch counter. Rejected: cannot prove DIR-126-B/DIR-126-C's
+  savings — a `reuse-terminal` record with a nonzero combined counter (from mechanical calls that
+  always run) would be indistinguishable from one that also ran an expensive content agent.
+- A single overwritten per-task committed telemetry file, mirroring `.generation.json`'s per-`taskId`
+  overwrite semantics. Rejected: this is the literal defect being fixed — it would silently destroy
+  history on every re-run of the same task.
 - Writing telemetry only on the success path (today's confirmed behavior — all 15
-  `_releaseLeaseAndRecord` sites write `.generation.json`, but nothing writes a committed record on
-  any of them). Rejected by construction: this is the literal cause of the measured gap (16 of 17
-  sampled real calls non-success).
+  `_releaseLeaseAndRecord` sites write `.generation.json`, but none writes a committed record).
+  Rejected by construction: this is the literal cause of the measured gap (16 of 17 sampled real
+  calls non-success, no committed telemetry).
 
 **Mechanism-claim wiring coverage (DIR-117):** every new call/dispatch/ownership relationship this
-Proposal asserts is tagged as its own numbered sub-point (A.1-A.5 under Mechanism A, B.1-B.3 under
-Mechanism B) above, each paired inline with its own "AC coverage needed" sentence naming the
-concrete fixture/grep-guard/journal-count check that must exist as an Acceptance Criteria item —
-this is a pointer to that per-claim coverage, not a new summary claim needing separate evidence. In
-particular: Claim A.1 (extended
-`--record-generation` write ordering) and Claim A.4 (Receipt's dispatch-count 2→3 restructuring) are
-the two claims most likely to be under-proved by an implementer who treats this as "just add a
-write call" — both require an explicit RED fixture (forced-throw / forced-failure) proving the
-surrounding control flow (lease release, `--build` invocation gating) behaves as specified, not
-merely a GREEN happy-path fixture.
+Proposal introduces is tagged inline above as its own numbered sub-point — [A.1]-[A.5] under
+Mechanism A, [B.2] under Mechanism B — each paired with an explicit "AC needed" sentence
+naming the concrete fixture/grep-guard/journal-count check required. Flagged as most likely to be
+under-proved by an implementer treating this as "just add a write call": Claim A.1 (extended
+`--record-generation` write ordering relative to `releaseLease`) and Claim A.4 (Receipt's
+real-dispatch-count 2→3 restructuring) — both require an explicit RED fixture (forced-throw/
+forced-failure) proving the surrounding control flow (lease release still happens; `--build`
+invocation is correctly gated) behaves as specified, not merely a GREEN happy-path fixture. Claim
+A.2 and A.3 are flagged as most likely to be silently skipped entirely (rather than merely
+under-tested), since they are the two paths that do not flow through the already-obvious
+`_recordGenerationCli` extension point — each needs a dedicated, independent fixture, not a shared
+one with A.1.
 
 ## Plan
 
@@ -504,7 +491,7 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
    mirror) hash-binding the telemetry file into the receipt, and a `telemetry-stale`/`telemetry-
    missing` check to `checkPreparation()`, mirroring the existing `--ledger` pattern.
 3. Add a new `--telemetry-report <milestoneId>` read-only CLI mode to `milestone-preparation-
-   check.ts` answering phase-timing queries without JSONL parsing.
+   check.ts` answering per-generation telemetry queries without JSONL parsing.
 4. Add real test fixtures: one cold run, one resumed run, one contention rejection
    ([[DIR-126-A]]), one preflight rejection ([[DIR-126-B]]), and one `reuse-terminal`
    ([[DIR-126-C]]) record — each confirmed queryable via `--telemetry-report` — plus generation-ID
@@ -529,9 +516,8 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
 - [ ] **Telemetry is directly queryable:** one real cold run, one real resumed run, one real
   contention rejection ([[DIR-126-A]]), one real preflight rejection ([[DIR-126-B]]), and one real
   `reuse-terminal` ([[DIR-126-C]]) each produce a record exposing hashes, decision/prior
-  generation, phase wall timing, separate mechanical/content dispatch counts and summed execution
-  milliseconds, terminal/cacheability, lease-release result, and generation ID — retrieved via
-  `--telemetry-report`, without parsing `~/.claude/projects/**.jsonl`.
+  generation, mechanical/content dispatch counts, terminal/cacheability, lease-release result, and
+  generation ID — retrieved via `--telemetry-report`, without parsing `~/.claude/projects/**.jsonl`.
 - [ ] **Generation identity cannot collide across runs in one Claude session:** two successive
   Admission owners with the same `ownerExecutionId` but different fencing tokens produce distinct
   generation IDs; the ID is mechanically traceable back to A's exact lease tuple.
@@ -544,34 +530,36 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   confirmed to produce `telemetry-stale` via `checkPreparation()`, and a fixture attempting to
   certify a generation `prepared` with a missing/mismatched telemetry record is confirmed to fail
   closed — instrumentation cannot turn a failed preparation into `prepared`.
-- [ ] **Every phase transition is counted, not sampled:** a real journal's phase-dispatch count is
-  confirmed to equal the corresponding telemetry record's phase-transition entry count, for at
-  least one real multi-round generation (a `ProposalReview` delta round and a `PlanCheck` round).
 - [ ] Every emitted record's fields are confirmed present-and-typed (`null`/`"unknown"` where
   genuinely uncapturable, never omitted) — verified via schema check against a real record.
-- [ ] **Forward-compatible feedback identity:** every record carries an explicit telemetry schema
-  version, Prepare attempt/generation identity, workflow and checker-policy hashes, material-input
-  hashes, mechanical/content-agent counts, terminal outcome/reason, and stable finding codes.
-  Findings that recur across generations additionally carry a stable `recurrenceKey`,
-  `firstSeenGeneration`, and `lastSeenGeneration`; absence of a recurrence is explicit rather than
-  synthesized.
+- [ ] **Stable record identity:** every record carries an explicit telemetry schema version,
+  Prepare attempt/generation identity, workflow and checker-policy hashes, material-input hashes,
+  mechanical/content-agent counts, and terminal outcome/reason — a stable basis a future child could
+  build recurrence tracking on, without this child implementing that tracking itself (see the
+  deferred `findingCodes[]`/`recurrenceKey` note under Mechanism B above).
 - [ ] **One-way receipt migration:** DIR-124-B can deterministically adapt these Prepare records
   into its canonical `RunIdentity`/`StageReceiptEnvelope` without parsing prose or Claude session
   JSONL. DIR-126-D remains the Prepare telemetry producer, not a second cross-workflow receipt
   authority, and a fixture proves there is no reverse/dual-write dependency.
 - [ ] Canonical and `plugin/` mirrors of `prepare-milestone.js`, `milestone-preparation-check.ts`,
-  `proposal-convergence.ts`, and `prepare-admission-check.ts` (+ their test files) are byte-identical
-  — `cmp`/`sync-vendor.sh --check`.
+  and `proposal-convergence.ts` (+ their test files) are byte-identical — `cmp`/`sync-vendor.sh
+  --check`. `prepare-admission-check.ts` is untouched by this child (see Non-goals above).
 - [ ] **New committed telemetry path sanitizes taskId, RED/GREEN:** a fixture with a taskId
   containing a path separator (e.g. `foo/bar` or `../evil`) proves the new
   `milestones/prepare-telemetry/<taskId>/...` write path routes the directory segment through the
-  existing `_safeTaskIdSegment()` helper before use, confirming the record lands inside the intended
-  `milestones/prepare-telemetry/` tree, never outside it — a stricter bar than
+  existing `_safeTaskIdSegment()` helper before use — the SAME helper `_leasePath` and
+  `_generationPath` already reuse for `.generation.json`'s own path — confirming the record lands
+  inside the intended `milestones/prepare-telemetry/` tree, never outside it — a stricter bar than
   `gap-decide-resume-generation-path-unsanitized-taskid`'s accepted-risk sibling case, since this
   new path is permanently git-committed rather than gitignored/ephemeral.
 - [ ] **Pre-Receipt dispatch count never doubles:** a real multi-round generation's journal shows
   each of the 13 pre-Receipt `_releaseLeaseAndRecord` terminal call sites still dispatches exactly
   once per terminal (never silently doubled to 2) after the extended `--record-generation` change.
+- [ ] **Receipt's real-dispatch count is exactly 3, not silently 2 or 4:** a real `prepared`
+  generation's journal shows exactly 3 real dispatches for the Receipt terminal specifically
+  (`_writeGenerationTelemetry('Receipt', ...)`, `milestone-preparation-check.ts --build --telemetry`,
+  `_releaseLease('Receipt', ...)`) — distinct from the ordering-only RED/GREEN item below, and from
+  the pre-Receipt-sites-stay-1 item above, which explicitly excludes Receipt from its own scope.
 - [ ] **Pre-Receipt write-before-release ordering never orphans a lease:** a fixture that forces the
   new telemetry `fs.writeFileSync` inside `_recordGenerationCli` to throw confirms `releaseLease(...)`
   still ran and the Admission lease is not left held — the write is ordered after release, not
@@ -598,9 +586,10 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   direct, source-confirmed evidence of a real `--record-attempt` dispatch (not merely a
   code-reachable branch) — matching the standard the contention (`prepare-already-running`) case
   already gets in the AC item above — PLUS a dedicated fixture proving the `missing-required-args`
-  case specifically lands under `_missing-taskId/<recordId>.json` with an explicit `taskId: null`
+  case specifically fires *because* `taskId` itself is the missing field and lands under
+  `milestones/prepare-telemetry/_missing-taskId/<recordId>.json` with an explicit `taskId: null`
   field (never fabricated, never dropped), distinct from the other two sites which always have a
-  real taskId available.
+  real `taskId` available.
 - [ ] **Receipt write-before-build ordering, RED/GREEN:** a fixture that forces the Receipt-path
   `_writeGenerationTelemetry` write to fail proves the terminal is `needs-human`/
   `telemetry-write-failed`, never `prepared`, and that `--build --telemetry` is never invoked on
@@ -621,10 +610,6 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   records confirms `--telemetry-report <milestoneId>` returns `{ok:true, code:"no-records"}`, not a
   crash and not an empty-looking silent success — a companion fixture to the read-after-write case
   above, exercising the Defaults table's zero-match commitment directly.
-- [ ] **Finding-code recurrence tracking:** a fixture spanning two real generations of the same task
-  with a repeated `findingCodes[].code` confirms `lastSeenGeneration` advances to the second
-  generation's ID while `firstSeenGeneration` stays pinned to the first — new logic, its own
-  dedicated fixture, not assumed from an existing pattern.
 - [ ] **Backward-compat regression run:** existing M195/M197/M200/M201/M202-shaped fixtures
   (predating this child, none passing `--telemetry`) are re-run and stay GREEN unmodified — an
   explicit regression-run item, not an assumption.
@@ -698,6 +683,12 @@ N/A — directive-class child resolved via a human-steered milestone. Depends on
   no-space `decision.kind:'reuse-terminal'`/`createsContentGeneration:false`/
   `contentAgentDispatchCount:0` forms already covered above), naming the exact same real
   `reuse-terminal` telemetry-write fields, confirmed real by the same direct-source-read standard.
+  Round-6 additionally flagged, after this round's Mechanism-B scope trim (deferring `nowMs`
+  phase-timing and `findingCodes[]` recurrence tracking to a future child, per the follow-up gap task
+  cross-referenced under `## Touches`): `contentAgentDispatchCount: 0` (space variant, distinct from
+  the no-space form already covered above), `null`, `"unknown"` — the frozen record schema's own
+  explicit no-fabrication discipline for fields this milestone doesn't derive for every terminal,
+  confirmed real by direct design in this same document's Frozen record schema section.
 
 ## Definition of Done
 
@@ -732,12 +723,10 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
 - `plugin/scripts/milestone-preparation-check.ts`
 - `experiments/quay-perpetual-stream/scripts/proposal-convergence.ts`
 - `plugin/scripts/proposal-convergence.ts`
-- `experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts` (additive `nowMs` field only — Mechanism B.1)
-- `plugin/scripts/prepare-admission-check.ts` (additive `nowMs` field only — Mechanism B.1)
 - `experiments/quay-perpetual-stream/test/milestone-preparation-check.test.mjs`
 - `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs`
-- `experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs`
-- `plugin/test/prepare-admission-check.test.mjs`
 - `plugin/test/prepare-milestone-preparation-e2e.test.mjs`
 - `plugin/test/prepare-milestone-convergence.test.mjs`
 - `docs/proposals/quay-prepare-execute-feedback-convergence.md`
+- `tasks/gap-dir126d-deferred-phase-timing-recurrence-tracking.md` (new follow-up task filed by this
+  fix, recording the deferred Mechanism B.1/B.3 scope — not itself part of this child's own diff)
