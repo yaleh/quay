@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "recordId": "ca5bb88535f7",
+  "attemptId": "ca5bb88535f7",
+  "generationId": "ca5bb88535f7",
+  "admission": {
+    "key": ".::gap-dir126d-deferred-phase-timing-recurrence-tracking",
+    "ownerExecutionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1",
+    "fencingToken": 0,
+    "acquiredAt": 1785433961053
+  },
+  "workspace": ".",
+  "taskId": "gap-dir126d-deferred-phase-timing-recurrence-tracking",
+  "milestoneId": "M207",
+  "class": "development",
+  "highRisk": true,
+  "hashes": {
+    "charter": "c0e74a51ef40cbdd9225cc2f3febbad1c0b45b3cce10ab10b7ae4a2210c86c2b",
+    "taskContract": "9400b59ac9a1cecc99128f23d07ed76a15cb0aab79a4d0ff4564a07bcf6ee4f8",
+    "proposal": "d902a1610f2caf4696f9f6597d569cbb8f336cd96c553ded8ed05e7ba5bfe107",
+    "reviewPolicy": "46ec3ada793407d283218a285d9697e8c6d2c69297ac15a86977b5bea8c37189"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "split-recommended",
+    "phase": "ProposalReview",
+    "cacheable": true
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785436522473,
+  "telemetryWriteOk": true
+}

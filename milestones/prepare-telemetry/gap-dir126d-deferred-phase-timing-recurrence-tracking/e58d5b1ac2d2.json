@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "recordId": "e58d5b1ac2d2",
+  "attemptId": "e58d5b1ac2d2",
+  "generationId": "e58d5b1ac2d2",
+  "admission": {
+    "key": ".::gap-dir126d-deferred-phase-timing-recurrence-tracking",
+    "ownerExecutionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1",
+    "fencingToken": 0,
+    "acquiredAt": 1785437181865
+  },
+  "workspace": ".",
+  "taskId": "gap-dir126d-deferred-phase-timing-recurrence-tracking",
+  "milestoneId": "M207",
+  "class": "development",
+  "highRisk": true,
+  "hashes": {
+    "charter": "c0e74a51ef40cbdd9225cc2f3febbad1c0b45b3cce10ab10b7ae4a2210c86c2b",
+    "taskContract": "79731b038633c98b29ad48135b40d6321e937918cbe43a5d804f12964f6f9c37",
+    "proposal": "db4e0e044089325efa4e7faf5f7a91b48c104a456dd24cfad3486767254263e3",
+    "reviewPolicy": "46ec3ada793407d283218a285d9697e8c6d2c69297ac15a86977b5bea8c37189"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "plancheck-rounds-exceeded",
+    "phase": "PlanCheck",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785441815098,
+  "telemetryWriteOk": true
+}

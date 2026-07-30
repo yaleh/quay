@@ -1,0 +1,67 @@
+{
+  "taskId": "gap-dir126d-deferred-phase-timing-recurrence-tracking",
+  "milestoneId": "M207",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M207-gap-dir126d-deferred-enrichment.md",
+  "planFile": "docs/plans/M207-gap-dir126d-deferred-phase-timing-recurrence-tracking.md",
+  "ledgerFile": null,
+  "telemetryFile": null,
+  "hashes": {
+    "proposal": "563ee520c30eefae33ff75dc987b9b1fb3c46f69711e9d1b76f730856b803bfe",
+    "charter": "c0e74a51ef40cbdd9225cc2f3febbad1c0b45b3cce10ab10b7ae4a2210c86c2b",
+    "plan": "fc5200e2c7c52c9136f492aa0f6c1a2a5e983557f4176e6cb2e2528197f068e5",
+    "sources": {
+      "experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts": "fb1296484ce047788962753fcabaff7f81e7468279c13d5168e21a6c371d70b0",
+      "plugin/scripts/prepare-admission-check.ts": "fb1296484ce047788962753fcabaff7f81e7468279c13d5168e21a6c371d70b0",
+      "experiments/quay-perpetual-stream/scripts/proposal-convergence.ts": "0790dc57027bb821870626083437f9b83f35290a474f40dbc004b6ee30208042",
+      "plugin/scripts/proposal-convergence.ts": "0790dc57027bb821870626083437f9b83f35290a474f40dbc004b6ee30208042",
+      ".claude/workflows/prepare-milestone.js": "05ed3b309c311f9e1ba858d516571654d5606ca3a7c31cb43213411648abdff7",
+      "plugin/workflows/prepare-milestone.js": "05ed3b309c311f9e1ba858d516571654d5606ca3a7c31cb43213411648abdff7"
+    }
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 3,
+    "findings": 0
+  },
+  "touches": [
+    "experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts",
+    "plugin/scripts/prepare-admission-check.ts",
+    "experiments/quay-perpetual-stream/scripts/proposal-convergence.ts",
+    "plugin/scripts/proposal-convergence.ts",
+    "experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs",
+    "plugin/test/prepare-admission-check.test.mjs",
+    "experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs",
+    ".claude/workflows/prepare-milestone.js",
+    "plugin/workflows/prepare-milestone.js",
+    "plugin/test/prepare-milestone-convergence.test.mjs",
+    "tasks/gap-dir126d-deferred-phase-timing-recurrence-tracking.md",
+    "docs/plans/M207-gap-dir126d-deferred-phase-timing-recurrence-tracking.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [],
+    "adjudicator": null,
+    "proposalReviewer": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planAuthor": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "round": 2,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "round": 3,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      }
+    ]
+  },
+  "convergence": null
+}

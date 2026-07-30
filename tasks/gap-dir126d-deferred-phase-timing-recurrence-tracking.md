@@ -255,6 +255,21 @@ point DIR-126-D's `b8b87c3` ruling established).
    the reuse-terminal path (:582); nothing re-validates committed history, so DIR-126-D/E-era records
    lacking both keys are never retroactively invalidated (a code comment at `REQUIRED_TOP` flags this
    latent trap).
+7. **CLAIM C10 (needs AC): receiver-side malformed/oversized flag degradation is fail-soft and never
+   blocks the primary write.** The receiver CLI tail in `proposal-convergence.ts` that parses the new
+   `--phaseTimings`/`--findingCodes` flags must, on a malformed (unparseable) OR oversized value for
+   EITHER flag, default to `phaseTimings: []` and `findingCodes` computed from `terminal.reason` alone,
+   never throw, and never block or roll back the primary telemetry write (mirrors the existing
+   `telemetryWriteOk`-isolation posture). This is genuinely new receiver behavior — a greenfield grep for
+   `phaseTimings|findingCodes|recurrenceKey` across all four script/workflow trees returns zero hits, so
+   the receiver parses neither flag today. It needs its OWN dedicated fixture beyond general Defaults
+   coverage (per Risks), distinct from AC6 (a record MISSING a field, tested against the validator —
+   missing != malformed flag value), AC8 (sender-side `nowMs` at a workflow boundary), and AC9 (a
+   WELL-FORMED array carrying a null `endedAtMs`, the trailing-close happy path): the fixture feeds a
+   garbage/oversized `--phaseTimings` AND `--findingCodes` value to the receiver CLI and asserts all three
+   — defaulted fields, no throw, and the primary write still persists. The DoD's independent audit
+   exercises a happy-path production callsite, NOT this malformed-input negative path, so it does not
+   close this claim.
 
 ### Concrete control/data flow
 
@@ -417,7 +432,7 @@ point DIR-126-D's `b8b87c3` ruling established).
 
 ### AC coverage
 
-Mapping to the task's existing 11 AC bullets, with claims C1-C9 from the wiring-claim registry above:
+Mapping to the task's existing 11 AC bullets, with claims C1-C10 from the wiring-claim registry above:
 
 - **AC1** (additive `nowMs`; zero new `Date.now()`/`import()` in the workflow; grep guard): covered by
   Mechanism 1's CLI-boundary placement (C1), the explicit `round` parameter (C2), receiver-side span-close
@@ -459,11 +474,23 @@ Mapping to the task's existing 11 AC bullets, with claims C1-C9 from the wiring-
   renewal success is `ok: true`, not an `outcome: 'renewed'` literal; `validateTelemetryRecord`'s sole live
   call is :582; experiments-side test evidence cites `node --experimental-strip-types --test`; this task's
   archive now holds three records, so `split-recommended` has already recurred on disk.
+- **Receiver-side malformed/oversized flag degradation (CLAIM C10, falsifiable AC):** the receiver CLI
+  tail in `proposal-convergence.ts` that parses `--phaseTimings`/`--findingCodes` must, on a malformed
+  (unparseable) or oversized value for EITHER flag, default to `phaseTimings: []` and `findingCodes`
+  computed from `terminal.reason` alone, never throw, and never block or roll back the primary telemetry
+  write. Falsified by a dedicated fixture — distinct from Defaults prose, AC6 (a MISSING field against the
+  validator), AC8 (sender-side `nowMs`), and AC9 (a WELL-FORMED array with a null `endedAtMs`) — that feeds
+  a garbage/oversized `--phaseTimings` AND `--findingCodes` value to the receiver CLI and asserts all
+  three: (a) defaulted fields, (b) no throw, (c) the primary write still persists. This is the dedicated
+  fixture Risks flags as required 'beyond general Defaults coverage' for the `highRisk` shared-surface
+  blast radius, and it is the AC the Defaults §4 prose and the Risks entry previously lacked.
 - **Additional fixtures recommended for the Plan phase**: (1) both `--record-generation` helpers (:181 and
   :195) carry the new flags while `--release-only` (:200) does not; (2) the trailing open span's `endedAtMs`
   equals the receiver's `recordedAtMs`, never a sandbox value; (3) `--findingCodes`/`--phaseTimings`
   construction reads exclusively from already-parsed `_parseAgentJson(...).nowMs` values and the existing
-  `_ledger`/`_deltaRound`/`_planCheckRound` variables.
+  `_ledger`/`_deltaRound`/`_planCheckRound` variables; (4) a malformed (unparseable) AND an oversized
+  `--phaseTimings`/`--findingCodes` value fed to the receiver CLI defaults `phaseTimings: []` /
+  `findingCodes` from `terminal.reason`, never throws, and the primary write still persists (CLAIM C10).
 - **DoD** (real, non-fixture production callsite): satisfied DIR-126-D-style — a real `prepare-milestone`
   dispatch's committed record inspected post-hoc for non-`[]` `phaseTimings`/`findingCodes`, plus an
   independent diff audit. This task's own archive already holds three prior records (incl. `dd06ce1ed5b8.json`,
@@ -516,6 +543,27 @@ Mapping to the task's existing 11 AC bullets, with claims C1-C9 from the wiring-
 14. **Record a boundary for failed renewals that still carry `nowMs`.** Rejected: `ok: false` (e.g.
     `lease-missing`) means the phase may not have executed; recording it would falsify the timeline. The push
     rule requires success AND a finite `nowMs`.
+
+## Plan
+
+See docs/plans/M207-gap-dir126d-deferred-phase-timing-recurrence-tracking.md (authored 2026-07-30,
+base revision c82efac — the Plan's declared base / current HEAD, at which all Plan anchors were
+re-verified; 2d67a92 is HEAD~1, whose :601/:648 Proposal anchors for prepare-admission-check.ts were
+correct @2d67a92 but superseded by c82efac's +33-line insert). Nine ordered stages (RED CLI `nowMs` fixtures → GREEN admission-check
+stamping in both mirrors → RED workflow accumulation fixtures → GREEN workflow accumulation +
+flag threading in both mirrors → RED receiver fixtures → GREEN receiver flag-parse + trailing
+close + recurrence scan + `REQUIRED_TOP` widening in both mirrors → lockstep verification battery
+→ grounding evidence re-read → real-landing verification) each carry the mechanical
+`- AC:`/`- Files:`/`- Command:` block, RED/implementation/GREEN checks with expected exit
+behavior, code/prose classification, line budgets, and strict dependencies; every 1-based AC index
+(1-12) appears in at least one stage's `- AC:` list. Mechanically verified at authoring time:
+`validatePlanStructure` returns `plan-structure-ok` (9 stages, all 12 AC items mapped) and the
+live `prepare-admission-check.ts --preflight-plan` returns `ok:true` with zero findings.
+Standardized stopping rule: at most 3 Plan-check rounds, success only at F_i=0 (live
+`prepare-admission-check.ts --preflight-plan` returns `ok:true` with zero findings). Real-landing
+verification (DoD): a real post-landing `prepare-milestone` dispatch's committed record inspected
+for non-`[]` `phaseTimings`/`findingCodes`, with this task's own three archived records
+exercising the recurrence scanner against a real recurred code (`split-recommended`).
 
 ## Finding
 
