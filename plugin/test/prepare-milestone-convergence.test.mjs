@@ -133,7 +133,7 @@ function freshScratchDir() {
 // makeMock — the shared "outer phase" mock (authors/adjudicate/plan-author/plan-check/receipt),
 // parameterized by `reviewHandlers` for the ProposalReview phase under test.
 function makeMock(taskFileOnDisk, reviewHandlers) {
-  const calls = { authors: [], adjudicator: 0, reviews: [], revises: [], wiringChecks: 0, planAuthor: 0, planCheckers: [], admissionAcquires: 0, admissionRenews: 0, admissionReleases: 0, preflightContent: 0, preflightPlan: 0 };
+  const calls = { authors: [], adjudicator: 0, reviews: [], revises: [], wiringChecks: 0, planAuthor: 0, planCheckers: [], admissionAcquires: 0, admissionRenews: 0, admissionReleases: 0, preflightContent: 0, preflightPlan: 0, resumeDecisions: 0 };
   let planFile = null;
   let ledger = null;
 
@@ -154,8 +154,25 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
       return { raw: JSON.stringify({ ok: true }) };
     }
     if (/^admission-release-/.test(label)) {
+      // M202/DIR-126-C: `_releaseLeaseAndRecord` dispatches proposal-convergence.ts
+      // --record-generation under the SAME `admission-release-${stageLabel}` label
+      // `_releaseLease` used (label continuity, Plan-level refinement) — this pre-existing branch
+      // already covers every one of the 15 real terminal-return sites' new record-generation
+      // dispatch, unchanged. The mock's {ok:true} response keeps being ignored (fire-and-forget,
+      // exactly as today).
       calls.admissionReleases += 1;
       return { raw: JSON.stringify({ ok: true }) };
+    }
+
+    // M202/DIR-126-C: the new resume-decision dispatch (proposal-convergence.ts --decide-resume),
+    // fired ONLY when $a.resumeFromAdjudicatedProposal is omitted AND a prior generation record
+    // exists on disk (the Stage-4 pre-check). A test may stub the verdict via
+    // reviewHandlers.onResumeDecision; the DEFAULT returns a cold/missing-prior-record verdict so
+    // any test that doesn't care about this phase still behaves like today's cold path.
+    if (label === 'resume-decision') {
+      calls.resumeDecisions += 1;
+      if (typeof reviewHandlers.onResumeDecision === 'function') return reviewHandlers.onResumeDecision(prompt);
+      return { raw: JSON.stringify({ decision: 'cold', reason: 'missing-prior-record' }) };
     }
 
     // M201/DIR-126-B: the new Preflight phase's agent()-dispatched CLI calls (content, then
@@ -277,6 +294,27 @@ function baseArgs(scratchRel, extra = {}) {
     class: 'development',
     ...extra,
   };
+}
+
+// M202/DIR-126-C: prepare-milestone.js's Stage-4 pre-check reads
+// `.quay/prepare-leases/${_taskId}.generation.json` via a bare relative-string existsSync (its
+// ONE new real fs primitive) — node's fs resolves that relative to process.cwd() (REPO_ROOT when
+// running this test file) with standard '..' normalization. `path.join` performs the SAME
+// normalization here, so this helper resolves to the identical on-disk path the real workflow
+// checks, even though this file's own taskId-as-relative-path convention makes that path land
+// outside .quay/prepare-leases/ proper (a harmless test-harness-only quirk — real production
+// taskIds are plain ids with no '/' at all).
+function generationRecordPathFor(taskId) {
+  return path.join(REPO_ROOT, '.quay', 'prepare-leases', `${taskId}.generation.json`);
+}
+function writeGenerationRecord(taskId, record) {
+  const p = generationRecordPathFor(taskId);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(record));
+  return p;
+}
+function removeGenerationRecord(taskId) {
+  fs.rmSync(generationRecordPathFor(taskId), { force: true });
 }
 
 function cleanup(scratchDir, planFile, milestoneId) {
@@ -801,5 +839,202 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     } finally {
       cleanup(scratchDir, null, args.milestoneId);
     }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // ── M202/DIR-126-C: generation-aware resume — third child of DIR-126's split. Stage 4/7
+  // scenarios: the resume-decision dispatch itself, gated by the Stage-4 pre-check (a prior
+  // generation record must exist), and its three decision outcomes (resume/reuse-terminal/
+  // cold-via-unparseable-failure), plus AC11/R2's explicit-flag zero-dispatch guarantee. ────────
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  test(`[${mirrorName}] M202/DIR-126-C AC1/pre-check: omitted flag + NO prior generation record makes ZERO resume-decision dispatches — unchanged cold behavior`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel); // no resumeFromAdjudicatedProposal, no prior record
+    let planFile = null;
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onFullReview: () => ({ findings: [], mechanismCount: 1, sessionId: 'sess-reviewer-0' }),
+      });
+      planFile = result.planFile;
+      assert.equal(result.outcome, 'prepared', JSON.stringify(result));
+      assert.equal(calls.resumeDecisions, 0, 'no prior record for this taskId — the Stage-4 pre-check skips the dispatch entirely, identical to today\'s implicit default');
+      assert.equal(calls.authors.length, 2, 'still the full cold N-author synthesis');
+    } finally {
+      cleanup(scratchDir, planFile, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] M202/DIR-126-C AC2/AC5: omitted flag + prior record resolving 'resume' skips ProposalAuthors/Adjudicate, ProposalReview round-0 STILL dispatches, fullSynthesisCount=0`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk, charterFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    writeGenerationRecord(args.taskId, { schemaVersion: 1, taskId: args.taskId, terminalPhase: 'PlanAuthor', outcome: 'revision-needed', reason: 'plan-author-failed', cacheable: false });
+    let planFile = null;
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onResumeDecision: () => ({ raw: JSON.stringify({ decision: 'resume', reason: 'repaired-proposal-detected', priorGenerationId: 'gen-resume-1', hashes: {}, generationId: 'gen-resume-2' }) }),
+        onFullReview: () => ({ findings: [], mechanismCount: 1, sessionId: 'sess-reviewer-0' }),
+      });
+      planFile = result.planFile;
+      assert.equal(result.outcome, 'prepared', JSON.stringify(result));
+      assert.equal(calls.resumeDecisions, 1, 'exactly one resume-decision dispatch');
+      assert.equal(calls.authors.length, 0, 'ProposalAuthors skipped under automatic resume, same as explicit true');
+      assert.equal(calls.adjudicator, 0, 'Adjudicate skipped under automatic resume');
+      assert.equal(calls.reviews.filter((r) => r === 'full').length, 1, 'AC5: ProposalReview round-0 review STILL dispatches under automatic resume');
+      assert.equal(result.fullSynthesisCount, 0);
+      assert.equal(result.resumed, true);
+    } finally {
+      removeGenerationRecord(args.taskId);
+      cleanup(scratchDir, planFile, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] M202/DIR-126-C AC3/AC4/AC8: omitted flag + prior record resolving 'reuse-terminal' returns unchanged-generation-terminal BEFORE content Preflight — zero Preflight/author/adjudicate/review/plan dispatches, exactly one admission-related CLI dispatch beyond --acquire`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    writeGenerationRecord(args.taskId, { schemaVersion: 1, taskId: args.taskId, terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'split-recommended', cacheable: true });
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onResumeDecision: () => ({ raw: JSON.stringify({
+          decision: 'reuse-terminal', reason: 'unchanged-generation-terminal',
+          priorReason: 'split-recommended', priorGenerationId: 'gen-reuse-1', priorOutcome: 'needs-human',
+          releaseResult: { ok: true, releaseMethod: 'normal' },
+        }) }),
+      });
+      assert.equal(result.outcome, 'needs-human', JSON.stringify(result));
+      assert.equal(result.reason, 'unchanged-generation-terminal');
+      assert.equal(result.decision, 'reuse-terminal');
+      assert.equal(result.priorGenerationId, 'gen-reuse-1');
+      assert.equal(result.priorReason, 'split-recommended');
+      assert.equal(calls.resumeDecisions, 1);
+      assert.equal(calls.preflightContent, 0, 'AC3 sharpened (WIRING-CLAIM R4): reuse-terminal returns strictly BEFORE content Preflight — the mechanical content check is itself skipped');
+      assert.equal(calls.authors.length, 0);
+      assert.equal(calls.adjudicator, 0);
+      assert.equal(calls.reviews.length, 0, 'zero content/review agent dispatches on a reuse-terminal cache hit');
+      assert.equal(calls.planAuthor, 0, 'AC5: reuse-terminal cannot advance to PlanAuthor');
+      assert.equal(calls.admissionReleases, 0, 'AC8/R3: the lease release happened INSIDE the resume-decision dispatch itself — no separate admission-release-* dispatch');
+      assert.equal(calls.admissionAcquires, 1, 'exactly one admission-related dispatch beyond --acquire (the resume-decision call itself)');
+    } finally {
+      removeGenerationRecord(args.taskId);
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] M202/DIR-126-C: omitted flag + unparseable resume-decision verdict fails closed to needs-human/resume-decision-failed, never silently cold or resume`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    writeGenerationRecord(args.taskId, { schemaVersion: 1, taskId: args.taskId, terminalPhase: 'PlanAuthor', outcome: 'revision-needed', reason: 'plan-author-failed', cacheable: false });
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onResumeDecision: () => ({ raw: 'not valid json {{{' }),
+      });
+      assert.equal(result.outcome, 'needs-human', JSON.stringify(result));
+      assert.equal(result.reason, 'resume-decision-failed');
+      assert.equal(result.phase, 'Preflight');
+      assert.equal(calls.authors.length, 0, 'zero ProposalAuthors dispatches after a failed resume-decision');
+      assert.equal(calls.preflightContent, 0);
+    } finally {
+      removeGenerationRecord(args.taskId);
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] M202/DIR-126-C AC4: reuse-terminal selected but the embedded lease release FAILED -> needs-human/reuse-terminal-release-failed, never a clean cache hit with a stranded owner`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    writeGenerationRecord(args.taskId, { schemaVersion: 1, taskId: args.taskId, terminalPhase: 'PreflightContent', outcome: 'revision-needed', reason: 'preflight-rejected', cacheable: true });
+    try {
+      const { result } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onResumeDecision: () => ({ raw: JSON.stringify({
+          decision: 'reuse-terminal', reason: 'unchanged-generation-terminal', priorReason: 'preflight-rejected',
+          releaseResult: { ok: false, error: 'lease-missing' },
+        }) }),
+      });
+      assert.equal(result.outcome, 'needs-human', JSON.stringify(result));
+      assert.equal(result.reason, 'reuse-terminal-release-failed');
+      assert.equal(result.phase, 'Preflight');
+    } finally {
+      removeGenerationRecord(args.taskId);
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] M202/DIR-126-C AC6/AC11/R2: explicit resumeFromAdjudicatedProposal:true/false makes ZERO resume-decision dispatches even when a prior generation record exists — the CALL ITSELF is skipped, not just the decision forced`, async () => {
+    for (const explicitValue of [true, false]) {
+      const { scratchDir, scratchRel, taskFileOnDisk, charterFileOnDisk } = makeScratch();
+      const args = baseArgs(scratchRel, { resumeFromAdjudicatedProposal: explicitValue });
+      writeGenerationRecord(args.taskId, { schemaVersion: 1, taskId: args.taskId, terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'split-recommended', cacheable: true });
+      let planFile = null;
+      try {
+        const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+          onResumeDecision: () => { throw new Error('MUST NOT be dispatched: an explicit resumeFromAdjudicatedProposal value skips the resume-decision call entirely'); },
+          onFullReview: () => ({ findings: [], mechanismCount: 1, sessionId: 'sess-reviewer-0' }),
+        });
+        planFile = result.planFile;
+        assert.equal(calls.resumeDecisions, 0, `explicit ${explicitValue}: zero resume-decision dispatches`);
+        assert.equal(result.resumed, explicitValue);
+      } finally {
+        removeGenerationRecord(args.taskId);
+        cleanup(scratchDir, planFile, args.milestoneId);
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── M202/DIR-126-C Stage 5 — production-callsite coverage fixtures (source grep, no dispatch):
+// WIRING-CLAIM R5 (all 15 real terminal-return sites re-derived live, the literal --terminalPhase
+// argument values at the two preflight record-write sites) and WIRING-CLAIM R7 (the two
+// _releaseLeaseAndRecord('preflight-rejected', ...) sites carry DISTINCT terminalPhase literals —
+// the live manifestation of the identical-`reason`-string collision the Proposal frames). ────────
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+for (const [mirrorName, workflowFile] of MIRRORS) {
+  const src = () => fs.readFileSync(workflowFile, 'utf8');
+
+  test(`[${mirrorName}] WIRING-CLAIM R5: exactly 15 real _releaseLeaseAndRecord( call sites, zero remaining bare _releaseLease( calls`, () => {
+    const text = src();
+    // The baseline live count this Plan re-derives from git history (480cb58): 15 real
+    // post-Admission _releaseLease( terminal-return call sites, not an assumed 11 or 12. Anchor on
+    // `await _releaseLease(` — a bare `grep -c "_releaseLease("` also matches the helper's OWN
+    // `async function _releaseLease(stageLabel) {` definition line, over-counting by one.
+    const baseline = execSync(`git show 480cb58:${mirrorName} | grep -c "await _releaseLease("`, { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+    assert.equal(baseline, '15', 'the historical baseline this child replaces is 15 real call sites');
+
+    // The landed file: zero bare `_releaseLease(` identifier occurrences (the helper itself was
+    // removed, not just its call sites renamed) ...
+    assert.doesNotMatch(text, /(?<!AndRecord)\b_releaseLease\(/, 'zero remaining bare _releaseLease( calls — the now-callerless helper was removed');
+    // ... and exactly 15 real `await _releaseLeaseAndRecord(` call sites (the function's OWN
+    // definition line also contains the substring `_releaseLeaseAndRecord(`, so anchor on the
+    // `await` prefix every real call site — and only a call site — carries).
+    const callSites = [...text.matchAll(/await _releaseLeaseAndRecord\(/g)];
+    assert.equal(callSites.length, 15, `expected exactly 15 await _releaseLeaseAndRecord( call sites, found ${callSites.length}`);
+  });
+
+  test(`[${mirrorName}] WIRING-CLAIM R5/R7 production-callsite half: the two content-preflight sites record terminalPhase:'PreflightContent', the two plan-shape sites record terminalPhase:'PreflightPlan' — NOT a coarse shared 'Preflight' value`, () => {
+    const text = src();
+    const preflightRecordSites = [...text.matchAll(/_releaseLeaseAndRecord\('(preflight-check-failed|preflight-rejected)',\s*\{\s*terminalPhase:\s*'([^']+)'/g)];
+    assert.equal(preflightRecordSites.length, 4, 'exactly 4 preflight-labeled _releaseLeaseAndRecord call sites (2 content + 2 plan-shape)');
+    const contentSites = preflightRecordSites.filter((m) => m[2] === 'PreflightContent');
+    const planSites = preflightRecordSites.filter((m) => m[2] === 'PreflightPlan');
+    assert.equal(contentSites.length, 2, 'both content-preflight sites (preflight-check-failed, preflight-rejected) record terminalPhase:PreflightContent');
+    assert.equal(planSites.length, 2, 'both plan-shape-preflight sites (preflight-check-failed, preflight-rejected) record terminalPhase:PreflightPlan');
+    assert.ok(preflightRecordSites.every((m) => m[2] === 'PreflightContent' || m[2] === 'PreflightPlan'), 'no site uses a coarse shared \'Preflight\' terminalPhase value');
+  });
+
+  test(`[${mirrorName}] WIRING-CLAIM R7 grounding: the two 'preflight-rejected' _releaseLeaseAndRecord sites carry DISTINCT terminalPhase literals and DISTINCT cacheable values (the SAME reason string, two genuinely different real costs)`, () => {
+    const text = src();
+    const rejectedSites = [...text.matchAll(/_releaseLeaseAndRecord\('preflight-rejected',\s*\{\s*terminalPhase:\s*'([^']+)',\s*outcome:\s*'[^']+',\s*reason:\s*'preflight-rejected',\s*cacheable:\s*(true|false)\s*\}\)/g)];
+    assert.equal(rejectedSites.length, 2, 'exactly 2 preflight-rejected _releaseLeaseAndRecord sites');
+    const byPhase = Object.fromEntries(rejectedSites.map((m) => [m[1], m[2]]));
+    assert.equal(byPhase.PreflightContent, 'true', 'the content-preflight preflight-rejected site is the ONLY allowlisted preflight-rejected pair — cacheable:true');
+    assert.equal(byPhase.PreflightPlan, 'false', 'the plan-shape preflight-rejected site is deliberately NOT cacheable, despite the identical reason string');
+  });
+
+  test(`[${mirrorName}] WIRING-CLAIM R9: git diff --stat against prepare-admission-check.ts and .gitignore is empty for this child's own commits (base 480cb58)`, () => {
+    const out = execSync(
+      `git diff --stat 480cb58..HEAD -- experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts plugin/scripts/prepare-admission-check.ts .gitignore`,
+      { cwd: REPO_ROOT, encoding: 'utf8' }
+    ).trim();
+    assert.equal(out, '', `expected an empty diff against prepare-admission-check.ts/.gitignore since base 480cb58, got:\n${out}`);
   });
 }

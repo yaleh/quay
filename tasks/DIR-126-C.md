@@ -14,6 +14,10 @@ extra:
   dirStatus: applied
   rank: 0
   urgency: urgent
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-126-C
+    experiments/quay-perpetual-stream/charters/M202-dir126c-generation-aware-resume.md
+    milestones/M202/absorb-entry.md
 ---
 
 **type:** execution

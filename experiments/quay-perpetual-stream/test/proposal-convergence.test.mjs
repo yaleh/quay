@@ -2,16 +2,21 @@
 // Pure-function coverage: caps, stable finding identity, ledger merge/resolution, split
 // recommendation, injected-clock budget status, the nextAction decision table, ledger
 // hash-binding, and the receipt-side mechanical cap re-check.
-import { test } from "node:test";
+import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import { execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 
 import {
   capsFor, fingerprintFinding, upsertFindings, applyResolutions, blockingOpen,
   checkSplitRecommendation, budgetStatus, nextAction, hashLedger,
   validateConvergenceCounters, computeConvergenceMetrics, isValidDisposition,
+  decideResumeGeneration, PHASE_RANK, CACHEABLE_TERMINALS, RESUMABLE_PHASES, RESUME_POLICY_VERSION,
 } from "../scripts/proposal-convergence.ts";
+import { PREFLIGHT_POLICY_VERSION } from "../scripts/prepare-admission-check.ts";
 
 // ── capsFor ─────────────────────────────────────────────────────────────────────────────────────
 test("capsFor: ordinary defaults — 1 full synthesis, 2 delta rounds, 45m budget", () => {
@@ -281,4 +286,368 @@ test("prepare-milestone.js mirrors inline the SAME caps as capsFor()", () => {
     assert.match(src, /maxDeltaRounds:\s*_highRisk\s*\?\s*3\s*:\s*2/, `${rel}: ordinary/highRisk maxDeltaRounds must be 2/3`);
     assert.match(src, /_highRisk\s*\?\s*75\s*:\s*45/, `${rel}: ordinary/highRisk budget must be 45/75 minutes`);
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── decideResumeGeneration — DIR-126-C/M202: generation-aware resume, third child of DIR-126's
+// split. One it() per evaluation-order step of the task's own Proposal. ─────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+describe("decideResumeGeneration", () => {
+  const BASE = {
+    currentTaskId: "DIR-TEST",
+    currentCharterHash: "charterHashA",
+    currentTaskContractHash: "contractHashA",
+    currentTaskProposalHash: "proposalHashA",
+    currentReviewPolicyHash: "reviewPolicyHashA",
+  };
+  function matchingRecord(overrides = {}) {
+    return {
+      taskId: BASE.currentTaskId,
+      charterHash: BASE.currentCharterHash,
+      taskContractHash: BASE.currentTaskContractHash,
+      proposalHash: BASE.currentTaskProposalHash,
+      reviewPolicyHash: BASE.currentReviewPolicyHash,
+      terminalPhase: "ProposalReview",
+      reason: "split-recommended",
+      cacheable: true,
+      generationId: "gen000000001",
+      outcome: "needs-human",
+      ...overrides,
+    };
+  }
+
+  test("PHASE_RANK: the finer-grained vocabulary, in order", () => {
+    assert.deepEqual(PHASE_RANK, {
+      PreflightContent: 0, ProposalAuthors: 1, Adjudicate: 2, ProposalReview: 3,
+      PlanAuthor: 4, PreflightPlan: 5, PlanCheck: 6, Receipt: 7,
+    });
+  });
+
+  test("CACHEABLE_TERMINALS: exactly the two allowlisted {terminalPhase, reason} pairs", () => {
+    assert.deepEqual(CACHEABLE_TERMINALS, [
+      { terminalPhase: "PreflightContent", reason: "preflight-rejected" },
+      { terminalPhase: "ProposalReview", reason: "split-recommended" },
+    ]);
+  });
+
+  test("RESUME_POLICY_VERSION: a plain literal matching PREFLIGHT_POLICY_VERSION's shape", () => {
+    assert.equal(RESUME_POLICY_VERSION, "resume-v1");
+  });
+
+  test("RESUMABLE_PHASES: strictly AFTER Adjudicate — Adjudicate itself excluded", () => {
+    assert.equal(RESUMABLE_PHASES.includes("Adjudicate"), false);
+    assert.equal(RESUMABLE_PHASES.includes("PreflightContent"), false);
+    assert.equal(RESUMABLE_PHASES.includes("ProposalAuthors"), false);
+    for (const p of ["ProposalReview", "PlanAuthor", "PreflightPlan", "PlanCheck", "Receipt"]) {
+      assert.ok(RESUMABLE_PHASES.includes(p), `${p} must be resumable`);
+    }
+  });
+
+  // Step 1/2: callerOverride short-circuits everything else, even a missing/mismatched record.
+  test("step 1: callerOverride===true -> resume/caller-override-true, regardless of record state", () => {
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: null, callerOverride: true });
+    assert.deepEqual(r, { decision: "resume", reason: "caller-override-true" });
+  });
+  test("step 2: callerOverride===false -> cold/caller-override-false, regardless of record state", () => {
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: matchingRecord(), callerOverride: false });
+    assert.deepEqual(r, { decision: "cold", reason: "caller-override-false" });
+  });
+
+  // Step 4: missing-provenance fails closed (AC2's missing-provenance leg).
+  test("step 4: null prior record -> cold/missing-prior-record", () => {
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: null });
+    assert.deepEqual(r, { decision: "cold", reason: "missing-prior-record" });
+  });
+
+  // Steps 5-8: any provenance mismatch forces cold (AC2's per-cause fixtures).
+  test("step 5: taskId mismatch -> cold/task-id-mismatch", () => {
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: matchingRecord({ taskId: "OTHER-TASK" }) });
+    assert.deepEqual(r, { decision: "cold", reason: "task-id-mismatch" });
+  });
+  test("step 6: charter-hash mismatch -> cold/charter-hash-mismatch", () => {
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: matchingRecord({ charterHash: "stale" }) });
+    assert.deepEqual(r, { decision: "cold", reason: "charter-hash-mismatch" });
+  });
+  test("step 7: task-contract-hash mismatch -> cold/task-contract-hash-mismatch", () => {
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: matchingRecord({ taskContractHash: "stale" }) });
+    assert.deepEqual(r, { decision: "cold", reason: "task-contract-hash-mismatch" });
+  });
+  test("step 8: review-policy-hash mismatch -> cold/review-policy-hash-mismatch", () => {
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: matchingRecord({ reviewPolicyHash: "stale" }) });
+    assert.deepEqual(r, { decision: "cold", reason: "review-policy-hash-mismatch" });
+  });
+
+  // Step 9: unchanged cacheable split/preflight terminal reuse (AC3's fixture half).
+  test("step 9: all hashes match INCLUDING proposal hash + cacheable ProposalReview/split-recommended -> reuse-terminal", () => {
+    const rec = matchingRecord({ terminalPhase: "ProposalReview", reason: "split-recommended", cacheable: true, generationId: "gen-abc", outcome: "needs-human" });
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: rec });
+    assert.deepEqual(r, { decision: "reuse-terminal", reason: "unchanged-generation-terminal", priorGenerationId: "gen-abc", priorReason: "split-recommended", priorOutcome: "needs-human" });
+  });
+
+  // Step 10: repaired-Proposal auto-resume (AC2's resume leg).
+  test("step 10: hashes match except proposal hash + terminal ranked after Adjudicate -> resume/repaired-proposal-detected", () => {
+    const rec = matchingRecord({ terminalPhase: "PlanAuthor", reason: "plan-author-failed", cacheable: false, proposalHash: "OLD-PROPOSAL-HASH", generationId: "gen-xyz" });
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: rec });
+    assert.deepEqual(r, { decision: "resume", reason: "repaired-proposal-detected", priorGenerationId: "gen-xyz" });
+  });
+
+  // Step 11: fall-through cold cases.
+  test("step 11: unchanged proposal + non-cacheable terminal (soft-budget-exceeded) -> cold/no-eligible-reuse-or-resume-condition", () => {
+    const rec = matchingRecord({ terminalPhase: "ProposalReview", reason: "soft-budget-exceeded", cacheable: false });
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: rec });
+    assert.deepEqual(r, { decision: "cold", reason: "no-eligible-reuse-or-resume-condition" });
+  });
+  for (const reason of ["delta-cap-exhausted", "plan-author-failed", "plancheck-rounds-exceeded", "prepared"]) {
+    test(`step 11: unchanged proposal + non-cacheable terminal (${reason}) -> cold`, () => {
+      const rec = matchingRecord({ terminalPhase: "PlanCheck", reason, cacheable: false });
+      const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: rec });
+      assert.equal(r.decision, "cold");
+      assert.equal(r.reason, "no-eligible-reuse-or-resume-condition");
+    });
+  }
+  test("step 11: transient/terminal at or before Adjudicate (proposal-author-incomplete) forces cold, never resume, even with a changed proposal hash", () => {
+    const rec = matchingRecord({ terminalPhase: "ProposalAuthors", reason: "proposal-author-incomplete", cacheable: false, proposalHash: "OLD-HASH" });
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: rec });
+    assert.deepEqual(r, { decision: "cold", reason: "no-eligible-reuse-or-resume-condition" });
+  });
+  test("step 11: Adjudicate itself (strict > threshold, not >=) forces cold even with a changed proposal hash — adjudicate-failed's task_write may never have completed", () => {
+    const rec = matchingRecord({ terminalPhase: "Adjudicate", reason: "adjudicate-failed", cacheable: false, proposalHash: "OLD-HASH" });
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: rec });
+    assert.deepEqual(r, { decision: "cold", reason: "no-eligible-reuse-or-resume-condition" });
+  });
+
+  // WIRING-CLAIM R7 (AC10) fixture half: the SAME reason: 'preflight-rejected' string, but the
+  // pair keys on terminalPhase too — PreflightContent IS reuse-terminal-eligible while
+  // PreflightPlan (identical reason) is NOT.
+  test("R7 fixture half: {terminalPhase:'PreflightContent', reason:'preflight-rejected'} cacheable IS reuse-terminal-eligible", () => {
+    const rec = matchingRecord({ terminalPhase: "PreflightContent", reason: "preflight-rejected", cacheable: true, generationId: "gen-content" });
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: rec });
+    assert.equal(r.decision, "reuse-terminal");
+    assert.equal(r.priorReason, "preflight-rejected");
+  });
+  test("R7 fixture half: {terminalPhase:'PreflightPlan', reason:'preflight-rejected'} (SAME reason string) is NOT reuse-terminal-eligible — falls through to cold when proposal hash is unchanged", () => {
+    const rec = matchingRecord({ terminalPhase: "PreflightPlan", reason: "preflight-rejected", cacheable: true, generationId: "gen-plan" });
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: rec });
+    assert.notEqual(r.decision, "reuse-terminal");
+    assert.equal(r.decision, "cold");
+    assert.equal(r.reason, "no-eligible-reuse-or-resume-condition");
+  });
+  test("R7 fixture half: {terminalPhase:'PreflightPlan', reason:'preflight-rejected'} with a CHANGED proposal hash falls through to resume, never reuse-terminal (PreflightPlan depends on Plan-file content this mechanism's hashes never cover)", () => {
+    const rec = matchingRecord({ terminalPhase: "PreflightPlan", reason: "preflight-rejected", cacheable: true, proposalHash: "OLD-HASH", generationId: "gen-plan2" });
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: rec });
+    assert.equal(r.decision, "resume");
+    assert.equal(r.reason, "repaired-proposal-detected");
+  });
+
+  // A record whose `cacheable` flag is false, even if the (terminalPhase, reason) pair IS on the
+  // allowlist, is never treated as reuse-terminal-eligible — cacheable===true is a hard gate too.
+  test("cacheable:false on an otherwise-allowlisted pair is NOT reuse-terminal-eligible", () => {
+    const rec = matchingRecord({ terminalPhase: "PreflightContent", reason: "preflight-rejected", cacheable: false });
+    const r = decideResumeGeneration({ ...BASE, priorGenerationRecord: rec });
+    assert.notEqual(r.decision, "reuse-terminal");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── proposal-convergence.ts's CLI tail — --decide-resume / --record-generation — real spawned
+// CLI runs against a scratch workspace with a real lease file (Stage 3). ────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+describe("CLI: --decide-resume / --record-generation", () => {
+  const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
+  const CONVERGENCE_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "proposal-convergence.ts");
+  const ADMISSION_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "prepare-admission-check.ts");
+  const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "dir126c-fixtures-"));
+
+  function fixtureTaskBody(proposalText) {
+    return `---
+id: DIR-126-C-CLI-FIXTURE
+title: fixture task for proposal-convergence.ts CLI fixtures
+status: todo
+---
+## Proposal
+
+${proposalText}
+
+## Acceptance Criteria
+
+- [ ] fixture AC item
+
+## Definition of Done
+
+- [ ] fixture DoD item
+
+## Touches
+
+- fixture.ts
+`;
+  }
+
+  function makeCliScratch(taskId, proposalText = "fixture proposal v1") {
+    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "cli-scratch-"));
+    fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), fixtureTaskBody(proposalText));
+    const charterFile = path.join(dir, "charter.md");
+    fs.writeFileSync(charterFile, "fixture charter v1\n");
+    return { dir, charterFile };
+  }
+
+  function leasePath(dir, taskId) {
+    return path.join(dir, ".quay", "prepare-leases", `${taskId}.json`);
+  }
+  function generationPath(dir, taskId) {
+    return path.join(dir, ".quay", "prepare-leases", `${taskId}.generation.json`);
+  }
+  function writeLease(dir, taskId, { ownerExecutionId = "sess-1", fencingToken = 0, acquiredAt = 1000 } = {}) {
+    const p = leasePath(dir, taskId);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify({ ownerExecutionId, fencingToken, acquiredAt }));
+  }
+
+  function runNode(args) {
+    try {
+      const stdout = execFileSync("node", ["--experimental-strip-types", ...args], { encoding: "utf8" });
+      return { status: 0, stdout };
+    } catch (e) {
+      return { status: typeof e.status === "number" ? e.status : 1, stdout: e.stdout ? e.stdout.toString() : "" };
+    }
+  }
+
+  function runDecideResume(dir, taskId, charterFile, extra = []) {
+    return runNode([CONVERGENCE_SCRIPT, "--decide-resume", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile, ...extra]);
+  }
+  function runRecordGeneration(dir, taskId, charterFile, { terminalPhase, outcome, reason, cacheable }) {
+    return runNode([CONVERGENCE_SCRIPT, "--record-generation", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+      "--terminalPhase", terminalPhase, "--outcome", outcome, "--reason", reason, "--cacheable", String(cacheable)]);
+  }
+
+  test("--decide-resume: no prior record -> cold/missing-prior-record, hashes + generationId present, no releaseResult, lease untouched", () => {
+    const taskId = "DIR-126-C-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    writeLease(dir, taskId);
+    try {
+      const res = runDecideResume(dir, taskId, charterFile);
+      assert.equal(res.status, 0);
+      const out = JSON.parse(res.stdout.trim().split("\n").pop());
+      assert.equal(out.decision, "cold");
+      assert.equal(out.reason, "missing-prior-record");
+      assert.ok(out.generationId && out.generationId.length === 12);
+      assert.ok(out.hashes && out.hashes.charterHash && out.hashes.taskContractHash && out.hashes.proposalHash && out.hashes.reviewPolicyHash);
+      assert.equal(out.releaseResult, undefined, "cold decision must never release the lease");
+      assert.ok(fs.existsSync(leasePath(dir, taskId)), "lease is untouched on a cold decision");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--record-generation then --decide-resume (unchanged inputs, cacheable allowlisted pair) -> reuse-terminal, embedded release (exactly one), .generation.json never overwritten (AC13/R6, AC8/R3)", () => {
+    const taskId = "DIR-126-C-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId, "fixture proposal v1 — unchanged");
+    writeLease(dir, taskId, { ownerExecutionId: "sess-gen-1" });
+    try {
+      // First generation terminates at a cacheable PreflightContent/preflight-rejected — records +
+      // releases (embedded) in ONE invocation.
+      const rec = runRecordGeneration(dir, taskId, charterFile, { terminalPhase: "PreflightContent", outcome: "revision-needed", reason: "preflight-rejected", cacheable: true });
+      assert.equal(rec.status, 0, rec.stdout);
+      const recOut = JSON.parse(rec.stdout.trim());
+      assert.equal(recOut.ok, true);
+      assert.equal(recOut.releaseResult.ok, true, "record-generation piggybacks a real release");
+      assert.ok(!fs.existsSync(leasePath(dir, taskId)), "lease removed by the embedded release");
+      assert.ok(fs.existsSync(generationPath(dir, taskId)));
+
+      // Simulate a fresh Admission acquire for the SECOND dispatch (same taskId).
+      // prepare-admission-check.ts's --acquire needs CLAUDE_CODE_SESSION_ID in env; set it directly.
+      const acquireEnv = execFileSync("node", ["--experimental-strip-types", ADMISSION_SCRIPT, "--acquire", "--taskId", taskId, "--workspace", dir], {
+        encoding: "utf8", env: { ...process.env, CLAUDE_CODE_SESSION_ID: "sess-gen-2" },
+      });
+      const acquireOut = JSON.parse(acquireEnv.trim());
+      assert.equal(acquireOut.outcome, "acquired", "an immediate subsequent same-task dispatch acquires Admission rather than prepare-already-running (AC4)");
+      assert.ok(fs.existsSync(leasePath(dir, taskId)));
+
+      const before = fs.statSync(generationPath(dir, taskId));
+      const beforeHash = crypto.createHash("sha256").update(fs.readFileSync(generationPath(dir, taskId))).digest("hex");
+
+      // Unchanged task/charter content (same proposal, same charter, same AC/DoD/Touches, same
+      // policy versions) -> --decide-resume must return reuse-terminal via the allowlisted pair.
+      const decide = runDecideResume(dir, taskId, charterFile);
+      assert.equal(decide.status, 0, decide.stdout);
+      const decideOut = JSON.parse(decide.stdout.trim());
+      assert.equal(decideOut.decision, "reuse-terminal", JSON.stringify(decideOut));
+      assert.equal(decideOut.reason, "unchanged-generation-terminal");
+      assert.equal(decideOut.priorReason, "preflight-rejected");
+      assert.equal(decideOut.releaseResult.ok, true, "reuse-terminal's lease release happens INSIDE the same --decide-resume invocation");
+      assert.ok(!fs.existsSync(leasePath(dir, taskId)), "the second lease is ALSO released by the reuse-terminal short-circuit — no lease is stranded");
+
+      const after = fs.statSync(generationPath(dir, taskId));
+      const afterHash = crypto.createHash("sha256").update(fs.readFileSync(generationPath(dir, taskId))).digest("hex");
+      assert.equal(afterHash, beforeHash, "AC13/R6: reuse-terminal never overwrites .generation.json — byte-for-byte unchanged");
+      assert.equal(before.size, after.size);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--decide-resume: a prior record with a mutated Proposal (repaired) and matching hashes otherwise, terminal ranked after Adjudicate -> resume/repaired-proposal-detected", () => {
+    const taskId = "DIR-126-C-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId, "original proposal text");
+    writeLease(dir, taskId, { ownerExecutionId: "sess-a" });
+    try {
+      // First generation terminates at PlanAuthor (non-cacheable) — records + embedded-releases.
+      const rec = runRecordGeneration(dir, taskId, charterFile, { terminalPhase: "PlanAuthor", outcome: "revision-needed", reason: "plan-author-failed", cacheable: false });
+      assert.equal(rec.status, 0, rec.stdout);
+      const recOut = JSON.parse(rec.stdout.trim());
+      assert.equal(recOut.ok, true);
+      assert.equal(recOut.releaseResult.ok, true);
+      assert.equal(recOut.record.cacheable, false);
+
+      // A human/agent repairs the on-disk Proposal (charter/AC/DoD/Touches all stay the same) —
+      // then a fresh Admission cycle for the SECOND dispatch acquires a new lease.
+      const taskFile = path.join(dir, "tasks", `${taskId}.md`);
+      fs.writeFileSync(taskFile, fixtureTaskBody("REPAIRED proposal text — since manually fixed"));
+      writeLease(dir, taskId, { ownerExecutionId: "sess-b", fencingToken: 1 });
+
+      const decide = runDecideResume(dir, taskId, charterFile);
+      assert.equal(decide.status, 0, decide.stdout);
+      const decideOut = JSON.parse(decide.stdout.trim());
+      assert.equal(decideOut.decision, "resume", JSON.stringify(decideOut));
+      assert.equal(decideOut.reason, "repaired-proposal-detected");
+      assert.equal(decideOut.priorGenerationId, recOut.record.generationId);
+      assert.equal(decideOut.releaseResult, undefined, "resume never releases the lease — the resumed generation still needs it");
+      assert.ok(fs.existsSync(leasePath(dir, taskId)), "lease untouched on a resume decision");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--decide-resume: exception path (missing lease file) fails closed to cold/decision-exception, never crashes the CLI (exit 0 with a valid JSON verdict)", () => {
+    const taskId = "DIR-126-C-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    // No lease file written at all.
+    try {
+      const res = runDecideResume(dir, taskId, charterFile);
+      assert.equal(res.status, 0);
+      const out = JSON.parse(res.stdout.trim());
+      assert.equal(out.decision, "cold");
+      assert.equal(out.reason, "decision-exception");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC14/R8: importing proposal-convergence.ts (the same way milestone-preparation-check.ts does) fires zero fs/argv side effects — no CLI executes on import", () => {
+    const scratch = fs.mkdtempSync(path.join(FIXTURES_DIR, "import-"));
+    const harness = path.join(scratch, "harness.mjs");
+    const modUrl = JSON.stringify(`file://${CONVERGENCE_SCRIPT}`);
+    fs.writeFileSync(harness, `
+import { blockingOpen, validateConvergenceCounters, computeConvergenceMetrics, decideResumeGeneration } from ${modUrl};
+console.log(JSON.stringify({ ok: true, hasDecide: typeof decideResumeGeneration === "function" }));
+`);
+    try {
+      const out = execFileSync("node", ["--experimental-strip-types", harness], { encoding: "utf8" });
+      const parsed = JSON.parse(out.trim());
+      assert.equal(parsed.ok, true);
+      assert.equal(parsed.hasDecide, true);
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
+  });
 });

@@ -85,7 +85,7 @@ const _n = _highRisk ? 3 : 2
 // phase's own agents already `task_get` the task fresh, so no extra plumbing is needed to feed them
 // the resumed text). When false/absent (the default), behavior is byte-for-byte unchanged from
 // before this change.
-const _resumeFromAdjudicatedProposal = $a.resumeFromAdjudicatedProposal === true
+let _resumeFromAdjudicatedProposal = $a.resumeFromAdjudicatedProposal === true
 
 // DIR-117 iteration-2 item 2: every phase captures its OWN real `$CLAUDE_CODE_SESSION_ID` (the
 // same DIR-093 pattern `execute-milestone.js`'s Audit phase already uses for `auditSessionId`) so
@@ -125,11 +125,35 @@ async function _renewLease(stageLabel) {
   return _admissionAgentCall(`--renew --taskId ${_taskId} --workspace . --stage ${JSON.stringify(stageLabel)}`, `admission-renew-${stageLabel}`)
 }
 
-// Release on every terminal return (WIRING-CLAIM 2) — called immediately before each of the 11
-// post-Admission terminal `return` statements below. The line-26 missing-args guard above fires
-// BEFORE Admission ever runs, so it needs no matching release call.
-async function _releaseLease(stageLabel) {
-  return _admissionAgentCall(`--release --taskId ${_taskId} --workspace .`, `admission-release-${stageLabel}`)
+// M202/DIR-126-C: proposal-convergence.ts's new thin CLI tail — the SAME agent()-wraps-a-real-CLI
+// shape every dispatch in this file already uses, just pointed at a different, in-Touches script
+// (proposal-convergence.ts, never prepare-admission-check.ts — see the task's own Problem framing
+// for why that boundary is load-bearing).
+const _convergenceScript = 'experiments/quay-perpetual-stream/scripts/proposal-convergence.ts'
+
+async function _convergenceAgentCall(flagsText, label) {
+  return agent(
+    `Run exactly this shell command and report its stdout verbatim:
+node --experimental-strip-types ${_convergenceScript} ${flagsText}
+Do not paraphrase or reformat the command's stdout — copy it exactly as printed. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
+    { label, phase: 'Preflight', schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } } }
+  )
+}
+
+// M202/DIR-126-C: replaces the bare `_releaseLease` at every one of this file's 15 real
+// post-Admission terminal-return sites. Dispatches proposal-convergence.ts's `--record-generation`
+// (which piggybacks the SAME lease release `_releaseLease` used to make, per Chosen mechanism)
+// under the SAME `admission-release-${stageLabel}` label `_releaseLease` used — label continuity
+// keeps the out-of-Touches e2e mock's `/^admission-release-/` fail-closed dispatch chain matching
+// unchanged, and the per-terminal dispatch count stays exactly 1 (fire-and-forget: callers await
+// and never parse the result, exactly as today). `cacheable` is `true` ONLY for the two
+// CACHEABLE_TERMINALS-allowlisted {terminalPhase, reason} pairs (PreflightContent/
+// preflight-rejected, ProposalReview/split-recommended); `false` everywhere else.
+async function _releaseLeaseAndRecord(stageLabel, { terminalPhase, outcome, reason, cacheable }) {
+  return _convergenceAgentCall(
+    `--record-generation --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --terminalPhase ${terminalPhase} --outcome ${outcome} --reason ${JSON.stringify(reason)} --cacheable ${cacheable}`,
+    `admission-release-${stageLabel}`
+  )
 }
 
 // M201/DIR-126-B: sibling helper to _admissionAgentCall, dispatching the SAME
@@ -163,6 +187,59 @@ if (_admissionVerdict.outcome === 'prepare-already-running') {
 
 log(`Admission: acquired lease for ${_taskId} (fencingToken=${_admissionVerdict.lease?.fencingToken}, reclaimed=${_admissionVerdict.reclaimed === true}).`)
 
+// ── Resume decision — M202/DIR-126-C: generation-aware resume ───────────────────────────
+// Runs ONLY when the caller OMITS $a.resumeFromAdjudicatedProposal entirely — an explicit true/
+// false value (M197's own pre-existing opt-in/opt-out) makes ZERO --decide-resume dispatches at
+// all (WIRING-CLAIM R2), keeping that path's observable dispatch count and returned outcome/
+// reason/phase shapes byte-identical to pre-this-child behavior (AC6). Strictly BETWEEN Admission
+// success and content phase('Preflight') — a reuse-terminal short-circuit below returns BEFORE
+// phase('Preflight') is ever entered, so the mechanical content check is itself skipped on a cache
+// hit (WIRING-CLAIM R4's sharpened form), and the return structurally precedes ProposalReview
+// (phase('ProposalReview') below) and PlanAuthor/Receipt in file order — it cannot advance to
+// either (AC5's structural half).
+if ($a.resumeFromAdjudicatedProposal === undefined) {
+  const { existsSync } = await import('node:fs')
+  const _generationRecordPath = `.quay/prepare-leases/${_taskId}.generation.json`
+  if (existsSync(_generationRecordPath)) {
+    // A prior generation record exists for this task — only THEN is the resume-decision worth a
+    // real dispatch (no decision other than 'cold' is reachable without a record, per
+    // decideResumeGeneration's own evaluation step 4), so a first-attempt run for a never-before-
+    // seen task makes zero resume-decision dispatches, identical in effect to today's implicit
+    // hard-coded false.
+    const _decideResult = await _convergenceAgentCall(`--decide-resume --taskId ${_taskId} --workspace . --charterFile ${_charterFile}`, 'resume-decision')
+    const _decideVerdict = _decideResult?.raw ? _parseAgentJson(_decideResult.raw) : null
+    if (!_decideVerdict || typeof _decideVerdict.decision !== 'string') {
+      log(`Resume-decision phase FAILED — no parseable verdict (raw: ${_decideResult?.raw ?? '(none)'}). Failing closed, never silently treated as cold or resume.`)
+      return { outcome: 'needs-human', reason: 'resume-decision-failed', phase: 'Preflight' }
+    }
+    if (_decideVerdict.releaseResult && _decideVerdict.releaseResult.ok !== true) {
+      log(`Resume-decision: '${_decideVerdict.decision}' selected but the embedded lease release FAILED (releaseResult: ${JSON.stringify(_decideVerdict.releaseResult)}) — never reporting a clean cache hit with a stranded owner.`)
+      return { outcome: 'needs-human', reason: 'reuse-terminal-release-failed', phase: 'Preflight' }
+    }
+    if (_decideVerdict.decision === 'reuse-terminal') {
+      // The SAME --decide-resume invocation above already released the lease (embedded, no
+      // second dispatch — WIRING-CLAIM R3) and deliberately did NOT overwrite .generation.json
+      // (WIRING-CLAIM R6) — this return precedes phase('Preflight') itself, so zero Preflight/
+      // ProposalAuthors/Adjudicate/ProposalReview/PlanAuthor/PlanCheck dispatches happen.
+      log(`Resume-decision: reuse-terminal — unchanged generation terminal (priorGenerationId=${_decideVerdict.priorGenerationId}, priorReason=${_decideVerdict.priorReason}). Zero Preflight/ProposalAuthors/Adjudicate/ProposalReview/PlanAuthor/PlanCheck dispatches; lease already released inline.`)
+      return {
+        outcome: _decideVerdict.priorOutcome ?? 'needs-human',
+        reason: 'unchanged-generation-terminal',
+        priorReason: _decideVerdict.priorReason,
+        decision: 'reuse-terminal',
+        priorGenerationId: _decideVerdict.priorGenerationId,
+        phase: 'Preflight',
+      }
+    }
+    // decision === 'resume' -> _resumeFromAdjudicatedProposal = true (same branch as explicit
+    // true); decision === 'cold' -> false (same branch as explicit false).
+    _resumeFromAdjudicatedProposal = _decideVerdict.decision === 'resume'
+    log(`Resume-decision: ${_decideVerdict.decision} (${_decideVerdict.reason}).`)
+  } else {
+    log(`Resume-decision: no prior generation record for ${_taskId} — cold (zero --decide-resume dispatch, identical to today's implicit default).`)
+  }
+}
+
 // ── Phase: Preflight (content) — M201/DIR-126-B ──────────────────────────────────────
 // Deterministic mechanical rejection of the four content failure classes (merged Markdown claims,
 // stale AC/DoD refs, task-vs-charter Touches mismatch, missing precedent) BEFORE any
@@ -179,7 +256,7 @@ if (!_preflightContentVerdict || typeof _preflightContentVerdict.ok !== 'boolean
   // Fail-closed (AC: "Preflight CLI exits non-zero / unparseable JSON") — mirrors Admission's own
   // admission-check-failed branch, never silently treated as "no findings".
   log(`Preflight (content) phase FAILED — no parseable verdict (raw: ${_preflightContentResult?.raw ?? '(none)'}). Failing closed, never dispatching ProposalAuthors.`)
-  await _releaseLease('preflight-check-failed')
+  await _releaseLeaseAndRecord('preflight-check-failed', { terminalPhase: 'PreflightContent', outcome: 'needs-human', reason: 'preflight-check-failed', cacheable: false })
   return { outcome: 'needs-human', reason: 'preflight-check-failed', phase: 'Preflight', detail: _preflightContentResult?.raw ?? '(agent returned no output)' }
 }
 
@@ -189,7 +266,7 @@ if (_preflightContentBlocking.length > 0) {
   // plan-check-* agent() call in file order — zero of those dispatches happen on this path,
   // structurally, not merely asserted.
   log(`Preflight (content) REJECTED — ${_preflightContentBlocking.length} blocking finding(s): ${_preflightContentBlocking.map((f) => f.code).join(', ')}. Zero proposal-author-*/adjudicate/proposal-review/plan-check-* dispatches on this path.`)
-  await _releaseLease('preflight-rejected')
+  await _releaseLeaseAndRecord('preflight-rejected', { terminalPhase: 'PreflightContent', outcome: 'revision-needed', reason: 'preflight-rejected', cacheable: true })
   return { outcome: 'revision-needed', reason: 'preflight-rejected', phase: 'Preflight', findings: _preflightContentVerdict.findings }
 }
 for (const f of (_preflightContentVerdict.findings || [])) {
@@ -232,7 +309,7 @@ Return {authorIdx: ${authorIdx}, proposalText: <the full Proposal markdown text,
   _proposals = _proposalResults.filter(Boolean)
   if (_proposals.length < _n) {
     log(`ProposalAuthors phase: only ${_proposals.length}/${_n} authors returned a result.`)
-    await _releaseLease('proposal-author-incomplete')
+    await _releaseLeaseAndRecord('proposal-author-incomplete', { terminalPhase: 'ProposalAuthors', outcome: 'revision-needed', reason: 'proposal-author-incomplete', cacheable: false })
     return { outcome: 'revision-needed', reason: 'proposal-author-incomplete', phase: 'ProposalAuthors' }
   }
 
@@ -256,7 +333,7 @@ ${_proposals.map((p) => `--- Author ${p.authorIdx} ---\n${p.proposalText}`).join
 
   if (!adjudicateResult || adjudicateResult.ok !== true) {
     log(`Adjudicate phase FAILED: ${adjudicateResult?.error || '(agent returned nothing)'}`)
-    await _releaseLease('adjudicate-failed')
+    await _releaseLeaseAndRecord('adjudicate-failed', { terminalPhase: 'Adjudicate', outcome: 'revision-needed', reason: 'adjudicate-failed', cacheable: false })
     return { outcome: 'revision-needed', reason: adjudicateResult?.error || 'adjudicate-failed', phase: 'Adjudicate' }
   }
 }
@@ -418,7 +495,7 @@ This is the DIR-117-B/M195 mechanism-claim wiring coverage check — it calls th
 const _wiringVerdictCodes = ['wiring-coverage-complete', 'wiring-coverage-none-claimed', 'wiring-coverage-uncovered']
 if (!_wiringVerdict || !_wiringVerdictCodes.includes(_wiringVerdict.code)) {
   log(`ProposalReview wiring-coverage sub-step FAILED — no parseable verdict (${_wiringVerdict?.code || 'no-result'}); failing the phase closed rather than skipping coverage.`)
-  await _releaseLease('wiring-coverage-check-failed')
+  await _releaseLeaseAndRecord('wiring-coverage-check-failed', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'wiring-coverage-check-failed', cacheable: false })
   return { outcome: 'needs-human', reason: 'wiring-coverage-check-failed', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
 }
 _upsertFindings(Array.isArray(_wiringVerdict.findings) ? _wiringVerdict.findings : [], 0)
@@ -461,7 +538,7 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}${f.evidence
   if (_reviseResult?.proposalHash) _proposalHashes.push({ round: _deltaRound, hash: _reviseResult.proposalHash })
   if (!_reviseResult || _reviseResult.ok !== true) {
     log(`ProposalReview focused revision round ${_deltaRound} FAILED: ${_reviseResult?.error || '(agent returned nothing)'}`)
-    await _releaseLease('proposal-revise-failed')
+    await _releaseLeaseAndRecord('proposal-revise-failed', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'proposal-revise-failed', cacheable: false })
     return { outcome: 'needs-human', reason: _reviseResult?.error || 'proposal-revise-failed', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
   }
 
@@ -487,17 +564,17 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n'
 
 if (_terminalReason === 'split-recommended') {
   log(`ProposalReview: split recommended — ${_splitRecommendation.reason}`)
-  await _releaseLease('split-recommended')
+  await _releaseLeaseAndRecord('split-recommended', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'split-recommended', cacheable: true })
   return { outcome: 'needs-human', reason: 'split-recommended', splitRecommendation: _splitRecommendation, phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
 }
 if (_terminalReason === 'soft-budget-exceeded') {
   log(`ProposalReview: soft budget (${_policyCaps.softBudgetMs / 60000}m) exceeded with ${_blockingOpen().length} blocking finding(s) still open.`)
-  await _releaseLease('soft-budget-exceeded')
+  await _releaseLeaseAndRecord('soft-budget-exceeded', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'soft-budget-exceeded', cacheable: false })
   return { outcome: 'needs-human', reason: 'soft-budget-exceeded', phase: 'ProposalReview', ledger: _ledger, elapsedMs: _now() - _startedAtMs, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
 }
 if (_terminalReason === 'delta-cap-exhausted') {
   log(`ProposalReview: delta-review cap (${_maxDeltaRounds}) exhausted with ${_blockingOpen().length} blocking finding(s) still open.`)
-  await _releaseLease('delta-cap-exhausted')
+  await _releaseLeaseAndRecord('delta-cap-exhausted', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'delta-cap-exhausted', cacheable: false })
   return { outcome: 'needs-human', reason: 'delta-cap-exhausted', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
 }
 log(`ProposalReview PASSED — zero open blocking findings after 1 full synthesis + ${_deltaRound} delta round(s); ${_ledger.length} total finding(s) recorded.`)
@@ -536,7 +613,7 @@ Return {planFile: "${_planFile}", ok: true, sessionId: <your real session id>}. 
 
 if (!planAuthorResult || planAuthorResult.ok !== true) {
   log(`PlanAuthor phase FAILED: ${planAuthorResult?.error || '(agent returned nothing)'}`)
-  await _releaseLease('plan-author-failed')
+  await _releaseLeaseAndRecord('plan-author-failed', { terminalPhase: 'PlanAuthor', outcome: 'revision-needed', reason: 'plan-author-failed', cacheable: false })
   return { outcome: 'revision-needed', reason: planAuthorResult?.error || 'plan-author-failed', phase: 'PlanAuthor' }
 }
 
@@ -552,7 +629,7 @@ let _preflightPlanVerdict = _preflightPlanResult?.raw ? _parseAgentJson(_preflig
 
 if (!_preflightPlanVerdict || typeof _preflightPlanVerdict.ok !== 'boolean') {
   log(`Preflight (plan-shape) phase FAILED — no parseable verdict (raw: ${_preflightPlanResult?.raw ?? '(none)'}). Failing closed, never dispatching PlanCheck.`)
-  await _releaseLease('preflight-check-failed')
+  await _releaseLeaseAndRecord('preflight-check-failed', { terminalPhase: 'PreflightPlan', outcome: 'needs-human', reason: 'preflight-check-failed', cacheable: false })
   return { outcome: 'needs-human', reason: 'preflight-check-failed', phase: 'Preflight', detail: _preflightPlanResult?.raw ?? '(agent returned no output)' }
 }
 
@@ -561,7 +638,13 @@ if (_preflightPlanBlocking.length > 0) {
   // WIRING-CLAIM 4: this `return` precedes MAX_PLANCHECK_ROUNDS's loop entirely — zero
   // plan-check-round-* dispatches happen on this path, structurally.
   log(`Preflight (plan-shape) REJECTED — ${_preflightPlanBlocking.length} blocking finding(s): ${_preflightPlanBlocking.map((f) => f.code).join(', ')}. Zero plan-check-round-* dispatches on this path.`)
-  await _releaseLease('preflight-rejected')
+  // M202/DIR-126-C WIRING-CLAIM R5/R7: this is the PLAN-SHAPE preflight-rejected site — records
+  // terminalPhase 'PreflightPlan' (NOT the coarse 'Preflight' both call sites otherwise share, and
+  // NOT 'PreflightContent'), and cacheable:false — the SAME 'preflight-rejected' reason string as
+  // the content-preflight site above is NOT allowlisted at this terminalPhase, deliberately: it
+  // depends on Plan-file content this mechanism's hashes never cover, and a real PlanAuthor agent
+  // has already run by the time it fires.
+  await _releaseLeaseAndRecord('preflight-rejected', { terminalPhase: 'PreflightPlan', outcome: 'revision-needed', reason: 'preflight-rejected', cacheable: false })
   return { outcome: 'revision-needed', reason: 'preflight-rejected', phase: 'Preflight', findings: _preflightPlanVerdict.findings }
 }
 for (const f of (_preflightPlanVerdict.findings || [])) {
@@ -609,7 +692,7 @@ Return {findings: <integer count, 0 if none>, findingsDetail: <list each finding
 
 if (_planCheckFindings !== 0) {
   log(`PlanCheck exhausted ${MAX_PLANCHECK_ROUNDS} rounds without reaching F_i=0.`)
-  await _releaseLease('plancheck-rounds-exceeded')
+  await _releaseLeaseAndRecord('plancheck-rounds-exceeded', { terminalPhase: 'PlanCheck', outcome: 'revision-needed', reason: 'plancheck-rounds-exceeded', cacheable: false })
   return { outcome: 'revision-needed', reason: 'plancheck-rounds-exceeded', phase: 'PlanCheck' }
 }
 
@@ -679,7 +762,7 @@ Return {ok: <step-3 command exit === 0>, receiptFile: "${_receiptFile}", detail:
 
 if (!receiptResult || receiptResult.ok !== true) {
   log(`Receipt phase FAILED self-check: ${receiptResult?.detail || '(agent returned nothing)'}`)
-  await _releaseLease('receipt-selfcheck-failed')
+  await _releaseLeaseAndRecord('receipt-selfcheck-failed', { terminalPhase: 'Receipt', outcome: 'revision-needed', reason: 'receipt-selfcheck-failed', cacheable: false })
   return { outcome: 'revision-needed', reason: 'receipt-selfcheck-failed', phase: 'Receipt' }
 }
 
@@ -688,7 +771,7 @@ log(`Prepared: ${_taskId} — receipt at ${_receiptFile}, ledger at ${_ledgerFil
 // Final release (WIRING-CLAIM 2, line-497-class success return): the single most safety-critical
 // site — a verifier who stops at "11 named outcome sites" would never check this one, since it is
 // the file's own final success return, additional to and not folded into the other 11.
-await _releaseLease('prepared')
+await _releaseLeaseAndRecord('prepared', { terminalPhase: 'Receipt', outcome: 'prepared', reason: 'prepared', cacheable: false })
 
 return {
   outcome: 'prepared',
