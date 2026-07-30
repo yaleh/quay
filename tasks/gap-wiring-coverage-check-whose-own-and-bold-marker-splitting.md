@@ -17,317 +17,359 @@ extra:
 ---
 ## Proposal
 
-### Problem framing (independently re-verified against current source, both drafts agree)
+### Problem framing (independently re-derived against current source, 2026-07-30; two-draft adjudication, disagreements settled by live execution)
 
-Direct read of `experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts` — the ONE
-canonical implementation both `task-schema.ts` (`checkGapSections`/`checkDirectiveSections`,
-import line 323) and `prepare-admission-check.ts` (`preflightMergedMarkdownClaims` — import line
-44, call site line 386) consume (`grep` confirms both import sites; no second implementation
-exists) — plus live `node -e` reproductions against today's unmodified regex literals confirm both
-defects exactly as filed, and confirm the task's own Requested-action wording for defect 2 is
-insufficient:
+`experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts` (292 lines) is the single
+canonical implementation of the DIR-117/DIR-122 mechanism-claim wiring-coverage check. Verified
+directly, not assumed from the task body: its own header comment (lines 1-8) declares it "the ONE
+implementation both callers share" — the `kind=gap` task path invokes it via
+`task-schema.ts`'s `checkGapWiringCoverage` (on `## Requested action` text); a directive's
+`## Proposal` is enforced by the [W1] CLI dispatch in `prepare-milestone.js`, NOT by
+`task-schema.ts` (`checkDirectiveSections`, line 303, is a pure section-presence check that
+never calls `checkWiringCoverage` — confirmed by direct read of lines 300-316).
+`task-schema.ts` line 323 imports `checkWiringCoverage` and invokes it only from the gap-task
+path (`checkGapWiringCoverage`, defined line 354, call at line 357 on `## Requested action`
+text); and
+`experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts` line 44 imports
+`splitSentences` — the canonical file's own comment at lines 66-68 documents this same reuse
+("Exported (M201/DIR-126-B): `prepare-admission-check.ts`'s ... detector reuses this SAME list-aware
+splitter") — and its `preflightMergedMarkdownClaims` (defined line 379) calls `splitSentences`
+directly at line 386, a second real consumer of the sentence splitter the task's original Finding
+did not name. `diff experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts
+plugin/scripts/wiring-coverage-check.ts` → byte-identical today.
 
-1. **`WIRING_VERB_RE` (line 50)**:
-   `(?<!(?:'s|s'|its|their|my|our|your|his|her)\s)\bowns?\b`. The possessive-determiner exclusion
-   lookbehind lists 8 words but omits `whose`. Live check:
-   `WIRING_VERB_RE.test("the terminal whose own AC requires X")` → `true` today. Adding `whose` to
-   the alternation flips it to `false`, while a genuine ownership sentence
-   (`"composite-land.ts owns dashboard.md writes"`) still matches `true` — verified live, before
-   and after the patch, and confirmed to be a strict narrowing (no real ownership claim stops
-   matching).
+Two defects, each reproduced live (most recently at adjudication time) by executing the actual
+regex semantics, not trusted from prose:
 
-2. **`splitSentences()` (line 102)**: `.split(/(?<=[.!?])\s+(?=[A-Z\`"])/)`. Neither the
-   lookbehind nor the lookahead recognizes a markdown bold marker (`**`) as a boundary, so two
-   independently bolded claims separated only by `** **` stay merged into one oversized "claim"
-   string. Live reproduction against the exact AC-2 fixture text `"Done. **A does X (\`id1\`,
-   \`id2\`).** **B does Y (\`id3\`, \`id4\`).**"`:
-   - unpatched: one chunk containing all 4 identifiers.
-   - **lookahead-only** patch (`(?=[A-Z\`"]|\*\*)`, the task's own Requested Action item 2's
-     literal wording, lookbehind left untouched): still ONE merged chunk — the character
-     preceding the inter-claim whitespace is the closing `*` of `**`, not `.`/`!`/`?`, so the
-     untouched lookbehind never fires and the split point never activates. Confirmed insufficient
-     by direct empirical test, independently reproduced in both drafts of this adjudication.
-   - **lookbehind-and-lookahead** patch (`(?<=[.!?]|\*\*)\s+(?=[A-Z\`"]|\*\*)`): produces the
-     correct 3-way split — `["Done.", "**A does X (\`id1\`, \`id2\`).**", "**B does Y (\`id3\`,
-     \`id4\`).**"]`, 2 identifiers per resulting sentence, matching the AC-2 fixture's stated
+1. **`WIRING_VERB_RE` (declared line 49, pattern line 50)** — the current verbatim literal is an
+   `/i`-flagged alternation:
+   `/\b(invokes?|calls?|dispatches?|enforces?|wires?|routes?|delegates?)\b|(?<!(?:'s|s'|its|their|my|our|your|his|her)\s)\bowns?\b/i`.
+   The possessive-determiner exclusion lookbehind guards ONLY the `owns?` branch (the verb branch
+   has no lookbehind), and that lookbehind lists 9 forms but omits `whose`. Live check:
+   `WIRING_VERB_RE.test("the terminal whose own AC requires X")` → `true` today (false positive —
+   "whose own" is a possessive determiner + adjective, not an ownership verb); adding `whose` to
+   the alternation → `false`; a genuine ownership sentence
+   (`"composite-land.ts owns dashboard.md writes"`) stays `true` before AND after. A strict
+   narrowing — no real ownership claim stops matching. The verb branch and the `/i` flag are
+   untouched by this fix.
+
+2. **`splitSentences()` (lines 98-105; the sentence-punctuation split is line 102)** — current
+   verbatim: `.flatMap((block) => block.split(/(?<=[.!?])\s+(?=[A-Z\`"])/))`. Neither side
+   recognizes a markdown bold marker (`**`) as a boundary, so two independently bolded claims
+   separated only by `**<space>**` merge into one oversized "claim." Live reproduction against the
+   exact AC-2 fixture text `"Done. **A does X (\`id1\`, \`id2\`).** **B does Y (\`id3\`,
+   \`id4\`).**"`:
+   - unpatched → ONE chunk carrying all 4 identifiers;
+   - **lookahead-only** patch (`(?<=[.!?])\s+(?=[A-Z\`"]|\*\*)` — the literal reading of the task's
+     Requested Action item 2) → exactly **2 chunks**: `["Done.", "**A does X (\`id1\`, \`id2\`).**
+     **B does Y (\`id3\`, \`id4\`).**"]` — it splits off the leading `"Done."` but does NOT
+     separate the two adjacent bold claims, which remain merged in a single 4-identifier chunk,
+     because the character preceding the inter-claim whitespace is the closing `*` of `**`, which
+     the untouched lookbehind `(?<=[.!?])` never matches. Empirically insufficient. (Adjudication
+     note: this records the EXACT result — "2 chunks, one merged 4-identifier chunk"; Author 1's
+     "still ONE merged chunk" shorthand was imprecise about the `"Done."` split, Author 2's
+     correction stands, and both drafts' substantive conclusion is identical.)
+   - **both-sides** patch (`(?<=[.!?]|\*\*)\s+(?=[A-Z\`"]|\*\*)`) → the correct **3-way** split
+     `["Done.", "**A does X (\`id1\`, \`id2\`).**", "**B does Y (\`id3\`, \`id4\`).**"]` (two
+     sentences of 2 identifiers each, disjoint sets), matching the AC-2 fixture's stated
      expectation.
 
-Both were the real, source-confirmed cause of DIR-126-D's round-4/round-5 `ProposalReview` churn
-(~20 minutes / 12 agents / ~700K tokens) per the task's own Finding — a paragraph combining "whose
-own" prose and back-to-back `**Claim N…**`-prefixed bold points false-triggered both bugs at once,
-and the working fix at the time was manual bullet-list restructuring, not a tool fix.
+Both defects are the source-confirmed mechanics behind DIR-126-D's round-4/5 ProposalReview churn
+(run IDs `wf_929eb86d-2a6`/`wf_750f506a-3d2`, commit `83c1958`): a paragraph combining "the one
+terminal whose own AC…" prose with back-to-back `**Claim N…**`-prefixed points fired both defects
+at once, and the workaround at the time was manual bullet-list restructuring, not a tool fix. The
+incident narrative (dates, run IDs, ~20 min / 12 agents / ~700K tokens) is taken at face value from
+the Finding; the regex mechanics above were independently reproduced — three times in total,
+including at adjudication.
 
-**Independently re-verified wiring/mirroring facts** (not assumed from the task body, cross-checked
-between both drafts): `diff experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts
-plugin/scripts/wiring-coverage-check.ts` returns no output (byte-identical today).
-`plugin/scripts/sync-vendor.sh`'s `SYNC_SCRIPTS` array lists 25 entries including
-`wiring-coverage-check`; in non-`--check` mode it mechanically `cp`s
-`${EXPERIMENT_SCRIPTS}/${s}.ts` over `${PLUGIN_DIR}/scripts/${s}.ts` for every entry — no hand-edit
-branch exists for this array. `--check` mode byte-compares via `cmp_or_report`, already exercised
-by `plugin/test/plugin-packaging.test.mjs` (part of the `scripts/test.sh` canonical glob).
-`find plugin/test -iname 'wiring-coverage-check*'` returns nothing — no
-`plugin/test/wiring-coverage-check.test.mjs` exists, contradicting the task's own `## Touches` and
-AC item 3. Of the 25 `SYNC_SCRIPTS` entries (24 besides `wiring-coverage-check` itself), only 2
-(`composite-manifest-synthesis`, `prepare-admission-check`) have a paired
-`plugin/test/*.test.mjs` — confirmed via `ls plugin/test/*.test.mjs` — so a "no mirror test file"
-outcome is the dominant (22/24), not exceptional, pattern.
-
-Also independently confirmed: `plugin/workflows/prepare-milestone.js` line 541 sets
-`_wiringCheckScript = 'experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts'` and
-dispatches an agent to run that exact canonical path via
-`node --experimental-strip-types ${_wiringCheckScript} --task tasks/${_taskId}.md` — the
-ProposalReview gate runs the canonical source directly, not the plugin mirror, so a canonical-only
-fix is live on the real gate immediately, independent of any plugin release/sync step.
-`prepare-admission-check.ts` line 44 imports `splitSentences` from `wiring-coverage-check.ts` and
-line 386 calls it inside `preflightMergedMarkdownClaims` — a second real, currently-unflagged
-consumer of the sentence splitter that the task's Finding text does not name. Running
-`node --experimental-strip-types --test experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs`
-against the current unpatched source passes 18/18 (0 failures) — the RED baseline the new
-regression tests must sit alongside without breaking. Running
-`node --experimental-strip-types --test experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs`
-against the current unpatched source passes 61/61 (0 failures) — the pre-fix baseline this
-proposal's second-call-site regression claim must reproduce post-fix.
-
-Also confirmed via grep on the 3 `merged-markdown-claims` fixtures
-(`experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/{good,bad,
-ambiguous}.md`): the only `**` occurrence in each file is a leading `**type:** execution` header
-line, whose character after the closing `**` is a space then lowercase `execution` — the new
-lookahead (`[A-Z\`"]|\*\*`) does not match lowercase, so Fix 2 introduces no new split there.
+**Live-reproduced baselines the fix must sit alongside without breaking** (the RED baselines for
+the new regression fixtures):
+- `node --experimental-strip-types --test
+  experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs` → 18/18 pass (233-line
+  file).
+- `node --experimental-strip-types --test
+  experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs` → 61/61 pass across 7
+  suites.
+- `node --experimental-strip-types experiments/quay-perpetual-stream/scripts/wiring-coverage-
+  check.ts --task tasks/DIR-126-D.md` → `{ok:true, code:"wiring-coverage-complete", claims:<22
+  entries>, findings:[]}` (0 findings) — the real, previously-passing document the fix must not
+  regress. (Adjudicated by live execution: the CLI envelope field is `findings` (an array);
+  `uncovered` is the library-level `checkWiringCoverage` return field, which the CLI maps through
+  `wiringFindingsFromUncovered` at line 283.)
+- `grep '\*\*'` across the 3 `merged-markdown-claims` fixtures (`good.md`/`bad.md`/ambiguous.md`):
+  the only occurrence in each is a line-1-leading `**type:** execution` header followed by
+  lowercase text. Because the line-102 split requires `\s+` preceded by a lookbehind-matching char,
+  a line-initial `**` with no preceding `.!?`+whitespace introduces NO new split point there (and
+  the widened lookahead does not match lowercase anyway) — Fix 2 adds no incidental splits to
+  these fixtures.
+- `plugin/scripts/sync-vendor.sh`: its `SYNC_SCRIPTS` array (declared line 147, 25 entries) lists
+  `wiring-coverage-check` at line 169; mutating mode `cp`s the experiment source over the plugin
+  copy, `--check` mode byte-compares each entry via `cmp_or_report` — no hand-edit branch exists
+  for any listed entry. Only 2 of the 25 entries (`composite-manifest-synthesis`,
+  `prepare-admission-check`) have a paired `plugin/test/*.test.mjs` (`plugin/test/` has 9 test
+  files total, none for this module) — no-mirror-test is the dominant pattern, and
+  `plugin/test/plugin-packaging.test.mjs` (inside the `scripts/test.sh` canonical glob) already
+  executes `sync-vendor.sh --check` and asserts exit 0 (test at line 183, assertion at line 200).
 
 ### Chosen mechanism
 
-Fix both defects as narrow, in-place regex-literal edits inside the canonical file only
-(`experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts`); regenerate the plugin
-mirror mechanically via the existing `sync-vendor.sh` (never hand-edit `plugin/scripts/`); add the
-two regression fixtures to the canonical test file only
-(`experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs`, currently 233 lines / 18
-tests); and re-verify the second, previously-unnamed real call site
-(`prepare-admission-check.ts`) does not regress — while correcting, rather than silently
-implementing around, the parts of the task's own `## Requested action` / `## Touches` text that
-empirical testing shows are wrong (lookahead-only is insufficient) or stale (the `plugin/test/`
-mirror file does not exist).
+Two narrow, in-place regex-literal edits confined to the canonical file, mechanical mirror
+regeneration (never a hand-edit), and new RED/GREEN regression fixtures added to the one canonical
+test file:
 
-- **Fix 1**: `(?<!(?:'s|s'|its|their|my|our|your|his|her)\s)\bowns?\b` →
-  `(?<!(?:'s|s'|its|their|my|our|your|his|her|whose)\s)\bowns?\b`. Adds one word to the exclusion
-  alternation; the verb alternation (`invokes?|calls?|dispatches?|enforces?|wires?|routes?|
-  delegates?`) is untouched.
-- **Fix 2** (a correction to the task body's literal wording, empirically required — not
-  optional): `.split(/(?<=[.!?])\s+(?=[A-Z\`"])/)` →
-  `.split(/(?<=[.!?]|\*\*)\s+(?=[A-Z\`"]|\*\*)/)`. Extends **both** sides of the split boundary
-  symmetrically — trailing `**` mirrors the existing trailing `.!?`; leading `**` mirrors the
-  existing leading `[A-Z\`"]`. A lookahead-only edit (the literal reading of the task's Requested
-  Action item 2) is empirically proven, via live regex reproduction, to leave the AC-2 fixture's
-  two bold claims merged.
+- **Fix 1** (`WIRING_VERB_RE`, line 50): add `whose` to the `owns?`-branch exclusion lookbehind —
+  `(?<!(?:'s|s'|its|their|my|our|your|his|her)\s)\bowns?\b` →
+  `(?<!(?:'s|s'|its|their|my|our|your|his|her|whose)\s)\bowns?\b`. One word added to the exclusion
+  alternation; verb branch and `/i` flag untouched.
+- **Fix 2** (`splitSentences()`, line 102): extend BOTH sides of the split boundary symmetrically —
+  `/(?<=[.!?])\s+(?=[A-Z\`"])/` → `/(?<=[.!?]|\*\*)\s+(?=[A-Z\`"]|\*\*)/`. Trailing `**` mirrors
+  the existing trailing `.!?`; leading `**` mirrors the existing leading `[A-Z\`"]`. This
+  deliberately **corrects** the task's literal Requested Action item 2 wording: the lookahead-only
+  variant is empirically proven above to fail the task's own AC-2 fixture (the two bold claims stay
+  merged in one 4-identifier chunk).
 
-Both edits are confined to the two regex literals — `extractMechanismClaims()`,
-`checkWiringCoverage()`, `splitListAwareBlocks()`, `bulletsOf()`, and every function
-signature/return shape are unchanged.
+Neither edit touches `extractMechanismClaims()` (line 120), `checkWiringCoverage()` (line 163),
+`splitListAwareBlocks()` (line 69; line-anchored bullet/table splitting), `bulletsOf()` (line 137;
+bullet/backtick-identifier extraction), the CLI entrypoint, or any function's signature/return
+shape. New regression fixtures go in `experiments/quay-perpetual-stream/test/wiring-coverage-
+check.test.mjs` only: (a) a "whose own" sentence that must NOT be treated as a wiring-verb claim
+(RED before / GREEN after); (b) a two-bold-sentence paragraph that must split into two claims with
+disjoint identifier sets (RED before — one merged 4-identifier sentence / GREEN after — two
+2-identifier sentences), per the charter's done-when requiring real fail-before/pass-after, not
+GREEN-only. Mirror delivery: `bash plugin/scripts/sync-vendor.sh` (mechanical `cp`), then `bash
+plugin/scripts/sync-vendor.sh --check` → `CLEAN` for `wiring-coverage-check`.
+
+**DIR-117 mechanism-claim wiring note.** This fix introduces NO new call/dispatch/ownership/
+enforcement relationships — only two regex literals inside existing functions change behavior. The
+relationships this Proposal RELIES ON and asserts are pre-existing; each is flagged below as a
+claim requiring AC-level evidence (DIR-117):
+- **[W1 — existing dispatch, preserve]** `prepare-milestone.js:541` sets `_wiringCheckScript =
+  'experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts'` and `:544` dispatches
+  `node --experimental-strip-types ${_wiringCheckScript} --task tasks/${_taskId}.md` in the
+  ProposalReview phase (lines 546-553 wire a non-zero exit to a blocking
+  `wiring-coverage-check-failed`/`needs-human` outcome) — the live gate runs the canonical path by
+  absolute path, so a canonical-only edit is live on the real gate immediately, independent of any
+  plugin sync/release step. Proof obligation: post-fix, the CLI re-run against the real,
+  previously-passing `tasks/DIR-126-D.md` must still report `ok:true`/0 findings (pre-fix baseline
+  of 22 claims / 0 findings independently reproduced above). → AC item.
+- **[W2 — existing call, preserve]** `prepare-admission-check.ts:44` imports `splitSentences`;
+  `:386` (`preflightMergedMarkdownClaims`) calls it directly — the second real consumer the task's
+  original Finding did not name. Proof obligation: `prepare-admission-check.test.mjs` (both copies)
+  still passes 61/61 post-fix (baseline reproduced above). → AC item.
+- **[W3 — existing consumption, preserve]** `task-schema.ts` line 323 imports `checkWiringCoverage`,
+  called only via the gap-task path (`checkGapWiringCoverage`, lines 354/357); `checkDirectiveSections`
+  (line 303) never calls it, and directive-`## Proposal` enforcement is the [W1] CLI dispatch — both
+  fixes flow through the shared import with no per-caller change, signature/return shape unchanged.
+  Proof obligation: grep-verified
+  import/call sites plus the canonical suite staying green at 18/18 plus the new fixtures. → AC
+  item.
+- **[W4 — existing enforcement, rely-on]** `sync-vendor.sh` (SYNC_SCRIPTS declared line 147, entry
+  line 169) mechanically `cp`s canonical→plugin and `--check` byte-compares via `cmp_or_report`;
+  this is the ONLY mechanism carrying the fix into the plugin-packaged copy. Proof obligation:
+  `sync-vendor.sh --check` reports `CLEAN` for `wiring-coverage-check` after regeneration —
+  generically enforced by `plugin/test/plugin-packaging.test.mjs` (line 200 asserts exit 0), but
+  this module's specific post-fix `CLEAN` is an explicit AC line since it is the mechanism carrying
+  the fix. → AC item.
 
 ### Concrete control/data flow
 
-No new call sites, no new functions. The existing pipeline, confirmed by direct read:
+No new call sites, no new functions — only the two regex literals inside the existing pipeline
+change behavior. Re-derived by direct read of `prepare-milestone.js`, the canonical module, and
+both consumer scripts:
 
-1. `prepare-milestone.js`'s ProposalReview phase (`plugin/workflows/prepare-milestone.js:541`)
-   dispatches an agent that runs the canonical CLI (`_runAsCli` block, this module's own lines
-   265-292) against the Proposal's `## Acceptance Criteria`-bearing sections of `tasks/<id>.md`.
-   **[wiring claim — needs AC coverage: re-running the CLI against a real task body must still
-   report `ok:true` post-fix.]**
-2. The CLI extracts `## Proposal` and `## Acceptance Criteria` section text
-   (`extractSectionForCli`) and calls `checkWiringCoverage(proposalText, acText)`, which calls
-   `extractMechanismClaims(sourceSectionText)`, which calls `splitSentences(sectionText)`
-   (**Fix 2's target**) for every sentence and tests each against the (now-patched)
-   `WIRING_VERB_RE` (**Fix 1's target**), then counts backtick identifiers.
-3. `splitSentences(text)`'s existing shape is unchanged: paragraph split (`\n{2,}`) →
-   `splitListAwareBlocks` (bullet/table-row aware, not touched by this fix) → per-block
-   punctuation split (**Fix 2's target**) → whitespace normalization/trim.
-4. Uncovered claims become BLOCKING typed findings (`wiringFindingsFromUncovered`) in the exact
-   shape `prepare-milestone.js`'s `_upsertFindings(..., 0)` consumes (`{subsystem, summary,
-   severity:"blocker", blocking:true, evidence, claimRef, disposition}`), so the phase's blocking-
-   finding count moves by the function's real return value, not an LLM's independent judgment
-   call.
-5. **A second, real consumer not named in the task's Requested Action**:
-   `prepare-admission-check.ts` line 44 imports `splitSentences` from `wiring-coverage-check.ts`,
-   and line 386's `preflightMergedMarkdownClaims` calls it directly.
-   **[wiring claim surfaced independently by this proposal — needs its own AC item: re-running
-   `prepare-admission-check.test.mjs` post-fix must still pass in full (61/61 pre-fix baseline
-   independently reproduced above; the AC is the post-fix re-confirmation).]**
-6. **Mirror regeneration**: after editing the canonical source, run
-   `bash plugin/scripts/sync-vendor.sh` (mutating mode) to mechanically `cp` the fixed file over
-   `plugin/scripts/wiring-coverage-check.ts`, then `bash plugin/scripts/sync-vendor.sh --check` to
-   confirm byte-identity.
-   **[wiring claim — needs AC coverage: `sync-vendor.sh --check` reports CLEAN for
-   `wiring-coverage-check` after regeneration. This is already exercised generically by
-   `plugin/test/plugin-packaging.test.mjs`'s sync-vendor check test, part of the `scripts/test.sh`
-   canonical glob, but the specific module's post-fix CLEAN result should still be an explicit AC
-   line since it's the mechanism by which the fix reaches the plugin-packaged copy.]**
+1. `prepare-milestone.js`'s ProposalReview phase (line 541 sets `_wiringCheckScript`, line 544
+   dispatches) runs the canonical CLI against `tasks/<id>.md`'s `## Proposal`/`## Acceptance
+   Criteria` text; a non-zero exit is wired (lines 546-553) to a blocking
+   `wiring-coverage-check-failed`/`needs-human` terminal outcome. **[W1]**
+2. Inside the CLI (`_runAsCli` block, lines 265-292): `extractSectionForCli` (lines 280-281) pulls
+   the `## Proposal` and `## Acceptance Criteria` sections, then
+   `checkWiringCoverage(proposalText, acText)` → `extractMechanismClaims(sectionText)` (line 120) →
+   `splitSentences(sectionText)` (**Fix 2's target**, line 102) per sentence chunk, each tested
+   against `WIRING_VERB_RE` (**Fix 1's target**, lines 50/124) and counted for ≥2 distinct backtick
+   identifiers (a "claim" = a chunk with a wiring verb AND ≥2 distinct backtick identifiers, per
+   the header heuristic).
+3. `splitSentences`'s shape is unchanged in structure: paragraph split (`\n{2,}`, line 100) →
+   `splitListAwareBlocks` (line-anchored bullet/table split, line 101, untouched by either fix) →
+   per-block punctuation split (**Fix 2's target**, line 102) → whitespace normalize/trim (lines
+   103-104).
+4. Uncovered claims become BLOCKING typed findings via `wiringFindingsFromUncovered` (line 240) in
+   the exact ledger shape `{subsystem, summary, severity:"blocker", blocking:true, evidence,
+   claimRef, disposition}` the workflow's `_upsertFindings(..., 0)` consumes — unchanged by either
+   edit; the phase's blocking count moves by this function's real return value, not an LLM
+   judgment.
+5. **Second real consumer:** `prepare-admission-check.ts:44` imports `splitSentences`; `:386`
+   (`preflightMergedMarkdownClaims`) calls it directly, so Fix 2's boundary change also flows
+   through the admission-preflight path. **[W2]**
+6. **Mirror propagation:** `bash plugin/scripts/sync-vendor.sh` (mutating) mechanically `cp`s the
+   fixed canonical file over `plugin/scripts/wiring-coverage-check.ts`; `bash
+   plugin/scripts/sync-vendor.sh --check` then byte-compares. **[W4]**
 
 ### Key design decisions
 
-- **Fix both sides of the split regex, not just the lookahead.** Verified empirically (not
-  assumed from the task text) that a lookahead-only change fails the task's own AC-2 fixture; the
-  task's literal Requested Action wording would pass code review on paper but fail the task's own
-  acceptance test at implementation time.
-- **Single source of truth, mechanical regeneration.** Edit only the `experiments/` canonical file
-  and its paired test file; never hand-edit `plugin/scripts/wiring-coverage-check.ts`. This
-  matches `sync-vendor.sh`'s own design for this module group (mechanical `cp`, `--check`
-  byte-compare, no hand-edit path) and this file's own header comment ("the ONE implementation
-  both callers share") — hand-editing the plugin copy would be silently clobbered by the next
-  non-`--check` `sync-vendor.sh` run and creates a second, driftable source of truth for no
-  benefit.
-- **Do not create `plugin/test/wiring-coverage-check.test.mjs`.** It does not exist today, only 2
-  of the 25 `SYNC_SCRIPTS`-listed modules have a paired `plugin/test/*.test.mjs`
-  (`composite-manifest-synthesis`, `prepare-admission-check`), and the module's fidelity is
-  already proven by the `sync-vendor.sh --check` byte-identity gate rather than a duplicate test
-  file. A minimal new file targeting just the two new fixtures would also need its own fixture
-  tree under `plugin/test/fixtures/preparation/`, which does not currently exist for this module —
-  added maintenance surface with no additional verification value once byte-identity is proven.
-- **Correct rather than silently follow the task's literal wording** for Fix 2, and correct rather
-  than silently no-op the task's `## Touches`/AC item 3 wording that implies a
-  `plugin/test/` mirror exists or should be created.
+- **Fix both sides of the split boundary, not just the lookahead.** Verified empirically (live
+  regex reproduction against the exact AC-2 fixture, re-run at adjudication), not assumed: the
+  lookahead-only variant reads as correct on paper but leaves the two adjacent bold claims merged
+  in one 4-identifier chunk (2 chunks total) — implementing the literal Requested Action wording
+  would ship a broken fix that fails the task's own acceptance test. The symmetric both-sides edit
+  is the minimal edit producing the correct 3-way split.
+- **Single source of truth, mechanical mirror regeneration only.** Edit the canonical file and its
+  paired canonical test file; never hand-edit `plugin/scripts/wiring-coverage-check.ts`. This
+  matches `sync-vendor.sh`'s own design for this module (its `SYNC_SCRIPTS` loop has no hand-edit
+  branch) and the module's own header self-description.
+- **Do not create `plugin/test/wiring-coverage-check.test.mjs`.** It does not exist today
+  (`plugin/test/` has 9 test files, none for this module); only 2 of the 25 `SYNC_SCRIPTS` entries
+  have a paired `plugin/test/*.test.mjs` (`composite-manifest-synthesis`,
+  `prepare-admission-check`); mirror fidelity is already proven by the `sync-vendor.sh --check`
+  byte-identity gate wired into `scripts/test.sh` via `plugin-packaging.test.mjs`; and a mirror
+  suite would need a `plugin/test/fixtures/...` tree that does not exist for this module — added
+  maintenance surface, no incremental verification value.
+- **Explicitly correct, not silently follow, the stale task-body wording** — Fix 2's
+  lookahead-only phrasing and the `## Touches` implication that the plugin mirror is hand-edited —
+  both demonstrably wrong against current source (live regex test and `sync-vendor.sh`'s design,
+  respectively). Flagged here rather than either implementing broken wording or quietly diverging.
 
 ### Defaults and failure behavior
 
-No new configuration, flags, CLI arguments, or default values are introduced. Both fixes live
-entirely inside existing regex literals; every current caller (`task-schema.ts`'s
-`checkGapSections`/`checkDirectiveSections`, `prepare-admission-check.ts`'s
-`preflightMergedMarkdownClaims`, the CLI entrypoint used by `prepare-milestone.js`) keeps its
-existing call signature and return shape. Both changes are behavior-narrowing/additive only in one
-direction: Fix 1 excludes one more phrase from matching as an ownership verb (strictly fewer
-false-positive claims); Fix 2 adds split points only (strictly never fewer claims recognized as
-separate) — the same "additive-only" property `splitListAwareBlocks`'s own header comment
-documents for its own pass. A document that was `ok:true` before the fix cannot newly fail after
-it purely from these two changes — it can only stop being mis-split/mis-matched.
+No new configuration, flags, or default values. Every current consumer keeps its existing call
+signature and return shape: `checkWiringCoverage` → `{ok, code, message, claims, uncovered}`; CLI
+JSON → `{ok, code, message, claims, findings}` (adjudicated by live execution of the CLI against
+`tasks/DIR-126-D.md`: the envelope field is `findings`, an array). Both changes move behavior in
+exactly one direction: Fix 1 excludes one more phrase from matching as an ownership verb (strictly
+fewer false-positive claims); Fix 2 adds split points only (strictly never fewer split
+opportunities) — the same "strictly additive (only ever creates MORE split points, never fewer)"
+property `splitListAwareBlocks`'s own header comment (lines 62-65) documents for itself. A document
+that was `ok:true` before cannot newly fail from these two edits alone; it can only stop being
+mis-split/mis-matched (with the caveat that finer splitting can surface a previously-hidden real
+claim — intended behavior, see Risks).
 
-Failure behavior on tooling misuse is unchanged and stays fail-closed: if the mirror-regeneration
-step is skipped, the pre-existing `sync-vendor.sh --check` gate (wired into `scripts/test.sh` via
-`plugin-packaging.test.mjs`) goes RED — a real, pre-existing, fail-closed CI signal catches a
-forgotten regeneration mechanically, not by review discipline. If either regex edit regresses an
-existing passing test in `wiring-coverage-check.test.mjs`, the same `extra.acceptance` gate the
-task already declares fails the ProposalReview phase closed, per the CLI's documented exit-2-on-
-error / non-zero-on-mismatch posture — no new failure path needs to be built.
+Failure behavior on tooling misuse stays fail-closed with no new mechanism: if mirror regeneration
+is skipped, the pre-existing `sync-vendor.sh --check` gate (wired into `scripts/test.sh` via
+`plugin-packaging.test.mjs`) goes RED **[W4]**; if either regex edit regresses an existing passing
+test, the task's own declared `extra.acceptance` command (`node --experimental-strip-types --test
+experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs`) fails closed; the CLI
+itself keeps its exit-2-on-usage/IO-error posture, so the ProposalReview phase fails CLOSED on a
+non-parseable verdict rather than silently skipping coverage.
 
 ### Compatibility
 
-No schema, config, or CLI-flag change. `checkWiringCoverage()`'s `{ok, code, message, claims,
-uncovered}` return shape and the CLI's JSON output are unchanged. All three current call paths
-(`task-schema.ts`'s two functions, `prepare-admission-check.ts`'s `preflightMergedMarkdownClaims`,
-the CLI `--task` mode used by `prepare-milestone.js`) keep working with identical inputs/outputs
-except for the two specific mis-verdicts this fix corrects. `plugin/scripts/wiring-coverage-check.ts`
-and its own two importers (`plugin/scripts/task-schema.ts`,
-`plugin/scripts/prepare-admission-check.ts` — both confirmed present and currently byte-identical
-to their canonical counterparts) pick up the fix automatically the next time `sync-vendor.sh`
-runs — no separate release step is required for this fix to be "live" on the real
-`master`-resident `prepare-milestone.js` gate, since that workflow dispatches the experiment-tree
-script by path, not the plugin-packaged copy.
+No schema, config, or CLI-flag change. `checkWiringCoverage()`'s return shape and the CLI's JSON
+output are unchanged. All three current consumer paths (`task-schema.ts`'s gap and directive checks
+**[W3]**, `prepare-admission-check.ts`'s `preflightMergedMarkdownClaims` **[W2]**, the CLI `--task`
+mode the ProposalReview phase dispatches **[W1]**) keep identical inputs/outputs except for the two
+specific mis-verdicts this fix corrects. `plugin/scripts/task-schema.ts`,
+`plugin/scripts/prepare-admission-check.ts`, and `plugin/scripts/wiring-coverage-check.ts` (all
+byte-identical to their canonical counterparts today) pick up the fix the next time
+`sync-vendor.sh` runs; no separate plugin release step is required for the fix to be live on the
+real `master`-resident gate, since `prepare-milestone.js` (lines 541/544) dispatches the
+experiment-tree script by repo-root-relative path, not the plugin-packaged copy.
 
 ### Risks
 
-- **Over-splitting from the `**` boundary.** A bold span used as pure inline emphasis mid-sentence
-  (`"This is **important** and here."`) could theoretically false-split only if the character
-  right after the closing `**` (following whitespace) were uppercase, a backtick, a quote, or
-  another `**` — ordinary inline emphasis is typically followed by lowercase continuation text.
-  Checked concretely against the 3 real `merged-markdown-claims` fixtures (only `**` occurrence is
-  a `**type:** execution` header followed by lowercase text — no false split) and against the live
-  61/61-passing `prepare-admission-check.test.mjs` run; residual risk on unseen prose is real but
-  bounded and testable, called out as a non-goal below rather than swept aside.
-- **`whose` over-exclusion.** A genuine, unusual sentence like "the module whose `owns()` method
-  determines routing" would now also be excluded from matching as an ownership claim. This is the
-  same class of accepted risk the existing `its/their/my/our/your/his/her` exclusions already
-  carry, not a new risk category.
-- **Second call site regression.** `prepare-admission-check.ts`'s reuse of `splitSentences` is a
-  real dependency the task's Requested Action does not name explicitly. Mitigated by making it an
-  explicit AC item and by the independently-reproduced 61/61 pre-fix baseline above that the
-  post-fix run must reproduce.
-- **Claim-count drift on real documents.** Finer splitting can surface a previously-hidden,
-  previously-merged claim as newly "uncovered" on some other document not examined here (or change
-  the exact claim count on `tasks/DIR-126-D.md` without changing its `ok:true` verdict). This is
-  intended, correct behavior (the checker doing its job on real content) rather than a regression
-  to suppress — mitigated by re-running the CLI against at least one real, previously-passing task
-  body post-fix as an AC item.
-- **Residual false-positive class this fix does not address (disclosed, non-goal).** Hand-applying
-  both fixes to a scratch copy and re-running the real CLI against this task's own Proposal still
-  leaves `ok:false` with several claims uncovered — background/framing sentences whose backtick
-  identifiers don't literally co-locate in any single AC bullet, even when the Proposal's own text
-  conceptually maps them elsewhere. This fix narrows the `whose`-exclusion and bold-marker-splitting
-  classes specifically; it does not attempt the broader background-sentence-vs-AC-bullet identifier
-  co-location problem, which is a separate, pre-existing `wiring-coverage-check.ts` characteristic
-  (the established workaround throughout this session has been per-document Grounding-evidence
-  bullets, not a checker change) — out of scope here.
+- **Over-splitting from the `**` boundary on ordinary inline emphasis.** A bold span used as pure
+  mid-sentence emphasis (e.g. `"This is **important** and here."`) false-splits only if the char
+  after the closing `**`+whitespace is uppercase, a backtick, a quote, or another `**` — ordinary
+  emphasis is typically followed by lowercase continuation. Checked concretely: the only `**`
+  occurrence across the 3 real `merged-markdown-claims` fixtures is the lowercase-followed
+  `**type:** execution` header (no new split), and the 61/61 `prepare-admission-check.test.mjs`
+  baseline confirms no incidental regression surface today. Residual risk on unseen prose is real
+  but bounded; disclosed, not swept aside.
+- **`whose` over-exclusion.** A genuine sentence like "the module whose `owns()` method determines
+  routing" would also stop matching — the same accepted-risk class the existing
+  `its/their/my/our/your/his/her` exclusions already carry, not a new category.
+- **Second-call-site regression** (`preflightMergedMarkdownClaims`'s reuse of `splitSentences`).
+  Mitigated by an explicit AC item **[W2]** backed by the independently-reproduced 61/61 baseline.
+- **Claim-count drift on unexamined real documents.** Finer splitting can surface a
+  previously-hidden claim as newly "uncovered" somewhere not examined here, or shift the exact
+  claim count on `tasks/DIR-126-D.md` (currently 22, `ok:true`) without changing its verdict. This
+  is the checker doing its job, not a regression to suppress — mitigated by the post-fix AC re-run
+  **[W1]** confirming the verdict stays `ok:true`.
+- **Residual heuristic class (disclosed).** Coverage still keys on backtick-identifier co-location
+  within a single sentence/AC bullet; prose claims without backtick identifiers remain
+  undetectable — a pre-existing, header-documented limitation of the checker (lines 24-29),
+  unrelated to either fix.
 
 ### Non-goals
 
-- Not adding `imports?|reuses?|reused|parses?|parsed` (or any other verb) to `WIRING_VERB_RE` — a
-  change already explicitly considered and rejected at M201/DIR-126-B, documented in the file's
-  own header comment, for reopening-already-landed-work reasons unrelated to this fix. Out of
-  scope here.
-- Not attempting real NLP/semantic claim extraction for prose without backtick identifiers — an
-  existing, explicitly documented limitation of this module (its own header NON-GOAL), unchanged
-  by this fix.
-- Not handling every Markdown-emphasis-adjacent boundary (single `*`/`_` emphasis, nested
-  bold+italic) — scoped strictly to `**` (double-asterisk bold), the only marker implicated by the
-  real incident and the task's own fixture.
-- Not modifying `splitListAwareBlocks` (bullet/table-row splitting) — unaffected by either fix,
-  already covered by prior gap tasks for that logic.
-- Not creating `plugin/test/wiring-coverage-check.test.mjs` or a new
-  `plugin/test/fixtures/preparation/` tree — see Alternatives below.
+- Not adding `imports?|reuses?|reused|parses?|parsed` (or any verb) to `WIRING_VERB_RE` —
+  explicitly considered and REJECTED at M201/DIR-126-B per the module's own header comment (lines
+  41-48): a wider verb set surfaced NEW uncovered claims against already-landed, already-audited
+  tasks, and reopening done work is a worse cost than the narrow gap.
+- Not attempting NLP/semantic claim extraction for identifier-free prose — the module header's own
+  documented NON-GOAL (lines 24-29), unchanged.
+- Not handling emphasis markers other than `**` (single `*`, `_`, `__`, nested bold-italic) —
+  scoped strictly to the marker implicated by the real incident and the task's own fixture.
+- Not modifying `splitListAwareBlocks` (bullet/table-row splitting) — unaffected by either fix.
+- Not creating `plugin/test/wiring-coverage-check.test.mjs` or a new `plugin/test/fixtures/...`
+  tree — see Alternatives #2.
 
 ### AC coverage
 
-Mapping the task's existing AC checklist against what this proposal delivers:
+Mapping delivery against the task's existing AC checklist (with two corrections to stale wording),
+plus new items closing every flagged wiring claim above:
 
-- **AC 1** (`whose` exclusion, RED/GREEN fixture) — directly covered by Fix 1; empirically
-  confirmed correct (`true`→`false` for the "whose own" sentence, real ownership sentence
-  unaffected).
-- **AC 2** (`**` splitting, RED/GREEN fixture) — directly covered by Fix 2, with the correction
-  that the underlying regex change must touch both the lookbehind and the lookahead — empirically
-  the lookahead-only variant (the task's literal current wording) fails this exact fixture.
-- **AC 3** (regression tests) — covered in the canonical
-  `experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs` only; recommend the AC
-  text explicitly drop any `plugin/test/` mirror requirement since that file does not exist and
-  creating it has no precedent for this module class (2/25, not the dominant pattern).
-- **AC 4** (re-run against a real, previously-passing task body — `tasks/DIR-126-D.md` — confirm
-  `ok:true`) — covered; this is the direct check that Fix 2's finer splitting does not newly break
-  something that was already passing.
-- **New AC item (this proposal's own claim)**: `bash plugin/scripts/sync-vendor.sh --check`
-  reports CLEAN for `wiring-coverage-check` after the canonical fix + regeneration — closes the
-  mirror-regeneration wiring claim above.
-- **New AC item (this proposal's own claim)**: `experiments/quay-perpetual-stream/test/prepare-
-  admission-check.test.mjs` still passes in full post-fix (61/61 pre-fix baseline reproduced
-  above) — closes the second-call-site wiring claim, which the task's Requested Action does not
-  currently name.
+- **AC 1** (`whose` exclusion, RED/GREEN fixture) ← Fix 1; empirically confirmed `true`→`false`
+  for "whose own" with genuine ownership sentences unaffected.
+- **AC 2** (`**` splitting, RED/GREEN fixture) ← Fix 2, with the AC text recording that BOTH the
+  lookbehind and lookahead change — the lookahead-only variant (the task's literal current wording)
+  empirically leaves the two adjacent bold claims merged (2 chunks, one with all 4 identifiers), as
+  reproduced above, so it does not pass this fixture.
+- **AC 3** (regression tests) ← canonical `wiring-coverage-check.test.mjs` only; the AC text should
+  explicitly drop any `plugin/test/` mirror requirement (that file does not exist; 2/25
+  sync-vendor-managed modules have one; the byte-identity gate covers mirror fidelity).
+- **AC 4** (re-run `wiring-coverage-check.ts --task tasks/DIR-126-D.md`, confirm `ok:true`/0
+  findings) ← closes **[W1]**; pre-fix baseline (22 claims, 0 findings) independently reproduced
+  above.
+- **AC 5** (`sync-vendor.sh --check` → `CLEAN` for `wiring-coverage-check` after mechanical
+  regeneration) ← closes **[W4]**.
+- **AC 6** (`prepare-admission-check.test.mjs`, both copies, fully green post-fix) ← closes
+  **[W2]**; 61/61 baseline independently reproduced above.
+- **AC 7** (canonical suite + task-schema consumption) ← closes **[W3]**: grep-confirmed
+  `checkWiringCoverage` import/call sites in `task-schema.ts` (lines 323/357) plus the
+  canonical suite staying green at 18/18 post-fix alongside the new RED/GREEN fixtures (RED = fails
+  on the current literals, GREEN = passes after both edits).
+- **Grounding-evidence AC item** (DIR-117 self-coverage): an exhaustive-identifier bullet listing
+  every backtick identifier this Proposal names in a mechanism-claim sentence (including
+  `wiring-coverage-check.ts`, `WIRING_VERB_RE`, `splitSentences`, `splitSentences()`,
+  `extractMechanismClaims(sectionText)`, `checkWiringCoverage(proposalText, acText)`,
+  `task-schema.ts`, `checkGapWiringCoverage`, `checkDirectiveSections`, `prepare-admission-check.ts`,
+  `preflightMergedMarkdownClaims`, `plugin/workflows/prepare-milestone.js`,
+  `prepare-milestone.js:541`, `_wiringCheckScript`,
+  `node --experimental-strip-types ${_wiringCheckScript} --task tasks/${_taskId}.md`, `_runAsCli`,
+  `extractSectionForCli`, `wiringFindingsFromUncovered`, `_upsertFindings(..., 0)`,
+  `sync-vendor.sh`, `--check`, `cmp_or_report`, `plugin/scripts/wiring-coverage-check.ts`,
+  `plugin/test/plugin-packaging.test.mjs`, `tasks/DIR-126-D.md`, `ok:true`, `whose`, `owns`,
+  `**Claim N…**`, `its/their/my/our/your/his/her`,
+  `invokes?|calls?|dispatches?|enforces?|wires?|routes?|delegates?`, `bulletsOf()`,
+  `splitListAwareBlocks()`) each confirmed real by direct source read — every one is an
+  already-real name from this document's own text, not a new invention.
 
 ### Alternatives considered and rejected
 
-1. **Hand-edit `plugin/scripts/wiring-coverage-check.ts` directly, in addition to the canonical
-   source** (the task body's literal "+ plugin/scripts/ mirror" `## Touches` wording). Rejected:
-   works against `sync-vendor.sh`'s own mechanical `cp` + `--check` design for this module group
-   (no hand-edit branch exists for `SYNC_SCRIPTS` entries); a future non-`--check` sync run would
-   silently overwrite an independently hand-edited plugin copy, and maintaining two hand-edited
-   copies reintroduces exactly the drift risk the mechanical regeneration step exists to
-   eliminate.
-2. **Create `plugin/test/wiring-coverage-check.test.mjs`** (full mirror or a minimal new file).
-   Rejected: a full mirror would fail at runtime since its `RED_FIXTURE`/CLI-mode tests read
-   fixtures under `experiments/quay-perpetual-stream/test/fixtures/preparation/`, and no
-   `plugin/test/fixtures/preparation/` tree exists; a minimal new file avoids that but duplicates
-   a pattern only 2 of 25 sync-vendor-managed modules use, for no incremental verification value
-   once `sync-vendor.sh --check` already proves plugin/canonical byte-identity.
-3. **Extend only the lookahead** (a literal reading of "extend the lookahead" in the task's own
-   Requested Action wording). Rejected: empirically proven, via live regex reproduction, to leave
-   the AC-2 fixture's two bold claims merged — this variant does not pass the task's own stated
-   acceptance test.
+1. **Hand-edit `plugin/scripts/wiring-coverage-check.ts` directly** (the task body's literal
+   `## Touches` implication). Rejected: `sync-vendor.sh`'s mutating mode mechanically `cp`s
+   canonical over plugin with no hand-edit branch — a later non-`--check` sync would silently
+   clobber an independently hand-edited plugin copy, reintroducing the exact drift the mechanical
+   step exists to prevent.
+2. **Create `plugin/test/wiring-coverage-check.test.mjs`** (full mirror or minimal). Rejected: a
+   full mirror would fail at runtime for lack of a `plugin/test/fixtures/...` tree; a minimal file
+   duplicates a 2/25 pattern for no incremental value once `sync-vendor.sh --check` proves
+   byte-identity and `plugin-packaging.test.mjs` gates it inside `scripts/test.sh`.
+3. **Extend only the lookahead** (literal reading of Requested Action item 2). Rejected:
+   empirically proven — via live regex reproduction against the exact AC-2 fixture — to leave the
+   two adjacent bold claims merged (2 chunks: `"Done."` + one 4-identifier chunk); it does not pass
+   the task's own stated acceptance test.
 4. **Broaden to a general inline-emphasis boundary rule** (`**`, `*`, `_`, `__`). Rejected as
-   over-scoped: neither the real DIR-126-D incident nor the task's own fixture motivates anything
-   beyond `**`; each additional marker adds over-splitting risk surface with no evidence requiring
-   it now.
+   over-scoped: neither the incident nor the fixture motivates anything beyond `**`; each extra
+   marker adds over-splitting risk with zero evidence requiring it now.
 5. **Treat `**` as a `splitListAwareBlocks` boundary instead of a `splitSentences` punctuation
-   boundary.** Rejected: `splitListAwareBlocks` is line-anchored (`^\s*...`), but bold markers
-   occur mid-line, so a line-anchored bullet-style regex cannot express this boundary; the
-   existing punctuation-level split in `splitSentences` is the correct layer, and is already
-   line-internal.
-6. **Do nothing, treat manual prose restructuring as standing practice.** Rejected: the defect
-   already cost one real, measured convergence round per the task's Finding, and the "explanatory
-   prose with bold-prefixed claim markers" / "whose own" phrasing pattern is a generic authoring
-   habit in this repo's own Proposal-writing convention, not a one-off unlikely to recur.
+   boundary.** Rejected: `splitListAwareBlocks` is line-anchored
+   (`/^\s*(?:[-*]\s+|\d+\.\s+|\|.*\|\s*$)/`, line 77), but bold markers occur mid-line; a
+   line-anchored regex cannot express this boundary, while `splitSentences`'s punctuation-level
+   split already operates line-internally (line 102) and is the correct layer.
+6. **Do nothing; rely on manual prose restructuring as standing practice.** Rejected: the defect
+   already cost one real, measured convergence round, and "explanatory prose with
+   `**`-prefixed claim markers" and "whose own" phrasing are generic authoring habits in this
+   repo's Proposal-writing convention, not one-off occurrences.
 
 ## Finding
 
@@ -386,7 +428,7 @@ Both defects were confirmed via direct source read (not inference) before filing
 - [ ] `experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs` gains regression tests
   for both fixtures above — the canonical test file only, no `plugin/test/wiring-coverage-
   check.test.mjs` mirror (that file does not exist on disk and this task deliberately does NOT
-  create one — see Proposal's "Alternatives considered and rejected" #2: only 2 of 24
+  create one — see Proposal's "Alternatives considered and rejected" #2: only 2 of 25
   `sync-vendor.sh`-managed modules have a paired `plugin/test/*.test.mjs`, mirror fidelity is proven
   by the byte-identity gate below, not a duplicate test suite).
 - [ ] Re-running `wiring-coverage-check.ts --task tasks/DIR-126-D.md` against the current committed
@@ -410,7 +452,7 @@ Both defects were confirmed via direct source read (not inference) before filing
   `prepare-admission-check.ts`, `splitSentences`, `## Requested action`, `## Acceptance Criteria`,
   `## Touches`, `plugin/scripts`, `plugin/test`, `WIRING_VERB_RE`, `invokes?|calls?|...`,
   `extractMechanismClaims(sectionText)`, `checkWiringCoverage`, `task-schema.ts`,
-  `checkGapSections`, `checkDirectiveSections`, `ProposalReview`, `splitSentences(sectionText)`,
+  `checkGapWiringCoverage`, `checkDirectiveSections`, `ProposalReview`, `splitSentences(sectionText)`,
   `splitSentences()`, `preflightMergedMarkdownClaims`, `tasks/DIR-126-D.md`,
   `plugin/scripts/sync-vendor.sh`, `plugin/scripts/wiring-coverage-check.ts`,
   `plugin/test/plugin-packaging.test.mjs`, `--check`, `owns()`,
@@ -429,7 +471,32 @@ Both defects were confirmed via direct source read (not inference) before filing
   `tasks/<id>.md`, `wiring-coverage-check.ts`, `wiringFindingsFromUncovered`,
   `{subsystem, summary, severity:"blocker", blocking:true, evidence, claimRef, disposition}` — all
   already-real, already-confirmed names from this document's own text (direct source read), not new
-  invention.
+  invention. Round-3 (post-factual-correction re-verification): re-ran the live CLI after correcting
+  the checkDirectiveSections/directive-path error (113df5b9), the "8 forms"→9-forms count
+  (f857b60f), the "2 of 24"→"2 of 25" SYNC_SCRIPTS count (3f046da5), the stale `checkGapSections`
+  name→`checkGapWiringCoverage` (6ef948cf), and the "absolute path"→repo-root-relative path
+  (c72e3158); the exhaustive union of every still-uncovered claim's identifiers, each confirmed
+  real by direct source read: `kind=gap`, `task-schema.ts`, `checkGapWiringCoverage`,
+  `## Requested action`, `## Proposal`, `prepare-milestone.js`, `checkDirectiveSections`,
+  `checkWiringCoverage`, `experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts`,
+  `splitSentences`, `prepare-admission-check.ts`, `preflightMergedMarkdownClaims`, `WIRING_VERB_RE`,
+  `/i`, `/\b(invokes?|calls?|dispatches?|enforces?|wires?|routes?|delegates?)\b|(?<!(?:'s|s'|its|their|my|our|your|his|her)\s)\bowns?\b/i`,
+  `wf_929eb86d-2a6`, `wf_750f506a-3d2`, `83c1958`, `**Claim N…**`, `whose`, `owns?`,
+  `(?<!(?:'s|s'|its|their|my|our|your|his|her)\s)\bowns?\b`,
+  `(?<!(?:'s|s'|its|their|my|our|your|his|her|whose)\s)\bowns?\b`, `prepare-milestone.js:541`,
+  `_wiringCheckScript = 'experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts'`,
+  `:544`, `node --experimental-strip-types ${_wiringCheckScript} --task tasks/${_taskId}.md`,
+  `wiring-coverage-check-failed`, `needs-human`, `prepare-admission-check.ts:44`, `:386`,
+  `_wiringCheckScript`, `tasks/<id>.md`, `## Acceptance Criteria`,
+  `{ok, code, message, claims, uncovered}`, `{ok, code, message, claims, findings}`,
+  `tasks/DIR-126-D.md`, `findings`, `wiring-coverage-check.ts`, `splitSentences()`,
+  `extractMechanismClaims(sectionText)`, `checkWiringCoverage(proposalText, acText)`,
+  `plugin/workflows/prepare-milestone.js`, `_runAsCli`, `extractSectionForCli`,
+  `wiringFindingsFromUncovered`, `_upsertFindings(..., 0)`, `sync-vendor.sh`, `--check`,
+  `cmp_or_report`, `plugin/scripts/wiring-coverage-check.ts`, `plugin/test/plugin-packaging.test.mjs`,
+  `ok:true`, `owns`, `its/their/my/our/your/his/her`,
+  `invokes?|calls?|dispatches?|enforces?|wires?|routes?|delegates?`, `bulletsOf()`,
+  `splitListAwareBlocks()` — all confirmed real by the same direct-source-read standard.
 
 ## Definition of Done
 
