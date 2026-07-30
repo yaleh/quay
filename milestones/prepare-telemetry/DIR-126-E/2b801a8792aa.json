@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "recordId": "2b801a8792aa",
+  "attemptId": "2b801a8792aa",
+  "generationId": "2b801a8792aa",
+  "admission": {
+    "key": ".::DIR-126-E",
+    "ownerExecutionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1",
+    "fencingToken": 0,
+    "acquiredAt": 1785413417577
+  },
+  "workspace": ".",
+  "taskId": "DIR-126-E",
+  "milestoneId": "M204",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "d18a6549cc835620d01d957b8c52d11193d3ca2600cfa6e0026af78d22e6527f",
+    "taskContract": "926fc4afa69a2b9197c4d128a04b15e4958c25599946aa488b4c7208923966ec",
+    "proposal": "d6d1c334698ca4c10234ad4fe939823d4ffb3f8fe7d2c213863727ca020ada2b",
+    "reviewPolicy": "46ec3ada793407d283218a285d9697e8c6d2c69297ac15a86977b5bea8c37189"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "split-recommended",
+    "phase": "ProposalReview",
+    "cacheable": true
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785414551596,
+  "telemetryWriteOk": true
+}
