@@ -2,7 +2,7 @@
 id: DIR-126-E
 title: Recalibrate the prepare-milestone capacity model from real telemetry
   (--capacity-report aggregation) — fifth and final child of DIR-126's split
-status: todo
+status: done
 labels:
   - milestone-candidate
   - human-steered
@@ -745,14 +745,14 @@ re-queried at Build/Verify time, never frozen).
 
 ## Acceptance Criteria
 
-- [ ] **Most important — real production wiring, not agent-prompt guidance:** a grep/import-graph
+- [x] **Most important — real production wiring, not agent-prompt guidance:** _(AUDIT 2026-07-30, session 9b3ffa31, CONFIRMED: auditor's OWN live subprocess runs — canonical AND plugin mirror `--capacity-report --workspace .` — both exit 0 with well-formed JSON (code=ok, sampleCount=29); real independent top-level dispatch block verified at milestone-preparation-check.ts:1092, same shape as --build/--metrics/--telemetry-report.)_ a grep/import-graph
   check shows `--capacity-report` is a real, reachable CLI mode on `milestone-preparation-check.ts`
   (both mirrors) — not `--selftest`-only reachability — PLUS a live subprocess invocation
   (`node milestone-preparation-check.ts --capacity-report --workspace .` against the real
   workspace root `.`) confirms the mode actually runs and produces well-formed JSON output. This item alone,
   if unmet, fails the whole
   child regardless of how many other items pass.
-- [ ] **Capacity report is reproducible:** the command, re-run against the same checked-in telemetry
+- [x] **Capacity report is reproducible:** _(AUDIT CONFIRMED: auditor's own double run cmp byte-identical; live report carries every listed field — sampleCount 29, two UNPOOLED nearest-rank P50/P85 distributions, byStratum class/highRisk/terminal/decision with contentAgent summaries, agentWork measured/measuredZero/notMeasured/wallTimeProxyMinutes, preparedOverAttempt 0.077, byDecisionKind/byTerminalReason yield, absorbedTaskPerPrepareHour 2.248, concurrentDuplicate 0, unchangedTerminal 0, terminalReuseHits 0, 8 reasoned exclusions; doc §4 regeneration is git-visible in land commit 23f8891 and "15–25 minutes" is retired there.)_ the command, re-run against the same checked-in telemetry
   + receipt artifacts, emits sample count, P50/P85 wall time and summed agent-minutes by
   `class`/`highRisk`/terminal/decision, mechanical-vs-content dispatch work,
   `prepared/attempt`, terminal/decision yield, `absorbed-task/prepare-hour`, concurrent overlap
@@ -760,19 +760,19 @@ re-queried at Build/Verify time, never frozen).
   confirmed via a real `git diff`-visible run, not session transcript prose. The
   throughput-capacity document is updated from that output and no longer asserts 15-25 minutes as
   the general default without supporting current samples.
-- [ ] **Sample provenance is real and traceable:** the regenerated throughput doc cites real sample
+- [x] **Sample provenance is real and traceable:** _(AUDIT CONFIRMED: all 26 doc-cited record IDs + 3 receipt paths match the auditor's own live-run sampleIds exactly and every file exists on disk under milestones/prepare-telemetry/. Caveat — 5 of the 26 telemetry files are currently untracked in the working tree (M205's concurrent prep generations, pending its landing); headline impact negligible (tracked-only P50 29.3m vs 29.1m; P85 identical 58.8m); deviation row written.)_ the regenerated throughput doc cites real sample
   IDs a reader can independently locate under `milestones/prepare-telemetry/`, not a bare summary
   number.
-- [ ] **Duplicate-generation minutes mean real overlap:** an overlapping two-generation sequence
+- [x] **Duplicate-generation minutes mean real overlap:** _(AUDIT CONFIRMED: C11 fixture asserts exact 1-minute pairwise intersection for an overlapping pair, zero for a sequential retry, no group for a singleton; live run reports 0 overlap minutes across all four admission.key groups.)_ an overlapping two-generation sequence
   for the same `(workspace, taskId)` produces the exact interval-intersection minutes; a sequential
   retry beginning after the prior terminal and a single generation both produce zero.
-- [ ] **Degenerate `startedAtMs===endedAtMs` receipt intervals never silently report `prepareWallTimeMs:0`:**
+- [x] **Degenerate `startedAtMs===endedAtMs` receipt intervals never silently report `prepareWallTimeMs:0`:** _(AUDIT CONFIRMED: C9 fixture — degenerate receipt excluded as "convergence-interval-degenerate" while a +1ms interval stays included (wallTime minMs=1 proves exact-equality-only firing); live run excludes M192/M195/M204 as degenerate, never as 0-duration samples.)_
   a fixture receipt with a `convergence` block where `startedAtMs === endedAtMs` (matching the real,
   live M192/M195 shape) is excluded from wall-time stats with `reason:
   "convergence-interval-degenerate"`, never included as a `0`-duration sample; a fixture receipt with
   a genuinely short but distinct interval (`endedAtMs = startedAtMs + 1`) is confirmed still
   included, proving the guard fires only on exact equality, not on short durations.
-- [ ] **`absorbed-task/prepare-hour`'s numerator is a checked-in file-presence signal, never a live
+- [x] **`absorbed-task/prepare-hour`'s numerator is a checked-in file-presence signal, never a live — (AUDIT CONFIRMED: C8 fixture — numerator moves 1→2 when absorb-entry.md is added on disk, the AND confirmed (absorb-entry.md alone does NOT qualify), zero provider calls (pure node:fs reads, no MCP/provider import anywhere in computeCapacityReport); live run numeratorCount=9, denominator=M198+M200 receipts.) never a live
   query:** a fixture confirms the count changes when an `absorb-entry.md` file is added/removed on
   disk, with no MCP/provider call made — the numerator counts distinct `taskId`s whose milestone
   directory has BOTH a `preparation.json` receipt AND an `absorb-entry.md` (the AND confirmed
@@ -780,14 +780,14 @@ re-queried at Build/Verify time, never frozen).
   that same convergence-bearing receipt subset; `absorbed-task/prepare-hour` is source-of-truth from
   checked-in artifacts only, matching the "no `~/.claude/projects/**.jsonl` parsing" bar this
   child's own Key design decisions establish.
-- [ ] **C efficiency is measured separately (honest-reading wording, matching `### AC coverage`
+- [x] **C efficiency is measured separately (AUDIT CONFIRMED: positive fixture — recomputations=1 with null contentAgentMs routed to notMeasured + wallTimeProxy (never fabricated), a correct reuse-terminal is a hit (measuredZero, terminalReuseHits=1); "unknown" fixture asserts estimatedAvoidedAgentMinutes is the literal "unknown"; live report measuredZero=0 reported honestly.) (honest-reading wording, matching `### AC coverage`
   item 5):** an identical hash/policy cacheable terminal that is recomputed increments
   `unchangedTerminalRecomputations`; its observed wasted content-agent work is reported as the exact
   measured value when `contentAgentMs` is non-null, and via the `notMeasured`/`wallTimeProxyMinutes`
   rule (never a fabricated exact number) when it is `null` — a correct `reuse-terminal` increments
   the hit count and records zero content agents, exact and schema-guaranteed. Estimated avoided
   minutes are either reproducibly labeled/model-derived or `unknown`.
-- [ ] **Unchanged-terminal recomputation groups by the `hashes.*` 4-tuple, NEVER terminal-shape
+- [x] **Unchanged-terminal recomputation groups by the `hashes.*` 4-tuple, NEVER terminal-shape — (AUDIT CONFIRMED: the negative fixture — two records sharing a cacheable terminal shape but with DIFFERENT hashes.* — asserts unchangedTerminalRecomputations stays 0 and groups=[] ; passes.) NEVER terminal-shape
   alone (negative fixture):** two records that share a cacheable terminal SHAPE (e.g. both
   `ProposalReview/split-recommended`) but carry DIFFERENT `hashes.{charter,taskContract,proposal,
   reviewPolicy}` are confirmed NOT counted as an avoidable recomputation — a fixture asserting
@@ -795,18 +795,18 @@ re-queried at Build/Verify time, never frozen).
   item above; this pins the false-positive the Key-decisions section warns about: with 12 live
   `split-recommended` records, shape-only grouping would misclassify every legitimate
   between-rounds content revision as wasted work.)
-- [ ] **Two wall-time distributions are reported separately, never pooled:** a fixture confirms the
+- [x] **Two wall-time distributions are reported separately, never pooled:** _(AUDIT CONFIRMED: fixture asserts exactly two labeled blocks (receiptPrepareMs/telemetryProxyMs) with distinct P50s — would fail a blended implementation; live report carries both blocks with an explicit no-pooling note.)_ a fixture confirms the
   receipt-side `prepareWallTimeMs` distribution and the telemetry-side proxy
   (`recordedAtMs − admission.acquiredAt`) distribution appear as two distinctly-labeled blocks in
   the report — a fixture that would FAIL if an implementer blended both sources into one P50/P85
   (matching the Chosen-mechanism decision and the rejected "pool both wall-time sources"
   Alternative).
-- [ ] **Report output is byte-reproducible across consecutive runs:** a fixture runs
+- [x] **Report output is byte-reproducible across consecutive runs:** _(AUDIT CONFIRMED: auditor's own two `--out` runs over the same tree are cmp byte-identical; no generatedAtMs key in the payload (verified programmatically); canonical and plugin stdout also byte-identical.)_ a fixture runs
   `--capacity-report ... --out a.json` and then `--out b.json` over the SAME checked-in tree and
   confirms `a.json` and `b.json` are byte-identical (`cmp`/`diff` empty) — no `generatedAtMs` or
   wall-clock timestamp leaks into the payload, so the report is mechanically diff-able, not merely
   value-stable (the specific falsification for the byte-reproducible-output decision).
-- [ ] **Feedback-efficiency inputs are exported, Prepare-scoped, to the extent the current schema
+- [x] **Feedback-efficiency inputs are exported, Prepare-scoped, to the extent the current schema — (AUDIT CONFIRMED: live report exports cold/resume proxy + contentAgent buckets per stratum, notMeasured/wallTimeProxyMinutes, and the raw absorbed-task numerator/denominator fields (numeratorTaskIds, denominatorHours, denominatorReceiptPaths); schema limits — no token counts/novelty — disclosed in doc §4 "Honest limits".) to the extent the current schema
   supports (honest-reading wording, matching `### AC coverage` item 6):** the report includes
   cold/resume/reuse-terminal agent-minute distributions where measurable (`notMeasured`/
   `wallTimeProxyMinutes` where not, per the current telemetry schema's real limits — token counts
@@ -814,51 +814,51 @@ re-queried at Build/Verify time, never frozen).
   a genuine open item, not asserted solved here) and the raw numerator/denominator fields needed to
   compute Prepare escape rate later. It does not claim end-to-end verified value or an Execute escape
   rate from Prepare-only evidence.
-- [ ] The machine-readable report preserves raw sample IDs, stage/terminal strata, exclusions, and
+- [x] The machine-readable report preserves raw sample IDs, stage/terminal strata, exclusions, and — (AUDIT CONFIRMED: live report JSON preserves sampleIds + perPopulation sampleIds, perTask telemetryRecordIds, byStratum strata, recomputation groupRecordIds, exclusions[] with reasons, and estimatedAvoidedAgentMinutes="unknown" — machine-consumable without scraping prose.) and
   unknowns so a later Prepare-to-post-Land evaluation can consume it without scraping the
   regenerated prose document.
-- [ ] **`interval-fields-missing` is a partial exclusion, not a full one:** a fixture telemetry
+- [x] **`interval-fields-missing` is a partial exclusion, not a full one:** _(AUDIT CONFIRMED: fixture asserts the exclusion carries partial:true, the record is still counted in sampleCount=6, byDecisionKind.cold=3, and agentWork.notMeasured.count=3 — out of overlap analysis only.)_ a fixture telemetry
   record missing `admission.acquiredAt` or `recordedAtMs` confirms it is excluded from overlap
   analysis specifically (`reason: "interval-fields-missing"`) while still contributing to
   decision/agent-work stats elsewhere in the report — not dropped from the sample count entirely.
-- [ ] **Populations are best-effort joined, never required-paired:** a fixture with a receipt-only
+- [x] **Populations are best-effort joined, never required-paired:** _(AUDIT CONFIRMED: C6 fixture — join.paired=[], receipt-only samples still give wallTime.receiptPrepareMs.n=3, telemetry-only samples still give yield.attempts=3 and agentWork stats.)_ a fixture with a receipt-only
   sample (no matching telemetry record for that `(taskId, milestoneId)`) confirms it still
   contributes wall-time stats; a fixture with a telemetry-only sample (no matching receipt)
   confirms it still contributes decision/agent-work stats — neither is silently dropped from its
   own population for lacking its pair.
-- [ ] **`_walkJsonFiles` is a single shared recursion primitive:** a fixture confirms both
+- [x] **`_walkJsonFiles` is a single shared recursion primitive:** _(AUDIT CONFIRMED: source scan — definition at :163, exactly two call sites at :191 (queryTelemetryReport) and :274 (computeCapacityReport); C2 fixture asserts both function bodies reference it; nested-layout fixture traverses via it.)_ a fixture confirms both
   `queryTelemetryReport` and `computeCapacityReport` call the same `_walkJsonFiles(root)` helper for
   directory traversal, not two independent directory-walk implementations.
-- [ ] **`validateTelemetryRecord` is reused, not reimplemented:** a fixture confirms
+- [x] **`validateTelemetryRecord` is reused, not reimplemented:** _(AUDIT CONFIRMED: imported at :26 from proposal-convergence.ts; C3 fixture — a reuse-terminal record violating contentAgentDispatchCount===0 && contentAgentMs===0 lands in exclusions[] with reason "reuse-terminal-invalid" and the validator's own message.)_ a fixture confirms
   `computeCapacityReport` calls the existing `validateTelemetryRecord` to classify a malformed
   record into `exclusions[]` — including a `reuse-terminal` record violating
   `contentAgentDispatchCount === 0 && contentAgentMs === 0`, which is rejected with
   `{code: "reuse-terminal-invalid", message}` and routed to `exclusions[]` — never a second,
   parallel validation routine.
-- [ ] **`computeConvergenceMetrics`/`computeMetricsForReceipt` are reused for wall time, not
+- [x] **`computeConvergenceMetrics`/`computeMetricsForReceipt` are reused for wall time, not — (AUDIT CONFIRMED: C4 fixture — the report's receipt-side p50Ms equals computeMetricsForReceipt's OWN output (240000) for the identical receipt; no second derivation in source.) not
   re-derived:** a fixture confirms `computeCapacityReport` calls the existing
   `computeConvergenceMetrics`/`computeMetricsForReceipt` to get `prepareWallTimeMs` per receipt,
   not a second, independent wall-time computation.
-- [ ] **`CACHEABLE_TERMINALS` is imported, not hand-copied:** a fixture that changes an entry in
+- [x] **`CACHEABLE_TERMINALS` is imported, not hand-copied:** _(AUDIT CONFIRMED: C5 fixture mutates the REAL imported array — Receipt/prepared reclassification flips recomputations 0→1, then restored; auditor source scan found no hand-copied allowlist literal (isCacheableTerminalShape uses CACHEABLE_TERMINALS.some(); the split-recommended literals in the file are yield-reason counters/comments, not cacheability).)_ a fixture that changes an entry in
   the real, imported `CACHEABLE_TERMINALS` (from `proposal-convergence.ts`) and observes
   `computeCapacityReport`'s unchanged-terminal-recomputation logic pick up that change confirms a
   real import, not a duplicated literal that could silently drift from the source of truth.
-- [ ] **`queryTelemetryReport`'s existing behavior is unchanged:** a fixture confirms
+- [x] **`queryTelemetryReport`'s existing behavior is unchanged:** _(AUDIT CONFIRMED: C7 regression fixture — nested layout, silent-skip of malformed JSON, {ok, code} return shape, and embedded-milestoneId filter all intact; 56 pre-existing tests stay green within the 80/80 pass.)_ a fixture confirms
   `--telemetry-report <milestoneId>`'s pre-existing output shape/behavior is byte-for-byte the same
   before and after this child's diff — `_walkJsonFiles`'s extraction is a pure refactor of shared
   traversal logic, never a behavior change to the existing reader.
-- [ ] **Aggregation spans all task IDs under the glob root by default, never one hardcoded
+- [x] **Aggregation spans all task IDs under the glob root by default, never one hardcoded — (AUDIT CONFIRMED: AC2 fixture — TASK-A and TASK-B both appear in perTask with correct counts; live run — 4 distinct telemetry taskIds + receipt taskIds all broken down per-task/per-stratum.) never one hardcoded
   `taskId`:** a fixture telemetry population containing >= 2 distinct `taskId`s under
   `--telemetry-glob` confirms both task IDs appear in `computeCapacityReport`'s per-task/
   per-stratum breakdown — the real tree already holds 4 distinct task IDs' worth of telemetry, so a
   design that silently assumed a single task would under-report the actual available sample pool.
-- [ ] **Insufficient-sample honesty:** a fixture with fewer than 3 samples produces the explicit
+- [x] **Insufficient-sample honesty:** _(AUDIT CONFIRMED: fixtures — below-gate produces the typed insufficient-samples result with wallTime undefined (combined AND per-population gate, --min-samples boundary, empty-tree case, CLI exit-0 semantics).)_ a fixture with fewer than 3 samples produces the explicit
   `insufficient-samples` result, not a misleadingly precise distribution.
-- [ ] Canonical and `plugin/` mirrors of `milestone-preparation-check.ts` are byte-identical —
+- [x] Canonical and `plugin/` mirrors of `milestone-preparation-check.ts` are byte-identical — _(AUDIT CONFIRMED: auditor's own `cmp` reports identical and `sync-vendor.sh --check` exits 0 CLEAN with the module verified identical.)_ —
   `sync-vendor.sh --check` (the module is in `sync-vendor.sh`'s `SYNC_SCRIPTS` array; no test-file
   mirror parity is claimed — `plugin/test/` mirrors are not part of this repo's sync convention for
   this module, matching 23 of 25 `SYNC_SCRIPTS` entries).
-- [ ] **Grounding evidence for the Problem-framing/Chosen-mechanism claims above (added for
+- [x] **Grounding evidence for the Problem-framing/Chosen-mechanism claims above (AUDIT CONFIRMED: auditor's direct source read verified the key identifiers real in the current tree — computeCapacityReport, _walkJsonFiles, isCacheableTerminalShape, the CACHEABLE_TERMINALS + validateTelemetryRecord imports at :26, checkPreparation (now at :805 after additive growth from the :294 cited at authoring), and admission.acquiredAt/recordedAtMs/admission.key/hashes.* on live records; telemetry corpus verified 26 records / 4 taskIds / 6 terminal shapes.) (added for
   wiring-coverage completeness):** confirmed via direct source read — every identifier below is an
   already-real, already-landed name confirmed present in the current tree (DIR-126-A/B/C/D's own
   landed code, or this file's own Chosen mechanism), not a new invention: `contentAgentDispatchCount`,
@@ -897,17 +897,17 @@ re-queried at Build/Verify time, never frozen).
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply. Per DIR-026
 Reading A, source code, prompt text, or a same-generation self-test are necessary but insufficient.
 
-- [ ] Landed on `master` under human-steered discipline.
-- [ ] A real, non-fixture `--capacity-report` run against real post-[[DIR-126-D]] telemetry is
+- [x] Landed on `master` under human-steered discipline. _(AUDIT CONFIRMED: land commit 23f8891 is on master; task carries the human-steered label.)_
+- [x] A real, non-fixture `--capacity-report` run against real post-[[DIR-126-D]] telemetry is — (AUDIT CONFIRMED: auditor's own end-to-end live run exits 0 with code=ok over the real workspace (29 samples); doc §4 regenerated in the land commit from exactly that output shape.) is
   exercised end to end with command output, not asserted, and the throughput doc is regenerated
   from that real output.
-- [ ] At least three post-change real preparation generations of different terminal shapes
+- [x] At least three post-change real preparation generations of different terminal shapes — (AUDIT CONFIRMED: live run — 26 real telemetry records spanning 6 distinct terminal shapes across 4 taskIds, clearing the ≥3 bar in aggregate under the charter's cross-task reading.)
   (inherited from the parent's own DoD) are the real sample set this child's report is proven
   against — not a synthetic-only demonstration.
 - [ ] The real sample set includes or is supplemented by C's real `reuse-terminal` proof, and the
   report demonstrates zero content-agent work for that decision without weakening independent
   review for cold/resume generations.
-- [ ] A fresh independent audit confirms the report's numbers trace back to real, checked-in
+- [x] A fresh independent audit confirms the report's numbers trace back to real, checked-in — (AUDIT: this audit IS the fresh independent confirmation — every doc figure was re-derived by the auditor's own live run and traces to real on-disk artifacts, not session prose; caveat — 5 of 26 telemetry samples are untracked in the working tree pending M205's landing (headline impact ≤0.2m at P50, P85 identical), deviation row written.) checked-in
   telemetry artifacts, not session prose or hand-edited documentation.
 
 ## Human verification when exp5 marks this DIR done
@@ -927,3 +927,22 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
 - `plugin/scripts/milestone-preparation-check.ts`
 - `experiments/quay-perpetual-stream/test/milestone-preparation-check.test.mjs`
 - `docs/proposals/quay-milestone-workflow-throughput-capacity-model.md`
+
+## Execution record
+
+- **Milestone:** M204
+- **Iteration count:** 1 (iteration-0; direct-to-master Build, no separate worktree/branch)
+- **Realized Δv:** 0 (v̂>0 — capabilityGrowth, deliverable, method-infra surface; no chart-2
+  product-surface cell moves)
+- **Merge commit:** `23f8891` (on `master`)
+- **Audit verdict:** CONCERNS — all 23 AC items CONFIRMED by a fresh-context adversarial acceptance
+  audit (`milestones/M204/audits/iteration-0-acceptance-audit.md`, session
+  `9b3ffa31-5bd7-4274-86f3-74def2f0a1f1`); two disclosed, non-refuting concerns — DoD item 4 (live
+  `reuse-terminal` proof) honestly left `- [ ]` until a real sample lands naturally (0/26 live
+  records; fixture-proven and schema-guaranteed, never synthesized), and 5 of 26 provenance samples
+  untracked pending M205's landing (headline impact ≤0.2m at P50, P85 identical; machine-caught
+  deviation rows on dashboard.md). Mechanical gate `it0-dod-check.sh` exits 0 (12/12 clauses).
+- **Outcome:** done — `--capacity-report` aggregation landed on both byte-identical mirrors,
+  throughput doc §4 regenerated from a real live run with traceable sample provenance, 80/80 tests;
+  Land/ABSORB completed 2026-07-30 at `milestone_counter` 200→201; full evidence at
+  `milestones/M204/` (absorb-entry, audit, iteration report).
