@@ -1,0 +1,76 @@
+{
+  "taskId": "DIR-126-E",
+  "milestoneId": "M204",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M204-dir126e-capacity-report.md",
+  "planFile": "docs/plans/M204-dir-126-e.md",
+  "ledgerFile": "milestones/M204/proposal-ledger.json",
+  "telemetryFile": "milestones/prepare-telemetry/DIR-126-E/454f7ead5eb4.json",
+  "hashes": {
+    "proposal": "51a89b3ae6fb940b2448c6b5a76dffc970bc20a536729ccebb00263a8ae6fae6",
+    "charter": "d18a6549cc835620d01d957b8c52d11193d3ca2600cfa6e0026af78d22e6527f",
+    "plan": "ee520cc45868d673900c64a5c5b7389ac8acf1a5a3ab8ded889712cfd6bb4424",
+    "sources": {
+      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "185220e4c966ec2cb3e9d081a6a71f605e6f4da9f87ae8244c44f58ba317b6ff",
+      "plugin/scripts/milestone-preparation-check.ts": "185220e4c966ec2cb3e9d081a6a71f605e6f4da9f87ae8244c44f58ba317b6ff",
+      "experiments/quay-perpetual-stream/scripts/proposal-convergence.ts": "0790dc57027bb821870626083437f9b83f35290a474f40dbc004b6ee30208042",
+      "plugin/scripts/sync-vendor.sh": "00fd766342fe9230165aa483346ea4b3d20c905d425c9978022acc68af17cb05",
+      "docs/proposals/quay-milestone-workflow-throughput-capacity-model.md": "281f916e4c7c6702315969488a7157c366422c30a0c7a6f8f8566f89c5e2b1f0",
+      "experiments/quay-perpetual-stream/test/milestone-preparation-check.test.mjs": "0c0bf778236c1317fb58970fb179cdd1e314f22e56cca77c4df540d6b3686820"
+    },
+    "ledger": "af53abbf5c93576e84c6625fb740c660c9ea770cc37286295ef7f13fd5c8b1d5",
+    "telemetry": "e62199b75d3f828c0d3d4221fc9d7b2cb218c00618d55b46b4c90b65e1c9fa56"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [
+    "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts",
+    "plugin/scripts/milestone-preparation-check.ts",
+    "experiments/quay-perpetual-stream/test/milestone-preparation-check.test.mjs",
+    "docs/proposals/quay-milestone-workflow-throughput-capacity-model.md",
+    "docs/plans/M204-dir-126-e.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planAuthor": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 0,
+    "proposalReviewRounds": 1,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785436118668,
+    "endedAtMs": 1785436118668,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "8f7caab558930534"
+      }
+    ]
+  }
+}

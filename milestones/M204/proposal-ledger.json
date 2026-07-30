@@ -1,0 +1,72 @@
+[
+  {
+    "id": "f2ef3171",
+    "subsystem": "capacity-report/estimatedAvoidedAgentMinutes",
+    "summary": "The 'comparable, same-class/highRisk, non-reuse-terminal sample population' precondition for emitting a non-'unknown' estimatedAvoidedAgentMinutes is never given an exact predicate in either Chosen mechanism item 10 or AC item 7 ('reproducibly labeled/model-derived or unknown'), leaving implementer latitude in what counts as comparable.",
+    "severity": "minor",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "plan",
+    "evidence": "Proposal Chosen mechanism item 10: 'computed only when a comparable, same-class/highRisk, non-reuse-terminal sample population exists; otherwise the literal string \"unknown\"'. AC item 7: 'Estimated avoided minutes are either reproducibly labeled/model-derived or unknown.' No definition of 'comparable' (minimum size? same terminal distribution? same stratum cell?) appears anywhere. Verified the safe default ('unknown') makes the worst case under-use, not a fabricated number, consistent with the Proposal's 'savings are never fabricated' principle.",
+    "claimRef": "Chosen mechanism item 10 / AC item 7 (C-efficiency)",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "a9dd902b",
+    "subsystem": "capacity-report/output-schema",
+    "summary": "The mechanism promises the percentile method is named in the output ({..., method: \"nearest-rank\"}) but no AC explicitly demands the method label; the convention is pinned only behaviorally by fixture P50/P85 values plus the byte-reproducibility AC.",
+    "severity": "nit",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "plan",
+    "evidence": "Chosen mechanism item 2 specifies the distribution block '{n, minMs, p50Ms, p85Ms, maxMs, method: \"nearest-rank\"}' ('named in the output'); AC item 2 enumerates required output fields (sample count, P50/P85, strata, yields, exclusions) without 'method'; AC item 12 requires raw IDs/strata/exclusions/unknowns only. Byte-identity AC (cmp a.json b.json) plus value fixtures would catch interpolation drift in practice, so this is a wording gap, not a behavior gap.",
+    "claimRef": "Chosen mechanism item 2 vs AC items 2/12",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "0c25c5a8",
+    "subsystem": "dod/reuse-terminal-proof",
+    "summary": "The DoD clause 'the real sample set includes or is supplemented by C's real reuse-terminal proof' may be unsatisfiable by this child: 0/17 live records are reuse-terminal (all cold, verified), and the Proposal's declared fallback is to document the absence rather than produce the proof — an acknowledged tension between inherited DoD wording and the disclosed honest-empty path.",
+    "severity": "nit",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "accepted-risk",
+    "evidence": "Live extraction: decisionKind counts {cold: 17} over milestones/prepare-telemetry (17 records, up from the Proposal's 14-record snapshot). Proposal Defaults table row: 'the DoD clause requiring a real reuse-terminal proof is explicitly flagged as a residual open item (Risks), satisfied by a real sample landing, never synthesized here'; Risks: 'Execute-time work must either wait for a reuse-terminal sample to occur naturally or explicitly document its absence as a residual gap, never fabricate one'; AC item 7 mirrors this. The behavior is fail-honest (empty measuredZero bucket), disclosed in three places, and the validator (@462-464, verified) guarantees correctness if/when a sample lands — a data-availability residual, not a design defect.",
+    "claimRef": "DoD clause 4 / Risks para 1 / Defaults table last row",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "72ccb941",
+    "subsystem": "scope/split-signal",
+    "summary": "Corpus drift since the Proposal's snapshot (14 -> 17 records; DIR-126-E's own split-recommended records 4/5 -> 5/6) strengthens the live split-recommended signal the Proposal pre-registered as worth weighing; independent structural assessment nonetheless concurs with mechanismCount=1 — the facets are interdependent passes of one aggregation function over two joined populations, with the one separable seam (code vs doc edit) already split into two Requested-action items.",
+    "severity": "nit",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "accepted-risk",
+    "evidence": "Live extraction now shows 17 records / 4 taskIds / 3 terminal shapes (split-recommended x15, preflight-rejected x1, wiring-coverage-check-failed x1), DIR-126-E 6 records (5 split-recommended + 1 preflight-rejected) vs the Proposal's 14-record / 5-record / '4 of 5' snapshot. Proposal Risks: 'If a further real generation of this task also recommends split, that should be weighed as a stronger signal than this Proposal treats it, not re-litigated identically again', and documents the non-monotonic oscillation of this mechanical signal (gap-prepare-milestone-split-decision-no-finality, itself 3-4 split records). Duplicate-overlap detection is only interpretable alongside the unchanged-terminal-recomputation grouping it shares context with; all facets share one traversal, one join, and one exclusion array, and each already carries its own falsifiable AC fixture, so further splitting would fragment one function's test surface without independent landability.",
+    "claimRef": "Risks para 2 / Alternatives 'Split this child further' / Problem framing corpus enumeration",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "d895a333",
+    "subsystem": "ac/feedback-efficiency",
+    "summary": "AC item 11 (feedback-efficiency inputs) is explicitly partial: token counts and finding novelty/recurrence are not confirmed present in the telemetry schema and are honestly flagged as open, with schema extension declared a non-goal — a bounded partial-coverage item whose missing inputs are future work, not a silently dropped obligation.",
+    "severity": "nit",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "backlog",
+    "evidence": "AC item 11: 'token counts and finding novelty/recurrence are NOT confirmed present in the schema as of this Proposal and are a genuine open item, not asserted solved here... It does not claim end-to-end verified value or an Execute escape rate from Prepare-only evidence.' Non-goals: 'Not extending proposal-convergence.ts's telemetry writer... all legitimate future gap-* follow-ups.' AC coverage item 8 restates the same partial coverage. Verified the frozen schemaVersion: 2 on all 17 live records and no token field in the write paths at proposal-convergence.ts:653-665/748-751.",
+    "claimRef": "AC item 11 / AC coverage item 8 / Non-goals",
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  }
+]

@@ -705,9 +705,13 @@ circumstance. LOC/duration remain descriptive output only, never a productivity 
 
 ## Plan
 
-N/A — directive-class child resolved via a human-steered milestone. Depends on [[DIR-126-A]],
-[[DIR-126-B]], [[DIR-126-C]], [[DIR-126-D]] all being `done`, and on >= 3 real post-D preparation
-generations existing.
+Checked milestone Plan: `docs/plans/M204-dir-126-e.md` (M204, base revision `ee3c374`, authored
+2026-07-30). Depends on [[DIR-126-A]] (landed `a0aba1f`/M200), [[DIR-126-B]] (landed
+`528897c`/M201), [[DIR-126-C]] (landed `8c9d114`/M202), and [[DIR-126-D]] (landed
+`6a24bf3`/M203) all being `done`, and on >= 3 real post-D preparation generations existing (met
+in aggregate at Plan authoring: 17 checked-in telemetry records across 4 distinct task IDs
+spanning 3 distinct terminal shapes, plus 8 `milestones/M*/preparation.json` receipts —
+re-queried at Build/Verify time, never frozen).
 
 ## Finding
 
