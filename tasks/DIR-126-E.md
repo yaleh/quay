@@ -20,194 +20,195 @@ extra:
 
 ## Proposal
 
-Replace `docs/proposals/quay-milestone-workflow-throughput-capacity-model.md`'s flat "15-25 minute"
-Prepare planning assumption with a real, reproducible measured distribution, computed by a checked-
-in aggregation command over [[DIR-126-D]]'s committed telemetry records and the pre-existing
-`milestones/M*/preparation.json` receipt corpus. Fifth and final child of DIR-126's 5-way split.
-Depends on [[DIR-126-D]] (aggregation has nothing telemetry-side to aggregate until telemetry
-exists and has been exercised in production) and structurally on >= 3 real post-D preparation
-generations existing (this task's own DoD requirement).
+Replace `docs/proposals/quay-milestone-workflow-throughput-capacity-model.md`'s flat "15–25 minutes"
+(from one DIR-117 sample, "22m 21s") Prepare-stage planning assumption with a real, reproducible,
+additive `--capacity-report` aggregation mode over the two artifact populations DIR-126-D and its
+predecessors already produce and check in: `milestones/prepare-telemetry/**/*.json` records and
+`milestones/M*/preparation.json` receipts. Fifth and final child of DIR-126's 5-way split; depends on
+DIR-126-A/B/C/D being landed (confirmed: `a0aba1f`/M200, `528897c`/M201, `8c9d114`/M202,
+`6a24bf3`/M203) and structurally on real post-D telemetry existing to aggregate.
 
-### Problem framing (verified live against the current tree, 2026-07-30)
+### Problem framing (re-verified live against the current tree, 2026-07-30)
 
-- `docs/proposals/quay-milestone-workflow-throughput-capacity-model.md` §4 (lines ~108-124) states a
-  flat "**15-25 minutes**" Prepare planning range, sourced from exactly one real observation (DIR-117,
-  22m 21s), folded into "≈85-95 minutes per task." No distribution, sample count, or provenance
-  anywhere in the document. Confirmed by direct read; not carried over from any other source.
-- `experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts` is 587 lines, confirmed
-  **byte-identical** to `plugin/scripts/milestone-preparation-check.ts` (`diff` empty, re-run live).
-  `grep -n "capacity-report\|P50\|P85"` returns zero matches — no aggregation mode exists today. The
-  file already exports `queryTelemetryReport({workspace, milestoneId})` (line 159, CLI-wired at
-  `--telemetry-report <milestoneId>`), which recurses `milestones/prepare-telemetry/**/*.json` via an
-  inline `walk()` (line 162), filters to one `milestoneId`, and returns matching records raw. It
-  **silently drops malformed JSON with a bare `catch {}`** and computes no percentiles, ratios, or
-  waste classes — a materially weaker bar than what real aggregation requires.
-- `milestones/prepare-telemetry/DIR-126-E/` currently holds **two** real `schemaVersion: 2` records
-  (`2a107fcb5cc9.json`, `2b801a8792aa.json`), both `taskId: "DIR-126-E"`, `milestoneId: "M204"`,
-  `decision.kind: "cold"`, `contentAgentDispatchCount: null`, `contentAgentMs: null`, and both
-  terminating `needs-human` / `split-recommended` at `ProposalReview`. Both are this very task's own
-  prior generations writing their own telemetry — direct, in-session confirmation that DIR-126-D's
-  telemetry writer fires reliably in live dispatch. Two samples is still short of this task's own
-  ≥3-sample DoD bar, and both share the identical terminal — the eventual real sample set needs
-  terminal-shape diversity, not just count. **Notably, two independent prior generations of this
-  exact task both recommended `split` at ProposalReview** — a live signal this proposal must not
-  paper over (see Risks).
+- `docs/proposals/quay-milestone-workflow-throughput-capacity-model.md` §4 states a flat
+  "**15–25 minutes**" Prepare range folded into "≈85–95 minutes per task," sourced from exactly one
+  real observation (DIR-117, "22m 21s") — no distribution, sample count, or provenance anywhere in
+  the document. Confirmed by direct read.
+- `experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts` is confirmed 587 lines
+  and byte-identical to `plugin/scripts/milestone-preparation-check.ts` (`diff` empty, re-run live).
+  `grep -n "capacity-report\|P50\|P85"` returns zero matches in either file — no aggregation mode
+  exists today. The file already exports `queryTelemetryReport({workspace, milestoneId})` (line 159),
+  which recurses `milestones/prepare-telemetry/**/*.json` via an inline `walk()` closure (line 162),
+  filters to one `milestoneId`, silently drops malformed JSON with a bare `catch {}`, and computes no
+  percentiles, ratios, or waste classes.
+- **The live telemetry picture has moved since this task's own body was last written, and it must be
+  treated as a moving target, not a fixed snapshot.** A direct `find` + field read, run just now,
+  shows `milestones/prepare-telemetry/` holds **8 real `schemaVersion: 2` records across 4 distinct
+  task IDs**: `DIR-126-E` (4 records — 3× `ProposalReview`/`split-recommended`, 1×
+  `PreflightContent`/`preflight-rejected`, i.e. DIR-126-E's own sample set already spans two distinct
+  terminal shapes on its own), `gap-wiring-coverage-check-whose-own-and-bold-marker-splitting`/M205
+  (2× `ProposalReview`/`split-recommended`), `gap-prepare-milestone-split-decision-no-finality`/M206
+  (1× `ProposalReview`/`split-recommended`), and
+  `gap-dir126d-deferred-phase-timing-recurrence-tracking`/M207 (1× `ProposalReview`/
+  `wiring-coverage-check-failed`). Across all 8, `decision.kind` is `"cold"` and
+  `contentAgentDispatchCount`/`contentAgentMs` are `null`. Three distinct terminal shapes already
+  exist in the corpus — materially closer to the DoD's "at least three... of different terminal
+  shapes" bar than a stale single-task reading would suggest — but this design must not assume any
+  particular task's sample count or terminal mix stays fixed: it aggregates across every task under
+  the glob root by default, and the exact sample set used for the real regression proof must be
+  captured at Execute time, not assumed from this Proposal's drafting-time snapshot.
+- **Zero `resume` or `reuse-terminal` records exist yet anywhere in the corpus** (confirmed live
+  across all 8 files: every one is `decision.kind === "cold"`). AC item 5's "reuse-terminal
+  zero-content-agent proof" and the DoD's "real `reuse-terminal` proof" clause currently have no real
+  sample to point to; the design accounts for this with an explicit `insufficient-samples`-style
+  honesty path (see Defaults) and flags it as a residual open item (see Risks and AC coverage) rather
+  than assuming a `reuse-terminal` sample will exist by Execute time.
 - Direct inspection of all 8 currently-committed `milestones/M*/preparation.json` receipts (M192,
-  M195, M197, M198, M200, M201, M202, M203), re-run live via a small Node script reading each
-  receipt's `.convergence` and `.telemetryFile` fields, confirms: a non-null `convergence` block is
-  present for M192, M195, M198, M200 and absent (`null`) for M197, M201, M202, M203; **`telemetryFile`
-  is `undefined` on all 8** — zero of the historical receipts pair with a telemetry record. A design
-  that requires telemetry↔receipt pairing as a precondition for any statistic would report
-  `insufficient-samples` against the *entire* real M192-M203 baseline, not merely the "post-D" window
-  — this rules out "pairing required" as a viable design.
+  M195, M197, M198, M200, M201, M202, M203, re-checked live) confirms a non-null `.convergence` block
+  on M192/M195/M198/M200 and `null`/absent on M197/M201/M202/M203; **`telemetryFile` is absent
+  (`undefined`) on all 8** — zero of the historical receipts pair with a telemetry record today. A
+  design requiring telemetry↔receipt pairing as a statistic precondition would report
+  `insufficient-samples` against the entire real M192–M203 baseline this task exists to characterize.
+- A concrete correctness trap, confirmed live: of the 4 convergence-bearing receipts, **M192 and M195
+  both have `startedAtMs === endedAtMs`** (`1785238767187`/same; `1785256169477`/same) — a degenerate
+  placeholder, not a genuine near-instant Prepare run. M198 and M200 have real, distinct intervals
+  (`1785301300000→1785314458203`, `1785329024996→1785330281481`). This is acute because **M195 is the
+  exact receipt DIR-126's own parent Finding measured at ~80 real minutes** (57 of them PlanCheck) —
+  naively subtracting would report `0ms` for the slowest documented real generation on record,
+  directly undermining the reason this child exists.
 - `computeConvergenceMetrics` (`proposal-convergence.ts:188`, exported) is already reused by
-  `computeMetricsForReceipt` (`milestone-preparation-check.ts:118`) to derive
-  `prepareWallTimeMs`/`proposalReviewRounds`/`blockingFindingYield`/`proposalChurnRatio` from a
-  receipt's own `convergence.{startedAtMs,endedAtMs}` — a second, telemetry-independent, already-
-  working source of Prepare wall time for the 4 convergence-bearing receipts, confirmed live.
-- **A concrete correctness trap in that receipt-side data, found by direct inspection**: of the 4
-  convergence-bearing receipts, M192 and M195 both have `startedAtMs === endedAtMs`
-  (`1785238767187`/`1785238767187` and `1785256169477`/`1785256169477` respectively) — a degenerate
-  placeholder where the interval field was never actually populated with distinct times, not a
-  genuine near-instant Prepare run. M198 and M200 have real, distinct intervals
-  (`1785301300000→1785314458203`, `1785329024996→1785330281481`). This matters acutely because
-  **M195 is the exact receipt DIR-126's own parent Finding measured at ~80 real minutes (57 of them
-  PlanCheck)** — naively trusting `endedAtMs` minus `startedAtMs` for M195 would report `0ms` for the
-  slowest documented real generation on record, directly contradicting the reason this child exists.
-- `decision.createsContentGeneration` is written as `kind === "resume"` (`proposal-convergence.ts:664`,
-  and directly visible in both live DIR-126-E records: `kind: "cold"` pairs with
-  `createsContentGeneration: false`) — **true only for `resume`, false for `cold`**, backwards from
-  what the field's name suggests to a naive reader. Both `cold` and `resume` dispatch real content
-  agents; an aggregator must derive "content-generation attempt" from `decision.kind ∈ {cold,
-  resume}` directly, never from this field.
-- `contentAgentDispatchCount`/`contentAgentMs` are `null` (not `0`) for `cold`/`resume` records under
-  the currently-landed schema (confirmed in both live DIR-126-E records, and by reading
-  `_writeCommittedTelemetry`'s call site at `proposal-convergence.ts:665`); only `reuse-terminal`
-  (`~line 577`, guaranteed `0`/`0`) and pre-lease `not-evaluated` sites (`~line 751`, also `0`/`0`)
-  get an explicit `0`. `validateTelemetryRecord` (`proposal-convergence.ts:430`) enforces this at
-  write time: a `reuse-terminal` record failing `contentAgentDispatchCount===0 &&
-  contentAgentMs===0` is rejected with `{ok:false, code:"reuse-terminal-invalid"}`
-  (`proposal-convergence.ts:462-464`). Collapsing `null` into `0` would misreport "zero mechanical
-  work" for records where the value was simply never captured.
-- `CACHEABLE_TERMINALS` is `export const` at `proposal-convergence.ts:247` — confirmed live as
+  `computeMetricsForReceipt` (`milestone-preparation-check.ts:118`) to derive `prepareWallTimeMs` and
+  related fields from `convergence.{startedAtMs,endedAtMs}` — a second, telemetry-independent,
+  already-working wall-time source for the 4 convergence-bearing receipts.
+- `decision.createsContentGeneration` is written `true` only for `kind === "resume"`
+  (`proposal-convergence.ts:664`, confirmed live) — `false` for `cold`, and all 8 live records are
+  `cold` — backwards from what the name suggests. An aggregator must derive "content-generation
+  attempt" from `decision.kind ∈ {cold, resume}` directly, never from this field; trusting it as
+  named would misclassify the only real-world decision kind observed so far as "no content
+  generation."
+- `contentAgentDispatchCount`/`contentAgentMs` are `null` (never `0`) for `cold`/`resume` records
+  under the landed schema (confirmed on all 8 live records); only `reuse-terminal`
+  (`proposal-convergence.ts:577`) and pre-lease `not-evaluated` (`:751`) write an explicit `0`/`0`,
+  and `validateTelemetryRecord` (`:430`) fail-closed rejects a `reuse-terminal` record that doesn't
+  satisfy `contentAgentDispatchCount===0 && contentAgentMs===0` with
+  `{ok:false, code:"reuse-terminal-invalid"}` (`:462-464`). Collapsing `null` into `0` would
+  misreport "zero mechanical work" for work that was simply never captured.
+- `CACHEABLE_TERMINALS` is `export const` at `proposal-convergence.ts:247`, confirmed live as
   `[{terminalPhase:"PreflightContent",reason:"preflight-rejected"}, {terminalPhase:"ProposalReview",
-  reason:"split-recommended"}]` — the exact allowlist `decideResumeGeneration` uses to decide
-  `reuse-terminal` eligibility. `milestone-preparation-check.ts` already imports three named exports
-  from the same module (`proposal-convergence.ts`) at line 26, so importing this fourth is a
-  same-shape addition, not a new cross-module coupling.
+  reason:"split-recommended"}]` — exactly the two cacheable shapes observed in the live corpus above
+  (the `wiring-coverage-check-failed` terminal is, correctly, NOT in this allowlist and is
+  non-cacheable). `milestone-preparation-check.ts` already imports named exports from the same
+  module — a fourth named import is a same-shape addition.
 - `milestones/*/absorb-entry.md` is a real, pre-existing, checked-in convention recording a
-  milestone's ABSORB outcome — usable as the "this task actually landed" signal without a live
-  provider/task-store query.
+  milestone's ABSORB outcome, confirmed present for all 8 currently-committed receipts (M192, M195,
+  M197, M198, M200, M201, M202, M203) — not only the 4 convergence-bearing ones — a reproducible
+  "this task actually landed" signal with no live provider/task-store query.
 
 In short: no code anywhere aggregates capacity statistics across telemetry+receipt artifacts today;
 the throughput doc's flat number has zero supporting distribution; and the two real data sources
-(telemetry, receipts) have complementary, only-partially-overlapping coverage — a correct design must
-join them best-effort, never require pairing, or it silently discards the entire real historical
-baseline this child exists to characterize.
+(telemetry, receipts) have complementary, only-partially-overlapping coverage — a correct design
+must join them best-effort, never require pairing, and must not assume a single task's worth of
+telemetry is the whole population.
 
 ### Chosen mechanism
 
 Add one new, purely additive `--capacity-report [--telemetry-glob '<root>/**/*.json']
 [--workspace <dir>] [--exclusions <file.json>] [--min-samples N] [--out <file>]` CLI mode to
 `milestone-preparation-check.ts` (+ byte-identical `plugin/scripts/` mirror), following the file's
-existing sequential top-level-`if` dispatch shape (the `--build`/`--metrics`/`--telemetry-report`
-branches are independent `if` blocks, not an `else if` chain — a new branch matches that convention,
-not a new invocation pattern), backed by one new pure exported function `computeCapacityReport({
-workspace, telemetryGlob, exclusions, minSamples })`.
+existing sequential top-level-`if` dispatch shape (`--build`/`--metrics`/`--telemetry-report` are
+independent `if` blocks, not an `else if` chain — matching that convention, not a new invocation
+pattern), backed by one new pure exported function `computeCapacityReport({ workspace,
+telemetryGlob, exclusions, minSamples })`.
 
 Design, in order of load-bearing importance:
 
-1. **Two independent sample populations, joined best-effort — pairing is never required.**
+1. **Two independent sample populations, joined best-effort — pairing never required.**
    - *Telemetry population*: files under `milestones/prepare-telemetry/**/*.json`
      (`--telemetry-glob` overridable), walked by a new shared low-level `_walkJsonFiles(root)`
-     helper — pure directory recursion, factored out of `queryTelemetryReport`'s existing inline
-     `walk()` so both call sites share one traversal primitive instead of two independently
-     maintained copies. Each caller keeps owning its own per-file handling:
-     `queryTelemetryReport`'s parse-and-silently-skip contract is untouched (regression-tested by
-     re-running an existing `--telemetry-report` fixture before/after and diffing output);
-     `computeCapacityReport` instead captures `{path, record|null, parseError|null}` per file and
-     turns a parse failure into a traced `exclusions[]` entry (`reason: "malformed-json"`). Every
-     parsed record is run through the existing, reused `validateTelemetryRecord`; a validation
-     failure (including a `reuse-terminal` invariant violation) becomes an `exclusions[]` entry
-     carrying the validator's own `{code, message}` — never silently included.
+     helper factored out of `queryTelemetryReport`'s existing inline `walk()`, so both call sites
+     share one traversal primitive instead of two independently maintained copies. Each caller keeps
+     its own per-file handling: `queryTelemetryReport`'s parse-and-silently-skip contract stays
+     untouched, regression-tested by diffing an existing `--telemetry-report` fixture's output
+     before/after; `computeCapacityReport` instead captures `{path, record|null, parseError|null}`
+     per file, turning a parse failure into a traced `exclusions[]` entry (`reason:
+     "malformed-json"`). Every parsed record is run through the existing, reused
+     `validateTelemetryRecord`; a failure becomes an `exclusions[]` entry carrying the validator's
+     own `{code, message}`, never silently included.
    - *Receipt population*: every `milestones/M*/preparation.json` under `--workspace` (default `.`)
-     with a non-null `.convergence` block, fed through the existing, reused `computeConvergenceMetrics`
-     (via `computeMetricsForReceipt` — not a second derivation) for `prepareWallTimeMs` and the
-     related churn/round fields. A receipt with no `.convergence` (M197/M201/M202/M203, confirmed
-     live) is excluded from wall-time stats and tagged `"no-convergence-block"`, not treated as an
-     error. A receipt WITH `.convergence` where `startedAtMs === endedAtMs` (confirmed live for M192
-     and M195) is likewise excluded from wall-time stats, tagged `"convergence-interval-degenerate"`
-     — this guard fires only on exact equality of both finite fields, never on a merely-short-but-
+     with a non-null `.convergence` block, fed through the existing, reused
+     `computeConvergenceMetrics` via `computeMetricsForReceipt` — not a second, independent
+     derivation. No `.convergence` (M197/M201/M202/M203) → excluded, tagged
+     `"no-convergence-block"`, not treated as zero-duration. `.convergence.startedAtMs ===
+     .convergence.endedAtMs` (M192, M195) → excluded, tagged `"convergence-interval-degenerate"` —
+     this guard fires only on exact equality of both finite fields, never on a merely-short-but-
      distinct interval, so a real fast Prepare run is never wrongly discarded.
-   - The two populations join best-effort on `(taskId, milestoneId)` where both sides have a match;
-     an unpaired record on either side still contributes fully to its own population's stats. This
-     directly follows from the confirmed fact that 0/8 committed receipts pair with any telemetry
-     record today — a hard-pairing design would be vacuous against all existing real history.
-2. **Percentiles** via one small shared pure `percentile(sortedNumbers, p)` helper, applied to
-   receipt-side wall time, telemetry-side wall time (`recordedAtMs` minus `admission.acquiredAt`,
-   both fields confirmed present on the live records), and — where measurable — agent-minutes; broken
-   down by `class` / `highRisk` / terminal `{phase,reason}` / `decision.kind` (`not-evaluated` its
-   own bucket, never folded into `cold`).
+   - The two populations join best-effort on `(taskId, milestoneId)`; an unpaired record on either
+     side still contributes fully to its own population's stats. Directly forced by the confirmed
+     0/8 telemetry↔receipt pairing rate.
+2. **Percentiles** via one small shared pure `percentile(sortedNumbers, p)` helper over receipt-side
+   wall time, telemetry-side wall time (`recordedAtMs − admission.acquiredAt`, both confirmed
+   present on all 8 live records), and agent-minutes where measurable; broken down by
+   `class`/`highRisk`/terminal `{phase,reason}`/`decision.kind` (`not-evaluated` its own bucket,
+   never folded into `cold`).
 3. **Content-generation discriminator is `decision.kind ∈ {cold, resume}`**, never
-   `decision.createsContentGeneration` (confirmed inverted above, and both live DIR-126-E records
-   would be misclassified as "no content generation" if the field were trusted as named).
-   `eligible` = `decision.kind ∈ {cold, resume, reuse-terminal}`; `attempt` = every well-formed
-   record read, including `not-evaluated`.
-4. **Content-agent work reported in three explicit, never-blended buckets**: `measuredZero`
-   (`reuse-terminal`/`not-evaluated`, write-time-guaranteed `0`/`0`, trusted not re-derived);
-   `notMeasured` (`cold`/`resume` where both fields are `null` under the currently-landed schema —
-   emitted as `null`/`"not-measured"`, never coerced to `0`); and an explicitly-labeled
-   `wallTimeProxyMinutes` (`recordedAtMs − admission.acquiredAt`) as an optional supplementary
-   number, never presented under the `contentAgentMs` name.
-5. **`prepared/attempt` ratio**, with the acquired/eligible-content-generation denominator shown
-   alongside so contention/reuse attempts don't obscure the interpretation; **terminal/decision
-   yield by reason** (prepared, split/preflight-recommended, terminal-reused, transient failure).
+   `decision.createsContentGeneration` (confirmed inverted above, and all 8 live records would be
+   misclassified as "no content generation" if the field were trusted as named). `eligible` =
+   `decision.kind ∈ {cold, resume, reuse-terminal}`; `attempt` = every well-formed record read,
+   including `not-evaluated`.
+4. **Content-agent work in three explicit, never-blended buckets**: `measuredZero`
+   (`reuse-terminal`/`not-evaluated`, write-time-guaranteed `0`/`0`); `notMeasured` (`cold`/`resume`
+   where both fields are `null` under the currently-landed schema — emitted as `null`/
+   `"not-measured"`, never coerced to `0`, which currently covers all 8 real records); and an
+   explicitly-labeled `wallTimeProxyMinutes` (`recordedAtMs − admission.acquiredAt`) as an optional
+   supplementary number, never presented under the `contentAgentMs` name.
+5. **`prepared/attempt` ratio**, with the eligible-content-generation denominator shown alongside;
+   **terminal/decision yield by reason** (prepared, split/preflight-recommended, terminal-reused,
+   transient failure) — the live population already exercises `split-recommended` (6×),
+   `preflight-rejected` (1×), and `wiring-coverage-check-failed` (1×), so this bucket is not purely
+   synthetic even before `--min-samples` is separately met.
 6. **`absorbed-task/prepare-hour`**: numerator = distinct `taskId`s whose milestone directory has
-   both `preparation.json` and `absorb-entry.md`; denominator = summed `prepareWallTimeMs` from
-   `computeConvergenceMetrics` across those same receipts. This avoids the vacuous-pairing trap
-   directly: it is receipt-derived only, never requiring a paired telemetry record. Any of those
-   receipts lacking `.convergence` is excluded from the denominator, not treated as zero-duration.
+   both `preparation.json` and `absorb-entry.md` (confirmed present for all 8 currently-committed
+   receipts today — M192, M195, M197, M198, M200, M201, M202, M203, not only the 4
+   convergence-bearing ones); denominator = summed `prepareWallTimeMs` from
+   `computeConvergenceMetrics` across the subset of those same receipts that also carry a non-null
+   `.convergence` block (currently M192/M195/M198/M200 — 4 of the 8), excluding any lacking
+   `.convergence`. Receipt-derived only, requiring no telemetry pairing.
 7. **Concurrent duplicate-generation minutes**: for telemetry records sharing `(workspace, taskId)`,
-   build `[admission.acquiredAt, recordedAtMs]` intervals (both required non-null; a record missing
-   either is excluded from overlap analysis specifically — `"interval-fields-missing"` — but still
-   counted in decision/agent-work stats). Sum only pairwise intersection; a sequential retry that
-   starts after the prior terminal contributes exactly zero.
+   build `[admission.acquiredAt, recordedAtMs]` intervals (both required non-null — a record missing
+   either is excluded from overlap analysis only, `"interval-fields-missing"`, but still counted
+   elsewhere). Sum only pairwise intersection; a sequential retry starting after the prior terminal
+   contributes zero.
 8. **Unchanged-stable-terminal recomputation**: group telemetry records by `(taskId,
    hashes.{charter,taskContract,proposal,reviewPolicy})`, classify `terminal.{phase,reason}` as
    cacheable via the imported `CACHEABLE_TERMINALS`. When ≥2 records in the same group share a
-   cacheable terminal and the later one has `decision.kind !== "reuse-terminal"`, count it as an
-   avoidable recomputation and sum its `contentAgentMs` when non-null (else route to the
-   `notMeasured`/proxy accounting — never a fabricated exact number). The two live DIR-126-E
-   records are a real, in-hand instance of this exact terminal shape (same `taskId`, same cacheable
-   `ProposalReview`/`split-recommended` terminal, second record's `decision.kind` is `"cold"` not
-   `"reuse-terminal"`) but are confirmed live to have differing `hashes.proposal` and
-   `hashes.taskContract` (charter and reviewPolicy hashes match; task/proposal content changed
-   between rounds) — so they do **not** actually group under exact-hash equality. This is the exact
-   trap the grouping key must resist: the aggregator must not loosen `hashes.*` matching to "same
-   terminal regardless of hash," or every genuine content revision would be misreported as wasted
-   recomputation.
+   cacheable terminal and the later one has `decision.kind !== "reuse-terminal"`, count it as
+   avoidable recomputation, summing `contentAgentMs` when non-null (else route to
+   `notMeasured`/proxy accounting, never a fabricated exact number). Grouping key is `hashes.*` exact
+   equality — never terminal-shape alone: DIR-126-E's own multiple `split-recommended` records and
+   the two `gap-wiring-coverage-check-…`/M205 `split-recommended` records are real in-hand candidates
+   for this exact classification, but whether they actually group depends on their `hashes.*`
+   matching exactly, which must be checked per record at Execute time, not assumed from a shared
+   terminal alone — loosening the key would misclassify every legitimate content revision between
+   rounds as wasted work.
 9. **`estimatedAvoidedAgentMinutes`** computed only when a comparable, same-`class`/`highRisk`,
-   non-`reuse-terminal` sample population exists to derive a labeled, reproducible median from;
-   otherwise the literal string `"unknown"`.
+   non-`reuse-terminal` sample population exists; otherwise the literal string `"unknown"`.
 10. **Sample-count gate**: total eligible samples (telemetry ∪ receipt, post-exclusion) below
     `--min-samples` (default 3) → `{"code":"insufficient-samples", sampleCount, sampleIds, ...}`, no
-    P50/P85 emitted. Per-population counts are always reported separately, never blended into one
-    combined total that could hide a thin population behind a fatter one.
-11. **Exclusions unified and always reasoned**: malformed JSON, `validateTelemetryRecord` failures
-    (validator's own code), `interval-fields-missing`, `no-convergence-block`,
-    `convergence-interval-degenerate`, and caller-supplied `--exclusions <file.json>` entries
-    (`{id, reason}` matched against `recordId`/`attemptId`/receipt path — covers documented fixture
-    recoveries such as DIR-126-A's `--force-release` cases) — combined into one `exclusions[]`
-    array, each entry carrying an `id` and a `reason`. Nothing is ever dropped silently.
+    P50/P85. Per-population counts always reported separately, never blended into one combined total
+    that could hide a thin population behind a fatter one.
+11. **Exclusions unified and always reasoned**: malformed JSON, `validateTelemetryRecord` failures,
+    `interval-fields-missing`, `no-convergence-block`, `convergence-interval-degenerate`, and
+    caller-supplied `--exclusions <file.json>` entries (`{id, reason}`) — combined into one
+    `exclusions[]` array. Nothing dropped silently.
 12. `docs/proposals/quay-milestone-workflow-throughput-capacity-model.md` §4 is hand-edited to
-    replace the flat "15–25 minutes"/"22m 21s" text with the reproduced P50/P85, sample count,
-    sample-ID list, and an explicit exclusions note — copy-pasted from a real command run's `--out`
-    JSON. The doc stays readable prose (not templated/auto-generated); every number in it traces to
-    a real, checked-in command output, never to session recollection.
+    replace the flat range with the reproduced P50/P85, sample count, sample-ID list, and an
+    explicit exclusions note, copy-pasted from a real command run's `--out` JSON. The doc stays
+    readable prose, not templated; every number traces to a real, checked-in command output, never
+    to session recollection.
 
 No new write path into `milestones/prepare-telemetry/` or `.quay/prepare-leases/` — the whole mode is
-read-only over both trees, matching the charter's "additive, read-only aggregation" framing and the
-"Why not highRisk" section.
+read-only over both trees, matching the charter's "additive, read-only aggregation" / "why not
+highRisk" framing.
 
 ### Concrete control/data flow
 
@@ -216,37 +217,34 @@ CLI: node milestone-preparation-check.ts --capacity-report
        [--telemetry-glob 'milestones/prepare-telemetry/**/*.json']
        [--workspace .] [--exclusions exclusions.json] [--min-samples 3] [--out report.json]
    │
-   ├─ _walkJsonFiles(telemetryRoot)         [shared recursion; factored out of queryTelemetryReport's
-   │                                          inline walk() — each caller still parses/handles errors
-   │                                          independently, so queryTelemetryReport's own behavior
-   │                                          is unchanged]
+   ├─ _walkJsonFiles(telemetryRoot)   [shared recursion; queryTelemetryReport's own external
+   │                                    contract is unchanged — verified by regression diff]
    │     → per file: {path, record|null, parseError|null}
-   │        parseError                        → exclusions[] "malformed-json"
-   │        validateTelemetryRecord() fails    → exclusions[] (validator's own {code,message})
-   │        ok                                 → telemetry sample population
+   │        parseError                     → exclusions[] "malformed-json"
+   │        validateTelemetryRecord() fail → exclusions[] (validator's own {code,message})
+   │        ok                             → telemetry sample population
    ├─ walk milestones/M*/preparation.json; for each with non-null .convergence:
-   │        computeMetricsForReceipt → computeConvergenceMetrics(...)   [REUSED, no 2nd derivation]
-   │        no .convergence block               → excluded, "no-convergence-block"
-   │        startedAtMs === endedAtMs (both finite) → excluded, "convergence-interval-degenerate"
-   ├─ join telemetry + receipt populations by (taskId, milestoneId), BEST-EFFORT — an unpaired
-   │     record on either side still contributes to its own population's stats
-   ├─ apply --exclusions file entries (id/reason) on top of the above
-   ├─ import { CACHEABLE_TERMINALS } from proposal-convergence.ts    [not a hand-copied literal]
+   │        computeMetricsForReceipt → computeConvergenceMetrics(...)  [REUSED]
+   │        no .convergence block                → excluded, "no-convergence-block"
+   │        startedAtMs === endedAtMs (finite)    → excluded, "convergence-interval-degenerate"
+   ├─ join telemetry + receipt populations by (taskId, milestoneId), BEST-EFFORT
+   ├─ apply --exclusions file entries (id/reason)
+   ├─ import { CACHEABLE_TERMINALS } from proposal-convergence.ts  [not a hand-copied literal]
    ├─ classify: decision.kind ∈ {cold,resume} = content-generation attempt (NOT
-   │     decision.createsContentGeneration, confirmed inverted); route agent-work numbers into
-   │     measuredZero / notMeasured / wallTimeProxyMinutes buckets
-   ├─ percentile() over each in-scope numeric field; interval-intersection over
-   │     [admission.acquiredAt, recordedAtMs] pairs for overlap; hashes.*+cacheable-terminal
+   │     decision.createsContentGeneration, confirmed inverted); route agent-work into
+   │     measuredZero / notMeasured / wallTimeProxyMinutes
+   ├─ percentile() over in-scope numeric fields; interval-intersection over
+   │     [admission.acquiredAt, recordedAtMs] for overlap; hashes.*+cacheable-terminal
    │     grouping for recomputation waste (all pure, unit-testable functions)
-   ├─ absorbed-task/prepare-hour: count(receipts with preparation.json ∧ absorb-entry.md) /
+   ├─ absorbed-task/prepare-hour = count(receipts w/ preparation.json ∧ absorb-entry.md) /
    │     (sum of computeConvergenceMetrics wall-time hours over those same receipts)
    └─ eligible sample count (per-population AND combined) < --min-samples?
         → {code:"insufficient-samples", sampleCount, sampleIds, ...}
         else → {code:"ok", sampleCount, exclusions[], p50/p85 by stratum, ratios, waste-classes}
         console.log(JSON.stringify(report)); --out writes the same JSON; exit 0 in both cases
-        (insufficient-samples is a normal, successful report, not a usage failure); exit 2 only
-        on a hard usage/environment error (bad --telemetry-glob shape, unparsable --exclusions
-        JSON, unreadable --workspace)
+        (insufficient-samples is a normal, successful report, not a usage failure); exit 2 only on
+        a hard usage/environment error (bad --telemetry-glob shape, unparsable --exclusions JSON,
+        unreadable --workspace)
    │
    ▼ (human/agent regenerates by hand, citing the --out JSON's real sample IDs)
 docs/proposals/quay-milestone-workflow-throughput-capacity-model.md §4 rewritten
@@ -258,85 +256,81 @@ relationship claimed above, flagged explicitly for AC-level proof, not left as p
 - CLAIM: `--capacity-report` is a real, reachable CLI branch on `milestone-preparation-check.ts`
   (both the canonical file and the `plugin/scripts/` mirror), dispatched the same way as the
   existing `--build`/`--metrics`/`--telemetry-report` branches → needs grep/import-graph evidence
-  PLUS a live subprocess invocation test (not `--selftest`-only reachability).
+  PLUS a live subprocess invocation test, not `--selftest`-only reachability.
 - CLAIM: `_walkJsonFiles` is one shared recursion primitive used by both `queryTelemetryReport` and
-  `computeCapacityReport` → needs a fixture/call-count or source-inspection assertion showing a
-  single traversal implementation, not two independently written directory walks.
+  `computeCapacityReport` → needs source-inspection or call-count evidence showing a single
+  traversal implementation, not two independently written directory walks.
 - CLAIM: `computeCapacityReport` calls the existing `validateTelemetryRecord` (reused, not
-  reimplemented) → needs a test asserting a schema-invalid telemetry fixture record lands in
-  `exclusions[]` carrying the validator's own `{code, message}`.
-- CLAIM: `computeCapacityReport` derives wall time via `computeConvergenceMetrics`/
+  reimplemented) → needs a test asserting a schema-invalid fixture record lands in `exclusions[]`
+  carrying the validator's own `{code, message}`.
+- CLAIM: `computeCapacityReport` derives receipt wall time via `computeConvergenceMetrics`/
   `computeMetricsForReceipt` (not a second, independent derivation) → needs a test asserting the
   reported `prepareWallTimeMs` for a fixture receipt matches `computeMetricsForReceipt`'s own output
   for that identical receipt.
 - CLAIM: `computeCapacityReport` imports `CACHEABLE_TERMINALS` from `proposal-convergence.ts` (not a
   duplicated literal) → needs a fixture that mutates an entry in the real `CACHEABLE_TERMINALS` and
-  observes `computeCapacityReport`'s recomputation classification pick up the same change.
+  observes the recomputation classification pick up the change.
 - CLAIM: telemetry and receipt populations are joined best-effort, never required-paired → needs a
-  test asserting a receipt-only sample (no matching telemetry) still contributes wall-time stats,
-  AND a telemetry-only sample (no matching receipt) still contributes decision/agent-work stats.
+  test asserting a receipt-only sample still contributes wall-time stats, and a telemetry-only
+  sample still contributes decision/agent-work stats.
 - CLAIM: `queryTelemetryReport`'s existing external behavior (including silent-skip-on-malformed-
   JSON) is unchanged by the `_walkJsonFiles` extraction → needs a regression test re-running an
   existing `--telemetry-report` fixture and diffing output byte-for-byte before/after.
 - CLAIM: `sync-vendor.sh --check`/`cmp` keeps the `plugin/scripts/` mirror byte-identical after this
-  change → covered by the existing mirror-parity AC item; no new sync mechanism is invented.
+  change → covered by the existing mirror-parity AC item; no new sync mechanism invented.
 - CLAIM: `absorbed-task/prepare-hour`'s numerator is a checked-in file-presence signal, not a live
   task-store/MCP query → needs a fixture asserting the count changes when an `absorb-entry.md` file
-  is added/removed on disk, with zero MCP/provider calls made during the computation.
+  is added/removed on disk, zero MCP/provider calls made.
 - CLAIM: the `convergence-interval-degenerate` guard fires only on exact `startedAtMs===endedAtMs`
-  equality, never on a short-but-distinct interval → needs a fixture pairing (both fields equal →
-  excluded) against (fields one ms apart → included) to prove the boundary, since this is the exact
-  trap that would otherwise silently zero out M195's real ~80-minute Prepare in aggregate stats.
+  equality, never on a short-but-distinct interval → needs a paired fixture (equal → excluded; one
+  ms apart → included) — the exact trap that would otherwise silently zero out M195's real
+  ~80-minute Prepare.
+- CLAIM: `computeCapacityReport` aggregates across ALL task IDs under the glob root by default, not
+  just a single hardcoded `taskId` → needs a fixture with ≥2 distinct `taskId`s under the telemetry
+  root confirming both appear in the report's per-task/per-stratum breakdown — a materially live
+  concern now that the real tree holds 4 distinct task IDs, not the 1 a single-task reading might
+  assume.
 
 ### Key design decisions
 
-- **Two independent sample populations, best-effort joined — never pairing-required.** The single
-  most consequential decision, directly forced by the confirmed 0/8 telemetry↔receipt pairing rate.
-  Resolves in favor of a receipt-only wall-time denominator for `absorbed-task/prepare-hour` (via
-  `computeConvergenceMetrics`), which needs no pairing that does not yet exist.
+- **Two independent sample populations, best-effort joined — never pairing-required.** Directly
+  forced by the confirmed 0/8 telemetry↔receipt pairing rate. Resolves `absorbed-task/prepare-hour`
+  in favor of a receipt-only wall-time denominator that needs no telemetry pairing.
 - **`decision.kind`, not `decision.createsContentGeneration`, is the content-generation
-  discriminator** — direct code reading plus both live DIR-126-E records confirm the latter is
-  inverted relative to its apparent name. Routing around a landed field's surprising semantics
-  (rather than "fixing" it, which is out of this child's `## Touches` — it lives in
-  `proposal-convergence.ts`) is the lower-risk choice for a read-only reporting child.
+  discriminator** — confirmed inverted by direct code reading and independently re-confirmed against
+  all 8 live records. Routing around a landed field's surprising semantics (rather than "fixing" it,
+  out of this child's `## Touches`) is the lower-risk choice for a read-only reporting child.
 - **Traversal, the cacheable-pair allowlist, record validation, and receipt-wall-time derivation are
-  all imported/reused, never duplicated**: `_walkJsonFiles` shared with `queryTelemetryReport`
-  (recursion only, so `queryTelemetryReport`'s external contract stays provably unchanged);
-  `validateTelemetryRecord` and `computeConvergenceMetrics`/`computeMetricsForReceipt` reused as-is;
-  `CACHEABLE_TERMINALS` imported by name. Two independently maintained copies of any of these would
-  silently drift the next time DIR-126-C/D's own logic changes on this file — the "content living
-  in two places" defect class this repo's CLAUDE.md names explicitly.
+  all imported/reused, never duplicated** — the exact "content living in two places" drift class
+  this repo's CLAUDE.md names explicitly; two independently maintained copies of any of these would
+  silently drift the next time DIR-126-C/D's logic changes.
 - **`null` vs `0` for content-agent fields is preserved, never coerced** — confirmed by direct read
-  of the write path and by both live records (`null`/`null` for `cold`). Coercing to `0` would
-  misreport "mechanical work only" for records where content-agent work was simply never captured
-  under the current schema. The task body's own AC wording ("mechanical-runner versus content-
-  generation agent dispatch counts/minutes") is read here to permit an honest `notMeasured` bucket
-  plus a distinctly-named `wallTimeProxyMinutes`, rather than requiring a directly-measured minutes
-  value the landed schema cannot currently supply for `cold`/`resume`.
+  of the write path and all 8 live records (`null`/`null` for `cold`). Coercing to `0` would
+  misreport "mechanical work only" where the value was simply never captured.
 - **`convergence-interval-degenerate` is a distinct exclusion reason from `no-convergence-block`**,
-  scoped narrowly to exact-equality — this is the specific guard that keeps M195 (the receipt behind
-  this whole child's founding Finding) from silently reporting `0ms` once real aggregation exists.
+  scoped narrowly to exact-equality — the specific guard keeping M195 (the receipt behind this
+  child's founding Finding) from silently reporting `0ms` once real aggregation exists.
 - **The unchanged-terminal recomputation grouping key is `hashes.*` equality, never terminal-shape
-  equality alone** — confirmed live that the two DIR-126-E telemetry records share a cacheable
-  terminal but differ on `hashes.proposal`/`hashes.taskContract`, so they must NOT be counted as a
-  recomputation pair. Loosening the key to "same terminal regardless of hash" would misclassify
-  every legitimate content revision as wasted work.
+  equality alone** — loosening the key to "same terminal regardless of hash" would misclassify every
+  legitimate content revision (e.g. between two `split-recommended` rounds of the same task where
+  the proposal text actually changed) as wasted work; this must be checked per-record, not assumed
+  from the terminal alone.
 - **Concurrency overlap and unchanged-input recomputation are two separate waste-class passes**, not
-  one combined heuristic — overlap is interval intersection on `[acquiredAt, recordedAtMs]`
-  (missing either field excludes that record from overlap analysis only, never zero-duration by
-  default); recomputation is identical `hashes.*` plus a repeated cacheable terminal. Conflating them
-  would misattribute one waste class's cost to the other.
+  one combined heuristic, to avoid misattributing one waste class's cost to the other.
 - **No new glob dependency** — `--telemetry-glob` supports exactly the fixed `<root>/**/*.json`
-  shape via a string split on `/**/`, not a general glob engine or `fs.globSync` (Node ≥22.13-only,
-  below this repo's declared Node-20 packaging floor).
+  shape via a string split, not a general glob engine or `fs.globSync` (Node ≥22.13-only, below this
+  repo's Node-20 packaging floor).
 - **No telemetry schema change** — `admission.acquiredAt`/`recordedAtMs` already support interval
-  math on both live records; DIR-126-D's frozen `schemaVersion: 2` stays untouched.
+  math on every live record; DIR-126-D's frozen `schemaVersion: 2` stays untouched.
 - **Savings are never fabricated** — `reuse-terminal`'s zero-agent-work claim is exact and schema-
   guaranteed; `estimatedAvoidedAgentMinutes` is `"unknown"` unless a real, labeled, reproducible
   comparable sample population exists.
 - **The throughput-doc rewrite stays a manual, human/agent-authored prose edit** citing the real
-  `--out` JSON, not an automated markdown-templating step — keeps §4 readable while the JSON output
-  remains the traceable source of truth.
+  `--out` JSON, not an automated markdown-templating step.
+- **Aggregation is task-ID-agnostic by default** — the live tree now spans 4 distinct task IDs'
+  worth of telemetry; a design that silently assumed a single task (as might be tempting given
+  DIR-126-E's own charter framed itself as the sole data source) would under-report the real
+  available sample pool the moment this command actually ships and is run.
 
 ### Defaults and failure behavior
 
@@ -355,58 +349,64 @@ relationship claimed above, flagged explicitly for AC-level proof, not left as p
 | A receipt has no `.convergence` block (M197/M201/M202/M203) | excluded from wall-time stats and the `absorbed-task/prepare-hour` denominator, not treated as zero-duration |
 | A receipt's `.convergence.startedAtMs === .convergence.endedAtMs` (M192, M195) | excluded from wall-time stats, `reason: "convergence-interval-degenerate"` — never a fabricated `0ms` sample |
 | `--telemetry-glob` doesn't match `<root>/**/*.json`, malformed `--exclusions` JSON, or unreadable `--workspace` | hard usage error, exit 2, matching this file's existing `parseArgs` error convention |
-| Zero eligible samples at all (both populations empty) | same `insufficient-samples` path as the < min-samples case; exit 0, not an error |
+| Zero eligible samples at all (both populations empty) | same `insufficient-samples` path; exit 0, not an error |
+| No `reuse-terminal` sample exists anywhere in the corpus at Execute time (currently true: 0/8 live records) | `measuredZero` bucket reports as empty/zero-count, not fabricated; the report stays honest and usable, and the DoD clause requiring a real `reuse-terminal` proof is explicitly flagged as a residual open item (see Risks) to satisfy via a real sample landing, not synthesized here |
 
 ### Compatibility
 
-Purely additive: one new CLI mode plus one new exported function on the existing, already-587-line
-script (mirrors confirmed byte-identical live via `diff`). `checkPreparation()` — the function the
-`Prepared` gate actually calls — is untouched; nothing in this proposal alters its control flow.
+Purely additive: one new CLI mode plus one new exported function on the existing 587-line script
+(mirrors confirmed byte-identical live via `diff`). `checkPreparation()` — the function the
+`Prepared` gate actually calls — is untouched; nothing here alters its control flow.
 `queryTelemetryReport()`'s external behavior (CLI flag, input, output shape, silent-skip-on-
 malformed-JSON) is unchanged; only its internal recursion is factored into the shared
 `_walkJsonFiles` helper, verified by an explicit before/after regression test. Both
-`experiments/quay-perpetual-stream/scripts/` and `plugin/scripts/` copies stay byte-identical via the
-existing `sync-vendor.sh` mechanism (confirmed identical live, no new sync path). No existing check
-changes shape or becomes stricter, matching the charter's "why not highRisk" framing.
+`experiments/quay-perpetual-stream/scripts/` and `plugin/scripts/` copies stay byte-identical via
+the existing `sync-vendor.sh` mechanism (confirmed identical live, no new sync path). No existing
+check changes shape or becomes stricter, matching the charter's "why not highRisk" framing.
 
 ### Risks
 
-- **The ≥3-real-sample DoD bar is structurally gated on this child's own further dispatch plus other
-  real work landing.** Two real telemetry records now exist for `DIR-126-E` (confirmed live), both
-  short of 3 and both sharing the identical `ProposalReview`/`split-recommended` terminal — the DoD
-  additionally wants "different terminal shapes," which two identical-terminal records do not
-  satisfy on their own. Code and unit tests (synthetic fixtures) can be written and reviewed now; the
-  real `--capacity-report` regression proof and doc regeneration should wait until the sample bar
-  (count AND shape diversity) is realistically reachable, per the charter's own explicit steering.
-- **Two consecutive real prior generations of this exact task both terminated `split-recommended` at
-  ProposalReview.** Examined honestly, this proposal's ~12-item mechanism and its AC items are
-  sub-facets of ONE pure aggregation function (`computeCapacityReport`) over two joined artifact
-  populations, not independently shippable increments — dropping any one item (e.g. percentiles
-  without exclusions, or overlap detection without the recomputation check it structurally needs for
-  correct interpretation) would produce a report that is silently wrong or misleading in exactly the
-  way this child exists to prevent. The one genuinely separable seam (the `--capacity-report` code
-  vs. the doc-regeneration edit) is already reflected as two distinct Requested-action items, not
-  merged. A task named `gap-prepare-milestone-split-decision-no-finality` is already filed
-  (`status: todo`, unrelated to this child's own scope) and a charter file
-  (`experiments/quay-perpetual-stream/charters/M206-gap-split-decision-finality.md`) already exists
-  documenting that a mechanical split-decision signal from a cold LLM reviewer (a scalar
-  `mechanismCount` self-report observed oscillating non-monotonically, 8/8/4/6, across otherwise-
-  similar review rounds) is itself noisy and non-monotonic — that filed gap is offered as
-  corroborating evidence that repeated `split-recommended` verdicts on a structurally-single-function
-  design are a known systemic-noise pattern, not by itself a standing objection this Proposal must
-  further rebut beyond the structural single-function argument above. (No milestone directory for
-  M206 exists yet, so this is cited as a filed, charter-drafted gap — not as a landed fix.) If a
-  third generation of this task also recommends split, that should be weighed as a stronger signal
-  than this Proposal currently treats it, not re-litigated identically a third time.
-- **Telemetry-side decision/content-agent statistics may stay thin (2-3 samples) even once receipt-
-  side wall-time statistics (4 existing convergence-bearing receipts) are not.** The report surfaces
-  this asymmetry via separate per-population sample counts, never blended into one combined total.
+- **The ≥3-real-sample DoD bar is closer than a stale single-task snapshot suggests, but must still
+  be re-verified at Build/Verify time, not assumed from this Proposal's drafting-time snapshot.** As
+  of drafting, `milestones/prepare-telemetry/` holds 8 real records across 4 task IDs spanning 3
+  distinct terminal shapes (`ProposalReview`/`split-recommended`, `ProposalReview`/
+  `wiring-coverage-check-failed`, `PreflightContent`/`preflight-rejected`) — genuine diversity, not a
+  single repeated shape. However **zero `resume`/`reuse-terminal` records exist yet**, so the DoD's
+  "real `reuse-terminal` proof" clause and this Proposal's AC item 5 currently have no real sample to
+  cite. The DoD text ("at least three post-change real preparation generations of different terminal
+  shapes") does not explicitly require all three to come from the SAME task — that scoping question
+  should be resolved explicitly at Plan/Build time, since the charter's own framing (tolerant of
+  "this child's own dispatch... plus real dispatches of other pending work" accumulating a genuine
+  sample set) reads as tolerant of a cross-task pool. Live counts will keep moving between this
+  proposal's authoring and Build; the real regression proof must re-query the tree at Build/Verify
+  time, and Execute-time work must either wait for a `reuse-terminal` sample to occur naturally or
+  explicitly document its absence as a residual gap, never fabricate one.
+- **Multiple prior real generations of this exact task have terminated `split-recommended` at
+  ProposalReview** (3 of DIR-126-E's own 4 live telemetry records). Examined honestly, this
+  Proposal's ~12-item mechanism is a set of interdependent facets of one aggregation function over
+  two joined artifact populations (e.g. overlap detection is only correctly interpretable alongside
+  the recomputation check it needs for context), not independently shippable increments; the one
+  genuinely separable seam (the `--capacity-report` code vs. the doc-regeneration edit) is already
+  reflected as two distinct Requested-action items, not merged. A related filed gap,
+  `gap-prepare-milestone-split-decision-no-finality` (status: todo, charter
+  `M206-gap-split-decision-finality.md`, itself already showing a `split-recommended` telemetry
+  record), documents that this same mechanical split-decision signal has been observed oscillating
+  non-monotonically across otherwise-similar rounds — offered as corroborating context that repeated
+  `split-recommended` verdicts on a structurally-single-function design are a known noise pattern,
+  not by itself a standing objection this Proposal must further rebut beyond the structural argument
+  above. If a further real generation of this task also recommends split, that should be weighed as a
+  stronger signal than this Proposal currently treats it, not re-litigated identically again.
+- **Telemetry-side decision/content-agent statistics may stay thin per-task even as the cross-task
+  pool grows, and may stay thin overall (8 records, 4 taskIds) even once receipt-side wall-time
+  statistics (4 convergence-bearing receipts) are not.** The report surfaces this via separate
+  per-task and per-population sample counts, never blended into one combined total that hides a thin
+  population behind a fatter one.
 - **Content-agent-minutes honesty vs. AC readability tension**: reporting `notMeasured` for
-  `cold`/`resume` (rather than fabricating a number) means the regenerated doc's headline duration is
-  wall time, not agent-minutes — a real, disclosed schema limitation. Extending the schema to
-  populate real `contentAgentMs` for `cold`/`resume` is out of this child's scope.
+  `cold`/`resume` (all 8 live records) means the regenerated doc's headline duration is wall time,
+  not agent-minutes — a real, disclosed schema limitation. Extending the schema to populate real
+  `contentAgentMs` for `cold`/`resume` is out of this child's scope.
 - **Too few real samples produce a misleadingly precise-looking P50/P85** — mitigated by the explicit
-  `insufficient-samples` default rather than reporting a distribution from 1-3 points as meaningful.
+  `insufficient-samples` default.
 - **Interval-based overlap math depends on `admission.acquiredAt`/`recordedAtMs` fidelity** — both
   are wall-clock `Date.now()`-derived; clock skew across concurrent processes could in principle
   produce a spurious small overlap or gap. No distributed-clock correction exists in this repo; the
@@ -414,6 +414,10 @@ changes shape or becomes stricter, matching the charter's "why not highRisk" fra
 - **Malformed-record tracing changes `computeCapacityReport`'s exclusions output shape relative to
   `queryTelemetryReport`'s silent-skip behavior** — a deliberate, explicitly flagged divergence
   between the two functions, not an accidental mismatch.
+- **Aggregating across multiple task IDs by default is a design choice this Proposal makes
+  explicitly** (see Key design decisions) that a single-task reading of the charter would not need to
+  confront; Build should confirm the AC wording ("Prepare-scoped" capacity questions) is read as
+  cross-task by default, with per-task breakdowns available, not silently single-task.
 
 ### Non-goals
 
@@ -423,38 +427,42 @@ reports on their real, already-landed output. Not a general-purpose analytics/da
 names. Not reopening DIR-126-D's frozen telemetry schema (`schemaVersion: 2`) or changing
 `queryTelemetryReport`'s existing external behavior. Not extending `proposal-convergence.ts`'s
 telemetry writer to populate real per-generation `contentAgentDispatchCount`/`contentAgentMs` for
-`cold`/`resume` — outside this child's `## Touches` and the charter's additive-read-only framing; a
-legitimate future `gap-*` follow-up. Not fixing `decision.createsContentGeneration`'s apparent
-semantic inversion in `proposal-convergence.ts` — same reasoning. LOC/duration remain descriptive
-output only, never a productivity target.
+`cold`/`resume` — outside this child's `## Touches`; a legitimate future `gap-*` follow-up. Not
+fixing `decision.createsContentGeneration`'s apparent semantic inversion in `proposal-convergence.ts`
+— same reasoning. Not resolving whether the DoD's "≥3 generations of different terminal shapes" bar
+must come from a single task or may span tasks — flagged as an open scoping question for Plan/Build,
+not decided unilaterally here. LOC/duration remain descriptive output only, never a productivity
+target.
 
 ### AC coverage (mapped to `tasks/DIR-126-E.md`'s Acceptance Criteria)
 
 1. **Real, reachable CLI mode** — covered: `--capacity-report` added to the same dispatch pattern as
    `--build`/`--metrics`/`--telemetry-report`, verified by grep/import-graph plus a live subprocess
-   invocation test, both mirrors — not `--selftest`-only reachability.
+   invocation, both mirrors — not `--selftest`-only reachability.
 2. **Reproducible aggregation over checked-in artifacts** — covered by `computeCapacityReport`'s
    field list; every emitted field traces to a named record/receipt field, none synthesized; unit
-   tested plus one real `git diff`-visible CLI run.
+   tested plus one real `git diff`-visible CLI run against the now-real, larger telemetry tree.
 3. **Sample provenance real and traceable** — covered: both populations retain source
    `recordId`/`attemptId`/receipt path; `--out` JSON carries the raw sample-ID list; the doc rewrite
    cites it directly.
 4. **Duplicate-generation minutes mean real overlap** — covered by interval intersection, unit
    tested against an overlapping pair, a sequential-retry pair, and a single-generation case.
-5. **Content-agent efficiency measured separately (honest reading)** — covered:
-   `reuse-terminal`'s zero-content-agent claim is exact and schema-guaranteed; a recomputed cacheable
-   terminal's wasted work is reported as the exact value when `contentAgentMs` is non-null, else via
-   the `notMeasured`/proxy rule, never fabricated.
+5. **Content-agent efficiency measured separately, honest reading** — covered: `reuse-terminal`'s
+   zero-content-agent claim is exact and schema-guaranteed; a recomputed cacheable terminal's wasted
+   work is reported as the exact measured value when non-null, else via `notMeasured`/proxy. Flagged
+   as a residual open item: no real `reuse-terminal` sample exists in the corpus as of this
+   Proposal's drafting, so the live-data proof for this item may need to wait on, or explicitly
+   document the absence of, such a sample at Execute time.
 6. **Feedback-efficiency inputs exported, Prepare-scoped** — partially covered: cold/resume/reuse-
    terminal minute distributions where measurable, `absorbed-task/prepare-hour`; token counts and
-   finding-novelty/recurrence are **not confirmed present in the current telemetry schema** as of
-   this proposal's own live check and are flagged as a genuine open item for Plan/Build, not asserted
-   solved here. Does not claim end-to-end verified value or an Execute escape rate from Prepare-only
-   evidence.
+   finding-novelty/recurrence are **not confirmed present in the current telemetry schema** and are
+   flagged as a genuine open item for Plan/Build, not asserted solved here. Does not claim end-to-end
+   verified value or an Execute escape rate from Prepare-only evidence.
 7. **Machine-readable report preserves raw IDs/strata/exclusions/unknowns** — covered by the `--out`
    JSON schema, consumable later without scraping prose.
 8. **Insufficient-sample honesty** — covered by the `< minSamples` default-table row, unit tested
-   with exactly 2 samples (the real current DIR-126-E count).
+   with the real current combined sample count (8, as of this proposal's drafting) alongside a
+   synthetic 2-sample fixture proving the boundary.
 9. **Mirror byte-identity** — covered by the existing `sync-vendor.sh --check`/`cmp` mechanism,
    unchanged, re-run as part of this child's own Verify.
 10. **`convergence-interval-degenerate` never silently reports `0ms`** — covered by a fixture built
@@ -471,22 +479,22 @@ output only, never a productivity target.
   requiring pairing would report `insufficient-samples` against the entire real historical baseline
   this task exists to characterize.
 - **Extend `queryTelemetryReport` in place to also aggregate**, instead of adding a new function.
-  Rejected: it is contractually `milestoneId`-scoped, its callers depend on that exact single-
-  milestone return shape and its current silent-skip malformed-record behavior; changing it would
-  violate this child's own Compatibility bar.
-- **Fabricate/estimate content-agent-minutes for `cold`/`resume` from wall time via a fixed ratio**
-  (e.g. "assume X% of wall time is content-agent time"). Rejected: exactly the invented-precision
-  this design's "savings are never fabricated" principle forbids; an honest `notMeasured` bucket plus
-  a distinctly-labeled `wallTimeProxyMinutes` is more defensible and matches the existing
-  `estimatedAvoidedAgentMinutes: "unknown"` precedent already in this design.
+  Rejected: it is contractually `milestoneId`-scoped, its callers depend on that exact
+  single-milestone return shape and its current silent-skip malformed-record behavior; changing it
+  would violate this child's own Compatibility bar.
+- **Fabricate/estimate content-agent-minutes for `cold`/`resume` from wall time via a fixed ratio.**
+  Rejected: exactly the invented-precision this design's "savings are never fabricated" principle
+  forbids; an honest `notMeasured` bucket plus a distinctly-labeled `wallTimeProxyMinutes` is more
+  defensible and matches the existing `estimatedAvoidedAgentMinutes: "unknown"` precedent already in
+  this design.
 - **Trust `decision.createsContentGeneration` as written.** Rejected after direct code reading
-  (confirmed live against both current DIR-126-E records) showed it inverted relative to its
-  apparent name; trusting it would silently misclassify `cold` — the majority real-world decision
-  kind — as "no content generation."
-- **Add a general glob-matching dependency (`minimatch`/`fast-glob`) or use `fs.globSync`.** Rejected:
-  the one real use case is a fixed `<root>/**/*.json` shape; a new dependency, or a Node ≥22.13-only
-  stdlib API below this repo's Node-20 packaging floor, buys nothing over a simple string split plus
-  the already-existing recursive walk.
+  (confirmed live against all 8 current records, all `cold`) showed it inverted relative to its
+  apparent name; trusting it would silently misclassify the majority real-world decision kind as "no
+  content generation."
+- **Add a general glob-matching dependency (`minimatch`/`fast-glob`) or use `fs.globSync`.**
+  Rejected: the one real use case is a fixed `<root>/**/*.json` shape; a new dependency, or a
+  Node ≥22.13-only stdlib API below this repo's Node-20 packaging floor, buys nothing over a simple
+  string split plus the already-existing recursive walk.
 - **Reimplement `queryTelemetryReport`'s traversal from scratch inside the new function.** Rejected:
   two independently maintained directory walks over the same tree is the exact "content living in
   two places" drift pattern this repo's CLAUDE.md calls out to fix at the source.
@@ -498,22 +506,26 @@ output only, never a productivity target.
   the explicit no-session-JSONL-parsing bar this repo's process already establishes for this class of
   work, and session logs are not checked-in, reproducible artifacts.
 - **A telemetry schema change adding explicit wall-clock start/end fields.** Rejected as unnecessary
-  — `admission.acquiredAt`/`recordedAtMs` (confirmed present on both live records) already support
+  — `admission.acquiredAt`/`recordedAtMs` (confirmed present on all 8 live records) already support
   the required interval math without reopening DIR-126-D's frozen `schemaVersion: 2`.
 - **Live, scheduler-integrated overlap detection** (enforcing/blocking at dispatch time). Rejected:
   that is DIR-126-A's already-landed concurrency-control job; this child is read-only reporting over
   historical artifacts, not a second enforcement point.
 - **Hand-edit the throughput doc's numbers from session-transcript recollection**, skipping a real
-  command run. Rejected: defeats the entire purpose of this child, which exists specifically because
-  DIR-126's own Finding showed the current doc has no real supporting measurement.
-- **Split this child further** (e.g. percentiles-only vs. waste-classes-only as separate milestones),
-  mirroring the two real `split-recommended` prior verdicts on this exact task. Considered seriously
-  given the repeated live signal, but rejected on the same structural grounds DIR-126-D used for its
-  own "Mechanism A" ruling: the ~12 mechanism items are interdependent facets of one aggregation
-  function over two joined populations (e.g. duplicate-overlap detection is only correctly
-  interpretable alongside the unchanged-terminal-recomputation check), not independently shippable
-  increments — the one genuinely separable seam (the `--capacity-report` code vs. the doc-
-  regeneration edit) is already reflected as two distinct Requested-action items, not merged.
+  command run. Rejected: defeats the entire purpose of this child.
+- **Restrict aggregation to a single hardcoded `taskId` (e.g. only `DIR-126-E`).** Rejected on fresh
+  evidence found during this proposal's own drafting: the real tree already spans 4 distinct task
+  IDs' worth of telemetry; a single-task design would discard 4 of the 8 real records that exist
+  today and misrepresent the tool as narrower than the actual artifact population it reads.
+- **Split this child further** (mirroring the repeated `split-recommended` verdicts observed live on
+  this exact task's own telemetry). Considered seriously given the repeated live signal, but rejected
+  on structural grounds: the mechanism items are interdependent facets of one aggregation function
+  over two joined populations (e.g. duplicate-overlap detection is only correctly interpretable
+  alongside the unchanged-terminal-recomputation check it needs for context), not independently
+  shippable increments; the one genuinely separable seam (code vs. doc-regeneration edit) is already
+  reflected as two distinct Requested-action items, not merged. If a further real generation of this
+  task also recommends split, that should be weighed as a stronger signal than this Proposal
+  currently treats it, not re-litigated identically again.
 
 ## Plan
 
@@ -623,6 +635,11 @@ generations existing.
   `--telemetry-report <milestoneId>`'s pre-existing output shape/behavior is byte-for-byte the same
   before and after this child's diff — `_walkJsonFiles`'s extraction is a pure refactor of shared
   traversal logic, never a behavior change to the existing reader.
+- [ ] **Aggregation spans all task IDs under the glob root by default, never one hardcoded
+  `taskId`:** a fixture telemetry population containing >= 2 distinct `taskId`s under
+  `--telemetry-glob` confirms both task IDs appear in `computeCapacityReport`'s per-task/
+  per-stratum breakdown — the real tree already holds 4 distinct task IDs' worth of telemetry, so a
+  design that silently assumed a single task would under-report the actual available sample pool.
 - [ ] **Insufficient-sample honesty:** a fixture with fewer than 3 samples produces the explicit
   `insufficient-samples` result, not a misleadingly precise distribution.
 - [ ] Canonical and `plugin/` mirrors of `milestone-preparation-check.ts` and its test file are
@@ -648,7 +665,12 @@ generations existing.
   forms, from the separately-listed `proposal-convergence.ts`/`:462-464` tokens already covered
   above), `~line 577`, `~line 751`, `decision.kind !== "reuse-terminal"`, `notMeasured`,
   `computeCapacityReport`, `exclusions[]`, `{code, message}` — all confirmed real by the same
-  direct-source-read standard as every round above.
+  direct-source-read standard as every round above. Round-4 additionally flagged this sample-set
+  enumeration claim's exact identifiers: `gap-wiring-coverage-check-whose-own-and-bold-marker-splitting`,
+  `ProposalReview`, `split-recommended`, `gap-prepare-milestone-split-decision-no-finality`,
+  `gap-dir126d-deferred-phase-timing-recurrence-tracking`, `wiring-coverage-check-failed` — all
+  confirmed real by the same direct-source-read standard (the actual, on-disk telemetry record
+  directory listing this Proposal's Problem framing cites).
 
 ## Definition of Done
 
