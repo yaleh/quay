@@ -475,7 +475,7 @@ to both-sides), plus items closing every flagged wiring claim above:
 ## Plan
 
 `docs/plans/M205-gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md` — 7-stage Plan
-authored 2026-07-30 at base revision `42f474d` (current HEAD short-sha) for milestone M205 (charter
+authored 2026-07-30 at base revision `c82efac` (current HEAD short-sha) for milestone M205 (charter
 `experiments/quay-perpetual-stream/charters/M205-gap-wiring-coverage-checker-fixes.md`), mapping all
 7 task AC items to ordered RED/implementation/GREEN stages: RED regression fixtures in the canonical
 test file (`experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs`, `splitSentences`
@@ -484,11 +484,13 @@ added to the line-10 import) → the two in-place regex edits in
 `whose` to the `owns?` exclusion lookbehind; `splitSentences()` line 102: widen BOTH sides of the
 split boundary to ``(?<=[.!?]|\*\*)\s+(?=[A-Z`"]|\*\*)``) → GREEN canonical suite (the
 `extra.acceptance` command) → mechanical `sync-vendor.sh` mirror regeneration (`--check` → `CLEAN`,
-never a hand-edit) → `tasks/DIR-126-D.md` CLI non-regression (`ok:true`/0 findings) → both-copies
-`prepare-admission-check.test.mjs` non-regression → grounding-evidence/landing verification
+never a hand-edit) → `tasks/DIR-126-D.md` CLI non-regression (`ok:true`/0 findings; 22-claim/
+0-finding baseline re-verified at `c82efac`) → both-copies `prepare-admission-check.test.mjs`
+non-regression (63/63, 7 suites at `c82efac`) → grounding-evidence/landing verification
 (`scripts/test.sh`). Stage blocks emit the DIR-117 iteration-2 item-3 mechanical format
-(`### Stage N` + `- AC:` + `- Files:` + `- Command:`) parsed by `milestone-preparation-check.ts`.
-Standardized stopping rule: at most 3 Plan-check rounds, success only at F_i=0.
+(`### Stage N` + `- AC:` + `- Files:` + `- Command:`) parsed by `milestone-preparation-check.ts`
+(`validatePlanStructure` → `plan-structure-ok`, all 7 AC indices mapped — verified live this
+session). Standardized stopping rule: at most 3 Plan-check rounds, success only at F_i=0.
 
 ## Finding
 
@@ -667,5 +669,6 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 - experiments/quay-perpetual-stream/scripts/task-schema.ts
 - plugin/workflows/prepare-milestone.js
 - plugin/scripts/sync-vendor.sh
+- tasks/DIR-126-D.md
 - docs/plans/M205-gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md
 
