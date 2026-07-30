@@ -474,23 +474,32 @@ to both-sides), plus items closing every flagged wiring claim above:
 
 ## Plan
 
-`docs/plans/M205-gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md` — 7-stage Plan
-authored 2026-07-30 at base revision `c82efac` (current HEAD short-sha) for milestone M205 (charter
-`experiments/quay-perpetual-stream/charters/M205-gap-wiring-coverage-checker-fixes.md`), mapping all
-7 task AC items to ordered RED/implementation/GREEN stages: RED regression fixtures in the canonical
-test file (`experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs`, `splitSentences`
-added to the line-10 import) → the two in-place regex edits in
+`docs/plans/M205-gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md` — 9-stage Plan
+authored 2026-07-30 at base revision `b28cfdb` (current HEAD short-sha; supersedes the stale
+`c82efac` Plan) for milestone M205 (charter
+`experiments/quay-perpetual-stream/charters/M205-gap-wiring-coverage-checker-fixes.md`), mapping
+all 7 task AC items to ordered RED/implementation/GREEN stages: grounding + baseline capture
+(re-verified live at `b28cfdb`: 18/18 canonical suite, 63/63-across-7-suites
+`prepare-admission-check.test.mjs`, `tasks/DIR-126-D.md` CLI `ok:true` / 22 claims / 0 findings) →
+RED Fix-1 fixture (`whose` exclusion, canonical test file only) → RED Fix-2 two-layer fixture
+(split-layer via `splitSentences` added to the line-10 import, plus a claim-layer pair with a real
+wiring verb, since "does" is not a wiring verb and a claim-level assertion on the literal AC-2 text
+would be RED-forever) → the two in-place regex-literal edits in
 `experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts` (`WIRING_VERB_RE` line 50: add
 `whose` to the `owns?` exclusion lookbehind; `splitSentences()` line 102: widen BOTH sides of the
-split boundary to ``(?<=[.!?]|\*\*)\s+(?=[A-Z`"]|\*\*)``) → GREEN canonical suite (the
+split boundary to `` (?<=[.!?]|\*\*)\s+(?=[A-Z`"]|\*\*) ``) → GREEN canonical suite (the
 `extra.acceptance` command) → mechanical `sync-vendor.sh` mirror regeneration (`--check` → `CLEAN`,
-never a hand-edit) → `tasks/DIR-126-D.md` CLI non-regression (`ok:true`/0 findings; 22-claim/
-0-finding baseline re-verified at `c82efac`) → both-copies `prepare-admission-check.test.mjs`
-non-regression (63/63, 7 suites at `c82efac`) → grounding-evidence/landing verification
-(`scripts/test.sh`). Stage blocks emit the DIR-117 iteration-2 item-3 mechanical format
-(`### Stage N` + `- AC:` + `- Files:` + `- Command:`) parsed by `milestone-preparation-check.ts`
-(`validatePlanStructure` → `plan-structure-ok`, all 7 AC indices mapped — verified live this
-session). Standardized stopping rule: at most 3 Plan-check rounds, success only at F_i=0.
+never a hand-edit) → `tasks/DIR-126-D.md` CLI non-regression (`ok:true` / 0 findings — verdict
+invariance, not claim-count invariance) → `prepare-admission-check.test.mjs` both-copies
+non-regression (63/63, 7 suites) → grounding-evidence + landing verification (`scripts/test.sh`,
+single commit to `master`, lifecycle gate). Stage blocks emit the DIR-117 iteration-2 item-3
+mechanical format (`### Stage N` + `- AC:` + `- Files:` + `- Command:`) parsed by
+`milestone-preparation-check.ts` (`parsePlanStages` → `validatePlanStructure` →
+`plan-structure-ok`) — verified live this session: "Plan has 9 stage(s), all 7 task AC item(s)
+mapped." Complete touch set, line budgets, stage dependencies, guardrails, rollback, and
+real-landing verification are in the Plan file. Standardized stopping rule: at most 3 Plan-check
+rounds, success only at F_i=0.
+
 
 ## Finding
 
@@ -667,8 +676,13 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 - experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs
 - plugin/test/prepare-admission-check.test.mjs
 - experiments/quay-perpetual-stream/scripts/task-schema.ts
+- experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts
+- experiments/quay-perpetual-stream/test/task-schema.test.mjs
 - plugin/workflows/prepare-milestone.js
 - plugin/scripts/sync-vendor.sh
+- plugin/scripts/task-schema.ts
+- plugin/test/plugin-packaging.test.mjs
+- .claude/workflows/prepare-milestone.js
+- scripts/test.sh
 - tasks/DIR-126-D.md
 - docs/plans/M205-gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md
-
