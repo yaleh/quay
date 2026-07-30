@@ -113,6 +113,23 @@ isolation-leak lesson`, an unrelated `.halt`-path/workspace-root failure mode) w
 here, so no citation crosses the φ threshold and nothing consolidates into `inherited-core.md`
 this pass.
 
+**RECONCILIATION NOTE (shared-tree concurrency, 2026-07-30):** this Land's CAPTURE step staged
+`milestones/M204/audits/iteration-0-acceptance-audit.md` into the index; before this Land's own
+commit landed, the CONCURRENT M205 PREPARE pipeline (commit `ce7a079`, "M205: PREPARED") committed
+the shared working tree and swept that staged audit artifact into its own commit alongside M205's
+prep evidence (`milestones/M205/{preparation,proposal-ledger}.json`, M205 telemetry records, M205
+plan/task). This is the shared-working-tree concurrency class CLAUDE.md warns about (two pipelines
+editing one tree). It is BENIGN here: the audit artifact landed on `master` byte-identical
+(`git diff HEAD` clean; 81 lines; CONCERNS verdict + all 23 AC/DoD write-backs intact — verified at
+this Land), there is no content loss or duplication, and CAPTURE's requirement (M204's
+charter+audit+iteration evidence on master, none left untracked) is fully met — iteration-0.md in
+Build commit `23f8891`, the audit artifact in `ce7a079`, the charter already tracked. Side effect:
+`ce7a079` also committed the 5 `gap-wiring-coverage-check-*` telemetry records the M204 audit's
+Concern #1 flagged as untracked — those provenance samples are now checked in (the concern's own
+"re-verify after M205 lands" trigger), so Concern #1's untracked-sample condition is closed by M205,
+leaving only the negligible headline-impact caveat (tracked-only P50 29.3m vs 29.1m; P85 identical
+58.8m) already on dashboard.md. No corrective action required; recorded for provenance honesty.
+
 adversarial-audit disposition: CONCERNS — all 23 AC items CONFIRMED by the auditor's own live runs/fixtures (gate item: both mirrors exit 0, well-formed JSON, code=ok, sampleCount=29; mechanical wiring verified at milestone-preparation-check.ts:1092); two disclosed concerns, neither a refutation: (1) DoD item 4 (real reuse-terminal proof) remains OPEN — 0/26 live reuse-terminal samples; the zero-work claim is fixture-proven and schema-guaranteed but not yet witnessed by live data, flagged honestly in doc §4 and the iteration report per the task's own Defaults/Risks, never synthesized; (2) 5 of the 26 doc-cited telemetry samples are untracked in the working tree (M205's concurrent prep generations, pre-land timestamps 18:06–20:33Z before the 21:03Z land commit), with negligible headline impact (tracked-only P50 29.3m vs 29.1m; P85 identical 58.8m) — deviation rows written to dashboard.md. DoD items 1/2/3/5 confirmed; item 5 carries the untracked-samples caveat.
 
 V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated carry-forward (vmeta-lag-check.sh --counter 199 experiments/quay-perpetual-stream/v-meta-ledger.md, exit 0 — both ledger rows [ok]: consolidated row "lag gate does not apply", proposed row "not past φ threshold, no lag gate").
