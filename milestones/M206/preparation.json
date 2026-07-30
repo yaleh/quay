@@ -1,0 +1,95 @@
+{
+  "taskId": "gap-prepare-milestone-split-decision-no-finality",
+  "milestoneId": "M206",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M206-gap-split-decision-finality.md",
+  "planFile": "docs/plans/M206-gap-prepare-milestone-split-decision-no-finality.md",
+  "ledgerFile": "milestones/M206/proposal-ledger.json",
+  "telemetryFile": "milestones/prepare-telemetry/gap-prepare-milestone-split-decision-no-finality/ef57a199607a.json",
+  "hashes": {
+    "proposal": "73c82acfeb28981b636268468ac2072aba50f3771b66da8111cb1ff380aebed4",
+    "charter": "88ffc6430397039013ae959fef9d4aba4dd418a9cb850737cf2346d2a9b72e30",
+    "plan": "1cbb4f2f84a5f7e8db78b09edd23e012651bf19deaad1bc31f09d04424bcab86",
+    "sources": {
+      ".claude/workflows/prepare-milestone.js": "05ed3b309c311f9e1ba858d516571654d5606ca3a7c31cb43213411648abdff7",
+      "plugin/workflows/prepare-milestone.js": "05ed3b309c311f9e1ba858d516571654d5606ca3a7c31cb43213411648abdff7",
+      "experiments/quay-perpetual-stream/scripts/proposal-convergence.ts": "0790dc57027bb821870626083437f9b83f35290a474f40dbc004b6ee30208042",
+      "plugin/scripts/proposal-convergence.ts": "0790dc57027bb821870626083437f9b83f35290a474f40dbc004b6ee30208042",
+      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "185220e4c966ec2cb3e9d081a6a71f605e6f4da9f87ae8244c44f58ba317b6ff",
+      "plugin/scripts/milestone-preparation-check.ts": "185220e4c966ec2cb3e9d081a6a71f605e6f4da9f87ae8244c44f58ba317b6ff",
+      "experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs": "fc5a0def2ddbc7d0f5541659aac104a344b14262762fcfb6419eeaac53bbe59d",
+      "plugin/test/prepare-milestone-convergence.test.mjs": "1a2d8d174a4511ff1458b6bbf5b3680f130d7b423cbb88966c5e26307907d722",
+      "experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts": "fb1296484ce047788962753fcabaff7f81e7468279c13d5168e21a6c371d70b0",
+      "plugin/scripts/prepare-admission-check.ts": "fb1296484ce047788962753fcabaff7f81e7468279c13d5168e21a6c371d70b0",
+      "experiments/quay-perpetual-stream/scripts/task-schema.ts": "aae695004405fffb3cb9c2cbaf28ea5ffe4504d46f82ad3e2663b925fa754486",
+      "plugin/scripts/task-schema.ts": "0ee10bf50adf01a216882e20f330dbd4e40905f56f8a6e51847f9b69b2f2e81a"
+    },
+    "ledger": "9f236746c9e3bac4a5b2dcf131139a1dbc4ac9be61d3facbed500fe19cc2c482",
+    "telemetry": "4f3b121193f2ea8a819413d27964f6820a3fd42671ba83dd4c6adaa15def82a3"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 2,
+    "findings": 0
+  },
+  "touches": [
+    "tasks/gap-prepare-milestone-split-decision-no-finality.md",
+    ".claude/workflows/prepare-milestone.js",
+    "plugin/workflows/prepare-milestone.js",
+    "experiments/quay-perpetual-stream/scripts/proposal-convergence.ts",
+    "plugin/scripts/proposal-convergence.ts",
+    "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts",
+    "plugin/scripts/milestone-preparation-check.ts",
+    "experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs",
+    "plugin/test/prepare-milestone-convergence.test.mjs",
+    "docs/plans/M206-gap-prepare-milestone-split-decision-no-finality.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planAuthor": {
+      "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      },
+      {
+        "round": 2,
+        "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": true,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 1,
+    "proposalReviewRounds": 2,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785438079436,
+    "endedAtMs": 1785438936061,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "sha256:4206fc0b81d4"
+      },
+      {
+        "round": 1,
+        "hash": "72bb188fedf57114"
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "recordId": "31161d095578",
+  "attemptId": "31161d095578",
+  "generationId": "31161d095578",
+  "admission": {
+    "key": ".::gap-prepare-milestone-split-decision-no-finality",
+    "ownerExecutionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1",
+    "fencingToken": 0,
+    "acquiredAt": 1785435936648
+  },
+  "workspace": ".",
+  "taskId": "gap-prepare-milestone-split-decision-no-finality",
+  "milestoneId": "M206",
+  "class": "development",
+  "highRisk": true,
+  "hashes": {
+    "charter": "88ffc6430397039013ae959fef9d4aba4dd418a9cb850737cf2346d2a9b72e30",
+    "taskContract": "ef0e90c8df29df88eb116dd40bb6a489563f3ae54647675bab9175d764205d01",
+    "proposal": "e7dcd467d033ce6ed4a9596d4b039e868bd2828a59b6a6ccc68210738d85fd79",
+    "reviewPolicy": "46ec3ada793407d283218a285d9697e8c6d2c69297ac15a86977b5bea8c37189"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "preflight-rejected",
+    "phase": "PreflightPlan",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785437137094,
+  "telemetryWriteOk": true
+}

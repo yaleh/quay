@@ -96,13 +96,20 @@ Confirmed greenfield in this session: `grep -E
 across all three production files returns **0 matches**; `milestones/prepare-decisions/` does not
 exist (`ls`: No such file or directory), while `milestones/prepare-telemetry/` does (committed
 records exist, including a subdirectory for this very task; schemaVersion 2 — the durability
-precedent). And this is live, not historical:
-`.quay/prepare-leases/gap-prepare-milestone-split-decision-no-finality.generation.json` on disk
-right now records THIS task's own most recent generation as `{terminalPhase: "ProposalReview",
-outcome: "needs-human", reason: "split-recommended", cacheable: true}` (generationId `0eba810e4ccb`)
-— the defect is reproducing against the task that would fix it. The defect class is **grouping /
-counting / finality**, not caching, which is why DIR-126-C (M202, landed) did not prevent the
-recurrence.
+precedent). And the reproduction is not merely historical — it is in this task's own generation-
+record chain.
+`.quay/prepare-leases/gap-prepare-milestone-split-decision-no-finality.generation.json` recorded,
+at generationId `0eba810e4ccb`, a `{terminalPhase: "ProposalReview", outcome: "needs-human",
+reason: "split-recommended", cacheable: true}` terminal: the split defect firing against the very
+task that would fix it (that record survives as HISTORY — the file is overwritten wholesale per
+terminal, decision 9 — with the durable copy in `milestones/prepare-telemetry/`'s subdirectory for
+this task). A direct read of the SAME file in THIS session (2026-07-30) shows its CURRENT record is
+a LATER generation — `{terminalPhase: "PreflightPlan", outcome: "revision-needed", reason:
+"preflight-rejected", cacheable: false}` (generationId `31161d095578`, recordedAtMs
+1785437137089): that generation PASSED ProposalReview and was then rejected at the next gate,
+independently demonstrating AC13's live `preflight-touches-mismatch` risk reproducing against this
+very task. The defect class is **grouping / counting / finality**, not caching, which is why
+DIR-126-C (M202, landed) did not prevent the recurrence.
 
 One pre-existing asymmetry this task must respect: the pure `checkSplitRecommendation`
 (`proposal-convergence.ts:130`) has a third trigger, `split-touch-set-too-large` (:140-142), that is
@@ -135,8 +142,9 @@ mirrors, same convention as `_splitCheck`):
   (anti-laundering: one provable contract cannot become two cosmetically distinct "mechanisms" —
   this is what mechanically enforces AC3's "distinct proof surface"). On success → `{ok:true, count,
   inventoryHash}` with `count = inventory.filter(m => m.independentlyShippable).length` — **a
-  script-side mechanical derivation, never a trusted reviewer integer, on any production branch**
-  (AC1). `_splitCheck`/`checkSplitRecommendation` gain a `mechanismInventory` parameter and perform
+  script-side mechanical derivation, never a trusted reviewer integer, on any steady-state production branch**
+  (AC1 — the ONE-generation `legacy-scalar` fallback below is the sole flagged, sunset-enforced
+  exception). `_splitCheck`/`checkSplitRecommendation` gain a `mechanismInventory` parameter and perform
   the derivation themselves; `mechanismCount` as a directly-trusted input disappears from every
   non-legacy production path.
 - A *missing* `mechanisms` field (absent — distinct from an explicit `[]`) is a new fail-closed
@@ -162,6 +170,20 @@ field plus an additive `splitBypassAvailable` input and a matching `consume-spli
 `mechanismInventorySource:'legacy-scalar'` in ledger/telemetry so the fallback is auditable, never
 silent — mirroring DIR-125's own bare-number `findings` fallback precedent at :519-525 and keeping
 existing mocks/fixtures green (AC12). The production prompt no longer requests the bare field.
+
+**The ONE-generation sunset is mechanically enforced, not audit-only.** The M5 ring entry carries
+one additive field, `mechanismInventorySource` (`'typed' | 'legacy-scalar'`), and on ring append
+the phase compares against the immediately-preceding same-`(charterHash, scopeHash,
+reviewPolicyHash)` entry: if BOTH the current and the preceding entry carry
+`mechanismInventorySource:'legacy-scalar'`, the generation fails closed with the SAME
+`needs-human`/`mechanism-inventory-missing` terminal the reviewer-output path produces — a second
+consecutive scalar-only output IS a missing inventory once the one-generation allowance is
+exhausted (the same ProposalReview/reviewer-output context AC17's disambiguation names, not a third
+code). The fallback is therefore self-terminating on any real production stream: at most one
+consecutive legacy-format generation per scope key; a reviewer that keeps emitting the scalar hits
+a human decision point, not an indefinite fallback. AC12's fixtures still pass because they
+exercise the legacy shape in isolation — a single generation against an empty or typed ring
+history never presents two consecutive `legacy-scalar` entries at one key.
 
 **(M2) Root-cause-aware blocking clustering (RA3).** `_findingSchema` (:486-493) gains two OPTIONAL
 fields: `rootCauseKey` (reviewer-supplied string) and `repairable` (boolean, **default `false` —
@@ -261,7 +283,8 @@ Two new CLI submodes on `proposal-convergence.ts` (same `agent()`-wraps-CLI disp
 **(M5) Cross-generation instability detection (RA6).** A NEW gitignored bounded ring file
 `.quay/prepare-leases/<taskId>.mechanism-history.json` (last 5 entries — `.quay/prepare-leases/`
 verified gitignored via `git check-ignore`), each `{charterHash, scopeHash, reviewPolicyHash,
-mechanismInventoryHash, mechanismCount, generationId, atMs}`, appended once per full-review round
+mechanismInventoryHash, mechanismCount, mechanismInventorySource, generationId, atMs}`, appended
+once per full-review round
 (round 0 only — delta rounds reuse the round-0 inventory). This is a SEPARATE file from
 `.quay/prepare-leases/<taskId>.generation.json` on verified write-semantics grounds: the generation
 record is overwritten wholesale per terminal (`proposal-convergence.ts:639`
@@ -336,7 +359,8 @@ phase('ProposalReview') (:406)
   -> wiring-coverage-check agent (:542, unchanged call/merge/fail-closed)
   -> NEW: deriveMechanismInventory(mechanisms) -> {count, inventoryHash} | needs-human
      (mechanism-inventory-missing / mechanism-inventory-invalid, fail closed)
-  -> NEW: append ring entry to .quay/prepare-leases/<taskId>.mechanism-history.json (bounded 5; write failure non-fatal)
+  -> NEW: append ring entry (carries mechanismInventorySource) to .quay/prepare-leases/<taskId>.mechanism-history.json (bounded 5; write failure non-fatal)
+     (second consecutive 'legacy-scalar' at the same scope key -> mechanism-inventory-missing, stop — M1 sunset)
   -> NEW: compare vs immediately-preceding same-scope entry -> differs -> split-assessment-unstable, stop
   -> while(true) (:563, existing structure, parameterized):
      - zero open blocking -> zero-finding PASS (unchanged)
@@ -412,6 +436,11 @@ phase('Receipt') (:754)
 - Missing `mechanisms` on a fresh (non-legacy) dispatch → `needs-human`/`mechanism-inventory-missing`
   — today's silent-undefined behavior (`_mechanismCount` → `undefined` → `_splitCheck` skips the
   count branch at :558) is removed, never silently skipped.
+- Second consecutive `legacy-scalar` reviewer output at the same `(charterHash, scopeHash,
+  reviewPolicyHash)` scope key → `needs-human`/`mechanism-inventory-missing` (M1's sunset: the
+  one-generation allowance is exhausted, so the scalar-only output is now treated as a missing
+  inventory); a FIRST legacy-format output at a scope key is still accepted as the synthetic
+  single-entry inventory.
 - Invalid inventory (duplicate `id`, dangling `dependsOn`, duplicate `proofSurface`) →
   `needs-human`/`mechanism-inventory-invalid`.
 - `rootCauseKey`/`repairable` omitted → each finding is its own cluster member (legacy behavior) and
@@ -435,11 +464,14 @@ phase('Receipt') (:754)
   `mechanismInventory`/`repairable` are additive — existing destructuring callers unaffected.
   `nextAction` gains only an additive input and one additive action value.
 - Reviewer schema retains `mechanismCount: {type:'number'}` for one generation as a flagged legacy
-  fallback only (`mechanismInventorySource:'legacy-scalar'`), mirroring DIR-125's bare-number
+  fallback only (`mechanismInventorySource:'legacy-scalar'`, the ONE-generation sunset mechanically
+  enforced via consecutive-legacy ring detection — M1), mirroring DIR-125's bare-number
   `findings` fallback precedent (:519-525) — keeps existing mocks/fixtures green (AC12).
 - `CACHEABLE_TERMINALS`/`decideResumeGeneration` evaluation order untouched; `split-recommended`
-  stays a cacheable terminal on unchanged `proposalHash` (verified :247-250 — this task's own live
-  `.generation.json` carries `cacheable: true`). This task adds a PARALLEL coarser (scope-keyed, not
+  stays a cacheable terminal on unchanged `proposalHash` (verified :247-250 — this task's own
+  `.generation.json` recorded `cacheable: true` at its `split-recommended` generation
+  `0eba810e4ccb`; the file's CURRENT record is the later `preflight-rejected` generation cited in
+  the Problem framing). This task adds a PARALLEL coarser (scope-keyed, not
   proposal-text-keyed) short-circuit that fires before a reviewer would even run — complementary, not
   replacing. Only `_currentReviewPolicyHash()`'s internal composition changes (X2); both existing
   consumers treat it opaquely.
@@ -455,6 +487,13 @@ phase('Receipt') (:754)
 - **Repairable-carve-out gaming.** A reviewer could mis-mark a genuinely non-repairable cluster
   `repairable:true`. Blast radius bounded to at most one extra delta round by the one-shot guard;
   terminal regardless afterward.
+- **Legacy-scalar compatibility window.** For exactly one consecutive generation per scope key the
+  bare reviewer integer still drives the split outcome through the synthetic `legacy-0` inventory.
+  Accepted-risk note: this is the flagged compat window that keeps existing mocks/fixtures green
+  (AC12); it is audited (`mechanismInventorySource:'legacy-scalar'` in ring/ledger/telemetry, never
+  silent) and self-terminating — consecutive-legacy ring detection fires
+  `mechanism-inventory-missing` on a second consecutive scalar-only output, so the window cannot
+  extend itself.
 - **Procedural human-authorship guarantee** for `--record-split-decision` — accepted, consistent with
   `.halt`/`restart-readiness-check.sh`; mitigated by the grep-based regression test (both halves,
   AC7).
@@ -515,8 +554,10 @@ phase('Receipt') (:754)
 
 ### AC coverage
 
-- AC1 (typed inventory; mechanically derived count; no bare int trusted) → (M1): `_splitCheck`
-  consumes only `deriveMechanismInventory`'s derived count on every production path.
+- AC1 (typed inventory; mechanically derived count; no bare int trusted on steady-state production
+  paths; one-generation legacy fallback sunset-enforced) → (M1): `_splitCheck` consumes only
+  `deriveMechanismInventory`'s derived count on every non-legacy production path, and the
+  consecutive-legacy ring detection mechanically enforces the fallback's ONE-generation limit.
 - AC2 (A.1-A.5 grouped as one mechanism; read-only report as a second; rename/reorder-stable
   hash/count) → (M1)'s grouping-rule prompt instruction (grounded in `b8b87c3`'s verbatim Mechanism A
   / Mechanism B ruling — commit text says A.0-A.5) + `proofSurface`-sorted `inventoryHash` +
@@ -552,8 +593,9 @@ phase('Receipt') (:754)
   P11.
 - AC (grounding evidence) → Problem framing's verbatim commit-subject citations
   (`7808f0c`/`1170b25`/`a449053`/`b8b87c3`), the verbatim `b8b87c3` ruling quote, the current-tree
-  line numbers verified by direct read in this session, the grep-verified greenfield, and the live
-  `.generation.json` split-recommended record for this very task.
+  line numbers verified by direct read in this session, the grep-verified greenfield, and this
+  task's own `.generation.json` split-recommended record (historical generation `0eba810e4ccb`,
+  with the current record being the later `preflight-rejected` generation `31161d095578`).
 
 ### Alternatives considered and rejected
 
@@ -676,16 +718,17 @@ fixture, grep, or diff evidence — never descriptive prose restating the claim.
 
 ## Plan
 
-See docs/plans/M206-gap-prepare-milestone-split-decision-no-finality.md (authored 2026-07-30, base
-revision fe3898e). Nine ordered stages (typed inventory M1 → root-cause clustering M2 → repairable
-bypass M3 → decision record + admission adjudication M4 → instability ring M5 → policy version X2 →
-workflow mirrors → Receipt binding X1 → lockstep/golden-replay verification) each carry the
-mechanical `- AC:`/`- Files:`/`- Command:` block, RED/implementation/GREEN checks with expected exit
+See docs/plans/M206-gap-prepare-milestone-split-decision-no-finality.md (re-authored 2026-07-30,
+base revision 2d67a92, live `--preflight-plan` gate verified ok:true with zero findings). Nine
+ordered stages (typed inventory M1 → root-cause clustering M2 → repairable bypass M3 → decision
+record + admission adjudication M4 → instability ring M5 → policy version X2 → workflow mirrors →
+Receipt binding X1 → lockstep/golden-replay verification) each carry the mechanical
+`- AC:`/`- Files:`/`- Command:` block, RED/implementation/GREEN checks with expected exit
 behavior, code/prose classification, line budgets, and strict dependencies; every 1-based AC index
-(1-18) appears in at least one stage's `- AC:` list. Standardized stopping rule: at most 3
-Plan-check rounds, success only at F_i=0 (live `prepare-admission-check.ts --preflight-plan` returns
-`ok:true`). Golden replay of DIR-126-D's real 8→4→≤2→6 sequence plus a legitimate split case and a
-COMMIT-rerun case gates production cutover (charter Done-when).
+(1-18) appears in at least one stage’s `- AC:` list. Standardized stopping rule: at most 3
+Plan-check rounds, success only at F_i=0 (live `prepare-admission-check.ts --preflight-plan`
+returns `ok:true` with zero findings). Golden replay of DIR-126-D’s real 8→4→≤2→6 sequence
+plus a legitimate split case and a COMMIT-rerun case gates production cutover (charter Done-when).
 
 ## Finding
 
@@ -741,7 +784,13 @@ the split decision evidence-bearing, stable, and terminal until its actual scope
 
 - [ ] ProposalReview returns a typed mechanism inventory with stable IDs, ownership, proof
   surfaces, dependencies, independently-shippable decisions, and rationale; the split count is
-  mechanically derived from that inventory and no production branch trusts a bare reviewer integer.
+  mechanically derived from that inventory and no steady-state production branch trusts a bare
+  reviewer integer — the sole exception is the flagged ONE-generation `legacy-scalar` fallback,
+  whose sunset is mechanically enforced: a dedicated fixture confirms that a SECOND consecutive
+  `legacy-scalar` reviewer output at the same `(charterHash, scopeHash, reviewPolicyHash)` scope
+  key yields the `needs-human`/`mechanism-inventory-missing` terminal (not an indefinite
+  fallback), while a single legacy-format output against an empty/typed ring history is still
+  accepted as the synthetic single-entry inventory.
 - [ ] RED/GREEN fixtures classify DIR-126-D's A.1-A.5 terminal-write call-site variants as one
   atomic mechanism and its read-only report as a second mechanism; renaming or reordering entries
   does not change the inventory hash or count.

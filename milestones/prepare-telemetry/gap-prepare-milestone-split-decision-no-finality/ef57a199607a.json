@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "recordId": "ef57a199607a",
+  "attemptId": "ef57a199607a",
+  "generationId": "ef57a199607a",
+  "admission": {
+    "key": ".::gap-prepare-milestone-split-decision-no-finality",
+    "ownerExecutionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1",
+    "fencingToken": 0,
+    "acquiredAt": 1785437423690
+  },
+  "workspace": ".",
+  "taskId": "gap-prepare-milestone-split-decision-no-finality",
+  "milestoneId": "M206",
+  "class": "development",
+  "highRisk": true,
+  "hashes": {
+    "charter": "88ffc6430397039013ae959fef9d4aba4dd418a9cb850737cf2346d2a9b72e30",
+    "taskContract": "f944ebbfaf731f5840e135f497c2006a71944dd36567556839f400a83482b3b8",
+    "proposal": "7c2c62416af3ad19f2405556548d3fc6601d5a12838f2ad9aa08cdc7ad7da8f3",
+    "reviewPolicy": "46ec3ada793407d283218a285d9697e8c6d2c69297ac15a86977b5bea8c37189"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "prepared",
+    "reason": "prepared",
+    "phase": "Receipt",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": false,
+    "ok": null,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785441705581,
+  "telemetryWriteOk": true
+}
