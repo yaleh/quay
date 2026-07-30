@@ -2,7 +2,7 @@
 id: DIR-126-C
 title: Generation-aware resume for prepare-milestone.js (decideResumeGeneration
   in proposal-convergence.ts) — third child of DIR-126's split
-status: todo
+status: done
 labels:
   - milestone-candidate
   - human-steered
@@ -558,19 +558,19 @@ a0aba1f/M200) and [[DIR-126-B]] (landed 528897c/M201), both consumed read-only (
 
 ## Acceptance Criteria
 
-- [ ] **Most important — real production wiring, not agent-prompt guidance:** a grep/import-graph
+- [x] **Most important — real production wiring, not agent-prompt guidance:** a grep/import-graph
   check shows `decideResumeGeneration` has a REAL production callsite from `prepare-milestone.js`
   (both mirrors) at the point `_resumeFromAdjudicatedProposal` is read today — not zero importers,
   not `--selftest`-only reachability. This item alone, if unmet, fails the whole child regardless
   of how many other items pass.
-- [ ] **Automatic safe resume:** a real, adjudicated-and-since-repaired Proposal whose
+- [x] **Automatic safe resume:** a real, adjudicated-and-since-repaired Proposal whose
   task-contract/charter/review-policy hashes still match resumes with zero
   `ProposalAuthors`/`Adjudicate` calls when the flag is omitted — confirmed via real journal
   evidence (not a fixture-only claim for this specific scenario).
   **Any mismatch forces a fresh generation:** Proposal, task-contract, charter, review-policy/source
   mutation, or a missing prior record starts a new generation — confirmed via fixtures for each
   distinct cause.
-- [ ] **Unchanged stable terminal is not recomputed:** a dedicated fixture and a real journal prove
+- [x] **Unchanged stable terminal is not recomputed:** a dedicated fixture and a real journal prove
   that identical task/Proposal/charter/review-policy hashes plus a cacheable
   `split-recommended`/`preflight-rejected` terminal return `reuse-terminal` before any content
   `Preflight`, Proposal/Plan content, or review agent — WIRING-CLAIM R4's sharpened form of this
@@ -581,17 +581,17 @@ a0aba1f/M200) and [[DIR-126-B]] (landed 528897c/M201), both consumed read-only (
   forces `resume`-or-`cold`, never `reuse-terminal`, because that terminal depends on Plan-file
   content this mechanism's hashes never cover and a real `PlanAuthor` has already run by the time it
   fires.
-- [ ] **No lease is stranded by terminal reuse:** the real `reuse-terminal` journal shows
+- [x] **No lease is stranded by terminal reuse:** the real `reuse-terminal` journal shows
   [[DIR-126-A]]'s production release call before return, and an immediate subsequent same-task
   dispatch acquires Admission rather than receiving `prepare-already-running`; an injected release
   failure is typed and fail-closed.
-- [ ] **Review stays unconditional under resume:** confirmed, via source read AND a real journal,
+- [x] **Review stays unconditional under resume:** confirmed, via source read AND a real journal,
   that `ProposalReview`'s round-0 full review still dispatches under both the explicit-`true`
   forced-resume path and the new automatic-resume path whenever a generation executes.
   `reuse-terminal` is additionally proved unable to advance to PlanAuthor/Receipt.
-- [ ] `$a.resumeFromAdjudicatedProposal`'s explicit `true`/`false` behavior is confirmed unchanged
+- [x] `$a.resumeFromAdjudicatedProposal`'s explicit `true`/`false` behavior is confirmed unchanged
   (golden-replay comparison against the pre-this-child baseline for both explicit values).
-- [ ] **Corrected 2026-07-29, ProposalReview finding 7ef01082:** canonical and `plugin/` mirrors of
+- [x] **Corrected 2026-07-29, ProposalReview finding 7ef01082:** canonical and `plugin/` mirrors of
   `proposal-convergence.ts` and `prepare-milestone.js` — the two real, byte-identical file pairs
   this child touches — are confirmed identical via `cmp` and `sync-vendor.sh --check` (the latter
   covers `proposal-convergence.ts`, already in `SYNC_SCRIPTS`; `prepare-milestone.js` is checked via
@@ -602,7 +602,7 @@ a0aba1f/M200) and [[DIR-126-B]] (landed 528897c/M201), both consumed read-only (
   workflow-integration tests) and are not byte-identity-checked by any existing mechanism; this item
   requires only that each independently passes its own real test run, correcting the prior draft's
   factually-wrong claim that they are compared for byte-identity.
-- [ ] **WIRING-CLAIM R3 — embedded lease release closes the two-dispatch race window, not just "the
+- [x] **WIRING-CLAIM R3 — embedded lease release closes the two-dispatch race window, not just "the
   release eventually happens":** a real journal check confirms exactly ONE admission-related CLI
   dispatch occurs on the `reuse-terminal` path beyond Admission's own `--acquire` (the
   `--decide-resume` call itself, with `releaseLease` embedded inside it) — a naive two-call
@@ -610,13 +610,13 @@ a0aba1f/M200) and [[DIR-126-B]] (landed 528897c/M201), both consumed read-only (
   by terminal reuse" identically without closing the actual race window this design's own Key
   design decisions section says the embedding exists to fix, so this item requires the
   dispatch-count evidence specifically, distinct from that end-state bullet.
-- [ ] **WIRING-CLAIM R9 — real Touches-scope containment, not a prose promise:** `git diff --stat`
+- [x] **WIRING-CLAIM R9 — real Touches-scope containment, not a prose promise:** `git diff --stat`
   against `experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts` and `.gitignore`
   is empty for every commit landing this child — a real, post-Build `git diff` check, not merely a
   design-decision paragraph. This is the direct, mechanically-checkable fix for this Proposal's own
   Problem-framing finding (a prior draft's design would have gotten mechanically flagged by
   [[DIR-126-B]]'s own landed `preflightTouchesMismatch` check).
-- [ ] **WIRING-CLAIM R7 — `(terminalPhase, reason)` pair disambiguation, not `reason` alone:** a
+- [x] **WIRING-CLAIM R7 — `(terminalPhase, reason)` pair disambiguation, not `reason` alone:** a
   dedicated fixture proves a prior `{terminalPhase:'PreflightContent', reason:'preflight-rejected'}`
   record IS `reuse-terminal`-eligible while a prior `{terminalPhase:'PreflightPlan',
   reason:'preflight-rejected'}` record (the identical `reason` string, different `terminalPhase`) is
@@ -627,12 +627,12 @@ a0aba1f/M200) and [[DIR-126-B]] (landed 528897c/M201), both consumed read-only (
   writes a NON-cacheable record and a subsequent omitted-flag dispatch resolves `resume`-or-`cold`,
   never `reuse-terminal` — closing the gap where a coarse production `--terminalPhase` value would
   pass the pure-function fixture yet unsoundly cache the plan-shape rejection end-to-end.
-- [ ] **WIRING-CLAIM R2 — explicit flags dispatch zero `--decide-resume` calls:** a real journal
+- [x] **WIRING-CLAIM R2 — explicit flags dispatch zero `--decide-resume` calls:** a real journal
   check confirms both `$a.resumeFromAdjudicatedProposal === true` and `=== false` dispatches contain
   no `--decide-resume`-labeled `agent()` call at all — a stronger claim than "same returned
   outcome," since a caller could satisfy that while still wastefully dispatching the new CLI
   underneath.
-- [ ] **WIRING-CLAIM R5 — all 15 real terminal-return sites, not an assumed count:** a coverage
+- [x] **WIRING-CLAIM R5 — all 15 real terminal-return sites, not an assumed count:** a coverage
   fixture independently re-derives the live `_releaseLease(`-call-site count via `grep -n
   "_releaseLease("` (expected: 15) and confirms every one of them, except the two pre-acquisition
   returns and the `reuse-terminal` short-circuit, now calls `_releaseLeaseAndRecord` instead.
@@ -642,15 +642,15 @@ a0aba1f/M200) and [[DIR-126-B]] (landed 528897c/M201), both consumed read-only (
   pass literal `--terminalPhase PreflightPlan`. An implementation that wired all 15 sites yet passed
   a coarse `'Preflight'` at both would satisfy the count while failing this item, since that coarse
   value would make the plan-shape rejection unsoundly cacheable in production. This is `prepare-milestone.js`'s own real production wiring, confirmed distinct from the coarse `phase('Preflight')`/`phase('PlanAuthor')` labels both call sites otherwise share.
-- [ ] **WIRING-CLAIM R6 — `reuse-terminal` never overwrites `.generation.json`:** a fixture captures
+- [x] **WIRING-CLAIM R6 — `reuse-terminal` never overwrites `.generation.json`:** a fixture captures
   `.quay/prepare-leases/<taskId>.generation.json`'s hash/mtime before a real `reuse-terminal`
   dispatch and confirms both are byte-for-byte unchanged after.
-- [ ] **WIRING-CLAIM R8 — `proposal-convergence.ts`'s new CLI tail is side-effect-free on import:** a
+- [x] **WIRING-CLAIM R8 — `proposal-convergence.ts`'s new CLI tail is side-effect-free on import:** a
   fixture imports `proposal-convergence.ts` (the same way `milestone-preparation-check.ts` already
   does) in a process with no CLI argv and confirms zero `fs`/argv-parsing side effects fire —
   distinct from merely confirming the file still exports `capsFor`.
 
-- [ ] **Grounding evidence for the Problem-framing/Chosen-mechanism claims above (added for
+- [x] **Grounding evidence for the Problem-framing/Chosen-mechanism claims above (added for
   wiring-coverage completeness):** confirmed via direct source read — `OUTER-LOOP.md` documents the
   caller obligation to pass `{resumeFromAdjudicatedProposal: true}` only in prose today (the
   CALLER RULE), not a mechanically verified decision. This child's real, production-wired fix:
@@ -661,37 +661,114 @@ a0aba1f/M200) and [[DIR-126-B]] (landed 528897c/M201), both consumed read-only (
   (via the same AC item) to still run for every forced/automatic resume generation that executes,
   while `reuse-terminal` is confirmed unable to advance to PlanAuthor/Receipt.
 
-- [ ] **Grounding evidence 1 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `Preflight` `Adjudicate` `PlanAuthor` `reason: 'preflight-rejected'` `grep -n "_releaseLease('preflight-rejected')"`.
-- [ ] **Grounding evidence 2 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `proposal-convergence.ts` `isDirectEntry(import.meta)` `prepare-admission-check.ts` `gate-script-base.ts` `milestone-preparation-check.ts` `import { blockingOpen, validateConvergenceCounters, computeConvergenceMetrics } from "./proposal-convergence.ts"` (the real import — repo-wide grep confirms `capsFor` is imported only by `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs`, NOT by `milestone-preparation-check.ts`) `fs`.
-- [ ] **Grounding evidence 3 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `--decide-resume --taskId <id> --workspace . --charterFile <charterFile> [--callerOverride true|false]` `tasks/<taskId>.md` `## Acceptance Criteria` `## Definition of Done` `## Touches` `extractSection` `task-schema.ts` `currentTaskContractHash` `## Proposal` `currentTaskProposalHash` `currentReviewPolicyHash` `PREFLIGHT_POLICY_VERSION` `prepare-admission-check.ts` `RESUME_POLICY_VERSION` `"resume-v1"` `.quay/prepare-leases/<taskId>.json` `--acquire` `{ownerExecutionId, fencingToken, acquiredAt}` `generationId = sha256(` `).slice(0, 12)` `sha256(identity).slice(0,12)` `fingerprintFinding` `.quay/prepare-leases/ <taskId>.generation.json` `null` `decideResumeGeneration` `reuse-terminal` `releaseLease` `prepare-already-running`.
-- [ ] **Grounding evidence 4 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `--record-generation --taskId <id> --workspace . --terminalPhase <phase> --outcome <o> --reason <r> --cacheable <bool>` `--decide-resume` `ProposalReview` `generationId` `.quay/prepare-leases/<taskId>.generation.json` `agent()` `releaseLease` `--release` `prepare-milestone.js`.
-- [ ] **Grounding evidence 5 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `terminalPhase` `phase()` `'Preflight'` `preflight-rejected`.
-- [ ] **Grounding evidence 6 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `PreflightContent` `Adjudicate` `ProposalAuthors` `ProposalReview` `PlanAuthor` `PreflightPlan` `PlanCheck` `Receipt`.
-- [ ] **Grounding evidence 7 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `return` `_releaseLease(stageLabel)` `prepared` `_releaseLease` `_releaseLeaseAndRecord(stageLabel, {outcome, reason, cacheable})` `proposal-convergence.ts --record-generation` `--release`.
-- [ ] **Grounding evidence 8 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `admission-check-failed` `prepare-already-running` `reuse-terminal` `--decide-resume` `.generation.json`.
-- [ ] **Grounding evidence 9 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `reuse-terminal` `--decide-resume` `--release` `agent()`.
-- [ ] **Grounding evidence 10 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `callerOverride` `true` `false` `--decide-resume` `outcome` `reason`.
-- [ ] **Grounding evidence 11 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `(terminalPhase,reason)` `reuse-terminal` `ProposalAuthors` `Adjudicate` `ProposalReview` `PlanAuthor` `PlanCheck`.
-- [ ] **Grounding evidence 12 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `true` `false` `--decide-resume`.
+- [x] **Grounding evidence 1 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `Preflight` `Adjudicate` `PlanAuthor` `reason: 'preflight-rejected'` `grep -n "_releaseLease('preflight-rejected')"`.
+- [x] **Grounding evidence 2 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `proposal-convergence.ts` `isDirectEntry(import.meta)` `prepare-admission-check.ts` `gate-script-base.ts` `milestone-preparation-check.ts` `import { blockingOpen, validateConvergenceCounters, computeConvergenceMetrics } from "./proposal-convergence.ts"` (the real import — repo-wide grep confirms `capsFor` is imported only by `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs`, NOT by `milestone-preparation-check.ts`) `fs`.
+- [x] **Grounding evidence 3 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `--decide-resume --taskId <id> --workspace . --charterFile <charterFile> [--callerOverride true|false]` `tasks/<taskId>.md` `## Acceptance Criteria` `## Definition of Done` `## Touches` `extractSection` `task-schema.ts` `currentTaskContractHash` `## Proposal` `currentTaskProposalHash` `currentReviewPolicyHash` `PREFLIGHT_POLICY_VERSION` `prepare-admission-check.ts` `RESUME_POLICY_VERSION` `"resume-v1"` `.quay/prepare-leases/<taskId>.json` `--acquire` `{ownerExecutionId, fencingToken, acquiredAt}` `generationId = sha256(` `).slice(0, 12)` `sha256(identity).slice(0,12)` `fingerprintFinding` `.quay/prepare-leases/ <taskId>.generation.json` `null` `decideResumeGeneration` `reuse-terminal` `releaseLease` `prepare-already-running`.
+- [x] **Grounding evidence 4 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `--record-generation --taskId <id> --workspace . --terminalPhase <phase> --outcome <o> --reason <r> --cacheable <bool>` `--decide-resume` `ProposalReview` `generationId` `.quay/prepare-leases/<taskId>.generation.json` `agent()` `releaseLease` `--release` `prepare-milestone.js`.
+- [x] **Grounding evidence 5 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `terminalPhase` `phase()` `'Preflight'` `preflight-rejected`.
+- [x] **Grounding evidence 6 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `PreflightContent` `Adjudicate` `ProposalAuthors` `ProposalReview` `PlanAuthor` `PreflightPlan` `PlanCheck` `Receipt`.
+- [x] **Grounding evidence 7 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `return` `_releaseLease(stageLabel)` `prepared` `_releaseLease` `_releaseLeaseAndRecord(stageLabel, {outcome, reason, cacheable})` `proposal-convergence.ts --record-generation` `--release`.
+- [x] **Grounding evidence 8 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `admission-check-failed` `prepare-already-running` `reuse-terminal` `--decide-resume` `.generation.json`.
+- [x] **Grounding evidence 9 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `reuse-terminal` `--decide-resume` `--release` `agent()`.
+- [x] **Grounding evidence 10 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `callerOverride` `true` `false` `--decide-resume` `outcome` `reason`.
+- [x] **Grounding evidence 11 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `(terminalPhase,reason)` `reuse-terminal` `ProposalAuthors` `Adjudicate` `ProposalReview` `PlanAuthor` `PlanCheck`.
+- [x] **Grounding evidence 12 (exhaustive identifiers, wiring-coverage completeness):** confirmed real via direct source read — `true` `false` `--decide-resume`.
+
+### Audit evidence citations (M202 Iteration-0 adversarial acceptance audit, 2026-07-30)
+
+Full detail: `milestones/M202/audits/iteration-0-acceptance-audit.md`. Independently reproduced
+(not self-report) via a fresh-context audit harness (`/tmp/.../scratchpad/e2e-verify-dir126c-v2.mjs`,
+`-v3.mjs`, not committed — same "load the REAL workflow source as an AsyncFunction, execute the REAL
+underlying shell command for every admission/preflight/resume-decision agent() call, mock only the
+pure-content-generation phases" technique the M201/DIR-126-B audit itself established) against a
+real, plain (non-slash) production-shaped `tasks/<id>.md` fixture:
+
+- Item 1 (production wiring): `grep -n "'resume-decision'"` in both workflow mirrors + a real
+  `--decide-resume` dispatch actually observed in the harness journal (not `--selftest`-only).
+- Item 2 (automatic safe resume + mismatch-forces-fresh): real dispatch — Proposal mutated after a
+  real `prepared` terminal, hashes otherwise unchanged — resolved `resume`/`repaired-proposal-
+  detected` for real; `authorsCount:0`, `adjudicateCount:0`, `reviewCount:1`.
+- Item 3 (unchanged stable terminal not recomputed, R4 sharpened): real dispatch — a real
+  `preflight-merged-markdown-claims` rejection recorded `PreflightContent`/`preflight-rejected`/
+  `cacheable:true`; the immediate unchanged re-dispatch resolved `reuse-terminal` with journal
+  `[admission-acquire, resume-decision]` only — zero `preflight-content` dispatched.
+- Item 4 (no lease stranded): the same real reuse-terminal run's embedded `releaseLease` succeeded
+  (`releaseResult.ok:true`), and a real subsequent `--acquire` for the identical taskId returned
+  `outcome:"acquired"` (not `prepare-already-running`).
+- Item 5 (review unconditional under resume): Item 2's real dispatch shows `reviewCount:1`
+  (`proposal-review` label present in the real journal) under automatic resume; `reuse-terminal`'s
+  journal (Item 3) never reaches `plan-author`/`receipt`.
+- Item 6 (explicit true/false unchanged): `prepare-milestone-convergence.test.mjs`'s
+  "AC6/AC11/R2" test (both mirrors, real assertions) — `calls.resumeDecisions === 0` and
+  `result.resumed === explicitValue` for both `true` and `false` with a prior generation record
+  present, confirming the CALL itself (not just the decision) is skipped.
+- Item 7 (mirror byte-identity + independent test runs): `cmp` on both touched mirror pairs +
+  `sync-vendor.sh --check` → CLEAN (independently re-run by this audit); both test files
+  independently re-run by this audit: `proposal-convergence.test.mjs` 63/63 pass,
+  `prepare-milestone-convergence.test.mjs` 52/52 pass.
+- Item 8 (R3, single embedded-release dispatch): Item 3's real journal — exactly
+  `[admission-acquire, resume-decision]`, zero separate `admission-release-*` call.
+- Item 9 (R9, Touches containment): `git diff --stat 480cb58 HEAD -- .../prepare-admission-check.ts
+  .gitignore` independently re-run by this audit — empty.
+- Item 10 (R7, pair disambiguation + production callsite): unit fixtures (both test suites, passing)
+  + production grep (below, item 12) confirming distinct `terminalPhase` literals at the two
+  `preflight-rejected` call sites.
+- Item 11 (R2, explicit flags zero dispatch): same evidence as item 6.
+- Item 12 (R5, 15 sites + terminalPhase argument values): `grep -c "_releaseLeaseAndRecord("` on
+  `.claude/workflows/prepare-milestone.js` = 16 (1 def + 15 call sites, independently re-counted by
+  this audit); direct read confirms lines emitting `PreflightContent` (two content-preflight sites)
+  vs `PreflightPlan` (two plan-shape sites) are textually distinct, not a shared coarse value.
+- Item 13 (R6, generation.json never overwritten on reuse-terminal): Item 3's real dispatch — file
+  mtime and byte content identical before/after the real `reuse-terminal` return.
+- Item 14 (R8, side-effect-free import): `proposal-convergence.test.mjs`'s "AC14/R8" real-process
+  import test, independently re-run — passes.
+- Grounding-evidence bullet + items 1–12 (identifier-citation completeness): confirmed via direct
+  read of `proposal-convergence.ts` and `.claude/workflows/prepare-milestone.js` — every cited
+  identifier is real and present as claimed.
+
+**Concern raised by this audit (not falsifying any AC item as literally worded — see the audit
+document's ‘Concerns’ section):** the Stage-4 pre-check (`existsSync(_generationRecordPath)`,
+`.claude/workflows/prepare-milestone.js` line ~202) builds its path via unsanitized string
+interpolation of `_taskId`, while `proposal-convergence.ts`'s own `_generationPath()`
+sanitizes `taskId` (replacing `/`/`\\` with `_`) before computing the same file's path. For any
+taskId containing a `/` (never true for a real `tasks/<ID>.md` id today, but true for this
+project's own established relative-path scratch-fixture convention — the same convention this
+audit's own first harness attempt, and `prepare-milestone-convergence.test.mjs`'s `baseArgs()`,
+both use), the two computations resolve to different files, so the pre-check always sees "no prior
+record" and silently degrades to `cold` — never a crash, never an unsafe resume, just a missed
+resume/reuse opportunity. Confirmed real via direct path computation
+(`/tmp/.../scratchpad/path-check.mjs`) and reproduced live (v1 harness Scenario B: 0
+`resume-decision` dispatches with a real prior record on disk). Recommend a follow-up gap task to
+sanitize the workflow's own pre-check path the same way the CLI already does.
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply. Per DIR-026
 Reading A, source code, prompt text, or a same-generation self-test are necessary but insufficient.
 
-- [ ] Landed on `master` under human-steered discipline (this touches
+- [x] Landed on `master` under human-steered discipline (this touches
   `.claude/workflows/prepare-milestone.js`, the control-plane script every future milestone's
-  Prepare stage runs through).
-- [ ] A real, non-fixture cold dispatch AND a real, non-fixture automatic-resume dispatch are both
+  Prepare stage runs through). **Ticked at Land (2026-07-30):** see `## Execution record` above —
+  merge commit `2319e8e`, `status: done`.
+- [x] A real, non-fixture cold dispatch AND a real, non-fixture automatic-resume dispatch are both
   exercised end to end with journal output, not asserted.
-- [ ] A real unchanged-input `reuse-terminal` dispatch releases its Admission lease and spends zero
+- [x] A real unchanged-input `reuse-terminal` dispatch releases its Admission lease and spends zero
   Proposal/Plan content or review agents.
-- [ ] RED/GREEN evidence exists for matching-contract repaired-Proposal resume,
+- [x] RED/GREEN evidence exists for matching-contract repaired-Proposal resume,
   charter-mutation-forces-fresh, unchanged-input stable-terminal reuse,
   task-contract/checker-policy invalidation, transient-terminal cold, and
   missing-provenance-fails-closed.
-- [ ] A fresh independent audit confirms the real production callsite and confirms review staying
+- [x] A fresh independent audit confirms the real production callsite and confirms review staying
   unconditional under resume, not merely unit-test reachability.
+
+**DoD evidence:** item 1 (Landed) intentionally left unchecked — Land has not yet run as of this
+Audit-phase pass (`git log` shows Build commit `2319e8e` only, `tasks/DIR-126-C.md` frontmatter
+still `status: todo`); this is the expected state for an Audit-phase artifact under this
+milestone's own pipeline, not a defect. Items 2–3: this audit's own real `e2e-verify-dir126c-v2.mjs`/
+`-v3.mjs` harness runs (see AC evidence citations above). Item 4: `proposal-convergence.test.mjs`
+(63/63) + `prepare-milestone-convergence.test.mjs` (52/52), independently re-run by this audit,
+cover matching-contract resume, charter/task-contract/review-policy-hash invalidation, unchanged-
+terminal reuse, transient-terminal cold, and missing-provenance-fails-closed. Item 5: this document.
 
 ## Human verification when exp5 marks this DIR done
 
@@ -710,3 +787,39 @@ Reading A, source code, prompt text, or a same-generation self-test are necessar
 - `plugin/scripts/proposal-convergence.ts`
 - `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs`
 - `plugin/test/prepare-milestone-convergence.test.mjs`
+
+## Execution record
+
+- **Milestone:** M202
+- **Iteration count:** 1 (single Build pass covering `decideResumeGeneration`/
+  `--decide-resume`/`--record-generation` in `proposal-convergence.ts` + the `resume-decision`
+  wiring + `_releaseLeaseAndRecord` at all 15 real terminal-return sites, followed by 1
+  fresh-context adversarial acceptance audit round that verdicted **CONCERNS** — no AC/DoD item
+  refuted, all 27 AC + 4/5 DoD items independently reconfirmed via the audit's own real,
+  non-mocked-CLI end-to-end dispatches, one previously-undisclosed narrow-blast-radius latent
+  defect [Stage-4 pre-check path-sanitization mismatch, §4 of the audit] newly discovered and
+  disclosed, not blocking Land). No mid-milestone re-scope — same charter, same AC/DoD list
+  throughout.
+- **Realized Δv:** 0 (v̂>0 per the charter's own Value hypothesis — capabilityGrowth, deliverable,
+  method-infra surface; no chart-2 `packages/quay*` product-surface cell moves, since the surface
+  improved is the `prepare-milestone` control-plane's own resume mechanism, not a product surface —
+  structurally identical to the M164/M167/M179/M188/M189/M192/M193/M194/M195/M197/M198/M200/M201
+  precedent the VT ruler cannot score for the same reason).
+- **Merge commit SHA:** `2319e8e` (Build's own direct-to-master commit; no separate worktree/branch
+  — this milestone's own Land commit series, layered on top, carries the audit/absorb/dashboard/
+  provenance write-back).
+- **Outcome:** Generation-aware resume for `prepare-milestone.js` landed on `master` — a new pure
+  `decideResumeGeneration` function (+ `--decide-resume`/`--record-generation` CLI pair) in
+  `proposal-convergence.ts` (byte-identical `plugin/scripts/` mirror) replaces the caller-supplied
+  `resumeFromAdjudicatedProposal` boolean with a fail-closed, hash/provenance-derived
+  `cold`/`resume`/`reuse-terminal` decision, dispatched only when the caller omits the flag;
+  `reuse-terminal` re-emits a cacheable prior `preflight-rejected`/`split-recommended` terminal with
+  zero content/review agent dispatches and an embedded, non-stranding lease release;
+  `ProposalReview`'s round-0 review stays unconditional for every executing generation; all 15 real
+  terminal-return sites now call `_releaseLeaseAndRecord` with an explicit, textually-distinct
+  `terminalPhase`. Independently confirmed via this audit's own real, non-mocked-CLI end-to-end
+  dispatches (cold, automatic-resume, reuse-terminal) plus 63/63 + 52/52 independently re-run unit
+  tests and byte-identical mirror checks. One disclosed, non-blocking follow-up gap recommended
+  (path-sanitization mismatch in the Stage-4 pre-check, fail-safe, zero real-production blast
+  radius). See `milestones/M202/absorb-entry.md` and
+  `milestones/M202/audits/iteration-0-acceptance-audit.md` for full detail.

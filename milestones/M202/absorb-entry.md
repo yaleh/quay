@@ -31,3 +31,9 @@ TBD — completed by the Audit phase.
 ## ABSORB gate run (M202, post-audit)
 
 TBD — completed at Land.
+
+## Audit disposition (M202 Iteration-0, written by the adversarial acceptance audit)
+
+adversarial-audit disposition: CONCERNS
+
+V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated carry-forward (bash experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh --counter 197 experiments/quay-perpetual-stream/v-meta-ledger.md; milestone_counter=197 K=2; rows: "consolidated | lag=- | consolidated — lag gate does not apply | domain-audit-channel≡CI-job pattern (+ per-subcommand audit exercise)", "proposed | lag=- | proposed — not past φ threshold, no lag gate | repo-root isolation-leak lesson")
