@@ -465,10 +465,43 @@ export function preflightMissingPrecedent({ taskBody, workspace }) {
 // PlanAuthor that (stylistically, non-deterministically) backtick-wraps its Files: entries
 // produced a permanent, unfixable-by-redispatch false mismatch, since the wrapped/unwrapped forms
 // never string-equal or regex-match each other.
+//
+// Trailing-annotation stripping (gap-preflight-touches-mismatch-plan-files-annotation, M205): the
+// same non-deterministic PlanAuthor also appends parenthetical annotations to '- Files:' entries —
+// e.g. `wiring-coverage-check.ts (read-only input: tasks/DIR-126-D.md)` or `sync-vendor.sh (all
+// read-only)`. The annotation rides along inside the comma-separated path token, so a Touches entry
+// naming the bare path never matches the annotated form. Strip ONE trailing ` (…)` annotation after
+// backtick-stripping. This is NOT over-permissive: repo paths never contain parentheses, and the
+// stripped path must still exactly/glob-match a declared '## Touches' entry via _globCoversPath
+// (the match predicate is unchanged) — only the cosmetic annotation is removed before matching.
 function _stripWrappingBacktick(g) {
   g = g.trim();
   if (g.startsWith("`") && g.endsWith("`") && g.length >= 2) g = g.slice(1, -1).trim();
+  g = g.replace(/\s+\(.*$/, "").trim();
   return g;
+}
+// _splitTopLevelCommas — split a Plan '- Files:' value on commas WITHOUT splitting inside a
+// parenthetical annotation. The non-deterministic PlanAuthor appends annotations that may
+// themselves contain commas — e.g. `a.test.mjs, b.test.mjs (both run, neither modified)` — so a
+// naive `.split(",")` shreds ` (both run, neither modified)` into bogus path tokens (`(both run`,
+// `neither modified)`) that can never match a '## Touches' entry. Track paren depth and split only
+// at depth 0; per-token annotation stripping then removes each path's own trailing ` (…)`.
+function _splitTopLevelCommas(s) {
+  const parts = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of s) {
+    if (ch === "(") depth++;
+    else if (ch === ")" && depth > 0) depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  parts.push(cur);
+  return parts.map((p) => p.trim()).filter(Boolean);
 }
 function _extractGlobsFromSection(sectionText) {
   const globs = [];
@@ -517,7 +550,7 @@ export function preflightTouchesMismatch({ taskBody, secondaryBody, secondaryLab
     // 'plan-files': aggregate every Stage's '- Files:' line (comma-separated real paths) — reuses
     // milestone-preparation-check.ts's own stage-block parser, never a second Markdown parser.
     const stages = parsePlanStages(secondaryBody || "");
-    secondaryGlobs = new Set(stages.flatMap((s) => (s.files || "").split(",").map((f) => _stripWrappingBacktick(f)).filter(Boolean)));
+    secondaryGlobs = new Set(stages.flatMap((s) => _splitTopLevelCommas(s.files || "").map((f) => _stripWrappingBacktick(f)).filter(Boolean)));
   }
   if (secondaryGlobs.size === 0) return null;
 

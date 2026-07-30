@@ -205,7 +205,12 @@ AC-level evidence (DIR-117):
   signature/return-shape invariance, optionally reinforced by `task-schema.test.mjs` (which
   references `checkWiringCoverage` but lives outside `scripts/test.sh`'s glob, so it must be run
   directly, not via the canonical suite). The 18/18 canonical `wiring-coverage-check.test.mjs`
-  suite proves the module itself, not its task-schema.ts consumption. → AC item.
+  suite proves the module itself, not its task-schema.ts consumption. → carried by the
+  grounding-evidence AC (the real AC list's bullet 7) identifier listing below, which names these
+  exact `task-schema.ts` identifiers; the exported signature/return-shape invariance is by
+  construction and the direct `task-schema.test.mjs` run is OPTIONAL reinforcement — no dedicated
+  AC bullet is declared to "close [W3]" (the real `## Acceptance Criteria` 7th bullet is the
+  DIR-117 grounding-evidence item, not a W3-reachability test).
 - **[W4 — existing enforcement, rely-on]** `sync-vendor.sh` (`SYNC_SCRIPTS` declared line 147, entry
   line 169, `cmp_or_report` line 53) mechanically `cp`s canonical→plugin and `--check`
   byte-compares; it is the ONLY mechanism carrying the fix into
@@ -399,7 +404,9 @@ to both-sides), plus items closing every flagged wiring claim above:
   regeneration) ← closes **[W4]**.
 - **AC 6** (`prepare-admission-check.test.mjs`, both copies, fully green post-fix) ← closes **[W2]**;
   61/61 (7 suites) baseline reproduced this session.
-- **AC 7** (task-schema consumption invariant + module suite) ← closes **[W3]**: grep-confirmed
+- **[W3] note (NOT a separate AC bullet — the real `## Acceptance Criteria` 7th bullet is the
+  grounding-evidence item below; this Proposal therefore declares NO AC bullet that closes [W3]):**
+  grep-confirmed
   `checkWiringCoverage` import/call sites in `task-schema.ts` (lines 323/357/441;
   `checkDirectiveSections` line 303 verified call-free), plus exported signature/return-shape
   invariance (neither edit touches any exported function, so every importer's contract is
@@ -407,7 +414,7 @@ to both-sides), plus items closing every flagged wiring claim above:
   glob); the canonical `wiring-coverage-check.test.mjs` suite stays green at 18/18 post-fix
   alongside the new RED/GREEN fixtures (RED = fails on the current literals, GREEN = passes after
   both edits — never GREEN-only, never RED-forever).
-- **Grounding-evidence AC item** (DIR-117 self-coverage): an exhaustive-identifier bullet listing
+- **AC 7** (grounding-evidence, DIR-117 self-coverage): an exhaustive-identifier bullet listing
   every backtick identifier this Proposal names in a mechanism-claim sentence — including
   `wiring-coverage-check.ts`, `WIRING_VERB_RE`, `splitSentences`, `splitSentences()`,
   `extractMechanismClaims(sectionText)`, `checkWiringCoverage(proposalText, acText)`,
@@ -463,6 +470,25 @@ to both-sides), plus items closing every flagged wiring claim above:
    `83c1958` verified), and "explanatory prose with `**`-prefixed claim markers" and "whose own"
    phrasing are generic authoring habits in this repo's Proposal-writing convention (the current
    task board and CLAUDE.md use both freely), not one-off occurrences.
+
+
+## Plan
+
+`docs/plans/M205-gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md` — 7-stage Plan
+authored 2026-07-30 at base revision `42f474d` (current HEAD short-sha) for milestone M205 (charter
+`experiments/quay-perpetual-stream/charters/M205-gap-wiring-coverage-checker-fixes.md`), mapping all
+7 task AC items to ordered RED/implementation/GREEN stages: RED regression fixtures in the canonical
+test file (`experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs`, `splitSentences`
+added to the line-10 import) → the two in-place regex edits in
+`experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts` (`WIRING_VERB_RE` line 50: add
+`whose` to the `owns?` exclusion lookbehind; `splitSentences()` line 102: widen BOTH sides of the
+split boundary to ``(?<=[.!?]|\*\*)\s+(?=[A-Z`"]|\*\*)``) → GREEN canonical suite (the
+`extra.acceptance` command) → mechanical `sync-vendor.sh` mirror regeneration (`--check` → `CLEAN`,
+never a hand-edit) → `tasks/DIR-126-D.md` CLI non-regression (`ok:true`/0 findings) → both-copies
+`prepare-admission-check.test.mjs` non-regression → grounding-evidence/landing verification
+(`scripts/test.sh`). Stage blocks emit the DIR-117 iteration-2 item-3 mechanical format
+(`### Stage N` + `- AC:` + `- Files:` + `- Command:`) parsed by `milestone-preparation-check.ts`.
+Standardized stopping rule: at most 3 Plan-check rounds, success only at F_i=0.
 
 ## Finding
 
@@ -632,6 +658,14 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 
 ## Touches
 
+- tasks/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md
 - experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts
 - plugin/scripts/wiring-coverage-check.ts
 - experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs
+- experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs
+- plugin/test/prepare-admission-check.test.mjs
+- experiments/quay-perpetual-stream/scripts/task-schema.ts
+- plugin/workflows/prepare-milestone.js
+- plugin/scripts/sync-vendor.sh
+- docs/plans/M205-gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md
+

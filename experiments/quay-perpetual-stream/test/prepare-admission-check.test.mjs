@@ -547,6 +547,40 @@ describe("preflightTouchesMismatch — WIRING-CLAIM 6: one implementation, two c
     assert.equal(preflightTouchesMismatch({ taskBody, secondaryBody: planBody, secondaryLabel: "plan-files" }), null);
   });
 
+  test("known-good ('plan-files', annotation-robustness, gap-preflight-touches-mismatch-plan-files-annotation): a comma-containing annotation on an all-declared '- Files:' line is stripped, not shredded into bogus tokens -> zero findings", () => {
+    // Both paths ARE in the task's ## Touches; the PlanAuthor appended "(both run, neither
+    // modified)" — a comma-containing annotation. Before the paren-aware split, `.split(",")`
+    // shredded it into bogus tokens ("(both run", "neither modified)") that never matched.
+    const planBody = [
+      "# Fixture Plan — comma-containing annotation on declared paths",
+      "",
+      "### Stage 1: annotated all-declared files",
+      "- AC: 1",
+      "- Files: packages/quay/src/foo.ts, packages/quay/test/foo.test.mjs (both run, neither modified)",
+      "- Command: `true`",
+      "",
+    ].join("\n");
+    assert.equal(preflightTouchesMismatch({ taskBody, secondaryBody: planBody, secondaryLabel: "plan-files" }), null);
+  });
+
+  test("RED ('plan-files', annotation-robustness is NOT over-permissive): a trailing annotation on an UNDECLARED path is stripped but the path still correctly flags a mismatch", () => {
+    // packages/quay-native/src/other.ts is NOT in the task's ## Touches; the "(all read-only)"
+    // annotation is stripped, but the bare path still fails to match -> still a blocking mismatch.
+    const planBody = [
+      "# Fixture Plan — trailing annotation on an undeclared path",
+      "",
+      "### Stage 1: annotated undeclared file",
+      "- AC: 1",
+      "- Files: packages/quay-native/src/other.ts (all read-only)",
+      "- Command: `true`",
+      "",
+    ].join("\n");
+    const verdict = preflightTouchesMismatch({ taskBody, secondaryBody: planBody, secondaryLabel: "plan-files" });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-touches-mismatch");
+    assert.equal(verdict.blocking, true);
+  });
+
   test("ambiguous-valid ('plan-files' call site): a Plan referencing ONLY a test/fixtures/ path (the documented touch-set-expansion case) -> reviewer-required, not blocking", () => {
     const planBody = readFixture("touches-mismatch", "plan-ambiguous.md");
     const verdict = preflightTouchesMismatch({ taskBody, secondaryBody: planBody, secondaryLabel: "plan-files" });
