@@ -101,7 +101,7 @@ for the new regression fixtures):
   `extractMechanismClaims, bulletsOf, checkWiringCoverage` — NOTE: NOT `splitSentences`, which the
   new split-layer fixture must ADD to that import list; `splitSentences` is exported at line 98).
 - `node --experimental-strip-types --test experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs`
-  → **61/61 pass across 7 suites**.
+  → **63/63 pass across 7 suites**.
 - `node --experimental-strip-types experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts --task tasks/DIR-126-D.md`
   → `{ok:true, code:"wiring-coverage-complete", claims:22, findings:0}` — the real,
   previously-passing document the fix must not regress. (The CLI envelope field is `findings` — an
@@ -193,7 +193,7 @@ AC-level evidence (DIR-117):
 - **[W2 — existing call, preserve]** `prepare-admission-check.ts:44` imports `splitSentences`;
   `preflightMergedMarkdownClaims` (line 379) calls it directly at line 386 — the second real
   consumer the original Finding did not name. Proof obligation: `prepare-admission-check.test.mjs`
-  (canonical copy and plugin mirror copy) still passes 61/61 post-fix (baseline reproduced this
+  (canonical copy and plugin mirror copy) still passes 63/63 post-fix (baseline reproduced this
   session). → AC item.
 - **[W3 — existing consumption, preserve]** `task-schema.ts:323` imports `checkWiringCoverage`,
   called only via the gap path (`checkGapWiringCoverage`, lines 354/357, wired into the gap
@@ -337,7 +337,7 @@ experiment-tree script by repo-root-relative path, not the plugin-packaged copy.
   session: `"This is **important** and here \`a.ts\` calls \`b.ts\`."` → NO split (lowercase
   continuation); `"This is **important** And here …"` → splits (uppercase continuation — the
   residual risk, disclosed, not swept aside). All 3 real `merged-markdown-claims` fixtures are
-  unaffected (line-initial `**type:**` + lowercase; verified), and the 61/61
+  unaffected (line-initial `**type:**` + lowercase; verified), and the 63/63
   `prepare-admission-check.test.mjs` baseline confirms no incidental regression surface today.
   Residual risk on unseen prose is real but bounded.
 - **`whose` over-exclusion.** Adding `whose` to the exclusion alternation only affects
@@ -350,7 +350,7 @@ experiment-tree script by repo-root-relative path, not the plugin-packaged copy.
   accepted class the existing `its/their/my/our/your/his/her` exclusions already carry (header lines
   34-40), not a new category.
 - **Second-call-site regression** (`preflightMergedMarkdownClaims`'s reuse of `splitSentences` at
-  line 386). Mitigated by an explicit AC item **[W2]** backed by the 61/61 baseline reproduced this
+  line 386). Mitigated by an explicit AC item **[W2]** backed by the 63/63 baseline reproduced this
   session.
 - **Claim-count drift on unexamined real documents.** Finer splitting can surface a
   previously-hidden claim as newly "uncovered" somewhere not examined here, or shift the exact claim
@@ -403,7 +403,7 @@ to both-sides), plus items closing every flagged wiring claim above:
 - **AC 5** (`sync-vendor.sh --check` → `CLEAN` for `wiring-coverage-check` after mechanical
   regeneration) ← closes **[W4]**.
 - **AC 6** (`prepare-admission-check.test.mjs`, both copies, fully green post-fix) ← closes **[W2]**;
-  61/61 (7 suites) baseline reproduced this session.
+  63/63 (7 suites) baseline reproduced this session.
 - **[W3] note (NOT a separate AC bullet — the real `## Acceptance Criteria` 7th bullet is the
   grounding-evidence item below; this Proposal therefore declares NO AC bullet that closes [W3]):**
   grep-confirmed
@@ -475,11 +475,13 @@ to both-sides), plus items closing every flagged wiring claim above:
 ## Plan
 
 `docs/plans/M205-gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md` — 9-stage Plan
-authored 2026-07-30 at base revision `b28cfdb` (current HEAD short-sha; supersedes the stale
-`c82efac` Plan) for milestone M205 (charter
+re-authored 2026-07-30 at base revision `b850542` (current HEAD short-sha, full
+`b8505422e549faff72ae32bee4bfdaa3b2f50862`; supersedes the stale `b28cfdb` and `c82efac` Plans —
+`git diff --stat b28cfdb..b850542` over every touch-set source file is empty, and all baselines
+were re-verified live at `b850542`) for milestone M205 (charter
 `experiments/quay-perpetual-stream/charters/M205-gap-wiring-coverage-checker-fixes.md`), mapping
 all 7 task AC items to ordered RED/implementation/GREEN stages: grounding + baseline capture
-(re-verified live at `b28cfdb`: 18/18 canonical suite, 63/63-across-7-suites
+(re-verified live at `b850542`: 18/18 canonical suite, 63/63-across-7-suites
 `prepare-admission-check.test.mjs`, `tasks/DIR-126-D.md` CLI `ok:true` / 22 claims / 0 findings) →
 RED Fix-1 fixture (`whose` exclusion, canonical test file only) → RED Fix-2 two-layer fixture
 (split-layer via `splitSentences` added to the line-10 import, plus a claim-layer pair with a real
@@ -492,14 +494,14 @@ split boundary to `` (?<=[.!?]|\*\*)\s+(?=[A-Z`"]|\*\*) ``) → GREEN canonical 
 never a hand-edit) → `tasks/DIR-126-D.md` CLI non-regression (`ok:true` / 0 findings — verdict
 invariance, not claim-count invariance) → `prepare-admission-check.test.mjs` both-copies
 non-regression (63/63, 7 suites) → grounding-evidence + landing verification (`scripts/test.sh`,
-single commit to `master`, lifecycle gate). Stage blocks emit the DIR-117 iteration-2 item-3
-mechanical format (`### Stage N` + `- AC:` + `- Files:` + `- Command:`) parsed by
+single commit to `master`, lifecycle gate). The complete touch set (canonical module/test EDIT,
+mirror REGENERATE, all consumer/mirror/suite files declared READ ONLY / RUN ONLY), per-stage line
+budgets, the stage dependency graph `1 → 2 → 3 → 4 → 5 → 6 → {7, 8} → 9`, guardrails, rollback,
+and real-landing verification are in the Plan file. Stage blocks emit the DIR-117 iteration-2
+item-3 mechanical format (`### Stage N` + `- AC:` + `- Files:` + `- Command:`) parsed by
 `milestone-preparation-check.ts` (`parsePlanStages` → `validatePlanStructure` →
-`plan-structure-ok`) — verified live this session: "Plan has 9 stage(s), all 7 task AC item(s)
-mapped." Complete touch set, line budgets, stage dependencies, guardrails, rollback, and
-real-landing verification are in the Plan file. Standardized stopping rule: at most 3 Plan-check
-rounds, success only at F_i=0.
-
+`plan-structure-ok`) — verified for this revision: "Plan has 9 stage(s), all 7 task AC item(s)
+mapped." Standardized stopping rule: at most 3 Plan-check rounds, success only at F_i=0.
 
 ## Finding
 
@@ -554,9 +556,13 @@ Both defects were confirmed via direct source read (not inference) before filing
 - [ ] `splitSentences()` splits before a `**` bold marker; a fixture paragraph
   `"Done. **A does X (\`id1\`, \`id2\`).** **B does Y (\`id3\`, \`id4\`).**"` produces three chunks
   after the fix — two identifier-carrying sentences with disjoint backtick-identifier sets
-  `{id1,id2}` / `{id3,id4}`, plus one leading zero-identifier `Done.` sentence (RED before fix — one
-  merged 4-identifier chunk plus the split-off `Done.`; GREEN after — the two bold sentences split
-  apart into 2-identifier chunks each).
+  `{id1,id2}` / `{id3,id4}`, plus one leading zero-identifier `Done.` sentence (RED before fix —
+  exactly ONE merged chunk carrying all 4 identifiers, i.e. the entire string with `Done.` still
+  attached: the character after the post-`Done.` whitespace is `*`, outside the existing lookahead's
+  uppercase/backtick/quote class, so the unpatched regex does NOT split `Done.` off — the
+  `Done.`-peeled 2-chunk shape is the lookahead-only variant the Proposal's Chosen mechanism/Key
+  decisions disproves, not the pre-fix baseline; GREEN after — the two bold sentences split apart
+  into 2-identifier chunks each, three chunks total).
 - [ ] `experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs` gains regression tests
   for both fixtures above — the canonical test file only, no `plugin/test/wiring-coverage-
   check.test.mjs` mirror (that file does not exist on disk and this task deliberately does NOT
@@ -677,6 +683,7 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 - plugin/test/prepare-admission-check.test.mjs
 - experiments/quay-perpetual-stream/scripts/task-schema.ts
 - experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts
+- plugin/scripts/prepare-admission-check.ts
 - experiments/quay-perpetual-stream/test/task-schema.test.mjs
 - plugin/workflows/prepare-milestone.js
 - plugin/scripts/sync-vendor.sh
