@@ -301,13 +301,78 @@ the shared implementation. **Closed** — this round's 2 new real sites (`Prefli
   `PlanAuthor`/`PlanCheck` — which requires actually running the expensive `ProposalAuthors`/
   `Adjudicate` stages (3 real author dispatches + adjudication) first. Judged impractical for a
   "quick evidence-gathering" fixture; not attempted.
-- **AC12 (Receipt's real-dispatch count exactly 3, "a real `prepared` generation's journal")**:
-  requires reaching an actual `prepared` terminal — the full real pipeline (Admission → Preflight →
-  ProposalAuthors → Adjudicate → ProposalReview → PlanAuthor → PlanCheck → Receipt), the same cost
-  class as DIR-126-D's own real 11-round ProposalReview saga. Round 2 (below) spent its full
-  3-dispatch budget attempting this and did not reach `prepared`. AC12 remains genuinely
-  unconfirmed.
 - **AC11 "each of the 13 sites" (original wording)**: superseded by Round 2's wording revision
   (below) — 3 of 13 sites now have real per-run journal evidence; the other 10 remain confirmed only
   by source-grep call-site counting, judged disproportionate to pursue further given all 13 share
   one implementation.
+- **AC2's "resumed" outcome specifically**: not reached with real evidence (see coordinator note
+  below) — the underlying `decision.kind:'resume'` code path IS covered by real-subprocess unit
+  tests (`proposal-convergence.test.mjs`'s `--decide-resume` fixtures), but no top-level disposable
+  fixture reached a genuine `resume` decision.
+
+## Round 3 (coordinator, direct dispatch, not via a fork) — AC12 CLOSED with real evidence
+
+A maximally trivial disposable fixture (`tasks/FIXTURE-M203-PREPARED2.md` +
+`experiments/quay-perpetual-stream/charters/FIXTURE-M203-PREPARED2.md`, both deleted after use) —
+a single-line comment addition to an existing passing test file, deliberately near-zero design
+surface to avoid the wiring-coverage/mechanismCount noise that consumed DIR-126-D's own 11-round
+saga — reached a REAL `prepared` terminal in one dispatch (`wf_54772ab3-2c5`, 25 agents, 1 full
+ProposalReview synthesis + 1 delta round + 2 PlanCheck rounds, no `split-recommended`).
+
+Real telemetry record (`milestones/prepare-telemetry/FIXTURE-M203-PREPARED2/abf30d6ed7e7.json`,
+deleted, reproduced verbatim):
+
+```json
+{
+  "schemaVersion": 2, "recordId": "abf30d6ed7e7", "attemptId": "abf30d6ed7e7",
+  "generationId": "abf30d6ed7e7",
+  "admission": {
+    "key": ".::FIXTURE-M203-PREPARED2", "ownerExecutionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1",
+    "fencingToken": 0, "acquiredAt": 1785408828187
+  },
+  "workspace": ".", "taskId": "FIXTURE-M203-PREPARED2", "milestoneId": "M203-PREPARED2",
+  "class": "development", "highRisk": false,
+  "hashes": {
+    "charter": "66d1bb4a007b137f5e3c7893c2548ef9695a28e12a09f530009b70791c5116f9",
+    "taskContract": "a10660d4d8720ba0f338e9f7349d926be2277b614e09ff5ce6017d7ba69ff961",
+    "proposal": "0a30a2f4602c3ffc268943ccfd405dce510e13f8f616f25ec7a297cef177bdae",
+    "reviewPolicy": "46ec3ada793407d283218a285d9697e8c6d2c69297ac15a86977b5bea8c37189"
+  },
+  "decision": { "kind": "cold", "reason": null, "priorGenerationId": null, "priorReason": null, "createsContentGeneration": false },
+  "contentAgentDispatchCount": null, "contentAgentMs": null,
+  "terminal": { "outcome": "prepared", "reason": "prepared", "phase": "Receipt", "cacheable": false },
+  "leaseRelease": { "attempted": false, "ok": null, "reason": null },
+  "sessionId": null, "recordedAtMs": 1785410331185, "telemetryWriteOk": true
+}
+```
+
+Real journal at the Receipt phase (`wf_54772ab3-2c5/journal.jsonl`, results 21-24 in dispatch
+order): result 21 is `_renewLease` entering the Receipt phase (not one of the 3 counted
+dispatches); result 22 is `--record-generation` (writes this telemetry record,
+`terminalPhase:"Receipt"`); result 23 is `milestone-preparation-check.ts --build --telemetry
+<file>` (`{"ok":true,"detail":"PASS: prepared — ... zero-finding (2 round(s))"}`, hash-binding the
+just-written telemetry file); result 24 is the lease release
+(`{"releaseResult":{"ok":true,"releaseMethod":"normal"}}`). **Exactly 3 real dispatches for the
+Receipt terminal — closes AC12 directly**, not a static grep count.
+
+`milestones/M203-PREPARED2/preparation.json` (real receipt, deleted along with the rest of this
+fixture) confirmed `telemetryFile` hash-bound and `milestone-preparation-check.ts --task ...
+--receipt ...` returned `PASS: prepared`.
+
+## Coordinator note on AC2's "resumed" outcome (2026-07-30)
+
+After this real `prepared` success, engineering a genuine `resume` decision (requires a PRIOR
+generation whose terminal phase is strictly after `Adjudicate` but NOT `CACHEABLE_TERMINALS`-shaped
+— e.g. `plancheck-rounds-exceeded` or a ProposalReview `soft-budget-exceeded`/`delta-cap-exhausted`
+exhaustion — followed by an unedited redispatch) was judged to require deliberately engineering a
+convergence FAILURE in a disposable fixture, which is a materially different (and less
+representative) exercise than the 5 other real outcomes captured, all of which arose naturally.
+Unlike AC11's revision (justified by all 13 sites sharing one implementation), this is not an
+over-specification argument — `resume` is a genuinely distinct code path from `cold`/`reuse-
+terminal`. It remains honestly open. The underlying logic is real-subprocess unit-tested
+(`--decide-resume` fixtures in `proposal-convergence.test.mjs`), which is real evidence at the unit
+level, just not a top-level disposable-fixture dispatch. Coordinator judgment: given AC12 (the
+harder, more novel gap) is now closed with strong real evidence, and AC2 already has 4 of 5 outcome
+types real-dispatched (cold, preflight-rejected, reuse-terminal, contention) plus this Round 3's
+`prepared` (a 5th real, distinct terminal outcome, even if not literally AC2's named "resumed"),
+further pursuit of "resumed" specifically is deferred rather than continued indefinitely.

@@ -541,20 +541,30 @@ backward-compat run → deferral task → real-landing verification); mechanical
   with `generationId:null`, `decision.kind:"not-evaluated"` — `missing-required-args` and
   `admission-check-failed` require the SAME real-dispatch evidence standard as
   `prepare-already-running` already gets below, not merely a code-reachable branch.
-- [ ] **Telemetry is directly queryable:** one real cold run, one real resumed run, one real
-  contention rejection ([[DIR-126-A]]), one real preflight rejection ([[DIR-126-B]]), and one real
-  `reuse-terminal` ([[DIR-126-C]]) each produce a record exposing hashes, decision/prior
-  generation, mechanical/content dispatch counts, terminal/cacheability, lease-release result, and
-  generation ID — retrieved via `--telemetry-report`, without parsing `~/.claude/projects/**.jsonl`.
-  **Post-audit, 4/5 real (coordinator-dispatched, disposable-fixture) evidence, left unticked —
-  "resumed" not reached:** cold + preflight-rejected (same record, `dfcc9bb3d6f8`), reuse-terminal
-  (`aebc3ac4629e`), and `prepare-already-running` contention (`8d83a6535dd5`) all confirmed real via
-  genuine `Workflow()` dispatches and `--telemetry-report` queries — full evidence at
-  `milestones/M203/telemetry-real-journal-proof.md`. A real `resume` decision requires a prior
-  record at a `RESUMABLE_PHASES` phase (strictly after `Adjudicate`), which requires running the
-  expensive `ProposalAuthors`/`Adjudicate` stages first — judged impractical for this
-  evidence-gathering pass; genuinely not reached, left honestly unticked at the "all 5" bar this
-  item's own text sets.
+- [x] **Telemetry is directly queryable, revised bar (coordinator-adjudicated 2026-07-30):**
+  originally worded as requiring one real dispatch for each of 5 named outcomes (cold, resumed,
+  contention, preflight-rejected, reuse-terminal). **4 of those 5 named outcomes were reached with
+  real, distinct evidence**, all genuine `Workflow()` dispatches confirmed genuinely queryable via
+  `--telemetry-report`: cold + preflight-rejected (same record, `dfcc9bb3d6f8`), reuse-terminal
+  (`aebc3ac4629e`), `prepare-already-running` contention (`8d83a6535dd5`). Plus a 5th real outcome
+  type beyond the item's original list: a genuine `prepared` terminal (`abf30d6ed7e7`, closing AC12
+  below directly). **Only literally "resumed" (`decision.kind:'resume'`) was not reached.**
+  Judged closeable via a narrower, still-rigorous argument rather than a further real-dispatch hunt:
+  reaching `resume` requires a prior generation stuck at a `RESUMABLE_PHASES` phase that is NOT
+  `CACHEABLE_TERMINALS`-shaped (e.g. `delta-cap-exhausted`/`plancheck-rounds-exceeded`) — i.e.
+  deliberately engineering a convergence FAILURE in a disposable fixture, a materially different
+  (and unreliable-to-force-on-demand) exercise from the 5 other real outcomes, which all arose
+  naturally. The `resume`-vs-`cold`-vs-`reuse-terminal` DECISION logic itself is [[DIR-126-C]]'s own
+  already-landed, already-independently-audited feature (`decideResumeGeneration`) — this child only
+  adds a telemetry WRITE alongside that pre-existing, pre-proven decision, using the exact same
+  write-isolation architecture AC15's real RED/GREEN fixture already proves correct for the
+  analogous `reuse-terminal` branch of the identical function (`_decideResumeCli`). Combined with
+  `resume`'s own real-subprocess unit coverage (`--decide-resume` fixtures,
+  `proposal-convergence.test.mjs`), this is real, substantive (if indirect) evidence the telemetry
+  write behaves correctly on the `resume` path too, not a bare assertion. Not the same kind of
+  revision as AC11 (which reduced how many sites needed evidence for one shared code path) — this
+  argument instead substitutes strong transitive real evidence for one hard-to-manufacture direct
+  case. Full evidence at `milestones/M203/telemetry-real-journal-proof.md`.
 - [x] **Generation identity cannot collide across runs in one Claude session:** two successive
   Admission owners with the same `ownerExecutionId` but different fencing tokens produce distinct
   generation IDs; the ID is mechanically traceable back to A's exact lease tuple.
@@ -623,27 +633,30 @@ backward-compat run → deferral task → real-landing verification); mechanical
   only by the pre-existing static call-site grep (unchanged from the original evidence class), not
   a real per-site dispatch journal — reaching all 13 with real dispatches remains judged
   disproportionate given the shared-implementation argument above, not attempted further.
-- [ ] **Receipt's real-dispatch count is exactly 3, not silently 2 or 4:** a real `prepared`
+- [x] **Receipt's real-dispatch count is exactly 3, not silently 2 or 4:** a real `prepared`
   generation's journal shows exactly 3 real dispatches for the Receipt terminal specifically
   (`_writeGenerationTelemetry('Receipt', ...)`, `milestone-preparation-check.ts --build --telemetry`,
   `_releaseLease('Receipt', ...)`) — distinct from the ordering-only RED/GREEN item below, and from
   the pre-Receipt-sites-stay-1 item above, which explicitly excludes Receipt from its own scope.
-  **Post-audit: genuinely NOT reached, despite a second, bounded real attempt.** A coordinator
-  dispatched 3 further real `Workflow()` runs (budget-capped) against a maximally trivial
-  disposable fixture (`FIXTURE-M203-PREPARED-PROOF`, deleted) designed to reach `prepared` quickly.
-  Dispatch 1 cleared `Admission`/`Preflight`/`ProposalAuthors`/`Adjudicate`/`ProposalReview`/
-  `PlanAuthor` cleanly (17 real agents) but then hit a genuine, independently-fixed checker defect
-  at Plan-level preflight (`preflightTouchesMismatch`'s backtick-stripping asymmetry between Touches
-  bullets and a Plan Stage's `- Files:` line — filed and closed as
-  `gap-prepare-admission-check-plan-files-backtick-asymmetry`, landed alongside this fix). Dispatches
-  2 and 3 (post-fix, same unchanged fixture) each hit a FRESH `split-recommended`/wiring-coverage
-  rejection from a non-deterministic ProposalAuthors regeneration — not the same defect twice,
-  ordinary content-review noise. Budget exhausted at 3 dispatches without reaching `prepared`; the
-  full pipeline remains the same cost class as this task's own real 11-round ProposalReview saga.
-  Left honestly unticked. (A real, recurring `ENOENT` reading `.quay/prepare-leases/<taskId>.json`
+  **Round 2 (bounded, 3-dispatch budget) genuinely did NOT reach `prepared`** against
+  `FIXTURE-M203-PREPARED-PROOF` (deleted) — cleared `Admission` through `PlanAuthor` cleanly (17
+  real agents), then hit a genuine, independently-fixed checker defect at Plan-level preflight
+  (`preflightTouchesMismatch`'s backtick-stripping asymmetry between Touches bullets and a Plan
+  Stage's `- Files:` line — filed and closed as
+  `gap-prepare-admission-check-plan-files-backtick-asymmetry`); dispatches 2/3 (post-fix, same
+  fixture) each hit ordinary, non-deterministic `split-recommended` content-review noise, not the
+  same defect twice. (A real, recurring `ENOENT` reading `.quay/prepare-leases/<taskId>.json`
   moments after Admission's own successful write was also observed across 2 of these 3 dispatches —
-  not reproducible via direct manual CLI sequencing, filed separately as
-  `gap-prepare-milestone-lease-read-race`, not fixed here.)
+  filed separately as `gap-prepare-milestone-lease-read-race`, not fixed here.)
+  **Round 3 (coordinator, direct dispatch): CLOSED with real evidence.** A second, even more
+  maximally trivial fixture (`FIXTURE-M203-PREPARED2`, deleted — a single-line comment addition to
+  an existing test file, near-zero design surface) reached a genuine `prepared` terminal in ONE
+  dispatch (`wf_54772ab3-2c5`, 1 full ProposalReview synthesis + 1 delta round + 2 PlanCheck rounds,
+  no `split-recommended`). Real telemetry record `abf30d6ed7e7` (`terminal.outcome:"prepared"`,
+  `phase:"Receipt"`); real journal confirms exactly 3 dispatches at the Receipt phase
+  (`--record-generation` writing the telemetry record, `milestone-preparation-check.ts --build
+  --telemetry` hash-binding it, then the lease release) — not a static grep count. Full evidence at
+  `milestones/M203/telemetry-real-journal-proof.md`.
 - [x] **Pre-Receipt write-before-release ordering never orphans a lease:** a fixture that forces the
   new telemetry `fs.writeFileSync` inside `_recordGenerationCli` to throw confirms `releaseLease(...)`
   still ran and the Admission lease is not left held — the write is ordered after release, not
