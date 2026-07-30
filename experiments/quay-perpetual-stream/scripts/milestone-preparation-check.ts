@@ -23,7 +23,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { extractSection, countBoxes } from "./task-schema.ts";
-import { blockingOpen, validateConvergenceCounters, computeConvergenceMetrics } from "./proposal-convergence.ts";
+import { blockingOpen, validateConvergenceCounters, computeConvergenceMetrics, CACHEABLE_TERMINALS, validateTelemetryRecord } from "./proposal-convergence.ts";
 
 export function sha256(text) {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
@@ -150,15 +150,18 @@ export function computeTouchesExpansion(receiptTouches, declaredTouches) {
   return { expanded };
 }
 
-// ── queryTelemetryReport — DIR-126-D/M203 Claim B.1: the ONE read-only query mode over the
-// committed milestones/prepare-telemetry/**/*.json tree. Filters by each record's own EMBEDDED
-// `milestoneId` field, never by directory layout alone — layout is `taskId`-primary and a
-// re-charter'd task can carry a different `milestoneId` across generations under the same
-// directory. Zero matches is an explicit, typed result, never a crash and never an ambiguous
-// empty-looking silent success (AC22).
-export function queryTelemetryReport({ workspace, milestoneId }) {
-  const root = path.join(workspace, "milestones", "prepare-telemetry");
-  const records = [];
+// ── _walkJsonFiles — DIR-126-E/M204: the ONE shared recursive `.json`-file enumeration primitive
+// under a root directory. Factored OUT of queryTelemetryReport's former inline `walk()` closure so
+// BOTH read-only modes over the telemetry tree — queryTelemetryReport (single-milestone query) and
+// computeCapacityReport (whole-tree capacity aggregation) — share ONE traversal implementation,
+// never two independently maintained directory walks (the exact "content living in two places"
+// drift class this repo's CLAUDE.md names). Pure enumeration only: each CALLER keeps its own
+// per-file contract (parse-and-silently-skip vs. parse-and-trace-the-failure). Traversal order is
+// the filesystem's own readdir order, exactly as the pre-refactor inline walk had it, so
+// queryTelemetryReport's external output is byte-for-byte unchanged by this extraction
+// (regression-tested).
+export function _walkJsonFiles(root) {
+  const files = [];
   function walk(dir) {
     if (!fs.existsSync(dir)) return;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -166,20 +169,528 @@ export function queryTelemetryReport({ workspace, milestoneId }) {
       if (entry.isDirectory()) {
         walk(p);
       } else if (entry.isFile() && entry.name.endsWith(".json")) {
-        try {
-          const rec = JSON.parse(fs.readFileSync(p, "utf8"));
-          if (rec && rec.milestoneId === milestoneId) records.push(rec);
-        } catch {
-          // Malformed telemetry file — skipped, never crashes the report query.
-        }
+        files.push(p);
       }
     }
   }
   walk(root);
+  return files;
+}
+
+// ── queryTelemetryReport — DIR-126-D/M203 Claim B.1: the ONE read-only query mode over the
+// committed milestones/prepare-telemetry/**/*.json tree. Filters by each record's own EMBEDDED
+// `milestoneId` field, never by directory layout alone — layout is `taskId`-primary and a
+// re-charter'd task can carry a different `milestoneId` across generations under the same
+// directory. Zero matches is an explicit, typed result, never a crash and never an ambiguous
+// empty-looking silent success (AC22). DIR-126-E/M204: its recursion now goes through the shared
+// _walkJsonFiles primitive; its external contract (CLI flag, inputs, {ok, code} return shape,
+// silent-skip-on-malformed-JSON, record order) is unchanged.
+export function queryTelemetryReport({ workspace, milestoneId }) {
+  const root = path.join(workspace, "milestones", "prepare-telemetry");
+  const records = [];
+  for (const p of _walkJsonFiles(root)) {
+    try {
+      const rec = JSON.parse(fs.readFileSync(p, "utf8"));
+      if (rec && rec.milestoneId === milestoneId) records.push(rec);
+    } catch {
+      // Malformed telemetry file — skipped, never crashes the report query.
+    }
+  }
   if (records.length === 0) {
     return { ok: true, code: "no-records", milestoneId };
   }
   return { ok: true, code: "records-found", milestoneId, records };
+}
+
+// ── percentile — DIR-126-E/M204: nearest-rank percentile over an ASCENDING-sorted number array.
+// Deliberately pinned to the nearest-rank definition (rank = ceil(p/100 · n), 1-based) — never an
+// interpolated percentile — so the method carries no convention ambiguity and is named in every
+// distribution block that uses it (`method: "nearest-rank"`). Deterministic: same input array,
+// same value, every run. Returns null for an empty array.
+export function percentile(sortedNumbers, p) {
+  const n = sortedNumbers.length;
+  if (n === 0) return null;
+  const rank = Math.max(1, Math.ceil((p / 100) * n));
+  return sortedNumbers[Math.min(rank, n) - 1];
+}
+
+// ── isCacheableTerminalShape — DIR-126-E/M204: the phase→terminalPhase bridge. A telemetry record
+// stores its terminal as `{outcome, reason, phase, cacheable}` (field name `terminal.phase`), while
+// proposal-convergence.ts's exported CACHEABLE_TERMINALS allowlist keys its entries on
+// `terminalPhase`. _isCacheablePair is NOT exported and proposal-convergence.ts is outside this
+// child's ## Touches, so this small bridge lives HERE — importing the real constant (never a
+// hand-copied literal that could silently drift) and mapping `terminal.phase → terminalPhase`.
+// The record's own self-reported `terminal.cacheable` is deliberately NOT consulted here: it is a
+// per-record policy snapshot that can go stale when the allowlist changes; computeCapacityReport
+// re-derives cacheability from the imported source of truth and surfaces any derived-vs-self-
+// reported disagreement as a diagnostic entry (derived value governs classification).
+export function isCacheableTerminalShape(terminal) {
+  return CACHEABLE_TERMINALS.some((p) => p.terminalPhase === terminal?.phase && p.reason === terminal?.reason);
+}
+
+// ── computeCapacityReport — DIR-126-E/M204: the ONE read-only capacity aggregation over the two
+// artifact populations DIR-126-A..D already produce and check in: milestones/prepare-telemetry/**
+// *.json telemetry records (DIR-126-D's landed writer) and milestones/M*/preparation.json receipts
+// (DIR-125's landed instrumentation). Reads ONLY checked-in artifacts — never Claude Code session
+// JSONL (every live record carries sessionId: null, confirming no session data is reachable from
+// the data itself).
+//
+// Load-bearing design invariants (each one a distinct task AC, each regression-tested):
+//  - Two INDEPENDENT sample populations, joined BEST-EFFORT on embedded (taskId, milestoneId) —
+//    pairing is NEVER required (the live telemetry↔receipt pairing rate is 0/11; requiring it
+//    would report insufficient-samples against the entire real baseline).
+//  - Two wall-time distributions, labeled and NEVER POOLED: receipt-side prepareWallTimeMs (full
+//    prepare loop incl. PlanCheck, via the reused computeMetricsForReceipt →
+//    computeConvergenceMetrics — never a second derivation) and telemetry-side proxy
+//    (recordedAtMs − admission.acquiredAt, lease-acquire → record-write). They measure
+//    semantically different intervals; one blended P50/P85 would fabricate a number neither
+//    source supports.
+//  - Content-generation discriminator is decision.kind ∈ {cold, resume} — NEVER
+//    decision.createsContentGeneration, which is written inverted (kind === "resume") at
+//    proposal-convergence.ts:664 and would misclassify the entire live corpus.
+//  - contentAgentMs null (cold/resume under schemaVersion 2) is preserved as notMeasured — NEVER
+//    coerced to 0; reuse-terminal/not-evaluated are the schema-guaranteed measuredZero buckets.
+//  - Cacheability is RE-DERIVED from the imported CACHEABLE_TERMINALS via isCacheableTerminalShape
+//    (never the record's self-reported flag; disagreement → diagnostic).
+//  - Degenerate receipt intervals (startedAtMs === endedAtMs, both finite — the real M192/M195
+//    shape) are excluded as "convergence-interval-degenerate" by an EXTERNAL exact-equality guard
+//    composing OVER the reused computeConvergenceMetrics (which itself legitimately returns 0 for
+//    that shape — DIR-125's callers depend on that contract).
+//  - Output is byte-reproducible: NO generatedAtMs / wall-clock timestamp; every array sorted; the
+//    same input tree produces byte-identical JSON, making the reproducibility AC diff-provable.
+//  - Every exclusion is reasoned and traced (malformed-json, the validator's own codes e.g.
+//    reuse-terminal-invalid, interval-fields-missing [PARTIAL — overlap analysis only],
+//    no-convergence-block, convergence-interval-degenerate, caller-supplied --exclusions).
+export function computeCapacityReport({ workspace, telemetryRoot, exclusions = [], minSamples = 3 }) {
+  const exclusionsOut = [];
+  const excludeById = new Map((exclusions || []).map((e) => [e.id, e.reason]));
+
+  // ── Telemetry population: traverse via the shared _walkJsonFiles primitive, trace every parse/
+  // validation failure into exclusions[] (a deliberate, flagged divergence from
+  // queryTelemetryReport's silent-skip contract), validate every parsed record via the reused
+  // exported validateTelemetryRecord (never a second, parallel validation routine). Aggregates
+  // across ALL task IDs under the root by default — never one hardcoded taskId.
+  const telemetrySamples = [];
+  for (const p of _walkJsonFiles(telemetryRoot)) {
+    let rec;
+    try {
+      rec = JSON.parse(fs.readFileSync(p, "utf8"));
+    } catch (e) {
+      exclusionsOut.push({ population: "telemetry", id: path.basename(p).replace(/\.json$/, ""), path: p, reason: "malformed-json", detail: e.message });
+      continue;
+    }
+    const id = (rec && rec.recordId) || path.basename(p).replace(/\.json$/, "");
+    if (excludeById.has(id)) {
+      exclusionsOut.push({ population: "telemetry", id, path: p, reason: String(excludeById.get(id)) });
+      continue;
+    }
+    const v = validateTelemetryRecord(rec);
+    if (!v.ok) {
+      exclusionsOut.push({ population: "telemetry", id, path: p, reason: v.code, detail: v.message });
+      continue;
+    }
+    telemetrySamples.push({ path: p, record: rec });
+  }
+
+  // ── Receipt population: every milestones/M*/preparation.json under the workspace, wall time via
+  // the reused computeMetricsForReceipt → computeConvergenceMetrics (C4: never re-derived).
+  const receiptSamples = [];
+  const receiptRawById = new Map();
+  const milestonesRoot = path.join(workspace, "milestones");
+  const milestoneDirs = [];
+  if (fs.existsSync(milestonesRoot)) {
+    for (const entry of fs.readdirSync(milestonesRoot, { withFileTypes: true })) {
+      if (entry.isDirectory() && /^M\d+$/.test(entry.name)) milestoneDirs.push(entry.name);
+    }
+  }
+  milestoneDirs.sort();
+  for (const m of milestoneDirs) {
+    const receiptFile = path.join(milestonesRoot, m, "preparation.json");
+    if (!fs.existsSync(receiptFile)) continue;
+    let receipt;
+    try {
+      receipt = JSON.parse(fs.readFileSync(receiptFile, "utf8"));
+    } catch (e) {
+      exclusionsOut.push({ population: "receipt", id: receiptFile, path: receiptFile, reason: "malformed-json", detail: e.message });
+      continue;
+    }
+    // Keep the raw taskId/milestoneId for the absorbed-task numerator even when this receipt is
+    // excluded from wall-time stats below (file-presence identity, not stats eligibility).
+    receiptRawById.set(receiptFile, { taskId: receipt.taskId ?? null, milestoneId: receipt.milestoneId || m });
+    if (excludeById.has(receiptFile) || excludeById.has(m)) {
+      exclusionsOut.push({ population: "receipt", id: receiptFile, path: receiptFile, reason: String(excludeById.get(receiptFile) ?? excludeById.get(m)) });
+      continue;
+    }
+    const metricsResult = computeMetricsForReceipt({ receiptFile });
+    if (!metricsResult.ok) {
+      exclusionsOut.push({ population: "receipt", id: receiptFile, path: receiptFile, reason: metricsResult.code === "convergence-not-recorded" ? "no-convergence-block" : metricsResult.code });
+      continue;
+    }
+    const c = receipt.convergence || {};
+    // External degenerate-interval guard (C9): fires ONLY on exact startedAtMs === endedAtMs
+    // equality with both finite — never on a short-but-distinct interval. This is the specific
+    // guard keeping M195 (the receipt behind DIR-126's founding ~80-minute Finding) from silently
+    // reporting prepareWallTimeMs: 0 once real aggregation exists.
+    if (Number.isFinite(c.startedAtMs) && Number.isFinite(c.endedAtMs) && c.startedAtMs === c.endedAtMs) {
+      exclusionsOut.push({ population: "receipt", id: receiptFile, path: receiptFile, reason: "convergence-interval-degenerate" });
+      continue;
+    }
+    receiptSamples.push({
+      path: receiptFile, milestoneId: receipt.milestoneId || m, taskId: receipt.taskId ?? null,
+      highRisk: !!c.highRisk, prepareWallTimeMs: metricsResult.metrics.prepareWallTimeMs,
+    });
+  }
+
+  const sortIds = (arr) => [...arr].sort((a, b) => String(a).localeCompare(String(b)));
+  const telemetryIds = sortIds(telemetrySamples.map(({ record }) => record.recordId));
+  const receiptIds = sortIds(receiptSamples.map(({ path: p }) => p));
+  const sampleCount = telemetrySamples.length + receiptSamples.length;
+  const sampleIds = sortIds([...telemetryIds, ...receiptIds]);
+  const perPopulation = {
+    telemetry: { count: telemetrySamples.length, sampleIds: telemetryIds },
+    receipts: { count: receiptSamples.length, sampleIds: receiptIds },
+  };
+
+  const sortedExclusions = exclusionsOut.sort((a, b) =>
+    [a.population, a.id, a.reason].join(" ").localeCompare([b.population, b.id, b.reason].join(" ")));
+
+  // ── Sample-count gate: below --min-samples (default 3), combined OR per-population, no P50/P85.
+  // Per-population counts are ALWAYS reported separately, never blended into one combined total
+  // that could hide a thin population behind a fatter one. insufficient-samples is a normal,
+  // successful report (the CLI exits 0), not a usage failure.
+  if (sampleCount < minSamples || telemetrySamples.length < minSamples || receiptSamples.length < minSamples) {
+    return { code: "insufficient-samples", minSamples, sampleCount, sampleIds, perPopulation, exclusions: sortedExclusions };
+  }
+
+  // ── Two wall-time distributions, labeled and never pooled.
+  const dist = (values) => {
+    if (values.length === 0) return { n: 0, minMs: null, p50Ms: null, p85Ms: null, maxMs: null, method: "nearest-rank" };
+    const sorted = [...values].sort((a, b) => a - b);
+    return { n: sorted.length, minMs: sorted[0], p50Ms: percentile(sorted, 50), p85Ms: percentile(sorted, 85), maxMs: sorted[sorted.length - 1], method: "nearest-rank" };
+  };
+  const proxyMsOf = (rec) =>
+    Number.isFinite(rec.recordedAtMs) && Number.isFinite(rec.admission?.acquiredAt)
+      ? rec.recordedAtMs - rec.admission.acquiredAt
+      : null;
+  const telemetryProxyValues = telemetrySamples.map(({ record }) => proxyMsOf(record)).filter((v) => v !== null);
+  const receiptWallValues = receiptSamples.map(({ prepareWallTimeMs }) => prepareWallTimeMs).filter((v) => Number.isFinite(v));
+  const wallTime = {
+    receiptPrepareMs: dist(receiptWallValues),
+    telemetryProxyMs: dist(telemetryProxyValues),
+    note: "two unpooled distributions — receipt = full prepare loop incl. PlanCheck (computeConvergenceMetrics.prepareWallTimeMs); telemetry proxy = admission.acquiredAt → recordedAtMs (lease-acquire → record-write). Pooling them would fabricate a statistic neither source supports.",
+  };
+
+  // ── Agent-work buckets: measured / measuredZero / notMeasured, never blended; plus the
+  // explicitly-labeled supplementary wallTimeProxyMinutes (never presented under the contentAgentMs
+  // name). null is preserved as notMeasured, never coerced to 0.
+  const agentWork = {
+    measured: { count: 0, contentAgentMs: 0, recordIds: [] },
+    measuredZero: { count: 0, recordIds: [] },
+    notMeasured: { count: 0, recordIds: [] },
+    wallTimeProxyMinutes: { n: telemetryProxyValues.length, totalMinutes: Number((telemetryProxyValues.reduce((a, b) => a + b, 0) / 60000).toFixed(3)) },
+    note: "contentAgentDispatchCount/contentAgentMs are null for cold/resume under schemaVersion 2 — reported notMeasured, never coerced to 0. measuredZero = reuse-terminal/not-evaluated (write-time-guaranteed 0/0, validator-enforced).",
+  };
+  for (const { record } of telemetrySamples) {
+    const kind = record.decision?.kind;
+    if (kind === "reuse-terminal" || kind === "not-evaluated") {
+      agentWork.measuredZero.count++;
+      agentWork.measuredZero.recordIds.push(record.recordId);
+    } else if (record.contentAgentMs === null || record.contentAgentDispatchCount === null) {
+      agentWork.notMeasured.count++;
+      agentWork.notMeasured.recordIds.push(record.recordId);
+    } else {
+      agentWork.measured.count++;
+      agentWork.measured.contentAgentMs += record.contentAgentMs || 0;
+      agentWork.measured.recordIds.push(record.recordId);
+    }
+  }
+  agentWork.measuredZero.recordIds.sort();
+  agentWork.notMeasured.recordIds.sort();
+  agentWork.measured.recordIds.sort();
+
+  // ── Per-stratum breakdowns (class / highRisk / terminal / decision), all task IDs, never one
+  // hardcoded taskId. Telemetry strata carry the proxy distribution + content-agent summary;
+  // highRisk additionally carries the receipt side (receipts record convergence.highRisk);
+  // class/terminal/decision are telemetry-only concepts (receiptCount 0, receiptPrepareMs null).
+  const perTask = {};
+  const byStratum = { class: {}, highRisk: {}, terminal: {}, decision: {} };
+  const stratumEntry = (obj, key) => (obj[key] ??= { telemetryCount: 0, receiptCount: 0, proxyValues: [], receiptWallValues: [], contentAgent: { measuredMs: null, measuredCount: 0, notMeasuredCount: 0, measuredZeroCount: 0 } });
+  for (const { record } of telemetrySamples) {
+    const kind = record.decision?.kind;
+    const terminalKey = `${record.terminal?.phase}/${record.terminal?.reason}`;
+    const proxy = proxyMsOf(record);
+    for (const [strata, key] of [
+      [byStratum.class, record.class ?? "unknown"],
+      [byStratum.highRisk, String(!!record.highRisk)],
+      [byStratum.terminal, terminalKey],
+      [byStratum.decision, kind ?? "unknown"],
+    ]) {
+      const e = stratumEntry(strata, key);
+      e.telemetryCount++;
+      if (proxy !== null) e.proxyValues.push(proxy);
+      if (kind === "reuse-terminal" || kind === "not-evaluated") e.contentAgent.measuredZeroCount++;
+      else if (record.contentAgentMs === null || record.contentAgentDispatchCount === null) e.contentAgent.notMeasuredCount++;
+      else {
+        e.contentAgent.measuredCount++;
+        e.contentAgent.measuredMs = (e.contentAgent.measuredMs || 0) + (record.contentAgentMs || 0);
+      }
+    }
+    const t = (perTask[record.taskId ?? "unknown"] ??= { telemetryCount: 0, receiptCount: 0, telemetryRecordIds: [] });
+    t.telemetryCount++;
+    t.telemetryRecordIds.push(record.recordId);
+  }
+  for (const { taskId, highRisk, prepareWallTimeMs } of receiptSamples) {
+    const e = stratumEntry(byStratum.highRisk, String(highRisk));
+    e.receiptCount++;
+    if (Number.isFinite(prepareWallTimeMs)) e.receiptWallValues.push(prepareWallTimeMs);
+    const t = (perTask[taskId ?? "unknown"] ??= { telemetryCount: 0, receiptCount: 0, telemetryRecordIds: [] });
+    t.receiptCount++;
+  }
+  const finalizeStratum = (e) => ({
+    telemetryCount: e.telemetryCount,
+    receiptCount: e.receiptCount,
+    telemetryProxyMs: dist(e.proxyValues),
+    receiptPrepareMs: e.receiptWallValues.length > 0 ? dist(e.receiptWallValues) : null,
+    contentAgent: e.contentAgent,
+  });
+  for (const group of Object.values(byStratum)) for (const k of Object.keys(group)) group[k] = finalizeStratum(group[k]);
+  for (const k of Object.keys(perTask)) {
+    perTask[k].telemetryRecordIds.sort();
+  }
+  // Byte-reproducibility: object KEY order must not depend on filesystem readdir order — rebuild
+  // every string-keyed map with sorted keys (JS preserves insertion order on stringify).
+  const sortedKeys = (obj) => Object.fromEntries(Object.keys(obj).sort((a, b) => String(a).localeCompare(String(b))).map((k) => [k, obj[k]]));
+  for (const gk of Object.keys(byStratum)) byStratum[gk] = sortedKeys(byStratum[gk]);
+  const perTaskSorted = sortedKeys(perTask);
+
+  // ── Terminal/decision yield + prepared/attempt ratio (eligible-content-generation denominator
+  // shown alongside). not-evaluated is its OWN decision bucket, never folded into cold.
+  const byDecisionKind = {};
+  const byTerminalReason = {};
+  let preparedCount = 0, splitOrPreflightRecommended = 0, terminalReused = 0, transientFailure = 0;
+  for (const { record } of telemetrySamples) {
+    const kind = record.decision?.kind ?? "unknown";
+    byDecisionKind[kind] = (byDecisionKind[kind] || 0) + 1;
+    const terminalKey = `${record.terminal?.phase}/${record.terminal?.reason}`;
+    byTerminalReason[terminalKey] = (byTerminalReason[terminalKey] || 0) + 1;
+    if (kind === "reuse-terminal") terminalReused++;
+    else if (record.terminal?.reason === "prepared" || record.terminal?.outcome === "prepared") preparedCount++;
+    else if (record.terminal?.reason === "split-recommended" || record.terminal?.reason === "preflight-rejected") splitOrPreflightRecommended++;
+    else transientFailure++;
+  }
+  const attempts = telemetrySamples.length;
+  const contentGenerationEligible = telemetrySamples.filter(({ record }) => ["cold", "resume", "reuse-terminal"].includes(record.decision?.kind)).length;
+  const yield_ = {
+    attempts,
+    prepared: preparedCount,
+    splitOrPreflightRecommended,
+    terminalReused,
+    transientFailure,
+    preparedOverAttempt: attempts > 0 ? Number((preparedCount / attempts).toFixed(3)) : null,
+    contentGenerationEligible,
+    byDecisionKind: sortedKeys(byDecisionKind),
+    byTerminalReason: sortedKeys(byTerminalReason),
+  };
+
+  // ── Best-effort join on embedded (taskId, milestoneId) — unpaired samples on either side still
+  // contribute fully to their OWN population's stats (never dropped for lacking a pair).
+  const telemetryKeys = new Set(telemetrySamples.map(({ record }) => `${record.taskId} ${record.milestoneId}`));
+  const receiptKeys = new Set(receiptSamples.map((r) => `${r.taskId} ${r.milestoneId}`));
+  const join = {
+    paired: sortIds([...telemetryKeys].filter((k) => receiptKeys.has(k))).map((k) => k.replace(" ", "/")),
+    telemetryOnly: sortIds([...telemetryKeys].filter((k) => !receiptKeys.has(k))).map((k) => k.replace(" ", "/")),
+    receiptOnly: sortIds([...receiptKeys].filter((k) => !telemetryKeys.has(k))).map((k) => k.replace(" ", "/")),
+  };
+
+  // ── absorbed-task/prepare-hour: numerator = distinct milestone dirs with BOTH preparation.json
+  // AND absorb-entry.md (checked-in file presence only — zero MCP/provider calls; the AND matters,
+  // milestones with absorb-entry.md alone do NOT qualify); denominator = summed reused
+  // computeConvergenceMetrics wall-time HOURS over the convergence-bearing, non-degenerate subset
+  // of exactly those receipts.
+  const numeratorTaskIds = [];
+  const denominatorReceiptPaths = [];
+  let denominatorMs = 0;
+  for (const m of milestoneDirs) {
+    const dir = path.join(milestonesRoot, m);
+    const receiptPath = path.join(dir, "preparation.json");
+    if (!fs.existsSync(receiptPath) || !fs.existsSync(path.join(dir, "absorb-entry.md"))) continue;
+    const rs = receiptSamples.find((r) => r.path === receiptPath);
+    // Identity comes from the RAW receipt (even one excluded from wall-time stats as degenerate/
+    // no-convergence), falling back to the milestone dir name only if the receipt has no taskId.
+    const tid = receiptRawById.get(receiptPath)?.taskId ?? m;
+    if (!numeratorTaskIds.includes(tid)) numeratorTaskIds.push(tid);
+    if (rs && Number.isFinite(rs.prepareWallTimeMs)) {
+      denominatorReceiptPaths.push(rs.path);
+      denominatorMs += rs.prepareWallTimeMs;
+    }
+  }
+  numeratorTaskIds.sort();
+  denominatorReceiptPaths.sort();
+  const denominatorHours = denominatorMs > 0 ? Number((denominatorMs / 3600000).toFixed(6)) : null;
+  const absorbedTaskPerPrepareHour = {
+    numeratorTaskIds,
+    numeratorCount: numeratorTaskIds.length,
+    denominatorHours,
+    denominatorReceiptPaths,
+    absorbedPerPrepareHour: denominatorHours ? Number((numeratorTaskIds.length / denominatorHours).toFixed(3)) : null,
+  };
+
+  // ── Concurrent duplicate-generation minutes: group telemetry records by their OWN admission.key
+  // ("<workspace>::<taskId>" — reused, never synthesized), sum pairwise interval intersections.
+  // A sequential retry starting at/after the prior terminal contributes exactly zero. Records
+  // missing admission.acquiredAt/recordedAtMs are excluded from overlap analysis ONLY
+  // (PARTIAL "interval-fields-missing" — they still count in decision/agent-work stats and the
+  // sample count).
+  const overlapIntervals = new Map();
+  for (const { record, path: p } of telemetrySamples) {
+    const key = record.admission?.key;
+    if (!key) continue;
+    const start = record.admission?.acquiredAt;
+    const end = record.recordedAtMs;
+    if (!Number.isFinite(start) || !Number.isFinite(end)) {
+      exclusionsOut.push({ population: "telemetry", id: record.recordId, path: p, reason: "interval-fields-missing", partial: true });
+      continue;
+    }
+    (overlapIntervals.get(key) ?? overlapIntervals.set(key, []).get(key)).push({ recordId: record.recordId, start, end });
+  }
+  const overlapGroups = [];
+  let concurrentDuplicateMs = 0;
+  for (const [key, intervals] of [...overlapIntervals.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (intervals.length < 2) continue;
+    let groupMs = 0;
+    for (let i = 0; i < intervals.length; i++) {
+      for (let j = i + 1; j < intervals.length; j++) {
+        groupMs += Math.max(0, Math.min(intervals[i].end, intervals[j].end) - Math.max(intervals[i].start, intervals[j].start));
+      }
+    }
+    concurrentDuplicateMs += groupMs;
+    overlapGroups.push({ key, recordIds: sortIds(intervals.map((x) => x.recordId)), overlapMinutes: Number((groupMs / 60000).toFixed(3)) });
+  }
+
+  // ── Unchanged-stable-terminal recomputation: group by (taskId, hashes.{charter,taskContract,
+  // proposal,reviewPolicy}) EXACT 4-tuple equality — NEVER terminal-shape alone (with 16 live
+  // split-recommended records, shape-only grouping would misclassify every legitimate between-
+  // rounds content revision as wasted work). Within a group, order by recordedAtMs ascending;
+  // among records sharing a DERIVED-cacheable terminal (via the imported CACHEABLE_TERMINALS
+  // bridge), each later one with decision.kind !== "reuse-terminal" is an avoidable recomputation;
+  // a later reuse-terminal is a correct hit. Wasted work: the exact measured contentAgentMs when
+  // non-null, else routed to notMeasured + proxy accounting — never a fabricated exact number.
+  const recomputeGroups = new Map();
+  for (const { record } of telemetrySamples) {
+    const h = record.hashes || {};
+    if (!h.charter || !h.taskContract || !h.proposal || !h.reviewPolicy) continue;
+    const gk = [record.taskId ?? "unknown", h.charter, h.taskContract, h.proposal, h.reviewPolicy].join(" ");
+    (recomputeGroups.get(gk) ?? recomputeGroups.set(gk, []).get(gk)).push({
+      recordId: record.recordId, recordedAtMs: Number.isFinite(record.recordedAtMs) ? record.recordedAtMs : Number.MAX_SAFE_INTEGER,
+      kind: record.decision?.kind, cacheable: isCacheableTerminalShape(record.terminal), contentAgentMs: record.contentAgentMs,
+      proxyMs: proxyMsOf(record),
+    });
+  }
+  let unchangedTerminalRecomputations = 0;
+  let wastedMeasuredContentAgentMs = null;
+  let notMeasuredRecomputations = 0;
+  let wallTimeProxyMinutesForNotMeasuredRecomputations = 0;
+  let terminalReuseHits = 0;
+  const terminalReuseHitRecordIds = [];
+  const recomputationGroupEntries = [];
+  for (const [gk, entries] of [...recomputeGroups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    entries.sort((a, b) => a.recordedAtMs - b.recordedAtMs || String(a.recordId).localeCompare(String(b.recordId)));
+    const cacheables = entries.filter((e) => e.cacheable);
+    const recomputationRecordIds = [];
+    for (const e of entries) if (e.kind === "reuse-terminal") { terminalReuseHits++; terminalReuseHitRecordIds.push(e.recordId); }
+    for (let i = 1; i < cacheables.length; i++) {
+      const e = cacheables[i];
+      if (e.kind === "reuse-terminal") continue; // a correct reuse of identical inputs — a hit, not waste
+      unchangedTerminalRecomputations++;
+      recomputationRecordIds.push(e.recordId);
+      if (Number.isFinite(e.contentAgentMs)) {
+        wastedMeasuredContentAgentMs = (wastedMeasuredContentAgentMs || 0) + e.contentAgentMs;
+      } else {
+        notMeasuredRecomputations++;
+        if (e.proxyMs !== null) wallTimeProxyMinutesForNotMeasuredRecomputations += e.proxyMs;
+      }
+    }
+    if (recomputationRecordIds.length > 0) {
+      const [taskId, charter, taskContract, proposal, reviewPolicy] = gk.split(" ");
+      recomputationGroupEntries.push({
+        taskId, hashes: { charter, taskContract, proposal, reviewPolicy },
+        groupRecordIds: sortIds(entries.map((e) => e.recordId)),
+        recomputationRecordIds: sortIds(recomputationRecordIds),
+      });
+    }
+  }
+  terminalReuseHitRecordIds.sort();
+
+  // ── Cacheability diagnostics: derived (from the imported allowlist) vs the record's
+  // self-reported terminal.cacheable. Disagreement is surfaced, never silently resolved either
+  // way; the derived value governs classification above.
+  const diagnostics = [];
+  for (const { record } of telemetrySamples) {
+    const derived = isCacheableTerminalShape(record.terminal);
+    const selfReported = record.terminal?.cacheable === true;
+    if (derived !== selfReported) {
+      diagnostics.push({
+        type: "cacheability-self-report-mismatch", recordId: record.recordId,
+        terminal: `${record.terminal?.phase}/${record.terminal?.reason}`,
+        derivedCacheable: derived, selfReportedCacheable: selfReported,
+      });
+    }
+  }
+  diagnostics.sort((a, b) => String(a.recordId).localeCompare(String(b.recordId)));
+
+  // ── estimatedAvoidedAgentMinutes: computed ONLY when a comparable, same-class/highRisk,
+  // non-reuse-terminal sample population with measured contentAgentMs exists — otherwise the
+  // literal string "unknown" (savings are never fabricated).
+  let estimatedAvoidedAgentMinutes = "unknown";
+  if (unchangedTerminalRecomputations > 0) {
+    let estimatedMs = 0;
+    let estimable = true;
+    for (const group of recomputationGroupEntries) {
+      for (const rid of group.recomputationRecordIds) {
+        const sample = telemetrySamples.find(({ record }) => record.recordId === rid)?.record;
+        if (Number.isFinite(sample?.contentAgentMs)) continue; // already measured exactly above
+        const comparables = telemetrySamples.filter(({ record }) =>
+          record.class === sample?.class && record.highRisk === sample?.highRisk &&
+          record.decision?.kind !== "reuse-terminal" && Number.isFinite(record.contentAgentMs));
+        if (comparables.length === 0) { estimable = false; break; }
+        estimatedMs += comparables.reduce((a, { record }) => a + record.contentAgentMs, 0) / comparables.length;
+      }
+      if (!estimable) break;
+    }
+    if (estimable) estimatedAvoidedAgentMinutes = Number((estimatedMs / 60000).toFixed(3));
+  }
+
+  exclusionsOut.sort((a, b) => [a.population, a.id, a.reason].join(" ").localeCompare([b.population, b.id, b.reason].join(" ")));
+
+  return {
+    code: "ok",
+    minSamples,
+    sampleCount,
+    sampleIds,
+    perPopulation,
+    perTask: perTaskSorted,
+    wallTime,
+    byStratum,
+    agentWork,
+    yield: yield_,
+    join,
+    absorbedTaskPerPrepareHour,
+    waste: {
+      concurrentDuplicate: { totalMinutes: Number((concurrentDuplicateMs / 60000).toFixed(3)), groups: overlapGroups },
+      unchangedTerminal: {
+        recomputations: unchangedTerminalRecomputations,
+        wastedMeasuredContentAgentMs,
+        notMeasuredRecomputations,
+        wallTimeProxyMinutesForNotMeasured: Number((wallTimeProxyMinutesForNotMeasuredRecomputations / 60000).toFixed(3)),
+        terminalReuseHits,
+        terminalReuseHitRecordIds,
+        groups: recomputationGroupEntries,
+      },
+    },
+    estimatedAvoidedAgentMinutes,
+    diagnostics,
+    exclusions: exclusionsOut,
+  };
 }
 
 // ── parsePlanStages / validatePlanStructure — DIR-117 iteration-2 item 3: real structural Plan
@@ -471,6 +982,17 @@ function parseArgs(argv) {
     else if (a === "--telemetry") out.telemetryFile = argv[++i];
     else if (a === "--workspace") out.workspace = argv[++i];
     else if (a === "--telemetry-report") out.telemetryReportMilestoneId = argv[++i];
+    // DIR-126-E/M204 — the read-only capacity-aggregation mode: --capacity-report aggregates BOTH
+    // checked-in artifact populations (telemetry records + preparation receipts) into P50/P85
+    // wall-time distributions and the waste/yield/absorption statistics the throughput doc cites.
+    // --telemetry-glob supports exactly the fixed '<root>/**/*.json' shape (no glob engine, no
+    // fs.globSync — below the repo's Node-20 packaging floor); --exclusions is a caller-supplied
+    // JSON array of {id, reason} entries; --min-samples (default 3) gates the insufficient-samples
+    // path. Reuses the existing --workspace (default ".") and --out flags.
+    else if (a === "--capacity-report") out.capacityReport = true;
+    else if (a === "--telemetry-glob") out.telemetryGlob = argv[++i];
+    else if (a === "--exclusions") out.exclusionsFile = argv[++i];
+    else if (a === "--min-samples") out.minSamples = Number(argv[++i]);
   }
   return out;
 }
@@ -565,6 +1087,56 @@ if (isDirectInvocation()) {
     const result = queryTelemetryReport({ workspace: parsed.workspace || ".", milestoneId: parsed.telemetryReportMilestoneId });
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.ok ? 0 : 1);
+  }
+
+  if (parsed.capacityReport) {
+    // ── --capacity-report mode: DIR-126-E/M204 read-only capacity aggregation over BOTH checked-in
+    // artifact populations (telemetry records under --telemetry-glob + milestones/M*/preparation.json
+    // receipts). Exit 0 for BOTH `ok` and `insufficient-samples` (a normal, successful report, not
+    // a usage failure); exit 2 only on a hard usage/environment error — matching this file's
+    // existing parseArgs/exit-2 convention. The stdout JSON and the --out file carry the SAME
+    // bytes, with NO generatedAtMs — byte-identical re-runs over the same input tree.
+    const glob = parsed.telemetryGlob || "milestones/prepare-telemetry/**/*.json";
+    if (!glob.endsWith("/**/*.json")) {
+      console.error(`ERROR: --telemetry-glob must have the fixed shape '<root>/**/*.json', got: ${glob}`);
+      process.exit(2);
+    }
+    const ws = parsed.workspace || ".";
+    if (!fs.existsSync(ws)) {
+      console.error(`ERROR: --workspace does not exist or is not readable: ${ws}`);
+      process.exit(2);
+    }
+    let exclusions = [];
+    if (parsed.exclusionsFile) {
+      if (!fs.existsSync(parsed.exclusionsFile)) {
+        console.error(`ERROR: --exclusions file does not exist: ${parsed.exclusionsFile}`);
+        process.exit(2);
+      }
+      try {
+        exclusions = JSON.parse(fs.readFileSync(parsed.exclusionsFile, "utf8"));
+      } catch (e) {
+        console.error(`ERROR: --exclusions file is not valid JSON: ${e.message}`);
+        process.exit(2);
+      }
+      if (!Array.isArray(exclusions) || exclusions.some((e) => !e || typeof e.id === "undefined" || typeof e.reason === "undefined")) {
+        console.error("ERROR: --exclusions file must be a JSON array of {id, reason} entries");
+        process.exit(2);
+      }
+    }
+    const globRoot = glob.slice(0, -"/**/*.json".length);
+    const result = computeCapacityReport({
+      workspace: ws,
+      telemetryRoot: path.resolve(ws, globRoot),
+      exclusions,
+      minSamples: Number.isFinite(parsed.minSamples) ? parsed.minSamples : 3,
+    });
+    const json = JSON.stringify(result, null, 2);
+    console.log(json);
+    if (parsed.outFile) {
+      fs.mkdirSync(path.dirname(parsed.outFile), { recursive: true });
+      fs.writeFileSync(parsed.outFile, json + "\n");
+    }
+    process.exit(0);
   }
 
   const { taskFile, charterFile, receiptFile, declaredTouchesFile } = parsed;

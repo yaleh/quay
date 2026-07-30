@@ -14,6 +14,10 @@ extra:
   dirStatus: applied
   rank: 0
   urgency: urgent
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-126-E
+    experiments/quay-perpetual-stream/charters/M204-dir126e-capacity-report.md
+    milestones/M204/absorb-entry.md
 ---
 
 **type:** execution
