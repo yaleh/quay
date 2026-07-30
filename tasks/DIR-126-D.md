@@ -487,7 +487,7 @@ dedicated, non-mocked fixtures.
 `docs/plans/M203-dir-126-d.md` — 13-stage Plan authored 2026-07-30, updated 2026-07-30 at base
 revision `a449053` (current HEAD short-sha) to track the task's round-10 AC revision, mapping all
 24 task AC items to ordered stages (schema/helpers → Claims A.1-A.5, including A.2's isolated-write
-failure guarantee → Claim B.2 → generation-ID/migration proofs → regression guard → mirror sync →
+failure guarantee → Claim B.1 → generation-ID/migration proofs → regression guard → mirror sync →
 backward-compat run → deferral task → real-landing verification); mechanically verified via
 `validatePlanStructure(planText, 24)` → `plan-structure-ok`. Depends on [[DIR-126-A]],
 [[DIR-126-B]], [[DIR-126-C]].
@@ -679,13 +679,13 @@ backward-compat run → deferral task → real-landing verification); mechanical
   `.quay/prepare-leases/<taskId>.generation.json`, `Adjudicate`, `Admission`, `Date.now()`,
   `PlanAuthor`, `PlanCheck`, `PreflightContent`, `PreflightPlan`, `ProposalAuthors`,
   `ProposalReview`, `Receipt`, `_admissionAgentCall`, `_admissionAgentCall('--renew ...')`,
-  `_convergence`, `_convergenceAgentCall`, `_generationPath()`, `_now()`, `_phaseTelemetry`,
-  `_phaseTelemetry.push(...)`, `_preflightAgentCall`, `_recordGenerationCli`,
+  `_convergence`, `_convergenceAgentCall`, `_generationPath()`, `_now()`,
+  `_preflightAgentCall`, `_recordGenerationCli`,
   `_releaseLeaseAndRecord`, `_releaseLeaseAndRecord(stageLabel, {terminalPhase, outcome, reason,
   cacheable})`, `_renewLease`, `_renewLease(stageLabel)`, `adjudicate-failed`,
   `admission-check-failed`, `agent()`, `contentAgentDispatchCount`, `contentAgentMs`,
   `date +%s%3N`, `decideResumeGeneration`, `delta-cap-exhausted`, `fs.write`, `fs.writeFileSync`,
-  `mechanicalRunnerCount`, `mechanicalRunnerMs`, `missing-required-args`, `needs-human`,
+  `mechanicalRunnerCount`, `missing-required-args`, `needs-human`,
   `new Date()`, `nowMs`, `nowMs: Date.now()`, `plan-author-failed`, `plancheck-rounds-exceeded`,
   `preflight-check-failed`, `preflight-rejected`, `prepare-admission-check.ts`,
   `prepare-already-running`, `prepare-milestone`, `prepare-milestone.js`, `prepared`,
@@ -696,7 +696,13 @@ backward-compat run → deferral task → real-landing verification); mechanical
   taskContractHash, proposalHash, reviewPolicyHash, terminalPhase, outcome, reason, cacheable,
   recordedAtMs}` — every one of these is an already-real, already-landed name confirmed present in
   the current tree (DIR-126-A/B/C's own landed code, or this file's own Chosen mechanism), not a
-  new invention. Also covering this child's own new design-decision identifiers (the Receipt-path
+  new invention. (An independent post-round-11 verification found `_phaseTelemetry`/
+  `_phaseTelemetry.push(...)`/`mechanicalRunnerMs` — pre-round-7 phase-timing-enrichment identifiers
+  belonging to Mechanism B.1, deferred out of this child's scope by round-7's commit `1170b25` — had
+  been left uncited-but-still-listed here as a stale leftover; struck from this citation list, since
+  correctly-deferred scope is grounded by its own "Deferred out of DIR-126-D's scope" note above
+  (the `{phase, round, startedAtMs, endedAtMs}` breakdown shape is), not by a false "already-landed"
+  claim here.) Also covering this child's own new design-decision identifiers (the Receipt-path
   ordering fix and the `findingCodes[]` recurrence-tracking field): `--build`, `_releaseLease`,
   `_releaseLease('Receipt', {outcome: 'prepared', ...})`, `_writeGenerationTelemetry`,
   `_writeGenerationTelemetry('Receipt', {outcome:'prepared', ...})`, `code`, `findingCodes[]`,
