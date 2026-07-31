@@ -40,6 +40,9 @@ jobs:
         # cli-edit-parity-conformance.test.mjs) now declare their own in-file skip condition
         # (opt-in via QUAY_TEST_LIVE_GITHUB=1, not set here) instead of being excluded by a
         # hand-written grep/glob pattern — this job reports them `skipped`, not silently absent.
+        # gap-split-or-commit-not-continuously-checked: scripts/test.sh itself now also runs the
+        # whole-task-store split-or-commit scan (DIR-026) on every invocation — this job inherits
+        # that via this same `bash scripts/test.sh` call; no separate CI job was added for it.
         run: bash scripts/test.sh
         env:
           GH_TOKEN: ${{ github.token }}
