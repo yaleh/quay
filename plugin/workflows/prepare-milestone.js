@@ -73,14 +73,48 @@ const _receiptFile = `milestones/${_milestoneId}/preparation.json`
 // return value/shape is byte-identical either way.
 const _convergenceScript = 'experiments/quay-perpetual-stream/scripts/proposal-convergence.ts'
 
+// M207 — per-phase-boundary timing accumulation + finding-code construction (purely additive
+// telemetry, never a gate). `_phaseTimings` accumulates one closed {phase, round, startedAtMs,
+// endedAtMs} span per SUCCESSFUL renewal boundary; `_lastBoundaryMs` is seeded from the parsed
+// `--acquire` verdict's self-reported `nowMs` and advanced by each renewal's — the sandbox NEVER
+// computes a timestamp itself (AC19's regression class f6db2a8/7357a91: zero Date.now()/new Date()/
+// import() sites in this file; every value below is read out of already-parsed subprocess JSON).
+// The trailing still-open span is closed RECEIVER-side (proposal-convergence.ts fills its
+// `endedAtMs: null` with its own `recordedAtMs`), never here.
+let _phaseTimings = []
+let _lastBoundaryMs = null
+// M207 — TDZ-safe finding-code construction. `let _ledger = []` is declared far below (in the
+// ProposalReview section), textually AFTER four pre-ledger terminal exits that already call
+// `_releaseLeaseAndRecord` — optional chaining does NOT bypass the temporal dead zone
+// (`_ledger?.map(...)` still evaluates the binding and throws ReferenceError there), so this
+// boolean short-circuit guard is the minimal correct form: `false` until `let _ledger = []` has
+// actually executed, at which point it flips true and the ledger's own finding ids join the codes.
+let _ledgerLive = false
+function _findingCodesFor(reason) {
+  return [reason, ...(_ledgerLive ? _ledger.map((f) => f.id) : [])]
+}
+// M207 — the `--phaseTimings` payload every record-writing terminal dispatch carries: the closed
+// spans plus ONE trailing open `{..., endedAtMs: null}` entry the receiver closes with its own
+// `recordedAtMs`. `round` is the constant 0 here (not `_deltaRound`/`_planCheckRound`): a terminal
+// dispatch can fire BEFORE those `let` declarations execute (the same TDZ hazard `_ledgerLive`
+// guards) — a formatted terminal label is presentation, and 0 is the honest round-agnostic value.
+function _phaseTimingsForTerminal(stageLabel) {
+  return [..._phaseTimings, { phase: stageLabel, round: 0, startedAtMs: _lastBoundaryMs, endedAtMs: null }]
+}
+
 async function _recordAttemptAgentCall(site, detailObj) {
   // _taskId may be genuinely absent (the missing-required-args site's whole point) — omit the
   // --taskId flag entirely rather than pass an empty value, so the shell command the agent
   // constructs never has an ambiguous/empty flag argument.
   const _taskIdFlag = _taskId ? `--taskId ${JSON.stringify(_taskId)} ` : ''
+  // M207: the 3 pre-lease sites carry `--phaseTimings []` (by construction — missing-required-args
+  // precedes --acquire entirely; the other two have zero completed spans) and `--findingCodes`
+  // seeded from the site name alone (the `_ledgerLive` guard yields exactly `[site]` here). Both
+  // flags ride the dispatch that already exists — no new dispatch, double-JSON.stringify idiom
+  // matching --detail above.
   return agent(
     `Run exactly this shell command and report its stdout verbatim:
-node --experimental-strip-types ${_convergenceScript} --record-attempt ${_taskIdFlag}--workspace . --site ${JSON.stringify(site)} --detail ${JSON.stringify(JSON.stringify(detailObj || {}))}
+node --experimental-strip-types ${_convergenceScript} --record-attempt ${_taskIdFlag}--workspace . --site ${JSON.stringify(site)} --detail ${JSON.stringify(JSON.stringify(detailObj || {}))} --phaseTimings ${JSON.stringify(JSON.stringify([]))} --findingCodes ${JSON.stringify(JSON.stringify(_findingCodesFor(site)))}
 Do not paraphrase or reformat the command's stdout — copy it exactly as printed. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
     { label: `record-attempt-${site}`, phase: 'Admission', schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } } }
   )
@@ -144,8 +178,31 @@ Do not paraphrase or reformat the command's stdout — copy it exactly as printe
 // (Adjudicate entry, ProposalReview entry, each ProposalReview delta round, PlanAuthor entry, each
 // PlanCheck round, Receipt entry). The workflow DSL has confirmed zero try/finally semantics, so
 // this is dispatched explicitly at each boundary rather than inherited from exception unwinding.
-async function _renewLease(stageLabel) {
+// M207: `round` is a second, caller-owned parameter — the integer the caller ALREADY holds in
+// scope (`_deltaRound`, `_planCheckRound`, or 0 for the non-round sites), never regex-parsed from
+// the formatted `stageLabel` (a label is presentation, not a structured-data source). All 6 call
+// sites pass it explicitly and feed the response to `_recordPhaseBoundary` below.
+async function _renewLease(stageLabel, round) {
   return _admissionAgentCall(`--renew --taskId ${_taskId} --workspace . --stage ${JSON.stringify(stageLabel)}`, `admission-renew-${stageLabel}`)
+}
+
+// M207: FIRST code ever to read anything out of a renewal response (100% discarded before this
+// child). Parses via the existing `_parseAgentJson` balanced-brace scanner (never naive
+// JSON.parse — agent stdout carries non-JSON noise, gap-prepare-milestone-noisy-agent-raw-json-
+// parse) and pushes a span onto `_phaseTimings` ONLY under the rule `v.ok === true &&
+// Number.isFinite(v.nowMs)` — matching renewLease's real `{ok: true, lease}` success shape (NOT
+// an invented `outcome:'renewed'` literal, and NOT nowMs-presence alone: error verdicts also
+// carry nowMs by design). A failed (ok:false, e.g. lease-missing) or unparseable/noisy renewal
+// pushes NOTHING and leaves `_lastBoundaryMs` unchanged — fail-soft (telemetry is additive,
+// never blocks the real gate); the next successful boundary yields a wider, correctly bounded
+// span. `startedAtMs` is `_lastBoundaryMs` — seeded from the parsed --acquire verdict's `nowMs`
+// (below) and advanced by each successful boundary — never a workflow-local clock read.
+function _recordPhaseBoundary(stageLabel, round, r) {
+  const v = r?.raw ? _parseAgentJson(r.raw) : null
+  if (v && v.ok === true && Number.isFinite(v.nowMs)) {
+    _phaseTimings.push({ phase: stageLabel, round, startedAtMs: _lastBoundaryMs, endedAtMs: v.nowMs })
+    _lastBoundaryMs = v.nowMs
+  }
 }
 
 // M202/DIR-126-C: proposal-convergence.ts's new thin CLI tail — the SAME agent()-wraps-a-real-CLI
@@ -177,8 +234,12 @@ async function _releaseLeaseAndRecord(stageLabel, { terminalPhase, outcome, reas
   // (`_resumeFromAdjudicatedProposal`, set by the resume-decision block above) into the committed
   // telemetry record's `decision.kind` — per the frozen schema, `cold|resume` for admitted
   // attempts, never the `not-evaluated` value reserved for the three pre-lease sites.
+  // M207: `--phaseTimings` (closed spans + one trailing open entry the receiver closes with its
+  // own recordedAtMs) and `--findingCodes` (terminal reason + ledger finding ids via the TDZ-safe
+  // `_findingCodesFor` guard) ride THIS already-existing dispatch — no new dispatch, double-
+  // JSON.stringify idiom matching _recordAttemptAgentCall's --detail.
   return _convergenceAgentCall(
-    `--record-generation --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --terminalPhase ${terminalPhase} --outcome ${outcome} --reason ${JSON.stringify(reason)} --cacheable ${cacheable} --milestoneId ${_milestoneId} --class ${_class} --highRisk ${_highRisk} --decisionKind ${_resumeFromAdjudicatedProposal ? 'resume' : 'cold'}`,
+    `--record-generation --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --terminalPhase ${terminalPhase} --outcome ${outcome} --reason ${JSON.stringify(reason)} --cacheable ${cacheable} --milestoneId ${_milestoneId} --class ${_class} --highRisk ${_highRisk} --decisionKind ${_resumeFromAdjudicatedProposal ? 'resume' : 'cold'} --phaseTimings ${JSON.stringify(JSON.stringify(_phaseTimingsForTerminal(stageLabel)))} --findingCodes ${JSON.stringify(JSON.stringify(_findingCodesFor(reason)))}`,
     `admission-release-${stageLabel}`
   )
 }
@@ -191,8 +252,11 @@ async function _releaseLeaseAndRecord(stageLabel, { terminalPhase, outcome, reas
 // `admission-release-${stageLabel}` label _releaseLeaseAndRecord already uses (label continuity
 // with the out-of-Touches e2e mock's `/^admission-release-/` fail-closed dispatch chain).
 async function _writeGenerationTelemetry(stageLabel, { terminalPhase, outcome, reason, cacheable }) {
+  // M207: the Receipt success path carries BOTH new flags too (uniformly with
+  // `_releaseLeaseAndRecord` above); `_releaseLease`'s --release-only dispatch below gains
+  // nothing — it writes no telemetry.
   return _convergenceAgentCall(
-    `--record-generation --no-release --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --terminalPhase ${terminalPhase} --outcome ${outcome} --reason ${JSON.stringify(reason)} --cacheable ${cacheable} --milestoneId ${_milestoneId} --class ${_class} --highRisk ${_highRisk} --decisionKind ${_resumeFromAdjudicatedProposal ? 'resume' : 'cold'}`,
+    `--record-generation --no-release --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --terminalPhase ${terminalPhase} --outcome ${outcome} --reason ${JSON.stringify(reason)} --cacheable ${cacheable} --milestoneId ${_milestoneId} --class ${_class} --highRisk ${_highRisk} --decisionKind ${_resumeFromAdjudicatedProposal ? 'resume' : 'cold'} --phaseTimings ${JSON.stringify(JSON.stringify(_phaseTimingsForTerminal(stageLabel)))} --findingCodes ${JSON.stringify(JSON.stringify(_findingCodesFor(reason)))}`,
     `write-telemetry-${stageLabel}`
   )
 }
@@ -236,6 +300,15 @@ if (_admissionVerdict.outcome === 'prepare-already-running') {
 }
 
 log(`Admission: acquired lease for ${_taskId} (fencingToken=${_admissionVerdict.lease?.fencingToken}, reclaimed=${_admissionVerdict.reclaimed === true}).`)
+
+// M207: seed `_lastBoundaryMs` EXCLUSIVELY from the already-parsed --acquire verdict's self-
+// reported `nowMs` (the subprocess computes the clock; the sandbox only reads a cached number —
+// never a workflow-local clock read). Only on `outcome === 'acquired'` — the prepare-already-
+// running path returned above before any span exists. No `_phaseTimings` entry is pushed here:
+// acquire is the FIRST boundary, with no prior boundary to pair against. An older-subprocess
+// verdict lacking `nowMs` leaves `_lastBoundaryMs` null — the first successful renewal then
+// pushes a span with `startedAtMs: null`, an honest "epoch unknown", not a crash.
+if (_admissionVerdict.outcome === 'acquired' && Number.isFinite(_admissionVerdict.nowMs)) _lastBoundaryMs = _admissionVerdict.nowMs
 
 // ── Resume decision — M202/DIR-126-C: generation-aware resume ───────────────────────────
 // Runs ONLY when the caller OMITS $a.resumeFromAdjudicatedProposal entirely — an explicit true/
@@ -369,7 +442,7 @@ Return {authorIdx: ${authorIdx}, proposalText: <the full Proposal markdown text,
 
   // ── Phase: Adjudicate ─────────────────────────────────────────────────────────────────
   phase('Adjudicate')
-  await _renewLease('Adjudicate')
+  _recordPhaseBoundary('Adjudicate', 0, await _renewLease('Adjudicate', 0))
 
   adjudicateResult = await agent(
     `Adjudicate ${_proposals.length} independent Proposal drafts for task ${_taskId} into ONE reconciled Proposal, then write it back.
@@ -404,7 +477,7 @@ ${_proposals.map((p) => `--- Author ${p.authorIdx} ---\n${p.proposalText}`).join
 // no import statements (established convention: see MAX_PLANCHECK_ROUNDS below), so the numbers
 // are inlined here and cross-checked by proposal-convergence.test.mjs's own dedicated test.
 phase('ProposalReview')
-await _renewLease('ProposalReview')
+_recordPhaseBoundary('ProposalReview', 0, await _renewLease('ProposalReview', 0))
 
 // FIX (2026-07-28, real-dispatch crash found post-DIR-125): workflow scripts cannot call
 // Date.now()/new Date() — the sandbox throws (it would break resume). `$a.now` as a FUNCTION is a
@@ -442,6 +515,9 @@ function _fingerprint(subsystem, claimRef, summary) {
 }
 
 let _ledger = []
+// M207: from this point on `_findingCodesFor` may read `_ledger` (the TDZ guard above flips here —
+// see its comment for why `_ledger?.map(...)` would be wrong).
+_ledgerLive = true
 function _upsertFindings(rawFindings, round) {
   const byId = new Map(_ledger.map((f) => [f.id, { ...f }]))
   for (const raw of (rawFindings || [])) {
@@ -574,7 +650,7 @@ while (true) {
 
   _deltaRound += 1
   log(`ProposalReview: ${openBlocking.length} blocking finding(s) open — dispatching focused revision + delta review round ${_deltaRound}/${_maxDeltaRounds}.`)
-  await _renewLease(`ProposalReview-delta-round-${_deltaRound}`)
+  _recordPhaseBoundary(`ProposalReview-delta-round-${_deltaRound}`, _deltaRound, await _renewLease(`ProposalReview-delta-round-${_deltaRound}`, _deltaRound))
 
   const _reviseResult = await agent(
     `Focused Proposal reviser for task ${_taskId}, delta round ${_deltaRound}/${_maxDeltaRounds}. Do NOT re-derive the Proposal from scratch and do NOT act as an independent author — resolve ONLY these recorded blocking findings against the CURRENT task ${_taskId} \`## Proposal\`, preserving every other section/sentence unchanged:
@@ -635,7 +711,7 @@ log(`ProposalReview PASSED — zero open blocking findings after 1 full synthesi
 
 // ── Phase: PlanAuthor ─────────────────────────────────────────────────────────────────
 phase('PlanAuthor')
-await _renewLease('PlanAuthor')
+_recordPhaseBoundary('PlanAuthor', 0, await _renewLease('PlanAuthor', 0))
 
 const _slug = _taskId.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 const _planFile = `docs/plans/${_milestoneId}-${_slug}.md`
@@ -716,7 +792,7 @@ const _planCheckSessions = []
 
 while (_planCheckRound < MAX_PLANCHECK_ROUNDS) {
   _planCheckRound += 1
-  await _renewLease(`PlanCheck-round-${_planCheckRound}`)
+  _recordPhaseBoundary(`PlanCheck-round-${_planCheckRound}`, _planCheckRound, await _renewLease(`PlanCheck-round-${_planCheckRound}`, _planCheckRound))
   const checkResult = await agent(
     `INDEPENDENT grounded Plan check, round ${_planCheckRound}/${MAX_PLANCHECK_ROUNDS}, for ${_planFile} (task ${_taskId}) — you did NOT author this Plan.
 
@@ -752,7 +828,7 @@ if (_planCheckFindings !== 0) {
 
 // ── Phase: Receipt ────────────────────────────────────────────────────────────────────
 phase('Receipt')
-await _renewLease('Receipt')
+_recordPhaseBoundary('Receipt', 0, await _renewLease('Receipt', 0))
 
 // DIR-117 iteration-2 item 2: thread the REAL, distinct session ids captured by each phase above
 // into the receipt's --build command, so buildReceipt() records real provenance — never a

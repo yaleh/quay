@@ -680,10 +680,21 @@ async function main(argv) {
   }
   const now = Date.now();
   try {
+    // M207: every JSON verdict this CLI prints carries ONE additive `nowMs: now` field, reusing
+    // the single already-computed `const now = Date.now()` above — ZERO new Date.now() sites in
+    // this file. This is the per-phase-boundary self-report prepare-milestone.js reads out of the
+    // parsed verdict (never computing a clock read in the sandbox itself — AC19's regression class
+    // f6db2a8/7357a91, and acquireLease's own `missing-now` contract above). Lease-mode `result`
+    // objects gain it by non-clobbering `{...result, nowMs: now}` spread; the two preflight modes
+    // spread the object `runPreflightChecks(...)` RETURNED so the existing `{ok, policyVersion,
+    // findings}` keys downstream Preflight verdict parsing reads survive unchanged; the inline
+    // error literals and the catch-all carry it too, so a failure verdict also self-reports when
+    // the subprocess answered. The pure decision functions above stay untouched (already
+    // `now`-injected) — the pure-decision/thin-CLI split and every direct-import unit test holds.
     if (mode === "preflight" || mode === "preflight-plan") {
       const taskPath = path.join(workspace, "tasks", `${taskId}.md`);
       if (!fs.existsSync(taskPath)) {
-        console.log(JSON.stringify({ outcome: "error", code: "preflight-check-failed", message: `task file not found: ${taskPath}` }));
+        console.log(JSON.stringify({ outcome: "error", code: "preflight-check-failed", message: `task file not found: ${taskPath}`, nowMs: now }));
         return 2;
       }
       const taskBody = fs.readFileSync(taskPath, "utf8");
@@ -692,23 +703,23 @@ async function main(argv) {
           ? fs.readFileSync(parsed.flags.charterFile, "utf8")
           : "";
         const result = runPreflightChecks({ mode: "content", taskBody, charterBody, workspace });
-        console.log(JSON.stringify(result));
+        console.log(JSON.stringify({ ...result, nowMs: now }));
         return result.ok ? 0 : 1;
       }
       // mode === 'preflight-plan'
       if (!parsed.flags.planFile || !fs.existsSync(parsed.flags.planFile)) {
-        console.log(JSON.stringify({ outcome: "error", code: "preflight-check-failed", message: `--planFile not found: ${parsed.flags.planFile}` }));
+        console.log(JSON.stringify({ outcome: "error", code: "preflight-check-failed", message: `--planFile not found: ${parsed.flags.planFile}`, nowMs: now }));
         return 2;
       }
       const planBody = fs.readFileSync(parsed.flags.planFile, "utf8");
       const result = runPreflightChecks({ mode: "plan", taskBody, planBody, workspace });
-      console.log(JSON.stringify(result));
+      console.log(JSON.stringify({ ...result, nowMs: now }));
       return result.ok ? 0 : 1;
     }
     if (mode === "acquire") {
       const ownerExecutionId = process.env.CLAUDE_CODE_SESSION_ID;
       if (!ownerExecutionId) {
-        console.log(JSON.stringify({ outcome: "error", code: "missing-session-id", message: "CLAUDE_CODE_SESSION_ID is not set in this process environment" }));
+        console.log(JSON.stringify({ outcome: "error", code: "missing-session-id", message: "CLAUDE_CODE_SESSION_ID is not set in this process environment", nowMs: now }));
         return 2;
       }
       const result = acquireLease({
@@ -718,17 +729,17 @@ async function main(argv) {
         baseCommit: parsed.flags.baseCommit || null,
         now, ownerExecutionId,
       });
-      console.log(JSON.stringify(result));
+      console.log(JSON.stringify({ ...result, nowMs: now }));
       return result.outcome === "acquired" ? 0 : 1;
     }
     if (mode === "renew") {
       const result = renewLease({ workspace, taskId, stage: parsed.flags.stage, now });
-      console.log(JSON.stringify(result));
+      console.log(JSON.stringify({ ...result, nowMs: now }));
       return result.ok ? 0 : 1;
     }
     if (mode === "release") {
       const result = releaseLease({ workspace, taskId, method: "normal", reason: parsed.flags.reason || null, now });
-      console.log(JSON.stringify(result));
+      console.log(JSON.stringify({ ...result, nowMs: now }));
       return result.ok ? 0 : 1;
     }
     // mode === 'force-release'
@@ -738,10 +749,10 @@ async function main(argv) {
       return 2;
     }
     const result = releaseLease({ workspace, taskId, method: "force-release", reason, now });
-    console.log(JSON.stringify(result));
+    console.log(JSON.stringify({ ...result, nowMs: now }));
     return result.ok ? 0 : 1;
   } catch (err) {
-    console.log(JSON.stringify({ outcome: "error", code: err.code || "admission-check-failed", message: err.message }));
+    console.log(JSON.stringify({ outcome: "error", code: err.code || "admission-check-failed", message: err.message, nowMs: now }));
     return 2;
   }
 }

@@ -385,6 +385,118 @@ export function computeAttemptId(fields) {
   return sha256(JSON.stringify(fields ?? {})).slice(0, 12);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── M207 — phase timing + finding-recurrence extensions (purely additive to the frozen
+// schemaVersion:2 record). Receiver side: closes the trailing open span the sandbox dispatches
+// (never a sandbox-computed timestamp — CLAIM C5), scans the task's committed archive for
+// recurrence (LOCAL helper — zero new import edges onto the verified 3-file cycle, CLAIM C7),
+// and degrades fail-soft on malformed/oversized flag values (CLAIM C10). ═══════════════════════
+
+// _telemetryDir — reuses telemetryPath's own resolution VERBATIM (including the _missing-taskId
+// fallback and the _unsafe-taskid containment redirect) — the task's archive directory is the
+// dirname of a probe record path, never a second path-resolution implementation.
+function _telemetryDir(workspace, taskId) {
+  return path.dirname(telemetryPath(workspace, taskId, "__probe__"));
+}
+
+// _scanPriorTelemetryRecords — LOCAL prior-record scan (rejected Alternative #10: no
+// queryTelemetryReport import, no 4th edge onto the verified 3-file import cycle). Enumerates the
+// task's committed archive, JSON.parses each record, and — mirroring milestone-preparation-
+// check.ts's malformed-skip precedent (:172-173) — silently skips any file that fails to parse or
+// lacks a `findingCodes` array (covering EVERY pre-M207 record). Returns records sorted by
+// recordedAtMs ascending so the EARLIEST matching prior record is found first. `attemptOnly`
+// restricts the scan to sibling --record-attempt records (generationId: null) — the pre-lease
+// sites' recurrence is keyed on attemptId, never generationId.
+function _scanPriorTelemetryRecords(workspace, taskId, { attemptOnly = false } = {}) {
+  const dir = _telemetryDir(workspace, taskId);
+  let entries;
+  try {
+    entries = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+  } catch {
+    return []; // no archive yet — first occurrence for this taskId
+  }
+  const records = [];
+  for (const f of entries) {
+    let rec;
+    try {
+      rec = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+    } catch {
+      continue; // malformed sibling — skipped individually, never aborts the scan or the write
+    }
+    if (!rec || typeof rec !== "object" || !Array.isArray(rec.findingCodes)) continue; // pre-M207 schema
+    if (attemptOnly && rec.generationId !== null) continue;
+    records.push(rec);
+  }
+  records.sort((a, b) => (Number.isFinite(a.recordedAtMs) ? a.recordedAtMs : 0) - (Number.isFinite(b.recordedAtMs) ? b.recordedAtMs : 0));
+  return records;
+}
+
+// _computeFindingCodes — one identity quad per stable code: recurrenceKey =
+// sha256(`${taskId}::${code}`).slice(0,12) — the SAME stability property fingerprintFinding/
+// computeAttemptId already rely on (summaries reword round-to-round; the code must not).
+// firstSeenGeneration = the earliest matching prior record's own generationId (or its attemptId
+// for --record-attempt records, which carry generationId: null), or the current record's own id
+// when no prior match exists (the expected first-occurrence shape); lastSeenGeneration is ALWAYS
+// the current record's own id.
+function _computeFindingCodes({ workspace, taskId, codes, currentRecordId, attemptOnly = false }) {
+  const seen = new Set();
+  const unique = [];
+  for (const c of codes || []) {
+    const s = String(c);
+    if (s && !seen.has(s)) { seen.add(s); unique.push(s); }
+  }
+  if (unique.length === 0) return [];
+  const prior = _scanPriorTelemetryRecords(workspace, taskId, { attemptOnly });
+  return unique.map((code) => {
+    const recurrenceKey = sha256(`${taskId}::${code}`).slice(0, 12);
+    let firstSeenGeneration = currentRecordId;
+    for (const rec of prior) {
+      if ((rec.findingCodes || []).some((fc) => fc && fc.recurrenceKey === recurrenceKey)) {
+        firstSeenGeneration = rec.generationId ?? rec.attemptId ?? rec.recordId ?? currentRecordId;
+        break;
+      }
+    }
+    return { code, recurrenceKey, firstSeenGeneration, lastSeenGeneration: currentRecordId };
+  });
+}
+
+// Fail-soft receiver-side flag degradation (CLAIM C10): a malformed (unparseable) OR oversized
+// value for EITHER new flag defaults (phaseTimings: [] / findingCodes computed from
+// terminal.reason alone), never throws, and never blocks or rolls back the primary telemetry
+// write — mirrors the existing telemetryWriteOk-isolation posture. The bound is 64KiB — ample for
+// any real payload (a whole generation's phase timings + finding codes is low single-digit KiB)
+// AND below the kernel's per-argument execve ceiling (~128KiB on Linux), so an oversized value
+// can still reach the CLI through a real argv and exercise this guard end-to-end.
+const _MAX_TELEMETRY_FLAG_BYTES = 64 * 1024;
+function _parsePhaseTimingsFlag(raw) {
+  if (typeof raw !== "string" || raw.length === 0 || raw.length > _MAX_TELEMETRY_FLAG_BYTES) return [];
+  let v;
+  try { v = JSON.parse(raw); } catch { return []; }
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((s) => s && typeof s === "object" && !Array.isArray(s))
+    .map((s) => ({
+      phase: typeof s.phase === "string" ? s.phase : null,
+      round: Number.isFinite(s.round) ? s.round : null,
+      startedAtMs: Number.isFinite(s.startedAtMs) ? s.startedAtMs : null,
+      endedAtMs: Number.isFinite(s.endedAtMs) ? s.endedAtMs : null,
+    }));
+}
+// Returns a string[] of codes, or null — null means "flag absent/malformed/oversized: compute
+// from terminal.reason alone" (the documented default), distinct from a WELL-FORMED empty array.
+function _parseFindingCodesFlag(raw) {
+  if (typeof raw !== "string" || raw.length === 0 || raw.length > _MAX_TELEMETRY_FLAG_BYTES) return null;
+  let v;
+  try { v = JSON.parse(raw); } catch { return null; }
+  if (!Array.isArray(v)) return null;
+  return v.filter((c) => typeof c === "string" && c.length > 0);
+}
+// Close any still-open span with the receiver's OWN recordedAtMs — the trailing entry the sandbox
+// dispatches with endedAtMs:null (CLAIM C5: never a sandbox-computed timestamp).
+function _closePhaseTimings(spans, recordedAtMs) {
+  return spans.map((s) => (s.endedAtMs === null ? { ...s, endedAtMs: recordedAtMs } : s));
+}
+
 // buildTelemetryRecord — the frozen schemaVersion:2 record shape (task's own "Frozen record
 // schema"). Fills every field explicitly, even when the caller omits it — an omitted-but-required
 // field becomes an explicit `null`, never a dropped key (no-fabrication discipline: JSON.stringify
@@ -397,6 +509,11 @@ export function buildTelemetryRecord({
   contentAgentDispatchCount, contentAgentMs,
   terminal, leaseRelease,
   sessionId, recordedAtMs, telemetryWriteOk,
+  // M207: two additive array fields — always materialized (`[]` when empty, never a dropped key,
+  // matching the always-materialized `?? null` discipline above). schemaVersion stays 2 — additive
+  // in-family growth (TELEMETRY_SCHEMA_VERSION's :356-357 precedent reserves bumps for new record
+  // FAMILIES; nothing re-validates history, so no forward-compat hazard forces a bump).
+  phaseTimings, findingCodes,
 } = {}) {
   return {
     schemaVersion: TELEMETRY_SCHEMA_VERSION,
@@ -418,6 +535,8 @@ export function buildTelemetryRecord({
     sessionId: sessionId ?? null,
     recordedAtMs: recordedAtMs ?? null,
     telemetryWriteOk: telemetryWriteOk === undefined ? true : telemetryWriteOk,
+    phaseTimings: phaseTimings ?? [],
+    findingCodes: findingCodes ?? [],
   };
 }
 
@@ -438,6 +557,13 @@ export function validateTelemetryRecord(record) {
     "recordId", "attemptId", "generationId", "admission", "workspace", "taskId", "milestoneId",
     "class", "highRisk", "hashes", "decision", "contentAgentDispatchCount", "contentAgentMs",
     "terminal", "leaseRelease", "sessionId", "recordedAtMs", "telemetryWriteOk",
+    // M207: the two additive keys. LATENT TRAP (flagged per the task's own Risks): enforcement is
+    // WRITE-TIME ONLY — this validator's sole live call site is the reuse-terminal branch above
+    // (grep-verified: exactly one), so NOTHING re-validates committed history and every pre-M207
+    // record lacking both keys stays valid forever. A future re-validate-all sweep would
+    // invalidate every such record — widening REQUIRED_TOP without a schemaVersion bump is safe
+    // precisely because no such sweep exists today.
+    "phaseTimings", "findingCodes",
   ];
   for (const k of REQUIRED_TOP) {
     if (!(k in record)) {
@@ -562,6 +688,15 @@ export function _decideResumeCli({ taskId, workspace, charterFile, callerOverrid
       let telemetryWriteOk = true;
       let schemaInvalid = false;
       try {
+        // M207: a cache hit ran no phases — `phaseTimings: []`; `findingCodes` is computed from
+        // the reused terminal's own reason alone (the workflow threads no flags on this dispatch),
+        // recurrence computed identically via the local scan.
+        const recordedAtMs = Date.now();
+        const reuseCodes = _computeFindingCodes({
+          workspace, taskId,
+          codes: decision.priorReason ? [decision.priorReason] : [],
+          currentRecordId: generationId,
+        });
         const telRecord = buildTelemetryRecord({
           recordId: generationId,
           attemptId: generationId,
@@ -577,7 +712,8 @@ export function _decideResumeCli({ taskId, workspace, charterFile, callerOverrid
           contentAgentDispatchCount: 0, contentAgentMs: 0,
           terminal: { outcome: decision.priorOutcome ?? null, reason: decision.priorReason ?? null, phase: null, cacheable: true },
           leaseRelease: releaseResult ? { attempted: true, ok: releaseResult.ok, reason: releaseResult.reason ?? null } : { attempted: false, ok: null, reason: null },
-          sessionId: null, recordedAtMs: Date.now(),
+          sessionId: null, recordedAtMs,
+          phaseTimings: [], findingCodes: reuseCodes,
         });
         const validation = validateTelemetryRecord(telRecord);
         if (!validation.ok) {
@@ -650,11 +786,23 @@ function _writeLegacyGenerationRecord({ taskId, workspace, charterFile, terminal
 // `cold` when the caller omits it (the safe, conservative default — every real call site now
 // threads this explicitly, see prepare-milestone.js's `_releaseLeaseAndRecord`/
 // `_writeGenerationTelemetry`).
-function _writeCommittedTelemetry({ taskId, workspace, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId, lease, hashes, generationId, releaseResult, decisionKind }) {
+function _writeCommittedTelemetry({ taskId, workspace, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId, lease, hashes, generationId, releaseResult, decisionKind, phaseTimings: phaseTimingsRaw, findingCodes: findingCodesRaw }) {
   let telemetryWriteOk = true;
   let telemetryFile = null;
   try {
     const kind = decisionKind === "resume" ? "resume" : "cold";
+    // M207: close the trailing open span with THIS writer's own recordedAtMs (CLAIM C5 — never a
+    // sandbox value), compute the recurrence quad per code (local archive scan, CLAIM C7), and
+    // degrade fail-soft on malformed/oversized flag values (CLAIM C10 — defaults, never throw,
+    // never block the primary write).
+    const recordedAtMs = Date.now();
+    const spans = _closePhaseTimings(_parsePhaseTimingsFlag(phaseTimingsRaw), recordedAtMs);
+    const parsedCodes = _parseFindingCodesFlag(findingCodesRaw);
+    const findingCodes = _computeFindingCodes({
+      workspace, taskId,
+      codes: parsedCodes ?? (reason ? [reason] : []),
+      currentRecordId: generationId,
+    });
     const telRecord = buildTelemetryRecord({
       recordId: generationId, attemptId: generationId, generationId,
       admission: { key: lease.key ?? null, ownerExecutionId: lease.ownerExecutionId ?? null, fencingToken: lease.fencingToken ?? null, acquiredAt: lease.acquiredAt ?? null },
@@ -665,7 +813,8 @@ function _writeCommittedTelemetry({ taskId, workspace, terminalPhase, outcome, r
       contentAgentDispatchCount: null, contentAgentMs: null,
       terminal: { outcome, reason, phase: terminalPhase, cacheable: cacheable === "true" || cacheable === true },
       leaseRelease: releaseResult ? { attempted: true, ok: releaseResult.ok, reason: releaseResult.reason ?? null } : { attempted: false, ok: null, reason: null },
-      sessionId: sessionId ?? null, recordedAtMs: Date.now(),
+      sessionId: sessionId ?? null, recordedAtMs,
+      phaseTimings: spans, findingCodes,
     });
     telemetryFile = _writeTelemetryRecord(workspace, taskId, generationId, telRecord);
   } catch {
@@ -683,13 +832,13 @@ function _writeCommittedTelemetry({ taskId, workspace, terminalPhase, outcome, r
 // there can never prevent or retroactively invalidate a release that already happened (AC13); it
 // is surfaced via the returned `telemetryWriteOk` field, distinct from `ok` (which continues to
 // reflect only whether this call completed without throwing — AC14).
-export function _recordGenerationCli({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId, decisionKind }) {
+export function _recordGenerationCli({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId, decisionKind, phaseTimings, findingCodes }) {
   try {
     const { lease, generationId, hashes, record } = _writeLegacyGenerationRecord({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable });
     const releaseResult = releaseLease({ workspace, taskId, method: "normal", reason: reason || null, now: Date.now() });
     const { telemetryWriteOk, telemetryFile } = _writeCommittedTelemetry({
       taskId, workspace, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId,
-      lease, hashes, generationId, releaseResult, decisionKind,
+      lease, hashes, generationId, releaseResult, decisionKind, phaseTimings, findingCodes,
     });
     return { ok: true, record, releaseResult, telemetryWriteOk, telemetryFile };
   } catch (err) {
@@ -702,12 +851,12 @@ export function _recordGenerationCli({ taskId, workspace, charterFile, terminalP
 // NOT call releaseLease at all — backs prepare-milestone.js's restructured Receipt sequence (write
 // first, then --build, then release), so a silent write failure is visible BEFORE the receipt-build
 // agent call ever runs, never absorbed into a false 'prepared' certification.
-export function _writeGenerationTelemetryCli({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId, decisionKind }) {
+export function _writeGenerationTelemetryCli({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId, decisionKind, phaseTimings, findingCodes }) {
   try {
     const { lease, generationId, hashes, record } = _writeLegacyGenerationRecord({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable });
     const { telemetryWriteOk, telemetryFile } = _writeCommittedTelemetry({
       taskId, workspace, terminalPhase, outcome, reason, cacheable, milestoneId, class: klass, highRisk, sessionId,
-      lease, hashes, generationId, releaseResult: null, decisionKind,
+      lease, hashes, generationId, releaseResult: null, decisionKind, phaseTimings, findingCodes,
     });
     return { ok: true, record, generationId, telemetryWriteOk, telemetryFile };
   } catch (err) {
@@ -735,7 +884,7 @@ export function _releaseLeaseOnlyCli({ taskId, workspace, reason }) {
 // `computeAttemptId` hash of the fields the caller's own verdict already exposes.
 // `taskId === null` (the missing-required-args case where taskId itself is the missing field)
 // routes to telemetryPath's fixed `_missing-taskId` segment.
-export function _recordAttemptCli({ taskId, workspace, site, detail }) {
+export function _recordAttemptCli({ taskId, workspace, site, detail, phaseTimings: phaseTimingsRaw, findingCodes: findingCodesRaw }) {
   const effectiveTaskId = taskId ? taskId : null;
   let detailObj = {};
   if (detail) {
@@ -743,6 +892,18 @@ export function _recordAttemptCli({ taskId, workspace, site, detail }) {
   }
   const attemptId = computeAttemptId({ site, taskId: effectiveTaskId, detail: detailObj });
   const phase = site === "missing-required-args" ? "ProposalAuthors" : "Admission";
+  // M207: `phaseTimings` is [] by construction at the 3 pre-lease sites (no completed spans);
+  // `findingCodes` defaults to [site] when the flag is absent/malformed, and recurrence is keyed
+  // on attemptId — scanning ONLY sibling attempt records (generationId: null).
+  const recordedAtMs = Date.now();
+  const spans = _closePhaseTimings(_parsePhaseTimingsFlag(phaseTimingsRaw), recordedAtMs);
+  const parsedCodes = _parseFindingCodesFlag(findingCodesRaw);
+  const findingCodes = _computeFindingCodes({
+    workspace, taskId: effectiveTaskId,
+    codes: parsedCodes ?? [site],
+    currentRecordId: attemptId,
+    attemptOnly: true,
+  });
   const record = buildTelemetryRecord({
     recordId: attemptId, attemptId, generationId: null,
     admission: null, workspace, taskId: effectiveTaskId, milestoneId: null, class: null, highRisk: null,
@@ -751,7 +912,8 @@ export function _recordAttemptCli({ taskId, workspace, site, detail }) {
     contentAgentDispatchCount: 0, contentAgentMs: 0,
     terminal: { outcome: "needs-human", reason: site, phase, cacheable: false },
     leaseRelease: { attempted: false, ok: null, reason: null },
-    sessionId: null, recordedAtMs: Date.now(),
+    sessionId: null, recordedAtMs,
+    phaseTimings: spans, findingCodes,
   });
   let telemetryWriteOk = true;
   let telemetryFile = null;
@@ -765,7 +927,7 @@ export function _recordAttemptCli({ taskId, workspace, site, detail }) {
 
 async function _cliMain(argv) {
   const spec = {
-    usage: "(--decide-resume|--record-generation [--no-release]|--release-only|--record-attempt) --taskId <id> --workspace <dir> [--charterFile <path>] [--callerOverride true|false] [--terminalPhase <phase>] [--outcome <o>] [--reason <r>] [--cacheable <bool>] [--milestoneId <id>] [--class <c>] [--highRisk <bool>] [--sessionId <id>] [--site <site>] [--detail <json>]",
+    usage: "(--decide-resume|--record-generation [--no-release]|--release-only|--record-attempt) --taskId <id> --workspace <dir> [--charterFile <path>] [--callerOverride true|false] [--terminalPhase <phase>] [--outcome <o>] [--reason <r>] [--cacheable <bool>] [--milestoneId <id>] [--class <c>] [--highRisk <bool>] [--sessionId <id>] [--site <site>] [--detail <json>] [--phaseTimings <json>] [--findingCodes <json>]",
     minArgs: 0,
     flags: {
       "decide-resume": { type: "boolean" },
@@ -788,6 +950,11 @@ async function _cliMain(argv) {
       site: { type: "string" },
       detail: { type: "string" },
       decisionKind: { type: "string" },
+      // M207: both additive telemetry flags — parsed with the same optional-JSON-flag tolerance
+      // as every existing flag; malformed/oversized values degrade fail-soft inside the writers
+      // (CLAIM C10), never throwing here.
+      phaseTimings: { type: "string" },
+      findingCodes: { type: "string" },
     },
   };
   const parsed = parseArgs(argv, spec);
@@ -801,7 +968,7 @@ async function _cliMain(argv) {
       console.error(`usage: node proposal-convergence.ts ${spec.usage}`);
       return 2;
     }
-    const out = _recordAttemptCli({ taskId: taskId || null, workspace, site: parsed.flags.site, detail: parsed.flags.detail });
+    const out = _recordAttemptCli({ taskId: taskId || null, workspace, site: parsed.flags.site, detail: parsed.flags.detail, phaseTimings: parsed.flags.phaseTimings, findingCodes: parsed.flags.findingCodes });
     console.log(JSON.stringify(out));
     return out.ok && out.telemetryWriteOk !== false ? 0 : 1;
   }
@@ -827,6 +994,7 @@ async function _cliMain(argv) {
       reason: parsed.flags.reason, cacheable: parsed.flags.cacheable,
       milestoneId: parsed.flags.milestoneId, class: parsed.flags.class, highRisk: parsed.flags.highRisk,
       sessionId: parsed.flags.sessionId, decisionKind: parsed.flags.decisionKind,
+      phaseTimings: parsed.flags.phaseTimings, findingCodes: parsed.flags.findingCodes,
     });
     console.log(JSON.stringify(out));
     return out.ok && out.telemetryWriteOk !== false ? 0 : 1;
@@ -838,6 +1006,7 @@ async function _cliMain(argv) {
       reason: parsed.flags.reason, cacheable: parsed.flags.cacheable,
       milestoneId: parsed.flags.milestoneId, class: parsed.flags.class, highRisk: parsed.flags.highRisk,
       sessionId: parsed.flags.sessionId, decisionKind: parsed.flags.decisionKind,
+      phaseTimings: parsed.flags.phaseTimings, findingCodes: parsed.flags.findingCodes,
     });
     console.log(JSON.stringify(out));
     return out.ok && out.releaseResult?.ok ? 0 : 1;

@@ -133,7 +133,7 @@ function freshScratchDir() {
 // makeMock — the shared "outer phase" mock (authors/adjudicate/plan-author/plan-check/receipt),
 // parameterized by `reviewHandlers` for the ProposalReview phase under test.
 function makeMock(taskFileOnDisk, reviewHandlers) {
-  const calls = { authors: [], adjudicator: 0, reviews: [], revises: [], wiringChecks: 0, planAuthor: 0, planCheckers: [], admissionAcquires: 0, admissionRenews: 0, admissionReleases: 0, preflightContent: 0, preflightPlan: 0, resumeDecisions: 0 };
+  const calls = { authors: [], adjudicator: 0, reviews: [], revises: [], wiringChecks: 0, planAuthor: 0, planCheckers: [], admissionAcquires: 0, admissionRenews: 0, admissionReleases: 0, preflightContent: 0, preflightPlan: 0, resumeDecisions: 0, releasePrompts: [], writeTelemetryPrompts: [], recordAttemptPrompts: [] };
   let planFile = null;
   let ledger = null;
 
@@ -144,13 +144,22 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
     // (never touching real .quay/prepare-leases/ state) — this file's job is proving the
     // ProposalReview convergence loop's OWN wiring, not re-testing prepare-admission-check.ts
     // (that has its own dedicated experiments/quay-perpetual-stream/test/
-    // prepare-admission-check.test.mjs). Every generation in this file always wins admission.
+    // prepare-admission-check.test.mjs). Every generation in this file always wins admission
+    // unless a test stubs the verdict via reviewHandlers.onAcquire (M207: e.g. a nowMs-bearing
+    // verdict to exercise _lastBoundaryMs seeding, or a prepare-already-running contention
+    // verdict to exercise a pre-lease --record-attempt site).
     if (label === 'admission-acquire') {
       calls.admissionAcquires += 1;
+      if (typeof reviewHandlers.onAcquire === 'function') return reviewHandlers.onAcquire(prompt);
       return { raw: JSON.stringify({ outcome: 'acquired', lease: { fencingToken: 0 }, reclaimed: false }) };
     }
     if (/^admission-renew-/.test(label)) {
       calls.admissionRenews += 1;
+      // M207: a test may stub the renewal verdict via reviewHandlers.onRenew(prompt, label) — e.g.
+      // a nowMs-bearing {ok:true} verdict to exercise _recordPhaseBoundary span accumulation. The
+      // DEFAULT {ok:true} response carries NO nowMs, so _recordPhaseBoundary's fail-soft rule
+      // pushes nothing — every pre-M207 scenario in this file behaves exactly as before.
+      if (typeof reviewHandlers.onRenew === 'function') return reviewHandlers.onRenew(prompt, label);
       return { raw: JSON.stringify({ ok: true }) };
     }
     if (/^admission-release-/.test(label)) {
@@ -159,8 +168,10 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
       // `_releaseLease` used (label continuity, Plan-level refinement) — this pre-existing branch
       // already covers every one of the 15 real terminal-return sites' new record-generation
       // dispatch, unchanged. The mock's {ok:true} response keeps being ignored (fire-and-forget,
-      // exactly as today).
+      // exactly as today). M207: the dispatch prompt (now carrying --phaseTimings/--findingCodes)
+      // is captured so fixtures can decode and assert the threaded flag payloads.
       calls.admissionReleases += 1;
+      calls.releasePrompts.push(prompt);
       return { raw: JSON.stringify({ ok: true }) };
     }
 
@@ -183,6 +194,7 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
     // experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs coverage.
     if (label === 'preflight-content') {
       calls.preflightContent = (calls.preflightContent || 0) + 1;
+      if (typeof reviewHandlers.onPreflightContent === 'function') return reviewHandlers.onPreflightContent(prompt);
       return { raw: JSON.stringify({ ok: true, policyVersion: 'preflight-v1', findings: [] }) };
     }
     if (label === 'preflight-plan') {
@@ -256,6 +268,7 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
     // hashable file at SOME path.
     if (label === 'write-telemetry-Receipt') {
       calls.writeTelemetry = (calls.writeTelemetry || 0) + 1;
+      calls.writeTelemetryPrompts.push(prompt); // M207: capture for --phaseTimings/--findingCodes flag assertions
       const milestoneIdMatch = prompt.match(/--milestoneId (\S+)/);
       const milestoneId = milestoneIdMatch ? milestoneIdMatch[1] : 'UNKNOWN-MILESTONE';
       const telemetryFile = path.join('milestones', milestoneId, 'prepare-telemetry-mock.json');
@@ -270,6 +283,7 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
     // these sites doesn't spuriously fail with "unexpected agent() call".
     if (/^record-attempt-/.test(label)) {
       calls.recordAttempts = (calls.recordAttempts || 0) + 1;
+      calls.recordAttemptPrompts.push(prompt); // M207: capture for --phaseTimings/--findingCodes flag assertions
       return { raw: JSON.stringify({ ok: true, telemetryWriteOk: true, attemptId: 'mock-attempt' }) };
     }
     if (label === 'receipt') {
@@ -1087,12 +1101,19 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     assert.equal(byPhase.PreflightPlan, 'false', 'the plan-shape preflight-rejected site is deliberately NOT cacheable, despite the identical reason string');
   });
 
-  test(`[${mirrorName}] WIRING-CLAIM R9: git diff --stat against prepare-admission-check.ts and .gitignore is empty for this child's own commits (base 480cb58)`, () => {
+  test(`[${mirrorName}] WIRING-CLAIM R9: git diff --stat against prepare-admission-check.ts and .gitignore is empty for DIR-126-C's own commits (closed historical range 480cb58..68eb5eb^)`, () => {
+    // M207: CLOSED historical range, not `..HEAD`. The claim under test is DIR-126-C's own — its
+    // commits (from base 480cb58) never touched prepare-admission-check.ts/.gitignore. That held
+    // until DIR-126-D's 68eb5eb (the preflightTouchesMismatch backtick-asymmetry fix) and M205's
+    // c82efac deliberately DID touch the file, and M207 itself re-extends it with the additive
+    // nowMs self-report — an open-ended `..HEAD` pin can never be green again once any later
+    // milestone legitimately edits the file. The closed range keeps the original historical claim
+    // mechanically verifiable forever (empty diff, verified at M207 authoring time).
     const out = execSync(
-      `git diff --stat 480cb58..HEAD -- experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts plugin/scripts/prepare-admission-check.ts .gitignore`,
+      `git diff --stat 480cb58..68eb5eb^ -- experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts plugin/scripts/prepare-admission-check.ts .gitignore`,
       { cwd: REPO_ROOT, encoding: 'utf8' }
     ).trim();
-    assert.equal(out, '', `expected an empty diff against prepare-admission-check.ts/.gitignore since base 480cb58, got:\n${out}`);
+    assert.equal(out, '', `expected an empty diff against prepare-admission-check.ts/.gitignore over DIR-126-C's own commit range, got:\n${out}`);
   });
 
   // M203/DIR-126-D Stage 9 — AC19: zero new Date.now()/new Date()/import()/await import( regression
@@ -1113,5 +1134,243 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       const m = stripped.match(re);
       assert.equal(m, null, `found a live (non-comment) '${name}' call site in ${mirrorName}: ${m ? JSON.stringify(m[0]) : ''}`);
     }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── M207 — per-phase-boundary timing accumulation + findingCodes construction (both mirrors) ─────
+// SENDER-side fixtures: the workflow reads `nowMs` out of ALREADY-PARSED subprocess verdicts
+// (never computes a clock read itself), accumulates {phase, round, startedAtMs, endedAtMs} spans,
+// and threads --phaseTimings/--findingCodes onto the record-writing dispatches that already exist.
+// RECEIVER-side semantics (trailing-span close with recordedAtMs, recurrence scan, REQUIRED_TOP
+// widening, malformed-flag fail-soft) are covered by experiments/quay-perpetual-stream/test/
+// proposal-convergence.test.mjs's own CLI fixtures — this block proves what the sandbox SENDS.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+// Decodes a double-JSON.stringify'd flag value (the existing --detail idiom) out of a captured
+// dispatch prompt: on the command line the value is a shell-quoted JSON string whose parse yields
+// the inner JSON string, whose parse yields the real value. Balanced-quote scan — escaped quotes
+// inside the payload must NOT terminate the token — never a naive split.
+function extractDoubleJsonFlag(prompt, flagName) {
+  const marker = `--${flagName} `;
+  const idx = prompt.indexOf(marker);
+  assert.ok(idx >= 0, `expected a --${flagName} flag in the dispatch prompt:\n${prompt.slice(0, 400)}`);
+  let i = idx + marker.length;
+  assert.equal(prompt[i], '"', `--${flagName} must be double-JSON.stringify'd (a shell-quoted JSON string)`);
+  let token = '"';
+  let escaped = false;
+  for (i = i + 1; i < prompt.length; i++) {
+    const ch = prompt[i];
+    token += ch;
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\') { escaped = true; continue; }
+    if (ch === '"') break;
+  }
+  return JSON.parse(JSON.parse(token));
+}
+
+for (const [mirrorName, workflowFile] of MIRRORS) {
+  const runFullGeneration = async (reviewHandlers = {}, extraArgs = {}) => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const milestoneId = `M${Math.floor(900000 + Math.random() * 90000)}`;
+    const handlers = {
+      onFullReview: () => ({ findings: [], mechanismCount: 1, proposalHash: 'h0', sessionId: 'sess-review' }),
+      onRevise: () => ({ ok: true, proposalHash: 'h1', sessionId: 'sess-revise' }),
+      onDeltaReview: () => ({ resolvedIds: [], findings: [], sessionId: 'sess-delta' }),
+      ...reviewHandlers,
+    };
+    try {
+      const out = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, ...extraArgs }), taskFileOnDisk, handlers);
+      // A prepared run's mock writes real receipt/ledger/telemetry-mock files under
+      // milestones/<milestoneId>/ and a real Plan file (mock plan-author) — remove them the same
+      // way the pre-existing scenarios' cleanup convention does, never leaving repo artifacts.
+      if (out.planFile) fs.rmSync(path.join(REPO_ROOT, out.planFile), { force: true });
+      fs.rmSync(path.join(REPO_ROOT, 'milestones', milestoneId), { recursive: true, force: true });
+      return out;
+    } finally {
+      fs.rmSync(scratchDir, { recursive: true, force: true });
+    }
+  };
+
+  test(`[${mirrorName}] M207/AC2/AC7 (CLAIM C2/C3/C4): a real multi-round generation (a ProposalReview delta round AND a PlanCheck round) accumulates one span per successful renewal plus the receiver-bound trailing entry — round threaded from caller-owned variables, never regex-parsed from the label`, async () => {
+    let renewNowMs = 1000;
+    const { result, calls } = await runFullGeneration({
+      onAcquire: () => ({ raw: JSON.stringify({ outcome: 'acquired', lease: { fencingToken: 0 }, reclaimed: false, nowMs: 500 }) }),
+      onRenew: () => ({ raw: JSON.stringify({ ok: true, nowMs: (renewNowMs += 1000) }) }),
+      // ONE blocking finding on the full review, resolved on delta round 1 -> exactly one
+      // ProposalReview-delta-round-1 renewal; the mock plan-checker returns findings:0 -> exactly
+      // one PlanCheck-round-1 renewal.
+      onFullReview: () => ({ findings: [{ subsystem: 'fixture', summary: 'one blocking finding', severity: 'blocker', blocking: true }], mechanismCount: 1, proposalHash: 'h0', nowMs: 111, sessionId: 'sess-review' }),
+      onDeltaReview: (round, prompt) => ({ resolvedIds: Object.values(findingIdBySubsystem(prompt)), findings: [], nowMs: 222, sessionId: 'sess-delta' }),
+    });
+    assert.equal(result.outcome, 'prepared', JSON.stringify(result));
+    assert.equal(calls.admissionRenews, 6, 'Adjudicate, ProposalReview, delta-round-1, PlanAuthor, PlanCheck-round-1, Receipt');
+    assert.equal(calls.writeTelemetryPrompts.length, 1, 'the Receipt success path threads the flags on its existing --record-generation --no-release dispatch');
+    const spans = extractDoubleJsonFlag(calls.writeTelemetryPrompts[0], 'phaseTimings');
+    // RENEWAL-BOUNDED EQUALITY (AC2): the admission-touching dispatch count on the renewal metric
+    // (each successful renewal CLOSES one span; the terminal close appends the trailing entry)
+    // equals the phaseTimings entry count — NOT the raw phase() call count (11 live/16 raw).
+    assert.equal(spans.length, calls.admissionRenews + 1, `expected ${calls.admissionRenews} closed spans + 1 trailing entry, got ${spans.length}`);
+    // Seeded EXCLUSIVELY from the parsed --acquire verdict's nowMs (CLAIM C4) — never a workflow clock.
+    assert.equal(spans[0].startedAtMs, 500);
+    // Contiguous spans: each entry's end is the next entry's start.
+    for (let i = 0; i < spans.length - 1; i++) {
+      assert.equal(spans[i + 1].startedAtMs, spans[i].endedAtMs, `span ${i + 1} must start where span ${i} ended`);
+    }
+    assert.deepEqual(spans.map((s) => s.phase), [
+      'Adjudicate', 'ProposalReview', 'ProposalReview-delta-round-1', 'PlanAuthor', 'PlanCheck-round-1', 'Receipt',
+      'Receipt', // the trailing open entry the RECEIVER closes with its own recordedAtMs (CLAIM C5)
+    ]);
+    const byPhase = Object.fromEntries(spans.slice(0, 6).map((s) => [s.phase, s]));
+    assert.equal(byPhase['ProposalReview-delta-round-1'].round, 1, 'the delta span carries _deltaRound (caller-owned)');
+    assert.equal(byPhase['PlanCheck-round-1'].round, 1, 'the PlanCheck span carries _planCheckRound (caller-owned)');
+    assert.equal(byPhase['Adjudicate'].round, 0);
+    // The trailing entry: dispatched OPEN — the receiver fills endedAtMs, never the sandbox.
+    const trailing = spans[spans.length - 1];
+    assert.equal(trailing.round, 0);
+    assert.equal(trailing.endedAtMs, null, 'endedAtMs: null on dispatch — closed receiver-side (CLAIM C5)');
+    assert.equal(trailing.startedAtMs, spans[5].endedAtMs);
+    // findingCodes on the Receipt success path: terminal reason + the ledger's own finding ids
+    // (_ledgerLive is true by Receipt — the ledger's blocking finding id joins).
+    const codes = extractDoubleJsonFlag(calls.writeTelemetryPrompts[0], 'findingCodes');
+    assert.equal(codes[0], 'prepared');
+    assert.ok(codes.length >= 2, `the ledger's finding id must join the codes post-ledger, got ${JSON.stringify(codes)}`);
+  });
+
+  test(`[${mirrorName}] M207/AC8 (CLAIM C3 fail-soft): renewals without a finite nowMs push NOTHING and leave _lastBoundaryMs unchanged — only the acquire seed + trailing entry survive`, async () => {
+    const { result, calls } = await runFullGeneration({
+      onAcquire: () => ({ raw: JSON.stringify({ outcome: 'acquired', lease: { fencingToken: 0 }, reclaimed: false, nowMs: 700 }) }),
+      onRenew: () => ({ raw: JSON.stringify({ ok: true }) }), // success, but NO nowMs (older-subprocess interop)
+    });
+    assert.equal(result.outcome, 'prepared', JSON.stringify(result));
+    assert.equal(calls.admissionRenews, 5, 'zero-finding generation: Adjudicate, ProposalReview, PlanAuthor, PlanCheck-round-1, Receipt');
+    const spans = extractDoubleJsonFlag(calls.writeTelemetryPrompts[0], 'phaseTimings');
+    assert.equal(spans.length, 1, 'no boundary pushed for nowMs-less renewals — only the trailing entry remains');
+    assert.equal(spans[0].startedAtMs, 700, '_lastBoundaryMs stayed at the acquire seed — unchanged');
+    assert.equal(spans[0].endedAtMs, null);
+  });
+
+  test(`[${mirrorName}] M207/AC8 (CLAIM C3 push-rule precision): an ok:false renewal that EVEN CARRIES a nowMs pushes nothing — the rule is ok===true AND finite nowMs`, async () => {
+    let n = 0;
+    const { result, calls } = await runFullGeneration({
+      onAcquire: () => ({ raw: JSON.stringify({ outcome: 'acquired', lease: { fencingToken: 0 }, reclaimed: false, nowMs: 100 }) }),
+      onRenew: () => (++n === 1
+        ? { raw: JSON.stringify({ ok: false, error: 'lease-missing', nowMs: 150 }) }
+        : { raw: JSON.stringify({ ok: true, nowMs: 100 + n * 100 }) }),
+    });
+    assert.equal(result.outcome, 'prepared', JSON.stringify(result));
+    const spans = extractDoubleJsonFlag(calls.writeTelemetryPrompts[0], 'phaseTimings');
+    assert.equal(spans.length, calls.admissionRenews, 'one failed renewal -> one fewer closed span, plus the trailing entry');
+    assert.ok(!spans.some((s) => s.endedAtMs === 150), "the ok:false renewal's nowMs must NOT become a boundary");
+  });
+
+  test(`[${mirrorName}] M207/AC9/AC10 (CLAIM C6 TDZ): a pre-ledger terminal exit produces findingCodes from the reason alone with NO ReferenceError — the _ledgerLive short-circuit, never _ledger?.map(...)`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, baseArgs(scratchRel), taskFileOnDisk, {
+        // Unparseable preflight verdict -> the preflight-check-failed terminal, which fires
+        // BEFORE `let _ledger = []` has executed — the TDZ hazard site. Any reference to the
+        // uninitialized _ledger (even optional-chained) would throw ReferenceError and crash the
+        // failure-path telemetry itself.
+        onPreflightContent: () => ({ raw: 'NOT-JSON noise [unbalanced' }),
+        onAcquire: () => ({ raw: JSON.stringify({ outcome: 'acquired', lease: { fencingToken: 0 }, reclaimed: false, nowMs: 42 }) }),
+      });
+      assert.equal(result.reason, 'preflight-check-failed', JSON.stringify(result));
+      assert.equal(calls.releasePrompts.length, 1);
+      const codes = extractDoubleJsonFlag(calls.releasePrompts[0], 'findingCodes');
+      assert.deepEqual(codes, ['preflight-check-failed'], 'pre-ledger exit: exactly [reason] — no ledger entries fabricated');
+      const spans = extractDoubleJsonFlag(calls.releasePrompts[0], 'phaseTimings');
+      assert.equal(spans.length, 1, 'no renewal ran — only the trailing open entry');
+      assert.equal(spans[0].phase, 'preflight-check-failed');
+      assert.equal(spans[0].startedAtMs, 42, 'seeded from the parsed acquire verdict');
+      assert.equal(spans[0].endedAtMs, null);
+    } finally {
+      fs.rmSync(scratchDir, { recursive: true, force: true });
+    }
+  });
+
+  test(`[${mirrorName}] M207/AC10 (CLAIM C6): all 3 pre-lease --record-attempt exits independently produce a non-empty findingCodes array seeded from the site name alone, with phaseTimings [] by construction`, async () => {
+    // Site 1: missing-required-args — taskId absent entirely (runs before ANY other state).
+    {
+      const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+      try {
+        const args = baseArgs(scratchRel);
+        delete args.taskId;
+        const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {});
+        assert.match(result.reason, /missing-required-args/);
+        assert.equal(calls.recordAttemptPrompts.length, 1);
+        assert.deepEqual(extractDoubleJsonFlag(calls.recordAttemptPrompts[0], 'findingCodes'), ['missing-required-args']);
+        assert.deepEqual(extractDoubleJsonFlag(calls.recordAttemptPrompts[0], 'phaseTimings'), []);
+      } finally {
+        fs.rmSync(scratchDir, { recursive: true, force: true });
+      }
+    }
+    // Site 2: prepare-already-running — a contention verdict at --acquire.
+    {
+      const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+      try {
+        const { result, calls } = await runPrepareMilestone(workflowFile, baseArgs(scratchRel), taskFileOnDisk, {
+          onAcquire: () => ({ raw: JSON.stringify({ outcome: 'prepare-already-running', owner: { ownerExecutionId: 'other-session', stage: 'ProposalReview', leaseUntil: 999 }, nowMs: 77 }) }),
+        });
+        assert.equal(result.reason, 'prepare-already-running');
+        assert.equal(calls.recordAttemptPrompts.length, 1);
+        assert.deepEqual(extractDoubleJsonFlag(calls.recordAttemptPrompts[0], 'findingCodes'), ['prepare-already-running']);
+        assert.deepEqual(extractDoubleJsonFlag(calls.recordAttemptPrompts[0], 'phaseTimings'), [], 'pre-lease: zero completed spans, no trailing entry');
+      } finally {
+        fs.rmSync(scratchDir, { recursive: true, force: true });
+      }
+    }
+    // Site 3: admission-check-failed — an unparseable --acquire verdict.
+    {
+      const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+      try {
+        const { result, calls } = await runPrepareMilestone(workflowFile, baseArgs(scratchRel), taskFileOnDisk, {
+          onAcquire: () => ({ raw: null }),
+        });
+        assert.equal(result.reason, 'admission-check-failed');
+        assert.equal(calls.recordAttemptPrompts.length, 1);
+        assert.deepEqual(extractDoubleJsonFlag(calls.recordAttemptPrompts[0], 'findingCodes'), ['admission-check-failed']);
+        assert.deepEqual(extractDoubleJsonFlag(calls.recordAttemptPrompts[0], 'phaseTimings'), []);
+      } finally {
+        fs.rmSync(scratchDir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test(`[${mirrorName}] M207/AC1/AC7 (CLAIM C2): all 6 _renewLease call sites pass round explicitly (caller-owned values only); responses parse via _parseAgentJson under the exact push rule; zero regex-parsing of stageLabel`, () => {
+    const text = fs.readFileSync(workflowFile, 'utf8');
+    const stripped = text.split('\n').map((line) => line.replace(/\/\/.*$/, '')).join('\n');
+    // (a) exactly 6 _renewLease(label, round) call sites (the DEFINITION's bare-identifier params
+    // never match the quoted/template-literal first-argument shape).
+    const renewCalls = [...stripped.matchAll(/_renewLease\((`[^`]+`|'[^']+'),\s*([A-Za-z0-9_]+)\)/g)];
+    assert.equal(renewCalls.length, 6, `expected exactly 6 _renewLease(label, round) call sites, found ${renewCalls.length}`);
+    const boundaryRefs = [...stripped.matchAll(/_recordPhaseBoundary\(/g)];
+    assert.equal(boundaryRefs.length, 7, 'one _recordPhaseBoundary definition + 6 call sites');
+    // (b) round values are ONLY caller-owned identifiers/literals — never derived from the label.
+    for (const m of renewCalls) {
+      assert.match(m[2], /^(0|_deltaRound|_planCheckRound)$/, `round at a _renewLease site must be caller-owned (0/_deltaRound/_planCheckRound), got '${m[2]}'`);
+    }
+    // (c) NEGATIVE: no regex-parse of the formatted stageLabel recovers round anywhere.
+    assert.ok(!/stageLabel\.(match|split|replace|indexOf)\(/.test(stripped), 'stageLabel must never be parsed — it is presentation, not structured data');
+    assert.ok(!/RegExp\([^)]*round/.test(stripped), 'no RegExp over a round pattern');
+    // (d) renewal responses parse via the existing balanced-brace scanner under the exact rule.
+    const boundaryBody = stripped.slice(stripped.indexOf('function _recordPhaseBoundary'));
+    assert.match(boundaryBody, /_parseAgentJson\(/, 'parsed via _parseAgentJson, never naive JSON.parse');
+    assert.match(boundaryBody, /v\.ok === true && Number\.isFinite\(v\.nowMs\)/, 'push rule = ok===true AND finite nowMs, exactly');
+  });
+
+  test(`[${mirrorName}] M207/AC1 (CLAIM C5 sender half): the trailing open span is dispatched endedAtMs:null (receiver-side close); BOTH record-writing helpers thread the flags while --release-only gains nothing`, () => {
+    const text = fs.readFileSync(workflowFile, 'utf8');
+    const stripped = text.split('\n').map((line) => line.replace(/\/\/.*$/, '')).join('\n');
+    assert.match(stripped, /function _phaseTimingsForTerminal\(stageLabel\)\s*\{\s*return \[\.\.\._phaseTimings, \{ phase: stageLabel, round: 0, startedAtMs: _lastBoundaryMs, endedAtMs: null \}\]/, 'the trailing entry is dispatched OPEN (endedAtMs: null) for receiver-side close');
+    const releaseAndRecord = stripped.slice(stripped.indexOf('async function _releaseLeaseAndRecord'), stripped.indexOf('async function _writeGenerationTelemetry'));
+    assert.match(releaseAndRecord, /--phaseTimings /);
+    assert.match(releaseAndRecord, /--findingCodes /);
+    const writeTel = stripped.slice(stripped.indexOf('async function _writeGenerationTelemetry'), stripped.indexOf('async function _releaseLease(stageLabel'));
+    assert.match(writeTel, /--phaseTimings /);
+    assert.match(writeTel, /--findingCodes /);
+    const releaseOnly = stripped.slice(stripped.indexOf('async function _releaseLease(stageLabel'), stripped.indexOf('async function _preflightAgentCall'));
+    assert.ok(!releaseOnly.includes('--phaseTimings'), '--release-only writes no telemetry — gains nothing');
+    assert.ok(!releaseOnly.includes('--findingCodes'), '--release-only writes no telemetry — gains nothing');
   });
 }

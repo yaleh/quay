@@ -1106,3 +1106,219 @@ describe("telemetry: Stage 8 — generationId non-collision + migration-shape st
     assert.match(doc, /DIR-126-D remains the Prepare telemetry PRODUCER/, "the doc must explicitly disclaim a reverse/second-authority role");
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── M207 — phase timing + finding recurrence RECEIVER fixtures (Plan Stages 5/6). Real CLI runs
+// against scratch workspaces (same shape as the DIR-126-D fixtures above). Evidence note: this
+// file is OUTSIDE scripts/test.sh's glob (scripts/test.sh:37) — AC evidence cites this direct
+// `node --experimental-strip-types --test` invocation, never a scripts/test.sh run.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+describe("M207: phase timing + finding-recurrence receiver extensions", () => {
+  const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
+  const CONVERGENCE_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "proposal-convergence.ts");
+  const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "m207-fixtures-"));
+  const sha = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
+
+  function fixtureTaskBody() {
+    return `---\nid: M207-CLI-FIXTURE\ntitle: fixture task for M207 receiver fixtures\nstatus: todo\n---\n## Proposal\n\nfixture proposal v1\n\n## Acceptance Criteria\n\n- [ ] fixture AC item\n\n## Definition of Done\n\n- [ ] fixture DoD item\n\n## Touches\n\n- fixture.ts\n`;
+  }
+  function makeCliScratch(taskId) {
+    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "cli-scratch-"));
+    fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), fixtureTaskBody());
+    const charterFile = path.join(dir, "charter.md");
+    fs.writeFileSync(charterFile, "fixture charter v1\n");
+    return { dir, charterFile };
+  }
+  function writeLease(dir, taskId, { ownerExecutionId = "sess-1", fencingToken = 0, acquiredAt = 1000 } = {}) {
+    const p = path.join(dir, ".quay", "prepare-leases", `${taskId}.json`);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify({ ownerExecutionId, fencingToken, acquiredAt, key: `${taskId}::key` }));
+  }
+  function runNode(args) {
+    try {
+      const stdout = execFileSync("node", ["--experimental-strip-types", ...args], { encoding: "utf8" });
+      return { status: 0, stdout };
+    } catch (e) {
+      return { status: typeof e.status === "number" ? e.status : 1, stdout: e.stdout ? e.stdout.toString() : "" };
+    }
+  }
+  function recordGeneration(dir, charterFile, taskId, extraFlags) {
+    return runNode([CONVERGENCE_SCRIPT, "--record-generation", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+      "--terminalPhase", "ProposalReview", "--outcome", "needs-human", "--reason", "split-recommended", "--cacheable", "true", ...extraFlags]);
+  }
+
+  test("buildTelemetryRecord: phaseTimings/findingCodes are always materialized ([] when omitted) — never a dropped key — and schemaVersion stays 2", () => {
+    const bare = buildTelemetryRecord({ recordId: "r1" });
+    assert.deepEqual(bare.phaseTimings, []);
+    assert.deepEqual(bare.findingCodes, []);
+    assert.equal(bare.schemaVersion, TELEMETRY_SCHEMA_VERSION);
+    assert.equal(bare.schemaVersion, 2, "schemaVersion held at 2 — additive in-family growth");
+    const spans = [{ phase: "Receipt", round: 0, startedAtMs: 1, endedAtMs: 2 }];
+    const codes = [{ code: "x", recurrenceKey: "k", firstSeenGeneration: "a", lastSeenGeneration: "b" }];
+    const full = buildTelemetryRecord({ recordId: "r2", phaseTimings: spans, findingCodes: codes });
+    assert.deepEqual(full.phaseTimings, spans);
+    assert.deepEqual(full.findingCodes, codes);
+  });
+
+  test("AC6 (CLAIM C8): validateTelemetryRecord fails closed with telemetry-field-missing when EITHER new key is absent — direct validator unit test", () => {
+    const rec = buildTelemetryRecord({ recordId: "r1", decision: { kind: "cold" } });
+    assert.equal(validateTelemetryRecord(rec).ok, true, "a fully-materialized record (both keys []) passes");
+    const noTimings = { ...rec };
+    delete noTimings.phaseTimings;
+    const r1 = validateTelemetryRecord(noTimings);
+    assert.equal(r1.ok, false);
+    assert.equal(r1.code, "telemetry-field-missing");
+    assert.match(r1.message, /phaseTimings/);
+    const noCodes = { ...rec };
+    delete noCodes.findingCodes;
+    const r2 = validateTelemetryRecord(noCodes);
+    assert.equal(r2.ok, false);
+    assert.equal(r2.code, "telemetry-field-missing");
+    assert.match(r2.message, /findingCodes/);
+  });
+
+  test("AC9 (CLAIM C5): the receiver closes a trailing endedAtMs:null span with its OWN recordedAtMs — the filled value equals recordedAtMs exactly, never a sandbox value", () => {
+    const taskId = "M207-TRAILING-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    writeLease(dir, taskId);
+    const spans = [
+      { phase: "Adjudicate", round: 0, startedAtMs: 1000, endedAtMs: 2000 },
+      { phase: "Receipt", round: 0, startedAtMs: 2000, endedAtMs: null }, // the trailing open entry
+    ];
+    const res = recordGeneration(dir, charterFile, taskId, ["--phaseTimings", JSON.stringify(spans), "--findingCodes", JSON.stringify(["split-recommended"])]);
+    assert.equal(res.status, 0, res.stdout);
+    const out = JSON.parse(res.stdout.trim());
+    assert.equal(out.telemetryWriteOk, true);
+    const rec = JSON.parse(fs.readFileSync(out.telemetryFile, "utf8"));
+    assert.equal(rec.phaseTimings.length, 2);
+    assert.equal(rec.phaseTimings[0].endedAtMs, 2000, "already-closed spans pass through untouched");
+    assert.equal(rec.phaseTimings[1].endedAtMs, rec.recordedAtMs, "the trailing span is closed with the RECEIVER's own recordedAtMs, exactly");
+    assert.ok(Number.isFinite(rec.phaseTimings[1].endedAtMs));
+  });
+
+  test("AC3 (CLAIM C7/C8): two real generations with a repeated code — recurrenceKey stable, firstSeenGeneration PINNED, lastSeenGeneration ADVANCES", () => {
+    const taskId = "M207-RECURRENCE-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    // Generation 1 (fencingToken 0)
+    writeLease(dir, taskId, { fencingToken: 0, acquiredAt: 1000 });
+    const res1 = recordGeneration(dir, charterFile, taskId, ["--findingCodes", JSON.stringify(["split-recommended"]), "--phaseTimings", "[]"]);
+    assert.equal(res1.status, 0, res1.stdout);
+    const out1 = JSON.parse(res1.stdout.trim());
+    const rec1 = JSON.parse(fs.readFileSync(out1.telemetryFile, "utf8"));
+    assert.equal(rec1.findingCodes.length, 1);
+    const fc1 = rec1.findingCodes[0];
+    assert.equal(fc1.code, "split-recommended");
+    assert.equal(fc1.recurrenceKey, sha(`${taskId}::split-recommended`).slice(0, 12), "recurrenceKey = sha256('<taskId>::<code>').slice(0,12)");
+    assert.equal(fc1.firstSeenGeneration, rec1.generationId, "no prior records: first occurrence shape");
+    assert.equal(fc1.lastSeenGeneration, rec1.generationId);
+    // Generation 2 (fencingToken 1 -> distinct generationId)
+    writeLease(dir, taskId, { fencingToken: 1, acquiredAt: 2000 });
+    const res2 = recordGeneration(dir, charterFile, taskId, ["--findingCodes", JSON.stringify(["split-recommended"]), "--phaseTimings", "[]"]);
+    assert.equal(res2.status, 0, res2.stdout);
+    const out2 = JSON.parse(res2.stdout.trim());
+    const rec2 = JSON.parse(fs.readFileSync(out2.telemetryFile, "utf8"));
+    assert.notEqual(rec2.generationId, rec1.generationId);
+    const fc2 = rec2.findingCodes[0];
+    assert.equal(fc2.recurrenceKey, fc1.recurrenceKey, "the key is stable across generations");
+    assert.equal(fc2.firstSeenGeneration, rec1.generationId, "PINNED to the earliest matching prior record");
+    assert.equal(fc2.lastSeenGeneration, rec2.generationId, "ADVANCES to the current record's own id");
+  });
+
+  test("AC3 sub-case (CLAIM C7): --record-attempt recurrence keys on attemptId, scanning ONLY sibling attempt records (generationId: null)", () => {
+    const taskId = "M207-ATTEMPT-FIXTURE";
+    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "attempt-scratch-"));
+    const runAttempt = (detailObj) => runNode([CONVERGENCE_SCRIPT, "--record-attempt", "--taskId", taskId, "--workspace", dir,
+      "--site", "prepare-already-running", "--detail", JSON.stringify(JSON.stringify(detailObj)),
+      "--phaseTimings", "[]", "--findingCodes", JSON.stringify(["prepare-already-running"])]);
+    const res1 = runAttempt({ n: 1 });
+    assert.equal(res1.status, 0, res1.stdout);
+    const out1 = JSON.parse(res1.stdout.trim());
+    assert.equal(out1.record.generationId, null);
+    assert.equal(out1.record.findingCodes[0].firstSeenGeneration, out1.attemptId, "first occurrence keys on the record's own attemptId");
+    const res2 = runAttempt({ n: 2 }); // distinct detail -> distinct attemptId
+    const out2 = JSON.parse(res2.stdout.trim());
+    assert.notEqual(out2.attemptId, out1.attemptId);
+    assert.equal(out2.record.findingCodes[0].recurrenceKey, out1.record.findingCodes[0].recurrenceKey);
+    assert.equal(out2.record.findingCodes[0].firstSeenGeneration, out1.attemptId, "firstSeenGeneration names the prior attempt record's attemptId");
+    assert.equal(out2.record.findingCodes[0].lastSeenGeneration, out2.attemptId);
+  });
+
+  test("AC5 (CLAIM C7): corrupted + pre-M207 siblings are skipped individually — never aborting the scan or the current write; the scan is a LOCAL helper reusing telemetryPath verbatim", () => {
+    const taskId = "M207-SCAN-HYGIENE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    const archiveDir = path.dirname(telemetryPath(dir, taskId, "__probe__"));
+    fs.mkdirSync(archiveDir, { recursive: true });
+    fs.writeFileSync(path.join(archiveDir, "corrupt.json"), "{NOT VALID JSON");
+    fs.writeFileSync(path.join(archiveDir, "pre-m207.json"), JSON.stringify({ schemaVersion: 2, recordId: "old", generationId: "oldgen", recordedAtMs: 1, terminal: { reason: "split-recommended" } })); // no findingCodes array
+    writeLease(dir, taskId);
+    const res = recordGeneration(dir, charterFile, taskId, []); // NEITHER new flag — defaults apply
+    assert.equal(res.status, 0, res.stdout);
+    const out = JSON.parse(res.stdout.trim());
+    assert.equal(out.telemetryWriteOk, true, "the current write persists despite corrupt siblings");
+    const rec = JSON.parse(fs.readFileSync(out.telemetryFile, "utf8"));
+    assert.deepEqual(rec.phaseTimings, [], "absent --phaseTimings defaults to []");
+    assert.equal(rec.findingCodes.length, 1);
+    assert.equal(rec.findingCodes[0].code, "split-recommended", "absent --findingCodes defaults to terminal.reason alone");
+    assert.equal(rec.findingCodes[0].firstSeenGeneration, rec.generationId, "corrupt + schema-lacking siblings skipped -> first-occurrence shape");
+    // The scan is a LOCAL helper reusing telemetryPath — never a new import edge.
+    const src = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "proposal-convergence.ts"), "utf8");
+    assert.match(src, /function _telemetryDir\(workspace, taskId\) \{\s*return path\.dirname\(telemetryPath\(/);
+    assert.ok(!/^\s*import .*milestone-preparation-check/m.test(src), "zero import edges from proposal-convergence.ts to milestone-preparation-check.ts");
+    assert.ok(!/import .*queryTelemetryReport/.test(src), "no queryTelemetryReport import (rejected Alternative #10)");
+  });
+
+  test("CLAIM C10: garbage AND oversized --phaseTimings/--findingCodes values default, never throw, and the primary write STILL persists", () => {
+    const taskId = "M207-FAILSOFT-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    writeLease(dir, taskId);
+    // 70KiB > the receiver's 64KiB guard, and < the kernel's ~128KiB per-argument execve ceiling
+    // — so the oversized value genuinely reaches the CLI through a real argv.
+    const oversized = "x".repeat(70 * 1024);
+    const res = runNode([CONVERGENCE_SCRIPT, "--record-generation", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+      "--terminalPhase", "ProposalReview", "--outcome", "needs-human", "--reason", "delta-cap-exhausted", "--cacheable", "false",
+      "--phaseTimings", "{GARBAGE not json [", "--findingCodes", oversized]);
+    assert.equal(res.status, 0, res.stdout); // (b) no throw — the CLI completes
+    const out = JSON.parse(res.stdout.trim());
+    assert.equal(out.ok, true);
+    assert.equal(out.telemetryWriteOk, true); // (c) the primary write persists
+    const rec = JSON.parse(fs.readFileSync(out.telemetryFile, "utf8"));
+    assert.deepEqual(rec.phaseTimings, [], "(a) malformed --phaseTimings defaults to []");
+    assert.equal(rec.findingCodes.length, 1, "(a) oversized --findingCodes defaults to terminal.reason alone");
+    assert.equal(rec.findingCodes[0].code, "delta-cap-exhausted");
+  });
+
+  test("AC6/C9: the reuse-terminal write (validateTelemetryRecord's SOLE live call) carries both new keys and passes the widened REQUIRED_TOP; recurrence reads real prior history", () => {
+    const taskId = "M207-REUSE-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    // Generation 1: a cacheable PreflightContent/preflight-rejected terminal — its
+    // --record-generation write also persists .generation.json with the CURRENT file hashes.
+    writeLease(dir, taskId, { fencingToken: 0, acquiredAt: 1000 });
+    const gen1 = runNode([CONVERGENCE_SCRIPT, "--record-generation", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+      "--terminalPhase", "PreflightContent", "--outcome", "revision-needed", "--reason", "preflight-rejected", "--cacheable", "true",
+      "--findingCodes", JSON.stringify(["preflight-rejected"]), "--phaseTimings", "[]"]);
+    assert.equal(gen1.status, 0, gen1.stdout);
+    const gen1Out = JSON.parse(gen1.stdout.trim());
+    const gen1GenerationId = gen1Out.record.generationId;
+    // Re-acquire (the lease was released) and ask for the resume decision — unchanged files ->
+    // reuse-terminal, which validates BEFORE writing against the widened REQUIRED_TOP.
+    writeLease(dir, taskId, { fencingToken: 5, acquiredAt: 3000 });
+    const res = runNode([CONVERGENCE_SCRIPT, "--decide-resume", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile]);
+    const out = JSON.parse(res.stdout.trim());
+    assert.equal(out.decision, "reuse-terminal", JSON.stringify(out));
+    assert.equal(out.telemetryWriteOk, true, "the widened REQUIRED_TOP passes at the sole live validateTelemetryRecord call");
+    const rec = JSON.parse(fs.readFileSync(telemetryPath(dir, taskId, out.generationId), "utf8"));
+    assert.equal(rec.decision.kind, "reuse-terminal");
+    assert.deepEqual(rec.phaseTimings, [], "a cache hit ran no phases");
+    assert.equal(rec.findingCodes.length, 1);
+    assert.equal(rec.findingCodes[0].code, "preflight-rejected", "computed from the reused terminal's own reason alone");
+    assert.equal(rec.findingCodes[0].firstSeenGeneration, gen1GenerationId, "the scan found generation 1's committed record");
+    assert.equal(rec.findingCodes[0].lastSeenGeneration, rec.generationId);
+  });
+
+  test("AC6 (CLAIM C9, mechanical): validateTelemetryRecord has exactly ONE definition + ONE live call site — enforcement is write-time only; nothing re-validates disk-read history", () => {
+    const src = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "proposal-convergence.ts"), "utf8");
+    const occurrences = [...src.matchAll(/validateTelemetryRecord\(/g)];
+    assert.equal(occurrences.length, 2, "exactly one definition + the ONE live call inside _decideResumeCli's reuse-terminal branch — widening REQUIRED_TOP is forward-only-safe");
+  });
+});

@@ -12,6 +12,10 @@ labels:
   - milestone-candidate
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    gap-dir126d-deferred-phase-timing-recurrence-tracking
+    experiments/quay-perpetual-stream/charters/M207-gap-dir126d-deferred-enrichment.md
+    milestones/M207/absorb-entry.md
 ---
 ## Proposal
 

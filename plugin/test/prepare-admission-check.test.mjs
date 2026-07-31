@@ -739,6 +739,155 @@ describe("CLI --preflight / --preflight-plan", () => {
   });
 });
 
+// ── M207: additive `nowMs` self-report on ALL SIX CLI modes (success AND error paths) ──────────────
+// The CLI wrapper attaches `nowMs: now` — the single already-computed epoch-ms constant in
+// `main()` — to every JSON verdict it prints, on both success and error paths, with ZERO new
+// Date.now() sites in the module (the pure decision functions stay untouched). The two preflight
+// modes print the object `runPreflightChecks(...)` RETURNED via a non-clobbering
+// `{...result, nowMs}` spread — the existing `{ok, policyVersion, findings}` keys downstream
+// Preflight verdict parsing reads must survive unchanged (M207 Plan Stages 1/2; AC1/AC10/AC11,
+// CLAIM C1).
+describe("M207: additive nowMs self-report across all six CLI modes", () => {
+  function writeTask(workspace, taskId, body) {
+    fs.mkdirSync(path.join(workspace, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(workspace, "tasks", `${taskId}.md`), body);
+  }
+  function assertFiniteEpochMs(v, label) {
+    assert.equal(typeof v, "number", `${label}: nowMs must be a number, got ${typeof v}`);
+    assert.ok(Number.isFinite(v), `${label}: nowMs must be finite`);
+    assert.ok(v > 1_000_000_000_000, `${label}: nowMs must be an epoch-ms value`);
+  }
+
+  test("--acquire success path carries additive nowMs", () => {
+    const workspace = makeWorkspace();
+    const res = runCli(["--acquire", "--taskId", "T-NOWMS-1", "--workspace", workspace], { CLAUDE_CODE_SESSION_ID: "s-nowms" });
+    assert.equal(res.status, 0, res.stdout);
+    assert.equal(res.json.outcome, "acquired");
+    assertFiniteEpochMs(res.json.nowMs, "--acquire success");
+    assert.ok(res.json.lease, "the pre-existing `lease` key survives the {...result, nowMs} spread");
+  });
+
+  test("--acquire contention (prepare-already-running) error path also carries nowMs", () => {
+    const workspace = makeWorkspace();
+    runCli(["--acquire", "--taskId", "T-NOWMS-2", "--workspace", workspace], { CLAUDE_CODE_SESSION_ID: "first-owner" });
+    const res = runCli(["--acquire", "--taskId", "T-NOWMS-2", "--workspace", workspace], { CLAUDE_CODE_SESSION_ID: "second-owner" });
+    assert.equal(res.status, 1);
+    assert.equal(res.json.outcome, "prepare-already-running");
+    assertFiniteEpochMs(res.json.nowMs, "--acquire contention");
+  });
+
+  test("--acquire missing-session-id inline error literal carries nowMs", () => {
+    const workspace = makeWorkspace();
+    const res = runCli(["--acquire", "--taskId", "T-NOWMS-3", "--workspace", workspace], { CLAUDE_CODE_SESSION_ID: "" });
+    assert.equal(res.status, 2);
+    assert.equal(res.json.code, "missing-session-id");
+    assertFiniteEpochMs(res.json.nowMs, "--acquire missing-session-id");
+  });
+
+  test("--renew success AND lease-missing error paths both carry nowMs", () => {
+    const workspace = makeWorkspace();
+    runCli(["--acquire", "--taskId", "T-NOWMS-4", "--workspace", workspace], { CLAUDE_CODE_SESSION_ID: "s" });
+    const ok = runCli(["--renew", "--taskId", "T-NOWMS-4", "--workspace", workspace, "--stage", "Adjudicate"]);
+    assert.equal(ok.status, 0, ok.stdout);
+    assert.equal(ok.json.ok, true);
+    assert.ok(ok.json.lease, "the pre-existing `lease` key survives the spread");
+    assertFiniteEpochMs(ok.json.nowMs, "--renew success");
+    const missing = runCli(["--renew", "--taskId", "T-NOWMS-NEVER-ACQUIRED", "--workspace", workspace]);
+    assert.equal(missing.status, 1);
+    assert.equal(missing.json.ok, false);
+    assert.equal(missing.json.error, "lease-missing");
+    assertFiniteEpochMs(missing.json.nowMs, "--renew lease-missing");
+  });
+
+  test("--release success AND lease-missing error paths both carry nowMs", () => {
+    const workspace = makeWorkspace();
+    runCli(["--acquire", "--taskId", "T-NOWMS-5", "--workspace", workspace], { CLAUDE_CODE_SESSION_ID: "s" });
+    const ok = runCli(["--release", "--taskId", "T-NOWMS-5", "--workspace", workspace]);
+    assert.equal(ok.status, 0, ok.stdout);
+    assert.equal(ok.json.ok, true);
+    assert.equal(ok.json.releaseMethod, "normal");
+    assertFiniteEpochMs(ok.json.nowMs, "--release success");
+    const missing = runCli(["--release", "--taskId", "T-NOWMS-ALREADY-RELEASED", "--workspace", workspace]);
+    assert.equal(missing.status, 1);
+    assert.equal(missing.json.ok, false);
+    assert.equal(missing.json.error, "lease-missing");
+    assertFiniteEpochMs(missing.json.nowMs, "--release lease-missing");
+  });
+
+  test("--force-release success AND lease-missing error paths both carry nowMs", () => {
+    const workspace = makeWorkspace();
+    runCli(["--acquire", "--taskId", "T-NOWMS-6", "--workspace", workspace], { CLAUDE_CODE_SESSION_ID: "s" });
+    const ok = runCli(["--force-release", "human-escape-hatch", "--taskId", "T-NOWMS-6", "--workspace", workspace]);
+    assert.equal(ok.status, 0, ok.stdout);
+    assert.equal(ok.json.ok, true);
+    assert.equal(ok.json.releaseMethod, "force-release");
+    assertFiniteEpochMs(ok.json.nowMs, "--force-release success");
+    const missing = runCli(["--force-release", "no-lease-here", "--taskId", "T-NOWMS-NO-LEASE", "--workspace", workspace]);
+    assert.equal(missing.status, 1);
+    assert.equal(missing.json.ok, false);
+    assert.equal(missing.json.error, "lease-missing");
+    assertFiniteEpochMs(missing.json.nowMs, "--force-release lease-missing");
+  });
+
+  test("--preflight success: nowMs is additive and the {ok, policyVersion, findings} keys survive the spread unchanged", () => {
+    const workspace = makeWorkspace();
+    writeTask(workspace, "T-NOWMS-PF", readFixture("merged-markdown-claims", "good.md"));
+    const res = runCli(["--preflight", "--taskId", "T-NOWMS-PF", "--workspace", workspace]);
+    assert.equal(res.status, 0, res.stdout);
+    assert.equal(res.json.ok, true);
+    assert.equal(res.json.policyVersion, PREFLIGHT_POLICY_VERSION);
+    assert.deepEqual(res.json.findings, []);
+    assertFiniteEpochMs(res.json.nowMs, "--preflight success");
+    // Exact key set: the three pre-existing keys PLUS additive nowMs — nothing dropped, nothing
+    // else added (downstream Preflight verdict parsing in prepare-milestone.js reads these keys).
+    assert.deepEqual(Object.keys(res.json).sort(), ["findings", "nowMs", "ok", "policyVersion"]);
+  });
+
+  test("--preflight task-file-missing error literal carries nowMs", () => {
+    const workspace = makeWorkspace();
+    const res = runCli(["--preflight", "--taskId", "T-NOWMS-NOFILE", "--workspace", workspace]);
+    assert.equal(res.status, 2);
+    assert.equal(res.json.code, "preflight-check-failed");
+    assertFiniteEpochMs(res.json.nowMs, "--preflight task-file-missing");
+  });
+
+  test("--preflight-plan success: nowMs is additive and the existing keys survive the spread unchanged", () => {
+    const workspace = makeWorkspace();
+    writeTask(workspace, "T-NOWMS-PP", "---\nid: T-NOWMS-PP\ntitle: fixture\nstatus: todo\n---\n## Proposal\n\nx\n\n## Acceptance Criteria\n\n- [ ] one\n\n## Definition of Done\n\n- [ ] d\n");
+    const planPath = path.join(workspace, "plan.md");
+    fs.writeFileSync(planPath, "# fixture plan\n\n### Stage 1: cover the one AC\n- AC: 1\n- Files: fixture.ts\n- Command: `true`\n");
+    const res = runCli(["--preflight-plan", "--taskId", "T-NOWMS-PP", "--workspace", workspace, "--planFile", planPath]);
+    assert.equal(res.status, 0, res.stdout);
+    assert.equal(res.json.ok, true);
+    assert.equal(res.json.policyVersion, PREFLIGHT_POLICY_VERSION);
+    assert.deepEqual(res.json.findings, []);
+    assertFiniteEpochMs(res.json.nowMs, "--preflight-plan success");
+    assert.deepEqual(Object.keys(res.json).sort(), ["findings", "nowMs", "ok", "policyVersion"]);
+  });
+
+  test("--preflight-plan --planFile-missing error literal carries nowMs", () => {
+    const workspace = makeWorkspace();
+    writeTask(workspace, "T-NOWMS-PP2", readFixture("touches-mismatch", "task.md"));
+    const res = runCli(["--preflight-plan", "--taskId", "T-NOWMS-PP2", "--workspace", workspace, "--planFile", path.join(workspace, "absent.md")]);
+    assert.equal(res.status, 2);
+    assert.equal(res.json.code, "preflight-check-failed");
+    assertFiniteEpochMs(res.json.nowMs, "--preflight-plan planFile-missing");
+  });
+
+  test("catch-all admission-check-failed error path also self-reports nowMs when the subprocess answered", () => {
+    const workspace = makeWorkspace();
+    // Make the lease path a DIRECTORY so _readLease's readFileSync throws EISDIR inside renewLease
+    // — caught by main()'s catch-all, which prints the admission-check-failed shape.
+    const leasePath = path.join(workspace, ".quay", "prepare-leases", "T-NOWMS-EISDIR.json");
+    fs.mkdirSync(leasePath, { recursive: true });
+    const res = runCli(["--renew", "--taskId", "T-NOWMS-EISDIR", "--workspace", workspace]);
+    assert.equal(res.status, 2);
+    assert.ok(res.json);
+    assert.equal(res.json.outcome, "error");
+    assertFiniteEpochMs(res.json.nowMs, "catch-all admission-check-failed");
+  });
+});
+
 // ── Real production wiring: --preflight/--preflight-plan use the SAME parseArgs/spec.flags
 // machinery --acquire/--renew/--release already use — WIRING-CLAIM 9. ──────────────────────────────
 test("WIRING-CLAIM 9: --preflight/--preflight-plan/planFile/charterFile are added to the SAME spec.flags object parseArgs already consumes for acquire/renew/release", () => {

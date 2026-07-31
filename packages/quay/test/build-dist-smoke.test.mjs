@@ -138,7 +138,13 @@ test("(b) serve --port + HTTP GET returns 200", async () => {
   });
   try {
     let code;
-    for (let i = 0; i < 40; i++) {
+    // Poll for up to ~15s (100 × 150ms) — matching test (c)'s 15s envelope. The previous 40 ×
+    // 150ms (6s) window sat exactly at the bundle's cold-start-under-load time: under full-suite
+    // `--test-concurrency=8` load the spawned server genuinely needs ~6s to bind (measured:
+    // 6.08s pass / 6.68s fail on the same machine, same load — a coin-flip at the boundary), so
+    // ANY test-suite growth tipped this into deterministic failure without any product change.
+    // A genuinely broken serve still fails here, just after a load-tolerant wait.
+    for (let i = 0; i < 100; i++) {
       await sleep(150);
       try { code = await httpGet(port, "/"); break; } catch { /* not up yet */ }
     }
