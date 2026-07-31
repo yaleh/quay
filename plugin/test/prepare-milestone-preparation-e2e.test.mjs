@@ -173,6 +173,22 @@ function makeAgentMock(taskFileOnDisk) {
       return { raw: JSON.stringify({ ok: true, verdict: 'no-decision-on-file' }) };
     }
 
+    // gap-prepare-milestone-cross-generation-review-state-reset: --resolve-checkpoint is dispatched
+    // ONLY when resumeFromAdjudicatedProposal is true (never on this fixture's cold path — the
+    // resume-decision mock above always returns 'cold') — handled defensively so any future reuse
+    // of this mock that DOES exercise the resume path doesn't spuriously fail with "unexpected
+    // agent() call". Every ProposalReview terminal (including the success path) ALSO dispatches
+    // --write-checkpoint via the `write-review-checkpoint-*` label family — mocked as a no-op
+    // success so this fixture's own cold-path 'prepared' assertions stay unaffected.
+    if (label === 'resolve-checkpoint') {
+      sessions.resolveCheckpoints = (sessions.resolveCheckpoints || 0) + 1;
+      return { raw: JSON.stringify({ usable: false, code: 'checkpoint-missing' }) };
+    }
+    if (/^write-review-checkpoint-/.test(label)) {
+      sessions.writeReviewCheckpoints = (sessions.writeReviewCheckpoints || 0) + 1;
+      return { raw: JSON.stringify({ ok: true, checkpointFile: '.quay/prepare-checkpoints/mock.json', counters: { fullReviews: 1, deltaRounds: 0 } }) };
+    }
+
     // M201/DIR-126-B: the new Preflight phase's agent()-dispatched CLI calls — mocked with a
     // default non-blocking verdict so this fixture still reaches 'prepared' unchanged. Preflight's
     // own detector logic has its own dedicated prepare-admission-check.test.mjs coverage.

@@ -21,6 +21,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { checkPreparation } from '../../experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts';
 import { sweepOrphans } from '../../experiments/quay-perpetual-stream/scripts/sweep-fixture-orphans.mjs';
+import { checkpointPath } from '../../experiments/quay-perpetual-stream/scripts/proposal-convergence.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
@@ -214,6 +215,28 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
       return { raw: JSON.stringify({ ok: true, verdict: 'no-decision-on-file' }) };
     }
 
+    // gap-prepare-milestone-cross-generation-review-state-reset: --resolve-checkpoint is dispatched
+    // ONLY when resumeFromAdjudicatedProposal ends up true (a test exercising cross-generation delta
+    // continuation stubs the verdict via reviewHandlers.onResolveCheckpoint); the DEFAULT reports no
+    // usable checkpoint so every existing cold-path scenario in this file is unaffected. EVERY
+    // ProposalReview terminal (including success) also dispatches --write-checkpoint via the
+    // `write-review-checkpoint-*` label family — captured for assertions, mocked as a no-op success
+    // by default (stubbable via reviewHandlers.onWriteCheckpoint).
+    if (label === 'resolve-checkpoint') {
+      calls.resolveCheckpoints = (calls.resolveCheckpoints || 0) + 1;
+      if (typeof reviewHandlers.onResolveCheckpoint === 'function') return reviewHandlers.onResolveCheckpoint(prompt);
+      return { raw: JSON.stringify({ usable: false, code: 'checkpoint-missing' }) };
+    }
+    if (/^write-review-checkpoint-/.test(label)) {
+      calls.writeReviewCheckpoints = (calls.writeReviewCheckpoints || 0) + 1;
+      calls.writeReviewCheckpointLabels = calls.writeReviewCheckpointLabels || [];
+      calls.writeReviewCheckpointLabels.push(label);
+      calls.writeReviewCheckpointPrompts = calls.writeReviewCheckpointPrompts || [];
+      calls.writeReviewCheckpointPrompts.push(prompt);
+      if (typeof reviewHandlers.onWriteCheckpoint === 'function') return reviewHandlers.onWriteCheckpoint(prompt, label);
+      return { raw: JSON.stringify({ ok: true, checkpointFile: '.quay/prepare-checkpoints/mock.json', counters: { fullReviews: 1, deltaRounds: 0 } }) };
+    }
+
     // M201/DIR-126-B: the new Preflight phase's agent()-dispatched CLI calls (content, then
     // plan-shape). Mocked with a default non-blocking verdict so every existing scenario in this
     // file that doesn't care about Preflight still passes unchanged — mirroring exactly how the
@@ -243,6 +266,15 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
     if (label === 'proposal-review') {
       calls.reviews.push('full');
       return reviewHandlers.onFullReview(prompt);
+    }
+    // gap-prepare-milestone-cross-generation-review-state-reset: the cross-generation delta
+    // continuation's ONE-agent "verification only" round (first round of a generation whose
+    // checkpoint classified the diff as wording-only/known-finding-repair) — distinct from the
+    // ordinary per-round revise+delta-review PAIR below.
+    if (label === 'proposal-crossgen-delta-review') {
+      calls.reviews.push('crossgen-delta');
+      calls.crossGenDeltaReviews = (calls.crossGenDeltaReviews || 0) + 1;
+      return reviewHandlers.onCrossGenDeltaReview(prompt);
     }
     if (label === 'wiring-coverage-check') {
       // DIR-117-B/M195 (AC #4): the ProposalReview phase now calls the REAL checkWiringCoverage()
@@ -933,6 +965,298 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       assert.equal(calls.revises.length, 2, 'the ordinary delta-round cap (2) is unaffected by resume');
     } finally {
       cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // ── gap-prepare-milestone-cross-generation-review-state-reset: cross-generation ProposalReview
+  // checkpoint. DIR-125 bounds convergence WITHIN one generation; DIR-126-C's resume above only
+  // skips ProposalAuthors/Adjudicate — ProposalReview itself always restarted from an empty ledger.
+  // This closes that gap: a validated checkpoint (proposal-convergence.ts's --resolve-checkpoint/
+  // --write-checkpoint) lets ProposalReview skip its full-review agent and dispatch exactly ONE
+  // delta reviewer instead, for wording-only/known-finding-repair diffs only. ──────────────────
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  test(`[${mirrorName}] cross-gen checkpoint AC#3: a focused edit resolving one known finding carries the prior ledger forward and dispatches exactly ONE delta reviewer — zero full reviewers, zero authors/adjudicators`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel, { resumeFromAdjudicatedProposal: true });
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onResolveCheckpoint: () => ({
+          raw: JSON.stringify({
+            usable: true, code: 'checkpoint-valid', classification: 'known-finding-repair', classificationCode: 'diff-scoped-to-known-finding',
+            noveltyScan: { hasNovelClaim: false, novelClaims: [] },
+            ledger: [{ id: 'f-known-1', subsystem: 's1', summary: 'known finding to repair', severity: 'blocker', blocking: true, everBlocking: true, disposition: 'unresolved', evidence: '', claimRef: 'AC#1', rootCauseKey: null, repairable: true, status: 'open', firstSeenRound: 0, lastSeenRound: 0 }],
+            counters: { fullReviews: 1, deltaRounds: 0 },
+            mechanismInventoryHash: 'mi-carried', mechanismInventoryCount: 1,
+            lastFullReviewSession: { sessionId: 'sess-original-full-review', timestamp: 1000 },
+          }),
+        }),
+        onCrossGenDeltaReview: () => ({ resolvedIds: ['f-known-1'], findings: [], proposalHash: 'h-crossgen-1', nowMs: 2000, sessionId: 'sess-crossgen-delta-1' }),
+      });
+
+      assert.equal(result.outcome, 'prepared', JSON.stringify(result));
+      assert.equal(calls.authors.length, 0, 'zero Proposal authors — resume already skips them');
+      assert.equal(calls.adjudicator, 0, 'zero adjudicator dispatches');
+      assert.equal(calls.reviews.filter((r) => r === 'full').length, 0, 'zero full ProposalReview reviewers dispatched');
+      assert.equal(calls.crossGenDeltaReviews, 1, 'exactly ONE cross-generation delta reviewer dispatched');
+      assert.equal(calls.revises.length, 0, 'zero reviser dispatches — the cross-gen round is verification-only, the Proposal was already edited outside this loop');
+      assert.equal(calls.resolveCheckpoints, 1, 'checkpoint resolution attempted exactly once');
+      assert.ok(calls.writeReviewCheckpoints >= 1, 'checkpoint written at the terminal');
+      assert.equal(result.ledger.find((f) => f.id === 'f-known-1').status, 'resolved', 'the carried finding is resolved, not silently dropped');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] cross-gen checkpoint AC#4: a wording-only edit whose carried ledger is already clean reaches 'prepared' with ZERO review agents dispatched this generation`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel, { resumeFromAdjudicatedProposal: true });
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onResolveCheckpoint: () => ({
+          raw: JSON.stringify({
+            usable: true, code: 'checkpoint-valid', classification: 'wording-only', classificationCode: 'no-new-claims-paths-or-mechanism-removal-detected',
+            noveltyScan: { hasNovelClaim: false, novelClaims: [] },
+            ledger: [{ id: 'f-stable-1', subsystem: 's1', summary: 'already resolved', severity: 'blocker', blocking: false, everBlocking: true, disposition: 'backlog', evidence: '', claimRef: 'AC#1', rootCauseKey: null, repairable: true, status: 'resolved', firstSeenRound: 0, lastSeenRound: 1 }],
+            counters: { fullReviews: 1, deltaRounds: 1 },
+            mechanismInventoryHash: 'mi-carried', mechanismInventoryCount: 1,
+            lastFullReviewSession: { sessionId: 'sess-original-full-review', timestamp: 1000 },
+          }),
+        }),
+        onCrossGenDeltaReview: () => { throw new Error('MUST NOT be dispatched: the carried ledger already has zero open blocking findings'); },
+      });
+
+      assert.equal(result.outcome, 'prepared', JSON.stringify(result));
+      assert.equal(calls.crossGenDeltaReviews, undefined, 'zero cross-gen delta reviewers dispatched');
+      assert.equal(calls.reviews.length, 0, 'zero review agents of ANY kind dispatched this generation');
+      assert.equal(result.ledger.length, 1, 'the stable finding id/disposition survive untouched');
+      assert.equal(result.ledger[0].id, 'f-stable-1', 'stable finding id preserved across the wording-only revision');
+      assert.equal(result.ledger[0].disposition, 'backlog', 'disposition preserved — a wording-only edit never reopens a completed decision');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] cross-gen checkpoint AC#5: checkpoint classifies the diff as 'mechanism-change' -> falls back to the ordinary full-review path (authors/adjudicate still skipped by resume, but ProposalReview itself is NOT a cross-gen delta)`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel, { resumeFromAdjudicatedProposal: true });
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onResolveCheckpoint: () => ({
+          raw: JSON.stringify({ usable: true, code: 'checkpoint-valid', classification: 'mechanism-change', classificationCode: 'mechanism-claim-removed-unexplained', ledger: [], counters: { fullReviews: 1, deltaRounds: 0 } }),
+        }),
+        onFullReview: () => ({ findings: [], mechanismCount: 1, sessionId: 'sess-full-2' }),
+        onCrossGenDeltaReview: () => { throw new Error('MUST NOT be dispatched: mechanism-change is not an admitted cross-gen classification'); },
+      });
+
+      assert.equal(result.outcome, 'prepared', JSON.stringify(result));
+      assert.equal(calls.authors.length, 0, 'resume still skips ProposalAuthors regardless of the checkpoint classification');
+      assert.equal(calls.adjudicator, 0, 'resume still skips Adjudicate regardless of the checkpoint classification');
+      assert.equal(calls.reviews.filter((r) => r === 'full').length, 1, 'a full review WAS dispatched — the checkpoint was resolved but never used as a delta base');
+      assert.equal(calls.crossGenDeltaReviews, undefined, 'zero cross-gen delta reviewers dispatched');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] cross-gen checkpoint AC#2: corrupt/cross-task/stale-policy/wrong-charter --resolve-checkpoint verdicts all fall back to full review — never silently treated as a valid delta base`, async () => {
+    const cases = [
+      { code: 'checkpoint-corrupt' },
+      { code: 'checkpoint-wrong-task' },
+      { code: 'checkpoint-stale-policy' },
+      { code: 'checkpoint-charter-mismatch' },
+      { code: 'checkpoint-scope-mismatch' },
+      { code: 'checkpoint-missing' },
+    ];
+    for (const { code } of cases) {
+      const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+      const args = baseArgs(scratchRel, { resumeFromAdjudicatedProposal: true });
+      try {
+        const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+          onResolveCheckpoint: () => ({ raw: JSON.stringify({ usable: false, code }) }),
+          onFullReview: () => ({ findings: [], mechanismCount: 1, sessionId: 'sess-full-fallback' }),
+          onCrossGenDeltaReview: () => { throw new Error(`MUST NOT be dispatched for a ${code} verdict — never a valid delta base`); },
+        });
+        assert.equal(result.outcome, 'prepared', `${code}: ${JSON.stringify(result)}`);
+        assert.equal(calls.reviews.filter((r) => r === 'full').length, 1, `${code}: a full review must run when the checkpoint is unusable`);
+        assert.equal(calls.crossGenDeltaReviews, undefined, `${code}: zero cross-gen delta reviewers dispatched`);
+      } finally {
+        cleanup(scratchDir, null, args.milestoneId);
+      }
+    }
+  });
+
+  test(`[${mirrorName}] cross-gen checkpoint AC#6 (novelty scan): a mechanically-detected novel claim surfaced to the cross-gen delta reviewer is confirmed and routed to review as a NEW blocking finding, not silently waved through`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel, { resumeFromAdjudicatedProposal: true, maxDeltaRounds: 2 });
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onResolveCheckpoint: () => ({
+          raw: JSON.stringify({
+            usable: true, code: 'checkpoint-valid', classification: 'known-finding-repair', classificationCode: 'diff-scoped-to-known-finding',
+            noveltyScan: { hasNovelClaim: true, novelClaims: [{ sentence: 'It also invokes `newmodule.ts` to route Z.', identifiers: ['newmodule.ts'] }] },
+            ledger: [],
+            counters: { fullReviews: 1, deltaRounds: 0 },
+            mechanismInventoryHash: null, mechanismInventoryCount: null,
+            lastFullReviewSession: { sessionId: 'sess-original-full-review', timestamp: 1000 },
+          }),
+        }),
+        // The cross-gen reviewer VERIFIES the mechanically-flagged novel claim and reports it as a
+        // genuine new blocking finding — this is the reviewer's own judgment call, but the CANDIDATE
+        // claim it is judging came from the mechanical scan, never from LLM self-report alone.
+        onCrossGenDeltaReview: () => ({
+          resolvedIds: [], findings: [{ subsystem: 'wiring', claimRef: 'newmodule.ts', summary: 'new claim escaped the focused repair', severity: 'blocker', blocking: true, evidence: 'novelty scan flagged `newmodule.ts`' }],
+          nowMs: 2000, sessionId: 'sess-crossgen-1',
+        }),
+        onRevise: (round) => ({ ok: true, sessionId: `sess-revise-${round}` }),
+        onDeltaReview: (round) => ({ resolvedIds: ['find-it-yourself'], findings: [], sessionId: `sess-delta-${round}` }),
+      });
+
+      // The loop must NOT terminate zero-finding after round 1 — the novel claim is a real open
+      // blocking finding, so round 2 (the ordinary revise+delta-review pair) is dispatched to
+      // resolve it, proving it was routed to review rather than silently preserved as "clean".
+      assert.equal(calls.crossGenDeltaReviews, 1, 'exactly one cross-gen delta reviewer dispatched (round 1)');
+      assert.ok(calls.revises.length >= 1, 'a further round was needed — the novel claim was NOT silently waved through as if the old pass still covered it');
+      const found = result.ledger.find((f) => f.claimRef === 'newmodule.ts');
+      assert.ok(found, 'the novel claim is present in the final ledger as a real finding');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] cross-gen checkpoint: every ProposalReview terminal writes/updates the checkpoint, including a non-success terminal (delta-cap-exhausted)`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel, { maxDeltaRounds: 1 });
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onFullReview: () => ({ findings: [{ subsystem: 's1', claimRef: 'AC#1', summary: 'persistent', severity: 'blocker', blocking: true }], mechanismCount: 1, sessionId: 'sess-full' }),
+        onRevise: (round) => ({ ok: true, sessionId: `sess-revise-${round}` }),
+        onDeltaReview: (round) => ({ resolvedIds: [], findings: [{ subsystem: 's1', claimRef: 'AC#1', summary: 'persistent', severity: 'blocker', blocking: true }], sessionId: `sess-delta-${round}` }),
+      });
+      assert.equal(result.outcome, 'needs-human');
+      assert.equal(result.reason, 'delta-cap-exhausted');
+      assert.equal(calls.writeReviewCheckpoints, 1, 'checkpoint written exactly once, at the delta-cap-exhausted terminal');
+      assert.equal(calls.writeReviewCheckpointLabels[0], 'write-review-checkpoint-delta-cap-exhausted');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  // ── DIR-126-D synthetic replay: the repo owner explicitly approved reconstructing a SYNTHETIC
+  // fixture matching that incident's SHAPE (one full review, then several small wording/known-
+  // finding-repair generations) rather than replaying real historical data. This test drives the
+  // REAL proposal-convergence.ts --resolve-checkpoint/--write-checkpoint CLI (never a mocked
+  // in-memory stand-in) across FOUR sequential real workflow dispatches against the SAME on-disk
+  // checkpoint, scaled down from the real incident's ~9-11 generations for test runtime (the
+  // mechanism under test — epoch-wide full-review admission — is identical regardless of how many
+  // delta-only generations follow the one full review). ─────────────────────────────────────────
+  test(`[${mirrorName}] DIR-126-D synthetic replay: at most ONE full semantic review across a 4-generation epoch, later edits carried through real checkpoint continuation, final ledger preserved`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk, charterFileOnDisk } = makeScratch();
+    const taskId = `../${scratchRel}/task`;
+    const charterRel = `${scratchRel}/charter.md`;
+    const milestoneId = `M${Math.floor(900000 + Math.random() * 90000)}`;
+    const CONVERGENCE_SCRIPT = 'experiments/quay-perpetual-stream/scripts/proposal-convergence.ts';
+
+    function realCheckpointHandlers() {
+      return {
+        onResolveCheckpoint: () => {
+          const res = runShell(`node --experimental-strip-types ${CONVERGENCE_SCRIPT} --resolve-checkpoint --taskId ${JSON.stringify(taskId)} --workspace . --charterFile ${JSON.stringify(charterRel)}`);
+          return { raw: res.stdout.trim() };
+        },
+        onWriteCheckpoint: (prompt) => {
+          const pathMatch = prompt.match(/Write the file (\S+) with EXACTLY this content/);
+          const jsonMatch = prompt.match(/```json\n([\s\S]*?)\n```/);
+          const abs = path.join(REPO_ROOT, pathMatch[1]);
+          fs.mkdirSync(path.dirname(abs), { recursive: true });
+          fs.writeFileSync(abs, jsonMatch[1]);
+          const cmds = extractNodeCommands(prompt);
+          const res = runShell(cmds[0]);
+          return { raw: res.stdout.trim() };
+        },
+      };
+    }
+
+    let planFile = null;
+    const totalFullReviews = { count: 0 };
+    const totalCrossGenDeltaReviews = { count: 0 };
+    try {
+      // ── Generation 1 (COLD): one full review finds one blocking finding. maxDeltaRounds:1 forces
+      // this generation to STOP at delta-cap-exhausted with the finding still OPEN (mirroring the
+      // real incident's shape — round 0 already had findings that outlived that generation) — the
+      // checkpoint written at THIS non-success terminal is what generation 2 must resume from.
+      const gen1 = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, maxDeltaRounds: 1 }), taskFileOnDisk, {
+        ...realCheckpointHandlers(),
+        onFullReview: () => { totalFullReviews.count += 1; return { findings: [{ subsystem: 's1', claimRef: 'AC#1', summary: 'blocker one', severity: 'blocker', blocking: true, repairable: true }], mechanismCount: 1, sessionId: 'sess-full-gen1' }; },
+        onRevise: (round) => ({ ok: true, sessionId: `sess-revise-gen1-${round}` }),
+        onDeltaReview: (round) => ({ resolvedIds: [], findings: [{ subsystem: 's1', claimRef: 'AC#1', summary: 'blocker one', severity: 'blocker', blocking: true, repairable: true }], sessionId: `sess-delta-gen1-${round}` }),
+      });
+      assert.equal(gen1.result.outcome, 'needs-human', JSON.stringify(gen1.result));
+      assert.equal(gen1.result.reason, 'delta-cap-exhausted');
+      assert.equal(gen1.calls.reviews.filter((r) => r === 'full').length, 1, 'generation 1: exactly one full review');
+
+      // ── Generation 2: a human repairs the finding (edits the on-disk Proposal) and re-dispatches
+      // with resumeFromAdjudicatedProposal:true (mirroring a real human-repaired-attempt dispatch —
+      // ProposalAuthors/Adjudicate skipped) — the REAL --resolve-checkpoint CLI reads generation 1's
+      // checkpoint (its open finding still there) and admits cross-generation delta continuation;
+      // the ONE cross-gen delta reviewer confirms the repair resolved it.
+      {
+        const body = fs.readFileSync(taskFileOnDisk, 'utf8');
+        fs.writeFileSync(taskFileOnDisk, body.replace(/## Proposal\n/, '## Proposal\n\n<!-- generation 2: human repair of blocker one -->\n'));
+      }
+      const gen2 = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, resumeFromAdjudicatedProposal: true }), taskFileOnDisk, {
+        ...realCheckpointHandlers(),
+        onFullReview: () => { totalFullReviews.count += 1; return { findings: [], mechanismCount: 1, sessionId: 'sess-full-gen2' }; },
+        onCrossGenDeltaReview: (prompt) => {
+          totalCrossGenDeltaReviews.count += 1;
+          const ids = findingIdBySubsystem(prompt);
+          return { resolvedIds: [ids.s1], findings: [], nowMs: 2000, sessionId: 'sess-crossgen-gen2' };
+        },
+      });
+      assert.equal(gen2.result.outcome, 'prepared', JSON.stringify(gen2.result));
+      planFile = gen2.result.planFile;
+
+      // ── Generations 3-4: pure wording tidy-ups AFTER the substance is already fixed — the carried
+      // checkpoint ledger is already clean, so these reach 'prepared' with ZERO review agents.
+      const genResultsAfterFirst = [gen2];
+      for (let i = 3; i <= 4; i++) {
+        const body = fs.readFileSync(taskFileOnDisk, 'utf8');
+        fs.writeFileSync(taskFileOnDisk, body.replace(/## Proposal\n/, `## Proposal\n\n<!-- generation ${i} wording tidy-up -->\n`));
+        const gen = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, resumeFromAdjudicatedProposal: true }), taskFileOnDisk, {
+          ...realCheckpointHandlers(),
+          onFullReview: () => { totalFullReviews.count += 1; return { findings: [], mechanismCount: 1, sessionId: `sess-full-gen${i}` }; },
+          onCrossGenDeltaReview: () => { totalCrossGenDeltaReviews.count += 1; return { resolvedIds: [], findings: [], nowMs: 1000 * i, sessionId: `sess-crossgen-gen${i}` }; },
+        });
+        genResultsAfterFirst.push(gen);
+        assert.equal(gen.result.outcome, 'prepared', `generation ${i}: ${JSON.stringify(gen.result)}`);
+        assert.equal(gen.calls.crossGenDeltaReviews, undefined, `generation ${i}: the carried ledger was already clean — zero review agents needed`);
+      }
+
+      // ── The core DIR-126-D-shaped claim: across the WHOLE 4-generation epoch, at most ONE full
+      // semantic review ran — generations 2-4 never re-derived from scratch, and the repair went
+      // through exactly ONE real cross-generation delta reviewer, never a second full reviewer.
+      assert.equal(totalFullReviews.count, 1, 'at most one full semantic review across the whole epoch — generations 2-4 never re-dispatched a full reviewer');
+      assert.equal(totalCrossGenDeltaReviews.count, 1, 'the human repair went through exactly ONE cross-generation delta reviewer (generation 2)');
+      for (const gen of genResultsAfterFirst) {
+        assert.equal(gen.calls.authors.length, 0, 'zero Proposal authors on every generation after the first');
+        assert.equal(gen.calls.adjudicator, 0, 'zero adjudicators on every generation after the first');
+      }
+
+      // ── Final ledger from generation 4's checkpoint still carries the original finding, resolved.
+      const finalCheckpointFile = checkpointPath(REPO_ROOT, taskId);
+      const finalCheckpoint = JSON.parse(fs.readFileSync(finalCheckpointFile, 'utf8'));
+      assert.equal(finalCheckpoint.ledger.length, 1, 'the original finding survives across all 4 generations — never discarded');
+      assert.equal(finalCheckpoint.ledger[0].status, 'resolved');
+      assert.equal(finalCheckpoint.counters.fullReviews, 1, 'epoch-cumulative fullReviews counter stayed at 1 across all 4 generations');
+    } finally {
+      // Real CLI dispatches wrote a real checkpoint file (and a scratch --checkpointInputFile
+      // handoff, same input path reused/overwritten every generation) directly under this repo's
+      // OWN .quay/prepare-checkpoints/ (gitignored, but not test-scoped like scratchDir) — clean
+      // both up explicitly rather than relying on the generic scratchDir/milestoneId cleanup, which
+      // never looks there.
+      fs.rmSync(checkpointPath(REPO_ROOT, taskId), { force: true });
+      fs.rmSync(path.join(REPO_ROOT, '.quay', 'prepare-checkpoints', `_input-${taskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`), { force: true });
+      cleanup(scratchDir, planFile, milestoneId);
     }
   });
 

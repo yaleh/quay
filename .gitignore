@@ -25,6 +25,10 @@ experiment/timing/*.log
 **/dist-sea/
 **/.quay/gate-events.jsonl
 **/.quay/prepare-leases/
+# gap-prepare-milestone-cross-generation-review-state-reset: cross-generation ProposalReview
+# checkpoint — same per-workspace gitignored runtime-state family as prepare-leases/, never
+# committed (the task's own '## Proposal'/AC/Plan stay the single authoritative content source).
+**/.quay/prepare-checkpoints/
 
 # archguard MCP tool's own local cache/metrics — not source, regenerated per-session
 .archguard/

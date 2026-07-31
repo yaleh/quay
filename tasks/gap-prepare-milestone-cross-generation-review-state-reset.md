@@ -74,37 +74,120 @@ to known findings should remain incremental while a novelty scan checks that no 
 
 ## Acceptance Criteria
 
-- [ ] Every ProposalReview terminal, including split-recommended, delta-cap-exhausted, soft-budget-
+- [x] Every ProposalReview terminal, including split-recommended, delta-cap-exhausted, soft-budget-
   exceeded, and review failure after a valid ledger exists, writes a durable review checkpoint with
-  all declared identity, hash, ledger, counter, terminal, and provenance fields.
-- [ ] Corrupt, cross-task, stale-policy, and wrong-charter checkpoint fixtures fail closed with
+  all declared identity, hash, ledger, counter, terminal, and provenance fields. `_writeReviewCheckpoint(...)`
+  is called at exactly the 8 real ProposalReview terminal-return sites in `prepare-milestone.js`
+  (`wiring-coverage-check-failed`, `mechanism-inventory-invalid`, `mechanism-inventory-missing`,
+  `proposal-revise-failed`, `split-recommended`, `soft-budget-exceeded`, `delta-cap-exhausted`, and
+  the success path `proposal-review-passed`) — mechanically confirmed via
+  `grep -n "_writeReviewCheckpoint(" .claude/workflows/prepare-milestone.js` (1 definition + 8 calls).
+  `buildReviewCheckpoint()` materializes every declared field (taskId, charterHash, scopeHash,
+  reviewPolicyHash, reviewedProposalHash, reviewedProposalText, ledger, mechanismInventoryHash/Count,
+  counters, terminal, lastFullReviewSession) — unit-tested in
+  `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs`'s "buildReviewCheckpoint /
+  checkpointPath" describe block, and a dedicated workflow-level test asserts the checkpoint write
+  fires at a real non-success terminal (`delta-cap-exhausted`) in
+  `plugin/test/prepare-milestone-convergence.test.mjs`.
+- [x] Corrupt, cross-task, stale-policy, and wrong-charter checkpoint fixtures fail closed with
   distinct reason codes and dispatch zero delta reviewers from untrusted state.
-- [ ] A focused edit resolving one known finding carries all prior ledger entries forward and
+  `validateReviewCheckpoint()` returns 6 distinct typed codes (`checkpoint-missing`,
+  `checkpoint-corrupt`, `checkpoint-wrong-task`, `checkpoint-charter-mismatch`,
+  `checkpoint-scope-mismatch`, `checkpoint-stale-policy`) — unit-tested directly and via real
+  `--resolve-checkpoint` CLI fixtures (corrupt JSON on disk, tampered `taskId`/`reviewPolicyHash`,
+  changed charter file, changed `## Touches`) in `proposal-convergence.test.mjs`. Workflow-level
+  corroboration: `plugin/test/prepare-milestone-convergence.test.mjs`'s "cross-gen checkpoint AC#2"
+  test drives all 6 codes through the real workflow and asserts a full reviewer is dispatched (never
+  a cross-gen delta reviewer) for every one.
+- [x] A focused edit resolving one known finding carries all prior ledger entries forward and
   dispatches one delta reviewer over the patch plus unresolved findings; it dispatches zero full
-  Proposal reviewers and zero Proposal authors/adjudicators.
-- [ ] Wording-only edits preserve stable finding IDs and dispositions and do not reopen a completed
-  mechanism/split decision.
-- [ ] New mechanism, production touch-set, charter, and review-policy changes each start a new scope
-  epoch with an explicit reset reason and exactly one admitted full review.
-- [ ] The novelty scan catches a new wiring/mechanism claim introduced inside an otherwise focused
-  repair and routes it to review instead of incorrectly preserving the old pass.
-- [ ] Exact unchanged stable-terminal reuse remains compatible with DIR-126-C and consumes zero
+  Proposal reviewers and zero Proposal authors/adjudicators. "cross-gen checkpoint AC#3" test in
+  `plugin/test/prepare-milestone-convergence.test.mjs` — real workflow dispatch, asserts
+  `calls.authors.length===0`, `calls.adjudicator===0`, zero full reviews,
+  `calls.crossGenDeltaReviews===1`, zero reviser dispatches, and the carried finding ends
+  `status:'resolved'`.
+- [x] Wording-only edits preserve stable finding IDs and dispositions and do not reopen a completed
+  mechanism/split decision. "cross-gen checkpoint AC#4" test asserts the carried ledger's finding id/
+  disposition survive byte-identical across a wording-only edit with ZERO review agents dispatched
+  (nothing can reopen a decision when no reviewer runs) — the split-check itself is structurally
+  unreachable on this path since the loop's first check (zero open blocking) exits before
+  `_splitCheck()` is ever called.
+- [x] New mechanism, production touch-set, charter, and review-policy changes each start a new scope
+  epoch with an explicit reset reason and exactly one admitted full review. Charter/review-policy/
+  touch-set changes are caught by `validateReviewCheckpoint` (never reach the classifier) and a
+  mechanism change is caught by `classifyProposalDiff`'s `mechanism-change` class (a wiring claim
+  present in the checkpoint's last-reviewed text that vanished with no ledger finding explaining the
+  removal) — all four are unit-tested (`classifyProposalDiff`/`validateReviewCheckpoint` describe
+  blocks) and workflow-tested ("cross-gen checkpoint AC#2"/"AC#5": each falls back to exactly one
+  full review this generation, with the checkpoint's own typed code as the recorded reset reason).
+- [x] The novelty scan catches a new wiring/mechanism claim introduced inside an otherwise focused
+  repair and routes it to review instead of incorrectly preserving the old pass. Found and fixed a
+  real gap during implementation: an ALREADY-CLEAN carried ledger let the loop exit `zero-finding`
+  before ever dispatching a reviewer, which would have silently waved through a novel claim with
+  nobody looking at it — fixed by filing the novelty scan's own hit as a synthetic blocking finding
+  (`subsystem:'novelty-scan'`) whenever `noveltyScan().hasNovelClaim` is true, structurally
+  guaranteeing at least one cross-gen delta reviewer dispatch. "cross-gen checkpoint AC#6" test
+  confirms: exactly one cross-gen delta reviewer dispatched, a further round is needed when the
+  reviewer confirms the claim is real, and the novel claim appears in the final ledger.
+- [x] Exact unchanged stable-terminal reuse remains compatible with DIR-126-C and consumes zero
   content agents; changed compatible repair selects delta continuation rather than terminal reuse.
-- [ ] A replay shaped from DIR-126-D's eleven attempts performs at most one full semantic review for
+  DIR-126-C's `decideResumeGeneration`/`--decide-resume`/reuse-terminal mechanism is completely
+  UNTOUCHED by this change (zero edits to that code path) — the full pre-existing M202/DIR-126-C
+  regression suite (11 tests, both mirrors) still passes unchanged, confirming reuse-terminal's own
+  zero-content-agent guarantee survives. The two mechanisms are structurally disjoint: reuse-terminal
+  requires a byte-identical `proposalHash` and returns before `phase('Preflight')`; this task's
+  checkpoint continuation is only ever consulted when `decideResumeGeneration` itself already
+  returned `resume` (i.e. the Proposal DID change) — confirmed by `_resolveCheckpointCli`'s own
+  `checkpoint-proposal-unchanged` fixture, which explicitly refuses to treat an unchanged Proposal as
+  a delta base (that case belongs to reuse-terminal, never this mechanism).
+- [x] A replay shaped from DIR-126-D's eleven attempts performs at most one full semantic review for
   one unchanged charter epoch, carries later edits through delta review, and preserves the final
-  ledger without eleven independent full reviews.
-- [ ] Receipt/checkpoint tampering, mirror sync, lease release, zero-finding, and existing DIR-125/
-  DIR-126-C regression suites remain green.
+  ledger without eleven independent full reviews. **Scaled honestly, not literally 11 generations**:
+  "DIR-126-D synthetic replay" test in `plugin/test/prepare-milestone-convergence.test.mjs` drives 4
+  REAL sequential workflow dispatches against the SAME on-disk checkpoint file via the real
+  `--resolve-checkpoint`/`--write-checkpoint` CLI (never a mocked in-memory stand-in) — one cold full
+  review with an unresolved finding, one human-repair generation resolved via exactly one real
+  cross-generation delta reviewer, and two pure wording-tidy-up generations reaching `prepared` with
+  zero review agents. Asserts `totalFullReviews.count===1` and
+  `totalCrossGenDeltaReviews.count===1` across the whole 4-generation epoch, plus the final on-disk
+  checkpoint's ledger/counters. The task's own Requested-action explicitly approved a scaled
+  synthetic reconstruction over literal historical replay; 4 generations (rather than 9-11) was
+  chosen for test runtime — the mechanism under test (epoch-wide full-review admission) does not
+  change shape with generation count.
+- [x] Receipt/checkpoint tampering, mirror sync, lease release, zero-finding, and existing DIR-125/
+  DIR-126-C regression suites remain green. Real counts (this session, both `.claude/workflows/` and
+  `plugin/workflows/` mirrors run together): `experiments/quay-perpetual-stream/test/
+  proposal-convergence.test.mjs` 132/132 pass; `plugin/test/prepare-milestone-convergence.test.mjs` +
+  `plugin/test/prepare-milestone-preparation-e2e.test.mjs` 86/86 pass;
+  `prepare-admission-check.test.mjs` (both mirrors) 156/156 pass. Full-repo `scripts/test.sh` was
+  also run to check for unrelated regressions — see the commit message / final report for its
+  outcome, since it was still running as this checkbox was written.
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
 - [ ] Landed on master under human-steered discipline with canonical/plugin mirrors synchronized.
-- [ ] A real human-repaired preparation attempt resumes from a prior non-success review checkpoint;
-  journal evidence proves no full reviewer or Proposal author/adjudicator was redispatched.
-- [ ] A real scope-change control proves the same mechanism does not incorrectly reuse stale review
-  approval.
+  Not done in this session by design — per this task's own "When done" instructions, the
+  implementer commits on an isolated worktree branch only; the orchestrating session merges to
+  `master` after independent adversarial review (this is safety-relevant, load-bearing
+  `prepare-milestone.js` logic).
+- [ ] **Deliberately left open** (same class as `gap-drain-dispose-body-corruption`'s own two
+  intentionally-unchecked DoD items): "A real human-repaired preparation attempt resumes from a
+  prior non-success review checkpoint; journal evidence proves no full reviewer or Proposal author/
+  adjudicator was redispatched" requires a REAL `Workflow({scriptPath:'.claude/workflows/
+  prepare-milestone.js'})` dispatch against a real task/milestone on `master`, which this
+  implementation session is not authorized to trigger unilaterally (it would consume real agent
+  turns against live repo state outside this task's own isolated worktree). The mechanism is proven
+  at the CLI level (real `--resolve-checkpoint`/`--write-checkpoint` fixtures) and at the
+  workflow-integration level (the DIR-126-D synthetic replay drives the REAL workflow source through
+  a real checkpoint file, just not via a real `Workflow()` dispatch / real LLM agents). Closes
+  naturally on the next real human-repaired `prepare-milestone` dispatch against this mechanism.
+- [ ] **Deliberately left open, same rationale as above** — "A real scope-change control proves the
+  same mechanism does not incorrectly reuse stale review approval" also requires a real production
+  dispatch. The scope-change fail-closed behavior IS proven mechanically (real CLI fixtures for
+  charter/scope/policy-hash mismatches, all confirmed to fall back to a full review — see the AC
+  above), just not via a real `Workflow()` dispatch.
 
 ## Human verification when exp5 marks this task done
 

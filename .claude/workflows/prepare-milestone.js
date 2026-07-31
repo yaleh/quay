@@ -399,6 +399,47 @@ let _splitCheckDisabled = false
   }
 }
 
+// ── gap-prepare-milestone-cross-generation-review-state-reset: cross-generation ProposalReview
+// checkpoint resolution ──────────────────────────────────────────────────────────────────────
+// DIR-125 bounds ProposalReview WITHIN one generation; DIR-126-C's resume above only skips
+// ProposalAuthors/Adjudicate — ProposalReview itself always restarted from an empty ledger and a
+// fresh full review, which is why a real incident (DIR-126-D) burned nine full ProposalReview
+// generations after small, targeted task edits. Only attempted when `_resumeFromAdjudicatedProposal`
+// is true (set either by an explicit caller override, or by the resume-decision block above
+// returning 'resume') — cross-generation delta continuation only makes sense once ProposalAuthors/
+// Adjudicate are ALREADY being skipped and the task's CURRENT on-disk Proposal is being trusted
+// as-is; it is never attempted on a cold dispatch. ONE additional non-content CLI dispatch
+// (proposal-convergence.ts --resolve-checkpoint) — read-only, never writes anything. ANY mismatch,
+// corruption, missing checkpoint, or unparseable verdict falls back to `_useCrossGenDelta = false`
+// (the existing cold/full-review ProposalReview path, byte-for-byte unchanged below) — never
+// silently treated as a valid delta base (Requested-action item 2).
+let _useCrossGenDelta = false
+let _crossGenLedger = null
+let _crossGenCounters = null
+let _crossGenMechanismInventoryHash = null
+let _crossGenMechanismInventoryCount = null
+let _crossGenNoveltyScan = null
+let _crossGenClassification = null
+let _crossGenLastFullReviewSession = null
+
+if (_resumeFromAdjudicatedProposal) {
+  const _checkpointResult = await _convergenceAgentCall(`--resolve-checkpoint --taskId ${_taskId} --workspace . --charterFile ${_charterFile}`, 'resolve-checkpoint')
+  const _checkpointVerdict = _checkpointResult?.raw ? _parseAgentJson(_checkpointResult.raw) : null
+  if (_checkpointVerdict && _checkpointVerdict.usable === true && ['wording-only', 'known-finding-repair'].includes(_checkpointVerdict.classification)) {
+    _useCrossGenDelta = true
+    _crossGenLedger = Array.isArray(_checkpointVerdict.ledger) ? _checkpointVerdict.ledger : []
+    _crossGenCounters = _checkpointVerdict.counters && Number.isFinite(_checkpointVerdict.counters.deltaRounds) ? _checkpointVerdict.counters : { fullReviews: 0, deltaRounds: 0 }
+    _crossGenMechanismInventoryHash = _checkpointVerdict.mechanismInventoryHash ?? null
+    _crossGenMechanismInventoryCount = Number.isFinite(_checkpointVerdict.mechanismInventoryCount) ? _checkpointVerdict.mechanismInventoryCount : null
+    _crossGenNoveltyScan = _checkpointVerdict.noveltyScan ?? null
+    _crossGenClassification = _checkpointVerdict.classification
+    _crossGenLastFullReviewSession = _checkpointVerdict.lastFullReviewSession ?? null
+    log(`Checkpoint: valid cross-generation delta base (classification=${_checkpointVerdict.classification}, code=${_checkpointVerdict.classificationCode}). Carrying ${_crossGenLedger.length} ledger entrie(s) forward (epoch counters so far: fullReviews=${_crossGenCounters.fullReviews}, deltaRounds=${_crossGenCounters.deltaRounds}); ProposalReview will skip its full-review agent this generation.`)
+  } else {
+    log(`Checkpoint: ${_checkpointVerdict ? `not usable as a cross-generation delta base (usable=${_checkpointVerdict.usable}, code=${_checkpointVerdict.code}${_checkpointVerdict.classification ? `, classification=${_checkpointVerdict.classification}` : ''})` : 'no parseable verdict'} — proceeding with the ordinary full ProposalReview path.`)
+  }
+}
+
 // ── Phase: Preflight (content) — M201/DIR-126-B ──────────────────────────────────────
 // Deterministic mechanical rejection of the four content failure classes (merged Markdown claims,
 // stale AC/DoD refs, task-vs-charter Touches mismatch, missing precedent) BEFORE any
@@ -697,10 +738,74 @@ const _findingSchema = {
 }
 
 const _proposalHashes = []
+const _reviewSessions = []
+const _reviserSessions = []
+let _fullReviewResult = null
+let _fullReviewNowMs = null
+let _mechanismInventory = null
+let _mechanismInventorySource = 'typed'
+let _rawMechanisms = null
+let _mechanismCount = undefined
+let _deltaRound = 0
+let _terminalReason = null
+let _splitRecommendation = null
+let _splitBypassUsed = false  // M206/M3: one-shot repairable-cluster bypass
 
-// ── Round 0: ONE full grounded review of the just-adjudicated Proposal. ──────────────
-const _fullReviewResult = await agent(
-  `INDEPENDENT review of task ${_taskId}'s just-reconciled \`## Proposal\` — you did NOT author it. Read the CURRENT task via \`task_get ${_taskId}\` (fresh, do not trust anything from a prior phase) against the real repository.
+// gap-prepare-milestone-cross-generation-review-state-reset: epoch-cumulative delta-round offset
+// carried forward from the checkpoint (0 on a cold/full-review generation, or when no valid
+// checkpoint was resolved) — the while(true) loop below enforces the round cap against
+// (_deltaRoundOffset + _deltaRound), never just this generation's own local _deltaRound, so the
+// bound is real across the WHOLE scope epoch (Requested-action item 5), not merely reset to zero
+// by every fresh generation.
+const _deltaRoundOffset = _useCrossGenDelta && Number.isFinite(_crossGenCounters?.deltaRounds) ? _crossGenCounters.deltaRounds : 0
+
+// _writeReviewCheckpoint — dispatched at EVERY ProposalReview terminal below (success included),
+// never only the happy path (Requested-action item 1). Mirrors the Receipt phase's own established
+// "agent writes a scratch file with EXACT content, then runs a CLI over it" pattern (the workflow
+// DSL has no fs of its own) — writes a scratch checkpoint-input file, then dispatches
+// proposal-convergence.ts --write-checkpoint, which re-reads task/charter/Proposal FRESH, folds in
+// epoch-cumulative counters, and atomically persists the checkpoint. Best-effort/non-fatal: a write
+// failure here never changes the terminal's own outcome — it only means the NEXT attempt falls back
+// to a full review (the safe default), since no valid checkpoint would exist.
+async function _writeReviewCheckpoint(stageLabel, { terminalReason, terminalOutcome }) {
+  const _fullReviewsThisGen = _useCrossGenDelta ? 0 : 1
+  const _deltaRoundsThisGen = _deltaRound
+  const _lastFullReviewSessionId = _useCrossGenDelta ? (_crossGenLastFullReviewSession?.sessionId ?? null) : (_reviewSessions[0] ?? null)
+  const _lastFullReviewTimestamp = _useCrossGenDelta ? (_crossGenLastFullReviewSession?.timestamp ?? null) : (_fullReviewNowMs ?? null)
+  const _checkpointInput = {
+    ledger: _ledger,
+    mechanismInventoryHash: (_mechanismInventory && _mechanismInventory.ok) ? _mechanismInventory.inventoryHash : null,
+    mechanismInventoryCount: (_mechanismInventory && _mechanismInventory.ok) ? _mechanismInventory.count : null,
+    fullReviewsThisGen: _fullReviewsThisGen,
+    deltaRoundsThisGen: _deltaRoundsThisGen,
+    lastFullReviewSessionId: _lastFullReviewSessionId,
+    lastFullReviewTimestamp: _lastFullReviewTimestamp,
+  }
+  const _checkpointInputJson = JSON.stringify(_checkpointInput, null, 2)
+  const _checkpointInputFile = `.quay/prepare-checkpoints/_input-${_taskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`
+  const _writeResult = await agent(
+    `Write the file ${_checkpointInputFile} with EXACTLY this content (create parent directories as needed):
+
+\`\`\`json
+${_checkpointInputJson}
+\`\`\`
+
+Then run exactly this shell command and report its stdout verbatim:
+node --no-warnings --experimental-strip-types ${_convergenceScript} --write-checkpoint --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --checkpointInputFile ${_checkpointInputFile} --outcome ${terminalOutcome} --reason ${JSON.stringify(terminalReason)}
+Do not paraphrase or reformat the command's stdout — copy it exactly as printed. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
+    { label: `write-review-checkpoint-${stageLabel}`, phase: 'ProposalReview', schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } } }
+  )
+  const _verdict = _writeResult?.raw ? _parseAgentJson(_writeResult.raw) : null
+  if (!_verdict || _verdict.ok !== true) {
+    log(`ProposalReview: checkpoint write FAILED at terminal '${terminalReason}' (verdict: ${JSON.stringify(_verdict)}) — non-fatal, this terminal's own outcome is unaffected; the NEXT attempt simply falls back to a full review (the fail-closed default) since no valid checkpoint would exist.`)
+  }
+  return _verdict
+}
+
+if (!_useCrossGenDelta) {
+  // ── Round 0: ONE full grounded review of the just-adjudicated Proposal. ──────────────
+  _fullReviewResult = await agent(
+    `INDEPENDENT review of task ${_taskId}'s just-reconciled \`## Proposal\` — you did NOT author it. Read the CURRENT task via \`task_get ${_taskId}\` (fresh, do not trust anything from a prior phase) against the real repository.
 
 1. Verify the Proposal makes the implementation approach reviewable without re-designing it: problem framing grounded in current code, chosen mechanism, concrete control/data flow, key decisions, defaults/failure behavior, compatibility, risks, non-goals, AC coverage, explicit alternatives.
 2. Mechanism-claim wiring coverage (DIR-117): extract every new call/dispatch/ownership/enforcement relationship the Proposal claims and confirm the task's own \`## Acceptance Criteria\` has a matching, falsifiable item demanding real production-callsite or cross-generation reachability evidence for THAT relationship (not descriptive prose restating the claim).
@@ -709,40 +814,65 @@ const _fullReviewResult = await agent(
 5. ${_sessionIdInstruction}
 6. BEFORE returning, run \`date +%s%3N\` (real epoch milliseconds) and include the result as \`nowMs\` (a number) — the orchestrating workflow script cannot read the clock itself.
 7. Return {findings: [{subsystem, summary, severity: "blocker"|"major"|"minor"|"nit", blocking: <boolean>, evidence, claimRef, disposition, rootCauseKey, repairable}], mechanisms: [{id, owner, proofSurface, dependsOn: [id...], independentlyShippable: <boolean>, rationale}], proposalHash: <a short hash/fingerprint you compute over the reviewed Proposal text, any stable digest is fine>, nowMs: <the real epoch-ms number from step 6>, sessionId: <your real session id>}. Use findings: [] and mechanisms: [] if there are none.`,
-  { label: 'proposal-review', phase: 'ProposalReview',
-    schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'array', items: _findingSchema }, mechanisms: { type: 'array' }, proposalHash: { type: 'string' }, nowMs: { type: 'number' }, sessionId: { type: 'string' } } } }
-)
+    { label: 'proposal-review', phase: 'ProposalReview',
+      schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'array', items: _findingSchema }, mechanisms: { type: 'array' }, proposalHash: { type: 'string' }, nowMs: { type: 'number' }, sessionId: { type: 'string' } } } }
+  )
 
-const _reviewSessions = []
-const _reviserSessions = []
-if (_fullReviewResult?.sessionId) _reviewSessions.push(_fullReviewResult.sessionId)
-if (_fullReviewResult?.proposalHash) _proposalHashes.push({ round: 0, hash: _fullReviewResult.proposalHash })
-if (Number.isFinite(_fullReviewResult?.nowMs)) _latestKnownNowMs = _fullReviewResult.nowMs
+  if (_fullReviewResult?.sessionId) _reviewSessions.push(_fullReviewResult.sessionId)
+  if (_fullReviewResult?.proposalHash) _proposalHashes.push({ round: 0, hash: _fullReviewResult.proposalHash })
+  if (Number.isFinite(_fullReviewResult?.nowMs)) { _latestKnownNowMs = _fullReviewResult.nowMs; _fullReviewNowMs = _fullReviewResult.nowMs }
+
+  // Backward compat (DIR-125 AC: "zero-finding first-review fixture remains backward-compatible"):
+  // a legacy reviewer/mock may still return a bare `findings: <number>` — 0 is a zero-finding pass;
+  // nonzero is filed as ONE untyped blocking finding so the SAME bounded loop still applies rather
+  // than silently trusting a shape this phase no longer natively emits.
+  let _rawFindings = _fullReviewResult?.findings
+  if (typeof _rawFindings === 'number') {
+    _rawFindings = _rawFindings === 0 ? [] : [{ subsystem: 'unspecified', summary: _fullReviewResult?.findingsDetail || 'legacy-scalar-finding', severity: 'major', blocking: true }]
+  }
+  _upsertFindings(Array.isArray(_rawFindings) ? _rawFindings : [], 0)
+} else {
+  // gap-prepare-milestone-cross-generation-review-state-reset: a validated checkpoint classified
+  // the intervening diff as wording-only/known-finding-repair — carry the prior ledger forward
+  // verbatim instead of starting from an empty ledger and dispatching a fresh full reviewer.
+  _ledger = _crossGenLedger
+  log(`ProposalReview: cross-generation delta continuation (checkpoint classification=${_crossGenClassification}) — skipping the full-review agent this generation; carried ${_ledger.length} ledger entrie(s) forward (epoch delta rounds used so far: ${_deltaRoundOffset}/${_maxDeltaRounds}).`)
+  // AC #6 / novelty-scan safety net: a carried ledger that is ALREADY clean (zero open blocking)
+  // would otherwise let the while(true) loop below terminate 'zero-finding' on its very FIRST check
+  // — BEFORE ever dispatching a delta reviewer — which would silently wave through a mechanically-
+  // detected novel claim with nobody ever looking at it. File it as a synthetic BLOCKING finding so
+  // the loop is structurally guaranteed to dispatch at least one cross-gen delta reviewer to verify
+  // it (the reviewer may resolve it as a false positive, but only via an explicit, recorded
+  // resolvedIds entry — never by the loop simply never asking).
+  if (_crossGenNoveltyScan?.hasNovelClaim === true) {
+    const _novelClaimSentences = (_crossGenNoveltyScan.novelClaims || []).map((c) => c.sentence).filter(Boolean)
+    _upsertFindings([{
+      subsystem: 'novelty-scan',
+      summary: `Mechanically-detected novel claim(s) since the checkpoint's last review, requiring verification: ${_novelClaimSentences.join(' | ') || '(claim text unavailable)'}`,
+      severity: 'major',
+      blocking: true,
+      evidence: "proposal-convergence.ts's noveltyScan() (hooked into wiring-coverage-check.ts's real extractMechanismClaims) flagged >=1 mechanism claim present in the CURRENT Proposal that was absent from the checkpoint's last-reviewed text.",
+      claimRef: (_crossGenNoveltyScan.novelClaims || []).map((c) => (c.identifiers || []).join('+')).join(','),
+      disposition: 'unresolved',
+    }], 0)
+    log(`ProposalReview: novelty scan flagged ${(_crossGenNoveltyScan.novelClaims || []).length} mechanically-novel claim(s) since the checkpoint — filed as a synthetic blocking finding to force verification, never silently waved through.`)
+  }
+}
 _startedAtMs = _now()
 
-// Backward compat (DIR-125 AC: "zero-finding first-review fixture remains backward-compatible"):
-// a legacy reviewer/mock may still return a bare `findings: <number>` — 0 is a zero-finding pass;
-// nonzero is filed as ONE untyped blocking finding so the SAME bounded loop still applies rather
-// than silently trusting a shape this phase no longer natively emits.
-let _rawFindings = _fullReviewResult?.findings
-if (typeof _rawFindings === 'number') {
-  _rawFindings = _rawFindings === 0 ? [] : [{ subsystem: 'unspecified', summary: _fullReviewResult?.findingsDetail || 'legacy-scalar-finding', severity: 'major', blocking: true }]
-}
-_upsertFindings(Array.isArray(_rawFindings) ? _rawFindings : [], 0)
-
-// ── DIR-117-B/M195 (AC #4): MECHANICAL mechanism-claim wiring coverage ──────────────
-// ProposalReview now calls wiring-coverage-check.ts's REAL checkWiringCoverage() function directly
-// — NOT prompt-only LLM guidance (the exact "prompt-guidance mistaken for production wiring" defect
-// M191's independent audit §3 found and DIR-122's corrected AC6 forbids). Workflow scripts cannot
-// `import` (sandboxed/resumable), so we dispatch an agent to run the module's CLI — the SAME
-// dispatch pattern the Receipt and Prepared phases already use for milestone-preparation-check.ts,
-// no new mechanism class. The SCRIPT (not the LLM) then merges the returned BLOCKING findings into
-// the typed ledger via the existing `_upsertFindings(..., 0)` path above, so this phase's
-// open-blocking count increments by the function's REAL return value (`findings.length`), and the
-// ledger is hash-bound into the receipt via the Receipt phase's `--ledger` flag. The LLM reviewer's
-// prompt-level wiring step (review item 2) is RETAINED as a complementary heuristic — no longer the
-// only check. A non-parseable verdict (agent crash / CLI exit 2) fails the phase CLOSED, mirroring
-// the revise-failed `needs-human` path, rather than silently skipping coverage.
+// ── DIR-117-B/M195 (AC #4) + Requested-action item 4 ("rerun the real deterministic ... wiring
+// checks"): the mechanical wiring-coverage-check ALWAYS reruns — cold generation or cross-gen delta
+// continuation alike, never skipped. It calls wiring-coverage-check.ts's REAL checkWiringCoverage()
+// function directly — NOT prompt-only LLM guidance (the exact "prompt-guidance mistaken for
+// production wiring" defect M191's independent audit §3 found and DIR-122's corrected AC6 forbids).
+// Workflow scripts cannot `import` (sandboxed/resumable), so we dispatch an agent to run the
+// module's CLI — the SAME dispatch pattern the Receipt and Prepared phases already use for
+// milestone-preparation-check.ts, no new mechanism class. The SCRIPT (not the LLM) then merges the
+// returned BLOCKING findings into the typed ledger via the existing `_upsertFindings(..., 0)` path,
+// so this phase's open-blocking count increments by the function's REAL return value
+// (`findings.length`), and the ledger is hash-bound into the receipt via the Receipt phase's
+// `--ledger` flag. A non-parseable verdict (agent crash / CLI exit 2) fails the phase CLOSED,
+// mirroring the revise-failed `needs-human` path, rather than silently skipping coverage.
 const _wiringCheckScript = 'experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts'
 const _wiringVerdict = await agent(
   `Run exactly this command and return its parsed stdout JSON:
@@ -754,41 +884,50 @@ This is the DIR-117-B/M195 mechanism-claim wiring coverage check — it calls th
 const _wiringVerdictCodes = ['wiring-coverage-complete', 'wiring-coverage-none-claimed', 'wiring-coverage-uncovered']
 if (!_wiringVerdict || !_wiringVerdictCodes.includes(_wiringVerdict.code)) {
   log(`ProposalReview wiring-coverage sub-step FAILED — no parseable verdict (${_wiringVerdict?.code || 'no-result'}); failing the phase closed rather than skipping coverage.`)
+  await _writeReviewCheckpoint('wiring-coverage-check-failed', { terminalReason: 'wiring-coverage-check-failed', terminalOutcome: 'needs-human' })
   await _releaseLeaseAndRecord('wiring-coverage-check-failed', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'wiring-coverage-check-failed', cacheable: false })
   return { outcome: 'needs-human', reason: 'wiring-coverage-check-failed', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
 }
 _upsertFindings(Array.isArray(_wiringVerdict.findings) ? _wiringVerdict.findings : [], 0)
 log(`ProposalReview wiring coverage: ${_wiringVerdict.code} — merged ${Array.isArray(_wiringVerdict.findings) ? _wiringVerdict.findings.length : 0} blocking wiring finding(s) from checkWiringCoverage()'s real return value.`)
 
-const _mechanismCount = Number.isFinite(_fullReviewResult?.mechanismCount) ? _fullReviewResult.mechanismCount : undefined
-// M206/M1: typed mechanism inventory — derive count + hash mechanically, never trust a bare integer.
-// The ONE-generation legacy fallback: a reviewer returning mechanismCount without mechanisms is
-// accepted as a synthetic single-entry inventory flagged mechanismInventorySource:'legacy-scalar'.
-let _mechanismInventory = null
-let _mechanismInventorySource = 'typed'
-const _rawMechanisms = _fullReviewResult?.mechanisms
-if (Array.isArray(_rawMechanisms) && _rawMechanisms.length > 0) {
-  _mechanismInventory = _deriveMechanismInventory(_rawMechanisms)
-  _mechanismInventorySource = 'typed'
-  if (!_mechanismInventory.ok) {
-    log(`ProposalReview: mechanism inventory failed — ${_mechanismInventory.code}: ${_mechanismInventory.message}`)
-    await _releaseLeaseAndRecord('mechanism-inventory-invalid', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: _mechanismInventory.code, cacheable: false })
-    return { outcome: 'needs-human', reason: _mechanismInventory.code, phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+if (!_useCrossGenDelta) {
+  _mechanismCount = Number.isFinite(_fullReviewResult?.mechanismCount) ? _fullReviewResult.mechanismCount : undefined
+  // M206/M1: typed mechanism inventory — derive count + hash mechanically, never trust a bare integer.
+  // The ONE-generation legacy fallback: a reviewer returning mechanismCount without mechanisms is
+  // accepted as a synthetic single-entry inventory flagged mechanismInventorySource:'legacy-scalar'.
+  _rawMechanisms = _fullReviewResult?.mechanisms
+  if (Array.isArray(_rawMechanisms) && _rawMechanisms.length > 0) {
+    _mechanismInventory = _deriveMechanismInventory(_rawMechanisms)
+    _mechanismInventorySource = 'typed'
+    if (!_mechanismInventory.ok) {
+      log(`ProposalReview: mechanism inventory failed — ${_mechanismInventory.code}: ${_mechanismInventory.message}`)
+      await _writeReviewCheckpoint('mechanism-inventory-invalid', { terminalReason: _mechanismInventory.code, terminalOutcome: 'needs-human' })
+      await _releaseLeaseAndRecord('mechanism-inventory-invalid', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: _mechanismInventory.code, cacheable: false })
+      return { outcome: 'needs-human', reason: _mechanismInventory.code, phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+    }
+  } else if (!Array.isArray(_rawMechanisms) && Number.isFinite(_mechanismCount)) {
+    // ONE-generation legacy scalar fallback — flagged, never silent.
+    _mechanismInventory = { ok: true, count: _mechanismCount > 2 ? _mechanismCount : 0, inventoryHash: 'legacy-scalar-' + String(_mechanismCount), mechanismCount: _mechanismCount }
+    _mechanismInventorySource = 'legacy-scalar'
+  } else if (!Array.isArray(_rawMechanisms)) {
+    // No mechanisms field at all — fail closed.
+    log(`ProposalReview: no mechanisms field returned — mechanism-inventory-missing`)
+    await _writeReviewCheckpoint('mechanism-inventory-missing', { terminalReason: 'mechanism-inventory-missing', terminalOutcome: 'needs-human' })
+    await _releaseLeaseAndRecord('mechanism-inventory-missing', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'mechanism-inventory-missing', cacheable: false })
+    return { outcome: 'needs-human', reason: 'mechanism-inventory-missing', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
   }
-} else if (!Array.isArray(_rawMechanisms) && Number.isFinite(_mechanismCount)) {
-  // ONE-generation legacy scalar fallback — flagged, never silent.
-  _mechanismInventory = { ok: true, count: _mechanismCount > 2 ? _mechanismCount : 0, inventoryHash: 'legacy-scalar-' + String(_mechanismCount), mechanismCount: _mechanismCount }
-  _mechanismInventorySource = 'legacy-scalar'
-} else if (!Array.isArray(_rawMechanisms)) {
-  // No mechanisms field at all — fail closed.
-  log(`ProposalReview: no mechanisms field returned — mechanism-inventory-missing`)
-  await _releaseLeaseAndRecord('mechanism-inventory-missing', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'mechanism-inventory-missing', cacheable: false })
-  return { outcome: 'needs-human', reason: 'mechanism-inventory-missing', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+} else {
+  // Carried forward from the checkpoint — no fresh reviewer dispatch this generation, so there is
+  // nothing new to derive; `null` (never a fabricated inventory) when the checkpoint itself never
+  // captured one (e.g. its own generation used the legacy-scalar fallback with count<=2, which
+  // stores no real inventoryHash).
+  _mechanismInventory = (_crossGenMechanismInventoryHash != null || _crossGenMechanismInventoryCount != null)
+    ? { ok: true, count: _crossGenMechanismInventoryCount ?? 0, inventoryHash: _crossGenMechanismInventoryHash, mechanismCount: _crossGenMechanismInventoryCount ?? 0 }
+    : null
+  _mechanismInventorySource = 'carried-forward'
+  log(`ProposalReview: mechanism inventory carried forward from checkpoint (hash=${_crossGenMechanismInventoryHash ?? '(none)'}, count=${_crossGenMechanismInventoryCount ?? '(none)'}).`)
 }
-let _deltaRound = 0
-let _terminalReason = null
-let _splitRecommendation = null
-let _splitBypassUsed = false  // M206/M3: one-shot repairable-cluster bypass
 
 while (true) {
   const openBlocking = _blockingOpen()
@@ -811,14 +950,23 @@ while (true) {
   const _elapsedMs = _now() - _startedAtMs
   if (_elapsedMs >= _policyCaps.softBudgetMs) { _terminalReason = 'soft-budget-exceeded'; break }
 
-  if (_deltaRound >= _maxDeltaRounds) { _terminalReason = 'delta-cap-exhausted'; break }
+  if ((_deltaRoundOffset + _deltaRound) >= _maxDeltaRounds) { _terminalReason = 'delta-cap-exhausted'; break }
 
   _deltaRound += 1
-  log(`ProposalReview: ${openBlocking.length} blocking finding(s) open — dispatching focused revision + delta review round ${_deltaRound}/${_maxDeltaRounds}.`)
+  // gap-prepare-milestone-cross-generation-review-state-reset: the FIRST round of a cross-gen
+  // delta-continuation generation dispatches exactly ONE delta reviewer (verification only — the
+  // Proposal on disk was ALREADY edited by a human/prior agent outside this loop) instead of the
+  // ordinary revise-then-independently-verify PAIR. Any FURTHER round in the SAME generation (rare
+  // — only if that one delta reviewer still leaves blocking findings open) falls back to the
+  // ordinary two-agent shape, since round 2+ has no pre-existing "already edited" Proposal to verify
+  // against.
+  const _isCrossGenFirstRound = _useCrossGenDelta && _deltaRound === 1
+  log(`ProposalReview: ${openBlocking.length} blocking finding(s) open — dispatching ${_isCrossGenFirstRound ? 'ONE cross-generation delta reviewer (no separate reviser)' : 'focused revision + delta review'}, round ${_deltaRound}/${_maxDeltaRounds} (epoch delta rounds used so far: ${_deltaRoundOffset}).`)
   _recordPhaseBoundary(`ProposalReview-delta-round-${_deltaRound}`, _deltaRound, await _renewLease(`ProposalReview-delta-round-${_deltaRound}`, _deltaRound))
 
-  const _reviseResult = await agent(
-    `Focused Proposal reviser for task ${_taskId}, delta round ${_deltaRound}/${_maxDeltaRounds}. Do NOT re-derive the Proposal from scratch and do NOT act as an independent author — resolve ONLY these recorded blocking findings against the CURRENT task ${_taskId} \`## Proposal\`, preserving every other section/sentence unchanged:
+  if (!_isCrossGenFirstRound) {
+    const _reviseResult = await agent(
+      `Focused Proposal reviser for task ${_taskId}, delta round ${_deltaRound}/${_maxDeltaRounds}. Do NOT re-derive the Proposal from scratch and do NOT act as an independent author — resolve ONLY these recorded blocking findings against the CURRENT task ${_taskId} \`## Proposal\`, preserving every other section/sentence unchanged:
 
 ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}${f.evidence ? ` — evidence: ${f.evidence}` : ''}`).join('\n')}
 
@@ -826,19 +974,37 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}${f.evidence
 2. Edit ONLY what is needed to resolve the findings above; write the revised Proposal back via \`task_write\` (splice into \`## Proposal\`, preserve every other section).
 3. ${_sessionIdInstruction}
 4. Return {ok: true, proposalHash: <a short hash/fingerprint over the revised Proposal text>, sessionId: <your real session id>}. If task_write fails, return {ok: false, error: <reason>}. Do NOT self-report which findings are resolved — the INDEPENDENT delta reviewer (next step) makes that determination, not you.`,
-    { label: `proposal-revise-round-${_deltaRound}`, phase: 'ProposalReview',
-      schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, proposalHash: { type: 'string' }, error: { type: 'string' }, sessionId: { type: 'string' } } } }
-  )
-  if (_reviseResult?.sessionId) _reviserSessions.push(_reviseResult.sessionId)
-  if (_reviseResult?.proposalHash) _proposalHashes.push({ round: _deltaRound, hash: _reviseResult.proposalHash })
-  if (!_reviseResult || _reviseResult.ok !== true) {
-    log(`ProposalReview focused revision round ${_deltaRound} FAILED: ${_reviseResult?.error || '(agent returned nothing)'}`)
-    await _releaseLeaseAndRecord('proposal-revise-failed', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'proposal-revise-failed', cacheable: false })
-    return { outcome: 'needs-human', reason: _reviseResult?.error || 'proposal-revise-failed', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+      { label: `proposal-revise-round-${_deltaRound}`, phase: 'ProposalReview',
+        schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, proposalHash: { type: 'string' }, error: { type: 'string' }, sessionId: { type: 'string' } } } }
+    )
+    if (_reviseResult?.sessionId) _reviserSessions.push(_reviseResult.sessionId)
+    if (_reviseResult?.proposalHash) _proposalHashes.push({ round: _deltaRound, hash: _reviseResult.proposalHash })
+    if (!_reviseResult || _reviseResult.ok !== true) {
+      log(`ProposalReview focused revision round ${_deltaRound} FAILED: ${_reviseResult?.error || '(agent returned nothing)'}`)
+      await _writeReviewCheckpoint('proposal-revise-failed', { terminalReason: _reviseResult?.error || 'proposal-revise-failed', terminalOutcome: 'needs-human' })
+      await _releaseLeaseAndRecord('proposal-revise-failed', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'proposal-revise-failed', cacheable: false })
+      return { outcome: 'needs-human', reason: _reviseResult?.error || 'proposal-revise-failed', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+    }
   }
 
-  const _deltaReviewResult = await agent(
-    `INDEPENDENT delta review, round ${_deltaRound}/${_maxDeltaRounds}, of task ${_taskId}'s just-revised \`## Proposal\` — you did NOT author or revise it. Read the CURRENT task via \`task_get ${_taskId}\`.
+  const _deltaReviewPrompt = _isCrossGenFirstRound
+    ? `Cross-generation DELTA reviewer for task ${_taskId} — a prior generation already completed the ONE full independent review this scope epoch allows (checkpoint diff classification: ${_crossGenClassification}). Do NOT re-derive or re-review the whole Proposal from scratch, and do NOT act as a reviser — the Proposal you are about to read has ALREADY been edited since that review (by a human or a prior agent, outside this dispatch).
+
+Read the CURRENT task via \`task_get ${_taskId}\`.
+
+Mechanically-detected novel claims from the cross-generation diff scan (verify each yourself — do not just trust the scan; if genuinely novel AND wiring-shaped, report it as a NEW blocking finding requiring Acceptance-Criteria coverage):
+${JSON.stringify((_crossGenNoveltyScan?.novelClaims || []).map((c) => c.sentence))}
+
+Previously recorded open blocking findings (verify status against the CURRENT Proposal):
+${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n')}
+
+1. For each finding id above, confirm whether it is now resolved by the edit already on disk.
+2. For each novel claim listed above (if any), verify whether it is genuinely a NEW wiring/mechanism claim requiring Acceptance-Criteria coverage — if so, report it as a new BLOCKING finding ({subsystem, summary, severity:"blocker", blocking:true, evidence, claimRef, disposition:"unresolved"}).
+3. Report ONLY currently-open findings (blocking or non-blocking) as the \`findings\` array — a finding you already know about and consider unchanged should be reported again with the SAME subsystem/claimRef so it keeps its identity. Do NOT re-run a full independent Proposal re-derivation.
+4. ${_sessionIdInstruction}
+5. BEFORE returning, run \`date +%s%3N\` (real epoch milliseconds) and include the result as \`nowMs\` (a number) — the orchestrating workflow script cannot read the clock itself.
+6. Return {resolvedIds: [<ids from the list above now resolved>], findings: [<any still-open findings, typed the same way as the full review>], proposalHash: <a short hash/fingerprint you compute over the CURRENT Proposal text>, nowMs: <the real epoch-ms number from step 5>, sessionId: <your real session id>}.`
+    : `INDEPENDENT delta review, round ${_deltaRound}/${_maxDeltaRounds}, of task ${_taskId}'s just-revised \`## Proposal\` — you did NOT author or revise it. Read the CURRENT task via \`task_get ${_taskId}\`.
 
 Previously recorded open blocking findings:
 ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n')}
@@ -847,11 +1013,14 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n'
 2. Report ONLY currently-open findings (blocking or non-blocking) as the \`findings\` array — a finding you already reported before and consider unchanged should be reported again with the SAME subsystem/claimRef so it keeps its identity. Do NOT re-run a full independent Proposal re-derivation.
 3. ${_sessionIdInstruction}
 4. BEFORE returning, run \`date +%s%3N\` (real epoch milliseconds) and include the result as \`nowMs\` (a number) — the orchestrating workflow script cannot read the clock itself.
-5. Return {resolvedIds: [<ids from the list above now resolved>], findings: [<any still-open findings, typed the same way as the full review>], nowMs: <the real epoch-ms number from step 4>, sessionId: <your real session id>}.`,
-    { label: `proposal-delta-review-round-${_deltaRound}`, phase: 'ProposalReview',
-      schema: { type: 'object', properties: { resolvedIds: { type: 'array', items: { type: 'string' } }, findings: { type: 'array', items: _findingSchema }, nowMs: { type: 'number' }, sessionId: { type: 'string' } } } }
+5. Return {resolvedIds: [<ids from the list above now resolved>], findings: [<any still-open findings, typed the same way as the full review>], nowMs: <the real epoch-ms number from step 4>, sessionId: <your real session id>}.`
+  const _deltaReviewLabel = _isCrossGenFirstRound ? 'proposal-crossgen-delta-review' : `proposal-delta-review-round-${_deltaRound}`
+  const _deltaReviewResult = await agent(_deltaReviewPrompt,
+    { label: _deltaReviewLabel, phase: 'ProposalReview',
+      schema: { type: 'object', properties: { resolvedIds: { type: 'array', items: { type: 'string' } }, findings: { type: 'array', items: _findingSchema }, proposalHash: { type: 'string' }, nowMs: { type: 'number' }, sessionId: { type: 'string' } } } }
   )
   if (_deltaReviewResult?.sessionId) _reviewSessions.push(_deltaReviewResult.sessionId)
+  if (_isCrossGenFirstRound && _deltaReviewResult?.proposalHash) _proposalHashes.push({ round: _deltaRound, hash: _deltaReviewResult.proposalHash })
   _applyResolutions(_deltaReviewResult?.resolvedIds, _deltaRound)
   _upsertFindings(_deltaReviewResult?.findings, _deltaRound)
   if (Number.isFinite(_deltaReviewResult?.nowMs)) _latestKnownNowMs = _deltaReviewResult.nowMs
@@ -859,20 +1028,24 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n'
 
 if (_terminalReason === 'split-recommended') {
   log(`ProposalReview: split recommended — ${_splitRecommendation.reason}`)
+  await _writeReviewCheckpoint('split-recommended', { terminalReason: 'split-recommended', terminalOutcome: 'needs-human' })
   await _releaseLeaseAndRecord('split-recommended', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'split-recommended', cacheable: true })
   return { outcome: 'needs-human', reason: 'split-recommended', splitRecommendation: _splitRecommendation, phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
 }
 if (_terminalReason === 'soft-budget-exceeded') {
   log(`ProposalReview: soft budget (${_policyCaps.softBudgetMs / 60000}m) exceeded with ${_blockingOpen().length} blocking finding(s) still open.`)
+  await _writeReviewCheckpoint('soft-budget-exceeded', { terminalReason: 'soft-budget-exceeded', terminalOutcome: 'needs-human' })
   await _releaseLeaseAndRecord('soft-budget-exceeded', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'soft-budget-exceeded', cacheable: false })
   return { outcome: 'needs-human', reason: 'soft-budget-exceeded', phase: 'ProposalReview', ledger: _ledger, elapsedMs: _now() - _startedAtMs, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
 }
 if (_terminalReason === 'delta-cap-exhausted') {
   log(`ProposalReview: delta-review cap (${_maxDeltaRounds}) exhausted with ${_blockingOpen().length} blocking finding(s) still open.`)
+  await _writeReviewCheckpoint('delta-cap-exhausted', { terminalReason: 'delta-cap-exhausted', terminalOutcome: 'needs-human' })
   await _releaseLeaseAndRecord('delta-cap-exhausted', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'delta-cap-exhausted', cacheable: false })
   return { outcome: 'needs-human', reason: 'delta-cap-exhausted', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
 }
-log(`ProposalReview PASSED — zero open blocking findings after 1 full synthesis + ${_deltaRound} delta round(s); ${_ledger.length} total finding(s) recorded.`)
+log(`ProposalReview PASSED — zero open blocking findings after ${_useCrossGenDelta ? '0 full synthesis (cross-generation delta continuation)' : '1 full synthesis'} + ${_deltaRound} delta round(s) this generation (epoch delta rounds used so far: ${_deltaRoundOffset}); ${_ledger.length} total finding(s) recorded.`)
+await _writeReviewCheckpoint('proposal-review-passed', { terminalReason: 'zero-finding', terminalOutcome: 'prepared-pending' })
 
 // ── Phase: PlanAuthor ─────────────────────────────────────────────────────────────────
 phase('PlanAuthor')
