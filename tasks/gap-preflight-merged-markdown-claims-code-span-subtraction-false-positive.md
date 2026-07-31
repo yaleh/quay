@@ -124,7 +124,21 @@ harness): a scratch task whose Finding section reproduces both cited instances f
 Finding (`` `recordedAtMs - admission.acquiredAt` `` and `` `endedAtMs - startedAtMs` ``) still
 returns `{"ok":true,"findings":[]}` — zero findings, unaffected by the sibling task's redesign.
 
-**Outcome:** fix (code-span exclusion) unchanged and still correct through the redesign; tests
+**Independent review of round 2: REFUTED** (again on the sibling task's own logic — a worse false
+negative than round 1; see that task's Execution record). This task's code-span-exclusion mechanism
+was not implicated by either refutation.
+
+**Round 3** (2026-07-31, by the orchestrating session directly): the sibling task's logic was
+redesigned a second time around a bounded-severity-downgrade strategy instead of a binary
+genuine/not-genuine classifier (full design writeup in the sibling task's Execution record). This
+task's own code-span-exclusion step is again unchanged — it still runs first, unconditionally
+excluding any match fully inside a `` `...` `` code span, before the (now downgrade-only)
+prose-dash signal is even computed. Full suite: 83/83 pass in both mirrors after round 3. `cmp`
+zero output confirmed on the script mirror, test mirror, and the new round-3 fixture mirror. Real
+CLI re-dogfooded post-round-3 against this task's own two cited reproduction instances: still
+`{"ok":true,"findings":[]}`, unaffected.
+
+**Outcome:** fix (code-span exclusion) unchanged and still correct through both redesigns; tests
 added; real-CLI dogfooded. AC/DoD boxes deliberately left UNCHECKED and `status` left at `todo` per
-the coordinator's explicit 2026-07-31 instruction covering the whole shared change — a second
+the coordinator's explicit 2026-07-31 instruction covering the whole shared change — a third
 independent review is expected before this task is called done or landed.

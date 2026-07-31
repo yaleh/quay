@@ -143,8 +143,56 @@ harness, against scratch task files):
 - Review counterexample B (trailing identifier, must NOT block) → `{"ok":true,...}`, no
   merged-markdown-claims finding.
 
-**Outcome:** fix redesigned, tests added, real-CLI dogfooded — all evidence above is real and
-reproducible. AC/DoD boxes deliberately left UNCHECKED and `status` left at `todo` per the
-coordinator's explicit 2026-07-31 instruction: round 1's self-assessment was wrong once already, so
-this round does not re-assert `done` — a second independent review is expected before this task is
+**Independent review of round 2: REFUTED, with a worse false negative than round 1.**
+`"...`foo.ts`, `bar.ts`, `baz.ts`, and `qux.ts` - The new caching layer must invalidate stale
+entries on write, not just on read."` — front-loaded identifiers again, second claim starts with
+"The" (a stopword) — silently passed with `result: null`. The reviewer's point, stated precisely:
+a stoplist keyed on the FIRST WORD of a continuation cannot work as a genuine/not-genuine binary
+gate, because genuine second claims and prose asides draw from the SAME function-word-heavy
+distribution of ordinary English sentence openers ("This also...", "It must...", "The new..." are
+all completely normal ways to start a real second claim, not just a prose aside). This was flagged
+as worse in kind than round 1's bug — round 1 failed on one constructed edge case, round 2 failed
+on the common case.
+
+**Round 3** (2026-07-31, by the orchestrating session directly, after two failed subagent-heuristic
+attempts): changed strategy. Stopped trying to build a perfect binary genuine/not-genuine
+classifier over unstructured English prose — no finite heuristic can be both sound and complete,
+and both prior designs erred specifically by ever fully SUPPRESSING a match (returning zero
+findings) based on a necessarily-imperfect signal. Redesign: the same continuation-stopword signal
+(renamed `_isProseDashTail`, same idea as round 2's tail check) is now bounded to a SEVERITY
+DOWNGRADE ONLY. A block whose mid-bullet match(es) ALL look like a prose dash is downgraded from
+the blocking (`>=4` identifiers) tier to the ambiguous/`reviewer-required` tier — exactly what this
+task's own AC #2 explicitly permits ("zero findings, OR AT MOST a non-blocking ambiguous
+variant") — and can never drop all the way to zero findings by this signal alone. This bounds the
+blast radius precisely to what both refutations were actually objecting to (silent, invisible
+suppression of a real defect): worst case under round 3, a genuine crammed-claims defect is flagged
+non-blocking instead of blocking — still a real, visible, human-reviewed finding, never silently
+missed.
+
+Re-verified against ALL prior shapes plus a new adversarial case constructed during round 3 itself
+(a block with one prose-looking dash AND one genuine-looking dash — must still block, since the
+downgrade requires EVERY match in the block to look like prose, not just one):
+- `bad.md` (genuine, must block) → still blocks (tail "update" is not a stopword).
+- Round-1 counterexample A (front-loaded, genuine, must block) → still blocks (tail "fix" is not a
+  stopword; the OTHER dash's "also" being a stopword doesn't matter — not every() match is prose).
+- This task's own repro + round-2's counterexample (both prose, must not hard-block) → both
+  DOWNGRADED to ambiguous (`ok:true`, `blocking:false`, `disposition:"reviewer-required"`), never
+  silently suppressed.
+- Round-1 counterexample B (trailing identifier, prose, must not hard-block) → downgraded to
+  ambiguous.
+- `code-span-subtraction.md` (unrelated to this signal) → unchanged, zero findings.
+- New mixed-signal case (`"...qux.ts` - also note this - rewrite the validation logic entirely."`,
+  one prose-looking dash + one genuine-looking dash) → correctly BLOCKS (real CLI, `blocking:true`)
+  — confirms the "every() match must look like prose" requirement is load-bearing, not vestigial.
+
+New regression test + fixture added for round 2's exact counterexample
+(`round2-stopword-opening-second-claim.md`) asserting it is downgraded to ambiguous, not silently
+suppressed. Full suite: 83/83 pass in both `experiments/quay-perpetual-stream/test/
+prepare-admission-check.test.mjs` and `plugin/test/prepare-admission-check.test.mjs`. `cmp` zero
+output on the script mirror, test mirror, and the new fixture mirror.
+
+**Outcome:** fix redesigned a second time, with a structurally different safety property (bounded
+downgrade, never full suppression) rather than a bigger heuristic. All evidence above is real and
+reproducible. AC/DoD boxes remain UNCHECKED and `status` remains `todo` — two rounds of
+self-assessment were wrong already; a third independent review is required before this task is
 called done or landed.
