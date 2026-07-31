@@ -12,8 +12,10 @@ labels:
   - milestone-candidate
 extra:
   schema: v1
-  acceptance: node --experimental-strip-types --test
-    experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    gap-wiring-coverage-check-whose-own-and-bold-marker-splitting
+    experiments/quay-perpetual-stream/charters/M205-gap-wiring-coverage-checker-fixes.md
+    milestones/M205/absorb-entry.md
 ---
 ## Proposal
 
@@ -163,7 +165,7 @@ just as dangerous as a GREEN-only one. The Fix-2 fixtures must therefore be TWO-
   `{id1, id2}` / `{id3, id4}` (RED before: 1 merged 4-identifier chunk; GREEN after: the two bold
   sentences split apart);
 - (b) a **claim-layer** RED/GREEN pair using a REAL wiring verb inside the bold sentences (e.g.
-  `"**A calls \`x1.ts\` from \`y1.ts\`.** **B calls \`x2.ts\` from \`y2.ts\`.**"`) asserting
+  "**A calls \`x1.ts\` from \`y1.ts\`.** **B calls \`x2.ts\` from \`y2.ts\`.**") asserting
   `extractMechanismClaims` yields 2 claims with disjoint identifier pairs (RED before: 1 merged
   4-identifier claim; GREEN after: 2) — satisfying the charter's done-when requirement of real
   fail-before/pass-after, never GREEN-only, never RED-forever.
@@ -549,10 +551,12 @@ Both defects were confirmed via direct source read (not inference) before filing
 
 ## Acceptance Criteria
 
-- [ ] `WIRING_VERB_RE`'s exclusion lookbehind includes `whose`; a fixture sentence "the terminal
+- [x] `WIRING_VERB_RE`'s exclusion lookbehind includes `whose`; a fixture sentence "the terminal
   whose own AC requires X" is confirmed NOT flagged as a wiring-verb claim (RED before fix, GREEN
-  after).
-- [ ] `splitSentences()` splits before a `**` bold marker; a fixture paragraph
+  after). (audit 2026-07-31, session 9b3ffa31: CONFIRMED — `whose` in the line-50 literal; pre-fix
+  module RED run fails the "whose own" 0-claims test, post-fix GREEN 22/22; genuine-`owns` control
+  green under BOTH literals, live-reproduced.)
+- [x] `splitSentences()` splits before a `**` bold marker; a fixture paragraph
   `"Done. **A does X (\`id1\`, \`id2\`).** **B does Y (\`id3\`, \`id4\`).**"` produces three chunks
   after the fix — two identifier-carrying sentences with disjoint backtick-identifier sets
   `{id1,id2}` / `{id3,id4}`, plus one leading zero-identifier `Done.` sentence (RED before fix —
@@ -561,23 +565,39 @@ Both defects were confirmed via direct source read (not inference) before filing
   uppercase/backtick/quote class, so the unpatched regex does NOT split `Done.` off — the
   `Done.`-peeled 2-chunk shape is the lookahead-only variant the Proposal's Chosen mechanism/Key
   decisions disproves, not the pre-fix baseline; GREEN after — the two bold sentences split apart
-  into 2-identifier chunks each, three chunks total).
-- [ ] `experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs` gains regression tests
+  into 2-identifier chunks each, three chunks total). (audit 2026-07-31: CONFIRMED — line-102
+  literal widened on BOTH sides; split-layer fixture on the exact AC text asserts 3 chunks with
+  disjoint {id1,id2}/{id3,id4}; pre-fix RED (1 merged chunk), post-fix GREEN, live-reproduced.)
+- [x] `experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs` gains regression tests
   for both fixtures above — the canonical test file only, no `plugin/test/wiring-coverage-
   check.test.mjs` mirror (that file does not exist on disk and this task deliberately does NOT
   create one — see Proposal's "Alternatives considered and rejected" #2: only 2 of 25
   `sync-vendor.sh`-managed modules have a paired `plugin/test/*.test.mjs`, mirror fidelity is proven
-  by the byte-identity gate below, not a duplicate test suite).
-- [ ] Re-running `wiring-coverage-check.ts --task tasks/DIR-126-D.md` against the current committed
+  by the byte-identity gate below, not a duplicate test suite). (audit 2026-07-31: CONFIRMED — 4 new
+  fixtures in the canonical test file only; no plugin mirror test file exists; mirror byte-identity
+  verified via sync-vendor.sh --check CLEAN.)
+- [x] Re-running `wiring-coverage-check.ts --task tasks/DIR-126-D.md` against the current committed
   task body after the fix still reports `ok:true`/0 findings (no regression on the real document
-  that surfaced this).
-- [ ] `bash plugin/scripts/sync-vendor.sh --check` reports `CLEAN` for `wiring-coverage-check` after
+  that surfaced this). (audit 2026-07-31: CONFIRMED — live CLI post-fix ok:true/claims 21/findings:[];
+  pre-fix baseline ok:true/22 claims; verdict-invariant, claim-count drift disclosed in Risks.)
+- [x] `bash plugin/scripts/sync-vendor.sh --check` reports `CLEAN` for `wiring-coverage-check` after
   the canonical-source fix is regenerated into `plugin/scripts/wiring-coverage-check.ts` via
-  `sync-vendor.sh` (mechanical `cp`, never a hand-edit).
-- [ ] `experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs` (both copies) still
+  `sync-vendor.sh` (mechanical `cp`, never a hand-edit). (audit 2026-07-31: CONFIRMED — --check exit 0,
+  "OK (identical): scripts/wiring-coverage-check.ts", "CLEAN: all files verified, no drift detected".)
+- [x] `experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs` (both copies) still
   passes post-fix, confirming `preflightMergedMarkdownClaims`'s own reuse of `splitSentences` does
-  not regress — a second real call site beyond the canonical CLI/`task-schema.ts` path.
+  not regress — a second real call site beyond the canonical CLI/`task-schema.ts` path. (audit
+  2026-07-31: CONFIRMED — 74/74 canonical + 74/74 plugin copy, both exit 0, live run.)
 - [ ] Grounding evidence (exhaustive identifiers, wiring-coverage completeness): direct source read
+  (audit 2026-07-31, session 9b3ffa31: REFUTED — the delivered fix flips THIS task file's own
+  directive-mode self-check from ok:true (pre-fix, 29 claims, live-reproduced) to ok:false (post-fix,
+  1 of 28 claims uncovered: the Fix-2 claim-layer example prose now self-extracts a chunk whose
+  backtick-pairing artifacts no AC bullet covers), falsifying this bullet's round-5 assertion "this
+  bullet makes the directive-mode check return ok:true on this task's own file" and its
+  "exhaustive union of every claim this Proposal's own ## Proposal text extracts" standard, computed
+  under the pre-fix extractor. Box deliberately left unchecked; see
+  milestones/M205/audits/iteration-0-acceptance-audit.md. All identifiers listed remain real — the
+  substantive grounding standard holds; only the self-coverage assertion is refuted.)
   confirmed `WIRING_VERB_RE`'s current lookbehind
   `(?<!(?:'s|s'|its|their|my|our|your|his|her)\s)\bowns?\b` omits `whose`, so `\bowns?\b` still
   matches inside "whose own" — reproduced and closed by AC item 1 above's fixture. Also covering
@@ -640,8 +660,8 @@ Both defects were confirmed via direct source read (not inference) before filing
   strings below, which themselves carry a wiring verb plus >=2 backtick identifiers and so
   self-extract), each confirmed real by direct source read and reproduced live, not a new
   invention:
-  `task-schema.ts:323`, `"**A calls \`x1.ts\` from \`y1.ts\`.** **B calls \`x2.ts\` from \`y2.ts\`.**"`, `"This is
-  **important** and here \`a.ts\` calls \`b.ts\`."`, `"This is **important** And here …"`, `##
+  `task-schema.ts:323`, `"This is **important** and here \`a.ts\` calls \`b.ts\`."`, `"This is
+  **important** And here …"`, `##
   Acceptance Criteria`, `## Finding`, `## Proposal`, `## Requested action`, `**Claim N…**`,
   `--check`, `83c1958`, `:544`, `WIRING_VERB_RE`, `WIRING_VERB_RE.test(sentence)`,
   `_releaseLeaseAndRecord`, `_runAsCli`, `_upsertFindings(..., 0)`, `_wiringCheckScript`,
@@ -661,16 +681,26 @@ Both defects were confirmed via direct source read (not inference) before filing
   `whose`, `wiring-coverage-check-failed`, `wiring-coverage-check.test.mjs`, `wiring-coverage-
   check.ts`, `wiringFindingsFromUncovered` — all confirmed real by the same
   direct-source-read standard; this bullet makes the directive-mode check return `ok:true`
-  on this task's own file.
+  on this task's own file. Round-6 (post-Fix-2 self-extraction correction): the Fix-2 claim-layer
+  example prose (line 168) originally wrapped in outer backticks produced a garbled backtick-pairing
+  artifact (") asserting") across the newly-split bold-marker boundary — removing the outer backtick
+  wrapper produces two clean claims with disjoint identifier sets: {`x1.ts\`, `y1.ts\`} and {`x2.ts\`,
+  `y2.ts\`} — the backslash-trailing forms are the literal identifiers `backtickIdentifiers()`
+  extracts from markdown-escaped `\`x1.ts\`` source (the backslash before the closing backtick is
+  captured), confirmed real by the same direct-source-read standard as every round above. Also adding
+  `extractMechanismClaims` which now appears in the second claim's backtick context.
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on `master`.
-- [ ] Real, non-fixture evidence: both fixtures above pass; a real run of
+- [ ] Landed on `master`. (audit 2026-07-31: NOT YET — build state is uncommitted in the working
+  tree; audit runs pre-Land by design, Land commits and ticks this.)
+- [x] Real, non-fixture evidence: both fixtures above pass; a real run of
   `wiring-coverage-check.ts --task tasks/DIR-126-D.md` (or its state at time of fix) confirms no
-  regression.
+  regression. (audit 2026-07-31: CONFIRMED — real CLI runs pre-fix (ok:true/22 claims) and post-fix
+  (ok:true/21 claims, findings:[]) against the committed DIR-126-D.md; canonical suite 22/22 with
+  genuine RED-before/GREEN-after fixtures; admission suite 74/74 both copies.)
 
 ## Touches
 

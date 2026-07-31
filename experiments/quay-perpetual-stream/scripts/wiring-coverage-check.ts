@@ -47,7 +47,7 @@ import { pathToFileURL } from "node:url";
 // would close. Left as a known, narrower limitation; the DIR-126-B content gap this would have
 // caught is instead closed directly in that task's own AC text.
 const WIRING_VERB_RE =
-  /\b(invokes?|calls?|dispatches?|enforces?|wires?|routes?|delegates?)\b|(?<!(?:'s|s'|its|their|my|our|your|his|her)\s)\bowns?\b/i;
+  /\b(invokes?|calls?|dispatches?|enforces?|wires?|routes?|delegates?)\b|(?<!(?:'s|s'|its|their|my|our|your|his|her|whose)\s)\bowns?\b/i;
 const EVIDENCE_RE = /\b(real|production|callsite|call site|reachability|reachable|evidence|wired|confirm(?:ed|s|ation)?|reproduc\w*|verifi(?:ed|es|cation)?|proven?|proves?)\b/i;
 
 // Split a paragraph into Markdown-list-aware blocks: a new block starts at every bullet-list line
@@ -99,7 +99,7 @@ export function splitSentences(text) {
   return text
     .split(/\n{2,}/)
     .flatMap((para) => splitListAwareBlocks(para))
-    .flatMap((block) => block.split(/(?<=[.!?])\s+(?=[A-Z`"])/))
+    .flatMap((block) => block.split(/(?<=[.!?]|\*\*)\s+(?=[A-Z`"]|\*\*)/))
     .map((s) => s.replace(/\s+/g, " ").trim())
     .filter(Boolean);
 }

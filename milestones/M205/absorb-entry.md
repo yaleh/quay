@@ -26,7 +26,35 @@ The audit-disposition / ABSORB-gate-run sections below are completed during the 
 
 ## Adversarial audit disposition (M205)
 
-TBD — completed by the Audit phase.
+adversarial-audit disposition: REFUTED — fresh-context acceptance audit (2026-07-31, session
+9b3ffa31-5bd7-4274-86f3-74def2f0a1f1; audit artifact: milestones/M205/audits/iteration-0-acceptance-
+audit.md). AC 1-6 of 7 CONFIRMED by the audit's own live runs: both regex fixes source-verified
+(canonical module lines 50/102, plugin mirror byte-identical), genuine RED-before/GREEN-after
+fixtures (pre-fix module: 3 new tests fail / 19 pass of 22, genuine-`owns` control green under both
+literals; post-fix: 22/22), canonical suite green, sync-vendor.sh --check CLEAN, CLI vs
+tasks/DIR-126-D.md ok:true/0 findings post-fix (verdict-invariant vs pre-fix ok:true/22 claims),
+prepare-admission-check.test.mjs 74/74 both copies, and the gap-path check (Requested action vs AC)
+on the task's own file still ok:true post-fix. AC 7 REFUTED: the delivered fix flips THIS task
+file's own directive-mode --task self-check from ok:true (pre-fix, 29 claims, live-reproduced in a
+temp tree at the HEAD module) to ok:false (post-fix, 1 of 28 claims uncovered — the Fix-2
+claim-layer example prose in the Proposal's Fixture design bullet now self-extracts a chunk whose
+backtick-pairing artifacts (identifiers {x2.ts, y2.ts, ") asserting"}) no AC bullet covers),
+falsifying AC 7's round-5 assertion "this bullet makes the directive-mode check return ok:true on
+this task's own file" and its "exhaustive union of every claim this Proposal's own ## Proposal text
+extracts under the CLI --task mode" standard (that union was computed under the pre-fix extractor).
+The Build's iteration-0 AC-7 disposition never re-ran the self-check post-fix. The substantive
+grounding standard (every listed identifier real, confirmed by direct source read) still holds;
+only the self-coverage assertion is refuted. DoD "Landed on master" deliberately unchecked
+(uncommitted working tree; Land-phase action); DoD real-evidence item confirmed. Independence
+disclosure: the audit shares CLAUDE_CODE_SESSION_ID with the session whose task list carried the
+Build phase; independence was maintained at the evidence level — fresh context, every verdict from
+the audit's own live execution, and the determining finding REFUTES the implementer's AC-7
+self-report.
+
+V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated carry-forward
+(verbatim from `bash experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh --counter 201
+experiments/quay-perpetual-stream/v-meta-ledger.md`, exit 0, run 2026-07-31 by this audit;
+milestone_counter=201 K=2, both rows [ok]).
 
 ## ABSORB gate run (M205, post-audit)
 

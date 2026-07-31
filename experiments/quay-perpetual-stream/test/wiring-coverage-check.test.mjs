@@ -7,7 +7,7 @@ import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractMechanismClaims, bulletsOf, checkWiringCoverage } from "../scripts/wiring-coverage-check.ts";
+import { extractMechanismClaims, bulletsOf, checkWiringCoverage, splitSentences } from "../scripts/wiring-coverage-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(__dirname, "..", "scripts", "wiring-coverage-check.ts");
@@ -96,6 +96,62 @@ test("extractMechanismClaims: real ownership-verb claim (\"X owns Y\", no posses
   const claims = extractMechanismClaims(text);
   assert.equal(claims.length, 1);
   assert.deepEqual(claims[0].identifiers.sort(), ["composite-land.ts", "dashboard.md"]);
+});
+
+// ── M205/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting: two source-confirmed regex
+// defects found live during DIR-126-D's round-4/5 ProposalReview convergence, when the milestone's
+// own explanatory prose ("the one terminal whose own AC…" + back-to-back `**Claim N…**` points)
+// kept re-triggering false uncovered-claim findings. Fix 1: the `owns?` possessive-determiner
+// exclusion lookbehind omitted `whose`, so "whose own AC" false-matched as an ownership-verb
+// claim. Fix 2: splitSentences()'s per-block punctuation split never recognized a markdown bold
+// marker (`**`) on EITHER side, so two adjacent `**Bold.** **Bold.**` sentences merged into one
+// oversized "claim". Each RED/GREEN fixture below FAILS before its fix and PASSES after; the
+// genuine-`owns` control must stay green under BOTH literals (strict narrowing). Canonical test
+// file ONLY — no `plugin/test/wiring-coverage-check.test.mjs` mirror (that file does not exist;
+// mirror fidelity is proven by the `sync-vendor.sh --check` byte-identity gate). ──
+test("extractMechanismClaims: possessive-determiner \"whose own\" is NOT a wiring claim (Fix 1, RED before / GREEN after)", () => {
+  const text = "The terminal whose own AC requires `a.ts` and `b.ts` stays out of scope.";
+  assert.equal(
+    extractMechanismClaims(text).length,
+    0,
+    "\"whose own\" is a possessive determiner + adjective, not an ownership-verb claim"
+  );
+});
+
+test("extractMechanismClaims: genuine \"owns\" control is unaffected by the `whose` exclusion (strict narrowing)", () => {
+  const text = "`composite-land.ts` owns `dashboard.md` writes from `x.ts` to `y.ts`.";
+  const claims = extractMechanismClaims(text);
+  assert.equal(claims.length, 1, "a real ownership-verb claim must still fire under the patched literal");
+  assert.deepEqual(claims[0].identifiers.sort(), ["composite-land.ts", "dashboard.md", "x.ts", "y.ts"]);
+});
+
+test("splitSentences: adjacent bold-prefixed sentences split on BOTH sides of the `**` marker (Fix 2 split-layer, RED before / GREEN after)", () => {
+  // The exact AC-2 fixture text. Pre-fix: ONE merged chunk carrying all 4 identifiers — the char
+  // after the post-`Done.` whitespace is `*`, outside the old lookahead class, so even `Done.` is
+  // not peeled off. Post-fix: 3 chunks — a leading zero-identifier `Done.` plus two identifier-
+  // carrying sentences with DISJOINT backtick-identifier sets. A lookahead-ONLY variant leaves the
+  // two bold claims merged (2 chunks: `Done.` + one 4-identifier chunk) — the symmetric both-sides
+  // edit is the minimal sufficient fix (live-reproduced during Proposal adjudication).
+  const chunks = splitSentences("Done. **A does X (`id1`, `id2`).** **B does Y (`id3`, `id4`).**");
+  assert.equal(chunks.length, 3, "leading `Done.` plus two bold sentences, not one merged chunk");
+  assert.equal(chunks[0], "Done.");
+  const ids = (s) => [...s.matchAll(/`([^`]+)`/g)].map((m) => m[1]).sort();
+  assert.deepEqual(ids(chunks[1]), ["id1", "id2"]);
+  assert.deepEqual(ids(chunks[2]), ["id3", "id4"]);
+  assert.equal(ids(chunks[1]).some((id) => ids(chunks[2]).includes(id)), false, "identifier sets must be disjoint");
+});
+
+test("extractMechanismClaims: adjacent bold-prefixed claims with a REAL wiring verb split into 2 disjoint claims (Fix 2 claim-layer, RED before / GREEN after)", () => {
+  // The claim-layer uses a real wiring verb ("calls") inside the bold sentences: "does" (the AC-2
+  // fixture's verb) is NOT a wiring verb, so a claim-level assertion on the literal AC-2 text would
+  // be RED-forever (0 claims both before and after — the verb test in extractMechanismClaims and
+  // the >=2-identifier test would both exclude it). Pre-fix: 1 merged 4-identifier claim;
+  // post-fix: 2 claims with disjoint identifier pairs.
+  const text = "**A calls `x1.ts` from `y1.ts`.** **B calls `x2.ts` from `y2.ts`.**";
+  const claims = extractMechanismClaims(text);
+  assert.equal(claims.length, 2, "each bold sentence is its own claim, not one merged 4-identifier claim");
+  assert.deepEqual(claims[0].identifiers.sort(), ["x1.ts", "y1.ts"]);
+  assert.deepEqual(claims[1].identifiers.sort(), ["x2.ts", "y2.ts"]);
 });
 
 // ── gap-wiring-coverage-check-reuse-verbs-and-tables (M201/DIR-126-B): a dense Markdown pipe
