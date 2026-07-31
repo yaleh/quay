@@ -8,7 +8,7 @@
   "mechanismInventoryFile": "milestones/M210/mechanism-inventory.json",
   "hashes": {
     "proposal": "81cd0308cba3c2236484dde389ad5f21ffcc208421599a03027a3ad400501a71",
-    "charter": "7d609d3d18d097eca97002cbba52083e3b7bf42f2e033d579b3e9167d23d2a0d",
+    "charter": "b65f46826e911bd28dcf8a0f60b0b11c57a4198dcbcc7019470fcd329299abb5",
     "plan": "dc946ab97c37ef222decb2f6c71a495286f6a7554656ae93d5128bedf5db75a9",
     "sources": {
       "experiments/quay-perpetual-stream/scripts/composite-build.ts": "23e659bd05cdb44ea6679eafdeded1a53cce329a88dca5da786440588c59c97c",

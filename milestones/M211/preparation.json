@@ -8,7 +8,7 @@
   "mechanismInventoryFile": "milestones/M211/mechanism-inventory.json",
   "hashes": {
     "proposal": "88b091ed3a39d6d8afb8fd000bb04f97a4e5301e4b54c45d263b4a43496e52b4",
-    "charter": "ebbe3877683cb4f298dc38187db2ee46233aa8ab2b55eef2030a1d5ba14a9fde",
+    "charter": "f2ef67214d81282dae57f24bc56de701c1502ddee1e4f0d115384be8a7d5016a",
     "plan": "6f74906319666fdc2b2cf3515a3e8473be817479860b9e1fb711f19093cc9395",
     "sources": {
       "experiments/quay-perpetual-stream/scripts/composite-audit.ts": "58d259c0c30e4a2ee43a879db7395217d147183ff0f366fecc6c65ca256908bd",
