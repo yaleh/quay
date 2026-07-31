@@ -118,8 +118,12 @@ function ledgerFromPrompt(prompt) {
   return { ledgerFile: pathMatch[1], ledgerJson: jsonMatch[1] };
 }
 
+// gap-decide-resume-generation-path-unsanitized-taskid (2026-07-31): match any run of `--flag`
+// tokens between `node` and `--experimental-strip-types` (not a literal fixed prefix), so this
+// stays correct if the workflow's constructed commands gain further flags later — mirrors the
+// same fix applied to prepare-milestone-convergence.test.mjs's own extractNodeCommands().
 function extractNodeCommands(prompt) {
-  return [...prompt.matchAll(/node --experimental-strip-types [^\n]+/g)].map((m) => m[0]);
+  return [...prompt.matchAll(/node(?: --\S+)* --experimental-strip-types [^\n]+/g)].map((m) => m[0]);
 }
 
 function runShell(cmd) {

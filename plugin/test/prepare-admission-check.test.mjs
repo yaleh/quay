@@ -8,7 +8,7 @@
 // modes, --preflight/--preflight-plan CLI, calibration).
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -239,6 +239,92 @@ test("CLI --force-release <reason> against a still-active lease exits 0, genuine
   // Immediately re-acquirable — a real, non-silent unlock.
   const reacquired = runCli(["--acquire", "--taskId", "T-CLI-5", "--workspace", workspace], { CLAUDE_CODE_SESSION_ID: "fresh-session" });
   assert.equal(reacquired.status, 0);
+});
+
+// ── gap-prepare-milestone-lease-read-race regression (M203/DIR-126-D) ──────────────────────────────
+// Reproduces the SHAPE of the real race (a lease file written by a genuinely separate OS process,
+// read moments later by THIS process) as closely as a single-machine test harness practically can —
+// see milestones/M203/telemetry-real-journal-proof.md for the two real occurrences this models
+// (`wf_49d73fc5-782`, `wf_7caf2523-9c0`). Without the bounded retry, a raw fs.readFileSync here
+// would non-deterministically ENOENT exactly like those two real Workflow-tool dispatches.
+// gap-decide-resume-generation-path-unsanitized-taskid (2026-07-31): the vulnerable WORKFLOW-side
+// path computation this task originally targeted (a raw `${_taskId}` interpolation in
+// prepare-milestone.js's Stage-4 --decide-resume pre-check) was already deleted by an unrelated
+// commit (7357a91, M203/DIR-126-D — removed because `await import('node:fs')` is unreachable in
+// the workflow sandbox, which happened to delete the whole vulnerable block with it). There is no
+// longer a second, workflow-side path computation to compare against the CLI's own — this test
+// instead proves the single remaining computation (the real CLI's `leasePath()`, via
+// `safeTaskIdSegment()`) genuinely sanitizes a slash-containing taskId rather than letting it
+// escape `.quay/prepare-leases/` via a path separator, closing the AC's real intent (a
+// slash-containing taskId cannot produce a divergent/unsafe path) even though the original
+// two-computation comparison is now moot by construction.
+describe("gap-decide-resume-generation-path-unsanitized-taskid: slash-containing taskId sanitization", () => {
+  test("leasePath() for a slash-containing taskId stays inside .quay/prepare-leases/ as a single flattened segment, never a nested subdirectory or path escape", () => {
+    const workspace = makeWorkspace();
+    const slashTaskId = "../../etc/T-EVIL/nested";
+    const p = _internal.leasePath(workspace, slashTaskId);
+    // The decisive safety property: the resolved REAL directory of the lease file is exactly
+    // leaseDir(workspace) — not a parent, not a nested subdirectory. A literal '..' substring can
+    // legitimately survive inside the FILENAME itself once flattened (slashes replaced with '_'
+    // turn '../..' into '.._..', which is inert — it is no longer adjacent to a path separator, so
+    // Node's path resolution cannot interpret it as traversal); asserting on the resolved
+    // directory, not a raw substring search, is the correct safety check.
+    assert.equal(path.dirname(p), _internal.leaseDir(workspace), "the lease file must land directly inside .quay/prepare-leases/, not a nested subdirectory or an escaped parent directory the slash/dot segments would otherwise create");
+    assert.equal(path.basename(p), ".._.._etc_T-EVIL_nested.json", "slashes are flattened into a single safe filename segment, not interpreted as directory separators");
+  });
+
+  test("acquireLease/renewLease/releaseLease round-trip correctly for a slash-containing taskId (real end-to-end proof, not just the path helper in isolation)", () => {
+    const workspace = makeWorkspace();
+    const slashTaskId = "some/nested/task-id";
+    const now = 2_000_000;
+    const acquired = acquireLease({ workspace, taskId: slashTaskId, now, ownerExecutionId: "sess-slash-1" });
+    assert.equal(acquired.outcome, "acquired");
+    const p = _internal.leasePath(workspace, slashTaskId);
+    assert.ok(fs.existsSync(p), "the lease file must exist at the sanitized flattened path");
+    const renewed = renewLease({ workspace, taskId: slashTaskId, stage: "Admission", now: now + 1000 });
+    assert.equal(renewed.ok, true, JSON.stringify(renewed));
+    const released = releaseLease({ workspace, taskId: slashTaskId, reason: "test-cleanup", now: now + 2000 });
+    assert.equal(released.ok, true);
+    assert.ok(!fs.existsSync(p), "lease file removed after release");
+  });
+});
+
+describe("gap-prepare-milestone-lease-read-race: bounded ENOENT retry", () => {
+  test("_readLeaseFileWithRetry tolerates a write landing from a genuinely separate OS process shortly after the first read attempt", () => {
+    const workspace = makeWorkspace();
+    const p = _internal.leasePath(workspace, "T-RACE-RETRY");
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    // A detached child process (NOT this test's own event loop — the retry's Atomics.wait blocks
+    // this process's main thread entirely, so a same-process setTimeout could never fire during the
+    // retry window; only a genuinely separate OS process can land a write inside it, matching the
+    // real cross-subprocess agent() dispatch shape) writes the lease file shortly after being
+    // spawned — modeling the immediately-preceding subprocess's write becoming durably visible
+    // moments after this process's own read attempt fires. Writes to a sibling tmp path then
+    // renames into place (rename is atomic on the same filesystem) so this test only ever exercises
+    // the absent -> fully-present transition this retry targets, never a separate torn-write
+    // (file-exists-but-partial-content) race, which is a different failure class than the ENOENT
+    // this task's Finding documents.
+    const tmp = `${p}.tmp`;
+    const child = spawn("sh", ["-c", `printf '%s' '${JSON.stringify({ ownerExecutionId: "racer-a" })}' > '${tmp}' && mv '${tmp}' '${p}'`], {
+      stdio: "ignore",
+      detached: true,
+    });
+    child.unref();
+    // In the overwhelming common case no lease file exists yet at this exact instant (the child
+    // has typically not even been scheduled by the OS yet) — the bounded retry inside
+    // _readLeaseFileWithRetry is what bridges this gap, not scheduling luck.
+    const raw = _internal._readLeaseFileWithRetry(p);
+    const lease = JSON.parse(raw);
+    assert.equal(lease.ownerExecutionId, "racer-a");
+  });
+
+  test("_readLeaseFileWithRetry still fails closed (ENOENT) for a genuinely-missing lease after the bounded retry window — never masks a real missing-lease case", () => {
+    const workspace = makeWorkspace();
+    const p = _internal.leasePath(workspace, "T-RACE-NEVER-WRITTEN");
+    assert.throws(() => _internal._readLeaseFileWithRetry(p), (err) => err.code === "ENOENT");
+    // _readLease's own null-on-missing contract stays intact through the retry.
+    assert.equal(_internal._readLease(workspace, "T-RACE-NEVER-WRITTEN"), null);
+  });
 });
 
 // ── Stage 8: module-level single-flight simulation, stall-vs-crash distinction, admission-error shape ──

@@ -105,8 +105,13 @@ function ledgerFromPrompt(prompt) {
   return { ledgerFile: pathMatch[1], ledgerJson: jsonMatch[1] };
 }
 
+// gap-decide-resume-generation-path-unsanitized-taskid (2026-07-31): the workflow's real command
+// strings now carry `--no-warnings` before `--experimental-strip-types` (added this session to
+// suppress Node's MODULE_TYPELESS_PACKAGE_JSON noise from poisoning agent-reported stdout) — match
+// any run of `--flag` tokens between `node` and `--experimental-strip-types`, not a literal
+// two-token prefix, so this stays correct if more flags are added later.
 function extractNodeCommands(prompt) {
-  return [...prompt.matchAll(/node --experimental-strip-types [^\n]+/g)].map((m) => m[0]);
+  return [...prompt.matchAll(/node(?: --\S+)* --experimental-strip-types [^\n]+/g)].map((m) => m[0]);
 }
 
 function runShell(cmd) {
@@ -1155,6 +1160,27 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       const m = stripped.match(re);
       assert.equal(m, null, `found a live (non-comment) '${name}' call site in ${mirrorName}: ${m ? JSON.stringify(m[0]) : ''}`);
     }
+  });
+
+  // gap-decide-resume-generation-path-unsanitized-taskid regression guard: M202/DIR-126-C's Build
+  // (2319e8e) briefly computed `_generationRecordPath` via raw, unsanitized `${_taskId}`
+  // interpolation (`.quay/prepare-leases/${_taskId}.generation.json`) — for a slash-containing
+  // taskId this could resolve to a DIFFERENT file than proposal-convergence.ts's own
+  // `_safeTaskIdSegment()`-sanitized `_generationPath()`/`_leasePath()` (`/[\\/]/g -> "_"`).
+  // gap-prepare-milestone-workflow-dynamic-import (7357a91, M203/DIR-126-D) already deleted that
+  // ENTIRE local computation, for an unrelated reason (`await import('node:fs')` unreachable in the
+  // workflow sandbox) — the workflow now defers path resolution to the real `--decide-resume`/
+  // `--record-generation` CLI dispatches exclusively, which is exactly this gap's own Requested-
+  // action alternative ("avoid the workflow-side path derivation entirely ... let the CLI itself be
+  // the single source of truth for path resolution, since it already sanitizes correctly"). A
+  // slash/".."-bearing taskId cannot diverge because there is no second, workflow-side computation
+  // left to diverge FROM — every test in this file's `baseArgs()` already dispatches with exactly
+  // such a taskId (`../${scratchRel}/task`). Assert the deleted computation never reappears.
+  test(`[${mirrorName}] gap-decide-resume-generation-path-unsanitized-taskid: zero LIVE workflow-side 'prepare-leases'/'.generation.json' path construction — the real --decide-resume/--record-generation CLI dispatch (already _safeTaskIdSegment()-sanitized) is the sole path-resolution authority`, () => {
+    const text = src();
+    const stripped = text.split('\n').map((line) => line.replace(/\/\/.*$/, '')).join('\n');
+    const m = stripped.match(/prepare-leases|\.generation\.json/);
+    assert.equal(m, null, `found a live (non-comment) local generation/lease-path construction in ${mirrorName}: ${m ? JSON.stringify(m[0]) : ''} — a raw \${_taskId} interpolation here would diverge from proposal-convergence.ts's sanitized path for a slash-containing taskId; the workflow must keep deferring entirely to the CLI dispatch`);
   });
 }
 
