@@ -50,3 +50,10 @@ experiment/timing/*.log
 # never reach 6 digits, so this cannot collide with a genuine milestone).
 docs/plans/M9[0-9][0-9][0-9][0-9][0-9]-*.md
 milestones/M9[0-9][0-9][0-9][0-9][0-9]/
+# Same class, second source found 2026-07-31: prepare-milestone-preparation-e2e.test.mjs uses a
+# FIXED milestoneId 'M997' (not random) for its own Plan-file/milestones scratch — its own
+# `finally` cleanup exists but this test currently fails (pre-existing, unrelated to any change in
+# this commit — confirmed via git stash) before reaching a passing assertion in some runs, leaving
+# the same shape of orphan behind.
+docs/plans/M997-*.md
+milestones/M997/

@@ -272,8 +272,9 @@ Return {taskId, outcome: "done", iterationCount, mergeCommit: "<short-sha>"} on 
   // Build agent does the work directly — no background dispatch.
   log(`Build phase complete: outcome=${buildResult?.outcome}`)
 
-  if (buildResult?.outcome === 'needs-human') {
-    return { outcome: 'needs-human', reason: buildResult?.reason || 'build-failed', phase: 'Build', verifyCacheUpdates }
+  if (buildResult?.outcome !== 'done') {
+    const reason = buildResult?.reason || (buildResult ? 'build-outcome-not-done' : 'build-agent-no-result')
+    return { outcome: 'needs-human', reason, phase: 'Build', verifyCacheUpdates }
   }
 
 // ── Phase: Audit (step 6 acceptance audit) ──────────────────────────────────────────
