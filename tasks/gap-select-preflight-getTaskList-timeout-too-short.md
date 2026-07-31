@@ -4,7 +4,7 @@ title: select-preflight.ts's getTaskList() hardcodes a 60s execFileSync timeout,
   shorter than measured real `quay task list --json` wall time (66-78s) against
   the current (475+ task) store — every live select-preflight.ts --json run can
   halt before producing a portfolio, though timing is variable/non-deterministic
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -49,23 +49,38 @@ Non-goals scope excludes editing sibling checker/script internals outside its de
 
 ## Acceptance Criteria
 
-- [ ] `getTaskList()`'s `execFileSync` timeout is raised with a code comment citing the measured
+- [x] `getTaskList()`'s `execFileSync` timeout is raised with a code comment citing the measured
   66-78s real wall-time baseline this Finding recorded, giving real headroom (not just enough to
-  pass once).
-- [ ] A regression test in `experiments/quay-perpetual-stream/test/select-preflight.test.mjs`
-  asserts the timeout value is at or above the documented floor.
-- [ ] Canonical and `plugin/scripts/` mirror (if `select-preflight.ts` has one) stay byte-identical
-  after the edit — confirmed via `cmp`/`sync-vendor.sh --check`.
+  pass once). (`GETTASKLIST_TIMEOUT_MS_FLOOR = 120000`, ~1.5-1.8x the measured worst case.)
+- [x] A regression test in `experiments/quay-perpetual-stream/test/select-preflight.test.mjs`
+  asserts the timeout value is at or above the documented floor. (32/32 tests pass, independently
+  re-run by a fresh reviewer.)
+- [x] Canonical and `plugin/scripts/` mirror (if `select-preflight.ts` has one) stay byte-identical
+  after the edit — confirmed via `cmp`/`sync-vendor.sh --check`. (No `plugin/scripts/` mirror
+  exists for this file — vacuously satisfied, confirmed via `find`.)
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on `master`.
-- [ ] A real `select-preflight.ts --json` run against the current task store, timed, is captured as
+- [x] Landed on `master`. (commit `28870e5`)
+- [x] A real `select-preflight.ts --json` run against the current task store, timed, is captured as
   command output showing real headroom over the new timeout (not merely a source-level assertion).
+  (Independent reviewer's own real run: `real 0m16.668s`, exit 0, valid JSON — ~103s headroom
+  under the new 120000ms timeout.)
 
 ## Touches
 
 - experiments/quay-perpetual-stream/scripts/select-preflight.ts
 - experiments/quay-perpetual-stream/test/select-preflight.test.mjs
+
+## Execution record
+
+Executed directly (mixed mode, 2026-07-31, per explicit user instruction). Build commit `28870e5`.
+Independent verification via a fresh subagent reviewer standing in for Audit: verdict CONCERNS
+(purely because the review ran before the Land commit landed — expected sequence; no code defect
+found; also independently confirmed the task's Finding numbers match the code/test exactly and
+noted a non-blocking observation that 120s vs 60s means a genuine hang takes twice as long to
+fail-closed, an accepted tradeoff since 66-78s is real legitimate work time per the Finding).
+
+**Outcome:** done.
