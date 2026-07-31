@@ -350,6 +350,10 @@ let _epochThisGenDeltaRounds = 0
 let _epochBase = { attempts: 0, fullReviews: 0, deltaRounds: 0, contentAgentDispatches: 0, observableAgentMs: 0, terminalFingerprints: {}, tokensObserved: null }
 let _epochPolicy = { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2, maxOverrideCount: 3, maxNewEpochResetCount: 3 }
 let _epochOverrides = []
+// gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening (item 3): loaded the SAME way
+// `_epochOverrides` already is, below — consumed by `_epochEscapeValveActions()` so a breach
+// report never lists `NEW-EPOCH` once `maxNewEpochResetCount` is ALREADY exhausted.
+let _epochResets = []
 
 const _epochStatusResult = await _convergenceAgentCall(`--epoch-status --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --highRisk ${_highRisk}`, 'epoch-status')
 const _epochStatusVerdict = _epochStatusResult?.raw ? _parseAgentJson(_epochStatusResult.raw) : null
@@ -370,6 +374,7 @@ if (_epochStatusVerdict.code === 'epoch-identity-mismatch') {
 _epochBase = _epochStatusVerdict.counters || _epochBase
 _epochPolicy = _epochStatusVerdict.policy || _epochPolicy
 _epochOverrides = Array.isArray(_epochStatusVerdict.overrides) ? _epochStatusVerdict.overrides : []
+_epochResets = Array.isArray(_epochStatusVerdict.resets) ? _epochStatusVerdict.resets : []
 
 // _epochElapsedMsSoFar — reuses `_lastBoundaryMs` (M207's own real-`nowMs`-derived phase-boundary
 // clock, seeded from the Admission --acquire verdict and advanced at every successful --renew
@@ -421,13 +426,39 @@ async function _recordEpochDispatch(stageLabel, terminalPhase, reason) {
   )
 }
 
+// _epochEscapeValveActions — gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening (item 3,
+// explicit decision): "no further resets/overrides, ever, once a hard ceiling is hit — converge to
+// COMMIT/SPLIT" IS the intended terminal design (the whole point of a hard ceiling is that it's not
+// negotiable; a genuine "human-authorized override of the human-authorized override" escape valve
+// would risk re-creating the exact infinite-regress problem this circuit breaker exists to
+// prevent — see the task's own recorded reasoning). What this function fixes is narrower:
+// `_epochBreachExit` previously listed `NEW-EPOCH`/`OVERRIDE` in `allowedActions`
+// UNCONDITIONALLY, even once `maxNewEpochResetCount`/`maxOverrideCount` was ALREADY exhausted —
+// at that point both are mechanically-guaranteed dead ends (`_newEpochCli`/`_overrideBudgetCli`
+// fail-closed on their own ceiling check, confirmed by this same task's `new-epoch-reset-count-
+// cap-exceeded`/`override-count-cap-exceeded` regression coverage), so listing them implied an
+// escalation path that doesn't actually exist in code. Computed from the SAME `_epochResets`/
+// `_epochOverrides`/`_epochPolicy` state already loaded once at Admission (`_epochStatusCli`) —
+// never a second read; COMMIT/SPLIT are ALWAYS listed (never mechanically gated — the genuine,
+// always-available terminal paths).
+function _epochEscapeValveActions() {
+  const p = _epochPolicy || {}
+  const maxOverrideCount = Number.isFinite(p.maxOverrideCount) ? p.maxOverrideCount : 3
+  const maxNewEpochResetCount = Number.isFinite(p.maxNewEpochResetCount) ? p.maxNewEpochResetCount : 3
+  const actions = ['COMMIT', 'SPLIT']
+  if ((_epochResets || []).length < maxNewEpochResetCount) actions.push('NEW-EPOCH')
+  if ((_epochOverrides || []).length < maxOverrideCount) actions.push('OVERRIDE')
+  return actions
+}
+
 // _epochBreachExit — the ONE exit path every cap-check call site below uses on a breach: releases
 // the held lease + persists final counters via the EXISTING `_releaseLeaseAndRecord` choke point
-// (never a new/second release path), then returns needs-human with the exact 4 allowedActions the
-// task's own AC names — COMMIT/SPLIT reuse M206/M4's EXISTING `--record-split-decision` verbs
-// verbatim (never a parallel commit/split concept); NEW-EPOCH/OVERRIDE map onto this child's own
-// `--new-epoch`/`--override-budget` CLI modes. Dispatches NOTHING further — this function is always
-// called INSTEAD of the content-agent call it would have gated, never alongside it.
+// (never a new/second release path), then returns needs-human with `allowedActions` computed by
+// `_epochEscapeValveActions()` above — COMMIT/SPLIT reuse M206/M4's EXISTING `--record-split-
+// decision` verbs verbatim (never a parallel commit/split concept); NEW-EPOCH/OVERRIDE map onto
+// this child's own `--new-epoch`/`--override-budget` CLI modes, listed ONLY while their own hard
+// ceiling still has headroom. Dispatches NOTHING further — this function is always called INSTEAD
+// of the content-agent call it would have gated, never alongside it.
 async function _epochBreachExit(terminalPhase, stageLabel, capResult) {
   log(`Epoch budget breach at ${terminalPhase} — ${capResult.code}: ${capResult.message}. Releasing the lease and returning needs-human; zero further content-agent dispatch this generation.`)
   await _releaseLeaseAndRecord(stageLabel, { terminalPhase, outcome: 'needs-human', reason: capResult.code, cacheable: false })
@@ -436,7 +467,7 @@ async function _epochBreachExit(terminalPhase, stageLabel, capResult) {
     reason: capResult.code,
     phase: terminalPhase,
     epochCapBreach: capResult,
-    allowedActions: ['COMMIT', 'SPLIT', 'NEW-EPOCH', 'OVERRIDE'],
+    allowedActions: _epochEscapeValveActions(),
     ...(_ledgerLive ? { ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions } : {}),
   }
 }
