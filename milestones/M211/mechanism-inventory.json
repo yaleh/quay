@@ -1,0 +1,39 @@
+{
+  "mechanisms": [
+    {
+      "id": "readonly-audit-core",
+      "owner": "execute-milestone.js Audit phase (both .claude/workflows and plugin/workflows mirrors) + composite-audit.ts snapshot/guard mode",
+      "proofSurface": ".claude/workflows/execute-milestone.js",
+      "dependsOn": [],
+      "independentlyShippable": true,
+      "rationale": "One atomic read-only-Audit safety contract grouping three inseparable call-site variants: (a) per-shard dispatch of one audit-shard-<id> agent per manifest.auditShards[] entry (composite-contracts.ts:44) scoped to taskIds; (b) the workflow's own inline-DSL before/after git-status diff that hard-fails any non-empty delta as audit-shard-write-violation:<id>; (c) stripping the composite CHECKLIST/DISPOSITION/DEVIATION write instructions from the Audit prompt (currently execute-milestone.js:295/298/315). No strict subset ships with a complete safety contract: dispatch without the diff multiplies unenforced writers; the diff without stripping writes fails every audit (the agent writes by design today); stripping writes without a downstream writer (Reconcile/D4) orphans them. Lands as one unit; legacy width-1 Audit is untouched (compatibility oracle / golden replay). Carries audit-cli-modes and shard-verdict-combine as inseparable call-site variants of the same contract."
+    },
+    {
+      "id": "audit-cli-modes",
+      "owner": "composite-audit.ts (experiments/quay-perpetual-stream/scripts + plugin/scripts mirrors)",
+      "proofSurface": "experiments/quay-perpetual-stream/scripts/composite-audit.ts",
+      "dependsOn": [
+        "readonly-audit-core"
+      ],
+      "independentlyShippable": false,
+      "rationale": "New non-selftest --snapshot/--guard/--combine-json CLI modes (wrapping the already-exported combineShardVerdicts, L93) exist solely to be invoked from the workflow's dispatch/enforcement/combine prompt text — the DSL has no import capability, so every production callsite is a prompt-text command string (same pattern as composite-preflight.ts at execute-milestone.js:133). With no production importer they are --selftest-only dead code — exactly the state AC1 fails on — so they have no independent shippable value. Distinct proofSurface from readonly-audit-core (the .ts module vs the workflow file)."
+    },
+    {
+      "id": "shard-verdict-combine",
+      "owner": "single audit-combine agent -> composite-audit.ts --combine-json",
+      "proofSurface": "combineShardVerdicts",
+      "dependsOn": [
+        "readonly-audit-core"
+      ],
+      "independentlyShippable": false,
+      "rationale": "One audit-combine agent (distinct label, excluded from the shard-count check) invoking the real exported combineShardVerdicts() (composite-audit.ts:93, verified real/exported, today reached only via selftest/tests) to produce the generation-bound BundleAuditResult that the workflow's verdict branch consumes (execute-milestone.js:387-397 read a single auditResult.verdict). combine of <=1 shard is degenerate, so it is REQUIRED by the per-shard dispatch to yield a single consumable verdict and has no independent user value; AC3 falsifies reimplementation via import grep. proofSurface is the real symbol it must wrap, distinct from the other two entries."
+    }
+  ],
+  "inventory": {
+    "ok": true,
+    "count": 1,
+    "inventoryHash": "mi-0ff93b40",
+    "mechanismCount": 1
+  },
+  "source": "typed"
+}

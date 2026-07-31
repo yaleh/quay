@@ -1,0 +1,50 @@
+[
+  {
+    "id": "25a73e97",
+    "subsystem": "proposal/prose-vs-schema",
+    "summary": "Proposal prose says each shard is 'scoped only to that shard's declared task IDs/AC indexes/invariant/integrated generation', but DIR-119-D1's landed CompositeAuditShard type is only {id, kind, taskIds}; the integration invariant lives on CompositePhase.integrationInvariant and AC indexes/generation are not shard fields.",
+    "severity": "minor",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "plan",
+    "evidence": "experiments/quay-perpetual-stream/scripts/composite-contracts.ts:32-37 defines CompositeAuditShard {id, kind, taskIds} only; integrationInvariant is a field of CompositePhase (contracts.ts:21-30), reached via phase.auditShardIds, not a shard field; synthesis (composite-manifest-synthesis.ts:215-248) emits shards {id:'shard-<id>-ac'|'shard-<...>-integration', kind, taskIds}. The Plan (docs/plans/M211-dir-119-d3.md, 'Grounded facts') correctly grounds the real {id,kind,taskIds} shape, and AC item 2 correctly keys the falsifiable scope check on taskIds only — so this is prose precision, not a wiring gap.",
+    "claimRef": "Proposal 'Chosen mechanism' para 3 ('scoped only to that shard's declared task IDs/AC indexes/invariant/integrated generation') and 'Requested action' #2",
+    "rootCauseKey": "shard-scope-prose-precision",
+    "repairable": true,
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "ed5a3c92",
+    "subsystem": "audit-readonly-enforcement",
+    "summary": "The read-only enforcement diffs git-status snapshots that an agent RETURNS; the workflow DSL has only phase/agent/parallel/log/args globals (no fs/child_process), so there is no out-of-band filesystem observer. A shard that forges its returned output — including the degenerate case of returning two empty/identical well-formed snapshots, which diff to an empty delta = PASS — can evade detection. Malformed manifest-read and malformed combine-input ARE fail-closed, but an empty-but-well-formed snapshot pair is not separately guarded.",
+    "severity": "major",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "accepted-risk",
+    "evidence": "Proposal: 'Snapshot transport remains within the platform's existing agent/tool trust boundary ... not cryptographic proof an agent process cannot forge its own output', and Risks 'Snapshot forgery / concurrent unrelated writers ... mechanical adjudication within the existing agent/tool trust boundary, not a cryptographic attestation' (mitigations: raw git-status retention in the artifact + single-driver discipline + independent wiring audit). Plan L134: inline DSL _diffAuditSnapshotLines runs on the RETURNED raw snapshot strings, raw output retained as the auditability backstop; Plan L102: takeGitSnapshot/execFileSync live in composite-audit.ts (run by an agent), not the DSL. DSL no-import/no-fs fact grounded in execute-milestone.js L24 globals. This is an explicitly disclosed, architecturally inherent accepted limitation (no stronger in-architecture mechanism exists), resolved by disclosure + mitigations rather than left unresolved — hence non-blocking.",
+    "claimRef": "Proposal 'Chosen mechanism' para 4 ('The workflow itself ... diffs the two snapshots') + 'Risks and mitigations' (Snapshot forgery)",
+    "rootCauseKey": "snapshot-trust-boundary",
+    "repairable": false,
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  },
+  {
+    "id": "d28224ce",
+    "subsystem": "split-sequencing",
+    "summary": "D3 strips composite write instructions from the Audit prompt and moves them 'entirely to Reconcile (DIR-119-D4)'; D4 (status todo) is what wires reconcile-apply as the sole composite writer and depends on D3. If D3 lands before D4 and a width>1 composite dispatch runs in between, checklist/absorb/deviation write-backs are orphaned (Audit no longer writes them, Reconcile not yet wired). The legacy width-1 Audit path is explicitly unchanged, so the default single-task production path is unaffected, and human-steered sequential landing mitigates the window — but the transient orphan-write window is not called out explicitly.",
+    "severity": "minor",
+    "blocking": false,
+    "everBlocking": false,
+    "disposition": "plan",
+    "evidence": "Proposal 'Chosen mechanism' para 1: 'Remove every composite checklist/absorb/deviation/dashboard/lifecycle/status write instruction ... (composite mode only — legacy width-1 Audit is unchanged); that mutation moves entirely to Reconcile (DIR-119-D4's own scope).' DIR-119-D4 task (status todo) owns reconcile-apply as sole writer, AC5 confirms it is the ONLY writer, and it declares 'Depends on DIR-119-D3'. Current code confirms the writes live in Audit today (.claude/workflows/execute-milestone.js:288, 295, 298-300, 315-320). Non-goals correctly assign Reconcile/Land to D4/D5.",
+    "claimRef": "Proposal 'Chosen mechanism' para 1 + 'Non-goals' (DIR-119-D4/D5 scope)",
+    "rootCauseKey": "d3-d4-write-ownership-sequencing",
+    "repairable": true,
+    "status": "open",
+    "firstSeenRound": 0,
+    "lastSeenRound": 0
+  }
+]

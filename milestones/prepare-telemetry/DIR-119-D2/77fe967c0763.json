@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 2,
+  "recordId": "77fe967c0763",
+  "attemptId": "77fe967c0763",
+  "generationId": "77fe967c0763",
+  "admission": {
+    "key": ".::DIR-119-D2",
+    "ownerExecutionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c",
+    "fencingToken": 0,
+    "acquiredAt": 1785525137509
+  },
+  "workspace": ".",
+  "taskId": "DIR-119-D2",
+  "milestoneId": "M210",
+  "class": "development",
+  "highRisk": true,
+  "hashes": {
+    "charter": "7d609d3d18d097eca97002cbba52083e3b7bf42f2e033d579b3e9167d23d2a0d",
+    "taskContract": "9a93a5febe6c08ac45066af78120b4da39ad95131ef0d36336fc48d9743a016e",
+    "proposal": "e96a169481a45d992117508ca71f5f05d93a51918e042c47026208637ea3c3e1",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "prepared",
+    "reason": "prepared",
+    "phase": "Receipt",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": false,
+    "ok": null,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785530639429,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785525137509,
+      "endedAtMs": 1785525229760
+    },
+    {
+      "phase": "ProposalReview-delta-round-1",
+      "round": 1,
+      "startedAtMs": 1785525229760,
+      "endedAtMs": 1785525955854
+    },
+    {
+      "phase": "ProposalReview-delta-round-2",
+      "round": 2,
+      "startedAtMs": 1785525955854,
+      "endedAtMs": 1785526898523
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785526898523,
+      "endedAtMs": 1785527670821
+    },
+    {
+      "phase": "PlanCheck-round-1",
+      "round": 1,
+      "startedAtMs": 1785527670821,
+      "endedAtMs": 1785528069232
+    },
+    {
+      "phase": "PlanCheck-round-2",
+      "round": 2,
+      "startedAtMs": 1785528069232,
+      "endedAtMs": 1785529103483
+    },
+    {
+      "phase": "PlanCheck-round-3",
+      "round": 3,
+      "startedAtMs": 1785529103483,
+      "endedAtMs": 1785530075090
+    },
+    {
+      "phase": "Receipt",
+      "round": 0,
+      "startedAtMs": 1785530075090,
+      "endedAtMs": 1785530621226
+    },
+    {
+      "phase": "Receipt",
+      "round": 0,
+      "startedAtMs": 1785530621226,
+      "endedAtMs": 1785530639429
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "prepared",
+      "recurrenceKey": "d208e275c4d1",
+      "firstSeenGeneration": "77fe967c0763",
+      "lastSeenGeneration": "77fe967c0763"
+    },
+    {
+      "code": "e7fcc805",
+      "recurrenceKey": "54b5670dbcab",
+      "firstSeenGeneration": "77fe967c0763",
+      "lastSeenGeneration": "77fe967c0763"
+    },
+    {
+      "code": "5c28d343",
+      "recurrenceKey": "cdb454beea88",
+      "firstSeenGeneration": "77fe967c0763",
+      "lastSeenGeneration": "77fe967c0763"
+    },
+    {
+      "code": "6d335bf2",
+      "recurrenceKey": "36f438b7b410",
+      "firstSeenGeneration": "77fe967c0763",
+      "lastSeenGeneration": "77fe967c0763"
+    },
+    {
+      "code": "549a1c61",
+      "recurrenceKey": "4171fddd32c3",
+      "firstSeenGeneration": "77fe967c0763",
+      "lastSeenGeneration": "77fe967c0763"
+    },
+    {
+      "code": "5d75cb5d",
+      "recurrenceKey": "59b39f957d59",
+      "firstSeenGeneration": "77fe967c0763",
+      "lastSeenGeneration": "77fe967c0763"
+    },
+    {
+      "code": "da509b06",
+      "recurrenceKey": "b241aa8e51a1",
+      "firstSeenGeneration": "77fe967c0763",
+      "lastSeenGeneration": "77fe967c0763"
+    },
+    {
+      "code": "779e8ee2",
+      "recurrenceKey": "8536108b081b",
+      "firstSeenGeneration": "77fe967c0763",
+      "lastSeenGeneration": "77fe967c0763"
+    },
+    {
+      "code": "6bf36bfc",
+      "recurrenceKey": "895922376c6f",
+      "firstSeenGeneration": "77fe967c0763",
+      "lastSeenGeneration": "77fe967c0763"
+    }
+  ]
+}

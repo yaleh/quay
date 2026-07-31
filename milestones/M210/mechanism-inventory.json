@@ -1,0 +1,29 @@
+{
+  "mechanisms": [
+    {
+      "id": "json-cli-wraps",
+      "owner": "composite-build.ts (experiments/quay-perpetual-stream/scripts + byte-identical plugin/scripts mirror)",
+      "proofSurface": "experiments/quay-perpetual-stream/scripts/composite-build.ts",
+      "dependsOn": [],
+      "independentlyShippable": false,
+      "rationale": "Pure --plan-json/--map-evidence-json CLI wraps of the already-exported planPhaseExecution/mapEvidenceToTasks (verified exports at L37/L135; selftest 'parallel-agentcount-capped-below-task-count' untouched). The Plan declares staged inertness: no production caller until the dispatcher lands and runtime behavior is unchanged; the task's MASTER AC1 fails the WHOLE child if real production callsites are absent — so the wraps alone carry no independent user value and no complete value contract. Ships atomically with per-phase-build-dispatcher."
+    },
+    {
+      "id": "per-phase-build-dispatcher",
+      "owner": "execute-milestone.js (.claude/workflows + byte-identical plugin/workflows mirror)",
+      "proofSurface": ".claude/workflows/execute-milestone.js",
+      "dependsOn": [
+        "json-cli-wraps"
+      ],
+      "independentlyShippable": true,
+      "rationale": "ONE atomic behavior contract replacing the single unlabeled Build agent() (verified at L229): build-plan once → serial per-batch parallel() of exactly one labeled build-phase-<phaseId> agent per phase respecting requires → serial build-integrate as sole candidate-generation commit creator and --map-evidence-json caller; plus per-phase prompt scoping, maxParallelAgents-bounds-concurrency-not-ownership, fail-closed-mid-batch, and the _isComposite && _taskIds.length > 1 legacy/singleton boundary. No strict subset ships independently with a complete safety contract (workers without plan input, or integrate without workers, have no contract; the count/ordering/scoping/sole-commit properties are evidenced by ONE real composite dispatch). External dependency on DIR-119-D1's composite-manifest-synthesis.ts is for the proof run only — verified DIR-119-D1 status: done. Count of independentlyShippable:true entries = 1 → consistent with this task already being the second child of DIR-119-D's split; no further split indicated."
+    }
+  ],
+  "inventory": {
+    "ok": true,
+    "count": 1,
+    "inventoryHash": "mi-19c467fb",
+    "mechanismCount": 1
+  },
+  "source": "typed"
+}

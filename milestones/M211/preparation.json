@@ -1,0 +1,89 @@
+{
+  "taskId": "DIR-119-D3",
+  "milestoneId": "M211",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M211-dir119d3-audit-readonly-shards.md",
+  "planFile": "docs/plans/M211-dir-119-d3.md",
+  "ledgerFile": "milestones/M211/proposal-ledger.json",
+  "telemetryFile": "milestones/prepare-telemetry/DIR-119-D3/8cbfc240456f.json",
+  "mechanismInventoryFile": "milestones/M211/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "88b091ed3a39d6d8afb8fd000bb04f97a4e5301e4b54c45d263b4a43496e52b4",
+    "charter": "ebbe3877683cb4f298dc38187db2ee46233aa8ab2b55eef2030a1d5ba14a9fde",
+    "plan": "6f74906319666fdc2b2cf3515a3e8473be817479860b9e1fb711f19093cc9395",
+    "sources": {
+      "experiments/quay-perpetual-stream/scripts/composite-audit.ts": "58d259c0c30e4a2ee43a879db7395217d147183ff0f366fecc6c65ca256908bd",
+      "plugin/scripts/composite-audit.ts": "58d259c0c30e4a2ee43a879db7395217d147183ff0f366fecc6c65ca256908bd",
+      "experiments/quay-perpetual-stream/scripts/composite-reconcile.ts": "5e9ed1d1a7ea05e0f94191d5d436e00c70e6bc1e5a410d4a4fedcd11b0adb000",
+      ".claude/workflows/execute-milestone.js": "34ba8da91e3fed054b8dbcc7ad9ed3ca145f5fa5276dcbd63f46b41e7c127077",
+      "plugin/workflows/execute-milestone.js": "34ba8da91e3fed054b8dbcc7ad9ed3ca145f5fa5276dcbd63f46b41e7c127077",
+      "experiments/quay-perpetual-stream/scripts/composite-contracts.ts": "6d837784734f339559111197bc595c81906beaec2c1da7818fb22cb5ad9d9d2b",
+      "experiments/quay-perpetual-stream/scripts/composite-manifest-synthesis.ts": "e7eab02fa2cec730283d19c7b2dac1dfbe336de8caa231efb5a7b2369bdaf722",
+      "experiments/quay-perpetual-stream/test/composite-manifest-synthesis.test.mjs": "3161410388695a4bdc5a6accacd13fa3c0dccaa87d3034169af9099d1d2f5d86",
+      "plugin/test/composite-manifest-synthesis.test.mjs": "3161410388695a4bdc5a6accacd13fa3c0dccaa87d3034169af9099d1d2f5d86",
+      "scripts/test.sh": "9266a8b081dee6384e141adc2e72d5fe8d43a5c339feeb1071afc7a81948b6c5",
+      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "e14d46c3c016ec57009d368f1bafb2eb89bde017dd7aae7939d5ac7e04929be4"
+    },
+    "ledger": "64c6dae10e307db09083e48d62a55d80b38d8ca0831107be454dcac46c561896",
+    "telemetry": "2648aadfa245c79f43f71954e574988f89619417f627f6c2efa4a9fcc22b7e33",
+    "mechanismInventory": "f0e38f0955388269a9a20a8158c56ee7b7287ad28b94b1a44e541aca1e655537"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 2,
+    "findings": 0
+  },
+  "touches": [
+    ".claude/workflows/execute-milestone.js",
+    "plugin/workflows/execute-milestone.js",
+    "experiments/quay-perpetual-stream/scripts/composite-audit.ts",
+    "plugin/scripts/composite-audit.ts",
+    "experiments/quay-perpetual-stream/test/composite-audit.test.mjs",
+    "plugin/test/composite-audit.test.mjs",
+    "docs/plans/M211-dir-119-d3.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 2,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": true,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 0,
+    "proposalReviewRounds": 1,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785516277671,
+    "endedAtMs": 1785516277671,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "9162f9f3077c"
+      }
+    ]
+  }
+}

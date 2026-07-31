@@ -1,0 +1,101 @@
+{
+  "taskId": "DIR-119-D2",
+  "milestoneId": "M210",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M210-dir119d2-build-phase-dag.md",
+  "planFile": "docs/plans/M210-dir-119-d2.md",
+  "ledgerFile": "milestones/M210/proposal-ledger.json",
+  "telemetryFile": "milestones/prepare-telemetry/DIR-119-D2/77fe967c0763.json",
+  "mechanismInventoryFile": "milestones/M210/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "81cd0308cba3c2236484dde389ad5f21ffcc208421599a03027a3ad400501a71",
+    "charter": "7d609d3d18d097eca97002cbba52083e3b7bf42f2e033d579b3e9167d23d2a0d",
+    "plan": "dc946ab97c37ef222decb2f6c71a495286f6a7554656ae93d5128bedf5db75a9",
+    "sources": {
+      "experiments/quay-perpetual-stream/scripts/composite-build.ts": "23e659bd05cdb44ea6679eafdeded1a53cce329a88dca5da786440588c59c97c",
+      "plugin/scripts/composite-build.ts": "23e659bd05cdb44ea6679eafdeded1a53cce329a88dca5da786440588c59c97c",
+      "experiments/quay-perpetual-stream/scripts/composite-manifest-synthesis.ts": "e7eab02fa2cec730283d19c7b2dac1dfbe336de8caa231efb5a7b2369bdaf722",
+      "experiments/quay-perpetual-stream/scripts/composite-preflight.ts": "5437169799853f043c7f9e77ec7275b321e91cbf280f061d62aca1379d49c1a2",
+      "experiments/quay-perpetual-stream/scripts/composite-contracts.ts": "6d837784734f339559111197bc595c81906beaec2c1da7818fb22cb5ad9d9d2b",
+      "experiments/quay-perpetual-stream/test/composite-build.test.mjs": "132a6173b9cc89e03312af02cec0c01cb82b8d0dd1f5056d079adcd2fe0895ab",
+      ".claude/workflows/execute-milestone.js": "34ba8da91e3fed054b8dbcc7ad9ed3ca145f5fa5276dcbd63f46b41e7c127077",
+      "plugin/workflows/execute-milestone.js": "34ba8da91e3fed054b8dbcc7ad9ed3ca145f5fa5276dcbd63f46b41e7c127077",
+      "plugin/test/execute-milestone-build-phase-gate.test.mjs": "eb1bb06d32d9676d73a12ba0f902c3789ea05bc9a424d16f7806830afd0dceab",
+      "plugin/test/execute-milestone-disposition-conformance.test.mjs": "8c622cec10ad357ac21ef46849e1d4676e507dcc3ad3ed7e27b8ddfe799a50fe",
+      "plugin/test/execute-milestone-preparation-gate.test.mjs": "3ed6acc2d062c1af67cb8cd230bec4793bf4f5723025c913593e718d75f6aad0"
+    },
+    "ledger": "a697af3734df3fb69bb84e1cee1f8a46a71f8bd1c7001969266a494647c7766d",
+    "telemetry": "96374dc5d4b73a33373c580081414f880bbe2c372488657b1588bb6503022dfa",
+    "mechanismInventory": "40ca94a4843112e4ee713c210fd2f9cc38c7d09b76122f7a3fe52559491bd1b7"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 3,
+    "findings": 0
+  },
+  "touches": [
+    ".claude/workflows/execute-milestone.js",
+    "plugin/workflows/execute-milestone.js",
+    "experiments/quay-perpetual-stream/scripts/composite-build.ts",
+    "plugin/scripts/composite-build.ts",
+    "experiments/quay-perpetual-stream/test/composite-build.test.mjs",
+    "plugin/test/composite-build.test.mjs",
+    "docs/plans/M210-dir-119-d2.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 2,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 3,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": true,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 2,
+    "proposalReviewRounds": 3,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785525837410,
+    "endedAtMs": 1785527440167,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "ed7faa9e4cd1"
+      },
+      {
+        "round": 1,
+        "hash": "449c42472f7f"
+      },
+      {
+        "round": 2,
+        "hash": "940aff36ab23"
+      }
+    ]
+  }
+}
