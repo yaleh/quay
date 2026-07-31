@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "gap-build-phase-null-result-not-gated",
+  "charterHash": "316a1e04a70971f5b5e7b32100bf835ca83710e18c2e0ea8a4c5cc73a329212c",
+  "scopeHash": "37c2c3cd47bec914669a62a9c85c61c99b8c0e3e4129fe9ab63497ab780fe086",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "commit",
+  "reason": "Re-affirmed after DIR-125 delta-review round updated Proposal; still a tiny 2-line gate fix with wire-coverage false positives. Split not warranted.",
+  "authorizingSessionId": null,
+  "decidedAtMs": 1785480049008,
+  "invalidations": []
+}
