@@ -17,6 +17,7 @@ import {
   computeHumanSteered,
   isEpicBlockedByHumanSteeredChildren,
   classifyCandidate,
+  GETTASKLIST_TIMEOUT_MS_FLOOR,
 } from "../scripts/select-preflight.ts";
 
 const SCRIPT = fileURLToPath(new URL("../scripts/select-preflight.ts", import.meta.url));
@@ -109,6 +110,29 @@ test("getPendingDirectives: directive without extra → skipped", () => {
     { id: "DIR-001", labels: ["directive"] },
   ];
   assert.deepEqual(getPendingDirectives(tasks), []);
+});
+
+// ── getTaskList (gap-select-preflight-getTaskList-timeout-too-short) ────────────────────────────────
+// Regression guard: Build measured real `quay task list --json` wall time at 66-78s against the
+// current (475+ task) store (DIR-119-D1/M198 Build phase) — a hardcoded 60000ms execFileSync
+// timeout starves that call intermittently. GETTASKLIST_TIMEOUT_MS_FLOOR must stay at/above a
+// documented floor that gives real headroom over the measured 66-78s baseline, not just enough to
+// pass once.
+test("getTaskList: GETTASKLIST_TIMEOUT_MS_FLOOR is at or above the documented 78s measured-wall-time floor with real headroom", () => {
+  const MEASURED_WORST_CASE_MS = 78000;
+  assert.ok(
+    GETTASKLIST_TIMEOUT_MS_FLOOR > MEASURED_WORST_CASE_MS,
+    `GETTASKLIST_TIMEOUT_MS_FLOOR (${GETTASKLIST_TIMEOUT_MS_FLOOR}) must exceed the measured ` +
+      `worst-case wall time (${MEASURED_WORST_CASE_MS}ms) — regressing it back toward/below the ` +
+      `measured range reintroduces the intermittent FAIL-CLOSED halt this test guards against.`,
+  );
+  // Not just "greater than" — require real headroom, not a razor-thin margin.
+  assert.ok(
+    GETTASKLIST_TIMEOUT_MS_FLOOR >= 100000,
+    `GETTASKLIST_TIMEOUT_MS_FLOOR (${GETTASKLIST_TIMEOUT_MS_FLOOR}) must be at least 100000ms — ` +
+      `a value only marginally above 78000ms would not give "real headroom" as required by the ` +
+      `task's Acceptance Criteria.`,
+  );
 });
 
 // ── getCandidates ─────────────────────────────────────────────────────────────────────────────────

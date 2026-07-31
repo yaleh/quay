@@ -427,13 +427,25 @@ export function getCadence(workspaceRoot: string): CadenceResult | null {
 // ── getTaskList ───────────────────────────────────────────────────────────────────────────────────
 // Run quay task list --json and parse the output.
 // Returns the task array or null on failure.
+//
+// GETTASKLIST_TIMEOUT_MS_FLOOR (gap-select-preflight-getTaskList-timeout-too-short, 2026-07-31):
+// Build measured real `quay task list --json` wall time at 66-78s against the current (475+ task)
+// store during DIR-119-D1's (M198) Build phase — longer than the previous hardcoded 60000ms
+// execFileSync timeout, causing intermittent FAIL-CLOSED halts. 120000ms gives real headroom
+// (~1.5-1.8x the measured worst case) over that baseline, not just enough to pass once.
+export const GETTASKLIST_TIMEOUT_MS_FLOOR = 120000;
 export function getTaskList(workspaceRoot: string): any[] | null {
   const quayCli = path.join(workspaceRoot, "packages", "quay", "bin", "quay.ts");
   try {
     const stdout = execFileSync(
       "node",
       ["--experimental-strip-types", quayCli, "task", "list", "--json"],
-      { encoding: "utf8", timeout: 60000, maxBuffer: 50 * 1024 * 1024, cwd: workspaceRoot },
+      {
+        encoding: "utf8",
+        timeout: GETTASKLIST_TIMEOUT_MS_FLOOR,
+        maxBuffer: 50 * 1024 * 1024,
+        cwd: workspaceRoot,
+      },
     ).trim();
     return JSON.parse(stdout);
   } catch {
