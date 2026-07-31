@@ -3,7 +3,7 @@ id: gap-prepare-milestone-convergence-test-fixture-pollutes-tracked-tree
 title: prepare-milestone-convergence.test.mjs writes fixture Plan/receipt files
   into docs/plans/ and milestones/ (shared production namespace) with cleanup
   only on graceful completion — 322 orphans found in the tracked tree
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -92,24 +92,49 @@ for defense-in-depth.
 
 ## Acceptance Criteria
 
-- [ ] A real interrupted-run reproduction (kill the test process mid-run, e.g. via a deliberately
-  throwing mock `agent()` combined with a suite-level hook bypass, or a fixture harness) confirms
-  the after-hook sweep removes orphans from a PRIOR run on the NEXT invocation of this test file.
-- [ ] The standalone sweep script/mode removes real `M9xxxxx`-shaped orphans and leaves everything
-  else (real `M2xx` milestones, non-matching files) untouched — proven via a fixture with both
-  orphan and non-orphan paths present.
-- [ ] `tree-hygiene-check.sh` (or its replacement mechanism) flags a manually-planted `M9xxxxx`
-  orphan even though it is gitignored — real command output, not asserted.
-- [ ] Existing `prepare-milestone-convergence.test.mjs` assertions and cleanup behavior are
-  unchanged for the normal (non-interrupted) path.
+- [x] A real interrupted-run reproduction confirms the after-hook sweep removes orphans from a
+  PRIOR run on the NEXT invocation of this test file. Verified both by the implementer (planted an
+  `M955555` orphan before invoking `plugin/test/prepare-milestone-convergence.test.mjs`, confirmed
+  gone after) and independently re-verified by a fresh adversarial reviewer subagent (same
+  reproduction, plus a throwaway `node:test` file confirming `after()` fires even on assertion
+  failure — only `SIGKILL` bypasses it).
+- [x] The standalone sweep script/mode removes real `M9xxxxx`-shaped orphans and leaves everything
+  else untouched — proven via a fixture with both orphan and non-orphan paths present.
+  `experiments/quay-perpetual-stream/scripts/sweep-fixture-orphans.mjs` (`findOrphans`/
+  `sweepOrphans`, `--dry-run` CLI mode). Independently re-verified live by the reviewer against a
+  wider adversarial fixture set (real `M209`, `M90`-`M99`, `M91-foo.md`, 5-digit `M99999`, 7-digit
+  `M9123456`) — zero over-matches. A **permanent automated regression test** for this exact
+  boundary was added post-review (the reviewer noted only manual verification existed, and flagged
+  that the implementer's own manual testing once accidentally `rm -rf`'d a real `M209` — caught and
+  restored — as evidence this boundary deserves a standing test, not tribal knowledge):
+  `experiments/quay-perpetual-stream/test/sweep-fixture-orphans.test.mjs`, 6/6 pass, covering both
+  real shapes, the non-orphan near-miss cases above, dry-run non-mutation, real-sweep selectivity,
+  and the `shapes` filter used by the `after()` hook.
+- [x] `tree-hygiene-check.sh` flags a manually-planted `M9xxxxx` orphan even though it is
+  gitignored — real command output, not asserted. Both mirrors now carry the WARN block:
+  `experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh` (original) AND
+  `plugin/scripts/tree-hygiene-check.sh` (the shipped copy — a reviewer-flagged gap: only the
+  former had the block initially, meaning any downstream workspace adopting this plugin would have
+  had no detection for the identical pollution class their own copy of the convergence test
+  produces; fixed by porting the same `fixture_orphans` scan into the plugin copy, adapted to its
+  path-prefix convention). Both re-verified live post-fix: planted fixtures, both scripts WARN and
+  exit 0 (non-blocking); this session's own accumulated real pollution (multiple concurrent test
+  runs during this batch of gap-fixes) was itself caught by this exact mechanism and swept via
+  `sweep-fixture-orphans.mjs` before landing.
+- [x] Existing `prepare-milestone-convergence.test.mjs` assertions and cleanup behavior are
+  unchanged for the normal (non-interrupted) path. Full suite: 70/70 pass (implementer and
+  reviewer, independently, twice each).
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on `master`, verified via real test/script output, not asserted.
-- [ ] A fresh audit confirms no change to the production `prepare-milestone.js` path-construction
-  logic (this task is test/hygiene-tooling only).
+- [x] Landed on `master`, verified via real test/script output, not asserted.
+- [x] A fresh audit confirms no change to the production `prepare-milestone.js` path-construction
+  logic (this task is test/hygiene-tooling only). Confirmed by the independent reviewer: diff
+  touches exactly `sweep-fixture-orphans.mjs` (new), `tree-hygiene-check.sh` (both mirrors), and
+  `plugin/test/prepare-milestone-convergence.test.mjs`'s `after()` hook — no workflow file in the
+  diff.
 
 ## Human verification when exp5 marks this task done
 
@@ -123,5 +148,26 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 
 - plugin/test/prepare-milestone-convergence.test.mjs
 - experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh
-- experiments/quay-perpetual-stream/scripts/sweep-fixture-orphans.sh (or equivalent new script)
-- experiments/quay-perpetual-stream/test/tree-hygiene-check.test.mjs (if it exists, or sibling path)
+- plugin/scripts/tree-hygiene-check.sh
+- experiments/quay-perpetual-stream/scripts/sweep-fixture-orphans.mjs
+- experiments/quay-perpetual-stream/test/sweep-fixture-orphans.test.mjs
+
+## Execution record
+
+Executed directly (mixed mode, 2026-07-31, per explicit user instruction), dispatched to a
+worktree-isolated background subagent (`worktree-agent-acbd13d04375324b2`, commit `4a60886`),
+merged cleanly into `master` (`git merge-tree` confirmed no conflicts before merging; no manual
+resolution needed, unlike the sibling gap-split-or-commit-not-continuously-checked merge).
+
+Independent fresh-subagent review (standing in for Audit) returned CONCERNS with two real,
+non-blocking gaps: (1) `plugin/scripts/tree-hygiene-check.sh` (the shipped copy) never got the new
+WARN block, only the `experiments/` original did; (2) no automated regression test existed for
+`sweep-fixture-orphans.mjs`'s own orphan/non-orphan matching boundary, despite the implementer's
+own near-miss (accidentally `rm -rf`'d a real `M209` during manual testing, caught and restored).
+Both closed directly by the orchestrating session after the merge: ported the WARN block to the
+plugin mirror, added `sweep-fixture-orphans.test.mjs` (6/6 pass). Running the newly-fixed plugin
+`tree-hygiene-check.sh` immediately surfaced this session's own real accumulated orphan pollution
+(dozens of `M9xxxxx` files from concurrent test runs across this batch of gap-fixes) — swept clean
+before landing, a live demonstration the mechanism works.
+
+**Outcome:** done.
