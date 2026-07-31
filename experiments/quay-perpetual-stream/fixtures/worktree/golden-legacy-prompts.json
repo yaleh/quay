@@ -1,0 +1,100 @@
+{
+  "phases": [
+    "Verify",
+    "Prepared",
+    "Build",
+    "Audit",
+    "Gate",
+    "Land"
+  ],
+  "calls": [
+    {
+      "label": "ceiling-check",
+      "phase": null,
+      "prompt": "FIRST extract gap-XXX-style IDs from the charter's ## Scope and ## Done-when sections (e.g. UQ-042). Skip IDs in the **Task:** header. Skip DIR-NNN IDs entirely — directives are TASK-CANONICAL (DIR-028: the single source of truth is tasks/DIR-NNN.md's own status/dirStatus field, already verified when the charter was authored), not tracked in experiments/quay-continuous-bootstrap/gap-list.md, so it0-ceiling-check.sh (which only greps that legacy gap-list) cannot resolve them and a DIR-NNN citation must never be passed to it. Likewise skip any extracted ID for which a real task file exists at tasks/<id>.md — task-canonical gap-<slug> tasks (e.g. gap-config-wiring-check-symlink-noop) are the SAME TASK-CANONICAL class as DIR-NNN (their own status field is authoritative, they are not legacy gap-list.md rows, and it0-ceiling-check.sh structurally cannot resolve them either); check with a real `test -f tasks/<id>.md` before passing any ID to the script. If NO IDs remain after both skips (directive-only, task-canonical-gap-only, or gap-list-irrelevant charter): return {check:\"ceiling-check\",ok:true,detail:\"vacuous — no legacy gap-list IDs in charter Scope/Done-when (DIR-NNN and task-canonical gap-<slug> citations, if any, are TASK-CANONICAL and out of this check's scope)\",source:\"script\"}. If legacy gap-list IDs remain after both skips: run bash experiments/quay-perpetual-stream/scripts/it0-ceiling-check.sh --milestone 999 <id1> <id2> ... and return {check:\"ceiling-check\",ok:<exit===0>,detail:\"<stdout last 2000 chars>\",source:\"script\"}."
+    },
+    {
+      "label": "gate-hash",
+      "phase": null,
+      "prompt": "Run: bash experiments/quay-perpetual-stream/scripts/it0-gate-hash-check.sh --by-reference milestones/M999/M999-charter.md. Non-zero=GATE-HASH-REF mismatch; zero=hash matches. Return {check:\"gate-hash\",ok:<exit===0>,detail:\"<stdout>\",source:\"script\"}."
+    },
+    {
+      "label": "line-budget",
+      "phase": null,
+      "prompt": "Run: bash experiments/quay-perpetual-stream/scripts/it0-ceiling-line-budget-check.sh milestones/M999/M999-charter.md. Non-zero=exceeds line budget; zero=within budget. Return {check:\"line-budget\",ok:<exit===0>,detail:\"<stdout>\",source:\"script\"}."
+    },
+    {
+      "label": "dogfood-evidence",
+      "phase": null,
+      "prompt": "Run: bash experiments/quay-perpetual-stream/scripts/it0-dogfood-evidence-gate.sh --milestone 999 milestones/M999/M999-charter.md. Non-zero=evidence-gap; zero=all claimed clauses have nearby fenced evidence. Return {check:\"dogfood-evidence\",ok:<exit===0>,detail:\"<stdout>\",source:\"script\"}."
+    },
+    {
+      "label": "domain-misfit",
+      "phase": null,
+      "prompt": "Apply the domain-misfit audit-channel decision procedure (inherited-core.md) to milestone task GOLDEN-TASK's Done-when list (charter: milestones/M999/M999-charter.md). Return {ok: true, step3conclusion} — ok indicates the check completed (always true when the procedure was applied); step3conclusion records whether a misfit was found. This check is INFORMATIONAL, never blocking."
+    },
+    {
+      "label": "composite-preflight",
+      "phase": null,
+      "prompt": "Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/composite-preflight.ts --args-json '{\"taskId\":\"GOLDEN-TASK\",\"charterFile\":\"milestones/M999/M999-charter.md\",\"absorbEntryFile\":\"/dev/null\",\"preparationReceiptFile\":\"/tmp/golden-receipt.json\"}'. This is DIR-119-B's (M189) Stage 2.1/2.2 mechanical check: it re-validates argument normalization (legacy {taskId,...} OR new {milestoneCandidate:{taskIds,...}, compositeManifestFile,...} — NEVER rejected on task-array length) and, ONLY when a compositeManifestFile is present, the composite contract (membership/AC-phase-audit coverage/acyclic phase DAG/union touches+semantic-resources/forbidden-temporal-edge exclusion/capacity/atomic Land). A legacy single-task call or a new-shape call with no manifest file is a VACUOUS PASS (golden replay for the pre-existing path is unaffected). Non-zero exit = normalization or contract failure — paste the JSON stdout. Return {check:\"composite-preflight\",ok:<exit===0>,detail:\"<stdout>\",source:\"script\"}."
+    },
+    {
+      "label": "preparation-check",
+      "phase": "Prepared",
+      "prompt": "Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task tasks/GOLDEN-TASK.md --charter milestones/M999/M999-charter.md --receipt /tmp/golden-receipt.json\nReturn {ok: <exit code === 0>, code: <the PASS:/FAIL: code printed>, detail: <the full line printed>}."
+    },
+    {
+      "label": null,
+      "phase": "Build",
+      "prompt": "BUILD the inner iteration for milestone task GOLDEN-TASK. DO THE ACTUAL WORK — you are the build executor, not a dispatcher.\n\nCharter file: milestones/M999/M999-charter.md\nAbsorb entry path: /dev/null\n\n1. PRE-FLIGHT: ensure extra.acceptance is set on the task via task_write:\n   extra.acceptance = \"bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh GOLDEN-TASK milestones/M999/M999-charter.md /dev/null\"\n\n1a. BACKLOG-ROW SURFACE TAG (gap-absorb-entry-clause-disposition-sequencing / M180, it0-dod-check.ts\n    clause7): read `/dev/null`'s `## Backlog row` pipe-delimited line. If it has NO\n    `surface:<label>` token at all, add one now, chosen accurately from this milestone's real\n    `## Touches` list: `method-infra`/`docs`/`cross-cutting`/`packaging` for a non-product-\n    touching milestone, or `cli`/`web-ui`/`provider-abi`/`mcp` for a milestone that touches\n    `packages/quay*` product code. Never fabricate — pick the label(s) that actually match the\n    Touches list. If the row already carries an accurate `surface:` token, leave it as-is.\n\n2. CLASS-ROUTE: This is a development-class task (capability-growth). Read the task body and charter, then implement each item in the Done-when list.\n\n3. IMPLEMENT: Make the actual code changes needed to satisfy all AC and Done-when clauses. For each:\n   - Edit/create files as needed\n   - Run tests to verify\n   - Record what was done\n\n   TIMEOUT DISCIPLINE (DIR-090): when using the Bash tool to run long-running commands:\n   npm install, npm test, npm ci, node --test, npx, git clone, git fetch\n   — you MUST pass timeout: 300000 (5 minutes) or higher. The Bash tool's default\n   is 120s which is insufficient. If a test suite or install takes longer than 5m,\n   raise the timeout further. Never run these commands with the Bash tool's implicit\n   default timeout.\n\n4. EVIDENCE: Write iteration report to <MILESTONE_ROOT>/iterations/iteration-0.md, where\n   MILESTONE_ROOT is resolved via the ONE authoritative path-prefix rule\n   (gap-build-phase-iteration-evidence-path-not-single-sourced — the SAME single-sourced resolver\n   Audit/Land already use, never re-derived by hand): run `source\n   experiments/quay-perpetual-stream/scripts/gate-script-lib.sh && gate_resolve_milestone_root\n   999` to get MILESTONE_ROOT.\n\n5. COMMIT all changes with a descriptive message.\n\nReturn {taskId, outcome: \"done\", iterationCount, mergeCommit: \"<short-sha>\"} on success, or {outcome: \"needs-human\", reason} on failure."
+    },
+    {
+      "label": null,
+      "phase": "Audit",
+      "prompt": "ADVERSARIAL ACCEPTANCE AUDIT for milestone task GOLDEN-TASK. FRESH CONTEXT — you have NOT seen the build.\n\nCHARGE (refute-first stance):\n1. AC SATISFACTION: read the task file tasks/GOLDEN-TASK.md's ## Acceptance Criteria.\n   For EACH criterion, try to REFUTE that it is actually met — citing the concrete\n   artifact/test output/diff, NOT the implementer's self-report. Any AC you cannot\n   confirm → REFUTED.\n1a. CHECKLIST WRITE-BACK (DIR-020): for each confirmed AC/DoD item, WRITE BACK to the\n    task file ticking - [x] with evidence citation. Leave - [ ] for unconfirmed items.\n2. DoD SATISFACTION: confirm the task's ## Definition of Done is satisfied.\n2a. DISPOSITION APPEND (gap-absorb-entry-clause-disposition-sequencing / M180): BEFORE running the\n    mechanical gate in step 3, append the following REAL (never fabricated) disposition lines to\n    `/dev/null` — e.g. via `cat >> /dev/null <<'EOF' ... EOF` — so\n    clause1/clause2 of the mechanical gate find them already written instead of failing on \"NO\n    disposition statement found\":\n    (i) a line containing the phrase `adversarial-audit disposition: <VERDICT>` where <VERDICT> is\n        the verdict you just determined from step 1 (NO REFUTATION FOUND / CONCERNS / REFUTED) —\n        write it only AFTER you have actually reached that verdict, never before.\n    (ii) run the SAME command the later Gate phase runs — `bash\n        experiments/quay-perpetual-stream/scripts/vmeta-lag-check.sh --counter <current\n        milestone_counter from experiments/quay-perpetual-stream/dashboard.md minus 1>\n        experiments/quay-perpetual-stream/v-meta-ledger.md` (read-only, cheap, safe to duplicate)\n        — then append a line containing `V_meta consolidation-lag: <verbatim reason/verdict text\n        from that command's own output>`. Copy the script's actual reason text; do not paraphrase\n        or invent a \"clear\" result if the script did not say so.\n3. MECHANICAL GATE: run experiments/quay-perpetual-stream/scripts/it0-dod-check.sh GOLDEN-TASK milestones/M999/M999-charter.md\n   /dev/null. Non-zero exit = REFUTED by construction.\n4. DEVIATION-LOG WRITE-BACK (DIR-017 Step 3 / M36): if you find a REFUTED or CONCERNS,\n   write a deviation row to dashboard.md's \"Homeostatic variables (DIR-017 Step 3)\" table:\n   (i) caught-by: machine — your OWN finding this same pass; (ii) caught-by: human — an\n   ABSORB entry disclosure the outer loop already drafted (the audit transcribes it, does\n   not originate it). Each row must carry level / caught-by / caught-at / description /\n   status (open) / age (0). This is the SAME audit agent performing the write-back — no\n   separate writer, no split timing.\n\nOutput to <MILESTONE_ROOT>/audits/iteration-0-acceptance-audit.md, where MILESTONE_ROOT is\nresolved via the ONE authoritative path-prefix rule (gap-absorb-charter-audit-not-committed / M176,\nroot cause 3 — single-sourced, ADR-004): run `source experiments/quay-perpetual-stream/scripts/gate-script-lib.sh && gate_resolve_milestone_root 999`\nto get MILESTONE_ROOT. Never re-derive the milestones/ vs experiments/.../milestones/ boundary by\nhand — that function is the only place the \">= 130\" rule is allowed to live.\n\t4a. STAGE THE AUDIT FILE (DIR-M176): immediately after writing it, `git add` this audit file —\n\t    it must never be left untracked for Land to discover (that is exactly the gap M176 closes;\n\t    Land's own CAPTURE step is a mechanical backstop, not a substitute for staging it here).\n\t5. SESSION-ID (DIR-093): BEFORE writing the audit artifact, run `echo $CLAUDE_CODE_SESSION_ID` to discover your REAL session ID (this is set by the harness and cannot be forged). Write `**Audit session id:** <that-id>` as the FIRST content line of the audit artifact (after the title). Return the discovered session ID as `auditSessionId` in your structured output.\n\n\tReturn {verdict: 'NO REFUTATION FOUND'|'CONCERNS'|'REFUTED', detail, concernsDetail, auditSessionId}."
+    },
+    {
+      "label": "vmeta-lag",
+      "phase": null,
+      "prompt": "Run vmeta-lag-check.sh --counter <extract current milestone_counter from experiments/quay-perpetual-stream/dashboard.md minus 1> experiments/quay-perpetual-stream/v-meta-ledger.md. This reads the V_meta ledger (NOT the absorb entry). Return {ok, detail}. Non-zero = ALARM → HARD BLOCK."
+    },
+    {
+      "label": "dash-budget",
+      "phase": null,
+      "prompt": "Run it0-dashboard-line-budget-check.sh. Return {ok, detail}. Non-zero = dashboard exceeds 1200-line cap → HARD BLOCK."
+    },
+    {
+      "label": "tree",
+      "phase": null,
+      "prompt": "Run tree-hygiene-check.sh. Return {ok, detail}. Non-zero = un-gitignored scratch on master → HARD BLOCK."
+    },
+    {
+      "label": "worktree",
+      "phase": null,
+      "prompt": "Run worktree-branch-hygiene-check.sh. Return {ok, detail}. Non-zero = orphaned milestone evidence → HARD BLOCK."
+    },
+    {
+      "label": "split-or-commit",
+      "phase": null,
+      "prompt": "Run quay gate --gate split-or-commit GOLDEN-TASK. Return {ok, detail}. Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK."
+    },
+    {
+      "label": null,
+      "phase": "Land",
+      "prompt": "LAND the milestone for task GOLDEN-TASK.\n\n1. MERGE the iteration worktree into master (DIR-027: loop runs on master directly).\n   Any conflict → per-file resolution, both sides read, reconciliation note recorded.\n   Never a blanket --ours/--theirs (DIR-013).\n2. CAPTURE, mechanical + unconditional (gap-absorb-charter-audit-not-committed / M176 —\n   NOT prose-conditional \"if a non-primary iteration produced evidence\"): resolve MILESTONE_ROOT\n   via `source experiments/quay-perpetual-stream/scripts/gate-script-lib.sh &&\n   gate_resolve_milestone_root 999` (the SAME single-sourced rule the Audit phase and\n   it0-dogfood-evidence-gate.sh use — never re-derive the milestones/ path boundary by hand), THEN\n   `git add` every currently-untracked file under `$MILESTONE_ROOT/audits/` and\n   `$MILESTONE_ROOT/iterations/` regardless of which iteration/phase produced it. ALSO\n   `git add milestones/M999/M999-charter.md` if it is still untracked (defense-in-depth: OUTER-LOOP.md's charter\n   step should already have staged it at authoring time — this is the backstop, not the primary\n   mechanism). Together this milestone's own charter+audit+iteration evidence lands in THIS commit\n   series — no manual sweep needed afterward. THEN PRUNE (DIR-033): if a non-primary iteration ALSO\n   produced evidence not on master, cherry-pick JUST that evidence file. Then git worktree remove +\n   git branch -d the now-merged branches.\n3. WRITE ABSORB log entry into dashboard.md's ## Log section (DIR-054 rolling-window\n   format): m<NN> · <task-id> · Δv=<realized> · audit=<verdict> · merge=<sha> · → milestones/M<NN>/\n4. UPDATE DASHBOARD (step 7): VT (sum weight·cov), slope (marginal Δv), ρ, charter-thickness,\n   discovery-latency, calibration-error, V_meta consolidation lag, milestone_counter++\n   (ONLY after all gates above cleared and master merge landed).\n5. REGENERATE backlog.md/dashboard.md views via experiments/quay-perpetual-stream/scripts/it0-backlog-regen.ts.\n6. RUN tree-hygiene-check.sh and worktree-branch-hygiene-check.sh one final time\n   to confirm the close-out is clean. Paste results.\n7. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/GOLDEN-TASK.md\n   appending a ## Execution record section (milestone id, iteration count, realized Δv,\n   merge commit SHA, one-line outcome summary) and setting status: done.\n8. PHI CONSOLIDATION CHECK: if a prior adaptation was REUSED UNCHANGED by THIS\n   (different-domain) milestone, consolidate it into inherited-core.md and retire\n   its citation (§4.2).\n\nCharter: milestones/M999/M999-charter.md\nAbsorb entry: /dev/null\nBuild outcome: {\"outcome\":\"done\",\"mergeCommit\":\"deadbeef\",\"iterationCount\":1}\nAudit verdict: NO REFUTATION FOUND\n\nReturn {taskId, outcome: 'done', mergeCommit, milestoneCounter}."
+    },
+    {
+      "label": "post-land-split-or-commit",
+      "phase": "Land",
+      "prompt": "Run the WHOLE-TASK-STORE split-or-commit scan to verify Land's own lifecycle write-back\n(status/parent/children mutations for task GOLDEN-TASK) did not introduce a PARENT-DONE-IFF-CHILDREN,\nSELECT-SPLIT, or CHILD-LINK-SYMMETRY violation (DIR-026). Run exactly:\n  bash plugin/scripts/it0-split-or-commit-check.sh .\nfrom the repository root — the WHOLE-STORE form (bare \".\" workspace-root, scans every tasks/*.md),\nNOT \"quay gate --gate split-or-commit GOLDEN-TASK\" (which only checks one task and was already run,\nagainst the PRE-Land state, earlier in this same workflow's Gate phase). Return\n{ok: <exit code === 0>, detail: \"<full stdout, or last 4000 chars if longer>\"}."
+    }
+  ],
+  "result": {
+    "outcome": "done",
+    "taskId": "GOLDEN-TASK",
+    "taskIds": [
+      "GOLDEN-TASK"
+    ],
+    "verifyCacheUpdates": {}
+  }
+}

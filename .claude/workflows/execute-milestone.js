@@ -79,6 +79,43 @@ const priorVerifyCache = $a.priorVerifyCache || {}
 // Extract milestone number for script invocations
 const _milestone = ($a.charterFile.match(/M(\d+)/) || [])[1] || '<extracted-from-charter>'
 
+// ── DIR-123: opt-in per-milestone git-worktree isolation ─────────────────────────────
+// `$a.isolationMode: 'worktree'` routes Build/Audit/Gate through a REAL per-milestone worktree
+// (created before Build via milestone-worktree.ts, merged back + removed at Land, which is the SOLE
+// phase touching the shared checkout) so two file-disjoint execute-milestone dispatches can run
+// genuinely concurrently. ANY mode other than the literal 'worktree' (including omitted) is
+// byte-for-behavior the pre-DIR-123 direct-on-shared-tree path — golden replay, proven by
+// execute-milestone-worktree.test.mjs, never asserted. The path/branch derivation below is the
+// documented INLINE MIRROR of milestone-worktree.ts's pure computeIsolationPlan/milestoneRootRel (the
+// workflow DSL has no import capability — the SAME mirror pattern composite-args.ts uses above); the
+// Build/Land agents invoke milestone-worktree.ts's CLI for the REAL git operations, and the
+// execute-milestone-worktree test pins this inline mirror against the .ts single-source so it cannot
+// silently drift. Same opt-in-then-prove posture as DIR-117's Prepared phase: this does NOT force a
+// permanent default switch.
+const _isolationPlan = (() => {
+  const mode = $a.isolationMode
+  if (mode == null || mode === '') return { isolated: false }
+  if (mode !== 'worktree') return { isolated: false, error: `unknown-isolation-mode: ${mode}` }
+  const num = Number((_milestone.match(/\d+/) || [])[0])
+  if (!Number.isFinite(num)) return { isolated: false, error: 'worktree-needs-numeric-milestone' }
+  const root = num >= 130 ? `milestones/M${num}` : `experiments/quay-perpetual-stream/milestones/M${num}`
+  return { isolated: true, milestoneNum: num, worktreeRel: `${root}/worktrees/iteration-0`, branch: `milestone/M${num}/iteration-0` }
+})()
+const _useWorktree = _isolationPlan.isolated === true
+// A REQUESTED-but-unusable isolation FAILS CLOSED rather than silently building on the shared checkout
+// — this covers BOTH `isolationMode:'worktree'` with no derivable numeric milestone AND any unknown
+// non-empty mode (a caller typo like 'worktre' must not silently drop isolation and reopen the
+// concurrent-collision risk). Silently falling back would defeat the whole point and is exactly the
+// "smart fallback standing in for a hard check" anti-pattern. Omitted/empty mode → legacy (golden
+// replay). Same return shape as the arg-normalization failure above (caller-fixable, surfaced at Verify).
+if ($a.isolationMode != null && $a.isolationMode !== '' && !_useWorktree) {
+  log(`Worktree isolation requested (isolationMode=${JSON.stringify($a.isolationMode)}) but unusable — ${_isolationPlan.error}. Failing closed (never silently falling back to the shared checkout).`)
+  return { outcome: 'needs-human', reason: _isolationPlan.error, phase: 'Verify' }
+}
+if (_useWorktree) {
+  log(`Worktree isolation ENABLED (DIR-123): Build/Audit/Gate operate in ${_isolationPlan.worktreeRel} (branch ${_isolationPlan.branch}); Land is the sole phase that merges back into the shared checkout.`)
+}
+
 // ── Per-check cache lookup ──
 function _cached(label) {
   const fp = cacheFingerprints[label]
@@ -349,18 +386,60 @@ Return {outcome: "done"|"needs-human", reason, mergeCommit: "<short-sha>", evide
 
 // ── Phase: Build (step 5) ───────────────────────────────────────────────────────────
 phase('Build')
+// DIR-123: under worktree isolation, create the REAL per-milestone worktree BEFORE building, so every
+// edit/test/commit below happens on the worktree branch, not the shared checkout. milestone-worktree.ts
+// performs the real `git worktree add` (fail-closed on a pre-existing path/branch — a same-milestone
+// double-dispatch is a collision the caller must see, never a silent reuse). Legacy (no isolation):
+// this whole block is skipped — byte-for-behavior unchanged (golden replay). This runs BEFORE the
+// composite/width-1 branch below so it applies to either Build route under worktree isolation.
+if (_useWorktree) {
+  const wtCreate = await agent(
+    `Create the REAL per-milestone git worktree for milestone ${_milestone} BEFORE building (DIR-123 worktree isolation). From the repository root, run the --add command and parse the single JSON line it prints:
+  node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-worktree.ts --add --workspace . --milestone ${_milestone}
+This performs a real \`git worktree add ${_isolationPlan.worktreeRel} -b ${_isolationPlan.branch}\`.
+
+THEN handle the outcome (DIR-123 review Obstacle 3 — recover from a PRIOR CRASHED dispatch of this SAME
+milestone, which would otherwise strand the worktree and fail-closed forever):
+ - outcome:"added" → done; report it.
+ - outcome:"error" with code "worktree-path-exists" or "branch-exists" → a prior attempt may have crashed
+   AFTER creating the worktree but BEFORE Land removed it. Run the idempotent cleaner:
+     node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-worktree.ts --clean-stale --workspace . --milestone ${_milestone}
+   It removes a stranded worktree+branch ONLY when that branch has ZERO commits ahead of master (i.e. the
+   crashed attempt never built anything real — unambiguous because the path/branch are milestone-scoped).
+     • outcome:"cleaned" → RETRY the --add command ONCE and report THAT result.
+     • outcome:"has-commits" → DO NOT clean (that branch holds REAL work). Report {ok:false} with this
+       detail so the workflow fails closed to needs-human for human reconciliation — never discard real work.
+     • outcome:"nothing-to-clean" → report {ok:false} (unexpected state; fail closed).
+ - any other outcome:"error" → report {ok:false} with the detail.
+
+Return {ok: <final outcome === "added">, worktreeAbs: <worktreeAbs field if added>, branch: <branch field>, detail: <the full final JSON line>}.`,
+    { label: 'worktree-create', phase: 'Build',
+      schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, worktreeAbs: { type: 'string' }, branch: { type: 'string' }, detail: { type: 'string' } } } }
+  )
+  if (!wtCreate || wtCreate.ok !== true) {
+    log(`Worktree creation FAILED — ${wtCreate?.detail || 'agent returned nothing'}. Cannot build in isolation; failing closed (never silently falling back to the shared checkout). A "has-commits" detail means a prior crashed attempt left REAL work on ${_isolationPlan.branch} — reconcile it by hand, never discard it.`)
+    return { outcome: 'needs-human', reason: 'worktree-create-failed', phase: 'Build', verifyCacheUpdates }
+  }
+  log(`Worktree created: ${_isolationPlan.worktreeRel} (branch ${_isolationPlan.branch}, abs=${wtCreate.worktreeAbs}). Build/Audit/Gate operate there; Land merges back.`)
+}
+// DIR-123: threaded into the Build prompt ONLY under worktree isolation ('' otherwise → the legacy
+// prompt is byte-identical). Tells the build executor to do ALL editing/testing/committing inside the
+// worktree on its branch, never the primary checkout.
+const _buildIsolationNote = _useWorktree
+  ? `\n\nWORKTREE ISOLATION (DIR-123): you are building inside the per-milestone git worktree at \`${_isolationPlan.worktreeRel}\` (branch \`${_isolationPlan.branch}\`), NOT the shared primary checkout. Do ALL editing, testing, \`git add\`, and \`git commit\` below from that worktree path (e.g. \`cd ${_isolationPlan.worktreeRel}\` first) so every commit lands on branch \`${_isolationPlan.branch}\`. Do NOT edit or commit anything in the primary checkout — Land is the ONLY phase that merges this branch back. Evidence files (iteration report, etc.) are written into the WORKTREE's copy of MILESTONE_ROOT.`
+  : ''
 // DIR-119-D2 (M210): the new per-phase DAG dispatcher fires IFF `_isComposite && _taskIds.length > 1`
 // (branches on WIDTH, not _isComposite alone — the composite-shaped singleton falls through to the
-// width-1 path). The single-agent prompt below stays BYTE-IDENTICAL and serves the width-1 path AND
-// that singleton; the composite path routes around it via _compositePhaseDagBuild() — additive, not a
-// rewrite (AC9 / guardrail G2).
+// width-1 path). The single-agent prompt below stays BYTE-IDENTICAL for the LEGACY width-1 path (DIR-123's
+// `_buildIsolationNote` is '' when no isolationMode) AND serves that singleton; the composite path routes
+// around it via _compositePhaseDagBuild() — additive, not a rewrite (AC9 / guardrail G2).
 const buildResult = (_isComposite && _taskIds.length > 1)
   ? await _compositePhaseDagBuild()
   : await agent(
     `BUILD the inner iteration for milestone task ${_primaryTaskId}. DO THE ACTUAL WORK — you are the build executor, not a dispatcher.
 
 Charter file: ${$a.charterFile}
-Absorb entry path: ${$a.absorbEntryFile}
+Absorb entry path: ${$a.absorbEntryFile}${_buildIsolationNote}
 
 1. PRE-FLIGHT: ensure extra.acceptance is set on the task via task_write:
    extra.acceptance = "bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh ${_primaryTaskId} ${$a.charterFile} ${$a.absorbEntryFile}"
@@ -414,8 +493,19 @@ Return {taskId, outcome: "done", iterationCount, mergeCommit: "<short-sha>"} on 
 
 // ── Phase: Audit (step 6 acceptance audit) ──────────────────────────────────────────
 phase('Audit')
+// DIR-123: threaded into the Audit prompt ONLY under worktree isolation ('' otherwise → byte-identical
+// legacy). CRITICAL for correctness: the build being audited lives in the WORKTREE, not the primary
+// checkout (Land has not merged yet) — an audit that read the primary checkout would see nothing and
+// wrongly REFUTE. execute-milestone-worktree.test.mjs proves Audit reads the worktree path via a
+// fixture where the worktree and primary checkout deliberately differ.
+const _auditIsolationNote = _useWorktree
+  ? `\n\nWORKTREE ISOLATION (DIR-123): the Build you are auditing happened inside the per-milestone worktree at \`${_isolationPlan.worktreeRel}\` (branch \`${_isolationPlan.branch}\`), NOT the primary checkout — Land has NOT merged it yet. READ the built artifacts, inspect diffs (\`git -C ${_isolationPlan.worktreeRel} diff\` / \`git -C ${_isolationPlan.worktreeRel} show\`), read files under \`${_isolationPlan.worktreeRel}/\`, and run the mechanical gate from THAT WORKTREE PATH. Auditing the primary checkout would see none of the build and wrongly REFUTE. Write your audit artifact into the WORKTREE's copy of MILESTONE_ROOT/audits/ and \`git add\` it there.
+   COMMIT-THE-AUDIT-EVIDENCE (DIR-123 review C1 — REQUIRED under worktree isolation): Build committed BEFORE this audit existed, so NOTHING you write is on the branch yet; and Land's \`git worktree remove --force\` DISCARDS any staged-but-uncommitted worktree content, so a merely-\`git add\`-ed audit artifact would be LOST on every worktree-isolated Land. Therefore, AFTER you finish steps 1–5 below, from the worktree path COMMIT your evidence onto the branch:
+     cd ${_isolationPlan.worktreeRel} && git add -A && git commit -m "audit: ${_primaryTaskId} acceptance audit + AC write-backs + disposition (DIR-123 worktree isolation)"
+   (\`git add -A\` picks up the audit artifact, the task-file AC-checkbox write-backs, the absorb-entry disposition line, and any deviation-log row you wrote.) This commit is the ONLY thing that carries your evidence to the primary — via Land's merge (serial path) or the fan-in's merge (concurrent path, where the branch must already hold the committed evidence BEFORE the fan-in merges it). Do NOT skip it. If there is genuinely nothing to commit, that is fine — but the audit artifact + AC write-backs are always something, so in practice this commit always happens.`
+  : ''
 const auditResult = await agent(
-  `ADVERSARIAL ACCEPTANCE AUDIT for milestone task ${_primaryTaskId}. FRESH CONTEXT — you have NOT seen the build.${_isComposite ? ` COMPOSITE CALL (DIR-119-B/M189): ${_taskIds.length} member tasks [${_taskIds.join(', ')}] — apply the same refute-first AC/DoD audit to EVERY member task's own file, not just ${_primaryTaskId} (step 1/1a below applies per-task). Beyond the per-task AC/DoD checklist write-back this shared audit agent already performs (unchanged, legacy behavior), it must never write absorb dispositions, dashboard entries, the milestone counter, or any lifecycle STATUS field for any member task — that mutation is Land's job below (composite-audit.ts's stricter shard-level read-only boundary is the target architecture once DIR-119-C wires a real per-shard dispatcher).` : ''}
+  `ADVERSARIAL ACCEPTANCE AUDIT for milestone task ${_primaryTaskId}. FRESH CONTEXT — you have NOT seen the build.${_isComposite ? ` COMPOSITE CALL (DIR-119-B/M189): ${_taskIds.length} member tasks [${_taskIds.join(', ')}] — apply the same refute-first AC/DoD audit to EVERY member task's own file, not just ${_primaryTaskId} (step 1/1a below applies per-task). Beyond the per-task AC/DoD checklist write-back this shared audit agent already performs (unchanged, legacy behavior), it must never write absorb dispositions, dashboard entries, the milestone counter, or any lifecycle STATUS field for any member task — that mutation is Land's job below (composite-audit.ts's stricter shard-level read-only boundary is the target architecture once DIR-119-C wires a real per-shard dispatcher).` : ''}${_auditIsolationNote}
 
 CHARGE (refute-first stance):
 1. AC SATISFACTION: read the task file tasks/${_primaryTaskId}.md's ## Acceptance Criteria.
@@ -481,21 +571,30 @@ if (AUDIT_SESSION_ID) {
 
 // ── Phase: Gate (step 6 all mechanical checks) ──────────────────────────────────────
 phase('Gate')
+// DIR-123: under worktree isolation, the build's task-file / working-tree changes live in the WORKTREE
+// (Land has not merged), so gates that inspect the working tree / task store must run against the
+// worktree path, not the pre-build primary checkout. Prefixed onto every gate prompt ONLY in worktree
+// mode ('' otherwise → byte-identical legacy prompts). Repo-level ledger checks (vmeta-lag, dashboard
+// line-budget) read the same shared ledgers either way; running them from the worktree cwd is harmless
+// and keeps one uniform instruction.
+const _gateWt = _useWorktree
+  ? `WORKTREE ISOLATION (DIR-123): first \`cd ${_isolationPlan.worktreeRel}\` (the build worktree, branch ${_isolationPlan.branch}) and run this gate FROM THERE so it checks the BUILT state (the task-file / working-tree changes are in the worktree; Land has not merged the primary checkout yet). Then `
+  : ''
 // DIR-119-B (M189) Stage 2.5: the task-scoped split-or-commit gate runs for EVERY member task
 // (not just the primary) — for a legacy single-task call (_taskIds.length===1) this is
 // byte-for-behavior identical to the pre-existing single gate call (same label, same command).
 const _splitOrCommitGates = _taskIds.map((tid) => () => agent(
-  `Run quay gate --gate split-or-commit ${tid}. Return {ok, detail}. Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK.`,
+  `${_gateWt}Run quay gate --gate split-or-commit ${tid}. Return {ok, detail}. Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK.`,
   { label: _isComposite ? `split-or-commit-${tid}` : 'split-or-commit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } },
 ))
 const gates = await parallel([
-  () => agent(`Run vmeta-lag-check.sh --counter <extract current milestone_counter from experiments/quay-perpetual-stream/dashboard.md minus 1> experiments/quay-perpetual-stream/v-meta-ledger.md. This reads the V_meta ledger (NOT the absorb entry). Return {ok, detail}. Non-zero = ALARM → HARD BLOCK.`,
+  () => agent(`${_gateWt}Run vmeta-lag-check.sh --counter <extract current milestone_counter from experiments/quay-perpetual-stream/dashboard.md minus 1> experiments/quay-perpetual-stream/v-meta-ledger.md. This reads the V_meta ledger (NOT the absorb entry). Return {ok, detail}. Non-zero = ALARM → HARD BLOCK.`,
     { label: 'vmeta-lag', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`Run it0-dashboard-line-budget-check.sh. Return {ok, detail}. Non-zero = dashboard exceeds 1200-line cap → HARD BLOCK.`,
+  () => agent(`${_gateWt}Run it0-dashboard-line-budget-check.sh. Return {ok, detail}. Non-zero = dashboard exceeds 1200-line cap → HARD BLOCK.`,
     { label: 'dash-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`Run tree-hygiene-check.sh. Return {ok, detail}. Non-zero = un-gitignored scratch on master → HARD BLOCK.`,
+  () => agent(`${_gateWt}Run tree-hygiene-check.sh. Return {ok, detail}. Non-zero = un-gitignored scratch on master → HARD BLOCK.`,
     { label: 'tree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`Run worktree-branch-hygiene-check.sh. Return {ok, detail}. Non-zero = orphaned milestone evidence → HARD BLOCK.`,
+  () => agent(`${_gateWt}Run worktree-branch-hygiene-check.sh. Return {ok, detail}. Non-zero = orphaned milestone evidence → HARD BLOCK.`,
     { label: 'worktree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
   ..._splitOrCommitGates,
 ])
@@ -537,6 +636,73 @@ const _compositeLandNote = _isComposite
   ? `\n\nCOMPOSITE LAND (DIR-119-B/M189, ${_taskIds.length} member tasks: ${_taskIds.join(', ')}): mark ALL of [${_taskIds.join(', ')}] status:done with their own Execution record write-back — NOT just ${_primaryTaskId}. Regardless of member count, this Land step still performs EXACTLY ONE milestone_counter increment and writes EXACTLY ONE dashboard log entry (composite-land.ts's atomic-Land invariant) — record task-completion count (${_taskIds.length}) separately in that one entry, never as N separate entries or N separate counter bumps.`
   : ''
 
+// DIR-123: the SERIAL Land path's step-1 merge instruction, mode-aware. (The CONCURRENT path uses
+// _concurrentLandStep below — under worktree isolation it defers the merge to the fan-in, which is the
+// SOLE merge owner per OUTER-LOOP step g.) Fixes the stale step-1 worktree-merge-into-master text that
+// described an action never real for the now-default no-worktree path.
+//  - WORKTREE MODE: Land is the SOLE phase touching the shared checkout. Step 1 ACQUIRES the single-
+//    flight Land lock and does the real merge + worktree-remove, but does NOT release the lock — the
+//    lock is held for the ENTIRE Land phase (released only by _landLockReleaseStep after step 8), so the
+//    CAPTURE commits, dashboard.md ## Log append, milestone_counter read-modify-write, and the
+//    it0-backlog-regen.ts regeneration ALL happen under it (DIR-123 review Obstacle 1: a lock covering
+//    only the merge left steps 3-5 racing → lost-update on milestone_counter/dashboard.md/backlog.md +
+//    a git-index race on the CAPTURE commits). A real merge conflict is the DEFINED same-file-conflict
+//    path (auto-aborted, marks needs-human, never blanket --ours/--theirs).
+//  - NO-ISOLATION MODE (default): Build committed directly to master, so there is NO worktree to merge
+//    — an explicit, accurate NO-OP (the legacy prompt's step-1 worktree-merge text was vestigial), and
+//    NO lock is taken (this is the strictly-serial default path; mixed-mode concurrency is forbidden —
+//    see the Obstacle-5 precondition documented in tasks/DIR-123.md / CLAUDE.md).
+// The no-isolation branch is the ONE intentional legacy-path prompt-text change DIR-123 makes
+// (Requested-action #4); it is behavior-preserving — execute-milestone-worktree.test.mjs's golden replay
+// proves it is the only legacy delta (_landLockReleaseStep is '' in no-isolation mode).
+const _landMergeStep = _useWorktree
+  ? `1. MERGE — DIR-123 worktree isolation (Land is the SOLE phase that touches the shared checkout):
+   a. ACQUIRE the single-flight Land lock — and HOLD IT for the ENTIRE Land phase (it is released only
+      in the final RELEASE step after step 8, so EVERY shared-checkout mutation below — this merge, the
+      CAPTURE commits, the dashboard.md ## Log append, the milestone_counter increment, and the
+      backlog/dashboard regeneration — happens under the lock; a concurrent worktree Land blocks until
+      this whole Land finishes): run
+      \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-worktree.ts --land-lock-acquire --workspace .\`
+      (this process inherits CLAUDE_CODE_SESSION_ID as the lock owner). If it prints
+      outcome:"land-already-running", WAIT for the other Land to finish and retry — never merge concurrently.
+   b. REAL merge of the worktree branch into the primary checkout (on master):
+      \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-worktree.ts --merge --workspace . --milestone ${_milestone}\`
+      (a real \`git merge --no-ff ${_isolationPlan.branch}\`). If it prints outcome:"conflict" with a
+      "files" list, that is the DEFINED same-file-conflict path — the pre-dispatch touches-orthogonality
+      check (concurrent-batch-scheduler.ts) should have prevented it; DO NOT blanket --ours/--theirs
+      (DIR-013): RELEASE the Land lock, then mark needs-human citing the conflicting files for per-file
+      human resolution (the merge was auto-aborted, leaving the shared checkout clean).
+   c. REMOVE the worktree + delete the now-merged branch (real operations):
+      \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-worktree.ts --remove --workspace . --milestone ${_milestone}\`
+      (real \`git worktree remove\` + \`git branch -d\`; \`-d\` refuses an UNMERGED branch as a backstop).
+      The Land lock STAYS HELD through steps 2-8 below; release it only in the final RELEASE step.`
+  : `1. NO WORKTREE MERGE (no-isolation mode — the default): Build committed DIRECTLY to the shared
+   checkout on master (DIR-027: the loop runs on master directly), so there is NO per-milestone
+   iteration worktree to merge — this merge step is a NO-OP, and NO Land lock is taken (this is the
+   strictly-serial default path). (Under \`isolationMode:'worktree'\` this step is instead a REAL merge
+   of the per-milestone worktree branch via milestone-worktree.ts, under a Land lock held for the whole
+   Land phase.) If the direct build left any conflict, resolve per-file: both sides read, reconciliation
+   note recorded. Never a blanket --ours/--theirs (DIR-013).`
+
+// DIR-123 (review Obstacle 1): the Land lock RELEASE, appended as the FINAL step of the SERIAL Land
+// (after step 8) under worktree isolation — '' in no-isolation mode, so the legacy serial prompt stays
+// byte-identical (golden replay). Releasing only here is what makes "Land is the sole serialized mutator"
+// literally true: the lock's scoped region equals the FULL set of shared-checkout mutations.
+const _landLockReleaseStep = _useWorktree
+  ? `\n9. RELEASE the Land lock — ONLY now, after ALL shared-checkout mutations above (step 1 merge/remove,
+   the CAPTURE commits, the dashboard.md ## Log append, the milestone_counter increment, the
+   backlog/dashboard regeneration) are complete:
+   \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-worktree.ts --land-lock-release --workspace .\`.
+   Holding the lock across the whole Land phase is what serializes concurrent worktree Lands over EVERY
+   shared-checkout write, not just the merge.`
+  : ''
+
+// DIR-123: the CAPTURE step's trailing worktree-prune clause, also mode-aware so no stale "git worktree
+// remove" text describes an action that isn't real for its path (Requested-action #4 grep-cleanliness).
+const _landCaptureTail = _useWorktree
+  ? `\n   (The per-milestone worktree was already merged + removed in step 1 above — nothing further to prune here.)`
+  : ` Then, ONLY if a non-primary iteration produced its OWN worktree evidence not on master, \`git worktree remove\` + \`git branch -d\` those now-merged branches — a NO-OP for the default single-iteration direct-to-master build, which creates no worktree.`
+
 const IS_CONCURRENT = $a.mode === 'concurrent'
 
 // ── Post-Land split-or-commit check (gap-split-or-commit-not-continuously-checked) ──────────
@@ -569,14 +735,76 @@ against the PRE-Land state, earlier in this same workflow's Gate phase). Return
 
 // ── Concurrent path (DIR-075/M142): defers shared-state writes to fan-in ──────────
 if (IS_CONCURRENT) {
+  // DIR-123 review Obstacle 2: worktree-mode + mode:'concurrent' must NOT contradict the fan-in's
+  // "SOLE merge owner / ¬parallel merge" invariant (OUTER-LOOP.md concurrent_execute step g). So under
+  // worktree isolation the per-workflow concurrent Land does NOT merge, does NOT remove the worktree,
+  // does NOT CAPTURE-commit on the primary, and does NOT take the Land lock — it leaves the worktree
+  // branch committed and returns buildBranch + worktreeRel. The fan-in (step g) is the single owner of
+  // ALL shared-checkout mutations: for each survivor, UNDER the Land lock, it merges buildBranch
+  // (--no-ff), CAPTUREs the evidence (git add + commit on the primary), removes the worktree + deletes
+  // the branch, then releases the lock. This also moves CAPTURE's shared-checkout commit UNDER the lock
+  // (fixing the concurrent-CAPTURE index race). The legacy no-isolation concurrent path below is
+  // unchanged (the fan-in already owned its merges). DECISION documented in tasks/DIR-123.md.
+  if (_useWorktree) {
+    const concurrentResult = await agent(
+      `LAND (concurrent + worktree-isolation mode) the milestone for task ${_primaryTaskId}. IN THIS MODE
+   you are part of a multi-milestone worktree-isolated batch, and the FAN-IN (OUTER-LOOP.md
+   concurrent_execute step g) is the SOLE merge owner — so YOU DO NOT MERGE AND DO NOT TOUCH THE SHARED
+   CHECKOUT AT ALL. Your Build committed this milestone's work on branch \`${_isolationPlan.branch}\` in
+   the worktree \`${_isolationPlan.worktreeRel}\`.
+
+1. DO NOT \`git merge\`, DO NOT \`git worktree remove\`, DO NOT \`git add\`/\`git commit\` on the primary
+   checkout, and DO NOT take the Land lock here. LEAVE the worktree and its branch exactly as they are —
+   the fan-in (step g) will, UNDER the single-flight Land lock, run milestone-worktree.ts --merge
+   (real \`git merge --no-ff ${_isolationPlan.branch}\`), CAPTURE this milestone's evidence (git add the
+   audits/iterations/charter + commit on the primary), then --remove (worktree remove + branch -d), then
+   release the lock. Doing any of that here would violate the SOLE-merge-owner invariant and race the
+   fan-in / other survivors on the primary git index.
+2. Do NOT update milestone_counter or dashboard.md (deferred to the serial fan-in absorb step).
+3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${_primaryTaskId}.md appending a
+   ## Execution record section (milestone id, iteration count, realized Δv, build branch
+   ${_isolationPlan.branch}, one-line outcome summary) and setting status: done. (This is a PER-TASK
+   store write, serialized by quay-native's per-task lock — NOT part of the shared-checkout race — so it
+   is safe to do here before the fan-in merges.)
+4. COMPUTE touchedFiles (READ-ONLY, safe): run \`git diff --numstat master..${_isolationPlan.branch}\`
+   from the repo root to get the files this build changed; collect column 3 into a flat array.
+5. DRAFT a one-line dashboard entry for this milestone: "m<NN> · ${_primaryTaskId} · Δv=<realized> ·
+   audit=${auditResult?.verdict || 'NO REFUTATION FOUND'} · merge=<pending fan-in> · → milestones/<NN>/"${_compositeLandNote}
+
+Charter: ${$a.charterFile}
+Build outcome: ${JSON.stringify(buildResult)}
+Audit verdict: ${auditResult?.verdict}
+
+Return {taskId: "${_primaryTaskId}", outcome: "done",
+  buildBranch: "${_isolationPlan.branch}", worktreeRel: "${_isolationPlan.worktreeRel}",
+  touchedFiles: ["relative/path/to/file1.ts", ...],
+  dashboardEntry: "<markdown block for serial-fanin-absorb.ts>"}.`,
+      { phase: 'Land',
+        schema: { type: 'object', required: ['outcome', 'buildBranch', 'touchedFiles', 'dashboardEntry'], properties: {
+          taskId: { type: 'string' }, outcome: { type: 'string' },
+          buildBranch: { type: 'string' }, worktreeRel: { type: 'string' },
+          touchedFiles: { type: 'array', items: { type: 'string' } },
+          dashboardEntry: { type: 'string' },
+        } } }
+    )
+    const postLandCheck = await postLandSplitOrCommitCheck()
+    if (!postLandCheck?.ok) {
+      log(`Land post-mutation split-or-commit check FAILED (concurrent+worktree, gap-split-or-commit-not-continuously-checked) — ${postLandCheck?.detail || 'no detail'}`)
+      return { outcome: 'needs-human', reason: 'post-land-split-or-commit-violation', phase: 'Land', postLandSplitOrCommit: postLandCheck, verifyCacheUpdates }
+    }
+    log(`Land phase complete (concurrent + worktree) — milestone ${_primaryTaskId} deferred its merge to the fan-in (buildBranch=${_isolationPlan.branch}); touched ${(concurrentResult?.touchedFiles || []).length} files.`)
+    return { outcome: 'done', taskId: _primaryTaskId, taskIds: _taskIds,
+      buildBranch: _isolationPlan.branch, worktreeRel: _isolationPlan.worktreeRel,
+      touchedFiles: concurrentResult?.touchedFiles, dashboardEntry: concurrentResult?.dashboardEntry, verifyCacheUpdates }
+  }
+
+  // ── Legacy concurrent path (no isolation): UNCHANGED — fan-in owns merges; per-workflow CAPTURE. ──
   const concurrentResult = await agent(
     `LAND (concurrent mode) the milestone for task ${_primaryTaskId}. IN CONCURRENT MODE:
    you are part of a multi-milestone batch — do NOT update milestone_counter or dashboard.md
    (those writes are deferred to the serial fan-in absorb step that follows).
 
-1. MERGE the iteration worktree into master (DIR-027: loop runs on master directly).
-   Any conflict → per-file resolution, both sides read, reconciliation note recorded.
-   Never a blanket --ours/--theirs (DIR-013).
+${_landMergeStep}
 2. CAPTURE, mechanical + unconditional (gap-absorb-charter-audit-not-committed / M176 —
    NOT prose-conditional "if a non-primary iteration produced evidence"): resolve MILESTONE_ROOT
    via \`source experiments/quay-perpetual-stream/scripts/gate-script-lib.sh &&
@@ -588,8 +816,7 @@ if (IS_CONCURRENT) {
    step should already have staged it at authoring time — this is the backstop, not the primary
    mechanism). Together this milestone's own charter+audit+iteration evidence lands in THIS commit
    series — no manual sweep needed afterward. THEN PRUNE (DIR-033): if a non-primary iteration ALSO
-   produced evidence not on master, cherry-pick JUST that evidence file. Then git worktree remove +
-   git branch -d the now-merged branches.
+   produced evidence not on master, cherry-pick JUST that evidence file.${_landCaptureTail}
 3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${_primaryTaskId}.md
    appending a ## Execution record section (milestone id, iteration count, realized Δv,
    merge commit SHA, one-line outcome summary) and setting status: done.
@@ -632,9 +859,7 @@ Return {taskId: "${_primaryTaskId}", outcome: "done", mergeCommit: "<40-char SHA
 await agent(
   `LAND the milestone for task ${_primaryTaskId}.
 
-1. MERGE the iteration worktree into master (DIR-027: loop runs on master directly).
-   Any conflict → per-file resolution, both sides read, reconciliation note recorded.
-   Never a blanket --ours/--theirs (DIR-013).
+${_landMergeStep}
 2. CAPTURE, mechanical + unconditional (gap-absorb-charter-audit-not-committed / M176 —
    NOT prose-conditional "if a non-primary iteration produced evidence"): resolve MILESTONE_ROOT
    via \`source experiments/quay-perpetual-stream/scripts/gate-script-lib.sh &&
@@ -646,8 +871,7 @@ await agent(
    step should already have staged it at authoring time — this is the backstop, not the primary
    mechanism). Together this milestone's own charter+audit+iteration evidence lands in THIS commit
    series — no manual sweep needed afterward. THEN PRUNE (DIR-033): if a non-primary iteration ALSO
-   produced evidence not on master, cherry-pick JUST that evidence file. Then git worktree remove +
-   git branch -d the now-merged branches.
+   produced evidence not on master, cherry-pick JUST that evidence file.${_landCaptureTail}
 3. WRITE ABSORB log entry into dashboard.md's ## Log section (DIR-054 rolling-window
    format): m<NN> · <task-id> · Δv=<realized> · audit=<verdict> · merge=<sha> · → milestones/M<NN>/
 4. UPDATE DASHBOARD (step 7): VT (sum weight·cov), slope (marginal Δv), ρ, charter-thickness,
@@ -661,7 +885,7 @@ await agent(
    merge commit SHA, one-line outcome summary) and setting status: done.
 8. PHI CONSOLIDATION CHECK: if a prior adaptation was REUSED UNCHANGED by THIS
    (different-domain) milestone, consolidate it into inherited-core.md and retire
-   its citation (§4.2).${_compositeLandNote}
+   its citation (§4.2).${_compositeLandNote}${_landLockReleaseStep}
 
 Charter: ${$a.charterFile}
 Absorb entry: ${$a.absorbEntryFile}

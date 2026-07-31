@@ -196,12 +196,19 @@ concurrent_execute :: Batch → {done[], needs-human[]}
 concurrent_execute(B) where |B| ≥ 2:
   a. ∀c∈B: dispatch Workflow({name: "execute-milestone",
      args: {taskId: c.id, charterFile: c.charter, absorbEntryFile: c.absorb,
-     preparationReceiptFile: c.receipt, mode: "concurrent"}},
+     preparationReceiptFile: c.receipt, mode: "concurrent", isolationMode: "worktree"}},
      run_in_background: true) from MAIN session
      — NOT from within a workflow (DIR-092 architectural fix; Workflow-internal dispatch is broken)
      — `preparationReceiptFile` is REQUIRED post-M195/DIR-117-B flip (enforced-by-default Prepared
      gate): every candidate's receipt is produced by `prepare(c)` in the SELECT cycle; a dispatch
      omitting it fails closed with `preparation-receipt-missing` before Build
+     — `isolationMode: "worktree"` is REQUIRED for EVERY concurrent dispatch (DIR-123): each candidate
+     Builds in its own per-milestone git worktree so the concurrent Builds never share the working tree.
+     This is also the OBSTACLE-5 mechanical backstop: a concurrent batch is worktree-isolated BY
+     CONSTRUCTION here, so a no-isolation dispatch can never be admitted into a concurrent batch. A
+     no-isolation (default) dispatch must NEVER overlap a concurrent batch against the same checkout
+     (hard precondition — see tasks/DIR-123.md / CLAUDE.md; the default path takes no Land lock and
+     commits directly to master in Build, so it is not serialized against worktree Lands).
   b. wait ∀ N complete (monitor background task completion)
   c. survivors = {c | outcome: "done"}
   d. PRE-MERGE GATE — audit-independence per survivor (DIR-107 Fix 3): verify each survivor's
@@ -216,7 +223,15 @@ concurrent_execute(B) where |B| ≥ 2:
   f. scripts/serial-fanin-absorb.ts for deterministic merge plan from survivor results
      (buildBranch ∪ touchedFiles ∪ dashboardEntry → ordered merge sequence)
   g. MERGE each survivor one at a time in plan order consuming buildBranch (SOLE merge owner;
-     ¬parallel merge — single git worktree). Prune each branch after its merge.
+     ¬parallel merge — single git worktree). Under DIR-123 worktree isolation each survivor's
+     buildBranch is its per-milestone worktree branch (milestone/M<NN>/iteration-0) and the workflow
+     MERGED NOTHING itself — so for EACH survivor, under the single-flight Land lock
+     (scripts/milestone-worktree.ts): `--land-lock-acquire` → `--merge` (real `git merge --no-ff
+     buildBranch`) → CAPTURE the milestone's evidence (git add audits/iterations/charter + commit on
+     the primary) → `--remove` (worktree remove + branch -d) → `--land-lock-release`. The lock is held
+     across merge+CAPTURE+remove so concurrent survivors serialize over EVERY shared-checkout mutation
+     (no git-index/HEAD race on the CAPTURE commits). A real merge conflict → the lock is released and
+     the survivor routes to needs-human (never a blanket --ours/--theirs; the merge auto-aborts clean).
   h. milestone_counter += |survivors|; dashboard.md append each survivor's dashboardEntry
   i. regenerate backlog.md/dashboard.md views via scripts/it0-backlog-regen.ts; close-out hygiene
      (tree-hygiene-check.sh + worktree-branch-hygiene-check.sh final pass)
@@ -225,7 +240,11 @@ concurrent_execute(B) where |B| ≥ 2:
   ⊨ anti-drift-touches-check NON-WAIVABLE (concurrent builds MUST be touch-orthogonal)
   ⊨ fan-in merge is deterministic (serial-fanin-absorb.ts plan order, not heuristic)
   ⊨ survivors < N is legal (failed milestones → needs-human; survivors merge, failed recorded in ABSORB)
-  ⊨ step g is SOLE merge owner — workflows produce committed branches; fan-in owns all merges
+  ⊨ step g is SOLE merge owner — workflows produce committed branches; fan-in owns all merges. Under
+    DIR-123 worktree isolation this is literal: the per-workflow concurrent Land merges NOTHING and
+    returns buildBranch + worktreeRel; step g does every merge + CAPTURE + worktree-remove under the
+    Land lock. (The serial, non-concurrent execute-milestone Land instead merges within the workflow,
+    holding that same Land lock for its ENTIRE Land phase.)
 
 checkpoint :: Counter → Checkpoint?
 checkpoint(n) = n%5=0 → write("checkpoints/cp-<NN>.md", health_snapshot) | ∅

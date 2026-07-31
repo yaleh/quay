@@ -139,6 +139,34 @@ export function assembleBatch(candidates, { expand }) {
   return { batch: batch.map((c) => c.id), deferred };
 }
 
+// ── worktreeDispatchEligibility ─────────────────────────────────────────────────────────────────
+// DIR-123: the SINGLE pre-dispatch safety decision for which candidates may be dispatched CONCURRENTLY
+// under execute-milestone.js's `isolationMode:'worktree'`. A thin, explicitly-named wrapper over
+// assembleBatch — the disjointness verdict is STILL checkTouchesPair (imported from
+// touches-orthogonality-check.ts), NEVER a second eligibility checker (DIR-123 Requested-action #7:
+// this directive is about EXECUTION isolation, not re-deciding which tasks may batch).
+//
+// SAME-FILE-CONFLICT RESOLUTION (DIR-123 Requested-action #5, the explicit decision): two candidates
+// whose `## Touches` expand to OVERLAPPING file-sets are REJECTED PRE-DISPATCH — the later one is
+// deferred to a serial round (it lands in `mustSerialize` tagged `sameFileConflict:true`), NOT admitted
+// to run concurrently and left to collide at Land. Land's own real-merge-conflict handling
+// (milestone-worktree.ts mergeWorktree → outcome:"conflict" → auto-abort + needs-human, never a blanket
+// --ours/--theirs) is the DEFINED backstop for an UNDECLARED touch that slips past this check — never the
+// primary mechanism. Returns {eligible:[ids], mustSerialize:[{id, reason, sameFileConflict}]}.
+export function worktreeDispatchEligibility(candidates, { expand }) {
+  const r = assembleBatch(candidates, { expand });
+  const mustSerialize = r.deferred.map((d) => ({
+    id: d.id,
+    reason: d.reason,
+    // "overlapping file-sets" is checkTouchesPair's concrete-overlap verdict (assembleBatch wraps it as
+    // "not disjoint from <peer>: overlapping file-sets"). Distinguish it from the OTHER serialize reasons
+    // (learning-type / shared-state / non-capability-growth / conservative ill-declared touches) so the
+    // DIR-123 same-file-conflict fixture asserts on the conflict case specifically, not a conservative one.
+    sameFileConflict: /overlapping file-sets/i.test(d.reason),
+  }));
+  return { eligible: r.batch, mustSerialize };
+}
+
 // ── applyPreparationExpansion ────────────────────────────────────────────────────────────────────
 // DIR-117 iteration-2 item 4: a candidate's declared '## Touches' can go stale once its checked
 // Plan (a real milestone-preparation-check.ts receipt's `.touches`) covers MORE than what the
