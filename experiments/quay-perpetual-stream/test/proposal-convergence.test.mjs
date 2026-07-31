@@ -292,10 +292,11 @@ test("prepare-milestone.js mirrors inline the SAME caps as capsFor()", () => {
 });
 
 // ── Cross-check: prepare-milestone.js's `_checkEpochCapsInline`/`_epochPolicy` default literals
-// must match DEFAULT_EPOCH_POLICY (90/150/1/2) exactly — SAME "workflow has no import statements,
-// fails loudly on drift" precedent as the capsFor() cross-check immediately above.
+// must match DEFAULT_EPOCH_POLICY (90/150/1/2/3, the last being maxOverrideCount added in round 2
+// post-REFUTATION) exactly — SAME "workflow has no import statements, fails loudly on drift"
+// precedent as the capsFor() cross-check immediately above.
 test("prepare-milestone.js mirrors inline the SAME epoch-budget defaults as DEFAULT_EPOCH_POLICY", () => {
-  assert.deepEqual(DEFAULT_EPOCH_POLICY, { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2 });
+  assert.deepEqual(DEFAULT_EPOCH_POLICY, { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2, maxOverrideCount: 3 });
   const repoRoot = path.resolve(import.meta.dirname, "..", "..", "..");
   for (const rel of [".claude/workflows/prepare-milestone.js", "plugin/workflows/prepare-milestone.js"]) {
     const src = fs.readFileSync(path.join(repoRoot, rel), "utf8");
@@ -303,6 +304,7 @@ test("prepare-milestone.js mirrors inline the SAME epoch-budget defaults as DEFA
     assert.match(src, /Number\.isFinite\(p\.ordinaryCapMinutes\)\s*\?\s*p\.ordinaryCapMinutes\s*:\s*90/, `${rel}: ordinary time cap default must be 90 minutes`);
     assert.match(src, /Number\.isFinite\(p\.maxFullReviewsPerEpoch\)\s*\?\s*p\.maxFullReviewsPerEpoch\s*:\s*1/, `${rel}: maxFullReviewsPerEpoch default must be 1`);
     assert.match(src, /Number\.isFinite\(p\.maxRepeatedFingerprint\)\s*\?\s*p\.maxRepeatedFingerprint\s*:\s*2/, `${rel}: maxRepeatedFingerprint default must be 2`);
+    assert.match(src, /maxOverrideCount:\s*3/, `${rel}: _epochPolicy fallback literal must carry maxOverrideCount:3 (the real enforcement lives in _overrideBudgetCli, but the inline default must stay in sync so this cross-check keeps catching drift)`);
   }
 });
 
@@ -2244,6 +2246,98 @@ fixture proposal text v1
       const secondDistinct = JSON.parse(runOverride(dir, taskId, charterFile, { reason: "a genuinely different justification", owner: "bob", additionalMinutes: 15 }).stdout.trim());
       assert.equal(secondDistinct.ok, true);
       assert.equal(secondDistinct.overrides.length, 2);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // gap-prepare-milestone-task-epoch-budget-reset (round 2, post-REFUTATION): an independent review
+  // reproduced a real bypass — the original distinctness check compared only against the MOST
+  // RECENT override, so alternating between two canned (owner, reason) pairs granted unbounded
+  // cumulative override minutes (reproduced: 4 calls alternating "reason A"/"reason B", all
+  // accepted, +240 minutes total, zero genuine new human scope decisions). Fixed with two
+  // independent layers: a hard maxOverrideCount ceiling (the real boundary), and a strengthened
+  // distinctness check comparing against the FULL override history, not just the last entry. This
+  // test reproduces the EXACT exploit shape and confirms it is now blocked.
+  test("REFUTATION regression: alternating between two canned (owner, reason) pairs cannot grant unbounded override minutes -- either the strengthened full-history distinctness check or the hard maxOverrideCount ceiling must stop it", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+
+      const results = [];
+      const reasons = ["reason A", "reason B", "reason A", "reason B", "reason A", "reason B"];
+      for (const reason of reasons) {
+        const out = JSON.parse(runOverride(dir, taskId, charterFile, { reason, owner: "attacker", additionalMinutes: 60 }).stdout.trim());
+        results.push(out);
+      }
+
+      // The exploit's exact shape (A, B, A, B, ...) must NOT all succeed -- either the full-history
+      // distinctness check rejects the 3rd call (repeats "reason A", which appeared as call #1, not
+      // just the immediately-preceding call), or the hard count ceiling rejects it once
+      // maxOverrideCount is reached. Either way, unbounded accumulation is impossible.
+      const succeeded = results.filter((r) => r.ok === true);
+      assert.ok(succeeded.length < reasons.length, `expected the alternating-reason exploit to be blocked before all ${reasons.length} calls succeeded, but ${succeeded.length} succeeded`);
+
+      // Read the real on-disk epoch record and confirm the total accumulated override minutes stay
+      // BOUNDED -- this is the actual property that matters, not just "some call was rejected".
+      const epochFile = path.join(dir, ".quay", "prepare-epochs", `${taskId}.json`);
+      const record = JSON.parse(fs.readFileSync(epochFile, "utf8"));
+      const totalOverrideMinutes = (record.overrides || []).reduce((sum, o) => sum + (o.additionalBudget || 0), 0);
+      const maxOverrideCount = record.policy.maxOverrideCount;
+      assert.ok(Number.isFinite(maxOverrideCount) && maxOverrideCount > 0, "a real, finite hard override-count ceiling is recorded on the epoch");
+      assert.ok(record.overrides.length <= maxOverrideCount, `override count (${record.overrides.length}) must never exceed the hard ceiling (${maxOverrideCount})`);
+      assert.ok(totalOverrideMinutes <= maxOverrideCount * 60, `total accumulated override minutes (${totalOverrideMinutes}) must stay bounded by the hard ceiling, not grow without limit`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("REFUTATION regression: full-history distinctness -- a THIRD override repeating the FIRST override's (owner, reason), not just the most recent one, is rejected", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+
+      const first = JSON.parse(runOverride(dir, taskId, charterFile, { reason: "original justification", owner: "carol", additionalMinutes: 20 }).stdout.trim());
+      assert.equal(first.ok, true);
+
+      const second = JSON.parse(runOverride(dir, taskId, charterFile, { reason: "a genuinely different justification", owner: "carol", additionalMinutes: 20 }).stdout.trim());
+      assert.equal(second.ok, true, "the second, genuinely distinct override succeeds");
+
+      // The third call repeats the FIRST call's (owner, reason) -- NOT the most recent (second)
+      // call's. A distinctness check that only compares against the most recent entry would
+      // wrongly accept this (it's "distinct" from #2). It must be rejected because it duplicates #1.
+      const third = runOverride(dir, taskId, charterFile, { reason: "original justification", owner: "carol", additionalMinutes: 20 });
+      const thirdOut = JSON.parse(third.stdout.trim());
+      assert.equal(thirdOut.ok, false, "a repeat of the FIRST override's (owner, reason), not just the most recent one, must be rejected");
+      assert.equal(thirdOut.code, "override-not-distinct");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("REFUTATION regression: the hard maxOverrideCount ceiling rejects a genuinely-distinct override once the count cap is reached, even with a real, non-repeated reason", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+
+      const epochFile = path.join(dir, ".quay", "prepare-epochs", `${taskId}.json`);
+      const maxOverrideCount = JSON.parse(fs.readFileSync(epochFile, "utf8")).policy.maxOverrideCount;
+      assert.ok(Number.isFinite(maxOverrideCount) && maxOverrideCount > 0);
+
+      const results = [];
+      for (let i = 0; i < maxOverrideCount + 1; i++) {
+        const out = JSON.parse(runOverride(dir, taskId, charterFile, { reason: `genuinely distinct reason #${i}`, owner: `owner-${i}`, additionalMinutes: 5 }).stdout.trim());
+        results.push(out);
+      }
+
+      const succeeded = results.filter((r) => r.ok === true);
+      const lastResult = results[results.length - 1];
+      assert.equal(succeeded.length, maxOverrideCount, `exactly ${maxOverrideCount} overrides succeed (the hard ceiling), even though every reason/owner was genuinely distinct`);
+      assert.equal(lastResult.ok, false, "the call exceeding the hard ceiling is rejected even with a genuinely distinct reason");
+      assert.equal(lastResult.code, "override-count-cap-exceeded");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

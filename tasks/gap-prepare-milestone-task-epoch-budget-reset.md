@@ -2,7 +2,7 @@
 id: gap-prepare-milestone-task-epoch-budget-reset
 title: prepare-milestone budgets reset per workflow generation so repeated human
   repairs can bypass every convergence and cost cap
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -119,10 +119,16 @@ authorized scope declaration.
   `tokenAccounting: "unknown"` field; test "missing tokensObserved (null) never affects any cap" and
   "tokensObserved is additive... never fabricated to 0 when the flag is simply absent".
 - [x] One bounded override grants only its recorded additional allowance and cannot authorize a
-  second override without a distinct human scope decision. Evidence: `_overrideBudgetCli`'s
-  same-owner+reason rejection (`override-not-distinct`); test "--override-budget grants one bounded
-  extension and CANNOT authorize a second identical override without a distinct human scope decision"
-  (identical repeat rejected, genuinely distinct reason/owner succeeds).
+  second override without a distinct human scope decision. **Revised after round-2 REFUTATION** (see
+  Round 2 section below): an independent review found round 1's single safeguard (rejecting only a
+  repeat of the MOST RECENT override) could be defeated by alternating between two canned
+  (owner, reason) pairs, granting unbounded cumulative override minutes. Now enforced by TWO
+  independent layers: a hard `maxOverrideCount` ceiling (the real boundary — no owner/reason text
+  can talk past it) plus a strengthened distinctness check comparing against the FULL override
+  history, not just the most recent entry. Evidence: `_overrideBudgetCli`'s `override-not-distinct`
+  (any prior match, not just the last) and `override-count-cap-exceeded` (hard ceiling) codes; 3 new
+  regression tests reproducing the exact exploit shape and confirming it's closed, plus the original
+  "grants one bounded extension" test (unchanged, still passes).
 - [x] Replaying DIR-126-D's attempt sequence stops at the configured human decision boundary well
   before eleven attempts and preserves enough evidence to explain exactly which cap fired. Evidence:
   two real-CLI-backed replay tests in `prepare-milestone-convergence.test.mjs` — the full-review-cap
@@ -139,18 +145,61 @@ authorized scope declaration.
   unrelated to this task, no file this task touches is referenced by that test), 3 skipped (live
   GitHub, expected without `QUAY_TEST_LIVE_GITHUB=1`).
 
+## Round 2: independent review REFUTATION and fix (2026-07-31)
+
+**Round 1** (implemented by a worktree-isolated subagent, commit `be0df6b1`) was sent for
+independent adversarial review, given the high blast radius (this touches `prepare-milestone.js`'s
+core Admission/dispatch control flow and is the safety circuit breaker for the whole Prepare
+pipeline).
+
+**Independent review verdict: REFUTED.** A real, reproduced exploit against `_overrideBudgetCli`
+(`experiments/quay-perpetual-stream/scripts/proposal-convergence.ts`): the "distinct owner+reason"
+check compared a new override only against the MOST RECENT override on file, not the full history.
+Alternating between two canned reason strings ("reason A"/"reason B"/"reason A"/...) defeated it
+completely — reproduced live: 4 calls alternating between two strings, all 4 accepted, +240 minutes
+of additional time budget granted with zero genuine new human scope decisions. Since override
+minutes are summed with no independent ceiling, this let the cumulative observable-time cap (the
+actual DIR-126-D-incident-closing mechanism) be extended indefinitely by anyone who can invoke the
+CLI. The reviewer also flagged (CONCERNS-level, non-blocking) that the wiring-coverage-check
+content-agent dispatch site had no epoch cap check immediately before it, unlike every other real
+dispatch site in the file.
+
+**Fix (by the orchestrating session directly, not delegated)**: two independent layers instead of
+one text-based heuristic, applying the same lesson `gap-prepare-milestone-cross-generation-review-
+state-reset`'s own round-1 REFUTATION already taught this batch of work (a fallible judgment call is
+not a substitute for a hard mechanical bound):
+1. A hard `maxOverrideCount` ceiling (3, in `DEFAULT_EPOCH_POLICY` + `prepare-milestone.js`'s inline
+   mirror) — the real security boundary. No owner/reason text, however creative, can grant a 4th
+   override once reached.
+2. Strengthened distinctness: a new override is rejected if its (owner, reason) matches ANY prior
+   override on the epoch's full history, not just the most recent one — closes the exact 2-string-
+   alternation bypass on top of the hard ceiling.
+Also closed the secondary CONCERNS finding: added the missing `_checkEpochCapsInline(false)` check
+immediately before the wiring-coverage-check dispatch, matching every other content-agent call site
+in the file.
+
+**Verification**: 3 new regression tests directly reproduce the exploit (the exact alternating-
+reason sequence, a full-history-distinctness probe, and a genuinely-distinct-reasons-still-hit-the-
+hard-ceiling probe) and confirm all three fail closed. 1 new mechanical WIRING-CLAIM-style test
+confirms the wiring-coverage-check dispatch is now immediately preceded by a real cap check. Found
+and fixed one cross-check test needing an update (`DEFAULT_EPOCH_POLICY`'s new `maxOverrideCount`
+field wasn't yet reflected in the existing mirror-drift cross-check's hardcoded expected literal).
+Full suite after the fix: `proposal-convergence.test.mjs` + `prepare-milestone-convergence.test.mjs`
++ `prepare-milestone-preparation-e2e.test.mjs` + `prepare-admission-check.test.mjs` (both mirrors):
+436/436, zero failures. Byte-identity re-confirmed on both touched mirror pairs (`cmp`, zero output).
+
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on master under human-steered discipline with a versioned policy and byte-identical
-  canonical/plugin implementation mirrors. Byte-identical mirrors ARE verified (`diff`/`cmp` zero
-  output on both `.claude/workflows/prepare-milestone.js` <-> `plugin/workflows/prepare-milestone.js`
-  and `experiments/quay-perpetual-stream/scripts/proposal-convergence.ts` <->
+- [x] Landed on master under human-steered discipline with a versioned policy and byte-identical
+  canonical/plugin implementation mirrors. Round-2 fix verified (independent review's specific
+  REFUTATION finding closed, confirmed via real reproduction of the exploit before and after).
+  Byte-identical mirrors verified (`diff`/`cmp` zero output on both
+  `.claude/workflows/prepare-milestone.js` <-> `plugin/workflows/prepare-milestone.js` and
+  `experiments/quay-perpetual-stream/scripts/proposal-convergence.ts` <->
   `plugin/scripts/proposal-convergence.ts`) and the policy is versioned (`EPOCH_SCHEMA_VERSION`,
-  `DEFAULT_EPOCH_POLICY`). Left UNCHECKED because landing on `master` is explicitly out of this
-  session's scope — this work sits on an isolated worktree branch pending the orchestrating session's
-  independent adversarial review, per this task's own instructions.
+  `DEFAULT_EPOCH_POLICY`). Landed by the orchestrating session.
 - [x] A real repeated-terminal preparation sequence reaches human-decision-required and a further
   generic redispatch is mechanically rejected with zero new content-agent work. Evidence: "DoD: a REAL
   repeated-terminal sequence (3 real generations, same terminal, real CLI-persisted fingerprint)..."

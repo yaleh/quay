@@ -1663,11 +1663,22 @@ export const EPOCH_SCHEMA_VERSION = 1;
 // --ordinaryCapMinutes/--highRiskCapMinutes flags (see _recordEpochDispatchCli below), never raise
 // them — the SAME "callers may lower, never raise" contract capsFor()/_maxDeltaRounds already
 // establishes for DIR-125's own per-generation caps.
+// gap-prepare-milestone-task-epoch-budget-reset (round 2, post-REFUTATION): maxOverrideCount is a
+// HARD, count-based ceiling on total overrides ever granted for one epoch — added after an
+// independent review found the original "distinct owner+reason" text check (compared only against
+// the MOST RECENT override) could be defeated by trivially alternating between two canned reason
+// strings, granting unbounded cumulative budget. Text-based distinctness can never be a real
+// security boundary (the same lesson the sibling checkpoint task learned the hard way — see
+// gap-prepare-milestone-cross-generation-review-state-reset's own Round 2 history — a heuristic
+// judgment call is not a substitute for a hard mechanical bound). This count ceiling is now the
+// REAL boundary; the strengthened distinctness check (compares against ALL prior overrides, not
+// just the last one) is defense-in-depth on top of it, not the sole protection.
 export const DEFAULT_EPOCH_POLICY = Object.freeze({
   ordinaryCapMinutes: 90,
   highRiskCapMinutes: 150,
   maxFullReviewsPerEpoch: 1,
   maxRepeatedFingerprint: 2,
+  maxOverrideCount: 3,
 });
 
 // epochPath — SAME directory FAMILY as prepare-checkpoints (gitignored per-workspace runtime
@@ -1715,6 +1726,7 @@ export function buildEpochRecord({
       highRiskCapMinutes: Number.isFinite(policy?.highRiskCapMinutes) ? policy.highRiskCapMinutes : DEFAULT_EPOCH_POLICY.highRiskCapMinutes,
       maxFullReviewsPerEpoch: Number.isFinite(policy?.maxFullReviewsPerEpoch) ? policy.maxFullReviewsPerEpoch : DEFAULT_EPOCH_POLICY.maxFullReviewsPerEpoch,
       maxRepeatedFingerprint: Number.isFinite(policy?.maxRepeatedFingerprint) ? policy.maxRepeatedFingerprint : DEFAULT_EPOCH_POLICY.maxRepeatedFingerprint,
+      maxOverrideCount: Number.isFinite(policy?.maxOverrideCount) ? policy.maxOverrideCount : DEFAULT_EPOCH_POLICY.maxOverrideCount,
     },
     createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : null,
   };
@@ -1968,12 +1980,23 @@ export function _newEpochCli({ taskId, workspace, charterFile, reason, owner, co
 }
 
 // --override-budget: HUMAN-INVOKED ONLY. Grants ONE bounded extra time allowance (minutes) on the
-// SAME epoch — appended to `overrides`, never replacing/removing a prior one. Non-stackable without
-// a distinct human decision: a second call is REJECTED when its (owner, reason) — normalized —
-// is IDENTICAL to the most recent override already on file (Requested-action item 5 / AC: "cannot
-// authorize a second override without a distinct human scope decision"). A genuinely distinct
-// owner or reason always succeeds — this is a low mechanical bar against an automated process
-// blindly repeating the same justification, never a limit on legitimate repeated human review.
+// SAME epoch — appended to `overrides`, never replacing/removing a prior one.
+//
+// gap-prepare-milestone-task-epoch-budget-reset (round 2, post-REFUTATION): TWO independent
+// safeguards, not one — an independent review found the original single "compare against only the
+// MOST RECENT override" distinctness check could be defeated by trivially alternating between two
+// canned (owner, reason) pairs, granting unbounded cumulative override minutes with zero genuine
+// new human scope decisions (reproduced: 4 calls alternating "reason A"/"reason B" all succeeded,
+// +240 minutes total). Fixed with two layers, neither alone sufficient before, both real now:
+//   1. HARD CEILING (the real boundary): `policy.maxOverrideCount` — a strict count of total
+//      overrides ever granted on this epoch, fail-closed once reached, no owner/reason text can
+//      talk its way past it. This is the actual security property.
+//   2. Strengthened distinctness (defense-in-depth, not the sole guard): a new override's
+//      normalized (owner, reason) pair is rejected if it matches ANY prior override on this epoch's
+//      full history, not just the most recent one — closes the 2-string-alternation bypass
+//      specifically, on top of the hard ceiling above.
+// A genuinely distinct owner or reason, within the count ceiling, always succeeds — this remains a
+// real mechanism for legitimate repeated human review, not a de facto single-use override.
 export function _overrideBudgetCli({ taskId, workspace, charterFile, reason, owner, additionalMinutes }) {
   if (!reason) return { ok: false, code: "override-requires-reason", error: "--reason is required" };
   if (!owner) return { ok: false, code: "override-requires-owner", error: "--owner is required" };
@@ -1987,16 +2010,25 @@ export function _overrideBudgetCli({ taskId, workspace, charterFile, reason, own
     if (!_epochIdentityMatches(existing, { taskId, charterHash, reviewPolicyHash })) {
       return { ok: false, code: "epoch-identity-mismatch-requires-new-epoch", error: "the on-file epoch's identity no longer matches current state — call --new-epoch first" };
     }
+    const priorOverrides = existing.overrides || [];
+    const maxOverrideCount = Number.isFinite(existing.policy?.maxOverrideCount) ? existing.policy.maxOverrideCount : DEFAULT_EPOCH_POLICY.maxOverrideCount;
+    if (priorOverrides.length >= maxOverrideCount) {
+      return {
+        ok: false, code: "override-count-cap-exceeded",
+        error: `this epoch already has ${priorOverrides.length} override(s), meeting/exceeding the hard cap of ${maxOverrideCount} — no further overrides can be granted; use --new-epoch for a genuine scope change instead`,
+        overrideCount: priorOverrides.length, maxOverrideCount,
+      };
+    }
     const norm = (s) => String(s ?? "").trim().toLowerCase();
-    const lastOverride = (existing.overrides || [])[existing.overrides.length - 1];
-    if (lastOverride && norm(lastOverride.reason) === norm(reason) && norm(lastOverride.owner) === norm(owner)) {
+    const duplicate = priorOverrides.find((o) => norm(o.reason) === norm(reason) && norm(o.owner) === norm(owner));
+    if (duplicate) {
       return {
         ok: false, code: "override-not-distinct",
-        error: "the most recent override on this epoch has the SAME owner+reason — a second override requires a distinct human scope decision, never a repeat of the prior one",
+        error: "a PRIOR override on this epoch (not necessarily the most recent) already has the SAME owner+reason — a second override requires a distinct human scope decision, never a repeat of any earlier one",
       };
     }
     const overrideEntry = { owner, reason, additionalBudget: minutes, grantedAt: Date.now() };
-    const record = { ...existing, overrides: [...(existing.overrides || []), overrideEntry] };
+    const record = { ...existing, overrides: [...priorOverrides, overrideEntry] };
     const p = epochPath(workspace, taskId);
     _atomicWriteJson(p, record);
     return { ok: true, epochFile: p, epochId: record.epochId, override: overrideEntry, overrides: record.overrides };

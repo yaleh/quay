@@ -1617,6 +1617,35 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     }
   });
 
+  // gap-prepare-milestone-task-epoch-budget-reset (round 2, post-REFUTATION): an independent review
+  // found the wiring-coverage-check dispatch site was the ONE real content-agent call in this file
+  // with no epoch cap check immediately before it — every other dispatch site (ProposalAuthors,
+  // Adjudicate, full/delta ProposalReview, PlanAuthor, PlanCheck) is guarded, this one wasn't.
+  // Mechanical WIRING-CLAIM-style test (same idiom as the `_releaseLeaseAndRecord` call-site count
+  // test below) rather than trying to simulate the exact millisecond-precision timing needed to
+  // trigger this specific gate via a mocked replay — verifies the structural property directly:
+  // the source has a `_checkEpochCapsInline(` call immediately preceding the wiring-coverage-check
+  // dispatch, and the total call-site count reflects the fix.
+  test(`[${mirrorName}] WIRING-CLAIM: the wiring-coverage-check content-agent dispatch is immediately preceded by an epoch cap check — was the one previously-ungated real dispatch site, closed after round-2 REFUTATION review`, () => {
+    const text = fs.readFileSync(workflowFile, 'utf8');
+    // Anchor on the real call pattern (`_epochCap = _checkEpochCapsInline(`) — a bare
+    // `_checkEpochCapsInline(` also matches the function's OWN definition line
+    // (`function _checkEpochCapsInline(checkFullReviewCap) {`), over-counting by one.
+    const callSites = [...text.matchAll(/_epochCap = _checkEpochCapsInline\(/g)];
+    assert.equal(callSites.length, 8, `expected exactly 8 real _checkEpochCapsInline( call sites, found ${callSites.length}`);
+
+    const wiringDispatchIdx = text.indexOf("_wiringVerdict = await agent(");
+    assert.ok(wiringDispatchIdx > 0, 'the wiring-coverage-check dispatch site exists');
+    // The nearest _checkEpochCapsInline( call BEFORE the dispatch site must be close by (same
+    // guarded block, not some unrelated earlier call site coincidentally appearing first in the
+    // file) — and its own breach-exit must cite 'epoch-cap-wiring-coverage' as the reason code.
+    const capCallIdx = text.lastIndexOf('_epochCap = _checkEpochCapsInline(', wiringDispatchIdx);
+    assert.ok(capCallIdx > 0, 'a _checkEpochCapsInline( call exists before the wiring-coverage-check dispatch');
+    const gapText = text.slice(capCallIdx, wiringDispatchIdx);
+    assert.ok(gapText.length < 400, `the cap check sits immediately adjacent to the dispatch (gap: ${gapText.length} chars) — not some unrelated distant call site`);
+    assert.ok(gapText.includes("'epoch-cap-wiring-coverage'"), "the immediately-preceding cap check's own breach-exit cites 'epoch-cap-wiring-coverage' as its reason code, confirming it genuinely guards THIS dispatch site");
+  });
+
   test(`[${mirrorName}] epoch budget: a repeated-terminal-fingerprint (2 prior occurrences of the SAME terminal) stops the NEXT generation before any content-agent dispatch`, async () => {
     const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
     const args = baseArgs(scratchRel);

@@ -348,7 +348,7 @@ let _epochThisGenDispatches = 0
 let _epochThisGenFullReviews = 0
 let _epochThisGenDeltaRounds = 0
 let _epochBase = { attempts: 0, fullReviews: 0, deltaRounds: 0, contentAgentDispatches: 0, observableAgentMs: 0, terminalFingerprints: {}, tokensObserved: null }
-let _epochPolicy = { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2 }
+let _epochPolicy = { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2, maxOverrideCount: 3 }
 let _epochOverrides = []
 
 const _epochStatusResult = await _convergenceAgentCall(`--epoch-status --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --highRisk ${_highRisk}`, 'epoch-status')
@@ -1029,6 +1029,17 @@ _startedAtMs = _now()
 // (`findings.length`), and the ledger is hash-bound into the receipt via the Receipt phase's
 // `--ledger` flag. A non-parseable verdict (agent crash / CLI exit 2) fails the phase CLOSED,
 // mirroring the revise-failed `needs-human` path, rather than silently skipping coverage.
+// gap-prepare-milestone-task-epoch-budget-reset (round 2, post-REFUTATION): this dispatch site was
+// found ungated by an independent review — every OTHER real content-agent dispatch in this file
+// checks the epoch cap immediately before dispatching, but this one didn't, leaving one small
+// window (worst-case exposure on the resumeFromAdjudicatedProposal + cross-gen-delta fast path,
+// where no cap check runs at all between Admission and this dispatch) where a real agent call could
+// fire after the epoch's cumulative budget was already exhausted. Closed the same way as every
+// other site: check first, exit closed on breach, dispatch nothing.
+{
+  const _epochCap = _checkEpochCapsInline(false)
+  if (_epochCap.breached) return await _epochBreachExit('ProposalReview', 'epoch-cap-wiring-coverage', _epochCap)
+}
 const _wiringCheckScript = 'experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts'
 const _wiringVerdict = await agent(
   `Run exactly this command and return its parsed stdout JSON:
@@ -1037,6 +1048,7 @@ This is the DIR-117-B/M195 mechanism-claim wiring coverage check — it calls th
   { label: 'wiring-coverage-check', phase: 'ProposalReview',
     schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, code: { type: 'string' }, findings: { type: 'array', items: _findingSchema } } } }
 )
+_epochThisGenDispatches += 1
 const _wiringVerdictCodes = ['wiring-coverage-complete', 'wiring-coverage-none-claimed', 'wiring-coverage-uncovered']
 if (!_wiringVerdict || !_wiringVerdictCodes.includes(_wiringVerdict.code)) {
   log(`ProposalReview wiring-coverage sub-step FAILED — no parseable verdict (${_wiringVerdict?.code || 'no-result'}); failing the phase closed rather than skipping coverage.`)
