@@ -1,7 +1,7 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 202** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)** · **cp-135 written at M135 ABSORB — see checkpoints/cp-135.md** · cp-125 was M125 (HALT-RECOMMENDED, governance:product breach; now informational only per DIR-066)
+**milestone_counter: 203** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)** · **cp-135 written at M135 ABSORB — see checkpoints/cp-135.md** · cp-125 was M125 (HALT-RECOMMENDED, governance:product breach; now informational only per DIR-066)
 <!-- M207 ABSORB (2026-07-31): milestone_counter 201→202 — gap-dir126d-deferred-phase-timing-
 recurrence-tracking (per-phase-boundary `nowMs` self-reporting on prepare-admission-check.ts +
 `phaseTimings`/`findingCodes[]` recurrence tracking on the committed telemetry record — the two

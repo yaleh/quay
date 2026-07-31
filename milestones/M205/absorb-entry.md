@@ -59,3 +59,23 @@ milestone_counter=201 K=2, both rows [ok]).
 ## ABSORB gate run (M205, post-audit)
 
 TBD — completed at Land.
+
+### Resolution (2026-07-31, independent re-audit: NO REFUTATION FOUND)
+
+The AC 7 REFUTATION above was RESOLVED: the outer backtick wrapper was removed from the Fix-2
+claim-layer example prose (line 168), preventing the garbled backtick-pairing artifact across the
+bold-marker boundary. The clean identifiers (x1.ts\, y1.ts\, x2.ts\, y2.ts\ — the backslash-trailing
+forms backtickIdentifiers() extracts from markdown-escaped source) plus extractMechanismClaims were
+added to the grounding AC bullet.
+
+Independent re-audit (fresh context, own runs, refute-first) confirmed NO REFUTATION FOUND:
+directive-mode self-check on the task's own file: ok:true, 28 claims, 0 findings; DIR-126-D
+regression: ok:true, 21 claims, 0 findings; both regex edits source-verified; genuine RED/GREEN
+for both Fix 1 ("whose own" TRUE→FALSE) and Fix 2 (bold-marker 3-way split); 22/22
+wiring-coverage-check tests + 74/74 prepare-admission-check tests green; sync-vendor.sh --check
+CLEAN; it0-dod-check.sh exit 0 (all 12 clauses PASS).
+
+Charter Done-when satisfied. The REFUTED history above is preserved per the M198/M207 precedent;
+this resolution is recorded alongside.
+
+adversarial-audit disposition: REFUTED → RESOLVED (see resolution above)

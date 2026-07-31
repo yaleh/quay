@@ -6,7 +6,7 @@ title: wiring-coverage-check.ts's WIRING_VERB_RE false-triggers on "whose own"
   sub-points merge into one oversized "claim" -- found live during DIR-126-D's
   round-4/5 ProposalReview convergence when the milestone's own explanatory
   prose kept re-triggering uncovered-claim findings
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -588,7 +588,7 @@ Both defects were confirmed via direct source read (not inference) before filing
   passes post-fix, confirming `preflightMergedMarkdownClaims`'s own reuse of `splitSentences` does
   not regress — a second real call site beyond the canonical CLI/`task-schema.ts` path. (audit
   2026-07-31: CONFIRMED — 74/74 canonical + 74/74 plugin copy, both exit 0, live run.)
-- [ ] Grounding evidence (exhaustive identifiers, wiring-coverage completeness): direct source read
+- [x] Grounding evidence (exhaustive identifiers, wiring-coverage completeness): direct source read
   (audit 2026-07-31, session 9b3ffa31: REFUTED — the delivered fix flips THIS task file's own
   directive-mode self-check from ok:true (pre-fix, 29 claims, live-reproduced) to ok:false (post-fix,
   1 of 28 claims uncovered: the Fix-2 claim-layer example prose now self-extracts a chunk whose
