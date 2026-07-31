@@ -21,7 +21,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { checkPreparation } from '../../experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts';
 import { sweepOrphans } from '../../experiments/quay-perpetual-stream/scripts/sweep-fixture-orphans.mjs';
-import { checkpointPath } from '../../experiments/quay-perpetual-stream/scripts/proposal-convergence.ts';
+import { checkpointPath, epochPath } from '../../experiments/quay-perpetual-stream/scripts/proposal-convergence.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
@@ -171,6 +171,30 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
       calls.admissionAcquires += 1;
       if (typeof reviewHandlers.onAcquire === 'function') return reviewHandlers.onAcquire(prompt);
       return { raw: JSON.stringify({ outcome: 'acquired', lease: { fencingToken: 0 }, reclaimed: false }) };
+    }
+
+    // gap-prepare-milestone-task-epoch-budget-reset: the epoch-status read (dispatched exactly
+    // once, right after Admission succeeds and before resume-decision) and the epoch-dispatch write
+    // (dispatched from EVERY terminal, via _releaseLeaseAndRecord/_writeGenerationTelemetry).
+    // Mocked with a default fresh/non-breaching response so every EXISTING scenario in this file
+    // (none of which cares about the epoch budget) passes unchanged — stubbable via
+    // reviewHandlers.onEpochStatus/onEpochDispatch for the dedicated epoch-budget test block below.
+    if (label === 'epoch-status') {
+      calls.epochStatuses = (calls.epochStatuses || 0) + 1;
+      if (typeof reviewHandlers.onEpochStatus === 'function') return reviewHandlers.onEpochStatus(prompt);
+      return { raw: JSON.stringify({
+        ok: true, code: 'no-epoch-record', exists: false,
+        counters: { attempts: 0, fullReviews: 0, deltaRounds: 0, contentAgentDispatches: 0, observableAgentMs: 0, terminalFingerprints: {}, tokensObserved: null },
+        policy: { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2 },
+        overrides: [], resets: [], capCheck: { breached: false },
+      }) };
+    }
+    if (/^epoch-dispatch-/.test(label)) {
+      calls.epochDispatches = (calls.epochDispatches || 0) + 1;
+      calls.epochDispatchPrompts = calls.epochDispatchPrompts || [];
+      calls.epochDispatchPrompts.push(prompt);
+      if (typeof reviewHandlers.onEpochDispatch === 'function') return reviewHandlers.onEpochDispatch(prompt, label);
+      return { raw: JSON.stringify({ ok: true, epochId: 'mock-epoch', counters: {}, policy: {}, capCheck: { breached: false } }) };
     }
     if (/^admission-renew-/.test(label)) {
       calls.admissionRenews += 1;
@@ -912,6 +936,17 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       if (label === 'split-decision') {
         return { raw: JSON.stringify({ ok: true, verdict: 'no-decision-on-file' }) };
       }
+      // gap-prepare-milestone-task-epoch-budget-reset: the epoch-status read happens right after
+      // Admission succeeds, BEFORE resume-decision — also exercises the same noisy-stderr-prefix
+      // tolerance this test is named for.
+      if (label === 'epoch-status') {
+        return { raw: noisyPrefix + JSON.stringify({
+          ok: true, code: 'no-epoch-record', exists: false,
+          counters: { attempts: 0, fullReviews: 0, deltaRounds: 0, contentAgentDispatches: 0, observableAgentMs: 0, terminalFingerprints: {}, tokensObserved: null },
+          policy: { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2 },
+          overrides: [], resets: [], capCheck: { breached: false },
+        }) };
+      }
       if (label === 'preflight-content') {
         calls.preflightContent += 1;
         return { raw: noisyPrefix + JSON.stringify({ ok: true, policyVersion: 'preflight-v1', findings: [] }) };
@@ -1507,6 +1542,294 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       }
     }
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // ── gap-prepare-milestone-task-epoch-budget-reset: epoch-cumulative circuit breaker ───────────
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  test(`[${mirrorName}] epoch budget: a cumulative time-cap breach ALREADY on file at Admission stops BEFORE any content-agent dispatch — needs-human/epoch-time-cap-exceeded, allowedActions COMMIT/SPLIT/NEW-EPOCH/OVERRIDE`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onEpochStatus: () => ({ raw: JSON.stringify({
+          ok: true, code: 'epoch-status-ok', exists: true, epochId: 'prior-epoch',
+          counters: { attempts: 5, fullReviews: 1, deltaRounds: 3, contentAgentDispatches: 20, observableAgentMs: 91 * 60 * 1000, terminalFingerprints: {}, tokensObserved: null },
+          policy: { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2 },
+          overrides: [], resets: [],
+        }) }),
+      });
+      assert.equal(result.outcome, 'needs-human', JSON.stringify(result));
+      assert.equal(result.reason, 'epoch-time-cap-exceeded');
+      assert.equal(result.phase, 'Admission');
+      assert.deepEqual(result.allowedActions, ['COMMIT', 'SPLIT', 'NEW-EPOCH', 'OVERRIDE']);
+      assert.equal(calls.authors.length, 0, 'zero ProposalAuthors dispatches');
+      assert.equal(calls.adjudicator, 0, 'zero Adjudicate dispatches');
+      assert.equal(calls.reviews.length, 0, 'zero ProposalReview dispatches');
+      assert.equal(calls.planAuthor, 0, 'zero PlanAuthor dispatches');
+      assert.equal(calls.preflightContent, 0, 'the breach fires before even the mechanical Preflight check — the earliest possible point after Admission');
+      assert.ok(calls.epochDispatches >= 1, 'the breach path still persists final counters via _recordEpochDispatch');
+      assert.ok(calls.admissionReleases >= 1, 'the held Admission lease is released on breach');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] epoch budget: an epoch identity mismatch (real charter/review-policy drift) stops at Admission with allowedActions:['NEW-EPOCH'] only`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onEpochStatus: () => ({ raw: JSON.stringify({ ok: true, code: 'epoch-identity-mismatch', exists: true, epochId: 'prior-epoch', priorCharterHash: 'old', priorReviewPolicyHash: 'old', hashes: { charterHash: 'new', reviewPolicyHash: 'old' } }) }),
+      });
+      assert.equal(result.outcome, 'needs-human', JSON.stringify(result));
+      assert.equal(result.reason, 'epoch-identity-mismatch');
+      assert.equal(result.phase, 'Admission');
+      assert.deepEqual(result.allowedActions, ['NEW-EPOCH']);
+      assert.equal(calls.authors.length, 0);
+      assert.equal(calls.preflightContent, 0);
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] epoch budget: the full-review cap gates ONLY the full-review dispatch itself — ProposalAuthors/Adjudicate still run this generation, then the full review is blocked before it is ever dispatched`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onEpochStatus: () => ({ raw: JSON.stringify({
+          ok: true, code: 'epoch-status-ok', exists: true, epochId: 'prior-epoch',
+          counters: { attempts: 1, fullReviews: 1, deltaRounds: 0, contentAgentDispatches: 4, observableAgentMs: 1000, terminalFingerprints: {}, tokensObserved: null },
+          policy: { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2 },
+          overrides: [], resets: [],
+        }) }),
+      });
+      assert.equal(result.outcome, 'needs-human', JSON.stringify(result));
+      assert.equal(result.reason, 'epoch-full-review-cap-exceeded');
+      assert.equal(result.phase, 'ProposalReview');
+      assert.deepEqual(result.allowedActions, ['COMMIT', 'SPLIT', 'NEW-EPOCH', 'OVERRIDE']);
+      assert.equal(calls.authors.length, 2, 'ProposalAuthors DID run this generation — the epoch cap only gates the full-review dispatch itself, not every content agent unconditionally');
+      assert.equal(calls.adjudicator, 1, 'Adjudicate DID run this generation too');
+      assert.equal(calls.reviews.filter((r) => r === 'full').length, 0, 'the full review agent itself was never dispatched');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  // gap-prepare-milestone-task-epoch-budget-reset (round 2, post-REFUTATION): an independent review
+  // found the wiring-coverage-check dispatch site was the ONE real content-agent call in this file
+  // with no epoch cap check immediately before it — every other dispatch site (ProposalAuthors,
+  // Adjudicate, full/delta ProposalReview, PlanAuthor, PlanCheck) is guarded, this one wasn't.
+  // Mechanical WIRING-CLAIM-style test (same idiom as the `_releaseLeaseAndRecord` call-site count
+  // test below) rather than trying to simulate the exact millisecond-precision timing needed to
+  // trigger this specific gate via a mocked replay — verifies the structural property directly:
+  // the source has a `_checkEpochCapsInline(` call immediately preceding the wiring-coverage-check
+  // dispatch, and the total call-site count reflects the fix.
+  test(`[${mirrorName}] WIRING-CLAIM: the wiring-coverage-check content-agent dispatch is immediately preceded by an epoch cap check — was the one previously-ungated real dispatch site, closed after round-2 REFUTATION review`, () => {
+    const text = fs.readFileSync(workflowFile, 'utf8');
+    // Anchor on the real call pattern (`_epochCap = _checkEpochCapsInline(`) — a bare
+    // `_checkEpochCapsInline(` also matches the function's OWN definition line
+    // (`function _checkEpochCapsInline(checkFullReviewCap) {`), over-counting by one.
+    const callSites = [...text.matchAll(/_epochCap = _checkEpochCapsInline\(/g)];
+    assert.equal(callSites.length, 8, `expected exactly 8 real _checkEpochCapsInline( call sites, found ${callSites.length}`);
+
+    const wiringDispatchIdx = text.indexOf("_wiringVerdict = await agent(");
+    assert.ok(wiringDispatchIdx > 0, 'the wiring-coverage-check dispatch site exists');
+    // The nearest _checkEpochCapsInline( call BEFORE the dispatch site must be close by (same
+    // guarded block, not some unrelated earlier call site coincidentally appearing first in the
+    // file) — and its own breach-exit must cite 'epoch-cap-wiring-coverage' as the reason code.
+    const capCallIdx = text.lastIndexOf('_epochCap = _checkEpochCapsInline(', wiringDispatchIdx);
+    assert.ok(capCallIdx > 0, 'a _checkEpochCapsInline( call exists before the wiring-coverage-check dispatch');
+    const gapText = text.slice(capCallIdx, wiringDispatchIdx);
+    assert.ok(gapText.length < 400, `the cap check sits immediately adjacent to the dispatch (gap: ${gapText.length} chars) — not some unrelated distant call site`);
+    assert.ok(gapText.includes("'epoch-cap-wiring-coverage'"), "the immediately-preceding cap check's own breach-exit cites 'epoch-cap-wiring-coverage' as its reason code, confirming it genuinely guards THIS dispatch site");
+  });
+
+  test(`[${mirrorName}] epoch budget: a repeated-terminal-fingerprint (2 prior occurrences of the SAME terminal) stops the NEXT generation before any content-agent dispatch`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onEpochStatus: () => ({ raw: JSON.stringify({
+          ok: true, code: 'epoch-status-ok', exists: true, epochId: 'prior-epoch',
+          counters: { attempts: 2, fullReviews: 0, deltaRounds: 2, contentAgentDispatches: 6, observableAgentMs: 1000, terminalFingerprints: { deadbeef1234: 2 }, tokensObserved: null },
+          policy: { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2 },
+          overrides: [], resets: [],
+        }) }),
+      });
+      assert.equal(result.outcome, 'needs-human', JSON.stringify(result));
+      assert.equal(result.reason, 'epoch-fingerprint-cap-exceeded');
+      assert.equal(calls.authors.length, 0, 'zero content-agent dispatches — caught at the earliest Admission-time check');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  // ── DIR-126-D synthetic replay (epoch mechanism) — the repo owner explicitly approved
+  // reconstructing a SYNTHETIC fixture matching that incident's SHAPE (many small sequential
+  // generations, each individually within its own local DIR-125 policy, but collectively exceeding
+  // a sane cumulative bound) over literal historical replay — the SAME precedent the sibling
+  // checkpoint-continuation test above already used. Drives the REAL, unmodified workflow via a
+  // REAL --epoch-status/--record-epoch-dispatch CLI round trip (never a mocked in-memory
+  // stand-in) across TWO sequential real workflow dispatches: generation 1 (cold — a real full
+  // review + delta round that ends needs-human, persisting fullReviews=1 to the real on-disk epoch
+  // record), generation 2 (ALSO cold — mirroring the real incident's exact failure mode: "a caller
+  // can edit the task and start a fresh generation with brand-new counters" — DIR-125's own
+  // per-generation caps are satisfied fine by generation 2 in isolation, but the EPOCH stops it
+  // before it can dispatch a second full review). This is the real defect DIR-126-D exposed:
+  // eleven individually-compliant attempts accumulated ~5h/9.5M tokens because NOTHING bounded the
+  // number of generations. This replay shows the breaker firing at generation 2 — nowhere near 11.
+  test(`[${mirrorName}] DIR-126-D synthetic replay (epoch budget): the full-review cap stops a second cold generation at attempt 2 — nowhere near the real incident's 9-11 attempts, with clear evidence of which cap fired`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk, charterFileOnDisk } = makeScratch();
+    const taskId = `../${scratchRel}/task`;
+    const charterRel = `${scratchRel}/charter.md`;
+    const milestoneId = `M${Math.floor(900000 + Math.random() * 90000)}`;
+    const CONVERGENCE_SCRIPT = 'experiments/quay-perpetual-stream/scripts/proposal-convergence.ts';
+
+    function realEpochHandlers() {
+      return {
+        onEpochStatus: () => {
+          const res = runShell(`node --experimental-strip-types ${CONVERGENCE_SCRIPT} --epoch-status --taskId ${JSON.stringify(taskId)} --workspace . --charterFile ${JSON.stringify(charterRel)} --highRisk false`);
+          return { raw: res.stdout.trim() };
+        },
+        onEpochDispatch: (prompt) => {
+          const cmds = extractNodeCommands(prompt);
+          const res = runShell(cmds[0]);
+          return { raw: res.stdout.trim() };
+        },
+      };
+    }
+
+    let planFile = null;
+    try {
+      // ── Generation 1 (COLD): one full review finds one persistent blocking finding; the ordinary
+      // maxDeltaRounds:1 forces this generation to stop at delta-cap-exhausted with the epoch's own
+      // real --record-epoch-dispatch persisting fullReviews=1 (one real full review actually ran).
+      const gen1 = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, maxDeltaRounds: 1 }), taskFileOnDisk, {
+        ...realEpochHandlers(),
+        onFullReview: () => ({ findings: [{ subsystem: 's1', claimRef: 'AC#1', summary: 'blocker one', severity: 'blocker', blocking: true }], mechanismCount: 1, sessionId: 'sess-full-gen1' }),
+        onRevise: (round) => ({ ok: true, sessionId: `sess-revise-gen1-${round}` }),
+        onDeltaReview: (round) => ({ resolvedIds: [], findings: [{ subsystem: 's1', claimRef: 'AC#1', summary: 'blocker one', severity: 'blocker', blocking: true }], sessionId: `sess-delta-gen1-${round}` }),
+      });
+      assert.equal(gen1.result.outcome, 'needs-human', JSON.stringify(gen1.result));
+      assert.equal(gen1.result.reason, 'delta-cap-exhausted');
+      assert.equal(gen1.calls.reviews.filter((r) => r === 'full').length, 1, 'generation 1: exactly one full review, individually well within DIR-125 policy');
+
+      // ── Generation 2: mirrors the REAL DIR-126-D failure mode verbatim — a human edits the task
+      // (a small repair, exactly like every real DIR-126-D round) and starts a FRESH cold
+      // generation (no resumeFromAdjudicatedProposal) — DIR-125's own per-generation caps are
+      // satisfied fine by this generation in total isolation (it is, after all, just gen1's own
+      // shape again). The epoch-cumulative full-review cap is what actually stops it.
+      {
+        const body = fs.readFileSync(taskFileOnDisk, 'utf8');
+        fs.writeFileSync(taskFileOnDisk, body.replace(/## Proposal\n/, '## Proposal\n\n<!-- generation 2: human repair, cold redispatch (the exact DIR-126-D pattern) -->\n'));
+      }
+      const gen2 = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId }), taskFileOnDisk, {
+        ...realEpochHandlers(),
+        onFullReview: () => { throw new Error('MUST NOT be dispatched: the epoch full-review cap must stop generation 2 BEFORE the full-review agent is ever called'); },
+      });
+      assert.equal(gen2.result.outcome, 'needs-human', JSON.stringify(gen2.result));
+      assert.equal(gen2.result.reason, 'epoch-full-review-cap-exceeded', 'clear evidence of exactly which cap fired');
+      assert.equal(gen2.result.phase, 'ProposalReview');
+      assert.deepEqual(gen2.result.allowedActions, ['COMMIT', 'SPLIT', 'NEW-EPOCH', 'OVERRIDE']);
+      // DIR-126-D's own real 2 authors + 1 adjudicator STILL ran this generation (the epoch cap
+      // gates ONLY the specific over-cap dispatch, not the whole generation retroactively) — but
+      // the circuit breaker fired at generation 2, stopping the cycle well before 9-11 attempts.
+      assert.equal(gen2.calls.authors.length, 2);
+      assert.equal(gen2.calls.adjudicator, 1);
+      assert.equal(gen2.calls.reviews.length, 0, 'zero review agents this generation — the breach fired before the full-review dispatch');
+
+      // ── Final on-disk epoch record: fullReviews stayed at exactly 1, the SAME real cumulative
+      // counter that caused generation 2's breach — never silently reset by the intervening edit.
+      const finalEpoch = JSON.parse(fs.readFileSync(epochPath(REPO_ROOT, taskId), 'utf8'));
+      assert.equal(finalEpoch.counters.fullReviews, 1);
+      assert.equal(finalEpoch.counters.attempts, 2, 'exactly 2 real attempts recorded — the replay stopped at attempt 2, nowhere near the real incident\'s 9-11');
+    } finally {
+      fs.rmSync(epochPath(REPO_ROOT, taskId), { force: true });
+      cleanup(scratchDir, planFile, milestoneId);
+    }
+  });
+
+  // ── DoD: "A real repeated-terminal preparation sequence reaches human-decision-required and a
+  // further generic redispatch is mechanically rejected with zero new content-agent work." Drives
+  // THREE real, sequential, un-mocked-epoch generations against the REAL --epoch-status/
+  // --record-epoch-dispatch CLI (never seeded/mocked counters), each independently and
+  // deterministically terminating at the IDENTICAL real terminal (PreflightContent/
+  // preflight-rejected) — the cheapest real terminal to reproduce deterministically. Generation 3
+  // is the "further generic redispatch": a plain cold dispatch with no special flags, mechanically
+  // rejected by the real on-disk fingerprint count BEFORE Preflight itself ever runs.
+  test(`[${mirrorName}] DoD: a REAL repeated-terminal sequence (3 real generations, same terminal, real CLI-persisted fingerprint) reaches human-decision-required and a further generic redispatch is mechanically rejected with ZERO new content-agent work`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk, charterFileOnDisk } = makeScratch();
+    const taskId = `../${scratchRel}/task`;
+    const charterRel = `${scratchRel}/charter.md`;
+    const milestoneId = `M${Math.floor(900000 + Math.random() * 90000)}`;
+    const CONVERGENCE_SCRIPT = 'experiments/quay-perpetual-stream/scripts/proposal-convergence.ts';
+    let planFile = null; // never populated — every generation here rejects at Preflight, well before PlanAuthor
+
+    function realEpochHandlers() {
+      return {
+        onEpochStatus: () => {
+          const res = runShell(`node --experimental-strip-types ${CONVERGENCE_SCRIPT} --epoch-status --taskId ${JSON.stringify(taskId)} --workspace . --charterFile ${JSON.stringify(charterRel)} --highRisk false`);
+          return { raw: res.stdout.trim() };
+        },
+        onEpochDispatch: (prompt) => {
+          const cmds = extractNodeCommands(prompt);
+          const res = runShell(cmds[0]);
+          return { raw: res.stdout.trim() };
+        },
+      };
+    }
+    // Every real generation deterministically rejects at content-Preflight with the SAME blocking
+    // finding — never reaching ProposalAuthors, so each real dispatch is fast and cheap while still
+    // exercising the REAL --record-generation -> _recordEpochDispatch -> real on-disk fingerprint
+    // write path (the SAME `_releaseLeaseAndRecord` choke point every other terminal uses).
+    const REJECTING_PREFLIGHT = { raw: JSON.stringify({ ok: true, policyVersion: 'preflight-v1', findings: [{ code: 'merged-markdown-claim', message: 'fixture blocking finding', blocking: true, disposition: 'unresolved' }] }) };
+
+    try {
+      // resumeFromAdjudicatedProposal:false on every dispatch — explicit, so ZERO --decide-resume
+      // calls happen (WIRING-CLAIM R2 precedent) and every generation independently reaches a real,
+      // fresh Preflight dispatch rather than risking a reuse-terminal cache hit on an unchanged
+      // Proposal (preflight-rejected IS one of the two CACHEABLE_TERMINALS-allowlisted pairs).
+      const gen1 = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, resumeFromAdjudicatedProposal: false }), taskFileOnDisk, {
+        ...realEpochHandlers(),
+        onPreflightContent: () => REJECTING_PREFLIGHT,
+      });
+      assert.equal(gen1.result.outcome, 'revision-needed', JSON.stringify(gen1.result));
+      assert.equal(gen1.result.reason, 'preflight-rejected');
+      assert.equal(gen1.calls.preflightContent, 1);
+
+      const gen2 = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, resumeFromAdjudicatedProposal: false }), taskFileOnDisk, {
+        ...realEpochHandlers(),
+        onPreflightContent: () => REJECTING_PREFLIGHT,
+      });
+      assert.equal(gen2.result.outcome, 'revision-needed', JSON.stringify(gen2.result));
+      assert.equal(gen2.result.reason, 'preflight-rejected');
+      assert.equal(gen2.calls.preflightContent, 1, 'generation 2 also reached a REAL fresh Preflight dispatch — no reuse-terminal short-circuit');
+
+      const midEpoch = JSON.parse(fs.readFileSync(epochPath(REPO_ROOT, taskId), 'utf8'));
+      const fpCounts = Object.values(midEpoch.counters.terminalFingerprints);
+      assert.ok(fpCounts.includes(2), `expected a real fingerprint count of 2 after 2 identical real terminals, got ${JSON.stringify(midEpoch.counters.terminalFingerprints)}`);
+
+      // ── Generation 3: "a further generic redispatch" — a PLAIN cold dispatch, no special flags
+      // beyond the SAME resumeFromAdjudicatedProposal:false every generation here already uses.
+      // Mechanically rejected by the REAL on-disk fingerprint count BEFORE Preflight ever runs.
+      const gen3 = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, resumeFromAdjudicatedProposal: false }), taskFileOnDisk, {
+        ...realEpochHandlers(),
+        onPreflightContent: () => { throw new Error('MUST NOT be dispatched: the repeated-fingerprint cap must stop generation 3 BEFORE Preflight is ever called'); },
+      });
+      assert.equal(gen3.result.outcome, 'needs-human', JSON.stringify(gen3.result));
+      assert.equal(gen3.result.reason, 'epoch-fingerprint-cap-exceeded');
+      assert.equal(gen3.result.phase, 'Admission');
+      assert.deepEqual(gen3.result.allowedActions, ['COMMIT', 'SPLIT', 'NEW-EPOCH', 'OVERRIDE']);
+      assert.equal(gen3.calls.preflightContent, 0, 'ZERO new content-agent work — mechanically rejected before Preflight, let alone ProposalAuthors');
+      assert.equal(gen3.calls.authors.length, 0);
+      assert.equal(gen3.calls.adjudicator, 0);
+    } finally {
+      fs.rmSync(epochPath(REPO_ROOT, taskId), { force: true });
+      cleanup(scratchDir, planFile, milestoneId);
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -1519,7 +1842,7 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
 for (const [mirrorName, workflowFile] of MIRRORS) {
   const src = () => fs.readFileSync(workflowFile, 'utf8');
 
-  test(`[${mirrorName}] WIRING-CLAIM R5: exactly 13 real _releaseLeaseAndRecord( call sites (M203/DIR-126-D: Receipt's own 2 moved to the new _releaseLease split)`, () => {
+  test(`[${mirrorName}] WIRING-CLAIM R5: exactly 15 real _releaseLeaseAndRecord( call sites (M203/DIR-126-D: Receipt's own 2 moved to the new _releaseLease split; gap-prepare-milestone-task-epoch-budget-reset: +2 epoch-breach sites)`, () => {
     const text = src();
     // The baseline live count this Plan re-derives from git history (480cb58): 15 real
     // post-Admission _releaseLease( terminal-return call sites, not an assumed 11 or 12. Anchor on
@@ -1534,8 +1857,14 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     // pre-Receipt terminals (including reuse-terminal, which never called this helper at all) are
     // UNCHANGED, still dispatching _releaseLeaseAndRecord exactly once each.
     // M206: +2 new sites for mechanism-inventory-invalid / mechanism-inventory-missing fail-closed terminals.
+    // gap-prepare-milestone-task-epoch-budget-reset: +2 MORE textual sites — the Admission-time
+    // epoch-identity-mismatch handler's own direct call, and the shared `_epochBreachExit` helper's
+    // ONE call (reused by every one of the 7 cap-check call sites, so it contributes exactly 1
+    // textual occurrence regardless of how many places call `_epochBreachExit` itself).
+    // 15 (M203 baseline) + 2 (M206) = 17, but M203's own comment already nets those two together as
+    // "15" post-Receipt-split — so the running total re-derived here is 15 + 2 (epoch) = 17.
     const callSites = [...text.matchAll(/await _releaseLeaseAndRecord\(/g)];
-    assert.equal(callSites.length, 15, `expected exactly 15 await _releaseLeaseAndRecord( call sites (17 minus Receipt's own 2 + 2 new M206 terminals), found ${callSites.length}`);
+    assert.equal(callSites.length, 17, `expected exactly 17 await _releaseLeaseAndRecord( call sites (15 pre-epoch baseline + 2 new epoch-breach sites), found ${callSites.length}`);
 
     // The NEW _releaseLease(stageLabel, {reason}) helper (M203/DIR-126-D — a DIFFERENT function
     // from the pre-M202 helper this same name historically referred to, which WAS fully removed at

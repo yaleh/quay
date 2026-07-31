@@ -238,10 +238,16 @@ async function _releaseLeaseAndRecord(stageLabel, { terminalPhase, outcome, reas
   // own recordedAtMs) and `--findingCodes` (terminal reason + ledger finding ids via the TDZ-safe
   // `_findingCodesFor` guard) ride THIS already-existing dispatch — no new dispatch, double-
   // JSON.stringify idiom matching _recordAttemptAgentCall's --detail.
-  return _convergenceAgentCall(
+  const _result = await _convergenceAgentCall(
     `--record-generation --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --terminalPhase ${terminalPhase} --outcome ${outcome} --reason ${JSON.stringify(reason)} --cacheable ${cacheable} --milestoneId ${_milestoneId} --class ${_class} --highRisk ${_highRisk} --decisionKind ${_resumeFromAdjudicatedProposal ? 'resume' : 'cold'} --phaseTimings ${JSON.stringify(JSON.stringify(_phaseTimingsForTerminal(stageLabel)))} --findingCodes ${JSON.stringify(JSON.stringify(_findingCodesFor(reason)))}`,
     `admission-release-${stageLabel}`
   )
+  // gap-prepare-milestone-task-epoch-budget-reset: EVERY post-Admission terminal ALSO persists this
+  // generation's real accumulated epoch deltas — the SAME "one choke-point function every terminal
+  // already calls" pattern this helper itself already established for --record-generation, never a
+  // new per-terminal call site. Fire-and-forget (result unused), matching the existing convention.
+  await _recordEpochDispatch(stageLabel, terminalPhase, reason)
+  return _result
 }
 
 // M203/DIR-126-D Claim A.4 — Receipt-phase split, backing the restructured write-first/build/
@@ -255,10 +261,16 @@ async function _writeGenerationTelemetry(stageLabel, { terminalPhase, outcome, r
   // M207: the Receipt success path carries BOTH new flags too (uniformly with
   // `_releaseLeaseAndRecord` above); `_releaseLease`'s --release-only dispatch below gains
   // nothing — it writes no telemetry.
-  return _convergenceAgentCall(
+  const _result = await _convergenceAgentCall(
     `--record-generation --no-release --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --terminalPhase ${terminalPhase} --outcome ${outcome} --reason ${JSON.stringify(reason)} --cacheable ${cacheable} --milestoneId ${_milestoneId} --class ${_class} --highRisk ${_highRisk} --decisionKind ${_resumeFromAdjudicatedProposal ? 'resume' : 'cold'} --phaseTimings ${JSON.stringify(JSON.stringify(_phaseTimingsForTerminal(stageLabel)))} --findingCodes ${JSON.stringify(JSON.stringify(_findingCodesFor(reason)))}`,
     `write-telemetry-${stageLabel}`
   )
+  // gap-prepare-milestone-task-epoch-budget-reset: the Receipt-phase success path also persists
+  // epoch deltas here (the SAME choke point _releaseLeaseAndRecord uses for every other terminal) —
+  // Receipt never calls _releaseLeaseAndRecord itself (M203/DIR-126-D's own write-first/build/
+  // release split), so this is the one place its own epoch accounting happens.
+  await _recordEpochDispatch(stageLabel, terminalPhase, reason)
+  return _result
 }
 
 async function _releaseLease(stageLabel, { reason }) {
@@ -315,6 +327,130 @@ log(`Admission: acquired lease for ${_taskId} (fencingToken=${_admissionVerdict.
 // verdict lacking `nowMs` leaves `_lastBoundaryMs` null — the first successful renewal then
 // pushes a span with `startedAtMs: null`, an honest "epoch unknown", not a crash.
 if (_admissionVerdict.outcome === 'acquired' && Number.isFinite(_admissionVerdict.nowMs)) _lastBoundaryMs = _admissionVerdict.nowMs
+
+// ── gap-prepare-milestone-task-epoch-budget-reset: epoch-cumulative circuit breaker ───────────
+// DIR-125 bounds convergence WITHIN one generation; DIR-126-C's resume and this file's own
+// cross-generation checkpoint mechanism carry PROPOSAL-REVIEW state forward across generations, but
+// neither bounds the number of GENERATIONS a task can burn — the real DIR-126-D incident
+// accumulated ~5h wall time / ~9.5M aggregate tokens / 11 attempts, each individually within its own
+// local DIR-125 policy. Loaded ONCE per generation, immediately after Admission succeeds (the
+// earliest point a held lease exists, so a breach detected here can still release it via the SAME
+// _releaseLeaseAndRecord/_releaseLease mechanism every other terminal already uses) and strictly
+// BEFORE resume-decision/split-decision/Preflight/any content-agent dispatch. `_epochThisGen*` are
+// LOCAL, in-memory deltas accrued as THIS generation's own real content-agent dispatches happen —
+// checked cheaply (pure arithmetic, zero extra CLI round trips) before every one of them via
+// `_checkEpochCapsInline`, then persisted ONCE at this generation's own terminal by
+// `_releaseLeaseAndRecord`/`_writeGenerationTelemetry` (extended below to also call
+// `_recordEpochDispatch`) — the SAME "one choke-point function every terminal already calls" pattern
+// M202/DIR-126-C established for `--record-generation`, never a new per-terminal dispatch site.
+const _epochGenStartMs = Number.isFinite(_admissionVerdict.nowMs) ? _admissionVerdict.nowMs : null
+let _epochThisGenDispatches = 0
+let _epochThisGenFullReviews = 0
+let _epochThisGenDeltaRounds = 0
+let _epochBase = { attempts: 0, fullReviews: 0, deltaRounds: 0, contentAgentDispatches: 0, observableAgentMs: 0, terminalFingerprints: {}, tokensObserved: null }
+let _epochPolicy = { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2, maxOverrideCount: 3, maxNewEpochResetCount: 3 }
+let _epochOverrides = []
+
+const _epochStatusResult = await _convergenceAgentCall(`--epoch-status --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --highRisk ${_highRisk}`, 'epoch-status')
+const _epochStatusVerdict = _epochStatusResult?.raw ? _parseAgentJson(_epochStatusResult.raw) : null
+if (!_epochStatusVerdict || _epochStatusVerdict.ok !== true) {
+  log(`Epoch-status phase FAILED — no parseable verdict (raw: ${_epochStatusResult?.raw ?? '(none)'}). Failing closed, never dispatching a content agent without a real epoch-budget read.`)
+  await _releaseLease('Admission', { reason: 'epoch-status-failed' })
+  return { outcome: 'needs-human', reason: 'epoch-status-failed', phase: 'Admission' }
+}
+if (_epochStatusVerdict.code === 'epoch-identity-mismatch') {
+  // A real charter/review-policy change since the last generation — the ONLY thing that can make
+  // (charterHash, reviewPolicyHash) drift, since the epoch key deliberately excludes Proposal/AC/
+  // Touches content. Never silently continued under a stale record NOR silently reset to zero —
+  // requires an explicit human-invoked --new-epoch call first.
+  log(`Epoch-status: identity mismatch — an epoch record exists for ${_taskId} but its (charterHash, reviewPolicyHash) no longer matches current state. A new epoch requires an explicit --new-epoch scope-reset decision; never silently continuing under a stale OR a fresh-zero epoch.`)
+  await _releaseLeaseAndRecord('epoch-identity-mismatch', { terminalPhase: 'Admission', outcome: 'needs-human', reason: 'epoch-identity-mismatch', cacheable: false })
+  return { outcome: 'needs-human', reason: 'epoch-identity-mismatch', phase: 'Admission', allowedActions: ['NEW-EPOCH'], epoch: _epochStatusVerdict }
+}
+_epochBase = _epochStatusVerdict.counters || _epochBase
+_epochPolicy = _epochStatusVerdict.policy || _epochPolicy
+_epochOverrides = Array.isArray(_epochStatusVerdict.overrides) ? _epochStatusVerdict.overrides : []
+
+// _epochElapsedMsSoFar — reuses `_lastBoundaryMs` (M207's own real-`nowMs`-derived phase-boundary
+// clock, seeded from the Admission --acquire verdict and advanced at every successful --renew
+// dispatch) as the epoch's own "observable agent time" proxy — never a new/fabricated clock. This
+// covers every phase this file dispatches content agents in (Adjudicate/ProposalReview/PlanAuthor/
+// PlanCheck renew at their own entry; ProposalAuthors runs before the first renewal, at elapsed 0).
+function _epochElapsedMsSoFar() {
+  if (_epochGenStartMs === null || !Number.isFinite(_lastBoundaryMs)) return 0
+  return Math.max(0, _lastBoundaryMs - _epochGenStartMs)
+}
+
+// _checkEpochCapsInline — the no-import workflow-local mirror of proposal-convergence.ts's
+// exported `checkEpochCaps()` (the file has no import statements by established convention — see
+// capsFor()'s own inline mirror above). MUST match that function's logic exactly; cross-checked by
+// experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs's own dedicated test, the
+// SAME precedent as the existing "prepare-milestone.js mirrors inline the SAME caps as capsFor()"
+// check. `checkFullReviewCap` is passed `true` ONLY at the one call site immediately before
+// dispatching a NEW full-review agent — every other content-agent dispatch never attempts a second
+// full review this generation, so gating them on that cap would incorrectly block ordinary delta/
+// author/plan work whenever an epoch has already used its one full review.
+function _checkEpochCapsInline(checkFullReviewCap) {
+  const c = {
+    fullReviews: (_epochBase.fullReviews || 0) + _epochThisGenFullReviews,
+    observableAgentMs: (_epochBase.observableAgentMs || 0) + _epochElapsedMsSoFar(),
+    terminalFingerprints: _epochBase.terminalFingerprints || {},
+  }
+  const p = _epochPolicy || {}
+  const capMinutes = _highRisk ? (Number.isFinite(p.highRiskCapMinutes) ? p.highRiskCapMinutes : 150) : (Number.isFinite(p.ordinaryCapMinutes) ? p.ordinaryCapMinutes : 90)
+  const overrideMinutes = (_epochOverrides || []).reduce((sum, o) => sum + (Number.isFinite(o?.additionalBudget) ? o.additionalBudget : 0), 0)
+  const effectiveCapMs = (capMinutes + overrideMinutes) * 60 * 1000
+  const maxFullReviews = Number.isFinite(p.maxFullReviewsPerEpoch) ? p.maxFullReviewsPerEpoch : 1
+  const maxRepeatedFingerprint = Number.isFinite(p.maxRepeatedFingerprint) ? p.maxRepeatedFingerprint : 2
+  const fpEntry = Object.entries(c.terminalFingerprints).find(([, count]) => Number.isFinite(count) && count >= maxRepeatedFingerprint)
+  if (fpEntry) return { breached: true, breachedCap: 'repeated-terminal-fingerprint', code: 'epoch-fingerprint-cap-exceeded', message: `terminal fingerprint ${fpEntry[0]} has recurred ${fpEntry[1]} time(s), meeting the epoch cap of ${maxRepeatedFingerprint}` }
+  if (checkFullReviewCap && c.fullReviews >= maxFullReviews) return { breached: true, breachedCap: 'full-review-cap-exceeded', code: 'epoch-full-review-cap-exceeded', message: `cumulative full-review count (${c.fullReviews}) meets/exceeds the epoch cap of ${maxFullReviews} for this unchanged scope epoch` }
+  if (c.observableAgentMs >= effectiveCapMs) return { breached: true, breachedCap: 'time-cap-exceeded', code: 'epoch-time-cap-exceeded', message: `cumulative observable agent time (${c.observableAgentMs}ms) meets/exceeds the epoch cap (${effectiveCapMs}ms${overrideMinutes ? `, includes ${overrideMinutes}m override` : ''})` }
+  return { breached: false }
+}
+
+// _recordEpochDispatch — dispatched from EVERY terminal choke-point (_releaseLeaseAndRecord /
+// _writeGenerationTelemetry, both extended below) to persist this generation's real accumulated
+// deltas onto the epoch record. `tokensObserved` is deliberately omitted here (never a fabricated
+// value) — this workflow has no mechanism to observe real per-generation token usage; the CLI
+// itself leaves any prior observed value on file untouched when the flag is absent.
+async function _recordEpochDispatch(stageLabel, terminalPhase, reason) {
+  return _convergenceAgentCall(
+    `--record-epoch-dispatch --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --highRisk ${_highRisk} --dispatchDelta ${_epochThisGenDispatches} --fullReviewDelta ${_epochThisGenFullReviews} --deltaRoundDelta ${_epochThisGenDeltaRounds} --elapsedMsDelta ${_epochElapsedMsSoFar()} --attemptIncrement 1 --terminalPhase ${terminalPhase} --reason ${JSON.stringify(reason)}`,
+    `epoch-dispatch-${stageLabel}`
+  )
+}
+
+// _epochBreachExit — the ONE exit path every cap-check call site below uses on a breach: releases
+// the held lease + persists final counters via the EXISTING `_releaseLeaseAndRecord` choke point
+// (never a new/second release path), then returns needs-human with the exact 4 allowedActions the
+// task's own AC names — COMMIT/SPLIT reuse M206/M4's EXISTING `--record-split-decision` verbs
+// verbatim (never a parallel commit/split concept); NEW-EPOCH/OVERRIDE map onto this child's own
+// `--new-epoch`/`--override-budget` CLI modes. Dispatches NOTHING further — this function is always
+// called INSTEAD of the content-agent call it would have gated, never alongside it.
+async function _epochBreachExit(terminalPhase, stageLabel, capResult) {
+  log(`Epoch budget breach at ${terminalPhase} — ${capResult.code}: ${capResult.message}. Releasing the lease and returning needs-human; zero further content-agent dispatch this generation.`)
+  await _releaseLeaseAndRecord(stageLabel, { terminalPhase, outcome: 'needs-human', reason: capResult.code, cacheable: false })
+  return {
+    outcome: 'needs-human',
+    reason: capResult.code,
+    phase: terminalPhase,
+    epochCapBreach: capResult,
+    allowedActions: ['COMMIT', 'SPLIT', 'NEW-EPOCH', 'OVERRIDE'],
+    ...(_ledgerLive ? { ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions } : {}),
+  }
+}
+
+// First check of the generation — before resume-decision/split-decision/Preflight/ANY content
+// agent. Catches: (a) a repeated-terminal-fingerprint already recorded by prior generations, or
+// (b) an epoch whose cumulative time/full-review budget was ALREADY exhausted before this
+// generation even started (e.g. a crash mid-generation left counters persisted but the process
+// never reached its own terminal). `checkFullReviewCap:false` here — whether THIS generation will
+// even attempt a full review is decided later, at its own specific dispatch site.
+{
+  const _epochCap = _checkEpochCapsInline(false)
+  if (_epochCap.breached) return await _epochBreachExit('Admission', 'epoch-cap-admission', _epochCap)
+}
 
 // ── Resume decision — M202/DIR-126-C: generation-aware resume ───────────────────────────
 // Runs ONLY when the caller OMITS $a.resumeFromAdjudicatedProposal entirely — an explicit true/
@@ -489,6 +625,13 @@ if (_resumeFromAdjudicatedProposal) {
   // ── Phase: ProposalAuthors ───────────────────────────────────────────────────────────
   phase('ProposalAuthors')
 
+  // gap-prepare-milestone-task-epoch-budget-reset: check BEFORE dispatching — a breach here means
+  // ZERO author agents are dispatched this generation.
+  {
+    const _epochCap = _checkEpochCapsInline(false)
+    if (_epochCap.breached) return await _epochBreachExit('ProposalAuthors', 'epoch-cap-proposal-authors', _epochCap)
+  }
+
   const _proposalPrompt = (authorIdx) => `Independent Proposal author ${authorIdx} of ${_n} for task ${_taskId} (class: ${_class}), milestone charter ${_charterFile}.
 
 Read the CURRENT task (\`task_get ${_taskId}\`) and the charter file (${_charterFile}) — ground your Proposal in the actual current repository state, not in the existing task body's possibly-thin Proposal. Do NOT read the other author(s)' output — this must be an independently re-derived proposal, not a copy.
@@ -508,6 +651,8 @@ Return {authorIdx: ${authorIdx}, proposalText: <the full Proposal markdown text,
     }))
   )
 
+  _epochThisGenDispatches += _n // real dispatches attempted, regardless of how many returned
+
   _proposals = _proposalResults.filter(Boolean)
   if (_proposals.length < _n) {
     log(`ProposalAuthors phase: only ${_proposals.length}/${_n} authors returned a result.`)
@@ -518,6 +663,12 @@ Return {authorIdx: ${authorIdx}, proposalText: <the full Proposal markdown text,
   // ── Phase: Adjudicate ─────────────────────────────────────────────────────────────────
   phase('Adjudicate')
   _recordPhaseBoundary('Adjudicate', 0, await _renewLease('Adjudicate', 0))
+
+  // gap-prepare-milestone-task-epoch-budget-reset: check BEFORE dispatching the adjudicator.
+  {
+    const _epochCap = _checkEpochCapsInline(false)
+    if (_epochCap.breached) return await _epochBreachExit('Adjudicate', 'epoch-cap-adjudicate', _epochCap)
+  }
 
   adjudicateResult = await agent(
     `Adjudicate ${_proposals.length} independent Proposal drafts for task ${_taskId} into ONE reconciled Proposal, then write it back.
@@ -532,6 +683,7 @@ ${_proposals.map((p) => `--- Author ${p.authorIdx} ---\n${p.proposalText}`).join
     { label: 'adjudicate', phase: 'Adjudicate',
       schema: { type: 'object', required: ['ok'], properties: { proposalText: { type: 'string' }, ok: { type: 'boolean' }, error: { type: 'string' }, sessionId: { type: 'string' } } } }
   )
+  _epochThisGenDispatches += 1
 
   if (!adjudicateResult || adjudicateResult.ok !== true) {
     log(`Adjudicate phase FAILED: ${adjudicateResult?.error || '(agent returned nothing)'}`)
@@ -805,6 +957,14 @@ Do not paraphrase or reformat the command's stdout — copy it exactly as printe
 }
 
 if (!_useCrossGenDelta) {
+  // gap-prepare-milestone-task-epoch-budget-reset: check BEFORE dispatching a NEW full review —
+  // the ONE call site that gates on the epoch's full-review cap (checkFullReviewCap:true). Every
+  // other content-agent dispatch in this file never attempts a second full review, so it never
+  // passes `true` here.
+  {
+    const _epochCap = _checkEpochCapsInline(true)
+    if (_epochCap.breached) return await _epochBreachExit('ProposalReview', 'epoch-cap-full-review', _epochCap)
+  }
   // ── Round 0: ONE full grounded review of the just-adjudicated Proposal. ──────────────
   _fullReviewResult = await agent(
     `INDEPENDENT review of task ${_taskId}'s just-reconciled \`## Proposal\` — you did NOT author it. Read the CURRENT task via \`task_get ${_taskId}\` (fresh, do not trust anything from a prior phase) against the real repository.
@@ -819,6 +979,8 @@ if (!_useCrossGenDelta) {
     { label: 'proposal-review', phase: 'ProposalReview',
       schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'array', items: _findingSchema }, mechanisms: { type: 'array' }, proposalHash: { type: 'string' }, nowMs: { type: 'number' }, sessionId: { type: 'string' } } } }
   )
+  _epochThisGenDispatches += 1
+  _epochThisGenFullReviews += 1
 
   if (_fullReviewResult?.sessionId) _reviewSessions.push(_fullReviewResult.sessionId)
   if (_fullReviewResult?.proposalHash) _proposalHashes.push({ round: 0, hash: _fullReviewResult.proposalHash })
@@ -867,6 +1029,17 @@ _startedAtMs = _now()
 // (`findings.length`), and the ledger is hash-bound into the receipt via the Receipt phase's
 // `--ledger` flag. A non-parseable verdict (agent crash / CLI exit 2) fails the phase CLOSED,
 // mirroring the revise-failed `needs-human` path, rather than silently skipping coverage.
+// gap-prepare-milestone-task-epoch-budget-reset (round 2, post-REFUTATION): this dispatch site was
+// found ungated by an independent review — every OTHER real content-agent dispatch in this file
+// checks the epoch cap immediately before dispatching, but this one didn't, leaving one small
+// window (worst-case exposure on the resumeFromAdjudicatedProposal + cross-gen-delta fast path,
+// where no cap check runs at all between Admission and this dispatch) where a real agent call could
+// fire after the epoch's cumulative budget was already exhausted. Closed the same way as every
+// other site: check first, exit closed on breach, dispatch nothing.
+{
+  const _epochCap = _checkEpochCapsInline(false)
+  if (_epochCap.breached) return await _epochBreachExit('ProposalReview', 'epoch-cap-wiring-coverage', _epochCap)
+}
 const _wiringCheckScript = 'experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts'
 const _wiringVerdict = await agent(
   `Run exactly this command and return its parsed stdout JSON:
@@ -875,6 +1048,7 @@ This is the DIR-117-B/M195 mechanism-claim wiring coverage check — it calls th
   { label: 'wiring-coverage-check', phase: 'ProposalReview',
     schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, code: { type: 'string' }, findings: { type: 'array', items: _findingSchema } } } }
 )
+_epochThisGenDispatches += 1
 const _wiringVerdictCodes = ['wiring-coverage-complete', 'wiring-coverage-none-claimed', 'wiring-coverage-uncovered']
 if (!_wiringVerdict || !_wiringVerdictCodes.includes(_wiringVerdict.code)) {
   log(`ProposalReview wiring-coverage sub-step FAILED — no parseable verdict (${_wiringVerdict?.code || 'no-result'}); failing the phase closed rather than skipping coverage.`)
@@ -976,6 +1150,20 @@ while (true) {
   log(`ProposalReview: ${openBlocking.length} blocking finding(s) open — dispatching ${_isCrossGenFirstRound ? 'ONE cross-generation delta reviewer (no separate reviser, mandatory even with zero open findings — see the loop\'s own header comment)' : 'focused revision + delta review'}, round ${_deltaRound}/${_maxDeltaRounds} (epoch delta rounds used so far: ${_deltaRoundOffset}).`)
   _recordPhaseBoundary(`ProposalReview-delta-round-${_deltaRound}`, _deltaRound, await _renewLease(`ProposalReview-delta-round-${_deltaRound}`, _deltaRound))
 
+  // gap-prepare-milestone-task-epoch-budget-reset: check ONCE per delta-round iteration (covering
+  // both the revise + delta-review dispatch below, the SAME per-iteration granularity this loop's
+  // own DIR-125 caps just above already use) — a breach here still persists the review checkpoint
+  // FIRST (this generation's ledger progress must survive into the needs-human terminal, the same
+  // "every ProposalReview terminal writes the checkpoint" discipline every other exit here follows),
+  // then releases the lease via the shared _epochBreachExit path. Dispatches NOTHING further.
+  {
+    const _epochCap = _checkEpochCapsInline(false)
+    if (_epochCap.breached) {
+      await _writeReviewCheckpoint('epoch-cap-delta-round', { terminalReason: _epochCap.code, terminalOutcome: 'needs-human' })
+      return await _epochBreachExit('ProposalReview', 'epoch-cap-delta-round', _epochCap)
+    }
+  }
+
   if (!_isCrossGenFirstRound) {
     const _reviseResult = await agent(
       `Focused Proposal reviser for task ${_taskId}, delta round ${_deltaRound}/${_maxDeltaRounds}. Do NOT re-derive the Proposal from scratch and do NOT act as an independent author — resolve ONLY these recorded blocking findings against the CURRENT task ${_taskId} \`## Proposal\`, preserving every other section/sentence unchanged:
@@ -989,6 +1177,7 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}${f.evidence
       { label: `proposal-revise-round-${_deltaRound}`, phase: 'ProposalReview',
         schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, proposalHash: { type: 'string' }, error: { type: 'string' }, sessionId: { type: 'string' } } } }
     )
+    _epochThisGenDispatches += 1
     if (_reviseResult?.sessionId) _reviserSessions.push(_reviseResult.sessionId)
     if (_reviseResult?.proposalHash) _proposalHashes.push({ round: _deltaRound, hash: _reviseResult.proposalHash })
     if (!_reviseResult || _reviseResult.ok !== true) {
@@ -1039,6 +1228,8 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n'
     { label: _deltaReviewLabel, phase: 'ProposalReview',
       schema: { type: 'object', properties: { resolvedIds: { type: 'array', items: { type: 'string' } }, findings: { type: 'array', items: _findingSchema }, proposalHash: { type: 'string' }, nowMs: { type: 'number' }, sessionId: { type: 'string' } } } }
   )
+  _epochThisGenDispatches += 1
+  _epochThisGenDeltaRounds += 1
   if (_deltaReviewResult?.sessionId) _reviewSessions.push(_deltaReviewResult.sessionId)
   if (_isCrossGenFirstRound && _deltaReviewResult?.proposalHash) _proposalHashes.push({ round: _deltaRound, hash: _deltaReviewResult.proposalHash })
   _applyResolutions(_deltaReviewResult?.resolvedIds, _deltaRound)
@@ -1074,6 +1265,12 @@ _recordPhaseBoundary('PlanAuthor', 0, await _renewLease('PlanAuthor', 0))
 const _slug = _taskId.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 const _planFile = `docs/plans/${_milestoneId}-${_slug}.md`
 
+// gap-prepare-milestone-task-epoch-budget-reset: check BEFORE dispatching PlanAuthor.
+{
+  const _epochCap = _checkEpochCapsInline(false)
+  if (_epochCap.breached) return await _epochBreachExit('PlanAuthor', 'epoch-cap-plan-author', _epochCap)
+}
+
 const planAuthorResult = await agent(
   `Author the checked milestone Plan for task ${_taskId} (milestone ${_milestoneId}, charter ${_charterFile}) at ${_planFile}.
 
@@ -1098,6 +1295,7 @@ Return {planFile: "${_planFile}", ok: true, sessionId: <your real session id>}. 
   { label: 'plan-author', phase: 'PlanAuthor',
     schema: { type: 'object', required: ['ok'], properties: { planFile: { type: 'string' }, ok: { type: 'boolean' }, error: { type: 'string' }, sessionId: { type: 'string' } } } }
 )
+_epochThisGenDispatches += 1
 
 if (!planAuthorResult || planAuthorResult.ok !== true) {
   log(`PlanAuthor phase FAILED: ${planAuthorResult?.error || '(agent returned nothing)'}`)
@@ -1151,6 +1349,15 @@ const _planCheckSessions = []
 while (_planCheckRound < MAX_PLANCHECK_ROUNDS) {
   _planCheckRound += 1
   _recordPhaseBoundary(`PlanCheck-round-${_planCheckRound}`, _planCheckRound, await _renewLease(`PlanCheck-round-${_planCheckRound}`, _planCheckRound))
+
+  // gap-prepare-milestone-task-epoch-budget-reset: check ONCE per PlanCheck-round iteration
+  // (covering both the check dispatch AND its conditional revise dispatch below) — a breach
+  // stops before either.
+  {
+    const _epochCap = _checkEpochCapsInline(false)
+    if (_epochCap.breached) return await _epochBreachExit('PlanCheck', 'epoch-cap-plancheck-round', _epochCap)
+  }
+
   const checkResult = await agent(
     `INDEPENDENT grounded Plan check, round ${_planCheckRound}/${MAX_PLANCHECK_ROUNDS}, for ${_planFile} (task ${_taskId}) — you did NOT author this Plan.
 
@@ -1162,6 +1369,7 @@ Return {findings: <integer count, 0 if none>, findingsDetail: <list each finding
     { label: `plan-check-round-${_planCheckRound}`, phase: 'PlanCheck',
       schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'number' }, findingsDetail: { type: 'string' }, sessionId: { type: 'string' } } } }
   )
+  _epochThisGenDispatches += 1
   _planCheckFindings = checkResult?.findings ?? 1
   if (checkResult?.sessionId) _planCheckSessions.push(checkResult.sessionId)
   if (_planCheckFindings === 0) {
@@ -1176,6 +1384,7 @@ Return {findings: <integer count, 0 if none>, findingsDetail: <list each finding
     { label: `plan-revise-round-${_planCheckRound}`, phase: 'PlanCheck',
       schema: { type: 'object', properties: { ok: { type: 'boolean' } } } }
   )
+  _epochThisGenDispatches += 1
 }
 
 if (_planCheckFindings !== 0) {
