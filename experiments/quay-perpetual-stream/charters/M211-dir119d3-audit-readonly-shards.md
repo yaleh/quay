@@ -3,6 +3,8 @@
 **Task:** DIR-119-D3 · **Class:** development · **Value type:** capabilityGrowth
 **Deliverable:** yes · **Charter tokens:** ~0.3 K · **type:** execution
 
+GATE-HASH-REF: 5023da8232f12579e9a8db0ce26c5a5d1aadd5a7d095380016636330c63d2c93
+
 ## Value hypothesis
 
 Δv̂ > 0 (capability-growth, deliverable, method-infra surface). Third child of DIR-119-D's
