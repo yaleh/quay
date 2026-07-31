@@ -23,11 +23,28 @@
 # --test-concurrency=8 is the default (ADR-019: measured 10.3% faster than the runtime default
 # with zero correctness regression across repeated runs, 514/514 pass at concurrency 4/8/16).
 # A later --test-concurrency=N on the command line overrides this (node --test is last-flag-wins).
+#
+# gap-split-or-commit-not-continuously-checked: this script also runs the WHOLE-TASK-STORE
+# split-or-commit scan (it0-split-or-commit-check.ts, DIR-026's PARENT-DONE-IFF-CHILDREN /
+# SELECT-SPLIT / CHILD-LINK-SYMMETRY rules) on EVERY invocation — not the single-task
+# `quay gate --gate split-or-commit <id>` form, and not only opportunistically inside a
+# milestone's own Gate phase. Previously a violation introduced by one milestone's Land (which
+# runs AFTER that milestone's own Gate phase) could sit undetected until some unrelated future
+# milestone's Gate phase happened to run split-or-commit next. Since this script is the ONE
+# canonical entrypoint CI and local runs both invoke (ADR-019/DIR-109), wiring it here closes
+# that gap for both surfaces at once — CI inherits it via its existing `bash scripts/test.sh`
+# step, no separate ci.yml job needed. It runs unconditionally (even when specific test files
+# are named on the command line) because it is a repo-wide invariant, independent of which
+# test files were requested, and it is fast (whole-store scan of ~450 tasks completes in well
+# under a second).
 
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
+
+echo "== split-or-commit whole-store check (DIR-026, gap-split-or-commit-not-continuously-checked) =="
+bash "${repo_root}/plugin/scripts/it0-split-or-commit-check.sh" "${repo_root}"
 
 if [ "$#" -eq 0 ]; then
   # Default glob: every *.test.mjs under any package's test/ dir, plus plugin/test/.

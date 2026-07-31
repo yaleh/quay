@@ -266,6 +266,34 @@ if (auditResult?.verdict === 'REFUTED') {
 
 const IS_CONCURRENT = $a.mode === 'concurrent'
 
+// ── Post-Land split-or-commit check (gap-split-or-commit-not-continuously-checked) ──────────
+// Runs the WHOLE-TASK-STORE scan (it0-split-or-commit-check.ts, DIR-026) AFTER Land's own
+// lifecycle write-back (status: done etc.) has been applied and BEFORE this workflow may report
+// outcome: 'done' — Land observes the state it just mutated, rather than relying only on the
+// pre-mutation Gate-phase check above (which necessarily ran against the PRE-Land state and
+// cannot see a violation Land's own write introduces — e.g. a parent marked done while an
+// already-existing child stays open, the exact M192/M194 shape this gap was found from). NOT the
+// single-task `quay gate --gate split-or-commit <id>` CLI form used in the Gate phase — the
+// whole-store form, which is what actually catches a cross-task violation. A failure here returns
+// a typed non-success terminal ({outcome:'needs-human'}); when DIR-124-B stage receipts land,
+// this result belongs in the Land stage receipt — until then, the command identity/outcome/reason
+// are recorded via log() below and in the returned journal field, both part of this workflow's
+// deterministic output.
+async function postLandSplitOrCommitCheck() {
+  return agent(
+    `Run the WHOLE-TASK-STORE split-or-commit scan to verify Land's own lifecycle write-back
+(status/parent/children mutations for task ${$a.taskId}) did not introduce a PARENT-DONE-IFF-CHILDREN,
+SELECT-SPLIT, or CHILD-LINK-SYMMETRY violation (DIR-026). Run exactly:
+  bash plugin/scripts/it0-split-or-commit-check.sh .
+from the repository root — the WHOLE-STORE form (bare "." workspace-root, scans every tasks/*.md),
+NOT "quay gate --gate split-or-commit ${$a.taskId}" (which only checks one task and was already run,
+against the PRE-Land state, earlier in this same workflow's Gate phase). Return
+{ok: <exit code === 0>, detail: "<full stdout, or last 4000 chars if longer>"}.`,
+    { phase: 'Land', label: 'post-land-split-or-commit',
+      schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+  )
+}
+
 // ── Concurrent path (DIR-075/M142): defers shared-state writes to fan-in ──────────
 if (IS_CONCURRENT) {
   const concurrentResult = await agent(
@@ -315,6 +343,14 @@ Return {taskId: "${$a.taskId}", outcome: "done", mergeCommit: "<40-char SHA>",
         dashboardEntry: { type: 'string' },
       } } }
   )
+
+  const postLandCheck = await postLandSplitOrCommitCheck()
+  if (!postLandCheck?.ok) {
+    log(`Land post-mutation split-or-commit check FAILED (concurrent, gap-split-or-commit-not-continuously-checked) — ${postLandCheck?.detail || 'no detail'}`)
+    return { outcome: 'needs-human', reason: 'post-land-split-or-commit-violation', phase: 'Land', postLandSplitOrCommit: postLandCheck, verifyCacheUpdates }
+  }
+  log(`Land post-mutation split-or-commit check PASSED (concurrent) — whole task store re-scanned after lifecycle writes, no violations.`)
+
   log(`Land phase complete (concurrent) — milestone ${$a.taskId} done, touched ${(concurrentResult?.touchedFiles || []).length} files.`)
   return { outcome: 'done', taskId: $a.taskId, mergeCommit: concurrentResult?.mergeCommit,
     touchedFiles: concurrentResult?.touchedFiles, dashboardEntry: concurrentResult?.dashboardEntry, verifyCacheUpdates }
@@ -367,6 +403,13 @@ Return {taskId, outcome: 'done', mergeCommit, milestoneCounter}.`,
       mergeCommit: { type: 'string' }, milestoneCounter: { type: 'number' },
     } } }
 )
+
+const postLandCheck = await postLandSplitOrCommitCheck()
+if (!postLandCheck?.ok) {
+  log(`Land post-mutation split-or-commit check FAILED (gap-split-or-commit-not-continuously-checked) — ${postLandCheck?.detail || 'no detail'}`)
+  return { outcome: 'needs-human', reason: 'post-land-split-or-commit-violation', phase: 'Land', postLandSplitOrCommit: postLandCheck, verifyCacheUpdates }
+}
+log(`Land post-mutation split-or-commit check PASSED — whole task store re-scanned after lifecycle writes, no violations.`)
 
 log(`Land phase complete — milestone ${$a.taskId} done.`)
 return { outcome: 'done', taskId: $a.taskId, verifyCacheUpdates }
