@@ -228,6 +228,30 @@ regardless of whether the distinctness text-match (layer 2, defense-in-depth onl
 matching this batch of work's established principle (see the sibling checkpoint task's own history)
 that a hard mechanical bound, not a smarter text heuristic, is the real safety property.
 
+**Round 3's fix was independently re-reviewed a third time before landing (given this task's
+2-real-defects-in-2-rounds track record, the review brief explicitly asked for maximal adversarial
+effort). Verdict: CONCERNS, not REFUTED** — the specific round-2 defect (unrate-limited
+`--new-epoch` reset via ordinary sequential CLI calls) is independently confirmed genuinely closed
+(live reproduction: 5 identical calls now yield only 1 success + 4 `new-epoch-reset-not-distinct`
+rejections; 3 genuinely-distinct calls succeed, a 4th correctly hits
+`new-epoch-reset-count-cap-exceeded`). All 438 tests independently re-run and confirmed, byte-
+identity and merge-tree cleanliness confirmed. The reviewer found 3 additional items, explicitly
+assessed as real but a DIFFERENT threat model than what this task closes (the actual DIR-126-D
+incident was a single actor's ordinary sequential redispatch, not a deliberate concurrent-process
+attack or direct filesystem tampering) — filed as a follow-up task
+(`gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening`) rather than blocking this merge,
+per the reviewer's own explicit recommendation to land now:
+1. A TOCTOU race: concurrent `--new-epoch`/`--override-budget` invocations (no inter-process lock,
+   unlike the codebase's own Admission lease) can transiently exceed the ceiling by one and silently
+   drop a reset/override entry from the audit trail (last-writer-wins on the JSON file).
+2. Deleting the epoch's `.quay/prepare-epochs/<task>.json` file directly resets everything
+   (`_newEpochCli`'s ceiling/distinctness checks are skipped entirely when no prior record exists) —
+   an operator-level bypass, same class as tampering with any other `.quay/` runtime state, never
+   previously documented as an accepted risk.
+3. Whether "no escape valve past `maxNewEpochResetCount` genuine resets" is intended design (forcing
+   convergence to COMMIT/SPLIT) or needs a distinct human-authorized ceiling-override path — flagged
+   for confirmation, not assumed either way.
+
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
