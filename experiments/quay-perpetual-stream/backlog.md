@@ -6,6 +6,7 @@ Sort: value-view (DONE/open/STALE, default)
 
 | id | title | status | value type / cadence | labels |
 |---|---|---|---|---|
+| gap-touches-orthogonality-symlink-isdirect-mismatch | gap: 5 experiments/-mirrored scripts are dead code via their symlink invocation path (isDirect realpath mismatch) — touches-orthogonality-check.ts, anti-drift-touches-check.ts, routine-file-gate.ts, routine-scheduler.ts, serial-fanin-absorb.ts | DONE | - | gap, defect, milestone-candidate |
 | gap-build-phase-null-result-not-gated | execute-milestone.js's Build-phase check only rejects outcome==='needs-human' — a terminally-errored agent() call (null result) silently passes through to Audit/Gate/Land as if Build succeeded | DONE | - | gap, defect, milestone-candidate, human-steered |
 | gap-prepare-milestone-split-decision-no-finality | prepare-milestone split recommendations use an unstable scalar count and have no hash-bound human decision finality | DONE | - | gap, defect, milestone-candidate, human-steered |
 | DIR-126 | Make prepare-milestone flow-efficient with single-flight admission, deterministic preflight, generation-aware resume, phase telemetry, and a calibrated capacity model | DONE | - | directive, milestone-candidate, human-steered, priority:urgent |
@@ -237,7 +238,6 @@ Sort: value-view (DONE/open/STALE, default)
 | exp5-M11 | Re-verify M04-discover's Web UI findings with REAL browser tooling | DONE | exploit, discovery + risk/option | milestone-candidate, milestone:M11-webui-reverify, backfill, surface:web-ui |
 | exp5-M12 | GitHub Provider parent/children WRITE | DONE | exploit | milestone-candidate, milestone:M12-abi-parent-write, backfill, surface:provider-abi |
 | gap-prepare-milestone-convergence-test-fixture-pollutes-tracked-tree | prepare-milestone-convergence.test.mjs writes fixture Plan/receipt files into docs/plans/ and milestones/ (shared production namespace) with cleanup only on graceful completion — 322 orphans found in the tracked tree | open | - | gap, defect, milestone-candidate |
-| gap-touches-orthogonality-symlink-isdirect-mismatch | gap: 5 experiments/-mirrored scripts are dead code via their symlink invocation path (isDirect realpath mismatch) — touches-orthogonality-check.ts, anti-drift-touches-check.ts, routine-file-gate.ts, routine-scheduler.ts, serial-fanin-absorb.ts | open | - | gap, defect, milestone-candidate |
 | gap-execute-milestone-build-admission-and-verification-fuse | execute-milestone has no size-aware Build admission, bounded verification ladder, or repeated-test failure fuse | open | - | gap, milestone-candidate, human-steered |
 | gap-build-evidence-manifest-missing | Build returns a verdict and sparse iteration metadata but no canonical, hash-bound evidence manifest for independent Audit | open | - | gap, milestone-candidate, human-steered |
 | gap-preflight-merged-markdown-claims-code-span-subtraction-false-positive | preflightMergedMarkdownClaims's mid-line-bullet regex misidentifies a backtick-wrapped subtraction expression (e.g. `endedAtMs - startedAtMs`) as a markdown bullet marker -- found live during DIR-126-E's round-4 Preflight rejection | open | - | gap, milestone-candidate |
@@ -272,4 +272,4 @@ Sort: value-view (DONE/open/STALE, default)
 | DIR-071 | DIR-071: Mechanize DRAIN step — drain-scheduler.ts + /drain-directives workflow | open | - | directive, milestone-candidate |
 | exp5-M-QENG-DOD-DEMO-ONLY | The QENG-5 'exp5 DoD via quay gate' wiring is demo-only (2 fixture tasks, QENG-5-DEMO-PASS/FAIL) — the REAL per-milestone DoD meta-enforcer gate at OUTER-LOOP.md step 6/7 still runs it0-dod-check.sh as a bare prose shell call, not through quay gate; decide whether/how to close that gap | SELECTED | governance-integrity (closes a self-disclosed "shelfware risk" the QENG-0 epic itself named as | milestone-candidate, surface:method-infra, milestone:M37-discover-post-qeng |
 
-_265 milestone-candidate task(s) as of 2026-07-31T07:49:17.097Z._
+_265 milestone-candidate task(s) as of 2026-07-31T08:04:05.366Z._

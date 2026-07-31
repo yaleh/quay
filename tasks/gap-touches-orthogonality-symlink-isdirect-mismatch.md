@@ -4,7 +4,7 @@ title: "gap: 5 experiments/-mirrored scripts are dead code via their symlink
   invocation path (isDirect realpath mismatch) — touches-orthogonality-check.ts,
   anti-drift-touches-check.ts, routine-file-gate.ts, routine-scheduler.ts,
   serial-fanin-absorb.ts"
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -432,25 +432,25 @@ the identical defect shape, discovered by pattern sweep rather than by an observ
 
 ## Acceptance Criteria
 
-- [ ] `anti-drift-touches-selfcheck.sh`, `touches-orthogonality-selfcheck.sh`, and the equivalent
+- [x] `anti-drift-touches-selfcheck.sh`, `touches-orthogonality-selfcheck.sh`, and the equivalent
   selfcheck/direct invocation for `routine-file-gate.ts`, `routine-scheduler.ts`, and
   `serial-fanin-absorb.ts` all PASS when invoked via their documented
   `experiments/quay-perpetual-stream/scripts/*` path (not just via the `plugin/scripts/` real path)
   -- shown with real command output, not asserted.
-- [ ] A fixture case that should fail (e.g. `mis-declared-overlap-BITES`) actually reports non-zero
+- [x] A fixture case that should fail (e.g. `mis-declared-overlap-BITES`) actually reports non-zero
   when invoked through the symlink path -- proven, not asserted.
-- [ ] A single repo-wide test enumerates every `experiments/quay-perpetual-stream/scripts/*` symlink
+- [x] A single repo-wide test enumerates every `experiments/quay-perpetual-stream/scripts/*` symlink
   target and asserts mirror-path invocation is non-silent for all of them -- RED against at least one
   of the 5 real scripts before the fix, GREEN after; written so a script added later with the same
   vulnerable guard shape is caught automatically (enumerates symlinks, does not hardcode names).
-- [ ] Real code inspection confirms the fix uses the SAME `fs.realpathSync`-based logic across all 5
+- [x] Real code inspection confirms the fix uses the SAME `fs.realpathSync`-based logic across all 5
   scripts: `gate-script-base.ts`'s `isDirectEntry()` body contains `fs.realpathSync(path.resolve(...))`,
   and each of the 5 affected scripts imports `isDirectEntry` from `./gate-script-base.ts` rather than
   defining its own variant -- shown via grep/diff, not asserted.
-- [ ] `serial-fanin-absorb.ts` no longer imports `{ fileURLToPath }` from `node:url` (dead after guard replacement) and imports `isDirectEntry` from `./gate-script-base.ts` instead -- shown via grep, not asserted.
-- [ ] Selfcheck scripts that invoke `.ts` files directly (`routine-file-gate-selfcheck.sh`, `routine-scheduler-selfcheck.sh`) pass without modification after the fix -- shown via real command output, not asserted.
-- [ ] No changes to `.sh` wrapper scripts (`touches-orthogonality-check.sh`, `anti-drift-touches-check.sh`, `serial-fanin-absorb.sh`) -- shown via `git diff` showing zero hunks in `.sh` files, not asserted.
-- [ ] The regression test at `experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs` dynamically enumerates symlinks via `fs.readdirSync` + `fs.lstatSync` + `fs.realpathSync` (not a static hardcoded list of filenames) and asserts non-empty stdout per symlink with output-identical behavior between the symlink and real invocation paths -- shown via grep of the test source, not asserted.
+- [x] `serial-fanin-absorb.ts` no longer imports `{ fileURLToPath }` from `node:url` (dead after guard replacement) and imports `isDirectEntry` from `./gate-script-base.ts` instead -- shown via grep, not asserted.
+- [x] Selfcheck scripts that invoke `.ts` files directly (`routine-file-gate-selfcheck.sh`, `routine-scheduler-selfcheck.sh`) pass without modification after the fix -- shown via real command output, not asserted.
+- [x] No changes to `.sh` wrapper scripts (`touches-orthogonality-check.sh`, `anti-drift-touches-check.sh`, `serial-fanin-absorb.sh`) -- shown via `git diff` showing zero hunks in `.sh` files, not asserted.
+- [x] The regression test at `experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs` dynamically enumerates symlinks via `fs.readdirSync` + `fs.lstatSync` + `fs.realpathSync` (not a static hardcoded list of filenames) and asserts non-empty stdout per symlink with output-identical behavior between the symlink and real invocation paths -- shown via grep of the test source, not asserted.
 
 ## Definition of Done
 
@@ -458,8 +458,8 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 Reading A, script changes alone do not satisfy this -- real before/after command output for all 5
 scripts is required, not asserted.
 
-- [ ] Landed on `master`, verified via real command output for all 5 scripts.
-- [ ] The repo-wide symlink-enumeration regression test is real and independently re-run, not just
+- [x] Landed on `master`, verified via real command output for all 5 scripts.
+- [x] The repo-wide symlink-enumeration regression test is real and independently re-run, not just
   described.
 
 ## Human verification when exp5 marks this task done
@@ -485,3 +485,19 @@ scripts is required, not asserted.
 - experiments/quay-perpetual-stream/scripts/routine-file-gate-selfcheck.sh
 - experiments/quay-perpetual-stream/scripts/routine-scheduler-selfcheck.sh
 - experiments/quay-perpetual-stream/scripts/serial-fanin-absorb-selfcheck.sh
+
+## Execution record
+
+**Milestone:** M209 · **iteration count:** 1 · **realized Δv:** 0 (v̂=0, defect-fix — 5 symlinked
+CLI scripts' isDirect guard now fires correctly via fs.realpathSync)
+**Build commit:** e7b5d49
+
+Executed directly (mixed mode, 2026-07-31, per explicit user instruction). Independent
+verification substituted a forked fresh-context adversarial reviewer for the normal Audit step
+(verdict: NO REFUTATION FOUND — independently reproduced the before/after defect via `git stash`,
+ran all 6 selfchecks and 118 existing unit tests live, confirmed byte-identical gate-script-base.ts
+copies, confirmed zero `.sh` files touched). Real mechanical Gate scripts all passed:
+`vmeta-lag-check.sh`, `it0-dashboard-line-budget-check.sh`, `worktree-branch-hygiene-check.sh`,
+`tree-hygiene-check.sh`, `it0-split-or-commit-check.ts .`.
+
+**Outcome:** done.
