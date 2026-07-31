@@ -74,10 +74,60 @@ function leaseKey(workspace, taskId) {
   return `${workspace}::${taskId}`;
 }
 
+// ── _readLeaseFileWithRetry — gap-prepare-milestone-lease-read-race (M203/DIR-126-D): a bounded,
+// documented resilience measure against a REAL, twice-observed condition where a real
+// `Workflow({scriptPath:'.claude/workflows/prepare-milestone.js'})` dispatch's own SUBSEQUENT
+// `agent()`-dispatched subprocess ENOENT'd reading this exact path moments after the
+// immediately-preceding subprocess (a SEPARATE OS process — this repo's own sandboxed-workflow-
+// dispatches-real-subprocess architecture) reported writing it successfully
+// (`milestones/M203/telemetry-real-journal-proof.md`, occurrences on `wf_49d73fc5-782` and
+// `wf_7caf2523-9c0`). A direct manual reproduction attempt (the same two CLI calls run back-to-back
+// in one shell, one process) did NOT reproduce it — so this is treated as a plausible cross-
+// subprocess filesystem-visibility gap specific to the real `agent()` dispatch environment, not a
+// located defect in this file's own read/write ordering (no missing `fsync`/caching layer was
+// found: `fs.writeFileSync` here has no `{flush:false}`-style opt-out, and Node's `fs` sync API
+// offers no cross-process durability primitive beyond what `writeFileSync` already does) — so this
+// is a bounded, documented retry (the task's own Requested-action option 3), not a fix to a
+// pinpointed root cause.
+//
+// Retries ONLY `ENOENT` (any other error — `EACCES`, a downstream `JSON.parse` `SyntaxError`, etc.
+// — propagates immediately, unretried, so a genuinely malformed lease file is never masked as
+// "missing"). A FIXED, bounded number of extra attempts (`LEASE_READ_RETRY_ATTEMPTS`, currently 3 —
+// "one immediate re-read on ENOENT" per the task's own wording, widened from a single retry to a
+// short backed-off series after real local reproduction showed a single fixed 20ms gap alone is not
+// always enough margin under load; still a small, fixed bound, never unbounded/never a polling loop)
+// with a short real sleep between attempts (`Atomics.wait` on a throwaway `SharedArrayBuffer` — the
+// only synchronous sleep primitive available in a `.ts` CLI script without spawning a subprocess).
+// Total worst-case added latency across all retries is on the order of ~150ms — negligible next to
+// the multi-second/-minute real agent() dispatches this sits between. A genuinely-missing lease (no
+// lease ever acquired, or one already legitimately released) still ends up `ENOENT` after this
+// bounded window, so callers' existing missing-lease semantics (`_readLease` -> `null`,
+// `_decideResumeCli` -> `decision-exception`, `renewLease`/`releaseLease` -> `{ok:false,
+// error:'lease-missing'}`) stay intact — never masked into a false "found", never an unbounded retry.
+const LEASE_READ_RETRY_DELAYS_MS = [20, 40, 80];
+function _syncSleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+export function _readLeaseFileWithRetry(p) {
+  for (let i = 0; i < LEASE_READ_RETRY_DELAYS_MS.length; i++) {
+    try {
+      return fs.readFileSync(p, "utf8");
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
+      _syncSleepMs(LEASE_READ_RETRY_DELAYS_MS[i]);
+    }
+  }
+  return fs.readFileSync(p, "utf8"); // last attempt — a still-missing file propagates ENOENT here
+}
+
 function _readLease(workspace, taskId) {
   const p = leasePath(workspace, taskId);
-  if (!fs.existsSync(p)) return null;
-  return JSON.parse(fs.readFileSync(p, "utf8"));
+  try {
+    return JSON.parse(_readLeaseFileWithRetry(p));
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw err;
+  }
 }
 function _writeLeaseOverwrite(workspace, taskId, record) {
   fs.mkdirSync(leaseDir(workspace), { recursive: true });
@@ -628,7 +678,7 @@ export function runPreflightChecks({ mode, taskBody, charterBody, planBody, work
 }
 
 // ── Exposed for tests/fixtures (not part of the CLI contract). ─────────────────────────────────────
-export const _internal = { leaseDir, leasePath, auditPath, leaseKey, stalenessMsFor, _readLease };
+export const _internal = { leaseDir, leasePath, auditPath, leaseKey, stalenessMsFor, _readLease, _readLeaseFileWithRetry };
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 async function main(argv) {

@@ -24,7 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry, parseArgs } from "./gate-script-base.ts";
 import { extractSection, countBoxes } from "./task-schema.ts";
-import { PREFLIGHT_POLICY_VERSION, releaseLease } from "./prepare-admission-check.ts";
+import { PREFLIGHT_POLICY_VERSION, releaseLease, _readLeaseFileWithRetry } from "./prepare-admission-check.ts";
 
 export function sha256(text) {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
@@ -741,7 +741,14 @@ function _readCurrentHashes({ workspace, taskId, charterFile }) {
 // prepare-already-running for a task about to vanish).
 export function _decideResumeCli({ taskId, workspace, charterFile, callerOverride }) {
   try {
-    const leaseRaw = fs.readFileSync(_leasePath(workspace, taskId), "utf8");
+    // gap-prepare-milestone-lease-read-race (M203/DIR-126-D): _readLeaseFileWithRetry (imported
+    // from prepare-admission-check.ts, the single owner of this bounded-retry primitive — never
+    // reimplemented here) absorbs the exact ENOENT observed twice on real dispatches (Occurrence 1,
+    // `wf_49d73fc5-782`) where this call fired moments after Admission's own reported-successful
+    // lease write. A genuinely missing lease still surfaces as ENOENT after the bounded retry,
+    // falling through to this function's own catch-all below (`decision-exception`) exactly as
+    // before.
+    const leaseRaw = _readLeaseFileWithRetry(_leasePath(workspace, taskId));
     const lease = JSON.parse(leaseRaw);
     const generationId = _computeGenerationId({
       taskId, ownerExecutionId: lease.ownerExecutionId, fencingToken: lease.fencingToken, acquiredAt: lease.acquiredAt,
@@ -855,7 +862,13 @@ export function _decideResumeCli({ taskId, workspace, charterFile, callerOverrid
 // telemetry file — callers add that write themselves, at whatever point in their own sequence
 // (before or after release) their own Claim requires, isolated in their OWN try/catch.
 function _writeLegacyGenerationRecord({ taskId, workspace, charterFile, terminalPhase, outcome, reason, cacheable }) {
-  const leaseRaw = fs.readFileSync(_leasePath(workspace, taskId), "utf8");
+  // gap-prepare-milestone-lease-read-race (M203/DIR-126-D): same bounded-retry rationale as
+  // _decideResumeCli above — this is the read behind Occurrence 1/2's "terminal telemetry-write
+  // dispatch ALSO failed with the same ENOENT" (both _recordGenerationCli/_writeGenerationTelemetryCli
+  // route through here). Occurrence 2's separate `{ok:false, error:'lease-missing'}` errors during
+  // ProposalReview delta-round lease-renewal calls go through renewLease()'s own _readLease() in
+  // prepare-admission-check.ts, already covered there.
+  const leaseRaw = _readLeaseFileWithRetry(_leasePath(workspace, taskId));
   const lease = JSON.parse(leaseRaw);
   const generationId = _computeGenerationId({
     taskId, ownerExecutionId: lease.ownerExecutionId, fencingToken: lease.fencingToken, acquiredAt: lease.acquiredAt,
