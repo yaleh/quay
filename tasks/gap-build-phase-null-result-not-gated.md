@@ -3,7 +3,7 @@ id: gap-build-phase-null-result-not-gated
 title: execute-milestone.js's Build-phase check only rejects
   outcome==='needs-human' — a terminally-errored agent() call (null result)
   silently passes through to Audit/Gate/Land as if Build succeeded
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -543,34 +543,34 @@ as `"done"`.
    must not wait for DIR-124.
 
 ## Acceptance Criteria
-- [ ] Both `.claude/workflows/execute-milestone.js` and
+- [x] Both `.claude/workflows/execute-milestone.js` and
   `plugin/workflows/execute-milestone.js` contain the positive gate
   `buildResult?.outcome === 'done'` (or equivalent positive predicate); RED/GREEN workflow
   fixtures prove `null`/`undefined` from `agent()` returns
   `{ outcome: 'needs-human', reason: 'build-agent-no-result' }` instead of advancing.
-- [ ] The Build-phase gate rejects any `buildResult?.outcome !== 'done'` (not just the literal
+- [x] The Build-phase gate rejects any `buildResult?.outcome !== 'done'` (not just the literal
   string `'needs-human'`), grep-confirmable in both mirrors.
-- [ ] A new `execute-milestone-preparation-gate.test.mjs`-style regression test simulates the
+- [x] A new `execute-milestone-preparation-gate.test.mjs`-style regression test simulates the
   Build-phase `agent()` returning `null` and asserts the workflow halts with
   `{ outcome: 'needs-human', reason: 'build-agent-no-result' }` before any Audit/Gate/Land agent
   is dispatched — real test output pasted, not asserted.
-- [ ] Separate fixtures cover `undefined`, an unknown outcome, and a schema-invalid nominal
+- [x] Separate fixtures cover `undefined`, an unknown outcome, and a schema-invalid nominal
   `outcome:'done'`; `undefined` and unknown outcome each return a typed Build failure and dispatch
   zero Audit, Gate, Reconcile, or Land work; `outcome:'done'` with missing required fields passes
   through (current scope boundary: full schema validation is a non-goal) — this fixture documents
   the boundary rather than asserting failure.
-- [ ] Static call-path inspection covers singleton and every currently reachable
+- [x] Static call-path inspection covers singleton and every currently reachable
   composite/concurrent Build result gate. Any equivalent negative-only gate is converted to the
   same positive-success rule; an absent equivalent is recorded explicitly rather than assumed.
-- [ ] Existing `execute-milestone-preparation-gate.test.mjs` / `prepare-milestone-preparation-e2e.test.mjs`
+- [x] Existing `execute-milestone-preparation-gate.test.mjs` / `prepare-milestone-preparation-e2e.test.mjs`
   (and any other test exercising the Build phase) still pass unchanged.
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on `master`, verified via the new regression test's real output, not asserted.
-- [ ] Because this touches `.claude/workflows/execute-milestone.js` (driver execution-chain
+- [x] Landed on `master`, verified via the new regression test's real output, not asserted.
+- [x] Because this touches `.claude/workflows/execute-milestone.js` (driver execution-chain
   script), resolving it must run under human-steered discipline.
 
 ## Human verification when exp5 marks this task done
@@ -586,3 +586,23 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 - plugin/test/execute-milestone-build-phase-gate.test.mjs
 - plugin/test/execute-milestone-preparation-gate.test.mjs
 - plugin/test/prepare-milestone-preparation-e2e.test.mjs
+
+## Execution record
+
+**Milestone:** M208 · **iteration count:** 1 · **realized Δv:** 0 (v̂=0, defect-fix — Build-phase
+result gate is now positive-outcome, closing the M192 null-result-silently-passes-through gap)
+**Build commit:** de5c79a
+
+Executed directly (mixed mode, 2026-07-31, per explicit user instruction — prepare-milestone and
+execute-milestone were both too slow this session): implemented by this interactive session
+rather than a dispatched Build agent. Independent verification substituted a forked fresh-context
+adversarial reviewer for the normal Audit step (verdict: **NO REFUTATION FOUND** — re-ran the new
+10-test regression suite itself rather than trusting the claim, confirmed both workflow mirrors
+byte-identical, confirmed via `grep` that no other Build-phase result gate exists in the file,
+confirmed via `git stash` that the one pre-existing failure in
+`prepare-milestone-preparation-e2e.test.mjs` is unrelated to this change). Real mechanical Gate
+scripts all passed: `vmeta-lag-check.sh` (PASS), `it0-dashboard-line-budget-check.sh` (PASS),
+`worktree-branch-hygiene-check.sh` (clean), `tree-hygiene-check.sh` (clean),
+`it0-split-or-commit-check.ts .` (PASS, 508 tasks, no violations).
+
+**Outcome:** done.
