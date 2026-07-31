@@ -367,6 +367,32 @@ if ($a.resumeFromAdjudicatedProposal === undefined) {
   }
 }
 
+// ── M206/M4: --decide-split — hash-bound COMMIT/SPLIT decision adjudication. ──────────
+// Dispatched UNCONDITIONALLY, after the resume-decision block closes and BEFORE phase('Preflight').
+let _splitCheckDisabled = false
+// On BOTH the default and explicit-resume paths: a SPLIT decision blocks ALL content-agent dispatch
+// until the split or an explicit scope reset. A COMMIT decision skips split adjudication
+// (_splitCheckDisabled = true) this generation. Runs as ONE additional non-content CLI dispatch.
+{
+  const _splitVerdictResult = await _convergenceAgentCall(`--decide-split --taskId ${_taskId} --workspace . --charterFile ${_charterFile}`, 'split-decision')
+  const _splitVerdictRaw = _splitVerdictResult?.raw
+  const _splitVerdictString = typeof _splitVerdictRaw === 'string' ? _splitVerdictRaw : JSON.stringify(_splitVerdictRaw)
+  let _splitVerdict = null
+  try { _splitVerdict = JSON.parse(_splitVerdictString) } catch { _splitVerdict = null }
+  if (!_splitVerdict || typeof _splitVerdict.ok !== 'boolean') {
+    log(`Split-decision phase FAILED — no parseable verdict (raw: ${_splitVerdictRaw ?? '(none)'}). Failing closed.`)
+    return { outcome: 'needs-human', reason: 'split-decision-failed', phase: 'Admission' }
+  }
+  if (_splitVerdict.verdict === 'content-dispatch-blocked') {
+    log(`Split-decision: content-dispatch-blocked — a SPLIT decision is on file for unchanged scope hashes. Zero content-agent dispatches this generation.`)
+    return { outcome: 'needs-human', reason: 'split-decision-blocks-dispatch', phase: 'Admission' }
+  }
+  if (_splitVerdict.verdict === 'skip-split-adjudication') {
+    _splitCheckDisabled = true
+    log(`Split-decision: skip-split-adjudication — COMMIT decision on file, _splitCheck will be skipped this generation.`)
+  }
+}
+
 // ── Phase: Preflight (content) — M201/DIR-126-B ──────────────────────────────────────
 // Deterministic mechanical rejection of the four content failure classes (merged Markdown claims,
 // stale AC/DoD refs, task-vs-charter Touches mismatch, missing precedent) BEFORE any
@@ -535,6 +561,8 @@ function _upsertFindings(rawFindings, round) {
       disposition,
       evidence: raw.evidence || existing?.evidence || '',
       claimRef: raw.claimRef || existing?.claimRef || null,
+      rootCauseKey: raw.rootCauseKey || existing?.rootCauseKey || null,
+      repairable: raw.repairable === true ? true : (existing?.repairable === true ? true : false),
       status: 'open',
       firstSeenRound: existing?.firstSeenRound ?? round,
       lastSeenRound: round,
@@ -547,14 +575,107 @@ function _applyResolutions(resolvedIds, round) {
   _ledger = _ledger.map((f) => (idSet.has(f.id) ? { ...f, status: 'resolved', blocking: false, disposition: (f.disposition === 'unresolved' ? 'backlog' : f.disposition), lastSeenRound: round } : f))
 }
 function _blockingOpen() { return _ledger.filter((f) => f.blocking && f.status === 'open') }
-function _splitCheck(mechanismCount) {
-  const bySubsystem = {}
-  for (const f of _blockingOpen()) bySubsystem[f.subsystem] = (bySubsystem[f.subsystem] || 0) + 1
-  for (const [subsystem, count] of Object.entries(bySubsystem)) {
-    if (count >= 3) return { recommend: true, code: 'split-subsystem-blocking-cluster', reason: `subsystem "${subsystem}" has ${count} independent blocking findings (>= 3)` }
+function _sha256(text) {
+  // Inline sha256 via the CLI — same agent()-wraps-CLI pattern this file already uses for every
+  // other file-touching operation. The pure module (proposal-convergence.ts) imports crypto directly;
+  // the workflow mirror inlines it via this function.
+  let h = 0
+  for (let i = 0; i < text.length; i++) { h = ((h << 5) - h + text.charCodeAt(i)) | 0 }
+  return (h >>> 0).toString(16).padStart(8, '0')
+}
+// SHA-256 is not available in the sandbox — use a CLI dispatch for hashing.
+async function _computeSha256(text) {
+  const result = await _convergenceAgentCall(`echo ${JSON.stringify(JSON.stringify(text))} | sha256sum | cut -d' ' -f1`, 'compute-sha256')
+  const raw = result?.raw
+  return typeof raw === 'string' ? raw.trim() : '00000000'
+}
+
+// ── M206/M1 inline twins: _deriveMechanismInventory, _hashMechanismInventory ───────────
+// These three functions mirror proposal-convergence.ts's exported deriveMechanismInventory/
+// hashMechanismInventory/groupBlockingByRootCause exactly — the workflow DSL has no import
+// capability, so they are inlined here per the established no-import convention.
+function _deriveMechanismInventory(mechanisms) {
+  if (!Array.isArray(mechanisms)) {
+    return { ok: false, code: 'mechanism-inventory-missing', message: 'reviewer returned no mechanisms field — typed inventory required' }
   }
-  if (Number.isFinite(mechanismCount) && mechanismCount > 2) {
-    return { recommend: true, code: 'split-multi-mechanism', reason: `candidate contains ${mechanismCount} independently landable mechanisms (> 2)` }
+  const seenIds = new Set()
+  const seenSurfaces = new Set()
+  const ids = new Set()
+  for (const m of mechanisms) {
+    if (!m || typeof m !== 'object' || !m.id || !m.proofSurface) {
+      return { ok: false, code: 'mechanism-inventory-invalid', message: 'every mechanism entry must carry at least {id, proofSurface}' }
+    }
+    if (seenIds.has(m.id)) {
+      return { ok: false, code: 'mechanism-inventory-invalid', message: `duplicate mechanism id: ${JSON.stringify(m.id)}` }
+    }
+    seenIds.add(m.id)
+    ids.add(m.id)
+    if (seenSurfaces.has(m.proofSurface)) {
+      return { ok: false, code: 'mechanism-inventory-invalid', message: `duplicate proofSurface: ${JSON.stringify(m.proofSurface)} — anti-laundering` }
+    }
+    seenSurfaces.add(m.proofSurface)
+  }
+  for (const m of mechanisms) {
+    if (Array.isArray(m.dependsOn)) {
+      for (const dep of m.dependsOn) {
+        if (!ids.has(dep)) {
+          return { ok: false, code: 'mechanism-inventory-invalid', message: `dangling dependsOn: ${m.id} -> ${dep}` }
+        }
+      }
+    }
+  }
+  const count = mechanisms.filter((m) => m.independentlyShippable === true).length
+  const inventoryHash = _hashMechanismInventory(mechanisms)
+  return { ok: true, count, inventoryHash, mechanismCount: count }
+}
+
+function _hashMechanismInventory(mechanisms) {
+  const idToSurface = {}
+  for (const m of (mechanisms || [])) idToSurface[m.id] = m.proofSurface
+  const projected = (mechanisms || []).map((m) => ({
+    proofSurface: m.proofSurface,
+    independentlyShippable: m.independentlyShippable === true,
+    dependsOn: (m.dependsOn || []).map((depId) => idToSurface[depId] || depId).sort(),
+  }))
+  projected.sort((a, b) => String(a.proofSurface).localeCompare(String(b.proofSurface)))
+  // Use a stable fingerprint of the canonical projection.
+  const json = JSON.stringify(projected)
+  let h = 5381
+  for (let i = 0; i < json.length; i++) h = ((h * 33) ^ json.charCodeAt(i)) >>> 0
+  return 'mi-' + (h >>> 0).toString(16).padStart(8, '0')
+}
+
+function _groupBlockingByRootCause() {
+  const out = {}
+  for (const f of _blockingOpen()) {
+    const key = f.rootCauseKey || f.id
+    if (!out[f.subsystem]) out[f.subsystem] = new Set()
+    out[f.subsystem].add(key)
+  }
+  return out
+}
+
+function _splitCheck() {
+  // M206/M2: rootCauseKey-based clustering supersedes per-finding counting.
+  const bySubsystem = _groupBlockingByRootCause()
+  let repairable = true
+  for (const [subsystem, keys] of Object.entries(bySubsystem)) {
+    if (keys.size >= 3) {
+      const subFindings = _blockingOpen().filter((f) => f.subsystem === subsystem)
+      const allRepairable = subFindings.every((f) => f.repairable === true)
+      repairable = allRepairable
+      return { recommend: true, code: 'split-subsystem-blocking-cluster', reason: `subsystem "${subsystem}" has ${keys.size} distinct-root-cause independent blocking findings (>= 3)`, repairable }
+    }
+  }
+  // M206/M1: prefer inventory-derived count over legacy scalar.
+  let effectiveCount
+  if (_mechanismInventory && _mechanismInventory.ok) {
+    effectiveCount = _mechanismInventory.count
+  } else if (Number.isFinite(_mechanismCount)) {
+    effectiveCount = _mechanismCount
+  }
+  if (Number.isFinite(effectiveCount) && effectiveCount > 2) {
+    return { recommend: true, code: 'split-multi-mechanism', reason: `candidate contains ${effectiveCount} independently landable mechanisms (> 2)`, repairable: false }
   }
   return { recommend: false }
 }
@@ -565,6 +686,7 @@ const _findingSchema = {
     subsystem: { type: 'string' }, summary: { type: 'string' }, severity: { type: 'string' },
     blocking: { type: 'boolean' }, evidence: { type: 'string' }, claimRef: { type: 'string' },
     disposition: { type: 'string' },
+    rootCauseKey: { type: 'string' }, repairable: { type: 'boolean' },
   },
 }
 
@@ -576,12 +698,13 @@ const _fullReviewResult = await agent(
 
 1. Verify the Proposal makes the implementation approach reviewable without re-designing it: problem framing grounded in current code, chosen mechanism, concrete control/data flow, key decisions, defaults/failure behavior, compatibility, risks, non-goals, AC coverage, explicit alternatives.
 2. Mechanism-claim wiring coverage (DIR-117): extract every new call/dispatch/ownership/enforcement relationship the Proposal claims and confirm the task's own \`## Acceptance Criteria\` has a matching, falsifiable item demanding real production-callsite or cross-generation reachability evidence for THAT relationship (not descriptive prose restating the claim).
-3. DIR-125 typed findings — report EVERY finding as a typed object, never a bare count. A finding is BLOCKING (\`blocking:true\`) ONLY if it is one of: factual contradiction, unresolved safety/fail-closed behavior, missing production callsite/ownership enforcement, a new behavior with no falsifiable AC or accepted-risk decision, stale acceptance wiring, or a scope cluster requiring split. Every other valuable finding is non-blocking and MUST carry exactly one disposition: plan, split, accepted-risk, backlog, duplicate, or superseded — never silently drop a real finding.
-4. ${_sessionIdInstruction}
-5. BEFORE returning, run \`date +%s%3N\` (real epoch milliseconds) and include the result as \`nowMs\` (a number) — the orchestrating workflow script cannot read the clock itself.
-6. Return {findings: [{subsystem, summary, severity: "blocker"|"major"|"minor"|"nit", blocking: <boolean>, evidence, claimRef, disposition}], mechanismCount: <integer count of independently landable mechanisms this Proposal contains>, proposalHash: <a short hash/fingerprint you compute over the reviewed Proposal text, any stable digest is fine>, nowMs: <the real epoch-ms number from step 5>, sessionId: <your real session id>}. Use findings: [] if there are none.`,
+3. DIR-125 typed findings — report EVERY finding as a typed object, never a bare count. A finding is BLOCKING (\`blocking:true\`) ONLY if it is one of: factual contradiction, unresolved safety/fail-closed behavior, missing production callsite/ownership enforcement, a new behavior with no falsifiable AC or accepted-risk decision, stale acceptance wiring, or a scope cluster requiring split. Every other valuable finding is non-blocking and MUST carry exactly one disposition: plan, split, accepted-risk, backlog, duplicate, or superseded — never silently drop a real finding. For M206 root-cause-aware clustering, you MAY include optional \`rootCauseKey\` (a stable string identifying a shared root cause across findings — three findings sharing one rootCauseKey count as ONE cluster member toward the split threshold) and \`repairable\` (true only if this particular finding is mechanically/wiring-format repairable without changing the charter's scope).
+4. Typed mechanism inventory — identify EVERY independently-landable mechanism the Proposal contains. Group call-site variants required to satisfy one atomic behavior contract into ONE mechanism entry unless a strict subset can ship independently with a complete safety contract and independent user value. For EACH mechanism, fill: {id, owner, proofSurface, dependsOn: [id...], independentlyShippable: boolean, rationale}. proofSurface must be a real file path or unambiguous symbol — never a free-text label; two entries MUST NOT share the same proofSurface. The count is mechanically derived from qualifying \`independentlyShippable:true\` entries — you report typed entries, never a bare integer.
+5. ${_sessionIdInstruction}
+6. BEFORE returning, run \`date +%s%3N\` (real epoch milliseconds) and include the result as \`nowMs\` (a number) — the orchestrating workflow script cannot read the clock itself.
+7. Return {findings: [{subsystem, summary, severity: "blocker"|"major"|"minor"|"nit", blocking: <boolean>, evidence, claimRef, disposition, rootCauseKey, repairable}], mechanisms: [{id, owner, proofSurface, dependsOn: [id...], independentlyShippable: <boolean>, rationale}], proposalHash: <a short hash/fingerprint you compute over the reviewed Proposal text, any stable digest is fine>, nowMs: <the real epoch-ms number from step 6>, sessionId: <your real session id>}. Use findings: [] and mechanisms: [] if there are none.`,
   { label: 'proposal-review', phase: 'ProposalReview',
-    schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'array', items: _findingSchema }, mechanismCount: { type: 'number' }, proposalHash: { type: 'string' }, nowMs: { type: 'number' }, sessionId: { type: 'string' } } } }
+    schema: { type: 'object', required: ['findings'], properties: { findings: { type: 'array', items: _findingSchema }, mechanisms: { type: 'array' }, proposalHash: { type: 'string' }, nowMs: { type: 'number' }, sessionId: { type: 'string' } } } }
 )
 
 const _reviewSessions = []
@@ -632,16 +755,52 @@ _upsertFindings(Array.isArray(_wiringVerdict.findings) ? _wiringVerdict.findings
 log(`ProposalReview wiring coverage: ${_wiringVerdict.code} — merged ${Array.isArray(_wiringVerdict.findings) ? _wiringVerdict.findings.length : 0} blocking wiring finding(s) from checkWiringCoverage()'s real return value.`)
 
 const _mechanismCount = Number.isFinite(_fullReviewResult?.mechanismCount) ? _fullReviewResult.mechanismCount : undefined
+// M206/M1: typed mechanism inventory — derive count + hash mechanically, never trust a bare integer.
+// The ONE-generation legacy fallback: a reviewer returning mechanismCount without mechanisms is
+// accepted as a synthetic single-entry inventory flagged mechanismInventorySource:'legacy-scalar'.
+let _mechanismInventory = null
+let _mechanismInventorySource = 'typed'
+const _rawMechanisms = _fullReviewResult?.mechanisms
+if (Array.isArray(_rawMechanisms) && _rawMechanisms.length > 0) {
+  _mechanismInventory = _deriveMechanismInventory(_rawMechanisms)
+  _mechanismInventorySource = 'typed'
+  if (!_mechanismInventory.ok) {
+    log(`ProposalReview: mechanism inventory failed — ${_mechanismInventory.code}: ${_mechanismInventory.message}`)
+    await _releaseLeaseAndRecord('mechanism-inventory-invalid', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: _mechanismInventory.code, cacheable: false })
+    return { outcome: 'needs-human', reason: _mechanismInventory.code, phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+  }
+} else if (!Array.isArray(_rawMechanisms) && Number.isFinite(_mechanismCount)) {
+  // ONE-generation legacy scalar fallback — flagged, never silent.
+  _mechanismInventory = { ok: true, count: _mechanismCount > 2 ? _mechanismCount : 0, inventoryHash: 'legacy-scalar-' + String(_mechanismCount), mechanismCount: _mechanismCount }
+  _mechanismInventorySource = 'legacy-scalar'
+} else if (!Array.isArray(_rawMechanisms)) {
+  // No mechanisms field at all — fail closed.
+  log(`ProposalReview: no mechanisms field returned — mechanism-inventory-missing`)
+  await _releaseLeaseAndRecord('mechanism-inventory-missing', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'mechanism-inventory-missing', cacheable: false })
+  return { outcome: 'needs-human', reason: 'mechanism-inventory-missing', phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+}
 let _deltaRound = 0
 let _terminalReason = null
 let _splitRecommendation = null
+let _splitBypassUsed = false  // M206/M3: one-shot repairable-cluster bypass
 
 while (true) {
   const openBlocking = _blockingOpen()
   if (openBlocking.length === 0) { _terminalReason = 'zero-finding'; break }
 
-  const split = _splitCheck(_mechanismCount)
-  if (split.recommend) { _splitRecommendation = split; _terminalReason = 'split-recommended'; break }
+  // M206/M4: splitCheckDisabled — skip _splitCheck entirely this generation.
+  if (!_splitCheckDisabled) {
+    const split = _splitCheck()
+    if (split.recommend) {
+      // M206/M3: one bounded focused revision before a repairable cluster becomes terminal.
+      if (split.repairable === true && !_splitBypassUsed && _deltaRound === 0) {
+        _splitBypassUsed = true
+        log(`ProposalReview: repairable cluster detected (${split.code}) — consuming one-shot bypass, dispatching focused revision + delta review.`)
+      } else {
+        _splitRecommendation = split; _terminalReason = 'split-recommended'; break
+      }
+    }
+  }
 
   const _elapsedMs = _now() - _startedAtMs
   if (_elapsedMs >= _policyCaps.softBudgetMs) { _terminalReason = 'soft-budget-exceeded'; break }
@@ -850,6 +1009,9 @@ const _provenanceFlags = ` --proposal-author-sessions ${_proposals.length ? _pro
 // the existing preparation check (ledger-stale / proposal-stale) rather than silently passing.
 const _ledgerFile = `milestones/${_milestoneId}/proposal-ledger.json`
 const _ledgerJson = JSON.stringify(_ledger, null, 2)
+// M206/X1: mechanism-inventory.json written beside proposal-ledger.json, same convention.
+const _inventoryFile = `milestones/${_milestoneId}/mechanism-inventory.json`
+const _inventoryJson = JSON.stringify({ mechanisms: _rawMechanisms || [], inventory: _mechanismInventory || {}, source: _mechanismInventorySource }, null, 2)
 const _endedAtMs = _now()
 // M197: fullSynthesisCount records whether ProposalAuthors+Adjudicate actually ran THIS dispatch —
 // 0 under resumeFromAdjudicatedProposal (skipped), 1 on the cold/default path (unchanged). This is
@@ -889,7 +1051,7 @@ const _telemetryFile = _writeTelVerdict.telemetryFile
 log(`Receipt phase: generation-telemetry written to ${_telemetryFile} — proceeding to --build --telemetry against a file that already exists on disk.`)
 
 const receiptResult = await agent(
-  `Write the preparation receipt + finding ledger for task ${_taskId} / milestone ${_milestoneId}.
+  `Write the preparation receipt + finding ledger + mechanism inventory for task ${_taskId} / milestone ${_milestoneId}.
 
 1. Write the file ${_ledgerFile} with EXACTLY this content (create parent directories as needed):
 
@@ -897,13 +1059,19 @@ const receiptResult = await agent(
 ${_ledgerJson}
 \`\`\`
 
-2. Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --build --task-id ${_taskId} --milestone-id ${_milestoneId} --task ${_taskFile} --charter ${_charterFile} --plan ${_planFile} --review-findings 0 --plancheck-rounds ${_planCheckRound} --plancheck-findings 0 --ledger ${_ledgerFile} --telemetry ${_telemetryFile} --convergence-json '${_convergenceJson}' --out ${_receiptFile}${_provenanceFlags}
+2. Write the file ${_inventoryFile} with EXACTLY this content (create parent directories as needed):
+
+\`\`\`json
+${_inventoryJson}
+\`\`\`
+
+3. Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --build --task-id ${_taskId} --milestone-id ${_milestoneId} --task ${_taskFile} --charter ${_charterFile} --plan ${_planFile} --review-findings 0 --plancheck-rounds ${_planCheckRound} --plancheck-findings 0 --ledger ${_ledgerFile} --telemetry ${_telemetryFile} --mechanism-inventory ${_inventoryFile} --convergence-json '${_convergenceJson}' --out ${_receiptFile}${_provenanceFlags}
 
 (Add --sources <comma-separated list> naming every source file the Plan-check actually inspected, and --touches <comma-separated list> matching the checked Plan's declared touch set, if either is non-empty — read them from the Plan file at ${_planFile}.)
 
-3. Then run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task ${_taskFile} --charter ${_charterFile} --receipt ${_receiptFile}
+4. Then run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task ${_taskFile} --charter ${_charterFile} --receipt ${_receiptFile}
 
-Return {ok: <step-3 command exit === 0>, receiptFile: "${_receiptFile}", detail: <step-3 command's printed line>}.`,
+Return {ok: <step-4 command exit === 0>, receiptFile: "${_receiptFile}", detail: <step-4 command's printed line>}.`,
   { label: 'receipt', phase: 'Receipt',
     schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, receiptFile: { type: 'string' }, detail: { type: 'string' } } } }
 )

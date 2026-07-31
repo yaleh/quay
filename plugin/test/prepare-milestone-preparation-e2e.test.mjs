@@ -164,6 +164,11 @@ function makeAgentMock(taskFileOnDisk) {
       return { raw: JSON.stringify({ decision: 'cold', reason: 'missing-prior-record' }) };
     }
 
+    // M206/M4: the new --decide-split dispatch — fired UNCONDITIONALLY after resume-decision.
+    if (label === 'split-decision') {
+      return { raw: JSON.stringify({ ok: true, verdict: 'no-decision-on-file' }) };
+    }
+
     // M201/DIR-126-B: the new Preflight phase's agent()-dispatched CLI calls — mocked with a
     // default non-blocking verdict so this fixture still reaches 'prepared' unchanged. Preflight's
     // own detector logic has its own dedicated prepare-admission-check.test.mjs coverage.
@@ -261,6 +266,12 @@ function makeAgentMock(taskFileOnDisk) {
       const { ledgerFile, ledgerJson } = ledgerFromPrompt(prompt);
       fs.mkdirSync(path.dirname(ledgerFile), { recursive: true });
       fs.writeFileSync(ledgerFile, ledgerJson);
+      // M206/X1: also write the mechanism-inventory file from the prompt content.
+      const invMatch = prompt.match(/Write the file (\S+mechanism-inventory\.json) with EXACTLY this content[\s\S]*?```json\s*\n([\s\S]*?)\n```/);
+      if (invMatch) {
+        fs.mkdirSync(path.dirname(invMatch[1]), { recursive: true });
+        fs.writeFileSync(invMatch[1], invMatch[2]);
+      }
       const cmds = extractNodeCommands(prompt);
       assert.equal(cmds.length, 2, `expected exactly 2 node commands in the Receipt prompt, got ${cmds.length}:\n${prompt}`);
       const build = runShell(cmds[0]);

@@ -76,7 +76,7 @@ export function computeCurrentHashes({ taskFile, charterFile, receipt }) {
 // into `hashes.telemetry` the exact same way `ledgerFile` is hash-bound into `hashes.ledger`, so a
 // later swap for a different/edited telemetry record is caught by checkPreparation()'s
 // `telemetry-stale`/`telemetry-missing` checks (Claim A.5) rather than silently passing.
-export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planFile, sourceFiles = [], review, planCheck, touches = [], provenance, ledgerFile, convergence, telemetryFile }) {
+export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planFile, sourceFiles = [], review, planCheck, touches = [], provenance, ledgerFile, convergence, telemetryFile, mechanismInventoryFile }) {
   const taskText = fs.readFileSync(taskFile, "utf8");
   const proposalSection = extractSection(taskText, "Proposal") || "";
   const charterText = fs.readFileSync(charterFile, "utf8");
@@ -85,6 +85,7 @@ export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planF
   for (const f of sourceFiles) sources[f] = sha256(fs.readFileSync(f, "utf8"));
   const ledgerHash = ledgerFile ? sha256(fs.readFileSync(ledgerFile, "utf8")) : undefined;
   const telemetryHash = telemetryFile ? sha256(fs.readFileSync(telemetryFile, "utf8")) : undefined;
+  const mechanismInventoryHash = mechanismInventoryFile ? sha256(fs.readFileSync(mechanismInventoryFile, "utf8")) : undefined;
   return {
     taskId,
     milestoneId,
@@ -92,6 +93,7 @@ export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planF
     planFile,
     ledgerFile: ledgerFile ?? null,
     telemetryFile: telemetryFile ?? null,
+    mechanismInventoryFile: mechanismInventoryFile ?? null,
     hashes: {
       proposal: sha256(proposalSection.trim()),
       charter: sha256(charterText),
@@ -99,6 +101,7 @@ export function buildReceipt({ taskId, milestoneId, charterFile, taskFile, planF
       sources,
       ...(ledgerHash !== undefined ? { ledger: ledgerHash } : {}),
       ...(telemetryHash !== undefined ? { telemetry: telemetryHash } : {}),
+      ...(mechanismInventoryHash !== undefined ? { mechanismInventory: mechanismInventoryHash } : {}),
     },
     review: review ?? { findings: 0 },
     planCheck: planCheck ?? { rounds: 1, findings: 0 },
@@ -900,6 +903,16 @@ export function checkPreparation({ taskFile, charterFile, receiptFile, declaredT
       return { ok: false, code: "telemetry-stale", message: `telemetry record (${receipt.telemetryFile}) has changed since preparation, or this receipt has been paired with a telemetry record it did not build — rerun preparation` };
     }
   }
+  // M206/X1: mechanism-inventory hash-binding — structurally identical to ledger/telemetry above.
+  if (receipt.mechanismInventoryFile) {
+    if (!fs.existsSync(receipt.mechanismInventoryFile)) {
+      return { ok: false, code: "mechanism-inventory-missing", message: `preparation receipt names a mechanism inventory file that no longer exists: ${receipt.mechanismInventoryFile}` };
+    }
+    const currentInventoryHash = sha256(fs.readFileSync(receipt.mechanismInventoryFile, "utf8"));
+    if (currentInventoryHash !== receipt.hashes?.mechanismInventory) {
+      return { ok: false, code: "mechanism-inventory-stale", message: `mechanism inventory (${receipt.mechanismInventoryFile}) has changed since preparation, or this receipt has been paired with an inventory it did not build — rerun preparation` };
+    }
+  }
   if (receipt.convergence) {
     const convergenceResult = validateConvergenceCounters({
       highRisk: receipt.convergence.highRisk,
@@ -985,6 +998,7 @@ function parseArgs(argv) {
     // queryTelemetryReport scans milestones/prepare-telemetry/ under (defaults to "." — the SAME
     // default proposal-convergence.ts's own CLI implicitly relies on via its own --workspace flag).
     else if (a === "--telemetry") out.telemetryFile = argv[++i];
+    else if (a === "--mechanism-inventory") out.mechanismInventoryFile = argv[++i];
     else if (a === "--workspace") out.workspace = argv[++i];
     else if (a === "--telemetry-report") out.telemetryReportMilestoneId = argv[++i];
     // DIR-126-E/M204 — the read-only capacity-aggregation mode: --capacity-report aggregates BOTH
@@ -1027,10 +1041,10 @@ if (isDirectInvocation()) {
       taskFile, charterFile, planFile, outFile, taskId, milestoneId, sourceFiles,
       reviewFindings, planCheckRounds, planCheckFindings, touches,
       proposalAuthorSessions, adjudicatorSession, reviewSession, planAuthorSession, planCheckSessions,
-      ledgerFile, convergenceJson, telemetryFile,
+      ledgerFile, convergenceJson, telemetryFile, mechanismInventoryFile,
     } = parsed;
     if (!taskFile || !charterFile || !planFile || !outFile || !taskId) {
-      console.error("usage: node milestone-preparation-check.ts --build --task-id <id> --task <task.md> --charter <charter.md> --plan <plan.md> --out <receipt.json> [--milestone-id <M-id>] [--sources a,b,c] [--review-findings N] [--plancheck-rounds N] [--plancheck-findings N] [--touches a,b,c] [--proposal-author-sessions a,b] [--adjudicator-session id] [--review-session id] [--plan-author-session id] [--plancheck-sessions r1,r2] [--ledger ledger.json] [--convergence-json '{...}'] [--telemetry telemetry.json]");
+      console.error("usage: node milestone-preparation-check.ts --build --task-id <id> --task <task.md> --charter <charter.md> --plan <plan.md> --out <receipt.json> [--milestone-id <M-id>] [--sources a,b,c] [--review-findings N] [--plancheck-rounds N] [--plancheck-findings N] [--touches a,b,c] [--proposal-author-sessions a,b] [--adjudicator-session id] [--review-session id] [--plan-author-session id] [--plancheck-sessions r1,r2] [--ledger ledger.json] [--convergence-json '{...}'] [--telemetry telemetry.json] [--mechanism-inventory mechanism-inventory.json]");
       process.exit(2);
     }
     if (ledgerFile && !fs.existsSync(ledgerFile)) {
@@ -1039,6 +1053,10 @@ if (isDirectInvocation()) {
     }
     if (telemetryFile && !fs.existsSync(telemetryFile)) {
       console.error(`ERROR: --telemetry file does not exist: ${telemetryFile}`);
+      process.exit(2);
+    }
+    if (mechanismInventoryFile && !fs.existsSync(mechanismInventoryFile)) {
+      console.error(`ERROR: --mechanism-inventory file does not exist: ${mechanismInventoryFile}`);
       process.exit(2);
     }
     let convergence = null;
@@ -1069,6 +1087,7 @@ if (isDirectInvocation()) {
       ledgerFile: ledgerFile || undefined,
       convergence,
       telemetryFile: telemetryFile || undefined,
+      mechanismInventoryFile: mechanismInventoryFile || undefined,
     });
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, JSON.stringify(receipt, null, 2) + "\n");

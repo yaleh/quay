@@ -187,6 +187,15 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
       return { raw: JSON.stringify({ decision: 'cold', reason: 'missing-prior-record' }) };
     }
 
+    // M206/M4: the new split-decision dispatch (proposal-convergence.ts --decide-split),
+    // fired UNCONDITIONALLY after the resume-decision block closes. Defaults to no-decision-on-file
+    // so every existing scenario that doesn't care about this phase still passes unchanged.
+    if (label === 'split-decision') {
+      calls.splitDecisions = (calls.splitDecisions || 0) + 1;
+      if (typeof reviewHandlers.onSplitDecision === 'function') return reviewHandlers.onSplitDecision(prompt);
+      return { raw: JSON.stringify({ ok: true, verdict: 'no-decision-on-file' }) };
+    }
+
     // M201/DIR-126-B: the new Preflight phase's agent()-dispatched CLI calls (content, then
     // plan-shape). Mocked with a default non-blocking verdict so every existing scenario in this
     // file that doesn't care about Preflight still passes unchanged — mirroring exactly how the
@@ -291,9 +300,17 @@ function makeMock(taskFileOnDisk, reviewHandlers) {
       fs.mkdirSync(path.dirname(ledgerFile), { recursive: true });
       fs.writeFileSync(ledgerFile, ledgerJson);
       ledger = JSON.parse(ledgerJson);
+      // M206/X1: also write the mechanism-inventory file from the prompt content.
+      const invMatch = prompt.match(/Write the file (\S+mechanism-inventory\.json) with EXACTLY this content[\s\S]*?```json\s*\n([\s\S]*?)\n```/);
+      if (invMatch) {
+        const invFile = invMatch[1];
+        fs.mkdirSync(path.dirname(invFile), { recursive: true });
+        fs.writeFileSync(invFile, invMatch[2]);
+      }
       const cmds = extractNodeCommands(prompt);
       assert.equal(cmds.length, 2, `expected exactly 2 node commands in the Receipt prompt, got ${cmds.length}:\n${prompt}`);
       assert.match(cmds[0], /--telemetry \S+/, 'the --build dispatch must hash-bind the telemetry file written just above (Claim A.4/A.5)');
+      assert.match(cmds[0], /--mechanism-inventory \S+/, 'the --build dispatch must hash-bind the mechanism-inventory file (M206/X1)');
       const build = runShell(cmds[0]);
       assert.equal(build.status, 0, `--build command failed:\n${build.stdout}`);
       const check = runShell(cmds[1]);
@@ -842,6 +859,9 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
         // test's own scope (Admission/Preflight noisy-JSON parsing) unaffected.
         return { raw: noisyPrefix + JSON.stringify({ decision: 'cold', reason: 'missing-prior-record' }) };
       }
+      if (label === 'split-decision') {
+        return { raw: JSON.stringify({ ok: true, verdict: 'no-decision-on-file' }) };
+      }
       if (label === 'preflight-content') {
         calls.preflightContent += 1;
         return { raw: noisyPrefix + JSON.stringify({ ok: true, policyVersion: 'preflight-v1', findings: [] }) };
@@ -1067,10 +1087,11 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     // M203/DIR-126-D Claim A.4 (this child): Receipt's own 2 sites
     // (receipt-selfcheck-failed/prepared) moved OFF the combined _releaseLeaseAndRecord helper onto
     // the new write-first/build/release-only split (_writeGenerationTelemetry + _releaseLease) — the
-    // 13 pre-Receipt terminals (including reuse-terminal, which never called this helper at all) are
+    // pre-Receipt terminals (including reuse-terminal, which never called this helper at all) are
     // UNCHANGED, still dispatching _releaseLeaseAndRecord exactly once each.
+    // M206: +2 new sites for mechanism-inventory-invalid / mechanism-inventory-missing fail-closed terminals.
     const callSites = [...text.matchAll(/await _releaseLeaseAndRecord\(/g)];
-    assert.equal(callSites.length, 13, `expected exactly 13 await _releaseLeaseAndRecord( call sites (15 minus Receipt's own 2), found ${callSites.length}`);
+    assert.equal(callSites.length, 15, `expected exactly 15 await _releaseLeaseAndRecord( call sites (17 minus Receipt's own 2 + 2 new M206 terminals), found ${callSites.length}`);
 
     // The NEW _releaseLease(stageLabel, {reason}) helper (M203/DIR-126-D — a DIFFERENT function
     // from the pre-M202 helper this same name historically referred to, which WAS fully removed at

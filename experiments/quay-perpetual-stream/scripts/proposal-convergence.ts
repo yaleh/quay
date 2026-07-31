@@ -23,7 +23,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectEntry, parseArgs } from "./gate-script-base.ts";
-import { extractSection } from "./task-schema.ts";
+import { extractSection, countBoxes } from "./task-schema.ts";
 import { PREFLIGHT_POLICY_VERSION, releaseLease } from "./prepare-admission-check.ts";
 
 export function sha256(text) {
@@ -89,6 +89,8 @@ export function upsertFindings(ledger, rawFindings, round) {
       disposition,
       evidence: raw.evidence || existing?.evidence || "",
       claimRef: raw.claimRef || existing?.claimRef || null,
+      rootCauseKey: raw.rootCauseKey || existing?.rootCauseKey || null,
+      repairable: raw.repairable === true ? true : (existing?.repairable === true ? true : false),
       status: "open",
       firstSeenRound: existing?.firstSeenRound ?? round,
       lastSeenRound: round,
@@ -127,18 +129,108 @@ export function groupBlockingBySubsystem(ledger) {
 // than 2 independently landable mechanisms in the candidate, (c) checked touch set exceeds the
 // configured small-milestone boundary (default 8 — a tunable policy default, not a repo-wide
 // convention; callers may override via `smallMilestoneTouchBoundary`).
-export function checkSplitRecommendation({ ledger, mechanismCount, touchSetSize, smallMilestoneTouchBoundary = 8 } = {}) {
-  const bySubsystem = groupBlockingBySubsystem(ledger);
-  for (const [subsystem, count] of Object.entries(bySubsystem)) {
-    if (count >= 3) {
-      return { recommend: true, code: "split-subsystem-blocking-cluster", reason: `subsystem "${subsystem}" has ${count} independent blocking findings (>= 3)` };
+// ── deriveMechanismInventory — M206/M1: validates a typed mechanism inventory and derives count +
+// inventoryHash mechanically (never trusts a bare integer). Fail-closed on duplicate id, dangling
+// dependsOn, or duplicate proofSurface. Mirrored inline as _deriveMechanismInventory in both
+// prepare-milestone.js workflow files (no-import DSL convention).
+export function deriveMechanismInventory(mechanisms) {
+  if (!Array.isArray(mechanisms)) {
+    return { ok: false, code: "mechanism-inventory-missing", message: "reviewer returned no `mechanisms` field — typed inventory required" };
+  }
+  const seenIds = new Set();
+  const seenSurfaces = new Set();
+  const ids = new Set();
+  for (const m of mechanisms) {
+    if (!m || typeof m !== "object" || !m.id || !m.proofSurface) {
+      return { ok: false, code: "mechanism-inventory-invalid", message: "every mechanism entry must carry at least {id, proofSurface}" };
+    }
+    if (seenIds.has(m.id)) {
+      return { ok: false, code: "mechanism-inventory-invalid", message: `duplicate mechanism id: ${JSON.stringify(m.id)}` };
+    }
+    seenIds.add(m.id);
+    ids.add(m.id);
+    if (seenSurfaces.has(m.proofSurface)) {
+      return { ok: false, code: "mechanism-inventory-invalid", message: `duplicate proofSurface: ${JSON.stringify(m.proofSurface)} — two entries cannot share one proof surface (anti-laundering)` };
+    }
+    seenSurfaces.add(m.proofSurface);
+  }
+  // Validate dependsOn edges — every referenced id must exist in the inventory.
+  for (const m of mechanisms) {
+    if (Array.isArray(m.dependsOn)) {
+      for (const dep of m.dependsOn) {
+        if (!ids.has(dep)) {
+          return { ok: false, code: "mechanism-inventory-invalid", message: `dangling dependsOn edge: ${JSON.stringify(m.id)} depends on ${JSON.stringify(dep)} which is not in the inventory` };
+        }
+      }
     }
   }
-  if (Number.isFinite(mechanismCount) && mechanismCount > 2) {
-    return { recommend: true, code: "split-multi-mechanism", reason: `candidate contains ${mechanismCount} independently landable mechanisms (> 2)` };
+  const count = mechanisms.filter((m) => m.independentlyShippable === true).length;
+  const inventoryHash = hashMechanismInventory(mechanisms);
+  return { ok: true, count, inventoryHash, mechanismCount: count };
+}
+
+// ── hashMechanismInventory — canonical, rename/reorder-stable projection. Entries sorted by
+// proofSurface; each reduced to {proofSurface, independentlyShippable, dependsOn} with dependsOn
+// re-expressed via target entries' proofSurface values (sorted).
+export function hashMechanismInventory(mechanisms) {
+  const idToSurface = {};
+  for (const m of mechanisms || []) idToSurface[m.id] = m.proofSurface;
+  const projected = (mechanisms || []).map((m) => ({
+    proofSurface: m.proofSurface,
+    independentlyShippable: m.independentlyShippable === true,
+    dependsOn: (m.dependsOn || []).map((depId) => idToSurface[depId] || depId).sort(),
+  }));
+  projected.sort((a, b) => String(a.proofSurface).localeCompare(String(b.proofSurface)));
+  return sha256(JSON.stringify(projected));
+}
+
+// ── groupBlockingByRootCause — M206/M2: supersedes groupBlockingBySubsystem. Per subsystem, count
+// DISTINCT rootCauseKey values (falling back to the finding's own id when rootCauseKey is absent —
+// legacy behavior). Three findings sharing one rootCauseKey count as ONE cluster member toward the
+// unchanged >= 3 threshold; three independently-rooted blockers still trigger it.
+export function groupBlockingByRootCause(ledger) {
+  const out = {};
+  for (const f of blockingOpen(ledger)) {
+    const key = f.rootCauseKey || f.id;
+    if (!out[f.subsystem]) out[f.subsystem] = { distinctKeys: new Set(), totalFindings: 0 };
+    out[f.subsystem].distinctKeys.add(key);
+    out[f.subsystem].totalFindings++;
+  }
+  const result = {};
+  for (const [subsystem, entry] of Object.entries(out)) {
+    result[subsystem] = { count: entry.distinctKeys.size, totalFindings: entry.totalFindings };
+  }
+  return result;
+}
+
+export function checkSplitRecommendation({ ledger, mechanismCount, mechanismInventory, touchSetSize, smallMilestoneTouchBoundary = 8 } = {}) {
+  // M206/M2: use rootCauseKey-based clustering. Each distinct rootCauseKey counts as one cluster
+  // member; legacy findings without rootCauseKey each count individually (id fallback).
+  const bySubsystem = groupBlockingByRootCause(ledger);
+  let repairable = true;
+  for (const [subsystem, { count }] of Object.entries(bySubsystem)) {
+    if (count >= 3) {
+      // Check if EVERY finding contributing to this cluster has repairable === true.
+      const subFindings = blockingOpen(ledger).filter((f) => f.subsystem === subsystem);
+      const allRepairable = subFindings.every((f) => f.repairable === true);
+      repairable = allRepairable;
+      return { recommend: true, code: "split-subsystem-blocking-cluster", reason: `subsystem "${subsystem}" has ${count} distinct-root-cause independent blocking findings (>= 3)`, repairable };
+    }
+  }
+  // M206/M1: prefer inventory-derived count over the legacy scalar mechanismCount.
+  // mechanismInventory shape: {ok, count, inventoryHash} from deriveMechanismInventory.
+  let effectiveCount;
+  if (mechanismInventory && mechanismInventory.ok) {
+    effectiveCount = mechanismInventory.count;
+  } else if (Number.isFinite(mechanismCount)) {
+    effectiveCount = mechanismCount;
+  }
+  if (Number.isFinite(effectiveCount) && effectiveCount > 2) {
+    // split-multi-mechanism is NEVER repairable — scope that cannot be changed without charter edit.
+    return { recommend: true, code: "split-multi-mechanism", reason: `candidate contains ${effectiveCount} independently landable mechanisms (> 2)`, repairable: false };
   }
   if (Number.isFinite(touchSetSize) && Number.isFinite(smallMilestoneTouchBoundary) && touchSetSize > smallMilestoneTouchBoundary) {
-    return { recommend: true, code: "split-touch-set-too-large", reason: `checked touch set (${touchSetSize}) exceeds the small-milestone boundary (${smallMilestoneTouchBoundary})` };
+    return { recommend: true, code: "split-touch-set-too-large", reason: `checked touch set (${touchSetSize}) exceeds the small-milestone boundary (${smallMilestoneTouchBoundary})`, repairable: false };
   }
   return { recommend: false };
 }
@@ -152,10 +244,14 @@ export function budgetStatus({ startedAtMs, nowMs, softBudgetMs }) {
 
 // ── nextAction — the ONE decision function the bounded loop consults every round. Pure: never
 // mutates its inputs, never dispatches anything itself.
-export function nextAction({ fullSynthesisCount, deltaRound, ledger, caps, budgetExceeded, splitCheck }) {
+export function nextAction({ fullSynthesisCount, deltaRound, ledger, caps, budgetExceeded, splitCheck, splitBypassAvailable }) {
   if ((fullSynthesisCount || 0) < 1) return { action: "dispatch-full-synthesis" };
   const openBlocking = blockingOpen(ledger).length;
   if (openBlocking === 0) return { action: "stop-prepared" };
+  // M206/M3: repairable-cluster bypass — one focused revision + delta review before terminal split.
+  if (splitCheck?.recommend && splitCheck.repairable === true && splitBypassAvailable === true && (deltaRound || 0) === 0) {
+    return { action: "consume-split-bypass", reason: splitCheck.reason, code: splitCheck.code };
+  }
   if (splitCheck?.recommend) return { action: "stop-split", reason: splitCheck.reason, code: splitCheck.code };
   if (budgetExceeded) return { action: "stop-needs-human", reason: "soft-budget-exceeded", code: "budget-exceeded" };
   if ((deltaRound || 0) >= caps.maxDeltaRounds) {
@@ -236,6 +332,7 @@ export const PHASE_RANK = {
 // resume/reuse decision logic changes in a way that should invalidate every prior generation
 // record.
 export const RESUME_POLICY_VERSION = "resume-v1";
+export const MECHANISM_POLICY_VERSION = "mechanism-v1";
 
 // Explicit allowlist of {terminalPhase, reason} PAIRS, not `reason` alone — the live workflow
 // returns the IDENTICAL string 'preflight-rejected' from two genuinely different points in the
@@ -613,7 +710,7 @@ function _computeGenerationId({ taskId, ownerExecutionId, fencingToken, acquired
 }
 
 function _currentReviewPolicyHash() {
-  return sha256(`${PREFLIGHT_POLICY_VERSION}::${RESUME_POLICY_VERSION}`);
+  return sha256(`${PREFLIGHT_POLICY_VERSION}::${RESUME_POLICY_VERSION}::${MECHANISM_POLICY_VERSION}`);
 }
 
 // Reads tasks/<taskId>.md and the charter file fresh off disk, extracts '## Acceptance Criteria' /
@@ -932,12 +1029,215 @@ export function _recordAttemptCli({ taskId, workspace, site, detail, phaseTiming
   return { ok: true, attemptId, record, telemetryWriteOk, telemetryFile };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── M206/M4: Scope hash — deliberately prose-insensitive. Sensitive to AC checkbox count + Touches
+// path set, insensitive to sentence-level rewording. DoD box count is EXCLUDED — adding an
+// audit-obligation checkbox is not a scope change. Uses canonicalJSON key ordering.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+function _canonicalJSON(obj) {
+  if (Array.isArray(obj)) return JSON.stringify(obj.map(_canonicalJSON));
+  if (obj !== null && typeof obj === "object") {
+    const keys = Object.keys(obj).sort();
+    const out = {};
+    for (const k of keys) out[k] = obj[k];
+    return JSON.stringify(out);
+  }
+  return JSON.stringify(obj);
+}
+
+export function scopeHash({ taskBody, declaredTouches }) {
+  const acSection = extractSection(taskBody, "Acceptance Criteria") || "";
+  const { total: acBoxCount } = countBoxes(acSection);
+  const touchesSorted = [...(declaredTouches || [])].sort();
+  return sha256(_canonicalJSON({ acBoxCount, touchesSorted }));
+}
+
+// ── _decisionRecordPath — committed decision record under milestones/prepare-decisions/. ──────
+function _decisionRecordPath(workspace, taskId) {
+  const seg = _safeTaskIdSegment(taskId);
+  return path.join(workspace, "milestones", "prepare-decisions", `${seg}.json`);
+}
+
+// ── decideSplitAdjudication — M206/M4: pure read-only evaluator for hash-bound COMMIT/SPLIT
+// decision records. Four verdicts: no-decision-on-file, skip-split-adjudication (COMMIT match),
+// decision-invalidated (COMMIT mismatch), content-dispatch-blocked (SPLIT match).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+export function decideSplitAdjudication(record, { charterHash, scopeHash: currentScopeHash, reviewPolicyHash }) {
+  if (!record || typeof record !== "object" || !record.decision) {
+    return { verdict: "no-decision-on-file" };
+  }
+  const match = record.charterHash === charterHash && record.scopeHash === currentScopeHash && record.reviewPolicyHash === reviewPolicyHash;
+  if (record.decision === "commit") {
+    if (match) {
+      return { verdict: "skip-split-adjudication", splitCheckDisabled: true, record };
+    } else {
+      // Append invalidation entry to record.
+      const mismatchedFields = [];
+      if (record.charterHash !== charterHash) mismatchedFields.push("charterHash");
+      if (record.scopeHash !== currentScopeHash) mismatchedFields.push("scopeHash");
+      if (record.reviewPolicyHash !== reviewPolicyHash) mismatchedFields.push("reviewPolicyHash");
+      const invalidation = { atMs: Date.now(), generationId: null, mismatchedFields, priorValue: record, currentValue: { charterHash, scopeHash: currentScopeHash, reviewPolicyHash } };
+      record.invalidations = [...(record.invalidations || []), invalidation];
+      return { verdict: "decision-invalidated", mismatchedFields, record };
+    }
+  }
+  if (record.decision === "split") {
+    if (match) {
+      return { verdict: "content-dispatch-blocked", outcome: "needs-human", reason: "split-decision-blocks-dispatch", phase: "Admission", record };
+    }
+    // SPLIT record with mismatched hashes — the ruling no longer applies; proceed.
+    return { verdict: "decision-invalidated", record };
+  }
+  return { verdict: "no-decision-on-file" };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── M206/M5: mechanism-history.json — gitignored bounded ring (last 5 entries). SEPARATE file
+// from .generation.json (wholesale-overwrite contract preserved). Round-0 only appends.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+const MAX_MECHANISM_HISTORY_ENTRIES = 5;
+
+function _mechanismHistoryPath(workspace, taskId) {
+  const seg = _safeTaskIdSegment(taskId);
+  return path.join(workspace, ".quay", "prepare-leases", `${seg}.mechanism-history.json`);
+}
+
+export function appendMechanismHistory(workspace, taskId, entry) {
+  const p = _mechanismHistoryPath(workspace, taskId);
+  let history = [];
+  if (fs.existsSync(p)) {
+    try { history = JSON.parse(fs.readFileSync(p, "utf8")); } catch { history = []; }
+  }
+  if (!Array.isArray(history)) history = [];
+  history.push({ ...entry, atMs: Date.now() });
+  // Keep only last N entries.
+  if (history.length > MAX_MECHANISM_HISTORY_ENTRIES) history = history.slice(-MAX_MECHANISM_HISTORY_ENTRIES);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(history, null, 2));
+  return { ok: true, entryCount: history.length };
+}
+
+export function checkMechanismStability(workspace, taskId, { charterHash, scopeHash: currentScopeHash, reviewPolicyHash, currentInventoryHash }) {
+  const p = _mechanismHistoryPath(workspace, taskId);
+  if (!fs.existsSync(p)) {
+    return { stable: true, priorEntry: null, code: "no-prior-history" };
+  }
+  let history;
+  try { history = JSON.parse(fs.readFileSync(p, "utf8")); } catch { return { stable: true, priorEntry: null, code: "history-unparseable" }; }
+  if (!Array.isArray(history) || history.length === 0) {
+    return { stable: true, priorEntry: null, code: "no-prior-history" };
+  }
+  // Find the immediately-preceding entry sharing the same scope key.
+  const key = `${charterHash}::${currentScopeHash}::${reviewPolicyHash}`;
+  let prior = null;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const e = history[i];
+    if (e && e.charterHash === charterHash && e.scopeHash === currentScopeHash && e.reviewPolicyHash === reviewPolicyHash) {
+      prior = e;
+      break;
+    }
+  }
+  if (!prior) {
+    return { stable: true, priorEntry: null, code: "no-prior-same-scope-entry" };
+  }
+  if (prior.mechanismInventoryHash === currentInventoryHash) {
+    return { stable: true, priorEntry: prior, code: "mechanism-inventory-stable" };
+  }
+  return { stable: false, priorEntry: prior, code: "split-assessment-unstable", reason: "consecutive reviews produced incompatible mechanism inventories at unchanged scope" };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── --record-split-decision: human-invoked ONLY. Writes milestones/prepare-decisions/<taskId>.json.
+// Never infers --decision or --reason — both are required CLI flags.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+export function _recordSplitDecisionCli({ taskId, workspace, charterFile, decision, reason, sessionId }) {
+  if (!decision || !["commit", "split"].includes(decision)) {
+    return { ok: false, error: `--decision must be "commit" or "split", got ${JSON.stringify(decision)}` };
+  }
+  if (!reason) {
+    return { ok: false, error: "--reason is required for --record-split-decision" };
+  }
+  try {
+    const taskPath = path.join(workspace, "tasks", `${taskId}.md`);
+    let taskBody;
+    try {
+      taskBody = fs.readFileSync(taskPath, "utf8");
+    } catch {
+      return { ok: false, error: `task file not found: ${taskPath}` };
+    }
+    const charterBody = fs.readFileSync(path.resolve(workspace, charterFile), "utf8");
+    const touchesText = extractSection(taskBody, "Touches") || "";
+    const declaredTouches = touchesText.split(/\r?\n/).map((l) => l.trim().replace(/^-\s*/, "")).filter(Boolean);
+    const charterHash = sha256(charterBody);
+    const currentScopeHash = scopeHash({ taskBody, declaredTouches });
+    const reviewPolicyHash = _currentReviewPolicyHash();
+    const p = _decisionRecordPath(workspace, taskId);
+    const record = {
+      schemaVersion: 1,
+      taskId,
+      charterHash,
+      scopeHash: currentScopeHash,
+      reviewPolicyHash,
+      mechanismInventoryHash: null, // audit-only, excluded from match
+      decision,
+      reason,
+      authorizingSessionId: sessionId || null,
+      decidedAtMs: Date.now(),
+      invalidations: [],
+    };
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(record, null, 2));
+    return { ok: true, path: p, record };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// ── --decide-split: pure read-only adjudication, invoked unconditionally by prepare-milestone.js.
+// Reads the committed decision record and returns a verdict.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+export function _decideSplitCli({ taskId, workspace, charterFile }) {
+  try {
+    const taskPath = path.join(workspace, "tasks", `${taskId}.md`);
+    const taskBody = fs.readFileSync(taskPath, "utf8");
+    const charterBody = fs.readFileSync(path.resolve(workspace, charterFile), "utf8");
+    const touchesText = extractSection(taskBody, "Touches") || "";
+    const declaredTouches = touchesText.split(/\r?\n/).map((l) => l.trim().replace(/^-\s*/, "")).filter(Boolean);
+    const charterHash = sha256(charterBody);
+    const currentScopeHash = scopeHash({ taskBody, declaredTouches });
+    const reviewPolicyHash = _currentReviewPolicyHash();
+    const recordPath = _decisionRecordPath(workspace, taskId);
+    let record = null;
+    if (fs.existsSync(recordPath)) {
+      try {
+        record = JSON.parse(fs.readFileSync(recordPath, "utf8"));
+      } catch {
+        // Unparseable record — treated as no-decision-on-file.
+      }
+    }
+    const verdict = decideSplitAdjudication(record, { charterHash, scopeHash: currentScopeHash, reviewPolicyHash });
+    // If decision-invalidated and we mutated the record (COMMIT mismatch), write back the augmented record.
+    if (verdict.verdict === "decision-invalidated" && verdict.record && record) {
+      try {
+        fs.writeFileSync(recordPath, JSON.stringify(verdict.record, null, 2));
+      } catch {
+        // Write failure non-fatal — the CLI surface still reports the correct verdict.
+      }
+    }
+    return { ok: true, ...verdict, hashes: { charterHash, scopeHash: currentScopeHash, reviewPolicyHash } };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 async function _cliMain(argv) {
   const spec = {
-    usage: "(--decide-resume|--record-generation [--no-release]|--release-only|--record-attempt) --taskId <id> --workspace <dir> [--charterFile <path>] [--callerOverride true|false] [--terminalPhase <phase>] [--outcome <o>] [--reason <r>] [--cacheable <bool>] [--milestoneId <id>] [--class <c>] [--highRisk <bool>] [--sessionId <id>] [--site <site>] [--detail <json>] [--phaseTimings <json>] [--findingCodes <json>]",
+    usage: "(--decide-resume|--decide-split|--record-split-decision|--record-generation [--no-release]|--release-only|--record-attempt) --taskId <id> --workspace <dir> [--charterFile <path>] [--callerOverride true|false] [--terminalPhase <phase>] [--outcome <o>] [--reason <r>] [--cacheable <bool>] [--milestoneId <id>] [--class <c>] [--highRisk <bool>] [--sessionId <id>] [--site <site>] [--detail <json>] [--phaseTimings <json>] [--findingCodes <json>] [--decision commit|split]",
     minArgs: 0,
     flags: {
       "decide-resume": { type: "boolean" },
+      "decide-split": { type: "boolean" },
+      "record-split-decision": { type: "boolean" },
       "record-generation": { type: "boolean" },
       "no-release": { type: "boolean" },
       "release-only": { type: "boolean" },
@@ -956,6 +1256,7 @@ async function _cliMain(argv) {
       sessionId: { type: "string" },
       site: { type: "string" },
       detail: { type: "string" },
+      decision: { type: "string" },
       decisionKind: { type: "string" },
       // M207: both additive telemetry flags — parsed with the same optional-JSON-flag tolerance
       // as every existing flag; malformed/oversized values degrade fail-soft inside the writers
@@ -988,6 +1289,29 @@ async function _cliMain(argv) {
     const out = _decideResumeCli({ taskId, workspace, charterFile: parsed.flags.charterFile, callerOverride: parsed.flags.callerOverride });
     console.log(JSON.stringify(out));
     return 0;
+  }
+  if (parsed.flags["decide-split"]) {
+    if (!parsed.flags.charterFile) {
+      console.error("--decide-split requires --charterFile");
+      return 2;
+    }
+    const out = _decideSplitCli({ taskId, workspace, charterFile: parsed.flags.charterFile });
+    console.log(JSON.stringify(out));
+    return out.ok ? 0 : 1;
+  }
+  if (parsed.flags["record-split-decision"]) {
+    if (!parsed.flags.charterFile) {
+      console.error("--record-split-decision requires --charterFile");
+      return 2;
+    }
+    const out = _recordSplitDecisionCli({
+      taskId, workspace, charterFile: parsed.flags.charterFile,
+      decision: parsed.flags.decision,
+      reason: parsed.flags.reason,
+      sessionId: parsed.flags.sessionId,
+    });
+    console.log(JSON.stringify(out));
+    return out.ok ? 0 : 1;
   }
   if (parsed.flags["release-only"]) {
     const out = _releaseLeaseOnlyCli({ taskId, workspace, reason: parsed.flags.reason });
