@@ -486,6 +486,22 @@ describe("preflightMergedMarkdownClaims", () => {
     assert.equal(verdict.blocking, false);
     assert.equal(verdict.disposition, "reviewer-required");
   });
+
+  // gap-preflight-merged-markdown-ascii-dash-false-positive: an ordinary ASCII " - " prose
+  // dash/aside (not a bullet marker) trailing after the block's backtick identifiers must not
+  // hard-block just because the block happens to name >=4 identifiers earlier in the sentence.
+  test("ascii-dash-prose false positive: an ordinary ASCII ' - ' prose dash/aside is NOT a bullet marker -> zero findings", () => {
+    const taskBody = readFixture("merged-markdown-claims", "ascii-dash-prose.md");
+    assert.equal(preflightMergedMarkdownClaims({ taskBody }), null);
+  });
+
+  // gap-preflight-merged-markdown-claims-code-span-subtraction-false-positive: a backtick-wrapped
+  // subtraction expression (e.g. `` `endedAtMs - startedAtMs` ``) has no concept of code-span
+  // boundaries under the raw regex and must not be misread as a bullet marker.
+  test("code-span-subtraction false positive: a backtick-wrapped subtraction expression is NOT a bullet marker -> zero findings", () => {
+    const taskBody = readFixture("merged-markdown-claims", "code-span-subtraction.md");
+    assert.equal(preflightMergedMarkdownClaims({ taskBody }), null);
+  });
 });
 
 describe("preflightStaleAcRefs", () => {

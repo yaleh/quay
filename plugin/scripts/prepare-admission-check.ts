@@ -426,6 +426,37 @@ function _scanStaleReferences(text, workspace, touchesGlobs) {
 // real remaining gap it does not close is a bullet marker embedded MID-LINE (two claims crammed onto
 // one physical line, e.g. "`foo.ts` - update `bar.ts` invokes ..." with no line break between them)
 // — this detector's own new, narrow logic layered on top of the reused splitter.
+//
+// `_MID_BULLET_RE` alone over-matches two shapes that are NOT a merged-claims bullet marker
+// (gap-preflight-merged-markdown-ascii-dash-false-positive /
+// gap-preflight-merged-markdown-claims-code-span-subtraction-false-positive, both 2026-07):
+//   1. a backtick-wrapped subtraction expression, e.g. `` `endedAtMs - startedAtMs` `` — the regex
+//      has no concept of code-span boundaries, so a math `-` inside backticks reads as a bullet.
+//   2. an ordinary ASCII " - " prose dash/aside, e.g. "..., and `qux.ts` - all four files share
+//      one helper module" — a ` - ` between two prose words is not a bullet marker just because it
+//      sits in a block that also happens to name >=2 backtick identifiers earlier in the sentence.
+// `_findGenuineMidBullet` closes both: (a) skip any match whose span falls entirely inside a
+// `` `...` `` code span, then (b) only treat a surviving match as a genuine bullet marker if
+// another backtick-quoted identifier follows it later in the block — the real shape of "two claims
+// crammed onto one line" is `` `A` - text `B` `` (a new claim, itself naming an identifier, starts
+// right after the marker); a trailing prose aside with no further identifier after it never does.
+const _MID_BULLET_RE = /\S[ \t]+[-*][ \t]+\S/g;
+
+function _findGenuineMidBullet(block) {
+  const codeSpanRanges = [...block.matchAll(/`[^`]*`/g)].map((m) => [m.index, m.index + m[0].length]);
+  const re = new RegExp(_MID_BULLET_RE.source, _MID_BULLET_RE.flags);
+  let match;
+  while ((match = re.exec(block))) {
+    const start = match.index;
+    const end = start + match[0].length;
+    const insideCodeSpan = codeSpanRanges.some(([s, e]) => start >= s && end <= e);
+    if (insideCodeSpan) continue;
+    const identifierFollows = codeSpanRanges.some(([s]) => s >= end);
+    if (identifierFollows) return match[0];
+  }
+  return null;
+}
+
 export function preflightMergedMarkdownClaims({ taskBody }) {
   const code = "preflight-merged-markdown-claims";
   const sections = ["Requested action", "Proposal", "Finding"]
@@ -438,8 +469,7 @@ export function preflightMergedMarkdownClaims({ taskBody }) {
   let worstIdentifierCount = 0;
   let anyAmbiguous = false;
   for (const block of blocks) {
-    const midBulletMatches = block.match(/\S[ \t]+[-*][ \t]+\S/g) || [];
-    if (midBulletMatches.length === 0) continue;
+    if (!_findGenuineMidBullet(block)) continue;
     const identifiers = new Set([...block.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
     if (identifiers.size >= 4) {
       if (identifiers.size > worstIdentifierCount) { worstIdentifierCount = identifiers.size; worstBlock = block; }
