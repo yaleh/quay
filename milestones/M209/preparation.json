@@ -1,0 +1,70 @@
+{
+  "taskId": "gap-touches-orthogonality-symlink-isdirect-mismatch",
+  "milestoneId": "M209",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M209-gap-touches-orthogonality-symlink-isdirect-mismatch.md",
+  "planFile": "docs/plans/M209-gap-touches-orthogonality-symlink-isdirect-mismatch.md",
+  "ledgerFile": null,
+  "telemetryFile": null,
+  "mechanismInventoryFile": null,
+  "hashes": {
+    "proposal": "ddae5265d5d4802c4f133e44fab83b9455dee22edb4eefded6b8e8ef03c9646a",
+    "charter": "71934f5472493d439e8939428d515480c83a2a04ef4da0889e253b9b92793113",
+    "plan": "aa1c3cd1b89e7edd92446b642326a2fc617905e36945f238a92b018d570d65cb",
+    "sources": {
+      "plugin/scripts/gate-script-base.ts": "f22c7643accc60b7beba50c181b92ce7ff75344dc25d238e1a154e1b544729a3",
+      "experiments/quay-perpetual-stream/scripts/gate-script-base.ts": "f22c7643accc60b7beba50c181b92ce7ff75344dc25d238e1a154e1b544729a3",
+      "plugin/scripts/touches-orthogonality-check.ts": "6ce152e69201b47e83537dc8fb3741bd865823d1e1f07eecd3a369b03a9e40b5",
+      "plugin/scripts/anti-drift-touches-check.ts": "b635546b4e124fdca04e9c7b9e05e1ab7e141b6d1da32bf429d323d318966086",
+      "plugin/scripts/routine-file-gate.ts": "2ea5c4b41dfc41d58a906aeb23415a3a064bb379167de4d6322cc9bee9caae2d",
+      "plugin/scripts/routine-scheduler.ts": "14b2d6f66355293ca0f5e299025780c641af54b15f1b6bdb064474e897170e18",
+      "plugin/scripts/serial-fanin-absorb.ts": "4a415e0f06242d3d4973362764843ac206dc5257ed6b0c4580d4a44945b9faa2"
+    }
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 3,
+    "findings": 0
+  },
+  "touches": [
+    "plugin/scripts/gate-script-base.ts",
+    "experiments/quay-perpetual-stream/scripts/gate-script-base.ts",
+    "plugin/scripts/touches-orthogonality-check.ts",
+    "plugin/scripts/anti-drift-touches-check.ts",
+    "plugin/scripts/routine-file-gate.ts",
+    "plugin/scripts/routine-scheduler.ts",
+    "plugin/scripts/serial-fanin-absorb.ts",
+    "experiments/quay-perpetual-stream/test/symlink-mirror-invocation.test.mjs",
+    "experiments/quay-perpetual-stream/scripts/touches-orthogonality-selfcheck.sh",
+    "experiments/quay-perpetual-stream/scripts/anti-drift-touches-selfcheck.sh",
+    "experiments/quay-perpetual-stream/scripts/routine-file-gate-selfcheck.sh",
+    "experiments/quay-perpetual-stream/scripts/routine-scheduler-selfcheck.sh",
+    "experiments/quay-perpetual-stream/scripts/serial-fanin-absorb-selfcheck.sh"
+  ],
+  "provenance": {
+    "proposalAuthors": [],
+    "adjudicator": null,
+    "proposalReviewer": {
+      "sessionId": "4226284b-330a-4212-ae47-bdbb8e760bd5"
+    },
+    "planAuthor": {
+      "sessionId": "4226284b-330a-4212-ae47-bdbb8e760bd5"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "4226284b-330a-4212-ae47-bdbb8e760bd5"
+      },
+      {
+        "round": 2,
+        "sessionId": "4226284b-330a-4212-ae47-bdbb8e760bd5"
+      },
+      {
+        "round": 3,
+        "sessionId": "4226284b-330a-4212-ae47-bdbb8e760bd5"
+      }
+    ]
+  },
+  "convergence": null
+}

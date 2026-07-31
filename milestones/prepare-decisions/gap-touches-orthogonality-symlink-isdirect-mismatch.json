@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "taskId": "gap-touches-orthogonality-symlink-isdirect-mismatch",
+  "charterHash": "71934f5472493d439e8939428d515480c83a2a04ef4da0889e253b9b92793113",
+  "scopeHash": "532bef2b7b3c06808e9a4d58e3c1f509d0140bfeb47e74ea1a139c7a32ad1ae2",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "commit",
+  "reason": "Re-affirmed after DIR-125 delta-review round updated Proposal; still a small mechanical 5-file same-patch fix with wire-coverage false positives. Split not warranted.",
+  "authorizingSessionId": null,
+  "decidedAtMs": 1785480050384,
+  "invalidations": [
+    {
+      "atMs": 1785482162971,
+      "generationId": null,
+      "mismatchedFields": [
+        "scopeHash"
+      ],
+      "priorValue": {
+        "schemaVersion": 1,
+        "taskId": "gap-touches-orthogonality-symlink-isdirect-mismatch",
+        "charterHash": "71934f5472493d439e8939428d515480c83a2a04ef4da0889e253b9b92793113",
+        "scopeHash": "532bef2b7b3c06808e9a4d58e3c1f509d0140bfeb47e74ea1a139c7a32ad1ae2",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+        "mechanismInventoryHash": null,
+        "decision": "commit",
+        "reason": "Re-affirmed after DIR-125 delta-review round updated Proposal; still a small mechanical 5-file same-patch fix with wire-coverage false positives. Split not warranted.",
+        "authorizingSessionId": null,
+        "decidedAtMs": 1785480050384
+      },
+      "currentValue": {
+        "charterHash": "71934f5472493d439e8939428d515480c83a2a04ef4da0889e253b9b92793113",
+        "scopeHash": "31dc4e3e99ae3a5d2ca34a7bd27a940b07666929d910f725f0514484dcc1819d",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      }
+    }
+  ]
+}

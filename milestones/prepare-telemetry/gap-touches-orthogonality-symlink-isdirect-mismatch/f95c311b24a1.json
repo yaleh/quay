@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "recordId": "f95c311b24a1",
+  "attemptId": "f95c311b24a1",
+  "generationId": null,
+  "admission": null,
+  "workspace": ".",
+  "taskId": "gap-touches-orthogonality-symlink-isdirect-mismatch",
+  "milestoneId": null,
+  "class": null,
+  "highRisk": null,
+  "hashes": null,
+  "decision": {
+    "kind": "not-evaluated",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": 0,
+  "contentAgentMs": 0,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "prepare-already-running",
+    "phase": "Admission",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": false,
+    "ok": null,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785474740237,
+  "telemetryWriteOk": true,
+  "phaseTimings": [],
+  "findingCodes": [
+    {
+      "code": "prepare-already-running",
+      "recurrenceKey": "9917af0836be",
+      "firstSeenGeneration": "f95c311b24a1",
+      "lastSeenGeneration": "f95c311b24a1"
+    }
+  ]
+}

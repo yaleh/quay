@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 2,
+  "recordId": "e6e676ccc347",
+  "attemptId": "e6e676ccc347",
+  "generationId": "e6e676ccc347",
+  "admission": {
+    "key": ".::gap-touches-orthogonality-symlink-isdirect-mismatch",
+    "ownerExecutionId": "4226284b-330a-4212-ae47-bdbb8e760bd5",
+    "fencingToken": 0,
+    "acquiredAt": 1785475711841
+  },
+  "workspace": ".",
+  "taskId": "gap-touches-orthogonality-symlink-isdirect-mismatch",
+  "milestoneId": "M209",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "71934f5472493d439e8939428d515480c83a2a04ef4da0889e253b9b92793113",
+    "taskContract": "b94e3724b3b0cdc13c46bd3d53af71aacc28d36a88df6b48c458c81d1a9b15e2",
+    "proposal": "e35b839d4900620c2b8b6305366eafb7478e531ec9a91b1c3659dbfe84b824a6",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "preflight-rejected",
+    "phase": "PreflightPlan",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785477491286,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785475711841,
+      "endedAtMs": 1785475802736
+    },
+    {
+      "phase": "ProposalReview-delta-round-1",
+      "round": 1,
+      "startedAtMs": 1785475802736,
+      "endedAtMs": 1785476309381
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785476309381,
+      "endedAtMs": 1785476750088
+    },
+    {
+      "phase": "preflight-rejected",
+      "round": 0,
+      "startedAtMs": 1785476750088,
+      "endedAtMs": 1785477491286
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "preflight-rejected",
+      "recurrenceKey": "ed1f780e6bf8",
+      "firstSeenGeneration": "e6e676ccc347",
+      "lastSeenGeneration": "e6e676ccc347"
+    },
+    {
+      "code": "d603a635",
+      "recurrenceKey": "56f8399adfb0",
+      "firstSeenGeneration": "e6e676ccc347",
+      "lastSeenGeneration": "e6e676ccc347"
+    },
+    {
+      "code": "1694211b",
+      "recurrenceKey": "b156ba69f1db",
+      "firstSeenGeneration": "e6e676ccc347",
+      "lastSeenGeneration": "e6e676ccc347"
+    },
+    {
+      "code": "49fc9f9e",
+      "recurrenceKey": "f614fa01a6b2",
+      "firstSeenGeneration": "928b5d6440f3",
+      "lastSeenGeneration": "e6e676ccc347"
+    },
+    {
+      "code": "d6835702",
+      "recurrenceKey": "5c078ef943fd",
+      "firstSeenGeneration": "928b5d6440f3",
+      "lastSeenGeneration": "e6e676ccc347"
+    },
+    {
+      "code": "d38117b8",
+      "recurrenceKey": "8c3ec4793eaa",
+      "firstSeenGeneration": "928b5d6440f3",
+      "lastSeenGeneration": "e6e676ccc347"
+    },
+    {
+      "code": "bff2493a",
+      "recurrenceKey": "c0c9142647c2",
+      "firstSeenGeneration": "928b5d6440f3",
+      "lastSeenGeneration": "e6e676ccc347"
+    }
+  ]
+}

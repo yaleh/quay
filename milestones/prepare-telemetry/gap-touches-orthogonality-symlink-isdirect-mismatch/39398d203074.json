@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "recordId": "39398d203074",
+  "attemptId": "39398d203074",
+  "generationId": null,
+  "admission": null,
+  "workspace": ".",
+  "taskId": "gap-touches-orthogonality-symlink-isdirect-mismatch",
+  "milestoneId": null,
+  "class": null,
+  "highRisk": null,
+  "hashes": null,
+  "decision": {
+    "kind": "not-evaluated",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": 0,
+  "contentAgentMs": 0,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "admission-check-failed",
+    "phase": "Admission",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": false,
+    "ok": null,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785474934067,
+  "telemetryWriteOk": true,
+  "phaseTimings": [],
+  "findingCodes": [
+    {
+      "code": "admission-check-failed",
+      "recurrenceKey": "d398460b3ef0",
+      "firstSeenGeneration": "39398d203074",
+      "lastSeenGeneration": "39398d203074"
+    }
+  ]
+}
