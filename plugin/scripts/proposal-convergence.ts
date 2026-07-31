@@ -1627,9 +1627,387 @@ export function _writeCheckpointCli({ taskId, workspace, charterFile, checkpoint
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── gap-prepare-milestone-task-epoch-budget-reset — epoch-cumulative circuit breaker. DIR-125
+// bounds convergence WITHIN one generation; this file's own decideResumeGeneration/checkpoint
+// mechanisms above carry state forward ACROSS generations, but neither bounds the number of
+// GENERATIONS a task can burn — the real DIR-126-D incident accumulated ~5h wall time / ~9.5M
+// aggregate tokens / 11 attempts, each individually within its own local DIR-125 policy. This
+// closes that gap with a durable per-task epoch record
+// (`.quay/prepare-epochs/<safeTaskIdSegment>.json`, reusing this file's OWN `_safeTaskIdSegment`
+// and `_currentReviewPolicyHash`/sha256-charter-hash idioms verbatim — never a second sanitizer or
+// hasher), keyed on (taskId, charterHash, reviewPolicyHash) ONLY — deliberately NOT any
+// Proposal-content hash, so an ordinary Proposal/Plan/AC/Touches edit can never reset the epoch
+// (Requested-action item 2). A new epoch requires an EXPLICIT `--new-epoch` CLI call with
+// owner+reason; a bounded time extension requires an EXPLICIT `--override-budget` call. Neither is
+// ever auto-invoked by prepare-milestone.js's own automated flow — both are human-invoked-only CLI
+// surfaces, matching the SAME posture `--record-split-decision` already established for M206/M4's
+// COMMIT/SPLIT decisions (this mechanism's own `allowedActions` reuse those two literal action
+// names verbatim, never reinventing a parallel commit/split concept).
+//
+// Per the lesson learned the hard way by gap-prepare-milestone-cross-generation-review-state-reset
+// (round 1's `classifyProposalDiff` heuristic was found exploitable by an independent reviewer; the
+// round-2 fix was a STRUCTURAL guarantee, never a smarter classifier): the caps enforced here are
+// simple, mechanical, countable things (elapsed observable-agent time, full-review count, dispatch
+// count, repeated-terminal-fingerprint count) — there is no heuristic anywhere in this module that
+// decides whether a given content-agent dispatch "doesn't really count." Every real content-agent
+// dispatch counts, full stop; only an explicit human CLI call can create a new epoch or grant a
+// bounded override.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+export const EPOCH_SCHEMA_VERSION = 1;
+
+// DEFAULT_EPOCH_POLICY — the fail-closed compiled ceiling (Requested-action item 3: "ordinary
+// defaults must be no looser than 90 minutes"; highRisk 150m/1 full review/2 repeated-fingerprint).
+// A caller MAY lower ordinaryCapMinutes/highRiskCapMinutes via --record-epoch-dispatch's own
+// --ordinaryCapMinutes/--highRiskCapMinutes flags (see _recordEpochDispatchCli below), never raise
+// them — the SAME "callers may lower, never raise" contract capsFor()/_maxDeltaRounds already
+// establishes for DIR-125's own per-generation caps.
+export const DEFAULT_EPOCH_POLICY = Object.freeze({
+  ordinaryCapMinutes: 90,
+  highRiskCapMinutes: 150,
+  maxFullReviewsPerEpoch: 1,
+  maxRepeatedFingerprint: 2,
+});
+
+// epochPath — SAME directory FAMILY as prepare-checkpoints (gitignored per-workspace runtime
+// state), its OWN subdirectory: an epoch record is CUMULATIVE ACROSS every generation for a given
+// (taskId, charterHash, reviewPolicyHash) identity, never reset by a single generation's own
+// lease/checkpoint lifecycle.
+export function epochPath(workspace, taskId) {
+  return path.join(workspace, ".quay", "prepare-epochs", `${_safeTaskIdSegment(taskId)}.json`);
+}
+
+function _computeEpochId({ taskId, charterHash, reviewPolicyHash, salt }) {
+  return sha256(`${taskId}::${charterHash}::${reviewPolicyHash}::${salt ?? ""}`).slice(0, 12);
+}
+
+// buildEpochRecord — every field explicitly materialized (no-fabrication discipline matching
+// buildTelemetryRecord/buildReviewCheckpoint above): an omitted-but-required field becomes an
+// explicit `null`/`0`/`{}`, never a dropped key. `counters.tokensObserved` defaults to `null`
+// (never a fabricated `0`) whenever no real token usage has ever been observed for this epoch.
+export function buildEpochRecord({
+  epochId, taskId, charterHash, reviewPolicyHash, parentEpochId,
+  counters, overrides, resets, policy, createdAtMs,
+} = {}) {
+  return {
+    schemaVersion: EPOCH_SCHEMA_VERSION,
+    epochId: epochId ?? null,
+    taskId: taskId ?? null,
+    charterHash: charterHash ?? null,
+    reviewPolicyHash: reviewPolicyHash ?? null,
+    parentEpochId: parentEpochId ?? null,
+    counters: {
+      attempts: Number.isFinite(counters?.attempts) ? counters.attempts : 0,
+      fullReviews: Number.isFinite(counters?.fullReviews) ? counters.fullReviews : 0,
+      deltaRounds: Number.isFinite(counters?.deltaRounds) ? counters.deltaRounds : 0,
+      contentAgentDispatches: Number.isFinite(counters?.contentAgentDispatches) ? counters.contentAgentDispatches : 0,
+      observableAgentMs: Number.isFinite(counters?.observableAgentMs) ? counters.observableAgentMs : 0,
+      terminalFingerprints: (counters?.terminalFingerprints && typeof counters.terminalFingerprints === "object" && !Array.isArray(counters.terminalFingerprints)) ? counters.terminalFingerprints : {},
+      // Never a fabricated 0 — null means "no real token usage has ever been observed for this
+      // epoch", distinct from a real observed value of 0.
+      tokensObserved: Number.isFinite(counters?.tokensObserved) ? counters.tokensObserved : null,
+    },
+    overrides: Array.isArray(overrides) ? overrides : [],
+    resets: Array.isArray(resets) ? resets : [],
+    policy: {
+      ordinaryCapMinutes: Number.isFinite(policy?.ordinaryCapMinutes) ? policy.ordinaryCapMinutes : DEFAULT_EPOCH_POLICY.ordinaryCapMinutes,
+      highRiskCapMinutes: Number.isFinite(policy?.highRiskCapMinutes) ? policy.highRiskCapMinutes : DEFAULT_EPOCH_POLICY.highRiskCapMinutes,
+      maxFullReviewsPerEpoch: Number.isFinite(policy?.maxFullReviewsPerEpoch) ? policy.maxFullReviewsPerEpoch : DEFAULT_EPOCH_POLICY.maxFullReviewsPerEpoch,
+      maxRepeatedFingerprint: Number.isFinite(policy?.maxRepeatedFingerprint) ? policy.maxRepeatedFingerprint : DEFAULT_EPOCH_POLICY.maxRepeatedFingerprint,
+    },
+    createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : null,
+  };
+}
+
+// checkEpochCaps — the ONE pure decision function every enforcement point (the CLI below AND
+// prepare-milestone.js's own no-import inline mirror, `_checkEpochCapsInline`) consults. Evaluation
+// order (most-severe/cheapest-first, never a bag of independent booleans): repeated-terminal-
+// fingerprint, then (only when the caller is specifically about to attempt ANOTHER full review —
+// `checkFullReviewCap:true`, passed ONLY at that one dispatch site) full-review cap, then the
+// cumulative observable-time cap (policy cap + any recorded override minutes). Never mutates its
+// inputs, never dispatches anything.
+export function checkEpochCaps({ counters, policy, highRisk, overrides, checkFullReviewCap = false } = {}) {
+  const c = counters || {};
+  const p = policy || DEFAULT_EPOCH_POLICY;
+  const capMinutes = highRisk
+    ? (Number.isFinite(p.highRiskCapMinutes) ? p.highRiskCapMinutes : DEFAULT_EPOCH_POLICY.highRiskCapMinutes)
+    : (Number.isFinite(p.ordinaryCapMinutes) ? p.ordinaryCapMinutes : DEFAULT_EPOCH_POLICY.ordinaryCapMinutes);
+  const overrideMinutes = (overrides || []).reduce((sum, o) => sum + (Number.isFinite(o?.additionalBudget) ? o.additionalBudget : 0), 0);
+  const effectiveCapMs = (capMinutes + overrideMinutes) * 60 * 1000;
+  const observableAgentMs = Number.isFinite(c.observableAgentMs) ? c.observableAgentMs : 0;
+  const maxFullReviews = Number.isFinite(p.maxFullReviewsPerEpoch) ? p.maxFullReviewsPerEpoch : DEFAULT_EPOCH_POLICY.maxFullReviewsPerEpoch;
+  const fullReviews = Number.isFinite(c.fullReviews) ? c.fullReviews : 0;
+  const maxRepeatedFingerprint = Number.isFinite(p.maxRepeatedFingerprint) ? p.maxRepeatedFingerprint : DEFAULT_EPOCH_POLICY.maxRepeatedFingerprint;
+  const fpCounts = (c.terminalFingerprints && typeof c.terminalFingerprints === "object") ? c.terminalFingerprints : {};
+  const repeated = Object.entries(fpCounts).find(([, count]) => Number.isFinite(count) && count >= maxRepeatedFingerprint);
+  if (repeated) {
+    return {
+      breached: true, breachedCap: "repeated-terminal-fingerprint", code: "epoch-fingerprint-cap-exceeded",
+      message: `terminal fingerprint ${repeated[0]} has recurred ${repeated[1]} time(s), meeting the epoch cap of ${maxRepeatedFingerprint}`,
+      detail: { fingerprint: repeated[0], count: repeated[1], cap: maxRepeatedFingerprint },
+    };
+  }
+  if (checkFullReviewCap && fullReviews >= maxFullReviews) {
+    return {
+      breached: true, breachedCap: "full-review-cap-exceeded", code: "epoch-full-review-cap-exceeded",
+      message: `cumulative full-review count (${fullReviews}) meets/exceeds the epoch cap of ${maxFullReviews} for this unchanged scope epoch`,
+      detail: { fullReviews, cap: maxFullReviews },
+    };
+  }
+  if (observableAgentMs >= effectiveCapMs) {
+    return {
+      breached: true, breachedCap: "time-cap-exceeded", code: "epoch-time-cap-exceeded",
+      message: `cumulative observable agent time (${observableAgentMs}ms) meets/exceeds the epoch cap (${effectiveCapMs}ms${overrideMinutes ? `, includes ${overrideMinutes}m override` : ""})`,
+      detail: { observableAgentMs, effectiveCapMs, capMinutes, overrideMinutes },
+    };
+  }
+  return { breached: false };
+}
+
+function _epochIdentityMatches(record, { taskId, charterHash, reviewPolicyHash }) {
+  return !!record && record.taskId === taskId && record.charterHash === charterHash && record.reviewPolicyHash === reviewPolicyHash;
+}
+
+function _readEpochRecord(workspace, taskId) {
+  const p = epochPath(workspace, taskId);
+  let raw;
+  try {
+    raw = fs.readFileSync(p, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return { exists: false, record: null, corrupt: false };
+    throw err;
+  }
+  try {
+    return { exists: true, record: JSON.parse(raw), corrupt: false };
+  } catch {
+    return { exists: true, record: null, corrupt: true };
+  }
+}
+
+// _currentEpochIdentity — reuses the SAME charter-sha256/`_currentReviewPolicyHash()` idiom
+// `_readCurrentHashes` above already establishes — deliberately does NOT read the task file at all
+// (unlike `_readCurrentHashes`/`scopeHash`): the epoch identity is Proposal/AC/Touches-insensitive
+// by design (Requested-action item 2).
+function _currentEpochIdentity({ workspace, taskId, charterFile }) {
+  const charterBody = fs.readFileSync(path.resolve(workspace, charterFile), "utf8");
+  return { charterHash: sha256(charterBody), reviewPolicyHash: _currentReviewPolicyHash() };
+}
+
+// --epoch-status: READ-ONLY, never writes anything. Distinguishes observed/estimated/unknown
+// fields (Requested-action item 6): every counter here is a real accumulated delta ("observed");
+// `tokensObserved: null` is reported via `tokenAccounting: "unknown"`, never silently treated as 0.
+export function _epochStatusCli({ taskId, workspace, charterFile, highRisk, checkFullReviewCap }) {
+  try {
+    const { charterHash, reviewPolicyHash } = _currentEpochIdentity({ workspace, taskId, charterFile });
+    const { record, corrupt } = _readEpochRecord(workspace, taskId);
+    const hr = highRisk === true || highRisk === "true";
+    const cfrc = checkFullReviewCap === true || checkFullReviewCap === "true";
+    if (corrupt) {
+      return { ok: true, code: "epoch-corrupt", exists: true, message: "epoch record file exists but is not valid JSON — never blindly trusted as a fresh/zero epoch", hashes: { charterHash, reviewPolicyHash } };
+    }
+    if (!record) {
+      const fresh = buildEpochRecord({});
+      return {
+        ok: true, code: "no-epoch-record", exists: false,
+        epochId: null, parentEpochId: null,
+        counters: fresh.counters, policy: DEFAULT_EPOCH_POLICY, overrides: [], resets: [],
+        capCheck: { breached: false },
+        hashes: { charterHash, reviewPolicyHash },
+        tokenAccounting: "unknown",
+      };
+    }
+    if (!_epochIdentityMatches(record, { taskId, charterHash, reviewPolicyHash })) {
+      return {
+        ok: true, code: "epoch-identity-mismatch", exists: true,
+        epochId: record.epochId, priorCharterHash: record.charterHash, priorReviewPolicyHash: record.reviewPolicyHash,
+        hashes: { charterHash, reviewPolicyHash },
+      };
+    }
+    const capCheck = checkEpochCaps({ counters: record.counters, policy: record.policy, highRisk: hr, overrides: record.overrides, checkFullReviewCap: cfrc });
+    return {
+      ok: true, code: "epoch-status-ok", exists: true,
+      epochId: record.epochId, parentEpochId: record.parentEpochId,
+      counters: record.counters, policy: record.policy, overrides: record.overrides, resets: record.resets,
+      capCheck,
+      hashes: { charterHash, reviewPolicyHash },
+      tokenAccounting: record.counters.tokensObserved === null ? "unknown" : "observed",
+    };
+  } catch (err) {
+    return { ok: false, code: "epoch-status-exception", error: err.message };
+  }
+}
+
+// --record-epoch-dispatch: the ONLY write path prepare-milestone.js's own automated flow ever
+// calls. Folds real deltas (dispatch/full-review/delta-round counts, elapsed observable-agent ms,
+// one terminal-fingerprint occurrence, an attempt increment, and optionally an ADDITIVE
+// tokensObserved delta) into the epoch record matching the CURRENT (taskId, charterHash,
+// reviewPolicyHash) identity — bootstrapping a fresh epoch (parentEpochId: null) the FIRST time a
+// task is ever dispatched, but refusing (fail-closed, `epoch-identity-mismatch-requires-new-epoch`)
+// to silently start over when an ON-FILE record's identity no longer matches: that always requires
+// an explicit --new-epoch call first (Requested-action item 2/5).
+export function _recordEpochDispatchCli({
+  taskId, workspace, charterFile, highRisk,
+  dispatchDelta, fullReviewDelta, deltaRoundDelta, elapsedMsDelta, attemptIncrement,
+  terminalPhase, reason, tokensObserved,
+  ordinaryCapMinutes, highRiskCapMinutes,
+}) {
+  try {
+    const { charterHash, reviewPolicyHash } = _currentEpochIdentity({ workspace, taskId, charterFile });
+    const { record: existing, corrupt } = _readEpochRecord(workspace, taskId);
+    if (corrupt) {
+      return { ok: false, code: "epoch-corrupt", error: "epoch record file exists but is not valid JSON — refusing to blindly overwrite; run --new-epoch to explicitly recover" };
+    }
+    if (existing && !_epochIdentityMatches(existing, { taskId, charterHash, reviewPolicyHash })) {
+      return { ok: false, code: "epoch-identity-mismatch-requires-new-epoch", error: "an epoch record exists for this task but its (charterHash, reviewPolicyHash) identity no longer matches current state — call --new-epoch first, never silently reset" };
+    }
+    const base = existing ? existing.counters : buildEpochRecord({}).counters;
+    const basePolicy = existing ? existing.policy : DEFAULT_EPOCH_POLICY;
+    const _dispatchDelta = Number.isFinite(dispatchDelta) ? dispatchDelta : 0;
+    const _fullReviewDelta = Number.isFinite(fullReviewDelta) ? fullReviewDelta : 0;
+    const _deltaRoundDelta = Number.isFinite(deltaRoundDelta) ? deltaRoundDelta : 0;
+    const _elapsedMsDelta = Number.isFinite(elapsedMsDelta) ? elapsedMsDelta : 0;
+    const _attemptIncrement = Number.isFinite(attemptIncrement) ? attemptIncrement : 0;
+    const fp = sha256(`${terminalPhase}::${reason}`).slice(0, 12);
+    const terminalFingerprints = { ...(base.terminalFingerprints || {}) };
+    terminalFingerprints[fp] = (terminalFingerprints[fp] || 0) + 1;
+    // tokensObserved: an ABSENT/non-numeric flag leaves whatever was already on file UNCHANGED
+    // (never fabricates a 0); a present numeric flag is ADDED to any existing observed value
+    // (starting from 0 only once a first real observation exists).
+    let newTokensObserved = Number.isFinite(base.tokensObserved) ? base.tokensObserved : null;
+    if (Number.isFinite(tokensObserved)) {
+      newTokensObserved = (Number.isFinite(newTokensObserved) ? newTokensObserved : 0) + tokensObserved;
+    }
+    // Policy: never raise above the compiled DEFAULT_EPOCH_POLICY ceiling, and never raise above
+    // whatever is ALREADY persisted — a caller can only ever tighten (Requested-action item 3 /
+    // AC: "lower caller limits are honored and callers cannot silently raise policy maxima"), the
+    // SAME "callers may lower, never raise" contract capsFor()/_maxDeltaRounds already establishes.
+    const policy = {
+      ordinaryCapMinutes: Math.min(
+        Number.isFinite(basePolicy.ordinaryCapMinutes) ? basePolicy.ordinaryCapMinutes : DEFAULT_EPOCH_POLICY.ordinaryCapMinutes,
+        Number.isFinite(ordinaryCapMinutes) ? ordinaryCapMinutes : Infinity,
+      ),
+      highRiskCapMinutes: Math.min(
+        Number.isFinite(basePolicy.highRiskCapMinutes) ? basePolicy.highRiskCapMinutes : DEFAULT_EPOCH_POLICY.highRiskCapMinutes,
+        Number.isFinite(highRiskCapMinutes) ? highRiskCapMinutes : Infinity,
+      ),
+      maxFullReviewsPerEpoch: Number.isFinite(basePolicy.maxFullReviewsPerEpoch) ? basePolicy.maxFullReviewsPerEpoch : DEFAULT_EPOCH_POLICY.maxFullReviewsPerEpoch,
+      maxRepeatedFingerprint: Number.isFinite(basePolicy.maxRepeatedFingerprint) ? basePolicy.maxRepeatedFingerprint : DEFAULT_EPOCH_POLICY.maxRepeatedFingerprint,
+    };
+    const epochId = existing ? existing.epochId : _computeEpochId({ taskId, charterHash, reviewPolicyHash, salt: "" });
+    const record = buildEpochRecord({
+      epochId, taskId, charterHash, reviewPolicyHash,
+      parentEpochId: existing ? existing.parentEpochId : null,
+      counters: {
+        attempts: (base.attempts || 0) + _attemptIncrement,
+        fullReviews: (base.fullReviews || 0) + _fullReviewDelta,
+        deltaRounds: (base.deltaRounds || 0) + _deltaRoundDelta,
+        contentAgentDispatches: (base.contentAgentDispatches || 0) + _dispatchDelta,
+        observableAgentMs: (base.observableAgentMs || 0) + _elapsedMsDelta,
+        terminalFingerprints,
+        tokensObserved: newTokensObserved,
+      },
+      overrides: existing ? existing.overrides : [],
+      resets: existing ? existing.resets : [],
+      policy,
+      createdAtMs: existing ? existing.createdAtMs : Date.now(),
+    });
+    const p = epochPath(workspace, taskId);
+    _atomicWriteJson(p, record);
+    const hr = highRisk === true || highRisk === "true";
+    const capCheck = checkEpochCaps({ counters: record.counters, policy: record.policy, highRisk: hr, overrides: record.overrides, checkFullReviewCap: false });
+    return { ok: true, epochFile: p, epochId: record.epochId, parentEpochId: record.parentEpochId, counters: record.counters, policy: record.policy, capCheck };
+  } catch (err) {
+    return { ok: false, code: "epoch-dispatch-exception", error: err.message };
+  }
+}
+
+// --new-epoch: HUMAN-INVOKED ONLY. Creates a NEW epoch record linked via parentEpochId, resetting
+// counters to zero. Requires --reason and --owner always; when the current (charterHash,
+// reviewPolicyHash) identity is UNCHANGED from the existing on-file epoch, ALSO requires an
+// explicit --confirmUnchangedScope true flag — a distinct, separately-named flag from --reason, so
+// an ordinary redispatch (which never passes this flag) can never silently trigger a reset even by
+// accident (Requested-action item 1 / "never triggered by a plain redispatch"; "verify the new
+// epoch's identity hashes actually differ ... OR that an explicit override justification is
+// present — don't let this become a silent bypass").
+export function _newEpochCli({ taskId, workspace, charterFile, reason, owner, confirmUnchangedScope }) {
+  if (!reason) return { ok: false, code: "new-epoch-requires-reason", error: "--reason is required" };
+  if (!owner) return { ok: false, code: "new-epoch-requires-owner", error: "--owner is required" };
+  try {
+    const { charterHash, reviewPolicyHash } = _currentEpochIdentity({ workspace, taskId, charterFile });
+    const { record: existing, corrupt } = _readEpochRecord(workspace, taskId);
+    if (corrupt) {
+      return { ok: false, code: "epoch-corrupt", error: "epoch record file exists but is not valid JSON" };
+    }
+    const identityChanged = !!existing && (existing.charterHash !== charterHash || existing.reviewPolicyHash !== reviewPolicyHash);
+    const confirmed = confirmUnchangedScope === true || confirmUnchangedScope === "true";
+    if (existing && !identityChanged && !confirmed) {
+      return {
+        ok: false, code: "new-epoch-requires-changed-identity-or-explicit-confirmation",
+        error: "the current (charterHash, reviewPolicyHash) identity is UNCHANGED from the existing epoch — pass --confirmUnchangedScope true to explicitly authorize a reset with no real scope-hash change (never a silent bypass)",
+      };
+    }
+    const newEpochId = _computeEpochId({ taskId, charterHash, reviewPolicyHash, salt: `${Date.now()}-${Math.random()}` });
+    const record = buildEpochRecord({
+      epochId: newEpochId, taskId, charterHash, reviewPolicyHash,
+      parentEpochId: existing ? existing.epochId : null,
+      counters: {}, overrides: [],
+      resets: existing ? [
+        ...(existing.resets || []),
+        { fromEpochId: existing.epochId, owner, reason, oldHash: { charterHash: existing.charterHash, reviewPolicyHash: existing.reviewPolicyHash }, newHash: { charterHash, reviewPolicyHash }, timestamp: Date.now() },
+      ] : [],
+      policy: existing ? existing.policy : DEFAULT_EPOCH_POLICY,
+      createdAtMs: Date.now(),
+    });
+    const p = epochPath(workspace, taskId);
+    _atomicWriteJson(p, record);
+    return { ok: true, epochFile: p, epochId: record.epochId, parentEpochId: record.parentEpochId, record };
+  } catch (err) {
+    return { ok: false, code: "new-epoch-exception", error: err.message };
+  }
+}
+
+// --override-budget: HUMAN-INVOKED ONLY. Grants ONE bounded extra time allowance (minutes) on the
+// SAME epoch — appended to `overrides`, never replacing/removing a prior one. Non-stackable without
+// a distinct human decision: a second call is REJECTED when its (owner, reason) — normalized —
+// is IDENTICAL to the most recent override already on file (Requested-action item 5 / AC: "cannot
+// authorize a second override without a distinct human scope decision"). A genuinely distinct
+// owner or reason always succeeds — this is a low mechanical bar against an automated process
+// blindly repeating the same justification, never a limit on legitimate repeated human review.
+export function _overrideBudgetCli({ taskId, workspace, charterFile, reason, owner, additionalMinutes }) {
+  if (!reason) return { ok: false, code: "override-requires-reason", error: "--reason is required" };
+  if (!owner) return { ok: false, code: "override-requires-owner", error: "--owner is required" };
+  const minutes = Number(additionalMinutes);
+  if (!Number.isFinite(minutes) || minutes <= 0) return { ok: false, code: "override-requires-positive-minutes", error: "--additional-minutes must be a positive number" };
+  try {
+    const { charterHash, reviewPolicyHash } = _currentEpochIdentity({ workspace, taskId, charterFile });
+    const { record: existing, corrupt } = _readEpochRecord(workspace, taskId);
+    if (corrupt) return { ok: false, code: "epoch-corrupt", error: "epoch record file exists but is not valid JSON" };
+    if (!existing) return { ok: false, code: "override-requires-existing-epoch", error: "no epoch record exists yet for this task — nothing to override" };
+    if (!_epochIdentityMatches(existing, { taskId, charterHash, reviewPolicyHash })) {
+      return { ok: false, code: "epoch-identity-mismatch-requires-new-epoch", error: "the on-file epoch's identity no longer matches current state — call --new-epoch first" };
+    }
+    const norm = (s) => String(s ?? "").trim().toLowerCase();
+    const lastOverride = (existing.overrides || [])[existing.overrides.length - 1];
+    if (lastOverride && norm(lastOverride.reason) === norm(reason) && norm(lastOverride.owner) === norm(owner)) {
+      return {
+        ok: false, code: "override-not-distinct",
+        error: "the most recent override on this epoch has the SAME owner+reason — a second override requires a distinct human scope decision, never a repeat of the prior one",
+      };
+    }
+    const overrideEntry = { owner, reason, additionalBudget: minutes, grantedAt: Date.now() };
+    const record = { ...existing, overrides: [...(existing.overrides || []), overrideEntry] };
+    const p = epochPath(workspace, taskId);
+    _atomicWriteJson(p, record);
+    return { ok: true, epochFile: p, epochId: record.epochId, override: overrideEntry, overrides: record.overrides };
+  } catch (err) {
+    return { ok: false, code: "override-exception", error: err.message };
+  }
+}
+
 async function _cliMain(argv) {
   const spec = {
-    usage: "(--decide-resume|--decide-split|--record-split-decision|--record-generation [--no-release]|--release-only|--record-attempt|--resolve-checkpoint|--write-checkpoint) --taskId <id> --workspace <dir> [--charterFile <path>] [--callerOverride true|false] [--terminalPhase <phase>] [--outcome <o>] [--reason <r>] [--cacheable <bool>] [--milestoneId <id>] [--class <c>] [--highRisk <bool>] [--sessionId <id>] [--site <site>] [--detail <json>] [--phaseTimings <json>] [--findingCodes <json>] [--decision commit|split] [--checkpointInputFile <path>]",
+    usage: "(--decide-resume|--decide-split|--record-split-decision|--record-generation [--no-release]|--release-only|--record-attempt|--resolve-checkpoint|--write-checkpoint|--epoch-status|--record-epoch-dispatch|--new-epoch|--override-budget) --taskId <id> --workspace <dir> [--charterFile <path>] [--callerOverride true|false] [--terminalPhase <phase>] [--outcome <o>] [--reason <r>] [--cacheable <bool>] [--milestoneId <id>] [--class <c>] [--highRisk <bool>] [--sessionId <id>] [--site <site>] [--detail <json>] [--phaseTimings <json>] [--findingCodes <json>] [--decision commit|split] [--checkpointInputFile <path>] [--owner <name>] [--additional-minutes <n>] [--confirmUnchangedScope true|false]",
     minArgs: 0,
     flags: {
       "decide-resume": { type: "boolean" },
@@ -1641,6 +2019,10 @@ async function _cliMain(argv) {
       "record-attempt": { type: "boolean" },
       "resolve-checkpoint": { type: "boolean" },
       "write-checkpoint": { type: "boolean" },
+      "epoch-status": { type: "boolean" },
+      "record-epoch-dispatch": { type: "boolean" },
+      "new-epoch": { type: "boolean" },
+      "override-budget": { type: "boolean" },
       checkpointInputFile: { type: "string" },
       taskId: { type: "string" },
       workspace: { type: "string" },
@@ -1663,6 +2045,21 @@ async function _cliMain(argv) {
       // (CLAIM C10), never throwing here.
       phaseTimings: { type: "string" },
       findingCodes: { type: "string" },
+      // gap-prepare-milestone-task-epoch-budget-reset: the epoch-cumulative circuit breaker's own
+      // flags — numeric ones are parsed as strings (SAME convention as --highRisk/--cacheable
+      // above) and converted with Number()/Number.isFinite() at each handler below.
+      owner: { type: "string" },
+      "additional-minutes": { type: "string" },
+      confirmUnchangedScope: { type: "string" },
+      dispatchDelta: { type: "string" },
+      fullReviewDelta: { type: "string" },
+      deltaRoundDelta: { type: "string" },
+      elapsedMsDelta: { type: "string" },
+      attemptIncrement: { type: "string" },
+      tokensObserved: { type: "string" },
+      ordinaryCapMinutes: { type: "string" },
+      highRiskCapMinutes: { type: "string" },
+      checkFullReviewCap: { type: "string" },
     },
   };
   const parsed = parseArgs(argv, spec);
@@ -1763,6 +2160,63 @@ async function _cliMain(argv) {
     });
     console.log(JSON.stringify(out));
     return out.ok && out.releaseResult?.ok ? 0 : 1;
+  }
+  // gap-prepare-milestone-task-epoch-budget-reset: the epoch-cumulative circuit breaker's own
+  // four CLI submodes — --epoch-status (read-only), --record-epoch-dispatch (the only write path
+  // prepare-milestone.js's own automated flow calls), --new-epoch / --override-budget (both
+  // human-invoked-only, never dispatched by the workflow's own automated logic).
+  if (parsed.flags["epoch-status"]) {
+    if (!parsed.flags.charterFile) {
+      console.error("--epoch-status requires --charterFile");
+      return 2;
+    }
+    const out = _epochStatusCli({
+      taskId, workspace, charterFile: parsed.flags.charterFile,
+      highRisk: parsed.flags.highRisk, checkFullReviewCap: parsed.flags.checkFullReviewCap,
+    });
+    console.log(JSON.stringify(out));
+    return out.ok ? 0 : 1;
+  }
+  if (parsed.flags["record-epoch-dispatch"]) {
+    if (!parsed.flags.charterFile) {
+      console.error("--record-epoch-dispatch requires --charterFile");
+      return 2;
+    }
+    const out = _recordEpochDispatchCli({
+      taskId, workspace, charterFile: parsed.flags.charterFile, highRisk: parsed.flags.highRisk,
+      dispatchDelta: Number(parsed.flags.dispatchDelta), fullReviewDelta: Number(parsed.flags.fullReviewDelta),
+      deltaRoundDelta: Number(parsed.flags.deltaRoundDelta), elapsedMsDelta: Number(parsed.flags.elapsedMsDelta),
+      attemptIncrement: Number(parsed.flags.attemptIncrement),
+      terminalPhase: parsed.flags.terminalPhase, reason: parsed.flags.reason,
+      tokensObserved: Number(parsed.flags.tokensObserved),
+      ordinaryCapMinutes: Number(parsed.flags.ordinaryCapMinutes), highRiskCapMinutes: Number(parsed.flags.highRiskCapMinutes),
+    });
+    console.log(JSON.stringify(out));
+    return out.ok ? 0 : 1;
+  }
+  if (parsed.flags["new-epoch"]) {
+    if (!parsed.flags.charterFile) {
+      console.error("--new-epoch requires --charterFile");
+      return 2;
+    }
+    const out = _newEpochCli({
+      taskId, workspace, charterFile: parsed.flags.charterFile,
+      reason: parsed.flags.reason, owner: parsed.flags.owner, confirmUnchangedScope: parsed.flags.confirmUnchangedScope,
+    });
+    console.log(JSON.stringify(out));
+    return out.ok ? 0 : 1;
+  }
+  if (parsed.flags["override-budget"]) {
+    if (!parsed.flags.charterFile) {
+      console.error("--override-budget requires --charterFile");
+      return 2;
+    }
+    const out = _overrideBudgetCli({
+      taskId, workspace, charterFile: parsed.flags.charterFile,
+      reason: parsed.flags.reason, owner: parsed.flags.owner, additionalMinutes: parsed.flags["additional-minutes"],
+    });
+    console.log(JSON.stringify(out));
+    return out.ok ? 0 : 1;
   }
   console.error(`usage: node proposal-convergence.ts ${spec.usage}`);
   return 2;

@@ -17,6 +17,7 @@ import {
   decideResumeGeneration, PHASE_RANK, CACHEABLE_TERMINALS, RESUMABLE_PHASES, RESUME_POLICY_VERSION,
   checkpointPath, buildReviewCheckpoint, validateReviewCheckpoint, classifyProposalDiff, noveltyScan,
   CHECKPOINT_SCHEMA_VERSION,
+  epochPath, buildEpochRecord, checkEpochCaps, DEFAULT_EPOCH_POLICY, EPOCH_SCHEMA_VERSION,
 } from "../scripts/proposal-convergence.ts";
 import { PREFLIGHT_POLICY_VERSION } from "../scripts/prepare-admission-check.ts";
 
@@ -287,6 +288,21 @@ test("prepare-milestone.js mirrors inline the SAME caps as capsFor()", () => {
     const src = fs.readFileSync(path.join(repoRoot, rel), "utf8");
     assert.match(src, /maxDeltaRounds:\s*_highRisk\s*\?\s*3\s*:\s*2/, `${rel}: ordinary/highRisk maxDeltaRounds must be 2/3`);
     assert.match(src, /_highRisk\s*\?\s*75\s*:\s*45/, `${rel}: ordinary/highRisk budget must be 45/75 minutes`);
+  }
+});
+
+// ── Cross-check: prepare-milestone.js's `_checkEpochCapsInline`/`_epochPolicy` default literals
+// must match DEFAULT_EPOCH_POLICY (90/150/1/2) exactly — SAME "workflow has no import statements,
+// fails loudly on drift" precedent as the capsFor() cross-check immediately above.
+test("prepare-milestone.js mirrors inline the SAME epoch-budget defaults as DEFAULT_EPOCH_POLICY", () => {
+  assert.deepEqual(DEFAULT_EPOCH_POLICY, { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2 });
+  const repoRoot = path.resolve(import.meta.dirname, "..", "..", "..");
+  for (const rel of [".claude/workflows/prepare-milestone.js", "plugin/workflows/prepare-milestone.js"]) {
+    const src = fs.readFileSync(path.join(repoRoot, rel), "utf8");
+    assert.match(src, /_highRisk\s*\?\s*\(Number\.isFinite\(p\.highRiskCapMinutes\)\s*\?\s*p\.highRiskCapMinutes\s*:\s*150\)/, `${rel}: highRisk time cap default must be 150 minutes`);
+    assert.match(src, /Number\.isFinite\(p\.ordinaryCapMinutes\)\s*\?\s*p\.ordinaryCapMinutes\s*:\s*90/, `${rel}: ordinary time cap default must be 90 minutes`);
+    assert.match(src, /Number\.isFinite\(p\.maxFullReviewsPerEpoch\)\s*\?\s*p\.maxFullReviewsPerEpoch\s*:\s*1/, `${rel}: maxFullReviewsPerEpoch default must be 1`);
+    assert.match(src, /Number\.isFinite\(p\.maxRepeatedFingerprint\)\s*\?\s*p\.maxRepeatedFingerprint\s*:\s*2/, `${rel}: maxRepeatedFingerprint default must be 2`);
   }
 });
 
@@ -1854,5 +1870,420 @@ console.log(JSON.stringify({ ok: true, hasValidate: typeof validateReviewCheckpo
     } finally {
       fs.rmSync(scratch, { recursive: true, force: true });
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── gap-prepare-milestone-task-epoch-budget-reset — epoch-cumulative circuit breaker. Pure-function
+// coverage for `checkEpochCaps`/`buildEpochRecord`, then real CLI round-trip coverage for
+// --epoch-status/--record-epoch-dispatch/--new-epoch/--override-budget, following the SAME
+// spawn-a-real-subprocess-against-a-scratch-workspace pattern the checkpoint CLI tests above use.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+describe("checkEpochCaps — pure decision function", () => {
+  const FRESH = { attempts: 0, fullReviews: 0, deltaRounds: 0, contentAgentDispatches: 0, observableAgentMs: 0, terminalFingerprints: {}, tokensObserved: null };
+
+  test("fresh/zero counters never breach", () => {
+    const r = checkEpochCaps({ counters: FRESH, policy: DEFAULT_EPOCH_POLICY, highRisk: false });
+    assert.equal(r.breached, false);
+  });
+
+  test("ordinary time cap: 90 minutes exactly meets the cap -> breached", () => {
+    const r = checkEpochCaps({ counters: { ...FRESH, observableAgentMs: 90 * 60 * 1000 }, policy: DEFAULT_EPOCH_POLICY, highRisk: false });
+    assert.equal(r.breached, true);
+    assert.equal(r.breachedCap, "time-cap-exceeded");
+    assert.equal(r.code, "epoch-time-cap-exceeded");
+  });
+
+  test("ordinary time cap: 89 minutes does NOT breach", () => {
+    const r = checkEpochCaps({ counters: { ...FRESH, observableAgentMs: 89 * 60 * 1000 }, policy: DEFAULT_EPOCH_POLICY, highRisk: false });
+    assert.equal(r.breached, false);
+  });
+
+  test("highRisk uses the 150-minute cap, not the ordinary 90-minute one", () => {
+    const counters = { ...FRESH, observableAgentMs: 120 * 60 * 1000 };
+    assert.equal(checkEpochCaps({ counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false }).breached, true, "120m breaches the 90m ordinary cap");
+    assert.equal(checkEpochCaps({ counters, policy: DEFAULT_EPOCH_POLICY, highRisk: true }).breached, false, "120m does NOT breach the 150m highRisk cap");
+  });
+
+  test("full-review cap only gates when checkFullReviewCap:true is explicitly passed", () => {
+    const counters = { ...FRESH, fullReviews: 1 };
+    assert.equal(checkEpochCaps({ counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false, checkFullReviewCap: false }).breached, false, "ordinary dispatches (ProposalAuthors/Adjudicate/PlanAuthor/PlanCheck/delta rounds) never gate on this cap");
+    const r = checkEpochCaps({ counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false, checkFullReviewCap: true });
+    assert.equal(r.breached, true);
+    assert.equal(r.breachedCap, "full-review-cap-exceeded");
+    assert.equal(r.code, "epoch-full-review-cap-exceeded");
+  });
+
+  test("repeated-terminal-fingerprint cap: 2 occurrences of one fingerprint breaches (default maxRepeatedFingerprint:2)", () => {
+    const counters = { ...FRESH, terminalFingerprints: { abc123: 2 } };
+    const r = checkEpochCaps({ counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false });
+    assert.equal(r.breached, true);
+    assert.equal(r.breachedCap, "repeated-terminal-fingerprint");
+    assert.equal(r.code, "epoch-fingerprint-cap-exceeded");
+  });
+
+  test("repeated-terminal-fingerprint cap: 1 occurrence does NOT breach", () => {
+    const counters = { ...FRESH, terminalFingerprints: { abc123: 1 } };
+    assert.equal(checkEpochCaps({ counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false }).breached, false);
+  });
+
+  test("fingerprint cap is checked BEFORE the time/full-review caps (evaluation order)", () => {
+    const counters = { ...FRESH, terminalFingerprints: { x: 5 }, observableAgentMs: 999 * 60 * 1000, fullReviews: 99 };
+    const r = checkEpochCaps({ counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false, checkFullReviewCap: true });
+    assert.equal(r.breachedCap, "repeated-terminal-fingerprint");
+  });
+
+  test("a recorded override EXTENDS the effective time cap by its additionalBudget minutes", () => {
+    const counters = { ...FRESH, observableAgentMs: 100 * 60 * 1000 }; // 100m > 90m ordinary cap
+    const noOverride = checkEpochCaps({ counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false, overrides: [] });
+    assert.equal(noOverride.breached, true, "100m breaches the bare 90m cap");
+    const withOverride = checkEpochCaps({ counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false, overrides: [{ owner: "a", reason: "r", additionalBudget: 30 }] });
+    assert.equal(withOverride.breached, false, "90m + 30m override = 120m ceiling, 100m no longer breaches");
+  });
+
+  test("missing tokensObserved (null) never affects any cap — time/full-review/fingerprint caps still enforce independently", () => {
+    const counters = { ...FRESH, observableAgentMs: 200 * 60 * 1000, tokensObserved: null };
+    const r = checkEpochCaps({ counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false });
+    assert.equal(r.breached, true, "the time cap still fires with tokensObserved:null — missing token data cannot disable other caps");
+  });
+
+  test("a caller-lowered policy (e.g. ordinaryCapMinutes:10) is honored, never silently widened back to the 90m default", () => {
+    const counters = { ...FRESH, observableAgentMs: 15 * 60 * 1000 };
+    const r = checkEpochCaps({ counters, policy: { ...DEFAULT_EPOCH_POLICY, ordinaryCapMinutes: 10 }, highRisk: false });
+    assert.equal(r.breached, true);
+  });
+});
+
+describe("buildEpochRecord — no-fabrication field materialization", () => {
+  test("tokensObserved defaults to null (never a fabricated 0) when omitted", () => {
+    const rec = buildEpochRecord({ taskId: "T1", charterHash: "c", reviewPolicyHash: "r" });
+    assert.equal(rec.counters.tokensObserved, null);
+    assert.equal(rec.schemaVersion, EPOCH_SCHEMA_VERSION);
+  });
+
+  test("a real observed tokensObserved value of 0 is preserved as 0, distinct from null", () => {
+    const rec = buildEpochRecord({ counters: { tokensObserved: 0 } });
+    assert.equal(rec.counters.tokensObserved, 0);
+  });
+
+  test("policy defaults match DEFAULT_EPOCH_POLICY (90/150/1/2) when omitted", () => {
+    const rec = buildEpochRecord({});
+    assert.deepEqual(rec.policy, DEFAULT_EPOCH_POLICY);
+  });
+
+  test("overrides/resets default to empty arrays, terminalFingerprints defaults to {}", () => {
+    const rec = buildEpochRecord({});
+    assert.deepEqual(rec.overrides, []);
+    assert.deepEqual(rec.resets, []);
+    assert.deepEqual(rec.counters.terminalFingerprints, {});
+  });
+});
+
+describe("CLI: --epoch-status / --record-epoch-dispatch / --new-epoch / --override-budget", () => {
+  const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
+  const CONVERGENCE_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "proposal-convergence.ts");
+  const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "epoch-cli-fixtures-"));
+
+  function fixtureTaskBody() {
+    return `---
+id: EPOCH-CLI-FIXTURE
+title: fixture task for epoch-budget CLI fixtures
+status: todo
+---
+## Proposal
+
+fixture proposal text v1
+
+## Acceptance Criteria
+
+- [ ] fixture AC item
+
+## Definition of Done
+
+- [ ] fixture DoD item
+
+## Touches
+
+- fixture.ts
+`;
+  }
+
+  function makeCliScratch(taskId) {
+    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "cli-scratch-"));
+    fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), fixtureTaskBody());
+    const charterFile = path.join(dir, "charter.md");
+    fs.writeFileSync(charterFile, "fixture charter v1\n");
+    return { dir, charterFile };
+  }
+
+  function runNode(args) {
+    try {
+      const stdout = execFileSync("node", ["--no-warnings", "--experimental-strip-types", ...args], { encoding: "utf8" });
+      return { status: 0, stdout };
+    } catch (e) {
+      return { status: typeof e.status === "number" ? e.status : 1, stdout: e.stdout ? e.stdout.toString() : "" };
+    }
+  }
+  function runStatus(dir, taskId, charterFile, extra = []) {
+    return runNode([CONVERGENCE_SCRIPT, "--epoch-status", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile, ...extra]);
+  }
+  function runDispatch(dir, taskId, charterFile, flags = {}) {
+    const args = [CONVERGENCE_SCRIPT, "--record-epoch-dispatch", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile];
+    for (const [k, v] of Object.entries(flags)) args.push(`--${k}`, String(v));
+    return runNode(args);
+  }
+  function runNewEpoch(dir, taskId, charterFile, { reason, owner, confirmUnchangedScope } = {}) {
+    const args = [CONVERGENCE_SCRIPT, "--new-epoch", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile];
+    if (reason !== undefined) args.push("--reason", reason);
+    if (owner !== undefined) args.push("--owner", owner);
+    if (confirmUnchangedScope !== undefined) args.push("--confirmUnchangedScope", String(confirmUnchangedScope));
+    return runNode(args);
+  }
+  function runOverride(dir, taskId, charterFile, { reason, owner, additionalMinutes } = {}) {
+    const args = [CONVERGENCE_SCRIPT, "--override-budget", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile];
+    if (reason !== undefined) args.push("--reason", reason);
+    if (owner !== undefined) args.push("--owner", owner);
+    if (additionalMinutes !== undefined) args.push("--additional-minutes", String(additionalMinutes));
+    return runNode(args);
+  }
+
+  test("--epoch-status on a task with no prior record -> no-epoch-record, exists:false, tokenAccounting:unknown", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const res = runStatus(dir, taskId, charterFile);
+      assert.equal(res.status, 0);
+      const out = JSON.parse(res.stdout.trim());
+      assert.equal(out.ok, true);
+      assert.equal(out.code, "no-epoch-record");
+      assert.equal(out.exists, false);
+      assert.equal(out.tokenAccounting, "unknown");
+      assert.equal(out.counters.tokensObserved, null);
+      assert.equal(out.capCheck.breached, false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--record-epoch-dispatch bootstraps a fresh epoch on first call (parentEpochId:null), then accumulates on a second call", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const first = runDispatch(dir, taskId, charterFile, { dispatchDelta: 2, fullReviewDelta: 1, elapsedMsDelta: 1000, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+      assert.equal(first.status, 0);
+      const firstOut = JSON.parse(first.stdout.trim());
+      assert.equal(firstOut.ok, true);
+      assert.equal(firstOut.parentEpochId, null, "the FIRST epoch ever created for a task has no parent — not a 'reset'");
+      assert.equal(firstOut.counters.contentAgentDispatches, 2);
+      assert.equal(firstOut.counters.fullReviews, 1);
+      assert.equal(firstOut.counters.observableAgentMs, 1000);
+      assert.equal(firstOut.counters.attempts, 1);
+
+      const second = runDispatch(dir, taskId, charterFile, { dispatchDelta: 3, deltaRoundDelta: 1, elapsedMsDelta: 500, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "delta-cap-exhausted" });
+      const secondOut = JSON.parse(second.stdout.trim());
+      assert.equal(secondOut.epochId, firstOut.epochId, "SAME epoch across generations sharing (taskId, charterHash, reviewPolicyHash)");
+      assert.equal(secondOut.counters.contentAgentDispatches, 5, "5 = 2 + 3, cumulative across generations");
+      assert.equal(secondOut.counters.fullReviews, 1, "unchanged — the second dispatch recorded 0 new full reviews");
+      assert.equal(secondOut.counters.deltaRounds, 1);
+      assert.equal(secondOut.counters.observableAgentMs, 1500);
+      assert.equal(secondOut.counters.attempts, 2);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC: a caller-lowered --ordinaryCapMinutes is honored and persisted, but a LATER call cannot silently raise it back — callers may only ever tighten policy, never widen it", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const lowered = JSON.parse(runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding", ordinaryCapMinutes: 30 }).stdout.trim());
+      assert.equal(lowered.policy.ordinaryCapMinutes, 30, "the caller's lower value is honored");
+
+      // A later dispatch requesting a HIGHER value than both the compiled default (90) and the
+      // already-persisted 30 must be silently clamped — never widened back up.
+      const attemptedRaise = JSON.parse(runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding", ordinaryCapMinutes: 200 }).stdout.trim());
+      assert.equal(attemptedRaise.policy.ordinaryCapMinutes, 30, "a later caller-requested 200m must NOT silently raise the already-tightened 30m ceiling");
+
+      // Even a fresh dispatch omitting the flag entirely must not exceed the compiled 90m default.
+      const noFlag = JSON.parse(runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" }).stdout.trim());
+      assert.equal(noFlag.policy.ordinaryCapMinutes, 30, "omitting the flag keeps whatever is already persisted, never widens it back toward the 90m default");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC: a caller CANNOT raise ordinaryCapMinutes above the compiled 90m default on the VERY FIRST dispatch either (bootstrap path)", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const first = JSON.parse(runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding", ordinaryCapMinutes: 500 }).stdout.trim());
+      assert.equal(first.policy.ordinaryCapMinutes, 90, "the compiled DEFAULT_EPOCH_POLICY ceiling (90) always wins over a caller-requested higher value, even on epoch bootstrap");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC: editing Proposal/Plan/AC/Touches content does NOT reset the epoch — fixtures prove all counters remain monotone after the same repair shapes used between DIR-126-D rounds", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const first = runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, fullReviewDelta: 1, elapsedMsDelta: 2000, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "delta-cap-exhausted" });
+      const firstOut = JSON.parse(first.stdout.trim());
+
+      // Simulate the EXACT repair shapes DIR-126-D rounds used between generations: edit Proposal,
+      // Plan, AC, and Touches — none of these are hashed into the epoch's own identity key.
+      const taskFile = path.join(dir, "tasks", `${taskId}.md`);
+      let body = fs.readFileSync(taskFile, "utf8");
+      body = body.replace("fixture proposal text v1", "fixture proposal text v2 — human repair");
+      body = body.replace("- [ ] fixture AC item", "- [ ] fixture AC item\n- [ ] a second AC item added during repair");
+      body = body.replace("- fixture.ts", "- fixture.ts\n- another-touched-file.ts");
+      fs.writeFileSync(taskFile, body);
+
+      const second = runDispatch(dir, taskId, charterFile, { dispatchDelta: 2, deltaRoundDelta: 1, elapsedMsDelta: 1000, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+      assert.equal(second.status, 0, `expected the SAME epoch to keep accumulating after a Proposal/AC/Touches edit, got: ${second.stdout}`);
+      const secondOut = JSON.parse(second.stdout.trim());
+      assert.equal(secondOut.epochId, firstOut.epochId, "Proposal/AC/Touches content edits must NEVER change the epoch identity");
+      assert.equal(secondOut.counters.contentAgentDispatches, 3, "monotone: 1 + 2, never reset to 2 alone");
+      assert.equal(secondOut.counters.fullReviews, 1, "monotone: unchanged, never reset to 0");
+      assert.equal(secondOut.counters.observableAgentMs, 3000, "monotone: 2000 + 1000, never reset");
+      assert.equal(secondOut.counters.attempts, 2, "monotone: 1 + 1, never reset to 1");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a real charter edit changes the epoch identity -> --epoch-status reports epoch-identity-mismatch, --record-epoch-dispatch REFUSES to silently continue", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+      fs.appendFileSync(charterFile, "\na genuinely new charter clause\n");
+
+      const status = JSON.parse(runStatus(dir, taskId, charterFile).stdout.trim());
+      assert.equal(status.code, "epoch-identity-mismatch");
+
+      const dispatch = runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+      assert.equal(dispatch.status, 1);
+      const dispatchOut = JSON.parse(dispatch.stdout.trim());
+      assert.equal(dispatchOut.ok, false);
+      assert.equal(dispatchOut.code, "epoch-identity-mismatch-requires-new-epoch");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--new-epoch requires --reason and --owner", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      assert.equal(JSON.parse(runNewEpoch(dir, taskId, charterFile, { owner: "alice" }).stdout.trim()).code, "new-epoch-requires-reason");
+      assert.equal(JSON.parse(runNewEpoch(dir, taskId, charterFile, { reason: "r" }).stdout.trim()).code, "new-epoch-requires-owner");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC: an authorized charter/scope reset creates a new epoch, links it to the prior epoch, and records owner/reason/old-new hashes/timestamp", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const first = JSON.parse(runDispatch(dir, taskId, charterFile, { dispatchDelta: 5, fullReviewDelta: 1, attemptIncrement: 3, terminalPhase: "ProposalReview", reason: "delta-cap-exhausted" }).stdout.trim());
+      fs.appendFileSync(charterFile, "\na genuinely new charter clause\n");
+
+      const reset = JSON.parse(runNewEpoch(dir, taskId, charterFile, { reason: "charter revised for real scope change", owner: "alice" }).stdout.trim());
+      assert.equal(reset.ok, true);
+      assert.notEqual(reset.epochId, first.epochId, "a genuinely new epoch id");
+      assert.equal(reset.parentEpochId, first.epochId, "linked to the prior epoch");
+      assert.equal(reset.record.counters.attempts, 0, "counters reset to zero on the new epoch");
+      assert.equal(reset.record.counters.contentAgentDispatches, 0);
+      const lastReset = reset.record.resets[reset.record.resets.length - 1];
+      assert.equal(lastReset.owner, "alice");
+      assert.equal(lastReset.reason, "charter revised for real scope change");
+      assert.equal(lastReset.fromEpochId, first.epochId);
+      assert.ok(lastReset.oldHash && lastReset.newHash && lastReset.oldHash.charterHash !== lastReset.newHash.charterHash);
+      assert.ok(Number.isFinite(lastReset.timestamp));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--new-epoch with UNCHANGED identity is rejected unless --confirmUnchangedScope true is explicitly passed — never a silent bypass via a plain redispatch", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+      const rejected = JSON.parse(runNewEpoch(dir, taskId, charterFile, { reason: "no real change", owner: "alice" }).stdout.trim());
+      assert.equal(rejected.ok, false);
+      assert.equal(rejected.code, "new-epoch-requires-changed-identity-or-explicit-confirmation");
+
+      const confirmed = JSON.parse(runNewEpoch(dir, taskId, charterFile, { reason: "no real change", owner: "alice", confirmUnchangedScope: true }).stdout.trim());
+      assert.equal(confirmed.ok, true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--override-budget grants one bounded extension and CANNOT authorize a second identical override without a distinct human scope decision", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+
+      const first = JSON.parse(runOverride(dir, taskId, charterFile, { reason: "one-off legit reason", owner: "bob", additionalMinutes: 30 }).stdout.trim());
+      assert.equal(first.ok, true);
+      assert.equal(first.override.additionalBudget, 30);
+
+      const secondIdentical = runOverride(dir, taskId, charterFile, { reason: "one-off legit reason", owner: "bob", additionalMinutes: 30 });
+      assert.equal(secondIdentical.status, 1);
+      const secondOut = JSON.parse(secondIdentical.stdout.trim());
+      assert.equal(secondOut.ok, false);
+      assert.equal(secondOut.code, "override-not-distinct");
+
+      const secondDistinct = JSON.parse(runOverride(dir, taskId, charterFile, { reason: "a genuinely different justification", owner: "bob", additionalMinutes: 15 }).stdout.trim());
+      assert.equal(secondDistinct.ok, true);
+      assert.equal(secondDistinct.overrides.length, 2);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--override-budget requires an existing epoch and a positive --additional-minutes", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const noEpoch = JSON.parse(runOverride(dir, taskId, charterFile, { reason: "r", owner: "o", additionalMinutes: 10 }).stdout.trim());
+      assert.equal(noEpoch.code, "override-requires-existing-epoch");
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+      const badMinutes = JSON.parse(runOverride(dir, taskId, charterFile, { reason: "r", owner: "o", additionalMinutes: -5 }).stdout.trim());
+      assert.equal(badMinutes.code, "override-requires-positive-minutes");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("tokensObserved is additive across dispatches and never fabricated to 0 when the flag is simply absent", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const noTokenFlag = JSON.parse(runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" }).stdout.trim());
+      assert.equal(noTokenFlag.counters.tokensObserved, null, "absent --tokensObserved leaves it null, never a fabricated 0");
+
+      const withTokens = JSON.parse(runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding", tokensObserved: 5000 }).stdout.trim());
+      assert.equal(withTokens.counters.tokensObserved, 5000);
+
+      const accumulated = JSON.parse(runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding", tokensObserved: 3000 }).stdout.trim());
+      assert.equal(accumulated.counters.tokensObserved, 8000, "additive: 5000 + 3000");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("epochPath resolves under .quay/prepare-epochs/<safeTaskIdSegment>.json — reuses the SAME sanitizer segment shape as checkpointPath", () => {
+    const p1 = epochPath("/ws", "some/task");
+    const p2 = checkpointPath("/ws", "some/task");
+    assert.equal(path.basename(p1), path.basename(p2), "both sanitize 'some/task' to the SAME filename segment");
+    assert.match(p1, /\.quay[/\\]prepare-epochs[/\\]/);
   });
 });

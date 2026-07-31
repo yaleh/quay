@@ -173,6 +173,24 @@ function makeAgentMock(taskFileOnDisk) {
       return { raw: JSON.stringify({ ok: true, verdict: 'no-decision-on-file' }) };
     }
 
+    // gap-prepare-milestone-task-epoch-budget-reset: the epoch-status read (dispatched once, right
+    // after Admission succeeds) and the epoch-dispatch write (dispatched from EVERY terminal via
+    // _releaseLeaseAndRecord/_writeGenerationTelemetry). Mocked fresh/non-breaching so this
+    // fixture's own cold-path 'prepared' assertions stay unaffected.
+    if (label === 'epoch-status') {
+      sessions.epochStatuses = (sessions.epochStatuses || 0) + 1;
+      return { raw: JSON.stringify({
+        ok: true, code: 'no-epoch-record', exists: false,
+        counters: { attempts: 0, fullReviews: 0, deltaRounds: 0, contentAgentDispatches: 0, observableAgentMs: 0, terminalFingerprints: {}, tokensObserved: null },
+        policy: { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2 },
+        overrides: [], resets: [], capCheck: { breached: false },
+      }) };
+    }
+    if (/^epoch-dispatch-/.test(label)) {
+      sessions.epochDispatches = (sessions.epochDispatches || 0) + 1;
+      return { raw: JSON.stringify({ ok: true, epochId: 'mock-epoch', counters: {}, policy: {}, capCheck: { breached: false } }) };
+    }
+
     // gap-prepare-milestone-cross-generation-review-state-reset: --resolve-checkpoint is dispatched
     // ONLY when resumeFromAdjudicatedProposal is true (never on this fixture's cold path — the
     // resume-decision mock above always returns 'cold') — handled defensively so any future reuse

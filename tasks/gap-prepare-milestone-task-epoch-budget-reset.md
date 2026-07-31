@@ -73,38 +73,103 @@ authorized scope declaration.
 
 ## Acceptance Criteria
 
-- [ ] A durable epoch record accumulates attempts, full/delta reviews, content dispatches,
+- [x] A durable epoch record accumulates attempts, full/delta reviews, content dispatches,
   observable agent time, terminal fingerprints, available tokens, overrides, and resets across
-  multiple prepare-milestone workflow generations.
-- [ ] Editing Proposal, Plan, AC, or Touches content does not reset the epoch; fixtures prove all
-  counters remain monotone after the same repair shapes used between DIR-126-D rounds.
-- [ ] An authorized charter/scope or review-policy reset creates a new epoch, links it to the prior
-  epoch, and records owner, reason, old/new identity hashes, and timestamp.
-- [ ] A second identical terminal fingerprint or exhausted cumulative time/full-review cap returns
-  human-decision-required before any additional content agent is dispatched.
-- [ ] The cap-breach path releases a held Admission lease, writes final counters, and exposes only
-  COMMIT, SPLIT, NEW-EPOCH, or bounded-override actions; a plain redispatch remains blocked.
-- [ ] Ordinary and high-risk default-limit fixtures exercise the declared 90/150-minute ceilings;
-  lower caller limits are honored and callers cannot silently raise policy maxima.
-- [ ] Missing token usage is reported as unknown while attempt, dispatch, and observable-time caps
-  continue to work; no fabricated zero token value appears in the record or report.
-- [ ] One bounded override grants only its recorded additional allowance and cannot authorize a
-  second override without a distinct human scope decision.
-- [ ] Replaying DIR-126-D's attempt sequence stops at the configured human decision boundary well
-  before eleven attempts and preserves enough evidence to explain exactly which cap fired.
-- [ ] Existing Admission contention, stale-lease recovery, exact-terminal reuse, ProposalReview
-  convergence, and successful prepared-path fixtures remain compatible in both mirrors.
+  multiple prepare-milestone workflow generations. Evidence: `.quay/prepare-epochs/<safeTaskIdSegment>.json`
+  (`buildEpochRecord`/`_recordEpochDispatchCli` in `proposal-convergence.ts`); CLI round-trip test
+  "--record-epoch-dispatch bootstraps a fresh epoch on first call ... then accumulates on a second
+  call" and the real 2-generation DIR-126-D synthetic replay (`prepare-milestone-convergence.test.mjs`).
+- [x] Editing Proposal, Plan, AC, or Touches content does not reset the epoch; fixtures prove all
+  counters remain monotone after the same repair shapes used between DIR-126-D rounds. Evidence:
+  "AC: editing Proposal/Plan/AC/Touches content does NOT reset the epoch" (real CLI test editing all
+  four sections between two `--record-epoch-dispatch` calls, asserting monotone counters + unchanged
+  epochId).
+- [x] An authorized charter/scope or review-policy reset creates a new epoch, links it to the prior
+  epoch, and records owner, reason, old/new identity hashes, and timestamp. Evidence: `--new-epoch`
+  CLI mode (`_newEpochCli`); "AC: an authorized charter/scope reset creates a new epoch, links it to
+  the prior epoch, and records owner/reason/old-new hashes/timestamp" (real CLI test).
+- [x] A second identical terminal fingerprint or exhausted cumulative time/full-review cap returns
+  human-decision-required before any additional content agent is dispatched. Evidence: `checkEpochCaps`
+  pure-function tests (fingerprint/time/full-review boundaries) + workflow tests "a cumulative
+  time-cap breach... stops BEFORE any content-agent dispatch", "a repeated-terminal-fingerprint...
+  stops the NEXT generation before any content-agent dispatch", and "the full-review cap gates ONLY
+  the full-review dispatch itself" — note the scoping actually built: each of the ~9 real
+  content-agent dispatch sites (ProposalAuthors, Adjudicate, full review, each delta round, PlanAuthor,
+  each PlanCheck round) is gated independently, at the moment it is about to run, against
+  cumulative-so-far counters; the full-review cap specifically (`checkFullReviewCap`) is checked ONLY
+  at the full-review dispatch site, so ProposalAuthors/Adjudicate can still run in a generation whose
+  epoch has already exhausted its one-full-review allowance — this is the deliberate, "simple
+  mechanical check at each real dispatch point" design the task's own note about the sibling task's
+  round-1 REFUTATION argues for, not a lookahead/smart-classifier shortcut.
+- [x] The cap-breach path releases a held Admission lease, writes final counters, and exposes only
+  COMMIT, SPLIT, NEW-EPOCH, or bounded-override actions; a plain redispatch remains blocked. Evidence:
+  `_epochBreachExit` (reuses the existing `_releaseLeaseAndRecord` choke point verbatim); all 4 new
+  workflow-level epoch-breach tests assert `allowedActions` deep-equals
+  `['COMMIT','SPLIT','NEW-EPOCH','OVERRIDE']`, `admissionReleases >= 1`, `epochDispatches >= 1`; the
+  real DIR-126-D replay's generation 2 IS a plain cold redispatch and is blocked.
+- [x] Ordinary and high-risk default-limit fixtures exercise the declared 90/150-minute ceilings;
+  lower caller limits are honored and callers cannot silently raise policy maxima. Evidence:
+  `checkEpochCaps` pure tests for the 89m/90m/120m/highRisk boundaries; CLI tests "a caller-lowered
+  --ordinaryCapMinutes is honored... but a LATER call cannot silently raise it back" and "a caller
+  CANNOT raise ordinaryCapMinutes above the compiled 90m default... on bootstrap" (both real CLI,
+  asserting the persisted `policy.ordinaryCapMinutes` never exceeds `Math.min(prior, requested)`).
+- [x] Missing token usage is reported as unknown while attempt, dispatch, and observable-time caps
+  continue to work; no fabricated zero token value appears in the record or report. Evidence:
+  `buildEpochRecord`'s `tokensObserved` defaults to `null` (never `0`); `--epoch-status`'s
+  `tokenAccounting: "unknown"` field; test "missing tokensObserved (null) never affects any cap" and
+  "tokensObserved is additive... never fabricated to 0 when the flag is simply absent".
+- [x] One bounded override grants only its recorded additional allowance and cannot authorize a
+  second override without a distinct human scope decision. Evidence: `_overrideBudgetCli`'s
+  same-owner+reason rejection (`override-not-distinct`); test "--override-budget grants one bounded
+  extension and CANNOT authorize a second identical override without a distinct human scope decision"
+  (identical repeat rejected, genuinely distinct reason/owner succeeds).
+- [x] Replaying DIR-126-D's attempt sequence stops at the configured human decision boundary well
+  before eleven attempts and preserves enough evidence to explain exactly which cap fired. Evidence:
+  two real-CLI-backed replay tests in `prepare-milestone-convergence.test.mjs` — the full-review-cap
+  replay stops at attempt 2 (`epoch-full-review-cap-exceeded`), and the repeated-terminal-fingerprint
+  replay stops at attempt 3 (`epoch-fingerprint-cap-exceeded`) — both read the real on-disk
+  `.quay/prepare-epochs/*.json` record afterward to confirm the exact counters that caused the stop.
+- [x] Existing Admission contention, stale-lease recovery, exact-terminal reuse, ProposalReview
+  convergence, and successful prepared-path fixtures remain compatible in both mirrors. Evidence: full
+  pre-existing suites re-run clean after this change — `prepare-milestone-convergence.test.mjs` 100/100
+  (both mirrors, was 88/88 before this task), `prepare-milestone-preparation-e2e.test.mjs` 2/2,
+  `proposal-convergence.test.mjs` 163/163, `prepare-admission-check.test.mjs` 83/83 (both mirrors);
+  full `scripts/test.sh`: 770 tests, 764 pass, 3 fail (pre-existing `plugin-packaging.test.mjs`
+  `tree-hygiene-check.sh` failures, confirmed via `git stash` to already fail on unmodified `master` —
+  unrelated to this task, no file this task touches is referenced by that test), 3 skipped (live
+  GitHub, expected without `QUAY_TEST_LIVE_GITHUB=1`).
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
 - [ ] Landed on master under human-steered discipline with a versioned policy and byte-identical
-  canonical/plugin implementation mirrors.
-- [ ] A real repeated-terminal preparation sequence reaches human-decision-required and a further
-  generic redispatch is mechanically rejected with zero new content-agent work.
+  canonical/plugin implementation mirrors. Byte-identical mirrors ARE verified (`diff`/`cmp` zero
+  output on both `.claude/workflows/prepare-milestone.js` <-> `plugin/workflows/prepare-milestone.js`
+  and `experiments/quay-perpetual-stream/scripts/proposal-convergence.ts` <->
+  `plugin/scripts/proposal-convergence.ts`) and the policy is versioned (`EPOCH_SCHEMA_VERSION`,
+  `DEFAULT_EPOCH_POLICY`). Left UNCHECKED because landing on `master` is explicitly out of this
+  session's scope — this work sits on an isolated worktree branch pending the orchestrating session's
+  independent adversarial review, per this task's own instructions.
+- [x] A real repeated-terminal preparation sequence reaches human-decision-required and a further
+  generic redispatch is mechanically rejected with zero new content-agent work. Evidence: "DoD: a REAL
+  repeated-terminal sequence (3 real generations, same terminal, real CLI-persisted fingerprint)..."
+  in `prepare-milestone-convergence.test.mjs` — 3 real sequential workflow dispatches, real
+  `--epoch-status`/`--record-epoch-dispatch` CLI calls (no mocked counters), generations 1-2 both
+  independently reach a real fresh Preflight rejection (`preflight-rejected`), generation 3 (a plain
+  cold redispatch, no special flags) is mechanically rejected at Admission
+  (`epoch-fingerprint-cap-exceeded`) with `preflightContent`/`authors`/`adjudicator` all `0` — zero new
+  content-agent work, confirmed against the real on-disk epoch record.
 - [ ] A separately authorized real scope reset starts a new linked epoch and is independently
-  audited against the old counters and decision record.
+  audited against the old counters and decision record. PARTIALLY evidenced, left UNCHECKED: the
+  `--new-epoch` CLI (real, tested end-to-end) produces a durable, inspectable `resets[]` entry
+  (owner/reason/`fromEpochId`/old+new identity hashes/timestamp) that ANY later reviewer or tool can
+  mechanically check against the prior epoch's own counters — but this session did not build a
+  SEPARATE independent-audit tool/step that itself cross-verifies a reset's legitimacy (e.g. an
+  out-of-band script comparing the resets ledger against real git history of the charter file); the
+  test coverage asserts the record's own internal self-consistency, not an independent second-party
+  audit of it. Whether the durable record alone satisfies "independently audited" is a judgment call
+  for the reviewing session.
 
 ## Human verification when exp5 marks this task done
 
