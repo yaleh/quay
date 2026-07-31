@@ -1738,20 +1738,37 @@ function _syncSleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// Test-only injectable hold-delay (gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening
+// review finding: the original disabled-lock regression test only caught a broken lock ~57% of
+// the time on a real machine, since natural OS-scheduling variance doesn't reliably force two
+// concurrent critical sections to overlap). When set, `_acquireEpochLock` sleeps this many ms
+// AFTER acquiring the lock and BEFORE returning — widening the critical section deterministically
+// so a regression test can force a genuine overlap window instead of relying on scheduling luck.
+// Never read outside a test process (no production code path sets this env var).
+function _epochLockTestHoldDelayMs() {
+  const raw = process.env.QUAY_EPOCH_LOCK_TEST_HOLD_MS;
+  const n = raw ? Number(raw) : 0;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 // _acquireEpochLock — throws a typed `epoch-lock-contention` error (never silently proceeds
 // without the lock, never hangs indefinitely) if every bounded retry is exhausted while a
 // genuinely live holder still holds it. A stale (crashed) holder is reclaimed deterministically —
-// no permanent deadlock from a crashed process.
+// no permanent deadlock from a crashed process. Returns `{lockPath, token}`; `token` must be
+// passed back to `_releaseEpochLock` (ownership check, see its own comment).
 function _acquireEpochLock(workspace, taskId) {
   const lockPath = epochLockPath(workspace, taskId);
   fs.mkdirSync(path.dirname(lockPath), { recursive: true });
-  const holder = { pid: process.pid, acquiredAtMs: Date.now() };
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const holder = { pid: process.pid, acquiredAtMs: Date.now(), token };
   for (let attempt = 0; attempt <= EPOCH_LOCK_RETRY_DELAYS_MS.length; attempt++) {
     try {
       // The atomic-create primitive: throws EEXIST if a lock already exists — the SAME real
       // single-flight mechanism `prepare-admission-check.ts`'s `_grantLeaseAtomic` establishes.
       fs.writeFileSync(lockPath, JSON.stringify(holder), { flag: "wx" });
-      return lockPath;
+      const testHoldMs = _epochLockTestHoldDelayMs();
+      if (testHoldMs > 0) _syncSleepMs(testHoldMs);
+      return { lockPath, token };
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
       let existing = null;
@@ -1760,7 +1777,20 @@ function _acquireEpochLock(workspace, taskId) {
       } catch {
         existing = null; // unreadable/mid-write/already-removed by the holder — treated as live contention below, never itself a crash signal
       }
-      const age = existing && Number.isFinite(existing.acquiredAtMs) ? Date.now() - existing.acquiredAtMs : null;
+      // Staleness clock: prefer the holder's own self-reported acquiredAtMs, but fall back to the
+      // lock FILE's own mtime when the content is unparseable/corrupt (review finding: a corrupt
+      // lock file made `existing` null forever, so `age` was always null and the 30s staleness
+      // reclaim path could NEVER fire for it — a permanent block, contradicting this primitive's
+      // own "never a permanent deadlock" guarantee). The file's own mtime is a real, content-
+      // independent clock that survives corruption.
+      let age = existing && Number.isFinite(existing.acquiredAtMs) ? Date.now() - existing.acquiredAtMs : null;
+      if (age === null) {
+        try {
+          age = Date.now() - fs.statSync(lockPath).mtimeMs;
+        } catch {
+          age = null; // lock file vanished between the failed read and this stat — treated as contention, retry below
+        }
+      }
       if (age !== null && age >= EPOCH_LOCK_STALE_MS) {
         // Stale — reclaim by removing the orphaned lock file, then retry immediately (still
         // bounded by this SAME loop's own attempt count, never an unbounded reclaim/retry cycle).
@@ -1777,12 +1807,24 @@ function _acquireEpochLock(workspace, taskId) {
   throw err;
 }
 
-function _releaseEpochLock(workspace, taskId) {
+// _releaseEpochLock — ownership-checked: only removes the lock file if its on-disk content still
+// carries OUR OWN token from acquisition. This is defense-in-depth against a same-process/same-
+// codebase logic bug (e.g. two call sites racing to release with mismatched state) — it does NOT
+// and cannot defend against an EXTERNAL actor with raw filesystem delete access removing the lock
+// file directly (bypassing this function entirely); that class of tampering is accepted risk, the
+// SAME trust boundary as direct deletion of the epoch record file itself (see the task's own
+// Decisions section — both are named there together, not just the epoch file).
+function _releaseEpochLock(workspace, taskId, token) {
+  const lockPath = epochLockPath(workspace, taskId);
   try {
-    fs.rmSync(epochLockPath(workspace, taskId), { force: true });
+    const existing = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+    if (existing?.token !== token) {
+      return; // not ours — reclaimed as stale by a racer, or a different holder now occupies this path; never remove state we don't own
+    }
+    fs.rmSync(lockPath, { force: true });
   } catch {
-    // best-effort — a missing lock file at release time (e.g. reclaimed as stale by a racer while
-    // this call was mid-critical-section) is never fatal to the caller's own already-completed work
+    // missing/unreadable at release time — e.g. reclaimed as stale by a racer while this call was
+    // mid-critical-section — never fatal to the caller's own already-completed work
   }
 }
 
@@ -2061,8 +2103,9 @@ export function _newEpochCli({ taskId, workspace, charterFile, reason, owner, co
   // any of them writes, each independently concluding the ceiling has room). A lock-acquisition
   // failure (typed `epoch-lock-contention`) is returned immediately — never silently proceeding
   // without the lock, and nothing has been read/written yet so there is nothing to release.
+  let _lockToken;
   try {
-    _acquireEpochLock(workspace, taskId);
+    ({ token: _lockToken } = _acquireEpochLock(workspace, taskId));
   } catch (err) {
     return { ok: false, code: err.code || "epoch-lock-exception", error: err.message };
   }
@@ -2117,7 +2160,7 @@ export function _newEpochCli({ taskId, workspace, charterFile, reason, owner, co
   } catch (err) {
     return { ok: false, code: err.code || "new-epoch-exception", error: err.message };
   } finally {
-    _releaseEpochLock(workspace, taskId);
+    _releaseEpochLock(workspace, taskId, _lockToken);
   }
 }
 
@@ -2146,8 +2189,9 @@ export function _overrideBudgetCli({ taskId, workspace, charterFile, reason, own
   if (!Number.isFinite(minutes) || minutes <= 0) return { ok: false, code: "override-requires-positive-minutes", error: "--additional-minutes must be a positive number" };
   // gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening (item 1): SAME lock as
   // _newEpochCli, guarding the SAME class of read-check-write race for --override-budget.
+  let _lockToken;
   try {
-    _acquireEpochLock(workspace, taskId);
+    ({ token: _lockToken } = _acquireEpochLock(workspace, taskId));
   } catch (err) {
     return { ok: false, code: err.code || "epoch-lock-exception", error: err.message };
   }
@@ -2184,7 +2228,7 @@ export function _overrideBudgetCli({ taskId, workspace, charterFile, reason, own
   } catch (err) {
     return { ok: false, code: err.code || "override-exception", error: err.message };
   } finally {
-    _releaseEpochLock(workspace, taskId);
+    _releaseEpochLock(workspace, taskId, _lockToken);
   }
 }
 

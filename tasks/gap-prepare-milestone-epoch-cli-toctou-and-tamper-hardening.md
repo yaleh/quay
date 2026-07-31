@@ -6,7 +6,7 @@ title: proposal-convergence.ts's --new-epoch/--override-budget CLI have a
   gap-prepare-milestone-task-epoch-budget-reset, explicitly out of that
   task's own threat model (single-actor sequential redispatch), filed as a
   follow-up rather than blocking that task's land
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -174,14 +174,78 @@ Reasoning:
   `prepare-admission-check.test.mjs` mirrors; 2/2 pass in
   `plugin/test/prepare-milestone-preparation-e2e.test.mjs`.
 
+## Round 2: independent review CONCERNS and fixes (2026-07-31)
+
+Round 1 was sent for independent adversarial review, explicitly briefed to be maximally adversarial
+given the track record of the sibling task this follows up on (3 real defects found across its own
+3 review rounds).
+
+**Verdict: CONCERNS, not REFUTED.** The core AC-mandated fix (item 1's TOCTOU lock) was confirmed
+genuinely correct — reproduced the regression tests 8 times (zero flakes), confirmed they catch the
+pre-fix race by neutering the lock and re-running, confirmed the escape-valve fix (item 3) is
+correctly wired per-mechanism (not all-or-nothing), confirmed byte-identity and a clean merge. Three
+real, non-blocking findings surfaced, all fixed directly by the orchestrating session before
+landing:
+
+1. **A 4th bypass: deleting only the `.lock` file.** Live-demonstrated: process A holds a genuine
+   (non-stale) lock; deleting just the 40-byte lock file externally lets a concurrent process B
+   acquire immediately, reopening the exact concurrent-write race this task exists to close — and
+   this is cheaper/more surgical than the already-accepted-risk epoch-file deletion, yet was never
+   named alongside it. **Fixed two ways**: (a) widened the "## Decisions" item 2 accepted-risk
+   reasoning to explicitly name the lock file (see the section below) — this is the primary,
+   honest fix, since no ordinary-file `wx`-flag lock can be tamper-proof against an external actor
+   with raw filesystem delete access (the SAME inherent property `prepare-admission-check.ts`'s own
+   lease already has, never previously treated as needing hardening); (b) added an ownership-token
+   check to `_releaseEpochLock` as defense-in-depth against a DIFFERENT, narrower class (a same-
+   process/same-codebase logic bug releasing the wrong holder's lock) — explicitly documented as
+   NOT a defense against the demonstrated external-deletion attack, which bypasses this function
+   entirely.
+2. **Corrupted (unparseable) lock file never self-healed.** The staleness check computed age from
+   the lock's own JSON content (`existing.acquiredAtMs`); a corrupted/unparseable file made that
+   always `null`, so the 30s staleness reclaim path could never fire — a permanent block,
+   contradicting the primitive's own "never a permanent deadlock" framing. **Fixed**: fall back to
+   the lock file's own filesystem mtime (content-independent) when the JSON can't be parsed. New
+   regression test plants a genuinely corrupt (not just stale-but-valid) lock file and confirms
+   reclaim via mtime.
+3. **Regression-test determinism gap.** The original concurrent-invocation test only caught a fully
+   disabled lock ~57% of the time (4/7 runs) on the reviewer's machine — natural OS-scheduling
+   variance doesn't reliably force two concurrent critical sections to overlap, so a future
+   accidental lock regression had a real chance of silently passing CI. **Fixed**: added a test-only
+   `QUAY_EPOCH_LOCK_TEST_HOLD_MS` env var (read only by `_acquireEpochLock`, zero production code
+   path sets it) that artificially widens the critical section, letting a new deterministic
+   regression test directly prove mutual exclusion (the second caller is genuinely blocked, not
+   racing) rather than inferring it statistically from a race that might not manifest on a given run.
+
+## Decisions addendum (2026-07-31, post-round-2)
+
+Item 2's accepted-risk reasoning above is widened to explicitly cover the lock file, not just the
+epoch record file: deleting `.quay/prepare-epochs/<taskId>.lock` while another process holds it is a
+real, live-demonstrated bypass (round-2 review finding), and is if anything CHEAPER for an attacker
+than the epoch-file deletion already accepted as out-of-scope. The same reasoning applies without
+modification: anyone with filesystem access to delete either file already has equal-or-greater
+access via legitimate front doors or direct field-editing; a lock is fundamentally an advisory
+mechanism between COOPERATING processes, not a security boundary against an adversarial one with
+local filesystem access — the SAME property `prepare-admission-check.ts`'s own lease has always had.
+Both files are now named together as the SAME accepted trust boundary.
+
+Full suite after round-2 fixes: `proposal-convergence.test.mjs` 173/173 (2 new tests this round:
+corrupted-lock-reclaim-via-mtime, deterministic-mutual-exclusion),
+`prepare-milestone-convergence.test.mjs` 106/106, `prepare-milestone-preparation-e2e.test.mjs` 2/2,
+`prepare-admission-check.test.mjs` (both mirrors) 83/83 each — 447/447 total, zero failures.
+Byte-identity re-confirmed on both mirror pairs.
+
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on master, OR closed as an explicit accepted-risk decision with documented reasoning
-  for whichever of items 1-3 above are judged not to warrant a code change. NOTE: item 1 (TOCTOU
-  lock) and item 3 (allowedActions accuracy) are real, tested code changes on this task's own
-  worktree branch (commit noted in the session report); item 2 is an accepted-risk decision only.
+- [x] Landed on master, OR closed as an explicit accepted-risk decision with documented reasoning
+  for whichever of items 1-3 above are judged not to warrant a code change. Item 1 (TOCTOU lock,
+  hardened in round 2 with the ownership-token check and mtime-fallback staleness) and item 3
+  (`allowedActions` accuracy) are real, tested code changes; item 2 (epoch-file AND lock-file
+  deletion, widened in round 2) is an accepted-risk decision, documented in "## Decisions" +
+  "## Decisions addendum" above. Independent round-2 review verdict: CONCERNS (not REFUTED) — the
+  core fix confirmed genuinely correct; 3 real, non-blocking findings all fixed by the orchestrating
+  session before landing. Landed by the orchestrating session.
   Landing on master is NOT yet done — left for the orchestrating session's independent adversarial
   review, per this task's own convention (status intentionally left `todo`, not set to `done` by
   the implementing agent).

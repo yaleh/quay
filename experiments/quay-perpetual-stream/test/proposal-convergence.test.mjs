@@ -2607,4 +2607,80 @@ fixture proposal text v1
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // Round-2 review finding: a CORRUPT (unparseable JSON) lock file made `existing` null forever,
+  // so the age computed from `existing.acquiredAtMs` was always null and the 30s staleness reclaim
+  // path could NEVER fire — a permanent block, not the bounded-then-reclaimed behavior the
+  // mechanism claims. Fixed by falling back to the lock FILE's own mtime (content-independent)
+  // when the JSON content can't be parsed. This test plants a genuinely corrupt (not just
+  // stale-but-valid) lock file and confirms it is still reclaimed after the staleness window.
+  test("--new-epoch/--override-budget: a CORRUPT (unparseable) lock file older than EPOCH_LOCK_STALE_MS is reclaimed via its own file mtime, not permanently blocked", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+      const lockFile = path.join(dir, ".quay", "prepare-epochs", `${taskId}.lock`);
+      fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+      // Genuinely corrupt content — not valid JSON at all, unlike the stale-holder test above
+      // (which plants well-formed JSON with an old timestamp). `existing.acquiredAtMs` can never be
+      // read from this; only the file's own mtime can establish its age.
+      fs.writeFileSync(lockFile, "{not valid json at all, no acquiredAtMs field to read", { flag: "wx" });
+      // Backdate the file's own mtime past the staleness window (utimesSync sets both atime/mtime).
+      const oldTime = new Date(Date.now() - 5 * 60 * 1000);
+      fs.utimesSync(lockFile, oldTime, oldTime);
+
+      const out = JSON.parse(runNewEpoch(dir, taskId, charterFile, { reason: "reclaim-after-corrupt-lock", owner: "rescuer", confirmUnchangedScope: true }).stdout.trim());
+      assert.equal(out.ok, true, `a corrupt-but-old lock must be reclaimed via file mtime, never a permanent deadlock: ${JSON.stringify(out)}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Round-2 review finding: the original concurrency regression test only caught a fully-disabled
+  // lock ~57% of the time (4/7 runs) on a real machine — natural OS-scheduling variance doesn't
+  // reliably force two concurrent critical sections to overlap, so a future accidental breakage of
+  // the lock has a real chance of silently passing CI. Fixed by using the test-only
+  // QUAY_EPOCH_LOCK_TEST_HOLD_MS env var (read only by `_acquireEpochLock`, never in production
+  // code) to force a real, deterministic overlap window between two concurrent callers, then
+  // asserting the SECOND caller is genuinely blocked until the first releases (rather than both
+  // proceeding concurrently) — a direct, deterministic proof the lock's mutual exclusion is real,
+  // not a statistical inference from a race that might not manifest on a given run.
+  test("REGRESSION (deterministic): with an artificially widened critical section (QUAY_EPOCH_LOCK_TEST_HOLD_MS), a second concurrent --new-epoch call is genuinely blocked until the first releases the lock — proves real mutual exclusion, not scheduling luck", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+
+      // Must fit comfortably within EPOCH_LOCK_RETRY_DELAYS_MS's total retry budget (~1.26s) minus
+      // the head start below, or the waiter legitimately exhausts its retries first (a correct
+      // fail-closed outcome under real contention, but not what THIS test wants to demonstrate).
+      const HOLD_MS = 500;
+      const args = [CONVERGENCE_SCRIPT, "--new-epoch", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile, "--reason", "holder", "--owner", "A", "--confirmUnchangedScope", "true"];
+      const holderStart = Date.now();
+      const holderProc = spawn(process.execPath, ["--no-warnings", "--experimental-strip-types", ...args], {
+        cwd: REPO_ROOT,
+        env: { ...process.env, QUAY_EPOCH_LOCK_TEST_HOLD_MS: String(HOLD_MS) },
+      });
+      // Give the holder a real head start to actually acquire the lock before the second call fires.
+      const sab = new Int32Array(new SharedArrayBuffer(4));
+      Atomics.wait(sab, 0, 0, 150);
+
+      const secondStart = Date.now();
+      const secondOut = JSON.parse(runNewEpoch(dir, taskId, charterFile, { reason: "waiter", owner: "B", confirmUnchangedScope: true }).stdout.trim());
+      const secondElapsedMs = Date.now() - secondStart;
+
+      holderProc.kill(); // best-effort cleanup; the holder should already be finishing by now
+      const holderElapsedMs = Date.now() - holderStart;
+
+      assert.equal(secondOut.ok, true, `the second call must eventually succeed once the lock is released: ${JSON.stringify(secondOut)}`);
+      // The decisive assertion: the second call must have taken meaningfully longer than an
+      // uncontended call would (a few ms) — proving it genuinely waited out the first call's real
+      // held critical section rather than proceeding concurrently. A generous floor (200ms) avoids
+      // false failures from scheduling jitter while still being far above what a no-op/broken lock
+      // would produce (an uncontended --new-epoch call completes in well under 100ms).
+      assert.ok(secondElapsedMs >= 200, `the second call returned in ${secondElapsedMs}ms — too fast to have genuinely waited for the first call's ${HOLD_MS}ms held lock (holder total: ${holderElapsedMs}ms); mutual exclusion is not real`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
