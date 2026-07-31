@@ -15,6 +15,8 @@ import {
   checkSplitRecommendation, budgetStatus, nextAction, hashLedger,
   validateConvergenceCounters, computeConvergenceMetrics, isValidDisposition,
   decideResumeGeneration, PHASE_RANK, CACHEABLE_TERMINALS, RESUMABLE_PHASES, RESUME_POLICY_VERSION,
+  checkpointPath, buildReviewCheckpoint, validateReviewCheckpoint, classifyProposalDiff, noveltyScan,
+  CHECKPOINT_SCHEMA_VERSION,
 } from "../scripts/proposal-convergence.ts";
 import { PREFLIGHT_POLICY_VERSION } from "../scripts/prepare-admission-check.ts";
 
@@ -1320,5 +1322,537 @@ describe("M207: phase timing + finding-recurrence receiver extensions", () => {
     const src = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "proposal-convergence.ts"), "utf8");
     const occurrences = [...src.matchAll(/validateTelemetryRecord\(/g)];
     assert.equal(occurrences.length, 2, "exactly one definition + the ONE live call inside _decideResumeCli's reuse-terminal branch — widening REQUIRED_TOP is forward-only-safe");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── gap-prepare-milestone-cross-generation-review-state-reset: cross-generation ProposalReview
+// checkpoint — pure-function coverage + CLI fixtures. DIR-125 bounds convergence WITHIN one
+// generation; this closes the gap where a fresh generation always restarted ProposalReview from an
+// empty ledger even after a trivial human repair (the real DIR-126-D incident: nine full
+// ProposalReview generations after small, targeted task edits).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+describe("buildReviewCheckpoint / checkpointPath", () => {
+  test("checkpointPath: lives under .quay/prepare-checkpoints/, reuses the SAME taskId sanitizer as the lease path family", () => {
+    const p = checkpointPath("/ws", "DIR-126-D");
+    assert.equal(p, path.join("/ws", ".quay", "prepare-checkpoints", "DIR-126-D.json"));
+    const traversal = checkpointPath("/ws", "a/b\\c");
+    assert.equal(traversal, path.join("/ws", ".quay", "prepare-checkpoints", "a_b_c.json"), "path separators sanitized, matching _safeTaskIdSegment's own contract");
+  });
+
+  test("buildReviewCheckpoint: every declared field is materialized even when the caller omits it — no dropped keys", () => {
+    const rec = buildReviewCheckpoint({});
+    assert.equal(rec.schemaVersion, CHECKPOINT_SCHEMA_VERSION);
+    assert.equal(rec.taskId, null);
+    assert.equal(rec.charterHash, null);
+    assert.equal(rec.scopeHash, null);
+    assert.equal(rec.reviewPolicyHash, null);
+    assert.equal(rec.reviewedProposalHash, null);
+    assert.equal(rec.reviewedProposalText, "");
+    assert.deepEqual(rec.ledger, []);
+    assert.equal(rec.mechanismInventoryHash, null);
+    assert.equal(rec.mechanismInventoryCount, null);
+    assert.deepEqual(rec.counters, { fullReviews: 0, deltaRounds: 0 });
+    assert.deepEqual(rec.terminal, { reason: null, outcome: null, timestamp: null });
+    assert.deepEqual(rec.lastFullReviewSession, { sessionId: null, timestamp: null });
+    assert.equal(rec.recordedAtMs, null);
+  });
+
+  test("buildReviewCheckpoint: real values pass through unchanged", () => {
+    const rec = buildReviewCheckpoint({
+      taskId: "T1", charterHash: "ch", scopeHash: "sh", reviewPolicyHash: "rp",
+      reviewedProposalHash: "ph", reviewedProposalText: "the proposal text",
+      ledger: [{ id: "f1" }], mechanismInventoryHash: "mi", mechanismInventoryCount: 2,
+      counters: { fullReviews: 1, deltaRounds: 2 },
+      terminal: { reason: "zero-finding", outcome: "prepared-pending", timestamp: 1000 },
+      lastFullReviewSession: { sessionId: "sess-1", timestamp: 900 },
+      recordedAtMs: 1500,
+    });
+    assert.equal(rec.taskId, "T1");
+    assert.equal(rec.reviewedProposalText, "the proposal text");
+    assert.deepEqual(rec.ledger, [{ id: "f1" }]);
+    assert.deepEqual(rec.counters, { fullReviews: 1, deltaRounds: 2 });
+    assert.equal(rec.terminal.reason, "zero-finding");
+    assert.equal(rec.lastFullReviewSession.sessionId, "sess-1");
+  });
+});
+
+describe("validateReviewCheckpoint — fail-closed typed reason codes (AC #2)", () => {
+  const IDENTITY = { taskId: "T1", charterHash: "ch", scopeHash: "sh", reviewPolicyHash: "rp" };
+  function validRecord(overrides = {}) {
+    return buildReviewCheckpoint({ ...IDENTITY, reviewedProposalHash: "ph", reviewedProposalText: "text", ledger: [], counters: { fullReviews: 1, deltaRounds: 0 }, ...overrides });
+  }
+
+  test("missing checkpoint (null record) -> checkpoint-missing", () => {
+    const out = validateReviewCheckpoint(null, IDENTITY);
+    assert.equal(out.ok, false);
+    assert.equal(out.code, "checkpoint-missing");
+  });
+
+  test("corrupt shape (not an object) -> checkpoint-corrupt", () => {
+    assert.equal(validateReviewCheckpoint("not an object", IDENTITY).code, "checkpoint-corrupt");
+    assert.equal(validateReviewCheckpoint([1, 2, 3], IDENTITY).code, "checkpoint-corrupt");
+    assert.equal(validateReviewCheckpoint(42, IDENTITY).code, "checkpoint-corrupt");
+  });
+
+  test("corrupt shape (missing required field) -> checkpoint-corrupt", () => {
+    const rec = validRecord();
+    delete rec.counters;
+    assert.equal(validateReviewCheckpoint(rec, IDENTITY).code, "checkpoint-corrupt");
+  });
+
+  test("corrupt shape (ledger not an array) -> checkpoint-corrupt", () => {
+    const rec = validRecord();
+    rec.ledger = "not-an-array";
+    assert.equal(validateReviewCheckpoint(rec, IDENTITY).code, "checkpoint-corrupt");
+  });
+
+  test("corrupt shape (counters malformed) -> checkpoint-corrupt", () => {
+    const rec = validRecord();
+    rec.counters = { fullReviews: "one", deltaRounds: 0 };
+    assert.equal(validateReviewCheckpoint(rec, IDENTITY).code, "checkpoint-corrupt");
+  });
+
+  test("cross-task checkpoint (taskId mismatch) -> checkpoint-wrong-task", () => {
+    const rec = validRecord();
+    const out = validateReviewCheckpoint(rec, { ...IDENTITY, taskId: "OTHER-TASK" });
+    assert.equal(out.ok, false);
+    assert.equal(out.code, "checkpoint-wrong-task");
+  });
+
+  test("wrong-charter checkpoint (charterHash mismatch) -> checkpoint-charter-mismatch", () => {
+    const rec = validRecord();
+    const out = validateReviewCheckpoint(rec, { ...IDENTITY, charterHash: "ch-CHANGED" });
+    assert.equal(out.ok, false);
+    assert.equal(out.code, "checkpoint-charter-mismatch");
+  });
+
+  test("scope mismatch (scopeHash mismatch) -> checkpoint-scope-mismatch", () => {
+    const rec = validRecord();
+    const out = validateReviewCheckpoint(rec, { ...IDENTITY, scopeHash: "sh-CHANGED" });
+    assert.equal(out.ok, false);
+    assert.equal(out.code, "checkpoint-scope-mismatch");
+  });
+
+  test("stale-policy checkpoint (reviewPolicyHash mismatch) -> checkpoint-stale-policy", () => {
+    const rec = validRecord();
+    const out = validateReviewCheckpoint(rec, { ...IDENTITY, reviewPolicyHash: "rp-CHANGED" });
+    assert.equal(out.ok, false);
+    assert.equal(out.code, "checkpoint-stale-policy");
+  });
+
+  test("a well-formed, matching checkpoint passes -> checkpoint-valid", () => {
+    const rec = validRecord();
+    const out = validateReviewCheckpoint(rec, IDENTITY);
+    assert.equal(out.ok, true);
+    assert.equal(out.code, "checkpoint-valid");
+  });
+
+  test("never silently accepted: EVERY corruption class above returns ok:false with a DISTINCT typed code, never a generic boolean", () => {
+    const codes = new Set();
+    codes.add(validateReviewCheckpoint(null, IDENTITY).code);
+    const badShape = validRecord(); delete badShape.counters;
+    codes.add(validateReviewCheckpoint(badShape, IDENTITY).code);
+    codes.add(validateReviewCheckpoint(validRecord(), { ...IDENTITY, taskId: "X" }).code);
+    codes.add(validateReviewCheckpoint(validRecord(), { ...IDENTITY, charterHash: "X" }).code);
+    codes.add(validateReviewCheckpoint(validRecord(), { ...IDENTITY, scopeHash: "X" }).code);
+    codes.add(validateReviewCheckpoint(validRecord(), { ...IDENTITY, reviewPolicyHash: "X" }).code);
+    assert.equal(codes.size, 6, `expected 6 distinct reason codes, got: ${[...codes].join(", ")}`);
+  });
+});
+
+describe("noveltyScan / classifyProposalDiff — mechanical diff classification (Requested-action item 3, AC #6)", () => {
+  test("noveltyScan: a claim present in both old and new text is NOT novel", () => {
+    const out = noveltyScan({
+      oldProposalText: "The scheduler invokes `foo.ts` and `bar.ts` to enforce ordering.",
+      newProposalText: "The scheduler invokes `foo.ts` and `bar.ts` to enforce ordering (reworded).",
+    });
+    assert.equal(out.hasNovelClaim, false);
+    assert.equal(out.novelClaims.length, 0);
+  });
+
+  test("noveltyScan: a claim naming a NEW identifier pair is novel", () => {
+    const out = noveltyScan({
+      oldProposalText: "The scheduler invokes `foo.ts` and `bar.ts` to enforce ordering.",
+      newProposalText: "The scheduler invokes `foo.ts` and `bar.ts` to enforce ordering. It also dispatches `baz.ts` and `qux.ts` to route retries.",
+    });
+    assert.equal(out.hasNovelClaim, true);
+    assert.equal(out.novelClaims.length, 1);
+  });
+
+  test("classifyProposalDiff: identical text after whitespace/case normalization -> wording-only", () => {
+    const out = classifyProposalDiff({ oldProposalText: "Hello   World.\n\n", newProposalText: "hello world.", ledger: [] });
+    assert.equal(out.classification, "wording-only");
+    assert.equal(out.code, "no-textual-difference");
+  });
+
+  test("classifyProposalDiff: a genuinely new mechanism claim -> new-claim", () => {
+    const out = classifyProposalDiff({
+      oldProposalText: "The system does X.",
+      newProposalText: "The system does X. It also invokes `newmod.ts` and `other.ts` to enforce Z.",
+      ledger: [],
+    });
+    assert.equal(out.classification, "new-claim");
+    assert.equal(out.noveltyScan.hasNovelClaim, true);
+  });
+
+  test("classifyProposalDiff: a new backtick file-path identifier with no wiring claim -> touch-set-change", () => {
+    const out = classifyProposalDiff({
+      oldProposalText: "The system does X.",
+      newProposalText: "The system does X, implemented in `new-module.ts`.",
+      ledger: [],
+    });
+    assert.equal(out.classification, "touch-set-change");
+  });
+
+  test("classifyProposalDiff: an added sentence overlapping a known ledger finding's own identity -> known-finding-repair", () => {
+    const out = classifyProposalDiff({
+      oldProposalText: "The retry logic has a known race condition under load.",
+      newProposalText: "The retry logic has a known race condition under load. Fixed: the retry now uses a bounded exponential backoff to close the race.",
+      ledger: [{ claimRef: "retry-race", summary: "retry logic race condition bounded backoff", evidence: "" }],
+    });
+    assert.equal(out.classification, "known-finding-repair");
+  });
+
+  test("classifyProposalDiff: a wiring claim present in the OLD text is now GONE, unexplained by any ledger finding -> mechanism-change", () => {
+    const out = classifyProposalDiff({
+      oldProposalText: "The system invokes `core.ts` and `bridge.ts` to route events.",
+      newProposalText: "The system no longer routes events that way.",
+      ledger: [],
+    });
+    assert.equal(out.classification, "mechanism-change");
+    assert.equal(out.code, "mechanism-claim-removed-unexplained");
+  });
+
+  test("classifyProposalDiff: a removed claim EXPLAINED by a ledger finding's own identity is not mis-classified as mechanism-change", () => {
+    const out = classifyProposalDiff({
+      oldProposalText: "The system incorrectly invokes `legacy.ts` and `oldpath.ts` to route events.",
+      newProposalText: "The system no longer routes events through the legacy path.",
+      ledger: [{ claimRef: "legacy.ts", summary: "incorrect legacy.ts oldpath.ts routing removed", evidence: "legacy.ts oldpath.ts" }],
+    });
+    assert.notEqual(out.classification, "mechanism-change");
+  });
+
+  test("classifyProposalDiff: pure rewording with no new claims/paths/removals -> wording-only", () => {
+    const out = classifyProposalDiff({
+      oldProposalText: "This module handles retries carefully.",
+      newProposalText: "This module handles retries very carefully indeed.",
+      ledger: [],
+    });
+    assert.equal(out.classification, "wording-only");
+  });
+
+  // gap-prepare-milestone-cross-generation-review-state-reset (round 2, post-REFUTATION): these two
+  // tests document a REAL, KNOWN limitation an independent review found — claim identity here is
+  // keyed only on the sorted set of backtick identifiers, so a same-identifiers edit that WEAKENS an
+  // existing claim's behavior, or a full removal "explained away" by an unrelated ledger finding
+  // that merely mentions the same identifier strings, both still classify wording-only. This is NOT
+  // fixed at the classifier level (a perfect free-text classifier is not a tractable goal — see this
+  // same session's 3-round preflightMergedMarkdownClaims history for why chasing perfect heuristic
+  // classification is a trap). It is fixed STRUCTURALLY one layer up: prepare-milestone.js's
+  // ProposalReview loop now ALWAYS dispatches at least one real independent delta reviewer for cross-
+  // generation continuation, regardless of this classifier's output or the carried ledger's content
+  // — see prepare-milestone.js's own "while (true)" loop header comment and
+  // plugin/test/prepare-milestone-convergence.test.mjs's "REFUTATION regression" test for the
+  // structural mitigation. These two tests exist so a future reader does not mistake silence here
+  // for the defect being closed at this layer — it is closed one layer up, on purpose.
+  test("classifyProposalDiff KNOWN LIMITATION (Exploit A, REFUTATION 2026-07-31): weakening an existing claim's behavior while keeping the same identifiers still classifies wording-only -- mitigated structurally in prepare-milestone.js, not here", () => {
+    const out = classifyProposalDiff({
+      oldProposalText: "The gate engine enforces `fail-closed` behavior in `gate.js` on every dispatch: any check error rejects the transition.",
+      newProposalText: "The gate engine enforces `fail-closed` behavior in `gate.js` on most dispatches: a check error normally rejects the transition, but a config-load error is treated as a pass-through to avoid blocking the pipeline.",
+      ledger: [],
+    });
+    assert.equal(out.classification, "wording-only", "documents the known limitation — same identifier set, weakened semantics, not detected at this layer");
+  });
+
+  test("classifyProposalDiff KNOWN LIMITATION (Exploit B, REFUTATION 2026-07-31): a claim removed entirely, explained away by an unrelated ledger finding that merely co-occurs on identifier text, misclassifies wording-only instead of mechanism-change -- mitigated structurally in prepare-milestone.js, not here", () => {
+    const withUnrelatedLedger = classifyProposalDiff({
+      oldProposalText: "`gate.js` invokes `validateInput` before every `task_write` to enforce schema constraints.",
+      newProposalText: "Schema constraints are now assumed to hold by convention.",
+      ledger: [{ id: "nit001", disposition: "backlog", summary: "prefer consistent casing across gate.js, validateInput, and task_write call sites (style only)" }],
+    });
+    assert.equal(withUnrelatedLedger.classification, "wording-only", "documents the known limitation — an unrelated ledger entry that merely mentions the same identifier strings incorrectly 'explains' a real claim removal");
+    // Control: the SAME removal with an EMPTY ledger correctly classifies mechanism-change — proves
+    // the misclassification above is specifically caused by incidental ledger text co-occurrence,
+    // not a blanket failure to detect removal.
+    const withEmptyLedger = classifyProposalDiff({
+      oldProposalText: "`gate.js` invokes `validateInput` before every `task_write` to enforce schema constraints.",
+      newProposalText: "Schema constraints are now assumed to hold by convention.",
+      ledger: [],
+    });
+    assert.equal(withEmptyLedger.classification, "mechanism-change", "control: the same removal with no unrelated ledger noise IS correctly detected");
+  });
+});
+
+describe("CLI: --resolve-checkpoint / --write-checkpoint", () => {
+  const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
+  const CONVERGENCE_SCRIPT = path.join(REPO_ROOT, "experiments", "quay-perpetual-stream", "scripts", "proposal-convergence.ts");
+  const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "checkpoint-cli-fixtures-"));
+
+  function fixtureTaskBody(proposalText) {
+    return `---
+id: CKPT-CLI-FIXTURE
+title: fixture task for checkpoint CLI fixtures
+status: todo
+---
+## Proposal
+
+${proposalText}
+
+## Acceptance Criteria
+
+- [ ] fixture AC item
+
+## Definition of Done
+
+- [ ] fixture DoD item
+
+## Touches
+
+- fixture.ts
+`;
+  }
+
+  function makeCliScratch(taskId, proposalText = "fixture proposal v1") {
+    const dir = fs.mkdtempSync(path.join(FIXTURES_DIR, "cli-scratch-"));
+    fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tasks", `${taskId}.md`), fixtureTaskBody(proposalText));
+    const charterFile = path.join(dir, "charter.md");
+    fs.writeFileSync(charterFile, "fixture charter v1\n");
+    return { dir, charterFile };
+  }
+
+  function runNode(args) {
+    try {
+      const stdout = execFileSync("node", ["--no-warnings", "--experimental-strip-types", ...args], { encoding: "utf8" });
+      return { status: 0, stdout };
+    } catch (e) {
+      return { status: typeof e.status === "number" ? e.status : 1, stdout: e.stdout ? e.stdout.toString() : "" };
+    }
+  }
+
+  function runResolve(dir, taskId, charterFile) {
+    return runNode([CONVERGENCE_SCRIPT, "--resolve-checkpoint", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile]);
+  }
+  function runWrite(dir, taskId, charterFile, input, { reason = "zero-finding", outcome = "prepared-pending" } = {}) {
+    const inputFile = path.join(dir, `checkpoint-input-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    fs.writeFileSync(inputFile, JSON.stringify(input));
+    return runNode([CONVERGENCE_SCRIPT, "--write-checkpoint", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+      "--checkpointInputFile", inputFile, "--reason", reason, "--outcome", outcome]);
+  }
+
+  test("--resolve-checkpoint: no checkpoint on disk -> usable:false, checkpoint-missing", () => {
+    const taskId = "CKPT-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const res = runResolve(dir, taskId, charterFile);
+      assert.equal(res.status, 0);
+      const out = JSON.parse(res.stdout.trim());
+      assert.equal(out.usable, false);
+      assert.equal(out.code, "checkpoint-missing");
+      assert.ok(out.hashes && out.hashes.charterHash, "hashes are still reported even on a miss");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--write-checkpoint then --resolve-checkpoint (unchanged Proposal) -> checkpoint-proposal-unchanged, never falsely 'usable'", () => {
+    const taskId = "CKPT-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId, "unchanged proposal text");
+    try {
+      const w = runWrite(dir, taskId, charterFile, { ledger: [], fullReviewsThisGen: 1, deltaRoundsThisGen: 0 });
+      assert.equal(w.status, 0, w.stdout);
+      assert.equal(JSON.parse(w.stdout.trim()).ok, true);
+      const res = runResolve(dir, taskId, charterFile);
+      const out = JSON.parse(res.stdout.trim());
+      assert.equal(out.usable, false);
+      assert.equal(out.code, "checkpoint-proposal-unchanged");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--write-checkpoint then edit the Proposal (wording-only) then --resolve-checkpoint -> usable:true, classification wording-only, ledger carried forward", () => {
+    const taskId = "CKPT-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId, "the retry module handles failures.");
+    try {
+      const ledger = [{ id: "f1", subsystem: "s1", summary: "a finding", blocking: true, status: "open" }];
+      const w = runWrite(dir, taskId, charterFile, { ledger, mechanismInventoryHash: "mi-1", mechanismInventoryCount: 1, fullReviewsThisGen: 1, deltaRoundsThisGen: 0, lastFullReviewSessionId: "sess-full-1", lastFullReviewTimestamp: 1000 });
+      assert.equal(w.status, 0, w.stdout);
+
+      const taskFile = path.join(dir, "tasks", `${taskId}.md`);
+      fs.writeFileSync(taskFile, fixtureTaskBody("the retry module handles failures gracefully now."));
+
+      const res = runResolve(dir, taskId, charterFile);
+      const out = JSON.parse(res.stdout.trim());
+      assert.equal(out.usable, true, JSON.stringify(out));
+      assert.equal(out.classification, "wording-only");
+      assert.deepEqual(out.ledger, ledger, "the prior ledger is carried forward VERBATIM");
+      assert.equal(out.mechanismInventoryHash, "mi-1");
+      assert.equal(out.lastFullReviewSession.sessionId, "sess-full-1");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("corrupt checkpoint file on disk -> --resolve-checkpoint fails closed to checkpoint-corrupt", () => {
+    const taskId = "CKPT-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const w = runWrite(dir, taskId, charterFile, { ledger: [], fullReviewsThisGen: 1, deltaRoundsThisGen: 0 });
+      const ckptFile = JSON.parse(w.stdout.trim()).checkpointFile;
+      fs.writeFileSync(ckptFile, "{ not valid json");
+      const res = runResolve(dir, taskId, charterFile);
+      assert.equal(JSON.parse(res.stdout.trim()).code, "checkpoint-corrupt");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("cross-task checkpoint (record.taskId tampered) -> checkpoint-wrong-task", () => {
+    const taskId = "CKPT-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const w = runWrite(dir, taskId, charterFile, { ledger: [], fullReviewsThisGen: 1, deltaRoundsThisGen: 0 });
+      const ckptFile = JSON.parse(w.stdout.trim()).checkpointFile;
+      const rec = JSON.parse(fs.readFileSync(ckptFile, "utf8"));
+      rec.taskId = "SOME-OTHER-TASK";
+      fs.writeFileSync(ckptFile, JSON.stringify(rec));
+      const taskFileForEdit = path.join(dir, "tasks", `${taskId}.md`);
+      fs.writeFileSync(taskFileForEdit, fixtureTaskBody("edited proposal text"));
+      const res = runResolve(dir, taskId, charterFile);
+      assert.equal(JSON.parse(res.stdout.trim()).code, "checkpoint-wrong-task");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("stale-policy checkpoint (record.reviewPolicyHash tampered) -> checkpoint-stale-policy", () => {
+    const taskId = "CKPT-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const w = runWrite(dir, taskId, charterFile, { ledger: [], fullReviewsThisGen: 1, deltaRoundsThisGen: 0 });
+      const ckptFile = JSON.parse(w.stdout.trim()).checkpointFile;
+      const rec = JSON.parse(fs.readFileSync(ckptFile, "utf8"));
+      rec.reviewPolicyHash = "stale-hash";
+      fs.writeFileSync(ckptFile, JSON.stringify(rec));
+      const taskFileForEdit = path.join(dir, "tasks", `${taskId}.md`);
+      fs.writeFileSync(taskFileForEdit, fixtureTaskBody("edited proposal text"));
+      const res = runResolve(dir, taskId, charterFile);
+      assert.equal(JSON.parse(res.stdout.trim()).code, "checkpoint-stale-policy");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("wrong-charter checkpoint (the charter FILE itself changed) -> checkpoint-charter-mismatch", () => {
+    const taskId = "CKPT-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const w = runWrite(dir, taskId, charterFile, { ledger: [], fullReviewsThisGen: 1, deltaRoundsThisGen: 0 });
+      assert.equal(w.status, 0, w.stdout);
+      fs.writeFileSync(charterFile, "fixture charter v2 — CHANGED\n");
+      const taskFileForEdit = path.join(dir, "tasks", `${taskId}.md`);
+      fs.writeFileSync(taskFileForEdit, fixtureTaskBody("edited proposal text"));
+      const res = runResolve(dir, taskId, charterFile);
+      assert.equal(JSON.parse(res.stdout.trim()).code, "checkpoint-charter-mismatch");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("scope-mismatch checkpoint (task's own Touches section changed) -> checkpoint-scope-mismatch", () => {
+    const taskId = "CKPT-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const w = runWrite(dir, taskId, charterFile, { ledger: [], fullReviewsThisGen: 1, deltaRoundsThisGen: 0 });
+      assert.equal(w.status, 0, w.stdout);
+      const taskFile = path.join(dir, "tasks", `${taskId}.md`);
+      const body = fs.readFileSync(taskFile, "utf8");
+      fs.writeFileSync(taskFile, body.replace("- fixture.ts", "- fixture.ts\n- new-touch-target.ts"));
+      const res = runResolve(dir, taskId, charterFile);
+      assert.equal(JSON.parse(res.stdout.trim()).code, "checkpoint-scope-mismatch");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("EVERY fail-closed verdict above dispatches zero delta reviewers from untrusted state — usable is ALWAYS false for a corrupt/mismatched checkpoint (AC #2, mechanical corroboration)", () => {
+    const taskId = "CKPT-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      // No checkpoint at all.
+      assert.equal(JSON.parse(runResolve(dir, taskId, charterFile).stdout.trim()).usable, false);
+      // A checkpoint that exists but is unparseable.
+      const w = runWrite(dir, taskId, charterFile, { ledger: [], fullReviewsThisGen: 1, deltaRoundsThisGen: 0 });
+      const ckptFile = JSON.parse(w.stdout.trim()).checkpointFile;
+      fs.writeFileSync(ckptFile, "not json at all");
+      assert.equal(JSON.parse(runResolve(dir, taskId, charterFile).stdout.trim()).usable, false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("epoch-cumulative counters accumulate across two --write-checkpoint calls in the SAME (charterHash, scopeHash, reviewPolicyHash) epoch, reset to local counts when the epoch key changes", () => {
+    const taskId = "CKPT-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId, "v1");
+    try {
+      const w1 = runWrite(dir, taskId, charterFile, { ledger: [], fullReviewsThisGen: 1, deltaRoundsThisGen: 1 });
+      const out1 = JSON.parse(w1.stdout.trim());
+      assert.deepEqual(out1.counters, { fullReviews: 1, deltaRounds: 1 });
+      assert.equal(out1.epochReset, true, "no prior checkpoint -> a fresh epoch");
+
+      const taskFile = path.join(dir, "tasks", `${taskId}.md`);
+      fs.writeFileSync(taskFile, fixtureTaskBody("v2 — wording tweak"));
+      const w2 = runWrite(dir, taskId, charterFile, { ledger: [], fullReviewsThisGen: 0, deltaRoundsThisGen: 1 });
+      const out2 = JSON.parse(w2.stdout.trim());
+      assert.deepEqual(out2.counters, { fullReviews: 1, deltaRounds: 2 }, "same epoch (charter/scope/policy unchanged) -> counters ACCUMULATE");
+      assert.equal(out2.epochReset, false);
+
+      // Now change the charter (a real scope-bearing epoch boundary) — counters must reset to this
+      // generation's own local counts, never keep accumulating onto the stale epoch's total.
+      fs.writeFileSync(charterFile, "fixture charter v2 — CHANGED\n");
+      const w3 = runWrite(dir, taskId, charterFile, { ledger: [], fullReviewsThisGen: 1, deltaRoundsThisGen: 0 });
+      const out3 = JSON.parse(w3.stdout.trim());
+      assert.deepEqual(out3.counters, { fullReviews: 1, deltaRounds: 0 }, "a new epoch (charter changed) resets counters to this generation's own local counts");
+      assert.equal(out3.epochReset, true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--write-checkpoint re-reads the Proposal FRESH (as-of-terminal), never a stale value captured at some earlier point", () => {
+    const taskId = "CKPT-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId, "original text");
+    try {
+      const taskFile = path.join(dir, "tasks", `${taskId}.md`);
+      fs.writeFileSync(taskFile, fixtureTaskBody("text as of the actual terminal"));
+      const w = runWrite(dir, taskId, charterFile, { ledger: [], fullReviewsThisGen: 1, deltaRoundsThisGen: 0 });
+      const ckptFile = JSON.parse(w.stdout.trim()).checkpointFile;
+      const rec = JSON.parse(fs.readFileSync(ckptFile, "utf8"));
+      assert.equal(rec.reviewedProposalText.trim(), "text as of the actual terminal");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("AC14/R8-style: importing proposal-convergence.ts fires zero fs/argv side effects from the checkpoint additions either — no CLI executes on import", () => {
+    const scratch = fs.mkdtempSync(path.join(FIXTURES_DIR, "import-"));
+    const harness = path.join(scratch, "harness.mjs");
+    const modUrl = JSON.stringify(`file://${CONVERGENCE_SCRIPT}`);
+    fs.writeFileSync(harness, `
+import { validateReviewCheckpoint, classifyProposalDiff, noveltyScan, checkpointPath } from ${modUrl};
+console.log(JSON.stringify({ ok: true, hasValidate: typeof validateReviewCheckpoint === "function", hasClassify: typeof classifyProposalDiff === "function" }));
+`);
+    try {
+      const out = execFileSync("node", ["--no-warnings", "--experimental-strip-types", harness], { encoding: "utf8" });
+      const parsed = JSON.parse(out.trim());
+      assert.equal(parsed.ok, true);
+      assert.equal(parsed.hasValidate, true);
+      assert.equal(parsed.hasClassify, true);
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });

@@ -25,6 +25,12 @@ import path from "node:path";
 import { isDirectEntry, parseArgs } from "./gate-script-base.ts";
 import { extractSection, countBoxes } from "./task-schema.ts";
 import { PREFLIGHT_POLICY_VERSION, releaseLease, _readLeaseFileWithRetry } from "./prepare-admission-check.ts";
+// gap-prepare-milestone-cross-generation-review-state-reset: the novelty scan (AC #6) reuses
+// wiring-coverage-check.ts's REAL claim-extraction machinery verbatim — never a second,
+// independently-buggy implementation of "what counts as a mechanism claim" (the same DIR-122
+// no-second-implementation discipline the ProposalReview phase's own wiring-coverage-check dispatch
+// already follows).
+import { extractMechanismClaims, splitSentences } from "./wiring-coverage-check.ts";
 
 export function sha256(text) {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
@@ -1246,9 +1252,384 @@ export function _decideSplitCli({ taskId, workspace, charterFile }) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ── gap-prepare-milestone-cross-generation-review-state-reset — cross-generation ProposalReview
+// checkpoint. DIR-125 bounds convergence WITHIN one generation; DIR-126-C's resume skips
+// ProposalAuthors/Adjudicate but ProposalReview itself always restarted from an empty ledger and a
+// fresh full review — the real DIR-126-D incident burned nine full ProposalReview generations after
+// small, targeted task edits. This closes that gap: a durable per-task checkpoint
+// (`.quay/prepare-checkpoints/<safeTaskIdSegment>.json`, reusing this file's OWN existing
+// `_safeTaskIdSegment` — never a second sanitizer) carries the typed finding ledger, the
+// last-reviewed Proposal text, and cumulative epoch counters forward across generations. A later
+// attempt validates the checkpoint FAIL-CLOSED (identity/charter/scope/review-policy must all
+// match — any mismatch or corruption routes to a typed cold/full-review reason, never silently
+// accepted as a valid delta base), classifies the Proposal diff mechanically (never LLM
+// self-report — the novelty half hooks into wiring-coverage-check.ts's real
+// extractMechanismClaims/splitSentences, the SAME machinery the ProposalReview phase's own
+// wiring-coverage-check dispatch already uses), and — only for `wording-only`/
+// `known-finding-repair` diffs — lets prepare-milestone.js skip the full-review agent and dispatch
+// exactly one delta reviewer instead. Charter/scope/review-policy changes never reach the
+// classifier at all: they fail checkpoint validation first and always fall back to a full review.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+export const CHECKPOINT_SCHEMA_VERSION = 1;
+
+// checkpointPath — same directory FAMILY as prepare-leases (gitignored, per-workspace runtime
+// state), but its OWN subdirectory: a checkpoint is a cross-GENERATION artifact (survives a lease
+// being released/reacquired many times over), not a single-generation lease/telemetry record.
+export function checkpointPath(workspace, taskId) {
+  return path.join(workspace, ".quay", "prepare-checkpoints", `${_safeTaskIdSegment(taskId)}.json`);
+}
+
+// buildReviewCheckpoint — every field explicitly materialized (no-fabrication discipline matching
+// buildTelemetryRecord above): an omitted-but-required field becomes an explicit `null`/`[]`/`0`,
+// never a dropped key, so validateReviewCheckpoint's REQUIRED-field scan below can distinguish a
+// genuinely malformed record from this module's own honest "not applicable yet" value.
+export function buildReviewCheckpoint({
+  taskId, charterHash, scopeHash: scopeHashValue, reviewPolicyHash,
+  reviewedProposalHash, reviewedProposalText,
+  ledger, mechanismInventoryHash, mechanismInventoryCount,
+  counters, terminal, lastFullReviewSession, recordedAtMs,
+} = {}) {
+  return {
+    schemaVersion: CHECKPOINT_SCHEMA_VERSION,
+    taskId: taskId ?? null,
+    charterHash: charterHash ?? null,
+    scopeHash: scopeHashValue ?? null,
+    reviewPolicyHash: reviewPolicyHash ?? null,
+    reviewedProposalHash: reviewedProposalHash ?? null,
+    // The FULL text (not just its hash) is retained — a later attempt's diff classifier needs real
+    // content to compare against, and no other durable store retains generation-scoped Proposal
+    // text (receipts/telemetry never persist prose, per their own "never a second content source"
+    // discipline). Markdown Proposal sections are small (single-digit KB); this is a gitignored
+    // runtime artifact, never committed.
+    reviewedProposalText: reviewedProposalText ?? "",
+    ledger: Array.isArray(ledger) ? ledger : [],
+    mechanismInventoryHash: mechanismInventoryHash ?? null,
+    mechanismInventoryCount: Number.isFinite(mechanismInventoryCount) ? mechanismInventoryCount : null,
+    // Cumulative ACROSS the whole scope epoch (Requested-action item 5), never reset by a mere
+    // generation boundary — only a new epoch (charter/scope/review-policy change) resets these to
+    // this generation's own local counts. Accumulation happens in _writeCheckpointCli, not here —
+    // this builder just materializes whatever counters object the caller already computed.
+    counters: {
+      fullReviews: Number.isFinite(counters?.fullReviews) ? counters.fullReviews : 0,
+      deltaRounds: Number.isFinite(counters?.deltaRounds) ? counters.deltaRounds : 0,
+    },
+    terminal: {
+      reason: terminal?.reason ?? null,
+      outcome: terminal?.outcome ?? null,
+      timestamp: Number.isFinite(terminal?.timestamp) ? terminal.timestamp : null,
+    },
+    // The ORIGINAL full review's own provenance — carried forward unchanged across every subsequent
+    // delta-only generation in the same epoch (never overwritten unless a NEW full review actually
+    // ran this generation), so "which real session performed the one full semantic review of this
+    // epoch" stays answerable after ten delta-only generations.
+    lastFullReviewSession: {
+      sessionId: lastFullReviewSession?.sessionId ?? null,
+      timestamp: Number.isFinite(lastFullReviewSession?.timestamp) ? lastFullReviewSession.timestamp : null,
+    },
+    recordedAtMs: Number.isFinite(recordedAtMs) ? recordedAtMs : null,
+  };
+}
+
+const _CHECKPOINT_REQUIRED_TOP = [
+  "schemaVersion", "taskId", "charterHash", "scopeHash", "reviewPolicyHash",
+  "reviewedProposalHash", "reviewedProposalText", "ledger", "counters", "terminal", "lastFullReviewSession",
+];
+
+// validateReviewCheckpoint — the ONE fail-closed gate (Requested-action item 2): missing, malformed,
+// wrong-task, stale-charter/scope/policy state ALL route to a typed, DISTINCT reason code — never a
+// generic "false" a caller could mistake for "just try a fresh full review for some other reason".
+// Pure: no fs, no exceptions on well-formed-but-mismatched input (a caller passing a non-object
+// still gets a typed result, never a thrown TypeError).
+export function validateReviewCheckpoint(record, { taskId, charterHash, scopeHash: scopeHashValue, reviewPolicyHash } = {}) {
+  if (!record) {
+    return { ok: false, code: "checkpoint-missing", message: "no checkpoint record on file for this task" };
+  }
+  if (typeof record !== "object" || Array.isArray(record)) {
+    return { ok: false, code: "checkpoint-corrupt", message: "checkpoint record is not a well-formed object" };
+  }
+  for (const k of _CHECKPOINT_REQUIRED_TOP) {
+    if (!(k in record)) {
+      return { ok: false, code: "checkpoint-corrupt", message: `checkpoint record is missing required field '${k}'` };
+    }
+  }
+  if (!Array.isArray(record.ledger)) {
+    return { ok: false, code: "checkpoint-corrupt", message: "checkpoint record's ledger is not an array" };
+  }
+  if (!record.counters || typeof record.counters !== "object" || !Number.isFinite(record.counters.fullReviews) || !Number.isFinite(record.counters.deltaRounds)) {
+    return { ok: false, code: "checkpoint-corrupt", message: "checkpoint record's counters block is malformed" };
+  }
+  if (typeof record.reviewedProposalText !== "string") {
+    return { ok: false, code: "checkpoint-corrupt", message: "checkpoint record's reviewedProposalText is not a string" };
+  }
+  if (record.taskId !== taskId) {
+    return { ok: false, code: "checkpoint-wrong-task", message: `checkpoint taskId (${JSON.stringify(record.taskId)}) does not match the current attempt's taskId (${JSON.stringify(taskId)})` };
+  }
+  if (record.charterHash !== charterHash) {
+    return { ok: false, code: "checkpoint-charter-mismatch", message: "checkpoint charterHash does not match the current charter — the milestone charter changed since this checkpoint was written" };
+  }
+  if (record.scopeHash !== scopeHashValue) {
+    return { ok: false, code: "checkpoint-scope-mismatch", message: "checkpoint scopeHash does not match the current task's AC-count/Touches scope — the scope changed since this checkpoint was written" };
+  }
+  if (record.reviewPolicyHash !== reviewPolicyHash) {
+    return { ok: false, code: "checkpoint-stale-policy", message: "checkpoint reviewPolicyHash does not match the current review-policy version" };
+  }
+  return { ok: true, code: "checkpoint-valid", message: "checkpoint is valid and matches the current attempt's identity/scope/policy" };
+}
+
+function _claimKey(claim) {
+  return [...claim.identifiers].sort().join("+");
+}
+
+// A backtick identifier is treated as a "touch-like" file-path reference when it contains a path
+// separator or a recognizable source-file extension — the SAME backtick-identifier convention
+// extractMechanismClaims already relies on for this repo's own authoring style.
+const _FILE_PATH_IDENT_RE = /^[\w.@+-]+(?:\/[\w.@+-]+)*\.(ts|tsx|js|jsx|mjs|cjs|md|json|ya?ml|sh)$/i;
+function _extractFilePathIdentifiers(text) {
+  const idents = new Set();
+  const re = /`([^`]+)`/g;
+  let m;
+  while ((m = re.exec(text || ""))) {
+    const id = m[1].trim();
+    if (_FILE_PATH_IDENT_RE.test(id) || id.includes("/")) idents.add(id);
+  }
+  return idents;
+}
+
+// noveltyScan — AC #6's mechanical novelty check, standalone-callable AND reused internally by
+// classifyProposalDiff below. A "novel claim" is a mechanism claim (wiring verb + >=2 backtick
+// identifiers, extractMechanismClaims's own definition) present in the NEW Proposal text whose
+// identifier-set was not present in the OLD text — never an LLM's self-report of "nothing new here".
+export function noveltyScan({ oldProposalText, newProposalText }) {
+  const oldClaims = extractMechanismClaims(oldProposalText || "");
+  const newClaims = extractMechanismClaims(newProposalText || "");
+  const oldKeys = new Set(oldClaims.map(_claimKey));
+  const novelClaims = newClaims.filter((c) => !oldKeys.has(_claimKey(c)));
+  return { hasNovelClaim: novelClaims.length > 0, novelClaims, oldClaimCount: oldClaims.length, newClaimCount: newClaims.length };
+}
+
+// classifyProposalDiff — Requested-action item 3's 5-way mechanical classification (charter/scope/
+// review-policy changes never reach here — they fail checkpoint validation first, per this module's
+// header comment). Evaluation order (most-severe-wins, never a bag of independent booleans):
+//   1. no textual difference after whitespace/case normalization -> wording-only (trivial case)
+//   2. a mechanism claim present in the OLD text is now GONE, and no ledger finding's own identity
+//      text explains the removal -> mechanism-change (a promised wiring relationship vanished)
+//   3. a genuinely NEW mechanism claim (novelty scan hit) -> new-claim
+//   4. a new file-path-shaped backtick identifier appears that wasn't mentioned before -> touch-set-change
+//   5. the changed sentences overlap a known ledger finding's own claimRef/summary keywords -> known-finding-repair
+//   6. otherwise -> wording-only
+// NON-GOAL (same posture as wiring-coverage-check.ts's own documented limitation): this cannot
+// detect a claim/mechanism change phrased entirely in prose with no backtick identifiers — accepted,
+// since this repo's authoring convention already names components in backticks and the alternative
+// (real NLP) is out of scope for a mechanical gate.
+export function classifyProposalDiff({ oldProposalText, newProposalText, ledger } = {}) {
+  const oldText = oldProposalText || "";
+  const newText = newProposalText || "";
+  const normalize = (t) => t.replace(/\s+/g, " ").trim().toLowerCase();
+  const emptyScan = { hasNovelClaim: false, novelClaims: [], oldClaimCount: 0, newClaimCount: 0 };
+  if (normalize(oldText) === normalize(newText)) {
+    return { classification: "wording-only", code: "no-textual-difference", noveltyScan: emptyScan };
+  }
+
+  const oldClaims = extractMechanismClaims(oldText);
+  const newClaims = extractMechanismClaims(newText);
+  const oldKeys = new Set(oldClaims.map(_claimKey));
+  const newKeys = new Set(newClaims.map(_claimKey));
+  const addedClaims = newClaims.filter((c) => !oldKeys.has(_claimKey(c)));
+  const scan = { hasNovelClaim: addedClaims.length > 0, novelClaims: addedClaims, oldClaimCount: oldClaims.length, newClaimCount: newClaims.length };
+
+  const removedClaims = oldClaims.filter((c) => !newKeys.has(_claimKey(c)));
+  const ledgerIdentifierText = (ledger || []).map((f) => `${f.claimRef || ""} ${f.evidence || ""} ${f.summary || ""}`).join(" ").toLowerCase();
+  const unexplainedRemoval = removedClaims.find((c) => !c.identifiers.every((id) => ledgerIdentifierText.includes(String(id).toLowerCase())));
+  if (unexplainedRemoval) {
+    return { classification: "mechanism-change", code: "mechanism-claim-removed-unexplained", detail: unexplainedRemoval.sentence, noveltyScan: scan };
+  }
+
+  if (addedClaims.length > 0) {
+    return { classification: "new-claim", code: "novel-mechanism-claim-detected", detail: addedClaims.map((c) => c.sentence).join(" | "), noveltyScan: scan };
+  }
+
+  const oldPaths = _extractFilePathIdentifiers(oldText);
+  const newPaths = _extractFilePathIdentifiers(newText);
+  const addedPaths = [...newPaths].filter((p) => !oldPaths.has(p));
+  if (addedPaths.length > 0) {
+    return { classification: "touch-set-change", code: "new-file-path-identifier-introduced", detail: addedPaths.join(", "), noveltyScan: scan };
+  }
+
+  const oldSentences = new Set(splitSentences(oldText).map(normalize));
+  const newSentences = splitSentences(newText).map(normalize);
+  const addedSentences = newSentences.filter((s) => !oldSentences.has(s));
+  const overlapsKnownFinding = addedSentences.some((s) =>
+    (ledger || []).some((f) => {
+      const key = normalize(`${f.claimRef || ""} ${f.summary || ""}`);
+      if (!key) return false;
+      return key.split(" ").filter((w) => w.length > 3).some((w) => s.includes(w));
+    })
+  );
+  if (overlapsKnownFinding) {
+    return { classification: "known-finding-repair", code: "diff-scoped-to-known-finding", noveltyScan: scan };
+  }
+  return { classification: "wording-only", code: "no-new-claims-paths-or-mechanism-removal-detected", noveltyScan: scan };
+}
+
+function _readCheckpointRecord(workspace, taskId) {
+  const p = checkpointPath(workspace, taskId);
+  let raw;
+  try {
+    raw = fs.readFileSync(p, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return { exists: false, record: null, corrupt: false };
+    throw err;
+  }
+  try {
+    return { exists: true, record: JSON.parse(raw), corrupt: false };
+  } catch {
+    return { exists: true, record: null, corrupt: true };
+  }
+}
+
+// _atomicWriteJson — tmp-then-rename, the same durable-JSON-write idiom this module's own lease
+// precedent (prepare-admission-check.ts's `wx`-flag lease acquire) established for state a LATER,
+// possibly different process reads back — never a partial/torn file a concurrent reader could
+// observe mid-write.
+function _atomicWriteJson(p, obj) {
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const tmp = `${p}.tmp-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
+  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
+  fs.renameSync(tmp, p);
+}
+
+// --resolve-checkpoint: READ-ONLY. Reads the checkpoint (if any), validates it fail-closed against
+// the CURRENT task/charter/scope/review-policy (Requested-action item 2), and — only when valid —
+// classifies the Proposal diff between the checkpoint's own last-reviewed text and the CURRENT
+// on-disk Proposal (item 3). Never writes anything; a corrupt/mismatched/missing checkpoint is
+// reported via a typed `usable:false` verdict, never repaired, deleted, or silently treated as
+// usable here.
+export function _resolveCheckpointCli({ taskId, workspace, charterFile }) {
+  try {
+    const taskPath = path.join(workspace, "tasks", `${taskId}.md`);
+    const taskBody = fs.readFileSync(taskPath, "utf8");
+    const charterBody = fs.readFileSync(path.resolve(workspace, charterFile), "utf8");
+    const touchesText = extractSection(taskBody, "Touches") || "";
+    const declaredTouches = touchesText.split(/\r?\n/).map((l) => l.trim().replace(/^-\s*/, "")).filter(Boolean);
+    const charterHash = sha256(charterBody);
+    const currentScopeHash = scopeHash({ taskBody, declaredTouches });
+    const reviewPolicyHash = _currentReviewPolicyHash();
+    const currentProposalText = extractSection(taskBody, "Proposal") || "";
+    const currentProposalHash = sha256(currentProposalText);
+    const hashes = { charterHash, scopeHash: currentScopeHash, reviewPolicyHash, proposalHash: currentProposalHash };
+
+    const { record, corrupt } = _readCheckpointRecord(workspace, taskId);
+    if (corrupt) {
+      return { usable: false, code: "checkpoint-corrupt", message: "checkpoint file exists but is not valid JSON", hashes };
+    }
+    const validation = validateReviewCheckpoint(record, { taskId, charterHash, scopeHash: currentScopeHash, reviewPolicyHash });
+    if (!validation.ok) {
+      return { usable: false, code: validation.code, message: validation.message, hashes };
+    }
+    if (record.reviewedProposalHash === currentProposalHash) {
+      // Nothing to classify — the Proposal is byte-identical to what this checkpoint already
+      // reviewed. Exact-unchanged reuse is DIR-126-C's own decideResumeGeneration/reuse-terminal
+      // mechanism's job, never this one's — reported distinctly so a caller never mistakes this for
+      // a usable cross-generation delta base.
+      return { usable: false, code: "checkpoint-proposal-unchanged", message: "current Proposal is byte-identical to the checkpoint's last-reviewed text", hashes };
+    }
+    const diff = classifyProposalDiff({ oldProposalText: record.reviewedProposalText, newProposalText: currentProposalText, ledger: record.ledger });
+    return {
+      usable: true,
+      code: "checkpoint-valid",
+      classification: diff.classification,
+      classificationCode: diff.code,
+      classificationDetail: diff.detail ?? null,
+      noveltyScan: diff.noveltyScan,
+      ledger: record.ledger,
+      counters: record.counters,
+      mechanismInventoryHash: record.mechanismInventoryHash,
+      mechanismInventoryCount: record.mechanismInventoryCount,
+      lastFullReviewSession: record.lastFullReviewSession,
+      // gap-prepare-milestone-cross-generation-review-state-reset (round 2, post-REFUTATION): the
+      // OLD reviewed text, so the caller can hand a real independent LLM reviewer the actual
+      // before/after diff to verify itself — classifyProposalDiff's own mechanical classification
+      // is advisory input to that reviewer, never a substitute for one. Never trust the mechanical
+      // classification alone to admit zero-reviewer cross-generation continuation (see the round-2
+      // REFUTATION this responds to: identifier-set-only claim identity let a weakened or fully
+      // removed wiring claim classify as wording-only/known-finding-repair).
+      reviewedProposalText: record.reviewedProposalText,
+      hashes,
+    };
+  } catch (err) {
+    // Fail-closed on any exception (malformed disk state, missing task/charter file, unreadable
+    // checkpoint directory): never silently treated as "usable" — always routes the caller to a
+    // full review.
+    return { usable: false, code: "checkpoint-resolve-exception", message: err.message };
+  }
+}
+
+// --write-checkpoint: re-reads task/charter/Proposal FRESH (as-of-terminal — the SAME rationale
+// _writeLegacyGenerationRecord's own comment documents: the Proposal may have been revised since
+// entry, e.g. across ProposalReview delta rounds), reads `checkpointInputFile` (a scratch handoff an
+// agent just wrote with EXACTLY the caller's ledger/mechanism-inventory/this-generation's-own-local-
+// counters content — the workflow DSL has no fs of its own, the SAME "write file with EXACT content
+// then run a CLI over it" pattern the Receipt phase already uses for the ledger/mechanism-inventory
+// files), accumulates epoch-scoped counters onto any PRIOR checkpoint sharing the SAME (charterHash,
+// scopeHash, reviewPolicyHash) epoch key (Requested-action item 5 — a scope-bearing change starts
+// counters fresh at this generation's own local counts), and writes the result atomically to
+// checkpointPath(workspace, taskId).
+export function _writeCheckpointCli({ taskId, workspace, charterFile, checkpointInputFile, terminalReason, terminalOutcome }) {
+  try {
+    const taskPath = path.join(workspace, "tasks", `${taskId}.md`);
+    const taskBody = fs.readFileSync(taskPath, "utf8");
+    const charterBody = fs.readFileSync(path.resolve(workspace, charterFile), "utf8");
+    const touchesText = extractSection(taskBody, "Touches") || "";
+    const declaredTouches = touchesText.split(/\r?\n/).map((l) => l.trim().replace(/^-\s*/, "")).filter(Boolean);
+    const charterHash = sha256(charterBody);
+    const currentScopeHash = scopeHash({ taskBody, declaredTouches });
+    const reviewPolicyHash = _currentReviewPolicyHash();
+    const reviewedProposalText = extractSection(taskBody, "Proposal") || "";
+    const reviewedProposalHash = sha256(reviewedProposalText);
+
+    let input = {};
+    try {
+      input = JSON.parse(fs.readFileSync(checkpointInputFile, "utf8"));
+    } catch (err) {
+      return { ok: false, error: `unreadable/malformed --checkpointInputFile: ${err.message}` };
+    }
+    const fullReviewsThisGen = Number.isFinite(input.fullReviewsThisGen) ? input.fullReviewsThisGen : 0;
+    const deltaRoundsThisGen = Number.isFinite(input.deltaRoundsThisGen) ? input.deltaRoundsThisGen : 0;
+
+    const { record: priorRecord } = _readCheckpointRecord(workspace, taskId);
+    const sameEpoch = !!(priorRecord && priorRecord.charterHash === charterHash && priorRecord.scopeHash === currentScopeHash && priorRecord.reviewPolicyHash === reviewPolicyHash);
+    const counters = {
+      fullReviews: (sameEpoch ? (priorRecord.counters?.fullReviews || 0) : 0) + fullReviewsThisGen,
+      deltaRounds: (sameEpoch ? (priorRecord.counters?.deltaRounds || 0) : 0) + deltaRoundsThisGen,
+    };
+    const lastFullReviewSession = fullReviewsThisGen > 0
+      ? { sessionId: input.lastFullReviewSessionId ?? null, timestamp: Number.isFinite(input.lastFullReviewTimestamp) ? input.lastFullReviewTimestamp : null }
+      : (sameEpoch && priorRecord.lastFullReviewSession ? priorRecord.lastFullReviewSession : { sessionId: input.lastFullReviewSessionId ?? null, timestamp: Number.isFinite(input.lastFullReviewTimestamp) ? input.lastFullReviewTimestamp : null });
+
+    const record = buildReviewCheckpoint({
+      taskId, charterHash, scopeHash: currentScopeHash, reviewPolicyHash,
+      reviewedProposalHash, reviewedProposalText,
+      ledger: Array.isArray(input.ledger) ? input.ledger : [],
+      mechanismInventoryHash: input.mechanismInventoryHash ?? null,
+      mechanismInventoryCount: Number.isFinite(input.mechanismInventoryCount) ? input.mechanismInventoryCount : null,
+      counters,
+      terminal: { reason: terminalReason ?? null, outcome: terminalOutcome ?? null, timestamp: Date.now() },
+      lastFullReviewSession,
+      recordedAtMs: Date.now(),
+    });
+    const p = checkpointPath(workspace, taskId);
+    _atomicWriteJson(p, record);
+    return { ok: true, checkpointFile: p, counters, epochReset: !sameEpoch };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 async function _cliMain(argv) {
   const spec = {
-    usage: "(--decide-resume|--decide-split|--record-split-decision|--record-generation [--no-release]|--release-only|--record-attempt) --taskId <id> --workspace <dir> [--charterFile <path>] [--callerOverride true|false] [--terminalPhase <phase>] [--outcome <o>] [--reason <r>] [--cacheable <bool>] [--milestoneId <id>] [--class <c>] [--highRisk <bool>] [--sessionId <id>] [--site <site>] [--detail <json>] [--phaseTimings <json>] [--findingCodes <json>] [--decision commit|split]",
+    usage: "(--decide-resume|--decide-split|--record-split-decision|--record-generation [--no-release]|--release-only|--record-attempt|--resolve-checkpoint|--write-checkpoint) --taskId <id> --workspace <dir> [--charterFile <path>] [--callerOverride true|false] [--terminalPhase <phase>] [--outcome <o>] [--reason <r>] [--cacheable <bool>] [--milestoneId <id>] [--class <c>] [--highRisk <bool>] [--sessionId <id>] [--site <site>] [--detail <json>] [--phaseTimings <json>] [--findingCodes <json>] [--decision commit|split] [--checkpointInputFile <path>]",
     minArgs: 0,
     flags: {
       "decide-resume": { type: "boolean" },
@@ -1258,6 +1639,9 @@ async function _cliMain(argv) {
       "no-release": { type: "boolean" },
       "release-only": { type: "boolean" },
       "record-attempt": { type: "boolean" },
+      "resolve-checkpoint": { type: "boolean" },
+      "write-checkpoint": { type: "boolean" },
+      checkpointInputFile: { type: "string" },
       taskId: { type: "string" },
       workspace: { type: "string" },
       charterFile: { type: "string" },
@@ -1333,6 +1717,28 @@ async function _cliMain(argv) {
     const out = _releaseLeaseOnlyCli({ taskId, workspace, reason: parsed.flags.reason });
     console.log(JSON.stringify(out));
     return out.ok && out.releaseResult?.ok ? 0 : 1;
+  }
+  if (parsed.flags["resolve-checkpoint"]) {
+    if (!parsed.flags.charterFile) {
+      console.error("--resolve-checkpoint requires --charterFile");
+      return 2;
+    }
+    const out = _resolveCheckpointCli({ taskId, workspace, charterFile: parsed.flags.charterFile });
+    console.log(JSON.stringify(out));
+    return 0;
+  }
+  if (parsed.flags["write-checkpoint"]) {
+    if (!parsed.flags.charterFile || !parsed.flags.checkpointInputFile) {
+      console.error("--write-checkpoint requires --charterFile and --checkpointInputFile");
+      return 2;
+    }
+    const out = _writeCheckpointCli({
+      taskId, workspace, charterFile: parsed.flags.charterFile,
+      checkpointInputFile: parsed.flags.checkpointInputFile,
+      terminalReason: parsed.flags.reason, terminalOutcome: parsed.flags.outcome,
+    });
+    console.log(JSON.stringify(out));
+    return out.ok ? 0 : 1;
   }
   if (parsed.flags["record-generation"] && parsed.flags["no-release"]) {
     const out = _writeGenerationTelemetryCli({
