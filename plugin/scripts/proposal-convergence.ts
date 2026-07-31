@@ -1548,6 +1548,14 @@ export function _resolveCheckpointCli({ taskId, workspace, charterFile }) {
       mechanismInventoryHash: record.mechanismInventoryHash,
       mechanismInventoryCount: record.mechanismInventoryCount,
       lastFullReviewSession: record.lastFullReviewSession,
+      // gap-prepare-milestone-cross-generation-review-state-reset (round 2, post-REFUTATION): the
+      // OLD reviewed text, so the caller can hand a real independent LLM reviewer the actual
+      // before/after diff to verify itself — classifyProposalDiff's own mechanical classification
+      // is advisory input to that reviewer, never a substitute for one. Never trust the mechanical
+      // classification alone to admit zero-reviewer cross-generation continuation (see the round-2
+      // REFUTATION this responds to: identifier-set-only claim identity let a weakened or fully
+      // removed wiring claim classify as wording-only/known-finding-repair).
+      reviewedProposalText: record.reviewedProposalText,
       hashes,
     };
   } catch (err) {

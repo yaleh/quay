@@ -1009,7 +1009,15 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     }
   });
 
-  test(`[${mirrorName}] cross-gen checkpoint AC#4: a wording-only edit whose carried ledger is already clean reaches 'prepared' with ZERO review agents dispatched this generation`, async () => {
+  // Round 2 (post-REFUTATION): an independent review found a real exploit — classifyProposalDiff's
+  // claim identity is keyed only on the sorted set of backtick identifiers, so a Proposal edit that
+  // WEAKENS or fully REMOVES an existing safety-relevant claim (same identifiers, changed/deleted
+  // semantics) can still classify wording-only/known-finding-repair. When the carried ledger was
+  // already clean, the OLD behavior reached 'prepared' with ZERO review agents ever reading the
+  // diff. Fixed structurally: cross-gen delta continuation now ALWAYS dispatches exactly one real
+  // delta reviewer, even with a clean carried ledger — this test asserts the NEW correct behavior
+  // (was previously asserting the now-refuted "zero review agents" behavior; do not revert).
+  test(`[${mirrorName}] cross-gen checkpoint AC#4 (post-REFUTATION fix): a wording-only edit whose carried ledger is already clean STILL dispatches exactly ONE real delta reviewer — never zero`, async () => {
     const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
     const args = baseArgs(scratchRel, { resumeFromAdjudicatedProposal: true });
     try {
@@ -1022,17 +1030,57 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
             counters: { fullReviews: 1, deltaRounds: 1 },
             mechanismInventoryHash: 'mi-carried', mechanismInventoryCount: 1,
             lastFullReviewSession: { sessionId: 'sess-original-full-review', timestamp: 1000 },
+            reviewedProposalText: 'The gate engine enforces fail-closed behavior.',
           }),
         }),
-        onCrossGenDeltaReview: () => { throw new Error('MUST NOT be dispatched: the carried ledger already has zero open blocking findings'); },
+        onCrossGenDeltaReview: () => ({ resolvedIds: [], findings: [], proposalHash: 'h-crossgen-ac4', nowMs: 2000, sessionId: 'sess-crossgen-ac4' }),
       });
 
       assert.equal(result.outcome, 'prepared', JSON.stringify(result));
-      assert.equal(calls.crossGenDeltaReviews, undefined, 'zero cross-gen delta reviewers dispatched');
-      assert.equal(calls.reviews.length, 0, 'zero review agents of ANY kind dispatched this generation');
+      assert.equal(calls.crossGenDeltaReviews, 1, 'exactly ONE real cross-gen delta reviewer dispatched, even though the carried ledger was already clean — the mechanical classification alone must never be trusted to skip review entirely');
+      assert.equal(calls.revises.length, 0, 'zero reviser dispatches — the cross-gen round is verification-only');
+      assert.equal(calls.reviews.filter((r) => r === 'full').length, 0, 'zero full ProposalReview reviewers dispatched — still cheaper than a full review');
       assert.equal(result.ledger.length, 1, 'the stable finding id/disposition survive untouched');
       assert.equal(result.ledger[0].id, 'f-stable-1', 'stable finding id preserved across the wording-only revision');
       assert.equal(result.ledger[0].disposition, 'backlog', 'disposition preserved — a wording-only edit never reopens a completed decision');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] cross-gen checkpoint REFUTATION regression: the delta reviewer prompt carries the checkpoint's OLD reviewed-proposal text so a weakened/removed claim (same identifiers, changed semantics) can be caught even when the mechanical classifier says wording-only and the carried ledger is clean`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel, { resumeFromAdjudicatedProposal: true });
+    const OLD_TEXT = 'The gate engine enforces `fail-closed` behavior in `gate.js`: any check error rejects the transition.';
+    try {
+      let capturedPrompt = null;
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onResolveCheckpoint: () => ({
+          raw: JSON.stringify({
+            usable: true, code: 'checkpoint-valid', classification: 'wording-only', classificationCode: 'no-new-claims-paths-or-mechanism-removal-detected',
+            noveltyScan: { hasNovelClaim: false, novelClaims: [] },
+            ledger: [],
+            counters: { fullReviews: 1, deltaRounds: 0 },
+            mechanismInventoryHash: null, mechanismInventoryCount: null,
+            lastFullReviewSession: { sessionId: 'sess-original-full-review', timestamp: 1000 },
+            reviewedProposalText: OLD_TEXT,
+          }),
+        }),
+        onCrossGenDeltaReview: (prompt) => {
+          capturedPrompt = prompt;
+          // A real reviewer given the OLD text plus this task's CURRENT (unchanged, generic
+          // fixture) Proposal would see no weakening — report clean, this test's point is only
+          // that the OLD text was actually made available to the reviewer to check against.
+          return { resolvedIds: [], findings: [], nowMs: 2000, sessionId: 'sess-crossgen-refutation-check' };
+        },
+      });
+
+      assert.equal(result.outcome, 'prepared', JSON.stringify(result));
+      assert.equal(calls.crossGenDeltaReviews, 1, 'exactly one delta reviewer dispatched');
+      assert.ok(capturedPrompt, 'the delta reviewer prompt was captured');
+      assert.ok(capturedPrompt.includes(OLD_TEXT), 'the prompt embeds the checkpoint\'s OLD reviewed-proposal text so the reviewer can independently compare before/after, not just trust the mechanical classification');
+      assert.match(capturedPrompt, /ADVISORY/i, 'the prompt explicitly tells the reviewer the mechanical classification is advisory, not authoritative');
+      assert.match(capturedPrompt, /weaken|contradict/i, 'the prompt explicitly instructs the reviewer to check for a weakened/contradicted existing claim');
     } finally {
       cleanup(scratchDir, null, args.milestoneId);
     }
@@ -1151,7 +1199,18 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
   // checkpoint, scaled down from the real incident's ~9-11 generations for test runtime (the
   // mechanism under test — epoch-wide full-review admission — is identical regardless of how many
   // delta-only generations follow the one full review). ─────────────────────────────────────────
-  test(`[${mirrorName}] DIR-126-D synthetic replay: at most ONE full semantic review across a 4-generation epoch, later edits carried through real checkpoint continuation, final ledger preserved`, async () => {
+  // Round 2 (post-REFUTATION): reduced from 4 to 3 generations, and now runs highRisk:true
+  // throughout. The structural fix (cross-gen delta continuation ALWAYS dispatches one real delta
+  // reviewer, never zero — see the ProposalReview loop's own header comment) means every
+  // cross-generation continuation now genuinely consumes epoch-cumulative delta-round budget, not
+  // just full-review budget. With the ordinary cap (2) that budget is exhausted by 1 (gen1's own
+  // capped round) + 1 (gen2) before gen3 could ever run; highRisk's cap (3) fits exactly
+  // 1(gen1)+1(gen2)+1(gen3), which is enough generations to prove the real claim (checkpoint
+  // continuation across MULTIPLE generations, not just one repair) without needing a 4th. This is
+  // an intentional, understood tradeoff of the safety fix, not a workaround — see gap-prepare-
+  // milestone-task-epoch-budget-reset (not yet built) for where a smarter, purpose-aware budget
+  // (distinguishing a real fix-attempt round from a mandatory-verification-only round) belongs.
+  test(`[${mirrorName}] DIR-126-D synthetic replay: at most ONE full semantic review across a 3-generation epoch, later edits carried through real checkpoint continuation, final ledger preserved`, async () => {
     const { scratchDir, scratchRel, taskFileOnDisk, charterFileOnDisk } = makeScratch();
     const taskId = `../${scratchRel}/task`;
     const charterRel = `${scratchRel}/charter.md`;
@@ -1185,7 +1244,7 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       // this generation to STOP at delta-cap-exhausted with the finding still OPEN (mirroring the
       // real incident's shape — round 0 already had findings that outlived that generation) — the
       // checkpoint written at THIS non-success terminal is what generation 2 must resume from.
-      const gen1 = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, maxDeltaRounds: 1 }), taskFileOnDisk, {
+      const gen1 = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, maxDeltaRounds: 1, highRisk: true }), taskFileOnDisk, {
         ...realCheckpointHandlers(),
         onFullReview: () => { totalFullReviews.count += 1; return { findings: [{ subsystem: 's1', claimRef: 'AC#1', summary: 'blocker one', severity: 'blocker', blocking: true, repairable: true }], mechanismCount: 1, sessionId: 'sess-full-gen1' }; },
         onRevise: (round) => ({ ok: true, sessionId: `sess-revise-gen1-${round}` }),
@@ -1204,7 +1263,7 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
         const body = fs.readFileSync(taskFileOnDisk, 'utf8');
         fs.writeFileSync(taskFileOnDisk, body.replace(/## Proposal\n/, '## Proposal\n\n<!-- generation 2: human repair of blocker one -->\n'));
       }
-      const gen2 = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, resumeFromAdjudicatedProposal: true }), taskFileOnDisk, {
+      const gen2 = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, resumeFromAdjudicatedProposal: true, highRisk: true }), taskFileOnDisk, {
         ...realCheckpointHandlers(),
         onFullReview: () => { totalFullReviews.count += 1; return { findings: [], mechanismCount: 1, sessionId: 'sess-full-gen2' }; },
         onCrossGenDeltaReview: (prompt) => {
@@ -1216,38 +1275,43 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
       assert.equal(gen2.result.outcome, 'prepared', JSON.stringify(gen2.result));
       planFile = gen2.result.planFile;
 
-      // ── Generations 3-4: pure wording tidy-ups AFTER the substance is already fixed — the carried
-      // checkpoint ledger is already clean, so these reach 'prepared' with ZERO review agents.
+      // ── Generation 3: a pure wording tidy-up AFTER the substance is already fixed. Round-2 fix
+      // (post-REFUTATION): even though the carried checkpoint ledger is already clean, cross-gen
+      // delta continuation ALWAYS dispatches exactly ONE real independent delta reviewer for this
+      // generation too — never zero — specifically so a diff that LOOKS clean by the mechanical
+      // classifier's own identifier-set-only heuristic still gets a real look. Still far cheaper
+      // than a full review (1 delta reviewer vs. a full author+reviewer round), just never zero.
       const genResultsAfterFirst = [gen2];
-      for (let i = 3; i <= 4; i++) {
+      {
         const body = fs.readFileSync(taskFileOnDisk, 'utf8');
-        fs.writeFileSync(taskFileOnDisk, body.replace(/## Proposal\n/, `## Proposal\n\n<!-- generation ${i} wording tidy-up -->\n`));
-        const gen = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, resumeFromAdjudicatedProposal: true }), taskFileOnDisk, {
+        fs.writeFileSync(taskFileOnDisk, body.replace(/## Proposal\n/, '## Proposal\n\n<!-- generation 3 wording tidy-up -->\n'));
+        const gen3 = await runPrepareMilestone(workflowFile, baseArgs(scratchRel, { milestoneId, resumeFromAdjudicatedProposal: true, highRisk: true }), taskFileOnDisk, {
           ...realCheckpointHandlers(),
-          onFullReview: () => { totalFullReviews.count += 1; return { findings: [], mechanismCount: 1, sessionId: `sess-full-gen${i}` }; },
-          onCrossGenDeltaReview: () => { totalCrossGenDeltaReviews.count += 1; return { resolvedIds: [], findings: [], nowMs: 1000 * i, sessionId: `sess-crossgen-gen${i}` }; },
+          onFullReview: () => { totalFullReviews.count += 1; return { findings: [], mechanismCount: 1, sessionId: 'sess-full-gen3' }; },
+          onCrossGenDeltaReview: () => { totalCrossGenDeltaReviews.count += 1; return { resolvedIds: [], findings: [], nowMs: 3000, sessionId: 'sess-crossgen-gen3' }; },
         });
-        genResultsAfterFirst.push(gen);
-        assert.equal(gen.result.outcome, 'prepared', `generation ${i}: ${JSON.stringify(gen.result)}`);
-        assert.equal(gen.calls.crossGenDeltaReviews, undefined, `generation ${i}: the carried ledger was already clean — zero review agents needed`);
+        genResultsAfterFirst.push(gen3);
+        assert.equal(gen3.result.outcome, 'prepared', `generation 3: ${JSON.stringify(gen3.result)}`);
+        assert.equal(gen3.calls.crossGenDeltaReviews, 1, 'generation 3: exactly ONE cross-gen delta reviewer dispatched even though the carried ledger was already clean — never zero (post-REFUTATION structural fix)');
       }
 
-      // ── The core DIR-126-D-shaped claim: across the WHOLE 4-generation epoch, at most ONE full
-      // semantic review ran — generations 2-4 never re-derived from scratch, and the repair went
-      // through exactly ONE real cross-generation delta reviewer, never a second full reviewer.
-      assert.equal(totalFullReviews.count, 1, 'at most one full semantic review across the whole epoch — generations 2-4 never re-dispatched a full reviewer');
-      assert.equal(totalCrossGenDeltaReviews.count, 1, 'the human repair went through exactly ONE cross-generation delta reviewer (generation 2)');
+      // ── The core DIR-126-D-shaped claim: across the WHOLE 3-generation epoch, at most ONE full
+      // semantic review ran — generations 2-3 never re-derived from scratch, and both cross-
+      // generation delta-continuation generations (2, 3) went through exactly one real cross-
+      // generation delta reviewer each, never a second full reviewer and never zero reviewers.
+      assert.equal(totalFullReviews.count, 1, 'at most one full semantic review across the whole epoch — generations 2-3 never re-dispatched a full reviewer');
+      assert.equal(totalCrossGenDeltaReviews.count, 2, 'every cross-gen delta-continuation generation (2, 3) dispatched exactly one real cross-generation delta reviewer — never zero');
       for (const gen of genResultsAfterFirst) {
         assert.equal(gen.calls.authors.length, 0, 'zero Proposal authors on every generation after the first');
         assert.equal(gen.calls.adjudicator, 0, 'zero adjudicators on every generation after the first');
       }
 
-      // ── Final ledger from generation 4's checkpoint still carries the original finding, resolved.
+      // ── Final ledger from generation 3's checkpoint still carries the original finding, resolved.
       const finalCheckpointFile = checkpointPath(REPO_ROOT, taskId);
       const finalCheckpoint = JSON.parse(fs.readFileSync(finalCheckpointFile, 'utf8'));
-      assert.equal(finalCheckpoint.ledger.length, 1, 'the original finding survives across all 4 generations — never discarded');
+      assert.equal(finalCheckpoint.ledger.length, 1, 'the original finding survives across all 3 generations — never discarded');
       assert.equal(finalCheckpoint.ledger[0].status, 'resolved');
-      assert.equal(finalCheckpoint.counters.fullReviews, 1, 'epoch-cumulative fullReviews counter stayed at 1 across all 4 generations');
+      assert.equal(finalCheckpoint.counters.fullReviews, 1, 'epoch-cumulative fullReviews counter stayed at 1 across all 3 generations');
     } finally {
       // Real CLI dispatches wrote a real checkpoint file (and a scratch --checkpointInputFile
       // handoff, same input path reused/overwritten every generation) directly under this repo's

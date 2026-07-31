@@ -107,11 +107,13 @@ to known findings should remain incremental while a novelty scan checks that no 
   `calls.crossGenDeltaReviews===1`, zero reviser dispatches, and the carried finding ends
   `status:'resolved'`.
 - [x] Wording-only edits preserve stable finding IDs and dispositions and do not reopen a completed
-  mechanism/split decision. "cross-gen checkpoint AC#4" test asserts the carried ledger's finding id/
-  disposition survive byte-identical across a wording-only edit with ZERO review agents dispatched
-  (nothing can reopen a decision when no reviewer runs) — the split-check itself is structurally
-  unreachable on this path since the loop's first check (zero open blocking) exits before
-  `_splitCheck()` is ever called.
+  mechanism/split decision. **Revised after round-2 REFUTATION** (see Execution record): "cross-gen
+  checkpoint AC#4" test now asserts the carried ledger's finding id/disposition survive byte-
+  identical across a wording-only edit while a REAL delta reviewer is dispatched to independently
+  verify the diff (exactly one, `calls.crossGenDeltaReviews===1`) — no longer "ZERO review agents",
+  since that was the exact shape of the round-2 REFUTATION (a mechanically-clean-looking edit
+  reaching `prepared` unreviewed). The finding id/disposition are preserved because the reviewer's
+  own mock in this test reports nothing changed, not because no reviewer ran.
 - [x] New mechanism, production touch-set, charter, and review-policy changes each start a new scope
   epoch with an explicit reset reason and exactly one admitted full review. Charter/review-policy/
   touch-set changes are caught by `validateReviewCheckpoint` (never reach the classifier) and a
@@ -121,14 +123,18 @@ to known findings should remain incremental while a novelty scan checks that no 
   blocks) and workflow-tested ("cross-gen checkpoint AC#2"/"AC#5": each falls back to exactly one
   full review this generation, with the checkpoint's own typed code as the recorded reset reason).
 - [x] The novelty scan catches a new wiring/mechanism claim introduced inside an otherwise focused
-  repair and routes it to review instead of incorrectly preserving the old pass. Found and fixed a
-  real gap during implementation: an ALREADY-CLEAN carried ledger let the loop exit `zero-finding`
-  before ever dispatching a reviewer, which would have silently waved through a novel claim with
-  nobody looking at it — fixed by filing the novelty scan's own hit as a synthetic blocking finding
-  (`subsystem:'novelty-scan'`) whenever `noveltyScan().hasNovelClaim` is true, structurally
-  guaranteeing at least one cross-gen delta reviewer dispatch. "cross-gen checkpoint AC#6" test
-  confirms: exactly one cross-gen delta reviewer dispatched, a further round is needed when the
-  reviewer confirms the claim is real, and the novel claim appears in the final ledger.
+  repair and routes it to review instead of incorrectly preserving the old pass. **Superseded by a
+  stronger, general fix after round-2 REFUTATION** (see Execution record): the original synthetic-
+  blocking-finding mechanism (filed only when `noveltyScan().hasNovelClaim` is true) was found by an
+  independent reviewer to be structurally UNREACHABLE in production — `classifyProposalDiff`
+  unconditionally routes any diff with a genuinely new claim to the `new-claim` classification
+  (excluded from cross-gen delta continuation) before that code could ever run — and was removed as
+  dead code that gave false confidence. Replaced with a strictly stronger, unconditional guarantee:
+  the ProposalReview loop now ALWAYS dispatches at least one real cross-gen delta reviewer regardless
+  of ledger content or novelty-scan output, which subsumes this AC's intent without depending on the
+  scan at all. "cross-gen checkpoint AC#6" test (unchanged assertions, still passes under the new
+  mechanism) confirms: exactly one cross-gen delta reviewer dispatched, a further round is needed
+  when the reviewer confirms the claim is real, and the novel claim appears in the final ledger.
 - [x] Exact unchanged stable-terminal reuse remains compatible with DIR-126-C and consumes zero
   content agents; changed compatible repair selects delta continuation rather than terminal reuse.
   DIR-126-C's `decideResumeGeneration`/`--decide-resume`/reuse-terminal mechanism is completely
@@ -142,18 +148,20 @@ to known findings should remain incremental while a novelty scan checks that no 
   a delta base (that case belongs to reuse-terminal, never this mechanism).
 - [x] A replay shaped from DIR-126-D's eleven attempts performs at most one full semantic review for
   one unchanged charter epoch, carries later edits through delta review, and preserves the final
-  ledger without eleven independent full reviews. **Scaled honestly, not literally 11 generations**:
-  "DIR-126-D synthetic replay" test in `plugin/test/prepare-milestone-convergence.test.mjs` drives 4
-  REAL sequential workflow dispatches against the SAME on-disk checkpoint file via the real
-  `--resolve-checkpoint`/`--write-checkpoint` CLI (never a mocked in-memory stand-in) — one cold full
-  review with an unresolved finding, one human-repair generation resolved via exactly one real
-  cross-generation delta reviewer, and two pure wording-tidy-up generations reaching `prepared` with
-  zero review agents. Asserts `totalFullReviews.count===1` and
-  `totalCrossGenDeltaReviews.count===1` across the whole 4-generation epoch, plus the final on-disk
-  checkpoint's ledger/counters. The task's own Requested-action explicitly approved a scaled
-  synthetic reconstruction over literal historical replay; 4 generations (rather than 9-11) was
-  chosen for test runtime — the mechanism under test (epoch-wide full-review admission) does not
-  change shape with generation count.
+  ledger without eleven independent full reviews. **Scaled honestly, not literally 11 generations;
+  regenerated after round-2 REFUTATION** (see Execution record): "DIR-126-D synthetic replay" test in
+  `plugin/test/prepare-milestone-convergence.test.mjs` drives 3 REAL sequential workflow dispatches
+  (reduced from 4 — see the round-2 fix's own tradeoff note in the test's header comment: the
+  structural "always dispatch a reviewer" fix means every cross-gen generation now genuinely
+  consumes epoch-cumulative delta-round budget, so 3 generations at `highRisk` cap (3) was chosen
+  over 4, which would have needed a 4th slot the current policy caps do not provide) against the SAME
+  on-disk checkpoint file via the real `--resolve-checkpoint`/`--write-checkpoint` CLI (never a
+  mocked in-memory stand-in) — one cold full review with an unresolved finding, one human-repair
+  generation resolved via exactly one real cross-generation delta reviewer, and one pure wording-
+  tidy-up generation ALSO dispatching exactly one real cross-generation delta reviewer (never zero —
+  this is the exact behavior round 2 fixed). Asserts `totalFullReviews.count===1` and
+  `totalCrossGenDeltaReviews.count===2` across the whole 3-generation epoch, plus the final on-disk
+  checkpoint's ledger/counters.
 - [x] Receipt/checkpoint tampering, mirror sync, lease release, zero-finding, and existing DIR-125/
   DIR-126-C regression suites remain green. Real counts (this session, both `.claude/workflows/` and
   `plugin/workflows/` mirrors run together): `experiments/quay-perpetual-stream/test/
@@ -188,6 +196,71 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
   dispatch. The scope-change fail-closed behavior IS proven mechanically (real CLI fixtures for
   charter/scope/policy-hash mismatches, all confirmed to fall back to a full review — see the AC
   above), just not via a real `Workflow()` dispatch.
+
+## Round 2: independent review REFUTATION and structural fix (2026-07-31)
+
+**Round 1** (implemented by a worktree-isolated subagent, commit `28a322ae`) was sent for
+independent adversarial review, given the high blast radius (this touches `prepare-milestone.js`'s
+core ProposalReview control flow).
+
+**Independent review verdict: REFUTED.** A real, twice-independently-reproduced exploit against
+`classifyProposalDiff` (`experiments/quay-perpetual-stream/scripts/proposal-convergence.ts`):
+claim identity is keyed only on the SORTED SET of backtick-quoted identifiers in a wiring-verb
+sentence, never the verb or surrounding semantics.
+- **Exploit A (weakening)**: rewording an existing claim to add an exception/failure-mode
+  ("always rejects" → "normally rejects, but a config-load error passes through") while keeping the
+  same identifiers classifies `wording-only`.
+- **Exploit B (unexplained removal)**: deleting a claim entirely, "explained away" by an unrelated,
+  already-resolved ledger finding that merely happens to mention the same identifier strings for an
+  unrelated reason, classifies `wording-only` instead of `mechanism-change` (a control with an empty
+  ledger correctly returns `mechanism-change`, proving the misclassification is specifically caused
+  by incidental ledger-text co-occurrence).
+
+Because `wording-only`/`known-finding-repair` are the only classifications admitted to cross-
+generation delta continuation, and because the ProposalReview `while(true)` loop terminated
+`zero-finding` BEFORE dispatching any reviewer whenever the carried checkpoint ledger was already
+clean (the common, intended steady state this whole feature targets), either exploit could let a
+genuine safety-relevant Proposal regression reach `prepared` with ZERO review agents ever reading
+it. The reviewer also found the AC #6 "novelty-scan safety net" (a synthetic blocking finding meant
+to force a reviewer dispatch on a novel claim) was structurally unreachable in production: any diff
+with a real novel claim is already routed to the `new-claim` classification (excluded from cross-gen
+delta continuation) before that safety-net code could ever run.
+
+**Fix (by the orchestrating session directly, not delegated)**: changed strategy from "perfect the
+classifier" (the same trap this session's `preflightMergedMarkdownClaims` fix fell into twice before
+abandoning it for a bounded-downgrade design — see `gap-preflight-merged-markdown-ascii-dash-false-
+positive`'s Execution record) to a STRUCTURAL guarantee. Cross-generation delta continuation now
+ALWAYS dispatches at least one real independent delta reviewer — never zero — regardless of the
+mechanical classification or the carried ledger's content:
+1. `prepare-milestone.js`'s ProposalReview loop gained a `_crossGenFirstRoundPending` flag that
+   suppresses the `zero-finding` early-exit until the mandatory first cross-gen delta round has
+   actually been dispatched (see the loop's own header comment for the full rationale).
+2. The `--resolve-checkpoint` CLI now also returns `reviewedProposalText` (the checkpoint's OLD,
+   last-reviewed Proposal text) so the delta reviewer's prompt can show a real BEFORE/AFTER and ask
+   the reviewer to independently verify no claim was weakened, contradicted, or unjustifiably
+   removed — explicitly telling the reviewer the mechanical classification is advisory input, never
+   authoritative.
+3. The now-fully-redundant (and previously unreachable) synthetic-blocking-finding novelty-scan
+   forcing code was REMOVED as dead code that gave false confidence, per the reviewer's own critique
+   — the unconditional dispatch guarantee subsumes what it was trying to do.
+
+This bounds the blast radius of the classifier being wrong to exactly what the review's own findings
+were about: worst case, a real regression is still SEEN by a real reviewer (who may then correctly
+flag it), never silently missed. `classifyProposalDiff`'s own limitation is NOT fixed at the
+classifier level — both exploits are preserved as documented "KNOWN LIMITATION" regression tests in
+`experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs` (asserting the classifier
+still returns `wording-only` for both, with an explicit note on why this is closed one layer up).
+
+**Verification**: `plugin/test/prepare-milestone-convergence.test.mjs`'s "DIR-126-D synthetic
+replay" test (and several others) needed real behavioral updates — not just re-assertion — since the
+old tests asserted the now-refuted "zero review agents" behavior. The replay itself was reduced from
+4 to 3 generations, since the structural fix means every cross-gen generation now genuinely consumes
+epoch-cumulative delta-round budget (this policy tradeoff is intentional, not a workaround — see the
+test's own header comment and `gap-prepare-milestone-task-epoch-budget-reset` for where smarter,
+purpose-aware budget accounting belongs). Full suite after the fix: `proposal-convergence.test.mjs`
+134/134, `prepare-milestone-convergence.test.mjs` 86/86, combined with
+`prepare-milestone-preparation-e2e.test.mjs` + `prepare-admission-check.test.mjs` (both mirrors):
+378/378, zero failures. Byte-identity re-confirmed on both touched mirror pairs (`cmp`, zero output).
 
 ## Orchestrating-session verification note (2026-07-31)
 

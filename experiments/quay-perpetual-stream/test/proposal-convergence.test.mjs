@@ -1542,6 +1542,47 @@ describe("noveltyScan / classifyProposalDiff — mechanical diff classification 
     });
     assert.equal(out.classification, "wording-only");
   });
+
+  // gap-prepare-milestone-cross-generation-review-state-reset (round 2, post-REFUTATION): these two
+  // tests document a REAL, KNOWN limitation an independent review found — claim identity here is
+  // keyed only on the sorted set of backtick identifiers, so a same-identifiers edit that WEAKENS an
+  // existing claim's behavior, or a full removal "explained away" by an unrelated ledger finding
+  // that merely mentions the same identifier strings, both still classify wording-only. This is NOT
+  // fixed at the classifier level (a perfect free-text classifier is not a tractable goal — see this
+  // same session's 3-round preflightMergedMarkdownClaims history for why chasing perfect heuristic
+  // classification is a trap). It is fixed STRUCTURALLY one layer up: prepare-milestone.js's
+  // ProposalReview loop now ALWAYS dispatches at least one real independent delta reviewer for cross-
+  // generation continuation, regardless of this classifier's output or the carried ledger's content
+  // — see prepare-milestone.js's own "while (true)" loop header comment and
+  // plugin/test/prepare-milestone-convergence.test.mjs's "REFUTATION regression" test for the
+  // structural mitigation. These two tests exist so a future reader does not mistake silence here
+  // for the defect being closed at this layer — it is closed one layer up, on purpose.
+  test("classifyProposalDiff KNOWN LIMITATION (Exploit A, REFUTATION 2026-07-31): weakening an existing claim's behavior while keeping the same identifiers still classifies wording-only -- mitigated structurally in prepare-milestone.js, not here", () => {
+    const out = classifyProposalDiff({
+      oldProposalText: "The gate engine enforces `fail-closed` behavior in `gate.js` on every dispatch: any check error rejects the transition.",
+      newProposalText: "The gate engine enforces `fail-closed` behavior in `gate.js` on most dispatches: a check error normally rejects the transition, but a config-load error is treated as a pass-through to avoid blocking the pipeline.",
+      ledger: [],
+    });
+    assert.equal(out.classification, "wording-only", "documents the known limitation — same identifier set, weakened semantics, not detected at this layer");
+  });
+
+  test("classifyProposalDiff KNOWN LIMITATION (Exploit B, REFUTATION 2026-07-31): a claim removed entirely, explained away by an unrelated ledger finding that merely co-occurs on identifier text, misclassifies wording-only instead of mechanism-change -- mitigated structurally in prepare-milestone.js, not here", () => {
+    const withUnrelatedLedger = classifyProposalDiff({
+      oldProposalText: "`gate.js` invokes `validateInput` before every `task_write` to enforce schema constraints.",
+      newProposalText: "Schema constraints are now assumed to hold by convention.",
+      ledger: [{ id: "nit001", disposition: "backlog", summary: "prefer consistent casing across gate.js, validateInput, and task_write call sites (style only)" }],
+    });
+    assert.equal(withUnrelatedLedger.classification, "wording-only", "documents the known limitation — an unrelated ledger entry that merely mentions the same identifier strings incorrectly 'explains' a real claim removal");
+    // Control: the SAME removal with an EMPTY ledger correctly classifies mechanism-change — proves
+    // the misclassification above is specifically caused by incidental ledger text co-occurrence,
+    // not a blanket failure to detect removal.
+    const withEmptyLedger = classifyProposalDiff({
+      oldProposalText: "`gate.js` invokes `validateInput` before every `task_write` to enforce schema constraints.",
+      newProposalText: "Schema constraints are now assumed to hold by convention.",
+      ledger: [],
+    });
+    assert.equal(withEmptyLedger.classification, "mechanism-change", "control: the same removal with no unrelated ledger noise IS correctly detected");
+  });
 });
 
 describe("CLI: --resolve-checkpoint / --write-checkpoint", () => {

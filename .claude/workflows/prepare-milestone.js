@@ -421,6 +421,7 @@ let _crossGenMechanismInventoryCount = null
 let _crossGenNoveltyScan = null
 let _crossGenClassification = null
 let _crossGenLastFullReviewSession = null
+let _crossGenReviewedProposalText = null
 
 if (_resumeFromAdjudicatedProposal) {
   const _checkpointResult = await _convergenceAgentCall(`--resolve-checkpoint --taskId ${_taskId} --workspace . --charterFile ${_charterFile}`, 'resolve-checkpoint')
@@ -434,7 +435,8 @@ if (_resumeFromAdjudicatedProposal) {
     _crossGenNoveltyScan = _checkpointVerdict.noveltyScan ?? null
     _crossGenClassification = _checkpointVerdict.classification
     _crossGenLastFullReviewSession = _checkpointVerdict.lastFullReviewSession ?? null
-    log(`Checkpoint: valid cross-generation delta base (classification=${_checkpointVerdict.classification}, code=${_checkpointVerdict.classificationCode}). Carrying ${_crossGenLedger.length} ledger entrie(s) forward (epoch counters so far: fullReviews=${_crossGenCounters.fullReviews}, deltaRounds=${_crossGenCounters.deltaRounds}); ProposalReview will skip its full-review agent this generation.`)
+    _crossGenReviewedProposalText = typeof _checkpointVerdict.reviewedProposalText === 'string' ? _checkpointVerdict.reviewedProposalText : ''
+    log(`Checkpoint: valid cross-generation delta base (classification=${_checkpointVerdict.classification}, code=${_checkpointVerdict.classificationCode}). Carrying ${_crossGenLedger.length} ledger entrie(s) forward (epoch counters so far: fullReviews=${_crossGenCounters.fullReviews}, deltaRounds=${_crossGenCounters.deltaRounds}); ProposalReview will skip its full-review agent this generation but ALWAYS dispatches exactly one real independent cross-generation delta reviewer (never zero) to verify the diff itself, regardless of the mechanical classification or whether the carried ledger is already clean.`)
   } else {
     log(`Checkpoint: ${_checkpointVerdict ? `not usable as a cross-generation delta base (usable=${_checkpointVerdict.usable}, code=${_checkpointVerdict.code}${_checkpointVerdict.classification ? `, classification=${_checkpointVerdict.classification}` : ''})` : 'no parseable verdict'} — proceeding with the ordinary full ProposalReview path.`)
   }
@@ -837,26 +839,18 @@ if (!_useCrossGenDelta) {
   // verbatim instead of starting from an empty ledger and dispatching a fresh full reviewer.
   _ledger = _crossGenLedger
   log(`ProposalReview: cross-generation delta continuation (checkpoint classification=${_crossGenClassification}) — skipping the full-review agent this generation; carried ${_ledger.length} ledger entrie(s) forward (epoch delta rounds used so far: ${_deltaRoundOffset}/${_maxDeltaRounds}).`)
-  // AC #6 / novelty-scan safety net: a carried ledger that is ALREADY clean (zero open blocking)
-  // would otherwise let the while(true) loop below terminate 'zero-finding' on its very FIRST check
-  // — BEFORE ever dispatching a delta reviewer — which would silently wave through a mechanically-
-  // detected novel claim with nobody ever looking at it. File it as a synthetic BLOCKING finding so
-  // the loop is structurally guaranteed to dispatch at least one cross-gen delta reviewer to verify
-  // it (the reviewer may resolve it as a false positive, but only via an explicit, recorded
-  // resolvedIds entry — never by the loop simply never asking).
-  if (_crossGenNoveltyScan?.hasNovelClaim === true) {
-    const _novelClaimSentences = (_crossGenNoveltyScan.novelClaims || []).map((c) => c.sentence).filter(Boolean)
-    _upsertFindings([{
-      subsystem: 'novelty-scan',
-      summary: `Mechanically-detected novel claim(s) since the checkpoint's last review, requiring verification: ${_novelClaimSentences.join(' | ') || '(claim text unavailable)'}`,
-      severity: 'major',
-      blocking: true,
-      evidence: "proposal-convergence.ts's noveltyScan() (hooked into wiring-coverage-check.ts's real extractMechanismClaims) flagged >=1 mechanism claim present in the CURRENT Proposal that was absent from the checkpoint's last-reviewed text.",
-      claimRef: (_crossGenNoveltyScan.novelClaims || []).map((c) => (c.identifiers || []).join('+')).join(','),
-      disposition: 'unresolved',
-    }], 0)
-    log(`ProposalReview: novelty scan flagged ${(_crossGenNoveltyScan.novelClaims || []).length} mechanically-novel claim(s) since the checkpoint — filed as a synthetic blocking finding to force verification, never silently waved through.`)
-  }
+  // Round 2 (post-REFUTATION): the original AC #6 "novelty-scan safety net" here (a synthetic
+  // BLOCKING finding filed whenever `_crossGenNoveltyScan?.hasNovelClaim === true`, meant to force
+  // at least one delta reviewer dispatch on an otherwise-clean carried ledger) was REMOVED — an
+  // independent review found it structurally unreachable in production: classifyProposalDiff
+  // unconditionally routes ANY diff with `addedClaims.length > 0` to the `new-claim` classification
+  // (excluded from cross-gen delta continuation entirely) before this code ever runs, so
+  // `hasNovelClaim` is already guaranteed false whenever `_useCrossGenDelta` is true. Keeping dead
+  // code shaped like a safety mechanism that can never fire is worse than removing it (false
+  // confidence). The real fix is the while(true) loop below now ALWAYS dispatching at least one
+  // cross-gen delta reviewer regardless of ledger content — see its own header comment — which
+  // subsumes what this block was trying to guarantee, unconditionally rather than only on a novel-
+  // claim hit. The novel-claims list is still passed to that reviewer's prompt for its own judgment.
 }
 _startedAtMs = _now()
 
@@ -929,9 +923,26 @@ if (!_useCrossGenDelta) {
   log(`ProposalReview: mechanism inventory carried forward from checkpoint (hash=${_crossGenMechanismInventoryHash ?? '(none)'}, count=${_crossGenMechanismInventoryCount ?? '(none)'}).`)
 }
 
+// gap-prepare-milestone-cross-generation-review-state-reset (round 2, post-REFUTATION): a validated
+// checkpoint's mechanical classification (wording-only/known-finding-repair) is advisory input to a
+// REAL independent reviewer, never a substitute for dispatching one. An independent review found a
+// real exploit: classifyProposalDiff's claim identity is keyed only on the sorted set of backtick
+// identifiers, so a Proposal edit that WEAKENS or fully REMOVES an existing safety-relevant claim
+// (same identifiers, changed/deleted semantics) can classify wording-only/known-finding-repair; when
+// the carried checkpoint ledger already has zero open blocking findings (the common, intended
+// steady state this whole feature targets), the loop below used to terminate 'zero-finding' on its
+// very first check, BEFORE dispatching any reviewer at all — letting the unsafe edit reach
+// 'prepared' with ZERO review agents ever reading it. Fixed structurally, not by trying to perfect
+// the classifier further (two prior attempts at a similar problem in this same session, the
+// preflightMergedMarkdownClaims ASCII-dash/code-span fixes, both needed 3 rounds before a
+// perfect-classifier approach was abandoned for a "never fully suppress" bound): cross-generation
+// delta continuation now ALWAYS dispatches at least one real delta reviewer before the loop may ever
+// terminate 'zero-finding', regardless of the carried ledger's own content.
+let _crossGenFirstRoundPending = _useCrossGenDelta
+
 while (true) {
   const openBlocking = _blockingOpen()
-  if (openBlocking.length === 0) { _terminalReason = 'zero-finding'; break }
+  if (openBlocking.length === 0 && !_crossGenFirstRoundPending) { _terminalReason = 'zero-finding'; break }
 
   // M206/M4: splitCheckDisabled — skip _splitCheck entirely this generation.
   if (!_splitCheckDisabled) {
@@ -961,7 +972,8 @@ while (true) {
   // ordinary two-agent shape, since round 2+ has no pre-existing "already edited" Proposal to verify
   // against.
   const _isCrossGenFirstRound = _useCrossGenDelta && _deltaRound === 1
-  log(`ProposalReview: ${openBlocking.length} blocking finding(s) open — dispatching ${_isCrossGenFirstRound ? 'ONE cross-generation delta reviewer (no separate reviser)' : 'focused revision + delta review'}, round ${_deltaRound}/${_maxDeltaRounds} (epoch delta rounds used so far: ${_deltaRoundOffset}).`)
+  if (_isCrossGenFirstRound) _crossGenFirstRoundPending = false
+  log(`ProposalReview: ${openBlocking.length} blocking finding(s) open — dispatching ${_isCrossGenFirstRound ? 'ONE cross-generation delta reviewer (no separate reviser, mandatory even with zero open findings — see the loop\'s own header comment)' : 'focused revision + delta review'}, round ${_deltaRound}/${_maxDeltaRounds} (epoch delta rounds used so far: ${_deltaRoundOffset}).`)
   _recordPhaseBoundary(`ProposalReview-delta-round-${_deltaRound}`, _deltaRound, await _renewLease(`ProposalReview-delta-round-${_deltaRound}`, _deltaRound))
 
   if (!_isCrossGenFirstRound) {
@@ -992,18 +1004,26 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}${f.evidence
 
 Read the CURRENT task via \`task_get ${_taskId}\`.
 
+IMPORTANT: the checkpoint's mechanical diff classification above (\`${_crossGenClassification}\`) is ADVISORY input only — it is a fast heuristic keyed mainly on backtick-quoted identifier sets, NOT a substitute for your own independent judgment. It can be WRONG in a specific, known way: an edit that keeps the same identifiers but WEAKENS, adds an exception/loophole to, or contradicts an existing safety/wiring claim's behavior, or that DELETES an existing claim entirely, can still classify as \`${_crossGenClassification}\` even though it is a real regression. Do not defer to it — verify the substance yourself.
+
+The Proposal text as it stood at the checkpoint's last full review (the "BEFORE"):
+\`\`\`
+${_crossGenReviewedProposalText || '(empty — the checkpoint recorded no prior text)'}
+\`\`\`
+
 Mechanically-detected novel claims from the cross-generation diff scan (verify each yourself — do not just trust the scan; if genuinely novel AND wiring-shaped, report it as a NEW blocking finding requiring Acceptance-Criteria coverage):
 ${JSON.stringify((_crossGenNoveltyScan?.novelClaims || []).map((c) => c.sentence))}
 
 Previously recorded open blocking findings (verify status against the CURRENT Proposal):
-${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n')}
+${openBlocking.length > 0 ? openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n') : '(none — the carried checkpoint ledger is currently clean; this does NOT mean the edit is automatically safe, see step 2 below)'}
 
 1. For each finding id above, confirm whether it is now resolved by the edit already on disk.
-2. For each novel claim listed above (if any), verify whether it is genuinely a NEW wiring/mechanism claim requiring Acceptance-Criteria coverage — if so, report it as a new BLOCKING finding ({subsystem, summary, severity:"blocker", blocking:true, evidence, claimRef, disposition:"unresolved"}).
-3. Report ONLY currently-open findings (blocking or non-blocking) as the \`findings\` array — a finding you already know about and consider unchanged should be reported again with the SAME subsystem/claimRef so it keeps its identity. Do NOT re-run a full independent Proposal re-derivation.
-4. ${_sessionIdInstruction}
-5. BEFORE returning, run \`date +%s%3N\` (real epoch milliseconds) and include the result as \`nowMs\` (a number) — the orchestrating workflow script cannot read the clock itself.
-6. Return {resolvedIds: [<ids from the list above now resolved>], findings: [<any still-open findings, typed the same way as the full review>], proposalHash: <a short hash/fingerprint you compute over the CURRENT Proposal text>, nowMs: <the real epoch-ms number from step 5>, sessionId: <your real session id>}.`
+2. Compare the BEFORE text above against the CURRENT task's \`## Proposal\` sentence by sentence. For every claim present in BOTH (even ones the mechanical classifier considered unchanged because the identifiers match): confirm its behavior, guarantee, or condition was NOT weakened, exception-carved, or contradicted. For every claim present in BEFORE but ABSENT from CURRENT: confirm its removal is explicitly and specifically justified — by an already-resolved/dispositioned ledger finding whose own recorded identity is genuinely ABOUT that removal (not merely a finding that happens to mention the same file/function names for an unrelated reason), or by a clearly-stated reason in the current Proposal text itself. If you find a weakened, contradicted, or unjustified-removed claim, report it as a NEW blocking finding ({subsystem, summary, severity:"blocker", blocking:true, evidence: <quote the BEFORE and AFTER text>, claimRef, disposition:"unresolved"}) — this is exactly the class of regression the mechanical classifier alone cannot see, which is why you are dispatched even when the carried ledger already looks clean.
+3. For each novel claim listed above (if any), verify whether it is genuinely a NEW wiring/mechanism claim requiring Acceptance-Criteria coverage — if so, report it as a new BLOCKING finding ({subsystem, summary, severity:"blocker", blocking:true, evidence, claimRef, disposition:"unresolved"}).
+4. Report ONLY currently-open findings (blocking or non-blocking) as the \`findings\` array — a finding you already know about and consider unchanged should be reported again with the SAME subsystem/claimRef so it keeps its identity. Do NOT re-run a full independent Proposal re-derivation; your job is verifying THIS diff, not re-authoring the Proposal.
+5. ${_sessionIdInstruction}
+6. BEFORE returning, run \`date +%s%3N\` (real epoch milliseconds) and include the result as \`nowMs\` (a number) — the orchestrating workflow script cannot read the clock itself.
+7. Return {resolvedIds: [<ids from the list above now resolved>], findings: [<any still-open findings, typed the same way as the full review, including any weakened/contradicted/unjustified-removed claim found in step 2>], proposalHash: <a short hash/fingerprint you compute over the CURRENT Proposal text>, nowMs: <the real epoch-ms number from step 6>, sessionId: <your real session id>}.`
     : `INDEPENDENT delta review, round ${_deltaRound}/${_maxDeltaRounds}, of task ${_taskId}'s just-revised \`## Proposal\` — you did NOT author or revise it. Read the CURRENT task via \`task_get ${_taskId}\`.
 
 Previously recorded open blocking findings:
