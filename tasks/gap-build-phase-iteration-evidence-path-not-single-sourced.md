@@ -3,7 +3,7 @@ id: gap-build-phase-iteration-evidence-path-not-single-sourced
 title: execute-milestone.js's Build-phase EVIDENCE step hand-derives the
   milestones/ path from prose instead of calling gate_resolve_milestone_root() —
   recurred 3 times this session (M179, M185, M188)
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -68,19 +68,30 @@ wasn't audited at the time.
    needed afterward.
 
 ## Acceptance Criteria
-- [ ] Build-phase EVIDENCE prompt text explicitly references `gate_resolve_milestone_root`, matching
-  Audit/Land's own phrasing — grep-confirmable.
+- [x] Build-phase EVIDENCE prompt text explicitly references `gate_resolve_milestone_root`, matching
+  Audit/Land's own phrasing — grep-confirmable. (Verified: independent reviewer confirmed the new
+  instruction genuinely matches Audit's line ~323-327 and Land's line ~423-428/473-479 phrasing,
+  not just superficially similar; `_milestone` is a real in-scope const already used elsewhere.)
 - [ ] A real (non-fixture) milestone dispatch after this fix shows the Build phase's own
   `iteration-0.md`/`iteration-N.md` filed at the correct top-level `milestones/M<NN>/` path with no
   subsequent `git mv` needed — shown via that real milestone's git history, not asserted.
+  **Deliberately left open (2026-07-31, mirrors the M204/DIR-126-E precedent for a disclosed,
+  non-blocking open item):** this cannot be produced at land time by construction — it requires a
+  real Build-phase dispatch that happens AFTER this fix lands. Closes naturally on the next real
+  milestone that reaches Build in this repo; no dedicated follow-up task needed. If a future
+  dispatch shows the OLD wrong-path behavior recurring, that is a genuine regression, not merely
+  this box staying unchecked.
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on `master`, verified via a real dispatch, not asserted.
-- [ ] Because this touches `.claude/workflows/execute-milestone.js` (driver execution-chain
-  script), resolving it must run under human-steered discipline.
+- [ ] Landed on `master`, verified via a real dispatch, not asserted. **Landed: yes (commit
+  `f8cc145`). Verified via a real dispatch: not yet — same open item as AC2 above, closes
+  naturally on the next real Build-phase dispatch.**
+- [x] Because this touches `.claude/workflows/execute-milestone.js` (driver execution-chain
+  script), resolving it must run under human-steered discipline. (This session's interactive user
+  is the human steering this — mixed mode, per explicit instruction.)
 
 ## Human verification when exp5 marks this task done
 1. Does a real milestone's Build phase now file its own evidence at the correct path on the first
