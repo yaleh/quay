@@ -4,7 +4,7 @@ title: preflightMergedMarkdownClaims's mid-line-bullet regex misidentifies a
   backtick-wrapped subtraction expression (e.g. `endedAtMs - startedAtMs`) as
   a markdown bullet marker -- found live during DIR-126-E's round-4
   Preflight rejection
-status: done
+status: todo
 labels:
   - gap
   - milestone-candidate
@@ -48,44 +48,32 @@ this repo's own telemetry/receipt work) don't need the same workaround.
 
 ## Acceptance Criteria
 
-- [x] A fixture sentence with a backtick-wrapped subtraction expression (`` `a - b` `` shape) and
+- [ ] A fixture sentence with a backtick-wrapped subtraction expression (`` `a - b` `` shape) and
   >=4 other backtick identifiers is confirmed NOT flagged as `preflight-merged-markdown-claims` (RED
-  before fix, GREEN after). (New fixture
-  `experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/code-span-
-  subtraction.md` (+ byte-identical `plugin/test/` mirror): "`` `endedAtMs - startedAtMs` `` using
-  `` `startedAtMs` ``, `` `endedAtMs` ``, `` `acquiredAtMs` ``, and `` `releasedAtMs` `` fields" — 5
-  backtick identifiers total, including the subtraction span. Pre-fix (`_MID_BULLET_RE` applied to
-  raw text with no code-span awareness) this shape hard-blocked with `blocking:true` — confirmed
-  live in the sibling task's own Finding section (`recordedAtMs - admission.acquiredAt` reproduction
-  against the unpatched regex). Post-fix: `preflightMergedMarkdownClaims` returns `null`.)
-- [x] The existing genuine mid-line-bullet-marker positive case (a real merged-claims block outside
+  before fix, GREEN after). Implemented and passing (see Execution record) but left UNCHECKED per
+  explicit coordinator instruction (2026-07-31): the sibling task's fix for the SAME shared function
+  was independently reviewed and REFUTED in its first design; this task's own code-span-exclusion
+  mechanism was not itself the refuted part, but both fixes land together in one change, so this box
+  stays open until the whole change gets a second independent review.
+- [ ] The existing genuine mid-line-bullet-marker positive case (a real merged-claims block outside
   any code span) still correctly triggers the finding — this fix must not regress true positives.
-  (Pre-existing RED fixture `bad.md` — "Add `FooModule` - update `BarService` invokes `Baz` and
-  `Qux` in one crammed line without separation." — still returns `blocking:true`, unregressed;
-  covered by the pre-existing "RED/known-bad" test, which stays green.)
-- [x] `experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs` (+ `plugin/test/`
-  mirror) gain both regression fixtures above. (Both mirrors gained the SAME two new tests —
-  "ascii-dash-prose false positive" (sibling task) and "code-span-subtraction false positive" (this
-  task) — plus the two new fixture files each, byte-identical via `cmp`.)
+  Confirmed still true post-redesign (`bad.md` still `blocking:true`) but left UNCHECKED pending the
+  same pending independent review.
+- [ ] `experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs` (+ `plugin/test/`
+  mirror) gain both regression fixtures above. Done (both mirrors, byte-identical) but left
+  UNCHECKED pending the same pending independent review.
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on `master`. NOT checked: this task was executed in an isolated git worktree/branch per
-  explicit dispatch instructions; the commit is real and self-contained but landing on `master` is
-  deliberately left to the orchestrating session's own independent review + merge step, not asserted
-  here.
-- [x] Real, non-fixture evidence: re-running `prepare-admission-check.ts --preflight` against
+- [ ] Landed on `master`. NOT checked: work is on an isolated git worktree/branch; landing on
+  `master` is left to the orchestrating session's own independent review + merge step.
+- [ ] Real, non-fixture evidence: re-running `prepare-admission-check.ts --preflight` against
   DIR-126-E's own real task body (at the commit that introduced the workaround reword, or an
-  equivalent fixture reproducing the same shape) confirms the false positive no longer fires. (Used
-  the "equivalent fixture reproducing the same shape" branch of this clause, not the original
-  DIR-126-E commit: real `prepare-admission-check.ts --preflight` CLI run — not the unit-test
-  harness — against a scratch task whose Finding section reproduces BOTH cited instances verbatim,
-  `` `recordedAtMs - admission.acquiredAt` `` and `` `endedAtMs - startedAtMs` `` alongside their
-  named component identifiers, exactly matching this task's own Finding-section evidence quotes.
-  Result: `{"ok":true,"findings":[]}` — zero findings at all, confirming the false positive no
-  longer fires.)
+  equivalent fixture reproducing the same shape) confirms the false positive no longer fires.
+  Re-confirmed post-redesign (see Execution record) but left UNCHECKED pending the pending
+  independent review, per explicit coordinator instruction.
 
 ## Touches
 
@@ -97,30 +85,46 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 - plugin/test/fixtures/preflight/merged-markdown-claims/ascii-dash-prose.md
 - experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/code-span-subtraction.md
 - plugin/test/fixtures/preflight/merged-markdown-claims/code-span-subtraction.md
+- experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/frontloaded-identifiers-crammed-claims.md
+- plugin/test/fixtures/preflight/merged-markdown-claims/frontloaded-identifiers-crammed-claims.md
+- experiments/quay-perpetual-stream/test/fixtures/preflight/merged-markdown-claims/trailing-identifier-ascii-dash-aside.md
+- plugin/test/fixtures/preflight/merged-markdown-claims/trailing-identifier-ascii-dash-aside.md
 
 ## Execution record
 
-Implemented together with the sibling task
-`gap-preflight-merged-markdown-ascii-dash-false-positive` as one coherent change to
-`preflightMergedMarkdownClaims`'s mid-bullet detection, since both false-positive shapes hit the
-exact same regex/logic (2026-07-31, dispatched to an isolated worktree agent).
+**Round 1** (2026-07-31, isolated worktree agent): implemented together with the sibling task
+`gap-preflight-merged-markdown-ascii-dash-false-positive` as one coherent change, since both
+false-positive shapes hit the same regex/logic. This task's own fix — `_findGenuineMidBullet`
+computing backtick code-span ranges and skipping any `_MID_BULLET_RE` match falling entirely inside
+one (a math `-` inside `` `endedAtMs - startedAtMs` `` never reaches the "genuine bullet" check at
+all) — is unconditionally correct and was NOT the part later refuted; the sibling task's ADDITIONAL
+"identifier follows" check was. Self-marked `status: done`, AC/DoD checked.
 
-Fix: introduced `_findGenuineMidBullet(block)`, which computes backtick code-span ranges in the
-block and skips any `_MID_BULLET_RE` match falling entirely inside a code span — this is this
-task's own direct fix (a math `-` inside `` `endedAtMs - startedAtMs` `` never reaches the
-"genuine bullet" check at all, since its match position is fully contained in a `` `...` `` span).
-The sibling ASCII-dash task's fix (require an identifier to follow a surviving match) is additive
-and does not affect this task's own code-span-exclusion mechanism.
+**Independent review of round 1: REFUTED** (on the sibling task's own "identifier follows" logic,
+not this task's code-span-exclusion mechanism — see that task's Execution record for the full
+counterexamples). Because both fixes live in the same `_findGenuineMidBullet` function and land
+together, this task's AC/DoD are held to the same re-review bar as the sibling's, even though its
+own mechanism was not directly implicated.
 
-Verification: sanity-checked directly (existing RED fixture still `blocking:true`, existing
-ambiguous fixture still `reviewer-required`, both new false-positive fixtures `null`) before running
-the full suites. `experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs` and
-`plugin/test/prepare-admission-check.test.mjs`: 80/80 pass each, byte-identical (`cmp` zero output
-on both the script and test mirrors, plus the two new fixture mirrors).
-Real-CLI dogfood: `node --experimental-strip-types experiments/quay-perpetual-stream/scripts/
-prepare-admission-check.ts --preflight --taskId T-CODE-SPAN --workspace <scratch>` against a scratch
-task whose Finding section contains both cited reproduction instances from this task's own Finding
-returned `{"ok":true,"findings":[]}`.
+**Round 2** (2026-07-31, same session): the sibling task's logic was redesigned around
+`_looksLikeNewClaimStart` (marker-adjacent stopword check, see that task's Execution record for the
+full design writeup). This task's own code-span-exclusion step is unchanged by that redesign — it
+runs first, before `_looksLikeNewClaimStart` is even consulted, so a match fully inside a
+`` `...` `` code span is excluded exactly as before.
 
-**Outcome:** done (code+tests landed on this branch; `master` landing left to the orchestrating
-session per dispatch instructions — see DoD note above).
+Regression tests for the sibling task's two new counterexamples were added in the same pass (they
+exercise the shared function, so both mirrors' full suites are the correct regression surface for
+this task too). Full suite: 82/82 pass in both `experiments/quay-perpetual-stream/test/` and
+`plugin/test/` mirrors. `cmp` zero output on the script mirror, test mirror, and all 4 fixture
+mirrors touching this shared function (2 from round 1 including this task's own
+`code-span-subtraction.md`, 2 new from round 2).
+
+Real-CLI dogfood, re-run post-redesign (`prepare-admission-check.ts --preflight`, not the unit-test
+harness): a scratch task whose Finding section reproduces both cited instances from this task's own
+Finding (`` `recordedAtMs - admission.acquiredAt` `` and `` `endedAtMs - startedAtMs` ``) still
+returns `{"ok":true,"findings":[]}` — zero findings, unaffected by the sibling task's redesign.
+
+**Outcome:** fix (code-span exclusion) unchanged and still correct through the redesign; tests
+added; real-CLI dogfooded. AC/DoD boxes deliberately left UNCHECKED and `status` left at `todo` per
+the coordinator's explicit 2026-07-31 instruction covering the whole shared change — a second
+independent review is expected before this task is called done or landed.

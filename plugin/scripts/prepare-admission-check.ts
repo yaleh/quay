@@ -435,12 +435,60 @@ function _scanStaleReferences(text, workspace, touchesGlobs) {
 //   2. an ordinary ASCII " - " prose dash/aside, e.g. "..., and `qux.ts` - all four files share
 //      one helper module" — a ` - ` between two prose words is not a bullet marker just because it
 //      sits in a block that also happens to name >=2 backtick identifiers earlier in the sentence.
-// `_findGenuineMidBullet` closes both: (a) skip any match whose span falls entirely inside a
-// `` `...` `` code span, then (b) only treat a surviving match as a genuine bullet marker if
-// another backtick-quoted identifier follows it later in the block — the real shape of "two claims
-// crammed onto one line" is `` `A` - text `B` `` (a new claim, itself naming an identifier, starts
-// right after the marker); a trailing prose aside with no further identifier after it never does.
+// `_findGenuineMidBullet` closes (1) by skipping any match whose span falls entirely inside a
+// `` `...` `` code span — unconditionally correct, code-span content is never prose structure.
+//
+// Closing (2) went through TWO designs; the first was REFUTED by an independent review (2026-07-31)
+// before landing and is recorded here so it isn't reintroduced. Design 1: "genuine iff another
+// backtick identifier occurs ANYWHERE LATER in the block." Refuted with a live counterexample —
+// "`foo.ts`, `bar.ts`, `baz.ts`, and `qux.ts` - fix the null check in the first two - also rename
+// the last two files for clarity." — a REAL crammed-two-claims defect (exactly what this detector
+// exists to catch) whose identifiers are all front-loaded BEFORE the dashes, so "any identifier
+// later" is false and the whole block silently passed — a false NEGATIVE, strictly worse than the
+// false positive it was fixing, since it defeats a hard-blocking safety check. The same design also
+// failed to generalize the ASCII-dash fix itself: "`foo.ts` - the main entry point - and also
+// `bar.ts` for testing, plus `baz.ts` and `qux.ts` for good measure." still hard-blocked (an
+// identifier — `bar.ts` — DOES occur later, just not adjacent to the marker), so it wasn't even a
+// correct fix for the dash-prose shape it targeted, only for the narrower "no identifier anywhere
+// after" case the original constructed repro happened to use.
+//
+// Design 2 (this one): direction-agnostic — never mind where OTHER identifiers in the block sit —
+// look only at whether the marker itself is immediately followed by the START of a genuine new
+// claim. `_looksLikeNewClaimStart` checks the single word right after the marker: either it's a
+// backtick-quoted identifier directly (the shape the reviewer's own positive example uses, "`A` -
+// `NewClaim` does X"), or it's a word NOT in `_CONTINUATION_STOPWORDS` — a closed-class list of
+// articles/conjunctions/prepositions/pronouns/quantifiers/discourse-connectors ("the", "and",
+// "also", "which", "with", ...) that is how an ASCII " - " prose aside/continuation overwhelmingly
+// starts in ordinary English, and how a genuine new claim/instruction essentially never does
+// (deliberately a STOPLIST, not a verb whitelist — verbs are open-class and unbounded, so a
+// whitelist silently under-covers; a closed-class function-word stoplist is enumerable and, when
+// wrong, is wrong in the safety-preferred direction: an unlisted word defaults to "looks like a
+// claim", never to "safely ignorable"). Re-run against both counterexamples above: "fix the null
+// check..." starts with "fix" (not a stopword) -> genuine -> still blocks, correctly. "the main
+// entry point..." starts with "the" (a stopword) -> not genuine; its OWN second dash, "- and also
+// `bar.ts`...", starts with "and" (also a stopword) -> not genuine either -> block correctly stays
+// silent, regardless of the `bar.ts` identifier sitting a few words later.
 const _MID_BULLET_RE = /\S[ \t]+[-*][ \t]+\S/g;
+
+const _CONTINUATION_STOPWORDS = new Set([
+  "the", "a", "an", "this", "that", "these", "those", "all", "both", "each", "every", "some",
+  "any", "no", "none", "and", "or", "but", "so", "yet", "for", "nor", "also", "then", "thus",
+  "hence", "therefore", "meanwhile", "otherwise", "however", "moreover", "furthermore",
+  "additionally", "plus", "which", "who", "whom", "whose", "where", "when", "while", "since",
+  "because", "although", "though", "it", "they", "we", "you", "he", "she", "i", "with", "without",
+  "within", "into", "onto", "upon", "about", "above", "below", "under", "over", "between",
+  "among", "during", "before", "after", "until", "unless", "per", "via", "as", "is", "are", "was",
+  "were", "be", "being", "been", "has", "have", "had", "not", "only", "just", "still", "already",
+  "even", "rather", "instead",
+]);
+
+function _looksLikeNewClaimStart(tail) {
+  const trimmed = tail.replace(/^[ \t]+/, "");
+  if (trimmed.startsWith("`")) return true;
+  const wordMatch = trimmed.match(/^[A-Za-z']+/);
+  if (!wordMatch) return true; // doesn't look like ordinary prose continuation either; default safe
+  return !_CONTINUATION_STOPWORDS.has(wordMatch[0].toLowerCase());
+}
 
 function _findGenuineMidBullet(block) {
   const codeSpanRanges = [...block.matchAll(/`[^`]*`/g)].map((m) => [m.index, m.index + m[0].length]);
@@ -451,8 +499,10 @@ function _findGenuineMidBullet(block) {
     const end = start + match[0].length;
     const insideCodeSpan = codeSpanRanges.some(([s, e]) => start >= s && end <= e);
     if (insideCodeSpan) continue;
-    const identifierFollows = codeSpanRanges.some(([s]) => s >= end);
-    if (identifierFollows) return match[0];
+    // `end - 1` because _MID_BULLET_RE's final `\S` already consumed the first character of the
+    // word that follows the marker — start the tail there, not one character late.
+    const tail = block.slice(end - 1);
+    if (_looksLikeNewClaimStart(tail)) return match[0];
   }
   return null;
 }

@@ -502,6 +502,32 @@ describe("preflightMergedMarkdownClaims", () => {
     const taskBody = readFixture("merged-markdown-claims", "code-span-subtraction.md");
     assert.equal(preflightMergedMarkdownClaims({ taskBody }), null);
   });
+
+  // Independent-review REFUTATION counterexample (2026-07-31): a first design of the ASCII-dash
+  // fix ("genuine iff a backtick identifier occurs anywhere LATER in the block") produced a false
+  // NEGATIVE here — all 4 identifiers are front-loaded BEFORE the dashes, so "any identifier
+  // later" was false and this real crammed-two-claims defect silently passed. The
+  // `_looksLikeNewClaimStart` redesign looks only at the word immediately after each marker
+  // ("fix"/"also rename" — neither is a continuation stopword) regardless of where identifiers in
+  // the block sit, so this must still block.
+  test("REFUTATION regression: front-loaded identifiers + dash-separated action clauses is STILL a genuine crammed-claims block -> blocking", () => {
+    const taskBody = readFixture("merged-markdown-claims", "frontloaded-identifiers-crammed-claims.md");
+    const verdict = preflightMergedMarkdownClaims({ taskBody });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-merged-markdown-claims");
+    assert.equal(verdict.blocking, true);
+  });
+
+  // Independent-review REFUTATION counterexample (2026-07-31): the same first design also failed
+  // to generalize the ASCII-dash-prose fix it was meant to deliver — this shape still hard-blocked
+  // because `bar.ts` occurs later in the block (just not adjacent to either marker). Under
+  // `_looksLikeNewClaimStart`, the word right after each marker ("the"/"and") is a continuation
+  // stopword, so neither dash reads as a genuine bullet, regardless of `bar.ts`/`baz.ts`/`qux.ts`
+  // appearing afterward.
+  test("REFUTATION regression: a trailing identifier elsewhere in the block does NOT make a prose dash/aside genuine -> zero findings", () => {
+    const taskBody = readFixture("merged-markdown-claims", "trailing-identifier-ascii-dash-aside.md");
+    assert.equal(preflightMergedMarkdownClaims({ taskBody }), null);
+  });
 });
 
 describe("preflightStaleAcRefs", () => {
