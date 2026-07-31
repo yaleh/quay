@@ -426,6 +426,119 @@ function _scanStaleReferences(text, workspace, touchesGlobs) {
 // real remaining gap it does not close is a bullet marker embedded MID-LINE (two claims crammed onto
 // one physical line, e.g. "`foo.ts` - update `bar.ts` invokes ..." with no line break between them)
 // — this detector's own new, narrow logic layered on top of the reused splitter.
+//
+// `_MID_BULLET_RE` alone over-matches two shapes that are NOT a merged-claims bullet marker
+// (gap-preflight-merged-markdown-ascii-dash-false-positive /
+// gap-preflight-merged-markdown-claims-code-span-subtraction-false-positive, both 2026-07):
+//   1. a backtick-wrapped subtraction expression, e.g. `` `endedAtMs - startedAtMs` `` — the regex
+//      has no concept of code-span boundaries, so a math `-` inside backticks reads as a bullet.
+//   2. an ordinary ASCII " - " prose dash/aside, e.g. "..., and `qux.ts` - all four files share
+//      one helper module" — a ` - ` between two prose words is not a bullet marker just because it
+//      sits in a block that also happens to name >=2 backtick identifiers earlier in the sentence.
+// `_findGenuineMidBullet` closes (1) by skipping any match whose span falls entirely inside a
+// `` `...` `` code span — unconditionally correct, code-span content is never prose structure.
+//
+// Closing (2) went through THREE designs; the first two were REFUTED by independent review
+// (2026-07-31) before landing and are recorded here so neither is reintroduced.
+//
+// Design 1: "genuine iff another backtick identifier occurs ANYWHERE LATER in the block."
+// Refuted with a live counterexample — "`foo.ts`, `bar.ts`, `baz.ts`, and `qux.ts` - fix the null
+// check in the first two - also rename the last two files for clarity." — a REAL crammed-two-claims
+// defect whose identifiers are all front-loaded BEFORE the dashes, so it silently passed with ZERO
+// findings — a false NEGATIVE that defeats a hard-blocking safety check.
+//
+// Design 2: direction-agnostic — look only at the single word immediately after each marker;
+// genuine iff that word is a backtick identifier or is NOT in a closed-class continuation-stopword
+// list ("the", "and", "also", "it", ...). Also refuted, with a WORSE counterexample —
+// "`foo.ts`, `bar.ts`, `baz.ts`, and `qux.ts` - The new caching layer must invalidate stale entries
+// on write, not just on read." — front-loaded identifiers, second claim starts with "The" (a
+// stopword) — silently passed with ZERO findings again. The reviewer's point: a stoplist keyed on
+// the FIRST WORD of a continuation cannot work, because genuine second claims and prose asides draw
+// from the exact same function-word-heavy distribution of English sentence openers ("This also...",
+// "It must...", "The new..." are all completely ordinary ways to START a real second claim).
+//
+// Design 3 (this one): stop trying to build a perfect binary genuine/not-genuine classifier — no
+// finite heuristic over unstructured English prose can be both sound and complete, and the last two
+// attempts both erred by ever fully SUPPRESSING a match (returning zero findings) based on a
+// necessarily-imperfect signal. Instead, the ASCII-dash prose signal (still the same continuation-
+// stopword idea, kept because it correctly identifies the two ORIGINAL false-positive shapes) is
+// now bounded to a SEVERITY DOWNGRADE ONLY: a block whose mid-bullet match(es) all look like a
+// prose dash/aside — via `_isProseDashTail`, same stopword-adjacency test as design 2's tail check,
+// but reused only to soften rather than to gate — is downgraded from the blocking (`>=4`
+// identifiers) tier to the ambiguous/`reviewer-required` (`preflight-ambiguous-merged-markdown-
+// claims`) tier, EXACTLY the outcome both original tasks' own Acceptance Criteria explicitly permit
+// ("returns zero findings, OR AT MOST a non-blocking ambiguous variant"). It can never drop all the
+// way to zero findings by this signal alone — the block still surfaces as a real, visible,
+// human-reviewed finding, just not a hard block. This bounds the blast radius of getting the
+// heuristic wrong: worst case, a genuine crammed-claims defect gets flagged non-blocking instead of
+// blocking (still caught by a human), never silently missed entirely — the actual property both
+// prior refutations were pointing at, stated precisely instead of chased informally with a bigger
+// heuristic. Re-verified against ALL FOUR known shapes plus both design-1/2 counterexamples:
+//   - bad.md ("`FooModule` - update `BarService` invokes ...", genuine, must block): its one match's
+//     tail is "update" (not a stopword) -> not a prose dash -> full severity -> still BLOCKS.
+//   - design-1's counterexample ("... - fix the null check ... - also rename ...", genuine, must
+//     block): "fix" is not a stopword -> at least one match is NOT prose-dash -> `every()` is false
+//     -> full severity -> still BLOCKS (the OTHER match, "also", being a stopword, does not matter —
+//     downgrade requires EVERY match in the block to look like prose, not just one).
+//   - the original #7 repro and design-2's counterexample ("... - all four files share ...", "...
+//     - The new caching layer must invalidate ...", both prose, must not hard-block): single match,
+//     tail starts with a stopword ("all"/"The") -> every() true -> DOWNGRADED to ambiguous, not
+//     blocking — satisfies "at most ambiguous" without ever going silent.
+//   - design-1's other counterexample ("... - the main entry point - and also `bar.ts` ...", prose,
+//     must not hard-block): two matches, tails "the"/"and", both stopwords -> every() true ->
+//     DOWNGRADED to ambiguous.
+//   - code-span-subtraction.md (`` `endedAtMs - startedAtMs` ``): unchanged from design 1/2 — a
+//     match entirely inside a backtick code span is excluded before this signal is even computed,
+//     unconditionally correct since code-span content is never prose structure; this is the one part
+//     of the fix neither prior review disputed.
+const _MID_BULLET_RE = /\S[ \t]+[-*][ \t]+\S/g;
+
+const _CONTINUATION_STOPWORDS = new Set([
+  "the", "a", "an", "this", "that", "these", "those", "all", "both", "each", "every", "some",
+  "any", "no", "none", "and", "or", "but", "so", "yet", "for", "nor", "also", "then", "thus",
+  "hence", "therefore", "meanwhile", "otherwise", "however", "moreover", "furthermore",
+  "additionally", "plus", "which", "who", "whom", "whose", "where", "when", "while", "since",
+  "because", "although", "though", "it", "they", "we", "you", "he", "she", "i", "with", "without",
+  "within", "into", "onto", "upon", "about", "above", "below", "under", "over", "between",
+  "among", "during", "before", "after", "until", "unless", "per", "via", "as", "is", "are", "was",
+  "were", "be", "being", "been", "has", "have", "had", "not", "only", "just", "still", "already",
+  "even", "rather", "instead",
+]);
+
+// Returns true only when the tail POSITIVELY looks like a prose continuation (starts with a
+// continuation-stopword). Any unclear/unrecognized shape defaults to FALSE (not prose) — the
+// safety-preferred direction here, since false=>"do not downgrade" keeps the block at full
+// severity, whereas the earlier designs' analogous defaults controlled whether a match was
+// suppressed entirely, a much higher-stakes decision this design no longer makes from this signal.
+function _isProseDashTail(tail) {
+  const trimmed = tail.replace(/^[ \t]+/, "");
+  if (trimmed.startsWith("`")) return false;
+  const wordMatch = trimmed.match(/^[A-Za-z']+/);
+  if (!wordMatch) return false;
+  return _CONTINUATION_STOPWORDS.has(wordMatch[0].toLowerCase());
+}
+
+// Returns every non-code-span mid-bullet match in `block`, each tagged with whether its tail looks
+// like a prose dash. Never filters a match out based on the prose signal — only code-span exclusion
+// removes a match entirely (unconditionally safe, see header comment above).
+function _midBulletMatches(block) {
+  const codeSpanRanges = [...block.matchAll(/`[^`]*`/g)].map((m) => [m.index, m.index + m[0].length]);
+  const re = new RegExp(_MID_BULLET_RE.source, _MID_BULLET_RE.flags);
+  const out = [];
+  let match;
+  while ((match = re.exec(block))) {
+    const start = match.index;
+    const end = start + match[0].length;
+    const insideCodeSpan = codeSpanRanges.some(([s, e]) => start >= s && end <= e);
+    if (insideCodeSpan) continue;
+    // `end - 1` because _MID_BULLET_RE's final `\S` already consumed the first character of the
+    // word that follows the marker — start the tail there, not one character late.
+    const tail = block.slice(end - 1);
+    out.push({ text: match[0], looksLikeProseDash: _isProseDashTail(tail) });
+  }
+  return out;
+}
+
 export function preflightMergedMarkdownClaims({ taskBody }) {
   const code = "preflight-merged-markdown-claims";
   const sections = ["Requested action", "Proposal", "Finding"]
@@ -438,12 +551,18 @@ export function preflightMergedMarkdownClaims({ taskBody }) {
   let worstIdentifierCount = 0;
   let anyAmbiguous = false;
   for (const block of blocks) {
-    const midBulletMatches = block.match(/\S[ \t]+[-*][ \t]+\S/g) || [];
+    const midBulletMatches = _midBulletMatches(block);
     if (midBulletMatches.length === 0) continue;
     const identifiers = new Set([...block.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
-    if (identifiers.size >= 4) {
+    // Every mid-bullet match in this block must look like a prose dash to downgrade — a single
+    // genuine-looking match (e.g. design-1's "- fix the null check...") keeps full severity even
+    // if another match in the same block ("- also rename...") looks like prose.
+    const allLookLikeProseDash = midBulletMatches.every((m) => m.looksLikeProseDash);
+    if (identifiers.size >= 4 && !allLookLikeProseDash) {
       if (identifiers.size > worstIdentifierCount) { worstIdentifierCount = identifiers.size; worstBlock = block; }
     } else if (identifiers.size >= 2) {
+      // 2-3 identifiers (original ambiguous tier), OR >=4 identifiers but every mid-bullet match
+      // looks like a prose dash — downgraded here rather than suppressed (see header comment).
       anyAmbiguous = true;
       if (!worstBlock) worstBlock = block;
     }
@@ -455,7 +574,7 @@ export function preflightMergedMarkdownClaims({ taskBody }) {
   }
   if (anyAmbiguous) {
     return _mkFinding(_ambiguousCode(code), false,
-      "a block has a mid-line bullet marker with 2-3 backtick identifiers — plausibly one claim with an inline aside, not confidently a merged-claims case",
+      "a block has a mid-line bullet marker with 2-3 backtick identifiers (or >=4 identifiers but every marker looks like a prose dash/aside) — plausibly one claim with an inline aside, not confidently a merged-claims case",
       worstBlock ? worstBlock.slice(0, 200) : "", "reviewer-required");
   }
   return null;

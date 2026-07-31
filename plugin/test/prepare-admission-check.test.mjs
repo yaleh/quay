@@ -486,6 +486,72 @@ describe("preflightMergedMarkdownClaims", () => {
     assert.equal(verdict.blocking, false);
     assert.equal(verdict.disposition, "reviewer-required");
   });
+
+  // gap-preflight-merged-markdown-ascii-dash-false-positive: an ordinary ASCII " - " prose
+  // dash/aside (not a bullet marker) trailing after the block's backtick identifiers must not
+  // hard-block just because the block happens to name >=4 identifiers earlier in the sentence.
+  // Design 3 (see the function's own header comment for why): downgraded to the non-blocking
+  // ambiguous/reviewer-required tier rather than fully suppressed — the task's own AC explicitly
+  // permits "zero findings, OR AT MOST a non-blocking ambiguous variant", and full suppression is
+  // exactly what made designs 1 and 2 both REFUTED for a real false-negative risk.
+  test("ascii-dash-prose false positive: an ordinary ASCII ' - ' prose dash/aside is NOT a bullet marker -> not blocking (downgraded to ambiguous, not silently suppressed)", () => {
+    const taskBody = readFixture("merged-markdown-claims", "ascii-dash-prose.md");
+    const verdict = preflightMergedMarkdownClaims({ taskBody });
+    assert.ok(verdict, "expected a visible (non-blocking) finding, not silent suppression");
+    assert.equal(verdict.code, "preflight-ambiguous-merged-markdown-claims");
+    assert.equal(verdict.blocking, false);
+    assert.equal(verdict.disposition, "reviewer-required");
+  });
+
+  // gap-preflight-merged-markdown-claims-code-span-subtraction-false-positive: a backtick-wrapped
+  // subtraction expression (e.g. `` `endedAtMs - startedAtMs` ``) has no concept of code-span
+  // boundaries under the raw regex and must not be misread as a bullet marker.
+  test("code-span-subtraction false positive: a backtick-wrapped subtraction expression is NOT a bullet marker -> zero findings", () => {
+    const taskBody = readFixture("merged-markdown-claims", "code-span-subtraction.md");
+    assert.equal(preflightMergedMarkdownClaims({ taskBody }), null);
+  });
+
+  // Independent-review REFUTATION counterexample (2026-07-31): a first design of the ASCII-dash
+  // fix ("genuine iff a backtick identifier occurs anywhere LATER in the block") produced a false
+  // NEGATIVE here — all 4 identifiers are front-loaded BEFORE the dashes, so "any identifier
+  // later" was false and this real crammed-two-claims defect silently passed. The
+  // `_looksLikeNewClaimStart` redesign looks only at the word immediately after each marker
+  // ("fix"/"also rename" — neither is a continuation stopword) regardless of where identifiers in
+  // the block sit, so this must still block.
+  test("REFUTATION regression: front-loaded identifiers + dash-separated action clauses is STILL a genuine crammed-claims block -> blocking", () => {
+    const taskBody = readFixture("merged-markdown-claims", "frontloaded-identifiers-crammed-claims.md");
+    const verdict = preflightMergedMarkdownClaims({ taskBody });
+    assert.ok(verdict, "expected a finding");
+    assert.equal(verdict.code, "preflight-merged-markdown-claims");
+    assert.equal(verdict.blocking, true);
+  });
+
+  // Independent-review REFUTATION counterexample (2026-07-31): design 1 also failed to generalize
+  // the ASCII-dash-prose fix it was meant to deliver — this shape still hard-blocked because
+  // `bar.ts` occurs later in the block (just not adjacent to either marker). Under design 3, both
+  // markers' tails ("the"/"and") are continuation stopwords -> every() true -> downgraded to
+  // ambiguous, not blocking (never silently suppressed).
+  test("REFUTATION regression: a trailing identifier elsewhere in the block does NOT make a prose dash/aside genuine -> not blocking (ambiguous)", () => {
+    const taskBody = readFixture("merged-markdown-claims", "trailing-identifier-ascii-dash-aside.md");
+    const verdict = preflightMergedMarkdownClaims({ taskBody });
+    assert.ok(verdict, "expected a visible (non-blocking) finding, not silent suppression");
+    assert.equal(verdict.code, "preflight-ambiguous-merged-markdown-claims");
+    assert.equal(verdict.blocking, false);
+  });
+
+  // Round-2 independent-review REFUTATION counterexample (2026-07-31): design 2 ("genuine iff the
+  // word right after the marker is not a continuation stopword") produced a WORSE false negative —
+  // a genuine crammed-claims defect whose second claim happens to start with "The" (a stopword)
+  // silently passed with zero findings. Design 3 downgrades instead of suppressing: still a real,
+  // visible, non-blocking finding, never silent.
+  test("Round-2 REFUTATION regression: front-loaded identifiers + a stopword-opening second claim ('The new caching layer...') -> not silently suppressed (downgraded to ambiguous)", () => {
+    const taskBody = readFixture("merged-markdown-claims", "round2-stopword-opening-second-claim.md");
+    const verdict = preflightMergedMarkdownClaims({ taskBody });
+    assert.ok(verdict, "expected a visible finding, not silent suppression (this was round 2's exact refutation)");
+    assert.equal(verdict.code, "preflight-ambiguous-merged-markdown-claims");
+    assert.equal(verdict.blocking, false);
+    assert.equal(verdict.disposition, "reviewer-required");
+  });
 });
 
 describe("preflightStaleAcRefs", () => {
