@@ -40,6 +40,31 @@ scripts. Some descriptions already disagree with execution.
 This duplication raises both descriptive length and run-to-run instability. It also makes policy
 changes deform orchestration code, preventing the kernel from remaining stable.
 
+**Scope addition (2026-07-31, prompt-quality review of `prepare-milestone.js`/`execute-milestone.js`
+during M208/M209 dispatch):** direct read of both live workflow files found two further concrete
+instances of the same "duplication raises descriptive length and prevents one stable owner" class
+this directive already targets, neither previously named in scope:
+
+- **`meta.description`/`phases[].detail` as an unbounded changelog.** `prepare-milestone.js`'s
+  `meta.description` is 1033 characters; roughly two-thirds is historical `STATUS (M<NN>/DIR-<NNN>):`
+  prose appended once per landed change and never subtracted (`execute-milestone.js`'s own
+  description, 601 characters, has the same shape). `phases[].detail` entries carry the same
+  `DIR-126-A/M200:`-style source-commit prefix instead of a pure operational description. This field
+  is the single most user-visible text the Workflow tool renders (task-notification summary,
+  `/workflows` listing) and currently functions as an append-only history rather than a description.
+- **`ProposalReview`'s single `agent()` call performs seven orthogonal jobs in one dispatch
+  (~3300-character prompt):** substantive Proposal review, mechanism-claim wiring-coverage
+  extraction (redundant with the already-separate `checkWiringCoverage()` sub-step this same phase
+  also runs), DIR-125 typed-finding classification (six dispositions plus `rootCauseKey`/
+  `repairable`), a typed mechanism-inventory extraction with anti-laundering `proofSurface`
+  uniqueness, session-id capture, and clock capture. No other `agent()` call in either workflow
+  combines more than two of these concerns; ProposalReview is the outlier.
+
+Both are the same root cause this directive already targets (stable rules/roles distributed across
+prompt prose instead of one executable or single-role owner) — extending this directive's scope,
+rather than filing a new directive, keeps one authoritative place for "subtract duplicate workflow
+prompt control text."
+
 ## Requested action
 
 1. Define a versioned `ExecutionPolicy`/profile registry mapping task kind/class and candidate shape
@@ -67,6 +92,20 @@ changes deform orchestration code, preventing the kernel from remaining stable.
 11. Expose measured cost, blocking-yield, and false-positive-cost inputs for DIR-124-E ordering.
     Policy determines what must run; the scheduler may optimize when it runs, never whether a
     required invariant runs.
+12. Replace `prepare-milestone.js`'s and `execute-milestone.js`'s `meta.description` with a
+    concise (target: under 250 characters), purely operational summary in both mirrors; strip every
+    `STATUS (M<NN>/DIR-<NNN>):`-shaped historical entry and every `phases[].detail` source-commit
+    prefix. Migrate the removed history verbatim into a new `docs/references/workflow-changelog.md`
+    (one dated section per workflow) so no information is discarded, only relocated to a place that
+    is not the primary user-facing summary text.
+13. Split `ProposalReview`'s round-0 full-review `agent()` call into narrower, single-purpose
+    dispatches: retain substantive review + DIR-125 typed findings in the review agent; extract
+    typed mechanism-inventory derivation into its own agent call (parallel to the already-separate
+    `checkWiringCoverage()` sub-step); move clock capture (`date +%s%3N`) to a mechanical
+    (non-content) command rather than a content-agent instruction. No dispatch introduced by this
+    split may exceed roughly 2000 prompt characters or combine more than two orthogonal review
+    responsibilities. Preserve the existing finding-ledger merge point (`_upsertFindings`) as the
+    single place results from the split dispatches are combined.
 
 ## Acceptance Criteria
 
@@ -90,6 +129,16 @@ changes deform orchestration code, preventing the kernel from remaining stable.
 - [ ] Before/after measurements show lower prompt bytes and duplicate-rule count; no migrated rule
   gains a second authoritative owner.
 - [ ] DIR-118 remains an unimplemented policy extension, not a hidden branch in the registry.
+- [ ] Both workflow mirrors' `meta.description` are each under 250 characters and contain zero
+  `STATUS (M<NN>/DIR-<NNN>):`-shaped historical entries; `phases[].detail` entries contain zero
+  source-commit prefixes; grep-confirmable in both `.claude/workflows/` and `plugin/workflows/`.
+  `docs/references/workflow-changelog.md` contains every removed STATUS entry, attributable to its
+  originating milestone/commit.
+- [ ] `ProposalReview`'s round-0 dispatch is split so no single `agent()` call in either workflow
+  combines substantive review, wiring-coverage extraction, typed mechanism-inventory derivation,
+  and clock capture in one prompt; each split dispatch's prompt is under ~2000 characters
+  (measured, not estimated). The existing `_deriveMechanismInventory()` validation and
+  `_upsertFindings` merge point are reused unchanged, not reimplemented per-dispatch.
 
 ## Definition of Done
 
@@ -123,3 +172,4 @@ Standard exp5 DoD clauses apply.
 - `plugin/workflows/execute-milestone.js`
 - `plugin/workflows/prepare-milestone.js`
 - `experiments/quay-perpetual-stream/OUTER-LOOP.md`
+- `docs/references/workflow-changelog.md`
