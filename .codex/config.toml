@@ -1,0 +1,20 @@
+# Project-scoped Codex configuration for the quay repository (DIR-121, Codex
+# adoption Stage 1 — interactive Quay task operator).
+#
+# Deliberately MINIMAL. Stage 1 registers ONLY the existing provider-neutral
+# Quay stdio MCP server that this stage needs. Per DIR-121 this file must NOT
+# set repository model, reasoning, sandbox, approval, hook, automation, or
+# telemetry defaults — those belong to later stages (and a Host Adapter), not
+# to a bounded human-authorized task operator.
+#
+# Syntax validated against codex-cli 0.146.0 (`codex mcp list` reports the
+# project `quay` server as enabled). See plugin/scripts/codex-stage1-selfcheck.sh.
+#
+# `args[0]` is a repo-root-relative path; Codex launches the server with the
+# trusted project root as cwd. This is the same stdio command `.mcp.json`
+# registers for the Claude environment, so both hosts exercise the identical
+# provider-neutral tool surface.
+
+[mcp_servers.quay]
+command = "node"
+args = ["packages/quay/bin/quay.ts", "mcp"]

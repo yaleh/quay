@@ -1,6 +1,6 @@
 ---
 name: quay-directive
-description: "Record a new directive for THIS workspace's quay task store as a TASK-CANONICAL quay task (label:directive) via task_write — the task IS the single source of truth (DIR-028/Plan A; NO directives/*.md file, NO projection, NO anti-drift check). Workspace-portable: works in any project with a .quay/config.yml, with or without an experiments/ dir. Every directive MUST carry runnable Acceptance Criteria + a real-landing Definition of Done (a file/fixture is necessary-not-sufficient — done = a real object actually operated through the mechanism, DIR-026 Reading A). Invoke after discussing the finding/action in this conversation, e.g. /quay-directive manda dispatch confirmed genuine."
+description: "Record a new directive for THIS workspace's quay task store as a TASK-CANONICAL quay task (label:directive) via task_write — the task IS the single source of truth (DIR-028/Plan A; NO directives/*.md file, NO projection, NO anti-drift check). Workspace-portable: works in any project with a .quay/config.yml, with or without an experiments/ dir. Every directive MUST carry runnable Acceptance Criteria + a real-landing Definition of Done (a file/fixture is necessary-not-sufficient — done = a real object actually operated through the mechanism, DIR-026 Reading A). Invoke after discussing the finding/action in the active conversation — host invocation is a thin adapter only: Claude Code uses /quay-directive, Codex uses $quay-directive (e.g. quay-directive manda dispatch confirmed genuine)."
 allowed-tools: Bash, Read, Write, Edit
 ---
 
@@ -25,9 +25,11 @@ no `experiments/` at all (the common case for a project that only installed this
 identically to a workspace that runs its own BAIME-style research loop under `experiments/` — that
 kind of layout is one instance of a workspace, not a hardcoded assumption baked into this skill.
 
-The optional argument after `/quay-directive` is a short title hint only. The Finding and Requested
-action must be drawn from what was ALREADY discussed in this conversation. If nothing substantive
-was discussed, stop and say so instead of inventing content.
+The optional argument after the skill invocation (`/quay-directive` in Claude Code,
+`$quay-directive` in Codex — host invocation syntax is a thin adapter only; the lifecycle
+policy below is the one canonical contract both resolve to) is a short title hint only. The
+Finding and Requested action must be drawn from what was ALREADY discussed in this conversation.
+If nothing substantive was discussed, stop and say so instead of inventing content.
 
 ## Steps
 
@@ -106,12 +108,13 @@ was discussed, stop and say so instead of inventing content.
    `## Resolution` on a still-open directive is correct.
 
 6. **Self-check the round-trip BEFORE landing (canonical-task-schema v1).** After create + read-back,
-   run the SHIPPED schema-check bundled with this plugin (not a reference into any `experiments/**`
-   path):
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-schema-check.ts" <path-to-the-task-file>` (or the
-   `.sh` wrapper at `"${CLAUDE_PLUGIN_ROOT}/scripts/task-schema-check.sh"`) and require **exit 0**
-   before committing. A `FAIL` means fix the TASK body (not the script); an `N/A legacy` line means
-   the `extra.schema:"v1"` marker was forgotten in step 4 — add it.
+   run the SHIPPED canonical-task-schema check (not a reference into any `experiments/**` path).
+   The path is host-relative (thin adapter): when installed as a Claude plugin use
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-schema-check.ts" <path-to-the-task-file>`; in a
+   checkout (Claude repo skill or Codex `$quay-directive`) use the repo-relative
+   `node plugin/scripts/task-schema-check.ts <path-to-the-task-file>` (or the `.sh` wrapper
+   alongside it). Require **exit 0** before committing. A `FAIL` means fix the TASK body (not the
+   script); an `N/A legacy` line means the `extra.schema:"v1"` marker was forgotten in step 4 — add it.
 
    **Land it.** Commit the new/edited task file in this workspace's own task store:
    `git add <task-file-path> && git commit -m "DIR-NNN: <one-line summary>"`.
