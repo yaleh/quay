@@ -189,6 +189,29 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
   charter/scope/policy-hash mismatches, all confirmed to fall back to a full review — see the AC
   above), just not via a real `Workflow()` dispatch.
 
+## Orchestrating-session verification note (2026-07-31)
+
+Before landing, the orchestrating session independently investigated an intermittent failure
+surfaced when running `plugin/test/prepare-milestone-convergence.test.mjs`'s full 70+-test suite
+(never the checkpoint mechanism's own dedicated `proposal-convergence.test.mjs`, which was 100%
+reliable across every run, ~10+ times): occasional failures/hangs at the PRE-EXISTING, unrelated
+Receipt-phase `milestone-preparation-check.ts --build` real CLI dispatch (a script this task never
+touches). Root-caused via a temporary diagnostic patch (start/success logging around every real
+`execSync` call in the test harness, not committed): when every individual real subprocess spawn in
+a run completes without an unusual delay, the ENTIRE 84-test suite (192 real CLI dispatches) passes
+100% clean — confirmed on a fully clean run. The intermittent failures/hangs only manifest when an
+individual OS-level subprocess spawn itself stalls, on this specific multi-tenant, multi-user
+machine (`uptime` showed 11 concurrently logged-in users; system load ranged from ~3 to ~20 across
+different points in this same investigation) under this session's own unusually heavy concurrent
+background-agent load. A control run of unmodified `master`'s copy of the same test file needed
+multiple attempts to get a clean baseline too, under similar conditions. This is an environmental
+property of the current shared execution host, not a defect in this task's own checkpoint logic —
+consistent with several OTHER pre-existing flaky-under-load findings already documented elsewhere in
+this same work session (e.g. `gap-prepare-milestone-lease-read-race`'s test fix,
+`delivery-standalone-smoke-gate.test.mjs`/`serve.test.mjs` contention flakes found investigating a
+separate task). Final confirmation run (both mirrors, all 4 touched test files together): 296/296
+pass, zero failures.
+
 ## Human verification when exp5 marks this task done
 
 1. Does a one-line repair review only the changed claim and unresolved findings?
