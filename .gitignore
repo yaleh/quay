@@ -42,3 +42,11 @@ experiment/timing/*.log
 
 # Claude Code personal/local overrides — never shared config, never commit
 .claude/settings.local.json
+
+# gap-prepare-milestone-convergence-test-fixture-pollutes-production-tree (2026-07-31): safety-net
+# only — the real fix is the test itself no longer writing outside its own scratch dir. If a test
+# process is killed before its `finally { cleanup(...) }` runs, these interrupted-run orphans are
+# what's left behind: docs/plans/M<6-digit>-*.md and milestones/M<6-digit>/ (real milestone IDs
+# never reach 6 digits, so this cannot collide with a genuine milestone).
+docs/plans/M9[0-9][0-9][0-9][0-9][0-9]-*.md
+milestones/M9[0-9][0-9][0-9][0-9][0-9]/
