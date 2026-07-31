@@ -13,13 +13,14 @@
 //
 // Run:
 //   node --experimental-strip-types --test plugin/test/prepare-milestone-convergence.test.mjs
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { checkPreparation } from '../../experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts';
+import { sweepOrphans } from '../../experiments/quay-perpetual-stream/scripts/sweep-fixture-orphans.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
@@ -29,6 +30,18 @@ const MIRRORS = [
 ];
 const FIXTURES = path.join(REPO_ROOT, 'experiments', 'quay-perpetual-stream', 'fixtures', 'preparation');
 const REPLAY_FINDINGS = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'dir120-replay-findings.json'), 'utf8')).findings;
+
+// gap-prepare-milestone-convergence-test-fixture-pollutes-tracked-tree: defense-in-depth against
+// a PRIOR run of THIS test file being killed before its own per-test `finally { cleanup(...) }`
+// ran (see cleanup() below) — sweeps only the `convergenceRandom` orphan shape (this file's own
+// per-test milestoneId, `M${Math.floor(900000 + Math.random() * 90000)}`), never the
+// `preparationE2eFixed` (M997) shape that belongs to a DIFFERENT test file's own cleanup
+// responsibility. Runs once after every test in this file completes (top-level `after()`, since
+// this file's `test(...)` calls are all at module top level, not nested in a `describe`). Cannot
+// help if THIS run itself gets killed — only narrows the window before the NEXT run.
+after(() => {
+  sweepOrphans({ repoRoot: REPO_ROOT, shapes: ['convergenceRandom'] });
+});
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 function loadWorkflow(file) {
