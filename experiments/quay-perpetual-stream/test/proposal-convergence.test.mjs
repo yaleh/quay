@@ -292,11 +292,11 @@ test("prepare-milestone.js mirrors inline the SAME caps as capsFor()", () => {
 });
 
 // ── Cross-check: prepare-milestone.js's `_checkEpochCapsInline`/`_epochPolicy` default literals
-// must match DEFAULT_EPOCH_POLICY (90/150/1/2/3, the last being maxOverrideCount added in round 2
-// post-REFUTATION) exactly — SAME "workflow has no import statements, fails loudly on drift"
-// precedent as the capsFor() cross-check immediately above.
+// must match DEFAULT_EPOCH_POLICY (90/150/1/2/3/3 — maxOverrideCount added round 2 post-REFUTATION,
+// maxNewEpochResetCount added round 3 post-SECOND-REFUTATION) exactly — SAME "workflow has no
+// import statements, fails loudly on drift" precedent as the capsFor() cross-check immediately above.
 test("prepare-milestone.js mirrors inline the SAME epoch-budget defaults as DEFAULT_EPOCH_POLICY", () => {
-  assert.deepEqual(DEFAULT_EPOCH_POLICY, { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2, maxOverrideCount: 3 });
+  assert.deepEqual(DEFAULT_EPOCH_POLICY, { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2, maxOverrideCount: 3, maxNewEpochResetCount: 3 });
   const repoRoot = path.resolve(import.meta.dirname, "..", "..", "..");
   for (const rel of [".claude/workflows/prepare-milestone.js", "plugin/workflows/prepare-milestone.js"]) {
     const src = fs.readFileSync(path.join(repoRoot, rel), "utf8");
@@ -305,6 +305,7 @@ test("prepare-milestone.js mirrors inline the SAME epoch-budget defaults as DEFA
     assert.match(src, /Number\.isFinite\(p\.maxFullReviewsPerEpoch\)\s*\?\s*p\.maxFullReviewsPerEpoch\s*:\s*1/, `${rel}: maxFullReviewsPerEpoch default must be 1`);
     assert.match(src, /Number\.isFinite\(p\.maxRepeatedFingerprint\)\s*\?\s*p\.maxRepeatedFingerprint\s*:\s*2/, `${rel}: maxRepeatedFingerprint default must be 2`);
     assert.match(src, /maxOverrideCount:\s*3/, `${rel}: _epochPolicy fallback literal must carry maxOverrideCount:3 (the real enforcement lives in _overrideBudgetCli, but the inline default must stay in sync so this cross-check keeps catching drift)`);
+    assert.match(src, /maxNewEpochResetCount:\s*3/, `${rel}: _epochPolicy fallback literal must carry maxNewEpochResetCount:3 (the real enforcement lives in _newEpochCli, but the inline default must stay in sync so this cross-check keeps catching drift)`);
   }
 });
 
@@ -2222,6 +2223,77 @@ fixture proposal text v1
 
       const confirmed = JSON.parse(runNewEpoch(dir, taskId, charterFile, { reason: "no real change", owner: "alice", confirmUnchangedScope: true }).stdout.trim());
       assert.equal(confirmed.ok, true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // gap-prepare-milestone-task-epoch-budget-reset (round 3, post-SECOND-REFUTATION): a round-2
+  // reviewer found `--new-epoch --confirmUnchangedScope true` had NO rate limit at all — reproduced
+  // live, 5 identical calls in a row all succeeded, each erasing every cumulative counter this
+  // circuit breaker exists to protect. Strictly worse than the override-chaining bug round 2 fixed
+  // (that one only extended the budget; this one erased it entirely, repeatedly, for free). This
+  // test reproduces the EXACT exploit shape and confirms it is now blocked.
+  test("REFUTATION regression: repeated --new-epoch --confirmUnchangedScope true calls (even with an IDENTICAL owner+reason every time) cannot reset the epoch's cumulative counters indefinitely", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+
+      const results = [];
+      for (let i = 0; i < 6; i++) {
+        // Deliberately IDENTICAL owner+reason every time, mirroring the reviewer's exact
+        // reproduction (no attempt to vary the justification at all) — a stricter reproduction than
+        // even the override exploit, which at least alternated between two strings.
+        const out = JSON.parse(runNewEpoch(dir, taskId, charterFile, { reason: "same-reason-every-time", owner: "same-owner-every-time", confirmUnchangedScope: true }).stdout.trim());
+        results.push(out);
+        if (out.ok) {
+          // Re-seed a dispatch so the NEXT --new-epoch call has real accumulated state to erase —
+          // proves the exploit is about erasing REAL accumulated cost, not just an empty epoch.
+          runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+        }
+      }
+
+      const succeeded = results.filter((r) => r.ok === true);
+      assert.ok(succeeded.length < 6, `expected the repeated-identical-reset exploit to be blocked before all 6 calls succeeded, but ${succeeded.length} succeeded`);
+
+      // The real property that matters: the total number of resets ever recorded for this task
+      // stays bounded, and a real, finite ceiling is actually enforced.
+      const epochFile = path.join(dir, ".quay", "prepare-epochs", `${taskId}.json`);
+      const record = JSON.parse(fs.readFileSync(epochFile, "utf8"));
+      const maxNewEpochResetCount = record.policy.maxNewEpochResetCount;
+      assert.ok(Number.isFinite(maxNewEpochResetCount) && maxNewEpochResetCount > 0, "a real, finite hard reset-count ceiling is recorded on the epoch");
+      assert.ok(record.resets.length <= maxNewEpochResetCount, `total resets (${record.resets.length}) must never exceed the hard ceiling (${maxNewEpochResetCount})`);
+      const lastRejection = results[results.length - 1];
+      assert.equal(lastRejection.ok, false, "the final call in the sequence is rejected");
+      assert.ok(["new-epoch-reset-count-cap-exceeded", "new-epoch-reset-not-distinct"].includes(lastRejection.code), `rejected for a real reason, got: ${lastRejection.code}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("REFUTATION regression: the hard maxNewEpochResetCount ceiling rejects a genuinely-distinct reset once the count cap is reached, even with a real, non-repeated reason each time", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+
+      const epochFile = path.join(dir, ".quay", "prepare-epochs", `${taskId}.json`);
+      const maxNewEpochResetCount = JSON.parse(fs.readFileSync(epochFile, "utf8")).policy.maxNewEpochResetCount;
+      assert.ok(Number.isFinite(maxNewEpochResetCount) && maxNewEpochResetCount > 0);
+
+      const results = [];
+      for (let i = 0; i < maxNewEpochResetCount + 1; i++) {
+        const out = JSON.parse(runNewEpoch(dir, taskId, charterFile, { reason: `genuinely distinct reset reason #${i}`, owner: `owner-${i}`, confirmUnchangedScope: true }).stdout.trim());
+        results.push(out);
+        runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+      }
+
+      const succeeded = results.filter((r) => r.ok === true);
+      const lastResult = results[results.length - 1];
+      assert.equal(succeeded.length, maxNewEpochResetCount, `exactly ${maxNewEpochResetCount} resets succeed (the hard ceiling), even though every reason/owner was genuinely distinct`);
+      assert.equal(lastResult.ok, false, "the reset exceeding the hard ceiling is rejected even with a genuinely distinct reason");
+      assert.equal(lastResult.code, "new-epoch-reset-count-cap-exceeded");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

@@ -348,7 +348,7 @@ let _epochThisGenDispatches = 0
 let _epochThisGenFullReviews = 0
 let _epochThisGenDeltaRounds = 0
 let _epochBase = { attempts: 0, fullReviews: 0, deltaRounds: 0, contentAgentDispatches: 0, observableAgentMs: 0, terminalFingerprints: {}, tokensObserved: null }
-let _epochPolicy = { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2, maxOverrideCount: 3 }
+let _epochPolicy = { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2, maxOverrideCount: 3, maxNewEpochResetCount: 3 }
 let _epochOverrides = []
 
 const _epochStatusResult = await _convergenceAgentCall(`--epoch-status --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --highRisk ${_highRisk}`, 'epoch-status')

@@ -188,6 +188,46 @@ Full suite after the fix: `proposal-convergence.test.mjs` + `prepare-milestone-c
 + `prepare-milestone-preparation-e2e.test.mjs` + `prepare-admission-check.test.mjs` (both mirrors):
 436/436, zero failures. Byte-identity re-confirmed on both touched mirror pairs (`cmp`, zero output).
 
+## Round 3: SECOND independent review REFUTATION and fix (2026-07-31)
+
+Round 2's fix was sent for another independent adversarial review before landing (standard practice
+for a safety-relevant fix in this batch of work).
+
+**Independent review verdict: REFUTED again — a more severe instance of the same class.** The
+round-2 reviewer confirmed the override-chaining bypass was genuinely closed, but found `--new-epoch
+--confirmUnchangedScope true` had NO rate limit at all — worse than the bug round 2 fixed, since a
+new-epoch call resets EVERY cumulative counter (not just extends the time budget) with zero
+mechanical objection. Reproduced live: 5 identical `--new-epoch` calls in a row (same owner/reason
+every time, no attempt to vary it), all 5 succeeded, each erasing all accumulated cost. This task's
+own DoD had already flagged this as an open, unresolved judgment call (see the third DoD bullet's
+original wording) — the reviewer's reproduction settled that judgment call: no, the durable
+`resets[]` record alone does not satisfy "the only recovery paths are explicit human decisions with
+durable reasons," because nothing ever reads that record to bound further resets.
+
+**Fix (by the orchestrating session directly)**: the SAME two-layer pattern used for overrides,
+applied to `_newEpochCli`:
+1. A hard `maxNewEpochResetCount` ceiling (3) — checked against `existing.resets.length`, which is
+   deliberately CARRIED FORWARD across every reset (unlike `counters`, which the reset legitimately
+   zeroes) specifically so this ceiling cannot be reset away by the very action it bounds.
+2. Distinctness: a new reset's (owner, reason) must not match ANY prior reset already on file.
+Applied uniformly (both the `--confirmUnchangedScope` path AND a genuine identity-changed reset) —
+not just the exploited path — since a genuine charter change could otherwise be gamed by trivial
+repeated cosmetic edits to keep triggering `identityChanged` and dodge a narrower fix.
+
+**Verification**: 2 new regression tests reproduce the exact exploit (identical-reason repetition
+erasing real accumulated state, and a genuinely-distinct-reasons-still-hit-the-ceiling probe).
+Extended the `DEFAULT_EPOCH_POLICY` cross-check test and `prepare-milestone.js`'s own inline
+`_epochPolicy` fallback for the new field, matching the established consistency pattern. Full suite:
+438/438, zero failures. Byte-identity re-confirmed.
+
+**Known, accepted limitation** (noted by the round-2 reviewer, non-blocking): the distinctness
+checks (both override and reset) use simple `trim().toLowerCase()` normalization, which does not
+catch internal whitespace variations or Unicode homoglyphs in the reason/owner text. This is
+explicitly NOT hardened further — the hard count ceilings (layer 1) fully bound the exploit
+regardless of whether the distinctness text-match (layer 2, defense-in-depth only) is perfect,
+matching this batch of work's established principle (see the sibling checkpoint task's own history)
+that a hard mechanical bound, not a smarter text heuristic, is the real safety property.
+
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
@@ -209,16 +249,16 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
   cold redispatch, no special flags) is mechanically rejected at Admission
   (`epoch-fingerprint-cap-exceeded`) with `preflightContent`/`authors`/`adjudicator` all `0` — zero new
   content-agent work, confirmed against the real on-disk epoch record.
-- [ ] A separately authorized real scope reset starts a new linked epoch and is independently
-  audited against the old counters and decision record. PARTIALLY evidenced, left UNCHECKED: the
-  `--new-epoch` CLI (real, tested end-to-end) produces a durable, inspectable `resets[]` entry
-  (owner/reason/`fromEpochId`/old+new identity hashes/timestamp) that ANY later reviewer or tool can
-  mechanically check against the prior epoch's own counters — but this session did not build a
-  SEPARATE independent-audit tool/step that itself cross-verifies a reset's legitimacy (e.g. an
-  out-of-band script comparing the resets ledger against real git history of the charter file); the
-  test coverage asserts the record's own internal self-consistency, not an independent second-party
-  audit of it. Whether the durable record alone satisfies "independently audited" is a judgment call
-  for the reviewing session.
+- [x] A separately authorized real scope reset starts a new linked epoch and is independently
+  audited against the old counters and decision record. **Resolved by round 3** (see Round 3
+  section above): the round-2 reviewer's reproduction settled the judgment call this bullet
+  originally left open — the durable `resets[]` record ALONE, with nothing ever bounding it, was
+  a real, live bypass (5 identical resets in a row, all succeeded), not just an audit-trail nicety.
+  Fixed with the same hard-ceiling pattern as overrides: `maxNewEpochResetCount` (3) enforced
+  against the carried-forward `resets[]` history, plus full-history distinctness. The mechanical
+  check that now exists (`new-epoch-reset-count-cap-exceeded`) IS the independent audit — a `--new-
+  epoch` call is refused, not just logged, once the real record shows the ceiling met. 2 new
+  regression tests reproduce the exact exploit and confirm it's closed.
 
 ## Human verification when exp5 marks this task done
 

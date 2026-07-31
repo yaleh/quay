@@ -1673,12 +1673,24 @@ export const EPOCH_SCHEMA_VERSION = 1;
 // judgment call is not a substitute for a hard mechanical bound). This count ceiling is now the
 // REAL boundary; the strengthened distinctness check (compares against ALL prior overrides, not
 // just the last one) is defense-in-depth on top of it, not the sole protection.
+// gap-prepare-milestone-task-epoch-budget-reset (round 3, post-SECOND-REFUTATION): maxNewEpochResetCount
+// is the SAME hard-ceiling pattern as maxOverrideCount, applied to --new-epoch itself. A round-2
+// reviewer found --new-epoch --confirmUnchangedScope true had NO rate limit at all — a mechanically
+// ungated, infinitely-repeatable full reset of EVERY cumulative counter this whole circuit breaker
+// exists to protect, strictly worse than the override-chaining bug round 2 fixed (that one only
+// extended the time budget; this one erases all of it). Reproduced live: 5 identical `--new-epoch`
+// calls in a row, all succeeded, each resetting counters to zero. Fixed the same way: a hard count
+// ceiling on total resets ever recorded for this task (enforced against the CARRIED-FORWARD
+// `resets[]` array, which survives a reset by design — unlike `counters`, which is deliberately
+// zeroed — so the ceiling itself cannot be reset away), plus a distinctness check on the new
+// reset's own (owner, reason) against every PRIOR reset already on file.
 export const DEFAULT_EPOCH_POLICY = Object.freeze({
   ordinaryCapMinutes: 90,
   highRiskCapMinutes: 150,
   maxFullReviewsPerEpoch: 1,
   maxRepeatedFingerprint: 2,
   maxOverrideCount: 3,
+  maxNewEpochResetCount: 3,
 });
 
 // epochPath — SAME directory FAMILY as prepare-checkpoints (gitignored per-workspace runtime
@@ -1727,6 +1739,7 @@ export function buildEpochRecord({
       maxFullReviewsPerEpoch: Number.isFinite(policy?.maxFullReviewsPerEpoch) ? policy.maxFullReviewsPerEpoch : DEFAULT_EPOCH_POLICY.maxFullReviewsPerEpoch,
       maxRepeatedFingerprint: Number.isFinite(policy?.maxRepeatedFingerprint) ? policy.maxRepeatedFingerprint : DEFAULT_EPOCH_POLICY.maxRepeatedFingerprint,
       maxOverrideCount: Number.isFinite(policy?.maxOverrideCount) ? policy.maxOverrideCount : DEFAULT_EPOCH_POLICY.maxOverrideCount,
+      maxNewEpochResetCount: Number.isFinite(policy?.maxNewEpochResetCount) ? policy.maxNewEpochResetCount : DEFAULT_EPOCH_POLICY.maxNewEpochResetCount,
     },
     createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : null,
   };
@@ -1942,6 +1955,18 @@ export function _recordEpochDispatchCli({
 // accident (Requested-action item 1 / "never triggered by a plain redispatch"; "verify the new
 // epoch's identity hashes actually differ ... OR that an explicit override justification is
 // present — don't let this become a silent bypass").
+//
+// gap-prepare-milestone-task-epoch-budget-reset (round 3, post-SECOND-REFUTATION): a round-2
+// reviewer found `--confirmUnchangedScope true` was a mechanically UNRATE-LIMITED full reset of
+// every cumulative counter — reproduced live, 5 identical calls in a row, all succeeded, each
+// erasing all accumulated cost. Fixed with the SAME two-layer pattern `_overrideBudgetCli` already
+// uses, applied here uniformly (not just on the unchanged-scope path — a real charter change could
+// otherwise be gamed by trivial repeated cosmetic edits to keep triggering `identityChanged`):
+//   1. HARD CEILING: total resets ever recorded for this task, checked against `existing.resets`
+//      (which — unlike `counters` — is deliberately CARRIED FORWARD across every reset, precisely
+//      so this ceiling cannot itself be reset away by the very action it bounds).
+//   2. Distinctness: the new reset's own (owner, reason) must not match ANY prior reset already on
+//      file, same "closed the alternation-bypass" reasoning as the override fix.
 export function _newEpochCli({ taskId, workspace, charterFile, reason, owner, confirmUnchangedScope }) {
   if (!reason) return { ok: false, code: "new-epoch-requires-reason", error: "--reason is required" };
   if (!owner) return { ok: false, code: "new-epoch-requires-owner", error: "--owner is required" };
@@ -1958,6 +1983,25 @@ export function _newEpochCli({ taskId, workspace, charterFile, reason, owner, co
         ok: false, code: "new-epoch-requires-changed-identity-or-explicit-confirmation",
         error: "the current (charterHash, reviewPolicyHash) identity is UNCHANGED from the existing epoch — pass --confirmUnchangedScope true to explicitly authorize a reset with no real scope-hash change (never a silent bypass)",
       };
+    }
+    if (existing) {
+      const priorResets = existing.resets || [];
+      const maxNewEpochResetCount = Number.isFinite(existing.policy?.maxNewEpochResetCount) ? existing.policy.maxNewEpochResetCount : DEFAULT_EPOCH_POLICY.maxNewEpochResetCount;
+      if (priorResets.length >= maxNewEpochResetCount) {
+        return {
+          ok: false, code: "new-epoch-reset-count-cap-exceeded",
+          error: `this task already has ${priorResets.length} recorded epoch reset(s), meeting/exceeding the hard cap of ${maxNewEpochResetCount} — no further resets can be granted via this mechanism; escalate to a human decision outside this CLI`,
+          resetCount: priorResets.length, maxNewEpochResetCount,
+        };
+      }
+      const norm = (s) => String(s ?? "").trim().toLowerCase();
+      const duplicateReset = priorResets.find((r) => norm(r.reason) === norm(reason) && norm(r.owner) === norm(owner));
+      if (duplicateReset) {
+        return {
+          ok: false, code: "new-epoch-reset-not-distinct",
+          error: "a PRIOR epoch reset for this task already has the SAME owner+reason — a further reset requires a distinct human scope decision, never a repeat of an earlier one",
+        };
+      }
     }
     const newEpochId = _computeEpochId({ taskId, charterHash, reviewPolicyHash, salt: `${Date.now()}-${Math.random()}` });
     const record = buildEpochRecord({
