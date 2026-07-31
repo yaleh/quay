@@ -24,6 +24,21 @@ scratch=$(git status --porcelain 2>/dev/null \
   | grep -iE '\.(bak|orig|tmp|swp|swo|rej)$|\.l-[a-z]-backup$|[-.]backup$|~$|(^|/)\.mutation-backup(/|$)' \
   || true)
 
+# ── gap-prepare-milestone-convergence-test-fixture-pollutes-tracked-tree (2026-07-31) ──────────
+# prepare-milestone-convergence.test.mjs / prepare-milestone-preparation-e2e.test.mjs drive the
+# REAL prepare-milestone.js workflow and can leave docs/plans/M9xxxxx-*.md / milestones/M9xxxxx/
+# (and the M997 fixed-ID variant) orphans behind if the test process is killed before its own
+# `finally { cleanup(...) }` runs. These are GITIGNORED (see .gitignore's own two blocks for the
+# same two shapes) specifically so they never pollute `git status --porcelain`'s `??` output —
+# which means the `scratch` check above, being git-status-based, has ZERO visibility into this
+# class. Scan the filesystem directly instead (belt-and-suspenders: .gitignore is the primary
+# fix, this is defense-in-depth visibility + a periodic-sweep prompt — see
+# sweep-fixture-orphans.mjs for the actual removal mechanism).
+fixture_orphans=$( { \
+    find "$ROOT/docs/plans" -maxdepth 1 -type f \( -regex '.*/M9[0-9][0-9][0-9][0-9][0-9]-.*\.md' -o -regex '.*/M997-.*\.md' \) 2>/dev/null; \
+    find "$ROOT/milestones" -maxdepth 1 -type d \( -regex '.*/M9[0-9][0-9][0-9][0-9][0-9]' -o -regex '.*/M997' \) 2>/dev/null; \
+  } | sed "s#^$ROOT/##" || true)
+
 # ── Non-blocking WARN (gap-absorb-charter-audit-not-committed / M176) ──────────────────────────
 # The ABSORB pipeline itself creates two kinds of evidence file (charters + Audit-phase reports)
 # that no pipeline step used to stage — they accumulated as untracked cruft for months (16 charters
@@ -41,6 +56,17 @@ if [ -n "$evidence_untracked" ]; then
   echo "              charter step / execute-milestone.js Land-phase CAPTURE) — non-blocking, but"
   echo "              left unaddressed these accumulate silently:"
   echo "$evidence_untracked" | sed 's/^/  /'
+fi
+
+if [ -n "$fixture_orphans" ]; then
+  echo "tree-hygiene: WARN — gitignored prepare-milestone.js test-fixture orphan(s) found on local"
+  echo "              disk (docs/plans/M9xxxxx-*.md / milestones/M9xxxxx/ / the M997 fixed-ID"
+  echo "              variant) — debris from a prior prepare-milestone-convergence.test.mjs or"
+  echo "              prepare-milestone-preparation-e2e.test.mjs run killed before its own"
+  echo "              cleanup ran. Non-blocking (already gitignored, cannot pollute the tracked"
+  echo "              tree), but consumes disk/inodes indefinitely if left. Clear with:"
+  echo "                node experiments/quay-perpetual-stream/scripts/sweep-fixture-orphans.mjs"
+  echo "$fixture_orphans" | sed 's/^/  /'
 fi
 
 if [ -z "$scratch" ]; then
