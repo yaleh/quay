@@ -4,7 +4,7 @@ title: preflight-merged-markdown-claims's mid-line-bullet regex also matches
   an ordinary ASCII " - " prose dash, not just a bullet marker -- currently
   dormant (0/495 real task files hit it), filed as a follow-up rather than
   blocking M201/DIR-126-B's fourth audit round
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -55,31 +55,38 @@ downgrade a detector once a REAL false positive is found, not a merely-construct
 
 ## Acceptance Criteria
 
-- [ ] The tightened regex/logic is real, wired in both the canonical
+- [x] The tightened regex/logic is real, wired in both the canonical
   `experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts` and the byte-identical
-  `plugin/scripts/prepare-admission-check.ts` mirror (`cmp`, zero output). Implemented
-  (`_looksLikeNewClaimStart`, see Execution record) and `cmp` confirmed zero output on both
-  mirrors — but left UNCHECKED per explicit coordinator instruction (2026-07-31): a first design of
-  this fix was independently reviewed and REFUTED (see Execution record), so this box stays open
-  until a second independent review confirms the redesign, not merely self-asserted here.
-- [ ] A new regression test confirms the ASCII-dash-prose reproduction no longer hard-blocks, while
-  the existing genuine-mid-line-bullet RED fixture still does. Tests added and passing (see
-  Execution record) but left UNCHECKED pending the same pending independent review.
-- [ ] No regression: the existing `preflightMergedMarkdownClaims` RED/known-good/ambiguous tests and
-  the full `prepare-admission-check.test.mjs` suite stay green. 82/82 pass in both mirrors (see
-  Execution record) but left UNCHECKED pending the same pending independent review.
+  `plugin/scripts/prepare-admission-check.ts` mirror (`cmp`, zero output). Round-3 design
+  (`_isProseDashTail`, severity-downgrade-only). Independently re-verified 2026-07-31, verdict
+  CONFIRMED: `cmp` clean on both mirrors, traced the function's own control flow to confirm the
+  downgrade signal can never cause full suppression by itself.
+- [x] A new regression test confirms the ASCII-dash-prose reproduction no longer hard-blocks, while
+  the existing genuine-mid-line-bullet RED fixture still does. Independently re-verified: both
+  behave correctly via direct real-CLI reproduction (not just the unit tests).
+- [x] No regression: the existing `preflightMergedMarkdownClaims` RED/known-good/ambiguous tests and
+  the full `prepare-admission-check.test.mjs` suite stay green. 83/83 pass in both mirrors,
+  independently re-run by the round-3 reviewer (not trusted from the implementer's own claim).
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on `master` under human-steered discipline (this touches the shared
-  `prepare-admission-check.ts` module DIR-126-A/DIR-126-B/DIR-126-C all depend on). NOT checked:
-  work is on an isolated git worktree/branch; landing on `master` is left to the orchestrating
-  session's own independent review + merge step.
-- [ ] Real, non-fixture evidence: the reproduction sentence dogfoods clean against the real CLI
-  post-fix. Real-CLI dogfood re-run and passing after the redesign (see Execution record) but left
-  UNCHECKED pending the pending independent review, per explicit coordinator instruction.
+- [x] Landed on `master` under human-steered discipline (this touches the shared
+  `prepare-admission-check.ts` module DIR-126-A/DIR-126-B/DIR-126-C all depend on). Landed by the
+  orchestrating session after round-3 independent review returned CONFIRMED.
+- [x] Real, non-fixture evidence: the reproduction sentence dogfoods clean against the real CLI
+  post-fix. Independently re-verified via direct `prepare-admission-check.ts --preflight`
+  invocation against all 8 known repro/counterexample shapes plus a new adversarial mixed-signal
+  case, not just the pasted output in this Execution record.
+
+**Note (2026-07-31, not blocking this task, filed as a separate follow-up):** the round-3 reviewer
+found a real, PRE-EXISTING gap unrelated to any of the three rounds here — a genuine mid-bullet
+block with fewer than 2 total backtick identifiers silently returns zero findings (no ambiguous
+tier either), confirmed byte-identical to this function's logic on `master` before round 1 ever
+touched it. Out of scope for this task (which is specifically about the `>=4`-identifier
+false-positive shapes); see `gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss`
+for the follow-up.
 
 ## Touches
 

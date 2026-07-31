@@ -4,7 +4,7 @@ title: preflightMergedMarkdownClaims's mid-line-bullet regex misidentifies a
   backtick-wrapped subtraction expression (e.g. `endedAtMs - startedAtMs`) as
   a markdown bullet marker -- found live during DIR-126-E's round-4
   Preflight rejection
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate
@@ -48,32 +48,27 @@ this repo's own telemetry/receipt work) don't need the same workaround.
 
 ## Acceptance Criteria
 
-- [ ] A fixture sentence with a backtick-wrapped subtraction expression (`` `a - b` `` shape) and
+- [x] A fixture sentence with a backtick-wrapped subtraction expression (`` `a - b` `` shape) and
   >=4 other backtick identifiers is confirmed NOT flagged as `preflight-merged-markdown-claims` (RED
-  before fix, GREEN after). Implemented and passing (see Execution record) but left UNCHECKED per
-  explicit coordinator instruction (2026-07-31): the sibling task's fix for the SAME shared function
-  was independently reviewed and REFUTED in its first design; this task's own code-span-exclusion
-  mechanism was not itself the refuted part, but both fixes land together in one change, so this box
-  stays open until the whole change gets a second independent review.
-- [ ] The existing genuine mid-line-bullet-marker positive case (a real merged-claims block outside
+  before fix, GREEN after). Independently re-verified 2026-07-31 (round 3 review, verdict
+  CONFIRMED): code-span exclusion unchanged through all 3 rounds, `cmp` clean on both mirrors.
+- [x] The existing genuine mid-line-bullet-marker positive case (a real merged-claims block outside
   any code span) still correctly triggers the finding — this fix must not regress true positives.
-  Confirmed still true post-redesign (`bad.md` still `blocking:true`) but left UNCHECKED pending the
-  same pending independent review.
-- [ ] `experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs` (+ `plugin/test/`
-  mirror) gain both regression fixtures above. Done (both mirrors, byte-identical) but left
-  UNCHECKED pending the same pending independent review.
+  Independently re-verified: `bad.md` still `blocking:true` via direct real-CLI reproduction.
+- [x] `experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs` (+ `plugin/test/`
+  mirror) gain both regression fixtures above. 83/83 pass in both mirrors, independently re-run.
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on `master`. NOT checked: work is on an isolated git worktree/branch; landing on
-  `master` is left to the orchestrating session's own independent review + merge step.
-- [ ] Real, non-fixture evidence: re-running `prepare-admission-check.ts --preflight` against
+- [x] Landed on `master`. Landed by the orchestrating session after round-3 independent review
+  returned CONFIRMED.
+- [x] Real, non-fixture evidence: re-running `prepare-admission-check.ts --preflight` against
   DIR-126-E's own real task body (at the commit that introduced the workaround reword, or an
   equivalent fixture reproducing the same shape) confirms the false positive no longer fires.
-  Re-confirmed post-redesign (see Execution record) but left UNCHECKED pending the pending
-  independent review, per explicit coordinator instruction.
+  Independently re-verified via direct CLI reproduction of both cited instances
+  (`` `recordedAtMs - admission.acquiredAt` `` and `` `endedAtMs - startedAtMs` ``): zero findings.
 
 ## Touches
 
