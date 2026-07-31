@@ -31,9 +31,39 @@ TBD — completed by the Audit phase.
 
 ## ABSORB gate run (M207, post-audit)
 
-TBD — completed at Land.
+- it0-dod-check.sh gap-dir126d-deferred-phase-timing-recurrence-tracking <charter> <absorb-entry>
+  → exit 0 (clause0: 12/12 AC checked; all clauses satisfied) — after the REQUIRED_TOP fix +
+  independent re-audit below resolved the AC6 REFUTATION and checked AC6.
+- sync-vendor.sh --check → CLEAN (all three edited mirror pairs byte-identical).
+- test suites: experiments (proposal-convergence + milestone-preparation-check +
+  prepare-admission-check) 252/252; plugin mirrors (prepare-admission-check +
+  prepare-milestone-convergence) 142/142. Total 394/394, 0 fail.
 
-adversarial-audit disposition: REFUTED
+adversarial-audit disposition: REFUTED → RESOLVED (see resolution below)
+
+### Resolution (2026-07-31, independent re-audit: NO REFUTATION FOUND)
+
+The AC6/CLAIM C9 REFUTATION above was RESOLVED at commit `4cc5166`: `validateTelemetryRecord`
+parameterized with `{ requireAdditiveFields = true }` — `phaseTimings`/`findingCodes` are in
+`REQUIRED_TOP` only when `requireAdditiveFields` is true. The reuse-terminal WRITE path
+(proposal-convergence.ts:725) uses the strict default (record materializes both keys); the
+read-time aggregation (computeCapacityReport, milestone-preparation-check.ts:292) passes
+`{ requireAdditiveFields: false }`, so pre-M207 records stay valid/aggregatable.
+
+Independent re-audit (fresh context, own runs, refute-first) confirmed NO REFUTATION FOUND:
+- A/B proof: pre-fix dc3d6c4 → code:insufficient-samples, 27 telemetry-field-missing exclusions
+  (every pre-M207 record excluded); HEAD 4cc5166 → code:ok, sampleCount 30, telemetry 27, ZERO
+  telemetry-field-missing exclusions. Direct-validator A/B: pre-M207 record → strict
+  {ok:false, telemetry-field-missing}, lenient {ok:true}.
+- All 12 ACs + DoD confirmed by the re-audit's own real CLI runs/test runs (AC1/AC10/AC11 ran all
+  six CLI modes confirming nowMs; AC2 renewal-bounded; AC3 recurrence pin/advance; AC9 trailing
+  close endedAtMs===recordedAtMs; TDZ/pre-lease; no sandbox Date.now()/new Date()/import()).
+- it0-dod-check.sh exit 0 (12/12 AC checked); all three mirror pairs byte-identical, sync-vendor
+  --check CLEAN.
+
+Charter Done-when consumer-protection ("no shape becomes stricter / existing consumers
+unaffected") is now satisfied. The REFUTED history above is preserved per the M198 precedent;
+this resolution is recorded alongside.
 
 AC 11/12 confirmed by fresh independent audit (own test runs, own real-CLI executions, own
 greps/cmps — not the implementer's self-report): AC1/AC11 admission nowMs all six modes ×2

@@ -6,7 +6,7 @@ title: DIR-126-D deferred two enrichment ideas that were never actually
   breakdown) and findingCodes[] recurrence tracking (recurrenceKey,
   firstSeenGeneration, lastSeenGeneration) -- record them as real,
   well-specified follow-up work
-status: todo
+status: done
 labels:
   - gap
   - milestone-candidate

@@ -1,7 +1,27 @@
 # Dashboard — quay-perpetual-stream (Experiment 5)
 
 **state: RUNNING**
-**milestone_counter: 201** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)** · **cp-135 written at M135 ABSORB — see checkpoints/cp-135.md** · cp-125 was M125 (HALT-RECOMMENDED, governance:product breach; now informational only per DIR-066)
+**milestone_counter: 202** · **chart: 2** · **checkpoint cadence: every 5 milestones (non-blocking)** · **cp-135 written at M135 ABSORB — see checkpoints/cp-135.md** · cp-125 was M125 (HALT-RECOMMENDED, governance:product breach; now informational only per DIR-066)
+<!-- M207 ABSORB (2026-07-31): milestone_counter 201→202 — gap-dir126d-deferred-phase-timing-
+recurrence-tracking (per-phase-boundary `nowMs` self-reporting on prepare-admission-check.ts +
+`phaseTimings`/`findingCodes[]` recurrence tracking on the committed telemetry record — the two
+enrichment ideas DIR-126-D deferred, re-chartered under M207) landed directly on master; Build
+commit `dc3d6c4` + REQUIRED_TOP forward-compat fix `4cc5166`, no separate worktree/branch.
+Additive: all six prepare-admission-check.ts CLI modes now emit `nowMs` (the real subprocess
+wall-clock already computed at :648, previously discarded); prepare-milestone.js (both mirrors)
+threads phase timing + finding codes onto the existing --record-generation/--record-attempt
+dispatches (no new dispatch, no sandbox Date.now()/import() — zero sandbox-clock hits confirmed by
+comment-stripped grep); proposal-convergence.ts receiver parses --phaseTimings/--findingCodes
+(fail-soft, never blocks the primary write), closes the trailing span (endedAtMs := recordedAtMs),
+runs a local recurrence scan (recurrenceKey = sha256(taskId::code).slice(0,12), firstSeenGeneration
+pinned / lastSeenGeneration advances), and materializes both keys in buildTelemetryRecord.
+AUDIT: iteration-0 REFUTED on AC6/CLAIM C9 (unconditional REQUIRED_TOP widening broke M204's
+computeCapacityReport read-time validation — all 27 pre-M207 records excluded as
+telemetry-field-missing); RESOLVED at 4cc5166 via validateTelemetryRecord({ requireAdditiveFields })
+(write path strict, read-time aggregation lenient); independent re-audit NO REFUTATION FOUND (A/B:
+pre-fix 27 exclusions -> HEAD 0 exclusions, sampleCount 30; all 12 ACs + DoD confirmed by own
+real CLI/test runs, 394/394 tests, it0-dod-check exit 0). REFUTED history preserved in
+milestones/M207/absorb-entry.md per M198 precedent; resolution recorded alongside. -->
 <!-- M204 ABSORB (2026-07-30): milestone_counter 200→201 — DIR-126-E (recalibrate the
 prepare-milestone capacity model from real telemetry — `--capacity-report` aggregation — fifth and
 final child of DIR-126's 5-way split) landed directly on master; Build commit `23f8891`, no separate
