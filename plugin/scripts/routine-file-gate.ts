@@ -11,7 +11,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { isDirectEntry } from "./gate-script-base.ts";
 
 export const DEFAULT_RATE = 3; // ≤ K routine-filed tasks per window (tunable)
 
@@ -93,5 +93,4 @@ export async function main(argv) {
   return r.accept ? 0 : 1;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isDirect) { main(process.argv).then((c) => process.exit(c)); }
+if (isDirectEntry(import.meta)) { main(process.argv).then((c) => process.exit(c)); }

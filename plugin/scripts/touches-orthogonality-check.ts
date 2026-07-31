@@ -15,7 +15,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { isDirectEntry } from "./gate-script-base.ts";
 
 // Kept for reference / callers; the authoritative test is isOverbroadDeclaration (semantic, below).
 export const OVERBROAD = new Set(["**", "*", "**/*", "./**", "**/**"]);
@@ -230,7 +230,6 @@ export async function main(argv) {
   return 1;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isDirect) {
+if (isDirectEntry(import.meta)) {
   main(process.argv).then((code) => process.exit(code));
 }

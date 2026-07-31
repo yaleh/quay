@@ -13,8 +13,7 @@
 // Pure functions are exported and unit-tested; `main()` is a thin CLI over them.
 
 import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { isDirectEntry } from "./gate-script-base.ts";
 
 // ── parseTrigger ─────────────────────────────────────────────────────────────────────────────────
 // "every(N)" → { kind: "every", n } ; "on(<event>)" → { kind: "on", event }. Throws on malformed
@@ -121,5 +120,4 @@ export async function main(argv) {
   return 0;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isDirect) { main(process.argv).then((c) => process.exit(c)); }
+if (isDirectEntry(import.meta)) { main(process.argv).then((c) => process.exit(c)); }

@@ -123,5 +123,10 @@ export function requireArg(value: any, name: string): void {
 //   if (isDirectEntry(import.meta)) main(process.argv).then(code => process.exit(code));
 export function isDirectEntry(importMeta: ImportMeta, argv1?: string): boolean {
   const entry = argv1 || process.argv[1];
-  return !!entry && fileURLToPath(importMeta.url) === path.resolve(entry);
+  if (!entry) return false;
+  try {
+    return fs.realpathSync(path.resolve(entry)) === fileURLToPath(importMeta.url);
+  } catch {
+    return false;
+  }
 }

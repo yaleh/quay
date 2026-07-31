@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   parseArgs,
   readFrontmatter,
@@ -425,8 +425,14 @@ test("isDirectEntry: returns false when argv1 is empty", () => {
 });
 
 test("isDirectEntry: resolves relative paths", () => {
-  const fakeImportMeta = { url: "file:///abs/path/script.ts" };
-  // path.resolve should make ./abs/path/script.ts → /abs/path/script.ts (depends on cwd)
-  const entry = isDirectEntry(fakeImportMeta, "/abs/path/script.ts");
+  // gap-touches-orthogonality-symlink-isdirect-mismatch (2026-07-31): isDirectEntry() now calls
+  // fs.realpathSync(path.resolve(entry)), which throws ENOENT for a path that doesn't exist on
+  // disk (the previous pure-string-comparison implementation didn't need a real file). Use a
+  // real, existing file — this test module itself — so the property under test ("relative/
+  // absolute path resolution matches importMeta.url") is exercised against real filesystem state,
+  // the same way every real CLI invocation's argv1 always names a real, existing script.
+  const realFile = fileURLToPath(import.meta.url);
+  const fakeImportMeta = { url: pathToFileURL(realFile).href };
+  const entry = isDirectEntry(fakeImportMeta, realFile);
   assert.equal(entry, true);
 });

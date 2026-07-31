@@ -11,7 +11,7 @@
 // Pure functions are exported and unit-tested; `main()` is a thin CLI over them.
 
 import fs from "node:fs";
-import { fileURLToPath } from "node:url";
+import { isDirectEntry } from "./gate-script-base.ts";
 import { matchGlob, isOverbroadDeclaration, normalizePath } from "./touches-orthogonality-check.ts";
 
 // normalizePath (canonical: strips ./, collapses //, resolves ./.. segments, drops trailing /, case
@@ -112,7 +112,6 @@ export async function main(argv) {
   return 1;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isDirect) {
+if (isDirectEntry(import.meta)) {
   main(process.argv).then((code) => process.exit(code));
 }

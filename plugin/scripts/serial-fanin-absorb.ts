@@ -12,7 +12,7 @@
 // Pure functions are exported and unit-tested; `main()` is a thin CLI over them.
 
 import fs from "node:fs";
-import { fileURLToPath } from "node:url";
+import { isDirectEntry } from "./gate-script-base.ts";
 
 // ── computeFanIn ─────────────────────────────────────────────────────────────────────────────────
 // startCounter: the milestone_counter BEFORE this fan-in. builds: [{ id, dashboardEntry }].
@@ -97,7 +97,6 @@ export async function main(argv) {
   return 0;
 }
 
-const isDirect = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isDirect) {
+if (isDirectEntry(import.meta)) {
   main(process.argv).then((code) => process.exit(code));
 }
