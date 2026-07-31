@@ -8,6 +8,10 @@
   before dispatch, selecting a size-appropriate verification strategy, and
   stopping repeated full-suite runs and out-of-scope diagnosis.
 - **Related:**
+  [`gap-execute-milestone-build-admission-and-verification-fuse`](../../tasks/gap-execute-milestone-build-admission-and-verification-fuse.md)
+  owns the size route, test ladder, checkpoints, and repeated-failure fuse. ·
+  [`gap-build-evidence-manifest-missing`](../../tasks/gap-build-evidence-manifest-missing.md)
+  owns the planned/actual evidence reconciliation and pre-Audit evidence gate. ·
   [`quay-milestone-workflow-task-sizing-and-adaptive-execution.md`](./quay-milestone-workflow-task-sizing-and-adaptive-execution.md)
   defines the corresponding Prepare-stage sizing policy. ·
   [`quay-milestone-workflow-throughput-capacity-model.md`](./quay-milestone-workflow-throughput-capacity-model.md)
