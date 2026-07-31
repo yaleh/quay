@@ -1701,6 +1701,91 @@ export function epochPath(workspace, taskId) {
   return path.join(workspace, ".quay", "prepare-epochs", `${_safeTaskIdSegment(taskId)}.json`);
 }
 
+// ── Epoch lock — gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening (item 1): a real
+// TOCTOU race, reproduced live by the round-3 adversarial review — `_newEpochCli`/
+// `_overrideBudgetCli` each do a read-existing-record -> check-hard-ceiling -> `_atomicWriteJson`
+// sequence with NO inter-process lock around the check-then-act window; 6 (and separately 20)
+// genuinely concurrent `--new-epoch` calls against `maxNewEpochResetCount:3` produced 4 `ok:true`
+// responses, and the final on-disk record showed only 3 resets — one caller's own accepted entry
+// silently vanished (last-writer-wins on `_atomicWriteJson`'s rename). Fixed by reusing this
+// repo's EXISTING atomic-lock primitive verbatim rather than inventing a new one:
+// `prepare-admission-check.ts`'s lease acquisition uses `fs.writeFileSync(path, json, {flag:
+// 'wx'})` (Node's atomic exclusive-create, throws EEXIST on contention) as the single-flight
+// mechanism — the SAME primitive, applied here to a short-lived critical section instead of a
+// multi-hundred-minute generation lease. `epochLockPath` reuses `_safeTaskIdSegment` VERBATIM
+// (never a second sanitizer) for the SAME reason `epochPath`/`checkpointPath`/lease paths already
+// do.
+function epochLockPath(workspace, taskId) {
+  return path.join(workspace, ".quay", "prepare-epochs", `${_safeTaskIdSegment(taskId)}.lock`);
+}
+
+// This is a short-lived, LOW-CONTENTION lock (a handful of human-invoked CLI calls at most, each
+// holding it only across one read+JSON-check+atomic-write — low milliseconds), never a
+// high-throughput primitive — a few short, bounded retries with backoff is proportionate; an
+// unbounded retry/poll loop is not (never hang indefinitely). Mirrors the ORDER OF MAGNITUDE of
+// `prepare-admission-check.ts`'s own `LEASE_READ_RETRY_DELAYS_MS`, widened slightly since this
+// primitive may need to wait out an ENTIRE concurrent critical section, not just a single read.
+const EPOCH_LOCK_RETRY_DELAYS_MS = [20, 40, 80, 160, 320, 640];
+// A held lock older than this is treated as an orphaned/crashed holder and reclaimed —
+// age-based, deterministic staleness check in the SAME spirit as `checkStaleOwner`'s stale-lease
+// reclaim (`prepare-admission-check.ts`), scaled down from that mechanism's multi-hundred-minute
+// generation lease to THIS primitive's own short-lived (expected: low-milliseconds)
+// read-check-write critical section — a lock still held after 30s did not crash mid-critical-
+// section, it crashed and needs reclaiming, not a permanent deadlock.
+const EPOCH_LOCK_STALE_MS = 30 * 1000;
+
+function _syncSleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// _acquireEpochLock — throws a typed `epoch-lock-contention` error (never silently proceeds
+// without the lock, never hangs indefinitely) if every bounded retry is exhausted while a
+// genuinely live holder still holds it. A stale (crashed) holder is reclaimed deterministically —
+// no permanent deadlock from a crashed process.
+function _acquireEpochLock(workspace, taskId) {
+  const lockPath = epochLockPath(workspace, taskId);
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  const holder = { pid: process.pid, acquiredAtMs: Date.now() };
+  for (let attempt = 0; attempt <= EPOCH_LOCK_RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      // The atomic-create primitive: throws EEXIST if a lock already exists — the SAME real
+      // single-flight mechanism `prepare-admission-check.ts`'s `_grantLeaseAtomic` establishes.
+      fs.writeFileSync(lockPath, JSON.stringify(holder), { flag: "wx" });
+      return lockPath;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      let existing = null;
+      try {
+        existing = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+      } catch {
+        existing = null; // unreadable/mid-write/already-removed by the holder — treated as live contention below, never itself a crash signal
+      }
+      const age = existing && Number.isFinite(existing.acquiredAtMs) ? Date.now() - existing.acquiredAtMs : null;
+      if (age !== null && age >= EPOCH_LOCK_STALE_MS) {
+        // Stale — reclaim by removing the orphaned lock file, then retry immediately (still
+        // bounded by this SAME loop's own attempt count, never an unbounded reclaim/retry cycle).
+        try { fs.rmSync(lockPath, { force: true }); } catch { /* another racer may have reclaimed it first */ }
+        continue;
+      }
+      if (attempt < EPOCH_LOCK_RETRY_DELAYS_MS.length) {
+        _syncSleepMs(EPOCH_LOCK_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  }
+  const err = new Error(`epoch-lock-contention: could not acquire the epoch lock for ${taskId} after ${EPOCH_LOCK_RETRY_DELAYS_MS.length + 1} attempt(s) — another process is actively holding it; failing closed rather than proceeding without the lock or waiting indefinitely`);
+  err.code = "epoch-lock-contention";
+  throw err;
+}
+
+function _releaseEpochLock(workspace, taskId) {
+  try {
+    fs.rmSync(epochLockPath(workspace, taskId), { force: true });
+  } catch {
+    // best-effort — a missing lock file at release time (e.g. reclaimed as stale by a racer while
+    // this call was mid-critical-section) is never fatal to the caller's own already-completed work
+  }
+}
+
 function _computeEpochId({ taskId, charterHash, reviewPolicyHash, salt }) {
   return sha256(`${taskId}::${charterHash}::${reviewPolicyHash}::${salt ?? ""}`).slice(0, 12);
 }
@@ -1970,6 +2055,17 @@ export function _recordEpochDispatchCli({
 export function _newEpochCli({ taskId, workspace, charterFile, reason, owner, confirmUnchangedScope }) {
   if (!reason) return { ok: false, code: "new-epoch-requires-reason", error: "--reason is required" };
   if (!owner) return { ok: false, code: "new-epoch-requires-owner", error: "--owner is required" };
+  // gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening (item 1): acquire the exclusive
+  // epoch lock BEFORE the read-check-write sequence below — this closes the real TOCTOU race the
+  // round-3 review reproduced (concurrent callers all reading the SAME `existing` record before
+  // any of them writes, each independently concluding the ceiling has room). A lock-acquisition
+  // failure (typed `epoch-lock-contention`) is returned immediately — never silently proceeding
+  // without the lock, and nothing has been read/written yet so there is nothing to release.
+  try {
+    _acquireEpochLock(workspace, taskId);
+  } catch (err) {
+    return { ok: false, code: err.code || "epoch-lock-exception", error: err.message };
+  }
   try {
     const { charterHash, reviewPolicyHash } = _currentEpochIdentity({ workspace, taskId, charterFile });
     const { record: existing, corrupt } = _readEpochRecord(workspace, taskId);
@@ -2019,7 +2115,9 @@ export function _newEpochCli({ taskId, workspace, charterFile, reason, owner, co
     _atomicWriteJson(p, record);
     return { ok: true, epochFile: p, epochId: record.epochId, parentEpochId: record.parentEpochId, record };
   } catch (err) {
-    return { ok: false, code: "new-epoch-exception", error: err.message };
+    return { ok: false, code: err.code || "new-epoch-exception", error: err.message };
+  } finally {
+    _releaseEpochLock(workspace, taskId);
   }
 }
 
@@ -2046,6 +2144,13 @@ export function _overrideBudgetCli({ taskId, workspace, charterFile, reason, own
   if (!owner) return { ok: false, code: "override-requires-owner", error: "--owner is required" };
   const minutes = Number(additionalMinutes);
   if (!Number.isFinite(minutes) || minutes <= 0) return { ok: false, code: "override-requires-positive-minutes", error: "--additional-minutes must be a positive number" };
+  // gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening (item 1): SAME lock as
+  // _newEpochCli, guarding the SAME class of read-check-write race for --override-budget.
+  try {
+    _acquireEpochLock(workspace, taskId);
+  } catch (err) {
+    return { ok: false, code: err.code || "epoch-lock-exception", error: err.message };
+  }
   try {
     const { charterHash, reviewPolicyHash } = _currentEpochIdentity({ workspace, taskId, charterFile });
     const { record: existing, corrupt } = _readEpochRecord(workspace, taskId);
@@ -2077,7 +2182,9 @@ export function _overrideBudgetCli({ taskId, workspace, charterFile, reason, own
     _atomicWriteJson(p, record);
     return { ok: true, epochFile: p, epochId: record.epochId, override: overrideEntry, overrides: record.overrides };
   } catch (err) {
-    return { ok: false, code: "override-exception", error: err.message };
+    return { ok: false, code: err.code || "override-exception", error: err.message };
+  } finally {
+    _releaseEpochLock(workspace, taskId);
   }
 }
 

@@ -1617,6 +1617,62 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     }
   });
 
+  // gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening (item 3, explicit decision): "no
+  // further resets/overrides, ever, once a hard ceiling is hit — converge to COMMIT/SPLIT" IS the
+  // intended terminal design (recorded in the task's own Proposal-adjacent prose). What these two
+  // tests verify is narrower and purely mechanical: `_epochBreachExit`'s `allowedActions` must
+  // stop implying an escalation path (`NEW-EPOCH`/`OVERRIDE`) that is ALREADY a mechanically-
+  // guaranteed dead end at breach time — `_newEpochCli`/`_overrideBudgetCli` fail-closed on their
+  // own `maxNewEpochResetCount`/`maxOverrideCount` ceiling regardless (see
+  // proposal-convergence.test.mjs's `new-epoch-reset-count-cap-exceeded`/`override-count-cap-
+  // exceeded` coverage), so listing them once already exhausted would be inaccurate, not merely
+  // unhelpful.
+  test(`[${mirrorName}] gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening (item 3): allowedActions omits OVERRIDE once maxOverrideCount is ALREADY exhausted, but still lists NEW-EPOCH while its own ceiling has headroom`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    try {
+      const { result } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onEpochStatus: () => ({ raw: JSON.stringify({
+          ok: true, code: 'epoch-status-ok', exists: true, epochId: 'prior-epoch',
+          // observableAgentMs deliberately exceeds ordinaryCapMinutes(90) + the ONE recorded
+          // override's own 30 additional minutes (effectiveCapMs = 120m) — the prior override
+          // genuinely extends the time cap, so a value only just past 90m alone would NOT breach
+          // here; 200m safely clears the extended cap too.
+          counters: { attempts: 5, fullReviews: 1, deltaRounds: 3, contentAgentDispatches: 20, observableAgentMs: 200 * 60 * 1000, terminalFingerprints: {}, tokensObserved: null },
+          policy: { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2, maxOverrideCount: 1, maxNewEpochResetCount: 3 },
+          overrides: [{ owner: 'alice', reason: 'prior override', additionalBudget: 30, grantedAt: 1 }],
+          resets: [],
+        }) }),
+      });
+      assert.equal(result.outcome, 'needs-human', JSON.stringify(result));
+      assert.equal(result.reason, 'epoch-time-cap-exceeded');
+      assert.deepEqual(result.allowedActions, ['COMMIT', 'SPLIT', 'NEW-EPOCH'], 'OVERRIDE is a mechanically-guaranteed dead end here (maxOverrideCount:1 already met by the one prior override on file) and must not be listed; NEW-EPOCH still has real headroom (0 of 3 resets used) so it stays listed');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
+  test(`[${mirrorName}] gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening (item 3): allowedActions is COMMIT/SPLIT ONLY once BOTH maxOverrideCount and maxNewEpochResetCount are ALREADY exhausted — no escape valve past the hard ceilings, by design`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    try {
+      const { result } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onEpochStatus: () => ({ raw: JSON.stringify({
+          ok: true, code: 'epoch-status-ok', exists: true, epochId: 'prior-epoch',
+          // Same rationale as the test above: past the extended (90+30=120m) effective cap.
+          counters: { attempts: 5, fullReviews: 1, deltaRounds: 3, contentAgentDispatches: 20, observableAgentMs: 200 * 60 * 1000, terminalFingerprints: {}, tokensObserved: null },
+          policy: { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2, maxOverrideCount: 1, maxNewEpochResetCount: 1 },
+          overrides: [{ owner: 'alice', reason: 'prior override', additionalBudget: 30, grantedAt: 1 }],
+          resets: [{ fromEpochId: 'prior-epoch-0', owner: 'bob', reason: 'prior reset', oldHash: {}, newHash: {}, timestamp: 1 }],
+        }) }),
+      });
+      assert.equal(result.outcome, 'needs-human', JSON.stringify(result));
+      assert.deepEqual(result.allowedActions, ['COMMIT', 'SPLIT'], 'once BOTH hard ceilings are already exhausted, NEW-EPOCH/OVERRIDE are mechanically-guaranteed dead ends and must not be listed — COMMIT/SPLIT remain the only genuine paths forward, matching the intended terminal design');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
   // gap-prepare-milestone-task-epoch-budget-reset (round 2, post-REFUTATION): an independent review
   // found the wiring-coverage-check dispatch site was the ONE real content-agent call in this file
   // with no epoch cap check immediately before it — every other dispatch site (ProposalAuthors,

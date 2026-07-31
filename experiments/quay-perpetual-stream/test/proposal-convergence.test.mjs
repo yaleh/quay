@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 
 import {
@@ -2451,5 +2451,160 @@ fixture proposal text v1
     const p2 = checkpointPath("/ws", "some/task");
     assert.equal(path.basename(p1), path.basename(p2), "both sanitize 'some/task' to the SAME filename segment");
     assert.match(p1, /\.quay[/\\]prepare-epochs[/\\]/);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // ── gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening: TOCTOU race regression ─────────
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // Follow-up from the round-3 adversarial review of gap-prepare-milestone-task-epoch-budget-reset
+  // (out of that task's own threat model, which was single-actor SEQUENTIAL redispatch only). The
+  // reviewer fired genuinely concurrent `--new-epoch`/`--override-budget` child processes against a
+  // shared epoch and reproduced TWO real defects pre-fix: (a) the hard ceiling was exceeded by one
+  // (4 ok:true against a cap of 3), and (b) the final on-disk record showed FEWER entries than the
+  // number of ok:true responses -- one caller's own accepted reset/override silently vanished from
+  // the audit trail (last-writer-wins on `_atomicWriteJson`'s rename, no lock around the
+  // read-check-write window). `_acquireEpochLock`/`_releaseEpochLock` (wx-flag exclusive lock,
+  // reusing prepare-admission-check.ts's `wx` primitive) close this. Uses REAL spawned child
+  // processes (node:child_process `spawn`, not in-process mocks/Promise.all-of-sync-calls) — the
+  // established pattern this repo's own cross-process race tests use (see
+  // prepare-admission-check.test.mjs's `gap-prepare-milestone-lease-read-race` describe block).
+  function spawnConvergenceCli(args) {
+    return new Promise((resolve) => {
+      const child = spawn("node", ["--no-warnings", "--experimental-strip-types", CONVERGENCE_SCRIPT, ...args]);
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (d) => { stdout += d; });
+      child.stderr.on("data", (d) => { stderr += d; });
+      child.on("close", (code) => resolve({ code, stdout, stderr }));
+      child.on("error", (err) => resolve({ code: -1, stdout, stderr: `${stderr}\nspawn error: ${err.message}` }));
+    });
+  }
+  function spawnNewEpoch(dir, taskId, charterFile, { reason, owner, confirmUnchangedScope } = {}) {
+    const args = ["--new-epoch", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile];
+    if (reason !== undefined) args.push("--reason", reason);
+    if (owner !== undefined) args.push("--owner", owner);
+    if (confirmUnchangedScope !== undefined) args.push("--confirmUnchangedScope", String(confirmUnchangedScope));
+    return spawnConvergenceCli(args);
+  }
+  function spawnOverride(dir, taskId, charterFile, { reason, owner, additionalMinutes } = {}) {
+    const args = ["--override-budget", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile];
+    if (reason !== undefined) args.push("--reason", reason);
+    if (owner !== undefined) args.push("--owner", owner);
+    if (additionalMinutes !== undefined) args.push("--additional-minutes", String(additionalMinutes));
+    return spawnConvergenceCli(args);
+  }
+  function parseCliJson(res) {
+    try {
+      return JSON.parse(res.stdout.trim());
+    } catch {
+      return { ok: false, code: "unparseable-cli-output", raw: res.stdout, stderr: res.stderr, exitCode: res.code };
+    }
+  }
+
+  test("REGRESSION (gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening): 20 genuinely concurrent --new-epoch child processes against a shared epoch (maxNewEpochResetCount:3) never exceed the hard ceiling, and every ok:true response has a real, permanently-persisted entry in the final on-disk record", async () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      // Seed an existing epoch record first — `_newEpochCli`'s entire ceiling/distinctness block
+      // is wrapped in `if (existing) {...}` and is skipped completely when no record exists yet.
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+
+      const N = 20; // matches the reviewer's own heavier reproduction (6 AND separately 20 concurrent processes)
+      const launches = [];
+      for (let i = 0; i < N; i++) {
+        // Distinct owner+reason per caller — isolates the TOCTOU/lock property under test from the
+        // SEPARATE (already-covered) distinctness-rejection mechanism.
+        launches.push(spawnNewEpoch(dir, taskId, charterFile, { reason: `concurrent reset reason #${i}`, owner: `owner-${i}`, confirmUnchangedScope: true }));
+      }
+      const results = (await Promise.all(launches)).map(parseCliJson);
+
+      const succeeded = results.filter((r) => r.ok === true);
+      const lockContention = results.filter((r) => r.code === "epoch-lock-contention");
+      const epochFile = path.join(dir, ".quay", "prepare-epochs", `${taskId}.json`);
+      const record = JSON.parse(fs.readFileSync(epochFile, "utf8"));
+      const maxNewEpochResetCount = record.policy.maxNewEpochResetCount;
+      assert.ok(Number.isFinite(maxNewEpochResetCount) && maxNewEpochResetCount > 0, "a real, finite hard reset-count ceiling is recorded on the epoch");
+
+      // (a) the hard ceiling is NEVER exceeded, regardless of concurrency -- the pre-fix
+      // reproduction got 4 ok:true against a cap of 3.
+      assert.ok(succeeded.length <= maxNewEpochResetCount, `expected at most ${maxNewEpochResetCount} of ${N} genuinely concurrent --new-epoch calls to succeed, got ${succeeded.length} — the hard ceiling was exceeded under concurrency`);
+      // (b) every ok:true response corresponds to a real, permanently-persisted entry in the final
+      // on-disk record -- no last-writer-wins silent data loss (the pre-fix defect: the final
+      // record showed only 3 resets even when 4 callers were told ok:true).
+      assert.equal(record.resets.length, succeeded.length, `every accepted reset must survive to the final on-disk record — got ${succeeded.length} ok:true responses but only ${record.resets.length} persisted resets (silent data loss)`);
+      assert.ok(record.resets.length <= maxNewEpochResetCount, `persisted resets (${record.resets.length}) must never exceed the hard ceiling (${maxNewEpochResetCount})`);
+      // Every non-ok response is a real, typed rejection (ceiling/distinctness/lock-contention),
+      // never an unhandled exception/crash.
+      for (const r of results) {
+        if (r.ok !== true) {
+          assert.ok(
+            ["new-epoch-reset-count-cap-exceeded", "new-epoch-reset-not-distinct", "epoch-lock-contention"].includes(r.code),
+            `unexpected rejection code for a concurrent --new-epoch call: ${r.code} (${JSON.stringify(r)})`
+          );
+        }
+      }
+      // Never a total lockout — with only 20 short-lived callers and generous bounded retries,
+      // lock contention should resolve for the overwhelming majority (this is a real, not just
+      // theoretical, liveness check on the retry/backoff bound).
+      assert.ok(lockContention.length < N, "the bounded lock retry must not starve every single concurrent caller");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("REGRESSION (gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening): 20 genuinely concurrent --override-budget child processes against a shared epoch (maxOverrideCount:3) never exceed the hard ceiling, and every ok:true response has a real, permanently-persisted entry in the final on-disk record", async () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+
+      const N = 20;
+      const launches = [];
+      for (let i = 0; i < N; i++) {
+        launches.push(spawnOverride(dir, taskId, charterFile, { reason: `concurrent override reason #${i}`, owner: `owner-${i}`, additionalMinutes: 5 }));
+      }
+      const results = (await Promise.all(launches)).map(parseCliJson);
+
+      const succeeded = results.filter((r) => r.ok === true);
+      const lockContention = results.filter((r) => r.code === "epoch-lock-contention");
+      const epochFile = path.join(dir, ".quay", "prepare-epochs", `${taskId}.json`);
+      const record = JSON.parse(fs.readFileSync(epochFile, "utf8"));
+      const maxOverrideCount = record.policy.maxOverrideCount;
+      assert.ok(Number.isFinite(maxOverrideCount) && maxOverrideCount > 0, "a real, finite hard override-count ceiling is recorded on the epoch");
+
+      assert.ok(succeeded.length <= maxOverrideCount, `expected at most ${maxOverrideCount} of ${N} genuinely concurrent --override-budget calls to succeed, got ${succeeded.length} — the hard ceiling was exceeded under concurrency`);
+      assert.equal(record.overrides.length, succeeded.length, `every accepted override must survive to the final on-disk record — got ${succeeded.length} ok:true responses but only ${record.overrides.length} persisted overrides (silent data loss)`);
+      assert.ok(record.overrides.length <= maxOverrideCount, `persisted overrides (${record.overrides.length}) must never exceed the hard ceiling (${maxOverrideCount})`);
+      for (const r of results) {
+        if (r.ok !== true) {
+          assert.ok(
+            ["override-count-cap-exceeded", "override-not-distinct", "epoch-lock-contention"].includes(r.code),
+            `unexpected rejection code for a concurrent --override-budget call: ${r.code} (${JSON.stringify(r)})`
+          );
+        }
+      }
+      assert.ok(lockContention.length < N, "the bounded lock retry must not starve every single concurrent caller");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("--new-epoch/--override-budget: a genuinely stale (crashed-holder) lock file older than EPOCH_LOCK_STALE_MS is reclaimed rather than permanently deadlocking the mechanism", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+      const lockFile = path.join(dir, ".quay", "prepare-epochs", `${taskId}.lock`);
+      fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+      // A lock file "acquired" 5 minutes ago (well past EPOCH_LOCK_STALE_MS=30s) by a pid that no
+      // longer holds it — models a crashed prior holder, never released.
+      fs.writeFileSync(lockFile, JSON.stringify({ pid: 999999999, acquiredAtMs: Date.now() - 5 * 60 * 1000 }), { flag: "wx" });
+
+      const out = JSON.parse(runNewEpoch(dir, taskId, charterFile, { reason: "reclaim-after-stale-lock", owner: "rescuer", confirmUnchangedScope: true }).stdout.trim());
+      assert.equal(out.ok, true, `a stale lock must be reclaimed, not a permanent deadlock: ${JSON.stringify(out)}`);
+      assert.ok(!fs.existsSync(lockFile), "the lock is released again after the reclaiming call completes");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
