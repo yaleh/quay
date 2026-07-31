@@ -1076,7 +1076,10 @@ export function decideSplitAdjudication(record, { charterHash, scopeHash: curren
       if (record.charterHash !== charterHash) mismatchedFields.push("charterHash");
       if (record.scopeHash !== currentScopeHash) mismatchedFields.push("scopeHash");
       if (record.reviewPolicyHash !== reviewPolicyHash) mismatchedFields.push("reviewPolicyHash");
-      const invalidation = { atMs: Date.now(), generationId: null, mismatchedFields, priorValue: record, currentValue: { charterHash, scopeHash: currentScopeHash, reviewPolicyHash } };
+      // Clone without invalidations to avoid circular reference: record.invalidations[n].priorValue
+      // would point back to record itself (which now contains the invalidation that references it).
+      const { invalidations: _, ...recordWithoutCycles } = record;
+      const invalidation = { atMs: Date.now(), generationId: null, mismatchedFields, priorValue: recordWithoutCycles, currentValue: { charterHash, scopeHash: currentScopeHash, reviewPolicyHash } };
       record.invalidations = [...(record.invalidations || []), invalidation];
       return { verdict: "decision-invalidated", mismatchedFields, record };
     }

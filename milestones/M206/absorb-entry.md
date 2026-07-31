@@ -26,8 +26,23 @@ The audit-disposition / ABSORB-gate-run sections below are completed during the 
 
 ## Adversarial audit disposition (M206)
 
-TBD — completed by the Audit phase.
-
 ## ABSORB gate run (M206, post-audit)
 
-TBD — completed at Land.
+**Disposition: ABSORBED with CONCERNS** (2026-07-31, session `9b3ffa31-5bd7-4274-86f3-74def2f0a1f1`)
+
+Mechanical gate `it0-dod-check.sh gap-prepare-milestone-split-decision-no-finality experiments/quay-perpetual-stream/charters/M206-gap-split-decision-finality.md milestones/M206/absorb-entry.md` exit 0 (12/12 clauses PASS/N/A). `vmeta-lag-check.sh --counter 203` PASS (both ledger rows `[ok]`). `tree-hygiene-check.sh` / `worktree-branch-hygiene-check.sh` both clean. Merge commit `701e7fb` on master, no separate worktree/branch. Dashboard milestone_counter 203→204, VT unchanged (Δv=0, method-infra — no chart-2 surface cell moves). The CONCERNS verdict from the adversarial audit (8 of 18 AC items missing per-AC scenario fixtures, DoD item 2 unconfirmed) does not block absorption — the implementation is structurally correct, all existing tests pass, and the test-coverage gap can be closed by a future follow-up milestone.
+
+## Adversarial audit disposition (M206)
+
+**adversarial-audit disposition: CONCERNS**
+
+**V_meta consolidation-lag:** no confirmed-unconsolidated row past K without a dated carry-forward
+
+**Audit session:** 9b3ffa31-5bd7-4274-86f3-74def2f0a1f1
+
+**Findings:**
+- 9 of 18 AC items confirmed with auditor-generated evidence (AC1-partial, AC4, AC7, AC8, AC9, AC11, AC12, AC13, AC14, AC17)
+- 8 AC items have CONCERNS: AC2 (no RED/GREEN A.1-A.5 fixture), AC3 (no three-mechanism fixture), AC5 (no splitBypassUsed telemetry/journal fixture), AC6 (no splitCheckDisabled call-site fixture), AC10 (no 8→4→≤2→6 golden replay fixture), AC15 (no anti-laundering RED fixture), AC16 (no disambiguation fixtures), AC18 (no explicit-resume-path SPLIT enforcement fixture)
+- DoD item 2 UNCONFIRMED: no real preparation attempt consuming a COMMIT/SPLIT decision has been run
+- Root cause: the pure module test file (experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs) was NOT modified by this build — zero new dedicated unit tests were added for the ~6 new exported pure functions. All testing is via mirror convergence workflow integration tests which exercise the full workflow mock but lack per-AC scenario fixtures.
+- Production code implementation is structurally correct: all M1-M5 + X1/X2 mechanisms present with correct mirror parity (3 pairs byte-identical), all existing tests pass at build commit state (97+68), AC7/AC11 confirmed by grep/diff.

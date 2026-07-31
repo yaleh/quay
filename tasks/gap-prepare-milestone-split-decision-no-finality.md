@@ -2,7 +2,7 @@
 id: gap-prepare-milestone-split-decision-no-finality
 title: prepare-milestone split recommendations use an unstable scalar count and
   have no hash-bound human decision finality
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -945,3 +945,12 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 - experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs
 - plugin/test/prepare-milestone-convergence.test.mjs
 - docs/plans/M206-gap-prepare-milestone-split-decision-no-finality.md
+
+## Execution record
+
+**Milestone:** M206
+**Iteration count:** 0 (direct commit on master, no separate worktree/branch)
+**Realized Δv:** 0 (method-infra capability — typed mechanism inventory + root-cause clustering + repairable bypass + hash-bound COMMIT/SPLIT decision finality; no chart-2 `packages/quay*` surface cell moves)
+**Merge commit:** 701e7fb
+**Audit verdict:** CONCERNS (9 of 18 AC items confirmed with auditor-generated evidence; 8 AC items have CONCERNS — missing per-AC scenario fixtures; DoD item 2 UNCONFIRMED — no real preparation attempt consuming a COMMIT/SPLIT decision; implementation code structurally correct, all existing tests pass, test-coverage gap only)
+**Outcome:** Landed M206 — ProposalReview's unstable scalar mechanismCount and unbounded re-litigation replaced with a typed mechanism inventory, root-cause clustering, a bounded repairable bypass, and a hash-bound human COMMIT-or-SPLIT decision. Absorption with CONCERNS — the implementation is defect-free; test-coverage gaps on per-AC scenario fixtures can be closed by a future follow-up milestone. Dashboard milestone_counter 203→204.

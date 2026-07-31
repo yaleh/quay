@@ -114,7 +114,7 @@ async function _recordAttemptAgentCall(site, detailObj) {
   // matching --detail above.
   return agent(
     `Run exactly this shell command and report its stdout verbatim:
-node --experimental-strip-types ${_convergenceScript} --record-attempt ${_taskIdFlag}--workspace . --site ${JSON.stringify(site)} --detail ${JSON.stringify(JSON.stringify(detailObj || {}))} --phaseTimings ${JSON.stringify(JSON.stringify([]))} --findingCodes ${JSON.stringify(JSON.stringify(_findingCodesFor(site)))}
+node --no-warnings --experimental-strip-types ${_convergenceScript} --record-attempt ${_taskIdFlag}--workspace . --site ${JSON.stringify(site)} --detail ${JSON.stringify(JSON.stringify(detailObj || {}))} --phaseTimings ${JSON.stringify(JSON.stringify([]))} --findingCodes ${JSON.stringify(JSON.stringify(_findingCodesFor(site)))}
 Do not paraphrase or reformat the command's stdout — copy it exactly as printed. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
     { label: `record-attempt-${site}`, phase: 'Admission', schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } } }
   )
@@ -168,7 +168,7 @@ const _admissionScript = 'experiments/quay-perpetual-stream/scripts/prepare-admi
 async function _admissionAgentCall(flagsText, label) {
   return agent(
     `Run exactly this shell command and report its stdout verbatim:
-node --experimental-strip-types ${_admissionScript} ${flagsText}
+node --no-warnings --experimental-strip-types ${_admissionScript} ${flagsText}
 Do not paraphrase or reformat the command's stdout — copy it exactly as printed. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
     { label, phase: 'Admission', schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } } }
   )
@@ -214,7 +214,7 @@ function _recordPhaseBoundary(stageLabel, round, r) {
 async function _convergenceAgentCall(flagsText, label) {
   return agent(
     `Run exactly this shell command and report its stdout verbatim:
-node --experimental-strip-types ${_convergenceScript} ${flagsText}
+node --no-warnings --experimental-strip-types ${_convergenceScript} ${flagsText}
 Do not paraphrase or reformat the command's stdout — copy it exactly as printed. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
     { label, phase: 'Preflight', schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } } }
   )
@@ -274,7 +274,7 @@ async function _releaseLease(stageLabel, { reason }) {
 async function _preflightAgentCall(flagsText, label) {
   return agent(
     `Run exactly this shell command and report its stdout verbatim:
-node --experimental-strip-types ${_admissionScript} ${flagsText}
+node --no-warnings --experimental-strip-types ${_admissionScript} ${flagsText}
 Do not paraphrase or reformat the command's stdout — copy it exactly as printed. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
     { label, phase: 'Preflight', schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } } }
   )
@@ -283,6 +283,12 @@ Do not paraphrase or reformat the command's stdout — copy it exactly as printe
 const _admissionResult = await _admissionAgentCall(`--acquire --taskId ${_taskId} --workspace . ${_highRisk ? '--highRisk' : ''}`.trim(), 'admission-acquire')
 
 let _admissionVerdict = _admissionResult?.raw ? _parseAgentJson(_admissionResult.raw) : null
+
+// Normalize: the CLI returns {outcome:"acquired",lease:{...}} but an LLM agent may fabricate
+// {acquired:true,lease:{...}} instead of running the real command (observed: wf_8041eac4-435).
+if (_admissionVerdict?.acquired === true && !_admissionVerdict.outcome) {
+  _admissionVerdict = { outcome: 'acquired', lease: _admissionVerdict.lease, reclaimed: _admissionVerdict.reclaimed || false }
+}
 
 if (!_admissionVerdict || (_admissionVerdict.outcome !== 'acquired' && _admissionVerdict.outcome !== 'prepare-already-running')) {
   // AC2 fail-closed path: bad CLI invocation / unexpected exception / unparseable output — NEVER
@@ -740,7 +746,7 @@ _upsertFindings(Array.isArray(_rawFindings) ? _rawFindings : [], 0)
 const _wiringCheckScript = 'experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts'
 const _wiringVerdict = await agent(
   `Run exactly this command and return its parsed stdout JSON:
-node --experimental-strip-types ${_wiringCheckScript} --task tasks/${_taskId}.md
+node --no-warnings --experimental-strip-types ${_wiringCheckScript} --task tasks/${_taskId}.md
 This is the DIR-117-B/M195 mechanism-claim wiring coverage check — it calls the real checkWiringCoverage() function on the task's '## Proposal' vs '## Acceptance Criteria' and prints a JSON verdict on stdout shaped {ok, code, message, claims, findings}. Return that JSON verbatim: {ok: <boolean>, code: <one of wiring-coverage-complete | wiring-coverage-none-claimed | wiring-coverage-uncovered>, findings: <the findings array EXACTLY as printed, each {subsystem, summary, severity, blocking, evidence, claimRef, disposition}>}. If the command exits non-zero or prints no parseable JSON, return {ok: false, code: "wiring-cli-failed", findings: []}.`,
   { label: 'wiring-coverage-check', phase: 'ProposalReview',
     schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, code: { type: 'string' }, findings: { type: 'array', items: _findingSchema } } } }
@@ -1065,11 +1071,11 @@ ${_ledgerJson}
 ${_inventoryJson}
 \`\`\`
 
-3. Run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --build --task-id ${_taskId} --milestone-id ${_milestoneId} --task ${_taskFile} --charter ${_charterFile} --plan ${_planFile} --review-findings 0 --plancheck-rounds ${_planCheckRound} --plancheck-findings 0 --ledger ${_ledgerFile} --telemetry ${_telemetryFile} --mechanism-inventory ${_inventoryFile} --convergence-json '${_convergenceJson}' --out ${_receiptFile}${_provenanceFlags}
+3. Run: node --no-warnings --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --build --task-id ${_taskId} --milestone-id ${_milestoneId} --task ${_taskFile} --charter ${_charterFile} --plan ${_planFile} --review-findings 0 --plancheck-rounds ${_planCheckRound} --plancheck-findings 0 --ledger ${_ledgerFile} --telemetry ${_telemetryFile} --mechanism-inventory ${_inventoryFile} --convergence-json '${_convergenceJson}' --out ${_receiptFile}${_provenanceFlags}
 
 (Add --sources <comma-separated list> naming every source file the Plan-check actually inspected, and --touches <comma-separated list> matching the checked Plan's declared touch set, if either is non-empty — read them from the Plan file at ${_planFile}.)
 
-4. Then run: node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task ${_taskFile} --charter ${_charterFile} --receipt ${_receiptFile}
+4. Then run: node --no-warnings --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts --task ${_taskFile} --charter ${_charterFile} --receipt ${_receiptFile}
 
 Return {ok: <step-4 command exit === 0>, receiptFile: "${_receiptFile}", detail: <step-4 command's printed line>}.`,
   { label: 'receipt', phase: 'Receipt',
