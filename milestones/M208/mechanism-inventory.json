@@ -1,0 +1,29 @@
+{
+  "mechanisms": [
+    {
+      "id": "build-phase-positive-outcome-gate",
+      "owner": "execute-milestone.js (both mirrors, maintained identical)",
+      "proofSurface": ".claude/workflows/execute-milestone.js:273-277",
+      "dependsOn": [],
+      "independentlyShippable": true,
+      "rationale": "The actual behavior-changing code edit: replaces the negative-only `buildResult?.outcome === 'needs-human'` check with a positive-outcome `buildResult?.outcome !== 'done'` gate plus a three-way reason-code fallback, returning needs-human before any Audit/Gate/Land dispatch. plugin/workflows/execute-milestone.js is confirmed byte-for-byte identical to the .claude/ mirror (full-file diff empty) and both must change together as one atomic behavior contract per the repo's existing mirror-maintenance convention — not two independent mechanisms, since a fix landed in only one mirror leaves the other with the pre-existing gap. This is the complete, independently valuable safety fix on its own (closes the M192-class gap) even before any new test exists."
+    },
+    {
+      "id": "build-phase-gate-regression-fixtures",
+      "owner": "plugin/test/execute-milestone-build-phase-gate.test.mjs (new file, does not yet exist — confirmed via `test -f`)",
+      "proofSurface": "plugin/test/execute-milestone-build-phase-gate.test.mjs",
+      "dependsOn": [
+        "build-phase-positive-outcome-gate"
+      ],
+      "independentlyShippable": false,
+      "rationale": "AC3 (null-result regression test) and AC4 (undefined/unknown-outcome/schema-invalid-done fixtures) are grouped into one mechanism entry: both are additional `test()` cases in the same new file, exercising the same `loadWorkflow`+mock-agent harness pattern already established by execute-milestone-preparation-gate.test.mjs, and none of them has independent user value or a complete safety contract without the gate fix they are asserting against — a fixture proving needs-human-on-null is meaningless (and per AC1 must be RED before, GREEN after) without build-phase-positive-outcome-gate already landed or landing in the same change."
+    }
+  ],
+  "inventory": {
+    "ok": true,
+    "count": 1,
+    "inventoryHash": "mi-a1da7e46",
+    "mechanismCount": 1
+  },
+  "source": "typed"
+}

@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 2,
+  "recordId": "1869c7284160",
+  "attemptId": "1869c7284160",
+  "generationId": "1869c7284160",
+  "admission": {
+    "key": ".::gap-build-phase-null-result-not-gated",
+    "ownerExecutionId": "4226284b-330a-4212-ae47-bdbb8e760bd5",
+    "fencingToken": 0,
+    "acquiredAt": 1785480069850
+  },
+  "workspace": ".",
+  "taskId": "gap-build-phase-null-result-not-gated",
+  "milestoneId": "M208",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "316a1e04a70971f5b5e7b32100bf835ca83710e18c2e0ea8a4c5cc73a329212c",
+    "taskContract": "3466c56f17be51769f051d1696e42946d28e6b01521aa87ddf6cab6166ccf9fc",
+    "proposal": "27116353810b87258bd326903fe1b49b89bdb266e5e7d2affdc60adb06d87008",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "prepared",
+    "reason": "prepared",
+    "phase": "Receipt",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": false,
+    "ok": null,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785481660697,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785480069850,
+      "endedAtMs": 1785480100189
+    },
+    {
+      "phase": "ProposalReview-delta-round-1",
+      "round": 1,
+      "startedAtMs": 1785480100189,
+      "endedAtMs": 1785480347994
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785480347994,
+      "endedAtMs": 1785480866299
+    },
+    {
+      "phase": "PlanCheck-round-1",
+      "round": 1,
+      "startedAtMs": 1785480866299,
+      "endedAtMs": 1785481070397
+    },
+    {
+      "phase": "PlanCheck-round-2",
+      "round": 2,
+      "startedAtMs": 1785481070397,
+      "endedAtMs": 1785481470473
+    },
+    {
+      "phase": "Receipt",
+      "round": 0,
+      "startedAtMs": 1785481470473,
+      "endedAtMs": 1785481646111
+    },
+    {
+      "phase": "Receipt",
+      "round": 0,
+      "startedAtMs": 1785481646111,
+      "endedAtMs": 1785481660697
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "prepared",
+      "recurrenceKey": "0bac0e3e472b",
+      "firstSeenGeneration": "1869c7284160",
+      "lastSeenGeneration": "1869c7284160"
+    },
+    {
+      "code": "55016c0b",
+      "recurrenceKey": "5ac3609b5cd6",
+      "firstSeenGeneration": "1869c7284160",
+      "lastSeenGeneration": "1869c7284160"
+    },
+    {
+      "code": "c2f5d98f",
+      "recurrenceKey": "496db332cb28",
+      "firstSeenGeneration": "1869c7284160",
+      "lastSeenGeneration": "1869c7284160"
+    },
+    {
+      "code": "1fddc0dc",
+      "recurrenceKey": "6ea7ec217179",
+      "firstSeenGeneration": "1869c7284160",
+      "lastSeenGeneration": "1869c7284160"
+    },
+    {
+      "code": "3cc8b25d",
+      "recurrenceKey": "203439c9f065",
+      "firstSeenGeneration": "ab52f856a572",
+      "lastSeenGeneration": "1869c7284160"
+    },
+    {
+      "code": "9f7c36a8",
+      "recurrenceKey": "20122c45156e",
+      "firstSeenGeneration": "ab52f856a572",
+      "lastSeenGeneration": "1869c7284160"
+    },
+    {
+      "code": "5dbe8a10",
+      "recurrenceKey": "f2f2977f9883",
+      "firstSeenGeneration": "ab52f856a572",
+      "lastSeenGeneration": "1869c7284160"
+    },
+    {
+      "code": "a6a8831c",
+      "recurrenceKey": "ddff0d3d3a22",
+      "firstSeenGeneration": "1869c7284160",
+      "lastSeenGeneration": "1869c7284160"
+    },
+    {
+      "code": "f0bbde92",
+      "recurrenceKey": "6695c9f730b8",
+      "firstSeenGeneration": "1869c7284160",
+      "lastSeenGeneration": "1869c7284160"
+    },
+    {
+      "code": "98559de6",
+      "recurrenceKey": "cdeeb3d536a8",
+      "firstSeenGeneration": "ab52f856a572",
+      "lastSeenGeneration": "1869c7284160"
+    }
+  ]
+}

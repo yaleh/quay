@@ -1,0 +1,86 @@
+{
+  "taskId": "gap-build-phase-null-result-not-gated",
+  "milestoneId": "M208",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M208-gap-build-phase-null-result-not-gated.md",
+  "planFile": "docs/plans/M208-gap-build-phase-null-result-not-gated.md",
+  "ledgerFile": "milestones/M208/proposal-ledger.json",
+  "telemetryFile": "milestones/prepare-telemetry/gap-build-phase-null-result-not-gated/1869c7284160.json",
+  "mechanismInventoryFile": "milestones/M208/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "ca5147791dba39a2fbb59617665f0a9a53e64c63aa64a84845ad83d4a5b97e1d",
+    "charter": "316a1e04a70971f5b5e7b32100bf835ca83710e18c2e0ea8a4c5cc73a329212c",
+    "plan": "273cdcf3a662700edffee8e0a10494dce3b5d26083a42df180534a8600912efe",
+    "sources": {
+      ".claude/workflows/execute-milestone.js": "1afa25bb42340ccf7d65eac91ad4383f999a20dc53158ad11194821f2dd98813",
+      "plugin/workflows/execute-milestone.js": "1afa25bb42340ccf7d65eac91ad4383f999a20dc53158ad11194821f2dd98813",
+      "plugin/test/execute-milestone-preparation-gate.test.mjs": "3ed6acc2d062c1af67cb8cd230bec4793bf4f5723025c913593e718d75f6aad0",
+      "plugin/test/prepare-milestone-preparation-e2e.test.mjs": "653c71add0d65f4437fc879f9dfb76847c626d21685bd1fa2a15e0f5747ad0aa"
+    },
+    "ledger": "ed1e0ea28f6586015ad590729a595b2022cf8ef48fc9d232f6be3f2ebf1e1315",
+    "telemetry": "a1ecace5ba6c3dae4b2046a6c7e36fc0c72dc7d95ffc4bc0a18d5085f5200de3",
+    "mechanismInventory": "33a17dad1a73844c7b782b991f7efeb833ca92c1443e2243922e36d6dda53f40"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 2,
+    "findings": 0
+  },
+  "touches": [
+    ".claude/workflows/execute-milestone.js",
+    "plugin/workflows/execute-milestone.js",
+    "plugin/test/execute-milestone-build-phase-gate.test.mjs",
+    "plugin/test/execute-milestone-preparation-gate.test.mjs",
+    "plugin/test/prepare-milestone-preparation-e2e.test.mjs",
+    "tasks/gap-build-phase-null-result-not-gated.md",
+    "docs/plans/M208-gap-build-phase-null-result-not-gated.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "4226284b-330a-4212-ae47-bdbb8e760bd5"
+    },
+    "planAuthor": {
+      "sessionId": "4226284b-330a-4212-ae47-bdbb8e760bd5"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "4226284b-330a-4212-ae47-bdbb8e760bd5"
+      },
+      {
+        "round": 2,
+        "sessionId": "4226284b-330a-4212-ae47-bdbb8e760bd5"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 1,
+    "proposalReviewRounds": 2,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785480295904,
+    "endedAtMs": 1785480857115,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "7ebc6fb998c1ccda"
+      },
+      {
+        "round": 1,
+        "hash": "8d92f917997fa2b1"
+      }
+    ]
+  }
+}

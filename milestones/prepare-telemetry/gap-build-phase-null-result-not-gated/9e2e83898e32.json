@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "recordId": "9e2e83898e32",
+  "attemptId": "9e2e83898e32",
+  "generationId": null,
+  "admission": null,
+  "workspace": ".",
+  "taskId": "gap-build-phase-null-result-not-gated",
+  "milestoneId": null,
+  "class": null,
+  "highRisk": null,
+  "hashes": null,
+  "decision": {
+    "kind": "not-evaluated",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": 0,
+  "contentAgentMs": 0,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "prepare-already-running",
+    "phase": "Admission",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": false,
+    "ok": null,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785474746363,
+  "telemetryWriteOk": true,
+  "phaseTimings": [],
+  "findingCodes": [
+    {
+      "code": "prepare-already-running",
+      "recurrenceKey": "19bcfc3b4f9a",
+      "firstSeenGeneration": "9e2e83898e32",
+      "lastSeenGeneration": "9e2e83898e32"
+    }
+  ]
+}
