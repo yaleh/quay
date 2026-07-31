@@ -14,7 +14,7 @@ import {
   computeMetricsForReceipt, queryTelemetryReport,
   computeCapacityReport, percentile, isCacheableTerminalShape, _walkJsonFiles,
 } from "../scripts/milestone-preparation-check.ts";
-import { CACHEABLE_TERMINALS } from "../scripts/proposal-convergence.ts";
+import { CACHEABLE_TERMINALS, validateTelemetryRecord } from "../scripts/proposal-convergence.ts";
 
 const FIXTURES = path.join(import.meta.dirname, "..", "fixtures", "preparation");
 const TASK = path.join(FIXTURES, "fixture-task.md");
@@ -957,6 +957,31 @@ test("DIR-126-E C3: validateTelemetryRecord is REUSED — a reuse-terminal invar
   assert.equal(ex.reason, "reuse-terminal-invalid");
   assert.match(ex.detail, /contentAgentDispatchCount === 0 && contentAgentMs === 0/);
   assert.equal(report.sampleCount, 6, "invalid record not counted");
+});
+
+test("M207 forward-compat: a pre-M207 record (no phaseTimings/findingCodes) is AGGREGATED at read time (not excluded as telemetry-field-missing), yet REJECTED by the strict write-time validator", () => {
+  // The additive M207 keys are required at WRITE time but NOT at read/aggregation time, so
+  // pre-M207 committed records stay valid/aggregatable (charter: "no shape becomes stricter").
+  const preM207 = capRecord({ recordId: "pre-m207", taskId: "TASK-PRE", milestoneId: "M-PRE" });
+  assert.ok(!("phaseTimings" in preM207) && !("findingCodes" in preM207), "fixture is genuinely pre-M207 shape");
+  // (a) strict write-time validator REJECTS it (keys required by default)...
+  const strict = validateTelemetryRecord(preM207);
+  assert.equal(strict.ok, false);
+  assert.equal(strict.code, "telemetry-field-missing");
+  assert.match(strict.message, /phaseTimings/);
+  // ...but the same record with the keys present passes the strict validator...
+  assert.equal(validateTelemetryRecord({ ...preM207, phaseTimings: [], findingCodes: [] }).ok, true);
+  // (b) ...and the read-time aggregation path ACCEPTS it (requireAdditiveFields:false), counting it
+  // in the telemetry population (not excluded as telemetry-field-missing). code may still be
+  // insufficient-samples because the receipt population is empty here — the point under test is the
+  // telemetry record's aggregation, not the combined-population sample gate.
+  const dir = freshTmpDir();
+  const taskDir = path.join(dir, "milestones", "prepare-telemetry", "TASK-PRE");
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, "pre-m207.json"), JSON.stringify(preM207, null, 2));
+  const report = computeCapacityReport({ workspace: dir, telemetryRoot: path.join(dir, "milestones", "prepare-telemetry"), minSamples: 1 });
+  assert.equal(report.sampleCount, 1, "pre-M207 record IS counted in the telemetry population");
+  assert.ok(!report.exclusions.some((e) => e.reason === "telemetry-field-missing"), "NOT excluded as telemetry-field-missing");
 });
 
 test("DIR-126-E C4: receipt wall time comes from the REUSED computeMetricsForReceipt/computeConvergenceMetrics — reported prepareWallTimeMs equals computeMetricsForReceipt's own output for the same receipt", () => {

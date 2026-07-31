@@ -546,7 +546,7 @@ const TELEMETRY_DECISION_KINDS = ["cold", "resume", "reuse-terminal", "not-evalu
 // record MUST have a non-null generationId, a non-null decision.priorGenerationId, all four
 // hashes.* non-null, and contentAgentDispatchCount===0 && contentAgentMs===0 — any violation is
 // `{ok:false, code:"reuse-terminal-invalid"}`.
-export function validateTelemetryRecord(record) {
+export function validateTelemetryRecord(record, { requireAdditiveFields = true } = {}) {
   if (!record || typeof record !== "object") {
     return { ok: false, code: "telemetry-record-malformed", message: "telemetry record is not an object" };
   }
@@ -557,14 +557,21 @@ export function validateTelemetryRecord(record) {
     "recordId", "attemptId", "generationId", "admission", "workspace", "taskId", "milestoneId",
     "class", "highRisk", "hashes", "decision", "contentAgentDispatchCount", "contentAgentMs",
     "terminal", "leaseRelease", "sessionId", "recordedAtMs", "telemetryWriteOk",
-    // M207: the two additive keys. LATENT TRAP (flagged per the task's own Risks): enforcement is
-    // WRITE-TIME ONLY — this validator's sole live call site is the reuse-terminal branch above
-    // (grep-verified: exactly one), so NOTHING re-validates committed history and every pre-M207
-    // record lacking both keys stays valid forever. A future re-validate-all sweep would
-    // invalidate every such record — widening REQUIRED_TOP without a schemaVersion bump is safe
-    // precisely because no such sweep exists today.
-    "phaseTimings", "findingCodes",
   ];
+  // M207: the two additive keys. They are required at WRITE time (buildTelemetryRecord
+  // materializes them unconditionally, and the reuse-terminal branch below enforces their presence
+  // on the records it validates), but they are NOT required at READ/aggregation time: pre-M207
+  // committed records legitimately predate them and must stay valid/aggregatable. The original M207
+  // revision put them unconditionally in REQUIRED_TOP on the (false) assumption that this validator's
+  // only live call site was the reuse-terminal branch — but `computeCapacityReport`
+  // (milestone-preparation-check.ts) ALSO validates every disk-read record, which would have excluded
+  // every pre-M207 record as telemetry-field-missing, violating the "no shape becomes stricter /
+  // existing consumers unaffected" charter clause (caught by M207's own adversarial audit via an A/B
+  // run). Hence `requireAdditiveFields`: write-time callers use the default (strict); the capacity
+  // report's read-time aggregation passes { requireAdditiveFields: false }.
+  if (requireAdditiveFields) {
+    REQUIRED_TOP.push("phaseTimings", "findingCodes");
+  }
   for (const k of REQUIRED_TOP) {
     if (!(k in record)) {
       return { ok: false, code: "telemetry-field-missing", message: `telemetry record is missing required field '${k}' (must be present — null/"unknown" is fine, omission is not)` };

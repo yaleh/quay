@@ -32,3 +32,34 @@ TBD — completed by the Audit phase.
 ## ABSORB gate run (M207, post-audit)
 
 TBD — completed at Land.
+
+adversarial-audit disposition: REFUTED
+
+AC 11/12 confirmed by fresh independent audit (own test runs, own real-CLI executions, own
+greps/cmps — not the implementer's self-report): AC1/AC11 admission nowMs all six modes ×2
+mirrors (74/74 each); AC2 renewal-bounded equality fixture (68/68); AC3 recurrence pin/advance
+fixtures + audit's own real-CLI A/B over the real archive (97/97); AC4 cmp ×3 + sync-vendor
+--check CLEAN; AC5 zero new import edges (4 mentions all comments); AC7 source-guard fixture;
+AC8 fail-soft fixtures; AC9 trailing close endedAtMs === recordedAtMs (fixture + audit's real
+run); AC10 TDZ + 3 pre-lease fixtures; AC12 identifier spot-checks real. DoD: landed on master
+(dc3d6c4 = HEAD, ancestor check true) and real non-fixture callsite evidence produced by this
+audit's own real CLI runs.
+
+REFUTATION (machine-caught, this pass): AC6's negative enforcement sub-assertion (CLAIM C9) is
+empirically false. milestone-preparation-check.ts:287 (computeCapacityReport, LANDED M204/
+DIR-126-E commit 23f8891) runs validateTelemetryRecord over EVERY disk-read record — outside
+the AC's proposal-convergence.ts-only grep scope. A/B proof on the SAME committed archive:
+dc3d6c4~1 `--capacity-report` → code:ok, sampleCount:31, zero telemetry exclusions; dc3d6c4
+(HEAD) → ALL 27 pre-M207 records excluded as telemetry-field-missing ("missing required field
+'phaseTimings'"), telemetry population 0, code:insufficient-samples. The REQUIRED_TOP widening
+is therefore NOT forward-only-safe; the landed latent-trap comment ("nothing re-validates
+committed history") is false as written; the charter's Done-when consumer-protection clause
+("existing consumers of DIR-126-D's own telemetry-record schema are unaffected... no shape
+becomes stricter") is violated. AC6 left UNCHECKED in the task file with full evidence.
+
+Secondary observation (not verdict-determining): full `scripts/test.sh` under parallel load
+times out 3 load-boundary M52 delivery-standalone-smoke spawn tests (60-79s each); all 3 pass
+in isolation at HEAD (9-13s) — same environmental load-boundary class the build itself
+disclosed repairing in build-dist-smoke; not M207-caused (M207 touches no gate code path).
+
+V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated carry-forward

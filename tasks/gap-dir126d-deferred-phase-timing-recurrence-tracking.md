@@ -255,10 +255,20 @@ point DIR-126-D's `b8b87c3` ruling established).
    `REQUIRED_TOP` (:437) grows by both keys. **CLAIM C8 (needs AC): `REQUIRED_TOP` includes both fields and
    a record missing either fails with `telemetry-field-missing`, fixture-asserted by calling the validator
    directly.**
-6. **CLAIM C9 (needs AC): enforcement is write-time only.** `validateTelemetryRecord`'s sole live call is
-   the reuse-terminal path (:582); nothing re-validates committed history, so DIR-126-D/E-era records
-   lacking both keys are never retroactively invalidated (a code comment at `REQUIRED_TOP` flags this
-   latent trap).
+6. **CLAIM C9 (needs AC): enforcement is write-time strict but read-time lenient.** The two additive
+   keys are required when a NEW record is validated (write-time: the reuse-terminal branch :582, and
+   `buildTelemetryRecord` materializes both keys unconditionally on every write), but they are NOT
+   required when an existing committed record is read back for aggregation: `computeCapacityReport`
+   (`milestone-preparation-check.ts`) ALSO validates every disk-read record (a second live
+   `validateTelemetryRecord` call site the original M207 revision missed), so it validates with
+   `{ requireAdditiveFields: false }`, keeping DIR-126-D/E-era records that legitimately predate both
+   keys valid and aggregatable. This is what the charter's "no shape becomes stricter / existing
+   consumers unaffected" clause requires — the original M207 "write-time only, nothing re-validates
+   history" framing was FALSE (caught by M207's own adversarial audit via an A/B `--capacity-report`
+   run: unconditional `REQUIRED_TOP` widening excluded every pre-M207 record as
+   `telemetry-field-missing`, emptying the telemetry population). Fixture-asserted: a pre-M207-shaped
+   record (no `phaseTimings`/`findingCodes`) is (a) rejected by the strict write-time validator and
+   (b) accepted by the read-time aggregation path.
 7. **CLAIM C10 (needs AC): receiver-side malformed/oversized flag degradation is fail-soft and never
    blocks the primary write.** The receiver CLI tail in `proposal-convergence.ts` that parses the new
    `--phaseTimings`/`--findingCodes` flags must, on a malformed (unparseable) OR oversized value for
@@ -407,8 +417,11 @@ point DIR-126-D's `b8b87c3` ruling established).
 - **Read amplification**: the recurrence scan is O(n) `JSON.parse` per write over a task's archive.
   Acceptable at observed scale (single-digit generations; DIR-126-E has 5, this task already has 3); called
   out as a Non-goal, not silently ignored.
-- **`REQUIRED_TOP` latent trap**: forward-only-safe today, but a future re-validate-all sweep would
-  invalidate every pre-this-task record — code comment required at :437.
+- **`REQUIRED_TOP` additive keys (resolved)**: the two additive keys are required at WRITE time but
+  NOT at read/aggregation time (`validateTelemetryRecord({ requireAdditiveFields })`;
+  `computeCapacityReport` passes `false`), so pre-this-task records stay valid/aggregatable. The
+  original "forward-only-safe / nothing re-validates history" framing was false (computeCapacityReport
+  re-validates disk reads) and is corrected by the parameterization.
 - **Command-line length**: bounded in practice by existing round caps (`MAX_PLANCHECK_ROUNDS` = 3 :714, the
   `_maxDeltaRounds` policy cap :428) and ledger size, but an unusually large `_ledger` could lengthen the
   `--findingCodes` payload — an optional sanity bound is Plan-discretionary.
@@ -613,11 +626,14 @@ the fix that let DIR-126-D actually converge.
 
 ## Acceptance Criteria
 
-- [ ] `prepare-admission-check.ts` (both mirrors) gain an additive `nowMs: Date.now()` field;
+- [x] `prepare-admission-check.ts` (both mirrors) gain an additive `nowMs: Date.now()` field;
   `prepare-milestone.js` (both mirrors) accumulates `{phase, round, startedAtMs, endedAtMs}` purely
   by reading already-parsed subprocess output — zero new `Date.now()`/`new Date()`/`import()` call
   sites added to `prepare-milestone.js` itself, verified by a grep-based regression fixture.
-- [ ] A real multi-round generation's journal (including a `ProposalReview` delta round and a
+  *(audit 2026-07-31: confirmed — admission fixtures 74/74 ×2 mirrors; AC19 guard green
+  (prepare-milestone-convergence.test.mjs:1124); audit grep: zero LIVE Date.now()/new Date(/import(
+  in both workflow mirrors.)*
+- [x] A real multi-round generation's journal (including a `ProposalReview` delta round and a
   `PlanCheck` round) has its **admission-touching dispatch count** confirmed equal to the telemetry
   record's own phase-transition entry count. "Admission-touching dispatch count" means the
   dispatches that carry the new phase-timing flags — the single `--acquire` plus the 6 bare
@@ -626,36 +642,71 @@ the fix that let DIR-126-D actually converge.
   `grep -c` including comments; timing is renewal-bounded, strictly coarser than phase-exact). The
   fixture asserts equality on this renewal-bounded metric, so it is falsifiable on the correct
   count and cannot be satisfied by mistakenly counting `phase()` calls.
-- [ ] `findingCodes[]` with `recurrenceKey`/`firstSeenGeneration`/`lastSeenGeneration` is added to
+  *(audit 2026-07-31: confirmed — prepare-milestone-convergence.test.mjs:1195 drives the real
+  workflow through a multi-round generation (delta + PlanCheck rounds), asserts spans.length ===
+  admissionRenews+1 (entry-producing boundaries: 6 renewals + trailing close = 7 = entry count;
+  acquire seeds without pushing an entry, by design), acquire-seed, contiguity, caller-owned
+  rounds; 68/68 green. End-to-end real-dispatch journal equality is Plan Stage 9, deferred to
+  Land by Plan design.)*
+- [x] `findingCodes[]` with `recurrenceKey`/`firstSeenGeneration`/`lastSeenGeneration` is added to
   the committed telemetry record (additive to DIR-126-D's frozen schema); a fixture spanning two
   real generations with a repeated finding code confirms `lastSeenGeneration` advances while
   `firstSeenGeneration` stays pinned.
-- [ ] Byte-identical mirrors re-verified (`cmp`/`sync-vendor.sh --check`) across every file this
+  *(audit 2026-07-31: confirmed — proposal-convergence.test.mjs:1200 (PINNED/ADVANCES) + :1228
+  (attemptId sub-case) + :1247 (scan hygiene), 97/97 green; audit's own real-CLI A/B on a copy of
+  the real archive reproduced it: recurrenceKey f7bc72448be9 stable, firstSeen pinned to
+  4f6aa41bb495, lastSeen advanced to 72af725059ab.)*
+- [x] Byte-identical mirrors re-verified (`cmp`/`sync-vendor.sh --check`) across every file this
   child touches, including the newly-touched `prepare-admission-check.ts`.
-- [ ] **Recurrence scan stays a local helper, never a new import edge:** an import-graph check
+  *(audit 2026-07-31: confirmed — cmp ×3 edited pairs byte-identical; plugin/scripts/sync-vendor.sh
+  --check CLEAN, exit 0.)*
+- [x] **Recurrence scan stays a local helper, never a new import edge:** an import-graph check
   (grep/AST) confirms zero new `import` statements are added between `proposal-convergence.ts` and
   `milestone-preparation-check.ts` — the recurrence scan reuses `_safeTaskIdSegment`/`telemetryPath`
   as a local helper within `proposal-convergence.ts` itself.
-- [ ] **`REQUIRED_TOP` extension fails closed (direct validator unit test):** a fixture calling
+  *(audit 2026-07-31: confirmed — 4 mentions of milestone-preparation-check in both mirrors are ALL
+  comments (:8/:14/:172/:333); git diff shows zero import-line changes; _telemetryDir reuses
+  telemetryPath via probe-record dirname.)*
+- [x] **`REQUIRED_TOP` extension fails closed (direct validator unit test):** a fixture calling
   `validateTelemetryRecord` directly with a record missing either `phaseTimings` or `findingCodes`
   confirms it returns `telemetry-field-missing`. This is a unit test of the validator itself — the
   gate on the reuse-terminal path (its sole live call at :582) — NOT a gate on every write: the
   main writes (`_writeCommittedTelemetry` :653, `_recordAttemptCli` :738) do not call
   `validateTelemetryRecord` and instead rely on `buildTelemetryRecord`'s always-materialize
   discipline. Distinct from the already-covered "fields are added to the record" claim above.
-  **Negative enforcement sub-assertion (CLAIM C9):** a grep over `proposal-convergence.ts` confirms
-  `validateTelemetryRecord` has exactly ONE live call site (`:582`, inside `_decideResumeCli`'s
-  reuse-terminal branch) and that NO call site validates a disk-read / historical record — i.e.
-  enforcement is write-time only and nothing re-validates committed telemetry history, so widening
-  `REQUIRED_TOP` is forward-only-safe (verified by the grep, not merely asserted in prose).
-- [ ] **`round` is threaded explicitly, never regex-parsed from `stageLabel`:** a fixture confirms
+  **Write-strict / read-lenient enforcement (CLAIM C9, corrected):** `validateTelemetryRecord` takes
+  `{ requireAdditiveFields }` (default `true`); the two additive keys are in `REQUIRED_TOP` only when
+  `requireAdditiveFields` is true. The reuse-terminal write path (:582) uses the default (strict);
+  `computeCapacityReport`'s read-time aggregation (`milestone-preparation-check.ts`) passes
+  `{ requireAdditiveFields: false }`, so pre-M207 records that legitimately predate both keys stay
+  valid and aggregatable. Fixture-asserted: a pre-M207-shaped record (no `phaseTimings`/
+  `findingCodes`) is (a) REJECTED by the strict write-time validator and (b) ACCEPTED by the
+  read-time aggregation path (not excluded as `telemetry-field-missing`).
+  *(audit 2026-07-31: the original M207 revision claimed "enforcement is write-time only, nothing
+  re-validates committed history" and put both keys unconditionally in REQUIRED_TOP — REFUTED,
+  because `computeCapacityReport` (milestone-preparation-check.ts, landed M204/DIR-126-E) validates
+  every disk-read record, so unconditional widening excluded ALL 27 pre-M207 records as
+  telemetry-field-missing, emptying the telemetry population (A/B proof: dc3d6c4~1 → code:ok,
+  sampleCount:31, zero telemetry exclusions; dc3d6c4 → all 27 excluded, code:insufficient-samples).
+  RESOLVED 2026-07-31 by the requireAdditiveFields parameterization: read-time aggregation is now
+  lenient. Re-verified A/B post-fix: `--capacity-report` → code:ok, sampleCount:30, ZERO
+  telemetry-field-missing exclusions (the 9 remaining exclusions are the legitimate
+  convergence-interval-degenerate/no-convergence-block receipt-population exclusions). The charter's
+  "no shape becomes stricter / existing consumers unaffected" clause is now satisfied.)*
+- [x] **`round` is threaded explicitly, never regex-parsed from `stageLabel`:** a fixture confirms
   `_phaseTimings`/`--findingCodes` construction reads exclusively from already-parsed
   `_parseAgentJson(...).nowMs` values and the existing `_ledger`/`_deltaRound`/`_planCheckRound`
   variables — no `Date.now()`, no regex-parsing of `stageLabel` to recover `round`.
-- [ ] **Missing/unparseable `nowMs` degrades fail-soft:** a fixture forcing a boundary's `nowMs` to
+  *(audit 2026-07-31: confirmed — source-guard fixture
+  prepare-milestone-convergence.test.mjs:1340 asserts exactly 6 _renewLease(label, round) sites,
+  round ∈ /^(0|_deltaRound|_planCheckRound)$/, NEGATIVE stageLabel-parse asserts, exact push rule
+  via _parseAgentJson; green ×2 mirrors.)*
+- [x] **Missing/unparseable `nowMs` degrades fail-soft:** a fixture forcing a boundary's `nowMs` to
   be absent/unparseable confirms no `_phaseTimings` entry is pushed for that boundary and
   `_lastBoundaryMs` is left unchanged — distinct from the happy-path multi-round journal item above.
-- [ ] **Receiver-side trailing-span close uses its own `recordedAtMs`, never a sandbox value
+  *(audit 2026-07-31: confirmed — fail-soft fixtures :1240 (nowMs-absent renewal pushes nothing)
+  + :1253 (ok:false carrying nowMs pushes nothing — rule is ok===true AND finite nowMs); green.)*
+- [x] **Receiver-side trailing-span close uses its own `recordedAtMs`, never a sandbox value
   (CLAIM C5, load-bearing for AC19):** a fixture feeding a `phaseTimings` array whose final entry is
   `{..., endedAtMs: null}` confirms the receiver (`proposal-convergence.ts`, before
   `buildTelemetryRecord`) fills that trailing `endedAtMs` with its own already-computed
@@ -664,13 +715,20 @@ the fix that let DIR-126-D actually converge.
   This is the positive assertion that the trailing span is closed on the receiver side; distinct
   from the fail-soft item above (which covers a missing/unparseable boundary, not the trailing
   close).
-- [ ] **All 7 pre-ledger terminal-return classes produce `findingCodes[]`:** the 3 pre-lease
+  *(audit 2026-07-31: confirmed — proposal-convergence.test.mjs:1181 real-CLI fixture asserts
+  filled endedAtMs === recordedAtMs exactly, green; audit's own real --record-generation run:
+  trailing endedAtMs 1785456654605 === recordedAtMs 1785456654605; workflow sends endedAtMs:null
+  (source-guard fixture :1362).)*
+- [x] **All 7 pre-ledger terminal-return classes produce `findingCodes[]`:** the 3 pre-lease
   `_recordAttemptAgentCall` exits (`missing-required-args`, `admission-check-failed`,
   `prepare-already-running`) and the 4 pre-ledger `_releaseLeaseAndRecord` exits
   (`proposal-author-incomplete`, `adjudicate-failed`, plus the 2 pre-`let _ledger = []`
   `preflight-rejected`-shaped exits) each independently produce a non-empty `findingCodes[]` seeded
   from `terminal.reason` alone — distinct from the general `findingCodes[]` item above.
-- [ ] **All six `prepare-admission-check.ts` CLI modes gain `nowMs` (success AND error paths, keys
+  *(audit 2026-07-31: confirmed — TDZ fixture prepare-milestone-convergence.test.mjs:1267
+  (pre-ledger exit produces [reason] with NO ReferenceError via _ledgerLive short-circuit) + :1292
+  (all 3 pre-lease --record-attempt sites non-empty, phaseTimings [] by construction); green ×2.)*
+- [x] **All six `prepare-admission-check.ts` CLI modes gain `nowMs` (success AND error paths, keys
   preserved):** acquire, renew, release, force-release, preflight, and preflight-plan are each
   individually fixture-verified to carry the additive `nowMs` field in their JSON output on BOTH
   the success path AND the error path (`{ok:false,...}` shapes); and — for the preflight/preflight-
@@ -678,7 +736,11 @@ the fix that let DIR-126-D actually converge.
   non-clobbering `{...result, nowMs}` spread — the existing `{ok, policyVersion, findings}` keys
   survive unchanged (a fixture asserts the spread adds `nowMs` without dropping or clobbering any
   pre-existing key, since downstream Preflight verdict parsing depends on those keys).
-- [ ] Grounding evidence (exhaustive identifiers, wiring-coverage completeness): confirmed real by
+  *(audit 2026-07-31: confirmed — admission fixtures :761-892 individually cover acquire
+  (success/contention/missing-session-id), renew, release, force-release (success + lease-missing
+  error each), preflight, preflight-plan (success + error + exact-key-set preservation), catch-all;
+  74/74 ×2 mirrors; audit's real CLI runs carried nowMs and preserved keys.)*
+- [x] Grounding evidence (exhaustive identifiers, wiring-coverage completeness): confirmed real by
   direct source read that DIR-126-D's landed `--record-generation`, `--decide-resume`, and
   `--record-attempt` calls are the exact three extension points this child's phase-timing field
   attaches to, matching Requested action item 1 above. Exhaustive identifier grounding covering
@@ -735,16 +797,30 @@ the fix that let DIR-126-D actually converge.
   Round-4 additionally flagged these exact-form identifiers (confirmed real by direct source read of the current tree, per the Problem-framing topology correction above): `acquireLease`, `"missing-now: a real epoch-ms 'now' is required (workflow scripts cannot call Date.now(); this CLI computes it itself when run directly)"`, `preflight-check-failed`, `preflight-rejected`, `_releaseLease`, `--release-only`, `--record-generation [--no-release]`, `?? []`.
   Round-5 additionally flagged these exact-form identifiers (confirmed real by direct source read of the current tree): the committed-telemetry writers set `recordedAtMs: Date.now()` (`proposal-convergence.ts` :580/:636/:668/:754); `_parseAgentJson` (`prepare-milestone.js` :32) is a balanced-brace scanner that tries every `{` offset and never uses naive `JSON.parse` (per `gap-prepare-milestone-noisy-agent-raw-json-parse`); the three bare `_releaseLease` `--release-only` Receipt sites are `telemetry-write-failed` (:809), `receipt-selfcheck-failed` (:837), and `prepared` (:847); the 11-live-vs-16-raw `phase()` count is reconfirmed by `grep -c`; `buildTelemetryRecord({…, phaseTimings, findingCodes})` materializes both new keys; and the mirror-parity / renew-path evidence cites `plugin/scripts/sync-vendor.sh` (`sync-vendor.sh`) `--check` returning `ok: true`, the renew `outcome: 'renewed'` path, the `validateTelemetryRecord` validator, a direct `node --experimental-strip-types --test` invocation, and the `split-recommended` cacheable terminal — all confirmed real by direct source read, not a new invention.
   Round-6 additionally flagged the `schemaVersion`-stays-2 design-decision identifiers (confirmed real by direct source read of the current tree): the additive-growth-within-a-family posture keeps `schemaVersion: 2` (v2 having superseded `.generation.json`'s v1 record family at `:356-357`), and the `validateTelemetryRecord` validator is its sole enforcement point — confirmed real, not a new invention.
+  *(audit 2026-07-31: confirmed — spot-checked on the current tree: `missing-now: a real epoch-ms`
+  literal (×1), all 6 `_renewLease` sites with caller-owned rounds (:445/:480/:653/:714/:795/:831),
+  `MAX_PLANCHECK_ROUNDS = 3`, `_parseAgentJson` (×8), AC19 fixture citing f6db2a8/7357a91,
+  `--release-only` (×3) — all real. CAVEAT: the "sole enforcement point" framing is false repo-wide
+  (see AC6 note — milestone-preparation-check.ts:287 also enforces against disk-read records).)*
 
 ## Definition of Done
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on `master` under human-steered discipline (touches `prepare-admission-check.ts`, not
+- [x] Landed on `master` under human-steered discipline (touches `prepare-admission-check.ts`, not
   previously touched by DIR-126-D's own trimmed scope).
-- [ ] Real, non-fixture evidence: a fresh independent audit confirms the real production callsite
+  *(audit 2026-07-31: confirmed — dc3d6c4 is HEAD of master; `git merge-base --is-ancestor dc3d6c4
+  master` true; touches both prepare-admission-check.ts mirrors; human-steered per charter.)*
+- [x] Real, non-fixture evidence: a fresh independent audit confirms the real production callsite
   for both the phase-timing self-report and the recurrence-tracking read, not merely unit-test
   reachability.
+  *(audit 2026-07-31: confirmed — this audit's OWN real CLI runs (no fixtures): real
+  prepare-admission-check.ts --acquire/--renew/--preflight carry real nowMs (e.g. 1785456570332);
+  real proposal-convergence.ts --record-generation ×2 over a copy of the REAL committed archive —
+  trailing span closed with the receiver's own recordedAtMs (1785456654605 === 1785456654605) and
+  recurrence PINNED/ADVANCED across two real records (f7bc72448be9: 4f6aa41bb495 → 72af725059ab).
+  CAVEAT: the end-to-end real-dispatch journal equality (Plan Stage 9) is deferred to Land by Plan
+  design; and this same audit REFUTED the AC6 negative sub-assertion — see AC6 note.)*
 
 ## Touches
 

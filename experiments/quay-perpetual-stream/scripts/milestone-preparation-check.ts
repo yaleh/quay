@@ -284,7 +284,12 @@ export function computeCapacityReport({ workspace, telemetryRoot, exclusions = [
       exclusionsOut.push({ population: "telemetry", id, path: p, reason: String(excludeById.get(id)) });
       continue;
     }
-    const v = validateTelemetryRecord(rec);
+    // Read-time aggregation validates with { requireAdditiveFields: false }: M207's additive
+    // phaseTimings/findingCodes keys are required at WRITE time but NOT here, so pre-M207 committed
+    // records (which legitimately predate those keys) stay valid and aggregatable rather than being
+    // excluded as telemetry-field-missing. Records still fail here for any OTHER validation reason
+    // (malformed decision.kind, reuse-terminal invariant breach, etc.).
+    const v = validateTelemetryRecord(rec, { requireAdditiveFields: false });
     if (!v.ok) {
       exclusionsOut.push({ population: "telemetry", id, path: p, reason: v.code, detail: v.message });
       continue;
