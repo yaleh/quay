@@ -257,7 +257,12 @@ Absorb entry path: ${$a.absorbEntryFile}
    raise the timeout further. Never run these commands with the Bash tool's implicit
    default timeout.
 
-4. EVIDENCE: Write iteration report to milestones/M<NN>/iterations/iteration-0.md (extract milestone number from charter path).
+4. EVIDENCE: Write iteration report to <MILESTONE_ROOT>/iterations/iteration-0.md, where
+   MILESTONE_ROOT is resolved via the ONE authoritative path-prefix rule
+   (gap-build-phase-iteration-evidence-path-not-single-sourced — the SAME single-sourced resolver
+   Audit/Land already use, never re-derived by hand): run \`source
+   experiments/quay-perpetual-stream/scripts/gate-script-lib.sh && gate_resolve_milestone_root
+   ${_milestone}\` to get MILESTONE_ROOT.
 
 5. COMMIT all changes with a descriptive message.
 
