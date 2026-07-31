@@ -3,8 +3,8 @@
   "milestoneId": "M205",
   "charterFile": "experiments/quay-perpetual-stream/charters/M205-gap-wiring-coverage-checker-fixes.md",
   "planFile": "docs/plans/M205-gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md",
-  "ledgerFile": "milestones/M205/proposal-ledger.json",
-  "telemetryFile": "milestones/prepare-telemetry/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting/cae260518768.json",
+  "ledgerFile": null,
+  "telemetryFile": null,
   "hashes": {
     "proposal": "722f32f7adaa172ad5014d21524ee1ca6c9dcdbf884c0b2fe6b582c514035785",
     "charter": "d94e9ff5d21f0790e27ce5b3dc57b9945356a054ba84d608790acdc5138b5191",
@@ -12,23 +12,21 @@
     "sources": {
       "experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts": "5f7e86de19af4462d90bccb7d408bf16280951c31902c1faa74daf0c6622c144",
       "experiments/quay-perpetual-stream/test/wiring-coverage-check.test.mjs": "797b18b2c26c153301160f84cad4c30059281414d1ab34c6725b08cf2ea2a116",
-      "experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs": "f4980d11a8ab8861af9270c118ef15c0b7a495fc6086d611b0faf41504304dba",
-      "plugin/test/prepare-admission-check.test.mjs": "f4980d11a8ab8861af9270c118ef15c0b7a495fc6086d611b0faf41504304dba",
+      "experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs": "25f47a1a5e33451b3bc50153f83c5a854a45c11b3e2c872cf95a5190973f3e76",
+      "plugin/test/prepare-admission-check.test.mjs": "25f47a1a5e33451b3bc50153f83c5a854a45c11b3e2c872cf95a5190973f3e76",
       "tasks/DIR-126-D.md": "2fdbe35eb17ab8b3c32e67b15fa0e35e71da11e92420b9e28c6a1c467caa53ad",
-      "plugin/workflows/prepare-milestone.js": "05ed3b309c311f9e1ba858d516571654d5606ca3a7c31cb43213411648abdff7",
-      "experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts": "fb1296484ce047788962753fcabaff7f81e7468279c13d5168e21a6c371d70b0",
+      "plugin/workflows/prepare-milestone.js": "a2db5c64e8d615f27b7ac9e1a0502e09db1e7fe2477ef8cb7abe06d51c52e626",
+      "experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts": "17b3ca04f3971de10e8484613fcb8abf6049c88b12e51a0b407534cfbb26cbf4",
       "experiments/quay-perpetual-stream/scripts/task-schema.ts": "aae695004405fffb3cb9c2cbaf28ea5ffe4504d46f82ad3e2663b925fa754486",
       "plugin/scripts/sync-vendor.sh": "00fd766342fe9230165aa483346ea4b3d20c905d425c9978022acc68af17cb05",
       "plugin/scripts/wiring-coverage-check.ts": "5f7e86de19af4462d90bccb7d408bf16280951c31902c1faa74daf0c6622c144",
-      "plugin/scripts/prepare-admission-check.ts": "fb1296484ce047788962753fcabaff7f81e7468279c13d5168e21a6c371d70b0",
+      "plugin/scripts/prepare-admission-check.ts": "17b3ca04f3971de10e8484613fcb8abf6049c88b12e51a0b407534cfbb26cbf4",
       "scripts/test.sh": "481e23e7b5fd7f5afe95b0a27aaca8e6ebb35b75d5c8c4decf11c247f1f96653",
       "plugin/test/plugin-packaging.test.mjs": "131ebf0b0bc22e0669cc91d2a70f8ea70eb06743c4eddfd51b315322eae91e09",
       "experiments/quay-perpetual-stream/test/task-schema.test.mjs": "2eae163c404b5062d59d373d0c08f828e490295d682e8972b533b3c77f36a0ca",
       "tasks/gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md": "1ba7673079bf533ec5e2a9624a002df4d8dbfefda6b21dd4fb8947d38cf1026c",
       "docs/plans/M205-gap-wiring-coverage-check-whose-own-and-bold-marker-splitting.md": "1b12de35bf4f72a6a5da17fb51b27167f93669276645c73cf14454a691ebb0c6"
-    },
-    "ledger": "4aa0ca218eb091f913f17f479e949afcb563be1172de08ef65c7e7afae9d3f78",
-    "telemetry": "48c8ee0d89783322b90448daacb34f552966d98043cd085f22822ac2d4011ce2"
+    }
   },
   "review": {
     "findings": 0
@@ -64,9 +62,7 @@
         "sessionId": "resumed-skipped"
       }
     ],
-    "adjudicator": {
-      "sessionId": "resumed-skipped"
-    },
+    "adjudicator": null,
     "proposalReviewer": {
       "sessionId": "9b3ffa31-5bd7-4274-86f3-74def2f0a1f1"
     },
@@ -80,20 +76,5 @@
       }
     ]
   },
-  "convergence": {
-    "highRisk": false,
-    "fullSynthesisCount": 0,
-    "deltaRounds": 0,
-    "proposalReviewRounds": 1,
-    "terminalReason": "zero-finding",
-    "reachedPlanAuthor": true,
-    "startedAtMs": 1785444508894,
-    "endedAtMs": 1785444508894,
-    "proposalHashes": [
-      {
-        "round": 0,
-        "hash": "5f5fb6a9cf64"
-      }
-    ]
-  }
+  "convergence": null
 }
