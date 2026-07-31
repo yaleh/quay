@@ -1108,6 +1108,44 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     }
   });
 
+  // Round-2 review coverage gap (2026-07-31, flagged non-blocking by an independent reviewer of the
+  // REFUTATION fix): the mandatory-first-cross-gen-round guarantee (`_crossGenFirstRoundPending`)
+  // suppresses ONLY the loop's `zero-finding` early-exit — it does NOT and must NOT suppress the
+  // split-check, soft-budget, or delta-cap-exhausted terminals, which can still preempt the mandatory
+  // round on its very first iteration. This is CORRECT fail-closed behavior (every one of those
+  // terminals is `outcome: 'needs-human'`, never `'prepared'` — the invariant that matters, "no
+  // regression reaches prepared unreviewed", holds even when the mandatory round itself never runs),
+  // but was previously untested. This test exercises the split-check preemption case specifically: a
+  // cross-gen checkpoint carrying `mechanismInventoryCount > 2` (the split-multi-mechanism threshold)
+  // with an already-clean ledger must reach `needs-human`/`split-recommended` WITHOUT ever dispatching
+  // the mandatory cross-gen delta reviewer — never a silent `prepared`.
+  test(`[${mirrorName}] cross-gen checkpoint: a carried mechanismInventoryCount > 2 (split-multi-mechanism) preempts the mandatory first cross-gen round — needs-human/split-recommended, never a silent 'prepared'`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel, { resumeFromAdjudicatedProposal: true });
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onResolveCheckpoint: () => ({
+          raw: JSON.stringify({
+            usable: true, code: 'checkpoint-valid', classification: 'wording-only', classificationCode: 'no-new-claims-paths-or-mechanism-removal-detected',
+            noveltyScan: { hasNovelClaim: false, novelClaims: [] },
+            ledger: [],
+            counters: { fullReviews: 1, deltaRounds: 0 },
+            mechanismInventoryHash: 'mi-split-carried', mechanismInventoryCount: 3,
+            lastFullReviewSession: { sessionId: 'sess-original-full-review', timestamp: 1000 },
+            reviewedProposalText: 'placeholder',
+          }),
+        }),
+        onCrossGenDeltaReview: () => { throw new Error('MUST NOT be dispatched: the carried mechanism-inventory split check must preempt the mandatory round before any reviewer is dispatched'); },
+      });
+
+      assert.equal(result.outcome, 'needs-human', JSON.stringify(result));
+      assert.equal(result.reason, 'split-recommended', 'a carried mechanismInventoryCount > 2 correctly triggers split-multi-mechanism on the very first loop iteration');
+      assert.equal(calls.crossGenDeltaReviews, undefined, 'the mandatory cross-gen round never got to dispatch — preempted by split-check, exactly as intended (fail-closed to needs-human, never a silent prepared)');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
   test(`[${mirrorName}] cross-gen checkpoint AC#2: corrupt/cross-task/stale-policy/wrong-charter --resolve-checkpoint verdicts all fall back to full review — never silently treated as a valid delta base`, async () => {
     const cases = [
       { code: 'checkpoint-corrupt' },

@@ -2,7 +2,7 @@
 id: gap-prepare-milestone-cross-generation-review-state-reset
 title: prepare-milestone resume skips Proposal authors but resets ProposalReview
   findings and full-review state on every generation
-status: todo
+status: done
 labels:
   - gap
   - defect
@@ -175,11 +175,14 @@ to known findings should remain incremental while a novelty scan checks that no 
 
 Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply.
 
-- [ ] Landed on master under human-steered discipline with canonical/plugin mirrors synchronized.
-  Not done in this session by design — per this task's own "When done" instructions, the
-  implementer commits on an isolated worktree branch only; the orchestrating session merges to
-  `master` after independent adversarial review (this is safety-relevant, load-bearing
-  `prepare-milestone.js` logic).
+- [x] Landed on master under human-steered discipline with canonical/plugin mirrors synchronized.
+  Round-2 review verdict CONFIRMED (see Round 2 section above) — the specific round-1 REFUTATION
+  defect is genuinely closed, verified independently via real test runs (not trusted from this
+  file's own claims) and direct code tracing of the fail-closed interaction between
+  `_crossGenFirstRoundPending` and the split-check/soft-budget/delta-cap terminals. One non-blocking
+  test-coverage gap the reviewer flagged (the split-check-preempts-mandatory-round path was
+  correct but untested) was closed immediately after: new test added, 88/88 pass in
+  `plugin/test/prepare-milestone-convergence.test.mjs`. Landed by the orchestrating session.
 - [ ] **Deliberately left open** (same class as `gap-drain-dispose-body-corruption`'s own two
   intentionally-unchecked DoD items): "A real human-repaired preparation attempt resumes from a
   prior non-success review checkpoint; journal evidence proves no full reviewer or Proposal author/
