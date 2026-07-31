@@ -250,6 +250,37 @@ sessionIdInject(d) = orchestratorRecords(d.agentId)
 
 ---
 
+## evidenceSurface :: WorkflowDispatch -> ArtifactPath
+
+Grounded fact for Plan authors and auditors (2026-07-31, verified against all 3890 real journal
+entries under `~/.claude/projects/-home-yale-work-quay`):
+
+The workflow harness persists two distinct evidence surfaces per dispatch. Plans and AC items
+that assert label counts, phase ordering, or dispatch identity MUST target the correct one:
+
+```
+journal.jsonl   (per-dispatch cache/resume journal, JSONL — one JSON object per line)
+  entry shape:  {type:"started"|"result", key:"v2:<hash>", agentId[, result]}
+  has .label:   NO
+  has .result:  YES — full typed return payload the agent produced
+  use for:      counting typed return shapes (e.g. .result.shardResult.shardId,
+                .result.bundleVerdict), agent transcript extraction via agentId
+
+workflows/wf_*.json   (workflow RESULT record, single JSON object)
+  has .label:   YES — workflowProgress[] carries one {type:"workflow_agent", label, phaseIndex}
+                entry per labeled agent() dispatch
+  has .logs:    YES — log() output appears as strings in the logs[] array
+  use for:      label counts (build-phase-*, audit-shard-*, etc.), phase/batch ordering
+                (phaseIndex / entry sequence), exactly-once label assertions
+```
+
+`log()` output does NOT appear in `journal.jsonl`. A `jq` filter for `.label` over
+`journal.jsonl` always yields 0 — this is a structurally unsatisfiable evidence command.
+
+`exec:` Reference for PlanCheck grounding and independent audit briefing. Not a runtime script.
+
+---
+
 ## sigmaFloor :: Baseline[] -> Disposition
 
 ```
