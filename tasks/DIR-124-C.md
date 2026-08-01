@@ -55,6 +55,8 @@ Extract a **deterministic control-plane kernel** (`experiments/quay-perpetual-st
 - `Reconciled → Landed`; `Landed → done`
 - `any → needs-human` (terminal failure); `any → revision-needed` (non-success stage); `any → halted` (external `.halt` sentinel); `any → retry` (explicit DIR-124-B resume from validated prior receipts, attempt++); `any → recovery` (invalid/torn stage state; `milestone-worktree.ts --clean-stale` for stranded worktrees)
 
+**ACCEPTED-RISK (halt semantics):** The `any → halted` transition adds a NEW mid-execution halt semantic — today the repo-root `.halt` is read ONLY at SELECT preflight (`select-preflight.ts checkHalt`), never mid-run in `execute-milestone.js`. This is a deliberate design extension: the kernel halts at the next stage boundary, preserving recoverable receipts for DIR-124-B resume. It carries NO dedicated AC (AC1-AC13 do not test halt behavior) and NO DoD item — recorded here as an explicit accepted-risk decision per DIR-125. The kernel halting on `.halt` at a stage boundary is additive (the workflow's current behavior is unchanged — `.halt` only pauses SELECT, and the kernel's mid-run halt is a new opt-in surface for future drivers); verification is deferred to the real-object Land proof in DoD.
+
 `recovery` is entered on resume when the earliest invalid stage is computed from the DIR-124-B journal and only validated prior receipts are reused.
 
 **Stage Adapter ABI (Requested action 2).**
@@ -285,7 +287,13 @@ an executable kernel that owns transitions and rejects adapters that exceed thei
 - [ ] Audit/Gate mutation attempts and Build writes outside the candidate worktree fail
   mechanically.
 - [ ] Reconcile is deterministic for identical validated receipts; Land is idempotent and fenced
-  against duplicate shared-state application.
+  against duplicate shared-state application. **FALSIFIABLE EVIDENCE: the mutation-SET authoring
+  authority moves from `reconcile-apply` (execute-milestone.js L935-953, today the physical writer
+  of AC/DoD ticks, status:done, dashboard rows, absorb dispositions) to fenced Land's
+  `composite-land.ts` — a callsite diff showing `reconcile-apply` no longer writes shared state
+  (grep for `task_write`/`status:done`/`dashboard` writes inside the Reconcile adapter returns
+  zero) and a real-object Land proof where Reconcile's proposed mutation SET and Land's applied
+  state match byte-for-byte.**
 - [ ] Invalid transition, wrong worktree/cwd, duplicate Land, and partial-stage fixtures fail closed.
 - [ ] Legacy singleton and real composite golden replay preserve intentional behavior and outcomes.
 - [ ] The workflow shim contains no canonical argument/state/effect implementation duplicated from
