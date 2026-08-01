@@ -127,3 +127,24 @@ export function resolveGate(name: string, workspaceRoot: string | null = discove
 export function listGates(workspaceRoot: string | null = discoverWorkspaceRoot()): string[] {
   return [...Object.keys(gateRegistry), ...Object.keys(loadWorkspaceGates(workspaceRoot))];
 }
+
+/** DIR-104: verbose gate listing with source provenance + diagnostics. */
+export function listGatesVerbose(workspaceRoot) {
+  if (workspaceRoot === undefined) workspaceRoot = discoverWorkspaceRoot();
+  var meta = loadWorkspaceGateMetadata(workspaceRoot);
+  var builtInRows = Object.keys(gateRegistry).map(function(name) {
+    var isDod = name === "dod";
+    var isAcc = name === "acceptance";
+    return {
+      name: name,
+      source: "built-in",
+      type: isDod ? "dod" : isAcc ? "acceptance" : "doc",
+      detail: isDod ? "(delegates to task.taskCheck)" :
+              isAcc ? "(runs task.extra.acceptance)" :
+              "(skill: " + name.replace(/^doc-/, "") + ")",
+    };
+  });
+  var builtInNames = new Set(Object.keys(gateRegistry));
+  var wsRows = meta.rows.filter(function(r) { return !builtInNames.has(r.name); });
+  return { rows: builtInRows.concat(wsRows), diagnostics: meta.diagnostics };
+}
