@@ -49,5 +49,6 @@
     "deltaRounds": 0
   },
   "forceCommitted": true,
-  "forceCommitReason": "Content passed ProposalReview twice (AC9 evidence + halt accepted-risk fixed). 16 remaining blockers are wiring-coverage checker false-positives (tracked as #60/P0). Force-accepted per human instruction."
+  "forceCommitReason": "Content passed ProposalReview twice (AC9 evidence + halt accepted-risk fixed). 16 remaining blockers are wiring-coverage checker false-positives (tracked as #60/P0). Force-accepted per human instruction.",
+  "note": "BLOCKED: no planFile \u2014 ProposalReview never passed PlanAuthor due to wiring-coverage checker false-positives. Needs real prepare after #60 (checker fix) lands."
 }
