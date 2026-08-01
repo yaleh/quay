@@ -252,3 +252,5 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 - `plugin/test/*size-estimat*.test.mjs`
 - `experiments/quay-perpetual-stream/test/*execution-manifest*.test.mjs`
 - `plugin/test/*execution-manifest*.test.mjs`
+
+- `docs/plans/M234-gap-size-routing.md`
