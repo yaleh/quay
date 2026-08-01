@@ -35,6 +35,11 @@ extra:
    artifact, built by `packages/quay/scripts/build-dist.mjs`, package-relative — NOT a
    repo-root `scripts/build-dist.mjs`). Test-suite convention: `node
    packages/quay/bin/quay.ts ...` (acceptance.test.mjs:29, gate.test.mjs:29).
+4. **`quay task get <id>` does NOT exist** — valid task subcommands are
+   `list|view|create|edit|check` only; `task get` prints usage and exits 1. Use
+   `task view <id> --json` (real) or read the native task file frontmatter for a
+   task-status assertion.
+
 
 ## Proposal
 

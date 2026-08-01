@@ -99,6 +99,14 @@ is treated as absent. So github-missing-env is ALSO a false-positive-as-error.
 - [ ] **Real-callsite evidence (AC, not DoD prose):** a real `config validate` run against
   a github-provider workspace with no `QUAY_GITHUB_REPO` emits a `warn` and exits 0; a
   real run with malformed `QUAY_GITHUB_REPO` emits an `error` and exits 1.
+
+- [ ] A github provider with `QUAY_GITHUB_REPO: ""` (present-but-empty) yields a `warn`
+  (not error) — the empty string is falsy, `resolveRepo` treats it as absent and defaults
+  to `yaleh/quay`; the check must mirror this, never "key present + not owner/repo →
+  error" (that re-introduces the false-positive class this child exists to fix).
+- [ ] AC6 falsifier (env-map-only): a native provider with `tasks_dir` set but
+  `QUAY_NATIVE_TASKS_DIR` absent from the env map STILL yields a `warn` — proving the
+  check reads the env map only, never `tasks_dir` as an env source.
 - [ ] Tests: `packages/quay/test/config-validate.test.mjs` RED/GREEN for the corrected
   semantics.
 
