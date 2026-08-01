@@ -12,7 +12,124 @@ children: []
 extra:
   schema: v1
 ---
-\n**type:** execution\n\n## Proposal\n\nGive acceptance commands a reproducible baseline environment two ways:\n\n1. **`acceptance_env` per-provider config key**: `.quay/config.yml` may declare a\n   per-provider env file that the acceptance runner sources before every acceptance\n   command (e.g. `.quay/acceptance.env` with `export PATH=...`). Missing configured file\n   fails closed BEFORE the acceptance command runs. Per-provider (AC7): different\n   providers can have different env files — resolution happens where the enabled-provider\n   id is known, and BOTH real acceptance surfaces must honor it: the CLI (`quay gate` /\n   `quay run`, `bin/quay.ts` `pinAcceptanceEnv`) and the MCP `gate_run` handler\n   (`packages/quay/src/mcp-handlers.ts`, which already mirrors pinAcceptanceEnv per\n   invocation for `QUAY_ACCEPTANCE_CWD`/`QUAY_ACCEPTANCE_TIMEOUT_MS`). No acceptance\n   surface may silently ignore `acceptance_env`.\n2. **Environment contract documentation**: a README \"Acceptance command environment\"\n   section + `quay gate --help` documenting the clean-shell contract (no .bashrc/.profile\n   sourced; PATH is inherited from the invoking process, not a fixed system default — the\n   original Proposal's \"/usr/bin:/bin\" claim was imprecise and would mislead the loop\n   driver), default timeout, and cwd defaults.\n\nThird child of the DIR-103 split. Resolves the `QUAY_ACCEPTANCE_ENV` env-var naming\nquestion: the config key is `acceptance_env`; mirror the existing\n`QUAY_ACCEPTANCE_CWD`/`QUAY_ACCEPTANCE_TIMEOUT_MS` env-pinning precedent if an env-var\noverride is wanted, otherwise drop the `QUAY_ACCEPTANCE_ENV` name entirely.\n\n## Chosen mechanism\n\n- Config: `readLoopParams`/config-utils reads `acceptance_env` from the enabled\n  provider's block.\n- Runner: `runAcceptance()` gains an optional `envFile` — when set, it sources the file\n  (or prepends its exports to the child env) before spawning the acceptance command.\n  Missing file → fail-closed error before execution.\n- Documentation: README section + `quay gate --help` lines.\n\n## Plan\n\nChecked milestone plan: `docs/plans/M225-dir-103-c.md` (base revision `b658b3fc`,\nDIR-117-B prepared-gate artifact).\n\n## Finding\n\n`packages/quay/src/gate/acceptance-runner.ts:36-44` — `runAcceptance({command,cwd,\ntimeoutMs})` spawns with stdio captured but discarded (no env, no output return); no env\nfile path exists. `packages/quay/src/gate/registry.ts:91-102` — the `acceptance` gate fn\nreceives only `task`, never the config or provider id; per-provider resolution needs the\nenabled-provider id known only at the CLI/MCP layer. `packages/quay/src/gate/config/\nutils.ts:25-36` — existing `QUAY_ACCEPTANCE_CWD`/`QUAY_ACCEPTANCE_TIMEOUT_MS` env-pinning\nprecedent exists. The original Proposal's \"Default PATH is the system default (typically\n/usr/bin:/bin)\" is factually wrong — the runner inherits `process.env` from the invoking\nprocess, not a fixed default.\n\n## Requested action\n\n1. Read `acceptance_env` per-provider from `.quay/config.yml` (resolved where the\n   enabled-provider id is known — CLI/MCP layer).\n2. `runAcceptance()` sources the configured env file before the acceptance command;\n   missing file → fail-closed error before execution.\n3. Decide the `QUAY_ACCEPTANCE_ENV` naming: either mirror the env-pinning precedent with a\n   real env-var override, or remove the name (config key `acceptance_env` is authoritative).\n4. README \"Acceptance command environment\" section + `quay gate --help` documenting the\n   clean-shell contract (PATH inherited from invoking process), timeout, cwd defaults.\n5. RED/GREEN tests: env file sourced (command sees exported vars); missing file fails\n   closed; per-provider resolution; docs grep-able.\n\n## Acceptance Criteria\n\n- [ ] When `acceptance_env` is set, the acceptance command sees the env file's exports\n  (real command-visible proof, not asserted).\n- [ ] When `acceptance_env` is set but the file does not exist, the runner fails closed\n  with a clear error BEFORE executing the acceptance command.\n- [ ] `acceptance_env` is per-provider — two providers can have different env files.\n- [ ] MCP-side per-provider env reachability is falsified, not asserted: a gate run\n  dispatched through the MCP `gate_run` surface sees the configured provider's\n  `acceptance_env` file exports (command-visible proof through the MCP surface) —\n  `gate_run` must not silently ignore `acceptance_env` while the CLI honors it.\n- [ ] README.md has an \"Acceptance command environment\" section; `quay gate --help`\n  documents the clean-shell contract accurately (PATH inherited from invoking process, NOT\n  a fixed system default).\n- [ ] The `QUAY_ACCEPTANCE_ENV` naming question is resolved explicitly (env-var override\n  implemented following the env-pinning precedent, or the name dropped — never left\n  undefined).\n- [ ] Tests: >=80% coverage on the new env-file + resolution paths.\n\n## Definition of Done\n\nStandard inherited-core DoD clauses apply.\n\n- [ ] Landed on `master` under human-steered discipline.\n- [ ] A real acceptance command consumes a configured `acceptance_env` file; a missing\n  file fails closed pre-execution.\n- [ ] A fresh independent audit finds no refutation.\n\n## Human verification\n\n1. Does a configured `acceptance_env` file actually change the acceptance command's\n   environment?\n2. Is the README's environment contract accurate (inherited PATH, not a fixed default)?\n\n## Touches\n\n- `packages/quay/src/gate/acceptance-runner.ts`\n- `packages/quay/src/gate/registry.ts`\n- `packages/quay/src/gate/config/utils.ts`\n- `packages/quay/src/gate/config/types.ts`\n- `packages/quay/bin/quay.ts`\n- `packages/quay/src/mcp-handlers.ts` (gate_run resolves `acceptance_env` per-provider)\n- `packages/quay/src/mcp-server.ts`\n- `packages/quay/test/acceptance.test.mjs`\n- `README.md`\n- `packages/quay-native/examples/sample-workspace/.quay/config.yml`\n- `docs/plans/M225-dir-103-c.md
+**type:** execution
+
+## Proposal
+
+Give acceptance commands a reproducible baseline environment two ways:
+
+1. **`acceptance_env` per-provider config key**: `.quay/config.yml` may declare a
+   per-provider env file that the acceptance runner sources before every acceptance
+   command (e.g. `.quay/acceptance.env` with `export PATH=...`). Missing configured file
+   fails closed BEFORE the acceptance command runs. Per-provider (AC7): different
+   providers can have different env files — resolution happens where the enabled-provider
+   id is known, and BOTH real acceptance surfaces must honor it: the CLI (`quay gate` /
+   `quay run`, `bin/quay.ts` `pinAcceptanceEnv`) and the MCP `gate_run` handler
+   (`packages/quay/src/mcp-handlers.ts`, which already mirrors pinAcceptanceEnv per
+   invocation for `QUAY_ACCEPTANCE_CWD`/`QUAY_ACCEPTANCE_TIMEOUT_MS`). No acceptance
+   surface may silently ignore `acceptance_env`.
+2. **Environment contract documentation**: a README "Acceptance command environment"
+   section + `quay gate --help` documenting the clean-shell contract (no .bashrc/.profile
+   sourced; PATH is inherited from the invoking process, not a fixed system default — the
+   original Proposal's "/usr/bin:/bin" claim was imprecise and would mislead the loop
+   driver), default timeout, and cwd defaults.
+
+Third child of the DIR-103 split. Resolves the `QUAY_ACCEPTANCE_ENV` env-var naming
+question: the config key is `acceptance_env`; mirror the existing
+`QUAY_ACCEPTANCE_CWD`/`QUAY_ACCEPTANCE_TIMEOUT_MS` env-pinning precedent if an env-var
+override is wanted, otherwise drop the `QUAY_ACCEPTANCE_ENV` name entirely.
+
+## Chosen mechanism
+
+- Config: `readLoopParams`/config-utils reads `acceptance_env` from the enabled
+  provider's block.
+- Runner: `runAcceptance()` gains an optional `envFile` — when set, it sources the file
+  (or prepends its exports to the child env) before spawning the acceptance command.
+  Missing file → fail-closed error before execution.
+- Documentation: README section + `quay gate --help` lines.
+
+## Plan
+
+Checked milestone plan: `docs/plans/M225-dir-103-c.md` (base revision `f8ecdf21`,
+DIR-117-B prepared-gate artifact).
+
+## Finding
+
+`packages/quay/src/gate/acceptance-runner.ts:36-44` — `runAcceptance({command,cwd,
+timeoutMs})` spawns with stdio captured but discarded (no env, no output return); no env
+file path exists. `packages/quay/src/gate/registry.ts:91-102` — the `acceptance` gate fn
+receives only `task`, never the config or provider id; per-provider resolution needs the
+enabled-provider id known only at the CLI/MCP layer. `packages/quay/src/gate/config/
+utils.ts:25-36` — existing `QUAY_ACCEPTANCE_CWD`/`QUAY_ACCEPTANCE_TIMEOUT_MS` env-pinning
+precedent exists. The original Proposal's "Default PATH is the system default (typically
+/usr/bin:/bin)" is factually wrong — the runner inherits `process.env` from the invoking
+process, not a fixed default.
+
+## Requested action
+
+1. Read `acceptance_env` per-provider from `.quay/config.yml` (resolved where the
+   enabled-provider id is known — CLI/MCP layer).
+2. `runAcceptance()` sources the configured env file before the acceptance command;
+   missing file → fail-closed error before execution.
+3. Decide the `QUAY_ACCEPTANCE_ENV` naming: either mirror the env-pinning precedent with a
+   real env-var override, or remove the name (config key `acceptance_env` is authoritative).
+4. README "Acceptance command environment" section + `quay gate --help` documenting the
+   clean-shell contract (PATH inherited from invoking process), timeout, cwd defaults.
+5. RED/GREEN tests: env file sourced (command sees exported vars); missing file fails
+   closed; per-provider resolution; docs grep-able.
+
+## Acceptance Criteria
+
+- [ ] When `acceptance_env` is set, the acceptance command sees the env file's exports
+  (real command-visible proof, not asserted).
+- [ ] When `acceptance_env` is set but the file does not exist, the runner fails closed
+  with a clear error BEFORE executing the acceptance command.
+- [ ] `acceptance_env` is per-provider — two providers can have different env files.
+- [ ] MCP-side per-provider env reachability is falsified, not asserted: a gate run
+  dispatched through the MCP `gate_run` surface sees the configured provider's
+  `acceptance_env` file exports (command-visible proof through the MCP surface) —
+  `gate_run` must not silently ignore `acceptance_env` while the CLI honors it.
+- [ ] CLI-side per-provider env reachability is falsified, not asserted: a gate run
+  dispatched through the CLI production surface (`quay gate` / `quay run`, `bin/quay.ts`
+  `pinAcceptanceEnv`) sees the configured provider's `acceptance_env` file exports
+  (command-visible proof through the CLI surface) — the CLI must not silently ignore
+  `acceptance_env` while the MCP `gate_run` honors it.
+- [ ] README.md has an "Acceptance command environment" section; `quay gate --help`
+  documents the clean-shell contract accurately (PATH inherited from invoking process, NOT
+  a fixed system default).
+- [ ] The `QUAY_ACCEPTANCE_ENV` naming question is resolved explicitly (env-var override
+  implemented following the env-pinning precedent, or the name dropped — never left
+  undefined).
+- [ ] Tests: >=80% coverage on the new env-file + resolution paths.
+
+## Definition of Done
+
+Standard inherited-core DoD clauses apply.
+
+- [ ] Landed on `master` under human-steered discipline.
+- [ ] A real acceptance command consumes a configured `acceptance_env` file; a missing
+  file fails closed pre-execution.
+- [ ] A fresh independent audit finds no refutation.
+
+## Human verification
+
+1. Does a configured `acceptance_env` file actually change the acceptance command's
+   environment?
+2. Is the README's environment contract accurate (inherited PATH, not a fixed default)?
+
+## Touches
+
+- `packages/quay/src/gate/acceptance-runner.ts`
+- `packages/quay/src/gate/registry.ts`
+- `packages/quay/src/gate/config/utils.ts`
+- `packages/quay/src/gate/config/types.ts`
+- `packages/quay/bin/quay.ts`
+- `packages/quay/src/mcp-handlers.ts`
+- `packages/quay/src/mcp-server.ts`
+- `packages/quay/test/acceptance.test.mjs`
+- `README.md`
+- `packages/quay-native/examples/sample-workspace/.quay/config.yml`
+- `docs/plans/M225-dir-103-c.md
 
 **Grounded facts for Plan authors (2026-08-01, from real PlanCheck rounds):**
 
@@ -36,5 +153,3 @@ extra:
    resolution in each caller.
 5. **Line-budget arithmetic must be self-consistent**: the "Total" row must equal the sum
    of the per-stage budgets (262 > 255 is a defect the mechanical validator will flag).
-
-`
