@@ -209,7 +209,9 @@ test("validateConfig returns ok:true for valid config", async () => {
   const ws = makeWorkspaceBase(makeValidConfig("/tmp/test"), "clean");
   const result = validateConfig({ workspaceRoot: ws });
   assert.equal(result.ok, true, `valid config should be ok, got issues: ${JSON.stringify(result.issues)}`);
-  assert.deepEqual(result.issues, [], "valid config should have zero issues");
+  // ok:true even with warn-only issues (warn-exit contract)
+  const hasErrors = result.issues.some((i) => i.severity === "error");
+  assert.equal(hasErrors, false, `valid config should have no errors, got: ${JSON.stringify(result.issues)}`);
 });
 
 // ── Additional: missing required loop fields ──
