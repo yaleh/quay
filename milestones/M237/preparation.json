@@ -1,0 +1,53 @@
+{
+  "taskId": "DIR-124-C",
+  "milestoneId": "M237",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M237-dir-124-c.md",
+  "outcome": "prepared",
+  "hashes": {
+    "proposal": "7bd473feef130497012b4dd90211e947fd2a142dd5c3156d4f311ccc9c7e03a3",
+    "charter": "5a9633efa76ee3fda9cd5afbdaf59b37124c47d91a43915d0b12c3ae9ff12c95",
+    "plan": "0000000000000000000000000000000000000000000000000000000000000000",
+    "sources": {},
+    "ledger": "0000000000000000000000000000000000000000000000000000000000000000",
+    "telemetry": "0000000000000000000000000000000000000000000000000000000000000000",
+    "mechanismInventory": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "force-accepted"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "force-accepted"
+    },
+    "proposalReviewer": {
+      "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+    },
+    "planAuthor": {
+      "sessionId": "force-accepted"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 0
+  },
+  "forceCommitted": true,
+  "forceCommitReason": "Content passed ProposalReview twice (AC9 evidence + halt accepted-risk fixed). 16 remaining blockers are wiring-coverage checker false-positives (tracked as #60/P0). Force-accepted per human instruction."
+}
