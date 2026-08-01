@@ -1,6 +1,7 @@
 ---
 id: DIR-103-B
-title: "MCP surface: gate_run dryRun: true executes the acceptance command without recording a GateEvent"
+title: "MCP surface: gate_run dryRun: true executes the acceptance command
+  without recording a GateEvent"
 status: todo
 labels:
   - directive
@@ -11,15 +12,26 @@ children: []
 extra:
   schema: v1
 ---
-
 **type:** execution
 
 ## Proposal
 
 Add a `dryRun` parameter to the MCP `gate_run` tool. When `dryRun: true`, the tool
-executes the acceptance command (same shared `runAcceptance()` path as the CLI) and
-returns `{ ok, reason, ... }` WITHOUT appending a GateEvent and WITHOUT mutating task
-status.
+executes the acceptance command via the shared `runAcceptance()` path the `acceptance`
+gate itself uses (registry.ts) and returns `{ ok, reason, ... }` WITHOUT appending a
+GateEvent and WITHOUT mutating task status.
+
+The skip-append lives in the ENGINE, not the handler: `runGate` (engine.ts) gains a
+`dryRun` option in `RunGateArgs` that gates the `appendGateEvent` call at engine.ts:64 —
+the single place any dry-run traverses. The MCP handler is a thin pass-through that
+forwards `dryRun` to `runGate` and performs no local skip logic (no second
+implementation).
+
+This child is self-contained and falsifiable against the CURRENT codebase — the engine
+`runGate` dryRun option plus the existing `acceptance` gate's `runAcceptance()` runner —
+without requiring any CLI surface. The CLI `--dry-run` (`quay gate --dry-run <task-id>`)
+is the unlanded sibling DIR-103-A's scope; that cross-child dependency is declared in the
+parent DIR-103, not in this child's own Proposal.
 
 The original DIR-103 Proposal claimed this in DoD1 ("both CLI and MCP gate_run with
 dryRun: true") but had NO Acceptance Criterion covering the MCP surface — all 8 ACs were
@@ -30,15 +42,21 @@ callsite + no-GateEvent proof). Second child of the DIR-103 split.
 
 Extend the `gate_run` tool schema in `packages/quay/src/mcp-handlers.ts` (the gate_run
 handler at mcp-handlers.ts:286-303 today exposes provider/id/gate/timeoutMs/file/cwd only)
-with an optional `dryRun: boolean` param. When true, the handler invokes the same
-acceptance runner the CLI `--dry-run` uses (shared module, identical verdicts), skips the
-gate-event store append, and returns the execution result. `dryRun: false`/omitted
-behaves exactly as today (GateEvent appended, status lifecycle as normal).
+with an optional `dryRun: boolean` param. When `dryRun: true`, the handler forwards it to
+the engine: add a `dryRun?: boolean` field to `RunGateArgs` in
+`packages/quay/src/gate/engine.ts`, and in `runGate` skip the `appendGateEvent` call
+(engine.ts:64) when `dryRun: true`. The acceptance command is still executed by the same
+`runAcceptance()` runner the `acceptance` gate uses (registry.ts, identical verdicts) —
+the engine is the single place the skip-append lives, shared by any dry-run surface; the
+handler performs no local skip logic. `dryRun: false`/omitted behaves exactly as today
+(GateEvent appended, status lifecycle as normal).
 
 ## Plan
 
-N/A — resolved via a human-steered milestone. The resolving milestone authors a checked
-`docs/plans/*.md` plan (DIR-117-B prepared-gate artifact) before implementation.
+Resolved via milestone M224 (human-steered). Checked Plan: `docs/plans/M224-dir-103-b.md`
+(DIR-117-B prepared-gate artifact) — 7 ordered stages (RED real-subprocess test → engine
+`RunGateArgs.dryRun` guard + handler forward → GREEN verify → full-suite → post-Land
+audit), all 6 AC items mapped, base revision `e6034728`.
 
 ## Finding
 
@@ -65,8 +83,11 @@ un-AC'd — this child makes it real.
   pre-change (GateEvent appended, normal lifecycle).
 - [ ] `dryRun` is a real parameter in the `gate_run` tool schema (grep-confirmable in
   `mcp-handlers.ts`), not prompt-guidance.
-- [ ] The MCP dry-run path shares the same acceptance-runner module as the CLI
-  `--dry-run` (no second implementation).
+- [ ] The dryRun skip-append lives in exactly ONE place — `runGate`'s engine path, via a
+  `dryRun?: boolean` field in `RunGateArgs` that gates the `appendGateEvent` call — and
+  the MCP `gate_run` handler is a thin pass-through with no local skip logic
+  (grep-confirmable: `appendGateEvent` appears in the engine only, not in the handler).
+  The shared `runAcceptance()` runner executes the command (no second implementation).
 - [ ] Tests: driving the real `quay mcp` subprocess, >=80% coverage on the dryRun path.
 
 ## Definition of Done
@@ -86,5 +107,7 @@ Standard inherited-core DoD clauses apply.
 ## Touches
 
 - `packages/quay/src/mcp-handlers.ts`
+- `packages/quay/src/gate/engine.ts`
 - `packages/quay/test/acceptance.test.mjs` (or sibling MCP-surface test)
+- `packages/quay/test/mcp-gate-dryrun.test.mjs (new)`
 - `docs/plans/M224-dir-103-b.md`
