@@ -15,6 +15,20 @@
 // real call/dispatch/ownership/enforcement relationship between two named components. The claim's
 // "key" is the set of those identifiers.
 //
+// Scope narrowing (gap-wiring-coverage-scope-narrowing, P0 #60): for a `## Proposal` — a section
+// structured into `### ` subsections (or `**...**` bold-heading equivalents) — mechanism claims are
+// extracted ONLY from the mechanism-bearing subsections: Chosen mechanism, Mechanism-claim wiring
+// coverage, Key design decisions, Mechanism-claim → AC coverage, and any `**WIRING-CLAIM (...):**` /
+// `**[WIRING CLAIM N — ...]**` explicit claim markers. Problem framing / Finding, Risks, Defaults
+// and failure behavior, Compatibility, Alternatives considered, Non-goals, and the `**P1/P2/P3…**`
+// finding paragraphs are background/syntax/motivation prose — code references there (e.g. "the
+// installed `execute-milestone.js` dispatches `composite-preflight.ts` from `phase('Verify')`",
+// naming the PRE-EXISTING wiring being motivated) are NOT mechanism claims and must not be wired-
+// checked against AC. Before this narrowing a large Proposal's Problem-framing section full of code
+// references produced a `mechanism-inventory-invalid` terminal (the same fingerprint 4161ab22b641
+// recurring across A2/A5/DIR-099-B/DIR-124-C). Non-Proposal source sections (`## Requested action`,
+// which is flat) still scan the whole section — backward-compatible with DIR-122's gap path.
+//
 // A claim is COVERED iff at least one `## Acceptance Criteria` checklist bullet (continuation
 // lines joined) contains ALL of the claim's identifiers AND an evidence-requiring keyword (real /
 // production / callsite / reachability / evidence / wired / confirmed / reproduc* / verified /
@@ -130,6 +144,89 @@ export function extractMechanismClaims(sectionText) {
   return claims;
 }
 
+// ── Mechanism-subsection narrowing (gap-wiring-coverage-scope-narrowing, P0 #60) ────────────────
+// The canonical `## Proposal` subsection vocabulary (DIR-117/DIR-122). Mechanism claims live ONLY
+// under these headings (whether `### Heading` or `**Heading.**`/`**Heading:**` bold equivalents);
+// every other Proposal subsection (Problem framing, Risks, Defaults and failure behavior,
+// Compatibility, Alternatives considered, Non-goals) is background/motivation prose and is excluded
+// from claim extraction. `Mechanism-claim → AC coverage` may carry a parenthetical suffix (e.g.
+// "(DIR-117 wiring)") and the arrow may be `→`/`->`/`=>`/`to`.
+const MECHANISM_HEADING_RE =
+  /^(?:chosen mechanism|key design decisions|mechanism-claim(?:\s+wiring\s+coverage|\s*(?:→|->|=>|to)\s*(?:ac|acceptance)\s*coverage))\b/i;
+// `**WIRING-CLAIM (X):**` / `**[WIRING CLAIM N — ...]**` — explicit claim markers; mechanism-bearing
+// regardless of which subsection they sit in.
+const WIRING_CLAIM_MARKER_RE = /^\*\*\s*\[?\s*WIRING[- ]CLAIM\b/i;
+
+function isMechanismSubsectionHeading(headingText) {
+  return MECHANISM_HEADING_RE.test((headingText || "").trim());
+}
+
+// Return ONLY the mechanism-bearing subsections of a Proposal section's text (concatenated), or ""
+// when the section has no mechanism-bearing subsection — callers then fall back to scanning the
+// whole section (a flat `## Requested action`, or a Proposal with no `### Chosen mechanism`-style
+// subsection at all, has nothing to narrow to and keeps pre-fix behavior).
+export function extractMechanismSubsections(proposalText) {
+  if (!proposalText) return "";
+  const lines = proposalText.split(/\r?\n/);
+  const out = [];
+  let inMechanism = false;
+  let i = 0;
+  while (i < lines.length) {
+    const rawLine = lines[i];
+    const line = rawLine.trim();
+    // `### <heading>` — a subsection boundary. Mechanism subsections are claim sources; everything
+    // else (Problem framing, Risks, Defaults, Compatibility, Non-goals, Alternatives) is excluded.
+    const h3 = line.match(/^#{3}\s+(.+)$/);
+    if (h3) {
+      inMechanism = isMechanismSubsectionHeading(h3[1]);
+      if (inMechanism) out.push(rawLine);
+      i++;
+      continue;
+    }
+    // `**<Mechanism heading>.**` / `:**` bold-heading subsection markers (DIR-117-B style, where a
+    // Proposal uses `**Chosen mechanism.**` instead of `### Chosen mechanism`).
+    const boldHead = line.match(/^\*\*\s*(.+?)\s*[:.]\s*\*\*/);
+    if (boldHead && isMechanismSubsectionHeading(boldHead[1])) {
+      inMechanism = true;
+      out.push(rawLine);
+      i++;
+      continue;
+    }
+    // `**WIRING-CLAIM (X):**` / `**[WIRING CLAIM N — ...]**` — explicit claim markers. The marker
+    // line and its OWN paragraph are claim sources, but the marker must NOT pull in the rest of a
+    // non-mechanism enclosing subsection (Problem framing) — real DIR-124-A2 places its
+    // `**WIRING-CLAIM (A2-M192-CODE):**` markers inside Problem framing, so capturing-to-next-`###`
+    // would wrongly re-flag that prose. Capture just this paragraph (until blank line or `###`).
+    if (WIRING_CLAIM_MARKER_RE.test(line)) {
+      out.push(rawLine);
+      i++;
+      while (i < lines.length) {
+        const cont = lines[i];
+        const ct = cont.trim();
+        if (ct === "" || /^#{3}\s+/.test(ct)) break;
+        out.push(cont);
+        i++;
+      }
+      continue;
+    }
+    // Regular line: included only inside a mechanism subsection. A non-mechanism bold heading
+    // (e.g. `**Problem framing ...**`, `**Mechanism-claim (X):**`) falls through here and is kept
+    // only when it is a sub-heading INSIDE an already-active mechanism subsection.
+    if (inMechanism) out.push(rawLine);
+    i++;
+  }
+  return out.join("\n");
+}
+
+// A `## Proposal` narrows to its mechanism-bearing subsections; a flat section (e.g. a gap task's
+// `## Requested action`, which has no `###`/`**...**` subsection structure) has nothing to narrow to
+// and keeps scanning the whole section (backward-compatible with DIR-122's checkGapWiringCoverage).
+function sourceForWiringCoverage(sourceSectionText) {
+  if (!sourceSectionText) return "";
+  const narrowed = extractMechanismSubsections(sourceSectionText);
+  return narrowed.trim() !== "" ? narrowed : sourceSectionText;
+}
+
 // ── bulletsOf — GFM checklist bullets from an AC section, continuation lines joined. ─────────────
 // A checklist item in this repo's authoring convention commonly wraps across multiple lines (the
 // continuation indented under the `- [ ]`/`- [x]` line); join those so an identifier/evidence
@@ -158,10 +255,14 @@ export function bulletsOf(sectionText) {
 
 // ── checkWiringCoverage — the one assertion both callers run. ─────────────────────────────────────
 // sourceSectionText: the claim-bearing section's raw text (e.g. task-schema.ts's
-//   extractSection(body, "Proposal") or extractSection(body, "Requested action")).
+//   extractSection(body, "Proposal") or extractSection(body, "Requested action")). For a `##
+//   Proposal` (a section with `### `/`**...**` subsection structure) only the mechanism-bearing
+//   subsections are claim sources — see extractMechanismSubsections above; problem-framing/risks/
+//   motivation prose full of code references is NOT mechanism-claimed. Non-Proposal sections
+//   (`## Requested action`) scan the whole section (backward compat).
 // acSectionText: the task's `## Acceptance Criteria` section raw text.
 export function checkWiringCoverage(sourceSectionText, acSectionText) {
-  const claims = extractMechanismClaims(sourceSectionText);
+  const claims = extractMechanismClaims(sourceForWiringCoverage(sourceSectionText));
   if (claims.length === 0) {
     return {
       ok: true,

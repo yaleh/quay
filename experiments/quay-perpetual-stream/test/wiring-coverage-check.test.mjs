@@ -7,7 +7,7 @@ import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractMechanismClaims, bulletsOf, checkWiringCoverage, splitSentences } from "../scripts/wiring-coverage-check.ts";
+import { extractMechanismClaims, extractMechanismSubsections, bulletsOf, checkWiringCoverage, splitSentences } from "../scripts/wiring-coverage-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(__dirname, "..", "scripts", "wiring-coverage-check.ts");
@@ -210,6 +210,113 @@ test("checkWiringCoverage: identifiers matched but no evidence keyword in the bu
   const ac = "- [ ] `a.ts` and `b.ts` are both mentioned here as new files";
   const result = checkWiringCoverage(source, ac);
   assert.equal(result.ok, false);
+});
+
+// ── gap-wiring-coverage-scope-narrowing (P0 #60): mechanism claims are extracted from the
+// mechanism-bearing subsections of a `## Proposal` ONLY — Chosen mechanism, Mechanism-claim wiring
+// coverage, Key design decisions, Mechanism-claim → AC coverage, and `**WIRING-CLAIM ...:**`
+// markers. Problem-framing / Risks / Defaults / Compatibility / Alternatives / Non-goals prose full
+// of code references is NOT mechanism-claimed and must not be wired-checked against AC (the
+// recurring `mechanism-inventory-invalid` fingerprint 4161ab22b641 on A2/A5/DIR-099-B/DIR-124-C). ──
+test("extractMechanismSubsections: a Proposal narrows to its mechanism-bearing subsections; Problem-framing code references are excluded", () => {
+  const proposal =
+    "### Problem framing\n\n" +
+    "The installed driver `execute-milestone.js` dispatches seven phases (`Verify`, `Prepared`, `Build`, `Audit`, `Gate`, `Reconcile`, `Land`) and calls `composite-preflight.ts` from `phase('Verify')`.\n\n" +
+    "### Chosen mechanism\n\n" +
+    "The new `workflow-kernel.ts` module invokes `composite-args.ts` `normalizeExecuteArgs` to enforce ordering.\n";
+  const narrowed = extractMechanismSubsections(proposal);
+  assert.match(narrowed, /### Chosen mechanism/);
+  assert.doesNotMatch(narrowed, /### Problem framing/);
+  assert.doesNotMatch(narrowed, /execute-milestone\.js/);
+  const claims = extractMechanismClaims(narrowed);
+  assert.equal(claims.length, 1, "only the Chosen-mechanism claim survives narrowing");
+  assert.deepEqual(claims[0].identifiers.sort(), ["composite-args.ts", "normalizeExecuteArgs", "workflow-kernel.ts"]);
+  // Control: scanning the WHOLE Proposal (pre-narrowing) would ALSO flag the problem-framing
+  // sentence — proving the narrowing is what removes the false positive.
+  assert.equal(extractMechanismClaims(proposal).length, 2, "pre-narrowing the Problem-framing code-reference sentence is a claim too");
+});
+
+test("extractMechanismSubsections: bold **Chosen mechanism.** / **Key design decisions.** headings are recognized (DIR-117-B style, no ###)", () => {
+  const proposal =
+    "**Problem framing (grounded in current code).** The driver `execute-milestone.js` dispatches `composite-preflight.ts` and `composite-reconcile.ts` before Build.\n\n" +
+    "**Chosen mechanism.** The new `workflow-kernel.ts` invokes `composite-args.ts` `normalizeExecuteArgs` on every dispatch.\n\n" +
+    "**Key design decisions.** The shim invokes the kernel's `--enforce-effects` mode around `validateEffects` on each adapter dispatch.\n";
+  const narrowed = extractMechanismSubsections(proposal);
+  assert.doesNotMatch(narrowed, /Problem framing/);
+  assert.match(narrowed, /Chosen mechanism/);
+  assert.match(narrowed, /Key design decisions/);
+  const claims = extractMechanismClaims(narrowed);
+  assert.equal(claims.length, 2, "both mechanism headings survive; Problem framing is excluded");
+});
+
+test("extractMechanismSubsections: a **WIRING-CLAIM (...):** marker is captured even without any ### subsection", () => {
+  const proposal =
+    "### Problem framing\n\n" +
+    "`a.ts` dispatches `b.ts` and `c.ts` during startup.\n\n" +
+    "**WIRING-CLAIM (X-1):** `a.ts` invokes `b.ts` from `c.ts` to enforce ordering.\n";
+  const narrowed = extractMechanismSubsections(proposal);
+  assert.doesNotMatch(narrowed, /dispatches `b\.ts`/);
+  assert.match(narrowed, /WIRING-CLAIM/);
+  const claims = extractMechanismClaims(narrowed);
+  assert.equal(claims.length, 1, "the explicit claim marker is kept; the Problem-framing sentence is not");
+  assert.deepEqual(claims[0].identifiers.sort(), ["a.ts", "b.ts", "c.ts"]);
+});
+
+test("extractMechanismSubsections: a WIRING-CLAIM marker captures ONLY its own paragraph, not the rest of a Problem-framing subsection (real DIR-124-A2 placement)", () => {
+  // DIR-124-A2 places its `**WIRING-CLAIM (A2-M192-CODE):**` markers INSIDE Problem framing. The
+  // marker's own paragraph is a claim source, but it must not pull in the surrounding Problem-framing
+  // bullets (which would re-introduce the exact false-positive class this narrowing removes).
+  const proposal =
+    "### Problem framing\n\n" +
+    "1. **Baseline A** — `alpha.ts` dispatches `beta.ts` from `gamma.ts` before `delta.ts`.\n\n" +
+    "**WIRING-CLAIM (A2-M192-CODE):** `delta.ts` invokes `epsilon.ts` from `zeta.ts` on the pre-fix null result.\n\n" +
+    "2. **Baseline B** — `eta.ts` enforces `theta.ts` from `iota.ts`.\n";
+  const narrowed = extractMechanismSubsections(proposal);
+  assert.match(narrowed, /WIRING-CLAIM/);
+  assert.match(narrowed, /delta\.ts` invokes `epsilon\.ts/, "the marker's own paragraph is kept");
+  assert.doesNotMatch(narrowed, /alpha\.ts/, "Problem-framing bullet BEFORE the marker is excluded");
+  assert.doesNotMatch(narrowed, /theta\.ts/, "Problem-framing bullet AFTER the marker is excluded too (marker captures only its own paragraph)");
+  const claims = extractMechanismClaims(narrowed);
+  assert.equal(claims.length, 1, "only the WIRING-CLAIM paragraph is a claim source, not the surrounding Problem-framing bullets");
+  assert.deepEqual(claims[0].identifiers.sort(), ["delta.ts", "epsilon.ts", "zeta.ts"]);
+});
+
+test("checkWiringCoverage: GREEN — Proposal problem-framing code references produce NO blockers; the Chosen-mechanism claim with a matching AC passes", () => {
+  const proposal =
+    "### Problem framing\n\n" +
+    "The installed driver `execute-milestone.js` dispatches seven phases (`Verify`, `Prepared`, `Build`, `Audit`, `Gate`, `Reconcile`, `Land`) and calls `composite-preflight.ts` from `phase('Verify')`.\n\n" +
+    "### Chosen mechanism\n\n" +
+    "The new `workflow-kernel.ts` module invokes `composite-args.ts` `normalizeExecuteArgs` to enforce ordering.\n";
+  const ac = "- [ ] Real production callsite evidence confirms `workflow-kernel.ts` invokes `composite-args.ts` `normalizeExecuteArgs`.\n";
+  const result = checkWiringCoverage(proposal, ac);
+  assert.equal(result.ok, true, "problem-framing code references must not be flagged as uncovered");
+  assert.equal(result.code, "wiring-coverage-complete");
+  assert.equal(result.uncovered.length, 0);
+});
+
+test("checkWiringCoverage: RED — a genuine Chosen-mechanism claim with no matching AC still fails, and only THAT claim is flagged (narrowing never hides real findings)", () => {
+  const proposal =
+    "### Problem framing\n\n" +
+    "The installed driver `execute-milestone.js` dispatches seven phases (`Verify`, `Prepared`, `Build`, `Audit`, `Gate`, `Reconcile`, `Land`) and calls `composite-preflight.ts` from `phase('Verify')`.\n\n" +
+    "### Chosen mechanism\n\n" +
+    "The new `workflow-kernel.ts` module invokes `composite-args.ts` `normalizeExecuteArgs` to enforce ordering.\n";
+  const ac = "- [ ] unrelated item with no identifiers at all\n";
+  const result = checkWiringCoverage(proposal, ac);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "wiring-coverage-uncovered");
+  assert.equal(result.uncovered.length, 1, "only the Chosen-mechanism claim is uncovered, NOT the Problem-framing sentence");
+  assert.deepEqual(result.uncovered[0].identifiers.sort(), ["composite-args.ts", "normalizeExecuteArgs", "workflow-kernel.ts"]);
+});
+
+test("checkWiringCoverage: a flat source section (no ###/bold subsections) keeps scanning the whole section — backward-compatible with ## Requested action", () => {
+  // A flat gap-task `## Requested action`: extractMechanismSubsections finds nothing to narrow to,
+  // so the whole section is scanned and a genuine uncovered claim still fails.
+  const flat = "The new `wiring-coverage-check.ts` module invokes `task-schema.ts` to enforce coverage.";
+  const ac = "- [ ] some unrelated acceptance item with no identifiers at all";
+  const result = checkWiringCoverage(flat, ac);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "wiring-coverage-uncovered");
+  assert.equal(result.uncovered.length, 1);
 });
 
 // ── DIR-117-B/M195 AC#4: the CLI is the grep-confirmable PRODUCTION call site the ProposalReview
