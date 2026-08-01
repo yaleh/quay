@@ -64,6 +64,67 @@ const _highRisk = $a.highRisk === true
 const _taskFile = `tasks/${_taskId}.md`
 const _receiptFile = `milestones/${_milestoneId}/preparation.json`
 
+// ── gap-prepare-milestone-no-worktree-isolation: opt-in worktree isolation ─────────────
+// `$a.isolationMode: 'worktree'` routes content-agent phases (ProposalAuthors through Receipt)
+// through a REAL per-milestone worktree created before Admission via milestone-worktree.ts,
+// merged back + removed at prepare-merge after Receipt success. Coordination primitives
+// (Admission lease, epoch records, telemetry, split-decisions) stay on the primary checkout.
+// The path/branch derivation below is the DOCUMENTED INLINE MIRROR of milestone-worktree.ts's
+// pure computeIsolationPlan/milestoneRootRel (the workflow DSL has no import capability — the
+// SAME mirror pattern execute-milestone.js already uses); the worktree-creation/prepare-merge
+// agents invoke milestone-worktree.ts's CLI for the REAL git operations.
+const _isolationPlan = (() => {
+  const mode = $a.isolationMode
+  if (mode == null || mode === '') return { isolated: false }
+  if (mode !== 'worktree') return { isolated: false, error: `unknown-isolation-mode: ${mode}` }
+  const num = Number((_milestoneId.match(/\d+/) || [])[0])
+  if (!Number.isFinite(num)) return { isolated: false, error: 'worktree-needs-numeric-milestone' }
+  const root = num >= 130 ? `milestones/M${num}` : `experiments/quay-perpetual-stream/milestones/M${num}`
+  return { isolated: true, milestoneNum: num, worktreeRel: `${root}/worktrees/iteration-0`, branch: `milestone/M${num}/iteration-0` }
+})()
+const _useWorktree = _isolationPlan.isolated === true
+// gap-prepare-milestone-no-worktree-isolation AC8: concurrent mode (`mode === 'concurrent'`) — the
+// fan-in (OUTER-LOOP.md concurrent_execute step g) is the SOLE merge owner, so prepare-merge commits
+// the worktree branch and returns buildBranch + worktreeRel WITHOUT merging/removing (mirroring
+// execute-milestone.js's own IS_CONCURRENT / concurrent Land path). Omitted mode → legacy.
+const _isConcurrent = $a.mode === 'concurrent'
+// A REQUESTED-but-unusable isolation FAILS CLOSED rather than silently running on the shared
+// checkout — this covers BOTH `isolationMode:'worktree'` with no derivable numeric milestone
+// AND any unknown non-empty mode (a caller typo like 'worktre' must not silently drop isolation).
+// Omitted/empty mode → legacy (golden replay).
+if ($a.isolationMode != null && $a.isolationMode !== '' && !_useWorktree) {
+  log(`Worktree isolation requested (isolationMode=${JSON.stringify($a.isolationMode)}) but unusable — ${_isolationPlan.error}. Failing closed (never silently falling back to the shared checkout).`)
+  return { outcome: 'needs-human', reason: _isolationPlan.error, phase: 'Admission' }
+}
+if (_useWorktree) {
+  log(`Worktree isolation ENABLED (gap-prepare-milestone-no-worktree-isolation): content-agent phases (ProposalAuthors through Receipt) operate in ${_isolationPlan.worktreeRel} (branch ${_isolationPlan.branch}); prepare-merge brings changes back at the end.`)
+}
+
+// gap-prepare-milestone-no-worktree-isolation D8: single module-level constant threaded into
+// every content-agent dispatch prompt. When isolation is off, this is '' — structurally
+// guaranteeing byte-for-behavior golden replay. When on, it instructs agents to cd to the
+// worktree for ALL file operations and to use Bash cat/>> for task reads/writes instead of
+// MCP task_get/task_write (which resolve against the primary checkout's config.yml).
+const _worktreeIsolationNote = _useWorktree
+  ? `\n\nWORKTREE ISOLATION (gap-prepare-milestone-no-worktree-isolation): you are operating inside a per-milestone git worktree at \`${_isolationPlan.worktreeRel}\` (branch \`${_isolationPlan.branch}\`), NOT the shared primary checkout. ALL file reads/writes/edits below MUST happen inside this worktree:
+
+- To READ a task body: \`cat ${_isolationPlan.worktreeRel}/tasks/<id>.md\` instead of \`task_get\`.
+- To WRITE/EDIT a task body: use Bash to edit \`${_isolationPlan.worktreeRel}/tasks/<id>.md\` directly (e.g. \`cat >>\` or a heredoc) instead of \`task_write\`.
+- To write any other file (plan, receipt, ledger, checkpoint): first \`cd ${_isolationPlan.worktreeRel}\`, then create the file at the path specified in the prompt (relative paths resolve inside the worktree).
+- To run CLI commands that read/write files: \`cd ${_isolationPlan.worktreeRel}\` first.
+- NEVER use MCP \`task_get\` or \`task_write\` — the MCP server reads from the PRIMARY checkout, not this worktree.
+- NEVER edit files in the primary checkout — the prepare-merge step later brings all worktree changes back.
+
+`
+  : ''
+
+// Helper: return the worktreeRel field on every terminal return under worktree isolation, so a
+// stranded-worktree path is discoverable by the caller. When isolation is off, returns obj
+// unchanged (byte-for-behavior golden replay).
+function _wtRet(obj) {
+  return _useWorktree ? { ...obj, worktreeRel: _isolationPlan.worktreeRel } : obj
+}
+
 // M203/DIR-126-D Claim A.3: proposal-convergence.ts's new --record-attempt CLI submode, dispatched
 // at the 3 pre-lease exit sites (missing-required-args, admission-check-failed,
 // prepare-already-running) — none of which holds an Admission lease or can derive a real
@@ -149,6 +210,36 @@ let _resumeFromAdjudicatedProposal = $a.resumeFromAdjudicatedProposal === true
 // the Receipt phase can populate a receipt `provenance` block that milestone-preparation-check.ts
 // mechanically verifies for DISTINCTNESS — never a caller-asserted "trust me, independent" claim.
 const _sessionIdInstruction = 'BEFORE returning, run `echo $CLAUDE_CODE_SESSION_ID` to discover your REAL session id (set by the harness, cannot be forged) and include it as `sessionId` in your structured output.'
+
+// ── gap-prepare-milestone-no-worktree-isolation: create the REAL per-milestone worktree BEFORE
+// Admission, so every content-agent edit below happens on the worktree branch, not the shared
+// checkout. milestone-worktree.ts performs the real `git worktree add` (fail-closed on a
+// pre-existing path/branch — a same-milestone retry after a prior crashed dispatch). Creation
+// failure returns needs-human WITHOUT ever acquiring the Admission lease — zero coordination
+// state is created on failure. Runs BEFORE the resume-decision/split-decision blocks too (those
+// are coordination dispatches that work against the primary checkout).
+if (_useWorktree) {
+  const _wtCreateResult = await agent(
+    `Create the REAL per-milestone git worktree for milestone ${_milestoneId} BEFORE preparing (DIR-XXX worktree isolation — gap-prepare-milestone-no-worktree-isolation). From the repository root, run the --add command and parse the single JSON line it prints:
+  node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-worktree.ts --add --workspace . --milestone ${_milestoneId}
+This performs a real \`git worktree add ${_isolationPlan.worktreeRel} -b ${_isolationPlan.branch}\`.
+If it fails (e.g. path-exists or branch-exists from a prior crashed dispatch that stranded the
+worktree), run the idempotent cleaner:
+  node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-worktree.ts --clean-stale --workspace . --milestone ${_milestoneId}
+Then retry the --add command ONCE more.
+Do NOT parse the --clean-stale output — only act on the --add output.
+If --add fails again (or --clean-stale refused to remove a branch with real commits), do NOT
+proceed — return {ok: false, detail: <the full final JSON line>}.
+Return {ok: <final outcome === "added">, detail: <the full final JSON line>}.`,
+    { label: 'worktree-create', phase: 'Admission',
+      schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }
+  )
+  if (!_wtCreateResult || _wtCreateResult.ok !== true) {
+    log(`Worktree creation FAILED — ${_wtCreateResult?.detail || 'agent returned nothing'}. Cannot prepare in isolation; failing closed (never silently falling back to the shared checkout). A "has-commits" detail means a prior crashed attempt left REAL work on ${_isolationPlan.branch} — reconcile it by hand, never discard it.`)
+    return { outcome: 'needs-human', reason: 'worktree-create-failed', phase: 'Admission', detail: _wtCreateResult?.detail }
+  }
+  log(`Worktree created: ${_isolationPlan.worktreeRel} (branch ${_isolationPlan.branch}). All content-agent phases operate there; prepare-merge brings changes back at the end.`)
+}
 
 // ── Phase: Admission — DIR-126-A/M200 single-flight admission ───────────────────────────────
 // Runs UNCONDITIONALLY, first, strictly ahead of BOTH the resume branch's log-only
@@ -679,7 +770,7 @@ if (_resumeFromAdjudicatedProposal) {
     if (_epochCap.breached) return await _epochBreachExit('ProposalAuthors', 'epoch-cap-proposal-authors', _epochCap)
   }
 
-  const _proposalPrompt = (authorIdx) => `Independent Proposal author ${authorIdx} of ${_n} for task ${_taskId} (class: ${_class}), milestone charter ${_charterFile}.
+  const _proposalPrompt = (authorIdx) => `${_worktreeIsolationNote}Independent Proposal author ${authorIdx} of ${_n} for task ${_taskId} (class: ${_class}), milestone charter ${_charterFile}.
 
 Read the CURRENT task (\`task_get ${_taskId}\`) and the charter file (${_charterFile}) — ground your Proposal in the actual current repository state, not in the existing task body's possibly-thin Proposal. Do NOT read the other author(s)' output — this must be an independently re-derived proposal, not a copy.
 
@@ -718,7 +809,7 @@ Return {authorIdx: ${authorIdx}, proposalText: <the full Proposal markdown text,
   }
 
   adjudicateResult = await agent(
-    `Adjudicate ${_proposals.length} independent Proposal drafts for task ${_taskId} into ONE reconciled Proposal, then write it back.
+    `${_worktreeIsolationNote}Adjudicate ${_proposals.length} independent Proposal drafts for task ${_taskId} into ONE reconciled Proposal, then write it back.
 
 Drafts:
 ${_proposals.map((p) => `--- Author ${p.authorIdx} ---\n${p.proposalText}`).join('\n\n')}
@@ -985,7 +1076,7 @@ async function _writeReviewCheckpoint(stageLabel, { terminalReason, terminalOutc
   const _checkpointInputJson = JSON.stringify(_checkpointInput, null, 2)
   const _checkpointInputFile = `.quay/prepare-checkpoints/_input-${_taskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`
   const _writeResult = await agent(
-    `Write the file ${_checkpointInputFile} with EXACTLY this content (create parent directories as needed):
+    `${_worktreeIsolationNote}Write the file ${_checkpointInputFile} with EXACTLY this content (create parent directories as needed):
 
 \`\`\`json
 ${_checkpointInputJson}
@@ -1017,7 +1108,7 @@ if (!_useCrossGenDelta) {
   }
   // ── Round 0: ONE full grounded review of the just-adjudicated Proposal. ──────────────
   _fullReviewResult = await agent(
-    `INDEPENDENT review of task ${_taskId}'s just-reconciled \`## Proposal\` — you did NOT author it. Read the CURRENT task via \`task_get ${_taskId}\` (fresh, do not trust anything from a prior phase) against the real repository.
+    `${_worktreeIsolationNote}INDEPENDENT review of task ${_taskId}'s just-reconciled \`## Proposal\` — you did NOT author it. Read the CURRENT task via \`task_get ${_taskId}\` (fresh, do not trust anything from a prior phase) against the real repository.
 
 1. Verify the Proposal makes the implementation approach reviewable without re-designing it: problem framing grounded in current code, chosen mechanism, concrete control/data flow, key decisions, defaults/failure behavior, compatibility, risks, non-goals, AC coverage, explicit alternatives.
 2. Mechanism-claim wiring coverage (DIR-117): extract every new call/dispatch/ownership/enforcement relationship the Proposal claims and confirm the task's own \`## Acceptance Criteria\` has a matching, falsifiable item demanding real production-callsite or cross-generation reachability evidence for THAT relationship (not descriptive prose restating the claim).
@@ -1092,7 +1183,7 @@ _startedAtMs = _now()
 }
 const _wiringCheckScript = 'experiments/quay-perpetual-stream/scripts/wiring-coverage-check.ts'
 const _wiringVerdict = await agent(
-  `Run exactly this command and return its parsed stdout JSON:
+  `${_worktreeIsolationNote}Run exactly this command and return its parsed stdout JSON:
 node --no-warnings --experimental-strip-types ${_wiringCheckScript} --task tasks/${_taskId}.md
 This is the DIR-117-B/M195 mechanism-claim wiring coverage check — it calls the real checkWiringCoverage() function on the task's '## Proposal' vs '## Acceptance Criteria' and prints a JSON verdict on stdout shaped {ok, code, message, claims, findings}. Return that JSON verbatim: {ok: <boolean>, code: <one of wiring-coverage-complete | wiring-coverage-none-claimed | wiring-coverage-uncovered>, findings: <the findings array EXACTLY as printed, each {subsystem, summary, severity, blocking, evidence, claimRef, disposition}>}. If the command exits non-zero or prints no parseable JSON, return {ok: false, code: "wiring-cli-failed", findings: []}.`,
   { label: 'wiring-coverage-check', phase: 'ProposalReview',
@@ -1216,7 +1307,7 @@ while (true) {
 
   if (!_isCrossGenFirstRound) {
     const _reviseResult = await agent(
-      `Focused Proposal reviser for task ${_taskId}, delta round ${_deltaRound}/${_maxDeltaRounds}. Do NOT re-derive the Proposal from scratch and do NOT act as an independent author — resolve ONLY these recorded blocking findings against the CURRENT task ${_taskId} \`## Proposal\`, preserving every other section/sentence unchanged:
+      `${_worktreeIsolationNote}Focused Proposal reviser for task ${_taskId}, delta round ${_deltaRound}/${_maxDeltaRounds}. Do NOT re-derive the Proposal from scratch and do NOT act as an independent author — resolve ONLY these recorded blocking findings against the CURRENT task ${_taskId} \`## Proposal\`, preserving every other section/sentence unchanged:
 
 ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}${f.evidence ? ` — evidence: ${f.evidence}` : ''}`).join('\n')}
 
@@ -1239,7 +1330,7 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}${f.evidence
   }
 
   const _deltaReviewPrompt = _isCrossGenFirstRound
-    ? `Cross-generation DELTA reviewer for task ${_taskId} — a prior generation already completed the ONE full independent review this scope epoch allows (checkpoint diff classification: ${_crossGenClassification}). Do NOT re-derive or re-review the whole Proposal from scratch, and do NOT act as a reviser — the Proposal you are about to read has ALREADY been edited since that review (by a human or a prior agent, outside this dispatch).
+    ? `${_worktreeIsolationNote}Cross-generation DELTA reviewer for task ${_taskId} — a prior generation already completed the ONE full independent review this scope epoch allows (checkpoint diff classification: ${_crossGenClassification}). Do NOT re-derive or re-review the whole Proposal from scratch, and do NOT act as a reviser — the Proposal you are about to read has ALREADY been edited since that review (by a human or a prior agent, outside this dispatch).
 
 Read the CURRENT task via \`task_get ${_taskId}\`.
 
@@ -1263,7 +1354,7 @@ ${openBlocking.length > 0 ? openBlocking.map((f) => `- [${f.id}] (${f.subsystem}
 5. ${_sessionIdInstruction}
 6. BEFORE returning, run \`date +%s%3N\` (real epoch milliseconds) and include the result as \`nowMs\` (a number) — the orchestrating workflow script cannot read the clock itself.
 7. Return {resolvedIds: [<ids from the list above now resolved>], findings: [<any still-open findings, typed the same way as the full review, including any weakened/contradicted/unjustified-removed claim found in step 2>], proposalHash: <a short hash/fingerprint you compute over the CURRENT Proposal text>, nowMs: <the real epoch-ms number from step 6>, sessionId: <your real session id>}.`
-    : `INDEPENDENT delta review, round ${_deltaRound}/${_maxDeltaRounds}, of task ${_taskId}'s just-revised \`## Proposal\` — you did NOT author or revise it. Read the CURRENT task via \`task_get ${_taskId}\`.
+    : `${_worktreeIsolationNote}INDEPENDENT delta review, round ${_deltaRound}/${_maxDeltaRounds}, of task ${_taskId}'s just-revised \`## Proposal\` — you did NOT author or revise it. Read the CURRENT task via \`task_get ${_taskId}\`.
 
 Previously recorded open blocking findings:
 ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n')}
@@ -1322,7 +1413,7 @@ const _planFile = `docs/plans/${_milestoneId}-${_slug}.md`
 }
 
 const planAuthorResult = await agent(
-  `Author the checked milestone Plan for task ${_taskId} (milestone ${_milestoneId}, charter ${_charterFile}) at ${_planFile}.
+  `${_worktreeIsolationNote}Author the checked milestone Plan for task ${_taskId} (milestone ${_milestoneId}, charter ${_charterFile}) at ${_planFile}.
 
 Read the task's current (just-adjudicated) \`## Proposal\` and \`## Acceptance Criteria\` via \`task_get ${_taskId}\`, and the charter file.
 
@@ -1409,7 +1500,7 @@ while (_planCheckRound < MAX_PLANCHECK_ROUNDS) {
   }
 
   const checkResult = await agent(
-    `INDEPENDENT grounded Plan check, round ${_planCheckRound}/${MAX_PLANCHECK_ROUNDS}, for ${_planFile} (task ${_taskId}) — you did NOT author this Plan.
+    `${_worktreeIsolationNote}INDEPENDENT grounded Plan check, round ${_planCheckRound}/${MAX_PLANCHECK_ROUNDS}, for ${_planFile} (task ${_taskId}) — you did NOT author this Plan.
 
 Verify against the CURRENT repository: signatures, call sites, dependency order, commands, line budgets, stage classification (code vs prose), AC coverage (every task AC maps to >=1 stage), and touch-set completeness against the task/charter '## Touches' declaration.
 
@@ -1430,7 +1521,7 @@ Return {findings: <integer count, 0 if none>, findingsDetail: <list each finding
   if (_planCheckRound >= MAX_PLANCHECK_ROUNDS) break
   // Revise: re-invoke the Plan author with the findings before the next round.
   await agent(
-    `Revise ${_planFile} (task ${_taskId}) to resolve these Plan-check findings, then re-write the file: ${checkResult?.findingsDetail || ''}`,
+    `${_worktreeIsolationNote}Revise ${_planFile} (task ${_taskId}) to resolve these Plan-check findings, then re-write the file: ${checkResult?.findingsDetail || ''}`,
     { label: `plan-revise-round-${_planCheckRound}`, phase: 'PlanCheck',
       schema: { type: 'object', properties: { ok: { type: 'boolean' } } } }
   )
@@ -1509,7 +1600,7 @@ const _telemetryFile = _writeTelVerdict.telemetryFile
 log(`Receipt phase: generation-telemetry written to ${_telemetryFile} — proceeding to --build --telemetry against a file that already exists on disk.`)
 
 const receiptResult = await agent(
-  `Write the preparation receipt + finding ledger + mechanism inventory for task ${_taskId} / milestone ${_milestoneId}.
+  `${_worktreeIsolationNote}Write the preparation receipt + finding ledger + mechanism inventory for task ${_taskId} / milestone ${_milestoneId}.
 
 1. Write the file ${_ledgerFile} with EXACTLY this content (create parent directories as needed):
 
@@ -1548,7 +1639,82 @@ log(`Prepared: ${_taskId} — receipt at ${_receiptFile}, ledger at ${_ledgerFil
 // ONLY (no write — the generation-telemetry write already happened above, before --build ran).
 await _releaseLease('Receipt', { reason: 'prepared' })
 
-return {
+// ── gap-prepare-milestone-no-worktree-isolation: prepare-merge step. ───────────────────
+// Under worktree isolation, ALL content-agent phases (ProposalAuthors through Receipt) wrote
+// to the worktree, not the primary checkout. Now — AFTER lease release (so a merge failure
+// doesn't strand the lease) — bring the worktree branch back. The lease is already released;
+// a merge conflict aborts cleanly and returns needs-human. In CONCURRENT mode (AC8,
+// mode === 'concurrent'), prepare-merge does NOT merge/remove — it commits the worktree branch
+// and returns buildBranch + worktreeRel, deferring the merge to the fan-in (OUTER-LOOP.md
+// concurrent_execute step g), the SOLE merge owner (mirrors execute-milestone.js's concurrent
+// Land path).
+if (_useWorktree) {
+  if (_isConcurrent) {
+    // ── Concurrent path (AC8): commit-only on the worktree branch — no merge, no remove, no
+    // Land lock. The fan-in (OUTER-LOOP.md concurrent_execute step g) merges each surviving
+    // prepare worktree under the Land lock before any execute-milestone dispatch.
+    const _prepareCommitResult = await agent(
+      `PREPARE-COMMIT (concurrent + worktree-isolation mode, gap-prepare-milestone-no-worktree-isolation): the content-agent phases wrote everything into the per-milestone worktree at \`${_isolationPlan.worktreeRel}\` (branch \`${_isolationPlan.branch}\`). IN CONCURRENT MODE you are part of a multi-milestone worktree-isolated batch, and the FAN-IN (OUTER-LOOP.md concurrent_execute step g) is the SOLE merge owner — so YOU DO NOT MERGE AND DO NOT TOUCH THE SHARED CHECKOUT AT ALL.
+
+1. COMMIT the worktree content on the worktree branch: first \`cd ${_isolationPlan.worktreeRel}\`, then
+   \`git add -A && git commit -m "prepare: ${_taskId} proposal + plan + receipt (gap-prepare-milestone-no-worktree-isolation)"\` (a \`git commit\` that prints "nothing to commit" exits non-zero — that is FINE, treat it as success; any OTHER failure is real).
+
+2. DO NOT \`git merge\`, DO NOT \`git worktree remove\`, DO NOT \`git add\`/\`git commit\` on the primary checkout, and DO NOT take the Land lock. LEAVE the worktree and its branch exactly as they are — the fan-in (step g) will, UNDER the single-flight Land lock, run \`milestone-worktree.ts --merge\` (real \`git merge --no-ff ${_isolationPlan.branch}\`), then \`--remove\`, before any execute-milestone dispatch for this milestone. Doing any of that here would violate the SOLE-merge-owner invariant and race the fan-in on the primary git index.
+
+Return {ok: <true if the commit was created or there was genuinely nothing to commit; false only on a real failure>, commit: <the HEAD commit SHA on the worktree branch after step 1, or null>, detail: <"committed" | "nothing-to-commit" | the real error text>}.`,
+      { label: 'prepare-commit', phase: 'Receipt',
+        schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, commit: { type: 'string' }, detail: { type: 'string' } } } }
+    )
+    if (!_prepareCommitResult || _prepareCommitResult.ok !== true) {
+      log(`Prepare-commit FAILED (concurrent) — ${_prepareCommitResult?.detail || 'agent returned nothing'}. The worktree at ${_isolationPlan.worktreeRel} is left intact; no merge was attempted (the fan-in is the sole merge owner). The Admission lease is already released.`)
+      return _wtRet({ outcome: 'needs-human', reason: 'prepare-commit-failed', phase: 'Receipt', milestoneId: _milestoneId, taskId: _taskId })
+    }
+    log(`Prepare-commit SUCCEEDED (concurrent) — worktree ${_isolationPlan.worktreeRel} committed on branch ${_isolationPlan.branch} (buildBranch=${_isolationPlan.branch}); merge deferred to the fan-in (OUTER-LOOP.md concurrent_execute step g).`)
+    return _wtRet({
+      outcome: 'building',
+      taskId: _taskId,
+      milestoneId: _milestoneId,
+      planFile: _planFile,
+      receiptFile: _receiptFile,
+      ledgerFile: _ledgerFile,
+      planCheckRounds: _planCheckRound,
+      fullSynthesisCount: _fullSynthesisCount,
+      resumed: _resumeFromAdjudicatedProposal,
+      deltaRounds: _deltaRound,
+      ledger: _ledger,
+      reviewSessions: _reviewSessions,
+      reviserSessions: _reviserSessions,
+      buildBranch: _isolationPlan.branch,
+    })
+  }
+
+  // ── Serial path (unchanged): commit worktree -> real --no-ff merge -> remove. ─────────
+  const _mergeAgentResult = await agent(
+    `PREPARE-MERGE (gap-prepare-milestone-no-worktree-isolation): the content-agent phases wrote everything into the per-milestone worktree at \`${_isolationPlan.worktreeRel}\` (branch \`${_isolationPlan.branch}\`). Now merge it back.
+
+1. COMMIT any final unstaged worktree content: first \`cd ${_isolationPlan.worktreeRel}\`, then
+   \`git add -A && git commit -m "prepare: ${_taskId} proposal + plan + receipt (gap-prepare-milestone-no-worktree-isolation)"\` (this is safe even if there's nothing to commit — the commit just no-ops with a non-zero exit, which is fine).
+
+2. MERGE the worktree branch into the primary checkout (REAL git merge on master):
+   \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-worktree.ts --merge --workspace . --milestone ${_milestoneId}\`
+   (a real \`git merge --no-ff ${_isolationPlan.branch}\`). If it prints outcome:"conflict" with a "files" list, that is a DEFINED same-file-conflict — the merge was auto-aborted leaving master clean. DO NOT blanket --ours/--theirs. Return {ok: false, code: "prepare-merge-conflict", files: <the conflict file list>}.
+
+3. REMOVE the worktree + delete the now-merged branch:
+   \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/milestone-worktree.ts --remove --workspace . --milestone ${_milestoneId}\`
+   (real \`git worktree remove\` + \`git branch -d\`; \`-d\` refuses an UNMERGED branch as a backstop).
+
+Return {ok: <step 2 outcome was "merged">, mergeCommit: <the merge commit SHA printed by step 2, or null>, files: <conflict file list, or []>}.`,
+    { label: 'prepare-merge', phase: 'Receipt',
+      schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, mergeCommit: { type: 'string' }, files: { type: 'array', items: { type: 'string' } } } } }
+  )
+  if (!_mergeAgentResult || _mergeAgentResult.ok !== true) {
+    log(`Prepare-merge FAILED — ${_mergeAgentResult?.code || _mergeAgentResult?.detail || 'agent returned nothing'}. Master is clean (the merge was auto-aborted); the worktree at ${_isolationPlan.worktreeRel} is left intact for human inspection. The Admission lease is already released.`)
+    return _wtRet({ outcome: 'needs-human', reason: _mergeAgentResult?.code || 'prepare-merge-failed', phase: 'Receipt', mergeFiles: _mergeAgentResult?.files || [], milestoneId: _milestoneId, taskId: _taskId })
+  }
+  log(`Prepare-merge SUCCEEDED — worktree ${_isolationPlan.worktreeRel} merged and removed (mergeCommit=${_mergeAgentResult?.mergeCommit || 'unknown'}).`)
+}
+
+return _wtRet({
   outcome: 'prepared',
   taskId: _taskId,
   milestoneId: _milestoneId,
@@ -1562,4 +1728,5 @@ return {
   ledger: _ledger,
   reviewSessions: _reviewSessions,
   reviserSessions: _reviserSessions,
-}
+  ...(_useWorktree ? { merged: true } : {}),
+})

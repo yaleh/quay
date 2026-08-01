@@ -35,7 +35,14 @@ select =
   → ∀c∈batch: author_ac_dod(c)   -- ¬self-tick (DIR-020): all - [ ] UNCHECKED; - [x] ONLY by Audit phase
   → ∀c∈batch: set_schema_v1(c)   -- extra.schema:"v1"; absent → N/A-legacy
   → ∀c∈batch: prepare(c)  -- DIR-117: invoke(".claude/workflows/prepare-milestone.js", {taskId, milestoneId,
-     charterFile, class, highRisk?}) BEFORE final dispatch — orchestrates quay-task-to-plan's proposal authors →
+     charterFile, class, highRisk?, CONCURRENT BATCH (|batch|≥2) ALSO: mode:"concurrent",
+     isolationMode:"worktree"}) BEFORE final dispatch — CONCURRENT prepare (gap-prepare-milestone-no-worktree-
+     isolation AC8): each prepare runs in its OWN per-milestone git worktree (same path/branch convention as
+     execute-milestone's Build worktree) and prepare-merge COMMITS-ONLY on the branch, returning buildBranch +
+     worktreeRel; the fan-in (concurrent_execute step g) is the SOLE merge owner of those prepared worktrees
+     (--merge + --remove under the Land lock) before any execute-milestone dispatch. SERIAL prepare (|batch|=1):
+     UNCHANGED — no mode/isolationMode, runs directly on the shared checkout. — orchestrates quay-task-to-plan's
+     proposal authors →
      adjudication/write-back → BOUNDED grounded proposal review (incl. mechanism-claim wiring coverage, DIR-117
      unit B) → Plan author → grounded Plan-check, then writes milestones/M<NN>/preparation.json + proposal-
      ledger.json (a derived verification RECEIPT + typed finding ledger only — task ## Proposal +

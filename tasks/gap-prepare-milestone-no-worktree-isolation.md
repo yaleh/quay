@@ -9,7 +9,6 @@ labels:
 extra:
   schema: v1
 ---
-
 **type:** execution
 
 ## Proposal
@@ -79,7 +78,7 @@ if outcome !== 'prepared' (any terminal exit):
 
 2. **Coordination-vs-content boundary (D2).** The Admission lease, epoch records, generation telemetry, and split-decision records are COORDINATION primitives -- they exist to prevent conflicting dispatches from stepping on each other and to track cumulative budget across generations. They MUST live in the primary checkout so every dispatch (regardless of worktree) can see and update them. Task body edits, plan files, receipt/ledger/inventory files, and ProposalReview checkpoints are CONTENT outputs -- the deliverable of THIS dispatch, which must be isolated from other concurrent dispatches. The boundary is: everything that needs cross-dispatch visibility stays in the primary checkout; everything that must NOT be visible to another dispatch until complete goes into the worktree. The `_admissionAgentCall`, `_convergenceAgentCall`, `_preflightAgentCall`, `_renewLease`, `_releaseLeaseAndRecord`, `_releaseLease`, `_writeGenerationTelemetry`, `_recordEpochDispatch`, and `_recordAttemptAgentCall` dispatch functions are NEVER modified to use the worktree path -- they continue operating against the primary checkout's filesystem.
 
-3. **`task_write`/`task_get` -> CLI translation under isolation (D3).** Under worktree isolation, agents must NOT use the MCP `task_write`/`task_get` tools for task body edits because the MCP server resolves `tasks_dir` against the primary checkout's `.quay/config.yml` at server startup. Instead, the `_worktreeIsolationNote` instructs agents to `cd` to the worktree and use direct file reads/writes via Bash (`cat tasks/<id>.md`, `cat >> tasks/<id>.md`). For `task_get` specifically: ProposalReview agents that read the current Proposal (lines 1020, 1266) must read from the worktree copy (`cat $WT/tasks/<id>.md`) — NOT from `task_get` — because the primary checkout still has the pre-adjudicate Proposal. The `_worktreeIsolationNote` is prepended to every content-agent prompt that references `task_get` or `task_write`, instructing: `WORKTREE ISOLATION: you are operating inside a per-milestone git worktree at <path>. Read task bodies via Bash: cat <path>/tasks/<id>.md. Write task bodies via Bash: cat >> <path>/tasks/<id>.md. Never use task_get or task_write — the MCP server reads from the primary checkout, not this worktree.` This is the SAME pattern `execute-milestone.js`'s Build phase already uses under worktree isolation.
+3. **`task_write`/`task_get` -> CLI translation under isolation (D3).** Under worktree isolation, agents must NOT use the MCP `task_write`/`task_get` tools for task body edits because the MCP server resolves `tasks_dir` against the primary checkout's `.quay/config.yml` at server startup. Instead, the `_worktreeIsolationNote` instructs agents to `cd` to the worktree and use direct file reads/writes via Bash (`cat tasks/<id>.md`, `cat >> tasks/<id>.md`). For `task_get` specifically: ProposalReview agents that read the current Proposal (lines 1020, 1266) must read from the worktree copy (`cat $WT/tasks/<id>.md`) -- NOT from `task_get` -- because the primary checkout still has the pre-adjudicate Proposal. The `_worktreeIsolationNote` is prepended to every content-agent prompt that references `task_get` or `task_write`, instructing: `WORKTREE ISOLATION: you are operating inside a per-milestone git worktree at <path>. Read task bodies via Bash: cat <path>/tasks/<id>.md. Write task bodies via Bash: cat >> <path>/tasks/<id>.md. Never use task_get or task_write -- the MCP server reads from the primary checkout, not this worktree.` This is the SAME pattern `execute-milestone.js`'s Build phase already uses under worktree isolation.
 
 4. **Opt-in, default-off (D4).** `isolationMode: 'worktree'` is opt-in, exactly matching `execute-milestone.js`'s posture. Omitted, empty, or unknown mode -> golden-replay legacy path (zero diffs). A REQUESTED-but-unusable mode -> fail-closed (never silently falls back), matching `execute-milestone.js`'s verified behavior. This is the same "opt-in-then-prove" phasing DIR-123 used -- the mechanism is implemented and tested first; making it the default is a SEPARATE, later decision after real concurrent dispatches have proven the mechanism on master.
 
@@ -119,8 +118,6 @@ if outcome !== 'prepared' (any terminal exit):
 
 - **Return shapes:** Under the default (no-isolation) path, the return shape at every terminal site is byte-identical. Under worktree isolation, the success return adds `worktreeRel` (informational) and `merged` (boolean); the failure returns add `worktreeRel` (for human inspection of the stranded worktree).
 
-- **OUTER-LOOP.md:** concurrent prepare path gains `isolationMode: 'worktree'` on each dispatch. Serial prepare path is unchanged.
-
 **Risks:**
 
 1. **Agent non-compliance with cd instructions (Medium).** Under worktree isolation, agents are instructed to `cd <worktree>` before file operations. If an agent ignores this instruction and edits the primary checkout instead, the isolation boundary is breached. Mitigation: (a) `execute-milestone.js`'s Build phase has already proven this pattern works with real LLM agents over many successful worktree-isolated builds; (b) the `prepare-merge` step's `git merge --no-ff` merge commit is structurally distinguishable from direct-on-master edits, enabling post-hoc verification; (c) `git diff --stat` on the primary checkout after prepare-merge shows exactly the merged changes and nothing else.
@@ -147,31 +144,19 @@ if outcome !== 'prepared' (any terminal exit):
 
 - **AC1 (Legacy calls byte-for-behavior identical):** When `isolationMode` is omitted, empty, or any value other than the literal `'worktree'`, `_worktreeIsolationNote === ''` and `_useWorktree === false`. Zero new agent dispatch sites execute. All existing agent prompt strings, return shapes, and dispatch counts are unchanged. Verified by golden-replay tests using the EXISTING mocks (which never pass `isolationMode`) passing with zero diffs.
 
-- **AC2 (Build/Audit/Gate produce zero primary-checkout diffs until merge):** Translated for prepare: ALL content-agent phases (ProposalAuthors through Receipt) produce zero primary-checkout diffs until prepare-merge. Every agent prompt that performs file writes carries `_worktreeIsolationNote` with `cd <worktree>` instructions. The `git add`/commit within the worktree only affects the worktree's git index. Verified by: after each phase under worktree isolation, `git diff --stat` on the PRIMARY checkout shows zero changes. After prepare-merge, the primary checkout shows exactly ONE merge commit containing all prepared content.
+- **AC2 (Zero primary-checkout diffs until merge):** ALL content-agent phases (ProposalAuthors, Adjudicate, ProposalReview, PlanAuthor, PlanCheck, Receipt) produce zero primary-checkout diffs until prepare-merge. Every agent prompt that performs file writes carries `_worktreeIsolationNote` with `cd <worktree>` instructions. Task body edits, plan writes, and receipt writes all happen inside the worktree. Verified by: after each phase under worktree isolation, `git diff --stat` on the PRIMARY checkout shows zero changes. After prepare-merge, the primary checkout shows exactly ONE merge commit containing all prepared content.
 
 - **AC3 (prepare-merge commits atomically):** The prepare-merge step (1) runs `git -C <worktree> add -A && git -C <worktree> commit` to capture any final receipts/ledgers written by the Receipt phase agent, (2) runs `milestone-worktree.ts --merge` which does a real `git merge --no-ff <branch>` on the primary checkout, (3) runs `milestone-worktree.ts --remove` which does `git worktree remove` + `git branch -d`. The entire merge is ONE `--no-ff` merge commit. Verified by: `git log --merges` on master shows exactly one merge commit with the worktree branch as its second parent.
 
-- **AC4 (Worktree isolation mechanism exists):** prepare-milestone.js accepts
-  `isolationMode: 'worktree'`, creates a real git worktree via the existing
-  `milestone-worktree.ts --add` CLI before Admission, routes all content-agent
-  phases (ProposalAuthors through Receipt) to the worktree path, and merges
-  the worktree branch at prepare-merge. This is a mechanism claim, not a
-  concurrency claim. Concurrent prepare dispatch proof is task #22's scope.
-  Verified by: single-task dispatch with `isolationMode: 'worktree'` produces
-  a prepared receipt and a clean merge commit on master.
+- **AC4 (Worktree isolation mechanism exists):** prepare-milestone.js accepts `isolationMode: 'worktree'`, creates a real git worktree via the existing `milestone-worktree.ts --add` CLI before Admission, routes all content-agent phases (ProposalAuthors through Receipt) to the worktree path, and merges the worktree branch at prepare-merge. This is a mechanism claim, not a concurrency claim -- concurrent prepare dispatch proof is task #22's scope. Verified by: single-task dispatch with `isolationMode: 'worktree'` produces a prepared receipt and a clean merge commit on master.
 
-- **AC5 (Failure cleanup):** On ANY non-success terminal exit under worktree isolation, (a) the Admission lease is released via the existing `_releaseLeaseAndRecord`/`_releaseLease` choke point, (b) the worktree and branch are LEFT on disk with their current content, (c) a subsequent `--add` for the same milestone detects `worktree-path-exists` and dispatches `--clean-stale`, which (d) removes the stranded worktree+branch ONLY when the branch has zero commits ahead of master, or (e) returns `has-commits` (real partial work) and refuses to clean. Verified by: unit tests covering each terminal exit site under worktree isolation, confirming the lease is released AND the worktree path still exists afterward; and a `--clean-stale` test verifying the zero-ahead-clean / has-commits-refuse contract.
+- **AC5 (Failure cleanup):** On ANY non-success terminal exit under worktree isolation, (a) the Admission lease is released via the existing `_releaseLeaseAndRecord`/`_releaseLease` choke points, (b) the worktree and branch are LEFT on disk with their current content, (c) a subsequent `--add` for the same milestone detects `worktree-path-exists` and dispatches `--clean-stale`, which (d) removes the stranded worktree+branch ONLY when the branch has zero commits ahead of master, or (e) returns `has-commits` (real partial work) and refuses to clean. Verified by: unit tests covering each terminal exit site under worktree isolation, confirming the lease is released AND the worktree path still exists afterward; and a `--clean-stale` test verifying the zero-ahead-clean / has-commits-refuse contract.
 
-- **AC6 (Coordination isolation):** Coordination state — Admission leases
-  (`.quay/prepare-admission/`), epoch records (`.quay/prepare-epochs/`),
-  prepare-telemetry (`milestones/prepare-telemetry/`), and split-decision
-  records — is NEVER read from or written to inside the worktree. All
-  `_admissionAgentCall`, `_convergenceAgentCall`, `_recordEpochDispatch`,
-  `_preflightAgentCall`, `_renewLease`, `_releaseLeaseAndRecord`,
-  `_releaseLease`, and `_recordAttemptAgentCall` dispatch functions continue
-  operating against primary-checkout paths. Verified mechanically: `grep`
-  for `_isolationPlan.worktreeRel` near every `_admissionAgentCall` site
-  returns zero matches — leases stay on the primary checkout by construction.
+- **AC6 (Coordination isolation):** Coordination state -- Admission leases (`.quay/prepare-admission/`), epoch records (`.quay/prepare-epochs/`), prepare-telemetry (`milestones/prepare-telemetry/`), and split-decision records -- is NEVER read from or written to inside the worktree. All `_admissionAgentCall`, `_convergenceAgentCall`, `_recordEpochDispatch`, `_preflightAgentCall`, `_renewLease`, `_releaseLeaseAndRecord`, `_releaseLease`, and `_recordAttemptAgentCall` dispatch functions continue operating against primary-checkout paths. Verified mechanically: `grep` for `_isolationPlan.worktreeRel` near every `_admissionAgentCall` site returns zero matches -- leases stay on the primary checkout by construction.
+
+- **AC7 (Stranded-worktree recovery path):** `milestone-worktree.ts --add` failing with `worktree-path-exists` or `branch-exists` (from a prior crashed dispatch) triggers `--clean-stale` dispatch, then retries `--add`. `--clean-stale` removes the stranded worktree+branch ONLY when zero commits ahead of master; `has-commits` returns `needs-human`. Worktree creation failure returns `needs-human` WITHOUT an Admission lease being acquired. Verified by: unit tests covering the `--add` -> failure -> `--clean-stale` -> retry -> success path, and the `--clean-stale` refusal on `has-commits`.
+
+- **AC8 (Concurrent-path return-shape invariants):** When dispatched with `mode === 'concurrent'`, the prepare-merge step does NOT merge, does NOT remove the worktree, and does NOT take the Land lock -- it commits changes on the worktree branch and returns `{ buildBranch, worktreeRel }`. The worktree and branch are left intact for the fan-in (task #22's merge owner). Verified by: unit tests confirming the concurrent path's return shape contains `buildBranch` (the branch name string), `worktreeRel` (the relative worktree path), NO merge commit on master, and the worktree directory still exists after return.
 
 **Explicit alternatives considered and rejected:**
 
@@ -196,24 +181,22 @@ M211's staged Build commit was swept by M212's prepare-milestone via broad `git 
 1. Add `isolationMode: 'worktree'` parameter (opt-in, default off)
 2. Create worktree before Admission, thread path through all content-agent dispatches; coordination primitives stay in primary checkout
 3. Add prepare-merge step: commit worktree -> git merge --no-ff -> remove worktree, after Receipt success and lease release
-4. Update OUTER-LOOP.md concurrent prepare path
-5. Real concurrent proof: two file-disjoint tasks
+4. Real concurrent proof: two file-disjoint tasks
+
+## Plan
+
+See `docs/plans/M252-gap-prepare-milestone-no-worktree-isolation.md` for the full mechanical stage spec (8 stages, AC1-8 mapped, RED/GREEN commands, guardrails, rollback, real-landing verification). Standardized stopping rule: at most 3 Plan-check rounds, success only at F_i=0.
 
 ## Acceptance Criteria
 
-- [ ] Legacy calls (no isolationMode) are byte-for-behavior identical
-- [ ] **AC2 (zero primary-checkout diffs until merge):** ALL content-agent phases
-  (ProposalAuthors, Adjudicate, ProposalReview, PlanAuthor, PlanCheck, Receipt)
-  produce zero primary-checkout diffs until prepare-merge. Every agent prompt
-  that performs file writes carries `_worktreeIsolationNote` with `cd <worktree>`
-  instructions. Task body edits, plan writes, and receipt writes all happen
-  inside the worktree. Verified by: after each phase under worktree isolation,
-  `git diff --stat` on the PRIMARY checkout shows zero changes. After
-  prepare-merge, the primary checkout shows exactly ONE merge commit containing
-  all prepared content.
-- [ ] prepare-merge commits task changes + plan + receipt atomically
-- [ ] Two concurrent file-disjoint prepare tasks complete successfully
-- [ ] Failure cleanup: abandoned worktree + branch on needs-human exits
+- [ ] **AC1 (Legacy calls byte-for-behavior identical):** When `isolationMode` is omitted, empty, or any value other than the literal `'worktree'`, `_worktreeIsolationNote === ''` and `_useWorktree === false`. Zero new agent dispatch sites execute. All existing agent prompt strings, return shapes, and dispatch counts are unchanged. Verified by golden-replay tests using the EXISTING mocks (which never pass `isolationMode`) passing with zero diffs.
+- [ ] **AC2 (Zero primary-checkout diffs until merge):** ALL content-agent phases (ProposalAuthors, Adjudicate, ProposalReview, PlanAuthor, PlanCheck, Receipt) produce zero primary-checkout diffs until prepare-merge. Every agent prompt that performs file writes carries `_worktreeIsolationNote` with `cd <worktree>` instructions. Task body edits, plan writes, and receipt writes all happen inside the worktree. Verified by: after each phase under worktree isolation, `git diff --stat` on the PRIMARY checkout shows zero changes. After prepare-merge, the primary checkout shows exactly ONE merge commit containing all prepared content.
+- [ ] **AC3 (prepare-merge commits atomically):** The prepare-merge step (1) runs `git -C <worktree> add -A && git -C <worktree> commit` to capture any final receipts/ledgers written by the Receipt phase agent, (2) runs `milestone-worktree.ts --merge` which does a real `git merge --no-ff <branch>` on the primary checkout, (3) runs `milestone-worktree.ts --remove` which does `git worktree remove` + `git branch -d`. The entire merge is ONE `--no-ff` merge commit. Verified by: `git log --merges` on master shows exactly one merge commit with the worktree branch as its second parent.
+- [ ] **AC4 (Worktree isolation mechanism exists):** prepare-milestone.js accepts `isolationMode: 'worktree'`, creates a real git worktree via the existing `milestone-worktree.ts --add` CLI before Admission, routes all content-agent phases (ProposalAuthors through Receipt) to the worktree path, and merges the worktree branch at prepare-merge. This is a mechanism claim, not a concurrency claim — concurrent prepare dispatch proof is task #22's scope. Verified by: single-task dispatch with `isolationMode: 'worktree'` produces a prepared receipt and a clean merge commit on master.
+- [ ] **AC5 (Failure cleanup):** On ANY non-success terminal exit under worktree isolation, (a) the Admission lease is released via the existing `_releaseLeaseAndRecord`/`_releaseLease` choke points, (b) the worktree and branch are LEFT on disk with their current content, (c) a subsequent `--add` for the same milestone detects `worktree-path-exists` and dispatches `--clean-stale`, which (d) removes the stranded worktree+branch ONLY when the branch has zero commits ahead of master, or (e) returns `has-commits` (real partial work) and refuses to clean. Verified by: unit tests covering each terminal exit site under worktree isolation, confirming the lease is released AND the worktree path still exists afterward; and a `--clean-stale` test verifying the zero-ahead-clean / has-commits-refuse contract.
+- [ ] **AC6 (Coordination isolation):** Coordination state — Admission leases (`.quay/prepare-admission/`), epoch records (`.quay/prepare-epochs/`), prepare-telemetry (`milestones/prepare-telemetry/`), and split-decision records — is NEVER read from or written to inside the worktree. All `_admissionAgentCall`, `_convergenceAgentCall`, `_recordEpochDispatch`, `_preflightAgentCall`, `_renewLease`, `_releaseLeaseAndRecord`, `_releaseLease`, and `_recordAttemptAgentCall` dispatch functions continue operating against primary-checkout paths. Verified mechanically: `grep` for `_isolationPlan.worktreeRel` near every `_admissionAgentCall` site returns zero matches — leases stay on the primary checkout by construction.
+- [ ] **AC7 (Stranded-worktree recovery path):** `milestone-worktree.ts --add` failing with `worktree-path-exists` or `branch-exists` (from a prior crashed dispatch) triggers `--clean-stale` dispatch, then retries `--add`. `--clean-stale` removes the stranded worktree+branch ONLY when zero commits ahead of master; `has-commits` returns `needs-human`. Worktree creation failure returns `needs-human` WITHOUT an Admission lease being acquired. Verified by: unit tests covering the `--add` -> failure -> `--clean-stale` -> retry -> success path, and the `--clean-stale` refusal on `has-commits`.
+- [ ] **AC8 (Concurrent-path return-shape invariants):** When dispatched with `mode === 'concurrent'`, the prepare-merge step does NOT merge, does NOT remove the worktree, and does NOT take the Land lock — it commits changes on the worktree branch and returns `{ buildBranch, worktreeRel }`. The worktree and branch are left intact for the fan-in (task #22's merge owner). Verified by: unit tests confirming the concurrent path's return shape contains `buildBranch` (the branch name string), `worktreeRel` (the relative worktree path), NO merge commit on master, and the worktree directory still exists after return.
 
 ## Definition of Done
 
