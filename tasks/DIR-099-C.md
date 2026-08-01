@@ -16,6 +16,13 @@ extra:
 
 ## Proposal
 
+**Depends on [[DIR-099-A]]** (hard dependency, blocked-by): this child's entire mechanism
+and AC2/AC3/AC4 consume DIR-099-A's `validateConfig` module and its malformed-YAML/
+unresolved-gate fixtures, which do not exist in the repo until DIR-099-A lands. This child
+must NOT be prepared/executed before DIR-099-A is done. If dispatched before M229 lands,
+its parity ACs fail closed (soft guard) but the dependency must be declared, not inferred
+from parent prose.
+
 Add the `config_validate` MCP tool to `packages/quay/src/mcp-handlers.ts` via a new
 `registerConfigHandlers` (following the existing `register*Handlers` convention), proxying
 the SAME shared `validateConfig({workspaceRoot, checkFiles}) -> {ok, issues}` module as
@@ -80,3 +87,17 @@ Standard inherited-core DoD clauses apply.
 - `packages/quay/src/mcp-handlers.ts`
 - `packages/quay/test/config-validate.test.mjs (new)` (or sibling MCP-surface test)
 - `docs/plans/M231-dir-099-c.md`
+
+**MCP contract clarifications (2026-08-01, from ProposalReview):**
+
+- **`checkFiles` default**: omitted `checkFiles` maps to `false` (byte-parity with the CLI's
+  no-flag default — `--check-files` is opt-in).
+- **Error path**: a malformed config is a RESULT (`{ok:false, issues}`), not an error. An
+  unreadable/absent `.quay/config.yml` or an internal `validateConfig` error returns
+  `isError:true` per the repo convention (adr_get/action_run pattern in mcp-handlers.ts).
+- **`structuredContent` is the output channel** (an AC names it, not just Proposal prose):
+  the handler returns `{ok, issues[]}` in structuredContent — a text-only return violates
+  the contract.
+- **`registerConfigHandlers(server, cfg)`** follows the explicit-params convention (like
+  each `register*Handler(server, getClient, cfg)`), binding `cfg.workspaceRoot` from
+  `loadConfig` — not an untyped `deps`.

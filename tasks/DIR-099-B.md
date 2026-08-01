@@ -16,21 +16,28 @@ extra:
 
 ## Proposal
 
-Add provider-environment validation to `config validate` — but CORRECTED against the
-actual runtime contract (the split review found the original Proposal's check #9 was a
-false positive):
+Add provider-environment validation to `config validate` — CORRECTED against the actual
+runtime contract (the split review AND a further ProposalReview round both found the
+original check #9's "required" premises were false positives — including an initially-
+over-corrected github clause):
 
 - **native provider**: `QUAY_NATIVE_TASKS_DIR` or a `tasks_dir` field is OPTIONAL —
-  `resolveTasksDir()` defaults to repo-root `./tasks`, and Core never fails closed on
-  their absence. Flagging a tasks_dir-less native provider as invalid is a FALSE POSITIVE
-  (the config runs correctly at runtime). Emit a `warn` (informational, not error) when
-  neither is set, noting the default.
-- **github provider**: `QUAY_GITHUB_REPO` IS required — `quay-github.ts` throws when it
-  is missing. This is an `error` (gate will not function).
+  `resolveTasksDir()` defaults to repo-root `./tasks`; Core never fails closed on their
+  absence. Missing env → `warn` (informational, exit 0), noting the `./tasks` default.
+- **github provider**: `QUAY_GITHUB_REPO` is ALSO OPTIONAL — `resolveRepo()`
+  (`packages/quay-github/bin/quay-github.ts` L18-27) defaults to `yaleh/quay` when the
+  env var is absent and never throws; the throw fires only for PRESENT-but-malformed
+  values (not `owner/repo`). Missing env → `warn` (exit 0), noting the `yaleh/quay`
+  default. A PRESENT-but-malformed `QUAY_GITHUB_REPO` (not `owner/repo`) → `error`
+  (matches the runtime throw).
+- **Warn-exit contract (pinned, owned by DIR-099-A's CLI):** `warn`-severity issues are
+  NON-FATAL — `config validate` exits 0 when the only issues are warns; only `error`-
+  severity issues force exit 1. DIR-099-B pins this contract so AC1 ("config exits 0")
+  holds regardless of A's implementation.
 
-Second child of the DIR-099 split. Depends on DIR-099-A's shared
-`validateConfig({workspaceRoot, checkFiles})` module (this child is the check #9
-provider-env sub-check within it).
+Second child of the DIR-099 split. Depends on [[DIR-099-A]]'s shared
+`validateConfig({workspaceRoot, checkFiles})` module and its warn/error severity →
+exit-code mapping (this child is the check #9 provider-env sub-check within it).
 
 ## Chosen mechanism
 
@@ -38,8 +45,10 @@ In the shared `config-validate.ts` module (or a `provider-env.ts` sibling): a
 `validateProviderEnv(provider)` check reading the enabled provider's `env:` map ONLY
 (grounded fact #4: `resolveProviderEnv` reads `provider.env`, never `provider.tasks_dir`;
 `QUAY_NATIVE_TASKS_DIR`/`QUAY_GITHUB_REPO` come from the config's `env:` map). Native
-missing env → `warn` (default `./tasks` used); github missing `QUAY_GITHUB_REPO` →
-`error`.
+missing env → `warn` (default `./tasks`); github missing env → `warn` (default
+`yaleh/quay`); github PRESENT-but-malformed (not `owner/repo`) → `error` (matches the
+runtime throw at quay-github.ts L18-27). Warns exit 0; errors exit 1 (the pinned
+warn-exit contract).
 
 ## Plan
 
@@ -67,10 +76,20 @@ correctly at runtime would be flagged invalid. The github clause is correct
 
 - [ ] A native provider without `QUAY_NATIVE_TASKS_DIR`/`tasks_dir` yields a `warn` (not
   an error) — the config exits 0 (false-positive fixed).
-- [ ] A github provider without `QUAY_GITHUB_REPO` yields an `error` (exit 1).
+- [ ] A github provider without `QUAY_GITHUB_REPO` yields a `warn` (exit 0, not error) —
+  `resolveRepo()` defaults to `yaleh/quay`, so the config runs correctly at runtime
+  (second false-positive fixed).
+- [ ] A github provider with PRESENT-but-malformed `QUAY_GITHUB_REPO` (not
+  `owner/repo`) yields an `error` (exit 1) — matches the runtime throw.
 - [ ] A provider with both env vars set yields zero provider-env issues.
+- [ ] `warn`-severity issues are non-fatal: `config validate` exits 0 when the only issues
+  are warns; only `error` severity forces exit 1 (the pinned warn-exit contract owned by
+  DIR-099-A's CLI).
 - [ ] The check reads the provider's `env:` map only (grounded fact #4), never
   `provider.tasks_dir` as an env source.
+- [ ] **Real-callsite evidence (AC, not DoD prose):** a real `config validate` run against
+  a github-provider workspace with no `QUAY_GITHUB_REPO` emits a `warn` and exits 0; a
+  real run with malformed `QUAY_GITHUB_REPO` emits an `error` and exits 1.
 - [ ] Tests: `packages/quay/test/config-validate.test.mjs` RED/GREEN for the corrected
   semantics.
 
