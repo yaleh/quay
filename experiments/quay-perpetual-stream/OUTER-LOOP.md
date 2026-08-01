@@ -24,8 +24,9 @@ select =
       scripts/candidate-synthesis.ts + scripts/portfolio-choice.ts) — advisory in this milestone (DIR-119-A's own
       Proposal defers operational wiring/self-certification to DIR-119-C); the legacy shortlist below is UNCHANGED
   → shortlist = preflight.shortlist  -- composed by deliverable-governor (DIR-066); deliverable classification baked in
-  → N = min(|shortlist|, .quay/loop.yml.concurrency)  -- DIR-106 Fix 2: SELECT up to concurrency candidates (not just top-1);
-     default concurrency=1 preserves backward-compat serial behavior
+  → N = min(|shortlist|, .quay/config.yml loop:.concurrency)  -- DIR-106 Fix 2: SELECT up to concurrency candidates (not just top-1);
+     default concurrency=1 preserves backward-compat serial behavior. DIR-050: concurrency lives in the unified
+     .quay/config.yml `loop:` section, NOT in a legacy .quay/loop.yml
   → candidates = shortlist[0..N]     -- ranked top-N; remaining candidates stay in pool for next cycle
   → batch_assemble(charters(candidates))  -- scripts/concurrent-batch-scheduler.ts (DIR-075/M142); ⊨ charter readiness: type: + ## Touches
   → log("BATCH (${|batch|}-wide, concurrent): ${batch}")         -- DIR-106 Fix 4: surface batch diagnostics
@@ -253,7 +254,7 @@ checkpoint(n) = n%5=0 → write("checkpoints/cp-<NN>.md", health_snapshot) | ∅
 
 routines :: () → {fired, filed, rejected, fileOnlyViolation}
 routines() = invoke(".claude/workflows/run-routines.js", {workspaceRoot, tasksDir, milestoneCounter})
-  ⊨ IS single-source (ADR-004, DIR-051/056): Schedule(read .quay/loop.yml → routine-scheduler.ts →
+  ⊨ IS single-source (ADR-004, DIR-051/056): Schedule(read .quay/config.yml `loop:` section → routine-scheduler.ts →
      DUE list) → Dispatch(readProbeSpec → availability check → fresh-context background agent) →
      Gate(routine-file-gate.ts: quality/dedup/rate → ACCEPT|REJECT) → Verify(FILE-ONLY invariant)
   ⊨ absent routines: → no-op (scheduler returns none due → exit immediately)

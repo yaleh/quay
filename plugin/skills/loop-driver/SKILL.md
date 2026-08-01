@@ -48,7 +48,7 @@ routines: []                 # [] (DEFAULT) = no routine track | [{name,trigger,
 
 The skill reads params via `readLoopParams` (`src/loop-params.js`). If absent or malformed, it refuses to run (FAIL-CLOSED). No runner name, project name, or workspace path is hardcoded in this skill.
 
-**Default behavior (no `execution`/`audit` keys):** build runs in a fresh background subagent (`execution: dispatched`) and a fresh-context adversarial auditor runs before land (`audit: adversarial`). This is the two-layer model. To opt out to single-context/self-gated behavior (constrained/trivial workspaces), set `execution: inline` + `audit: none` explicitly in `loop.yml`.
+**Default behavior (no `execution`/`audit` keys):** build runs in a fresh background subagent (`execution: dispatched`) and a fresh-context adversarial auditor runs before land (`audit: adversarial`). This is the two-layer model. To opt out to single-context/self-gated behavior (constrained/trivial workspaces), set `execution: inline` + `audit: none` explicitly in `.quay/config.yml` `loop:` section.
 
 **Concurrency (`concurrency > 1`, DIR-049) — opt-in cross-milestone batching.** Default `1` = serial (one dispatched build per iterate = steps 2→7 below). Concurrency defaults OFF (unlike dispatch/audit which default ON) because it trades safety for throughput and is safe ONLY where ready tasks are touches-disjoint AND carry no SELECT←ABSORB learning dependency (e.g. archguard's independent refactors qualify; methodology milestones with cross-milestone learning dependencies do not). When `concurrency = N > 1`, one iterate = one BATCH, orchestrated by CALLING the DIR-044 scripts (single-source — never re-implement them):
 1. **SELECT → batch:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/concurrent-batch-scheduler.ts" --root <workspaceRoot> <ready task .md files>` to assemble a maximal touches-disjoint, execution-type batch up to width N. (The DIR-044 scripts ship WITH the plugin under `${CLAUDE_PLUGIN_ROOT}/scripts/` — do NOT look for them in the workspace's own `scripts/`.) Tasks lacking a `## Touches` declaration, overbroad, or learning-type → conservative-serialize (not batched). A 1-wide result = fall back to serial (steps 2→7).
@@ -114,13 +114,13 @@ FAIL-CLOSED: if no Agent tool is available under `execution: dispatched` (or def
 Never silently fall back to inline execution.
 
 **IF `params.execution = inline`:**
-Implement the task in the worktree directly in the driver's own context (today's behavior). For trivial single-file tasks or environments where spawning a subagent is impossible. This is an explicit opt-out — declare it in `loop.yml`, not the default.
+Implement the task in the worktree directly in the driver's own context (today's behavior). For trivial single-file tasks or environments where spawning a subagent is impossible. This is an explicit opt-out — declare it in `.quay/config.yml` `loop:` section, not the default.
 
 ### 5. Gate
 ```
 gate :: Task → {PASS, FAIL}    ⊨ fail-closed ; ⊨ cwd = worktree ; ⊨ runner ∉ driver
 ```
-MCP `gate_run` with `{ id: <task.id>, gate: <params.gates[0]>, cwd: <worktree>, provider: <params.board> }` (or iterate over `params.gates`). Returns `{ ok, reason }` — `ok: true` = PASS; `ok: false` = FAIL. The runner (`vitest`, `node --test`, etc.) lives in `.quay/gates.yml` — not in this skill. The `cwd` parameter (DIR-046) ensures the gate runs against the BUILT worktree, not workspaceRoot.
+MCP `gate_run` with `{ id: <task.id>, gate: <params.gates[0]>, cwd: <worktree>, provider: <params.board> }` (or iterate over `params.gates`). Returns `{ ok, reason }` — `ok: true` = PASS; `ok: false` = FAIL. The runner (`vitest`, `node --test`, etc.) lives in `.quay/config.yml` `gates:` section — not in this skill. The `cwd` parameter (DIR-046) ensures the gate runs against the BUILT worktree, not workspaceRoot.
 
 ### 6. Record
 ```
@@ -142,7 +142,7 @@ The auditor prompt:
 The auditor MUST NOT have seen the build session (fresh-context, `run_in_background`). A `REFUTATION FOUND` response blocks land and routes the task to `needs-human`. A `NO REFUTATION FOUND` response proceeds to land.
 
 **IF `params.audit = none`:**
-Skip adversarial audit. Gate output only is the record. For throwaway/experimental boards as an explicit opt-out declared in `loop.yml`.
+Skip adversarial audit. Gate output only is the record. For throwaway/experimental boards as an explicit opt-out declared in `.quay/config.yml` `loop:` section.
 
 ### 7. Land
 ```

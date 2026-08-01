@@ -1,21 +1,18 @@
 {
   "schemaVersion": 1,
-  "epochId": "8d8c6906164c",
+  "epochId": "3cf88cd8ee08",
   "taskId": "DIR-112",
   "charterHash": "5c2b909c463e19dec86497505e1b2b6bc577447b27ae9d4f2c5c1d3e5dc7c15b",
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
-  "parentEpochId": "9858421989a1",
+  "parentEpochId": "8d8c6906164c",
   "bodyScopeHash": null,
   "counters": {
-    "attempts": 2,
-    "fullReviews": 1,
+    "attempts": 0,
+    "fullReviews": 0,
     "deltaRounds": 0,
-    "contentAgentDispatches": 8,
-    "observableAgentMs": 1104796,
-    "terminalFingerprints": {
-      "2d86004634ea": 1,
-      "4161ab22b641": 1
-    },
+    "contentAgentDispatches": 0,
+    "observableAgentMs": 0,
+    "terminalFingerprints": {},
     "tokensObserved": null
   },
   "overrides": [],
@@ -47,6 +44,20 @@
         "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
       },
       "timestamp": 1785570570618
+    },
+    {
+      "fromEpochId": "8d8c6906164c",
+      "owner": "orchestrating-session",
+      "reason": "fresh epoch after split-decision invalidated and lease cleaned — proposal repaired with exact grounded facts",
+      "oldHash": {
+        "charterHash": "5c2b909c463e19dec86497505e1b2b6bc577447b27ae9d4f2c5c1d3e5dc7c15b",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "5c2b909c463e19dec86497505e1b2b6bc577447b27ae9d4f2c5c1d3e5dc7c15b",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785578031670
     }
   ],
   "policy": {
@@ -57,5 +68,5 @@
     "maxOverrideCount": 3,
     "maxNewEpochResetCount": 3
   },
-  "createdAtMs": 1785570570618
+  "createdAtMs": 1785578031670
 }

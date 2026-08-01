@@ -1,6 +1,6 @@
 ---
 name: routines
-description: Evaluate the standing routine track from .quay/loop.yml — scheduler → readProbeSpec → dispatch probes → gate findings → FILE-ONLY verify. Replaces OUTER-LOOP.md step 5a.
+description: Evaluate the standing routine track from .quay/config.yml loop: section — scheduler → readProbeSpec → dispatch probes → gate findings → FILE-ONLY verify. Replaces OUTER-LOOP.md step 5a.
 allowed-tools: Bash, Read, Write, TaskCreate, TaskUpdate, TaskGet, TaskList, SendMessage, Skill, mcp__quay__task_get, mcp__quay__task_list, mcp__quay__task_write
 ---
 
@@ -8,7 +8,7 @@ allowed-tools: Bash, Read, Write, TaskCreate, TaskUpdate, TaskGet, TaskList, Sen
 
 ## Spec
 
-Evaluate the standing routine track: read `.quay/loop.yml` routines config, schedule
+Evaluate the standing routine track: read `.quay/config.yml` `loop:` section (legacy: `.quay/loop.yml`) routines config, schedule
 due probes, dispatch them as background agents with instrument-awareness, gate
 their findings through the routine-file-gate, and verify the FILE-ONLY invariant
 (no product/method code touched).
@@ -24,8 +24,7 @@ their findings through the routine-file-gate, and verify the FILE-ONLY invariant
 
 ### Phase 1 — Schedule
 
-1. Read `routines:` from `.quay/loop.yml` (falls back to `.quay/config.yml` `loop:`
-   section). Default `[]` = no routines — return immediately.
+1. Read `routines:` from `.quay/config.yml` `loop:` section (legacy fallback: `.quay/loop.yml`).
 2. Write routines as a temporary JSON array (one object per routine with
    `{name, trigger, probe?, dispatch?}`).
 3. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/routine-scheduler.ts" --iteration

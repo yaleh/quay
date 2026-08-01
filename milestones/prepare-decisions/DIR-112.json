@@ -5,9 +5,15 @@
   "scopeHash": "89f5e99ee5db721fa1eaf41c4622142c02ef18d98eb1b9d6ab146ce871ab959d",
   "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
   "mechanismInventoryHash": null,
-  "decision": "split",
-  "reason": "ProposalReview found wiring-coverage gaps — split as recommended",
+  "decision": "commit",
+  "reason": "ProposalReview found wiring-coverage gaps \u2014 split as recommended",
   "authorizingSessionId": null,
   "decidedAtMs": 1785572403487,
-  "invalidations": []
+  "invalidations": [
+    {
+      "reason": "Proposal repaired with exact grounded facts (89=66+23 spawns, line anchors, err.status ?? 1) after human-operator epoch reset \u2014 wiring-coverage gaps addressed",
+      "timestamp": "2026-08-01T09:47:00.000Z",
+      "owner": "orchestrating-session-restart"
+    }
+  ]
 }

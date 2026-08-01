@@ -1,6 +1,6 @@
 export const meta = {
   name: 'run-routines',
-  description: 'Evaluate the standing routine track from .quay/loop.yml — delegates to the quay:run-routines skill (plugin/skills/routines/SKILL.md). Backward-compat thin wrapper (M140, 2026-07-25).',
+  description: 'Evaluate the standing routine track from .quay/config.yml loop: section — delegates to the quay:run-routines skill (plugin/skills/routines/SKILL.md). Backward-compat thin wrapper (M140, 2026-07-25).',
   phases: [
     { title: 'Skill', detail: 'Invoke quay:run-routines plugin skill (Schedule → Dispatch → Gate → Verify)' },
   ],
@@ -24,7 +24,7 @@ const result = await agent(
 Pipeline (from plugin/skills/routines/SKILL.md):
 
 ### Phase 1 — Schedule
-1. Read \`routines:\` from \`.quay/loop.yml\` (fall back to \`.quay/config.yml\` \`loop:\` section). Default [] = no routines — return {fired: 0} immediately.
+1. Read \`routines:\` from \`.quay/config.yml\` \`loop:\` section (legacy fallback: \`.quay/loop.yml\`). Default [] = no routines — return {fired: 0} immediately.
 2. Write routines as a temporary JSON array.
 3. Run \`node experiments/quay-perpetual-stream/scripts/routine-scheduler.ts --iteration <counter> --event checkpoint --plugin-root . /tmp/routines-<counter>.json\`. Exit 0 = DUE list; exit 3 = none due.
 4. If none due, return {fired: 0}.
