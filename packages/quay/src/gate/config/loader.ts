@@ -37,12 +37,71 @@ export type {
 };
 
 // ---------------------------------------------------------------------------
+// Diagnostic output channel (DIR-100-C)
+// ---------------------------------------------------------------------------
+
+/** Severity taxonomy: error = gate not registered, warn = registered with extras. */
+export type DiagnosticSeverity = "error" | "warn";
+
+/** Rendered label per severity (data, not prose — AC4 grep-confirmable). */
+export const SEVERITY_LABEL: Record<DiagnosticSeverity, string> = {
+  error: "[error]",
+  warn: "[warn]",
+};
+
+/** Sink contract for diagnostic output. */
+export interface GateDiagnosticsSink {
+  append(line: string): void;
+}
+
+/** Known top-level gate sections under `gates:` (DIR-100-A/C). */
+export const KNOWN_GATE_SECTIONS = ["it0", "adr", "fixed", "testPass", "coverageFloor", "redGreen"];
+
+// Memoized sink — resolved once per process.
+let cachedSink: GateDiagnosticsSink | undefined;
+
+/** Resolve the diagnostics sink from QUAY_GATE_DIAGNOSTICS (once per process). */
+export function resolveGateDiagnosticsSink(): GateDiagnosticsSink {
+  if (cachedSink) return cachedSink;
+  const raw = process.env.QUAY_GATE_DIAGNOSTICS;
+  if (raw === undefined || raw === "stderr" || raw.trim() === "") {
+    cachedSink = { append(line: string): void { process.stderr.write(line + "\n"); } };
+    return cachedSink;
+  }
+  if (raw === "quiet") {
+    cachedSink = { append(_line: string): void {} };
+    return cachedSink;
+  }
+  const pending: string[] = [];
+  const stream = fs.createWriteStream(raw, { flags: "a" });
+  let writer: (line: string) => void = (line: string) => {
+    pending.push(line);
+    stream.write(line + "\n");
+  };
+  let degraded = false;
+  stream.on("error", (err) => {
+    if (!degraded) {
+      degraded = true;
+      for (const line of pending) process.stderr.write(line + "\n");
+      process.stderr.write("[error] QUAY_GATE_DIAGNOSTICS: cannot write to '" + raw + "' (" + err.message + "); falling back to stderr\n");
+      writer = (line: string) => process.stderr.write(line + "\n");
+    }
+  });
+  cachedSink = { append(line: string): void { writer(line); } };
+  return cachedSink;
+}
+
+/** Emit one diagnostic line through the resolved sink — single emission point. */
+export function emitDiagnostic(severity: DiagnosticSeverity, message: string): void {
+  resolveGateDiagnosticsSink().append(`${SEVERITY_LABEL[severity]} ${message}`);
+}
+
+// ---------------------------------------------------------------------------
 // Workspace root discovery
 // ---------------------------------------------------------------------------
 
-export function discoverWorkspaceRoot(startDir) {
-  if (startDir === undefined) startDir = process.cwd();
-  var configPath = findConfig(startDir);
+export function discoverWorkspaceRoot(startDir: string = process.cwd()): string | null {
+  const configPath = findConfig(startDir);
   if (!configPath) return null;
   return path.dirname(path.dirname(configPath));
 }
@@ -51,127 +110,128 @@ export function discoverWorkspaceRoot(startDir) {
 // Shared file resolver — single owner of branch-A-terminal precedence
 // ---------------------------------------------------------------------------
 
-function resolveGateConfigFile(workspaceRoot) {
+function resolveGateConfigFile(workspaceRoot: string | null): { file: string; text: string } | null {
   if (!workspaceRoot) return null;
-  var p = path.join(workspaceRoot, ".quay", "config.yml");
-  if (fs.existsSync(p)) return { file: p, text: fs.readFileSync(p, "utf8") };
-  p = path.join(workspaceRoot, ".quay", "gates.yml");
-  if (!fs.existsSync(p)) return null;
-  return { file: p, text: fs.readFileSync(p, "utf8") };
+  const unifiedConfigPath = path.join(workspaceRoot, ".quay", "config.yml");
+  if (fs.existsSync(unifiedConfigPath)) {
+    return { file: unifiedConfigPath, text: fs.readFileSync(unifiedConfigPath, "utf8") };
+  }
+  const legacyGatesPath = path.join(workspaceRoot, ".quay", "gates.yml");
+  if (!fs.existsSync(legacyGatesPath)) return null;
+  return { file: legacyGatesPath, text: fs.readFileSync(legacyGatesPath, "utf8") };
 }
 
 // ---------------------------------------------------------------------------
-// Private CST parser (DIR-104 AC3 — file:line provenance)
+// Private single-pass CST parser (DIR-104)
 // ---------------------------------------------------------------------------
 
-function parseGateEntryLines(text, srcFile) {
-  var empty = { it0: [], adr: [], fixed: [], testPass: [], coverageFloor: [], redGreen: [], srcFile: srcFile || "" };
-  var adrEntries = [];
+function parseGatesConfig(text: string, srcFile?: string): {
+  config: GatesConfig;
+  adrLines: Array<{ id: string; line: number }>;
+} {
+  const empty: GatesConfig = { it0: [], adr: [], fixed: [], testPass: [], coverageFloor: [], redGreen: [] };
+  const adrLines: Array<{ id: string; line: number }> = [];
 
-  var doc;
-  var lineCounter = new YAML.LineCounter(text);
-  try { doc = YAML.parseDocument(text, { keepSourceTokens: true, lineCounter: lineCounter }); }
-  catch (_) { return { config: empty, adrLines: adrEntries }; }
+  let doc: YAML.Document;
+  const lc = new YAML.LineCounter();
+  try { doc = YAML.parseDocument(text, { keepSourceTokens: true, lineCounter: lc }); }
+  catch { return { config: srcFile ? { ...empty, srcFile } : empty, adrLines: [] }; }
 
-  if (!doc.contents || !YAML.isMap(doc.contents)) return { config: empty, adrLines: adrEntries };
-  if (doc.errors && doc.errors.length > 0) return { config: empty, adrLines: adrEntries };
+  if (!doc.contents || !YAML.isMap(doc.contents)) {
+    return { config: srcFile ? { ...empty, srcFile } : empty, adrLines: [] };
+  }
 
-  var gatesMap = null;
+  let gatesMap: YAML.YAMLMap | null = null;
   if (doc.contents.has("gates")) {
-    var gNode = doc.contents.get("gates", true);
+    const gNode = doc.contents.get("gates", true);
     if (YAML.isMap(gNode)) gatesMap = gNode;
-  } else {
-    gatesMap = doc.contents;
-  }
-  if (!gatesMap) return { config: empty, adrLines: adrEntries };
+  } else { gatesMap = doc.contents; }
+  if (!gatesMap) return { config: srcFile ? { ...empty, srcFile } : empty, adrLines: [] };
 
-  function lineOf(node) {
-    if (!node || !node.range || !node.range[0]) return 0;
-    return lineCounter.linePos(node.range[0]).line;
-  }
-
-  function entriesFromSection(key) {
-    var n = gatesMap.get(key, true);
-    if (!n || !YAML.isSeq(n)) return [];
-    var result = [];
-    for (var i = 0; i < n.items.length; i++) {
-      var item = n.items[i];
-      var ln = lineOf(item);
-      if (YAML.isMap(item)) {
-        var data = {};
-        for (var j = 0; j < item.items.length; j++) {
-          var pair = item.items[j];
-          if (YAML.isScalar(pair.key)) {
-            var k = String(pair.key.value);
-            data[k] = YAML.isScalar(pair.value) ? pair.value.value : null;
-          }
-        }
-        if (Object.keys(data).length > 0) {
-          if (srcFile && ln > 0) data.src = { file: srcFile, line: ln };
-          result.push(data);
-        }
-      }
-    }
-    return result;
-  }
-
-  var adrNode = gatesMap.get("adr", true);
-  if (adrNode && YAML.isSeq(adrNode)) {
-    for (var a = 0; a < adrNode.items.length; a++) {
-      var adrItem = adrNode.items[a];
-      if (YAML.isScalar(adrItem) && typeof adrItem.value === "string" && adrItem.value.trim() !== "") {
-        adrEntries.push({ id: adrItem.value.trim(), line: lineOf(adrItem) });
-      }
+  // DIR-100-C: fail-loud scan of top-level keys (M226 scope, wired through emitDiagnostic)
+  for (const pair of gatesMap.items) {
+    if (!YAML.isScalar(pair.key)) continue;
+    const key = String(pair.key.value);
+    if (!KNOWN_GATE_SECTIONS.includes(key)) {
+      emitDiagnostic("error", "unrecognized gate section '" + key + "' — expected one of " + KNOWN_GATE_SECTIONS.join(", ") + "; section ignored");
+    } else if (!YAML.isSeq(pair.value)) {
+      emitDiagnostic("error", "gate section '" + key + "' must be a list (wrong nesting level); entries ignored");
     }
   }
 
-  var config = {
-    it0: entriesFromSection("it0"),
-    adr: adrEntries.map(function(e) { return e.id; }),
-    fixed: entriesFromSection("fixed"),
-    testPass: entriesFromSection("testPass"),
-    coverageFloor: entriesFromSection("coverageFloor"),
-    redGreen: entriesFromSection("redGreen"),
-    srcFile: srcFile || "",
+  const lineOf = (node: unknown): number => {
+    const n = node as { range?: [number, number, number?] };
+    if (!n?.range?.[0]) return 0;
+    return lc.linePos(n.range[0]).line;
   };
 
-  return { config: config, adrLines: adrEntries };
-}
+  const parseSection = (key: string): Array<{ data: Record<string, unknown>; line: number }> => {
+    const node = gatesMap!.get(key, true);
+    if (!node || !YAML.isSeq(node)) return [];
+    return node.items.map((item) => {
+      const line = lineOf(item);
+      if (YAML.isMap(item)) {
+        const data: Record<string, unknown> = {};
+        for (const pair of item.items) {
+          if (YAML.isScalar(pair.key)) {
+            const k = String(pair.key.value);
+            data[k] = YAML.isScalar(pair.value) ? pair.value.value : (pair.value as Record<string, unknown>)?.toJSON?.() ?? null;
+          }
+        }
+        return { data, line };
+      }
+      return { data: {}, line };
+    }).filter((e) => Object.keys(e.data).length > 0);
+  };
 
-// ---------------------------------------------------------------------------
-// gates.yml / config.yml reader (thin wrapper — G3 contract preserved)
-// ---------------------------------------------------------------------------
+  const mkSrc = (line: number): GateSource | undefined =>
+    srcFile && line > 0 ? { file: srcFile, line } : undefined;
 
-export function readGatesConfig(workspaceRoot) {
-  var empty = { it0: [], adr: [], fixed: [], testPass: [], coverageFloor: [], redGreen: [] };
-  var resolved = resolveGateConfigFile(workspaceRoot);
-  if (!resolved) return empty;
-  try {
-    var parsed = parseGateEntryLines(resolved.text, resolved.file);
-    var cfg = parsed.config;
-    if (cfg.it0.length === 0 && cfg.adr.length === 0 && cfg.fixed.length === 0 &&
-        cfg.testPass.length === 0 && cfg.coverageFloor.length === 0 && cfg.redGreen.length === 0) {
-      return empty;
+  const it0Parsed = parseSection("it0");
+  const fixedParsed = parseSection("fixed");
+  const testPassParsed = parseSection("testPass");
+  const coverageFloorParsed = parseSection("coverageFloor");
+  const redGreenParsed = parseSection("redGreen");
+
+  const adrNode = gatesMap.get("adr", true);
+  if (adrNode && YAML.isSeq(adrNode)) {
+    for (const item of adrNode.items) {
+      if (YAML.isScalar(item) && typeof item.value === "string" && item.value.trim() !== "") {
+        adrLines.push({ id: item.value.trim(), line: lineOf(item) });
+      }
     }
-    return cfg;
   }
-  catch (_) { return empty; }
+
+  const config: GatesConfig = {
+    it0: it0Parsed.map((e) => ({ ...e.data, src: mkSrc(e.line) } as It0Entry)),
+    adr: adrLines.map((a) => a.id),
+    fixed: fixedParsed.map((e) => ({ ...e.data, src: mkSrc(e.line) } as FixedEntry)),
+    testPass: testPassParsed.map((e) => ({ ...e.data, src: mkSrc(e.line) } as TestPassEntry)),
+    coverageFloor: coverageFloorParsed.map((e) => ({ ...e.data, src: mkSrc(e.line) } as CoverageFloorEntry)),
+    redGreen: redGreenParsed.map((e) => ({ ...e.data, src: mkSrc(e.line) } as RedGreenEntry)),
+    srcFile,
+  };
+
+  return { config, adrLines };
 }
 
 // ---------------------------------------------------------------------------
-// Per-type detail helpers (DIR-104)
+// gates.yml / config.yml reader (thin wrapper)
 // ---------------------------------------------------------------------------
 
-var DETAIL_FN = {
-  it0: function(e) { return "script: " + e.script + " argsKey: " + e.argsKey; },
-  fixed: function(e) { return "script: " + e.script; },
-  testPass: function(e) { return "command: " + e.command; },
-  coverageFloor: function(e) { return "command: " + e.command + " floor: " + e.floor + "%"; },
-  redGreen: function(e) { return "red: " + e.red + " green: " + e.green; },
-  adr: function(e) { return "adr: " + e.id; },
-};
+export function readGatesConfig(workspaceRoot: string): GatesConfig {
+  const empty: GatesConfig = { it0: [], adr: [], fixed: [], testPass: [], coverageFloor: [], redGreen: [] };
+  const resolved = resolveGateConfigFile(workspaceRoot);
+  if (!resolved) return empty;
+  try { return parseGatesConfig(resolved.text, resolved.file).config; }
+  catch { return empty; }
+}
 
-var REQUIRED = {
+// ---------------------------------------------------------------------------
+// Per-entry required-field diagnostics (DIR-100-B, routed through DIR-100-C channel)
+// ---------------------------------------------------------------------------
+
+const REQUIRED_FIELDS: Record<string, readonly string[]> = {
   it0: ["name", "script", "argsKey"],
   fixed: ["name", "script"],
   testPass: ["name", "command"],
@@ -179,141 +239,187 @@ var REQUIRED = {
   redGreen: ["name", "red", "green"],
 };
 
-function fieldOk(entry, field) {
-  var v = entry[field];
-  if (field === "name" || field === "script" || field === "argsKey") return Boolean(v);
-  if (field === "command" || field === "red" || field === "green") return typeof v === "string";
-  if (field === "floor") return typeof v === "number";
-  return true;
+function fieldPresent(entry: unknown, field: string): boolean {
+  const v = (entry as Record<string, unknown>)[field];
+  switch (field) {
+    case "name": case "script": case "argsKey": return Boolean(v);
+    case "command": case "red": case "green": return typeof v === "string";
+    case "floor": return typeof v === "number";
+    default: return true;
+  }
 }
 
-function nameOf(entry) {
-  return (typeof entry.name === "string" && entry.name.trim() !== "") ? entry.name : "<unnamed>";
+/** Collect missing-field diagnostics as GateDiagnostic[] for programmatic consumers. */
+function collectEntryDiagnostics(type: string, entry: unknown): GateDiagnostic[] {
+  const e = entry as Record<string, unknown> | undefined;
+  const missing = (REQUIRED_FIELDS[type] ?? []).filter((f) => !e || !fieldPresent(e, f));
+  if (missing.length === 0) return [];
+  const name = typeof e?.name === "string" && (e.name as string).trim() !== "" ? e.name : "<unnamed>";
+  return missing.map((field) => ({
+    level: "ERROR" as const,
+    message: type + " gate '" + name + "' missing required field '" + field + "' — gate will not be registered",
+  }));
+}
+
+// DIR-100-C: known-field sets for extra-field warn checks
+const KNOWN_IT0 = new Set(["name", "script", "argsKey", "cwd", "timeoutMs", "src"]);
+const KNOWN_FIXED = new Set(["name", "script", "cwd", "timeoutMs", "src"]);
+const KNOWN_TP = new Set(["name", "command", "cwd", "timeoutMs", "src"]);
+const KNOWN_COV = new Set(["name", "command", "floor", "pattern", "cwd", "timeoutMs", "src"]);
+const KNOWN_RG = new Set(["name", "red", "green", "cwd", "timeoutMs", "src"]);
+
+function warnExtraFields(type: string, entry: Record<string, unknown>, known: Set<string>): void {
+  const extras = Object.keys(entry).filter((k) => !known.has(k));
+  if (extras.length > 0) {
+    const name = typeof entry.name === "string" && entry.name.trim() !== "" ? entry.name : "<unnamed>";
+    emitDiagnostic("warn", type + " gate '" + name + "' has unexpected extra field(s) — registered");
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Workspace gate metadata pass (DIR-104 — provenance + diagnostics)
 // ---------------------------------------------------------------------------
 
-export function loadWorkspaceGateMetadata(workspaceRoot) {
+export function loadWorkspaceGateMetadata(workspaceRoot: string | null): {
+  gates: Record<string, GateFn>;
+  rows: Array<{ name: string; source: string; type: string; detail: string }>;
+  diagnostics: GateDiagnostic[];
+} {
   if (!workspaceRoot) return { gates: {}, rows: [], diagnostics: [] };
 
-  var resolved = resolveGateConfigFile(workspaceRoot);
-  var diagnostics = [];
-  var rows = [];
-  var gates = {};
+  const resolved = resolveGateConfigFile(workspaceRoot);
+  const diagnostics: GateDiagnostic[] = [];
+  const rows: Array<{ name: string; source: string; type: string; detail: string }> = [];
+  const gates: Record<string, GateFn> = {};
 
   if (resolved) {
-    var parsed;
-    try { parsed = parseGateEntryLines(resolved.text, resolved.file); }
-    catch (_) { return { gates: {}, rows: [], diagnostics: [] }; }
+    let cfg: GatesConfig;
+    let adrLines: Array<{ id: string; line: number }>;
+    try {
+      const parsed = parseGatesConfig(resolved.text, resolved.file);
+      cfg = parsed.config;
+      adrLines = parsed.adrLines;
+    } catch { return { gates: {}, rows: [], diagnostics: [] }; }
 
-    var cfg = parsed.config;
-    var adrLines = parsed.adrLines;
-    var srcFile = cfg.srcFile || resolved.file;
+    const srcFile = cfg.srcFile ?? resolved.file;
+    const srcStr = (line: number) => (line > 0 ? srcFile + ":" + line : srcFile);
 
-    function srcStr(line) { return line > 0 ? srcFile + ":" + line : srcFile; }
-
-    var configYmlPath = path.join(workspaceRoot, ".quay", "config.yml");
+    // branch-A shadow probe
+    const configYmlPath = path.join(workspaceRoot, ".quay", "config.yml");
     if (fs.existsSync(configYmlPath)) {
-      var legacyPath = path.join(workspaceRoot, ".quay", "gates.yml");
+      const legacyPath = path.join(workspaceRoot, ".quay", "gates.yml");
       if (fs.existsSync(legacyPath)) {
         try {
-          var legacyParsed = parseGateEntryLines(fs.readFileSync(legacyPath, "utf8"), legacyPath);
-          var legacyCfg = legacyParsed.config;
-          var registeredNames = {};
-          function addNames(arr) {
-            for (var i = 0; i < arr.length; i++) { if (arr[i].name) registeredNames[arr[i].name] = true; }
-          }
-          addNames(cfg.it0); addNames(cfg.fixed); addNames(cfg.testPass);
-          addNames(cfg.coverageFloor); addNames(cfg.redGreen);
-          for (var a = 0; a < cfg.adr.length; a++) registeredNames[cfg.adr[a]] = true;
-
-          var allLegacy = [].concat(legacyCfg.it0, legacyCfg.fixed, legacyCfg.testPass, legacyCfg.coverageFloor, legacyCfg.redGreen);
-          for (var i = 0; i < allLegacy.length; i++) {
-            var e = allLegacy[i];
-            if (e.name && !registeredNames[e.name]) {
-              var legacySrc = e.src;
-              var loc = legacySrc ? legacySrc.file + ":" + legacySrc.line : legacyPath;
-              diagnostics.push({
-                level: "WARNING",
-                message: "gate '" + e.name + "' declared in " + loc + " but NOT registered — .quay/config.yml has a `gates:` section that takes precedence (DIR-050). The config.yml gates section does not include an entry for '" + e.name + "'. Fix: add " + e.name + " to config.yml's gates section (removing the config.yml gates: section does NOT restore legacy gates.yml behavior — DIR-120 made branch A terminal, so the legacy file is never re-read when config.yml exists).",
-              });
+          const legacyCfg = parseGatesConfig(fs.readFileSync(legacyPath, "utf8"), legacyPath).config;
+          const registered: Set<string> = new Set([
+            ...cfg.it0.map((e) => e.name), ...cfg.adr,
+            ...cfg.fixed.map((e) => e.name), ...cfg.testPass.map((e) => e.name),
+            ...cfg.coverageFloor.map((e) => e.name), ...cfg.redGreen.map((e) => e.name),
+          ].filter(Boolean));
+          for (const arr of [legacyCfg.it0, legacyCfg.fixed, legacyCfg.testPass, legacyCfg.coverageFloor, legacyCfg.redGreen]) {
+            for (const e of arr) {
+              const nm = (e as { name?: string }).name;
+              if (nm && !registered.has(nm)) {
+                const legacySrc = (e as { src?: GateSource }).src;
+                const loc = legacySrc ? legacySrc.file + ":" + legacySrc.line : legacyPath;
+                diagnostics.push({
+                  level: "WARNING",
+                  message: "gate '" + nm + "' declared in " + loc + " as testPass but NOT registered — .quay/config.yml has a gates: section that takes precedence (DIR-050).",
+                });
+              }
             }
           }
-        } catch (_) { /* best-effort */ }
+        } catch { /* best-effort */ }
       }
     }
 
-    var gateConfigOf = function(entry) {
-      var cwd = undefined;
-      if (typeof entry.cwd === "string" && entry.cwd.trim() !== "") {
-        cwd = path.isAbsolute(entry.cwd) ? entry.cwd : path.resolve(workspaceRoot, entry.cwd);
-      }
-      var timeoutMs = (typeof entry.timeoutMs === "number" && entry.timeoutMs > 0) ? entry.timeoutMs : undefined;
-      return { cwd: cwd, timeoutMs: timeoutMs };
+    const gateConfigOf = (entry: { cwd?: string; timeoutMs?: number }) => {
+      const cwd = typeof entry?.cwd === "string" && entry.cwd.trim() !== ""
+        ? (path.isAbsolute(entry.cwd) ? entry.cwd : path.resolve(workspaceRoot, entry.cwd)) : undefined;
+      const timeoutMs = typeof entry?.timeoutMs === "number" && entry.timeoutMs > 0 ? entry.timeoutMs : undefined;
+      return { cwd, timeoutMs };
     };
 
-    function processSection(type, entries, gateFnKey) {
-      var req = REQUIRED[type] || [];
-      for (var i = 0; i < entries.length; i++) {
-        var e = entries[i];
-        if (!e) continue;
-        var ok = true;
-        for (var f = 0; f < req.length; f++) {
-          if (!fieldOk(e, req[f])) { ok = false; break; }
-        }
-        if (!ok) {
-          for (var f2 = 0; f2 < req.length; f2++) {
-            if (!fieldOk(e, req[f2])) {
-              diagnostics.push({
-                level: "WARNING",
-                message: type + " gate '" + nameOf(e) + "' missing required field '" + req[f2] + "' — gate will not be registered",
-              });
-            }
-          }
-          continue;
-        }
-        var fnKey = gateFnKey || type;
-        var scriptPath = e.script;
-        if (scriptPath && !path.isAbsolute(scriptPath)) scriptPath = path.resolve(workspaceRoot, scriptPath);
-        if (fnKey === "it0") gates[e.name] = gateFactories.it0(scriptPath, e.argsKey, e.name, gateConfigOf(e));
-        else if (fnKey === "fixed-script") gates[e.name] = gateFactories["fixed-script"](scriptPath, e.name, gateConfigOf(e));
-        else if (fnKey === "test-pass") gates[e.name] = gateFactories["test-pass"](e.command, e.name, gateConfigOf(e));
-        else if (fnKey === "coverage-floor") gates[e.name] = gateFactories["coverage-floor"](e.command, e.floor, e.pattern, e.name, gateConfigOf(e));
-        else if (fnKey === "red-green") gates[e.name] = gateFactories["red-green"](e.red, e.green, e.name, gateConfigOf(e));
-        rows.push({
-          name: e.name || "",
-          source: srcStr(e.src ? e.src.line : 0),
-          type: type,
-          detail: DETAIL_FN[type] ? DETAIL_FN[type](e) : "",
-        });
+    // it0
+    for (const entry of cfg.it0) {
+      if (!entry || !fieldPresent(entry, "name") || !fieldPresent(entry, "script") || !fieldPresent(entry, "argsKey")) {
+        diagnostics.push(...collectEntryDiagnostics("it0", entry));
+        continue;
       }
+      const scriptPath = path.isAbsolute(entry.script) ? entry.script : path.resolve(workspaceRoot, entry.script);
+      gates[entry.name] = gateFactories["it0"](scriptPath, entry.argsKey, entry.name, gateConfigOf(entry));
+      rows.push({ name: entry.name, source: srcStr(entry.src?.line ?? 0), type: "it0", detail: "script: " + entry.script + " argsKey: " + entry.argsKey });
+      warnExtraFields("it0", entry as unknown as Record<string, unknown>, KNOWN_IT0);
     }
 
-    processSection("it0", cfg.it0, "it0");
-
-    var adrDir = path.join(workspaceRoot, "adr");
-    for (var a = 0; a < adrLines.length; a++) {
-      var al = adrLines[a];
-      if (!al.id || al.id.trim() === "") continue;
-      gates[al.id.toLowerCase()] = gateFactories.adr(al.id, adrDir);
-      rows.push({ name: al.id.toLowerCase(), source: srcStr(al.line), type: "adr", detail: "adr: " + al.id });
+    // adr
+    const adrDir = path.join(workspaceRoot, "adr");
+    for (const a of adrLines) {
+      if (!a.id || a.id.trim() === "") continue;
+      gates[a.id.toLowerCase()] = gateFactories["adr"](a.id, adrDir);
+      rows.push({ name: a.id.toLowerCase(), source: srcStr(a.line), type: "adr", detail: "adr: " + a.id });
     }
 
-    processSection("fixed", cfg.fixed, "fixed-script");
-    processSection("testPass", cfg.testPass, "test-pass");
-    processSection("coverageFloor", cfg.coverageFloor, "coverage-floor");
-    processSection("redGreen", cfg.redGreen, "red-green");
+    // fixed
+    for (const entry of cfg.fixed) {
+      if (!entry || !fieldPresent(entry, "name") || !fieldPresent(entry, "script")) {
+        diagnostics.push(...collectEntryDiagnostics("fixed", entry));
+        continue;
+      }
+      const scriptPath = path.isAbsolute(entry.script) ? entry.script : path.resolve(workspaceRoot, entry.script);
+      gates[entry.name] = gateFactories["fixed-script"](scriptPath, entry.name, gateConfigOf(entry));
+      rows.push({ name: entry.name, source: srcStr(entry.src?.line ?? 0), type: "fixed", detail: "script: " + entry.script });
+      warnExtraFields("fixed", entry as unknown as Record<string, unknown>, KNOWN_FIXED);
+    }
+
+    // testPass
+    for (const entry of cfg.testPass) {
+      if (!entry || !fieldPresent(entry, "name") || !fieldPresent(entry, "command")) {
+        diagnostics.push(...collectEntryDiagnostics("testPass", entry));
+        continue;
+      }
+      gates[entry.name] = gateFactories["test-pass"](entry.command, entry.name, gateConfigOf(entry));
+      rows.push({ name: entry.name, source: srcStr(entry.src?.line ?? 0), type: "testPass", detail: "command: " + entry.command });
+      warnExtraFields("testPass", entry as unknown as Record<string, unknown>, KNOWN_TP);
+    }
+
+    // coverageFloor
+    for (const entry of cfg.coverageFloor) {
+      if (!entry || !fieldPresent(entry, "name") || !fieldPresent(entry, "command") || !fieldPresent(entry, "floor")) {
+        diagnostics.push(...collectEntryDiagnostics("coverageFloor", entry));
+        continue;
+      }
+      gates[entry.name] = gateFactories["coverage-floor"](entry.command, entry.floor, entry.pattern, entry.name, gateConfigOf(entry));
+      rows.push({ name: entry.name, source: srcStr(entry.src?.line ?? 0), type: "coverageFloor", detail: "command: " + entry.command + " floor: " + entry.floor + "%" });
+      warnExtraFields("coverageFloor", entry as unknown as Record<string, unknown>, KNOWN_COV);
+    }
+
+    // redGreen
+    for (const entry of cfg.redGreen) {
+      if (!entry || !fieldPresent(entry, "name") || !fieldPresent(entry, "red") || !fieldPresent(entry, "green")) {
+        diagnostics.push(...collectEntryDiagnostics("redGreen", entry));
+        continue;
+      }
+      gates[entry.name] = gateFactories["red-green"](entry.red, entry.green, entry.name, gateConfigOf(entry));
+      rows.push({ name: entry.name, source: srcStr(entry.src?.line ?? 0), type: "redGreen", detail: "red: " + entry.red + " green: " + entry.green });
+      warnExtraFields("redGreen", entry as unknown as Record<string, unknown>, KNOWN_RG);
+    }
   }
 
-  return { gates: gates, rows: rows, diagnostics: diagnostics };
+  // DIR-100-C: route collected diagnostics through the channel
+  for (const d of diagnostics) {
+    if (d.level === "ERROR") {
+      emitDiagnostic("error", d.message);
+    }
+  }
+
+  return { gates, rows, diagnostics };
 }
 
 // ---------------------------------------------------------------------------
 // Workspace gate set builder (thin wrapper — G3 contract preserved)
 // ---------------------------------------------------------------------------
 
-export function loadWorkspaceGates(workspaceRoot) {
+export function loadWorkspaceGates(workspaceRoot: string | null): Record<string, GateFn> {
   return loadWorkspaceGateMetadata(workspaceRoot).gates;
 }
