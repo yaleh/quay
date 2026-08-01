@@ -132,3 +132,5 @@ Standard exp5 DoD clauses apply.
 - `plugin/test/*workflow-resume*`
 - `.claude/workflows/execute-milestone.js`
 - `plugin/workflows/execute-milestone.js`
+
+- `docs/plans/M236-dir-124-b.md`

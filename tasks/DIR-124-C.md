@@ -137,3 +137,5 @@ Standard exp5 DoD clauses apply.
 - `plugin/scripts/composite-*.ts`
 - `plugin/test/*workflow-kernel*`
 - `plugin/test/*stage-adapter*`
+
+- `docs/plans/M237-dir-124-c.md`

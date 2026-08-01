@@ -165,3 +165,5 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 - `plugin/test/*build-evidence*.test.mjs`
 - `docs/proposals/quay-prepare-execute-feedback-convergence.md`
 - `docs/proposals/quay-execute-milestone-build-efficiency.md`
+
+- `docs/plans/M238-gap-evidence-manifest.md`

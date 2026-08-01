@@ -124,3 +124,5 @@ Standard exp5 DoD clauses apply.
 - `plugin/scripts/*workflow*event*`
 - `plugin/scripts/*workflow*replay*`
 - `plugin/test/*workflow*replay*`
+
+- `docs/plans/M235-dir-124-a.md`
