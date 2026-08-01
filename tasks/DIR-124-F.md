@@ -29,8 +29,15 @@ Distinct from DIR-124-D's ExecutionPolicy registry: that owns task-class → exe
 actually is). Both share the "single executable owner over prompt prose" principle.
 
 Fifth child of the DIR-124 family (ADR-020; seeded reference:
-`docs/references/repo-ground-truth.md`). Depends on [[DIR-124-B]] for versioned/hash-bound
-registry identity and receipt binding.
+`docs/references/repo-ground-truth.md`).
+
+**Independently executable / PRIORITY (2026-08-01, human decision):** no hard
+prerequisite. [[DIR-124-B]] is OPTIONAL — a minimal versioned registry (a `version` field
++ content hash, upgraded to B's StageReceipt binding later) works without it. This child
+directly eliminates the dominant prepare-milestone cost (PlanCheck first-attempt failures
+from missing repo facts, ~30-40M tokens across the 2026-07-31→08-01 product batch) and is
+executed BEFORE the DIR-124-B/C/D/E chain — it is the "fix the pipeline that every future
+prepare runs through" task. Its own prepare/execute must not wait for the DIR-124 chain.
 
 ## Plan
 
@@ -58,6 +65,12 @@ ADR-020 records the decision; this task mechanizes it.
 
 ## Requested action
 
+0. **Template hygiene (mechanical, immediate):** fix the prepare-milestone preflight /
+   task-schema checks so the recurring MECHANICAL preflight failures cannot happen:
+   (a) reject a `## Touches` entry with a parenthetical comment after the backticked path
+   (breaks exact-path matching, `preflight-touches-mismatch`); (b) reject any non-`##`-heading
+   content after `## Touches` (parsed as Touches entries, `touches-overbroad`). This removes
+   the ~15% of batch cost from template-format mistakes before the registry matters.
 1. Define a versioned `GroundTruthRegistry` (JSON or TS module) with schema-validated fact
    entries: `{ id, category, fact, adrRef? }`. Seed it from the five fact classes in
    `docs/references/repo-ground-truth.md` + migrate the `inherited-core.md`
