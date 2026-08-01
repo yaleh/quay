@@ -1,0 +1,1 @@
+{"meta":{"synthetic":true,"generatedAt":"2026-08-01T00:00:00Z","workflowCommit":"74fe7791"},"assertions":[{"id":"m192-norm","description":"Defect normalized as normative (should be REJECTED)","classification":"normative","internalCategory":"normative","check":{"predicate":"buildPhaseHasNoAgentOutcome","args":{}},"expected":true}]}

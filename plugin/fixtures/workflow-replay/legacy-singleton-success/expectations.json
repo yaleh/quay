@@ -1,0 +1,135 @@
+[
+  {
+    "id": "lss-001",
+    "description": "Verify before Prepared",
+    "classification": "normative",
+    "internalCategory": "normative",
+    "check": {
+      "predicate": "stageOrderedBefore",
+      "args": {
+        "a": "Verify",
+        "b": "Prepared"
+      }
+    },
+    "expected": true
+  },
+  {
+    "id": "lss-002",
+    "description": "Build before Audit",
+    "classification": "normative",
+    "internalCategory": "normative",
+    "check": {
+      "predicate": "stageOrderedBefore",
+      "args": {
+        "a": "Build",
+        "b": "Audit"
+      }
+    },
+    "expected": true
+  },
+  {
+    "id": "lss-003",
+    "description": "Audit before Land",
+    "classification": "normative",
+    "internalCategory": "normative",
+    "check": {
+      "predicate": "stageOrderedBefore",
+      "args": {
+        "a": "Audit",
+        "b": "Land"
+      }
+    },
+    "expected": true
+  },
+  {
+    "id": "lss-004",
+    "description": "Gate after Audit",
+    "classification": "normative",
+    "internalCategory": "normative",
+    "check": {
+      "predicate": "stageOrderedBefore",
+      "args": {
+        "a": "Audit",
+        "b": "Gate"
+      }
+    },
+    "expected": true
+  },
+  {
+    "id": "lss-005",
+    "description": "No Reconcile (width-1 skip)",
+    "classification": "normative",
+    "internalCategory": "normative",
+    "check": {
+      "predicate": "stageSkipped",
+      "args": {
+        "stage": "Reconcile"
+      }
+    },
+    "expected": true
+  },
+  {
+    "id": "lss-006",
+    "description": "Land phase exists",
+    "classification": "normative",
+    "internalCategory": "normative",
+    "check": {
+      "predicate": "hasStage",
+      "args": {
+        "stage": "Land"
+      }
+    },
+    "expected": true
+  },
+  {
+    "id": "lss-007",
+    "description": "Terminal outcome is done",
+    "classification": "normative",
+    "internalCategory": "normative",
+    "check": {
+      "predicate": "outcomeMatches"
+    },
+    "expected": "done"
+  },
+  {
+    "id": "lss-008",
+    "description": "Build-Evidence stage exists",
+    "classification": "normative",
+    "internalCategory": "normative",
+    "check": {
+      "predicate": "hasStage",
+      "args": {
+        "stage": "Build-Evidence"
+      }
+    },
+    "expected": true
+  },
+  {
+    "id": "lss-009",
+    "description": "Verify dispatches 6 agents",
+    "classification": "compatibility-only",
+    "internalCategory": "compatibility-only",
+    "check": {
+      "predicate": "agentCountForStage",
+      "args": {
+        "stage": "Verify",
+        "count": 6
+      }
+    },
+    "expected": true
+  },
+  {
+    "id": "lss-010",
+    "description": "Build dispatches 1 agent",
+    "classification": "compatibility-only",
+    "internalCategory": "compatibility-only",
+    "check": {
+      "predicate": "agentCountForStage",
+      "args": {
+        "stage": "Build",
+        "count": 1
+      }
+    },
+    "expected": true
+  }
+]
