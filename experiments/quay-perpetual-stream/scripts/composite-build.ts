@@ -13,6 +13,7 @@
 // default for exactly that reason; `mode: "parallel"` is offered so the CONTRACT already supports
 // fan-out once a caller is ready to use it.
 
+import fs from "node:fs";
 import type { CompositePhase } from "./composite-contracts.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
@@ -231,6 +232,68 @@ export function selftest(): boolean {
   return allPassed;
 }
 
-if (process.argv[1] != null && process.argv[1].endsWith("composite-build.ts") && process.argv.includes("--selftest")) {
-  process.exitCode = selftest() ? 0 : 1;
+// ── Non-selftest JSON CLI modes (M210/DIR-119-D2) ────────────────────────────────────────────────
+// PURE WRAPS over the already-exported planPhaseExecution / mapEvidenceToTasks: the ONLY input
+// handling is CLI-layer shape normalization — a bare CompositePhase[] is used as-is; the
+// {manifest, context} envelope composite-manifest-synthesis.ts writes is unwrapped to
+// .manifest.phases (the shape execute-milestone.js's production callsites pass via --phases); any
+// other shape exits 1. The planner functions still receive exactly the CompositePhase[] they always
+// have — planPhaseExecution/mapEvidenceToTasks/topoOrder/selftest receive ZERO edits (guardrail G7).
+
+function cliFail(message: string): never {
+  console.error(JSON.stringify({ ok: false, error: message }));
+  process.exit(1);
+}
+
+function argvFlag(name: string): string | undefined {
+  const i = process.argv.indexOf(name);
+  return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1] : undefined;
+}
+
+/** Read a CompositePhase[] from `file`, normalizing the two accepted on-disk shapes. */
+function readPhases(file: string | undefined): CompositePhase[] {
+  if (!file) cliFail("missing required --phases <file>");
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    return cliFail(`could not read --phases file ${file}: ${(e as Error).message}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return cliFail(`--phases file ${file} is not valid JSON: ${(e as Error).message}`);
+  }
+  if (Array.isArray(parsed)) return parsed as CompositePhase[];
+  const phases = (parsed as { manifest?: { phases?: unknown } })?.manifest?.phases;
+  if (Array.isArray(phases)) return phases as CompositePhase[];
+  return cliFail("--phases file must be a bare CompositePhase[] array or a {manifest, context} envelope with a .manifest.phases array");
+}
+
+if (process.argv[1] != null && process.argv[1].endsWith("composite-build.ts")) {
+  if (process.argv.includes("--selftest")) {
+    process.exitCode = selftest() ? 0 : 1;
+  } else if (process.argv.includes("--plan-json")) {
+    const phases = readPhases(argvFlag("--phases"));
+    const mode = argvFlag("--mode") === "parallel" ? "parallel" : "serialize";
+    const maxRaw = argvFlag("--max-parallel-agents");
+    const opts: PlanOpts = { mode };
+    if (maxRaw != null) opts.maxParallelAgents = Number(maxRaw);
+    console.log(JSON.stringify(planPhaseExecution(phases, opts), null, 2));
+    process.exitCode = 0;
+  } else if (process.argv.includes("--map-evidence-json")) {
+    const phases = readPhases(argvFlag("--phases"));
+    const evidenceFile = argvFlag("--evidence");
+    if (!evidenceFile) cliFail("missing required --evidence <file>");
+    let evidence: PhaseEvidence[];
+    try {
+      evidence = JSON.parse(fs.readFileSync(evidenceFile!, "utf8"));
+    } catch (e) {
+      evidence = cliFail(`--evidence file ${evidenceFile} missing or not valid JSON: ${(e as Error).message}`);
+    }
+    if (!Array.isArray(evidence)) cliFail("--evidence file must be a bare PhaseEvidence[] array");
+    console.log(JSON.stringify(mapEvidenceToTasks(phases, evidence), null, 2));
+    process.exitCode = 0;
+  }
 }

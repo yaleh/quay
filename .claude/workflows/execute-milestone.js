@@ -224,9 +224,139 @@ if (!preparedResult || preparedResult.ok !== true) {
 }
 log(`Prepared phase PASSED — ${preparedResult.code}: ${preparedResult.detail}`)
 
+// ── Composite per-phase DAG dispatcher (DIR-119-D2 / M210) ───────────────────────────
+// Replaces the single monolithic composite Build agent with a REAL phase-DAG dispatch:
+//   build-plan  → one helper agent runs composite-build.ts --plan-json (a PURE WRAP of the exported
+//                 planPhaseExecution) against the DIR-119-D1-synthesized manifest and returns the
+//                 PhaseExecutionPlan ({batches, owners, agentCount}) plus per-phase scoping descriptors;
+//   build-phase-<id> → per batch, parallel() over exactly ONE labeled agent per phase, each prompt
+//                 scoped ONLY to that phase's task IDs / predecessor phases / invariant / allowed
+//                 Touches / evidence schema (AC4). Batches run SERIALLY — batch i+1's parallel() is
+//                 invoked ONLY after every batch-i dispatch returns (AC3 requires-edge observance:
+//                 PhaseExecutionPlan.batches' "batch i+1 only starts once batch i's phases finish");
+//   build-integrate → one serial helper integrates in topological order, runs integration tests,
+//                 creates the ONE candidate-generation commit (SOLE commit-creator — AC8), then runs
+//                 composite-build.ts --map-evidence-json to map evidence back to tasks AND phases.
+// maxParallelAgents bounds the planner's concurrent OWNER count (unit-tested, AC7), never the
+// per-phase dispatch-label count — that always equals the phase count. Phase workers NEVER stage or
+// commit. Fail-closed mid-batch: any non-done phase worker => needs-human immediately, no further
+// batches, build-integrate does NOT run, no commit is created (partial changes left in place for
+// Audit/Reconcile DIR-119-D3/D4 — NOT rolled back by this child; accepted-risk, see task Proposal).
+async function _compositePhaseDagBuild() {
+  const manifestFile = $a.compositeManifestFile
+  const maxParallelAgents = $a.maxParallelAgents || 4
+  if (!manifestFile) {
+    return { outcome: 'needs-human', reason: 'composite-manifest-file-missing' }
+  }
+
+  // 1. build-plan (exactly once — AC5): run the --plan-json CLI (AC6 literal command) and read the
+  //    manifest's per-phase descriptors so each build-phase prompt can be scoped to its own phase.
+  const planResult = await agent(
+    `You are the build-plan helper for a composite milestone Build (${_taskIds.length} member tasks: ${_taskIds.join(', ')}).
+Run EXACTLY this command and capture its stdout:
+  node --experimental-strip-types experiments/quay-perpetual-stream/scripts/composite-build.ts --plan-json --phases ${manifestFile} --mode parallel --max-parallel-agents ${maxParallelAgents}
+The stdout is a PhaseExecutionPlan JSON ({batches, owners, agentCount}) — a pure wrap of composite-build.ts's exported planPhaseExecution over the manifest's phases (batch i+1 only starts once batch i's phases finish).
+Then Read the manifest file ${manifestFile} (a {manifest, context} envelope; phases live at .manifest.phases) and, for EACH phase, capture: id, taskIds, requires (predecessor phase ids), integrationInvariant (if present), and allowed Touches (the union of .context.taskTouches[t] for each t in the phase's taskIds; fall back to .manifest.touches if taskTouches is absent).
+Return {plan: <the parsed PhaseExecutionPlan JSON>, phases: [{id, taskIds, requires, integrationInvariant, touches}]}.`,
+    { label: 'build-plan', phase: 'Build',
+      schema: { type: 'object', required: ['plan', 'phases'], properties: {
+        plan: { type: 'object', required: ['batches'], properties: {
+          batches: { type: 'array', items: { type: 'array', items: { type: 'string' } } },
+          owners: { type: 'object' }, agentCount: { type: 'number' },
+        } },
+        phases: { type: 'array', items: { type: 'object', required: ['id', 'taskIds'], properties: {
+          id: { type: 'string' }, taskIds: { type: 'array', items: { type: 'string' } },
+          requires: { type: 'array', items: { type: 'string' } },
+          integrationInvariant: { type: 'string' },
+          touches: { type: 'array', items: { type: 'string' } },
+        } } },
+      } } }
+  )
+  if (!planResult || !planResult.plan || !Array.isArray(planResult.plan.batches)) {
+    log('build-plan FAILED — no PhaseExecutionPlan returned; failing closed before any phase dispatch.')
+    return { outcome: 'needs-human', reason: 'build-plan-failed' }
+  }
+  const phaseById = {}
+  for (const p of (planResult.phases || [])) phaseById[p.id] = p
+  const planPhases = planResult.plan.batches.flat()
+  log(`build-plan complete: ${planResult.plan.batches.length} batch(es), ${planPhases.length} phase(s) [${planPhases.join(', ')}], planner agentCount=${planResult.plan.agentCount} (cap ${maxParallelAgents})`)
+
+  // 2. Per-batch SERIAL dispatch (AC3 requires-edge observance). batch i+1 awaits batch i fully.
+  for (let i = 0; i < planResult.plan.batches.length; i++) {
+    const batch = planResult.plan.batches[i]
+    log(`Dispatching Build batch ${i}: [${batch.join(', ')}]`)
+    const batchResults = await parallel(batch.map((phaseId) => () => {
+      const ph = phaseById[phaseId] || { id: phaseId, taskIds: [], requires: [], touches: [] }
+      const prompt = `BUILD phase \`${phaseId}\` of a composite milestone (member tasks: ${_taskIds.join(', ')}). DO THE ACTUAL WORK — for THIS PHASE ONLY.
+
+Charter file: ${$a.charterFile}
+
+THIS PHASE'S SCOPE — touch NOTHING outside it (per-phase scoping, AC4):
+- Phase id: ${phaseId}
+- Task IDs (yours ALONE): ${(ph.taskIds || []).join(', ') || '(none declared)'}
+- Predecessor phases (already completed; their output is in the working tree): ${(ph.requires || []).join(', ') || '(none)'}
+${ph.integrationInvariant ? `- Integration invariant this shared phase upholds: ${ph.integrationInvariant}\n` : ''}- Allowed Touches (the ONLY paths you may edit): ${(ph.touches || []).join(', ') || '(see each task\'s ## Touches)'}
+
+Implement the AC / Done-when items for task IDs ${(ph.taskIds || []).join(', ')} ONLY. Do NOT reference, re-implement, or edit any OTHER phase's task IDs or any Touches outside the allowed set above — that leak would defeat the proven-disjoint parallel-batch safety.
+Do NOT run \`git add\` or \`git commit\` — phase workers NEVER stage or commit; the single candidate-generation commit is created later by build-integrate.
+
+Evidence schema (report back per composite-build.ts's mapEvidenceToTasks shape): {phaseId, files, commits, tests}.
+Return {phaseId: "${phaseId}", outcome: "done"|"needs-human", reason, files: ["..."], tests: ["..."]}.`
+      return agent(prompt, { label: `build-phase-${phaseId}`, phase: 'Build',
+        schema: { type: 'object', required: ['phaseId', 'outcome'], properties: {
+          phaseId: { type: 'string' }, outcome: { type: 'string' }, reason: { type: 'string' },
+          files: { type: 'array', items: { type: 'string' } },
+          tests: { type: 'array', items: { type: 'string' } },
+        } } })
+    }))
+    const returned = (batchResults || []).filter(Boolean)
+    const failed = returned.find((r) => r.outcome !== 'done')
+    if (failed || returned.length < batch.length) {
+      const which = failed ? (failed.phaseId || failed.reason || 'unknown') : `batch-${i}-worker-crashed`
+      log(`Build batch ${i} FAILED (${which}) — failing closed: no further batches, build-integrate will NOT run, NO commit created.`)
+      return { outcome: 'needs-human', reason: `build-phase-failed:${which}` }
+    }
+    log(`Build batch ${i} complete: ${batch.length} phase(s) done.`)
+  }
+
+  // 3. build-integrate (exactly once — AC5): SOLE commit-creator (AC8) and the --map-evidence-json caller.
+  const evidenceFile = `/tmp/composite-build-evidence-${_milestone}-${_primaryTaskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`
+  const integrateResult = await agent(
+    `You are the build-integrate helper for a composite milestone Build (${_taskIds.length} member tasks: ${_taskIds.join(', ')}). Every per-phase build-phase-<id> worker has completed and left its changes UNCOMMITTED in the shared working tree.
+
+1. Integrate the per-phase changes in deterministic topological phase order and resolve any overlap.
+2. Run the canonical integration suite: scripts/test.sh — confirm NO NEW failures (the 2 pre-existing plugin-packaging failures flagging tree-hygiene-check.sh are outside this milestone's touch set).
+3. Create EXACTLY ONE candidate-generation commit covering all phase changes plus this milestone's iteration report (write it to <MILESTONE_ROOT>/iterations/iteration-0.md; resolve MILESTONE_ROOT via \`source experiments/quay-perpetual-stream/scripts/gate-script-lib.sh && gate_resolve_milestone_root ${_milestone}\`). You are the SOLE commit-creator — phase workers never committed.
+4. Collect the phase evidence into a bare PhaseEvidence[] JSON file at ${evidenceFile} (each entry {phaseId, files, commits, tests}), then run EXACTLY:
+  node --experimental-strip-types experiments/quay-perpetual-stream/scripts/composite-build.ts --map-evidence-json --phases ${manifestFile} --evidence ${evidenceFile}
+   Its stdout is TaskEvidenceReport[] JSON mapping files/commits/tests back to BOTH tasks and phases — fold it into the iteration report.
+
+Charter: ${$a.charterFile}
+Return {outcome: "done"|"needs-human", reason, mergeCommit: "<short-sha>", evidenceReport: "<the --map-evidence-json stdout, verbatim>"}.`,
+    { label: 'build-integrate', phase: 'Build',
+      schema: { type: 'object', required: ['outcome'], properties: {
+        outcome: { type: 'string' }, reason: { type: 'string' },
+        mergeCommit: { type: 'string' }, evidenceReport: { type: 'string' },
+      } } }
+  )
+  if (!integrateResult || integrateResult.outcome !== 'done') {
+    log(`build-integrate FAILED — ${integrateResult?.reason || 'no result'}; no candidate-generation commit created.`)
+    return { outcome: 'needs-human', reason: integrateResult?.reason || 'build-integrate-failed' }
+  }
+  log(`build-integrate complete: mergeCommit=${integrateResult.mergeCommit}`)
+  return { outcome: 'done', taskId: _primaryTaskId, iterationCount: 1, mergeCommit: integrateResult.mergeCommit }
+}
+
 // ── Phase: Build (step 5) ───────────────────────────────────────────────────────────
 phase('Build')
-const buildResult = await agent(
+// DIR-119-D2 (M210): the new per-phase DAG dispatcher fires IFF `_isComposite && _taskIds.length > 1`
+// (branches on WIDTH, not _isComposite alone — the composite-shaped singleton falls through to the
+// width-1 path). The single-agent prompt below stays BYTE-IDENTICAL and serves the width-1 path AND
+// that singleton; the composite path routes around it via _compositePhaseDagBuild() — additive, not a
+// rewrite (AC9 / guardrail G2).
+const buildResult = (_isComposite && _taskIds.length > 1)
+  ? await _compositePhaseDagBuild()
+  : await agent(
     `BUILD the inner iteration for milestone task ${_primaryTaskId}. DO THE ACTUAL WORK — you are the build executor, not a dispatcher.
 
 Charter file: ${$a.charterFile}
