@@ -502,8 +502,8 @@ Return {taskId, outcome: "done", iterationCount, mergeCommit: "<short-sha>"} on 
   const _evidenceCollectorWtPrefix = _useWorktree
     ? `cd ${_isolationPlan.worktreeRel} && `
     : ''
-  const evidenceManifestFile = `/tmp/build-evidence-manifest-${_milestone}-${_primaryTaskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`
   const _milestoneRootCmd = `source experiments/quay-perpetual-stream/scripts/gate-script-lib.sh && gate_resolve_milestone_root ${_milestone}`
+  const evidenceManifestFile = `\$(${_milestoneRootCmd})/build-evidence-manifest.json`
   const collectorCmd = [
     `${_evidenceCollectorWtPrefix}node --experimental-strip-types experiments/quay-perpetual-stream/scripts/build-evidence-collector.ts`,
     `--build-result '${JSON.stringify(buildResult)}'`,
