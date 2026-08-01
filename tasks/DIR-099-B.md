@@ -1,6 +1,6 @@
 ---
 id: DIR-099-B
-title: "Provider env validation (check #9), corrected: native tasks_dir is optional (warn), github QUAY_GITHUB_REPO required (error)"
+title: "Provider env validation (check #9), corrected: native tasks_dir is optional (warn), github missing QUAY_GITHUB_REPO also defaults (warn); present-but-malformed → error"
 status: todo
 labels:
   - directive
@@ -62,15 +62,20 @@ field") is factually wrong as an error: `packages/quay-native/bin/quay-native.ts
 `resolveTasksDir()` (L46-55) defaults to repo-root `./tasks` with no fail-closed, and
 Core (serve.ts/mcp-server.ts) builds provider env via `resolveProviderEnv` which reads
 `provider.env` only — `provider.tasks_dir` is read nowhere in Core. A config that runs
-correctly at runtime would be flagged invalid. The github clause is correct
-(`quay-github.ts` L19-23 throws when `QUAY_GITHUB_REPO` missing).
+correctly at runtime would be flagged invalid. The github clause was ALSO mis-
+premised: `resolveRepo()` (quay-github.ts L18-27) defaults to `yaleh/quay` when
+`QUAY_GITHUB_REPO` is absent (`(envRepo || "yaleh/quay").split("/")`), and the throw
+fires only for PRESENT-but-malformed values (e.g. `foo`, `foo/`, `/repo`); empty-string
+is treated as absent. So github-missing-env is ALSO a false-positive-as-error.
 
 ## Requested action
 
 1. `validateProviderEnv` check #9 with the corrected semantics: native missing
-   env → `warn` (default tasks dir); github missing `QUAY_GITHUB_REPO` → `error`.
-2. RED/GREEN tests: native-without-tasks_dir → warn (not error, exit 0); github-without-
-   QUAY_GITHUB_REPO → error (exit 1); both-set → no issue.
+   env → `warn` (default tasks dir); github missing `QUAY_GITHUB_REPO` → `warn`
+   (default `yaleh/quay`); github PRESENT-but-malformed → `error`.
+2. RED/GREEN tests: native-without-tasks_dir → warn (exit 0); github-without-
+   QUAY_GITHUB_REPO → warn (exit 0); github present-but-malformed → error (exit 1);
+   both-set → no issue.
 
 ## Acceptance Criteria
 
@@ -80,7 +85,11 @@ correctly at runtime would be flagged invalid. The github clause is correct
   `resolveRepo()` defaults to `yaleh/quay`, so the config runs correctly at runtime
   (second false-positive fixed).
 - [ ] A github provider with PRESENT-but-malformed `QUAY_GITHUB_REPO` (not
-  `owner/repo`) yields an `error` (exit 1) — matches the runtime throw.
+  `owner/repo`) yields an `error` (exit 1). NOTE the runtime predicate is NOT a
+  strict `^owner/repo$` regex: `resolveRepo()` accepts `a/b/c` (uses the first two
+  split segments) and treats an empty-string PRESENT env as absent (defaults, no
+  throw). AC3 must mirror the RUNTIME predicate — a strict-shape check over-flags
+  and breaks the "matches the runtime throw" guarantee.
 - [ ] A provider with both env vars set yields zero provider-env issues.
 - [ ] `warn`-severity issues are non-fatal: `config validate` exits 0 when the only issues
   are warns; only `error` severity forces exit 1 (the pinned warn-exit contract owned by
@@ -99,7 +108,7 @@ Standard inherited-core DoD clauses apply.
 
 - [ ] Landed on `master` under human-steered discipline.
 - [ ] Real run: this repo's native provider (env set) → no provider-env issue; a
-  github-without-repo fixture → error.
+  github-without-repo fixture → warn (exit 0); a present-malformed fixture → error.
 - [ ] A fresh independent audit finds no refutation.
 
 ## Human verification

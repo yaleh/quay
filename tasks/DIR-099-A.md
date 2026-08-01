@@ -1,6 +1,7 @@
 ---
 id: DIR-099-A
-title: "config validate core: YAML/provider/gate/loop/routine checks + CLI command + --check-files/--json output"
+title: "config validate core: YAML/provider/gate/loop/routine checks + CLI
+  command + --check-files/--json output"
 status: todo
 labels:
   - directive
@@ -81,14 +82,31 @@ no `%` after numbers (grounded for the coverage gate).
 - [ ] `quay config validate` on a valid config exits 0 with "Config valid".
 - [ ] Malformed YAML → exit 1 with line number.
 - [ ] Gate at wrong nesting (e.g. `gates: vitest:`) → exit 1 with correct-shape hint.
+- [ ] Gate entry violating its type schema (e.g. `it0` missing `script`/`argsKey`,
+  `testPass` missing `command`) → exit 1 with correct-shape hint (check #3 negative,
+  distinct from the wrong-nesting AC).
 - [ ] loop.gates referencing non-existent gate → exit 1 "unresolved gate" + hint.
 - [ ] Missing loop.board → exit 1 specific message.
+- [ ] A valid config whose enabled provider is missing `mcp_entry` → exit 1 with a
+  message naming the provider and the missing field (check #2).
+- [ ] Invalid loop field values (execution outside {dispatched,inline}; audit outside
+  {adversarial,none}; concurrency non-integer or < 1; malformed stop pattern) → exit 1
+  with a field-specific message (check #7).
+- [ ] A malformed routine entry (missing `name`/`trigger`/`probe`/`dispatch` shape) →
+  exit 1 with a field-specific message (check #8).
 - [ ] `--json` outputs `[{severity, field, message, suggestion?}]` (empty on valid).
+- [ ] **Warn-exit contract (upstream of DIR-099-B):** `warn`-severity issues are NON-FATAL
+  — `config validate` exits 0 when the only issues are `warn`; only `error` severity
+  forces exit 1. DIR-099-B's AC1/AC2/AC7 depend on this, so it is an AC here, not prose.
 - [ ] `--check-files` on a missing gate script → exit 1 with file path; a clean workspace
   whose gate commands start with `npx`/`node`/`for` → exit 0 (AC17, the PATH-binary
   negative).
 - [ ] Works on unified config.yml (DIR-050) AND legacy gates.yml+loop.yml workspaces.
 - [ ] Tests: `packages/quay/test/config-validate.test.mjs` RED/GREEN, >=80% coverage.
+- [ ] Wiring (DIR-117 mechanism-claim coverage): a test in `config-validate.test.mjs`
+  exercises the real CLI `config validate`/`check` handler in `bin/quay.ts` and asserts
+  it calls `validateConfig` imported from `src/config-validate.ts` (spy/mock observed
+  invoked), so the shared module is reached from a production callsite — not dead code.
 
 ## Definition of Done
 
