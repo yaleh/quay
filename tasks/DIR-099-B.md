@@ -41,7 +41,7 @@ exit-code mapping (this child is the check #9 provider-env sub-check within it).
 
 ## Chosen mechanism
 
-In the shared `config-validate.ts` module (or a `provider-env.ts` sibling): a
+In the shared `packages/quay/src/config-validate.ts` module that DIR-099-A creates: a
 `validateProviderEnv(provider)` check reading the enabled provider's `env:` map ONLY
 (grounded fact #4: `resolveProviderEnv` reads `provider.env`, never `provider.tasks_dir`;
 `QUAY_NATIVE_TASKS_DIR`/`QUAY_GITHUB_REPO` come from the config's `env:` map). Native
@@ -117,7 +117,7 @@ Standard inherited-core DoD clauses apply.
 
 ## Touches
 
-- `packages/quay/src/config-validate.ts (new)` (or sibling provider-env check)
+- `packages/quay/src/config-validate.ts` (shared module; adds `validateProviderEnv` function)
 - `packages/quay/src/gate/config/` (types if touched)
 - `packages/quay/test/config-validate.test.mjs (new)`
 - `docs/plans/M230-dir-099-b.md`
