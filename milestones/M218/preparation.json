@@ -1,0 +1,93 @@
+{
+  "taskId": "DIR-101",
+  "milestoneId": "M218",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M218-dir101.md",
+  "planFile": "docs/plans/M218-dir-101.md",
+  "ledgerFile": "milestones/M218/proposal-ledger.json",
+  "telemetryFile": "milestones/prepare-telemetry/DIR-101/33a38589904e.json",
+  "mechanismInventoryFile": "milestones/M218/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "fe83440db5baaa0f75c2fcd8c2b03336b30e80aa860ebf7840ab4e323487cd69",
+    "charter": "f45c9f4327f6774424d0faa46e0e28c2a5ca495cc7e8b1bcb2799dde3edfc2f4",
+    "plan": "dabe4310605eab2ac2049ca379e1ba2112200bc00c0cc5d833a0493ec27b2632",
+    "sources": {
+      "packages/quay-native/src/store.ts": "ad7384a7cdf2de184e63b67bf286fd81e0b4ea5a6b5aaa18f5770720f320e2f2",
+      "packages/quay-native/bin/quay-native.ts": "7bc65edcbbaaddbe5893dc98e34596e16158f936f51ec8d5fda698261de1ff4f",
+      "packages/quay-native/src/mcp-server.ts": "642c60e9ede24248abaa5555e11e903997c21bae30c8b907a7edd18073edec77",
+      "packages/quay-native/test/default-status.test.mjs": "f9a7369d55560fd074bcdc4c95c02553a43a6ae04f79fd0865e8491b2e1fdf50",
+      "packages/quay-native/examples/sample-workspace/.quay/config.yml": "247871211542b1625112bf7a0f7b0394884756ce53ac46338de612413ad6f947",
+      "packages/quay/bin/quay.ts": "70cfaf12071b3e96d57045e83b3548e09a25030aaca16a3fa5f97d8bf94882d8",
+      "scripts/test.sh": "9266a8b081dee6384e141adc2e72d5fe8d43a5c339feeb1071afc7a81948b6c5",
+      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "e14d46c3c016ec57009d368f1bafb2eb89bde017dd7aae7939d5ac7e04929be4"
+    },
+    "ledger": "b85b5f933153732df2326499ff9a6f3867f2e0bc7015443520b87d03c3771572",
+    "telemetry": "f11ffb4695459c79be7a879d0e188d195e5e4693ef730c788a9b24e7af6048c4",
+    "mechanismInventory": "6be089acb248ee06c97d9568c8457e5836f099ba4a4238b002788efd6403a997"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 3,
+    "findings": 0
+  },
+  "touches": [
+    "packages/quay-native/src/store.ts",
+    "packages/quay-native/bin/quay-native.ts",
+    "packages/quay-native/src/mcp-server.ts",
+    "packages/quay-native/test/default-schema.test.mjs",
+    "packages/quay-native/examples/sample-workspace/.quay/config.yml",
+    "docs/plans/M218-dir-101.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 2,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 3,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 1,
+    "proposalReviewRounds": 2,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785555227940,
+    "endedAtMs": 1785555455276,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "20bcd08749da2b86"
+      },
+      {
+        "round": 1,
+        "hash": "d5c2dccbaf27e7ac"
+      }
+    ]
+  }
+}

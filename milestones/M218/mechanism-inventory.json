@@ -1,0 +1,29 @@
+{
+  "mechanisms": [
+    {
+      "id": "m1-store-default-application",
+      "owner": "quay-native store (packages/quay-native/src/store.ts)",
+      "proofSurface": "/home/yale/work/quay/packages/quay-native/src/store.ts",
+      "dependsOn": [],
+      "independentlyShippable": true,
+      "rationale": "createStore defaultSchema opt + write() creation-branch application + resolveDefaultSchema validator form one atomic behavior contract (apply configured default at creation when extra.schema unset). Ships and tests entirely at the store layer via createStore unit tests (matching DIR-047's staged ship): complete safety contract via the validator (throws on invalid), independent user value for any createStore embedder without touching config readers."
+    },
+    {
+      "id": "m2-config-plumbing",
+      "owner": "quay-native CLI + MCP entry points",
+      "proofSurface": "/home/yale/work/quay/packages/quay-native/bin/quay-native.ts",
+      "dependsOn": [
+        "m1-store-default-application"
+      ],
+      "independentlyShippable": false,
+      "rationale": "loadDefaultSchema() in bin + startMcpServer() defaultSchema passthrough + .quay/config.yml per-provider schema key + sample-workspace/help docs together deliver the user-facing config key end-to-end at both CLI and MCP entry points; these call-site variants serve one atomic contract and cannot ship independently — they require m1 to receive the forwarded value."
+    }
+  ],
+  "inventory": {
+    "ok": true,
+    "count": 1,
+    "inventoryHash": "mi-157115a2",
+    "mechanismCount": 1
+  },
+  "source": "typed"
+}
