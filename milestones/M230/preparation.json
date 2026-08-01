@@ -1,0 +1,54 @@
+{
+  "taskId": "DIR-099-B",
+  "milestoneId": "M230",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M230-dir-099-b.md",
+  "planFile": "docs/plans/M230-dir-099-b.md",
+  "ledgerFile": "milestones/M230/proposal-ledger.json",
+  "telemetryFile": null,
+  "mechanismInventoryFile": "milestones/M230/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "672b81fc5bd9d60f3257105bf5d80a19259845f02cb05902f20a9ef6a54fa9ea",
+    "charter": "62a530a6bcebc132c725da2566814458598068e1d9c2e4aa2cff7a1ae2c8dd9f",
+    "plan": "87ba8fdbbabc3bcf433cb51c544ea82720cbeda7651933183ff82dff35597dc1",
+    "sources": {},
+    "ledger": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "mechanismInventory": "e813d564bccbeefe1db875d1c9abb55d63c52b639acc61134a5f1d19cc489b67"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [
+    "packages/quay/src/config-validate.ts",
+    "packages/quay/test/config-validate.test.mjs",
+    "docs/plans/M230-dir-099-b.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "manual-takeover"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "manual-takeover"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ],
+    "manualTakeover": true
+  },
+  "convergence": null
+}
