@@ -1951,10 +1951,11 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     // epoch-identity-mismatch handler's own direct call, and the shared `_epochBreachExit` helper's
     // ONE call (reused by every one of the 7 cap-check call sites, so it contributes exactly 1
     // textual occurrence regardless of how many places call `_epochBreachExit` itself).
-    // 15 (M203 baseline) + 2 (M206) = 17, but M203's own comment already nets those two together as
-    // "15" post-Receipt-split — so the running total re-derived here is 15 + 2 (epoch) = 17.
+    // DIR-124-A1b (split-recursive-guard): +1 MORE textual site — the split-recursive-guard
+    // needs-human terminal's own direct `_releaseLeaseAndRecord('split-recursive-guard', ...)` call.
+    // 15 (M203 baseline) + 2 (M206 epoch) + 1 (A1b split-recursive-guard) = 18.
     const callSites = [...text.matchAll(/await _releaseLeaseAndRecord\(/g)];
-    assert.equal(callSites.length, 17, `expected exactly 17 await _releaseLeaseAndRecord( call sites (15 pre-epoch baseline + 2 new epoch-breach sites), found ${callSites.length}`);
+    assert.equal(callSites.length, 18, `expected exactly 18 await _releaseLeaseAndRecord( call sites (15 pre-epoch baseline + 2 new epoch-breach sites + 1 split-recursive-guard), found ${callSites.length}`);
 
     // The NEW _releaseLease(stageLabel, {reason}) helper (M203/DIR-126-D — a DIFFERENT function
     // from the pre-M202 helper this same name historically referred to, which WAS fully removed at

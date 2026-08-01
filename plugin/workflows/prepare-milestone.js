@@ -63,6 +63,10 @@ const _taskId = $a.taskId
 // DIR-NNN-Xnx → 3 (great-grandchild). Gap tasks: gap-*-X → 1. Returns 0 for unrecognized.
 // Used by _splitCheck to guard against recursive split at depth ≥ 2 (DIR-124-A1b, 2026-08-01).
 function _computeWbsLevel(taskId) {
+  // taskId may be genuinely absent at this point (the missing-required-args site's whole point) —
+  // guard before the missing-required-args check runs, so the missing-taskId fail-closed path
+  // never throws here.
+  if (!taskId) return 0
   const dirMatch = taskId.match(/^DIR-\d+(.*)$/)
   if (dirMatch) {
     if (!dirMatch[1]) return 0
@@ -974,13 +978,12 @@ function _deriveMechanismInventory(mechanisms) {
     }
     seenSurfaces.add(m.proofSurface)
   }
+  // dependsOn may reference EITHER in-inventory mechanisms OR cross-task mechanism ids (sibling
+  // split children) — tolerate unknown-but-well-formed ids (hashMechanismInventory keeps them
+  // verbatim via idToSurface[depId] || depId). Only a structurally-malformed dependsOn is rejected.
   for (const m of mechanisms) {
-    if (Array.isArray(m.dependsOn)) {
-      for (const dep of m.dependsOn) {
-        if (!ids.has(dep)) {
-          return { ok: false, code: 'mechanism-inventory-invalid', message: `dangling dependsOn: ${m.id} -> ${dep}` }
-        }
-      }
+    if (m.dependsOn != null && !Array.isArray(m.dependsOn)) {
+      return { ok: false, code: 'mechanism-inventory-invalid', message: `dependsOn must be an array, got ${JSON.stringify(m.dependsOn)} for ${JSON.stringify(m.id)}` }
     }
   }
   const count = mechanisms.filter((m) => m.independentlyShippable === true).length
@@ -1405,6 +1408,14 @@ ${openBlocking.map((f) => `- [${f.id}] (${f.subsystem}) ${f.summary}`).join('\n'
 }
 
 if (_terminalReason === 'split-recommended') {
+  // DIR-124-A1b (2026-08-01): split-recursive-guard means the task is already a deep leaf
+  // and the real defect is upstream decomposition — route to needs-human, never auto-split.
+  if (_splitRecommendation && _splitRecommendation.code === 'split-recursive-guard') {
+    log(`ProposalReview: split-recursive-guard — ${_splitRecommendation.reason}`)
+    await _writeReviewCheckpoint('split-recursive-guard', { terminalReason: 'split-recursive-guard', terminalOutcome: 'needs-human' })
+    await _releaseLeaseAndRecord('split-recursive-guard', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'split-recursive-guard', cacheable: true })
+    return { outcome: 'needs-human', reason: 'split-recursive-guard', splitRecommendation: _splitRecommendation, phase: 'ProposalReview', ledger: _ledger, reviewSessions: _reviewSessions, reviserSessions: _reviserSessions }
+  }
   log(`ProposalReview: split recommended — ${_splitRecommendation.reason}`)
   await _writeReviewCheckpoint('split-recommended', { terminalReason: 'split-recommended', terminalOutcome: 'needs-human' })
   await _releaseLeaseAndRecord('split-recommended', { terminalPhase: 'ProposalReview', outcome: 'needs-human', reason: 'split-recommended', cacheable: true })

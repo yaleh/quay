@@ -135,6 +135,11 @@ export function groupBlockingBySubsystem(ledger) {
 // than 2 independently landable mechanisms in the candidate, (c) checked touch set exceeds the
 // configured small-milestone boundary (default 8 — a tunable policy default, not a repo-wide
 // convention; callers may override via `smallMilestoneTouchBoundary`).
+// DIR-124-A1b (2026-08-01): wbsLevel guard — when a task is already a level-2+ leaf (split depth
+// >= 2) and trigger (b) fires, the real defect is UPSTREAM decomposition was too shallow, not
+// that this leaf needs yet another split. Return `split-recursive-guard` instead — recommend:true
+// (still must stop the current prepare cycle), repairable:false (scope fix requires redesign at
+// a higher WBS level), and the orchestrator routes to needs-human rather than auto-splitting.
 // ── deriveMechanismInventory — M206/M1: validates a typed mechanism inventory and derives count +
 // inventoryHash mechanically (never trusts a bare integer). Fail-closed on duplicate id, dangling
 // dependsOn, or duplicate proofSurface. Mirrored inline as _deriveMechanismInventory in both
@@ -160,14 +165,14 @@ export function deriveMechanismInventory(mechanisms) {
     }
     seenSurfaces.add(m.proofSurface);
   }
-  // Validate dependsOn edges — every referenced id must exist in the inventory.
+  // Validate dependsOn edges — a referenced id may be EITHER a mechanism in this inventory OR a
+  // cross-task mechanism reference (e.g. a sibling split child's mechanism id, like B2's store for
+  // B3's consumer). Only a structurally-malformed dependsOn entry is rejected; an unknown-but-well-
+  // formed id is treated as an external/cross-task reference and tolerated, consistent with
+  // hashMechanismInventory's `idToSurface[depId] || depId` (which keeps unknown ids verbatim).
   for (const m of mechanisms) {
-    if (Array.isArray(m.dependsOn)) {
-      for (const dep of m.dependsOn) {
-        if (!ids.has(dep)) {
-          return { ok: false, code: "mechanism-inventory-invalid", message: `dangling dependsOn edge: ${JSON.stringify(m.id)} depends on ${JSON.stringify(dep)} which is not in the inventory` };
-        }
-      }
+    if (m.dependsOn != null && !Array.isArray(m.dependsOn)) {
+      return { ok: false, code: "mechanism-inventory-invalid", message: `dependsOn must be an array, got ${JSON.stringify(m.dependsOn)} for ${JSON.stringify(m.id)}` };
     }
   }
   const count = mechanisms.filter((m) => m.independentlyShippable === true).length;
@@ -209,7 +214,7 @@ export function groupBlockingByRootCause(ledger) {
   return result;
 }
 
-export function checkSplitRecommendation({ ledger, mechanismCount, mechanismInventory, touchSetSize, smallMilestoneTouchBoundary = 8 } = {}) {
+export function checkSplitRecommendation({ ledger, mechanismCount, mechanismInventory, touchSetSize, smallMilestoneTouchBoundary = 8, wbsLevel = 0 } = {}) {
   // M206/M2: use rootCauseKey-based clustering. Each distinct rootCauseKey counts as one cluster
   // member; legacy findings without rootCauseKey each count individually (id fallback).
   const bySubsystem = groupBlockingByRootCause(ledger);
@@ -232,6 +237,13 @@ export function checkSplitRecommendation({ ledger, mechanismCount, mechanismInve
     effectiveCount = mechanismCount;
   }
   if (Number.isFinite(effectiveCount) && effectiveCount > 2) {
+    // DIR-124-A1b (2026-08-01): a level-2+ leaf that still triggers split-multi-mechanism is a
+    // structural anomaly — the UPSTREAM decomposition was too shallow. Flag as recursive-guard
+    // (needs-human) rather than auto-splitting deeper (which would produce level-3+ leaves that
+    // inevitably trigger the same signal because the real scope problem is at level 1 or 2).
+    if (Number.isFinite(wbsLevel) && wbsLevel >= 2) {
+      return { recommend: true, code: "split-recursive-guard", reason: `level-${wbsLevel} leaf still multi-mechanism (${effectiveCount} > 2) — upstream decomposition too shallow, needs human diagnosis before further split`, repairable: false };
+    }
     // split-multi-mechanism is NEVER repairable — scope that cannot be changed without charter edit.
     return { recommend: true, code: "split-multi-mechanism", reason: `candidate contains ${effectiveCount} independently landable mechanisms (> 2)`, repairable: false };
   }

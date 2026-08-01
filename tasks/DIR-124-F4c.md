@@ -57,6 +57,8 @@ Standard inherited-core DoD clauses apply.
 ## Touches
 
 - `docs/references/repo-ground-truth.md`
+- `experiments/quay-perpetual-stream/scripts/ground-truth-registry.ts` (read-only input — CATEGORIES is verified against, not modified; owned by F4a/M270)
+- `plugin/scripts/ground-truth-registry.ts` (read-only input — mirror)
 - `experiments/quay-perpetual-stream/test/*ground-truth*.test.mjs`
 - `plugin/test/*ground-truth*.test.mjs`
 - `docs/plans/M272-dir-124-f4c.md`
