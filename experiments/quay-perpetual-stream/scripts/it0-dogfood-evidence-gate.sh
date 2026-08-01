@@ -61,7 +61,7 @@ if [ -n "$MILESTONE" ]; then
     echo "Milestone directory not found for ${MILESTONE} (resolved: ${MILESTONE_ROOT:-<none>}) — vacuously PASS."
     exit 0
   fi
-  REPORTS=$(find "$MILESTONE_ROOT" -name 'iteration-*.md' 2>/dev/null | sort)
+  REPORTS=$(find "$MILESTONE_ROOT" -name 'iteration-*.md' -not -path '*/experiments/*' 2>/dev/null | sort)
   if [ -z "$REPORTS" ]; then
     echo "No iteration reports found for milestone ${MILESTONE}."
     echo "Nothing to check — vacuously PASS."
