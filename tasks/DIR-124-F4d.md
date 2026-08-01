@@ -64,3 +64,9 @@ Standard inherited-core DoD clauses apply.
 - `tasks/DIR-124-F.md`
 - `adr/ADR-020-runtime-contract-ground-truth-registry.md`
 - `docs/plans/M273-dir-124-f4d.md`
+`milestones/M273/preparation.json`
+`milestones/M273/proposal-ledger.json`
+`milestones/M273/stage-journal.jsonl`
+`milestones/M273/receipts/*.json`
+`tasks/DIR-124-F4d.md`
+`.quay/config.yml`

@@ -1,7 +1,7 @@
 ---
 id: DIR-124-A3a
 title: Invariant-ownership manifest format + enforcement script
-status: todo
+status: done
 labels:
   - directive
   - milestone-candidate

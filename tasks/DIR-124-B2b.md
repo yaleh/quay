@@ -77,3 +77,9 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/test/*workflow-journal*`
 - `plugin/test/*workflow-journal*`
 - `docs/plans/M276-dir-124-b2b.md`
+`milestones/M276/preparation.json`
+`milestones/M276/proposal-ledger.json`
+`milestones/M276/stage-journal.jsonl`
+`milestones/M276/receipts/*.json`
+`tasks/DIR-124-B2b.md`
+`.quay/config.yml`

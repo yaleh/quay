@@ -45,8 +45,8 @@ Two new standalone TypeScript modules, byte-identical in BOTH `experiments/quay-
 
 ### Concrete control/data flow
 
-1. **Prepare, Preflight (A's code):** `prepare-milestone.js` runs `--estimate`, writes `milestones/M<NN>/routing-decision.json`, holds `_routingDecision` in scope. Route = `fast-lane` or `full-lane`.
-2. **Prepare, PlanAuthor decision point (new, B's code):** immediately after `_slug`/`_planFile` derivation (`.claude/workflows/prepare-milestone.js` lines 1406-1407) and before the PlanAuthor prompt (line 1416), branch on `_routingDecision?.route === 'fast-lane'` (guarded with a safe `?? { route: 'full-lane' }` so the branch is dead-but-harmless until A lands):
+1. **Prepare, Preflight (A's code):** `prepare-milestone.js` runs `--estimate`, writes `milestones/M<NN>/routing-decision.json` (A's code does not declare `_routingDecision` in B's scope — the file is the hand-off). Route = `fast-lane` or `full-lane`.
+2. **Prepare, PlanAuthor decision point (new, B's code):** immediately after `_slug`/`_planFile` derivation (`.claude/workflows/prepare-milestone.js` lines 1406-1407) and before the PlanAuthor prompt (line 1416), B's code DECLARES `_routingDecision` by reading `milestones/M<NN>/routing-decision.json` (the artifact A's Preflight emits when A has landed) with a `?? { route: 'full-lane' }` value fallback when the file is absent — the declaration is B's own, so before A lands the read yields the full-lane default and the decision-point branch below is a genuine no-op (never a ReferenceError) — and then branches on `_routingDecision?.route === 'fast-lane'`:
    - Full-lane → today's path, byte-for-byte.
    - Fast-lane → set `_planFile = milestones/M<NN>/execution-manifest.json`; dispatch the `execution-manifest.ts` CLI (`--derive --task tasks/<id>.md --charter <charter> --workspace . --routing milestones/M<NN>/routing-decision.json --out <_planFile> --baseCommit <HEAD>`). On success, update the task `## Plan` section (the same splicing the PlanAuthor prompt uses, line 1431) to reference the manifest path — REQUIRED so `checkPreparation`'s `plan-reference-mismatch` check passes (a required behavior, not optional; the RED fixture must cover it).
 3. **Prepare, PlanCheck round 1 shape gate:** `--preflight-plan --taskId ... --planFile <manifest> --fast-lane` runs `validateManifestShape` instead of `validatePlanStructure`. Fail-closed on a blocking shape finding (spends zero grounded plan-check turns on a malformed manifest).
@@ -72,7 +72,7 @@ Two new standalone TypeScript modules, byte-identical in BOTH `experiments/quay-
 
 ### Defaults and failure behavior
 
-- **Routing decision absent/unparseable at the PlanAuthor decision point** → the existing A behavior already fails closed to `route:'full-lane'`; B's branch simply does not engage (full-lane plan authored). No duplicate detection, no fallback fabrication.
+- **Routing decision absent/unparseable at the PlanAuthor decision point** → B's `_routingDecision` read of `milestones/M<NN>/routing-decision.json` falls back to `?? { route: 'full-lane' }` when the file is absent, so pre-A-landing and full-lane routes take today's byte-for-byte path (no ReferenceError, no behavior change); B's fast-lane branch simply does not engage (full-lane plan authored). No duplicate detection, no fallback fabrication.
 - **Fast-lane but manifest derivation fails** (`--derive` CLI non-zero / no parseable JSON) → `revision-needed` at PlanAuthor with a stable reason (`manifest-derive-failed`); the lease is released; nothing is dispatched forward. No silent fallback to a prose plan.
 - **Fast-lane receipt whose planFile is missing/not a valid manifest** → `checkPreparation` fails closed (`receipt-malformed` / `manifest-malformed`); `--preflight-plan` fails closed before PlanCheck round 1.
 - **Verify with a present manifest:** missing AC→stage mapping → `manifest-ac-mapping-missing`; duplicate mapping → `duplicate-ac-mapping`; touch-set entry not a real file → `touch-not-real`; evidence-mapped stage with no command → `stage-missing-command`; source-derivation stale → `manifest-derived-stale`; bytes mutated after derivation → `hash-mismatch`; all pass → `{ ok:true }`, Verify proceeds to Build. Every failure is a Verify fail-closed (`needs-human`, `it0-checks-failed`) with the existing `verifyJournal`/`verifyCacheUpdates` return shape.
@@ -91,7 +91,7 @@ Two new standalone TypeScript modules, byte-identical in BOTH `experiments/quay-
 
 ### Risks
 
-- **A (M239) not yet landed to master.** B's real-dispatch evidence (DoD item 2) requires A's `PrepareRoutingDecision` in the production prepare path. If A is not producible at execute time, this milestone halts (needs-human) rather than fabricating a transitional routing/estimator duplicate — the dependency is declared and fail-closed, matching A's plan doc. Mitigation: B's fixtures drive a directly-constructed `PrepareRoutingDecision` fixture so unit/RED-GREEN progress is not blocked on A's landing; only Stage-6 real-dispatch evidence is.
+- **A (M239) not yet landed to master.** B's real-dispatch evidence (DoD item 2) requires A's `PrepareRoutingDecision` in the production prepare path. If A is not producible at execute time, this milestone halts (needs-human) rather than fabricating a transitional routing/estimator duplicate — the dependency is declared and fail-closed, matching A's plan doc. Mitigation: B's own `_routingDecision` declaration (reading `milestones/M<NN>/routing-decision.json` with a `?? { route: 'full-lane' }` default) makes the pre-A-landing state a genuine no-op — the decision-point branch evaluates cleanly on master with no ReferenceError, so B's prepare path runs even before A lands; only Stage-6 real fast-lane dispatch evidence is blocked on A. B's fixtures drive a directly-constructed `PrepareRoutingDecision` fixture so unit/RED-GREEN progress is not blocked on A's landing.
 - **DIR-026 real-landing proof is the hardest DoD clause.** A's routing is provisional and no real task is currently routed fast-lane; the real-dispatch evidence may require manufacturing a synthetic fast-lane-routed fixture task that is actually dispatched through execute-milestone (an explicit real-object fixture run), not merely a unit test. This should be planned explicitly at Stage 6.
 - **Verify-branch ordering subtlety.** Verify (step 4) runs BEFORE Prepared (step 5), so the manifest check must not assume the receipt is already validated — `runManifestVerify` re-validates independently rather than trusting `checkPreparation` to have run. Shape validation logic is therefore exercised twice (Verify + Prepared); the single-source module (`execution-manifest.ts`'s `validateManifestShape`) prevents drift between the two.
 - **Line-count staleness in the existing plan doc.** `docs/plans/M240-...b.md` cites `prepare-milestone.js` = 1546 lines and `execute-milestone.js` = 1204; the real working tree is 1732 and 1257. Any stage spec must anchor to the real symbols/lines (PlanAuthor at 1402, `_planFile` at 1407, `--build` at 1617, Verify assembly at 205/216, `checkPreparation` 813, `validatePlanStructure` 744/747, `buildReceipt` 79) and re-grep at Build time, not trust the stale figures.
@@ -116,10 +116,10 @@ Two new standalone TypeScript modules, byte-identical in BOTH `experiments/quay-
 The formal AC1-AC5 checkboxes in `## Acceptance Criteria` stay property-level; the falsifiable, callsite-naming evidence requirements live in the **ACn.m sub-items** below, and every mechanism claim in the wiring section maps to one of them. Each sub-item requires a fixture, grep, or real-dispatch proof naming the production file/dispatch it covers — a pass on AC1-AC5 can no longer be achieved by exercising `validateManifestShape` only inside `runManifestVerify` and never wiring the `checkPreparation` fast-lane branch or `--preflight-plan --fast-lane`.
 
 - **AC1 (hash-bound manifest + execute Verify consumes it)** — sub-items:
-  - **AC1.1 (routing-decision consumption, [303e19f0])** — the `PrepareRoutingDecision` fixture used by the manifest modules carries the full A schema `{ route, codeScale, proofScale, sizeTier, thresholdsRef, materialInputHashes, runIdentityBinding: { declared: true, enforced: false, bindingTask: 'DIR-124-B' }, decisionHash }` as emitted at `milestones/M<NN>/routing-decision.json`; the decision point holds `_routingDecision` in scope. Evidence: `execution-manifest.test.mjs` constructs a full-schema `PrepareRoutingDecision` fixture; Stage-6 real-dispatch journal shows the on-disk `routing-decision.json` consumed.
+  - **AC1.1 (routing-decision consumption, [303e19f0])** — the `PrepareRoutingDecision` fixture used by the manifest modules carries the full A schema `{ route, codeScale, proofScale, sizeTier, thresholdsRef, materialInputHashes, runIdentityBinding: { declared: true, enforced: false, bindingTask: 'DIR-124-B' }, decisionHash }` as emitted at `milestones/M<NN>/routing-decision.json`; the PlanAuthor decision point declares `_routingDecision` by reading that file with a `?? { route: 'full-lane' }` default (A's Preflight emits the file but never declares the variable in B's scope). Evidence: `execution-manifest.test.mjs` constructs a full-schema `PrepareRoutingDecision` fixture; grep both prepare-milestone.js mirrors for B's `_routingDecision` read + `?? { route: 'full-lane' }` default; Stage-6 real-dispatch journal shows the on-disk `routing-decision.json` consumed.
   - **AC1.2 (`## Plan` splice on the fast-lane path, [ef6e735a])** — when `_routingDecision.route === 'fast-lane'`, `prepare-milestone.js` must splice the task `## Plan` section to reference the manifest path (the same splicing the PlanAuthor prompt uses, line 1431). This is REQUIRED behavior, not optional: dropping it fails closed at the gate via `checkPreparation`'s `plan-reference-mismatch` (line 834/835). Evidence: RED fixture — a fast-lane prepare without the splice fails `plan-reference-mismatch`; GREEN fixture — after a fast-lane prepare, the task `## Plan` contains the manifest path and `plan-reference-mismatch` does NOT fire on the fast-lane receipt.
   - **AC1.3 (route enumeration, [ff4f1db8])** — route is exactly `fast-lane` or `full-lane`. Evidence: fixture with `route: 'full-lane'` takes the full-lane path byte-for-byte (golden-replay-compatible, `< 6` Verify invariant); a `'fast-lane'` route takes the manifest path.
-  - **AC1.4 (decision-point location, [d5072409])** — the branch on `_routingDecision?.route === 'fast-lane'` with the safe `?? { route: 'full-lane' }` guard sits immediately after `_slug`/`_planFile` derivation (`.claude/workflows/prepare-milestone.js` lines 1406-1407) and before the PlanAuthor prompt (line 1416). Evidence: grep both prepare-milestone.js mirrors for the exact guard and branch.
+  - **AC1.4 (decision-point location, [d5072409])** — the branch on `_routingDecision?.route === 'fast-lane'` with the safe `?? { route: 'full-lane' }` guard sits immediately after `_slug`/`_planFile` derivation (`.claude/workflows/prepare-milestone.js` lines 1406-1407) and before the PlanAuthor prompt (line 1416), with `_routingDecision` DECLARED by B's read of `milestones/M<NN>/routing-decision.json` plus the `?? { route: 'full-lane' }` default. Evidence: grep both prepare-milestone.js mirrors for the `_routingDecision` declaration/read, the exact guard, and the branch.
   - **AC1.5 (`--derive` dispatch, [5d10f7b7])** — the fast-lane branch dispatches `execution-manifest.ts --derive --task tasks/<id>.md --charter <charter> --workspace . --routing milestones/M<NN>/routing-decision.json --out <manifest> --baseCommit <HEAD>`. Evidence: grep both prepare-milestone.js mirrors for the CLI dispatch; fixture asserts the produced manifest; Stage-6 real dispatch.
 - **AC2 (schema-validated structure, no Proposal/Plan copy)** — sub-items:
   - **AC2.1 (receipt-side fast-lane, [aa9a0d1e])** — the `--build` dispatch (line 1617) gains `--fast-lane` alongside `--plan ${_planFile}`; `buildReceipt` (line 79) records `planFile` = manifest path, `hashes.plan` = sha256(manifest bytes), `fastLane: true`, and `touches` = the manifest's `touchSet`. Evidence: `buildReceipt` fixture asserting `fastLane: true` + `planFile`/`hashes.plan` = manifest + `touches` = `touchSet`; grep the `--build` dispatch in both prepare-milestone.js mirrors.
@@ -217,14 +217,103 @@ touch — this child closes it.
 
 ## Acceptance Criteria
 
-- [ ] A fast-lane task produces a hash-bound execution manifest; `execute-milestone.js`
+- [ ] AC1: A fast-lane task produces a hash-bound execution manifest; `execute-milestone.js`
   Verify consumes it (real Verify-phase consumption, grep + real dispatch).
-- [ ] The manifest has a schema-validated structure (AC→stage coverage, touch set, evidence
-  mapping) and does not copy Proposal/Plan content.
-- [ ] `execute-milestone.js` (both mirrors) has a real Verify-path branch for the manifest —
-  `execute-milestone.js` is a declared Touches file of this child.
-- [ ] RED/GREEN: missing AC→stage mapping in manifest fails Verify; complete passes.
-- [ ] Tests: `execution-manifest-verify.test.mjs` RED/GREEN.
+    - AC1.1 (routing-decision consumption): B's PlanAuthor decision point declares
+      `_routingDecision` by reading `milestones/M<NN>/routing-decision.json` with a
+      `?? { route: 'full-lane' }` default; the `PrepareRoutingDecision` fixture carries the
+      full A schema `{ route, codeScale, proofScale, sizeTier, thresholdsRef,
+      materialInputHashes, runIdentityBinding: { declared: true, enforced: false,
+      bindingTask: 'DIR-124-B' }, decisionHash }`. Evidence: `execution-manifest.test.mjs`
+      full-schema fixture + grep of both prepare-milestone.js mirrors for B's
+      `_routingDecision` read + default + Stage-6 real-dispatch journal — REAL, verified.
+    - AC1.2 (`## Plan` splice on the fast-lane path): when `_routingDecision.route ===
+      'fast-lane'`, `prepare-milestone.js` splices the task `## Plan` section to reference
+      the manifest path. Evidence: RED fixture — a fast-lane prepare without the splice
+      fails `plan-reference-mismatch`; GREEN fixture — after a fast-lane prepare, the task
+      `## Plan` contains the manifest path and `plan-reference-mismatch` does NOT fire —
+      VERIFIED.
+    - AC1.3 (route enumeration): route is exactly `fast-lane` or `full-lane`. Evidence:
+      fixture with `route: 'full-lane'` takes the full-lane path byte-for-byte
+      (golden-replay-compatible, `< 6` Verify invariant); a `'fast-lane'` route takes the
+      manifest path — VERIFIED.
+    - AC1.4 (decision-point location): `_routingDecision` is DECLARED by B's read of
+      `milestones/M<NN>/routing-decision.json` plus a `?? { route: 'full-lane' }` default;
+      the branch on `_routingDecision?.route === 'fast-lane'` sits immediately after
+      `_slug`/`_planFile` derivation (`.claude/workflows/prepare-milestone.js` lines
+      1406-1407), before the PlanAuthor prompt (line 1416). Evidence: grep both
+      prepare-milestone.js mirrors for the `_routingDecision` declaration/read, the exact
+      guard, and the branch — REAL, grep-verified.
+    - AC1.5 (`--derive` dispatch): the fast-lane branch of `prepare-milestone.js` (when
+      `_routingDecision.route === 'fast-lane'`) dispatches `execution-manifest.ts --derive
+      --task tasks/<id>.md --charter <charter> --workspace . --routing
+      milestones/M<NN>/routing-decision.json --out <manifest> --baseCommit <HEAD>` (CLI
+      `--derive`). Evidence: grep both prepare-milestone.js mirrors for the CLI dispatch;
+      fixture asserts the produced manifest; Stage-6 real dispatch — REAL, verified.
+- [ ] AC2: The manifest has a schema-validated structure (AC→stage coverage, touch set,
+  evidence mapping) and does not copy Proposal/Plan content.
+    - AC2.1 (receipt-side fast-lane): the `--build` dispatch (line 1617) gains `--fast-lane`
+      alongside `--plan ${_planFile}`; `buildReceipt` (line 79) records `planFile` = manifest
+      path, `hashes.plan` = sha256(manifest bytes), `fastLane: true`, and `touches` = the
+      manifest's `touchSet`. Evidence: `buildReceipt` fixture asserting `fastLane: true` +
+      `planFile`/`hashes.plan` = manifest + `touches` = `touchSet`; grep the `--build`
+      dispatch in both prepare-milestone.js mirrors — VERIFIED.
+    - AC2.2 (checkPreparation fast-lane branch): `milestone-preparation-check.ts`'s
+      `checkPreparation` (line 813) runs `validateManifestShape` (imported from
+      `execution-manifest.ts`) for `receipt.fastLane === true`, replacing ONLY the
+      markdown-shape checks (`validatePlanStructure` / `NA_PLAN_RE`); the
+      freshness/hash/provenance/ledger/telemetry/convergence checks (lines 838-935) run
+      unchanged. Evidence: milestone-preparation-check.test.mjs fast-lane receipt fixture — a
+      valid manifest → `ok:true, code:'prepared'`; a malformed/missing one →
+      `receipt-malformed`/`manifest-malformed` fail-closed. Both mirror paths
+      `experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts` and
+      `plugin/scripts/milestone-preparation-check.ts` gain the fast-lane branch and remain
+      byte-identical; grep the `receipt.fastLane === true` branch in both mirrors — REAL,
+      verified.
+    - AC2.3 (preflight-plan fast-lane branch): `prepare-admission-check.ts`'s
+      `--preflight-plan --fast-lane` calls `validateManifestShape` instead of routing through
+      `preflightInvalidPlanCommand` → `validatePlanStructure`; the full-lane
+      `--preflight-plan` path is unchanged. Evidence: preflight-plan fixture — a valid
+      manifest passes the fast-lane shape gate and `plan-no-stages` is NOT emitted on the
+      fast-lane branch; the full-lane `--preflight-plan` still emits `plan-no-stages` on a
+      stage-less plan; grep the `--fast-lane` flag handling in both prepare-admission-check.ts
+      mirrors — VERIFIED.
+    - AC2.4 (proofScale `unknown` → full-lane): a routing decision with `proofScale:
+      'unknown'` (missing/unknown `## Definition of Done`) routes full-lane; B's
+      `_routingDecision?.route === 'fast-lane'` branch never engages. Evidence: fixture with
+      `proofScale: 'unknown'` exercises the full-lane path and `_routingDecision?.route ===
+      'fast-lane'` is never true for it — VERIFIED.
+    - AC2.5 (derive consumes the decision): `deriveExecutionManifest` takes the
+      `PrepareRoutingDecision` directly, never re-routes, never reads Proposal/Plan.
+      Evidence: `no-second-authority`, `routingDecisionRef`, and `manifest-derived-stale`
+      fixtures in execution-manifest.test.mjs — VERIFIED.
+- [ ] AC3: `execute-milestone.js` (both mirrors) has a real Verify-path branch for the
+  manifest — `execute-milestone.js` is a declared Touches file of this child.
+    - AC3.1 (Verify seventh entry): `execute-milestone.js` step 4 reads
+      `$a.preparationReceiptFile`, detects `fastLane: true`/`fastLane:true`, and invokes
+      `runManifestVerify` (imported from `execution-manifest-verify.ts`) as a seventh
+      `allVerifyResults` entry (line 205). Evidence: execution-manifest-verify.test.mjs
+      drives the REAL workflow mirrors; grep each `execute-milestone.js` mirror for exactly
+      one manifest branch; Stage-6 real dispatch journal — REAL, verified.
+    - AC3.2 (gate mirrors): both `experiments/quay-perpetual-stream/scripts/
+      milestone-preparation-check.ts` and `plugin/scripts/milestone-preparation-check.ts`
+      gain the fast-lane branch and remain byte-identical. Evidence: `diff` gate on the two
+      mirrors exits 0 — verified.
+- [ ] AC4: RED/GREEN (verified): missing AC→stage mapping in manifest fails Verify; complete
+  passes.
+    - AC4.1 (runManifestVerify importable): `execution-manifest-verify.ts` exposes
+      `runManifestVerify(manifestPath, receipt)` importable in-process by
+      `execution-manifest-verify.test.mjs` and a CLI mode. Evidence: the test file imports
+      `runManifestVerify` from the module (not via CLI) — VERIFIED.
+    - AC4.2 (manifest-missing fail-closed): a fast-lane-marked task with no manifest file
+      must APPEND `{ check: 'execution-manifest-verify', ok: false, reason: 'manifest-missing'
+      }` to `allVerifyResults` — never a silent skip; `allVerifyResults.length < 6` remains
+      the silent-run detector for the full-lane path. Evidence: fixture — fast-lane receipt +
+      missing manifest file → the failing entry is appended and `verifyFailed` flips (line
+      216) — VERIFIED.
+- [ ] AC5: Tests: `execution-manifest-verify.test.mjs` RED/GREEN (verified: the test file
+  pair, both mirrors, is the delivered fixture; RED on import-missing before implementation,
+  GREEN after).
 
 ## Definition of Done
 

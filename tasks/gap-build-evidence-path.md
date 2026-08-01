@@ -61,3 +61,9 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/scripts/*build-evidence*`
 - `plugin/scripts/*build-evidence*`
 - `docs/plans/M263-gap-build-evidence-path.md`
+`milestones/M263/preparation.json`
+`milestones/M263/proposal-ledger.json`
+`milestones/M263/stage-journal.jsonl`
+`milestones/M263/receipts/*.json`
+`tasks/gap-build-evidence-path.md`
+`.quay/config.yml`

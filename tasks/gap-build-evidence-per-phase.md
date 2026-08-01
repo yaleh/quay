@@ -77,3 +77,9 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/test/*build-evidence*`
 - `plugin/test/*build-evidence*`
 - `docs/plans/M264-gap-build-evidence-per-phase.md`
+`milestones/M264/preparation.json`
+`milestones/M264/proposal-ledger.json`
+`milestones/M264/stage-journal.jsonl`
+`milestones/M264/receipts/*.json`
+`tasks/gap-build-evidence-per-phase.md`
+`.quay/config.yml`

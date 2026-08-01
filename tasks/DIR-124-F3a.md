@@ -68,3 +68,9 @@ Standard inherited-core DoD clauses apply.
 
 - `tasks/DIR-124-F.md`
 - `docs/plans/M267-dir-124-f3a.md`
+`milestones/M267/preparation.json`
+`milestones/M267/proposal-ledger.json`
+`milestones/M267/stage-journal.jsonl`
+`milestones/M267/receipts/*.json`
+`tasks/DIR-124-F3a.md`
+`.quay/config.yml`
