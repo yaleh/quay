@@ -56,7 +56,7 @@ handler performs no local skip logic. `dryRun: false`/omitted behaves exactly as
 Resolved via milestone M224 (human-steered). Checked Plan: `docs/plans/M224-dir-103-b.md`
 (DIR-117-B prepared-gate artifact) — 7 ordered stages (RED real-subprocess test → engine
 `RunGateArgs.dryRun` guard + handler forward → GREEN verify → full-suite → post-Land
-audit), all 6 AC items mapped, base revision `e6034728`.
+audit), all 6 AC items mapped, base revision `20d16b28`.
 
 ## Finding
 
@@ -86,7 +86,7 @@ un-AC'd — this child makes it real.
 - [ ] The dryRun skip-append lives in exactly ONE place — `runGate`'s engine path, via a
   `dryRun?: boolean` field in `RunGateArgs` that gates the `appendGateEvent` call — and
   the MCP `gate_run` handler is a thin pass-through with no local skip logic
-  (grep-confirmable: `appendGateEvent` appears in the engine only, not in the handler).
+  (grep-confirmed: `appendGateEvent` appears in the engine only, not in the handler).
   The shared `runAcceptance()` runner executes the command (no second implementation).
 - [ ] Tests: driving the real `quay mcp` subprocess, >=80% coverage on the dryRun path.
 
@@ -108,6 +108,6 @@ Standard inherited-core DoD clauses apply.
 
 - `packages/quay/src/mcp-handlers.ts`
 - `packages/quay/src/gate/engine.ts`
-- `packages/quay/test/acceptance.test.mjs` (or sibling MCP-surface test)
+- `packages/quay/test/acceptance.test.mjs`
 - `packages/quay/test/mcp-gate-dryrun.test.mjs (new)`
 - `docs/plans/M224-dir-103-b.md`
