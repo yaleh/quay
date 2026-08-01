@@ -1,0 +1,84 @@
+{
+  "taskId": "DIR-112",
+  "milestoneId": "M222",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M222-dir112.md",
+  "planFile": "docs/plans/M222-dir-112.md",
+  "ledgerFile": "milestones/M222/proposal-ledger.json",
+  "telemetryFile": "milestones/prepare-telemetry/DIR-112/7ea2bcde3bca.json",
+  "mechanismInventoryFile": "milestones/M222/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "1cfca6d5c1651d792b282e8c427c0ca64f02af2142c8d424ea8c58179fdc04c3",
+    "charter": "5c2b909c463e19dec86497505e1b2b6bc577447b27ae9d4f2c5c1d3e5dc7c15b",
+    "plan": "3ef87eb933ff6b45f80d0c6ae54e6673d6b398521424c34295befa3eb5198383",
+    "sources": {
+      "packages/quay/test/cli.test.mjs": "93236c0fc6ec85e2358146273ead0bd7dfa64424b0829a96e1296ef46f98c9c4",
+      "scripts/test.sh": "9266a8b081dee6384e141adc2e72d5fe8d43a5c339feeb1071afc7a81948b6c5",
+      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "e14d46c3c016ec57009d368f1bafb2eb89bde017dd7aae7939d5ac7e04929be4"
+    },
+    "ledger": "13bc90bca2003971c8417e87913ed22d733990d92336cde757965cb8633e3ae0",
+    "telemetry": "a678f91a1416a40dad7c3e23bb2633087cdf0a208bd0811e7f558dbd2809d3b1",
+    "mechanismInventory": "303a8317d4355ce06dc9dd59b958abedee4c49f6f4958fbc1d781d67bc0d99c4"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 3,
+    "findings": 0
+  },
+  "touches": [
+    "packages/quay/test/cli.test.mjs",
+    "docs/plans/M222-dir-112.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 2,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 3,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 1,
+    "proposalReviewRounds": 2,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785557522865,
+    "endedAtMs": 1785558002500,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "b1b213bbfa22"
+      },
+      {
+        "round": 1,
+        "hash": "284bf556e4287392"
+      }
+    ]
+  }
+}

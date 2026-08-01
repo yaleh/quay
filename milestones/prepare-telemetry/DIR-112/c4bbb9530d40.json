@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 2,
+  "recordId": "c4bbb9530d40",
+  "attemptId": "c4bbb9530d40",
+  "generationId": "c4bbb9530d40",
+  "admission": {
+    "key": ".::DIR-112",
+    "ownerExecutionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c",
+    "fencingToken": 0,
+    "acquiredAt": 1785555029800
+  },
+  "workspace": ".",
+  "taskId": "DIR-112",
+  "milestoneId": "M222",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "5c2b909c463e19dec86497505e1b2b6bc577447b27ae9d4f2c5c1d3e5dc7c15b",
+    "taskContract": "ce277c14dc08c4da5db5f63a513bc480089f146d141fb6ee251436f3e0d5c5b3",
+    "proposal": "6ea726df4f8c7d530821949d6df729cbbf9ce76ec59881b775ac3116e2e66c32",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "plancheck-rounds-exceeded",
+    "phase": "PlanCheck",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785557098072,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785555029800,
+      "endedAtMs": 1785555059416
+    },
+    {
+      "phase": "ProposalReview-delta-round-1",
+      "round": 1,
+      "startedAtMs": 1785555059416,
+      "endedAtMs": 1785555334384
+    },
+    {
+      "phase": "ProposalReview-delta-round-2",
+      "round": 2,
+      "startedAtMs": 1785555334384,
+      "endedAtMs": 1785555650990
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785555650990,
+      "endedAtMs": 1785555905796
+    },
+    {
+      "phase": "PlanCheck-round-1",
+      "round": 1,
+      "startedAtMs": 1785555905796,
+      "endedAtMs": 1785556269277
+    },
+    {
+      "phase": "PlanCheck-round-2",
+      "round": 2,
+      "startedAtMs": 1785556269277,
+      "endedAtMs": 1785556527431
+    },
+    {
+      "phase": "PlanCheck-round-3",
+      "round": 3,
+      "startedAtMs": 1785556527431,
+      "endedAtMs": 1785556887752
+    },
+    {
+      "phase": "plancheck-rounds-exceeded",
+      "round": 0,
+      "startedAtMs": 1785556887752,
+      "endedAtMs": 1785557098072
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "plancheck-rounds-exceeded",
+      "recurrenceKey": "fcf080bd0757",
+      "firstSeenGeneration": "c4bbb9530d40",
+      "lastSeenGeneration": "c4bbb9530d40"
+    },
+    {
+      "code": "18978de8",
+      "recurrenceKey": "95a3e09d78c0",
+      "firstSeenGeneration": "c4bbb9530d40",
+      "lastSeenGeneration": "c4bbb9530d40"
+    },
+    {
+      "code": "38cbb8b5",
+      "recurrenceKey": "678f63268656",
+      "firstSeenGeneration": "c4bbb9530d40",
+      "lastSeenGeneration": "c4bbb9530d40"
+    },
+    {
+      "code": "3101a8f5",
+      "recurrenceKey": "013389a482da",
+      "firstSeenGeneration": "c4bbb9530d40",
+      "lastSeenGeneration": "c4bbb9530d40"
+    },
+    {
+      "code": "846102ac",
+      "recurrenceKey": "9a6b1ab43666",
+      "firstSeenGeneration": "c4bbb9530d40",
+      "lastSeenGeneration": "c4bbb9530d40"
+    },
+    {
+      "code": "3d108d93",
+      "recurrenceKey": "99a86fe91365",
+      "firstSeenGeneration": "c4bbb9530d40",
+      "lastSeenGeneration": "c4bbb9530d40"
+    },
+    {
+      "code": "6afc0746",
+      "recurrenceKey": "06c71c294028",
+      "firstSeenGeneration": "c4bbb9530d40",
+      "lastSeenGeneration": "c4bbb9530d40"
+    },
+    {
+      "code": "a50c5666",
+      "recurrenceKey": "27ebb99d5052",
+      "firstSeenGeneration": "c4bbb9530d40",
+      "lastSeenGeneration": "c4bbb9530d40"
+    },
+    {
+      "code": "1806c03c",
+      "recurrenceKey": "66b323290320",
+      "firstSeenGeneration": "c4bbb9530d40",
+      "lastSeenGeneration": "c4bbb9530d40"
+    }
+  ]
+}
