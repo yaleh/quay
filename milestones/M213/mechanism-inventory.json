@@ -1,0 +1,40 @@
+{
+  "mechanisms": [
+    {
+      "id": "M1-atomic-land-validator-wired",
+      "owner": "execute-milestone.js composite Land phase (both mirrors) invoking composite-land.ts --land-json (both mirrors)",
+      "proofSurface": ".claude/workflows/execute-milestone.js — composite Land phase production callsite to `composite-land.ts --land-json` (AC #1 grep/import-graph evidence)",
+      "dependsOn": [],
+      "independentlyShippable": true,
+      "rationale": "The --land-json CLI mode (producer) and the execute-milestone.js callsite (consumer) are two halves of ONE atomic behavior contract ('Land commits only on a validated ok:true transaction'); the CLI mode with no caller is exactly the tested-but-uninvoked anti-pattern this directive removes (no independent user value), and the .claude/plugin mirrors must stay byte-identical (confirmed: diff -q reports both execute-milestone.js and composite-land.ts mirror pairs IDENTICAL). Ships as one unit. Externally hard-depends on DIR-119-D4's reconcile-apply producing the real ReconcileResult it validates (not an in-inventory mechanism). This is the sole independently-shippable code mechanism in D5 -> shippable count = 1, no split triggered."
+    },
+    {
+      "id": "M2-end-to-end-pipeline-proof",
+      "owner": "one fresh real composite dispatch through the fully-wired pipeline",
+      "proofSurface": "workflows/wf_*.json `workflowProgress[]` (confirmed to carry {type:'workflow_agent',label,phaseIndex}; journal.jsonl carries only {type,key,agentId[,result]})",
+      "dependsOn": [
+        "M1-atomic-land-validator-wired"
+      ],
+      "independentlyShippable": false,
+      "rationale": "A proof obligation gating this child's DoD (AC #2), not a landable code unit: it has no product value separable from M1 and hard-depends on DIR-119-D1..D4 all being landed plus M1. Evidence surface is the harness workflow RESULT record — empirically confirmed: a real wf_*.json's workflowProgress[] contains workflow_agent entries with label+phaseIndex, and journal.jsonl entries carry only {type,key,agentId[,result]} with no label/phase."
+    },
+    {
+      "id": "M3-fresh-independent-wiring-audit",
+      "owner": "fresh independent wiring auditor (import-graph trace of all five composite-*.ts modules + Gate-failure branch)",
+      "proofSurface": "production import graph over experiments/quay-perpetual-stream/scripts/composite-{manifest-synthesis,build,audit,reconcile,land}.ts",
+      "dependsOn": [
+        "M1-atomic-land-validator-wired",
+        "M2-end-to-end-pipeline-proof"
+      ],
+      "independentlyShippable": false,
+      "rationale": "A verification obligation (AC #5 / DoD #3), not a landable mechanism: it depends on M1+M2 being landed and has no independent shippable value. Its required check surface is the production import graph across the five composite-*.ts modules plus an exercised Gate-failure branch — the explicit fix for the meta-gap DIR-119-D's own Finding names (the prior DIR-119-C audit only read journal call-counts and AC-citation text)."
+    }
+  ],
+  "inventory": {
+    "ok": true,
+    "count": 1,
+    "inventoryHash": "mi-f8e985ef",
+    "mechanismCount": 1
+  },
+  "source": "typed"
+}
