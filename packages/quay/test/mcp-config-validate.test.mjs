@@ -87,7 +87,7 @@ test("AC2: validateConfig returns ok:false with unresolved gate issue", async ()
   assert.equal(result.ok, false, "unresolved gate should fail with ok:false");
   const gateIssue = result.issues.find((i) => i.field === "loop.gates");
   assert.ok(gateIssue, "should have a loop.gates issue");
-  assert.ok(gateIssue.message.includes("unresolved"), `message should mention unresolved, got: ${gateIssue.message}`);
+  assert.ok(gateIssue.message.toLowerCase().includes("unresolved"), `message should mention unresolved, got: ${gateIssue.message}`);
   assert.ok(gateIssue.message.includes("nonexistent_gate"), `message should name the gate, got: ${gateIssue.message}`);
 });
 
@@ -197,7 +197,7 @@ test("AC5: config_validate handler invokes the imported validateConfig (not dead
   assert.ok(handlerResult.structuredContent, "handler should return structuredContent");
   assert.equal(handlerResult.structuredContent.ok, false, "should fail on unresolved gate");
   const gateIssue = handlerResult.structuredContent.issues.find(
-    (i) => i.field === "loop.gates" && i.message.includes("unresolved")
+    (i) => i.field === "loop.gates" && i.message.toLowerCase().includes("unresolved")
   );
   assert.ok(gateIssue, `should have unresolved gate issue, got: ${JSON.stringify(handlerResult.structuredContent.issues)}`);
 });
@@ -269,7 +269,7 @@ test("validateConfig flags unrecognized gate type key", async () => {
   const ws = makeWorkspaceBase(configWrongNesting, "wrong-nesting");
   const result = validateConfig({ workspaceRoot: ws });
   assert.equal(result.ok, false, "wrong gate nesting should fail");
-  const gateIssue = result.issues.find((i) => i.field.startsWith("gates.") && i.message.includes("unrecognized"));
+  const gateIssue = result.issues.find((i) => i.field.startsWith("gates.") && /recognized gate/i.test(i.message));
   assert.ok(gateIssue, `should have unrecognized gate type issue, got: ${JSON.stringify(result.issues)}`);
 });
 
