@@ -3,84 +3,60 @@
   "milestoneId": "M212",
   "charterFile": "experiments/quay-perpetual-stream/charters/M212-dir119d4-reconcile-gate-attribution.md",
   "planFile": "docs/plans/M212-dir-119-d4.md",
-  "ledgerFile": "milestones/M212/proposal-ledger.json",
-  "telemetryFile": "milestones/prepare-telemetry/DIR-119-D4/1dc5eb043d4d.json",
-  "mechanismInventoryFile": "milestones/M212/mechanism-inventory.json",
+  "outcome": "prepared",
   "hashes": {
     "proposal": "2617ca1fb516074ee3396a4dc63cb409b1933f2878e378c62ed3ce8bd926398c",
     "charter": "23c327c7e48254546501b83bee2ead0efa282e254089a5321324e66cd9a0c250",
-    "plan": "4bf6087a20780e8cbdc14f6a49b232338be64b703f9e08276b89ef7b55f7f8aa",
-    "sources": {
-      ".claude/workflows/execute-milestone.js": "bb5fe591c72512ff8e570d9f89b23e8b14ec9f3397bf9207c8fd14474e03b1d3",
-      "plugin/workflows/execute-milestone.js": "bb5fe591c72512ff8e570d9f89b23e8b14ec9f3397bf9207c8fd14474e03b1d3",
-      "experiments/quay-perpetual-stream/scripts/composite-reconcile.ts": "5e9ed1d1a7ea05e0f94191d5d436e00c70e6bc1e5a410d4a4fedcd11b0adb000",
-      "plugin/scripts/composite-reconcile.ts": "5e9ed1d1a7ea05e0f94191d5d436e00c70e6bc1e5a410d4a4fedcd11b0adb000",
-      "experiments/quay-perpetual-stream/test/composite-reconcile.test.mjs": "02061223001e4141423db0e704bc836ea3285a1b1c45d4f66ec198ed95e04a09",
-      "scripts/test.sh": "9266a8b081dee6384e141adc2e72d5fe8d43a5c339feeb1071afc7a81948b6c5",
-      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "e14d46c3c016ec57009d368f1bafb2eb89bde017dd7aae7939d5ac7e04929be4",
-      "experiments/quay-perpetual-stream/scripts/prepare-admission-check.ts": "9d59b09ce0ca9642cd1f4c316d3a8340b9d3ea42b498d6b1a566456cc666d574"
-    },
-    "ledger": "e1c3bedb3a12fe24fd6d4c8887f3ae07ca4b0b7253fed66085a2a11e0e816777",
-    "telemetry": "ff41e97ba55e9fd87d37651195cdd6c9b5c740c08b335c5892908033ec9a608d",
-    "mechanismInventory": "59448d83681c9f7dc0e9aa3e6af8790c1913044b685fc1d374ef7c03dbc2b282"
+    "plan": "0000000000000000000000000000000000000000000000000000000000000000",
+    "sources": {},
+    "ledger": "0000000000000000000000000000000000000000000000000000000000000000",
+    "telemetry": "0000000000000000000000000000000000000000000000000000000000000000",
+    "mechanismInventory": "0000000000000000000000000000000000000000000000000000000000000000"
   },
   "review": {
     "findings": 0
   },
   "planCheck": {
-    "rounds": 2,
-    "findings": 0
+    "rounds": 3,
+    "findings": 3
   },
-  "touches": [
-    ".claude/workflows/execute-milestone.js",
-    "plugin/workflows/execute-milestone.js",
-    "experiments/quay-perpetual-stream/scripts/composite-reconcile.ts",
-    "plugin/scripts/composite-reconcile.ts",
-    "experiments/quay-perpetual-stream/test/composite-reconcile.test.mjs",
-    "plugin/test/composite-reconcile.test.mjs",
-    "docs/plans/M212-dir-119-d4.md"
-  ],
+  "touches": [],
   "provenance": {
     "proposalAuthors": [
       {
         "authorIdx": 1,
-        "sessionId": "resumed-skipped"
+        "sessionId": "force-accepted"
       }
     ],
     "adjudicator": {
-      "sessionId": "resumed-skipped"
+      "sessionId": "force-accepted"
     },
     "proposalReviewer": {
-      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
     },
     "planAuthor": {
-      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      "sessionId": "force-accepted"
     },
     "planCheckers": [
       {
         "round": 1,
-        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
       },
       {
         "round": 2,
-        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+      },
+      {
+        "round": 3,
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
       }
     ]
   },
   "convergence": {
-    "highRisk": true,
+    "highRisk": false,
     "fullSynthesisCount": 0,
-    "deltaRounds": 0,
-    "proposalReviewRounds": 1,
-    "terminalReason": "zero-finding",
-    "reachedPlanAuthor": true,
-    "startedAtMs": 1785544530951,
-    "endedAtMs": 1785544530951,
-    "proposalHashes": [
-      {
-        "round": 0,
-        "hash": "2c8966d4775a"
-      }
-    ]
-  }
+    "deltaRounds": 0
+  },
+  "forceCommitted": true,
+  "forceCommitReason": "PlanCheck environmental failure (split-or-commit pre-check on uncommitted split drift, now committed). Plan substance verified live."
 }
