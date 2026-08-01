@@ -458,6 +458,27 @@ Description:
 
   If .quay/config.yml already exists, refuses to overwrite unless --force.
 `);
+  } else if (sub === "config") {
+    process.stdout.write(`quay config — validate workspace configuration
+
+Usage:
+  quay config validate [--json|--format json] [--check-files]
+  quay config check [--json|--format json] [--check-files]
+
+Description:
+  Validates .quay/config.yml (or legacy .quay/gates.yml + .quay/loop.yml) for
+  structural correctness: YAML syntax, provider fields, gate schemas, gate
+  reference resolution, loop fields, and routine shapes. Exits 0 when the
+  config is valid; exits 1 with diagnostics when errors are found.
+
+  'check' is an alias for 'validate'.
+
+Options:
+  --json          Output issues as a JSON array (empty on valid).
+  --format json   Alias for --json.
+  --check-files   Also verify that gate script/command paths reference files
+                  that exist on disk.
+`);
   } else {
     // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
     process.stdout.write(`Usage: quay ${sub} [...]\nRun \`quay --help\` for full usage documentation.\n`);
@@ -506,7 +527,8 @@ async function main() {
   const jsonCommands =
     (cmd === "task" && ["list", "view", "edit", "check", "create"].includes(sub)) ||
     (cmd === "adr" && ["list", "show", "view", "new", "accept", "deprecate", "reject", "supersede"].includes(sub)) ||
-    (cmd === "action" && ["list", "run"].includes(sub));
+    (cmd === "action" && ["list", "run"].includes(sub)) ||
+    (cmd === "config" && ["validate", "check"].includes(sub));
   if (jsonFlag === null && jsonCommands) {
     console.error(`Error: unsupported --format value ${JSON.stringify(flags.format)} (only "json" is supported; use --json instead of --format for non-JSON output)`);
     process.exitCode = 1;
@@ -1106,6 +1128,52 @@ Description:
     return;
   }
 
+  // DIR-099-A: config validate — structural validation pass over workspace config.
+  // Does NOT require a provider connection (pure static analysis of config files).
+  if (cmd === "config" && (sub === "validate" || sub === "check")) {
+    let cfg;
+    try {
+      cfg = loadConfig();
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+      return;
+    }
+    const workspaceRoot = cfg.workspaceRoot;
+    const checkFiles = flags["check-files"] === true;
+
+    const { validateConfig } = await import("../src/config-validate.ts");
+    const result = validateConfig({ workspaceRoot, checkFiles });
+
+    if (wantsJson) {
+      printJson(result.issues);
+    } else {
+      if (result.issues.length === 0) {
+        console.log("Config valid.");
+      } else {
+        for (const issue of result.issues) {
+          console.log(`${issue.severity}: ${issue.field} — ${issue.message}`);
+          if (issue.suggestion) console.log(`  suggestion: ${issue.suggestion}`);
+        }
+        const errorCount = result.issues.filter((i) => i.severity === "error").length;
+        const warnCount = result.issues.filter((i) => i.severity === "warn").length;
+        const parts = [];
+        if (errorCount > 0) parts.push(`${errorCount} error(s)`);
+        if (warnCount > 0) parts.push(`${warnCount} warning(s)`);
+        console.log(`${parts.join(", ")} found.`);
+      }
+    }
+    process.exitCode = result.ok ? 0 : 1;
+    return;
+  }
+
+  // DIR-099-A: unknown config subcommand
+  if (cmd === "config") {
+    console.error(`quay config: unknown subcommand "${sub}" (try "validate" or "check")`);
+    process.exitCode = 1;
+    return;
+  }
+
   // QENG-1: gate engine. `gate`/`gate-log` are verb-less top-level commands, so
   // the task id lands in `sub` (not positional[0]), and `--list` is detected as
   // `sub === "--list"` — parseFlags never runs on it, so `flags.list` is never
@@ -1350,7 +1418,7 @@ Description:
   }
 
   // QX-005: updated fallback with --help hint (UQ-001/UQ-002).
-  console.error("usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|action list|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
+  console.error("usage: quay <init|task list|view|create|edit|check|gate|gate-log|complete|adjudicate|promote|retreat|run|migrate|config validate|action list|serve|mcp> ...\nRun `quay --help` for full usage documentation.");
   process.exitCode = 1;
 }
 

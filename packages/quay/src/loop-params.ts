@@ -35,10 +35,10 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 
-const VALID_STOP_RE = /^(once|until\(.+\))$/;
+export const VALID_STOP_RE = /^(once|until\(.+\))$/;
 
-const VALID_EXECUTION = new Set(["dispatched", "inline"]);
-const VALID_AUDIT = new Set(["adversarial", "none"]);
+export const VALID_EXECUTION = new Set(["dispatched", "inline"]);
+export const VALID_AUDIT = new Set(["adversarial", "none"]);
 
 /**
  * Read and validate loop params from workspaceRoot.

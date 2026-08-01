@@ -1,42 +1,24 @@
-// config-validate.ts — workspace config structural validation (DIR-099-A/C).
+// config-validate.ts — structural validation pass over workspace config files.
+// Exports validateConfig({ workspaceRoot, checkFiles? }) -> { ok, issues }.
 //
-// Single shared module for both the CLI `quay config validate` (DIR-099-A)
-// and the MCP `config_validate` tool (DIR-099-C). The MCP handler is a thin
-// passthrough — zero duplicated validation logic.
+// Fail-closed: every check that encounters unexpected shape returns an error-
+// severity issue. The module is a pure diagnostic layer — the runtime loaders
+// (readGatesConfig, loadWorkspaceGates, readLoopParams) remain fail-quiet (their
+// existing contract), but the validator surfaces what the runtime silently absorbs.
 //
-// Exports:
-//   validateConfig({ workspaceRoot, checkFiles? }) -> { ok, issues[] }
-//   ConfigIssue = { severity: "error"|"warn", field, message, suggestion? }
-//
-// ok is true iff no issue has severity "error" (warn-only is still ok:true).
+// DIR-099-A: this module is the mechanism for the `quay config validate` CLI
+// command. It is also importable by the MCP server (DIR-099-C) and other tools.
 
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
+import { loadConfig } from "./config.ts";
 import { listGates } from "./gate/registry.ts";
+import { VALID_EXECUTION, VALID_AUDIT, VALID_STOP_RE } from "./loop-params.ts";
 
-// Re-exported from loop-params.ts so the validator imports constants rather
-// than duplicating them (DIR-099-A mechanism claim M5).
-const VALID_EXECUTION = new Set(["dispatched", "inline"]);
-const VALID_AUDIT = new Set(["adversarial", "none"]);
-const VALID_STOP_RE = /^(once|until\(.+\))$/;
-
-// Gate-type schemas co-located in this module (DIR-099-A mechanism claim M2).
-// Each entry: { required: string[], typeLabel: string }
-const GATE_TYPE_SCHEMAS: Record<string, { required: string[]; typeLabel: string }> = {
-  it0: { required: ["name", "script", "argsKey"], typeLabel: "it0" },
-  fixed: { required: ["name", "script"], typeLabel: "fixed" },
-  testPass: { required: ["name", "command"], typeLabel: "testPass" },
-  coverageFloor: { required: ["name", "command", "floor"], typeLabel: "coverageFloor" },
-  redGreen: { required: ["name", "red", "green"], typeLabel: "redGreen" },
-  adr: { required: [], typeLabel: "adr (string array)" },
-};
-
-// Shell keywords — never flagged by --check-files PATH-binary heuristic.
-const SHELL_KEYWORDS = new Set([
-  "for", "while", "if", "case", "until", "do", "done", "then", "else",
-  "elif", "fi", "esac", "time", "exec", "eval", "source", ".",
-]);
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 export interface ConfigIssue {
   severity: "error" | "warn";
@@ -45,7 +27,7 @@ export interface ConfigIssue {
   suggestion?: string;
 }
 
-export interface ValidateConfigInput {
+export interface ValidateConfigArgs {
   workspaceRoot: string;
   checkFiles?: boolean;
 }
@@ -55,271 +37,827 @@ export interface ValidateConfigResult {
   issues: ConfigIssue[];
 }
 
-// ── helpers ──
+// ---------------------------------------------------------------------------
+// Gate type schemas — co-located here (NOT imported from gate/config/types.ts)
+// so a type-change that breaks validation is a test failure, not silent drift.
+// ---------------------------------------------------------------------------
 
-function issue(severity: "error" | "warn", field: string, message: string, suggestion?: string): ConfigIssue {
-  const i: ConfigIssue = { severity, field, message };
-  if (suggestion) i.suggestion = suggestion;
-  return i;
+const KNOWN_GATE_KEYS = ["it0", "fixed", "testPass", "coverageFloor", "redGreen", "adr"] as const;
+
+interface GateTypeSchema {
+  requiredFields: string[];
+  shape: string;
 }
 
-function existsSafe(p: string): boolean {
-  try { return fs.existsSync(p); } catch { return false; }
+const GATE_SCHEMAS: Record<string, GateTypeSchema> = {
+  it0: {
+    requiredFields: ["name", "script", "argsKey"],
+    shape: '{ name: "<name>", script: "<path>", argsKey: "<key>" }',
+  },
+  fixed: {
+    requiredFields: ["name", "script"],
+    shape: '{ name: "<name>", script: "<path>" }',
+  },
+  testPass: {
+    requiredFields: ["name", "command"],
+    shape: '{ name: "<name>", command: "<shell command>" }',
+  },
+  coverageFloor: {
+    requiredFields: ["name", "command", "floor"],
+    shape: '{ name: "<name>", command: "<shell command>", floor: <number> }',
+  },
+  redGreen: {
+    requiredFields: ["name", "red", "green"],
+    shape: '{ name: "<name>", red: "<command>", green: "<command>" }',
+  },
+  adr: {
+    requiredFields: [],
+    shape: '- "ADR-NNN"',
+  },
+};
+
+// Shell keywords that are never flagged by the PATH-binary heuristic.
+const SHELL_KEYWORDS = new Set([
+  "for", "while", "if", "case", "until", "do", "done", "then", "else",
+  "elif", "fi", "esac", "time", "exec", "eval", "source", ".",
+]);
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the set of workspace-declared gate names from RAW parsed gates section.
+ * We do NOT use loadWorkspaceGates() because it silently skips malformed entries.
+ */
+function extractWorkspaceGateNames(gatesSection: unknown): string[] {
+  if (!gatesSection || typeof gatesSection !== "object") return [];
+  const names: string[] = [];
+  const g = gatesSection as Record<string, unknown>;
+  for (const key of KNOWN_GATE_KEYS) {
+    const arr = g[key];
+    if (Array.isArray(arr)) {
+      for (const entry of arr) {
+        if (key === "adr") {
+          if (typeof entry === "string" && entry.trim() !== "") {
+            names.push(entry.toLowerCase());
+          }
+        } else if (entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).name === "string") {
+          names.push((entry as Record<string, unknown>).name as string);
+        }
+      }
+    }
+  }
+  return names;
 }
 
-function isOnPath(binary: string): boolean {
+/**
+ * Resolve a gate entry's name from its object for error messages.
+ */
+function gateEntryName(entry: unknown, index: number): string {
+  if (entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).name === "string") {
+    return (entry as Record<string, unknown>).name as string;
+  }
+  return `[${index}]`;
+}
+
+// ---------------------------------------------------------------------------
+// Check functions — each returns ConfigIssue[]
+// ---------------------------------------------------------------------------
+
+/**
+ * 1+2. Config file discovery + YAML syntax check.
+ */
+function discoverAndParse(workspaceRoot: string): {
+  issues: ConfigIssue[];
+  unifiedParsed: unknown | null;
+  gatesParsed: unknown | null;
+  loopParsed: unknown | null;
+} {
+  const issues: ConfigIssue[] = [];
+  const unifiedConfigPath = path.join(workspaceRoot, ".quay", "config.yml");
+
+  if (fs.existsSync(unifiedConfigPath)) {
+    // Branch A: unified config.yml
+    let raw: string;
+    try {
+      raw = fs.readFileSync(unifiedConfigPath, "utf8");
+    } catch (e: unknown) {
+      issues.push({
+        severity: "error",
+        field: "config.yml",
+        message: `Cannot read .quay/config.yml: ${(e as Error).message}`,
+      });
+      return { issues, unifiedParsed: null, gatesParsed: null, loopParsed: null };
+    }
+
+    let unified: unknown;
+    try {
+      unified = YAML.parse(raw);
+    } catch (e: unknown) {
+      issues.push({
+        severity: "error",
+        field: "config.yml",
+        message: `YAML syntax error in .quay/config.yml: ${(e as Error).message}`,
+      });
+      return { issues, unifiedParsed: null, gatesParsed: null, loopParsed: null };
+    }
+
+    const u = unified && typeof unified === "object" ? (unified as Record<string, unknown>) : null;
+    const gatesParsed = u?.gates ?? null;
+    const loopParsed = u?.loop ?? null;
+    return { issues, unifiedParsed: unified, gatesParsed, loopParsed };
+  }
+
+  // Branch B: legacy .quay/gates.yml + .quay/loop.yml
+  const legacyGatesPath = path.join(workspaceRoot, ".quay", "gates.yml");
+  const legacyLoopPath = path.join(workspaceRoot, ".quay", "loop.yml");
+
+  let gatesParsed: unknown = null;
+  let loopParsed: unknown = null;
+  let foundAny = false;
+
+  if (fs.existsSync(legacyGatesPath)) {
+    foundAny = true;
+    try {
+      const raw = fs.readFileSync(legacyGatesPath, "utf8");
+      gatesParsed = YAML.parse(raw);
+    } catch (e: unknown) {
+      issues.push({
+        severity: "error",
+        field: "gates.yml",
+        message: `YAML syntax error in .quay/gates.yml: ${(e as Error).message}`,
+      });
+    }
+  }
+
+  if (fs.existsSync(legacyLoopPath)) {
+    foundAny = true;
+    try {
+      const raw = fs.readFileSync(legacyLoopPath, "utf8");
+      loopParsed = YAML.parse(raw);
+    } catch (e: unknown) {
+      issues.push({
+        severity: "error",
+        field: "loop.yml",
+        message: `YAML syntax error in .quay/loop.yml: ${(e as Error).message}`,
+      });
+    }
+  }
+
+  if (!foundAny) {
+    issues.push({
+      severity: "error",
+      field: "config",
+      message: "No config file found — neither .quay/config.yml nor legacy .quay/gates.yml/.quay/loop.yml exist",
+    });
+  }
+
+  return { issues, unifiedParsed: null, gatesParsed, loopParsed };
+}
+
+/**
+ * 3. Provider check: enabled providers must have non-empty mcp_entry array.
+ */
+function checkProviders(unifiedParsed: unknown | null): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  if (!unifiedParsed || typeof unifiedParsed !== "object") return issues;
+
+  const providers = (unifiedParsed as Record<string, unknown>).providers;
+  if (!providers || typeof providers !== "object") return issues;
+
+  for (const [pid, pdata] of Object.entries(providers as Record<string, unknown>)) {
+    if (!pdata || typeof pdata !== "object") continue;
+    const p = pdata as Record<string, unknown>;
+    if (p.enabled !== true) continue;
+
+    if (!Array.isArray(p.mcp_entry) || p.mcp_entry.length === 0) {
+      issues.push({
+        severity: "error",
+        field: `providers.${pid}`,
+        message: `Enabled provider "${pid}" is missing mcp_entry (must be a non-empty array)`,
+        suggestion: 'Add mcp_entry: ["node", "./bin/<provider>.ts", "mcp"] to this provider',
+      });
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * 4. Gate nesting check: unknown keys under `gates:` are errors.
+ */
+function checkGateNesting(gatesParsed: unknown | null): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  if (!gatesParsed || typeof gatesParsed !== "object") return issues;
+
+  const g = gatesParsed as Record<string, unknown>;
+  for (const key of Object.keys(g)) {
+    if (!KNOWN_GATE_KEYS.includes(key as (typeof KNOWN_GATE_KEYS)[number])) {
+      issues.push({
+        severity: "error",
+        field: `gates.${key}`,
+        message: `"${key}" is not a recognized gate type key`,
+        suggestion: `Gate entries must be nested under one of: ${KNOWN_GATE_KEYS.join(", ")}. Example: gates:\n  testPass:\n    - name: ${key}\n      command: "<cmd>"`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * 5. Gate shape check: validate each gate entry against its type schema.
+ */
+function checkGateShapes(gatesParsed: unknown | null): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  if (!gatesParsed || typeof gatesParsed !== "object") return issues;
+
+  const g = gatesParsed as Record<string, unknown>;
+
+  for (const key of KNOWN_GATE_KEYS) {
+    const arr = g[key];
+    if (!Array.isArray(arr)) continue;
+
+    if (key === "adr") {
+      for (let i = 0; i < (arr as unknown[]).length; i++) {
+        const entry = (arr as unknown[])[i];
+        if (typeof entry !== "string" || entry.trim() === "") {
+          issues.push({
+            severity: "error",
+            field: `gates.adr[${i}]`,
+            message: `adr entry at index ${i} must be a non-empty string (got ${typeof entry})`,
+            suggestion: 'Each adr entry must be a string like "ADR-NNN"',
+          });
+        }
+      }
+      continue;
+    }
+
+    const schema = GATE_SCHEMAS[key];
+    if (!schema) continue;
+
+    for (let i = 0; i < (arr as unknown[]).length; i++) {
+      const entry = (arr as unknown[])[i];
+      if (!entry || typeof entry !== "object") {
+        issues.push({
+          severity: "error",
+          field: `gates.${key}[${i}]`,
+          message: `Expected an object for ${key} gate entry at index ${i}, got ${typeof entry}`,
+          suggestion: `Should be: ${schema.shape}`,
+        });
+        continue;
+      }
+
+      const e = entry as Record<string, unknown>;
+
+      for (const field of schema.requiredFields) {
+        if (field === "floor") {
+          if (typeof e[field] !== "number") {
+            issues.push({
+              severity: "error",
+              field: `gates.${key}[${i}].${field}`,
+              message: `${key} entry "${gateEntryName(entry, i)}" is missing required field "${field}" (must be a number)`,
+              suggestion: `Should be: ${schema.shape}`,
+            });
+          }
+        } else {
+          if (!e[field] || (typeof e[field] === "string" && (e[field] as string).trim() === "")) {
+            issues.push({
+              severity: "error",
+              field: `gates.${key}[${i}].${field}`,
+              message: `${key} entry "${gateEntryName(entry, i)}" is missing required field "${field}"`,
+              suggestion: `Should be: ${schema.shape}`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * 6. Gate reference resolution: check that loop.gates names resolve.
+ */
+function checkGateReferences(
+  loopParsed: unknown | null,
+  gatesParsed: unknown | null,
+  workspaceRoot: string,
+): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  if (!loopParsed || typeof loopParsed !== "object") return issues;
+
+  const lp = loopParsed as Record<string, unknown>;
+  if (lp.gates === undefined) return issues;
+
+  let gateRefs: string[];
+  if (Array.isArray(lp.gates)) {
+    gateRefs = lp.gates.filter((g: unknown): g is string => typeof g === "string");
+  } else if (typeof lp.gates === "string") {
+    gateRefs = [lp.gates];
+  } else {
+    return issues;
+  }
+
+  const builtInNames = listGates(workspaceRoot);
+  const workspaceNames = extractWorkspaceGateNames(gatesParsed);
+  const knownNames = new Set([...builtInNames, ...workspaceNames]);
+
+  for (const ref of gateRefs) {
+    if (!knownNames.has(ref)) {
+      issues.push({
+        severity: "error",
+        field: `loop.gates`,
+        message: `Unresolved gate reference: "${ref}" is not a registered gate name`,
+        suggestion: `Registered gates: ${[...knownNames].sort().join(", ") || "(none)"}. Check that the gate is defined under "gates:" in your config.`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * 7. Loop required fields: board and gates must be present.
+ */
+function checkLoopRequiredFields(loopParsed: unknown | null): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  if (!loopParsed || typeof loopParsed !== "object") return issues;
+
+  const lp = loopParsed as Record<string, unknown>;
+
+  if (!lp.board || typeof lp.board !== "string" || (lp.board as string).trim() === "") {
+    issues.push({
+      severity: "error",
+      field: "loop.board",
+      message: `Missing required field "board" (provider name, e.g. "native")`,
+    });
+  }
+
+  if (lp.gates === undefined || lp.gates === null) {
+    issues.push({
+      severity: "error",
+      field: "loop.gates",
+      message: `Missing required field "gates" (gate name or list, e.g. ["acceptance"])`,
+    });
+  } else if (!Array.isArray(lp.gates) && typeof lp.gates !== "string") {
+    issues.push({
+      severity: "error",
+      field: "loop.gates",
+      message: `Field "gates" must be a string or non-empty array (got ${typeof lp.gates})`,
+    });
+  } else if (typeof lp.gates === "string" && (lp.gates as string).trim() === "") {
+    issues.push({
+      severity: "error",
+      field: "loop.gates",
+      message: `Field "gates" is an empty string — must be a non-empty gate name`,
+    });
+  }
+
+  return issues;
+}
+
+/**
+ * 8. Loop field validation: execution, audit, concurrency, stop.
+ */
+function checkLoopFieldValues(loopParsed: unknown | null): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  if (!loopParsed || typeof loopParsed !== "object") return issues;
+
+  const lp = loopParsed as Record<string, unknown>;
+
+  if (lp.execution !== undefined) {
+    const v = lp.execution;
+    if (typeof v !== "string" || !VALID_EXECUTION.has(v)) {
+      issues.push({
+        severity: "error",
+        field: "loop.execution",
+        message: `Invalid execution value "${v}" — must be "dispatched" or "inline"`,
+      });
+    }
+  }
+
+  if (lp.audit !== undefined) {
+    const v = lp.audit;
+    if (typeof v !== "string" || !VALID_AUDIT.has(v)) {
+      issues.push({
+        severity: "error",
+        field: "loop.audit",
+        message: `Invalid audit value "${v}" — must be "adversarial" or "none"`,
+      });
+    }
+  }
+
+  if (lp.concurrency !== undefined) {
+    const v = lp.concurrency;
+    if (!Number.isInteger(v) || (v as number) < 1) {
+      issues.push({
+        severity: "error",
+        field: "loop.concurrency",
+        message: `Invalid concurrency value "${v}" — must be an integer >= 1`,
+      });
+    }
+  }
+
+  if (lp.stop !== undefined) {
+    const v = lp.stop;
+    if (typeof v !== "string" || !VALID_STOP_RE.test(v.trim())) {
+      issues.push({
+        severity: "error",
+        field: "loop.stop",
+        message: `Invalid stop value "${v}" — must be "once", "until(.halt)", "until(empty)", or "until(<condition>)"`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * 9. Routine shape validation.
+ */
+function checkRoutines(loopParsed: unknown | null): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  if (!loopParsed || typeof loopParsed !== "object") return issues;
+
+  const lp = loopParsed as Record<string, unknown>;
+  const routines = lp.routines;
+  if (routines === undefined) return issues;
+
+  if (!Array.isArray(routines)) {
+    issues.push({
+      severity: "error",
+      field: "loop.routines",
+      message: `Field "routines" must be an array (got ${typeof routines})`,
+    });
+    return issues;
+  }
+
+  for (let i = 0; i < (routines as unknown[]).length; i++) {
+    const r = (routines as unknown[])[i];
+    if (!r || typeof r !== "object") {
+      issues.push({
+        severity: "error",
+        field: `loop.routines[${i}]`,
+        message: `Routine at index ${i} must be an object (got ${typeof r})`,
+      });
+      continue;
+    }
+
+    const entry = r as Record<string, unknown>;
+
+    if (typeof entry.name !== "string" || entry.name.trim() === "") {
+      issues.push({
+        severity: "error",
+        field: `loop.routines[${i}].name`,
+        message: `Routine at index ${i} needs a non-empty string "name"`,
+      });
+    }
+
+    if (typeof entry.trigger !== "string") {
+      issues.push({
+        severity: "error",
+        field: `loop.routines[${i}].trigger`,
+        message: `Routine "${entry.name ?? `[${i}]`}" is missing required field "trigger"`,
+        suggestion: 'Must be "every(N)" (N>=1) or "on(<event>)"',
+      });
+    } else {
+      const triggerStr = entry.trigger.trim();
+      if (!/^(every\(\s*\d+\s*\)|on\(\s*[\w-]+\s*\))$/.test(triggerStr)) {
+        issues.push({
+          severity: "error",
+          field: `loop.routines[${i}].trigger`,
+          message: `Routine "${entry.name ?? `[${i}]`}" trigger "${triggerStr}" is invalid`,
+          suggestion: 'Must be "every(N)" (N>=1) or "on(<event>)"',
+        });
+      } else {
+        const m = triggerStr.match(/^every\(\s*(\d+)\s*\)$/);
+        if (m && Number(m[1]) < 1) {
+          issues.push({
+            severity: "error",
+            field: `loop.routines[${i}].trigger`,
+            message: `Routine "${entry.name ?? `[${i}]`}" trigger "every(${m[1]})" invalid — N must be >= 1`,
+          });
+        }
+      }
+    }
+
+    const hasDispatch = typeof entry.dispatch === "string" && (entry.dispatch as string).trim() !== "";
+    const hasProbe = typeof entry.probe === "string" && (entry.probe as string).trim() !== "";
+    if (!hasDispatch && !hasProbe) {
+      issues.push({
+        severity: "error",
+        field: `loop.routines[${i}]`,
+        message: `Routine "${entry.name ?? `[${i}]`}" needs at least one of "dispatch" or "probe"`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
+// 10. Provider env validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate that the enabled provider has the expected env vars set.
+ * Reads the provider's `env:` map ONLY (grounded fact #4: resolveProviderEnv
+ * reads `provider.env`, never `provider.tasks_dir`).
+ *
+ * - native: QUAY_NATIVE_TASKS_DIR missing → warn (resolveTasksDir defaults
+ *   to repo-root ./tasks)
+ * - github: QUAY_GITHUB_REPO missing or empty-string → warn (resolveRepo
+ *   defaults to yaleh/quay)
+ * - github: QUAY_GITHUB_REPO present-but-malformed (split by "/" doesn't
+ *   produce at least 2 non-empty parts) → error (matches the runtime throw)
+ */
+function validateProviderEnv(unifiedParsed: unknown | null): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  if (!unifiedParsed || typeof unifiedParsed !== "object") return issues;
+
+  const providers = (unifiedParsed as Record<string, unknown>).providers;
+  if (!providers || typeof providers !== "object") return issues;
+
+  for (const [pid, pdata] of Object.entries(providers as Record<string, unknown>)) {
+    if (!pdata || typeof pdata !== "object") continue;
+    const p = pdata as Record<string, unknown>;
+    if (p.enabled !== true) continue;
+
+    const env = p.env;
+    const envMap = (env && typeof env === "object") ? (env as Record<string, string>) : {};
+
+    if (pid === "native") {
+      // QUAY_NATIVE_TASKS_DIR is OPTIONAL — resolveTasksDir() defaults to
+      // repo-root ./tasks; Core never fails closed on its absence.
+      if (!envMap.QUAY_NATIVE_TASKS_DIR) {
+        issues.push({
+          severity: "warn",
+          field: `providers.${pid}.env.QUAY_NATIVE_TASKS_DIR`,
+          message: `Native provider "${pid}" has no QUAY_NATIVE_TASKS_DIR env var — defaulting to ./tasks`,
+        });
+      }
+    } else if (pid === "github") {
+      const repo = envMap.QUAY_GITHUB_REPO;
+      // Falsy OR empty string → runtime defaults to yaleh/quay (no throw).
+      // Must check BEFORE the malformed check to avoid re-introducing the
+      // false-positive class (AC8: present-but-empty → warn, not error).
+      if (!repo) {
+        issues.push({
+          severity: "warn",
+          field: `providers.${pid}.env.QUAY_GITHUB_REPO`,
+          message: `GitHub provider "${pid}" has no QUAY_GITHUB_REPO env var — defaulting to yaleh/quay`,
+        });
+      } else {
+        // Present and non-empty — check for malformed (mirrors the runtime
+        // throw predicate at quay-github.ts L18-27, NOT a strict ^owner/repo$
+        // regex). The runtime does (repo || "yaleh/quay").split("/") and
+        // throws if either of the first two segments is falsy.
+        const parts = repo.split("/");
+        if (parts.length < 2 || !parts[0] || !parts[1]) {
+          issues.push({
+            severity: "error",
+            field: `providers.${pid}.env.QUAY_GITHUB_REPO`,
+            message: `QUAY_GITHUB_REPO must be "owner/repo" (got: "${repo}")`,
+          });
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
+// File-existence check helpers (only when checkFiles is true)
+// ---------------------------------------------------------------------------
+
+function isPathBinary(token: string): boolean {
   const dirs = (process.env.PATH || "").split(path.delimiter);
-  for (const d of dirs) {
-    const candidate = path.join(d, binary);
+  for (const dir of dirs) {
+    const candidate = path.join(dir, token);
     try {
       if (fs.existsSync(candidate)) {
-        try { fs.accessSync(candidate, fs.constants.X_OK); return true; } catch { /* not exec */ }
+        const stat = fs.statSync(candidate);
+        if (stat.isFile()) return true;
       }
-    } catch { /* skip */ }
+    } catch {
+      // Permission error — skip
+    }
   }
   return false;
 }
 
-function isShellKeyword(token: string): boolean {
-  return SHELL_KEYWORDS.has(token);
-}
+function classifyCommandToken(token: string, fieldPath: string, workspaceRoot: string): ConfigIssue | null {
+  if (SHELL_KEYWORDS.has(token)) return null;
 
-function firstToken(command: string): string {
-  return (command || "").trim().split(/\s+/)[0] || "";
-}
+  if (isPathBinary(token)) return null;
 
-/**
- * Classify a command's first token for --check-files.
- * Returns null if the token is a shell keyword or PATH-resolvable binary.
- * Returns { severity: "error", field, message } if explicit file path missing.
- * Returns { severity: "warn", field, message } if bare unqualified token not on PATH.
- */
-function checkCommandToken(token: string, workspaceRoot: string, field: string): ConfigIssue | null {
-  if (!token) return null;
-  if (isShellKeyword(token)) return null;
   if (token.startsWith("./") || token.startsWith("../") || token.startsWith("/")) {
-    const resolved = token.startsWith("/") ? token : path.resolve(workspaceRoot, token);
-    if (!existsSafe(resolved)) {
-      return issue("error", field, `file not found: ${resolved}`, "verify the script path exists or is generated before running the command");
+    const resolved = path.isAbsolute(token) ? token : path.resolve(workspaceRoot, token);
+    if (!fs.existsSync(resolved)) {
+      return {
+        severity: "error",
+        field: fieldPath,
+        message: `Script file not found: "${token}" (resolved to ${resolved})`,
+      };
     }
     return null;
   }
-  if (isOnPath(token)) return null;
-  // Bare unqualified token not on PATH — warn (could be in node_modules/.bin)
-  return issue("warn", field, `command "${token}" not found on PATH`, "it may become available at build time (e.g. via npm install)");
+
+  return {
+    severity: "warn",
+    field: fieldPath,
+    message: `Command token "${token}" is not resolvable on PATH and is not an explicit file path — may become available at build time`,
+  };
 }
 
-// ── validation pipeline ──
-
-export function validateConfig(input: ValidateConfigInput): ValidateConfigResult {
-  const { workspaceRoot, checkFiles = false } = input;
+function checkFileExistence(
+  gatesParsed: unknown | null,
+  workspaceRoot: string,
+): ConfigIssue[] {
   const issues: ConfigIssue[] = [];
+  if (!gatesParsed || typeof gatesParsed !== "object") return issues;
 
-  // 1. Config file discovery + YAML parsing
-  const unifiedPath = path.join(workspaceRoot, ".quay", "config.yml");
-  let rawConfig: string;
-  let parsed: Record<string, unknown>;
-  try {
-    rawConfig = fs.readFileSync(unifiedPath, "utf8");
-  } catch {
-    return { ok: false, issues: [issue("error", ".quay/config.yml", `config file not readable at ${unifiedPath}`)] };
-  }
-  try {
-    parsed = YAML.parse(rawConfig) as Record<string, unknown> || {};
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, issues: [issue("error", ".quay/config.yml", `YAML parse error: ${msg}`)] };
-  }
+  const g = gatesParsed as Record<string, unknown>;
 
-  // 2. Provider check: every enabled provider must have mcp_entry
-  const providers = (parsed.providers || {}) as Record<string, Record<string, unknown>>;
-  for (const [pid, pcfg] of Object.entries(providers)) {
-    if (!pcfg || typeof pcfg !== "object") continue;
-    if (pcfg.enabled === true) {
-      if (!Array.isArray(pcfg.mcp_entry) || (pcfg.mcp_entry as unknown[]).length === 0) {
-        issues.push(issue("error", `providers.${pid}.mcp_entry`,
-          `enabled provider "${pid}" is missing a valid mcp_entry`,
-          "add a mcp_entry: [command, ...args] to the provider config"));
-      }
-    }
-  }
-
-  // 3. Gate nesting check + shape check
-  const gates = (parsed.gates || {}) as Record<string, unknown>;
-  if (gates && typeof gates === "object" && !Array.isArray(gates)) {
-    for (const [key, value] of Object.entries(gates)) {
-      if (!(key in GATE_TYPE_SCHEMAS)) {
-        issues.push(issue("error", `gates.${key}`,
-          `unrecognized gate type key "${key}"`,
-          `valid gate type keys: ${Object.keys(GATE_TYPE_SCHEMAS).join(", ")}. ` +
-          `Gate entries must be nested under a gate-type key, e.g. gates:\n  it0:\n    - name: mygate\n      script: ./mygate.sh\n      argsKey: mygate`));
-      } else {
-        const schema = GATE_TYPE_SCHEMAS[key]!;
-        const entries = Array.isArray(value) ? value : [];
-        if (key === "adr") {
-          // adr is a string array, check each element is non-empty
-          if (!Array.isArray(value)) {
-            issues.push(issue("error", `gates.${key}`, `"${key}" entries must be an array of strings`));
-          } else {
-            for (let i = 0; i < entries.length; i++) {
-              if (typeof entries[i] !== "string" || (entries[i] as string).trim() === "") {
-                issues.push(issue("error", `gates.${key}[${i}]`, `adr entry at index ${i} must be a non-empty string`));
-              }
-            }
-          }
-        } else {
-          // Array of objects with required fields
-          if (!Array.isArray(value)) {
-            issues.push(issue("error", `gates.${key}`, `"${key}" gate type expects an array of entries, got ${typeof value}`));
-          } else {
-            for (let i = 0; i < (entries as unknown[]).length; i++) {
-              const entry = (entries as unknown[])[i] as Record<string, unknown> | null | undefined;
-              if (!entry || typeof entry !== "object") {
-                issues.push(issue("error", `gates.${key}[${i}]`, `gate entry at index ${i} is not an object`));
-                continue;
-              }
-              for (const req of schema.required) {
-                if (entry[req] === undefined || entry[req] === null) {
-                  issues.push(issue("error", `gates.${key}[${i}].${req}`,
-                    `missing required field "${req}" in ${schema.typeLabel} gate entry`,
-                    `add "${req}": <value> to this gate entry`));
-                }
-              }
-              // --check-files for it0/fixed scripts
-              if (checkFiles) {
-                if ((key === "it0" || key === "fixed") && typeof entry.script === "string") {
-                  const scriptPath = path.resolve(workspaceRoot, entry.script as string);
-                  if (!existsSafe(scriptPath)) {
-                    issues.push(issue("error", `gates.${key}[${i}].script`,
-                      `file not found: ${scriptPath}`,
-                      "verify the script path exists or is generated before running the gate"));
-                  }
-                }
-                if (["testPass", "coverageFloor"].includes(key) && typeof entry.command === "string") {
-                  const tok = firstToken(entry.command as string);
-                  const r = checkCommandToken(tok, workspaceRoot, `gates.${key}[${i}].command`);
-                  if (r) issues.push(r);
-                }
-                if (key === "redGreen") {
-                  for (const f of ["red", "green"]) {
-                    if (typeof entry[f] === "string") {
-                      const tok = firstToken(entry[f] as string);
-                      const r = checkCommandToken(tok, workspaceRoot, `gates.${key}[${i}].${f}`);
-                      if (r) issues.push(r);
-                    }
-                  }
-                }
-              }
-            }
+  // it0 entries: script path
+  const it0Arr = g.it0;
+  if (Array.isArray(it0Arr)) {
+    for (let i = 0; i < (it0Arr as unknown[]).length; i++) {
+      const entry = (it0Arr as unknown[])[i];
+      if (entry && typeof entry === "object") {
+        const e = entry as Record<string, unknown>;
+        if (typeof e.script === "string" && e.script.trim() !== "") {
+          const script = e.script.trim();
+          const resolved = path.isAbsolute(script) ? script : path.resolve(workspaceRoot, script);
+          if (!fs.existsSync(resolved)) {
+            issues.push({
+              severity: "error",
+              field: `gates.it0[${i}].script`,
+              message: `Script file not found: "${script}" (resolved to ${resolved})`,
+            });
           }
         }
       }
     }
   }
 
-  // 4. Gate reference resolution + loop field checks
-  if (parsed.loop !== undefined && parsed.loop !== null && typeof parsed.loop === "object") {
-    const loop = parsed.loop as Record<string, unknown>;
-    // Build set of known gate names: listGates() for built-ins + parse workspace gates from raw YAML
-    const knownGateNames = new Set(listGates(workspaceRoot));
-    // Also add workspace-declared gate names from raw parsed gates section
-    if (gates && typeof gates === "object" && !Array.isArray(gates)) {
-      for (const [key, value] of Object.entries(gates)) {
-        if (key in GATE_TYPE_SCHEMAS && key !== "adr" && Array.isArray(value)) {
-          for (const entry of value as unknown[]) {
-            if (entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).name === "string") {
-              knownGateNames.add((entry as Record<string, unknown>).name as string);
+  // fixed entries: script path
+  const fixedArr = g.fixed;
+  if (Array.isArray(fixedArr)) {
+    for (let i = 0; i < (fixedArr as unknown[]).length; i++) {
+      const entry = (fixedArr as unknown[])[i];
+      if (entry && typeof entry === "object") {
+        const e = entry as Record<string, unknown>;
+        if (typeof e.script === "string" && e.script.trim() !== "") {
+          const script = e.script.trim();
+          const resolved = path.isAbsolute(script) ? script : path.resolve(workspaceRoot, script);
+          if (!fs.existsSync(resolved)) {
+            issues.push({
+              severity: "error",
+              field: `gates.fixed[${i}].script`,
+              message: `Script file not found: "${script}" (resolved to ${resolved})`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // testPass entries: command first token
+  const tpArr = g.testPass;
+  if (Array.isArray(tpArr)) {
+    for (let i = 0; i < (tpArr as unknown[]).length; i++) {
+      const entry = (tpArr as unknown[])[i];
+      if (entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).command === "string") {
+        const cmd = ((entry as Record<string, unknown>).command as string).trim();
+        if (cmd) {
+          const firstToken = cmd.split(/\s+/)[0];
+          const issue = classifyCommandToken(firstToken, `gates.testPass[${i}].command`, workspaceRoot);
+          if (issue) issues.push(issue);
+        }
+      }
+    }
+  }
+
+  // coverageFloor entries: command first token
+  const cfArr = g.coverageFloor;
+  if (Array.isArray(cfArr)) {
+    for (let i = 0; i < (cfArr as unknown[]).length; i++) {
+      const entry = (cfArr as unknown[])[i];
+      if (entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).command === "string") {
+        const cmd = ((entry as Record<string, unknown>).command as string).trim();
+        if (cmd) {
+          const firstToken = cmd.split(/\s+/)[0];
+          const issue = classifyCommandToken(firstToken, `gates.coverageFloor[${i}].command`, workspaceRoot);
+          if (issue) issues.push(issue);
+        }
+      }
+    }
+  }
+
+  // redGreen entries: red and green command first tokens
+  const rgArr = g.redGreen;
+  if (Array.isArray(rgArr)) {
+    for (let i = 0; i < (rgArr as unknown[]).length; i++) {
+      const entry = (rgArr as unknown[])[i];
+      if (entry && typeof entry === "object") {
+        const e = entry as Record<string, unknown>;
+        for (const field of ["red", "green"]) {
+          if (typeof e[field] === "string") {
+            const cmd = (e[field] as string).trim();
+            if (cmd) {
+              const firstToken = cmd.split(/\s+/)[0];
+              const issue = classifyCommandToken(firstToken, `gates.redGreen[${i}].${field}`, workspaceRoot);
+              if (issue) issues.push(issue);
             }
           }
         }
       }
     }
-
-    if (loop.gates !== undefined) {
-      const loopGates = Array.isArray(loop.gates) ? (loop.gates as string[]) :
-        (typeof loop.gates === "string" ? [loop.gates as string] : []);
-      for (const g of loopGates) {
-        if (typeof g !== "string" || !knownGateNames.has(g)) {
-          issues.push(issue("error", "loop.gates",
-            `unresolved gate reference: "${g}"`,
-            `known gates: [${[...knownGateNames].sort().join(", ")}]. Register the gate in .quay/config.yml's gates: section.`));
-        }
-      }
-    }
-
-    // 5. Loop required fields
-    if (loop.board === undefined || (typeof loop.board === "string" && loop.board.trim() === "")) {
-      issues.push(issue("error", "loop.board", "missing required field \"board\" in loop section",
-        "set board to the provider name (e.g. board: native)"));
-    }
-
-    // 6. Loop field validation
-    if (loop.execution !== undefined && !VALID_EXECUTION.has(loop.execution as string)) {
-      issues.push(issue("error", "loop.execution",
-        `invalid execution value: "${loop.execution}"`,
-        `must be one of: ${[...VALID_EXECUTION].join(", ")}`));
-    }
-    if (loop.audit !== undefined && !VALID_AUDIT.has(loop.audit as string)) {
-      issues.push(issue("error", "loop.audit",
-        `invalid audit value: "${loop.audit}"`,
-        `must be one of: ${[...VALID_AUDIT].join(", ")}`));
-    }
-    if (loop.concurrency !== undefined) {
-      const c = Number(loop.concurrency);
-      if (!Number.isInteger(c) || c < 1) {
-        issues.push(issue("error", "loop.concurrency",
-          `concurrency must be an integer >= 1, got "${loop.concurrency}"`));
-      }
-    }
-    if (loop.stop !== undefined && typeof loop.stop === "string" && !VALID_STOP_RE.test(loop.stop as string)) {
-      issues.push(issue("error", "loop.stop",
-        `invalid stop value: "${loop.stop}"`,
-        `must match once, until(.halt), or until(...)`));
-    }
-
-    // 7. Routine shape check
-    if (loop.routines !== undefined && Array.isArray(loop.routines)) {
-      const TRIGGER_RE = /^(every\(\s*\d+\s*\)|on\(\s*[\w-]+\s*\))$/;
-      const routines = loop.routines as unknown[];
-      for (let i = 0; i < routines.length; i++) {
-        const r = routines[i] as Record<string, unknown> | null | undefined;
-        if (!r || typeof r !== "object") {
-          issues.push(issue("error", `loop.routines[${i}]`, "routine entry is not an object"));
-          continue;
-        }
-        if (!r.name || typeof r.name !== "string" || r.name.trim() === "") {
-          issues.push(issue("error", `loop.routines[${i}].name`, "routine must have a non-empty name"));
-        }
-        if (r.trigger === undefined || typeof r.trigger !== "string" || r.trigger.trim() === "") {
-          issues.push(issue("error", `loop.routines[${i}].trigger`,
-            "routine must have a trigger",
-            "use every(N) for interval or on(name) for named trigger"));
-        } else if (!TRIGGER_RE.test(r.trigger as string)) {
-          issues.push(issue("error", `loop.routines[${i}].trigger`,
-            `invalid trigger pattern: "${r.trigger}"`,
-            "must match every(N) or on(name)"));
-        } else {
-          // Check N >= 1 for every(N)
-          const m = (r.trigger as string).match(/^every\(\s*(\d+)\s*\)$/);
-          if (m && parseInt(m[1]!, 10) < 1) {
-            issues.push(issue("error", `loop.routines[${i}].trigger`,
-              `every(N) requires N >= 1, got ${m[1]}`));
-          }
-        }
-        const hasDispatch = r.dispatch && typeof r.dispatch === "string" && r.dispatch.trim() !== "";
-        const hasProbe = r.probe && typeof r.probe === "string" && r.probe.trim() !== "";
-        if (!hasDispatch && !hasProbe) {
-          issues.push(issue("error", `loop.routines[${i}]`,
-            "routine must have at least one of dispatch or probe",
-            "add dispatch: '<command>' or probe: '<command>'"));
-        }
-      }
-    }
   }
 
-  // 8. --check-files: also check gates in top-level section
-  // (already done inline during gate shape check for it0/fixed/testPass/coverageFloor/redGreen)
+  return issues;
+}
 
-  const hasErrors = issues.some((i) => i.severity === "error");
-  return { ok: !hasErrors, issues };
+// ---------------------------------------------------------------------------
+// Main export
+// ---------------------------------------------------------------------------
+
+export function validateConfig({ workspaceRoot, checkFiles = false }: ValidateConfigArgs): ValidateConfigResult {
+  const allIssues: ConfigIssue[] = [];
+
+  // 1+2. Config file discovery + YAML syntax check
+  const { issues: parseIssues, unifiedParsed, gatesParsed, loopParsed } = discoverAndParse(workspaceRoot);
+  allIssues.push(...parseIssues);
+
+  // If YAML parsing failed catastrophically, stop
+  const hasYamlError = allIssues.some(
+    (i) => i.field === "config.yml" && i.message.startsWith("YAML syntax error")
+  );
+  if (hasYamlError) {
+    return { ok: false, issues: allIssues };
+  }
+
+  // If no config at all was found, stop
+  if (allIssues.some((i) => i.field === "config" && i.message.startsWith("No config file found"))) {
+    return { ok: false, issues: allIssues };
+  }
+
+  // Determine effective gate/loop sources
+  const effectiveGatesParsed = unifiedParsed ? gatesParsed : gatesParsed;
+  const effectiveLoopParsed = unifiedParsed ? loopParsed : loopParsed;
+
+  // 3. Provider check
+  if (unifiedParsed) {
+    allIssues.push(...checkProviders(unifiedParsed));
+  }
+
+  // 4. Gate nesting check
+  if (effectiveGatesParsed) {
+    allIssues.push(...checkGateNesting(effectiveGatesParsed));
+  }
+
+  // 5. Gate shape check
+  if (effectiveGatesParsed) {
+    allIssues.push(...checkGateShapes(effectiveGatesParsed));
+  }
+
+  // 6. Gate reference resolution
+  if (effectiveLoopParsed) {
+    allIssues.push(...checkGateReferences(effectiveLoopParsed, effectiveGatesParsed, workspaceRoot));
+  }
+
+  // 7. Loop required fields
+  if (effectiveLoopParsed) {
+    allIssues.push(...checkLoopRequiredFields(effectiveLoopParsed));
+  }
+
+  // 8. Loop field values
+  if (effectiveLoopParsed) {
+    allIssues.push(...checkLoopFieldValues(effectiveLoopParsed));
+  }
+
+  // 9. Routine shape
+  if (effectiveLoopParsed) {
+    allIssues.push(...checkRoutines(effectiveLoopParsed));
+  }
+
+  // 10. Provider env check
+  if (unifiedParsed) {
+    allIssues.push(...validateProviderEnv(unifiedParsed));
+  }
+
+  // 11. File-existence check
+  if (checkFiles && effectiveGatesParsed) {
+    allIssues.push(...checkFileExistence(effectiveGatesParsed, workspaceRoot));
+  }
+
+  // 10. Warn-exit contract
+  const ok = !allIssues.some((i) => i.severity === "error");
+
+  return { ok, issues: allIssues };
 }
