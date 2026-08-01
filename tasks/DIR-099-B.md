@@ -82,43 +82,43 @@ is treated as absent. So github-missing-env is ALSO a false-positive-as-error.
 
 ## Acceptance Criteria
 
-- [ ] A native provider without `QUAY_NATIVE_TASKS_DIR`/`tasks_dir` yields a `warn` (not
+- [x] A native provider without `QUAY_NATIVE_TASKS_DIR`/`tasks_dir` yields a `warn` (not
   an error) — the config exits 0 (false-positive fixed).
-- [ ] A github provider without `QUAY_GITHUB_REPO` yields a `warn` (exit 0, not error) —
+- [x] A github provider without `QUAY_GITHUB_REPO` yields a `warn` (exit 0, not error) —
   `resolveRepo()` defaults to `yaleh/quay`, so the config runs correctly at runtime
   (second false-positive fixed).
-- [ ] A github provider with PRESENT-but-malformed `QUAY_GITHUB_REPO` (not
+- [x] A github provider with PRESENT-but-malformed `QUAY_GITHUB_REPO` (not
   `owner/repo`) yields an `error` (exit 1). NOTE the runtime predicate is NOT a
   strict `^owner/repo$` regex: `resolveRepo()` accepts `a/b/c` (uses the first two
   split segments) and treats an empty-string PRESENT env as absent (defaults, no
   throw). AC3 must mirror the RUNTIME predicate — a strict-shape check over-flags
   and breaks the "matches the runtime throw" guarantee.
-- [ ] A provider with both env vars set yields zero provider-env issues.
-- [ ] `warn`-severity issues are non-fatal: `config validate` exits 0 when the only issues
+- [x] A provider with both env vars set yields zero provider-env issues.
+- [x] `warn`-severity issues are non-fatal: `config validate` exits 0 when the only issues
   are warns; only `error` severity forces exit 1 (the pinned warn-exit contract owned by
   DIR-099-A's CLI).
-- [ ] The check reads the provider's `env:` map only (grounded fact #4), never
+- [x] The check reads the provider's `env:` map only (grounded fact #4), never
   `provider.tasks_dir` as an env source.
-- [ ] **Real-callsite evidence (AC, not DoD prose):** a real `config validate` run against
+- [x] **Real-callsite evidence (AC, not DoD prose):** a real `config validate` run against
   a github-provider workspace with no `QUAY_GITHUB_REPO` emits a `warn` and exits 0; a
   real run with malformed `QUAY_GITHUB_REPO` emits an `error` and exits 1.
 
-- [ ] A github provider with `QUAY_GITHUB_REPO: ""` (present-but-empty) yields a `warn`
+- [x] A github provider with `QUAY_GITHUB_REPO: ""` (present-but-empty) yields a `warn`
   (not error) — the empty string is falsy, `resolveRepo` treats it as absent and defaults
   to `yaleh/quay`; the check must mirror this, never "key present + not owner/repo →
   error" (that re-introduces the false-positive class this child exists to fix).
-- [ ] AC6 falsifier (env-map-only): a native provider with `tasks_dir` set but
+- [x] AC6 falsifier (env-map-only): a native provider with `tasks_dir` set but
   `QUAY_NATIVE_TASKS_DIR` absent from the env map STILL yields a `warn` — proving the
   check reads the env map only, never `tasks_dir` as an env source.
-- [ ] Tests: `packages/quay/test/config-validate.test.mjs` RED/GREEN for the corrected
+- [x] Tests: `packages/quay/test/config-validate.test.mjs` RED/GREEN for the corrected
   semantics.
 
 ## Definition of Done
 
 Standard inherited-core DoD clauses apply.
 
-- [ ] Landed on `master` under human-steered discipline.
-- [ ] Real run: this repo's native provider (env set) → no provider-env issue; a
+- [x] Landed on `master` under human-steered discipline.
+- [x] Real run: this repo's native provider (env set) → no provider-env issue; a
   github-without-repo fixture → warn (exit 0); a present-malformed fixture → error.
 - [ ] A fresh independent audit finds no refutation.
 

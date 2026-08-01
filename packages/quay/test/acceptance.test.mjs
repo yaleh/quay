@@ -304,3 +304,314 @@ test("C1 [regression]: `--gate dod` still routes to QENG-1's dod gate", () => {
   assert.equal(r.status, 0, `expected dod PASS exit 0; got ${r.status}, stdout=${r.stdout}, stderr=${r.stderr}`);
   assert.match(r.stdout, /PASS/);
 });
+
+// ===========================================================================
+// Phase D / dry-run — `gate --dry-run` / `gate -n` (DIR-103-A, M223)
+// ===========================================================================
+
+// D1: helper unit — runAcceptanceCapture on exit 0 with stdout
+test("D1: runAcceptanceCapture('printf dry-ok; exit 0') -> { output contains stdout, code:0, timedOut:false }", async () => {
+  const { runAcceptanceCapture } = await import("../src/gate/acceptance-runner.ts");
+  const r = runAcceptanceCapture({ command: "printf 'dry-ok'; exit 0", cwd: tmpCwd("d1-pass"), timeoutMs: 5000 });
+  assert.equal(r.code, 0);
+  assert.equal(r.timedOut, false);
+  assert.ok(r.output.includes("dry-ok"), `expected output to include 'dry-ok', got: ${JSON.stringify(r.output)}`);
+  assert.equal(r.error, null);
+});
+
+// D1: helper unit — runAcceptanceCapture on exit 3 with stderr
+test("D1: runAcceptanceCapture('printf dry-err >&2; exit 3') -> { code:3, output contains stderr }", async () => {
+  const { runAcceptanceCapture } = await import("../src/gate/acceptance-runner.ts");
+  const r = runAcceptanceCapture({ command: "printf 'dry-err' >&2; exit 3", cwd: tmpCwd("d1-fail"), timeoutMs: 5000 });
+  assert.equal(r.code, 3);
+  assert.equal(r.timedOut, false);
+  assert.ok(r.output.includes("dry-err"), `expected output to include 'dry-err', got: ${JSON.stringify(r.output)}`);
+  assert.equal(r.error, null);
+});
+
+// D1: helper unit — runAcceptanceCapture on timeout
+test("D1: runAcceptanceCapture('sleep 30', timeoutMs:200) -> { timedOut:true, code:null }", async () => {
+  const { runAcceptanceCapture } = await import("../src/gate/acceptance-runner.ts");
+  const r = runAcceptanceCapture({ command: "sleep 30", cwd: tmpCwd("d1-timeout"), timeoutMs: 200 });
+  assert.equal(r.timedOut, true);
+  assert.equal(r.code, null);
+  assert.equal(r.error, null);
+});
+
+// D2 [AC4]: dry-run appends ZERO GateEvents (real before/after) + positive assertion
+test("D2 [AC4]: gate --dry-run appends zero GateEvents, log byte-identical before/after", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("d2-nolog");
+  const logFile = path.join(workspaceRoot, "g.jsonl");
+  runNative(["task", "create", "QENG2DR1", "--title", "dry-run out fixture", "--status", "todo"], tasksDir);
+
+  const edit = runQuay(["task", "edit", "QENG2DR1", "--acceptance", "printf 'dry-out'; exit 3"], workspaceRoot);
+  assert.equal(edit.status, 0, `edit failed: ${edit.stderr}`);
+
+  const beforeLog = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+
+  const gate = runQuay(["gate", "--dry-run", "QENG2DR1", "--file", logFile], workspaceRoot);
+  // Positive: the command actually executed
+  assert.ok(gate.stdout.includes("dry-out"), `expected stdout to contain 'dry-out', got: ${gate.stdout}`);
+  assert.ok(gate.stdout.includes("dry-run: exit 3"), `expected stdout to contain 'dry-run: exit 3', got: ${gate.stdout}`);
+
+  const afterLog = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+  assert.equal(afterLog, beforeLog, `gate-event log changed: before=${JSON.stringify(beforeLog)} after=${JSON.stringify(afterLog)}`);
+});
+
+// D3 [AC5]: dry-run leaves status unchanged (ready fixture stays ready)
+test("D3 [AC5]: gate --dry-run leaves task status unchanged (ready stays ready)", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("d3-status");
+  const logFile = path.join(workspaceRoot, "g.jsonl");
+  runNative(["task", "create", "QENG2DR2", "--title", "dry-run ready fixture", "--status", "ready"], tasksDir);
+
+  const edit = runQuay(["task", "edit", "QENG2DR2", "--acceptance", "exit 0"], workspaceRoot);
+  assert.equal(edit.status, 0, `edit failed: ${edit.stderr}`);
+
+  const gate = runQuay(["gate", "--dry-run", "QENG2DR2", "--file", logFile], workspaceRoot);
+  // Positive: the dry-run actually executed
+  assert.ok(gate.stdout.includes("dry-run: exit 0"), `expected stdout to contain 'dry-run: exit 0', got: ${gate.stdout}`);
+
+  const view = runQuay(["task", "view", "QENG2DR2", "--json"], workspaceRoot);
+  const t = JSON.parse(view.stdout);
+  assert.equal(t.status, "ready", `expected status 'ready', got ${JSON.stringify(t.status)}`);
+});
+
+// D4 [AC1/AC2]: exit code surfaced + output printed
+test("D4 [AC1/AC2]: gate --dry-run prints stdout/stderr and mirrors exit code", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("d4-exitcode");
+  const logFile = path.join(workspaceRoot, "g.jsonl");
+  runNative(["task", "create", "QENG2DR3", "--title", "dry-run ok fixture", "--status", "todo"], tasksDir);
+
+  const edit = runQuay(["task", "edit", "QENG2DR3", "--acceptance", "printf 'DRYRUN-OK'; exit 7"], workspaceRoot);
+  assert.equal(edit.status, 0, `edit failed: ${edit.stderr}`);
+
+  const gate = runQuay(["gate", "--dry-run", "QENG2DR3", "--file", logFile], workspaceRoot);
+  assert.equal(gate.status, 7, `expected exit 7, got ${gate.status}, stdout=${gate.stdout}, stderr=${gate.stderr}`);
+  assert.ok(gate.stdout.includes("DRYRUN-OK"), `expected stdout to contain 'DRYRUN-OK', got: ${gate.stdout}`);
+  assert.ok(gate.stdout.includes("dry-run: exit 7"), `expected stdout to contain 'dry-run: exit 7', got: ${gate.stdout}`);
+});
+
+// D5 [AC3]: -n short flag equivalence (both positions)
+test("D5 [AC3]: gate -n behaves identically to gate --dry-run (both positions)", () => {
+  const { workspaceRoot, tasksDir } = makeWorkspace("d5-shortflag");
+  const logFile = path.join(workspaceRoot, "g.jsonl");
+  runNative(["task", "create", "QENG2DR4", "--title", "dry-run -n fixture", "--status", "todo"], tasksDir);
+
+  const edit = runQuay(["task", "edit", "QENG2DR4", "--acceptance", "printf 'DRYRUN-N-OK'; exit 7"], workspaceRoot);
+  assert.equal(edit.status, 0, `edit failed: ${edit.stderr}`);
+
+  // flag-first: gate -n <id>
+  const beforeLog = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+  const gate1 = runQuay(["gate", "-n", "QENG2DR4", "--file", logFile], workspaceRoot);
+  assert.equal(gate1.status, 7, `flag-first -n: expected exit 7, got ${gate1.status}, stdout=${gate1.stdout}`);
+  assert.ok(gate1.stdout.includes("DRYRUN-N-OK"), `flag-first -n: expected 'DRYRUN-N-OK' in stdout, got: ${gate1.stdout}`);
+  assert.ok(gate1.stdout.includes("dry-run: exit 7"), `flag-first -n: expected 'dry-run: exit 7' in stdout, got: ${gate1.stdout}`);
+  const afterLog1 = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+  assert.equal(afterLog1, beforeLog, `-n flag-first appended a GateEvent`);
+
+  // id-first: gate <id> -n
+  const gate2 = runQuay(["gate", "QENG2DR4", "-n", "--file", logFile], workspaceRoot);
+  assert.equal(gate2.status, 7, `id-first -n: expected exit 7, got ${gate2.status}, stdout=${gate2.stdout}`);
+  assert.ok(gate2.stdout.includes("DRYRUN-N-OK"), `id-first -n: expected 'DRYRUN-N-OK' in stdout, got: ${gate2.stdout}`);
+  assert.ok(gate2.stdout.includes("dry-run: exit 7"), `id-first -n: expected 'dry-run: exit 7' in stdout, got: ${gate2.stdout}`);
+  const afterLog2 = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+  assert.equal(afterLog2, beforeLog, `-n id-first appended a GateEvent`);
+});
+
+// ===========================================================================
+// Phase D / M225 — DIR-103-C: per-provider acceptance_env env file sourcing
+// T1–T2: unit tests (direct import runAcceptance with envFile)
+// T3: per-provider CLI (two providers, different env files)
+// T4: MCP gate_run surface via connectStdio
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// T1–T2: A2-level — direct-import runAcceptance env-file tests (AC #1, AC #2)
+// ---------------------------------------------------------------------------
+
+test("A2 [T1]: runAcceptance with envFile sources exports so the command sees them (AC #1)", () => {
+  const cwd = tmpCwd("t1-env");
+  const envFile = path.join(cwd, "acceptance.env");
+  fs.writeFileSync(envFile, "export QUAY_ACCEPTANCE_TEST_VAR=from_file\n");
+  const r = runAcceptance({
+    command: 'test "$QUAY_ACCEPTANCE_TEST_VAR" = "from_file"',
+    cwd,
+    timeoutMs: 5000,
+    envFile,
+  });
+  assert.equal(r.ok, true, `expected ok:true; got ${JSON.stringify(r)}`);
+  assert.match(r.reason, /passed/);
+});
+
+test("A2 [T1-control]: same command WITHOUT envFile fails — proving the var came from the file", () => {
+  const cwd = tmpCwd("t1-ctrl");
+  const r = runAcceptance({
+    command: 'test "$QUAY_ACCEPTANCE_TEST_VAR" = "from_file"',
+    cwd,
+    timeoutMs: 5000,
+  });
+  assert.equal(r.ok, false, `expected ok:false (var not set); got ${JSON.stringify(r)}`);
+});
+
+test("A2 [T1]: envFile with multiple exports all visible to the command", () => {
+  const cwd = tmpCwd("t1-multi");
+  const envFile = path.join(cwd, "acceptance.env");
+  fs.writeFileSync(envFile, "export A=hello\nexport B=world\n");
+  const r = runAcceptance({
+    command: 'test "$A" = "hello" && test "$B" = "world"',
+    cwd,
+    timeoutMs: 5000,
+    envFile,
+  });
+  assert.equal(r.ok, true, `expected ok:true; got ${JSON.stringify(r)}`);
+});
+
+test("A2 [T2]: runAcceptance with non-existent envFile fails-closed BEFORE execution (AC #2)", () => {
+  const cwd = tmpCwd("t2-missing");
+  const marker = path.join(cwd, "marker");
+  const missingFile = path.join(cwd, "no-such-env.env");
+  const r = runAcceptance({
+    command: `touch ${marker}`,
+    cwd,
+    timeoutMs: 5000,
+    envFile: missingFile,
+  });
+  assert.equal(r.ok, false, `expected ok:false; got ${JSON.stringify(r)}`);
+  assert.match(r.reason, /acceptance_env file not found|no such file/i, `reason should name missing file: ${r.reason}`);
+  assert.equal(fs.existsSync(marker), false, "marker must NOT exist — acceptance command was never executed");
+});
+
+test("A2 [T2]: missing envFile reason names the specific path", () => {
+  const cwd = tmpCwd("t2-path");
+  const missingFile = path.join(cwd, "really-missing.env");
+  const r = runAcceptance({
+    command: "exit 0",
+    cwd,
+    timeoutMs: 5000,
+    envFile: missingFile,
+  });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, new RegExp(missingFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+// ---------------------------------------------------------------------------
+// T3: C1-level — per-provider CLI with two providers, different env files (AC #3, AC #5)
+// ---------------------------------------------------------------------------
+
+test("C1 [T3]: two providers with different acceptance_env — enabled provider honors its own (AC #3, #5)", () => {
+  const tag = "t3-2prov";
+  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng2-${tag}-tasks-`));
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng2-${tag}-ws-`));
+
+  const envA = path.join(workspaceRoot, "envA.env");
+  const envB = path.join(workspaceRoot, "envB.env");
+  fs.writeFileSync(envA, "export WHICH_PROVIDER=provider_a\n");
+  fs.writeFileSync(envB, "export WHICH_PROVIDER=provider_b\n");
+
+  fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(workspaceRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      `    acceptance_env: "${envA.replaceAll("\\", "\\\\")}"`,
+      "  native-b:",
+      "    enabled: false",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      `    acceptance_env: "${envB.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+
+  runNative(["task", "create", "T3PROVA", "--title", "per-provider a", "--status", "todo"], tasksDir);
+  const editA = runQuay(["task", "edit", "T3PROVA", "--acceptance", 'test "$WHICH_PROVIDER" = "provider_a"'], workspaceRoot);
+  assert.equal(editA.status, 0, `editA failed: ${editA.stderr}`);
+
+  runNative(["task", "create", "T3PROVB", "--title", "per-provider b", "--status", "todo"], tasksDir);
+  const editB = runQuay(["task", "edit", "T3PROVB", "--acceptance", 'test "$WHICH_PROVIDER" = "provider_b"'], workspaceRoot);
+  assert.equal(editB.status, 0, `editB failed: ${editB.stderr}`);
+
+  const logFile = path.join(workspaceRoot, "g.jsonl");
+
+  // Enabled provider native → envA
+  const gateA = runQuay(["gate", "T3PROVA", "--file", logFile], workspaceRoot);
+  assert.equal(gateA.status, 0, `expected native gate PASS exit 0 (envA); got ${gateA.status}, stdout=${gateA.stdout}, stderr=${gateA.stderr}`);
+  assert.match(gateA.stdout, /PASS/);
+
+  // Explicit --provider native-b → envB
+  const gateB = runQuay(["gate", "T3PROVB", "--file", logFile, "--provider", "native-b"], workspaceRoot);
+  assert.equal(gateB.status, 0, `expected native-b gate PASS exit 0 (envB); got ${gateB.status}, stdout=${gateB.stdout}, stderr=${gateB.stderr}`);
+  assert.match(gateB.stdout, /PASS/);
+
+  // Negative control: native-b envB is wrong for envA's task
+  const gateWrong = runQuay(["gate", "T3PROVA", "--file", logFile, "--provider", "native-b"], workspaceRoot);
+  assert.equal(gateWrong.status, 1, `expected FAIL (wrong provider env); got ${gateWrong.status}, stdout=${gateWrong.stdout}`);
+  assert.match(gateWrong.stdout, /FAIL/);
+});
+
+// ---------------------------------------------------------------------------
+// T4: C1-level — MCP gate_run surface sees env exports (AC #4)
+// ---------------------------------------------------------------------------
+
+test("C1 [T4]: MCP gate_run surface sees acceptance_env exports (AC #4)", async () => {
+  const tag = "t4-mcp";
+  const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng2-${tag}-tasks-`));
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), `quay-qeng2-${tag}-ws-`));
+
+  const envFile = path.join(workspaceRoot, "mcp-test.env");
+  fs.writeFileSync(envFile, "export MCP_ENV_TEST_VAR=hello_from_mcp_env\n");
+
+  fs.mkdirSync(path.join(workspaceRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(workspaceRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    tasks_dir: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${tasksDir.replaceAll("\\", "\\\\")}"`,
+      `    acceptance_env: "${envFile.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+
+  runNative(["task", "create", "T4MCP", "--title", "mcp env test", "--status", "todo"], tasksDir);
+  runNative(["task", "edit", "T4MCP", "--extra", JSON.stringify({ acceptance: 'test "$MCP_ENV_TEST_VAR" = "hello_from_mcp_env"' })], tasksDir);
+
+  // Drive the REAL MCP surface via StdioClientTransport (mirrors mcp-server.test.mjs pattern)
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+  const coreBin = path.join(__dirname, "..", "bin", "quay.ts");
+
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [coreBin, "mcp"],
+    cwd: workspaceRoot,
+    env: process.env,
+  });
+  const client = new Client({ name: "test-agent", version: "0.0.1" });
+  await client.connect(transport);
+
+  try {
+    const result = await client.callTool({ name: "gate_run", arguments: { id: "T4MCP" } });
+    const sc = result.structuredContent;
+    assert.ok(sc, `structuredContent missing: ${JSON.stringify(result)}`);
+    assert.equal(sc.ok, true, `expected ok:true; got ${JSON.stringify(sc)}`);
+    assert.match(sc.reason, /passed/);
+  } finally {
+    await client.close();
+  }
+});

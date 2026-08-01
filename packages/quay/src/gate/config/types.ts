@@ -2,6 +2,18 @@
 // Types used by the config/loader.ts and workspace-gate builder, plus
 // the shared GateConfig / RunnerOptions originally in factories/utils.ts.
 
+/** Source provenance: which file and line a gate entry was defined at. */
+export interface GateSource {
+  file: string;
+  line: number;
+}
+
+/** A diagnostic emitted during gate loading (malformed entry, shadowed gate, etc.). */
+export interface GateDiagnostic {
+  level: "WARNING" | "ERROR";
+  message: string;
+}
+
 /** Shared gate configuration (cwd/timeoutMs). */
 export interface GateConfig {
   cwd?: string;
@@ -12,6 +24,11 @@ export interface GateConfig {
 export interface RunnerOptions {
   cwd: string;
   timeoutMs: number;
+  /** Per-provider `acceptance_env` file path, resolved and pinned via
+   *  QUAY_ACCEPTANCE_ENV at the CLI/MCP layer — DIR-103-C. When set, the
+   *  runner dot-sources this file before the acceptance command; missing
+   *  file fails closed pre-execution. Undefined means no env file. */
+  envFile?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -24,6 +41,7 @@ export interface It0Entry {
   argsKey: string;
   cwd?: string;
   timeoutMs?: number;
+  src?: GateSource;
 }
 
 export interface FixedEntry {
@@ -31,6 +49,7 @@ export interface FixedEntry {
   script: string;
   cwd?: string;
   timeoutMs?: number;
+  src?: GateSource;
 }
 
 export interface TestPassEntry {
@@ -38,6 +57,7 @@ export interface TestPassEntry {
   command: string;
   cwd?: string;
   timeoutMs?: number;
+  src?: GateSource;
 }
 
 export interface CoverageFloorEntry {
@@ -47,6 +67,7 @@ export interface CoverageFloorEntry {
   pattern?: string;
   cwd?: string;
   timeoutMs?: number;
+  src?: GateSource;
 }
 
 export interface RedGreenEntry {
@@ -55,6 +76,7 @@ export interface RedGreenEntry {
   green: string;
   cwd?: string;
   timeoutMs?: number;
+  src?: GateSource;
 }
 
 /** Parsed shape of a workspace's gates.yml (or config.yml `gates:` section). */
@@ -65,4 +87,5 @@ export interface GatesConfig {
   testPass: TestPassEntry[];
   coverageFloor: CoverageFloorEntry[];
   redGreen: RedGreenEntry[];
+  srcFile?: string;
 }

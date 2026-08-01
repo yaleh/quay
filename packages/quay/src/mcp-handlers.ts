@@ -9,7 +9,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { loadConfig } from "./config.ts";
+import path from "node:path";
+import { loadConfig, activeProvider } from "./config.ts";
 import { type ProviderClient } from "./provider-client.ts";
 import { composePayload, deliverTrigger } from "./action.ts";
 import { QUAY_VERSION } from "./version.ts";
@@ -279,6 +280,20 @@ export function registerGateHandlers(
   // illegal transition attempted via promote/retreat, missing/empty
   // `retreat` reason).
 
+  // DIR-103-C — MCP-side per-provider `acceptance_env` resolution (per-surface
+  // helper duplicated from bin/quay.ts — see that file's own
+  // resolveAcceptanceEnvFile). Defined inside registerGateHandlers so it
+  // closes over `cfg`; explicit `providerId` rather than implicit active-id.
+  // Relative paths resolve against cfg.workspaceRoot. Returns undefined when
+  // the provider has no `acceptance_env` key.
+  function resolveAcceptanceEnvFile(providerId: string | undefined): string | undefined {
+    const provider = activeProvider(cfg, providerId);
+    if (typeof provider.acceptance_env !== "string" || provider.acceptance_env.trim() === "") {
+      return undefined;
+    }
+    return path.resolve(cfg.workspaceRoot, provider.acceptance_env);
+  }
+
   // gate_run — mirrors `quay gate <task-id> [--gate <name>]`. Default gate
   // is "acceptance" at the MCP-tool layer only, matching the CLI's own
   // `vf.gate ?? "acceptance"` default (the engine's own `runGate` default,
@@ -304,6 +319,7 @@ export function registerGateHandlers(
     async ({ provider, id, gate, timeoutMs, file, cwd }) => {
       const prevTimeout = process.env.QUAY_ACCEPTANCE_TIMEOUT_MS;
       const prevCwd = process.env.QUAY_ACCEPTANCE_CWD;
+      const prevEnv = process.env.QUAY_ACCEPTANCE_ENV;
       try {
         const { client } = await getClient(provider);
         const logPath = resolveGateLogPath(cfg.workspaceRoot, { file });
@@ -319,6 +335,14 @@ export function registerGateHandlers(
         // the archguard DIR-048 friction). `resolveRunnerOptions` reads QUAY_ACCEPTANCE_TIMEOUT_MS at
         // highest precedence; set it here so gate_run reaches parity with the CLI `--timeout`.
         if (timeoutMs !== undefined) process.env.QUAY_ACCEPTANCE_TIMEOUT_MS = String(timeoutMs);
+        // DIR-103-C: pin QUAY_ACCEPTANCE_ENV from the selected provider's
+        // acceptance_env config key — mirrors resolveAcceptanceEnvFile + the
+        // cwd branch's explicit-override-wins: a pre-set env var wins; never
+        // clobber. Falls through to resolveRunnerOptions which reads this env var.
+        const envFile = resolveAcceptanceEnvFile(provider);
+        if (envFile && !process.env.QUAY_ACCEPTANCE_ENV) {
+          process.env.QUAY_ACCEPTANCE_ENV = envFile;
+        }
         const result = await runGate({ client: client as Parameters<typeof runGate>[0]['client'], id, gate: gate ?? "acceptance", logPath, workspaceRoot: cfg.workspaceRoot });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
@@ -333,6 +357,9 @@ export function registerGateHandlers(
         // restore QUAY_ACCEPTANCE_CWD so one gate_run's cwd never leaks into subsequent calls
         if (prevCwd === undefined) delete process.env.QUAY_ACCEPTANCE_CWD;
         else process.env.QUAY_ACCEPTANCE_CWD = prevCwd;
+        // restore QUAY_ACCEPTANCE_ENV so one gate_run's env file never leaks into subsequent calls
+        if (prevEnv === undefined) delete process.env.QUAY_ACCEPTANCE_ENV;
+        else process.env.QUAY_ACCEPTANCE_ENV = prevEnv;
       }
     }
   );

@@ -14,8 +14,13 @@ import { QUAY_VERSION } from "../src/version.ts";
 // top-level commands (see the main() dispatch below and their arg-extraction
 // note). runGate appends one GateEvent per run; runGateLogQuery is read-only.
 import { runGate } from "../src/gate/engine.ts";
-import { listGates } from "../src/gate/registry.ts";
+import { listGates, listGatesVerbose } from "../src/gate/registry.ts";
 import { resolveGateLogPath, runGateLogQuery } from "../src/gate/gate-log.ts";
+// DIR-103-A (M223): dry-run imports — runAcceptanceCapture (the capture
+// sibling) and resolveRunnerOptions (same cwd/timeout resolution a real
+// gate run uses)
+import { runAcceptanceCapture } from "../src/gate/acceptance-runner.ts";
+import { resolveRunnerOptions } from "../src/gate/config/utils.ts";
 // QENG-3: complete/adjudicate/promote/retreat lifecycle — the thin
 // status-WRITING layer over the gate engine. Four verb-less top-level commands
 // (id in `sub`), each mirroring the `gate` branch's withProvider/resolveGateLogPath
@@ -55,6 +60,13 @@ function printJson(obj) {
 // through to the top-level catch and DOES print its stack trace — that
 // remains correct/desired for a true programmer error.
 const GUARDED_ERROR_PATTERN = /^(unknown gate: |no such task: |illegal transition: )/;
+
+// DIR-103-A (M223): known boolean flags — when a flag name is in this set,
+// parseFlags sets flags[key]=true WITHOUT consuming the next token (it stays
+// a positional / next flag). Name-scoped and safe: `--dry-run` is already a
+// pure boolean on the `init` surface (:1077) and no command anywhere takes a
+// value after it, so this changes no existing command's parse.
+const BOOLEAN_FLAGS = new Set(["dry-run"]);
 
 /**
  * Run `fn`; on a thrown Error matching the guarded-error shapes above, print
@@ -120,20 +132,25 @@ function parseFlags(argv) {
     const a = argv[i];
     if (a.startsWith("--")) {
       const key = a.slice(2);
-      const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
-        // QX-016 (experiment 4, iteration 4): support repeated flags (e.g. --label A --label B).
-        // If the key already has a value, convert to array or push to existing array.
-        // This fixes CB-013 (CLI last-wins bug): previously `flags[key] = next` silently
-        // overwrote any prior value, so --label A --label B silently used only B.
-        if (flags[key] !== undefined && flags[key] !== true) {
-          flags[key] = Array.isArray(flags[key]) ? [...flags[key], next] : [flags[key], next];
-        } else {
-          flags[key] = next;
-        }
-        i++;
-      } else {
+      // DIR-103-A (M223): known boolean flags never consume the next token
+      if (BOOLEAN_FLAGS.has(key)) {
         flags[key] = true;
+      } else {
+        const next = argv[i + 1];
+        if (next !== undefined && !next.startsWith("--")) {
+          // QX-016 (experiment 4, iteration 4): support repeated flags (e.g. --label A --label B).
+          // If the key already has a value, convert to array or push to existing array.
+          // This fixes CB-013 (CLI last-wins bug): previously `flags[key] = next` silently
+          // overwrote any prior value, so --label A --label B silently used only B.
+          if (flags[key] !== undefined && flags[key] !== true) {
+            flags[key] = Array.isArray(flags[key]) ? [...flags[key], next] : [flags[key], next];
+          } else {
+            flags[key] = next;
+          }
+          i++;
+        } else {
+          flags[key] = true;
+        }
       }
     } else {
       positional.push(a);
@@ -184,7 +201,20 @@ async function resolveBody(flags) {
   return flags.body; // short-string mode, already validated present by the caller
 }
 
-// DIR-046-A — pin the acceptance runner's cwd/timeout env vars for gates that
+// DIR-103-C — resolve the enabled provider's `acceptance_env` key to an
+// absolute file path (relative paths resolve against `cfg.workspaceRoot`).
+// Returns undefined when the provider has no `acceptance_env` key, so the
+// caller only pins `QUAY_ACCEPTANCE_ENV` when an env file is configured.
+// Defined at module scope so all 4 call sites (gate/complete/promote/run)
+// share a single resolution point (DRY at the CLI layer).
+function resolveAcceptanceEnvFile(cfg, provider) {
+  if (typeof provider.acceptance_env !== "string" || provider.acceptance_env.trim() === "") {
+    return undefined;
+  }
+  return path.resolve(cfg.workspaceRoot, provider.acceptance_env);
+}
+
+// DIR-046-A — pin the acceptance runner's cwd/timeout/envFile env vars for gates that
 // read them (registry.js#resolveRunnerOptions), with an EXPLICIT-OVERRIDE-
 // WINS precedence, replacing the previous unconditional
 // `process.env.QUAY_ACCEPTANCE_CWD = cfg.workspaceRoot` at each of the 4
@@ -208,8 +238,13 @@ async function resolveBody(flags) {
 // default / a per-gate `timeoutMs` entry in the workspace's gates config,
 // per the same DIR-120 source note above, apply from there).
 //
-// @param {{ workspaceRoot: string, cwd?: string, timeout?: string|number }} args
-function pinAcceptanceEnv({ workspaceRoot, cwd, timeout }) {
+// Precedence (envFile): explicit `envFile` arg (from the enabled provider's
+// `acceptance_env` config key, resolved to an absolute path by the caller) >
+// a PRE-SET `QUAY_ACCEPTANCE_ENV` env var > unset (DIR-103-C). Never clobber
+// a pre-set env var — same session-8b74052c bug class.
+//
+// @param {{ workspaceRoot: string, cwd?: string, timeout?: string|number, envFile?: string }} args
+function pinAcceptanceEnv({ workspaceRoot, cwd, timeout, envFile }) {
   if (cwd) {
     process.env.QUAY_ACCEPTANCE_CWD = cwd;
   } else if (!process.env.QUAY_ACCEPTANCE_CWD) {
@@ -223,6 +258,13 @@ function pinAcceptanceEnv({ workspaceRoot, cwd, timeout }) {
   // already has (unset by default) — registry.js's own precedence takes it
   // from there (env > per-gate timeoutMs entry in the workspace's gates
   // config > 60000ms default).
+  // DIR-103-C: explicit-override-wins for QUAY_ACCEPTANCE_ENV, mirroring the
+  // cwd branch's precedence exactly.
+  if (envFile) {
+    process.env.QUAY_ACCEPTANCE_ENV = envFile;
+  }
+  // else: leave QUAY_ACCEPTANCE_ENV as whatever the environment already has
+  // (unset by default); a pre-set env var wins — never clobber.
 }
 
 async function withProvider(fn, { providerId } = {}) {
@@ -310,8 +352,8 @@ Usage:
   quay task check <task-id> [--json]
   quay action list <task-id> [--json]
   quay action run <task-id> <action-id> [--json]
-  quay gate <task-id> [--gate <name>] [--cwd <dir>] [--timeout <ms>]
-  quay gate --list
+  quay gate <task-id> [--gate <name>] [--cwd <dir>] [--timeout <ms>] [--dry-run]
+  quay gate --list [--verbose|-v] [--json]
   quay gate-log <task-id> [--gate <name>] [--json] [--file <log-path>]
   quay complete <task-id> [--file <log-path>] [--cwd <dir>] [--timeout <ms>]
   quay adjudicate <task-id> [--file <log-path>]
@@ -376,10 +418,14 @@ Gate engine commands (QENG-1/2) — evaluate a named check and append an immutab
                     task.extra.acceptance as a shell command, fail-closed if unset). Exit 0 = PASS,
                     1 = FAIL. Appends a GateEvent to the log (see gate-log).
   gate --list       List every registered gate name (no task id required).
+                    --verbose, -v     Show NAME, SOURCE, TYPE, DETAIL columns + diagnostics (DIR-104).
+                    --json            Output as JSON (gates array + diagnostics array). Takes
+                                      precedence over --verbose when both are present.
   gate-log <task-id>  Print the GateEvent history for <task-id> (human-readable by default).
   --gate <name>     Select a non-default named gate for 'gate'/'gate-log' (e.g. --gate dod).
   --list            With 'gate' (no task id): list registered gate names instead of running one.
-  --json            With 'gate-log': output the GateEvent array as JSON instead of human-readable text.
+  --json            With 'gate-log': output the GateEvent array as JSON instead of human-readable
+                    text. With 'gate --list': output gate listing as JSON (DIR-104).
   --file <log-path>  Override the GateEvent log path for 'gate-log' (default
                     <workspaceRoot>/.quay/gate-events.jsonl).
   --cwd <dir>       DIR-046: run the acceptance command IN <dir> instead of the workspace root
@@ -395,6 +441,10 @@ Gate engine commands (QENG-1/2) — evaluate a named check and append an immutab
                     'timeoutMs' field in that same workspace gates config is a lower-precedence
                     workspace-data alternative — a TIMEOUT failure's reason names both knobs
                     ("raise the gates config's timeoutMs / --timeout").
+  --dry-run         DIR-103-A: execute task.extra.acceptance with the same cwd/timeout/env as a
+                    real gate run, print stdout/stderr + exit code, but do NOT append a GateEvent
+                    or mutate task status. Short form: -n. Only valid with the default
+                    'acceptance' gate (--dry-run --gate dod is a usage error).
 
 Lifecycle commands (QENG-3) — status-writing verbs over the {todo,ready,done,needs-human} phases:
   complete <id>     Precondition status=ready; runs the acceptance gate; on pass writes status=done
@@ -478,6 +528,28 @@ Options:
   --format json   Alias for --json.
   --check-files   Also verify that gate script/command paths reference files
                   that exist on disk.
+`);
+  } else if (sub === "gate") {
+    process.stdout.write(`quay gate — run a named gate check against a task
+
+Usage:
+  quay gate <task-id> [--gate <name>] [--cwd <dir>] [--timeout <ms>] [--dry-run]
+  quay gate --list
+
+  gate <task-id>    Run a named gate check against <task-id> (default gate: acceptance — runs
+                    task.extra.acceptance as a shell command, fail-closed if unset). Exit 0 = PASS,
+                    1 = FAIL. Appends a GateEvent to the gate-event log.
+  gate --list       List every registered gate name (no task id required).
+
+Flags:
+  --gate <name>     Select a non-default named gate (e.g. --gate dod).
+  --list            With 'gate' (no task id): list registered gate names.
+  --cwd <dir>       Run the acceptance command in <dir> instead of the workspace root.
+  --timeout <ms>    Override the acceptance runner's kill deadline in ms (default 60000).
+  --dry-run         Execute task.extra.acceptance with the same cwd/timeout/env as a real
+                    gate run, print stdout/stderr + exit code, but do NOT append a GateEvent
+                    or mutate task status. Short form: -n. Only valid with the default
+                    'acceptance' gate.
 `);
   } else {
     // QX-007: stub for subcommands not yet documented in detail (serve, action, mcp, …).
@@ -1180,6 +1252,10 @@ Description:
   // set (proposal §"Architect review notes" #1). Both handlers sit before the
   // generic-usage fallback.
   if (cmd === "gate" && sub === "--list") {
+    // DIR-104: normalize -v → --verbose (parseFlags handles only --prefixed flags)
+    // and parse flags so `--verbose` / `--json` reach the handler.
+    const listArgs = (rest ?? []).map((a) => (a === "-v" ? "--verbose" : a));
+    const { flags: listFlags } = parseFlags(listArgs);
     // AC1: list registered gates, one per line, exit 0. No provider connection
     // (loadConfig() only reads .quay/config.yml — no MCP process spawned).
     // DIR-035-B: pass this workspace's own root explicitly so `--list` reflects
@@ -1196,18 +1272,50 @@ Description:
     } catch {
       workspaceRoot = undefined;
     }
-    console.log(listGates(workspaceRoot).join("\n"));
+    const verbose = listFlags.verbose === true;
+    const json = listFlags.json === true;
+    if (!verbose && !json) {
+      // AC6: flagless path — byte-identical to current behavior.
+      console.log(listGates(workspaceRoot).join("\n"));
+    } else {
+      const { rows, diagnostics } = listGatesVerbose(workspaceRoot);
+      if (json) {
+        // AC7: JSON output (takes precedence over verbose table when both flags present).
+        printJson({ gates: rows, diagnostics });
+      } else {
+        // AC1/AC2/AC3: verbose table with NAME, SOURCE, TYPE, DETAIL columns.
+        const nameWidth = Math.max(...rows.map((r) => r.name.length), 4);
+        const sourceWidth = Math.max(...rows.map((r) => r.source.length), 6);
+        const typeWidth = Math.max(...rows.map((r) => r.type.length), 4);
+        const pad = (s: string, w: number) => s.padEnd(w);
+        for (const r of rows) {
+          console.log(`${pad(r.name, nameWidth)}  ${pad(r.source, sourceWidth)}  ${pad(r.type, typeWidth)}  ${r.detail}`);
+        }
+        // AC4/AC5: diagnostics section.
+        if (diagnostics.length > 0) {
+          console.log(`\n## Diagnostics (${diagnostics.length} warning${diagnostics.length === 1 ? "" : "s"})`);
+          for (const d of diagnostics) {
+            console.log(`\n${d.level}: ${d.message}`);
+          }
+        }
+      }
+    }
     return;
   }
 
   if (cmd === "gate") {
+    // DIR-103-A (M223): normalize -n short flag to --dry-run before parsing.
+    // parseFlags handles only --prefixed flags, so a raw -n would fall through
+    // to positional and be misread as the task id.
+    const gateSub = sub === "-n" ? "--dry-run" : sub;
+    const gateRest = rest.map(a => a === "-n" ? "--dry-run" : a);
     // AC2: evaluate a named gate against <task>; exit 0 pass / 1 fail; append
     // exactly one GateEvent. Mirrors `task check`'s exit-code plumbing
     // (process.exitCode = ok ? 0 : 1). Id + flags are flag-aware in either order
     // (see the verb-less CLI arg-ordering note above).
-    const { flags: vf, id } = parseVerbless(sub, rest);
+    const { flags: vf, id } = parseVerbless(gateSub, gateRest);
     if (!id) { console.error("quay gate: missing required <task-id> argument"); process.exitCode = 1; return; }
-    await withProvider(async (client, cfg) => {
+    await withProvider(async (client, cfg, provider) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
       // QENG-2 (proposal §4, review note 2): default gate is `acceptance` at the
       // CLI layer only (engine's own `gate="dod"` default is untouched — only
@@ -1215,7 +1323,37 @@ Description:
       // dod gate. DIR-046-A: `--cwd`/`--timeout` (or a pre-set env var) win over
       // the workspaceRoot pin — see pinAcceptanceEnv's own doc comment.
       const gate = vf.gate ?? "acceptance";
-      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout });
+      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout, envFile: resolveAcceptanceEnvFile(cfg, provider) });
+      // DIR-103-A (M223): --dry-run / -n — execute the acceptance command with
+      // stdout/stderr capture WITHOUT appending a GateEvent or mutating status.
+      const dryRun = vf["dry-run"] === true;
+      if (dryRun) {
+        // M56-gate-cli-error-ux (AC1): named-gate dry-run / missing-task are
+        // guarded (expected) errors — see withGuardedErrors' own comment.
+        await withGuardedErrors(async () => {
+          if (gate !== "acceptance") {
+            console.error("quay gate --dry-run: only the 'acceptance' gate supports dry-run (it executes a shell command)");
+            process.exitCode = 1;
+            return;
+          }
+          const task = await client.taskGet(id);
+          if (!task) throw new Error(`no such task: ${id}`);
+          const command = (task.extra as Record<string, unknown>)?.acceptance;
+          if (typeof command !== "string" || command.trim() === "") {
+            throw new Error(`no acceptance command defined (set with \`quay task edit <id> --acceptance '<cmd>'\`)`);
+          }
+          const { cwd, timeoutMs } = resolveRunnerOptions();
+          const r = runAcceptanceCapture({ command, cwd, timeoutMs });
+          process.stdout.write(r.output);
+          if (r.timedOut) {
+            console.log(`dry-run: timed out after ${timeoutMs}ms`);
+          } else {
+            console.log(`dry-run: exit ${r.code ?? "?"}`);
+          }
+          process.exitCode = r.code ?? 1;
+        });
+        return;
+      }
       // DIR-035-B: thread the resolved workspace root through so a named
       // gate declared in THIS workspace's own gates config (DIR-120:
       // `.quay/config.yml`'s own `gates:` section for a migrated workspace,
@@ -1264,11 +1402,11 @@ Description:
   if (cmd === "complete") {
     const { flags: vf, id } = parseVerbless(sub, rest);
     if (!id) { console.error("quay complete: missing required <task-id> argument"); process.exitCode = 1; return; }
-    await withProvider(async (client, cfg) => {
+    await withProvider(async (client, cfg, provider) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
       // DIR-046-A: `--cwd`/`--timeout` (or a pre-set env var) win over the
       // workspaceRoot pin — see pinAcceptanceEnv's own doc comment.
-      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout });
+      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout, envFile: resolveAcceptanceEnvFile(cfg, provider) });
       // M56-gate-cli-error-ux (AC1): missing-task is a guarded error.
       await withGuardedErrors(async () => {
         await runComplete({ client, id, logPath });
@@ -1293,11 +1431,11 @@ Description:
   if (cmd === "promote") {
     const { flags: vf, id } = parseVerbless(sub, rest);
     if (!id) { console.error("quay promote: missing required <task-id> argument"); process.exitCode = 1; return; }
-    await withProvider(async (client, cfg) => {
+    await withProvider(async (client, cfg, provider) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: vf.file });
       // DIR-046-A: `--cwd`/`--timeout` (or a pre-set env var) win over the
       // workspaceRoot pin — see pinAcceptanceEnv's own doc comment.
-      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout });
+      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: vf.cwd, timeout: vf.timeout, envFile: resolveAcceptanceEnvFile(cfg, provider) });
       // M56-gate-cli-error-ux (AC1): missing-task / illegal-transition are
       // guarded errors — assertTransition() throws `illegal transition: ...`.
       await withGuardedErrors(async () => {
@@ -1337,11 +1475,11 @@ Description:
     // lands in `sub` (e.g. `quay run --once` → sub="--once", rest=[]). Re-parse
     // from [sub, ...rest] so `--once`/`--file`/`--provider` are all seen.
     const { flags: runFlags } = parseFlags([sub, ...rest].filter((a) => a !== undefined));
-    await withProvider(async (client, cfg) => {
+    await withProvider(async (client, cfg, provider) => {
       const logPath = resolveGateLogPath(cfg.workspaceRoot, { file: runFlags.file });
       // DIR-046-A: `--cwd`/`--timeout` (or a pre-set env var) win over the
       // workspaceRoot pin — see pinAcceptanceEnv's own doc comment.
-      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: runFlags.cwd, timeout: runFlags.timeout });
+      pinAcceptanceEnv({ workspaceRoot: cfg.workspaceRoot, cwd: runFlags.cwd, timeout: runFlags.timeout, envFile: resolveAcceptanceEnvFile(cfg, provider) });
       if (runFlags.once) {
         const r = await runOnce({ client, logPath });
         if (!r.processed) console.log("nothing to do");

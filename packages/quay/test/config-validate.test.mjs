@@ -59,6 +59,8 @@ providers:
   native:
     enabled: true
     mcp_entry: ["node", "./bin/native", "mcp"]
+    env:
+      QUAY_NATIVE_TASKS_DIR: "/custom/tasks"
 gates:
   testPass:
     - name: my-gate
@@ -813,6 +815,8 @@ providers:
   native:
     enabled: true
     mcp_entry: ["node", "./bin/native", "mcp"]
+    env:
+      QUAY_NATIVE_TASKS_DIR: "/custom/tasks"
 gates:
   testPass:
     - name: my-gate
@@ -1185,6 +1189,8 @@ providers:
   native:
     enabled: true
     mcp_entry: ["node", "./bin/native", "mcp"]
+    env:
+      QUAY_NATIVE_TASKS_DIR: "/custom/tasks"
 gates:
   testPass:
     - name: my-gate
@@ -1318,6 +1324,8 @@ providers:
   native:
     enabled: true
     mcp_entry: ["node", "./bin/native", "mcp"]
+    env:
+      QUAY_NATIVE_TASKS_DIR: "/custom/tasks"
 loop:
   board: native
   gates: [acceptance]

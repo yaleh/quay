@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { runAcceptance } from "./acceptance-runner.ts";
 import { makeDocumentContractGate } from "./factories/document-contract.ts";
 import { resolveRunnerOptions } from "./config/utils.ts";
-import { discoverWorkspaceRoot, loadWorkspaceGates } from "./config/loader.ts";
+import { discoverWorkspaceRoot, loadWorkspaceGates, loadWorkspaceGateMetadata } from "./config/loader.ts";
 import type { Task } from "../abi.ts";
 
 // esbuild bundles this module to CJS for the SEA build (Node SEA does not
@@ -60,6 +60,7 @@ export {
   loadWorkspaceGates,
   readGatesConfig,
   discoverWorkspaceRoot,
+  loadWorkspaceGateMetadata,
 } from "./config/loader.ts";
 export type { GatesConfig } from "./config/types.ts";
 
@@ -96,8 +97,8 @@ export const gateRegistry: Record<string, GateFn> = {
         reason: "no acceptance command defined (set with `quay task edit <id> --acceptance '<cmd>'`)",
       };
     }
-    const { cwd, timeoutMs } = resolveRunnerOptions();
-    const { ok, reason } = runAcceptance({ command, cwd, timeoutMs });
+    const { cwd, timeoutMs, envFile } = resolveRunnerOptions();
+    const { ok, reason } = runAcceptance({ command, cwd, timeoutMs, envFile });
     return { ok, reason };
   },
 };

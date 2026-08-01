@@ -26,6 +26,9 @@ export function shQuote(arg: string): string {
  *              `gates.yml` `cwd` field  >  `process.cwd()`
  *   timeoutMs: pre-set `QUAY_ACCEPTANCE_TIMEOUT_MS` env var > this gate's
  *              own `gates.yml` `timeoutMs` field > the 60000ms default.
+ *   envFile:   pre-set `QUAY_ACCEPTANCE_ENV` env var > undefined (no env
+ *              file) — per DIR-103-C; the CLI/MCP layer pins the env var
+ *              from the enabled provider's `acceptance_env` config key.
  */
 export function resolveRunnerOptions(gateConfig: GateConfig = {}): RunnerOptions {
   const cwd = process.env.QUAY_ACCEPTANCE_CWD || gateConfig.cwd || process.cwd();
@@ -33,5 +36,6 @@ export function resolveRunnerOptions(gateConfig: GateConfig = {}): RunnerOptions
   const timeoutMs = (Number.isFinite(envTimeout) && envTimeout > 0)
     ? envTimeout
     : (typeof gateConfig.timeoutMs === "number" && gateConfig.timeoutMs > 0 ? gateConfig.timeoutMs : 60000);
-  return { cwd, timeoutMs };
+  const envFile = process.env.QUAY_ACCEPTANCE_ENV || undefined;
+  return { cwd, timeoutMs, envFile };
 }
