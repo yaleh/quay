@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "recordId": "38a153da757b",
+  "attemptId": "38a153da757b",
+  "generationId": null,
+  "admission": null,
+  "workspace": ".",
+  "taskId": "gap-build-evidence-manifest-missing",
+  "milestoneId": null,
+  "class": null,
+  "highRisk": null,
+  "hashes": null,
+  "decision": {
+    "kind": "not-evaluated",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": 0,
+  "contentAgentMs": 0,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "prepare-already-running",
+    "phase": "Admission",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": false,
+    "ok": null,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785570692894,
+  "telemetryWriteOk": true,
+  "phaseTimings": [],
+  "findingCodes": [
+    {
+      "code": "prepare-already-running",
+      "recurrenceKey": "3a61b58dbbb9",
+      "firstSeenGeneration": "38a153da757b",
+      "lastSeenGeneration": "38a153da757b"
+    }
+  ]
+}

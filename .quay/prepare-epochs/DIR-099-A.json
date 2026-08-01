@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "epochId": "b580e6d5492f",
+  "taskId": "DIR-099-A",
+  "charterHash": "ba4fa6fabd23eae720900b544082c64a92343245f97cf1bba667ddf2b002d3b7",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "0178ff3b47cc",
+  "counters": {
+    "attempts": 2,
+    "fullReviews": 0,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 3,
+    "observableAgentMs": 475614,
+    "terminalFingerprints": {
+      "2d86004634ea": 1,
+      "9b6d54be5864": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "ba00f7776eb3",
+      "owner": "human-operator",
+      "reason": "PlanCheck F1 (import path ../../ -> ../) + config --help stub needs printHelp config branch + CB-021 allowlist. Added 3 grounding facts. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "ba4fa6fabd23eae720900b544082c64a92343245f97cf1bba667ddf2b002d3b7",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "ba4fa6fabd23eae720900b544082c64a92343245f97cf1bba667ddf2b002d3b7",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785560673560
+    },
+    {
+      "fromEpochId": "0178ff3b47cc",
+      "owner": "orchestrating-session",
+      "reason": "concurrent-session-consumed-full-review-quota -- fresh epoch for orchestrating session",
+      "oldHash": {
+        "charterHash": "ba4fa6fabd23eae720900b544082c64a92343245f97cf1bba667ddf2b002d3b7",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "ba4fa6fabd23eae720900b544082c64a92343245f97cf1bba667ddf2b002d3b7",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785570571128
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785570571128
+}

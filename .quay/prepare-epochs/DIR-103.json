@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "epochId": "d5bb487c7165",
+  "taskId": "DIR-103",
+  "charterHash": "05aa86500099c47c52cc63f41b79f41e0e97d044a43da7aa130a5190e1a05900",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "7d6e19033185",
+  "counters": {
+    "attempts": 0,
+    "fullReviews": 0,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 0,
+    "observableAgentMs": 0,
+    "terminalFingerprints": {},
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "7d6e19033185",
+      "owner": "human-operator",
+      "reason": "Split-recommended (5 mechanisms). Splitting per DIR-026: parent becomes compound, 3 children (CLI dry-run / MCP dryRun / env-file+docs).",
+      "oldHash": {
+        "charterHash": "05aa86500099c47c52cc63f41b79f41e0e97d044a43da7aa130a5190e1a05900",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "05aa86500099c47c52cc63f41b79f41e0e97d044a43da7aa130a5190e1a05900",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785555641724
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785555641724
+}

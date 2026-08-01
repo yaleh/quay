@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "epochId": "17f7b74691ca",
+  "taskId": "DIR-103-A",
+  "charterHash": "1740202719e2da0f69f206c78e886d2481b84c4e985ed6a09d65cbb63a9d47c0",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "13025aff7ee8",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 10,
+    "observableAgentMs": 2189447,
+    "terminalFingerprints": {
+      "38e402758377": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "9c5d334f6e96",
+      "owner": "human-operator",
+      "reason": "PlanCheck R3: parseFlags greedy value consumption (HIGH), gate --help stub (MED), AC3 todo fixture wrong. Fixed AC3 + added 3 grounded facts. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "1740202719e2da0f69f206c78e886d2481b84c4e985ed6a09d65cbb63a9d47c0",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "1740202719e2da0f69f206c78e886d2481b84c4e985ed6a09d65cbb63a9d47c0",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785557527242
+    },
+    {
+      "fromEpochId": "e0fd9cb6ad70",
+      "owner": "human-operator",
+      "reason": "Grounded facts appended after Touches (parsed as overbroad globs). Moved into Finding. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "1740202719e2da0f69f206c78e886d2481b84c4e985ed6a09d65cbb63a9d47c0",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "1740202719e2da0f69f206c78e886d2481b84c4e985ed6a09d65cbb63a9d47c0",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785558653834
+    },
+    {
+      "fromEpochId": "13025aff7ee8",
+      "owner": "human-operator",
+      "reason": "2nd ran against stale body (grounded facts after Touches, now moved to Finding). 2nd PlanCheck added task-view fact. Fresh epoch with corrected body.",
+      "oldHash": {
+        "charterHash": "1740202719e2da0f69f206c78e886d2481b84c4e985ed6a09d65cbb63a9d47c0",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "1740202719e2da0f69f206c78e886d2481b84c4e985ed6a09d65cbb63a9d47c0",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785559639400
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785559639400
+}

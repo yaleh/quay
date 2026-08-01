@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "recordId": "0894843997b8",
+  "attemptId": "0894843997b8",
+  "generationId": "0894843997b8",
+  "admission": {
+    "key": ".::DIR-099-A",
+    "ownerExecutionId": "4226284b-330a-4212-ae47-bdbb8e760bd5",
+    "fencingToken": 0,
+    "acquiredAt": 1785570679627
+  },
+  "workspace": ".",
+  "taskId": "DIR-099-A",
+  "milestoneId": "M229",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "ba4fa6fabd23eae720900b544082c64a92343245f97cf1bba667ddf2b002d3b7",
+    "taskContract": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
+    "proposal": "a8f9b4e5f7db31966130a1d17418301e1e431561900f72203a7f4cf95fbccf88",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "preflight-rejected",
+    "phase": "PreflightContent",
+    "cacheable": true
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785570728246,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "preflight-rejected",
+      "round": 0,
+      "startedAtMs": 1785570679627,
+      "endedAtMs": 1785570728246
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "preflight-rejected",
+      "recurrenceKey": "0811bc98bb76",
+      "firstSeenGeneration": "0894843997b8",
+      "lastSeenGeneration": "0894843997b8"
+    }
+  ]
+}

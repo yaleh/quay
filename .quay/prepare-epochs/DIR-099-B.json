@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "epochId": "ac211a164dc6",
+  "taskId": "DIR-099-B",
+  "charterHash": "62a530a6bcebc132c725da2566814458598068e1d9c2e4aa2cff7a1ae2c8dd9f",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "b16e9a6d7df1",
+  "counters": {
+    "attempts": 3,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 2,
+    "observableAgentMs": 102267,
+    "terminalFingerprints": {
+      "4161ab22b641": 1,
+      "2d86004634ea": 2
+    },
+    "tokensObserved": null
+  },
+  "overrides": [
+    {
+      "owner": "human-operator",
+      "reason": "Corrected body (empty-string warn AC + AC6 falsifier) not yet full-reviewed; epoch reset exhausted. Override one full review.",
+      "additionalBudget": 60,
+      "grantedAt": 1785559755119
+    }
+  ],
+  "resets": [
+    {
+      "fromEpochId": "09cc9755258b",
+      "owner": "human-operator",
+      "reason": "Fixed github clause (also defaults to yaleh/quay -> warn not error) + pinned warn-exit contract + callsite AC. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "62a530a6bcebc132c725da2566814458598068e1d9c2e4aa2cff7a1ae2c8dd9f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "62a530a6bcebc132c725da2566814458598068e1d9c2e4aa2cff7a1ae2c8dd9f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785558566575
+    },
+    {
+      "fromEpochId": "42b4f2b454b2",
+      "owner": "human-operator",
+      "reason": "Github correction propagated to ALL instances (title/Requested action/DoD/Finding were stale) + AC3 runtime-predicate precision. Added warn-exit AC to DIR-099-A upstream. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "62a530a6bcebc132c725da2566814458598068e1d9c2e4aa2cff7a1ae2c8dd9f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "62a530a6bcebc132c725da2566814458598068e1d9c2e4aa2cff7a1ae2c8dd9f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785558904871
+    },
+    {
+      "fromEpochId": "b16e9a6d7df1",
+      "owner": "human-operator",
+      "reason": "Pinned mechanism home to config-validate.ts (validateProviderEnv function), removed 'or sibling' ambiguity. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "62a530a6bcebc132c725da2566814458598068e1d9c2e4aa2cff7a1ae2c8dd9f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "62a530a6bcebc132c725da2566814458598068e1d9c2e4aa2cff7a1ae2c8dd9f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785559267182
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785559267182
+}

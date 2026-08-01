@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 2,
+  "recordId": "a0cce75fda08",
+  "attemptId": "a0cce75fda08",
+  "generationId": "a0cce75fda08",
+  "admission": {
+    "key": ".::gap-prepare-milestone-epoch-scope-change-grants-full-review",
+    "ownerExecutionId": "4226284b-330a-4212-ae47-bdbb8e760bd5",
+    "fencingToken": 0,
+    "acquiredAt": 1785569790645
+  },
+  "workspace": ".",
+  "taskId": "gap-prepare-milestone-epoch-scope-change-grants-full-review",
+  "milestoneId": "M233",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "f21d777b69f06771bcbee5fb914aa89909792fdb11fe54fb1e5edc361f5f9b40",
+    "taskContract": "c7800cbac927e130f9f9ec7db8c0b43340916f01fc40db9d9a833efd377fa851",
+    "proposal": "5df155a0a9c640e5301f6f19c4768de90f863378cbd9748d006a5f3605055a9f",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "split-recommended",
+    "phase": "ProposalReview",
+    "cacheable": true
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785570738712,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "Adjudicate",
+      "round": 0,
+      "startedAtMs": 1785569790645,
+      "endedAtMs": 1785570041273
+    },
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785570041273,
+      "endedAtMs": 1785570243464
+    },
+    {
+      "phase": "split-recommended",
+      "round": 0,
+      "startedAtMs": 1785570243464,
+      "endedAtMs": 1785570738712
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "split-recommended",
+      "recurrenceKey": "0db8af6dde01",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    },
+    {
+      "code": "bf0d66de",
+      "recurrenceKey": "ba8a3a46819e",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    },
+    {
+      "code": "93db8745",
+      "recurrenceKey": "b4220293288e",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    },
+    {
+      "code": "e5becf43",
+      "recurrenceKey": "0a69de3d7194",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    },
+    {
+      "code": "85f46711",
+      "recurrenceKey": "b3367caa83f5",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    },
+    {
+      "code": "7055b053",
+      "recurrenceKey": "9a2f73b8dc7c",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    },
+    {
+      "code": "16fd4453",
+      "recurrenceKey": "4b41c62a922f",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    },
+    {
+      "code": "2d30f25f",
+      "recurrenceKey": "2fc4f1fa4e71",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    },
+    {
+      "code": "4775c96c",
+      "recurrenceKey": "6926b0a0fbf0",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    },
+    {
+      "code": "3519acd7",
+      "recurrenceKey": "8d7c269b849e",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    },
+    {
+      "code": "88d4fbf3",
+      "recurrenceKey": "76feda5ef246",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    },
+    {
+      "code": "a284a81a",
+      "recurrenceKey": "e60abfa65abf",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    },
+    {
+      "code": "6bbde7cd",
+      "recurrenceKey": "245679aa1420",
+      "firstSeenGeneration": "a0cce75fda08",
+      "lastSeenGeneration": "a0cce75fda08"
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "epochId": "8d8c6906164c",
+  "taskId": "DIR-112",
+  "charterHash": "5c2b909c463e19dec86497505e1b2b6bc577447b27ae9d4f2c5c1d3e5dc7c15b",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "9858421989a1",
+  "bodyScopeHash": null,
+  "counters": {
+    "attempts": 2,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 8,
+    "observableAgentMs": 1104796,
+    "terminalFingerprints": {
+      "2d86004634ea": 1,
+      "4161ab22b641": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "5b051a1bb0e1",
+      "owner": "human-operator",
+      "reason": "PlanCheck LOW findings never converge to F_i=0 (spawn count off-by-one, err.code vs err.status, line offsets). Added exact grounded facts (89=66+23 spawns, line anchors, err.status). Fresh epoch.",
+      "oldHash": {
+        "charterHash": "5c2b909c463e19dec86497505e1b2b6bc577447b27ae9d4f2c5c1d3e5dc7c15b",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "5c2b909c463e19dec86497505e1b2b6bc577447b27ae9d4f2c5c1d3e5dc7c15b",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785557156347
+    },
+    {
+      "fromEpochId": "9858421989a1",
+      "owner": "orchestrating-session",
+      "reason": "concurrent-session-consumed-full-review-quota -- fresh epoch for orchestrating session",
+      "oldHash": {
+        "charterHash": "5c2b909c463e19dec86497505e1b2b6bc577447b27ae9d4f2c5c1d3e5dc7c15b",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "5c2b909c463e19dec86497505e1b2b6bc577447b27ae9d4f2c5c1d3e5dc7c15b",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785570570618
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785570570618
+}

@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "epochId": "cdfe350af1aa",
+  "taskId": "DIR-124-A",
+  "charterHash": "fe0b77e9fc7a19d37c416471689f39b72fcc606c4292bb8423fa6b544844a219",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "cab1f25eaacf",
+  "bodyScopeHash": null,
+  "counters": {
+    "attempts": 3,
+    "fullReviews": 2,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 13,
+    "observableAgentMs": 1349160,
+    "terminalFingerprints": {
+      "2d86004634ea": 1,
+      "a2ae225bf1eb": 2
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "cab1f25eaacf",
+      "owner": "orchestrating-session",
+      "reason": "concurrent-session-consumed-full-review-quota -- fresh epoch for orchestrating session",
+      "oldHash": {
+        "charterHash": "fe0b77e9fc7a19d37c416471689f39b72fcc606c4292bb8423fa6b544844a219",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "fe0b77e9fc7a19d37c416471689f39b72fcc606c4292bb8423fa6b544844a219",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785570569525
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785570569525
+}

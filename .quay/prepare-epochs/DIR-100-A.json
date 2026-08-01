@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "epochId": "a67bd23ae01f",
+  "taskId": "DIR-100-A",
+  "charterHash": "bcce10a24cd4ab35a0edcc5a50bb864e84e7435299f83bd4d0ad423c7b6518cf",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "59fb76ff1d9e",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 4,
+    "observableAgentMs": 781493,
+    "terminalFingerprints": {
+      "e3b22c8ec07f": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "59b5a9ff8f80",
+      "owner": "human-operator",
+      "reason": "PlanCheck HIGH: built-in gates short-circuit, gate <id> never loads workspace gates (real-CLI proof must use gate --list) + quay.ts path + mutually-exclusive fixtures. Added 4 grounding facts. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "bcce10a24cd4ab35a0edcc5a50bb864e84e7435299f83bd4d0ad423c7b6518cf",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "bcce10a24cd4ab35a0edcc5a50bb864e84e7435299f83bd4d0ad423c7b6518cf",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785559471804
+    },
+    {
+      "fromEpochId": "59fb76ff1d9e",
+      "owner": "human-operator",
+      "reason": "PlanCheck: residual quay.js in Stage 4 + scratch-cwd absolute-path requirement. Added 2 grounding facts. Fresh epoch (last reset).",
+      "oldHash": {
+        "charterHash": "bcce10a24cd4ab35a0edcc5a50bb864e84e7435299f83bd4d0ad423c7b6518cf",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "bcce10a24cd4ab35a0edcc5a50bb864e84e7435299f83bd4d0ad423c7b6518cf",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785561187480
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785561187480
+}

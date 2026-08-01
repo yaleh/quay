@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "epochId": "595335074b7d",
+  "taskId": "DIR-103-C",
+  "charterHash": "3717dd814a7b92faa20b8c8a87336e43025b635473e31c72599954bb0dc0126f",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "f042ce895c54",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 8,
+    "observableAgentMs": 2645330,
+    "terminalFingerprints": {
+      "38e402758377": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "fa2d19f235b4",
+      "owner": "human-operator",
+      "reason": "Plan references gate/config/utils.ts + types.ts exact paths not in Touches (directory entry insufficient). Fixed. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "3717dd814a7b92faa20b8c8a87336e43025b635473e31c72599954bb0dc0126f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "3717dd814a7b92faa20b8c8a87336e43025b635473e31c72599954bb0dc0126f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785556663078
+    },
+    {
+      "fromEpochId": "1d970d2e2396",
+      "owner": "human-operator",
+      "reason": "PlanCheck 5 findings (quay.js path, Touches count 11, Stage-2 exit contradiction, circular import, line-budget arithmetic). Added 5 grounding facts. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "3717dd814a7b92faa20b8c8a87336e43025b635473e31c72599954bb0dc0126f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "3717dd814a7b92faa20b8c8a87336e43025b635473e31c72599954bb0dc0126f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785558977025
+    },
+    {
+      "fromEpochId": "f042ce895c54",
+      "owner": "human-operator",
+      "reason": "mcp-handlers.ts Touches entry had parenthetical breaking exact-path match. Fixed. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "3717dd814a7b92faa20b8c8a87336e43025b635473e31c72599954bb0dc0126f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "3717dd814a7b92faa20b8c8a87336e43025b635473e31c72599954bb0dc0126f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785559877881
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785559877881
+}

@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "epochId": "42b879499e43",
+  "taskId": "DIR-099",
+  "charterHash": "d57086bd684844a8ded5c193fcb71da442810e6930c4754279504886762616c5",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "86735c6d7500",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 2,
+    "observableAgentMs": 34634,
+    "terminalFingerprints": {
+      "a2ae225bf1eb": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "31f9d8d9aa2b",
+      "owner": "human-operator",
+      "reason": "ProposalReview added MCP surface (config_validate in mcp-handlers.ts) not covered by Touches; fixed Touches. Fresh epoch for re-run.",
+      "oldHash": {
+        "charterHash": "d57086bd684844a8ded5c193fcb71da442810e6930c4754279504886762616c5",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "d57086bd684844a8ded5c193fcb71da442810e6930c4754279504886762616c5",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785554801350
+    },
+    {
+      "fromEpochId": "125ce85a6609",
+      "owner": "human-operator",
+      "reason": "PlanCheck 3 rounds exceeded: 5 real Plan defects (coverage regex vs Node v26 output, .js vs .ts CLI path, module signature mismatch, provider-env grounding, --check-files heuristic). Added grounded facts to Finding. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "d57086bd684844a8ded5c193fcb71da442810e6930c4754279504886762616c5",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "d57086bd684844a8ded5c193fcb71da442810e6930c4754279504886762616c5",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785556570828
+    },
+    {
+      "fromEpochId": "86735c6d7500",
+      "owner": "human-operator",
+      "reason": "3rd attempt delta-cap-exhausted: plan Stage-2 still has naive --check-files spec despite Proposal revision (grounded fact #5). Fresh epoch regenerates plan from current task body.",
+      "oldHash": {
+        "charterHash": "d57086bd684844a8ded5c193fcb71da442810e6930c4754279504886762616c5",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "d57086bd684844a8ded5c193fcb71da442810e6930c4754279504886762616c5",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785557567505
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785557567506
+}

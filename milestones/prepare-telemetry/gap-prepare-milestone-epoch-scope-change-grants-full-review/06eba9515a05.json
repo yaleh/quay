@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 2,
+  "recordId": "06eba9515a05",
+  "attemptId": "06eba9515a05",
+  "generationId": "06eba9515a05",
+  "admission": {
+    "key": ".::gap-prepare-milestone-epoch-scope-change-grants-full-review",
+    "ownerExecutionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c",
+    "fencingToken": 0,
+    "acquiredAt": 1785562801083
+  },
+  "workspace": ".",
+  "taskId": "gap-prepare-milestone-epoch-scope-change-grants-full-review",
+  "milestoneId": "M233",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "f21d777b69f06771bcbee5fb914aa89909792fdb11fe54fb1e5edc361f5f9b40",
+    "taskContract": "4fe17897f56e1ed095e22a6236055a3b751aeefda66925892207b86d0ee62245",
+    "proposal": "a28c8bb1519870e9be563885b6720275de626f5df9b05d5353a966b398bd5c05",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "preflight-rejected",
+    "phase": "PreflightPlan",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785564305166,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785562801083,
+      "endedAtMs": 1785562846724
+    },
+    {
+      "phase": "ProposalReview-delta-round-1",
+      "round": 1,
+      "startedAtMs": 1785562846724,
+      "endedAtMs": 1785563283292
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785563283292,
+      "endedAtMs": 1785563867992
+    },
+    {
+      "phase": "preflight-rejected",
+      "round": 0,
+      "startedAtMs": 1785563867992,
+      "endedAtMs": 1785564305166
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "preflight-rejected",
+      "recurrenceKey": "54d569252868",
+      "firstSeenGeneration": "06eba9515a05",
+      "lastSeenGeneration": "06eba9515a05"
+    },
+    {
+      "code": "ec7e8090",
+      "recurrenceKey": "c993494caaab",
+      "firstSeenGeneration": "06eba9515a05",
+      "lastSeenGeneration": "06eba9515a05"
+    },
+    {
+      "code": "5b7481cc",
+      "recurrenceKey": "327ba068f67f",
+      "firstSeenGeneration": "06eba9515a05",
+      "lastSeenGeneration": "06eba9515a05"
+    },
+    {
+      "code": "336c03a2",
+      "recurrenceKey": "5ef4bfa1e160",
+      "firstSeenGeneration": "06eba9515a05",
+      "lastSeenGeneration": "06eba9515a05"
+    },
+    {
+      "code": "0eb25d91",
+      "recurrenceKey": "61d907ca2f19",
+      "firstSeenGeneration": "06eba9515a05",
+      "lastSeenGeneration": "06eba9515a05"
+    },
+    {
+      "code": "c0a148fc",
+      "recurrenceKey": "eb48e883c778",
+      "firstSeenGeneration": "06eba9515a05",
+      "lastSeenGeneration": "06eba9515a05"
+    },
+    {
+      "code": "93250928",
+      "recurrenceKey": "430941ac28f2",
+      "firstSeenGeneration": "06eba9515a05",
+      "lastSeenGeneration": "06eba9515a05"
+    },
+    {
+      "code": "e1f80bc4",
+      "recurrenceKey": "a0a9b5b883f8",
+      "firstSeenGeneration": "06eba9515a05",
+      "lastSeenGeneration": "06eba9515a05"
+    },
+    {
+      "code": "4be5afb0",
+      "recurrenceKey": "fa1bbfd07c7d",
+      "firstSeenGeneration": "06eba9515a05",
+      "lastSeenGeneration": "06eba9515a05"
+    },
+    {
+      "code": "a617e077",
+      "recurrenceKey": "08f61d43f6f9",
+      "firstSeenGeneration": "06eba9515a05",
+      "lastSeenGeneration": "06eba9515a05"
+    },
+    {
+      "code": "fe9edd65",
+      "recurrenceKey": "c650877b54e5",
+      "firstSeenGeneration": "06eba9515a05",
+      "lastSeenGeneration": "06eba9515a05"
+    },
+    {
+      "code": "87e722df",
+      "recurrenceKey": "51c2424c2c1a",
+      "firstSeenGeneration": "06eba9515a05",
+      "lastSeenGeneration": "06eba9515a05"
+    }
+  ]
+}

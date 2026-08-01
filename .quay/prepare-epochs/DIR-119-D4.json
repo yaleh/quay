@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "epochId": "8ea1288b9aa6",
+  "taskId": "DIR-119-D4",
+  "charterHash": "23c327c7e48254546501b83bee2ead0efa282e254089a5321324e66cd9a0c250",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "e265af63668d",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 6,
+    "observableAgentMs": 2813687,
+    "terminalFingerprints": {
+      "e3b22c8ec07f": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "e265af63668d",
+      "owner": "human-operator",
+      "reason": "PlanCheck 3 rounds exceeded: (1) stale line citations after D2/M210 landed +132 lines into execute-milestone.js, (2) AC#5 Land-prompt write-stripping not covered in Stage 5. Added grounded fact to Finding section. Fresh epoch for re-run against current tree.",
+      "oldHash": {
+        "charterHash": "23c327c7e48254546501b83bee2ead0efa282e254089a5321324e66cd9a0c250",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "23c327c7e48254546501b83bee2ead0efa282e254089a5321324e66cd9a0c250",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785544382714
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785544382714
+}

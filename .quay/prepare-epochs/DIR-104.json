@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "epochId": "716888524368",
+  "taskId": "DIR-104",
+  "charterHash": "109e6aff593792c112bf3e04ccdbf3c4a19d5560afdc7077f83ff1d30938b10f",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "4a9a3e8b0bdb",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 10,
+    "observableAgentMs": 1867080,
+    "terminalFingerprints": {
+      "38e402758377": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "4a9a3e8b0bdb",
+      "owner": "human-operator",
+      "reason": "PlanCheck 4 findings never converge (flag-order output, null workspaceRoot crash, shadow-probe signature, AC5 coverage). Added 4 grounded facts. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "109e6aff593792c112bf3e04ccdbf3c4a19d5560afdc7077f83ff1d30938b10f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "109e6aff593792c112bf3e04ccdbf3c4a19d5560afdc7077f83ff1d30938b10f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785557828683
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785557828683
+}

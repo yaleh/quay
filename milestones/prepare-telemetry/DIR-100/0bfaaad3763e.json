@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 2,
+  "recordId": "0bfaaad3763e",
+  "attemptId": "0bfaaad3763e",
+  "generationId": "0bfaaad3763e",
+  "admission": {
+    "key": ".::DIR-100",
+    "ownerExecutionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c",
+    "fencingToken": 0,
+    "acquiredAt": 1785557025790
+  },
+  "workspace": ".",
+  "taskId": "DIR-100",
+  "milestoneId": "M217",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "2f6c31386b6b57111b5df882bb25948e9fc2230e6c1859bff9eea02562c417dc",
+    "taskContract": "701c2ba3c692606c09534108fa8e2763da191bde1149f0336fa0ad4e1b75fbac",
+    "proposal": "cb8b1bac82ae9f25e14af31c6cb08226963c1f65e821139f8a9613ff5d31af5c",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "split-recommended",
+    "phase": "ProposalReview",
+    "cacheable": true
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785557489601,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785557025790,
+      "endedAtMs": 1785557054000
+    },
+    {
+      "phase": "split-recommended",
+      "round": 0,
+      "startedAtMs": 1785557054000,
+      "endedAtMs": 1785557489601
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "split-recommended",
+      "recurrenceKey": "45acabab561f",
+      "firstSeenGeneration": "0bfaaad3763e",
+      "lastSeenGeneration": "0bfaaad3763e"
+    },
+    {
+      "code": "5f55c155",
+      "recurrenceKey": "236e68001af6",
+      "firstSeenGeneration": "0bfaaad3763e",
+      "lastSeenGeneration": "0bfaaad3763e"
+    },
+    {
+      "code": "ecb0ccb3",
+      "recurrenceKey": "eb4c9771ada3",
+      "firstSeenGeneration": "0bfaaad3763e",
+      "lastSeenGeneration": "0bfaaad3763e"
+    },
+    {
+      "code": "36b85230",
+      "recurrenceKey": "b5cfb16bb9d9",
+      "firstSeenGeneration": "0bfaaad3763e",
+      "lastSeenGeneration": "0bfaaad3763e"
+    },
+    {
+      "code": "7b3280fb",
+      "recurrenceKey": "44d35d2ca549",
+      "firstSeenGeneration": "0bfaaad3763e",
+      "lastSeenGeneration": "0bfaaad3763e"
+    },
+    {
+      "code": "62454ab6",
+      "recurrenceKey": "e77c72582f5c",
+      "firstSeenGeneration": "0bfaaad3763e",
+      "lastSeenGeneration": "0bfaaad3763e"
+    },
+    {
+      "code": "0462cebb",
+      "recurrenceKey": "f556d773894e",
+      "firstSeenGeneration": "0bfaaad3763e",
+      "lastSeenGeneration": "0bfaaad3763e"
+    },
+    {
+      "code": "042704ef",
+      "recurrenceKey": "13b4a357e57c",
+      "firstSeenGeneration": "0bfaaad3763e",
+      "lastSeenGeneration": "0bfaaad3763e"
+    }
+  ]
+}

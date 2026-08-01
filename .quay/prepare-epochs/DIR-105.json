@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "epochId": "03885267a1b0",
+  "taskId": "DIR-105",
+  "charterHash": "cb9ca4f27e109ad1abd8ccc65b1960a52f7e1eb411e745ca7bb63e7b8c92bc25",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "62040cc0c1ff",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 8,
+    "observableAgentMs": 1339620,
+    "terminalFingerprints": {
+      "38e402758377": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "aaa16ded52e7",
+      "owner": "human-operator",
+      "reason": "Preflight read stale Touches (ProposalReview wrote back .quay/config.yml + tasks/DIR-047.md). Fresh epoch for re-run.",
+      "oldHash": {
+        "charterHash": "cb9ca4f27e109ad1abd8ccc65b1960a52f7e1eb411e745ca7bb63e7b8c92bc25",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "cb9ca4f27e109ad1abd8ccc65b1960a52f7e1eb411e745ca7bb63e7b8c92bc25",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785555914516
+    },
+    {
+      "fromEpochId": "ec85c2b89137",
+      "owner": "human-operator",
+      "reason": "Preflight touches-mismatch: parenthetical comment in Touches entry broke exact-path match. Removed parentheticals. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "cb9ca4f27e109ad1abd8ccc65b1960a52f7e1eb411e745ca7bb63e7b8c92bc25",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "cb9ca4f27e109ad1abd8ccc65b1960a52f7e1eb411e745ca7bb63e7b8c92bc25",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785557680758
+    },
+    {
+      "fromEpochId": "62040cc0c1ff",
+      "owner": "human-operator",
+      "reason": "PlanCheck HIGH: execFileSync maxBuffer 1MB default but task list --json is ~4MB (ENOBUFS). Added maxBuffer 50MB grounding fact. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "cb9ca4f27e109ad1abd8ccc65b1960a52f7e1eb411e745ca7bb63e7b8c92bc25",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "cb9ca4f27e109ad1abd8ccc65b1960a52f7e1eb411e745ca7bb63e7b8c92bc25",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785560174221
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785560174221
+}

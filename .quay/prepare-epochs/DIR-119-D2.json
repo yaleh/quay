@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "epochId": "2b7302bc0bee",
+  "taskId": "DIR-119-D2",
+  "charterHash": "7d609d3d18d097eca97002cbba52083e3b7bf42f2e033d579b3e9167d23d2a0d",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "c7966031997d",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 2,
+    "contentAgentDispatches": 12,
+    "observableAgentMs": 5483717,
+    "terminalFingerprints": {
+      "e3b22c8ec07f": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "a8ed1715b616",
+      "owner": "human-operator",
+      "reason": "PlanCheck exceeded 3 rounds (Round 3: manifest envelope vs raw manifest CLI input-shape contradiction). Proposal was refined during review; fresh epoch for clean PlanAuthor+PlanCheck re-run.",
+      "oldHash": {
+        "charterHash": "7d609d3d18d097eca97002cbba52083e3b7bf42f2e033d579b3e9167d23d2a0d",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "7d609d3d18d097eca97002cbba52083e3b7bf42f2e033d579b3e9167d23d2a0d",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785519010326
+    },
+    {
+      "fromEpochId": "c7966031997d",
+      "owner": "human-operator",
+      "reason": "PlanCheck Round 3 found journal.jsonl format mismatch (Plan targeted journal.jsonl for label/batch data, but labels live in wf_*.json workflowProgress[]). Added grounded journal-format fact to task Finding section for PlanAuthor. Fresh epoch for re-run.",
+      "oldHash": {
+        "charterHash": "7d609d3d18d097eca97002cbba52083e3b7bf42f2e033d579b3e9167d23d2a0d",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "7d609d3d18d097eca97002cbba52083e3b7bf42f2e033d579b3e9167d23d2a0d",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785525123292
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785525123292
+}

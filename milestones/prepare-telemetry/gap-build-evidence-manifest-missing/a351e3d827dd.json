@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 2,
+  "recordId": "a351e3d827dd",
+  "attemptId": "a351e3d827dd",
+  "generationId": "a351e3d827dd",
+  "admission": {
+    "key": ".::gap-build-evidence-manifest-missing",
+    "ownerExecutionId": "4226284b-330a-4212-ae47-bdbb8e760bd5",
+    "fencingToken": 0,
+    "acquiredAt": 1785571020956
+  },
+  "workspace": ".",
+  "taskId": "gap-build-evidence-manifest-missing",
+  "milestoneId": "M238",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "fa8dc329bde400bd13549ada495e301fc385ea2b10491ef4bb7533e692bc281a",
+    "taskContract": "c32100d2ce092684dfcd6dff0d0892cc9476d1679c86a6f0f9b51ecbded28025",
+    "proposal": "e52ba6a8783eeb33a711c8f5ff179b3af179d87e47f15380dc0f1aea2b65426e",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "epoch-full-review-cap-exceeded",
+    "phase": "ProposalReview",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785571069742,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "Adjudicate",
+      "round": 0,
+      "startedAtMs": 1785570096981,
+      "endedAtMs": 1785570456566
+    },
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785570456566,
+      "endedAtMs": 1785571060205
+    },
+    {
+      "phase": "epoch-cap-full-review",
+      "round": 0,
+      "startedAtMs": 1785571060205,
+      "endedAtMs": 1785571069742
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "epoch-full-review-cap-exceeded",
+      "recurrenceKey": "d550b77ae8b4",
+      "firstSeenGeneration": "a351e3d827dd",
+      "lastSeenGeneration": "a351e3d827dd"
+    }
+  ]
+}

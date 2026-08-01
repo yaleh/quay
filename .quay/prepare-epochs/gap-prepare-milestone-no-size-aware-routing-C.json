@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "epochId": "8983098d4c40",
+  "taskId": "gap-prepare-milestone-no-size-aware-routing-C",
+  "charterHash": "cf3a2b09cacd613f3efae6bbe40689c8bca49d85fc6bdf02de58bb8f7e82401e",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": null,
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 2,
+    "observableAgentMs": 59796,
+    "terminalFingerprints": {
+      "4161ab22b641": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785564189537
+}

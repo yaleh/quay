@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 2,
+  "recordId": "edeeff0e6e80",
+  "attemptId": "edeeff0e6e80",
+  "generationId": "edeeff0e6e80",
+  "admission": {
+    "key": ".::gap-prepare-milestone-epoch-scope-change-grants-full-review",
+    "ownerExecutionId": "4226284b-330a-4212-ae47-bdbb8e760bd5",
+    "fencingToken": 0,
+    "acquiredAt": 1785568930653
+  },
+  "workspace": ".",
+  "taskId": "gap-prepare-milestone-epoch-scope-change-grants-full-review",
+  "milestoneId": "M233",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "f21d777b69f06771bcbee5fb914aa89909792fdb11fe54fb1e5edc361f5f9b40",
+    "taskContract": "4fe17897f56e1ed095e22a6236055a3b751aeefda66925892207b86d0ee62245",
+    "proposal": "f4793f6c6ab2a57e2dd32a10cf3b6756d1df2046fb4f19ec1f1b012c977005ce",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "epoch-full-review-cap-exceeded",
+    "phase": "ProposalReview",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785569701524,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "Adjudicate",
+      "round": 0,
+      "startedAtMs": 1785568930653,
+      "endedAtMs": 1785569349675
+    },
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785569349675,
+      "endedAtMs": 1785569692276
+    },
+    {
+      "phase": "epoch-cap-full-review",
+      "round": 0,
+      "startedAtMs": 1785569692276,
+      "endedAtMs": 1785569701524
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "epoch-full-review-cap-exceeded",
+      "recurrenceKey": "0de1f0df4068",
+      "firstSeenGeneration": "edeeff0e6e80",
+      "lastSeenGeneration": "edeeff0e6e80"
+    }
+  ]
+}

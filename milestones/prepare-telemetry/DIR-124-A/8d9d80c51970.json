@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 2,
+  "recordId": "8d9d80c51970",
+  "attemptId": "8d9d80c51970",
+  "generationId": "8d9d80c51970",
+  "admission": {
+    "key": ".::DIR-124-A",
+    "ownerExecutionId": "4226284b-330a-4212-ae47-bdbb8e760bd5",
+    "fencingToken": 0,
+    "acquiredAt": 1785571019882
+  },
+  "workspace": ".",
+  "taskId": "DIR-124-A",
+  "milestoneId": "M235",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "fe0b77e9fc7a19d37c416471689f39b72fcc606c4292bb8423fa6b544844a219",
+    "taskContract": "0c3f79488e735f20332fa691f3cd14a68d88bab308e1bd979414a368ece980c7",
+    "proposal": "ea2b9930553ef4f59e5285356dc9e0efc51548d7d4081d7375c83e79a94c1c15",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "cold",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": false
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "needs-human",
+    "reason": "split-recommended",
+    "phase": "ProposalReview",
+    "cacheable": true
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785571517896,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785570587756,
+      "endedAtMs": 1785571150047
+    },
+    {
+      "phase": "split-recommended",
+      "round": 0,
+      "startedAtMs": 1785571150047,
+      "endedAtMs": 1785571517896
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "split-recommended",
+      "recurrenceKey": "a14eb3c78daa",
+      "firstSeenGeneration": "5f2c1b9c4fc7",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "418b7a09",
+      "recurrenceKey": "c14607b64059",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "c91959e9",
+      "recurrenceKey": "c7a46da8b33d",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "18e38717",
+      "recurrenceKey": "d2deba0fef54",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "e3f82e48",
+      "recurrenceKey": "c894129b3245",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "5183eb8a",
+      "recurrenceKey": "de43288f0e92",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "78e1a0c9",
+      "recurrenceKey": "dd1d1d1891e3",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "ac2f9265",
+      "recurrenceKey": "2c0d43203057",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "f8e3e5f2",
+      "recurrenceKey": "ad49daf9ed80",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "0dd4dea5",
+      "recurrenceKey": "12caf787ac07",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "2099f388",
+      "recurrenceKey": "2f0b18828571",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "23ad72de",
+      "recurrenceKey": "fd4829891cf2",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "c5ffb5e3",
+      "recurrenceKey": "81e4ffebb2c5",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    },
+    {
+      "code": "b121daae",
+      "recurrenceKey": "cb92d0d31628",
+      "firstSeenGeneration": "8d9d80c51970",
+      "lastSeenGeneration": "8d9d80c51970"
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "epochId": "2f1f56e1959e",
+  "taskId": "DIR-100",
+  "charterHash": "2f6c31386b6b57111b5df882bb25948e9fc2230e6c1859bff9eea02562c417dc",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "302e5f016805",
+  "counters": {
+    "attempts": 0,
+    "fullReviews": 0,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 0,
+    "observableAgentMs": 0,
+    "terminalFingerprints": {},
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "95b509d583e4",
+      "owner": "human-operator",
+      "reason": "PlanCheck R3 left 1 minor citation slip (L468 vs L469) — PlanCheck requires F_i=0. Added 4 grounded facts (coverage basename rows, loader.ts exact lines, no gate --list --json, config 4 sections). Fresh epoch.",
+      "oldHash": {
+        "charterHash": "2f6c31386b6b57111b5df882bb25948e9fc2230e6c1859bff9eea02562c417dc",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "2f6c31386b6b57111b5df882bb25948e9fc2230e6c1859bff9eea02562c417dc",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785557016783
+    },
+    {
+      "fromEpochId": "302e5f016805",
+      "owner": "human-operator",
+      "reason": "Split into 3 children (DIR-100-A/B/C) per split-multi-mechanism. Parent rewritten as compound, M217 moot.",
+      "oldHash": {
+        "charterHash": "2f6c31386b6b57111b5df882bb25948e9fc2230e6c1859bff9eea02562c417dc",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "2f6c31386b6b57111b5df882bb25948e9fc2230e6c1859bff9eea02562c417dc",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785557775561
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785557775561
+}

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DIR-112",
+  "charterHash": "5c2b909c463e19dec86497505e1b2b6bc577447b27ae9d4f2c5c1d3e5dc7c15b",
+  "scopeHash": "89f5e99ee5db721fa1eaf41c4622142c02ef18d98eb1b9d6ab146ce871ab959d",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "mechanismInventoryHash": null,
+  "decision": "split",
+  "reason": "ProposalReview found wiring-coverage gaps — split as recommended",
+  "authorizingSessionId": null,
+  "decidedAtMs": 1785572403487,
+  "invalidations": []
+}

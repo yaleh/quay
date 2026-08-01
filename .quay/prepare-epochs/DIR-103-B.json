@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "epochId": "7dec5dd5e76a",
+  "taskId": "DIR-103-B",
+  "charterHash": "ebd1eb37ae4cb3eb7a184aef2cf283053287b899ef081046bd34109b92c077d4",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "e3028756d32e",
+  "counters": {
+    "attempts": 2,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 8,
+    "observableAgentMs": 1340265,
+    "terminalFingerprints": {
+      "38e402758377": 1,
+      "2d86004634ea": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "6c3621a15a1a",
+      "owner": "human-operator",
+      "reason": "Plan references mcp-gate-dryrun.test.mjs + gate/engine.ts not in Touches; fixed. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "ebd1eb37ae4cb3eb7a184aef2cf283053287b899ef081046bd34109b92c077d4",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "ebd1eb37ae4cb3eb7a184aef2cf283053287b899ef081046bd34109b92c077d4",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785556445666
+    },
+    {
+      "fromEpochId": "dcb2709b0077",
+      "owner": "human-operator",
+      "reason": "Touches parenthetical outside backticks broke path match. Fixed. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "ebd1eb37ae4cb3eb7a184aef2cf283053287b899ef081046bd34109b92c077d4",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "ebd1eb37ae4cb3eb7a184aef2cf283053287b899ef081046bd34109b92c077d4",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785557681185
+    },
+    {
+      "fromEpochId": "e3028756d32e",
+      "owner": "human-operator",
+      "reason": "PlanCheck 4 findings (runAcceptance 5 call sites, AC2 RED vacuous, killed-subprocess no coverage, Touches inconsistency). Fixed Touches + added 4 grounded facts. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "ebd1eb37ae4cb3eb7a184aef2cf283053287b899ef081046bd34109b92c077d4",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "ebd1eb37ae4cb3eb7a184aef2cf283053287b899ef081046bd34109b92c077d4",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785558595084
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785558595084
+}

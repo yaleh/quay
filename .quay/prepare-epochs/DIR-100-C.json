@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "epochId": "ad5beb296fd1",
+  "taskId": "DIR-100-C",
+  "charterHash": "17db98819a223edfaf7bf08c6123d0347f6ac62f85b9247e1f876ad035342f8f",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "d58580808148",
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 1,
+    "contentAgentDispatches": 5,
+    "observableAgentMs": 478973,
+    "terminalFingerprints": {
+      "4da660c57c73": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "b4c667e70ffb",
+      "owner": "human-operator",
+      "reason": "PlanCheck F1: execFileSync doesn't capture child stderr on zero exit (needs spawnSync/async stderr read) + 6 guards not 5. Added grounding facts. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "17db98819a223edfaf7bf08c6123d0347f6ac62f85b9247e1f876ad035342f8f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "17db98819a223edfaf7bf08c6123d0347f6ac62f85b9247e1f876ad035342f8f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785559317286
+    },
+    {
+      "fromEpochId": "d58580808148",
+      "owner": "human-operator",
+      "reason": "PlanCheck: coverageFloor pattern is optional (not required); invalid-path error-fallback omitted; cwd/timeoutMs not extra fields. Added 3 grounding facts. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "17db98819a223edfaf7bf08c6123d0347f6ac62f85b9247e1f876ad035342f8f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "17db98819a223edfaf7bf08c6123d0347f6ac62f85b9247e1f876ad035342f8f",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785561286397
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785561286397
+}

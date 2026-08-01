@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 2,
+  "recordId": "4894972d7cd2",
+  "attemptId": "4894972d7cd2",
+  "generationId": "4894972d7cd2",
+  "admission": {
+    "key": ".::DIR-104",
+    "ownerExecutionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c",
+    "fencingToken": 0,
+    "acquiredAt": 1785555028291
+  },
+  "workspace": ".",
+  "taskId": "DIR-104",
+  "milestoneId": "M220",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "109e6aff593792c112bf3e04ccdbf3c4a19d5560afdc7077f83ff1d30938b10f",
+    "taskContract": "39e37151fa7e560306c1ff6966150f201805d5ca8ef851e710263cf225d2e8b4",
+    "proposal": "e0dc74e472b4b316eb7f5fc1e74d045cc9487acee1d123caebe23065f8c97b5f",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "plancheck-rounds-exceeded",
+    "phase": "PlanCheck",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785557755747,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785555028291,
+      "endedAtMs": 1785555056701
+    },
+    {
+      "phase": "ProposalReview-delta-round-1",
+      "round": 1,
+      "startedAtMs": 1785555056701,
+      "endedAtMs": 1785555370742
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785555370742,
+      "endedAtMs": 1785555670884
+    },
+    {
+      "phase": "PlanCheck-round-1",
+      "round": 1,
+      "startedAtMs": 1785555670884,
+      "endedAtMs": 1785555925774
+    },
+    {
+      "phase": "PlanCheck-round-2",
+      "round": 2,
+      "startedAtMs": 1785555925774,
+      "endedAtMs": 1785556770203
+    },
+    {
+      "phase": "PlanCheck-round-3",
+      "round": 3,
+      "startedAtMs": 1785556770203,
+      "endedAtMs": 1785557437852
+    },
+    {
+      "phase": "plancheck-rounds-exceeded",
+      "round": 0,
+      "startedAtMs": 1785557437852,
+      "endedAtMs": 1785557755747
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "plancheck-rounds-exceeded",
+      "recurrenceKey": "5ba3ef612644",
+      "firstSeenGeneration": "4894972d7cd2",
+      "lastSeenGeneration": "4894972d7cd2"
+    },
+    {
+      "code": "7f0d6a48",
+      "recurrenceKey": "0565752e25fb",
+      "firstSeenGeneration": "4894972d7cd2",
+      "lastSeenGeneration": "4894972d7cd2"
+    },
+    {
+      "code": "6b93d30b",
+      "recurrenceKey": "b01890c90762",
+      "firstSeenGeneration": "4894972d7cd2",
+      "lastSeenGeneration": "4894972d7cd2"
+    },
+    {
+      "code": "3a22e264",
+      "recurrenceKey": "1c598b774540",
+      "firstSeenGeneration": "4894972d7cd2",
+      "lastSeenGeneration": "4894972d7cd2"
+    },
+    {
+      "code": "8e234f32",
+      "recurrenceKey": "2746b07c71bd",
+      "firstSeenGeneration": "4894972d7cd2",
+      "lastSeenGeneration": "4894972d7cd2"
+    },
+    {
+      "code": "62ba3d6e",
+      "recurrenceKey": "d0e5e913374c",
+      "firstSeenGeneration": "4894972d7cd2",
+      "lastSeenGeneration": "4894972d7cd2"
+    },
+    {
+      "code": "ce19dc96",
+      "recurrenceKey": "66bee46bc47b",
+      "firstSeenGeneration": "4894972d7cd2",
+      "lastSeenGeneration": "4894972d7cd2"
+    },
+    {
+      "code": "ff08c154",
+      "recurrenceKey": "6e18902507dd",
+      "firstSeenGeneration": "4894972d7cd2",
+      "lastSeenGeneration": "4894972d7cd2"
+    },
+    {
+      "code": "9fd4079e",
+      "recurrenceKey": "0aed526547d0",
+      "firstSeenGeneration": "4894972d7cd2",
+      "lastSeenGeneration": "4894972d7cd2"
+    },
+    {
+      "code": "94cf7923",
+      "recurrenceKey": "0c17c3a68d72",
+      "firstSeenGeneration": "4894972d7cd2",
+      "lastSeenGeneration": "4894972d7cd2"
+    },
+    {
+      "code": "956a3c33",
+      "recurrenceKey": "3783829e65c4",
+      "firstSeenGeneration": "4894972d7cd2",
+      "lastSeenGeneration": "4894972d7cd2"
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "epochId": "1ae0b73e478c",
+  "taskId": "gap-prepare-milestone-epoch-scope-change-grants-full-review",
+  "charterHash": "f21d777b69f06771bcbee5fb914aa89909792fdb11fe54fb1e5edc361f5f9b40",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "967a52f08f67",
+  "bodyScopeHash": null,
+  "counters": {
+    "attempts": 1,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 5,
+    "observableAgentMs": 484651,
+    "terminalFingerprints": {
+      "a2ae225bf1eb": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "bbe21c2bb4af",
+      "owner": "orchestrating-session",
+      "reason": "concurrent-session-prep-did-not-complete-receipt -- legitimate fresh attempt",
+      "oldHash": {
+        "charterHash": "f21d777b69f06771bcbee5fb914aa89909792fdb11fe54fb1e5edc361f5f9b40",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "f21d777b69f06771bcbee5fb914aa89909792fdb11fe54fb1e5edc361f5f9b40",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785569747419
+    },
+    {
+      "fromEpochId": "967a52f08f67",
+      "owner": "orchestrating-session",
+      "reason": "split-recommended-from-prior-run -- fresh epoch with AC fixes",
+      "oldHash": {
+        "charterHash": "f21d777b69f06771bcbee5fb914aa89909792fdb11fe54fb1e5edc361f5f9b40",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "f21d777b69f06771bcbee5fb914aa89909792fdb11fe54fb1e5edc361f5f9b40",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785571009288
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785571009288
+}

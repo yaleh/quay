@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "epochId": "de332932c399",
+  "taskId": "DIR-099-C",
+  "charterHash": "5c18e52c3a4ce408ff06f6c55d784cdfd1822ee5625a1e2b7456fbb6b2708c82",
+  "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51",
+  "parentEpochId": "49ea27351ce0",
+  "counters": {
+    "attempts": 2,
+    "fullReviews": 1,
+    "deltaRounds": 0,
+    "contentAgentDispatches": 5,
+    "observableAgentMs": 436088,
+    "terminalFingerprints": {
+      "4161ab22b641": 1,
+      "2d86004634ea": 1
+    },
+    "tokensObserved": null
+  },
+  "overrides": [],
+  "resets": [
+    {
+      "fromEpochId": "74b91b4aaeff",
+      "owner": "human-operator",
+      "reason": "Added hard dependency on DIR-099-A + MCP contract clarifications (checkFiles default, error path, structuredContent AC, explicit params). Fresh epoch.",
+      "oldHash": {
+        "charterHash": "5c18e52c3a4ce408ff06f6c55d784cdfd1822ee5625a1e2b7456fbb6b2708c82",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "5c18e52c3a4ce408ff06f6c55d784cdfd1822ee5625a1e2b7456fbb6b2708c82",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785558567055
+    },
+    {
+      "fromEpochId": "50cdbac84451",
+      "owner": "human-operator",
+      "reason": "MCP clarifications were appended after Touches (parsed as overbroad globs). Moved into Finding. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "5c18e52c3a4ce408ff06f6c55d784cdfd1822ee5625a1e2b7456fbb6b2708c82",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "5c18e52c3a4ce408ff06f6c55d784cdfd1822ee5625a1e2b7456fbb6b2708c82",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785558653330
+    },
+    {
+      "fromEpochId": "49ea27351ce0",
+      "owner": "human-operator",
+      "reason": "PlanCheck F1: MCP server dies at boot on malformed YAML (loadConfig no try/catch) — parity test needs semantically-invalid fixture; AC numbers shifted. Added 2 grounding facts. Fresh epoch.",
+      "oldHash": {
+        "charterHash": "5c18e52c3a4ce408ff06f6c55d784cdfd1822ee5625a1e2b7456fbb6b2708c82",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "newHash": {
+        "charterHash": "5c18e52c3a4ce408ff06f6c55d784cdfd1822ee5625a1e2b7456fbb6b2708c82",
+        "reviewPolicyHash": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+      },
+      "timestamp": 1785561012782
+    }
+  ],
+  "policy": {
+    "ordinaryCapMinutes": 90,
+    "highRiskCapMinutes": 150,
+    "maxFullReviewsPerEpoch": 1,
+    "maxRepeatedFingerprint": 2,
+    "maxOverrideCount": 3,
+    "maxNewEpochResetCount": 3
+  },
+  "createdAtMs": 1785561012782
+}
