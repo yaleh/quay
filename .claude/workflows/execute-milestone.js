@@ -7,6 +7,7 @@ export const meta = {
     { title: 'Build',  detail: 'Step 5 — class-route + dispatch inner iteration agent' },
     { title: 'Audit',  detail: 'Step 6 — adversarial fresh-context acceptance audit' },
     { title: 'Gate',   detail: 'Step 6 — all absorb-phase mechanical gate checks' },
+    { title: 'Reconcile', detail: 'DIR-119-D4/M212 — literal Reconcile phase between Gate and Land: sole success-path composite state writer (reconcile-apply), dispatched only for composite dispatches' },
     { title: 'Land',   detail: 'Step 6 merge + step 7 dashboard update + counter++' },
   ],
 }
@@ -653,7 +654,19 @@ Read-only otherwise: do NOT edit any repository file. Return {candidateId, shard
   const verdictMap = { REFUTED: 'REFUTED', CONCERNS: 'CONCERNS', PASS: 'NO REFUTATION FOUND' }
   const verdict = verdictMap[combineResult.bundleVerdict] || 'REFUTED'
   log(`audit-combine complete: bundleVerdict=${combineResult.bundleVerdict} -> verdict=${verdict} (candidate ${candidateId})`)
-  return { verdict, detail: `composite per-shard audit: ${shardResults.length} shard(s), bundle ${combineResult.bundleVerdict}`, auditSessionId }
+  // DIR-119-D4 (M212): thread the full BundleAuditResult through for the Reconcile phase — reconcile()
+  // consumes the complete shard-verdict vector as input, not just the mapped verdict.
+  return {
+    verdict,
+    detail: `composite per-shard audit: ${shardResults.length} shard(s), bundle ${combineResult.bundleVerdict}`,
+    auditSessionId,
+    bundleAudit: {
+      candidateId: combineResult.candidateId || candidateId,
+      shardResults: Array.isArray(combineResult.shardResults) ? combineResult.shardResults : shardResults,
+      bundleVerdict: combineResult.bundleVerdict,
+      generationId: combineResult.generationId,
+    },
+  }
 }
 
 // ── Phase: Audit (step 6 acceptance audit) ──────────────────────────────────────────
@@ -763,35 +776,133 @@ phase('Gate')
 const _gateWt = _useWorktree
   ? `WORKTREE ISOLATION (DIR-123): first \`cd ${_isolationPlan.worktreeRel}\` (the build worktree, branch ${_isolationPlan.branch}) and run this gate FROM THERE so it checks the BUILT state (the task-file / working-tree changes are in the worktree; Land has not merged the primary checkout yet). Then `
   : ''
+// DIR-119-D4 (M212): TYPED Gate results. Gate closures change RETURN SHAPE, not check set.
+// Task-scoped gates return {scope:"task", taskId, gate, ok, detail}; milestone-scoped gates return
+// {scope:"milestone", gate, ok, detail}. Identity is a STRUCTURAL `taskId` field — never the
+// `split-or-commit-${tid}` label, never positional order. For the LEGACY width-1 path the return
+// shape and prompts stay byte-identical (golden replay): every typed interpolation below is ''
+// when `_isComposite===false`, and the schemas fall back to the untyped {ok, detail} shape.
+const _typedMilestoneGateReturn = _isComposite ? 'Return a TYPED milestone-scoped gate record {scope:"milestone", gate:<check-name>, ok:<bool>, detail:<why>}.' : 'Return {ok, detail}.'
+const _typedTaskGateReturn = (tid) => _isComposite ? `Return a TYPED task-scoped gate record {scope:"task", taskId:"${tid}", gate:"split-or-commit", ok:<bool>, detail:<why>}.` : 'Return {ok, detail}.'
+const _milestoneGateSchema = _isComposite
+  ? { type: 'object', required: ['scope', 'gate', 'ok'], properties: { scope: { type: 'string' }, gate: { type: 'string' }, ok: { type: 'boolean' }, detail: { type: 'string' } } }
+  : { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } }
+const _taskGateSchema = _isComposite
+  ? { type: 'object', required: ['scope', 'taskId', 'gate', 'ok'], properties: { scope: { type: 'string' }, taskId: { type: 'string' }, gate: { type: 'string' }, ok: { type: 'boolean' }, detail: { type: 'string' } } }
+  : { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } }
 // DIR-119-B (M189) Stage 2.5: the task-scoped split-or-commit gate runs for EVERY member task
 // (not just the primary) — for a legacy single-task call (_taskIds.length===1) this is
 // byte-for-behavior identical to the pre-existing single gate call (same label, same command).
 const _splitOrCommitGates = _taskIds.map((tid) => () => agent(
-  `${_gateWt}Run quay gate --gate split-or-commit ${tid}. Return {ok, detail}. Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK.`,
-  { label: _isComposite ? `split-or-commit-${tid}` : 'split-or-commit', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } },
+  `${_gateWt}Run quay gate --gate split-or-commit ${tid}. ${_typedTaskGateReturn(tid)} Non-zero = SPLIT-OR-COMMIT violation (DIR-026: parent-done-iff-children, SELECT-split, child-link-symmetry, OR needs-human reason is in-project rather than external) → HARD BLOCK.`,
+  { label: _isComposite ? `split-or-commit-${tid}` : 'split-or-commit', schema: _taskGateSchema },
 ))
 const gates = await parallel([
-  () => agent(`${_gateWt}Run vmeta-lag-check.sh --counter <extract current milestone_counter from experiments/quay-perpetual-stream/dashboard.md minus 1> experiments/quay-perpetual-stream/v-meta-ledger.md. This reads the V_meta ledger (NOT the absorb entry). Return {ok, detail}. Non-zero = ALARM → HARD BLOCK.`,
-    { label: 'vmeta-lag', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`${_gateWt}Run it0-dashboard-line-budget-check.sh. Return {ok, detail}. Non-zero = dashboard exceeds 1200-line cap → HARD BLOCK.`,
-    { label: 'dash-budget', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`${_gateWt}Run tree-hygiene-check.sh. Return {ok, detail}. Non-zero = un-gitignored scratch on master → HARD BLOCK.`,
-    { label: 'tree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
-  () => agent(`${_gateWt}Run worktree-branch-hygiene-check.sh. Return {ok, detail}. Non-zero = orphaned milestone evidence → HARD BLOCK.`,
-    { label: 'worktree', schema: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, detail: { type: 'string' } } } }),
+  () => agent(`${_gateWt}Run vmeta-lag-check.sh --counter <extract current milestone_counter from experiments/quay-perpetual-stream/dashboard.md minus 1> experiments/quay-perpetual-stream/v-meta-ledger.md. This reads the V_meta ledger (NOT the absorb entry). ${_typedMilestoneGateReturn} Non-zero = ALARM → HARD BLOCK.`,
+    { label: 'vmeta-lag', schema: _milestoneGateSchema }),
+  () => agent(`${_gateWt}Run it0-dashboard-line-budget-check.sh. ${_typedMilestoneGateReturn} Non-zero = dashboard exceeds 1200-line cap → HARD BLOCK.`,
+    { label: 'dash-budget', schema: _milestoneGateSchema }),
+  () => agent(`${_gateWt}Run tree-hygiene-check.sh. ${_typedMilestoneGateReturn} Non-zero = un-gitignored scratch on master → HARD BLOCK.`,
+    { label: 'tree', schema: _milestoneGateSchema }),
+  () => agent(`${_gateWt}Run worktree-branch-hygiene-check.sh. ${_typedMilestoneGateReturn} Non-zero = orphaned milestone evidence → HARD BLOCK.`,
+    { label: 'worktree', schema: _milestoneGateSchema }),
   ..._splitOrCommitGates,
 ])
 
 const gatesFailed = gates.filter(Boolean).some(g => !g.ok)
 if (gatesFailed) {
   log('Gate phase FAILED — one or more mechanical gates did not pass. Marking needs-human.')
-  await agent(
-    `Mark task ${_primaryTaskId} needs-human. Record which gates failed and why in the ABSORB entry at ${$a.absorbEntryFile}. Gates: ${JSON.stringify(gates.filter(Boolean))}`,
-    { label: 'mark-needs-human', phase: 'Land' }
-  )
+  if (_isComposite && $a.compositeManifestFile) {
+    // DIR-119-D4 (M212): typed failure attribution — identify WHICH member task(s) actually failed
+    // via composite-reconcile.ts's REAL exported attributeGateFailures (invoked through the
+    // --attribute-gates-json CLI mode), never the old `_primaryTaskId` hardcode, never a workflow-side
+    // re-derivation. The attribute-gates helper agent writes the typed vector to /tmp and runs the
+    // command; its failedTaskIds feed the mark-needs-human agent below.
+    const gateVectorFile = `/tmp/composite-gate-vector-${_milestone}-${_primaryTaskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`
+    const attribution = await agent(
+      `You are the attribute-gates helper for a composite milestone Gate phase (DIR-119-D4).
+1. Write EXACTLY this typed gate-vector JSON to ${gateVectorFile} (a /tmp scratch file, OUTSIDE the repo — never write inside the repository):
+${JSON.stringify(gates.filter(Boolean))}
+2. Run EXACTLY this command and capture its stdout:
+  node --experimental-strip-types experiments/quay-perpetual-stream/scripts/composite-reconcile.ts --attribute-gates-json --in ${gateVectorFile}
+   Its stdout is the {failedTaskIds, passingTaskIds, milestoneFailures} JSON produced by composite-reconcile.ts's REAL exported attributeGateFailures — do NOT recompute attribution yourself.
+Return {failedTaskIds: [...], passingTaskIds: [...], milestoneFailures: [...]}.`,
+      { phase: 'Gate', label: 'attribute-gates',
+        schema: { type: 'object', required: ['failedTaskIds'], properties: {
+          failedTaskIds: { type: 'array', items: { type: 'string' } },
+          passingTaskIds: { type: 'array', items: { type: 'string' } },
+          milestoneFailures: { type: 'array' },
+        } } }
+    )
+    const failedTaskIds = (attribution && Array.isArray(attribution.failedTaskIds)) ? attribution.failedTaskIds : []
+    const failedTaskList = failedTaskIds.length > 0 ? failedTaskIds.join(', ') : '(unknown — attribution helper returned no failed ids)'
+    const milestoneFailuresNote = (attribution && Array.isArray(attribution.milestoneFailures) && attribution.milestoneFailures.length > 0)
+      ? ` Milestone-scoped gate failures (bundle-level, not attributable to a single member): ${JSON.stringify(attribution.milestoneFailures)}.`
+      : ''
+    await agent(
+      `Mark task(s) ${failedTaskList} needs-human (DIR-119-D4: failing member task(s) identified via attributeGateFailures, NOT ${_primaryTaskId} by default). Record which gates failed and why in the ABSORB entry at ${$a.absorbEntryFile}.${milestoneFailuresNote} Gates: ${JSON.stringify(gates.filter(Boolean))}`,
+      { label: 'mark-needs-human', phase: 'Land' }
+    )
+  } else {
+    await agent(
+      `Mark task ${_primaryTaskId} needs-human. Record which gates failed and why in the ABSORB entry at ${$a.absorbEntryFile}. Gates: ${JSON.stringify(gates.filter(Boolean))}`,
+      { label: 'mark-needs-human', phase: 'Land' }
+    )
+  }
   return { outcome: 'needs-human', reason: 'gate-failed', phase: 'Gate', verifyCacheUpdates }
 }
 log(`Gate phase PASSED — all ${gates.filter(Boolean).length} mechanical gates green.`)
+
+// ── Phase: Reconcile (DIR-119-D4 / M212) ─────────────────────────────────────────────
+// Literal Reconcile phase between Gate and Land. For a COMPOSITE dispatch this is the ONLY phase
+// permitted to write task AC/DoD ticks, status:done, dashboard rows, and absorb dispositions —
+// reconcile-apply is the sole success-path writer; the Land agent below VALIDATES the post-image and
+// commits (DIR-119-D5 owns Land's transaction wiring). Strictly downstream of Gate because
+// reconcile() requires the complete typed task+milestone gate vector. Width-1 / manifest-less
+// dispatches SKIP this phase entirely — the width-1 Land prompt keeps its writes byte-for-behavior
+// identical (golden replay, execute-milestone-worktree.test.mjs).
+const IS_CONCURRENT = $a.mode === 'concurrent'
+if (_isComposite && $a.compositeManifestFile) {
+  phase('Reconcile')
+  const _reconcileWt = _useWorktree
+    ? `WORKTREE ISOLATION (DIR-123): first \`cd ${_isolationPlan.worktreeRel}\` (the build worktree, branch ${_isolationPlan.branch}) and apply your writes THERE (task files / dashboard / absorb live in the worktree; Land has not merged the primary checkout yet). Then `
+    : ''
+  const _reconcileLandScopeNote = IS_CONCURRENT
+    ? `\nCONCURRENT MODE (fan-in absorb): do NOT write dashboard.md or increment milestone_counter (those are deferred to the serial fan-in absorb step). Your sole-writer scope here is the task-level success-path state — AC/DoD ticks, status:done, absorb dispositions — plus the consolidated audit artifact.`
+    : `\nSERIAL MODE: as the sole success-path writer, ALSO apply EXACTLY ONE dashboard.md ## Log absorb entry, EXACTLY ONE milestone_counter increment, and the dashboard view update (composite-land.ts's atomic-Land invariant).`
+  const reconcileInputFile = `/tmp/composite-reconcile-input-${_milestone}-${_primaryTaskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`
+  const reconcileInput = {
+    bundleAudit: auditResult?.bundleAudit || { candidateId: `M${_milestone}-${_primaryTaskId}`, shardResults: [], bundleVerdict: 'REFUTED' },
+    requiredGenerationId: buildResult?.mergeCommit || undefined,
+    taskGates: gates.filter((g) => g && g.scope === 'task'),
+    milestoneGates: gates.filter((g) => g && g.scope === 'milestone'),
+    taskIds: _taskIds,
+  }
+  const reconcileApply = await agent(
+    `You are reconcile-apply for the COMPOSITE milestone Reconcile phase (DIR-119-D4). ${_reconcileWt}You are the ONLY agent in this workflow whose prompt instructs success-path composite state writes — task AC/DoD ticks, status:done, dashboard rows, absorb dispositions, deviation/write-back rows — for a composite dispatch. The Land agent below only VALIDATES your post-image and commits (DIR-119-D5 owns Land's transaction wiring).
+1. Write EXACTLY this ReconcileInput JSON to ${reconcileInputFile} (a /tmp scratch file, OUTSIDE the repo — never write inside the repository):
+${JSON.stringify(reconcileInput)}
+2. Run EXACTLY this command and capture its stdout:
+  node --experimental-strip-types experiments/quay-perpetual-stream/scripts/composite-reconcile.ts --reconcile-json --in ${reconcileInputFile}
+   Its stdout is the ReconcileResult JSON from composite-reconcile.ts's REAL exported reconcile() — {ok, reason?, mutations:[{taskId, checkboxes:[ac-<n>...], absorbDisposition}], bundleDisposition?}. Do NOT recompute the mutation plan yourself. A nonzero exit code means ok:false (contract violation) — apply ZERO mutations.
+3. APPLY ALL-OR-NOTHING (pre-image capture + rollback; never a partial success):
+   - If result.ok === true: FIRST capture pre-images (read each member task's current AC/DoD checkbox state and lifecycle status), THEN apply the COMPLETE returned mutation set — for EACH {taskId, checkboxes, absorbDisposition}: tick EXACTLY the returned \`ac-<acIndex>\` checkboxes in tasks/<taskId>.md's ## Acceptance Criteria / ## Definition of Done sections, append the absorb-disposition line to ${$a.absorbEntryFile}, and task_write status:done with a per-task ## Execution record.${_reconcileLandScopeNote} Also write the consolidated audit artifact under MILESTONE_ROOT/audits/ (resolve MILESTONE_ROOT via \`source experiments/quay-perpetual-stream/scripts/gate-script-lib.sh && gate_resolve_milestone_root ${_milestone}\`). Any failure mid-apply: ROLL BACK every mutation to the captured pre-images and mark needs-human — never leave a partial success.
+   - If result.ok === false: apply ZERO mutations. Return {applied:false, reason, result}.
+Return {applied: <bool>, result: <the ReconcileResult JSON>}.`,
+    { phase: 'Reconcile', label: 'reconcile-apply',
+      schema: { type: 'object', required: ['applied', 'result'], properties: {
+        applied: { type: 'boolean' },
+        result: { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' }, reason: { type: 'string' }, mutations: { type: 'array' }, bundleDisposition: { type: 'string' } } },
+      } } }
+  )
+  log(`Reconcile phase complete: applied=${reconcileApply?.applied}, result.ok=${reconcileApply?.result?.ok}${reconcileApply?.result?.reason ? ` reason=${reconcileApply.result.reason}` : ''}`)
+  if (!reconcileApply?.applied || !reconcileApply?.result?.ok) {
+    log(`Reconcile contract violation (${reconcileApply?.result?.reason || 'reconcile-apply-did-not-apply'}) — zero mutations applied; cannot proceed to Land.`)
+    return { outcome: 'needs-human', reason: reconcileApply?.result?.reason || 'reconcile-contract-violation', phase: 'Reconcile', verifyCacheUpdates }
+  }
+} else {
+  log('Reconcile phase skipped (width-1 / manifest-less dispatch — success-path writes remain in Land per golden replay).')
+}
 
 // ── Phase: Land (step 6 merge + step 7 dashboard) ────────────────────────────────────
 phase('Land')
@@ -809,14 +920,15 @@ if (auditResult?.verdict === 'REFUTED') {
   return { outcome: 'needs-human', reason: 'audit-refuted', phase: 'Land', verifyCacheUpdates }
 }
 
-// DIR-119-B (M189) Stage 2.6: atomic-Land note threaded into both Land prompts below. For a
-// legacy single-task call (_isComposite===false) this is empty — behavior is byte-for-behavior
-// unchanged (golden replay). For a genuine composite call, instruct the agent to apply
-// composite-land.ts's invariant: mark EVERY member task consistently, but still exactly ONE
-// milestone_counter increment and ONE dashboard entry regardless of task count (never one
-// increment/entry per task) — task-completion count is recorded separately from the counter.
+// DIR-119-D4 (M212): atomic-Land note threaded into both Land prompts below. For a legacy
+// single-task call (_isComposite===false) this is empty — behavior is byte-for-behavior unchanged
+// (golden replay). For a genuine composite call it is a VALIDATION-ONLY note: the composite
+// success-path writes (task lifecycle state, AC/DoD ticks, absorb dispositions, dashboard rows) were
+// applied by `reconcile-apply` in the Reconcile phase (the SOLE success-path writer), so Land here
+// validates the post-image and commits — never re-applying those writes. Task-completion count is
+// recorded as metadata only.
 const _compositeLandNote = _isComposite
-  ? `\n\nCOMPOSITE LAND (DIR-119-B/M189, ${_taskIds.length} member tasks: ${_taskIds.join(', ')}): mark ALL of [${_taskIds.join(', ')}] status:done with their own Execution record write-back — NOT just ${_primaryTaskId}. Regardless of member count, this Land step still performs EXACTLY ONE milestone_counter increment and writes EXACTLY ONE dashboard log entry (composite-land.ts's atomic-Land invariant) — record task-completion count (${_taskIds.length}) separately in that one entry, never as N separate entries or N separate counter bumps.`
+  ? `\n\nCOMPOSITE LAND (DIR-119-D4/M212, ${_taskIds.length} member tasks: ${_taskIds.join(', ')}): the composite success-path writes (task lifecycle state, AC/DoD ticks, absorb dispositions, dashboard rows) were applied by \`reconcile-apply\` in the Reconcile phase. Here VALIDATE that post-image (read the tasks, inspect \`git diff\`) and commit only — do NOT re-apply any of those writes. Record task-completion count (${_taskIds.length}) as metadata.`
   : ''
 
 // DIR-123: the SERIAL Land path's step-1 merge instruction, mode-aware. (The CONCURRENT path uses
@@ -886,8 +998,6 @@ const _landCaptureTail = _useWorktree
   ? `\n   (The per-milestone worktree was already merged + removed in step 1 above — nothing further to prune here.)`
   : ` Then, ONLY if a non-primary iteration produced its OWN worktree evidence not on master, \`git worktree remove\` + \`git branch -d\` those now-merged branches — a NO-OP for the default single-iteration direct-to-master build, which creates no worktree.`
 
-const IS_CONCURRENT = $a.mode === 'concurrent'
-
 // ── Post-Land split-or-commit check (gap-split-or-commit-not-continuously-checked) ──────────
 // Runs the WHOLE-TASK-STORE scan (it0-split-or-commit-check.ts, DIR-026) AFTER Land's own
 // lifecycle write-back (status: done etc.) has been applied and BEFORE this workflow may report
@@ -944,11 +1054,11 @@ if (IS_CONCURRENT) {
    release the lock. Doing any of that here would violate the SOLE-merge-owner invariant and race the
    fan-in / other survivors on the primary git index.
 2. Do NOT update milestone_counter or dashboard.md (deferred to the serial fan-in absorb step).
-3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${_primaryTaskId}.md appending a
+${_isComposite ? `3. EXECUTION-PROVENANCE VALIDATION (DIR-119-D4): reconcile-apply set status:done and ticked AC/DoD for every member task in the Reconcile phase — VALIDATE those writes (read the member tasks) and do NOT re-write them. If a per-task ## Execution record is missing, append ONLY that provenance record WITHOUT re-setting status.` : `3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${_primaryTaskId}.md appending a
    ## Execution record section (milestone id, iteration count, realized Δv, build branch
    ${_isolationPlan.branch}, one-line outcome summary) and setting status: done. (This is a PER-TASK
    store write, serialized by quay-native's per-task lock — NOT part of the shared-checkout race — so it
-   is safe to do here before the fan-in merges.)
+   is safe to do here before the fan-in merges.)`}
 4. COMPUTE touchedFiles (READ-ONLY, safe): run \`git diff --numstat master..${_isolationPlan.branch}\`
    from the repo root to get the files this build changed; collect column 3 into a flat array.
 5. DRAFT a one-line dashboard entry for this milestone: "m<NN> · ${_primaryTaskId} · Δv=<realized> ·
@@ -1000,9 +1110,9 @@ ${_landMergeStep}
    mechanism). Together this milestone's own charter+audit+iteration evidence lands in THIS commit
    series — no manual sweep needed afterward. THEN PRUNE (DIR-033): if a non-primary iteration ALSO
    produced evidence not on master, cherry-pick JUST that evidence file.${_landCaptureTail}
-3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${_primaryTaskId}.md
+${_isComposite ? `3. EXECUTION-PROVENANCE VALIDATION (DIR-119-D4): reconcile-apply set status:done and ticked AC/DoD for every member task in the Reconcile phase — VALIDATE those writes (read the member tasks) and do NOT re-write them. If a per-task ## Execution record is missing, append ONLY that provenance record WITHOUT re-setting status.` : `3. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${_primaryTaskId}.md
    appending a ## Execution record section (milestone id, iteration count, realized Δv,
-   merge commit SHA, one-line outcome summary) and setting status: done.
+   merge commit SHA, one-line outcome summary) and setting status: done.`}
 4. COMPUTE touchedFiles: run \`git diff --numstat <merge-base>..<build-branch>\` to get the
    actual files touched by this build. The merge-base is \`git merge-base origin/master HEAD\`
    or the commit recorded in the build result (${
@@ -1055,17 +1165,17 @@ ${_landMergeStep}
    mechanism). Together this milestone's own charter+audit+iteration evidence lands in THIS commit
    series — no manual sweep needed afterward. THEN PRUNE (DIR-033): if a non-primary iteration ALSO
    produced evidence not on master, cherry-pick JUST that evidence file.${_landCaptureTail}
-3. WRITE ABSORB log entry into dashboard.md's ## Log section (DIR-054 rolling-window
-   format): m<NN> · <task-id> · Δv=<realized> · audit=<verdict> · merge=<sha> · → milestones/M<NN>/
-4. UPDATE DASHBOARD (step 7): VT (sum weight·cov), slope (marginal Δv), ρ, charter-thickness,
+${_isComposite ? `3. VALIDATE the dashboard.md ## Log absorb entry applied by \`reconcile-apply\` in the Reconcile phase (DIR-119-D4) — read it and confirm it is present; do NOT write it again.` : `3. WRITE ABSORB log entry into dashboard.md's ## Log section (DIR-054 rolling-window
+   format): m<NN> · <task-id> · Δv=<realized> · audit=<verdict> · merge=<sha> · → milestones/M<NN>/`}
+${_isComposite ? `4. VALIDATE the dashboard view + milestone_counter increment applied by \`reconcile-apply\` in the Reconcile phase (DIR-119-D4) — confirm exactly ONE increment landed; do NOT increment again.` : `4. UPDATE DASHBOARD (step 7): VT (sum weight·cov), slope (marginal Δv), ρ, charter-thickness,
    discovery-latency, calibration-error, V_meta consolidation lag, milestone_counter++
-   (ONLY after all gates above cleared and master merge landed).
+   (ONLY after all gates above cleared and master merge landed).`}
 5. REGENERATE backlog.md/dashboard.md views via experiments/quay-perpetual-stream/scripts/it0-backlog-regen.ts.
 6. RUN tree-hygiene-check.sh and worktree-branch-hygiene-check.sh one final time
    to confirm the close-out is clean. Paste results.
-7. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${_primaryTaskId}.md
+${_isComposite ? `7. EXECUTION-PROVENANCE VALIDATION (DIR-119-D4): reconcile-apply set status:done and ticked AC/DoD in the Reconcile phase — VALIDATE those writes (read the task) and do NOT re-write them. If the ## Execution record is missing, append ONLY that provenance record WITHOUT re-setting status.` : `7. EXECUTION-PROVENANCE WRITE-BACK (M24): task_write to tasks/${_primaryTaskId}.md
    appending a ## Execution record section (milestone id, iteration count, realized Δv,
-   merge commit SHA, one-line outcome summary) and setting status: done.
+   merge commit SHA, one-line outcome summary) and setting status: done.`}
 8. PHI CONSOLIDATION CHECK: if a prior adaptation was REUSED UNCHANGED by THIS
    (different-domain) milestone, consolidate it into inherited-core.md and retire
    its citation (§4.2).${_compositeLandNote}${_landLockReleaseStep}

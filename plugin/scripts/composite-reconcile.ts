@@ -9,6 +9,7 @@
 // mutations:[]}` — atomic, no partial task-lifecycle mutation ever reaches the caller.
 
 import type { BundleAuditResult } from "./composite-audit.ts";
+import { readFileSync } from "node:fs";
 
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,48 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
     ok: true,
     mutations,
     bundleDisposition: `composite bundle PASS for [${input.taskIds.join(", ")}] (candidate ${input.bundleAudit.candidateId})`,
+  };
+}
+
+// ── attributeGateFailures (DIR-119-D4 / M212) ─────────────────────────────────────────────────────
+// Partitions the full TYPED gate vector (task-scoped + milestone-scoped) into the specific failing
+// member task(s). Identity is the STRUCTURAL `taskId` field — never the `split-or-commit-${tid}`
+// label, never positional order. `_primaryTaskId` gets no special treatment: it is reported only if
+// it is itself among `failedTaskIds`. Milestone-scoped failures are reported separately (they are
+// bundle-level, not attributable to any single member task).
+
+export interface GateAttributionResult {
+  /** Member task ids (in `taskIds` membership order) with at least one failed task-scoped gate. */
+  failedTaskIds: string[];
+  /** Member task ids (in `taskIds` membership order) with at least one task-scoped gate, all ok. */
+  passingTaskIds: string[];
+  /** Milestone-scoped gates that failed (never attributable to a single member task). */
+  milestoneFailures: MilestoneGateResult[];
+}
+
+export function attributeGateFailures(
+  gates: (TaskGateResult | MilestoneGateResult)[],
+  taskIds: string[],
+): GateAttributionResult {
+  const membership = new Set(taskIds);
+  const failed = new Set<string>();
+  const passed = new Set<string>();
+  const milestoneFailures: MilestoneGateResult[] = [];
+  for (const g of gates) {
+    if (g == null) continue;
+    if ("taskId" in g && typeof g.taskId === "string") {
+      if (!membership.has(g.taskId)) continue; // not a declared member — never reported
+      if (g.ok) passed.add(g.taskId);
+      else failed.add(g.taskId);
+    } else if (typeof g.gate === "string" && !g.ok) {
+      milestoneFailures.push({ gate: g.gate, ok: g.ok, detail: g.detail });
+    }
+  }
+  return {
+    // Deterministic order: follow `taskIds` membership order, never Set insertion order.
+    failedTaskIds: taskIds.filter((t) => failed.has(t)),
+    passingTaskIds: taskIds.filter((t) => passed.has(t) && !failed.has(t)),
+    milestoneFailures,
   };
 }
 
@@ -219,10 +262,102 @@ export function selftest(): boolean {
     check("stale-generation-identity-fails-closed", result.ok === false && result.reason?.startsWith("generation-identity-mismatch"), JSON.stringify(result));
   }
 
+  // ── attributeGateFailures (DIR-119-D4 / M212): typed Gate-failure attribution ──
+  // A NON-primary member's gate fails → THAT member is named, not taskIds[0] by default.
+  {
+    const gates = [
+      { scope: "milestone" as const, gate: "vmeta-lag", ok: true },
+      { scope: "task" as const, taskId: "T-0", gate: "split-or-commit", ok: true },
+      { scope: "task" as const, taskId: "T-1", gate: "split-or-commit", ok: false, detail: "child left open" },
+    ];
+    const attr = attributeGateFailures(gates, ["T-0", "T-1"]);
+    check("attribution-names-non-primary-failing-member", JSON.stringify(attr.failedTaskIds) === JSON.stringify(["T-1"]), JSON.stringify(attr));
+    check("attribution-control-passing-set", JSON.stringify(attr.passingTaskIds) === JSON.stringify(["T-0"]), JSON.stringify(attr));
+  }
+  // The primary is marked ONLY if itself among failedTaskIds; milestone failures reported separately.
+  {
+    const gates = [
+      { scope: "milestone" as const, gate: "vmeta-lag", ok: false, detail: "alarm" },
+      { scope: "task" as const, taskId: "T-0", gate: "split-or-commit", ok: false },
+      { scope: "task" as const, taskId: "T-1", gate: "split-or-commit", ok: true },
+    ];
+    const attr = attributeGateFailures(gates, ["T-0", "T-1"]);
+    check("attribution-primary-only-if-self-failed", JSON.stringify(attr.failedTaskIds) === JSON.stringify(["T-0"]), JSON.stringify(attr));
+    check("attribution-milestone-failures-separate", attr.milestoneFailures.length === 1 && attr.milestoneFailures[0].gate === "vmeta-lag", JSON.stringify(attr.milestoneFailures));
+  }
+  // Identity is the structural taskId field, never the split-or-commit-${tid} label.
+  {
+    const gates = [
+      { scope: "task" as const, taskId: "T-0", gate: "split-or-commit-T-0", ok: true },
+      { scope: "task" as const, taskId: "T-1", gate: "split-or-commit-T-1", ok: false },
+    ];
+    const attr = attributeGateFailures(gates, ["T-0", "T-1"]);
+    check("attribution-identity-is-taskId-not-label", JSON.stringify(attr.failedTaskIds) === JSON.stringify(["T-1"]), JSON.stringify(attr));
+  }
+  // Membership order is deterministic and unknown ids are excluded.
+  {
+    const gates = [
+      { scope: "task" as const, taskId: "T-1", gate: "split-or-commit", ok: false },
+      { scope: "task" as const, taskId: "T-0", gate: "split-or-commit", ok: true },
+      { scope: "task" as const, taskId: "STRANGER", gate: "split-or-commit", ok: true },
+    ];
+    const attr = attributeGateFailures(gates, ["T-0", "T-1"]);
+    check("attribution-membership-order-deterministic", JSON.stringify(attr.failedTaskIds) === JSON.stringify(["T-1"]) && JSON.stringify(attr.passingTaskIds) === JSON.stringify(["T-0"]), JSON.stringify(attr));
+  }
+
   console.log(`\nSELFTEST: ${allPassed ? "all fixture cases PASS" : "SOME FIXTURES FAILED"}`);
   return allPassed;
 }
 
-if (process.argv[1] != null && process.argv[1].endsWith("composite-reconcile.ts") && process.argv.includes("--selftest")) {
-  process.exitCode = selftest() ? 0 : 1;
+// CLI entry (DIR-119-D4 / M212): `--selftest` PLUS two non-selftest PRODUCTION modes with real
+// callsites in execute-milestone.js (both mirrors): `--attribute-gates-json` (typed Gate-failure
+// attribution for Gate's failure branch) and `--reconcile-json` (the reconcile() wrap consumed by
+// the reconcile-apply agent in the Reconcile phase). Input JSON comes from `--in <file>` (the
+// production interface the workflow writes to /tmp) or an inline JSON positional arg. Both print
+// the result JSON to stdout; `--reconcile-json` exits nonzero fail-closed on a contract violation
+// (ok:false) while still emitting the deterministic recovery record on stdout.
+if (process.argv[1] != null && process.argv[1].endsWith("composite-reconcile.ts")) {
+  const argv = process.argv;
+  const argValue = (flag: string): string | undefined => {
+    const i = argv.indexOf(flag);
+    return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined;
+  };
+  const readInput = (flag: string): unknown => {
+    const inFile = argValue("--in");
+    if (inFile) return JSON.parse(readFileSync(inFile, "utf8"));
+    const i = argv.indexOf(flag);
+    const inline = i >= 0 && i + 1 < argv.length && !argv[i + 1].startsWith("--") ? argv[i + 1] : undefined;
+    if (inline) return JSON.parse(inline);
+    throw new Error(`no input JSON for ${flag} (pass --in <file> or an inline JSON arg)`);
+  };
+  if (argv.includes("--selftest")) {
+    process.exitCode = selftest() ? 0 : 1;
+  } else if (argv.includes("--attribute-gates-json")) {
+    try {
+      const input = readInput("--attribute-gates-json") as (TaskGateResult | MilestoneGateResult)[];
+      if (!Array.isArray(input)) throw new Error("input JSON must be a typed gate-record array");
+      const taskIdsArg = argValue("--task-ids");
+      const taskIds: string[] = taskIdsArg
+        ? JSON.parse(taskIdsArg) as string[]
+        : [...new Set(input.filter((g): g is TaskGateResult => "taskId" in g && typeof g.taskId === "string").map((g) => g.taskId))];
+      console.log(JSON.stringify(attributeGateFailures(input, taskIds)));
+      process.exitCode = 0;
+    } catch (err) {
+      console.error(`--attribute-gates-json failed: ${(err as Error).message}`);
+      process.exitCode = 1;
+    }
+  } else if (argv.includes("--reconcile-json")) {
+    try {
+      const input = readInput("--reconcile-json") as ReconcileInput;
+      if (input == null || typeof input !== "object") throw new Error("input JSON must be a ReconcileInput object");
+      const result = reconcile(input);
+      // Result JSON ALWAYS goes to stdout (the reconcile-apply agent needs the deterministic recovery
+      // record on failure too); the exit code is the fail-closed signal (0 = pass, nonzero = violation).
+      console.log(JSON.stringify(result));
+      process.exitCode = result.ok ? 0 : 1;
+    } catch (err) {
+      console.error(`--reconcile-json failed: ${(err as Error).message}`);
+      process.exitCode = 1;
+    }
+  }
 }
