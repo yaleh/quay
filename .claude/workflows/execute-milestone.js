@@ -491,8 +491,174 @@ Return {taskId, outcome: "done", iterationCount, mergeCommit: "<short-sha>"} on 
     return { outcome: 'needs-human', reason, phase: 'Build', verifyCacheUpdates }
   }
 
+// COMPOSITE-AUDIT-SHARD-PROMPT-BEGIN
+// DIR-119-D3 (M211): fenced per-shard read-only Audit prompt template. Contains ONLY: refute-first
+// AC/DoD inspection scoped to the shard's declared task IDs / AC indexes / integrated generation;
+// the composite-audit.ts --snapshot before/after + --guard command chain; the typed return schema
+// {beforeSnapshot, afterSnapshot, shardResult}; and the DIR-093 session-id capture. Structurally
+// NO checklist-tick, NO absorb-disposition append, NO deviation-log row, NO dashboard / milestone
+// counter / lifecycle-status writes — those mutations move entirely to Reconcile (DIR-119-D4's
+// scope; explicit Non-goal here). A structural static grep asserts zero write-instruction language
+// between these markers in both mirrors (not merely one run's clean tree).
+function _compositeAuditShardPrompt(shard, candidateId, generation) {
+  return `ADVERSARIAL READ-ONLY AUDIT SHARD \`${shard.id}\` (kind: ${shard.kind || 'ac'}) for a composite milestone Audit. FRESH CONTEXT — you have NOT seen the build.
+
+YOU ARE MECHANICALLY READ-ONLY: the workflow itself diffs a \`git status\` snapshot of your before/after window and HARD-FAILS this shard as audit-shard-write-violation:${shard.id} on ANY filesystem delta, tracked or untracked. Do NOT create, modify, or delete ANY file anywhere inside the repository; do NOT run \`git add\` / \`git commit\` / \`git checkout\` / \`git stash\` or any other mutating command. Read-only commands only (Read, grep, git log/diff/show, scripts/test.sh, node --test). Scratch snapshot files go to /tmp ONLY (outside the repo).
+
+THIS SHARD'S SCOPE — inspect NOTHING outside it:
+- Shard id: ${shard.id}
+- Task IDs (yours ALONE): ${(shard.taskIds || []).join(', ') || '(none declared)'}
+- Integrated generation under audit: candidate ${candidateId}${generation ? `, generation commit ${generation}` : ''}
+
+CHARGE (refute-first stance): for EACH task ID above (yours ALONE), read its own task file (tasks/<id>.md) ## Acceptance Criteria and ## Definition of Done. For EACH criterion, try to REFUTE that it is actually met — cite the concrete artifact/test output/diff, NOT the implementer's self-report. Any AC you cannot confirm → verdict REFUTED with evidence detail; confirmed → PASS with evidence citation. Shard verdict: REFUTED if any AC verdict is REFUTED; CONCERNS if none REFUTED but concerns exist; else PASS. Do NOT reference or re-audit any OTHER shard's task IDs — a scope leak defeats the per-shard boundary.
+
+SNAPSHOT PROTOCOL (exact order; ALL inspection work happens INSIDE the before/after window):
+1. BEFORE: run EXACTLY \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/composite-audit.ts --snapshot\` and capture its stdout JSON {snapshot: [...]} — the array is your beforeSnapshot.
+2. Perform all read-only inspection work for this shard.
+3. AFTER: run the same \`composite-audit.ts --snapshot\` command again — the array is your afterSnapshot.
+4. Write both arrays to /tmp/audit-shard-${shard.id}-before.json and /tmp/audit-shard-${shard.id}-after.json, then run EXACTLY \`node --experimental-strip-types experiments/quay-perpetual-stream/scripts/composite-audit.ts --guard --shard-id ${shard.id} --before /tmp/audit-shard-${shard.id}-before.json --after /tmp/audit-shard-${shard.id}-after.json\` and capture its stdout JSON as guardResult. This guard is a recorded double-check ONLY — the workflow's own diff of your returned raw snapshots is the enforcement point and runs regardless of what you report here.
+
+SESSION-ID (DIR-093): run \`echo \$CLAUDE_CODE_SESSION_ID\` and return the discovered id as auditSessionId.
+
+Return {beforeSnapshot: [...], afterSnapshot: [...], shardResult: {shardId: "${shard.id}", verdicts: [{taskId, acIndex, verdict: 'PASS'|'REFUTED'|'CONCERNS', detail}], shardVerdict: 'PASS'|'REFUTED'|'CONCERNS'}, guardResult: {ok, ...}, auditSessionId}.`
+}
+// COMPOSITE-AUDIT-SHARD-PROMPT-END
+
+// ── Composite per-shard read-only Audit dispatcher (DIR-119-D3 / M211) ─────────────
+// Replaces the single monolithic composite Audit agent (which both audited AND wrote
+// checklist/absorb/deviation state — the mutations the target architecture assigns to Reconcile)
+// with REAL per-shard dispatch: audit-manifest-read (one mechanical agent returns the manifest's
+// auditShards[]; the DSL cannot read files itself) → SERIALIZED audit-shard-<id> loop (plain
+// for..of, deliberately NOT parallel() — concurrent snapshot windows would cross-attribute writes;
+// single-driver discipline per CLAUDE.md) → exactly ONE audit-combine agent (distinct label from
+// audit-shard-*) invoking composite-audit.ts --combine-json, i.e. the REAL exported
+// combineShardVerdicts — never a workflow-side reimplementation.
+// READ-ONLY ENFORCEMENT IS MECHANICAL, NOT SELF-REPORT: _diffAuditSnapshotLines below (an inline
+// mirror of composite-audit.ts's diffGitSnapshots/guardShardReadOnly — the same documented pattern
+// as _normalizeExecuteArgsInline, because workflow DSL scripts have no import capability) runs IN
+// THIS WORKFLOW JS over the returned raw snapshot strings. ANY non-empty delta, tracked or
+// untracked, hard-fails the shard as audit-shard-write-violation:<id> regardless of what the agent
+// or its own --guard run claims. Trust-boundary limitation stated plainly: mechanical adjudication
+// of returned command output within the existing agent/tool boundary, NOT a cryptographic
+// attestation that an agent process cannot forge its own output — both raw snapshot arrays are
+// retained in the shard's journaled typed return as the auditability backstop.
+function _diffAuditSnapshotLines(before, after) {
+  const bCounts = new Map()
+  const aCounts = new Map()
+  for (const line of (Array.isArray(before) ? before : [])) bCounts.set(line, (bCounts.get(line) || 0) + 1)
+  for (const line of (Array.isArray(after) ? after : [])) aCounts.set(line, (aCounts.get(line) || 0) + 1)
+  const delta = []
+  for (const key of [...new Set([...bCounts.keys(), ...aCounts.keys()])].sort()) {
+    const n = aCounts.get(key) || 0
+    const m = bCounts.get(key) || 0
+    for (let i = 0; i < n - m; i++) delta.push('+ ' + key)
+    for (let i = 0; i < m - n; i++) delta.push('- ' + key)
+  }
+  return delta
+}
+
+async function _compositePerShardAudit() {
+  const manifestFile = $a.compositeManifestFile
+  const candidateId = `M${_milestone}-${_primaryTaskId}`
+  const generation = buildResult?.mergeCommit || ''
+
+  // 1. audit-manifest-read (exactly one mechanical agent). Its journaled .result shape
+  //    ({auditShards:[...]}) is disjoint from the shard and combine return shapes.
+  const manifestRead = await agent(
+    `You are the audit-manifest-read helper for a composite milestone Audit. Read the manifest file ${manifestFile} (a {manifest, context} envelope; audit shards live at .manifest.auditShards) and return that array verbatim — each entry {id, kind, taskIds}. Read-only: do NOT edit anything.`,
+    { label: 'audit-manifest-read', phase: 'Audit',
+      schema: { type: 'object', required: ['auditShards'], properties: {
+        auditShards: { type: 'array', items: { type: 'object', required: ['id', 'taskIds'], properties: {
+          id: { type: 'string' }, kind: { type: 'string' },
+          taskIds: { type: 'array', items: { type: 'string' } },
+        } } },
+      } } }
+  )
+  const auditShards = (manifestRead && Array.isArray(manifestRead.auditShards)) ? manifestRead.auditShards : []
+  if (auditShards.length === 0) {
+    log('audit-manifest-read FAILED — no auditShards[] returned from the manifest; failing closed before any shard dispatch.')
+    return { outcome: 'needs-human', reason: 'audit-manifest-read-failed', phase: 'Audit' }
+  }
+  log(`audit-manifest-read complete: ${auditShards.length} shard(s) [${auditShards.map((s) => s.id).join(', ')}]`)
+
+  // 2. Serialized per-shard dispatch + 3. workflow-side mechanical diff (THE enforcement point).
+  const shardResults = []
+  let auditSessionId = null
+  for (const shard of auditShards) {
+    const shardReturn = await agent(
+      _compositeAuditShardPrompt(shard, candidateId, generation),
+      { label: `audit-shard-${shard.id}`, phase: 'Audit',
+        schema: { type: 'object', required: ['beforeSnapshot', 'afterSnapshot', 'shardResult'], properties: {
+          beforeSnapshot: { type: 'array', items: { type: 'string' } },
+          afterSnapshot: { type: 'array', items: { type: 'string' } },
+          shardResult: { type: 'object', required: ['shardId', 'verdicts', 'shardVerdict'], properties: {
+            shardId: { type: 'string' },
+            verdicts: { type: 'array', items: { type: 'object', required: ['taskId', 'acIndex', 'verdict', 'detail'], properties: {
+              taskId: { type: 'string' }, acIndex: { type: 'number' },
+              verdict: { type: 'string' }, detail: { type: 'string' },
+            } } },
+            shardVerdict: { type: 'string' },
+          } },
+          guardResult: { type: 'object' },
+          auditSessionId: { type: 'string' },
+        } } }
+    )
+    if (!shardReturn || !Array.isArray(shardReturn.beforeSnapshot) || !Array.isArray(shardReturn.afterSnapshot)) {
+      log(`audit-shard-${shard.id} FAILED — no raw snapshot arrays returned; failing closed (missing snapshots are NEVER treated as clean).`)
+      return { outcome: 'needs-human', reason: `audit-shard-snapshot-missing:${shard.id}`, phase: 'Audit' }
+    }
+    // THE ENFORCEMENT POINT: this workflow's own diff of the returned raw git-status snapshots —
+    // not the agent's self-report, not its --guard run, not deepFreeze/structuredClone.
+    const delta = _diffAuditSnapshotLines(shardReturn.beforeSnapshot, shardReturn.afterSnapshot)
+    log(`audit-shard-${shard.id} workflow-side snapshot diff: ${delta.length === 0 ? 'CLEAN' : JSON.stringify(delta)} (agent guard self-report: ${JSON.stringify(shardReturn.guardResult || null)})`)
+    if (delta.length > 0) {
+      log(`audit-shard-${shard.id} WRITE VIOLATION — the workflow's own before/after git-status diff is non-empty: ${JSON.stringify(delta)}. Hard-failing regardless of the agent's claims.`)
+      return { outcome: 'needs-human', reason: `audit-shard-write-violation:${shard.id}`, phase: 'Audit' }
+    }
+    if (!shardReturn.shardResult || shardReturn.shardResult.shardId !== shard.id) {
+      log(`audit-shard-${shard.id} FAILED — shardResult missing or shardId mismatch (got ${shardReturn?.shardResult?.shardId}); failing closed.`)
+      return { outcome: 'needs-human', reason: `audit-shard-result-mismatch:${shard.id}`, phase: 'Audit' }
+    }
+    if (!auditSessionId && shardReturn.auditSessionId) auditSessionId = shardReturn.auditSessionId
+    shardResults.push(shardReturn.shardResult)
+  }
+
+  // 4. audit-combine (exactly once): invokes the REAL combineShardVerdicts via --combine-json.
+  const shardResultsFile = `/tmp/composite-audit-shard-results-${_milestone}-${_primaryTaskId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`
+  const combineResult = await agent(
+    `You are the audit-combine helper for a composite milestone Audit. Every audit-shard-<id> worker has completed and passed the workflow's mechanical read-only snapshot diff.
+1. Write EXACTLY this AuditShardResult[] JSON to ${shardResultsFile} (a /tmp scratch file, OUTSIDE the repo — never write inside the repository):
+${JSON.stringify(shardResults)}
+2. Run EXACTLY this command and capture its stdout:
+  node --experimental-strip-types experiments/quay-perpetual-stream/scripts/composite-audit.ts --combine-json --in ${shardResultsFile} --candidate-id ${candidateId}${generation ? ` --generation-id ${generation}` : ''}
+   Its stdout is the BundleAuditResult JSON ({candidateId, shardResults, bundleVerdict, generationId}) produced by composite-audit.ts's REAL exported combineShardVerdicts — do NOT recompute the verdict yourself.
+3. Run \`echo \$CLAUDE_CODE_SESSION_ID\` and return the discovered id as auditSessionId.
+Read-only otherwise: do NOT edit any repository file. Return {candidateId, shardResults, bundleVerdict, generationId, auditSessionId}.`,
+    { label: 'audit-combine', phase: 'Audit',
+      schema: { type: 'object', required: ['bundleVerdict'], properties: {
+        candidateId: { type: 'string' },
+        shardResults: { type: 'array' },
+        bundleVerdict: { type: 'string' },
+        generationId: { type: 'string' },
+        auditSessionId: { type: 'string' },
+      } } }
+  )
+  if (!combineResult || !combineResult.bundleVerdict) {
+    log('audit-combine FAILED — no BundleAuditResult returned; failing closed.')
+    return { outcome: 'needs-human', reason: 'audit-combine-failed', phase: 'Audit' }
+  }
+  if (!auditSessionId && combineResult.auditSessionId) auditSessionId = combineResult.auditSessionId
+  // Map bundleVerdict onto the existing auditResult shape so ALL downstream plumbing (the verdict
+  // branches, AUDIT_SESSION_ID pass-through, Gate/Land) is unchanged.
+  const verdictMap = { REFUTED: 'REFUTED', CONCERNS: 'CONCERNS', PASS: 'NO REFUTATION FOUND' }
+  const verdict = verdictMap[combineResult.bundleVerdict] || 'REFUTED'
+  log(`audit-combine complete: bundleVerdict=${combineResult.bundleVerdict} -> verdict=${verdict} (candidate ${candidateId})`)
+  return { verdict, detail: `composite per-shard audit: ${shardResults.length} shard(s), bundle ${combineResult.bundleVerdict}`, auditSessionId }
+}
+
 // ── Phase: Audit (step 6 acceptance audit) ──────────────────────────────────────────
 phase('Audit')
+
 // DIR-123: threaded into the Audit prompt ONLY under worktree isolation ('' otherwise → byte-identical
 // legacy). CRITICAL for correctness: the build being audited lives in the WORKTREE, not the primary
 // checkout (Land has not merged yet) — an audit that read the primary checkout would see nothing and
@@ -503,9 +669,18 @@ const _auditIsolationNote = _useWorktree
    COMMIT-THE-AUDIT-EVIDENCE (DIR-123 review C1 — REQUIRED under worktree isolation): Build committed BEFORE this audit existed, so NOTHING you write is on the branch yet; and Land's \`git worktree remove --force\` DISCARDS any staged-but-uncommitted worktree content, so a merely-\`git add\`-ed audit artifact would be LOST on every worktree-isolated Land. Therefore, AFTER you finish steps 1–5 below, from the worktree path COMMIT your evidence onto the branch:
      cd ${_isolationPlan.worktreeRel} && git add -A && git commit -m "audit: ${_primaryTaskId} acceptance audit + AC write-backs + disposition (DIR-123 worktree isolation)"
    (\`git add -A\` picks up the audit artifact, the task-file AC-checkbox write-backs, the absorb-entry disposition line, and any deviation-log row you wrote.) This commit is the ONLY thing that carries your evidence to the primary — via Land's merge (serial path) or the fan-in's merge (concurrent path, where the branch must already hold the committed evidence BEFORE the fan-in merges it). Do NOT skip it. If there is genuinely nothing to commit, that is fine — but the audit artifact + AC write-backs are always something, so in practice this commit always happens.`
-  : ''
-const auditResult = await agent(
-  `ADVERSARIAL ACCEPTANCE AUDIT for milestone task ${_primaryTaskId}. FRESH CONTEXT — you have NOT seen the build.${_isComposite ? ` COMPOSITE CALL (DIR-119-B/M189): ${_taskIds.length} member tasks [${_taskIds.join(', ')}] — apply the same refute-first AC/DoD audit to EVERY member task's own file, not just ${_primaryTaskId} (step 1/1a below applies per-task). Beyond the per-task AC/DoD checklist write-back this shared audit agent already performs (unchanged, legacy behavior), it must never write absorb dispositions, dashboard entries, the milestone counter, or any lifecycle STATUS field for any member task — that mutation is Land's job below (composite-audit.ts's stricter shard-level read-only boundary is the target architecture once DIR-119-C wires a real per-shard dispatcher).` : ''}${_auditIsolationNote}
+  : ''// DIR-119-D3 (M211): a composite call WITH a manifest routes to the real per-shard read-only
+// dispatcher (_compositePerShardAudit) — one mechanically-checked-read-only audit-shard-<id> agent
+// per manifest shard, then exactly one audit-combine invoking composite-audit.ts's real
+// combineShardVerdicts via --combine-json. The composite write instructions that used to be
+// interpolated into the single-agent prompt below are STRIPPED entirely (those mutations move to
+// Reconcile, DIR-119-D4). The width-1 / manifest-less path stays the untouched single agent — the
+// removed interpolation was the empty string when _isComposite===false, so that path's prompt text
+// is byte-for-byte identical (golden replay).
+const auditResult = (_isComposite && $a.compositeManifestFile)
+  ? await _compositePerShardAudit()
+  : await agent(
+  `ADVERSARIAL ACCEPTANCE AUDIT for milestone task ${_primaryTaskId}. FRESH CONTEXT — you have NOT seen the build.${_auditIsolationNote}
 
 CHARGE (refute-first stance):
 1. AC SATISFACTION: read the task file tasks/${_primaryTaskId}.md's ## Acceptance Criteria.
@@ -557,6 +732,14 @@ hand — that function is the only place the ">= 130" rule is allowed to live.
       auditSessionId: { type: 'string' },
     } } }
 )
+// DIR-119-D3 (M211): the composite per-shard dispatcher returns its own typed terminals
+// (audit-manifest-read-failed / audit-shard-write-violation:<id> / audit-shard-snapshot-missing:<id>
+// / audit-shard-result-mismatch:<id> / audit-combine-failed) — fail closed BEFORE Gate/Land. The
+// legacy single-agent audit never returns an `outcome` field, so this fires only on the composite path.
+if (auditResult?.outcome === 'needs-human') {
+  log(`Audit phase FAILED (${auditResult.reason}) — composite per-shard audit hard-failed; cannot proceed to Gate.`)
+  return { outcome: 'needs-human', reason: auditResult.reason, phase: 'Audit', verifyCacheUpdates }
+}
 log(`Audit phase complete: verdict=${auditResult?.verdict}, sessionId=${auditResult?.auditSessionId}`)
 
 // ── Session-ID pass-through (DIR-093 fix v2): pass audit session ID directly ─────────

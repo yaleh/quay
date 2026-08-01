@@ -1,0 +1,57 @@
+{
+  "mechanisms": [
+    {
+      "id": "worktree-isolated-pipeline",
+      "owner": "execute-milestone.js Build/Audit/Gate/Land phases (both mirrors: .claude/workflows + plugin/workflows)",
+      "proofSurface": ".claude/workflows/execute-milestone.js:229 (buildResult agent() call — worktree create + path threading entry point, through phase('Land') :384)",
+      "dependsOn": [],
+      "independentlyShippable": true,
+      "rationale": "Create (git worktree add before Build), thread (Build→Audit→Gate run against the worktree, zero primary diffs), and merge-back+remove at Land form ONE atomic behavior contract: Audit reading the primary checkout would audit a stale tree (false REFUTED on its own milestone's evidence), and create-without-remove leaks registered worktrees into worktree-branch-hygiene-check.sh — no strict subset carries a complete safety contract. Ships opt-in with golden-replay guard (AC2) and delivers isolation value even before the concurrency proof, conditional on pinning failure-path cleanup semantics (blocking finding F1)."
+    },
+    {
+      "id": "land-prompt-honesty-fix",
+      "owner": "execute-milestone.js Land-phase prompt text (both mirrors)",
+      "proofSurface": ".claude/workflows/execute-milestone.js:447 ('1. MERGE the iteration worktree into master' — duplicated at :505)",
+      "dependsOn": [],
+      "independentlyShippable": true,
+      "rationale": "Pure prompt-text correction with zero runtime behavior change (golden-replay identical), a complete safety contract on its own, and independent user value: stops instructing Land agents to merge a worktree that does not exist on the default path. Self-contained grep-confirmable AC (AC6); lands cleanly before or after the pipeline mechanism."
+    },
+    {
+      "id": "same-file-conflict-resolution",
+      "owner": "pre-dispatch eligibility (touches-orthogonality-check.ts) and/or Land conflict handling, per AC5's mandated decision",
+      "proofSurface": "plugin/scripts/touches-orthogonality-check.ts:172 (checkTouchesPair — the reused disjointness verdict any pre-dispatch-reject option builds on)",
+      "dependsOn": [
+        "worktree-isolated-pipeline"
+      ],
+      "independentlyShippable": false,
+      "rationale": "The conflict fixture and its explicit resolution (reject pre-dispatch vs defined Land merge-conflict handling — plus the existing anti-drift pre-merge gate option, finding F4) have meaning only once two concurrent isolated worktrees can exist; without the pipeline mechanism there is no concurrent-conflict surface and no user value."
+    },
+    {
+      "id": "eligibility-reuse-wiring",
+      "owner": "concurrent-batch-scheduler.ts batch-assembly verdict → worktree-dispatch eligibility",
+      "proofSurface": "plugin/scripts/concurrent-batch-scheduler.ts:99 (assembleBatch)",
+      "dependsOn": [
+        "worktree-isolated-pipeline"
+      ],
+      "independentlyShippable": false,
+      "rationale": "The disjointness logic already exists and is already imported (concurrent-batch-scheduler.ts:18-24) — the new value is routing its verdict to isolationMode:'worktree' dispatches, which requires the pipeline mechanism to exist and the dispatcher callsite (finding F3) to consume it; a scheduler flag with no executor support has no user value."
+    },
+    {
+      "id": "production-concurrent-dispatch-wiring",
+      "owner": "OUTER-LOOP.md concurrent_execute dispatch template (the MAIN-session production callsite)",
+      "proofSurface": "experiments/quay-perpetual-stream/OUTER-LOOP.md:197 (Workflow({name:'execute-milestone', args:{...,mode:'concurrent'}}) template)",
+      "dependsOn": [
+        "worktree-isolated-pipeline"
+      ],
+      "independentlyShippable": false,
+      "rationale": "No checked-in surface references isolationMode today (grep-verified); AC1's real proof dispatches and any cross-generation loop reachability must flow through this dispatch template, which is absent from ## Touches (blocking finding F3). Delivers loop-level concurrent-safe dispatch only with the pipeline mechanism present."
+    }
+  ],
+  "inventory": {
+    "ok": true,
+    "count": 2,
+    "inventoryHash": "mi-14a2faff",
+    "mechanismCount": 2
+  },
+  "source": "typed"
+}

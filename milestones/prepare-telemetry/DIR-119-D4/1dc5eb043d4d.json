@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 2,
+  "recordId": "1dc5eb043d4d",
+  "attemptId": "1dc5eb043d4d",
+  "generationId": "1dc5eb043d4d",
+  "admission": {
+    "key": ".::DIR-119-D4",
+    "ownerExecutionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c",
+    "fencingToken": 0,
+    "acquiredAt": 1785544397120
+  },
+  "workspace": ".",
+  "taskId": "DIR-119-D4",
+  "milestoneId": "M212",
+  "class": "development",
+  "highRisk": true,
+  "hashes": {
+    "charter": "23c327c7e48254546501b83bee2ead0efa282e254089a5321324e66cd9a0c250",
+    "taskContract": "6fd49d8e7704b62223538fa4f5706284fd162575d26eae93df18fd80a516a428",
+    "proposal": "66027f345838cee2d4e043312f5bfe3023f5e14f213996154f84c476d0c0f19d",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "prepared",
+    "reason": "prepared",
+    "phase": "Receipt",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": false,
+    "ok": null,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785547229146,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785544397120,
+      "endedAtMs": 1785544497583
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785544497583,
+      "endedAtMs": 1785545083906
+    },
+    {
+      "phase": "PlanCheck-round-1",
+      "round": 1,
+      "startedAtMs": 1785545083906,
+      "endedAtMs": 1785545703699
+    },
+    {
+      "phase": "PlanCheck-round-2",
+      "round": 2,
+      "startedAtMs": 1785545703699,
+      "endedAtMs": 1785546569704
+    },
+    {
+      "phase": "Receipt",
+      "round": 0,
+      "startedAtMs": 1785546569704,
+      "endedAtMs": 1785547210807
+    },
+    {
+      "phase": "Receipt",
+      "round": 0,
+      "startedAtMs": 1785547210807,
+      "endedAtMs": 1785547229146
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "prepared",
+      "recurrenceKey": "9c9f82cba4ce",
+      "firstSeenGeneration": "1dc5eb043d4d",
+      "lastSeenGeneration": "1dc5eb043d4d"
+    },
+    {
+      "code": "69fa31e0",
+      "recurrenceKey": "8ceb0b3e50a6",
+      "firstSeenGeneration": "1dc5eb043d4d",
+      "lastSeenGeneration": "1dc5eb043d4d"
+    },
+    {
+      "code": "57f0081f",
+      "recurrenceKey": "6d9bb6989382",
+      "firstSeenGeneration": "1dc5eb043d4d",
+      "lastSeenGeneration": "1dc5eb043d4d"
+    },
+    {
+      "code": "02d2a009",
+      "recurrenceKey": "f0ea33fdc1bd",
+      "firstSeenGeneration": "1dc5eb043d4d",
+      "lastSeenGeneration": "1dc5eb043d4d"
+    },
+    {
+      "code": "ca6fc26e",
+      "recurrenceKey": "9bc24c2f3242",
+      "firstSeenGeneration": "1dc5eb043d4d",
+      "lastSeenGeneration": "1dc5eb043d4d"
+    },
+    {
+      "code": "6fe1d867",
+      "recurrenceKey": "b51405f7a308",
+      "firstSeenGeneration": "1dc5eb043d4d",
+      "lastSeenGeneration": "1dc5eb043d4d"
+    },
+    {
+      "code": "f9ba46ae",
+      "recurrenceKey": "96472705f1ca",
+      "firstSeenGeneration": "1dc5eb043d4d",
+      "lastSeenGeneration": "1dc5eb043d4d"
+    },
+    {
+      "code": "51317f65",
+      "recurrenceKey": "3e0563d3ede8",
+      "firstSeenGeneration": "1dc5eb043d4d",
+      "lastSeenGeneration": "1dc5eb043d4d"
+    }
+  ]
+}

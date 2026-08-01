@@ -1,0 +1,102 @@
+{
+  "taskId": "DIR-119-D5",
+  "milestoneId": "M213",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M213-dir119d5-land-e2e-audit.md",
+  "planFile": "docs/plans/M213-dir-119-d5.md",
+  "ledgerFile": "milestones/M213/proposal-ledger.json",
+  "telemetryFile": "milestones/prepare-telemetry/DIR-119-D5/ac338764f090.json",
+  "mechanismInventoryFile": "milestones/M213/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "34c4c546107a520c52ab1e3de46332ebbb504818a5f8b75821bc77afe921361f",
+    "charter": "c85475488065a03b04c52fff8abf4378a1f549a53b58f7638982a38bfe62cb85",
+    "plan": "054c09d22efbdf456b7377fffc1c9e8743ec99c8ee9ac3034369b1d559eb41f0",
+    "sources": {
+      "experiments/quay-perpetual-stream/scripts/composite-land.ts": "d4a6be1dc2362caa20aee5d5187f60dd729dd5c626edd39e1ed82a425594bb9d",
+      "plugin/scripts/composite-land.ts": "d4a6be1dc2362caa20aee5d5187f60dd729dd5c626edd39e1ed82a425594bb9d",
+      "experiments/quay-perpetual-stream/test/composite-land.test.mjs": "c3dd130c709199ddd88ca71bb6ec4c4742a537ef6b2b27c1ad4848c4b4f10ed6",
+      "experiments/quay-perpetual-stream/scripts/composite-reconcile.ts": "5e9ed1d1a7ea05e0f94191d5d436e00c70e6bc1e5a410d4a4fedcd11b0adb000",
+      "experiments/quay-perpetual-stream/scripts/composite-contracts.ts": "6d837784734f339559111197bc595c81906beaec2c1da7818fb22cb5ad9d9d2b",
+      "experiments/quay-perpetual-stream/scripts/composite-manifest-synthesis.ts": "e7eab02fa2cec730283d19c7b2dac1dfbe336de8caa231efb5a7b2369bdaf722",
+      "experiments/quay-perpetual-stream/scripts/composite-build.ts": "17bf953e519b329d2086751faa553cfcf8da6ab6c93a05932e6686bbf8a791f1",
+      ".claude/workflows/execute-milestone.js": "e65de50c24c79c38a309764bf57936009850e42eb04231132885fbe4abecb6f0",
+      "plugin/workflows/execute-milestone.js": "e65de50c24c79c38a309764bf57936009850e42eb04231132885fbe4abecb6f0",
+      "experiments/quay-perpetual-stream/inherited-core.md": "6df9cc7732fd81ae45aaf37fab00055c42731563a80402e412c0df15ccdd8c6d",
+      "plugin/test/composite-manifest-synthesis.test.mjs": "3161410388695a4bdc5a6accacd13fa3c0dccaa87d3034169af9099d1d2f5d86",
+      "plugin/test/execute-milestone-build-phase-gate.test.mjs": "eb1bb06d32d9676d73a12ba0f902c3789ea05bc9a424d16f7806830afd0dceab",
+      "plugin/test/execute-milestone-disposition-conformance.test.mjs": "8c622cec10ad357ac21ef46849e1d4676e507dcc3ad3ed7e27b8ddfe799a50fe",
+      "plugin/test/execute-milestone-preparation-gate.test.mjs": "3ed6acc2d062c1af67cb8cd230bec4793bf4f5723025c913593e718d75f6aad0",
+      "scripts/test.sh": "9266a8b081dee6384e141adc2e72d5fe8d43a5c339feeb1071afc7a81948b6c5",
+      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "e14d46c3c016ec57009d368f1bafb2eb89bde017dd7aae7939d5ac7e04929be4"
+    },
+    "ledger": "f749ba88a47b42274e5198d05596e6058ecf87e7cd800b8249c1139111fd8b61",
+    "telemetry": "773df336e4bfe73a4fd067d1286aa54a654e05702b8d8c856d68abd0c7d45a63",
+    "mechanismInventory": "7ad06866ace800e720143326a7162ab975786f2d166c4c5cb751d8f563049e18"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 3,
+    "findings": 0
+  },
+  "touches": [
+    ".claude/workflows/execute-milestone.js",
+    "plugin/workflows/execute-milestone.js",
+    "experiments/quay-perpetual-stream/scripts/composite-land.ts",
+    "plugin/scripts/composite-land.ts",
+    "experiments/quay-perpetual-stream/test/composite-land.test.mjs",
+    "plugin/test/composite-land.test.mjs",
+    "docs/plans/M213-dir-119-d5.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 2,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 3,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": true,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 1,
+    "proposalReviewRounds": 2,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785541501424,
+    "endedAtMs": 1785541893491,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "104f829fd50621dc"
+      },
+      {
+        "round": 1,
+        "hash": "71efa7ce69e6"
+      }
+    ]
+  }
+}

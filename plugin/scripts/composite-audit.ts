@@ -11,6 +11,9 @@
 // selftest() exercises exactly that: a hostile shard fn attempts a mutation, and the REAL state
 // object passed in is proven byte-identical before/after the call.
 
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
 // ── Types ───────────────────────────────────────────────────────────────────────────────────────────
 
 export type Verdict = "PASS" | "REFUTED" | "CONCERNS";
@@ -96,6 +99,69 @@ export function combineShardVerdicts(shardResults: AuditShardResult[], candidate
   const hasConcerns = shardResults.some((s) => s.shardVerdict === "CONCERNS") || allVerdicts.some((v) => v.verdict === "CONCERNS");
   const bundleVerdict: Verdict = hasRefuted ? "REFUTED" : hasConcerns ? "CONCERNS" : "PASS";
   return { candidateId, shardResults, bundleVerdict, generationId };
+}
+
+// ── snapshot / guard / combine-json: mechanically-enforced read-only audit shards (DIR-119-D3 / M211) ──
+//
+// runReadOnlyAuditShard's deepFreeze/structuredClone isolation above binds ONLY in-process JS
+// object mutation — it is PROVABLY BLIND to a shard's real filesystem writes (the AC5 negative
+// control in this file's sibling test asserts exactly that: a shard fn performs a real
+// fs.writeFileSync and outcome.ok is still true). These modes add the enforcement surface that
+// CAN see real filesystem effects: a `git status --porcelain=v1 --untracked-files=all` snapshot
+// taken before and after a shard's inspection window, diffed by the CALLER — the workflow itself
+// (execute-milestone.js's inline _diffAuditSnapshotLines), never the shard's self-report. The
+// --guard CLI form wraps the same diff for a shard's own recorded double-check; the workflow's
+// diff of the raw returned snapshots is the load-bearing enforcement point. Trust-boundary
+// limitation stated plainly: mechanical adjudication of returned command output within the
+// existing agent/tool boundary, NOT a cryptographic attestation that an agent cannot forge its
+// own output — raw snapshot retention in the journaled typed return is the auditability backstop.
+
+/** Snapshot the working tree's REAL filesystem state: `git status --porcelain=v1
+ *  --untracked-files=all` lines, split/sorted/normalized. The --untracked-files=all flag is
+ *  load-bearing — a shard dropping a NEW file is the primary hostile case. */
+export function takeGitSnapshot(cwd: string = process.cwd()): string[] {
+  const out = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd, encoding: "utf8" });
+  return out.split("\n").filter((line) => line.length > 0).sort();
+}
+
+/** Line-multiset delta (added ∪ removed), order-stable (sorted keys). Empty array ⟺ clean. */
+export function diffGitSnapshots(before: string[], after: string[]): string[] {
+  const beforeCounts = new Map<string, number>();
+  const afterCounts = new Map<string, number>();
+  for (const line of before) beforeCounts.set(line, (beforeCounts.get(line) ?? 0) + 1);
+  for (const line of after) afterCounts.set(line, (afterCounts.get(line) ?? 0) + 1);
+  const delta: string[] = [];
+  const allKeys = [...new Set([...beforeCounts.keys(), ...afterCounts.keys()])].sort();
+  for (const key of allKeys) {
+    const n = afterCounts.get(key) ?? 0;
+    const m = beforeCounts.get(key) ?? 0;
+    for (let i = 0; i < n - m; i++) delta.push(`+ ${key}`);
+    for (let i = 0; i < m - n; i++) delta.push(`- ${key}`);
+  }
+  return delta;
+}
+
+/** Mechanical read-only adjudication of one shard's before/after snapshots. The violation string
+ *  is EXACTLY `audit-shard-write-violation:<shardId>`. Delegates to diffGitSnapshots — single
+ *  diff implementation, no duplicated comparison logic. */
+export function guardShardReadOnly(
+  shardId: string,
+  before: string[],
+  after: string[],
+): { ok: true } | { ok: false; violation: string; delta: string[] } {
+  const delta = diffGitSnapshots(before, after);
+  if (delta.length === 0) return { ok: true };
+  return { ok: false, violation: `audit-shard-write-violation:${shardId}`, delta };
+}
+
+/** THIN wrapper delegating to the exported combineShardVerdicts — NEVER a reimplementation
+ *  (DIR-119-D3 AC3: the audit-combine dispatch must invoke the real combine logic). */
+export function combineShardVerdictsFromJson(
+  shardResults: AuditShardResult[],
+  candidateId: string,
+  generationId?: string,
+): BundleAuditResult {
+  return combineShardVerdicts(shardResults, candidateId, generationId);
 }
 
 // ── selftest ───────────────────────────────────────────────────────────────────────────────────────
@@ -229,6 +295,58 @@ export function selftest(): boolean {
   return allPassed;
 }
 
-if (process.argv[1] != null && process.argv[1].endsWith("composite-audit.ts") && process.argv.includes("--selftest")) {
-  process.exitCode = selftest() ? 0 : 1;
+if (process.argv[1] != null && process.argv[1].endsWith("composite-audit.ts")) {
+  const argv = process.argv;
+  const argValue = (flag: string): string | undefined => {
+    const i = argv.indexOf(flag);
+    return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined;
+  };
+  if (argv.includes("--selftest")) {
+    process.exitCode = selftest() ? 0 : 1;
+  } else if (argv.includes("--snapshot")) {
+    // DIR-119-D3 (M211): print the working tree's git-status snapshot as JSON (non-selftest mode;
+    // production callsite: execute-milestone.js's per-shard Audit prompt, both mirrors).
+    console.log(JSON.stringify({ snapshot: takeGitSnapshot() }));
+    process.exitCode = 0;
+  } else if (argv.includes("--guard")) {
+    // DIR-119-D3 (M211): mechanically diff a shard's before/after snapshots; exit 1 on ANY delta.
+    const shardId = argValue("--shard-id");
+    const beforePath = argValue("--before");
+    if (!shardId || !beforePath) {
+      console.error("usage: composite-audit.ts --guard --shard-id <id> --before <file> [--after <file>]");
+      process.exitCode = 1;
+    } else {
+      try {
+        const before = JSON.parse(readFileSync(beforePath, "utf8")) as string[];
+        const afterPath = argValue("--after");
+        const after = afterPath ? (JSON.parse(readFileSync(afterPath, "utf8")) as string[]) : takeGitSnapshot();
+        if (!Array.isArray(before) || !Array.isArray(after)) throw new Error("snapshot files must contain string[] JSON");
+        const result = guardShardReadOnly(shardId, before, after);
+        console.log(JSON.stringify(result));
+        process.exitCode = result.ok ? 0 : 1;
+      } catch (err) {
+        console.error(`--guard failed: ${(err as Error).message}`);
+        process.exitCode = 1;
+      }
+    }
+  } else if (argv.includes("--combine-json")) {
+    // DIR-119-D3 (M211): wrap the REAL combineShardVerdicts over an AuditShardResult[] JSON file
+    // (production callsite: execute-milestone.js's audit-combine dispatch, both mirrors).
+    const inPath = argValue("--in");
+    const candidateId = argValue("--candidate-id");
+    if (!inPath || !candidateId) {
+      console.error("usage: composite-audit.ts --combine-json --in <file> --candidate-id <id> [--generation-id <g>]");
+      process.exitCode = 1;
+    } else {
+      try {
+        const shardResults = JSON.parse(readFileSync(inPath, "utf8")) as AuditShardResult[];
+        if (!Array.isArray(shardResults)) throw new Error("input JSON must be an AuditShardResult[] array");
+        console.log(JSON.stringify(combineShardVerdictsFromJson(shardResults, candidateId, argValue("--generation-id"))));
+        process.exitCode = 0;
+      } catch (err) {
+        console.error(`--combine-json failed: ${(err as Error).message}`);
+        process.exitCode = 1;
+      }
+    }
+  }
 }

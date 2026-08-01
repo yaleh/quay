@@ -1,0 +1,112 @@
+{
+  "taskId": "DIR-123",
+  "milestoneId": "M214",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M214-dir123-worktree-isolation.md",
+  "planFile": "docs/plans/M214-dir-123.md",
+  "ledgerFile": "milestones/M214/proposal-ledger.json",
+  "telemetryFile": "milestones/prepare-telemetry/DIR-123/aa7c0138f581.json",
+  "mechanismInventoryFile": "milestones/M214/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "a81c27904d059d15e5c3a41e38b45404feb6e6a246a45c043bdadc4ddceabb8e",
+    "charter": "35684123238eefd27d3b19a00b3da9efca04003f7c05f93274f2f4530066dc6b",
+    "plan": "36a0bab5d2a0b71a5531a2f50cb7a8c24bec8c47198c6464fe00d2f82c8eb58b",
+    "sources": {
+      ".claude/workflows/execute-milestone.js": "9282286c7c2874f4a4f12157f903928b4a1f212b78cbdd47432d84e24d1b0af9",
+      "plugin/workflows/execute-milestone.js": "9282286c7c2874f4a4f12157f903928b4a1f212b78cbdd47432d84e24d1b0af9",
+      "experiments/quay-perpetual-stream/scripts/concurrent-batch-scheduler.ts": "69aa83501edd08213e886fe417ef03ad2a90c7d6d019820544880b9658cebbd9",
+      "plugin/scripts/concurrent-batch-scheduler.ts": "69aa83501edd08213e886fe417ef03ad2a90c7d6d019820544880b9658cebbd9",
+      "experiments/quay-perpetual-stream/scripts/touches-orthogonality-check.ts": "642c6a4560a02ec8b45aa8e8e0a9760bba550eb74b4c2ad51be7848cd1e8fcb4",
+      "plugin/scripts/touches-orthogonality-check.ts": "642c6a4560a02ec8b45aa8e8e0a9760bba550eb74b4c2ad51be7848cd1e8fcb4",
+      "experiments/quay-perpetual-stream/OUTER-LOOP.md": "e23d0902d4a366f727e7fa1e2972552d4955c54f0c1f3c46998a6cd5ad4e4116",
+      "experiments/quay-perpetual-stream/scripts/serial-fanin-absorb.ts": "90d7a39ed279957b9501376afd59abcaccdb63b8e1c8dfece935be2aaf518059",
+      "experiments/quay-perpetual-stream/scripts/worktree-branch-hygiene-check.sh": "aba00f7737348f649eb6481ad360941fa31bd57a7c649abba2b44fe5168f7e2d",
+      "experiments/quay-perpetual-stream/scripts/tree-hygiene-check.sh": "b45ce2bc3606eddb79490681d8343769b8ca13a8649cec107ba69cdce16bb45a",
+      "experiments/quay-perpetual-stream/scripts/gate-script-lib.sh": "7721b2cc620a0fb4bc94612e7774507ef759a616f1bea6f3cb8fbe7c2d86640c",
+      "experiments/quay-perpetual-stream/scripts/anti-drift-touches-check.ts": "85640d45f6530fb7deb87999730573ab48a9b7fac346259c25afd7166c1460b9",
+      "experiments/quay-perpetual-stream/scripts/milestone-preparation-check.ts": "e14d46c3c016ec57009d368f1bafb2eb89bde017dd7aae7939d5ac7e04929be4",
+      "plugin/test/execute-milestone-build-phase-gate.test.mjs": "eb1bb06d32d9676d73a12ba0f902c3789ea05bc9a424d16f7806830afd0dceab",
+      "plugin/test/execute-milestone-disposition-conformance.test.mjs": "8c622cec10ad357ac21ef46849e1d4676e507dcc3ad3ed7e27b8ddfe799a50fe",
+      "plugin/test/execute-milestone-preparation-gate.test.mjs": "3ed6acc2d062c1af67cb8cd230bec4793bf4f5723025c913593e718d75f6aad0",
+      "milestones/M210/absorb-entry.md": "0fd8bfaff96fc2211c193145758b13487eda6694728d64937768e3ea20d5f947",
+      "CLAUDE.md": "612c80e1e6d52acd427113d9f2cdb040dda42f27a49c50ca191faa71eb6c787e",
+      "tasks/DIR-123.md": "8f06258fa0393feb2aa0dd86e929071431a67b4d62d6a057e83f87d967421ef5",
+      "experiments/quay-perpetual-stream/charters/M214-dir123-worktree-isolation.md": "35684123238eefd27d3b19a00b3da9efca04003f7c05f93274f2f4530066dc6b"
+    },
+    "ledger": "a42b800a2246acdaba02e42aa92a8f5c19220a7959a46208e69805a18044337e",
+    "telemetry": "0adab18fe15ad623629bdad94a0cd0b7e543505486567344a15c10c1d3ff3023",
+    "mechanismInventory": "6165c6b68a297c19861fa723487901a4858c6857d6d53d008963aebccbfb3036"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 3,
+    "findings": 0
+  },
+  "touches": [
+    ".claude/workflows/execute-milestone.js",
+    "plugin/workflows/execute-milestone.js",
+    "experiments/quay-perpetual-stream/scripts/concurrent-batch-scheduler.ts",
+    "plugin/scripts/concurrent-batch-scheduler.ts",
+    "experiments/quay-perpetual-stream/OUTER-LOOP.md",
+    "CLAUDE.md",
+    "plugin/test/execute-milestone-worktree-isolation.test.mjs",
+    "experiments/quay-perpetual-stream/test/execute-milestone-worktree-isolation.test.mjs",
+    "docs/plans/M214-dir-123.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 2,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 3,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": true,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 2,
+    "proposalReviewRounds": 3,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785541750712,
+    "endedAtMs": 1785542938705,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "c611c5c2cd301f5c"
+      },
+      {
+        "round": 1,
+        "hash": "sha256:5d53b8065252"
+      },
+      {
+        "round": 2,
+        "hash": "534d51b29d8c"
+      }
+    ]
+  }
+}
