@@ -352,7 +352,7 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
   // 12 (audit-independence) is, by contrast, CONDITIONALLY dispositioned (like clauses 1/2) — it
   // legitimately N/A-passes when no audit ran this milestone — so it is NOT listed here, mirroring
   // clauses 1/2's own placement.
-  const MECHANICALLY_UNCONDITIONAL_CLAUSES = new Set(["line-budget", "impl-row", "escrow-delta-v", "test-floor", "task-canonical-lifecycle-record", "tree-hygiene", "worktree-branch-hygiene"]);
+  const MECHANICALLY_UNCONDITIONAL_CLAUSES = new Set(["line-budget", "impl-row", "escrow-delta-v", "test-floor", "task-canonical-lifecycle-record", "tree-hygiene", "worktree-branch-hygiene", "invariant-ownership"]);
   const clauseNames = [
     { key: "adversarial-audit", pattern: /adversarial[- ]audit/i },
     { key: "V_meta consolidation-lag", pattern: /V_meta consolidation[- ]lag|V_meta[- ]lag/i },
@@ -364,6 +364,7 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
     { key: "tree-hygiene", pattern: /tree[- ]hygiene/i },
     { key: "worktree-branch-hygiene", pattern: /worktree[- ]branch[- ]hygiene|worktree\/branch[- ]hygiene/i },
     { key: "audit-independence", pattern: /audit[- ]independence/i },
+    { key: "invariant-ownership", pattern: /invariant[- ]ownership/i },
   ];
   const outOfScopeMatch = charterText.match(/##+ Explicitly OUT of scope[\s\S]*?(\n##+ |$)/i);
   const outOfScopeText = outOfScopeMatch ? outOfScopeMatch[0] : "";
@@ -852,6 +853,36 @@ const needsHuman = { declared: !!needsHumanMatch, reason: needsHumanMatch ? need
           throw new DodCheckEnvError(`ERROR: audit-independence-check.sh usage/environment error (exit ${e.status}): ${(e.stderr || "").toString().trim()}`);
         }
       }
+    }
+  }
+}
+
+// --- Clause 13: Invariant-ownership gate (DIR-124-A3a) — shell out to workflow-invariant-ownership.mjs ---
+// Validates the invariant-ownership manifest structurally: one authoritative owner per invariant,
+// owner paths resolve to existing files. Runs UNCONDITIONALLY every check (mirrors clauses 10/11/12's
+// shape — always dispositioned, never conditionally-skippable). Exit 0 = clean (PASS); exit 1 =
+// violation (FAIL); any other exit is a usage/environment error surfaced as DodCheckEnvError.
+{
+  const scriptPath = path.join(__dirname, "workflow-invariant-ownership.mjs");
+  if (!fs.existsSync(scriptPath)) {
+    throw new DodCheckEnvError(`ERROR: sibling script not found: ${scriptPath}`);
+  }
+  const manifestPath = path.join(process.cwd(), "experiments", "quay-perpetual-stream", "invariant-ownership.md");
+  try {
+    const out = execFileSync("node", [scriptPath, manifestPath], { encoding: "utf8" });
+    const parsed = JSON.parse(out);
+    passes.push(`clause13-invariant-ownership: PASS — ${parsed.totalInvariants} invariants, 0 violations`);
+    dispositionedClauses.add("invariant-ownership");
+  } catch (e) {
+    const out = (e.stdout || "").toString().trim();
+    if (e.status === 1) {
+      let parsed = null;
+      try { parsed = JSON.parse(out); } catch (_) { /* parse failure handled below */ }
+      const vCount = parsed && Array.isArray(parsed.violations) ? parsed.violations.length : "?";
+      failures.push(`clause13-invariant-ownership: FAIL — ${vCount} violation(s): ${(parsed && Array.isArray(parsed.violations) ? parsed.violations.map((v) => `${v.invariant}: ${v.detail}`).join("; ") : out.slice(0, 200))}`);
+      dispositionedClauses.add("invariant-ownership");
+    } else {
+      throw new DodCheckEnvError(`ERROR: workflow-invariant-ownership.mjs usage/environment error (exit ${e.status}): ${(e.stderr || "").toString().trim()}`);
     }
   }
 }
