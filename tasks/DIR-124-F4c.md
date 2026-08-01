@@ -62,3 +62,9 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/test/*ground-truth*.test.mjs`
 - `plugin/test/*ground-truth*.test.mjs`
 - `docs/plans/M272-dir-124-f4c.md`
+- `milestones/M272/preparation.json`
+- `milestones/M272/proposal-ledger.json`
+- `milestones/M272/stage-journal.jsonl`
+- `milestones/M272/receipts/*.json`
+- `tasks/DIR-124-F4c.md`
+- `.quay/config.yml`

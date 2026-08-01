@@ -110,3 +110,9 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs`
 - `plugin/test/prepare-milestone-convergence.test.mjs`
 - `docs/plans/M266-gap-prepare-milestone-epoch-scope-change-grants-full-review-a.md`
+- `milestones/M266/preparation.json`
+- `milestones/M266/proposal-ledger.json`
+- `milestones/M266/stage-journal.jsonl`
+- `milestones/M266/receipts/*.json`
+- `tasks/gap-prepare-milestone-epoch-scope-change-grants-full-review-A.md`
+- `.quay/config.yml`
