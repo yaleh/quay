@@ -1,1 +1,54 @@
-{"meta":{"synthetic":true,"generatedAt":"2026-08-01T00:00:00Z","workflowCommit":"pre-de5c79a2"},"assertions":[{"id":"m192-01","description":"Build start+end events","classification":"known-defect","internalCategory":"observed-but-undesired","mappingNote":"observed-but-undesired -> known-defect: Build agent crashed","check":{"predicate":"buildPhaseHasNoAgentOutcome","args":{}},"expected":true},{"id":"m192-02","description":"Audit after null Build","classification":"known-defect","internalCategory":"observed-but-undesired","mappingNote":"observed-but-undesired -> known-defect: null Build passed through","check":{"predicate":"auditAfterNullBuild","args":{}},"expected":true},{"id":"m192-03","description":"Build outcome error","classification":"known-defect","internalCategory":"observed-but-undesired","mappingNote":"observed-but-undesired -> known-defect","check":{"predicate":"fieldEquals","args":{"stage":"build","field":"outcome","expectedValue":"error"}},"expected":true},{"id":"m192-04","description":"Gate after null Build","classification":"known-defect","internalCategory":"observed-but-undesired","mappingNote":"observed-but-undesired -> known-defect","check":{"predicate":"hasStage","args":{"stage":"gate"}},"expected":true},{"id":"m192-05","description":"Land needs-human","classification":"known-defect","internalCategory":"observed-but-undesired","mappingNote":"observed-but-undesired -> known-defect","check":{"predicate":"outcomeMatches","args":{"expectedOutcome":"needs-human"}},"expected":true}]}
+{
+  "assertions": [
+    {
+      "id": "m192-001",
+      "description": "Build phase has events without agent outcome (null passthrough \u2014 mixed outcomes)",
+      "classification": "known-defect",
+      "internalCategory": "observed-but-undesired",
+      "mappingNote": "observed-but-undesired => known-defect: null outcome from crashed agent passed through pre-M208 gate",
+      "check": {
+        "predicate": "buildPhaseHasNoAgentOutcome",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "m192-002",
+      "description": "Audit entered after null Build result",
+      "classification": "known-defect",
+      "internalCategory": "observed-but-undesired",
+      "mappingNote": "observed-but-undesired => known-defect: workflow entered Audit without valid buildResult",
+      "check": {
+        "predicate": "auditAfterNullBuild",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "m192-003",
+      "description": "Gate entered despite null Build",
+      "classification": "known-defect",
+      "internalCategory": "observed-but-undesired",
+      "mappingNote": "observed-but-undesired => known-defect: workflow reached Gate without valid buildResult",
+      "check": {
+        "predicate": "hasStage",
+        "args": {
+          "stage": "gate"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "m192-004",
+      "description": "Land entered despite null Build (full passthrough)",
+      "classification": "known-defect",
+      "internalCategory": "observed-but-undesired",
+      "mappingNote": "observed-but-undesired => known-defect: complete null-passthrough to Land",
+      "check": {
+        "predicate": "landMergeOccurs",
+        "args": {}
+      },
+      "expected": true
+    }
+  ]
+}

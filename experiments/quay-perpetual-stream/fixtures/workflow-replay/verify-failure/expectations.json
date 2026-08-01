@@ -1,1 +1,96 @@
-{"meta":{"synthetic":true,"generatedAt":"2026-08-01T00:00:00Z","workflowCommit":"74fe7791"},"assertions":[{"id":"vf-01","description":"Terminal outcome needs-human","classification":"normative","internalCategory":"normative","check":{"predicate":"outcomeMatches","args":{"expectedOutcome":"needs-human"}},"expected":true},{"id":"vf-02","description":"Outcome phase verify","classification":"normative","internalCategory":"normative","check":{"predicate":"outcomePhaseEquals","args":{"expectedPhase":"verify"}},"expected":true},{"id":"vf-03","description":"No Prepared","classification":"normative","internalCategory":"normative","check":{"predicate":"stageSkipped","args":{"stage":"prepared"}},"expected":true},{"id":"vf-04","description":"No Build","classification":"normative","internalCategory":"normative","check":{"predicate":"stageSkipped","args":{"stage":"build"}},"expected":true},{"id":"vf-05","description":"Verify agent dispatched","classification":"compatibility-only","internalCategory":"compatibility-only","mappingNote":"Error detail may change","check":{"predicate":"agentCountForStage","args":{"stage":"verify","count":1}},"expected":true}]}
+{
+  "assertions": [
+    {
+      "id": "vf-001",
+      "description": "No Build after Verify failure",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageSkipped",
+        "args": {
+          "stage": "build"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "vf-002",
+      "description": "No Prepared after Verify failure",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageSkipped",
+        "args": {
+          "stage": "prepared"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "vf-003",
+      "description": "No Audit after Verify failure",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageSkipped",
+        "args": {
+          "stage": "audit"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "vf-004",
+      "description": "No Land after Verify failure",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageSkipped",
+        "args": {
+          "stage": "land"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "vf-005",
+      "description": "Terminal outcome needs-human",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "outcomeMatches",
+        "args": {
+          "expectedOutcome": "needs-human"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "vf-006",
+      "description": "Terminal phase is verify",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "outcomePhaseEquals",
+        "args": {
+          "expectedPhase": "verify"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "vf-007",
+      "description": "Verify phase exists",
+      "classification": "compatibility-only",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "Error detail compatibility-only",
+      "check": {
+        "predicate": "hasStage",
+        "args": {
+          "stage": "verify"
+        }
+      },
+      "expected": true
+    }
+  ]
+}

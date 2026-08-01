@@ -1,1 +1,80 @@
-{"meta":{"synthetic":true,"generatedAt":"2026-08-01T00:00:00Z","workflowCommit":"74fe7791"},"assertions":[{"id":"tampered-01","description":"Phase sequence MISSING Gate (TAMPERED to FAIL)","classification":"normative","internalCategory":"normative","check":{"predicate":"phaseSequenceEquals","args":{"sequence":["verify","prepared","build","audit","land"]}},"expected":true},{"id":"tampered-02","description":"Build 99 agents (DELIBERATELY WRONG)","classification":"normative","internalCategory":"normative","check":{"predicate":"agentCountForStage","args":{"stage":"build","count":99}},"expected":true}]}
+{
+  "assertions": [
+    {
+      "id": "lss-001",
+      "description": "Phase sequence verify->prepared->build->audit->gate->land",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "phaseSequenceEquals",
+        "args": {
+          "sequence": [
+            "verify",
+            "prepared",
+            "build",
+            "audit",
+            "gate",
+            "land"
+          ]
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-002",
+      "description": "Build before Audit",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "stageOrderedBefore",
+        "args": {
+          "A": "build",
+          "B": "audit"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-TAMPERED",
+      "description": "Build dispatches 2 agents (DELIBERATELY WRONG \u2014 actual is 1)",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "agentCountForStage",
+        "args": {
+          "stage": "build",
+          "count": 2
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-004",
+      "description": "Terminal outcome is done",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "outcomeMatches",
+        "args": {
+          "expectedOutcome": "done"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "lss-005",
+      "description": "Verify dispatches 5 agents",
+      "classification": "compatibility-only",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "Agent count may change",
+      "check": {
+        "predicate": "agentCountForStage",
+        "args": {
+          "stage": "verify",
+          "count": 5
+        }
+      },
+      "expected": true
+    }
+  ]
+}

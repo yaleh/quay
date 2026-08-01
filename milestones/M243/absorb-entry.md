@@ -20,3 +20,6 @@ surface:method-infra | DIR-124-A2 | M243 | golden replay corpus: 8 named cases +
 ## Gate
 
 - Acceptance: PASS (golden replay runner + fixtures + RED/GREEN controls)
+
+adversarial-audit disposition: REFUTED
+V_meta consolidation-lag: PASS — no confirmed-unconsolidated row past K without a dated carry-forward (milestone_counter=205 K=2; both ledger rows [ok] consolidated / [ok] proposed, lag=- for both; domain-audit-channel≡CI-job already consolidated, repo-root isolation-leak lesson not past φ threshold)

@@ -1,1 +1,91 @@
-{"meta":{"synthetic":true,"generatedAt":"2026-08-01T00:00:00Z","workflowCommit":"74fe7791"},"assertions":[{"id":"cps-01","description":"Dispatch mode concurrent","classification":"normative","internalCategory":"normative","check":{"predicate":"dispatchModeEquals","args":{"expectedMode":"concurrent"}},"expected":true},{"id":"cps-02","description":"Land lock held","classification":"normative","internalCategory":"normative","check":{"predicate":"landLockHeld","args":{}},"expected":true},{"id":"cps-03","description":"Survivor lands","classification":"normative","internalCategory":"normative","check":{"predicate":"survivorMilestoneCounterAdvanced","args":{}},"expected":true},{"id":"cps-04","description":"Terminal done","classification":"normative","internalCategory":"normative","check":{"predicate":"outcomeMatches","args":{"expectedOutcome":"done"}},"expected":true},{"id":"cps-05","description":"Worktree active","classification":"normative","internalCategory":"normative","check":{"predicate":"worktreeFieldsPopulated","args":{"stage":"build"}},"expected":true},{"id":"cps-06","description":"Reconcile exists","classification":"normative","internalCategory":"normative","check":{"predicate":"reconcilePhaseExists","args":{}},"expected":true},{"id":"cps-07","description":"Build 3 agents","classification":"compatibility-only","internalCategory":"compatibility-only","mappingNote":"Agent count may change","check":{"predicate":"agentCountForStage","args":{"stage":"build","count":3}},"expected":true}]}
+{
+  "assertions": [
+    {
+      "id": "cps-001",
+      "description": "Worktree isolation active in Build",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "worktreeFieldsPopulated",
+        "args": {
+          "stage": "build"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cps-002",
+      "description": "Reconcile runs for composite concurrent",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "reconcilePhaseExists",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "cps-003",
+      "description": "Land merge occurs (survivor committed)",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "landMergeOccurs",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "cps-004",
+      "description": "Dispatch mode is concurrent",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "dispatchModeEquals",
+        "args": {
+          "expectedMode": "concurrent"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cps-005",
+      "description": "Single-flight Land lock held (>=2 land events)",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "landLockHeld",
+        "args": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "cps-006",
+      "description": "Terminal outcome done for survivor",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "outcomeMatches",
+        "args": {
+          "expectedOutcome": "done"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cps-007",
+      "description": "Audit shard count is 2",
+      "classification": "compatibility-only",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "per-shard agent count may change",
+      "check": {
+        "predicate": "agentCountForStage",
+        "args": {
+          "stage": "audit",
+          "count": 2
+        }
+      },
+      "expected": true
+    }
+  ]
+}

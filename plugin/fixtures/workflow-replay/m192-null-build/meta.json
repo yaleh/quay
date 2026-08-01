@@ -1,0 +1,7 @@
+{
+  "synthetic": true,
+  "description": "M192 null-Build continuation (known-defect, observed-but-undesired). Encodes pre-M208 null-passthrough. Fixed at M208 (de5c79a2).",
+  "mappingNote": "observed-but-undesired => known-defect",
+  "generatedAt": "2026-08-01T12:00:00.000Z",
+  "workflowCommit": "74fe7791"
+}

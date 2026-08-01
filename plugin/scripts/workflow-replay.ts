@@ -185,6 +185,22 @@ const PREDICATES: Record<string, PredicateFn> = {
     if (aIdx === -1) return "no audit"; if (gIdx === -1) return "no gate";
     return gIdx > aIdx ? true : "gate not after audit";
   },
+  stageEndsWithOutcome(events, args) {
+    const stage = String(args.stage);
+    const expected = args.expectedOutcome as string;
+    const last = [...events].reverse().find(e => e.stage === stage && e.outcome != null);
+    if (!last) return `stage "${stage}" has no outcome event`;
+    return last.outcome === expected ? true : last.outcome;
+  },
+  fieldValueEquals(events, args) {
+    const stage = String(args.stage);
+    const field = String(args.field);
+    const expected = args.value;
+    const last = [...events].reverse().find(e => e.stage === stage && (e as Record<string, unknown>)[field] != null);
+    if (!last) return `stage "${stage}" has no value for "${field}"`;
+    const val = (last as Record<string, unknown>)[field];
+    return JSON.stringify(val) === JSON.stringify(expected) ? true : val;
+  },
 };
 
 function buildStateVector(events: StageEvent[]): StateVector {

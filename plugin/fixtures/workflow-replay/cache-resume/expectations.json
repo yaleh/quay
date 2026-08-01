@@ -1,1 +1,73 @@
-{"meta":{"synthetic":true,"generatedAt":"2026-08-01T00:00:00Z","workflowCommit":"74fe7791"},"assertions":[{"id":"cr-01","description":"Verify cache-hit","classification":"normative","internalCategory":"normative","check":{"predicate":"fieldEquals","args":{"stage":"verify","field":"waitReason","expectedValue":"cache-hit"}},"expected":true},{"id":"cr-02","description":"Full lifecycle","classification":"normative","internalCategory":"normative","check":{"predicate":"phaseSequenceEquals","args":{"sequence":["verify","prepared","build","audit","gate","land"]}},"expected":true},{"id":"cr-03","description":"Terminal outcome done","classification":"normative","internalCategory":"normative","check":{"predicate":"outcomeMatches","args":{"expectedOutcome":"done"}},"expected":true}]}
+{
+  "assertions": [
+    {
+      "id": "cr-001",
+      "description": "Verify phase exists",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "hasStage",
+        "args": {
+          "stage": "verify"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cr-002",
+      "description": "All 6 Verify checks return source: cache",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "fieldEquals",
+        "args": {
+          "stage": "verify",
+          "field": "source",
+          "expectedValue": "cache"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cr-003",
+      "description": "Terminal outcome done",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "outcomeMatches",
+        "args": {
+          "expectedOutcome": "done"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cr-004",
+      "description": "Prepared phase passes cached receipt",
+      "classification": "normative",
+      "internalCategory": "normative",
+      "check": {
+        "predicate": "hasStage",
+        "args": {
+          "stage": "prepared"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "cr-005",
+      "description": "Verify agents from cache (6 distinct labels)",
+      "classification": "compatibility-only",
+      "internalCategory": "compatibility-only",
+      "mappingNote": "cache-hit agent labels",
+      "check": {
+        "predicate": "agentCountForStage",
+        "args": {
+          "stage": "verify",
+          "count": 6
+        }
+      },
+      "expected": true
+    }
+  ]
+}
