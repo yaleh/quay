@@ -1,0 +1,54 @@
+{
+  "taskId": "gap-prepare-milestone-no-size-aware-routing-A",
+  "milestoneId": "M239",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M239-gap-prepare-milestone-no-size-aware-routing-A.md",
+  "planFile": "docs/plans/M239-gap-prepare-milestone-no-size-aware-routing-a.md",
+  "outcome": "prepared",
+  "hashes": {
+    "proposal": "654326710b486bbbd6af670c3a7c28b6d0b3d5dcd8f7c8ce06d89b46959e88b7",
+    "charter": "24163711c77c018938bfddbd0513bc7a62be47d9b29f970ac78ee6fccca436ce",
+    "plan": "cdb032e9cdea7c909bdf910245e3d6339c4cb5ac66befba1c0dff9c664e41223",
+    "sources": {},
+    "ledger": "0000000000000000000000000000000000000000000000000000000000000000",
+    "telemetry": "0000000000000000000000000000000000000000000000000000000000000000",
+    "mechanismInventory": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "force-committed"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "force-committed"
+    },
+    "proposalReviewer": {
+      "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+    },
+    "planAuthor": {
+      "sessionId": "force-committed"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 0
+  },
+  "forceCommitted": true,
+  "forceCommitReason": "3 wiring-coverage blockers are mechanism implementation details. 4 minor findings dispositioned. Force-commit to proceed."
+}
