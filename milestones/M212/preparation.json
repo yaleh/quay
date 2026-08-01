@@ -11,8 +11,8 @@
     "charter": "23c327c7e48254546501b83bee2ead0efa282e254089a5321324e66cd9a0c250",
     "plan": "4bf6087a20780e8cbdc14f6a49b232338be64b703f9e08276b89ef7b55f7f8aa",
     "sources": {
-      ".claude/workflows/execute-milestone.js": "9282286c7c2874f4a4f12157f903928b4a1f212b78cbdd47432d84e24d1b0af9",
-      "plugin/workflows/execute-milestone.js": "9282286c7c2874f4a4f12157f903928b4a1f212b78cbdd47432d84e24d1b0af9",
+      ".claude/workflows/execute-milestone.js": "bb5fe591c72512ff8e570d9f89b23e8b14ec9f3397bf9207c8fd14474e03b1d3",
+      "plugin/workflows/execute-milestone.js": "bb5fe591c72512ff8e570d9f89b23e8b14ec9f3397bf9207c8fd14474e03b1d3",
       "experiments/quay-perpetual-stream/scripts/composite-reconcile.ts": "5e9ed1d1a7ea05e0f94191d5d436e00c70e6bc1e5a410d4a4fedcd11b0adb000",
       "plugin/scripts/composite-reconcile.ts": "5e9ed1d1a7ea05e0f94191d5d436e00c70e6bc1e5a410d4a4fedcd11b0adb000",
       "experiments/quay-perpetual-stream/test/composite-reconcile.test.mjs": "02061223001e4141423db0e704bc836ea3285a1b1c45d4f66ec198ed95e04a09",
