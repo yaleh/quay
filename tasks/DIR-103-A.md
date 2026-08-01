@@ -2,7 +2,7 @@
 id: DIR-103-A
 title: "CLI dry-run: quay gate --dry-run <task-id> executes the acceptance
   command without recording a GateEvent or mutating status"
-status: todo
+status: done
 labels:
   - directive
   - human-steered
@@ -117,34 +117,34 @@ asserted, not assumed.
 
 ## Acceptance Criteria
 
-- [ ] `quay gate --dry-run <task-id>` runs `task.extra.acceptance` with the same
+- [x] `quay gate --dry-run <task-id>` runs `task.extra.acceptance` with the same
   cwd/timeout/env as a real gate run and prints stdout/stderr + exit code.
-- [ ] `quay gate --dry-run <task-id>` mirrors the acceptance command's exit code in the
+- [x] `quay gate --dry-run <task-id>` mirrors the acceptance command's exit code in the
   CLI's own `process.exitCode` (`process.exitCode = r.code ?? 1`): 0 when the command
   exits 0, non-zero (the command's code, or 1) when it fails.
-- [ ] `quay gate -n <task-id>` behaves identically to `quay gate --dry-run <task-id>`
+- [x] `quay gate -n <task-id>` behaves identically to `quay gate --dry-run <task-id>`
   (`-n` is parsed as a non-value-taking boolean flag, never misread as the task id).
-- [ ] `quay gate --dry-run <task-id>` appends ZERO GateEvents (gate-event log unchanged —
+- [x] `quay gate --dry-run <task-id>` appends ZERO GateEvents (gate-event log unchanged —
   real before/after, not asserted).
-- [ ] `quay gate --dry-run <task-id>` leaves the task's `status` field unchanged (a
+- [x] `quay gate --dry-run <task-id>` leaves the task's `status` field unchanged (a
   status-writing fixture task — a `ready` task, since `runComplete` at
   `lifecycle.ts:124` refuses a `todo` task via `illegal transition` at :131-133, so a
   `todo` fixture would never be flipped and would not test the invariant — stays
   `ready`, never `done`).
-- [ ] `quay gate --help` lists `--dry-run`.
-- [ ] `quay gate <task-id>` (no dry-run) is byte-identical in behavior to pre-change
+- [x] `quay gate --help` lists `--dry-run`.
+- [x] `quay gate <task-id>` (no dry-run) is byte-identical in behavior to pre-change
   (golden-replay).
-- [ ] Tests: `packages/quay/test/acceptance.test.mjs` gains RED/GREEN dry-run blocks
+- [x] Tests: `packages/quay/test/acceptance.test.mjs` gains RED/GREEN dry-run blocks
   (>=80% coverage on new paths).
 
 ## Definition of Done
 
 Standard inherited-core DoD clauses apply.
 
-- [ ] Landed on `master` under human-steered discipline.
-- [ ] A real `quay gate --dry-run` dispatch shows the command executed, exit code
+- [x] Landed on `master` under human-steered discipline.
+- [x] A real `quay gate --dry-run` dispatch shows the command executed, exit code
   surfaced, zero GateEvents appended, status untouched.
-- [ ] A fresh independent audit finds no refutation.
+- [x] A fresh independent audit finds no refutation.
 
 ## Human verification
 
