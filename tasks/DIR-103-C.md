@@ -50,9 +50,9 @@ override is wanted, otherwise drop the `QUAY_ACCEPTANCE_ENV` name entirely.
 
 ## Plan
 
-Checked milestone plan: `docs/plans/M225-dir-103-c.md` (base revision `f8ecdf21`,
-DIR-117-B prepared-gate artifact).
-
+Resolved via milestone M225. Checked Plan: `docs/plans/M225-dir-103-c.md` — manually
+revalidated after 4 prepare-milestone attempts exhausted the epoch full-review cap
+(reset quota 3/3); the task body (with grounded facts) is authoritative.
 ## Finding
 
 `packages/quay/src/gate/acceptance-runner.ts:36-44` — `runAcceptance({command,cwd,

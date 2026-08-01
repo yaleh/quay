@@ -1,0 +1,73 @@
+{
+  "taskId": "DIR-103-C",
+  "milestoneId": "M225",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M225-dir-103-c.md",
+  "planFile": "docs/plans/M225-dir-103-c.md",
+  "ledgerFile": "milestones/M225/proposal-ledger.json",
+  "telemetryFile": null,
+  "mechanismInventoryFile": "milestones/M225/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "2dfbb276e39e8686735f490b1bb52c1fd3994192696545a1498a42feaa4d2b2c",
+    "charter": "3717dd814a7b92faa20b8c8a87336e43025b635473e31c72599954bb0dc0126f",
+    "plan": "47f702cca46fef69f41e498f298fee42101377dcb294e340b709e8e9a8675ffc",
+    "sources": {
+      "packages/quay/src/gate/acceptance-runner.ts": "ec0f5e9628509b338a4e27e17ab771b82a484f5838686eb55e08e07452b47566",
+      "packages/quay/src/gate/registry.ts": "5bfe062fa3d795840e8fe949985c990ff656180ab82e9eb968b5d91912cd5e79",
+      "packages/quay/src/gate/config/utils.ts": "356a1d26fb4b8802e9b9d111ee76f37978281ba9a3a7a4499ba2f2a141926c16",
+      "packages/quay/src/gate/config/types.ts": "96074f839b9677ab0eac74f21284ead4ca839f34b3003c61e6c88c23f0a630f2",
+      "packages/quay/bin/quay.ts": "70cfaf12071b3e96d57045e83b3548e09a25030aaca16a3fa5f97d8bf94882d8",
+      "packages/quay/src/mcp-handlers.ts": "80a84a289940304d7f35df992df93c93098aa26279ebcee40b446d0df8f94856",
+      "packages/quay/src/mcp-server.ts": "b2697595ca5cd053ea94438b6182bf3dca6cdf961ba4e8477e10bbd5b68c7516",
+      "packages/quay/test/acceptance.test.mjs": "b40b88b1e3b1803fddbec570ddc03b98381b5ffbfca5d6d982f957f1267c1f5c",
+      "README.md": "84b5eb1c874a297e6e731ac16c221b86b5f0ec662db14d1526b8dab9184d212d",
+      "packages/quay-native/examples/sample-workspace/.quay/config.yml": "247871211542b1625112bf7a0f7b0394884756ce53ac46338de612413ad6f947"
+    },
+    "ledger": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "mechanismInventory": "e813d564bccbeefe1db875d1c9abb55d63c52b639acc61134a5f1d19cc489b67"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [
+    "packages/quay/src/gate/acceptance-runner.ts",
+    "packages/quay/src/gate/registry.ts",
+    "packages/quay/src/gate/config/utils.ts",
+    "packages/quay/src/gate/config/types.ts",
+    "packages/quay/bin/quay.ts",
+    "packages/quay/src/mcp-handlers.ts",
+    "packages/quay/src/mcp-server.ts",
+    "packages/quay/test/acceptance.test.mjs",
+    "README.md",
+    "packages/quay-native/examples/sample-workspace/.quay/config.yml",
+    "docs/plans/M225-dir-103-c.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "manual-takeover"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "manual-takeover"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ],
+    "manualTakeover": true
+  },
+  "convergence": null
+}
