@@ -34,6 +34,19 @@ extra:
    async stderr-stream read for real-CLI stderr assertions.
 
 
+
+5. **Scratch-workspace CLI invocation must use an ABSOLUTE path to `quay.ts`** — `gate
+   --list` resolves the workspace via `findConfig(process.cwd())` with NO workspace-root
+   flag, so every real-CLI run must `cd` into the scratch workspace. But `node
+   packages/quay/bin/quay.ts` is a repo-root-RELATIVE path that cannot resolve from a
+   scratch cwd (MODULE_NOT_FOUND, verified). Use `node
+   /home/yale/work/quay/packages/quay/bin/quay.ts gate --list` (absolute) with the shell
+   cwd inside the scratch workspace.
+6. **Every `- Command:` MUST use `quay.ts` (never `quay.js`)** — grep-verify zero
+   `quay.js` residuals across ALL plan stages before completion (one residual in an
+   earlier plan round slipped past despite grounded fact #2).
+
+
 ## Proposal
 
 Make the gate loader fail-loud for unrecognized top-level keys under the `gates:`
@@ -72,7 +85,7 @@ routes arrays to per-index diagnostics; null/map shapes degrade gracefully, neve
 ## Plan
 
 See the checked milestone Plan at `docs/plans/M226-dir-100-a.md` (DIR-117-B
-prepared-gate artifact, authored for milestone M226; base revision `fc5253a1`).
+prepared-gate artifact, authored for milestone M226; base revision `36787ca8`).
 Implementation follows that Plan's staged RED/implementation/GREEN sequence with the
 standardized stopping rule (at most 3 Plan-check rounds, success only at F_i = 0).
 
