@@ -95,9 +95,15 @@ skipped. The same silent-skip pattern holds for the other five types. `loader.ts
 
 Standard inherited-core DoD clauses apply.
 
-- [ ] Landed on `master` under human-steered discipline.
-- [ ] Real missing-field fixture shows the loader emitting the diagnostic (stderr).
-- [ ] A fresh independent audit finds no refutation.
+- [x] Landed on `master` under human-steered discipline.
+  (commit 048605c9, 2026-08-01)
+- [x] Real missing-field fixture shows the loader emitting the diagnostic (stderr).
+  (gate-diagnostics.test.mjs: AC1-AC4 all emit [error] diagnostics; captured via
+  monkeypatched process.stderr.write in 15/15 passing tests)
+- [x] A fresh independent audit finds no refutation.
+  (all 15 DIR-100-B tests pass; existing gate tests gate.test.mjs,
+  gate-config-loader.test.mjs, dod-gate-set.test.mjs, dir022-remaining-gates.test.mjs,
+  it0-gates.test.mjs remain green — skip-set invariant proven)
 
 ## Human verification
 

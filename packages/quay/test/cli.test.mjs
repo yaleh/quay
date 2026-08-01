@@ -88,6 +88,13 @@
 // precondition of this experiment, re-confirmed at the start of every
 // iteration) — both spawn a real (read-only) `quay-github mcp` child
 // process via `--provider github`.
+//
+// DIR-112 (M222, 2026-08-01): refactored from synchronous execFileSync to
+// async execFile + Promise.all for the 7 own-workspace blocks (13, 17, 18,
+// 19, 20, 21, 22). Three-phase execution model: Phase 1 serial (blocks 1-12,
+// shared workspace/config.yml/task store), Phase 2 concurrent (7 isolated
+// blocks), Phase 3 serial (blocks 14-16, 23-25, shared workspace read-only).
+// Output prefixing via makeAssert(tag) for concurrent blocks.
 
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -110,6 +117,17 @@ function assert(cond, msg) {
   } else {
     console.log(`PASS: ${msg}`);
   }
+}
+
+function makeAssert(tag) {
+  return (cond, msg) => {
+    if (!cond) {
+      failures++;
+      console.error(`[${tag}] FAIL: ${msg}`);
+    } else {
+      console.log(`[${tag}] PASS: ${msg}`);
+    }
+  };
 }
 
 const VALID_SECTIONS =
@@ -182,12 +200,14 @@ async function main() {
 
   const spawnOpts = { cwd: workspaceRoot, encoding: "utf8" };
 
+  // === Phase 1 — serial (shared workspace, config.yml, task store) ===
+
   // 1. `quay task list --json` — confirms both the JSON shape AND
   //    (implicitly) that resolveProviderEnv()'s ./-relative resolution
   //    correctly pointed the spawned quay-native mcp child at
   //    envTasksDir, not an empty/wrong directory.
   {
-    const r = run(["task", "list", "--json"], spawnOpts);
+    const r = await run(["task", "list", "--json"], spawnOpts);
     assert(r.status === 0, "quay task list --json exits 0");
     let tasks;
     try {
@@ -204,14 +224,14 @@ async function main() {
 
   // 1b. Non-JSON fallback format (tab-separated id/status/role/title).
   {
-    const r = run(["task", "list"], spawnOpts);
+    const r = await run(["task", "list"], spawnOpts);
     assert(r.status === 0, "quay task list (no --json) exits 0");
     assert(r.stdout.includes("CLI-1") && r.stdout.includes("\t"), "quay task list (no --json) emits tab-separated lines");
   }
 
   // 2. `quay task view <id> --json` — happy path.
   {
-    const r = run(["task", "view", "CLI-1", "--json"], spawnOpts);
+    const r = await run(["task", "view", "CLI-1", "--json"], spawnOpts);
     assert(r.status === 0, "quay task view CLI-1 --json exits 0");
     const t = JSON.parse(r.stdout);
     assert(t.id === "CLI-1" && t.title === "CLI test task one", "quay task view --json returns the correct task");
@@ -219,14 +239,14 @@ async function main() {
 
   // 2b. "no such task" error path.
   {
-    const r = run(["task", "view", "NOPE-999", "--json"], spawnOpts);
+    const r = await run(["task", "view", "NOPE-999", "--json"], spawnOpts);
     assert(r.status === 1, "quay task view <unknown id> exits 1");
     assert(r.stderr.includes("no such task"), "quay task view <unknown id> prints 'no such task' to stderr");
   }
 
   // 3. `quay task edit <id> --status ready --json` — happy path.
   {
-    const r = run(["task", "edit", "CLI-1", "--status", "ready", "--json"], spawnOpts);
+    const r = await run(["task", "edit", "CLI-1", "--status", "ready", "--json"], spawnOpts);
     assert(r.status === 0, "quay task edit --status ready --json exits 0");
     const t = JSON.parse(r.stdout);
     assert(t.status === "ready", "quay task edit --status ready actually persists the new status");
@@ -237,7 +257,7 @@ async function main() {
   //     solely required; the guard now fires when NO patch-producing flag
   //     (nor --append-notes) is given at all.
   {
-    const r = run(["task", "edit", "CLI-1", "--json"], spawnOpts);
+    const r = await run(["task", "edit", "CLI-1", "--json"], spawnOpts);
     assert(r.status === 1, "quay task edit with no patch flags exits 1");
     assert(
       r.stderr.includes("at least one of") && r.stderr.includes("--status"),
@@ -251,12 +271,12 @@ async function main() {
   //    provider-client.js's taskCheck() directly and never exercises this
   //    CLI-level exit-code-setting branch.
   {
-    const rOk = run(["task", "check", "CLI-1", "--json"], spawnOpts);
+    const rOk = await run(["task", "check", "CLI-1", "--json"], spawnOpts);
     assert(rOk.status === 0, "quay task check <passing task> --json exits 0");
     const ok = JSON.parse(rOk.stdout);
     assert(ok.ok === true, "quay task check <passing task> reports ok:true");
 
-    const rFail = run(["task", "check", "CLI-2", "--json"], spawnOpts);
+    const rFail = await run(["task", "check", "CLI-2", "--json"], spawnOpts);
     assert(rFail.status === 1, "quay task check <failing task> --json exits 1 (mirrors result.ok)");
     const fail = JSON.parse(rFail.stdout);
     assert(fail.ok === false, "quay task check <failing task> reports ok:false");
@@ -279,31 +299,31 @@ async function main() {
   {
     // 4b-i. --enforce-gate refuses a gate-failing status transition: exit 1,
     //       no write performed, result.reason surfaced in the error message.
-    const rRefuse = run(["task", "edit", "CLI-2", "--status", "ready", "--enforce-gate", "--json"], spawnOpts);
+    const rRefuse = await run(["task", "edit", "CLI-2", "--status", "ready", "--enforce-gate", "--json"], spawnOpts);
     assert(rRefuse.status === 1, "quay task edit CLI-2 --status ready --enforce-gate exits 1 (gate fails)");
     assert(
       rRefuse.stderr.includes("AC checkboxes checked") || rRefuse.stderr.includes("checked"),
       `quay task edit --enforce-gate refusal surfaces the gate's result.reason in the error message (got stderr: ${rRefuse.stderr.slice(0, 300)})`
     );
-    const viewAfterRefuse = run(["task", "view", "CLI-2", "--json"], spawnOpts);
+    const viewAfterRefuse = await run(["task", "view", "CLI-2", "--json"], spawnOpts);
     const afterRefuse = JSON.parse(viewAfterRefuse.stdout);
     assert(afterRefuse.status === "todo", "quay task edit --enforce-gate refusal performs NO write — CLI-2 status unchanged (still todo)");
 
     // 4b-ii. WITHOUT --enforce-gate, the identical status transition against
     //        the SAME gate-failing fixture succeeds — current unguarded
     //        default behavior is unchanged (Done-when clause 3, zero regression).
-    const rUnguarded = run(["task", "edit", "CLI-2", "--status", "ready", "--json"], spawnOpts);
+    const rUnguarded = await run(["task", "edit", "CLI-2", "--status", "ready", "--json"], spawnOpts);
     assert(rUnguarded.status === 0, "quay task edit CLI-2 --status ready (no --enforce-gate) still succeeds unguarded against the same gate-failing fixture (Done-when clause 3)");
     const unguarded = JSON.parse(rUnguarded.stdout);
     assert(unguarded.status === "ready", "quay task edit CLI-2 --status ready (no --enforce-gate) actually persists the new status");
 
     // Reset CLI-2 back to todo (still gate-failing) for the remaining checks.
-    run(["task", "edit", "CLI-2", "--status", "todo"], spawnOpts);
+    await run(["task", "edit", "CLI-2", "--status", "todo"], spawnOpts);
 
     // 4b-iii. --enforce-gate succeeds identically to an unguarded write when
     //         the gate PASSES (Done-when clause 2) — use CLI-1, a passing
     //         fixture (AC fully checked), same exit code / output shape.
-    const rPass = run(["task", "edit", "CLI-1", "--status", "todo", "--enforce-gate", "--json"], spawnOpts);
+    const rPass = await run(["task", "edit", "CLI-1", "--status", "todo", "--enforce-gate", "--json"], spawnOpts);
     assert(rPass.status === 0, "quay task edit CLI-1 --status todo --enforce-gate exits 0 when the gate passes");
     const passResult = JSON.parse(rPass.stdout);
     assert(passResult.status === "todo", "quay task edit --enforce-gate (gate passes) actually persists the new status, same output shape as unguarded");
@@ -315,14 +335,14 @@ async function main() {
     //        Verify it does NOT refuse even though CLI-2 (currently todo,
     //        gate-failing) is the target — because no status change is
     //        requested, the gate is never invoked.
-    const rLabelsOnly = run(["task", "edit", "CLI-2", "--labels", "a,b", "--enforce-gate", "--json"], spawnOpts);
+    const rLabelsOnly = await run(["task", "edit", "CLI-2", "--labels", "a,b", "--enforce-gate", "--json"], spawnOpts);
     assert(rLabelsOnly.status === 0, "quay task edit CLI-2 --labels a,b --enforce-gate (no --status field) succeeds as a no-op guard-check — Done-when clause 4, option (b)");
   }
 
   // 5. `quay action list <id> --json` — action_buttons filtered by
   //    whenStatus against the task's live status.
   {
-    const r = run(["action", "list", "CLI-1", "--json"], spawnOpts);
+    const r = await run(["action", "list", "CLI-1", "--json"], spawnOpts);
     assert(r.status === 0, "quay action list CLI-1 --json exits 0");
     const buttons = JSON.parse(r.stdout);
     assert(
@@ -337,7 +357,7 @@ async function main() {
     execFileSync("node", [nativeBin, "task", "edit", "CLI-1", "--status", "done"], {
       env: { ...process.env, QUAY_NATIVE_TASKS_DIR: envTasksDir },
     });
-    const r = run(["action", "list", "CLI-1", "--json"], spawnOpts);
+    const r = await run(["action", "list", "CLI-1", "--json"], spawnOpts);
     assert(r.status === 0, "quay action list <done task> --json exits 0");
     const buttons = JSON.parse(r.stdout);
     assert(
@@ -354,7 +374,7 @@ async function main() {
   //    deliverTrigger() reached without throwing; JSON output carries the
   //    expected fields.
   {
-    const r = run(["action", "run", "CLI-1", "advance", "--json"], spawnOpts);
+    const r = await run(["action", "run", "CLI-1", "advance", "--json"], spawnOpts);
     assert(r.status === 0, "quay action run CLI-1 advance --json exits 0");
     // printJson() is the last thing `action run` writes, but composePayload()'s
     // own console.log lines precede it on stdout — find the start of the
@@ -385,7 +405,7 @@ async function main() {
   //     is required (the throw happens before deliverTrigger(), entirely
   //     local, against the same fixture used throughout this file).
   {
-    const r = run(["action", "run", "CLI-1", "bogus-action-id", "--json"], spawnOpts);
+    const r = await run(["action", "run", "CLI-1", "bogus-action-id", "--json"], spawnOpts);
     assert(r.status === 1, "quay action run <id> <unknown actionId> exits 1 (not a hang, not a silent success)");
     assert(
       r.stderr.includes("no such action button"),
@@ -396,7 +416,7 @@ async function main() {
 
   // 7. Unknown top-level command — usage fallback + exit 1.
   {
-    const r = run(["bogus"], spawnOpts);
+    const r = await run(["bogus"], spawnOpts);
     assert(r.status === 1, "quay <unknown command> exits 1");
     assert(r.stderr.includes("usage:"), "quay <unknown command> prints the usage fallback to stderr");
   }
@@ -435,7 +455,7 @@ async function main() {
         "",
       ].join("\n")
     );
-    const r = run(["task", "list", "--provider", "github", "--json"], spawnOpts);
+    const r = await run(["task", "list", "--provider", "github", "--json"], spawnOpts);
     assert(r.status === 0, "quay --provider github task list --json exits 0 (proves resolveProviderEnv()'s absolute-path passthrough reached the spawned quay-github mcp child intact)");
     let tasks;
     try {
@@ -605,7 +625,7 @@ async function main() {
       fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-action-github-log-")),
       "delivery-log.jsonl"
     );
-    const r = run(
+    const r = await run(
       ["action", "run", "gh-3", "advance", "--json", "--provider", "github"],
       { ...spawnOpts, env: { ...process.env, QUAY_ACTION_MOCK_LOG: mockLogPath } }
     );
@@ -720,7 +740,7 @@ async function main() {
 
     // 11a. `quay task view <id> --json --provider github`.
     {
-      const r = run(["task", "view", "gh-3", "--json", "--provider", "github"], spawnOpts);
+      const r = await run(["task", "view", "gh-3", "--json", "--provider", "github"], spawnOpts);
       assert(r.status === 0, "quay task view gh-3 --json --provider github exits 0 (real GitHub-backed task, end-to-end)");
       let t;
       try {
@@ -738,7 +758,7 @@ async function main() {
 
     // 11b. `quay action list <id> --json --provider github`.
     {
-      const r = run(["action", "list", "gh-3", "--json", "--provider", "github"], spawnOpts);
+      const r = await run(["action", "list", "gh-3", "--json", "--provider", "github"], spawnOpts);
       assert(r.status === 0, "quay action list gh-3 --json --provider github exits 0 (real GitHub-backed task, end-to-end)");
       let buttons;
       try {
@@ -760,7 +780,7 @@ async function main() {
     //      this exercises the FAIL branch (a different, previously-
     //      untested shape from test 10's action-run path).
     {
-      const r = run(["task", "check", "gh-3", "--json", "--provider", "github"], spawnOpts);
+      const r = await run(["task", "check", "gh-3", "--json", "--provider", "github"], spawnOpts);
       assert(r.status === 1, "quay task check gh-3 --json --provider github exits 1 (mirrors result.ok for gh-3's real, currently-unchecked AC state)");
       let result;
       try {
@@ -824,7 +844,7 @@ async function main() {
       ].join("\n")
     );
 
-    const r = run(["task", "list", "--provider", "broken-github", "--json"], spawnOpts);
+    const r = await run(["task", "list", "--provider", "broken-github", "--json"], spawnOpts);
     assert(r.status === 1, `quay task list --provider <a Provider whose mcp_entry crashes on launch> exits 1 (got ${r.status})`);
     assert(
       r.stdout.trim() === "",
@@ -853,824 +873,26 @@ async function main() {
     );
   }
 
-  // 13. QX-002 (experiment 4, iteration 1): --prefix filter for task list.
-  //     Closes CB-001: `quay task list --prefix <P>` returns only tasks whose
-  //     id starts with P. Uses a fresh isolated workspace with two distinct
-  //     task-id prefixes to confirm filtering and no-regression.
-  {
-    const prefixTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-prefix-tasks-"));
-    const prefixWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-prefix-workspace-"));
+  // === Phase 2 — concurrent (own-workspace blocks only) ===
 
-    fs.mkdirSync(path.join(prefixWorkspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(prefixWorkspaceRoot, ".quay", "config.yml"),
-      [
-        "providers:",
-        "  native:",
-        "    enabled: true",
-        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-        "    env:",
-        `      QUAY_NATIVE_TASKS_DIR: "${prefixTasksDir.replaceAll("\\", "\\\\")}"`,
-        "",
-      ].join("\n")
-    );
+  await Promise.all([
+    block13(),
+    block17(),
+    block18(),
+    block19(),
+    block20(),
+    block21(),
+    block22(),
+  ]);
 
-    // Seed tasks with two distinct prefixes
-    execFileSync("node", [nativeBin, "task", "create", "PRFA-001", "--title", "Prefix A task one",
-      "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
-    });
-    execFileSync("node", [nativeBin, "task", "create", "PRFA-002", "--title", "Prefix A task two",
-      "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
-    });
-    execFileSync("node", [nativeBin, "task", "create", "PRFB-001", "--title", "Prefix B task one",
-      "--status", "done", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
-    });
+  // === Phase 3 — serial (shared-workspace read-only blocks) ===
 
-    const prefixOpts = { cwd: prefixWorkspaceRoot, encoding: "utf8" };
-
-    // --prefix PRFA (non-JSON): should include PRFA tasks, exclude PRFB
-    {
-      const r = run(["task", "list", "--prefix", "PRFA"], prefixOpts);
-      assert(r.status === 0, "quay task list --prefix PRFA exits 0");
-      assert(r.stdout.includes("PRFA-001") && r.stdout.includes("PRFA-002"),
-        "quay task list --prefix PRFA includes both PRFA-* tasks");
-      assert(!r.stdout.includes("PRFB-001"),
-        "quay task list --prefix PRFA excludes PRFB-001");
-      assert(r.stdout.includes("filtered"),
-        "quay task list --prefix PRFA shows a filter indicator in non-JSON output");
-    }
-
-    // --prefix PRFA --json: should return a filtered JSON array
-    {
-      const r = run(["task", "list", "--prefix", "PRFA", "--json"], prefixOpts);
-      assert(r.status === 0, "quay task list --prefix PRFA --json exits 0");
-      let tasks;
-      try {
-        tasks = JSON.parse(r.stdout);
-      } catch {
-        tasks = null;
-      }
-      assert(Array.isArray(tasks), "quay task list --prefix PRFA --json emits a JSON array");
-      assert(
-        Array.isArray(tasks) && tasks.every((t) => t.id.toUpperCase().startsWith("PRFA")),
-        "quay task list --prefix PRFA --json returns only PRFA-* tasks"
-      );
-      assert(
-        Array.isArray(tasks) && !tasks.some((t) => t.id === "PRFB-001"),
-        "quay task list --prefix PRFA --json excludes PRFB-001"
-      );
-      assert(
-        Array.isArray(tasks) && tasks.length === 2,
-        `quay task list --prefix PRFA --json returns exactly 2 tasks (got ${Array.isArray(tasks) ? tasks.length : "null"})`
-      );
-    }
-
-    // --prefix prfa (lowercase): case-insensitive match
-    {
-      const r = run(["task", "list", "--prefix", "prfa", "--json"], prefixOpts);
-      assert(r.status === 0, "quay task list --prefix prfa (lowercase) exits 0");
-      let tasks;
-      try {
-        tasks = JSON.parse(r.stdout);
-      } catch {
-        tasks = null;
-      }
-      assert(
-        Array.isArray(tasks) && tasks.some((t) => t.id === "PRFA-001"),
-        "quay task list --prefix prfa (lowercase) matches PRFA-001 (case-insensitive)"
-      );
-    }
-
-    // No --prefix: all 3 tasks returned (no regression)
-    {
-      const r = run(["task", "list", "--json"], prefixOpts);
-      assert(r.status === 0, "quay task list --json (no prefix) exits 0 after adding prefix-test tasks");
-      let tasks;
-      try {
-        tasks = JSON.parse(r.stdout);
-      } catch {
-        tasks = null;
-      }
-      assert(
-        Array.isArray(tasks) && tasks.length === 3,
-        `quay task list --json (no prefix) returns all 3 seeded tasks (got ${Array.isArray(tasks) ? tasks.length : "null"}) — no regression`
-      );
-    }
-
-    fs.rmSync(prefixTasksDir, { recursive: true, force: true });
-    fs.rmSync(prefixWorkspaceRoot, { recursive: true, force: true });
-  }
-
-  // 14. QX-005 (experiment 4, iteration 1): --help and -h output.
-  //     Closes UQ-001 (was one-line fallback) and UQ-002 (subcommand help was missing).
-  //     Tests that --help / -h exit 0 and include expected content.
-  {
-    const helpOpts = { cwd: workspaceRoot, encoding: "utf8" };
-
-    // quay --help: exits 0, includes "Usage:" and key subcommands
-    {
-      const r = run(["--help"], helpOpts);
-      assert(r.status === 0, "quay --help exits 0 (not an error)");
-      assert(r.stdout.includes("Usage:"), "quay --help output includes 'Usage:'");
-      assert(r.stdout.includes("task list"), "quay --help output includes 'task list'");
-      assert(r.stdout.includes("task view"), "quay --help output includes 'task view'");
-      assert(r.stdout.includes("--prefix"), "quay --help output mentions --prefix flag (QX-002 cross-link)");
-      assert(r.stdout.includes("quay"), "quay --help output includes the tool name");
-      // M31-cli-gate-enforcement Done-when clause 5: --help documents BOTH
-      // the default-unguarded behavior and --enforce-gate.
-      assert(r.stdout.includes("--enforce-gate"), "quay --help output mentions --enforce-gate flag (M31-cli-gate-enforcement)");
-      assert(
-        r.stdout.includes("UNGUARDED") || r.stdout.includes("unguarded"),
-        "quay --help output documents that status transitions are unguarded by default (M31-cli-gate-enforcement)"
-      );
-      // exp5-M-GATE-HELP-SYNOPSIS-GAP (M51): the top-level Usage synopsis block must list
-      // `quay gate <id>` / `quay gate --list` / `quay gate-log <id>` explicitly, matching the
-      // existing complete/adjudicate/promote/retreat/run lines — not just be mentioned in passing
-      // inside another command's option text. Assert against the SYNOPSIS block specifically (lines
-      // starting with two-space indent, "quay gate"/"quay gate-log"), not just substring presence
-      // anywhere in the help text (which would trivially pass from the Options-section prose alone).
-      const synopsisBlock = r.stdout.slice(r.stdout.indexOf("Usage:"), r.stdout.indexOf("\n\nOptions for task list:"));
-      const gateSynopsisLines = synopsisBlock.split("\n").filter((l) => /^\s*quay gate\b/.test(l));
-      assert(
-        gateSynopsisLines.some((l) => /^\s*quay gate <task-id>/.test(l)),
-        "quay --help Usage synopsis includes a 'quay gate <task-id>' line"
-      );
-      assert(
-        gateSynopsisLines.some((l) => /^\s*quay gate --list/.test(l)),
-        "quay --help Usage synopsis includes a 'quay gate --list' line"
-      );
-      assert(
-        gateSynopsisLines.some((l) => /^\s*quay gate-log <task-id>/.test(l)),
-        "quay --help Usage synopsis includes a 'quay gate-log <task-id>' line"
-      );
-      // Dedicated options section for gate/gate-log (documenting --gate/--list/--json/--file),
-      // mirroring the existing "Lifecycle commands (QENG-3)" / "Driver command (QENG-4)" sections.
-      assert(
-        /gate/i.test(r.stdout) && /--gate <name>/.test(r.stdout),
-        "quay --help documents the --gate <name> flag in a dedicated gate/gate-log options section"
-      );
-      assert(r.stdout.includes("--list"), "quay --help documents the --list flag for 'gate'");
-    }
-
-    // quay -h: alias, also exits 0
-    {
-      const r = run(["-h"], helpOpts);
-      assert(r.status === 0, "quay -h exits 0 (alias for --help)");
-      assert(r.stdout.includes("Usage:"), "quay -h output includes 'Usage:'");
-    }
-
-    // quay task list --help: exits 0, includes task-list-specific flag docs
-    {
-      const r = run(["task", "list", "--help"], helpOpts);
-      assert(r.status === 0, "quay task list --help exits 0");
-      assert(r.stdout.includes("--prefix"), "quay task list --help output mentions --prefix");
-      assert(r.stdout.includes("--status"), "quay task list --help output mentions --status");
-    }
-
-    // The existing "unknown command" test must still work (--help is not passed).
-    {
-      const r = run(["bogus-command-that-is-not-help"], helpOpts);
-      assert(r.status === 1, "quay <unknown-non-help command> still exits 1 (--help does not break fallback)");
-      assert(r.stderr.includes("usage:"), "quay <unknown-non-help command> still prints usage to stderr");
-    }
-  }
-
-  // 15. QX-006 (experiment 4, iteration 1): `--prefix` with no value must
-  //     exit 1 with a clear usage error, not crash with a TypeError.
-  //     Regression from QX-002 (SH-001). Uses the same fixture workspace as
-  //     tests 1-12 (envTasksDir has CLI-1 seeded, which is enough to reach
-  //     the prefix-guard code path).
-  {
-    const r = run(["task", "list", "--prefix"], spawnOpts);
-    assert(r.status === 1, "quay task list --prefix (no value) exits 1 (not a TypeError crash)");
-    assert(
-      r.stderr.includes("--prefix requires a value"),
-      `quay task list --prefix (no value) prints a clear usage error to stderr (got: ${JSON.stringify(r.stderr.slice(0, 200))})`
-    );
-    assert(
-      !r.stderr.includes("TypeError"),
-      "quay task list --prefix (no value) does NOT produce a TypeError stack trace"
-    );
-  }
-
-  // 16. QX-007 (experiment 4, iteration 1): `quay serve --help` and
-  //     `quay action --help` must exit 0 and produce at least a stub line
-  //     of output. Previously they exited 0 with no output (UQ-010).
-  {
-    const r1 = run(["serve", "--help"], spawnOpts);
-    assert(r1.status === 0, "quay serve --help exits 0");
-    assert(
-      r1.stdout.trim().length > 0,
-      "quay serve --help prints at least some output (not silent)"
-    );
-    assert(
-      r1.stdout.includes("quay --help") || r1.stdout.includes("serve"),
-      "quay serve --help output references serve or points to --help"
-    );
-
-    const r2 = run(["action", "--help"], spawnOpts);
-    assert(r2.status === 0, "quay action --help exits 0");
-    assert(
-      r2.stdout.trim().length > 0,
-      "quay action --help prints at least some output (not silent)"
-    );
-  }
-
-  // 17. QX-008 (experiment 4, iteration 2): --sort updated.
-  //     Closes CB-004 (no sort-by-time on CLI) and CB-012 (--sort updated
-  //     silently ignored). Uses a fresh isolated workspace with tasks created
-  //     in a specific time-ordered sequence so sort-by-updated is verifiable.
-  {
-    const sortTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-sort-tasks-"));
-    const sortWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-sort-workspace-"));
-    fs.mkdirSync(path.join(sortWorkspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(sortWorkspaceRoot, ".quay", "config.yml"),
-      [
-        "providers:",
-        "  native:",
-        "    enabled: true",
-        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-        "    env:",
-        `      QUAY_NATIVE_TASKS_DIR: "${sortTasksDir.replaceAll("\\", "\\\\")}"`,
-        "",
-      ].join("\n")
-    );
-
-    const sortOpts = { cwd: sortWorkspaceRoot, encoding: "utf8" };
-    const SORT_BODY = VALID_SECTIONS + AC_DOD_CHECKED;
-
-    // Create tasks in order: SORT-A, then SORT-B, then SORT-C.
-    // Touch each file 100ms apart to ensure distinct mtimes.
-    execFileSync("node", [nativeBin, "task", "create", "SORT-A", "--title", "Sort A (oldest)",
-      "--status", "todo", "--body", SORT_BODY], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
-    });
-    // Small sleep between creates to ensure distinct mtime.
-    const t0 = Date.now(); while (Date.now() - t0 < 50) { /* spin */ }
-    execFileSync("node", [nativeBin, "task", "create", "SORT-B", "--title", "Sort B (middle)",
-      "--status", "todo", "--body", SORT_BODY], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
-    });
-    const t1 = Date.now(); while (Date.now() - t1 < 50) { /* spin */ }
-    execFileSync("node", [nativeBin, "task", "create", "SORT-C", "--title", "Sort C (most recent)",
-      "--status", "todo", "--body", SORT_BODY], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
-    });
-
-    // --sort updated --json: tasks should be sorted by mtime descending (SORT-C first, SORT-A last).
-    {
-      const r = run(["task", "list", "--sort", "updated", "--json"], sortOpts);
-      assert(r.status === 0, "quay task list --sort updated --json exits 0");
-      let tasks;
-      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
-      assert(Array.isArray(tasks), "quay task list --sort updated --json emits a JSON array");
-      if (Array.isArray(tasks) && tasks.length === 3) {
-        assert(
-          tasks[0].id === "SORT-C",
-          `quay task list --sort updated: first task is most-recently-created SORT-C (got ${tasks[0]?.id})`
-        );
-        assert(
-          tasks[tasks.length - 1].id === "SORT-A",
-          `quay task list --sort updated: last task is oldest SORT-A (got ${tasks[tasks.length - 1]?.id})`
-        );
-        // Confirm updatedAt field is present and numeric.
-        assert(
-          tasks.every((t) => typeof t.updatedAt === "number" && t.updatedAt > 0),
-          "quay task list --sort updated: all tasks include updatedAt as a positive number (ms)"
-        );
-      }
-    }
-
-    // --sort updated (non-JSON): exits 0, produces tabbed output (not default insertion order).
-    {
-      const r = run(["task", "list", "--sort", "updated"], sortOpts);
-      assert(r.status === 0, "quay task list --sort updated (non-JSON) exits 0");
-      // Tasks are listed in default alphabetical (insertion) order without --sort:
-      // SORT-A, SORT-B, SORT-C. With --sort updated, SORT-C should be first.
-      const lines = r.stdout.trim().split("\n").filter((l) => !l.startsWith("#") && l.trim());
-      assert(
-        lines.length === 3 && lines[0].startsWith("SORT-C"),
-        `quay task list --sort updated (non-JSON): first line starts with SORT-C (got: ${lines[0]})`
-      );
-    }
-
-    // CB-012 verification: --sort updated does NOT silently return default
-    // (insertion alphabetical) order. Default order would be SORT-A first.
-    // Sort-by-updated order has SORT-C first. These differ, so the
-    // non-default-equals-updated check above is the live proof.
-
-    fs.rmSync(sortTasksDir, { recursive: true, force: true });
-    fs.rmSync(sortWorkspaceRoot, { recursive: true, force: true });
-  }
-
-  // 18. QX-016 (experiment 4, iteration 4): multi-label AND-filter on CLI.
-  //     --label A --label B should return only tasks that have BOTH labels.
-  //     Closes CB-013 (CLI last-wins bug: parseFlags() now collects repeated
-  //     --label flags as an array; filter applies AND-logic).
-  {
-    const mlTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-multilabel-tasks-"));
-    const mlWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-multilabel-workspace-"));
-    fs.mkdirSync(path.join(mlWorkspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(mlWorkspaceRoot, ".quay", "config.yml"),
-      [
-        "providers:",
-        "  native:",
-        "    enabled: true",
-        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-        "    env:",
-        `      QUAY_NATIVE_TASKS_DIR: "${mlTasksDir.replaceAll("\\", "\\\\")}"`,
-        "",
-      ].join("\n")
-    );
-
-    const ML_BODY = VALID_SECTIONS + AC_DOD_CHECKED;
-    // MBOTH-1: has both labels "bug" and "cli"
-    execFileSync("node", [nativeBin, "task", "create", "MBOTH-1", "--title", "Has both labels",
-      "--status", "todo", "--body", ML_BODY, "--labels", "bug,cli"], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mlTasksDir },
-    });
-    // MBUG-1: has only "bug"
-    execFileSync("node", [nativeBin, "task", "create", "MBUG-1", "--title", "Has only bug",
-      "--status", "todo", "--body", ML_BODY, "--labels", "bug"], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mlTasksDir },
-    });
-    // MNONE-1: no labels
-    execFileSync("node", [nativeBin, "task", "create", "MNONE-1", "--title", "Has no labels",
-      "--status", "todo", "--body", ML_BODY], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mlTasksDir },
-    });
-
-    const mlOpts = { cwd: mlWorkspaceRoot, encoding: "utf8" };
-
-    // --label bug --label cli (AND-logic): should return only MBOTH-1
-    {
-      const r = run(["task", "list", "--label", "bug", "--label", "cli", "--json"], mlOpts);
-      assert(r.status === 0, "quay task list --label bug --label cli exits 0 (multi-label AND-filter, QX-016, CB-013)");
-      let tasks;
-      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
-      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "MBOTH-1"),
-        "quay task list --label bug --label cli includes MBOTH-1 (has both labels) (QX-016)");
-      assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "MBUG-1"),
-        "quay task list --label bug --label cli excludes MBUG-1 (has only bug, not cli) (QX-016, CB-013)");
-      assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "MNONE-1"),
-        "quay task list --label bug --label cli excludes MNONE-1 (no labels) (QX-016)");
-    }
-
-    // --label bug (single): should return MBOTH-1 and MBUG-1 (no regression)
-    {
-      const r = run(["task", "list", "--label", "bug", "--json"], mlOpts);
-      assert(r.status === 0, "quay task list --label bug exits 0 (single-label, no regression, QX-016)");
-      let tasks;
-      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
-      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "MBOTH-1"),
-        "quay task list --label bug includes MBOTH-1 (QX-016 single-label no regression)");
-      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "MBUG-1"),
-        "quay task list --label bug includes MBUG-1 (QX-016 single-label no regression)");
-    }
-
-    fs.rmSync(mlTasksDir, { recursive: true, force: true });
-    fs.rmSync(mlWorkspaceRoot, { recursive: true, force: true });
-  }
-
-  // 19. QX-021 (experiment 4, iteration 5): --search title filter on CLI.
-  //     --search "foo" returns only tasks with "foo" in title (case-insensitive).
-  //     --search "" (empty string) or no flag returns all tasks (no filter).
-  //     Also covers QX-022: non-JSON output includes a timestamp ("ago") column.
-  //     Closes CB-007 (CLI full-text search) and UQ-004 (CLI timestamp).
-  {
-    const srchTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-search-tasks-"));
-    const srchWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-search-workspace-"));
-    fs.mkdirSync(path.join(srchWorkspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(srchWorkspaceRoot, ".quay", "config.yml"),
-      [
-        "providers:",
-        "  native:",
-        "    enabled: true",
-        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-        "    env:",
-        `      QUAY_NATIVE_TASKS_DIR: "${srchTasksDir.replaceAll("\\", "\\\\")}"`,
-        "",
-      ].join("\n")
-    );
-
-    const ML_BODY = VALID_SECTIONS + AC_DOD_CHECKED;
-    // SRCH-1: title contains "bootstrap" (should match --search bootstrap)
-    execFileSync("node", [nativeBin, "task", "create", "SRCH-1", "--title", "Quay bootstrap task",
-      "--status", "todo", "--body", ML_BODY], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir },
-    });
-    // SRCH-2: title contains "dashboard" (should NOT match --search bootstrap)
-    execFileSync("node", [nativeBin, "task", "create", "SRCH-2", "--title", "Dashboard setup",
-      "--status", "todo", "--body", ML_BODY], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir },
-    });
-    // SRCH-3: title contains "Bootstrap" (case-insensitive should also match --search bootstrap)
-    execFileSync("node", [nativeBin, "task", "create", "SRCH-3", "--title", "Bootstrap configuration",
-      "--status", "done", "--body", ML_BODY], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir },
-    });
-
-    const srchOpts = { cwd: srchWorkspaceRoot, encoding: "utf8" };
-
-    // --search bootstrap: should match SRCH-1 and SRCH-3, not SRCH-2
-    {
-      const r = run(["task", "list", "--search", "bootstrap", "--json"], srchOpts);
-      assert(r.status === 0, "quay task list --search bootstrap exits 0 (QX-021, CB-007)");
-      let tasks;
-      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
-      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "SRCH-1"),
-        "quay task list --search bootstrap includes SRCH-1 (title: Quay bootstrap task) (QX-021)");
-      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "SRCH-3"),
-        "quay task list --search bootstrap includes SRCH-3 (title: Bootstrap configuration, case-insensitive) (QX-021)");
-      assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "SRCH-2"),
-        "quay task list --search bootstrap excludes SRCH-2 (title: Dashboard setup) (QX-021, CB-007)");
-    }
-
-    // --search dashboard: should match only SRCH-2
-    {
-      const r = run(["task", "list", "--search", "dashboard", "--json"], srchOpts);
-      assert(r.status === 0, "quay task list --search dashboard exits 0 (QX-021)");
-      let tasks;
-      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
-      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "SRCH-2"),
-        "quay task list --search dashboard includes SRCH-2 (QX-021)");
-      assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "SRCH-1"),
-        "quay task list --search dashboard excludes SRCH-1 (QX-021)");
-    }
-
-    // No --search flag: should return all 3 tasks (no filter applied)
-    {
-      const r = run(["task", "list", "--json"], srchOpts);
-      assert(r.status === 0, "quay task list (no --search) exits 0 (QX-021 no-filter baseline)");
-      let tasks;
-      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
-      assert(Array.isArray(tasks) && tasks.length === 3,
-        "quay task list (no --search) returns all 3 tasks (QX-021 no-filter baseline)");
-    }
-
-    // QX-022: non-JSON output includes timestamp ("ago") column for tasks with updatedAt.
-    // quay-native's store.js sets updatedAt = file mtime, so any created task has it.
-    {
-      const r = run(["task", "list"], srchOpts);
-      assert(r.status === 0, "quay task list (non-JSON) exits 0 (QX-022, UQ-004)");
-      const lines = r.stdout.trim().split("\n").filter((l) => !l.startsWith("#") && l.trim());
-      assert(lines.length === 3, `quay task list (non-JSON) returns 3 lines (got ${lines.length}) (QX-022)`);
-      // Each task row should have 5 tab-separated fields: id, status, role, title, updated
-      const firstLine = lines[0];
-      const fields = firstLine.split("\t");
-      assert(fields.length === 5, `quay task list (non-JSON) row has 5 tab-separated fields (got ${fields.length}): "${firstLine}" (QX-022, UQ-004)`);
-      // The 5th field (timestamp) should contain "ago" or be "—" (null-safe)
-      const tsField = fields[4];
-      assert(tsField.includes("ago") || tsField === "—",
-        `quay task list (non-JSON) 5th field is a relative timestamp or "—" (got: "${tsField}") (QX-022, UQ-004)`);
-    }
-
-    // QX-021: --help now documents --search flag
-    {
-      const r = run(["--help"], srchOpts);
-      assert(r.status === 0, "quay --help exits 0 (QX-021 --help check)");
-      assert(r.stdout.includes("--search"), "quay --help output mentions --search flag (QX-021, CB-007)");
-    }
-
-    // QX-023 (experiment 4, iteration 6): body search — term in body but NOT in title.
-    // SRCH-4: title is "Unrelated title" but body contains "xyzzy-unique-term".
-    // --search xyzzy-unique-term must match SRCH-4 (body match) and exclude SRCH-1/2/3.
-    {
-      const srch4TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-bodysearch-tasks-"));
-      const srch4WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-bodysearch-workspace-"));
-      fs.mkdirSync(path.join(srch4WorkspaceRoot, ".quay"), { recursive: true });
-      fs.writeFileSync(
-        path.join(srch4WorkspaceRoot, ".quay", "config.yml"),
-        [
-          "providers:",
-          "  native:",
-          "    enabled: true",
-          `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-          `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-          "    env:",
-          `      QUAY_NATIVE_TASKS_DIR: "${srch4TasksDir.replaceAll("\\", "\\\\")}"`,
-          "",
-        ].join("\n")
-      );
-      const srch4Opts = { cwd: srch4WorkspaceRoot, encoding: "utf8" };
-      // BSRCH-1: unique term ONLY in body, not in title
-      const bodyWithUniqueToken = VALID_SECTIONS + "\nxyzzy-unique-term appears here in the body\n" + AC_DOD_CHECKED;
-      execFileSync("node", [nativeBin, "task", "create", "BSRCH-1", "--title", "Unrelated title",
-        "--status", "todo", "--body", bodyWithUniqueToken], {
-        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srch4TasksDir },
-      });
-      // BSRCH-2: control — term NOT in title or body; must be excluded
-      execFileSync("node", [nativeBin, "task", "create", "BSRCH-2", "--title", "Other task",
-        "--status", "todo", "--body", ML_BODY], {
-        env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srch4TasksDir },
-      });
-      {
-        const r = run(["task", "list", "--search", "xyzzy-unique-term", "--json"], srch4Opts);
-        assert(r.status === 0, "quay task list --search body-term exits 0 (QX-023, CB-016)");
-        let tasks;
-        try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
-        assert(Array.isArray(tasks) && tasks.some((t) => t.id === "BSRCH-1"),
-          "quay task list --search body-term includes BSRCH-1 (body match, not title) (QX-023, CB-016)");
-        assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "BSRCH-2"),
-          "quay task list --search body-term excludes BSRCH-2 (no match) (QX-023, CB-016)");
-      }
-      // QX-025: zero-result hint (UQ-024) — --search for a term that matches nothing
-      // should print a Hint line in non-JSON output.
-      {
-        const r = run(["task", "list", "--search", "no-such-term-ever-42z"], srch4Opts);
-        assert(r.status === 0, "quay task list --search no-match exits 0 (QX-025, UQ-024)");
-        assert(r.stdout.includes("Hint:"),
-          "quay task list --search no-match outputs Hint line (QX-025, UQ-024)");
-        assert(r.stdout.includes("--label"),
-          "quay task list --search no-match Hint mentions --label (QX-025, UQ-024)");
-      }
-      fs.rmSync(srch4TasksDir, { recursive: true, force: true });
-      fs.rmSync(srch4WorkspaceRoot, { recursive: true, force: true });
-    }
-
-    fs.rmSync(srchTasksDir, { recursive: true, force: true });
-    fs.rmSync(srchWorkspaceRoot, { recursive: true, force: true });
-  }
-
-  // 20. QX-028 (experiment 4, iteration 7): heading-excluded body search (CB-017).
-  //     --search "Proposal" must NOT match a task whose body is only heading lines.
-  //     --search "Proposal" MUST match a task with "proposal" in prose (non-heading) content.
-  //     --search <help-text-check>: --help now says "title/body content" not "title substring".
-  {
-    const hdngTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-hdng-tasks-"));
-    const hdngWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-hdng-workspace-"));
-    fs.mkdirSync(path.join(hdngWorkspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(hdngWorkspaceRoot, ".quay", "config.yml"),
-      [
-        "providers:",
-        "  native:",
-        "    enabled: true",
-        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-        "    env:",
-        `      QUAY_NATIVE_TASKS_DIR: "${hdngTasksDir.replaceAll("\\", "\\\\")}"`,
-        "",
-      ].join("\n")
-    );
-    const hdngOpts = { cwd: hdngWorkspaceRoot, encoding: "utf8" };
-    // HDNG-1: body is ONLY heading lines — searching "Proposal" must NOT return this task
-    execFileSync("node", [nativeBin, "task", "create", "HDNG-1", "--title", "Headings only",
-      "--status", "todo", "--body", "## Proposal\n## Plan\n## AC\n## DoD\n"], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: hdngTasksDir },
-    });
-    // HDNG-2: body has "proposal" in actual prose — must MATCH
-    execFileSync("node", [nativeBin, "task", "create", "HDNG-2", "--title", "Prose body",
-      "--status", "todo", "--body", VALID_SECTIONS + "\nThis task is a proposal for improvement.\n" + AC_DOD_CHECKED], {
-      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: hdngTasksDir },
-    });
-    {
-      const r = run(["task", "list", "--search", "Proposal", "--json"], hdngOpts);
-      assert(r.status === 0, "quay task list --search Proposal exits 0 (QX-028, CB-017)");
-      let tasks;
-      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
-      assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "HDNG-1"),
-        "quay task list --search Proposal excludes HDNG-1 (heading-only body) (QX-028, CB-017)");
-      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "HDNG-2"),
-        "quay task list --search Proposal includes HDNG-2 (prose contains 'proposal') (QX-028, CB-017)");
-    }
-    {
-      // Verify help text updated (QX-027, UQ-029): "title/body content" not "title substring"
-      const rHelp = run(["--help"], hdngOpts);
-      assert(rHelp.status === 0, "quay --help exits 0 (QX-027 doc-staleness check)");
-      assert(rHelp.stdout.includes("title/body content"),
-        "quay --help mentions 'title/body content' (QX-027, UQ-029)");
-      assert(!rHelp.stdout.includes("title substring"),
-        "quay --help no longer says 'title substring' (QX-027, UQ-029)");
-      assert(rHelp.stdout.includes("in title or body"),
-        "quay --help example says 'in title or body' not 'in title' (QX-027, UQ-029)");
-    }
-    fs.rmSync(hdngTasksDir, { recursive: true, force: true });
-    fs.rmSync(hdngWorkspaceRoot, { recursive: true, force: true });
-  }
-
-  // 21. QX-037 (experiment 4, iteration 10): UQ-020 (empty filter result message)
-  //     and UQ-021 (--label with no value guard).
-  {
-    const qx37TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-qx37-tasks-"));
-    const qx37WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-qx37-workspace-"));
-    fs.mkdirSync(path.join(qx37WorkspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(qx37WorkspaceRoot, ".quay", "config.yml"),
-      [
-        "providers:",
-        "  native:",
-        "    enabled: true",
-        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-        `    tasks_dir: "${qx37TasksDir.replaceAll("\\", "\\\\")}"`,
-        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-        "    env:",
-        `      QUAY_NATIVE_TASKS_DIR: "${qx37TasksDir.replaceAll("\\", "\\\\")}"`,
-        "",
-      ].join("\n")
-    );
-    const spawnOpts37 = { cwd: qx37WorkspaceRoot, encoding: "utf8" };
-    const env37 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx37TasksDir };
-
-    // Create one ready task (status != done, so filtering by done returns empty)
-    execFileSync("node", [nativeBin, "task", "create", "QRDY-1",
-      "--title", "A ready task",
-      "--status", "ready",
-      "--labels", "some-label"],
-      { env: env37, cwd: qx37WorkspaceRoot });
-
-    // UQ-020: filter by --status done on a workspace with no done tasks → "No tasks found." to stdout
-    {
-      const r = run(["task", "list", "--status", "done"], spawnOpts37);
-      assert(r.status === 0, "quay task list --status done (no matches) exits 0 (QX-037, UQ-020)");
-      assert(r.stdout.includes("No tasks found"), "quay task list --status done prints 'No tasks found' to stdout (QX-037, UQ-020)");
-    }
-
-    // UQ-021: --label with no value should exit 1 with usage error
-    {
-      const r = run(["task", "list", "--label"], spawnOpts37);
-      assert(r.status !== 0, "quay task list --label (no value) exits non-zero (QX-037, UQ-021)");
-      assert(r.stderr.includes("--label requires a value"), "quay task list --label (no value) prints usage error to stderr (QX-037, UQ-021)");
-    }
-
-    fs.rmSync(qx37TasksDir, { recursive: true, force: true });
-    fs.rmSync(qx37WorkspaceRoot, { recursive: true, force: true });
-  }
-
-  // 22. QX-045 (experiment 4, iteration 12): CB-020 — `--prefix X --json` must emit
-  //     valid JSON (no `# filtered:` comment before the array).
-  //
-  //     CB-020 was filed (simulated-user, iteration 11) because the `# filtered: QX-* (N tasks)`
-  //     comment in non-JSON mode confused automated consumers who may have expected JSON.
-  //     The `--json` path already routes through printJson() (no comment emitted), but this
-  //     test regression-locks that invariant so it cannot regress if the branching logic changes.
-  //
-  //     Assertions:
-  //       (a) `--prefix X --json`: stdout is valid JSON with JSON.parse() (no comment line)
-  //       (b) `--json` without prefix: stdout is valid JSON (baseline)
-  //       (c) `--prefix X` WITHOUT --json: stdout contains `# filtered:` (human-readable comment preserved)
-  {
-    const qx45TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-qx45-tasks-"));
-    const qx45WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-qx45-workspace-"));
-    fs.mkdirSync(path.join(qx45WorkspaceRoot, ".quay"), { recursive: true });
-    fs.writeFileSync(
-      path.join(qx45WorkspaceRoot, ".quay", "config.yml"),
-      [
-        "providers:",
-        "  native:",
-        "    enabled: true",
-        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
-        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
-        "    env:",
-        `      QUAY_NATIVE_TASKS_DIR: "${qx45TasksDir.replaceAll("\\", "\\\\")}"`,
-        "",
-      ].join("\n")
-    );
-    const spawnOpts45 = { cwd: qx45WorkspaceRoot, encoding: "utf8" };
-    const env45 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx45TasksDir };
-
-    // Seed two tasks: one with prefix QX, one without
-    execFileSync("node", [nativeBin, "task", "create", "QX-T1", "--title", "QX prefix task", "--status", "todo"],
-      { env: env45 });
-    execFileSync("node", [nativeBin, "task", "create", "OTHER-1", "--title", "Other prefix task", "--status", "todo"],
-      { env: env45 });
-
-    // (a) --prefix QX --json must produce valid JSON (no # filtered: comment)
-    {
-      const r = run(["task", "list", "--prefix", "QX", "--json"], spawnOpts45);
-      assert(r.status === 0, "quay task list --prefix QX --json exits 0 (QX-045, CB-020)");
-      let tasks = null;
-      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
-      assert(
-        Array.isArray(tasks),
-        `quay task list --prefix QX --json stdout is valid JSON array (no # comment prefix) (QX-045, CB-020). stdout: ${r.stdout.slice(0, 200)}`
-      );
-      assert(
-        tasks !== null && tasks.some((t) => t.id === "QX-T1"),
-        "quay task list --prefix QX --json includes QX-T1 (QX-045, CB-020)"
-      );
-    }
-
-    // (b) --json without prefix: stdout is valid JSON
-    {
-      const r = run(["task", "list", "--json"], spawnOpts45);
-      assert(r.status === 0, "quay task list --json exits 0 (QX-045 baseline)");
-      let tasks = null;
-      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
-      assert(
-        Array.isArray(tasks) && tasks.length === 2,
-        `quay task list --json (no prefix) is valid JSON with 2 tasks (QX-045, CB-020). got: ${r.stdout.slice(0, 200)}`
-      );
-    }
-
-    // (c) --prefix QX WITHOUT --json: stdout includes # filtered: comment for human use
-    {
-      const r = run(["task", "list", "--prefix", "QX"], spawnOpts45);
-      assert(r.status === 0, "quay task list --prefix QX (non-JSON) exits 0 (QX-045 non-json path)");
-      assert(
-        r.stdout.includes("# filtered:"),
-        `quay task list --prefix QX (non-JSON) includes '# filtered:' header for human use (QX-045, CB-020). stdout: ${r.stdout.slice(0, 200)}`
-      );
-    }
-
-    fs.rmSync(qx45TasksDir, { recursive: true, force: true });
-    fs.rmSync(qx45WorkspaceRoot, { recursive: true, force: true });
-  }
-
-  // 23. M08-merge-recover: --version / -V (UQ-047). Real package.json version,
-  //     exit 0. No provider/workspace needed — this must work from any cwd.
-  {
-    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
-    const r1 = run(["--version"]);
-    assert(r1.status === 0, "quay --version exits 0");
-    assert(r1.stdout.trim() === pkg.version, `quay --version prints the real package.json version (got ${JSON.stringify(r1.stdout.trim())}, expected ${JSON.stringify(pkg.version)})`);
-
-    const r2 = run(["-V"]);
-    assert(r2.status === 0, "quay -V exits 0");
-    assert(r2.stdout.trim() === pkg.version, `quay -V prints the real package.json version (got ${JSON.stringify(r2.stdout.trim())}, expected ${JSON.stringify(pkg.version)})`);
-  }
-
-  // 24. M08-merge-recover: --format json (CB-021) behaves identically to --json,
-  //     across content, for both task list (array) and task view (object).
-  {
-    const rJson = run(["task", "list", "--json"], spawnOpts);
-    const rFormat = run(["task", "list", "--format", "json"], spawnOpts);
-    assert(rFormat.status === 0, "quay task list --format json exits 0");
-    assert(rJson.status === 0 && rFormat.status === 0, "both --json and --format json exit 0");
-    let jTasks, fTasks;
-    try { jTasks = JSON.parse(rJson.stdout); } catch { jTasks = null; }
-    try { fTasks = JSON.parse(rFormat.stdout); } catch { fTasks = null; }
-    assert(Array.isArray(fTasks), "quay task list --format json emits a JSON array");
-    assert(
-      JSON.stringify(jTasks) === JSON.stringify(fTasks),
-      "quay task list --format json output is identical in content to --json"
-    );
-
-    const rViewJson = run(["task", "view", "CLI-1", "--json"], spawnOpts);
-    const rViewFormat = run(["task", "view", "CLI-1", "--format", "json"], spawnOpts);
-    assert(rViewFormat.status === 0, "quay task view --format json exits 0");
-    assert(
-      rViewJson.stdout === rViewFormat.stdout,
-      "quay task view --format json output is byte-identical to --json"
-    );
-
-    // Invalid --format value is a hard usage error, not a silent human-readable fallback.
-    const rBadFormat = run(["task", "list", "--format", "yaml"], spawnOpts);
-    assert(rBadFormat.status === 1, "quay task list --format yaml (unsupported value) exits 1");
-    assert(
-      rBadFormat.stderr.includes("--format"),
-      "quay task list --format yaml prints a --format usage error to stderr, not a silent human-readable fallback"
-    );
-  }
-
-  // 25. M08-merge-recover: --page-size N (CB-006/CB-022) in both CLI table
-  //     mode and --json/--format json mode — the printJson(sorted) bug fix.
-  //     Also UQ-048: invalid values (0, -1, abc) are a hard error.
-  {
-    // Baseline: workspace has exactly 2 tasks (CLI-1, CLI-2) at this point.
-    const rAllJson = run(["task", "list", "--json"], spawnOpts);
-    const allTasks = JSON.parse(rAllJson.stdout);
-    assert(allTasks.length === 2, `sanity: workspace has 2 tasks before --page-size test (got ${allTasks.length})`);
-
-    const rPage1 = run(["task", "list", "--json", "--page-size", "1"], spawnOpts);
-    assert(rPage1.status === 0, "quay task list --json --page-size 1 exits 0");
-    const page1 = JSON.parse(rPage1.stdout);
-    assert(
-      Array.isArray(page1) && page1.length === 1,
-      `quay task list --json --page-size 1 returns exactly 1 task, not the full array (CB-022 printJson bug fix) (got ${page1.length})`
-    );
-    assert(page1[0].id === allTasks[0].id, "quay task list --json --page-size 1 returns the first task by current sort order");
-
-    const rTablePage1 = run(["task", "list", "--page-size", "1"], spawnOpts);
-    assert(rTablePage1.status === 0, "quay task list --page-size 1 (table mode) exits 0");
-    const tableLines = rTablePage1.stdout.split("\n").filter((l) => l.includes("\t"));
-    assert(tableLines.length === 1, `quay task list --page-size 1 (table mode) prints exactly 1 task row (got ${tableLines.length})`);
-
-    // --page-size larger than the result set: returns everything, no error.
-    const rPageBig = run(["task", "list", "--json", "--page-size", "1000"], spawnOpts);
-    assert(rPageBig.status === 0, "quay task list --json --page-size 1000 (larger than result set) exits 0");
-    assert(JSON.parse(rPageBig.stdout).length === 2, "quay task list --json --page-size 1000 returns all tasks when page-size exceeds total count");
-
-    // UQ-048: invalid --page-size values are a hard error, not a silent "show everything".
-    for (const bad of ["0", "-1", "abc"]) {
-      const r = run(["task", "list", "--page-size", bad], spawnOpts);
-      assert(r.status === 1, `quay task list --page-size ${bad} exits 1 (UQ-048 hard error, not silent fallback)`);
-      assert(
-        r.stderr.includes("--page-size"),
-        `quay task list --page-size ${bad} prints a --page-size usage error to stderr (got: ${r.stderr.slice(0, 200)})`
-      );
-    }
-  }
+  await block14(workspaceRoot);
+  await block15(spawnOpts);
+  await block16(spawnOpts);
+  await block23();
+  await block24(spawnOpts);
+  await block25(spawnOpts);
 
   fs.rmSync(tasksDir, { recursive: true, force: true });
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
@@ -1683,3 +905,831 @@ main().catch((err) => {
   console.error(err.stack || String(err));
   process.exitCode = 1;
 });
+
+// === Extracted block functions ===
+
+// 13. QX-002 (experiment 4, iteration 1): --prefix filter for task list.
+//     Closes CB-001: `quay task list --prefix <P>` returns only tasks whose
+//     id starts with P. Uses a fresh isolated workspace with two distinct
+//     task-id prefixes to confirm filtering and no-regression.
+async function block13() {
+  const assert = makeAssert("prefix");
+  const prefixTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-prefix-tasks-"));
+  const prefixWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-prefix-workspace-"));
+
+  fs.mkdirSync(path.join(prefixWorkspaceRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(prefixWorkspaceRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${prefixTasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+
+  // Seed tasks with two distinct prefixes
+  execFileSync("node", [nativeBin, "task", "create", "PRFA-001", "--title", "Prefix A task one",
+    "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
+  });
+  execFileSync("node", [nativeBin, "task", "create", "PRFA-002", "--title", "Prefix A task two",
+    "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
+  });
+  execFileSync("node", [nativeBin, "task", "create", "PRFB-001", "--title", "Prefix B task one",
+    "--status", "done", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
+  });
+
+  const prefixOpts = { cwd: prefixWorkspaceRoot, encoding: "utf8" };
+
+  // --prefix PRFA (non-JSON): should include PRFA tasks, exclude PRFB
+  {
+    const r = await run(["task", "list", "--prefix", "PRFA"], prefixOpts);
+    assert(r.status === 0, "quay task list --prefix PRFA exits 0");
+    assert(r.stdout.includes("PRFA-001") && r.stdout.includes("PRFA-002"),
+      "quay task list --prefix PRFA includes both PRFA-* tasks");
+    assert(!r.stdout.includes("PRFB-001"),
+      "quay task list --prefix PRFA excludes PRFB-001");
+    assert(r.stdout.includes("filtered"),
+      "quay task list --prefix PRFA shows a filter indicator in non-JSON output");
+  }
+
+  // --prefix PRFA --json: should return a filtered JSON array
+  {
+    const r = await run(["task", "list", "--prefix", "PRFA", "--json"], prefixOpts);
+    assert(r.status === 0, "quay task list --prefix PRFA --json exits 0");
+    let tasks;
+    try {
+      tasks = JSON.parse(r.stdout);
+    } catch {
+      tasks = null;
+    }
+    assert(Array.isArray(tasks), "quay task list --prefix PRFA --json emits a JSON array");
+    assert(
+      Array.isArray(tasks) && tasks.every((t) => t.id.toUpperCase().startsWith("PRFA")),
+      "quay task list --prefix PRFA --json returns only PRFA-* tasks"
+    );
+    assert(
+      Array.isArray(tasks) && !tasks.some((t) => t.id === "PRFB-001"),
+      "quay task list --prefix PRFA --json excludes PRFB-001"
+    );
+    assert(
+      Array.isArray(tasks) && tasks.length === 2,
+      `quay task list --prefix PRFA --json returns exactly 2 tasks (got ${Array.isArray(tasks) ? tasks.length : "null"})`
+    );
+  }
+
+  // --prefix prfa (lowercase): case-insensitive match
+  {
+    const r = await run(["task", "list", "--prefix", "prfa", "--json"], prefixOpts);
+    assert(r.status === 0, "quay task list --prefix prfa (lowercase) exits 0");
+    let tasks;
+    try {
+      tasks = JSON.parse(r.stdout);
+    } catch {
+      tasks = null;
+    }
+    assert(
+      Array.isArray(tasks) && tasks.some((t) => t.id === "PRFA-001"),
+      "quay task list --prefix prfa (lowercase) matches PRFA-001 (case-insensitive)"
+    );
+  }
+
+  // No --prefix: all 3 tasks returned (no regression)
+  {
+    const r = await run(["task", "list", "--json"], prefixOpts);
+    assert(r.status === 0, "quay task list --json (no prefix) exits 0 after adding prefix-test tasks");
+    let tasks;
+    try {
+      tasks = JSON.parse(r.stdout);
+    } catch {
+      tasks = null;
+    }
+    assert(
+      Array.isArray(tasks) && tasks.length === 3,
+      `quay task list --json (no prefix) returns all 3 seeded tasks (got ${Array.isArray(tasks) ? tasks.length : "null"}) — no regression`
+    );
+  }
+
+  fs.rmSync(prefixTasksDir, { recursive: true, force: true });
+  fs.rmSync(prefixWorkspaceRoot, { recursive: true, force: true });
+}
+
+// 14. QX-005 (experiment 4, iteration 1): --help and -h output.
+//     Closes UQ-001 (was one-line fallback) and UQ-002 (subcommand help was missing).
+//     Tests that --help / -h exit 0 and include expected content.
+async function block14(workspaceRoot) {
+  const helpOpts = { cwd: workspaceRoot, encoding: "utf8" };
+
+  // quay --help: exits 0, includes "Usage:" and key subcommands
+  {
+    const r = await run(["--help"], helpOpts);
+    assert(r.status === 0, "quay --help exits 0 (not an error)");
+    assert(r.stdout.includes("Usage:"), "quay --help output includes 'Usage:'");
+    assert(r.stdout.includes("task list"), "quay --help output includes 'task list'");
+    assert(r.stdout.includes("task view"), "quay --help output includes 'task view'");
+    assert(r.stdout.includes("--prefix"), "quay --help output mentions --prefix flag (QX-002 cross-link)");
+    assert(r.stdout.includes("quay"), "quay --help output includes the tool name");
+    // M31-cli-gate-enforcement Done-when clause 5: --help documents BOTH
+    // the default-unguarded behavior and --enforce-gate.
+    assert(r.stdout.includes("--enforce-gate"), "quay --help output mentions --enforce-gate flag (M31-cli-gate-enforcement)");
+    assert(
+      r.stdout.includes("UNGUARDED") || r.stdout.includes("unguarded"),
+      "quay --help output documents that status transitions are unguarded by default (M31-cli-gate-enforcement)"
+    );
+    // exp5-M-GATE-HELP-SYNOPSIS-GAP (M51): the top-level Usage synopsis block must list
+    // `quay gate <id>` / `quay gate --list` / `quay gate-log <id>` explicitly, matching the
+    // existing complete/adjudicate/promote/retreat/run lines — not just be mentioned in passing
+    // inside another command's option text. Assert against the SYNOPSIS block specifically (lines
+    // starting with two-space indent, "quay gate"/"quay gate-log"), not just substring presence
+    // anywhere in the help text (which would trivially pass from the Options-section prose alone).
+    const synopsisBlock = r.stdout.slice(r.stdout.indexOf("Usage:"), r.stdout.indexOf("\n\nOptions for task list:"));
+    const gateSynopsisLines = synopsisBlock.split("\n").filter((l) => /^\s*quay gate\b/.test(l));
+    assert(
+      gateSynopsisLines.some((l) => /^\s*quay gate <task-id>/.test(l)),
+      "quay --help Usage synopsis includes a 'quay gate <task-id>' line"
+    );
+    assert(
+      gateSynopsisLines.some((l) => /^\s*quay gate --list/.test(l)),
+      "quay --help Usage synopsis includes a 'quay gate --list' line"
+    );
+    assert(
+      gateSynopsisLines.some((l) => /^\s*quay gate-log <task-id>/.test(l)),
+      "quay --help Usage synopsis includes a 'quay gate-log <task-id>' line"
+    );
+    // Dedicated options section for gate/gate-log (documenting --gate/--list/--json/--file),
+    // mirroring the existing "Lifecycle commands (QENG-3)" / "Driver command (QENG-4)" sections.
+    assert(
+      /gate/i.test(r.stdout) && /--gate <name>/.test(r.stdout),
+      "quay --help documents the --gate <name> flag in a dedicated gate/gate-log options section"
+    );
+    assert(r.stdout.includes("--list"), "quay --help documents the --list flag for 'gate'");
+  }
+
+  // quay -h: alias, also exits 0
+  {
+    const r = await run(["-h"], helpOpts);
+    assert(r.status === 0, "quay -h exits 0 (alias for --help)");
+    assert(r.stdout.includes("Usage:"), "quay -h output includes 'Usage:'");
+  }
+
+  // quay task list --help: exits 0, includes task-list-specific flag docs
+  {
+    const r = await run(["task", "list", "--help"], helpOpts);
+    assert(r.status === 0, "quay task list --help exits 0");
+    assert(r.stdout.includes("--prefix"), "quay task list --help output mentions --prefix");
+    assert(r.stdout.includes("--status"), "quay task list --help output mentions --status");
+  }
+
+  // The existing "unknown command" test must still work (--help is not passed).
+  {
+    const r = await run(["bogus-command-that-is-not-help"], helpOpts);
+    assert(r.status === 1, "quay <unknown-non-help command> still exits 1 (--help does not break fallback)");
+    assert(r.stderr.includes("usage:"), "quay <unknown-non-help command> still prints usage to stderr");
+  }
+}
+
+// 15. QX-006 (experiment 4, iteration 1): `--prefix` with no value must
+//     exit 1 with a clear usage error, not crash with a TypeError.
+//     Regression from QX-002 (SH-001). Uses the same fixture workspace as
+//     tests 1-12 (envTasksDir has CLI-1 seeded, which is enough to reach
+//     the prefix-guard code path).
+async function block15(spawnOpts) {
+  const r = await run(["task", "list", "--prefix"], spawnOpts);
+  assert(r.status === 1, "quay task list --prefix (no value) exits 1 (not a TypeError crash)");
+  assert(
+    r.stderr.includes("--prefix requires a value"),
+    `quay task list --prefix (no value) prints a clear usage error to stderr (got: ${JSON.stringify(r.stderr.slice(0, 200))})`
+  );
+  assert(
+    !r.stderr.includes("TypeError"),
+    "quay task list --prefix (no value) does NOT produce a TypeError stack trace"
+  );
+}
+
+// 16. QX-007 (experiment 4, iteration 1): `quay serve --help` and
+//     `quay action --help` must exit 0 and produce at least a stub line
+//     of output. Previously they exited 0 with no output (UQ-010).
+async function block16(spawnOpts) {
+  const r1 = await run(["serve", "--help"], spawnOpts);
+  assert(r1.status === 0, "quay serve --help exits 0");
+  assert(
+    r1.stdout.trim().length > 0,
+    "quay serve --help prints at least some output (not silent)"
+  );
+  assert(
+    r1.stdout.includes("quay --help") || r1.stdout.includes("serve"),
+    "quay serve --help output references serve or points to --help"
+  );
+
+  const r2 = await run(["action", "--help"], spawnOpts);
+  assert(r2.status === 0, "quay action --help exits 0");
+  assert(
+    r2.stdout.trim().length > 0,
+    "quay action --help prints at least some output (not silent)"
+  );
+}
+
+// 17. QX-008 (experiment 4, iteration 2): --sort updated.
+//     Closes CB-004 (no sort-by-time on CLI) and CB-012 (--sort updated
+//     silently ignored). Uses a fresh isolated workspace with tasks created
+//     in a specific time-ordered sequence so sort-by-updated is verifiable.
+async function block17() {
+  const assert = makeAssert("sort");
+  const sortTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-sort-tasks-"));
+  const sortWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-test-sort-workspace-"));
+  fs.mkdirSync(path.join(sortWorkspaceRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(sortWorkspaceRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${sortTasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+
+  const sortOpts = { cwd: sortWorkspaceRoot, encoding: "utf8" };
+  const SORT_BODY = VALID_SECTIONS + AC_DOD_CHECKED;
+
+  // Create tasks in order: SORT-A, then SORT-B, then SORT-C.
+  // Touch each file 100ms apart to ensure distinct mtimes.
+  execFileSync("node", [nativeBin, "task", "create", "SORT-A", "--title", "Sort A (oldest)",
+    "--status", "todo", "--body", SORT_BODY], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
+  });
+  // Small sleep between creates to ensure distinct mtime.
+  const t0 = Date.now(); while (Date.now() - t0 < 50) { /* spin */ }
+  execFileSync("node", [nativeBin, "task", "create", "SORT-B", "--title", "Sort B (middle)",
+    "--status", "todo", "--body", SORT_BODY], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
+  });
+  const t1 = Date.now(); while (Date.now() - t1 < 50) { /* spin */ }
+  execFileSync("node", [nativeBin, "task", "create", "SORT-C", "--title", "Sort C (most recent)",
+    "--status", "todo", "--body", SORT_BODY], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
+  });
+
+  // --sort updated --json: tasks should be sorted by mtime descending (SORT-C first, SORT-A last).
+  {
+    const r = await run(["task", "list", "--sort", "updated", "--json"], sortOpts);
+    assert(r.status === 0, "quay task list --sort updated --json exits 0");
+    let tasks;
+    try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+    assert(Array.isArray(tasks), "quay task list --sort updated --json emits a JSON array");
+    if (Array.isArray(tasks) && tasks.length === 3) {
+      assert(
+        tasks[0].id === "SORT-C",
+        `quay task list --sort updated: first task is most-recently-created SORT-C (got ${tasks[0]?.id})`
+      );
+      assert(
+        tasks[tasks.length - 1].id === "SORT-A",
+        `quay task list --sort updated: last task is oldest SORT-A (got ${tasks[tasks.length - 1]?.id})`
+      );
+      // Confirm updatedAt field is present and numeric.
+      assert(
+        tasks.every((t) => typeof t.updatedAt === "number" && t.updatedAt > 0),
+        "quay task list --sort updated: all tasks include updatedAt as a positive number (ms)"
+      );
+    }
+  }
+
+  // --sort updated (non-JSON): exits 0, produces tabbed output (not default insertion order).
+  {
+    const r = await run(["task", "list", "--sort", "updated"], sortOpts);
+    assert(r.status === 0, "quay task list --sort updated (non-JSON) exits 0");
+    // Tasks are listed in default alphabetical (insertion) order without --sort:
+    // SORT-A, SORT-B, SORT-C. With --sort updated, SORT-C should be first.
+    const lines = r.stdout.trim().split("\n").filter((l) => !l.startsWith("#") && l.trim());
+    assert(
+      lines.length === 3 && lines[0].startsWith("SORT-C"),
+      `quay task list --sort updated (non-JSON): first line starts with SORT-C (got: ${lines[0]})`
+    );
+  }
+
+  // CB-012 verification: --sort updated does NOT silently return default
+  // (insertion alphabetical) order. Default order would be SORT-A first.
+  // Sort-by-updated order has SORT-C first. These differ, so the
+  // non-default-equals-updated check above is the live proof.
+
+  fs.rmSync(sortTasksDir, { recursive: true, force: true });
+  fs.rmSync(sortWorkspaceRoot, { recursive: true, force: true });
+}
+
+// 18. QX-016 (experiment 4, iteration 4): multi-label AND-filter on CLI.
+//     --label A --label B should return only tasks that have BOTH labels.
+//     Closes CB-013 (CLI last-wins bug: parseFlags() now collects repeated
+//     --label flags as an array; filter applies AND-logic).
+async function block18() {
+  const assert = makeAssert("multilabel");
+  const mlTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-multilabel-tasks-"));
+  const mlWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-multilabel-workspace-"));
+  fs.mkdirSync(path.join(mlWorkspaceRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(mlWorkspaceRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${mlTasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+
+  const ML_BODY = VALID_SECTIONS + AC_DOD_CHECKED;
+  // MBOTH-1: has both labels "bug" and "cli"
+  execFileSync("node", [nativeBin, "task", "create", "MBOTH-1", "--title", "Has both labels",
+    "--status", "todo", "--body", ML_BODY, "--labels", "bug,cli"], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mlTasksDir },
+  });
+  // MBUG-1: has only "bug"
+  execFileSync("node", [nativeBin, "task", "create", "MBUG-1", "--title", "Has only bug",
+    "--status", "todo", "--body", ML_BODY, "--labels", "bug"], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mlTasksDir },
+  });
+  // MNONE-1: no labels
+  execFileSync("node", [nativeBin, "task", "create", "MNONE-1", "--title", "Has no labels",
+    "--status", "todo", "--body", ML_BODY], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mlTasksDir },
+  });
+
+  const mlOpts = { cwd: mlWorkspaceRoot, encoding: "utf8" };
+
+  // --label bug --label cli (AND-logic): should return only MBOTH-1
+  {
+    const r = await run(["task", "list", "--label", "bug", "--label", "cli", "--json"], mlOpts);
+    assert(r.status === 0, "quay task list --label bug --label cli exits 0 (multi-label AND-filter, QX-016, CB-013)");
+    let tasks;
+    try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+    assert(Array.isArray(tasks) && tasks.some((t) => t.id === "MBOTH-1"),
+      "quay task list --label bug --label cli includes MBOTH-1 (has both labels) (QX-016)");
+    assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "MBUG-1"),
+      "quay task list --label bug --label cli excludes MBUG-1 (has only bug, not cli) (QX-016, CB-013)");
+    assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "MNONE-1"),
+      "quay task list --label bug --label cli excludes MNONE-1 (no labels) (QX-016)");
+  }
+
+  // --label bug (single): should return MBOTH-1 and MBUG-1 (no regression)
+  {
+    const r = await run(["task", "list", "--label", "bug", "--json"], mlOpts);
+    assert(r.status === 0, "quay task list --label bug exits 0 (single-label, no regression, QX-016)");
+    let tasks;
+    try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+    assert(Array.isArray(tasks) && tasks.some((t) => t.id === "MBOTH-1"),
+      "quay task list --label bug includes MBOTH-1 (QX-016 single-label no regression)");
+    assert(Array.isArray(tasks) && tasks.some((t) => t.id === "MBUG-1"),
+      "quay task list --label bug includes MBUG-1 (QX-016 single-label no regression)");
+  }
+
+  fs.rmSync(mlTasksDir, { recursive: true, force: true });
+  fs.rmSync(mlWorkspaceRoot, { recursive: true, force: true });
+}
+
+// 19. QX-021 (experiment 4, iteration 5): --search title filter on CLI.
+//     --search "foo" returns only tasks with "foo" in title (case-insensitive).
+//     --search "" (empty string) or no flag returns all tasks (no filter).
+//     Also covers QX-022: non-JSON output includes a timestamp ("ago") column.
+//     Closes CB-007 (CLI full-text search) and UQ-004 (CLI timestamp).
+async function block19() {
+  const assert = makeAssert("search");
+  const srchTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-search-tasks-"));
+  const srchWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-search-workspace-"));
+  fs.mkdirSync(path.join(srchWorkspaceRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(srchWorkspaceRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${srchTasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+
+  const ML_BODY = VALID_SECTIONS + AC_DOD_CHECKED;
+  // SRCH-1: title contains "bootstrap" (should match --search bootstrap)
+  execFileSync("node", [nativeBin, "task", "create", "SRCH-1", "--title", "Quay bootstrap task",
+    "--status", "todo", "--body", ML_BODY], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir },
+  });
+  // SRCH-2: title contains "dashboard" (should NOT match --search bootstrap)
+  execFileSync("node", [nativeBin, "task", "create", "SRCH-2", "--title", "Dashboard setup",
+    "--status", "todo", "--body", ML_BODY], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir },
+  });
+  // SRCH-3: title contains "Bootstrap" (case-insensitive should also match --search bootstrap)
+  execFileSync("node", [nativeBin, "task", "create", "SRCH-3", "--title", "Bootstrap configuration",
+    "--status", "done", "--body", ML_BODY], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir },
+  });
+
+  const srchOpts = { cwd: srchWorkspaceRoot, encoding: "utf8" };
+
+  // --search bootstrap: should match SRCH-1 and SRCH-3, not SRCH-2
+  {
+    const r = await run(["task", "list", "--search", "bootstrap", "--json"], srchOpts);
+    assert(r.status === 0, "quay task list --search bootstrap exits 0 (QX-021, CB-007)");
+    let tasks;
+    try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+    assert(Array.isArray(tasks) && tasks.some((t) => t.id === "SRCH-1"),
+      "quay task list --search bootstrap includes SRCH-1 (title: Quay bootstrap task) (QX-021)");
+    assert(Array.isArray(tasks) && tasks.some((t) => t.id === "SRCH-3"),
+      "quay task list --search bootstrap includes SRCH-3 (title: Bootstrap configuration, case-insensitive) (QX-021)");
+    assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "SRCH-2"),
+      "quay task list --search bootstrap excludes SRCH-2 (title: Dashboard setup) (QX-021, CB-007)");
+  }
+
+  // --search dashboard: should match only SRCH-2
+  {
+    const r = await run(["task", "list", "--search", "dashboard", "--json"], srchOpts);
+    assert(r.status === 0, "quay task list --search dashboard exits 0 (QX-021)");
+    let tasks;
+    try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+    assert(Array.isArray(tasks) && tasks.some((t) => t.id === "SRCH-2"),
+      "quay task list --search dashboard includes SRCH-2 (QX-021)");
+    assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "SRCH-1"),
+      "quay task list --search dashboard excludes SRCH-1 (QX-021)");
+  }
+
+  // No --search flag: should return all 3 tasks (no filter applied)
+  {
+    const r = await run(["task", "list", "--json"], srchOpts);
+    assert(r.status === 0, "quay task list (no --search) exits 0 (QX-021 no-filter baseline)");
+    let tasks;
+    try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+    assert(Array.isArray(tasks) && tasks.length === 3,
+      "quay task list (no --search) returns all 3 tasks (QX-021 no-filter baseline)");
+  }
+
+  // QX-022: non-JSON output includes timestamp ("ago") column for tasks with updatedAt.
+  // quay-native's store.js sets updatedAt = file mtime, so any created task has it.
+  {
+    const r = await run(["task", "list"], srchOpts);
+    assert(r.status === 0, "quay task list (non-JSON) exits 0 (QX-022, UQ-004)");
+    const lines = r.stdout.trim().split("\n").filter((l) => !l.startsWith("#") && l.trim());
+    assert(lines.length === 3, `quay task list (non-JSON) returns 3 lines (got ${lines.length}) (QX-022)`);
+    // Each task row should have 5 tab-separated fields: id, status, role, title, updated
+    const firstLine = lines[0];
+    const fields = firstLine.split("\t");
+    assert(fields.length === 5, `quay task list (non-JSON) row has 5 tab-separated fields (got ${fields.length}): "${firstLine}" (QX-022, UQ-004)`);
+    // The 5th field (timestamp) should contain "ago" or be "—" (null-safe)
+    const tsField = fields[4];
+    assert(tsField.includes("ago") || tsField === "—",
+      `quay task list (non-JSON) 5th field is a relative timestamp or "—" (got: "${tsField}") (QX-022, UQ-004)`);
+  }
+
+  // QX-021: --help now documents --search flag
+  {
+    const r = await run(["--help"], srchOpts);
+    assert(r.status === 0, "quay --help exits 0 (QX-021 --help check)");
+    assert(r.stdout.includes("--search"), "quay --help output mentions --search flag (QX-021, CB-007)");
+  }
+
+  // QX-023 (experiment 4, iteration 6): body search — term in body but NOT in title.
+  // SRCH-4: title is "Unrelated title" but body contains "xyzzy-unique-term".
+  // --search xyzzy-unique-term must match SRCH-4 (body match) and exclude SRCH-1/2/3.
+  {
+    const srch4TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-bodysearch-tasks-"));
+    const srch4WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-bodysearch-workspace-"));
+    fs.mkdirSync(path.join(srch4WorkspaceRoot, ".quay"), { recursive: true });
+    fs.writeFileSync(
+      path.join(srch4WorkspaceRoot, ".quay", "config.yml"),
+      [
+        "providers:",
+        "  native:",
+        "    enabled: true",
+        `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+        `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+        "    env:",
+        `      QUAY_NATIVE_TASKS_DIR: "${srch4TasksDir.replaceAll("\\", "\\\\")}"`,
+        "",
+      ].join("\n")
+    );
+    const srch4Opts = { cwd: srch4WorkspaceRoot, encoding: "utf8" };
+    // BSRCH-1: unique term ONLY in body, not in title
+    const bodyWithUniqueToken = VALID_SECTIONS + "\nxyzzy-unique-term appears here in the body\n" + AC_DOD_CHECKED;
+    execFileSync("node", [nativeBin, "task", "create", "BSRCH-1", "--title", "Unrelated title",
+      "--status", "todo", "--body", bodyWithUniqueToken], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srch4TasksDir },
+    });
+    // BSRCH-2: control — term NOT in title or body; must be excluded
+    execFileSync("node", [nativeBin, "task", "create", "BSRCH-2", "--title", "Other task",
+      "--status", "todo", "--body", ML_BODY], {
+      env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srch4TasksDir },
+    });
+    {
+      const r = await run(["task", "list", "--search", "xyzzy-unique-term", "--json"], srch4Opts);
+      assert(r.status === 0, "quay task list --search body-term exits 0 (QX-023, CB-016)");
+      let tasks;
+      try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+      assert(Array.isArray(tasks) && tasks.some((t) => t.id === "BSRCH-1"),
+        "quay task list --search body-term includes BSRCH-1 (body match, not title) (QX-023, CB-016)");
+      assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "BSRCH-2"),
+        "quay task list --search body-term excludes BSRCH-2 (no match) (QX-023, CB-016)");
+    }
+    // QX-025: zero-result hint (UQ-024) — --search for a term that matches nothing
+    // should print a Hint line in non-JSON output.
+    {
+      const r = await run(["task", "list", "--search", "no-such-term-ever-42z"], srch4Opts);
+      assert(r.status === 0, "quay task list --search no-match exits 0 (QX-025, UQ-024)");
+      assert(r.stdout.includes("Hint:"),
+        "quay task list --search no-match outputs Hint line (QX-025, UQ-024)");
+      assert(r.stdout.includes("--label"),
+        "quay task list --search no-match Hint mentions --label (QX-025, UQ-024)");
+    }
+    fs.rmSync(srch4TasksDir, { recursive: true, force: true });
+    fs.rmSync(srch4WorkspaceRoot, { recursive: true, force: true });
+  }
+
+  fs.rmSync(srchTasksDir, { recursive: true, force: true });
+  fs.rmSync(srchWorkspaceRoot, { recursive: true, force: true });
+}
+
+// 20. QX-028 (experiment 4, iteration 7): heading-excluded body search (CB-017).
+//     --search "Proposal" must NOT match a task whose body is only heading lines.
+//     --search "Proposal" MUST match a task with "proposal" in prose (non-heading) content.
+//     --search <help-text-check>: --help now says "title/body content" not "title substring".
+async function block20() {
+  const assert = makeAssert("heading");
+  const hdngTasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-hdng-tasks-"));
+  const hdngWorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-hdng-workspace-"));
+  fs.mkdirSync(path.join(hdngWorkspaceRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(hdngWorkspaceRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${hdngTasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+  const hdngOpts = { cwd: hdngWorkspaceRoot, encoding: "utf8" };
+  // HDNG-1: body is ONLY heading lines — searching "Proposal" must NOT return this task
+  execFileSync("node", [nativeBin, "task", "create", "HDNG-1", "--title", "Headings only",
+    "--status", "todo", "--body", "## Proposal\n## Plan\n## AC\n## DoD\n"], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: hdngTasksDir },
+  });
+  // HDNG-2: body has "proposal" in actual prose — must MATCH
+  execFileSync("node", [nativeBin, "task", "create", "HDNG-2", "--title", "Prose body",
+    "--status", "todo", "--body", VALID_SECTIONS + "\nThis task is a proposal for improvement.\n" + AC_DOD_CHECKED], {
+    env: { ...process.env, QUAY_NATIVE_TASKS_DIR: hdngTasksDir },
+  });
+  {
+    const r = await run(["task", "list", "--search", "Proposal", "--json"], hdngOpts);
+    assert(r.status === 0, "quay task list --search Proposal exits 0 (QX-028, CB-017)");
+    let tasks;
+    try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+    assert(Array.isArray(tasks) && !tasks.some((t) => t.id === "HDNG-1"),
+      "quay task list --search Proposal excludes HDNG-1 (heading-only body) (QX-028, CB-017)");
+    assert(Array.isArray(tasks) && tasks.some((t) => t.id === "HDNG-2"),
+      "quay task list --search Proposal includes HDNG-2 (prose contains 'proposal') (QX-028, CB-017)");
+  }
+  {
+    // Verify help text updated (QX-027, UQ-029): "title/body content" not "title substring"
+    const rHelp = await run(["--help"], hdngOpts);
+    assert(rHelp.status === 0, "quay --help exits 0 (QX-027 doc-staleness check)");
+    assert(rHelp.stdout.includes("title/body content"),
+      "quay --help mentions 'title/body content' (QX-027, UQ-029)");
+    assert(!rHelp.stdout.includes("title substring"),
+      "quay --help no longer says 'title substring' (QX-027, UQ-029)");
+    assert(rHelp.stdout.includes("in title or body"),
+      "quay --help example says 'in title or body' not 'in title' (QX-027, UQ-029)");
+  }
+  fs.rmSync(hdngTasksDir, { recursive: true, force: true });
+  fs.rmSync(hdngWorkspaceRoot, { recursive: true, force: true });
+}
+
+// 21. QX-037 (experiment 4, iteration 10): UQ-020 (empty filter result message)
+//     and UQ-021 (--label with no value guard).
+async function block21() {
+  const assert = makeAssert("qx37");
+  const qx37TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-qx37-tasks-"));
+  const qx37WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-qx37-workspace-"));
+  fs.mkdirSync(path.join(qx37WorkspaceRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(qx37WorkspaceRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    tasks_dir: "${qx37TasksDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${qx37TasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+  const spawnOpts37 = { cwd: qx37WorkspaceRoot, encoding: "utf8" };
+  const env37 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx37TasksDir };
+
+  // Create one ready task (status != done, so filtering by done returns empty)
+  execFileSync("node", [nativeBin, "task", "create", "QRDY-1",
+    "--title", "A ready task",
+    "--status", "ready",
+    "--labels", "some-label"],
+    { env: env37, cwd: qx37WorkspaceRoot });
+
+  // UQ-020: filter by --status done on a workspace with no done tasks → "No tasks found." to stdout
+  {
+    const r = await run(["task", "list", "--status", "done"], spawnOpts37);
+    assert(r.status === 0, "quay task list --status done (no matches) exits 0 (QX-037, UQ-020)");
+    assert(r.stdout.includes("No tasks found"), "quay task list --status done prints 'No tasks found' to stdout (QX-037, UQ-020)");
+  }
+
+  // UQ-021: --label with no value should exit 1 with usage error
+  {
+    const r = await run(["task", "list", "--label"], spawnOpts37);
+    assert(r.status !== 0, "quay task list --label (no value) exits non-zero (QX-037, UQ-021)");
+    assert(r.stderr.includes("--label requires a value"), "quay task list --label (no value) prints usage error to stderr (QX-037, UQ-021)");
+  }
+
+  fs.rmSync(qx37TasksDir, { recursive: true, force: true });
+  fs.rmSync(qx37WorkspaceRoot, { recursive: true, force: true });
+}
+
+// 22. QX-045 (experiment 4, iteration 12): CB-020 — `--prefix X --json` must emit
+//     valid JSON (no `# filtered:` comment before the array).
+//
+//     CB-020 was filed (simulated-user, iteration 11) because the `# filtered: QX-* (N tasks)`
+//     comment in non-JSON mode confused automated consumers who may have expected JSON.
+//     The `--json` path already routes through printJson() (no comment emitted), but this
+//     test regression-locks that invariant so it cannot regress if the branching logic changes.
+//
+//     Assertions:
+//       (a) `--prefix X --json`: stdout is valid JSON with JSON.parse() (no comment line)
+//       (b) `--json` without prefix: stdout is valid JSON (baseline)
+//       (c) `--prefix X` WITHOUT --json: stdout contains `# filtered:` (human-readable comment preserved)
+async function block22() {
+  const assert = makeAssert("qx45");
+  const qx45TasksDir = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-qx45-tasks-"));
+  const qx45WorkspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "quay-cli-qx45-workspace-"));
+  fs.mkdirSync(path.join(qx45WorkspaceRoot, ".quay"), { recursive: true });
+  fs.writeFileSync(
+    path.join(qx45WorkspaceRoot, ".quay", "config.yml"),
+    [
+      "providers:",
+      "  native:",
+      "    enabled: true",
+      `    path: "${nativeProviderDir.replaceAll("\\", "\\\\")}"`,
+      `    mcp_entry: ["node", "${nativeBin.replaceAll("\\", "\\\\")}", "mcp"]`,
+      "    env:",
+      `      QUAY_NATIVE_TASKS_DIR: "${qx45TasksDir.replaceAll("\\", "\\\\")}"`,
+      "",
+    ].join("\n")
+  );
+  const spawnOpts45 = { cwd: qx45WorkspaceRoot, encoding: "utf8" };
+  const env45 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx45TasksDir };
+
+  // Seed two tasks: one with prefix QX, one without
+  execFileSync("node", [nativeBin, "task", "create", "QX-T1", "--title", "QX prefix task", "--status", "todo"],
+    { env: env45 });
+  execFileSync("node", [nativeBin, "task", "create", "OTHER-1", "--title", "Other prefix task", "--status", "todo"],
+    { env: env45 });
+
+  // (a) --prefix QX --json must produce valid JSON (no # filtered: comment)
+  {
+    const r = await run(["task", "list", "--prefix", "QX", "--json"], spawnOpts45);
+    assert(r.status === 0, "quay task list --prefix QX --json exits 0 (QX-045, CB-020)");
+    let tasks = null;
+    try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+    assert(
+      Array.isArray(tasks),
+      `quay task list --prefix QX --json stdout is valid JSON array (no # comment prefix) (QX-045, CB-020). stdout: ${r.stdout.slice(0, 200)}`
+    );
+    assert(
+      tasks !== null && tasks.some((t) => t.id === "QX-T1"),
+      "quay task list --prefix QX --json includes QX-T1 (QX-045, CB-020)"
+    );
+  }
+
+  // (b) --json without prefix: stdout is valid JSON
+  {
+    const r = await run(["task", "list", "--json"], spawnOpts45);
+    assert(r.status === 0, "quay task list --json exits 0 (QX-045 baseline)");
+    let tasks = null;
+    try { tasks = JSON.parse(r.stdout); } catch { tasks = null; }
+    assert(
+      Array.isArray(tasks) && tasks.length === 2,
+      `quay task list --json (no prefix) is valid JSON with 2 tasks (QX-045, CB-020). got: ${r.stdout.slice(0, 200)}`
+    );
+  }
+
+  // (c) --prefix QX WITHOUT --json: stdout includes # filtered: comment for human use
+  {
+    const r = await run(["task", "list", "--prefix", "QX"], spawnOpts45);
+    assert(r.status === 0, "quay task list --prefix QX (non-JSON) exits 0 (QX-045 non-json path)");
+    assert(
+      r.stdout.includes("# filtered:"),
+      `quay task list --prefix QX (non-JSON) includes '# filtered:' header for human use (QX-045, CB-020). stdout: ${r.stdout.slice(0, 200)}`
+    );
+  }
+
+  fs.rmSync(qx45TasksDir, { recursive: true, force: true });
+  fs.rmSync(qx45WorkspaceRoot, { recursive: true, force: true });
+}
+
+// 23. M08-merge-recover: --version / -V (UQ-047). Real package.json version,
+//     exit 0. No provider/workspace needed — this must work from any cwd.
+async function block23() {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+  const r1 = await run(["--version"]);
+  assert(r1.status === 0, "quay --version exits 0");
+  assert(r1.stdout.trim() === pkg.version, `quay --version prints the real package.json version (got ${JSON.stringify(r1.stdout.trim())}, expected ${JSON.stringify(pkg.version)})`);
+
+  const r2 = await run(["-V"]);
+  assert(r2.status === 0, "quay -V exits 0");
+  assert(r2.stdout.trim() === pkg.version, `quay -V prints the real package.json version (got ${JSON.stringify(r2.stdout.trim())}, expected ${JSON.stringify(pkg.version)})`);
+}
+
+// 24. M08-merge-recover: --format json (CB-021) behaves identically to --json,
+//     across content, for both task list (array) and task view (object).
+async function block24(spawnOpts) {
+  const rJson = await run(["task", "list", "--json"], spawnOpts);
+  const rFormat = await run(["task", "list", "--format", "json"], spawnOpts);
+  assert(rFormat.status === 0, "quay task list --format json exits 0");
+  assert(rJson.status === 0 && rFormat.status === 0, "both --json and --format json exit 0");
+  let jTasks, fTasks;
+  try { jTasks = JSON.parse(rJson.stdout); } catch { jTasks = null; }
+  try { fTasks = JSON.parse(rFormat.stdout); } catch { fTasks = null; }
+  assert(Array.isArray(fTasks), "quay task list --format json emits a JSON array");
+  assert(
+    JSON.stringify(jTasks) === JSON.stringify(fTasks),
+    "quay task list --format json output is identical in content to --json"
+  );
+
+  const rViewJson = await run(["task", "view", "CLI-1", "--json"], spawnOpts);
+  const rViewFormat = await run(["task", "view", "CLI-1", "--format", "json"], spawnOpts);
+  assert(rViewFormat.status === 0, "quay task view --format json exits 0");
+  assert(
+    rViewJson.stdout === rViewFormat.stdout,
+    "quay task view --format json output is byte-identical to --json"
+  );
+
+  // Invalid --format value is a hard usage error, not a silent human-readable fallback.
+  const rBadFormat = await run(["task", "list", "--format", "yaml"], spawnOpts);
+  assert(rBadFormat.status === 1, "quay task list --format yaml (unsupported value) exits 1");
+  assert(
+    rBadFormat.stderr.includes("--format"),
+    "quay task list --format yaml prints a --format usage error to stderr, not a silent human-readable fallback"
+  );
+}
+
+// 25. M08-merge-recover: --page-size N (CB-006/CB-022) in both CLI table
+//     mode and --json/--format json mode — the printJson(sorted) bug fix.
+//     Also UQ-048: invalid values (0, -1, abc) are a hard error.
+async function block25(spawnOpts) {
+  // Baseline: workspace has exactly 2 tasks (CLI-1, CLI-2) at this point.
+  const rAllJson = await run(["task", "list", "--json"], spawnOpts);
+  const allTasks = JSON.parse(rAllJson.stdout);
+  assert(allTasks.length === 2, `sanity: workspace has 2 tasks before --page-size test (got ${allTasks.length})`);
+
+  const rPage1 = await run(["task", "list", "--json", "--page-size", "1"], spawnOpts);
+  assert(rPage1.status === 0, "quay task list --json --page-size 1 exits 0");
+  const page1 = JSON.parse(rPage1.stdout);
+  assert(
+    Array.isArray(page1) && page1.length === 1,
+    `quay task list --json --page-size 1 returns exactly 1 task, not the full array (CB-022 printJson bug fix) (got ${page1.length})`
+  );
+  assert(page1[0].id === allTasks[0].id, "quay task list --json --page-size 1 returns the first task by current sort order");
+
+  const rTablePage1 = await run(["task", "list", "--page-size", "1"], spawnOpts);
+  assert(rTablePage1.status === 0, "quay task list --page-size 1 (table mode) exits 0");
+  const tableLines = rTablePage1.stdout.split("\n").filter((l) => l.includes("\t"));
+  assert(tableLines.length === 1, `quay task list --page-size 1 (table mode) prints exactly 1 task row (got ${tableLines.length})`);
+
+  // --page-size larger than the result set: returns everything, no error.
+  const rPageBig = await run(["task", "list", "--json", "--page-size", "1000"], spawnOpts);
+  assert(rPageBig.status === 0, "quay task list --json --page-size 1000 (larger than result set) exits 0");
+  assert(JSON.parse(rPageBig.stdout).length === 2, "quay task list --json --page-size 1000 returns all tasks when page-size exceeds total count");
+
+  // UQ-048: invalid --page-size values are a hard error, not a silent "show everything".
+  for (const bad of ["0", "-1", "abc"]) {
+    const r = await run(["task", "list", "--page-size", bad], spawnOpts);
+    assert(r.status === 1, `quay task list --page-size ${bad} exits 1 (UQ-048 hard error, not silent fallback)`);
+    assert(
+      r.stderr.includes("--page-size"),
+      `quay task list --page-size ${bad} prints a --page-size usage error to stderr (got: ${r.stderr.slice(0, 200)})`
+    );
+  }
+}
