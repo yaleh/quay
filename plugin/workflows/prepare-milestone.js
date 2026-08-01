@@ -57,6 +57,26 @@ function _parseAgentJson(raw) {
 }
 
 const _taskId = $a.taskId
+// _computeWbsLevel — heuristic WBS depth from task-ID naming convention (workflow sandbox has no
+// node:fs; chasing the parent chain via `tasks/*.md` reads would require an agent dispatch).
+// DIR-NNN → 0 (root), DIR-NNN-X → 1 (first child), DIR-NNN-Xn → 2 (grandchild),
+// DIR-NNN-Xnx → 3 (great-grandchild). Gap tasks: gap-*-X → 1. Returns 0 for unrecognized.
+// Used by _splitCheck to guard against recursive split at depth ≥ 2 (DIR-124-A1b, 2026-08-01).
+function _computeWbsLevel(taskId) {
+  const dirMatch = taskId.match(/^DIR-\d+(.*)$/)
+  if (dirMatch) {
+    if (!dirMatch[1]) return 0
+    const body = dirMatch[1].slice(1)  // strip leading '-'
+    const s = body.match(/^([A-Z])(\d+)?([a-z])?$/)
+    if (!s) return 1  // unrecognized shape, assume direct child
+    return 1 + (s[2] ? 1 : 0) + (s[3] ? 1 : 0)
+  }
+  // Gap or other: trailing -[A-Z] suffix → level 1.
+  const parts = taskId.split('-')
+  if (parts.length > 0 && /^[A-Z]$/.test(parts[parts.length - 1])) return 1
+  return 0
+}
+const _wbsLevel = _computeWbsLevel(_taskId)
 const _milestoneId = $a.milestoneId
 const _charterFile = $a.charterFile
 const _class = $a.class || 'development'
@@ -376,7 +396,7 @@ async function _releaseLease(stageLabel, { reason }) {
 // --preflight-plan modes — not a new dispatch mechanism.
 async function _preflightAgentCall(flagsText, label) {
   return agent(
-    `Run exactly this shell command and report its stdout verbatim:
+    `${_worktreeIsolationNote}Run exactly this shell command and report its stdout verbatim:
 node --no-warnings --experimental-strip-types ${_admissionScript} ${flagsText}
 Do not paraphrase or reformat the command's stdout — copy it exactly as printed. Return {raw: <the exact stdout text, or null if the command produced no output at all>}.`,
     { label, phase: 'Preflight', schema: { type: 'object', properties: { raw: { type: ['string', 'null'] } } } }
@@ -1014,6 +1034,12 @@ function _splitCheck() {
     effectiveCount = _mechanismCount
   }
   if (Number.isFinite(effectiveCount) && effectiveCount > 2) {
+    // DIR-124-A1b (2026-08-01): a level-2+ leaf that still triggers split-multi-mechanism
+    // means upstream decomposition was too shallow — flag as recursive-guard (needs-human)
+    // rather than auto-splitting deeper.
+    if (_wbsLevel >= 2) {
+      return { recommend: true, code: 'split-recursive-guard', reason: `level-${_wbsLevel} leaf still multi-mechanism (${effectiveCount} > 2) — upstream decomposition too shallow, needs human diagnosis before further split`, repairable: false }
+    }
     return { recommend: true, code: 'split-multi-mechanism', reason: `candidate contains ${effectiveCount} independently landable mechanisms (> 2)`, repairable: false }
   }
   return { recommend: false }
