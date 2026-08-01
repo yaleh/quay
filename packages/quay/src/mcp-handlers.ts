@@ -17,6 +17,7 @@ import { runGate } from "./gate/engine.ts";
 import { resolveGateLogPath, runGateLogQuery } from "./gate/gate-log.ts";
 import { listGates } from "./gate/registry.ts";
 import { runComplete, runAdjudicate, runPromote, runRetreat } from "./gate/lifecycle.ts";
+import { validateConfig } from "./config-validate.ts";
 
 export interface ConnectedProvider {
   id: string;
@@ -606,6 +607,54 @@ export function registerAdrHandlers(
   );
 }
 
+export function registerConfigHandlers(
+  server: McpServer,
+  cfg: ReturnType<typeof loadConfig>
+): void {
+  // config_validate — workspace-scoped config validation (DIR-099-C).
+  // This is a diagnostic tool, not a gate — it is read-only and does not
+  // append to gate-events.jsonl. No `provider` argument because config
+  // validation is workspace-scoped, not Provider-scoped (the config DEFINES
+  // providers — routing through a provider to validate it is circular).
+  // The handler is a thin passthrough to the shared validateConfig module
+  // (DIR-099-A) — zero duplicated validation logic.
+  //
+  // omitted checkFiles defaults to false (byte-parity with CLI no-flag).
+  // structuredContent is the machine-readable output channel.
+  server.registerTool(
+    "config_validate",
+    {
+      description:
+        "Validate workspace configuration (.quay/config.yml) for structural correctness: " +
+        "YAML syntax, provider fields, gate schemas, gate reference resolution, loop fields, and routine shapes. " +
+        "Returns { ok, issues[] } in structuredContent. " +
+        "Pass checkFiles:true to also verify that gate script/command paths reference files that exist on disk. " +
+        "This tool is workspace-scoped — it does not take a provider argument (the config defines providers). " +
+        "A malformed config returns ok:false with issues (not isError:true); " +
+        "an absent/unreadable config file or internal crash returns isError:true.",
+      inputSchema: {
+        checkFiles: z.boolean().optional().describe(
+          "If true, also check that gate script/command paths exist on disk. Default: false (CLI parity — --check-files is opt-in)."
+        ),
+      },
+    },
+    async ({ checkFiles }) => {
+      try {
+        const result = validateConfig({ workspaceRoot: cfg.workspaceRoot, checkFiles: checkFiles ?? false });
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          structuredContent: result as Record<string, unknown>,
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: (err as Error)?.message ?? String(err) }],
+        };
+      }
+    }
+  );
+}
+
 export function registerAllHandlers(
   server: McpServer,
   getClient: (providerId: string | undefined) => Promise<ConnectedProvider>,
@@ -616,6 +665,7 @@ export function registerAllHandlers(
   registerLifecycleHandlers(server, getClient, cfg);
   registerAdrHandlers(server, getClient);
   registerActionHandlers(server, getClient, cfg);
+  registerConfigHandlers(server, cfg);
 }
 
 export function registerActionHandlers(
