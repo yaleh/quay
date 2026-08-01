@@ -8,10 +8,32 @@ labels:
   - defect
   - milestone-candidate
   - human-steered
+parent: null
+children:
+  - gap-prepare-milestone-epoch-scope-change-grants-full-review-A
 extra:
   schema: v1
 ---
 **type:** execution
+
+## Split into an independently landable child (2026-08-01)
+
+This task has been split into one independently landable sub-task with its own M-number and milestone
+charter (split decision: `milestones/prepare-decisions/gap-prepare-milestone-epoch-scope-change-grants-full-review.json`):
+
+| Child | M-number | Title | Mechanism |
+|-------|----------|-------|-----------|
+| [gap-prepare-milestone-epoch-scope-change-grants-full-review-A](gap-prepare-milestone-epoch-scope-change-grants-full-review-A.md) | **M266** | Scope-change grants a fresh full-review allowance | `bodyScopeHash` at epoch record top level; `checkEpochCaps`/`_checkEpochCapsInline` reset `fullReviews` on scope change without consuming `--new-epoch`; unchanged scope stays capped (DIR-120 protection preserved) |
+
+The child is independently reviewable and landable. This parent is **done** when the child is done.
+
+**Original parent charter:** `experiments/quay-perpetual-stream/charters/M233-gap-prepare-milestone-epoch-scope-change-grants-full-review.md`
+(preserved for context).
+
+**Parent plan:** `docs/plans/M233-gap-prepare-milestone-epoch-scope-change-grants-full-review.md`
+(superseded by the child plan at `docs/plans/M266-gap-prepare-milestone-epoch-scope-change-grants-full-review-a.md`).
+
+---
 
 ## Finding
 

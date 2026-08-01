@@ -8,11 +8,33 @@ labels:
   - milestone-candidate
   - human-steered
 parent: null
-children: []
+children:
+  - gap-build-evidence-path
+  - gap-build-evidence-per-phase
+  - gap-build-evidence-git-fail-soft
 extra:
   schema: v1
 ---
 **type:** execution
+
+## Split into independently landable children (2026-08-01)
+
+This task has been split into three independently landable sub-tasks, each assigned its own M-number
+and milestone charter (split decision: `milestones/prepare-decisions/gap-build-evidence-manifest-missing.json`):
+
+| Child | M-number | Title | Mechanism |
+|-------|----------|-------|-----------|
+| [gap-build-evidence-path](gap-build-evidence-path.md) | **M263** | Manifest output path — write under `MILESTONE_ROOT`, not `/tmp` | Critical-path fix already committed in `2b1d67c2`; formalized: collector writes `build-evidence-manifest.json` via `gate_resolve_milestone_root`, never `/tmp` |
+| [gap-build-evidence-per-phase](gap-build-evidence-per-phase.md) | **M264** | Per-phase evidence consumption (`perPhaseEvidenceFile`/`iterationReport`) | Collector currently accepts the flags but reconciles against empty `actualRows`; consume per-phase evidence / iteration report into `acEvidence` rows with producer provenance |
+| [gap-build-evidence-git-fail-soft](gap-build-evidence-git-fail-soft.md) | **M265** | Fail-closed on git failure (`baseCommit`/`changedFiles` empty) | `git merge-base`/`git diff` failure currently yields empty fields + skipped drift check (fail-soft); fail closed with a distinct stable reason code |
+
+Each child is independently reviewable and landable. This parent is **done** when all three children
+are done.
+
+**Original parent charter:** `experiments/quay-perpetual-stream/charters/M238-gap-build-evidence-manifest-missing.md`
+(preserved for context).
+
+---
 
 ## Proposal
 

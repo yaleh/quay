@@ -1,17 +1,51 @@
 ---
 id: DIR-124-F
-title: "Runtime-contract ground-truth registry for PlanAuthor/PlanCheck: single-source repo facts + grounded-fact learning loop"
+title: "Runtime-contract ground-truth registry for PlanAuthor/PlanCheck:
+  single-source repo facts + grounded-fact learning loop"
 status: todo
 labels:
   - directive
   - human-steered
 parent: DIR-124
-children: []
+children:
+  - DIR-124-F1
+  - DIR-124-F2
+  - DIR-124-F3
+  - DIR-124-F4
+  - DIR-124-F5
+  - DIR-124-F6
 extra:
   schema: v1
 ---
 
 **type:** execution
+
+## Split into independently landable children (2026-08-01)
+
+This task has been split into six independently landable sub-tasks, each assigned its own M-number
+and milestone charter:
+
+| Child | M-number | Title | Mechanism |
+|-------|----------|-------|-----------|
+| [DIR-124-F1](DIR-124-F1.md) | **M257** | Template hygiene gate (reject non-`##`-heading content after `## Touches`) | `task-schema.ts` `checkTouches`/`extractSection` reject prose after `## Touches` (`touches-overbroad`); surfaced via `prepare-admission-check.ts` detector shape; M205 `_stripWrappingBacktick` preserved |
+| [DIR-124-F2](DIR-124-F2.md) | **M258** | PlanCheck typed findings (extended `_findingSchema` with classification) | PlanCheck schema `{findings: number}` → typed array with DIR-125 shape + `classification` ∈ {`grounded-fact-gap`, `task-specific`, `other`}; legacy-scalar tolerance |
+| [DIR-124-F3](DIR-124-F3.md) | **M259** | Touches coverage fix (`task-schema.ts` + `prepare-admission-check.ts` into Touches) | Amends the task `## Touches` (task_write, early) so the hygiene-gate implementation files are covered and Plan `- Files:` lines don't trip `preflight-touches-mismatch` |
+| [DIR-124-F4](DIR-124-F4.md) | **M260** | Fact-class reconciliation (5 vs 6 vs 8 fact classes) | One canonical category whitelist (the 8 seed-doc sections incl. `evidence-surface`); `--validate`/`--promote` reject unknown categories |
+| [DIR-124-F5](DIR-124-F5.md) | **M261** | Seed integrity (correct the false §3 first bullet in `repo-ground-truth.md`) | M205 correction: `loader.ts (new)` matches cleanly; the real `preflight-touches-mismatch` cause is an undeclared Plan `- Files:` line; seed encodes the corrected fact |
+| [DIR-124-F6](DIR-124-F6.md) | **M262** | Learning-loop classification trust (agent-assisted + mechanically validated) | `grounded-fact-gap` finding promotes via the finding ledger with a version bump; mechanically validated (category whitelist, duplicate exact-match, non-blocking); already-registered fact = injection defect |
+
+**Dependency order:** F2 (typed findings) is the learning-loop prerequisite for F6; F1/F5 are the
+mechanical preflight/seed fixes; F3 is the Touches-coverage fix for the milestone's own files; F4
+reconciles the fact-class enumeration. Each child is independently reviewable and landable. This
+parent is **done** when all six children are done.
+
+**Original parent charter:** `experiments/quay-perpetual-stream/charters/M232-dir-124-f.md`
+(preserved for context).
+
+**Parent plan:** N/A (resolved via the human-steered milestone; child plans at
+`docs/plans/M257-dir-124-f1.md` through `docs/plans/M262-dir-124-f6.md`).
+
+---
 
 ## Proposal
 
@@ -24,20 +58,272 @@ PlanAuthor and PlanCheck prompts, and a **learning loop** that promotes `grounde
 PlanCheck findings into the registry (with a version bump) so a fact is never re-discovered
 by a later task.
 
-Distinct from DIR-124-D's ExecutionPolicy registry: that owns task-class → execution POLICY
-(routing/gates/test-audit/resource profiles); this owns repo FACTS (what the runtime
-actually is). Both share the "single executable owner over prompt prose" principle.
+### Problem framing (grounded in current code)
 
-Fifth child of the DIR-124 family (ADR-020; seeded reference:
-`docs/references/repo-ground-truth.md`).
+The prepare-milestone pipeline is a no-import workflow DSL: `.claude/workflows/prepare-milestone.js`
+and its byte-identical mirror `plugin/workflows/prepare-milestone.js` (1732 lines each,
+`diff -q` clean, verified) cannot `import` or touch the filesystem directly (M203/DIR-126-D
+confirmed). Every file-touching operation already goes through an `agent()`-wraps-a-real-CLI
+dispatch (`_convergenceAgentCall` → proposal-convergence.ts, `_preflightAgentCall` /
+`_admissionAgentCall` → prepare-admission-check.ts), returning `{raw}` stdout that the workflow
+interpolates into prompt template strings.
 
-**Independently executable / PRIORITY (2026-08-01, human decision):** no hard
-prerequisite. [[DIR-124-B]] is OPTIONAL — a minimal versioned registry (a `version` field
-+ content hash, upgraded to B's StageReceipt binding later) works without it. This child
-directly eliminates the dominant prepare-milestone cost (PlanCheck first-attempt failures
-from missing repo facts, ~30-40M tokens across the 2026-07-31→08-01 product batch) and is
-executed BEFORE the DIR-124-B/C/D/E chain — it is the "fix the pipeline that every future
-prepare runs through" task. Its own prepare/execute must not wait for the DIR-124 chain.
+Against this surface, the PlanAuthor prompt (lines 1415-1437) and the PlanCheck prompt (lines
+1503-1511) currently carry ZERO repo-runtime-contract facts. PlanCheck returns scalar
+`{findings: <count>, findingsDetail: <string>}` (schema line 1511), so there is no typed finding
+to classify — the learning-loop prerequisite stated in Requested-action item 4 is real. PlanCheck
+round 1 fails on the same fact classes every task: CLI path `quay.ts` vs `quay.js`
+(`docs/references/repo-ground-truth.md` §1; confirmed: `packages/quay/bin/quay.ts`, no `quay.js`,
+no build step), Node `--test --experimental-test-coverage` basename rows without `%` (§2),
+Touches/`- Files:` mismatches (§3, with the M205 correction below), provider env defaults
+(`QUAY_NATIVE_TASKS_DIR`, `QUAY_GITHUB_REPO` §4), shared-module signatures (§5), and the
+`inherited-core.md` `evidenceSurface` (journal.jsonl `{type:"started"|"result", key:"v2:<hash>",
+agentId[, result]}` vs `workflows/wf_*.json` `workflowProgress[]` `{type:"workflow_agent",
+label, phaseIndex}`; `log()` output absent from journal.jsonl) — the sixth fact class (§6).
+
+**Critical seeding correction (grounded in M205):** `docs/references/repo-ground-truth.md` §3's
+first bullet ("parenthetical comments after a backticked path break the exact-path match") is
+FALSE — `prepare-admission-check.ts` `_stripWrappingBacktick` (line 646) already strips backticks
+AND one trailing ` (…)` annotation, and `_splitTopLevelCommas` splits at paren-depth 0. The real
+recurring `preflight-touches-mismatch` cause is a Plan-stage `- Files:` line naming a file the
+task's `## Touches` never declared (the "add the file to Touches" fix). Seeding must encode the
+corrected fact, never copy the refuted bullet verbatim.
+
+### Chosen mechanism
+
+A versioned, schema-validated, hash-bound `GroundTruthRegistry`:
+
+- **Registry DATA = a checked-in JSON data file** `experiments/quay-perpetual-stream/scripts/ground-truth-registry.json`
+  (byte-identical mirror `plugin/scripts/ground-truth-registry.json`) — the single production
+  owner of repo-invariant FACTS. Data file, not facts embedded in TS: the learning loop must
+  mechanically WRITE new facts via `--promote`, and JSON gives a clean fact-table diff plus a
+  meaningful content hash over canonicalized sorted facts (the proposal-convergence "pure module
+  + CLI modes" precedent).
+- **Validation/versioning/hashing/promotion = a TS CLI module**
+  `experiments/quay-perpetual-stream/scripts/ground-truth-registry.ts` (byte-identical mirror
+  `plugin/scripts/ground-truth-registry.ts`) that owns the registry shape
+  `{schemaVersion: "ground-truth-v1", version: <int>, contentHash: <sha256 of canonicalized
+  sorted facts>, facts: [{id, category, fact, adrRef?}]}`, the category whitelist, versioning,
+  and a content hash recomputed and compared on every validate. The CLI is the ONLY way the
+  no-import workflow can reach the registry.
+- **Seed** from the 8 sections of `repo-ground-truth.md` (categories: cli-paths, coverage-format,
+  touches-matching, provider-defaults, module-signatures, evidence-surface, subprocess,
+  gate-resolution) + `inherited-core.md` `evidenceSurface` (category evidence-surface), with the
+  M205 correction applied at seed time; `adrRef` points to the deciding ADR (e.g. ADR-020 for the
+  github-default decision).
+- **CLI surface:** `--inject [--categories <cat,...>]` (emit the subset as prompt-ready text;
+  default = inject ALL — the registry is small and PlanCheck is whole-repo), `--validate
+  [--receipt <preparation.json>]` (schema + category whitelist + hash + stale-version-vs-receipt),
+  `--promote <fact-json>` (schema/category validate, append, version bump, recompute hash),
+  `--record-receipt <preparation.json>` (write `hashes.groundTruth = {version, hash}` into the
+  existing receipt after `--build`), `--version`, `--hash`, `--selftest`.
+- `prepare-milestone.js` (both mirrors) gains a `_groundTruthAgentCall` sibling to
+  `_convergenceAgentCall`/`_preflightAgentCall` that dispatches
+  `node --no-warnings --experimental-strip-types experiments/quay-perpetual-stream/scripts/ground-truth-registry.ts <flags>`
+  and returns `{raw}`.
+
+### Concrete control/data flow
+
+1. **Preflight** (before any content agent): dispatch `--validate` (with `--receipt
+   <preparation.json>` when a prior receipt exists). Non-zero exit → `revision-needed` /
+   `preflight-rejected` terminal, zero content-agent turns (fail-closed-5).
+2. **PlanAuthor**: dispatch `--inject` → interpolate `raw` as a "GROUND-TRUTH REGISTRY v<N>
+   (hash H)" block into the PlanAuthor prompt (lines 1415-1437).
+3. **PlanCheck each round** (up to 3, F_i=0): dispatch `--inject` fresh (post-promotion) →
+   interpolate into the PlanCheck prompt (lines 1503-1511). PlanCheck schema upgrades from
+   `{findings: number, findingsDetail}` to `{findings: <typed array>, findingsDetail}`; each
+   finding carries the DIR-125 shape `{subsystem, summary, severity, blocking, evidence,
+   claimRef, disposition, rootCauseKey, repairable}` plus an explicit `classification` field ∈
+   {`grounded-fact-gap`, `task-specific`, `other`}. `_planCheckFindings = typedFindings.length`.
+4. **Learning loop**: merge typed findings into the finding-ledger via the existing
+   `_upsertFindings` (line 886), hash-bound into the receipt by `--ledger`; then for each finding
+   with `classification === "grounded-fact-gap"` that is NOT already registered (by id or exact
+   fact text) dispatch `--promote <fact-json>` — the real production promotion path, version bump
+   + hash recompute, ledger-disposition-tracked. An already-registered fact re-surfacing → a
+   registry-injection defect (the injection failed to surface the fact), reported as a finding,
+   never promoted twice. On a successful promote, refetch the subset and re-inject into the NEXT
+   PlanCheck round.
+5. **Receipt phase**: after `milestone-preparation-check.ts --build` (NOT modified — out of
+   Touches), a `*ground-truth*`-scoped binding step writes `hashes.groundTruth = {version, hash}`
+   into the current `preparation.json` (which already hash-binds ledger/telemetry/
+   mechanismInventory) so the NEXT prepare's `--validate --receipt` detects staleness. The
+   StageReceiptEnvelope coupling is declared-deferred to DIR-124-B and NOT implemented now.
+6. **Template hygiene (item 0a)**: reject any non-`##`-heading content after `## Touches` at the
+   real parse site (`task-schema.ts` `checkTouches`/`extractSection`, lines 368/411) so prose
+   after Touches is not parsed as Touches globs (`touches-overbroad`), surfaced through
+   `prepare-admission-check.ts`'s preflight detector shape (`{code, blocking, disposition,
+   policyVersion}`); `_stripWrappingBacktick`'s one-annotation strip stays intact (M205).
+
+### Key design decisions
+
+- **JSON data file + TS CLI module**, NOT facts embedded in TS and NOT a bare JSON with no
+  validator: the no-import workflow needs a dispatcher either way; a data file keeps `--promote`'s
+  mechanical write path and content hash meaningful; the module is the single owner of
+  validate/inject/promote/hash (single-source principle).
+- **Injection is real registry-driven interpolation of CLI `{raw}`**, never a second hardcoded
+  copy in the prompt — grep-confirmable that PlanCheck consults the registry.
+- **Inject ALL by default** (v1; registry small, PlanCheck is whole-repo — "signatures, call
+  sites, dependency order, commands"); `--inject --categories` is the growth escape valve, not
+  the default, so a category-selection miss can never be the cause of an injection defect.
+- **Categories** map 1:1 to the seed doc's sections; the whitelist is enforced at validate and
+  promote.
+- **Stale-version-vs-receipt is enforceable NOW** against the existing `preparation.json` (already
+  hash-binds ledger/telemetry/mechanismInventory) via `hashes.groundTruth`; StageReceipt (B) is
+  the declared, documented upgrade, not a current dependency (matches PRIORITY + AC3).
+- **PlanCheck typed-findings is the new contract** (required by item 4's prerequisite), with a
+  defensive legacy-scalar tolerance: a scalar return is tolerated exactly as ProposalReview
+  tolerates legacy scalars (0 → pass; nonzero → ONE untyped blocking finding filed into `_ledger`;
+  promotion requires typed findings — logged, never silent).
+- **Classification is agent-assisted + mechanically validated**, not NLP: the PlanCheck agent
+  labels `classification`; the workflow/CLI mechanically validates category whitelist, duplicate
+  exact-match, and non-blocking eligibility. No fragile free-text extractor.
+- **Promotion rides the existing finding ledger** ("via the proposal-convergence finding-ledger"):
+  the grounded-fact-gap finding merges into `_ledger` (thus `milestones/M<NN>/proposal-ledger.json`,
+  hash-bound into the receipt) with a `promoted` disposition marker — reviewable and hash-bound,
+  not a silent side write.
+- **Seed-doc migration**: `repo-ground-truth.md` and `inherited-core.md`'s `evidenceSurface`
+  content become the registry's seeded content; the reference docs become a pointer/index, never
+  a second divergent copy (DoD).
+- **Mirror parity**: both workflow mirrors, both registry JSON + TS mirrors, and both test files
+  byte-identical; vendor-sync clean (AC).
+
+### Defaults and failure behavior
+
+- Unknown category in a fact or an `--inject`/`--promote` request → non-zero exit → prepare fails
+  closed pre-dispatch.
+- Hash mismatch (tamper/drift) → `--validate` fails closed.
+- Missing registry file / missing fact id referenced by `adrRef` → fail closed.
+- Stale registry version vs a prior `preparation.json`'s recorded `hashes.groundTruth` → fail
+  closed (the deterministic invalidation until B's envelope exists).
+- A promotion bumps `version` and recomputes `hash`; the new version is picked up by the next
+  `--inject`.
+- A `grounded-fact-gap` finding whose fact is already registered (id or exact fact text) is NOT
+  promoted again — flagged as a registry-injection defect (fail the injection, not the task).
+- Legacy scalar PlanCheck return → tolerated as above, promotion skipped, logged never silent.
+- Worktree isolation (`isolationMode:'worktree'`): the ground-truth CLI runs inside the worktree
+  like every other content-phase dispatch; registry writes merge back at Land under the existing
+  single-flight Land lock.
+- Epoch accounting: `--inject`/`--validate`/`--promote` are non-content CLI dispatches; the
+  existing epoch-cap checks gate only content-agent dispatch sites (one extra non-content dispatch
+  per generation, one per promote).
+
+### Compatibility
+
+- PlanCheck schema change (scalar → typed array) is the only contract break. It affects: the e2e
+  mock (`plugin/test/prepare-milestone-preparation-e2e.test.mjs:297` currently returns
+  `{findings: 0, sessionId}` — must return `{findings: [], sessionId}`), the resume/cache path
+  (`--decide-resume` keys off the result shape), and the `--plancheck-sessions` /
+  `--plancheck-findings` provenance flags (count = typed array length, so
+  `milestone-preparation-check.ts`'s `--check` reading `receipt.planCheck.findings` as a number
+  stays valid).
+- Mirror parity preserved after both injection and typed-findings edits; new registry JSON + TS +
+  test files mirrored byte-identical; vendor-sync clean.
+- `proposal-convergence.ts`'s finding-ledger contract is reused unchanged (promotion goes through
+  `_upsertFindings`); no new ledger shape.
+- `milestone-preparation-check.ts` is NOT modified (out of Touches); the version binding is a
+  `*ground-truth*`-scoped write into the existing `preparation.json`.
+
+### Risks
+
+- **Touches gap (highest):** item 0a's template-hygiene gate edits `task-schema.ts` and
+  `prepare-admission-check.ts`, which are NOT covered by the current `## Touches` globs
+  (`*ground-truth*` only). The plan's `- Files:` lines naming those files would themselves trip
+  `preflight-touches-mismatch`. Mitigation (MUST be recorded before PlanAuthor runs): the
+  milestone amends the task's `## Touches` (task_write, early) to add `task-schema.ts`,
+  `prepare-admission-check.ts`, the registry JSON data file, and both test mirrors; OR the hygiene
+  gate is routed through a `*ground-truth*`-named file. Scoping items to `*ground-truth*`-only and
+  then declaring `- Files:` lines for the preflight/task-schema files WITHOUT the amendment will
+  trip the very gate this task fixes.
+- **No-import constraint:** every registry interaction must be a CLI dispatch; a future author
+  tempted to `import` the registry into the workflow will fail at runtime (M203-confirmed) —
+  `_groundTruthAgentCall` is the mandated single gate.
+- **Seed-doc drift:** after seeding, `repo-ground-truth.md` + `inherited-core.md` `evidenceSurface`
+  must become generated/pointer views or carry a drift check, or the crystallization
+  single-source principle is violated (DoD).
+- **Stale seeded facts:** must encode the M205 correction, not the refuted parenthetical bullet.
+- **Learning-loop misclassification:** an LLM may tag a task-specific fact as `grounded-fact-gap`;
+  mitigated by the explicit `classification` field + mechanical promote validation + version-bump
+  auditability.
+- **Prompt bloat:** v1 injects all; mitigated by phase-specific category subsets if the registry
+  grows.
+- **Touches under-scoping** (first bullet) collides with the very `preflight-touches-mismatch`
+  gate this milestone fixes — highest-severity operational risk.
+
+### AC coverage (Requested-action item → falsifiable check)
+
+- Item 0a → template-hygiene detector RED test (reject non-`##`-heading content after
+  `## Touches`) + Touches amendment recorded (currently NO dedicated AC — coverage gap, see
+  wiring claims).
+- Item 1 → registry file exists, schema-validated, versioned, hash-bound, seeded from the 8
+  sections + `evidenceSurface` with the M205 correction.
+- Item 2 → both PlanAuthor and PlanCheck prompts receive the fetched subset (real injection; RED:
+  fixture PlanAuthor omitting a registered fact yields a `grounded-fact-gap` PlanCheck finding;
+  GREEN: fresh PlanAuthor with the fact registered produces a clean plan).
+- Item 3 → version/hash binding is a DECLARED, deferred B upgrade; enforced NOW:
+  `hashes.groundTruth` on the current receipt + fail-closed-5.
+- Item 4 → typed PlanCheck findings with `grounded-fact-gap` classification + real (non-fixture)
+  promote + version bump through the ledger.
+- Item 5 → unknown-category and stale-version-vs-receipt fail closed before content dispatch.
+- Item 6 → RED/GREEN fixtures in both trees; the DoD's "one real task prepares cleanly without
+  manual grounded-facts (real dispatch evidence)" is an execution-phase (Build) proof on top.
+
+### Mechanism-claim wiring coverage (DIR-117)
+
+- CLAIM 1: both `prepare-milestone.js` mirrors dispatch `--inject` and interpolate `{raw}` into
+  the PlanAuthor prompt → AC: real-injection check (fixture asserting the subset string with the
+  live version appears in the PlanAuthor prompt).
+- CLAIM 2: same, into EACH PlanCheck round's prompt → AC: same shape.
+- CLAIM 3: PlanCheck emits typed findings with `grounded-fact-gap` classification (schema change
+  from scalar) → the learning-loop prerequisite; needs a DEDICATED AC (absent from the current
+  list — recommend adding "PlanCheck emits typed findings with classification").
+- CLAIM 4: a `grounded-fact-gap` finding promotes into the registry with a version bump via the
+  finding-ledger (`_upsertFindings`) → AC4; a grounded-fact-gap finding appears in
+  `milestones/M<NN>/proposal-ledger.json` (hash-bound).
+- CLAIM 5: the registry is the owner PlanCheck consults; per-task grounded-facts no longer needed
+  → AC1 (grep-confirmable).
+- CLAIM 6: registry version/hash bound into the current `preparation.json` receipt (fail-closed-5)
+  and into the StageReceipt as deferred-to-B → AC3.
+- CLAIM 7: unknown category / stale registry version vs receipt fails closed before content agents
+  dispatch → AC6 (fail-closed RED test).
+- CLAIM 8: template hygiene rejects non-`##` content after `## Touches` → item 0a has NO dedicated
+  AC — a coverage gap the milestone MUST close (new AC or fold under AC6/AC1) or ProposalReview
+  wiring-coverage will flag it uncovered.
+- CLAIM 9: a registered fact re-surfacing as a finding is a registry-injection defect, not a task
+  defect → fold into AC4.
+- CLAIM 10: Touches coverage — the milestone's implementation files are covered by the task's
+  `## Touches`; the current globs cover `*ground-truth*` + both workflow mirrors + docs, but item
+  0a touches `task-schema.ts`/`prepare-admission-check.ts` (absent from Touches). The milestone
+  MUST amend `## Touches` or scope every item strictly to `*ground-truth*` files; otherwise the
+  Plan's `- Files:` lines trip the very `preflight-touches-mismatch` gate this task fixes. Needs
+  an explicit AC/wiring note.
+
+### Alternatives considered and rejected
+
+- (a) Keep facts as per-task grounded-facts blocks (status quo) — rejected: per-task duplication,
+  re-discovery cost, the exact root cause this task targets.
+- (b) Prose doc the PlanAuthor is told to read — rejected: agents don't reliably read; no
+  version/hash, no fail-closed, no learning loop; violates ADR-004 (hard checks over prose).
+- (c) Plain JSON data file with no validator/CLI — rejected: no schema validation or fail-closed,
+  and the no-import workflow still needs a dispatcher.
+- (d) Facts embedded as a TS module imported directly into `prepare-milestone.js` — rejected
+  decisively: the workflow DSL is M203-confirmed no-import; direct import is impossible; AND the
+  learning loop must mechanically WRITE facts, which a module's source is awkward to mutate and
+  whose diff is not a clean fact table.
+- (e) Hardcoded registry subset in each prompt + registry file separately — rejected: two copies,
+  violates single-source.
+- (f) Workflow writes the registry JSON directly via fs for promotion — rejected: no-import
+  constraint; promotion must be a `--promote` CLI dispatch.
+- (g) Bind into StageReceipt now — rejected per PRIORITY: B is optional; the minimal
+  versioned+hash-bound registry + fail-closed-5 works standalone; StageReceipt is
+  declared-deferred.
+- (h) PlanCheck findings only as a count + a separate free-text findingsDetail for classification
+  — rejected: leaves classification to the LLM's unstructured prose, defeating the typed-finding
+  prerequisite; the DIR-125 shape already exists at `_findingSchema` (line 1022) and is reused.
+- (i) Per-task version sidecar (`.quay/ground-truth/<taskId>.version.json`) instead of
+  `hashes.groundTruth` on the existing receipt — rejected: the task's own wording is "stale
+  registry version vs RECEIPT"; the existing receipt already hash-binds ledger/telemetry/
+  mechanismInventory; a second version store duplicates state. The receipt's `hashes.groundTruth`
+  is the single binding, with the B envelope as the documented upgrade.
 
 ## Plan
 
