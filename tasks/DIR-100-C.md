@@ -83,10 +83,9 @@ severity is set at emission site (A/B) per the reconciled taxonomy.
 
 ## Plan
 
-Resolved via a human-steered milestone. Checked plan: `docs/plans/M228-dir-100-c.md`
-(DIR-117-B prepared-gate artifact) — diagnostic output channel (`QUAY_GATE_DIAGNOSTICS`
-stderr/quiet/file) + reconciled severity taxonomy + stderr routing; base revision `5bc637d2`.
-
+Resolved via milestone M228. Checked Plan: `docs/plans/M228-dir-100-c.md` — manually
+revalidated after 3 prepare-milestone attempts; the task body (with grounded facts) is
+authoritative. 5 mechanical stages, all 6 AC indices mapped.
 ## Finding
 
 The original DIR-100 Proposal labeled missing fields "warn" in change 2 but "error" in
@@ -113,6 +112,10 @@ emitted).
   invariance).
 - [ ] `QUAY_GATE_DIAGNOSTICS=quiet` suppresses all diagnostics.
 - [ ] `QUAY_GATE_DIAGNOSTICS=/path/to/log` appends diagnostics to that file.
+- [ ] An unwritable/invalid `QUAY_GATE_DIAGNOSTICS` file path (ENOENT etc.) is fail-closed:
+  the append stream's `error` listener falls back to `process.stderr` and `gate --list`
+  exits 0 (never an uncaught WriteStream `error`) — asserted by a RED/GREEN test that runs
+  `gate --list` against a bad path and observes the diagnostic on stderr, not prose.
 - [ ] Severity taxonomy is consistent: unrecognized-key and missing-field are `error`;
   extra-fields-only is `warn` (grep-confirmable, not prose).
 - [ ] Tests: `packages/quay/test/gate-diagnostics.test.mjs` RED/GREEN covering
