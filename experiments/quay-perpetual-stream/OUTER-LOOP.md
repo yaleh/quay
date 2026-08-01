@@ -194,7 +194,7 @@ dispatch(batch) =
 
 concurrent_execute :: Batch → {done[], needs-human[]}
 concurrent_execute(B) where |B| ≥ 2:
-  a. ∀c∈B: dispatch Workflow({scriptPath: "/home/yale/work/quay/.claude/workflows/execute-milestone.js",
+  a. ∀c∈B: dispatch Workflow({scriptPath: ".claude/workflows/execute-milestone.js",
      args: {taskId: c.id, charterFile: c.charter, absorbEntryFile: c.absorb,
      preparationReceiptFile: c.receipt, mode: "concurrent", isolationMode: "worktree"}},
      run_in_background: true) from MAIN session
