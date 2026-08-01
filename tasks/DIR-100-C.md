@@ -1,6 +1,7 @@
 ---
 id: DIR-100-C
-title: "Diagnostic output channel: QUAY_GATE_DIAGNOSTICS (stderr/quiet/file) + severity taxonomy + stderr routing"
+title: "Diagnostic output channel: QUAY_GATE_DIAGNOSTICS (stderr/quiet/file) +
+  severity taxonomy + stderr routing"
 status: todo
 labels:
   - directive
@@ -13,6 +14,23 @@ extra:
 ---
 
 **type:** execution
+
+
+**Grounded facts for Plan authors (2026-08-01, from real PlanCheck rounds):**
+
+1. **`execFileSync` does NOT capture child stderr on a zero exit** (verified on Node v26):
+   the success path returns only stdout and discards child stderr to the parent process.
+   A `runQuay` helper mirroring `gate.test.mjs:78-85` (execFileSync) returns
+   `{ status: 0, stdout, stderr: "" }` on success. `quay gate --list` exits 0 even when
+   loader diagnostics fire (they only write stderr, no exit-code change), so an assertion
+   that `runQuay(["gate","--list"], ws).stderr` carries a diagnostic observes `""` and
+   fails. The real-CLI stderr capture MUST use `spawnSync` (returns stderr on both success
+   and failure) or async `execFile`/`spawn` reading the stderr stream — an env override
+   alone does not fix capture.
+2. **There are SIX silent-skip `continue` guards in `loadWorkspaceGates`**, not five:
+   it0@146, adr@154, fixed@158, testPass@165, coverageFloor@169, redGreen@173. The adr
+   guard is the SECOND in source order (it0, adr, fixed, ...), never the fifth.
+
 
 ## Proposal
 
@@ -43,8 +61,9 @@ else → append-mode file stream. All diagnostics emitted by A/B route through t
 
 ## Plan
 
-N/A — resolved via a human-steered milestone. The resolving milestone authors a checked
-`docs/plans/*.md` plan (DIR-117-B prepared-gate artifact) before implementation.
+Resolved via a human-steered milestone. Checked plan: `docs/plans/M228-dir-100-c.md`
+(DIR-117-B prepared-gate artifact) — diagnostic output channel (`QUAY_GATE_DIAGNOSTICS`
+stderr/quiet/file) + reconciled severity taxonomy + stderr routing; base revision `990676e9`.
 
 ## Finding
 
