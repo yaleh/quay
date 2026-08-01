@@ -59,3 +59,21 @@ reference data.
   — no `.label`; typed returns persist in `.result`. `workflows/wf_*.json`
   `workflowProgress[]` carries `{type:"workflow_agent", label, phaseIndex}`; `logs[]`
   carries `log()` output. (See inherited-core.md `evidenceSurface`.)
+
+## 7. execFileSync / subprocess facts
+
+- `execFileSync` default `maxBuffer` is 1 MB. This repo's real `quay task list --json`
+  output is ~4 MB (ENOBUFS without an explicit maxBuffer). Any execFileSync over it MUST
+  set `maxBuffer: 50 * 1024 * 1024` (mirroring `select-preflight.ts` `getTaskList()` :446).
+- `execFileSync` does NOT capture child stderr on a zero exit (returns stderr:"" on
+  success). Use `spawnSync` or an async stderr-stream read for real-CLI stderr assertions.
+
+## 8. Gate resolution facts
+
+- Built-in gates (`dod`, `acceptance`) short-circuit in `resolveGate`
+  (`registry.ts:100-107` — `if (gateRegistry[name]) return gateRegistry[name]`) and NEVER
+  call `loadWorkspaceGates`/`readGatesConfig`. `quay gate <id>` with no `--gate` defaults
+  to the built-in `acceptance` gate, so it will NOT surface loader diagnostics. Use
+  `quay gate --list` for loader diagnostics (it loads workspace gates).
+- `quay task get <id>` does NOT exist — valid subcommands are `list|view|create|edit|
+  check`. Use `task view <id> --json` for a task-status assertion.
