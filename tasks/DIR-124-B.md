@@ -12,7 +12,6 @@ extra:
   dirStatus: applied
   schema: v1
 ---
-
 **type:** execution
 
 ## Proposal
@@ -28,9 +27,12 @@ This child implements C2 of the crystallization proposal. It consumes [[DIR-124-
 
 ## Plan
 
-N/A — execute only after DIR-124-A, DIR-123, and the evidence-path gap are done. The resolving
-milestone must use the canonical milestone-root resolver and worktree identity supplied by those
-prerequisites rather than inventing new path/Git conventions.
+Full checked milestone Plan: `docs/plans/M236-dir-124-b.md` (M236, base `65f414c4`). Covers all 11
+AC items across 8 ordered stages (RED contracts → implementation → GREEN → mirrors + canonical glob
+→ workflow wiring → wiring GREEN → real post-Land proof). The Lifecycle-feasibility section names
+the iteration-0 Audit-REFUTED-by-construction terminal (DoD 1–4 and the real halves of AC4/AC5/AC7
+are post-Land evidence): Stages 1–7 land human-steered, `done` is reached only via the post-Land
+Stage-8 re-promote.
 
 ## Finding
 

@@ -1,6 +1,7 @@
 ---
 id: gap-prepare-milestone-no-size-aware-routing-A
-title: "Size estimation + fast-lane routing: estimateTaskSize + PrepareRoutingDecision in prepare-milestone"
+title: "Size estimation + fast-lane routing: estimateTaskSize +
+  PrepareRoutingDecision in prepare-milestone"
 status: todo
 labels:
   - gap
@@ -19,8 +20,9 @@ Add a deterministic size-estimation step to `prepare-milestone.js`'s Preflight p
 routes each candidate as **fast-lane** or **full-lane**, and emits a versioned
 `PrepareRoutingDecision`.
 
-**Two-dimension routing that BOTH dimensions actually affect** (fixing the split-review
-finding that proofScale was classified but never used):
+**Two-dimension routing that BOTH dimensions actually affect** (introducing proofScale
+classification and making it genuinely gate fast-lane eligibility, closing the split-review
+gap):
 
 ```text
 codeScale  = 25*AC_count + 60*expanded_logical_Touches_count   (the sizing estimator)
@@ -43,16 +45,24 @@ dependencies within the split.
 
 ## Plan
 
-N/A — resolved via a human-steered milestone. The resolving milestone authors a checked
-`docs/plans/*.md` plan (DIR-117-B prepared-gate artifact) before implementation.
+Full checked milestone Plan: `docs/plans/M239-gap-prepare-milestone-no-size-aware-routing-a.md`
+(M239, base `65f414c4`). Covers all 7 AC items across 8 ordered stages (RED estimator/routing
+cases → RED real-workflow emission → estimator implementation → estimator mirror → workflow
+wiring → workflow mirror → full GREEN → real-object routing evidence). Emission-only fast-lane
+routing in `prepare-milestone.js`'s Preflight (after the Preflight content PASSED log, line
+644); full-lane stays today's path; tier thresholds are referenced through a single versioned
+`_ROUTING_POLICY` snapshot (`policyRegistryRef: 'DIR-124-D'`, provisional `policyVersion`),
+never scattered inline literals.
 
 ## Finding
 
 `prepare-milestone.js` applies the same full Proposal+Plan pipeline to every task. The
 sizing proposal (Table 4.1) assigns codeScale 501-900 to M (full synthesis), overlapping
 the fast-lane ~800 ceiling — the threshold conflict is real and must be resolved by
-DIR-124-D's policy registry, not hardcoded here. proofScale is classified today but never
-affects routing — a proof-heavy S task would wrongly get a single fast-lane reviewer.
+DIR-124-D's policy registry, not hardcoded here. No production code classifies proofScale
+today (it exists only in proposal/task text), so this milestone must introduce the
+classifier AND make it gate routing — without that, a proof-heavy S task could wrongly get
+a single fast-lane reviewer.
 
 ## Requested action
 
@@ -74,6 +84,9 @@ affects routing — a proof-heavy S task would wrongly get a single fast-lane re
 - [ ] `estimateTaskSize` produces a deterministic `{codeScale, proofScale, tier}` for every
   reachable singleton prepare path (composite primary tasks route through the same
   workflow).
+- [ ] `prepare-milestone.js`'s Preflight phase routes each candidate as **fast-lane** or
+  **full-lane** and emits a versioned `PrepareRoutingDecision` (mechanism wired into the
+  real prepare path, not a standalone estimator).
 - [ ] A proof-heavy S task (real-workflow/cross-generation proof) is routed FULL-lane, not
   fast-lane (the proofScale dimension genuinely affects routing — RED/GREEN).
 - [ ] The `PrepareRoutingDecision` is versioned + hash-bound and references the

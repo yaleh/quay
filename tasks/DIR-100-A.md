@@ -1,7 +1,7 @@
 ---
 id: DIR-100-A
 title: "Fail-loud scan: unrecognized top-level keys under gates: emit diagnostics"
-status: todo
+status: needs-human
 labels:
   - directive
   - human-steered
@@ -10,6 +10,9 @@ parent: DIR-100
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-100-A experiments/quay-perpetual-stream/charters/M226-dir-100-a.md
+    milestones/M226/absorb-entry.md
 ---
 **type:** execution
 

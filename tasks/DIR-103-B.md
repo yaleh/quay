@@ -2,7 +2,7 @@
 id: DIR-103-B
 title: "MCP surface: gate_run dryRun: true executes the acceptance command
   without recording a GateEvent"
-status: todo
+status: needs-human
 labels:
   - directive
   - human-steered
@@ -11,6 +11,9 @@ parent: DIR-103
 children: []
 extra:
   schema: v1
+  acceptance: bash experiments/quay-perpetual-stream/scripts/it0-dod-check.sh
+    DIR-103-B experiments/quay-perpetual-stream/charters/M224-dir-103-b.md
+    milestones/M224/absorb-entry.md
 ---
 **type:** execution
 
