@@ -15,6 +15,25 @@ extra:
 
 **type:** execution
 
+
+**Grounded facts for Plan authors (2026-08-01, from real PlanCheck rounds):**
+
+1. **Import path from `packages/quay/test/config-validate.test.mjs` is `../bin/quay.ts`**
+   (one level up to `packages/quay/`), NOT `../../bin/quay.ts` (`packages/bin/` does not
+   exist — `../../` throws ERR_MODULE_NOT_FOUND at test load). Sibling precedent:
+   `gate.test.mjs:29` `path.join(__dirname, "..", "bin", "quay.ts")`. `../src/
+   config-validate.ts` is correct for the module.
+2. **`quay config --help` hits the QX-007 else stub** — `main()`'s unconditional
+   subcommand-help check (quay.ts:493) fires BEFORE any `cmd ===` dispatch, calling
+   `printHelp("config")`, which has branches only for `!sub||sub==="task"` (:299) and
+   `sub==="init"` (:443); everything else hits the else stub (:461) printing no
+   `validate|check`. AC's `config --help | grep validate` needs a NEW `config` branch in
+   `printHelp` (not just the MAIN usage block edit).
+3. **CB-021 jsonCommands allowlist**: `--format json` on `config validate` requires adding
+   `config` to the `jsonCommands` allowlist (quay.ts:506-510); without it, `config
+   validate --format yaml` silently falls through to human output (the exact CB-021 bug).
+
+
 ## Proposal
 
 Add the core `quay config validate` (alias `check`) command in
@@ -54,8 +73,8 @@ fact #5).
 
 ## Plan
 
-N/A — resolved via a human-steered milestone. The resolving milestone authors a checked
-`docs/plans/*.md` plan (DIR-117-B prepared-gate artifact) before implementation.
+Resolved via the M229 human-steered milestone. The checked Plan lives at
+`docs/plans/M229-dir-099-a.md` (DIR-117-B prepared-gate artifact).
 
 ## Finding
 
