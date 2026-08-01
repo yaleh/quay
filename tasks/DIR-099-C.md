@@ -1,6 +1,7 @@
 ---
 id: DIR-099-C
-title: "MCP config_validate tool surface: registerConfigHandlers + CLI-MCP verdict parity"
+title: "MCP config_validate tool surface: registerConfigHandlers + CLI-MCP
+  verdict parity"
 status: todo
 labels:
   - directive
@@ -11,7 +12,6 @@ children: []
 extra:
   schema: v1
 ---
-
 **type:** execution
 
 
@@ -28,6 +28,21 @@ extra:
 - **`registerConfigHandlers(server, cfg)`** follows the explicit-params convention (like
   each `register*Handler(server, getClient, cfg)`), binding `cfg.workspaceRoot` from
   `loadConfig` — not an untyped `deps`.
+
+
+**Grounded facts for Plan authors (2026-08-01, from real PlanCheck rounds):**
+
+1. **`startMcpServer()` calls `loadConfig()` at boot** (mcp-server.ts:89) and
+   `bin/quay.ts:1041` `await startMcpServer()` has NO try/catch — a syntax-malformed
+   `.quay/config.yml` (DIR-099-A's AC2 malformed-YAML fixture) throws YAMLParseError at
+   boot and KILLS the MCP process before any tool registers. The MCP-vs-CLI parity test
+   (AC2) therefore CANNOT drive a syntax-malformed-YAML workspace through the real `quay
+   mcp` subprocess — use a semantically-invalid-but-syntactically-valid fixture (e.g. the
+   unresolved-gate case, which `loadConfig` parses fine and `validateConfig` flags).
+2. **DIR-099-A's AC numbers shifted after the split** — the unresolved-gate case is
+   DIR-099-A AC5 (not AC4); the PATH-binary/--check-files negative is AC12 (the task body
+   tags it "(AC17)" using pre-split parent-DIR-099 numbering — use the current numbers).
+
 
 ## Proposal
 
@@ -55,8 +70,11 @@ duplicated validation logic). `ok`/`issues` flow into structuredContent.
 
 ## Plan
 
-N/A — resolved via a human-steered milestone. The resolving milestone authors a checked
-`docs/plans/*.md` plan (DIR-117-B prepared-gate artifact) before implementation.
+Resolved via milestone M231 (human-steered). Checked Plan: `docs/plans/M231-dir-099-c.md`
+(DIR-117-B prepared-gate artifact) — 7 ordered stages (RED real-subprocess MCP test →
+`registerConfigHandlers` + `config_validate` tool in mcp-handlers.ts → GREEN parity verify →
+schema/no-second-implementation grep → >=80% coverage → full-suite → post-Land audit), all 5
+AC items mapped, base revision `f8ecdf21`.
 
 ## Finding
 
@@ -100,5 +118,5 @@ Standard inherited-core DoD clauses apply.
 ## Touches
 
 - `packages/quay/src/mcp-handlers.ts`
-- `packages/quay/test/config-validate.test.mjs (new)` (or sibling MCP-surface test)
+- `packages/quay/test/mcp-config-validate.test.mjs (new)`
 - `docs/plans/M231-dir-099-c.md`
