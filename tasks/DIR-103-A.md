@@ -1,6 +1,7 @@
 ---
 id: DIR-103-A
-title: "CLI dry-run: quay gate --dry-run <task-id> executes the acceptance command without recording a GateEvent or mutating status"
+title: "CLI dry-run: quay gate --dry-run <task-id> executes the acceptance
+  command without recording a GateEvent or mutating status"
 status: todo
 labels:
   - directive
@@ -11,7 +12,6 @@ children: []
 extra:
   schema: v1
 ---
-
 **type:** execution
 
 ## Proposal
@@ -34,18 +34,27 @@ First independently landable mechanism; no dependencies within the split.
 ## Chosen mechanism
 
 Extend the `gate` command's flag parsing to accept `--dry-run` (short `-n`). When set,
-the gate runner executes the acceptance command via the same `runAcceptance()` path used
-by a real run (preserving env/cwd/timeout semantics), captures the result, prints
-stdout/stderr + exit code to the terminal, and returns WITHOUT calling the gate-event
-store or the lifecycle status writer. The dry-run result is not recorded anywhere
-durable; its only observable effect is the printed output and the process exit code.
+the gate runner resolves the same runner options a real run would use (same cwd, same
+timeout, via `resolveRunnerOptions`), spawns the acceptance command DIRECTLY with its own
+stdout/stderr capture (a small sibling helper mirroring `coverage-floor`'s
+`spawnSyncCapture`), prints stdout/stderr + exit code to the terminal, and returns
+WITHOUT calling the gate-event store or the lifecycle status writer. It deliberately does
+NOT go through `runAcceptance()`: `AcceptanceResult` reports only
+{ok, reason, code, signal, timedOut} and discards stdout/stderr, and the codebase has
+explicitly chosen not to change that return shape (coverage-floor.ts keeps its output
+capture as "a tiny sibling rather than changing `runAcceptance`'s return shape"). Surfacing
+the command's output is the whole point of a dry-run, so the dry-run branch captures it
+directly. The dry-run result is not recorded anywhere durable; its only observable effect
+is the printed output and the process exit code.
 
 `quay gate --help` documents `--dry-run`.
 
 ## Plan
 
-N/A — resolved via a human-steered milestone. The resolving milestone authors a checked
-`docs/plans/*.md` plan (DIR-117-B prepared-gate artifact) before implementation.
+Resolved by milestone M223. The checked Plan (DIR-117-B prepared-gate artifact) is
+`docs/plans/M223-dir-103-a.md` — the authoritative stage-by-stage spec: milestone/task/charter/
+base-revision header, complete touch set, RED/implementation/GREEN stages with AC→stage mapping,
+line budgets, guardrails/rollback, and real-landing verification.
 
 ## Finding
 
@@ -61,9 +70,10 @@ asserted, not assumed.
 ## Requested action
 
 1. Add `--dry-run`/`-n` to the `quay gate <task-id>` flag set.
-2. When set: execute the acceptance command via the same `runAcceptance()` path as a real
-   run, print stdout/stderr + exit code, do NOT append a GateEvent, do NOT write any
-   lifecycle status field.
+2. When set: spawn the acceptance command directly with its own stdout/stderr capture,
+   using the same resolved cwd/timeout as a real run (NOT via `runAcceptance()`, whose
+   result carries no output text), print stdout/stderr + exit code, do NOT append a
+   GateEvent, do NOT write any lifecycle status field.
 3. Document `--dry-run` in `quay gate --help`.
 4. RED/GREEN tests: dry-run executes the command, prints result, appends zero GateEvents
    (`gate-log` empty), leaves `status` unchanged; a real `gate <id>` afterwards still
@@ -76,7 +86,10 @@ asserted, not assumed.
 - [ ] `quay gate --dry-run <task-id>` appends ZERO GateEvents (gate-event log unchanged —
   real before/after, not asserted).
 - [ ] `quay gate --dry-run <task-id>` leaves the task's `status` field unchanged (a
-  status-writing fixture task stays `todo`, never `done`).
+  status-writing fixture task — a `ready` task, since `runComplete` at
+  `lifecycle.ts:124` refuses a `todo` task via `illegal transition` at :131-133, so a
+  `todo` fixture would never be flipped and would not test the invariant — stays
+  `ready`, never `done`).
 - [ ] `quay gate --help` lists `--dry-run`.
 - [ ] `quay gate <task-id>` (no dry-run) is byte-identical in behavior to pre-change
   (golden-replay).
@@ -103,3 +116,23 @@ Standard inherited-core DoD clauses apply.
 - `packages/quay/src/gate/acceptance-runner.ts`
 - `packages/quay/test/acceptance.test.mjs`
 - `docs/plans/M223-dir-103-a.md`
+**Grounded facts for Plan authors (2026-08-01, from real PlanCheck round findings):**
+
+1. **`parseFlags` greedily consumes a flag's value** — `quay gate --dry-run <task-id>`
+   (flag-first) parses to `{flags:{dry-run:"<task-id>"}, id:undefined}` → the gate
+   branch's `if (!id)` emits the "missing required <task-id>" usage error. Only
+   id-first `gate <id> --dry-run` works today. The implementation MUST make `--dry-run`/
+   `-n` a **non-value-taking boolean flag** (a known-boolean-flags set in `parseFlags`),
+   not just a `-n`→`--dry-run` token rewrite — otherwise every test block and the
+   real-dispatch proof use a form the CLI cannot parse.
+2. **`quay gate --help` routes to a generic stub** (`printHelp("gate")`'s else-branch,
+   quay.ts:463; dispatch :493) that prints only "Usage: quay gate [...] / Run
+   `quay --help`...". The detailed usage line (:313) and flag-description block
+   (:385-397) render only under top-level `quay --help`. AC4 (`gate --help` lists
+   `--dry-run`) therefore requires adding a gate-specific flag-list rendering to
+   `printHelp`'s gate branch (or a help entry in the else-stub).
+3. **CLI binary path is `packages/quay/bin/quay.ts`**, NOT `quay.js` — no
+   `packages/quay/bin/quay.js` exists (only the gitignored `dist/quay.js` build
+   artifact, built by `packages/quay/scripts/build-dist.mjs`, package-relative — NOT a
+   repo-root `scripts/build-dist.mjs`). Test-suite convention: `node
+   packages/quay/bin/quay.ts ...` (acceptance.test.mjs:29, gate.test.mjs:29).
