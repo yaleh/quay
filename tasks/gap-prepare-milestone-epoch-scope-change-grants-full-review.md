@@ -95,4 +95,5 @@ Standard inherited-core DoD clauses apply.
 - `experiments/quay-perpetual-stream/test/proposal-convergence.test.mjs`
 - `plugin/test/proposal-convergence.test.mjs`
 
+
 - `docs/plans/M233-gap-epoch-scope.md`

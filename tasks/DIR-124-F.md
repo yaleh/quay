@@ -90,7 +90,6 @@ ADR-020 records the decision; this task mechanizes it.
    correct plan (proves the learning loop).
 
 - `docs/plans/M232-dir-124-f.md`
-
 ## Acceptance Criteria
 
 - [ ] A versioned `GroundTruthRegistry` is the single production owner of the seeded facts;
