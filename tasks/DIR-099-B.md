@@ -56,7 +56,7 @@ Resolved via milestone M230. Checked Plan: `docs/plans/M230-dir-099-b.md` (base 
 `e1b45823`, 2026-08-01) — manually authored after 6 prepare-milestone attempts exhausted
 the epoch full-review cap; the task body (corrected through 6 mechanism-inventory review
 rounds) is authoritative. 4 mechanical stages (RED → implementation → GREEN → real-callsite
-evidence + audit), all 7 AC indices mapped.
+evidence + audit), all 10 AC indices mapped.
 
 ## Finding
 
