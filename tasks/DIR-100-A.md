@@ -11,8 +11,28 @@ children: []
 extra:
   schema: v1
 ---
-
 **type:** execution
+
+
+**Grounded facts for Plan authors (2026-08-01, from real PlanCheck rounds):**
+
+1. **Built-in gates (`dod`, `acceptance`) short-circuit in `resolveGate`**
+   (`registry.ts:100-107`: `if (gateRegistry[name]) return gateRegistry[name]`) and NEVER
+   call `loadWorkspaceGates`/`readGatesConfig`. `quay gate <id>` with no `--gate` defaults
+   to the built-in `acceptance` gate (quay.ts:1149 `const gate = vf.gate ?? "acceptance"`),
+   and `complete`/`promote` delegate to `runGate` with `gate: "acceptance"`/`"dod"` (both
+   built-ins). So `quay gate <id>` will NOT surface loader diagnostics on stderr. The
+   real-CLI stderr proof MUST use `quay gate --list` (which loads workspace gates via
+   `listGates` → `loadWorkspaceGates` → `readGatesConfig`).
+2. **CLI binary is `packages/quay/bin/quay.ts`**, NOT `quay.js` (no such file; only the
+   npm-pack `dist/quay.js` artifact exists). `node packages/quay/bin/quay.js gate --list`
+   fails MODULE_NOT_FOUND.
+3. **A config has exactly ONE `gates:` key** — unrecognized-key, wrong-nesting-level, and
+   scalar-number diagnostics are mutually exclusive shapes and CANNOT all appear in one
+   `gate --list` stderr. Each malformed shape needs its OWN fixture.
+4. **`execFileSync` does NOT capture child stderr on a zero exit** — use `spawnSync` or an
+   async stderr-stream read for real-CLI stderr assertions.
+
 
 ## Proposal
 
@@ -29,7 +49,9 @@ guard the VALUE shapes, not just top-level key membership:
   emit a diagnostic (the key IS known, so membership alone misses it);
 - `gates:` parsed as `null` must NOT crash (`Object.keys(null)` throws) — it degrades
   gracefully to "no gate sections" (matching current graceful-empty behavior);
-- a scalar `gates:` (string/number) emits a diagnostic; an array emits per-index
+- a scalar `gates:` (string/number) emits a diagnostic via an explicit `typeof` guard
+  (a naive `Object.keys(42)` scan returns `[]` and would silently emit nothing, so
+  iteration/membership alone must NOT be relied on); an array `gates:` emits per-index
   diagnostics.
 
 First child of the DIR-100 split (`split-multi-mechanism` finding). No dependencies
@@ -42,12 +64,17 @@ top-level keys of the parsed `gates:` map. For each key: if not in
 `KNOWN_GATE_SECTIONS`, emit an `error`-severity diagnostic. Additionally, for each known
 section, validate its value shape (`Array.isArray`); a non-array value emits a
 "wrong nesting level" diagnostic naming the expected array shape. Guard the `gates:`
-value itself (`typeof` + `Array.isArray`) so null/scalar/map shapes never throw.
+value itself with an explicit `typeof` guard: a scalar (string/number) emits a
+diagnostic naming the scalar (this MUST be a real `typeof` check — a naive
+`Object.keys(42)` scan returns `[]` and would emit nothing), and `Array.isArray`
+routes arrays to per-index diagnostics; null/map shapes degrade gracefully, never throw.
 
 ## Plan
 
-N/A — resolved via a human-steered milestone. The resolving milestone authors a checked
-`docs/plans/*.md` plan (DIR-117-B prepared-gate artifact) before implementation.
+See the checked milestone Plan at `docs/plans/M226-dir-100-a.md` (DIR-117-B
+prepared-gate artifact, authored for milestone M226; base revision `fc5253a1`).
+Implementation follows that Plan's staged RED/implementation/GREEN sequence with the
+standardized stopping rule (at most 3 Plan-check rounds, success only at F_i = 0).
 
 ## Finding
 
@@ -64,8 +91,10 @@ skipped (no diagnostic). `Object.keys(null)` would throw if `gates:` were null.
 2. Guard value shapes: known section with non-array value → "wrong nesting level"
    diagnostic; `gates:` null/scalar/array → graceful handling, never a crash.
 3. RED/GREEN tests: unrecognized key → diagnostic; known-key-with-map-value →
-   diagnostic; `gates:` null → no crash + no false diagnostic; clean workspace → zero
-   diagnostics.
+   diagnostic; `gates:` null → no crash + no false diagnostic; `gates:` scalar (string
+   AND number) → diagnostic each (proves the explicit `typeof` guard — a naive
+   `Object.keys(42)` scan would emit nothing); `gates:` array → one diagnostic per
+   index (count == element count); clean workspace → zero diagnostics.
 
 ## Acceptance Criteria
 
@@ -75,6 +104,11 @@ skipped (no diagnostic). `Object.keys(null)` would throw if `gates:` were null.
   level" diagnostic — the key is known, so membership alone must NOT pass it silently.
 - [ ] `gates:` parsed as null/scalar/array degrades gracefully (no TypeError) — a null
   `gates:` produces no false diagnostic (matches current graceful-empty behavior).
+- [ ] `gates:` parsed as a scalar (string or number) emits a diagnostic — falsifiable:
+  the scalar check is an explicit `typeof` guard, because a naive `Object.keys(42)`
+  scan returns `[]` and would silently emit nothing (a numeric scalar must still emit).
+- [ ] `gates:` parsed as an array emits one diagnostic per index — falsifiable: the
+  diagnostic count equals the number of array elements.
 - [ ] A correctly-configured workspace produces zero diagnostics (no false positives).
 - [ ] Tests: `packages/quay/test/gate-diagnostics.test.mjs` RED/GREEN covering the above
   (>=80% coverage on new paths).
