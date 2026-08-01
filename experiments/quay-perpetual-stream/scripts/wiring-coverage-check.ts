@@ -246,6 +246,8 @@ function wiringFindingsFromUncovered(uncovered) {
     evidence: `checkWiringCoverage() returned uncovered claim #${i + 1}; identifiers: ${claim.identifiers.map((id) => "`" + id + "`").join(", ")}`,
     claimRef: claim.identifiers.join("+"),
     disposition: "unresolved",
+    rootCauseKey: "wiring-coverage-format",
+    repairable: true,
   }));
 }
 

@@ -232,6 +232,17 @@ test("CLI: RED fixture -> verdict with >=1 BLOCKING finding from the function's 
     assert.equal(f.blocking, true);
     assert.equal(f.disposition, "unresolved");
     assert.ok(f.summary && f.evidence && f.claimRef, "finding carries the ledger shape _upsertFindings consumes");
+    // gap-wiring-coverage-rootcause-fix: every mechanical wiring-coverage finding must carry
+    // rootCauseKey so _groupBlockingByRootCause() clusters them as one root cause (not N distinct
+    // ones per finding.id), and repairable so prepare-milestone's repairable-bypass path offers
+    // one-shot focused revision instead of split.
+    assert.equal(f.rootCauseKey, "wiring-coverage-format", "rootCauseKey enables root-cause-aware clustering");
+    assert.equal(f.repairable, true, "repairable enables one-shot focused revision bypass");
+  }
+  // All findings from the same task share the same rootCauseKey (clustering gate).
+  if (verdict.findings.length >= 2) {
+    const keys = new Set(verdict.findings.map((f) => f.rootCauseKey));
+    assert.equal(keys.size, 1, "all findings from one task share the same rootCauseKey for clustering");
   }
 });
 
