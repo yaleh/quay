@@ -46,8 +46,9 @@ PlanAuthor.
 - [ ] The parent DIR-124-F4 task's `## Touches` declares `tasks/DIR-124-F.md`,
   `adr/ADR-020-runtime-contract-ground-truth-registry.md`, and `tasks/DIR-124-F4.md`.
 - [ ] The amendment is recorded before PlanAuthor of any dependent child runs.
-- [ ] No script, test, or workflow file is modified by this child (`git diff --stat` shows only the
-  task file edit + plan).
+- [ ] No script, test, or workflow file is modified by this child — `prepare-admission-check.ts`
+  and `task-schema.ts` (both mirrors) are untouched (`git diff --stat` shows only the task file edit
+  + plan), **verified** by a diff that shows zero changes to those files.
 
 ## Definition of Done
 
