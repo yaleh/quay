@@ -22,5 +22,6 @@ providers:
                                               # spawned provider process's cwd
     tasks_dir: "./tasks"                     # this sample-workspace's own tasks/ dir
     mcp_entry: ["node", "./bin/quay-native.ts", "mcp"]   # resolved relative to provider.path (cwd), NOT workspaceRoot
+    # acceptance_env: "./.quay/acceptance.env"   # per-provider env file sourced before each acceptance command (DIR-103-C); relative paths resolve against workspaceRoot
     env:
       QUAY_NATIVE_TASKS_DIR: "./tasks"       # resolved relative to workspaceRoot at launch time

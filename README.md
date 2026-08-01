@@ -368,6 +368,53 @@ node --test packages/*/test/*.test.mjs
 This is the same command every iteration of this repository's own
 development process uses to self-verify (see `docs/proposals/` for why).
 
+## Acceptance command environment
+
+When the `acceptance` gate runs (`quay gate <id>`, default gate), it spawns
+a shell command in a **clean environment** with the following contract:
+
+- **No shell init files are sourced.** The runner spawns `sh -c`, which does **not**
+  source `~/.bashrc`, `~/.profile`, or any other shell initialization file.
+- **PATH is inherited from the invoking process**, not a fixed system default.
+  The acceptance command sees the same `PATH` as the process that invoked
+  `quay gate` (typically your shell or the agent's own process).
+- **Default working directory** (`cwd`): the workspace root (where
+  `.quay/config.yml` lives). Override with `--cwd <dir>` (highest precedence),
+  the `QUAY_ACCEPTANCE_CWD` env var, or the per-gate `cwd` field in the
+  workspace's gates configuration.
+- **Default timeout**: 60000 ms (60 seconds). Override with `--timeout <ms>`
+  (highest precedence), the `QUAY_ACCEPTANCE_TIMEOUT_MS` env var, or the
+  per-gate `timeoutMs` field in the workspace's gates configuration. A
+  timeout failure names both knobs in its reason message.
+- **`acceptance_env`** (per-provider config key, DIR-103-C): a provider block
+  in `.quay/config.yml` may declare an `acceptance_env` file path. Before
+  every acceptance command dispatched through that provider, the runner
+  **dot-sources** the configured file (`. <env-file> && <command>`), making
+  its `export`-ed variables visible to the acceptance command. A relative
+  path is resolved against the workspace root. If the configured file does
+  **not** exist, the runner fails closed (exit 1) **before** executing the
+  acceptance command — the acceptance command never runs. The
+  `QUAY_ACCEPTANCE_ENV` env var overrides the config key when pre-set
+  (mirrors the `QUAY_ACCEPTANCE_CWD` / `QUAY_ACCEPTANCE_TIMEOUT_MS`
+  explicit-override-wins precedence — a pre-set env var is never clobbered).
+
+Example `.quay/config.yml` with `acceptance_env`:
+
+```yaml
+providers:
+  native:
+    enabled: true
+    # ...
+    acceptance_env: "./.quay/acceptance.env"
+```
+
+Example `.quay/acceptance.env`:
+
+```sh
+export PATH="/custom/toolchain/bin:$PATH"
+export CI=true
+```
+
 ## Deeper design and methodology material
 
 The [`docs/proposals/`](docs/proposals/) directory is **internal experiment
