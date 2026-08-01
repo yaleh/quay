@@ -108,6 +108,28 @@ Standard inherited-core DoD clauses apply.
 
 - `packages/quay/src/mcp-handlers.ts`
 - `packages/quay/src/gate/engine.ts`
-- `packages/quay/test/acceptance.test.mjs`
 - `packages/quay/test/mcp-gate-dryrun.test.mjs (new)`
 - `docs/plans/M224-dir-103-b.md`
+**Grounded facts for Plan authors (2026-08-01, from real PlanCheck rounds):**
+
+1. **`runAcceptance` has FIVE production call sites** — registry.ts:100 (the `acceptance`
+   gate), gate/factories/adr.ts:49, gate/factories/fixed-script.ts:21, gate/factories/it0.ts:31,
+   gate/factories/red-green.ts:28+32. The invariant is ONE runner DEFINITION
+   (acceptance-runner.ts:36, no duplicated implementation) — the AC5 evidence must grep the
+   DEFINITION site, never claim "a single call site" (that grep would be refuted).
+2. **AC2's RED premise is vacuous**: `gate_run` on the current codebase never mutates task
+   status regardless of dryRun (the dryRun:true status-unchanged case PASSES pre-change).
+   The real RED/GREEN differentiator is AC1 — a GateEvent IS appended without dryRun and is
+   NOT with dryRun:true. AC2 is a safety assertion that happens to already hold; do not
+   frame it as RED-then-GREEN.
+3. **Node `--experimental-test-coverage` merges child-process coverage only on a CLEAN
+   child exit.** A child terminated by SIGTERM/SIGKILL contributes ZERO coverage — the
+   per-file table is empty. If the real-`quay mcp` subprocess test teardown uses
+   `child.kill`, engine.ts's `if (!dryRun) appendGateEvent` guard and the handler's
+   `dryRun,` forward never appear in the coverage report and AC6 is undemonstrable. Use a
+   clean-exit teardown (send a graceful quit command, or assert coverage on the parts not
+   gated behind the killed subprocess).
+4. **`packages/quay/test/acceptance.test.mjs` is NOT a DIR-103-B touch** — the MCP dry-run
+   test lives in the new `mcp-gate-dryrun.test.mjs`; the `(or sibling MCP-surface test)`
+   parenthetical was removed. Keep acceptance.test.mjs out of Touches (it is not edited by
+   this child).
