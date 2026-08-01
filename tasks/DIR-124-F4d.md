@@ -49,6 +49,12 @@ authoritative task body. → AC1: prose reconciled; ADR-020 note appended.
   content untouched).
 - [ ] `tasks/DIR-124-F.md` and `adr/ADR-020` are declared in the parent F4 task's `## Touches`
   (via the F4-M5 self-amendment) before PlanAuthor.
+- [ ] The reconciliation is falsifiable and mechanically satisfiable: the parent task body's "five
+  fact classes" prose is corrected to the canonical 8-category enumeration with `evidence-surface` as
+  class 6 of 8, and `adr/ADR-020-runtime-contract-ground-truth-registry.md` carries the append-only
+  amendment note — **verified** by a real-object diff of the parent body (no count-drift prose remains)
+  and a real grep confirming the full-path amendment note was appended with no prior ADR content
+  rewritten.
 
 ## Definition of Done
 

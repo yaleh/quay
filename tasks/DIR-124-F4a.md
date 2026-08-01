@@ -53,6 +53,23 @@ category fails `--validate`/`--promote` closed pre-dispatch. → AC1: module exi
 - [ ] The CLI is `isDirectEntry`-guarded; `--selftest` exits 0 and exercises
   validate/promote/hash round-trip.
 - [ ] Both mirrors byte-identical (`diff` exit 0); tests RED/GREEN per `scripts/test.sh`.
+- [ ] `--validate --receipt <preparation.json>` binds the registry `version` + `contentHash` into the
+  DIR-124-B `StageReceiptEnvelope` as a `groundTruthRegistry {version, contentHash}` block — **verified**
+  by a real `--validate --receipt` run emitting the binding; when a binding is present the check is NOT
+  silently skipped (fail-closed).
+- [ ] `--inject [--categories <cat,...>]` renders a category-filtered, prompt-ready projection of the
+  registry — **verified** by a real CLI run with `--categories` filtering and asserting the emitted
+  block format.
+- [ ] `--promote <fact-json> [--file <registry.json>]` calls `promoteFact` and, on ok, writes the new
+  registry back atomically (temp file + rename); on unknown-category/duplicate/validation failure it
+  invokes `emitFail` with **no write** — **verified** by a real-object promote-success + promote-failure
+  fixture.
+- [ ] Both mirrors are byte-identical with the `// Byte-identical mirror:` header comment, per the M238
+  `build-evidence-manifest.ts` / `gate-script-base.ts` precedent — **proven** by a mirror-parity test
+  (M238 AC12 pattern) and DoD `diff` exit 0.
+- [ ] The module imports the mirrored `gate-script-base.ts` and invokes `isDirectEntry`/`parseArgs`/
+  `emitPass`/`emitFail`/`requireArg` from it — **evidenced** by a production callsite grep and a real
+  `--selftest` run exercising the round-trip.
 
 ## Definition of Done
 

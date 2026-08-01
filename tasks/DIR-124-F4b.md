@@ -47,6 +47,15 @@ schema-validated, versioned, hash-bound registry data.
 - [ ] `ground-truth-registry.ts --validate` on the seeded data exits 0 (schema + category whitelist
   + content hash).
 - [ ] Both mirrors byte-identical (`diff` exit 0); tests RED/GREEN per `scripts/test.sh`.
+- [ ] The `module-signatures` seed facts name the real `packages/quay/src` surface —
+  `validateConfig({workspaceRoot, checkFiles}) -> {ok, issues}` (`packages/quay/src/config-validate.ts:790`)
+  and `runAcceptance` with `json` (`acceptance-runner.ts:48`) — **verified** by a `--validate` run and a
+  real grep confirming each seeded identifier resolves to production code.
+- [ ] The `gate-resolution` seed facts name the real gate surface — built-ins short-circuit in
+  `resolveGate` (`packages/quay/src/gate/ registry.ts:52`) with `loadWorkspaceGates`/`readGatesConfig`,
+  and the CLI verbs `quay gate <id> --gate acceptance` / `quay gate --list` / `quay task get` /
+  `task view <id> --json` — **verified** by a `--validate` run and a callsite grep confirming
+  `resolveGate` short-circuits built-ins.
 
 ## Definition of Done
 

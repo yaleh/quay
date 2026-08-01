@@ -58,6 +58,15 @@ AC1/AC4/AC5 (unified schema, producer provenance, evidence-class compatibility).
   with populated `acEvidence` (no `planned-ac-unmatched` false positive on a matching per-phase row).
 - [ ] Both mirrors byte-identical (`diff` exit 0); tests RED/GREEN per `scripts/test.sh`; existing
   build-evidence tests stay GREEN.
+- [ ] The collector unwraps `.manifest.phases` (the `CompositePhase[]` envelope from `composite-build.ts`),
+  maps each entry into `PhaseEvidence[]` via `mapEvidenceToTasks(phases, evidence)`, and produces rows
+  shaped `{taskId, files, commits, tests}` — **evidenced** by a real-object composite dispatch whose
+  manifest `acEvidence` rows are populated from the per-phase envelope.
+- [ ] The workflow Build-Evidence phase passes the per-phase evidence flags through at the production
+  callsite: `.claude/workflows/execute-milestone.js` and `plugin/workflows/execute-milestone.js` push
+  `--per-phase-evidence` (composite) and `--iteration-report` (width-1) into the collector invocation —
+  **verified** by a callsite grep of both workflow mirrors showing the flags are pushed for BOTH the
+  composite and width-1 paths.
 
 ## Definition of Done
 
@@ -74,6 +83,8 @@ Standard inherited-core DoD clauses apply.
 - `plugin/scripts/build-evidence-collector.ts`
 - `experiments/quay-perpetual-stream/scripts/build-evidence-manifest.ts`
 - `plugin/scripts/build-evidence-manifest.ts`
+- `.claude/workflows/execute-milestone.js`
+- `plugin/workflows/execute-milestone.js`
 - `experiments/quay-perpetual-stream/test/*build-evidence*`
 - `plugin/test/*build-evidence*`
 - `docs/plans/M264-gap-build-evidence-per-phase.md`
