@@ -87,3 +87,4 @@ Standard inherited-core DoD clauses apply.
 
 - `packages/quay/src/mcp-handlers.ts`
 - `packages/quay/test/acceptance.test.mjs` (or sibling MCP-surface test)
+- `docs/plans/M224-dir-103-b.md`

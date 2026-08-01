@@ -113,3 +113,4 @@ Standard inherited-core DoD clauses apply.
 - `packages/quay/test/acceptance.test.mjs`
 - `README.md`
 - `packages/quay-native/examples/sample-workspace/.quay/config.yml`
+- `docs/plans/M225-dir-103-c.md`
