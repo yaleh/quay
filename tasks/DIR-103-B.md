@@ -53,11 +53,11 @@ handler performs no local skip logic. `dryRun: false`/omitted behaves exactly as
 
 ## Plan
 
-Resolved via milestone M224 (human-steered). Checked Plan: `docs/plans/M224-dir-103-b.md`
-(DIR-117-B prepared-gate artifact) — 7 ordered stages (RED real-subprocess test → engine
-`RunGateArgs.dryRun` guard + handler forward → GREEN verify → schema/single-place grep →
-coverage → full-suite → post-Land audit), all 6 AC items mapped, base revision `3df86b6a`.
-
+Resolved via milestone M224. Checked Plan: `docs/plans/M224-dir-103-b.md` (base revision
+`96123543`, 2026-08-01) — manually authored after 4 prepare-milestone attempts exhausted
+the epoch full-review cap; the task body (corrected through PlanCheck rounds) is
+authoritative. 4 mechanical stages (RED → engine+handler wiring → GREEN/coverage →
+real-callsite evidence + audit), all 6 AC indices mapped.
 ## Finding
 
 `packages/quay/src/mcp-handlers.ts:286-303` — the `gate_run` tool schema exposes
