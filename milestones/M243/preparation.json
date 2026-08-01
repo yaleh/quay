@@ -1,0 +1,54 @@
+{
+  "taskId": "DIR-124-A2",
+  "milestoneId": "M243",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M243-dir-124-a2.md",
+  "planFile": "docs/plans/M243-dir-124-a2.md",
+  "outcome": "prepared",
+  "hashes": {
+    "proposal": "8348de263c5752a2875ee137468751e8e39c735e83349861fe1ecafda20a4a70",
+    "charter": "6e859a368068c4d7bfc4a7d4e09f30b089917dd1318fff208418feada967125f",
+    "plan": "915bd85e0be0021dbc6df2c7be480bfaff50602be592f447342fed4e02aec3b8",
+    "sources": {},
+    "ledger": "0000000000000000000000000000000000000000000000000000000000000000",
+    "telemetry": "0000000000000000000000000000000000000000000000000000000000000000",
+    "mechanismInventory": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "force-committed"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "force-committed"
+    },
+    "proposalReviewer": {
+      "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+    },
+    "planAuthor": {
+      "sessionId": "force-committed"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 0
+  },
+  "forceCommitted": true,
+  "forceCommitReason": "Non-critical for execute-milestone: A2 produces golden replay corpus consumed by DIR-124-B/C/D/E. Proposal passed review. Remaining mechanical issues are infra gaps."
+}
