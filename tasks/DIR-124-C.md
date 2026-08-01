@@ -300,6 +300,34 @@ an executable kernel that owns transitions and rejects adapters that exceed thei
   the kernel; remaining prose is limited to irreducible stage judgment.
 - [ ] Task routing, gate lists, test profiles, and resource budgets remain visibly isolated for
   DIR-124-D rather than being silently reimplemented in the kernel.
+- [ ] Both `.claude/workflows/execute-milestone.js` and `plugin/workflows/execute-milestone.js` are
+  compatibility entry shims that normalize `$a`, build a minimal RunIdentity, invoke the kernel CLI
+  (`node --experimental-strip-types <abs>/workflow-kernel.ts --run '<args-json>'`), and return the
+  kernel's result verbatim — **verified** by a real dispatch through each mirror shim.
+- [ ] `validateEffects` is unit-testable with no git, and the shim invokes the kernel's
+  `--enforce-effects` mode around each adapter dispatch — **verified** by a no-git fixture and a
+  real-object dispatch log.
+- [ ] The only justified `prepare-milestone.js` edits are (a) the Receipt phase emitting a stable
+  `receiptType`/`schemaVersion` marker + the hash surface the kernel's Prepared adapter validates
+  (in the DIR-124-B envelope), and (b) any field needed to distinguish a DIR-117-B preparation
+  receipt — **verified** by a callsite diff showing no other prepare-milestone phase was kernelized.
+- [ ] `workflow-kernel.ts` owns the `StageSpec` registry
+  (readSet/writeSet/semanticResources/resourceClaims/outputSchema) — **verified** by a production
+  callsite grep showing the registry is defined only in the kernel and consumed through adapters.
+- [ ] The Build adapter invokes `composite-build.ts` (`planPhaseExecution`, `mapEvidenceToTasks`)
+  and writes only to the candidate worktree; singleton path preserved — **evidenced** by a
+  real-object Build dispatch showing a worktree-only diff.
+- [ ] The Build adapter invokes `build-evidence-collector.ts` / `build-evidence-manifest.ts`
+  (`validateManifestShape`, `sha256File`/`manifestRefForReceipt()`) and binds the manifest hash into
+  the DIR-124-B Build receipt — **verified** by a real-object receipt hash binding.
+- [ ] The Audit adapter invokes `composite-audit.ts` (`runReadOnlyAuditShard`,
+  `combineShardVerdicts`, snapshot guard) and reads the build-evidence manifest only as an evidence
+  index, independently checking raw evidence — **evidenced** by a real-object Audit dispatch through
+  the adapter.
+- [ ] The Land adapter invokes `composite-land.ts` `buildLandTransaction` +
+  `milestone-worktree.ts` (`land-lock-acquire/release`, merge, remove, `clean-stale`) and is the
+  SOLE fenced applier to integration/task/ABSORB/dashboard/backlog/counter state — **evidenced** by
+  a real-object Land proof and a callsite diff.
 
 ## Definition of Done
 
