@@ -55,8 +55,8 @@ handler performs no local skip logic. `dryRun: false`/omitted behaves exactly as
 
 Resolved via milestone M224 (human-steered). Checked Plan: `docs/plans/M224-dir-103-b.md`
 (DIR-117-B prepared-gate artifact) — 7 ordered stages (RED real-subprocess test → engine
-`RunGateArgs.dryRun` guard + handler forward → GREEN verify → full-suite → post-Land
-audit), all 6 AC items mapped, base revision `20d16b28`.
+`RunGateArgs.dryRun` guard + handler forward → GREEN verify → schema/single-place grep →
+coverage → full-suite → post-Land audit), all 6 AC items mapped, base revision `3df86b6a`.
 
 ## Finding
 
@@ -112,9 +112,9 @@ Standard inherited-core DoD clauses apply.
 - `docs/plans/M224-dir-103-b.md`
 **Grounded facts for Plan authors (2026-08-01, from real PlanCheck rounds):**
 
-1. **`runAcceptance` has FIVE production call sites** — registry.ts:100 (the `acceptance`
-   gate), gate/factories/adr.ts:49, gate/factories/fixed-script.ts:21, gate/factories/it0.ts:31,
-   gate/factories/red-green.ts:28+32. The invariant is ONE runner DEFINITION
+1. **`runAcceptance` has SIX production call sites** — registry.ts:100 (the `acceptance`
+   gate), gate/factories/{adr.ts:49, fixed-script.ts:21, it0.ts:31, red-green.ts:28+32,
+   test-pass.ts:23}. The invariant is ONE runner DEFINITION
    (acceptance-runner.ts:36, no duplicated implementation) — the AC5 evidence must grep the
    DEFINITION site, never claim "a single call site" (that grep would be refuted).
 2. **AC2's RED premise is vacuous**: `gate_run` on the current codebase never mutates task
@@ -129,6 +129,19 @@ Standard inherited-core DoD clauses apply.
    `dryRun,` forward never appear in the coverage report and AC6 is undemonstrable. Use a
    clean-exit teardown (send a graceful quit command, or assert coverage on the parts not
    gated behind the killed subprocess).
+
+5. **The MCP gate_run handler needs THREE edits, not two**: (a) inputSchema `dryRun:
+   z.boolean().optional()` after the `cwd` field (mcp-handlers.ts:300), (b) add `dryRun`
+   to the handler's DESTRUCTURED parameter list at mcp-handlers.ts:303 (`async ({
+
+   provider, id, gate, timeoutMs, file, cwd }) =>`) — WITHOUT this, `dryRun` is not bound
+   in handler scope and the forward always passes undefined (silent no-op), and (c) add
+   `dryRun,` to the forwarded `runGate({...})` args at mcp-handlers.ts:321.
+6. **mcp-server.test.mjs line anchors**: gate_run callTool assertions at 1394-1410
+   (GATE-PASS 1396, GATE-FAIL 1402, NOPE-999 1408); cwd-threading assertions at
+   1435-1452 (callTool 1437/1443/1449). Lines 1417-1430 are GATE-CWD task-creation
+   execFileSync, not threading assertions.
+
 4. **`packages/quay/test/acceptance.test.mjs` is NOT a DIR-103-B touch** — the MCP dry-run
    test lives in the new `mcp-gate-dryrun.test.mjs`; the `(or sibling MCP-surface test)`
    parenthetical was removed. Keep acceptance.test.mjs out of Touches (it is not edited by
