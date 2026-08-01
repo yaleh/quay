@@ -107,27 +107,27 @@ emitted).
 
 ## Acceptance Criteria
 
-- [ ] `QUAY_GATE_DIAGNOSTICS` unset → diagnostics go to stderr, and `quay gate --list`
+- [x] `QUAY_GATE_DIAGNOSTICS` unset → diagnostics go to stderr, and `quay gate --list`
   stdout is byte-identical to pre-change (no JSON mode needed — the claim is about stdout
   invariance).
-- [ ] `QUAY_GATE_DIAGNOSTICS=quiet` suppresses all diagnostics.
-- [ ] `QUAY_GATE_DIAGNOSTICS=/path/to/log` appends diagnostics to that file.
-- [ ] An unwritable/invalid `QUAY_GATE_DIAGNOSTICS` file path (ENOENT etc.) is fail-closed:
+- [x] `QUAY_GATE_DIAGNOSTICS=quiet` suppresses all diagnostics.
+- [x] `QUAY_GATE_DIAGNOSTICS=/path/to/log` appends diagnostics to that file.
+- [x] An unwritable/invalid `QUAY_GATE_DIAGNOSTICS` file path (ENOENT etc.) is fail-closed:
   the append stream's `error` listener falls back to `process.stderr` and `gate --list`
   exits 0 (never an uncaught WriteStream `error`) — asserted by a RED/GREEN test that runs
   `gate --list` against a bad path and observes the diagnostic on stderr, not prose.
-- [ ] Severity taxonomy is consistent: unrecognized-key and missing-field are `error`;
+- [x] Severity taxonomy is consistent: unrecognized-key and missing-field are `error`;
   extra-fields-only is `warn` (grep-confirmable, not prose).
-- [ ] Tests: `packages/quay/test/gate-diagnostics.test.mjs` RED/GREEN covering
+- [x] Tests: `packages/quay/test/gate-diagnostics.test.mjs` RED/GREEN covering
   stderr/quiet/file modes + severity labels (>=80% coverage on new paths).
 
 ## Definition of Done
 
 Standard inherited-core DoD clauses apply.
 
-- [ ] Landed on `master` under human-steered discipline.
-- [ ] Real run shows diagnostics on stderr (or suppressed/file per env), stdout invariant.
-- [ ] A fresh independent audit finds no refutation.
+- [x] Landed on `master` under human-steered discipline.
+- [x] Real run shows diagnostics on stderr (or suppressed/file per env), stdout invariant.
+- [x] A fresh independent audit finds no refutation.
 
 ## Human verification
 
