@@ -1,0 +1,19 @@
+{
+  "mechanisms": [
+    {
+      "id": "dir-100-b-per-entry-validation",
+      "owner": "DIR-100-B (M227)",
+      "proofSurface": "packages/quay/src/gate/config/loader.ts",
+      "dependsOn": [],
+      "independentlyShippable": true,
+      "rationale": "Per-entry required-field validation + stderr error-severity diagnostic + skip-preservation in loadWorkspaceGates is ONE atomic behavior contract; the five entry-bearing gate arrays (it0/fixed/testPass/coverageFloor/redGreen) are call-site variants of the same validate-and-emit contract, not independent mechanisms. A strict subset (e.g. it0-only) cannot ship without violating the parent DIR-100 AC2 'every missing-required-field case across all five gate types emits a diagnostic'. The diagnostic channel (QUAY_GATE_DIAGNOSTICS) is DIR-100-C's separate mechanism and is explicitly out of this Proposal's scope. Production callsite proof surface: `gate --list` (packages/quay/bin/quay.ts:1114-1132) → listGates (packages/quay/src/gate/registry.ts:126-127) → loadWorkspaceGates."
+    }
+  ],
+  "inventory": {
+    "ok": true,
+    "count": 1,
+    "inventoryHash": "mi-14075fc4",
+    "mechanismCount": 1
+  },
+  "source": "typed"
+}

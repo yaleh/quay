@@ -53,8 +53,10 @@ missing-`script` case had an AC).
 
 ## Plan
 
-Authored at `docs/plans/M227-dir-100-b.md` (DIR-117-B prepared-gate artifact) — the
-resolving milestone's checked plan, per DIR-117-B prepared-gate discipline.
+Authored at `docs/plans/M227-dir-100-b.md` (DIR-117-B prepared-gate artifact; base
+revision `5bc637d2`, current HEAD short-sha at Plan finalization, 2026-08-01).
+Implementation follows that Plan's staged RED/implementation/GREEN sequence with the
+standardized stopping rule (at most 3 Plan-check rounds, success only at F_i = 0).
 
 ## Finding
 

@@ -1,0 +1,83 @@
+{
+  "taskId": "DIR-100-B",
+  "milestoneId": "M227",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M227-dir-100-b.md",
+  "planFile": "docs/plans/M227-dir-100-b.md",
+  "ledgerFile": "milestones/M227/proposal-ledger.json",
+  "telemetryFile": "milestones/prepare-telemetry/DIR-100-B/4c4b0de7da2b.json",
+  "mechanismInventoryFile": "milestones/M227/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "7022f22d2ba3e773fb8403445641f10b9b2d725e7e9e36bae233efd15b0a5881",
+    "charter": "18d403838335500dd8f3d68152affcea013ff6dbe8aba4cd74f627307d11d328",
+    "plan": "02240344a582213d743f71f2e83d544e58680631806d1192df26628daff00ff9",
+    "sources": {
+      "packages/quay/src/gate/config/loader.ts": "c61a9207fefe48997620665cdd2ccf9cdc1df0ffb5681d487fb8d41a99aa65a0",
+      "packages/quay/src/gate/config/types.ts": "96074f839b9677ab0eac74f21284ead4ca839f34b3003c61e6c88c23f0a630f2",
+      "packages/quay/bin/quay.ts": "70cfaf12071b3e96d57045e83b3548e09a25030aaca16a3fa5f97d8bf94882d8",
+      "packages/quay/src/gate/registry.ts": "5bfe062fa3d795840e8fe949985c990ff656180ab82e9eb968b5d91912cd5e79",
+      "packages/quay/test/gate-config-loader.test.mjs": "d2c7ef3163017c68f7c79a81829f613ea75c9fdf36cd7f357c2e49f82982c69b"
+    },
+    "ledger": "92d2447bd6cb130e18effda63c795c50884821bd181df8d0bc99f47a0cdbe800",
+    "telemetry": "8554db866363eab6ba9c1ef8ff95f26411838681a4ce5a1228573693abdf2c8e",
+    "mechanismInventory": "5e7f47a1902f5ef5762e111fb2e862908da61ef4e041556d47ff17d9036804e4"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 3,
+    "findings": 0
+  },
+  "touches": [
+    "packages/quay/src/gate/config/loader.ts",
+    "packages/quay/test/gate-diagnostics.test.mjs",
+    "docs/plans/M227-dir-100-b.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 2,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      },
+      {
+        "round": 3,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 0,
+    "proposalReviewRounds": 1,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785559528958,
+    "endedAtMs": 1785559528958,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "dc523f26cfb2d14e"
+      }
+    ]
+  }
+}
