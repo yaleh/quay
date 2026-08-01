@@ -97,7 +97,7 @@
 // blocks), Phase 3 serial (blocks 14-16, 23-25, shared workspace read-only).
 // Output prefixing via makeAssert(tag) for concurrent blocks.
 
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -167,19 +167,35 @@ const AC_DOD_UNCHECKED =
   "## DoD\n- [ ] a sufficiently long definition-of-done line for the minimum-content check\n";
 
 function run(args, opts = {}) {
-  try {
-    const out = execFileSync("node", [coreBin, ...args], {
-      encoding: "utf8",
-      ...opts,
+  return new Promise((resolve) => {
+    const child = execFile("node", [coreBin, ...args], { encoding: "utf8", ...opts });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c) => (stdout += c));
+    child.stderr.on("data", (c) => (stderr += c));
+    child.on("close", (code, signal) => {
+      resolve({ status: signal ? (code ?? 1) : (code ?? 0), stdout, stderr });
     });
-    return { status: 0, stdout: out, stderr: "" };
-  } catch (err) {
-    return {
-      status: err.status ?? 1,
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? String(err),
-    };
-  }
+    child.on("error", (err) => {
+      resolve({ status: err.status ?? 1, stdout: "", stderr: String(err) });
+    });
+  });
+}
+
+function runNative(args, opts = {}) {
+  return new Promise((resolve) => {
+    const child = execFile("node", [nativeBin, ...args], { encoding: "utf8", ...opts });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c) => (stdout += c));
+    child.stderr.on("data", (c) => (stderr += c));
+    child.on("close", (code, signal) => {
+      resolve({ status: signal ? (code ?? 1) : (code ?? 0), stdout, stderr });
+    });
+    child.on("error", (err) => {
+      resolve({ status: err.status ?? 1, stdout: "", stderr: String(err) });
+    });
+  });
 }
 
 async function main() {
@@ -959,15 +975,15 @@ async function block13() {
   );
 
   // Seed tasks with two distinct prefixes
-  execFileSync("node", [nativeBin, "task", "create", "PRFA-001", "--title", "Prefix A task one",
+  await runNative(["task", "create", "PRFA-001", "--title", "Prefix A task one",
     "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
   });
-  execFileSync("node", [nativeBin, "task", "create", "PRFA-002", "--title", "Prefix A task two",
+  await runNative(["task", "create", "PRFA-002", "--title", "Prefix A task two",
     "--status", "todo", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
   });
-  execFileSync("node", [nativeBin, "task", "create", "PRFB-001", "--title", "Prefix B task one",
+  await runNative(["task", "create", "PRFB-001", "--title", "Prefix B task one",
     "--status", "done", "--body", VALID_SECTIONS + AC_DOD_CHECKED], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: prefixTasksDir },
   });
@@ -1190,18 +1206,18 @@ async function block17() {
 
   // Create tasks in order: SORT-A, then SORT-B, then SORT-C.
   // Touch each file 100ms apart to ensure distinct mtimes.
-  execFileSync("node", [nativeBin, "task", "create", "SORT-A", "--title", "Sort A (oldest)",
+  await runNative(["task", "create", "SORT-A", "--title", "Sort A (oldest)",
     "--status", "todo", "--body", SORT_BODY], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
   });
   // Small sleep between creates to ensure distinct mtime.
   const t0 = Date.now(); while (Date.now() - t0 < 50) { /* spin */ }
-  execFileSync("node", [nativeBin, "task", "create", "SORT-B", "--title", "Sort B (middle)",
+  await runNative(["task", "create", "SORT-B", "--title", "Sort B (middle)",
     "--status", "todo", "--body", SORT_BODY], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
   });
   const t1 = Date.now(); while (Date.now() - t1 < 50) { /* spin */ }
-  execFileSync("node", [nativeBin, "task", "create", "SORT-C", "--title", "Sort C (most recent)",
+  await runNative(["task", "create", "SORT-C", "--title", "Sort C (most recent)",
     "--status", "todo", "--body", SORT_BODY], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: sortTasksDir },
   });
@@ -1277,17 +1293,17 @@ async function block18() {
 
   const ML_BODY = VALID_SECTIONS + AC_DOD_CHECKED;
   // MBOTH-1: has both labels "bug" and "cli"
-  execFileSync("node", [nativeBin, "task", "create", "MBOTH-1", "--title", "Has both labels",
+  await runNative(["task", "create", "MBOTH-1", "--title", "Has both labels",
     "--status", "todo", "--body", ML_BODY, "--labels", "bug,cli"], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mlTasksDir },
   });
   // MBUG-1: has only "bug"
-  execFileSync("node", [nativeBin, "task", "create", "MBUG-1", "--title", "Has only bug",
+  await runNative(["task", "create", "MBUG-1", "--title", "Has only bug",
     "--status", "todo", "--body", ML_BODY, "--labels", "bug"], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mlTasksDir },
   });
   // MNONE-1: no labels
-  execFileSync("node", [nativeBin, "task", "create", "MNONE-1", "--title", "Has no labels",
+  await runNative(["task", "create", "MNONE-1", "--title", "Has no labels",
     "--status", "todo", "--body", ML_BODY], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: mlTasksDir },
   });
@@ -1350,17 +1366,17 @@ async function block19() {
 
   const ML_BODY = VALID_SECTIONS + AC_DOD_CHECKED;
   // SRCH-1: title contains "bootstrap" (should match --search bootstrap)
-  execFileSync("node", [nativeBin, "task", "create", "SRCH-1", "--title", "Quay bootstrap task",
+  await runNative(["task", "create", "SRCH-1", "--title", "Quay bootstrap task",
     "--status", "todo", "--body", ML_BODY], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir },
   });
   // SRCH-2: title contains "dashboard" (should NOT match --search bootstrap)
-  execFileSync("node", [nativeBin, "task", "create", "SRCH-2", "--title", "Dashboard setup",
+  await runNative(["task", "create", "SRCH-2", "--title", "Dashboard setup",
     "--status", "todo", "--body", ML_BODY], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir },
   });
   // SRCH-3: title contains "Bootstrap" (case-insensitive should also match --search bootstrap)
-  execFileSync("node", [nativeBin, "task", "create", "SRCH-3", "--title", "Bootstrap configuration",
+  await runNative(["task", "create", "SRCH-3", "--title", "Bootstrap configuration",
     "--status", "done", "--body", ML_BODY], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srchTasksDir },
   });
@@ -1450,12 +1466,12 @@ async function block19() {
     const srch4Opts = { cwd: srch4WorkspaceRoot, encoding: "utf8" };
     // BSRCH-1: unique term ONLY in body, not in title
     const bodyWithUniqueToken = VALID_SECTIONS + "\nxyzzy-unique-term appears here in the body\n" + AC_DOD_CHECKED;
-    execFileSync("node", [nativeBin, "task", "create", "BSRCH-1", "--title", "Unrelated title",
+    await runNative(["task", "create", "BSRCH-1", "--title", "Unrelated title",
       "--status", "todo", "--body", bodyWithUniqueToken], {
       env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srch4TasksDir },
     });
     // BSRCH-2: control — term NOT in title or body; must be excluded
-    execFileSync("node", [nativeBin, "task", "create", "BSRCH-2", "--title", "Other task",
+    await runNative(["task", "create", "BSRCH-2", "--title", "Other task",
       "--status", "todo", "--body", ML_BODY], {
       env: { ...process.env, QUAY_NATIVE_TASKS_DIR: srch4TasksDir },
     });
@@ -1511,12 +1527,12 @@ async function block20() {
   );
   const hdngOpts = { cwd: hdngWorkspaceRoot, encoding: "utf8" };
   // HDNG-1: body is ONLY heading lines — searching "Proposal" must NOT return this task
-  execFileSync("node", [nativeBin, "task", "create", "HDNG-1", "--title", "Headings only",
+  await runNative(["task", "create", "HDNG-1", "--title", "Headings only",
     "--status", "todo", "--body", "## Proposal\n## Plan\n## AC\n## DoD\n"], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: hdngTasksDir },
   });
   // HDNG-2: body has "proposal" in actual prose — must MATCH
-  execFileSync("node", [nativeBin, "task", "create", "HDNG-2", "--title", "Prose body",
+  await runNative(["task", "create", "HDNG-2", "--title", "Prose body",
     "--status", "todo", "--body", VALID_SECTIONS + "\nThis task is a proposal for improvement.\n" + AC_DOD_CHECKED], {
     env: { ...process.env, QUAY_NATIVE_TASKS_DIR: hdngTasksDir },
   });
@@ -1570,7 +1586,7 @@ async function block21() {
   const env37 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx37TasksDir };
 
   // Create one ready task (status != done, so filtering by done returns empty)
-  execFileSync("node", [nativeBin, "task", "create", "QRDY-1",
+  await runNative(["task", "create", "QRDY-1",
     "--title", "A ready task",
     "--status", "ready",
     "--labels", "some-label"],
@@ -1628,9 +1644,9 @@ async function block22() {
   const env45 = { ...process.env, QUAY_NATIVE_TASKS_DIR: qx45TasksDir };
 
   // Seed two tasks: one with prefix QX, one without
-  execFileSync("node", [nativeBin, "task", "create", "QX-T1", "--title", "QX prefix task", "--status", "todo"],
+  await runNative(["task", "create", "QX-T1", "--title", "QX prefix task", "--status", "todo"],
     { env: env45 });
-  execFileSync("node", [nativeBin, "task", "create", "OTHER-1", "--title", "Other prefix task", "--status", "todo"],
+  await runNative(["task", "create", "OTHER-1", "--title", "Other prefix task", "--status", "todo"],
     { env: env45 });
 
   // (a) --prefix QX --json must produce valid JSON (no # filtered: comment)
