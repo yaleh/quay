@@ -11,8 +11,21 @@ children: []
 extra:
   schema: v1
 ---
-
 **type:** execution
+
+
+**Cross-child shared-file contract (2026-08-01, from PlanCheck):**
+
+DIR-100-A/B/C all touch `packages/quay/src/gate/config/loader.ts` AND create/append
+`packages/quay/test/gate-diagnostics.test.mjs`. They MUST execute serially (not
+concurrently — same files), and the TEST FILE's top-level helpers are owned by the
+FIRST child (DIR-100-A): it declares `tmpWs(tag)` and a `process.stderr.write` recorder.
+B and C MUST NOT re-declare `tmpWs` or any same-named helper — re-declaring a top-level
+const in the same module is a duplicate-identifier SyntaxError that breaks the WHOLE
+merged test file. B/C either (a) reuse the helper A declared (same-module scope), or
+(b) use a distinct name (e.g. `tmpWsB`). The Plan must state this explicitly, not assume
+"APPEND with ZERO edits" avoids the collision.
+
 
 ## Proposal
 
@@ -40,8 +53,8 @@ missing-`script` case had an AC).
 
 ## Plan
 
-N/A — resolved via a human-steered milestone. The resolving milestone authors a checked
-`docs/plans/*.md` plan (DIR-117-B prepared-gate artifact) before implementation.
+Authored at `docs/plans/M227-dir-100-b.md` (DIR-117-B prepared-gate artifact) — the
+resolving milestone's checked plan, per DIR-117-B prepared-gate discipline.
 
 ## Finding
 
