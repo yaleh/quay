@@ -1,0 +1,19 @@
+{
+  "mechanisms": [
+    {
+      "id": "dir-100-a-fail-loud-gates-scan",
+      "owner": "DIR-100-A",
+      "proofSurface": "packages/quay/src/gate/config/loader.ts:readGatesConfig",
+      "dependsOn": [],
+      "independentlyShippable": true,
+      "rationale": "One atomic fail-loud contract — scan the parsed `gates:` map's top-level keys and guard value shapes (unrecognized key / known-key-with-map / null / scalar / array), emitting self-contained console.error stderr diagnostics — all lands in the single code file in the touch set (loader.ts readGatesConfig), with a real production proof surface (`quay gate --list` via listGates -> loadWorkspaceGates -> readGatesConfig; MCP gate_list; any workspace-declared-gate invocation). The shape-guard variants are call-site variants of one behavior contract, not independently valuable mechanisms (the null guard only exists because the scan adds Object.keys); the new test file and KNOWN_GATE_SECTIONS const are proof/inputs of this mechanism, not separate mechanisms. Independent of DIR-100-B (per-entry validation) and deliberately does NOT consume DIR-100-C's channel."
+    }
+  ],
+  "inventory": {
+    "ok": true,
+    "count": 1,
+    "inventoryHash": "mi-d01e7f22",
+    "mechanismCount": 1
+  },
+  "source": "typed"
+}

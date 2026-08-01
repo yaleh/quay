@@ -1,0 +1,80 @@
+{
+  "taskId": "DIR-100-A",
+  "milestoneId": "M226",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M226-dir-100-a.md",
+  "planFile": "docs/plans/M226-dir-100-a.md",
+  "ledgerFile": "milestones/M226/proposal-ledger.json",
+  "telemetryFile": "milestones/prepare-telemetry/DIR-100-A/9f6772f6d6a9.json",
+  "mechanismInventoryFile": "milestones/M226/mechanism-inventory.json",
+  "hashes": {
+    "proposal": "21f8ec7614be6c26be27e0e72694c7a7e7e2badbbfb7d433178cc7306fd71a0a",
+    "charter": "bcce10a24cd4ab35a0edcc5a50bb864e84e7435299f83bd4d0ad423c7b6518cf",
+    "plan": "c1959b1b0783970518e5d597de299a38f170034ebdb5422db7ca8b8ad768a0fc",
+    "sources": {
+      "packages/quay/src/gate/config/loader.ts": "c61a9207fefe48997620665cdd2ccf9cdc1df0ffb5681d487fb8d41a99aa65a0",
+      "packages/quay/bin/quay.ts": "70cfaf12071b3e96d57045e83b3548e09a25030aaca16a3fa5f97d8bf94882d8",
+      "packages/quay/src/gate/registry.ts": "5bfe062fa3d795840e8fe949985c990ff656180ab82e9eb968b5d91912cd5e79",
+      "packages/quay/src/gate/lifecycle.ts": "5e7dbddb75e404a6f502efa23115c329cb3e87467bb7060f8ca602b304dbc7a3",
+      "packages/quay/src/mcp-server.ts": "b2697595ca5cd053ea94438b6182bf3dca6cdf961ba4e8477e10bbd5b68c7516",
+      "packages/quay/src/mcp-handlers.ts": "80a84a289940304d7f35df992df93c93098aa26279ebcee40b446d0df8f94856",
+      "packages/quay/src/gate/engine.ts": "27c26399605b65c3effdd75a284dccedf8671c94dad7b2b984e5fee320854ae0",
+      "packages/quay/src/gate/config/index.ts": "fc05ca6f7bf0c2507a9c4167d9207fa4ed2bcf1eb07c9cbd0beabeddfc09464e",
+      "packages/quay/src/config.ts": "72cf4c6a490eaef01cf54b05c48e253ed40d96a48c0a50b0e3aea19bef61f475",
+      "packages/quay/test/gate-config-loader.test.mjs": "d2c7ef3163017c68f7c79a81829f613ea75c9fdf36cd7f357c2e49f82982c69b"
+    },
+    "ledger": "ba085a42d1efaac1b0e14d6ff71f403141431a01b0ee892fd4e52b1e96b1ff90",
+    "telemetry": "085dc23089ade59f22bf76d3d47001818a8634a54946e18ec64905f4263f0ed8",
+    "mechanismInventory": "f7bf2da027bc6c779585061683983f11866f0bf5788dadae7777f45a9871b319"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [
+    "packages/quay/src/gate/config/loader.ts",
+    "packages/quay/test/gate-diagnostics.test.mjs",
+    "docs/plans/M226-dir-100-a.md"
+  ],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "resumed-skipped"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "resumed-skipped"
+    },
+    "proposalReviewer": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planAuthor": {
+      "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 0,
+    "proposalReviewRounds": 1,
+    "terminalReason": "zero-finding",
+    "reachedPlanAuthor": true,
+    "startedAtMs": 1785561434872,
+    "endedAtMs": 1785561434872,
+    "proposalHashes": [
+      {
+        "round": 0,
+        "hash": "48e16ad441b9"
+      }
+    ]
+  }
+}

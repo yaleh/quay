@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 2,
+  "recordId": "9f6772f6d6a9",
+  "attemptId": "9f6772f6d6a9",
+  "generationId": "9f6772f6d6a9",
+  "admission": {
+    "key": ".::DIR-100-A",
+    "ownerExecutionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c",
+    "fencingToken": 0,
+    "acquiredAt": 1785561197624
+  },
+  "workspace": ".",
+  "taskId": "DIR-100-A",
+  "milestoneId": "M226",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "bcce10a24cd4ab35a0edcc5a50bb864e84e7435299f83bd4d0ad423c7b6518cf",
+    "taskContract": "0e1e50bbd0966d719dd79af7b80dc395c591b568d292c4ef36c50a37d4b2613d",
+    "proposal": "51aa862a9e84ebf787bf7db6feae6c2a0c0ba1edccb8a1f37ce4a89a2841e86f",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "prepared",
+    "reason": "prepared",
+    "phase": "Receipt",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": false,
+    "ok": null,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785561987184,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785561197624,
+      "endedAtMs": 1785561229834
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785561229834,
+      "endedAtMs": 1785561505110
+    },
+    {
+      "phase": "PlanCheck-round-1",
+      "round": 1,
+      "startedAtMs": 1785561505110,
+      "endedAtMs": 1785561757280
+    },
+    {
+      "phase": "Receipt",
+      "round": 0,
+      "startedAtMs": 1785561757280,
+      "endedAtMs": 1785561979117
+    },
+    {
+      "phase": "Receipt",
+      "round": 0,
+      "startedAtMs": 1785561979117,
+      "endedAtMs": 1785561987184
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "prepared",
+      "recurrenceKey": "f21358b591f5",
+      "firstSeenGeneration": "9f6772f6d6a9",
+      "lastSeenGeneration": "9f6772f6d6a9"
+    },
+    {
+      "code": "c1ce38af",
+      "recurrenceKey": "fb131f91ebae",
+      "firstSeenGeneration": "9f6772f6d6a9",
+      "lastSeenGeneration": "9f6772f6d6a9"
+    },
+    {
+      "code": "dce17a14",
+      "recurrenceKey": "820d2b01c202",
+      "firstSeenGeneration": "9f6772f6d6a9",
+      "lastSeenGeneration": "9f6772f6d6a9"
+    },
+    {
+      "code": "77bbb81e",
+      "recurrenceKey": "1a5b0978d6dd",
+      "firstSeenGeneration": "9f6772f6d6a9",
+      "lastSeenGeneration": "9f6772f6d6a9"
+    },
+    {
+      "code": "58bc912f",
+      "recurrenceKey": "a4b0a0f7a472",
+      "firstSeenGeneration": "9f6772f6d6a9",
+      "lastSeenGeneration": "9f6772f6d6a9"
+    },
+    {
+      "code": "2349553e",
+      "recurrenceKey": "e295c4dfc95a",
+      "firstSeenGeneration": "9f6772f6d6a9",
+      "lastSeenGeneration": "9f6772f6d6a9"
+    }
+  ]
+}

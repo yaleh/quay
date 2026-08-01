@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 2,
+  "recordId": "9140951127d1",
+  "attemptId": "9140951127d1",
+  "generationId": "9140951127d1",
+  "admission": {
+    "key": ".::DIR-100-A",
+    "ownerExecutionId": "fce11849-b5c4-4ce4-afe5-7b960ca2ad0c",
+    "fencingToken": 0,
+    "acquiredAt": 1785559479888
+  },
+  "workspace": ".",
+  "taskId": "DIR-100-A",
+  "milestoneId": "M226",
+  "class": "development",
+  "highRisk": false,
+  "hashes": {
+    "charter": "bcce10a24cd4ab35a0edcc5a50bb864e84e7435299f83bd4d0ad423c7b6518cf",
+    "taskContract": "0e1e50bbd0966d719dd79af7b80dc395c591b568d292c4ef36c50a37d4b2613d",
+    "proposal": "51aa862a9e84ebf787bf7db6feae6c2a0c0ba1edccb8a1f37ce4a89a2841e86f",
+    "reviewPolicy": "685ef82e845db7fcc4125a508bfe9ca9bbeb6cc74cd6f3adab5786d07f702f51"
+  },
+  "decision": {
+    "kind": "resume",
+    "reason": null,
+    "priorGenerationId": null,
+    "priorReason": null,
+    "createsContentGeneration": true
+  },
+  "contentAgentDispatchCount": null,
+  "contentAgentMs": null,
+  "terminal": {
+    "outcome": "revision-needed",
+    "reason": "plancheck-rounds-exceeded",
+    "phase": "PlanCheck",
+    "cacheable": false
+  },
+  "leaseRelease": {
+    "attempted": true,
+    "ok": true,
+    "reason": null
+  },
+  "sessionId": null,
+  "recordedAtMs": 1785561148384,
+  "telemetryWriteOk": true,
+  "phaseTimings": [
+    {
+      "phase": "ProposalReview",
+      "round": 0,
+      "startedAtMs": 1785559479888,
+      "endedAtMs": 1785559510453
+    },
+    {
+      "phase": "PlanAuthor",
+      "round": 0,
+      "startedAtMs": 1785559510453,
+      "endedAtMs": 1785559775985
+    },
+    {
+      "phase": "PlanCheck-round-1",
+      "round": 1,
+      "startedAtMs": 1785559775985,
+      "endedAtMs": 1785559942705
+    },
+    {
+      "phase": "PlanCheck-round-2",
+      "round": 2,
+      "startedAtMs": 1785559942705,
+      "endedAtMs": 1785560528182
+    },
+    {
+      "phase": "PlanCheck-round-3",
+      "round": 3,
+      "startedAtMs": 1785560528182,
+      "endedAtMs": 1785560925255
+    },
+    {
+      "phase": "plancheck-rounds-exceeded",
+      "round": 0,
+      "startedAtMs": 1785560925255,
+      "endedAtMs": 1785561148384
+    }
+  ],
+  "findingCodes": [
+    {
+      "code": "plancheck-rounds-exceeded",
+      "recurrenceKey": "d72f4a88db67",
+      "firstSeenGeneration": "efe0a9e88e54",
+      "lastSeenGeneration": "9140951127d1"
+    },
+    {
+      "code": "91959662",
+      "recurrenceKey": "19bf652307b3",
+      "firstSeenGeneration": "9140951127d1",
+      "lastSeenGeneration": "9140951127d1"
+    },
+    {
+      "code": "0ac968fe",
+      "recurrenceKey": "8c95baf01825",
+      "firstSeenGeneration": "9140951127d1",
+      "lastSeenGeneration": "9140951127d1"
+    },
+    {
+      "code": "7df3113d",
+      "recurrenceKey": "04277af52573",
+      "firstSeenGeneration": "9140951127d1",
+      "lastSeenGeneration": "9140951127d1"
+    },
+    {
+      "code": "bff27774",
+      "recurrenceKey": "c3dd44c191db",
+      "firstSeenGeneration": "9140951127d1",
+      "lastSeenGeneration": "9140951127d1"
+    }
+  ]
+}
