@@ -200,3 +200,26 @@ writebacks declared in the Plan (`milestones/M211/absorb-entry.md` created with 
 carrying `surface:method-infra`; `tasks/DIR-119-D3.md` extra.acceptance set at Build pre-flight).
 Read-only inputs (`composite-contracts.ts`, `composite-manifest-synthesis.ts`,
 `composite-reconcile.ts`, `composite-preflight.ts` + mirrors) were never edited.
+
+## Provenance note — concurrent-workflow commit race (recorded, not swept under)
+
+The Build staged exactly this milestone's 10 touch-set files and was about to commit them when a
+CONCURRENT `prepare-milestone` workflow (M212/DIR-119-D4) committed directly into the same shared
+working tree with a broad `git add`, sweeping M211's staged files into ITS commit
+**`69b57b7f`** ("M212/DIR-119-D4: prepare-milestone PREPARED (2nd attempt, 51min)"). Consequence:
+ALL of M211's Build implementation is on `master` (verified: `git show 69b57b7f --stat` lists all
+10 M211 files alongside that workflow's sole file `milestones/M212/preparation.json`), but under a
+MISATTRIBUTED commit message. This is the exact shared-working-tree race CLAUDE.md's
+gap-execute-milestone-no-worktree-isolation correction warns about ("two execute-milestone
+dispatches must never run concurrently … the risk is the shared working tree itself") — here it was
+a prepare-milestone dispatch racing a Build commit, same hazard class.
+
+Deliberate response: NO history rewrite (no `git reset`/`rebase` on shared `master` while
+concurrent drivers are active — that would race again and could invalidate M212's preparation
+receipt, which may reference `69b57b7f`). The content is correct, complete, and verified on
+`master`; only the commit MESSAGE is misattributed. Land-phase and human verification should treat
+`69b57b7f` as this milestone's Build commit (its diff IS this milestone's touch set plus one M212
+file), and this note + the follow-up commit carrying it are the audit trail. A deviation row for
+`dashboard.md` is the Audit phase's write-back responsibility (step 4 of the Audit prompt), not
+Build's — flagged here so the Audit transcribes it.
+
