@@ -1617,6 +1617,40 @@ for (const [mirrorName, workflowFile] of MIRRORS) {
     }
   });
 
+  // M233/gap-epoch-status-parse-fallback (2026-08-01): the agent sometimes captures CLI stdout
+  // without the `ok: true` field, even though the CLI always returns it. The workflow must
+  // tolerate a missing `ok` when `code === 'epoch-status-ok'` — failing closed only when
+  // neither signal is present. RED: bare epoch-status-ok without ok:true currently breaks.
+  test(`[${mirrorName}] epoch budget: epoch-status CLI output missing ok:true field (agent parse quirk) — tolerated when code='epoch-status-ok'`, async () => {
+    const { scratchDir, scratchRel, taskFileOnDisk } = makeScratch();
+    const args = baseArgs(scratchRel);
+    try {
+      const { result, calls } = await runPrepareMilestone(workflowFile, args, taskFileOnDisk, {
+        onEpochStatus: () => ({ raw: JSON.stringify({
+          // DELIBERATELY omit ok:true — the intermittent agent output quirk observed
+          // 3+ times in session 8e4b1f78 (DIR-112, A2)
+          code: 'epoch-status-ok', exists: true, epochId: 'prior-epoch',
+          counters: { attempts: 0, fullReviews: 0, deltaRounds: 0, contentAgentDispatches: 0, observableAgentMs: 0, terminalFingerprints: {}, tokensObserved: null },
+          policy: { ordinaryCapMinutes: 90, highRiskCapMinutes: 150, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2 },
+          overrides: [], resets: [],
+          bodyScopeHash: null, recordBodyScopeHash: null,
+        }) }),
+        // Minimal passing handlers — the workflow proceeds past Admission into full ProposalReview
+        onFullReview: () => ({ findings: [], mechanisms: [{ id: 'm1', owner: 'test', proofSurface: 'test.ts', dependsOn: [], independentlyShippable: true, rationale: 'test' }], proposalHash: 'abc', nowMs: Date.now(), sessionId: 'test-session' }),
+        onPlanAuthor: () => ({ ok: true, planText: '# Plan\n\nTest plan.\n\n## Stages\n\n1. test\n' }),
+        onPlanCheck: () => ({ ok: true, findings: [], planCheckRounds: 1 }),
+        onRecordGeneration: () => ({ raw: '{"ok":true}' }),
+        onRecordEpoch: () => ({ raw: '{"ok":true}' }),
+      });
+      assert.notEqual(result.outcome, 'needs-human', `should NOT fail with needs-human when code='epoch-status-ok' even without ok:true; got ${JSON.stringify(result)}`);
+      assert.notEqual(result.reason, 'epoch-status-failed', 'should NOT be epoch-status-failed when code is epoch-status-ok');
+      // Should proceed past Admission — at minimum PreflightContent should run
+      assert.ok(calls.preflightContent > 0 || calls.authors.length > 0, 'should proceed past Admission');
+    } finally {
+      cleanup(scratchDir, null, args.milestoneId);
+    }
+  });
+
   // gap-prepare-milestone-epoch-cli-toctou-and-tamper-hardening (item 3, explicit decision): "no
   // further resets/overrides, ever, once a hard ceiling is hit — converge to COMMIT/SPLIT" IS the
   // intended terminal design (recorded in the task's own Proposal-adjacent prose). What these two

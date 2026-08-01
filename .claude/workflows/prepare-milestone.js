@@ -361,7 +361,14 @@ const _epochStatusVerdict = _epochStatusResult?.raw ? _parseAgentJson(_epochStat
 // review cap gate and passed through to _recordEpochDispatch for persistence in the epoch record.
 // Must be defined BEFORE any early-return paths that call _releaseLeaseAndRecord/_recordEpochDispatch.
 const _currentBodyScopeHash = _epochStatusVerdict?.bodyScopeHash ?? null
-if (!_epochStatusVerdict || _epochStatusVerdict.ok !== true) {
+// M233/epoch-status-parse-fallback (2026-08-01): the agent sometimes omits `ok:true` from
+// raw CLI stdout even though the CLI always returns it (observed 3+ times in 8e4b1f78).
+// Tolerate a missing `ok` when `code === 'epoch-status-ok'` — a recognised success code
+// with a parseable counters block is sufficient evidence the epoch was read correctly.
+// Fail closed ONLY when neither signal is present (malformed/corrupt output, no-epoch-record
+// returning unexpected shape, or a parser-miss on the real JSON body).
+const _epochStatusHasValidCode = _epochStatusVerdict && (_epochStatusVerdict.code === 'epoch-status-ok' || _epochStatusVerdict.code === 'no-epoch-record' || _epochStatusVerdict.code === 'epoch-identity-mismatch')
+if (!_epochStatusVerdict || (_epochStatusVerdict.ok !== true && !_epochStatusHasValidCode)) {
   log(`Epoch-status phase FAILED — no parseable verdict (raw: ${_epochStatusResult?.raw ?? '(none)'}). Failing closed, never dispatching a content agent without a real epoch-budget read.`)
   await _releaseLease('Admission', { reason: 'epoch-status-failed' })
   return { outcome: 'needs-human', reason: 'epoch-status-failed', phase: 'Admission' }
