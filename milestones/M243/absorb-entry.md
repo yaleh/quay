@@ -15,7 +15,7 @@
 
 ## Backlog row
 
-surface:method-infra | DIR-124-A2 | M243 | golden replay corpus: 8 named cases + two known-defect shapes, per-assertion classification | 2026-08-01
+| DIR-124-A2 | golden replay corpus: 8 named cases + two known-defect shapes, per-assertion classification | TBD | - | surface:method-infra, milestone-candidate, human-steered |
 
 ## Gate
 
@@ -23,3 +23,9 @@ surface:method-infra | DIR-124-A2 | M243 | golden replay corpus: 8 named cases +
 
 adversarial-audit disposition: REFUTED
 V_meta consolidation-lag: PASS — no confirmed-unconsolidated row past K without a dated carry-forward (milestone_counter=205 K=2; both ledger rows [ok] consolidated / [ok] proposed, lag=- for both; domain-audit-channel≡CI-job already consolidated, repo-root isolation-leak lesson not past φ threshold)
+
+## adversarial-audit disposition: CONCERNS
+
+Findings: AC1/AC2/AC4-AC12 all confirmed PASS via mechanical replay (20/20 tests GREEN), mirror byte-identity (all MD5 hashes match), and code inspection. Single concern: AC3 baseline invariance — the test only asserts phase sequence via hardcoded expected values rather than performing the full 5-dimension JSON.stringify comparison of stateVector against meta.baseline as specified in the AC text. The runner correctly produces the full state vector and the baseline data is stored in the fixture, but the comparison is not mechanically exercised for agentCounts, outcome, sharedStateMutations, or schedulingDecisions.
+
+## V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated carry-forward
