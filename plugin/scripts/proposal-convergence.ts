@@ -1838,6 +1838,7 @@ function _computeEpochId({ taskId, charterHash, reviewPolicyHash, salt }) {
 // (never a fabricated `0`) whenever no real token usage has ever been observed for this epoch.
 export function buildEpochRecord({
   epochId, taskId, charterHash, reviewPolicyHash, parentEpochId,
+  bodyScopeHash,
   counters, overrides, resets, policy, createdAtMs,
 } = {}) {
   return {
@@ -1847,6 +1848,10 @@ export function buildEpochRecord({
     charterHash: charterHash ?? null,
     reviewPolicyHash: reviewPolicyHash ?? null,
     parentEpochId: parentEpochId ?? null,
+    // bodyScopeHash: a hash over the task's ## Proposal section content — stored at record TOP
+    // LEVEL (not in counters) so it persists across --new-epoch resets. null means "no scope hash
+    // has ever been recorded for this epoch" — the conservative default for pre-migration records.
+    bodyScopeHash: bodyScopeHash ?? null,
     counters: {
       attempts: Number.isFinite(counters?.attempts) ? counters.attempts : 0,
       fullReviews: Number.isFinite(counters?.fullReviews) ? counters.fullReviews : 0,
@@ -1879,7 +1884,7 @@ export function buildEpochRecord({
 // `checkFullReviewCap:true`, passed ONLY at that one dispatch site) full-review cap, then the
 // cumulative observable-time cap (policy cap + any recorded override minutes). Never mutates its
 // inputs, never dispatches anything.
-export function checkEpochCaps({ counters, policy, highRisk, overrides, checkFullReviewCap = false } = {}) {
+export function checkEpochCaps({ counters, policy, highRisk, overrides, checkFullReviewCap = false, bodyScopeHash, currentBodyScopeHash } = {}) {
   const c = counters || {};
   const p = policy || DEFAULT_EPOCH_POLICY;
   const capMinutes = highRisk
@@ -1900,7 +1905,16 @@ export function checkEpochCaps({ counters, policy, highRisk, overrides, checkFul
       detail: { fingerprint: repeated[0], count: repeated[1], cap: maxRepeatedFingerprint },
     };
   }
+  // scope-change grant (M233): when the stored bodyScopeHash is non-null and differs from the
+  // current task body's Proposal hash, the scope has demonstrably changed since the last full
+  // review — grant a fresh full-review allowance WITHOUT consuming a --new-epoch reset. The
+  // fingerprint cap is still checked FIRST (a task that keeps hitting the same terminal fingerprint
+  // is broken regardless of body changes). The time cap is still checked AFTER this block (a body
+  // change does NOT reset the cumulative time counter).
   if (checkFullReviewCap && fullReviews >= maxFullReviews) {
+    if (bodyScopeHash != null && currentBodyScopeHash != null && bodyScopeHash !== currentBodyScopeHash) {
+      return { breached: false, scopeChanged: true };
+    }
     return {
       breached: true, breachedCap: "full-review-cap-exceeded", code: "epoch-full-review-cap-exceeded",
       message: `cumulative full-review count (${fullReviews}) meets/exceeds the epoch cap of ${maxFullReviews} for this unchanged scope epoch`,
@@ -1949,18 +1963,34 @@ function _currentEpochIdentity({ workspace, taskId, charterFile }) {
 // --epoch-status: READ-ONLY, never writes anything. Distinguishes observed/estimated/unknown
 // fields (Requested-action item 6): every counter here is a real accumulated delta ("observed");
 // `tokensObserved: null` is reported via `tokenAccounting: "unknown"`, never silently treated as 0.
-export function _epochStatusCli({ taskId, workspace, charterFile, highRisk, checkFullReviewCap }) {
+export function _epochStatusCli({ taskId, workspace, charterFile, highRisk, checkFullReviewCap, computeBodyScopeHash }) {
   try {
     const { charterHash, reviewPolicyHash } = _currentEpochIdentity({ workspace, taskId, charterFile });
     const { record, corrupt } = _readEpochRecord(workspace, taskId);
     const hr = highRisk === true || highRisk === "true";
     const cfrc = checkFullReviewCap === true || checkFullReviewCap === "true";
+    const cbws = computeBodyScopeHash === true || computeBodyScopeHash === "true";
+    // M233: compute the current bodyScopeHash from the task's ## Proposal section on demand.
+    // Reuses the SAME fs.readFileSync + extractSection + sha256 pattern _readCurrentHashes() and
+    // _resolveCheckpointCli() already use — zero new I/O class.
+    let bodyScopeHash = null;
+    if (cbws) {
+      try {
+        const taskPath = path.join(workspace, "tasks", `${taskId}.md`);
+        const taskBody = fs.readFileSync(taskPath, "utf8");
+        const proposal = extractSection(taskBody, "Proposal") || "";
+        bodyScopeHash = sha256(proposal);
+      } catch {
+        // Missing/corrupt task file — bodyScopeHash stays null. The Preflight phase would have
+        // caught this first; this is a defense-in-depth no-failure-on-read catch.
+      }
+    }
     if (corrupt) {
       return { ok: true, code: "epoch-corrupt", exists: true, message: "epoch record file exists but is not valid JSON — never blindly trusted as a fresh/zero epoch", hashes: { charterHash, reviewPolicyHash } };
     }
     if (!record) {
       const fresh = buildEpochRecord({});
-      return {
+      const result = {
         ok: true, code: "no-epoch-record", exists: false,
         epochId: null, parentEpochId: null,
         counters: fresh.counters, policy: DEFAULT_EPOCH_POLICY, overrides: [], resets: [],
@@ -1968,6 +1998,11 @@ export function _epochStatusCli({ taskId, workspace, charterFile, highRisk, chec
         hashes: { charterHash, reviewPolicyHash },
         tokenAccounting: "unknown",
       };
+      if (cbws) {
+        result.bodyScopeHash = bodyScopeHash;
+        result.recordBodyScopeHash = null;
+      }
+      return result;
     }
     if (!_epochIdentityMatches(record, { taskId, charterHash, reviewPolicyHash })) {
       return {
@@ -1976,8 +2011,11 @@ export function _epochStatusCli({ taskId, workspace, charterFile, highRisk, chec
         hashes: { charterHash, reviewPolicyHash },
       };
     }
-    const capCheck = checkEpochCaps({ counters: record.counters, policy: record.policy, highRisk: hr, overrides: record.overrides, checkFullReviewCap: cfrc });
-    return {
+    const capCheck = checkEpochCaps({
+      counters: record.counters, policy: record.policy, highRisk: hr, overrides: record.overrides, checkFullReviewCap: cfrc,
+      bodyScopeHash: record.bodyScopeHash ?? null, currentBodyScopeHash: cbws ? bodyScopeHash : null,
+    });
+    const result = {
       ok: true, code: "epoch-status-ok", exists: true,
       epochId: record.epochId, parentEpochId: record.parentEpochId,
       counters: record.counters, policy: record.policy, overrides: record.overrides, resets: record.resets,
@@ -1985,6 +2023,11 @@ export function _epochStatusCli({ taskId, workspace, charterFile, highRisk, chec
       hashes: { charterHash, reviewPolicyHash },
       tokenAccounting: record.counters.tokensObserved === null ? "unknown" : "observed",
     };
+    if (cbws) {
+      result.bodyScopeHash = bodyScopeHash;
+      result.recordBodyScopeHash = record.bodyScopeHash ?? null;
+    }
+    return result;
   } catch (err) {
     return { ok: false, code: "epoch-status-exception", error: err.message };
   }
@@ -2001,7 +2044,7 @@ export function _epochStatusCli({ taskId, workspace, charterFile, highRisk, chec
 export function _recordEpochDispatchCli({
   taskId, workspace, charterFile, highRisk,
   dispatchDelta, fullReviewDelta, deltaRoundDelta, elapsedMsDelta, attemptIncrement,
-  terminalPhase, reason, tokensObserved,
+  terminalPhase, reason, tokensObserved, bodyScopeHash,
   ordinaryCapMinutes, highRiskCapMinutes,
 }) {
   try {
@@ -2030,6 +2073,23 @@ export function _recordEpochDispatchCli({
     if (Number.isFinite(tokensObserved)) {
       newTokensObserved = (Number.isFinite(newTokensObserved) ? newTokensObserved : 0) + tokensObserved;
     }
+    // M233 bodyScopeHash scope-change grant: when the stored bodyScopeHash differs from the
+    // current bodyScopeHash (and the current hash is non-null), the task's ## Proposal has
+    // demonstrably changed since the last full review — reset the fullReviews counter to
+    // _fullReviewDelta (typically 1), granting the new scope its own full-review budget WITHOUT
+    // consuming a --new-epoch reset. When _fullReviewDelta is 0 (no full review this generation),
+    // bodyScopeHash is carried forward unchanged from the existing record.
+    const storedBodyScopeHash = existing?.bodyScopeHash ?? null;
+    const newBodyScopeHash = bodyScopeHash ?? null;
+    let resolvedFullReviews;
+    if (_fullReviewDelta > 0 && newBodyScopeHash != null && storedBodyScopeHash != null && newBodyScopeHash !== storedBodyScopeHash) {
+      resolvedFullReviews = _fullReviewDelta;
+    } else {
+      resolvedFullReviews = (base.fullReviews || 0) + _fullReviewDelta;
+    }
+    // When _fullReviewDelta is 0, carry forward the existing bodyScopeHash unchanged unless a new
+    // hash is explicitly provided (in which case record it).
+    const effectiveBodyScopeHash = _fullReviewDelta > 0 ? newBodyScopeHash : (newBodyScopeHash ?? storedBodyScopeHash);
     // Policy: never raise above the compiled DEFAULT_EPOCH_POLICY ceiling, and never raise above
     // whatever is ALREADY persisted — a caller can only ever tighten (Requested-action item 3 /
     // AC: "lower caller limits are honored and callers cannot silently raise policy maxima"), the
@@ -2050,9 +2110,10 @@ export function _recordEpochDispatchCli({
     const record = buildEpochRecord({
       epochId, taskId, charterHash, reviewPolicyHash,
       parentEpochId: existing ? existing.parentEpochId : null,
+      bodyScopeHash: effectiveBodyScopeHash,
       counters: {
         attempts: (base.attempts || 0) + _attemptIncrement,
-        fullReviews: (base.fullReviews || 0) + _fullReviewDelta,
+        fullReviews: resolvedFullReviews,
         deltaRounds: (base.deltaRounds || 0) + _deltaRoundDelta,
         contentAgentDispatches: (base.contentAgentDispatches || 0) + _dispatchDelta,
         observableAgentMs: (base.observableAgentMs || 0) + _elapsedMsDelta,
@@ -2146,6 +2207,7 @@ export function _newEpochCli({ taskId, workspace, charterFile, reason, owner, co
     const record = buildEpochRecord({
       epochId: newEpochId, taskId, charterHash, reviewPolicyHash,
       parentEpochId: existing ? existing.epochId : null,
+      bodyScopeHash: existing?.bodyScopeHash ?? null,
       counters: {}, overrides: [],
       resets: existing ? [
         ...(existing.resets || []),
@@ -2287,6 +2349,9 @@ async function _cliMain(argv) {
       ordinaryCapMinutes: { type: "string" },
       highRiskCapMinutes: { type: "string" },
       checkFullReviewCap: { type: "string" },
+      // M233: bodyScopeHash for epoch status computation and dispatch recording
+      "compute-body-scope-hash": { type: "string" },
+      bodyScopeHash: { type: "string" },
     },
   };
   const parsed = parseArgs(argv, spec);
@@ -2400,6 +2465,7 @@ async function _cliMain(argv) {
     const out = _epochStatusCli({
       taskId, workspace, charterFile: parsed.flags.charterFile,
       highRisk: parsed.flags.highRisk, checkFullReviewCap: parsed.flags.checkFullReviewCap,
+      computeBodyScopeHash: parsed.flags["compute-body-scope-hash"],
     });
     console.log(JSON.stringify(out));
     return out.ok ? 0 : 1;
@@ -2416,6 +2482,7 @@ async function _cliMain(argv) {
       attemptIncrement: Number(parsed.flags.attemptIncrement),
       terminalPhase: parsed.flags.terminalPhase, reason: parsed.flags.reason,
       tokensObserved: Number(parsed.flags.tokensObserved),
+      bodyScopeHash: parsed.flags.bodyScopeHash,
       ordinaryCapMinutes: Number(parsed.flags.ordinaryCapMinutes), highRiskCapMinutes: Number(parsed.flags.highRiskCapMinutes),
     });
     console.log(JSON.stringify(out));

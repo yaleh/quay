@@ -355,8 +355,12 @@ let _epochOverrides = []
 // report never lists `NEW-EPOCH` once `maxNewEpochResetCount` is ALREADY exhausted.
 let _epochResets = []
 
-const _epochStatusResult = await _convergenceAgentCall(`--epoch-status --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --highRisk ${_highRisk}`, 'epoch-status')
+const _epochStatusResult = await _convergenceAgentCall(`--epoch-status --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --highRisk ${_highRisk} --compute-body-scope-hash true`, 'epoch-status')
 const _epochStatusVerdict = _epochStatusResult?.raw ? _parseAgentJson(_epochStatusResult.raw) : null
+// M233: the current task body's ## Proposal hash computed once at Admission — used for the full-
+// review cap gate and passed through to _recordEpochDispatch for persistence in the epoch record.
+// Must be defined BEFORE any early-return paths that call _releaseLeaseAndRecord/_recordEpochDispatch.
+const _currentBodyScopeHash = _epochStatusVerdict?.bodyScopeHash ?? null
 if (!_epochStatusVerdict || _epochStatusVerdict.ok !== true) {
   log(`Epoch-status phase FAILED — no parseable verdict (raw: ${_epochStatusResult?.raw ?? '(none)'}). Failing closed, never dispatching a content agent without a real epoch-budget read.`)
   await _releaseLease('Admission', { reason: 'epoch-status-failed' })
@@ -372,6 +376,7 @@ if (_epochStatusVerdict.code === 'epoch-identity-mismatch') {
   return { outcome: 'needs-human', reason: 'epoch-identity-mismatch', phase: 'Admission', allowedActions: ['NEW-EPOCH'], epoch: _epochStatusVerdict }
 }
 _epochBase = _epochStatusVerdict.counters || _epochBase
+_epochBase.bodyScopeHash = _epochStatusVerdict.recordBodyScopeHash ?? null
 _epochPolicy = _epochStatusVerdict.policy || _epochPolicy
 _epochOverrides = Array.isArray(_epochStatusVerdict.overrides) ? _epochStatusVerdict.overrides : []
 _epochResets = Array.isArray(_epochStatusVerdict.resets) ? _epochStatusVerdict.resets : []
@@ -395,7 +400,7 @@ function _epochElapsedMsSoFar() {
 // dispatching a NEW full-review agent — every other content-agent dispatch never attempts a second
 // full review this generation, so gating them on that cap would incorrectly block ordinary delta/
 // author/plan work whenever an epoch has already used its one full review.
-function _checkEpochCapsInline(checkFullReviewCap) {
+function _checkEpochCapsInline(checkFullReviewCap, currentBodyScopeHash) {
   const c = {
     fullReviews: (_epochBase.fullReviews || 0) + _epochThisGenFullReviews,
     observableAgentMs: (_epochBase.observableAgentMs || 0) + _epochElapsedMsSoFar(),
@@ -409,7 +414,11 @@ function _checkEpochCapsInline(checkFullReviewCap) {
   const maxRepeatedFingerprint = Number.isFinite(p.maxRepeatedFingerprint) ? p.maxRepeatedFingerprint : 2
   const fpEntry = Object.entries(c.terminalFingerprints).find(([, count]) => Number.isFinite(count) && count >= maxRepeatedFingerprint)
   if (fpEntry) return { breached: true, breachedCap: 'repeated-terminal-fingerprint', code: 'epoch-fingerprint-cap-exceeded', message: `terminal fingerprint ${fpEntry[0]} has recurred ${fpEntry[1]} time(s), meeting the epoch cap of ${maxRepeatedFingerprint}` }
-  if (checkFullReviewCap && c.fullReviews >= maxFullReviews) return { breached: true, breachedCap: 'full-review-cap-exceeded', code: 'epoch-full-review-cap-exceeded', message: `cumulative full-review count (${c.fullReviews}) meets/exceeds the epoch cap of ${maxFullReviews} for this unchanged scope epoch` }
+  if (checkFullReviewCap && c.fullReviews >= maxFullReviews) {
+    // M233 scope-change grant: if the stored bodyScopeHash differs from current, grant fresh review
+    if (_epochBase.bodyScopeHash != null && currentBodyScopeHash != null && _epochBase.bodyScopeHash !== currentBodyScopeHash) return { breached: false, scopeChanged: true }
+    return { breached: true, breachedCap: 'full-review-cap-exceeded', code: 'epoch-full-review-cap-exceeded', message: `cumulative full-review count (${c.fullReviews}) meets/exceeds the epoch cap of ${maxFullReviews} for this unchanged scope epoch` }
+  }
   if (c.observableAgentMs >= effectiveCapMs) return { breached: true, breachedCap: 'time-cap-exceeded', code: 'epoch-time-cap-exceeded', message: `cumulative observable agent time (${c.observableAgentMs}ms) meets/exceeds the epoch cap (${effectiveCapMs}ms${overrideMinutes ? `, includes ${overrideMinutes}m override` : ''})` }
   return { breached: false }
 }
@@ -421,7 +430,7 @@ function _checkEpochCapsInline(checkFullReviewCap) {
 // itself leaves any prior observed value on file untouched when the flag is absent.
 async function _recordEpochDispatch(stageLabel, terminalPhase, reason) {
   return _convergenceAgentCall(
-    `--record-epoch-dispatch --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --highRisk ${_highRisk} --dispatchDelta ${_epochThisGenDispatches} --fullReviewDelta ${_epochThisGenFullReviews} --deltaRoundDelta ${_epochThisGenDeltaRounds} --elapsedMsDelta ${_epochElapsedMsSoFar()} --attemptIncrement 1 --terminalPhase ${terminalPhase} --reason ${JSON.stringify(reason)}`,
+    `--record-epoch-dispatch --taskId ${_taskId} --workspace . --charterFile ${_charterFile} --highRisk ${_highRisk} --dispatchDelta ${_epochThisGenDispatches} --fullReviewDelta ${_epochThisGenFullReviews} --deltaRoundDelta ${_epochThisGenDeltaRounds} --elapsedMsDelta ${_epochElapsedMsSoFar()} --attemptIncrement 1 --terminalPhase ${terminalPhase} --reason ${JSON.stringify(reason)} --bodyScopeHash ${_currentBodyScopeHash}`,
     `epoch-dispatch-${stageLabel}`
   )
 }
@@ -993,8 +1002,11 @@ if (!_useCrossGenDelta) {
   // other content-agent dispatch in this file never attempts a second full review, so it never
   // passes `true` here.
   {
-    const _epochCap = _checkEpochCapsInline(true)
+    const _epochCap = _checkEpochCapsInline(true, _currentBodyScopeHash)
     if (_epochCap.breached) return await _epochBreachExit('ProposalReview', 'epoch-cap-full-review', _epochCap)
+    // M233: scopeChanged:true means the bodyScopeHash changed since the last full review —
+    // grant a fresh full-review allowance WITHOUT consuming a --new-epoch reset. The full-review
+    // agent is dispatched normally below; _epochBreachExit is NOT called.
   }
   // ── Round 0: ONE full grounded review of the just-adjudicated Proposal. ──────────────
   _fullReviewResult = await agent(

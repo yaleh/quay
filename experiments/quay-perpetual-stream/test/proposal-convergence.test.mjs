@@ -309,6 +309,36 @@ test("prepare-milestone.js mirrors inline the SAME epoch-budget defaults as DEFA
   }
 });
 
+// M233 CLAIM-10: cross-check — prepare-milestone.js's _checkEpochCapsInline and related inline
+// logic must carry bodyScopeHash scope-change grant behavior in BOTH workflow mirrors identically.
+test("M233 CLAIM-10: prepare-milestone.js mirrors inline the SAME bodyScopeHash scope-change grant logic as proposal-convergence.ts's checkEpochCaps()", () => {
+  const repoRoot = path.resolve(import.meta.dirname, "..", "..", "..");
+  for (const rel of [".claude/workflows/prepare-milestone.js", "plugin/workflows/prepare-milestone.js"]) {
+    const src = fs.readFileSync(path.join(repoRoot, rel), "utf8");
+
+    // CLAIM-10a: _checkEpochCapsInline accepts currentBodyScopeHash parameter
+    assert.match(src, /function _checkEpochCapsInline\(checkFullReviewCap,\s*currentBodyScopeHash\)/, `${rel}: _checkEpochCapsInline must accept currentBodyScopeHash as second parameter`);
+
+    // CLAIM-10b: bodyScopeHash comparison logic for scope-change grant
+    assert.match(src, /_epochBase\.bodyScopeHash\s*!=\s*null\s*&&\s*currentBodyScopeHash\s*!=\s*null\s*&&\s*_epochBase\.bodyScopeHash\s*!==\s*currentBodyScopeHash/, `${rel}: must contain the bodyScopeHash comparision logic returning {breached:false,scopeChanged:true}`);
+
+    // CLAIM-10c: _epochBase.bodyScopeHash loaded from recordBodyScopeHash
+    assert.match(src, /_epochBase\.bodyScopeHash\s*=\s*_epochStatusVerdict\.recordBodyScopeHash/, `${rel}: must load bodyScopeHash from epoch status verdict's recordBodyScopeHash`);
+
+    // CLAIM-10d: --compute-body-scope-hash true on the admission --epoch-status call
+    assert.match(src, /--compute-body-scope-hash\s+true/, `${rel}: admission --epoch-status call must include --compute-body-scope-hash true`);
+
+    // CLAIM-10e: --bodyScopeHash flag on _recordEpochDispatch
+    assert.match(src, /--bodyScopeHash\s+\$\{_currentBodyScopeHash\}/, `${rel}: _recordEpochDispatch must pass --bodyScopeHash \${_currentBodyScopeHash}`);
+
+    // CLAIM-10f: _currentBodyScopeHash loaded from _epochStatusVerdict.bodyScopeHash (may use ?. for null safety)
+    assert.match(src, /_currentBodyScopeHash\s*=\s*_epochStatusVerdict\?*\.\s*bodyScopeHash/, `${rel}: _currentBodyScopeHash must be loaded from _epochStatusVerdict.bodyScopeHash`);
+
+    // CLAIM-10g: full-review gate passes _currentBodyScopeHash to _checkEpochCapsInline
+    assert.match(src, /_checkEpochCapsInline\(true,\s*_currentBodyScopeHash\)/, `${rel}: full-review gate must pass _currentBodyScopeHash to _checkEpochCapsInline(true, ...)`);
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // ── decideResumeGeneration — DIR-126-C/M202: generation-aware resume, third child of DIR-126's
 // split. One it() per evaluation-order step of the task's own Proposal. ─────────────────────────
@@ -1956,6 +1986,64 @@ describe("checkEpochCaps — pure decision function", () => {
     const r = checkEpochCaps({ counters, policy: { ...DEFAULT_EPOCH_POLICY, ordinaryCapMinutes: 10 }, highRisk: false });
     assert.equal(r.breached, true);
   });
+
+  // ── M233 bodyScopeHash scope-change grant tests ──────────────────────────────────────────────
+  test("M233 CLAIM-2: bodyScopeHash mismatch grants fresh full-review allowance (scopeChanged:true) when at the full-review cap", () => {
+    const counters = { ...FRESH, fullReviews: 1 };
+    const r = checkEpochCaps({
+      counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false, checkFullReviewCap: true,
+      bodyScopeHash: "old-hash", currentBodyScopeHash: "new-hash",
+    });
+    assert.equal(r.breached, false, "changed scope must NOT breach");
+    assert.equal(r.scopeChanged, true, "must signal scopeChanged:true");
+  });
+
+  test("M233 CLAIM-2: unchanged bodyScopeHash at cap still breaches (DIR-120 protection preserved)", () => {
+    const counters = { ...FRESH, fullReviews: 1 };
+    const r = checkEpochCaps({
+      counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false, checkFullReviewCap: true,
+      bodyScopeHash: "same-hash", currentBodyScopeHash: "same-hash",
+    });
+    assert.equal(r.breached, true);
+    assert.equal(r.breachedCap, "full-review-cap-exceeded");
+    assert.equal(r.scopeChanged, undefined, "matching hashes must NOT signal scopeChanged");
+  });
+
+  test("M233 CLAIM-9: null bodyScopeHash (pre-migration record) applies existing cap — no grant", () => {
+    const counters = { ...FRESH, fullReviews: 1 };
+    const r1 = checkEpochCaps({
+      counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false, checkFullReviewCap: true,
+      bodyScopeHash: null, currentBodyScopeHash: "new-hash",
+    });
+    assert.equal(r1.breached, true, "null stored hash = no grant, existing cap applies");
+
+    const r2 = checkEpochCaps({
+      counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false, checkFullReviewCap: true,
+      bodyScopeHash: "some-hash", currentBodyScopeHash: null,
+    });
+    assert.equal(r2.breached, true, "null current hash = no grant");
+  });
+
+  test("M233 CLAIM-2: fingerprint cap is still checked BEFORE the scope-change grant — a task with repeated fingerprints is broken regardless of body changes", () => {
+    const counters = { ...FRESH, fullReviews: 3, terminalFingerprints: { xyz: 3 } };
+    const r = checkEpochCaps({
+      counters, policy: { ...DEFAULT_EPOCH_POLICY, maxFullReviewsPerEpoch: 1, maxRepeatedFingerprint: 2 },
+      highRisk: false, checkFullReviewCap: true,
+      bodyScopeHash: "old-hash", currentBodyScopeHash: "new-hash",
+    });
+    assert.equal(r.breached, true);
+    assert.equal(r.breachedCap, "repeated-terminal-fingerprint", "fingerprint cap must fire FIRST even when scope changed");
+  });
+
+  test("M233 CLAIM-2: scope-change grant does NOT affect checkFullReviewCap:false call sites — no false scopeChanged leak", () => {
+    const counters = { ...FRESH, fullReviews: 1 };
+    const r = checkEpochCaps({
+      counters, policy: DEFAULT_EPOCH_POLICY, highRisk: false, checkFullReviewCap: false,
+      bodyScopeHash: "old-hash", currentBodyScopeHash: "new-hash",
+    });
+    assert.equal(r.breached, false);
+    assert.equal(r.scopeChanged, undefined, "scopeChange only evaluated when checkFullReviewCap:true");
+  });
 });
 
 describe("buildEpochRecord — no-fabrication field materialization", () => {
@@ -1980,6 +2068,18 @@ describe("buildEpochRecord — no-fabrication field materialization", () => {
     assert.deepEqual(rec.overrides, []);
     assert.deepEqual(rec.resets, []);
     assert.deepEqual(rec.counters.terminalFingerprints, {});
+  });
+
+  test("M233 CLAIM-1: bodyScopeHash defaults to null when omitted (additive field, no schema version bump required)", () => {
+    const rec = buildEpochRecord({});
+    assert.equal(rec.bodyScopeHash, null, "bodyScopeHash defaults to null — additive field, backward compatible");
+  });
+
+  test("M233 CLAIM-1: bodyScopeHash stored at record TOP LEVEL (not in counters), persists an explicit value", () => {
+    const rec = buildEpochRecord({ bodyScopeHash: "abc123", counters: {} });
+    assert.equal(rec.bodyScopeHash, "abc123");
+    // bodyScopeHash must NOT be inside counters (counters gets zeroed on --new-epoch)
+    assert.equal(rec.counters.bodyScopeHash, undefined, "bodyScopeHash must NOT be inside counters");
   });
 });
 
@@ -2679,6 +2779,211 @@ fixture proposal text v1
       // false failures from scheduling jitter while still being far above what a no-op/broken lock
       // would produce (an uncontended --new-epoch call completes in well under 100ms).
       assert.ok(secondElapsedMs >= 200, `the second call returned in ${secondElapsedMs}ms — too fast to have genuinely waited for the first call's ${HOLD_MS}ms held lock (holder total: ${holderElapsedMs}ms); mutual exclusion is not real`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // ── M233: bodyScopeHash scope-change grant — CLI round-trip tests ─────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+  function fixtureTaskBodyV2() {
+    return `---
+id: EPOCH-CLI-FIXTURE
+title: fixture task for epoch-budget CLI fixtures
+status: todo
+---
+## Proposal
+
+fixture proposal text v2 — second version, different from v1
+
+## Acceptance Criteria
+
+- [ ] fixture AC item
+
+## Definition of Done
+
+- [ ] fixture DoD item
+
+## Touches
+
+- fixture.ts
+`;
+  }
+
+  test("M233 CLAIM-5: --epoch-status --compute-body-scope-hash true reads task body and computes hash, returns both bodyScopeHash and recordBodyScopeHash", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      // First dispatch to create a record
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, fullReviewDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+      // Expected hash = sha256 of extractSection(taskBody, "Proposal") which returns
+      // "\nfixture proposal text v1\n\n" (leading newline after ## Proposal, trailing newlines before next heading)
+      const expectedHash = crypto.createHash("sha256").update("\nfixture proposal text v1\n\n", "utf8").digest("hex");
+      const res = runStatus(dir, taskId, charterFile, ["--compute-body-scope-hash", "true"]);
+      assert.equal(res.status, 0);
+      const out = JSON.parse(res.stdout.trim());
+      assert.equal(out.ok, true);
+      assert.equal(out.code, "epoch-status-ok");
+      assert.equal(typeof out.bodyScopeHash, "string", "bodyScopeHash must be present and a string");
+      assert.equal(out.bodyScopeHash, expectedHash, "bodyScopeHash must match sha256 of Proposal section");
+      // After dispatch, recordBodyScopeHash should still be null (pre-migration record didn't have it)
+      assert.equal(out.recordBodyScopeHash, null, "recordBodyScopeHash is null because no bodyScopeHash was explicitly stored yet");
+      // capCheck must have been called with bodyScopeHash/currentBodyScopeHash — since stored is null, no grant
+      assert.equal(out.capCheck.breached, false, "with fullReviews=1, checkFullReviewCap not passed here");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("M233 CLAIM-3: --record-epoch-dispatch with --bodyScopeHash resets fullReviews on mismatch (round-trip via real record file)", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      // Step 1: first dispatch with bodyScopeHash "hash-a", fullReviewDelta=1
+      const firstArgs = { dispatchDelta: 1, fullReviewDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" };
+      const first = runNode(
+        [CONVERGENCE_SCRIPT, "--record-epoch-dispatch", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+         "--dispatchDelta", String(firstArgs.dispatchDelta), "--fullReviewDelta", String(firstArgs.fullReviewDelta),
+         "--attemptIncrement", String(firstArgs.attemptIncrement), "--terminalPhase", firstArgs.terminalPhase, "--reason", firstArgs.reason,
+         "--bodyScopeHash", "hash-a"]
+      );
+      assert.equal(first.status, 0);
+      const firstOut = JSON.parse(first.stdout.trim());
+      assert.equal(firstOut.ok, true);
+      assert.equal(firstOut.counters.fullReviews, 1, "first dispatch: fullReviews = 1");
+
+      // Step 2: second dispatch with bodyScopeHash "hash-b" (different), fullReviewDelta=1
+      const secondArgs = { dispatchDelta: 1, fullReviewDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "revision-needed" };
+      const second = runNode(
+        [CONVERGENCE_SCRIPT, "--record-epoch-dispatch", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+         "--dispatchDelta", String(secondArgs.dispatchDelta), "--fullReviewDelta", String(secondArgs.fullReviewDelta),
+         "--attemptIncrement", String(secondArgs.attemptIncrement), "--terminalPhase", secondArgs.terminalPhase, "--reason", secondArgs.reason,
+         "--bodyScopeHash", "hash-b"]
+      );
+      assert.equal(second.status, 0);
+      const secondOut = JSON.parse(second.stdout.trim());
+      assert.equal(secondOut.ok, true);
+      assert.equal(secondOut.counters.fullReviews, 1, "hash changed -> fullReviews RESET to fullReviewDelta (1), NOT accumulated to 2");
+
+      // Verify the on-disk record
+      const epochFile = path.join(dir, ".quay", "prepare-epochs", `${taskId}.json`);
+      const record = JSON.parse(fs.readFileSync(epochFile, "utf8"));
+      assert.equal(record.bodyScopeHash, "hash-b", "bodyScopeHash updated to the new hash");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("M233 CLAIM-4: --record-epoch-dispatch with fullReviewDelta=0 carries bodyScopeHash forward unchanged", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      // First dispatch with a full review and bodyScopeHash set
+      runNode(
+        [CONVERGENCE_SCRIPT, "--record-epoch-dispatch", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+         "--dispatchDelta", "1", "--fullReviewDelta", "1", "--attemptIncrement", "1",
+         "--terminalPhase", "ProposalReview", "--reason", "zero-finding", "--bodyScopeHash", "hash-a"]
+      );
+
+      // Second dispatch with fullReviewDelta=0, no bodyScopeHash flag — should carry forward
+      const second = runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, fullReviewDelta: 0, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "delta-round" });
+      assert.equal(second.status, 0);
+      const secondOut = JSON.parse(second.stdout.trim());
+      assert.equal(secondOut.ok, true);
+
+      const epochFile = path.join(dir, ".quay", "prepare-epochs", `${taskId}.json`);
+      const record = JSON.parse(fs.readFileSync(epochFile, "utf8"));
+      assert.equal(record.bodyScopeHash, "hash-a", "bodyScopeHash carried forward unchanged when fullReviewDelta=0");
+      assert.equal(record.counters.fullReviews, 1, "fullReviews unchanged when fullReviewDelta=0");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("M233 CLAIM-4: --record-epoch-dispatch does NOT increment resets when resetting fullReviews due to bodyScopeHash change", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      // First dispatch
+      runNode(
+        [CONVERGENCE_SCRIPT, "--record-epoch-dispatch", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+         "--dispatchDelta", "1", "--fullReviewDelta", "1", "--attemptIncrement", "1",
+         "--terminalPhase", "ProposalReview", "--reason", "zero-finding", "--bodyScopeHash", "hash-a"]
+      );
+
+      // Second dispatch with different bodyScopeHash — triggers reset but NOT resets[]
+      const second = runNode(
+        [CONVERGENCE_SCRIPT, "--record-epoch-dispatch", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+         "--dispatchDelta", "1", "--fullReviewDelta", "1", "--attemptIncrement", "1",
+         "--terminalPhase", "ProposalReview", "--reason", "revision-needed", "--bodyScopeHash", "hash-b"]
+      );
+      assert.equal(second.status, 0);
+
+      const epochFile = path.join(dir, ".quay", "prepare-epochs", `${taskId}.json`);
+      const record = JSON.parse(fs.readFileSync(epochFile, "utf8"));
+      assert.deepEqual(record.resets, [], "resets[] must be empty — scope-change grant is NOT a --new-epoch reset");
+      assert.equal(record.counters.fullReviews, 1, "fullReviews reset to 1 (fullReviewDelta) on hash mismatch");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("M233 CLAIM-9: --epoch-status --compute-body-scope-hash on a pre-migration record (no bodyScopeHash) returns bodyScopeHash:null as recordBodyScopeHash", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      // Dispatch WITHOUT --bodyScopeHash flag
+      runDispatch(dir, taskId, charterFile, { dispatchDelta: 1, fullReviewDelta: 1, attemptIncrement: 1, terminalPhase: "ProposalReview", reason: "zero-finding" });
+
+      const res = runStatus(dir, taskId, charterFile, ["--compute-body-scope-hash", "true"]);
+      assert.equal(res.status, 0);
+      const out = JSON.parse(res.stdout.trim());
+      assert.equal(out.ok, true);
+      assert.equal(typeof out.bodyScopeHash, "string", "bodyScopeHash of current task must be computed");
+      assert.equal(out.recordBodyScopeHash, null, "pre-migration record has no bodyScopeHash -> recordBodyScopeHash is null");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("M233 CLAIM-5: --epoch-status --compute-body-scope-hash on no-epoch-record also returns hashes", () => {
+    const taskId = "EPOCH-CLI-FIXTURE-NEW";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      const res = runStatus(dir, taskId, charterFile, ["--compute-body-scope-hash", "true"]);
+      assert.equal(res.status, 0);
+      const out = JSON.parse(res.stdout.trim());
+      assert.equal(out.ok, true);
+      assert.equal(out.code, "no-epoch-record");
+      assert.equal(typeof out.bodyScopeHash, "string", "bodyScopeHash computed even when no epoch record exists");
+      assert.equal(out.recordBodyScopeHash, null, "no record -> recordBodyScopeHash is null");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("M233 CLAIM-3: --new-epoch carries bodyScopeHash forward from the existing record", () => {
+    const taskId = "EPOCH-CLI-FIXTURE";
+    const { dir, charterFile } = makeCliScratch(taskId);
+    try {
+      // First dispatch with bodyScopeHash
+      runNode(
+        [CONVERGENCE_SCRIPT, "--record-epoch-dispatch", "--taskId", taskId, "--workspace", dir, "--charterFile", charterFile,
+         "--dispatchDelta", "1", "--fullReviewDelta", "1", "--attemptIncrement", "1",
+         "--terminalPhase", "ProposalReview", "--reason", "zero-finding", "--bodyScopeHash", "hash-carry"]
+      );
+
+      // Now do --new-epoch with unchanged scope
+      const reset = runNewEpoch(dir, taskId, charterFile, { reason: "reset", owner: "tester", confirmUnchangedScope: true });
+      assert.equal(reset.status, 0);
+      const resetOut = JSON.parse(reset.stdout.trim());
+      assert.equal(resetOut.ok, true);
+      const record = resetOut.record;
+      assert.equal(record.bodyScopeHash, "hash-carry", "bodyScopeHash carried forward across --new-epoch reset");
+      assert.equal(record.counters.attempts, 0, "counters reset to zero");
+      assert.equal(record.resets.length, 1, "a reset entry was recorded");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
