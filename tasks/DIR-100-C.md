@@ -12,7 +12,6 @@ children: []
 extra:
   schema: v1
 ---
-
 **type:** execution
 
 
@@ -32,6 +31,23 @@ extra:
    guard is the SECOND in source order (it0, adr, fixed, ...), never the fifth.
 
 
+
+3. **coverageFloor's `pattern` field is OPTIONAL, NOT required** —
+   `types.ts` declares `pattern?: string`; the loader guard (:169) requires only
+   `{name, command, floor}`; `makeCoverageFloor` tolerates missing pattern. A plan that
+   pins `coverageFloor → {name, command, floor, pattern}` as required emits a false
+   missing-field error on a valid entry.
+4. **The invalid/unwritable file-path fallback MUST be planned** — the task body requires
+   (twice) that an unwritable/invalid `QUAY_GATE_DIAGNOSTICS` path (ENOENT etc.) is handled
+   via an `error` listener on the append WriteStream that falls back to `process.stderr`
+   — never an uncaught WriteStream `error` crashing `gate --list`. A plan branch that is
+   only `fs.createWriteStream(path, {flags:"a"})` with no `stream.on("error", …)` fallback
+   violates the task and can crash on a bad path.
+5. **cwd/timeoutMs are NOT "extra fields"** — `gateConfigOf` always reads them; they never
+   count as unexpected-extra fields for the warn diagnostic. A "VALID entry with an extra
+   key" warn must exclude cwd/timeoutMs (they are always known, never extras).
+
+
 ## Proposal
 
 Give the gate loader's diagnostics a defined output channel and severity taxonomy.
@@ -40,7 +56,10 @@ a controlled channel.
 
 1. **`QUAY_GATE_DIAGNOSTICS` env var**: `stderr` (default — diagnostics to stderr, never
    stdout, so `gate --list --json` output is unaffected), `quiet` (suppress all), or a
-   file path (append diagnostics to that file).
+   file path (append diagnostics to that file). An empty/whitespace-only value is treated
+   as absent (default `stderr`, never a file path), and an unwritable/invalid file path
+   (ENOENT etc.) is handled via an `error` listener on the append stream that falls back
+   to `stderr` — never an uncaught WriteStream `error` crashing `gate --list`.
 2. **Severity taxonomy** (reconciled — the split review found the original Proposal
    inconsistent): `error` = gate will not be registered (missing required field, or
    unrecognized-key/nesting defect that drops the gate); `warn` = gate registered but
@@ -56,14 +75,17 @@ child is the CHANNEL); consumes whatever A/B emit.
 
 A `resolveGateDiagnosticsSink()` helper (loader.ts or a sibling) reads
 `QUAY_GATE_DIAGNOSTICS` once: absent/`stderr` → `process.stderr`; `quiet` → null sink;
-else → append-mode file stream. All diagnostics emitted by A/B route through this sink.
-`warn` vs `error` severity is set at emission site (A/B) per the reconciled taxonomy.
+empty/whitespace-only → `process.stderr` (as absent — never a file path); else → an
+append-mode file stream whose `error` event (unwritable/invalid path, ENOENT) is handled
+by falling back to `process.stderr` — never an uncaught WriteStream `error` that crashes
+`gate --list`. All diagnostics emitted by A/B route through this sink. `warn` vs `error`
+severity is set at emission site (A/B) per the reconciled taxonomy.
 
 ## Plan
 
 Resolved via a human-steered milestone. Checked plan: `docs/plans/M228-dir-100-c.md`
 (DIR-117-B prepared-gate artifact) — diagnostic output channel (`QUAY_GATE_DIAGNOSTICS`
-stderr/quiet/file) + reconciled severity taxonomy + stderr routing; base revision `990676e9`.
+stderr/quiet/file) + reconciled severity taxonomy + stderr routing; base revision `5bc637d2`.
 
 ## Finding
 
