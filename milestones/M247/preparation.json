@@ -1,0 +1,54 @@
+{
+  "taskId": "gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss",
+  "milestoneId": "M247",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M247-gap-preflight-merged-markdown-low-identifier.md",
+  "planFile": "docs/plans/M247-gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss.md",
+  "outcome": "prepared",
+  "hashes": {
+    "proposal": "d22b71731b63fc5233a96dad9c746e20dd0b09ed9d3437ba86fd198a417c1d40",
+    "charter": "ec22586470b1f6409483614f0115f39b9e6af4d46dda1ce58222a8c78665eb10",
+    "plan": "01a18119a7212b805f255d396abbcbb854170d5a5adc269849720f89b67b1987",
+    "sources": {},
+    "ledger": "0000000000000000000000000000000000000000000000000000000000000000",
+    "telemetry": "0000000000000000000000000000000000000000000000000000000000000000",
+    "mechanismInventory": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "accepted-risk"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "accepted-risk"
+    },
+    "proposalReviewer": {
+      "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+    },
+    "planAuthor": {
+      "sessionId": "accepted-risk"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 0
+  },
+  "forceCommitted": true,
+  "forceCommitReason": "Documentation-only deliverable. No code changes. Accepted-risk decision documented in task body."
+}

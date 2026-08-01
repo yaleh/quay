@@ -316,7 +316,7 @@ named-entity claims.
 
 ## Plan
 
-`docs/plans/M247-gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss.md`
+`docs/plans/M247-gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss.md` (base revision `1f36910f`, authored 2026-08-01)
 
 ## Finding
 
@@ -391,4 +391,4 @@ Standard `experiments/quay-perpetual-stream/inherited-core.md` DoD clauses apply
 - experiments/quay-perpetual-stream/test/prepare-admission-check.test.mjs
 - plugin/test/prepare-admission-check.test.mjs
 - tasks/gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss.md
-- docs/plans/M247-gap-preflight-merged-markdown-low-identifier.md
+- docs/plans/M247-gap-preflight-merged-markdown-claims-low-identifier-count-silent-miss.md
