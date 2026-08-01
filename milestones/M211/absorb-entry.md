@@ -29,3 +29,19 @@ Audit/Land phases, per inherited-core.md.
 ## ABSORB gate run (M211, post-audit)
 
 (to be completed at Land phase)
+
+adversarial-audit disposition: REFUTED — 4 of 7 ACs confirmed with auditor-generated evidence
+(AC1 master wiring grep/import-graph, AC4 RED/GREEN hostile-write catch, AC5 in-process-isolation
+negative control, AC6 structural write-instruction absence) and 2 of 4 DoD items confirmed (landed
+on master under human-steered discipline; RED/GREEN evidence exists); 3 ACs REFUTED-by-absence
+(AC2 journal shard-count equality, AC3 exactly-once combine count, AC7 fresh-audit-no-refutation)
+and 2 DoD items REFUTED (real non-fixture composite dispatch; zero-unresolved-findings audit) — each
+demands real composite-dispatch journal evidence that does not exist anywhere on disk (auditor grep
+of all 228 journal.jsonl: 0 carry a shardResult/bundleVerdict typed return). Root cause is the same
+Plan/gate sequencing contradiction the sibling M210/DIR-119-D2 audit named: the checked Plan
+sequences Stage 6 (real-dispatch proof + fresh wiring audit) as POST-Land, but the iteration-0
+acceptance audit runs BEFORE Land, and it0-dod-check clause 0 HARD-blocks unchecked checklist boxes —
+unsatisfiable by construction at iteration-0. Nothing about the implementation is refuted on the
+merits; every reachable structural half was reached and verified.
+
+V_meta consolidation-lag: PASS: no confirmed-unconsolidated row past K without a dated carry-forward
