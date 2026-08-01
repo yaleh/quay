@@ -388,61 +388,61 @@ a single fast-lane reviewer.
 - [ ] AC1: `estimateTaskSize` produces a deterministic `{codeScale, proofScale, tier}` for every
   reachable singleton prepare path (composite primary tasks route through the same
   workflow).
-    - [ ] AC1.1: The estimator imports `extractSection` and `countBoxes` from `./task-schema.ts`
+    - AC1.1: The estimator imports `extractSection` and `countBoxes` from `./task-schema.ts`
       — never reimplements section parsing or box counting.
 - [ ] AC2: `prepare-milestone.js`'s Preflight phase routes each candidate as **fast-lane** or
   **full-lane** and emits a versioned `PrepareRoutingDecision` (mechanism wired into the
   real prepare path, not a standalone estimator).
-    - [ ] AC2.1: The routing stage is inserted strictly between the Preflight content PASSED log
+    - AC2.1: The routing stage is inserted strictly between the Preflight content PASSED log
       (line 644, `log('Preflight (content) PASSED — ${_taskId} may proceed to
       ProposalAuthors.')`) and `let _proposals = []` (line 655), structurally reached by both
       cold and resume paths.
-    - [ ] AC2.2: Exactly one `_sizeEstimateAgentCall()` helper function (one definition, one call
+    - AC2.2: Exactly one `_sizeEstimateAgentCall()` helper function (one definition, one call
       site) invokes the estimator, using the same `agent()`-wraps-CLI pattern as
       `_preflightAgentCall`, `_admissionAgentCall`, and `_convergenceAgentCall`.
-    - [ ] AC2.3: Routing is fire-and-forget emission — its return value is logged and persisted to
+    - AC2.3: Routing is fire-and-forget emission — its return value is logged and persisted to
       `milestones/M<NN>/routing-decision.json`, but the return value is never branched on to
       change behavior in this milestone.
-    - [ ] AC2.4: Workflow parses CLI stdout via the existing `_parseAgentJson` balanced-brace
+    - AC2.4: Workflow parses CLI stdout via the existing `_parseAgentJson` balanced-brace
       scanner, not a new parsing mechanism; fail-closes to `{ route: 'full-lane', codeScale:
       null, proofScale: 'unknown', failure: 'routing-check-failed' }` on unparseable output.
-    - [ ] AC2.5: An estimator crash or unparseable output logs a warning but never blocks the
+    - AC2.5: An estimator crash or unparseable output logs a warning but never blocks the
       workflow; no `return` or lease-release in the routing block.
-    - [ ] AC2.6: Both workflow mirrors (`.claude/workflows/prepare-milestone.js` and
+    - AC2.6: Both workflow mirrors (`.claude/workflows/prepare-milestone.js` and
       `plugin/workflows/prepare-milestone.js`) are byte-identical after the change.
 - [ ] AC3: A proof-heavy S task (real-workflow/cross-generation proof) is routed FULL-lane, not
   fast-lane (the proofScale dimension genuinely affects routing — RED/GREEN).
-    - [ ] AC3.1: `routeTask` gates fast-lane on `proofScale ∈ proofScaleFastLaneAllowlist`; a task
+    - AC3.1: `routeTask` gates fast-lane on `proofScale ∈ proofScaleFastLaneAllowlist`; a task
       with codeScale 300 (S tier) and `proofScale: real-workflow` does NOT route fast-lane
       because `real-workflow` is not in the allowlist.
-    - [ ] AC3.2: `sizeTier === 'S'` is a necessary condition for fast-lane; everything else (M/L
+    - AC3.2: `sizeTier === 'S'` is a necessary condition for fast-lane; everything else (M/L
       tier, unknown proofScale, scope-estimate-unavailable, mechanismCount > 1, >5 logical
       surfaces) routes `full-lane`.
 - [ ] AC4: The `PrepareRoutingDecision` is versioned + hash-bound and references the
   DIR-124-D policy registry version (not hardcoded thresholds).
-    - [ ] AC4.1: `buildRoutingDecision` returns `{ schemaVersion: 1, route, codeScale, proofScale,
+    - AC4.1: `buildRoutingDecision` returns `{ schemaVersion: 1, route, codeScale, proofScale,
       sizeTier, logicalSurfacesCount, mechanismCount, inputValid, thresholdsRef,
       materialInputHashes, runIdentityBinding, decisionHash }`.
-    - [ ] AC4.2: `decisionHash` is a self-hash computed over material inputs (task Proposal,
+    - AC4.2: `decisionHash` is a self-hash computed over material inputs (task Proposal,
       Touches, charter) AND route decision fields (`route`, `codeScale`, `proofScale`,
       `materialInputHashes` in the canonical JSON), not merely over inputs alone.
-    - [ ] AC4.3: `_ROUTING_POLICY` is the single named thresholds location; no inline threshold
+    - AC4.3: `_ROUTING_POLICY` is the single named thresholds location; no inline threshold
       literals (800, 5, 501) appear at any call site outside the `_ROUTING_POLICY` definition.
 - [ ] AC5: The DIR-124-B RunIdentity binding is declared and becomes enforced when B lands
   (documented upgrade path, not a current dependency).
 - [ ] AC6: Unknown proofScale/codeScale fails closed to full-lane.
-    - [ ] AC6.1: Three independent failure modes each produce `route: 'full-lane'`: (a) unknown
+    - AC6.1: Three independent failure modes each produce `route: 'full-lane'`: (a) unknown
       proofScale (no `## Definition of Done` section, `classifyProofScale` returns `unknown`),
       (b) scope-estimate-unavailable (missing `## Touches` or unexpandable glob →
       `inputValid: false`), (c) unparseable routing-CLI stdout in the workflow fallback block.
-    - [ ] AC6.2: A task with codeScale 750 and proofScale `local` — within the ~800 churn ceiling
+    - AC6.2: A task with codeScale 750 and proofScale `local` — within the ~800 churn ceiling
       but classified M-tier by `mTierFullLaneFloor` — routes full-lane through the
       `sizeTier !== 'S'` guard, never fast-lane.
-    - [ ] AC6.3: `decisionHash` binds to `materialInputHashes.taskTouches` (sha256 of the
+    - AC6.3: `decisionHash` binds to `materialInputHashes.taskTouches` (sha256 of the
       `## Touches` section text, not the expansion), enabling later verification that the task's
       declared touches match.
 - [ ] AC7: Tests: `prepare-milestone-size-estimate.test.mjs` RED/GREEN.
-    - [ ] AC7.1: Both estimator script mirrors (`experiments/.../prepare-milestone-size-estimate.ts`
+    - AC7.1: Both estimator script mirrors (`experiments/.../prepare-milestone-size-estimate.ts`
       and `plugin/.../prepare-milestone-size-estimate.ts`) are byte-identical and validated by
       the same `.test.mjs` file in both mirror locations.
 
