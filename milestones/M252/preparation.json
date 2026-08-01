@@ -1,0 +1,53 @@
+{
+  "taskId": "gap-prepare-milestone-no-worktree-isolation",
+  "milestoneId": "M252",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M252-gap-prepare-milestone-no-worktree-isolation.md",
+  "outcome": "prepared",
+  "hashes": {
+    "proposal": "4877b5fda0e9d913f28be2b1b41c41ffb073467b9b6394e924a546f083c25812",
+    "charter": "bcec400e1ec84644b88907bb638a6952a7d2dd71b3946e986bd3b0e5e61f3355",
+    "plan": "0000000000000000000000000000000000000000000000000000000000000000",
+    "sources": {},
+    "ledger": "0000000000000000000000000000000000000000000000000000000000000000",
+    "telemetry": "0000000000000000000000000000000000000000000000000000000000000000",
+    "mechanismInventory": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "direct-execute"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "direct-execute"
+    },
+    "proposalReviewer": {
+      "sessionId": "direct-execute"
+    },
+    "planAuthor": {
+      "sessionId": "direct-execute"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "direct-execute"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 0
+  },
+  "directExecute": true,
+  "directExecuteReason": "Leaf sub-task split from parent. Single mechanism. No prepare-milestone pipeline needed."
+}

@@ -1,0 +1,53 @@
+{
+  "taskId": "DIR-124-A1a",
+  "milestoneId": "M248",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M248-dir-124-a1a.md",
+  "outcome": "prepared",
+  "hashes": {
+    "proposal": "ec4d99be69f5149e61767a87e444073d18eaddc5d9784e59f7236e4aa36136e1",
+    "charter": "07975f610c2584b6663bb710d4917e7499a32932ff646e80cda4d155567c9cb3",
+    "plan": "0000000000000000000000000000000000000000000000000000000000000000",
+    "sources": {},
+    "ledger": "0000000000000000000000000000000000000000000000000000000000000000",
+    "telemetry": "0000000000000000000000000000000000000000000000000000000000000000",
+    "mechanismInventory": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "direct-execute"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "direct-execute"
+    },
+    "proposalReviewer": {
+      "sessionId": "direct-execute"
+    },
+    "planAuthor": {
+      "sessionId": "direct-execute"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "direct-execute"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 0
+  },
+  "directExecute": true,
+  "directExecuteReason": "Leaf sub-task split from parent. Single mechanism. No prepare-milestone pipeline needed."
+}
