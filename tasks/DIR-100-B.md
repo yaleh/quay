@@ -76,14 +76,20 @@ skipped. The same silent-skip pattern holds for the other five types. `loader.ts
 
 ## Acceptance Criteria
 
-- [ ] `it0` entry missing `name` emits a diagnostic naming the missing field.
-- [ ] `it0` entry missing `script` emits a diagnostic (the original AC2 case).
-- [ ] `it0` entry missing `argsKey` emits a diagnostic (the previously-unwired case).
-- [ ] `testPass` missing `command`, `fixed` missing `script`, `coverageFloor` missing
+- [x] `it0` entry missing `name` emits a diagnostic naming the missing field.
+  (test: AC1, gate-diagnostics.test.mjs:69)
+- [x] `it0` entry missing `script` emits a diagnostic (the original AC2 case).
+  (test: AC2, gate-diagnostics.test.mjs:78)
+- [x] `it0` entry missing `argsKey` emits a diagnostic (the previously-unwired case).
+  (test: AC3, gate-diagnostics.test.mjs:87)
+- [x] `testPass` missing `command`, `fixed` missing `script`, `coverageFloor` missing
   `command`/`floor`, `redGreen` missing `red`/`green` each emit a diagnostic.
-- [ ] A correctly-configured entry emits zero diagnostics (no false positives).
-- [ ] Tests: `packages/quay/test/gate-diagnostics.test.mjs` RED/GREEN covering every
+  (tests: AC4a-f, gate-diagnostics.test.mjs:100-152)
+- [x] A correctly-configured entry emits zero diagnostics (no false positives).
+  (test: AC5, gate-diagnostics.test.mjs:199)
+- [x] Tests: `packages/quay/test/gate-diagnostics.test.mjs` RED/GREEN covering every
   required-field case (>=80% coverage on new paths).
+  (15/15 pass, loader.ts:91.13% line coverage)
 
 ## Definition of Done
 
