@@ -443,9 +443,9 @@ Gate engine commands (QENG-1/2) — evaluate a named check and append an immutab
                     ("raise the gates config's timeoutMs / --timeout").
 
 // Environment contract — when the acceptance gate spawns a command:
-  The runner spawns `sh -c` (a clean shell — no .bashrc/.profile is sourced).
+  The runner spawns 'sh -c' (a clean shell — no .bashrc/.profile is sourced).
   PATH is inherited from the invoking process, not a fixed system default.
-  Override the environment with a per-provider `acceptance_env` file:
+  Override the environment with a per-provider 'acceptance_env' file:
     acceptance_env  DIR-103-C: per-provider config key in .quay/config.yml's provider
                     block — a path to an env file that is dot-sourced before every
                     acceptance command dispatched through that provider. Relative paths

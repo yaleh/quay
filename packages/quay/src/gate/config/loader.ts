@@ -175,3 +175,11 @@ export function loadWorkspaceGates(workspaceRoot: string | null): Record<string,
   }
   return gates;
 }
+
+// DIR-103-A compat: thin wrapper for registry.ts's listGatesVerbose (which
+// imports loadWorkspaceGateMetadata). Returns gates + empty rows/diagnostics
+// (full metadata pass not yet wired in this refactored loader).
+
+export function loadWorkspaceGateMetadata(workspaceRoot) {
+  return { gates: loadWorkspaceGates(workspaceRoot), rows: [], diagnostics: [] };
+}
