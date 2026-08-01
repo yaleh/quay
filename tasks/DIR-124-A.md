@@ -7,7 +7,12 @@ labels:
   - directive
   - human-steered
 parent: DIR-124
-children: []
+children:
+  - DIR-124-A1
+  - DIR-124-A2
+  - DIR-124-A3
+  - DIR-124-A4
+  - DIR-124-A5
 extra:
   dirStatus: applied
   schema: v1
@@ -27,10 +32,33 @@ This is C0 of
 without introducing stage scheduling, new lifecycle policy, or a second journal format that
 DIR-124-B later has to preserve.
 
+**Split 2026-08-01 (DIR-026 SPLIT-OR-COMMIT):** a real `prepare-milestone.js` `ProposalReview`
+returned `needs-human`/`split-recommended`, code `split-multi-mechanism` ("candidate contains 5
+independently landable mechanisms (> 2)"), `repairable: false`. Parent completion is exactly the
+completion of the children, in order:
+
+1. [[DIR-124-A1]] — stage-event schema + emission instrumentation at the 8 boundaries. No
+   dependencies.
+2. [[DIR-124-A2]] — golden replay corpus: 8 named cases + the two known-defect shapes. Depends on
+   A1's schema/stream.
+3. [[DIR-124-A3]] — invariant-ownership manifest with single-authoritative-owner enforcement and a
+   duplicate/deletion list. No dependencies.
+4. [[DIR-124-A4]] — workflow-metadata vs executable-driver conformance check. No dependencies.
+5. [[DIR-124-A5]] — baseline metrics emission (mechanical/content split, explicit unknowns). Depends
+   on A1's event stream.
+
+This parent is not independently SELECTable — each child carries its own full
+Proposal/Plan/AC/DoD and is dispatched (prepared + executed) on its own.
+
+**Correction (split review 2026-08-01):** the original Proposal anchored the replay boundary
+"before [[DIR-123]] … change its control plane," but DIR-123 is already done (commit 059b5b16) and
+its worktree isolation is live in the installed workflow. The before-state must be re-anchored to
+before the later DIR-124 children (B/C/D/E) touch the workflow's control plane — not before DIR-123.
+
 ## Plan
 
-N/A — resolving milestone must produce both measurement code and real baseline artifacts. It is the
-first DIR-124 child and depends only on DIR-117 and DIR-119 being complete.
+N/A — parent directive resolved only through its ordered children. Parent completion is exactly the
+completion of DIR-124-A1 through DIR-124-A5; the parent is not independently SELECTable.
 
 ## Finding
 
@@ -47,62 +75,34 @@ observed-but-undesired, or an explicitly open defect.
 
 ## Requested action
 
-1. Define a minimal, append-only stage-event schema containing run/candidate/task identity,
-   stage/attempt, queued/start/end timestamps, agent-call label, execution cwd/worktree, command/test
-   identity, observed writes, base/candidate commit, outcome, and wait reason/resource claim.
-2. Instrument Prepare/Verify/Prepared/Build/Audit/Gate/Reconcile/Land boundaries without changing
-   their dispatch order, concurrency, lifecycle results, or write authority.
-3. Build golden replay cases for legacy singleton success, Verify failure, Prepared failure, Audit
-   REFUTED, Gate failure, composite success, concurrent partial survivor, and cache/resume behavior.
-4. Record an invariant-ownership manifest. Every entry names one intended executable owner and
-   classifies other occurrences as generated view, compatibility adapter, or duplicate to remove.
-5. Record the baseline metrics required by DIR-124: stage wall/queue time, prompt bytes, agent-call
-   count, full-suite count, shared writer count, observed write sets, Land wait/fence time, and
-   replay variance. Split mechanical-runner work from content-agent work and retain agent-minutes,
-   token use, finding novelty/recurrence, and artifact bytes/line classes as explanatory
-   diagnostics.
-6. Add a conformance check comparing workflow metadata and the executable driver contract so stale
-   `building`, worktree, gate-count, cache/resume, or phase claims become visible failures.
-7. Keep the event schema intentionally minimal and forward-migratable; DIR-124-B owns durable
-   RunIdentity/receipt validation and may extend it without preserving accidental diagnostic fields.
-8. Add two measured known-defect replay shapes without normalizing them into desired behavior:
-   M192's null Build result advancing to Audit/Land is `observed-but-undesired`, and the stale
-   M195 Prepared control paying Verify cost before receipt rejection is a compatibility baseline
-   for DIR-124-C's later behavior-preserving reorder.
-9. Emit a reproducible baseline from first Prepare admission through Execute Land for the available
-   real samples, preserving per-stage wall/agent/token cost and terminal outcome. This child records
-   the before-state only; it does not infer delivered value or change pass/fail policy.
+Execute DIR-124-A1, DIR-124-A2, DIR-124-A3, DIR-124-A4, DIR-124-A5 in order; each is independently
+`prepare-milestone.js` + `execute-milestone.js` dispatched with its own real proof and independent
+audit. Do not promote DIR-124-A to `done` until all five children are `done`.
 
 ## Acceptance Criteria
 
-- [ ] One canonical stage-event schema is exercised by real workflow execution and records all
-  fields named in Requested action item 1.
-- [ ] Instrumentation changes no stage order, agent count, outcome, shared-state mutation, or
-  scheduling decision in golden replay.
-- [ ] Replay fixtures cover all eight named success/failure/composite/concurrent/cache cases and
-  label each assertion as normative, compatibility-only, or known-defect observation.
-- [ ] Golden replay includes the M192 null-Build continuation and stale-Prepared-after-Verify
-  shapes, classifies both explicitly, and does not make either defect a normative invariant.
-- [ ] The invariant-ownership manifest rejects two authoritative executable owners for the same
-  rule and identifies every known workflow/OUTER-LOOP/composite duplicate scheduled for deletion.
-- [ ] Baseline measurements are emitted mechanically rather than estimated from prose reports.
-- [ ] The baseline separates mechanical/content agent calls and reports stage wall/queue time,
-  agent-minutes, tokens, finding novelty/recurrence, and artifact-class output from Prepare
-  admission through Land where real evidence exists; missing fields are explicit unknowns.
-- [ ] A deliberately stale workflow metadata/driver claim fails the conformance check; the corrected
-  claim passes.
-- [ ] No post-Land Wiring Audit, lifecycle-promotion policy, worktree redesign, stage scheduler, or
-  resource lease is introduced by this child.
+- [ ] DIR-124-A1 is `done`: one canonical stage-event schema is exercised by real workflow execution
+  and records all fields named in the parent's Requested action item 1.
+- [ ] DIR-124-A2 is `done`: replay fixtures cover all eight named cases plus the two known-defect
+  shapes; each assertion is labeled normative/compatibility-only/known-defect.
+- [ ] DIR-124-A3 is `done`: the invariant-ownership manifest rejects two authoritative owners and
+  lists every known workflow/OUTER-LOOP/composite duplicate scheduled for deletion.
+- [ ] DIR-124-A4 is `done`: a deliberately stale workflow metadata/driver claim fails the
+  conformance check; the corrected claim passes.
+- [ ] DIR-124-A5 is `done`: baseline measurements are emitted mechanically, separate
+  mechanical/content agent calls, and report stage wall/queue time, agent-minutes, tokens, finding
+  novelty/recurrence, and artifact-class output with explicit unknowns.
+- [ ] Parent/child lifecycle consistency gate passes: this parent is `done` iff all five children
+  are `done` — no PARENT-DONE-IFF-CHILDREN violation.
 
 ## Definition of Done
 
 Standard exp5 DoD clauses apply.
 
-- [ ] Landed on master with the canonical test runner green.
-- [ ] One real post-landing workflow run emits the installed event schema.
-- [ ] Golden replay and metadata conformance include RED/GREEN negative controls.
-- [ ] A fresh audit checks that instrumentation did not silently change execution behavior or
-  freeze a documented open defect as a normative invariant.
+- [ ] All five children are real-landed and independently audited.
+- [ ] `it0-split-or-commit-check.ts .` reports no PARENT-DONE-IFF-CHILDREN violation.
+- [ ] No child introduces post-Land Wiring Audit, lifecycle-promotion policy, worktree redesign,
+  stage scheduler, or resource lease (the parent AC9 non-goal is enforced per-child).
 
 ## Human verification when exp5 marks this DIR done
 
@@ -113,16 +113,8 @@ Standard exp5 DoD clauses apply.
 
 ## Touches
 
-- `.claude/workflows/execute-milestone.js`
-- `.claude/workflows/prepare-milestone.js`
-- `plugin/workflows/execute-milestone.js`
-- `plugin/workflows/prepare-milestone.js`
-- `experiments/quay-perpetual-stream/scripts/*workflow*event*`
-- `experiments/quay-perpetual-stream/scripts/*workflow*replay*`
-- `experiments/quay-perpetual-stream/fixtures/workflow-replay/*`
-- `experiments/quay-perpetual-stream/test/*workflow*replay*`
-- `plugin/scripts/*workflow*event*`
-- `plugin/scripts/*workflow*replay*`
-- `plugin/test/*workflow*replay*`
-
-- `docs/plans/M235-dir-124-a.md`
+- `tasks/DIR-124-A1.md`
+- `tasks/DIR-124-A2.md`
+- `tasks/DIR-124-A3.md`
+- `tasks/DIR-124-A4.md`
+- `tasks/DIR-124-A5.md`
