@@ -1,0 +1,52 @@
+{
+  "taskId": "DIR-124-A3b",
+  "milestoneId": "M251",
+  "charterFile": "experiments/quay-perpetual-stream/charters/M251-dir-124-a3b.md",
+  "outcome": "prepared",
+  "hashes": {
+    "proposal": "477ee152d980359895b5c18bf483096f3c2e4e560cfad73164803bac72ede1dd",
+    "charter": "f5c729c8fe99843092fbfd824d5bceb47cbf5abcd852610c9377dd7450ce6d75",
+    "plan": "0000000000000000000000000000000000000000000000000000000000000000",
+    "sources": {},
+    "ledger": "0000000000000000000000000000000000000000000000000000000000000000",
+    "telemetry": "0000000000000000000000000000000000000000000000000000000000000000",
+    "mechanismInventory": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "review": {
+    "findings": 0
+  },
+  "planCheck": {
+    "rounds": 1,
+    "findings": 0
+  },
+  "touches": [],
+  "provenance": {
+    "proposalAuthors": [
+      {
+        "authorIdx": 1,
+        "sessionId": "force-committed"
+      }
+    ],
+    "adjudicator": {
+      "sessionId": "force-committed"
+    },
+    "proposalReviewer": {
+      "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+    },
+    "planAuthor": {
+      "sessionId": "force-committed"
+    },
+    "planCheckers": [
+      {
+        "round": 1,
+        "sessionId": "8e4b1f78-9125-44bb-ae80-18db4a1fa534"
+      }
+    ]
+  },
+  "convergence": {
+    "highRisk": false,
+    "fullSynthesisCount": 0,
+    "deltaRounds": 0
+  },
+  "forceCommitted": true
+}
